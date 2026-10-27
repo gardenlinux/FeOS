@@ -49,7 +49,7 @@ jobs:
         mv target/uki.efi target/feos-${{ github.ref_name }}-x86_64.efi
 
     - name: Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       id: create_release
       with:
         name: FeOS ${{ github.ref_name }}

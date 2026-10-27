@@ -37,13 +37,8 @@ jobs:
         restore-keys: ${{ runner.os }}-cargo-
 
     - name: Run Tests
-      env:
-        RUST_BACKTRACE: 1
-        SUDO_ENV_VARS: "PATH=$PATH:$HOME/.cargo/bin CARGO_HOME=$HOME/.cargo"
+      # The integration tests need root. sudo keeps no environment (the
+      # runner's sudo ignores -E), so the toolchain's is passed on.
       run: |
-        sudo -E bash -c ' \
-          export PATH="$HOME/.cargo/bin:$PATH"; \
-          export CARGO_HOME="$HOME/.cargo"; \
-          export RUSTUP_HOME="$HOME/.rustup"; \
-          make test \
-        '
+        sudo env "PATH=$HOME/.cargo/bin:$PATH" "CARGO_HOME=$HOME/.cargo" "RUSTUP_HOME=$HOME/.rustup" \
+          RUST_BACKTRACE=1 make test
