@@ -514,10 +514,16 @@ impl FirecrackerAdapter {
             .stdin(console_in)
             .stdout(serial)
             .stderr(stderr);
-        // SAFETY: setsid is async-signal-safe. Its own session keeps the VMM
-        // away from signals for this process's terminal.
+        // SAFETY: setsid is async-signal-safe, and so is the closure: nix's
+        // conversion of its Errno into an io::Error allocates nothing, where
+        // io::Error::other would allocate in the forked child, whose
+        // allocator lock another thread may have held. Its own session keeps
+        // the VMM away from signals for this process's terminal.
         unsafe {
-            command.pre_exec(|| unistd::setsid().map(drop).map_err(io::Error::other));
+            command.pre_exec(|| {
+                unistd::setsid()?;
+                Ok(())
+            });
         }
         // A std child: in FeOS the reaper owns waitpid, and a tokio child
         // would race it.
