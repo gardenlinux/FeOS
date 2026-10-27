@@ -35,8 +35,13 @@ jobs:
         flavor: |
           latest=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
 
-    - name: Install Protobuf Compiler
-      run: sudo apt-get update && sudo apt-get install protobuf-compiler -y
+    - name: Install Build Dependencies
+      # As the release workflow's: the host image carries the guest, whose
+      # kernel builds natively.
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y protobuf-compiler musl-tools cpio zstd file \
+          flex bison bc libelf-dev libssl-dev
 
     - name: Setup ORAS
       uses: oras-project/setup-oras@v1
