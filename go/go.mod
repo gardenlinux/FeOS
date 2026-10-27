@@ -6,7 +6,7 @@ toolchain go1.26.8
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/sync v0.22.0
