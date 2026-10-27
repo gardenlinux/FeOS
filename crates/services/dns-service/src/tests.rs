@@ -97,15 +97,14 @@ fn reply(
     log: &std::sync::Mutex<Vec<Asked>>,
 ) -> Option<Vec<u8>> {
     let query = Message::from_vec(query).unwrap();
-    let question = query.queries()[0].clone();
+    let question = query.queries[0].clone();
     let name = question.name().to_lowercase().to_ascii();
     log.lock().unwrap().push((name, question.query_type(), tcp));
     let mut response = zone(&question, tcp)?;
-    response
-        .set_id(query.id())
-        .set_message_type(MessageType::Response)
-        .set_recursion_desired(query.recursion_desired())
-        .set_recursion_available(true);
+    response.metadata.id = query.metadata.id;
+    response.metadata.message_type = MessageType::Response;
+    response.metadata.recursion_desired = query.metadata.recursion_desired;
+    response.metadata.recursion_available = true;
     response.add_query(question);
     Some(response.to_vec().unwrap())
 }
@@ -133,9 +132,9 @@ fn zone(query: &Query, tcp: bool) -> Option<Message> {
     let record = |data| Record::from_rdata(owner.clone(), 300, data);
     let a = |octets: [u8; 4]| record(RData::A(A(octets.into())));
     let aaaa = |address: &str| record(RData::AAAA(AAAA(address.parse().unwrap())));
-    let mut response = Message::new();
+    let mut response = Message::new(0, MessageType::Query, OpCode::Query);
     fn nodata(response: &mut Message) {
-        response.add_name_server(soa());
+        response.add_authority(soa());
     }
     match (
         query.name().to_lowercase().to_ascii().as_str(),
@@ -169,7 +168,7 @@ fn zone(query: &Query, tcp: bool) -> Option<Message> {
         }
         ("big.test.", RecordType::A) => {
             if !tcp {
-                response.set_truncated(true);
+                response.metadata.truncation = true;
             } else {
                 response.add_answer(a([1, 2, 3, 10]));
             }
@@ -201,13 +200,13 @@ fn zone(query: &Query, tcp: bool) -> Option<Message> {
                 ],
             );
             response.add_answer(record(RData::HTTPS(HTTPS(svcb))));
-            response.set_authentic_data(true);
+            response.metadata.authentic_data = true;
         }
         ("plain.test.", RecordType::HTTPS) => {
             let alpn = SvcParamValue::Alpn(Alpn(vec!["h2".into()]));
             let svcb = SVCB::new(1, Name::root(), vec![(SvcParamKey::Alpn, alpn)]);
             response.add_answer(record(RData::HTTPS(HTTPS(svcb))));
-            response.set_authentic_data(true);
+            response.metadata.authentic_data = true;
         }
         ("ipv4only.arpa.", RecordType::A) => {
             response.add_answers([a([192, 0, 0, 170]), a([192, 0, 0, 171])]);
@@ -218,12 +217,12 @@ fn zone(query: &Query, tcp: bool) -> Option<Message> {
         }
         ("silent.test.", _) => return None,
         ("missing.test.", _) => {
-            response.set_response_code(ResponseCode::NXDomain);
+            response.metadata.response_code = ResponseCode::NXDomain;
             nodata(&mut response);
         }
         (other, _) if other.ends_with(".test.") => nodata(&mut response),
         _ => {
-            response.set_response_code(ResponseCode::NXDomain);
+            response.metadata.response_code = ResponseCode::NXDomain;
         }
     }
     Some(response)
@@ -236,8 +235,8 @@ fn silence(_: &Query, _: bool) -> Option<Message> {
 
 /// A zone that fails everything.
 fn failure(_: &Query, _: bool) -> Option<Message> {
-    let mut response = Message::new();
-    response.set_response_code(ResponseCode::ServFail);
+    let mut response = Message::new(0, MessageType::Query, OpCode::Query);
+    response.metadata.response_code = ResponseCode::ServFail;
     Some(response)
 }
 
@@ -270,12 +269,8 @@ async fn upstream() -> Upstream {
 }
 
 fn query(owner: &str, record_type: RecordType) -> Message {
-    let mut query = Message::new();
-    query
-        .set_id(rand::random())
-        .set_message_type(MessageType::Query)
-        .set_op_code(OpCode::Query)
-        .set_recursion_desired(true);
+    let mut query = Message::new(rand::random(), MessageType::Query, OpCode::Query);
+    query.metadata.recursion_desired = true;
     query.add_query(Query::query(name(owner), record_type));
     let mut edns = Edns::new();
     edns.set_max_payload(1232);
@@ -311,9 +306,9 @@ async fn ask_udp_from(source: IpAddr, server: SocketAddr, query: &Message) -> Me
         .await
         .expect("an answer");
     let answer = Message::from_vec(&answer).unwrap();
-    assert_eq!(answer.id(), query.id());
-    assert_eq!(answer.message_type(), MessageType::Response);
-    assert_eq!(answer.queries(), query.queries());
+    assert_eq!(answer.metadata.id, query.metadata.id);
+    assert_eq!(answer.metadata.message_type, MessageType::Response);
+    assert_eq!(answer.queries, query.queries);
     answer
 }
 
@@ -338,16 +333,16 @@ async fn ask_tcp_from(source: IpAddr, server: SocketAddr, query: &Message) -> Me
         .unwrap()
         .unwrap();
     let answer = Message::from_vec(&answer).unwrap();
-    assert_eq!(answer.id(), query.id());
-    assert_eq!(answer.queries(), query.queries());
+    assert_eq!(answer.metadata.id, query.metadata.id);
+    assert_eq!(answer.queries, query.queries);
     answer
 }
 
 fn addresses(message: &Message) -> Vec<IpAddr> {
     message
-        .answers()
+        .answers
         .iter()
-        .filter_map(|record| match record.data() {
+        .filter_map(|record| match &record.data {
             RData::A(A(address)) => Some(IpAddr::V4(*address)),
             RData::AAAA(AAAA(address)) => Some(IpAddr::V6(*address)),
             _ => None,
@@ -368,8 +363,8 @@ async fn passes_aaaa_records() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let answer = ask_udp(server, &query("v6.test.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
-    assert!(answer.recursion_available());
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert!(answer.metadata.recursion_available);
     assert_eq!(addresses(&answer), ips(&["2001:db8::6"]));
     assert_eq!(
         upstream.asked(),
@@ -383,10 +378,10 @@ async fn synthesizes_nothing() {
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     // A name with A records alone has no AAAA records.
     let answer = ask_udp(server, &query("v4.test.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
-    assert!(answer.answers().is_empty());
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert!(answer.answers.is_empty());
     // The negative answer, with its SOA record.
-    assert_eq!(answer.name_servers().len(), 1);
+    assert_eq!(answer.authorities.len(), 1);
     assert_eq!(
         upstream.asked(),
         [asked("v4.test.", RecordType::AAAA, false)]
@@ -409,20 +404,20 @@ async fn keeps_the_cname_chain() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let answer = ask_udp(server, &query("alias.test.", RecordType::A)).await;
-    let answers = answer.answers();
+    let answers = &answer.answers;
     assert_eq!(answers.len(), 3);
-    assert_eq!(answers[0].name(), &name("alias.test."));
-    assert_eq!(answers[0].data(), &RData::CNAME(CNAME(name("v4.test."))));
+    assert_eq!(&answers[0].name, &name("alias.test."));
+    assert_eq!(&answers[0].data, &RData::CNAME(CNAME(name("v4.test."))));
     assert!(answers[1..]
         .iter()
-        .all(|record| record.name() == &name("v4.test.")));
+        .all(|record| record.name == name("v4.test.")));
     assert_eq!(addresses(&answer), ips(&["1.2.3.4", "5.6.7.8"]));
     // Without AAAA records at its end, the chain alone.
     let answer = ask_udp(server, &query("alias.test.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
-    assert_eq!(answer.answers().len(), 1);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert_eq!(answer.answers.len(), 1);
     assert_eq!(
-        answer.answers()[0].data(),
+        &answer.answers[0].data,
         &RData::CNAME(CNAME(name("v4.test.")))
     );
 }
@@ -432,8 +427,8 @@ async fn passes_nxdomain() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let answer = ask_udp(server, &query("missing.test.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NXDomain);
-    assert_eq!(answer.name_servers().len(), 1);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
+    assert_eq!(answer.authorities.len(), 1);
     assert_eq!(
         upstream.asked(),
         [asked("missing.test.", RecordType::AAAA, false)]
@@ -445,17 +440,13 @@ async fn keeps_the_flags_of_a_validating_client() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let mut request = query("v6.test.", RecordType::AAAA);
-    request.set_checking_disabled(true);
-    request
-        .extensions_mut()
-        .as_mut()
-        .unwrap()
-        .set_dnssec_ok(true);
+    request.metadata.checking_disabled = true;
+    request.edns.as_mut().unwrap().set_dnssec_ok(true);
     let answer = ask_udp(server, &request).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
     assert_eq!(addresses(&answer), ips(&["2001:db8::6"]));
-    assert!(answer.checking_disabled());
-    assert!(answer.extensions().as_ref().unwrap().flags().dnssec_ok);
+    assert!(answer.metadata.checking_disabled);
+    assert!(answer.edns.as_ref().unwrap().flags().dnssec_ok);
     assert_eq!(
         upstream.asked(),
         [asked("v6.test.", RecordType::AAAA, false)]
@@ -467,8 +458,8 @@ async fn asks_the_upstreams_for_ipv4only_arpa() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let answer = ask_udp(server, &query("ipv4only.arpa.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
-    assert!(answer.answers().is_empty());
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert!(answer.answers.is_empty());
     let answer = ask_udp(server, &query("ipv4only.arpa.", RecordType::A)).await;
     assert_eq!(addresses(&answer), ips(&["192.0.0.170", "192.0.0.171"]));
     assert_eq!(
@@ -485,17 +476,14 @@ async fn passes_reverse_queries() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let answer = ask_udp(server, &query("4.3.2.1.in-addr.arpa.", RecordType::PTR)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
-    assert_eq!(answer.answers().len(), 1);
-    assert_eq!(
-        answer.answers()[0].data(),
-        &RData::PTR(PTR(name("v4.test.")))
-    );
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert_eq!(answer.answers.len(), 1);
+    assert_eq!(&answer.answers[0].data, &RData::PTR(PTR(name("v4.test."))));
     // An IPv6 reverse name is asked as it is.
     let address: Ipv6Addr = "2001:db8::102:304".parse().unwrap();
     let reverse = Name::from(address);
     let answer = ask_udp(server, &query(&reverse.to_ascii(), RecordType::PTR)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NXDomain);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
     assert_eq!(
         upstream.asked(),
         [
@@ -514,10 +502,10 @@ async fn strips_ech() {
         ask_udp(server, &request).await,
         ask_tcp(server, &request).await,
     ] {
-        let RData::HTTPS(HTTPS(svcb)) = answer.answers()[0].data() else {
+        let RData::HTTPS(HTTPS(svcb)) = &answer.answers[0].data else {
             panic!("not an HTTPS record");
         };
-        let keys: Vec<_> = svcb.svc_params().iter().map(|(key, _)| *key).collect();
+        let keys: Vec<_> = svcb.svc_params.iter().map(|(key, _)| *key).collect();
         assert_eq!(
             keys,
             [
@@ -526,16 +514,16 @@ async fn strips_ech() {
                 SvcParamKey::Ipv6Hint
             ]
         );
-        assert!(!answer.authentic_data());
+        assert!(!answer.metadata.authentic_data);
     }
 
     // A record without ech passes as it is.
     let answer = ask_udp(server, &query("plain.test.", RecordType::HTTPS)).await;
-    let RData::HTTPS(HTTPS(svcb)) = answer.answers()[0].data() else {
+    let RData::HTTPS(HTTPS(svcb)) = &answer.answers[0].data else {
         panic!("not an HTTPS record");
     };
-    assert_eq!(svcb.svc_params().len(), 1);
-    assert!(answer.authentic_data());
+    assert_eq!(svcb.svc_params.len(), 1);
+    assert!(answer.metadata.authentic_data);
 }
 
 #[tokio::test]
@@ -556,7 +544,7 @@ async fn fails_over_and_fails() {
     // No upstream that answers: SERVFAIL.
     resolver.set_client(LOOPBACK.into(), POD, vec![silent.address], Vec::new());
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
-    assert_eq!(answer.response_code(), ResponseCode::ServFail);
+    assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
     // Only failures: the last stands.
     resolver.set_client(
         LOOPBACK.into(),
@@ -565,11 +553,11 @@ async fn fails_over_and_fails() {
         Vec::new(),
     );
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
-    assert_eq!(answer.response_code(), ResponseCode::ServFail);
+    assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
     // No upstream at all.
     resolver.set_client(LOOPBACK.into(), POD, Vec::new(), Vec::new());
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
-    assert_eq!(answer.response_code(), ResponseCode::ServFail);
+    assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
 }
 
 #[tokio::test]
@@ -589,7 +577,7 @@ async fn retries_truncated_answers_over_tcp() {
     let upstream = upstream().await;
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     let answer = ask_udp(server, &query("big.test.", RecordType::A)).await;
-    assert!(!answer.truncated());
+    assert!(!answer.metadata.truncation);
     assert_eq!(addresses(&answer), ips(&["1.2.3.10"]));
     assert_eq!(
         upstream.asked(),
@@ -606,14 +594,14 @@ async fn truncates_what_does_not_fit() {
     let (_, server) = resolver(Config::default(), vec![upstream.address]).await;
     // Without EDNS, a client takes 512 bytes over UDP.
     let mut request = query("many.test.", RecordType::A);
-    *request.extensions_mut() = None;
+    request.edns = None;
     let answer = ask_udp(server, &request).await;
-    assert!(answer.truncated());
-    assert!(answer.answers().is_empty());
+    assert!(answer.metadata.truncation);
+    assert!(answer.answers.is_empty());
     let answer = ask_tcp(server, &request).await;
-    assert!(!answer.truncated());
-    assert_eq!(answer.answers().len(), 60);
-    assert!(answer.extensions().is_none());
+    assert!(!answer.metadata.truncation);
+    assert_eq!(answer.answers.len(), 60);
+    assert!(answer.edns.is_none());
 }
 
 #[tokio::test]
@@ -640,10 +628,10 @@ async fn serves_tcp() {
     let mut ids = Vec::new();
     for _ in &queries {
         let answer = read_message(&mut stream).await.unwrap().unwrap();
-        ids.push(Message::from_vec(&answer).unwrap().id());
+        ids.push(Message::from_vec(&answer).unwrap().metadata.id);
     }
     ids.sort();
-    let mut expected: Vec<_> = queries.iter().map(|query| query.id()).collect();
+    let mut expected: Vec<_> = queries.iter().map(|query| query.metadata.id).collect();
     expected.sort();
     assert_eq!(ids, expected);
 }
@@ -654,9 +642,9 @@ async fn refuses_unknown_clients() {
     let (resolver, server) = resolver(Config::default(), vec![upstream.address]).await;
     resolver.remove_client(LOOPBACK.into());
     let answer = ask_udp(server, &query("v6.test.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::Refused);
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
     let answer = ask_tcp(server, &query("v6.test.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::Refused);
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
     assert!(upstream.asked().is_empty());
 }
 
@@ -714,7 +702,7 @@ async fn survives_garbage() {
         .await
         .is_none());
     let mut response = query("v6.test.", RecordType::A);
-    response.set_message_type(MessageType::Response);
+    response.metadata.message_type = MessageType::Response;
     let bytes = response.to_vec().unwrap();
     assert!(ask_udp_bytes(source, server, &bytes, wait).await.is_none());
     // A header with a broken body: FORMERR.
@@ -724,13 +712,16 @@ async fn survives_garbage() {
         .await
         .unwrap();
     let answer = Message::from_vec(&answer).unwrap();
-    assert_eq!(answer.response_code(), ResponseCode::FormErr);
-    assert_eq!(answer.id(), u16::from_be_bytes([broken[0], broken[1]]));
+    assert_eq!(answer.metadata.response_code, ResponseCode::FormErr);
+    assert_eq!(
+        answer.metadata.id,
+        u16::from_be_bytes([broken[0], broken[1]])
+    );
     // Other opcodes are not implemented.
     let mut notify = query("v6.test.", RecordType::SOA);
-    notify.set_op_code(OpCode::Notify);
+    notify.metadata.op_code = OpCode::Notify;
     let answer = ask_udp(server, &notify).await;
-    assert_eq!(answer.response_code(), ResponseCode::NotImp);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NotImp);
     // Garbage over TCP closes the connection.
     let mut stream = TcpStream::connect(server).await.unwrap();
     stream.write_all(&[0, 0]).await.unwrap();
@@ -754,9 +745,9 @@ async fn tells_pods_apart_by_their_ipv4_address() {
     let answer = ask_udp(server, &request).await;
     assert_eq!(addresses(&answer), ips(&["1.2.3.6"]));
     let answer = ask_udp_from(other, server, &request).await;
-    assert_eq!(answer.response_code(), ResponseCode::ServFail);
+    assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
     let answer = ask_tcp_from(other, server, &request).await;
-    assert_eq!(answer.response_code(), ResponseCode::ServFail);
+    assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
     assert_eq!(upstream.asked(), [asked("v6.test.", RecordType::A, false)]);
     assert_eq!(
         failing.asked(),
@@ -772,14 +763,14 @@ async fn tells_pods_apart_by_their_ipv4_address() {
     // An address the resolver does not know is refused.
     let unknown = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 3));
     let answer = ask_udp_from(unknown, server, &request).await;
-    assert_eq!(answer.response_code(), ResponseCode::Refused);
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
     let answer = ask_tcp_from(unknown, server, &request).await;
-    assert_eq!(answer.response_code(), ResponseCode::Refused);
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
     assert!(records.try_recv().is_err());
     // And so is a pod that is gone.
     resolver.remove_client(other);
     let answer = ask_udp_from(other, server, &request).await;
-    assert_eq!(answer.response_code(), ResponseCode::Refused);
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
 }
 
 #[tokio::test]
@@ -800,7 +791,7 @@ async fn knows_ipv4_clients_by_their_ipv4_address() {
     assert_eq!(addresses(&answer), ips(&["1.2.3.6"]));
     resolver.remove_client(mapped);
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
-    assert_eq!(answer.response_code(), ResponseCode::Refused);
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
 }
 
 #[tokio::test]
@@ -847,18 +838,11 @@ async fn answers_the_names_of_the_pods_tables() {
     // Every address of a name, in any case, over UDP and TCP, with a short
     // TTL; never asked upstream.
     let answer = ask_udp(server, &query("WeB.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NoError);
-    assert!(answer.authoritative() && answer.recursion_available());
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert!(answer.metadata.authoritative && answer.metadata.recursion_available);
     assert_eq!(addresses(&answer), ips(&["fd00::a", "fd00::b"]));
-    assert!(answer
-        .answers()
-        .iter()
-        .all(|record| record.ttl() == NAME_TTL));
-    assert_eq!(
-        answer.answers()[0].name(),
-        &name("WeB."),
-        "the query's case"
-    );
+    assert!(answer.answers.iter().all(|record| record.ttl == NAME_TTL));
+    assert_eq!(&answer.answers[0].name, &name("WeB."), "the query's case");
     let answer = ask_tcp(server, &query("vite.", RecordType::A)).await;
     assert_eq!(addresses(&answer), ips(&["127.0.0.1"]));
     let answer = ask_udp(server, &query("vite.", RecordType::AAAA)).await;
@@ -867,11 +851,11 @@ async fn answers_the_names_of_the_pods_tables() {
     for record_type in [RecordType::A, RecordType::HTTPS, RecordType::MX] {
         let answer = ask_udp(server, &query("db.", record_type)).await;
         assert_eq!(
-            answer.response_code(),
+            answer.metadata.response_code,
             ResponseCode::NoError,
             "{record_type}"
         );
-        assert!(answer.answers().is_empty(), "{record_type}");
+        assert!(answer.answers.is_empty(), "{record_type}");
     }
     assert!(upstream.asked().is_empty());
     // Each answer is recorded.
@@ -887,9 +871,9 @@ async fn answers_the_names_of_the_pods_tables() {
     let answer = ask_udp(server, &query("v6.test.", RecordType::AAAA)).await;
     assert_eq!(addresses(&answer), ips(&["2001:db8::6"]));
     let answer = ask_udp(server, &query("web.test.", RecordType::AAAA)).await;
-    assert!(answer.answers().is_empty());
+    assert!(answer.answers.is_empty());
     let answer = ask_udp(server, &query("other.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NXDomain);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
     resolver.set_client(
         LOOPBACK.into(),
         POD,
@@ -897,7 +881,7 @@ async fn answers_the_names_of_the_pods_tables() {
         vec!["env-1".to_string()],
     );
     let answer = ask_udp(server, &query("vite.", RecordType::A)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NXDomain);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
     assert_eq!(
         upstream.asked(),
         [
@@ -910,7 +894,7 @@ async fn answers_the_names_of_the_pods_tables() {
     // A pod without tables asks upstream for every name.
     resolver.set_client(LOOPBACK.into(), POD, vec![upstream.address], Vec::new());
     let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NXDomain);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
 }
 
 #[tokio::test]
@@ -924,6 +908,6 @@ async fn without_a_lookup_no_pod_has_names() {
         vec!["env-1".to_string()],
     );
     let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
-    assert_eq!(answer.response_code(), ResponseCode::NXDomain);
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
     assert_eq!(upstream.asked(), [asked("web.", RecordType::AAAA, false)]);
 }

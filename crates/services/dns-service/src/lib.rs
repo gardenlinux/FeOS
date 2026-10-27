@@ -376,23 +376,23 @@ impl Resolver {
             Some(code) => respond(&request, Err(code)),
             None if let Some(answer) = self.local(&request, client) => {
                 let mut response = respond(&request, Ok(answer));
-                response.set_authoritative(true);
+                response.metadata.authoritative = true;
                 response
             }
             None => match self.ask(&request, client, transport).await {
                 Some(mut response) => {
-                    let answers = svcb::strip(response.answers_mut());
-                    let additionals = svcb::strip(response.additionals_mut());
+                    let answers = svcb::strip(&mut response.answers);
+                    let additionals = svcb::strip(&mut response.additionals);
                     // What was changed is no longer what was signed.
                     if answers || additionals {
-                        response.set_authentic_data(false);
+                        response.metadata.authentic_data = false;
                     }
                     respond(&request, Ok(response))
                 }
                 None => respond(&request, Err(ResponseCode::ServFail)),
             },
         };
-        if let [question] = request.queries() {
+        if let [question] = request.queries.as_slice() {
             self.record(client, question, &response);
         }
         encode(&response, limit)
@@ -405,7 +405,7 @@ impl Resolver {
         if client.tables.is_empty() {
             return None;
         }
-        let question = request.queries().first()?;
+        let question = request.queries.first()?;
         let owner = question.name();
         if owner.num_labels() != 1 || question.query_class() != DNSClass::IN {
             return None;
@@ -417,7 +417,7 @@ impl Resolver {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()?;
         let addresses = names(&client.tables, label)?;
-        let mut answer = Message::new();
+        let mut answer = Message::new(0, MessageType::Query, OpCode::Query);
         for address in addresses {
             let data = match (address, question.query_type()) {
                 (IpAddr::V6(address), RecordType::AAAA) => RData::AAAA(AAAA(address)),
@@ -437,7 +437,7 @@ impl Resolver {
         client: &Client,
         transport: Transport,
     ) -> Option<Message> {
-        let question = request.queries().first()?.clone();
+        let question = request.queries.first()?.clone();
         let upstreams = match client.upstreams.is_empty() {
             true => &self.config.default_upstreams,
             false => &client.upstreams,
@@ -450,9 +450,9 @@ impl Resolver {
     /// Publishes the record of an answered query.
     fn record(&self, client: &Client, question: &Query, response: &Message) {
         let addresses = response
-            .answers()
+            .answers
             .iter()
-            .filter_map(|record| match record.data() {
+            .filter_map(|record| match &record.data {
                 RData::A(A(address)) => Some(address.to_string()),
                 RData::AAAA(AAAA(address)) => Some(address.to_string()),
                 _ => None,
@@ -465,7 +465,7 @@ impl Resolver {
             record: Some(traffic_record::Record::Dns(DnsQuery {
                 name: record_name(question.name()),
                 r#type: u16::from(question.query_type()).into(),
-                rcode: u16::from(response.response_code()).into(),
+                rcode: u16::from(response.metadata.response_code).into(),
                 addresses,
             })),
         };
@@ -476,14 +476,14 @@ impl Resolver {
 
 /// The error a request gets before it is resolved, if any.
 fn check(request: &Message) -> Option<ResponseCode> {
-    if request.op_code() != OpCode::Query {
+    if request.metadata.op_code != OpCode::Query {
         return Some(ResponseCode::NotImp);
     }
-    let [question] = request.queries() else {
+    let [question] = request.queries.as_slice() else {
         return Some(ResponseCode::FormErr);
     };
     if request
-        .extensions()
+        .edns
         .as_ref()
         .is_some_and(|edns| edns.version() != 0)
     {
@@ -498,31 +498,26 @@ fn check(request: &Message) -> Option<ResponseCode> {
 
 /// The response to `request`: what the upstreams answered, or an error.
 fn respond(request: &Message, upstream: Result<Message, ResponseCode>) -> Message {
-    let mut response = Message::new();
-    response
-        .set_id(request.id())
-        .set_message_type(MessageType::Response)
-        .set_op_code(request.op_code())
-        .set_recursion_desired(request.recursion_desired())
-        .set_recursion_available(true)
-        .set_checking_disabled(request.checking_disabled());
-    response.add_queries(request.queries().iter().cloned());
+    let mut response = Message::response(request.metadata.id, request.metadata.op_code);
+    response.metadata.recursion_desired = request.metadata.recursion_desired;
+    response.metadata.recursion_available = true;
+    response.metadata.checking_disabled = request.metadata.checking_disabled;
+    response.add_queries(request.queries.iter().cloned());
     match upstream {
-        Ok(mut upstream) => {
-            response
-                .set_response_code(upstream.response_code())
-                .set_authentic_data(upstream.authentic_data());
-            *response.answers_mut() = upstream.take_answers();
-            *response.name_servers_mut() = upstream.take_name_servers();
-            *response.additionals_mut() = upstream.take_additionals();
+        Ok(upstream) => {
+            response.metadata.response_code = upstream.metadata.response_code;
+            response.metadata.authentic_data = upstream.metadata.authentic_data;
+            response.answers = upstream.answers;
+            response.authorities = upstream.authorities;
+            response.additionals = upstream.additionals;
         }
         Err(code) => {
-            response.set_response_code(code);
+            response.metadata.response_code = code;
         }
     }
     // EDNS of our own, if the client spoke it; the upstream's options were
     // for us.
-    match request.extensions() {
+    match &request.edns {
         Some(edns) => {
             let mut ours = Edns::new();
             ours.set_max_payload(UDP_PAYLOAD)
@@ -530,8 +525,8 @@ fn respond(request: &Message, upstream: Result<Message, ResponseCode>) -> Messag
             response.set_edns(ours);
         }
         // A code that needs EDNS cannot be told.
-        None if response.response_code().high() != 0 => {
-            response.set_response_code(ResponseCode::ServFail);
+        None if response.metadata.response_code.high() != 0 => {
+            response.metadata.response_code = ResponseCode::ServFail;
         }
         None => {}
     }
@@ -547,9 +542,8 @@ fn encode(response: &Message, limit: usize) -> Option<Vec<u8>> {
         Err(error) => {
             debug!("dns: encoding an answer: {error}");
             let mut failure = response.truncate();
-            failure
-                .set_truncated(false)
-                .set_response_code(ResponseCode::ServFail);
+            failure.metadata.truncation = false;
+            failure.metadata.response_code = ResponseCode::ServFail;
             failure.to_vec().ok()
         }
     }
@@ -569,7 +563,7 @@ fn header_only(query: &[u8], code: ResponseCode) -> Vec<u8> {
 /// Whether the client of `request` wants DNSSEC records (RFC 3225).
 fn dnssec_ok(request: &Message) -> bool {
     request
-        .extensions()
+        .edns
         .as_ref()
         .is_some_and(|edns| edns.flags().dnssec_ok)
 }

@@ -21,13 +21,10 @@ const RESPONSE_BUFFER: usize = 4096;
 /// The query for `query` that goes upstream on behalf of `request`: the
 /// request's flags, and EDNS of our own.
 pub fn query(request: &Message, query: Query) -> Message {
-    let mut message = Message::new();
-    message
-        .set_message_type(MessageType::Query)
-        .set_op_code(OpCode::Query)
-        .set_recursion_desired(request.recursion_desired())
-        .set_authentic_data(request.authentic_data())
-        .set_checking_disabled(request.checking_disabled());
+    let mut message = Message::new(0, MessageType::Query, OpCode::Query);
+    message.metadata.recursion_desired = request.metadata.recursion_desired;
+    message.metadata.authentic_data = request.metadata.authentic_data;
+    message.metadata.checking_disabled = request.metadata.checking_disabled;
     message.add_query(query);
     let mut edns = Edns::new();
     edns.set_max_payload(UDP_PAYLOAD)
@@ -50,11 +47,14 @@ pub async fn ask(
         match exchange(upstream, query, tcp, timeout).await {
             Ok(response)
                 if matches!(
-                    response.response_code(),
+                    response.metadata.response_code,
                     ResponseCode::ServFail | ResponseCode::Refused
                 ) =>
             {
-                debug!("dns: upstream {upstream}: {}", response.response_code());
+                debug!(
+                    "dns: upstream {upstream}: {}",
+                    response.metadata.response_code
+                );
                 last = Some(response);
             }
             Ok(response) => return Some(response),
@@ -112,7 +112,7 @@ async fn udp(upstream: SocketAddr, query: &Message, id: u16) -> io::Result<Optio
         if !answers(query, &response) {
             continue;
         }
-        if response.truncated() {
+        if response.metadata.truncation {
             return Ok(None);
         }
         return Ok(Some(response));
@@ -128,7 +128,7 @@ async fn tcp(upstream: SocketAddr, query: &Message, id: u16) -> io::Result<Messa
         .await?
         .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
     let response = Message::from_vec(&response).map_err(invalid)?;
-    if response.id() != id || !answers(query, &response) {
+    if response.metadata.id != id || !answers(query, &response) {
         return Err(invalid("a response to another query"));
     }
     Ok(response)
@@ -136,23 +136,25 @@ async fn tcp(upstream: SocketAddr, query: &Message, id: u16) -> io::Result<Messa
 
 fn encode(query: &Message, id: u16) -> io::Result<Vec<u8>> {
     let mut query = query.clone();
-    query.set_id(id);
+    query.metadata.id = id;
     query.to_vec().map_err(invalid)
 }
 
 /// Whether `response` answers `query`: a response with the query's
 /// question. An error may come without the question.
 fn answers(query: &Message, response: &Message) -> bool {
-    if response.message_type() != MessageType::Response || response.op_code() != OpCode::Query {
+    if response.metadata.message_type != MessageType::Response
+        || response.metadata.op_code != OpCode::Query
+    {
         return false;
     }
-    match (query.queries(), response.queries()) {
+    match (query.queries.as_slice(), response.queries.as_slice()) {
         ([asked], [answered]) => {
             asked.name() == answered.name()
                 && asked.query_type() == answered.query_type()
                 && asked.query_class() == answered.query_class()
         }
-        (_, []) => response.response_code() != ResponseCode::NoError,
+        (_, []) => response.metadata.response_code != ResponseCode::NoError,
         _ => false,
     }
 }
@@ -171,17 +173,14 @@ mod tests {
     }
 
     fn response(query: Option<Query>, code: ResponseCode) -> Message {
-        let mut message = Message::new();
-        message
-            .set_message_type(MessageType::Response)
-            .set_response_code(code);
+        let mut message = Message::error_msg(0, OpCode::Query, code);
         message.add_queries(query);
         message
     }
 
     #[test]
     fn matches_the_question() {
-        let request = Message::new();
+        let request = Message::new(0, MessageType::Query, OpCode::Query);
         let asked = query(&request, question("www.example.com.", RecordType::AAAA));
         let same = question("WWW.Example.com.", RecordType::AAAA);
         assert!(answers(
@@ -202,23 +201,22 @@ mod tests {
         assert!(answers(&asked, &response(None, ResponseCode::FormErr)));
         // A query is no answer.
         let mut echo = asked.clone();
-        echo.set_message_type(MessageType::Query);
+        echo.metadata.message_type = MessageType::Query;
         assert!(!answers(&asked, &echo));
     }
 
     #[test]
     fn asks_with_the_requests_flags() {
-        let mut request = Message::new();
-        request
-            .set_recursion_desired(true)
-            .set_checking_disabled(true);
+        let mut request = Message::new(0, MessageType::Query, OpCode::Query);
+        request.metadata.recursion_desired = true;
+        request.metadata.checking_disabled = true;
         let mut edns = Edns::new();
         edns.set_dnssec_ok(true).set_max_payload(4096);
         request.set_edns(edns);
         let asked = query(&request, question("www.example.com.", RecordType::A));
-        assert!(asked.recursion_desired());
-        assert!(asked.checking_disabled());
-        let edns = asked.extensions().as_ref().unwrap();
+        assert!(asked.metadata.recursion_desired);
+        assert!(asked.metadata.checking_disabled);
+        let edns = asked.edns.as_ref().unwrap();
         assert!(edns.flags().dnssec_ok);
         assert_eq!(edns.max_payload(), UDP_PAYLOAD);
     }

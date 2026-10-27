@@ -63,9 +63,9 @@ clap = { version = "4.5.48", features = ["derive", "env"] }
 libc = "0.2"
 rtnetlink = "0.18.1"
 pnet = "0.35.0"
-dhcproto = "0.13.0"
+dhcproto = "0.15"
 # DNS messages for feosd's resolver: the wire format only, no I/O, no DNSSEC.
-hickory-proto = { version = "0.25.2", default-features = false }
+hickory-proto = { version = "0.26.1", default-features = false }
 rand = "0.9"
 socket2 = "0.6.0"
 futures = "0.3.31"

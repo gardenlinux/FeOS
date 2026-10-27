@@ -16,12 +16,12 @@ const STRIPPED: &[SvcParamKey] = &[SvcParamKey::EchConfigList];
 pub fn strip(records: &mut [Record]) -> bool {
     let mut changed = false;
     for record in records {
-        let svcb = match record.data_mut() {
+        let svcb = match &mut record.data {
             RData::HTTPS(HTTPS(svcb)) | RData::SVCB(svcb) => svcb,
             _ => continue,
         };
         if svcb
-            .svc_params()
+            .svc_params
             .iter()
             .any(|(key, _)| STRIPPED.contains(key))
         {
@@ -34,7 +34,7 @@ pub fn strip(records: &mut [Record]) -> bool {
 
 fn without(svcb: &SVCB, keys: &[SvcParamKey]) -> SVCB {
     let params = svcb
-        .svc_params()
+        .svc_params
         .iter()
         .filter(|(key, _)| !keys.contains(key))
         .filter_map(|(key, value)| match value {
@@ -50,13 +50,13 @@ fn without(svcb: &SVCB, keys: &[SvcParamKey]) -> SVCB {
             _ => Some((*key, value.clone())),
         })
         .collect();
-    SVCB::new(svcb.svc_priority(), svcb.target_name().clone(), params)
+    SVCB::new(svcb.svc_priority, svcb.target_name.clone(), params)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hickory_proto::op::Message;
+    use hickory_proto::op::{Message, MessageType, OpCode};
     use hickory_proto::rr::rdata::svcb::{Alpn, EchConfigList, IpHint};
     use hickory_proto::rr::rdata::{A, AAAA};
     use hickory_proto::rr::Name;
@@ -68,8 +68,8 @@ mod tests {
     }
 
     fn params(record: &Record) -> Vec<(SvcParamKey, SvcParamValue)> {
-        match record.data() {
-            RData::HTTPS(HTTPS(svcb)) => svcb.svc_params().to_vec(),
+        match &record.data {
+            RData::HTTPS(HTTPS(svcb)) => svcb.svc_params.clone(),
             _ => panic!("not an HTTPS record"),
         }
     }
@@ -120,10 +120,10 @@ mod tests {
         );
 
         // What is left goes onto the wire and back.
-        let mut message = Message::new();
+        let mut message = Message::new(0, MessageType::Query, OpCode::Query);
         message.add_answers(records.clone());
         let decoded = Message::from_vec(&message.to_vec().unwrap()).unwrap();
-        assert_eq!(decoded.answers(), records);
+        assert_eq!(decoded.answers, records);
     }
 
     #[test]
