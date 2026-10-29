@@ -125,9 +125,10 @@ jobs:
 
       - name: Build and push
         env:
-          REGISTRY: ghcr.io/${{ github.repository }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
+          # An image's name is lowercase; the repository's need not be.
+          REGISTRY="ghcr.io/${GITHUB_REPOSITORY,,}"
           make -C deploy/gardener feos-node REGISTRY="$REGISTRY" TAG=build
           echo "$TAGS" | while read -r tag; do
             [ -n "$tag" ] || continue
