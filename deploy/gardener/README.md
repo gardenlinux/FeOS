@@ -4,8 +4,7 @@ FeOS and FeRun on Gardener
 An example of the whole platform on a Gardener shoot: FeOS on the
 workers of a pool, in a pod per worker (ADR 0020), FeRun's control plane
 `ferund` beside it, `ferun-ingress`, which serves public environments
-(ADR 0021), FeChat, and an image registry. It was built on
-IronCore, whose workers are VMs with nested virtualization (`/dev/kvm`,
+(ADR 0021) and FeChat. It was built on IronCore, whose workers are VMs with nested virtualization (`/dev/kvm`,
 `kvm_intel nested=Y`) running Garden Linux. Garden Linux's kernel has
 what FeOS needs (ublk, tun, vhost-vsock, WireGuard, nftables).
 
@@ -15,12 +14,11 @@ what FeOS needs (ublk, tun, vhost-vsock, WireGuard, nftables).
 | [`ferun/`](ferun/) | namespace `ferun` | ferund, three instances, one on each worker, and its PostgreSQL `ferun-db`, a CloudNativePG cluster of three instances, one on each worker ([`ferun/postgres.yaml`](ferun/postgres.yaml)); the k3s manifests of ferund ([`../k3s/ferun`](../k3s/ferun)) with the nodes' port at a shoot address; `https://run.<DOMAIN>` by the HTTPRoute [`ferun/route.yaml`](ferun/route.yaml) in place of k3s's Ingress |
 | [`ferun-ingress/`](ferun-ingress/) | namespace `ferun-ingress` | ferun-ingress, two instances on two of the workers, behind a LoadBalancer of their own: `https://<label>.<APPS_ZONE>`, public environments' hosts, straight to their pods over the mesh ([The ingress](#the-ingress)) |
 | [`../k3s/fechat`](../k3s/fechat), [`fechat/`](fechat/) | namespace `fechat` | FeChat, unchanged but for its route: `https://chat.<DOMAIN>` by the HTTPRoute [`fechat/route.yaml`](fechat/route.yaml) in place of k3s's Ingress |
-| [`registry/`](registry/) | namespace `registry` | an image registry, `https://oci.<DOMAIN>`: distribution with its blobs in an object store |
 | [`cluster.yaml`](cluster.yaml) | | the issuer `letsencrypt-prod` the Gateway's certificates and ferun-ingress's name, answering DNS-01 |
 
 Every name under `DOMAIN` points at the shoot's public address, the
 LoadBalancer of Traefik, which serves the cluster's Gateway (Gateway
-API): run., chat. and oci.<DOMAIN> are HTTPRoutes on it, its listeners
+API): run. and chat.<DOMAIN> are HTTPRoutes on it, its listeners
 hold their certificates. The apps zone's names point at the second
 address, ferun-ingress's.
 
@@ -46,9 +44,9 @@ address, ferun-ingress's.
 - Traefik behind a LoadBalancer, serving the Gateway API (its standard
   CRDs), and cert-manager. A Gateway, `GATEWAY_NAMESPACE/GATEWAY_NAME`
   (default `traefik/platform`), with an HTTPS listener for each of
-  run., chat. and oci.<DOMAIN>: its certificate, from the issuer of
+  run. and chat.<DOMAIN>: its certificate, from the issuer of
   [`cluster.yaml`](cluster.yaml), and routes admitted from the
-  namespace `ferun`, `fechat` or `registry` respectively. FeCode's
+  namespace `ferun` or `fechat` respectively. FeCode's
   `deploy/fecode/gateway.yaml` is that Gateway on the shoot `fecode`.
   No Ingress is used here; deploy/k3s keeps its Ingresses for k3s's
   Traefik.
@@ -62,7 +60,7 @@ address, ferun-ingress's.
 - A second public address, ferun-ingress's LoadBalancer, and a volume
   of 1 GiB for each of its two instances.
 - An S3-compatible object store: a bucket for diskd, which the pods
-  hibernate into, and one for the registry.
+  hibernate into.
 - An OpenID Connect provider, at which people sign in to ferund and
   FeChat, and an OpenAI-compatible LLM gateway for FeChat.
 - On the machine that deploys: docker, kubectl, `envsubst` (gettext), and
@@ -77,7 +75,7 @@ on make's command line wins over the file.
 
 | Parameter | What |
 |---|---|
-| `DOMAIN` | the DNS zone: ferund at `run.<DOMAIN>`, FeChat at `chat.<DOMAIN>`, the registry at `oci.<DOMAIN>`; `run.<DOMAIN>` is FeRun's trust domain too |
+| `DOMAIN` | the DNS zone: ferund at `run.<DOMAIN>`, FeChat at `chat.<DOMAIN>`; `run.<DOMAIN>` is FeRun's trust domain too |
 | `REGISTRY` | where the images are pushed and pulled; default `ghcr.io/gardenlinux/feos`, public, pulled without a secret |
 | `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it |
 | `WORKER_POOL` | the worker pool that runs FeOS, its label `worker.gardener.cloud/pool` |
@@ -139,20 +137,17 @@ a new feosd's busy answers for failures
 From the repository's root, with `KUBECONFIG` at the shoot and
 `config.env` written. Keep the secrets' files outside the repository.
 
-The issuer, and the registry, whose secrets
-[`registry/registry.yaml`](registry/registry.yaml) describes:
+The issuer:
 
     kubectl -n cert-manager create secret generic cloudflare-api-token --from-literal=api-token=<token>
     kubectl apply -f deploy/gardener/cluster.yaml
-    make -C deploy/gardener apply-registry
-    kubectl -n registry create secret generic registry-config --from-file=config.yml=<config.yml>
-    kubectl -n registry create secret generic registry-auth --from-file=htpasswd=<htpasswd>
     docker login <REGISTRY>
 
-The platform's images do not come from it: they are public on GHCR
-(`REGISTRY`, FeCode's ADR 0012 §2), and no namespace needs a pull
-secret. The registry here holds projects' images; FeCode runs it now
-(its `deploy/registry`).
+The platform's images are public on GHCR (`REGISTRY`, FeCode's ADR
+0012 §2): no namespace needs a pull secret; pushing needs a login that
+may write packages. Projects' images live in a registry that is not the
+platform's, FeCode's `oci.fecode.dev` (its `deploy/registry`), which
+FeRun pulls from like from any other (ADR 0025).
 
 ferund, with CloudNativePG running ([What it needs](#what-it-needs)):
 the CA and the secrets of [`../k3s/README.md`](../k3s/README.md),

@@ -25,7 +25,7 @@ EDGE_NAME ?= $(if $(DOMAIN),edge.$(DOMAIN))
 DOMAIN_CHALLENGE_LABEL ?= _ferun-challenge
 # The workers' network, which reaches ferun-ingress's health port and mesh.
 NODE_CIDR ?= 10.250.0.0/16
-# The Gateway that serves run., chat. and oci.<DOMAIN> (config.env.example).
+# The Gateway that serves run. and chat.<DOMAIN> (config.env.example).
 GATEWAY_NAMESPACE ?= traefik
 GATEWAY_NAME ?= platform
 # DENY_PREFIXES, what the pods may not reach, has no default: the shoot's
@@ -59,7 +59,7 @@ cat-yaml = awk 'FNR==1{print "---"}1' $(1)
 
 .PHONY: feos-node push-feos-node deploy-feos feos-k8s push-feos-k8s deploy-feos-k8s
 .PHONY: ferund push-ferund deploy-ferund deploy-ferun-ingress
-.PHONY: manifests apply-feos apply-ferun apply-ferun-db-import apply-ferun-ingress apply-fechat apply-registry FORCE
+.PHONY: manifests apply-feos apply-ferun apply-ferun-db-import apply-ferun-ingress apply-fechat FORCE
 
 # feosd, diskd, feosctl, Firecracker and the guest from the packages, for
 # the feos-node pod (ADR 0020).
@@ -99,7 +99,7 @@ deploy-ferun-ingress: push-ferund ## Push ferund's image and roll ferun-ingress,
 	kubectl -n ferun-ingress rollout restart statefulset/ferun-ingress
 	kubectl -n ferun-ingress rollout status statefulset/ferun-ingress --timeout=10m
 
-manifests: $(MANIFESTS)/feos.yaml $(MANIFESTS)/feos-k8s.yaml $(MANIFESTS)/ferun.yaml $(MANIFESTS)/fechat.yaml $(MANIFESTS)/registry.yaml $(MANIFESTS)/ferun-ingress.yaml ## Write every part's manifests, with the parameters, to target/gardener/manifests.
+manifests: $(MANIFESTS)/feos.yaml $(MANIFESTS)/feos-k8s.yaml $(MANIFESTS)/ferun.yaml $(MANIFESTS)/fechat.yaml $(MANIFESTS)/ferun-ingress.yaml ## Write every part's manifests, with the parameters, to target/gardener/manifests.
 
 $(MANIFESTS)/feos.yaml: FORCE
 	$(call render,DOMAIN REGISTRY WORKER_POOL FERUN_NODES_IP DENY_PREFIXES,cat feos/feos.yaml)
@@ -120,9 +120,6 @@ $(MANIFESTS)/ferun-db-import.yaml: FORCE
 
 $(MANIFESTS)/fechat.yaml: FORCE
 	$(call render,DOMAIN REGISTRY OIDC_ISSUER FECHAT_MODEL GATEWAY_NAMESPACE GATEWAY_NAME,$(call cat-yaml,$(addprefix ../k3s/fechat/,namespace.yaml config.yaml app.yaml backend.yaml) fechat/route.yaml))
-
-$(MANIFESTS)/registry.yaml: FORCE
-	$(call render,DOMAIN GATEWAY_NAMESPACE GATEWAY_NAME,cat registry/registry.yaml)
 
 # Only with an apps zone: without one there is nothing to serve.
 $(MANIFESTS)/ferun-ingress.yaml: FORCE
@@ -166,9 +163,6 @@ apply-ferun-ingress: $(MANIFESTS)/ferun-ingress.yaml ## Apply ferun-ingress, its
 	kubectl apply -f $<
 
 apply-fechat: $(MANIFESTS)/fechat.yaml ## Apply FeChat, the k3s manifests.
-	kubectl apply -f $<
-
-apply-registry: $(MANIFESTS)/registry.yaml ## Apply the image registry.
 	kubectl apply -f $<
 
 FORCE:

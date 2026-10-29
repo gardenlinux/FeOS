@@ -33,8 +33,8 @@ DaemonSet itself. feosd connects out to ferund; no node opens a port.
   [`../gardener/cluster.yaml`](../gardener/cluster.yaml) does.
 - DNS: `run.<DOMAIN>` and `chat.<DOMAIN>` at the cluster's public
   address, where traefik listens.
-- An image registry (`REGISTRY`) the nodes pull from, such as
-  [`../gardener/registry`](../gardener/registry).
+- The images (`REGISTRY`): by default the public ones on GHCR,
+  `ghcr.io/gardenlinux/feos`, which the nodes pull without a secret.
 - An S3-compatible object store with a bucket for diskd, which the pods
   hibernate into.
 - An OpenID Connect provider, at which people sign in to ferund and
