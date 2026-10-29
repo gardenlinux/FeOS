@@ -78,7 +78,7 @@ on make's command line wins over the file.
 | Parameter | What |
 |---|---|
 | `DOMAIN` | the DNS zone: ferund at `run.<DOMAIN>`, FeChat at `chat.<DOMAIN>`, the registry at `oci.<DOMAIN>`; `run.<DOMAIN>` is FeRun's trust domain too |
-| `REGISTRY` | where the images are pushed and pulled; default `oci.<DOMAIN>` |
+| `REGISTRY` | where the images are pushed and pulled; default `ghcr.io/gardenlinux/feos`, public, pulled without a secret |
 | `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it |
 | `WORKER_POOL` | the worker pool that runs FeOS, its label `worker.gardener.cloud/pool` |
 | `NODE_NAME_PREFIX` | the beginning of the pool's node names, on IronCore `shoot--<project>--<shoot>-<pool>-`; feos-k8s removes from FeRun only nodes with it, by force, so no other shoot's nodes may match ([`config.env.example`](config.env.example)) |
@@ -149,13 +149,14 @@ The issuer, and the registry, whose secrets
     kubectl -n registry create secret generic registry-auth --from-file=htpasswd=<htpasswd>
     docker login <REGISTRY>
 
-Every namespace that pulls from it, `feos`, `ferun` and `fechat`, needs
-the secret `oci-pull` with the registry's credentials, as
-[`../k3s/README.md`](../k3s/README.md) makes it.
+The platform's images do not come from it: they are public on GHCR
+(`REGISTRY`, FeCode's ADR 0012 §2), and no namespace needs a pull
+secret. The registry here holds projects' images; FeCode runs it now
+(its `deploy/registry`).
 
 ferund, with CloudNativePG running ([What it needs](#what-it-needs)):
 the CA and the secrets of [`../k3s/README.md`](../k3s/README.md),
-`ferun-ca`, `oci-pull`, `ferund`, `ferund-secret-key` and
+`ferun-ca`, `ferund`, `ferund-secret-key` and
 `oidc-client-ferun`. The secret `ferund` holds only `FERUN_ADMIN_USERS`
 and `FERUN_BOOTSTRAP_TOKEN`: the database's URL is built in
 [`ferun/kustomization.yaml`](ferun/kustomization.yaml), and its password
@@ -184,7 +185,6 @@ from `kube-system/shoot-info` and stops if `DENY_PREFIXES` leaves one out:
 
     make packages FEOS_VERSION=...
     make -C deploy/gardener push-feos-node apply-feos
-    kubectl -n feos create secret docker-registry oci-pull ...
     kubectl -n feos create secret generic diskd-s3 --from-env-file=<s3.env> \
       --from-literal=DISKD_S3_PREFIX=<prefix>/
     kubectl -n feos create secret generic feos-k8s-ferun --from-literal=credentials="feos-k8s:$pw"
@@ -247,12 +247,11 @@ of the repository.
    token is `feos-ingress-join-<secret>.<pin>`; an answer without
    `"kind":"ingress"`, or with a `feos-join-` token, came from an older
    instance: discard it.
-2. The namespace, the pull secret `oci-pull` as for `ferun`, and the
-   tokens under the instances' names (only each pod's init container
-   mounts this Secret, and copies the pod's own token for it):
+2. The namespace and the tokens under the instances' names (only each
+   pod's init container mounts this Secret, and copies the pod's own
+   token for it):
 
        kubectl create namespace ferun-ingress
-       kubectl -n ferun-ingress create secret docker-registry oci-pull ...
        kubectl -n ferun-ingress create secret generic ferun-ingress-join \
          --from-literal=ferun-ingress-0=<token> --from-literal=ferun-ingress-1=<token>
 

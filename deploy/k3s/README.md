@@ -52,7 +52,7 @@ on make's command line wins over the file.
 | Parameter | What |
 |---|---|
 | `DOMAIN` | the DNS zone: ferund at `run.<DOMAIN>`, FeChat at `chat.<DOMAIN>`; `run.<DOMAIN>` is FeRun's trust domain too |
-| `REGISTRY` | where the images are pushed and pulled; default `oci.<DOMAIN>` |
+| `REGISTRY` | where the images are pushed and pulled; default `ghcr.io/gardenlinux/feos`, public, pulled without a secret |
 | `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it |
 | `FERUN_NODES_IP` | the ClusterIP of the service `ferund-nodes`, which feosd on the hosts dials: a free address of the service network; default `10.43.70.70`, in k3s's default `10.43.0.0/16` |
 | `FECHAT_MODEL` | FeChat's model at the LLM gateway |
@@ -83,8 +83,6 @@ instances' certificates on the nodes' port carry and the nodes check
 
 ### Once: the secrets
 
-    kubectl -n ferun create secret docker-registry oci-pull --docker-server=<REGISTRY> \
-      --docker-username='<registry user>' --docker-password='<registry password>'
     kubectl -n ferun create secret generic ferund-postgres --from-literal=password=$(openssl rand -hex 24)
     kubectl -n ferun create secret generic ferund \
       --from-literal=FERUN_DATABASE_URL="postgres://ferun:<password>@postgres.ferun.svc.cluster.local:5432/ferun?sslmode=disable" \
@@ -125,13 +123,13 @@ per build so that apt upgrades the nodes:
     make packages FEOS_VERSION=0.6.0~dev.$(date -u +%Y%m%d%H%M).$(git rev-parse --short=7 HEAD)
     make -C deploy/k3s push-feos-node apply-feos
 
-Then the secrets: `oci-pull` as for ferund; diskd's object store, the
+Then the secrets (the images are public on GHCR, `REGISTRY`, and need
+none): diskd's object store, the
 object store's variables of
 [`hack/packages/diskd/default`](../../hack/packages/diskd/default), with
 a key prefix of the cluster's own; and a join token for every node, under
 its name. Labelling a node installs FeOS there:
 
-    kubectl -n feos create secret docker-registry oci-pull ...
     kubectl -n feos create secret generic diskd-s3 \
       --from-env-file=<s3.env> --from-literal=DISKD_S3_PREFIX=<prefix>/
     args=""

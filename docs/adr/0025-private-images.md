@@ -228,10 +228,10 @@ registry names, over https, as Docker sends them.
 
 - **A registry that does not answer stops new pods of its images**, baked
   or not, as today, where every pod pulls; running pods, resumes and
-  restores go on. The platform's own images, the sandboxes' default image
-  and the addons' among them, move under `platform/` in FeCode's
-  registry (FeCode's ADR 0012), so that their question stays in the
-  cluster.
+  restores go on. The platform's own images are public on GHCR
+  (`ghcr.io/gardenlinux/feos/…`, FeCode's ADR 0012 §2), as the
+  sandboxes' default image is: their question is anonymous and goes to
+  GHCR, the addons' to Docker Hub until they are mirrored there.
 - **A create costs one `HEAD`**, and a token request when none is held:
   milliseconds in the cluster, tens of milliseconds to a public registry.
   Docker Hub does not count a `HEAD` against its pull limit.

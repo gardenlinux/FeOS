@@ -23,8 +23,6 @@
 #                       takes a deletion of the pod (never forced). Read
 #                       only while an instance keeps no valid certificate;
 #                       afterwards its identity is on its volume.
-#   oci-pull            the registry's credentials, as in the namespace
-#                       ferun.
 # cert-manager makes apps-wildcard-tls, the certificate below, through the
 # issuer's DNS-01 (cluster.yaml), whose token must edit the zone that
 # holds ${APPS_ZONE}.
@@ -244,8 +242,6 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-      imagePullSecrets:
-        - name: oci-pull
       # On SIGTERM an instance fails /readyz and serves on for
       # --shutdown-delay (10 s), waits for its requests for up to
       # --shutdown-grace (40 s) and releases its holds (2 s); this is

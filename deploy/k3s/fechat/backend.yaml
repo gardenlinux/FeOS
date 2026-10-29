@@ -24,8 +24,6 @@ spec:
       labels:
         app: fechat-backend
     spec:
-      imagePullSecrets:
-        - name: oci-pull
       containers:
         - name: fechat-backend
           image: ${REGISTRY}/fechat-backend:0.6.0

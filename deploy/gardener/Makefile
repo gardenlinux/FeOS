@@ -11,7 +11,10 @@
 
 REPO_ROOT := $(abspath ../..)
 -include config.env
-REGISTRY ?= $(if $(DOMAIN),oci.$(DOMAIN))
+# The images are public on GHCR, beside the code (FeCode's ADR 0012 §2):
+# no pull secret. Pushing needs a token that writes the organisation's
+# packages; the workflow images.yaml pushes master and tags.
+REGISTRY ?= ghcr.io/gardenlinux/feos
 # How long calls wait for a node that announced it stops: ferund's
 # --rollout-grace (config.env.example).
 FERUN_ROLLOUT_GRACE ?= 8m

@@ -1,0 +1,136 @@
+name: FeOS Images
+
+# The platform's images, public on GHCR beside the code (FeCode's ADR 0012
+# §2): ferund (which ferun-ingress runs too), feos-k8s and feos-node, as
+# ghcr.io/<repository>/<image>, tagged with the branch or tag and with
+# sha-<commit>. deploy/gardener pulls them from there (REGISTRY) and pins
+# what it rolls by digest.
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: ferund
+            dockerfile: go/Dockerfile
+          - image: feos-k8s
+            dockerfile: deploy/gardener/feos-k8s/Dockerfile
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          # ferund's version (feos-k8s takes none).
+          build-args: VERSION=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # feos-node holds the node's packages: feosd, diskd, Firecracker and the
+  # guest, built as make packages builds them.
+  feos-node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # The packages' dates come from git log of their paths.
+          fetch-depth: 0
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler musl-tools cpio zstd file \
+            flex bison bc libelf-dev libssl-dev e2fsprogs
+
+      - name: Install Rust Toolchain
+        # Installs the toolchain rust-toolchain.toml pins.
+        run: rustup toolchain install
+
+      - name: Set up cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/*
+            !target/guest
+          key: ${{ runner.os }}-images-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-images-cargo-
+
+      - name: Set up guest kernel cache
+        uses: actions/cache@v4
+        with:
+          path: target/guest/vmlinuz
+          key: ${{ runner.os }}-guest-kernel-${{ hashFiles('hack/guest/kernel/**') }}
+
+      - name: Build the packages
+        run: make packages
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}/feos-node
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        env:
+          REGISTRY: ghcr.io/${{ github.repository }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          make -C deploy/gardener feos-node REGISTRY="$REGISTRY" TAG=build
+          echo "$TAGS" | while read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$REGISTRY/feos-node:build" "$tag"
+            docker push "$tag"
+          done

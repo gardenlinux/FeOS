@@ -72,8 +72,6 @@ spec:
       # and 4 s per GiB of the microVMs' 40 GiB, with room. feosd's
       # --stop-grace says the same, 300 s by default.
       terminationGracePeriodSeconds: 300
-      imagePullSecrets:
-        - name: oci-pull
       initContainers:
         - name: prepare
           image: ${REGISTRY}/feos-node:dev

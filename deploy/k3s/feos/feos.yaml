@@ -69,8 +69,6 @@ spec:
       hostPID: true
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
-      imagePullSecrets:
-        - name: oci-pull
       initContainers:
         - name: install
           image: ${REGISTRY}/feos-node:dev

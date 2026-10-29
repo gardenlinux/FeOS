@@ -31,8 +31,6 @@ spec:
       labels:
         app: ferund
     spec:
-      imagePullSecrets:
-        - name: oci-pull
       # The image runs as distroless's nonroot (65532); the group makes the
       # secrets' files below readable to it.
       securityContext:

@@ -8,7 +8,10 @@
 
 REPO_ROOT := $(abspath ../..)
 -include config.env
-REGISTRY ?= $(if $(DOMAIN),oci.$(DOMAIN))
+# The images are public on GHCR, beside the code (FeCode's ADR 0012 §2):
+# no pull secret. Pushing needs a token that writes the organisation's
+# packages; the workflow images.yaml pushes master and tags.
+REGISTRY ?= ghcr.io/gardenlinux/feos
 FERUN_NODES_IP ?= 10.43.70.70
 export DOMAIN REGISTRY OIDC_ISSUER FERUN_NODES_IP FECHAT_MODEL
 DOCKER ?= docker

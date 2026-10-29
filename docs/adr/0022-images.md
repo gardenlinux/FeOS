@@ -112,10 +112,13 @@ that is there when the pod is not.
   every registry alike, `oci.<domain>`, GHCR or Docker Hub: it pulls with
   the credentials a create brings (ADR 0025), issues no registry tokens
   and keeps no namespaces.
-- The platform's own images, `ferund`, `feos-node`, the builder below,
-  and the addons' images live under `platform/` in FeCode's registry,
-  pushed by its super admins (FeCode's ADR 0012); a create pulls them as
-  any other image.
+- The platform's own images, `ferund`, `feos-node`, `feos-k8s` and the
+  builder below, live on GHCR beside their code, public under
+  `ghcr.io/gardenlinux/feos/…`, built and pushed by this repository's
+  workflow (FeCode's ADR 0012 §2): FeCode's registry holds projects'
+  images only, and no platform component pulls from it. The addons'
+  images stay where their blueprints name them until they are mirrored
+  there; a create pulls them as any other image.
 
 ### Builds run on the platform
 

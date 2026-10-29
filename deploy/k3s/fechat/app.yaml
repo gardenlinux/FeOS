@@ -18,8 +18,6 @@ spec:
       labels:
         app: fechat-app
     spec:
-      imagePullSecrets:
-        - name: oci-pull
       containers:
         - name: fechat-app
           image: ${REGISTRY}/fechat-app:0.6.0
