@@ -35,9 +35,10 @@ impl ImageServiceDispatcher {
 
     async fn handle_command(&mut self, cmd: Command) {
         let orchestrator_cmd = match cmd {
-            Command::PullImage(req, responder) => OrchestratorCommand::PullImage {
+            Command::PullImage(req, pull_token, responder) => OrchestratorCommand::PullImage {
                 image_ref: req.image_ref,
                 exclusive: req.exclusive,
+                pull_token,
                 responder,
             },
             Command::ListImages(_req, responder) => OrchestratorCommand::ListImages { responder },

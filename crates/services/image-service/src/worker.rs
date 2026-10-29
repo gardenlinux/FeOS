@@ -4,7 +4,7 @@
 use crate::{
     error::ImageServiceError,
     pull::{normalize_ref, pull_image},
-    pull_dir, FileCommand, ImageStateEvent, OrchestratorCommand,
+    pull_dir, FileCommand, ImageStateEvent, OrchestratorCommand, PullToken,
 };
 use feos_proto::image_service::{
     DeleteImageResponse, ImageInfo, ImageState, ImageStatusResponse, ListImagesResponse,
@@ -65,6 +65,7 @@ impl Orchestrator {
             OrchestratorCommand::PullImage {
                 image_ref,
                 exclusive,
+                pull_token,
                 responder,
             } => {
                 let image_ref = match normalize_ref(&image_ref) {
@@ -123,6 +124,7 @@ impl Orchestrator {
                     self.command_tx.clone(),
                     image_uuid,
                     image_ref,
+                    pull_token,
                 ));
             }
             OrchestratorCommand::FinalizePull {
@@ -277,12 +279,13 @@ pub async fn pull_oci_image(
     command_tx: mpsc::Sender<OrchestratorCommand>,
     image_uuid: String,
     image_ref: String,
+    pull_token: PullToken,
 ) {
     let dir = pull_dir(&image_uuid);
     let result = async {
         let _ = tokio::fs::remove_dir_all(&dir).await;
         tokio::fs::create_dir_all(&dir).await?;
-        pull_image(&image_ref, &dir).await
+        pull_image(&image_ref, &dir, &pull_token).await
     }
     .await;
     let cmd = match result {

@@ -581,6 +581,13 @@ TABLE sandbox_holds
   CONSTRAINT PRIMARY KEY (sandbox_id, holder)
   CREATE INDEX sandbox_holds_lease ON public.sandbox_holds USING btree (lease_until)
   CREATE UNIQUE INDEX sandbox_holds_pkey ON public.sandbox_holds USING btree (sandbox_id, holder)
+TABLE sandbox_image_credentials
+  COLUMN sandbox_id text COLLATE "C" NOT NULL
+  COLUMN sealed bytea NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (sandbox_id)
+  CREATE UNIQUE INDEX sandbox_image_credentials_pkey ON public.sandbox_image_credentials USING btree (sandbox_id)
 TABLE sandbox_tokens
   COLUMN hash text NOT NULL
   COLUMN sandbox_id text COLLATE "C" NOT NULL

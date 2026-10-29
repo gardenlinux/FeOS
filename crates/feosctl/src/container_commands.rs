@@ -236,6 +236,7 @@ async fn create_container(
         config: Some(config),
         container_id: id,
         adopt,
+        pull_token: String::new(),
     };
 
     let response = client.create_container(request).await?.into_inner();

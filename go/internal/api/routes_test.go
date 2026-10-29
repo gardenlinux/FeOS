@@ -120,6 +120,10 @@ var routeClasses = map[string]class{
 	"POST /auth/logout": classPublic,
 	"/auth/":            classPublic,
 	"/":                 classPublic,
+
+	// A sandbox's image credentials (ADR 0025).
+	"PUT /api/v1/sandboxes/{id}/image-credentials":    classTenant,
+	"DELETE /api/v1/sandboxes/{id}/image-credentials": classTenant,
 }
 
 // bindingRoutes are the routes that exist only while bindings are on.

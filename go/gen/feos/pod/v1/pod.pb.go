@@ -1088,7 +1088,13 @@ type CreatePodRequest struct {
 	// What the caller knows of baked layers of the pod's image (ADR 0025),
 	// beside the spec and not compared with it: a create delivered twice
 	// with other layers is the same create. Taken by a new pod only.
-	ImageLayers   *ImageLayers `protobuf:"bytes,3,opt,name=image_layers,json=imageLayers,proto3" json:"image_layers,omitempty"`
+	ImageLayers *ImageLayers `protobuf:"bytes,3,opt,name=image_layers,json=imageLayers,proto3" json:"image_layers,omitempty"`
+	// A Bearer token of the registry of the pod's one image, for the
+	// guest's pull of it (ADR 0025), beside the spec and not compared with
+	// it: feosd keeps it in memory for the pod's bring-up, never in the
+	// pod's record or on its disk, and hands it to the guest's pull only.
+	// Empty: the guest pulls anonymously.
+	PullToken     string `protobuf:"bytes,4,opt,name=pull_token,json=pullToken,proto3" json:"pull_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1142,6 +1148,13 @@ func (x *CreatePodRequest) GetImageLayers() *ImageLayers {
 		return x.ImageLayers
 	}
 	return nil
+}
+
+func (x *CreatePodRequest) GetPullToken() string {
+	if x != nil {
+		return x.PullToken
+	}
+	return ""
 }
 
 // The baked layers of a pod's image that its create names (ADR 0025): a
@@ -1334,8 +1347,11 @@ func (x *CreatePodResponse) GetPod() *PodInfo {
 }
 
 type StartPodRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PodId         string                 `protobuf:"bytes,1,opt,name=pod_id,json=podId,proto3" json:"pod_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	PodId string                 `protobuf:"bytes,1,opt,name=pod_id,json=podId,proto3" json:"pod_id,omitempty"`
+	// A Bearer token for the guest's pull of the pod's image, as
+	// CreatePodRequest.pull_token: for a start whose disk may not have it.
+	PullToken     string `protobuf:"bytes,2,opt,name=pull_token,json=pullToken,proto3" json:"pull_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1373,6 +1389,13 @@ func (*StartPodRequest) Descriptor() ([]byte, []int) {
 func (x *StartPodRequest) GetPodId() string {
 	if x != nil {
 		return x.PodId
+	}
+	return ""
+}
+
+func (x *StartPodRequest) GetPullToken() string {
+	if x != nil {
+		return x.PullToken
 	}
 	return ""
 }
@@ -2417,11 +2440,13 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\x05state\x18\x02 \x01(\x0e2\x1b.feos.pod.v1.ContainerStateR\x05state\x12 \n" +
 	"\texit_code\x18\x03 \x01(\x05H\x00R\bexitCode\x88\x01\x01B\f\n" +
 	"\n" +
-	"_exit_code\"\x90\x01\n" +
+	"_exit_code\"\xaf\x01\n" +
 	"\x10CreatePodRequest\x12\x15\n" +
 	"\x06pod_id\x18\x01 \x01(\tR\x05podId\x12(\n" +
 	"\x04spec\x18\x02 \x01(\v2\x14.feos.pod.v1.PodSpecR\x04spec\x12;\n" +
-	"\fimage_layers\x18\x03 \x01(\v2\x18.feos.pod.v1.ImageLayersR\vimageLayers\"o\n" +
+	"\fimage_layers\x18\x03 \x01(\v2\x18.feos.pod.v1.ImageLayersR\vimageLayers\x12\x1d\n" +
+	"\n" +
+	"pull_token\x18\x04 \x01(\tR\tpullToken\"o\n" +
 	"\vImageLayers\x12\x1b\n" +
 	"\timage_ref\x18\x01 \x01(\tR\bimageRef\x12/\n" +
 	"\x06layers\x18\x02 \x03(\v2\x17.feos.pod.v1.BakedLayerR\x06layers\x12\x12\n" +
@@ -2433,9 +2458,11 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\x02l0\x18\x03 \x01(\tR\x02l0\x12\x19\n" +
 	"\blayer_id\x18\x04 \x01(\tR\alayerId\";\n" +
 	"\x11CreatePodResponse\x12&\n" +
-	"\x03pod\x18\x01 \x01(\v2\x14.feos.pod.v1.PodInfoR\x03pod\"(\n" +
+	"\x03pod\x18\x01 \x01(\v2\x14.feos.pod.v1.PodInfoR\x03pod\"G\n" +
 	"\x0fStartPodRequest\x12\x15\n" +
-	"\x06pod_id\x18\x01 \x01(\tR\x05podId\"\x12\n" +
+	"\x06pod_id\x18\x01 \x01(\tR\x05podId\x12\x1d\n" +
+	"\n" +
+	"pull_token\x18\x02 \x01(\tR\tpullToken\"\x12\n" +
 	"\x10StartPodResponse\"'\n" +
 	"\x0eStopPodRequest\x12\x15\n" +
 	"\x06pod_id\x18\x01 \x01(\tR\x05podId\"\x11\n" +

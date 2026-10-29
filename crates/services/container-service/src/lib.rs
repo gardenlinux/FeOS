@@ -9,6 +9,7 @@ use feos_proto::container_service::{
     StopContainerRequest, StopContainerResponse, StreamContainerLogsRequest,
 };
 use feos_proto::task_service::ExecFrame;
+use image_service::PullToken;
 use tokio::sync::{mpsc, oneshot};
 use tonic::{Status, Streaming};
 
@@ -21,8 +22,10 @@ pub mod runtime;
 pub mod worker;
 
 pub enum Command {
+    /// A create, its request's pull token taken out into the `PullToken`.
     CreateContainer(
         CreateContainerRequest,
+        PullToken,
         oneshot::Sender<Result<CreateContainerResponse, ContainerServiceError>>,
     ),
     StartContainer(
@@ -58,9 +61,11 @@ pub enum Command {
 impl std::fmt::Debug for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Command::CreateContainer(req, _) => {
-                f.debug_tuple("CreateContainer").field(req).finish()
-            }
+            Command::CreateContainer(req, token, _) => f
+                .debug_tuple("CreateContainer")
+                .field(req)
+                .field(token)
+                .finish(),
             Command::StartContainer(req, _) => f.debug_tuple("StartContainer").field(req).finish(),
             Command::StopContainer(req, _) => f.debug_tuple("StopContainer").field(req).finish(),
             Command::GetContainer(req, _) => f.debug_tuple("GetContainer").field(req).finish(),

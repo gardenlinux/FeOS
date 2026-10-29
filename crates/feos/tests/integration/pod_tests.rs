@@ -308,6 +308,7 @@ async fn test_pod_lifecycle() -> Result<()> {
         pod_id: pod_id.clone(),
         spec: Some(spec.clone()),
         image_layers: None,
+        pull_token: String::new(),
     };
     pods.create_pod(create.clone()).await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -325,6 +326,7 @@ async fn test_pod_lifecycle() -> Result<()> {
             pod_id: pod_id.clone(),
             spec: Some(other),
             image_layers: None,
+            pull_token: String::new(),
         })
         .await
         .expect_err("a create with another spec");
@@ -546,6 +548,7 @@ async fn test_pod_lifecycle() -> Result<()> {
     info!("Starting pod {pod_id} again");
     pods.start_pod(StartPodRequest {
         pod_id: pod_id.clone(),
+        pull_token: String::new(),
     })
     .await?;
     let pod = wait_for_pod(&mut pods, &pod_id, PodState::Running).await?;
@@ -622,6 +625,7 @@ async fn test_pod_crash() -> Result<()> {
             ..Default::default()
         }),
         image_layers: None,
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -658,6 +662,7 @@ async fn test_pod_crash() -> Result<()> {
     info!("Starting the failed pod again");
     pods.start_pod(StartPodRequest {
         pod_id: pod_id.clone(),
+        pull_token: String::new(),
     })
     .await?;
     let pod = wait_for_pod(&mut pods, &pod_id, PodState::Running).await?;
@@ -696,6 +701,7 @@ async fn test_pod_suspend_and_resume() -> Result<()> {
             ..Default::default()
         }),
         image_layers: None,
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -771,6 +777,7 @@ async fn test_pod_suspend_and_resume() -> Result<()> {
     assert!(!vm_dir(&pod_id).exists(), "A stopped pod keeps no snapshot");
     pods.start_pod(StartPodRequest {
         pod_id: pod_id.clone(),
+        pull_token: String::new(),
     })
     .await?;
     let pod = wait_for_pod(&mut pods, &pod_id, PodState::Running).await?;

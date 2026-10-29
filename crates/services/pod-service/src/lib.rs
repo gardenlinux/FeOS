@@ -88,6 +88,7 @@ impl PodService for Pods {
                 request.pod_id,
                 request.spec.unwrap_or_default(),
                 request.image_layers,
+                request.pull_token,
             )
             .await?;
         Ok(Response::new(CreatePodResponse { pod: Some(pod) }))
@@ -98,7 +99,8 @@ impl PodService for Pods {
         request: Request<StartPodRequest>,
     ) -> Result<Response<StartPodResponse>, Status> {
         self.check_serving()?;
-        self.start(&request.into_inner().pod_id).await?;
+        let request = request.into_inner();
+        self.start(&request.pod_id, request.pull_token).await?;
         Ok(Response::new(StartPodResponse {}))
     }
 

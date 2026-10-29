@@ -185,6 +185,7 @@ fn marked(names: &[&str], marker: &str) -> Vec<(String, String)> {
 pub(super) async fn start(pods: &mut PodServiceClient<Channel>, pod_id: &str) -> Result<PodInfo> {
     pods.start_pod(StartPodRequest {
         pod_id: pod_id.to_string(),
+        pull_token: String::new(),
     })
     .await?;
     wait_until_up(pods, pod_id).await
@@ -219,6 +220,7 @@ async fn test_pod_disk_survives_stop_and_crash() -> Result<()> {
         pod_id: pod_id.clone(),
         spec: Some(spec()),
         image_layers: None,
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -373,6 +375,7 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
         pod_id: pod_id.clone(),
         spec: Some(networked.clone()),
         image_layers: None,
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -706,6 +709,7 @@ async fn up_pod(pods: &mut PodServiceClient<Channel>) -> Result<(String, PodGuar
         pod_id: pod_id.clone(),
         spec: Some(spec()),
         image_layers: None,
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());

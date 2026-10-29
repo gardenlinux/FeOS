@@ -285,7 +285,10 @@ type CreateContainerRequest struct {
 	// runtime state are built anew. An empty config keeps the image, command
 	// and environment it was created with; set fields replace them. Without a
 	// container to adopt, this is a plain create.
-	Adopt         bool `protobuf:"varint,3,opt,name=adopt,proto3" json:"adopt,omitempty"`
+	Adopt bool `protobuf:"varint,3,opt,name=adopt,proto3" json:"adopt,omitempty"`
+	// A Bearer token of the image's registry for this create's pull (ADR
+	// 0025): held in memory for the pull, never stored. Empty: anonymous.
+	PullToken     string `protobuf:"bytes,4,opt,name=pull_token,json=pullToken,proto3" json:"pull_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -339,6 +342,13 @@ func (x *CreateContainerRequest) GetAdopt() bool {
 		return x.Adopt
 	}
 	return false
+}
+
+func (x *CreateContainerRequest) GetPullToken() string {
+	if x != nil {
+		return x.PullToken
+	}
+	return ""
 }
 
 type CreateContainerResponse struct {
@@ -1337,11 +1347,13 @@ const file_feos_container_v1_container_proto_rawDesc = "" +
 	"\vVolumeMount\x12\x16\n" +
 	"\x06volume\x18\x01 \x01(\tR\x06volume\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1b\n" +
-	"\tread_only\x18\x03 \x01(\bR\breadOnly\"\xa3\x01\n" +
+	"\tread_only\x18\x03 \x01(\bR\breadOnly\"\xc2\x01\n" +
 	"\x16CreateContainerRequest\x12:\n" +
 	"\x06config\x18\x01 \x01(\v2\".feos.container.v1.ContainerConfigR\x06config\x12&\n" +
 	"\fcontainer_id\x18\x02 \x01(\tH\x00R\vcontainerId\x88\x01\x01\x12\x14\n" +
-	"\x05adopt\x18\x03 \x01(\bR\x05adoptB\x0f\n" +
+	"\x05adopt\x18\x03 \x01(\bR\x05adopt\x12\x1d\n" +
+	"\n" +
+	"pull_token\x18\x04 \x01(\tR\tpullTokenB\x0f\n" +
 	"\r_container_id\"c\n" +
 	"\x17CreateContainerResponse\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12%\n" +

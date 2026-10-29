@@ -45,6 +45,9 @@ type Service struct {
 	// ImageAsWritten is the image as the client wrote it, kept by
 	// Normalise when it pins Image; informational on input.
 	ImageAsWritten string `json:"imageAsWritten,omitempty"`
+	// ImageCredentials are the login for the image's registry (ADR 0025);
+	// nil: anonymous. Image runtime only.
+	ImageCredentials *ImageCredentials `json:"imageCredentials,omitempty"`
 	// Sandbox is the attached runtime's sandbox: the ID of a sandbox of
 	// the tenant (not an instance row), short or a UUID.
 	Sandbox string `json:"sandbox,omitempty"`
@@ -137,12 +140,26 @@ type Job struct {
 	Command        []string            `json:"command,omitempty"`
 	Env            map[string]EnvValue `json:"env,omitempty"`
 	Resources      *Resources          `json:"resources,omitempty"`
+	// ImageCredentials are the login for the image's registry (ADR 0025);
+	// nil: anonymous.
+	ImageCredentials *ImageCredentials `json:"imageCredentials,omitempty"`
 	// On is JobOnRelease (the default) or JobOnManual.
 	On string `json:"on,omitempty"`
 	// Timeout bounds one attempt; "": 10m, at most 2h.
 	Timeout string `json:"timeout,omitempty"`
 	// Retries is how many attempts follow a failed one: 0..5.
 	Retries int `json:"retries,omitempty"`
+}
+
+// ImageCredentials are a service's or job's login for its image's registry
+// (ADR 0025): a username and a password, each a string or a secret of the
+// environment ({"secret": n}). A secret named here is read at its latest
+// version whenever a pod is created, not at the version the release pins:
+// they are access, not configuration, and a token rotated or revoked
+// reaches the next replica of an old release.
+type ImageCredentials struct {
+	Username EnvValue `json:"username"`
+	Password EnvValue `json:"password"`
 }
 
 // Addon is a managed backing service of a registered type (a blueprint

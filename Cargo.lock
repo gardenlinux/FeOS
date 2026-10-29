@@ -1224,6 +1224,7 @@ dependencies = [
  "microvm-service",
  "network-service",
  "nix 0.30.1",
+ "oci-client",
  "pod-service",
  "prost",
  "rtnetlink",

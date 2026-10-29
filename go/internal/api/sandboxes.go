@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -78,6 +79,9 @@ type createSandboxRequest struct {
 	// sbx-<id>, which an environment's attached services in it reach the
 	// environment's addons through (ADR 0018). Fixed for its life.
 	Attachable bool `json:"attachable"`
+	// ImageCredentials are the login for the image's registry (ADR 0025),
+	// sealed and never returned; nil: anonymous.
+	ImageCredentials *model.RegistryCredentials `json:"imageCredentials"`
 }
 
 // sandboxView is a sandbox as the sandbox routes show it: its status and
@@ -172,6 +176,9 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := s.checkCredentials(req.ImageCredentials); err != nil {
+		return err
+	}
 	image := req.Image
 	if image == "" {
 		image = s.cfg.DefaultImage
@@ -201,6 +208,9 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 			return n
 		})
 		if err != nil {
+			return err
+		}
+		if err := s.keepCredentials(r.Context(), tx, row.ID, req.ImageCredentials); err != nil {
 			return err
 		}
 		_, err = tx.CreateSandboxToken(r.Context(), hash, row.ID, firstTokenLabel)
@@ -447,6 +457,78 @@ func (s *server) listTools(w http.ResponseWriter, _ *http.Request) error {
 
 // passOr returns an *apierr.Error of err as it is, and anything else as a
 // 500 "<what>: <err>".
+// checkCredentials refuses image credentials that cannot be kept: half
+// given, too long, or without --secret-key-file to seal them.
+func (s *server) checkCredentials(c *model.RegistryCredentials) error {
+	if c == nil || c.Anonymous() {
+		return nil
+	}
+	if err := c.Check(); err != nil {
+		return apierr.New(http.StatusBadRequest, "imageCredentials: %v", err)
+	}
+	if s.deps.Sealer == nil {
+		return apierr.New(http.StatusServiceUnavailable, "image credentials need --secret-key-file on the control plane")
+	}
+	return nil
+}
+
+// keepCredentials seals and keeps the sandbox's image credentials; none
+// keeps nothing.
+func (s *server) keepCredentials(ctx context.Context, st *store.Store, id podid.ID, c *model.RegistryCredentials) error {
+	if c == nil || c.Anonymous() {
+		return nil
+	}
+	plain, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	sealed, err := s.deps.Sealer.Seal(plain, store.ImageCredentialsAAD(id))
+	if err != nil {
+		return fmt.Errorf("seal the image credentials: %w", err)
+	}
+	return st.SetImageCredentials(ctx, id, sealed)
+}
+
+// putImageCredentials is PUT /api/v1/sandboxes/{id}/image-credentials
+// {username, password}: the sandbox's login for its image's registry,
+// replacing any (ADR 0025). Its next create asks the registry with it;
+// a pod that runs keeps running. 204.
+func (s *server) putImageCredentials(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	var c model.RegistryCredentials
+	if _, err := decodeJSON(r, &c); err != nil {
+		return err
+	}
+	if c.Anonymous() {
+		return apierr.New(http.StatusBadRequest, "imageCredentials: a username and a password; DELETE removes them")
+	}
+	if err := s.checkCredentials(&c); err != nil {
+		return err
+	}
+	if err := s.keepCredentials(r.Context(), s.st, sb.ID, &c); err != nil {
+		return passOr(err, "image credentials")
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// deleteImageCredentials is DELETE /api/v1/sandboxes/{id}/image-credentials:
+// the sandbox's creates are anonymous again. 204, also when it had none.
+func (s *server) deleteImageCredentials(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	if _, err := s.st.DeleteImageCredentials(r.Context(), sb.ID); err != nil {
+		return passOr(err, "image credentials")
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
 func passOr(err error, what string) error {
 	var e *apierr.Error
 	if errors.As(err, &e) {

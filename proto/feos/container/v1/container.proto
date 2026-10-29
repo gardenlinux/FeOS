@@ -89,6 +89,9 @@ message CreateContainerRequest {
   // and environment it was created with; set fields replace them. Without a
   // container to adopt, this is a plain create.
   bool adopt = 3;
+  // A Bearer token of the image's registry for this create's pull (ADR
+  // 0025): held in memory for the pull, never stored. Empty: anonymous.
+  string pull_token = 4;
 }
 
 message CreateContainerResponse {

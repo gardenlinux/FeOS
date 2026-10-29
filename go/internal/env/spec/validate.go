@@ -311,6 +311,7 @@ func (v *validator) service(name string, svc Service) {
 			v.errorf(p+".replicas", fmt.Sprintf("use 0..%d", MaxReplicas), "replicas %d is out of range", *svc.Replicas)
 		}
 		v.resources(p+".resources", svc.Resources)
+		v.imageCredentials(p+".imageCredentials", svc.ImageCredentials)
 		if svc.Idle != "" {
 			d, ok := v.duration(p+".idle", svc.Idle)
 			switch {
@@ -330,6 +331,10 @@ func (v *validator) service(name string, svc Service) {
 	case RuntimeAttached:
 		if svc.Image != "" || svc.ImageAsWritten != "" {
 			v.errorf(p+".image", `remove image, or set runtime "image"`, "an attached service runs no image")
+		}
+		if svc.ImageCredentials != nil {
+			v.errorf(p+".imageCredentials", `remove imageCredentials, or set runtime "image"`,
+				"an attached service pulls no image")
 		}
 		v.sandbox(p+".sandbox", svc.Sandbox)
 		if len(svc.Command) == 0 {
@@ -585,6 +590,30 @@ func (v *validator) env(path string, env map[string]EnvValue, fromImage bool, sa
 	}
 }
 
+// imageCredentials checks a login for an image's registry: a username
+// and a password, each a string or a secret.
+func (v *validator) imageCredentials(path string, c *ImageCredentials) {
+	if c == nil {
+		return
+	}
+	for _, f := range []struct {
+		name string
+		val  EnvValue
+	}{{"username", c.Username}, {"password", c.Password}} {
+		fp := path + "." + f.name
+		switch f.val.Kind {
+		case EnvSecret:
+			v.secretRef(fp, f.val.Secret)
+		case EnvString, EnvLiteral:
+			if f.val.Value == "" {
+				v.errorf(fp, `set it to a string or {"secret": "<name>"}`, "the image's %s is empty", f.name)
+			}
+		default:
+			v.errorf(fp, `use a string or {"secret": "<name>"}`, "the image's %s is a string or a secret", f.name)
+		}
+	}
+}
+
 // secretRef checks a reference to a tenant secret.
 func (v *validator) secretRef(path, name string) {
 	if !IsSecretName(name) {
@@ -662,6 +691,7 @@ func (v *validator) job(name string, j Job) {
 		}
 	}
 	v.resources(p+".resources", j.Resources)
+	v.imageCredentials(p+".imageCredentials", j.ImageCredentials)
 	v.env(p+".env", j.Env, true, "")
 }
 
@@ -958,11 +988,23 @@ func Referenced(s Spec) []string {
 			}
 		}
 	}
+	creds := func(c *ImageCredentials) {
+		if c == nil {
+			return
+		}
+		for _, val := range []EnvValue{c.Username, c.Password} {
+			if val.Kind == EnvSecret {
+				set[val.Secret] = true
+			}
+		}
+	}
 	for _, svc := range s.Services {
 		add(svc.Env)
+		creds(svc.ImageCredentials)
 	}
 	for _, j := range s.Jobs {
 		add(j.Env)
+		creds(j.ImageCredentials)
 	}
 	return slices.Sorted(maps.Keys(set))
 }

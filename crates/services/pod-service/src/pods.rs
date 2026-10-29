@@ -153,6 +153,10 @@ struct Pod {
     /// What keeps its microVM from answering now, as a suspend does, for a
     /// call to its guest that gets no answer.
     busy: Option<&'static str>,
+    /// The Bearer token for the guest's pull of the pod's image that its
+    /// create or start brought (ADR 0025): in memory only, for the next
+    /// bring-up, which takes it.
+    pull_token: Option<String>,
 }
 
 impl Pod {
@@ -164,6 +168,7 @@ impl Pod {
             hibernation: None,
             abandoned: VecDeque::new(),
             busy: None,
+            pull_token: None,
         }
     }
 
@@ -392,10 +397,12 @@ impl Pods {
         pod_id: String,
         spec: PodSpec,
         image_layers: Option<ImageLayers>,
+        pull_token: String,
     ) -> Result<PodInfo, Status> {
-        self.detached(
-            move |pods| async move { pods.create_detached(pod_id, spec, image_layers).await },
-        )
+        self.detached(move |pods| async move {
+            pods.create_detached(pod_id, spec, image_layers, pull_token)
+                .await
+        })
         .await
     }
 
@@ -404,6 +411,7 @@ impl Pods {
         pod_id: String,
         spec: PodSpec,
         image_layers: Option<ImageLayers>,
+        pull_token: String,
     ) -> Result<PodInfo, Status> {
         spec::check_id(&pod_id)?;
         let spec = spec::normalize(spec)?;
@@ -447,6 +455,7 @@ impl Pods {
             }
         };
         info!("Pods: {pod_id} created");
+        self.set_pull_token(&pod_id, pull_token);
         // The pod's rules stand before its TAP device carries a frame.
         if let Err(e) = self.apply_network().await {
             warn!("Pods: Failed to set the pods' rules: {e}");
@@ -532,13 +541,13 @@ impl Pods {
 
     /// Brings a stopped or failed pod up again, on its disk, in a task of
     /// its own (`detached`).
-    pub async fn start(&self, pod_id: &str) -> Result<(), Status> {
+    pub async fn start(&self, pod_id: &str, pull_token: String) -> Result<(), Status> {
         let pod_id = pod_id.to_string();
-        self.detached(move |pods| async move { pods.start_detached(&pod_id).await })
+        self.detached(move |pods| async move { pods.start_detached(&pod_id, pull_token).await })
             .await
     }
 
-    async fn start_detached(&self, pod_id: &str) -> Result<(), Status> {
+    async fn start_detached(&self, pod_id: &str, pull_token: String) -> Result<(), Status> {
         let _lock = self.lock(pod_id).await?;
         match self.info(pod_id)?.state() {
             PodState::Pending | PodState::Running => return Ok(()),
@@ -555,9 +564,23 @@ impl Pods {
             _ => {}
         }
         self.set_state(pod_id, PodState::Pending, "").await;
+        self.set_pull_token(pod_id, pull_token);
         drop(_lock);
         self.spawn_bring_up(pod_id);
         Ok(())
+    }
+
+    /// Keeps the token for the pod's next bring-up; empty: none.
+    fn set_pull_token(&self, pod_id: &str, pull_token: String) {
+        if let Some(pod) = self.pods().get_mut(pod_id) {
+            pod.pull_token = (!pull_token.is_empty()).then_some(pull_token);
+        }
+    }
+
+    /// Takes the token the pod's bring-up pulls with, if it has one: a
+    /// bring-up uses it once.
+    fn take_pull_token(&self, pod_id: &str) -> Option<String> {
+        self.pods().get_mut(pod_id)?.pull_token.take()
     }
 
     /// Ends the pod's microVM and stops its disk. Whatever state it is in,
@@ -2071,7 +2094,9 @@ impl Pods {
             if info.state() != PodState::Pending {
                 return;
             }
-            match pods.bring_up(&id, &info.spec.unwrap_or_default()).await {
+            let pull_token = pods.take_pull_token(&id);
+            let spec = info.spec.unwrap_or_default();
+            match pods.bring_up(&id, &spec, pull_token.as_deref()).await {
                 Ok(()) => pods.set_state(&id, PodState::Running, "").await,
                 Err(e) => pods.set_state(&id, PodState::Failed, e.message()).await,
             }
@@ -2083,15 +2108,27 @@ impl Pods {
         }
     }
 
-    async fn bring_up(&self, pod_id: &str, spec: &PodSpec) -> Result<(), Status> {
+    /// `pull_token` is what the guest's pull of the pod's image takes (ADR
+    /// 0025); none: an anonymous pull.
+    async fn bring_up(
+        &self,
+        pod_id: &str,
+        spec: &PodSpec,
+        pull_token: Option<&str>,
+    ) -> Result<(), Status> {
         let booted = self.boot(pod_id, spec).await?;
+        // A disk on a baked layer has the image: its guest pulls nothing,
+        // and gets no token.
+        let pull_token =
+            pull_token.filter(|_| !bake::on_layer(&self.info(pod_id).unwrap_or_default()));
         self.wait_for_guest(pod_id).await?;
         self.mount_volumes(pod_id, spec).await?;
         let channel = self.guest_channel(pod_id).await?;
-        self.bake_point(pod_id, spec, channel.clone()).await?;
+        self.bake_point(pod_id, spec, channel.clone(), pull_token)
+            .await?;
         let mut guest = ContainerServiceClient::new(channel);
         for container in &spec.containers {
-            run_container(&mut guest, container, booted)
+            run_container(&mut guest, container, booted, pull_token)
                 .await
                 .map_err(|e| {
                     Status::new(
@@ -2115,6 +2152,7 @@ impl Pods {
         pod_id: &str,
         spec: &PodSpec,
         channel: Channel,
+        pull_token: Option<&str>,
     ) -> Result<(), Status> {
         let Some(mut layer) = bake::due(&self.info(pod_id)?) else {
             return Ok(());
@@ -2142,7 +2180,12 @@ impl Pods {
             return Ok(());
         }
         let image = layer.image_ref.clone();
-        match timeout(BAKE_PULL_TIMEOUT, pull_in_guest(channel.clone(), &image)).await {
+        match timeout(
+            BAKE_PULL_TIMEOUT,
+            pull_in_guest(channel.clone(), &image, pull_token),
+        )
+        .await
+        {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 warn!("Pods: {pod_id} does not bake {image}: {}", e.message());
@@ -3036,11 +3079,16 @@ const BAKE_PUSHES: u32 = 3;
 
 /// Has the guest pull `image_ref` into its image store, or join the pull
 /// or the image there, and waits until it is ready.
-async fn pull_in_guest(channel: Channel, image_ref: &str) -> Result<(), Status> {
+async fn pull_in_guest(
+    channel: Channel,
+    image_ref: &str,
+    pull_token: Option<&str>,
+) -> Result<(), Status> {
     let mut images = ImageServiceClient::new(channel);
     let request = PullImageRequest {
         image_ref: image_ref.to_string(),
         exclusive: false,
+        pull_token: pull_token.unwrap_or_default().to_string(),
     };
     let image_uuid = images.pull_image(request).await?.into_inner().image_uuid;
     let request = WatchImageStatusRequest { image_uuid };
@@ -3091,6 +3139,7 @@ async fn run_container(
     guest: &mut ContainerServiceClient<Channel>,
     container: &ContainerSpec,
     booted: bool,
+    pull_token: Option<&str>,
 ) -> Result<(), Status> {
     let container_id = container.name.clone();
     let create = CreateContainerRequest {
@@ -3111,6 +3160,7 @@ async fn run_container(
         container_id: Some(container_id.clone()),
         // Without a container to adopt, a plain create.
         adopt: true,
+        pull_token: pull_token.unwrap_or_default().to_string(),
     };
     // Adopted once at most: one that stops again exited in this boot.
     let mut adopt = booted;
@@ -3662,7 +3712,7 @@ mod tests {
         let hung = hold_the_writer(&pods, dir.path());
         let start = tokio::spawn({
             let pods = pods.clone();
-            async move { pods.start(POD).await }
+            async move { pods.start(POD, String::new()).await }
         });
         sleep(Duration::from_millis(200)).await;
         assert_eq!(pods.info(POD).unwrap().state(), PodState::Pending);
@@ -3697,7 +3747,10 @@ mod tests {
         };
         let create = tokio::spawn({
             let pods = pods.clone();
-            async move { pods.create(POD.to_string(), spec, None).await }
+            async move {
+                pods.create(POD.to_string(), spec, None, String::new())
+                    .await
+            }
         });
         sleep(Duration::from_millis(200)).await;
         assert!(pods.info(POD).is_err(), "added before it is kept");

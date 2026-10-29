@@ -58,6 +58,8 @@ uuid = { workspace = true }
 microvm-service = { workspace = true }
 image-service = { workspace = true }
 host-service = { workspace = true }
+# A registry's token for the pull-token test.
+oci-client = { workspace = true }
 anyhow = { workspace = true }
 nix = { workspace = true }
 tokio = { workspace = true }

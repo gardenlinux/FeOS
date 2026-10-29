@@ -74,17 +74,35 @@ type registry struct {
 	status map[string]int
 	delays map[string]time.Duration
 	noHead bool
+	// private repositories take only the token of user's login, given at
+	// the realm as Basic authentication; basic answers every reference
+	// with a Basic challenge instead; realmAuth is the Authorization the
+	// realm saw last.
+	private   map[string]bool
+	user      [2]string
+	basic     bool
+	realmAuth string
 }
 
 func newRegistry(t *testing.T) *registry {
 	r := &registry{hits: map[string]int{}, token: "anon-token", manifests: map[string][2]string{}, digests: map[string]string{},
-		redirects: map[string]string{}, status: map[string]int{}, delays: map[string]time.Duration{}}
+		redirects: map[string]string{}, status: map[string]int{}, delays: map[string]time.Duration{},
+		private: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
-		bad, code := r.badToken, r.tokenStatus
+		bad, code, user := r.badToken, r.tokenStatus, r.user
 		r.tokens++
+		r.realmAuth = req.Header.Get("Authorization")
 		r.mu.Unlock()
+		if u, pw, ok := req.BasicAuth(); ok {
+			if u != user[0] || pw != user[1] {
+				http.Error(w, "bad login", http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprintf(w, `{"token": "user-token", "expires_in": 300}`)
+			return
+		}
 		if bad {
 			fmt.Fprint(w, "<html>not a token</html>")
 			return
@@ -111,8 +129,20 @@ func newRegistry(t *testing.T) *registry {
 			http.Redirect(w, req, redirect, http.StatusTemporaryRedirect)
 			return
 		}
-		if req.Header.Get("Authorization") != "Bearer "+r.token {
-			repo := strings.Split(key, "/manifests/")[0]
+		repo := strings.Split(key, "/manifests/")[0]
+		r.mu.Lock()
+		private, basic := r.private[repo], r.basic
+		r.mu.Unlock()
+		if basic {
+			w.Header().Set("WWW-Authenticate", `Basic realm="test-registry"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		want := "Bearer " + r.token
+		if private {
+			want = "Bearer user-token"
+		}
+		if got := req.Header.Get("Authorization"); got != want && !(got == "Bearer user-token" && !private) {
 			if realm == "" {
 				realm = r.srv.URL + "/token"
 			}
@@ -244,7 +274,7 @@ func TestResolver(t *testing.T) {
 	if _, err := r.resolve(bg, host+"/team/arm:v1"); err == nil || !strings.Contains(err.Error(), "no linux/amd64 variant") {
 		t.Fatalf("arm only: %v", err)
 	}
-	if _, err := r.resolve(bg, host+"/team/missing:v1"); err == nil || !strings.Contains(err.Error(), "private registries are not supported") {
+	if _, err := r.resolve(bg, host+"/team/missing:v1"); err == nil || !strings.Contains(err.Error(), "not found, or not for these credentials") {
 		t.Fatalf("missing: %v", err)
 	}
 	if _, err := r.resolve(bg, host+"/limited/x"); err == nil || !strings.Contains(err.Error(), "rate-limited") {
@@ -340,7 +370,7 @@ func TestEngineResolverDefaultRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.resolveImage(bg, "127.0.0.1:1/x/y:z")
+	_, err = e.resolveImage(bg, "127.0.0.1:1/x/y:z", model.RegistryCredentials{})
 	if want := "registry 127.0.0.1:1 is not reachable from the control plane: 127.0.0.1 is an internal address (127.0.0.0/8)"; err == nil ||
 		err.Error() != want {
 		t.Fatalf("%v, want %q", err, want)
@@ -356,7 +386,7 @@ func TestEnsureResolvesAndPinsImage(t *testing.T) {
 	reg.put("team/app/manifests/v1", "application/vnd.oci.image.index.v1+json",
 		`{"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"`+amd+`","platform":{"os":"linux","architecture":"amd64"}}]}`, "")
 	res := reg.resolver()
-	e.resolveImage, e.checkImage = res.resolve, res.access
+	e.resolveImage, e.checkImage = res.resolveAs, res.access
 	reg.put("team/app/manifests/"+amd, "application/vnd.oci.image.manifest.v1+json", `{}`, amd)
 	image := reg.host() + "/team/app:v1"
 	sb := h.sandbox(512)
@@ -388,6 +418,83 @@ func TestEnsureResolvesAndPinsImage(t *testing.T) {
 	wantState(t, h.row(bad.ID), model.StatePending)
 }
 
+// anon is an asker without credentials.
+var anon = model.RegistryCredentials{}
+
+// A create with credentials (ADR 0025): the realm gets them as Basic
+// authentication and gives their token, which is kept apart from the
+// anonymous one, as are the tags resolved with them; a registry that
+// takes only Basic authentication is refused, and the guest's pull token
+// is asked for anew.
+func TestResolverWithCredentials(t *testing.T) {
+	reg := newRegistry(t)
+	const mt = "application/vnd.oci.image.manifest.v1+json"
+	body := `{"mediaType":"` + mt + `","config":{"digest":"sha256:c1"}}`
+	d := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(body)))
+	reg.put("team/private/manifests/"+d, mt, body, d)
+	reg.put("team/private/manifests/v1", mt, body, d)
+	reg.set(func(r *registry) {
+		r.private["team/private"] = true
+		r.user = [2]string{"alice", "s3cret"}
+	})
+	res := reg.resolver()
+	alice := model.RegistryCredentials{Username: "alice", Password: "s3cret"}
+	pinned := reg.host() + "/team/private@" + d
+
+	// Anonymous: refused, and the tag does not resolve.
+	if err := res.access(bg, pinned, anon); !errors.Is(err, errImageRefused) {
+		t.Fatalf("anonymous: %v", err)
+	}
+	if _, err := res.resolve(bg, reg.host()+"/team/private:v1"); err == nil {
+		t.Fatal("anonymous resolve of a private tag")
+	}
+	// Her login: a yes, the token of her login at the realm, Basic.
+	if err := res.access(bg, pinned, alice); err != nil {
+		t.Fatalf("alice: %v", err)
+	}
+	reg.mu.Lock()
+	realmAuth := reg.realmAuth
+	reg.mu.Unlock()
+	if u, pw, ok := (&http.Request{Header: http.Header{"Authorization": {realmAuth}}}).BasicAuth(); !ok || u != "alice" || pw != "s3cret" {
+		t.Fatalf("the realm saw %q", realmAuth)
+	}
+	if got, err := res.resolveAs(bg, reg.host()+"/team/private:v1", alice); err != nil || got != pinned {
+		t.Fatalf("alice's resolve: %q %v", got, err)
+	}
+	// What she resolved and her token are hers: anonymous gets neither.
+	if _, err := res.resolve(bg, reg.host()+"/team/private:v1"); err == nil {
+		t.Fatal("an anonymous resolve took alice's tag or token")
+	}
+	if err := res.access(bg, pinned, anon); !errors.Is(err, errImageRefused) {
+		t.Fatalf("anonymous after alice: %v", err)
+	}
+	// Another password is refused at the realm.
+	if err := res.access(bg, pinned, model.RegistryCredentials{Username: "alice", Password: "guess"}); !errors.Is(err, errImageRefused) {
+		t.Fatalf("a wrong password: %v", err)
+	}
+	// The guest's pull token: asked for anew, her login's; none for an
+	// anonymous create.
+	before := reg.tokenRequests()
+	if tok, err := res.pullToken(bg, pinned, alice); err != nil || tok != "user-token" || reg.tokenRequests() != before+1 {
+		t.Fatalf("pull token %q %v, %d token requests", tok, err, reg.tokenRequests()-before)
+	}
+	if tok, err := res.pullToken(bg, pinned, anon); err != nil || tok != "" {
+		t.Fatalf("anonymous pull token %q %v", tok, err)
+	}
+	// A registry that takes only Basic authentication: refused with
+	// credentials, as anonymously.
+	reg.set(func(r *registry) { r.basic = true })
+	if err := res.access(bg, reg.host()+"/team/basic@"+d, alice); !errors.Is(err, errBasicOnly) {
+		t.Fatalf("basic only: %v", err)
+	}
+	if _, err := res.pullToken(bg, reg.host()+"/team/basic@"+d, alice); !errors.Is(err, errBasicOnly) {
+		t.Fatalf("basic only pull token: %v", err)
+	}
+	if err := res.access(bg, reg.host()+"/team/basic@"+d, anon); !errors.Is(err, errImageRefused) {
+		t.Fatalf("basic only, anonymous: %v", err)
+	}
+}
+
 // The question before a create (ADR 0025): HEAD of the manifest by its
 // digest with the realm's token, which is kept; the registry's no, and
 // no answer, which is no as well.
@@ -406,7 +513,7 @@ func TestResolverAccess(t *testing.T) {
 	// A yes, with the realm's token; the next question takes the token
 	// kept and asks once.
 	for range 2 {
-		if err := res.access(bg, pinned("team/app", d)); err != nil {
+		if err := res.access(bg, pinned("team/app", d), anon); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -421,40 +528,40 @@ func TestResolverAccess(t *testing.T) {
 		}
 	}
 	// The registry does not have it, or refuses it.
-	if err := res.access(bg, pinned("team/app", other)); !errors.Is(err, errImageNotThere) {
+	if err := res.access(bg, pinned("team/app", other), anon); !errors.Is(err, errImageNotThere) {
 		t.Fatalf("missing: %v", err)
 	}
 	reg.set(func(r *registry) { r.status["team/secret/manifests/"+d] = http.StatusForbidden })
-	if err := res.access(bg, pinned("team/secret", d)); !errors.Is(err, errImageRefused) {
+	if err := res.access(bg, pinned("team/secret", d), anon); !errors.Is(err, errImageRefused) {
 		t.Fatalf("forbidden: %v", err)
 	}
 	// An answer for another digest, a rate limit or a failure is none.
 	reg.put("team/liar/manifests/"+d, mt, body, other)
-	noAnswerWith(res.access(bg, pinned("team/liar", d)), "answered for "+other)
+	noAnswerWith(res.access(bg, pinned("team/liar", d), anon), "answered for "+other)
 	reg.set(func(r *registry) {
 		r.status["team/busy/manifests/"+d] = http.StatusTooManyRequests
 		r.status["team/down/manifests/"+d] = http.StatusServiceUnavailable
 	})
-	noAnswerWith(res.access(bg, pinned("team/busy", d)), "rate-limited")
-	noAnswerWith(res.access(bg, pinned("team/down", d)), "HTTP 503")
-	noAnswerWith(newResolver(nil).access(bg, "127.0.0.1:1/x/y@"+d), "registry 127.0.0.1:1 unreachable")
+	noAnswerWith(res.access(bg, pinned("team/busy", d), anon), "rate-limited")
+	noAnswerWith(res.access(bg, pinned("team/down", d), anon), "HTTP 503")
+	noAnswerWith(newResolver(nil).access(bg, "127.0.0.1:1/x/y@"+d, anon), "registry 127.0.0.1:1 unreachable")
 	// A registry that does not answer HEAD is asked with GET, and the
 	// body must be the digest's.
 	reg.set(func(r *registry) { r.noHead = true })
-	if err := res.access(bg, pinned("team/head", d)); err != nil {
+	if err := res.access(bg, pinned("team/head", d), anon); err != nil {
 		t.Fatalf("GET: %v", err)
 	}
 	reg.put("team/forged/manifests/"+d, mt, `{"forged":true}`, "")
-	noAnswerWith(res.access(bg, pinned("team/forged", d)), "served a manifest of")
+	noAnswerWith(res.access(bg, pinned("team/forged", d), anon), "served a manifest of")
 	reg.set(func(r *registry) { r.noHead = false })
 	// A realm that refuses a token refuses the image.
 	reg.set(func(r *registry) { r.tokenStatus = http.StatusUnauthorized })
-	if err := res.access(bg, pinned("team/other", d)); !errors.Is(err, errImageRefused) {
+	if err := res.access(bg, pinned("team/other", d), anon); !errors.Is(err, errImageRefused) {
 		t.Fatalf("realm refused: %v", err)
 	}
 	reg.set(func(r *registry) { r.tokenStatus = 0 })
 	// Only a pinned image is asked for.
-	if err := res.access(bg, reg.host()+"/team/app:v1"); err == nil || !strings.Contains(err.Error(), "not pinned") {
+	if err := res.access(bg, reg.host()+"/team/app:v1", anon); err == nil || !strings.Contains(err.Error(), "not pinned") {
 		t.Fatalf("a tag: %v", err)
 	}
 	// Questions at once share one request: the challenge and the answer.
@@ -462,7 +569,7 @@ func TestResolverAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, 8)
 	for i := range errs {
-		wg.Go(func() { errs[i] = res.access(bg, pinned("team/slow", d)) })
+		wg.Go(func() { errs[i] = res.access(bg, pinned("team/slow", d), anon) })
 	}
 	wg.Wait()
 	for _, err := range errs {

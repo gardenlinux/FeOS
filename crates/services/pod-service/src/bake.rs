@@ -49,6 +49,13 @@ pub(crate) fn due(info: &PodInfo) -> Option<BakedLayer> {
     Some(disk.clone())
 }
 
+/// Whether the pod's disk was made on a baked layer, which holds its image.
+pub(crate) fn on_layer(info: &PodInfo) -> bool {
+    info.disk
+        .as_ref()
+        .is_some_and(|disk| !disk.layer_id.is_empty())
+}
+
 /// Whether a thaw's error says that the filesystem was not frozen: FITHAW
 /// fails with EINVAL then.
 pub(crate) fn not_frozen(message: &str) -> bool {
@@ -128,6 +135,16 @@ mod tests {
         let mut restored = info.clone();
         restored.checkpoint = Some(Checkpoint::default());
         assert_eq!(due(&restored), None);
+    }
+
+    #[test]
+    fn a_disk_on_a_layer_has_its_image() {
+        let mut info = pod(&[IMAGE], true, vec![]);
+        assert!(!on_layer(&info));
+        info.disk = disk("");
+        assert!(!on_layer(&info));
+        info.disk = disk("l");
+        assert!(on_layer(&info));
     }
 
     #[test]

@@ -25,7 +25,7 @@ use feos_proto::{
     task_service::ExecFrame,
 };
 use hyper_util::rt::TokioIo;
-use image_service::IMAGE_SERVICE_SOCKET;
+use image_service::{PullToken, IMAGE_SERVICE_SOCKET};
 use log::{error, info, warn};
 use std::{
     path::{Path, PathBuf},
@@ -62,13 +62,15 @@ async fn get_image_service_client() -> Result<ImageServiceClient<Channel>, Conta
 
 /// Pulls the image, or joins the pull or the image that is there, and waits
 /// until it is ready. Returns its UUID.
-async fn pull_image(image_ref: &str) -> Result<Uuid, ContainerServiceError> {
+/// `token` is the create's pull token (ADR 0025), for a pull it starts.
+async fn pull_image(image_ref: &str, token: &PullToken) -> Result<Uuid, ContainerServiceError> {
     info!("ContainerWorker: Requesting image {image_ref}");
     let mut client = get_image_service_client().await?;
     let image_uuid = client
         .pull_image(PullImageRequest {
             image_ref: image_ref.to_string(),
             exclusive: false,
+            pull_token: token.secret().to_string(),
         })
         .await
         .map_err(|status| {
@@ -139,6 +141,7 @@ async fn blocking<T: Send + 'static>(
 /// Creates or adopts a container and returns when it is created.
 pub async fn create_container(
     req: CreateContainerRequest,
+    token: &PullToken,
     repository: &ContainerRepository,
     adapter: &ContainerAdapter,
 ) -> Result<CreateContainerResponse, ContainerServiceError> {
@@ -156,7 +159,15 @@ pub async fn create_container(
     });
 
     if req.adopt && bundle::adoptable(&container_id) && !live {
-        return adopt_container(container_id, req.config, existing, repository, adapter).await;
+        return adopt_container(
+            container_id,
+            req.config,
+            existing,
+            token,
+            repository,
+            adapter,
+        )
+        .await;
     }
     if existing.is_some() || bundle::container_dir(&container_id).exists() {
         return Err(ContainerServiceError::AlreadyExists(container_id));
@@ -191,7 +202,7 @@ pub async fn create_container(
     repository.save_container(&record).await?;
 
     let result = async {
-        record.image_uuid = pull_image(&config.image_ref).await?;
+        record.image_uuid = pull_image(&config.image_ref, token).await?;
         let image_dir = image_dir(record.image_uuid);
         let id = container_id.clone();
         let (command, env) = (config.command.clone(), config.env.clone());
@@ -227,6 +238,7 @@ async fn adopt_container(
     container_id: String,
     config: Option<ContainerConfig>,
     existing: Option<ContainerRecord>,
+    token: &PullToken,
     repository: &ContainerRepository,
     adapter: &ContainerAdapter,
 ) -> Result<CreateContainerResponse, ContainerServiceError> {
@@ -252,7 +264,7 @@ async fn adopt_container(
         )));
     }
 
-    let image_uuid = pull_image(&merged.image_ref).await?;
+    let image_uuid = pull_image(&merged.image_ref, token).await?;
     let image_dir = image_dir(image_uuid);
     let id = container_id.clone();
     let mounts = merged.volume_mounts.clone();

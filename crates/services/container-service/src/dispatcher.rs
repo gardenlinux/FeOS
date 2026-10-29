@@ -118,8 +118,8 @@ impl Dispatcher {
         adapter: Arc<ContainerAdapter>,
     ) -> Result<(), ContainerServiceError> {
         match cmd {
-            Command::CreateContainer(req, responder) => {
-                let result = worker::create_container(req, &repository, &adapter).await;
+            Command::CreateContainer(req, token, responder) => {
+                let result = worker::create_container(req, &token, &repository, &adapter).await;
                 let _ = responder.send(result);
             }
             Command::StartContainer(req, responder) => {

@@ -28,7 +28,7 @@ func TestEnsureAsksTheRegistryBeforeEveryCreate(t *testing.T) {
 	var mu sync.Mutex
 	var asked []string
 	var answer error
-	e.checkImage = func(_ context.Context, pinned string) error {
+	e.checkImage = func(_ context.Context, pinned string, _ model.RegistryCredentials) error {
 		mu.Lock()
 		defer mu.Unlock()
 		asked = append(asked, pinned)

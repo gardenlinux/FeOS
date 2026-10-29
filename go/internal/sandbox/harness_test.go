@@ -145,7 +145,7 @@ func (h *harness) addInstance(id string, mod ...func(*Config)) *instance {
 	}
 	in.eng.resolveImage = fakeResolve
 	// The images of the tests name no registry that answers (ADR 0025).
-	in.eng.checkImage = func(context.Context, string) error { return nil }
+	in.eng.checkImage = func(context.Context, string, model.RegistryCredentials) error { return nil }
 	in.eng.t.waitPoll = 100 * time.Millisecond
 	in.eng.t.deferredEvery = 500 * time.Millisecond
 	// The tests look for orphaned ops themselves (Engine.orphans).
@@ -336,7 +336,7 @@ func (h *harness) eng() *Engine { return h.ins[0].eng }
 
 // fakeResolve pins an image without a registry: a digest reference as it
 // is, a tag to a digest made from its name.
-func fakeResolve(_ context.Context, image string) (string, error) {
+func fakeResolve(_ context.Context, image string, _ model.RegistryCredentials) (string, error) {
 	ref, err := parseImageRef(image)
 	if err != nil {
 		return "", err

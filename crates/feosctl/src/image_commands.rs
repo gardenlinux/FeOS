@@ -73,6 +73,7 @@ async fn pull_image(client: &mut ImageServiceClient<Conn>, image_ref: String) ->
     let request = PullImageRequest {
         image_ref,
         exclusive: false,
+        pull_token: String::new(),
     };
     let response = client.pull_image(request).await?.into_inner();
     println!("Image pull initiated. UUID: {}", response.image_uuid);

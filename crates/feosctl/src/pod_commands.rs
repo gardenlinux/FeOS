@@ -216,6 +216,7 @@ pub async fn handle_pod_command(args: PodArgs) -> Result<()> {
             client
                 .start_pod(StartPodRequest {
                     pod_id: pod_id.clone(),
+                    pull_token: String::new(),
                 })
                 .await?;
             if wait {
@@ -350,6 +351,7 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             metadata: opts.metadata.into_iter().collect(),
         }),
         image_layers: None,
+        pull_token: String::new(),
     }
 }
 

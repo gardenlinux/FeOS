@@ -151,7 +151,7 @@ func normService(svc Service, p Pins) Service {
 		out.Runtime = RuntimeImage
 	}
 	if out.Runtime == RuntimeAttached {
-		out.Image, out.ImageAsWritten = "", ""
+		out.Image, out.ImageAsWritten, out.ImageCredentials = "", "", nil
 		out.Replicas, out.Resources, out.Idle, out.Rollout = nil, nil, "", nil
 		return out
 	}

@@ -17,10 +17,10 @@
 
 use crate::error::ImageServiceError;
 use crate::unpack::unpack_layer;
+use crate::PullToken;
 use log::{info, warn};
 use oci_client::client::{ClientConfig, ClientProtocol};
 use oci_client::manifest::{self, OciDescriptor};
-use oci_client::secrets::RegistryAuth;
 use oci_client::{Client, Reference};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -121,7 +121,14 @@ pub fn normalize_ref(image_ref: &str) -> Result<String, ImageServiceError> {
 /// Pulls `image_ref` into `dest`, which must exist and be empty: gzip tar
 /// layers end up in `dest/rootfs/`, VM artifacts in `dest/disk.image`,
 /// `dest/initramfs` and `dest/vmlinuz`.
-pub async fn pull_image(image_ref: &str, dest: &Path) -> Result<Pulled, ImageServiceError> {
+/// The pull is anonymous, or with `token`'s Bearer token (ADR 0025), which
+/// the registry client keeps for the layers.
+pub async fn pull_image(
+    image_ref: &str,
+    dest: &Path,
+    token: &PullToken,
+) -> Result<Pulled, ImageServiceError> {
+    let auth = token.auth();
     let reference = Reference::try_from(image_ref)?;
     let client = Arc::new(Client::new(client_config(&reference)));
 
@@ -129,10 +136,11 @@ pub async fn pull_image(image_ref: &str, dest: &Path) -> Result<Pulled, ImageSer
     let (manifest, _digest, config) = retry("manifest", || {
         let client = client.clone();
         let reference = reference.clone();
+        let auth = auth.clone();
         async move {
             tokio::time::timeout(
                 MANIFEST_TIMEOUT,
-                client.pull_manifest_and_config(&reference, &RegistryAuth::Anonymous),
+                client.pull_manifest_and_config(&reference, &auth),
             )
             .await
             .map_err(|_| format!("no manifest within {}s", MANIFEST_TIMEOUT.as_secs()))?
@@ -528,9 +536,13 @@ mod tests {
     #[ignore]
     async fn pulls_and_unpacks_a_real_image() {
         let dest = tempfile::tempdir().unwrap();
-        let pulled = pull_image("docker.io/library/busybox:1.36", dest.path())
-            .await
-            .unwrap();
+        let pulled = pull_image(
+            "docker.io/library/busybox:1.36",
+            dest.path(),
+            &PullToken::default(),
+        )
+        .await
+        .unwrap();
         assert!(pulled.digest.starts_with("sha256:"));
         assert!(pulled.size_bytes > 0);
         assert!(dest.path().join("rootfs/bin/busybox").is_file());

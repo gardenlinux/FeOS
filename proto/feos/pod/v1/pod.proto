@@ -306,6 +306,12 @@ message CreatePodRequest {
   // beside the spec and not compared with it: a create delivered twice
   // with other layers is the same create. Taken by a new pod only.
   ImageLayers image_layers = 3;
+  // A Bearer token of the registry of the pod's one image, for the
+  // guest's pull of it (ADR 0025), beside the spec and not compared with
+  // it: feosd keeps it in memory for the pod's bring-up, never in the
+  // pod's record or on its disk, and hands it to the guest's pull only.
+  // Empty: the guest pulls anonymously.
+  string pull_token = 4;
 }
 
 // The baked layers of a pod's image that its create names (ADR 0025): a
@@ -344,6 +350,9 @@ message CreatePodResponse {
 
 message StartPodRequest {
   string pod_id = 1;
+  // A Bearer token for the guest's pull of the pod's image, as
+  // CreatePodRequest.pull_token: for a start whose disk may not have it.
+  string pull_token = 2;
 }
 
 message StartPodResponse {}

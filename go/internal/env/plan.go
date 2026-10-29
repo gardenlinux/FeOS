@@ -114,29 +114,74 @@ var _ spec.ValidateContext = (*validateCtx)(nil)
 
 // images lists the images of a spec's image services and jobs that are
 // not digest references, by name.
-func imagesOf(s spec.Spec) []string {
-	set := map[string]bool{}
-	for _, svc := range s.Services {
-		if svc.Runtime != spec.RuntimeAttached && svc.Image != "" && !spec.IsDigestRef(svc.Image) {
-			set[svc.Image] = true
+func imagesOf(s spec.Spec) []imageAsk {
+	set := map[string]*spec.ImageCredentials{}
+	add := func(image string, creds *spec.ImageCredentials) {
+		if image == "" || spec.IsDigestRef(image) {
+			return
+		}
+		if prev, ok := set[image]; !ok || prev == nil {
+			set[image] = creds
 		}
 	}
-	for _, j := range s.Jobs {
-		if j.Image != "" && !spec.IsDigestRef(j.Image) {
-			set[j.Image] = true
+	for _, name := range slices.Sorted(maps.Keys(s.Services)) {
+		if svc := s.Services[name]; svc.Runtime != spec.RuntimeAttached {
+			add(svc.Image, svc.ImageCredentials)
 		}
 	}
-	return slices.Sorted(maps.Keys(set))
+	for _, name := range slices.Sorted(maps.Keys(s.Jobs)) {
+		add(s.Jobs[name].Image, s.Jobs[name].ImageCredentials)
+	}
+	out := make([]imageAsk, 0, len(set))
+	for _, image := range slices.Sorted(maps.Keys(set)) {
+		out = append(out, imageAsk{image: image, creds: set[image]})
+	}
+	return out
 }
 
-// resolveImages pins the images through the engine, a few at a time,
-// outside any transaction.
-func (s *Service) resolveImages(ctx context.Context, images []string) map[string]imageAnswer {
-	out := make(map[string]imageAnswer, len(images))
+// imageAsk is an image a spec names, with the login of the first service
+// or job (by name) that names it with one (ADR 0025).
+type imageAsk struct {
+	image string
+	creds *spec.ImageCredentials
+}
+
+// credentialsOf is the login c names, its secrets those of env at their
+// latest versions; without env, a secret does not resolve.
+func (s *Service) credentialsOf(ctx context.Context, env *store.Environment, c *spec.ImageCredentials) (
+	model.RegistryCredentials, error) {
+	if c == nil {
+		return model.RegistryCredentials{}, nil
+	}
+	value := func(v spec.EnvValue) (string, error) {
+		if v.Kind != spec.EnvSecret {
+			return v.Value, nil
+		}
+		if env == nil {
+			return "", fmt.Errorf("secret %s: the environment does not exist yet", v.Secret)
+		}
+		return s.ctl.ResolveSecret(ctx, env.ID, v.Secret, 0)
+	}
+	user, err := value(c.Username)
+	if err != nil {
+		return model.RegistryCredentials{}, err
+	}
+	password, err := value(c.Password)
+	if err != nil {
+		return model.RegistryCredentials{}, err
+	}
+	return model.RegistryCredentials{Username: user, Password: password}, nil
+}
+
+// resolveImages pins the images through the engine, each with its login,
+// a few at a time, outside any transaction.
+func (s *Service) resolveImages(ctx context.Context, env *store.Environment, asks []imageAsk) map[string]imageAnswer {
+	out := make(map[string]imageAnswer, len(asks))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, imageWorkers)
-	for _, img := range images {
+	for _, ask := range asks {
+		img := ask.image
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -148,7 +193,13 @@ func (s *Service) resolveImages(ctx context.Context, images []string) map[string
 				mu.Unlock()
 				return
 			}
-			pinned, err := s.d.Engine.ResolveImage(ctx, img)
+			auth, err := s.credentialsOf(ctx, env, ask.creds)
+			pinned := ""
+			if err == nil {
+				pinned, err = s.d.Engine.ResolveImage(ctx, img, auth)
+			} else {
+				err = fmt.Errorf("its credentials: %w", err)
+			}
 			<-sem
 			mu.Lock()
 			out[img] = imageAnswer{pinned: pinned, err: err}
@@ -179,7 +230,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	}
 	pins := spec.Pins{Images: map[string]string{}, Secrets: map[string]int{}, Plans: map[string]string{}}
 
-	vc.images = s.resolveImages(ctx, imagesOf(sp))
+	vc.images = s.resolveImages(ctx, env, imagesOf(sp))
 	for img, a := range vc.images {
 		if a.err == nil && a.pinned != "" {
 			pins.Images[img] = a.pinned

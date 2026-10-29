@@ -304,6 +304,17 @@ every call with any other ID fails with `INVALID_ARGUMENT`.
   would have been; a volume that stays frozen fails it. The layer goes to
   the object store in the background (`Push`, three tries), and once it
   is there the record names it (`baked`) and the pod's event says so.
+- **Pull tokens** (ADR 0025). A create or a start may bring a Bearer
+  token of the image's registry (`pull_token`), beside the spec and not
+  compared with it: `feosd` keeps it in memory, never in the record, for
+  the pod's next bring-up, which takes it and hands it to the guest's
+  pulls only, the bake point's (`PullImageRequest.pull_token`) and the
+  container's create (`CreateContainerRequest.pull_token`). The guest
+  takes it out of the request at once (`image_service::PullToken`, whose
+  `Debug` is redacted) and pulls with it as its registry client's Bearer
+  token; a pull that joins one in flight takes none. A pod whose disk was
+  made on a baked layer hands it to no guest: its image is there. A
+  restart of `feosd` loses it: the next start brings another.
 - **Stop** ends a bring-up, shuts the microVM down, or removes it if it
   does not go or is not running, and stops the disk; a microVM that is
   busy (its late snapshot) is left alone, and the stop answers

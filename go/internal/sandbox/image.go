@@ -5,7 +5,10 @@ package sandbox
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,14 +26,15 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/gardenlinux/feos/go/internal/bindings"
+	"github.com/gardenlinux/feos/go/internal/model"
 )
 
 // The image resolver pins an image to the digest of its linux/amd64
 // manifest, so that a sandbox never silently changes image and a tag that
 // moves never breaks CreatePod's idempotency (§9 "Image resolution"), and
 // asks an image's registry before every create whether the image may be
-// pulled (access, ADR 0025). It speaks the anonymous registry protocol
-// only, over https: private registries are not supported yet.
+// pulled (access, ADR 0025), over https, anonymously or with the
+// credentials a create brings.
 const (
 	resolveTTL          = 60 * time.Second
 	resolveTimeout      = 30 * time.Second
@@ -51,14 +55,20 @@ const (
 	tokenTTL   = 60 * time.Second
 	tokenSlack = 10 * time.Second
 	// anonymous is the asker without credentials, in the keys of the
-	// caches and of the shared questions: a create's credentials will key
-	// them by an HMAC of their own (ADR 0025).
+	// caches and of the shared questions; an asker with credentials is an
+	// HMAC of them (who).
 	anonymous = ""
 )
 
 // errImageNotFound is the answer of a registry that does not serve the
-// image anonymously: it does not exist, or is private.
-var errImageNotFound = errors.New("not found (private registries are not supported and look like this)")
+// image to the asker: it does not exist, or is private.
+var errImageNotFound = errors.New("not found, or not for these credentials (a private image without them looks like this)")
+
+// errBasicOnly is a registry that asks a create with credentials for Basic
+// authentication: it gives no token, and its password would enter the pod
+// that pulls (ADR 0025).
+var errBasicOnly = errors.New("the registry takes only Basic authentication, and a create's password does not enter its pod: " +
+	"such a registry waits for the node's own pull")
 
 // The registry's no to the question before a create (access): it refused
 // the asker, or does not have the image for it (a private repository
@@ -159,6 +169,9 @@ type resolver struct {
 	tokens map[tokenKey]heldToken
 	// asks shares questions of the same asker and image at once.
 	asks singleflight.Group
+	// key is the HMAC key that names askers with credentials (who): random,
+	// and the process's only.
+	key []byte
 }
 
 type resolved struct {
@@ -204,8 +217,10 @@ func newResolver(deny []netip.Prefix) *resolver {
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key) // crypto/rand.Read never fails
 	return &resolver{client: &http.Client{Transport: t, CheckRedirect: httpsRedirect}, transport: t, now: time.Now,
-		cache: map[string]resolved{}, tokens: map[tokenKey]heldToken{}}
+		cache: map[string]resolved{}, tokens: map[tokenKey]heldToken{}, key: key}
 }
 
 // deniedError is a dial the destination rule refused.
@@ -249,11 +264,30 @@ func unreachable(ctx context.Context, what string, err error) error {
 	return fmt.Errorf("%s unreachable", what)
 }
 
-// resolve returns "<registry>/<repository>@sha256:<manifest digest>" for
-// image: for an index, the digest of its linux/amd64 manifest. A digest
-// reference is passed through without asking the registry; a tag is
-// cached for 60 s.
+// who names an asker in the caches' keys and the shared questions: ""
+// without credentials, else an HMAC of them under the resolver's key.
+func (r *resolver) who(auth model.RegistryCredentials) string {
+	if auth.Anonymous() {
+		return anonymous
+	}
+	m := hmac.New(sha256.New, r.key)
+	m.Write([]byte(auth.Username))
+	m.Write([]byte{0})
+	m.Write([]byte(auth.Password))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// resolve is resolveAs anonymously.
 func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
+	return r.resolveAs(ctx, image, model.RegistryCredentials{})
+}
+
+// resolveAs returns "<registry>/<repository>@sha256:<manifest digest>" for
+// image, asked with auth: for an index, the digest of its linux/amd64
+// manifest. A digest reference is passed through without asking the
+// registry (the question before a create asks for it); a tag is cached
+// for 60 s, per asker.
+func (r *resolver) resolveAs(ctx context.Context, image string, auth model.RegistryCredentials) (string, error) {
 	ref, err := parseImageRef(image)
 	if err != nil {
 		return "", err
@@ -263,7 +297,7 @@ func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
 	}
 	// The tag cache is the asker's: what one asker resolved says nothing
 	// about another's access.
-	key := anonymous + "\x00" + image
+	key := r.who(auth) + "\x00" + image
 	now := r.now()
 	r.mu.Lock()
 	if c, ok := r.cache[key]; ok && now.Before(c.expires) {
@@ -273,7 +307,7 @@ func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
 	r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
-	body, digest, err := r.manifest(ctx, ref, ref.ref)
+	body, digest, err := r.manifest(ctx, ref, ref.ref, auth)
 	if err != nil {
 		return "", err
 	}
@@ -330,7 +364,7 @@ func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
 // registry's token is kept, and questions of the same asker and image at
 // once share one request, which runs on a context of its own, bounded by
 // resolveTimeout, so that a caller who goes away does not end the others'.
-func (r *resolver) access(ctx context.Context, pinned string) error {
+func (r *resolver) access(ctx context.Context, pinned string, auth model.RegistryCredentials) error {
 	ref, err := parseImageRef(pinned)
 	if err != nil {
 		return err
@@ -338,11 +372,11 @@ func (r *resolver) access(ctx context.Context, pinned string) error {
 	if !ref.digest() {
 		return fmt.Errorf("image %s is not pinned to a digest", pinned)
 	}
-	key := anonymous + "\x00" + ref.pinned(ref.ref)
+	key := r.who(auth) + "\x00" + ref.pinned(ref.ref)
 	ch := r.asks.DoChan(key, func() (any, error) {
 		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolveTimeout)
 		defer cancel()
-		return nil, r.ask(actx, ref)
+		return nil, r.ask(actx, ref, auth)
 	})
 	select {
 	case res := <-ch:
@@ -354,9 +388,9 @@ func (r *resolver) access(ctx context.Context, pinned string) error {
 
 // ask is access's request: with the token kept, or none; a 401 drops it
 // and answers the challenge once; a 405 to HEAD asks with GET.
-func (r *resolver) ask(ctx context.Context, ref imageRef) error {
+func (r *resolver) ask(ctx context.Context, ref imageRef, auth model.RegistryCredentials) error {
 	u := fmt.Sprintf("https://%s/v2/%s/manifests/%s", ref.host, ref.repo, ref.ref)
-	tk := tokenKey{who: anonymous, host: ref.host, scope: "repository:" + ref.repo + ":pull"}
+	tk := tokenKey{who: r.who(auth), host: ref.host, scope: "repository:" + ref.repo + ":pull"}
 	method := http.MethodHead
 	token := r.heldToken(tk)
 	challenged := false
@@ -379,10 +413,12 @@ func (r *resolver) ask(ctx context.Context, ref imageRef) error {
 			discard(resp)
 			r.dropToken(tk, token)
 			challenged = true
-			token, err = r.bearer(ctx, tk, challenge)
+			token, err = r.bearer(ctx, tk, challenge, auth)
 			switch {
 			case errors.Is(err, errRealmRefused):
 				return errImageRefused
+			case errors.Is(err, errBasicOnly):
+				return err
 			case err != nil && strings.HasPrefix(err.Error(), "unsupported auth challenge"):
 				// A login this asker does not have, as Basic
 				// authentication asks for.
@@ -398,6 +434,52 @@ func (r *resolver) ask(ctx context.Context, ref imageRef) error {
 		}
 		return answer(resp, method, ref)
 	}
+}
+
+// pullToken is a token of pinned's registry for its repository's pull,
+// for the guest's pull in a create with credentials (ADR 0025): asked for
+// anew, so that it lives as long as the registry gives one, and kept for
+// the questions too. "" for an asker without credentials, who pulls
+// anonymously, and for a registry that asks for no token.
+func (r *resolver) pullToken(ctx context.Context, pinned string, auth model.RegistryCredentials) (string, error) {
+	if auth.Anonymous() {
+		return "", nil
+	}
+	ref, err := parseImageRef(pinned)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+	defer cancel()
+	u := fmt.Sprintf("https://%s/v2/%s/manifests/%s", ref.host, ref.repo, ref.ref)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", resolveManifestType)
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return "", &noAnswerError{unreachable(ctx, "registry "+ref.host, err)}
+	}
+	discard(resp)
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+	case http.StatusOK:
+		return "", nil
+	default:
+		return "", noAnswer("registry %s answered HTTP %d before its challenge", ref.host, resp.StatusCode)
+	}
+	tk := tokenKey{who: r.who(auth), host: ref.host, scope: "repository:" + ref.repo + ":pull"}
+	token, err := r.bearer(ctx, tk, resp.Header.Get("WWW-Authenticate"), auth)
+	switch {
+	case errors.Is(err, errRealmRefused):
+		return "", errImageRefused
+	case errors.Is(err, errBasicOnly):
+		return "", err
+	case err != nil:
+		return "", &noAnswerError{err}
+	}
+	return token, nil
 }
 
 // answer reads the registry's answer to access's request.
@@ -432,7 +514,8 @@ func answer(resp *http.Response, method string, ref imageRef) error {
 // manifest fetches a manifest anonymously, answering a Bearer challenge
 // with an anonymous token; it returns the body and the digest the
 // registry names (Docker-Content-Digest), if any.
-func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest string) ([]byte, string, error) {
+func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest string,
+	auth model.RegistryCredentials) ([]byte, string, error) {
 	u := fmt.Sprintf("https://%s/v2/%s/manifests/%s", ref.host, ref.repo, tagOrDigest)
 	get := func(token string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -445,7 +528,7 @@ func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest strin
 		}
 		return r.client.Do(req)
 	}
-	tk := tokenKey{who: anonymous, host: ref.host, scope: "repository:" + ref.repo + ":pull"}
+	tk := tokenKey{who: r.who(auth), host: ref.host, scope: "repository:" + ref.repo + ":pull"}
 	held := r.heldToken(tk)
 	resp, err := get(held)
 	if err != nil {
@@ -455,7 +538,7 @@ func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest strin
 		challenge := resp.Header.Get("WWW-Authenticate")
 		discard(resp)
 		r.dropToken(tk, held)
-		token, err := r.bearer(ctx, tk, challenge)
+		token, err := r.bearer(ctx, tk, challenge, auth)
 		if errors.Is(err, errRealmRefused) {
 			return nil, "", errImageNotFound
 		}
@@ -485,8 +568,8 @@ func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest strin
 
 // bearer answers a WWW-Authenticate Bearer challenge for the token tk
 // names, and keeps the token until shortly before its end.
-func (r *resolver) bearer(ctx context.Context, tk tokenKey, challenge string) (string, error) {
-	token, ttl, err := r.token(ctx, challenge)
+func (r *resolver) bearer(ctx context.Context, tk tokenKey, challenge string, auth model.RegistryCredentials) (string, error) {
+	token, ttl, err := r.token(ctx, challenge, auth)
 	if err != nil {
 		return "", err
 	}
@@ -534,11 +617,17 @@ func discard(resp *http.Response) {
 	resp.Body.Close()
 }
 
-// token answers a WWW-Authenticate Bearer challenge anonymously, and
-// returns the token's life (expires_in, 60 s when the realm names none).
-// A realm that refuses is errRealmRefused.
-func (r *resolver) token(ctx context.Context, challenge string) (string, time.Duration, error) {
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(challenge)), "bearer") {
+// token answers a WWW-Authenticate Bearer challenge, with auth as Basic
+// authentication at the realm or anonymously, and returns the token's
+// life (expires_in, 60 s when the realm names none). A realm that refuses
+// is errRealmRefused; a Basic challenge to an asker with credentials is
+// errBasicOnly.
+func (r *resolver) token(ctx context.Context, challenge string, auth model.RegistryCredentials) (string, time.Duration, error) {
+	scheme := strings.ToLower(strings.TrimSpace(challenge))
+	if !strings.HasPrefix(scheme, "bearer") {
+		if strings.HasPrefix(scheme, "basic") && !auth.Anonymous() {
+			return "", 0, errBasicOnly
+		}
 		return "", 0, errors.New("unsupported auth challenge (anonymous pulls only)")
 	}
 	params := map[string]string{}
@@ -566,6 +655,11 @@ func (r *resolver) token(ctx context.Context, challenge string) (string, time.Du
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return "", 0, err
+	}
+	if !auth.Anonymous() {
+		// Only to the realm the registry names, over https; a redirect to
+		// another host drops it (net/http).
+		req.SetBasicAuth(auth.Username, auth.Password)
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {

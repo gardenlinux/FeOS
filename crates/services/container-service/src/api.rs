@@ -12,6 +12,7 @@ use feos_proto::container_service::{
 };
 use feos_proto::task_service::exec_frame;
 use feos_utils::dispatch::dispatch_and_wait;
+use image_service::PullToken;
 use log::info;
 use std::pin::Pin;
 use tokio::sync::mpsc;
@@ -40,8 +41,10 @@ impl ContainerService for ContainerApiHandler {
         request: Request<CreateContainerRequest>,
     ) -> Result<Response<CreateContainerResponse>, Status> {
         info!("ContainerApi: Received CreateContainer request.");
+        let mut request = request.into_inner();
+        let token = PullToken::new(std::mem::take(&mut request.pull_token));
         dispatch_and_wait(&self.dispatcher_tx, |resp_tx| {
-            Command::CreateContainer(request.into_inner(), resp_tx)
+            Command::CreateContainer(request, token, resp_tx)
         })
         .await
     }

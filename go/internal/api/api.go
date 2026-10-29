@@ -215,6 +215,14 @@ type Deps struct {
 	// and the nodes the instance should be connected to (nodes,
 	// node_telemetry, Conns, start time). nil: always ready.
 	Ready func(ctx context.Context) error
+	// Sealer seals a sandbox's image credentials (ADR 0025); nil: a
+	// create or a PUT with credentials answers 503.
+	Sealer Sealer
+}
+
+// Sealer seals what the engine opens (internal/seal).
+type Sealer interface {
+	Seal(plaintext, aad []byte) ([]byte, error)
 }
 
 // The fixed limits of the API.
@@ -381,6 +389,8 @@ func (s *server) routes() []route {
 	tenant("DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
 	tenant("POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
 	tenant("POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
+	tenant("PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
+	tenant("DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
 	tenant("GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
 	tenant("POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
 	tenant("DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)

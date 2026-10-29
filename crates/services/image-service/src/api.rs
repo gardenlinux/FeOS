@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::Command;
+use crate::{Command, PullToken};
 use feos_proto::image_service::{
     image_service_server::ImageService, DeleteImageRequest, DeleteImageResponse,
     ImageStatusResponse, ListImagesRequest, ListImagesResponse, PullImageRequest,
@@ -34,8 +34,10 @@ impl ImageService for ImageApiHandler {
         request: Request<PullImageRequest>,
     ) -> Result<Response<PullImageResponse>, Status> {
         info!("ImageApi: Received PullImage request.");
+        let mut request = request.into_inner();
+        let token = PullToken::new(std::mem::take(&mut request.pull_token));
         dispatch_and_wait(&self.dispatcher_tx, |resp_tx| {
-            Command::PullImage(request.into_inner(), resp_tx)
+            Command::PullImage(request, token, resp_tx)
         })
         .await
     }

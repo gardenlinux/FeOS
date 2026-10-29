@@ -224,7 +224,7 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 // group ing-<sandbox id> (IngressGroup; the insert appends the group), so
 // that the first publish rolls the service once and later ones never.
 func (c *Controller) planImage(v *view, kind, name, image string, command []string, env map[string]spec.EnvValue,
-	res *spec.Resources) *podPlan {
+	res *spec.Resources, creds *spec.ImageCredentials) *podPlan {
 	p := &podPlan{kind: kind, name: name, image: image}
 	p.vcpus, p.memoryMB = resourcesOf(res)
 	vals, wait, err := c.renderEnv(v, env)
@@ -239,13 +239,30 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 		NameTables:     []string{model.EnvTableID(v.env.ID)},
 		IngressGroup:   kind == spec.KindService && v.env.IngressGroup,
 	}
+	p.template.ImageCredentials = templateCredentials(creds)
 	p.finish(v.env.ID)
 	return p
 }
 
+// templateCredentials is a login for an image's registry as a pod's
+// template keeps it (ADR 0025): a string as it is, a secret by its name
+// at version 0, its latest when a pod is created.
+func templateCredentials(c *spec.ImageCredentials) *model.TemplateCredentials {
+	if c == nil {
+		return nil
+	}
+	val := func(e spec.EnvValue) model.TemplateValue {
+		if e.Kind == spec.EnvSecret {
+			return model.TemplateValue{Secret: e.Secret}
+		}
+		return model.TemplateValue{Value: e.Value}
+	}
+	return &model.TemplateCredentials{Username: val(c.Username), Password: val(c.Password)}
+}
+
 // planService renders an image service of the target.
 func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan {
-	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources)
+	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources, s.ImageCredentials)
 	p.idle = idleOf(s)
 	p.check = checkOf(s)
 	return p
@@ -253,7 +270,7 @@ func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan 
 
 // planJob renders a job of the target.
 func (c *Controller) planJob(v *view, name string, j spec.Job) *podPlan {
-	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources)
+	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources, j.ImageCredentials)
 }
 
 // planAttached renders an attached service of the target: its process.

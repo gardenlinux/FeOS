@@ -56,7 +56,7 @@ type engineHooks struct {
 	mu      sync.Mutex
 	secrets SecretResolver
 	prepare PrepareHook
-	access  func(ctx context.Context, pinned string) error
+	access  func(ctx context.Context, pinned string, auth model.RegistryCredentials) error
 }
 
 // SetSecretResolver sets what a pod template's secrets are unsealed with;
@@ -67,11 +67,11 @@ func (e *Engine) SetSecretResolver(r SecretResolver) {
 	e.hooks.secrets = r
 }
 
-// SetImageAccess replaces the question an image's registry is asked
-// before every create (ADR 0025) with access: nil is a yes. For tests and
-// test clusters whose images name no registry that answers; nil keeps
-// the question as it is.
-func (e *Engine) SetImageAccess(access func(ctx context.Context, pinned string) error) {
+// SetImageAccess replaces the registries (ADR 0025): the question before
+// every create is access's, nil a yes, and no pull token is asked for, so
+// the guest pulls anonymously. For tests and test clusters whose images
+// name no registry that answers; nil keeps the registries as they are.
+func (e *Engine) SetImageAccess(access func(ctx context.Context, pinned string, auth model.RegistryCredentials) error) {
 	if access == nil {
 		return
 	}
@@ -80,9 +80,20 @@ func (e *Engine) SetImageAccess(access func(ctx context.Context, pinned string) 
 	e.hooks.access = access
 }
 
+// imagePullToken gets the guest's pull token: none when SetImageAccess
+// replaced the registries, else the registry's.
+func (e *Engine) imagePullToken() func(ctx context.Context, pinned string, auth model.RegistryCredentials) (string, error) {
+	e.hooks.mu.Lock()
+	defer e.hooks.mu.Unlock()
+	if e.hooks.access != nil {
+		return func(context.Context, string, model.RegistryCredentials) (string, error) { return "", nil }
+	}
+	return e.pullToken
+}
+
 // imageAccess is the question before a create: SetImageAccess's, or the
 // registry's.
-func (e *Engine) imageAccess() func(ctx context.Context, pinned string) error {
+func (e *Engine) imageAccess() func(ctx context.Context, pinned string, auth model.RegistryCredentials) error {
 	e.hooks.mu.Lock()
 	defer e.hooks.mu.Unlock()
 	if e.hooks.access != nil {
@@ -191,6 +202,15 @@ func (e *Engine) prepareSpec(ctx context.Context, h *OpHandle) error {
 	}
 	h.spec = spec
 	h.layers = e.imageLayers(ctx, h.row.ImageRef)
+	// The guest's pull token, for a sandbox with image credentials: asked
+	// for now, so that it lives the registry's whole life for the pull.
+	auth, err := e.registryAuth(ctx, h.row)
+	if err != nil {
+		return &prepareError{node: h.target, kind: h.kind, err: err}
+	}
+	if h.pullToken, err = e.imagePullToken()(ctx, h.row.ImageRef, auth); err != nil {
+		return &prepareError{node: h.target, kind: h.kind, err: fmt.Errorf("the image's pull token: %w", err)}
+	}
 	return nil
 }
 
@@ -255,9 +275,10 @@ func (e *Engine) noteAddress(h *OpHandle, info *podv1.PodInfo) {
 }
 
 // ResolveImage pins an image to its digest as a sandbox's create does:
-// "<registry>/<repo>@sha256:<linux/amd64 manifest digest>", over the
-// anonymous registry protocol, honouring --deny-prefix, a tag cached for
-// 60 s. A digest reference is pinned without asking the registry.
-func (e *Engine) ResolveImage(ctx context.Context, image string) (string, error) {
-	return e.resolveImage(ctx, image)
+// "<registry>/<repo>@sha256:<linux/amd64 manifest digest>", asked with
+// auth (anonymous when empty), honouring --deny-prefix, a tag cached for
+// 60 s per asker. A digest reference is pinned without asking the
+// registry.
+func (e *Engine) ResolveImage(ctx context.Context, image string, auth model.RegistryCredentials) (string, error) {
+	return e.resolveImage(ctx, image, auth)
 }

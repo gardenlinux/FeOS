@@ -22,9 +22,12 @@ use feos_proto::container_service::{
 use feos_proto::image_service::{image_service_client::ImageServiceClient, ListImagesRequest};
 use feos_proto::pod_service::{
     pod_service_client::PodServiceClient, BakedLayer, ContainerSpec, CreatePodRequest,
-    DeletePodRequest, ImageLayers, PodInfo, PodSpec, Resources,
+    DeletePodRequest, ImageLayers, PodInfo, PodSpec, PodState, Resources,
 };
 use log::info;
+use oci_client::client::ClientConfig;
+use oci_client::secrets::RegistryAuth;
+use oci_client::{Client, Reference, RegistryOperation};
 use std::time::Duration;
 use tokio::time::{sleep, Instant};
 use tonic::transport::Channel;
@@ -63,6 +66,7 @@ async fn create(
             layers,
             bake: true,
         }),
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -226,6 +230,80 @@ async fn test_a_pod_bakes_its_image_and_the_next_starts_on_it() -> Result<()> {
         (&second, &mut second_guard),
         (&third, &mut third_guard),
     ] {
+        delete(&mut pods, pod_id).await?;
+        guard.disable_cleanup();
+    }
+    Ok(())
+}
+
+/// Creates a pod of the test image whose create brings `pull_token` and no
+/// layers, and returns its record once it runs or fails.
+async fn create_with_token(
+    pods: &mut PodServiceClient<Channel>,
+    pull_token: &str,
+) -> Result<(String, PodGuard, PodInfo)> {
+    let pod_id = new_pod_id();
+    pods.create_pod(CreatePodRequest {
+        pod_id: pod_id.clone(),
+        spec: Some(spec()),
+        image_layers: None,
+        pull_token: pull_token.to_string(),
+    })
+    .await?;
+    let guard = PodGuard::new(pod_id.clone());
+    let deadline = Instant::now() + BAKED_TIMEOUT;
+    loop {
+        let pod = get_pod(pods, &pod_id).await?;
+        if matches!(pod.state(), PodState::Running | PodState::Failed) {
+            return Ok((pod_id, guard, pod));
+        }
+        if Instant::now() > deadline {
+            bail!("pod {pod_id} neither ran nor failed: {pod:?}");
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+}
+
+// A create's pull token (ADR 0025) is what the guest pulls with: a token
+// the registry gave pulls the image, one it does not take fails the pull,
+// and the token is in no record of the pod's.
+#[tokio::test]
+async fn test_a_pod_pulls_with_its_token() -> Result<()> {
+    if installed_guest()?.is_none() {
+        return Ok(());
+    }
+    ensure_server().await;
+    let (mut pods, _, _) = get_public_clients().await?;
+    let reference: Reference = TEST_CONTAINER_IMAGE_REF.parse()?;
+    let token = Client::new(ClientConfig::default())
+        .auth(
+            &reference,
+            &RegistryAuth::Anonymous,
+            RegistryOperation::Pull,
+        )
+        .await?
+        .context("the registry gave no token")?;
+
+    let (good, mut good_guard, pod) = create_with_token(&mut pods, &token).await?;
+    if pod.state() != PodState::Running {
+        bail!("the pod with the registry's token failed: {}", pod.reason);
+    }
+    good_guard.set_pid(pid(&pod)?);
+    let (code, output) = sh(&good, "echo pulled").await?;
+    assert_eq!((code, output.as_str()), (0, "pulled\n"));
+    assert!(
+        !format!("{pod:?}").contains(&token),
+        "the pod's record shows its token"
+    );
+
+    let (bad, mut bad_guard, pod) = create_with_token(&mut pods, "not-a-token").await?;
+    assert_eq!(pod.state(), PodState::Failed, "{pod:?}");
+    info!(
+        "A pull with a token the registry does not take: {}",
+        pod.reason
+    );
+
+    for (pod_id, guard) in [(&good, &mut good_guard), (&bad, &mut bad_guard)] {
         delete(&mut pods, pod_id).await?;
         guard.disable_cleanup();
     }

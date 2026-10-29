@@ -179,14 +179,18 @@ func (en *ensurer) step(ctx context.Context, row store.Sandbox) (model.Lease, er
 	case model.StateStopped, model.StateFailed:
 		return model.Lease{}, en.stopped(ctx, row)
 	case model.StatePending:
+		auth, err := e.registryAuth(ctx, row)
+		if err != nil {
+			return model.Lease{}, err
+		}
 		if row.ImageRef == "" {
-			ref, err := e.resolveImage(ctx, row.Image)
+			ref, err := e.resolveImage(ctx, row.Image, auth)
 			if err != nil {
 				return model.Lease{}, fmt.Errorf("resolve image %s: %w", row.Image, err)
 			}
 			row.ImageRef = ref
 		}
-		if err := en.askRegistry(ctx, row); err != nil {
+		if err := en.askRegistry(ctx, row, auth); err != nil {
 			return model.Lease{}, err
 		}
 		return model.Lease{}, en.place(ctx, row, OpCreate)
@@ -471,13 +475,14 @@ func (en *ensurer) refusedOnNode(ctx context.Context, row store.Sandbox, err err
 const registryRetry = 15 * time.Second
 
 // askRegistry asks the registry of the row's pinned image whether the
-// create may pull it, before the create claims a node (ADR 0025): every
-// create of a new pod asks, cached image or not. A refusal, or an image
-// the registry does not have, fails the create with the answer; no answer
-// is no as well, retryable. Either says why in the row's status.
-func (en *ensurer) askRegistry(ctx context.Context, row store.Sandbox) error {
+// create may pull it with auth, the row's credentials, before the create
+// claims a node (ADR 0025): every create of a new pod asks, cached image
+// or not. A refusal, or an image the registry does not have, fails the
+// create with the answer; no answer is no as well, retryable. Either says
+// why in the row's status.
+func (en *ensurer) askRegistry(ctx context.Context, row store.Sandbox, auth model.RegistryCredentials) error {
 	e := en.e
-	err := e.imageAccess()(ctx, row.ImageRef)
+	err := e.imageAccess()(ctx, row.ImageRef, auth)
 	if err == nil {
 		return nil
 	}

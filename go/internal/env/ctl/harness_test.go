@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 // testEngine is the engine with an image resolver that asks no registry.
 type testEngine struct{ *sandbox.Engine }
 
-func (testEngine) ResolveImage(_ context.Context, image string) (string, error) {
+func (testEngine) ResolveImage(_ context.Context, image string, _ model.RegistryCredentials) (string, error) {
 	return fakeResolve(image), nil
 }
 
@@ -174,7 +174,7 @@ func newHarness(t *testing.T, o options) *harness {
 		t.Fatal(err)
 	}
 	// The test image names no registry that answers (ADR 0025).
-	h.eng.SetImageAccess(func(context.Context, string) error { return nil })
+	h.eng.SetImageAccess(func(context.Context, string, model.RegistryCredentials) error { return nil })
 	h.fl = fleet.New(fleet.Config{InstanceID: id, TrustDomain: testTD, RolloutGrace: 30 * time.Second, NodeTTL: time.Hour,
 		ConnDrainTimeout: time.Minute, Log: log}, fleet.Deps{DB: d, Issuer: iss, Links: h.srv, Hooks: h.eng, Elector: h.el})
 	fleetv1.RegisterFleetServiceServer(h.srv.Uplink(), h.fl.UplinkServer())

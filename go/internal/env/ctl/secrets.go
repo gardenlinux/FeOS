@@ -29,12 +29,25 @@ import (
 // realised. Without a Sealer it is an error naming --secret-key-file. It
 // is the engine's secret resolver (through the environment service's) and
 // the controller's own, for the env of attached services and of
-// provisioning steps.
+// provisioning steps. Version 0 is the latest version, which must not be
+// deleted: what a pod's image credentials name (ADR 0025).
 func (c *Controller) ResolveSecret(ctx context.Context, envID uuid.UUID, name string, version int) (string, error) {
 	if c.d.Sealer == nil {
 		return "", errNoSealer
 	}
-	sec, err := c.st.GetSecret(ctx, envID, name, version)
+	var sec store.EnvSecret
+	var err error
+	if version == 0 {
+		// Its latest version, which is not deleted: a pod's image
+		// credentials (ADR 0025).
+		sec, err = c.st.LatestSecret(ctx, envID, name)
+		if err == nil && !sec.DeletedAt.IsZero() {
+			return "", fmt.Errorf("secret %s of environment %s was deleted", name, envID)
+		}
+		version = sec.Version
+	} else {
+		sec, err = c.st.GetSecret(ctx, envID, name, version)
+	}
 	if errors.Is(err, store.ErrNoRow) {
 		return "", fmt.Errorf("no secret %s version %d in environment %s", name, version, envID)
 	}

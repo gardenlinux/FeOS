@@ -40,8 +40,8 @@ type Engine interface {
 	// exited; reason becomes the op's description.
 	Restart(ctx context.Context, id podid.ID, reason string) error
 	// ResolveImage pins an image to its digest
-	// ("<registry>/<repo>@sha256:…").
-	ResolveImage(ctx context.Context, image string) (string, error)
+	// ("<registry>/<repo>@sha256:…"), asked with auth (ADR 0025).
+	ResolveImage(ctx context.Context, image string, auth model.RegistryCredentials) (string, error)
 	// Acquire ensures the row runs and holds it awake with a hold of kind
 	// until release is called (it wakes a paused or hibernated row).
 	Acquire(ctx context.Context, id podid.ID, kind model.HoldKind) (lease model.Lease, release func(), err error)

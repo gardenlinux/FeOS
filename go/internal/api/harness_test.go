@@ -57,6 +57,8 @@ type envOptions struct {
 	}
 	ingress Ingress
 	ready   func(context.Context) error
+	// sealer seals the sandboxes' image credentials; nil: none.
+	sealer Sealer
 	// db shares another env's database (a second instance).
 	db *db.DB
 	// environments builds the environments service on the test's
@@ -100,7 +102,7 @@ func newEnv(t *testing.T, o envOptions) *env {
 			t.Fatal(err)
 		}
 		// The test images name no registry that answers (ADR 0025).
-		real.SetImageAccess(func(context.Context, string) error { return nil })
+		real.SetImageAccess(func(context.Context, string, model.RegistryCredentials) error { return nil })
 		eng = real
 	} else {
 		e.fake = &fakeEngine{st: st}
@@ -123,7 +125,7 @@ func newEnv(t *testing.T, o envOptions) *env {
 	deps := Deps{
 		DB: d, Store: st, Engine: eng, Conns: e.conns, Fleet: o.fleet, Tools: tools.NewREST(runner),
 		Specs: tools.Specs, MCP: o.mcp, Ports: o.ports, Watches: o.watches, Bindings: o.bindings, Ready: o.ready,
-		Ingress: o.ingress,
+		Ingress: o.ingress, Sealer: o.sealer,
 	}
 	if o.environments != nil {
 		deps.Environments = o.environments(d, st)

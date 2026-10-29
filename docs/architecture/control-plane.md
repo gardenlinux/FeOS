@@ -248,7 +248,8 @@ certificate issued), `host_labels` (every default host label ever given,
 and its tenant); `sandboxes`, `sandbox_tokens`, `sandbox_holds`,
 `pod_tombstones`, `bookings`; `tool_calls` (the keyed tool calls, [Calls
 that outlive their caller](#calls-that-outlive-their-caller));
-`image_bakes` (the baked layers of images, [Images](#images));
+`image_bakes` (the baked layers of images, [Images](#images)),
+`sandbox_image_credentials` (a sandbox's sealed image credentials);
 `activity` and `traffic_records`, partitioned by day; `issued_certs`
 (pods' certificates); `watches`;
 `kube_bindings`, `ssh_bindings`; `auth_logins`, `ui_sessions`;
@@ -1044,10 +1045,10 @@ are per node, set with `PATCH /api/v1/admin/nodes/{node}`.
 
 A sandbox's image is resolved once, before its first create, to
 `<registry>/<repository>@sha256:<digest>` (Docker Hub names normalised,
-`linux/amd64` from an index, anonymous registry tokens, a tag cache of
-60 s), and pinned in the row: every retry and every later create sends the
-same digest, so a moved tag never changes a sandbox. Private registries
-are not supported yet. The tenant names the image, and the image names the
+`linux/amd64` from an index, the registry's tokens for the create's
+credentials or anonymous ones, a tag cache of 60 s per asker), and pinned
+in the row: every retry and every later create sends the same digest, so
+a moved tag never changes a sandbox. The tenant names the image, and the image names the
 registry, so the resolver reaches registries as bindings reach servers:
 over https only, without a proxy, and at IPv4 addresses outside the deny
 set (`--deny-prefix`, by default the private, shared, link-local,
@@ -1075,7 +1076,31 @@ was created. The registry's token is kept per asker, registry and scope
 until 10 s before its `expires_in` (60 s when it names none), and
 nothing else is: questions of the same asker and image at once share
 one request, on a context of their own. Tests and test clusters replace
-the question (`Engine.SetImageAccess`).
+the registries (`Engine.SetImageAccess`): their question is answered by
+the replacement, and no pull token is asked for.
+
+**Credentials** (ADR 0025). A sandbox's create may bring
+`imageCredentials: {username, password}`, kept sealed under
+`--secret-key-file`'s key in `sandbox_image_credentials` (AAD
+`sandbox_image_credentials|<id>`), never in the sandbox's row and never
+returned; `PUT …/image-credentials` replaces them and `DELETE` removes
+them (204). Without the key, a create or `PUT` with credentials is 503;
+half given, 400. An environment's image service or job names them in its
+spec (`imageCredentials`, each field a string or `{secret}`); its
+template keeps a secret by its name at version 0, which
+`ResolveSecret` reads at its latest version that is not deleted when a
+pod is created, so a rotated token reaches the next replica of an old
+release; the template's hash takes them, so a change of which secret or
+username replaces the pods. The engine resolves a tag, asks the
+question and gets the guest's pull token with them: the realm gets them
+as Basic authentication, and its token, asked for anew for every create
+so that it lives the registry's whole life for the pull, goes beside the
+pod's spec in `CreatePodRequest.pull_token` (and in a start's or
+repair's `StartPodRequest`, asked for best-effort, since the disk has the
+image unless its first pull did not end). A registry that asks a create
+with credentials for Basic authentication is refused: its password would
+enter the pod. The tag and token caches and shared questions know an
+asker by an HMAC of its credentials under a key of the process.
 
 **Baked images** (ADR 0025, `--image-bakes`). A create names, beside its
 pod spec, the baked layers of its image that `image_bakes` holds, the
@@ -1205,7 +1230,8 @@ answer of an absent thing, 404. Every unknown route under `/api/` is 404
 path is a short ID or a UUID, either case ([Sandbox IDs](#sandbox-ids));
 anything else is 400 "sandboxId must be a sandbox ID: 11 characters of
 lowercase Crockford base32, the first a letter, or a UUID". `POST
-/api/v1/sandboxes` takes `image`, `vcpus`, `memoryMib` and `attachable`
+/api/v1/sandboxes` takes `image`, `vcpus`, `memoryMib`, `attachable` and
+`imageCredentials` ([Images](#images))
 and no `sandboxId`: one that is neither absent, null nor `""` is 400
 "sandboxId is not accepted: ferund mints a sandbox's ID; leave it out
 and keep status.sandboxId of the answer". Every create makes a new
@@ -1787,6 +1813,12 @@ shapes:
   sandbox, the only ones its sandbox's table names.
 - **Jobs**: an image, `on` `release` (the default) or `manual`, retries 0
   to 5, a timeout of 10m by default and 2h at most.
+- **Image credentials** (`imageCredentials`, image services and jobs):
+  a username and a password, each a string or `{secret}` of the
+  environment, the secret existing as an env value's does; not on an
+  attached service. A plan resolves an image with the credentials of the
+  first service or job, by name, that names it with some, a secret at its
+  latest version ([Images](#images)).
 - **Addons**: a registered type and a version, both required; the plan
   (the blueprint's default when absent) and the options are the
   blueprint's to check, against the addon that the volume holds when it

@@ -407,7 +407,13 @@ func (c *Controller) insertInstance(ctx context.Context, v *view, in insert) (po
 // wakes env-reconcile, whose step brings the row up.
 func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderSide bool) (podid.ID, error) {
 	p := in.plan
-	ref, err := c.d.Engine.ResolveImage(ctx, p.image)
+	auth, err := p.template.ImageCredentials.Resolve(func(name string) (string, error) {
+		return c.ResolveSecret(ctx, v.env.ID, name, 0)
+	})
+	if err != nil {
+		return "", fmt.Errorf("the image credentials of %s: %w", p.image, err)
+	}
+	ref, err := c.d.Engine.ResolveImage(ctx, p.image, auth)
 	if err != nil {
 		return "", fmt.Errorf("pin image %s: %w", p.image, err)
 	}

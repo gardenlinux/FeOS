@@ -224,8 +224,14 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		}
 	}
 	var key []byte
+	// sealer seals the sandboxes' image credentials (ADR 0025); nil
+	// without --secret-key-file.
+	var sealer *seal.Sealer
 	if cfg.SecretKeyFile != "" {
 		if key, err = readSecretKey(cfg.SecretKeyFile); err != nil {
+			return nil, fmt.Errorf("--secret-key-file: %w", err)
+		}
+		if sealer, err = seal.New(key); err != nil {
 			return nil, fmt.Errorf("--secret-key-file: %w", err)
 		}
 	}
@@ -302,7 +308,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		DrainTimeout: cfg.DrainTimeout, PendingRepairAfter: cfg.PendingRepairAfter,
 		UnreachableRepairAfter: cfg.UnreachableRepairAfter, HibernateTimeout: cfg.HibernateTimeout,
 		DenyPrefixes: cfg.DenyPrefixes, ImageBakes: cfg.ImageBakes, Log: i.log,
-	}, sandbox.Deps{DB: i.DB, Store: i.Store, Conns: i.Links, Elector: i.Elector, Activity: i.Activity}); err != nil {
+	}, sandbox.Deps{DB: i.DB, Store: i.Store, Conns: i.Links, Elector: i.Elector, Activity: i.Activity,
+		Sealer: openerOf(sealer)}); err != nil {
 		return nil, fmt.Errorf("the sandbox engine: %w", err)
 	}
 	fl = fleet.New(fleet.Config{
@@ -340,7 +347,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		DB: i.DB, Store: i.Store, Engine: i.Engine, Elector: i.Elector, Conns: i.Links, Fleet: fl,
 		Tools: tools.NewREST(i.Runner), Specs: tools.Specs, MCP: i.mcp, Ports: i.streams.Ports,
 		Watches: i.streams.Watches, Bindings: i.Bindings, Environments: i.Env, Ingress: ing, Domains: i.Domains,
-		Ready: i.ready,
+		Ready: i.ready, Sealer: sealerOf(sealer),
 	}
 	if ui.Built() {
 		deps.UI = ui.FS()
@@ -864,4 +871,20 @@ func readSecretKey(path string) ([]byte, error) {
 		}
 	}
 	return nil, errors.New("the file holds no 32-byte key (raw, hex or base64)")
+}
+
+// openerOf is sl as the engine takes it: a nil interface without a key.
+func openerOf(sl *seal.Sealer) sandbox.Opener {
+	if sl == nil {
+		return nil
+	}
+	return sl
+}
+
+// sealerOf is sl as the API takes it: a nil interface without a key.
+func sealerOf(sl *seal.Sealer) api.Sealer {
+	if sl == nil {
+		return nil
+	}
+	return sl
 }

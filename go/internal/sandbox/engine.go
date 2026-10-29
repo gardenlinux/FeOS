@@ -92,6 +92,14 @@ type Deps struct {
 	Activity *activity.Recorder
 	// Processes is set by the server after both exist (SetProcessLister).
 	Processes ProcessLister
+	// Sealer opens a sandbox's sealed image credentials (internal/seal,
+	// --secret-key-file); nil: a sandbox with credentials does not start.
+	Sealer Opener
+}
+
+// Opener opens what a Sealer sealed.
+type Opener interface {
+	Open(sealed, aad []byte) ([]byte, error)
 }
 
 // timings are the engine's fixed durations (§3, §9), fields so that the
@@ -274,10 +282,16 @@ type Engine struct {
 
 	// resolveImage pins an image to its digest (image.go); tests replace
 	// it.
-	resolveImage func(ctx context.Context, image string) (string, error)
+	resolveImage func(ctx context.Context, image string, auth model.RegistryCredentials) (string, error)
 	// checkImage asks a pinned image's registry before a create
 	// (image.go, ADR 0025); SetImageAccess replaces it.
-	checkImage func(ctx context.Context, pinned string) error
+	checkImage func(ctx context.Context, pinned string, auth model.RegistryCredentials) error
+	// pullToken gets the guest's pull token for a create with credentials
+	// (image.go, ADR 0025).
+	pullToken func(ctx context.Context, pinned string, auth model.RegistryCredentials) (string, error)
+	// sealer opens the sandboxes' image credentials; nil without
+	// --secret-key-file.
+	sealer Opener
 
 	// hooks are the environments' hooks (hooks.go).
 	hooks engineHooks
@@ -392,7 +406,8 @@ func New(cfg Config, deps Deps) (*Engine, error) {
 		deny = bindings.DefaultDenyPrefixes()
 	}
 	res := newResolver(deny)
-	e.resolveImage, e.checkImage = res.resolve, res.access
+	e.resolveImage, e.checkImage, e.pullToken = res.resolveAs, res.access, res.pullToken
+	e.sealer = deps.Sealer
 	e.runner = newRunner(e)
 	e.syncs.m = map[podid.ID]*syncEntry{}
 	e.bakes = map[string]bool{}

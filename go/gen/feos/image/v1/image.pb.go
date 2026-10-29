@@ -179,7 +179,11 @@ type PullImageRequest struct {
 	// Pull into a new image that is handed to nobody else, even if the
 	// reference is present. For consumers that write to the image's files,
 	// such as a VM using its disk image.
-	Exclusive     bool `protobuf:"varint,2,opt,name=exclusive,proto3" json:"exclusive,omitempty"`
+	Exclusive bool `protobuf:"varint,2,opt,name=exclusive,proto3" json:"exclusive,omitempty"`
+	// A Bearer token of the image's registry (ADR 0025), held in memory for
+	// the pull and never stored. Empty: anonymous. A pull that joins one
+	// in flight or an image that is there takes neither's token.
+	PullToken     string `protobuf:"bytes,3,opt,name=pull_token,json=pullToken,proto3" json:"pull_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -226,6 +230,13 @@ func (x *PullImageRequest) GetExclusive() bool {
 		return x.Exclusive
 	}
 	return false
+}
+
+func (x *PullImageRequest) GetPullToken() string {
+	if x != nil {
+		return x.PullToken
+	}
+	return ""
 }
 
 type PullImageResponse struct {
@@ -553,10 +564,12 @@ const file_feos_image_v1_image_proto_rawDesc = "" +
 	"\x06digest\x18\x04 \x01(\tR\x06digest\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x05 \x01(\x04R\tsizeBytes\x12\x1c\n" +
-	"\texclusive\x18\x06 \x01(\bR\texclusive\"M\n" +
+	"\texclusive\x18\x06 \x01(\bR\texclusive\"l\n" +
 	"\x10PullImageRequest\x12\x1b\n" +
 	"\timage_ref\x18\x01 \x01(\tR\bimageRef\x12\x1c\n" +
-	"\texclusive\x18\x02 \x01(\bR\texclusive\"2\n" +
+	"\texclusive\x18\x02 \x01(\bR\texclusive\x12\x1d\n" +
+	"\n" +
+	"pull_token\x18\x03 \x01(\tR\tpullToken\"2\n" +
 	"\x11PullImageResponse\x12\x1d\n" +
 	"\n" +
 	"image_uuid\x18\x01 \x01(\tR\timageUuid\"8\n" +

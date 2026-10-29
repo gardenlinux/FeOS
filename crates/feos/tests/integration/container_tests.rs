@@ -60,6 +60,7 @@ async fn test_create_and_start_container() -> Result<()> {
         config: Some(container_config),
         container_id: None,
         adopt: false,
+        pull_token: String::new(),
     };
 
     info!("Sending CreateContainer request");
@@ -125,6 +126,7 @@ async fn test_create_and_start_container() -> Result<()> {
         .pull_image(PullImageRequest {
             image_ref,
             exclusive: false,
+            pull_token: String::new(),
         })
         .await?
         .into_inner()

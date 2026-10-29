@@ -143,6 +143,9 @@ type OpHandle struct {
 	// layers are the baked layers of a create's image it names (prepare,
 	// ADR 0025); nil: none, and no bake.
 	layers *podv1.ImageLayers
+	// pullToken is the guest's pull token of a create with image
+	// credentials (prepare, ADR 0025); "": anonymous.
+	pullToken string
 
 	mu sync.Mutex
 	// dirty: a pod event arrived while the op ran; the finish syncs.
@@ -583,13 +586,14 @@ func (e *Engine) callOp(ctx context.Context, pc podv1.PodServiceClient, h *OpHan
 	var res callResult
 	switch h.kind {
 	case OpCreate:
-		resp, err := pc.CreatePod(ctx, &podv1.CreatePodRequest{PodId: id, Spec: h.spec, ImageLayers: h.layers})
+		resp, err := pc.CreatePod(ctx, &podv1.CreatePodRequest{PodId: id, Spec: h.spec, ImageLayers: h.layers,
+			PullToken: h.pullToken})
 		res.err = err
 		if err == nil {
 			res.pod = resp.GetPod()
 		}
 	case OpStart:
-		_, res.err = pc.StartPod(ctx, &podv1.StartPodRequest{PodId: id})
+		_, res.err = pc.StartPod(ctx, &podv1.StartPodRequest{PodId: id, PullToken: e.startToken(ctx, h.row)})
 	case OpResume:
 		_, res.err = pc.ResumePod(ctx, &podv1.ResumePodRequest{PodId: id})
 	case OpRestore:
@@ -685,7 +689,7 @@ func (e *Engine) callRepair(ctx context.Context, pc podv1.PodServiceClient, h *O
 			return res
 		}
 	}
-	if _, err := pc.StartPod(ctx, &podv1.StartPodRequest{PodId: id}); err != nil {
+	if _, err := pc.StartPod(ctx, &podv1.StartPodRequest{PodId: id, PullToken: e.startToken(ctx, h.row)}); err != nil {
 		res.err = err
 	}
 	return res

@@ -9,9 +9,8 @@ that closes it; what is closed, the architecture describes.
 
 ### A registry token enters the pod while its guest pulls
 
-**From** ADR 0025's second step on (registry credentials with the
-create, not built yet). **Intended:** no credential enters a pod
-(ADR 0001).
+**Since** ADR 0025's second step (registry credentials with the create).
+**Intended:** no credential enters a pod (ADR 0001).
 
 Until the node pulls images itself, a pod whose create brings registry
 credentials pulls its image in its guest, with the Bearer token `ferund`
@@ -35,10 +34,13 @@ the image the pod runs. No other repository, no push, nothing after the
 token's end.
 
 **Meanwhile:** the token rides beside the pod's spec, never in it, in its
-record or on its disk; a registry that takes only Basic authentication
-is refused (ADR 0025), so that no password enters a pod; a baked layer
-holds no token, since the guest keeps it in memory; and a create that
-starts on a baked layer pulls nothing and gets no token.
+record or on its disk; `feosd` holds it in memory for one bring-up, and
+the guest takes it out of the request at once into a type whose `Debug`
+is redacted, so that no log shows it; a registry that takes only Basic
+authentication is refused (ADR 0025), so that no password enters a pod;
+a baked layer holds no token, since the guest keeps it in memory; and a
+pod that starts on a baked layer pulls nothing, so `feosd` keeps the
+token its create carried from its guest.
 
 **What closes it:** the node pulls (ADR 0022's host pull and bake pod).
 `feosd` holds the token in memory for the pull, and the pod gets a baked

@@ -142,9 +142,9 @@ func (d *differ) job(a, b Job) ([]FieldChange, string) {
 	va["env"], vb["env"] = envView(a.Env, d.prev, false), envView(b.Env, d.next, false)
 	fields := changes(clean(va), clean(vb))
 	ta := map[string]any{"image": a.Image, "command": a.Command, "env": envView(a.Env, d.prev, true),
-		"resources": view(a.Resources)}
+		"resources": view(a.Resources), "imageCredentials": toAny(a.ImageCredentials)}
 	tb := map[string]any{"image": b.Image, "command": b.Command, "env": envView(b.Env, d.next, true),
-		"resources": view(b.Resources)}
+		"resources": view(b.Resources), "imageCredentials": toAny(b.ImageCredentials)}
 	if reflect.DeepEqual(ta, tb) {
 		return fields, EffectInPlace
 	}
@@ -198,7 +198,7 @@ func (d *differ) template(s Service, sp *Spec) map[string]any {
 			"env": envView(s.Env, sp, true)}
 	}
 	return map[string]any{"image": s.Image, "command": s.Command, "env": envView(s.Env, sp, true),
-		"resources": view(s.Resources)}
+		"resources": view(s.Resources), "imageCredentials": toAny(s.ImageCredentials)}
 }
 
 // envView is env as a diff shows it: each value in its JSON form, a

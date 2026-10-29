@@ -128,6 +128,7 @@ async fn create_pod(
         pod_id: pod_id.clone(),
         spec: Some(spec(volume_id, container)),
         image_layers: None,
+        pull_token: String::new(),
     })
     .await?;
     let mut guard = PodGuard::new(pod_id.clone());
@@ -227,6 +228,7 @@ async fn test_volume_outlives_its_pods() -> Result<()> {
             pod_id: new_pod_id(),
             spec: Some(spec(&volume_id, true)),
             image_layers: None,
+            pull_token: String::new(),
         })
         .await
         .expect_err("a second pod with an attached volume");
@@ -386,6 +388,7 @@ async fn test_volume_is_formatted_once() -> Result<()> {
     wipe(&volume_id).await?;
     pods.start_pod(feos_proto::pod_service::StartPodRequest {
         pod_id: pod_id.clone(),
+        pull_token: String::new(),
     })
     .await?;
     let failed = timeout(Duration::from_secs(120), async {
@@ -495,6 +498,7 @@ async fn test_volume_hibernates_with_its_pod() -> Result<()> {
             pod_id: new_pod_id(),
             spec: Some(spec(&volume_id, true)),
             image_layers: None,
+            pull_token: String::new(),
         })
         .await
         .expect_err("another pod with a hibernated pod's volume");

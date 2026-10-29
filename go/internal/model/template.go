@@ -95,6 +95,21 @@ type PodTemplate struct {
 	// row, where the ID is minted; the plan's template, which Hash takes,
 	// has the flag only.
 	IngressGroup bool `json:"ingressGroup,omitempty"`
+	// ImageCredentials are the pod's login for its image's registry (ADR
+	// 0025); nil: anonymous. Hash takes them: a pod made with other
+	// credentials is replaced, while a secret's new value is the same
+	// template (version 0).
+	ImageCredentials *TemplateCredentials `json:"imageCredentials,omitempty"`
+}
+
+// TemplateCredentials are an environment's pod's login for its image's
+// registry: a username and a password, each a literal or a secret of the
+// environment. A secret here has version 0, its latest when a pod is
+// created: they are access, not configuration, and a token rotated or
+// revoked reaches the next replica of an old release.
+type TemplateCredentials struct {
+	Username TemplateValue `json:"username"`
+	Password TemplateValue `json:"password"`
 }
 
 // TemplateVolume is a volume of the pod (feos.volume.v1): its name in the
@@ -213,10 +228,13 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		SecurityGroups []string                 `json:"securityGroups"`
 		NameTables     []string                 `json:"nameTables,omitempty"`
 		IngressGroup   bool                     `json:"ingressGroup,omitempty"`
+		// Without credentials, a template hashes as before them.
+		ImageCredentials *TemplateCredentials `json:"imageCredentials,omitempty"`
 	}{
 		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 		Command: nonNil(t.Command), Env: t.Env, Volumes: nonNil(t.Volumes), Mounts: nonNil(t.Mounts),
 		SecurityGroups: nonNil(groups), NameTables: t.NameTables, IngressGroup: t.IngressGroup,
+		ImageCredentials: t.ImageCredentials,
 	}
 	if h.Env == nil {
 		h.Env = map[string]TemplateValue{}

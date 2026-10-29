@@ -530,7 +530,7 @@ func (envEngine) Delete(context.Context, string, podid.ID) (store.Sandbox, bool,
 	return store.Sandbox{}, false, nil
 }
 func (envEngine) Restart(context.Context, podid.ID, string) error { return nil }
-func (envEngine) ResolveImage(_ context.Context, image string) (string, error) {
+func (envEngine) ResolveImage(_ context.Context, image string, _ model.RegistryCredentials) (string, error) {
 	repo, _, _ := strings.Cut(image, ":")
 	return repo + "@sha256:" + strings.Repeat("ab", 32), nil
 }
