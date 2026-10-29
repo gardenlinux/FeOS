@@ -215,6 +215,15 @@ message PodInfo {
   // The hibernation in flight (HibernatePod), until it ends; unset
   // otherwise.
   Hibernation hibernation = 10;
+  // What the pod's create named of its image's baked layers (ADR 0025).
+  ImageLayers image_layers = 11;
+  // What the pod's disk was made on, when the pod made it: the guest's
+  // version, its blank data volume, and the baked layer the disk starts
+  // on, if one fitted. Unset for a disk of a checkpoint, and for pods of
+  // before.
+  BakedLayer disk = 12;
+  // The layer the pod baked of its image, once the object store has it.
+  BakedLayer baked = 13;
 }
 
 // A hibernation in flight.
@@ -293,6 +302,40 @@ message CreatePodRequest {
   // before ADR 0019 have.
   string pod_id = 1;
   PodSpec spec = 2;
+  // What the caller knows of baked layers of the pod's image (ADR 0025),
+  // beside the spec and not compared with it: a create delivered twice
+  // with other layers is the same create. Taken by a new pod only.
+  ImageLayers image_layers = 3;
+}
+
+// The baked layers of a pod's image that its create names (ADR 0025): a
+// disk layer on the guest's blank data volume that holds the image pulled
+// into the guest's image store, sealed before any container ran.
+message ImageLayers {
+  // The image the layers hold, as the pod's one container names it:
+  // registry/repository@sha256:… . Layers of another image are ignored.
+  string image_ref = 1;
+  // The layers baked of it, newest first: the pod's new disk starts on the
+  // first one made for the guest it boots and that guest's blank data
+  // volume. One that the object store does not have is passed over.
+  repeated BakedLayer layers = 2;
+  // Whether the node bakes the image when no layer fits: after the pull,
+  // before the first container, with the guest's filesystem frozen; it
+  // reports the layer in PodInfo.baked once the object store has it.
+  bool bake = 3;
+}
+
+// A baked layer, and what it is made for.
+message BakedLayer {
+  // The image it holds, registry/repository@sha256:… .
+  string image_ref = 1;
+  // The installed guest's version the layer was made with: its directory
+  // under /usr/lib/feos/guest.
+  string guest_version = 2;
+  // The layer of the guest's blank data volume, the layer's parent.
+  string l0 = 3;
+  // The baked layer; empty for a disk on the blank data volume alone.
+  string layer_id = 4;
 }
 
 message CreatePodResponse {

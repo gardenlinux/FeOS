@@ -90,4 +90,10 @@ var (
 	// ErrCertSuperseded is a re-check of a superseded certificate past its
 	// grace: the connection closes as at the drain timeout.
 	ErrCertSuperseded = errors.New("superseded certificate")
+	// ErrImageRefused is an image whose registry refused it to the create,
+	// or does not have it for it (ADR 0025), wrapped with the answer.
+	ErrImageRefused = errors.New("image refused")
+	// ErrRegistryUnavailable is an image whose registry did not answer the
+	// question before a create (ADR 0025): no answer is no; retryable.
+	ErrRegistryUnavailable = errors.New("registry unavailable")
 )

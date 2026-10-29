@@ -99,6 +99,8 @@ func newEnv(t *testing.T, o envOptions) *env {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The test images name no registry that answers (ADR 0025).
+		real.SetImageAccess(func(context.Context, string) error { return nil })
 		eng = real
 	} else {
 		e.fake = &fakeEngine{st: st}

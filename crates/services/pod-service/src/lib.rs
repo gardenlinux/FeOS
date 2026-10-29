@@ -5,6 +5,7 @@
 //! pod's services to its guest; their volumes (ADR 0016),
 //! `feos.volume.v1.VolumeService`.
 
+mod bake;
 pub mod disk;
 pub mod forward;
 #[cfg(test)]
@@ -83,7 +84,11 @@ impl PodService for Pods {
         self.check_serving()?;
         let request = request.into_inner();
         let pod = self
-            .create(request.pod_id, request.spec.unwrap_or_default())
+            .create(
+                request.pod_id,
+                request.spec.unwrap_or_default(),
+                request.image_layers,
+            )
             .await?;
         Ok(Response::new(CreatePodResponse { pod: Some(pod) }))
     }

@@ -173,6 +173,8 @@ func newHarness(t *testing.T, o options) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The test image names no registry that answers (ADR 0025).
+	h.eng.SetImageAccess(func(context.Context, string) error { return nil })
 	h.fl = fleet.New(fleet.Config{InstanceID: id, TrustDomain: testTD, RolloutGrace: 30 * time.Second, NodeTTL: time.Hour,
 		ConnDrainTimeout: time.Minute, Log: log}, fleet.Deps{DB: d, Issuer: iss, Links: h.srv, Hooks: h.eng, Elector: h.el})
 	fleetv1.RegisterFleetServiceServer(h.srv.Uplink(), h.fl.UplinkServer())

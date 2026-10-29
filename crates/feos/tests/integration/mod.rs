@@ -28,6 +28,7 @@ pub mod diskd_gate;
 pub mod fixtures;
 pub mod host_tests;
 pub mod image_tests;
+pub mod pod_bake_tests;
 pub mod pod_disk_tests;
 pub mod pod_tests;
 pub mod pod_volume_tests;

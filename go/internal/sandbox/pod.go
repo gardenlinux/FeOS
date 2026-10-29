@@ -107,6 +107,7 @@ func (e *Engine) getPod(ctx context.Context, node string, id podid.ID) (observat
 	if err != nil {
 		return observation{}, err
 	}
+	e.recordBake(ctx, node, info)
 	return observation{answered: true, info: info}, nil
 }
 

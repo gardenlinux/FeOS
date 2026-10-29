@@ -398,6 +398,8 @@ func TestShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The test image names no registry that answers (ADR 0025).
+	i.Engine.SetImageAccess(func(context.Context, string) error { return nil })
 	i.endReadinessDelay = make(chan struct{})
 	stop := started(t, i)
 	var endOnce sync.Once

@@ -349,6 +349,7 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             volumes: opts.volumes,
             metadata: opts.metadata.into_iter().collect(),
         }),
+        image_layers: None,
     }
 }
 

@@ -35,6 +35,7 @@ mod stop;
 
 pub use stop::{read_record, StopRecord, Stopped, STOP_RECORD};
 
+use crate::bake;
 use crate::disk::{volume_disk, Disks};
 use crate::network::{Attachment, Network};
 use crate::spec;
@@ -49,6 +50,12 @@ use feos_proto::disk_service::{Head, MemoryRef};
 use feos_proto::guest_service::{
     guest_service_client::GuestServiceClient, MountVolumesRequest, Volume as GuestVolume,
 };
+use feos_proto::host_service::{
+    host_service_client::HostServiceClient, FreezeFilesystemRequest, ThawFilesystemRequest,
+};
+use feos_proto::image_service::{
+    image_service_client::ImageServiceClient, ImageState, PullImageRequest, WatchImageStatusRequest,
+};
 use feos_proto::microvm::{
     micro_vm_service_server::MicroVmService, stream_vm_console_request as console_request,
     AttachConsoleMessage, ConsoleData, CreateVmRequest, DeleteVmRequest, GetVmRequest,
@@ -57,9 +64,9 @@ use feos_proto::microvm::{
     VmState, VmStateChangedEvent,
 };
 use feos_proto::pod_service::{
-    Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
-    Hibernation as HibernationInfo, HibernationPhase, MicroVm, PodConsoleInput, PodConsoleOutput,
-    PodEvent, PodInfo, PodSpec, PodState, RestorePodResponse,
+    BakedLayer, Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
+    Hibernation as HibernationInfo, HibernationPhase, ImageLayers, MicroVm, PodConsoleInput,
+    PodConsoleOutput, PodEvent, PodInfo, PodSpec, PodState, RestorePodResponse,
 };
 use feos_proto::volume_service::{Volume, VolumeCheckpoint, VolumeState};
 use feos_utils::vsock::{self, API_PORT};
@@ -377,12 +384,27 @@ impl Pods {
     }
 
     /// Creates the pod and brings it up, in a task of its own (`detached`).
-    pub async fn create(&self, pod_id: String, spec: PodSpec) -> Result<PodInfo, Status> {
-        self.detached(move |pods| async move { pods.create_detached(pod_id, spec).await })
-            .await
+    /// Creates a pod, with what its caller knows of baked layers of its
+    /// image (ADR 0025): kept for its bring-up, and not compared when the
+    /// pod is there already.
+    pub async fn create(
+        &self,
+        pod_id: String,
+        spec: PodSpec,
+        image_layers: Option<ImageLayers>,
+    ) -> Result<PodInfo, Status> {
+        self.detached(
+            move |pods| async move { pods.create_detached(pod_id, spec, image_layers).await },
+        )
+        .await
     }
 
-    async fn create_detached(&self, pod_id: String, spec: PodSpec) -> Result<PodInfo, Status> {
+    async fn create_detached(
+        &self,
+        pod_id: String,
+        spec: PodSpec,
+        image_layers: Option<ImageLayers>,
+    ) -> Result<PodInfo, Status> {
         spec::check_id(&pod_id)?;
         let spec = spec::normalize(spec)?;
         self.inner.network.check(&spec)?;
@@ -398,6 +420,7 @@ impl Pods {
             pod_id: pod_id.clone(),
             spec: Some(spec.clone()),
             state: PodState::Pending as i32,
+            image_layers,
             ..Default::default()
         };
         let recorded = match self.add(info, spec::has_network(&spec)).await {
@@ -1335,7 +1358,14 @@ impl Pods {
             .as_ref()
             .map(|checkpoint| checkpoint.head_key.as_str())
             .filter(|key| !key.is_empty());
-        self.inner.disks.open(pod_id, head_key).await
+        let image = bake::image_of(&info);
+        let (device, made) = self.inner.disks.open(pod_id, head_key, image).await?;
+        // A new disk: what it was made on is the pod's, for its bake
+        // point and for the control plane.
+        if let Some(disk) = made {
+            self.update(pod_id, |info| info.disk = Some(disk)).await;
+        }
+        Ok(device)
     }
 
     /// Starts the disks of the pod's volumes, in the order of its spec: the
@@ -2057,7 +2087,9 @@ impl Pods {
         let booted = self.boot(pod_id, spec).await?;
         self.wait_for_guest(pod_id).await?;
         self.mount_volumes(pod_id, spec).await?;
-        let mut guest = ContainerServiceClient::new(self.guest_channel(pod_id).await?);
+        let channel = self.guest_channel(pod_id).await?;
+        self.bake_point(pod_id, spec, channel.clone()).await?;
+        let mut guest = ContainerServiceClient::new(channel);
         for container in &spec.containers {
             run_container(&mut guest, container, booted)
                 .await
@@ -2069,6 +2101,150 @@ impl Pods {
                 })?;
         }
         Ok(())
+    }
+
+    /// The bake point (ADR 0025, `bake`), before the pod's first container:
+    /// the guest pulls the image, its filesystem is frozen, diskd seals the
+    /// disk's top as a layer, the filesystem is thawed, and the layer goes
+    /// to the object store in the background, after which the pod's record
+    /// names it. A bake that does not happen leaves the bring-up as it would
+    /// have been: its container pulls; only a filesystem that stays frozen
+    /// fails it.
+    async fn bake_point(
+        &self,
+        pod_id: &str,
+        spec: &PodSpec,
+        channel: Channel,
+    ) -> Result<(), Status> {
+        let Some(mut layer) = bake::due(&self.info(pod_id)?) else {
+            return Ok(());
+        };
+        let Some(container) = spec.containers.first() else {
+            return Ok(());
+        };
+        // A container there already: the disk holds what the pod did.
+        let request = GetContainerRequest {
+            container_id: container.name.clone(),
+        };
+        match ContainerServiceClient::new(channel.clone())
+            .get_container(request)
+            .await
+        {
+            Err(e) if e.code() == Code::NotFound => {}
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                warn!("Pods: {pod_id} does not bake its image: {}", e.message());
+                return Ok(());
+            }
+        }
+        if let Err(e) = self.inner.disks.require_object_store(pod_id).await {
+            info!("Pods: {pod_id} does not bake its image: {}", e.message());
+            return Ok(());
+        }
+        let image = layer.image_ref.clone();
+        match timeout(BAKE_PULL_TIMEOUT, pull_in_guest(channel.clone(), &image)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                warn!("Pods: {pod_id} does not bake {image}: {}", e.message());
+                return Ok(());
+            }
+            Err(_) => {
+                warn!("Pods: {pod_id} does not bake {image}: the pull took longer than {BAKE_PULL_TIMEOUT:?}");
+                return Ok(());
+            }
+        }
+        let mut host = HostServiceClient::new(channel);
+        // A freeze that a restart of feosd cut off is thawed first; a guest
+        // that cannot freeze does not bake.
+        let thawed = timeout(
+            FREEZE_TIMEOUT,
+            host.thaw_filesystem(ThawFilesystemRequest::default()),
+        )
+        .await;
+        if let Ok(Err(e)) = thawed
+            && e.code() == Code::Unimplemented
+        {
+            info!("Pods: {pod_id} does not bake {image}: its guest cannot freeze its filesystem");
+            return Ok(());
+        }
+        // Only a freeze that took, or did not answer, is thawed again.
+        match timeout(
+            FREEZE_TIMEOUT,
+            host.freeze_filesystem(FreezeFilesystemRequest::default()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                warn!(
+                    "Pods: {pod_id} does not bake {image}: the freeze failed: {}",
+                    e.message()
+                );
+                return Ok(());
+            }
+            Err(_) => {
+                thaw(&mut host, pod_id).await?;
+                warn!("Pods: {pod_id} does not bake {image}: the freeze did not answer");
+                return Ok(());
+            }
+        }
+        let sealed = match timeout(BAKE_SEAL_TIMEOUT, self.inner.disks.bake(pod_id)).await {
+            Ok(sealed) => sealed,
+            Err(_) => Err(Status::deadline_exceeded(format!(
+                "the seal took longer than {BAKE_SEAL_TIMEOUT:?}"
+            ))),
+        };
+        thaw(&mut host, pod_id).await?;
+        let sealed = match sealed {
+            Ok(sealed) => sealed,
+            Err(e) => {
+                warn!("Pods: {pod_id} does not bake {image}: {}", e.message());
+                return Ok(());
+            }
+        };
+        info!(
+            "Pods: {pod_id} baked {image} into layer {} ({} bytes new, {:.1}s); uploading it",
+            sealed.layer_id, sealed.bytes_new, sealed.seal_seconds
+        );
+        layer.layer_id = sealed.layer_id;
+        let pods = self.clone();
+        let id = pod_id.to_string();
+        tokio::spawn(async move { pods.push_bake(&id, layer).await });
+        Ok(())
+    }
+
+    /// Uploads the layer the pod baked, and names it in the pod's record
+    /// once the object store has it, which the pod's event tells the
+    /// control plane.
+    async fn push_bake(&self, pod_id: &str, layer: BakedLayer) {
+        for attempt in 1..=BAKE_PUSHES {
+            match self.inner.disks.push(&layer.layer_id).await {
+                Ok(()) => {
+                    info!(
+                        "Pods: {pod_id}'s layer {} of {} is in the object store",
+                        layer.layer_id, layer.image_ref
+                    );
+                    self.update(pod_id, |info| info.baked = Some(layer)).await;
+                    if let Ok(info) = self.info(pod_id) {
+                        self.announce(&info, false);
+                    }
+                    return;
+                }
+                Err(e) if attempt < BAKE_PUSHES => {
+                    warn!(
+                        "Pods: {pod_id}'s layer {} does not upload: {}; again",
+                        layer.layer_id,
+                        e.message()
+                    );
+                    sleep(Duration::from_secs(30 * u64::from(attempt))).await;
+                }
+                Err(e) => warn!(
+                    "Pods: {pod_id}'s layer {} does not upload: {}; not baked",
+                    layer.layer_id,
+                    e.message()
+                ),
+            }
+        }
     }
 
     /// Gets the pod's microVM running on its disk, from whatever state it
@@ -2851,6 +3027,66 @@ async fn dial_guest(
 /// new boot, a container that the pod's disk has from the boot before is
 /// stopped, and is adopted with what it wrote; one that is not there is
 /// created.
+/// How long a bake waits for the guest's pull, for its freeze and thaw,
+/// and for diskd's seal; how often it tries to upload the layer.
+const BAKE_PULL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const FREEZE_TIMEOUT: Duration = Duration::from_secs(30);
+const BAKE_SEAL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const BAKE_PUSHES: u32 = 3;
+
+/// Has the guest pull `image_ref` into its image store, or join the pull
+/// or the image there, and waits until it is ready.
+async fn pull_in_guest(channel: Channel, image_ref: &str) -> Result<(), Status> {
+    let mut images = ImageServiceClient::new(channel);
+    let request = PullImageRequest {
+        image_ref: image_ref.to_string(),
+        exclusive: false,
+    };
+    let image_uuid = images.pull_image(request).await?.into_inner().image_uuid;
+    let request = WatchImageStatusRequest { image_uuid };
+    let mut statuses = images.watch_image_status(request).await?.into_inner();
+    while let Some(status) = statuses.message().await? {
+        match ImageState::try_from(status.state) {
+            Ok(ImageState::Ready) => return Ok(()),
+            Ok(ImageState::PullFailed | ImageState::NotFound) => {
+                return Err(Status::unavailable(format!(
+                    "the pull failed: {}",
+                    status.message
+                )));
+            }
+            _ => {}
+        }
+    }
+    Err(Status::unavailable(
+        "the image's status ended before it was ready",
+    ))
+}
+
+/// Thaws the guest's data volume: a filesystem that was not frozen is
+/// fine; one that stays frozen fails, since nothing could write there.
+async fn thaw(host: &mut HostServiceClient<Channel>, pod_id: &str) -> Result<(), Status> {
+    let mut last = String::new();
+    for attempt in 0..3 {
+        if attempt > 0 {
+            sleep(Duration::from_secs(1)).await;
+        }
+        match timeout(
+            FREEZE_TIMEOUT,
+            host.thaw_filesystem(ThawFilesystemRequest::default()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => return Ok(()),
+            Ok(Err(e)) if bake::not_frozen(e.message()) => return Ok(()),
+            Ok(Err(e)) => last = e.message().to_string(),
+            Err(_) => last = "the thaw did not answer".to_string(),
+        }
+    }
+    Err(Status::internal(format!(
+        "the guest of pod {pod_id} keeps its filesystem frozen after a bake: {last}"
+    )))
+}
+
 async fn run_container(
     guest: &mut ContainerServiceClient<Channel>,
     container: &ContainerSpec,
@@ -3461,7 +3697,7 @@ mod tests {
         };
         let create = tokio::spawn({
             let pods = pods.clone();
-            async move { pods.create(POD.to_string(), spec).await }
+            async move { pods.create(POD.to_string(), spec, None).await }
         });
         sleep(Duration::from_millis(200)).await;
         assert!(pods.info(POD).is_err(), "added before it is kept");

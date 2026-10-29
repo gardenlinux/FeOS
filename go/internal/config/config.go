@@ -132,6 +132,10 @@ type Config struct {
 	// resolver may not reach; nil: the built-in set (DefaultDenyPrefixes),
 	// which "default" in --deny-prefix adds to the prefixes given.
 	DenyPrefixes []netip.Prefix
+	// ImageBakes has a pod's node bake its image once into a layer in the
+	// object store, which later creates of the image start on once its
+	// registry said yes to them (ADR 0025).
+	ImageBakes bool
 	// AdminUsers are the operators' Basic credentials (user → password),
 	// the fallback beside OIDC sign-in.
 	AdminUsers map[string]string
@@ -257,6 +261,7 @@ func Default() Config {
 		OIDCAdminGroup:         "admins",
 		SessionTTL:             12 * time.Hour,
 		DefaultImage:           "ghcr.io/maltej/debian-ai:latest",
+		ImageBakes:             true,
 		DefaultVCPUs:           2,
 		DefaultMemoryMiB:       512,
 		Placement:              PlacementBinpack,
@@ -341,6 +346,8 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.BoolVar(&c.Bindings, "bindings", c.Bindings, "serve the Kubernetes and SSH binding surfaces (only with --secret-key-file)")
 	fs.Var((*prefixList)(&c.DenyPrefixes), "deny-prefix",
 		"a destination prefix preflights, bindings and the image resolver may not reach, comma-separated or repeated; \"default\" is the built-in set (default: the built-in set)")
+	fs.BoolVar(&c.ImageBakes, "image-bakes", c.ImageBakes,
+		"have a pod's node bake its image once into a layer in the object store, which later creates of the image start on once its registry said yes")
 	fs.StringVar(&t.adminUsers, "admin-users", "", "user:password,user:password for the admin API: the Basic fallback beside OIDC")
 	fs.StringVar(&c.PublicURL, "public-url", c.PublicURL, "the front door's external URL, e.g. https://run.fecode.dev; required with --oidc-issuer")
 	fs.StringVar(&c.OIDCIssuer, "oidc-issuer", c.OIDCIssuer, "OIDC issuer of human sign-in, exactly as its discovery document states it; empty: no OIDC")

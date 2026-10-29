@@ -47,6 +47,9 @@ type Config struct {
 	// runs the hibernation in a task of its own goes on after the call
 	// ends, and its end arrives as the pod's event.
 	HibernateTimeout time.Duration
+	// ImageBakes lets a create have its node bake the pod's image into a
+	// layer that later creates start on (--image-bakes, ADR 0025).
+	ImageBakes bool
 	// DenyPrefixes are the destinations the image resolver may not reach,
 	// as bindings and preflights may not (--deny-prefix); nil:
 	// bindings.DefaultDenyPrefixes.
@@ -272,6 +275,9 @@ type Engine struct {
 	// resolveImage pins an image to its digest (image.go); tests replace
 	// it.
 	resolveImage func(ctx context.Context, image string) (string, error)
+	// checkImage asks a pinned image's registry before a create
+	// (image.go, ADR 0025); SetImageAccess replaces it.
+	checkImage func(ctx context.Context, pinned string) error
 
 	// hooks are the environments' hooks (hooks.go).
 	hooks engineHooks
@@ -294,6 +300,7 @@ type Engine struct {
 	notified    map[string]time.Time  // node → last ferun_reconcile sent for it
 	touched     map[podid.ID]time.Time
 	unreachable map[podid.ID]*reach // sandboxes this instance marked unreachable
+	bakes       map[string]bool     // bakes this instance recorded (bakes.go)
 	// evacuations are the drain's workers in flight, sandbox → node, and
 	// evacuatingOn their number per node (at most drainPerNode).
 	evacuations  map[podid.ID]string
@@ -384,9 +391,11 @@ func New(cfg Config, deps Deps) (*Engine, error) {
 	if deny == nil {
 		deny = bindings.DefaultDenyPrefixes()
 	}
-	e.resolveImage = newResolver(deny).resolve
+	res := newResolver(deny)
+	e.resolveImage, e.checkImage = res.resolve, res.access
 	e.runner = newRunner(e)
 	e.syncs.m = map[podid.ID]*syncEntry{}
+	e.bakes = map[string]bool{}
 	e.bg, e.bgCancel = context.WithCancel(context.Background())
 	return e, nil
 }

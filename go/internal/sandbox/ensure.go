@@ -186,6 +186,9 @@ func (en *ensurer) step(ctx context.Context, row store.Sandbox) (model.Lease, er
 			}
 			row.ImageRef = ref
 		}
+		if err := en.askRegistry(ctx, row); err != nil {
+			return model.Lease{}, err
+		}
 		return model.Lease{}, en.place(ctx, row, OpCreate)
 	case model.StateLost:
 		return model.Lease{}, en.lost(ctx, row)
@@ -461,6 +464,41 @@ func (en *ensurer) refusedOnNode(ctx context.Context, row store.Sandbox, err err
 		return err
 	}
 	return en.runOp(ctx, row, OpIntent{Kind: OpHibernate, Trigger: TriggerEnsure, Target: row.Node, Incarnation: row.Incarnation})
+}
+
+// registryRetry is when a caller whose create the image's registry did
+// not answer should come back.
+const registryRetry = 15 * time.Second
+
+// askRegistry asks the registry of the row's pinned image whether the
+// create may pull it, before the create claims a node (ADR 0025): every
+// create of a new pod asks, cached image or not. A refusal, or an image
+// the registry does not have, fails the create with the answer; no answer
+// is no as well, retryable. Either says why in the row's status.
+func (en *ensurer) askRegistry(ctx context.Context, row store.Sandbox) error {
+	e := en.e
+	err := e.imageAccess()(ctx, row.ImageRef)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return err
+	}
+	var na *noAnswerError
+	var out error
+	switch {
+	case errors.As(err, &na):
+		out = laterf(registryRetry, model.ErrRegistryUnavailable,
+			"image access not confirmed (retryable): %s: %v", row.ImageRef, err)
+	case errors.Is(err, errImageNotThere):
+		out = errorf(model.ErrImageRefused, "image %s: %v for this create", row.ImageRef, err)
+	default:
+		out = errorf(model.ErrImageRefused, "image %s: %v", row.ImageRef, err)
+	}
+	if serr := e.st.SetStatusDescription(ctx, row.ID, row.Incarnation, out.Error()); serr != nil {
+		return serr
+	}
+	return out
 }
 
 // hasObjectStore reports whether a node can hibernate pods.

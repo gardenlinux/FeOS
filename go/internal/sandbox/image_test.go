@@ -6,6 +6,7 @@ package sandbox
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -64,18 +65,32 @@ type registry struct {
 	redirects map[string]string
 	// badToken: /token answers something that is not JSON.
 	badToken bool
+	// tokens counts the token requests; tokenStatus, when set, is /token's
+	// answer instead of a token.
+	tokens      int
+	tokenStatus int
+	// status answers a reference with that status, once authorised;
+	// delays hold its answer; noHead answers HEAD with 405.
+	status map[string]int
+	delays map[string]time.Duration
+	noHead bool
 }
 
 func newRegistry(t *testing.T) *registry {
 	r := &registry{hits: map[string]int{}, token: "anon-token", manifests: map[string][2]string{}, digests: map[string]string{},
-		redirects: map[string]string{}}
+		redirects: map[string]string{}, status: map[string]int{}, delays: map[string]time.Duration{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
-		bad := r.badToken
+		bad, code := r.badToken, r.tokenStatus
+		r.tokens++
 		r.mu.Unlock()
 		if bad {
 			fmt.Fprint(w, "<html>not a token</html>")
+			return
+		}
+		if code != 0 {
+			http.Error(w, http.StatusText(code), code)
 			return
 		}
 		if req.URL.Query().Get("scope") == "" || req.URL.Query().Get("service") != "test-registry" {
@@ -112,6 +127,18 @@ func newRegistry(t *testing.T) *registry {
 		}
 		if key == "limited/x/manifests/latest" {
 			http.Error(w, "slow down", http.StatusTooManyRequests)
+			return
+		}
+		r.mu.Lock()
+		code, delay, noHead := r.status[key], r.delays[key], r.noHead
+		r.mu.Unlock()
+		time.Sleep(delay)
+		if code != 0 {
+			http.Error(w, http.StatusText(code), code)
+			return
+		}
+		if noHead && req.Method == http.MethodHead {
+			http.Error(w, "no HEAD here", http.StatusMethodNotAllowed)
 			return
 		}
 		if !ok {
@@ -156,6 +183,12 @@ func (r *registry) hitsOf(key string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.hits[key]
+}
+
+func (r *registry) tokenRequests() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.tokens
 }
 
 func TestResolver(t *testing.T) {
@@ -220,8 +253,9 @@ func TestResolver(t *testing.T) {
 	if _, err := r.resolve(bg, "127.0.0.1:1/nothing/here:v1"); err == nil || err.Error() != "registry 127.0.0.1:1 unreachable" {
 		t.Fatalf("unreachable: %v", err)
 	}
+	// (A repository whose token is not kept yet: the token is asked for.)
 	reg.set(func(r *registry) { r.badToken = true })
-	if _, err := r.resolve(bg, host+"/team/plain:v2"); err == nil || err.Error() != "token realm returned no token" {
+	if _, err := r.resolve(bg, host+"/team/fresh:v1"); err == nil || err.Error() != "token realm returned no token" {
 		t.Fatalf("a token realm that answers no JSON: %v", err)
 	}
 }
@@ -321,7 +355,9 @@ func TestEnsureResolvesAndPinsImage(t *testing.T) {
 	const amd = "sha256:" + "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
 	reg.put("team/app/manifests/v1", "application/vnd.oci.image.index.v1+json",
 		`{"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[{"digest":"`+amd+`","platform":{"os":"linux","architecture":"amd64"}}]}`, "")
-	e.resolveImage = reg.resolver().resolve
+	res := reg.resolver()
+	e.resolveImage, e.checkImage = res.resolve, res.access
+	reg.put("team/app/manifests/"+amd, "application/vnd.oci.image.manifest.v1+json", `{}`, amd)
 	image := reg.host() + "/team/app:v1"
 	sb := h.sandbox(512)
 	h.exec("UPDATE sandboxes SET image = $2 WHERE id = $1", sb.ID, image)
@@ -350,4 +386,91 @@ func TestEnsureResolvesAndPinsImage(t *testing.T) {
 	_, err = e.Ensure(ctx, bad.ID)
 	wantErr(t, err, nil, "resolve image "+reg.host()+"/team/missing:v1: not found")
 	wantState(t, h.row(bad.ID), model.StatePending)
+}
+
+// The question before a create (ADR 0025): HEAD of the manifest by its
+// digest with the realm's token, which is kept; the registry's no, and
+// no answer, which is no as well.
+func TestResolverAccess(t *testing.T) {
+	reg := newRegistry(t)
+	const mt = "application/vnd.oci.image.manifest.v1+json"
+	body := `{"mediaType":"` + mt + `","config":{"digest":"sha256:c0"}}`
+	d := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(body)))
+	other := "sha256:" + strings.Repeat("1", 64)
+	for _, repo := range []string{"team/app", "team/slow", "team/head"} {
+		reg.put(repo+"/manifests/"+d, mt, body, d)
+	}
+	res := reg.resolver()
+	pinned := func(repo, digest string) string { return reg.host() + "/" + repo + "@" + digest }
+
+	// A yes, with the realm's token; the next question takes the token
+	// kept and asks once.
+	for range 2 {
+		if err := res.access(bg, pinned("team/app", d)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, h := reg.tokenRequests(), reg.hitsOf("team/app/manifests/"+d); n != 1 || h != 3 {
+		t.Fatalf("%d token requests and %d questions, want 1 and 3", n, h)
+	}
+	noAnswerWith := func(err error, text string) {
+		t.Helper()
+		var na *noAnswerError
+		if !errors.As(err, &na) || !strings.Contains(err.Error(), text) {
+			t.Fatalf("%v, want no answer with %q", err, text)
+		}
+	}
+	// The registry does not have it, or refuses it.
+	if err := res.access(bg, pinned("team/app", other)); !errors.Is(err, errImageNotThere) {
+		t.Fatalf("missing: %v", err)
+	}
+	reg.set(func(r *registry) { r.status["team/secret/manifests/"+d] = http.StatusForbidden })
+	if err := res.access(bg, pinned("team/secret", d)); !errors.Is(err, errImageRefused) {
+		t.Fatalf("forbidden: %v", err)
+	}
+	// An answer for another digest, a rate limit or a failure is none.
+	reg.put("team/liar/manifests/"+d, mt, body, other)
+	noAnswerWith(res.access(bg, pinned("team/liar", d)), "answered for "+other)
+	reg.set(func(r *registry) {
+		r.status["team/busy/manifests/"+d] = http.StatusTooManyRequests
+		r.status["team/down/manifests/"+d] = http.StatusServiceUnavailable
+	})
+	noAnswerWith(res.access(bg, pinned("team/busy", d)), "rate-limited")
+	noAnswerWith(res.access(bg, pinned("team/down", d)), "HTTP 503")
+	noAnswerWith(newResolver(nil).access(bg, "127.0.0.1:1/x/y@"+d), "registry 127.0.0.1:1 unreachable")
+	// A registry that does not answer HEAD is asked with GET, and the
+	// body must be the digest's.
+	reg.set(func(r *registry) { r.noHead = true })
+	if err := res.access(bg, pinned("team/head", d)); err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	reg.put("team/forged/manifests/"+d, mt, `{"forged":true}`, "")
+	noAnswerWith(res.access(bg, pinned("team/forged", d)), "served a manifest of")
+	reg.set(func(r *registry) { r.noHead = false })
+	// A realm that refuses a token refuses the image.
+	reg.set(func(r *registry) { r.tokenStatus = http.StatusUnauthorized })
+	if err := res.access(bg, pinned("team/other", d)); !errors.Is(err, errImageRefused) {
+		t.Fatalf("realm refused: %v", err)
+	}
+	reg.set(func(r *registry) { r.tokenStatus = 0 })
+	// Only a pinned image is asked for.
+	if err := res.access(bg, reg.host()+"/team/app:v1"); err == nil || !strings.Contains(err.Error(), "not pinned") {
+		t.Fatalf("a tag: %v", err)
+	}
+	// Questions at once share one request: the challenge and the answer.
+	reg.set(func(r *registry) { r.delays["team/slow/manifests/"+d] = 300 * time.Millisecond })
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Go(func() { errs[i] = res.access(bg, pinned("team/slow", d)) })
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h := reg.hitsOf("team/slow/manifests/" + d); h != 2 {
+		t.Fatalf("%d requests for 8 questions at once, want 2", h)
+	}
 }

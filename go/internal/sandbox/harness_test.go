@@ -144,6 +144,8 @@ func (h *harness) addInstance(id string, mod ...func(*Config)) *instance {
 		t.Fatal(err)
 	}
 	in.eng.resolveImage = fakeResolve
+	// The images of the tests name no registry that answers (ADR 0025).
+	in.eng.checkImage = func(context.Context, string) error { return nil }
 	in.eng.t.waitPoll = 100 * time.Millisecond
 	in.eng.t.deferredEvery = 500 * time.Millisecond
 	// The tests look for orphaned ops themselves (Engine.orphans).

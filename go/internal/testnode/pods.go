@@ -529,6 +529,7 @@ func (p *podService) bringUpPod(ctx context.Context, id string, pd *pod) {
 		pd.info.State, pd.info.Reason = podv1.PodState_POD_STATE_FAILED, failed.Error()
 	} else {
 		pd.guestDown, pd.exited = false, nil
+		bakeLocked(pd.info)
 		pd.info.State, pd.info.Reason = podv1.PodState_POD_STATE_RUNNING, ""
 		// A boot is a new microVM process, as on feosd.
 		p.nextPID++
@@ -537,6 +538,41 @@ func (p *podService) bringUpPod(ctx context.Context, id string, pd *pod) {
 		scheduled = p.bootedLocked(pd, true)
 	}
 	p.announceLocked(pd.info, false)
+}
+
+// The guest version and blank data volume of the test node's disks: what
+// a baked layer is made for (ADR 0025).
+const (
+	GuestVersion = "testnode-guest"
+	BlankLayer   = "testnode-l0"
+)
+
+// bakeLocked does at a pod's first bring-up what feosd's bake point does
+// (ADR 0025): a pod whose create named its one container's image starts
+// its disk on the first layer made for the node's guest and blank data
+// volume, or, if none is and the create lets it, bakes the image; the
+// bake is reported at once, as feosd reports it once the object store has
+// it. A pod with a disk already, or of a checkpoint, is left as it is.
+func bakeLocked(info *podv1.PodInfo) {
+	layers := info.GetImageLayers()
+	containers := info.GetSpec().GetContainers()
+	if info.Disk != nil || info.Checkpoint != nil || layers.GetImageRef() == "" || len(containers) != 1 ||
+		containers[0].GetImageRef() != layers.GetImageRef() {
+		return
+	}
+	disk := &podv1.BakedLayer{ImageRef: layers.GetImageRef(), GuestVersion: GuestVersion, L0: BlankLayer}
+	for _, l := range layers.GetLayers() {
+		if l.GetImageRef() == layers.GetImageRef() && l.GetGuestVersion() == GuestVersion && l.GetL0() == BlankLayer {
+			disk.LayerId = l.GetLayerId()
+			break
+		}
+	}
+	info.Disk = disk
+	if disk.LayerId == "" && layers.GetBake() {
+		baked := proto.Clone(disk).(*podv1.BakedLayer)
+		baked.LayerId = "baked-" + info.PodId
+		info.Baked = baked
+	}
 }
 
 // allocateLocked gives a pod its addresses, refusing a TAP device that
@@ -629,7 +665,7 @@ func containerStatuses(spec *podv1.PodSpec, exited map[string]containerExit) []*
 
 func (p *podService) CreatePod(ctx context.Context, req *podv1.CreatePodRequest) (*podv1.CreatePodResponse, error) {
 	return mutate(p, ctx, func(ctx context.Context) (*podv1.CreatePodResponse, error) {
-		info, err := p.create(ctx, req.GetPodId(), req.GetSpec())
+		info, err := p.create(ctx, req.GetPodId(), req.GetSpec(), req.GetImageLayers())
 		if err != nil {
 			return nil, err
 		}
@@ -637,7 +673,7 @@ func (p *podService) CreatePod(ctx context.Context, req *podv1.CreatePodRequest)
 	})
 }
 
-func (p *podService) create(ctx context.Context, id string, spec *podv1.PodSpec) (*podv1.PodInfo, error) {
+func (p *podService) create(ctx context.Context, id string, spec *podv1.PodSpec, layers *podv1.ImageLayers) (*podv1.PodInfo, error) {
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
@@ -653,6 +689,9 @@ func (p *podService) create(ctx context.Context, id string, spec *podv1.PodSpec)
 		return sameSpec(info, spec)
 	}
 	info := &podv1.PodInfo{PodId: id, Spec: spec, State: podv1.PodState_POD_STATE_PENDING}
+	if layers != nil {
+		info.ImageLayers = proto.Clone(layers).(*podv1.ImageLayers)
+	}
 	if hasNetwork(spec) {
 		if err := p.allocateLocked(info); err != nil {
 			p.mu.Unlock()

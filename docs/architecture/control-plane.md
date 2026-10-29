@@ -92,6 +92,7 @@ kind ([The ingress](#the-ingress)).
 | `--domain-reserved` | none | a zone no domain may be or be under (the platform's own domain, where `run`, `id` and `edge` are), beside the apps zone and `--edge-name`; repeatable |
 | `--dns-resolver` | the system's resolvers (`/etc/resolv.conf`) | the DNS resolver, `host:port`, the domains' checks ask |
 | `--default-image` | `ghcr.io/maltej/debian-ai:latest` | the image of a sandbox created without one |
+| `--image-bakes` | true | a create names the baked layers of its image and lets its node bake it ([Images](#images), ADR 0025); false: neither |
 | `--default-vcpus`, `--default-memory-mib` | 2, 512 | the size of a sandbox created without one |
 | `--placement` | `binpack` | or `spread` |
 | `--disk-budget` | `4GiB` | placement's disk gate per pod |
@@ -247,6 +248,7 @@ certificate issued), `host_labels` (every default host label ever given,
 and its tenant); `sandboxes`, `sandbox_tokens`, `sandbox_holds`,
 `pod_tombstones`, `bookings`; `tool_calls` (the keyed tool calls, [Calls
 that outlive their caller](#calls-that-outlive-their-caller));
+`image_bakes` (the baked layers of images, [Images](#images));
 `activity` and `traffic_records`, partitioned by day; `issued_certs`
 (pods' certificates); `watches`;
 `kube_bindings`, `ssh_bindings`; `auth_logins`, `ui_sessions`;
@@ -1045,7 +1047,7 @@ A sandbox's image is resolved once, before its first create, to
 `linux/amd64` from an index, anonymous registry tokens, a tag cache of
 60 s), and pinned in the row: every retry and every later create sends the
 same digest, so a moved tag never changes a sandbox. Private registries
-are not supported. The tenant names the image, and the image names the
+are not supported yet. The tenant names the image, and the image names the
 registry, so the resolver reaches registries as bindings reach servers:
 over https only, without a proxy, and at IPv4 addresses outside the deny
 set (`--deny-prefix`, by default the private, shared, link-local,
@@ -1054,6 +1056,40 @@ address it dials, for the registry, every redirect and the token realm
 alike. Its errors
 name the address refused, or that the registry is unreachable, never
 what a dial found there.
+
+**The question before a create** (ADR 0025). Every create of a new pod
+(a pending sandbox's, whatever made it pending) asks the pinned image's
+registry first, before placement: `HEAD /v2/<repository>/manifests/<digest>`
+(a `GET` whose body must have the digest where `HEAD` is answered with
+405), the Bearer challenge answered at its realm. A 200, whose
+`Docker-Content-Digest` is the digest when it names one, is a yes and
+the only answer that creates the pod. 401 and 403, a realm that refuses
+a token, or a challenge for a login, fail the Ensure with
+`model.ErrImageRefused` ("image …: the registry refused it"), 404 the
+same ("… does not have it for this create"); no answer (unreachable, a
+timeout of 30 s, 429, another status, another digest) fails it with
+`model.ErrRegistryUnavailable`, retryable after 15 s. Either is the
+sandbox's status description, and the sandbox stays pending. A resume,
+a restore, a start and a repair ask nothing: they bring up a pod that
+was created. The registry's token is kept per asker, registry and scope
+until 10 s before its `expires_in` (60 s when it names none), and
+nothing else is: questions of the same asker and image at once share
+one request, on a context of their own. Tests and test clusters replace
+the question (`Engine.SetImageAccess`).
+
+**Baked images** (ADR 0025, `--image-bakes`). A create names, beside its
+pod spec, the baked layers of its image that `image_bakes` holds, the
+newest first, at most 16, and lets the node bake the image
+(`CreatePodRequest.image_layers`); the key is the pinned image, registry,
+repository and manifest digest, never a digest alone. feosd starts the
+new pod's disk on the first layer made for its guest and blank data
+volume that the object store has, or bakes the image at the pod's bake
+point ([node.md](node.md#a-pod)) and names the layer in the pod's record
+(`PodInfo.baked`) once the store has it. Every observation of a pod
+(`getPod`) records a bake it names in `image_bakes`, once per instance
+and layer; a layer the store lost is passed over by the nodes, and the
+next bake of the image is a row of its own. Nothing collects layers or
+rows yet.
 
 ### Sync and reconcile
 

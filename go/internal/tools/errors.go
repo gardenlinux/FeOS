@@ -166,7 +166,8 @@ func feosdRefusal(err error, id podid.ID) bool {
 
 // Retryable reports whether a failed call is worth repeating shortly, as
 // the REST tool routes tell with Retry-After: no capacity, a node or
-// instance that is unavailable or stopping, an op in flight that the
+// instance that is unavailable or stopping, an image's registry that did
+// not answer the question before a create, an op in flight that the
 // sandbox's preparation does not wait for (a hibernation), a stream or
 // tool budget, the exec cap or the cap of calls with an id exhausted, a
 // call cut by a forced drain, a call with an id that could not be
@@ -174,6 +175,7 @@ func feosdRefusal(err error, id podid.ID) bool {
 func Retryable(err error) bool {
 	switch {
 	case errors.Is(err, model.ErrNoCapacity), errors.Is(err, model.ErrNodeUnavailable),
+		errors.Is(err, model.ErrRegistryUnavailable),
 		errors.Is(err, model.ErrStopping), errors.Is(err, model.ErrBusy), errors.Is(err, ErrExecCap),
 		errors.Is(err, ErrCancelled), errors.Is(err, ErrCallCap), errors.Is(err, ErrRecord),
 		errors.Is(err, ErrCallNotRun):

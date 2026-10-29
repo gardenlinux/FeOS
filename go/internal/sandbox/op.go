@@ -140,6 +140,9 @@ type OpHandle struct {
 	span, parent string
 	// spec is a create's pod spec, built before its call (prepare).
 	spec *podv1.PodSpec
+	// layers are the baked layers of a create's image it names (prepare,
+	// ADR 0025); nil: none, and no bake.
+	layers *podv1.ImageLayers
 
 	mu sync.Mutex
 	// dirty: a pod event arrived while the op ran; the finish syncs.
@@ -580,7 +583,7 @@ func (e *Engine) callOp(ctx context.Context, pc podv1.PodServiceClient, h *OpHan
 	var res callResult
 	switch h.kind {
 	case OpCreate:
-		resp, err := pc.CreatePod(ctx, &podv1.CreatePodRequest{PodId: id, Spec: h.spec})
+		resp, err := pc.CreatePod(ctx, &podv1.CreatePodRequest{PodId: id, Spec: h.spec, ImageLayers: h.layers})
 		res.err = err
 		if err == nil {
 			res.pod = resp.GetPod()

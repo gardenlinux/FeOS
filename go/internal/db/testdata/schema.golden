@@ -322,6 +322,18 @@ TABLE host_labels
   CONSTRAINT UNIQUE (env_id)
   CREATE UNIQUE INDEX host_labels_env_id_key ON public.host_labels USING btree (env_id)
   CREATE UNIQUE INDEX host_labels_pkey ON public.host_labels USING btree (label)
+TABLE image_bakes
+  COLUMN image text COLLATE "C" NOT NULL
+  COLUMN guest_version text COLLATE "C" NOT NULL
+  COLUMN l0 text COLLATE "C" NOT NULL
+  COLUMN layer text COLLATE "C" NOT NULL
+  COLUMN node text NOT NULL
+  COLUMN baked_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK (((guest_version <> ''::text) AND (l0 <> ''::text) AND (layer <> ''::text)))
+  CONSTRAINT CHECK ((image ~ '@sha256:[0-9a-f]{64}$'::text))
+  CONSTRAINT PRIMARY KEY (image, guest_version, l0, layer)
+  CREATE INDEX image_bakes_newest ON public.image_bakes USING btree (image, baked_at DESC)
+  CREATE UNIQUE INDEX image_bakes_pkey ON public.image_bakes USING btree (image, guest_version, l0, layer)
 TABLE ingress_certs
   COLUMN serial text NOT NULL
   COLUMN ingress text NOT NULL

@@ -285,6 +285,25 @@ every call with any other ID fails with `INVALID_ARGUMENT`.
   a restart of `feosd` cut off is taken up again where it ended. A create with the ID of a pod
   that exists returns that pod if the spec is the same, and fails with
   `ALREADY_EXISTS` if not.
+- **Baked images** (ADR 0025). A create may name, beside its spec, the
+  image of the pod's one container, layers baked of it, and whether the
+  pod may bake it (`image_layers`, kept in the pod's record and never
+  compared). The pod's new disk starts on the first of those layers that
+  is made for the newest guest installed (its directory's name) and that
+  guest's blank data volume, and whose manifest diskd has or fetches
+  (`Pull`); one it cannot fetch is passed over, and with none the disk is
+  on the blank data volume. The record says what the disk was made on
+  (`disk`). A pod on the blank data volume whose create lets it bakes the
+  image at its bake point, after its volumes are mounted and before its
+  first container, unless the guest has that container already or diskd
+  has no object store: the guest pulls the image into its image store
+  (`PullImage`), its data volume is frozen (`FreezeFilesystem`, after a
+  thaw of a freeze a restart cut off), diskd seals the disk's top as a
+  layer on L0 (`Bake`), and the volume is thawed. A pull, freeze or seal
+  that fails, and a guest that cannot freeze, leave the bring-up as it
+  would have been; a volume that stays frozen fails it. The layer goes to
+  the object store in the background (`Push`, three tries), and once it
+  is there the record names it (`baked`) and the pod's event says so.
 - **Stop** ends a bring-up, shuts the microVM down, or removes it if it
   does not go or is not running, and stops the disk; a microVM that is
   busy (its late snapshot) is left alone, and the stop answers

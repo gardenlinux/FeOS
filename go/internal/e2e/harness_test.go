@@ -257,6 +257,8 @@ func (c *cluster) start(name string, tune ...func(*config.Config)) *instance {
 		}
 		c.t.Fatalf("instance %s: %v", name, err)
 	}
+	// The test image names no registry that answers (ADR 0025).
+	si.Engine.SetImageAccess(func(context.Context, string) error { return nil })
 	ctx, cancel := context.WithCancel(bg)
 	in := &instance{Instance: si, name: name, cancel: cancel, done: make(chan error, 1), stopped: make(chan struct{}),
 		finished: make(chan struct{})}

@@ -20,14 +20,17 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/gardenlinux/feos/go/internal/bindings"
 )
 
 // The image resolver pins an image to the digest of its linux/amd64
 // manifest, so that a sandbox never silently changes image and a tag that
-// moves never breaks CreatePod's idempotency (§9 "Image resolution"). It
-// speaks the anonymous registry protocol only, over https: private
-// registries are not supported.
+// moves never breaks CreatePod's idempotency (§9 "Image resolution"), and
+// asks an image's registry before every create whether the image may be
+// pulled (access, ADR 0025). It speaks the anonymous registry protocol
+// only, over https: private registries are not supported yet.
 const (
 	resolveTTL          = 60 * time.Second
 	resolveTimeout      = 30 * time.Second
@@ -41,9 +44,42 @@ const (
 		"application/vnd.docker.distribution.manifest.v2+json"
 )
 
+const (
+	// tokenTTL is a registry token's life when its realm names none, as
+	// the distribution spec says; tokenSlack is how long before its end
+	// a token is no longer used.
+	tokenTTL   = 60 * time.Second
+	tokenSlack = 10 * time.Second
+	// anonymous is the asker without credentials, in the keys of the
+	// caches and of the shared questions: a create's credentials will key
+	// them by an HMAC of their own (ADR 0025).
+	anonymous = ""
+)
+
 // errImageNotFound is the answer of a registry that does not serve the
 // image anonymously: it does not exist, or is private.
 var errImageNotFound = errors.New("not found (private registries are not supported and look like this)")
+
+// The registry's no to the question before a create (access): it refused
+// the asker, or does not have the image for it (a private repository
+// looks like that too).
+var (
+	errImageRefused  = errors.New("the registry refused it")
+	errImageNotThere = errors.New("the registry does not have it")
+	// errRealmRefused is a token realm that refused a token (401, 403,
+	// 404).
+	errRealmRefused = errors.New("the token realm refused a token")
+)
+
+// noAnswerError is a question before a create that the registry did not
+// answer: unreachable, too slow, rate-limited, failing, or answering for
+// another digest. It is no, and the create asks again later.
+type noAnswerError struct{ err error }
+
+func (e *noAnswerError) Error() string { return e.err.Error() }
+func (e *noAnswerError) Unwrap() error { return e.err }
+
+func noAnswer(format string, args ...any) error { return &noAnswerError{fmt.Errorf(format, args...)} }
 
 var authParam = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
@@ -117,11 +153,26 @@ type resolver struct {
 
 	mu    sync.Mutex
 	cache map[string]resolved
+	// tokens are the registries' tokens, by asker, host and scope, kept
+	// until shortly before their end: the registry's own yes, for as long
+	// as it gives it, and the only answer kept.
+	tokens map[tokenKey]heldToken
+	// asks shares questions of the same asker and image at once.
+	asks singleflight.Group
 }
 
 type resolved struct {
 	pinned  string
 	expires time.Time
+}
+
+// tokenKey names a registry token: who asked (anonymous, or a create's
+// credentials), the registry and the token's scope.
+type tokenKey struct{ who, host, scope string }
+
+type heldToken struct {
+	token string
+	until time.Time
 }
 
 // newResolver returns a resolver that reaches registries over https only,
@@ -154,7 +205,7 @@ func newResolver(deny []netip.Prefix) *resolver {
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 	return &resolver{client: &http.Client{Transport: t, CheckRedirect: httpsRedirect}, transport: t, now: time.Now,
-		cache: map[string]resolved{}}
+		cache: map[string]resolved{}, tokens: map[tokenKey]heldToken{}}
 }
 
 // deniedError is a dial the destination rule refused.
@@ -210,9 +261,12 @@ func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
 	if ref.digest() {
 		return ref.pinned(ref.ref), nil
 	}
+	// The tag cache is the asker's: what one asker resolved says nothing
+	// about another's access.
+	key := anonymous + "\x00" + image
 	now := r.now()
 	r.mu.Lock()
-	if c, ok := r.cache[image]; ok && now.Before(c.expires) {
+	if c, ok := r.cache[key]; ok && now.Before(c.expires) {
 		r.mu.Unlock()
 		return c.pinned, nil
 	}
@@ -256,7 +310,7 @@ func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
 	}
 	pinned := ref.pinned(digest)
 	r.mu.Lock()
-	r.cache[image] = resolved{pinned: pinned, expires: now.Add(resolveTTL)}
+	r.cache[key] = resolved{pinned: pinned, expires: now.Add(resolveTTL)}
 	for k, c := range r.cache {
 		if !now.Before(c.expires) {
 			delete(r.cache, k)
@@ -264,6 +318,115 @@ func (r *resolver) resolve(ctx context.Context, image string) (string, error) {
 	}
 	r.mu.Unlock()
 	return pinned, nil
+}
+
+// access asks the registry of pinned, a reference with a digest, whether
+// the asker may pull that manifest, before every create of a pod that
+// runs it (ADR 0025): HEAD /v2/<repository>/manifests/<digest> (a GET
+// where the registry does not answer HEAD), the registry's Bearer
+// challenge answered with a token of its realm. nil is a yes;
+// errImageRefused and errImageNotThere are the registry's no; a
+// *noAnswerError is no answer, and no as well. Nothing but the
+// registry's token is kept, and questions of the same asker and image at
+// once share one request, which runs on a context of its own, bounded by
+// resolveTimeout, so that a caller who goes away does not end the others'.
+func (r *resolver) access(ctx context.Context, pinned string) error {
+	ref, err := parseImageRef(pinned)
+	if err != nil {
+		return err
+	}
+	if !ref.digest() {
+		return fmt.Errorf("image %s is not pinned to a digest", pinned)
+	}
+	key := anonymous + "\x00" + ref.pinned(ref.ref)
+	ch := r.asks.DoChan(key, func() (any, error) {
+		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolveTimeout)
+		defer cancel()
+		return nil, r.ask(actx, ref)
+	})
+	select {
+	case res := <-ch:
+		return res.Err
+	case <-ctx.Done():
+		return &noAnswerError{fmt.Errorf("registry %s: %w", ref.host, ctx.Err())}
+	}
+}
+
+// ask is access's request: with the token kept, or none; a 401 drops it
+// and answers the challenge once; a 405 to HEAD asks with GET.
+func (r *resolver) ask(ctx context.Context, ref imageRef) error {
+	u := fmt.Sprintf("https://%s/v2/%s/manifests/%s", ref.host, ref.repo, ref.ref)
+	tk := tokenKey{who: anonymous, host: ref.host, scope: "repository:" + ref.repo + ":pull"}
+	method := http.MethodHead
+	token := r.heldToken(tk)
+	challenged := false
+	for {
+		req, err := http.NewRequestWithContext(ctx, method, u, nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Accept", resolveManifestType)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := r.client.Do(req)
+		if err != nil {
+			return &noAnswerError{unreachable(ctx, "registry "+ref.host, err)}
+		}
+		switch {
+		case resp.StatusCode == http.StatusUnauthorized && !challenged:
+			challenge := resp.Header.Get("WWW-Authenticate")
+			discard(resp)
+			r.dropToken(tk, token)
+			challenged = true
+			token, err = r.bearer(ctx, tk, challenge)
+			switch {
+			case errors.Is(err, errRealmRefused):
+				return errImageRefused
+			case err != nil && strings.HasPrefix(err.Error(), "unsupported auth challenge"):
+				// A login this asker does not have, as Basic
+				// authentication asks for.
+				return fmt.Errorf("%w: %v", errImageRefused, err)
+			case err != nil:
+				return &noAnswerError{err}
+			}
+			continue
+		case resp.StatusCode == http.StatusMethodNotAllowed && method == http.MethodHead:
+			discard(resp)
+			method = http.MethodGet
+			continue
+		}
+		return answer(resp, method, ref)
+	}
+}
+
+// answer reads the registry's answer to access's request.
+func answer(resp *http.Response, method string, ref imageRef) error {
+	defer discard(resp)
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return errImageRefused
+	case http.StatusNotFound:
+		return errImageNotThere
+	case http.StatusTooManyRequests:
+		return noAnswer("registry %s rate-limited the question", ref.host)
+	default:
+		return noAnswer("registry %s answered HTTP %d", ref.host, resp.StatusCode)
+	}
+	if d := resp.Header.Get("Docker-Content-Digest"); d != "" && d != ref.ref {
+		return noAnswer("registry %s answered for %s, not %s", ref.host, d, ref.ref)
+	}
+	if method == http.MethodGet {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, resolveManifestMax))
+		if err != nil {
+			return noAnswer("registry %s: manifest read: %v", ref.host, err)
+		}
+		if d := fmt.Sprintf("sha256:%x", sha256.Sum256(body)); d != ref.ref {
+			return noAnswer("registry %s served a manifest of %s, not %s", ref.host, d, ref.ref)
+		}
+	}
+	return nil
 }
 
 // manifest fetches a manifest anonymously, answering a Bearer challenge
@@ -282,15 +445,20 @@ func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest strin
 		}
 		return r.client.Do(req)
 	}
-	resp, err := get("")
+	tk := tokenKey{who: anonymous, host: ref.host, scope: "repository:" + ref.repo + ":pull"}
+	held := r.heldToken(tk)
+	resp, err := get(held)
 	if err != nil {
 		return nil, "", unreachable(ctx, "registry "+ref.host, err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		challenge := resp.Header.Get("WWW-Authenticate")
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-		resp.Body.Close()
-		token, err := r.token(ctx, challenge)
+		discard(resp)
+		r.dropToken(tk, held)
+		token, err := r.bearer(ctx, tk, challenge)
+		if errors.Is(err, errRealmRefused) {
+			return nil, "", errImageNotFound
+		}
 		if err != nil {
 			return nil, "", err
 		}
@@ -315,10 +483,63 @@ func (r *resolver) manifest(ctx context.Context, ref imageRef, tagOrDigest strin
 	return body, resp.Header.Get("Docker-Content-Digest"), nil
 }
 
-// token answers a WWW-Authenticate Bearer challenge anonymously.
-func (r *resolver) token(ctx context.Context, challenge string) (string, error) {
+// bearer answers a WWW-Authenticate Bearer challenge for the token tk
+// names, and keeps the token until shortly before its end.
+func (r *resolver) bearer(ctx context.Context, tk tokenKey, challenge string) (string, error) {
+	token, ttl, err := r.token(ctx, challenge)
+	if err != nil {
+		return "", err
+	}
+	if ttl > tokenSlack {
+		now := r.now()
+		r.mu.Lock()
+		for k, t := range r.tokens {
+			if !now.Before(t.until) {
+				delete(r.tokens, k)
+			}
+		}
+		r.tokens[tk] = heldToken{token: token, until: now.Add(ttl - tokenSlack)}
+		r.mu.Unlock()
+	}
+	return token, nil
+}
+
+// heldToken returns the token kept for tk, or "".
+func (r *resolver) heldToken(tk tokenKey) string {
+	now := r.now()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if t, ok := r.tokens[tk]; ok && now.Before(t.until) {
+		return t.token
+	}
+	return ""
+}
+
+// dropToken forgets the token kept for tk if it is token: the registry no
+// longer took it.
+func (r *resolver) dropToken(tk tokenKey, token string) {
+	if token == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if t, ok := r.tokens[tk]; ok && t.token == token {
+		delete(r.tokens, tk)
+	}
+}
+
+// discard reads a little of a body that is not used, and closes it.
+func discard(resp *http.Response) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	resp.Body.Close()
+}
+
+// token answers a WWW-Authenticate Bearer challenge anonymously, and
+// returns the token's life (expires_in, 60 s when the realm names none).
+// A realm that refuses is errRealmRefused.
+func (r *resolver) token(ctx context.Context, challenge string) (string, time.Duration, error) {
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(challenge)), "bearer") {
-		return "", errors.New("unsupported auth challenge (anonymous pulls only)")
+		return "", 0, errors.New("unsupported auth challenge (anonymous pulls only)")
 	}
 	params := map[string]string{}
 	for _, m := range authParam.FindAllStringSubmatch(challenge, -1) {
@@ -326,13 +547,13 @@ func (r *resolver) token(ctx context.Context, challenge string) (string, error) 
 	}
 	realm := params["realm"]
 	if realm == "" {
-		return "", errors.New("unsupported auth challenge (anonymous pulls only)")
+		return "", 0, errors.New("unsupported auth challenge (anonymous pulls only)")
 	}
 	// The realm is fetched as the registry is: over https, under the
 	// destination rule.
 	u, err := url.Parse(realm)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
-		return "", errors.New("unsupported auth challenge: the token realm is not an https URL")
+		return "", 0, errors.New("unsupported auth challenge: the token realm is not an https URL")
 	}
 	q := u.Query()
 	if v := params["service"]; v != "" {
@@ -344,31 +565,36 @@ func (r *resolver) token(ctx context.Context, challenge string) (string, error) 
 	u.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", unreachable(ctx, "token realm "+u.Host, err)
+		return "", 0, unreachable(ctx, "token realm "+u.Host, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized {
-			return "", errImageNotFound
+			return "", 0, errRealmRefused
 		}
-		return "", fmt.Errorf("token realm answered HTTP %d", resp.StatusCode)
+		return "", 0, fmt.Errorf("token realm answered HTTP %d", resp.StatusCode)
 	}
 	var tok struct {
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
+		ExpiresIn   int64  `json:"expires_in"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tok); err != nil {
-		return "", errors.New("token realm returned no token")
+		return "", 0, errors.New("token realm returned no token")
+	}
+	ttl := tokenTTL
+	if tok.ExpiresIn > 0 {
+		ttl = time.Duration(min(tok.ExpiresIn, 24*3600)) * time.Second
 	}
 	if tok.Token != "" {
-		return tok.Token, nil
+		return tok.Token, ttl, nil
 	}
 	if tok.AccessToken != "" {
-		return tok.AccessToken, nil
+		return tok.AccessToken, ttl, nil
 	}
-	return "", errors.New("token realm returned no token")
+	return "", 0, errors.New("token realm returned no token")
 }

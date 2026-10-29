@@ -17,11 +17,12 @@
 //! a disk as large as the volume.
 
 use feos_proto::disk_service::{
-    disk_service_client::DiskServiceClient, CloseMemoryRequest, CreateDiskRequest, GetHeadRequest,
-    GetObjectRequest, Head, ImportBaseRequest, Layer, MemoryRef, OpenDiskRequest,
-    OpenMemoryRequest, PutHeadRequest, PutObjectRequest, RemoveDeviceRequest, SealFileRequest,
-    SealRequest, StatsRequest, StatsResponse, StopDiskRequest,
+    disk_service_client::DiskServiceClient, BakeRequest, CloseMemoryRequest, CreateDiskRequest,
+    GetHeadRequest, GetObjectRequest, Head, ImportBaseRequest, Layer, LayerRef, MemoryRef,
+    OpenDiskRequest, OpenMemoryRequest, PutHeadRequest, PutObjectRequest, RemoveDeviceRequest,
+    SealFileRequest, SealRequest, StatsRequest, StatsResponse, StopDiskRequest,
 };
+use feos_proto::pod_service::BakedLayer;
 use feos_proto::volume_service::{Volume, VolumeState};
 use hyper_util::rt::TokioIo;
 use log::{info, warn};
@@ -98,16 +99,22 @@ impl Disks {
 
     /// Starts the pod's disk for a boot, and returns the path Firecracker
     /// takes: the disk the node has of the pod, or the one of its
-    /// checkpoint `head_key`, or a new one on the blank data volume.
-    pub async fn open(&self, pod_id: &str, head_key: Option<&str>) -> Result<String, Status> {
+    /// checkpoint `head_key`, or a new one, on a layer baked of the pod's
+    /// `image` or on the blank data volume (ADR 0025). For a new disk of a
+    /// pod with an image, it also returns what the disk was made on.
+    pub async fn open(
+        &self,
+        pod_id: &str,
+        head_key: Option<&str>,
+        image: Option<(&str, &[BakedLayer])>,
+    ) -> Result<(String, Option<BakedLayer>), Status> {
         if let Some(device) = self.open_existing(pod_id).await? {
-            return Ok(device);
+            return Ok((device, None));
         }
-        let device = match head_key {
-            Some(head_key) => self.open_checkpoint(pod_id, head_key).await?,
-            None => self.create(pod_id).await?,
-        };
-        Ok(device)
+        match head_key {
+            Some(head_key) => Ok((self.open_checkpoint(pod_id, head_key).await?, None)),
+            None => self.create(pod_id, image).await,
+        }
     }
 
     /// Starts the disk the node has of `disk`, if it has one.
@@ -227,8 +234,76 @@ impl Disks {
         Ok(device.into_inner().link_path)
     }
 
+    /// A new disk: on the newest of `image`'s baked layers that is made for
+    /// the newest guest installed and its blank data volume and that the
+    /// object store has, else on the blank data volume. Returns what the
+    /// disk was made on when the pod has an image.
+    async fn create(
+        &self,
+        pod_id: &str,
+        image: Option<(&str, &[BakedLayer])>,
+    ) -> Result<(String, Option<BakedLayer>), Status> {
+        let (blank, guest_version) = self.blank().await?;
+        let made = |layer_id: &str| {
+            image.map(|(image_ref, _)| BakedLayer {
+                image_ref: image_ref.to_string(),
+                guest_version: guest_version.clone(),
+                l0: blank.clone(),
+                layer_id: layer_id.to_string(),
+            })
+        };
+        if let Some((image_ref, layers)) = image {
+            for layer in layers.iter().filter(|layer| {
+                layer.image_ref == image_ref
+                    && layer.guest_version == guest_version
+                    && layer.l0 == blank
+                    && !layer.layer_id.is_empty()
+            }) {
+                match self.create_on_layer(pod_id, &blank, &layer.layer_id).await {
+                    Ok(device) => {
+                        info!(
+                            "Disks: {pod_id} has a new disk on layer {} of {image_ref}",
+                            layer.layer_id
+                        );
+                        return Ok((device, made(&layer.layer_id)));
+                    }
+                    Err(e) => warn!(
+                        "Disks: {pod_id} does not start on layer {} of {image_ref}: {}; passed over",
+                        layer.layer_id,
+                        e.message()
+                    ),
+                }
+            }
+        }
+        let device = self.create_blank(pod_id).await?;
+        Ok((device, made("")))
+    }
+
+    /// A new disk on the baked layer `layer` over the blank data volume's
+    /// `blank`: its manifest is fetched from the object store first, unless
+    /// diskd has it.
+    async fn create_on_layer(
+        &self,
+        pod_id: &str,
+        blank: &str,
+        layer: &str,
+    ) -> Result<String, Status> {
+        let pull = LayerRef {
+            layer_id: layer.to_string(),
+            warm: false,
+        };
+        self.client().pull(pull).await.map_err(diskd)?;
+        let request = CreateDiskRequest {
+            pod_id: pod_id.to_string(),
+            chain: vec![blank.to_string(), layer.to_string()],
+            logical_size: 0,
+        };
+        let device = self.client().create_disk(request).await.map_err(diskd)?;
+        Ok(device.into_inner().link_path)
+    }
+
     /// A new disk on the blank data volume.
-    async fn create(&self, pod_id: &str) -> Result<String, Status> {
+    async fn create_blank(&self, pod_id: &str) -> Result<String, Status> {
         let create = |chain: String| {
             let mut client = self.client();
             let request = CreateDiskRequest {
@@ -238,7 +313,7 @@ impl Disks {
             };
             async move { client.create_disk(request).await }
         };
-        let device = match create(self.blank().await?).await {
+        let device = match create(self.blank().await?.0).await {
             Ok(device) => device,
             // diskd may have lost the layer since it was imported: once
             // more, imported anew.
@@ -248,7 +323,7 @@ impl Disks {
                     e.message()
                 );
                 self.blanks.lock().await.clear();
-                create(self.blank().await?).await.map_err(diskd)?
+                create(self.blank().await?.0).await.map_err(diskd)?
             }
             Err(e) => return Err(diskd(e)),
         };
@@ -257,18 +332,23 @@ impl Disks {
     }
 
     /// The layer of the blank data volume of the newest guest installed,
-    /// imported into diskd the first time a pod needs it.
-    async fn blank(&self) -> Result<String, Status> {
+    /// imported into diskd the first time a pod needs it, and that guest's
+    /// version: its directory's name.
+    async fn blank(&self) -> Result<(String, String), Status> {
         let guest = installed::newest_guest().ok_or_else(|| {
             Status::failed_precondition(format!(
                 "no guest is installed in {}",
                 installed::GUEST_DIR
             ))
         })?;
+        let version = guest
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let image = guest.join(BLANK_DATA_VOLUME);
         let mut blanks = self.blanks.lock().await;
         if let Some(layer) = blanks.get(&image) {
-            return Ok(layer.clone());
+            return Ok((layer.clone(), version));
         }
         if !image.is_file() {
             return Err(Status::failed_precondition(format!(
@@ -292,7 +372,33 @@ impl Disks {
             layer.layer_id
         );
         blanks.insert(image, layer.layer_id.clone());
-        Ok(layer.layer_id)
+        Ok((layer.layer_id, version))
+    }
+
+    /// Seals the frozen top of the pod's running disk as a layer on its L0
+    /// (ADR 0025): the guest's filesystem must be frozen, or diskd refuses.
+    /// The layer is not uploaded yet: `push` does that.
+    pub async fn bake(&self, pod_id: &str) -> Result<Layer, Status> {
+        let request = BakeRequest {
+            pod_id: pod_id.to_string(),
+            upload: false,
+        };
+        Ok(self
+            .client()
+            .bake(request)
+            .await
+            .map_err(diskd)?
+            .into_inner())
+    }
+
+    /// Uploads a layer to the object store: its chunks, then its manifest.
+    pub async fn push(&self, layer_id: &str) -> Result<(), Status> {
+        let request = LayerRef {
+            layer_id: layer_id.to_string(),
+            warm: false,
+        };
+        self.client().push(request).await.map_err(diskd)?;
+        Ok(())
     }
 
     /// Stops the pod's disk, which keeps what the pod wrote: its microVM

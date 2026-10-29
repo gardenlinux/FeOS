@@ -56,6 +56,7 @@ type engineHooks struct {
 	mu      sync.Mutex
 	secrets SecretResolver
 	prepare PrepareHook
+	access  func(ctx context.Context, pinned string) error
 }
 
 // SetSecretResolver sets what a pod template's secrets are unsealed with;
@@ -64,6 +65,30 @@ func (e *Engine) SetSecretResolver(r SecretResolver) {
 	e.hooks.mu.Lock()
 	defer e.hooks.mu.Unlock()
 	e.hooks.secrets = r
+}
+
+// SetImageAccess replaces the question an image's registry is asked
+// before every create (ADR 0025) with access: nil is a yes. For tests and
+// test clusters whose images name no registry that answers; nil keeps
+// the question as it is.
+func (e *Engine) SetImageAccess(access func(ctx context.Context, pinned string) error) {
+	if access == nil {
+		return
+	}
+	e.hooks.mu.Lock()
+	defer e.hooks.mu.Unlock()
+	e.hooks.access = access
+}
+
+// imageAccess is the question before a create: SetImageAccess's, or the
+// registry's.
+func (e *Engine) imageAccess() func(ctx context.Context, pinned string) error {
+	e.hooks.mu.Lock()
+	defer e.hooks.mu.Unlock()
+	if e.hooks.access != nil {
+		return e.hooks.access
+	}
+	return e.checkImage
 }
 
 // SetPrepareHook sets the hook that prepares a node for an op on a row
@@ -165,6 +190,7 @@ func (e *Engine) prepareSpec(ctx context.Context, h *OpHandle) error {
 		return &prepareError{node: h.target, kind: h.kind, err: err}
 	}
 	h.spec = spec
+	h.layers = e.imageLayers(ctx, h.row.ImageRef)
 	return nil
 }
 
