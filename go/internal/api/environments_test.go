@@ -204,9 +204,9 @@ func (f *fakeEnvs) CreateRouteToken(_ context.Context, tenant, env string) (envs
 func (f *fakeEnvs) RevokeRouteTokens(_ context.Context, tenant, env string) error {
 	return f.do(envCall{"RevokeRouteTokens", tenant, env, nil}, nil)
 }
-func (f *fakeEnvs) SetPublic(_ context.Context, tenant, env string, public bool) (envs.PublicAnswer, error) {
+func (f *fakeEnvs) SetPublic(_ context.Context, tenant, env string, public bool, hostLabel string) (envs.PublicAnswer, error) {
 	var out envs.PublicAnswer
-	return out, f.do(envCall{"SetPublic", tenant, env, []any{envs.PublicRequest{Public: public}}}, &out)
+	return out, f.do(envCall{"SetPublic", tenant, env, []any{envs.PublicRequest{Public: public, HostLabel: hostLabel}}}, &out)
 }
 func (f *fakeEnvs) ServeRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Door", "route")
@@ -455,6 +455,8 @@ func TestEnvironmentArguments(t *testing.T) {
 			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": false},
 			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: false}}}, 200},
+		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "hostLabel": "stage--kino"},
+			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino"}}}, 200},
 	}
 	for _, c := range cases {
 		fe := &fakeEnvs{}

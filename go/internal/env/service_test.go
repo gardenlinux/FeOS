@@ -1041,7 +1041,7 @@ func TestSetPublic(t *testing.T) {
 	hosts := []string{"stage-acme.apps.test"}
 	ch, unsubscribe := h.d.Subscribe(db.ChanLeader)
 	defer unsubscribe()
-	a, err := h.svc.SetPublic(ctx, tenantA, "stage", true)
+	a, err := h.svc.SetPublic(ctx, tenantA, "stage", true, "")
 	if err != nil || !a.Public || !slices.Equal(a.Hosts, hosts) || !a.Rolling {
 		t.Fatalf("publish: %+v %v", a, err)
 	}
@@ -1051,7 +1051,7 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("row %+v", e)
 	}
 	// Again, by its ID: the same answer, and nothing rolls.
-	a, err = h.svc.SetPublic(ctx, tenantA, st.ID, true)
+	a, err = h.svc.SetPublic(ctx, tenantA, st.ID, true, "")
 	if err != nil || !a.Public || !slices.Equal(a.Hosts, hosts) || a.Rolling {
 		t.Fatalf("again: %+v %v", a, err)
 	}
@@ -1103,7 +1103,7 @@ func TestSetPublic(t *testing.T) {
 
 	// Unpublished: no host, the route door alone; the label and the group
 	// stay, so publishing again names the same host and rolls nothing.
-	a, err = h.svc.SetPublic(ctx, tenantA, "stage", false)
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", false, "")
 	if err != nil || a.Public || a.Hosts == nil || len(a.Hosts) != 0 || a.Rolling {
 		t.Fatalf("unpublish: %+v %v", a, err)
 	}
@@ -1119,22 +1119,45 @@ func TestSetPublic(t *testing.T) {
 	if e := h.env("stage"); e.Public || !e.IngressGroup || e.HostLabel != "stage-acme" {
 		t.Fatalf("unpublished row %+v", e)
 	}
-	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true)
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "")
 	if err != nil || !slices.Equal(a.Hosts, hosts) || a.Rolling {
 		t.Fatalf("republish: %+v %v", a, err)
 	}
 
+	// A label the tenant chose: the host moves and nothing rolls; a label
+	// not of the chosen form, one without public and one another tenant
+	// holds are refused, and the environment keeps its host.
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "stage--shop")
+	if err != nil || !slices.Equal(a.Hosts, []string{"stage--shop.apps.test"}) || a.Rolling {
+		t.Fatalf("chosen label: %+v %v", a, err)
+	}
+	if e := h.env("stage"); !e.Public || e.HostLabel != "stage--shop" {
+		t.Fatalf("chosen row %+v", e)
+	}
+	for _, bad := range []string{"stage-shop", "ab--shop", "Stage--shop", "x--0123456789abcdef", "stage--shop-"} {
+		_, err = h.svc.SetPublic(ctx, tenantA, "stage", true, bad)
+		wantStatus(t, err, http.StatusBadRequest, "a chosen host label is a DNS label")
+	}
+	_, err = h.svc.SetPublic(ctx, tenantA, "stage", false, "stage--shop")
+	wantStatus(t, err, http.StatusBadRequest, textHostLabelNotPublic)
+	h.exec("INSERT INTO host_labels (label, owner) VALUES ('taken--x', $1)", tenantB)
+	_, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "taken--x")
+	wantStatus(t, err, http.StatusConflict, "host label taken--x is another tenant's")
+	if e := h.env("stage"); !e.Public || e.HostLabel != "stage--shop" {
+		t.Fatalf("kept %+v", e)
+	}
+
 	// Refused: another tenant's environment or none, a deleting
 	// environment, a deleting tenant.
-	_, err = h.svc.SetPublic(ctx, tenantB, "stage", true)
+	_, err = h.svc.SetPublic(ctx, tenantB, "stage", true, "")
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
-	_, err = h.svc.SetPublic(ctx, tenantA, "nope", true)
+	_, err = h.svc.SetPublic(ctx, tenantA, "nope", true, "")
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
 	if err := h.svc.DeleteEnv(ctx, tenantA, "demo"); err != nil {
 		t.Fatal(err)
 	}
 	for _, public := range []bool{true, false} {
-		_, err = h.svc.SetPublic(ctx, tenantA, "demo", public)
+		_, err = h.svc.SetPublic(ctx, tenantA, "demo", public, "")
 		wantStatus(t, err, http.StatusConflict, "environment demo is being deleted")
 	}
 	// A public environment being deleted keeps its flag, but the ingress
@@ -1154,7 +1177,7 @@ func TestSetPublic(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE tenants SET deleting_at = now() WHERE id = $1", tenantB)
-	_, err = h.svc.SetPublic(ctx, tenantB, "x", true)
+	_, err = h.svc.SetPublic(ctx, tenantB, "x", true, "")
 	wantStatus(t, err, http.StatusConflict, "tenant other is being deleted")
 
 	// Without a zone (the kill switch): publishing is refused; a public
@@ -1164,7 +1187,7 @@ func TestSetPublic(t *testing.T) {
 	h2.create("stage", nil)
 	h2.putSecret("stage", "token", "x")
 	h2.apply("stage", stageSpec, 0)
-	_, err = h2.svc.SetPublic(ctx, tenantA, "stage", true)
+	_, err = h2.svc.SetPublic(ctx, tenantA, "stage", true, "")
 	wantStatus(t, err, http.StatusConflict, "the platform serves no apps zone (--apps-zone); an environment cannot be public")
 	if _, err := h2.st.SetEnvironmentPublic(ctx, h2.env("stage").ID, true); err != nil {
 		t.Fatal(err)
@@ -1177,7 +1200,7 @@ func TestSetPublic(t *testing.T) {
 		len(p.Findings) != 1 || p.Findings[0].Problem != "nothing changes: the spec equals release 1's" {
 		t.Fatalf("plan without a zone %+v %v", p, err)
 	}
-	a, err = h2.svc.SetPublic(ctx, tenantA, "stage", false)
+	a, err = h2.svc.SetPublic(ctx, tenantA, "stage", false, "")
 	if err != nil || a.Public || len(a.Hosts) != 0 || a.Rolling {
 		t.Fatalf("unpublish without a zone: %+v %v", a, err)
 	}

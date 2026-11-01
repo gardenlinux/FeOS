@@ -548,31 +548,38 @@ every host of its environment.
 ### Host labels
 
 An environment's default host is `<label>.<apps zone>`. The label is
-given at its first publish and never changes while the environment
-lives:
+given at its first publish, or chosen by its tenant (below), and changes
+only when its tenant chooses another:
 
 - **natural**: `<environment>-<tenant>`, when it names that pair alone
   and is a valid label:
   - the environment's name has no hyphen, so the label splits at its
     first hyphen;
-  - the tenant has no dot, so the label holds the tenant as it is;
+  - the tenant has no dot, so the label holds the tenant as it is, and
+    no `--`, so the label has none;
   - it does not end in a hyphen and 16 hex characters, the fallback's
     form;
   - it is a DNS label of at most 63 characters whose third and fourth
     characters are not `--` (RFC 5891's reserved form);
 - **fallback**: at most 46 characters of the name (prefixed `e-` when the
   name has that reserved form, trailing hyphens trimmed), a hyphen, and
-  the first 16 hex characters of the SHA-256 of the environment's UUID.
+  the first 16 hex characters of the SHA-256 of the environment's UUID;
+- **chosen**: a label the tenant names with `PUT …/public {"public":
+  true, "hostLabel": "stage--kino"}`: a DNS label of at most 63
+  characters with `--` in it, not as its third and fourth characters,
+  and not ending in a hyphen and 16 hex characters. It replaces the
+  label the environment had or would get; that one stays the tenant's.
 
 So no two pairs of environment name and tenant have the same natural
 label, and no natural label is another environment's fallback: a host
 that reads as `<environment>-<tenant>` belongs to that tenant. `web` of
 `acme-io` is `web-acme-io`; `web` of `acme.io` and `web-acme` of `io`,
-which would read the same, get the fallback.
+which would read the same, get the fallback. A chosen label is neither
+form: no natural label has `--`, and every fallback ends in its hash.
 
 `host_labels` registers every label ever given with the tenant that
-first claimed it. A claim is one atomic upsert, the natural label first,
-then the fallback: a label is free only for its owner, and only once its
+first claimed it. A claim is one atomic upsert, the chosen label, or the
+natural label first, then the fallback: a label is free only for its owner, and only once its
 environment is gone (the foreign key sets it free on delete). So a host,
 its cookies, service workers and HSTS never pass to another tenant; a
 tenant created again under the same name inherits its labels.

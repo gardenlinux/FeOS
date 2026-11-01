@@ -32,7 +32,29 @@ var fallbackRE = regexp.MustCompile(`-[0-9a-f]{16}$`)
 // them alone: the name has no '-', the tenant no '.', and the label does
 // not end as a fallback does.
 func unambiguous(name, tenant string) bool {
-	return !strings.Contains(name, "-") && !strings.Contains(tenant, ".") && !fallbackRE.MatchString(name+"-"+tenant)
+	return !strings.Contains(name, "-") && !strings.Contains(tenant, ".") && !strings.Contains(tenant, "--") &&
+		!fallbackRE.MatchString(name+"-"+tenant)
+}
+
+// A chosen label has "--", is a host label and does not end as a
+// fallback; no natural label HostLabels takes and no fallback is one.
+func TestChosenHostLabel(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{
+		"stage--kino": true, "production--ironcore-dashboard": true, "a--b": true,
+		"stage-kino": false, "qa--kino": false, "Stage--kino": false, "stage--kino-": false, "--kino": false,
+		"stage--kino-0123456789abcdef": false, "stage--" + strings.Repeat("k", 57): false,
+	} {
+		if got := ChosenHostLabel(in); got != want {
+			t.Errorf("%q: %v, want %v", in, got, want)
+		}
+	}
+	for _, in := range [][2]string{{"web", "acme"}, {"web", "a--b"}, {"web-prod", "acme"}, {"ab", "c--d"}} {
+		natural, ok, fallback := HostLabels(in[0], in[1], uuid.New())
+		if (ok && ChosenHostLabel(natural)) || ChosenHostLabel(fallback) {
+			t.Errorf("%q: natural %q (%v) or fallback %q reads as chosen", in, natural, ok, fallback)
+		}
+	}
 }
 
 func TestIngressGroupID(t *testing.T) {

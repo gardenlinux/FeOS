@@ -130,7 +130,7 @@ type Environments interface {
 	RunJob(ctx context.Context, tenant, envRef, name string) error
 	CreateRouteToken(ctx context.Context, tenant, envRef string) (envs.RouteToken, error)
 	RevokeRouteTokens(ctx context.Context, tenant, envRef string) error
-	SetPublic(ctx context.Context, tenant, envRef string, public bool) (envs.PublicAnswer, error)
+	SetPublic(ctx context.Context, tenant, envRef string, public bool, hostLabel string) (envs.PublicAnswer, error)
 	ServeRoute(w http.ResponseWriter, r *http.Request)
 }
 

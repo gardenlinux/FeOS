@@ -56,7 +56,9 @@ const (
 // unambiguous and a valid label:
 //
 //   - the name contains no '-', so the label splits at its first '-';
-//   - the tenant contains no '.', so the label holds the tenant as it is;
+//   - the tenant contains no '.', so the label holds the tenant as it is,
+//     and no "--", so the label has none and is never a chosen one
+//     (ChosenHostLabel);
 //   - it does not end in "-" and 16 hex characters, the form of every
 //     fallback label;
 //   - it is a DNS label of at most 63 characters whose third and fourth
@@ -70,7 +72,7 @@ const (
 // any valid environment name. It never panics, whatever its input.
 func HostLabels(name, tenant string, id uuid.UUID) (natural string, naturalOK bool, fallback string) {
 	natural = name + "-" + tenant
-	naturalOK = !strings.Contains(name, "-") && !strings.Contains(tenant, ".") &&
+	naturalOK = !strings.Contains(name, "-") && !strings.Contains(tenant, ".") && !strings.Contains(tenant, "--") &&
 		!hasHashSuffix(natural) && isHostLabel(natural)
 	p := name
 	if isRLDH(p) {
@@ -80,6 +82,15 @@ func HostLabels(name, tenant string, id uuid.UUID) (natural string, naturalOK bo
 	sum := sha256.Sum256([]byte(id.String()))
 	fallback = p + "-" + hex.EncodeToString(sum[:])[:hashLen]
 	return natural, naturalOK, fallback
+}
+
+// ChosenHostLabel reports whether s may be a default host label its
+// tenant chose (PUT …/public with a hostLabel): a DNS label as
+// isHostLabel has it, with "--" in it and not ending as a fallback does.
+// A natural label never has "--" and every fallback ends in its hash, so
+// a chosen label is never one HostLabels gives.
+func ChosenHostLabel(s string) bool {
+	return isHostLabel(s) && strings.Contains(s, "--") && !hasHashSuffix(s)
 }
 
 // hasHashSuffix reports whether s ends in "-" and 16 lowercase hex

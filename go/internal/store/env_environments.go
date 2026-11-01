@@ -155,8 +155,8 @@ type Environment struct {
 	// token (its tenant's decision, SetEnvironmentPublic). IngressGroup:
 	// its image services' pods name ing-<sandbox id>; set at the first
 	// publish, never cleared. HostLabel is its default host's label under
-	// the apps zone, given at the first publish and never changed; "":
-	// never published.
+	// the apps zone, given at the first publish and changed only when its
+	// tenant chooses one (SetEnvironmentHostLabel); "": never published.
 	Public, IngressGroup bool
 	HostLabel            string
 }

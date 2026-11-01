@@ -447,9 +447,9 @@ func (s *server) revokeRouteTokens(w http.ResponseWriter, r *http.Request) error
 	return noContent(w, http.StatusNoContent)
 }
 
-// setEnvPublic is PUT …/public {"public": bool}: the field is required
-// (absent or null is a 400), so that an empty body changes nothing by
-// accident.
+// setEnvPublic is PUT …/public {"public": bool, "hostLabel"?: string}:
+// public is required (absent or null is a 400), so that an empty body
+// changes nothing by accident.
 func (s *server) setEnvPublic(w http.ResponseWriter, r *http.Request) error {
 	var req envs.PublicRequest
 	sent, err := decodeJSON(r, &req)
@@ -459,7 +459,7 @@ func (s *server) setEnvPublic(w http.ResponseWriter, r *http.Request) error {
 	if raw, ok := sent["public"]; !ok || string(raw) == "null" {
 		return apierr.New(http.StatusBadRequest, "public is required: {\"public\": true} or {\"public\": false}")
 	}
-	a, err := s.deps.Environments.SetPublic(r.Context(), tenantOf(r), r.PathValue("env"), req.Public)
+	a, err := s.deps.Environments.SetPublic(r.Context(), tenantOf(r), r.PathValue("env"), req.Public, req.HostLabel)
 	if err != nil {
 		return err
 	}

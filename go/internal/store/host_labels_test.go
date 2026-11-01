@@ -4,11 +4,13 @@
 package store_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // Host labels across tenants. A dotted tenant or a hyphenated name gets
@@ -70,5 +72,38 @@ func TestClaimHostLabel(t *testing.T) {
 	_, _, fallback2 := model.HostLabels(api2.Name, api2.Owner, api2.ID)
 	if a := publish(t, s, api2.ID, true); a.HostLabel != fallback2 {
 		t.Fatalf("re-created api %+v (fallback %s)", a, fallback2)
+	}
+}
+
+// A label the tenant chose replaces the one it had: the old one stays
+// the tenant's, free for it alone; a chosen label another tenant owns or
+// another environment holds is ErrHostLabelTaken, and the same label
+// changes nothing.
+func TestSetEnvironmentHostLabel(t *testing.T) {
+	s, _ := newStore(t)
+	mkTenant(t, s, "acme")
+	mkTenant(t, s, "other")
+	web := publish(t, s, mkEnv(t, s, "acme", "web").ID, true)
+	if web.HostLabel != "web-acme" {
+		t.Fatalf("published %+v", web)
+	}
+	e, err := s.SetEnvironmentHostLabel(bg, web, "web--shop")
+	if err != nil || e.HostLabel != "web--shop" || !e.Public {
+		t.Fatalf("chosen %+v %v", e, err)
+	}
+	if again, err := s.SetEnvironmentHostLabel(bg, e, "web--shop"); err != nil || again.HostLabel != "web--shop" {
+		t.Fatalf("again %+v %v", again, err)
+	}
+	// The old label is free for acme alone.
+	api := mkEnv(t, s, "acme", "api")
+	if _, err := s.SetEnvironmentHostLabel(bg, api, "web--shop"); !errors.Is(err, store.ErrHostLabelTaken) {
+		t.Fatalf("held by web: %v", err)
+	}
+	x := mkEnv(t, s, "other", "x")
+	if _, err := s.SetEnvironmentHostLabel(bg, x, "web-acme"); !errors.Is(err, store.ErrHostLabelTaken) {
+		t.Fatalf("acme's old label to another tenant: %v", err)
+	}
+	if a, err := s.SetEnvironmentHostLabel(bg, api, "web-acme"); err != nil || a.HostLabel != "web-acme" {
+		t.Fatalf("acme's old label to acme: %+v %v", a, err)
 	}
 }

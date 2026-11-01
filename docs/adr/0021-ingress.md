@@ -625,6 +625,25 @@ changed these points:
   runs no collector: the dependencies would come before anything reads
   the spans, and an export can start from the records later.
 
+- **A tenant may choose its environment's label (2026-11-01).** A
+  tenant that is a product of its own, as FeCode is with one tenant for
+  every project, could not name its environments' hosts: FeCode's stage
+  of the project `kino` came out as `kino-stage-<8 hex>-<16 hex>`, the
+  fallback of a hyphenated name. `PUT …/public` takes a `hostLabel`
+  beside `public: true`, and the environment gets that label in place of
+  the one it had or would get. A chosen label has `--` in it, is a DNS
+  label that is not R-LDH, and does not end as a fallback does; a
+  natural label never has `--` (a tenant with `--` in its name gets the
+  fallback, as one with a dot does), so the three forms stay apart and a
+  host that reads as `<environment>-<tenant>` is still that tenant's.
+  Chosen labels are first come: `host_labels` registers one to its
+  tenant as it does every label, the label an environment gives up stays
+  its tenant's, and one another tenant or environment holds is a 409.
+  What a tenant writes left and right of the `--` is its own; FeCode
+  writes `<environment>--<project>`. A changed label moves the host at
+  once: the old one answers 404, and a route naming it as its `host`
+  answers on it no longer.
+
 ## Alternatives considered
 
 - **The route door as the ingress**, `ferund`'s instances the data

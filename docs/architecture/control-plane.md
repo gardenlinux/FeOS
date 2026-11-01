@@ -1773,7 +1773,7 @@ a deleting one.
 
 | Table | Holds |
 |---|---|
-| `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `release` (the latest desired), `realised`, `deleting`, `gen` (the env group's version); `public` (its tenant's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish, unique), public only with both ([Public environments](#public-environments)) |
+| `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `release` (the latest desired), `realised`, `deleting`, `gen` (the env group's version); `public` (its tenant's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish or chosen by its tenant, unique), public only with both ([Public environments](#public-environments)) |
 | `env_releases` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`pending`, `rolling`, `realised`, `failed`, `superseded`), `reason`, start and end |
 | `env_tags` | a tag's release, who moved it and when |
 | `env_secrets` | one version of a secret, sealed; `system` for an addon's credential, `addon.<addon>.<key>`, never listed; soft-deleted |
@@ -2493,7 +2493,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `POST /api/v1/environments` `{name, id?, labels?}` | 201 its status; the same ID and name again 200; 409 `name_taken`, `id_taken` |
 | `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, release, realised, state, public, hosts, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest release's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
-| `PUT /api/v1/environments/{env}/public` `{public}` | `{public, hosts, rolling}`; 400 without a boolean `public`; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
+| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings}` |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current}` |
 | `POST …/{env}/releases` `{spec, base, author?, message?, annotations?}` | 201 the release; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
@@ -2632,10 +2632,16 @@ ingress serves an environment only once its tenant made it public, `PUT
   characters without `--` as its third and fourth characters. Else it is
   at most 46 characters of the name, a hyphen and 16 hex characters of
   the SHA-256 of the environment's UUID ([Host
-  labels](ingress.md#host-labels)). `host_labels` registers it to the
-  tenant that first claimed it, in one atomic upsert: another tenant
-  never gets it, and its owner may claim it again once its environment
-  is gone. It never changes while the environment lives.
+  labels](ingress.md#host-labels)), unless the tenant chose one:
+  `{"public": true, "hostLabel": "stage--kino"}` gives the environment
+  that label, a DNS label with `--` in it that does not end as a
+  fallback does (400 otherwise, and without `public: true`), in place of
+  the one it had, which stays the tenant's; 409 `host_label_taken` when
+  another tenant owns it or another environment holds it. `host_labels`
+  registers every label to the tenant that first claimed it, in one
+  atomic upsert: another tenant never gets it, and its owner may claim
+  it again once no environment holds it. It changes only by a chosen
+  label.
 
 ### The ingress service
 

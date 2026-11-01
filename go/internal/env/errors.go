@@ -26,6 +26,9 @@ const (
 	// CodeIDTaken: 409, an environment of that ID exists with another name
 	// or another owner.
 	CodeIDTaken = "id_taken"
+	// CodeHostLabelTaken: 409, the host label a tenant chose is another
+	// tenant's or another environment's (PUT …/public).
+	CodeHostLabelTaken = "host_label_taken"
 )
 
 // The texts of the environments' plain answers.
