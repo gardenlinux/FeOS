@@ -175,11 +175,13 @@ func Asleep(phase, clientState, op string) bool {
 //     the routes' Port and numbered by the instance's own release, else
 //     by the routing release. The others are counted by their Class; a
 //     ready one without an admitted port is pending.
-//   - Its domains (e.Domains) follow its default host in Hosts, and with
-//     their certificates in Domains, in their order, as long as the entry
-//     stays within MaxEnvBytes and each within MaxDomainBytes: a domain
-//     that does not fit is left out, never the environment. A name twice
-//     is taken once.
+//   - Its hosts are its domains (e.Domains), with their certificates in
+//     Domains, in their order, as long as the entry stays within
+//     MaxEnvBytes and each within MaxDomainBytes: a domain that does not
+//     fit is left out, never the environment. A name twice is taken once.
+//     Its default host, <label>.<zone>, is its host only while none of its
+//     domains is: an environment on a domain of its own is not served in
+//     the apps zone too (ADR 0021).
 //   - Its hash identifies the rest of its content, the certificates
 //     included, so that a renewed one is sent again.
 //
@@ -193,11 +195,12 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 	if err != nil {
 		return wire.Env{}, nil, fmt.Errorf("environment %s, routing release %d: %w", e.ID, number, err)
 	}
-	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: []string{}, Release: number,
-		Routes: []wire.Route{}, Services: []wire.Service{}}
+	defaultHosts := []string{}
 	if zone != "" && e.HostLabel != "" {
-		out.Hosts = append(out.Hosts, e.HostLabel+"."+zone)
+		defaultHosts = append(defaultHosts, e.HostLabel+"."+zone)
 	}
+	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: defaultHosts, Release: number,
+		Routes: []wire.Route{}, Services: []wire.Service{}}
 	byService := map[string][]spec.RouteView{}
 	for _, r := range spec.IngressRoutes(sp) {
 		out.Routes = append(out.Routes, wire.Route{Name: r.Name, Path: r.Prefix, Service: r.Service, Port: r.Port.String(),
@@ -273,7 +276,7 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 		}
 		if size > MaxEnvBytes {
 			// The estimate was short: the domains stay out.
-			out.Hosts, out.Domains = out.Hosts[:len(out.Hosts)-len(out.Domains)], nil
+			out.Hosts, out.Domains = defaultHosts, nil
 			if h, _, err = digest(out); err != nil {
 				return wire.Env{}, nil, fmt.Errorf("environment %s: %w", e.ID, err)
 			}
@@ -284,15 +287,16 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 }
 
 // withDomains returns e, which takes size bytes coded, with the domains
-// of ds that fit added to its Hosts and Domains (BuildEnv), and whether
-// any did.
+// of ds that fit as its Hosts and Domains in place of its default host
+// (BuildEnv), and whether any did. The budget counts the default host,
+// which errs on the safe side.
 func withDomains(e wire.Env, ds []wire.Domain, size int) (wire.Env, bool, error) {
 	if len(ds) == 0 {
 		return e, false, nil
 	}
 	// ,"domains":[] once, then each domain and its host with a comma.
 	budget := MaxEnvBytes - size - len(`,"domains":[]`)
-	hosts := slices.Clone(e.Hosts)
+	hosts := []string{}
 	var domains []wire.Domain
 	for _, d := range ds {
 		if d.Name == "" || slices.Contains(hosts, d.Name) {

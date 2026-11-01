@@ -44,9 +44,10 @@ type validateCtx struct {
 	// deleted hold, by addon name.
 	volumes   map[string]spec.AddonData
 	blueprint func(typ string) (addons.Blueprint, bool)
-	// zone is the apps zone (Deps.AppsZone); host the environment's
-	// default host under it ("" without an environment, or for one never
-	// published), public whether the environment is public.
+	// zone is the apps zone (Deps.AppsZone); host the environment's first
+	// host (hostsOf), else its default host under the zone ("" without an
+	// environment, or for one never published), public whether the
+	// environment is public.
 	zone, host string
 	public     bool
 }
@@ -92,7 +93,7 @@ func (v *validateCtx) Image(image string) (string, error) {
 	return a.pinned, a.err
 }
 
-// IngressHost is the environment's default host and whether it is public;
+// IngressHost is the environment's first host and whether it is public;
 // ok false when the platform has no apps zone, so that no ingress serves
 // any route.
 func (v *validateCtx) IngressHost() (host string, public, ok bool) {
@@ -226,6 +227,14 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		vc.public = env.Public
 		if vc.zone != "" && env.HostLabel != "" {
 			vc.host = env.HostLabel + "." + vc.zone
+		}
+		// A public environment on a domain of its own is served there.
+		hosts, err := s.hosts(ctx, *env)
+		if err != nil {
+			return nil, spec.Pins{}, fmt.Errorf("hosts: %w", err)
+		}
+		if len(hosts) > 0 {
+			vc.host = hosts[0]
 		}
 	}
 	pins := spec.Pins{Images: map[string]string{}, Secrets: map[string]int{}, Plans: map[string]string{}}

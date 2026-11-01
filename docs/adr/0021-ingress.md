@@ -643,6 +643,26 @@ changed these points:
   writes `<environment>--<project>`. A changed label moves the host at
   once: the old one answers 404, and a route naming it as its `host`
   answers on it no longer.
+- **An environment on a domain is not served at its default host
+  (2026-11-01).** The default host was served beside an environment's
+  domains, so a production on `dashboard.fecore.dev` answered at
+  `prod--ironcore-dashboard.apps.fecode.dev` too: a second address of
+  the same production, which search engines, links and cookies split
+  between, and one its tenant did not ask for. The default host is now
+  the address of an environment without one of its own: while one of
+  its domains is served (served or dns-moved, verified, bound, with a
+  certificate ahead), its hosts are its served domains, in the order
+  they were bound, and the default host answers 404; when none is
+  served any more, a deactivated or unbound domain or an expired
+  certificate, the default host is its host again, at once. The label
+  stays the environment's throughout, so the host that comes back is
+  the same. A domain is served only once its certificate is there, so a
+  binding moves the environment from its default host to its domain
+  without a gap. `hosts` in the status, the listing and `PUT …/public`
+  answer the same, the first of them being where a route's `url`
+  points; a domain the ingress leaves out for its size, or whose key
+  does not open, is the one case where the two differ. A route whose
+  `host` is the default host answers nowhere while a domain is served.
 
 ## Alternatives considered
 

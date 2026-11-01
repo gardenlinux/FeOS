@@ -6,6 +6,7 @@ package env
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
@@ -83,7 +84,11 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool
 	if err != nil {
 		return PublicAnswer{}, err
 	}
-	ans := PublicAnswer{Public: after.Public, Hosts: hostsOf(after, s.d.AppsZone), Rolling: public && !before.IngressGroup}
+	hosts, err := s.hosts(ctx, after)
+	if err != nil {
+		return PublicAnswer{}, fmt.Errorf("hosts: %w", err)
+	}
+	ans := PublicAnswer{Public: after.Public, Hosts: hosts, Rolling: public && !before.IngressGroup}
 	if before.Public != public || before.HostLabel != after.HostLabel {
 		s.log.Info("environment public", "tenant", tenant, "env", after.Name, "id", after.ID, "public", public,
 			"hosts", ans.Hosts, "rolling", ans.Rolling, "label_before", before.HostLabel)

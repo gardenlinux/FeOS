@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -69,12 +70,7 @@ func (s *Store) IngressDomains(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 	if envIDs != nil && len(envIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.q.Query(ctx, `SELECT d.env_id, d.id, d.name, c.chain, c.key_sealed, c.not_after
-		FROM domains d
-		JOIN environments e ON e.id = d.env_id AND e.owner = d.owner AND e.public AND NOT e.deleting
-		JOIN domain_certs c ON c.domain_id = d.id AND c.not_after > now()
-		WHERE d.state IN ('served','dns-moved') AND d.verification = 'verified'
-			AND ($1::uuid[] IS NULL OR d.env_id = ANY($1))
+	rows, err := s.q.Query(ctx, `SELECT d.env_id, d.id, d.name, c.chain, c.key_sealed, c.not_after `+servedDomains+`
 		ORDER BY d.env_id, d.bound_at, d.name, d.id`, envIDs)
 	if err != nil {
 		return nil, fmt.Errorf("read the ingress's domains: %w", err)
@@ -86,6 +82,44 @@ func (s *Store) IngressDomains(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read the ingress's domains: %w", err)
+	}
+	return out, nil
+}
+
+// servedDomains is the FROM and WHERE of the domains the ingress serves,
+// $1 the environments they are limited to (IngressDomains).
+const servedDomains = `FROM domains d
+		JOIN environments e ON e.id = d.env_id AND e.owner = d.owner AND e.public AND NOT e.deleting
+		JOIN domain_certs c ON c.domain_id = d.id AND c.not_after > now()
+		WHERE d.state IN ('served','dns-moved') AND d.verification = 'verified'
+			AND ($1::uuid[] IS NULL OR d.env_id = ANY($1))`
+
+// ServedDomainNames returns the names of the domains the ingress serves
+// (IngressDomains) of envIDs (empty: none), by environment, in the order
+// they were bound.
+func (s *Store) ServedDomainNames(ctx context.Context, envIDs []uuid.UUID) (map[uuid.UUID][]string, error) {
+	out := map[uuid.UUID][]string{}
+	if len(envIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.q.Query(ctx, `SELECT d.env_id, d.name `+servedDomains+`
+		ORDER BY d.env_id, d.bound_at, d.name, d.id`, envIDs)
+	if err != nil {
+		return nil, fmt.Errorf("read the served domains: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("read the served domains: %w", err)
+		}
+		if !slices.Contains(out[id], name) {
+			out[id] = append(out[id], name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the served domains: %w", err)
 	}
 	return out, nil
 }

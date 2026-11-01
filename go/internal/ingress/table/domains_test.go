@@ -25,9 +25,9 @@ func domain(name string, n int, fill byte) wire.Domain {
 		Key: bytes.Repeat([]byte{fill}, n/10+1)}
 }
 
-// An environment's domains follow its default host in Hosts and come
-// with their certificates; a name twice, or one that is the default
-// host, is taken once; a renewed certificate changes the hash.
+// An environment's domains are its Hosts, in place of its default host,
+// and come with their certificates; a name twice is taken once; a renewed
+// certificate changes the hash.
 func TestBuildEnvDomains(t *testing.T) {
 	specs := specsOf(map[int]*spec.Spec{1: release1()})
 	e := baseEnv(1, 1, ready("a0000000001", "web", 1, 8080))
@@ -36,9 +36,9 @@ func TestBuildEnvDomains(t *testing.T) {
 		t.Fatalf("domains without any: %+v", plain.Domains)
 	}
 	e.Domains = []wire.Domain{domain("dashboard.fecore.dev", 100, 1), domain("www.fecore.dev", 100, 2),
-		domain("dashboard.fecore.dev", 100, 3), domain("web-acme.apps.example", 100, 4)}
+		domain("dashboard.fecore.dev", 100, 3)}
 	got, _ := build(t, "apps.example", e, specs)
-	if !slices.Equal(got.Hosts, []string{"web-acme.apps.example", "dashboard.fecore.dev", "www.fecore.dev"}) {
+	if !slices.Equal(got.Hosts, []string{"dashboard.fecore.dev", "www.fecore.dev"}) {
 		t.Fatalf("hosts %v", got.Hosts)
 	}
 	if len(got.Domains) != 2 || got.Domains[0].Chain[0][0] != 1 || got.Domains[1].Name != "www.fecore.dev" {
@@ -50,9 +50,12 @@ func TestBuildEnvDomains(t *testing.T) {
 	if h, err := Hash(got); err != nil || h != got.Hash {
 		t.Fatalf("hash %s, recomputed %s %v", got.Hash, h, err)
 	}
-	// Without a zone the domains are the hosts.
+	if !slices.Equal(plain.Hosts, []string{"web-acme.apps.example"}) {
+		t.Fatalf("hosts without domains %v", plain.Hosts)
+	}
+	// Without a zone too.
 	noZone, _ := build(t, "", e, specs)
-	if !slices.Equal(noZone.Hosts, []string{"dashboard.fecore.dev", "www.fecore.dev", "web-acme.apps.example"}) {
+	if !slices.Equal(noZone.Hosts, []string{"dashboard.fecore.dev", "www.fecore.dev"}) {
 		t.Fatalf("hosts without a zone %v", noZone.Hosts)
 	}
 	// A renewed certificate: another hash.
@@ -84,7 +87,7 @@ func TestBuildEnvDomainsBounded(t *testing.T) {
 		t.Fatalf("%d bytes", n)
 	}
 	if len(got.Domains) < 20 || len(got.Domains) >= 60 || got.Domains[0].Name != "d00.example" ||
-		len(got.Hosts) != len(got.Domains)+1 {
+		len(got.Hosts) != len(got.Domains) {
 		t.Fatalf("%d domains, first %s, %d hosts", len(got.Domains), got.Domains[0].Name, len(got.Hosts))
 	}
 	for i, d := range got.Domains {
@@ -104,7 +107,7 @@ func TestBuildEnvDomainsBounded(t *testing.T) {
 	if size, _ := wire.Size(full); size+(200<<10) <= MaxEnvBytes {
 		t.Fatalf("the routes take %d bytes: not near the bound", size)
 	}
-	if got.Domains != nil || len(got.Hosts) != 1 || got.Hash != full.Hash {
+	if got.Domains != nil || !slices.Equal(got.Hosts, []string{"web-acme.apps.example"}) || got.Hash != full.Hash {
 		t.Fatalf("near the bound: %d domains, hosts %v", len(got.Domains), got.Hosts)
 	}
 }
@@ -171,7 +174,8 @@ func envOf(s *Snapshot, id uuid.UUID) wire.Env { return s.Envs[id.String()] }
 // with a certificate still valid, its key opened; not one that is
 // issuing, whose certificate expired, or whose key does not open; a
 // renewal (ACME's write notifies the environment) reaches the snapshot.
-// Without a sealer no domain is served.
+// Without a sealer no domain is served. An environment's domains are its
+// hosts; its default host is its host only while none is served.
 func TestBuilderDomains(t *testing.T) {
 	f := newFixture(t)
 	sl := testSealer(t)
@@ -186,7 +190,7 @@ func TestBuilderDomains(t *testing.T) {
 	b := f.builder(t, func(b *Builder) { b.Sealer = sl })
 	s, _ := use(t, b)
 	e := envOf(s, f.env.ID)
-	if !slices.Equal(e.Hosts, []string{"web-acme.apps.example", "dashboard.fecore.dev", "moved.fecore.dev"}) {
+	if !slices.Equal(e.Hosts, []string{"dashboard.fecore.dev", "moved.fecore.dev"}) {
 		t.Fatalf("hosts %v", e.Hosts)
 	}
 	if len(e.Domains) != 2 || !bytes.Equal(e.Domains[0].Key, []byte("key-1")) || !slices.EqualFunc(e.Domains[0].Chain,
@@ -210,7 +214,19 @@ func TestBuilderDomains(t *testing.T) {
 	}
 	await(t, b, time.Second, "the domain no longer served", func(s *Snapshot) bool {
 		e := envOf(s, f.env.ID)
-		return len(e.Domains) == 1 && e.Domains[0].Name == "moved.fecore.dev" && len(e.Hosts) == 2
+		return len(e.Domains) == 1 && e.Domains[0].Name == "moved.fecore.dev" && slices.Equal(e.Hosts, []string{"moved.fecore.dev"})
+	})
+
+	// None served: the default host again.
+	if _, err := f.d.Pool.Exec(bg, `UPDATE domains SET state = 'inactive' WHERE env_id = $1`, f.env.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.Notify(bg, "ferun_ingress", store.IngressEnvPayload(f.env.ID)); err != nil {
+		t.Fatal(err)
+	}
+	await(t, b, time.Second, "the default host back", func(s *Snapshot) bool {
+		e := envOf(s, f.env.ID)
+		return len(e.Domains) == 0 && slices.Equal(e.Hosts, []string{"web-acme.apps.example"})
 	})
 
 	// Without a sealer: none.

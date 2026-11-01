@@ -10,6 +10,8 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -25,9 +27,12 @@ import (
 // none is realised), with the doors that serve them; and its open
 // incidents. It reads only.
 func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, error) {
-	hosts := hostsOf(e, s.d.AppsZone)
+	hosts, err := s.hosts(ctx, e)
+	if err != nil {
+		return EnvStatus{}, fmt.Errorf("hosts: %w", err)
+	}
 	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Release: e.Release, Realised: e.Realised,
-		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, Objects: []ObjectStatus{}, Routes: []RouteStatus{},
+		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Objects: []ObjectStatus{}, Routes: []RouteStatus{},
 		CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
 		st.Labels = map[string]string{}
@@ -181,19 +186,40 @@ func routesOf(sp *spec.Spec, hosts []string) []RouteStatus {
 	return out
 }
 
-// hostsOf are the hosts the ingress serves environment e at: its default
-// host under zone while it is public and zone is set; none otherwise, and
-// none while it is being deleted, which the ingress no longer serves.
-func hostsOf(e store.Environment, zone string) []string {
-	if !e.Public || zone == "" || e.HostLabel == "" || e.Deleting {
+// hostsOf are the hosts the ingress serves environment e at while it is
+// public: domains, the names of its served domains in the order they were
+// bound, else its default host under zone (none without a zone); none
+// while it is not public or is being deleted, which the ingress no longer
+// serves. An environment on a domain of its own is not served at its
+// default host (ADR 0021).
+func hostsOf(e store.Environment, zone string, domains []string) []string {
+	if !e.Public || e.Deleting {
+		return []string{}
+	}
+	if len(domains) > 0 {
+		return slices.Clone(domains)
+	}
+	if zone == "" || e.HostLabel == "" {
 		return []string{}
 	}
 	return []string{e.HostLabel + "." + zone}
 }
 
+// hosts are e's hosts (hostsOf), its served domains read.
+func (s *Service) hosts(ctx context.Context, e store.Environment) ([]string, error) {
+	if !e.Public || e.Deleting {
+		return []string{}, nil
+	}
+	ds, err := s.st.ServedDomainNames(ctx, []uuid.UUID{e.ID})
+	if err != nil {
+		return nil, err
+	}
+	return hostsOf(e, s.d.AppsZone, ds[e.ID]), nil
+}
+
 // summaryOf is an environment as its tenant's listing shows it, with its
 // hosts under zone.
-func summaryOf(r store.EnvSummaryRow, zone string) EnvSummary {
+func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary {
 	state := r.ReleaseState
 	switch {
 	case r.Deleting:
@@ -206,7 +232,7 @@ func summaryOf(r store.EnvSummaryRow, zone string) EnvSummary {
 		labels = map[string]string{}
 	}
 	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Release: r.Release, Realised: r.Realised,
-		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone), OpenIncidents: int(r.OpenIncidents),
+		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel, OpenIncidents: int(r.OpenIncidents),
 		CreatedAt: rfc3339(r.CreatedAt)}
 }
 

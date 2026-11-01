@@ -2472,8 +2472,11 @@ an attached service with its sandbox, phase, restarts and last exit;
 realised release, else the latest), each with its `door`, `ingress` with
 its `url` (`https://<host><prefix>`) for a route to an image service of
 a public environment and `route` for every other, `public`, its `hosts`
-(its default host while it is public, the platform has an apps zone and
-it is not being deleted; otherwise empty), and the number of open
+(while it is public and not being deleted: its served domains in the
+order they were bound, else its default host when the platform has an
+apps zone; otherwise empty, [ADR 0021](../adr/0021-ingress.md)),
+`hostLabel` (its default host's label once it has one, kept while a
+domain is its host), and the number of open
 incidents. An instance carries its `image`, `registry/repository@sha256:…`
 as its release resolved it. The listing shows `public` and `hosts` too. An
 incident has its object, release, condition, summary, opening and
@@ -2491,7 +2494,7 @@ name; one the tenant does not have is 404 "no such environment".
 | Method and path | Answers |
 |---|---|
 | `POST /api/v1/environments` `{name, id?, labels?}` | 201 its status; the same ID and name again 200; 409 `name_taken`, `id_taken` |
-| `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, release, realised, state, public, hosts, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest release's, `none` or `deleting` |
+| `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, release, realised, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest release's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
 | `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings}` |

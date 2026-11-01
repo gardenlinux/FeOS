@@ -289,9 +289,10 @@ pods' mesh".
 The table is what the ingress routes, one entry per public environment
 (`wire.Env`, [api.md](api.md#the-ingresss-api)):
 
-- its ID, tenant, name and hosts: `<label>.<apps zone>` while the
-  platform has an apps zone, then its served domains; without a zone
-  its domains alone;
+- its ID, tenant, name and hosts: its served domains, else
+  `<label>.<apps zone>` while the platform has an apps zone: an
+  environment on a domain of its own is not served at its default host
+  (ADR 0021);
 - its **domains** (`domains`): each served domain's name, its
   certificate's chain (DER, leaf first) and private key (PKCS #8 DER),
   opened by the builder from `domain_certs`. A domain is served when its
@@ -533,8 +534,9 @@ can be published. Deploying the ingress makes no environment public, and
 a clone never copies `public`.
 
 `GET /api/v1/environments` and `GET …/{env}` show `public` and `hosts`
-(the default host while the environment is public, the platform has a
-zone and it is not being deleted; otherwise empty), and each route its
+(while the environment is public and not being deleted: its served
+domains, else the default host while the platform has a zone; otherwise
+empty), and each route its
 `door`: `ingress` for a route to an image service of a public
 environment, with its `url` (`https://<host><prefix>`), `route` for every
 other. A plan says the same as info findings at `routes.<name>`: "served

@@ -41,9 +41,10 @@ type EnvSummary struct {
 	// State is the latest release's state (model.Release…),
 	// model.EnvNone without a release, model.EnvDeleting.
 	State string `json:"state"`
-	// Public and Hosts are as EnvStatus has them.
+	// Public, Hosts and HostLabel are as EnvStatus has them.
 	Public        bool     `json:"public"`
 	Hosts         []string `json:"hosts"`
+	HostLabel     string   `json:"hostLabel,omitempty"`
 	OpenIncidents int      `json:"openIncidents"`
 	CreatedAt     string   `json:"createdAt"`
 }
@@ -60,10 +61,15 @@ type EnvStatus struct {
 	// Public: its tenant made it public (PUT …/public), and the ingress
 	// serves its image services' routes without a route token (ADR 0021).
 	Public bool `json:"public"`
-	// Hosts are the hosts the ingress serves it at: its default host under
-	// the apps zone while it is public and the platform has a zone; empty
-	// otherwise, and while it is being deleted.
+	// Hosts are the hosts the ingress serves it at while it is public: its
+	// served domains in the order they were bound, else its default host
+	// under the apps zone while the platform has one; empty otherwise, and
+	// while it is being deleted.
 	Hosts []string `json:"hosts"`
+	// HostLabel is the label of its default host, given at its first
+	// publish or chosen by its tenant; empty before. It stays while a
+	// domain is its host.
+	HostLabel string `json:"hostLabel,omitempty"`
 	// Rollout is the latest release's; null without a release.
 	Rollout       *RolloutStatus `json:"rollout"`
 	Objects       []ObjectStatus `json:"objects"`

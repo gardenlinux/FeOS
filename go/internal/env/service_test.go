@@ -1147,6 +1147,43 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("kept %+v", e)
 	}
 
+	// A served domain is its host in place of the default host, in the
+	// answer, the status, its routes and the listing; one being issued,
+	// or one whose certificate expired, is not.
+	stage := h.env("stage")
+	for i, d := range []struct {
+		name, state string
+		notAfter    string
+	}{{"shop.example", "served", "now() + interval '30 days'"}, {"issuing.example", "issuing", ""},
+		{"old.example", "served", "now() - interval '1 hour'"}} {
+		id := fmt.Sprintf("00000000-0000-4000-8000-00000000000%d", i+1)
+		h.exec(`INSERT INTO domains (id, owner, name, token, env_id, bound_at, verification, verified_at, routed, was_routed, state)
+			VALUES ($1, $2, $3, 'abcdefghijklmnopqrstuvwxyz234567', $4, now(), 'verified', now(), true, true, $5)`,
+			id, tenantA, d.name, stage.ID, d.state)
+		if d.notAfter != "" {
+			h.exec(`INSERT INTO domain_certs (domain_id, chain, key_sealed, not_before, not_after, renew_after, serial)
+				VALUES ($1, ARRAY['\x01'::bytea], '\x01', now() - interval '1 day', `+d.notAfter+`, now(), '1')`, id)
+		}
+	}
+	shop := []string{"shop.example"}
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "")
+	if err != nil || !slices.Equal(a.Hosts, shop) {
+		t.Fatalf("with a domain: %+v %v", a, err)
+	}
+	st, err = h.svc.GetEnv(ctx, tenantA, "stage")
+	if err != nil || !slices.Equal(st.Hosts, shop) || st.HostLabel != "stage--shop" || st.Routes[2].URL != "https://shop.example/" {
+		t.Fatalf("status with a domain: %+v %v", st, err)
+	}
+	list, err = h.svc.ListEnvs(ctx, tenantA, map[string]string{})
+	if err != nil || !slices.Equal(list.Environments[1].Hosts, shop) || list.Environments[1].HostLabel != "stage--shop" {
+		t.Fatalf("list with a domain: %+v %v", list, err)
+	}
+	h.exec(`UPDATE domains SET state = 'inactive' WHERE env_id = $1`, stage.ID)
+	if st, err = h.svc.GetEnv(ctx, tenantA, "stage"); err != nil ||
+		!slices.Equal(st.Hosts, []string{"stage--shop.apps.test"}) {
+		t.Fatalf("its domain inactive: %+v %v", st, err)
+	}
+
 	// Refused: another tenant's environment or none, a deleting
 	// environment, a deleting tenant.
 	_, err = h.svc.SetPublic(ctx, tenantB, "stage", true, "")

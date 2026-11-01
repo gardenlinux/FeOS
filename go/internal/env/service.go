@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
@@ -73,9 +75,19 @@ func (s *Service) ListEnvs(ctx context.Context, tenant string, labels map[string
 	if err != nil {
 		return EnvList{}, fmt.Errorf("list environments: %w", err)
 	}
+	var public []uuid.UUID
+	for _, r := range rows {
+		if r.Public && !r.Deleting {
+			public = append(public, r.ID)
+		}
+	}
+	domains, err := s.st.ServedDomainNames(ctx, public)
+	if err != nil {
+		return EnvList{}, fmt.Errorf("list environments: %w", err)
+	}
 	out := EnvList{Environments: make([]EnvSummary, 0, len(rows))}
 	for _, r := range rows {
-		out.Environments = append(out.Environments, summaryOf(r, s.d.AppsZone))
+		out.Environments = append(out.Environments, summaryOf(r, s.d.AppsZone, domains[r.ID]))
 	}
 	return out, nil
 }
