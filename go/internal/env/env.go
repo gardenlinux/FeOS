@@ -67,6 +67,10 @@ type Deps struct {
 	// (--apps-zone, ADR 0021); "": no hosts, and no environment can be
 	// made public.
 	AppsZone string
+	// AppsZoneOwners are the tenants that own the apps zone's plain names
+	// (--apps-zone-owners, ADR 0021): each may choose a host label without
+	// "--" (model.PlainHostLabel); nil: no tenant may.
+	AppsZoneOwners []string
 	// SinkURL is the sink's API (--sink-url, ADR 0026), which the logs
 	// calls ask first and the access log alone; "": the logs calls read
 	// the nodes only, and the access log answers 503.

@@ -89,6 +89,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--mcp-allowed-origins` | none | the Origins `/mcp` accepts; empty refuses every request with an Origin |
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
 | `--apps-zone` | empty | the DNS zone of public environments' default hosts, `<label>.<zone>`, which `ferun-ingress` serves ([The ingress](#the-ingress)); empty: no hosts, and no environment can be made public |
+| `--apps-zone-owners` | none | the tenants that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<project>.<zone>` ([Public environments](#public-environments)); empty: none may |
 | `--edge-name` | empty | the name tenants' domains point at with a CNAME, such as `edge.fecode.dev`, which the operator publishes with the balancer's addresses ([Domains](#domains)); empty: domains are off |
 | `--edge-address` | none | an edge address beside what `--edge-name` resolves to, which a domain's A and AAAA records may name; repeatable |
 | `--domain-challenge-label` | `_ferun-challenge` | the label of a claim's TXT record, `<label>.<name>`; a lowercase DNS label that may hold `_` |
@@ -2496,7 +2497,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `POST /api/v1/environments` `{name, id?, labels?}` | 201 its status; the same ID and name again 200; 409 `name_taken`, `id_taken` |
 | `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, release, realised, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest release's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
-| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
+| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a tenant of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds, or a plain label that is the natural label of an existing tenant's environment; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings}` |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current}` |
 | `POST …/{env}/releases` `{spec, base, author?, message?, annotations?}` | 201 the release; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
@@ -2645,6 +2646,18 @@ ingress serves an environment only once its tenant made it public, `PUT
   atomic upsert: another tenant never gets it, and its owner may claim
   it again once no environment holds it. It changes only by a chosen
   label.
+- **Plain labels** (ADR 0021, 2026-11-01): a tenant of
+  `--apps-zone-owners` (FeCode's installation: `fecode`) may also choose
+  a label without `--`, `{"public": true, "hostLabel": "kino"}`: a DNS
+  label that is not R-LDH and does not end as a fallback does (400
+  otherwise, with the chosen form's text less the `--`). One that splits
+  at its first hyphen into an environment's name and an existing
+  tenant, its natural label, is a 409 `host_label_taken` "host label
+  web-acme is the natural label of environment web of tenant acme",
+  unless `host_labels` registers it to the tenant already; the rest is
+  as for a chosen label. A tenant made later whose natural label the
+  owner holds gets its fallback. Every other tenant's plain label is the
+  chosen form's 400.
 
 ### The ingress service
 

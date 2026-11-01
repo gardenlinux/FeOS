@@ -106,4 +106,13 @@ func TestSetEnvironmentHostLabel(t *testing.T) {
 	if a, err := s.SetEnvironmentHostLabel(bg, api, "web-acme"); err != nil || a.HostLabel != "web-acme" {
 		t.Fatalf("acme's old label to acme: %+v %v", a, err)
 	}
+	// Whose a label is: the tenant that first claimed it, held or not.
+	for label, want := range map[string]string{"web-acme": "acme", "web--shop": "acme"} {
+		if owner, err := s.HostLabelOwner(bg, label); err != nil || owner != want {
+			t.Fatalf("owner of %s: %q %v", label, owner, err)
+		}
+	}
+	if owner, err := s.HostLabelOwner(bg, "kino"); !errors.Is(err, store.ErrNoRow) || owner != "" {
+		t.Fatalf("owner of an unclaimed label: %q %v", owner, err)
+	}
 }

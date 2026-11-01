@@ -59,12 +59,24 @@ func (s *Store) ClaimHostLabel(ctx context.Context, e Environment) (string, erro
 	return "", fmt.Errorf("claim a host label for environment %s: %s taken", e.ID, strings.Join(candidates, " and "))
 }
 
+// HostLabelOwner returns the tenant host_labels registers label to, the
+// one that first claimed it; ErrNoRow when none did.
+func (s *Store) HostLabelOwner(ctx context.Context, label string) (string, error) {
+	var owner string
+	err := s.q.QueryRow(ctx, "SELECT owner FROM host_labels WHERE label = $1", label).Scan(&owner)
+	if err = noRow(err, ErrNoRow); err != nil && !errors.Is(err, ErrNoRow) {
+		return "", fmt.Errorf("the owner of host label %s: %w", label, err)
+	}
+	return owner, err
+}
+
 // ErrHostLabelTaken: the label a tenant chose is another tenant's, or
 // another environment holds it.
 var ErrHostLabelTaken = errors.New("host label taken")
 
 // SetEnvironmentHostLabel gives the environment e the default host label
-// its tenant chose (model.ChosenHostLabel, which the caller checks) and
+// its tenant chose (model.ChosenHostLabel or, for a tenant that owns the
+// apps zone, model.PlainHostLabel, which the caller checks) and
 // returns its row. It runs in the caller's transaction, with e's row
 // locked. The label e held is released first, and stays its tenant's like
 // one of a deleted environment; the chosen one is claimed as ClaimHostLabel

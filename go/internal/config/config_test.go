@@ -507,6 +507,40 @@ func TestAppsZone(t *testing.T) {
 	}
 }
 
+// --apps-zone-owners: none by default; tenant names from the flag or
+// FERUN_APPS_ZONE_OWNERS, comma-separated, the flag winning; a name that
+// is no tenant's is refused.
+func TestAppsZoneOwners(t *testing.T) {
+	t.Parallel()
+	if EnvName("apps-zone-owners") != "FERUN_APPS_ZONE_OWNERS" {
+		t.Fatal(EnvName("apps-zone-owners"))
+	}
+	c, err := Parse([]string{"--database-url", testURL}, env(nil))
+	if err != nil || c.AppsZoneOwners != nil || Default().AppsZoneOwners != nil {
+		t.Fatalf("default %q, %v", c.AppsZoneOwners, err)
+	}
+	c, err = Parse([]string{"--database-url", testURL}, env(map[string]string{"FERUN_APPS_ZONE_OWNERS": "fecode, acme.io"}))
+	if err != nil || !reflect.DeepEqual(c.AppsZoneOwners, []string{"fecode", "acme.io"}) {
+		t.Fatalf("from the variable %q, %v", c.AppsZoneOwners, err)
+	}
+	c, err = Parse([]string{"--database-url", testURL, "--apps-zone-owners", "fecode"},
+		env(map[string]string{"FERUN_APPS_ZONE_OWNERS": "other"}))
+	if err != nil || !reflect.DeepEqual(c.AppsZoneOwners, []string{"fecode"}) {
+		t.Fatalf("from the flag %q, %v", c.AppsZoneOwners, err)
+	}
+	for _, bad := range []string{"FeCode", "f", "-fecode", "fe_code", "fecode/x"} {
+		if _, err := Parse([]string{"--database-url", testURL, "--apps-zone-owners", bad}, env(nil)); err == nil ||
+			!strings.Contains(err.Error(), "--apps-zone-owners") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	var b strings.Builder
+	Usage(&b, CmdServe)
+	if !strings.Contains(b.String(), "--apps-zone-owners (FERUN_APPS_ZONE_OWNERS)") {
+		t.Fatalf("serve help lacks --apps-zone-owners:\n%s", b.String())
+	}
+}
+
 // The domains' flags (ADR 0021): their defaults (domains off, the label
 // _ferun-challenge, a grace of 72 h, 50 unverified claims), their
 // variables, and what Validate refuses.

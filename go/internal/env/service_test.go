@@ -1242,3 +1242,125 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("unpublish without a zone: %+v %v", a, err)
 	}
 }
+
+// A plain label (ADR 0021, 2026-11-01): a tenant of --apps-zone-owners may
+// choose a host label without "--", as FeCode does for a project's
+// production; any other tenant gets the 400 it got before. A plain label
+// is first come as every label is, and one that is the natural label of
+// an existing tenant's environment is refused; a tenant made later, whose
+// natural label the owner holds, gets its fallback, and the owner keeps
+// the label.
+func TestSetPublicPlainLabel(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, harnessOptions{appsZone: "apps.test", appsZoneOwners: []string{tenantA}})
+	ctx := h.ctx()
+	for _, n := range []string{"prod", "demo"} {
+		h.create(n, nil)
+	}
+	if _, created, err := h.svc.CreateEnv(ctx, tenantB, CreateEnvRequest{Name: "prod"}); err != nil || !created {
+		t.Fatalf("create %v %v", created, err)
+	}
+	code := func(err error) string {
+		var ae *apierr.Error
+		if errors.As(err, &ae) {
+			return ae.Code
+		}
+		return ""
+	}
+
+	// The zone's owner: a plain label at its first publish, again without
+	// a change, and a label with "--" as before.
+	a, err := h.svc.SetPublic(ctx, tenantA, "prod", true, "kino")
+	if err != nil || !slices.Equal(a.Hosts, []string{"kino.apps.test"}) || !a.Rolling {
+		t.Fatalf("plain label: %+v %v", a, err)
+	}
+	if e := h.env("prod"); !e.Public || e.HostLabel != "kino" {
+		t.Fatalf("row %+v", e)
+	}
+	a, err = h.svc.SetPublic(ctx, tenantA, "prod", true, "kino")
+	if err != nil || !slices.Equal(a.Hosts, []string{"kino.apps.test"}) || a.Rolling {
+		t.Fatalf("again: %+v %v", a, err)
+	}
+	a, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "demo--kino")
+	if err != nil || !slices.Equal(a.Hosts, []string{"demo--kino.apps.test"}) {
+		t.Fatalf("chosen label of the owner: %+v %v", a, err)
+	}
+	a, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "ironcore-dashboard")
+	if err != nil || !slices.Equal(a.Hosts, []string{"ironcore-dashboard.apps.test"}) {
+		t.Fatalf("a hyphenated plain label no tenant's: %+v %v", a, err)
+	}
+
+	// Not of the form: a fallback's end, R-LDH, upper case, too long.
+	for _, bad := range []string{"kino-0123456789abcdef", "xn--kino", "Kino", "kino-", strings.Repeat("k", 64)} {
+		_, err = h.svc.SetPublic(ctx, tenantA, "prod", true, bad)
+		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadOwnedHostLabel, bad))
+	}
+
+	// Taken: another environment of the owner holds it, another tenant
+	// owns it, it is the natural label of an existing tenant's
+	// environment (the owner's own included). The environment keeps its
+	// label.
+	_, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "kino")
+	wantStatus(t, err, http.StatusConflict, "host label kino is another tenant's or another environment's")
+	if code(err) != CodeHostLabelTaken {
+		t.Fatalf("code %q", code(err))
+	}
+	h.exec("INSERT INTO host_labels (label, owner) VALUES ('shop', $1)", tenantB)
+	_, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "shop")
+	wantStatus(t, err, http.StatusConflict, "host label shop is another tenant's or another environment's")
+	for label, msg := range map[string]string{
+		"web-other": "host label web-other is the natural label of environment web of tenant other",
+		"web-acme":  "host label web-acme is the natural label of environment web of tenant acme",
+	} {
+		_, err = h.svc.SetPublic(ctx, tenantA, "demo", true, label)
+		wantStatus(t, err, http.StatusConflict, msg)
+		if code(err) != CodeHostLabelTaken {
+			t.Fatalf("%s: code %q", label, code(err))
+		}
+	}
+	if e := h.env("demo"); e.HostLabel != "ironcore-dashboard" {
+		t.Fatalf("kept %+v", e)
+	}
+
+	// Another tenant: a plain label is the 400 of before, a label with
+	// "--" is chosen.
+	for _, bad := range []string{"kino2", "web-acme"} {
+		_, err = h.svc.SetPublic(ctx, tenantB, "prod", true, bad)
+		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadHostLabel, bad))
+	}
+	if a, err := h.svc.SetPublic(ctx, tenantB, "prod", true, "prod--x"); err != nil ||
+		!slices.Equal(a.Hosts, []string{"prod--x.apps.test"}) {
+		t.Fatalf("chosen label of another tenant: %+v %v", a, err)
+	}
+
+	// A tenant made later whose natural label the owner holds: its
+	// environment gets its fallback, and the owner keeps the label, also
+	// when it chooses it again.
+	if _, err := h.svc.SetPublic(ctx, tenantA, "demo", true, "shop-later"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.st.CreateTenant(ctx, "later"); err != nil {
+		t.Fatal(err)
+	}
+	shop, created, err := h.svc.CreateEnv(ctx, "later", CreateEnvRequest{Name: "shop"})
+	if err != nil || !created {
+		t.Fatalf("create %v %v", created, err)
+	}
+	_, _, fallback := model.HostLabels("shop", "later", uuid.MustParse(shop.ID))
+	if a, err := h.svc.SetPublic(ctx, "later", "shop", true, ""); err != nil ||
+		!slices.Equal(a.Hosts, []string{fallback + ".apps.test"}) {
+		t.Fatalf("later tenant: %+v %v (fallback %s)", a, err, fallback)
+	}
+	if a, err := h.svc.SetPublic(ctx, tenantA, "demo", true, "shop-later"); err != nil ||
+		!slices.Equal(a.Hosts, []string{"shop-later.apps.test"}) {
+		t.Fatalf("the owner again: %+v %v", a, err)
+	}
+	// Its other environment may take it once the first gives it up.
+	if _, err := h.svc.SetPublic(ctx, tenantA, "demo", true, "demo--kino"); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := h.svc.SetPublic(ctx, tenantA, "prod", true, "shop-later"); err != nil ||
+		!slices.Equal(a.Hosts, []string{"shop-later.apps.test"}) {
+		t.Fatalf("the owner's other environment: %+v %v", a, err)
+	}
+}

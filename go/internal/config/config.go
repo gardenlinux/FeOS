@@ -25,6 +25,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/mesh"
 	"github.com/gardenlinux/feos/go/internal/pki"
+	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // The fixed timings of ferund (§3 of the design), named here in one place.
@@ -180,6 +181,11 @@ type Config struct {
 	// which ferun-ingress serves (ADR 0021); empty: no hosts, and no
 	// environment can be public.
 	AppsZone string
+	// AppsZoneOwners are the tenants that own the apps zone's plain names
+	// (ADR 0021, 2026-11-01): such a tenant may choose a default host
+	// label without "--", as FeCode does for a project's production
+	// (<project>.<apps zone>); nil: no tenant may.
+	AppsZoneOwners []string
 	// EdgeName is the name tenants' domains point at with a CNAME (ADR
 	// 0021), such as edge.fecode.dev, which the operator publishes with the
 	// balancer's addresses; empty: domains are off.
@@ -389,6 +395,8 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"the pods' network: empty, routed (every node a prefix of its network's); mesh, a ULA /64 drawn once and kept in the database; or such a /64 (fdXX:XXXX:XXXX::/64)")
 	fs.StringVar(&c.AppsZone, "apps-zone", c.AppsZone,
 		"the DNS zone of public environments' default hosts, served by ferun-ingress (ADR 0021); empty: no hosts, and no environment can be public")
+	fs.Var((*listValue)(&c.AppsZoneOwners), "apps-zone-owners",
+		"tenants that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without \"--\", <label>.<apps zone> (ADR 0021); empty: none may")
 	fs.StringVar(&c.EdgeName, "edge-name", c.EdgeName,
 		"the name tenants' domains point at with a CNAME (ADR 0021), e.g. edge.fecode.dev; empty: domains are off")
 	fs.Var((*addrList)(&c.EdgeAddresses), "edge-address",
@@ -525,6 +533,11 @@ func (c *Config) Validate() error {
 	if c.AppsZone != "" {
 		if err := pki.ValidateDomain(c.AppsZone); err != nil {
 			bad("--apps-zone: %w", err)
+		}
+	}
+	for _, tn := range c.AppsZoneOwners {
+		if !store.TenantNamePattern.MatchString(tn) {
+			bad("--apps-zone-owners: %q is not a tenant name (%s)", tn, store.TenantNamePattern)
 		}
 	}
 	if c.EdgeName != "" {

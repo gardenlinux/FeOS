@@ -509,8 +509,10 @@ type LogsAnswer struct {
 // PublicRequest is PUT /api/v1/environments/{env}/public: whether the
 // ingress serves the environment (ADR 0021). Public is required.
 // HostLabel, with public true, is the default host's label its tenant
-// chooses (model.ChosenHostLabel: a DNS label with "--" in it); without
-// it the environment keeps its label, or gets one at its first publish.
+// chooses (model.ChosenHostLabel: a DNS label with "--" in it; for a
+// tenant that owns the apps zone also model.PlainHostLabel, one without);
+// without it the environment keeps its label, or gets one at its first
+// publish.
 type PublicRequest struct {
 	Public    bool   `json:"public"`
 	HostLabel string `json:"hostLabel,omitempty"`

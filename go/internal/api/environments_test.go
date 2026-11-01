@@ -457,6 +457,8 @@ func TestEnvironmentArguments(t *testing.T) {
 			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: false}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "hostLabel": "stage--kino"},
 			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino"}}}, 200},
+		{"PUT", "/api/v1/environments/prod/public", map[string]any{"public": true, "hostLabel": "kino"},
+			envCall{"SetPublic", testTenant, "prod", []any{envs.PublicRequest{Public: true, HostLabel: "kino"}}}, 200},
 	}
 	for _, c := range cases {
 		fe := &fakeEnvs{}

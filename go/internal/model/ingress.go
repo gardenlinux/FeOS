@@ -93,6 +93,26 @@ func ChosenHostLabel(s string) bool {
 	return isHostLabel(s) && strings.Contains(s, "--") && !hasHashSuffix(s)
 }
 
+// PlainHostLabel reports whether s may be a plain label, one a tenant
+// that owns the apps zone chose (--apps-zone-owners, PUT …/public with a
+// hostLabel): a DNS label as isHostLabel has it, without "--" and not
+// ending as a fallback does. It is never a fallback, but it may read as a
+// natural label; NaturalPair names the only pair it can be the natural
+// label of, which the caller checks against the tenants.
+func PlainHostLabel(s string) bool {
+	return isHostLabel(s) && !strings.Contains(s, "--") && !hasHashSuffix(s)
+}
+
+// NaturalPair splits a label at its first '-' into the environment's name
+// and the tenant whose natural label it would be ("ironcore-dashboard":
+// "ironcore" of "dashboard"); ok is false for a label without a '-' or
+// with nothing on either side of it. A natural label's name has no '-'
+// (HostLabels), so no other pair has it as its natural label.
+func NaturalPair(label string) (name, tenant string, ok bool) {
+	name, tenant, ok = strings.Cut(label, "-")
+	return name, tenant, ok && name != "" && tenant != ""
+}
+
 // hasHashSuffix reports whether s ends in "-" and 16 lowercase hex
 // characters, as a fallback label does.
 func hasHashSuffix(s string) bool {

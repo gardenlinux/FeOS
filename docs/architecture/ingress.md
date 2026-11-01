@@ -570,7 +570,14 @@ only when its tenant chooses another:
   true, "hostLabel": "stage--kino"}`: a DNS label of at most 63
   characters with `--` in it, not as its third and fourth characters,
   and not ending in a hyphen and 16 hex characters. It replaces the
-  label the environment had or would get; that one stays the tenant's.
+  label the environment had or would get; that one stays the tenant's;
+- **plain**: a chosen label without `--`, which only a tenant that owns
+  the apps zone may choose (`--apps-zone-owners`, FeCode's installation
+  `fecode`, for a project's production at `<project>.<apps zone>`): a
+  DNS label of at most 63 characters, not ending in a hyphen and 16 hex
+  characters. One whose part after its first hyphen names an existing
+  tenant is refused (409 `host_label_taken`), since it is the natural
+  label of that tenant's environment, unless the owner holds it already.
 
 So no two pairs of environment name and tenant have the same natural
 label, and no natural label is another environment's fallback: a host
@@ -578,6 +585,13 @@ that reads as `<environment>-<tenant>` belongs to that tenant. `web` of
 `acme-io` is `web-acme-io`; `web` of `acme.io` and `web-acme` of `io`,
 which would read the same, get the fallback. A chosen label is neither
 form: no natural label has `--`, and every fallback ends in its hash.
+A plain label is never a fallback, but one with a hyphen reads as a
+natural label: `ironcore-dashboard` as `ironcore` of `dashboard`. That
+is the zone's owner's trade, bounded so: an existing tenant's natural
+label is refused, and a tenant made later whose natural label the owner
+holds gets its fallback, as for a label another tenant holds. A host
+that reads as `<environment>-<tenant>` is that tenant's or the zone's
+owner's.
 
 `host_labels` registers every label ever given with the tenant that
 first claimed it. A claim is one atomic upsert, the chosen label, or the

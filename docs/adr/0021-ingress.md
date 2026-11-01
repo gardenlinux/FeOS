@@ -663,6 +663,37 @@ changed these points:
   points; a domain the ingress leaves out for its size, or whose key
   does not open, is the one case where the two differ. A route whose
   `host` is the default host answers nowhere while a domain is served.
+- **The zone's owner may choose plain labels (2026-11-01).** FeCode
+  serves a project's production at `<project>.apps.fecode.dev`
+  (`kino.apps.fecode.dev`, `ironcore-dashboard.apps.fecode.dev`) and
+  every other environment at `<environment>--<project>`: the production
+  is the address people are given, and `prod--kino` is a platform's
+  detail in it. A chosen label needs `--`, so FeRun refused `kino`. The
+  operator now names the tenants that own the apps zone's plain names,
+  `--apps-zone-owners` (`FERUN_APPS_ZONE_OWNERS`, comma-separated, empty
+  by default; FeCode's installation names `fecode`). Such a tenant's
+  chosen label may also be a plain one: a DNS label that is not R-LDH,
+  without `--` and not ending as a fallback does, so it is never a
+  fallback. Everything else stays: first come in `host_labels`,
+  registered to the tenant for good, 409 `host_label_taken` when another
+  tenant or environment holds it, and a label with `--` chosen by any
+  tenant as before. Every other tenant's plain label is the 400 it was.
+  The trade: a plain label with a hyphen reads as another tenant's
+  natural label (`ironcore-dashboard` as `ironcore` of `dashboard`), so
+  a host that reads as `<environment>-<tenant>` is that tenant's, or the
+  zone's owner's. The owner holds plain names in its zone, as a
+  platform holds the names under its own domain. The bound: split at
+  its first hyphen, the only split a natural label has, a plain label
+  whose rest names an existing tenant, the owner itself included, is a
+  409 `host_label_taken` ("host label web-acme is the natural label of
+  environment web of tenant acme"), unless `host_labels` registers it to
+  the owner already, so that choosing it again changes nothing. So no
+  existing tenant's natural host is ever taken. A tenant made later,
+  whose natural label the owner holds, gets its fallback, as for any
+  label another tenant holds; it never fails. A tenant taken off the
+  list chooses no plain label from then on, naming one it holds again
+  included (the 400), and its environments keep those they hold until
+  it chooses others.
 
 ## Alternatives considered
 

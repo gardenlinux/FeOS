@@ -57,6 +57,74 @@ func TestChosenHostLabel(t *testing.T) {
 	}
 }
 
+// A plain label, a zone owner's, is a host label without "--" that does
+// not end as a fallback; a fallback is never one, and every label with
+// "--" is a chosen one or neither.
+func TestPlainHostLabel(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{
+		"kino": true, "ironcore-dashboard": true, "a": true, "x1": true, "web-acme": true,
+		strings.Repeat("k", 63): true, "kino-0123456789abcde": true, "kino-0123456789abcdeg": true,
+		"stage--kino": false, "xn--kino": false, "ab--": false, "Kino": false, "kino-": false, "-kino": false,
+		"kino-0123456789abcdef": false, "0123456789abcdef": true, "-0123456789abcdef": false,
+		strings.Repeat("k", 64): false, "": false, "ki_no": false, "kino.dev": false,
+	} {
+		if got := PlainHostLabel(in); got != want {
+			t.Errorf("%q: %v, want %v", in, got, want)
+		}
+		if PlainHostLabel(in) && ChosenHostLabel(in) {
+			t.Errorf("%q is plain and chosen", in)
+		}
+	}
+	for _, in := range [][2]string{{"web", "acme"}, {"web-prod", "acme"}, {"ab--x", "acme"}, {"web", "acme.io"}} {
+		if _, _, fallback := HostLabels(in[0], in[1], uuid.New()); PlainHostLabel(fallback) {
+			t.Errorf("%q: fallback %q reads as plain", in, fallback)
+		}
+	}
+}
+
+// NaturalPair splits at the first hyphen; a usable natural label splits
+// into its own pair, so a plain label is the natural label of that pair
+// alone.
+func TestNaturalPair(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string][3]string{
+		"ironcore-dashboard": {"ironcore", "dashboard", "ok"},
+		"web-acme-io":        {"web", "acme-io", "ok"},
+		"kino":               {"kino", "", ""},
+		"-kino":              {"", "kino", ""},
+		"kino-":              {"kino", "", ""},
+		"":                   {"", "", ""},
+	} {
+		name, tenant, ok := NaturalPair(in)
+		if name != want[0] || tenant != want[1] || ok != (want[2] == "ok") {
+			t.Errorf("%q: (%q, %q, %v), want %q", in, name, tenant, ok, want)
+		}
+	}
+	r := rand.New(rand.NewPCG(5, 6))
+	word := func(set string, n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = set[r.IntN(len(set))]
+		}
+		return string(b)
+	}
+	for range 5000 {
+		// A tenant name starts with a letter or a digit (tenants.id).
+		name, tenant := word("ab1-", 1+r.IntN(8)), word("ab1", 1)+word("ab1-.", 1+r.IntN(10))
+		natural, ok, _ := HostLabels(name, tenant, uuid.Nil)
+		if !ok {
+			continue
+		}
+		if !PlainHostLabel(natural) {
+			t.Fatalf("%q %q: natural %q is not plain", name, tenant, natural)
+		}
+		if n, tn, ok := NaturalPair(natural); !ok || n != name || tn != tenant {
+			t.Fatalf("%q %q: natural %q splits into (%q, %q, %v)", name, tenant, natural, n, tn, ok)
+		}
+	}
+}
+
 func TestIngressGroupID(t *testing.T) {
 	t.Parallel()
 	short := podid.ID("k3m9q7a2b4c")
