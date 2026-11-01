@@ -11,7 +11,7 @@ use feos_proto::container_service::{
 };
 use feos_proto::host_service::{
     host_service_client::HostServiceClient, GetNetworkConfigRequest, GetTimeRequest,
-    GetVersionInfoRequest, PingRequest, PingResponse,
+    GetVersionInfoRequest, PingRequest, PingResponse, SetTimeRequest,
 };
 use feos_proto::pod_service::{
     pod_service_client::PodServiceClient, CreatePodRequest, DeletePodRequest, GetPodRequest,
@@ -461,6 +461,27 @@ async fn test_pod_lifecycle() -> Result<()> {
         skew < Duration::from_secs(5),
         "The guest's clock is {skew:?} off"
     );
+    // feosd keeps the clock of an attached guest (ADR 0027): one put 150 ms
+    // ahead is stepped back within its minute.
+    guest_host(&pod_id)
+        .await?
+        .set_time(SetTimeRequest {
+            time: Some((SystemTime::now() + Duration::from_millis(150)).into()),
+        })
+        .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(75);
+    loop {
+        let skew = guest_clock_skew(&pod_id).await?;
+        if skew < Duration::from_millis(5) {
+            info!("feosd corrected the guest's clock: {skew:?} off");
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "feosd did not correct the guest's clock: {skew:?} off"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
     let first_boot = guest_ping(&pod_id).await?.boot_id;
 
     // Firecracker runs jailed, as a user of the pod's own, in a cgroup of

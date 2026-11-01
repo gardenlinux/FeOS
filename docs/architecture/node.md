@@ -926,6 +926,16 @@ pushes the wall time and, if the pod has an address, its network
 configuration through the guest's API. After a resume it pings the guest
 once instead of waiting for the uplink.
 
+While the guest is attached, the layer keeps its clock
+([ADR 0027](../adr/0027-the-guests-clock.md)): once a minute it calls
+`GetTime` four times and takes the call with the shortest round trip. The
+offset is the guest's time against the middle of that call on the node's
+`CLOCK_REALTIME`. A measurement whose shortest round trip took over
+10 ms is dropped. The layer sends the offset to `AdjustTime`, and sets a
+guest that answers `UNIMPLEMENTED` with `SetTime` when it is off by more
+than 20 ms. A failed or timed-out measurement (5 s) is logged at debug
+and tried again a minute later.
+
 ### Balloon
 
 A pod's microVM has a virtio balloon with free page reporting: the guest

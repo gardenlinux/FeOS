@@ -3,14 +3,14 @@
 
 use crate::error::HostError;
 use feos_proto::host_service::{
-    FeosLogEntry, FreezeFilesystemRequest, FreezeFilesystemResponse, GetCpuInfoResponse,
-    GetKernelStatsResponse, GetMemoryBreakdownRequest, GetNetworkConfigResponse,
-    GetNetworkInfoResponse, GetTimeResponse, GetVersionInfoResponse, HostnameResponse,
-    KernelLogEntry, MemoryBreakdown, MemoryResponse, PingResponse, PreparePauseRequest,
-    PreparePauseResponse, RebootRequest, RebootResponse, SetNetworkConfigRequest,
-    SetNetworkConfigResponse, SetTimeRequest, SetTimeResponse, ShutdownRequest, ShutdownResponse,
-    ThawFilesystemRequest, ThawFilesystemResponse, UpgradeFeosBinaryRequest,
-    UpgradeFeosBinaryResponse,
+    AdjustTimeRequest, AdjustTimeResponse, FeosLogEntry, FreezeFilesystemRequest,
+    FreezeFilesystemResponse, GetCpuInfoResponse, GetKernelStatsResponse,
+    GetMemoryBreakdownRequest, GetNetworkConfigResponse, GetNetworkInfoResponse, GetTimeResponse,
+    GetVersionInfoResponse, HostnameResponse, KernelLogEntry, MemoryBreakdown, MemoryResponse,
+    PingResponse, PreparePauseRequest, PreparePauseResponse, RebootRequest, RebootResponse,
+    SetNetworkConfigRequest, SetNetworkConfigResponse, SetTimeRequest, SetTimeResponse,
+    ShutdownRequest, ShutdownResponse, ThawFilesystemRequest, ThawFilesystemResponse,
+    UpgradeFeosBinaryRequest, UpgradeFeosBinaryResponse,
 };
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
@@ -49,6 +49,10 @@ pub enum Command {
         oneshot::Sender<Result<SetTimeResponse, HostError>>,
     ),
     GetTime(oneshot::Sender<Result<GetTimeResponse, HostError>>),
+    AdjustTime(
+        AdjustTimeRequest,
+        oneshot::Sender<Result<AdjustTimeResponse, HostError>>,
+    ),
     SetNetworkConfig(
         SetNetworkConfigRequest,
         oneshot::Sender<Result<SetNetworkConfigResponse, HostError>>,

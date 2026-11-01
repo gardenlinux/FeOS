@@ -90,6 +90,9 @@ impl HostServiceDispatcher {
                 Command::GetTime(responder) => {
                     tokio::spawn(worker::clock::handle_get_time(responder));
                 }
+                Command::AdjustTime(req, responder) => {
+                    tokio::spawn(worker::clock::handle_adjust_time(req, responder));
+                }
                 Command::SetNetworkConfig(req, responder) => {
                     let pushed = self.pushed_network_config.clone();
                     tokio::spawn(worker::network::handle_set_network_config(

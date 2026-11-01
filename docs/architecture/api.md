@@ -31,7 +31,7 @@ plane, and between `feosd` and `feos-guest`. They live in
 Decided, not built:
 
 - `feos.guest.v1.GuestService`, which has `MountVolumes`, takes
-  `SetTime`, `GetTime`, `SetNetworkConfig`, `GetNetworkConfig`,
+  `SetTime`, `GetTime`, `AdjustTime`, `SetNetworkConfig`, `GetNetworkConfig`,
   `FreezeFilesystem`, `ThawFilesystem` and `PreparePause` out of
   `HostService`; only `feos-guest` serves it
   ([ADR 0007](../adr/0007-guest.md)).

@@ -3,17 +3,17 @@
 
 use crate::Command;
 use feos_proto::host_service::{
-    host_service_server::HostService, FeosLogEntry, FreezeFilesystemRequest,
-    FreezeFilesystemResponse, GetCpuInfoRequest, GetCpuInfoResponse, GetKernelStatsRequest,
-    GetKernelStatsResponse, GetMemoryBreakdownRequest, GetNetworkConfigRequest,
-    GetNetworkConfigResponse, GetNetworkInfoRequest, GetNetworkInfoResponse, GetTimeRequest,
-    GetTimeResponse, GetVersionInfoRequest, GetVersionInfoResponse, HostnameRequest,
-    HostnameResponse, KernelLogEntry, MemoryBreakdown, MemoryRequest, MemoryResponse, PingRequest,
-    PingResponse, PreparePauseRequest, PreparePauseResponse, RebootRequest, RebootResponse,
-    SetNetworkConfigRequest, SetNetworkConfigResponse, SetTimeRequest, SetTimeResponse,
-    ShutdownRequest, ShutdownResponse, StreamFeosLogsRequest, StreamKernelLogsRequest,
-    ThawFilesystemRequest, ThawFilesystemResponse, UpgradeFeosBinaryRequest,
-    UpgradeFeosBinaryResponse,
+    host_service_server::HostService, AdjustTimeRequest, AdjustTimeResponse, FeosLogEntry,
+    FreezeFilesystemRequest, FreezeFilesystemResponse, GetCpuInfoRequest, GetCpuInfoResponse,
+    GetKernelStatsRequest, GetKernelStatsResponse, GetMemoryBreakdownRequest,
+    GetNetworkConfigRequest, GetNetworkConfigResponse, GetNetworkInfoRequest,
+    GetNetworkInfoResponse, GetTimeRequest, GetTimeResponse, GetVersionInfoRequest,
+    GetVersionInfoResponse, HostnameRequest, HostnameResponse, KernelLogEntry, MemoryBreakdown,
+    MemoryRequest, MemoryResponse, PingRequest, PingResponse, PreparePauseRequest,
+    PreparePauseResponse, RebootRequest, RebootResponse, SetNetworkConfigRequest,
+    SetNetworkConfigResponse, SetTimeRequest, SetTimeResponse, ShutdownRequest, ShutdownResponse,
+    StreamFeosLogsRequest, StreamKernelLogsRequest, ThawFilesystemRequest, ThawFilesystemResponse,
+    UpgradeFeosBinaryRequest, UpgradeFeosBinaryResponse,
 };
 use feos_utils::dispatch::dispatch_and_wait;
 use log::{debug, info};
@@ -172,6 +172,18 @@ impl HostService for HostApiHandler {
     ) -> Result<Response<GetTimeResponse>, Status> {
         debug!("HostApi: Received GetTime request.");
         dispatch_and_wait(&self.dispatcher_tx, Command::GetTime).await
+    }
+
+    async fn adjust_time(
+        &self,
+        request: Request<AdjustTimeRequest>,
+    ) -> Result<Response<AdjustTimeResponse>, Status> {
+        // Once a minute: keep it out of the info log.
+        debug!("HostApi: Received AdjustTime request.");
+        dispatch_and_wait(&self.dispatcher_tx, |resp_tx| {
+            Command::AdjustTime(request.into_inner(), resp_tx)
+        })
+        .await
     }
 
     async fn set_network_config(

@@ -100,9 +100,28 @@ grep -q "tick=1 " <<<"${out}" || fail "first ping"
 now=$(date +%s)
 ctl set-time "${now}" >/dev/null
 guest_time="$(ctl get-time)"; log "guest time ${guest_time}"
-guest_s=$(date -d "${guest_time}" +%s)
+guest_s=$(date -d "${guest_time%% *}" +%s)
 drift=$(( guest_s - now )); drift=${drift#-}
 [ "${drift}" -le 5 ] || fail "clock drift ${drift}s after set-time"
+
+# The guest's offset from this machine's clock, in whole milliseconds.
+offset_ms() { ctl get-time | sed -n 's/.*(\([-+][0-9]*\)\.[0-9]* ms from.*/\1/p'; }
+ctl set-time >/dev/null
+# 200 ms ahead is stepped back at once.
+out="$(ctl adjust-time 200000000)"; log "adjust +200 ms: ${out}"
+grep -q "^stepped" <<<"${out}" || fail "a 200 ms offset was not stepped: ${out}"
+off=$(offset_ms)
+[ "${off}" -le -195 ] && [ "${off}" -ge -205 ] || fail "after a 200 ms step: ${off} ms"
+ctl set-time >/dev/null
+# 50 ms behind is slewed, at 0.5 ms per second.
+before=$(offset_ms)
+out="$(ctl adjust-time -50000000)"; log "adjust -50 ms: ${out}"
+grep -q "^slewing" <<<"${out}" || fail "a 50 ms offset was not slewed: ${out}"
+sleep 4
+after=$(offset_ms)
+log "slewed from ${before} ms to ${after} ms in 4 s"
+[ $(( after - before )) -ge 1 ] && [ $(( after - before )) -le 3 ] || fail "slew: ${before} ms to ${after} ms"
+ctl set-time >/dev/null
 
 out="$(ctl ping)"
 grep -q "tick=2 " <<<"${out}" || fail "tick did not advance: ${out}"

@@ -6,12 +6,12 @@ use anyhow::Result;
 use clap::builder::ArgPredicate;
 use clap::{ArgGroup, Args, Subcommand};
 use feos_proto::host_service::{
-    host_service_client::HostServiceClient, FreezeFilesystemRequest, GetCpuInfoRequest,
-    GetMemoryBreakdownRequest, GetNetworkConfigRequest, GetNetworkInfoRequest, GetTimeRequest,
-    GetVersionInfoRequest, HostnameRequest, MemoryBreakdown, MemoryRequest, NetworkRoute,
-    PingRequest, PreparePauseRequest, RebootRequest, SetNetworkConfigRequest, SetTimeRequest,
-    ShutdownRequest, StreamFeosLogsRequest, StreamKernelLogsRequest, ThawFilesystemRequest,
-    UpgradeFeosBinaryRequest,
+    host_service_client::HostServiceClient, AdjustTimeRequest, FreezeFilesystemRequest,
+    GetCpuInfoRequest, GetMemoryBreakdownRequest, GetNetworkConfigRequest, GetNetworkInfoRequest,
+    GetTimeRequest, GetVersionInfoRequest, HostnameRequest, MemoryBreakdown, MemoryRequest,
+    NetworkRoute, PingRequest, PreparePauseRequest, RebootRequest, SetNetworkConfigRequest,
+    SetTimeRequest, ShutdownRequest, StreamFeosLogsRequest, StreamKernelLogsRequest,
+    ThawFilesystemRequest, UpgradeFeosBinaryRequest,
 };
 use prost_types::Timestamp;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -75,8 +75,17 @@ pub enum HostCommand {
         #[arg(help = "Seconds since the Unix epoch")]
         unix_seconds: Option<i64>,
     },
-    /// Read the host's clock
+    /// Read the clock, and how far it is from this machine's
     GetTime,
+    /// Correct the clock by an offset, as feosd does once a minute (ADR
+    /// 0027): over 100 ms it is stepped, otherwise slewed
+    AdjustTime {
+        #[arg(
+            allow_hyphen_values = true,
+            help = "How far the clock is ahead, in nanoseconds; negative if behind"
+        )]
+        offset_ns: i64,
+    },
     /// Push a static network configuration: an IPv6 address, an IPv4
     /// address or both
     ///
@@ -175,6 +184,21 @@ pub async fn handle_host_command(args: HostArgs) -> Result<()> {
         HostCommand::Ping => ping(&mut client).await?,
         HostCommand::SetTime { unix_seconds } => set_time(&mut client, unix_seconds).await?,
         HostCommand::GetTime => get_time(&mut client).await?,
+        HostCommand::AdjustTime { offset_ns } => {
+            let response = client
+                .adjust_time(AdjustTimeRequest { offset_ns })
+                .await?
+                .into_inner();
+            println!(
+                "{}; frequency {} ppb",
+                if response.stepped {
+                    "stepped"
+                } else {
+                    "slewing"
+                },
+                response.frequency_ppb
+            );
+        }
         HostCommand::SetNetwork {
             interface,
             ipv4,
@@ -528,13 +552,38 @@ async fn set_time(
     Ok(())
 }
 
+/// Prints the time and how far it is from this machine's clock: of four
+/// calls, the one with the shortest round trip, against its middle.
 async fn get_time(client: &mut HostServiceClient<Channel>) -> Result<()> {
-    let response = client.get_time(GetTimeRequest {}).await?.into_inner();
-    let time = response.time.unwrap_or_default();
-    match chrono::DateTime::from_timestamp(time.seconds, time.nanos as u32) {
-        Some(datetime) => println!("{}", datetime.to_rfc3339()),
-        None => println!("{}.{:09}", time.seconds, time.nanos),
+    let mut best: Option<(Timestamp, i128, std::time::Duration)> = None;
+    for _ in 0..4 {
+        let sent = SystemTime::now();
+        let response = client.get_time(GetTimeRequest {}).await?.into_inner();
+        let round_trip = SystemTime::now().duration_since(sent).unwrap_or_default();
+        if best
+            .as_ref()
+            .is_some_and(|(_, _, best)| *best <= round_trip)
+        {
+            continue;
+        }
+        let time = response.time.unwrap_or_default();
+        let middle = (sent + round_trip / 2).duration_since(UNIX_EPOCH)?;
+        let offset_ns = i128::from(time.seconds) * 1_000_000_000 + i128::from(time.nanos)
+            - middle.as_nanos() as i128;
+        best = Some((time, offset_ns, round_trip));
     }
+    let Some((time, offset_ns, round_trip)) = best else {
+        return Ok(());
+    };
+    match chrono::DateTime::from_timestamp(time.seconds, time.nanos as u32) {
+        Some(datetime) => print!("{}", datetime.to_rfc3339()),
+        None => print!("{}.{:09}", time.seconds, time.nanos),
+    }
+    println!(
+        " ({:+.3} ms from this machine's clock, round trip {:.3} ms)",
+        offset_ns as f64 / 1e6,
+        round_trip.as_secs_f64() * 1e3
+    );
     Ok(())
 }
 

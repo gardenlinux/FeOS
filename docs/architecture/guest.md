@@ -34,7 +34,14 @@ As PID 1 the guest:
 It runs no DHCP and no NTP: the host pushes the time and the network when
 the guest attaches and after every resume, and the network again when
 `feosd` finds a running pod's guest configured for an earlier network
-([node.md](node.md)).
+([node.md](node.md)). While the guest is attached, `feosd` measures its
+clock once a minute and sends the offset to `AdjustTime`
+([ADR 0027](../adr/0027-the-guests-clock.md)): over 100 ms the guest
+steps its clock (`adjtimex` `ADJ_SETOFFSET`), otherwise it slews it
+(`ADJ_OFFSET_SINGLESHOT`, 0.5 ms/s) and, at least 16 s after its last
+adjustment, corrects its frequency (`ADJ_FREQUENCY`) by half of the rate
+it drifted at. It remembers only when it last adjusted; `SetTime` starts
+that again.
 
 ## Network
 

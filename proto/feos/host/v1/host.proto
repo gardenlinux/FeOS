@@ -38,6 +38,10 @@ service HostService {
   rpc SetTime(SetTimeRequest) returns (SetTimeResponse);
   // Reads CLOCK_REALTIME.
   rpc GetTime(GetTimeRequest) returns (GetTimeResponse);
+  // Corrects CLOCK_REALTIME by an offset its host measured, and learns the
+  // clock's frequency from the offsets (ADR 0027): an offset over 100 ms
+  // steps the clock, a smaller one is slewed.
+  rpc AdjustTime(AdjustTimeRequest) returns (AdjustTimeResponse);
 
   // Configures an interface with static IPv4 and IPv6 addresses, the
   // default routes, the DNS resolvers and the hostname. A guest has no DHCP: its host pushes
@@ -291,6 +295,20 @@ message GetTimeRequest {}
 
 message GetTimeResponse {
   google.protobuf.Timestamp time = 1;
+}
+
+message AdjustTimeRequest {
+  // How far the clock is ahead of the host's, in nanoseconds; negative if
+  // it is behind.
+  sint64 offset_ns = 1;
+}
+
+message AdjustTimeResponse {
+  // Whether the offset was large enough to step the clock rather than slew
+  // it.
+  bool stepped = 1;
+  // The clock's frequency correction after the call, in parts per billion.
+  int64 frequency_ppb = 2;
 }
 
 message SetNetworkConfigRequest {

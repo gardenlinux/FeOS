@@ -16,11 +16,15 @@
 //! uplink: a call that sat idle before a snapshot is not woken in the
 //! restored guest until its keepalive notices, seconds later. The guest's
 //! listeners come back with its memory, so the resume pings it instead.
+//!
+//! While a guest is attached, the VM service measures its clock once a
+//! minute and has it correct the offset (`AdjustTime`, ADR 0027): kvm-clock
+//! runs at the node's uncorrected rate and drifts by about a second a day.
 
 use crate::{vsock_path, VmEventWrapper};
 use feos_proto::host_service::{
-    host_service_client::HostServiceClient, NetworkRoute, PingRequest, PreparePauseRequest,
-    SetNetworkConfigRequest, SetTimeRequest,
+    host_service_client::HostServiceClient, AdjustTimeRequest, GetTimeRequest, NetworkRoute,
+    PingRequest, PreparePauseRequest, SetNetworkConfigRequest, SetTimeRequest,
 };
 use feos_proto::lifecycle_service::lifecycle_service_server::{
     LifecycleService, LifecycleServiceServer,
@@ -30,7 +34,7 @@ use feos_proto::microvm::{
     GuestAttachedEvent, GuestDetachedEvent, GuestInfo, GuestNetworkConfig, VmEvent,
 };
 use feos_utils::vsock::{API_PORT, UPLINK_PORT};
-use log::{info, warn};
+use log::{debug, info, warn};
 use prost::Message;
 use prost_types::Any;
 use std::collections::HashMap;
@@ -38,12 +42,12 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::net::UnixListener;
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::{ReceiverStream, UnixListenerStream};
-use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::transport::{Channel, Server};
+use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
 
 /// How long one push may take.
@@ -54,6 +58,17 @@ pub(crate) const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// has its memory served by the UFFD handler page by page, and its first
 /// answer can take longer than a connect's 5 s (`vsock::CONNECT_TIMEOUT`).
 const RESUME_TIMEOUT: Duration = Duration::from_secs(30);
+/// How often the clock of an attached guest is measured and corrected.
+const CLOCK_PERIOD: Duration = Duration::from_secs(60);
+/// How long one measurement and correction may take, its connect included.
+const CLOCK_TIMEOUT: Duration = Duration::from_secs(5);
+/// The `GetTime` calls of one measurement; the one with the shortest round
+/// trip counts.
+const CLOCK_SAMPLES: usize = 4;
+/// A measurement whose shortest round trip took longer than this is dropped.
+const CLOCK_MAX_ROUND_TRIP: Duration = Duration::from_millis(10);
+/// A guest without `AdjustTime` is set when it is off by more than this.
+const CLOCK_SET_THRESHOLD: Duration = Duration::from_millis(20);
 
 /// Where the VM service listens for the guest's uplink.
 pub fn uplink_path(vm_id: &str) -> PathBuf {
@@ -289,6 +304,66 @@ impl Guests {
         .unwrap_or_else(|_| Err(format!("no answer within {}s", PUSH_TIMEOUT.as_secs())))
     }
 
+    /// Measures the guest's clock and has it correct the offset. A guest
+    /// that has no `AdjustTime` yet is set instead, if it is far off.
+    async fn keep_clock(&self, vm_id: &str) {
+        let kept = tokio::time::timeout(CLOCK_TIMEOUT, async {
+            let channel =
+                feos_utils::vsock::channel_within(vsock_path(vm_id), API_PORT, CLOCK_TIMEOUT)
+                    .await
+                    .map_err(|e| format!("connect to the guest: {e}"))?;
+            let mut client = HostServiceClient::new(channel);
+            let (offset_ns, round_trip) = clock_offset(&mut client).await?;
+            if round_trip > CLOCK_MAX_ROUND_TRIP {
+                return Err(format!(
+                    "the shortest round trip took {} µs",
+                    round_trip.as_micros()
+                ));
+            }
+            match client.adjust_time(AdjustTimeRequest { offset_ns }).await {
+                Ok(response) => {
+                    let response = response.into_inner();
+                    if response.stepped {
+                        info!(
+                            "Guests ({vm_id}): Stepped the guest's clock, it was {} ms off",
+                            offset_ns / 1_000_000
+                        );
+                    } else {
+                        debug!(
+                            "Guests ({vm_id}): The guest's clock was {} µs off; frequency {} ppb",
+                            offset_ns / 1_000,
+                            response.frequency_ppb
+                        );
+                    }
+                    Ok(())
+                }
+                Err(status) if status.code() == Code::Unimplemented => {
+                    if offset_ns.unsigned_abs() <= CLOCK_SET_THRESHOLD.as_nanos() as u64 {
+                        return Ok(());
+                    }
+                    client
+                        .set_time(SetTimeRequest {
+                            time: Some(SystemTime::now().into()),
+                        })
+                        .await
+                        .map_err(|status| format!("SetTime: {}", status.message()))?;
+                    info!(
+                        "Guests ({vm_id}): Set the clock of a guest without AdjustTime, it was {} ms off",
+                        offset_ns / 1_000_000
+                    );
+                    Ok(())
+                }
+                Err(status) => Err(format!("AdjustTime: {}", status.message())),
+            }
+        })
+        .await
+        .unwrap_or_else(|_| Err(format!("no answer within {}s", CLOCK_TIMEOUT.as_secs())));
+        // A pausing microVM does not answer; the next minute tries again.
+        if let Err(e) = kept {
+            debug!("Guests ({vm_id}): The guest's clock was not kept: {e}");
+        }
+    }
+
     fn pushed(&self, vm_id: &str, result: Result<(), String>) {
         let push_error = match result {
             Ok(()) => {
@@ -393,13 +468,23 @@ impl LifecycleService for Uplink {
         }
 
         // The host sends nothing; the stream ends when the guest goes or
-        // the listener stops.
+        // the listener stops. Until then, the guest's clock is kept.
         let (tx, rx) = mpsc::channel(1);
         let mut stop = self.stop.clone();
         tokio::spawn(async move {
-            tokio::select! {
-                _ = tx.closed() => {}
-                _ = stop.wait_for(|stop| *stop) => {}
+            let start = tokio::time::Instant::now() + CLOCK_PERIOD;
+            let mut clock = tokio::time::interval_at(start, CLOCK_PERIOD);
+            clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                let tick = tokio::select! {
+                    _ = tx.closed() => false,
+                    _ = stop.wait_for(|stop| *stop) => false,
+                    _ = clock.tick() => true,
+                };
+                if !tick {
+                    break;
+                }
+                guests.keep_clock(&vm_id).await;
             }
             drop(tx);
             if guests.detached(&vm_id, attach_id) {
@@ -415,6 +500,34 @@ impl LifecycleService for Uplink {
         });
         Ok(Response::new(ReceiverStream::new(rx)))
     }
+}
+
+/// How far the guest's clock is ahead of the node's, in nanoseconds, and the
+/// round trip of the measurement: of `CLOCK_SAMPLES` calls, the one with the
+/// shortest round trip, against the middle of it on the node's clock.
+async fn clock_offset(client: &mut HostServiceClient<Channel>) -> Result<(i64, Duration), String> {
+    let mut best: Option<(i64, Duration)> = None;
+    for _ in 0..CLOCK_SAMPLES {
+        let sent = SystemTime::now();
+        let time = client
+            .get_time(GetTimeRequest {})
+            .await
+            .map_err(|status| format!("GetTime: {}", status.message()))?
+            .into_inner()
+            .time
+            .ok_or("GetTime returned no time")?;
+        let received = SystemTime::now();
+        let round_trip = received.duration_since(sent).unwrap_or_default();
+        if best.is_some_and(|(_, best)| best <= round_trip) {
+            continue;
+        }
+        let middle = sent + round_trip / 2;
+        let guest = Duration::new(time.seconds.max(0) as u64, time.nanos.max(0) as u32);
+        let node = middle.duration_since(UNIX_EPOCH).unwrap_or_default();
+        let offset_ns = guest.as_nanos() as i64 - node.as_nanos() as i64;
+        best = Some((offset_ns, round_trip));
+    }
+    best.ok_or_else(|| "no measurement".to_string())
 }
 
 /// Pings the FeOS guest behind the vsock socket `uds`, within `deadline`,
