@@ -111,6 +111,11 @@ patches:
                 env:
                   - name: FERUN_APPS_ZONE
                     value: '${APPS_ZONE}'
+                  # The tenants that own the apps zone's plain names: each
+                  # may choose a host label without "--" (ADR 0021); empty,
+                  # none does. FeCode's installation: fecode.
+                  - name: FERUN_APPS_ZONE_OWNERS
+                    value: '${APPS_ZONE_OWNERS}'
                   - name: FERUN_EDGE_NAME
                     value: '${EDGE_NAME}'
                   - name: FERUN_EDGE_ADDRESS
