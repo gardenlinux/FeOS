@@ -420,10 +420,15 @@ async fn test_pod_lifecycle() -> Result<()> {
             .trim()
             .parse()?;
     // Of IPv4, the node holds only the resolver's address on it, which its
-    // ARP for the pod asks from, and answers for the gateway by proxy.
+    // ARP for the pod asks from, and the OTLP receiver's; it answers for the
+    // gateway by proxy.
     let (tap_ipv4, proxied) = device_ipv4(index).await?;
     let resolver: IpAddr = network.dns[0].parse()?;
-    assert_eq!(tap_ipv4, [resolver], "{tap_name}");
+    assert_eq!(
+        tap_ipv4,
+        [resolver, IpAddr::V4(network::OTLP_ADDRESS)],
+        "{tap_name}"
+    );
     assert_eq!(proxied, [network::GATEWAY4]);
     for (path, value) in [
         (format!("ipv4/neigh/{tap_name}/proxy_delay"), "0"),
@@ -433,14 +438,18 @@ async fn test_pod_lifecycle() -> Result<()> {
     ] {
         assert_eq!(sysctl(&path)?, value, "{path}");
     }
-    // The node holds the resolver's address, and never the gateway.
+    // The node holds the resolver's address and the OTLP receiver's, and
+    // never the gateway.
     let dns_device = Path::new("/sys/class/net")
         .join(network::DNS_DEVICE)
         .join("ifindex");
     let dns_index: u32 = std::fs::read_to_string(dns_device)?.trim().parse()?;
     assert_eq!(
         device_ipv4(dns_index).await?.0,
-        ["169.254.0.53".parse::<IpAddr>()?]
+        [
+            "169.254.0.53".parse::<IpAddr>()?,
+            IpAddr::V4(network::OTLP_ADDRESS)
+        ]
     );
     // feosd's table, with the pod's chains.
     let chains = nft::chains(nft::Family::Inet, network::TABLE)?;
