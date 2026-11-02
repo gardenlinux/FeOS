@@ -51,6 +51,7 @@ func (s *server) envRoutes(add func(c class, pattern string, h http.Handler)) {
 	env("GET /api/v1/environments/{env}/incidents", s.listIncidents)
 	env("GET /api/v1/environments/{env}/incidents/{id}", s.getIncident)
 	env("GET /api/v1/environments/{env}/access-logs", s.accessLogs)
+	env("GET /api/v1/environments/{env}/traffic", s.traffic)
 	env("POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
 	env("POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
 	env("POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
@@ -402,6 +403,21 @@ func (s *server) accessLogs(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, list)
+}
+
+// traffic is GET …/traffic[?window=1h|24h]: the requests, errors and
+// latencies of the environment's routed services that the ingress
+// answered in the window, per bucket (FeCode ADR 0009 §4).
+func (s *server) traffic(w http.ResponseWriter, r *http.Request) error {
+	window, err := envs.ParseTrafficWindow(r.URL.Query().Get("window"))
+	if err != nil {
+		return err
+	}
+	t, err := s.deps.Environments.Traffic(r.Context(), tenantOf(r), r.PathValue("env"), window)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, t)
 }
 
 // isTraceID reports whether s is a trace ID of W3C Trace Context: 32

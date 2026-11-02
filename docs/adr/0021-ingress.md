@@ -694,6 +694,30 @@ changed these points:
   list chooses no plain label from then on, naming one it holds again
   included (the 400), and its environments keep those they hold until
   it chooses others.
+- **The traffic, aggregated from the ingress's spans (2026-11-02).**
+  FeCode ADR 0009 §4 shows an environment's traffic, the requests,
+  errors and latency per service over the last hour and day, and the
+  access log answers records a page at a time, which a client would have
+  to read whole to count.
+  `GET /api/v1/environments/{env}/traffic?window=1h|24h` answers the
+  counts: per service with a request in the window, its requests, its
+  errors (a status of 500 or more, or none written unless the client
+  went away), the 50th and 95th percentiles of the durations, and the
+  window in steps (60 of a minute, 96 of a quarter hour), every step
+  present. It was planned as a query of `access_logs`, but that table
+  was dropped on 2026-10-31 (ADR 0026 §8) and `ferund` keeps no line. So
+  the sink counts the ingress's server spans in Quickwit's trace index,
+  which has each record as a span with its duration as a fast field, and
+  `ferund` asks it with the caller's token, for the services the
+  environment's releases route; the ingress reaches no other service, so
+  that is all the traffic there is. The service is not a fast field of
+  the index, so each service takes two searches (its failed requests,
+  then all with their percentiles); a new mapping version could group
+  them in one, but its index would hold only the spans from then on. The
+  numbers are best effort: the ingress sends a batch of spans once and
+  drops what the sink does not take, where it sends its lines again, and
+  the newest five seconds are not yet in the index
+  ([architecture/traces.md](../architecture/traces.md#reading-the-ingresss-traffic)).
 
 ## Alternatives considered
 

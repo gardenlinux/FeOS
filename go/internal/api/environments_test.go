@@ -187,6 +187,10 @@ func (f *fakeEnvs) AccessLogs(_ context.Context, tenant, env string, q envs.Acce
 	var out envs.AccessLogList
 	return out, f.do(envCall{"AccessLogs", tenant, env, []any{q}}, &out)
 }
+func (f *fakeEnvs) Traffic(_ context.Context, tenant, env, window string) (envs.Traffic, error) {
+	var out envs.Traffic
+	return out, f.do(envCall{"Traffic", tenant, env, []any{window}}, &out)
+}
 func (f *fakeEnvs) Logs(_ context.Context, tenant, env, kind, name string, lines, replica int) (envs.LogsAnswer, error) {
 	var out envs.LogsAnswer
 	return out, f.do(envCall{"Logs", tenant, env, []any{kind, name, lines, replica}}, &out)
@@ -258,6 +262,7 @@ var fixtureMethods = map[string]string{
 	"GET_environments_env_incidents":              "Incidents",
 	"GET_environments_env_incidents_id":           "Incident",
 	"GET_environments_env_access-logs":            "AccessLogs",
+	"GET_environments_env_traffic":                "Traffic",
 	"POST_environments_env_services_name_restart": "RestartService",
 	"POST_environments_env_jobs_name_run":         "RunJob",
 	"POST_environments_env_route-tokens":          "CreateRouteToken",
@@ -440,6 +445,10 @@ func TestEnvironmentArguments(t *testing.T) {
 			envCall{"AccessLogs", testTenant, "stage", []any{envs.AccessLogQuery{Limit: 5, BeforeTsNs: 1761739200000000000,
 				TraceID: "4bf92f3577b34da6a3ce929d0e0e4736"}}}, 200},
 		{"GET", "/api/v1/environments/stage/access-logs", nil, envCall{"AccessLogs", testTenant, "stage", []any{envs.AccessLogQuery{}}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic", nil, envCall{"Traffic", testTenant, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic?window=", nil, envCall{"Traffic", testTenant, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic?window=1h", nil, envCall{"Traffic", testTenant, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic?window=24h", nil, envCall{"Traffic", testTenant, "stage", []any{"24h"}}, 200},
 		{"GET", "/api/v1/environments/stage/tags/v1.4", nil, envCall{"Tag", testTenant, "stage", []any{"v1.4"}}, 200},
 		{"DELETE", "/api/v1/environments/stage/secrets/token", nil, envCall{"DeleteSecret", testTenant, "stage",
 			[]any{"token"}}, 204},
@@ -483,6 +492,7 @@ func TestEnvironmentArguments(t *testing.T) {
 		{"GET", "/api/v1/environments/stage/incidents/x", `incident \"x\" is not a number`},
 		{"GET", "/api/v1/environments/stage/incidents?open=maybe", "open must be a boolean"},
 		{"GET", "/api/v1/environments/stage/access-logs?traceId=4BF92F3577B34DA6A3CE929D0E0E4736", "traceId must be 32 lower case hex digits"},
+		{"GET", "/api/v1/environments/stage/traffic?window=7d", `window must be 1h or 24h, got \"7d\"`},
 		{"DELETE", "/api/v1/environments/stage/objects/route/api?base=x", "base must be an integer"},
 		{"POST", "/api/v1/environments/stage/releases", "request body must be a JSON object"},
 	} {

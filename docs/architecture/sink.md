@@ -436,6 +436,10 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
   paged up to 8 times), each line's JSON an `AccessLogRecord`. Without
   `--sink-url` it answers 503 `no_log_store`, and 503
   `log_store_unavailable` (`Retry-After: 5`) when the sink fails.
+- `GET /api/v1/environments/{env}/traffic` reads the sink's
+  `GET /api/v1/traffic`, the ingress's spans counted per service and
+  step ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
+  caller's token, and answers 503 as `…/access-logs` does.
 - The objects' logs call and a job run's log read from the sink when
   `--sink-url` is set, with the caller's token
   (`instance=<sandbox ID>&container=main&direction=backward&since=<its

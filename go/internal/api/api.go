@@ -125,6 +125,7 @@ type Environments interface {
 	Incidents(ctx context.Context, tenant, envRef string, openOnly bool) (envs.IncidentList, error)
 	Incident(ctx context.Context, tenant, envRef string, id int64) (envs.Incident, error)
 	AccessLogs(ctx context.Context, tenant, envRef string, q envs.AccessLogQuery) (envs.AccessLogList, error)
+	Traffic(ctx context.Context, tenant, envRef, window string) (envs.Traffic, error)
 	Logs(ctx context.Context, tenant, envRef, kind, name string, lines, replica int) (envs.LogsAnswer, error)
 	RestartService(ctx context.Context, tenant, envRef, name string) error
 	RunJob(ctx context.Context, tenant, envRef, name string) error

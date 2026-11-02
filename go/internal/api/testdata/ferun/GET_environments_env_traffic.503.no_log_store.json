@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/v1/environments/expensa-stage/traffic",
+  "query": {
+    "window": [
+      "24h"
+    ]
+  },
+  "status": 503,
+  "request": null,
+  "response": {
+    "error": "the traffic is read from the sink, and this ferund has no --sink-url",
+    "code": "no_log_store"
+  }
+}
