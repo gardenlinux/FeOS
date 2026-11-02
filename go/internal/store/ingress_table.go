@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
@@ -69,12 +68,12 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 			s.address, s.client_state, s.op, coalesce(s.node, ''), coalesce(n.ingress_group_version, 0), s.idle_after_s
 		FROM environments e
 		JOIN tenants t ON t.id = e.owner AND t.deleting_at IS NULL
-		LEFT JOIN env_instances i ON i.env_id = e.id AND i.kind = 'service' AND i.phase <> ALL($2)
+		LEFT JOIN env_instances i ON i.env_id = e.id AND i.kind = 'service' AND i.phase <> 'stopping'
 		LEFT JOIN sandboxes s ON s.id = i.sandbox_id
 		LEFT JOIN nodes n ON n.name = s.node
 		WHERE e.public AND NOT e.deleting AND e.release > 0 AND e.host_label IS NOT NULL
 			AND ($1::uuid[] IS NULL OR e.id = ANY($1))
-		ORDER BY e.id, i.object, i.replica, i.sandbox_id`, envIDs, bothWords(earlierPhases, []string{model.PhaseStopping}))
+		ORDER BY e.id, i.object, i.replica, i.sandbox_id`, envIDs)
 	if err != nil {
 		return nil, fmt.Errorf("read the ingress's routing: %w", err)
 	}
@@ -94,8 +93,7 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 		}
 		row.HasInstance = true
 		row.SandboxID = podid.ID(*sandbox)
-		row.Object, row.Replica, row.InstanceRelease = deref(object), deref(replica), deref(release)
-		row.Phase = currentWord(earlierPhases, deref(phase))
+		row.Object, row.Replica, row.InstanceRelease, row.Phase = deref(object), deref(replica), deref(release), deref(phase)
 		row.Address, row.ClientState, row.Op = deref(address), deref(state), deref(op)
 		row.IngressPorts = nonNil(row.IngressPorts)
 		return row, nil

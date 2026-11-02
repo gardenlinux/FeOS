@@ -86,7 +86,6 @@ func envInstanceTargets(i *EnvInstance) ([]any, func()) {
 			&ready, &retire, &i.Restarts, &i.LastExit, &i.ProbeFailures, &next, &i.Exits,
 			&i.ProvisionedHash, &i.Detail, &i.CreatedAt, &i.UpdatedAt, &i.IngressPorts}, func() {
 			i.ReadySince, i.RetireAt, i.NextRestartAt = timeOf(ready), timeOf(retire), timeOf(next)
-			i.Phase = currentWord(earlierPhases, i.Phase)
 			i.Exits, i.IngressPorts = nonNil(i.Exits), nonNil(i.IngressPorts)
 		}
 }

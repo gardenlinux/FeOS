@@ -1775,7 +1775,7 @@ a deleting one.
 | Table | Holds |
 |---|---|
 | `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `release` (the latest desired), `deployed` (the latest deployed), `deleting`, `gen` (the env group's version); `public` (its tenant's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish or chosen by its tenant, unique), public only with both ([Public environments](#public-environments)) |
-| `env_releases` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`waiting`, `deploying`, `deployed`, `failed`, `replaced`; the earlier words admitted for now, below), `reason`, start and end |
+| `env_releases` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`waiting`, `deploying`, `deployed`, `failed`, `replaced`), `reason`, start and end |
 | `env_tags` | a tag's release, who moved it and when |
 | `env_secrets` | one version of a secret, sealed; `system` for an addon's credential, `addon.<addon>.<key>`, never listed; soft-deleted |
 | `env_instances` | the controller's view of an instance row: kind, object, replica, template hash, release, phase (`starting`, `ready`, `unready`, `exited`, `succeeded`, `failed`, `stopping`), restarts, the last 5 exits, probe failures, the next restart, an addon's provisioning hash, detail; `ingress_ports`, the ports its `ing-` group opens to the ingress as its node holds them ([Security groups](#security-groups)) |
@@ -1793,16 +1793,16 @@ in a later migration: the previous version, which a rolling deploy runs
 beside this one, still reads and writes it.
 
 The states' words changed in three steps (ADR 0018, "The states'
-words"). `0021` added `environments.deployed`, kept equal to
-`realised` by a trigger, and its version wrote the earlier words
-`pending`, `rolling`, `realised`, `superseded` and `retiring` while
-reading both. `0022` rewrote the rows to the new words, let the checks
-of `env_releases.state` and `env_instances.phase` admit both, and
-dropped `realised` and the trigger; its version writes the new words
-and still reads both (`store/env_words.go`), since the version of
-`0021` writes the earlier ones beside it. The next version reads the
-new words only and lets the checks admit them alone; it rolls once
-`0022`'s rollout has ended.
+words"), each safe beside the version before it in a rolling deploy.
+`0021` added `environments.deployed`, kept equal to `realised` by a
+trigger, and its version wrote the earlier words `pending`, `rolling`,
+`realised`, `superseded` and `retiring` while reading both. `0022`
+rewrote the rows to the new words, let the checks of
+`env_releases.state` and `env_instances.phase` admit both, and dropped
+`realised` and the trigger; its version wrote the new words and still
+read both. `0023` rewrote what `0021`'s version wrote meanwhile and
+lets the checks admit the new words only; it rolls once no instance of
+`0021`'s version is left.
 
 The database holds no secret value: the log tails it keeps, a run's and
 an incident's, are redacted before they are stored, as far as

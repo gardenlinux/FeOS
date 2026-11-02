@@ -97,3 +97,53 @@ func TestStateWordsMigration(t *testing.T) {
 		t.Fatalf("realised, its trigger or its function left: %d %v", left, err)
 	}
 }
+
+// 0023 rewrites what the version of 0021 wrote in the earlier words
+// during 0022's rollout, and lets the CHECKs admit the new words only.
+func TestStateWordsOnlyMigration(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	d := dbtest.Open(t)
+	migrateBefore(t, d, 23)
+
+	exec := func(q string) {
+		t.Helper()
+		if _, err := d.Pool.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec("INSERT INTO tenants (id) VALUES ('acme')")
+	exec(`INSERT INTO environments (id, owner, name, release, deployed) VALUES
+		('00000000-0000-4000-8000-000000000001', 'acme', 'stage', 5, 4)`)
+	exec(`INSERT INTO env_releases (env_id, number, spec, base, origin, state)
+		SELECT '00000000-0000-4000-8000-000000000001', n, '{}', n - 1, 'apply', s
+		FROM (VALUES (1, 'superseded'), (2, 'replaced'), (3, 'failed'), (4, 'realised'), (5, 'rolling')) AS r(n, s)`)
+	exec(`INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib) VALUES
+		('abcdefghjk0', 'acme', 'img', 1, 512), ('abcdefghjk1', 'acme', 'img', 1, 512)`)
+	exec(`INSERT INTO env_instances (sandbox_id, env_id, kind, object, template_hash, release, phase) VALUES
+		('abcdefghjk0', '00000000-0000-4000-8000-000000000001', 'service', 'web', 'h', 5, 'retiring'),
+		('abcdefghjk1', '00000000-0000-4000-8000-000000000001', 'service', 'web', 'h', 5, 'stopping')`)
+	if err := d.Migrate(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var states string
+	if err := d.Pool.QueryRow(ctx, "SELECT string_agg(state, ',' ORDER BY number) FROM env_releases").
+		Scan(&states); err != nil || states != "replaced,replaced,failed,deployed,deploying" {
+		t.Fatalf("states %q %v", states, err)
+	}
+	var stopping int
+	if err := d.Pool.QueryRow(ctx, "SELECT count(*) FROM env_instances WHERE phase = 'stopping'").
+		Scan(&stopping); err != nil || stopping != 2 {
+		t.Fatalf("stopping %d %v", stopping, err)
+	}
+	for _, q := range []string{
+		"UPDATE env_releases SET state = 'pending' WHERE number = 5",
+		"UPDATE env_releases SET state = 'superseded' WHERE number = 1",
+		"UPDATE env_instances SET phase = 'retiring' WHERE sandbox_id = 'abcdefghjk0'",
+	} {
+		if _, err := d.Pool.Exec(ctx, q); err == nil {
+			t.Errorf("an earlier word was admitted: %s", q)
+		}
+	}
+}

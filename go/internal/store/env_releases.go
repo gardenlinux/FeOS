@@ -56,7 +56,6 @@ func scanRelease(row pgx.Row, withSpec bool) (EnvRelease, error) {
 		return EnvRelease{}, err
 	}
 	r.StartedAt, r.FinishedAt = timeOf(started), timeOf(finished)
-	r.State = currentWord(earlierReleaseStates, r.State)
 	r.Annotations = stringMap(r.Annotations)
 	if withSpec {
 		r.Spec = json.RawMessage(spec)
@@ -147,8 +146,7 @@ func (s *Store) UpdateRelease(ctx context.Context, before, after EnvRelease) (En
 func (s *Store) ReplaceReleases(ctx context.Context, envID uuid.UUID, below int, states ...string) ([]int, error) {
 	rows, err := s.q.Query(ctx, `UPDATE env_releases SET state = 'replaced', finished_at = coalesce(finished_at, now()),
 			updated_at = now()
-		WHERE env_id = $1 AND number < $2 AND state = ANY($3) RETURNING number`, envID, below,
-		bothWords(earlierReleaseStates, states))
+		WHERE env_id = $1 AND number < $2 AND state = ANY($3) RETURNING number`, envID, below, nonNil(states))
 	if err != nil {
 		return nil, err
 	}

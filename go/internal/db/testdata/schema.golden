@@ -207,7 +207,7 @@ TABLE env_instances
   COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN ingress_ports integer[] NOT NULL DEFAULT '{}'::integer[]
   CONSTRAINT CHECK ((kind = ANY (ARRAY['service'::text, 'addon'::text, 'job'::text])))
-  CONSTRAINT CHECK ((phase = ANY (ARRAY['starting'::text, 'ready'::text, 'unready'::text, 'exited'::text, 'succeeded'::text, 'failed'::text, 'stopping'::text, 'retiring'::text])))
+  CONSTRAINT CHECK ((phase = ANY (ARRAY['starting'::text, 'ready'::text, 'unready'::text, 'exited'::text, 'succeeded'::text, 'failed'::text, 'stopping'::text])))
   CONSTRAINT CHECK ((replica >= 0))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id)
   CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
@@ -254,7 +254,7 @@ TABLE env_releases
   CONSTRAINT CHECK ((base >= 0))
   CONSTRAINT CHECK ((number >= 1))
   CONSTRAINT CHECK ((origin = ANY (ARRAY['apply'::text, 'revert'::text, 'clone'::text, 'object'::text])))
-  CONSTRAINT CHECK ((state = ANY (ARRAY['waiting'::text, 'deploying'::text, 'deployed'::text, 'failed'::text, 'replaced'::text, 'pending'::text, 'rolling'::text, 'realised'::text, 'superseded'::text])))
+  CONSTRAINT CHECK ((state = ANY (ARRAY['waiting'::text, 'deploying'::text, 'deployed'::text, 'failed'::text, 'replaced'::text])))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (env_id, number)
   CREATE UNIQUE INDEX env_releases_pkey ON public.env_releases USING btree (env_id, number)

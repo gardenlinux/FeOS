@@ -173,10 +173,7 @@ func TestStatus(t *testing.T) {
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", previewSpec(sb), 0)
-	// The earlier words, as the version of migration 0021 still writes
-	// them (store/env_words.go): 'realised' is deployed, 'rolling'
-	// deploying, 'retiring' stopping.
-	h.exec("UPDATE env_releases SET state = 'realised', started_at = now(), finished_at = now() WHERE env_id = $1", e.ID)
+	h.exec("UPDATE env_releases SET state = 'deployed', started_at = now(), finished_at = now() WHERE env_id = $1", e.ID)
 	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 
 	api0 := h.instance(e.ID, spec.KindService, "api", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::11")
@@ -299,7 +296,7 @@ func TestStatus(t *testing.T) {
 		got.Objects[0].Desired != 2 {
 		t.Fatalf("failed latest %+v", got)
 	}
-	h.exec("UPDATE env_releases SET state = 'rolling' WHERE env_id = $1 AND number = 2", e.ID)
+	h.exec("UPDATE env_releases SET state = 'deploying' WHERE env_id = $1 AND number = 2", e.ID)
 	if got, _ := h.svc.GetEnv(ctx, tenantA, "stage"); got.Objects[0].Desired != 4 {
 		t.Fatalf("rolling latest %+v", got.Objects[0])
 	}
@@ -799,14 +796,14 @@ func TestRouteDoorRollingPort(t *testing.T) {
 	if p := port(); p != 8080 {
 		t.Fatalf("release 1's instance on %d", p)
 	}
-	h.exec("UPDATE env_instances SET phase = 'retiring' WHERE sandbox_id = $1", old)
+	h.exec("UPDATE env_instances SET phase = 'stopping' WHERE sandbox_id = $1", old)
 	h.instance(e.ID, spec.KindService, "api", 0, 2, model.PhaseReady, model.StateRunning, "n1", "fd6b::12")
 	if p := port(); p != 9090 {
 		t.Fatalf("release 2's instance on %d", p)
 	}
 	// A release that has no such port falls back to the matched one's.
 	h.apply("stage", specOf("web", 7070), 2)
-	h.exec("UPDATE env_instances SET phase = 'retiring' WHERE env_id = $1", e.ID)
+	h.exec("UPDATE env_instances SET phase = 'stopping' WHERE env_id = $1", e.ID)
 	h.instance(e.ID, spec.KindService, "api", 0, 3, model.PhaseReady, model.StateRunning, "n1", "fd6b::13")
 	if p := port(); p != 8080 {
 		t.Fatalf("release 3's instance on %d", p)

@@ -47,7 +47,6 @@ func (s *Store) EnvSummaries(ctx context.Context, owner string, labels map[strin
 			return EnvSummaryRow{}, err
 		}
 		finish()
-		out.ReleaseState = currentWord(earlierReleaseStates, out.ReleaseState)
 		return out, nil
 	})
 }
