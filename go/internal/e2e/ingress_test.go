@@ -153,7 +153,7 @@ func podOf(body string) podid.ID {
 }
 
 // mkApp makes the tenant's environment name with appSpec's first release
-// and waits until it is realised.
+// and waits until it is deployed.
 func (c *cluster) mkApp(name string, replicas int, idle string) uuid.UUID {
 	c.t.Helper()
 	e, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
@@ -161,11 +161,11 @@ func (c *cluster) mkApp(name string, replicas int, idle string) uuid.UUID {
 		c.t.Fatal(err)
 	}
 	n := c.applyRelease(e.ID, appSpec(replicas, idle, "1"))
-	c.waitRelease(e.ID, n, model.ReleaseRealised, 2*time.Minute)
+	c.waitRelease(e.ID, n, model.ReleaseDeployed, 2*time.Minute)
 	return e.ID
 }
 
-// webRows are the environment's instances of web that are not retiring.
+// webRows are the environment's instances of web that are not stopping.
 func (c *cluster) webRows(envID uuid.UUID) []store.EnvInstanceRow {
 	c.t.Helper()
 	rows, err := c.st.ListEnvInstanceRows(bg, envID)
@@ -174,7 +174,7 @@ func (c *cluster) webRows(envID uuid.UUID) []store.EnvInstanceRow {
 	}
 	var out []store.EnvInstanceRow
 	for _, r := range rows {
-		if r.Instance.Kind == spec.KindService && r.Instance.Object == "web" && r.Instance.Phase != model.PhaseRetiring {
+		if r.Instance.Kind == spec.KindService && r.Instance.Object == "web" && r.Instance.Phase != model.PhaseStopping {
 			out = append(out, r)
 		}
 	}
@@ -182,7 +182,7 @@ func (c *cluster) webRows(envID uuid.UUID) []store.EnvInstanceRow {
 }
 
 // waitWeb waits until the environment has exactly replicas instances of
-// web, none retiring, each ready, running without an op, and as ok says,
+// web, none stopping, each ready, running without an op, and as ok says,
 // and returns them.
 func (c *cluster) waitWeb(envID uuid.UUID, replicas int, what string, ok func(store.EnvInstanceRow) bool) []store.EnvInstanceRow {
 	c.t.Helper()
@@ -721,7 +721,7 @@ func TestIngressRollout(t *testing.T) {
 	h := p.hammer(host)
 	time.Sleep(500 * time.Millisecond)
 	n := c.applyRelease(envID, appSpec(2, "", "2"))
-	c.waitRelease(envID, n, model.ReleaseRealised, 3*time.Minute)
+	c.waitRelease(envID, n, model.ReleaseDeployed, 3*time.Minute)
 	rows := c.waitWeb(envID, 2, "the new replicas", func(r store.EnvInstanceRow) bool { return !old[r.Sandbox.ID] })
 	fresh := webPods(rows)
 	eventually(t, 60*time.Second, "the new replicas serving", func() bool {
@@ -978,7 +978,7 @@ func TestIngressSurvivesControlPlane(t *testing.T) {
 	// Meanwhile the service gets a second replica, which the ingress
 	// cannot know yet.
 	n := c.applyRelease(envID, appSpec(2, "", "1"))
-	c.waitRelease(envID, n, model.ReleaseRealised, 2*time.Minute)
+	c.waitRelease(envID, n, model.ReleaseDeployed, 2*time.Minute)
 	both := webPods(c.waitWeb(envID, 2, "two replicas", namesIngGroup))
 	if ep := p.status().DataPath.Endpoints; ep != 1 {
 		t.Fatalf("cut off, the ingress has %d endpoints", ep)
@@ -1032,7 +1032,7 @@ func TestIngressMovesInstance(t *testing.T) {
 
 	// The table follows on the new instance.
 	n := c.applyRelease(envID, appSpec(3, "", "1"))
-	c.waitRelease(envID, n, model.ReleaseRealised, 2*time.Minute)
+	c.waitRelease(envID, n, model.ReleaseDeployed, 2*time.Minute)
 	all := webPods(c.waitWeb(envID, 3, "three replicas", namesIngGroup))
 	if got := p.waitServing(host, 3, 60*time.Second); !samePods(got, all) {
 		t.Fatalf("after the scale-up: served by %v; the instances %v", got, all)

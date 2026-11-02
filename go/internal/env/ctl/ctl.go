@@ -9,10 +9,10 @@
 // a transaction:
 //
 //	env-reconcile  2 s, hint "env-reconcile": one step per environment whose latest
-//	               release is not realised, whose instances do not match their
+//	               release is not deployed, whose instances do not match their
 //	               target, or that is deleting: groups, addons (credentials,
 //	               volume, instance, provisioning), release jobs, image services
-//	               (rolling, surge 1), attached services, removed objects, realised
+//	               (rolling, surge 1), attached services, removed objects, deployed
 //	env-probe      1 s: containers' exits and restarts with backoff, readiness
 //	               (http, tcp, exec), attached services' processes; tenants'
 //	               jobs (tenantjobs.go): their ends, starts and pods
@@ -43,7 +43,7 @@
 // with both.
 //
 // The target T of an environment is its latest release R, unless R
-// failed: then the realised release (nothing when none was realised), so
+// failed: then the deployed release (nothing when none was deployed), so
 // that a failed release is never retried until a new one arrives. An
 // instance's template hash is model.PodTemplate.Hash over its rendered
 // template; an instance whose hash differs from T's is replaced (rolled
@@ -191,11 +191,11 @@ type Deps struct {
 // timings are the controller's durations, fields so that the package's
 // tests shorten them.
 type timings struct {
-	// retireGrace is how long a retiring instance stays before it is
+	// stopGrace is how long a stopping instance stays before it is
 	// deleted: routes stop sending to it at once, the env table drops it
 	// within a pass of env-names, and the answers that named it expire
 	// after their TTL (5 s).
-	retireGrace time.Duration
+	stopGrace time.Duration
 	// crashWindow: so many exits within it open crash_loop; restarts
 	// reset after an instance was ready for as long.
 	crashWindow time.Duration
@@ -230,7 +230,7 @@ type timings struct {
 
 func defaultTimings() timings {
 	return timings{
-		retireGrace:     10 * time.Second,
+		stopGrace:       10 * time.Second,
 		crashWindow:     10 * time.Minute,
 		crashExits:      3,
 		restartMax:      5 * time.Minute,
@@ -280,7 +280,7 @@ type Controller struct {
 	// provisionFailed holds when an addon instance's provisioning failed
 	// last, for provisionRetry.
 	provisionFailed map[podid.ID]time.Time
-	// lastPending is what each rolling release waited for at its last
+	// lastPending is what each deploying release waited for at its last
 	// step, for logPending.
 	lastPending map[string]string
 	// exitRun is the microVM's pid at each instance's last recorded exit:
@@ -384,7 +384,7 @@ func steady(sb store.Sandbox) bool {
 // live reports whether an instance counts as ready (§13.7): its phase is
 // ready and its row runs without an op. For an idle service (idles) a
 // replica paused or hibernated without an op counts too, so that an idle
-// service still realises. A phase left from a pod that is unknown,
+// service still gets deployed. A phase left from a pod that is unknown,
 // stopped, failed or lost does not count: the probes only look at rows
 // that run, so nothing else resets it.
 func live(r store.EnvInstanceRow, idles bool) bool {

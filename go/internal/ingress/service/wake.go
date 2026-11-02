@@ -29,7 +29,7 @@ const (
 
 // Wake wakes the asleep instances of a routed service of a public
 // environment (§6.6 of the ingress's design): the instances that are not
-// retiring and that the table counts as Asleep (table.Asleep: paused,
+// stopping and that the table counts as Asleep (table.Asleep: paused,
 // hibernated, pausing or hibernating, or ready and running with an
 // operation, a pause on its way). An environment that is not public,
 // deleting or unknown is NOT_FOUND, and so is a service that is not an
@@ -70,7 +70,7 @@ func (s *Service) Wake(ctx context.Context, req *wire.WakeRequest) (*wire.WakeRe
 		return nil, status.Errorf(codes.NotFound, "no public environment %s", envID)
 	}
 	e := envs[0]
-	sp, err := s.tbl.Specs().Get(dctx, e.ID, e.CreatedAt, table.RoutingRelease(e.Release, e.Realised))
+	sp, err := s.tbl.Specs().Get(dctx, e.ID, e.CreatedAt, table.RoutingRelease(e.Release, e.Deployed))
 	if err != nil && !errors.Is(err, table.ErrSpec) {
 		return nil, dbError(ctx, err, "wake")
 	}

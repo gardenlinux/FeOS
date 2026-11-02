@@ -153,17 +153,17 @@ func TestPlanApply(t *testing.T) {
 		t.Fatalf("plan %+v %v", p, err)
 	}
 
-	// Apply: release 1, pending, the controller woken.
+	// Apply: release 1, waiting, the controller woken.
 	ch, unsubscribe := h.d.Subscribe(db.ChanLeader)
 	defer unsubscribe()
 	a := h.apply("stage", stageSpec, 0)
 	waitHint(t, ch, ctl.HintReconcile)
-	if a.Number != 1 || a.State != model.ReleasePending || a.Origin != model.OriginApply || a.Base != 0 ||
+	if a.Number != 1 || a.State != model.ReleaseWaiting || a.Origin != model.OriginApply || a.Base != 0 ||
 		a.Unchanged || a.StatusCode() != http.StatusCreated || len(a.Diff) != 8 || a.Author != "tester" {
 		t.Fatalf("apply %+v", a)
 	}
 	e := h.env("stage")
-	if e.Release != 1 || e.Realised != 0 {
+	if e.Release != 1 || e.Deployed != 0 {
 		t.Fatalf("env %+v", e)
 	}
 	stored, err := h.st.GetRelease(ctx, e.ID, 1)
@@ -208,12 +208,12 @@ func TestPlanApply(t *testing.T) {
 	_, err = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed), Base: &far})
 	wantStatus(t, err, http.StatusNotFound, "no such release")
 
-	// On the current base: release 2, the pending 1 superseded.
+	// On the current base: release 2, the waiting 1 replaced.
 	a = h.apply("stage", changed, 1)
 	if a.Number != 2 || a.Base != 1 {
 		t.Fatalf("apply %+v", a)
 	}
-	if r1, _ := h.st.GetRelease(ctx, e.ID, 1); r1.State != model.ReleaseSuperseded || r1.FinishedAt.IsZero() {
+	if r1, _ := h.st.GetRelease(ctx, e.ID, 1); r1.State != model.ReleaseReplaced || r1.FinishedAt.IsZero() {
 		t.Fatalf("release 1 %+v", r1)
 	}
 

@@ -185,7 +185,7 @@ type Route struct {
 	Port    PortRef `json:"port"`
 	// Strip removes Path from the request's path before it is forwarded.
 	Strip bool `json:"strip,omitempty"`
-	// Host is accepted and stored, not realised yet (an info finding).
+	// Host is accepted and stored, not used yet (an info finding).
 	Host string `json:"host,omitempty"`
 }
 

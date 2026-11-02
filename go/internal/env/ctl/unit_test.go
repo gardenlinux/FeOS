@@ -140,7 +140,7 @@ func TestMembersAndVersions(t *testing.T) {
 }
 
 // The env table names addons and image services by the addresses of
-// their live replicas (retiring ones never; when none is live, those of
+// their live replicas (stopping ones never; when none is live, those of
 // the best ranked); its version is its content's, and a delta between two
 // tables turns one into the other.
 func TestNameTable(t *testing.T) {
@@ -162,9 +162,9 @@ func TestNameTable(t *testing.T) {
 		rows: []store.EnvInstanceRow{
 			row(spec.KindService, "api", 0, model.PhaseStarting, "fd00::10"),
 			row(spec.KindService, "api", 1, model.PhaseReady, "fd00::11"),
-			row(spec.KindService, "api", 2, model.PhaseRetiring, "fd00::12"),
+			row(spec.KindService, "api", 2, model.PhaseStopping, "fd00::12"),
 			row(spec.KindService, "api", 4, model.PhaseReady, "fd00:0::13"),
-			row(spec.KindService, "worker", 0, model.PhaseRetiring, "fd00::20"),
+			row(spec.KindService, "worker", 0, model.PhaseStopping, "fd00::20"),
 			row(spec.KindAddon, "postgres", 0, model.PhaseReady, "fd00::5"),
 			row(spec.KindAddon, "gone", 0, model.PhaseReady, "fd00::6"),
 			row(spec.KindJob, "migrate", 0, model.PhaseStarting, "fd00::7"),
@@ -177,7 +177,7 @@ func TestNameTable(t *testing.T) {
 	if !maps.EqualFunc(got, want, slices.Equal[[]string]) {
 		t.Fatalf("entries %v, want %v", got, want)
 	}
-	// No live replica: the others, never a retiring one.
+	// No live replica: the others, never a stopping one.
 	v.rows[1].Instance.Phase, v.rows[3].Instance.Phase = model.PhaseUnready, model.PhaseUnready
 	if got := nameEntries(v)["api"]; !slices.Equal(got, []string{"fd00::10", "fd00::11", "fd00::13"}) {
 		t.Errorf("api without a live replica %v", got)

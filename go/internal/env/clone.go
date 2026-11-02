@@ -355,7 +355,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		}
 		if _, err := tx.InsertRelease(ctx, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: specJSON, Author: req.Author,
 			Annotations: annotations, Origin: model.OriginClone, OriginRef: fmt.Sprintf("%s/%d", src.ID, number),
-			State: model.ReleasePending}); err != nil {
+			State: model.ReleaseWaiting}); err != nil {
 			return err
 		}
 		after := e

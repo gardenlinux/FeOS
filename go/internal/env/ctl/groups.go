@@ -280,7 +280,7 @@ func (c *Controller) buildIngGroup(ctx context.Context, id string, sbx podid.ID,
 // ingress: none unless the sandbox is an instance of an image service
 // (in) of an environment that is public and not being deleted; else the
 // routed ports of its service (spec.RoutedPorts): of every route of the
-// environment's realised and latest release that targets it, the port's
+// environment's deployed and latest release that targets it, the port's
 // number in the instance's own release.
 func (c *Controller) ingressPorts(ctx context.Context, pass *groupPass, in store.IngressInput) ([]int, error) {
 	if in.EnvID == uuid.Nil || in.Kind != spec.KindService {
@@ -296,8 +296,8 @@ func (c *Controller) ingressPorts(ctx context.Context, pass *groupPass, in store
 			return nil, err
 		}
 	}
-	numbers := []int{env.Realised}
-	if env.Release != env.Realised {
+	numbers := []int{env.Deployed}
+	if env.Release != env.Deployed {
 		numbers = append(numbers, env.Release)
 	}
 	var routing []*spec.Spec

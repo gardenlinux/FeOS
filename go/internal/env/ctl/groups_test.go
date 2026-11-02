@@ -78,7 +78,7 @@ func TestEnvGroups(t *testing.T) {
 	env := h.newEnv("stage")
 	id := model.EnvGroupID(env.ID)
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	one := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
 	var g1 *networkv1.SecurityGroup
 	eventually(t, 30*time.Second, "the group with its member", func() bool {
@@ -92,7 +92,7 @@ func TestEnvGroups(t *testing.T) {
 		t.Errorf("rules %v", g1.Rules)
 	}
 	r2 := h.apply(env.ID, serviceSpec(2, "1", ""))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 	two := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 	var g2 *networkv1.SecurityGroup
 	eventually(t, 30*time.Second, "the group with both members", func() bool {
@@ -107,9 +107,9 @@ func TestEnvGroups(t *testing.T) {
 		t.Errorf("gen %d, version %d", e.Gen, g2.Version)
 	}
 	r3 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r3, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 30*time.Second)
 	var g3 *networkv1.SecurityGroup
-	eventually(t, 30*time.Second, "the group without the retired member", func() bool {
+	eventually(t, 30*time.Second, "the group without the stopped member", func() bool {
 		g3 = h.group("n1", id)
 		return g3 != nil && slices.Equal(g3.Members, []string{one[0].Sandbox.Address})
 	})
@@ -146,7 +146,7 @@ func TestEnvDeletion(t *testing.T) {
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, `{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
 		"services":{"api":{"image":"`+testImage+`","replicas":2}}}`)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	var pods []podid.ID
 	for _, r := range h.rows(env.ID) {
 		pods = append(pods, r.Sandbox.ID)
@@ -187,7 +187,7 @@ func TestEnvDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := h.apply(e2.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(e2.ID, r, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(e2.ID, r, model.ReleaseDeployed, 30*time.Second)
 	if _, err := h.st.MarkTenantDeleting(bg, "t2"); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestLogsAndRestart(t *testing.T) {
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"image":%q,"replicas":2},
 		"idler":{"image":%q,"idle":"15m"}},"jobs":{"once":{"image":%q,"on":"manual"}}}`, testImage, testImage, testImage))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	rows := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 	for i := range 5 {
 		_ = n1.Script().AppendLog(rows[1].Sandbox.ID, "main", fmt.Sprintf("line %d", i))
@@ -340,7 +340,7 @@ func TestNoCapacity(t *testing.T) {
 		t.Errorf("summary %q", inc.Summary)
 	}
 	r2 := h.apply(env.ID, fmt.Sprintf(`{"services":{"big":{"image":%q,"resources":{"memoryMib":512}}}}`, testImage))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 	eventually(t, 30*time.Second, "the incident closed", func() bool { return len(h.incidents(env.ID, true)) == 0 })
 }
 
@@ -352,7 +352,7 @@ func TestEnvIDReused(t *testing.T) {
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"old":{"image":%q}}}`, testImage))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	h.exec(`UPDATE environments SET deleting = true WHERE id = $1`, env.ID)
 	eventually(t, 60*time.Second, "the environment gone", func() bool {
 		_, err := h.st.GetEnvironment(bg, env.ID)
@@ -363,7 +363,7 @@ func TestEnvIDReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := h.apply(again.ID, fmt.Sprintf(`{"services":{"new":{"image":%q}}}`, testImage))
-	h.waitRelease(again.ID, r, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(again.ID, r, model.ReleaseDeployed, 30*time.Second)
 	rows := h.rows(again.ID)
 	if len(rows) != 1 || rows[0].Instance.Object != "new" {
 		t.Fatalf("rows of the new environment %+v", rows)

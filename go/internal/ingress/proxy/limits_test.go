@@ -755,7 +755,7 @@ func TestUnpublishCutsConnections(t *testing.T) {
 }
 
 // F3: an instance that leaves a service that stays routed (a replica
-// retires) keeps its open connections for the grace, so that its
+// stops) keeps its open connections for the grace, so that its
 // requests end with its pod; an instance that loses the route's port
 // loses its connections on that port at once.
 func TestEndpointLeavesCutsConnections(t *testing.T) {
@@ -770,7 +770,7 @@ func TestEndpointLeavesCutsConnections(t *testing.T) {
 		t.Fatal("not on w1")
 	}
 
-	// w1 retires.
+	// w1 stops.
 	p.SetState(testState(svc("web", ep("w2", "fd00::2", "n1"))))
 	if !echoes(c, br, "still") {
 		t.Fatal("cut before the grace")

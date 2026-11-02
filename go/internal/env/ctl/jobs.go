@@ -26,14 +26,14 @@ import (
 // provisioned; a failed attempt is retried while attempt ≤ retries; a
 // failed last attempt fails R (job_failed). A job runs once at a time
 // across releases (§13.7): while a run of it that is not R's runs (a
-// superseded release's, a manual one, another template's), R's waits for
+// replaced release's, a manual one, another template's), R's waits for
 // it to end, never cancelling it; the time R waited so moves the start
 // its budgets count from (jobWait), on every step, also once the job is
 // done.
 func (c *Controller) stepJobs(ctx context.Context, s *stepState) {
 	v := s.v
 	c.stepRuns(ctx, s)
-	if !rolling(v) {
+	if !deploying(v) {
 		return
 	}
 	for _, name := range slices.Sorted(maps.Keys(v.target.Jobs)) {

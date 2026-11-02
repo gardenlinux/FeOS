@@ -151,7 +151,7 @@ func (c *Controller) stepAddon(ctx context.Context, s *stepState, name string, a
 }
 
 // fallbackAddon is the addon a step keeps while R failed (T is the
-// realised release, §13.5): T's when the current row runs T's template;
+// deployed release, §13.5): T's when the current row runs T's template;
 // R's when it runs R's (R recreated it before it failed), so that it is
 // kept, healed and provisioned as R has it, never recreated back (to an
 // older version than its data, or for a second downtime); else T's.
@@ -204,7 +204,7 @@ func (c *Controller) dataRefusal(ctx context.Context, v *view, p *addonPlan, vol
 }
 
 // refuseAddon leaves an addon as it runs when its target cannot run on
-// its volume's data: the current row stays (healed); a rolling R fails
+// its volume's data: the current row stays (healed); a deploying R fails
 // (rollout_failed), else addon_unhealthy opens, the finding the reason.
 func (c *Controller) refuseAddon(ctx context.Context, s *stepState, p *addonPlan, cur store.EnvInstanceRow, hasCur bool,
 	problem string) {
@@ -214,7 +214,7 @@ func (c *Controller) refuseAddon(ctx context.Context, s *stepState, p *addonPlan
 		c.heal(ctx, cur.Sandbox, false)
 	}
 	s.wait(p.object(), "%s", reason)
-	if rolling(v) {
+	if deploying(v) {
 		if err := c.failRelease(ctx, v, reason, p.object(), model.ConditionRolloutFailed,
 			evidence{Diff: c.releaseDiff(ctx, v)}); err == nil {
 			s.failed = true
@@ -335,7 +335,7 @@ func (c *Controller) addonVolume(ctx context.Context, v *view, bp addons.Bluepri
 func (c *Controller) newAddon(ctx context.Context, s *stepState, p *addonPlan, vol *store.EnvVolume) {
 	v := s.v
 	for _, r := range v.rowsOf(spec.KindAddon, p.name) {
-		if r.Instance.Phase == model.PhaseRetiring {
+		if r.Instance.Phase == model.PhaseStopping {
 			s.wait(p.object(), "addon %s: its old instance is being deleted", p.name)
 			return
 		}
@@ -419,7 +419,7 @@ func (c *Controller) recreateAddon(ctx context.Context, s *stepState, p *addonPl
 			return err
 		}
 		after := inst
-		after.Phase, after.RetireAt = model.PhaseRetiring, now
+		after.Phase, after.RetireAt = model.PhaseStopping, now
 		if _, err := tx.UpdateEnvInstance(ctx, inst, after); err != nil {
 			return err
 		}
@@ -471,7 +471,7 @@ func addonState(r store.EnvInstanceRow) string {
 // GetVolume there reports the volume free (no pod, or this pod;
 // AVAILABLE or CHECKPOINTED), all read outside a transaction: then, as
 // recreateAddon does, the volume records the node and the lost row as its
-// holder, the row retires and goes, and newAddon inserts the new one on
+// holder, the row stops and goes, and newAddon inserts the new one on
 // that node once the old pod is gone. It reports whether it replaced the
 // row, and else what the node said when that kept it ("" when it never
 // asked: no volume, the node down, removed or draining).
@@ -509,7 +509,7 @@ func (c *Controller) replaceLostAddon(ctx context.Context, v *view, p *addonPlan
 			return err
 		}
 		after := inst
-		after.Phase, after.RetireAt = model.PhaseRetiring, now
+		after.Phase, after.RetireAt = model.PhaseStopping, now
 		if _, err := tx.UpdateEnvInstance(ctx, inst, after); err != nil {
 			return err
 		}

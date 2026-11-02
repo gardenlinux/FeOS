@@ -10,7 +10,7 @@
   },
   "response": {
     "number": 8,
-    "state": "pending",
+    "state": "waiting",
     "origin": "revert",
     "originRef": "6",
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000002",

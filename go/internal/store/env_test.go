@@ -274,7 +274,7 @@ func TestEnvironments(t *testing.T) {
 	mkTenant(t, s, "acme")
 	mkTenant(t, s, "other")
 	e := mkEnv(t, s, "acme", "stage")
-	if e.Release != 0 || e.Realised != 0 || e.Deleting || e.Gen != 0 || e.Labels["app"] != "stage" || e.CreatedAt.IsZero() {
+	if e.Release != 0 || e.Deployed != 0 || e.Deleting || e.Gen != 0 || e.Labels["app"] != "stage" || e.CreatedAt.IsZero() {
 		t.Fatalf("new environment %+v", e)
 	}
 	// The same name of the owner, or the same ID: ErrExists; another
@@ -337,13 +337,13 @@ func TestEnvironments(t *testing.T) {
 	stale := cur
 	stale.Gen = 0
 	after := cur
-	after.Realised = 1
+	after.Deployed = 1
 	if _, err := s.UpdateEnvironment(bg, stale, after); err == nil {
 		t.Fatal("a stale gen was written")
 	}
 	after = cur
-	after.Gen, after.Realised = cur.Gen+1, 1
-	if w, err := s.UpdateEnvironment(bg, cur, after); err != nil || w.Gen != 2 || w.Realised != 1 {
+	after.Gen, after.Deployed = cur.Gen+1, 1
+	if w, err := s.UpdateEnvironment(bg, cur, after); err != nil || w.Gen != 2 || w.Deployed != 1 {
 		t.Fatalf("gen written %+v %v", w, err)
 	}
 	after = cur
@@ -380,7 +380,7 @@ func TestEnvReleasesAndTags(t *testing.T) {
 	spec := json.RawMessage(`{"services":{"web":{"image":"x"}}}`)
 	r1, err := s.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: spec, Author: "me", Message: "first",
 		Annotations: map[string]string{"fecode.dev/revision": "r1"}, Origin: model.OriginApply})
-	if err != nil || r1.State != model.ReleasePending || r1.Annotations["fecode.dev/revision"] != "r1" ||
+	if err != nil || r1.State != model.ReleaseWaiting || r1.Annotations["fecode.dev/revision"] != "r1" ||
 		!strings.Contains(string(r1.Spec), `"web"`) || !r1.StartedAt.IsZero() {
 		t.Fatalf("release 1 %+v %v", r1, err)
 	}
@@ -403,9 +403,9 @@ func TestEnvReleasesAndTags(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	after := r1
-	after.State, after.StartedAt = model.ReleaseRolling, now
+	after.State, after.StartedAt = model.ReleaseDeploying, now
 	w, err := s.UpdateRelease(bg, r1, after)
-	if err != nil || w.State != model.ReleaseRolling || !w.StartedAt.Equal(now) {
+	if err != nil || w.State != model.ReleaseDeploying || !w.StartedAt.Equal(now) {
 		t.Fatalf("update %+v %v", w, err)
 	}
 	after = w
@@ -413,11 +413,11 @@ func TestEnvReleasesAndTags(t *testing.T) {
 	if _, err := s.UpdateRelease(bg, w, after); err == nil {
 		t.Fatal("a message was written")
 	}
-	sup, err := s.SupersedeReleases(bg, e.ID, 2, model.ReleasePending, model.ReleaseRolling)
+	sup, err := s.ReplaceReleases(bg, e.ID, 2, model.ReleaseWaiting, model.ReleaseDeploying)
 	if err != nil || !slices.Equal(sup, []int{1}) {
-		t.Fatalf("superseded %v %v", sup, err)
+		t.Fatalf("replaced %v %v", sup, err)
 	}
-	if got, err := s.GetRelease(bg, e.ID, 1); err != nil || got.State != model.ReleaseSuperseded || got.FinishedAt.IsZero() {
+	if got, err := s.GetRelease(bg, e.ID, 1); err != nil || got.State != model.ReleaseReplaced || got.FinishedAt.IsZero() {
 		t.Fatalf("release 1 after %+v %v", got, err)
 	}
 	if _, err := s.GetRelease(bg, e.ID, 9); !errors.Is(err, store.ErrNoRow) {
@@ -447,6 +447,104 @@ func TestEnvReleasesAndTags(t *testing.T) {
 	}
 	if _, err := s.GetTag(bg, e.ID, "good"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("deleted tag: %v", err)
+	}
+}
+
+// The store writes the earlier words of the release states and of the
+// stopping phase, which the previous version reads beside this one, and
+// reads both, the new ones as the next version writes them once its
+// migration lets the CHECKs admit them (ADR 0018, "The states' words").
+func TestEnvStoredWords(t *testing.T) {
+	s, d := newStore(t)
+	mkTenant(t, s, "acme")
+	mkNode(t, s, "n1")
+	e := routedEnv(t, s, "acme", "stage")
+	stored := func(q string, args ...any) string {
+		t.Helper()
+		var w string
+		if err := d.Pool.QueryRow(bg, q, args...).Scan(&w); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		return w
+	}
+	state := func(n int) string {
+		t.Helper()
+		return stored("SELECT state FROM env_releases WHERE env_id = $1 AND number = $2", e.ID, n)
+	}
+	release := func(n int) store.EnvRelease {
+		t.Helper()
+		r, err := s.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: n, Spec: json.RawMessage(`{}`),
+			Origin: model.OriginApply})
+		must(t, err)
+		return r
+	}
+
+	// Writes: the earlier words.
+	r := release(1)
+	if r.State != model.ReleaseWaiting || state(1) != "pending" {
+		t.Fatalf("inserted %q, stored %q", r.State, state(1))
+	}
+	for _, w := range []struct{ state, stored string }{
+		{model.ReleaseDeploying, "rolling"}, {model.ReleaseDeployed, "realised"},
+	} {
+		after := r
+		after.State = w.state
+		var err error
+		if r, err = s.UpdateRelease(bg, r, after); err != nil || r.State != w.state || state(1) != w.stored {
+			t.Fatalf("updated to %s: %+v %v, stored %q", w.state, r, err, state(1))
+		}
+	}
+	if n, err := s.ReplaceReleases(bg, e.ID, 2, model.ReleaseDeployed); err != nil || !slices.Equal(n, []int{1}) ||
+		state(1) != "superseded" {
+		t.Fatalf("replaced %v %v, stored %q", n, err, state(1))
+	}
+	if got, err := s.GetRelease(bg, e.ID, 1); err != nil || got.State != model.ReleaseReplaced {
+		t.Fatalf("read back %+v %v", got, err)
+	}
+	stopping := mkService(t, s, e, "n1")
+	inst, err := s.LockEnvInstance(bg, stopping.ID, store.NoLock)
+	must(t, err)
+	after := inst
+	after.Phase = model.PhaseStopping
+	inst, err = s.UpdateEnvInstance(bg, inst, after)
+	phase := stored("SELECT phase FROM env_instances WHERE sandbox_id = $1", stopping.ID)
+	if err != nil || inst.Phase != model.PhaseStopping || phase != "retiring" {
+		t.Fatalf("instance %+v %v, stored %q", inst, err, phase)
+	}
+
+	// Reads: both words.
+	exec(t, s, "ALTER TABLE env_releases DROP CONSTRAINT env_releases_state_check")
+	exec(t, s, "ALTER TABLE env_instances DROP CONSTRAINT env_instances_phase_check")
+	release(2)
+	release(3)
+	release(4)
+	exec(t, s, "UPDATE env_releases SET state = 'deploying' WHERE env_id = $1 AND number = 2", e.ID)
+	exec(t, s, "UPDATE env_releases SET state = 'rolling' WHERE env_id = $1 AND number = 3", e.ID)
+	exec(t, s, "UPDATE env_releases SET state = 'deployed' WHERE env_id = $1 AND number = 4", e.ID)
+	exec(t, s, "UPDATE environments SET release = 4 WHERE id = $1", e.ID)
+	if got, err := s.GetRelease(bg, e.ID, 2); err != nil || got.State != model.ReleaseDeploying {
+		t.Fatalf("a new word: %+v %v", got, err)
+	}
+	if got, err := s.GetRelease(bg, e.ID, 3); err != nil || got.State != model.ReleaseDeploying {
+		t.Fatalf("an earlier word: %+v %v", got, err)
+	}
+	if n, err := s.ReplaceReleases(bg, e.ID, 4, model.ReleaseDeploying); err != nil || !slices.Equal(n, []int{2, 3}) {
+		t.Fatalf("replaced by either word: %v %v", n, err)
+	}
+	if sum, err := s.EnvSummaries(bg, "acme", nil); err != nil || len(sum) != 1 || sum[0].ReleaseState != model.ReleaseDeployed {
+		t.Fatalf("summaries %+v %v", sum, err)
+	}
+	exec(t, s, "UPDATE env_instances SET phase = 'stopping' WHERE sandbox_id = $1", stopping.ID)
+	if got, err := s.GetEnvInstance(bg, stopping.ID); err != nil || got.Phase != model.PhaseStopping {
+		t.Fatalf("a new phase word: %+v %v", got, err)
+	}
+	// The ingress leaves out a stopping instance by either word.
+	earlier := mkService(t, s, e, "n1")
+	exec(t, s, "UPDATE env_instances SET phase = 'retiring' WHERE sandbox_id = $1", earlier.ID)
+	ready := mkService(t, s, e, "n1")
+	rows, err := s.IngressRouting(bg, []uuid.UUID{e.ID})
+	if err != nil || len(rows) != 1 || rows[0].SandboxID != ready.ID {
+		t.Fatalf("routing %+v %v", rows, err)
 	}
 }
 
@@ -895,7 +993,7 @@ func TestSetEnvironmentPublic(t *testing.T) {
 
 // The writes the ingress's table follows send ferun_ingress "env:<id>":
 // the ports admitted to an instance (once), a service instance's insert,
-// phase or release and deletion, an environment's release, realised or
+// phase or release and deletion, an environment's release, deployed or
 // deleting, a tenant's deletion and an environment's.
 func TestIngressNotifications(t *testing.T) {
 	s, d := newStore(t)
@@ -986,7 +1084,7 @@ func TestIngressNotifications(t *testing.T) {
 		t.Fatalf("delete again %v %v", ok, err)
 	}
 
-	// The environment: release, realised and deleting notify, labels do
+	// The environment: release, deployed and deleting notify, labels do
 	// not.
 	cur, _ := s.GetEnvironment(bg, e.ID)
 	ea := cur
@@ -1002,7 +1100,7 @@ func TestIngressNotifications(t *testing.T) {
 	}
 	expectPayload(t, ch, want)
 	ea = cur
-	ea.Realised = 1
+	ea.Deployed = 1
 	if cur, err = s.UpdateEnvironment(bg, cur, ea); err != nil {
 		t.Fatal(err)
 	}

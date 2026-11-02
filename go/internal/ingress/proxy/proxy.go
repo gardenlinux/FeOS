@@ -102,8 +102,8 @@ const (
 	// the requests.
 	connReceiveWindow = maxConcurrentStreams * streamReceiveWindow
 	// endpointGrace is how long the connections to an instance that left
-	// a service which stays routed live on (a replica retires, or is no
-	// longer ready): a retiring pod goes after 10 s, and its requests
+	// a service which stays routed live on (a replica stops, or is no
+	// longer ready): a stopping pod goes after 10 s, and its requests
 	// end with it. Connections to what is no longer routed at all close
 	// at once.
 	endpointGrace = 30 * time.Second
@@ -338,7 +338,7 @@ func (p *Proxy) route(addr string) (dialTarget, bool) {
 // unpublished or deleted, the service lost its routes, or the instance
 // its port), so that unpublishing ends every way in; after the grace
 // when only the instance left a service that stays routed, so that the
-// requests of a retiring replica end with its pod, not before.
+// requests of a stopping replica end with its pod, not before.
 func (p *Proxy) cutConns(t *table, now time.Time) {
 	n := p.up.closeIf(func(c *trackedConn) bool {
 		if _, ok := t.dials[c.addr]; ok {

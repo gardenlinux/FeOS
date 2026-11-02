@@ -36,7 +36,7 @@ describe('EnvTable', () => {
   const list = response('GET_environments.200').environments;
   const table = (envs, filtered = false) => html(<EnvTable envs={envs} filtered={filtered} tenant={T} navigate={nav} onLabel={() => {}} />);
 
-  it('lists name, labels, release, realised, state, open incidents and created', () => {
+  it('lists name, labels, release, deployed, state, open incidents and created', () => {
     const out = table(list);
     expect(out.match(/<th[ >]/g)).toHaveLength(8);
     expect(count(out, 'class="clickable"')).toBe(3);
@@ -44,12 +44,12 @@ describe('EnvTable', () => {
     expect(out).toContain('href="/tenants/fecode/environments/expensa-prod"');
     expect(out).toContain('>fecode.class=<b>stage</b></button>');
     expect(out).toContain('title="filter by fecode.class=production"');
-    // Stage rolls 7 while 6 serves: the realised number stands out.
+    // Stage rolls 7 while 6 serves: the deployed number stands out.
     expect(out).toContain('<td class="col-num mono">7</td>');
-    expect(out).toContain('class="col-num mono warntext" title="the latest release is not realised">6</td>');
+    expect(out).toContain('class="col-num mono warntext" title="the latest release is not deployed">6</td>');
     expect(out).toContain('class="state-label paused"');
-    expect(out).toContain('>rolling</span>');
-    expect(count(out, '>realised</span>')).toBe(2);
+    expect(out).toContain('>deploying</span>');
+    expect(count(out, '>deployed</span>')).toBe(2);
     expect(out).toContain('<span class="badge bad">1 open</span>');
     expect(count(out, '<span class="muted">0</span>')).toBe(2);
   });
@@ -73,7 +73,7 @@ describe('EnvOverview', () => {
     expect(out).not.toContain('rollout-reason');
   });
 
-  it("shows a failed rollout's reason, and that the realised release keeps serving", () => {
+  it("shows a failed rollout's reason, and that the deployed release keeps serving", () => {
     const reason = 'service expense-service: a new instance (replica 1) exited 3 times';
     const st = { ...STAGE, rollout: { ...STAGE.rollout, state: 'failed', reason } };
     const out = overview(st);
@@ -82,7 +82,7 @@ describe('EnvOverview', () => {
     expect(text(<EnvOverview st={st} tenant={T} navigate={nav} />)).toContain('release 6 keeps serving');
   });
 
-  it("shows a rolling release's reason without a failure", () => {
+  it("shows a deploying release's reason without a failure", () => {
     const st = { ...STAGE, rollout: { ...STAGE.rollout, reason: 'secrets need --secret-key-file' } };
     expect(overview(st)).toContain('<div class="rollout-reason">secrets need --secret-key-file</div>');
   });
@@ -189,7 +189,7 @@ describe('ReleaseTable', () => {
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/releases/7"');
     expect(count(out, '<span class="badge acc">latest</span>')).toBe(1);
     expect(out).toContain('<span class="badge" title="tag">v1.3</span>');
-    expect(out).toContain('>superseded</span>');
+    expect(out).toContain('>replaced</span>');
     expect(out).toContain('title="fecode:0193a000-aaaa-7bbb-8ccc-000000000001"');
     expect(out).toContain('stage follows main at revision 12');
     expect(out).toContain('>fecode.dev/kind=<b>stage</b></span>');
@@ -216,7 +216,7 @@ describe('ReleaseView', () => {
 
   it('shows the release with its annotations', () => {
     const all = text(<ReleaseView rel={rel} />);
-    expect(all).toContain('release 7 rolling');
+    expect(all).toContain('release 7 deploying');
     expect(all).toContain('origin apply base release 6');
     expect(all).toContain('message stage follows main at revision 12');
     expect(all).toContain('fecode.dev/revision 0193c111-2222-7333-8444-000000000012');
@@ -312,11 +312,11 @@ describe('IncidentView', () => {
     expect(count(out, '<td class="col-num mono bad">1</td>')).toBe(3);
     expect(out).toContain('<pre class="logpre">2026/10/18 14:07:11 expense-service 1.4 starting on [::]:8080\n'
       + '2026/10/18 14:07:11 connect to nats: nats: authorization violation\n2026/10/18 14:07:12 exit status 1</pre>');
-    expect(out).not.toContain('the diff against the realised release');
+    expect(out).not.toContain('the diff against the deployed release');
     expect(out).not.toContain('placement');
   });
 
-  it("shows a failed rollout's diff against the realised release, and an exit without a status", () => {
+  it("shows a failed rollout's diff against the deployed release, and an exit without a status", () => {
     const failed = {
       ...inc, id: '13', condition: 'rollout_failed',
       summary: 'service expense-service: a new instance (replica 1) exited 3 times',
@@ -326,7 +326,7 @@ describe('IncidentView', () => {
     const out = view(failed);
     expect(words(failed)).toContain('incident 13 open rollout failed');
     expect(out).toContain('<td class="col-num mono bad">no status</td>');
-    expect(words(failed)).toContain('the diff against the realised release');
+    expect(words(failed)).toContain('the diff against the deployed release');
     expect(count(out, 'class="diff-entry"')).toBe(3);
     expect(out).not.toContain('the end of the log');
   });
@@ -338,7 +338,7 @@ describe('IncidentView', () => {
     expect(words(late)).toContain('what the release waited for');
     expect(out).toContain('<pre class="logpre">addon postgres is not ready\nservice expense-service waits for the addons\n'
       + 'addon/postgres replica 0: provisioning step provision exited 1');
-    expect(words(late)).toContain('the diff against the realised release');
+    expect(words(late)).toContain('the diff against the deployed release');
     expect(out).not.toContain('No evidence recorded.');
   });
 

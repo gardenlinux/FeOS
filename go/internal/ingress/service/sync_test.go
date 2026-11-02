@@ -258,7 +258,7 @@ func empty(t *wire.Table) bool {
 
 // The stream: whole first, with the ingress itself and the mesh's nodes;
 // an environment published with an instance is put within a second, its
-// retired instance taken out, and the unpublished environment removed; a
+// stopping instance taken out, and the unpublished environment removed; a
 // new node comes as the mesh; a change of the ingress's row named on
 // ferun_ingress comes as Self.
 func TestSync(t *testing.T) {
@@ -295,9 +295,9 @@ func TestSync(t *testing.T) {
 	}
 	t.Logf("published to put: %v", time.Since(start))
 
-	// Retired: put again, without the endpoint.
-	h.setPhase(sb, model.PhaseRetiring)
-	sy.until(time.Second, "the retired endpoint gone", func(t *wire.Table) bool {
+	// Stopping: put again, without the endpoint.
+	h.setPhase(sb, model.PhaseStopping)
+	sy.until(time.Second, "the stopped endpoint gone", func(t *wire.Table) bool {
 		return len(t.Envs) == 1 && len(t.Envs[0].Services) == 1 && len(t.Envs[0].Services[0].Endpoints) == 0
 	})
 

@@ -13,8 +13,8 @@
 // in the list (the latest release's state, "none" or "deleting").
 export function releaseTone(state) {
   switch (state) {
-    case 'realised': return 'running';
-    case 'pending': case 'rolling': case 'deleting': return 'paused';
+    case 'deployed': return 'running';
+    case 'waiting': case 'deploying': case 'deleting': return 'paused';
     case 'failed': return 'failed';
     default: return 'absent';
   }
@@ -232,10 +232,10 @@ export function hasEvidence(ev) {
 // envCounts counts the list's environments by the state of their latest
 // release, and their open incidents.
 export function envCounts(envs) {
-  const c = { realised: 0, rolling: 0, failed: 0, incidents: 0 };
+  const c = { deployed: 0, deploying: 0, failed: 0, incidents: 0 };
   for (const e of envs || []) {
-    if (e.state === 'realised') c.realised++;
-    else if (e.state === 'pending' || e.state === 'rolling') c.rolling++;
+    if (e.state === 'deployed') c.deployed++;
+    else if (e.state === 'waiting' || e.state === 'deploying') c.deploying++;
     else if (e.state === 'failed') c.failed++;
     c.incidents += e.openIncidents || 0;
   }
@@ -250,16 +250,16 @@ export function statusState(st) {
   return st.rollout ? st.rollout.state : 'none';
 }
 
-// rolloutNote says what serves while the latest release is not realised:
-// the realised release keeps serving a failed one and serves during a
+// rolloutNote says what serves while the latest release is not deployed:
+// the deployed release keeps serving a failed one and serves during a
 // rollout.
 export function rolloutNote(st) {
   const r = st && st.rollout;
   if (!r) return '';
-  if (r.state === 'realised') return 'every object matches it';
-  if (st.realised > 0 && st.realised !== r.release) {
-    return r.state === 'failed' ? `release ${st.realised} keeps serving` : `release ${st.realised} serves meanwhile`;
+  if (r.state === 'deployed') return 'every object matches it';
+  if (st.deployed > 0 && st.deployed !== r.release) {
+    return r.state === 'failed' ? `release ${st.deployed} keeps serving` : `release ${st.deployed} serves meanwhile`;
   }
-  if (r.state === 'failed') return 'no release was realised before it';
+  if (r.state === 'failed') return 'no release was deployed before it';
   return '';
 }

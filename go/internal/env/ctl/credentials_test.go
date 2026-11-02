@@ -41,7 +41,7 @@ func TestImageCredentials(t *testing.T) {
 	creds := `,"imageCredentials":{"username":"project","password":{"secret":"pull-token"}}`
 
 	r1 := h.apply(env.ID, serviceSpec(1, "1", creds))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	rows := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
 	want := &model.TemplateCredentials{Username: model.TemplateValue{Value: "project"},
 		Password: model.TemplateValue{Secret: "pull-token"}}
@@ -54,7 +54,7 @@ func TestImageCredentials(t *testing.T) {
 
 	h.putSecret(env.ID, "pull-token", "second")
 	r2 := h.apply(env.ID, serviceSpec(2, "1", creds))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 	rows = h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 	if rows[0].Instance.TemplateHash != rows[1].Instance.TemplateHash {
 		t.Fatal("a rotated secret made another template")

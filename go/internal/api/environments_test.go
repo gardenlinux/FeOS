@@ -632,7 +632,7 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 		t.Fatalf("invalid %d %s", w.Code, w.Body)
 	}
 	w = do("GET", "/api/v1/environments/stage", nil)
-	if s := decode[envs.EnvStatus](t, w); w.Code != 200 || s.Rollout == nil || s.Rollout.State != "pending" ||
+	if s := decode[envs.EnvStatus](t, w); w.Code != 200 || s.Rollout == nil || s.Rollout.State != "waiting" ||
 		len(s.Objects) != 1 || s.Routes[0].Port != 8080 {
 		t.Fatalf("status %d %s", w.Code, w.Body)
 	}

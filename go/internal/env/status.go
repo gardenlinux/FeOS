@@ -20,18 +20,18 @@ import (
 
 // status assembles an environment's status (§4.9) from the tables: its
 // latest release's rollout; the objects of its target release (the
-// latest, or the realised one while the latest failed) with their
+// latest, or the deployed one while the latest failed) with their
 // instances (env_instances with their sandbox rows: state, node,
 // address), attached services (env_attached) and jobs' latest runs
-// (env_job_runs); the routes of its realised release (the latest when
-// none is realised), with the doors that serve them; and its open
+// (env_job_runs); the routes of its deployed release (the latest when
+// none is deployed), with the doors that serve them; and its open
 // incidents. It reads only.
 func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, error) {
 	hosts, err := s.hosts(ctx, e)
 	if err != nil {
 		return EnvStatus{}, fmt.Errorf("hosts: %w", err)
 	}
-	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Release: e.Release, Realised: e.Realised,
+	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Release: e.Release, Deployed: e.Deployed,
 		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Objects: []ObjectStatus{}, Routes: []RouteStatus{},
 		CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
@@ -52,16 +52,16 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 	st.Rollout = &RolloutStatus{Release: latest.Number, State: latest.State, StartedAt: rfc3339(latest.StartedAt),
 		Reason: latest.Reason}
 	target := e.Release
-	if latest.State == model.ReleaseFailed && e.Realised > 0 {
-		target = e.Realised
+	if latest.State == model.ReleaseFailed && e.Deployed > 0 {
+		target = e.Deployed
 	}
 	targetSpec, err := s.releaseSpec(ctx, e, target)
 	if err != nil {
 		return EnvStatus{}, err
 	}
 	routed := e.Release
-	if e.Realised > 0 {
-		routed = e.Realised
+	if e.Deployed > 0 {
+		routed = e.Deployed
 	}
 	routeSpec, err := s.releaseSpec(ctx, e, routed)
 	if err != nil {
@@ -134,7 +134,7 @@ func objectsOf(sp *spec.Spec, instances []store.EnvInstanceRow, attached []store
 		var current *store.EnvInstance
 		for _, row := range byObject[spec.KindAddon+"/"+name] {
 			o.Instances = append(o.Instances, instanceStatus(row))
-			if row.Instance.Phase != model.PhaseRetiring {
+			if row.Instance.Phase != model.PhaseStopping {
 				i := row.Instance
 				current = &i
 			}
@@ -231,7 +231,7 @@ func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary 
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Release: r.Release, Realised: r.Realised,
+	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Release: r.Release, Deployed: r.Deployed,
 		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel, OpenIncidents: int(r.OpenIncidents),
 		CreatedAt: rfc3339(r.CreatedAt)}
 }

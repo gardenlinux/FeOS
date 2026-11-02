@@ -92,7 +92,7 @@ func TestAttachedNewIncarnation(t *testing.T) {
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"api":{"image":%q,"ports":[{"name":"http","port":8080}]},
 		"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}}}`, testImage, sb.ID))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" || a.SandboxIncarnation != sb.Incarnation {
 		t.Fatalf("attached %+v %v", a, err)
@@ -157,7 +157,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 
 	// Removed from the spec.
 	dev := h.newEnv("dev")
-	h.waitRelease(dev.ID, h.apply(dev.ID, `{"services":{`+web+`,`+api+`}}`), model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(dev.ID, h.apply(dev.ID, `{"services":{`+web+`,`+api+`}}`), model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, dev.ID, "web")
 	if err != nil || a.ProcessID == "" {
 		t.Fatalf("attached %+v %v", a, err)
@@ -173,11 +173,11 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 	if got := h.runningNamed(sb, "ferun-env-dev-web"); !slices.Equal(got, []string{a.ProcessID}) {
 		t.Fatalf("running %v", got)
 	}
-	if r := h.release(dev.ID, r2); r.State == model.ReleaseRealised {
-		t.Fatalf("realised while the service is not removed: %+v", r)
+	if r := h.release(dev.ID, r2); r.State == model.ReleaseDeployed {
+		t.Fatalf("deployed while the service is not removed: %+v", r)
 	}
 	pp.failStops.Store(false)
-	h.waitRelease(dev.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(dev.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	if _, err := h.st.GetAttached(bg, dev.ID, "web"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("the removed service's row: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 
 	// Its environment deleted.
 	stage := h.newEnv("stage")
-	h.waitRelease(stage.ID, h.apply(stage.ID, `{"services":{`+web+`}}`), model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(stage.ID, h.apply(stage.ID, `{"services":{`+web+`}}`), model.ReleaseDeployed, 60*time.Second)
 	b, err := h.st.GetAttached(bg, stage.ID, "web")
 	if err != nil || b.ProcessID == "" {
 		t.Fatalf("attached %+v %v", b, err)
@@ -237,7 +237,7 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 	}
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, `{"services":{`+attached("web", s1.ID)+`,`+attached("worker", s1.ID)+`}}`)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" {
 		t.Fatalf("attached %+v %v", a, err)
@@ -248,7 +248,7 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 	h.sleepUntilPaused(s1.ID)
 
 	r2 := h.apply(env.ID, `{"services":{`+attached("web", s2.ID)+`,`+attached("worker", s1.ID)+`}}`)
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	b, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || b.SandboxID != s2.ID || b.ProcessID == "" || b.Phase != model.PhaseReady {
 		t.Fatalf("moved %+v %v", b, err)
@@ -351,7 +351,7 @@ func TestAttachedSupervisedPastManyRecords(t *testing.T) {
 	sb := h.attachable()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}}}`, sb.ID))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" {
 		t.Fatalf("attached %+v %v", a, err)

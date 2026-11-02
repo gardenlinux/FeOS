@@ -73,7 +73,7 @@ func TestAddonLifecycle(t *testing.T) {
 	n1.Script().SetExec(execs.fn)
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, postgresSpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 
 	// Credentials: 32 hex characters, version 1, system.
 	var creds []string
@@ -150,7 +150,7 @@ func TestAddonLifecycle(t *testing.T) {
 
 	// A plan change recreates it, on the same node, with the same volume.
 	r2 := h.apply(env.ID, strings.Replace(postgresSpec, `"dev"`, `"small"`, 1))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	rows = h.rowsOf(env.ID, spec.KindAddon, "postgres")
 	if len(rows) != 1 || rows[0].Sandbox.ID == first.Sandbox.ID || !ready(rows[0]) {
 		t.Fatalf("after the recreate %+v", rows)
@@ -179,7 +179,7 @@ func TestAddonLifecycle(t *testing.T) {
 	}
 	// A role option alone reprovisions it, without a recreate.
 	r3 := h.apply(env.ID, strings.Replace(strings.Replace(postgresSpec, `"dev"`, `"small"`, 1), `["svc"]`, `["svc","ops"]`, 1))
-	h.waitRelease(env.ID, r3, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 60*time.Second)
 	rows = h.rowsOf(env.ID, spec.KindAddon, "postgres")
 	if len(rows) != 1 || rows[0].Sandbox.ID != second.Sandbox.ID || rows[0].Instance.ProvisionedHash == second.Instance.ProvisionedHash {
 		t.Fatalf("after a role was added %+v", rows)
@@ -187,16 +187,16 @@ func TestAddonLifecycle(t *testing.T) {
 	if _, err := h.st.GetSecret(bg, env.ID, "addon.postgres.role.ops.password", 1); err != nil {
 		t.Errorf("the new role's credential: %v", err)
 	}
-	if rel := h.release(env.ID, r1); rel.State != model.ReleaseSuperseded {
+	if rel := h.release(env.ID, r1); rel.State != model.ReleaseReplaced {
 		t.Errorf("release %d is %s", r1, rel.State)
 	}
-	if e, _ := h.st.GetEnvironment(bg, env.ID); e.Realised != r3 {
-		t.Errorf("realised %d", e.Realised)
+	if e, _ := h.st.GetEnvironment(bg, env.ID); e.Deployed != r3 {
+		t.Errorf("deployed %d", e.Deployed)
 	}
 
 	// Removed, the addon loses its instance, its volume and its credentials.
 	r4 := h.apply(env.ID, `{}`)
-	h.waitRelease(env.ID, r4, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r4, model.ReleaseDeployed, 60*time.Second)
 	eventually(t, 60*time.Second, "the volume gone", func() bool {
 		_, err := h.st.GetEnvVolume(bg, env.ID, "addon/postgres")
 		return err != nil && len(n1.Volumes()) == 0
@@ -206,8 +206,8 @@ func TestAddonLifecycle(t *testing.T) {
 	}
 }
 
-// Without --secret-key-file an addon is not realised: its release stays
-// rolling with the reason, and no incident opens.
+// Without --secret-key-file an addon is not deployed: its release stays
+// deploying with the reason, and no incident opens.
 func TestAddonWithoutSealer(t *testing.T) {
 	h := newHarness(t, options{noSealer: true})
 	h.addNode("n1")
@@ -215,7 +215,7 @@ func TestAddonWithoutSealer(t *testing.T) {
 	r := h.apply(env.ID, postgresSpec)
 	eventually(t, 30*time.Second, "the reason", func() bool {
 		rel := h.release(env.ID, r)
-		return rel.State == model.ReleaseRolling && rel.Reason == "secrets need --secret-key-file"
+		return rel.State == model.ReleaseDeploying && rel.Reason == "secrets need --secret-key-file"
 	})
 	if rows := h.rows(env.ID); len(rows) != 0 {
 		t.Errorf("rows %+v", rows)
@@ -239,7 +239,7 @@ func TestAddonVolumeUnavailable(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache")
 	if err != nil || vol.SizeMiB != 256 || vol.Holder != first.Sandbox.ID {
@@ -293,7 +293,7 @@ func TestAddonLostOnLiveNode(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, cacheWebSpec())
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache")
@@ -356,7 +356,7 @@ func TestAddonLostOnLiveNodeRecreated(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache")
 	if err != nil {
@@ -377,7 +377,7 @@ func TestAddonLostOnLiveNodeRecreated(t *testing.T) {
 	r2 := h.apply(env.ID, `{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev",
 		"options":{"maxmemoryPolicy":"allkeys-lru"}}}}`)
 	h.exec(`UPDATE nodes SET draining = false, drain_started_at = NULL WHERE name = 'n1'`)
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	second := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	if second.Sandbox.ID == first.Sandbox.ID || second.Sandbox.Node != "n1" || second.Sandbox.PinNode != "n1" ||
 		second.Instance.TemplateHash == first.Instance.TemplateHash || second.Instance.Release != r2 {
@@ -401,7 +401,7 @@ func TestAddonLostOnLiveNodeVolumeHeld(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache")
 	if err != nil {
@@ -482,7 +482,7 @@ func TestAddonReadyOnlyWhileLive(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	addon := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	n1.Script().SetHook(podv1.PodService_GetPod_FullMethodName, func(_ context.Context, _ string, req any) error {
 		if r, ok := req.(*podv1.GetPodRequest); ok && r.GetPodId() == addon.Sandbox.ID.String() {
@@ -505,10 +505,10 @@ func TestAddonReadyOnlyWhileLive(t *testing.T) {
 	if !strings.Contains(pending, "addon cache is unknown (out of touch)") {
 		t.Errorf("the release waits for %q", pending)
 	}
-	// Back in touch: the job runs, the release is realised.
+	// Back in touch: the job runs, the release is deployed.
 	n1.Script().SetHook(podv1.PodService_GetPod_FullMethodName, nil)
 	finishRun(t, h, n1, env.ID, 0)
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
 }
 
 // A drained node's addon restores on another node with its volume (the
@@ -519,7 +519,7 @@ func TestAddonMovesWithDrain(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	if first.Sandbox.Node != "n1" {
 		t.Fatalf("on %s", first.Sandbox.Node)
@@ -564,7 +564,7 @@ func TestAddonVolumeFollowsStoppedRow(t *testing.T) {
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	n2 := h.addNode("n2")
 	h.exec("UPDATE nodes SET draining = true, drain_started_at = now() WHERE name = 'n1'")
@@ -627,7 +627,7 @@ func TestVolumeOfRemovedNode(t *testing.T) {
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	h.removeNode("n1")
 	if _, _, err := h.eng.Delete(bg, "", first.Sandbox.ID); err != nil {
@@ -665,7 +665,7 @@ func cacheServiceSpec(valkey, web string) string {
 
 // A release that upgraded an addon and then failed (a service's new
 // instance crashed) keeps the addon as it recreated it: T falls back to
-// the realised release, whose older version is never started again on
+// the deployed release, whose older version is never started again on
 // the data the newer one wrote, and the addon is not recreated a second
 // time; the volume records the version that ran on it.
 func TestFailedReleaseKeepsAddon(t *testing.T) {
@@ -673,7 +673,7 @@ func TestFailedReleaseKeepsAddon(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, cacheServiceSpec("7.2", "1"))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	old := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	if vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache"); err != nil || vol.AddonType != "valkey" || vol.DataVersion != "7.2" {
@@ -766,11 +766,11 @@ func TestAddonTypeChange(t *testing.T) {
 		return v
 	}
 	r1 := h.apply(env.ID, pg("16"))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	v1, p1 := volume("postgres", "16"), password()
 
 	r2 := h.apply(env.ID, `{"addons":{"db":{"type":"valkey","version":"8","plan":"dev"}}}`)
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	v2, p2 := volume("valkey", "8"), password()
 	if v2.VolumeID == v1.VolumeID || p2 == p1 {
 		t.Fatalf("valkey has postgres's volume or password: %+v", v2)
@@ -781,14 +781,14 @@ func TestAddonTypeChange(t *testing.T) {
 	}
 
 	r3 := h.apply(env.ID, pg("17"))
-	h.waitRelease(env.ID, r3, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 60*time.Second)
 	if v3 := volume("postgres", "17"); v3.VolumeID == v2.VolumeID || v3.VolumeID == v1.VolumeID {
 		t.Fatalf("postgres 17 mounts an old volume: %+v", v3)
 	}
 }
 
 // An addon's target that its volume's data refuses (a major version the
-// blueprint cannot run on it) is never started: a rolling release fails
+// blueprint cannot run on it) is never started: a deploying release fails
 // with the finding and the running instance stays; outside a rollout,
 // addon_unhealthy opens and no instance starts on the data.
 func TestAddonRefusedOnItsData(t *testing.T) {
@@ -799,7 +799,7 @@ func TestAddonRefusedOnItsData(t *testing.T) {
 		return fmt.Sprintf(`{"addons":{"db":{"type":"postgres","version":%q,"plan":"dev","options":{"databases":["app"]}}}}`, version)
 	}
 	r1 := h.apply(env.ID, pg("16"))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	first := h.waitRows(env.ID, spec.KindAddon, "db", 1, 10*time.Second, "ready", ready)[0]
 
 	// The service's validation refuses this; a removal and a re-add that
@@ -819,7 +819,7 @@ func TestAddonRefusedOnItsData(t *testing.T) {
 	})
 
 	// Data written by 17 (as if it had run), the instance gone: T, the
-	// realised 16, never starts on it.
+	// deployed 16, never starts on it.
 	h.exec(`UPDATE env_volumes SET data_version = '17' WHERE env_id = $1`, env.ID)
 	if _, _, err := h.eng.Delete(bg, "", first.Sandbox.ID); err != nil {
 		t.Fatal(err)
@@ -856,9 +856,9 @@ func failingProvisioning(n *testnode.Node, code *atomic.Int32) *atomic.Int32 {
 }
 
 // A provisioning step that fails keeps the addon unprovisioned and the
-// release rolling, with the step's output as the instance's detail and
+// release deploying, with the step's output as the instance's detail and
 // the credentials redacted from it; the step runs again after the retry
-// wait, and once it succeeds the release is realised.
+// wait, and once it succeeds the release is deployed.
 func TestAddonProvisioningFails(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
@@ -879,11 +879,11 @@ func TestAddonProvisioningFails(t *testing.T) {
 		t.Fatalf("instance %+v", row.Instance)
 	}
 	eventually(t, 10*time.Second, "the step run again", func() bool { return runs.Load() >= 2 })
-	if rel := h.release(env.ID, r1); rel.State != model.ReleaseRolling {
+	if rel := h.release(env.ID, r1); rel.State != model.ReleaseDeploying {
 		t.Fatalf("release %s while its addon is not provisioned", rel.State)
 	}
 	code.Store(0)
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	row = h.waitRows(env.ID, spec.KindAddon, "postgres", 1, 10*time.Second, "ready", ready)[0]
 	if row.Instance.ProvisionedHash == "" || row.Instance.Detail != "" {
 		t.Fatalf("instance after the provisioning %+v", row.Instance)

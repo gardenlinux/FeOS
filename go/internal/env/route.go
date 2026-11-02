@@ -155,7 +155,7 @@ func rawOf(path, raw string) string {
 // goes on to the upstream, unless its bearer token is a tenant's or a
 // sandbox's: 401 the same way, and nothing is forwarded), the longest
 // segment-aware
-// prefix match over the routes of the realised release (the latest when
+// prefix match over the routes of the deployed release (the latest when
 // none is), and the request forwarded through the port door to a ready
 // instance of the route's service, round-robin, or, when none is ready,
 // to a paused or hibernated one (the forward wakes it: scale from zero);
@@ -228,7 +228,7 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, textDot, http.StatusBadRequest)
 		return
 	}
-	number := e.Realised
+	number := e.Deployed
 	if number == 0 {
 		number = e.Release
 	}
@@ -291,7 +291,7 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The instance listens on the port of its own release, which a
-	// rolling release may have changed.
+	// deploying release may have changed.
 	if inst.release != number && inst.release > 0 {
 		own, err := s.releaseSpec(ctx, e, inst.release)
 		if err != nil && !isNotFound(err) {
@@ -355,7 +355,7 @@ func (s *Service) pickInstance(ctx context.Context, envID uuid.UUID, service str
 	var ready, asleep []picked
 	for _, row := range rows {
 		i, sb := row.Instance, row.Sandbox
-		if i.Kind != spec.KindService || i.Object != service || i.Phase == model.PhaseRetiring {
+		if i.Kind != spec.KindService || i.Object != service || i.Phase == model.PhaseStopping {
 			continue
 		}
 		p := picked{id: sb.ID, release: i.Release}

@@ -12,7 +12,7 @@
     "releases": [
       {
         "number": 7,
-        "state": "rolling",
+        "state": "deploying",
         "origin": "apply",
         "originRef": "",
         "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
@@ -31,7 +31,7 @@
       },
       {
         "number": 6,
-        "state": "realised",
+        "state": "deployed",
         "origin": "apply",
         "originRef": "",
         "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
@@ -52,7 +52,7 @@
       },
       {
         "number": 5,
-        "state": "superseded",
+        "state": "replaced",
         "origin": "apply",
         "originRef": "",
         "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",

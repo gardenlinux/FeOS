@@ -178,13 +178,13 @@
       "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
     },
     "release": 1,
-    "realised": 0,
+    "deployed": 0,
     "deleting": false,
     "public": false,
     "hosts": [],
     "rollout": {
       "release": 1,
-      "state": "pending",
+      "state": "waiting",
       "startedAt": "",
       "reason": ""
     },
@@ -265,5 +265,5 @@
     "openIncidents": 0,
     "createdAt": "2026-10-18T14:09:30Z"
   },
-  "note": "release 1 (origin clone, originRef '<source id>/6') is the given spec; the objects are release 1's, without instances until the controller inserts them; the routes are release 1's while none is realised"
+  "note": "release 1 (origin clone, originRef '<source id>/6') is the given spec; the objects are release 1's, without instances until the controller inserts them; the routes are release 1's while none is deployed"
 }

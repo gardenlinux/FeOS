@@ -331,9 +331,11 @@ TABLE environments
   COLUMN public boolean NOT NULL DEFAULT false
   COLUMN ingress_group boolean NOT NULL DEFAULT false
   COLUMN host_label text
+  COLUMN deployed integer NOT NULL DEFAULT 0
   CONSTRAINT CHECK (((NOT public) OR (ingress_group AND (host_label IS NOT NULL))))
   CONSTRAINT CHECK (((host_label ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (substr(host_label, 3, 2) <> '--'::text)))
   CONSTRAINT CHECK (((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (name !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
+  CONSTRAINT CHECK ((deployed >= 0))
   CONSTRAINT CHECK ((realised >= 0))
   CONSTRAINT CHECK ((release >= 0))
   CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id)

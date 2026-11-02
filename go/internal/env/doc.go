@@ -11,7 +11,7 @@
 // secrets, incidents, logs, restarts, job runs and route tokens; and it
 // serves the route door (ServeRoute), which forwards HTTP requests to the
 // environment's services by their routes. It composes the controller
-// (internal/env/ctl), whose leader loops realise the releases, and gives
+// (internal/env/ctl), whose leader loops deploy the releases, and gives
 // the engine its hooks: the secrets' resolution (ResolveSecret) and the
 // preparation of a node (PrepareHook).
 //

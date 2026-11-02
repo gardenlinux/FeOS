@@ -41,20 +41,20 @@ func byReplica(a, b store.EnvInstanceRow) int {
 // stepService keeps an image service at T: rows of T's template are kept
 // (release and idle updated in place) and healed; rows of another
 // template are replaced one at a time, surge 1 (a new one first, ready,
-// then an old one retires); missing replicas are added, surplus ones
-// retire, the highest first. While R rolls the service waits for the
+// then an old one stops); missing replicas are added, surplus ones
+// stop, the highest first. While R rolls the service waits for the
 // addons and the release jobs, and its rollout budget counts from R's
 // start, moved on by the time the release jobs waited for runs that were
 // not R's (stepState.start): past it, or when a new instance exited 3
-// times, R fails (rollout_failed) and R's new instances retire.
+// times, R fails (rollout_failed) and R's new instances stop.
 func (c *Controller) stepService(ctx context.Context, s *stepState, name string, svc spec.Service) {
 	v := s.v
-	var cur, old, retiring []store.EnvInstanceRow
+	var cur, old, stopping []store.EnvInstanceRow
 	p := c.planService(v, name, svc)
 	for _, r := range v.rowsOf(spec.KindService, name) {
 		switch {
-		case r.Instance.Phase == model.PhaseRetiring:
-			retiring = append(retiring, r)
+		case r.Instance.Phase == model.PhaseStopping:
+			stopping = append(stopping, r)
 		case p.ok() && r.Instance.TemplateHash == p.hash:
 			cur = append(cur, r)
 		default:
@@ -72,7 +72,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 		s.wait(objectName(spec.KindService, name), "service %s: %s", name, p.why())
 		return
 	}
-	if rolling(v) && (!s.addonsReady || !s.jobsDone) {
+	if deploying(v) && (!s.addonsReady || !s.jobsDone) {
 		for _, r := range cur {
 			c.heal(ctx, r.Sandbox, idles)
 		}
@@ -98,7 +98,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 		})
 	}
 	desired := replicasOf(svc)
-	if rolling(v) && c.rolloutFailed(ctx, s, name, svc, p, cur, old) {
+	if deploying(v) && c.rolloutFailed(ctx, s, name, svc, p, cur, old) {
 		return
 	}
 	ready := 0
@@ -116,7 +116,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 			}
 		}
 	case len(old) == 0 && len(cur) > desired:
-		if err := c.retire(ctx, v, true, cur[desired:]...); err != nil {
+		if err := c.stopInstances(ctx, v, true, cur[desired:]...); err != nil {
 			s.wait(objectName(spec.KindService, name), "service %s: %v", name, err)
 		}
 	case len(old) > 0 && ready < len(cur):
@@ -129,13 +129,13 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 		}
 	case len(old) > 0:
 		// Every new one is ready: an old one goes, the highest first.
-		if err := c.retire(ctx, v, true, old[len(old)-1]); err != nil {
+		if err := c.stopInstances(ctx, v, true, old[len(old)-1]); err != nil {
 			s.wait(objectName(spec.KindService, name), "service %s: %v", name, err)
 		}
 	}
-	if len(old) > 0 || len(cur) != desired || ready != len(cur) || len(retiring) > 0 {
-		s.wait(objectName(spec.KindService, name), "service %s: %d of %d ready, %d old, %d retiring", name, ready, desired,
-			len(old), len(retiring))
+	if len(old) > 0 || len(cur) != desired || ready != len(cur) || len(stopping) > 0 {
+		s.wait(objectName(spec.KindService, name), "service %s: %d of %d ready, %d old, %d stopping", name, ready, desired,
+			len(old), len(stopping))
 	}
 }
 
@@ -156,14 +156,14 @@ func freeReplicas(rows []store.EnvInstanceRow, n int) []int {
 
 // rolloutFailed fails R when the service's rollout ran past its budget, or
 // when one of its new instances exited 3 times; R's new instances of the
-// service retire, the old keep serving. It reports whether R failed.
+// service stop, the old keep serving. It reports whether R failed.
 func (c *Controller) rolloutFailed(ctx context.Context, s *stepState, name string, svc spec.Service, p *podPlan,
 	cur, old []store.EnvInstanceRow) bool {
 	v := s.v
 	// The service rolls when it has old instances, is new to R, or scales
 	// to another count (a scale-up adds under the same budget).
-	realised, inRealised := c.realisedService(ctx, v, name)
-	rollingService := len(old) > 0 || !inRealised || replicasOf(realised) != replicasOf(svc)
+	deployed, inDeployed := c.deployedService(ctx, v, name)
+	rollingService := len(old) > 0 || !inDeployed || replicasOf(deployed) != replicasOf(svc)
 	if !rollingService {
 		return false
 	}
@@ -216,20 +216,20 @@ func (c *Controller) rolloutFailed(ctx context.Context, s *stepState, name strin
 		return false
 	}
 	s.failed = true
-	if err := c.retire(ctx, v, true, fresh...); err != nil && ctx.Err() == nil {
-		c.rl.warn("rollout", "cannot retire a failed rollout's instances", "environment", v.env.ID, "service", name, "err", err)
+	if err := c.stopInstances(ctx, v, true, fresh...); err != nil && ctx.Err() == nil {
+		c.rl.warn("rollout", "cannot stop a failed rollout's instances", "environment", v.env.ID, "service", name, "err", err)
 	}
 	return true
 }
 
-// realisedService is the image service as the realised release has it,
-// and whether it has it (true when the realised release cannot be read:
+// deployedService is the image service as the deployed release has it,
+// and whether it has it (true when the deployed release cannot be read:
 // the budget is not guessed).
-func (c *Controller) realisedService(ctx context.Context, v *view, name string) (spec.Service, bool) {
-	if v.env.Realised == 0 {
+func (c *Controller) deployedService(ctx context.Context, v *view, name string) (spec.Service, bool) {
+	if v.env.Deployed == 0 {
 		return spec.Service{}, false
 	}
-	sp, err := c.releaseSpec(ctx, v.env, v.env.Realised)
+	sp, err := c.releaseSpec(ctx, v.env, v.env.Deployed)
 	if err != nil {
 		return v.target.Services[name], true
 	}

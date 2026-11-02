@@ -246,7 +246,7 @@ func webService(s *Snapshot, env uuid.UUID) (wire.Service, bool) {
 
 // The builder follows the store's writes within a second each: the
 // first snapshot has the endpoint; a sandbox change (ferun_sandbox) makes
-// it asleep and back; retiring takes it out; unpublishing removes the
+// it asleep and back; stopping takes it out; unpublishing removes the
 // environment (its read has no rows); publishing again brings it back,
 // and the tenant's deletion removes it. An environment whose routing
 // release does not parse is left out.
@@ -285,14 +285,14 @@ func TestBuilderFollows(t *testing.T) {
 		return ok && len(svc.Endpoints) == 1
 	})
 
-	// Retiring: the environment stays, without the instance.
-	f.setPhase(t, f.sb, model.PhaseRetiring)
-	s = await(t, b, time.Second, "the retired endpoint gone", func(s *Snapshot) bool {
+	// Stopping: the environment stays, without the instance.
+	f.setPhase(t, f.sb, model.PhaseStopping)
+	s = await(t, b, time.Second, "the stopped endpoint gone", func(s *Snapshot) bool {
 		svc, ok := webService(s, f.env.ID)
 		return ok && len(svc.Endpoints) == 0 && svc.Asleep+svc.Waking+svc.Pending == 0
 	})
 	if _, ok := s.bySandbox[f.sb]; ok {
-		t.Fatal("a retired instance's sandbox is still indexed")
+		t.Fatal("a stopped instance's sandbox is still indexed")
 	}
 
 	// A new instance comes with its environment's notification.
@@ -364,8 +364,8 @@ func TestBuilderTooLarge(t *testing.T) {
 		return !ok
 	})
 	// The others still follow their changes.
-	f.setPhase(t, f.sb, model.PhaseRetiring)
-	s = await(t, b, time.Second, "the retired endpoint gone", func(s *Snapshot) bool {
+	f.setPhase(t, f.sb, model.PhaseStopping)
+	s = await(t, b, time.Second, "the stopped endpoint gone", func(s *Snapshot) bool {
 		svc, ok := webService(s, f.env.ID)
 		return ok && len(svc.Endpoints) == 0
 	})
@@ -464,7 +464,7 @@ func TestBuilderIdle(t *testing.T) {
 	}
 
 	// A change while unused; the next user's first snapshot has it.
-	f.setPhase(t, f.sb, model.PhaseRetiring)
+	f.setPhase(t, f.sb, model.PhaseStopping)
 	s, _ := use(t, b)
 	if svc, ok := webService(s, f.env.ID); !ok || len(svc.Endpoints) != 0 {
 		t.Fatalf("a stale snapshot after a pause: %+v", svc)

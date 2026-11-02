@@ -121,8 +121,8 @@ function EnvList({ tenant, navigate }) {
             <span className="count">{envs ? envs.length : '…'}</span>
           </h2>
           <span className="mini-stats muted">
-            <span className="ok" title="realised">● {counts.realised}</span>
-            <span className="warn" title="pending or rolling">● {counts.rolling}</span>
+            <span className="ok" title="deployed">● {counts.deployed}</span>
+            <span className="warn" title="waiting or deploying">● {counts.deploying}</span>
             {counts.failed > 0 && <span className="bad" title="the latest release failed">● {counts.failed}</span>}
             {counts.incidents > 0 && <span className="bad" title="open incidents">▲ {counts.incidents}</span>}
           </span>
@@ -178,7 +178,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
               <th>name</th>
               <th>labels</th>
               <th className="col-num">release</th>
-              <th className="col-num">realised</th>
+              <th className="col-num">deployed</th>
               <th>state</th>
               <th className="col-num">incidents</th>
               <th className="col-when">created</th>
@@ -197,9 +197,9 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
                   </td>
                   <td><Labels labels={e.labels} onLabel={onLabel} /></td>
                   <td className="col-num mono">{e.release || '—'}</td>
-                  <td className={'col-num mono' + (e.realised !== e.release ? ' warntext' : '')}
-                    title={e.realised !== e.release ? 'the latest release is not realised' : ''}>
-                    {e.realised || '—'}
+                  <td className={'col-num mono' + (e.deployed !== e.release ? ' warntext' : '')}
+                    title={e.deployed !== e.release ? 'the latest release is not deployed' : ''}>
+                    {e.deployed || '—'}
                   </td>
                   <td><ToneLabel tone={tone}>{e.state}</ToneLabel></td>
                   <td className="col-num">
@@ -283,7 +283,7 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
           </span>
           <span className="muted small">
             {st
-              ? <>release {st.release || '—'} · realised {st.realised || '—'} · <span className="mono">{st.id}</span></>
+              ? <>release {st.release || '—'} · deployed {st.deployed || '—'} · <span className="mono">{st.id}</span></>
               : 'loading…'}
           </span>
         </div>
@@ -344,7 +344,7 @@ export function EnvOverview({ st, tenant, navigate }) {
         <KV k="environment ID"><span className="mono">{st.id}</span> <CopyBtn text={st.id} mini /></KV>
         <KV k="labels"><Labels labels={st.labels} /></KV>
         <KV k="releases">
-          latest <span className="mono">{st.release || '—'}</span>, realised <span className="mono">{st.realised || '—'}</span>
+          latest <span className="mono">{st.release || '—'}</span>, deployed <span className="mono">{st.deployed || '—'}</span>
         </KV>
         <KV k="open incidents">
           {st.openIncidents > 0
@@ -460,7 +460,7 @@ function JobLine({ run }) {
 }
 
 // InstanceTable lists an object's pods; one of an older release than the
-// latest is muted, a retiring one dimmed.
+// latest is muted, a stopping one dimmed.
 export function InstanceTable({ instances, latest, navigate, logsTo }) {
   const list = instances || [];
   if (list.length === 0) return <div className="envobj-line muted">No instances yet.</div>;
@@ -486,7 +486,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
           {list.map((i) => {
             const old = latest > 0 && i.release < latest;
             return (
-              <tr key={i.id} className={i.phase === 'retiring' ? 'dim' : ''} title={`instance ${i.id}`}>
+              <tr key={i.id} className={i.phase === 'stopping' ? 'dim' : ''} title={`instance ${i.id}`}>
                 <td className="col-num mono">{i.replica}</td>
                 <td><ToneLabel tone={phaseTone(i.phase)}>{i.phase}</ToneLabel></td>
                 <td><StateLabel state={i.state} /></td>
@@ -515,8 +515,8 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
   );
 }
 
-// RoutesTable lists the routes of the realised release (the latest when
-// none is realised), their ports resolved.
+// RoutesTable lists the routes of the deployed release (the latest when
+// none is deployed), their ports resolved.
 export function RoutesTable({ routes, env }) {
   const list = routes || [];
   return (
@@ -831,7 +831,7 @@ function IncidentPane({ tenant, env, id, navigate }) {
 
 // IncidentView is an incident with what the controller saw: the exits,
 // the end of the log, what a release past its deadline still waited for,
-// a failed rollout's diff against the realised release, why an instance
+// a failed rollout's diff against the deployed release, why an instance
 // found no place.
 export function IncidentView({ inc, tenant, env, navigate }) {
   const open = !inc.closedAt;
@@ -888,7 +888,7 @@ export function IncidentView({ inc, tenant, env, navigate }) {
         </>)}
       {(ev.diff || []).length > 0 && (
         <>
-          <div className="sect">the diff against the realised release</div>
+          <div className="sect">the diff against the deployed release</div>
           <DiffView diff={ev.diff} />
         </>)}
       {ev.placement && (

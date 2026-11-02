@@ -130,7 +130,7 @@ func TestAttachedService(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(n1.PodDir(sb.ID), "app"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.Phase != model.PhaseReady || a.ProcessID == "" || a.SandboxIncarnation != sb.Incarnation ||
 		a.Restarts != 0 {
@@ -184,7 +184,7 @@ func TestAttachedService(t *testing.T) {
 	// A changed template replaces the process.
 	b, _ := h.st.GetAttached(bg, env.ID, "web")
 	r2 := h.apply(env.ID, attachedSpec(sb.ID, "/app", "hello", true))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	c, _ := h.st.GetAttached(bg, env.ID, "web")
 	if c.ProcessID == b.ProcessID || c.Phase != model.PhaseReady {
 		t.Fatalf("after the template changed %+v", c)
@@ -214,7 +214,7 @@ func TestAttachedService(t *testing.T) {
 	// Removed: the process stops, the row and the name go.
 	d, _ := h.st.GetAttached(bg, env.ID, "web")
 	r3 := h.apply(env.ID, attachedSpec(sb.ID, "/app", "", false))
-	h.waitRelease(env.ID, r3, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 60*time.Second)
 	if _, err := h.st.GetAttached(bg, env.ID, "web"); !errors.Is(err, store.ErrNoRow) {
 		t.Errorf("the attached row: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestAttachedWakesPausedSandbox(t *testing.T) {
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,
 		"command":["sleep","60"]}}}`, sb.ID))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" || a.Phase != model.PhaseReady {
 		t.Fatalf("attached %+v %v", a, err)
@@ -330,7 +330,7 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"api":{"image":%q},
 		"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, testImage, sb.ID))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" || a.SandboxIncarnation != sb.Incarnation {
 		t.Fatalf("attached %+v %v", a, err)
@@ -419,7 +419,7 @@ func TestAttachedStrayProcesses(t *testing.T) {
 	sb := h.attachable()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, sb.ID))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" {
 		t.Fatalf("attached %+v %v", a, err)
@@ -526,7 +526,7 @@ func TestAttachedRestartIsNoExit(t *testing.T) {
 	sb := h.attachable()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, sb.ID))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 	a, err := h.st.GetAttached(bg, env.ID, "web")
 	if err != nil || a.ProcessID == "" || a.Restarts != 0 {
 		t.Fatalf("attached %+v %v", a, err)
@@ -582,7 +582,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	}
 	up := func(envID uuid.UUID, r int) store.EnvAttached {
 		t.Helper()
-		h.waitRelease(envID, r, model.ReleaseRealised, 60*time.Second)
+		h.waitRelease(envID, r, model.ReleaseDeployed, 60*time.Second)
 		a, err := h.st.GetAttached(bg, envID, "web")
 		if err != nil || a.ProcessID == "" {
 			t.Fatalf("attached %+v %v", a, err)
@@ -603,7 +603,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 		t.Fatal("the sleeping sandbox lost its names")
 	}
 	r2 := h.apply(dev.ID, `{"services":{`+other+`}}`)
-	h.waitRelease(dev.ID, r2, model.ReleaseRealised, 60*time.Second)
+	h.waitRelease(dev.ID, r2, model.ReleaseDeployed, 60*time.Second)
 	if _, err := h.st.GetAttached(bg, dev.ID, "web"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("the removed service's row: %v", err)
 	}

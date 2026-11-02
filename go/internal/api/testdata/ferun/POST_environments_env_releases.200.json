@@ -165,7 +165,7 @@
   },
   "response": {
     "number": 7,
-    "state": "rolling",
+    "state": "deploying",
     "origin": "apply",
     "originRef": "",
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",

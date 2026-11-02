@@ -37,7 +37,7 @@ type EnvSummary struct {
 	Name     string            `json:"name"`
 	Labels   map[string]string `json:"labels"`
 	Release  int               `json:"release"`
-	Realised int               `json:"realised"`
+	Deployed int               `json:"deployed"`
 	// State is the latest release's state (model.Release…),
 	// model.EnvNone without a release, model.EnvDeleting.
 	State string `json:"state"`
@@ -56,7 +56,7 @@ type EnvStatus struct {
 	Name     string            `json:"name"`
 	Labels   map[string]string `json:"labels"`
 	Release  int               `json:"release"`
-	Realised int               `json:"realised"`
+	Deployed int               `json:"deployed"`
 	Deleting bool              `json:"deleting"`
 	// Public: its tenant made it public (PUT …/public), and the ingress
 	// serves its image services' routes without a route token (ADR 0021).
@@ -204,8 +204,8 @@ type JobRunStatus struct {
 	Detail string `json:"detail"`
 }
 
-// RouteStatus is a route of the realised release (the latest when none
-// is realised), its port resolved to a number.
+// RouteStatus is a route of the deployed release (the latest when none
+// is deployed), its port resolved to a number.
 type RouteStatus struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
@@ -481,7 +481,7 @@ type IncidentEvidence struct {
 	Exits []Exit `json:"exits,omitempty"`
 	// LogTail is the end of its log.
 	LogTail []string `json:"logTail,omitempty"`
-	// Diff is a failed rollout's diff against the realised release.
+	// Diff is a failed rollout's diff against the deployed release.
 	Diff []spec.DiffEntry `json:"diff,omitempty"`
 	// Placement is why an instance could not be placed.
 	Placement string `json:"placement,omitempty"`

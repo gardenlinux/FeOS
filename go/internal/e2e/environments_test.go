@@ -50,7 +50,7 @@ func (c *cluster) applyRelease(envID uuid.UUID, spec string) int {
 		if _, err := tx.UpdateEnvironment(bg, e, after); err != nil {
 			return err
 		}
-		if _, err := tx.SupersedeReleases(bg, envID, n, model.ReleasePending, model.ReleaseRolling); err != nil {
+		if _, err := tx.ReplaceReleases(bg, envID, n, model.ReleaseWaiting, model.ReleaseDeploying); err != nil {
 			return err
 		}
 		return tx.Notify(bg, db.ChanLeader, ctl.HintReconcile)
@@ -101,7 +101,7 @@ func nodeGroup(n *node, id string) *networkv1.SecurityGroup {
 // security groups and name tables: an attachable sandbox made over REST
 // gets its group and its name table before its pod; an environment's image
 // service and an attached service in that sandbox come up and the release
-// is realised; the env group has both as members and the sandbox's group
+// is deployed; the env group has both as members and the sandbox's group
 // reaches it; the node's resolver answers each pod the names it should;
 // the controller reads the process's log; a deleted environment leaves
 // its sandbox alone and nothing of its own.
@@ -163,7 +163,7 @@ func TestEnvironments(t *testing.T) {
 		"web":{"runtime":"attached","sandbox":%q,"command":["sh","-c","echo up $API; exec sleep 60"],"cwd":"/app",
 			"env":{"API":{"service":"api","port":"http","key":"url"}},"ports":[{"name":"http","port":5173}]}}}`,
 		testImage, sb.id))
-	c.waitRelease(env.ID, r1, model.ReleaseRealised, 60*time.Second)
+	c.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
 
 	rows, err := c.st.ListEnvInstanceRows(bg, env.ID)
 	if err != nil || len(rows) != 1 || rows[0].Instance.Object != "api" || rows[0].Instance.Phase != model.PhaseReady {

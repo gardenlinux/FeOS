@@ -19,8 +19,8 @@
           "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
         },
         "release": 7,
-        "realised": 6,
-        "state": "rolling",
+        "deployed": 6,
+        "state": "deploying",
         "public": true,
         "hosts": [
           "expensa-stage-fecode.apps.fecode.dev"
@@ -37,8 +37,8 @@
           "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
         },
         "release": 4,
-        "realised": 4,
-        "state": "realised",
+        "deployed": 4,
+        "state": "deployed",
         "public": false,
         "hosts": [],
         "openIncidents": 0,
@@ -53,8 +53,8 @@
           "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
         },
         "release": 3,
-        "realised": 3,
-        "state": "realised",
+        "deployed": 3,
+        "state": "deployed",
         "public": false,
         "hosts": [],
         "openIncidents": 0,

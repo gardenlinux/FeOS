@@ -74,7 +74,7 @@ func TestLogTailBytes(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	const n = 600
 	for i := range n {
@@ -222,7 +222,7 @@ func TestServiceTailsRedacted(t *testing.T) {
 			"ports":[{"name":"http","port":8080}]%s}}}`, testImage, version, extra)
 	}
 	r1 := h.apply(env.ID, webSpec("1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	for i := 1; i <= 3; i++ {
 		var lines []string

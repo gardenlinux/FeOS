@@ -442,8 +442,8 @@ var errReplan = errors.New("the current release changed since the plan")
 // error), refuses error findings, and in one transaction (the tenant FOR
 // SHARE, the environment FOR UPDATE) answers the current release
 // unchanged when the spec equals it and it did not fail, refuses a base
-// that is not the current release, inserts the next release pending,
-// supersedes the older pending and rolling ones and wakes the
+// that is not the current release, inserts the next release waiting,
+// replaces the older waiting and deploying ones and wakes the
 // controller.
 func (s *Service) apply(ctx context.Context, tenant, ref string, a applyArgs) (ApplyAnswer, error) {
 	for range 3 {
@@ -530,7 +530,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		number := e.Release + 1
 		r, err := tx.InsertRelease(ctx, store.EnvRelease{EnvID: e.ID, Number: number, Spec: specJSON, Base: a.base,
 			Author: a.author, Message: a.message, Annotations: a.annotations, Origin: a.origin, OriginRef: a.originRef,
-			State: model.ReleasePending})
+			State: model.ReleaseWaiting})
 		if err != nil {
 			return err
 		}
@@ -539,7 +539,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		if _, err := tx.UpdateEnvironment(ctx, e, after); err != nil {
 			return err
 		}
-		if _, err := tx.SupersedeReleases(ctx, e.ID, number, model.ReleasePending, model.ReleaseRolling); err != nil {
+		if _, err := tx.ReplaceReleases(ctx, e.ID, number, model.ReleaseWaiting, model.ReleaseDeploying); err != nil {
 			return err
 		}
 		if err := wake(ctx, tx, ctl.HintReconcile, ctl.HintGroups); err != nil {

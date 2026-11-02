@@ -159,8 +159,8 @@ func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest)
 // Apply is POST /api/v1/environments/{env}/releases: plan, refuse on any
 // error (InvalidSpecError), pin the images (unresolvable: an error), and
 // in one transaction check req.Base against the current release
-// (BaseMismatchError), insert release current+1 pending, supersede the
-// older pending and rolling ones and wake the controller. A normalised
+// (BaseMismatchError), insert release current+1 waiting, replace the
+// older waiting and deploying ones and wake the controller. A normalised
 // spec equal to the current release's answers that release Unchanged
 // (200), unless it failed.
 func (s *Service) Apply(ctx context.Context, tenant, env string, req ApplyRequest) (ApplyAnswer, error) {
@@ -623,7 +623,7 @@ func ctlError(err error, kind, name string) error {
 		return apierr.WithCode(http.StatusConflict, CodeNotRunning, "%s %s is not running: its sandbox is gone", kind, name)
 	case errors.Is(err, store.ErrNoRow):
 		// An instance or process row the controller read went before it
-		// locked it (retired, replaced).
+		// locked it (stopped, replaced).
 		return apierr.WithCode(http.StatusConflict, CodeBusy, "%s %s changed meanwhile; try again", kind, name).
 			RetryAfter(5)
 	case errors.Is(err, ctl.ErrNotRunning):

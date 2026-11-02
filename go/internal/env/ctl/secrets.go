@@ -26,7 +26,7 @@ import (
 // environment envID, a tenant's or an addon's system secret
 // ("addon.<addon>.<key>"), unsealed with its AAD (envdeps.SecretAAD). A
 // deleted version still resolves: a release pins it until a later one is
-// realised. Without a Sealer it is an error naming --secret-key-file. It
+// deployed. Without a Sealer it is an error naming --secret-key-file. It
 // is the engine's secret resolver (through the environment service's) and
 // the controller's own, for the env of attached services and of
 // provisioning steps. Version 0 is the latest version, which must not be

@@ -13,7 +13,7 @@
       "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
     },
     "release": 7,
-    "realised": 6,
+    "deployed": 6,
     "deleting": false,
     "public": true,
     "hosts": [
@@ -21,7 +21,7 @@
     ],
     "rollout": {
       "release": 7,
-      "state": "rolling",
+      "state": "deploying",
       "startedAt": "2026-10-18T14:02:11Z",
       "reason": ""
     },

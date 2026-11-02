@@ -463,7 +463,7 @@ func TestValidateRules(t *testing.T) {
 			s.Routes["f"] = Route{Path: "/f//g", Service: "web"}
 		}, []expect{e("routes.a.path", "does not begin with /"), e("routes.b.path", "is route api-expense's too"),
 			e("routes.c.path", "needs escaping"), e("routes.c.service", `no service "nope"`),
-			e("routes.d.path", "segment"), e("routes.d.port", "web has no port grpc"), i("routes.e.host", "not realised"),
+			e("routes.d.path", "segment"), e("routes.d.port", "web has no port grpc"), i("routes.e.host", "not used"),
 			e("routes.f.path", "segment"), e("routes.f.port", "a port is needed")}},
 		{"images", ModePlan, func(s *Spec) {
 			approval(s)
@@ -523,7 +523,7 @@ func TestValidateRouteDoors(t *testing.T) {
 		later    = "served by the route door; the ingress serves it once the environment is public"
 		both     = "served by the ingress and by the route door"
 	)
-	stored := i("routes.approval.host", "host is stored, not realised yet: the ingress and the route door serve the route "+
+	stored := i("routes.approval.host", "host is stored, not used yet: the ingress and the route door serve the route "+
 		"on every host of the environment")
 	nope := e("routes.nope.service", `no service "nope"`)
 	cases := []struct {

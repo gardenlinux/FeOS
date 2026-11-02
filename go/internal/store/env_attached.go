@@ -27,7 +27,7 @@ type EnvAttached struct {
 	SandboxIncarnation uuid.UUID
 	TemplateHash       string
 	ProcessID          string // "": not started
-	Phase              string // model.Phase* but succeeded and retiring
+	Phase              string // model.Phase* but succeeded and stopping
 	ReadySince         time.Time
 	Restarts           int
 	LastExit           *int

@@ -122,7 +122,7 @@ type options struct {
 
 // testTimings are the controller's timings for the tests.
 func testTimings(t *timings) {
-	t.retireGrace = 300 * time.Millisecond
+	t.stopGrace = 300 * time.Millisecond
 	t.restartUnit = 200 * time.Millisecond
 	t.restartMax = 2 * time.Second
 	t.steadyAfter = 300 * time.Millisecond
@@ -350,7 +350,7 @@ func (h *harness) newEnv(name string) store.Environment {
 }
 
 // apply inserts a release of spec as the service's apply does: the next
-// number, older pending and rolling releases superseded, env-reconcile
+// number, older waiting and deploying releases replaced, env-reconcile
 // and env-groups woken. It returns the release's number.
 func (h *harness) apply(envID uuid.UUID, spec string) int {
 	h.t.Helper()
@@ -374,7 +374,7 @@ func (h *harness) apply(envID uuid.UUID, spec string) int {
 		if _, err := tx.UpdateEnvironment(bg, e, after); err != nil {
 			return err
 		}
-		if _, err := tx.SupersedeReleases(bg, envID, n, model.ReleasePending, model.ReleaseRolling); err != nil {
+		if _, err := tx.ReplaceReleases(bg, envID, n, model.ReleaseWaiting, model.ReleaseDeploying); err != nil {
 			return err
 		}
 		if err := tx.Notify(bg, db.ChanLeader, HintReconcile); err != nil {
@@ -436,18 +436,18 @@ func (h *harness) rows(envID uuid.UUID) []store.EnvInstanceRow {
 	return rows
 }
 
-// rowsOf are the rows of an object, retiring ones left out.
+// rowsOf are the rows of an object, stopping ones left out.
 func (h *harness) rowsOf(envID uuid.UUID, kind, name string) []store.EnvInstanceRow {
 	var out []store.EnvInstanceRow
 	for _, r := range h.rows(envID) {
-		if r.Instance.Kind == kind && r.Instance.Object == name && r.Instance.Phase != model.PhaseRetiring {
+		if r.Instance.Kind == kind && r.Instance.Object == name && r.Instance.Phase != model.PhaseStopping {
 			out = append(out, r)
 		}
 	}
 	return out
 }
 
-// waitRows waits until an object has n rows (not retiring) that all
+// waitRows waits until an object has n rows (not stopping) that all
 // satisfy ok, and returns them.
 func (h *harness) waitRows(envID uuid.UUID, kind, name string, n int, within time.Duration, what string,
 	ok func(store.EnvInstanceRow) bool) []store.EnvInstanceRow {

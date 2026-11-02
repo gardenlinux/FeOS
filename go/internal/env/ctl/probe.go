@@ -222,7 +222,7 @@ func (c *Controller) probe(ctx context.Context) error {
 		}
 		for _, r := range v.rows {
 			live[r.Sandbox.ID.String()] = true
-			if r.Instance.Phase == model.PhaseRetiring || !steady(r.Sandbox) || !c.connected(r.Sandbox.Node) {
+			if r.Instance.Phase == model.PhaseStopping || !steady(r.Sandbox) || !c.connected(r.Sandbox.Node) {
 				continue
 			}
 			if !run(func() { c.probeInstance(ctx, v, r) }) {
@@ -352,7 +352,7 @@ func (c *Controller) probeInstance(ctx context.Context, v *view, r store.EnvInst
 }
 
 // objectSteady reports whether every instance of an object (but those
-// retiring) has been ready for the crash window, with after as one of
+// stopping) has been ready for the crash window, with after as one of
 // them is now, each counted as live counts it (a ready phase of a row
 // that does not run is not ready).
 func (c *Controller) objectSteady(v *view, kind, object string, after store.EnvInstance) bool {
@@ -366,7 +366,7 @@ func (c *Controller) objectSteady(v *view, kind, object string, after store.EnvI
 			r.Instance = after
 		}
 		i := r.Instance
-		if i.Phase == model.PhaseRetiring {
+		if i.Phase == model.PhaseStopping {
 			continue
 		}
 		if !live(r, idles) || i.ReadySince.IsZero() || v.now.Sub(i.ReadySince) < c.t.crashWindow {
@@ -478,7 +478,7 @@ func (c *Controller) instanceExited(ctx context.Context, v *view, r store.EnvIns
 		if err != nil {
 			return err
 		}
-		if inst.Phase == model.PhaseRetiring || (inst.Phase == model.PhaseExited && !inst.NextRestartAt.IsZero()) {
+		if inst.Phase == model.PhaseStopping || (inst.Phase == model.PhaseExited && !inst.NextRestartAt.IsZero()) {
 			return nil
 		}
 		recorded = true

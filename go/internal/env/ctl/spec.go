@@ -292,11 +292,11 @@ func (c *Controller) load(ctx context.Context, envID uuid.UUID) (*view, error) {
 	switch {
 	case v.latest.State != model.ReleaseFailed:
 		v.target, v.targetNum, v.targetIsLatest = v.latestSpec, env.Release, true
-	case env.Realised > 0:
-		if v.target, err = c.releaseSpec(ctx, env, env.Realised); err != nil {
+	case env.Deployed > 0:
+		if v.target, err = c.releaseSpec(ctx, env, env.Deployed); err != nil {
 			return nil, err
 		}
-		v.targetNum = env.Realised
+		v.targetNum = env.Deployed
 	default:
 		v.target = &spec.Spec{}
 	}
@@ -347,13 +347,13 @@ func (v *view) rowsOf(kind, name string) []store.EnvInstanceRow {
 	return out
 }
 
-// addonRow is the current instance row of an addon: the one not retiring,
+// addonRow is the current instance row of an addon: the one not stopping,
 // preferring the newest.
 func (v *view) addonRow(name string) (store.EnvInstanceRow, bool) {
 	var out store.EnvInstanceRow
 	found := false
 	for _, r := range v.rowsOf(spec.KindAddon, name) {
-		if r.Instance.Phase == model.PhaseRetiring {
+		if r.Instance.Phase == model.PhaseStopping {
 			continue
 		}
 		if !found || r.Instance.CreatedAt.After(out.Instance.CreatedAt) {

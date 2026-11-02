@@ -44,7 +44,7 @@ func (c *Controller) stepAttached(ctx context.Context, s *stepState) {
 		if runtimeOf(svc) != spec.RuntimeAttached {
 			continue
 		}
-		if c.stepOneAttached(ctx, s, name, svc) || !rolling(v) {
+		if c.stepOneAttached(ctx, s, name, svc) || !deploying(v) {
 			continue
 		}
 		start, ok := s.start()

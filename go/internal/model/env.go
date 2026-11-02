@@ -7,20 +7,22 @@ package model
 // which the environment service, its controller and the API share, and
 // which FeCode reads in the REST answers.
 
-// The states of a release (env_releases.state).
+// The states of a release (env_releases.state; until the stored words
+// change, the store writes its earlier words, ADR 0018, "The states'
+// words").
 const (
-	// ReleasePending: applied, its rollout not begun.
-	ReleasePending = "pending"
-	// ReleaseRolling: the controller brings the environment to it.
-	ReleaseRolling = "rolling"
-	// ReleaseRealised: every object matched it and was ready.
-	ReleaseRealised = "realised"
+	// ReleaseWaiting: applied, its rollout not begun.
+	ReleaseWaiting = "waiting"
+	// ReleaseDeploying: the controller brings the environment to it.
+	ReleaseDeploying = "deploying"
+	// ReleaseDeployed: every object matched it and was ready.
+	ReleaseDeployed = "deployed"
 	// ReleaseFailed: its rollout failed (env_releases.reason); the
-	// environment keeps serving its realised release.
+	// environment keeps serving its deployed release.
 	ReleaseFailed = "failed"
-	// ReleaseSuperseded: a later release took its place before or after
-	// it was realised.
-	ReleaseSuperseded = "superseded"
+	// ReleaseReplaced: a later release took its place before or after it
+	// was deployed.
+	ReleaseReplaced = "replaced"
 )
 
 // What made a release (env_releases.origin).
@@ -33,7 +35,7 @@ const (
 
 // The phases of an instance (env_instances.phase) and of an attached
 // service (env_attached.phase, which has neither succeeded nor
-// retiring).
+// stopping).
 const (
 	PhaseStarting  = "starting"
 	PhaseReady     = "ready"
@@ -41,7 +43,8 @@ const (
 	PhaseExited    = "exited"
 	PhaseSucceeded = "succeeded"
 	PhaseFailed    = "failed"
-	PhaseRetiring  = "retiring"
+	// PhaseStopping: it no longer serves and goes after its grace.
+	PhaseStopping = "stopping"
 )
 
 // The phases of a run of an environment's job (env_job_runs.phase).

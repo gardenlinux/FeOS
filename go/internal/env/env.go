@@ -171,7 +171,7 @@ func (s *Service) SecretsEnabled() bool { return s.d.Sealer != nil }
 // ResolveSecret is the value of version version of the secret name of
 // environment envID, a tenant's or a system secret, unsealed with its AAD
 // (envdeps.SecretAAD). A deleted version still resolves (a release pins
-// it until a later one is realised). The controller resolves it, which
+// it until a later one is deployed). The controller resolves it, which
 // also generates the addons' credentials.
 func (s *Service) ResolveSecret(ctx context.Context, envID uuid.UUID, name string, version int) (string, error) {
 	return s.ctl.ResolveSecret(ctx, envID, name, version)

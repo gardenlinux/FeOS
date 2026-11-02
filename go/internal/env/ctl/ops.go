@@ -77,7 +77,7 @@ func (c *Controller) LogTail(ctx context.Context, envID uuid.UUID, kind, name st
 		if r.Instance.Replica != replica {
 			continue
 		}
-		if row == nil || (row.Instance.Phase == model.PhaseRetiring && r.Instance.Phase != model.PhaseRetiring) ||
+		if row == nil || (row.Instance.Phase == model.PhaseStopping && r.Instance.Phase != model.PhaseStopping) ||
 			r.Instance.CreatedAt.After(row.Instance.CreatedAt) {
 			r := r
 			row = &r
@@ -193,7 +193,7 @@ func (c *Controller) RestartService(ctx context.Context, envID uuid.UUID, name s
 	}
 	var rows []store.EnvInstanceRow
 	for _, r := range v.rowsOf(spec.KindService, name) {
-		if r.Instance.Phase != model.PhaseRetiring {
+		if r.Instance.Phase != model.PhaseStopping {
 			rows = append(rows, r)
 		}
 	}

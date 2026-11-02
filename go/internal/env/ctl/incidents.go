@@ -15,7 +15,7 @@ import (
 
 // evidence is what an incident keeps of what the controller saw (§4.9):
 // the container's last exits, the end of its log, a failed rollout's diff
-// against the realised release, why an instance could not be placed, what
+// against the deployed release, why an instance could not be placed, what
 // a release past its deadline waited for.
 type evidence struct {
 	Exits     []store.EnvExit  `json:"exits,omitempty"`

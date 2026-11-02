@@ -85,7 +85,7 @@ func TestRoutedPorts(t *testing.T) {
 	if got := RoutedPorts("web", &Spec{Services: map[string]Service{"web": image(http(80))}}, routing); len(got) != 0 {
 		t.Fatalf("attached: %v", got)
 	}
-	// The union of the realised and the desired release, sorted and
+	// The union of the deployed and the desired release, sorted and
 	// unique.
 	desired := &Spec{
 		Services: map[string]Service{"api": image(http(8080), Port{Name: "metrics", Port: 7000})},

@@ -70,7 +70,7 @@ func TestClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(describe(err))
 	}
-	if st.ID != id.String() || st.Release != 1 || st.Rollout.State != model.ReleasePending || st.Labels["fecode.class"] != "demo" {
+	if st.ID != id.String() || st.Release != 1 || st.Rollout.State != model.ReleaseWaiting || st.Labels["fecode.class"] != "demo" {
 		t.Fatalf("clone status %+v", st)
 	}
 	r, err := h.st.GetRelease(ctx, id, 1)
@@ -173,8 +173,11 @@ func TestStatus(t *testing.T) {
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", previewSpec(sb), 0)
+	// Release states and phases are stored in their earlier words for now
+	// (store/env_words.go): 'realised' is deployed, 'rolling' deploying,
+	// 'retiring' stopping.
 	h.exec("UPDATE env_releases SET state = 'realised', started_at = now(), finished_at = now() WHERE env_id = $1", e.ID)
-	h.exec("UPDATE environments SET realised = 1 WHERE id = $1", e.ID)
+	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 
 	api0 := h.instance(e.ID, spec.KindService, "api", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::11")
 	h.instance(e.ID, spec.KindService, "api", 1, 1, model.PhaseExited, model.StateRunning, "n2", "fd6b::12")
@@ -216,7 +219,7 @@ func TestStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Release != 1 || got.Realised != 1 || got.Rollout.State != model.ReleaseRealised || got.Rollout.StartedAt == "" ||
+	if got.Release != 1 || got.Deployed != 1 || got.Rollout.State != model.ReleaseDeployed || got.Rollout.StartedAt == "" ||
 		got.OpenIncidents != 1 || got.Labels["k"] != "v" {
 		t.Fatalf("status %+v", got)
 	}
@@ -286,7 +289,7 @@ func TestStatus(t *testing.T) {
 		t.Fatalf("open %+v", list)
 	}
 
-	// A failed latest release: the objects are the realised release's,
+	// A failed latest release: the objects are the deployed release's,
 	// the rollout the latest's.
 	changed := strings.Replace(previewSpec(sb), `"replicas": 2`, `"replicas": 4`, 1)
 	h.apply("stage", changed, 1)
@@ -301,7 +304,7 @@ func TestStatus(t *testing.T) {
 		t.Fatalf("rolling latest %+v", got.Objects[0])
 	}
 	list2, _ := h.svc.ListEnvs(ctx, tenantA, nil)
-	if list2.Environments[0].State != model.ReleaseRolling || list2.Environments[0].OpenIncidents != 0 {
+	if list2.Environments[0].State != model.ReleaseDeploying || list2.Environments[0].OpenIncidents != 0 {
 		t.Fatalf("list %+v", list2)
 	}
 }
@@ -427,7 +430,7 @@ func TestRouteDoor(t *testing.T) {
 
 	a0 := h.instance(e.ID, spec.KindService, "api", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::11")
 	a1 := h.instance(e.ID, spec.KindService, "api", 1, 1, model.PhaseReady, model.StateRunning, "n2", "fd6b::12")
-	h.instance(e.ID, spec.KindService, "api", 2, 1, model.PhaseRetiring, model.StateRunning, "n2", "fd6b::13")
+	h.instance(e.ID, spec.KindService, "api", 2, 1, model.PhaseStopping, model.StateRunning, "n2", "fd6b::13")
 	h.instance(e.ID, spec.KindService, "api", 3, 1, model.PhaseStarting, model.StateRunning, "n2", "fd6b::14")
 	web := h.instance(e.ID, spec.KindService, "web", 0, 1, model.PhaseReady, model.StatePaused, "n1", "")
 
@@ -545,13 +548,13 @@ func TestRouteDoor(t *testing.T) {
 	if f := h.ports.last(t); f.sandbox != sb || f.port != 5173 || f.path != "/dev/src/main.ts" {
 		t.Fatalf("attached %+v", f)
 	}
-	// The realised release's routes serve while a later one rolls.
-	h.exec("UPDATE environments SET realised = 1 WHERE id = $1", e.ID)
+	// The deployed release's routes serve while a later one rolls.
+	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 	if w := routeRequest(mux, "GET", "/api/v1/environments/stage/http/dev/x", tok.Token); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	if f := h.ports.last(t); f.sandbox != web {
-		t.Fatalf("realised release's routes: %+v", f)
+		t.Fatalf("deployed release's routes: %+v", f)
 	}
 
 	// .. segments, also escaped (the mux redirects plain ones itself).
@@ -783,7 +786,7 @@ func TestRouteDoorRollingPort(t *testing.T) {
 			port, name, port, name)
 	}
 	h.apply("stage", specOf("http", 8080), 0)
-	h.exec("UPDATE environments SET realised = 1 WHERE id = $1", e.ID)
+	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 	h.apply("stage", specOf("http", 9090), 1)
 	port := func() int {
 		t.Helper()

@@ -55,7 +55,7 @@ func IngressRoutes(sp *Spec) []RouteView {
 }
 
 // RoutedPorts returns the port numbers that the routes of the routing
-// specs (an environment's realised and desired release) send the ingress
+// specs (an environment's deployed and desired release) send the ingress
 // to on a pod of the image service named service: for every route that
 // targets service where it is an image service in that routing spec, the
 // number of the route's port in own, the pod's own release, else in the

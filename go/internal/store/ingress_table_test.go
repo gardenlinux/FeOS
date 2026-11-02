@@ -37,10 +37,10 @@ func routingEnvs(rows []store.IngressRoutingRow) []uuid.UUID {
 }
 
 // IngressRouting returns public environments with their service instances
-// that are not retiring, environments without one as a single row, and
+// that are not stopping, environments without one as a single row, and
 // leaves out what the ingress does not serve: environments not public,
 // deleting, without a release, of a deleting tenant or without a host
-// label; jobs and retiring instances.
+// label; jobs and stopping instances.
 func TestIngressRouting(t *testing.T) {
 	s, _ := newStore(t)
 	mkTenant(t, s, "acme")
@@ -65,12 +65,12 @@ func TestIngressRouting(t *testing.T) {
 	if _, err := s.UpdateEnvInstance(bg, inst, after); err != nil {
 		t.Fatal(err)
 	}
-	// A retiring service instance and a job are left out.
-	retiring := mkService(t, s, web, "n1")
-	inst, err = s.LockEnvInstance(bg, retiring.ID, store.NoLock)
+	// A stopping service instance and a job are left out.
+	stopping := mkService(t, s, web, "n1")
+	inst, err = s.LockEnvInstance(bg, stopping.ID, store.NoLock)
 	must(t, err)
 	after = inst
-	after.Phase = model.PhaseRetiring
+	after.Phase = model.PhaseStopping
 	if _, err := s.UpdateEnvInstance(bg, inst, after); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestIngressRouting(t *testing.T) {
 				r.IdleAfterS == nil || *r.IdleAfterS != 60 {
 				t.Fatalf("instance row %+v", r)
 			}
-			if r.Owner != "acme" || r.Name != "web" || r.HostLabel != "web-acme" || r.Release != 1 || r.Realised != 0 ||
+			if r.Owner != "acme" || r.Name != "web" || r.HostLabel != "web-acme" || r.Release != 1 || r.Deployed != 0 ||
 				!r.CreatedAt.Equal(web.CreatedAt) {
 				t.Fatalf("environment of the row %+v", r)
 			}

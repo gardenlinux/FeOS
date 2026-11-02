@@ -64,7 +64,7 @@ func finishRun(t *testing.T, h *harness, n *testnode.Node, envID uuid.UUID, code
 // A release job runs before the services, once per template: its exit 0
 // is a succeeded run with its log kept; a failing one is retried and its
 // failed last attempt fails the release (job_failed), which leaves the
-// environment at its realised release until a new one succeeds.
+// environment at its deployed release until a new one succeeds.
 func TestReleaseJobs(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
@@ -75,7 +75,7 @@ func TestReleaseJobs(t *testing.T) {
 		return len(h.rowsOf(env.ID, spec.KindService, "api")) > 0
 	})
 	first := finishRun(t, h, n1, env.ID, 0, "applying 0001", "done")
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	runs, err := h.st.ListJobRuns(bg, env.ID, "migrate", 10)
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs %+v %v", runs, err)
@@ -93,7 +93,7 @@ func TestReleaseJobs(t *testing.T) {
 	}
 	// A release that changes nothing of the job does not run it again.
 	r2 := h.apply(env.ID, strings.Replace(jobSpec("v1", 1), `"serve"`, `"serve","--v2"`, 1))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 	if runs, _ := h.st.ListJobRuns(bg, env.ID, "migrate", 10); len(runs) != 1 {
 		t.Fatalf("the unchanged job ran again: %+v", runs)
 	}
@@ -117,22 +117,22 @@ func TestReleaseJobs(t *testing.T) {
 		*ev.Exits[0].Code != 3 {
 		t.Fatalf("incident %+v %+v %v", inc, ev, err)
 	}
-	// The failed release is not retried; the realised one keeps serving.
+	// The failed release is not retried; the deployed one keeps serving.
 	never(t, 2*time.Second, "the failed job ran again", func() bool {
 		runs, _ := h.st.ListJobRuns(bg, env.ID, "migrate", 10)
 		return len(runs) != 3
 	})
-	if e, _ := h.st.GetEnvironment(bg, env.ID); e.Realised != r2 {
-		t.Errorf("realised %d", e.Realised)
+	if e, _ := h.st.GetEnvironment(bg, env.ID); e.Deployed != r2 {
+		t.Errorf("deployed %d", e.Deployed)
 	}
 	if rows := h.rowsOf(env.ID, spec.KindService, "api"); len(rows) != 1 || rows[0].Instance.Release != r2 {
 		t.Errorf("the service after the failure %+v", rows)
 	}
 
-	// A new release that succeeds is realised and closes the incident.
+	// A new release that succeeds is deployed and closes the incident.
 	r4 := h.apply(env.ID, jobSpec("v3", 0))
 	finishRun(t, h, n1, env.ID, 0)
-	h.waitRelease(env.ID, r4, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r4, model.ReleaseDeployed, 30*time.Second)
 	if open := h.incidents(env.ID, true); len(open) != 0 {
 		t.Errorf("open incidents %+v", open)
 	}
@@ -166,12 +166,12 @@ func TestJobTimeoutAndManual(t *testing.T) {
 	if err := h.c.RunJob(bg, env.ID, "nope"); err != ErrNoObject {
 		t.Errorf("run an unknown job: %v", err)
 	}
-	// The target is the realised release: none, so no job to run.
+	// The target is the deployed release: none, so no job to run.
 	if err := h.c.RunJob(bg, env.ID, "backfill"); err != ErrNoObject {
 		t.Errorf("run a job of no target: %v", err)
 	}
 	r3 := h.apply(env.ID, fmt.Sprintf(`{"jobs":{"backfill":{"image":%q,"on":"manual"}}}`, testImage))
-	h.waitRelease(env.ID, r3, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 30*time.Second)
 	if err := h.c.RunJob(bg, env.ID, "backfill"); err != nil {
 		t.Fatal(err)
 	}
@@ -219,12 +219,12 @@ func runningRuns(h *harness, envID uuid.UUID) int {
 }
 
 // A job runs once at a time across releases (§13.7): a release that
-// supersedes a rolling one while its job runs waits for that run, never
+// replaces a deploying one while its job runs waits for that run, never
 // runs a second one beside it, never cancels it. The old run's success
 // with the same template is the new release's; a changed job runs once
 // the old run ended; a manual run that runs when a release rolls is
 // waited for the same way.
-func TestReleaseJobSupersededWhileRunning(t *testing.T) {
+func TestReleaseJobReplacedWhileRunning(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
@@ -232,19 +232,19 @@ func TestReleaseJobSupersededWhileRunning(t *testing.T) {
 	first := runningJob(t, h, env.ID)
 	// r2 changes only the service: migrate keeps its template.
 	r2 := h.apply(env.ID, strings.Replace(jobSpec("v1", 0), `"serve"`, `"serve","--v2"`, 1))
-	never(t, 3*time.Second, "a second run of migrate beside the superseded release's", func() bool {
+	never(t, 3*time.Second, "a second run of migrate beside the replaced release's", func() bool {
 		return runningRuns(h, env.ID) > 1
 	})
-	if rel := h.release(env.ID, r2); rel.State != model.ReleaseRolling {
+	if rel := h.release(env.ID, r2); rel.State != model.ReleaseDeploying {
 		t.Fatalf("release %d is %s while it waits for the job", r2, rel.State)
 	}
 	if err := n1.Script().ExitContainer(first, "main", 0); err != nil {
 		t.Fatal(err)
 	}
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 	if runs, _ := h.st.ListJobRuns(bg, env.ID, "migrate", 10); len(runs) != 1 || runs[0].Release != r1 ||
 		runs[0].Phase != model.RunSucceeded {
-		t.Fatalf("the superseded release's success is not the new one's: %+v", runs)
+		t.Fatalf("the replaced release's success is not the new one's: %+v", runs)
 	}
 
 	// A changed job waits for the old template's run, whose failure does
@@ -263,9 +263,9 @@ func TestReleaseJobSupersededWhileRunning(t *testing.T) {
 		return err == nil && r.Release == r4 && r.Attempt == 1
 	})
 	finishRun(t, h, n1, env.ID, 0)
-	h.waitRelease(env.ID, r4, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r4, model.ReleaseDeployed, 30*time.Second)
 	if rel := h.release(env.ID, r3); rel.State == model.ReleaseFailed {
-		t.Errorf("the superseded release failed with its job: %+v", rel)
+		t.Errorf("the replaced release failed with its job: %+v", rel)
 	}
 
 	// A manual run that runs when a release rolls is waited for too.
@@ -285,7 +285,7 @@ func TestReleaseJobSupersededWhileRunning(t *testing.T) {
 		return err == nil && r.Release == r5
 	})
 	finishRun(t, h, n1, env.ID, 0)
-	h.waitRelease(env.ID, r5, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r5, model.ReleaseDeployed, 30*time.Second)
 }
 
 // A release job that waited for another release's run keeps its time:
@@ -303,10 +303,10 @@ func TestReleaseJobWaitKeepsItsTime(t *testing.T) {
 	// The same template: its deadline is the job's 15 s.
 	r2 := h.apply(env.ID, jobOnly("v1"))
 	var started time.Time
-	eventually(t, 10*time.Second, "release 2 rolling", func() bool {
+	eventually(t, 10*time.Second, "release 2 deploying", func() bool {
 		rel := h.release(env.ID, r2)
 		started = rel.StartedAt
-		return rel.State == model.ReleaseRolling && !started.IsZero()
+		return rel.State == model.ReleaseDeploying && !started.IsZero()
 	})
 	time.Sleep(time.Until(started.Add(8 * time.Second)))
 	// The old run fails 8 s into release 2: its own run starts then, and
@@ -325,17 +325,17 @@ func TestReleaseJobWaitKeepsItsTime(t *testing.T) {
 	if err := n1.Script().ExitContainer(own, "main", 0); err != nil {
 		t.Fatal(err)
 	}
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 }
 
-// rollingSince waits for release n to roll and returns its start.
-func rollingSince(t *testing.T, h *harness, envID uuid.UUID, n int) time.Time {
+// deployingSince waits for release n to deploy and returns its start.
+func deployingSince(t *testing.T, h *harness, envID uuid.UUID, n int) time.Time {
 	t.Helper()
 	var started time.Time
-	eventually(t, 10*time.Second, fmt.Sprintf("release %d rolling", n), func() bool {
+	eventually(t, 10*time.Second, fmt.Sprintf("release %d deploying", n), func() bool {
 		rel := h.release(envID, n)
 		started = rel.StartedAt
-		return rel.State == model.ReleaseRolling && !started.IsZero()
+		return rel.State == model.ReleaseDeploying && !started.IsZero()
 	})
 	return started
 }
@@ -371,7 +371,7 @@ func TestReleaseJobWaitShiftsTheRolloutBudget(t *testing.T) {
 	// A changed job: release 1's run ends 9 s into release 2, whose own
 	// run then succeeds at once, near web's 10 s from release 2's start.
 	r2 := h.apply(env.ID, webAndMigrate("v2", job, "2", "10s", ""))
-	started := rollingSince(t, h, env.ID, r2)
+	started := deployingSince(t, h, env.ID, r2)
 	time.Sleep(time.Until(started.Add(9 * time.Second)))
 	if err := n1.Script().ExitContainer(first, "main", 1); err != nil {
 		t.Fatal(err)
@@ -382,7 +382,7 @@ func TestReleaseJobWaitShiftsTheRolloutBudget(t *testing.T) {
 	})
 	finishRun(t, h, n1, env.ID, 0)
 	never(t, 3*time.Second, "release 2 failed right after its own run", failed(r2))
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 
 	// The same template: release 3's run succeeds 11 s into release 4,
 	// past web's 10 s from release 4's start, and serves it.
@@ -393,13 +393,13 @@ func TestReleaseJobWaitShiftsTheRolloutBudget(t *testing.T) {
 	})
 	third := runningJob(t, h, env.ID)
 	r4 := h.apply(env.ID, webAndMigrate("v3", job, "4", "10s", ""))
-	started = rollingSince(t, h, env.ID, r4)
+	started = deployingSince(t, h, env.ID, r4)
 	time.Sleep(time.Until(started.Add(11 * time.Second)))
 	if err := n1.Script().ExitContainer(third, "main", 0); err != nil {
 		t.Fatal(err)
 	}
 	never(t, 3*time.Second, "release 4 failed once release 3's run served it", failed(r4))
-	h.waitRelease(env.ID, r4, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r4, model.ReleaseDeployed, 30*time.Second)
 	if r, err := h.st.LatestJobRun(bg, env.ID, "migrate"); err != nil || r.Release != r3 {
 		t.Fatalf("release 4 ran its job again: %+v %v", r, err)
 	}
@@ -425,7 +425,7 @@ func TestReleaseJobWaitShiftsTheDeadline(t *testing.T) {
 	h.apply(env.ID, webAndMigrate("v1", "15s", "1", "15s", check))
 	first := runningJob(t, h, env.ID)
 	r2 := h.apply(env.ID, webAndMigrate("v2", "15s", "2", "15s", check))
-	started := rollingSince(t, h, env.ID, r2)
+	started := deployingSince(t, h, env.ID, r2)
 	time.Sleep(time.Until(started.Add(9 * time.Second)))
 	if err := n1.Script().ExitContainer(first, "main", 1); err != nil {
 		t.Fatal(err)
@@ -441,7 +441,7 @@ func TestReleaseJobWaitShiftsTheDeadline(t *testing.T) {
 		return h.release(env.ID, r2).State == model.ReleaseFailed
 	})
 	code.Store(0)
-	h.waitRelease(env.ID, r2, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
 }
 
 // The leader's insert of a release job's run is refused while a run of
@@ -452,7 +452,7 @@ func TestStartRunRefusedWhileARunRuns(t *testing.T) {
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"jobs":{"backfill":{"image":%q,"on":"manual"}}}`, testImage))
-	h.waitRelease(env.ID, r1, model.ReleaseRealised, 30*time.Second)
+	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
 	if err := h.c.RunJob(bg, env.ID, "backfill"); err != nil {
 		t.Fatal(err)
 	}

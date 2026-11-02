@@ -64,8 +64,8 @@ func specsOf(m map[int]*spec.Spec) SpecFunc {
 
 var envID = uuid.MustParse("0b1f6b54-3c6e-4d2f-9d7b-5d1c0e7c9a11")
 
-func baseEnv(release, realised int, instances ...Instance) EnvRows {
-	return EnvRows{ID: envID, Tenant: "acme", Name: "web", HostLabel: "web-acme", Release: release, Realised: realised,
+func baseEnv(release, deployed int, instances ...Instance) EnvRows {
+	return EnvRows{ID: envID, Tenant: "acme", Name: "web", HostLabel: "web-acme", Release: release, Deployed: deployed,
 		CreatedAt: time.Unix(1700000000, 0), Instances: instances}
 }
 
@@ -97,7 +97,7 @@ func service(t *testing.T, e wire.Env, name string) wire.Service {
 	return wire.Service{}
 }
 
-// The routing release is the realised one, else the latest; a route to
+// The routing release is the deployed one, else the latest; a route to
 // an attached service is the door's, and only image services that a
 // route sends to are services.
 func TestBuildEnvRoutes(t *testing.T) {
@@ -109,7 +109,7 @@ func TestBuildEnvRoutes(t *testing.T) {
 		{Name: "root", Path: "/", Service: "web", Port: "http"},
 	}
 	if got.Release != 1 || !reflect.DeepEqual(got.Routes, want) {
-		t.Fatalf("realised: release %d, routes %+v", got.Release, got.Routes)
+		t.Fatalf("deployed: release %d, routes %+v", got.Release, got.Routes)
 	}
 	if len(got.Services) != 1 || got.Services[0].Name != "web" || got.Services[0].Idle {
 		t.Fatalf("services %+v", got.Services)
@@ -383,17 +383,17 @@ func TestGroup(t *testing.T) {
 	idle := 0
 	at := time.Unix(1700000000, 0)
 	rows := []store.IngressRoutingRow{
-		{EnvID: a, Owner: "acme", Name: "a", HostLabel: "a-acme", Release: 2, Realised: 1, CreatedAt: at,
+		{EnvID: a, Owner: "acme", Name: "a", HostLabel: "a-acme", Release: 2, Deployed: 1, CreatedAt: at,
 			HasInstance: true, SandboxID: "a0000000001", Object: "web", Replica: 0, InstanceRelease: 1, Phase: model.PhaseReady,
 			IngressPorts: []int{80}, Address: "fd00::1", ClientState: model.StateRunning, Node: "n1", NodeGroupVersion: 5},
-		{EnvID: a, Owner: "acme", Name: "a", HostLabel: "a-acme", Release: 2, Realised: 1, CreatedAt: at,
+		{EnvID: a, Owner: "acme", Name: "a", HostLabel: "a-acme", Release: 2, Deployed: 1, CreatedAt: at,
 			HasInstance: true, SandboxID: "a0000000002", Object: "web", Replica: 1, InstanceRelease: 2, Phase: model.PhaseStarting,
 			ClientState: model.StateCreating, Op: "create", IdleAfterS: &idle},
 		{EnvID: b, Owner: "acme", Name: "b", HostLabel: "b-acme", Release: 1, CreatedAt: at},
 	}
 	got := Group(rows)
 	want := []EnvRows{
-		{ID: a, Tenant: "acme", Name: "a", HostLabel: "a-acme", Release: 2, Realised: 1, CreatedAt: at, Instances: []Instance{
+		{ID: a, Tenant: "acme", Name: "a", HostLabel: "a-acme", Release: 2, Deployed: 1, CreatedAt: at, Instances: []Instance{
 			{ID: "a0000000001", Service: "web", Release: 1, Phase: model.PhaseReady, ClientState: model.StateRunning,
 				Address: "fd00::1", Node: "n1", IngressPorts: []int{80}, GroupVersion: 5, Idle: true},
 			{ID: "a0000000002", Service: "web", Replica: 1, Release: 2, Phase: model.PhaseStarting,

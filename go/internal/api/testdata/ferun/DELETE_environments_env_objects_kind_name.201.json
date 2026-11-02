@@ -13,7 +13,7 @@
   "request": null,
   "response": {
     "number": 8,
-    "state": "pending",
+    "state": "waiting",
     "origin": "object",
     "originRef": "route/api-approval",
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",

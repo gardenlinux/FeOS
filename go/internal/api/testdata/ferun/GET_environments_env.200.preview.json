@@ -13,13 +13,13 @@
       "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
     },
     "release": 3,
-    "realised": 3,
+    "deployed": 3,
     "deleting": false,
     "public": false,
     "hosts": [],
     "rollout": {
       "release": 3,
-      "state": "realised",
+      "state": "deployed",
       "startedAt": "2026-10-18T13:30:02Z",
       "reason": ""
     },

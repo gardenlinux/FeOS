@@ -49,7 +49,7 @@ var loopback = []string{"127.0.0.1", "::1"}
 // or, when none is, those of the best that are there (another replica
 // whose state is known, else one whose node is out of touch, its address
 // maybe stale), so that a name never goes during a roll or a restart;
-// never a retiring replica's. Addresses are IPv6, as the pods reach each
+// never a stopping replica's. Addresses are IPv6, as the pods reach each
 // other.
 func nameEntries(v *view) map[string][]string {
 	type best struct {
@@ -59,7 +59,7 @@ func nameEntries(v *view) map[string][]string {
 	found := map[string]*best{}
 	for _, r := range v.rows {
 		inst := r.Instance
-		if inst.Phase == model.PhaseRetiring {
+		if inst.Phase == model.PhaseStopping {
 			continue
 		}
 		ip, err := netip.ParseAddr(r.Sandbox.Address)
@@ -513,7 +513,7 @@ func (c *Controller) stepNames(ctx context.Context, s *stepState) {
 	if len(unserved) > 0 {
 		for _, r := range v.rows {
 			inst := r.Instance
-			if inst.Phase == model.PhaseRetiring || !unserved[r.Sandbox.Node] || r.Sandbox.PodTemplate == nil ||
+			if inst.Phase == model.PhaseStopping || !unserved[r.Sandbox.Node] || r.Sandbox.PodTemplate == nil ||
 				len(r.Sandbox.PodTemplate.NameTables) == 0 {
 				continue
 			}

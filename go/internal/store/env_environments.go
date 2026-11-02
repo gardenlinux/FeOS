@@ -143,9 +143,9 @@ type Environment struct {
 	Owner  string // the tenant
 	Name   string // a DNS label, never a UUID
 	Labels map[string]string
-	// Release is the latest desired release, Realised the latest realised
+	// Release is the latest desired release, Deployed the latest deployed
 	// one; 0: none.
-	Release, Realised int
+	Release, Deployed int
 	Deleting          bool
 	// Gen is the version of the env security group (env-<id>):
 	// BumpEnvironmentGen when its rules or members change.
@@ -164,7 +164,7 @@ type Environment struct {
 // environmentColumns are the columns of an Environment, each prefixed with
 // p and a dot when p is not empty.
 func environmentColumns(p string) string {
-	cols := prefixed(p, []string{"id", "owner", "name", "labels", "release", "realised", "deleting", "gen",
+	cols := prefixed(p, []string{"id", "owner", "name", "labels", "release", "deployed", "deleting", "gen",
 		"created_at", "updated_at", "public", "ingress_group"})
 	if p != "" {
 		p += "."
@@ -177,7 +177,7 @@ var environmentCols = environmentColumns("")
 // environmentTargets are the scan targets of environmentColumns for e, and
 // the function that finishes the scan.
 func environmentTargets(e *Environment) ([]any, func()) {
-	return []any{&e.ID, &e.Owner, &e.Name, &e.Labels, &e.Release, &e.Realised, &e.Deleting, &e.Gen,
+	return []any{&e.ID, &e.Owner, &e.Name, &e.Labels, &e.Release, &e.Deployed, &e.Deleting, &e.Gen,
 			&e.CreatedAt, &e.UpdatedAt, &e.Public, &e.IngressGroup, &e.HostLabel}, func() {
 			e.Labels = stringMap(e.Labels)
 		}
@@ -271,12 +271,12 @@ func (s *Store) DeletingEnvironments(ctx context.Context, limit int) ([]Environm
 
 // UpdateEnvironment writes the columns in which after differs from before,
 // the row as the caller read it (normally locked FOR UPDATE in the same
-// transaction): labels, release, realised, deleting and gen; updated_at =
+// transaction): labels, release, deployed, deleting and gen; updated_at =
 // now(). id, owner, name, created_at, public, ingress_group and host_label
 // are never written (SetEnvironmentPublic writes the last three). A row
 // whose gen is no longer before's is not written (ErrRowChanged); when
 // nothing differs, before is returned unwritten. A write of release,
-// realised or deleting sends ferun_ingress "env:<id>".
+// deployed or deleting sends ferun_ingress "env:<id>".
 func (s *Store) UpdateEnvironment(ctx context.Context, before, after Environment) (Environment, error) {
 	what := "environment " + before.ID.String()
 	if err := fixed(what, map[string]bool{"id": before.ID != after.ID, "owner": before.Owner != after.Owner,
@@ -290,7 +290,7 @@ func (s *Store) UpdateEnvironment(ctx context.Context, before, after Environment
 		return Environment{}, err
 	}
 	u.set("release", before.Release != after.Release, after.Release)
-	u.set("realised", before.Realised != after.Realised, after.Realised)
+	u.set("deployed", before.Deployed != after.Deployed, after.Deployed)
 	u.set("deleting", before.Deleting != after.Deleting, after.Deleting)
 	u.set("gen", before.Gen != after.Gen, after.Gen)
 	if u.empty() {
@@ -304,7 +304,7 @@ func (s *Store) UpdateEnvironment(ctx context.Context, before, after Environment
 	if err != nil {
 		return Environment{}, fmt.Errorf("update %s: %w", what, err)
 	}
-	if before.Release != after.Release || before.Realised != after.Realised || before.Deleting != after.Deleting {
+	if before.Release != after.Release || before.Deployed != after.Deployed || before.Deleting != after.Deleting {
 		if err := s.notifyIngressEnvs(ctx, []uuid.UUID{e.ID}); err != nil {
 			return Environment{}, fmt.Errorf("update %s: %w", what, err)
 		}

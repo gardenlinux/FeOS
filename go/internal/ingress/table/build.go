@@ -24,15 +24,15 @@ import (
 )
 
 // EnvRows is one public environment as the table is built from it: the
-// environment and its service instances that are not retiring.
+// environment and its service instances that are not stopping.
 type EnvRows struct {
 	ID        uuid.UUID
 	Tenant    string
 	Name      string
 	HostLabel string
-	// Release is the latest desired release, Realised the latest
-	// realised one (0: none).
-	Release, Realised int
+	// Release is the latest desired release, Deployed the latest
+	// deployed one (0: none).
+	Release, Deployed int
 	CreatedAt         time.Time
 	Instances         []Instance
 	// Domains are the environment's domains the ingress serves, with
@@ -78,7 +78,7 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 	for _, r := range rows {
 		if len(out) == 0 || out[len(out)-1].ID != r.EnvID {
 			out = append(out, EnvRows{ID: r.EnvID, Tenant: r.Owner, Name: r.Name, HostLabel: r.HostLabel,
-				Release: r.Release, Realised: r.Realised, CreatedAt: r.CreatedAt})
+				Release: r.Release, Deployed: r.Deployed, CreatedAt: r.CreatedAt})
 		}
 		if !r.HasInstance {
 			continue
@@ -93,11 +93,11 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 }
 
 // RoutingRelease is the release whose routes the ingress serves: the
-// realised one, else (before a first rollout ends) the latest desired
+// deployed one, else (before a first rollout ends) the latest desired
 // one.
-func RoutingRelease(release, realised int) int {
-	if realised > 0 {
-		return realised
+func RoutingRelease(release, deployed int) int {
+	if deployed > 0 {
+		return deployed
 	}
 	return release
 }
@@ -190,7 +190,7 @@ func Asleep(phase, clientState, op string) bool {
 // MaxEnvBytes coded: either way the environment cannot be routed. Other
 // errors are specs' read errors.
 func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, error) {
-	number := RoutingRelease(e.Release, e.Realised)
+	number := RoutingRelease(e.Release, e.Deployed)
 	sp, err := specs(number)
 	if err != nil {
 		return wire.Env{}, nil, fmt.Errorf("environment %s, routing release %d: %w", e.ID, number, err)

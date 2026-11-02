@@ -808,7 +808,7 @@ func (v *validator) route(name string, r Route) {
 		}
 	}
 	if r.Host != "" {
-		v.add(SeverityInfo, p+".host", "", "host is stored, not realised yet: the ingress and the route door "+
+		v.add(SeverityInfo, p+".host", "", "host is stored, not used yet: the ingress and the route door "+
 			"serve the route on every host of the environment")
 	}
 }

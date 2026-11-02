@@ -21,12 +21,12 @@ const obj = (st, kind, name) => st.objects.find((o) => o.kind === kind && o.name
 
 describe('tones', () => {
   it('of release states', () => {
-    expect(releaseTone('realised')).toBe('running');
-    expect(releaseTone('rolling')).toBe('paused');
-    expect(releaseTone('pending')).toBe('paused');
+    expect(releaseTone('deployed')).toBe('running');
+    expect(releaseTone('deploying')).toBe('paused');
+    expect(releaseTone('waiting')).toBe('paused');
     expect(releaseTone('deleting')).toBe('paused');
     expect(releaseTone('failed')).toBe('failed');
-    expect(releaseTone('superseded')).toBe('absent');
+    expect(releaseTone('replaced')).toBe('absent');
     expect(releaseTone('none')).toBe('absent');
   });
 
@@ -38,7 +38,7 @@ describe('tones', () => {
     expect(phaseTone('running')).toBe('paused');
     expect(phaseTone('exited')).toBe('failed');
     expect(phaseTone('failed')).toBe('failed');
-    expect(phaseTone('retiring')).toBe('absent');
+    expect(phaseTone('stopping')).toBe('absent');
   });
 
   it('of objects, per kind', () => {
@@ -138,17 +138,17 @@ describe('the list', () => {
   });
 
   it('counts the environments by state and their open incidents', () => {
-    expect(envCounts(LIST)).toEqual({ realised: 2, rolling: 1, failed: 0, incidents: 1 });
+    expect(envCounts(LIST)).toEqual({ deployed: 2, deploying: 1, failed: 0, incidents: 1 });
     expect(envCounts([{ state: 'failed', openIncidents: 2 }, { state: 'none', openIncidents: 0 }]))
-      .toEqual({ realised: 0, rolling: 0, failed: 1, incidents: 2 });
-    expect(envCounts(null)).toEqual({ realised: 0, rolling: 0, failed: 0, incidents: 0 });
+      .toEqual({ deployed: 0, deploying: 0, failed: 1, incidents: 2 });
+    expect(envCounts(null)).toEqual({ deployed: 0, deploying: 0, failed: 0, incidents: 0 });
   });
 });
 
 describe('the rollout', () => {
   it("names an environment's state as the list does", () => {
-    expect(statusState(STAGE)).toBe('rolling');
-    expect(statusState(PREVIEW)).toBe('realised');
+    expect(statusState(STAGE)).toBe('deploying');
+    expect(statusState(PREVIEW)).toBe('deployed');
     expect(statusState(response('POST_environments.201'))).toBe('none');
     expect(statusState({ ...STAGE, deleting: true })).toBe('deleting');
     expect(statusState(null)).toBe('');
@@ -157,8 +157,8 @@ describe('the rollout', () => {
   it('says what serves meanwhile', () => {
     expect(rolloutNote(STAGE)).toBe('release 6 serves meanwhile');
     expect(rolloutNote({ ...STAGE, rollout: { ...STAGE.rollout, state: 'failed' } })).toBe('release 6 keeps serving');
-    expect(rolloutNote({ ...STAGE, realised: 0, rollout: { ...STAGE.rollout, state: 'failed' } }))
-      .toBe('no release was realised before it');
+    expect(rolloutNote({ ...STAGE, deployed: 0, rollout: { ...STAGE.rollout, state: 'failed' } }))
+      .toBe('no release was deployed before it');
     expect(rolloutNote(PREVIEW)).toBe('every object matches it');
     expect(rolloutNote(response('POST_environments.201'))).toBe('');
   });
