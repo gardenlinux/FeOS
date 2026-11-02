@@ -37,7 +37,7 @@ func TestLogLabels(t *testing.T) {
 	run := runningJob(t, h, env.ID)
 	want := map[string]string{model.LogTenant: testTenant, model.LogInstance: run.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: spec.KindJob, model.LogObject: "migrate",
-		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1), model.LogRelease: strconv.Itoa(r1), model.LogAttempt: "1"}
+		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1), model.LogAttempt: "1"}
 	if got := n1.LogLabels(run); !maps.Equal(got, want) {
 		t.Fatalf("the run's create: %v, want %v", got, want)
 	}
@@ -51,7 +51,7 @@ func TestLogLabels(t *testing.T) {
 	api := h.waitRows(env.ID, spec.KindService, "api", 1, 10*time.Second, "running", running)[0].Sandbox.ID
 	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: api.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: spec.KindService, model.LogObject: "api",
-		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1), model.LogRelease: strconv.Itoa(r1)}
+		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1)}
 	if got := n1.LogLabels(api); !maps.Equal(got, want) {
 		t.Fatalf("the service's create: %v, want %v", got, want)
 	}

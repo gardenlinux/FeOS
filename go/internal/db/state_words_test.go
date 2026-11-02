@@ -123,9 +123,7 @@ func TestStateWordsOnlyMigration(t *testing.T) {
 	exec(`INSERT INTO env_instances (sandbox_id, env_id, kind, object, template_hash, release, phase) VALUES
 		('abcdefghjk0', '00000000-0000-4000-8000-000000000001', 'service', 'web', 'h', 5, 'retiring'),
 		('abcdefghjk1', '00000000-0000-4000-8000-000000000001', 'service', 'web', 'h', 5, 'stopping')`)
-	if err := d.Migrate(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
+	migrateRange(t, d, 23, 24)
 
 	var states string
 	if err := d.Pool.QueryRow(ctx, "SELECT string_agg(state, ',' ORDER BY number) FROM env_releases").

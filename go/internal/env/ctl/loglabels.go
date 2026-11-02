@@ -26,7 +26,7 @@ func instanceLogLabels(owner string, id podid.ID, envID uuid.UUID, kind, object 
 	l := map[string]string{
 		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
 		model.LogKind: kind, model.LogObject: object, model.LogReplica: strconv.Itoa(replica),
-		model.LogDeployment: strconv.Itoa(deployment), model.LogRelease: strconv.Itoa(deployment),
+		model.LogDeployment: strconv.Itoa(deployment),
 	}
 	if attempt > 0 {
 		l[model.LogAttempt] = strconv.Itoa(attempt)

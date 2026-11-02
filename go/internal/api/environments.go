@@ -37,13 +37,6 @@ func (s *server) envRoutes(add func(c class, pattern string, h http.Handler)) {
 	env("GET /api/v1/environments/{env}/deployments", s.listDeployments)
 	env("GET /api/v1/environments/{env}/deployments/{n}", s.getDeployment)
 	env("POST /api/v1/environments/{env}/deployments/{n}/revert", s.revertDeployment)
-	// The same routes under the deployments' earlier word, for the clients
-	// of the version before (ADR 0018, "The deployments' word"); the next
-	// version removes them.
-	env("POST /api/v1/environments/{env}/releases", s.applyDeployment)
-	env("GET /api/v1/environments/{env}/releases", s.listDeployments)
-	env("GET /api/v1/environments/{env}/releases/{n}", s.getDeployment)
-	env("POST /api/v1/environments/{env}/releases/{n}/revert", s.revertDeployment)
 	env("PUT /api/v1/environments/{env}/objects/{kind}/{name}", s.putObject)
 	env("DELETE /api/v1/environments/{env}/objects/{kind}/{name}", s.deleteObject)
 	env("GET /api/v1/environments/{env}/objects/{kind}/{name}/logs", s.objectLogs)

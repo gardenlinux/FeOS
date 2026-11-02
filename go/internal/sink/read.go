@@ -386,28 +386,24 @@ type LineJSON struct {
 
 // StreamJSON is a stream of /api/v1/logs and /api/v1/log-streams.
 type StreamJSON struct {
-	ID          string `json:"id"`
-	Tenant      string `json:"tenant"`
-	Instance    string `json:"instance"`
-	Container   string `json:"container"`
-	Environment string `json:"environment"`
-	Kind        string `json:"kind"`
-	Object      string `json:"object"`
-	Replica     int    `json:"replica"`
-	Deployment  int    `json:"deployment"`
-	// Release is Deployment under its earlier word, for the readers of
-	// the version before (ADR 0018, "The deployments' word"); it goes
-	// with ferund's D2.
-	Release   int        `json:"release"`
-	Job       string     `json:"job"`
-	Attempt   int        `json:"attempt"`
-	Node      string     `json:"node"`
-	Source    string     `json:"source"`
-	FirstTime *time.Time `json:"firstTime"`
-	LastTime  *time.Time `json:"lastTime"`
-	EndedAt   *time.Time `json:"endedAt"`
-	Lines     int64      `json:"lines"`
-	Bytes     int64      `json:"bytes"`
+	ID          string     `json:"id"`
+	Tenant      string     `json:"tenant"`
+	Instance    string     `json:"instance"`
+	Container   string     `json:"container"`
+	Environment string     `json:"environment"`
+	Kind        string     `json:"kind"`
+	Object      string     `json:"object"`
+	Replica     int        `json:"replica"`
+	Deployment  int        `json:"deployment"`
+	Job         string     `json:"job"`
+	Attempt     int        `json:"attempt"`
+	Node        string     `json:"node"`
+	Source      string     `json:"source"`
+	FirstTime   *time.Time `json:"firstTime"`
+	LastTime    *time.Time `json:"lastTime"`
+	EndedAt     *time.Time `json:"endedAt"`
+	Lines       int64      `json:"lines"`
+	Bytes       int64      `json:"bytes"`
 }
 
 func nsTime(ns *int64) *time.Time {
@@ -426,7 +422,7 @@ func (st *streamRow) json() StreamJSON {
 	}
 	return StreamJSON{
 		ID: st.SID, Tenant: st.Tenant, Instance: st.Instance, Container: st.Container, Environment: st.Environment,
-		Kind: st.Kind, Object: st.Object, Replica: st.Replica, Deployment: st.Deployment, Release: st.Deployment, Job: st.Job, Attempt: st.Attempt,
+		Kind: st.Kind, Object: st.Object, Replica: st.Replica, Deployment: st.Deployment, Job: st.Job, Attempt: st.Attempt,
 		Node: st.Node, Source: st.Source, FirstTime: nsTime(st.FirstNs), LastTime: nsTime(st.LastNs), EndedAt: ended,
 		Lines: st.Lines, Bytes: st.Bytes,
 	}

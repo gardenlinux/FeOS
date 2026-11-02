@@ -101,7 +101,7 @@
           "role": "expense_svc"
         }
       },
-      "on": "release",
+      "on": "deploy",
       "timeout": "10m",
       "retries": 1
     }

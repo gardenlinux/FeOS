@@ -39,7 +39,7 @@ func TestObjectStatusJSON(t *testing.T) {
 		`{"kind":"service","name":"expense-service","runtime":"image","desired":2,"ready":1,"instances":[` +
 			`{"id":"0193a000-0000-7000-8000-000000000101","replica":0,"phase":"ready","state":"running","node":"n1",` +
 			`"address":"fd6b::5","deployment":7,"restarts":0,"lastExit":null,"readySince":"2026-10-18T12:00:00Z","detail":"",` +
-			`"image":"registry.test/expense@sha256:0123","release":7}]}`,
+			`"image":"registry.test/expense@sha256:0123"}]}`,
 	}, {
 		ObjectStatus{Kind: spec.KindService, Name: "idle", Runtime: spec.RuntimeImage},
 		`{"kind":"service","name":"idle","runtime":"image","desired":0,"ready":0,"instances":[]}`,
@@ -57,7 +57,7 @@ func TestObjectStatusJSON(t *testing.T) {
 		ObjectStatus{Kind: spec.KindJob, Name: "migrate", LastRun: &JobRunStatus{Deployment: 7, Attempt: 1,
 			Phase: model.RunSucceeded, ExitCode: &zero, FinishedAt: "2026-10-18T12:00:00Z"}},
 		`{"kind":"job","name":"migrate","lastRun":{"deployment":7,"attempt":1,"phase":"succeeded","exitCode":0,` +
-			`"finishedAt":"2026-10-18T12:00:00Z","detail":"","release":7}}`,
+			`"finishedAt":"2026-10-18T12:00:00Z","detail":""}}`,
 	}, {
 		ObjectStatus{Kind: spec.KindJob, Name: "seed"},
 		`{"kind":"job","name":"seed","lastRun":null}`,
@@ -78,7 +78,7 @@ func TestStatusJSON(t *testing.T) {
 		Hosts: []string{}, Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: "2026-10-18T12:00:00Z"}
 	const want = `{"id":"0193a000-0000-7000-8000-0000000000e1","name":"stage","labels":{},"deployment":0,"deployed":0,` +
 		`"deleting":false,"public":false,"hosts":[],"rollout":null,"objects":[],"routes":[],"openIncidents":0,` +
-		`"createdAt":"2026-10-18T12:00:00Z","release":0}`
+		`"createdAt":"2026-10-18T12:00:00Z"}`
 	if got := marshal(t, st); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
 	}
@@ -93,8 +93,7 @@ func TestStatusJSON(t *testing.T) {
 	sum := EnvSummary{ID: st.ID, Name: "stage", Labels: map[string]string{}, State: model.EnvNone, Public: true,
 		Hosts: []string{"stage-acme.apps.test"}, CreatedAt: st.CreatedAt}
 	const wantSum = `{"id":"0193a000-0000-7000-8000-0000000000e1","name":"stage","labels":{},"deployment":0,"deployed":0,` +
-		`"state":"none","public":true,"hosts":["stage-acme.apps.test"],"openIncidents":0,"createdAt":"2026-10-18T12:00:00Z",` +
-		`"release":0}`
+		`"state":"none","public":true,"hosts":["stage-acme.apps.test"],"openIncidents":0,"createdAt":"2026-10-18T12:00:00Z"}`
 	if got := marshal(t, sum); got != wantSum {
 		t.Fatalf("summary\n got %s\nwant %s", got, wantSum)
 	}
@@ -174,64 +173,5 @@ func TestWriteError(t *testing.T) {
 		{Severity: spec.SeverityError, Path: "p", Problem: "b"}}}
 	if e.Error() != "the spec has 2 errors, the first: a" {
 		t.Fatal(e.Error())
-	}
-}
-
-// The deployments' earlier word, for one version (ADR 0018, "The
-// deployments' word"): every number an answer calls deployment is there
-// as release too, a list of deployments as releases too; a request and an
-// answer read either key, both only when they are equal.
-func TestEarlierWordJSON(t *testing.T) {
-	answers := []struct {
-		v    any
-		want string
-	}{
-		{RolloutStatus{Deployment: 7, State: model.DeploymentDeploying},
-			`{"deployment":7,"state":"deploying","startedAt":"","reason":"","release":7}`},
-		{Tag{Tag: "v1", Deployment: 3, MovedBy: "a", MovedAt: "2026-10-18T12:00:00Z"},
-			`{"tag":"v1","deployment":3,"movedBy":"a","movedAt":"2026-10-18T12:00:00Z","release":3}`},
-		{DeploymentList{Deployments: []DeploymentInfo{}}, `{"deployments":[],"releases":[]}`},
-		{Incident{ID: "1", Object: "service/web", Deployment: 2, Condition: model.ConditionCrashLoop,
-			Summary: "a <b> & c"}, `{"id":"1","object":"service/web","deployment":2,"condition":"crash_loop",` +
-			`"openedAt":"","closedAt":"","summary":"a \u003cb\u003e \u0026 c","evidence":{},"release":2}`},
-	}
-	for _, c := range answers {
-		if got := marshal(t, c.v); got != c.want {
-			t.Errorf("%T\n got %s\nwant %s", c.v, got, c.want)
-		}
-	}
-
-	var tag PutTagRequest
-	if err := json.Unmarshal([]byte(`{"release":4,"author":"a"}`), &tag); err != nil || tag.Deployment != 4 || tag.Author != "a" {
-		t.Fatalf("a tag under release: %+v %v", tag, err)
-	}
-	if err := json.Unmarshal([]byte(`{"deployment":5,"release":5}`), &tag); err != nil || tag.Deployment != 5 {
-		t.Fatalf("a tag under both keys: %+v %v", tag, err)
-	}
-	var clone CloneRequest
-	if err := json.Unmarshal([]byte(`{"name":"demo"}`), &clone); err != nil || clone.Deployment != nil {
-		t.Fatalf("a clone without a number: %+v %v", clone, err)
-	}
-	if err := json.Unmarshal([]byte(`{"name":"demo","release":0}`), &clone); err != nil || clone.Deployment == nil ||
-		*clone.Deployment != 0 || clone.Name != "demo" {
-		t.Fatalf("a clone under release: %+v %v", clone, err)
-	}
-	for _, body := range []string{`{"name":"demo","deployment":3,"release":4}`} {
-		if err := json.Unmarshal([]byte(body), &clone); err == nil || !strings.Contains(err.Error(), "differ") {
-			t.Fatalf("%s: %v", body, err)
-		}
-	}
-	if err := json.Unmarshal([]byte(`{"deployment":3,"release":4}`), &tag); err == nil {
-		t.Fatal("a tag under two numbers")
-	}
-	var list DeploymentList
-	if err := json.Unmarshal([]byte(`{"releases":[{"number":2}]}`), &list); err != nil || len(list.Deployments) != 1 ||
-		list.Deployments[0].Number != 2 {
-		t.Fatalf("a list under releases: %+v %v", list, err)
-	}
-	var st EnvStatus
-	if err := json.Unmarshal([]byte(`{"name":"stage","release":6,"rollout":{"release":6,"state":"deployed"}}`), &st); err != nil ||
-		st.Deployment != 6 || st.Name != "stage" || st.Rollout == nil || st.Rollout.Deployment != 6 {
-		t.Fatalf("a status under release: %+v %v", st, err)
 	}
 }

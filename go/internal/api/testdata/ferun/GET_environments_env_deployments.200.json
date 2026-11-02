@@ -69,67 +69,6 @@
         "finishedAt": "2026-10-16T16:23:50Z",
         "tags": []
       }
-    ],
-    "releases": [
-      {
-        "number": 7,
-        "state": "deploying",
-        "origin": "apply",
-        "originRef": "",
-        "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
-        "message": "stage follows main at revision 12",
-        "annotations": {
-          "fecode.dev/kind": "stage",
-          "fecode.dev/revision": "0193c111-2222-7333-8444-000000000012",
-          "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
-        },
-        "base": 6,
-        "reason": "",
-        "createdAt": "2026-10-18T14:02:10Z",
-        "startedAt": "2026-10-18T14:02:11Z",
-        "finishedAt": "",
-        "tags": []
-      },
-      {
-        "number": 6,
-        "state": "deployed",
-        "origin": "apply",
-        "originRef": "",
-        "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
-        "message": "stage follows main at revision 11",
-        "annotations": {
-          "fecode.dev/kind": "stage",
-          "fecode.dev/revision": "0193c111-2222-7333-8444-000000000011",
-          "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
-        },
-        "base": 5,
-        "reason": "",
-        "createdAt": "2026-10-16T16:20:31Z",
-        "startedAt": "2026-10-16T16:20:32Z",
-        "finishedAt": "2026-10-16T16:23:50Z",
-        "tags": [
-          "v1.3"
-        ]
-      },
-      {
-        "number": 5,
-        "state": "replaced",
-        "origin": "apply",
-        "originRef": "",
-        "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
-        "message": "stage follows main at revision 10",
-        "annotations": {
-          "fecode.dev/kind": "stage",
-          "fecode.dev/revision": "0193c111-2222-7333-8444-000000000011",
-          "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
-        },
-        "base": 4,
-        "reason": "",
-        "createdAt": "2026-10-15T08:00:12Z",
-        "startedAt": "2026-10-15T08:00:12Z",
-        "finishedAt": "2026-10-16T16:23:50Z",
-        "tags": []
-      }
     ]
   },
   "note": "newest first"

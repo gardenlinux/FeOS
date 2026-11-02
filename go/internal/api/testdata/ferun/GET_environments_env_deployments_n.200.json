@@ -168,7 +168,7 @@
             "vcpus": 1,
             "memoryMib": 512
           },
-          "on": "release",
+          "on": "deploy",
           "timeout": "10m0s",
           "retries": 1
         }

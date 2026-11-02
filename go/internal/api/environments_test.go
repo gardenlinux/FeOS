@@ -459,21 +459,8 @@ func TestEnvironmentArguments(t *testing.T) {
 			[]any{"migrate"}}, 202},
 		{"POST", "/api/v1/environments/stage/deployments/6/revert", map[string]any{"base": 7},
 			envCall{"Revert", testTenant, "stage", []any{envs.RevertRequest{Base: 7}, 6}}, 201},
-		// The routes under the deployments' earlier word, until the next
-		// version (ADR 0018, "The deployments' word").
-		{"GET", "/api/v1/environments/stage/releases?limit=5", nil, envCall{"Deployments", testTenant, "stage", []any{5}}, 200},
-		{"GET", "/api/v1/environments/stage/releases/7", nil, envCall{"Deployment", testTenant, "stage", []any{7}}, 200},
-		{"POST", "/api/v1/environments/stage/releases/6/revert", map[string]any{"base": 7},
-			envCall{"Revert", testTenant, "stage", []any{envs.RevertRequest{Base: 7}, 6}}, 201},
-		{"POST", "/api/v1/environments/stage/releases", map[string]any{"base": 7},
-			envCall{"Apply", testTenant, "stage", []any{envs.ApplyRequest{Base: 7}}}, 201},
-		// A clone's and a tag's number under either key, both when equal.
-		{"POST", "/api/v1/environments/stage/clone", map[string]any{"name": "demo", "release": 3},
+		{"POST", "/api/v1/environments/stage/clone", map[string]any{"name": "demo", "deployment": 3},
 			envCall{"Clone", testTenant, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
-		{"POST", "/api/v1/environments/stage/clone", map[string]any{"name": "demo", "deployment": 3, "release": 3},
-			envCall{"Clone", testTenant, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
-		{"PUT", "/api/v1/environments/stage/tags/v1", map[string]any{"release": 4},
-			envCall{"PutTag", testTenant, "stage", []any{envs.PutTagRequest{Deployment: 4}, "v1"}}, 200},
 		{"POST", "/api/v1/environments/plan", map[string]any{"spec": map[string]any{}},
 			envCall{"PlanSpec", testTenant, "", []any{envs.PlanSpecRequest{Spec: json.RawMessage(`{}`)}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true},
@@ -520,11 +507,13 @@ func TestEnvironmentArguments(t *testing.T) {
 			t.Fatalf("%s %s: %d %s %+v", c.method, c.path, w.Code, w.Body, fe.calls)
 		}
 	}
-	// A number under both keys that differ is a 400.
-	both := e.serveWith(newServer(e.srv.cfg, e.srv.deps), request{method: "POST", path: "/api/v1/environments/stage/clone",
-		body: map[string]any{"name": "demo", "deployment": 3, "release": 4}, header: http.Header{"Authorization": {tok}}})
-	if both.Code != http.StatusBadRequest || !strings.Contains(both.Body.String(), "deployment 3 and release 4 differ") {
-		t.Fatalf("both keys: %d %s", both.Code, both.Body)
+	// The routes under the deployments' earlier word are gone (ADR 0018,
+	// "The deployments' word").
+	for _, path := range []string{"/api/v1/environments/stage/releases", "/api/v1/environments/stage/releases/7"} {
+		if w := e.serveWith(newServer(e.srv.cfg, e.srv.deps), request{method: "GET", path: path,
+			header: http.Header{"Authorization": {tok}}}); w.Code != http.StatusNotFound {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body)
+		}
 	}
 	// PUT …/public needs its field: a body without it, or with null, is a
 	// 400, and so is one that is not a boolean.

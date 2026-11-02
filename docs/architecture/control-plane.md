@@ -1811,12 +1811,14 @@ version before, and gave `environments`, `env_instances`,
 `env_job_runs` and `env_incidents` a column `deployment` beside
 `release`, kept equal both ways by triggers (`deployment_sync`), with
 `env_incidents_open_deployment` beside `env_incidents_open`; its version
-reads and writes the new names only, and still stores a deploy job's
-`on` as `release`, the word the version before knows. `0025` rewrites
-the stored specs' `"on": "release"` to `"deploy"` and drops the view,
+reads and writes the new names only, and still stored a deploy job's
+`on` as `release`, the word the version before knows. `0025` rewrote
+the stored specs' `"on": "release"` to `"deploy"` and dropped the view,
 the triggers, their function, the `release` columns and
-`env_incidents_open`; it rolls once no instance of the version before
-`0024` is left.
+`env_incidents_open` on `release`, whose name the index on `deployment`
+took; its version stores `deploy`, and both versions take a deploy job's
+`on` in either word as the same (`spec.EqualNormalised`, the diff). It
+rolls once no instance of the version before `0024` is left.
 
 The database holds no secret value: the log tails it keeps, a run's and
 an incident's, are redacted before they are stored, as far as
@@ -2544,13 +2546,10 @@ name; one the tenant does not have is 404 "no such environment".
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |
 | `ANY …/{env}/http/{path...}` | the route door |
 
-For one version, until the clients have moved (ADR 0018, "The
-deployments' word"), the deployments' earlier word works beside the new
-one: `…/{env}/releases[/{n}[/revert]]` are the same routes as
-`…/deployments[…]`; every answer that carries a number as `deployment`
-carries it as `release` too, and a list of `deployments` as `releases`
-too; a clone and a tag take the number as `deployment` or `release`,
-both only when equal (else 400). The next version removes them.
+The deployments' earlier word worked beside the new one for one
+version, `0024`'s, while the clients moved (ADR 0018, "The deployments'
+word"): `…/{env}/releases[…]` and the keys `release` and `releases`.
+They are gone; a deploy job's `on: release` stays accepted.
 
 Other answers: plain 409s "environment X is being deleted", "tenant X is
 being deleted", "deployment N pins secret X: apply a deployment without it
@@ -3035,9 +3034,9 @@ nor waits for. `ferund`'s part:
   `ferun.tenant`, `ferun.instance` (the row's ID); an environment's
   `ferun.environment`, `ferun.kind`, `ferun.object`, `ferun.replica`,
   `ferun.deployment` (the deployment the instance was inserted for: a
-  kept instance's later deployment does not change it; until the next
-  version also under its earlier word `ferun.release`, which the sink of
-  the version before reads alone), a job run's
+  kept instance's later deployment does not change it; a pod made before
+  `0025`'s version may carry it under its earlier word `ferun.release`,
+  which the sink reads too), a job run's
   `ferun.attempt`; a tenant's job's `ferun.job` (its ID), `ferun.attempt`
   `1` and, when it asked, `ferun.retention_days`. The engine sends them
   as `CreatePodRequest.log_labels`, beside the spec: a create delivered

@@ -19,7 +19,6 @@
           "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
         },
         "deployment": 7,
-        "release": 7,
         "deployed": 6,
         "state": "deploying",
         "public": true,
@@ -38,7 +37,6 @@
           "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
         },
         "deployment": 4,
-        "release": 4,
         "deployed": 4,
         "state": "deployed",
         "public": false,
@@ -55,7 +53,6 @@
           "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
         },
         "deployment": 3,
-        "release": 3,
         "deployed": 3,
         "state": "deployed",
         "public": false,

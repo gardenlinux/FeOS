@@ -9,17 +9,13 @@ package model
 // tenant's job's pod (sandboxes.log_labels); a sandbox a tenant made
 // itself has none, and its logs are not shipped.
 const (
-	LogTenant      = "ferun.tenant"
-	LogInstance    = "ferun.instance"
-	LogEnvironment = "ferun.environment"
-	LogKind        = "ferun.kind"
-	LogObject      = "ferun.object"
-	LogReplica     = "ferun.replica"
-	LogDeployment  = "ferun.deployment"
-	// LogRelease is LogDeployment's earlier word (ADR 0018, "The
-	// deployments' word"), set beside it for the sink of the version
-	// before, which reads it alone; it goes with ferund's D2.
-	LogRelease       = "ferun.release"
+	LogTenant        = "ferun.tenant"
+	LogInstance      = "ferun.instance"
+	LogEnvironment   = "ferun.environment"
+	LogKind          = "ferun.kind"
+	LogObject        = "ferun.object"
+	LogReplica       = "ferun.replica"
+	LogDeployment    = "ferun.deployment"
 	LogJob           = "ferun.job"
 	LogAttempt       = "ferun.attempt"
 	LogRetentionDays = "ferun.retention_days"

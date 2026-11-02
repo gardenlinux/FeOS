@@ -5,6 +5,7 @@ package db_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
@@ -204,5 +205,104 @@ func TestDeploymentsMigration(t *testing.T) {
 	if err := d.Pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM env_releases) - (SELECT count(*) FROM env_deployments)").
 		Scan(&n); err != nil || n != 0 {
 		t.Fatalf("the view and the table differ by %d rows: %v", n, err)
+	}
+}
+
+// 0025 rewrites the stored specs' deploy jobs to their new word and drops
+// what 0024 kept for the version before it: the view env_releases, the
+// release columns, their triggers, the function and env_incidents_open
+// on release, whose name the index on deployment takes. The version of
+// 0024, which a rolling deploy runs beside this one, keeps working: its
+// statements name the table and the deployment columns only.
+func TestDeploymentsOnlyMigration(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	d := dbtest.Open(t)
+	migrateBefore(t, d, 25)
+
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := d.Pool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	const env = "00000000-0000-4000-8000-000000000001"
+	exec("INSERT INTO tenants (id) VALUES ('acme')")
+	exec(`INSERT INTO environments (id, owner, name, deployment, deployed) VALUES ($1, 'acme', 'stage', 4, 3)`, env)
+	exec(`INSERT INTO env_deployments (env_id, number, spec, base, origin, state, updated_at) VALUES
+		($1, 1, '{"services":{"web":{"image":"i"}}}', 0, 'apply', 'replaced', '2026-11-01T00:00:00Z'),
+		($1, 2, '{"jobs":{}}', 1, 'apply', 'replaced', '2026-11-01T00:00:00Z'),
+		($1, 3, '{"jobs":{"m":{"image":"i","on":"release","retries":1},"s":{"image":"i","on":"manual"}}}', 2,
+			'apply', 'deployed', '2026-11-01T00:00:00Z'),
+		($1, 4, '{"jobs":{"m":{"image":"i","on":"deploy"},"n":{"image":"i","on":"release"}}}', 3, 'apply', 'deploying',
+			'2026-11-01T00:00:00Z')`, env)
+	exec(`INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib) VALUES ('abcdefghjk0', 'acme', 'img', 1, 512)`)
+	exec(`INSERT INTO env_instances (sandbox_id, env_id, kind, object, template_hash, deployment)
+		VALUES ('abcdefghjk0', $1, 'service', 'web', 'h', 3)`, env)
+	exec(`INSERT INTO env_incidents (env_id, object, deployment, condition) VALUES ($1, 'service/web', 3, 'crash_loop')`, env)
+	migrateRange(t, d, 25, 26)
+
+	specs := map[int]string{}
+	rows, err := d.Pool.Query(ctx, `SELECT number, spec::text FROM env_deployments
+		WHERE updated_at = '2026-11-01T00:00:00Z' ORDER BY number`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var n int
+		var s string
+		if err := rows.Scan(&n, &s); err != nil {
+			t.Fatal(err)
+		}
+		specs[n] = s
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]string{
+		1: `{"services": {"web": {"image": "i"}}}`,
+		2: `{"jobs": {}}`,
+		3: `{"jobs": {"m": {"on": "deploy", "image": "i", "retries": 1}, "s": {"on": "manual", "image": "i"}}}`,
+		4: `{"jobs": {"m": {"on": "deploy", "image": "i"}, "n": {"on": "deploy", "image": "i"}}}`,
+	}
+	for n, w := range want {
+		if specs[n] != w {
+			t.Errorf("deployment %d: spec %s (updated_at changed?), want %s", n, specs[n], w)
+		}
+	}
+
+	var left int
+	if err := d.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM pg_class WHERE relname = 'env_releases')
+		+ (SELECT count(*) FROM information_schema.columns WHERE column_name = 'release'
+			AND table_name IN ('environments', 'env_instances', 'env_job_runs', 'env_incidents'))
+		+ (SELECT count(*) FROM pg_trigger WHERE tgname LIKE '%deployment_sync')
+		+ (SELECT count(*) FROM pg_proc WHERE proname = 'deployment_sync')
+		+ (SELECT count(*) FROM pg_class WHERE relname = 'env_incidents_open_deployment')`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("the view, a release column, a trigger, the function or the index's old name left: %d %v", left, err)
+	}
+
+	// The version of 0024 beside it: its writes of the deployment columns,
+	// its ON CONFLICT on deployment, now env_incidents_open.
+	exec("UPDATE environments SET deployment = 5 WHERE name = 'stage'")
+	exec(`INSERT INTO env_job_runs (env_id, job, template_hash, deployment) VALUES ($1, 'm', 'h', 5)`, env)
+	exec("UPDATE env_instances SET deployment = 5 WHERE sandbox_id = 'abcdefghjk0'")
+	open := func() bool {
+		t.Helper()
+		rows, err := d.Pool.Query(ctx, `INSERT INTO env_incidents (env_id, object, deployment, condition, summary, evidence)
+			VALUES ($1, 'service/web', 3, 'crash_loop', '', '{}')
+			ON CONFLICT (env_id, object, deployment, condition) WHERE closed_at IS NULL DO NOTHING RETURNING id`, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		return rows.Next()
+	}
+	if open() {
+		t.Fatal("an incident opened twice")
+	}
+	var idx string
+	if err := d.Pool.QueryRow(ctx, "SELECT pg_get_indexdef('env_incidents_open'::regclass)").Scan(&idx); err != nil ||
+		!strings.Contains(idx, "(env_id, object, deployment, condition) WHERE (closed_at IS NULL)") {
+		t.Fatalf("env_incidents_open: %s %v", idx, err)
 	}
 }

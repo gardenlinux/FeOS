@@ -8,7 +8,6 @@
     "id": "13",
     "object": "addon/postgres",
     "deployment": 8,
-    "release": 8,
     "condition": "rollout_failed",
     "openedAt": "2026-10-18T15:30:02Z",
     "closedAt": "2026-10-18T15:41:10Z",

@@ -195,7 +195,6 @@ TABLE env_incidents
   COLUMN id bigint NOT NULL GENERATED ALWAYS AS IDENTITY
   COLUMN env_id uuid NOT NULL
   COLUMN object text NOT NULL
-  COLUMN release integer NOT NULL
   COLUMN condition text NOT NULL
   COLUMN opened_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN closed_at timestamp with time zone
@@ -206,8 +205,7 @@ TABLE env_incidents
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX env_incidents_env ON public.env_incidents USING btree (env_id, id)
-  CREATE UNIQUE INDEX env_incidents_open ON public.env_incidents USING btree (env_id, object, release, condition) WHERE (closed_at IS NULL)
-  CREATE UNIQUE INDEX env_incidents_open_deployment ON public.env_incidents USING btree (env_id, object, deployment, condition) WHERE (closed_at IS NULL)
+  CREATE UNIQUE INDEX env_incidents_open ON public.env_incidents USING btree (env_id, object, deployment, condition) WHERE (closed_at IS NULL)
   CREATE UNIQUE INDEX env_incidents_pkey ON public.env_incidents USING btree (id)
 TABLE env_instances
   COLUMN sandbox_id text COLLATE "C" NOT NULL
@@ -216,7 +214,6 @@ TABLE env_instances
   COLUMN object text NOT NULL
   COLUMN replica integer NOT NULL DEFAULT 0
   COLUMN template_hash text NOT NULL
-  COLUMN release integer NOT NULL
   COLUMN phase text NOT NULL DEFAULT 'starting'::text
   COLUMN ready_since timestamp with time zone
   COLUMN retire_at timestamp with time zone
@@ -245,7 +242,6 @@ TABLE env_job_runs
   COLUMN env_id uuid NOT NULL
   COLUMN job text NOT NULL
   COLUMN template_hash text NOT NULL
-  COLUMN release integer NOT NULL
   COLUMN attempt integer NOT NULL DEFAULT 1
   COLUMN sandbox_id text COLLATE "C"
   COLUMN phase text NOT NULL DEFAULT 'running'::text
@@ -326,7 +322,6 @@ TABLE environments
   COLUMN owner text NOT NULL
   COLUMN name text NOT NULL
   COLUMN labels jsonb NOT NULL DEFAULT '{}'::jsonb
-  COLUMN release integer NOT NULL DEFAULT 0
   COLUMN deleting boolean NOT NULL DEFAULT false
   COLUMN gen bigint NOT NULL DEFAULT 0
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
@@ -341,7 +336,6 @@ TABLE environments
   CONSTRAINT CHECK (((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (name !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
   CONSTRAINT CHECK ((deployed >= 0))
   CONSTRAINT CHECK ((deployment >= 0))
-  CONSTRAINT CHECK ((release >= 0))
   CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id)
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, name)

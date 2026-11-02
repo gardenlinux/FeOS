@@ -60,8 +60,9 @@ const (
 	attrReplica     = "ferun.replica"
 	attrDeployment  = "ferun.deployment"
 	// attrRelease is ferun.deployment's earlier word (ADR 0018, "The
-	// deployments' word"): a pod keeps the labels of its insert for its
-	// life, so the sink reads it where ferun.deployment is not set.
+	// deployments' word"), which ferund no longer writes: a pod keeps the
+	// labels of its insert for its life, so the sink reads it where
+	// ferun.deployment is not set.
 	attrRelease       = "ferun.release"
 	attrJob           = "ferun.job"
 	attrAttempt       = "ferun.attempt"

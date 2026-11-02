@@ -415,12 +415,13 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
 
 - **Labels**: an environment's instance and job run, and a tenant's job,
   get `log_labels` on their pod's create (the table above), kept on their
-  sandbox row (`sandboxes.log_labels`, migration `0019`). `ferun.deployment`
-  is the deployment the instance was made for; a pod keeps the labels of
-  its create, so the sink reads its earlier word `ferun.release` where it
-  is not set, and `ferund` writes both until its next version (ADR 0018,
-  "The deployments' word"). The column `log_streams.release` and the
-  index field `release` hold it. A sandbox a tenant made
+  sandbox row (`sandboxes.log_labels`, migration `0019`).
+  `ferun.deployment` is the deployment the instance was made for; a pod
+  keeps the labels of its create, so the sink reads its earlier word
+  `ferun.release` where it is not set, which `ferund` wrote, beside
+  `ferun.deployment`, up to the version of its migration `0024` (ADR
+  0018, "The deployments' word"). The column `log_streams.release` and
+  the index field `release` hold it. A sandbox a tenant made
   itself (an attached service's workspace too) has none: its logs are
   not shipped. `POST /api/v1/jobs` takes `logRetentionDays` (1 to 400),
   which becomes `ferun.retention_days`.

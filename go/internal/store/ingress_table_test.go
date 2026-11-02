@@ -95,7 +95,7 @@ func TestIngressRouting(t *testing.T) {
 	if _, err := s.UpdateEnvironment(bg, cur, del); err != nil {
 		t.Fatal(err)
 	}
-	norelease := publish(t, s, mkEnv(t, s, "acme", "norelease").ID, true)
+	nodeployment := publish(t, s, mkEnv(t, s, "acme", "nodeployment").ID, true)
 	routedEnv(t, s, "gone", "web")
 	if _, err := s.MarkTenantDeleting(bg, "gone"); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestIngressRouting(t *testing.T) {
 
 	// Limited to some environments; an empty list reads none, and an
 	// environment it leaves out has no row.
-	rows, err = s.IngressRouting(bg, []uuid.UUID{bare.ID, norelease.ID, unpublished.ID})
+	rows, err = s.IngressRouting(bg, []uuid.UUID{bare.ID, nodeployment.ID, unpublished.ID})
 	must(t, err)
 	if got := routingEnvs(rows); !slices.Equal(got, []uuid.UUID{bare.ID}) {
 		t.Fatalf("limited: %v", got)

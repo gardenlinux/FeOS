@@ -448,11 +448,11 @@ const (
 	JobOnManual  = "manual"
 )
 
-// JobOnStored is the word normalisation stores for JobOnDeploy: still
-// JobOnRelease, since the version before this one, which a rolling
-// deploy runs beside it, reads stored specs and knows only that word.
-// The next version stores JobOnDeploy and rewrites the stored specs.
-const JobOnStored = JobOnRelease
+// JobOnStored is the word normalisation stores for JobOnDeploy (migration
+// 0025 rewrote the specs stored before). The version before this one,
+// which a rolling deploy runs beside it, reads both words and stores
+// JobOnRelease; EqualNormalised and Diff take either as the same.
+const JobOnStored = JobOnDeploy
 
 // IsJobOnDeploy reports whether on (a job's On) runs the job with every
 // deployment: JobOnDeploy, its earlier word JobOnRelease, or unset.
