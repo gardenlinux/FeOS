@@ -3,7 +3,8 @@
 **Status:** Accepted · **Date:** 2026-10-18; tenants' jobs (§ A
 tenant's job) Proposed 2026-10-30; what keeps a sandbox awake for its
 attached services (§ An attached service idles as an image service
-does) Accepted 2026-10-30
+does) Accepted 2026-10-30; the states' words (§ The states' words)
+Accepted 2026-11-02
 
 ## Context
 
@@ -465,6 +466,47 @@ paused is frozen, not stopped: it goes on where it was when the sandbox
 resumes. The caller decides the values: FeCode gives a preview's
 attached services the `idle` its class gives image services (15 min).
 Hibernation after `--hibernate-after` of being paused is unchanged.
+
+### The states' words
+
+Accepted 2026-11-02, after "realised" in FeCode's UI left its reader
+asking what it meant.
+
+The words of a release's states came from this decision's prose: a
+release is realised, a later one supersedes it, the controller rolls
+toward a pending one, an old pod retires. People who run deployments
+know other words for the same things, those of the tools they use, and
+FeCode shows FeRun's words as they are. The words change, everywhere:
+in the API, the database, the code, the logs, the UI and the
+documentation. What they mean stays.
+
+| Before | Now |
+|---|---|
+| release `pending` | `waiting`: applied, its rollout not begun |
+| release `rolling` | `deploying`: the controller brings the environment to it |
+| release `realised` | `deployed`: every object matched it and was ready |
+| release `failed` | `failed` |
+| release `superseded` | `replaced`: a later release took its place |
+| the environment's `realised`, its latest realised release | `deployed` |
+| an instance's phase `retiring` | `stopping`: it no longer serves, and goes after its grace |
+
+The rest of this ADR keeps the words it was written with; read them as
+these.
+
+- **Clients first.** FeCode reads these words. It learns both
+  vocabularies first; then `ferund` answers the new ones alone; then
+  FeCode drops the old ones. No request of `ferund`'s takes a state as a
+  filter or an input, so none has to accept both.
+- **The database in three releases.** A rolling deploy runs the previous
+  `ferund` beside the new one over the same database, and the previous
+  one would take a release in a state it does not know for one that is
+  not rolling out, and move its services without waiting for its addons
+  and release jobs. So the first release (migration `0021`) keeps the
+  stored words and reads both, and gives `environments` the column
+  `deployed`, which a trigger keeps equal to `realised` for the previous
+  version; the next writes the new words, lets the checks admit both,
+  rewrites the rows and drops `realised`; the one after admits the new
+  words only.
 
 ### What changed while it was built
 

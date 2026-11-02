@@ -302,8 +302,8 @@ The table is what the ingress routes, one entry per public environment
   64 KiB (`table.MaxDomainBytes`, a chain takes a few), and the domains
   that would take the entry past 2 MiB are left out, never the
   environment;
-- the routes of its routing release, the realised one, else the latest
-  while none is realised: name, path prefix, service, port name,
+- the routes of its routing release, the deployed one, else the latest
+  while none is deployed: name, path prefix, service, port name,
   `strip`, and `door` for a route to an attached service, which the
   route door alone serves;
 - per image service that a route sends to, its idle policy, its
@@ -361,11 +361,11 @@ for all), while a stream uses it, and keeps it as an immutable snapshot:
   than 30 s.
 
 Every writer of what the table shows notifies in its transaction:
-publishing, an environment's release, realised release or deletion, a
+publishing, an environment's release, deployed release or deletion, a
 tenant's deletion, an instance's insert, delete, phase or release, the
 admission records, and the ingress and mesh rows
 ([control-plane.md](control-plane.md#the-database)). A replica that
-becomes ready, pauses or retires reaches the ingress about 100 ms after
+becomes ready, pauses or stops reaches the ingress about 100 ms after
 its write commits, at most 5 s when an older `ferund` wrote it.
 
 ### The stream
@@ -544,7 +544,7 @@ by the ingress at https://<host><prefix> and by the route door", "served
 by the route door; the ingress serves it once the environment is
 public", or "served by the route door alone: an attached service runs in
 a sandbox, which the ingress does not reach". A route's `host` stays
-stored and not realised: the ingress and the route door serve a route on
+stored and not used: the ingress and the route door serve a route on
 every host of its environment.
 
 ### Host labels
@@ -623,7 +623,7 @@ address of the mesh reaches, and the ingress answers it 404 "route
   environment is public its one rule allows TCP in on the pod's routed
   ports from the group `ferun-ingress`; otherwise, or without routed
   ports, it has no rules. The routed ports are the numbers, in the pod's
-  own release, of the ports that the routes of the realised and the
+  own release, of the ports that the routes of the deployed and the
   latest release give its service. It has no members; its version is a
   hash of its content. Addons, jobs and attachable sandboxes never name
   one, and a service no route names opens nothing.
@@ -747,7 +747,7 @@ host 404 "no such host".
   once when the environment left it (unpublished, deleted, no apps
   zone), its service lost its routes, or the instance the route's port;
   30 to 40 s later when only the instance left a service that stays
-  routed (a replica retires, is not ready or pauses), so that its
+  routed (a replica stops, is not ready or pauses), so that its
   requests end with its pod, which goes after 10 s, rather than with the
   table's change. A request that picked an instance just before the table
   dropped it does not dial it, and a dial under way when the table
@@ -1339,7 +1339,7 @@ open question.
 | A node that never took the ingress as a peer | No handshake: its endpoints are the last resort, and readiness ignores the node after 60 s when another node works. | |
 | `ferund` cut off from the database | That instance's builder turns unhealthy after 30 s and ends its streams. | 30 s |
 | A new leader | No effect on the table or the data path; `mesh-peers`, `env-groups` and the idle loop pause for the election. | the lease's TTL |
-| A replica retires | It leaves the table in about 100 ms and the idle pooled connections to it are closed; its pod goes after 10 s, which cuts longer requests; the ingress closes what is still open after 30 s. | |
+| A replica stops | It leaves the table in about 100 ms and the idle pooled connections to it are closed; its pod goes after 10 s, which cuts longer requests; the ingress closes what is still open after 30 s. | |
 | An environment is unpublished | New requests get 404; the open connections to its instances, upgraded ones included, are closed. | about 100 ms |
 | An app accepts connections and never answers | Its requests wait for a connection 10 s at most; at most 256 of them are forwarded at once per instance (512 for all its tenant's environments), and the others get 503 at once. Other tenants keep their shares, and the instance's memory stays bounded. | 256 requests per instance |
 | A service stays pending | Its requests are held up to the pending bound, at most 128 at once per instance (256 for all its tenant's environments); other tenants' requests are still held. | 128 per instance |

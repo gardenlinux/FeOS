@@ -239,7 +239,7 @@ A ferund on one machine, with a test node:
         --server-name ferun.feos.test
 
 Without `--secret-key-file` the sandboxes run, but an environment with
-an addon or a secret stays rolling ("secrets need --secret-key-file").
+an addon or a secret stays deploying ("secrets need --secret-key-file").
 The test node fails a pod whose security groups or name tables it does
 not have, as feosd does (`--check-security-groups`,
 `--check-name-tables`, both on by default; `--no-name-service` plays a
@@ -263,7 +263,7 @@ the join's:
   container of an environment's pod whose `ferun.object` label matches
   exit with that code so long after each boot (2 s by default; a
   negative code: no exit status), the first match counting: with
-  `job/*=0@3s` release jobs finish and a release can be realised,
+  `job/*=0@3s` release jobs finish and a release can be deployed,
   `service/crasher=1` crash-loops a service, `process/<name>` ends a
   fake process.
 - `--start-log` appends a line to a container's log at each boot and
