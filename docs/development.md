@@ -263,7 +263,7 @@ the join's:
   container of an environment's pod whose `ferun.object` label matches
   exit with that code so long after each boot (2 s by default; a
   negative code: no exit status), the first match counting: with
-  `job/*=0@3s` release jobs finish and a release can be deployed,
+  `job/*=0@3s` deploy jobs finish and a deployment can be deployed,
   `service/crasher=1` crash-loops a service, `process/<name>` ends a
   fake process.
 - `--start-log` appends a line to a container's log at each boot and

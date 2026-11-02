@@ -181,7 +181,7 @@ content type `application/grpc+json`. Method names are
   comes between them. A message takes at most 32 MiB, an environment at
   most 2 MiB (a larger one is left out of the table; domains that would
   make it larger are left out of it). An `Env` is `{id, tenant, name,
-  hosts, release, hash, routes: [{name, path, service, port, strip,
+  hosts, deployment, hash, routes: [{name, path, service, port, strip,
   door}], services: [{name, idle, endpoints: [{instance, address, node,
   ports, groupVersion}], asleep, waking, pending}], domains: [{name,
   chain, key}]}`: `domains`, absent without any, are the hosts with a

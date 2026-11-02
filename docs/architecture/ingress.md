@@ -302,15 +302,15 @@ The table is what the ingress routes, one entry per public environment
   64 KiB (`table.MaxDomainBytes`, a chain takes a few), and the domains
   that would take the entry past 2 MiB are left out, never the
   environment;
-- the routes of its routing release, the deployed one, else the latest
+- the routes of its routing deployment, the deployed one, else the latest
   while none is deployed: name, path prefix, service, port name,
   `strip`, and `door` for a route to an attached service, which the
   route door alone serves;
 - per image service that a route sends to, its idle policy, its
   **endpoints**, the instances that are ready, run without an op and have
   an address and a node, with the ports their node admits under the
-  routes' port names, numbered by each instance's own release (else the
-  routing release's), the node and the node's version of
+  routes' port names, numbered by each instance's own deployment (else the
+  routing deployment's), the node and the node's version of
   `ferun-ingress`; and the counts of the other instances:
   - `asleep`: paused, hibernated, pausing or hibernating, or ready and
     running with an op (a pause on its way): a Wake helps;
@@ -327,14 +327,14 @@ instance's name, mesh address, the apps zone and its admitted version
 ([Admission](#admission)), and the **challenges**: every pending ACME
 HTTP-01 answer (`acme_challenges` whose `expires_at` is ahead, at most
 1024), each its token, host and key authorization, for every instance. An environment that is not public, is being
-deleted, has no label or no release, or whose tenant is being deleted
-has no entry; nor has one whose routing release's spec does not parse,
+deleted, has no label or no deployment, or whose tenant is being deleted
+has no entry; nor has one whose routing deployment's spec does not parse,
 or whose entry would take more than 2 MiB coded (`table.MaxEnvBytes`;
 logged at most once a minute per environment): every instance holds
 every entry, so one tenant's environment must not grow the messages of
 all. A valid spec stays far below that size, since a route's path has at
-most 1 KiB ([control-plane.md](control-plane.md#the-release-spec)); a
-release stored before that limit can exceed it.
+most 1 KiB ([control-plane.md](control-plane.md#the-deployment-spec)); a
+deployment stored before that limit can exceed it.
 
 ### The builder
 
@@ -361,8 +361,8 @@ for all), while a stream uses it, and keeps it as an immutable snapshot:
   than 30 s.
 
 Every writer of what the table shows notifies in its transaction:
-publishing, an environment's release, deployed release or deletion, a
-tenant's deletion, an instance's insert, delete, phase or release, the
+publishing, an environment's deployment, deployed deployment or deletion, a
+tenant's deletion, an instance's insert, delete, phase or deployment, the
 admission records, and the ingress and mesh rows
 ([control-plane.md](control-plane.md#the-database)). A replica that
 becomes ready, pauses or stops reaches the ingress about 100 ms after
@@ -623,8 +623,8 @@ address of the mesh reaches, and the ingress answers it 404 "route
   environment is public its one rule allows TCP in on the pod's routed
   ports from the group `ferun-ingress`; otherwise, or without routed
   ports, it has no rules. The routed ports are the numbers, in the pod's
-  own release, of the ports that the routes of the deployed and the
-  latest release give its service. It has no members; its version is a
+  own deployment, of the ports that the routes of the deployed and the
+  latest deployment give its service. It has no members; its version is a
   hash of its content. Addons, jobs and attachable sandboxes never name
   one, and a service no route names opens nothing.
 - **`ferun-ingress`** has no rules. Its members are the mesh addresses of
@@ -875,7 +875,7 @@ request with 503 "the ingress is shutting down, try again",
 
 `ferund`'s `Wake` answers `NOT_FOUND` for an environment that is not
 public, deleting or unknown, and for a service that no route of the
-routing release sends to or that is attached. It wakes exactly the asleep
+routing deployment sends to or that is attached. It wakes exactly the asleep
 instances, the table's predicate, never creating, stopped, failed or
 other ones: each once at a time on that instance, in the background on
 the service's context, never the caller's (`Engine.Sync`, then
@@ -961,9 +961,9 @@ larger than the one it sits in has no effect.
     coded ([What it holds](#what-it-holds)), and every `ferund` with a
     stream builds them all, so one tenant's many public environments
     grow the memory of all of them;
-  - the builder's parsed release specs (`table.Specs`), bounded by
+  - the builder's parsed deployment specs (`table.Specs`), bounded by
     count, 4096, not by bytes. A stored spec has at most 1 MiB
-    ([control-plane.md](control-plane.md#the-release-spec)), which
+    ([control-plane.md](control-plane.md#the-deployment-spec)), which
     parses to about as much when it is long values and to about 20 MiB
     when it is many small environment variables, so a few dozen public
     environments with such specs fill a `ferund` of 512 MiB.

@@ -4,6 +4,7 @@
 tenant's job) Proposed 2026-10-30; what keeps a sandbox awake for its
 attached services (§ An attached service idles as an image service
 does) Accepted 2026-10-30; the states' words (§ The states' words)
+Accepted 2026-11-02; the deployments' word (§ The deployments' word)
 Accepted 2026-11-02
 
 ## Context
@@ -507,6 +508,73 @@ these.
   version; the next writes the new words, lets the checks admit both,
   rewrites the rows and drops `realised`; the one after admits the new
   words only.
+
+### The deployments' word
+
+Accepted 2026-11-02, after FeCode showed "Release 1 · v0.11.0".
+
+In FeCode a version, an annotated git tag `v<semver>`, is what its
+people call a release, and FeRun's numbered change of an environment
+read as a second, contradicting one. What this decision calls a
+release is a **deployment**: a numbered, immutable change of an
+environment's spec. The word changes everywhere: in the API, the
+database, the stored specs, the code, the logs and their labels, the
+UI and the documentation. What it means stays, and the states' words
+now read as they are meant: deployment 7 is deploying, deployment 6 is
+deployed.
+
+| Before | Now |
+|---|---|
+| a release, release N, the releases | a deployment, deployment N, the deployments |
+| `…/environments/{env}/releases[/{n}[/revert]]` | `…/environments/{env}/deployments[/{n}[/revert]]` |
+| the key `release` of a number (an environment's latest, `rollout`, an instance's, a job run's, a tag's, a clone's, an incident's), `releases` of a list | `deployment`, `deployments` |
+| a release job, `on: release` | a deploy job, `on: deploy` |
+| the release spec, the release's deadline | the deployment spec, the deployment's deadline |
+| the routing release (the ingress) | the routing deployment |
+| the label `ferun.release` | `ferun.deployment` |
+| `env_releases`, the columns `release` | `env_deployments`, `deployment` |
+| "no such release" | "no such deployment" |
+
+Unchanged: `base` and `base_mismatch` (its text says deployment),
+`deployed`, `rollout`, revert, clone, tags, the origins and
+`ferun.revertOf`. Other meanings of release stay: a software release
+of FeOS or FeCode, a lock, lease, hold or turn being released.
+
+The rest of this ADR keeps the words it was written with, and its file
+its name, which links name; read them as these.
+
+- **Clients first, in two versions.** The first (`ferund` with
+  migration `0024`) serves the deployments' routes and the releases'
+  beside them, answers every such number under both keys and a list
+  under both, and takes a clone's or a tag's number under either (both
+  only when equal, else 400). FeCode moves to the new names; then the
+  second (`0025`) removes the old routes and keys.
+- **The database in two.** A rolling deploy runs the previous `ferund`
+  beside the new one over the same database. So `0024` renames
+  `env_releases` to `env_deployments` and leaves a view `env_releases`
+  over it, which is updatable as the table, and gives `environments`,
+  `env_instances`, `env_job_runs` and `env_incidents` a column
+  `deployment` beside `release`, kept equal both ways by triggers, with
+  a unique index of open incidents on `deployment` beside the one on
+  `release`; its version names the new ones only. `0025` drops the
+  view, the triggers, the `release` columns and their index.
+- **`on: release` for good.** Stored specs, the files of old commits
+  and reverts to old deployments say `release`, so it stays a synonym of
+  `deploy`. The first version accepts both and still stores `release`,
+  since the previous version reads stored specs and knows only that
+  word; the second stores `deploy`, and `0025` rewrites the stored
+  specs.
+- **The label.** A pod keeps the log labels of its create for its life,
+  so the sink reads `ferun.deployment`, else `ferun.release`, for good;
+  the first version writes both, for the sink of the version before,
+  the second `ferun.deployment` alone. The sink's stored names keep the
+  earlier word: a Quickwit index's mapping does not change in place, so
+  a field `deployment` would be a new index and Kafka topic of every
+  retention (the sink's mapping version) for a field no search filters
+  by. The field `release` and the column `log_streams.release` hold the
+  deployment, take the new name with the next mapping version, and the
+  sink's API answers `deployment` (and, in the first version, `release`
+  too).
 
 ### What changed while it was built
 

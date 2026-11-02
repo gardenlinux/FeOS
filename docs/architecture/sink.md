@@ -121,7 +121,7 @@ One `ResourceLogs` per stream. Its resource attributes are the pod's
 | `ferun.instance` | the sandbox's ID (`InstanceStatus.id`) | `ferund` |
 | `ferun.environment` | the environment's ID | `ferund`, an environment's pods |
 | `ferun.kind`, `ferun.object` | `service`, `addon` or `job`, and its name | `ferund`, an environment's pods |
-| `ferun.replica`, `ferun.release` | numbers, as text | `ferund`, an environment's pods |
+| `ferun.replica`, `ferun.deployment` | numbers, as text; `ferun.release` is `ferun.deployment`'s earlier word, read where it is not set | `ferund`, an environment's pods |
 | `ferun.job`, `ferun.attempt` | a tenant's job's ID, the attempt | `ferund`, a tenant's job |
 | `ferun.retention_days` | days, as text | `ferund`, when a job asked |
 
@@ -254,7 +254,10 @@ and the index's one Kafka source `kafka` on the topic
 (`auto.offset.reset` earliest; a session of 10 s). A record is a line as
 the index's document, JSON: `ts` (ns, the time field), `tenant`,
 `stream` (the ID), `environment`, `kind`, `object`, `replica`,
-`release`, `instance`, `container`, `job`, `attempt`, `source`,
+`release` (the stream's deployment: the field keeps the label's earlier
+word, since a field of its own is a new mapping, so a new index and
+topic of every retention, for a field no search filters by; it takes
+the new name with the next mapping version), `instance`, `container`, `job`, `attempt`, `source`,
 `iostream`, `level` (the bit), `trace_id`, `off`, `partial`, `cont`, and
 `text` (Quickwit's `default` tokenizer, with positions). Its key is
 its stream's object, `<tenant>/<environment>/<kind>/<object>` (an
@@ -262,7 +265,7 @@ environment's job run: kind `job`, its job's name), or `<tenant>//<job>`
 for a stream of no environment (a tenant's job), its partition the key's
 FNV-1a hash modulo the topic's partitions, chosen by the sink: a
 stream's lines are in order in one partition, and an object's streams
-(its replicas, releases and runs) share theirs. An environment's objects
+(its replicas, deployments and runs) share theirs. An environment's objects
 spread over the partitions, so one busy service fills its own partition
 and a follow of another reads none of its records. The source indexes each record once, the topic's
 offsets kept in Quickwit's metastore with each split it publishes; a
@@ -357,7 +360,7 @@ taken once (stream, offset).
      "offset": "4096", "source": "stdout", "level": "error", "partial": false, "text": "…"}
   ],
   "streams": {"s_…": {"id": "s_…", "tenant": "…", "instance": "…", "container": "main",
-     "environment": "…", "kind": "service", "object": "api", "replica": 0, "release": 12,
+     "environment": "…", "kind": "service", "object": "api", "replica": 0, "deployment": 12,
      "job": "", "attempt": 0, "node": "…", "source": "container", "firstTime": "…", "lastTime": "…", "endedAt": null,
      "lines": 1234, "bytes": 56789}},
   "cursor": "…",
@@ -412,8 +415,12 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
 
 - **Labels**: an environment's instance and job run, and a tenant's job,
   get `log_labels` on their pod's create (the table above), kept on their
-  sandbox row (`sandboxes.log_labels`, migration `0019`). `ferun.release`
-  is the release the instance was made for. A sandbox a tenant made
+  sandbox row (`sandboxes.log_labels`, migration `0019`). `ferun.deployment`
+  is the deployment the instance was made for; a pod keeps the labels of
+  its create, so the sink reads its earlier word `ferun.release` where it
+  is not set, and `ferund` writes both until its next version (ADR 0018,
+  "The deployments' word"). The column `log_streams.release` and the
+  index field `release` hold it. A sandbox a tenant made
   itself (an attached service's workspace too) has none: its logs are
   not shipped. `POST /api/v1/jobs` takes `logRetentionDays` (1 to 400),
   which becomes `ferun.retention_days`.
@@ -429,7 +436,7 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
   (ServerAuth, no DNS name) for an Ed25519 or ECDSA P-256 key; at most 10
   requests of a token an hour (429).
 - `InstanceStatus.image`: the image the instance runs,
-  `registry/repository@sha256:…` as the release resolved it.
+  `registry/repository@sha256:…` as the deployment resolved it.
 - `GET /api/v1/environments/{env}/access-logs` reads the ingress's
   lines from the sink alone, with the caller's token
   (`environment=<ID>&source=ingress&direction=backward&since=0&until=<beforeTsNs − 1>&trace=<traceId>&limit=<the rest>`,
@@ -451,7 +458,7 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
   each create and stored nowhere: the values `ferund` redacts its stored
   tails of, each also in its URL-userinfo escaping, of 4 bytes or more,
   longest first. An environment's pod: its addons' credentials, its
-  tenant secrets (latest versions and those its releases pin) and those
+  tenant secrets (latest versions and those its deployments pin) and those
   its template names; a tenant's job's: its secrets and image
   credentials. A failure to compute them fails the create, so that no
   pod ships unredacted lines. Every restore sends the row's labels and

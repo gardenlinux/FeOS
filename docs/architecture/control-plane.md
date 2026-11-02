@@ -9,7 +9,7 @@ replication, and how nodes connect),
 credentials), [ADR 0013](../adr/0013-traffic-records.md) (traffic records),
 [ADR 0017](../adr/0017-pod-mesh.md) (the pods' mesh),
 [ADR 0018](../adr/0018-environments-and-releases.md) (environments and
-releases), [ADR 0021](../adr/0021-ingress.md) (the ingress),
+deployments), [ADR 0021](../adr/0021-ingress.md) (the ingress),
 [ADR 0023](../adr/0023-calls-outlive-their-caller.md) (calls that outlive
 their caller), [ADR 0009](../adr/0009-node-os-and-packages.md) (packages).
 The node's side of the wire is in [node.md](node.md#the-control-plane);
@@ -250,7 +250,7 @@ replicate synchronously ([Operations](#operations)).
 | `ferun_watch` | a watch ID | a watch's paths, owner or result changed |
 | `ferun_cancel` | JSON | an exec, an MCP call or a keyed call (ADR 0023) is to be cancelled on whichever instance runs it |
 | `ferun_call` | a tool call's ID (`tool_calls.id`), or `*` for more than 256 | a keyed call left running: done, interrupted, not run |
-| `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, label, releases, deletion (its tenant's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
+| `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, label, deployments, deletion (its tenant's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
 
 The tables: `instances`, `leases`, `cluster_secrets`; `tenants`,
 `tenant_tokens`; `nodes`, `node_telemetry` (the hot row, about a hundred
@@ -269,7 +269,7 @@ that outlive their caller](#calls-that-outlive-their-caller));
 `activity` and `traffic_records`, partitioned by day; `issued_certs`
 (pods' certificates); `watches`;
 `kube_bindings`, `ssh_bindings`; `auth_logins`, `ui_sessions`;
-`environments`, `env_releases`, `env_tags`, `env_secrets`,
+`environments`, `env_deployments`, `env_tags`, `env_secrets`,
 `env_instances`, `env_job_runs`, `env_attached`, `env_volumes`,
 `env_incidents`, `env_route_tokens` ([Environments](#environments));
 `domains` ([Domains](#domains)); `domain_certs`, `acme_accounts`,
@@ -1111,7 +1111,7 @@ spec (`imageCredentials`, each field a string or `{secret}`); its
 template keeps a secret by its name at version 0, which
 `ResolveSecret` reads at its latest version that is not deleted when a
 pod is created, so a rotated token reaches the next replica of an old
-release; the template's hash takes them, so a change of which secret or
+deployment; the template's hash takes them, so a change of which secret or
 username replaces the pods. The engine resolves a tag, asks the
 question and gets the guest's pull token with them: the realm gets them
 as Basic authentication, and its token, asked for anew for every create
@@ -1693,8 +1693,8 @@ keeps in the browser, it shows the tenant's sandboxes and, read only, its
 environments (`/tenants/<t>/environments[/<env>[/<tab>]]`): the
 list, with label filters; an environment's overview (its rollout, its
 objects by kind with their instances, its routes, its open incidents);
-its releases with their tags, annotations, diff and spec; its incidents
-with their evidence, also what a release past its deadline waited for;
+its deployments with their tags, annotations, diff and spec; its incidents
+with their evidence, also what a deployment past its deadline waited for;
 and an object's logs, where the 501 of a node that serves none and the
 409 of a paused instance are messages, not errors.
 It polls (the list every 4 s, an environment every 3 s, the rest every
@@ -1707,10 +1707,10 @@ of ferund's API tests (`go/internal/api/testdata/ferun`).
 An environment ([ADR 0018](../adr/0018-environments-and-releases.md)) is
 a tenant's set of typed objects that run together: services, jobs,
 addons, routes and secrets, each with a DNS label for its name. It
-changes only by releases, numbered from 1 per environment and never
-changed: a release holds the whole desired state as a spec, the release
+changes only by deployments, numbered from 1 per environment and never
+changed: a deployment holds the whole desired state as a spec, the deployment
 it was made on, who made it, why, and annotations of the caller's. The
-controller brings each environment to its latest release and keeps it
+controller brings each environment to its latest deployment and keeps it
 there. FeCode drives environments for its projects' applications
 (FeCode's ADR 0008); the management UI reads them.
 
@@ -1718,8 +1718,8 @@ there. FeCode drives environments for its projects' applications
 
 | Package | What it is |
 |---|---|
-| `env` | the service: plan, apply, revert, object changes, clone, releases, tags, secrets, status, incidents, logs, the route door and its tokens; the wire bodies and error answers; `New`, `Run`, `Loops` |
-| `env/spec` | the release spec: types, strict parse, validation, normalisation, diff, merge patch, hashing |
+| `env` | the service: plan, apply, revert, object changes, clone, deployments, tags, secrets, status, incidents, logs, the route door and its tokens; the wire bodies and error answers; `New`, `Run`, `Loops` |
+| `env/spec` | the deployment spec: types, strict parse, validation, normalisation, diff, merge patch, hashing |
 | `env/addons` | the addon blueprints and their registry |
 | `env/ctl` | the controller: its leader loops, the Ensure pool, probes and restarts, attached services, security groups, name tables, the engine's prepare hook, secret resolution |
 | `env/envdeps` | the interfaces both reach the instance through (`Engine`, `Runner`, `Ports`, `Sealer`) and `SecretAAD` |
@@ -1757,7 +1757,7 @@ resolver (one that does not resolve fails the op before any pod call),
 its volumes, mounts, groups and name tables, and the sandbox's labels
 beside the template's `ferun.environment`, `ferun.object`
 (`<kind>/<name>`) and `ferun.template` (the template hash). There is no
-release label: an object a release does not change keeps its pods. Rows
+deployment label: an object a deployment does not change keeps its pods. Rows
 are inserted with `idle_after_s` always written, IDs ferund mints ([Sandbox
 IDs](#sandbox-ids)), and at least 256 MiB, the rows' floor,
 which valkey's and nats's `dev` plans are raised to.
@@ -1774,15 +1774,15 @@ a deleting one.
 
 | Table | Holds |
 |---|---|
-| `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `release` (the latest desired), `deployed` (the latest deployed), `deleting`, `gen` (the env group's version); `public` (its tenant's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish or chosen by its tenant, unique), public only with both ([Public environments](#public-environments)) |
-| `env_releases` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`waiting`, `deploying`, `deployed`, `failed`, `replaced`), `reason`, start and end |
-| `env_tags` | a tag's release, who moved it and when |
+| `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `deployment` (the latest desired), `deployed` (the latest deployed), `deleting`, `gen` (the env group's version); `public` (its tenant's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish or chosen by its tenant, unique), public only with both ([Public environments](#public-environments)) |
+| `env_deployments` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`waiting`, `deploying`, `deployed`, `failed`, `replaced`), `reason`, start and end |
+| `env_tags` | a tag's deployment, who moved it and when |
 | `env_secrets` | one version of a secret, sealed; `system` for an addon's credential, `addon.<addon>.<key>`, never listed; soft-deleted |
-| `env_instances` | the controller's view of an instance row: kind, object, replica, template hash, release, phase (`starting`, `ready`, `unready`, `exited`, `succeeded`, `failed`, `stopping`), restarts, the last 5 exits, probe failures, the next restart, an addon's provisioning hash, detail; `ingress_ports`, the ports its `ing-` group opens to the ingress as its node holds them ([Security groups](#security-groups)) |
-| `env_job_runs` | one attempt of a job: template hash, release, attempt, phase, exit code, detail, the last 50 lines of its log, redacted and bounded ([Logs](#probes-exits-and-restarts)) |
+| `env_instances` | the controller's view of an instance row: kind, object, replica, template hash, deployment, phase (`starting`, `ready`, `unready`, `exited`, `succeeded`, `failed`, `stopping`), restarts, the last 5 exits, probe failures, the next restart, an addon's provisioning hash, detail; `ingress_ports`, the ports its `ing-` group opens to the ingress as its node holds them ([Security groups](#security-groups)) |
+| `env_job_runs` | one attempt of a job: template hash, deployment, attempt, phase, exit code, detail, the last 50 lines of its log, redacted and bounded ([Logs](#probes-exits-and-restarts)) |
 | `env_attached` | an attached service: its sandbox and the incarnation of it the service last used, template hash, process ID, phase, restarts, the next restart, probe failures, the last exit, detail |
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
-| `env_incidents` | a condition of an object in a release: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable` or `names_unserved` (`attach_failed` is reserved), opened, closed, summary, evidence; one open per object, release and condition |
+| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable` or `names_unserved` (`attach_failed` is reserved), opened, closed, summary, evidence; one open per object, deployment and condition |
 | `env_route_tokens` | the route door's tokens, as hashes |
 | `host_labels` | every default host label ever given: its owner, the tenant that first claimed it and alone may claim it again, and the environment that has it, set free when that is deleted |
 
@@ -1804,17 +1804,31 @@ read both. `0023` rewrote what `0021`'s version wrote meanwhile and
 lets the checks admit the new words only; it rolls once no instance of
 `0021`'s version is left.
 
+The deployments' word changes in two steps (ADR 0018, "The deployments'
+word"). `0024` renamed `env_releases` to `env_deployments`, left a view
+`env_releases` over it, which is updatable as its table, for the
+version before, and gave `environments`, `env_instances`,
+`env_job_runs` and `env_incidents` a column `deployment` beside
+`release`, kept equal both ways by triggers (`deployment_sync`), with
+`env_incidents_open_deployment` beside `env_incidents_open`; its version
+reads and writes the new names only, and still stores a deploy job's
+`on` as `release`, the word the version before knows. `0025` rewrites
+the stored specs' `"on": "release"` to `"deploy"` and drops the view,
+the triggers, their function, the `release` columns and
+`env_incidents_open`; it rolls once no instance of the version before
+`0024` is left.
+
 The database holds no secret value: the log tails it keeps, a run's and
 an incident's, are redacted before they are stored, as far as
 redaction reaches ([Logs](#probes-exits-and-restarts)). A writer that
 wants the controller to act sends `env-reconcile` (or `env-groups`,
 `env-names`) on `ferun_leader` in its transaction. The writers of what
-the ingress's table shows (publishing, an environment's release,
-deployed release and deletion, a tenant's deletion, a service
-instance's insert, delete, phase, release and admitted ports) send
+the ingress's table shows (publishing, an environment's deployment,
+deployed deployment and deletion, a tenant's deletion, a service
+instance's insert, delete, phase, deployment and admitted ports) send
 `ferun_ingress` `env:<id>` themselves.
 
-### The release spec
+### The deployment spec
 
 JSON, its objects in maps keyed by name (`services`, `jobs`, `addons`,
 `routes`, `secrets`), parsed strictly: an unknown field, a wrong type, a
@@ -1848,7 +1862,8 @@ shapes:
   names an attached service, since image pods cannot reach a sandbox, and
   an attached service names only the attached services of its own
   sandbox, the only ones its sandbox's table names.
-- **Jobs**: an image, `on` `release` (the default) or `manual`, retries 0
+- **Jobs**: an image, `on` `deploy` (the default, a deploy job; its
+  earlier word `release` is the same, accepted for good) or `manual`, retries 0
   to 5, a timeout of 10m by default and 2h at most.
 - **Image credentials** (`imageCredentials`, image services and jobs):
   a username and a password, each a string or `{secret}` of the
@@ -1860,7 +1875,7 @@ shapes:
   (the blueprint's default when absent) and the options are the
   blueprint's to check, against the addon that the volume holds when it
   has one (its `addon_type` and `data_version`), else the latest
-  release's: a postgres major version change and a valkey downgrade are
+  deployment's: a postgres major version change and a valkey downgrade are
   errors, a volume of another type is the warning that its data is
   deleted.
 - **Routes**: a path of unreserved characters without empty, `.` or
@@ -1876,7 +1891,7 @@ Normalisation fills the defaults, writes durations as Go does, pins
 every image to `<registry>/<repository>@sha256:…` (keeping
 `imageAsWritten`; a digest reference stays) and every referenced secret
 to its latest version, and drops the secrets nothing references. The
-normalised spec is what a release stores and what plans diff. A diff
+normalised spec is what a deployment stores and what plans diff. A diff
 entry is `{kind, name, change, fields: [{path, from, to}], effect}`, the
 effect `in place`, `restarts` (a job's template), `replaces N pods` (an
 image service's), `recreates (downtime)` (an addon's version, plan or
@@ -1888,17 +1903,17 @@ its version, an image as written with its digest.
 
 - **Plan** parses, validates, resolves the images (one that does not
   resolve is a warning), normalises and diffs against `base` or the
-  current release; it writes nothing. `POST /api/v1/environments/plan`
+  current deployment; it writes nothing. `POST /api/v1/environments/plan`
   validates without an environment.
 - **Apply** plans and refuses any error (422 with every finding), pins
   the images outside the transaction (one that does not resolve is now
   an error), then in one transaction locks the tenant FOR SHARE and the
   environment FOR UPDATE (each refused while it is deleted), checks the
   pinned secret versions again, answers a spec equal to the current
-  release's with that release (200 `unchanged`, checked before the base,
-  so that a no-op on a stale base is no conflict) unless that release
+  deployment's with that deployment (200 `unchanged`, checked before the base,
+  so that a no-op on a stale base is no conflict) unless that deployment
   failed, where the same spec is the retry, checks `base` (409
-  `base_mismatch` with `current`), inserts release `current+1` waiting,
+  `base_mismatch` with `current`), inserts deployment `current+1` waiting,
   replaces older waiting and deploying ones, and sends `env-reconcile`.
 - **Revert** to n applies n's stored spec, origin `revert`, with n's
   annotations and `ferun.revertOf: n`; the call takes no annotations of
@@ -1911,9 +1926,9 @@ its version, an image as written with its digest.
   with `id_taken` before anything is planned under it), sets its secrets
   (`{"copy": true}` the source's latest version that is not deleted,
   opened and sealed again as version 1, `{"value": …}` version 1), and
-  applies as its release 1 (origin `clone`, the source release's
-  annotations without `ferun.revertOf`, whose number names a release of
-  the source) a whole spec of the caller's, or the source release's
+  applies as its deployment 1 (origin `clone`, the source deployment's
+  annotations without `ferun.revertOf`, whose number names a deployment of
+  the source) a whole spec of the caller's, or the source deployment's
   without its attached services and their routes (info findings) and
   with its secret pins reset. It changes no single value of the source's
   spec: a caller that wants other sizes or replicas passes its own spec.
@@ -1926,12 +1941,12 @@ inside a transaction:
 
 | Loop | Interval | Does |
 |---|---|---|
-| `env-reconcile` | 2 s, hint `env-reconcile` | a step ([below](#a-reconcile-step)) for each environment that has a release and is not deleted, four at once |
+| `env-reconcile` | 2 s, hint `env-reconcile` | a step ([below](#a-reconcile-step)) for each environment that has a deployment and is not deleted, four at once |
 | `env-probe` | 1 s | exits, restarts and readiness of the instances whose rows run without an op on a node this instance is connected to; attached services; the tenants' jobs that have not ended, and the pods their ends left ([Tenants' jobs](#tenants-jobs)); at most 16 checks at once |
 | `env-groups` | 10 s, hint `env-groups` | per connected node, the groups its rows' templates name and the groups their rules name (`ferun-ingress` among them), put again where the node's differ, and what the node holds of the ingress's groups recorded ([Security groups](#security-groups)); the groups of environments and sandboxes that are gone deleted, once no pod names them, and an `ing-` group of a sandbox that runs elsewhere too |
 | `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments and sandboxes that are gone deleted, once no pod names them ([Names](#names)) |
 | `env-volumes` | 30 s | volumes marked deleting, 64 a pass, deleted on their node once no pod holds them (`FAILED_PRECONDITION`: later, at the end of the queue; `NOT_FOUND`: done), then their rows; a removed node's lose their rows only; records of environments' volumes on a connected node that no pod holds and no row places there are deleted |
-| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances deleted, its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its releases, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
+| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances deleted, its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
 
 **The Ensure pool.** The controller runs `Engine.Ensure` for the rows
 that should run, and its other slow work (an addon's provisioning, an
@@ -1945,8 +1960,8 @@ grace finds out without waking it.
 
 ### A reconcile step
 
-The target T is the latest release R, unless R failed: then the deployed
-release (nothing when none was), so that a failed release is not tried
+The target T is the latest deployment R, unless R failed: then the deployed
+deployment (nothing when none was), so that a failed deployment is not tried
 again until a new one comes. R waiting turns deploying when T is R. An
 instance's template hash is the sha256 of its rendered template without
 labels, with the image, vCPUs and memory; an addon's takes the image as
@@ -1962,13 +1977,13 @@ failed or lost does not count: the probes look only at rows that run, so
 nothing else resets it. Liveness decides the services' ready counts (the
 status shows the same) and their rollouts, how long a restart of a
 service waits for each replica before the next, an addon's readiness,
-which the release jobs and the services wait for, the names, and when a
+which the deploy jobs and the services wait for, the names, and when a
 crash loop closes. Then:
 
 1. **Addons**, each by its blueprint ([Addons](#addons)):
    - Credentials: system secrets `addon.<addon>.<key>`, 32 hex
      characters (valkey's flags are split at words), version 1,
-     generated once and never changed. Without a sealer the release
+     generated once and never changed. Without a sealer the deployment
      stays deploying with the reason "secrets need --secret-key-file", and
      no incident.
    - The volume row, `addon/<name>`, with the plan's size at its first
@@ -1998,7 +2013,7 @@ crash loop closes. Then:
      most 2 minutes each; their output is redacted of every credential
      before it is stored anywhere; a failure is the instance's detail and
      runs again after 10 s. Databases and roles change the steps, never
-     the pod. Not live, the release waits: "addon <a> is <phase>", or,
+     the pod. Not live, the deployment waits: "addon <a> is <phase>", or,
      with a ready phase, "addon <a> is <state> (<description>)".
    - Whenever the row's pod is materialised on a node (running, paused,
      stopped or failed there, without an op), the volume row's node and
@@ -2022,33 +2037,34 @@ crash loop closes. Then:
      stays queued to sync the row if the node returns with it. An addon
      without a volume (nats without JetStream) is never replaced when it
      is lost.
-2. **Jobs** `on: release`, while R is deploying: one whose template hash has no
-   succeeded run runs once every addon is provisioned. Exit 0 succeeds;
+2. **Deploy jobs** (`on: deploy`, or its earlier word `release`), while R
+   is deploying: one whose template hash has no succeeded run runs once
+   every addon is provisioned. Exit 0 succeeds;
    another code, none ("the node did not report an exit status"), its
    timeout or a lost row fail the attempt, which runs again while
    retries are left; the run keeps the last 50 lines of the log before
    its row goes. A failed last attempt fails R (`job_failed`). A job runs
-   at most once at a time per environment, across releases: while a run
-   of it that is not R's runs (a replaced release's, a manual one,
-   another template's), R's waits ("job <j> waits for its run of release
+   at most once at a time per environment, across deployments: while a run
+   of it that is not R's runs (a replaced deployment's, a manual one,
+   another template's), R's waits ("job <j> waits for its run of deployment
    <n> (attempt <k>)") and never cancels it; that run's success under
    the same template hash serves R, and otherwise R's attempt 1 starts
    once it ended. A run's insert checks under the environment's row lock
    that no run of its job runs. Any job of T runs as a new attempt 1 on
    `POST …/jobs/{name}/run`, refused while a run of it runs.
 3. **Image services**, while R is deploying only after the addons are
-   provisioned and the release jobs succeeded: rows of T's template are
-   kept (their release and idle updated in place) and healed; the others
+   provisioned and the deploy jobs succeeded: rows of T's template are
+   kept (their deployment and idle updated in place) and healed; the others
    are replaced one at a time, surge 1: a new one, ready, then an old
    one stops (phase `stopping`, `retire_at` 10 s ahead: routes drop it
    at once, the env table within a pass of `env-names`, and the answers
    that named it expire after their 5 s) and goes; surplus replicas stop
    from the highest; a lost row is replaced. The service's `rollout.timeout`
-   counts from R's start, moved on by the time R's release jobs waited
-   for runs that were not R's (see the release's deadline below): past
+   counts from R's start, moved on by the time R's deploy jobs waited
+   for runs that were not R's (see the deployment's deadline below): past
    it, or once one of R's new instances exited 3 times, R fails
    (`rollout_failed`, with the exits, the log tail and the diff since
-   the deployed release), and R's new instances stop while the old
+   the deployed deployment), and R's new instances stop while the old
    serve on. Healing, always: a desired row stopped, failed or pending
    gets Ensure, and one unknown, paused or hibernated too when its
    service does not idle ([the pool](#the-controller)).
@@ -2058,30 +2074,30 @@ crash loop closes. Then:
 5. **Removed objects**: their instances stop and go; an addon neither T
    nor R has loses its volume (marked deleting) and its credentials,
    while an addon of a failed R that T lacks stays, so that a failed
-   first release deletes no data; an attached service is cleaned up, its
+   first deployment deletes no data; an attached service is cleaned up, its
    process stopped, a sleeping sandbox woken for it, before its row, and
    its name with it, goes. The open `crash_loop`,
    `volume_unavailable` and `addon_unhealthy` incidents of objects that
    neither T nor R has close.
 6. **Deployed**, when T is R: every object as R has it and ready, addons
-   provisioned, release jobs succeeded, nothing stopping. R is
+   provisioned, deploy jobs succeeded, nothing stopping. R is
    `deployed`, the environment's `deployed` with it, older deployed and
-   waiting releases are replaced, and the open `rollout_failed`,
-   `job_failed` and `crash_loop` incidents of older releases close.
+   waiting deployments are replaced, and the open `rollout_failed`,
+   `job_failed` and `crash_loop` incidents of older deployments close.
 
-**The release's deadline.** A deploying R fails (`rollout_failed`) once it
+**The deployment's deadline.** A deploying R fails (`rollout_failed`) once it
 rolled longer than the longest of T's image services' `rollout.timeout`,
-T's release jobs' timeout × (retries + 1), and 10 minutes, naming the
+T's deploy jobs' timeout × (retries + 1), and 10 minutes, naming the
 first object it still waits for; the evidence lists what it waits for
 and those instances' details, credentials redacted. R's budgets, this
 deadline as well as its services' `rollout.timeout` and its attached
 services' 10 minutes, count from R's start moved on by the time its
-release jobs waited for runs that were not R's: to the latest end of a
-run of such a job by another release that ended after R started (the
+deploy jobs waited for runs that were not R's: to the latest end of a
+run of such a job by another deployment that ended after R started (the
 present while one runs), unless a run of R's template of the job had
 succeeded before R started. The shift is worked out on every step, so
 that R keeps it once its jobs are done; the reason names the time R had
-from its own start. A release without a sealer is spared. An instance
+from its own start. A deployment without a sealer is spared. An instance
 pending without capacity for 2 minutes opens `no_capacity`, with the
 placement's text, which closes once it places. An object of T with a pod
 on a node that serves no names opens `names_unserved` ([Names](#names)).
@@ -2102,7 +2118,7 @@ gives, without a hold:
   …"), scheduled again without counting. 3 exits within 10 minutes open
   `crash_loop` (the exits, the log tail), which closes once every
   instance of the object has been ready for 10 minutes and is live, or
-  once a later release is deployed. Restarts count from zero again after 10
+  once a later deployment is deployed. Restarts count from zero again after 10
   minutes ready.
 - **Readiness**: http, a GET of the path over a port-forward with `Host:
   localhost:<port>`, 200 to 399 within 2 s; tcp, a port-forward that is
@@ -2135,7 +2151,7 @@ node does not serve container logs yet", a paused or hibernated instance
 409 "paused" (never woken for it), an instance that does not run 409
 `not_running`. A replica the object has no row for is 409 `not_running`
 "<kind> <name> has no instance of replica <r> yet: no log to read"
-below the replicas the target release asks for, "… runs no replica
+below the replicas the target deployment asks for, "… runs no replica
 (replicas: 0): no log to read" for none, and 404 "<kind> <name> has no
 replica <r> (it has <n>)" beyond them. A job's log is its latest run's,
 the stored tail once its row is gone; an attached service's is its
@@ -2178,8 +2194,8 @@ two carry the egress table: any protocol to `0.0.0.0/0` except `0.0.0.0/8`,
   is the pod's own: the controller adds `ing-<sandbox id>` to the row's
   groups at its insert. While the environment is public it allows TCP
   in on the pod's routed ports from the group `ferun-ingress`: the
-  numbers, in the pod's own release, of the ports that the routes of the
-  deployed and the latest release give its service. Otherwise, or
+  numbers, in the pod's own deployment, of the ports that the routes of the
+  deployed and the latest deployment give its service. Otherwise, or
   without routed ports, it has no rules; it never has members. Addons,
   jobs and attachable sandboxes name none.
 - **`ferun-ingress`** has no rules; its members are the mesh addresses of
@@ -2246,7 +2262,7 @@ from the name tables the controller puts on the nodes
   the IPv6 addresses of their live replicas; while none is live, those
   of the replicas whose row's state is known; only then those of unknown
   ones, whose node is out of touch and whose address may be stale; never
-  a stopping one's. An environment without a release, or being deleted,
+  a stopping one's. An environment without a deployment, or being deleted,
   has an empty table.
 - **The sbx table**, `sbx-<sandbox id>`, which an attachable sandbox's
   template names from its creation, names the attached services whose
@@ -2325,7 +2341,7 @@ the old one, its phase is `starting`, and its restarts, next restart,
 probe failures and detail are reset; a new sandbox that sleeps is woken
 for the start. (A client cannot make a sandbox under an ID of its choice
 any more, [ADR 0019](../adr/0019-pod-ids.md): a replaced sandbox has a
-new ID, which the environment's spec names in a new release.)
+new ID, which the environment's spec names in a new deployment.)
 
 **Cleanup.** A service that goes, removed from T, moved to another
 sandbox or with its environment deleted, has its process stopped before
@@ -2350,7 +2366,7 @@ with it, names the old one.
 **References** resolve thus: an addon's output (`{addon, key, …}`) to the
 blueprint's parts against the addon instance's address (in brackets in a
 URL), so that a dependent waits while the addon has none, and gets a new
-template when it changes, rolled as a release would be; a service's
+template when it changes, rolled as a deployment would be; a service's
 (`{service, port, key}`) to its name, its port number or
 `http://<name>:<port>`, which the env table names; a secret to its
 pinned version.
@@ -2368,7 +2384,7 @@ route token of another environment is 404 "no such environment".
 `POST /api/v1/environments/{env}/route-tokens` mints one (32 random
 bytes, base64url, shown once, only its SHA-256 kept); `DELETE` revokes
 them all. The door matches the longest prefix, segment by segment, over
-the routes of the deployed release (the latest while none is deployed;
+the routes of the deployed deployment (the latest while none is deployed;
 no match is 404 "no route for <path>") and forwards with the port door's
 `ForwardTo`, naming the headers that carried the token: a forward hold
 and a touch, the Host passed on, upgrades and streams kept, a
@@ -2387,7 +2403,7 @@ serves anonymous clients; a refusal below 500 keeps its text.
   runs, round-robin; with none, to a paused or hibernated one, which the
   forward wakes (scale from zero); with none at all, 503 "no ready
   instance of <service>" with `Retry-After: 5`. The port is the one the
-  chosen instance's own release gives the route's port name.
+  chosen instance's own deployment gives the route's port name.
 - An attached service's goes to the sandbox of its `env_attached` row
   while that exists, is the owner's and is no instance row, a new
   incarnation of it too, where the controller starts the service anew.
@@ -2424,8 +2440,8 @@ id>|<name>|<version>`; without the key the secrets routes answer 503
 an addon is deployed. The controller resolves them (`ResolveSecret`,
 also the engine's resolver) into a pod's env at its create, a process's
 and a provisioning step's, and writes them nowhere. A delete is refused
-(409) while the latest release pins the secret, and soft-deletes every
-version, so that an older release still resolves.
+(409) while the latest deployment pins the secret, and soft-deletes every
+version, so that an older deployment still resolves.
 
 **Known exposure.** A resolved env reaches feosd's record of the pod,
 `GetPod` and `ListPods`, the node's disk and hibernation checkpoints in
@@ -2476,13 +2492,13 @@ each blueprint against its image in docker, as FeOS would start it.
 ### Status and incidents
 
 `GET /api/v1/environments/{env}` answers the environment, its rollout
-(the latest release's state, start and reason), its objects as the
-target release has them (an image service with desired and ready counts,
+(the latest deployment's state, start and reason), its objects as the
+target deployment has them (an image service with desired and ready counts,
 the ready ones its live instances, and its instances, an addon with
 type, version, plan, phase and `provisioned`, a job with its last run,
 an attached service with its sandbox, phase, restarts and last exit;
 `starting` before an object has an instance), its routes (of the
-deployed release, else the latest), each with its `door`, `ingress` with
+deployed deployment, else the latest), each with its `door`, `ingress` with
 its `url` (`https://<host><prefix>`) for a route to an image service of
 a public environment and `route` for every other, `public`, its `hosts`
 (while it is public and not being deleted: its served domains in the
@@ -2491,12 +2507,12 @@ apps zone; otherwise empty, [ADR 0021](../adr/0021-ingress.md)),
 `hostLabel` (its default host's label once it has one, kept while a
 domain is its host), and the number of open
 incidents. An instance carries its `image`, `registry/repository@sha256:…`
-as its release resolved it. The listing shows `public` and `hosts` too. An
-incident has its object, release, condition, summary, opening and
+as its deployment resolved it. The listing shows `public` and `hosts` too. An
+incident has its object, deployment, condition, summary, opening and
 closing, and evidence: `exits`, `logTail` (redacted and bounded), `diff`
-(since the deployed release), `placement`, and `pending`, what a release
+(since the deployed deployment), `placement`, and `pending`, what a deployment
 past its deadline still waited for with the details of those objects'
-instances, credentials redacted. A failed release's reason is its
+instances, credentials redacted. A failed deployment's reason is its
 incident's summary.
 
 ### The environments' REST API
@@ -2507,38 +2523,46 @@ name; one the tenant does not have is 404 "no such environment".
 | Method and path | Answers |
 |---|---|
 | `POST /api/v1/environments` `{name, id?, labels?}` | 201 its status; the same ID and name again 200; 409 `name_taken`, `id_taken` |
-| `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, release, deployed, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest release's, `none` or `deleting` |
+| `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest deployment's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
 | `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a tenant of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds, or a plain label that is the natural label of an existing tenant's environment; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings}` |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current}` |
-| `POST …/{env}/releases` `{spec, base, author?, message?, annotations?}` | 201 the release; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
-| `GET …/{env}/releases?limit=50`, `…/releases/{n}` | newest first, with their tags; one with its spec and its diff against n-1 |
-| `POST …/releases/{n}/revert` `{base, author?, message?}` | as a release |
-| `PUT`, `DELETE …/{env}/objects/{kind}/{name}` | as a release; with `dryRun` a plan |
-| `GET`, `PUT`, `DELETE …/{env}/tags[/{tag}]` | the tags, a tag (`PUT {release, author?}`), 204 |
-| `POST …/{env}/clone` `{name, id?, release?, spec?, labels?, secrets?, author?, data?}` | 201 the new environment's status; 409 `id_taken` before the spec is planned, `name_taken`; 422 findings |
+| `POST …/{env}/deployments` `{spec, base, author?, message?, annotations?}` | 201 the deployment; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
+| `GET …/{env}/deployments?limit=50`, `…/deployments/{n}` | newest first, with their tags; one with its spec and its diff against n-1 |
+| `POST …/deployments/{n}/revert` `{base, author?, message?}` | as a deployment |
+| `PUT`, `DELETE …/{env}/objects/{kind}/{name}` | as a deployment; with `dryRun` a plan |
+| `GET`, `PUT`, `DELETE …/{env}/tags[/{tag}]` | the tags, a tag (`PUT {deployment, author?}`), 204 |
+| `POST …/{env}/clone` `{name, id?, deployment?, spec?, labels?, secrets?, author?, data?}` | 201 the new environment's status; 409 `id_taken` before the spec is planned, `name_taken`; 422 findings |
 | `GET …/{env}/secrets`, `PUT`, `DELETE …/secrets/{name}` | the names with their latest versions; `{name, version}`; 204, 409 while pinned |
 | `GET …/{env}/incidents[?open=1]`, `…/incidents/{id}` | newest first; one |
 | `GET …/{env}/access-logs[?limit=200&beforeTsNs=&traceId=]` | `{records}`: the newest page of the ingress's access log before `beforeTsNs` (a record's `tsNs`, a string), at most 1000, ascending, of the trace `traceId` (32 lower case hex digits; else 400) when given, read from the sink ([The sink](#the-sink)); 503 `no_log_store` without `--sink-url`, 503 `log_store_unavailable` when the sink fails; each `{tsNs, time, durationNs, ingress, service, instance, host, method, path, proto, status, outcome, attempts, heldNs, bytesIn, bytesOut, clientIp, userAgent, traceId, spanId, parentSpanId}` ([ingress.md](ingress.md#access-log)) |
-| `GET …/{env}/traffic[?window=1h]` | the requests the ingress answered for each routed service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every service of the desired and deployed releases' routes to an image service with a request in the window, by name, each with every bucket, oldest first; `errors` the requests of a status ≥ 500 or none written, but not aborted; the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-ingresss-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
+| `GET …/{env}/traffic[?window=1h]` | the requests the ingress answered for each routed service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every service of the desired and deployed deployments' routes to an image service with a request in the window, by name, each with every bucket, oldest first; `errors` the requests of a status ≥ 500 or none written, but not aborted; the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-ingresss-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
 | `GET …/{env}/objects/{kind}/{name}/logs?lines=200&replica=0` | `{lines, source}`, the source `container` or `process`; with `--sink-url` a container's log is the sink's first ([The sink](#the-sink)); 501; 409 "paused" (unless the sink has the instance's lines), `not_running` (also for a replica without an instance yet, or none at all); 404 for a replica beyond the object's ([Logs](#probes-exits-and-restarts)) |
 | `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes, or an attached service's process |
-| `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (release N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any release; 409 `not_ready` |
+| `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |
 | `ANY …/{env}/http/{path...}` | the route door |
 
+For one version, until the clients have moved (ADR 0018, "The
+deployments' word"), the deployments' earlier word works beside the new
+one: `…/{env}/releases[/{n}[/revert]]` are the same routes as
+`…/deployments[…]`; every answer that carries a number as `deployment`
+carries it as `release` too, and a list of `deployments` as `releases`
+too; a clone and a tag take the number as `deployment` or `release`,
+both only when equal (else 400). The next version removes them.
+
 Other answers: plain 409s "environment X is being deleted", "tenant X is
-being deleted", "release N pins secret X: apply a release without it
+being deleted", "deployment N pins secret X: apply a deployment without it
 first", "the platform serves no apps zone (--apps-zone); an environment
 cannot be public" and "paused"; 409s with a code for states the
 controller expects: `busy` (with `Retry-After`) while the object has an
 op in flight or, for
 a job, a run, `not_running` for an instance that does not run,
 `not_ready` for a job whose template cannot render yet ("job X cannot
-run yet: …"); 404 "no such release", "no such tag", "no such secret",
+run yet: …"); 404 "no such deployment", "no such tag", "no such secret",
 "no such incident", "no such object: <kind>/<name>" for an object the
-target release does not have; 503 "secrets need --secret-key-file". An
+target deployment does not have; 503 "secrets need --secret-key-file". An
 author has at most 1 KiB, a message 64 KiB, annotations 4 KiB, labels 64
 of at most 253 bytes. Not built: MCP tools and grants for environments,
 an admin listing, volumes for services, a copy of data on a clone, addon
@@ -2704,7 +2728,7 @@ port](#the-nodes-port), [api.md](api.md#the-ingresss-api)), from
   table builder has not read the database for 30 s.
 - **The table builder** (`internal/ingress/table`) runs on every
   instance that has a stream: it builds each public environment's entry
-  from the database (routes of the deployed release, else the latest;
+  from the database (routes of the deployed deployment, else the latest;
   endpoints with their admitted ports; asleep, waking and pending
   counts; its served domains with their certificates, the keys opened
   with `--secret-key-file`'s key), rebuilds an environment on
@@ -2822,8 +2846,8 @@ their claims, checks and states, are the domains core's; ACME owns
 - **Incidents.** A domain served (`served` or `dns-moved`, its
   certificate valid) whose orders have failed for 24 hours gets
   `certificate_failing` on its environment, object `domain/<name>`, the
-  environment's latest release, with the last error and the expiry in
-  its summary; once, whatever the releases; a renewal that succeeds
+  environment's latest deployment, with the last error and the expiry in
+  its summary; once, whatever the deployments; a renewal that succeeds
   closes it.
 - **The table** carries a served domain (`served` or `dns-moved`,
   verified, bound to a public environment of its tenant, its
@@ -2981,7 +3005,7 @@ state without a write: `domains-settle` catches it.
   verified; routed again ends it; at the grace's end it is `inactive`,
   and stays verified and bound.
 - **Incidents** on the bound environment, object `domain/<name>`, on its
-  latest release: `domain_record_wrong` when a grace starts (which record
+  latest deployment: `domain_record_wrong` when a grace starts (which record
   since when, and `deactivatesAt`; one incident for both records, its
   summary rewritten), closed when no grace runs; `domain_deactivated`
   when a grace ran out, closed when the domain is active again;
@@ -3010,8 +3034,10 @@ nor waits for. `ferund`'s part:
   tenant's job's pod writes `sandboxes.log_labels` (`model.Log*`):
   `ferun.tenant`, `ferun.instance` (the row's ID); an environment's
   `ferun.environment`, `ferun.kind`, `ferun.object`, `ferun.replica`,
-  `ferun.release` (the release the instance was inserted for: a kept
-  instance's later release does not change it), a job run's
+  `ferun.deployment` (the deployment the instance was inserted for: a
+  kept instance's later deployment does not change it; until the next
+  version also under its earlier word `ferun.release`, which the sink of
+  the version before reads alone), a job run's
   `ferun.attempt`; a tenant's job's `ferun.job` (its ID), `ferun.attempt`
   `1` and, when it asked, `ferun.retention_days`. The engine sends them
   as `CreatePodRequest.log_labels`, beside the spec: a create delivered
@@ -3065,7 +3091,7 @@ nor waits for. `ferund`'s part:
   the sink from the ingress's spans
   ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
   caller's bearer: `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s`
-  for the services that the routes of the desired and deployed releases
+  for the services that the routes of the desired and deployed deployments
   send the ingress to (an attached service's routes only the route door
   serves). Without such a service the sink is not asked and `services`
   is empty. `ferund` fills the steps the sink leaves out with zeros and
@@ -3158,7 +3184,7 @@ without the pod does, its volumes let go; an exec into a pod labelled
 provisioning pass. Its `Config` drives an environment end to end:
 `ContainerExits` make the main container of an environment's pods exit
 a while after each boot, by a glob over their `ferun.object` label (the
-first rule that matches counts), so that release jobs finish and a
+first rule that matches counts), so that deploy jobs finish and a
 service crash-loops, and a rule `process/<name>` ends a fake process;
 `FakeProcesses` answers the control plane's process scripts
 (`process_start` and the attached services' start, listing, logs and
@@ -3193,7 +3219,7 @@ has a variable `FERUN_TESTNODE_<NAME>`, which the flag overrides. SIGHUP
 restarts the node gracefully, as an upgrade of feosd does, and SIGUSR1
 logs its pods, volumes, security groups and name tables as one JSON
 line. An
-environment with addons, release jobs, attached services and routes runs
+environment with addons, deploy jobs, attached services and routes runs
 end to end against a ferund with `--secret-key-file` and test nodes with
 `--fake-exec --fake-processes --exit 'job/*=0@3s' --start-log
 --port-addr 8080=127.0.0.1:18080`, a local server on `127.0.0.1:18080`
@@ -3244,6 +3270,13 @@ that dial the instances.
   answers the release states, `deployed` and the stopping phase in
   their new words alone (ADR 0018, "The states' words"): roll a FeCode
   that reads both vocabularies before that ferund.
+- **The deployments' word, `0024` then `0025`.** The version of `0024`
+  serves the deployments' routes and keys and the releases' beside them,
+  and writes the log label `ferun.deployment` beside `ferun.release`; roll
+  it (`ferund`, `ferun-sink`, `ferun-ingress`) before FeCode moves to the
+  new names. The version of `0025` serves the new names alone and stops
+  writing `ferun.release`: roll it once FeCode uses the new names only and
+  no `ferund` before `0024` is left (ADR 0018, "The deployments' word").
 
 ### Requirements
 

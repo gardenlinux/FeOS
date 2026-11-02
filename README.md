@@ -13,7 +13,7 @@ back in under a second, on the same node or another one. On top of it,
   tools for a user, often for days, with exec, file tools, file watches,
   ports and credentials it can use but never sees.
 - **Container as a service** (CaaS): customers run their own images as
-  services, jobs and addons in environments, with releases, routes and
+  services, jobs and addons in environments, with deployments, routes and
   scale to zero, without operating a cluster.
 
 FeOS is written in Rust, statically linked against musl; FeRun in Go.
@@ -58,7 +58,7 @@ FeOS is written in Rust, statically linked against musl; FeRun in Go.
 | `diskd` | [`crates/diskd`](crates/diskd) | the disk daemon: a pod's disk as a ublk device over sealed layers, cached locally and tiered to S3 |
 | `feos-host-init` | [`crates/feos-host-init`](crates/feos-host-init) | PID 1 of a node whose operating system is FeOS |
 | `feosctl` | [`crates/feosctl`](crates/feosctl) | the command-line client of a node |
-| `ferund` | [`go/`](go/) | FeRun, the control plane: REST, MCP, the nodes' connections, placement, environments and releases |
+| `ferund` | [`go/`](go/) | FeRun, the control plane: REST, MCP, the nodes' connections, placement, environments and deployments |
 | `feos-k8s` | [`go/`](go/) | joins and drains FeOS nodes that run on Kubernetes |
 | management UI | [`web/`](web/) | FeRun's UI (React), served by `ferund` |
 | FeChat | [`fechat/`](fechat/) | a reference chat client of FeRun: an LLM with tools in a sandbox per conversation |

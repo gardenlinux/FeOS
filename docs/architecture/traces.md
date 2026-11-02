@@ -71,7 +71,8 @@ same as its log streams carry (sink.md, The OTLP shape) without
 `ferun.container`, `ferun.log_id` and `ferun.retention_days`:
 `ferun.pod`, `ferun.node`, `ferun.tenant`, `ferun.instance`, and those of
 `ferun.environment`, `ferun.kind`, `ferun.object`, `ferun.replica`,
-`ferun.release`, `ferun.job`, `ferun.attempt` the pod has. A resource
+`ferun.deployment` (else its earlier word `ferun.release`), `ferun.job`,
+`ferun.attempt` the pod has. A resource
 without `service.name` gets the pod's `ferun.object`, else its
 `ferun.job`, else `unknown_service`. Spans, scopes and their attributes
 pass as they came.
@@ -200,7 +201,7 @@ span:
 | `ts` | datetime (ns), the timestamp field, fast | `start_time_unix_nano` |
 | `tenant` | raw text, the tag field | `ferun.tenant` |
 | `environment`, `kind`, `object`, `instance`, `job`, `source`, `pod`, `node` | raw text | the `ferun.*` attributes; `source` `container` unless `ingress` |
-| `replica`, `release`, `attempt` | u64 | the `ferun.*` attributes |
+| `replica`, `release`, `attempt` | u64 | the `ferun.*` attributes; `release` is the deployment, under the label's earlier word, as the log index has it (sink.md) |
 | `trace_id`, `span_id`, `parent_span_id` | raw text, lower-case hex, `trace_id` fast | the span |
 | `trace_state` | stored, not indexed | the span |
 | `flags` | u64 | the span's `flags`, its low 8 bits (W3C trace flags) |
