@@ -3,7 +3,8 @@
 `ferun-sink` keeps the spans of the pods FeRun makes and of the requests
 `ferun-ingress` answers (ADR 0026 §10, step 10), appended to a Kafka
 topic and indexed from there by Quickwit's trace index (§11), and
-answers them to a tenant in the shape of Jaeger's query API. This page is
+answers them to a tenant in the shape of Jaeger's query API, and the
+ingress's spans also as its traffic per service. This page is
 the contract between the parts; the ADR says why. Logs are
 docs/architecture/sink.md; what that page says of identities, the topics
 and Quickwit holds here unless this one says otherwise.
@@ -13,7 +14,8 @@ pod (OTel SDK) ──OTLP/gRPC :4317, OTLP/HTTP protobuf :4318──▶ feosd at
                                    │ the pod by its source address, its ferun.* labels stamped
 feosd (node) ──OTLP TraceService/Export (mTLS, node cert)──▶ ferun-sink ──▶ PostgreSQL `trace_usage` (quota)
 ferun-ingress ──TraceService/Export (mTLS, ingress cert)──▶     │   └──▶ Kafka ferun-traces-v4-<days>d ──Kafka source──▶ Quickwit index of that name
-tenants (FeCode) ── GET /api/v1/jaeger/api/… (Bearer) ─────────┘
+tenants (FeCode) ── GET /api/v1/jaeger/api/… (Bearer) ──────────┤
+ferund ── GET /api/v1/traffic (the caller's Bearer) ────────────┘
 ```
 
 Sampling: every span that arrives is kept (ADR 0026, open question 2).
@@ -267,6 +269,49 @@ among them). A span is `{"traceID", "spanID", "operationName",
 `otel.status_description` when set, and `error` `true` for an error;
 `logs` are the events, `{"timestamp" (µs), "fields": [tags…, {"key":
 "event", "type": "string", "value": name}]}`.
+
+### Reading: the ingress's traffic
+
+`GET /api/v1/traffic?environment=<ID>&service=<name>[&service=…]&since=&until=&step=`,
+with a tenant's token as above: the requests the ingress answered for
+each service of the tenant's environment, counted from its server spans
+(source `ingress`, the service as `object`). `ferund`'s
+`…/environments/{env}/traffic` reads it (control-plane.md). `since` and
+`until` are RFC 3339 or Unix ns, the range `[since, until)`, both
+multiples of `step`, a Go duration of whole seconds (`60s`, `15m`); 1 to
+128 services, at most 1,440 steps; else 400.
+
+```json
+{"services": [
+  {"service": "web", "requests": 1234, "errors": 3, "p50Ns": 12300000.0, "p95Ns": 87000000.0,
+   "steps": [{"tsNs": "1793581200000000000", "requests": 20, "errors": 0, "p95Ns": 90100000.0}]}
+]}
+```
+
+A service per one asked, in that order; `steps` holds only the steps
+with requests, oldest first; the percentiles are of `duration_ns`,
+`null` without requests. A request failed (`errors`) when its status
+was 500 or more, or none was written and the client did not go away.
+The span's status does not say this (an aborted request is
+`STATUS_CODE_ERROR` too), so the sink reads it from the attributes:
+`http.response.status_code` in 500 to 999, or `ferun.outcome` `2xx`
+without a code of 200 to 299 (the ingress's class of a request that
+wrote no status and was neither aborted nor upgraded). An attribute is
+not a fast field and takes no range, so the codes are a set of terms
+(`IN [500 501 …]`).
+
+`object` is not a fast field either, so the spans cannot be grouped
+by service in one search: each service takes two searches of the index,
+both with a `date_histogram` of `ts` in the step (aligned to the epoch,
+`min_doc_count` 1). The failed requests are counted first, then all
+requests with `percentiles` of `duration_ns` (50, 95) overall and 95
+per step. The index only grows, so the errors counted first never
+outnumber the requests counted after them. Four services are searched
+at a time. The percentiles are Quickwit's estimates, within about 1 %.
+The index alone is read, so the last commit's spans (5 s) are not in
+it yet. The count is best effort: the ingress sends its spans once and
+drops a batch the sink did not take (The ingress), and a span stored
+twice is counted twice.
 
 ## FeCode
 

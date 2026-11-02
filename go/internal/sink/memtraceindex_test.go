@@ -7,9 +7,11 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gardenlinux/feos/go/internal/sink/kafka"
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
@@ -106,6 +108,48 @@ func (m *memTraceIndex) NewestTraces(_ context.Context, pattern string, q quickw
 	}
 	slices.SortFunc(out, func(a, b quickwit.TraceHit) int { return cmp.Compare(b.NewestNs, a.NewestNs) })
 	return out[:min(len(out), n)], nil
+}
+
+func (m *memTraceIndex) SpanHistogram(_ context.Context, pattern string, q quickwit.SpanQuery, step time.Duration,
+	durations bool) (quickwit.Histogram, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	byStep := map[int64][]int64{}
+	var all []int64
+	for _, d := range m.match(pattern, &q) {
+		start := d.TS - d.TS%int64(step)
+		byStep[start] = append(byStep[start], d.DurationNs)
+		all = append(all, d.DurationNs)
+	}
+	h := quickwit.Histogram{Count: int64(len(all))}
+	if durations {
+		h.P50Ns, h.P95Ns = percentileCont(all, 0.50), percentileCont(all, 0.95)
+	}
+	for _, start := range slices.Sorted(maps.Keys(byStep)) {
+		b := quickwit.Bucket{StartNs: start, Count: int64(len(byStep[start]))}
+		if durations {
+			b.P95Ns = percentileCont(byStep[start], 0.95)
+		}
+		h.Buckets = append(h.Buckets, b)
+	}
+	return h, nil
+}
+
+// percentileCont is the p-th percentile of xs, interpolated between the
+// closest ranks (PostgreSQL's percentile_cont); nil for none. Quickwit
+// estimates it within about 1 %.
+func percentileCont(xs []int64, p float64) *float64 {
+	if len(xs) == 0 {
+		return nil
+	}
+	s := slices.Sorted(slices.Values(xs))
+	r := p * float64(len(s)-1)
+	lo := int(r)
+	v := float64(s[lo])
+	if lo+1 < len(s) {
+		v += (r - float64(lo)) * float64(s[lo+1]-s[lo])
+	}
+	return &v
 }
 
 // count is how many spans the indexes hold.

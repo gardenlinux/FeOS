@@ -69,7 +69,8 @@ type SpanLink struct {
 // SpanQuery selects a tenant's spans: the labels and fields set (empty:
 // any), a time range of ts in Unix ns (both ends included; 0: open), a
 // range of durations (0: open), and attributes each with its value in
-// the span's or the resource's attributes; at most Max hits.
+// the span's or the resource's attributes; with Failed only the
+// ingress's spans of failed requests (Failed); at most Max hits.
 type SpanQuery struct {
 	Tenant                                     string
 	Environment, Object, Job, Instance, Source string
@@ -77,6 +78,7 @@ type SpanQuery struct {
 	Tags                                       map[string]string
 	SinceNs, UntilNs                           int64
 	MinDurationNs, MaxDurationNs               int64
+	Failed                                     bool
 	Max                                        int
 }
 
@@ -126,6 +128,9 @@ func (q SpanQuery) String() string {
 		f, v := fieldPath(k), quote(q.Tags[k])
 		c = append(c, "(span_attributes."+f+":"+v+" OR resource_attributes."+f+":"+v+")")
 	}
+	if q.Failed {
+		c = append(c, failedClause)
+	}
 	if len(c) == 0 {
 		return "*"
 	}
@@ -174,7 +179,7 @@ func (q *SpanQuery) Match(d *SpanDoc) bool {
 			return false
 		}
 	}
-	return true
+	return !q.Failed || Failed(d)
 }
 
 // valueIs reports whether a JSON value is v: a string equal to it, a

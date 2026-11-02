@@ -7,10 +7,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +197,37 @@ func TestTracesEndToEnd(t *testing.T) {
 		t.Fatalf("%d spans indexed", tidx.count())
 	}
 	check("index")
+
+	// The ingress's traffic of the environment's services: the ingress's
+	// span of web, none of api; the pod's own span is not traffic.
+	step := int64(time.Minute)
+	until := (time.Now().UnixNano()/step + 1) * step
+	traffic := "http://" + prog.APIAddr().String() + "/api/v1/traffic?" + url.Values{"environment": {"env1"},
+		"service": {"web", "api"}, "since": {fmt.Sprint(until - int64(time.Hour))}, "until": {fmt.Sprint(until)},
+		"step": {"60s"}}.Encode()
+	r, _ := http.NewRequestWithContext(actx, http.MethodGet, traffic, nil)
+	r.Header.Set("Authorization", "Bearer tenant-token")
+	tresp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr struct {
+		Services []ServiceTraffic `json:"services"`
+	}
+	err = json.NewDecoder(tresp.Body).Decode(&tr)
+	_ = tresp.Body.Close()
+	if err != nil || tresp.StatusCode != http.StatusOK || len(tr.Services) != 2 || tr.Services[0].Service != "web" ||
+		tr.Services[0].Requests != 1 || tr.Services[0].Errors != 0 || len(tr.Services[0].Steps) != 1 ||
+		tr.Services[1].Service != "api" || tr.Services[1].Requests != 0 {
+		t.Errorf("traffic: %d %+v %v", tresp.StatusCode, tr, err)
+	}
+	r, _ = http.NewRequestWithContext(actx, http.MethodGet, strings.Replace(traffic, "step=60s", "step=1ms", 1), nil)
+	r.Header.Set("Authorization", "Bearer tenant-token")
+	if tresp, err := http.DefaultClient.Do(r); err != nil || tresp.StatusCode != http.StatusBadRequest {
+		t.Errorf("traffic of a bad step: %v %v", tresp, err)
+	} else {
+		_ = tresp.Body.Close()
+	}
 
 	if a := read("/traces/zz", http.StatusBadRequest); len(a.Errors) != 1 || a.Errors[0].Code != 400 {
 		t.Errorf("a bad ID: %+v", a)
