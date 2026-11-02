@@ -122,7 +122,7 @@ replicated database, as [`../gardener/ferun`](../gardener/ferun) does.
 Built from `make packages` (FeOS's .deb packages, ADR 0009), with a version
 per build so that apt upgrades the nodes:
 
-    make packages FEOS_VERSION=0.6.0~dev.$(date -u +%Y%m%d%H%M).$(git rev-parse --short=7 HEAD)
+    make dev-packages
     make -C deploy/k3s push-feos-node apply-feos
 
 Then the secrets: `oci-pull` as for ferund; diskd's object store, the

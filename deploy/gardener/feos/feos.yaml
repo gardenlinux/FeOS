@@ -109,6 +109,9 @@ spec:
             requests: { cpu: 250m, memory: 2Gi }
           volumeMounts:
             - { name: feos, mountPath: /var/lib/feos }
+            # feosd hands diskd a guest's blank data volume by its path
+            # there: diskd sees every version that feosd boots.
+            - { name: dist, mountPath: /usr/lib/feos, readOnly: true }
             - { name: dev, mountPath: /dev }
       containers:
         - name: feosd

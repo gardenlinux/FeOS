@@ -30,7 +30,7 @@ uninlined_format_args = "warn"
 result_large_err = "allow"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 
 [workspace.dependencies]

@@ -123,9 +123,12 @@ privileged and on the host's network, with the host's `/dev` and
   exits; the next feosd resumes them. A crash ends them; FeRun brings their
   sandboxes back from their last hibernation.
 - **Versions side by side**: the init container adds the image's
-  Firecracker and guest versions to `/var/lib/feos/dist`, which the feosd
-  container sees as `/usr/lib/feos`, so that a pod resumes with the
-  Firecracker it was suspended with.
+  Firecracker and guest versions to `/var/lib/feos/dist`, which both
+  containers see as `/usr/lib/feos`, so that a pod resumes with the
+  Firecracker it was suspended with. A new pod boots the newest guest
+  there, so an image's packages must be newer than every version on the
+  node: a dev version (`make dev-packages`), never a plain release number
+  of a release still to come, which would outrank every dev build of it.
 - **Workers come and go**: Gardener replaces them on updates and in the
   shoot's maintenance window by cordoning, draining and deleting the
   machine. `feos-k8s` makes a join token for every new worker and keeps a
@@ -136,7 +139,7 @@ privileged and on the host's network, with the host's `/dev` and
 
 The image comes from the packages:
 
-    make packages FEOS_VERSION=0.6.0~dev.$(date -u +%Y%m%d%H%M).$(git rev-parse --short=7 HEAD)
+    make dev-packages
     make -C deploy/gardener deploy-feos      # build, push and roll feos-node
 
 Roll ferund (`make -C deploy/gardener deploy-ferund`) before feos-node

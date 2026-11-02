@@ -18,7 +18,7 @@ back in under a second, on the same node or another one. On top of it,
 
 FeOS is written in Rust, statically linked against musl; FeRun in Go.
 
-> **Status:** FeOS 0.6.0 is in development and changes quickly. The node
+> **Status:** FeOS 0.6.1 is in development and changes quickly. The node
 > layer and the agent sandboxes run; CaaS is partly built. What is built and
 > what is not is in [docs/overview.md](docs/overview.md)
 > and in the [ADR index](docs/adr/README.md#index).

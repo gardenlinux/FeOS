@@ -78,6 +78,10 @@ test-ferund-package: ## Install ferund's package on Debian 13 and check its user
 # <FeOS version>~dev.<UTC time>.<commit>.
 DEV_VERSION := $(FEOS_VERSION)~dev.$(shell date -u +%Y%m%d%H%M).$(shell git rev-parse --short=7 HEAD 2>/dev/null)
 
+.PHONY: dev-packages
+dev-packages: ## Build the packages of HEAD as a dev version, for an image or a node.
+	$(MAKE) packages FEOS_VERSION=$(DEV_VERSION)
+
 .PHONY: publish-apt
 publish-apt: ## Build the packages of HEAD, ferund's too, as a dev version and publish them to apt.fecode.dev.
 	@git diff --quiet HEAD -- crates proto hack go web Cargo.toml Cargo.lock || \
