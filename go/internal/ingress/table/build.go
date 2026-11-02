@@ -30,11 +30,11 @@ type EnvRows struct {
 	Tenant    string
 	Name      string
 	HostLabel string
-	// Release is the latest desired release, Deployed the latest
+	// Deployment is the latest desired deployment, Deployed the latest
 	// deployed one (0: none).
-	Release, Deployed int
-	CreatedAt         time.Time
-	Instances         []Instance
+	Deployment, Deployed int
+	CreatedAt            time.Time
+	Instances            []Instance
 	// Domains are the environment's domains the ingress serves, with
 	// their certificates and keys opened (store.IngressDomains), in the
 	// order their entry takes them.
@@ -52,9 +52,9 @@ type Instance struct {
 	ID      podid.ID
 	Service string // the service's name in the spec
 	Replica int
-	// Release is the instance's own release: the one whose target it was
+	// Deployment is the instance's own deployment: the one whose target it was
 	// last kept for.
-	Release     int
+	Deployment  int
 	Phase       string // model.Phase*
 	ClientState string // model.State*
 	Op          string // "": none
@@ -78,28 +78,28 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 	for _, r := range rows {
 		if len(out) == 0 || out[len(out)-1].ID != r.EnvID {
 			out = append(out, EnvRows{ID: r.EnvID, Tenant: r.Owner, Name: r.Name, HostLabel: r.HostLabel,
-				Release: r.Release, Deployed: r.Deployed, CreatedAt: r.CreatedAt})
+				Deployment: r.Deployment, Deployed: r.Deployed, CreatedAt: r.CreatedAt})
 		}
 		if !r.HasInstance {
 			continue
 		}
 		e := &out[len(out)-1]
 		e.Instances = append(e.Instances, Instance{ID: r.SandboxID, Service: r.Object, Replica: r.Replica,
-			Release: r.InstanceRelease, Phase: r.Phase, ClientState: r.ClientState, Op: r.Op, Address: r.Address,
+			Deployment: r.InstanceDeployment, Phase: r.Phase, ClientState: r.ClientState, Op: r.Op, Address: r.Address,
 			Node: r.Node, IngressPorts: r.IngressPorts, GroupVersion: uint64(max(r.NodeGroupVersion, 0)),
 			Idle: r.IdleAfterS == nil || *r.IdleAfterS > 0})
 	}
 	return out
 }
 
-// RoutingRelease is the release whose routes the ingress serves: the
+// RoutingDeployment is the deployment whose routes the ingress serves: the
 // deployed one, else (before a first rollout ends) the latest desired
 // one.
-func RoutingRelease(release, deployed int) int {
+func RoutingDeployment(deployment, deployed int) int {
 	if deployed > 0 {
 		return deployed
 	}
-	return release
+	return deployment
 }
 
 // Class is how the table counts a service instance (wire.Service).
@@ -164,7 +164,7 @@ func Asleep(phase, clientState, op string) bool {
 // zone ("": no hosts, so the ingress serves nothing of it), and returns
 // the sandboxes of the instances it counted, whose changes change it.
 //
-//   - Its routes are those of its routing release (RoutingRelease), by
+//   - Its routes are those of its routing deployment (RoutingDeployment), by
 //     name; a route's Path is its prefix as the route door matches it
 //     (spec.RoutePrefix). A route to an attached service is the route
 //     door's alone (Door).
@@ -172,8 +172,8 @@ func Asleep(phase, clientState, op string) bool {
 //     An instance of it is an endpoint when it is ready, running,
 //     without an operation, with an address and a node, and its node
 //     admits at least one of its routed ports; its ports are named by
-//     the routes' Port and numbered by the instance's own release, else
-//     by the routing release. The others are counted by their Class; a
+//     the routes' Port and numbered by the instance's own deployment, else
+//     by the routing deployment. The others are counted by their Class; a
 //     ready one without an admitted port is pending.
 //   - Its hosts are its domains (e.Domains), with their certificates in
 //     Domains, in their order, as long as the entry stays within
@@ -185,21 +185,21 @@ func Asleep(phase, clientState, op string) bool {
 //   - Its hash identifies the rest of its content, the certificates
 //     included, so that a renewed one is sent again.
 //
-// An error wrapping ErrSpec means the routing release has no usable spec,
+// An error wrapping ErrSpec means the routing deployment has no usable spec,
 // one wrapping ErrTooLarge that the entry would take more than
 // MaxEnvBytes coded: either way the environment cannot be routed. Other
 // errors are specs' read errors.
 func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, error) {
-	number := RoutingRelease(e.Release, e.Deployed)
+	number := RoutingDeployment(e.Deployment, e.Deployed)
 	sp, err := specs(number)
 	if err != nil {
-		return wire.Env{}, nil, fmt.Errorf("environment %s, routing release %d: %w", e.ID, number, err)
+		return wire.Env{}, nil, fmt.Errorf("environment %s, routing deployment %d: %w", e.ID, number, err)
 	}
 	defaultHosts := []string{}
 	if zone != "" && e.HostLabel != "" {
 		defaultHosts = append(defaultHosts, e.HostLabel+"."+zone)
 	}
-	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: defaultHosts, Release: number,
+	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: defaultHosts, Deployment: number,
 		Routes: []wire.Route{}, Services: []wire.Service{}}
 	byService := map[string][]spec.RouteView{}
 	for _, r := range spec.IngressRoutes(sp) {
@@ -209,8 +209,8 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 			byService[r.Service] = append(byService[r.Service], r)
 		}
 	}
-	// The own releases' specs, read once each; nil: none usable, so the
-	// routing release numbers the ports.
+	// The own deployments' specs, read once each; nil: none usable, so the
+	// routing deployment numbers the ports.
 	own := map[int]*spec.Spec{number: sp}
 	ownSpec := func(n int) (*spec.Spec, error) {
 		if s, ok := own[n]; ok {
@@ -218,7 +218,7 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 		}
 		s, err := specs(n)
 		if err != nil && !errors.Is(err, ErrSpec) {
-			return nil, fmt.Errorf("environment %s, release %d: %w", e.ID, n, err)
+			return nil, fmt.Errorf("environment %s, deployment %d: %w", e.ID, n, err)
 		}
 		own[n] = s
 		return s, nil
@@ -236,7 +236,7 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 			case ClassReady:
 				var ports map[string]int
 				if in.Address != "" && in.Node != "" {
-					s, err := ownSpec(in.Release)
+					s, err := ownSpec(in.Deployment)
 					if err != nil {
 						return wire.Env{}, nil, err
 					}
@@ -264,7 +264,7 @@ func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, err
 		return wire.Env{}, nil, fmt.Errorf("environment %s: %w", e.ID, err)
 	}
 	if size > MaxEnvBytes {
-		return wire.Env{}, nil, fmt.Errorf("environment %s (%s of tenant %s), routing release %d: %d bytes, at most %d: %w",
+		return wire.Env{}, nil, fmt.Errorf("environment %s (%s of tenant %s), routing deployment %d: %d bytes, at most %d: %w",
 			e.ID, e.Name, e.Tenant, number, size, MaxEnvBytes, ErrTooLarge)
 	}
 	if with, ok, err := withDomains(out, e.Domains, size); err != nil {
@@ -327,7 +327,7 @@ func withDomains(e wire.Env, ds []wire.Domain, size int) (wire.Env, bool, error)
 
 // admittedPorts returns the ports of an instance of service that its node
 // admits (admitted), under the names routes give them (Route.Port): each
-// route's port numbered in own, the instance's own release, else in
+// route's port numbered in own, the instance's own deployment, else in
 // routing.
 func admittedPorts(service string, admitted []int, routes []spec.RouteView, own, routing *spec.Spec) map[string]int {
 	ports := map[string]int{}

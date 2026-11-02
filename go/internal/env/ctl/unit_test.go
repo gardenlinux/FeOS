@@ -359,7 +359,7 @@ func TestDefaults(t *testing.T) {
 	if jobTimeout(spec.Job{}) != 10*time.Minute || jobTimeout(spec.Job{Timeout: "5h"}) != 2*time.Hour {
 		t.Error("job timeout")
 	}
-	if jobOn(spec.Job{}) != spec.JobOnRelease || jobOn(spec.Job{On: spec.JobOnManual}) != spec.JobOnManual {
+	if jobOn(spec.Job{}) != spec.JobOnDeploy || jobOn(spec.Job{On: spec.JobOnRelease}) != spec.JobOnDeploy || jobOn(spec.Job{On: spec.JobOnManual}) != spec.JobOnManual {
 		t.Error("job on")
 	}
 	if idleOf(spec.Service{}) != 0 || idleOf(spec.Service{Idle: "15m"}) != 900 {
@@ -672,7 +672,7 @@ func TestRender(t *testing.T) {
 	}
 }
 
-// The release spec reads from the store's JSON with every default
+// The deployment spec reads from the store's JSON with every default
 // applied where the spec leaves a field out.
 func TestSpecFromJSON(t *testing.T) {
 	raw := `{"services":{"web":{"image":"img","ports":[{"name":"http","port":80}],
@@ -686,7 +686,7 @@ func TestSpecFromJSON(t *testing.T) {
 	if runtimeOf(web) != spec.RuntimeImage || replicasOf(web) != 1 || checkOf(web).kind != "tcp" || checkOf(web).port != 80 {
 		t.Errorf("web %+v", web)
 	}
-	if jobOn(s.Jobs["m"]) != spec.JobOnRelease || s.Jobs["m"].Retries != 0 {
+	if jobOn(s.Jobs["m"]) != spec.JobOnDeploy || s.Jobs["m"].Retries != 0 {
 		t.Error("job defaults")
 	}
 	bp, ok := addons.Get("postgres")

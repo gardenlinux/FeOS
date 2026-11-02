@@ -160,14 +160,14 @@ func (h *harness) exec(sql string, args ...any) {
 	}
 }
 
-// env makes an environment of tenant, public or not, with release 1.
+// env makes an environment of tenant, public or not, with deployment 1.
 func (h *harness) env(tenant, name string, public bool) store.Environment {
 	h.t.Helper()
 	e, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.exec("UPDATE environments SET release = 1 WHERE id = $1", e.ID)
+	h.exec("UPDATE environments SET deployment = 1 WHERE id = $1", e.ID)
 	if public {
 		if e, err = h.st.SetEnvironmentPublic(bg, e.ID, true); err != nil {
 			h.t.Fatal(err)

@@ -64,7 +64,7 @@ func resolveEnv(ctx context.Context, st *store.Store, tenant, ref string, lock s
 }
 
 // lockTenant takes the tenant's row FOR SHARE and refuses a deleting
-// one: what an environment's create, release and secret need.
+// one: what an environment's create, deployment and secret need.
 func lockTenant(ctx context.Context, tx *store.Store, tenant string) error {
 	t, err := tx.LockTenant(ctx, tenant, store.ForShare)
 	if errors.Is(err, store.ErrNoRow) {
@@ -113,33 +113,33 @@ func parseStored(raw json.RawMessage) (*spec.Spec, error) {
 	return &sp, nil
 }
 
-// releaseSpec returns release number of environment e's parsed spec, for
-// reading only (cached: a release never changes); errNoRelease when there
+// deploymentSpec returns deployment number of environment e's parsed spec, for
+// reading only (cached: a deployment never changes); errNoDeployment when there
 // is none. The cache knows the environment by its ID and its creation:
 // an ID is free again once its environment is deleted, and the next
-// environment of that ID has releases of its own.
-func (s *Service) releaseSpec(ctx context.Context, e store.Environment, number int) (*spec.Spec, error) {
-	k := releaseKey{env: e.ID, created: e.CreatedAt.UnixMicro(), number: number}
+// environment of that ID has deployments of its own.
+func (s *Service) deploymentSpec(ctx context.Context, e store.Environment, number int) (*spec.Spec, error) {
+	k := deploymentKey{env: e.ID, created: e.CreatedAt.UnixMicro(), number: number}
 	if sp, ok := s.specs.get(k); ok {
 		return sp, nil
 	}
-	r, err := s.st.GetRelease(ctx, e.ID, number)
+	r, err := s.st.GetDeployment(ctx, e.ID, number)
 	if errors.Is(err, store.ErrNoRow) {
-		return nil, errNoRelease()
+		return nil, errNoDeployment()
 	}
 	if err != nil {
-		return nil, fmt.Errorf("release %d: %w", number, err)
+		return nil, fmt.Errorf("deployment %d: %w", number, err)
 	}
 	sp, err := parseStored(r.Spec)
 	if err != nil {
-		return nil, fmt.Errorf("release %d: %w", number, err)
+		return nil, fmt.Errorf("deployment %d: %w", number, err)
 	}
 	s.specs.put(k, sp)
 	return sp, nil
 }
 
-// releaseInfo is a release as the answers show it.
-func releaseInfo(r store.EnvRelease, tags []string) ReleaseInfo {
+// deploymentInfo is a deployment as the answers show it.
+func deploymentInfo(r store.EnvDeployment, tags []string) DeploymentInfo {
 	if tags == nil {
 		tags = []string{}
 	}
@@ -147,13 +147,13 @@ func releaseInfo(r store.EnvRelease, tags []string) ReleaseInfo {
 	if ann == nil {
 		ann = map[string]string{}
 	}
-	return ReleaseInfo{Number: r.Number, State: r.State, Origin: r.Origin, OriginRef: r.OriginRef, Author: r.Author,
+	return DeploymentInfo{Number: r.Number, State: r.State, Origin: r.Origin, OriginRef: r.OriginRef, Author: r.Author,
 		Message: r.Message, Annotations: ann, Base: r.Base, Reason: r.Reason, CreatedAt: rfc3339(r.CreatedAt),
 		StartedAt: rfc3339(r.StartedAt), FinishedAt: rfc3339(r.FinishedAt), Tags: tags}
 }
 
-// tagsByRelease are the environment's tags by the release they name.
-func (s *Service) tagsByRelease(ctx context.Context, envID uuid.UUID) (map[int][]string, error) {
+// tagsByDeployment are the environment's tags by the deployment they name.
+func (s *Service) tagsByDeployment(ctx context.Context, envID uuid.UUID) (map[int][]string, error) {
 	tags, err := s.st.ListTags(ctx, envID)
 	if err != nil {
 		return nil, fmt.Errorf("tags: %w", err)

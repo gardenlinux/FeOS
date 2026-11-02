@@ -274,7 +274,7 @@ func TestEnvironments(t *testing.T) {
 	mkTenant(t, s, "acme")
 	mkTenant(t, s, "other")
 	e := mkEnv(t, s, "acme", "stage")
-	if e.Release != 0 || e.Deployed != 0 || e.Deleting || e.Gen != 0 || e.Labels["app"] != "stage" || e.CreatedAt.IsZero() {
+	if e.Deployment != 0 || e.Deployed != 0 || e.Deleting || e.Gen != 0 || e.Labels["app"] != "stage" || e.CreatedAt.IsZero() {
 		t.Fatalf("new environment %+v", e)
 	}
 	// The same name of the owner, or the same ID: ErrExists; another
@@ -319,12 +319,12 @@ func TestEnvironments(t *testing.T) {
 			return err
 		}
 		after := before
-		after.Release, after.Labels = 1, map[string]string{"app": "stage", "tier": "1"}
+		after.Deployment, after.Labels = 1, map[string]string{"app": "stage", "tier": "1"}
 		w, err := tx.UpdateEnvironment(bg, before, after)
 		if err != nil {
 			return err
 		}
-		if w.Release != 1 || w.Labels["tier"] != "1" || w.Gen != before.Gen {
+		if w.Deployment != 1 || w.Labels["tier"] != "1" || w.Gen != before.Gen {
 			t.Errorf("updated %+v", w)
 		}
 		return nil
@@ -373,55 +373,55 @@ func TestEnvironments(t *testing.T) {
 	}
 }
 
-func TestEnvReleasesAndTags(t *testing.T) {
+func TestEnvDeploymentsAndTags(t *testing.T) {
 	s, _ := newStore(t)
 	mkTenant(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 	spec := json.RawMessage(`{"services":{"web":{"image":"x"}}}`)
-	r1, err := s.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: spec, Author: "me", Message: "first",
+	r1, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: spec, Author: "me", Message: "first",
 		Annotations: map[string]string{"fecode.dev/revision": "r1"}, Origin: model.OriginApply})
-	if err != nil || r1.State != model.ReleaseWaiting || r1.Annotations["fecode.dev/revision"] != "r1" ||
+	if err != nil || r1.State != model.DeploymentWaiting || r1.Annotations["fecode.dev/revision"] != "r1" ||
 		!strings.Contains(string(r1.Spec), `"web"`) || !r1.StartedAt.IsZero() {
-		t.Fatalf("release 1 %+v %v", r1, err)
+		t.Fatalf("deployment 1 %+v %v", r1, err)
 	}
-	if _, err := s.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: spec, Origin: model.OriginApply}); !errors.Is(err, store.ErrExists) {
+	if _, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: spec, Origin: model.OriginApply}); !errors.Is(err, store.ErrExists) {
 		t.Fatalf("number taken: %v", err)
 	}
-	if _, err := s.InsertRelease(bg, store.EnvRelease{EnvID: uuid.New(), Number: 1, Spec: spec, Origin: model.OriginApply}); !errors.Is(err, store.ErrNoRow) {
+	if _, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: uuid.New(), Number: 1, Spec: spec, Origin: model.OriginApply}); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("unknown environment: %v", err)
 	}
-	r2, err := s.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 2, Spec: spec, Base: 1, Origin: model.OriginRevert,
+	r2, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 2, Spec: spec, Base: 1, Origin: model.OriginRevert,
 		OriginRef: "1"})
 	if err != nil || len(r2.Annotations) != 0 || r2.Annotations == nil {
-		t.Fatalf("release 2 %+v %v", r2, err)
+		t.Fatalf("deployment 2 %+v %v", r2, err)
 	}
-	if l, err := s.ListReleases(bg, e.ID, 10); err != nil || len(l) != 2 || l[0].Number != 2 || l[0].Spec != nil {
+	if l, err := s.ListDeployments(bg, e.ID, 10); err != nil || len(l) != 2 || l[0].Number != 2 || l[0].Spec != nil {
 		t.Fatalf("list %+v %v", l, err)
 	}
-	if l, _ := s.ListReleases(bg, e.ID, 1); len(l) != 1 {
+	if l, _ := s.ListDeployments(bg, e.ID, 1); len(l) != 1 {
 		t.Fatalf("limit %v", l)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	after := r1
-	after.State, after.StartedAt = model.ReleaseDeploying, now
-	w, err := s.UpdateRelease(bg, r1, after)
-	if err != nil || w.State != model.ReleaseDeploying || !w.StartedAt.Equal(now) {
+	after.State, after.StartedAt = model.DeploymentDeploying, now
+	w, err := s.UpdateDeployment(bg, r1, after)
+	if err != nil || w.State != model.DeploymentDeploying || !w.StartedAt.Equal(now) {
 		t.Fatalf("update %+v %v", w, err)
 	}
 	after = w
 	after.Message = "changed"
-	if _, err := s.UpdateRelease(bg, w, after); err == nil {
+	if _, err := s.UpdateDeployment(bg, w, after); err == nil {
 		t.Fatal("a message was written")
 	}
-	sup, err := s.ReplaceReleases(bg, e.ID, 2, model.ReleaseWaiting, model.ReleaseDeploying)
+	sup, err := s.ReplaceDeployments(bg, e.ID, 2, model.DeploymentWaiting, model.DeploymentDeploying)
 	if err != nil || !slices.Equal(sup, []int{1}) {
 		t.Fatalf("replaced %v %v", sup, err)
 	}
-	if got, err := s.GetRelease(bg, e.ID, 1); err != nil || got.State != model.ReleaseReplaced || got.FinishedAt.IsZero() {
-		t.Fatalf("release 1 after %+v %v", got, err)
+	if got, err := s.GetDeployment(bg, e.ID, 1); err != nil || got.State != model.DeploymentReplaced || got.FinishedAt.IsZero() {
+		t.Fatalf("deployment 1 after %+v %v", got, err)
 	}
-	if _, err := s.GetRelease(bg, e.ID, 9); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("unknown release: %v", err)
+	if _, err := s.GetDeployment(bg, e.ID, 9); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("unknown deployment: %v", err)
 	}
 
 	// Tags.
@@ -434,7 +434,7 @@ func TestEnvReleasesAndTags(t *testing.T) {
 		t.Fatalf("moved %+v %v", tag, err)
 	}
 	if _, err := s.PutTag(bg, store.EnvTag{EnvID: e.ID, Tag: "bad", Number: 7}); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("tag of an unknown release: %v", err)
+		t.Fatalf("tag of an unknown deployment: %v", err)
 	}
 	if l, err := s.ListTags(bg, e.ID); err != nil || len(l) != 1 {
 		t.Fatalf("tags %v %v", l, err)
@@ -541,17 +541,17 @@ func TestEnvInstancesAndJobRuns(t *testing.T) {
 	e := mkEnv(t, s, "acme", "stage")
 	sb := mkInstance(t, s, e)
 	i, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: e.ID, Kind: "service", Object: "web",
-		Replica: 1, TemplateHash: "h1", Release: 3})
+		Replica: 1, TemplateHash: "h1", Deployment: 3})
 	if err != nil || i.Phase != model.PhaseStarting || i.Exits == nil || len(i.Exits) != 0 || i.LastExit != nil ||
 		!i.ReadySince.IsZero() {
 		t.Fatalf("instance %+v %v", i, err)
 	}
 	if _, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: e.ID, Kind: "service", Object: "web",
-		TemplateHash: "h1", Release: 3}); !errors.Is(err, store.ErrExists) {
+		TemplateHash: "h1", Deployment: 3}); !errors.Is(err, store.ErrExists) {
 		t.Fatalf("instance twice: %v", err)
 	}
 	if _, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: podid.Mint(), EnvID: e.ID, Kind: "service", Object: "web",
-		TemplateHash: "h1", Release: 3}); !errors.Is(err, store.ErrNoRow) {
+		TemplateHash: "h1", Deployment: 3}); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("instance of no row: %v", err)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -591,7 +591,7 @@ func TestEnvInstancesAndJobRuns(t *testing.T) {
 	}
 
 	// Job runs outlive their rows.
-	run, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "j1", Release: 3, SandboxID: sb.ID})
+	run, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "j1", Deployment: 3, SandboxID: sb.ID})
 	if err != nil || run.ID == 0 || run.Phase != model.RunRunning || run.Attempt != 1 || run.LogTail == nil {
 		t.Fatalf("run %+v %v", run, err)
 	}
@@ -615,7 +615,7 @@ func TestEnvInstancesAndJobRuns(t *testing.T) {
 	if ok, _ := s.JobSucceeded(bg, e.ID, "migrate", "j2"); ok {
 		t.Fatal("another template succeeded")
 	}
-	second, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "j2", Release: 4, Attempt: 2})
+	second, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "j2", Deployment: 4, Attempt: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -718,25 +718,25 @@ func TestEnvAttachedVolumesIncidents(t *testing.T) {
 		t.Fatalf("delete volume %v %v", ok, err)
 	}
 
-	// Incidents: one open per (object, release, condition).
-	in, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Release: 2,
+	// Incidents: one open per (object, deployment, condition).
+	in, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Deployment: 2,
 		Condition: model.ConditionCrashLoop, Summary: "3 exits", Evidence: json.RawMessage(`{"exits":[1]}`)})
 	if err != nil || !opened || in.ID == 0 || !in.ClosedAt.IsZero() {
 		t.Fatalf("open %+v %v %v", in, opened, err)
 	}
-	again, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Release: 2,
+	again, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Deployment: 2,
 		Condition: model.ConditionCrashLoop, Summary: "other"})
 	if err != nil || opened || again.ID != in.ID || again.Summary != "3 exits" {
 		t.Fatalf("again %+v %v %v", again, opened, err)
 	}
-	if _, _, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Release: 2,
+	if _, _, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Deployment: 2,
 		Condition: "bogus"}); err == nil {
 		t.Fatal("an unknown condition")
 	}
-	other, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Release: 3,
+	other, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Deployment: 3,
 		Condition: model.ConditionCrashLoop})
 	if err != nil || !opened || string(other.Evidence) != "{}" {
-		t.Fatalf("other release %+v %v", other, err)
+		t.Fatalf("other deployment %+v %v", other, err)
 	}
 	afterI := in
 	afterI.Summary, afterI.Evidence = "4 exits", json.RawMessage(`{"exits": [1, 2]}`)
@@ -765,7 +765,7 @@ func TestEnvAttachedVolumesIncidents(t *testing.T) {
 		t.Fatalf("another environment's: %v", err)
 	}
 	// Closed, the same condition opens anew.
-	if n, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Release: 2,
+	if n, opened, err := s.OpenIncident(bg, store.EnvIncident{EnvID: e.ID, Object: "service/web", Deployment: 2,
 		Condition: model.ConditionCrashLoop}); err != nil || !opened || n.ID == in.ID {
 		t.Fatalf("reopened %+v %v %v", n, opened, err)
 	}
@@ -895,7 +895,7 @@ func TestSetEnvironmentPublic(t *testing.T) {
 
 // The writes the ingress's table follows send ferun_ingress "env:<id>":
 // the ports admitted to an instance (once), a service instance's insert,
-// phase or release and deletion, an environment's release, deployed or
+// phase or deployment and deletion, an environment's deployment, deployed or
 // deleting, a tenant's deletion and an environment's.
 func TestIngressNotifications(t *testing.T) {
 	s, d := newStore(t)
@@ -907,7 +907,7 @@ func TestIngressNotifications(t *testing.T) {
 
 	sb := mkInstance(t, s, e)
 	i, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: e.ID, Kind: "service", Object: "web",
-		TemplateHash: "h1", Release: 1})
+		TemplateHash: "h1", Deployment: 1})
 	if err != nil || i.IngressPorts == nil || len(i.IngressPorts) != 0 {
 		t.Fatalf("insert %+v %v", i, err)
 	}
@@ -935,7 +935,7 @@ func TestIngressNotifications(t *testing.T) {
 	must(t, func() error { _, err := s.SetIngressPorts(bg, sb.ID, []int{443}); return err }())
 	expectPayload(t, ch, want)
 
-	// A service instance's phase or release notifies; its detail does not;
+	// A service instance's phase or deployment notifies; its detail does not;
 	// ingress_ports is never written by UpdateEnvInstance.
 	i, _ = s.GetEnvInstance(bg, sb.ID)
 	after := i
@@ -951,9 +951,9 @@ func TestIngressNotifications(t *testing.T) {
 	}
 	expectPayload(t, ch, want)
 	after = i
-	after.Release = 2
+	after.Deployment = 2
 	if i, err = s.UpdateEnvInstance(bg, i, after); err != nil || !slices.Equal(i.IngressPorts, []int{443}) {
-		t.Fatalf("release %+v %v", i, err)
+		t.Fatalf("deployment %+v %v", i, err)
 	}
 	expectPayload(t, ch, want)
 	after = i
@@ -965,7 +965,7 @@ func TestIngressNotifications(t *testing.T) {
 	// A job's instance never notifies.
 	job := mkInstance(t, s, e)
 	j, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: job.ID, EnvID: e.ID, Kind: "job", Object: "migrate",
-		TemplateHash: "j1", Release: 1})
+		TemplateHash: "j1", Deployment: 1})
 	must(t, err)
 	after = j
 	after.Phase = model.PhaseSucceeded
@@ -986,7 +986,7 @@ func TestIngressNotifications(t *testing.T) {
 		t.Fatalf("delete again %v %v", ok, err)
 	}
 
-	// The environment: release, deployed and deleting notify, labels do
+	// The environment: deployment, deployed and deleting notify, labels do
 	// not.
 	cur, _ := s.GetEnvironment(bg, e.ID)
 	ea := cur
@@ -996,7 +996,7 @@ func TestIngressNotifications(t *testing.T) {
 	}
 	expectNoPayload(t, ch, want)
 	ea = cur
-	ea.Release = 1
+	ea.Deployment = 1
 	if cur, err = s.UpdateEnvironment(bg, cur, ea); err != nil {
 		t.Fatal(err)
 	}

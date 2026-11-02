@@ -70,13 +70,13 @@ func TestClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(describe(err))
 	}
-	if st.ID != id.String() || st.Release != 1 || st.Rollout.State != model.ReleaseWaiting || st.Labels["fecode.class"] != "demo" {
+	if st.ID != id.String() || st.Deployment != 1 || st.Rollout.State != model.DeploymentWaiting || st.Labels["fecode.class"] != "demo" {
 		t.Fatalf("clone status %+v", st)
 	}
-	r, err := h.st.GetRelease(ctx, id, 1)
+	r, err := h.st.GetDeployment(ctx, id, 1)
 	if err != nil || r.Origin != model.OriginClone || r.OriginRef != srcID.String()+"/1" ||
 		r.Annotations["fecode.dev/revision"] != "r7" || r.Author != "a" {
-		t.Fatalf("release 1 %+v %v", r, err)
+		t.Fatalf("deployment 1 %+v %v", r, err)
 	}
 	sp, _ := parseStored(r.Spec)
 	if _, ok := sp.Services["dev"]; ok || sp.Routes["dev"].Path != "" || sp.Secrets["token"].Version != 1 ||
@@ -94,11 +94,11 @@ func TestClone(t *testing.T) {
 		t.Fatal("the copy opens under the source's AAD")
 	}
 
-	// A given spec, a set value, another release; a taken name.
+	// A given spec, a set value, another deployment; a taken name.
 	given := strings.Replace(stageSpec, `"replicas": 2`, `"replicas": 1`, 1)
 	one := 1
 	value := "fresh"
-	st, err = h.svc.Clone(ctx, tenantA, src.ID, CloneRequest{Name: "demo2", Release: &one, Spec: json.RawMessage(given),
+	st, err = h.svc.Clone(ctx, tenantA, src.ID, CloneRequest{Name: "demo2", Deployment: &one, Spec: json.RawMessage(given),
 		Secrets: map[string]CloneSecret{"token": {Value: &value}}})
 	if err != nil {
 		t.Fatal(describe(err))
@@ -108,7 +108,7 @@ func TestClone(t *testing.T) {
 	if v, err := h.sealer.Open(sec.Sealed, envdeps.SecretAAD(e2.ID, "token", 1)); err != nil || string(v) != "fresh" {
 		t.Fatalf("set secret %q %v", v, err)
 	}
-	sp2, _ := h.svc.releaseSpec(ctx, e2, 1)
+	sp2, _ := h.svc.deploymentSpec(ctx, e2, 1)
 	if *sp2.Services["api"].Replicas != 1 {
 		t.Fatalf("given spec %+v", sp2.Services["api"])
 	}
@@ -153,13 +153,13 @@ func TestClone(t *testing.T) {
 	}
 
 	nine := 9
-	_, err = h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo3", Release: &nine})
-	wantStatus(t, err, http.StatusNotFound, "no such release")
+	_, err = h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo3", Deployment: &nine})
+	wantStatus(t, err, http.StatusNotFound, "no such deployment")
 	_, err = h.svc.Clone(ctx, tenantB, "preview", CloneRequest{Name: "demo3"})
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
 	h.create("bare", nil)
 	_, err = h.svc.Clone(ctx, tenantA, "bare", CloneRequest{Name: "demo3"})
-	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "release", "has no release to clone") {
+	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "deployment", "has no deployment to clone") {
 		t.Fatalf("clone of nothing %v", describe(err))
 	}
 }
@@ -173,7 +173,7 @@ func TestStatus(t *testing.T) {
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", previewSpec(sb), 0)
-	h.exec("UPDATE env_releases SET state = 'deployed', started_at = now(), finished_at = now() WHERE env_id = $1", e.ID)
+	h.exec("UPDATE env_deployments SET state = 'deployed', started_at = now(), finished_at = now() WHERE env_id = $1", e.ID)
 	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 
 	api0 := h.instance(e.ID, spec.KindService, "api", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::11")
@@ -196,17 +196,17 @@ func TestStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := 0
-	if _, err := h.st.InsertJobRun(ctx, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "h", Release: 1,
+	if _, err := h.st.InsertJobRun(ctx, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "h", Deployment: 1,
 		Attempt: 1, Phase: model.RunFailed}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := h.st.InsertJobRun(ctx, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "h", Release: 1,
+	run, err := h.st.InsertJobRun(ctx, store.EnvJobRun{EnvID: e.ID, Job: "migrate", TemplateHash: "h", Deployment: 1,
 		Attempt: 2, Phase: model.RunSucceeded, ExitCode: &code})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE env_job_runs SET finished_at = now() WHERE id = $1", run.ID)
-	if _, _, err := h.st.OpenIncident(ctx, store.EnvIncident{EnvID: e.ID, Object: "service/api", Release: 1,
+	if _, _, err := h.st.OpenIncident(ctx, store.EnvIncident{EnvID: e.ID, Object: "service/api", Deployment: 1,
 		Condition: model.ConditionCrashLoop, Summary: "api exited 3 times",
 		Evidence: json.RawMessage(`{"exits":[{"at":"2026-10-18T14:05:01Z","code":1}],"logTail":["boom"]}`)}); err != nil {
 		t.Fatal(err)
@@ -216,7 +216,7 @@ func TestStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Release != 1 || got.Deployed != 1 || got.Rollout.State != model.ReleaseDeployed || got.Rollout.StartedAt == "" ||
+	if got.Deployment != 1 || got.Deployed != 1 || got.Rollout.State != model.DeploymentDeployed || got.Rollout.StartedAt == "" ||
 		got.OpenIncidents != 1 || got.Labels["k"] != "v" {
 		t.Fatalf("status %+v", got)
 	}
@@ -261,7 +261,7 @@ func TestStatus(t *testing.T) {
 	}
 	// The JSON has every field of its kind.
 	b, _ := json.Marshal(got)
-	for _, want := range []string{`"lastRun":{"release":1,"attempt":2,"phase":"succeeded","exitCode":0`,
+	for _, want := range []string{`"lastRun":{"deployment":1,"attempt":2,"phase":"succeeded","exitCode":0`,
 		`"kind":"service","name":"dev","runtime":"attached","sandbox":"` + sb.String() + `","phase":"starting","restarts":0,"lastExit":null`,
 		`"openIncidents":1`} {
 		if !strings.Contains(string(b), want) {
@@ -286,28 +286,28 @@ func TestStatus(t *testing.T) {
 		t.Fatalf("open %+v", list)
 	}
 
-	// A failed latest release: the objects are the deployed release's,
+	// A failed latest deployment: the objects are the deployed deployment's,
 	// the rollout the latest's.
 	changed := strings.Replace(previewSpec(sb), `"replicas": 2`, `"replicas": 4`, 1)
 	h.apply("stage", changed, 1)
-	h.exec("UPDATE env_releases SET state = 'failed', reason = 'rollout timed out' WHERE env_id = $1 AND number = 2", e.ID)
+	h.exec("UPDATE env_deployments SET state = 'failed', reason = 'rollout timed out' WHERE env_id = $1 AND number = 2", e.ID)
 	got, _ = h.svc.GetEnv(ctx, tenantA, "stage")
-	if got.Rollout.Release != 2 || got.Rollout.State != model.ReleaseFailed || got.Rollout.Reason != "rollout timed out" ||
+	if got.Rollout.Deployment != 2 || got.Rollout.State != model.DeploymentFailed || got.Rollout.Reason != "rollout timed out" ||
 		got.Objects[0].Desired != 2 {
 		t.Fatalf("failed latest %+v", got)
 	}
-	h.exec("UPDATE env_releases SET state = 'deploying' WHERE env_id = $1 AND number = 2", e.ID)
+	h.exec("UPDATE env_deployments SET state = 'deploying' WHERE env_id = $1 AND number = 2", e.ID)
 	if got, _ := h.svc.GetEnv(ctx, tenantA, "stage"); got.Objects[0].Desired != 4 {
 		t.Fatalf("rolling latest %+v", got.Objects[0])
 	}
 	list2, _ := h.svc.ListEnvs(ctx, tenantA, nil)
-	if list2.Environments[0].State != model.ReleaseDeploying || list2.Environments[0].OpenIncidents != 0 {
+	if list2.Environments[0].State != model.DeploymentDeploying || list2.Environments[0].OpenIncidents != 0 {
 		t.Fatalf("list %+v", list2)
 	}
 }
 
 // An incident's answer has every part of the evidence the controller
-// stores (ctl's evidence): a release past its deadline's pending objects
+// stores (ctl's evidence): a deployment past its deadline's pending objects
 // too.
 func TestIncidentEvidence(t *testing.T) {
 	t.Parallel()
@@ -324,8 +324,8 @@ func TestIncidentEvidence(t *testing.T) {
 	if err := dec.Decode(&IncidentEvidence{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.st.OpenIncident(ctx, store.EnvIncident{EnvID: h.env("stage").ID, Object: "addon/postgres", Release: 2,
-		Condition: model.ConditionRolloutFailed, Summary: "release 2 did not roll out within 10m0s: addon postgres is not ready",
+	if _, _, err := h.st.OpenIncident(ctx, store.EnvIncident{EnvID: h.env("stage").ID, Object: "addon/postgres", Deployment: 2,
+		Condition: model.ConditionRolloutFailed, Summary: "deployment 2 did not roll out within 10m0s: addon postgres is not ready",
 		Evidence: json.RawMessage(stored)}); err != nil {
 		t.Fatal(err)
 	}
@@ -413,7 +413,7 @@ func TestRouteDoor(t *testing.T) {
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", tenantTok), 401, "route token required\n")
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", prodTok.Token), 404, "no such environment\n")
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/nope/http/", tok.Token), 404, "no such environment\n")
-	// No release, no route.
+	// No deployment, no route.
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/x", tok.Token), 404, "no route for /x\n")
 
 	h.putSecret("stage", "token", "x")
@@ -545,13 +545,13 @@ func TestRouteDoor(t *testing.T) {
 	if f := h.ports.last(t); f.sandbox != sb || f.port != 5173 || f.path != "/dev/src/main.ts" {
 		t.Fatalf("attached %+v", f)
 	}
-	// The deployed release's routes serve while a later one rolls.
+	// The deployed deployment's routes serve while a later one rolls.
 	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 	if w := routeRequest(mux, "GET", "/api/v1/environments/stage/http/dev/x", tok.Token); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 	if f := h.ports.last(t); f.sandbox != web {
-		t.Fatalf("deployed release's routes: %+v", f)
+		t.Fatalf("deployed deployment's routes: %+v", f)
 	}
 
 	// .. segments, also escaped (the mux redirects plain ones itself).
@@ -621,7 +621,7 @@ func TestRouteDoorFailure(t *testing.T) {
 	wantPlain(t, w, 500, "the route door failed\n")
 	h.exec(`ALTER TABLE tenant_tokens_away RENAME TO tenant_tokens`)
 	// A stored spec that does not parse.
-	h.exec(`UPDATE env_releases SET spec = '{"services": 5}' WHERE env_id = $1`, h.env("stage").ID)
+	h.exec(`UPDATE env_deployments SET spec = '{"services": 5}' WHERE env_id = $1`, h.env("stage").ID)
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/api/x", tok.Token), 500,
 		"the route door failed\n")
 	// A database that is gone.
@@ -763,9 +763,9 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	refused("another tenant's after the owner's")
 }
 
-// The port of a request comes from the release of the instance it goes
-// to: while a release that changes the port rolls, its ready instances
-// get the new one, the old release's the old one.
+// The port of a request comes from the deployment of the instance it goes
+// to: while a deployment that changes the port rolls, its ready instances
+// get the new one, the old deployment's the old one.
 func TestRouteDoorRollingPort(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
@@ -794,18 +794,18 @@ func TestRouteDoorRollingPort(t *testing.T) {
 	}
 	old := h.instance(e.ID, spec.KindService, "api", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::11")
 	if p := port(); p != 8080 {
-		t.Fatalf("release 1's instance on %d", p)
+		t.Fatalf("deployment 1's instance on %d", p)
 	}
 	h.exec("UPDATE env_instances SET phase = 'stopping' WHERE sandbox_id = $1", old)
 	h.instance(e.ID, spec.KindService, "api", 0, 2, model.PhaseReady, model.StateRunning, "n1", "fd6b::12")
 	if p := port(); p != 9090 {
-		t.Fatalf("release 2's instance on %d", p)
+		t.Fatalf("deployment 2's instance on %d", p)
 	}
-	// A release that has no such port falls back to the matched one's.
+	// A deployment that has no such port falls back to the matched one's.
 	h.apply("stage", specOf("web", 7070), 2)
 	h.exec("UPDATE env_instances SET phase = 'stopping' WHERE env_id = $1", e.ID)
 	h.instance(e.ID, spec.KindService, "api", 0, 3, model.PhaseReady, model.StateRunning, "n1", "fd6b::13")
 	if p := port(); p != 8080 {
-		t.Fatalf("release 3's instance on %d", p)
+		t.Fatalf("deployment 3's instance on %d", p)
 	}
 }

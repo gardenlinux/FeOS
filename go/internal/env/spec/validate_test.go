@@ -196,7 +196,7 @@ func TestValidateExpensa(t *testing.T) {
 	// The fixtures' stage spec too.
 	s, fs := Parse(readFile(t, "testdata/expensa-stage-request.json"))
 	checkFindings(t, append(fs, Validate(defaultVC(ModeApply), s, nil)...), nil)
-	s, fs = Parse(readFile(t, "testdata/expensa-stage-release7.json"))
+	s, fs = Parse(readFile(t, "testdata/expensa-stage-deployment7.json"))
 	checkFindings(t, append(fs, Validate(defaultVC(ModeApply), s, &s)...), nil)
 }
 
@@ -235,6 +235,11 @@ func TestValidateRules(t *testing.T) {
 			s.Routes["R"] = Route{Path: "/r", Service: "web", Port: PortRef{Name: "http"}}
 		}, []expect{e("addons.a.b", "not a DNS label"), e("jobs.-j", "not a DNS label"), e("routes.R", "not a DNS label"),
 			e("services.Bad_Name", "not a DNS label")}},
+		{"both words of a deploy job", ModePlan, func(s *Spec) {
+			approval(s)
+			s.Jobs["deploy"] = Job{Image: "img", On: JobOnDeploy}
+			s.Jobs["release"] = Job{Image: "img", On: JobOnRelease}
+		}, nil},
 		{"service and addon share a name", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Services["nats"] = Service{Image: "img"}
@@ -655,7 +660,7 @@ func TestValidateContextDependent(t *testing.T) {
 		s.Addons["nats"] = Addon{Type: "postgres", Version: "17"}
 	}), []expect{w("addons.nats.type", "changes its type from nats to postgres"),
 		e("addons.postgres.version", "a major version change")})
-	// Env-less: no previous release.
+	// Env-less: no previous deployment.
 	vc.mode = ModeSpec
 	checkFindings(t, validateMutated(t, vc, &prev, func(s *Spec) {
 		approval(s)
@@ -675,8 +680,8 @@ func TestValidateContextDependent(t *testing.T) {
 
 // An addon is validated against the data its environment's volume holds
 // when it has one (the controller keeps a volume by the addon's name, and
-// mounts it whatever the latest release says), else against the latest
-// release's addon.
+// mounts it whatever the latest deployment says), else against the latest
+// deployment's addon.
 func TestValidateAgainstVolume(t *testing.T) {
 	prev := mustParse(t, expensa)
 	pg16 := Addon{Type: "postgres", Version: "16"}
@@ -695,7 +700,7 @@ func TestValidateAgainstVolume(t *testing.T) {
 		mode   Mode
 		want   []expect
 	}{
-		// The latest release removed db, but the controller has not yet
+		// The latest deployment removed db, but the controller has not yet
 		// deleted its volume: re-added, the volume's data decides.
 		{name: "removed then re-added", volume: &AddonData{Type: "postgres", Version: "16"}, next: pg17,
 			want: []expect{e("addons.db.version", "a major version change")}},
@@ -708,17 +713,17 @@ func TestValidateAgainstVolume(t *testing.T) {
 			volume: &AddonData{Type: "postgres", Version: "16"}, next: pg17,
 			want: []expect{e("addons.db.version", "a major version change")}},
 		// The volume holds another type's data: it is deleted, whatever the
-		// latest release says, and its version is no constraint.
+		// latest deployment says, and its version is no constraint.
 		{name: "volume of another type", latest: &pg17, volume: &AddonData{Type: "nats", Version: "2"}, next: pg16,
 			want: []expect{w("addons.db.type", "holds nats data, not postgres: its data is deleted")}},
 		// The version that ran ready on the volume decides, not the latest
-		// release's (a failed upgrade never wrote the data).
+		// deployment's (a failed upgrade never wrote the data).
 		{name: "upgrade that never ran", latest: &Addon{Type: "postgres", Version: "17"},
 			volume: &AddonData{Type: "postgres", Version: "16"}, next: pg16},
-		// No version recorded yet: the latest release's.
+		// No version recorded yet: the latest deployment's.
 		{name: "no data version", latest: &pg17, volume: &AddonData{Type: "postgres"}, next: pg16,
 			want: []expect{e("addons.db.version", "a major version change")}},
-		// No volume: the latest release's addon, as before.
+		// No volume: the latest deployment's addon, as before.
 		{name: "no volume", latest: &pg17, next: pg16, want: []expect{e("addons.db.version", "a major version change")}},
 		{name: "no volume, type change", latest: &Addon{Type: "nats", Version: "2"}, next: pg16,
 			want: []expect{w("addons.db.type", "changes its type from nats to postgres: its data is deleted")}},

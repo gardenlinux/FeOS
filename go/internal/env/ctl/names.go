@@ -194,7 +194,7 @@ func parseTable(id string) (groupRef, bool) {
 }
 
 // buildTable is a name table as the database says it should be, with the
-// tables it includes. An env table of an environment that has no release
+// tables it includes. An env table of an environment that has no deployment
 // or is being deleted holds no names.
 func (c *Controller) buildTable(ctx context.Context, id string) (*networkv1.NameTable, []string, error) {
 	ref, ok := parseTable(id)
@@ -509,7 +509,7 @@ func (c *Controller) stepNames(ctx context.Context, s *stepState) {
 	v := s.v
 	unserved := c.unservedNodes()
 	affected := map[string]string{}
-	release := map[string]int{}
+	deployment := map[string]int{}
 	if len(unserved) > 0 {
 		for _, r := range v.rows {
 			inst := r.Instance
@@ -519,7 +519,7 @@ func (c *Controller) stepNames(ctx context.Context, s *stepState) {
 			}
 			obj := objectName(inst.Kind, inst.Object)
 			if _, ok := affected[obj]; !ok {
-				affected[obj], release[obj] = r.Sandbox.Node, inst.Release
+				affected[obj], deployment[obj] = r.Sandbox.Node, inst.Deployment
 			}
 		}
 		for _, name := range slices.Sorted(maps.Keys(v.attached)) {
@@ -530,7 +530,7 @@ func (c *Controller) stepNames(ctx context.Context, s *stepState) {
 			}
 			obj := objectName(spec.KindService, name)
 			if _, ok := affected[obj]; !ok {
-				affected[obj], release[obj] = sb.Node, v.targetNum
+				affected[obj], deployment[obj] = sb.Node, v.targetNum
 			}
 		}
 	}
@@ -538,7 +538,7 @@ func (c *Controller) stepNames(ctx context.Context, s *stepState) {
 		if v.isOpen(obj, model.ConditionNamesUnserved) {
 			continue
 		}
-		c.incident(ctx, v.env.ID, obj, release[obj], model.ConditionNamesUnserved,
+		c.incident(ctx, v.env.ID, obj, deployment[obj], model.ConditionNamesUnserved,
 			fmt.Sprintf("node %s does not serve names (its feosd predates the NameService): %s does not resolve "+
 				"the environment's names there", affected[obj], obj), evidence{})
 	}

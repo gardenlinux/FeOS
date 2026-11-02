@@ -36,8 +36,8 @@ type EnvInstance struct {
 	Object       string // the object's name in the spec
 	Replica      int
 	TemplateHash string
-	// Release is the release whose target it was last kept for.
-	Release       int
+	// Deployment is the deployment whose target it was last kept for.
+	Deployment    int
 	Phase         string    // model.Phase*
 	ReadySince    time.Time // zero: NULL
 	RetireAt      time.Time // zero: NULL
@@ -59,7 +59,7 @@ type EnvInstance struct {
 }
 
 func envInstanceColumns(p string) string {
-	cols := []string{"sandbox_id", "env_id", "kind", "object", "replica", "template_hash", "release", "phase",
+	cols := []string{"sandbox_id", "env_id", "kind", "object", "replica", "template_hash", "deployment", "phase",
 		"ready_since", "retire_at", "restarts", "last_exit", "probe_failures", "next_restart_at", "exits",
 		"provisioned_hash", "detail", "created_at", "updated_at", "ingress_ports"}
 	return prefixed(p, cols)
@@ -82,7 +82,7 @@ func prefixed(p string, cols []string) string {
 // the function that finishes the scan.
 func envInstanceTargets(i *EnvInstance) ([]any, func()) {
 	var ready, retire, next *time.Time
-	return []any{&i.SandboxID, &i.EnvID, &i.Kind, &i.Object, &i.Replica, &i.TemplateHash, &i.Release, &i.Phase,
+	return []any{&i.SandboxID, &i.EnvID, &i.Kind, &i.Object, &i.Replica, &i.TemplateHash, &i.Deployment, &i.Phase,
 			&ready, &retire, &i.Restarts, &i.LastExit, &i.ProbeFailures, &next, &i.Exits,
 			&i.ProvisionedHash, &i.Detail, &i.CreatedAt, &i.UpdatedAt, &i.IngressPorts}, func() {
 			i.ReadySince, i.RetireAt, i.NextRestartAt = timeOf(ready), timeOf(retire), timeOf(next)
@@ -120,11 +120,11 @@ func (s *Store) InsertEnvInstance(ctx context.Context, i EnvInstance) (EnvInstan
 		return EnvInstance{}, err
 	}
 	out, err := scanEnvInstance(s.q.QueryRow(ctx, `INSERT INTO env_instances (sandbox_id, env_id, kind, object, replica,
-			template_hash, release, phase, ready_since, retire_at, restarts, last_exit, probe_failures, next_restart_at,
+			template_hash, deployment, phase, ready_since, retire_at, restarts, last_exit, probe_failures, next_restart_at,
 			exits, provisioned_hash, detail)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)
 		RETURNING `+envInstanceCols,
-		i.SandboxID, i.EnvID, i.Kind, i.Object, i.Replica, i.TemplateHash, i.Release, i.Phase, nullTime(i.ReadySince),
+		i.SandboxID, i.EnvID, i.Kind, i.Object, i.Replica, i.TemplateHash, i.Deployment, i.Phase, nullTime(i.ReadySince),
 		nullTime(i.RetireAt), i.Restarts, nullInt(i.LastExit), i.ProbeFailures, nullTime(i.NextRestartAt), exits,
 		i.ProvisionedHash, i.Detail))
 	if err != nil {
@@ -188,12 +188,12 @@ func (s *Store) ListEnvInstanceRows(ctx context.Context, envID uuid.UUID) ([]Env
 }
 
 // UpdateEnvInstance writes the columns in which after differs from before,
-// the row as the caller read it (normally locked FOR UPDATE): release,
+// the row as the caller read it (normally locked FOR UPDATE): deployment,
 // phase, ready_since, retire_at, restarts, last_exit, probe_failures,
 // next_restart_at, exits, provisioned_hash and detail;
 // updated_at = now(). The fixed columns and ingress_ports
 // (SetIngressPorts) are refused. When nothing differs, before is returned
-// unwritten. A service's write of phase or release sends ferun_ingress
+// unwritten. A service's write of phase or deployment sends ferun_ingress
 // "env:<env id>".
 func (s *Store) UpdateEnvInstance(ctx context.Context, before, after EnvInstance) (EnvInstance, error) {
 	what := "instance " + before.SandboxID.String()
@@ -204,7 +204,7 @@ func (s *Store) UpdateEnvInstance(ctx context.Context, before, after EnvInstance
 		return EnvInstance{}, err
 	}
 	u := newUpdates(before.SandboxID)
-	u.set("release", before.Release != after.Release, after.Release)
+	u.set("deployment", before.Deployment != after.Deployment, after.Deployment)
 	u.set("phase", before.Phase != after.Phase, after.Phase)
 	u.set("ready_since", !before.ReadySince.Equal(after.ReadySince), nullTime(after.ReadySince))
 	u.set("retire_at", !before.RetireAt.Equal(after.RetireAt), nullTime(after.RetireAt))
@@ -225,7 +225,7 @@ func (s *Store) UpdateEnvInstance(ctx context.Context, before, after EnvInstance
 	if err != nil {
 		return EnvInstance{}, fmt.Errorf("update %s: %w", what, noRow(err, ErrNoRow))
 	}
-	if before.Phase != after.Phase || before.Release != after.Release {
+	if before.Phase != after.Phase || before.Deployment != after.Deployment {
 		if err := s.notifyIngressInstance(ctx, i.EnvID, i.Kind); err != nil {
 			return EnvInstance{}, fmt.Errorf("update %s: %w", what, err)
 		}

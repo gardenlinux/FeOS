@@ -1,6 +1,6 @@
 {
   "method": "POST",
-  "path": "/api/v1/environments/expensa-stage/releases/2/revert",
+  "path": "/api/v1/environments/expensa-stage/deployments/2/revert",
   "query": {},
   "status": 422,
   "request": {

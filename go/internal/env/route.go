@@ -155,13 +155,13 @@ func rawOf(path, raw string) string {
 // goes on to the upstream, unless its bearer token is a tenant's or a
 // sandbox's: 401 the same way, and nothing is forwarded), the longest
 // segment-aware
-// prefix match over the routes of the deployed release (the latest when
+// prefix match over the routes of the deployed deployment (the latest when
 // none is), and the request forwarded through the port door to a ready
 // instance of the route's service, round-robin, or, when none is ready,
 // to a paused or hibernated one (the forward wakes it: scale from zero);
 // none at all is 503 with Retry-After 5. The port is the one the chosen
-// instance's own release gives the route's port name (the matched
-// release's when that release has none). An attached service's requests
+// instance's own deployment gives the route's port name (the matched
+// deployment's when that deployment has none). An attached service's requests
 // go to its sandbox, only while that is the environment owner's and no
 // instance row (else 503; §13.6). The path is
 // stripped of the route's path when the route says so; the query is
@@ -230,11 +230,11 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	number := e.Deployed
 	if number == 0 {
-		number = e.Release
+		number = e.Deployment
 	}
 	var sp *spec.Spec
 	if number > 0 {
-		if sp, err = s.releaseSpec(ctx, e, number); err != nil {
+		if sp, err = s.deploymentSpec(ctx, e, number); err != nil {
 			s.routeFailed(w, r, err)
 			return
 		}
@@ -290,10 +290,10 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no ready instance of "+route.Service, http.StatusServiceUnavailable)
 		return
 	}
-	// The instance listens on the port of its own release, which a
-	// deploying release may have changed.
-	if inst.release != number && inst.release > 0 {
-		own, err := s.releaseSpec(ctx, e, inst.release)
+	// The instance listens on the port of its own deployment, which a
+	// deploying deployment may have changed.
+	if inst.deployment != number && inst.deployment > 0 {
+		own, err := s.deploymentSpec(ctx, e, inst.deployment)
 		if err != nil && !isNotFound(err) {
 			s.routeFailed(w, r, err)
 			return
@@ -338,10 +338,10 @@ func (s *Service) attachedSandbox(ctx context.Context, e store.Environment, serv
 	return sb.ID, "", nil
 }
 
-// picked is the instance a request goes to: its sandbox and its release.
+// picked is the instance a request goes to: its sandbox and its deployment.
 type picked struct {
-	id      podid.ID
-	release int
+	id         podid.ID
+	deployment int
 }
 
 // pickInstance chooses the instance of an image service a request goes
@@ -358,7 +358,7 @@ func (s *Service) pickInstance(ctx context.Context, envID uuid.UUID, service str
 		if i.Kind != spec.KindService || i.Object != service || i.Phase == model.PhaseStopping {
 			continue
 		}
-		p := picked{id: sb.ID, release: i.Release}
+		p := picked{id: sb.ID, deployment: i.Deployment}
 		switch {
 		case i.Phase == model.PhaseReady && sb.ClientState == model.StateRunning && sb.Op == "":
 			ready = append(ready, p)

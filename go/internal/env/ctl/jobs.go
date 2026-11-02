@@ -21,12 +21,12 @@ import (
 )
 
 // stepJobs keeps the running runs going (timeouts, healing, leftovers)
-// and, while R rolls, runs its release jobs (§4.3 step 3): a job runs
+// and, while R rolls, runs its deploy jobs (§4.3 step 3): a job runs
 // when no run of its template hash succeeded, once every addon is
 // provisioned; a failed attempt is retried while attempt ≤ retries; a
 // failed last attempt fails R (job_failed). A job runs once at a time
-// across releases (§13.7): while a run of it that is not R's runs (a
-// replaced release's, a manual one, another template's), R's waits for
+// across deployments (§13.7): while a run of it that is not R's runs (a
+// replaced deployment's, a manual one, another template's), R's waits for
 // it to end, never cancelling it; the time R waited so moves the start
 // its budgets count from (jobWait), on every step, also once the job is
 // done.
@@ -38,7 +38,7 @@ func (c *Controller) stepJobs(ctx context.Context, s *stepState) {
 	}
 	for _, name := range slices.Sorted(maps.Keys(v.target.Jobs)) {
 		j := v.target.Jobs[name]
-		if jobOn(j) != spec.JobOnRelease {
+		if jobOn(j) != spec.JobOnDeploy {
 			continue
 		}
 		p := c.planJob(v, name, j)
@@ -71,7 +71,7 @@ func (c *Controller) stepJobs(ctx context.Context, s *stepState) {
 		var last, other *store.EnvJobRun
 		for i := range runs {
 			switch {
-			case runs[i].TemplateHash == p.hash && runs[i].Release == v.targetNum:
+			case runs[i].TemplateHash == p.hash && runs[i].Deployment == v.targetNum:
 				if last == nil {
 					last = &runs[i]
 				}
@@ -81,7 +81,7 @@ func (c *Controller) stepJobs(ctx context.Context, s *stepState) {
 		}
 		switch {
 		case other != nil:
-			s.wait(objectName(spec.KindJob, name), "job %s waits for its run of release %d (attempt %d)", name, other.Release,
+			s.wait(objectName(spec.KindJob, name), "job %s waits for its run of deployment %d (attempt %d)", name, other.Deployment,
 				other.Attempt)
 		case last == nil:
 			c.startRun(ctx, s, p, 1)
@@ -92,7 +92,7 @@ func (c *Controller) stepJobs(ctx context.Context, s *stepState) {
 		case last.Phase == model.RunFailed:
 			summary := fmt.Sprintf("job %s failed its last attempt (%d of %d)%s", name, last.Attempt, j.Retries+1, runOutcome(*last))
 			ev := evidence{Exits: []store.EnvExit{{At: last.FinishedAt, Code: last.ExitCode}}, LogTail: last.LogTail}
-			if err := c.failRelease(ctx, v, summary, objectName(spec.KindJob, name), model.ConditionJobFailed, ev); err != nil {
+			if err := c.failDeployment(ctx, v, summary, objectName(spec.KindJob, name), model.ConditionJobFailed, ev); err != nil {
 				s.wait(objectName(spec.KindJob, name), "job %s: %v", name, err)
 				continue
 			}
@@ -147,9 +147,9 @@ func runOutcome(r store.EnvJobRun) string {
 // meanwhile is waited for, never run beside).
 func (c *Controller) startRun(ctx context.Context, s *stepState, p *podPlan, attempt int) {
 	v := s.v
-	run := &store.EnvJobRun{EnvID: v.env.ID, Job: p.name, TemplateHash: p.hash, Release: v.targetNum, Attempt: attempt,
+	run := &store.EnvJobRun{EnvID: v.env.ID, Job: p.name, TemplateHash: p.hash, Deployment: v.targetNum, Attempt: attempt,
 		Phase: model.RunRunning}
-	if _, err := c.insertInstance(ctx, v, insert{plan: p, release: v.targetNum, run: run, once: true}); err != nil {
+	if _, err := c.insertInstance(ctx, v, insert{plan: p, deployment: v.targetNum, run: run, once: true}); err != nil {
 		if errors.Is(err, ErrJobRunning) {
 			s.wait(objectName(spec.KindJob, p.name), "%v", err)
 			return
@@ -160,7 +160,7 @@ func (c *Controller) startRun(ctx context.Context, s *stepState, p *podPlan, att
 	s.wait(objectName(spec.KindJob, p.name), "job %s starts (attempt %d)", p.name, attempt)
 }
 
-// stepRuns keeps the running runs of the environment going, release and
+// stepRuns keeps the running runs of the environment going, deployment and
 // manual ones: a run past its job's timeout fails, a lost instance fails
 // its run, a row that is not up is brought up; the rows of finished runs
 // go.
@@ -319,10 +319,10 @@ func appendExit(exits []store.EnvExit, e store.EnvExit) []store.EnvExit {
 	return out
 }
 
-// RunJob starts a run of a job of the environment's target release (what
+// RunJob starts a run of a job of the environment's target deployment (what
 // jobs on "manual" are for): a new attempt 1. It returns once the run's
 // row is inserted; ErrNoObject, ErrNotReady, and ErrJobRunning (a
-// model.ErrBusy) while a run of the job runs, of any release (a repeated
+// model.ErrBusy) while a run of the job runs, of any deployment (a repeated
 // request never runs it twice at once).
 func (c *Controller) RunJob(ctx context.Context, envID uuid.UUID, name string) error {
 	v, err := c.load(ctx, envID)
@@ -340,9 +340,9 @@ func (c *Controller) RunJob(ctx context.Context, envID uuid.UUID, name string) e
 	if !p.ok() {
 		return &stateError{msg: fmt.Sprintf("job %s cannot run yet: %s", name, p.why()), kind: ErrNotReady}
 	}
-	run := &store.EnvJobRun{EnvID: v.env.ID, Job: name, TemplateHash: p.hash, Release: v.targetNum, Attempt: 1,
+	run := &store.EnvJobRun{EnvID: v.env.ID, Job: name, TemplateHash: p.hash, Deployment: v.targetNum, Attempt: 1,
 		Phase: model.RunRunning}
-	_, err = c.insertFrom(ctx, v, insert{plan: p, release: v.targetNum, run: run, once: true}, false)
+	_, err = c.insertFrom(ctx, v, insert{plan: p, deployment: v.targetNum, run: run, once: true}, false)
 	return err
 }
 
@@ -354,7 +354,7 @@ func noRunOf(ctx context.Context, tx *store.Store, envID uuid.UUID, job string) 
 	}
 	for _, r := range runs {
 		if r.Job == job {
-			return &stateError{msg: fmt.Sprintf("job %s runs already (release %d, attempt %d)", job, r.Release, r.Attempt),
+			return &stateError{msg: fmt.Sprintf("job %s runs already (deployment %d, attempt %d)", job, r.Deployment, r.Attempt),
 				kind: ErrJobRunning}
 		}
 	}

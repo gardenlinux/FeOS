@@ -325,7 +325,7 @@ func (s *Issuer) openIncidents(ctx context.Context) error {
 		err := s.fenced(ctx, func(tx *store.Store) error {
 			var err error
 			_, opened, err = tx.OpenIncident(ctx, store.EnvIncident{EnvID: f.EnvID, Object: store.DomainObject(f.Name),
-				Release: f.EnvRelease, Condition: ConditionCertificateFailing, Summary: summary})
+				Deployment: f.EnvDeployment, Condition: ConditionCertificateFailing, Summary: summary})
 			return err
 		})
 		if err != nil {

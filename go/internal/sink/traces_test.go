@@ -41,7 +41,7 @@ func testSpan(trace, id, parent, name string, start int64, dur time.Duration) *t
 // podAttrs are a pod's resource attributes as the node stamps them.
 func podAttrs(tenant, env, object string) map[string]string {
 	return map[string]string{attrTenant: tenant, attrPod: "abcdefghjkm", attrNode: "node-1", attrEnvironment: env,
-		attrKind: "service", attrObject: object, attrInstance: "i-" + object, attrReplica: "1", attrRelease: "7",
+		attrKind: "service", attrObject: object, attrInstance: "i-" + object, attrReplica: "1", attrDeployment: "7",
 		attrServiceName: object}
 }
 
@@ -125,7 +125,7 @@ func TestParseTraceExport(t *testing.T) {
 		t.Errorf("span fields: %+v", d)
 	}
 	if d.Tenant != "acme" || d.Environment != "env1" || d.Kind != "service" || d.Object != "api" || d.Instance != "i-api" ||
-		d.Source != SourceContainer || d.Pod != "abcdefghjkm" || d.Node != "node-1" || d.Replica != 1 || d.Release != 7 {
+		d.Source != SourceContainer || d.Pod != "abcdefghjkm" || d.Node != "node-1" || d.Replica != 1 || d.Deployment != 7 {
 		t.Errorf("labels: %+v", d)
 	}
 	if string(d.SpanAttributes["http.response.status_code"]) != "500" || string(d.ResourceAttributes["ferun.foo"]) != `"bar"` {

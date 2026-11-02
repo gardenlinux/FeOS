@@ -34,10 +34,10 @@ import (
 
 // The bounds of the listings.
 const (
-	defaultReleases = 50
-	maxReleases     = 1000
-	defaultLogLines = 200
-	maxLogLines     = 10000
+	defaultDeployments = 50
+	maxDeployments     = 1000
+	defaultLogLines    = 200
+	maxLogLines        = 10000
 )
 
 // tagName is a tag's rule (env_tags).
@@ -124,7 +124,7 @@ func (s *Service) DeleteEnv(ctx context.Context, tenant, env string) error {
 }
 
 // PlanSpec is POST /api/v1/environments/plan: a spec validated without an
-// environment (spec.ModeSpec): no secrets, no release to compare with, but
+// environment (spec.ModeSpec): no secrets, no deployment to compare with, but
 // the tenant's sandboxes and the images.
 func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecRequest) (PlanSpecAnswer, error) {
 	sp, fs := spec.Parse(req.Spec)
@@ -143,7 +143,7 @@ func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecReque
 
 // Plan is POST /api/v1/environments/{env}/plan: parse, validate, resolve
 // the images (unresolvable: a warning), normalise, and diff against
-// req.Base or the current release. It changes nothing.
+// req.Base or the current deployment. It changes nothing.
 func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest) (PlanAnswer, error) {
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
 	if err != nil {
@@ -156,76 +156,76 @@ func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest)
 	return p.answer(), nil
 }
 
-// Apply is POST /api/v1/environments/{env}/releases: plan, refuse on any
+// Apply is POST /api/v1/environments/{env}/deployments: plan, refuse on any
 // error (InvalidSpecError), pin the images (unresolvable: an error), and
-// in one transaction check req.Base against the current release
-// (BaseMismatchError), insert release current+1 waiting, replace the
+// in one transaction check req.Base against the current deployment
+// (BaseMismatchError), insert deployment current+1 waiting, replace the
 // older waiting and deploying ones and wake the controller. A normalised
-// spec equal to the current release's answers that release Unchanged
+// spec equal to the current deployment's answers that deployment Unchanged
 // (200), unless it failed.
 func (s *Service) Apply(ctx context.Context, tenant, env string, req ApplyRequest) (ApplyAnswer, error) {
-	if err := checkReleaseMeta(req.Author, req.Message, req.Annotations); err != nil {
+	if err := checkDeploymentMeta(req.Author, req.Message, req.Annotations); err != nil {
 		return ApplyAnswer{}, err
 	}
 	return s.apply(ctx, tenant, env, applyArgs{raw: req.Spec, base: req.Base, author: req.Author, message: req.Message,
 		annotations: req.Annotations, origin: model.OriginApply})
 }
 
-// Releases is GET /api/v1/environments/{env}/releases: the newest limit
-// releases (default 50), newest first.
-func (s *Service) Releases(ctx context.Context, tenant, env string, limit int) (ReleaseList, error) {
+// Deployments is GET /api/v1/environments/{env}/deployments: the newest limit
+// deployments (default 50), newest first.
+func (s *Service) Deployments(ctx context.Context, tenant, env string, limit int) (DeploymentList, error) {
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
 	if err != nil {
-		return ReleaseList{}, err
+		return DeploymentList{}, err
 	}
 	if limit <= 0 {
-		limit = defaultReleases
+		limit = defaultDeployments
 	}
-	limit = min(limit, maxReleases)
-	rows, err := s.st.ListReleases(ctx, e.ID, limit)
+	limit = min(limit, maxDeployments)
+	rows, err := s.st.ListDeployments(ctx, e.ID, limit)
 	if err != nil {
-		return ReleaseList{}, fmt.Errorf("releases: %w", err)
+		return DeploymentList{}, fmt.Errorf("deployments: %w", err)
 	}
-	tags, err := s.tagsByRelease(ctx, e.ID)
+	tags, err := s.tagsByDeployment(ctx, e.ID)
 	if err != nil {
-		return ReleaseList{}, err
+		return DeploymentList{}, err
 	}
-	out := ReleaseList{Releases: make([]ReleaseInfo, 0, len(rows))}
+	out := DeploymentList{Deployments: make([]DeploymentInfo, 0, len(rows))}
 	for _, r := range rows {
-		out.Releases = append(out.Releases, releaseInfo(r, tags[r.Number]))
+		out.Deployments = append(out.Deployments, deploymentInfo(r, tags[r.Number]))
 	}
 	return out, nil
 }
 
-// Release is GET /api/v1/environments/{env}/releases/{n}: the release,
-// its spec and its diff against release n-1; 404 "no such release".
-func (s *Service) Release(ctx context.Context, tenant, env string, number int) (ReleaseDetail, error) {
+// Deployment is GET /api/v1/environments/{env}/deployments/{n}: the deployment,
+// its spec and its diff against deployment n-1; 404 "no such deployment".
+func (s *Service) Deployment(ctx context.Context, tenant, env string, number int) (DeploymentDetail, error) {
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
 	if err != nil {
-		return ReleaseDetail{}, err
+		return DeploymentDetail{}, err
 	}
-	r, err := s.st.GetRelease(ctx, e.ID, number)
+	r, err := s.st.GetDeployment(ctx, e.ID, number)
 	if errors.Is(err, store.ErrNoRow) {
-		return ReleaseDetail{}, errNoRelease()
+		return DeploymentDetail{}, errNoDeployment()
 	}
 	if err != nil {
-		return ReleaseDetail{}, fmt.Errorf("release %d: %w", number, err)
+		return DeploymentDetail{}, fmt.Errorf("deployment %d: %w", number, err)
 	}
-	sp, err := s.releaseSpec(ctx, e, number)
+	sp, err := s.deploymentSpec(ctx, e, number)
 	if err != nil {
-		return ReleaseDetail{}, err
+		return DeploymentDetail{}, err
 	}
 	var prev *spec.Spec
 	if number > 1 {
-		if prev, err = s.releaseSpec(ctx, e, number-1); err != nil && !isNotFound(err) {
-			return ReleaseDetail{}, err
+		if prev, err = s.deploymentSpec(ctx, e, number-1); err != nil && !isNotFound(err) {
+			return DeploymentDetail{}, err
 		}
 	}
-	tags, err := s.tagsByRelease(ctx, e.ID)
+	tags, err := s.tagsByDeployment(ctx, e.ID)
 	if err != nil {
-		return ReleaseDetail{}, err
+		return DeploymentDetail{}, err
 	}
-	return ReleaseDetail{ReleaseInfo: releaseInfo(r, tags[number]), Spec: r.Spec,
+	return DeploymentDetail{DeploymentInfo: deploymentInfo(r, tags[number]), Spec: r.Spec,
 		Diff: spec.DiffWith(prev, sp, s.addonEffect)}, nil
 }
 
@@ -235,44 +235,44 @@ func isNotFound(err error) bool {
 	return errors.As(err, &ae) && ae.Status == http.StatusNotFound
 }
 
-// Revert is POST /api/v1/environments/{env}/releases/{n}/revert: Apply of
-// release n's spec with origin revert, originRef n, and n's annotations
+// Revert is POST /api/v1/environments/{env}/deployments/{n}/revert: Apply of
+// deployment n's spec with origin revert, originRef n, and n's annotations
 // plus "ferun.revertOf": n. A secret version n pins that was deleted is an
 // error finding.
 func (s *Service) Revert(ctx context.Context, tenant, env string, number int, req RevertRequest) (ApplyAnswer, error) {
-	if err := checkReleaseMeta(req.Author, req.Message, nil); err != nil {
+	if err := checkDeploymentMeta(req.Author, req.Message, nil); err != nil {
 		return ApplyAnswer{}, err
 	}
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}
-	r, err := s.st.GetRelease(ctx, e.ID, number)
+	r, err := s.st.GetDeployment(ctx, e.ID, number)
 	if errors.Is(err, store.ErrNoRow) {
-		return ApplyAnswer{}, errNoRelease()
+		return ApplyAnswer{}, errNoDeployment()
 	}
 	if err != nil {
-		return ApplyAnswer{}, fmt.Errorf("release %d: %w", number, err)
+		return ApplyAnswer{}, fmt.Errorf("deployment %d: %w", number, err)
 	}
 	return s.apply(ctx, tenant, e.ID.String(), applyArgs{raw: r.Spec, base: req.Base, author: req.Author,
 		message: req.Message, annotations: revertAnnotations(r), origin: model.OriginRevert,
 		originRef: strconv.Itoa(number)})
 }
 
-// currentRaw is the current release's spec as stored, nil without one.
+// currentRaw is the current deployment's spec as stored, nil without one.
 func (s *Service) currentRaw(ctx context.Context, e store.Environment) ([]byte, error) {
-	if e.Release == 0 {
+	if e.Deployment == 0 {
 		return nil, nil
 	}
-	r, err := s.st.GetRelease(ctx, e.ID, e.Release)
+	r, err := s.st.GetDeployment(ctx, e.ID, e.Deployment)
 	if err != nil {
-		return nil, fmt.Errorf("release %d: %w", e.Release, err)
+		return nil, fmt.Errorf("deployment %d: %w", e.Deployment, err)
 	}
 	return r.Spec, nil
 }
 
 // PutObject is PUT /api/v1/environments/{env}/objects/{kind}/{name}: the
-// current release's spec with the object set, applied (origin object,
+// current deployment's spec with the object set, applied (origin object,
 // originRef "<kind>/<name>") or, with DryRun, planned against req.Base.
 // kind is spec.KindService, KindJob, KindAddon, KindRoute or KindSecret.
 func (s *Service) PutObject(ctx context.Context, tenant, env, kind, name string, req PutObjectRequest) (ObjectAnswer, error) {
@@ -283,8 +283,8 @@ func (s *Service) PutObject(ctx context.Context, tenant, env, kind, name string,
 }
 
 // DeleteObject is DELETE /api/v1/environments/{env}/objects/{kind}/{name}:
-// the current release's spec without the object, applied or planned; 404
-// "no such object" when the current release has none.
+// the current deployment's spec without the object, applied or planned; 404
+// "no such object" when the current deployment has none.
 func (s *Service) DeleteObject(ctx context.Context, tenant, env, kind, name string, req DeleteObjectRequest) (ObjectAnswer, error) {
 	return s.objectChange(ctx, tenant, env, kind, name, nil, req.Base, req.DryRun, req.Author, req.Message)
 }
@@ -292,7 +292,7 @@ func (s *Service) DeleteObject(ctx context.Context, tenant, env, kind, name stri
 // objectChange is PutObject (object set) and DeleteObject (nil).
 func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name string, object []byte, base int, dryRun bool,
 	author, message string) (ObjectAnswer, error) {
-	if err := checkReleaseMeta(author, message, nil); err != nil {
+	if err := checkDeploymentMeta(author, message, nil); err != nil {
 		return ObjectAnswer{}, err
 	}
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
@@ -328,8 +328,8 @@ func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name stri
 // Clone is POST /api/v1/environments/{env}/clone: a new environment
 // (201, its status) with the secrets of req.Secrets (copied: the
 // source's latest version, unsealed and sealed again for the new
-// environment; or set), whose release 1 (origin clone, originRef "<env
-// id>/<number>", annotations copied) is req.Spec or the source release's
+// environment; or set), whose deployment 1 (origin clone, originRef "<env
+// id>/<number>", annotations copied) is req.Spec or the source deployment's
 // spec without its attached services. No data is copied (Data is an
 // error finding); a secret reference the new environment would not have
 // is one too.
@@ -339,7 +339,7 @@ func (s *Service) Clone(ctx context.Context, tenant, env string, req CloneReques
 
 // tagOf is a tag as the answers show it.
 func tagOf(t store.EnvTag) Tag {
-	return Tag{Tag: t.Tag, Release: t.Number, MovedBy: t.MovedBy, MovedAt: rfc3339(t.MovedAt)}
+	return Tag{Tag: t.Tag, Deployment: t.Number, MovedBy: t.MovedBy, MovedAt: rfc3339(t.MovedAt)}
 }
 
 // Tags is GET /api/v1/environments/{env}/tags.
@@ -376,29 +376,29 @@ func (s *Service) Tag(ctx context.Context, tenant, env, tag string) (Tag, error)
 }
 
 // PutTag is PUT /api/v1/environments/{env}/tags/{tag}: set or move the
-// tag to a release (movedBy the author, else the tenant); 404 "no such
-// release".
+// tag to a deployment (movedBy the author, else the tenant); 404 "no such
+// deployment".
 func (s *Service) PutTag(ctx context.Context, tenant, env, tag string, req PutTagRequest) (Tag, error) {
 	if !tagName.MatchString(tag) {
 		return Tag{}, errBadRequest("tag %q must match %s", tag, tagName)
 	}
-	if err := checkReleaseMeta(req.Author, "", nil); err != nil {
+	if err := checkDeploymentMeta(req.Author, "", nil); err != nil {
 		return Tag{}, err
 	}
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
 	if err != nil {
 		return Tag{}, err
 	}
-	if req.Release < 1 {
-		return Tag{}, errNoRelease()
+	if req.Deployment < 1 {
+		return Tag{}, errNoDeployment()
 	}
 	by := req.Author
 	if by == "" {
 		by = tenant
 	}
-	t, err := s.st.PutTag(ctx, store.EnvTag{EnvID: e.ID, Tag: tag, Number: req.Release, MovedBy: by})
+	t, err := s.st.PutTag(ctx, store.EnvTag{EnvID: e.ID, Tag: tag, Number: req.Deployment, MovedBy: by})
 	if errors.Is(err, store.ErrNoRow) {
-		return Tag{}, errNoRelease()
+		return Tag{}, errNoDeployment()
 	}
 	if err != nil {
 		return Tag{}, fmt.Errorf("tag %s: %w", tag, err)
@@ -447,7 +447,7 @@ func (s *Service) Secrets(ctx context.Context, tenant, env string) (SecretList, 
 
 // PutSecret is PUT /api/v1/environments/{env}/secrets/{name}: a new
 // version (the highest ever plus one), sealed under its AAD (200); 503
-// without a sealer. A release pins it at its next apply.
+// without a sealer. A deployment pins it at its next apply.
 func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req PutSecretRequest) (SecretVersion, error) {
 	if s.d.Sealer == nil {
 		return SecretVersion{}, errNoSecrets()
@@ -460,7 +460,7 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 		return SecretVersion{}, errBadRequest("the value has %d bytes; at most %d are allowed", len(req.Value),
 			maxSecretBytes)
 	}
-	if err := checkReleaseMeta(req.Author, "", nil); err != nil {
+	if err := checkDeploymentMeta(req.Author, "", nil); err != nil {
 		return SecretVersion{}, err
 	}
 	by := req.Author
@@ -500,7 +500,7 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 }
 
 // DeleteSecret is DELETE /api/v1/environments/{env}/secrets/{name}: every
-// version soft-deleted (204); 409 while the latest release pins it, 404
+// version soft-deleted (204); 409 while the latest deployment pins it, 404
 // "no such secret", 503 without a sealer.
 func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) error {
 	if s.d.Sealer == nil {
@@ -515,18 +515,18 @@ func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) er
 		if err != nil {
 			return err
 		}
-		if e.Release > 0 {
-			r, err := tx.GetRelease(ctx, e.ID, e.Release)
+		if e.Deployment > 0 {
+			r, err := tx.GetDeployment(ctx, e.ID, e.Deployment)
 			if err != nil {
-				return fmt.Errorf("release %d: %w", e.Release, err)
+				return fmt.Errorf("deployment %d: %w", e.Deployment, err)
 			}
 			sp, err := parseStored(r.Spec)
 			if err != nil {
 				return err
 			}
 			if _, pinned := sp.Secrets[name]; pinned || slices.Contains(spec.Referenced(*sp), name) {
-				return apierr.New(http.StatusConflict, "release %d pins secret %s: apply a release without it first",
-					e.Release, name)
+				return apierr.New(http.StatusConflict, "deployment %d pins secret %s: apply a deployment without it first",
+					e.Deployment, name)
 			}
 		}
 		n, err := tx.DeleteSecret(ctx, e.ID, name)
@@ -612,7 +612,7 @@ func ctlError(err error, kind, name string) error {
 	case errors.Is(err, ctl.ErrNoContainerLogs):
 		return apierr.New(http.StatusNotImplemented, "%s", ctl.ErrNoContainerLogs.Error())
 	case errors.Is(err, ctl.ErrJobRunning):
-		// Its own text (the run's release and attempt); a run takes
+		// Its own text (the run's deployment and attempt); a run takes
 		// minutes, not seconds.
 		return apierr.WithCode(http.StatusConflict, CodeBusy, "%s", msg).RetryAfter(apierr.RetryAfterOf(err, 30))
 	case errors.Is(err, model.ErrBusy):
@@ -687,8 +687,8 @@ func (s *Service) RestartService(ctx context.Context, tenant, env, name string) 
 }
 
 // RunJob is POST /api/v1/environments/{env}/jobs/{name}/run (202): a new
-// run, attempt 1; 409 CodeBusy while a run of the job runs, of any release
-// ("job X runs already (release N, attempt M)", Retry-After 30); 409
+// run, attempt 1; 409 CodeBusy while a run of the job runs, of any deployment
+// ("job X runs already (deployment N, attempt M)", Retry-After 30); 409
 // CodeNotReady while its template cannot render.
 func (s *Service) RunJob(ctx context.Context, tenant, env, name string) error {
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)

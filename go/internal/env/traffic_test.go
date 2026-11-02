@@ -137,7 +137,7 @@ func (f *fakeTrafficSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // The traffic is read from the sink with the caller's token, for the
-// services the environment's desired and deployed releases route to an
+// services the environment's desired and deployed deployments route to an
 // image service; without --sink-url or a token, or with the sink down,
 // it answers 503 as the access log does, and another tenant's
 // environment is a 404.
@@ -146,8 +146,8 @@ func TestTrafficFromSink(t *testing.T) {
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "v1")
 	sb := h.sandbox(tenantA, true)
-	// Release 1 routes / to web, /api to api and /dev to the attached
-	// dev, which the route door alone serves; release 2 drops /api.
+	// Deployment 1 routes / to web, /api to api and /dev to the attached
+	// dev, which the route door alone serves; deployment 2 drops /api.
 	withDev := strings.Replace(previewSpec(sb), `"root": {"path": "/", "service": "web", "port": "http"}`,
 		`"root": {"path": "/", "service": "web", "port": "http"}, "dev": {"path": "/dev", "service": "dev", "port": "http"}`, 1)
 	h.apply("stage", withDev, 0)
@@ -173,7 +173,7 @@ func TestTrafficFromSink(t *testing.T) {
 		http.StatusNotFound, "")
 	refused("another window", ctx, tenantA, "7d", http.StatusBadRequest, "")
 
-	// The desired release routes web alone: the deployed one adds api.
+	// The desired deployment routes web alone: the deployed one adds api.
 	read := func(window string) Traffic {
 		t.Helper()
 		tr, err := h.svc.Traffic(ctx, tenantA, "stage", window)

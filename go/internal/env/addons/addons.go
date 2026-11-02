@@ -37,7 +37,7 @@ type Blueprint interface {
 	Plans() map[string]Plan
 	// DefaultPlan is the plan of an addon that names none.
 	DefaultPlan() string
-	// Validate checks an addon against the current release's same addon
+	// Validate checks an addon against the current deployment's same addon
 	// (prev nil: none): version, plan and options. Paths are relative to
 	// the addon: "version", "options.roles[1]". A major version change is
 	// an error, a plan change that would resize the volume a warning (the

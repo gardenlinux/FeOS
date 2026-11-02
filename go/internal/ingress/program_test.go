@@ -309,7 +309,7 @@ func newProgHarness(t *testing.T) *progHarness {
 	}}})
 	fake.SetAdmittedVersion(progName, 3)
 	fake.PutEnv(wire.Env{
-		ID: progEnv, Tenant: "acme", Name: "app", Hosts: []string{progHost}, Release: 1, Hash: "h1",
+		ID: progEnv, Tenant: "acme", Name: "app", Hosts: []string{progHost}, Deployment: 1, Hash: "h1",
 		Routes: []wire.Route{{Name: "root", Path: "/", Service: "web", Port: "http"}},
 		Services: []wire.Service{{Name: "web", Endpoints: []wire.Endpoint{{
 			Instance: "inst-1", Address: progPod, Node: progNode, Ports: map[string]int{"http": 8080}, GroupVersion: 3,

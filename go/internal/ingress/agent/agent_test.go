@@ -369,7 +369,7 @@ func lostFiles(t *testing.T, dir string) []string {
 
 func testEnv(id string) wire.Env {
 	return wire.Env{
-		ID: id, Tenant: "acme", Name: "prod", Hosts: []string{"prod-acme.apps.test"}, Release: 1, Hash: "h-" + id,
+		ID: id, Tenant: "acme", Name: "prod", Hosts: []string{"prod-acme.apps.test"}, Deployment: 1, Hash: "h-" + id,
 		Routes: []wire.Route{{Name: "web", Path: "/", Service: "web", Port: "http"}},
 		Services: []wire.Service{{Name: "web", Endpoints: []wire.Endpoint{{
 			Instance: "i-" + id, Address: "fd00:1:2:10::5", Node: "n1", Ports: map[string]int{"http": 8080}, GroupVersion: 1,

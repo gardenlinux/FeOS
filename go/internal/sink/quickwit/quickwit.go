@@ -30,19 +30,24 @@ type Doc struct {
 	Kind        string `json:"kind,omitempty"`
 	Object      string `json:"object,omitempty"`
 	Replica     int    `json:"replica"`
-	Release     int    `json:"release"`
-	Instance    string `json:"instance,omitempty"`
-	Container   string `json:"container,omitempty"`
-	Job         string `json:"job,omitempty"`
-	Attempt     int    `json:"attempt"`
-	Source      string `json:"source"`
-	IOStream    string `json:"iostream,omitempty"`
-	Level       int    `json:"level"`
-	TraceID     string `json:"trace_id,omitempty"`
-	Off         int64  `json:"off"`
-	Partial     bool   `json:"partial"`
-	Cont        bool   `json:"cont"`
-	Text        string `json:"text"`
+	// Deployment is the stream's ferun.deployment. Its field keeps the
+	// name release, the label's earlier word (ADR 0018, "The
+	// deployments' word"): a field of its own is a new mapping, so a new
+	// index and topic of every retention (MappingVersion), for a field no
+	// search filters by; it takes the new name with the next version.
+	Deployment int    `json:"release"`
+	Instance   string `json:"instance,omitempty"`
+	Container  string `json:"container,omitempty"`
+	Job        string `json:"job,omitempty"`
+	Attempt    int    `json:"attempt"`
+	Source     string `json:"source"`
+	IOStream   string `json:"iostream,omitempty"`
+	Level      int    `json:"level"`
+	TraceID    string `json:"trace_id,omitempty"`
+	Off        int64  `json:"off"`
+	Partial    bool   `json:"partial"`
+	Cont       bool   `json:"cont"`
+	Text       string `json:"text"`
 }
 
 // Query selects a tenant's lines: the labels set (empty or nil: any), a

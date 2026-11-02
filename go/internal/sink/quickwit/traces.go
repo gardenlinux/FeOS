@@ -17,18 +17,19 @@ import (
 // SpanDoc is a span as the trace index holds it (traces.md, The index).
 // Attributes are JSON values as they came from OTLP's AnyValue.
 type SpanDoc struct {
-	TS                 int64                      `json:"ts"`
-	Tenant             string                     `json:"tenant"`
-	Environment        string                     `json:"environment,omitempty"`
-	Kind               string                     `json:"kind,omitempty"`
-	Object             string                     `json:"object,omitempty"`
-	Instance           string                     `json:"instance,omitempty"`
-	Job                string                     `json:"job,omitempty"`
-	Source             string                     `json:"source"`
-	Pod                string                     `json:"pod,omitempty"`
-	Node               string                     `json:"node,omitempty"`
-	Replica            uint64                     `json:"replica"`
-	Release            uint64                     `json:"release"`
+	TS          int64  `json:"ts"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment,omitempty"`
+	Kind        string `json:"kind,omitempty"`
+	Object      string `json:"object,omitempty"`
+	Instance    string `json:"instance,omitempty"`
+	Job         string `json:"job,omitempty"`
+	Source      string `json:"source"`
+	Pod         string `json:"pod,omitempty"`
+	Node        string `json:"node,omitempty"`
+	Replica     uint64 `json:"replica"`
+	// Deployment keeps the field name release, as Doc's does.
+	Deployment         uint64                     `json:"release"`
 	Attempt            uint64                     `json:"attempt"`
 	TraceID            string                     `json:"trace_id"`
 	SpanID             string                     `json:"span_id"`

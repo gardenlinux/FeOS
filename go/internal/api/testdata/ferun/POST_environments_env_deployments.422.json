@@ -1,6 +1,6 @@
 {
   "method": "POST",
-  "path": "/api/v1/environments/expensa-stage/releases",
+  "path": "/api/v1/environments/expensa-stage/deployments",
   "query": {},
   "status": 422,
   "request": {

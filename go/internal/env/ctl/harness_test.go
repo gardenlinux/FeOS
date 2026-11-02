@@ -349,9 +349,9 @@ func (h *harness) newEnv(name string) store.Environment {
 	return e
 }
 
-// apply inserts a release of spec as the service's apply does: the next
-// number, older waiting and deploying releases replaced, env-reconcile
-// and env-groups woken. It returns the release's number.
+// apply inserts a deployment of spec as the service's apply does: the next
+// number, older waiting and deploying deployments replaced, env-reconcile
+// and env-groups woken. It returns the deployment's number.
 func (h *harness) apply(envID uuid.UUID, spec string) int {
 	h.t.Helper()
 	var compact json.RawMessage
@@ -364,17 +364,17 @@ func (h *harness) apply(envID uuid.UUID, spec string) int {
 		if err != nil {
 			return err
 		}
-		n = e.Release + 1
-		if _, err := tx.InsertRelease(bg, store.EnvRelease{EnvID: envID, Number: n, Spec: compact, Base: e.Release,
+		n = e.Deployment + 1
+		if _, err := tx.InsertDeployment(bg, store.EnvDeployment{EnvID: envID, Number: n, Spec: compact, Base: e.Deployment,
 			Origin: model.OriginApply}); err != nil {
 			return err
 		}
 		after := e
-		after.Release = n
+		after.Deployment = n
 		if _, err := tx.UpdateEnvironment(bg, e, after); err != nil {
 			return err
 		}
-		if _, err := tx.ReplaceReleases(bg, envID, n, model.ReleaseWaiting, model.ReleaseDeploying); err != nil {
+		if _, err := tx.ReplaceDeployments(bg, envID, n, model.DeploymentWaiting, model.DeploymentDeploying); err != nil {
 			return err
 		}
 		if err := tx.Notify(bg, db.ChanLeader, HintReconcile); err != nil {
@@ -405,22 +405,22 @@ func (h *harness) putSecret(envID uuid.UUID, name, value string) int {
 	return version
 }
 
-// release reads a release.
-func (h *harness) release(envID uuid.UUID, n int) store.EnvRelease {
+// deployment reads a deployment.
+func (h *harness) deployment(envID uuid.UUID, n int) store.EnvDeployment {
 	h.t.Helper()
-	r, err := h.st.GetRelease(bg, envID, n)
+	r, err := h.st.GetDeployment(bg, envID, n)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	return r
 }
 
-// waitRelease waits until a release is in state.
-func (h *harness) waitRelease(envID uuid.UUID, n int, state string, within time.Duration) store.EnvRelease {
+// waitDeployment waits until a deployment is in state.
+func (h *harness) waitDeployment(envID uuid.UUID, n int, state string, within time.Duration) store.EnvDeployment {
 	h.t.Helper()
-	var r store.EnvRelease
-	eventually(h.t, within, fmt.Sprintf("release %d %s", n, state), func() bool {
-		r = h.release(envID, n)
+	var r store.EnvDeployment
+	eventually(h.t, within, fmt.Sprintf("deployment %d %s", n, state), func() bool {
+		r = h.deployment(envID, n)
 		return r.State == state
 	})
 	return r

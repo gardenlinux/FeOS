@@ -49,7 +49,7 @@ func TestImageServiceRollingAndScale(t *testing.T) {
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(2, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	v1 := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 	if v1[0].Instance.Replica != 0 || v1[1].Instance.Replica != 1 || v1[0].Sandbox.IdleAfterS == nil ||
 		*v1[0].Sandbox.IdleAfterS != 0 || v1[0].Sandbox.MemoryMiB != 512 || v1[0].Sandbox.VCPUs != 1 {
@@ -104,7 +104,7 @@ func TestImageServiceRollingAndScale(t *testing.T) {
 		}
 	}()
 	r2 := h.apply(env.ID, serviceSpec(2, "2", ""))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
 	close(stop)
 	<-watched
 	mu.Lock()
@@ -130,14 +130,14 @@ func TestImageServiceRollingAndScale(t *testing.T) {
 
 	// Scale up: the kept replicas stay, one is added.
 	r3 := h.apply(env.ID, serviceSpec(3, "2", ""))
-	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r3, model.DeploymentDeployed, 30*time.Second)
 	v3 := h.waitRows(env.ID, spec.KindService, "web", 3, 10*time.Second, "ready", ready)
 	kept := 0
 	for _, r := range v3 {
 		if slices.ContainsFunc(v2, func(o store.EnvInstanceRow) bool { return o.Sandbox.ID == r.Sandbox.ID }) {
 			kept++
-			if r.Instance.Release != r3 {
-				t.Errorf("a kept replica's release is %d", r.Instance.Release)
+			if r.Instance.Deployment != r3 {
+				t.Errorf("a kept replica's deployment is %d", r.Instance.Deployment)
 			}
 		}
 	}
@@ -147,7 +147,7 @@ func TestImageServiceRollingAndScale(t *testing.T) {
 
 	// Scale down: the highest replicas stop.
 	r4 := h.apply(env.ID, serviceSpec(1, "2", `,"idle":"15m"`))
-	h.waitRelease(env.ID, r4, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r4, model.DeploymentDeployed, 30*time.Second)
 	v4 := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
 	if v4[0].Instance.Replica != 0 || v4[0].Sandbox.ID != v3[0].Sandbox.ID {
 		t.Fatalf("after the scale down %+v", v4)
@@ -170,14 +170,14 @@ func TestImageServiceRollingAndScale(t *testing.T) {
 
 // A container that exits is restarted with a growing backoff, and 3 exits
 // within the window open crash_loop with the exits and the log tail; a
-// new instance of a deploying release that exits 3 times fails the release
+// new instance of a deploying deployment that exits 3 times fails the deployment
 // (rollout_failed), stops the new instances and keeps the old serving.
 func TestCrashLoopAndRolloutFailure(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	row := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	id := row.Sandbox.ID
 	var gaps []time.Duration
@@ -211,13 +211,13 @@ func TestCrashLoopAndRolloutFailure(t *testing.T) {
 	inc := h.incident(env.ID, "service/web", model.ConditionCrashLoop, 10*time.Second)
 	var ev evidence
 	if err := json.Unmarshal(inc.Evidence, &ev); err != nil || len(ev.Exits) != 3 || len(ev.LogTail) != 3 ||
-		inc.Release != r1 || inc.Summary != "web (release 1) exited 3 times within 10 minutes, last with code 1" {
+		inc.Deployment != r1 || inc.Summary != "web (deployment 1) exited 3 times within 10 minutes, last with code 1" {
 		t.Fatalf("incident %+v %+v", inc, ev)
 	}
 	// Restarted once more, it is ready again.
 	h.waitRows(env.ID, spec.KindService, "web", 1, 30*time.Second, "ready again", ready)
 
-	// A release whose new instance crashes fails; the old one serves on.
+	// A deployment whose new instance crashes fails; the old one serves on.
 	r2 := h.apply(env.ID, serviceSpec(1, "2", ""))
 	var newID podid.ID
 	for i := 1; i <= 3; i++ {
@@ -243,12 +243,12 @@ func TestCrashLoopAndRolloutFailure(t *testing.T) {
 			return err == nil && len(inst.Exits) == i
 		})
 	}
-	rel := h.waitRelease(env.ID, r2, model.ReleaseFailed, 30*time.Second)
+	rel := h.waitDeployment(env.ID, r2, model.DeploymentFailed, 30*time.Second)
 	if !strings.Contains(rel.Reason, "exited 3 times") {
 		t.Errorf("reason %q", rel.Reason)
 	}
 	inc = h.incident(env.ID, "service/web", model.ConditionRolloutFailed, 10*time.Second)
-	if err := json.Unmarshal(inc.Evidence, &ev); err != nil || len(ev.Exits) != 3 || inc.Release != r2 {
+	if err := json.Unmarshal(inc.Evidence, &ev); err != nil || len(ev.Exits) != 3 || inc.Deployment != r2 {
 		t.Fatalf("rollout incident %+v %+v", inc, ev)
 	}
 	eventually(t, 30*time.Second, "the new instance gone, the old one serving", func() bool {
@@ -284,11 +284,11 @@ func TestReadinessPhases(t *testing.T) {
 		inst, _ := h.st.GetEnvInstance(bg, row.Sandbox.ID)
 		return inst.Phase == model.PhaseStarting && strings.Contains(inst.Detail, "answered 503")
 	})
-	if rel := h.release(env.ID, r1); rel.State != model.ReleaseDeploying {
-		t.Errorf("release %s while its instance is starting", rel.State)
+	if rel := h.deployment(env.ID, r1); rel.State != model.DeploymentDeploying {
+		t.Errorf("deployment %s while its instance is starting", rel.State)
 	}
 	status.Store(200)
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	if p, ok := hosts.Load("localhost:8080"); !ok || p != "/readyz" {
 		t.Error("the probe did not ask for localhost:8080/readyz")
 	}
@@ -321,7 +321,7 @@ func TestReadinessPhases(t *testing.T) {
 		return strings.Contains(inst.Detail, "tcp port 8080")
 	})
 	n1.Script().SetPodPortAddr(tcpRow.Sandbox.ID, 8080, strings.TrimPrefix(srv.URL, "http://"))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
 
 	// exec: exit 1, then 0.
 	var code atomic.Int32
@@ -342,7 +342,7 @@ func TestReadinessPhases(t *testing.T) {
 		return false
 	})
 	code.Store(0)
-	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r3, model.DeploymentDeployed, 30*time.Second)
 }
 
 // A rollout counts only live instances (§13.7): a new instance whose
@@ -363,7 +363,7 @@ func TestRolloutCountsLiveInstances(t *testing.T) {
 	})
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	old := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	r2 := h.apply(env.ID, serviceSpec(1, "2", `,"readiness":{"exec":{"command":["check"]},"period":"1s"}`))
 	var fresh store.EnvInstanceRow
@@ -397,8 +397,8 @@ func TestRolloutCountsLiveInstances(t *testing.T) {
 		}
 		return true
 	})
-	if rel := h.release(env.ID, r2); rel.State != model.ReleaseDeploying {
-		t.Fatalf("release %s while its new instance is unknown", rel.State)
+	if rel := h.deployment(env.ID, r2); rel.State != model.DeploymentDeploying {
+		t.Fatalf("deployment %s while its new instance is unknown", rel.State)
 	}
 	if sb, _ := h.st.GetSandbox(bg, fresh.Sandbox.ID); sb.ClientState != model.StateUnknown {
 		t.Fatalf("the new instance is %s, not unknown: the test did not hold it", sb.ClientState)
@@ -406,7 +406,7 @@ func TestRolloutCountsLiveInstances(t *testing.T) {
 	// Back in touch, and its check passes: the rollout goes on.
 	n1.Script().SetHook(podv1.PodService_GetPod_FullMethodName, nil)
 	code.Store(0)
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
 	if rows := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready); rows[0].Sandbox.ID != fresh.Sandbox.ID {
 		t.Errorf("web after the rollout %+v", rows[0].Sandbox)
 	}
@@ -418,7 +418,7 @@ func TestRolloutCountsLiveInstances(t *testing.T) {
 // is paused or hibernated without an op.
 func TestRestartWaitsForALiveReplica(t *testing.T) {
 	h := newHarness(t, options{timings: func(t *timings) { t.restartReady = 300 * time.Millisecond }})
-	// An environment without a release, whose rows the controller leaves.
+	// An environment without a deployment, whose rows the controller leaves.
 	env := h.newEnv("stage")
 	// A row made before ADR 0019, with a UUID.
 	id := podid.ID(uuid.NewString())
@@ -429,7 +429,7 @@ func TestRestartWaitsForALiveReplica(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.st.InsertEnvInstance(bg, store.EnvInstance{SandboxID: id, EnvID: env.ID, Kind: spec.KindService,
-		Object: "web", TemplateHash: "h", Release: 1, Phase: model.PhaseReady}); err != nil {
+		Object: "web", TemplateHash: "h", Deployment: 1, Phase: model.PhaseReady}); err != nil {
 		t.Fatal(err)
 	}
 	h.exec(`UPDATE sandboxes SET client_state = 'hibernated' WHERE id = $1`, id)
@@ -455,7 +455,7 @@ func TestUnknownIdleNotWoken(t *testing.T) {
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"image":%q},"idler":{"image":%q,"idle":"15m"}}}`,
 		testImage, testImage))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	idler := h.waitRows(env.ID, spec.KindService, "idler", 1, 10*time.Second, "ready", ready)[0]
 	if err := h.eng.Pause(bg, idler.Sandbox.ID); err != nil {
@@ -518,14 +518,14 @@ func crash(t *testing.T, h *harness, n *testnode.Node, envID uuid.UUID, id podid
 }
 
 // A crash loop's incident closes once the object has been ready for the
-// crash window, and a later crash loop of the same release opens a new
+// crash window, and a later crash loop of the same deployment opens a new
 // one.
 func TestCrashLoopCloses(t *testing.T) {
 	h := newHarness(t, options{timings: func(t *timings) { t.crashWindow = 12 * time.Second }})
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	crash(t, h, n1, env.ID, id, 0, 3)
 	first := h.incident(env.ID, "service/web", model.ConditionCrashLoop, 10*time.Second)
@@ -543,22 +543,22 @@ func TestCrashLoopCloses(t *testing.T) {
 	}
 	crash(t, h, n1, env.ID, id, 0, 3)
 	second := h.incident(env.ID, "service/web", model.ConditionCrashLoop, 10*time.Second)
-	if second.ID == first.ID || second.Release != r1 {
+	if second.ID == first.ID || second.Deployment != r1 {
 		t.Fatalf("the second crash loop %+v, the first %+v", second, first)
 	}
 }
 
 // Incidents that nothing else closes: crash_loop, volume_unavailable and
 // addon_unhealthy of objects that neither T nor R has close; a crash
-// loop of an older release closes once a later release is deployed.
+// loop of an older deployment closes once a later deployment is deployed.
 func TestIncidentsClose(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	open := func(object, condition string) int64 {
-		i, _, err := h.st.OpenIncident(bg, store.EnvIncident{EnvID: env.ID, Object: object, Release: r1, Condition: condition,
+		i, _, err := h.st.OpenIncident(bg, store.EnvIncident{EnvID: env.ID, Object: object, Deployment: r1, Condition: condition,
 			Summary: "test", Evidence: []byte("{}")})
 		if err != nil {
 			t.Fatal(err)
@@ -584,9 +584,9 @@ func TestIncidentsClose(t *testing.T) {
 		t.Fatal("the crash loop of an object T has closed")
 	}
 	r2 := h.apply(env.ID, serviceSpec(1, "2", ""))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
 	if !closed(stays) {
-		t.Error("the crash loop of release 1 stays open after release 2 was deployed")
+		t.Error("the crash loop of deployment 1 stays open after deployment 2 was deployed")
 	}
 }
 
@@ -599,7 +599,7 @@ func TestRestartNotDoneIsNoExit(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	var fail atomic.Int32
 	fail.Store(2)
@@ -624,32 +624,32 @@ func TestRestartNotDoneIsNoExit(t *testing.T) {
 	}
 }
 
-// A deploying release that waits for an addon that never provisions fails
+// A deploying deployment that waits for an addon that never provisions fails
 // at its deadline (rollout_failed, naming the addon, with what it waited
 // for and the instance's detail, credentials redacted), and the old
 // instance serves on. The deadline is the longest of the services'
 // budgets (5s here) and the floor (10s here, 10 minutes by default).
-func TestReleaseDeadline(t *testing.T) {
-	h := newHarness(t, options{timings: func(t *timings) { t.releaseDeadline = 10 * time.Second }})
+func TestDeploymentDeadline(t *testing.T) {
+	h := newHarness(t, options{timings: func(t *timings) { t.deploymentDeadline = 10 * time.Second }})
 	n1 := h.addNode("n1")
 	var code atomic.Int32
 	code.Store(1)
 	failingProvisioning(n1, &code)
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	old := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"postgres":{"type":"postgres","version":"17","plan":"dev",
 		"options":{"databases":["app"]}}},"services":{"web":{"image":%q,"command":["/app"],
 		"env":{"DB":{"addon":"postgres","key":"url"}},"ports":[{"name":"http","port":8080}],"rollout":{"timeout":"5s"}}}}`,
 		testImage))
-	rel := h.waitRelease(env.ID, r2, model.ReleaseFailed, 60*time.Second)
-	if !strings.HasPrefix(rel.Reason, "release 2 did not roll out within 10s: addon postgres") {
+	rel := h.waitDeployment(env.ID, r2, model.DeploymentFailed, 60*time.Second)
+	if !strings.HasPrefix(rel.Reason, "deployment 2 did not roll out within 10s: addon postgres") {
 		t.Errorf("reason %q", rel.Reason)
 	}
 	inc := h.incident(env.ID, "addon/postgres", model.ConditionRolloutFailed, 10*time.Second)
 	var ev evidence
-	if err := json.Unmarshal(inc.Evidence, &ev); err != nil || inc.Release != r2 {
+	if err := json.Unmarshal(inc.Evidence, &ev); err != nil || inc.Deployment != r2 {
 		t.Fatalf("incident %+v %v", inc, err)
 	}
 	pw, _ := h.c.ResolveSecret(bg, env.ID, "addon.postgres.password", 1)
@@ -659,13 +659,13 @@ func TestReleaseDeadline(t *testing.T) {
 		t.Errorf("pending %q", ev.Pending)
 	}
 	if rows := h.rowsOf(env.ID, spec.KindService, "web"); len(rows) != 1 || rows[0].Sandbox.ID != old.Sandbox.ID || !ready(rows[0]) {
-		t.Errorf("web after the failed release %+v", rows)
+		t.Errorf("web after the failed deployment %+v", rows)
 	}
 }
 
 // A scale-up counts as a rollout: replicas that cannot place fail the
-// release at the service's budget, and the replicas it kept serve on. The
-// first release keeps the default budget, so that its replica does not
+// deployment at the service's budget, and the replicas it kept serve on. The
+// first deployment keeps the default budget, so that its replica does not
 // have to be ready within the scale-up's 3 s; the budget is no part of
 // the template, so the scale-up keeps that replica.
 func TestScaleUpBudget(t *testing.T) {
@@ -676,10 +676,10 @@ func TestScaleUpBudget(t *testing.T) {
 		return serviceSpec(replicas, "1", `,"resources":{"memoryMib":6144}`+extra)
 	}
 	r1 := h.apply(env.ID, big(1, ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	kept := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	r2 := h.apply(env.ID, big(2, `,"rollout":{"timeout":"3s"}`))
-	rel := h.waitRelease(env.ID, r2, model.ReleaseFailed, 30*time.Second)
+	rel := h.waitDeployment(env.ID, r2, model.DeploymentFailed, 30*time.Second)
 	if rel.Reason != "service web did not roll out within 3s" {
 		t.Errorf("reason %q", rel.Reason)
 	}
@@ -726,7 +726,7 @@ func TestProbeBusyIsInconclusive(t *testing.T) {
 	r1 := h.apply(env.ID, serviceSpec(1, "1", `,"readiness":{"http":{"port":"http","path":"/"},"period":"1s","failureThreshold":1}`))
 	row := h.waitRows(env.ID, spec.KindService, "web", 1, 30*time.Second, "running", running)[0]
 	n1.Script().SetPodPortAddr(row.Sandbox.ID, 8080, strings.TrimPrefix(srv.URL, "http://"))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	door.busy.Store(true)
 	never(t, 4*time.Second, "a busy probe counted", func() bool {
 		inst, err := h.st.GetEnvInstance(bg, row.Sandbox.ID)
@@ -736,20 +736,20 @@ func TestProbeBusyIsInconclusive(t *testing.T) {
 
 // An addon whose address changes (restored on another node) gives its
 // dependents a new template: they roll as for a change of T, surge 1,
-// without a new release.
+// without a new deployment.
 func TestAddonAddressRollsDependents(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, valkeySpec)
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 	addon := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	// n1 takes no other pod: the service goes to n2.
 	h.exec(`UPDATE nodes SET slots = 1 WHERE name = 'n1'`)
 	h.addNode("n2")
 	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
 		"services":{"web":{"image":%q,"env":{"CACHE":{"addon":"cache","key":"url"}}}}}`, testImage))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	if web.Sandbox.Node != "n2" {
 		t.Fatalf("web on %s", web.Sandbox.Node)
@@ -819,7 +819,7 @@ func TestAddonAddressRollsDependents(t *testing.T) {
 		t.Errorf("at most %d web instances at once (want 2), a gap without a ready one %v", maxLive, gap)
 	}
 	mu.Unlock()
-	if e, _ := h.st.GetEnvironment(bg, env.ID); e.Release != r2 || e.Deployed != r2 {
+	if e, _ := h.st.GetEnvironment(bg, env.ID); e.Deployment != r2 || e.Deployed != r2 {
 		t.Errorf("environment %+v", e)
 	}
 }
@@ -831,7 +831,7 @@ func TestRefusalsOfExpectedStates(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	block := make(chan struct{})
 	n1.Script().SetHook(podv1.PodService_SuspendPod_FullMethodName, func(ctx context.Context, _ string, _ any) error {

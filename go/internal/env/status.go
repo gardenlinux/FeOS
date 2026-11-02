@@ -19,11 +19,11 @@ import (
 )
 
 // status assembles an environment's status (§4.9) from the tables: its
-// latest release's rollout; the objects of its target release (the
+// latest deployment's rollout; the objects of its target deployment (the
 // latest, or the deployed one while the latest failed) with their
 // instances (env_instances with their sandbox rows: state, node,
 // address), attached services (env_attached) and jobs' latest runs
-// (env_job_runs); the routes of its deployed release (the latest when
+// (env_job_runs); the routes of its deployed deployment (the latest when
 // none is deployed), with the doors that serve them; and its open
 // incidents. It reads only.
 func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, error) {
@@ -31,7 +31,7 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 	if err != nil {
 		return EnvStatus{}, fmt.Errorf("hosts: %w", err)
 	}
-	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Release: e.Release, Deployed: e.Deployed,
+	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Deployment: e.Deployment, Deployed: e.Deployed,
 		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Objects: []ObjectStatus{}, Routes: []RouteStatus{},
 		CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
@@ -42,28 +42,28 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 		return EnvStatus{}, fmt.Errorf("incidents: %w", err)
 	}
 	st.OpenIncidents = int(open)
-	if e.Release == 0 {
+	if e.Deployment == 0 {
 		return st, nil
 	}
-	latest, err := s.st.GetRelease(ctx, e.ID, e.Release)
+	latest, err := s.st.GetDeployment(ctx, e.ID, e.Deployment)
 	if err != nil {
-		return EnvStatus{}, fmt.Errorf("release %d: %w", e.Release, err)
+		return EnvStatus{}, fmt.Errorf("deployment %d: %w", e.Deployment, err)
 	}
-	st.Rollout = &RolloutStatus{Release: latest.Number, State: latest.State, StartedAt: rfc3339(latest.StartedAt),
+	st.Rollout = &RolloutStatus{Deployment: latest.Number, State: latest.State, StartedAt: rfc3339(latest.StartedAt),
 		Reason: latest.Reason}
-	target := e.Release
-	if latest.State == model.ReleaseFailed && e.Deployed > 0 {
+	target := e.Deployment
+	if latest.State == model.DeploymentFailed && e.Deployed > 0 {
 		target = e.Deployed
 	}
-	targetSpec, err := s.releaseSpec(ctx, e, target)
+	targetSpec, err := s.deploymentSpec(ctx, e, target)
 	if err != nil {
 		return EnvStatus{}, err
 	}
-	routed := e.Release
+	routed := e.Deployment
 	if e.Deployed > 0 {
 		routed = e.Deployed
 	}
-	routeSpec, err := s.releaseSpec(ctx, e, routed)
+	routeSpec, err := s.deploymentSpec(ctx, e, routed)
 	if err != nil {
 		return EnvStatus{}, err
 	}
@@ -147,7 +147,7 @@ func objectsOf(sp *spec.Spec, instances []store.EnvInstanceRow, attached []store
 	for _, name := range slices.Sorted(maps.Keys(sp.Jobs)) {
 		o := ObjectStatus{Kind: spec.KindJob, Name: name}
 		if r, ok := runOf[name]; ok {
-			o.LastRun = &JobRunStatus{Release: r.Release, Attempt: r.Attempt, Phase: r.Phase, ExitCode: r.ExitCode,
+			o.LastRun = &JobRunStatus{Deployment: r.Deployment, Attempt: r.Attempt, Phase: r.Phase, ExitCode: r.ExitCode,
 				FinishedAt: rfc3339(r.FinishedAt), Detail: r.Detail}
 		}
 		out = append(out, o)
@@ -163,7 +163,7 @@ func instanceStatus(row store.EnvInstanceRow) InstanceStatus {
 		detail = sb.StatusDescription
 	}
 	return InstanceStatus{ID: sb.ID.String(), Replica: i.Replica, Phase: i.Phase, State: sb.ClientState, Node: sb.Node,
-		Address: sb.Address, Release: i.Release, Restarts: i.Restarts, LastExit: i.LastExit,
+		Address: sb.Address, Deployment: i.Deployment, Restarts: i.Restarts, LastExit: i.LastExit,
 		ReadySince: rfc3339(i.ReadySince), Detail: detail, Image: sb.ImageRef}
 }
 
@@ -220,7 +220,7 @@ func (s *Service) hosts(ctx context.Context, e store.Environment) ([]string, err
 // summaryOf is an environment as its tenant's listing shows it, with its
 // hosts under zone.
 func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary {
-	state := r.ReleaseState
+	state := r.DeploymentState
 	switch {
 	case r.Deleting:
 		state = model.EnvDeleting
@@ -231,7 +231,7 @@ func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary 
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Release: r.Release, Deployed: r.Deployed,
+	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Deployment: r.Deployment, Deployed: r.Deployed,
 		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel, OpenIncidents: int(r.OpenIncidents),
 		CreatedAt: rfc3339(r.CreatedAt)}
 }
@@ -242,6 +242,6 @@ func incidentOf(i store.EnvIncident) Incident {
 	if len(i.Evidence) > 0 {
 		_ = json.Unmarshal(i.Evidence, &ev)
 	}
-	return Incident{ID: fmt.Sprint(i.ID), Object: i.Object, Release: i.Release, Condition: i.Condition,
+	return Incident{ID: fmt.Sprint(i.ID), Object: i.Object, Deployment: i.Deployment, Condition: i.Condition,
 		OpenedAt: rfc3339(i.OpenedAt), ClosedAt: rfc3339(i.ClosedAt), Summary: i.Summary, Evidence: ev}
 }

@@ -180,8 +180,8 @@ func normJob(j Job, p Pins) Job {
 	out := j
 	out.Env = maps.Clone(j.Env)
 	out.Image, out.ImageAsWritten = pin(j.Image, j.ImageAsWritten, p)
-	if out.On == "" {
-		out.On = JobOnRelease
+	if IsJobOnDeploy(out.On) {
+		out.On = JobOnStored
 	}
 	out.Timeout = normDuration(j.Timeout, DefaultJobTimeout)
 	out.Resources = normResources(j.Resources)

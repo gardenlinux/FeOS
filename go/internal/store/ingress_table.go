@@ -24,19 +24,19 @@ type IngressRoutingRow struct {
 	Owner     string // the tenant
 	Name      string
 	HostLabel string
-	// Release is the environment's latest desired release, Deployed its
+	// Deployment is the environment's latest desired deployment, Deployed its
 	// latest deployed one (0: none).
-	Release, Deployed int
-	CreatedAt         time.Time
+	Deployment, Deployed int
+	CreatedAt            time.Time
 
 	HasInstance bool
 	SandboxID   podid.ID
 	Object      string // the service's name in the spec
 	Replica     int
-	// InstanceRelease is the release whose target the instance was last
-	// kept for: its own release.
-	InstanceRelease int
-	Phase           string // model.Phase*
+	// InstanceDeployment is the deployment whose target the instance was last
+	// kept for: its own deployment.
+	InstanceDeployment int
+	Phase              string // model.Phase*
 	// IngressPorts are the ports the instance's group ing-<sandbox id>
 	// admits on its node (EnvInstance.IngressPorts), ascending.
 	IngressPorts []int
@@ -54,7 +54,7 @@ type IngressRoutingRow struct {
 
 // IngressRouting returns what the ingress's table is built from (ADR
 // 0021): every environment that is public, not deleting, of a tenant that
-// is not deleting, with a release and a host label, each with its service
+// is not deleting, with a deployment and a host label, each with its service
 // instances that are not stopping; envIDs limits it to those environments
 // (nil: every one; empty: none). The rows are ordered by environment, then
 // service, replica and sandbox. An environment it leaves out is one the
@@ -63,15 +63,15 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 	if envIDs != nil && len(envIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.q.Query(ctx, `SELECT e.id, e.owner, e.name, e.host_label, e.release, e.deployed, e.created_at,
-			i.sandbox_id, i.object, i.replica, i.release, i.phase, i.ingress_ports,
+	rows, err := s.q.Query(ctx, `SELECT e.id, e.owner, e.name, e.host_label, e.deployment, e.deployed, e.created_at,
+			i.sandbox_id, i.object, i.replica, i.deployment, i.phase, i.ingress_ports,
 			s.address, s.client_state, s.op, coalesce(s.node, ''), coalesce(n.ingress_group_version, 0), s.idle_after_s
 		FROM environments e
 		JOIN tenants t ON t.id = e.owner AND t.deleting_at IS NULL
 		LEFT JOIN env_instances i ON i.env_id = e.id AND i.kind = 'service' AND i.phase <> 'stopping'
 		LEFT JOIN sandboxes s ON s.id = i.sandbox_id
 		LEFT JOIN nodes n ON n.name = s.node
-		WHERE e.public AND NOT e.deleting AND e.release > 0 AND e.host_label IS NOT NULL
+		WHERE e.public AND NOT e.deleting AND e.deployment > 0 AND e.host_label IS NOT NULL
 			AND ($1::uuid[] IS NULL OR e.id = ANY($1))
 		ORDER BY e.id, i.object, i.replica, i.sandbox_id`, envIDs)
 	if err != nil {
@@ -80,9 +80,9 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (IngressRoutingRow, error) {
 		var row IngressRoutingRow
 		var sandbox, object, phase, address, state, op *string
-		var replica, release *int
-		if err := r.Scan(&row.EnvID, &row.Owner, &row.Name, &row.HostLabel, &row.Release, &row.Deployed, &row.CreatedAt,
-			&sandbox, &object, &replica, &release, &phase, &row.IngressPorts,
+		var replica, deployment *int
+		if err := r.Scan(&row.EnvID, &row.Owner, &row.Name, &row.HostLabel, &row.Deployment, &row.Deployed, &row.CreatedAt,
+			&sandbox, &object, &replica, &deployment, &phase, &row.IngressPorts,
 			&address, &state, &op, &row.Node, &row.NodeGroupVersion, &row.IdleAfterS); err != nil {
 			return IngressRoutingRow{}, err
 		}
@@ -93,7 +93,7 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 		}
 		row.HasInstance = true
 		row.SandboxID = podid.ID(*sandbox)
-		row.Object, row.Replica, row.InstanceRelease, row.Phase = deref(object), deref(replica), deref(release), deref(phase)
+		row.Object, row.Replica, row.InstanceDeployment, row.Phase = deref(object), deref(replica), deref(deployment), deref(phase)
 		row.Address, row.ClientState, row.Op = deref(address), deref(state), deref(op)
 		row.IngressPorts = nonNil(row.IngressPorts)
 		return row, nil

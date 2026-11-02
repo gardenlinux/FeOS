@@ -1,8 +1,8 @@
 {
   "method": "POST",
-  "path": "/api/v1/environments/expensa-stage/releases",
+  "path": "/api/v1/environments/expensa-stage/deployments",
   "query": {},
-  "status": 200,
+  "status": 201,
   "request": {
     "spec": {
       "services": {
@@ -154,7 +154,7 @@
         }
       }
     },
-    "base": 7,
+    "base": 6,
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
     "message": "stage follows main at revision 12",
     "annotations": {
@@ -165,7 +165,7 @@
   },
   "response": {
     "number": 7,
-    "state": "deploying",
+    "state": "waiting",
     "origin": "apply",
     "originRef": "",
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
@@ -178,19 +178,50 @@
     "base": 6,
     "reason": "",
     "createdAt": "2026-10-18T14:02:10Z",
-    "startedAt": "2026-10-18T14:02:11Z",
+    "startedAt": "",
     "finishedAt": "",
     "tags": [],
-    "unchanged": true,
-    "diff": [],
-    "findings": [
+    "diff": [
       {
-        "severity": "info",
-        "path": "",
-        "problem": "nothing changes: the spec equals release 7's",
-        "remedy": ""
+        "kind": "service",
+        "name": "expense-service",
+        "change": "update",
+        "fields": [
+          {
+            "path": "image",
+            "from": "ghcr.io/acme/expense:1.3 (sha256:2780e52e5ffc077629f9b26f1469ccc2b0bc37d1778d4038d4a9fc587ff89ab5)",
+            "to": "ghcr.io/acme/expense:1.4 (sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a)"
+          }
+        ],
+        "effect": "replaces 2 pods"
+      },
+      {
+        "kind": "service",
+        "name": "web",
+        "change": "update",
+        "fields": [
+          {
+            "path": "image",
+            "from": "ghcr.io/acme/expensa-web:1.3 (sha256:171e8d334efeb5b7d6961f1f2ff14eee166a978b3fa0f3d116c66526e1eda9d2)",
+            "to": "ghcr.io/acme/expensa-web:1.4 (sha256:de2feb13b0b780dd0dfd7aa32bcd02b306a4680f4958f896b3347f3ba3521a81)"
+          }
+        ],
+        "effect": "replaces 1 pod"
+      },
+      {
+        "kind": "job",
+        "name": "migrate",
+        "change": "update",
+        "fields": [
+          {
+            "path": "image",
+            "from": "ghcr.io/acme/expense:1.3 (sha256:2780e52e5ffc077629f9b26f1469ccc2b0bc37d1778d4038d4a9fc587ff89ab5)",
+            "to": "ghcr.io/acme/expense:1.4 (sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a)"
+          }
+        ],
+        "effect": "restarts"
       }
-    ]
-  },
-  "note": "the normalised spec equals the current release's (which did not fail): that release, unchanged"
+    ],
+    "findings": []
+  }
 }

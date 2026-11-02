@@ -9,16 +9,16 @@ import (
 	"testing"
 )
 
-// release7 is the fixtures' normalised stage release 7.
-func release7(t *testing.T) Spec {
+// deployment7 is the fixtures' normalised stage deployment 7.
+func deployment7(t *testing.T) Spec {
 	t.Helper()
-	return mustParse(t, string(readFile(t, "testdata/expensa-stage-release7.json")))
+	return mustParse(t, string(readFile(t, "testdata/expensa-stage-deployment7.json")))
 }
 
-// release6 is release 7 with expense-service, web and migrate at 1.3.
-func release6(t *testing.T) Spec {
+// deployment6 is deployment 7 with expense-service, web and migrate at 1.3.
+func deployment6(t *testing.T) Spec {
 	t.Helper()
-	s := release7(t)
+	s := deployment7(t)
 	svc(&s, "expense-service", func(v *Service) {
 		v.Image, v.ImageAsWritten = "ghcr.io/acme/expense@"+digestExpense13, "ghcr.io/acme/expense:1.3"
 	})
@@ -40,10 +40,10 @@ func diffJSON(t *testing.T, d []DiffEntry) string {
 	return string(b)
 }
 
-// The diff of releases 6 and 7 is the fixtures', byte for byte; a revert
+// The diff of deployments 6 and 7 is the fixtures', byte for byte; a revert
 // is its mirror.
 func TestDiffFixture(t *testing.T) {
-	r6, r7 := release6(t), release7(t)
+	r6, r7 := deployment6(t), deployment7(t)
 	want := strings.TrimSpace(string(readFile(t, "testdata/expensa-stage-diff-6-7.json")))
 	if got := diffJSON(t, Diff(&r6, &r7)); got != want {
 		t.Fatalf("diff\n%s\nwant\n%s", got, want)
@@ -105,7 +105,7 @@ func TestDiffEffects(t *testing.T) {
 			j := s.Jobs["migrate"]
 			j.Retries, j.On = 3, JobOnManual
 			s.Jobs["migrate"] = j
-		}, `[{"kind":"job","name":"migrate","change":"update","fields":[{"path":"on","from":"release","to":"manual"},` +
+		}, `[{"kind":"job","name":"migrate","change":"update","fields":[{"path":"on","from":"deploy","to":"manual"},` +
 			`{"path":"retries","from":1,"to":3}],"effect":"in place"}]`},
 		{"job env", func(s *Spec) {
 			j := s.Jobs["migrate"]
@@ -146,7 +146,7 @@ func TestDiffEffects(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			prev, next := release7(t), release7(t)
+			prev, next := deployment7(t), deployment7(t)
 			c.change(&next)
 			got := Diff(&prev, &next)
 			if c.want == "" {
@@ -178,7 +178,7 @@ func TestDiffAttachedAndAddonEffect(t *testing.T) {
 	}
 
 	// The blueprint tells an options change apart.
-	prev, next := release7(t), release7(t)
+	prev, next := deployment7(t), deployment7(t)
 	next.Addons["postgres"] = Addon{Type: "postgres", Version: "17", Plan: "small",
 		Options: map[string]any{"databases": []any{"expensa"}, "roles": []any{"expense_svc"}}}
 	var asked string
@@ -194,9 +194,9 @@ func TestDiffAttachedAndAddonEffect(t *testing.T) {
 		t.Fatalf("%s", diffJSON(t, d))
 	}
 
-	// Without a previous release every object is an add; without a next
+	// Without a previous deployment every object is an add; without a next
 	// one a remove.
-	r7 := release7(t)
+	r7 := deployment7(t)
 	adds := Diff(nil, &r7)
 	if len(adds) != 3+1+2+3+1 {
 		t.Fatalf("%s", diffJSON(t, adds))
@@ -221,5 +221,31 @@ func TestDiffAttachedAndAddonEffect(t *testing.T) {
 	n := Spec{Services: map[string]Service{"x": {Runtime: RuntimeImage, Image: "a@sha256:" + strings.Repeat("2", 64)}}}
 	if d := Diff(&p, &n); d[0].Fields[0].From != "a@sha256:"+strings.Repeat("1", 64) {
 		t.Fatalf("%s", diffJSON(t, d))
+	}
+}
+
+// A deploy job's on is the same in either word: two versions in a rolling
+// deploy store different ones (JobOnStored), and neither may take the
+// other's spec for a change (ADR 0018, "The deployments' word").
+func TestJobOnWords(t *testing.T) {
+	prev, next := deployment7(t), deployment7(t)
+	j := prev.Jobs["migrate"]
+	j.On = JobOnRelease
+	prev.Jobs = map[string]Job{"migrate": j}
+	j.On = JobOnDeploy
+	next.Jobs = map[string]Job{"migrate": j}
+	if !EqualNormalised(prev, next) {
+		t.Fatal("on release and on deploy differ")
+	}
+	if d := Diff(&prev, &next); len(d) != 0 {
+		t.Fatalf("diff %+v", d)
+	}
+	j.On = JobOnManual
+	next.Jobs = map[string]Job{"migrate": j}
+	if EqualNormalised(prev, next) {
+		t.Fatal("on release and on manual are equal")
+	}
+	if prev.Jobs["migrate"].On != JobOnRelease {
+		t.Fatal("the comparison changed its spec")
 	}
 }

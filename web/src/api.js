@@ -304,10 +304,10 @@ export const api = {
   // secret and no route token.
   listEnvironments: (labels = []) => tenantCall('GET', '/environments' + labelQuery(labels)),
   getEnvironment: (env) => tenantCall('GET', `/environments/${enc(env)}`),
-  listReleases: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/releases${query({ limit })}`),
-  // A release with its normalised spec and its diff against the one
+  listDeployments: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
+  // A deployment with its normalised spec and its diff against the one
   // before.
-  getRelease: (env, n) => tenantCall('GET', `/environments/${enc(env)}/releases/${enc(n)}`),
+  getDeployment: (env, n) => tenantCall('GET', `/environments/${enc(env)}/deployments/${enc(n)}`),
   listIncidents: (env, { open } = {}) =>
     tenantCall('GET', `/environments/${enc(env)}/incidents${open ? '?open=1' : ''}`),
   getIncident: (env, id) => tenantCall('GET', `/environments/${enc(env)}/incidents/${enc(id)}`),

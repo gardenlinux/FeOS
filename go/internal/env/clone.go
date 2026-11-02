@@ -134,7 +134,7 @@ func secretRefPaths(sp spec.Spec) map[string][]string {
 	return out
 }
 
-// cloneSpec is the source release's spec as a clone applies it: without
+// cloneSpec is the source deployment's spec as a clone applies it: without
 // its attached services (and the routes to them), which run in a
 // sandbox of the source, and with its secrets pinned to nothing (the
 // clone's own versions are pinned).
@@ -178,7 +178,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	if err != nil {
 		return EnvStatus{}, err
 	}
-	if err := checkReleaseMeta(req.Author, "", nil); err != nil {
+	if err := checkDeploymentMeta(req.Author, "", nil); err != nil {
 		return EnvStatus{}, err
 	}
 	// A taken ID is refused before anything is planned under it: it may
@@ -200,21 +200,21 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "data", Problem: "copying data is not available",
 			Remedy: "clone without data; the addons start empty"})
 	}
-	number := src.Release
-	if req.Release != nil {
-		number = *req.Release
+	number := src.Deployment
+	if req.Deployment != nil {
+		number = *req.Deployment
 	}
-	var srcRel *store.EnvRelease
-	if number < 0 || (number == 0 && req.Release != nil && *req.Release != 0) {
-		return EnvStatus{}, errNoRelease()
+	var srcRel *store.EnvDeployment
+	if number < 0 || (number == 0 && req.Deployment != nil && *req.Deployment != 0) {
+		return EnvStatus{}, errNoDeployment()
 	}
 	if number > 0 {
-		r, err := s.st.GetRelease(ctx, src.ID, number)
+		r, err := s.st.GetDeployment(ctx, src.ID, number)
 		if errors.Is(err, store.ErrNoRow) {
-			return EnvStatus{}, errNoRelease()
+			return EnvStatus{}, errNoDeployment()
 		}
 		if err != nil {
-			return EnvStatus{}, fmt.Errorf("release %d: %w", number, err)
+			return EnvStatus{}, fmt.Errorf("deployment %d: %w", number, err)
 		}
 		srcRel = &r
 	}
@@ -222,8 +222,8 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		raw = nil
 		if srcRel == nil {
-			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "release",
-				Problem: "environment " + src.Name + " has no release to clone", Remedy: "pass a spec, or apply a release first"})
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "deployment",
+				Problem: "environment " + src.Name + " has no deployment to clone", Remedy: "pass a spec, or apply a deployment first"})
 		} else {
 			var cfs []spec.Finding
 			if raw, cfs, err = cloneSpec(srcRel.Spec); err != nil {
@@ -301,7 +301,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		}
 	}
 
-	// The plan, as release 1 of an environment that is not there yet.
+	// The plan, as deployment 1 of an environment that is not there yet.
 	var norm spec.Spec
 	if raw != nil {
 		p, err := s.plan(ctx, tenant, store.Environment{ID: id, Owner: tenant, Name: req.Name}, raw, nil, spec.ModeApply,
@@ -353,13 +353,13 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 				return err
 			}
 		}
-		if _, err := tx.InsertRelease(ctx, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: specJSON, Author: req.Author,
+		if _, err := tx.InsertDeployment(ctx, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: specJSON, Author: req.Author,
 			Annotations: annotations, Origin: model.OriginClone, OriginRef: fmt.Sprintf("%s/%d", src.ID, number),
-			State: model.ReleaseWaiting}); err != nil {
+			State: model.DeploymentWaiting}); err != nil {
 			return err
 		}
 		after := e
-		after.Release = 1
+		after.Deployment = 1
 		if row, err = tx.UpdateEnvironment(ctx, e, after); err != nil {
 			return err
 		}

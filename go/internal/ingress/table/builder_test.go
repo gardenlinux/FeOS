@@ -67,7 +67,7 @@ type downRow struct{}
 func (downRow) Scan(...any) error { return errDown }
 
 // fixture is a database with a tenant, a node and a public environment
-// whose release 1 routes / to the image service web's port http (8080),
+// whose deployment 1 routes / to the image service web's port http (8080),
 // with one ready instance of it, running on n1 with an address, whose
 // node admits 8080 and holds version 2 of ferun-ingress.
 type fixture struct {
@@ -100,19 +100,19 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-// mkEnv makes a public environment of acme at release 1 with spec.
+// mkEnv makes a public environment of acme at deployment 1 with spec.
 func (f *fixture) mkEnv(t *testing.T, name, spec string) store.Environment {
 	t.Helper()
 	e, err := f.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "acme", Name: name})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.st.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: json.RawMessage(spec),
+	if _, err := f.st.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: json.RawMessage(spec),
 		Origin: model.OriginApply}); err != nil {
 		t.Fatal(err)
 	}
 	after := e
-	after.Release = 1
+	after.Deployment = 1
 	if _, err := f.st.UpdateEnvironment(bg, e, after); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func (f *fixture) mkInstance(t *testing.T, env store.Environment, address string
 		t.Fatalf("address: %v %v", ok, err)
 	}
 	if _, err := f.st.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: env.ID, Kind: "service", Object: "web",
-		TemplateHash: "h1", Release: 1, Phase: model.PhaseReady}); err != nil {
+		TemplateHash: "h1", Deployment: 1, Phase: model.PhaseReady}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.st.SetIngressPorts(bg, sb.ID, ports); err != nil {
@@ -249,7 +249,7 @@ func webService(s *Snapshot, env uuid.UUID) (wire.Service, bool) {
 // it asleep and back; stopping takes it out; unpublishing removes the
 // environment (its read has no rows); publishing again brings it back,
 // and the tenant's deletion removes it. An environment whose routing
-// release does not parse is left out.
+// deployment does not parse is left out.
 func TestBuilderFollows(t *testing.T) {
 	f := newFixture(t)
 	broken := f.mkEnv(t, "broken", `{"services": 5}`)
@@ -265,7 +265,7 @@ func TestBuilderFollows(t *testing.T) {
 	}
 	want := []wire.Endpoint{{Instance: f.sb.String(), Address: "fd00:0:0:1::5", Node: "n1",
 		Ports: map[string]int{"http": 8080}, GroupVersion: 2}}
-	if e.Release != 1 || len(e.Hosts) != 1 || e.Hosts[0] != "web-acme.apps.example" || len(e.Services) != 1 ||
+	if e.Deployment != 1 || len(e.Hosts) != 1 || e.Hosts[0] != "web-acme.apps.example" || len(e.Services) != 1 ||
 		!reflect.DeepEqual(e.Services[0].Endpoints, want) {
 		t.Fatalf("env %+v", e)
 	}
@@ -330,7 +330,7 @@ func TestBuilderFollows(t *testing.T) {
 
 // F13: an environment too large for the table (ErrTooLarge) is left out,
 // on the whole read and on its own, as one without a usable spec is; the
-// other environments stay, and a release that makes an environment too
+// other environments stay, and a deployment that makes an environment too
 // large takes it out.
 func TestBuilderTooLarge(t *testing.T) {
 	f := newFixture(t)
@@ -349,13 +349,13 @@ func TestBuilderTooLarge(t *testing.T) {
 		t.Fatalf("envs %v", s.Envs)
 	}
 
-	// Release 2 makes grow too large: it leaves the table.
-	if _, err := f.st.InsertRelease(bg, store.EnvRelease{EnvID: grow.ID, Number: 2, Spec: raw,
+	// Deployment 2 makes grow too large: it leaves the table.
+	if _, err := f.st.InsertDeployment(bg, store.EnvDeployment{EnvID: grow.ID, Number: 2, Spec: raw,
 		Origin: model.OriginApply}); err != nil {
 		t.Fatal(err)
 	}
 	after := grow
-	after.Release = 2
+	after.Deployment = 2
 	if _, err := f.st.UpdateEnvironment(bg, grow, after); err != nil {
 		t.Fatal(err)
 	}
@@ -493,8 +493,8 @@ func TestBuilderHealth(t *testing.T) {
 	await(t, b, 2*time.Second, "a healthy snapshot", func(s *Snapshot) bool { return s.Healthy })
 }
 
-// Specs parses a release once and keeps it, apart for an environment
-// made again with the same ID; a missing or unparsable release is
+// Specs parses a deployment once and keeps it, apart for an environment
+// made again with the same ID; a missing or unparsable deployment is
 // ErrSpec; past maxSpecs it forgets one for each new one.
 func TestSpecs(t *testing.T) {
 	f := newFixture(t)
@@ -517,7 +517,7 @@ func TestSpecs(t *testing.T) {
 		number  int
 	}{{f.env.ID, f.env.CreatedAt, 2}, {f.env.ID, f.env.CreatedAt, 0}, {broken.ID, broken.CreatedAt, 1}} {
 		if _, err := c.Get(bg, c2.env, c2.created, c2.number); !errors.Is(err, ErrSpec) {
-			t.Fatalf("%v release %d: %v", c2.env, c2.number, err)
+			t.Fatalf("%v deployment %d: %v", c2.env, c2.number, err)
 		}
 	}
 	f.q.down.Store(true)

@@ -33,7 +33,7 @@ const (
 // hibernated, pausing or hibernating, or ready and running with an
 // operation, a pause on its way). An environment that is not public,
 // deleting or unknown is NOT_FOUND, and so is a service that is not an
-// image service a route of the routing release sends to. Each instance
+// image service a route of the routing deployment sends to. Each instance
 // is woken once at a time on this instance, in the background on Run's
 // context, never the caller's: Engine.Sync, then Engine.Ensure, within
 // config.PreparationBudget; failures are logged, rate-limited. The answer
@@ -70,7 +70,7 @@ func (s *Service) Wake(ctx context.Context, req *wire.WakeRequest) (*wire.WakeRe
 		return nil, status.Errorf(codes.NotFound, "no public environment %s", envID)
 	}
 	e := envs[0]
-	sp, err := s.tbl.Specs().Get(dctx, e.ID, e.CreatedAt, table.RoutingRelease(e.Release, e.Deployed))
+	sp, err := s.tbl.Specs().Get(dctx, e.ID, e.CreatedAt, table.RoutingDeployment(e.Deployment, e.Deployed))
 	if err != nil && !errors.Is(err, table.ErrSpec) {
 		return nil, dbError(ctx, err, "wake")
 	}

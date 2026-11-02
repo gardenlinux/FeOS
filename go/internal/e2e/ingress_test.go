@@ -51,7 +51,7 @@ import (
 // appPort is the port the replicas listen on.
 const appPort = 8080
 
-// appSpec is a release spec with the image service web: replicas on
+// appSpec is a deployment spec with the image service web: replicas on
 // appPort, ready by GET /healthz, with idle ("" for none) and the
 // environment variable VERSION, whose change changes the template, and
 // the route / to web.
@@ -152,7 +152,7 @@ func podOf(body string) podid.ID {
 	return podid.ID(id)
 }
 
-// mkApp makes the tenant's environment name with appSpec's first release
+// mkApp makes the tenant's environment name with appSpec's first deployment
 // and waits until it is deployed.
 func (c *cluster) mkApp(name string, replicas int, idle string) uuid.UUID {
 	c.t.Helper()
@@ -160,8 +160,8 @@ func (c *cluster) mkApp(name string, replicas int, idle string) uuid.UUID {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	n := c.applyRelease(e.ID, appSpec(replicas, idle, "1"))
-	c.waitRelease(e.ID, n, model.ReleaseDeployed, 2*time.Minute)
+	n := c.applyDeployment(e.ID, appSpec(replicas, idle, "1"))
+	c.waitDeployment(e.ID, n, model.DeploymentDeployed, 2*time.Minute)
 	return e.ID
 }
 
@@ -704,7 +704,7 @@ func samePods(a, b map[podid.ID]bool) bool {
 	return true
 }
 
-// Scenario: a release that changes the template rolls a public service's
+// Scenario: a deployment that changes the template rolls a public service's
 // replicas while a client GETs every 20 ms through the ingress: not one
 // request fails, and the new replicas answer at the end.
 func TestIngressRollout(t *testing.T) {
@@ -720,8 +720,8 @@ func TestIngressRollout(t *testing.T) {
 
 	h := p.hammer(host)
 	time.Sleep(500 * time.Millisecond)
-	n := c.applyRelease(envID, appSpec(2, "", "2"))
-	c.waitRelease(envID, n, model.ReleaseDeployed, 3*time.Minute)
+	n := c.applyDeployment(envID, appSpec(2, "", "2"))
+	c.waitDeployment(envID, n, model.DeploymentDeployed, 3*time.Minute)
 	rows := c.waitWeb(envID, 2, "the new replicas", func(r store.EnvInstanceRow) bool { return !old[r.Sandbox.ID] })
 	fresh := webPods(rows)
 	eventually(t, 60*time.Second, "the new replicas serving", func() bool {
@@ -877,7 +877,7 @@ func TestIngressHoldsIdle(t *testing.T) {
 	}
 
 	// waitServing's requests hold the replica until the ingress finds it
-	// quiet and releases it, within two renewals (10 s each); and the idle
+	// quiet and deployments it, within two renewals (10 s each); and the idle
 	// loop acts only once the leader has led for the engine's outage guard
 	// (15 s). The window below begins after both, so that only the open
 	// request can keep the replica. (The release sets last_active_at, so
@@ -977,8 +977,8 @@ func TestIngressSurvivesControlPlane(t *testing.T) {
 
 	// Meanwhile the service gets a second replica, which the ingress
 	// cannot know yet.
-	n := c.applyRelease(envID, appSpec(2, "", "1"))
-	c.waitRelease(envID, n, model.ReleaseDeployed, 2*time.Minute)
+	n := c.applyDeployment(envID, appSpec(2, "", "1"))
+	c.waitDeployment(envID, n, model.DeploymentDeployed, 2*time.Minute)
 	both := webPods(c.waitWeb(envID, 2, "two replicas", namesIngGroup))
 	if ep := p.status().DataPath.Endpoints; ep != 1 {
 		t.Fatalf("cut off, the ingress has %d endpoints", ep)
@@ -1031,8 +1031,8 @@ func TestIngressMovesInstance(t *testing.T) {
 	h.stopAndCheck(t, 20)
 
 	// The table follows on the new instance.
-	n := c.applyRelease(envID, appSpec(3, "", "1"))
-	c.waitRelease(envID, n, model.ReleaseDeployed, 2*time.Minute)
+	n := c.applyDeployment(envID, appSpec(3, "", "1"))
+	c.waitDeployment(envID, n, model.DeploymentDeployed, 2*time.Minute)
 	all := webPods(c.waitWeb(envID, 3, "three replicas", namesIngGroup))
 	if got := p.waitServing(host, 3, 60*time.Second); !samePods(got, all) {
 		t.Fatalf("after the scale-up: served by %v; the instances %v", got, all)

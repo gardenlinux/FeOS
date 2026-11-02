@@ -22,7 +22,7 @@ func mkService(t *testing.T, s *store.Store, env store.Environment, node string)
 	minute := 60
 	sb := mkInstance(t, s, env, func(n *store.NewSandbox) { n.IdleAfterS = &minute })
 	if _, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: env.ID, Kind: "service", Object: "web",
-		TemplateHash: "h1", Release: 1}); err != nil {
+		TemplateHash: "h1", Deployment: 1}); err != nil {
 		t.Fatal(err)
 	}
 	place(t, s, sb.ID, node, model.StateRunning)
@@ -95,7 +95,7 @@ func TestIngressHolds(t *testing.T) {
 	private := mkService(t, s, mkEnv(t, s, "acme", "private"), "n1")
 	job := mkInstance(t, s, env)
 	if _, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: job.ID, EnvID: env.ID, Kind: "job", Object: "migrate",
-		TemplateHash: "j1", Release: 1}); err != nil {
+		TemplateHash: "j1", Deployment: 1}); err != nil {
 		t.Fatal(err)
 	}
 	place(t, s, job.ID, "n1", model.StateRunning)

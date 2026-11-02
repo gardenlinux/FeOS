@@ -213,7 +213,7 @@ func (c *Controller) probe(ctx context.Context) error {
 		return true
 	}
 	for _, e := range envs {
-		if e.Deleting || e.Release == 0 {
+		if e.Deleting || e.Deployment == 0 {
 			continue
 		}
 		v, err := c.load(ctx, e.ID)
@@ -511,9 +511,9 @@ func (c *Controller) instanceExited(ctx context.Context, v *view, r store.EnvIns
 			if code != nil {
 				last = fmt.Sprintf("with code %d", *code)
 			}
-			summary := fmt.Sprintf("%s (release %d) exited %d times within %s, last %s", r.Instance.Object, inst.Release,
+			summary := fmt.Sprintf("%s (deployment %d) exited %d times within %s, last %s", r.Instance.Object, inst.Deployment,
 				recent, spell(c.t.crashWindow), last)
-			if _, err := openIncident(ctx, tx, v.env.ID, obj, inst.Release, model.ConditionCrashLoop, summary,
+			if _, err := openIncident(ctx, tx, v.env.ID, obj, inst.Deployment, model.ConditionCrashLoop, summary,
 				evidence{Exits: after.Exits, LogTail: tail}); err != nil {
 				return err
 			}

@@ -79,12 +79,31 @@ func syntaxFinding(err error) Finding {
 }
 
 // EqualNormalised reports whether two normalised specs are the same
-// release: their canonical JSON (map keys sorted by the encoder) is
-// equal. Specs that are not normalised may differ only in form.
+// deployment: their canonical JSON (map keys sorted by the encoder) is
+// equal, a deploy job's on in either word. Specs that are not normalised
+// may differ only in form.
 func EqualNormalised(a, b Spec) bool {
-	ja, errA := json.Marshal(a)
-	jb, errB := json.Marshal(b)
+	ja, errA := json.Marshal(oneJobWord(a))
+	jb, errB := json.Marshal(oneJobWord(b))
 	return errA == nil && errB == nil && string(ja) == string(jb)
+}
+
+// oneJobWord is s with each deploy job's On JobOnDeploy, whichever word
+// it was stored in (JobOnStored), so that two versions in a rolling
+// deploy, which store different words, see the same spec.
+func oneJobWord(s Spec) Spec {
+	if len(s.Jobs) == 0 {
+		return s
+	}
+	jobs := make(map[string]Job, len(s.Jobs))
+	for name, j := range s.Jobs {
+		if IsJobOnDeploy(j.On) {
+			j.On = JobOnDeploy
+		}
+		jobs[name] = j
+	}
+	s.Jobs = jobs
+	return s
 }
 
 // SortFindings orders findings by path, keeping the order of those of one
@@ -327,7 +346,7 @@ func (p *parser) decode(n *node, v reflect.Value, path string) {
 			if k := lastKey(path); k != "" {
 				msg = strings.TrimPrefix(msg, k+": ")
 			}
-			p.errorf(path, "see the release spec's forms in ADR 0018", "%s", msg)
+			p.errorf(path, "see the deployment spec's forms in ADR 0018", "%s", msg)
 		}
 		return
 	}

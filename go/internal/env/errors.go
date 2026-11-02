@@ -17,7 +17,7 @@ import (
 const (
 	// CodeInvalidSpec: 422, the spec has error findings (InvalidSpecError).
 	CodeInvalidSpec = "invalid_spec"
-	// CodeBaseMismatch: 409, the request's base is not the current release
+	// CodeBaseMismatch: 409, the request's base is not the current deployment
 	// (BaseMismatchError).
 	CodeBaseMismatch = "base_mismatch"
 	// CodeNameTaken: 409, the tenant has an environment of that name with
@@ -76,7 +76,7 @@ func (e *InvalidSpecError) Body() any {
 	}{e.Error(), CodeInvalidSpec, nonNilFindings(e.Findings)}
 }
 
-// BaseMismatchError refuses a change made on another release than the
+// BaseMismatchError refuses a change made on another deployment than the
 // environment's current one: 409 {"error", "code": "base_mismatch",
 // "current"}. The client plans again on Current.
 type BaseMismatchError struct {
@@ -84,7 +84,7 @@ type BaseMismatchError struct {
 }
 
 func (e *BaseMismatchError) Error() string {
-	return fmt.Sprintf("base %d is not the current release %d: plan again on release %d", e.Base, e.Current, e.Current)
+	return fmt.Sprintf("base %d is not the current deployment %d: plan again on deployment %d", e.Base, e.Current, e.Current)
 }
 
 // Status is the answer's HTTP status.
@@ -132,14 +132,14 @@ func errBadRequest(format string, args ...any) error {
 	return apierr.New(http.StatusBadRequest, format, args...)
 }
 
-// errNoRelease, errNoTag, errNoSecret and errNoIncident are the 404s of
+// errNoDeployment, errNoTag, errNoSecret and errNoIncident are the 404s of
 // what the environment does not have.
-func errNoRelease() error  { return apierr.New(http.StatusNotFound, "no such release") }
-func errNoTag() error      { return apierr.New(http.StatusNotFound, "no such tag") }
-func errNoSecret() error   { return apierr.New(http.StatusNotFound, "no such secret") }
-func errNoIncident() error { return apierr.New(http.StatusNotFound, "no such incident") }
+func errNoDeployment() error { return apierr.New(http.StatusNotFound, "no such deployment") }
+func errNoTag() error        { return apierr.New(http.StatusNotFound, "no such tag") }
+func errNoSecret() error     { return apierr.New(http.StatusNotFound, "no such secret") }
+func errNoIncident() error   { return apierr.New(http.StatusNotFound, "no such incident") }
 
-// errNoObject is the 404 of an object the environment's release does not
+// errNoObject is the 404 of an object the environment's deployment does not
 // have.
 func errNoObject(kind, name string) error {
 	return apierr.New(http.StatusNotFound, "no such object: %s/%s", kind, name)

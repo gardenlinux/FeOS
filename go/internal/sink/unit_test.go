@@ -348,3 +348,23 @@ func exportRequest(attrs []*commonv1.KeyValue, records ...*logsv1.LogRecord) *ot
 		ScopeLogs: []*logsv1.ScopeLogs{{LogRecords: records}},
 	}}}
 }
+
+// A stream's deployment is ferun.deployment, else its earlier word
+// ferun.release, which a pod made before keeps for its life (ADR 0018,
+// "The deployments' word").
+func TestDeploymentLabel(t *testing.T) {
+	for _, c := range []struct {
+		attrs map[string]string
+		want  int
+	}{
+		{map[string]string{attrDeployment: "7"}, 7},
+		{map[string]string{attrRelease: "6"}, 6},
+		{map[string]string{attrDeployment: "7", attrRelease: "7"}, 7},
+		{map[string]string{attrDeployment: "8", attrRelease: "7"}, 8},
+		{map[string]string{}, 0},
+	} {
+		if got := labelsOf(c.attrs, "n1", SourceContainer).Deployment; got != c.want {
+			t.Errorf("%v: deployment %d, want %d", c.attrs, got, c.want)
+		}
+	}
+}

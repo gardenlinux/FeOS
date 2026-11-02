@@ -12,6 +12,7 @@
       "fecode.env": "0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b01",
       "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
     },
+    "deployment": 7,
     "release": 7,
     "deployed": 6,
     "deleting": false,
@@ -20,6 +21,7 @@
       "expensa-stage-fecode.apps.fecode.dev"
     ],
     "rollout": {
+      "deployment": 7,
       "release": 7,
       "state": "deploying",
       "startedAt": "2026-10-18T14:02:11Z",
@@ -40,6 +42,7 @@
             "state": "running",
             "node": "n1",
             "address": "fd6b:a01:2::11",
+            "deployment": 7,
             "release": 7,
             "restarts": 0,
             "lastExit": null,
@@ -63,6 +66,7 @@
             "state": "running",
             "node": "n2",
             "address": "fd6b:a01:3::14",
+            "deployment": 7,
             "release": 7,
             "restarts": 0,
             "lastExit": null,
@@ -77,6 +81,7 @@
             "state": "running",
             "node": "n1",
             "address": "fd6b:a01:2::12",
+            "deployment": 6,
             "release": 6,
             "restarts": 0,
             "lastExit": null,
@@ -91,6 +96,7 @@
             "state": "running",
             "node": "n2",
             "address": "fd6b:a01:3::15",
+            "deployment": 7,
             "release": 7,
             "restarts": 3,
             "lastExit": 1,
@@ -114,6 +120,7 @@
             "state": "running",
             "node": "n1",
             "address": "fd6b:a01:2::16",
+            "deployment": 7,
             "release": 7,
             "restarts": 0,
             "lastExit": null,
@@ -139,6 +146,7 @@
             "state": "running",
             "node": "n2",
             "address": "fd6b:a01:3::6",
+            "deployment": 7,
             "release": 7,
             "restarts": 0,
             "lastExit": null,
@@ -164,6 +172,7 @@
             "state": "running",
             "node": "n1",
             "address": "fd6b:a01:2::5",
+            "deployment": 7,
             "release": 7,
             "restarts": 0,
             "lastExit": null,
@@ -177,6 +186,7 @@
         "kind": "job",
         "name": "migrate",
         "lastRun": {
+          "deployment": 7,
           "release": 7,
           "attempt": 1,
           "phase": "succeeded",
@@ -215,5 +225,5 @@
     "openIncidents": 1,
     "createdAt": "2026-10-01T09:12:44Z"
   },
-  "note": "{env} is the UUID or the name; stage rolls release 7 while 6 serves; it is public, so the ingress serves its image services' routes at its host (door \"ingress\", url) besides the route door"
+  "note": "{env} is the UUID or the name; stage rolls deployment 7 while 6 serves; it is public, so the ingress serves its image services' routes at its host (door \"ingress\", url) besides the route door"
 }

@@ -79,5 +79,5 @@
     ],
     "findings": []
   },
-  "note": "the current release's spec with the object set, applied; originRef names the object"
+  "note": "the current deployment's spec with the object set, applied; originRef names the object"
 }

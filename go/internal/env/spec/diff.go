@@ -20,7 +20,7 @@ type AddonEffect func(name string, prev, next Addon) string
 
 // Diff lists the changes from prev to next, both normalised, one entry
 // per changed object, ordered by kind (services, jobs, addons, routes,
-// secrets) and name; nil prev is an environment without a release (every
+// secrets) and name; nil prev is an environment without a deployment (every
 // object an add), nil next one whose objects all go. An update lists its
 // changed fields and the effect on the running pods: "in place" (adds
 // and removes but an addon's, routes, secrets, replicas, ports,
@@ -136,6 +136,13 @@ func (d *differ) service(a, b Service) ([]FieldChange, string) {
 
 func (d *differ) job(a, b Job) ([]FieldChange, string) {
 	va, vb := view(a), view(b)
+	// A deploy job's on shows in its new word, whichever word is stored.
+	if IsJobOnDeploy(a.On) {
+		va["on"] = JobOnDeploy
+	}
+	if IsJobOnDeploy(b.On) {
+		vb["on"] = JobOnDeploy
+	}
 	delete(va, "imageAsWritten")
 	delete(vb, "imageAsWritten")
 	va["image"], vb["image"] = imageDisplay(a.Image, a.ImageAsWritten), imageDisplay(b.Image, b.ImageAsWritten)

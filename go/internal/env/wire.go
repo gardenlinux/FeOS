@@ -12,7 +12,7 @@ import (
 
 // The request and answer bodies of the environments' REST routes (the
 // contract's §4.9 and §5), as the API reads and writes them: camelCase,
-// times as RFC 3339 in seconds, UTC ("" for none), release numbers as
+// times as RFC 3339 in seconds, UTC ("" for none), deployment numbers as
 // JSON numbers, incident IDs as strings. Answers carry every field, so
 // that clients see the same shape every time.
 
@@ -33,13 +33,13 @@ type EnvList struct {
 
 // EnvSummary is an environment in the list.
 type EnvSummary struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Labels   map[string]string `json:"labels"`
-	Release  int               `json:"release"`
-	Deployed int               `json:"deployed"`
-	// State is the latest release's state (model.Release…),
-	// model.EnvNone without a release, model.EnvDeleting.
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Labels     map[string]string `json:"labels"`
+	Deployment int               `json:"deployment"`
+	Deployed   int               `json:"deployed"`
+	// State is the latest deployment's state (model.Deployment…),
+	// model.EnvNone without a deployment, model.EnvDeleting.
 	State string `json:"state"`
 	// Public, Hosts and HostLabel are as EnvStatus has them.
 	Public        bool     `json:"public"`
@@ -52,12 +52,12 @@ type EnvSummary struct {
 // EnvStatus is GET /api/v1/environments/{env}, and the answer of a create
 // and a clone.
 type EnvStatus struct {
-	ID       string            `json:"id"`
-	Name     string            `json:"name"`
-	Labels   map[string]string `json:"labels"`
-	Release  int               `json:"release"`
-	Deployed int               `json:"deployed"`
-	Deleting bool              `json:"deleting"`
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	Labels     map[string]string `json:"labels"`
+	Deployment int               `json:"deployment"`
+	Deployed   int               `json:"deployed"`
+	Deleting   bool              `json:"deleting"`
 	// Public: its tenant made it public (PUT …/public), and the ingress
 	// serves its image services' routes without a route token (ADR 0021).
 	Public bool `json:"public"`
@@ -70,7 +70,7 @@ type EnvStatus struct {
 	// publish or chosen by its tenant; empty before. It stays while a
 	// domain is its host.
 	HostLabel string `json:"hostLabel,omitempty"`
-	// Rollout is the latest release's; null without a release.
+	// Rollout is the latest deployment's; null without a deployment.
 	Rollout       *RolloutStatus `json:"rollout"`
 	Objects       []ObjectStatus `json:"objects"`
 	Routes        []RouteStatus  `json:"routes"`
@@ -78,15 +78,15 @@ type EnvStatus struct {
 	CreatedAt     string         `json:"createdAt"`
 }
 
-// RolloutStatus is the latest release's rollout.
+// RolloutStatus is the latest deployment's rollout.
 type RolloutStatus struct {
-	Release   int    `json:"release"`
-	State     string `json:"state"`
-	StartedAt string `json:"startedAt"`
-	Reason    string `json:"reason"`
+	Deployment int    `json:"deployment"`
+	State      string `json:"state"`
+	StartedAt  string `json:"startedAt"`
+	Reason     string `json:"reason"`
 }
 
-// ObjectStatus is an object of the environment's target release, as the
+// ObjectStatus is an object of the environment's target deployment, as the
 // status shows it. Its JSON has the fields of its kind only:
 //
 //	image service     kind, name, runtime, desired, ready, instances
@@ -181,20 +181,20 @@ type InstanceStatus struct {
 	State      string `json:"state"`
 	Node       string `json:"node"`
 	Address    string `json:"address"`
-	Release    int    `json:"release"`
+	Deployment int    `json:"deployment"`
 	Restarts   int    `json:"restarts"`
 	LastExit   *int   `json:"lastExit"`
 	ReadySince string `json:"readySince"`
 	Detail     string `json:"detail"`
 	// Image is the image the instance runs, registry/repository@sha256:…
-	// as its release resolved it.
+	// as its deployment resolved it.
 	Image string `json:"image"`
 }
 
 // JobRunStatus is a run of a job.
 type JobRunStatus struct {
-	Release int `json:"release"`
-	Attempt int `json:"attempt"`
+	Deployment int `json:"deployment"`
+	Attempt    int `json:"attempt"`
 	// Phase is model.RunRunning, RunSucceeded or RunFailed.
 	Phase      string `json:"phase"`
 	ExitCode   *int   `json:"exitCode"`
@@ -204,7 +204,7 @@ type JobRunStatus struct {
 	Detail string `json:"detail"`
 }
 
-// RouteStatus is a route of the deployed release (the latest when none
+// RouteStatus is a route of the deployed deployment (the latest when none
 // is deployed), its port resolved to a number.
 type RouteStatus struct {
 	Name    string `json:"name"`
@@ -243,7 +243,7 @@ type PlanSpecAnswer struct {
 // PlanRequest is POST /api/v1/environments/{env}/plan.
 type PlanRequest struct {
 	Spec json.RawMessage `json:"spec"`
-	// Base is the release to diff against; nil: the current one.
+	// Base is the deployment to diff against; nil: the current one.
 	Base *int `json:"base,omitempty"`
 }
 
@@ -252,36 +252,36 @@ type PlanAnswer struct {
 	Valid    bool             `json:"valid"`
 	Findings []spec.Finding   `json:"findings"`
 	Diff     []spec.DiffEntry `json:"diff"`
-	// Base is the release the diff is against, Current the environment's
-	// current release (0: none); an apply passes Current as its base.
+	// Base is the deployment the diff is against, Current the environment's
+	// current deployment (0: none); an apply passes Current as its base.
 	Base    int `json:"base"`
 	Current int `json:"current"`
 }
 
-// ApplyRequest is POST /api/v1/environments/{env}/releases.
+// ApplyRequest is POST /api/v1/environments/{env}/deployments.
 type ApplyRequest struct {
 	Spec json.RawMessage `json:"spec"`
-	// Base must be the environment's current release (0: none), or the
+	// Base must be the environment's current deployment (0: none), or the
 	// apply is refused (BaseMismatchError).
 	Base    int    `json:"base"`
 	Author  string `json:"author,omitempty"`
 	Message string `json:"message,omitempty"`
-	// Annotations are the client's, stored with the release: a string map
+	// Annotations are the client's, stored with the deployment: a string map
 	// of at most 4 KiB ("fecode.dev/revision", …).
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// ReleaseList is GET /api/v1/environments/{env}/releases, newest first.
-type ReleaseList struct {
-	Releases []ReleaseInfo `json:"releases"`
+// DeploymentList is GET /api/v1/environments/{env}/deployments, newest first.
+type DeploymentList struct {
+	Deployments []DeploymentInfo `json:"deployments"`
 }
 
-// ReleaseInfo is a release without its spec.
-type ReleaseInfo struct {
+// DeploymentInfo is a deployment without its spec.
+type DeploymentInfo struct {
 	Number int `json:"number"`
-	// State is model.Release….
+	// State is model.Deployment….
 	State string `json:"state"`
-	// Origin is model.Origin…; OriginRef the reverted release's number,
+	// Origin is model.Origin…; OriginRef the reverted deployment's number,
 	// the cloned "<env id>/<number>" or the object "<kind>/<name>".
 	Origin      string            `json:"origin"`
 	OriginRef   string            `json:"originRef"`
@@ -289,7 +289,7 @@ type ReleaseInfo struct {
 	Message     string            `json:"message"`
 	Annotations map[string]string `json:"annotations"`
 	Base        int               `json:"base"`
-	// Reason is a failed release's.
+	// Reason is a failed deployment's.
 	Reason     string `json:"reason"`
 	CreatedAt  string `json:"createdAt"`
 	StartedAt  string `json:"startedAt"`
@@ -298,20 +298,20 @@ type ReleaseInfo struct {
 	Tags []string `json:"tags"`
 }
 
-// ReleaseDetail is GET /api/v1/environments/{env}/releases/{n}: the
-// release, its normalised spec and its diff against release n-1.
-type ReleaseDetail struct {
-	ReleaseInfo
+// DeploymentDetail is GET /api/v1/environments/{env}/deployments/{n}: the
+// deployment, its normalised spec and its diff against deployment n-1.
+type DeploymentDetail struct {
+	DeploymentInfo
 	Spec json.RawMessage  `json:"spec"`
 	Diff []spec.DiffEntry `json:"diff"`
 }
 
 // ApplyAnswer is the answer of an apply, a revert and an object put or
-// delete: 201 with the new release, or 200 with the current one and
-// Unchanged when the normalised spec equals the current release's (and
+// delete: 201 with the new deployment, or 200 with the current one and
+// Unchanged when the normalised spec equals the current deployment's (and
 // that one did not fail).
 type ApplyAnswer struct {
-	ReleaseInfo
+	DeploymentInfo
 	Unchanged bool             `json:"unchanged,omitempty"`
 	Diff      []spec.DiffEntry `json:"diff"`
 	Findings  []spec.Finding   `json:"findings"`
@@ -325,7 +325,7 @@ func (a ApplyAnswer) StatusCode() int {
 	return http.StatusCreated
 }
 
-// RevertRequest is POST /api/v1/environments/{env}/releases/{n}/revert.
+// RevertRequest is POST /api/v1/environments/{env}/deployments/{n}/revert.
 type RevertRequest struct {
 	Base    int    `json:"base"`
 	Author  string `json:"author,omitempty"`
@@ -333,7 +333,7 @@ type RevertRequest struct {
 }
 
 // PutObjectRequest is PUT /api/v1/environments/{env}/objects/{kind}/{name}:
-// the current release's spec with the object set.
+// the current deployment's spec with the object set.
 type PutObjectRequest struct {
 	// Object is the object as a spec has it under its kind's map.
 	Object  json.RawMessage `json:"object"`
@@ -379,14 +379,14 @@ func (o ObjectAnswer) StatusCode() int {
 }
 
 // CloneRequest is POST /api/v1/environments/{env}/clone: a new
-// environment whose release 1 is the source's release (or Spec).
+// environment whose deployment 1 is the source's deployment (or Spec).
 type CloneRequest struct {
 	Name string `json:"name"`
 	// ID is the new environment's UUID; "": a new one.
 	ID string `json:"id,omitempty"`
-	// Release is the source's release to clone; nil: its current one.
-	Release *int `json:"release,omitempty"`
-	// Spec, when set, is applied instead of the source release's spec
+	// Deployment is the source's deployment to clone; nil: its current one.
+	Deployment *int `json:"deployment,omitempty"`
+	// Spec, when set, is applied instead of the source deployment's spec
 	// (whose attached services a clone drops).
 	Spec   json.RawMessage   `json:"spec,omitempty"`
 	Labels map[string]string `json:"labels,omitempty"`
@@ -411,18 +411,18 @@ type TagList struct {
 	Tags []Tag `json:"tags"`
 }
 
-// Tag is a movable name of a release.
+// Tag is a movable name of a deployment.
 type Tag struct {
-	Tag     string `json:"tag"`
-	Release int    `json:"release"`
-	MovedBy string `json:"movedBy"`
-	MovedAt string `json:"movedAt"`
+	Tag        string `json:"tag"`
+	Deployment int    `json:"deployment"`
+	MovedBy    string `json:"movedBy"`
+	MovedAt    string `json:"movedAt"`
 }
 
 // PutTagRequest is PUT /api/v1/environments/{env}/tags/{tag}.
 type PutTagRequest struct {
-	Release int    `json:"release"`
-	Author  string `json:"author,omitempty"`
+	Deployment int    `json:"deployment"`
+	Author     string `json:"author,omitempty"`
 }
 
 // SecretList is GET /api/v1/environments/{env}/secrets: the tenant's
@@ -464,8 +464,8 @@ type Incident struct {
 	// ID is the incident's number, as a string.
 	ID string `json:"id"`
 	// Object is "<kind>/<name>".
-	Object  string `json:"object"`
-	Release int    `json:"release"`
+	Object     string `json:"object"`
+	Deployment int    `json:"deployment"`
 	// Condition is model.Condition….
 	Condition string `json:"condition"`
 	OpenedAt  string `json:"openedAt"`
@@ -481,11 +481,11 @@ type IncidentEvidence struct {
 	Exits []Exit `json:"exits,omitempty"`
 	// LogTail is the end of its log.
 	LogTail []string `json:"logTail,omitempty"`
-	// Diff is a failed rollout's diff against the deployed release.
+	// Diff is a failed rollout's diff against the deployed deployment.
 	Diff []spec.DiffEntry `json:"diff,omitempty"`
 	// Placement is why an instance could not be placed.
 	Placement string `json:"placement,omitempty"`
-	// Pending is what a release past its deadline still waited for, and
+	// Pending is what a deployment past its deadline still waited for, and
 	// the details of those objects' instances (credentials redacted).
 	Pending []string `json:"pending,omitempty"`
 }

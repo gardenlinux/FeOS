@@ -17,10 +17,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// ErrSpec is wrapped by the errors of a release that has no usable spec:
-// it does not exist, or its stored spec does not parse. Releases never
+// ErrSpec is wrapped by the errors of a deployment that has no usable spec:
+// it does not exist, or its stored spec does not parse. Deployments never
 // change, so reading it again does not help.
-var ErrSpec = errors.New("no usable release spec")
+var ErrSpec = errors.New("no usable deployment spec")
 
 // ErrTooLarge is wrapped by the error of an environment whose entry in
 // the table would take more than MaxEnvBytes coded. Like an environment
@@ -42,24 +42,24 @@ func unroutable(err error) bool {
 	return errors.Is(err, ErrSpec) || errors.Is(err, ErrTooLarge)
 }
 
-// SpecFunc returns the parsed spec of release number of the environment
+// SpecFunc returns the parsed spec of deployment number of the environment
 // being built, for reading only; an error wrapping ErrSpec when that
-// release has none, any other error when it could not be read.
+// deployment has none, any other error when it could not be read.
 type SpecFunc func(number int) (*spec.Spec, error)
 
 // maxSpecs bounds the specs a Specs keeps parsed.
 const maxSpecs = 4096
 
-// specKey names a release: an environment ID is free again once its
+// specKey names a deployment: an environment ID is free again once its
 // environment is deleted, and the next environment of that ID has
-// releases of its own, so the key has the environment's creation too.
+// deployments of its own, so the key has the environment's creation too.
 type specKey struct {
 	env     uuid.UUID
 	created int64 // the environment's created_at in µs
 	number  int
 }
 
-// Specs caches parsed release specs, which never change, for reading
+// Specs caches parsed deployment specs, which never change, for reading
 // only. It is safe for concurrent use. Past maxSpecs specs it forgets an
 // arbitrary one for each new one.
 type Specs struct {
@@ -69,17 +69,17 @@ type Specs struct {
 	m  map[specKey]*spec.Spec
 }
 
-// NewSpecs returns an empty cache that reads releases with st.
+// NewSpecs returns an empty cache that reads deployments with st.
 func NewSpecs(st *store.Store) *Specs {
 	return &Specs{st: st, m: map[specKey]*spec.Spec{}}
 }
 
-// Get returns the parsed spec of release number of the environment env,
-// created at created (cached). A release that does not exist, or whose
+// Get returns the parsed spec of deployment number of the environment env,
+// created at created (cached). A deployment that does not exist, or whose
 // spec does not parse, is an error wrapping ErrSpec.
 func (c *Specs) Get(ctx context.Context, env uuid.UUID, created time.Time, number int) (*spec.Spec, error) {
 	if number <= 0 {
-		return nil, fmt.Errorf("release %d of environment %s: %w", number, env, ErrSpec)
+		return nil, fmt.Errorf("deployment %d of environment %s: %w", number, env, ErrSpec)
 	}
 	k := specKey{env: env, created: created.UnixMicro(), number: number}
 	c.mu.Lock()
@@ -88,16 +88,16 @@ func (c *Specs) Get(ctx context.Context, env uuid.UUID, created time.Time, numbe
 	if ok {
 		return sp, nil
 	}
-	r, err := c.st.GetRelease(ctx, env, number)
+	r, err := c.st.GetDeployment(ctx, env, number)
 	if errors.Is(err, store.ErrNoRow) {
-		return nil, fmt.Errorf("release %d of environment %s does not exist: %w", number, env, ErrSpec)
+		return nil, fmt.Errorf("deployment %d of environment %s does not exist: %w", number, env, ErrSpec)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read release %d of environment %s: %w", number, env, err)
+		return nil, fmt.Errorf("read deployment %d of environment %s: %w", number, env, err)
 	}
 	var parsed spec.Spec
 	if err := json.Unmarshal(r.Spec, &parsed); err != nil {
-		return nil, fmt.Errorf("release %d of environment %s: %w: %w", number, env, ErrSpec, err)
+		return nil, fmt.Errorf("deployment %d of environment %s: %w: %w", number, env, ErrSpec, err)
 	}
 	c.mu.Lock()
 	for old := range c.m {
@@ -111,7 +111,7 @@ func (c *Specs) Get(ctx context.Context, env uuid.UUID, created time.Time, numbe
 	return &parsed, nil
 }
 
-// For returns the SpecFunc of environment e's releases, which reads with
+// For returns the SpecFunc of environment e's deployments, which reads with
 // ctx.
 func (c *Specs) For(ctx context.Context, e EnvRows) SpecFunc {
 	return func(number int) (*spec.Spec, error) { return c.Get(ctx, e.ID, e.CreatedAt, number) }

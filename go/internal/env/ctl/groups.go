@@ -280,8 +280,8 @@ func (c *Controller) buildIngGroup(ctx context.Context, id string, sbx podid.ID,
 // ingress: none unless the sandbox is an instance of an image service
 // (in) of an environment that is public and not being deleted; else the
 // routed ports of its service (spec.RoutedPorts): of every route of the
-// environment's deployed and latest release that targets it, the port's
-// number in the instance's own release.
+// environment's deployed and latest deployment that targets it, the port's
+// number in the instance's own deployment.
 func (c *Controller) ingressPorts(ctx context.Context, pass *groupPass, in store.IngressInput) ([]int, error) {
 	if in.EnvID == uuid.Nil || in.Kind != spec.KindService {
 		return nil, nil
@@ -291,21 +291,21 @@ func (c *Controller) ingressPorts(ctx context.Context, pass *groupPass, in store
 		return nil, err
 	}
 	var own *spec.Spec
-	if in.Release > 0 {
-		if own, err = c.releaseSpec(ctx, *env, in.Release); err != nil {
+	if in.Deployment > 0 {
+		if own, err = c.deploymentSpec(ctx, *env, in.Deployment); err != nil {
 			return nil, err
 		}
 	}
 	numbers := []int{env.Deployed}
-	if env.Release != env.Deployed {
-		numbers = append(numbers, env.Release)
+	if env.Deployment != env.Deployed {
+		numbers = append(numbers, env.Deployment)
 	}
 	var routing []*spec.Spec
 	for _, n := range numbers {
 		if n <= 0 {
 			continue
 		}
-		sp, err := c.releaseSpec(ctx, *env, n)
+		sp, err := c.deploymentSpec(ctx, *env, n)
 		if err != nil {
 			return nil, err
 		}

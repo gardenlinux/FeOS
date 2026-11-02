@@ -67,7 +67,7 @@ var base = time.Now().Add(-5 * time.Minute).UnixNano()
 
 func envLabels(tenant, env string, replica int) Labels {
 	return Labels{Tenant: tenant, Node: "node-1", Instance: "inst" + fmt.Sprint(replica), Environment: env, Kind: "service",
-		Object: "api", Replica: replica, Release: 3, Attrs: map[string]string{attrTenant: tenant}}
+		Object: "api", Replica: replica, Deployment: 3, Attrs: map[string]string{attrTenant: tenant}}
 }
 
 // lines makes n lines from offset off on, 10 bytes apart, a millisecond
@@ -215,7 +215,7 @@ func TestIngestIdempotent(t *testing.T) {
 			t.Fatal(err)
 		}
 		if string(r.Key) != "acme/env1/service/api" || r.Partition != part || d.Stream != sid || d.Tenant != "acme" ||
-			d.Environment != "env1" || d.Replica != 0 || d.Release != 3 || d.Source != SourceContainer || d.IOStream != "stdout" {
+			d.Environment != "env1" || d.Replica != 0 || d.Deployment != 3 || d.Source != SourceContainer || d.IOStream != "stdout" {
 			t.Errorf("record %q in %d: %+v", r.Key, r.Partition, d)
 		}
 		offs = append(offs, d.Off)

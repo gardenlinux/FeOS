@@ -313,9 +313,9 @@ type ACMEDomain struct {
 	EnvID        uuid.UUID // uuid.Nil: unbound
 	Verification string
 	State        string
-	// EnvRelease is the bound environment's latest release (0: none or
-	// unbound), the release of its incidents.
-	EnvRelease int
+	// EnvDeployment is the bound environment's latest deployment (0: none or
+	// unbound), the deployment of its incidents.
+	EnvDeployment int
 	// Valid: it has a certificate whose not_after is ahead.
 	Valid             bool
 	IssueBackoffS     int
@@ -331,11 +331,11 @@ func (s *Store) LockACMEDomain(ctx context.Context, id uuid.UUID) (ACMEDomain, e
 	var env *uuid.UUID
 	var failing, next *time.Time
 	err := s.q.QueryRow(ctx, `SELECT d.id, d.name, d.owner, d.env_id, d.verification, d.state,
-			coalesce((SELECT e.release FROM environments e WHERE e.id = d.env_id), 0),
+			coalesce((SELECT e.deployment FROM environments e WHERE e.id = d.env_id), 0),
 			EXISTS (SELECT 1 FROM domain_certs c WHERE c.domain_id = d.id AND c.not_after > now()),
 			d.issue_backoff_s, d.issue_error, d.issue_failing_since, d.next_issue_at
 		FROM domains d WHERE d.id = $1 FOR UPDATE OF d`, id).Scan(&d.ID, &d.Name, &d.Owner, &env, &d.Verification,
-		&d.State, &d.EnvRelease, &d.Valid, &d.IssueBackoffS, &d.IssueError, &failing, &next)
+		&d.State, &d.EnvDeployment, &d.Valid, &d.IssueBackoffS, &d.IssueError, &failing, &next)
 	if err != nil {
 		return ACMEDomain{}, noRow(err, ErrNoRow)
 	}
@@ -431,13 +431,13 @@ func (s *Store) ACMEOrderFailed(ctx context.Context, d ACMEDomain, text string, 
 // renewals have failed for a while, without an open incident of the
 // condition on its environment.
 type ACMERenewalFailing struct {
-	DomainID     uuid.UUID
-	Name         string
-	EnvID        uuid.UUID
-	EnvRelease   int
-	IssueError   string
-	FailingSince time.Time
-	NotAfter     time.Time
+	DomainID      uuid.UUID
+	Name          string
+	EnvID         uuid.UUID
+	EnvDeployment int
+	IssueError    string
+	FailingSince  time.Time
+	NotAfter      time.Time
 }
 
 // ACMERenewalsFailing returns the domains served (state served or
@@ -447,7 +447,7 @@ type ACMERenewalFailing struct {
 // is to be opened. At most limit.
 func (s *Store) ACMERenewalsFailing(ctx context.Context, failingFor time.Duration, condition string,
 	limit int) ([]ACMERenewalFailing, error) {
-	rows, err := s.q.Query(ctx, `SELECT d.id, d.name, d.env_id, e.release, d.issue_error, d.issue_failing_since, c.not_after
+	rows, err := s.q.Query(ctx, `SELECT d.id, d.name, d.env_id, e.deployment, d.issue_error, d.issue_failing_since, c.not_after
 		FROM domains d
 		JOIN environments e ON e.id = d.env_id
 		JOIN domain_certs c ON c.domain_id = d.id AND c.not_after > now()
@@ -461,7 +461,7 @@ func (s *Store) ACMERenewalsFailing(ctx context.Context, failingFor time.Duratio
 	}
 	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (ACMERenewalFailing, error) {
 		var f ACMERenewalFailing
-		err := r.Scan(&f.DomainID, &f.Name, &f.EnvID, &f.EnvRelease, &f.IssueError, &f.FailingSince, &f.NotAfter)
+		err := r.Scan(&f.DomainID, &f.Name, &f.EnvID, &f.EnvDeployment, &f.IssueError, &f.FailingSince, &f.NotAfter)
 		return f, err
 	})
 	if err != nil {

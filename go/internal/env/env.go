@@ -92,7 +92,7 @@ type Service struct {
 	ctl *ctl.Controller
 	log *slog.Logger
 
-	// specs caches the parsed specs of releases, which never change.
+	// specs caches the parsed specs of deployments, which never change.
 	specs specCache
 	// next picks the route door's ready instance round-robin.
 	next atomic.Uint64
@@ -123,7 +123,7 @@ func New(deps Deps) (*Service, error) {
 		st = store.New(deps.DB)
 	}
 	log := deps.Log.With("component", "env")
-	s := &Service{d: deps, st: st, log: log, specs: specCache{m: map[releaseKey]*spec.Spec{}},
+	s := &Service{d: deps, st: st, log: log, specs: specCache{m: map[deploymentKey]*spec.Spec{}},
 		touches: throttle{last: map[string]time.Time{}}}
 	c, err := ctl.New(ctl.Deps{
 		InstanceID: deps.InstanceID, DB: deps.DB, Store: st, Elector: deps.Elector, Conns: deps.Conns,
@@ -170,7 +170,7 @@ func (s *Service) SecretsEnabled() bool { return s.d.Sealer != nil }
 
 // ResolveSecret is the value of version version of the secret name of
 // environment envID, a tenant's or a system secret, unsealed with its AAD
-// (envdeps.SecretAAD). A deleted version still resolves (a release pins
+// (envdeps.SecretAAD). A deleted version still resolves (a deployment pins
 // it until a later one is deployed). The controller resolves it, which
 // also generates the addons' credentials.
 func (s *Service) ResolveSecret(ctx context.Context, envID uuid.UUID, name string, version int) (string, error) {
@@ -252,32 +252,32 @@ func (s *Service) addonEffect(name string, prev, next spec.Addon) string {
 	return spec.EffectInPlace
 }
 
-// releaseKey names a release: its environment's ID and creation time
+// deploymentKey names a deployment: its environment's ID and creation time
 // (in microseconds, the database's precision), and its number.
-type releaseKey struct {
+type deploymentKey struct {
 	env     uuid.UUID
 	created int64
 	number  int
 }
 
-// specCache holds parsed release specs, for reading only: a release
+// specCache holds parsed deployment specs, for reading only: a deployment
 // never changes. It forgets everything when full.
 type specCache struct {
 	mu sync.Mutex
-	m  map[releaseKey]*spec.Spec
+	m  map[deploymentKey]*spec.Spec
 }
 
 // specCacheSize bounds the specs a service keeps parsed.
 const specCacheSize = 512
 
-func (c *specCache) get(k releaseKey) (*spec.Spec, bool) {
+func (c *specCache) get(k deploymentKey) (*spec.Spec, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	sp, ok := c.m[k]
 	return sp, ok
 }
 
-func (c *specCache) put(k releaseKey, sp *spec.Spec) {
+func (c *specCache) put(k deploymentKey, sp *spec.Spec) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(c.m) >= specCacheSize {

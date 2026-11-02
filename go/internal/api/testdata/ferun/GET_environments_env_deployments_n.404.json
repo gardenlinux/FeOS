@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/api/v1/environments/expensa-stage/deployments/99",
+  "query": {},
+  "status": 404,
+  "request": null,
+  "response": {
+    "error": "no such deployment"
+  }
+}

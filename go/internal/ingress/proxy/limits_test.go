@@ -39,9 +39,9 @@ func twoEnvs(a, b wire.Service) *wire.State {
 	s := wire.NewState()
 	s.Self = wire.Self{Name: "ingress-0", AppsZone: testZone}
 	routes := []wire.Route{{Name: "root", Path: "/", Service: "web", Port: "http"}}
-	s.Envs[envA] = wire.Env{ID: envA, Tenant: "evil", Name: "a", Hosts: []string{hostA}, Release: 1,
+	s.Envs[envA] = wire.Env{ID: envA, Tenant: "evil", Name: "a", Hosts: []string{hostA}, Deployment: 1,
 		Routes: routes, Services: []wire.Service{a}}
-	s.Envs[envB] = wire.Env{ID: envB, Tenant: "acme", Name: "shop", Hosts: []string{hostB}, Release: 1,
+	s.Envs[envB] = wire.Env{ID: envB, Tenant: "acme", Name: "shop", Hosts: []string{hostB}, Deployment: 1,
 		Routes: routes, Services: []wire.Service{b}}
 	return s
 }

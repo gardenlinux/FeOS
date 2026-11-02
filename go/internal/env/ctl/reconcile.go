@@ -27,7 +27,7 @@ import (
 const reconcileConcurrency = 4
 
 // reconcile is env-reconcile: one step per environment that has a
-// release and is not being deleted (env-delete has those).
+// deployment and is not being deleted (env-delete has those).
 func (c *Controller) reconcile(ctx context.Context) error {
 	envs, err := c.st.ListEnvironments(ctx, "", nil)
 	if err != nil {
@@ -37,7 +37,7 @@ func (c *Controller) reconcile(ctx context.Context) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for _, e := range envs {
-		if e.Deleting || e.Release == 0 {
+		if e.Deleting || e.Deployment == 0 {
 			continue
 		}
 		select {
@@ -66,16 +66,16 @@ type stepState struct {
 	addons map[string]*addonPlan
 	// addonsReady: every addon of T is ready and provisioned.
 	addonsReady bool
-	// jobsDone: the release jobs of T succeeded (or T is not deploying).
+	// jobsDone: the deploy jobs of T succeeded (or T is not deploying).
 	jobsDone bool
-	// pending lists what the deploying release still waits for.
+	// pending lists what the deploying deployment still waits for.
 	pending []pending
-	// reason is shown on a deploying release that cannot go on ("secrets
+	// reason is shown on a deploying deployment that cannot go on ("secrets
 	// need --secret-key-file"); "" for none.
 	reason string
 	// failed: the step failed R.
 	failed bool
-	// shift is how long R's release jobs waited for runs that were not
+	// shift is how long R's deploy jobs waited for runs that were not
 	// R's (jobWait): R's budgets count from its start moved on by it.
 	shift time.Duration
 	// shiftUnknown: the shift could not be read in this step, so no
@@ -84,7 +84,7 @@ type stepState struct {
 }
 
 // start is when R's budgets count from (its deadline, its services'
-// rollout budgets): R's start moved on by the time its release jobs
+// rollout budgets): R's start moved on by the time its deploy jobs
 // waited for runs that were not R's; false while R has not started or
 // the shift is not known.
 func (s *stepState) start() (time.Time, bool) {
@@ -94,13 +94,13 @@ func (s *stepState) start() (time.Time, bool) {
 	return s.v.latest.StartedAt.Add(s.shift), true
 }
 
-// pending is one thing a deploying release waits for: the object ("" for
+// pending is one thing a deploying deployment waits for: the object ("" for
 // none) and what of it.
 type pending struct {
 	object, text string
 }
 
-// wait records that the release waits for object (format and args say
+// wait records that the deployment waits for object (format and args say
 // what of it).
 func (s *stepState) wait(object, format string, args ...any) {
 	s.pending = append(s.pending, pending{object: object, text: fmt.Sprintf(format, args...)})
@@ -118,7 +118,7 @@ func (s *stepState) texts() []string {
 // deploying reports whether T is R and R is waiting or deploying: its jobs
 // run, its budget counts, and it may become deployed.
 func deploying(v *view) bool {
-	return v.targetIsLatest && (v.latest.State == model.ReleaseWaiting || v.latest.State == model.ReleaseDeploying)
+	return v.targetIsLatest && (v.latest.State == model.DeploymentWaiting || v.latest.State == model.DeploymentDeploying)
 }
 
 // step is one reconcile step of an environment (§4.3).
@@ -127,7 +127,7 @@ func (c *Controller) step(ctx context.Context, envID uuid.UUID) error {
 	if err != nil || v == nil {
 		return err
 	}
-	if v.targetIsLatest && v.latest.State == model.ReleaseWaiting {
+	if v.targetIsLatest && v.latest.State == model.DeploymentWaiting {
 		if err := c.startRollout(ctx, v); err != nil {
 			return err
 		}
@@ -155,17 +155,17 @@ func (c *Controller) step(ctx context.Context, envID uuid.UUID) error {
 }
 
 // deadline is how long R may roll (§13.5): the longest of T's image
-// services' rollout budgets, of T's release jobs' attempts (timeout ×
+// services' rollout budgets, of T's deploy jobs' attempts (timeout ×
 // (retries+1)), and the floor (10 minutes).
 func (c *Controller) deadline(v *view) time.Duration {
-	d := c.t.releaseDeadline
+	d := c.t.deploymentDeadline
 	for _, svc := range v.target.Services {
 		if runtimeOf(svc) == spec.RuntimeImage {
 			d = max(d, rolloutOf(svc))
 		}
 	}
 	for _, j := range v.target.Jobs {
-		if jobOn(j) == spec.JobOnRelease {
+		if jobOn(j) == spec.JobOnDeploy {
 			d = max(d, jobTimeout(j)*time.Duration(max(j.Retries, 0)+1))
 		}
 	}
@@ -173,7 +173,7 @@ func (c *Controller) deadline(v *view) time.Duration {
 }
 
 // within is how long R may roll from its own start: its deadline, plus
-// the time its release jobs waited for runs that were not R's
+// the time its deploy jobs waited for runs that were not R's
 // (stepState.shift).
 func (c *Controller) within(s *stepState) time.Duration {
 	return c.deadline(s.v) + s.shift
@@ -189,7 +189,7 @@ func (c *Controller) pastDeadline(s *stepState) bool {
 // failLate fails a deploying R past its deadline (rollout_failed), naming
 // the first object it still waits for; the evidence has what it waits
 // for and the details of those objects' instances, credentials redacted.
-// A release that waits for addons or jobs, or for a scale-up without
+// A deployment that waits for addons or jobs, or for a scale-up without
 // capacity, would otherwise roll forever.
 func (c *Controller) failLate(ctx context.Context, s *stepState) error {
 	v := s.v
@@ -220,17 +220,17 @@ func (c *Controller) failLate(ctx context.Context, s *stepState) error {
 			ev.Pending = append(ev.Pending, redact(fmt.Sprintf("service/%s: %s", name, a.Detail), secrets))
 		}
 	}
-	ev.Diff = c.releaseDiff(ctx, v)
-	reason := redact(fmt.Sprintf("release %d did not roll out within %s: %s", v.latest.Number,
+	ev.Diff = c.deploymentDiff(ctx, v)
+	reason := redact(fmt.Sprintf("deployment %d did not roll out within %s: %s", v.latest.Number,
 		c.within(s).Round(time.Second), first.text), secrets)
-	if err := c.failRelease(ctx, v, reason, first.object, model.ConditionRolloutFailed, ev); err != nil {
+	if err := c.failDeployment(ctx, v, reason, first.object, model.ConditionRolloutFailed, ev); err != nil {
 		return err
 	}
 	s.failed = true
 	return nil
 }
 
-// logPending logs what a deploying release waits for, when that changed.
+// logPending logs what a deploying deployment waits for, when that changed.
 func (c *Controller) logPending(v *view, pending []string) {
 	if !deploying(v) {
 		return
@@ -242,18 +242,18 @@ func (c *Controller) logPending(v *view, pending []string) {
 	c.lastPending[key] = text
 	c.mu.Unlock()
 	if !ok || last != text {
-		c.log.Debug("the release waits", "environment", v.env.ID, "release", v.latest.Number, "for", text)
+		c.log.Debug("the deployment waits", "environment", v.env.ID, "deployment", v.latest.Number, "for", text)
 	}
 }
 
 // startRollout moves R from waiting to deploying.
 func (c *Controller) startRollout(ctx context.Context, v *view) error {
 	return c.fenced(ctx, func(tx *store.Store) error {
-		r, err := tx.LockRelease(ctx, v.env.ID, v.latest.Number, store.ForUpdate)
+		r, err := tx.LockDeployment(ctx, v.env.ID, v.latest.Number, store.ForUpdate)
 		if err != nil {
 			return err
 		}
-		if r.State != model.ReleaseWaiting {
+		if r.State != model.DeploymentWaiting {
 			v.latest = r
 			return nil
 		}
@@ -262,32 +262,32 @@ func (c *Controller) startRollout(ctx context.Context, v *view) error {
 			return err
 		}
 		after := r
-		after.State, after.StartedAt = model.ReleaseDeploying, now
-		if v.latest, err = tx.UpdateRelease(ctx, r, after); err != nil {
+		after.State, after.StartedAt = model.DeploymentDeploying, now
+		if v.latest, err = tx.UpdateDeployment(ctx, r, after); err != nil {
 			return err
 		}
-		c.log.Info("rollout begins", "environment", v.env.ID, "release", r.Number)
+		c.log.Info("rollout begins", "environment", v.env.ID, "deployment", r.Number)
 		return nil
 	})
 }
 
-// setReason writes why a deploying release does not go on.
+// setReason writes why a deploying deployment does not go on.
 func (c *Controller) setReason(ctx context.Context, v *view, reason string) error {
 	return c.fenced(ctx, func(tx *store.Store) error {
-		r, err := tx.LockRelease(ctx, v.env.ID, v.latest.Number, store.ForUpdate)
-		if err != nil || r.State != model.ReleaseDeploying {
+		r, err := tx.LockDeployment(ctx, v.env.ID, v.latest.Number, store.ForUpdate)
+		if err != nil || r.State != model.DeploymentDeploying {
 			return err
 		}
 		after := r
 		after.Reason = reason
-		_, err = tx.UpdateRelease(ctx, r, after)
+		_, err = tx.UpdateDeployment(ctx, r, after)
 		return err
 	})
 }
 
 // markDeployed marks R deployed (§4.3 step 7): the environment's deployed
-// release, older deployed and waiting ones replaced, the open
-// rollout_failed, job_failed and crash_loop incidents of older releases
+// deployment, older deployed and waiting ones replaced, the open
+// rollout_failed, job_failed and crash_loop incidents of older deployments
 // closed (every instance of R is ready), env-groups woken.
 func (c *Controller) markDeployed(ctx context.Context, v *view) error {
 	n := v.latest.Number
@@ -296,14 +296,14 @@ func (c *Controller) markDeployed(ctx context.Context, v *view) error {
 		if err != nil {
 			return err
 		}
-		if env.Release != n || env.Deleting {
+		if env.Deployment != n || env.Deleting {
 			return nil
 		}
-		r, err := tx.LockRelease(ctx, env.ID, n, store.ForUpdate)
+		r, err := tx.LockDeployment(ctx, env.ID, n, store.ForUpdate)
 		if err != nil {
 			return err
 		}
-		if r.State != model.ReleaseWaiting && r.State != model.ReleaseDeploying {
+		if r.State != model.DeploymentWaiting && r.State != model.DeploymentDeploying {
 			return nil
 		}
 		now, err := tx.Now(ctx)
@@ -311,11 +311,11 @@ func (c *Controller) markDeployed(ctx context.Context, v *view) error {
 			return err
 		}
 		after := r
-		after.State, after.Reason, after.FinishedAt = model.ReleaseDeployed, "", now
+		after.State, after.Reason, after.FinishedAt = model.DeploymentDeployed, "", now
 		if after.StartedAt.IsZero() {
 			after.StartedAt = now
 		}
-		if _, err := tx.UpdateRelease(ctx, r, after); err != nil {
+		if _, err := tx.UpdateDeployment(ctx, r, after); err != nil {
 			return err
 		}
 		ea := env
@@ -323,32 +323,32 @@ func (c *Controller) markDeployed(ctx context.Context, v *view) error {
 		if _, err := tx.UpdateEnvironment(ctx, env, ea); err != nil {
 			return err
 		}
-		if _, err := tx.ReplaceReleases(ctx, env.ID, n, model.ReleaseDeployed, model.ReleaseWaiting,
-			model.ReleaseDeploying); err != nil {
+		if _, err := tx.ReplaceDeployments(ctx, env.ID, n, model.DeploymentDeployed, model.DeploymentWaiting,
+			model.DeploymentDeploying); err != nil {
 			return err
 		}
 		if _, err := tx.EnvCtlCloseIncidents(ctx, env.ID, n, model.ConditionRolloutFailed, model.ConditionJobFailed,
 			model.ConditionCrashLoop); err != nil {
 			return err
 		}
-		// The routes of the releases before R no longer count for the
+		// The routes of the deployments before R no longer count for the
 		// ing- groups' ports: env-groups shrinks them.
 		if err := tx.Notify(ctx, db.ChanLeader, HintGroups); err != nil {
 			return err
 		}
-		c.log.Info("release deployed", "environment", env.ID, "release", n)
+		c.log.Info("deployment deployed", "environment", env.ID, "deployment", n)
 		return nil
 	})
 }
 
-// failRelease fails R with reason and opens its incident.
-func (c *Controller) failRelease(ctx context.Context, v *view, reason, object, condition string, ev evidence) error {
+// failDeployment fails R with reason and opens its incident.
+func (c *Controller) failDeployment(ctx context.Context, v *view, reason, object, condition string, ev evidence) error {
 	return c.fenced(ctx, func(tx *store.Store) error {
-		r, err := tx.LockRelease(ctx, v.env.ID, v.latest.Number, store.ForUpdate)
+		r, err := tx.LockDeployment(ctx, v.env.ID, v.latest.Number, store.ForUpdate)
 		if err != nil {
 			return err
 		}
-		if r.State != model.ReleaseWaiting && r.State != model.ReleaseDeploying {
+		if r.State != model.DeploymentWaiting && r.State != model.DeploymentDeploying {
 			return nil
 		}
 		now, err := tx.Now(ctx)
@@ -356,36 +356,36 @@ func (c *Controller) failRelease(ctx context.Context, v *view, reason, object, c
 			return err
 		}
 		after := r
-		after.State, after.Reason, after.FinishedAt = model.ReleaseFailed, reason, now
+		after.State, after.Reason, after.FinishedAt = model.DeploymentFailed, reason, now
 		if after.StartedAt.IsZero() {
 			after.StartedAt = now
 		}
-		if _, err := tx.UpdateRelease(ctx, r, after); err != nil {
+		if _, err := tx.UpdateDeployment(ctx, r, after); err != nil {
 			return err
 		}
 		if _, err := openIncident(ctx, tx, v.env.ID, object, r.Number, condition, reason, ev); err != nil {
 			return err
 		}
-		c.log.Info("release failed", "environment", v.env.ID, "release", r.Number, "reason", reason)
+		c.log.Info("deployment failed", "environment", v.env.ID, "deployment", r.Number, "reason", reason)
 		return nil
 	})
 }
 
-// releaseDiff is a failed release's diff against the deployed one.
-func (c *Controller) releaseDiff(ctx context.Context, v *view) []spec.DiffEntry {
+// deploymentDiff is a failed deployment's diff against the deployed one.
+func (c *Controller) deploymentDiff(ctx context.Context, v *view) []spec.DiffEntry {
 	var prev *spec.Spec
 	if v.env.Deployed > 0 {
-		prev, _ = c.releaseSpec(ctx, v.env, v.env.Deployed)
+		prev, _ = c.deploymentSpec(ctx, v.env, v.env.Deployed)
 	}
 	return spec.Diff(prev, v.latestSpec)
 }
 
 // insert is an instance row to insert.
 type insert struct {
-	plan    *podPlan
-	replica int
-	release int
-	pin     string
+	plan       *podPlan
+	replica    int
+	deployment int
+	pin        string
 	// run is a job's run, inserted with the row.
 	run *store.EnvJobRun
 	// once: a run of a job that is refused while a run of the job runs
@@ -460,14 +460,14 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 			}
 			return store.NewSandbox{ID: id, Owner: v.env.Owner, Image: p.image, VCPUs: p.vcpus, MemoryMiB: p.memoryMB,
 				ImageRef: ref, EnvironmentID: v.env.ID, PodTemplate: &own, PinNode: in.pin, IdleAfterS: &idle,
-				LogLabels: instanceLogLabels(v.env.Owner, id, v.env.ID, p.kind, p.name, in.replica, in.release, attempt)}
+				LogLabels: instanceLogLabels(v.env.Owner, id, v.env.ID, p.kind, p.name, in.replica, in.deployment, attempt)}
 		})
 		if err != nil {
 			return err
 		}
 		id = row.ID
 		if _, err := tx.InsertEnvInstance(ctx, store.EnvInstance{SandboxID: id, EnvID: v.env.ID, Kind: p.kind,
-			Object: p.name, Replica: in.replica, TemplateHash: p.hash, Release: in.release,
+			Object: p.name, Replica: in.replica, TemplateHash: p.hash, Deployment: in.deployment,
 			Phase: model.PhaseStarting}); err != nil {
 			return err
 		}
@@ -492,19 +492,19 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 		return "", err
 	}
 	c.log.Info("instance inserted", "environment", v.env.ID, "object", p.object(), "replica", in.replica,
-		"sandbox", id, "release", in.release)
+		"sandbox", id, "deployment", in.deployment)
 	if leaderSide {
 		c.ensure(ctx, id)
 	}
 	return id, nil
 }
 
-// keep updates a kept instance in place: its release, and its row's
+// keep updates a kept instance in place: its deployment, and its row's
 // idle_after_s.
 func (c *Controller) keep(ctx context.Context, v *view, r store.EnvInstanceRow, idle int) {
-	needRelease := r.Instance.Release != v.targetNum && v.targetNum > 0
+	needDeployment := r.Instance.Deployment != v.targetNum && v.targetNum > 0
 	needIdle := r.Sandbox.IdleAfterS == nil || *r.Sandbox.IdleAfterS != idle
-	if !needRelease && !needIdle {
+	if !needDeployment && !needIdle {
 		return
 	}
 	err := c.fenced(ctx, func(tx *store.Store) error {
@@ -513,13 +513,13 @@ func (c *Controller) keep(ctx context.Context, v *view, r store.EnvInstanceRow, 
 				return err
 			}
 		}
-		if needRelease {
+		if needDeployment {
 			inst, err := tx.LockEnvInstance(ctx, r.Sandbox.ID, store.ForUpdate)
 			if err != nil {
 				return err
 			}
 			after := inst
-			after.Release = v.targetNum
+			after.Deployment = v.targetNum
 			_, err = tx.UpdateEnvInstance(ctx, inst, after)
 			return err
 		}
@@ -642,7 +642,7 @@ func (c *Controller) healThen(ctx context.Context, sb store.Sandbox, idles bool,
 // stepRemoved stops and deletes what T no longer has (§4.3 step 6):
 // instances of objects not in T; an addon also gone from R loses its
 // volume (deleting) and its credentials (an addon of a failed R that T
-// lacks stays as it is, so that a failed first release deletes no data);
+// lacks stays as it is, so that a failed first deployment deletes no data);
 // attached services lose their process, then their row and name.
 func (c *Controller) stepRemoved(ctx context.Context, s *stepState) {
 	v := s.v
@@ -734,7 +734,7 @@ func (c *Controller) stepRemoved(ctx context.Context, s *stepState) {
 // closeRemovedIncidents closes the open crash_loop, volume_unavailable and
 // addon_unhealthy incidents of objects that neither T nor R has: nothing
 // closes them otherwise (no_capacity closes in stepStarved, rollout_failed
-// and job_failed when a release is deployed).
+// and job_failed when a deployment is deployed).
 func (c *Controller) closeRemovedIncidents(ctx context.Context, v *view) {
 	done := map[[2]string]bool{}
 	for _, i := range v.open {
@@ -819,7 +819,7 @@ func (c *Controller) stepStarved(ctx context.Context, s *stepState) {
 		if v.isOpen(obj, model.ConditionNoCapacity) {
 			continue
 		}
-		c.incident(ctx, v.env.ID, obj, r.Instance.Release, model.ConditionNoCapacity,
+		c.incident(ctx, v.env.ID, obj, r.Instance.Deployment, model.ConditionNoCapacity,
 			fmt.Sprintf("%s replica %d found no capacity for %s", obj, r.Instance.Replica, c.t.noCapacityAfter),
 			evidence{Placement: desc})
 	}

@@ -10,7 +10,7 @@
 //
 // For a control plane's environments end to end: --fake-exec (probes and
 // provisioning pass), --fake-processes (attached services start, list and
-// stop), --exit 'job/*=0@3s' (release jobs finish), --start-log (log
+// stop), --exit 'job/*=0@3s' (deploy jobs finish), --start-log (log
 // tails show lines) and --port-addr 8080=127.0.0.1:18080 (routes and
 // probes reach a local server).
 //

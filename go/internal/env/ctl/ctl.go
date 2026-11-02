@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package ctl is the environment controller (ADR 0018): the leader loops
-// that bring every environment to its target release and keep it there,
+// that bring every environment to its target deployment and keep it there,
 // and the engine's prepare hook.
 //
 // Loops (Loops), run by the leader, fenced, never with a node call inside
 // a transaction:
 //
 //	env-reconcile  2 s, hint "env-reconcile": one step per environment whose latest
-//	               release is not deployed, whose instances do not match their
+//	               deployment is not deployed, whose instances do not match their
 //	               target, or that is deleting: groups, addons (credentials,
-//	               volume, instance, provisioning), release jobs, image services
+//	               volume, instance, provisioning), deploy jobs, image services
 //	               (rolling, surge 1), attached services, removed objects, deployed
 //	env-probe      1 s: containers' exits and restarts with backoff, readiness
 //	               (http, tcp, exec), attached services' processes; tenants'
@@ -42,9 +42,9 @@
 // nodes.ingress_group_version): the ingress sends to an instance only
 // with both.
 //
-// The target T of an environment is its latest release R, unless R
-// failed: then the deployed release (nothing when none was deployed), so
-// that a failed release is never retried until a new one arrives. An
+// The target T of an environment is its latest deployment R, unless R
+// failed: then the deployed deployment (nothing when none was deployed), so
+// that a failed deployment is never retried until a new one arrives. An
 // instance's template hash is model.PodTemplate.Hash over its rendered
 // template; an instance whose hash differs from T's is replaced (rolled
 // for image services, recreated for addons). An addon's hash takes its
@@ -103,7 +103,7 @@ const (
 // The answers of LogTail, RestartService and RunJob that the API maps to
 // statuses of its own.
 var (
-	// ErrNoObject: the environment's target release has no such object
+	// ErrNoObject: the environment's target deployment has no such object
 	// (or replica: then the error's text says so, and wraps it).
 	ErrNoObject = errors.New("no such object")
 	// ErrPaused: the instance is paused or hibernated; reading its logs
@@ -122,8 +122,8 @@ var (
 	// ErrNotReady: the object cannot run yet, an expected state (409): a
 	// job whose template does not render ("job X cannot run yet: …").
 	ErrNotReady = errors.New("not ready")
-	// ErrJobRunning: a run of the job runs already, of any release (409
-	// busy): the error's text says which ("job X runs already (release
+	// ErrJobRunning: a run of the job runs already, of any deployment (409
+	// busy): the error's text says which ("job X runs already (deployment
 	// N, attempt M)"). It wraps model.ErrBusy.
 	ErrJobRunning = fmt.Errorf("a run of the job runs: %w", model.ErrBusy)
 )
@@ -223,27 +223,27 @@ type timings struct {
 	// restartReady bounds how long RestartService waits for a restarted
 	// replica to be ready before it restarts the next.
 	restartReady time.Duration
-	// releaseDeadline is the least time a release may roll before it fails
+	// deploymentDeadline is the least time a deployment may roll before it fails
 	// (§13.5: longer when its services' budgets or jobs need more).
-	releaseDeadline time.Duration
+	deploymentDeadline time.Duration
 }
 
 func defaultTimings() timings {
 	return timings{
-		stopGrace:       10 * time.Second,
-		crashWindow:     10 * time.Minute,
-		crashExits:      3,
-		restartMax:      5 * time.Minute,
-		restartUnit:     time.Second,
-		steadyAfter:     2 * time.Second,
-		noCapacityAfter: 2 * time.Minute,
-		provisionRetry:  10 * time.Second,
-		stepTimeout:     2 * time.Minute,
-		probeTimeout:    10 * time.Second,
-		nodeCall:        10 * time.Second,
-		attachedReady:   time.Minute,
-		restartReady:    5 * time.Minute,
-		releaseDeadline: 10 * time.Minute,
+		stopGrace:          10 * time.Second,
+		crashWindow:        10 * time.Minute,
+		crashExits:         3,
+		restartMax:         5 * time.Minute,
+		restartUnit:        time.Second,
+		steadyAfter:        2 * time.Second,
+		noCapacityAfter:    2 * time.Minute,
+		provisionRetry:     10 * time.Second,
+		stepTimeout:        2 * time.Minute,
+		probeTimeout:       10 * time.Second,
+		nodeCall:           10 * time.Second,
+		attachedReady:      time.Minute,
+		restartReady:       5 * time.Minute,
+		deploymentDeadline: 10 * time.Minute,
 	}
 }
 
@@ -280,7 +280,7 @@ type Controller struct {
 	// provisionFailed holds when an addon instance's provisioning failed
 	// last, for provisionRetry.
 	provisionFailed map[podid.ID]time.Time
-	// lastPending is what each deploying release waited for at its last
+	// lastPending is what each deploying deployment waited for at its last
 	// step, for logPending.
 	lastPending map[string]string
 	// exitRun is the microVM's pid at each instance's last recorded exit:

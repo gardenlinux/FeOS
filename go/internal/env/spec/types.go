@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// Spec is a release spec: the typed objects of an environment, each map
+// Spec is a deployment spec: the typed objects of an environment, each map
 // keyed by the object's DNS-label name. As a client writes it, most
 // fields may be left out; in its normalised form (Normalise) the defaults
 // are filled in, the runtime is explicit, durations are Go's, images are
@@ -76,7 +76,7 @@ type Service struct {
 	// idle interval applies (ADR 0018, "An attached service idles as an
 	// image service does").
 	Idle string `json:"idle,omitempty"`
-	// Rollout bounds a release's rollout of the service. Image runtime
+	// Rollout bounds a deployment's rollout of the service. Image runtime
 	// only.
 	Rollout *Rollout `json:"rollout,omitempty"`
 	// Mounts is not available yet: its presence is an error finding
@@ -129,15 +129,15 @@ type ExecCheck struct {
 	Command []string `json:"command"`
 }
 
-// Rollout bounds a release's rollout of a service.
+// Rollout bounds a deployment's rollout of a service.
 type Rollout struct {
-	// Timeout is counted from the release's start; "": 10m.
+	// Timeout is counted from the deployment's start; "": 10m.
 	Timeout string `json:"timeout,omitempty"`
 }
 
-// Job is a run-to-completion object: on every release whose template of
-// it differs from its last succeeded run (On "release"), or when asked
-// (On "manual").
+// Job is a run-to-completion object: on every deployment whose template of
+// it differs from its last succeeded run (On "deploy", a deploy job), or
+// when asked (On "manual").
 type Job struct {
 	Image          string              `json:"image,omitempty"`
 	ImageAsWritten string              `json:"imageAsWritten,omitempty"`
@@ -147,7 +147,8 @@ type Job struct {
 	// ImageCredentials are the login for the image's registry (ADR 0025);
 	// nil: anonymous.
 	ImageCredentials *ImageCredentials `json:"imageCredentials,omitempty"`
-	// On is JobOnRelease (the default) or JobOnManual.
+	// On is JobOnDeploy (the default; JobOnRelease is the same) or
+	// JobOnManual. Normalised it is JobOnStored or JobOnManual.
 	On string `json:"on,omitempty"`
 	// Timeout bounds one attempt; "": 10m, at most 2h.
 	Timeout string `json:"timeout,omitempty"`
@@ -158,9 +159,9 @@ type Job struct {
 // ImageCredentials are a service's or job's login for its image's registry
 // (ADR 0025): a username and a password, each a string or a secret of the
 // environment ({"secret": n}). A secret named here is read at its latest
-// version whenever a pod is created, not at the version the release pins:
+// version whenever a pod is created, not at the version the deployment pins:
 // they are access, not configuration, and a token rotated or revoked
-// reaches the next replica of an old release.
+// reaches the next replica of an old deployment.
 type ImageCredentials struct {
 	Username EnvValue `json:"username"`
 	Password EnvValue `json:"password"`
@@ -190,7 +191,7 @@ type Route struct {
 }
 
 // SecretRef pins a tenant secret of the environment to a version; 0: the
-// latest when the release is applied.
+// latest when the deployment is applied.
 type SecretRef struct {
 	Version int `json:"version,omitempty"`
 }
@@ -256,7 +257,7 @@ const (
 	// EnvLiteral is {"value": "s"}.
 	EnvLiteral EnvKind = "value"
 	// EnvSecret is {"secret": "name"}: a tenant secret of the
-	// environment, at the version the release pins.
+	// environment, at the version the deployment pins.
 	EnvSecret EnvKind = "secret"
 	// EnvAddon is {"addon": "a", "key": "k", …fields}: an output of an
 	// addon (a URL, a host, a password), with the blueprint's fields
@@ -436,9 +437,28 @@ const (
 
 // When a job runs.
 const (
+	// JobOnDeploy: with every deployment whose template of the job
+	// differs from its last succeeded run, a deploy job.
+	JobOnDeploy = "deploy"
+	// JobOnRelease is JobOnDeploy's earlier word (ADR 0018, "The
+	// deployments' word"), accepted as its synonym for good: stored
+	// specs, the files of old commits and reverts to old deployments say
+	// it.
 	JobOnRelease = "release"
 	JobOnManual  = "manual"
 )
+
+// JobOnStored is the word normalisation stores for JobOnDeploy: still
+// JobOnRelease, since the version before this one, which a rolling
+// deploy runs beside it, reads stored specs and knows only that word.
+// The next version stores JobOnDeploy and rewrites the stored specs.
+const JobOnStored = JobOnRelease
+
+// IsJobOnDeploy reports whether on (a job's On) runs the job with every
+// deployment: JobOnDeploy, its earlier word JobOnRelease, or unset.
+func IsJobOnDeploy(on string) bool {
+	return on == "" || on == JobOnDeploy || on == JobOnRelease
+}
 
 // The kinds of objects, as diffs, object routes (PUT …/objects/{kind}/
 // {name}), the status and the pods' LabelObject name them.
@@ -543,7 +563,7 @@ func EffectReplaces(n int) string {
 	return fmt.Sprintf("replaces %d pods", n)
 }
 
-// DiffEntry is the change of one object between two releases.
+// DiffEntry is the change of one object between two deployments.
 type DiffEntry struct {
 	// Kind is KindService, KindJob, KindAddon, KindRoute or KindSecret.
 	Kind string `json:"kind"`

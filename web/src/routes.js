@@ -11,7 +11,7 @@
 //   /tenants/:t/tools                   the tools of its sandboxes
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments, read-only; tab:
-//                                       overview, releases[/:n],
+//                                       overview, deployments[/:n],
 //                                       incidents[/:id],
 //                                       logs[/:kind/:name[/:replica]]
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
@@ -27,18 +27,18 @@ function decode(s) {
 }
 
 // ENV_TABS are the tabs of an environment.
-export const ENV_TABS = ['overview', 'releases', 'incidents', 'logs'];
+export const ENV_TABS = ['overview', 'deployments', 'incidents', 'logs'];
 
 // envRoute reads the segments after /tenants/:t/environments: the
 // environment, its tab (an unknown one is the overview), and the tab's
-// item: a release's number, an incident's ID, or the "<kind>/<name>" of
+// item: a deployment's number, an incident's ID, or the "<kind>/<name>" of
 // the object whose logs show, with the replica (0 unless given).
 function envRoute(tenant, seg) {
   const env = seg[0] || '';
   const tab = env && ENV_TABS.includes(seg[1]) ? seg[1] : 'overview';
   let item = '';
   let replica = 0;
-  if (tab === 'releases' || tab === 'incidents') item = seg[2] || '';
+  if (tab === 'deployments' || tab === 'incidents') item = seg[2] || '';
   if (tab === 'logs' && seg[2] && seg[3]) {
     item = `${seg[2]}/${seg[3]}`;
     if (/^\d+$/.test(seg[4] || '')) replica = Number(seg[4]);
@@ -61,10 +61,25 @@ export function envPath(tenant, env = '', tab = 'overview', item = '', replica =
   return p;
 }
 
+// EARLIER_TABS maps an environment tab's earlier name to its name: the
+// deployments were the releases (ADR 0018, "The deployments' word").
+const EARLIER_TABS = { releases: 'deployments' };
+
+// canonicalPath is pathname with an environment tab's earlier name
+// replaced by its name, so that an old link redirects; else pathname.
+export function canonicalPath(pathname) {
+  const seg = String(pathname || '/').split('/');
+  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && EARLIER_TABS[seg[5]]) {
+    seg[5] = EARLIER_TABS[seg[5]];
+    return seg.join('/');
+  }
+  return pathname;
+}
+
 // parsePath maps a path to {view, tenant?, sel?, tab?, node?}, and for
 // the environments to {view, tenant, env, tab, item, replica}.
 export function parsePath(pathname) {
-  const seg = String(pathname || '/').split('/').filter(Boolean).map(decode);
+  const seg = String(canonicalPath(pathname) || '/').split('/').filter(Boolean).map(decode);
   switch (seg[0]) {
     case 'nodes':
       return seg[1] ? { view: 'node', node: seg[1], tab: seg[2] || 'overview' } : { view: 'nodes' };

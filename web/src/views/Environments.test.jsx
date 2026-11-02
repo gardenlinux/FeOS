@@ -8,13 +8,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveTenant, setTenantToken } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
-  DiffView, EnvOverview, EnvTable, IncidentTable, IncidentView, LogPicker, LogsBody, ReleaseTable, ReleaseView,
+  DiffView, EnvOverview, EnvTable, IncidentTable, IncidentView, LogPicker, LogsBody, DeploymentTable, DeploymentView,
 } from './Environments.jsx';
 import { logsProblem } from './envs.js';
 
 // The environments view, rendered with ferund's fixtures as its answers:
 // the list, an environment's objects and instances per kind with its
-// rollout and incidents, the releases with a release's diff and spec,
+// rollout and incidents, the deployments with a deployment's diff and spec,
 // the incidents with their evidence, and an object's logs with ferund's
 // refusals.
 
@@ -36,7 +36,7 @@ describe('EnvTable', () => {
   const list = response('GET_environments.200').environments;
   const table = (envs, filtered = false) => html(<EnvTable envs={envs} filtered={filtered} tenant={T} navigate={nav} onLabel={() => {}} />);
 
-  it('lists name, labels, release, deployed, state, open incidents and created', () => {
+  it('lists name, labels, deployment, deployed, state, open incidents and created', () => {
     const out = table(list);
     expect(out.match(/<th[ >]/g)).toHaveLength(8);
     expect(count(out, 'class="clickable"')).toBe(3);
@@ -46,7 +46,7 @@ describe('EnvTable', () => {
     expect(out).toContain('title="filter by fecode.class=production"');
     // Stage rolls 7 while 6 serves: the deployed number stands out.
     expect(out).toContain('<td class="col-num mono">7</td>');
-    expect(out).toContain('class="col-num mono warntext" title="the latest release is not deployed">6</td>');
+    expect(out).toContain('class="col-num mono warntext" title="the latest deployment is not deployed">6</td>');
     expect(out).toContain('class="state-label paused"');
     expect(out).toContain('>deploying</span>');
     expect(count(out, '>deployed</span>')).toBe(2);
@@ -64,25 +64,25 @@ describe('EnvTable', () => {
 describe('EnvOverview', () => {
   const overview = (st) => html(<EnvOverview st={st} tenant={T} navigate={nav} />);
 
-  it('shows the rollout: release 7 rolls while 6 serves, the open incident linked', () => {
+  it('shows the rollout: deployment 7 rolls while 6 serves, the open incident linked', () => {
     const out = overview(STAGE);
     expect(out).toContain('class="rollout paused"');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/releases/7"');
-    expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />)).toContain('release 6 serves meanwhile');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/7"');
+    expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />)).toContain('deployment 6 serves meanwhile');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/incidents" class="bad">1 open</a>');
     expect(out).not.toContain('rollout-reason');
   });
 
-  it("shows a failed rollout's reason, and that the deployed release keeps serving", () => {
+  it("shows a failed rollout's reason, and that the deployed deployment keeps serving", () => {
     const reason = 'service expense-service: a new instance (replica 1) exited 3 times';
     const st = { ...STAGE, rollout: { ...STAGE.rollout, state: 'failed', reason } };
     const out = overview(st);
     expect(out).toContain('class="rollout failed"');
     expect(out).toContain(`<div class="rollout-reason">${reason}</div>`);
-    expect(text(<EnvOverview st={st} tenant={T} navigate={nav} />)).toContain('release 6 keeps serving');
+    expect(text(<EnvOverview st={st} tenant={T} navigate={nav} />)).toContain('deployment 6 keeps serving');
   });
 
-  it("shows a deploying release's reason without a failure", () => {
+  it("shows a deploying deployment's reason without a failure", () => {
     const st = { ...STAGE, rollout: { ...STAGE.rollout, reason: 'secrets need --secret-key-file' } };
     expect(overview(st)).toContain('<div class="rollout-reason">secrets need --secret-key-file</div>');
   });
@@ -95,7 +95,7 @@ describe('EnvOverview', () => {
     expect(count(out, 'class="envobj"')).toBe(6);
   });
 
-  it("lists an image service's instances: replica, phase, state, node, address, release, restarts, last exit, detail", () => {
+  it("lists an image service's instances: replica, phase, state, node, address, deployment, restarts, last exit, detail", () => {
     const out = overview(STAGE);
     const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />);
     expect(all).toContain('expense-service image · 1 / 2 ready');
@@ -109,9 +109,9 @@ describe('EnvOverview', () => {
     expect(out).toContain('>exited</span>');
     expect(out).toContain('<td class="mono small">fd6b:a01:3::15</td>');
     expect(out).toContain('href="/nodes/n2"');
-    // Replica 1 of release 6 still serves: muted as an older release's.
-    expect(out).toContain('class="col-num mono muted" title="an older release&#x27;s instance">6</td>');
-    expect(count(out, 'title="an older release&#x27;s instance"')).toBe(1);
+    // Replica 1 of deployment 6 still serves: muted as an older deployment's.
+    expect(out).toContain('class="col-num mono muted" title="an older deployment&#x27;s instance">6</td>');
+    expect(count(out, 'title="an older deployment&#x27;s instance"')).toBe(1);
     // Each instance links its replica's logs.
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service/1"');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service"');
@@ -132,11 +132,11 @@ describe('EnvOverview', () => {
   it("shows a job's last run", () => {
     const out = overview(STAGE);
     const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />);
-    expect(all).toContain('migrate release 7, attempt 1: succeeded (exit 0)');
-    expect(all).toContain('release 7 attempt 1 phase succeeded exit 0 finished');
+    expect(all).toContain('migrate deployment 7, attempt 1: succeeded (exit 0)');
+    expect(all).toContain('deployment 7 attempt 1 phase succeeded exit 0 finished');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/job/migrate"');
     const failed = { ...STAGE, objects: [{ kind: 'job', name: 'migrate', lastRun: {
-      release: 7, attempt: 2, phase: 'failed', exitCode: null, finishedAt: '2026-10-18T14:03:37Z',
+      deployment: 7, attempt: 2, phase: 'failed', exitCode: null, finishedAt: '2026-10-18T14:03:37Z',
       detail: 'the node did not report an exit status' } }] };
     expect(overview(failed)).toContain('<div class="envobj-detail">the node did not report an exit status</div>');
     const never = { ...STAGE, objects: [{ kind: 'job', name: 'seed', lastRun: null }] };
@@ -165,10 +165,10 @@ describe('EnvOverview', () => {
       .toContain('Served at /api/v1/environments/expensa-login-3f9a/http/… to a route token');
   });
 
-  it('a new environment: no release, no objects, no routes', () => {
+  it('a new environment: no deployment, no objects, no routes', () => {
     const all = text(<EnvOverview st={response('POST_environments.201')} tenant={T} navigate={nav} />);
-    expect(all).toContain('No release yet: nothing runs.');
-    expect(all).toContain('No objects: the environment has no release yet.');
+    expect(all).toContain('No deployment yet: nothing runs.');
+    expect(all).toContain('No objects: the environment has no deployment yet.');
     expect(all).toContain('No routes.');
     expect(all).toContain('open incidents none');
   });
@@ -179,14 +179,14 @@ describe('EnvOverview', () => {
   });
 });
 
-describe('ReleaseTable', () => {
-  const releases = response('GET_environments_env_releases.200').releases;
-  const table = (list, latest = 7) => html(<ReleaseTable releases={list} latest={latest} tenant={T} env="expensa-stage" navigate={nav} />);
+describe('DeploymentTable', () => {
+  const deployments = response('GET_environments_env_deployments.200').deployments;
+  const table = (list, latest = 7) => html(<DeploymentTable deployments={list} latest={latest} tenant={T} env="expensa-stage" navigate={nav} />);
 
   it('lists number, state, origin, author, message, annotations and tags, the latest marked', () => {
-    const out = table(releases);
+    const out = table(deployments);
     expect(count(out, 'class="clickable"')).toBe(3);
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/releases/7"');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/7"');
     expect(count(out, '<span class="badge acc">latest</span>')).toBe(1);
     expect(out).toContain('<span class="badge" title="tag">v1.3</span>');
     expect(out).toContain('>replaced</span>');
@@ -194,38 +194,38 @@ describe('ReleaseTable', () => {
     expect(out).toContain('stage follows main at revision 12');
     expect(out).toContain('>fecode.dev/kind=<b>stage</b></span>');
     expect(out).toContain('title="fecode.dev/revision=0193c111-2222-7333-8444-000000000012"');
-    expect(text(<ReleaseTable releases={releases} latest={7} tenant={T} env="expensa-stage" navigate={nav} />))
+    expect(text(<DeploymentTable deployments={deployments} latest={7} tenant={T} env="expensa-stage" navigate={nav} />))
       .toContain('apply');
   });
 
-  it("shows a failed release's reason and a revert's origin", () => {
-    const failed = { ...releases[0], number: 8, state: 'failed', origin: 'revert', originRef: '6',
+  it("shows a failed deployment's reason and a revert's origin", () => {
+    const failed = { ...deployments[0], number: 8, state: 'failed', origin: 'revert', originRef: '6',
       reason: 'service expense-service did not roll out within 10m0s' };
-    const out = table([failed, ...releases], 8);
+    const out = table([failed, ...deployments], 8);
     expect(out).toContain('<div class="bad">service expense-service did not roll out within 10m0s</div>');
     expect(out).toContain('revert to 6');
   });
 
   it('says when there are none', () => {
-    expect(table([])).toContain('No releases yet.');
+    expect(table([])).toContain('No deployments yet.');
   });
 });
 
-describe('ReleaseView', () => {
-  const rel = response('GET_environments_env_releases_n.200');
+describe('DeploymentView', () => {
+  const rel = response('GET_environments_env_deployments_n.200');
 
-  it('shows the release with its annotations', () => {
-    const all = text(<ReleaseView rel={rel} />);
-    expect(all).toContain('release 7 deploying');
-    expect(all).toContain('origin apply base release 6');
+  it('shows the deployment with its annotations', () => {
+    const all = text(<DeploymentView rel={rel} />);
+    expect(all).toContain('deployment 7 deploying');
+    expect(all).toContain('origin apply base deployment 6');
     expect(all).toContain('message stage follows main at revision 12');
     expect(all).toContain('fecode.dev/revision 0193c111-2222-7333-8444-000000000012');
     expect(all).toContain('finished —');
   });
 
-  it('shows its diff against the release before, with effects and fields from → to', () => {
-    const out = html(<ReleaseView rel={rel} />);
-    expect(text(<ReleaseView rel={rel} />)).toContain('changes against release 6');
+  it('shows its diff against the deployment before, with effects and fields from → to', () => {
+    const out = html(<DeploymentView rel={rel} />);
+    expect(text(<DeploymentView rel={rel} />)).toContain('changes against deployment 6');
     expect(count(out, 'class="diff-entry"')).toBe(3);
     expect(out).toContain('<span class="badge acc">update</span><span class="mono">service/expense-service</span>');
     expect(out).toContain('<span class="small muted">replaces 2 pods</span>');
@@ -236,18 +236,18 @@ describe('ReleaseView', () => {
   });
 
   it('shows its normalised spec', () => {
-    const out = html(<ReleaseView rel={rel} />);
+    const out = html(<DeploymentView rel={rel} />);
     expect(out).toContain('<details class="specbox">');
     expect(out).toContain('&quot;imageAsWritten&quot;: &quot;ghcr.io/acme/expense:1.4&quot;');
     expect(out).toContain('&quot;internal-token&quot;: {\n      &quot;version&quot;: 3\n    }');
   });
 
-  it('the first release changes against nothing; a failed one shows its reason', () => {
+  it('the first deployment changes against nothing; a failed one shows its reason', () => {
     const first = { ...rel, number: 1, base: 0, diff: [], state: 'failed', reason: 'job migrate failed its last attempt (2 of 2) with code 3' };
-    const out = html(<ReleaseView rel={first} />);
-    expect(text(<ReleaseView rel={first} />)).toContain('changes (the first release) No changes.');
+    const out = html(<DeploymentView rel={first} />);
+    expect(text(<DeploymentView rel={first} />)).toContain('changes (the first deployment) No changes.');
     expect(out).toContain('<div class="error">job migrate failed its last attempt (2 of 2) with code 3</div>');
-    expect(text(<ReleaseView rel={first} />)).toContain('base none');
+    expect(text(<DeploymentView rel={first} />)).toContain('base none');
   });
 });
 
@@ -278,7 +278,7 @@ describe('DiffView', () => {
 describe('IncidentTable', () => {
   const incidents = response('GET_environments_env_incidents.200').incidents;
 
-  it('lists condition, object, release, summary, opened and closed; a closed one dimmed', () => {
+  it('lists condition, object, deployment, summary, opened and closed; a closed one dimmed', () => {
     const out = html(<IncidentTable incidents={incidents} tenant={T} env="expensa-stage" navigate={nav} />);
     expect(out).toContain('class="clickable"');
     expect(out).toContain('class="clickable dim"');
@@ -286,7 +286,7 @@ describe('IncidentTable', () => {
     expect(out).toContain('<td class="nowrap">crash loop</td>');
     expect(out).toContain('<td class="nowrap">job failed</td>');
     expect(out).toContain('<td class="mono small nowrap">service/expense-service</td>');
-    expect(out).toContain('expense-service (release 7) exited 3 times within 10 minutes, last with code 1');
+    expect(out).toContain('expense-service (deployment 7) exited 3 times within 10 minutes, last with code 1');
     expect(out).toContain('<span class="bad small">open</span>');
     expect(out).toContain('class="sdot failed" title="open"');
     expect(out).toContain('class="sdot absent" title="closed"');
@@ -308,37 +308,37 @@ describe('IncidentView', () => {
     expect(words(inc)).toContain('incident 12 open crash loop');
     expect(words(inc)).toContain('still open');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service"');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/releases/7"');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/7"');
     expect(count(out, '<td class="col-num mono bad">1</td>')).toBe(3);
     expect(out).toContain('<pre class="logpre">2026/10/18 14:07:11 expense-service 1.4 starting on [::]:8080\n'
       + '2026/10/18 14:07:11 connect to nats: nats: authorization violation\n2026/10/18 14:07:12 exit status 1</pre>');
-    expect(out).not.toContain('the diff against the deployed release');
+    expect(out).not.toContain('the diff against the deployed deployment');
     expect(out).not.toContain('placement');
   });
 
-  it("shows a failed rollout's diff against the deployed release, and an exit without a status", () => {
+  it("shows a failed rollout's diff against the deployed deployment, and an exit without a status", () => {
     const failed = {
       ...inc, id: '13', condition: 'rollout_failed',
       summary: 'service expense-service: a new instance (replica 1) exited 3 times',
       evidence: { exits: [{ at: '2026-10-18T14:05:01Z', code: null }], logTail: [],
-        diff: response('GET_environments_env_releases_n.200').diff },
+        diff: response('GET_environments_env_deployments_n.200').diff },
     };
     const out = view(failed);
     expect(words(failed)).toContain('incident 13 open rollout failed');
     expect(out).toContain('<td class="col-num mono bad">no status</td>');
-    expect(words(failed)).toContain('the diff against the deployed release');
+    expect(words(failed)).toContain('the diff against the deployed deployment');
     expect(count(out, 'class="diff-entry"')).toBe(3);
     expect(out).not.toContain('the end of the log');
   });
 
-  it('shows what a release past its deadline waited for', () => {
+  it('shows what a deployment past its deadline waited for', () => {
     const late = response('GET_environments_env_incidents_id.200.rollout');
     const out = view(late);
     expect(words(late)).toContain('incident 13 closed rollout failed');
-    expect(words(late)).toContain('what the release waited for');
+    expect(words(late)).toContain('what the deployment waited for');
     expect(out).toContain('<pre class="logpre">addon postgres is not ready\nservice expense-service waits for the addons\n'
       + 'addon/postgres replica 0: provisioning step provision exited 1');
-    expect(words(late)).toContain('the diff against the deployed release');
+    expect(words(late)).toContain('the diff against the deployed deployment');
     expect(out).not.toContain('No evidence recorded.');
   });
 
@@ -429,8 +429,8 @@ describe('read-only', () => {
   it('calls only the reading routes', () => {
     const src = readFileSync(new URL('./Environments.jsx', import.meta.url), 'utf8');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
-    expect(used).toEqual(['getEnvironment', 'getIncident', 'getRelease', 'listEnvironments', 'listIncidents',
-      'listReleases', 'objectLogs']);
+    expect(used).toEqual(['getDeployment', 'getEnvironment', 'getIncident', 'listDeployments', 'listEnvironments',
+      'listIncidents', 'objectLogs']);
     expect(src).not.toMatch(/route-tokens|\/secrets|revert\(|deleteEnv/);
   });
 });

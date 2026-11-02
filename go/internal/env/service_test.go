@@ -32,7 +32,7 @@ func TestCreateListGetDelete(t *testing.T) {
 	id := uuid.New().String()
 	labels := map[string]string{"fecode.project": "p1", "fecode.class": "stage"}
 	st, created, err := h.svc.CreateEnv(ctx, tenantA, CreateEnvRequest{Name: "stage", ID: id, Labels: labels})
-	if err != nil || !created || st.ID != id || st.Name != "stage" || st.Release != 0 || st.Rollout != nil ||
+	if err != nil || !created || st.ID != id || st.Name != "stage" || st.Deployment != 0 || st.Rollout != nil ||
 		st.Labels["fecode.class"] != "stage" || st.CreatedAt == "" || st.Objects == nil || st.Routes == nil {
 		t.Fatalf("create: %+v %v %v", st, created, err)
 	}
@@ -153,20 +153,20 @@ func TestPlanApply(t *testing.T) {
 		t.Fatalf("plan %+v %v", p, err)
 	}
 
-	// Apply: release 1, waiting, the controller woken.
+	// Apply: deployment 1, waiting, the controller woken.
 	ch, unsubscribe := h.d.Subscribe(db.ChanLeader)
 	defer unsubscribe()
 	a := h.apply("stage", stageSpec, 0)
 	waitHint(t, ch, ctl.HintReconcile)
-	if a.Number != 1 || a.State != model.ReleaseWaiting || a.Origin != model.OriginApply || a.Base != 0 ||
+	if a.Number != 1 || a.State != model.DeploymentWaiting || a.Origin != model.OriginApply || a.Base != 0 ||
 		a.Unchanged || a.StatusCode() != http.StatusCreated || len(a.Diff) != 8 || a.Author != "tester" {
 		t.Fatalf("apply %+v", a)
 	}
 	e := h.env("stage")
-	if e.Release != 1 || e.Deployed != 0 {
+	if e.Deployment != 1 || e.Deployed != 0 {
 		t.Fatalf("env %+v", e)
 	}
-	stored, err := h.st.GetRelease(ctx, e.ID, 1)
+	stored, err := h.st.GetDeployment(ctx, e.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,18 +184,18 @@ func TestPlanApply(t *testing.T) {
 	for _, base := range []int{1, 0} {
 		a = h.apply("stage", stageSpec, base)
 		if !a.Unchanged || a.Number != 1 || a.StatusCode() != http.StatusOK || len(a.Diff) != 0 ||
-			!hasFinding(a.Findings, spec.SeverityInfo, "", "nothing changes: the spec equals release 1's") {
+			!hasFinding(a.Findings, spec.SeverityInfo, "", "nothing changes: the spec equals deployment 1's") {
 			t.Fatalf("unchanged %+v", a)
 		}
 	}
-	// A change on a stale base: 409 with the current release.
+	// A change on a stale base: 409 with the current deployment.
 	changed := strings.Replace(stageSpec, `"replicas": 2`, `"replicas": 3`, 1)
 	_, err = h.svc.Apply(ctx, tenantA, "stage", ApplyRequest{Spec: json.RawMessage(changed), Base: 0})
 	var bm *BaseMismatchError
 	if !errors.As(err, &bm) || bm.Current != 1 || bm.Base != 0 {
 		t.Fatalf("base mismatch: %v", err)
 	}
-	// The plan of a change against the current release and an older base.
+	// The plan of a change against the current deployment and an older base.
 	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed)})
 	if len(p.Diff) != 1 || p.Diff[0].Effect != spec.EffectInPlace || p.Diff[0].Fields[0].Path != "replicas" {
 		t.Fatalf("plan diff %+v", p.Diff)
@@ -206,19 +206,19 @@ func TestPlanApply(t *testing.T) {
 		t.Fatalf("plan on base 0 %+v", p)
 	}
 	_, err = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed), Base: &far})
-	wantStatus(t, err, http.StatusNotFound, "no such release")
+	wantStatus(t, err, http.StatusNotFound, "no such deployment")
 
-	// On the current base: release 2, the waiting 1 replaced.
+	// On the current base: deployment 2, the waiting 1 replaced.
 	a = h.apply("stage", changed, 1)
 	if a.Number != 2 || a.Base != 1 {
 		t.Fatalf("apply %+v", a)
 	}
-	if r1, _ := h.st.GetRelease(ctx, e.ID, 1); r1.State != model.ReleaseReplaced || r1.FinishedAt.IsZero() {
-		t.Fatalf("release 1 %+v", r1)
+	if r1, _ := h.st.GetDeployment(ctx, e.ID, 1); r1.State != model.DeploymentReplaced || r1.FinishedAt.IsZero() {
+		t.Fatalf("deployment 1 %+v", r1)
 	}
 
-	// A failed release is retried by the same spec.
-	h.exec("UPDATE env_releases SET state = 'failed', reason = 'rollout timed out' WHERE env_id = $1 AND number = 2", e.ID)
+	// A failed deployment is retried by the same spec.
+	h.exec("UPDATE env_deployments SET state = 'failed', reason = 'rollout timed out' WHERE env_id = $1 AND number = 2", e.ID)
 	a = h.apply("stage", changed, 2)
 	if a.Unchanged || a.Number != 3 || !hasFinding(a.Findings, spec.SeverityInfo, "", "nothing changes") {
 		t.Fatalf("retry %+v", a)
@@ -258,7 +258,7 @@ func TestPlanApply(t *testing.T) {
 	if len(p.Diff) != 1 || p.Diff[0].Effect != spec.EffectRecreates {
 		t.Fatalf("recreate %+v", p.Diff)
 	}
-	// A major version change against the current release is refused.
+	// A major version change against the current deployment is refused.
 	major := strings.Replace(changed, `"version": "17"`, `"version": "16"`, 1)
 	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(major)})
 	if p.Valid || !hasFinding(p.Findings, spec.SeverityError, "addons.pg.version", "") {
@@ -329,7 +329,7 @@ func TestAttachedValidation(t *testing.T) {
 		"port 5173 is used in sandbox "+sb.String()+" by service vite of environment one") {
 		t.Fatalf("clash %+v %v", p, err)
 	}
-	// The environment's own release does not clash with itself.
+	// The environment's own deployment does not clash with itself.
 	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(attached(sb, "5173"))}); !p.Valid {
 		t.Fatalf("own %+v", p)
 	}
@@ -388,7 +388,7 @@ func TestAttachedValidation(t *testing.T) {
 	}
 }
 
-func TestReleasesAndRevert(t *testing.T) {
+func TestDeploymentsAndRevert(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
@@ -400,33 +400,33 @@ func TestReleasesAndRevert(t *testing.T) {
 	}
 	changed := strings.Replace(stageSpec, "ghcr.io/acme/web:1", "ghcr.io/acme/web:2", 1)
 	h.apply("stage", changed, 1)
-	if _, err := h.svc.PutTag(ctx, tenantA, "stage", "v1", PutTagRequest{Release: 1, Author: "a2"}); err != nil {
+	if _, err := h.svc.PutTag(ctx, tenantA, "stage", "v1", PutTagRequest{Deployment: 1, Author: "a2"}); err != nil {
 		t.Fatal(err)
 	}
 
-	list, err := h.svc.Releases(ctx, tenantA, "stage", 0)
-	if err != nil || len(list.Releases) != 2 || list.Releases[0].Number != 2 || list.Releases[1].Tags[0] != "v1" ||
-		list.Releases[1].Message != "first" || list.Releases[1].Annotations["fecode.dev/revision"] != "r1" ||
-		list.Releases[0].Tags == nil {
-		t.Fatalf("releases %+v %v", list, err)
+	list, err := h.svc.Deployments(ctx, tenantA, "stage", 0)
+	if err != nil || len(list.Deployments) != 2 || list.Deployments[0].Number != 2 || list.Deployments[1].Tags[0] != "v1" ||
+		list.Deployments[1].Message != "first" || list.Deployments[1].Annotations["fecode.dev/revision"] != "r1" ||
+		list.Deployments[0].Tags == nil {
+		t.Fatalf("deployments %+v %v", list, err)
 	}
-	if list, _ := h.svc.Releases(ctx, tenantA, "stage", 1); len(list.Releases) != 1 {
+	if list, _ := h.svc.Deployments(ctx, tenantA, "stage", 1); len(list.Deployments) != 1 {
 		t.Fatalf("limit %+v", list)
 	}
-	d, err := h.svc.Release(ctx, tenantA, "stage", 2)
+	d, err := h.svc.Deployment(ctx, tenantA, "stage", 2)
 	if err != nil || d.Number != 2 || len(d.Diff) != 1 || d.Diff[0].Name != "web" ||
 		d.Diff[0].Fields[0].To != "ghcr.io/acme/web:2 ("+strings.SplitN(digestOf("ghcr.io/acme/web:2"), "@", 2)[1]+")" {
-		t.Fatalf("release 2 %+v %v", d, err)
+		t.Fatalf("deployment 2 %+v %v", d, err)
 	}
 	var sp spec.Spec
 	if err := json.Unmarshal(d.Spec, &sp); err != nil || sp.Services["web"].ImageAsWritten != "ghcr.io/acme/web:2" {
 		t.Fatalf("spec %s %v", d.Spec, err)
 	}
-	if d, _ := h.svc.Release(ctx, tenantA, "stage", 1); len(d.Diff) != 8 {
-		t.Fatalf("release 1 diff %+v", d.Diff)
+	if d, _ := h.svc.Deployment(ctx, tenantA, "stage", 1); len(d.Diff) != 8 {
+		t.Fatalf("deployment 1 diff %+v", d.Diff)
 	}
-	_, err = h.svc.Release(ctx, tenantA, "stage", 3)
-	wantStatus(t, err, http.StatusNotFound, "no such release")
+	_, err = h.svc.Deployment(ctx, tenantA, "stage", 3)
+	wantStatus(t, err, http.StatusNotFound, "no such deployment")
 
 	// Revert to 1: its spec, its annotations plus ferun.revertOf.
 	a, err := h.svc.Revert(ctx, tenantA, "stage", 1, RevertRequest{Base: 2, Author: "a3", Message: "back"})
@@ -438,24 +438,24 @@ func TestReleasesAndRevert(t *testing.T) {
 		t.Fatalf("revert to the current %+v %v", a, err)
 	}
 	// A clone of the revert copies its annotations without ferun.revertOf,
-	// whose number names one of the source's releases.
+	// whose number names one of the source's deployments.
 	if _, err := h.svc.Clone(ctx, tenantA, "stage", CloneRequest{Name: "copy",
 		Secrets: map[string]CloneSecret{"token": {Copy: true}}}); err != nil {
 		t.Fatal(describe(err))
 	}
-	if r, err := h.svc.Release(ctx, tenantA, "copy", 1); err != nil || r.Annotations["fecode.dev/revision"] != "r1" ||
+	if r, err := h.svc.Deployment(ctx, tenantA, "copy", 1); err != nil || r.Annotations["fecode.dev/revision"] != "r1" ||
 		len(r.Annotations) != 1 {
-		t.Fatalf("the clone's release's annotations %v, %v", r.Annotations, err)
+		t.Fatalf("the clone's deployment's annotations %v, %v", r.Annotations, err)
 	}
 	_, err = h.svc.Revert(ctx, tenantA, "stage", 1, RevertRequest{Base: 2})
 	var bm *BaseMismatchError
 	if errors.As(err, &bm) {
-		// Release 1 equals the current 3: unchanged answers before the
+		// Deployment 1 equals the current 3: unchanged answers before the
 		// base.
 		t.Fatalf("revert %v", err)
 	}
 	_, err = h.svc.Revert(ctx, tenantA, "stage", 9, RevertRequest{Base: 3})
-	wantStatus(t, err, http.StatusNotFound, "no such release")
+	wantStatus(t, err, http.StatusNotFound, "no such deployment")
 
 	// A pinned version that was deleted refuses the revert.
 	noSecret := strings.Replace(stageSpec, `"TOKEN": {"secret": "token"},`, ``, 1)
@@ -487,7 +487,7 @@ func TestObjects(t *testing.T) {
 		dry.StatusCode() != http.StatusOK || dry.Plan.Base != 1 {
 		t.Fatalf("dry run %+v %v", dry, err)
 	}
-	if e := h.env("stage"); e.Release != 1 {
+	if e := h.env("stage"); e.Deployment != 1 {
 		t.Fatalf("a dry run applied: %+v", e)
 	}
 	put, err := h.svc.PutObject(ctx, tenantA, "stage", spec.KindService, "web", PutObjectRequest{Object: web, Base: 1,
@@ -522,7 +522,7 @@ func TestObjects(t *testing.T) {
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "jobs.seed.schedule", "unknown field") {
 		t.Fatalf("unknown field %v", describe(err))
 	}
-	// An object into an environment without a release.
+	// An object into an environment without a deployment.
 	h.create("empty", nil)
 	put, err = h.svc.PutObject(ctx, tenantA, "empty", spec.KindAddon, "q", PutObjectRequest{
 		Object: json.RawMessage(`{"type": "nats", "version": "2"}`)})
@@ -538,25 +538,25 @@ func TestTags(t *testing.T) {
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", stageSpec, 0)
-	tag, err := h.svc.PutTag(ctx, tenantA, "stage", "v1.4", PutTagRequest{Release: 1, Author: "a"})
-	if err != nil || tag.Tag != "v1.4" || tag.Release != 1 || tag.MovedBy != "a" || tag.MovedAt == "" {
+	tag, err := h.svc.PutTag(ctx, tenantA, "stage", "v1.4", PutTagRequest{Deployment: 1, Author: "a"})
+	if err != nil || tag.Tag != "v1.4" || tag.Deployment != 1 || tag.MovedBy != "a" || tag.MovedAt == "" {
 		t.Fatalf("put %+v %v", tag, err)
 	}
-	if tag, _ := h.svc.PutTag(ctx, tenantA, "stage", "stable", PutTagRequest{Release: 1}); tag.MovedBy != tenantA {
+	if tag, _ := h.svc.PutTag(ctx, tenantA, "stage", "stable", PutTagRequest{Deployment: 1}); tag.MovedBy != tenantA {
 		t.Fatalf("moved by %+v", tag)
 	}
 	list, err := h.svc.Tags(ctx, tenantA, "stage")
 	if err != nil || len(list.Tags) != 2 || list.Tags[0].Tag != "stable" {
 		t.Fatalf("tags %+v %v", list, err)
 	}
-	if got, err := h.svc.Tag(ctx, tenantA, "stage", "v1.4"); err != nil || got.Release != 1 {
+	if got, err := h.svc.Tag(ctx, tenantA, "stage", "v1.4"); err != nil || got.Deployment != 1 {
 		t.Fatalf("tag %+v %v", got, err)
 	}
 	_, err = h.svc.Tag(ctx, tenantA, "stage", "nope")
 	wantStatus(t, err, http.StatusNotFound, "no such tag")
-	_, err = h.svc.PutTag(ctx, tenantA, "stage", "v2", PutTagRequest{Release: 7})
-	wantStatus(t, err, http.StatusNotFound, "no such release")
-	_, err = h.svc.PutTag(ctx, tenantA, "stage", ".bad", PutTagRequest{Release: 1})
+	_, err = h.svc.PutTag(ctx, tenantA, "stage", "v2", PutTagRequest{Deployment: 7})
+	wantStatus(t, err, http.StatusNotFound, "no such deployment")
+	_, err = h.svc.PutTag(ctx, tenantA, "stage", ".bad", PutTagRequest{Deployment: 1})
 	wantStatus(t, err, http.StatusBadRequest, "must match")
 	if err := h.svc.DeleteTag(ctx, tenantA, "stage", "v1.4"); err != nil {
 		t.Fatal(err)
@@ -623,10 +623,10 @@ func TestSecrets(t *testing.T) {
 	_, err = h.svc.PutSecret(ctx, tenantA, "stage", "big", PutSecretRequest{Value: strings.Repeat("x", 70000)})
 	wantStatus(t, err, http.StatusBadRequest, "at most")
 
-	// Pinned by the latest release: refused; then deleted.
+	// Pinned by the latest deployment: refused; then deleted.
 	h.apply("stage", stageSpec, 0)
 	err = h.svc.DeleteSecret(ctx, tenantA, "stage", "token")
-	wantStatus(t, err, http.StatusConflict, "release 1 pins secret token: apply a release without it first")
+	wantStatus(t, err, http.StatusConflict, "deployment 1 pins secret token: apply a deployment without it first")
 	if err := h.svc.DeleteSecret(ctx, tenantA, "stage", "other"); err != nil {
 		t.Fatal(err)
 	}
@@ -731,7 +731,7 @@ func TestRouteTokens(t *testing.T) {
 
 // An environment's ID is free again once env-delete removed it; the next
 // environment of that ID, another tenant's here, never sees the old one's
-// releases through the parsed-spec cache.
+// deployments through the parsed-spec cache.
 func TestReusedEnvID(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
@@ -742,17 +742,17 @@ func TestReusedEnvID(t *testing.T) {
 	}
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", stageSpec, 0)
-	// Read release 1 every way the service caches it.
+	// Read deployment 1 every way the service caches it.
 	if st, err := h.svc.GetEnv(ctx, tenantA, "stage"); err != nil || len(st.Objects) != 5 {
 		t.Fatalf("status %+v %v", st, err)
 	}
-	if _, err := h.svc.Release(ctx, tenantA, "stage", 1); err != nil {
+	if _, err := h.svc.Deployment(ctx, tenantA, "stage", 1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(stageSpec)}); err != nil {
 		t.Fatal(err)
 	}
-	// env-delete removes the row, its releases with it.
+	// env-delete removes the row, its deployments with it.
 	h.exec("DELETE FROM environments WHERE id = $1", id)
 
 	if _, _, err := h.svc.CreateEnv(ctx, tenantB, CreateEnvRequest{Name: "solo", ID: id.String()}); err != nil {
@@ -790,8 +790,8 @@ func TestReusedEnvID(t *testing.T) {
 	if !removed {
 		t.Fatalf("diff %+v", p.Diff)
 	}
-	if d, err := h.svc.Release(ctx, tenantB, "solo", 1); err != nil || len(d.Diff) != 2 {
-		t.Fatalf("release 1 %+v %v", d, err)
+	if d, err := h.svc.Deployment(ctx, tenantB, "solo", 1); err != nil || len(d.Diff) != 2 {
+		t.Fatalf("deployment 1 %+v %v", d, err)
 	}
 }
 
@@ -856,7 +856,7 @@ func TestAddonAgainstVolume(t *testing.T) {
 	if err != nil || !p.Valid || hasFinding(p.Findings, spec.SeverityWarning, "addons.db.type", "") {
 		t.Fatalf("back to postgres 16 %+v %v", p, err)
 	}
-	// A revert to release 1 is checked the same way.
+	// A revert to deployment 1 is checked the same way.
 	if _, err := h.svc.Revert(ctx, tenantA, "stage", 1, RevertRequest{Base: 4}); err != nil {
 		t.Fatalf("revert to postgres 16: %v", describe(err))
 	}
@@ -878,7 +878,7 @@ func TestAddonAgainstVolume(t *testing.T) {
 	}
 
 	// The version that ran ready on the volume decides a downgrade, not
-	// the latest release: an upgrade to 8 that never ran may go back.
+	// the latest deployment: an upgrade to 8 that never ran may go back.
 	h.exec("DELETE FROM env_volumes WHERE env_id = $1", e.ID)
 	h.apply("stage", addon("valkey", "7.2"), 7)
 	vk72 := volume("valkey", "7.2")
@@ -901,7 +901,7 @@ func TestAddonAgainstVolume(t *testing.T) {
 }
 
 // A secret deleted between an apply's plan and its transaction is never
-// pinned by the new release: the apply plans again and refuses it.
+// pinned by the new deployment: the apply plans again and refuses it.
 func TestApplyRacesDeleteSecret(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
@@ -923,8 +923,8 @@ func TestApplyRacesDeleteSecret(t *testing.T) {
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "services.web.env.X", "secret x was deleted") {
 		t.Fatalf("apply: %v", describe(err))
 	}
-	if e := h.env("stage"); e.Release != 1 {
-		t.Fatalf("release %d was made", e.Release)
+	if e := h.env("stage"); e.Deployment != 1 {
+		t.Fatalf("deployment %d was made", e.Deployment)
 	}
 }
 
@@ -955,7 +955,7 @@ func TestControllerRefusals(t *testing.T) {
 		t.Fatalf("code %q", code(err))
 	}
 
-	// A replica the release has but that has no instance yet (it waits
+	// A replica the deployment has but that has no instance yet (it waits
 	// for its addons) has no log; one the object does not have is no
 	// object, and the answer says which.
 	for _, c := range []struct {
@@ -1234,7 +1234,7 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("public without a zone: %+v %v", st, err)
 	}
 	if p, err := h2.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(stageSpec)}); err != nil ||
-		len(p.Findings) != 1 || p.Findings[0].Problem != "nothing changes: the spec equals release 1's" {
+		len(p.Findings) != 1 || p.Findings[0].Problem != "nothing changes: the spec equals deployment 1's" {
 		t.Fatalf("plan without a zone %+v %v", p, err)
 	}
 	a, err = h2.svc.SetPublic(ctx, tenantA, "stage", false, "")

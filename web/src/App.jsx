@@ -7,7 +7,7 @@ import {
 } from './api.js';
 import { Icon } from './Icon.jsx';
 import { Avatar, ThemeToggle, usePoll } from './components.jsx';
-import { TENANT_VIEWS, envPath, parsePath } from './routes.js';
+import { TENANT_VIEWS, canonicalPath, envPath, parsePath } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
@@ -25,10 +25,12 @@ import { Instances } from './views/Instances.jsx';
 // signed in (/auth/me) and how one signs in (/auth/config); signed out,
 // or once an admin call is answered 401, it shows the sign-in screen.
 
+// useRoute follows the location; a path under an earlier name is
+// replaced by its canonical one (canonicalPath).
 function useRoute() {
-  const [path, setPath] = useState(location.pathname);
+  const [path, setPath] = useState(() => canonical());
   useEffect(() => {
-    const onPop = () => setPath(location.pathname);
+    const onPop = () => setPath(canonical());
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -40,6 +42,14 @@ function useRoute() {
     }
   }, []);
   return [parsePath(path), navigate];
+}
+
+// canonical is the location's path, replaced in the history by its
+// canonical one when it differs.
+function canonical() {
+  const canon = canonicalPath(location.pathname);
+  if (canon !== location.pathname) history.replaceState(null, '', canon + location.search + location.hash);
+  return canon;
 }
 
 // displayName is how the header names the signed-in person.

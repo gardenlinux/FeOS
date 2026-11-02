@@ -34,7 +34,7 @@ func readFile(t *testing.T, name string) []byte {
 // finding, into what a decoder reads.
 func TestParseExpensa(t *testing.T) {
 	for _, raw := range [][]byte{[]byte(expensa), readFile(t, "testdata/expensa-stage-request.json"),
-		readFile(t, "testdata/expensa-stage-release7.json")} {
+		readFile(t, "testdata/expensa-stage-deployment7.json")} {
 		s, fs := Parse(raw)
 		if len(fs) > 0 {
 			t.Fatalf("findings %+v", fs)

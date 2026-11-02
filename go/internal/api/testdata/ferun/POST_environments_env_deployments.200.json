@@ -1,8 +1,8 @@
 {
   "method": "POST",
-  "path": "/api/v1/environments/expensa-stage/releases",
+  "path": "/api/v1/environments/expensa-stage/deployments",
   "query": {},
-  "status": 409,
+  "status": 200,
   "request": {
     "spec": {
       "services": {
@@ -154,7 +154,7 @@
         }
       }
     },
-    "base": 5,
+    "base": 7,
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
     "message": "stage follows main at revision 12",
     "annotations": {
@@ -164,8 +164,33 @@
     }
   },
   "response": {
-    "error": "base 5 is not the current release 7: plan again on release 7",
-    "code": "base_mismatch",
-    "current": 7
-  }
+    "number": 7,
+    "state": "deploying",
+    "origin": "apply",
+    "originRef": "",
+    "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
+    "message": "stage follows main at revision 12",
+    "annotations": {
+      "fecode.dev/kind": "stage",
+      "fecode.dev/revision": "0193c111-2222-7333-8444-000000000012",
+      "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
+    },
+    "base": 6,
+    "reason": "",
+    "createdAt": "2026-10-18T14:02:10Z",
+    "startedAt": "2026-10-18T14:02:11Z",
+    "finishedAt": "",
+    "tags": [],
+    "unchanged": true,
+    "diff": [],
+    "findings": [
+      {
+        "severity": "info",
+        "path": "",
+        "problem": "nothing changes: the spec equals deployment 7's",
+        "remedy": ""
+      }
+    ]
+  },
+  "note": "the normalised spec equals the current deployment's (which did not fail): that deployment, unchanged"
 }

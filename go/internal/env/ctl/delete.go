@@ -188,7 +188,7 @@ const deleteBatch = 16
 // sleeping sandbox woken for it, before their rows and names go), its
 // volumes (marked deleting) and its group and name table on every
 // connected node; its row goes once no instance row, volume, group, name
-// table or attached service still to clean is left (its releases, secrets, runs, incidents
+// table or attached service still to clean is left (its deployments, secrets, runs, incidents
 // and route tokens cascade). An environment whose pass could not finish
 // (a volume on a node that is down, a sandbox that cannot be woken yet)
 // is touched, so that it goes to the end of the queue: the oldest-touched

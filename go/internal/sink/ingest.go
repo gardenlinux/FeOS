@@ -49,15 +49,19 @@ const (
 // The resource and record attributes the sink reads (sink.md, The OTLP
 // shape).
 const (
-	attrPod           = "ferun.pod"
-	attrContainer     = "ferun.container"
-	attrLogID         = "ferun.log_id"
-	attrTenant        = "ferun.tenant"
-	attrInstance      = "ferun.instance"
-	attrEnvironment   = "ferun.environment"
-	attrKind          = "ferun.kind"
-	attrObject        = "ferun.object"
-	attrReplica       = "ferun.replica"
+	attrPod         = "ferun.pod"
+	attrContainer   = "ferun.container"
+	attrLogID       = "ferun.log_id"
+	attrTenant      = "ferun.tenant"
+	attrInstance    = "ferun.instance"
+	attrEnvironment = "ferun.environment"
+	attrKind        = "ferun.kind"
+	attrObject      = "ferun.object"
+	attrReplica     = "ferun.replica"
+	attrDeployment  = "ferun.deployment"
+	// attrRelease is ferun.deployment's earlier word (ADR 0018, "The
+	// deployments' word"): a pod keeps the labels of its insert for its
+	// life, so the sink reads it where ferun.deployment is not set.
 	attrRelease       = "ferun.release"
 	attrJob           = "ferun.job"
 	attrAttempt       = "ferun.attempt"
@@ -267,6 +271,15 @@ func parseExport(req *otlplogsv1.ExportLogsServiceRequest, p ingestPeer, now tim
 	return out, nil
 }
 
+// deploymentAttr is the attribute that holds a stream's deployment:
+// ferun.deployment, else its earlier word.
+func deploymentAttr(attrs map[string]string) string {
+	if _, ok := attrs[attrDeployment]; ok {
+		return attrDeployment
+	}
+	return attrRelease
+}
+
 func labelsOf(attrs map[string]string, node, source string) Labels {
 	num := func(k string) int {
 		n, _ := strconv.Atoi(attrs[k])
@@ -275,7 +288,7 @@ func labelsOf(attrs map[string]string, node, source string) Labels {
 	return Labels{
 		Tenant: attrs[attrTenant], Node: node, Instance: attrs[attrInstance],
 		Environment: attrs[attrEnvironment], Kind: attrs[attrKind], Object: attrs[attrObject], Job: attrs[attrJob],
-		Replica: num(attrReplica), Release: num(attrRelease), Attempt: num(attrAttempt),
+		Replica: num(attrReplica), Deployment: num(deploymentAttr(attrs)), Attempt: num(attrAttempt),
 		RetentionDays: num(attrRetentionDays), Source: source, Attrs: attrs,
 	}
 }

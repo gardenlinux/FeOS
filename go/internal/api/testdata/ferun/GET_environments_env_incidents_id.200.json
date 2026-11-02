@@ -7,11 +7,12 @@
   "response": {
     "id": "12",
     "object": "service/expense-service",
+    "deployment": 7,
     "release": 7,
     "condition": "crash_loop",
     "openedAt": "2026-10-18T14:07:15Z",
     "closedAt": "",
-    "summary": "expense-service (release 7) exited 3 times within 10 minutes, last with code 1",
+    "summary": "expense-service (deployment 7) exited 3 times within 10 minutes, last with code 1",
     "evidence": {
       "exits": [
         {

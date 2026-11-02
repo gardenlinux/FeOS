@@ -1,12 +1,12 @@
 {
   "method": "POST",
-  "path": "/api/v1/environments/expensa-stage/releases/6/revert",
+  "path": "/api/v1/environments/expensa-stage/deployments/6/revert",
   "query": {},
   "status": 201,
   "request": {
     "base": 7,
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000002",
-    "message": "revert to release 6: expense-service 1.4 crash-loops"
+    "message": "revert to deployment 6: expense-service 1.4 crash-loops"
   },
   "response": {
     "number": 8,
@@ -14,7 +14,7 @@
     "origin": "revert",
     "originRef": "6",
     "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000002",
-    "message": "revert to release 6: expense-service 1.4 crash-loops",
+    "message": "revert to deployment 6: expense-service 1.4 crash-loops",
     "annotations": {
       "fecode.dev/kind": "stage",
       "fecode.dev/revision": "0193c111-2222-7333-8444-000000000011",

@@ -142,14 +142,14 @@ func collectDomains(rows pgx.Rows, err error) ([]Domain, error) {
 
 // DomainView is a domain with what its state is derived from beyond its
 // own row: its environment's publicity, deletion, name and latest
-// release, its certificate and orders, and the database's now() of the
+// deployment, its certificate and orders, and the database's now() of the
 // read.
 type DomainView struct {
 	Domain
 	// The bound environment; zero while unbound.
 	EnvName                string
 	EnvPublic, EnvDeleting bool
-	EnvRelease             int
+	EnvDeployment          int
 	Issuance               DomainIssuance
 	Now                    time.Time
 }
@@ -176,7 +176,7 @@ const domainViewFrom = ` FROM domains d
 	LEFT JOIN domain_certs c ON c.domain_id = d.id`
 
 var domainViewCols = domainColumns("d") + `, coalesce(e.name, ''), coalesce(e.public, false), coalesce(e.deleting, false),
-	coalesce(e.release, 0), ` + issuanceCols + `, now()`
+	coalesce(e.deployment, 0), ` + issuanceCols + `, now()`
 
 // issuanceCols are a DomainIssuance's columns of domains d and
 // domain_certs c.
@@ -200,7 +200,7 @@ func scanDomainView(row pgx.Row) (DomainView, error) {
 	var v DomainView
 	var sc domainScan
 	var isc issuanceScan
-	targets := append(v.Domain.targets(&sc), &v.EnvName, &v.EnvPublic, &v.EnvDeleting, &v.EnvRelease)
+	targets := append(v.Domain.targets(&sc), &v.EnvName, &v.EnvPublic, &v.EnvDeleting, &v.EnvDeployment)
 	targets = append(targets, v.Issuance.targets(&isc)...)
 	if err := row.Scan(append(targets, &v.Now)...); err != nil {
 		return DomainView{}, err
@@ -428,7 +428,7 @@ func (s *Store) DeleteDomain(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 // OpenIncidentOf returns the open incident of condition of the
-// environment's object, of any release, and whether there is one.
+// environment's object, of any deployment, and whether there is one.
 func (s *Store) OpenIncidentOf(ctx context.Context, envID uuid.UUID, object, condition string) (EnvIncident, bool, error) {
 	i, err := scanIncident(s.q.QueryRow(ctx, "SELECT "+incidentCols+` FROM env_incidents
 		WHERE env_id = $1 AND object = $2 AND condition = $3 AND closed_at IS NULL ORDER BY id DESC LIMIT 1`,

@@ -32,7 +32,7 @@ func TestServiceNamesFollowReplicas(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(2, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	v1 := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 	want := addressesOf(v1)
 	eventually(t, 10*time.Second, "both replicas named", func() bool {
@@ -46,7 +46,7 @@ func TestServiceNamesFollowReplicas(t *testing.T) {
 
 	// A roll: the name ends at the new replicas.
 	r2 := h.apply(env.ID, serviceSpec(2, "2", ""))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 60*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
 	v2 := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 	want = addressesOf(v2)
 	eventually(t, 20*time.Second, "the new replicas named", func() bool {
@@ -59,7 +59,7 @@ func TestServiceNamesFollowReplicas(t *testing.T) {
 }
 
 // A node whose feosd predates the NameService (UNIMPLEMENTED) runs the
-// environment's pods without names: the release is deployed, names_unserved
+// environment's pods without names: the deployment is deployed, names_unserved
 // opens for the objects with pods there, naming the node, and closes once
 // they have none there.
 func TestNamesUnserved(t *testing.T) {
@@ -67,7 +67,7 @@ func TestNamesUnserved(t *testing.T) {
 	n1 := h.addNode("n1", func(cfg *testnode.Config) { cfg.NoNameService = true })
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	rows := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
 	if _, ok := n1.Resolve(rows[0].Sandbox.ID, "web"); ok || len(n1.NameTables()) != 0 {
 		t.Fatalf("names on a node without the NameService: %v", n1.NameTables())
@@ -88,7 +88,7 @@ func TestNamesUnserved(t *testing.T) {
 
 	// Without the service, nothing of it runs there.
 	r2 := h.apply(env.ID, `{"services":{}}`)
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
 	eventually(t, 20*time.Second, "names_unserved closed", func() bool {
 		for _, i := range h.incidents(env.ID, true) {
 			if i.Condition == model.ConditionNamesUnserved {

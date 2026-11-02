@@ -15,14 +15,14 @@ import (
 
 // evidence is what an incident keeps of what the controller saw (§4.9):
 // the container's last exits, the end of its log, a failed rollout's diff
-// against the deployed release, why an instance could not be placed, what
-// a release past its deadline waited for.
+// against the deployed deployment, why an instance could not be placed, what
+// a deployment past its deadline waited for.
 type evidence struct {
 	Exits     []store.EnvExit  `json:"exits,omitempty"`
 	LogTail   []string         `json:"logTail,omitempty"`
 	Diff      []spec.DiffEntry `json:"diff,omitempty"`
 	Placement string           `json:"placement,omitempty"`
-	// Pending is what a release past its deadline still waited for, and
+	// Pending is what a deployment past its deadline still waited for, and
 	// the details of those objects' instances.
 	Pending []string `json:"pending,omitempty"`
 }
@@ -36,21 +36,21 @@ func (e evidence) json() json.RawMessage {
 }
 
 // openIncident opens an incident in tx unless one is open for its
-// object, release and condition; it reports whether it opened one.
-func openIncident(ctx context.Context, tx *store.Store, envID uuid.UUID, object string, release int, condition, summary string,
+// object, deployment and condition; it reports whether it opened one.
+func openIncident(ctx context.Context, tx *store.Store, envID uuid.UUID, object string, deployment int, condition, summary string,
 	ev evidence) (bool, error) {
-	_, opened, err := tx.OpenIncident(ctx, store.EnvIncident{EnvID: envID, Object: object, Release: release,
+	_, opened, err := tx.OpenIncident(ctx, store.EnvIncident{EnvID: envID, Object: object, Deployment: deployment,
 		Condition: condition, Summary: summary, Evidence: ev.json()})
 	return opened, err
 }
 
 // incident opens an incident in a fenced transaction of its own.
-func (c *Controller) incident(ctx context.Context, envID uuid.UUID, object string, release int, condition, summary string,
+func (c *Controller) incident(ctx context.Context, envID uuid.UUID, object string, deployment int, condition, summary string,
 	ev evidence) {
 	err := c.fenced(ctx, func(tx *store.Store) error {
-		opened, err := openIncident(ctx, tx, envID, object, release, condition, summary, ev)
+		opened, err := openIncident(ctx, tx, envID, object, deployment, condition, summary, ev)
 		if opened {
-			c.log.Info("incident opened", "environment", envID, "object", object, "release", release,
+			c.log.Info("incident opened", "environment", envID, "object", object, "deployment", deployment,
 				"condition", condition, "summary", summary)
 		}
 		return err

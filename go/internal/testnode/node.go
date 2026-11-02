@@ -117,7 +117,7 @@ type Config struct {
 	// does not have.
 	FakeExec bool
 	// ContainerExits make the main container of an environment's pods
-	// exit a while after each boot, by their ferun.object label: release
+	// exit a while after each boot, by their ferun.object label: deploy
 	// jobs that finish, a service that crash-loops (ferun-testnode
 	// --exit). The first matching rule counts.
 	ContainerExits []ExitRule

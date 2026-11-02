@@ -58,8 +58,8 @@ func TestRoutedPorts(t *testing.T) {
 	http := func(n int) Port { return Port{Name: "http", Port: n} }
 	admin := func(n int) Port { return Port{Name: "admin", Port: n} }
 
-	// The pod's own release declares http 8080, the routing release 9090:
-	// the own number wins. admin is only in the routing release: its
+	// The pod's own deployment declares http 8080, the routing deployment 9090:
+	// the own number wins. admin is only in the routing deployment: its
 	// number there is the fallback.
 	own := &Spec{Services: map[string]Service{"api": image(http(8080))}}
 	routing := &Spec{
@@ -85,7 +85,7 @@ func TestRoutedPorts(t *testing.T) {
 	if got := RoutedPorts("web", &Spec{Services: map[string]Service{"web": image(http(80))}}, routing); len(got) != 0 {
 		t.Fatalf("attached: %v", got)
 	}
-	// The union of the deployed and the desired release, sorted and
+	// The union of the deployed and the desired deployment, sorted and
 	// unique.
 	desired := &Spec{
 		Services: map[string]Service{"api": image(http(8080), Port{Name: "metrics", Port: 7000})},

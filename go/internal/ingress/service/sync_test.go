@@ -27,7 +27,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// webSpec is a release whose route / goes to port http (8080) of the
+// webSpec is a deployment whose route / goes to port http (8080) of the
 // image service web.
 const webSpec = `{"services": {"web": {"runtime": "image", "image": "web@sha256:1",
 	"ports": [{"name": "http", "port": 8080}]}}, "routes": {"root": {"path": "/", "service": "web", "port": "http"}}}`
@@ -47,7 +47,7 @@ func (h *harness) world() {
 	}
 }
 
-// mkEnv makes an environment of acme at release 1 with spec, public
+// mkEnv makes an environment of acme at deployment 1 with spec, public
 // when public.
 func (h *harness) mkEnv(name, spec string, public bool) store.Environment {
 	h.t.Helper()
@@ -55,12 +55,12 @@ func (h *harness) mkEnv(name, spec string, public bool) store.Environment {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if _, err := h.st.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 1, Spec: json.RawMessage(spec),
+	if _, err := h.st.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: json.RawMessage(spec),
 		Origin: model.OriginApply}); err != nil {
 		h.t.Fatal(err)
 	}
 	after := e
-	after.Release = 1
+	after.Deployment = 1
 	if e, err = h.st.UpdateEnvironment(bg, e, after); err != nil {
 		h.t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func (h *harness) mkInstance(env store.Environment, service, phase, state string
 		}
 	}
 	if _, err := h.st.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: env.ID, Kind: "service",
-		Object: service, TemplateHash: "h1", Release: 1, Phase: phase}); err != nil {
+		Object: service, TemplateHash: "h1", Deployment: 1, Phase: phase}); err != nil {
 		h.t.Fatal(err)
 	}
 	if _, err := h.st.SetIngressPorts(bg, sb.ID, ports); err != nil {

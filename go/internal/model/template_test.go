@@ -167,7 +167,7 @@ func TestTemplateHash(t *testing.T) {
 }
 
 // The hashes of templates without the fields added later (name tables,
-// the ingress group flag) stay what they were: the instances of a release
+// the ingress group flag) stay what they were: the instances of a deployment
 // made before keep their pods. With the ingress group flag the hash
 // differs, so that the first publish of an environment rolls its image
 // services once.

@@ -11,15 +11,15 @@ import { envPath } from '../routes.js';
 import {
   KIND_TITLES, changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence,
   heavyEffect, incidentObject, isAttached, labelPairs, logReplicas, logSourceText, logsProblem, objectSummary,
-  objectTone, originText, parseLabelFilter, phaseTone, releaseTone, rolloutNote, statusState,
+  objectTone, originText, parseLabelFilter, phaseTone, deploymentTone, rolloutNote, statusState,
 } from './envs.js';
 
 // A tenant's environments, read-only: the list with a label filter, and
 // an environment with its tabs: the overview (the rollout, the objects
-// of its target release with their instances, the routes), its releases
-// (a release's diff and normalised spec), its incidents (with their
+// of its target deployment with their instances, the routes), its deployments
+// (a deployment's diff and normalised spec), its incidents (with their
 // evidence) and the logs of an object. Environments are made and changed
-// through ferund's API (FeCode applies the releases); this view applies,
+// through ferund's API (FeCode applies the deployments); this view applies,
 // reverts and deletes nothing, and reads no secret and no route token.
 // The environment, the tab and its item are the route's:
 // /tenants/:t/environments/:env/:tab/:item.
@@ -123,7 +123,7 @@ function EnvList({ tenant, navigate }) {
           <span className="mini-stats muted">
             <span className="ok" title="deployed">● {counts.deployed}</span>
             <span className="warn" title="waiting or deploying">● {counts.deploying}</span>
-            {counts.failed > 0 && <span className="bad" title="the latest release failed">● {counts.failed}</span>}
+            {counts.failed > 0 && <span className="bad" title="the latest deployment failed">● {counts.failed}</span>}
             {counts.incidents > 0 && <span className="bad" title="open incidents">▲ {counts.incidents}</span>}
           </span>
           <span className="spacer" />
@@ -177,7 +177,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
               <th className="col-state">state</th>
               <th>name</th>
               <th>labels</th>
-              <th className="col-num">release</th>
+              <th className="col-num">deployment</th>
               <th className="col-num">deployed</th>
               <th>state</th>
               <th className="col-num">incidents</th>
@@ -187,7 +187,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
           <tbody>
             {list.map((e) => {
               const to = envPath(tenant, e.name);
-              const tone = releaseTone(e.state);
+              const tone = deploymentTone(e.state);
               return (
                 <tr key={e.id} className="clickable" onClick={() => navigate(to)}>
                   <td className="col-state"><ToneDot tone={tone} title={e.state} /></td>
@@ -196,9 +196,9 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
                     <span className="muted small mono idsub" title={e.id}>{shortId(e.id)}</span>
                   </td>
                   <td><Labels labels={e.labels} onLabel={onLabel} /></td>
-                  <td className="col-num mono">{e.release || '—'}</td>
-                  <td className={'col-num mono' + (e.deployed !== e.release ? ' warntext' : '')}
-                    title={e.deployed !== e.release ? 'the latest release is not deployed' : ''}>
+                  <td className="col-num mono">{e.deployment || '—'}</td>
+                  <td className={'col-num mono' + (e.deployed !== e.deployment ? ' warntext' : '')}
+                    title={e.deployed !== e.deployment ? 'the latest deployment is not deployed' : ''}>
                     {e.deployed || '—'}
                   </td>
                   <td><ToneLabel tone={tone}>{e.state}</ToneLabel></td>
@@ -224,7 +224,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: 'gauge' },
-  { key: 'releases', label: 'Releases', icon: 'history' },
+  { key: 'deployments', label: 'Deployments', icon: 'history' },
   { key: 'incidents', label: 'Incidents', icon: 'alert' },
   { key: 'logs', label: 'Logs', icon: 'file' },
 ];
@@ -275,7 +275,7 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
       <div className="detail-head">
         <button className="iconbtn" title="back to the environments (Esc)" onClick={() => navigate(list)}>
           <Icon name="arrowLeft" size={15} /></button>
-        <ToneDot tone={releaseTone(state)} title={state} />
+        <ToneDot tone={deploymentTone(state)} title={state} />
         <div className="detail-title">
           <span className="mono uuid">
             {st ? st.name : env}
@@ -283,7 +283,7 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
           </span>
           <span className="muted small">
             {st
-              ? <>release {st.release || '—'} · deployed {st.deployed || '—'} · <span className="mono">{st.id}</span></>
+              ? <>deployment {st.deployment || '—'} · deployed {st.deployed || '—'} · <span className="mono">{st.id}</span></>
               : 'loading…'}
           </span>
         </div>
@@ -308,9 +308,9 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
           {st ? <EnvOverview st={st} tenant={tenant} navigate={navigate} /> : !err && <p className="empty">Loading…</p>}
         </div>
       )}
-      {activeTab === 'releases' && (
+      {activeTab === 'deployments' && (
         <div className="tabbody">
-          <ReleasesTab tenant={tenant} env={env} st={st} item={item} navigate={navigate} />
+          <DeploymentsTab tenant={tenant} env={env} st={st} item={item} navigate={navigate} />
         </div>
       )}
       {activeTab === 'incidents' && (
@@ -332,7 +332,7 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
 // --------------------------------------------------------------- overview --
 
 // EnvOverview is an environment's status (GET /api/v1/environments/{env}):
-// the rollout, the objects of the target release by kind with their
+// the rollout, the objects of the target deployment by kind with their
 // instances, and the routes.
 export function EnvOverview({ st, tenant, navigate }) {
   const groups = groupObjects(st.objects);
@@ -343,8 +343,8 @@ export function EnvOverview({ st, tenant, navigate }) {
       <div className="kv-grid">
         <KV k="environment ID"><span className="mono">{st.id}</span> <CopyBtn text={st.id} mini /></KV>
         <KV k="labels"><Labels labels={st.labels} /></KV>
-        <KV k="releases">
-          latest <span className="mono">{st.release || '—'}</span>, deployed <span className="mono">{st.deployed || '—'}</span>
+        <KV k="deployments">
+          latest <span className="mono">{st.deployment || '—'}</span>, deployed <span className="mono">{st.deployed || '—'}</span>
         </KV>
         <KV k="open incidents">
           {st.openIncidents > 0
@@ -361,19 +361,19 @@ export function EnvOverview({ st, tenant, navigate }) {
         <div key={kind} className="envsect">
           <div className="sect">{KIND_TITLES[kind] || kind} <span className="count">· {objects.length}</span></div>
           {objects.map((o) => (
-            <ObjectCard key={`${o.kind}/${o.name}`} o={o} latest={st.release} tenant={tenant} navigate={navigate}
+            <ObjectCard key={`${o.kind}/${o.name}`} o={o} latest={st.deployment} tenant={tenant} navigate={navigate}
               logsTo={(replica) => logsTo(o, replica)} />
           ))}
         </div>
       ))}
-      {groups.length === 0 && <p className="empty">No objects: the environment has no release yet.</p>}
+      {groups.length === 0 && <p className="empty">No objects: the environment has no deployment yet.</p>}
 
       <RoutesTable routes={st.routes} env={st.name} />
     </>
   );
 }
 
-// RolloutBox is the latest release's rollout, with its reason.
+// RolloutBox is the latest deployment's rollout, with its reason.
 export function RolloutBox({ st, tenant, navigate }) {
   const r = st.rollout;
   if (st.deleting) {
@@ -382,17 +382,17 @@ export function RolloutBox({ st, tenant, navigate }) {
   }
   if (!r) {
     return <div className="rollout absent"><div className="rollout-head"><ToneLabel tone="absent">none</ToneLabel>
-      <span className="muted small">No release yet: nothing runs.</span></div></div>;
+      <span className="muted small">No deployment yet: nothing runs.</span></div></div>;
   }
-  const tone = releaseTone(r.state);
+  const tone = deploymentTone(r.state);
   const note = rolloutNote(st);
   return (
     <div className={'rollout ' + tone}>
       <div className="rollout-head">
         <ToneLabel tone={tone}>{r.state}</ToneLabel>
         <span>
-          release{' '}
-          <Link to={envPath(tenant, st.name, 'releases', r.release)} navigate={navigate} className="mono">{r.release}</Link>
+          deployment{' '}
+          <Link to={envPath(tenant, st.name, 'deployments', r.deployment)} navigate={navigate} className="mono">{r.deployment}</Link>
         </span>
         {r.startedAt && <span className="muted small">started {fmtDate(r.startedAt)} <Ago iso={r.startedAt} /></span>}
         {note && <span className="muted small">· {note}</span>}
@@ -447,7 +447,7 @@ function JobLine({ run }) {
   return (
     <>
       <div className="envobj-line">
-        <span><span className="k">release</span><span className="mono">{run.release}</span></span>
+        <span><span className="k">deployment</span><span className="mono">{run.deployment}</span></span>
         <span><span className="k">attempt</span><span className="mono">{run.attempt}</span></span>
         <span><span className="k">phase</span><ToneLabel tone={phaseTone(run.phase)}>{run.phase}</ToneLabel></span>
         <span><span className="k">exit</span><span className={'mono' + (run.exitCode ? ' bad' : '')}>
@@ -459,7 +459,7 @@ function JobLine({ run }) {
   );
 }
 
-// InstanceTable lists an object's pods; one of an older release than the
+// InstanceTable lists an object's pods; one of an older deployment than the
 // latest is muted, a stopping one dimmed.
 export function InstanceTable({ instances, latest, navigate, logsTo }) {
   const list = instances || [];
@@ -474,7 +474,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
             <th>state</th>
             <th>node</th>
             <th>address</th>
-            <th className="col-num">release</th>
+            <th className="col-num">deployment</th>
             <th className="col-num">restarts</th>
             <th className="col-num">last exit</th>
             <th className="col-when">ready since</th>
@@ -484,7 +484,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
         </thead>
         <tbody>
           {list.map((i) => {
-            const old = latest > 0 && i.release < latest;
+            const old = latest > 0 && i.deployment < latest;
             return (
               <tr key={i.id} className={i.phase === 'stopping' ? 'dim' : ''} title={`instance ${i.id}`}>
                 <td className="col-num mono">{i.replica}</td>
@@ -496,7 +496,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
                     : <span className="muted">—</span>}
                 </td>
                 <td className="mono small">{i.address || <span className="muted">—</span>}</td>
-                <td className={'col-num mono' + (old ? ' muted' : '')} title={old ? "an older release's instance" : ''}>{i.release}</td>
+                <td className={'col-num mono' + (old ? ' muted' : '')} title={old ? "an older deployment's instance" : ''}>{i.deployment}</td>
                 <td className={'col-num mono' + (i.restarts > 0 ? ' warntext' : '')}>{i.restarts}</td>
                 <td className={'col-num mono' + (i.lastExit ? ' bad' : '')}>
                   {i.lastExit === null || i.lastExit === undefined ? '—' : i.lastExit}
@@ -515,7 +515,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
   );
 }
 
-// RoutesTable lists the routes of the deployed release (the latest when
+// RoutesTable lists the routes of the deployed deployment (the latest when
 // none is deployed), their ports resolved.
 export function RoutesTable({ routes, env }) {
   const list = routes || [];
@@ -547,18 +547,18 @@ export function RoutesTable({ routes, env }) {
   );
 }
 
-// --------------------------------------------------------------- releases --
+// --------------------------------------------------------------- deployments --
 
-// ReleasesTab polls the releases (newest first) and shows the list, or
-// one release. The spec and diff of a release never change, so they are
+// DeploymentsTab polls the deployments (newest first) and shows the list, or
+// one deployment. The spec and diff of a deployment never change, so they are
 // read once; its state, reason, finish and tags do, so the polled list's
 // entry is laid over them.
-function ReleasesTab({ tenant, env, st, item, navigate }) {
-  const [releases, setReleases] = useState(null);
+function DeploymentsTab({ tenant, env, st, item, navigate }) {
+  const [deployments, setDeployments] = useState(null);
   const [err, setErr] = useState('');
   const refresh = useCallback(async () => {
     try {
-      setReleases((await api.listReleases(env)).releases || []);
+      setDeployments((await api.listDeployments(env)).deployments || []);
       setErr('');
     } catch (e) {
       setErr(e.message);
@@ -567,28 +567,28 @@ function ReleasesTab({ tenant, env, st, item, navigate }) {
   usePoll(refresh, 5000);
 
   if (item) {
-    const listed = (releases || []).find((r) => String(r.number) === item) || null;
-    return <ReleasePane key={item} tenant={tenant} env={env} n={item} listed={listed} navigate={navigate} />;
+    const listed = (deployments || []).find((r) => String(r.number) === item) || null;
+    return <DeploymentPane key={item} tenant={tenant} env={env} n={item} listed={listed} navigate={navigate} />;
   }
   return (
     <>
       <ErrBox error={err} />
-      <ReleaseTable releases={releases} latest={st ? st.release : 0} tenant={tenant} env={env} navigate={navigate} />
-      {!releases && !err && <p className="empty">Loading…</p>}
+      <DeploymentTable deployments={deployments} latest={st ? st.deployment : 0} tenant={tenant} env={env} navigate={navigate} />
+      {!deployments && !err && <p className="empty">Loading…</p>}
     </>
   );
 }
 
-// ReleaseTable is the releases' table.
-export function ReleaseTable({ releases, latest, tenant, env, navigate }) {
-  const list = releases || [];
+// DeploymentTable is the deployments' table.
+export function DeploymentTable({ deployments, latest, tenant, env, navigate }) {
+  const list = deployments || [];
   return (
     <>
       <div className="tblwrap">
-        <table className="tbl releases-tbl">
+        <table className="tbl deployments-tbl">
           <thead>
             <tr>
-              <th className="col-num">release</th>
+              <th className="col-num">deployment</th>
               <th>state</th>
               <th>origin</th>
               <th>author</th>
@@ -600,14 +600,14 @@ export function ReleaseTable({ releases, latest, tenant, env, navigate }) {
           </thead>
           <tbody>
             {list.map((r) => {
-              const to = envPath(tenant, env, 'releases', r.number);
+              const to = envPath(tenant, env, 'deployments', r.number);
               return (
                 <tr key={r.number} className="clickable" onClick={() => navigate(to)}>
                   <td className="col-num nowrap">
                     <Link to={to} navigate={navigate} className="mono strong">{r.number}</Link>
                   </td>
                   <td className="nowrap">
-                    <ToneLabel tone={releaseTone(r.state)}>{r.state}</ToneLabel>
+                    <ToneLabel tone={deploymentTone(r.state)}>{r.state}</ToneLabel>
                     {r.number === latest && <span className="badge acc">latest</span>}
                     {(r.tags || []).map((t) => <span key={t} className="badge" title="tag">{t}</span>)}
                   </td>
@@ -626,48 +626,48 @@ export function ReleaseTable({ releases, latest, tenant, env, navigate }) {
           </tbody>
         </table>
       </div>
-      {releases && list.length === 0 && <p className="empty">No releases yet.</p>}
+      {deployments && list.length === 0 && <p className="empty">No deployments yet.</p>}
     </>
   );
 }
 
-function ReleasePane({ tenant, env, n, listed, navigate }) {
+function DeploymentPane({ tenant, env, n, listed, navigate }) {
   const [rel, setRel] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
     let live = true;
-    api.getRelease(env, n).then((r) => { if (live) setRel(r); }, (e) => { if (live) setErr(e.message); });
+    api.getDeployment(env, n).then((r) => { if (live) setRel(r); }, (e) => { if (live) setErr(e.message); });
     return () => { live = false; };
   }, [env, n]);
   const shown = rel && listed ? { ...rel, ...listed } : rel;
   return (
     <>
       <div className="subhead">
-        <button className="ghost mini" onClick={() => navigate(envPath(tenant, env, 'releases'))}>
-          <Icon name="arrowLeft" size={13} /> releases</button>
+        <button className="ghost mini" onClick={() => navigate(envPath(tenant, env, 'deployments'))}>
+          <Icon name="arrowLeft" size={13} /> deployments</button>
       </div>
       <ErrBox error={err} />
       {!rel && !err && <p className="empty">Loading…</p>}
-      {shown && <ReleaseView rel={shown} />}
+      {shown && <DeploymentView rel={shown} />}
     </>
   );
 }
 
-// ReleaseView is a release (GET …/releases/{n}): what made it, its diff
-// against the release before, and its normalised spec.
-export function ReleaseView({ rel }) {
+// DeploymentView is a deployment (GET …/deployments/{n}): what made it, its diff
+// against the deployment before, and its normalised spec.
+export function DeploymentView({ rel }) {
   const spec = prettyJson(rel.spec || {});
   return (
-    <div className="release">
-      <div className="release-head">
-        <span className="mono strong">release {rel.number}</span>
-        <ToneLabel tone={releaseTone(rel.state)}>{rel.state}</ToneLabel>
+    <div className="deployment">
+      <div className="deployment-head">
+        <span className="mono strong">deployment {rel.number}</span>
+        <ToneLabel tone={deploymentTone(rel.state)}>{rel.state}</ToneLabel>
         {(rel.tags || []).map((t) => <span key={t} className="badge" title="tag">{t}</span>)}
       </div>
       {rel.reason && <div className={rel.state === 'failed' ? 'error' : 'notice'}>{rel.reason}</div>}
       <div className="kv-grid">
         <KV k="origin">{originText(rel)}</KV>
-        <KV k="base">{rel.base ? <>release <span className="mono">{rel.base}</span></> : 'none'}</KV>
+        <KV k="base">{rel.base ? <>deployment <span className="mono">{rel.base}</span></> : 'none'}</KV>
         <KV k="author"><span className="mono small">{rel.author || '—'}</span></KV>
         <KV k="message">{rel.message || <span className="muted">—</span>}</KV>
         <KV k="created">{fmtDateTime(rel.createdAt)} <Ago iso={rel.createdAt} /></KV>
@@ -683,7 +683,7 @@ export function ReleaseView({ rel }) {
               </span>)}
         </KV>
       </div>
-      <div className="sect">{rel.number > 1 ? `changes against release ${rel.number - 1}` : 'changes (the first release)'}</div>
+      <div className="sect">{rel.number > 1 ? `changes against deployment ${rel.number - 1}` : 'changes (the first deployment)'}</div>
       <DiffView diff={rel.diff} />
       <details className="specbox">
         <summary>The spec, normalised: defaults filled, images pinned to digests, secret versions pinned</summary>
@@ -773,7 +773,7 @@ export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
               <th className="col-num">#</th>
               <th>condition</th>
               <th>object</th>
-              <th className="col-num">release</th>
+              <th className="col-num">deployment</th>
               <th>summary</th>
               <th className="col-when">opened</th>
               <th className="col-when">closed</th>
@@ -789,7 +789,7 @@ export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
                   <td className="col-num"><Link to={to} navigate={navigate} className="mono">{i.id}</Link></td>
                   <td className="nowrap">{conditionText(i.condition)}</td>
                   <td className="mono small nowrap">{i.object}</td>
-                  <td className="col-num mono">{i.release}</td>
+                  <td className="col-num mono">{i.deployment}</td>
                   <td className="small msgcell">{i.summary}</td>
                   <td className="col-when"><Ago iso={i.openedAt} /></td>
                   <td className="col-when">{i.closedAt ? <Ago iso={i.closedAt} /> : <span className="bad small">open</span>}</td>
@@ -830,8 +830,8 @@ function IncidentPane({ tenant, env, id, navigate }) {
 }
 
 // IncidentView is an incident with what the controller saw: the exits,
-// the end of the log, what a release past its deadline still waited for,
-// a failed rollout's diff against the deployed release, why an instance
+// the end of the log, what a deployment past its deadline still waited for,
+// a failed rollout's diff against the deployed deployment, why an instance
 // found no place.
 export function IncidentView({ inc, tenant, env, navigate }) {
   const open = !inc.closedAt;
@@ -839,7 +839,7 @@ export function IncidentView({ inc, tenant, env, navigate }) {
   const ev = inc.evidence || {};
   return (
     <div className="incident">
-      <div className="release-head">
+      <div className="deployment-head">
         <span className="mono strong">incident {inc.id}</span>
         <ToneLabel tone={open ? 'failed' : 'absent'}>{open ? 'open' : 'closed'}</ToneLabel>
         <span className="badge">{conditionText(inc.condition)}</span>
@@ -850,8 +850,8 @@ export function IncidentView({ inc, tenant, env, navigate }) {
           <span className="mono">{inc.object}</span>
           {obj.hasLogs && <> · <Link to={envPath(tenant, env, 'logs', inc.object)} navigate={navigate}>its logs</Link></>}
         </KV>
-        <KV k="release">
-          <Link to={envPath(tenant, env, 'releases', inc.release)} navigate={navigate} className="mono">{inc.release}</Link>
+        <KV k="deployment">
+          <Link to={envPath(tenant, env, 'deployments', inc.deployment)} navigate={navigate} className="mono">{inc.deployment}</Link>
         </KV>
         <KV k="opened">{fmtDateTime(inc.openedAt)} <Ago iso={inc.openedAt} /></KV>
         <KV k="closed">
@@ -883,12 +883,12 @@ export function IncidentView({ inc, tenant, env, navigate }) {
         </>)}
       {(ev.pending || []).length > 0 && (
         <>
-          <div className="sect">what the release waited for</div>
+          <div className="sect">what the deployment waited for</div>
           <pre className="logpre">{ev.pending.join('\n')}</pre>
         </>)}
       {(ev.diff || []).length > 0 && (
         <>
-          <div className="sect">the diff against the deployed release</div>
+          <div className="sect">the diff against the deployed deployment</div>
           <DiffView diff={ev.diff} />
         </>)}
       {ev.placement && (

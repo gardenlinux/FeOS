@@ -92,7 +92,7 @@ type postgresOptions struct {
 }
 
 // options reads a's options, with every finding about them (prev: the
-// current release's addon, for what provisioning leaves behind).
+// current deployment's addon, for what provisioning leaves behind).
 func (p postgres) options(prev *Addon, a Addon) (postgresOptions, []spec.Finding) {
 	fs := unknownOptions(p.Type(), a.Options, "databases", "roles")
 	dbItems, dfs := stringList(a.Options, "databases")

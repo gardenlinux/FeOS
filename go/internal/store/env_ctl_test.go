@@ -120,9 +120,9 @@ func TestEnvCtlQueries(t *testing.T) {
 		t.Fatalf("starved for 5 minutes %v", starved)
 	}
 
-	// Incidents closed by release and by object.
-	open := func(object string, release int, condition string) int64 {
-		i, _, err := s.OpenIncident(bg, store.EnvIncident{EnvID: env.ID, Object: object, Release: release, Condition: condition})
+	// Incidents closed by deployment and by object.
+	open := func(object string, deployment int, condition string) int64 {
+		i, _, err := s.OpenIncident(bg, store.EnvIncident{EnvID: env.ID, Object: object, Deployment: deployment, Condition: condition})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,22 +143,22 @@ func TestEnvCtlQueries(t *testing.T) {
 	}
 
 	// Running runs.
-	if _, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: env.ID, Job: "m", TemplateHash: "h", Release: 1}); err != nil {
+	if _, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: env.ID, Job: "m", TemplateHash: "h", Deployment: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if runs, err := s.EnvCtlRunningJobRuns(bg, env.ID); err != nil || len(runs) != 1 {
 		t.Fatalf("runs %v %v", runs, err)
 	}
 
-	// A release's wait for its job: the latest end of the runs of other
-	// releases that ended after its start (now() while one runs).
+	// A deployment's wait for its job: the latest end of the runs of other
+	// deployments that ended after its start (now() while one runs).
 	var start time.Time
 	if err := s.Q().QueryRow(bg, "SELECT now() - interval '1 hour'").Scan(&start); err != nil {
 		t.Fatal(err)
 	}
-	waited := func(hash string, release int) time.Time {
+	waited := func(hash string, deployment int) time.Time {
 		t.Helper()
-		until, err := s.EnvCtlJobWaitedUntil(bg, env.ID, "w", hash, release, start)
+		until, err := s.EnvCtlJobWaitedUntil(bg, env.ID, "w", hash, deployment, start)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,15 +167,15 @@ func TestEnvCtlQueries(t *testing.T) {
 	if until := waited("h2", 2); !until.IsZero() {
 		t.Fatalf("waited until %v without a run", until)
 	}
-	old, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: env.ID, Job: "w", TemplateHash: "h1", Release: 1})
+	old, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: env.ID, Job: "w", TemplateHash: "h1", Deployment: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if until := waited("h2", 2); until.Before(start.Add(time.Hour)) {
-		t.Fatalf("a running run of release 1: waited until %v", until)
+		t.Fatalf("a running run of deployment 1: waited until %v", until)
 	}
 	if until := waited("h1", 1); !until.IsZero() {
-		t.Fatalf("its own release's run is waited for: %v", until)
+		t.Fatalf("its own deployment's run is waited for: %v", until)
 	}
 	exec(t, s, `UPDATE env_job_runs SET phase = 'failed', finished_at = $2 WHERE id = $1`, old.ID, start.Add(9*time.Second))
 	if until := waited("h2", 2); !until.Equal(start.Add(9 * time.Second)) {
@@ -188,7 +188,7 @@ func TestEnvCtlQueries(t *testing.T) {
 	// A template that had succeeded before the start was never waited
 	// for, unless the hash is not known.
 	exec(t, s, `UPDATE env_job_runs SET finished_at = $2 WHERE id = $1`, old.ID, start.Add(9*time.Second))
-	done, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: env.ID, Job: "w", TemplateHash: "h2", Release: 1,
+	done, err := s.InsertJobRun(bg, store.EnvJobRun{EnvID: env.ID, Job: "w", TemplateHash: "h2", Deployment: 1,
 		Phase: model.RunSucceeded})
 	if err != nil {
 		t.Fatal(err)
@@ -273,15 +273,15 @@ func TestEnvCtlQueries(t *testing.T) {
 	}
 
 	// The inputs of ing groups: an instance's environment, kind, object
-	// and release; a sandbox without an instance row with none; a sandbox
+	// and deployment; a sandbox without an instance row with none; a sandbox
 	// that is gone missing.
 	if _, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: a.ID, EnvID: env.ID, Kind: "service", Object: "web",
-		TemplateHash: "h", Release: 3}); err != nil {
+		TemplateHash: "h", Deployment: 3}); err != nil {
 		t.Fatal(err)
 	}
 	inputs, err := s.EnvCtlIngressInputs(bg, []podid.ID{a.ID, b.ID, sbx.ID, goneSbx, goneLegacy})
 	if err != nil || len(inputs) != 3 ||
-		inputs[a.ID] != (store.IngressInput{EnvID: env.ID, Kind: "service", Object: "web", Release: 3}) ||
+		inputs[a.ID] != (store.IngressInput{EnvID: env.ID, Kind: "service", Object: "web", Deployment: 3}) ||
 		inputs[b.ID] != (store.IngressInput{}) || inputs[sbx.ID] != (store.IngressInput{}) {
 		t.Fatalf("ingress inputs %+v %v", inputs, err)
 	}

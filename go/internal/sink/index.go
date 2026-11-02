@@ -95,7 +95,7 @@ func keyOf(st *streamRow) string {
 // docOf is a line as its stream's index holds it.
 func docOf(l Line, st *streamRow) quickwit.Doc {
 	return quickwit.Doc{TS: l.TS, Tenant: st.Tenant, Stream: st.SID, Environment: st.Environment, Kind: st.Kind,
-		Object: st.Object, Replica: st.Replica, Release: st.Release, Instance: st.Instance, Container: st.Container,
+		Object: st.Object, Replica: st.Replica, Deployment: st.Deployment, Instance: st.Instance, Container: st.Container,
 		Job: st.Job, Attempt: st.Attempt, Source: st.Source, IOStream: l.Source, Level: l.Level, TraceID: l.Trace,
 		Off: l.Off, Partial: l.Partial, Cont: l.Cont, Text: l.Text}
 }

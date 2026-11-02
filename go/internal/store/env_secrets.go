@@ -14,7 +14,7 @@ import (
 
 // EnvSecret is a row of env_secrets: one version of a secret, sealed
 // (internal/seal, AAD envdeps.SecretAAD). A version is never changed; a
-// deleted secret's versions keep resolving while a release pins them.
+// deleted secret's versions keep resolving while a deployment pins them.
 type EnvSecret struct {
 	EnvID   uuid.UUID
 	Name    string

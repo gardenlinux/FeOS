@@ -25,7 +25,7 @@ import (
 // ResolveSecret is the value of version version of the secret name of
 // environment envID, a tenant's or an addon's system secret
 // ("addon.<addon>.<key>"), unsealed with its AAD (envdeps.SecretAAD). A
-// deleted version still resolves: a release pins it until a later one is
+// deleted version still resolves: a deployment pins it until a later one is
 // deployed. Without a Sealer it is an error naming --secret-key-file. It
 // is the engine's secret resolver (through the environment service's) and
 // the controller's own, for the env of attached services and of

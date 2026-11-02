@@ -514,7 +514,7 @@ func (s *Service) leaveIncidents(ctx context.Context, tx *store.Store, before, a
 }
 
 // openIncident opens an incident of condition on the environment's
-// object, on its latest release, or, while one is open (of any release),
+// object, on its latest deployment, or, while one is open (of any deployment),
 // writes the new summary into it.
 func (s *Service) openIncident(ctx context.Context, tx *store.Store, e store.Environment, obj, condition, summary string) error {
 	open, ok, err := tx.OpenIncidentOf(ctx, e.ID, obj, condition)
@@ -530,7 +530,7 @@ func (s *Service) openIncident(ctx context.Context, tx *store.Store, e store.Env
 		_, err := tx.UpdateIncident(ctx, open, after)
 		return err
 	}
-	if _, _, err := tx.OpenIncident(ctx, store.EnvIncident{EnvID: e.ID, Object: obj, Release: e.Release,
+	if _, _, err := tx.OpenIncident(ctx, store.EnvIncident{EnvID: e.ID, Object: obj, Deployment: e.Deployment,
 		Condition: condition, Summary: summary}); err != nil {
 		return err
 	}

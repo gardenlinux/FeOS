@@ -22,11 +22,11 @@ import (
 
 // instanceLogLabels are those of an environment's instance; attempt > 0
 // makes them a job's run's.
-func instanceLogLabels(owner string, id podid.ID, envID uuid.UUID, kind, object string, replica, release, attempt int) map[string]string {
+func instanceLogLabels(owner string, id podid.ID, envID uuid.UUID, kind, object string, replica, deployment, attempt int) map[string]string {
 	l := map[string]string{
 		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
 		model.LogKind: kind, model.LogObject: object, model.LogReplica: strconv.Itoa(replica),
-		model.LogRelease: strconv.Itoa(release),
+		model.LogDeployment: strconv.Itoa(deployment), model.LogRelease: strconv.Itoa(deployment),
 	}
 	if attempt > 0 {
 		l[model.LogAttempt] = strconv.Itoa(attempt)
@@ -76,7 +76,7 @@ func (c *Controller) LogRedact(ctx context.Context, row store.Sandbox) ([]string
 			return nil, fmt.Errorf("environment %s: %w", row.EnvironmentID, err)
 		}
 		if v == nil {
-			return nil, fmt.Errorf("environment %s is being deleted or has no release", row.EnvironmentID)
+			return nil, fmt.Errorf("environment %s is being deleted or has no deployment", row.EnvironmentID)
 		}
 		vals = c.envSecretValues(ctx, v, row.PodTemplate)
 	}

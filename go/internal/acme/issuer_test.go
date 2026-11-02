@@ -40,7 +40,7 @@ import (
 var bg = context.Background()
 
 // fixture is a database with the tenant acme and its public environment
-// web at release 1, a sealer and a recording Refresher.
+// web at deployment 1, a sealer and a recording Refresher.
 type fixture struct {
 	t   *testing.T
 	d   *db.DB
@@ -105,20 +105,20 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
-// mkEnv makes an environment of acme at release 1, public when public.
+// mkEnv makes an environment of acme at deployment 1, public when public.
 func (f *fixture) mkEnv(name string, public bool) store.Environment {
 	f.t.Helper()
 	e, err := f.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "acme", Name: name})
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.st.InsertRelease(bg, store.EnvRelease{EnvID: e.ID, Number: 1, Origin: model.OriginApply,
+	if _, err := f.st.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Origin: model.OriginApply,
 		Spec: json.RawMessage(`{"services": {"web": {"runtime": "image", "image": "web@sha256:1",
 			"ports": [{"name": "http", "port": 8080}]}}, "routes": {"root": {"path": "/", "service": "web", "port": "http"}}}`)}); err != nil {
 		f.t.Fatal(err)
 	}
 	after := e
-	after.Release = 1
+	after.Deployment = 1
 	if e, err = f.st.UpdateEnvironment(bg, e, after); err != nil {
 		f.t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestIncident(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(open) != 1 || open[0].Object != "domain/dashboard.fecore.dev" || open[0].Condition != ConditionCertificateFailing ||
-		open[0].Release != f.env.Release || !strings.Contains(open[0].Summary, "rate limited by the CA: slow down") ||
+		open[0].Deployment != f.env.Deployment || !strings.Contains(open[0].Summary, "rate limited by the CA: slow down") ||
 		!strings.Contains(open[0].Summary, "has not been renewed since") {
 		t.Fatalf("incidents %+v", open)
 	}

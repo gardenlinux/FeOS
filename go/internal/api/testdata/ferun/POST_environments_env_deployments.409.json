@@ -1,0 +1,171 @@
+{
+  "method": "POST",
+  "path": "/api/v1/environments/expensa-stage/deployments",
+  "query": {},
+  "status": 409,
+  "request": {
+    "spec": {
+      "services": {
+        "approval-service": {
+          "image": "ghcr.io/acme/approval:1.2",
+          "command": [
+            "/app/approval-service"
+          ],
+          "env": {
+            "APPROVAL_DATABASE_URL": {
+              "addon": "postgres",
+              "database": "expensa",
+              "key": "url",
+              "role": "approval_svc"
+            },
+            "APPROVAL_HTTP_ADDR": "[::]:8080",
+            "APPROVAL_INTERNAL_TOKEN": {
+              "secret": "internal-token"
+            }
+          },
+          "ports": [
+            {
+              "name": "http",
+              "port": 8080
+            }
+          ],
+          "readiness": {
+            "http": {
+              "port": "http",
+              "path": "/readyz"
+            }
+          }
+        },
+        "expense-service": {
+          "image": "ghcr.io/acme/expense:1.4",
+          "command": [
+            "/app/expense-service"
+          ],
+          "env": {
+            "EXPENSA_APPROVAL_URL": {
+              "service": "approval-service",
+              "port": "http",
+              "key": "url"
+            },
+            "EXPENSA_DATABASE_URL": {
+              "addon": "postgres",
+              "database": "expensa",
+              "key": "url",
+              "role": "expense_svc"
+            },
+            "EXPENSA_HTTP_ADDR": "[::]:8080",
+            "EXPENSA_INTERNAL_TOKEN": {
+              "secret": "internal-token"
+            },
+            "EXPENSA_NATS_URL": {
+              "addon": "nats",
+              "key": "url"
+            }
+          },
+          "ports": [
+            {
+              "name": "http",
+              "port": 8080
+            }
+          ],
+          "replicas": 2,
+          "readiness": {
+            "http": {
+              "port": "http",
+              "path": "/readyz"
+            }
+          }
+        },
+        "web": {
+          "image": "ghcr.io/acme/expensa-web:1.4",
+          "ports": [
+            {
+              "name": "http",
+              "port": 8080
+            }
+          ],
+          "readiness": {
+            "http": {
+              "port": "http",
+              "path": "/readyz"
+            }
+          }
+        }
+      },
+      "jobs": {
+        "migrate": {
+          "image": "ghcr.io/acme/expense:1.4",
+          "command": [
+            "/app/expense-service",
+            "migrate"
+          ],
+          "env": {
+            "EXPENSA_DATABASE_URL": {
+              "addon": "postgres",
+              "database": "expensa",
+              "key": "url",
+              "role": "expense_svc"
+            }
+          },
+          "on": "release",
+          "timeout": "10m",
+          "retries": 1
+        }
+      },
+      "addons": {
+        "nats": {
+          "type": "nats",
+          "version": "2",
+          "plan": "small",
+          "options": {
+            "jetstream": true
+          }
+        },
+        "postgres": {
+          "type": "postgres",
+          "version": "17",
+          "plan": "small",
+          "options": {
+            "databases": [
+              "expensa"
+            ],
+            "roles": [
+              "expense_svc",
+              "approval_svc"
+            ]
+          }
+        }
+      },
+      "routes": {
+        "api-approval": {
+          "path": "/api/approval",
+          "service": "approval-service",
+          "port": "http"
+        },
+        "api-expense": {
+          "path": "/api/expense",
+          "service": "expense-service",
+          "port": "http"
+        },
+        "root": {
+          "path": "/",
+          "service": "web",
+          "port": "http"
+        }
+      }
+    },
+    "base": 5,
+    "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
+    "message": "stage follows main at revision 12",
+    "annotations": {
+      "fecode.dev/kind": "stage",
+      "fecode.dev/revision": "0193c111-2222-7333-8444-000000000012",
+      "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
+    }
+  },
+  "response": {
+    "error": "base 5 is not the current deployment 7: plan again on deployment 7",
+    "code": "base_mismatch",
+    "current": 7
+  }
+}

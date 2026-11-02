@@ -63,7 +63,9 @@ func (k StreamKey) less(o StreamKey) bool {
 // SourceIngress or SourceContainer.
 type Labels struct {
 	Tenant, Node, Instance, Environment, Kind, Object, Job string
-	Replica, Release, Attempt                              int
+	// Deployment is ferun.deployment (or its earlier word ferun.release);
+	// it is stored in the column release, as Doc keeps the field release.
+	Replica, Deployment, Attempt int
 	// RetentionDays is ferun.retention_days, 0 for none.
 	RetentionDays int
 	Source        string
@@ -219,7 +221,7 @@ func (s *Store) ingestStream(ctx context.Context, tx pgx.Tx, b *StreamBatch) (st
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (pod, container, log_id) DO NOTHING`,
 		sid, b.Key.Pod, b.Key.Container, b.Key.LogID, l.Tenant, l.Node, l.Instance, l.Environment,
-		l.Kind, l.Object, l.Replica, l.Release, l.Job, l.Attempt, retention, l.Attrs, source); err != nil {
+		l.Kind, l.Object, l.Replica, l.Deployment, l.Job, l.Attempt, retention, l.Attrs, source); err != nil {
 		return streamCount{}, nil, fmt.Errorf("stream: %w", err)
 	}
 	var open int16

@@ -285,14 +285,14 @@ describe('the environments routes', () => {
     expect(r.err).toMatchObject({ message: 'no such environment', status: 404 });
   });
 
-  it('reads the releases (50, newest first) and a release with its spec and diff', async () => {
-    let r = await ask('GET_environments_env_releases.200', () => api.listReleases(STAGE));
-    expect(r.out.releases.map((x) => x.number)).toEqual([7, 6, 5]);
-    r = await ask('GET_environments_env_releases_n.200', () => api.getRelease(STAGE, 7));
+  it('reads the deployments (50, newest first) and a deployment with its spec and diff', async () => {
+    let r = await ask('GET_environments_env_deployments.200', () => api.listDeployments(STAGE));
+    expect(r.out.deployments.map((x) => x.number)).toEqual([7, 6, 5]);
+    r = await ask('GET_environments_env_deployments_n.200', () => api.getDeployment(STAGE, 7));
     expect(r.out.spec.services['expense-service'].imageAsWritten).toBe('ghcr.io/acme/expense:1.4');
     expect(r.out.diff).toHaveLength(3);
-    r = await ask('GET_environments_env_releases_n.404', () => api.getRelease(STAGE, 99));
-    expect(r.err).toMatchObject({ message: 'no such release', status: 404 });
+    r = await ask('GET_environments_env_deployments_n.404', () => api.getDeployment(STAGE, 99));
+    expect(r.err).toMatchObject({ message: 'no such deployment', status: 404 });
   });
 
   it('reads the incidents, the open ones, and one incident', async () => {
@@ -328,8 +328,8 @@ describe('the environments routes', () => {
     const calls = serveFixtures(...Array(7).fill('GET_environments.200'));
     await api.listEnvironments();
     await api.getEnvironment(STAGE);
-    await api.listReleases(STAGE);
-    await api.getRelease(STAGE, 1);
+    await api.listDeployments(STAGE);
+    await api.getDeployment(STAGE, 1);
     await api.listIncidents(STAGE);
     await api.getIncident(STAGE, '1');
     await api.objectLogs(STAGE, 'job', 'migrate');

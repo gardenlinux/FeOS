@@ -16,7 +16,7 @@ import (
 )
 
 // A job's run asked for while a run of the job runs answers 409 busy with
-// the controller's own text (which release and attempt runs) and a
+// the controller's own text (which deployment and attempt runs) and a
 // Retry-After of 30 s; any other busy refusal keeps the generic text,
 // which names no instance.
 func TestRunJobBusy(t *testing.T) {
@@ -29,15 +29,15 @@ func TestRunJobBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := h.svc.RunJob(ctx, tenantA, "stage", "backfill")
-	wantStatus(t, err, http.StatusConflict, "job backfill runs already (release 1, attempt 1)")
+	wantStatus(t, err, http.StatusConflict, "job backfill runs already (deployment 1, attempt 1)")
 	var ae *apierr.Error
 	if !errors.As(err, &ae) || ae.Code != CodeBusy || ae.Header.Get("Retry-After") != "30" ||
-		ae.Error() != "job backfill runs already (release 1, attempt 1)" {
+		ae.Error() != "job backfill runs already (deployment 1, attempt 1)" {
 		t.Fatalf("busy %+v", ae)
 	}
 
-	err = ctlError(fmt.Errorf("job x runs already (release 3, attempt 2): %w", ctl.ErrJobRunning), spec.KindJob, "x")
-	wantStatus(t, err, http.StatusConflict, "job x runs already (release 3, attempt 2)")
+	err = ctlError(fmt.Errorf("job x runs already (deployment 3, attempt 2): %w", ctl.ErrJobRunning), spec.KindJob, "x")
+	wantStatus(t, err, http.StatusConflict, "job x runs already (deployment 3, attempt 2)")
 	err = ctlError(fmt.Errorf("an op ensure of instance i2 is in flight: %w", model.ErrBusy), spec.KindJob, "x")
 	wantStatus(t, err, http.StatusConflict, "job x is busy with another operation; try again shortly")
 }

@@ -70,10 +70,10 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r1 := c.applyRelease(env.ID, fmt.Sprintf(`{"services":{
+	r1 := c.applyDeployment(env.ID, fmt.Sprintf(`{"services":{
 		"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"],"ports":[{"name":"http","port":5173}]}},
 		"routes":{"root":{"path":"/","service":"web","port":"http"}}}`, id))
-	c.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
+	c.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 	first, err := c.st.GetAttached(bg, env.ID, "web")
 	if err != nil || first.ProcessID == "" {
 		t.Fatalf("attached %+v %v", first, err)

@@ -29,10 +29,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/testnode"
 )
 
-// applyRelease inserts the next release of an environment with spec, as
+// applyDeployment inserts the next deployment of an environment with spec, as
 // the environment service's apply does (its API is another lane's), and
-// wakes the controller. It returns the release's number.
-func (c *cluster) applyRelease(envID uuid.UUID, spec string) int {
+// wakes the controller. It returns the deployment's number.
+func (c *cluster) applyDeployment(envID uuid.UUID, spec string) int {
 	c.t.Helper()
 	var n int
 	err := c.st.InTx(bg, func(tx *store.Store) error {
@@ -40,17 +40,17 @@ func (c *cluster) applyRelease(envID uuid.UUID, spec string) int {
 		if err != nil {
 			return err
 		}
-		n = e.Release + 1
-		if _, err := tx.InsertRelease(bg, store.EnvRelease{EnvID: envID, Number: n, Spec: json.RawMessage(spec),
-			Base: e.Release, Origin: model.OriginApply}); err != nil {
+		n = e.Deployment + 1
+		if _, err := tx.InsertDeployment(bg, store.EnvDeployment{EnvID: envID, Number: n, Spec: json.RawMessage(spec),
+			Base: e.Deployment, Origin: model.OriginApply}); err != nil {
 			return err
 		}
 		after := e
-		after.Release = n
+		after.Deployment = n
 		if _, err := tx.UpdateEnvironment(bg, e, after); err != nil {
 			return err
 		}
-		if _, err := tx.ReplaceReleases(bg, envID, n, model.ReleaseWaiting, model.ReleaseDeploying); err != nil {
+		if _, err := tx.ReplaceDeployments(bg, envID, n, model.DeploymentWaiting, model.DeploymentDeploying); err != nil {
 			return err
 		}
 		return tx.Notify(bg, db.ChanLeader, ctl.HintReconcile)
@@ -61,11 +61,11 @@ func (c *cluster) applyRelease(envID uuid.UUID, spec string) int {
 	return n
 }
 
-// waitRelease waits until a release of an environment is in state.
-func (c *cluster) waitRelease(envID uuid.UUID, n int, state string, within time.Duration) {
+// waitDeployment waits until a deployment of an environment is in state.
+func (c *cluster) waitDeployment(envID uuid.UUID, n int, state string, within time.Duration) {
 	c.t.Helper()
-	eventually(c.t, within, fmt.Sprintf("release %d %s", n, state), func() bool {
-		r, err := c.st.GetRelease(bg, envID, n)
+	eventually(c.t, within, fmt.Sprintf("deployment %d %s", n, state), func() bool {
+		r, err := c.st.GetDeployment(bg, envID, n)
 		return err == nil && r.State == state
 	})
 }
@@ -100,7 +100,7 @@ func nodeGroup(n *node, id string) *networkv1.SecurityGroup {
 // The environment controller in a running ferund, on a node that checks
 // security groups and name tables: an attachable sandbox made over REST
 // gets its group and its name table before its pod; an environment's image
-// service and an attached service in that sandbox come up and the release
+// service and an attached service in that sandbox come up and the deployment
 // is deployed; the env group has both as members and the sandbox's group
 // reaches it; the node's resolver answers each pod the names it should;
 // the controller reads the process's log; a deleted environment leaves
@@ -158,12 +158,12 @@ func TestEnvironments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r1 := c.applyRelease(env.ID, fmt.Sprintf(`{"services":{
+	r1 := c.applyDeployment(env.ID, fmt.Sprintf(`{"services":{
 		"api":{"runtime":"image","image":%q,"ports":[{"name":"http","port":8080}]},
 		"web":{"runtime":"attached","sandbox":%q,"command":["sh","-c","echo up $API; exec sleep 60"],"cwd":"/app",
 			"env":{"API":{"service":"api","port":"http","key":"url"}},"ports":[{"name":"http","port":5173}]}}}`,
 		testImage, sb.id))
-	c.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
+	c.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 
 	rows, err := c.st.ListEnvInstanceRows(bg, env.ID)
 	if err != nil || len(rows) != 1 || rows[0].Instance.Object != "api" || rows[0].Instance.Phase != model.PhaseReady {

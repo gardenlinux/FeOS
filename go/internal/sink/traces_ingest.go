@@ -120,7 +120,7 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 			Tenant: cleanText(tenant), Environment: cleanText(text[attrEnvironment]), Kind: cleanText(text[attrKind]),
 			Object: cleanText(text[attrObject]), Instance: cleanText(text[attrInstance]), Job: cleanText(text[attrJob]),
 			Source: source, Pod: cleanText(pod), Node: cleanText(text[attrNode]),
-			Replica: num(attrReplica), Release: num(attrRelease), Attempt: num(attrAttempt),
+			Replica: num(attrReplica), Deployment: num(deploymentAttr(text)), Attempt: num(attrAttempt),
 			ServiceName: service, ResourceAttributes: attrsJSON(rs.GetResource().GetAttributes()),
 		}
 		for _, ss := range rs.GetScopeSpans() {

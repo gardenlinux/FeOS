@@ -25,7 +25,7 @@ type EnvJobRun struct {
 	EnvID        uuid.UUID
 	Job          string
 	TemplateHash string
-	Release      int
+	Deployment   int
 	Attempt      int
 	SandboxID    podid.ID // "": NULL
 	Phase        string   // model.Run*
@@ -36,14 +36,14 @@ type EnvJobRun struct {
 	FinishedAt   time.Time // zero: NULL
 }
 
-const jobRunCols = `id, env_id, job, template_hash, release, attempt, sandbox_id, phase, exit_code, detail, log_tail,
+const jobRunCols = `id, env_id, job, template_hash, deployment, attempt, sandbox_id, phase, exit_code, detail, log_tail,
 	started_at, finished_at`
 
 func scanJobRun(row pgx.Row) (EnvJobRun, error) {
 	var r EnvJobRun
 	var sandbox *podid.ID
 	var finished *time.Time
-	if err := row.Scan(&r.ID, &r.EnvID, &r.Job, &r.TemplateHash, &r.Release, &r.Attempt, &sandbox, &r.Phase,
+	if err := row.Scan(&r.ID, &r.EnvID, &r.Job, &r.TemplateHash, &r.Deployment, &r.Attempt, &sandbox, &r.Phase,
 		&r.ExitCode, &r.Detail, &r.LogTail, &r.StartedAt, &finished); err != nil {
 		return EnvJobRun{}, err
 	}
@@ -71,10 +71,10 @@ func (s *Store) InsertJobRun(ctx context.Context, r EnvJobRun) (EnvJobRun, error
 	if err != nil {
 		return EnvJobRun{}, err
 	}
-	out, err := scanJobRun(s.q.QueryRow(ctx, `INSERT INTO env_job_runs (env_id, job, template_hash, release, attempt,
+	out, err := scanJobRun(s.q.QueryRow(ctx, `INSERT INTO env_job_runs (env_id, job, template_hash, deployment, attempt,
 			sandbox_id, phase, exit_code, detail, log_tail, finished_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11) RETURNING `+jobRunCols,
-		r.EnvID, r.Job, r.TemplateHash, r.Release, r.Attempt, nullID(r.SandboxID), r.Phase, nullInt(r.ExitCode),
+		r.EnvID, r.Job, r.TemplateHash, r.Deployment, r.Attempt, nullID(r.SandboxID), r.Phase, nullInt(r.ExitCode),
 		r.Detail, tail, nullTime(r.FinishedAt)))
 	if err != nil {
 		return EnvJobRun{}, insertError("insert a run of job "+r.Job, err)
@@ -142,7 +142,7 @@ func (s *Store) UpdateJobRun(ctx context.Context, before, after EnvJobRun) (EnvJ
 	what := fmt.Sprintf("run %d of job %s", before.ID, before.Job)
 	if err := fixed(what, map[string]bool{"id": before.ID != after.ID, "env_id": before.EnvID != after.EnvID,
 		"job": before.Job != after.Job, "template_hash": before.TemplateHash != after.TemplateHash,
-		"release": before.Release != after.Release, "attempt": before.Attempt != after.Attempt,
+		"deployment": before.Deployment != after.Deployment, "attempt": before.Attempt != after.Attempt,
 		"started_at": !before.StartedAt.Equal(after.StartedAt)}); err != nil {
 		return EnvJobRun{}, err
 	}

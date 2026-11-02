@@ -45,7 +45,7 @@ func TestImageCredentials(t *testing.T) {
 		t.Fatalf("referenced %v", got)
 	}
 
-	prev, next := release7(t), release7(t)
+	prev, next := deployment7(t), deployment7(t)
 	svc(&next, "expense-service", func(v *Service) { v.ImageCredentials = creds(String("bot"), String("x")) })
 	d := Diff(&prev, &next)
 	if len(d) != 1 || !strings.HasPrefix(d[0].Effect, "replaces") || d[0].Fields[0].Path != "imageCredentials" {

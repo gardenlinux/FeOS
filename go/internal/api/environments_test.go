@@ -108,13 +108,13 @@ func (f *fakeEnvs) Apply(_ context.Context, tenant, env string, req envs.ApplyRe
 	var out envs.ApplyAnswer
 	return out, f.do(envCall{"Apply", tenant, env, []any{req}}, &out)
 }
-func (f *fakeEnvs) Releases(_ context.Context, tenant, env string, limit int) (envs.ReleaseList, error) {
-	var out envs.ReleaseList
-	return out, f.do(envCall{"Releases", tenant, env, []any{limit}}, &out)
+func (f *fakeEnvs) Deployments(_ context.Context, tenant, env string, limit int) (envs.DeploymentList, error) {
+	var out envs.DeploymentList
+	return out, f.do(envCall{"Deployments", tenant, env, []any{limit}}, &out)
 }
-func (f *fakeEnvs) Release(_ context.Context, tenant, env string, n int) (envs.ReleaseDetail, error) {
-	var out envs.ReleaseDetail
-	return out, f.do(envCall{"Release", tenant, env, []any{n}}, &out)
+func (f *fakeEnvs) Deployment(_ context.Context, tenant, env string, n int) (envs.DeploymentDetail, error) {
+	var out envs.DeploymentDetail
+	return out, f.do(envCall{"Deployment", tenant, env, []any{n}}, &out)
 }
 func (f *fakeEnvs) Revert(_ context.Context, tenant, env string, n int, req envs.RevertRequest) (envs.ApplyAnswer, error) {
 	var out envs.ApplyAnswer
@@ -244,10 +244,10 @@ var fixtureMethods = map[string]string{
 	"DELETE_environments_env":                     "DeleteEnv",
 	"POST_environments_plan":                      "PlanSpec",
 	"POST_environments_env_plan":                  "Plan",
-	"POST_environments_env_releases":              "Apply",
-	"GET_environments_env_releases":               "Releases",
-	"GET_environments_env_releases_n":             "Release",
-	"POST_environments_env_releases_n_revert":     "Revert",
+	"POST_environments_env_deployments":           "Apply",
+	"GET_environments_env_deployments":            "Deployments",
+	"GET_environments_env_deployments_n":          "Deployment",
+	"POST_environments_env_deployments_n_revert":  "Revert",
 	"PUT_environments_env_objects_kind_name":      "PutObject",
 	"DELETE_environments_env_objects_kind_name":   "DeleteObject",
 	"GET_environments_env_objects_kind_name_logs": "Logs",
@@ -420,6 +420,7 @@ func TestEnvironmentArguments(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	tok := bearerOf(e.tenantToken)
+	three := 3
 	cases := []struct {
 		method, path string
 		body         any
@@ -435,9 +436,9 @@ func TestEnvironmentArguments(t *testing.T) {
 			envCall{"Logs", testTenant, "stage", []any{"service", "api", 50, 1}}, 200},
 		{"GET", "/api/v1/environments/stage/objects/addon/pg/logs", nil,
 			envCall{"Logs", testTenant, "stage", []any{"addon", "pg", 0, 0}}, 200},
-		{"GET", "/api/v1/environments/stage/releases?limit=5", nil, envCall{"Releases", testTenant, "stage", []any{5}}, 200},
-		{"GET", "/api/v1/environments/stage/releases", nil, envCall{"Releases", testTenant, "stage", []any{0}}, 200},
-		{"GET", "/api/v1/environments/stage/releases/7", nil, envCall{"Release", testTenant, "stage", []any{7}}, 200},
+		{"GET", "/api/v1/environments/stage/deployments?limit=5", nil, envCall{"Deployments", testTenant, "stage", []any{5}}, 200},
+		{"GET", "/api/v1/environments/stage/deployments", nil, envCall{"Deployments", testTenant, "stage", []any{0}}, 200},
+		{"GET", "/api/v1/environments/stage/deployments/7", nil, envCall{"Deployment", testTenant, "stage", []any{7}}, 200},
 		{"GET", "/api/v1/environments/stage/incidents?open=1", nil, envCall{"Incidents", testTenant, "stage", []any{true}}, 200},
 		{"GET", "/api/v1/environments/stage/incidents", nil, envCall{"Incidents", testTenant, "stage", []any{false}}, 200},
 		{"GET", "/api/v1/environments/stage/incidents/12", nil, envCall{"Incident", testTenant, "stage", []any{int64(12)}}, 200},
@@ -456,8 +457,23 @@ func TestEnvironmentArguments(t *testing.T) {
 			[]any{"api"}}, 202},
 		{"POST", "/api/v1/environments/stage/jobs/migrate/run", nil, envCall{"RunJob", testTenant, "stage",
 			[]any{"migrate"}}, 202},
+		{"POST", "/api/v1/environments/stage/deployments/6/revert", map[string]any{"base": 7},
+			envCall{"Revert", testTenant, "stage", []any{envs.RevertRequest{Base: 7}, 6}}, 201},
+		// The routes under the deployments' earlier word, until the next
+		// version (ADR 0018, "The deployments' word").
+		{"GET", "/api/v1/environments/stage/releases?limit=5", nil, envCall{"Deployments", testTenant, "stage", []any{5}}, 200},
+		{"GET", "/api/v1/environments/stage/releases/7", nil, envCall{"Deployment", testTenant, "stage", []any{7}}, 200},
 		{"POST", "/api/v1/environments/stage/releases/6/revert", map[string]any{"base": 7},
 			envCall{"Revert", testTenant, "stage", []any{envs.RevertRequest{Base: 7}, 6}}, 201},
+		{"POST", "/api/v1/environments/stage/releases", map[string]any{"base": 7},
+			envCall{"Apply", testTenant, "stage", []any{envs.ApplyRequest{Base: 7}}}, 201},
+		// A clone's and a tag's number under either key, both when equal.
+		{"POST", "/api/v1/environments/stage/clone", map[string]any{"name": "demo", "release": 3},
+			envCall{"Clone", testTenant, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
+		{"POST", "/api/v1/environments/stage/clone", map[string]any{"name": "demo", "deployment": 3, "release": 3},
+			envCall{"Clone", testTenant, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
+		{"PUT", "/api/v1/environments/stage/tags/v1", map[string]any{"release": 4},
+			envCall{"PutTag", testTenant, "stage", []any{envs.PutTagRequest{Deployment: 4}, "v1"}}, 200},
 		{"POST", "/api/v1/environments/plan", map[string]any{"spec": map[string]any{}},
 			envCall{"PlanSpec", testTenant, "", []any{envs.PlanSpecRequest{Spec: json.RawMessage(`{}`)}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true},
@@ -487,14 +503,14 @@ func TestEnvironmentArguments(t *testing.T) {
 	// What cannot be read is a 400 before the service is asked.
 	for _, c := range []struct{ method, path, want string }{
 		{"GET", "/api/v1/environments?label=nolabel", `label must be key=value, got \"nolabel\"`},
-		{"GET", "/api/v1/environments/stage/releases/x", `release \"x\" is not a number`},
-		{"GET", "/api/v1/environments/stage/releases?limit=x", "limit must be an integer"},
+		{"GET", "/api/v1/environments/stage/deployments/x", `deployment \"x\" is not a number`},
+		{"GET", "/api/v1/environments/stage/deployments?limit=x", "limit must be an integer"},
 		{"GET", "/api/v1/environments/stage/incidents/x", `incident \"x\" is not a number`},
 		{"GET", "/api/v1/environments/stage/incidents?open=maybe", "open must be a boolean"},
 		{"GET", "/api/v1/environments/stage/access-logs?traceId=4BF92F3577B34DA6A3CE929D0E0E4736", "traceId must be 32 lower case hex digits"},
 		{"GET", "/api/v1/environments/stage/traffic?window=7d", `window must be 1h or 24h, got \"7d\"`},
 		{"DELETE", "/api/v1/environments/stage/objects/route/api?base=x", "base must be an integer"},
-		{"POST", "/api/v1/environments/stage/releases", "request body must be a JSON object"},
+		{"POST", "/api/v1/environments/stage/deployments", "request body must be a JSON object"},
 	} {
 		fe := &fakeEnvs{}
 		e.srv.deps.Environments = fe
@@ -503,6 +519,12 @@ func TestEnvironmentArguments(t *testing.T) {
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), c.want) || len(fe.calls) != 0 {
 			t.Fatalf("%s %s: %d %s %+v", c.method, c.path, w.Code, w.Body, fe.calls)
 		}
+	}
+	// A number under both keys that differ is a 400.
+	both := e.serveWith(newServer(e.srv.cfg, e.srv.deps), request{method: "POST", path: "/api/v1/environments/stage/clone",
+		body: map[string]any{"name": "demo", "deployment": 3, "release": 4}, header: http.Header{"Authorization": {tok}}})
+	if both.Code != http.StatusBadRequest || !strings.Contains(both.Body.String(), "deployment 3 and release 4 differ") {
+		t.Fatalf("both keys: %d %s", both.Code, both.Body)
 	}
 	// PUT …/public needs its field: a body without it, or with null, is a
 	// 400, and so is one that is not a boolean.
@@ -583,7 +605,7 @@ func (envPorts) ForwardTo(w http.ResponseWriter, r *http.Request, id podid.ID, p
 }
 
 // The real service behind the routes: create, secrets, plan, apply,
-// status, releases, tags, route tokens and the door, delete.
+// status, deployments, tags, route tokens and the door, delete.
 func TestEnvironmentsEndToEnd(t *testing.T) {
 	t.Parallel()
 	var svc *envs.Service
@@ -624,19 +646,19 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 	if p := decode[envs.PlanAnswer](t, w); w.Code != 200 || !p.Valid || len(p.Diff) != 3 {
 		t.Fatalf("plan %d %s", w.Code, w.Body)
 	}
-	w = do("POST", "/api/v1/environments/"+st.ID+"/releases", map[string]any{"spec": spec, "base": 0})
+	w = do("POST", "/api/v1/environments/"+st.ID+"/deployments", map[string]any{"spec": spec, "base": 0})
 	if a := decode[envs.ApplyAnswer](t, w); w.Code != 201 || a.Number != 1 {
 		t.Fatalf("apply %d %s", w.Code, w.Body)
 	}
-	w = do("POST", "/api/v1/environments/stage/releases", map[string]any{"spec": spec, "base": 1})
+	w = do("POST", "/api/v1/environments/stage/deployments", map[string]any{"spec": spec, "base": 1})
 	if a := decode[envs.ApplyAnswer](t, w); w.Code != 200 || !a.Unchanged {
 		t.Fatalf("unchanged %d %s", w.Code, w.Body)
 	}
 	spec["services"].(map[string]any)["api"].(map[string]any)["replicas"] = 2
-	w = do("POST", "/api/v1/environments/stage/releases", map[string]any{"spec": spec, "base": 0})
-	expect(t, w, http.StatusConflict, `{"error":"base 0 is not the current release 1: plan again on release 1",`+
+	w = do("POST", "/api/v1/environments/stage/deployments", map[string]any{"spec": spec, "base": 0})
+	expect(t, w, http.StatusConflict, `{"error":"base 0 is not the current deployment 1: plan again on deployment 1",`+
 		`"code":"base_mismatch","current":1}`+"\n")
-	w = do("POST", "/api/v1/environments/stage/releases", map[string]any{"spec": map[string]any{"nope": 1}, "base": 1})
+	w = do("POST", "/api/v1/environments/stage/deployments", map[string]any{"spec": map[string]any{"nope": 1}, "base": 1})
 	if w.Code != 422 || !strings.Contains(w.Body.String(), `"code":"invalid_spec"`) ||
 		!strings.Contains(w.Body.String(), `"path":"nope"`) {
 		t.Fatalf("invalid %d %s", w.Code, w.Body)
@@ -646,16 +668,16 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 		len(s.Objects) != 1 || s.Routes[0].Port != 8080 {
 		t.Fatalf("status %d %s", w.Code, w.Body)
 	}
-	w = do("GET", "/api/v1/environments/stage/releases/1", nil)
-	if d := decode[envs.ReleaseDetail](t, w); w.Code != 200 || len(d.Spec) == 0 || len(d.Diff) != 3 {
-		t.Fatalf("release %d %s", w.Code, w.Body)
+	w = do("GET", "/api/v1/environments/stage/deployments/1", nil)
+	if d := decode[envs.DeploymentDetail](t, w); w.Code != 200 || len(d.Spec) == 0 || len(d.Diff) != 3 {
+		t.Fatalf("deployment %d %s", w.Code, w.Body)
 	}
-	expect(t, do("GET", "/api/v1/environments/stage/releases/9", nil), http.StatusNotFound, errBody("no such release"))
-	expect(t, do("PUT", "/api/v1/environments/stage/tags/v1", map[string]any{"release": 1}), http.StatusOK, "")
+	expect(t, do("GET", "/api/v1/environments/stage/deployments/9", nil), http.StatusNotFound, errBody("no such deployment"))
+	expect(t, do("PUT", "/api/v1/environments/stage/tags/v1", map[string]any{"deployment": 1}), http.StatusOK, "")
 	expect(t, do("DELETE", "/api/v1/environments/stage/tags/v1", nil), http.StatusNoContent, "")
 	expect(t, do("GET", "/api/v1/environments/stage/secrets", nil), http.StatusOK, "")
 	expect(t, do("DELETE", "/api/v1/environments/stage/secrets/token", nil), http.StatusConflict,
-		errBody("release 1 pins secret token: apply a release without it first"))
+		errBody("deployment 1 pins secret token: apply a deployment without it first"))
 	// Without an apps zone nothing can be public; unpublishing is no error.
 	expect(t, do("PUT", "/api/v1/environments/stage/public", map[string]any{"public": true}), http.StatusConflict,
 		errBody("the platform serves no apps zone (--apps-zone); an environment cannot be public"))

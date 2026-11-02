@@ -17,19 +17,19 @@ import (
 	"github.com/gardenlinux/feos/go/internal/model"
 )
 
-// EnvRelease is a row of env_releases: a numbered, immutable desired state
+// EnvDeployment is a row of env_deployments: a numbered, immutable desired state
 // of an environment. Only its state, reason and times change.
-type EnvRelease struct {
+type EnvDeployment struct {
 	EnvID  uuid.UUID
 	Number int
-	// Spec is the normalised release spec; nil in ListReleases.
+	// Spec is the normalised deployment spec; nil in ListDeployments.
 	Spec            json.RawMessage
-	Base            int // the release it was made on; 0: none
+	Base            int // the deployment it was made on; 0: none
 	Author, Message string
 	Annotations     map[string]string
 	Origin          string // model.Origin*
 	OriginRef       string
-	State           string // model.Release*
+	State           string // model.Deployment*
 	Reason          string
 	StartedAt       time.Time // zero: NULL
 	FinishedAt      time.Time // zero: NULL
@@ -37,14 +37,14 @@ type EnvRelease struct {
 	UpdatedAt       time.Time
 }
 
-const releaseSummaryCols = `env_id, number, base, author, message, annotations, origin, origin_ref, state, reason,
+const deploymentSummaryCols = `env_id, number, base, author, message, annotations, origin, origin_ref, state, reason,
 	started_at, finished_at, created_at, updated_at`
 
-// releaseCols are the summary's columns and the spec, last.
-const releaseCols = releaseSummaryCols + ", spec"
+// deploymentCols are the summary's columns and the spec, last.
+const deploymentCols = deploymentSummaryCols + ", spec"
 
-func scanRelease(row pgx.Row, withSpec bool) (EnvRelease, error) {
-	var r EnvRelease
+func scanDeployment(row pgx.Row, withSpec bool) (EnvDeployment, error) {
+	var r EnvDeployment
 	var started, finished *time.Time
 	dst := []any{&r.EnvID, &r.Number, &r.Base, &r.Author, &r.Message, &r.Annotations, &r.Origin, &r.OriginRef,
 		&r.State, &r.Reason, &started, &finished, &r.CreatedAt, &r.UpdatedAt}
@@ -53,7 +53,7 @@ func scanRelease(row pgx.Row, withSpec bool) (EnvRelease, error) {
 		dst = append(dst, &spec)
 	}
 	if err := row.Scan(dst...); err != nil {
-		return EnvRelease{}, err
+		return EnvDeployment{}, err
 	}
 	r.StartedAt, r.FinishedAt = timeOf(started), timeOf(finished)
 	r.Annotations = stringMap(r.Annotations)
@@ -63,66 +63,66 @@ func scanRelease(row pgx.Row, withSpec bool) (EnvRelease, error) {
 	return r, nil
 }
 
-// InsertRelease inserts a release (state waiting when empty); the caller
-// holds its environment FOR UPDATE and sets environments.release with it.
+// InsertDeployment inserts a deployment (state waiting when empty); the caller
+// holds its environment FOR UPDATE and sets environments.deployment with it.
 // A number the environment has is ErrExists, an unknown environment
 // ErrNoRow.
-func (s *Store) InsertRelease(ctx context.Context, r EnvRelease) (EnvRelease, error) {
+func (s *Store) InsertDeployment(ctx context.Context, r EnvDeployment) (EnvDeployment, error) {
 	if r.State == "" {
-		r.State = model.ReleaseWaiting
+		r.State = model.DeploymentWaiting
 	}
 	ann, err := jsonText(stringMap(r.Annotations))
 	if err != nil {
-		return EnvRelease{}, fmt.Errorf("insert release %d: %w", r.Number, err)
+		return EnvDeployment{}, fmt.Errorf("insert deployment %d: %w", r.Number, err)
 	}
-	out, err := scanRelease(s.q.QueryRow(ctx, `INSERT INTO env_releases (env_id, number, spec, base, author, message,
+	out, err := scanDeployment(s.q.QueryRow(ctx, `INSERT INTO env_deployments (env_id, number, spec, base, author, message,
 			annotations, origin, origin_ref, state, reason, started_at, finished_at)
-		VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13) RETURNING `+releaseCols,
+		VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13) RETURNING `+deploymentCols,
 		r.EnvID, r.Number, string(r.Spec), r.Base, r.Author, r.Message, ann, r.Origin, r.OriginRef, r.State, r.Reason,
 		nullTime(r.StartedAt), nullTime(r.FinishedAt)), true)
 	if err != nil {
-		return EnvRelease{}, insertError(fmt.Sprintf("insert release %d of environment %s", r.Number, r.EnvID), err)
+		return EnvDeployment{}, insertError(fmt.Sprintf("insert deployment %d of environment %s", r.Number, r.EnvID), err)
 	}
 	return out, nil
 }
 
-// GetRelease reads a release with its spec; ErrNoRow if there is none.
-func (s *Store) GetRelease(ctx context.Context, envID uuid.UUID, number int) (EnvRelease, error) {
-	return s.LockRelease(ctx, envID, number, NoLock)
+// GetDeployment reads a deployment with its spec; ErrNoRow if there is none.
+func (s *Store) GetDeployment(ctx context.Context, envID uuid.UUID, number int) (EnvDeployment, error) {
+	return s.LockDeployment(ctx, envID, number, NoLock)
 }
 
-// LockRelease reads a release with its spec and locks its row with lock;
+// LockDeployment reads a deployment with its spec and locks its row with lock;
 // ErrNoRow if there is none.
-func (s *Store) LockRelease(ctx context.Context, envID uuid.UUID, number int, lock RowLock) (EnvRelease, error) {
-	r, err := scanRelease(s.q.QueryRow(ctx, "SELECT "+releaseCols+` FROM env_releases
+func (s *Store) LockDeployment(ctx context.Context, envID uuid.UUID, number int, lock RowLock) (EnvDeployment, error) {
+	r, err := scanDeployment(s.q.QueryRow(ctx, "SELECT "+deploymentCols+` FROM env_deployments
 		WHERE env_id = $1 AND number = $2 `+string(lock), envID, number), true)
 	if err != nil {
-		return EnvRelease{}, noRow(err, ErrNoRow)
+		return EnvDeployment{}, noRow(err, ErrNoRow)
 	}
 	return r, nil
 }
 
-// ListReleases returns up to limit releases of the environment without
+// ListDeployments returns up to limit deployments of the environment without
 // their specs, newest first.
-func (s *Store) ListReleases(ctx context.Context, envID uuid.UUID, limit int) ([]EnvRelease, error) {
-	rows, err := s.q.Query(ctx, "SELECT "+releaseSummaryCols+` FROM env_releases
+func (s *Store) ListDeployments(ctx context.Context, envID uuid.UUID, limit int) ([]EnvDeployment, error) {
+	rows, err := s.q.Query(ctx, "SELECT "+deploymentSummaryCols+` FROM env_deployments
 		WHERE env_id = $1 ORDER BY number DESC LIMIT $2`, envID, limit)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (EnvRelease, error) { return scanRelease(r, false) })
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (EnvDeployment, error) { return scanDeployment(r, false) })
 }
 
-// UpdateRelease writes the state, reason, started_at and finished_at in
+// UpdateDeployment writes the state, reason, started_at and finished_at in
 // which after differs from before (updated_at = now()); every other column
 // is immutable. When nothing differs, before is returned unwritten.
-func (s *Store) UpdateRelease(ctx context.Context, before, after EnvRelease) (EnvRelease, error) {
-	what := fmt.Sprintf("release %d of environment %s", before.Number, before.EnvID)
+func (s *Store) UpdateDeployment(ctx context.Context, before, after EnvDeployment) (EnvDeployment, error) {
+	what := fmt.Sprintf("deployment %d of environment %s", before.Number, before.EnvID)
 	if err := fixed(what, map[string]bool{"env_id": before.EnvID != after.EnvID, "number": before.Number != after.Number,
 		"base": before.Base != after.Base, "author": before.Author != after.Author, "message": before.Message != after.Message,
 		"annotations": !maps.Equal(before.Annotations, after.Annotations), "origin": before.Origin != after.Origin,
 		"origin_ref": before.OriginRef != after.OriginRef}); err != nil {
-		return EnvRelease{}, err
+		return EnvDeployment{}, err
 	}
 	u := newUpdates(before.EnvID, before.Number)
 	u.set("state", before.State != after.State, after.State)
@@ -132,19 +132,19 @@ func (s *Store) UpdateRelease(ctx context.Context, before, after EnvRelease) (En
 	if u.empty() {
 		return before, nil
 	}
-	r, err := scanRelease(s.q.QueryRow(ctx, "UPDATE env_releases SET "+u.clause(true)+
-		" WHERE env_id = $1 AND number = $2 RETURNING "+releaseCols, u.args...), true)
+	r, err := scanDeployment(s.q.QueryRow(ctx, "UPDATE env_deployments SET "+u.clause(true)+
+		" WHERE env_id = $1 AND number = $2 RETURNING "+deploymentCols, u.args...), true)
 	if err != nil {
-		return EnvRelease{}, fmt.Errorf("update %s: %w", what, noRow(err, ErrNoRow))
+		return EnvDeployment{}, fmt.Errorf("update %s: %w", what, noRow(err, ErrNoRow))
 	}
 	return r, nil
 }
 
-// ReplaceReleases marks the releases of the environment numbered below
+// ReplaceDeployments marks the deployments of the environment numbered below
 // below whose state is one of states replaced (finished_at = now() where
 // unset) and returns their numbers, ascending.
-func (s *Store) ReplaceReleases(ctx context.Context, envID uuid.UUID, below int, states ...string) ([]int, error) {
-	rows, err := s.q.Query(ctx, `UPDATE env_releases SET state = 'replaced', finished_at = coalesce(finished_at, now()),
+func (s *Store) ReplaceDeployments(ctx context.Context, envID uuid.UUID, below int, states ...string) ([]int, error) {
+	rows, err := s.q.Query(ctx, `UPDATE env_deployments SET state = 'replaced', finished_at = coalesce(finished_at, now()),
 			updated_at = now()
 		WHERE env_id = $1 AND number < $2 AND state = ANY($3) RETURNING number`, envID, below, nonNil(states))
 	if err != nil {
@@ -158,7 +158,7 @@ func (s *Store) ReplaceReleases(ctx context.Context, envID uuid.UUID, below int,
 	return nums, nil
 }
 
-// EnvTag is a row of env_tags: a movable name of a release.
+// EnvTag is a row of env_tags: a movable name of a deployment.
 type EnvTag struct {
 	EnvID   uuid.UUID
 	Tag     string
@@ -175,8 +175,8 @@ func scanTag(row pgx.Row) (EnvTag, error) {
 	return t, err
 }
 
-// PutTag points a tag at a release (moved_at = now()), creating or moving
-// it; a release the environment does not have is ErrNoRow.
+// PutTag points a tag at a deployment (moved_at = now()), creating or moving
+// it; a deployment the environment does not have is ErrNoRow.
 func (s *Store) PutTag(ctx context.Context, t EnvTag) (EnvTag, error) {
 	out, err := scanTag(s.q.QueryRow(ctx, `INSERT INTO env_tags (env_id, tag, number, moved_by) VALUES ($1, $2, $3, $4)
 		ON CONFLICT (env_id, tag) DO UPDATE SET number = excluded.number, moved_by = excluded.moved_by, moved_at = now()

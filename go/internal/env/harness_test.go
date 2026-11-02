@@ -36,7 +36,7 @@ const (
 )
 
 // stageSpec is a spec the real blueprints accept: two image services
-// (one idle behind the root route), a release job, postgres and nats, a
+// (one idle behind the root route), a deploy job, postgres and nats, a
 // secret.
 const stageSpec = `{
   "services": {
@@ -224,7 +224,7 @@ func (h *harness) putSecret(env, name, value string) int {
 	return v.Version
 }
 
-// apply applies a spec to tenantA's environment and wants a release.
+// apply applies a spec to tenantA's environment and wants a deployment.
 func (h *harness) apply(env, raw string, base int) ApplyAnswer {
 	h.t.Helper()
 	a, err := h.svc.Apply(h.ctx(), tenantA, env, ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "tester"})
@@ -271,7 +271,7 @@ func (h *harness) exec(sql string, args ...any) {
 
 // instance inserts an instance row of an environment with its
 // controller's row: a sandbox in state on node with address.
-func (h *harness) instance(envID uuid.UUID, kind, object string, replica, release int, phase, state, node, address string) podid.ID {
+func (h *harness) instance(envID uuid.UUID, kind, object string, replica, deployment int, phase, state, node, address string) podid.ID {
 	h.t.Helper()
 	id := podid.Mint()
 	zero := 0
@@ -286,7 +286,7 @@ func (h *harness) instance(envID uuid.UUID, kind, object string, replica, releas
 	}
 	h.exec(`UPDATE sandboxes SET client_state = $2, node = $3, address = $4 WHERE id = $1`, id, state, nodeArg, address)
 	if _, err := h.st.InsertEnvInstance(h.ctx(), store.EnvInstance{SandboxID: id, EnvID: envID, Kind: kind, Object: object,
-		Replica: replica, TemplateHash: "h", Release: release, Phase: phase}); err != nil {
+		Replica: replica, TemplateHash: "h", Deployment: deployment, Phase: phase}); err != nil {
 		h.t.Fatal(err)
 	}
 	return id

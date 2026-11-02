@@ -139,7 +139,7 @@ func stateWith(self wire.Self, hosts []string, services ...wire.Service) *wire.S
 	s := wire.NewState()
 	s.Self = self
 	s.Envs[testEnv] = wire.Env{
-		ID: testEnv, Tenant: "acme", Name: "app", Hosts: hosts, Release: 1,
+		ID: testEnv, Tenant: "acme", Name: "app", Hosts: hosts, Deployment: 1,
 		Routes: []wire.Route{
 			{Name: "root", Path: "/", Service: "web", Port: "http"},
 			{Name: "api", Path: "/api/", Service: "api", Port: "http", Strip: true},

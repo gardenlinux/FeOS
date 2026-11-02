@@ -693,8 +693,8 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .inst-tbl .state-label { font-size: 12px; }
 .detailcell { overflow-wrap: anywhere; color: var(--warn); }
 .msgcell { min-width: 200px; max-width: 420px; overflow-wrap: anywhere; }
-.release-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 10px; }
-.release-head .badge { margin-left: 0; }
+.deployment-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 10px; }
+.deployment-head .badge { margin-left: 0; }
 .annlist { display: flex; flex-direction: column; gap: 2px; }
 .subhead { margin: 0 0 8px; }
 .diff { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 8px; }
@@ -716,8 +716,8 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .incident-summary { margin: 0 0 10px; font-size: 13.5px; overflow-wrap: anywhere; }
 .chiprow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 2px 0 8px; }
 .chipbtn.objchip { gap: 0; }
-.releases-tbl .labelchip { max-width: 210px; }
-.releases-tbl .trunc { max-width: 170px; }
+.deployments-tbl .labelchip { max-width: 210px; }
+.deployments-tbl .trunc { max-width: 170px; }
 .chiprow .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-right: 4px; }
 .logs { margin-top: 6px; }
 .logs .pane-toolbar h2 { font-size: 13px; }

@@ -50,15 +50,15 @@ func (s *Store) EnvCtlSandboxes(ctx context.Context, envID uuid.UUID) ([]Sandbox
 }
 
 // EnvCtlCloseIncidents closes the environment's open incidents of one of
-// conditions whose release is below below, and returns how many.
+// conditions whose deployment is below below, and returns how many.
 func (s *Store) EnvCtlCloseIncidents(ctx context.Context, envID uuid.UUID, below int, conditions ...string) (int64, error) {
 	ct, err := s.q.Exec(ctx, `UPDATE env_incidents SET closed_at = now()
-		WHERE env_id = $1 AND release < $2 AND condition = ANY($3) AND closed_at IS NULL`, envID, below, nonNil(conditions))
+		WHERE env_id = $1 AND deployment < $2 AND condition = ANY($3) AND closed_at IS NULL`, envID, below, nonNil(conditions))
 	return ct.RowsAffected(), err
 }
 
 // EnvCtlCloseObjectIncidents closes the open incidents of condition of an
-// object of the environment ("<kind>/<name>"), of any release, and
+// object of the environment ("<kind>/<name>"), of any deployment, and
 // returns how many.
 func (s *Store) EnvCtlCloseObjectIncidents(ctx context.Context, envID uuid.UUID, object, condition string) (int64, error) {
 	ct, err := s.q.Exec(ctx, `UPDATE env_incidents SET closed_at = now()
@@ -172,20 +172,20 @@ func (s *Store) EnvCtlRunningJobRuns(ctx context.Context, envID uuid.UUID) ([]En
 		WHERE env_id = $1 AND phase = 'running' ORDER BY id`, envID))
 }
 
-// EnvCtlJobWaitedUntil is when a release's wait for its job ended: the
-// latest end of the job's runs of other releases that ended after since
-// (the release's start) or still run, now() for those; zero when there
-// is none, or when a run of the release's template hash had succeeded by
-// since, so that the release never waited for the job ("": the hash is
+// EnvCtlJobWaitedUntil is when a deployment's wait for its job ended: the
+// latest end of the job's runs of other deployments that ended after since
+// (the deployment's start) or still run, now() for those; zero when there
+// is none, or when a run of the deployment's template hash had succeeded by
+// since, so that the deployment never waited for the job ("": the hash is
 // not known, and the runs count).
-func (s *Store) EnvCtlJobWaitedUntil(ctx context.Context, envID uuid.UUID, job, hash string, release int,
+func (s *Store) EnvCtlJobWaitedUntil(ctx context.Context, envID uuid.UUID, job, hash string, deployment int,
 	since time.Time) (time.Time, error) {
 	var until *time.Time
 	err := s.q.QueryRow(ctx, `SELECT max(COALESCE(finished_at, now())) FROM env_job_runs
-		WHERE env_id = $1 AND job = $2 AND release <> $4 AND COALESCE(finished_at, now()) > $5
+		WHERE env_id = $1 AND job = $2 AND deployment <> $4 AND COALESCE(finished_at, now()) > $5
 			AND NOT EXISTS (SELECT 1 FROM env_job_runs o WHERE o.env_id = $1 AND o.job = $2
 				AND o.template_hash = $3 AND o.phase = 'succeeded' AND o.finished_at <= $5)`,
-		envID, job, hash, release, since).Scan(&until)
+		envID, job, hash, deployment, since).Scan(&until)
 	return timeOf(until), err
 }
 
@@ -247,10 +247,10 @@ func (s *Store) EnvCtlExisting(ctx context.Context, envs []uuid.UUID, sandboxes 
 // from (EnvCtlIngressInputs): the instance the sandbox is, as its
 // env_instances row has it; EnvID uuid.Nil when it has none.
 type IngressInput struct {
-	EnvID   uuid.UUID
-	Kind    string // "service", "addon", "job"
-	Object  string
-	Release int
+	EnvID      uuid.UUID
+	Kind       string // "service", "addon", "job"
+	Object     string
+	Deployment int
 }
 
 // EnvCtlIngressInputs returns, for each of the ids that is a sandbox, what
@@ -262,7 +262,7 @@ func (s *Store) EnvCtlIngressInputs(ctx context.Context, ids []podid.ID) (map[po
 		return out, nil
 	}
 	rows, err := s.q.Query(ctx, `SELECT s.id, i.env_id, coalesce(i.kind, ''), coalesce(i.object, ''),
-			coalesce(i.release, 0)
+			coalesce(i.deployment, 0)
 		FROM sandboxes s LEFT JOIN env_instances i ON i.sandbox_id = s.id WHERE s.id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
@@ -272,7 +272,7 @@ func (s *Store) EnvCtlIngressInputs(ctx context.Context, ids []podid.ID) (map[po
 		var id podid.ID
 		var envID *uuid.UUID
 		var in IngressInput
-		if err := rows.Scan(&id, &envID, &in.Kind, &in.Object, &in.Release); err != nil {
+		if err := rows.Scan(&id, &envID, &in.Kind, &in.Object, &in.Deployment); err != nil {
 			return nil, err
 		}
 		in.EnvID = uuidOf(envID)

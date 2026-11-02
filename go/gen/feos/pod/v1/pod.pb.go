@@ -1121,7 +1121,7 @@ type CreatePodRequest struct {
 	// the pod's record and sends them with each of its containers' log
 	// streams to the sink as OTLP resource attributes, as they are
 	// (ferun.tenant, ferun.instance, ferun.environment, ferun.kind,
-	// ferun.object, ferun.replica, ferun.release, ferun.job, ferun.attempt,
+	// ferun.object, ferun.replica, ferun.deployment, ferun.job, ferun.attempt,
 	// ferun.retention_days; docs/architecture/sink.md). Taken by a new pod only. Empty: the pod's logs
 	// are not shipped.
 	LogLabels map[string]string `protobuf:"bytes,5,rep,name=log_labels,json=logLabels,proto3" json:"log_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`

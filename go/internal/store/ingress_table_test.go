@@ -13,12 +13,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// routedEnv makes a public environment of owner at release 1.
+// routedEnv makes a public environment of owner at deployment 1.
 func routedEnv(t *testing.T, s *store.Store, owner, name string) store.Environment {
 	t.Helper()
 	e := mkEnv(t, s, owner, name)
 	after := e
-	after.Release = 1
+	after.Deployment = 1
 	if _, err := s.UpdateEnvironment(bg, e, after); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func routingEnvs(rows []store.IngressRoutingRow) []uuid.UUID {
 // IngressRouting returns public environments with their service instances
 // that are not stopping, environments without one as a single row, and
 // leaves out what the ingress does not serve: environments not public,
-// deleting, without a release, of a deleting tenant or without a host
+// deleting, without a deployment, of a deleting tenant or without a host
 // label; jobs and stopping instances.
 func TestIngressRouting(t *testing.T) {
 	s, _ := newStore(t)
@@ -76,14 +76,14 @@ func TestIngressRouting(t *testing.T) {
 	}
 	job := mkInstance(t, s, web)
 	if _, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: job.ID, EnvID: web.ID, Kind: "job", Object: "migrate",
-		TemplateHash: "j1", Release: 1}); err != nil {
+		TemplateHash: "j1", Deployment: 1}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Public, without instances: one row.
 	bare := routedEnv(t, s, "acme", "bare")
 	// Left out: never published (no label), unpublished, deleting, no
-	// release, a deleting tenant's.
+	// deployment, a deleting tenant's.
 	mkEnv(t, s, "acme", "private")
 	unpublished := routedEnv(t, s, "acme", "unpublished")
 	publish(t, s, unpublished.ID, false)
@@ -111,13 +111,13 @@ func TestIngressRouting(t *testing.T) {
 	for _, r := range rows {
 		switch r.EnvID {
 		case web.ID:
-			if !r.HasInstance || r.SandboxID != sb.ID || r.Object != "web" || r.Replica != 0 || r.InstanceRelease != 1 ||
+			if !r.HasInstance || r.SandboxID != sb.ID || r.Object != "web" || r.Replica != 0 || r.InstanceDeployment != 1 ||
 				r.Phase != model.PhaseReady || !slices.Equal(r.IngressPorts, []int{80, 8080}) || r.Address != "fd00::5" ||
 				r.ClientState != model.StateRunning || r.Op != "" || r.Node != "n1" || r.NodeGroupVersion != 7 ||
 				r.IdleAfterS == nil || *r.IdleAfterS != 60 {
 				t.Fatalf("instance row %+v", r)
 			}
-			if r.Owner != "acme" || r.Name != "web" || r.HostLabel != "web-acme" || r.Release != 1 || r.Deployed != 0 ||
+			if r.Owner != "acme" || r.Name != "web" || r.HostLabel != "web-acme" || r.Deployment != 1 || r.Deployed != 0 ||
 				!r.CreatedAt.Equal(web.CreatedAt) {
 				t.Fatalf("environment of the row %+v", r)
 			}

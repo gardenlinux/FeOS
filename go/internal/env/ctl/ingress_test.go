@@ -35,7 +35,7 @@ const (
 
 // ingressSpec is a spec with an image service web of two ports, an addon,
 // a manual job and routes (the routes' JSON, comma-separated): its
-// releases differ in their routes and replicas only, so that web's
+// deployments differ in their routes and replicas only, so that web's
 // template stays.
 func ingressSpec(replicas int, routes ...string) string {
 	return fmt.Sprintf(`{"services":{"web":{"image":%q,"command":["/app"],"replicas":%d,
@@ -199,7 +199,7 @@ func admitted(rows []store.EnvInstanceRow, ports ...int) bool {
 // ferun-ingress lists the ingress at its version, and both are recorded
 // as admitted. Unpublishing empties the rule and republishing fills it,
 // without a roll; a route added or removed changes the ports without new
-// rows (a removed one once its release is deployed). Addons and jobs never
+// rows (a removed one once its deployment is deployed). Addons and jobs never
 // name an ing group. An ingress removed leaves ferun-ingress at a new
 // version.
 func TestIngressGroups(t *testing.T) {
@@ -208,7 +208,7 @@ func TestIngressGroups(t *testing.T) {
 	addr := h.meshIngress("ingress-0")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, ingressSpec(2, webRoute))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 60*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 	before := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready)
 
 	// Never published: no flag, no ing group, the hash of the template as
@@ -308,16 +308,16 @@ func TestIngressGroups(t *testing.T) {
 	stable("web rolled after publishing again")
 
 	// A route added opens its port without new rows; removed, the port
-	// closes once its release is deployed.
+	// closes once its deployment is deployed.
 	r2 := h.apply(env.ID, ingressSpec(2, webRoute, adminRoute))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
 	eventually(t, 30*time.Second, "both routed ports open and admitted", func() bool {
 		return h.opens("n1", published[0], 8080, 9090) && h.opens("n1", published[1], 8080, 9090) &&
 			admitted(h.rowsOf(env.ID, spec.KindService, "web"), 8080, 9090)
 	})
 	stable("web rolled for a route")
 	r3 := h.apply(env.ID, ingressSpec(2, webRoute))
-	h.waitRelease(env.ID, r3, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r3, model.DeploymentDeployed, 30*time.Second)
 	eventually(t, 30*time.Second, "the removed route's port closed", func() bool {
 		return h.opens("n1", published[0], 8080) && h.opens("n1", published[1], 8080) &&
 			admitted(h.rowsOf(env.ID, spec.KindService, "web"), 8080)
@@ -348,7 +348,7 @@ func TestIngressGroupsStale(t *testing.T) {
 	h.meshIngress("ingress-0")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, webSpec(2, webRoute))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	h.setPublic(env.ID, true)
 	var rows []store.EnvInstanceRow
 	eventually(t, 60*time.Second, "web rolled to rows with their ing groups", func() bool {
@@ -388,7 +388,7 @@ func TestIngressGroupsStale(t *testing.T) {
 	// A replica stopped and deleted: its ing group goes.
 	gone := rows[1]
 	r2 := h.apply(env.ID, webSpec(1, webRoute))
-	h.waitRelease(env.ID, r2, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
 	eventually(t, 30*time.Second, "the stopped replica's row gone", func() bool {
 		_, err := h.st.GetSandbox(bg, gone.Sandbox.ID)
 		return err != nil

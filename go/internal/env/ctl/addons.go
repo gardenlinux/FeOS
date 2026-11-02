@@ -151,7 +151,7 @@ func (c *Controller) stepAddon(ctx context.Context, s *stepState, name string, a
 }
 
 // fallbackAddon is the addon a step keeps while R failed (T is the
-// deployed release, §13.5): T's when the current row runs T's template;
+// deployed deployment, §13.5): T's when the current row runs T's template;
 // R's when it runs R's (R recreated it before it failed), so that it is
 // kept, healed and provisioned as R has it, never recreated back (to an
 // older version than its data, or for a second downtime); else T's.
@@ -188,7 +188,7 @@ func (c *Controller) dataRefusal(ctx context.Context, v *view, p *addonPlan, vol
 		prev.Type = vol.AddonType
 	}
 	if hasCur {
-		if sp, err := c.releaseSpec(ctx, v.env, cur.Instance.Release); err == nil {
+		if sp, err := c.deploymentSpec(ctx, v.env, cur.Instance.Deployment); err == nil {
 			if ra, ok := sp.Addons[p.name]; ok && ra.Type == prev.Type {
 				ran := specAddon(p.bp, p.name, ra)
 				prev.Plan, prev.Options = ran.Plan, ran.Options
@@ -215,8 +215,8 @@ func (c *Controller) refuseAddon(ctx context.Context, s *stepState, p *addonPlan
 	}
 	s.wait(p.object(), "%s", reason)
 	if deploying(v) {
-		if err := c.failRelease(ctx, v, reason, p.object(), model.ConditionRolloutFailed,
-			evidence{Diff: c.releaseDiff(ctx, v)}); err == nil {
+		if err := c.failDeployment(ctx, v, reason, p.object(), model.ConditionRolloutFailed,
+			evidence{Diff: c.deploymentDiff(ctx, v)}); err == nil {
 			s.failed = true
 		}
 		return
@@ -362,7 +362,7 @@ func (c *Controller) newAddon(ctx context.Context, s *stepState, p *addonPlan, v
 			pin = vol.Node
 		}
 	}
-	if _, err := c.insertInstance(ctx, v, insert{plan: &p.podPlan, release: v.targetNum, pin: pin}); err != nil {
+	if _, err := c.insertInstance(ctx, v, insert{plan: &p.podPlan, deployment: v.targetNum, pin: pin}); err != nil {
 		s.wait(p.object(), "addon %s: %v", p.name, err)
 		return
 	}

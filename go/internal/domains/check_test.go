@@ -572,7 +572,7 @@ func TestBothGracesOneIncident(t *testing.T) {
 	if err != nil || len(list) != 1 || list[0].Condition != model.ConditionDomainRecordWrong ||
 		!strings.Contains(list[0].Summary, "TXT record _ferun-challenge.both.example.com") ||
 		!strings.Contains(list[0].Summary, "resolved elsewhere than "+testEdge) ||
-		!strings.Contains(list[0].Summary, rfc3339(v.RecordMissingSince.Add(72*time.Hour))) || list[0].Release != 1 {
+		!strings.Contains(list[0].Summary, rfc3339(v.RecordMissingSince.Add(72*time.Hour))) || list[0].Deployment != 1 {
 		t.Fatalf("incidents %+v %v", list, err)
 	}
 	h.dns.setTXT("both.example.com", d.Token)

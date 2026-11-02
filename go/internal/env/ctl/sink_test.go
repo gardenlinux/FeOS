@@ -37,7 +37,7 @@ func TestLogLabels(t *testing.T) {
 	run := runningJob(t, h, env.ID)
 	want := map[string]string{model.LogTenant: testTenant, model.LogInstance: run.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: spec.KindJob, model.LogObject: "migrate",
-		model.LogReplica: "0", model.LogRelease: strconv.Itoa(r1), model.LogAttempt: "1"}
+		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1), model.LogRelease: strconv.Itoa(r1), model.LogAttempt: "1"}
 	if got := n1.LogLabels(run); !maps.Equal(got, want) {
 		t.Fatalf("the run's create: %v, want %v", got, want)
 	}
@@ -47,11 +47,11 @@ func TestLogLabels(t *testing.T) {
 	if err := n1.Script().ExitContainer(run, "main", 0); err != nil {
 		t.Fatal(err)
 	}
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	api := h.waitRows(env.ID, spec.KindService, "api", 1, 10*time.Second, "running", running)[0].Sandbox.ID
 	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: api.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: spec.KindService, model.LogObject: "api",
-		model.LogReplica: "0", model.LogRelease: strconv.Itoa(r1)}
+		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1), model.LogRelease: strconv.Itoa(r1)}
 	if got := n1.LogLabels(api); !maps.Equal(got, want) {
 		t.Fatalf("the service's create: %v, want %v", got, want)
 	}
@@ -102,7 +102,7 @@ func TestLogRedact(t *testing.T) {
 	const token = "s3cr3t/t0ken"
 	h.putSecret(env.ID, "token", token)
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"image":%q,"env":{"TOKEN":{"secret":"token"}}}}}`, testImage))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "running", running)[0].Sandbox.ID
 	if got := n1.LogRedact(web); !slices.Equal(got, []string{"s3cr3t%2Ft0ken", token}) {
 		t.Fatalf("the instance's create: %q", got)
@@ -154,7 +154,7 @@ func TestNodeLogParts(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	for _, e := range []struct {
 		text    string
@@ -244,7 +244,7 @@ func TestSinkLogs(t *testing.T) {
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"image":%q},"idler":{"image":%q,"idle":"15m"}}}`,
 		testImage, testImage))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	_ = n1.Script().AppendLog(web, "main", "from the node")
 	logs := func(ctx context.Context, name string, lines int) []string {
@@ -351,7 +351,7 @@ func TestSinkJobRunLog(t *testing.T) {
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, jobSpec("v1", 0))
 	run := finishRun(t, h, n1, env.ID, 0, "kept")
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	got, _, err := h.c.LogTail(ctx, env.ID, spec.KindJob, "migrate", 0, 10)
 	if err != nil || !slices.Equal(got, []string{"kept"}) {
 		t.Fatalf("the kept tail: %q %v", got, err)

@@ -8,7 +8,7 @@
 // any ingress and a failover is a reconnect plus a whole snapshot.
 //
 // BuildEnv turns one public environment's rows (store.IngressRouting)
-// into a wire.Env, purely: the routes of its routing release (the
+// into a wire.Env, purely: the routes of its routing deployment (the
 // deployed one, else the latest), and for each routed image service the
 // instances that answer (Endpoints, with only the ports their node
 // admits to the ingress) and the others counted by why they do not

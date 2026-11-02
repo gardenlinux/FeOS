@@ -18,7 +18,7 @@ import (
 )
 
 // The labels an environment's instance pods carry beside the sandbox
-// labels (ADR 0018). There is no release label: an object that a release
+// labels (ADR 0018). There is no deployment label: an object that a deployment
 // leaves unchanged keeps its pods.
 const (
 	// LabelEnvironment is the environment's ID.
@@ -106,7 +106,7 @@ type PodTemplate struct {
 // registry: a username and a password, each a literal or a secret of the
 // environment. A secret here has version 0, its latest when a pod is
 // created: they are access, not configuration, and a token rotated or
-// revoked reaches the next replica of an old release.
+// revoked reaches the next replica of an old deployment.
 type TemplateCredentials struct {
 	Username TemplateValue `json:"username"`
 	Password TemplateValue `json:"password"`
@@ -212,7 +212,7 @@ func (t PodTemplate) HasCredential() bool {
 // each only when there are any or it is set, so that a template without
 // them hashes as before they were). Equal pods hash equal: a nil and an
 // empty list or map hash alike. What an instance is not rebuilt for (its
-// labels, the idle policy, the release) is not in it.
+// labels, the idle policy, the deployment) is not in it.
 func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 	groups := slices.Clone(t.SecurityGroups)
 	slices.Sort(groups)

@@ -7,11 +7,11 @@ import { response } from '../testing/ferun.js';
 import {
   changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence, heavyEffect,
   incidentObject, logReplicas, logSourceText, logsProblem, objectSummary, objectTone, originText, parseLabelFilter,
-  phaseTone, releaseTone, rolloutNote, statusState,
+  phaseTone, deploymentTone, rolloutNote, statusState,
 } from './envs.js';
 
 // The environments view's arithmetic, on ferund's fixtures: stage rolls
-// release 7 while 6 serves and expense-service crash-loops; the preview
+// deployment 7 while 6 serves and expense-service crash-loops; the preview
 // runs attached services in the workspace's sandbox.
 
 const STAGE = response('GET_environments_env.200');
@@ -20,14 +20,14 @@ const LIST = response('GET_environments.200').environments;
 const obj = (st, kind, name) => st.objects.find((o) => o.kind === kind && o.name === name);
 
 describe('tones', () => {
-  it('of release states', () => {
-    expect(releaseTone('deployed')).toBe('running');
-    expect(releaseTone('deploying')).toBe('paused');
-    expect(releaseTone('waiting')).toBe('paused');
-    expect(releaseTone('deleting')).toBe('paused');
-    expect(releaseTone('failed')).toBe('failed');
-    expect(releaseTone('replaced')).toBe('absent');
-    expect(releaseTone('none')).toBe('absent');
+  it('of deployment states', () => {
+    expect(deploymentTone('deployed')).toBe('running');
+    expect(deploymentTone('deploying')).toBe('paused');
+    expect(deploymentTone('waiting')).toBe('paused');
+    expect(deploymentTone('deleting')).toBe('paused');
+    expect(deploymentTone('failed')).toBe('failed');
+    expect(deploymentTone('replaced')).toBe('absent');
+    expect(deploymentTone('none')).toBe('absent');
   });
 
   it('of phases and job runs', () => {
@@ -66,9 +66,9 @@ describe('objects', () => {
     expect(objectSummary(obj(PREVIEW, 'service', 'web'))).toBe('attached · starting');
     expect(objectSummary(obj(STAGE, 'addon', 'postgres'))).toBe('postgres 17 · plan small · provisioned');
     expect(objectSummary({ ...obj(STAGE, 'addon', 'nats'), provisioned: false })).toBe('nats 2 · plan small · not provisioned');
-    expect(objectSummary(obj(STAGE, 'job', 'migrate'))).toBe('release 7, attempt 1: succeeded (exit 0)');
-    expect(objectSummary({ kind: 'job', lastRun: { release: 3, attempt: 2, phase: 'failed', exitCode: null } }))
-      .toBe('release 3, attempt 2: failed');
+    expect(objectSummary(obj(STAGE, 'job', 'migrate'))).toBe('deployment 7, attempt 1: succeeded (exit 0)');
+    expect(objectSummary({ kind: 'job', lastRun: { deployment: 3, attempt: 2, phase: 'failed', exitCode: null } }))
+      .toBe('deployment 3, attempt 2: failed');
     expect(objectSummary({ kind: 'job', lastRun: null })).toBe('not run yet');
   });
 
@@ -155,18 +155,18 @@ describe('the rollout', () => {
   });
 
   it('says what serves meanwhile', () => {
-    expect(rolloutNote(STAGE)).toBe('release 6 serves meanwhile');
-    expect(rolloutNote({ ...STAGE, rollout: { ...STAGE.rollout, state: 'failed' } })).toBe('release 6 keeps serving');
+    expect(rolloutNote(STAGE)).toBe('deployment 6 serves meanwhile');
+    expect(rolloutNote({ ...STAGE, rollout: { ...STAGE.rollout, state: 'failed' } })).toBe('deployment 6 keeps serving');
     expect(rolloutNote({ ...STAGE, deployed: 0, rollout: { ...STAGE.rollout, state: 'failed' } }))
-      .toBe('no release was deployed before it');
+      .toBe('no deployment was deployed before it');
     expect(rolloutNote(PREVIEW)).toBe('every object matches it');
     expect(rolloutNote(response('POST_environments.201'))).toBe('');
   });
 });
 
-describe('releases and diffs', () => {
+describe('deployments and diffs', () => {
   it('name their origin', () => {
-    const rel = response('GET_environments_env_releases.200').releases[0];
+    const rel = response('GET_environments_env_deployments.200').deployments[0];
     expect(originText(rel)).toBe('apply');
     expect(originText({ origin: 'revert', originRef: '5' })).toBe('revert to 5');
     expect(originText({ origin: 'clone', originRef: '0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b01/7' }))

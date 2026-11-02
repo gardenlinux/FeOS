@@ -201,7 +201,7 @@ func TestEndToEnd(t *testing.T) {
 	sinks := sinkv1.NewSinkServiceClient(conn)
 	now := uint64(time.Now().UnixNano())
 	req := exportRequest(resourceAttrs("abcdefghjkm", "main", "log1", "acme",
-		map[string]string{attrEnvironment: "env1", attrKind: "service", attrObject: "api", attrReplica: "0", attrRelease: "4", "ferun.node": "liar"}),
+		map[string]string{attrEnvironment: "env1", attrKind: "service", attrObject: "api", attrReplica: "0", attrDeployment: "4", "ferun.node": "liar"}),
 		record(0, now-3000, "stdout", "INFO starting"), record(20, now-2000, "stderr", `{"level":"error","trace_id":"`+traceA+`"}`),
 		record(70, now-1000, "stdout", "plain"))
 	for range 2 {
@@ -275,7 +275,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}
 	st := page.Streams[page.Lines[0].Stream]
-	if st.Node != "node-1" || st.Environment != "env1" || st.Release != 4 || st.Lines != 3 || st.Tenant != "acme" {
+	if st.Node != "node-1" || st.Environment != "env1" || st.Deployment != 4 || st.Lines != 3 || st.Tenant != "acme" {
 		t.Errorf("stream %+v", st)
 	}
 	if !strings.Contains(string(b), `"ts":"`) || !strings.Contains(string(b), `"offset":"20"`) {

@@ -75,6 +75,6 @@
 //
 // A domain served with a valid certificate whose orders have failed for
 // a day gets the incident certificate_failing on its environment
-// (object domain/<name>, release the environment's latest); a renewal
+// (object domain/<name>, deployment the environment's latest); a renewal
 // that succeeds closes it.
 package acme

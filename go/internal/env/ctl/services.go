@@ -39,12 +39,12 @@ func byReplica(a, b store.EnvInstanceRow) int {
 }
 
 // stepService keeps an image service at T: rows of T's template are kept
-// (release and idle updated in place) and healed; rows of another
+// (deployment and idle updated in place) and healed; rows of another
 // template are replaced one at a time, surge 1 (a new one first, ready,
 // then an old one stops); missing replicas are added, surplus ones
 // stop, the highest first. While R rolls the service waits for the
-// addons and the release jobs, and its rollout budget counts from R's
-// start, moved on by the time the release jobs waited for runs that were
+// addons and the deploy jobs, and its rollout budget counts from R's
+// start, moved on by the time the deploy jobs waited for runs that were
 // not R's (stepState.start): past it, or when a new instance exited 3
 // times, R fails (rollout_failed) and R's new instances stop.
 func (c *Controller) stepService(ctx context.Context, s *stepState, name string, svc spec.Service) {
@@ -76,7 +76,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 		for _, r := range cur {
 			c.heal(ctx, r.Sandbox, idles)
 		}
-		s.wait(objectName(spec.KindService, name), "service %s waits for the addons and the release jobs", name)
+		s.wait(objectName(spec.KindService, name), "service %s waits for the addons and the deploy jobs", name)
 		return
 	}
 	var lost []store.EnvInstanceRow
@@ -110,7 +110,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 	switch {
 	case len(old) == 0 && len(cur) < desired:
 		for _, replica := range freeReplicas(cur, desired-len(cur)) {
-			if _, err := c.insertInstance(ctx, v, insert{plan: p, replica: replica, release: v.targetNum}); err != nil {
+			if _, err := c.insertInstance(ctx, v, insert{plan: p, replica: replica, deployment: v.targetNum}); err != nil {
 				s.wait(objectName(spec.KindService, name), "service %s: %v", name, err)
 				return
 			}
@@ -123,7 +123,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 		// A new one is coming up: wait for it.
 	case len(old) > 0 && len(cur) < desired && len(cur)+len(old) <= desired:
 		replica := freeReplicas(cur, 1)
-		if _, err := c.insertInstance(ctx, v, insert{plan: p, replica: replica[0], release: v.targetNum}); err != nil {
+		if _, err := c.insertInstance(ctx, v, insert{plan: p, replica: replica[0], deployment: v.targetNum}); err != nil {
 			s.wait(objectName(spec.KindService, name), "service %s: %v", name, err)
 			return
 		}
@@ -204,14 +204,14 @@ func (c *Controller) rolloutFailed(ctx context.Context, s *stepState, name strin
 	if reason == "" {
 		return false
 	}
-	ev := evidence{Diff: c.releaseDiff(ctx, v)}
+	ev := evidence{Diff: c.deploymentDiff(ctx, v)}
 	if culprit != nil {
 		ev.Exits = culprit.Instance.Exits
 		if steady(culprit.Sandbox) && c.connected(culprit.Sandbox.Node) {
 			ev.LogTail = c.storedTail(ctx, v, culprit.Sandbox)
 		}
 	}
-	if err := c.failRelease(ctx, v, reason, objectName(spec.KindService, name), model.ConditionRolloutFailed, ev); err != nil {
+	if err := c.failDeployment(ctx, v, reason, objectName(spec.KindService, name), model.ConditionRolloutFailed, ev); err != nil {
 		s.wait(objectName(spec.KindService, name), "service %s: %v", name, err)
 		return false
 	}
@@ -222,14 +222,14 @@ func (c *Controller) rolloutFailed(ctx context.Context, s *stepState, name strin
 	return true
 }
 
-// deployedService is the image service as the deployed release has it,
-// and whether it has it (true when the deployed release cannot be read:
+// deployedService is the image service as the deployed deployment has it,
+// and whether it has it (true when the deployed deployment cannot be read:
 // the budget is not guessed).
 func (c *Controller) deployedService(ctx context.Context, v *view, name string) (spec.Service, bool) {
 	if v.env.Deployed == 0 {
 		return spec.Service{}, false
 	}
-	sp, err := c.releaseSpec(ctx, v.env, v.env.Deployed)
+	sp, err := c.deploymentSpec(ctx, v.env, v.env.Deployed)
 	if err != nil {
 		return v.target.Services[name], true
 	}

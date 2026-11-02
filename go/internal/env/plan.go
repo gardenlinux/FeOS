@@ -24,7 +24,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The bounds of what a release carries besides its spec.
+// The bounds of what a deployment carries besides its spec.
 const (
 	maxAnnotationBytes = 4 << 10
 	maxMessageBytes    = 64 << 10
@@ -307,11 +307,11 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		}
 	}
 
-	// An environment without a release has no addon volumes. A clone
+	// An environment without a deployment has no addon volumes. A clone
 	// plans for one that is not there yet, under an ID that may be
 	// another tenant's environment's (its insert refuses that later):
 	// what that one's volumes hold is no business of the clone's.
-	if env != nil && env.Release > 0 && len(sp.Addons) > 0 {
+	if env != nil && env.Deployment > 0 && len(sp.Addons) > 0 {
 		vols, err := s.st.ListEnvVolumes(ctx, env.ID)
 		if err != nil {
 			return nil, pins, fmt.Errorf("volumes: %w", err)
@@ -359,8 +359,8 @@ type planned struct {
 	parsed bool
 	norm   spec.Spec
 	diff   []spec.DiffEntry
-	// base is the release the diff is against, current the
-	// environment's current release when the plan read it, currentSpec
+	// base is the deployment the diff is against, current the
+	// environment's current deployment when the plan read it, currentSpec
 	// its spec (nil without one).
 	base, current int
 	currentSpec   *spec.Spec
@@ -374,19 +374,19 @@ func (p planned) answer() PlanAnswer {
 }
 
 // plan parses, validates and normalises raw for the environment env and
-// diffs it against release base (nil: the current one). secrets, when
+// diffs it against deployment base (nil: the current one). secrets, when
 // not nil, stands in for the environment's secrets.
 func (s *Service) plan(ctx context.Context, tenant string, env store.Environment, raw []byte, base *int, mode spec.Mode,
 	secrets map[string]spec.SecretInfo) (planned, error) {
-	p := planned{base: env.Release, current: env.Release}
+	p := planned{base: env.Deployment, current: env.Deployment}
 	if base != nil {
-		if *base < 0 || *base > env.Release {
-			return planned{}, errNoRelease()
+		if *base < 0 || *base > env.Deployment {
+			return planned{}, errNoDeployment()
 		}
 		p.base = *base
 	}
-	if env.Release > 0 {
-		cur, err := s.releaseSpec(ctx, env, env.Release)
+	if env.Deployment > 0 {
+		cur, err := s.deploymentSpec(ctx, env, env.Deployment)
 		if err != nil {
 			return planned{}, err
 		}
@@ -408,7 +408,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 	if p.base != p.current {
 		baseSpec = nil
 		if p.base > 0 {
-			if baseSpec, err = s.releaseSpec(ctx, env, p.base); err != nil {
+			if baseSpec, err = s.deploymentSpec(ctx, env, p.base); err != nil {
 				return planned{}, err
 			}
 		}
@@ -417,13 +417,13 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 	p.diff = spec.DiffWith(baseSpec, &norm, s.addonEffect)
 	if p.currentSpec != nil && spec.EqualNormalised(norm, *p.currentSpec) {
 		fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "",
-			Problem: fmt.Sprintf("nothing changes: the spec equals release %d's", env.Release), Remedy: ""})
+			Problem: fmt.Sprintf("nothing changes: the spec equals deployment %d's", env.Deployment), Remedy: ""})
 	}
 	p.findings = spec.SortFindings(fs)
 	return p, nil
 }
 
-// applyArgs are what an apply makes a release of.
+// applyArgs are what an apply makes a deployment of.
 type applyArgs struct {
 	raw             []byte
 	base            int
@@ -434,15 +434,15 @@ type applyArgs struct {
 }
 
 // errReplan is an apply whose plan is stale: the environment got a new
-// release between the plan and the transaction, which the request's base
+// deployment between the plan and the transaction, which the request's base
 // already names, or a secret version the plan pins was deleted.
-var errReplan = errors.New("the current release changed since the plan")
+var errReplan = errors.New("the current deployment changed since the plan")
 
 // apply plans raw (ModeApply: an image that cannot be resolved is an
 // error), refuses error findings, and in one transaction (the tenant FOR
-// SHARE, the environment FOR UPDATE) answers the current release
+// SHARE, the environment FOR UPDATE) answers the current deployment
 // unchanged when the spec equals it and it did not fail, refuses a base
-// that is not the current release, inserts the next release waiting,
+// that is not the current deployment, inserts the next deployment waiting,
 // replaces the older waiting and deploying ones and wakes the
 // controller.
 func (s *Service) apply(ctx context.Context, tenant, ref string, a applyArgs) (ApplyAnswer, error) {
@@ -452,7 +452,7 @@ func (s *Service) apply(ctx context.Context, tenant, ref string, a applyArgs) (A
 			return ans, err
 		}
 	}
-	return ApplyAnswer{}, errors.New("the environment keeps getting new releases; try again")
+	return ApplyAnswer{}, errors.New("the environment keeps getting new deployments; try again")
 }
 
 func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs) (ApplyAnswer, error) {
@@ -492,23 +492,23 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		if e.Deleting {
 			return errDeleting(e.Name)
 		}
-		if e.Release != p.current {
-			if a.base == e.Release {
+		if e.Deployment != p.current {
+			if a.base == e.Deployment {
 				return errReplan
 			}
-			return &BaseMismatchError{Base: a.base, Current: e.Release}
+			return &BaseMismatchError{Base: a.base, Current: e.Deployment}
 		}
 		// The plan read the secrets before the lock: a DeleteSecret, which
 		// takes the same lock, may have deleted a version it pins since.
 		if err := checkPins(ctx, tx, e.ID, p.norm.Secrets); err != nil {
 			return err
 		}
-		if e.Release > 0 && spec.EqualNormalised(p.norm, *p.currentSpec) {
-			cur, err := tx.GetRelease(ctx, e.ID, e.Release)
+		if e.Deployment > 0 && spec.EqualNormalised(p.norm, *p.currentSpec) {
+			cur, err := tx.GetDeployment(ctx, e.ID, e.Deployment)
 			if err != nil {
-				return fmt.Errorf("release %d: %w", e.Release, err)
+				return fmt.Errorf("deployment %d: %w", e.Deployment, err)
 			}
-			if cur.State != model.ReleaseFailed {
+			if cur.State != model.DeploymentFailed {
 				tags, err := tx.ListTags(ctx, e.ID)
 				if err != nil {
 					return err
@@ -519,33 +519,33 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 						names = append(names, t.Tag)
 					}
 				}
-				ans = ApplyAnswer{ReleaseInfo: releaseInfo(cur, names), Unchanged: true, Diff: []spec.DiffEntry{},
+				ans = ApplyAnswer{DeploymentInfo: deploymentInfo(cur, names), Unchanged: true, Diff: []spec.DiffEntry{},
 					Findings: nonNilFindings(p.findings)}
 				return nil
 			}
 		}
-		if a.base != e.Release {
-			return &BaseMismatchError{Base: a.base, Current: e.Release}
+		if a.base != e.Deployment {
+			return &BaseMismatchError{Base: a.base, Current: e.Deployment}
 		}
-		number := e.Release + 1
-		r, err := tx.InsertRelease(ctx, store.EnvRelease{EnvID: e.ID, Number: number, Spec: specJSON, Base: a.base,
+		number := e.Deployment + 1
+		r, err := tx.InsertDeployment(ctx, store.EnvDeployment{EnvID: e.ID, Number: number, Spec: specJSON, Base: a.base,
 			Author: a.author, Message: a.message, Annotations: a.annotations, Origin: a.origin, OriginRef: a.originRef,
-			State: model.ReleaseWaiting})
+			State: model.DeploymentWaiting})
 		if err != nil {
 			return err
 		}
 		after := e
-		after.Release = number
+		after.Deployment = number
 		if _, err := tx.UpdateEnvironment(ctx, e, after); err != nil {
 			return err
 		}
-		if _, err := tx.ReplaceReleases(ctx, e.ID, number, model.ReleaseWaiting, model.ReleaseDeploying); err != nil {
+		if _, err := tx.ReplaceDeployments(ctx, e.ID, number, model.DeploymentWaiting, model.DeploymentDeploying); err != nil {
 			return err
 		}
 		if err := wake(ctx, tx, ctl.HintReconcile, ctl.HintGroups); err != nil {
 			return err
 		}
-		ans = ApplyAnswer{ReleaseInfo: releaseInfo(r, nil), Diff: nonNilDiff(p.diff), Findings: nonNilFindings(p.findings)}
+		ans = ApplyAnswer{DeploymentInfo: deploymentInfo(r, nil), Diff: nonNilDiff(p.diff), Findings: nonNilFindings(p.findings)}
 		return nil
 	})
 	if err != nil {
@@ -573,9 +573,9 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	return nil
 }
 
-// checkReleaseMeta refuses an author, a message or annotations that a
-// release cannot carry.
-func checkReleaseMeta(author, message string, annotations map[string]string) error {
+// checkDeploymentMeta refuses an author, a message or annotations that a
+// deployment cannot carry.
+func checkDeploymentMeta(author, message string, annotations map[string]string) error {
 	if len(author) > maxAuthorBytes {
 		return errBadRequest("author has %d bytes; at most %d are allowed", len(author), maxAuthorBytes)
 	}
@@ -594,11 +594,11 @@ func checkReleaseMeta(author, message string, annotations map[string]string) err
 }
 
 // annotationRevertOf is the annotation of a revert: the number of the
-// release it reverts to.
+// deployment it reverts to.
 const annotationRevertOf = "ferun.revertOf"
 
-// revertAnnotations are release n's annotations plus ferun.revertOf.
-func revertAnnotations(r store.EnvRelease) map[string]string {
+// revertAnnotations are deployment n's annotations plus ferun.revertOf.
+func revertAnnotations(r store.EnvDeployment) map[string]string {
 	out := maps.Clone(r.Annotations)
 	if out == nil {
 		out = map[string]string{}
@@ -607,8 +607,8 @@ func revertAnnotations(r store.EnvRelease) map[string]string {
 	return out
 }
 
-// cloneAnnotations are the source release's annotations for a clone's
-// release 1, without ferun.revertOf: its number names a release of the
+// cloneAnnotations are the source deployment's annotations for a clone's
+// deployment 1, without ferun.revertOf: its number names a deployment of the
 // source, which the clone does not have.
 func cloneAnnotations(a map[string]string) map[string]string {
 	out := maps.Clone(a)
@@ -622,7 +622,7 @@ var objectMaps = map[string]string{
 	spec.KindSecret: "secrets",
 }
 
-// withObject is the current release's spec (raw JSON, "" for none) with
+// withObject is the current deployment's spec (raw JSON, "" for none) with
 // object set (nil: removed) under kind's map, and whether the object was
 // there.
 func withObject(current []byte, kind, name string, object json.RawMessage) ([]byte, bool, error) {

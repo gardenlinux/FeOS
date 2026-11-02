@@ -19,7 +19,7 @@ const (
 	digestWeb14      = "sha256:de2feb13b0b780dd0dfd7aa32bcd02b306a4680f4958f896b3347f3ba3521a81"
 )
 
-// stagePins pin the fixtures' stage spec as release 7 was.
+// stagePins pin the fixtures' stage spec as deployment 7 was.
 func stagePins() Pins {
 	return Pins{
 		Images: map[string]string{
@@ -41,7 +41,7 @@ func marshalSpec(t *testing.T, s Spec) string {
 	return string(b)
 }
 
-// The fixtures' request normalises to the fixtures' release 7, byte for
+// The fixtures' request normalises to the fixtures' deployment 7, byte for
 // byte; a normalised spec normalises to itself.
 func TestNormaliseFixture(t *testing.T) {
 	s := mustParse(t, string(readFile(t, "testdata/expensa-stage-request.json")))
@@ -49,7 +49,7 @@ func TestNormaliseFixture(t *testing.T) {
 	if len(fs) != 0 {
 		t.Fatalf("findings %+v", fs)
 	}
-	want := canonical(t, readFile(t, "testdata/expensa-stage-release7.json"))
+	want := canonical(t, readFile(t, "testdata/expensa-stage-deployment7.json"))
 	if g := canonical(t, []byte(marshalSpec(t, got))); g != want {
 		t.Fatalf("normalised\n%s\nwant\n%s", g, want)
 	}
@@ -78,6 +78,8 @@ func TestNormaliseRules(t *testing.T) {
 		Replicas: intp(1), Readiness: &Readiness{Exec: &ExecCheck{Command: []string{"true"}}}, Idle: "900s"}
 	s.Services["attached-never"] = Service{Runtime: RuntimeAttached, Sandbox: webSandbox, Command: []string{"x"}, Idle: IdleNever}
 	s.Jobs["seed"] = Job{Image: "ghcr.io/acme/expense:1.4", On: JobOnManual, Timeout: "1h"}
+	s.Jobs["deploy"] = Job{Image: "ghcr.io/acme/expense:1.4", On: JobOnDeploy}
+	s.Jobs["release"] = Job{Image: "ghcr.io/acme/expense:1.4", On: JobOnRelease}
 	s.Volumes = []byte(`{}`)
 	pins := stagePins()
 	got, fs := Normalise(s, pins)
@@ -111,9 +113,15 @@ func TestNormaliseRules(t *testing.T) {
 	if web := got.Services["web"]; web.Runtime != RuntimeAttached || web.Replicas != nil {
 		t.Fatalf("web %+v", web)
 	}
-	if j := got.Jobs["migrate"]; j.Timeout != "10m0s" || j.On != JobOnRelease || j.Retries != 1 ||
+	if j := got.Jobs["migrate"]; j.Timeout != "10m0s" || j.On != JobOnStored || j.Retries != 1 ||
 		j.Image != "ghcr.io/acme/expense@"+digestExpense14 {
 		t.Fatalf("migrate %+v", j)
+	}
+	// Both words of a deploy job, and none, normalise to the stored one.
+	for _, name := range []string{"deploy", "release"} {
+		if j := got.Jobs[name]; j.On != JobOnStored {
+			t.Fatalf("%s: on %q, want %q", name, j.On, JobOnStored)
+		}
 	}
 	if j := got.Jobs["seed"]; j.Timeout != "1h0m0s" || j.On != JobOnManual || *j.Resources != (Resources{VCPUs: 1, MemoryMib: 512}) {
 		t.Fatalf("seed %+v", j)

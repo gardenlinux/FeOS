@@ -160,7 +160,7 @@ func sameMesh(a, b wire.Mesh) bool {
 // ferun_sandbox (an instance's sandbox) and reads what they name after
 // Debounce, and reads the whole table again every Full. An environment
 // whose read returns no rows has left the table: it is not public any
-// more, deleting, of a deleting tenant, or without a release. The
+// more, deleting, of a deleting tenant, or without a deployment. The
 // domains' keys are opened with Sealer; without one, no domain is
 // served. While no one uses it, it reads nothing. It is safe for
 // concurrent use; Run runs its loop.
@@ -209,7 +209,7 @@ func NewBuilder(d *db.DB, st *store.Store, zone string, log *slog.Logger) *Build
 		kick: make(chan struct{}, 1)}
 }
 
-// Specs returns the builder's cache of release specs.
+// Specs returns the builder's cache of deployment specs.
 func (b *Builder) Specs() *Specs { return b.specs }
 
 // Use counts a user of the table (an ingress stream) and returns the
@@ -710,7 +710,7 @@ func (b *Builder) readMesh(ctx context.Context) (wire.Mesh, uint64, error) {
 	return BuildMesh(peers), uint64(max(version, 0)), nil
 }
 
-// warnSpec logs that environment id cannot be routed (its routing release
+// warnSpec logs that environment id cannot be routed (its routing deployment
 // has no usable spec, or it is too large), at most every failureLogEvery
 // per environment.
 func (b *Builder) warnSpec(id uuid.UUID, err error) {

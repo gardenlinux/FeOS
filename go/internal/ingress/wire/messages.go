@@ -173,7 +173,7 @@ type Self struct {
 }
 
 // Env is one public environment as the ingress routes it: its hosts, its
-// routing release and the services its routes reach. Hash identifies the
+// routing deployment and the services its routes reach. Hash identifies the
 // content, so that the control plane sends an environment again only
 // when it changed.
 //
@@ -182,15 +182,18 @@ type Self struct {
 // too. The default host under the apps zone has none: it takes the
 // ingress's wildcard.
 type Env struct {
-	ID       string    `json:"id"`
-	Tenant   string    `json:"tenant"`
-	Name     string    `json:"name"`
-	Hosts    []string  `json:"hosts"`
-	Release  int       `json:"release"`
-	Hash     string    `json:"hash"`
-	Routes   []Route   `json:"routes"`
-	Services []Service `json:"services"`
-	Domains  []Domain  `json:"domains,omitempty"`
+	ID     string   `json:"id"`
+	Tenant string   `json:"tenant"`
+	Name   string   `json:"name"`
+	Hosts  []string `json:"hosts"`
+	// Deployment is its routing deployment's number. The ingress does
+	// not read it; it is in the hash, which so changed once with its key
+	// (ADR 0018, "The deployments' word").
+	Deployment int       `json:"deployment"`
+	Hash       string    `json:"hash"`
+	Routes     []Route   `json:"routes"`
+	Services   []Service `json:"services"`
+	Domains    []Domain  `json:"domains,omitempty"`
 }
 
 // Domain is a host served with a certificate of its own: its name, the

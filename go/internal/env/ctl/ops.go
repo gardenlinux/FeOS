@@ -34,8 +34,8 @@ const maxLogLines = 10000
 // container's log is the sink's first (sinkLog), the node's when the sink
 // fails or has no line. It never wakes an instance (ErrPaused, unless the
 // sink has its lines); ErrNoObject (its text names a replica the object does not
-// have), ErrNotRunning for a replica the target release has but that has
-// no instance yet (the release waits for its addons or a job, or for
+// have), ErrNotRunning for a replica the target deployment has but that has
+// no instance yet (the deployment waits for its addons or a job, or for
 // capacity), ErrNoContainerLogs.
 func (c *Controller) LogTail(ctx context.Context, envID uuid.UUID, kind, name string, replica, lines int) ([]string, string, error) {
 	if lines <= 0 {
@@ -171,7 +171,7 @@ func (c *Controller) processLog(ctx context.Context, v *view, name string, lines
 	return out, SourceProcess, err
 }
 
-// RestartService restarts a service of the environment's target release:
+// RestartService restarts a service of the environment's target deployment:
 // an attached service's process is stopped and started again (never its
 // sandbox's pod); an image service's replicas are restarted one at a
 // time. It returns once the restart is under way; ErrNoObject, ErrPaused

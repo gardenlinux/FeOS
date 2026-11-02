@@ -16,7 +16,7 @@ import (
 // The environments' routes (ADR 0018, the contract's §5): tenant class,
 // each a thin adapter of a request to one method of Deps.Environments and
 // of its answer (or error, envs.WriteError: 422 with findings, 409 with
-// the current release) back. The route door, a class of its own, is the
+// the current deployment) back. The route door, a class of its own, is the
 // service's handler as it is.
 
 // envRoutes registers the environments' routes on add; none without the
@@ -33,10 +33,17 @@ func (s *server) envRoutes(add func(c class, pattern string, h http.Handler)) {
 	env("GET /api/v1/environments/{env}", s.getEnv)
 	env("DELETE /api/v1/environments/{env}", s.deleteEnv)
 	env("POST /api/v1/environments/{env}/plan", s.planEnv)
-	env("POST /api/v1/environments/{env}/releases", s.applyRelease)
-	env("GET /api/v1/environments/{env}/releases", s.listReleases)
-	env("GET /api/v1/environments/{env}/releases/{n}", s.getRelease)
-	env("POST /api/v1/environments/{env}/releases/{n}/revert", s.revertRelease)
+	env("POST /api/v1/environments/{env}/deployments", s.applyDeployment)
+	env("GET /api/v1/environments/{env}/deployments", s.listDeployments)
+	env("GET /api/v1/environments/{env}/deployments/{n}", s.getDeployment)
+	env("POST /api/v1/environments/{env}/deployments/{n}/revert", s.revertDeployment)
+	// The same routes under the deployments' earlier word, for the clients
+	// of the version before (ADR 0018, "The deployments' word"); the next
+	// version removes them.
+	env("POST /api/v1/environments/{env}/releases", s.applyDeployment)
+	env("GET /api/v1/environments/{env}/releases", s.listDeployments)
+	env("GET /api/v1/environments/{env}/releases/{n}", s.getDeployment)
+	env("POST /api/v1/environments/{env}/releases/{n}/revert", s.revertDeployment)
 	env("PUT /api/v1/environments/{env}/objects/{kind}/{name}", s.putObject)
 	env("DELETE /api/v1/environments/{env}/objects/{kind}/{name}", s.deleteObject)
 	env("GET /api/v1/environments/{env}/objects/{kind}/{name}/logs", s.objectLogs)
@@ -85,7 +92,7 @@ func noContent(w http.ResponseWriter, status int) error {
 	return nil
 }
 
-// pathNumber is a path value that is a release number or an incident ID.
+// pathNumber is a path value that is a deployment number or an incident ID.
 func pathNumber(r *http.Request, name, what string) (int64, error) {
 	s := r.PathValue(name)
 	n, err := strconv.ParseInt(s, 10, 64)
@@ -95,14 +102,14 @@ func pathNumber(r *http.Request, name, what string) (int64, error) {
 	return n, nil
 }
 
-// releaseNumber is the path's {n}.
-func releaseNumber(r *http.Request) (int, error) {
-	n, err := pathNumber(r, "n", "release")
+// deploymentNumber is the path's {n}.
+func deploymentNumber(r *http.Request) (int, error) {
+	n, err := pathNumber(r, "n", "deployment")
 	if err != nil {
 		return 0, err
 	}
 	if n > 1<<31-1 {
-		return 0, apierr.New(http.StatusNotFound, "no such release")
+		return 0, apierr.New(http.StatusNotFound, "no such deployment")
 	}
 	return int(n), nil
 }
@@ -179,7 +186,7 @@ func (s *server) planEnv(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, a)
 }
 
-func (s *server) applyRelease(w http.ResponseWriter, r *http.Request) error {
+func (s *server) applyDeployment(w http.ResponseWriter, r *http.Request) error {
 	var req envs.ApplyRequest
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
@@ -191,32 +198,32 @@ func (s *server) applyRelease(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, a.StatusCode(), a)
 }
 
-func (s *server) listReleases(w http.ResponseWriter, r *http.Request) error {
+func (s *server) listDeployments(w http.ResponseWriter, r *http.Request) error {
 	limit, err := queryInt(r, "limit")
 	if err != nil {
 		return err
 	}
-	list, err := s.deps.Environments.Releases(r.Context(), tenantOf(r), r.PathValue("env"), limit)
+	list, err := s.deps.Environments.Deployments(r.Context(), tenantOf(r), r.PathValue("env"), limit)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, list)
 }
 
-func (s *server) getRelease(w http.ResponseWriter, r *http.Request) error {
-	n, err := releaseNumber(r)
+func (s *server) getDeployment(w http.ResponseWriter, r *http.Request) error {
+	n, err := deploymentNumber(r)
 	if err != nil {
 		return err
 	}
-	d, err := s.deps.Environments.Release(r.Context(), tenantOf(r), r.PathValue("env"), n)
+	d, err := s.deps.Environments.Deployment(r.Context(), tenantOf(r), r.PathValue("env"), n)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, d)
 }
 
-func (s *server) revertRelease(w http.ResponseWriter, r *http.Request) error {
-	n, err := releaseNumber(r)
+func (s *server) revertDeployment(w http.ResponseWriter, r *http.Request) error {
+	n, err := deploymentNumber(r)
 	if err != nil {
 		return err
 	}

@@ -1,13 +1,33 @@
 {
-  "method": "POST",
-  "path": "/api/v1/environments/expensa-stage/releases",
+  "method": "GET",
+  "path": "/api/v1/environments/expensa-stage/deployments/7",
   "query": {},
-  "status": 201,
-  "request": {
+  "status": 200,
+  "request": null,
+  "response": {
+    "number": 7,
+    "state": "deploying",
+    "origin": "apply",
+    "originRef": "",
+    "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
+    "message": "stage follows main at revision 12",
+    "annotations": {
+      "fecode.dev/kind": "stage",
+      "fecode.dev/revision": "0193c111-2222-7333-8444-000000000012",
+      "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
+    },
+    "base": 6,
+    "reason": "",
+    "createdAt": "2026-10-18T14:02:10Z",
+    "startedAt": "2026-10-18T14:02:11Z",
+    "finishedAt": "",
+    "tags": [],
     "spec": {
       "services": {
         "approval-service": {
-          "image": "ghcr.io/acme/approval:1.2",
+          "runtime": "image",
+          "image": "ghcr.io/acme/approval@sha256:11cdf88d1c2c3802016199fb7e7e2a5377ed51b81855411f3f5840fe9d703e93",
+          "imageAsWritten": "ghcr.io/acme/approval:1.2",
           "command": [
             "/app/approval-service"
           ],
@@ -29,15 +49,28 @@
               "port": 8080
             }
           ],
+          "replicas": 1,
+          "resources": {
+            "vcpus": 1,
+            "memoryMib": 512
+          },
           "readiness": {
             "http": {
               "port": "http",
               "path": "/readyz"
-            }
+            },
+            "initialDelay": "0s",
+            "period": "2s",
+            "failureThreshold": 3
+          },
+          "rollout": {
+            "timeout": "10m0s"
           }
         },
         "expense-service": {
-          "image": "ghcr.io/acme/expense:1.4",
+          "runtime": "image",
+          "image": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a",
+          "imageAsWritten": "ghcr.io/acme/expense:1.4",
           "command": [
             "/app/expense-service"
           ],
@@ -69,32 +102,56 @@
             }
           ],
           "replicas": 2,
+          "resources": {
+            "vcpus": 1,
+            "memoryMib": 512
+          },
           "readiness": {
             "http": {
               "port": "http",
               "path": "/readyz"
-            }
+            },
+            "initialDelay": "0s",
+            "period": "2s",
+            "failureThreshold": 3
+          },
+          "rollout": {
+            "timeout": "10m0s"
           }
         },
         "web": {
-          "image": "ghcr.io/acme/expensa-web:1.4",
+          "runtime": "image",
+          "image": "ghcr.io/acme/expensa-web@sha256:de2feb13b0b780dd0dfd7aa32bcd02b306a4680f4958f896b3347f3ba3521a81",
+          "imageAsWritten": "ghcr.io/acme/expensa-web:1.4",
           "ports": [
             {
               "name": "http",
               "port": 8080
             }
           ],
+          "replicas": 1,
+          "resources": {
+            "vcpus": 1,
+            "memoryMib": 512
+          },
           "readiness": {
             "http": {
               "port": "http",
               "path": "/readyz"
-            }
+            },
+            "initialDelay": "0s",
+            "period": "2s",
+            "failureThreshold": 3
+          },
+          "rollout": {
+            "timeout": "10m0s"
           }
         }
       },
       "jobs": {
         "migrate": {
-          "image": "ghcr.io/acme/expense:1.4",
+          "image": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a",
+          "imageAsWritten": "ghcr.io/acme/expense:1.4",
           "command": [
             "/app/expense-service",
             "migrate"
@@ -107,8 +164,12 @@
               "role": "expense_svc"
             }
           },
+          "resources": {
+            "vcpus": 1,
+            "memoryMib": 512
+          },
           "on": "release",
-          "timeout": "10m",
+          "timeout": "10m0s",
           "retries": 1
         }
       },
@@ -152,35 +213,13 @@
           "service": "web",
           "port": "http"
         }
+      },
+      "secrets": {
+        "internal-token": {
+          "version": 3
+        }
       }
     },
-    "base": 6,
-    "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
-    "message": "stage follows main at revision 12",
-    "annotations": {
-      "fecode.dev/kind": "stage",
-      "fecode.dev/revision": "0193c111-2222-7333-8444-000000000012",
-      "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
-    }
-  },
-  "response": {
-    "number": 7,
-    "state": "waiting",
-    "origin": "apply",
-    "originRef": "",
-    "author": "fecode:0193a000-aaaa-7bbb-8ccc-000000000001",
-    "message": "stage follows main at revision 12",
-    "annotations": {
-      "fecode.dev/kind": "stage",
-      "fecode.dev/revision": "0193c111-2222-7333-8444-000000000012",
-      "fecode.dev/values": "2087034914b19da9e7ae7f06bbe87841f24b94d1d99a55afe95a70f5653565a4"
-    },
-    "base": 6,
-    "reason": "",
-    "createdAt": "2026-10-18T14:02:10Z",
-    "startedAt": "",
-    "finishedAt": "",
-    "tags": [],
     "diff": [
       {
         "kind": "service",
@@ -221,7 +260,7 @@
         ],
         "effect": "restarts"
       }
-    ],
-    "findings": []
-  }
+    ]
+  },
+  "note": "the normalised spec, and the diff against deployment 6"
 }

@@ -29,7 +29,7 @@ func domain(name string, n int, fill byte) wire.Domain {
 // and come with their certificates; a name twice is taken once; a renewed
 // certificate changes the hash.
 func TestBuildEnvDomains(t *testing.T) {
-	specs := specsOf(map[int]*spec.Spec{1: release1()})
+	specs := specsOf(map[int]*spec.Spec{1: deployment1()})
 	e := baseEnv(1, 1, ready("a0000000001", "web", 1, 8080))
 	plain, _ := build(t, "apps.example", e, specs)
 	if plain.Domains != nil {
@@ -72,7 +72,7 @@ func TestBuildEnvDomains(t *testing.T) {
 // within MaxEnvBytes, or alone take more than MaxDomainBytes, are left
 // out, in their order, and the entry stays within its bound.
 func TestBuildEnvDomainsBounded(t *testing.T) {
-	specs := specsOf(map[int]*spec.Spec{1: release1()})
+	specs := specsOf(map[int]*spec.Spec{1: deployment1()})
 	e := baseEnv(1, 1, ready("a0000000001", "web", 1, 8080))
 	e.Domains = []wire.Domain{domain("huge.example", MaxDomainBytes, 7)}
 	for i := range 60 {

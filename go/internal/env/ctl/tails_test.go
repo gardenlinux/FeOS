@@ -74,7 +74,7 @@ func TestLogTailBytes(t *testing.T) {
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	const n = 600
 	for i := range n {
@@ -167,7 +167,7 @@ func TestJobLogTailRedacted(t *testing.T) {
 	if err := n1.Script().ExitContainer(id, "main", 1); err != nil {
 		t.Fatal(err)
 	}
-	h.waitRelease(env.ID, r1, model.ReleaseFailed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentFailed, 30*time.Second)
 	run, err := h.st.LatestJobRun(bg, env.ID, "migrate")
 	if err != nil || run.Phase != model.RunFailed {
 		t.Fatalf("run %+v %v", run, err)
@@ -222,7 +222,7 @@ func TestServiceTailsRedacted(t *testing.T) {
 			"ports":[{"name":"http","port":8080}]%s}}}`, testImage, version, extra)
 	}
 	r1 := h.apply(env.ID, webSpec("1", ""))
-	h.waitRelease(env.ID, r1, model.ReleaseDeployed, 30*time.Second)
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
 	for i := 1; i <= 3; i++ {
 		var lines []string
@@ -247,7 +247,7 @@ func TestServiceTailsRedacted(t *testing.T) {
 	}
 	h.waitRows(env.ID, spec.KindService, "web", 1, 30*time.Second, "ready again", ready)
 
-	// A new instance that never gets ready fails the release at its
+	// A new instance that never gets ready fails the deployment at its
 	// rollout budget; the evidence has its tail, redacted.
 	r2 := h.apply(env.ID, webSpec("2", `,"readiness":{"tcp":{"port":8080},"period":"1s"},"rollout":{"timeout":"5s"}`))
 	var fresh podid.ID
@@ -265,7 +265,7 @@ func TestServiceTailsRedacted(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h.waitRelease(env.ID, r2, model.ReleaseFailed, 30*time.Second)
+	h.waitDeployment(env.ID, r2, model.DeploymentFailed, 30*time.Second)
 	inc = h.incident(env.ID, "service/web", model.ConditionRolloutFailed, 10*time.Second)
 	ev = evidence{}
 	if err := json.Unmarshal(inc.Evidence, &ev); err != nil {

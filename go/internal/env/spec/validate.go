@@ -21,13 +21,13 @@ type Mode string
 
 const (
 	// ModeSpec is POST /api/v1/environments/plan: no environment, so no
-	// check that needs one (secrets, the current release); the tenant's
+	// check that needs one (secrets, the current deployment); the tenant's
 	// sandboxes are checked.
 	ModeSpec Mode = "spec"
 	// ModePlan is a plan of an environment: an image that cannot be
 	// resolved is a warning.
 	ModePlan Mode = "plan"
-	// ModeApply is an apply (a release, a revert, an object put or
+	// ModeApply is an apply (a deployment, a revert, an object put or
 	// delete, a clone): an image that cannot be resolved is an error.
 	ModeApply Mode = "apply"
 )
@@ -66,8 +66,8 @@ type ValidateContext interface {
 	// Volume reports the data the environment's volume of addon name
 	// holds (its volume that is not being deleted); ok false when it has
 	// none. The controller keeps an addon's volume by the addon's name and
-	// mounts it whatever the latest release says, so an addon is validated
-	// against it rather than against the latest release's addon. Not asked
+	// mounts it whatever the latest deployment says, so an addon is validated
+	// against it rather than against the latest deployment's addon. Not asked
 	// in ModeSpec.
 	Volume(addon string) (data AddonData, ok bool)
 	// Blueprint returns the addon type typ; ok false when no blueprint of
@@ -136,7 +136,7 @@ type SecretInfo struct {
 type Blueprint interface {
 	// Validate checks addon name of this type against what it replaces
 	// (prev nil: nothing, or another type): the data its volume holds,
-	// else the same addon of the current release. Its version, plan and
+	// else the same addon of the current deployment. Its version, plan and
 	// options. Paths are relative to the addon: "version",
 	// "options.roles[1]"; Validate prefixes them with "addons.<name>.".
 	Validate(name string, prev *Addon, next Addon) []Finding
@@ -182,7 +182,7 @@ func IsName(name string) bool { return dnsLabel.MatchString(name) }
 
 // Validate checks a parsed spec against the rules of the contract's §3
 // and returns every finding, ordered by path. prev is the environment's
-// current release's spec (nil: none, and always nil in ModeSpec): an
+// current deployment's spec (nil: none, and always nil in ModeSpec): an
 // addon is validated against its previous self (a major version change
 // is an error). Findings about the spec as written; Normalise adds its
 // own (dropped secrets).
@@ -683,9 +683,9 @@ func (v *validator) job(name string, j Job) {
 		v.image(p+".image", j.Image)
 	}
 	switch j.On {
-	case "", JobOnRelease, JobOnManual:
+	case "", JobOnDeploy, JobOnRelease, JobOnManual:
 	default:
-		v.errorf(p+".on", `use "release" or "manual"`, "on %q is unknown", j.On)
+		v.errorf(p+".on", `use "deploy" or "manual"`, "on %q is unknown", j.On)
 	}
 	if j.Retries < 0 || j.Retries > MaxRetries {
 		v.errorf(p+".retries", fmt.Sprintf("use 0..%d", MaxRetries), "retries %d is out of range", j.Retries)
@@ -725,8 +725,8 @@ func (v *validator) addon(name string, a Addon) {
 
 // prevAddon is what addon name of type a.Type is validated against: the
 // data its volume holds when the environment has one (its type, the
-// version that wrote it, the latest release's plan and options when that
-// release has the addon of that type), else the latest release's addon;
+// version that wrote it, the latest deployment's plan and options when that
+// deployment has the addon of that type), else the latest deployment's addon;
 // nil when there is neither, or either is of another type, which deletes
 // the data (a warning says so).
 func (v *validator) prevAddon(name string, a Addon) *Addon {

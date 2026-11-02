@@ -56,8 +56,8 @@ func (c *Controller) stepAttached(ctx context.Context, s *stepState) {
 		if a, err := c.st.GetAttached(ctx, v.env.ID, name); err == nil && a.Detail != "" {
 			reason += ": " + a.Detail
 		}
-		if err := c.failRelease(ctx, v, reason, objectName(spec.KindService, name), model.ConditionRolloutFailed,
-			evidence{Diff: c.releaseDiff(ctx, v)}); err == nil {
+		if err := c.failDeployment(ctx, v, reason, objectName(spec.KindService, name), model.ConditionRolloutFailed,
+			evidence{Diff: c.deploymentDiff(ctx, v)}); err == nil {
 			s.failed = true
 			return
 		}

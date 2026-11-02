@@ -19,11 +19,11 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The controller reads a release's spec as the store keeps it (normalised
+// The controller reads a deployment's spec as the store keeps it (normalised
 // by the service's apply), but never relies on the normalisation: every
 // default of the contract's §3 is applied here where a field is empty.
 
-// specKey names a release: of the environment of its ID created when
+// specKey names a deployment: of the environment of its ID created when
 // (an environment's ID is free again once it is deleted, and the client
 // chooses it, so the ID alone does not name the environment).
 type specKey struct {
@@ -32,7 +32,7 @@ type specKey struct {
 	number  int
 }
 
-// specCache keeps parsed specs: a release's spec never changes.
+// specCache keeps parsed specs: a deployment's spec never changes.
 type specCache struct {
 	mu sync.Mutex
 	m  map[specKey]*spec.Spec
@@ -43,9 +43,9 @@ func newSpecCache() *specCache { return &specCache{m: map[specKey]*spec.Spec{}} 
 // maxCachedSpecs bounds the cache; past it, it starts anew.
 const maxCachedSpecs = 1024
 
-// releaseSpec reads (and caches) the spec of release number of the
+// deploymentSpec reads (and caches) the spec of deployment number of the
 // environment.
-func (c *Controller) releaseSpec(ctx context.Context, env store.Environment, number int) (*spec.Spec, error) {
+func (c *Controller) deploymentSpec(ctx context.Context, env store.Environment, number int) (*spec.Spec, error) {
 	k := specKey{env: env.ID, created: env.CreatedAt, number: number}
 	c.specs.mu.Lock()
 	s, ok := c.specs.m[k]
@@ -53,13 +53,13 @@ func (c *Controller) releaseSpec(ctx context.Context, env store.Environment, num
 	if ok {
 		return s, nil
 	}
-	r, err := c.st.GetRelease(ctx, env.ID, number)
+	r, err := c.st.GetDeployment(ctx, env.ID, number)
 	if err != nil {
-		return nil, fmt.Errorf("release %d: %w", number, err)
+		return nil, fmt.Errorf("deployment %d: %w", number, err)
 	}
 	s = &spec.Spec{}
 	if err := json.Unmarshal(r.Spec, s); err != nil {
-		return nil, fmt.Errorf("release %d of environment %s: its spec: %w", r.Number, r.EnvID, err)
+		return nil, fmt.Errorf("deployment %d of environment %s: its spec: %w", r.Number, r.EnvID, err)
 	}
 	c.specs.mu.Lock()
 	defer c.specs.mu.Unlock()
@@ -156,10 +156,11 @@ func rolloutOf(s spec.Service) time.Duration {
 	return duration(s.Rollout.Timeout, spec.DefaultRolloutTimeout)
 }
 
-// jobOn is a job's trigger: release when unset.
+// jobOn is a job's trigger: JobOnDeploy for a deploy job, whichever word
+// its spec says or none.
 func jobOn(j spec.Job) string {
-	if j.On == "" {
-		return spec.JobOnRelease
+	if spec.IsJobOnDeploy(j.On) {
+		return spec.JobOnDeploy
 	}
 	return j.On
 }
@@ -231,14 +232,14 @@ func secretVersion(s *spec.Spec, name string) int {
 }
 
 // view is what one pass knows of an environment: its row, its latest
-// release R and its target T, its instances, volumes and attached
+// deployment R and its target T, its instances, volumes and attached
 // services, and the database's time.
 type view struct {
 	env store.Environment
 	// latest is R; latestSpec its spec.
-	latest     store.EnvRelease
+	latest     store.EnvDeployment
 	latestSpec *spec.Spec
-	// target is T, targetNum its release (0: none, an empty spec);
+	// target is T, targetNum its deployment (0: none, an empty spec);
 	// targetIsLatest: T is R.
 	target         *spec.Spec
 	targetNum      int
@@ -264,36 +265,36 @@ func (v *view) isOpen(object, condition string) bool {
 	return false
 }
 
-// load reads an environment's view; nil when it has no release or is
+// load reads an environment's view; nil when it has no deployment or is
 // being deleted.
 func (c *Controller) load(ctx context.Context, envID uuid.UUID) (*view, error) {
 	env, err := c.st.GetEnvironment(ctx, envID)
 	if err != nil {
 		return nil, err
 	}
-	if env.Deleting || env.Release == 0 {
+	if env.Deleting || env.Deployment == 0 {
 		return nil, nil
 	}
 	v := &view{env: env}
-	// The latest release without its spec (up to 1 MiB, read every
+	// The latest deployment without its spec (up to 1 MiB, read every
 	// second by the probes): the spec comes from the cache.
-	latest, err := c.st.ListReleases(ctx, envID, 1)
+	latest, err := c.st.ListDeployments(ctx, envID, 1)
 	if err != nil {
 		return nil, err
 	}
-	if len(latest) == 1 && latest[0].Number == env.Release {
+	if len(latest) == 1 && latest[0].Number == env.Deployment {
 		v.latest = latest[0]
-	} else if v.latest, err = c.st.GetRelease(ctx, envID, env.Release); err != nil {
-		return nil, fmt.Errorf("release %d: %w", env.Release, err)
+	} else if v.latest, err = c.st.GetDeployment(ctx, envID, env.Deployment); err != nil {
+		return nil, fmt.Errorf("deployment %d: %w", env.Deployment, err)
 	}
-	if v.latestSpec, err = c.releaseSpec(ctx, env, env.Release); err != nil {
+	if v.latestSpec, err = c.deploymentSpec(ctx, env, env.Deployment); err != nil {
 		return nil, err
 	}
 	switch {
-	case v.latest.State != model.ReleaseFailed:
-		v.target, v.targetNum, v.targetIsLatest = v.latestSpec, env.Release, true
+	case v.latest.State != model.DeploymentFailed:
+		v.target, v.targetNum, v.targetIsLatest = v.latestSpec, env.Deployment, true
 	case env.Deployed > 0:
-		if v.target, err = c.releaseSpec(ctx, env, env.Deployed); err != nil {
+		if v.target, err = c.deploymentSpec(ctx, env, env.Deployed); err != nil {
 			return nil, err
 		}
 		v.targetNum = env.Deployed

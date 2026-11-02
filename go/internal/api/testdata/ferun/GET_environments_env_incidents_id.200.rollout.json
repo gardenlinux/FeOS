@@ -7,11 +7,12 @@
   "response": {
     "id": "13",
     "object": "addon/postgres",
+    "deployment": 8,
     "release": 8,
     "condition": "rollout_failed",
     "openedAt": "2026-10-18T15:30:02Z",
     "closedAt": "2026-10-18T15:41:10Z",
-    "summary": "release 8 did not roll out within 10m0s: addon postgres is not ready",
+    "summary": "deployment 8 did not roll out within 10m0s: addon postgres is not ready",
     "evidence": {
       "diff": [
         {
@@ -35,5 +36,5 @@
       ]
     }
   },
-  "note": "a release past its deadline: what it still waited for, and its instances' details (credentials redacted)"
+  "note": "a deployment past its deadline: what it still waited for, and its instances' details (credentials redacted)"
 }

@@ -100,7 +100,7 @@ type sinkTraffic struct {
 }
 
 // Traffic is GET /api/v1/environments/{env}/traffic?window=: the traffic
-// of the services that the environment's desired and deployed releases
+// of the services that the environment's desired and deployed deployments
 // route (the ingress reaches no other, and an attached service's routes
 // only the route door), read from the ingress's spans in the sink with
 // the caller's token (traces.md, Reading: the ingress's traffic). As
@@ -144,14 +144,14 @@ func (s *Service) Traffic(ctx context.Context, tenant, env, window string) (Traf
 }
 
 // routedServices are the image services that the routes of e's desired
-// and deployed releases send the ingress to, sorted.
+// and deployed deployments send the ingress to, sorted.
 func (s *Service) routedServices(ctx context.Context, e store.Environment) ([]string, error) {
 	var out []string
-	for _, n := range []int{e.Release, e.Deployed} {
+	for _, n := range []int{e.Deployment, e.Deployed} {
 		if n <= 0 {
 			continue
 		}
-		sp, err := s.releaseSpec(ctx, e, n)
+		sp, err := s.deploymentSpec(ctx, e, n)
 		if err != nil {
 			return nil, err
 		}

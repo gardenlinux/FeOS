@@ -16,29 +16,29 @@ import (
 )
 
 // EnvIncident is a row of env_incidents: a condition of an object that
-// needs a look. At most one is open per (environment, object, release,
+// needs a look. At most one is open per (environment, object, deployment,
 // condition).
 type EnvIncident struct {
-	ID        int64
-	EnvID     uuid.UUID
-	Object    string // "<kind>/<name>"
-	Release   int
-	Condition string // model.Condition*
-	OpenedAt  time.Time
-	ClosedAt  time.Time // zero: open
-	Summary   string
+	ID         int64
+	EnvID      uuid.UUID
+	Object     string // "<kind>/<name>"
+	Deployment int
+	Condition  string // model.Condition*
+	OpenedAt   time.Time
+	ClosedAt   time.Time // zero: open
+	Summary    string
 	// Evidence is a JSON object ({exits, logTail, diff, placement}); nil
 	// is {}.
 	Evidence json.RawMessage
 }
 
-const incidentCols = "id, env_id, object, release, condition, opened_at, closed_at, summary, evidence"
+const incidentCols = "id, env_id, object, deployment, condition, opened_at, closed_at, summary, evidence"
 
 func scanIncident(row pgx.Row) (EnvIncident, error) {
 	var i EnvIncident
 	var closed *time.Time
 	var evidence []byte
-	if err := row.Scan(&i.ID, &i.EnvID, &i.Object, &i.Release, &i.Condition, &i.OpenedAt, &closed, &i.Summary,
+	if err := row.Scan(&i.ID, &i.EnvID, &i.Object, &i.Deployment, &i.Condition, &i.OpenedAt, &closed, &i.Summary,
 		&evidence); err != nil {
 		return EnvIncident{}, err
 	}
@@ -61,15 +61,15 @@ func evidenceText(e json.RawMessage) string {
 }
 
 // OpenIncident opens an incident unless one is open for its environment,
-// object, release and condition: it returns the new one and true, or the
+// object, deployment and condition: it returns the new one and true, or the
 // open one (as it is) and false. An unknown environment is ErrNoRow.
 func (s *Store) OpenIncident(ctx context.Context, i EnvIncident) (EnvIncident, bool, error) {
 	for range 3 {
-		out, err := scanIncident(s.q.QueryRow(ctx, `INSERT INTO env_incidents (env_id, object, release, condition, summary,
+		out, err := scanIncident(s.q.QueryRow(ctx, `INSERT INTO env_incidents (env_id, object, deployment, condition, summary,
 				evidence)
 			VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-			ON CONFLICT (env_id, object, release, condition) WHERE closed_at IS NULL DO NOTHING RETURNING `+incidentCols,
-			i.EnvID, i.Object, i.Release, i.Condition, i.Summary, evidenceText(i.Evidence)))
+			ON CONFLICT (env_id, object, deployment, condition) WHERE closed_at IS NULL DO NOTHING RETURNING `+incidentCols,
+			i.EnvID, i.Object, i.Deployment, i.Condition, i.Summary, evidenceText(i.Evidence)))
 		if err == nil {
 			return out, true, nil
 		}
@@ -77,8 +77,8 @@ func (s *Store) OpenIncident(ctx context.Context, i EnvIncident) (EnvIncident, b
 			return EnvIncident{}, false, insertError("open incident "+i.Condition+" of "+i.Object, err)
 		}
 		out, err = scanIncident(s.q.QueryRow(ctx, "SELECT "+incidentCols+` FROM env_incidents
-			WHERE env_id = $1 AND object = $2 AND release = $3 AND condition = $4 AND closed_at IS NULL`,
-			i.EnvID, i.Object, i.Release, i.Condition))
+			WHERE env_id = $1 AND object = $2 AND deployment = $3 AND condition = $4 AND closed_at IS NULL`,
+			i.EnvID, i.Object, i.Deployment, i.Condition))
 		if err == nil {
 			return out, false, nil
 		}
@@ -131,7 +131,7 @@ func (s *Store) CountOpenIncidents(ctx context.Context, envID uuid.UUID) (int64,
 func (s *Store) UpdateIncident(ctx context.Context, before, after EnvIncident) (EnvIncident, error) {
 	what := fmt.Sprintf("incident %d", before.ID)
 	if err := fixed(what, map[string]bool{"id": before.ID != after.ID, "env_id": before.EnvID != after.EnvID,
-		"object": before.Object != after.Object, "release": before.Release != after.Release,
+		"object": before.Object != after.Object, "deployment": before.Deployment != after.Deployment,
 		"condition": before.Condition != after.Condition, "opened_at": !before.OpenedAt.Equal(after.OpenedAt)}); err != nil {
 		return EnvIncident{}, err
 	}

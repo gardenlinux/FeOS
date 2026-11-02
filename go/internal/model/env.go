@@ -7,24 +7,24 @@ package model
 // which the environment service, its controller and the API share, and
 // which FeCode reads in the REST answers.
 
-// The states of a release (env_releases.state; ADR 0018, "The states'
+// The states of a deployment (env_deployments.state; ADR 0018, "The states'
 // words").
 const (
-	// ReleaseWaiting: applied, its rollout not begun.
-	ReleaseWaiting = "waiting"
-	// ReleaseDeploying: the controller brings the environment to it.
-	ReleaseDeploying = "deploying"
-	// ReleaseDeployed: every object matched it and was ready.
-	ReleaseDeployed = "deployed"
-	// ReleaseFailed: its rollout failed (env_releases.reason); the
-	// environment keeps serving its deployed release.
-	ReleaseFailed = "failed"
-	// ReleaseReplaced: a later release took its place before or after it
+	// DeploymentWaiting: applied, its rollout not begun.
+	DeploymentWaiting = "waiting"
+	// DeploymentDeploying: the controller brings the environment to it.
+	DeploymentDeploying = "deploying"
+	// DeploymentDeployed: every object matched it and was ready.
+	DeploymentDeployed = "deployed"
+	// DeploymentFailed: its rollout failed (env_deployments.reason); the
+	// environment keeps serving its deployed deployment.
+	DeploymentFailed = "failed"
+	// DeploymentReplaced: a later deployment took its place before or after it
 	// was deployed.
-	ReleaseReplaced = "replaced"
+	DeploymentReplaced = "replaced"
 )
 
-// What made a release (env_releases.origin).
+// What made a deployment (env_deployments.origin).
 const (
 	OriginApply  = "apply"
 	OriginRevert = "revert"
@@ -99,9 +99,9 @@ const (
 )
 
 // The states of an environment in the list (GET /api/v1/environments)
-// besides its latest release's state.
+// besides its latest deployment's state.
 const (
-	// EnvNone: the environment has no release yet.
+	// EnvNone: the environment has no deployment yet.
 	EnvNone = "none"
 	// EnvDeleting: the environment is being deleted.
 	EnvDeleting = "deleting"

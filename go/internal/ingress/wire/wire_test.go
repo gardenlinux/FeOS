@@ -38,7 +38,7 @@ func TestCodecRoundTrip(t *testing.T) {
 		Seq:   7,
 		Whole: true,
 		Envs: []Env{{
-			ID: "e1", Tenant: "acme", Name: "prod", Hosts: []string{"a.apps.test"}, Release: 3, Hash: "h",
+			ID: "e1", Tenant: "acme", Name: "prod", Hosts: []string{"a.apps.test"}, Deployment: 3, Hash: "h",
 			Routes: []Route{{Name: "web", Path: "/", Service: "web", Port: "http", Strip: true}},
 			Services: []Service{{
 				Name: "web", Idle: true, Asleep: 1, Waking: 2, Pending: 3,

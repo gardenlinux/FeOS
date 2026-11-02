@@ -23,7 +23,7 @@
 // interrupted, not_run) send ferun_call with the call's id; the writes the
 // ingress's table follows send ferun_ingress: "env:<id>" (or "*" for more
 // than 256 environments) for an environment's publicity, host label,
-// releases and deletion (env_environments.go), its service instances and
+// deployments and deletion (env_environments.go), its service instances and
 // their admitted ports (env_instances.go) and its tenant's deletion
 // (tenants.go); "ingress:<name>" for an ingress instance's re-join,
 // removal, mesh join and certificates (ingresses.go); "mesh" for every

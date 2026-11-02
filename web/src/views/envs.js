@@ -4,14 +4,14 @@
 // The environments view's arithmetic: pure, with no React or browser
 // imports, so that the tests load it as it is. The shapes are ferund's
 // (go/internal/env/wire.go): an environment's status with its objects
-// and their instances, releases, diffs and incidents.
+// and their instances, deployments, diffs and incidents.
 
 // Tones are the classes of the state dots and labels (styles.css):
 // running green, paused amber, failed red, absent grey.
 
-// releaseTone is the tone of a release's state, or of an environment's
-// in the list (the latest release's state, "none" or "deleting").
-export function releaseTone(state) {
+// deploymentTone is the tone of a deployment's state, or of an environment's
+// in the list (the latest deployment's state, "none" or "deleting").
+export function deploymentTone(state) {
   switch (state) {
     case 'deployed': return 'running';
     case 'waiting': case 'deploying': case 'deleting': return 'paused';
@@ -77,7 +77,7 @@ export function objectSummary(o) {
     case 'job': {
       const r = o.lastRun;
       if (!r) return 'not run yet';
-      let s = `release ${r.release}, attempt ${r.attempt}: ${r.phase}`;
+      let s = `deployment ${r.deployment}, attempt ${r.attempt}: ${r.phase}`;
       if (r.exitCode !== null && r.exitCode !== undefined) s += ` (exit ${r.exitCode})`;
       return s;
     }
@@ -163,8 +163,8 @@ export function labelPairs(labels) {
   return Object.entries(labels || {}).sort(([a], [b]) => a.localeCompare(b));
 }
 
-// originText says where a release came from: an apply, a revert to an
-// earlier release, a clone of another environment's release, or a change
+// originText says where a deployment came from: an apply, a revert to an
+// earlier deployment, a clone of another environment's deployment, or a change
 // of one object.
 export function originText(r) {
   switch (r.origin) {
@@ -230,7 +230,7 @@ export function hasEvidence(ev) {
 }
 
 // envCounts counts the list's environments by the state of their latest
-// release, and their open incidents.
+// deployment, and their open incidents.
 export function envCounts(envs) {
   const c = { deployed: 0, deploying: 0, failed: 0, incidents: 0 };
   for (const e of envs || []) {
@@ -243,23 +243,23 @@ export function envCounts(envs) {
 }
 
 // statusState is an environment's state as the list names it, from its
-// status: deleting, none without a release, else the latest release's.
+// status: deleting, none without a deployment, else the latest deployment's.
 export function statusState(st) {
   if (!st) return '';
   if (st.deleting) return 'deleting';
   return st.rollout ? st.rollout.state : 'none';
 }
 
-// rolloutNote says what serves while the latest release is not deployed:
-// the deployed release keeps serving a failed one and serves during a
+// rolloutNote says what serves while the latest deployment is not deployed:
+// the deployed deployment keeps serving a failed one and serves during a
 // rollout.
 export function rolloutNote(st) {
   const r = st && st.rollout;
   if (!r) return '';
   if (r.state === 'deployed') return 'every object matches it';
-  if (st.deployed > 0 && st.deployed !== r.release) {
-    return r.state === 'failed' ? `release ${st.deployed} keeps serving` : `release ${st.deployed} serves meanwhile`;
+  if (st.deployed > 0 && st.deployed !== r.deployment) {
+    return r.state === 'failed' ? `deployment ${st.deployed} keeps serving` : `deployment ${st.deployed} serves meanwhile`;
   }
-  if (r.state === 'failed') return 'no release was deployed before it';
+  if (r.state === 'failed') return 'no deployment was deployed before it';
   return '';
 }

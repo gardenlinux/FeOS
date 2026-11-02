@@ -137,7 +137,7 @@ func (c *Controller) prepareVolume(ctx context.Context, node string, sb store.Sa
 		return nil
 	}
 	if r, err := c.st.GetEnvInstance(ctx, sb.ID); err == nil {
-		c.volumeIncident(ctx, vol, r.Release, why)
+		c.volumeIncident(ctx, vol, r.Deployment, why)
 	}
 	return unfit{errors.New(why)}
 }
@@ -162,9 +162,9 @@ func (c *Controller) volumeByID(ctx context.Context, id uuid.UUID) (store.EnvVol
 
 // volumeIncident opens volume_unavailable for a volume's addon, outside
 // the leader's fence: the hook runs wherever the op runs.
-func (c *Controller) volumeIncident(ctx context.Context, vol store.EnvVolume, release int, why string) {
+func (c *Controller) volumeIncident(ctx context.Context, vol store.EnvVolume, deployment int, why string) {
 	err := c.st.InTx(ctx, func(tx *store.Store) error {
-		_, err := openIncident(ctx, tx, vol.EnvID, vol.Object, release, model.ConditionVolumeUnavailable, why, evidence{})
+		_, err := openIncident(ctx, tx, vol.EnvID, vol.Object, deployment, model.ConditionVolumeUnavailable, why, evidence{})
 		return err
 	})
 	if err != nil && ctx.Err() == nil {

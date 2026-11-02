@@ -5,7 +5,7 @@
   "status": 422,
   "request": {
     "name": "expensa-demo",
-    "release": 6,
+    "deployment": 6,
     "data": true
   },
   "response": {
@@ -26,5 +26,5 @@
       }
     ]
   },
-  "note": "without spec: the source release's spec (attached services dropped with an info finding each); a secret the new environment would not have is reported once, at its first reference"
+  "note": "without spec: the source deployment's spec (attached services dropped with an info finding each); a secret the new environment would not have is reported once, at its first reference"
 }
