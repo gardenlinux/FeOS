@@ -173,9 +173,9 @@ func TestStatus(t *testing.T) {
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", previewSpec(sb), 0)
-	// Release states and phases are stored in their earlier words for now
-	// (store/env_words.go): 'realised' is deployed, 'rolling' deploying,
-	// 'retiring' stopping.
+	// The earlier words, as the version of migration 0021 still writes
+	// them (store/env_words.go): 'realised' is deployed, 'rolling'
+	// deploying, 'retiring' stopping.
 	h.exec("UPDATE env_releases SET state = 'realised', started_at = now(), finished_at = now() WHERE env_id = $1", e.ID)
 	h.exec("UPDATE environments SET deployed = 1 WHERE id = $1", e.ID)
 

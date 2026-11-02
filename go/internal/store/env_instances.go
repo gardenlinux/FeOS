@@ -125,8 +125,7 @@ func (s *Store) InsertEnvInstance(ctx context.Context, i EnvInstance) (EnvInstan
 			exits, provisioned_hash, detail)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, $17)
 		RETURNING `+envInstanceCols,
-		i.SandboxID, i.EnvID, i.Kind, i.Object, i.Replica, i.TemplateHash, i.Release, storedWord(earlierPhases, i.Phase),
-		nullTime(i.ReadySince),
+		i.SandboxID, i.EnvID, i.Kind, i.Object, i.Replica, i.TemplateHash, i.Release, i.Phase, nullTime(i.ReadySince),
 		nullTime(i.RetireAt), i.Restarts, nullInt(i.LastExit), i.ProbeFailures, nullTime(i.NextRestartAt), exits,
 		i.ProvisionedHash, i.Detail))
 	if err != nil {
@@ -207,7 +206,7 @@ func (s *Store) UpdateEnvInstance(ctx context.Context, before, after EnvInstance
 	}
 	u := newUpdates(before.SandboxID)
 	u.set("release", before.Release != after.Release, after.Release)
-	u.set("phase", before.Phase != after.Phase, storedWord(earlierPhases, after.Phase))
+	u.set("phase", before.Phase != after.Phase, after.Phase)
 	u.set("ready_since", !before.ReadySince.Equal(after.ReadySince), nullTime(after.ReadySince))
 	u.set("retire_at", !before.RetireAt.Equal(after.RetireAt), nullTime(after.RetireAt))
 	u.set("restarts", before.Restarts != after.Restarts, after.Restarts)

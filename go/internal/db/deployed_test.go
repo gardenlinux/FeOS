@@ -30,9 +30,7 @@ func TestDeployedMigration(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	if err := d.Migrate(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
+	migrateRange(t, d, 21, 22)
 
 	both := func(name string) (deployed, realised int) {
 		t.Helper()

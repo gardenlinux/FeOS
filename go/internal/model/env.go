@@ -7,8 +7,7 @@ package model
 // which the environment service, its controller and the API share, and
 // which FeCode reads in the REST answers.
 
-// The states of a release (env_releases.state; until the stored words
-// change, the store writes its earlier words, ADR 0018, "The states'
+// The states of a release (env_releases.state; ADR 0018, "The states'
 // words").
 const (
 	// ReleaseWaiting: applied, its rollout not begun.

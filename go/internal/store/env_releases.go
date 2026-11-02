@@ -79,8 +79,7 @@ func (s *Store) InsertRelease(ctx context.Context, r EnvRelease) (EnvRelease, er
 	out, err := scanRelease(s.q.QueryRow(ctx, `INSERT INTO env_releases (env_id, number, spec, base, author, message,
 			annotations, origin, origin_ref, state, reason, started_at, finished_at)
 		VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13) RETURNING `+releaseCols,
-		r.EnvID, r.Number, string(r.Spec), r.Base, r.Author, r.Message, ann, r.Origin, r.OriginRef,
-		storedWord(earlierReleaseStates, r.State), r.Reason,
+		r.EnvID, r.Number, string(r.Spec), r.Base, r.Author, r.Message, ann, r.Origin, r.OriginRef, r.State, r.Reason,
 		nullTime(r.StartedAt), nullTime(r.FinishedAt)), true)
 	if err != nil {
 		return EnvRelease{}, insertError(fmt.Sprintf("insert release %d of environment %s", r.Number, r.EnvID), err)
@@ -127,7 +126,7 @@ func (s *Store) UpdateRelease(ctx context.Context, before, after EnvRelease) (En
 		return EnvRelease{}, err
 	}
 	u := newUpdates(before.EnvID, before.Number)
-	u.set("state", before.State != after.State, storedWord(earlierReleaseStates, after.State))
+	u.set("state", before.State != after.State, after.State)
 	u.set("reason", before.Reason != after.Reason, after.Reason)
 	u.set("started_at", !before.StartedAt.Equal(after.StartedAt), nullTime(after.StartedAt))
 	u.set("finished_at", !before.FinishedAt.Equal(after.FinishedAt), nullTime(after.FinishedAt))
@@ -146,10 +145,10 @@ func (s *Store) UpdateRelease(ctx context.Context, before, after EnvRelease) (En
 // below whose state is one of states replaced (finished_at = now() where
 // unset) and returns their numbers, ascending.
 func (s *Store) ReplaceReleases(ctx context.Context, envID uuid.UUID, below int, states ...string) ([]int, error) {
-	rows, err := s.q.Query(ctx, `UPDATE env_releases SET state = $4, finished_at = coalesce(finished_at, now()),
+	rows, err := s.q.Query(ctx, `UPDATE env_releases SET state = 'replaced', finished_at = coalesce(finished_at, now()),
 			updated_at = now()
 		WHERE env_id = $1 AND number < $2 AND state = ANY($3) RETURNING number`, envID, below,
-		bothWords(earlierReleaseStates, states), storedWord(earlierReleaseStates, model.ReleaseReplaced))
+		bothWords(earlierReleaseStates, states))
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,13 @@ import (
 // and records them, as a database of an earlier ferund has them.
 func migrateBefore(t *testing.T, d *db.DB, version int) {
 	t.Helper()
+	migrateRange(t, d, 0, version)
+}
+
+// migrateRange applies the migrations from version from up to before
+// version to and records them, as the ferund of to-1 would.
+func migrateRange(t *testing.T, d *db.DB, from, to int) {
+	t.Helper()
 	files, err := filepath.Glob("migrations/*.sql")
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +45,7 @@ func migrateBefore(t *testing.T, d *db.DB, version int) {
 			if err != nil {
 				return err
 			}
-			if v >= version {
+			if v < from || v >= to {
 				continue
 			}
 			b, err := os.ReadFile(f)

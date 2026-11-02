@@ -450,10 +450,9 @@ func TestEnvReleasesAndTags(t *testing.T) {
 	}
 }
 
-// The store writes the earlier words of the release states and of the
-// stopping phase, which the previous version reads beside this one, and
-// reads both, the new ones as the next version writes them once its
-// migration lets the CHECKs admit them (ADR 0018, "The states' words").
+// The store writes the new words of the release states and of the stopping
+// phase, and reads both: the earlier ones as the version of 0021 writes
+// them beside this one (ADR 0018, "The states' words").
 func TestEnvStoredWords(t *testing.T) {
 	s, d := newStore(t)
 	mkTenant(t, s, "acme")
@@ -479,13 +478,13 @@ func TestEnvStoredWords(t *testing.T) {
 		return r
 	}
 
-	// Writes: the earlier words.
+	// Writes: the new words.
 	r := release(1)
-	if r.State != model.ReleaseWaiting || state(1) != "pending" {
+	if r.State != model.ReleaseWaiting || state(1) != "waiting" {
 		t.Fatalf("inserted %q, stored %q", r.State, state(1))
 	}
 	for _, w := range []struct{ state, stored string }{
-		{model.ReleaseDeploying, "rolling"}, {model.ReleaseDeployed, "realised"},
+		{model.ReleaseDeploying, "deploying"}, {model.ReleaseDeployed, "deployed"},
 	} {
 		after := r
 		after.State = w.state
@@ -495,7 +494,7 @@ func TestEnvStoredWords(t *testing.T) {
 		}
 	}
 	if n, err := s.ReplaceReleases(bg, e.ID, 2, model.ReleaseDeployed); err != nil || !slices.Equal(n, []int{1}) ||
-		state(1) != "superseded" {
+		state(1) != "replaced" {
 		t.Fatalf("replaced %v %v, stored %q", n, err, state(1))
 	}
 	if got, err := s.GetRelease(bg, e.ID, 1); err != nil || got.State != model.ReleaseReplaced {
@@ -508,13 +507,11 @@ func TestEnvStoredWords(t *testing.T) {
 	after.Phase = model.PhaseStopping
 	inst, err = s.UpdateEnvInstance(bg, inst, after)
 	phase := stored("SELECT phase FROM env_instances WHERE sandbox_id = $1", stopping.ID)
-	if err != nil || inst.Phase != model.PhaseStopping || phase != "retiring" {
+	if err != nil || inst.Phase != model.PhaseStopping || phase != "stopping" {
 		t.Fatalf("instance %+v %v, stored %q", inst, err, phase)
 	}
 
 	// Reads: both words.
-	exec(t, s, "ALTER TABLE env_releases DROP CONSTRAINT env_releases_state_check")
-	exec(t, s, "ALTER TABLE env_instances DROP CONSTRAINT env_instances_phase_check")
 	release(2)
 	release(3)
 	release(4)
@@ -534,13 +531,14 @@ func TestEnvStoredWords(t *testing.T) {
 	if sum, err := s.EnvSummaries(bg, "acme", nil); err != nil || len(sum) != 1 || sum[0].ReleaseState != model.ReleaseDeployed {
 		t.Fatalf("summaries %+v %v", sum, err)
 	}
-	exec(t, s, "UPDATE env_instances SET phase = 'stopping' WHERE sandbox_id = $1", stopping.ID)
+	exec(t, s, "UPDATE env_instances SET phase = 'retiring' WHERE sandbox_id = $1", stopping.ID)
 	if got, err := s.GetEnvInstance(bg, stopping.ID); err != nil || got.Phase != model.PhaseStopping {
-		t.Fatalf("a new phase word: %+v %v", got, err)
+		t.Fatalf("an earlier phase word: %+v %v", got, err)
 	}
-	// The ingress leaves out a stopping instance by either word.
-	earlier := mkService(t, s, e, "n1")
-	exec(t, s, "UPDATE env_instances SET phase = 'retiring' WHERE sandbox_id = $1", earlier.ID)
+	// The ingress leaves out a stopping instance by either word: stopping's
+	// is the earlier one now, this one's the new one.
+	other := mkService(t, s, e, "n1")
+	exec(t, s, "UPDATE env_instances SET phase = 'stopping' WHERE sandbox_id = $1", other.ID)
 	ready := mkService(t, s, e, "n1")
 	rows, err := s.IngressRouting(bg, []uuid.UUID{e.ID})
 	if err != nil || len(rows) != 1 || rows[0].SandboxID != ready.ID {
