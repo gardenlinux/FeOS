@@ -169,3 +169,50 @@ func (s *Store) CloseIncident(ctx context.Context, id int64) (bool, error) {
 	ct, err := s.q.Exec(ctx, "UPDATE env_incidents SET closed_at = now() WHERE id = $1 AND closed_at IS NULL", id)
 	return ct.RowsAffected() > 0, err
 }
+
+// HoldIncidents records that the open incidents of condition of an object
+// of the environment still hold, now by the database's clock (held_at),
+// and returns how many.
+func (s *Store) HoldIncidents(ctx context.Context, envID uuid.UUID, object, condition string) (int64, error) {
+	ct, err := s.q.Exec(ctx, `UPDATE env_incidents SET held_at = now()
+		WHERE env_id = $1 AND object = $2 AND condition = $3 AND closed_at IS NULL`, envID, object, condition)
+	return ct.RowsAffected(), err
+}
+
+// CloseUnheldIncidents closes the open incidents of condition of an object
+// of the environment, of any deployment, whose condition was last seen to
+// hold (held_at, else opened_at) clean or longer ago by the database's
+// clock, and returns how many; clean 0 closes them all.
+func (s *Store) CloseUnheldIncidents(ctx context.Context, envID uuid.UUID, object, condition string,
+	clean time.Duration) (int64, error) {
+	ct, err := s.q.Exec(ctx, `UPDATE env_incidents SET closed_at = now()
+		WHERE env_id = $1 AND object = $2 AND condition = $3 AND closed_at IS NULL
+			AND coalesce(held_at, opened_at) <= now() - $4::interval`, envID, object, condition, interval(clean))
+	return ct.RowsAffected(), err
+}
+
+// ReopenIncident opens again the newest incident of i's environment,
+// object, deployment and condition that closed within the last within by
+// the database's clock, unless one of them is open: with i's summary and
+// evidence, held now. It reports whether it reopened one.
+func (s *Store) ReopenIncident(ctx context.Context, i EnvIncident, within time.Duration) (bool, error) {
+	ct, err := s.q.Exec(ctx, `UPDATE env_incidents SET closed_at = NULL, held_at = now(), summary = $5,
+			evidence = $6::jsonb
+		WHERE id = (SELECT id FROM env_incidents WHERE env_id = $1 AND object = $2 AND deployment = $3 AND condition = $4
+				AND closed_at > now() - $7::interval ORDER BY closed_at DESC, id DESC LIMIT 1)
+			AND NOT EXISTS (SELECT 1 FROM env_incidents WHERE env_id = $1 AND object = $2 AND deployment = $3
+				AND condition = $4 AND closed_at IS NULL)`,
+		i.EnvID, i.Object, i.Deployment, i.Condition, i.Summary, evidenceText(i.Evidence), interval(within))
+	if err != nil {
+		return false, fmt.Errorf("reopen incident %s of %s: %w", i.Condition, i.Object, err)
+	}
+	return ct.RowsAffected() > 0, nil
+}
+
+// DeleteClosedIncidents deletes the incidents of one of conditions that
+// closed more than keep ago by the database's clock, and returns how many.
+func (s *Store) DeleteClosedIncidents(ctx context.Context, conditions []string, keep time.Duration) (int64, error) {
+	ct, err := s.q.Exec(ctx, `DELETE FROM env_incidents WHERE closed_at < now() - $2::interval AND condition = ANY($1)`,
+		nonNil(conditions), interval(keep))
+	return ct.RowsAffected(), err
+}

@@ -189,11 +189,14 @@ follows; the sink requires nothing of `http_end`.
   token or a body. Query strings and bodies are never recorded.
 - **Audit**: `feosd` also publishes each `http` record as the pod's audit
   record (`AuditRecord`, kind `http_request`, or `http`, its type;
-  `detail_json` the same object), which `ferund` keeps in its activity
-  log (source `authn`) and reads for the bindings' incidents
-  ([control-plane.md](control-plane.md#http-bindings)). It may publish
-  the other records (`http_end`, `token`, `bindings`) as audit records
-  of their types; `ferund` keeps them and counts none.
+  `detail_json` the same object). The sink is where a pod's requests
+  are kept: `ferund` keeps none of them in its activity log. It counts
+  them per pod, binding and minute for the bindings' incidents and keeps
+  the newest ten of each pod's binding as their evidence, both for ten
+  minutes ([control-plane.md](control-plane.md#http-bindings)). It may
+  publish the other records (`http_end`, `token`, `bindings`) as audit
+  records of their types; `ferund` drops `http_end` and keeps the others
+  in its activity log (source `authn`), counting none.
 - **Batches, limits**: as a container's stream. A record the limit
   drops is counted in the node's dropped-lines record.
 - **Reading**: `GET /api/v1/logs?environment=<id>&source=egress` (and

@@ -37,11 +37,12 @@ func (f *fakeHTTPBindings) CheckDestination(_ context.Context, host string) erro
 	}
 	return nil
 }
-func (f *fakeHTTPBindings) PreflightHTTP(_ context.Context, b *fleetv1.HttpBinding, _ *bindings.HTTPProbe) *bindings.HTTPPreflightResult {
+func (f *fakeHTTPBindings) PreflightHTTP(_ context.Context, _ string, b *fleetv1.HttpBinding, _ *bindings.HTTPProbe) (
+	*bindings.HTTPPreflightResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.last = b
-	return &bindings.HTTPPreflightResult{OK: true, Addresses: []string{"203.0.113.40"}}
+	return &bindings.HTTPPreflightResult{OK: true, Addresses: []string{"203.0.113.40"}}, nil
 }
 
 // shopSpec has an ERP system's API for web and a payment provider's,
@@ -217,5 +218,83 @@ func TestEnvBindingsPlan(t *testing.T) {
 	}
 	if _, err := off.svc.CheckBinding(off.ctx(), tenantA, "shop", "erp", BindingCheckRequest{}); !hasCode(err, CodeBindingsOff) {
 		t.Fatalf("check while off: %v", err)
+	}
+}
+
+// invalidSpec has the worker call an ERP system's API by its name and a
+// payment provider's, intercepted, with a header from pay-token.
+const invalidSpec = `{
+  "services": {"worker": {"image": "ghcr.io/acme/worker:1", "bindings": ["erp", "pay"]}},
+  "bindings": {
+    "erp": {"upstream": "https://api.erp.example", "credential": {"kind": "headers",
+      "headers": {"X-API-Key": {"secret": "erp-key"}}}},
+    "pay": {"upstream": "https://api.pay.example", "mode": "intercept", "credential": {"kind": "headers",
+      "headers": {"Authorization": {"secret": "pay-token"}}}}
+  }
+}`
+
+// A binding whose secret is no valid header value: the plan warns without
+// the value, and the pod gets the binding without its credential whether
+// its bindings are opened or not, so that its clear part and its sealed set
+// name the same bindings under one version, and its CA stays.
+func TestEnvBindingsInvalidValue(t *testing.T) {
+	h := newHarness(t, harnessOptions{bindings: &fakeHTTPBindings{}})
+	h.create("shop", nil)
+	h.putSecret("shop", "erp-key", "erp-key-v1")
+	h.putSecret("shop", "pay-token", "Bearer t0ken\r\nX-Injected: 1")
+
+	plan, err := h.svc.Plan(h.ctx(), tenantA, "shop", PlanRequest{Spec: []byte(invalidSpec)})
+	if err != nil || !plan.Valid {
+		t.Fatalf("plan: %+v %v", plan, err)
+	}
+	warned := false
+	for _, f := range plan.Findings {
+		if f.Path == "bindings.pay.credential" && f.Severity == "warning" {
+			warned = true
+			if strings.Contains(f.Problem, "t0ken") || !strings.Contains(f.Problem, "control character") {
+				t.Fatalf("the warning: %s", f.Problem)
+			}
+		}
+	}
+	if !warned {
+		t.Fatalf("no warning: %+v", plan.Findings)
+	}
+	h.apply("shop", invalidSpec, 0)
+	worker := h.podOf(h.envID("shop"), "worker", 1, erpTemplate, payTemplate)
+
+	open, v, err := h.svc.RowHTTPBindings(h.ctx(), worker, true)
+	if err != nil || len(open) != 2 || open[0].GetName() != "erp" || open[1].GetName() != "pay" ||
+		open[0].GetHeaders().GetHeaders()["X-Api-Key"] != "erp-key-v1" || open[1].GetCredential() != nil {
+		t.Fatalf("opened: %v %v", open, err)
+	}
+	closed, cv, err := h.svc.RowHTTPBindings(h.ctx(), worker, false)
+	if err != nil || len(closed) != 2 || cv != v {
+		t.Fatalf("unopened: %v %q, opened %q: %v", closed, cv, v, err)
+	}
+
+	bsvc, err := bindings.New(bindings.Config{Enabled: true, Key: make([]byte, 32), Log: dbtest.Logger(t)}, h.st, h.d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bsvc.SetEnvSource(h.svc)
+	for range 3 {
+		part, err := bsvc.PodHTTP(h.ctx(), worker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pb, pv, err := bsvc.PodBindings(h.ctx(), worker.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if part.GetVersion() != pv || !slices.Equal(part.GetNames(), []string{"erp"}) ||
+			!slices.Equal(part.GetInterceptHosts(), []string{"api.pay.example"}) || len(pb.GetHttp()) != 2 ||
+			len(pb.GetInterceptCas()) != 1 || len(part.GetInterceptCaPems()) != 1 {
+			t.Fatalf("clear part %v, sealed %v (%s)", part, pb, pv)
+		}
+	}
+	var cas int
+	if err := h.d.Pool.QueryRow(h.ctx(), "SELECT count(*) FROM pod_intercept_cas WHERE sandbox_id = $1",
+		worker.ID).Scan(&cas); err != nil || cas != 1 {
+		t.Fatalf("CAs: %d %v", cas, err)
 	}
 }

@@ -153,16 +153,52 @@ func (s *Store) DeleteInterceptCAsBefore(ctx context.Context, sandboxID podid.ID
 	return err
 }
 
+// HTTPPushedUnknown is http_pushed when two pushes of a pod ran at once and
+// which part its node took last is not known: no part's version, so that
+// the loop pushes again.
+const HTTPPushedUnknown = "unknown"
+
 // SetHTTPPushed records that the pod of the row's incarnation inc took
-// the clear part of version v of its HTTP bindings. A row of another
-// incarnation, or gone, is left: false.
-func (s *Store) SetHTTPPushed(ctx context.Context, sandboxID podid.ID, inc uuid.UUID, v string) (bool, error) {
-	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET http_pushed = $3
-		WHERE id = $1 AND incarnation = $2 AND http_pushed IS DISTINCT FROM $3`, sandboxID, inc, v)
+// the clear part of version v of its HTTP bindings, if http_pushed is
+// still from, what the pusher read before it pushed (or v already).
+// Otherwise another push ran meanwhile, whose part the node may hold
+// instead: http_pushed becomes HTTPPushedUnknown, and false. A row of
+// another incarnation, or gone, is left: false.
+func (s *Store) SetHTTPPushed(ctx context.Context, sandboxID podid.ID, inc uuid.UUID, from, v string) (bool, error) {
+	var now string
+	err := s.q.QueryRow(ctx, `UPDATE sandboxes
+		SET http_pushed = CASE WHEN http_pushed = $3 OR http_pushed = $4 THEN $4 ELSE $5 END
+		WHERE id = $1 AND incarnation = $2 AND http_pushed IS DISTINCT FROM $4
+		RETURNING http_pushed`, sandboxID, inc, from, v, HTTPPushedUnknown).Scan(&now)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// v already, or another incarnation's row, or none.
+		return s.httpPushedIs(ctx, sandboxID, inc, v)
+	}
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	return now == v, nil
+}
+
+// httpPushedIs reports whether the row of incarnation inc records v.
+func (s *Store) httpPushedIs(ctx context.Context, sandboxID podid.ID, inc uuid.UUID, v string) (bool, error) {
+	var is bool
+	err := s.q.QueryRow(ctx, "SELECT http_pushed = $3 FROM sandboxes WHERE id = $1 AND incarnation = $2",
+		sandboxID, inc, v).Scan(&is)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return is, err
+}
+
+// ResetHTTPPushed records that the pod of the row's incarnation inc took
+// no clear part yet that a node confirmed: after its create, which a feosd
+// from before ADR 0028 takes without the spec's part. A row of another
+// incarnation, or gone, is left.
+func (s *Store) ResetHTTPPushed(ctx context.Context, sandboxID podid.ID, inc uuid.UUID) error {
+	_, err := s.q.Exec(ctx, `UPDATE sandboxes SET http_pushed = ''
+		WHERE id = $1 AND incarnation = $2 AND http_pushed <> ''`, sandboxID, inc)
+	return err
 }
 
 // HTTPPushCandidates returns the rows on nodes whose pods may hold another

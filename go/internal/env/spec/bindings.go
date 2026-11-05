@@ -13,7 +13,10 @@ import (
 
 // An environment's bindings (ADR 0028): checked by the rules of a
 // sandbox's HTTP set (internal/bindings/httpcheck), their credentials'
-// fields literals or secrets of the environment, their names in the
+// secret fields (a header's value, password, clientSecret, keyPem)
+// secrets of the environment, never literals, which would stand in the
+// clear in the spec, its plans and its deployments, their other fields
+// literals or secrets, their names in the
 // space of the services' and addons' (the pods' name tables answer
 // those), each named by the services and jobs that get it.
 
@@ -130,7 +133,7 @@ func (v *validator) binding(name string, b Binding) (httpcheck.Upstream, string)
 }
 
 // credential checks a binding's credential: its kind's fields, and no
-// other, each a literal or a secret.
+// other, each a literal or a secret, the secret fields a secret.
 func (v *validator) credential(p string, c *BindingCredential) {
 	if c == nil {
 		v.errorf(p, `set the credential: {"kind": "headers" | "basic" | "oauth2" | "clientCertificate", …}`,
@@ -187,6 +190,20 @@ func (v *validator) credential(p string, c *BindingCredential) {
 				"a secret", field)
 		}
 	}
+	// secret checks a secret field: required, a secret of the environment.
+	secret := func(field string, val *EnvValue) {
+		fp := p + "." + field
+		switch {
+		case val == nil:
+			v.errorf(fp, `set it to {"secret": "<name>"}`, "a credential of kind %s needs %s", c.Kind, field)
+		case val.Kind == EnvSecret:
+			v.secretRef(fp, val.Secret)
+		default:
+			v.errorf(fp, `store the value as a secret of the environment and write {"secret": "<name>"}`,
+				"a credential's %s is a secret's: a literal would stand in the clear in the spec, its plans and its "+
+					"deployments", field)
+		}
+	}
 	switch c.Kind {
 	case httpcheck.KindHeaders:
 		if len(c.Headers) == 0 {
@@ -203,11 +220,11 @@ func (v *validator) credential(p string, c *BindingCredential) {
 			}
 			canon[strings.ToLower(h)] = h
 			val := c.Headers[h]
-			value("headers."+h, &val, true, httpcheck.HeaderValue)
+			secret("headers."+h, &val)
 		}
 	case httpcheck.KindBasic:
 		value("user", c.User, true, httpcheck.BasicUser)
-		value("password", c.Password, true, nil)
+		secret("password", c.Password)
 	case httpcheck.KindOAuth2:
 		fp := p + ".tokenUrl"
 		switch {
@@ -224,15 +241,14 @@ func (v *validator) credential(p string, c *BindingCredential) {
 			}
 		}
 		value("clientId", c.ClientID, true, nil)
-		value("clientSecret", c.ClientSecret, true, nil)
+		secret("clientSecret", c.ClientSecret)
 		value("scope", c.Scope, false, nil)
 		value("audience", c.Audience, false, nil)
 	case httpcheck.KindClientCertificate:
+		// The pair is checked once the key's secret resolves: a plan's
+		// warning, a pod's binding_invalid.
 		value("certPem", c.CertPem, true, func(string, string) *httpcheck.Error { return nil })
-		value("keyPem", c.KeyPem, true, func(string, string) *httpcheck.Error { return nil })
-		if c.CertPem != nil && c.KeyPem != nil && c.CertPem.Kind != EnvSecret && c.KeyPem.Kind != EnvSecret {
-			v.fail(p, httpcheck.ClientCertificate("credential", c.CertPem.Value, c.KeyPem.Value))
-		}
+		secret("keyPem", c.KeyPem)
 	}
 }
 

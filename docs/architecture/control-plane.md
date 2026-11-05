@@ -72,7 +72,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--ca-dir` | `/etc/ferun/ca` | the issuer: `issuer.crt`, `issuer.key`, `issuer.json`, `bundle.crt`; never `root.key` |
 | `--node-server-names` | the control-plane domain | the DNS names of the instance's certificate on the nodes' port, each under the control-plane domain |
 | `--secret-key-file` | none | 32 bytes (raw, hex or base64) that seal the bindings and the environments' secrets at rest |
-| `--bindings` | off | serve the Kubernetes and SSH bindings; only with `--secret-key-file` |
+| `--bindings` | off | serve the Kubernetes, SSH and HTTP bindings; only with `--secret-key-file` |
 | `--acme-directory` | none | the ACME directory, an https URL (`https://acme-v02.api.letsencrypt.org/directory`), from which the domains' certificates are obtained ([Certificates of domains](#certificates-of-domains)); its terms of service are agreed to. Empty: none is obtained, and domains stay `issuing`. Needs `--secret-key-file`, which seals the keys |
 | `--acme-email` | none | the contact of the platform's ACME account, an email address; changing it updates the account |
 | `--acme-profile` | `shortlived` | the certificate profile the orders ask for (ACME profiles), one the directory lists: Let's Encrypt's `shortlived` is six days (160 hours), `classic` 90 days; empty: the CA's default. A profile the directory does not list fails every order |
@@ -268,7 +268,9 @@ that outlive their caller](#calls-that-outlive-their-caller));
 `sandbox_image_credentials` (a sandbox's sealed image credentials);
 `activity` and `traffic_records`, partitioned by day; `issued_certs`
 (pods' certificates); `watches`;
-`kube_bindings`, `ssh_bindings`; `auth_logins`, `ui_sessions`;
+`kube_bindings`, `ssh_bindings`, `http_bindings`, `pod_intercept_cas`,
+`http_egress`, `http_egress_records` ([HTTP bindings](#http-bindings));
+`auth_logins`, `ui_sessions`;
 `environments`, `env_deployments`, `env_tags`, `env_secrets`,
 `env_instances`, `env_job_runs`, `env_attached`, `env_volumes`,
 `env_incidents`, `env_route_tokens` ([Environments](#environments));
@@ -1691,8 +1693,12 @@ They come from two places, and from no other:
 | `PUT /api/v1/sandboxes/{id}/http` `{"bindings": [B…]}` | sandbox | 200 the set as `GET` answers it; 400 with a code below; `bindings` absent is 400 (`[]` is none) |
 | `GET /api/v1/sandboxes/{id}/http` | sandbox | `{"version", "bindings": [B…]}`, by name, every secret field `{"set": true}`: a header's value, `password`, `clientSecret`, `keyPem`; `version` `""` for none |
 | `DELETE /api/v1/sandboxes/{id}/http` | sandbox | 204 |
-| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object |
-| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions; 404 `no_binding`, `bindings_off` |
+| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object; 429 `too_many_preflights` |
+| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions; 404 `no_binding`, `bindings_off`; 429 `too_many_preflights` |
+
+A tenant has at most two preflights and checks in flight on an
+instance, together: each resolves, dials out and may take its 10 s.
+Beyond, 429 `too_many_preflights` with `Retry-After: 1`.
 
 A binding B: `{"name", "upstream", "mode", "caPem", "pathPrefixes",
 "forwardedHost", "rateLimit": {"perSecond", "burst"}, "credential": C}`,
@@ -1713,7 +1719,7 @@ C one of `{"kind": "headers", "headers": {name: value}}`, `{"kind":
 | `bad_header` | a header name that is not a token, or `Host`, `Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Content-Length`, `Proxy-*`, `Forwarded`, `X-Forwarded-For`, `-Host`, `-Proto` or `FeOS-Binding-Error`; two names of one header; an empty value, over 8 KiB, with a control character or surrounding whitespace; more than 16 headers |
 | `bad_ca` | a `caPem` without a certificate or with another block |
 | `bad_client_cert` | a client certificate whose key does not parse or match |
-| `destination_denied` | the upstream's or the token endpoint's host is an internal address, resolves to one, or does not resolve (the destination rule of the other bindings, `--deny-prefix`) |
+| `destination_denied` | the upstream's or the token endpoint's host is an internal address, resolves to one, or does not resolve (the destination rule of the other bindings, `--deny-prefix`); the message names no address a name resolved to, and a preflight answers no `addresses` with it |
 | `name_taken` | the name the pod would resolve is one an environment with attached services in the sandbox gives it (its tables include theirs) |
 
 **At rest.** `http_bindings` holds a sandbox's set: the upstream, mode,
@@ -1735,8 +1741,10 @@ hour before its issue, its key PKCS#8 sealed as a credential (bound to
 the pod and the CA's number). `ferund` makes it when the pod first
 needs one: in the PUT that brings a sandbox's first intercepted names,
 at an environment's pod's first create (or its first credentials). A pod
-whose intercepted names change gets a new CA beside the old ones; the
-newest issues; at most eight are kept, the oldest going first. A pod
+that comes to intercept a name its newest CA does not permit gets a new
+CA beside the old ones; one whose names shrink keeps its newest, so that
+a set and a part of it never make CAs by turns; the newest issues; at
+most eight are kept, the oldest going first. A pod
 without intercept bindings is given none of them.
 
 **Sealed to the run.** `IssuePodCredentials` seals a pod's HTTP bindings
@@ -1768,7 +1776,13 @@ bindings. A create carries it in its spec; the engine sends
   whose part is not the one their node took (256 a pass).
 
 `sandboxes.http_pushed` is the version the node took last for the row's
-incarnation (the create's, or a push's answered OK); a push records an
+incarnation, a push's answered OK, recorded against the value the
+pusher read before it pushed: when another push (the loop's, another
+instance's) changed it meanwhile, the node may hold that one's part, and
+it becomes `unknown`, which the loop pushes again. A create records none: a `feosd`
+from before ADR 0028 drops the spec's part unread, so the loop sends the
+part once after every create, which changes nothing on a node that took
+it (`feosd` answers the same part again without a change); a push records an
 activity event `pod_http_bindings` (`sent`, `unimplemented`). A node
 that answers `UNIMPLEMENTED` is recorded and not asked again for ten
 minutes; its pods get the part with their next create. `NOT_FOUND` is
@@ -1813,15 +1827,25 @@ new version of a binding's secret keeps the pods (`in place`), and the
 kept instance, moved to it, is sent its bindings again. A secret a
 binding names enters no container's environment unless a service's env
 names it itself. A binding whose resolved secret is no valid value (a
-header value with a line break) is left out of the pod's bindings and
-logged; the check says why.
+header value with a line break) is given to the pod without its
+credential, so that its names and version are the same in its clear part
+and in what its `feos-authn` gets, which answers its requests 503
+`binding_invalid`; it is logged, a plan warns of it
+(`bindings.<name>.credential`, the check's words, never the value), and
+the check says why.
 
-**Incidents** (ADR 0028 §6). The leader's loop `env-bindings` (30 s)
-reads, for every environment with bindings, its pods' requests per
-binding over the last five minutes from their audit records (activity,
-source `authn`, kind `http_request` or `http`, `feos-authn`'s `http`
-records, [sink.md](sink.md#a-pods-egress-records-adr-0028)). A
-binding's requests are those the upstream answered and those
+**Incidents** (ADR 0028 §6). A pod's requests through its bindings are
+the sink's records ([sink.md](sink.md#a-pods-egress-records-adr-0028)):
+`ferund` keeps none of them as activity. Of the audit events `feosd`
+publishes of them (kind `http_request` or `http`, `feos-authn`'s `http`
+records; `http_end` it drops) it counts, in the batch's transaction and
+so once each, those of a sandbox's pod that name a binding and count
+below, per pod, binding and minute of the database's clock at their
+arrival (`http_egress`), and keeps the newest ten records of each pod's
+binding (`http_egress_records`); the leader's loop `env-bindings` (30 s)
+deletes both after ten minutes by the database's clock. That loop
+reads, for every environment with bindings, its pods' counts per binding
+of the current minute and the five before it. A binding's requests are those the upstream answered and those
 `feos-authn` refused because the upstream could not be reached
 (`unreachable`, `tls`) or no token could be had
 (`credential_unavailable`); its refusals for the pod's own mistakes
@@ -1840,9 +1864,16 @@ deployment:
 
 One condition at a time, in that order. The evidence is `egress`:
 `{windowSeconds, requests, refused, failing, tokenFailed, records}`, the
-newest ten records of the binding with the pod's ID. An incident closes
-once its condition no longer holds (also without requests), or its
-binding is gone.
+newest ten kept records of the binding's requests within the window,
+each with the pod's ID. Every pass that sees an open incident's
+condition hold records it (`held_at`, the database's clock). An
+incident closes only once its condition has not held for a whole window
+(also without requests), so that a share around a half does not open
+and close it by turns, and at once when its binding is gone. A
+condition that holds again within an hour of its incident's close, on
+the same deployment, opens that incident again (`closed_at` cleared, its
+summary and evidence the new ones) instead of a new one. The loop
+deletes a binding's incidents 30 days after they closed.
 
 ### The management UI
 
@@ -1959,7 +1990,7 @@ a deleting one.
 | `env_job_runs` | one attempt of a job: template hash, deployment, attempt, phase, exit code, detail, the last 50 lines of its log, redacted and bounded ([Logs](#probes-exits-and-restarts)) |
 | `env_attached` | an attached service: its sandbox and the incarnation of it the service last used, template hash, process ID, phase, restarts, the next restart, probe failures, the last exit, detail |
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
-| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence; one open per object, deployment and condition |
+| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence, when a binding's condition last held; one open per object, deployment and condition; a binding's deleted 30 days after it closed |
 | `env_route_tokens` | the route door's tokens, as hashes |
 | `host_labels` | every default host label ever given: its owner, the tenant that first claimed it and alone may claim it again, and the environment that has it, set free when that is deleted |
 
@@ -2065,8 +2096,12 @@ shapes:
   environment that exists and is not deleted.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
   label each, at most 32, checked as a sandbox's (upstream, mode, CA,
-  prefixes, rate limit, headers), the credential's fields a string,
-  `{value}` or `{secret}` of the environment, `tokenUrl` a literal; the
+  prefixes, rate limit, headers), the credential's secret fields (a
+  header's value, `password`, `clientSecret`, `keyPem`) a `{secret}` of
+  the environment, never a literal, which would stand in the clear in the
+  spec, its plans, its deployments and the pod's version; its other
+  fields (`user`, `clientId`, `scope`, `audience`, `certPem`) a string,
+  `{value}` or `{secret}`, `tokenUrl` a literal; the
   hosts of the upstreams and token endpoints judged by the destination
   rule; no binding named as a service or addon, and no intercepted host
   either (the pods' names); no host intercepted twice. Image services

@@ -33,8 +33,9 @@ import (
 // sandbox's PUT, an environment's pod at its first create or credentials)
 // and keeps its key sealed at rest; it reaches the pod's feos-authn with
 // the bindings, and its certificate the pod's containers in the clear part.
-// A pod whose intercepted names change gets a new CA beside the old ones;
-// the newest issues.
+// A pod that comes to intercept a name its newest CA does not permit gets a
+// new CA beside the old ones; the newest issues. One whose names shrink
+// keeps its newest, so that a set and a part of it never make CAs by turns.
 const (
 	// caLifetime is a CA's validity: it outlives any pod, which keeps its
 	// CA across suspends and hibernations.
@@ -93,10 +94,10 @@ func caAAD(id podid.ID, seq int) []byte {
 }
 
 // ensureCAs returns the pod's CAs, oldest first, after making a new one
-// for hosts (sorted) when the newest's hosts differ, and dropping the
-// oldest beyond maxCAs. A concurrent writer's CA for the same number wins;
-// one for other hosts makes this one try the next number. tx may be a
-// transaction or the pool.
+// for hosts (sorted) when the newest's hosts do not hold them all, and
+// dropping the oldest beyond maxCAs. A concurrent writer's CA for the same
+// number wins; one for other hosts makes this one try the next number. tx
+// may be a transaction or the pool.
 func (s *Service) ensureCAs(ctx context.Context, tx *store.Store, id podid.ID, hosts []string) ([]store.InterceptCA, error) {
 	for range 4 {
 		cas, err := tx.InterceptCAs(ctx, id)
@@ -105,7 +106,7 @@ func (s *Service) ensureCAs(ctx context.Context, tx *store.Store, id podid.ID, h
 		}
 		seq := 1
 		if n := len(cas); n > 0 {
-			if slices.Equal(cas[n-1].Hosts, hosts) {
+			if holdsAll(cas[n-1].Hosts, hosts) {
 				return cas, nil
 			}
 			seq = cas[n-1].Seq + 1
@@ -133,6 +134,16 @@ func (s *Service) ensureCAs(ctx context.Context, tx *store.Store, id podid.ID, h
 		}
 	}
 	return nil, fmt.Errorf("interception CAs of %s keep changing", id)
+}
+
+// holdsAll reports whether a CA's hosts hold every one of hosts.
+func holdsAll(caHosts, hosts []string) bool {
+	for _, h := range hosts {
+		if !slices.Contains(caHosts, h) {
+			return false
+		}
+	}
+	return true
 }
 
 // openCAs opens the CAs' keys for the pod's bindings.

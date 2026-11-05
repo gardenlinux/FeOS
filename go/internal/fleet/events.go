@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	fleetv1 "github.com/gardenlinux/feos/go/gen/feos/fleet/v1"
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
 	"github.com/gardenlinux/feos/go/internal/activity"
+	"github.com/gardenlinux/feos/go/internal/bindings/httpcheck"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -196,6 +198,9 @@ type ingestion struct {
 	traffic  []store.TrafficRow
 	gaps     [][2]int64
 	stopping bool
+	// egress are the batch's counts of the pods' requests through their
+	// HTTP bindings.
+	egress map[egressKey]*store.EgressCount
 	// unknown counts the events without a known body; they are added to
 	// the Service's count once the batch committed.
 	unknown int64
@@ -272,6 +277,13 @@ func (in *ingestion) add(ctx context.Context, ev *fleetv1.Event) error {
 		rec := body.Audit
 		kind := auditKind(rec.GetKind())
 		detail, fields := auditDetail(rec.GetDetailJson())
+		switch kind {
+		case store.KindHTTPRequest, store.KindHTTP:
+			return in.addEgress(ctx, rec.GetPodId(), detail, fields)
+		case store.KindHTTPEnd:
+			// A request's end: the sink's alone.
+			return nil
+		}
 		id, a, err := in.attribute(ctx, rec.GetPodId())
 		if err != nil {
 			return err
@@ -336,11 +348,92 @@ func (in *ingestion) add(ctx context.Context, ev *fleetv1.Event) error {
 	return nil
 }
 
+// egressKey is a pod's binding.
+type egressKey struct {
+	sandbox podid.ID
+	binding string
+}
+
+// addEgress counts the record of a pod's request through one of its HTTP
+// bindings for the bindings' incidents (store.AddEgress): only when it is
+// its sandbox's, is of type http, names a binding and counts for it. A
+// pod's requests are the sink's records (ADR 0026): no activity row is
+// kept of any of them, so that neither a busy pod's requests fill
+// Postgres nor their retention keeps them for weeks.
+func (in *ingestion) addEgress(ctx context.Context, podID string, detail json.RawMessage, f map[string]any) error {
+	if f == nil {
+		return nil
+	}
+	if t, ok := f["type"]; ok && t != store.KindHTTP {
+		return nil
+	}
+	binding, _ := f["binding"].(string)
+	if httpcheck.Name(binding) != nil {
+		return nil
+	}
+	status := 0
+	if n, ok := f["status"].(json.Number); ok {
+		if v, err := strconv.Atoi(n.String()); err == nil && v >= 0 && v <= 999 {
+			status = v
+		}
+	}
+	var code string
+	refusal := false
+	if e, ok := f["error"]; ok && e != nil {
+		refusal = true
+		if m, ok := e.(map[string]any); ok {
+			code, _ = m["code"].(string)
+		}
+	}
+	class := store.ClassifyEgress(status, refusal, code)
+	if !class.Counted {
+		return nil
+	}
+	_, a, err := in.attribute(ctx, podID)
+	if err != nil || !a.ok {
+		return err
+	}
+	if in.egress == nil {
+		in.egress = map[egressKey]*store.EgressCount{}
+	}
+	k := egressKey{sandbox: a.SandboxID, binding: binding}
+	c := in.egress[k]
+	if c == nil {
+		c = &store.EgressCount{SandboxID: a.SandboxID, Binding: binding}
+		in.egress[k] = c
+	}
+	c.Requests++
+	c.Refused += b2i(class.Refused)
+	c.Failing += b2i(class.Failing)
+	c.TokenFailed += b2i(class.TokenFailed)
+	c.Records = append(c.Records, detail)
+	if len(c.Records) > store.EgressKeep {
+		c.Records = c.Records[len(c.Records)-store.EgressKeep:]
+	}
+	return nil
+}
+
+func b2i(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // store writes the batch's rows, its gaps and a "stopping" node event's
 // rollout deadline.
 func (in *ingestion) store(ctx context.Context) error {
 	for _, g := range in.gaps {
 		if err := in.tx.InsertEventGap(ctx, in.node, in.startID, g[0], g[1]); err != nil {
+			return err
+		}
+	}
+	if len(in.egress) > 0 {
+		counts := make([]store.EgressCount, 0, len(in.egress))
+		for _, c := range in.egress {
+			counts = append(counts, *c)
+		}
+		if err := in.tx.AddEgress(ctx, counts); err != nil {
 			return err
 		}
 	}
@@ -485,9 +578,6 @@ func auditName(kind string, f map[string]any) string {
 	switch kind {
 	case "kube_request":
 		return strings.Join(strings.Fields(field("method")+" "+field("path")+" "+field("status")), " ")
-	case "http_request":
-		// ADR 0028: "GET erp /odata/Orders 200".
-		return strings.Join(strings.Fields(field("method")+" "+field("binding")+" "+field("path")+" "+field("status")), " ")
 	case "ssh_signature":
 		return "ssh signature (" + field("binding") + ")"
 	case "kube_deny", "ssh_deny":

@@ -186,9 +186,10 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
   key that must outlive the run, and this key is trusted by one pod
   only.
 - The CA carries **name constraints**: permitted DNS names, exactly the
-  intercepted names at its issue. A pod whose set of intercepted names
-  changes gets a new CA beside the old one in its trust files, and
-  `feos-authn` issues from the newest. A process that read its trust
+  intercepted names at its issue. A pod that comes to intercept a name
+  its newest CA does not permit gets a new CA beside the old one in its
+  trust files, and `feos-authn` issues from the newest; one whose names
+  shrink keeps its CA. A process that read its trust
   store before the change reaches the new name after its restart.
 - Leaf certificates live 24 hours and are made in memory at first use.
 - **The CA in every container, not only in the microVM.** Only pods
@@ -248,6 +249,13 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
   them to the sink (ADR 0026) as the pod's egress records, under its
   labels, each a client span with the request's trace context: the
   ingress's access log (ADR 0021) in the other direction.
+- **The records live in the sink, and only there.** `ferund` keeps none
+  of a pod's requests in its activity log: a busy pod would fill
+  Postgres with a row per request for the activity's retention. Of the
+  events it keeps what the incidents below need, bounded: the requests
+  counted per pod, binding and minute of the database's clock, and the
+  newest few records of each pod's binding as evidence, both deleted
+  after minutes.
 - `ferund` opens an incident (ADR 0018) for a binding of an environment
   whose answers are mostly 401 or 403 for five minutes ("credential
   refused"), mostly 429 or 5xx ("upstream failing"), or whose token
@@ -276,9 +284,10 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
 - **Preflight** (`POST /api/v1/http/preflight`), before anything is
   stored: resolve and check the upstream, connect, check TLS, fetch a
   token where the credential is OAuth, and, if asked, send one `GET` or
-  `HEAD` to a given path with the credential. It answers the addresses,
-  the server certificate's subject and issuer, the token's lifetime, the
-  status and the latency, never a body.
+  `HEAD` to a given path with the credential. It answers the addresses
+  (none for a denied destination: the preflight is no resolver of the
+  platform's own networks), the server certificate's subject and issuer,
+  the token's lifetime, the status and the latency, never a body.
 - The pod's security groups apply as to its own connections. An
   environment's default egress table reaches the internet (ADR 0018),
   so a binding needs no rule of its own there.

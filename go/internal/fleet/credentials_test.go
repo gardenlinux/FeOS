@@ -144,6 +144,9 @@ func TestIssuePodCredentialsStates(t *testing.T) {
 		}
 		f.exec("DELETE FROM issued_certs")
 	}
+	// A pod without a run here, or not placed here, is refused before its
+	// bindings are read.
+	calls := f.bindings.callCount()
 	for _, state := range []string{"pending", "pausing", "paused", "hibernating", "hibernated", "stopped", "failed", "unknown", "lost"} {
 		f.exec("UPDATE sandboxes SET client_state = $2 WHERE id = $1", f.pod, state)
 		_, err := f.issue(f.pod.String())
@@ -162,6 +165,9 @@ func TestIssuePodCredentialsStates(t *testing.T) {
 	wantCode(t, err, codes.NotFound, "no pod "+unknown)
 	_, err = f.issue("pod-1")
 	wantCode(t, err, codes.NotFound, "no pod pod-1")
+	if n := f.bindings.callCount(); n != calls {
+		t.Fatalf("the bindings were read %d times for pods refused", n-calls)
+	}
 
 	// The signing request is for an Ed25519 key; the HPKE key is X25519.
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

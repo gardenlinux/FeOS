@@ -54,6 +54,16 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
 
+	// The node and the pod's placement are checked before anything of its
+	// bindings is read (PodBindings may make the pod's interception CA),
+	// and again in the transaction.
+	if err := checkInTx(ctx, s.st, p.Node, p.Serial); err != nil {
+		return nil, s.credentialsRefused(p.Node, podID, err)
+	}
+	if _, err := podRunOn(ctx, s.st, podID, p.Node, store.NoLock); err != nil {
+		return nil, s.credentialsRefused(p.Node, podID, err)
+	}
+
 	// The bindings are read before the transaction, so that the version
 	// issued_certs records is the version sealed into the answer.
 	var bindings *fleetv1.PodBindings
@@ -77,20 +87,9 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 		if err := checkInTx(ctx, tx, p.Node, p.Serial); err != nil {
 			return err
 		}
-		sb, err := tx.LockSandbox(ctx, podID, store.ForShare)
-		if errors.Is(err, model.ErrNotFound) {
-			return status.Errorf(codes.NotFound, "no pod %s", podID)
-		}
+		sb, err := podRunOn(ctx, tx, podID, p.Node, store.ForShare)
 		if err != nil {
 			return err
-		}
-		if sb.Node != p.Node {
-			return status.Errorf(codes.PermissionDenied, "pod %s is not placed on node %s", podID, p.Node)
-		}
-		switch sb.ClientState {
-		case model.StateCreating, model.StateRunning, model.StateResuming:
-		default:
-			return status.Errorf(codes.PermissionDenied, "pod %s has no run on node %s", podID, p.Node)
 		}
 		// Concurrent requests for the pod (feos-authn retrying over
 		// several uplinks) count and insert one at a time.
@@ -131,11 +130,7 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 		return nil
 	})
 	if err != nil {
-		if st, ok := status.FromError(err); ok && st.Code() != codes.Unavailable {
-			s.rl.warn("credentials", "pod credentials refused", "node", p.Node, "pod", podID, "code", st.Code().String(), "err", st.Message())
-			return nil, st.Err()
-		}
-		return nil, rpcError(err, "issue pod credentials")
+		return nil, s.credentialsRefused(p.Node, podID, err)
 	}
 	resp := &fleetv1.IssuePodCredentialsResponse{Certificate: cert}
 	if bindings != nil {
@@ -146,4 +141,38 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 		resp.Bindings = sealed
 	}
 	return resp, nil
+}
+
+// podRunOn reads the pod's row with lock and checks that the pod is placed
+// on node and has a run there (it is created, started, resumed or
+// restored, or runs).
+func podRunOn(ctx context.Context, st *store.Store, podID podid.ID, node string, lock store.RowLock) (store.Sandbox,
+	error) {
+	sb, err := st.LockSandbox(ctx, podID, lock)
+	if errors.Is(err, model.ErrNotFound) {
+		return store.Sandbox{}, status.Errorf(codes.NotFound, "no pod %s", podID)
+	}
+	if err != nil {
+		return store.Sandbox{}, err
+	}
+	if sb.Node != node {
+		return store.Sandbox{}, status.Errorf(codes.PermissionDenied, "pod %s is not placed on node %s", podID, node)
+	}
+	switch sb.ClientState {
+	case model.StateCreating, model.StateRunning, model.StateResuming:
+	default:
+		return store.Sandbox{}, status.Errorf(codes.PermissionDenied, "pod %s has no run on node %s", podID, node)
+	}
+	return sb, nil
+}
+
+// credentialsRefused is the answer of IssuePodCredentials that failed with
+// err: a refusal as it is, logged; anything else as rpcError.
+func (s *Service) credentialsRefused(node string, podID podid.ID, err error) error {
+	if st, ok := status.FromError(err); ok && st.Code() != codes.Unavailable {
+		s.rl.warn("credentials", "pod credentials refused", "node", node, "pod", podID, "code", st.Code().String(),
+			"err", st.Message())
+		return st.Err()
+	}
+	return rpcError(err, "issue pod credentials")
 }

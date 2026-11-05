@@ -4,22 +4,36 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
-// The audit records of a pod's requests through its HTTP bindings (ADR
-// 0028 §6), kept in activity with source authn: feos-authn's "http"
-// record of each request (docs/architecture/sink.md), as feosd publishes
-// it, of kind http_request, or of kind http, its type's word.
+// A pod's requests through its HTTP bindings (ADR 0028 §6): feos-authn's
+// "http" record of each request (docs/architecture/sink.md), which feosd
+// publishes as the pod's audit event of kind http_request, or of kind http,
+// its type's word, and its "http_end" of kind http_end. The records are the
+// sink's (ADR 0026): ferund keeps none of them as activity. For the
+// bindings' incidents it counts each pod's requests per binding and minute
+// of the database's clock (http_egress) and keeps the newest EgressKeep
+// records of each (http_egress_records), both swept after a few minutes.
 const (
 	KindHTTPRequest = "http_request"
 	KindHTTP        = "http"
+	KindHTTPEnd     = "http_end"
 )
+
+// EgressKeep is how many records of a pod's binding http_egress_records
+// keeps, the newest.
+const EgressKeep = 10
 
 // The refusal codes of feos-authn (error.code of a record) that say the
 // upstream could not be reached or its TLS failed, and that no OAuth
@@ -30,6 +44,93 @@ var (
 	egressUnreachable = []string{"unreachable", "tls"}
 	egressNoToken     = []string{"credential_unavailable"}
 )
+
+// EgressClass is how a record of a request counts for its binding: whether
+// it counts at all (the upstream answered it, or feos-authn refused it
+// because the upstream could not be reached or no token could be had), and
+// as which of the counts of EgressStat.
+type EgressClass struct {
+	Counted, Refused, Failing, TokenFailed bool
+}
+
+// ClassifyEgress classes a record by the status it was answered with (0
+// when none) and, for a refusal of feos-authn's own, its code; refusal
+// false is the upstream's answer.
+func ClassifyEgress(status int, refusal bool, code string) EgressClass {
+	if !refusal {
+		return EgressClass{Counted: true, Refused: status == 401 || status == 403,
+			Failing: status == 429 || status >= 500}
+	}
+	switch {
+	case slices.Contains(egressUnreachable, code):
+		return EgressClass{Counted: true, Failing: true}
+	case slices.Contains(egressNoToken, code):
+		return EgressClass{Counted: true, TokenFailed: true}
+	}
+	return EgressClass{}
+}
+
+// EgressCount is what one batch of a node's events adds of one pod's
+// requests through one binding: the counts of EgressStat, and its newest
+// records (at most EgressKeep, oldest first), each the record's JSON.
+type EgressCount struct {
+	SandboxID                               podid.ID
+	Binding                                 string
+	Requests, Refused, Failing, TokenFailed int64
+	Records                                 []json.RawMessage
+}
+
+// AddEgress adds counts to the minute of the database's clock and keeps
+// the newest EgressKeep records of each pod's binding. It writes in the
+// order of (sandbox, binding), so that two batches do not deadlock.
+func (s *Store) AddEgress(ctx context.Context, counts []EgressCount) error {
+	sorted := slices.Clone(counts)
+	slices.SortFunc(sorted, func(a, b EgressCount) int {
+		return cmp.Or(cmp.Compare(a.SandboxID, b.SandboxID), cmp.Compare(a.Binding, b.Binding))
+	})
+	for _, c := range sorted {
+		if _, err := s.q.Exec(ctx, `INSERT INTO http_egress (sandbox_id, binding, minute, requests, refused, failing,
+				token_failed)
+			VALUES ($1, $2, date_trunc('minute', now()), $3, $4, $5, $6)
+			ON CONFLICT (sandbox_id, binding, minute) DO UPDATE SET requests = http_egress.requests + EXCLUDED.requests,
+				refused = http_egress.refused + EXCLUDED.refused, failing = http_egress.failing + EXCLUDED.failing,
+				token_failed = http_egress.token_failed + EXCLUDED.token_failed`,
+			c.SandboxID, c.Binding, c.Requests, c.Refused, c.Failing, c.TokenFailed); err != nil {
+			return fmt.Errorf("count the requests of %s through %s: %w", c.SandboxID, c.Binding, err)
+		}
+		if len(c.Records) == 0 {
+			continue
+		}
+		records := make([]string, 0, len(c.Records))
+		for _, r := range c.Records {
+			records = append(records, string(r))
+		}
+		if _, err := s.q.Exec(ctx, `INSERT INTO http_egress_records (sandbox_id, binding, detail)
+			SELECT $1, $2, r::jsonb FROM unnest($3::text[]) WITH ORDINALITY AS u(r, n) ORDER BY n`,
+			c.SandboxID, c.Binding, records); err != nil {
+			return fmt.Errorf("keep the records of %s through %s: %w", c.SandboxID, c.Binding, err)
+		}
+		if _, err := s.q.Exec(ctx, `DELETE FROM http_egress_records WHERE sandbox_id = $1 AND binding = $2
+			AND id < (SELECT id FROM http_egress_records WHERE sandbox_id = $1 AND binding = $2
+				ORDER BY id DESC OFFSET $3 LIMIT 1)`, c.SandboxID, c.Binding, EgressKeep-1); err != nil {
+			return fmt.Errorf("trim the records of %s through %s: %w", c.SandboxID, c.Binding, err)
+		}
+	}
+	return nil
+}
+
+// SweepEgress deletes the counts and records older than keep by the
+// database's clock.
+func (s *Store) SweepEgress(ctx context.Context, keep time.Duration) error {
+	if _, err := s.q.Exec(ctx, "DELETE FROM http_egress WHERE minute < now() - $1::interval", interval(keep)); err != nil {
+		return fmt.Errorf("sweep http_egress: %w", err)
+	}
+	if _, err := s.q.Exec(ctx, "DELETE FROM http_egress_records WHERE arrived_at < now() - $1::interval",
+		interval(keep)); err != nil {
+		return fmt.Errorf("sweep http_egress_records: %w", err)
+	}
+	return nil
+}
 
 // BindingEnv is an environment whose bindings the controller watches: its
 // latest deployment and the bindings it has.
@@ -60,42 +161,28 @@ func (s *Store) BindingEnvs(ctx context.Context) ([]BindingEnv, error) {
 	})
 }
 
-// EgressStat is what the audit records of an environment's pods say of
-// one binding over a window: its requests that reached the upstream or
-// were meant to (Requests: the upstream's answers, feos-authn's
-// unreachable, tls and credential_unavailable; not its refusals for the
-// pod's own mistakes), those the upstream refused with 401 or 403
-// (Refused), those it answered with 429 or 5xx or that could not reach
-// it (Failing), and those refused because no token could be had
-// (TokenFailed).
+// EgressStat is what an environment's pods' requests through one binding
+// were over a window: those that reached the upstream or were meant to
+// (Requests: the upstream's answers, feos-authn's unreachable, tls and
+// credential_unavailable; not its refusals for the pod's own mistakes),
+// those the upstream refused with 401 or 403 (Refused), those it answered
+// with 429 or 5xx or that could not reach it (Failing), and those refused
+// because no token could be had (TokenFailed).
 type EgressStat struct {
 	Binding                                 string
 	Requests, Refused, Failing, TokenFailed int64
 }
 
-// egressClass is the SQL of the classes of a record a: its status (0 when
-// none), whether feos-authn refused it itself, its refusal's code.
-const egressClass = `CASE WHEN a.detail->>'status' ~ '^[0-9]{1,3}$' THEN (a.detail->>'status')::int ELSE 0 END`
-
 // EgressStats returns, by binding, the requests of the environment's pods
-// over the last window by the database's clock (their records' ts_ns).
-// Records of pods whose rows are gone do not count.
+// that arrived over the last window by the database's clock: the counts of
+// the current minute and of the minutes that began within the window
+// before it. Pods whose rows are gone do not count.
 func (s *Store) EgressStats(ctx context.Context, envID uuid.UUID, window time.Duration) ([]EgressStat, error) {
-	rows, err := s.q.Query(ctx, `SELECT binding, count(*),
-			count(*) FILTER (WHERE upstream AND status IN (401, 403)),
-			count(*) FILTER (WHERE (upstream AND (status = 429 OR status >= 500)) OR code = ANY($4)),
-			count(*) FILTER (WHERE code = ANY($5))
-		FROM (SELECT coalesce(a.detail->>'binding', '') AS binding, `+egressClass+` AS status,
-				coalesce(jsonb_typeof(a.detail->'error'), 'null') = 'null' AS upstream,
-				coalesce(a.detail->'error'->>'code', '') AS code
-			FROM activity a JOIN sandboxes s ON s.id = a.sandbox_id
-			WHERE s.environment_id = $1 AND a.source = 'authn' AND a.kind = ANY($2)
-				AND coalesce(a.detail->>'type', 'http') = 'http'
-				AND a.day >= (now() AT TIME ZONE 'utc')::date - 1
-				AND a.ts_ns >= (extract(epoch FROM now()) * 1e9)::bigint - $3) r
-		WHERE upstream OR code = ANY($4) OR code = ANY($5)
-		GROUP BY binding ORDER BY binding`, envID, []string{KindHTTPRequest, KindHTTP}, window.Nanoseconds(),
-		egressUnreachable, egressNoToken)
+	rows, err := s.q.Query(ctx, `SELECT e.binding, sum(e.requests)::bigint, sum(e.refused)::bigint,
+			sum(e.failing)::bigint, sum(e.token_failed)::bigint
+		FROM http_egress e JOIN sandboxes s ON s.id = e.sandbox_id
+		WHERE s.environment_id = $1 AND e.minute >= date_trunc('minute', now()) - $2::interval
+		GROUP BY e.binding ORDER BY e.binding`, envID, interval(window))
 	if err != nil {
 		return nil, err
 	}
@@ -106,19 +193,15 @@ func (s *Store) EgressStats(ctx context.Context, envID uuid.UUID, window time.Du
 	})
 }
 
-// EgressRecords returns the newest limit audit records of the
-// environment's pods' requests through binding over the last window, newest
-// first, as their egress JSON with the pod's ID as "sandbox".
+// EgressRecords returns the newest limit records of the environment's
+// pods' requests through binding that arrived over the last window by the
+// database's clock, newest first, each with the pod's ID as "sandbox".
 func (s *Store) EgressRecords(ctx context.Context, envID uuid.UUID, binding string, window time.Duration, limit int) (
 	[]json.RawMessage, error) {
-	rows, err := s.q.Query(ctx, `SELECT a.detail || jsonb_build_object('sandbox', a.sandbox_id)
-		FROM activity a JOIN sandboxes s ON s.id = a.sandbox_id
-		WHERE s.environment_id = $1 AND a.source = 'authn' AND a.kind = ANY($2) AND a.detail->>'binding' = $3
-			AND coalesce(a.detail->>'type', 'http') = 'http'
-			AND a.day >= (now() AT TIME ZONE 'utc')::date - 1
-			AND a.ts_ns >= (extract(epoch FROM now()) * 1e9)::bigint - $4
-		ORDER BY a.ts_ns DESC, a.id DESC LIMIT $5`, envID, []string{KindHTTPRequest, KindHTTP}, binding,
-		window.Nanoseconds(), limit)
+	rows, err := s.q.Query(ctx, `SELECT r.detail || jsonb_build_object('sandbox', r.sandbox_id)
+		FROM http_egress_records r JOIN sandboxes s ON s.id = r.sandbox_id
+		WHERE s.environment_id = $1 AND r.binding = $2 AND r.arrived_at >= now() - $3::interval
+		ORDER BY r.id DESC LIMIT $4`, envID, binding, interval(window), limit)
 	if err != nil {
 		return nil, err
 	}

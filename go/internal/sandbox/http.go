@@ -188,7 +188,8 @@ func (e *Engine) pushHTTP(ctx context.Context, id podid.ID) error {
 }
 
 // pushRow sends the row's pod its part, through pc when given (an op's
-// client), unless its node took it already.
+// client), unless its node took it already; row.HTTPPushed is what was
+// read before.
 func (e *Engine) pushRow(ctx context.Context, row store.Sandbox, pc podv1.PodServiceClient) error {
 	part, err := e.httpPart(ctx, row)
 	if err != nil {
@@ -224,7 +225,10 @@ func (e *Engine) pushRow(ctx context.Context, row store.Sandbox, pc podv1.PodSer
 	default:
 		return fmt.Errorf("SetPodHttpBindings on node %s: %w", row.Node, err)
 	}
-	if _, err := e.st.SetHTTPPushed(ctx, row.ID, row.Incarnation, part.GetVersion()); err != nil {
+	// Against the http_pushed read before the push: a concurrent push (the
+	// loop's, another instance's) leaves it unknown, and the loop pushes
+	// again.
+	if _, err := e.st.SetHTTPPushed(ctx, row.ID, row.Incarnation, row.HTTPPushed, part.GetVersion()); err != nil {
 		return fmt.Errorf("record the pushed HTTP bindings: %w", err)
 	}
 	e.recordHTTPPush(row, part.GetVersion(), "sent")
@@ -272,9 +276,11 @@ func (e *Engine) prepareHTTP(ctx context.Context, h *OpHandle) error {
 
 // httpAroundCall pushes an op's pod its part where the op's call does not
 // carry it: before the StartPod or ResumePod (before is true), after a
-// restore's or a repair's calls (before false). A create records the part
-// its spec carried. Best effort: a failure is logged, and the loop tries
-// again.
+// restore's or a repair's calls (before false). A create records no part:
+// a feosd from before ADR 0028 drops the spec's unread, so whether the pod
+// holds it is not known until a push is answered, and the loop sends it
+// once (the same part again changes nothing on a node that took it). Best
+// effort: a failure is logged, and the loop tries again.
 func (e *Engine) httpAroundCall(ctx context.Context, pc podv1.PodServiceClient, h *OpHandle, before bool) {
 	if e.httpSource() == nil {
 		return
@@ -282,9 +288,7 @@ func (e *Engine) httpAroundCall(ctx context.Context, pc podv1.PodServiceClient, 
 	var err error
 	switch {
 	case !before && h.kind == OpCreate:
-		if h.spec != nil {
-			_, err = e.st.SetHTTPPushed(ctx, h.id, h.inc, h.spec.GetHttpBindings().GetVersion())
-		}
+		err = e.st.ResetHTTPPushed(ctx, h.id, h.inc)
 	case before && (h.kind == OpStart || h.kind == OpResume),
 		!before && (h.kind == OpRestore || h.kind == OpRepair):
 		row := h.row

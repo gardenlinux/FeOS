@@ -101,10 +101,22 @@ func TestValidateBindings(t *testing.T) {
 			binding(s, "erp", func(b *Binding) { b.Credential.Headers["X-API-Key"] = SecretEnv("missing") })
 		}, []expect{e("bindings.erp.credential.headers.X-API-Key", "no secret missing")}},
 		{"host header", func(s *Spec) {
-			binding(s, "erp", func(b *Binding) { b.Credential.Headers = map[string]EnvValue{"Host": String("x")} })
+			binding(s, "erp", func(b *Binding) { b.Credential.Headers = map[string]EnvValue{"Host": SecretEnv("erp-key")} })
 		}, []expect{e("bindings.erp.credential.headers.Host", "cannot set")}},
-		{"a field of another kind", func(s *Spec) { binding(s, "erp", func(b *Binding) { b.Credential.Password = lit("p") }) },
-			[]expect{e("bindings.erp.credential.password", "has no password")}},
+		{"a field of another kind", func(s *Spec) {
+			binding(s, "erp", func(b *Binding) { b.Credential.Password = secret("erp-key") })
+		}, []expect{e("bindings.erp.credential.password", "has no password")}},
+		{"a header's value written out", func(s *Spec) {
+			binding(s, "erp", func(b *Binding) { b.Credential.Headers["X-API-Key"] = String("k3y") })
+		}, []expect{e("bindings.erp.credential.headers.X-API-Key", "a secret's")}},
+		{"a client secret written out", func(s *Spec) {
+			binding(s, "pay", func(b *Binding) { b.Credential.ClientSecret = lit("s3cret") })
+		}, []expect{e("bindings.pay.credential.clientSecret", "a secret's")}},
+		{"a password written out", func(s *Spec) {
+			binding(s, "erp", func(b *Binding) {
+				b.Credential = &BindingCredential{Kind: "basic", User: lit("shop"), Password: lit("p4ss")}
+			})
+		}, []expect{e("bindings.erp.credential.password", "a secret's")}},
 		{"no credential", func(s *Spec) { binding(s, "erp", func(b *Binding) { b.Credential = nil }) },
 			[]expect{e("bindings.erp.credential", "needs a credential")}},
 		{"basic", func(s *Spec) {
@@ -116,7 +128,12 @@ func TestValidateBindings(t *testing.T) {
 			binding(s, "erp", func(b *Binding) {
 				b.Credential = &BindingCredential{Kind: "clientCertificate", CertPem: lit("x"), KeyPem: lit("y")}
 			})
-		}, []expect{e("bindings.erp.credential", "credential")}},
+		}, []expect{e("bindings.erp.credential.keyPem", "a secret's")}},
+		{"client certificate with its key from a secret", func(s *Spec) {
+			binding(s, "erp", func(b *Binding) {
+				b.Credential = &BindingCredential{Kind: "clientCertificate", CertPem: lit("x"), KeyPem: secret("cert")}
+			})
+		}, nil},
 		{"client certificate from secrets", func(s *Spec) {
 			binding(s, "erp", func(b *Binding) {
 				b.Credential = &BindingCredential{Kind: "clientCertificate", CertPem: secret("cert"), KeyPem: secret("cert")}

@@ -127,8 +127,8 @@ type Config struct {
 	// SecretKeyFile holds the 32-byte key (raw, hex or base64) that seals
 	// bindings at rest.
 	SecretKeyFile string
-	// Bindings serves the Kubernetes and SSH binding surfaces; it takes
-	// effect only with SecretKeyFile.
+	// Bindings serves the Kubernetes, SSH and HTTP binding surfaces; it
+	// takes effect only with SecretKeyFile.
 	Bindings bool
 	// ACMEDirectory is the ACME directory (an https URL) the domains'
 	// certificates are obtained from (ADR 0021); empty: none is
@@ -369,7 +369,7 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.Var((*listValue)(&c.NodeServerNames), "node-server-names",
 		"DNS names of the instance's certificate on the nodes' port, comma-separated or repeated; each under the control-plane domain (default: the control-plane domain)")
 	fs.StringVar(&c.SecretKeyFile, "secret-key-file", c.SecretKeyFile, "file of the 32-byte key (raw, hex or base64) sealing bindings at rest")
-	fs.BoolVar(&c.Bindings, "bindings", c.Bindings, "serve the Kubernetes and SSH binding surfaces (only with --secret-key-file)")
+	fs.BoolVar(&c.Bindings, "bindings", c.Bindings, "serve the Kubernetes, SSH and HTTP binding surfaces (only with --secret-key-file)")
 	fs.StringVar(&c.ACMEDirectory, "acme-directory", c.ACMEDirectory,
 		"the ACME directory (https URL) of the domains' certificates, e.g. https://acme-v02.api.letsencrypt.org/directory; empty: none is obtained (needs --secret-key-file)")
 	fs.StringVar(&c.ACMEEmail, "acme-email", c.ACMEEmail, "the contact (an email address) of the platform's ACME account; empty: none")

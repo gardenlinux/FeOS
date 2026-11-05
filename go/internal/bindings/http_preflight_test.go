@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	fleetv1 "github.com/gardenlinux/feos/go/gen/feos/fleet/v1"
 )
 
 // The HTTP preflight against a local TLS server that plays an API and its
@@ -196,18 +198,57 @@ func TestHTTPPreflightDestinationRule(t *testing.T) {
 	body := map[string]any{"binding": map[string]any{"upstream": f.srv.URL, "caPem": ca,
 		"credential": map[string]any{"kind": "headers", "headers": map[string]any{"X-API-Key": httpAPIKey}}}}
 	res := r.httpPreflight(body)
-	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 1 {
+	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 0 {
 		t.Fatalf("loopback: %+v %+v", res, res.Error)
 	}
 	r.svc.dest.allowDest = allowLoopback // the resolution passes; the dial's rule stays the deny policy
 	res = r.httpPreflight(body)
-	if res.OK || res.Error.Code != codeDestinationDenied || res.TLS != nil {
+	if res.OK || res.Error.Code != codeDestinationDenied || res.TLS != nil || len(res.Addresses) != 0 {
 		t.Fatalf("loopback at the dial: %+v %+v", res, res.Error)
 	}
-	// The name of an internal host.
+	// The name of an internal host: no address it resolved to is answered.
 	res = r.httpPreflight(map[string]any{"binding": map[string]any{"upstream": "https://mixed.test",
 		"credential": map[string]any{"kind": "headers", "headers": map[string]any{"X-API-Key": httpAPIKey}}}})
-	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 2 {
+	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 0 ||
+		strings.Contains(res.Error.Message, "192.168") || strings.Contains(res.Error.Message, "203.0.113") {
 		t.Fatalf("a name with an internal address: %+v %+v", res, res.Error)
+	}
+}
+
+// A tenant has at most maxTenantPreflights preflights and binding checks in
+// flight on an instance; beyond, 429. Another tenant's are its own.
+func TestHTTPPreflightPerTenant(t *testing.T) {
+	r := newRig(t)
+	var releases []func()
+	for range maxTenantPreflights {
+		release, err := r.svc.takePreflight("acme")
+		if err != nil {
+			t.Fatal(err)
+		}
+		releases = append(releases, release)
+	}
+	body := `{"binding": {"name": "erp", "upstream": "https://api.erp.example",
+		"credential": {"kind": "headers", "headers": {"X-API-Key": "k"}}}}`
+	code, raw := r.tenantCall(http.MethodPost, "/api/v1/http/preflight", body)
+	if msg, c := codeOf(raw); code != http.StatusTooManyRequests || c != codeTooManyPreflights {
+		t.Fatalf("over the limit: %d %s %s", code, c, msg)
+	}
+	if _, err := r.svc.PreflightHTTP(bg, "acme", &fleetv1.HttpBinding{Name: "erp"}, nil); err == nil {
+		t.Fatal("a check over the limit")
+	}
+	other, err := r.svc.takePreflight("other")
+	if err != nil {
+		t.Fatalf("another tenant: %v", err)
+	}
+	other()
+	releases[0]()
+	again, err := r.svc.takePreflight("acme")
+	if err != nil {
+		t.Fatalf("after one ended: %v", err)
+	}
+	again()
+	releases[1]()
+	if n := len(r.svc.preflights); n != 0 {
+		t.Fatalf("%d tenants in flight after all ended", n)
 	}
 }

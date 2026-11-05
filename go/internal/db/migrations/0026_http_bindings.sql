@@ -14,17 +14,37 @@
 -- pod_intercept_cas are a pod's interception CAs (ADR 0028 §5), oldest
 -- first by seq: ECDSA P-256, name-constrained to hosts, the intercepted
 -- host names at its issue; the key PKCS#8, sealed like a credential. A
--- pod whose intercepted names change gets a new one beside the old.
+-- pod that comes to intercept a name its newest does not permit gets a
+-- new one beside the old.
 --
 -- sandboxes.http_pushed is the version of the clear part of the pod's HTTP
--- bindings (PodSpec.http_bindings) that the pod's node took last, by the
--- create's spec or SetPodHttpBindings, for the pod of the row's
--- incarnation; '' for none, as every pod made before had. A row whose
--- pod's part differs from it gets SetPodHttpBindings.
+-- bindings (PodSpec.http_bindings) that the pod's node took last, by
+-- SetPodHttpBindings answered OK, for the pod of the row's incarnation; ''
+-- for none, as every pod made before had, and after a create, whose spec's
+-- part a feosd from before ADR 0028 drops. A row whose pod's part differs
+-- from it gets SetPodHttpBindings.
 --
 -- env_incidents gains the conditions of an environment's binding (ADR
 -- 0028 §6), on the object binding/<name>: credential_refused,
--- upstream_failing, token_failing.
+-- upstream_failing, token_failing; and held_at, when the controller last
+-- saw an incident's condition hold (NULL: at its opening). A binding's
+-- incident closes only after a whole window in which its condition did
+-- not hold, one closed within the hour is opened again rather than a new
+-- one, and the leader deletes a binding's incidents 30 days after they
+-- closed (env_incidents_closed).
+--
+-- http_egress is what those incidents read of a pod's requests through its
+-- HTTP bindings: feos-authn's http records, which feosd publishes as the
+-- pod's audit events, counted per pod, binding and minute of the
+-- database's clock at their arrival; http_egress_records keeps the newest
+-- ten of a pod's binding as the incidents' evidence. The records
+-- themselves are the sink's (ADR 0026): ferund keeps none of them as
+-- activity, and the leader sweeps both tables after ten minutes. No
+-- foreign key: the sweep takes a deleted sandbox's rows too.
+--
+-- env_job_runs_sandbox serves the lookup of the deployment a job's pod
+-- belongs to by its sandbox (EnvInstanceDeployment), which every pod's
+-- bindings read.
 --
 -- Additive: an instance of the previous version neither reads nor writes
 -- the new columns and tables, and a sandbox's delete cascades to them; it
@@ -63,3 +83,27 @@ ALTER TABLE env_incidents ADD CONSTRAINT env_incidents_condition_check
      'addon_unhealthy','volume_unavailable','attach_failed','names_unserved',
      'domain_record_wrong','domain_deactivated','domain_superseded','certificate_failing',
      'credential_refused','upstream_failing','token_failing'));
+ALTER TABLE env_incidents ADD COLUMN held_at timestamptz;
+CREATE INDEX env_incidents_closed ON env_incidents(closed_at) WHERE closed_at IS NOT NULL;
+
+CREATE INDEX env_job_runs_sandbox ON env_job_runs(sandbox_id);
+
+CREATE TABLE http_egress (
+  sandbox_id text COLLATE "C" NOT NULL,
+  binding text NOT NULL,
+  minute timestamptz NOT NULL,                 -- date_trunc('minute', now()) at the arrival
+  requests bigint NOT NULL DEFAULT 0,          -- answered by the upstream, or refused unreachable, tls, credential_unavailable
+  refused bigint NOT NULL DEFAULT 0,           -- of them answered 401 or 403 by the upstream
+  failing bigint NOT NULL DEFAULT 0,           -- answered 429 or 5xx by it, or unreachable, tls
+  token_failed bigint NOT NULL DEFAULT 0,      -- credential_unavailable
+  PRIMARY KEY (sandbox_id, binding, minute));
+CREATE INDEX http_egress_minute ON http_egress(minute);
+
+CREATE TABLE http_egress_records (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  sandbox_id text COLLATE "C" NOT NULL,
+  binding text NOT NULL,
+  arrived_at timestamptz NOT NULL DEFAULT now(),
+  detail jsonb NOT NULL);                      -- the http record as feos-authn wrote it
+CREATE INDEX http_egress_records_binding ON http_egress_records(sandbox_id, binding, id);
+CREATE INDEX http_egress_records_arrived ON http_egress_records(arrived_at);

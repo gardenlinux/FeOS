@@ -229,12 +229,21 @@ type fakeBindings struct {
 	b       *fleetv1.PodBindings
 	version string
 	err     error
+	// calls counts the PodBindings calls.
+	calls int
 }
 
 func (f *fakeBindings) PodBindings(context.Context, podid.ID) (*fleetv1.PodBindings, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.calls++
 	return f.b, f.version, f.err
+}
+
+func (f *fakeBindings) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
 }
 
 func (f *fakeBindings) set(b *fleetv1.PodBindings, version string) {
