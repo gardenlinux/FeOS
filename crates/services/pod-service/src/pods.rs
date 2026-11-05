@@ -912,7 +912,8 @@ impl Pods {
         );
         self.inner.network.set_http_names(&info);
         self.want_authn(&info);
-        // A pod that is coming up pushes them itself, before its containers.
+        // A pod that is coming up pushes them itself, before its containers
+        // and again once it runs; a resume or a restore once it runs.
         if cas_changed && info.state() == PodState::Running {
             self.repush_intercept_cas(pod_id).await;
         }
@@ -975,9 +976,9 @@ impl Pods {
     }
 
     /// [`Pods::push_intercept_cas`] for a pod whose containers run: after a
-    /// resume or a restore, whose guest holds the CAs of its suspend, and
-    /// after a change. A failure is logged; the containers keep the CAs
-    /// they have.
+    /// resume or a restore, whose guest holds the CAs of its suspend, after
+    /// a bring-up, which a change may have come during, and after a change.
+    /// A failure is logged; the containers keep the CAs they have.
     async fn repush_intercept_cas(&self, pod_id: &str) {
         if let Err(e) = self.push_intercept_cas(pod_id, true).await {
             warn!(
@@ -2534,7 +2535,13 @@ impl Pods {
             let pull_token = pods.take_pull_token(&id);
             let spec = info.spec.unwrap_or_default();
             match pods.bring_up(&id, &spec, pull_token.as_deref()).await {
-                Ok(()) => pods.set_state(&id, PodState::Running, "").await,
+                Ok(()) => {
+                    pods.set_state(&id, PodState::Running, "").await;
+                    // A change of the CAs while it came up, after the
+                    // bring-up's own push, was recorded, not pushed: the
+                    // push reads the record as it is now.
+                    pods.repush_intercept_cas(&id).await;
+                }
                 Err(e) => pods.set_state(&id, PodState::Failed, e.message()).await,
             }
         });

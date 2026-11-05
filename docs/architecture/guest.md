@@ -160,8 +160,10 @@ reaps.
   fails while a volume it mounts is not mounted.
 - **The pod's interception CAs** (ADR 0028 §5), for a pod with intercept
   bindings: feosd pushes them with `GuestService.SetInterceptCas` before
-  it creates a bring-up's containers, after a resume or a restore with
-  memory, and when `SetPodHttpBindings` changes them. The guest writes
+  it creates a bring-up's containers and again once the pod runs (a
+  change while it came up is recorded, not pushed), after a resume or a
+  restore with memory, and when `SetPodHttpBindings` changes them while
+  the pod runs. The guest writes
   them to `intercept-ca.pem` in the share directory, which every
   container sees read-only at `/run/feos/intercept-ca.pem`. A container
   created or adopted while the guest holds CAs, init, sidecar or main,
