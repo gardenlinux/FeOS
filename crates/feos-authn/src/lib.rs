@@ -24,6 +24,7 @@ pub mod keys;
 pub mod oauth;
 pub mod proxy;
 pub mod ratelimit;
+pub mod redact;
 pub mod trace;
 pub mod upstream;
 

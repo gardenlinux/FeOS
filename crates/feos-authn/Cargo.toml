@@ -41,6 +41,9 @@ bytes = "1"
 tower-service = "0.3"
 form_urlencoded = "1"
 base64 = "0.22"
+# The search for a binding's credential in what goes back to the pod; in
+# the tree already, through regex.
+memchr = "2"
 # rcgen's dates.
 time = "0.3"
 # The WebPKI's roots, built in: the jail has no system store.
