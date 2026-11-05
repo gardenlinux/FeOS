@@ -13,6 +13,7 @@ initramfs: target/firecracker/firecracker guest container-release
 	rm -f target/rootfs/usr/share/feos/vmlinuz target/rootfs/usr/share/feos/initramfs
 	cp target/container/x86_64-unknown-linux-musl/release/feos-host-init target/rootfs/usr/sbin/feos-host-init
 	cp target/container/x86_64-unknown-linux-musl/release/feosd target/rootfs/usr/sbin/feosd
+	cp target/container/x86_64-unknown-linux-musl/release/feos-authn target/rootfs/usr/sbin/feos-authn
 	cp target/container/x86_64-unknown-linux-musl/release/diskd target/rootfs/usr/sbin/diskd
 	sudo chown -R `whoami` target/rootfs/etc/feos/
 	cd target/rootfs && rm -f init && ln -s usr/sbin/feos-host-init init

@@ -14,7 +14,8 @@ description: |-
   FeOS node agent
   feosd runs microVMs in Firecracker's jailer, with snapshots and
   restores, and serves FeOS's API on /run/feos/api.sock. It boots the
-  newest Firecracker and guest installed side by side in /usr/lib/feos.
+  newest Firecracker and guest installed side by side in /usr/lib/feos,
+  and runs a pod's credentials in feos-authn, beside it.
 depends:
   - diskd
   - feos-firecracker
@@ -22,6 +23,11 @@ depends:
 contents:
   - src: ${MUSL_RELEASE}/feosd
     dst: /usr/sbin/feosd
+    expand: true
+    file_info:
+      mode: 0755
+  - src: ${MUSL_RELEASE}/feos-authn
+    dst: /usr/sbin/feos-authn
     expand: true
     file_info:
       mode: 0755
