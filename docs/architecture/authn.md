@@ -196,7 +196,8 @@ upstream's host and port alone, whatever a URL names. Then:
 
 1. The binding's path prefixes, when it has any: a prefix holds whole
    segments (`/api` holds `/api` and `/api/x`, not `/apix`); a path with
-   dot segments, `\`, or encoded `/`, `\` or `.` is refused. Outside:
+   dot segments (with parameters too: `..;x`), `\`, or encoded `/`, `\`
+   or `.` is refused. Outside:
    403 `denied_path`.
 2. The rate limit, a token bucket per binding (`perSecond`, `burst`; a
    burst of 0 is one second's worth): 429 `rate_limited` with

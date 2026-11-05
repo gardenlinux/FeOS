@@ -270,7 +270,8 @@ pub fn request_host(uri: &Uri, headers: &HeaderMap) -> Option<String> {
 /// are none). A prefix holds whole segments: "/api" holds "/api" and
 /// "/api/x", not "/apix". With prefixes, a path with dot segments or
 /// encoded separators or dots is refused, so that no upstream's
-/// normalisation takes it out of its prefix.
+/// normalisation takes it out of its prefix; a dot segment with
+/// parameters ("..;x"), which servlet containers take for one, too.
 pub fn check_path(path: &str, prefixes: &[String]) -> Result<(), String> {
     if prefixes.is_empty() {
         return Ok(());
@@ -282,7 +283,8 @@ pub fn check_path(path: &str, prefixes: &[String]) -> Result<(), String> {
             prefixes.join(", ")
         ));
     }
-    if path.split('/').any(|s| s == "." || s == "..") {
+    let dots = |s: &str| matches!(s.split(';').next(), Some("." | ".."));
+    if path.split('/').any(dots) {
         return Err(format!(
             "the path {path} has dot segments; the binding allows only {}",
             prefixes.join(", ")
@@ -860,9 +862,14 @@ mod tests {
             "/api/x%5cy",
             "/api\\..\\admin",
             "/odata/..",
+            "/api/..;/admin",
+            "/api/..;jsessionid=1/admin",
+            "/api/.;x/y",
         ] {
             assert!(check_path(bad, &p).is_err(), "{bad}");
         }
+        assert!(check_path("/api/x;v=1/y", &p).is_ok());
+        assert!(check_path("/api/...;x", &p).is_ok());
         // No prefixes: every path.
         assert!(check_path("/api/../anything", &[]).is_ok());
     }
