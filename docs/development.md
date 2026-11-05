@@ -20,6 +20,8 @@ crates/
                         through userfaultfd
   feos/                 feosd and feos-guest: their startup, the wiring of
                         the services, the task supervisor
+  feos-authn/           a pod's credentials on its node, one process per
+                        pod: its HTTP bindings (ADR 0014, ADR 0028)
   feos-host-init/       PID 1 of a node whose operating system is FeOS:
                         machine setup (network, NTP, SR-IOV)
   feos-proto/           generated gRPC code for proto/
@@ -90,6 +92,13 @@ Each binary is named after where it runs ([ADR 0003](adr/0003-programs.md)):
   containers. None of the node's code or dependencies are in this binary.
 - **`feos-host-init`** (`crates/feos-host-init`): PID 1 when FeOS is the
   node's operating system. It sets the machine up and runs `feosd`.
+- **`feos-authn`** (`crates/feos-authn`): a pod's credentials, one process
+  per running pod that `feosd` starts with its microVM, jailed: its HTTP
+  bindings at `169.254.169.1`, the credential added on the way out
+  ([ADR 0014](adr/0014-identity-and-credentials.md),
+  [ADR 0028](adr/0028-http-bindings.md),
+  [architecture/authn.md](architecture/authn.md)). It ships in the
+  `feosd` package, beside `feosd`.
 - **`feosctl`** (`crates/feosctl`): the client. For development and the
   guest's tests it also has `container create --volume NAME:PATH[:ro]`
   with the command verbatim after `--`, `container logs [--tail N]
@@ -147,7 +156,7 @@ use) and `protoc` with its well-known types (Debian: `protobuf-compiler`,
     make fmt-check
     make test-unit       # unit tests, no root needed
     make test            # all tests; the integration tests need root
-    make release         # target/x86_64-unknown-linux-musl/release/{feosd,feos-host-init}
+    make release         # target/x86_64-unknown-linux-musl/release/{feosd,feos-authn,feos-host-init}
     make release-guest   # target/x86_64-unknown-linux-musl/release/feos-guest
     make cli             # feosctl
 
