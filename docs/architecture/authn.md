@@ -136,9 +136,9 @@ end, so each request has two records, joined by `spanId`:
 {"ts":"2026-11-05T12:00:00.123456789Z","type":"http","binding":"erp","mode":"name",
  "method":"GET","host":"api.erp.example","path":"/odata/x","status":200,"durationMs":12,
  "upstreamAddr":"192.0.2.10:443","credential":"headers","traceId":"0af7…319c",
- "spanId":"b7ad6b7169203331","parentSpanId":"00f067aa0ba902b7","error":null}
+ "spanId":"b7ad6b7169203331","parentSpanId":"00f067aa0ba902b7","redacted":0,"error":null}
 {"ts":"…","type":"http_end","binding":"erp","traceId":"0af7…319c","spanId":"b7ad6b7169203331",
- "status":200,"bytesIn":0,"bytesOut":5120,"durationMs":40,"error":null}
+ "status":200,"bytesIn":0,"bytesOut":5120,"redacted":1,"durationMs":40,"error":null}
 ```
 
 - `http`: `binding` and `mode` (`name`, `intercept`) are null when no
@@ -146,16 +146,22 @@ end, so each request has two records, joined by `spanId`:
   `host` is the upstream's. `path` has no query string. `durationMs` is
   until the answer's head. `upstreamAddr` is the address dialed, null
   for a refusal before any. `credential` is `headers`, `basic`,
-  `oauth2` or `clientCertificate`, never a value. `error` is a refusal's
-  `{"code","message"}` (the codes below), null for the upstream's
-  answers, whatever their status.
+  `oauth2` or `clientCertificate`, never a value. `redacted` is how many
+  places of the credential were replaced in the answer's head (its reason
+  and header values) or in a refusal's message (below, "Redaction").
+  `error` is a refusal's `{"code","message"}` (the codes below), null for
+  the upstream's answers, whatever their status.
 - `http_end`: once the answer's body is done, or for an upgrade the
   tunnel. `bytesIn` is the request body's bytes (an upgrade's: what the
   pod sent through the tunnel), `bytesOut` the answer body's (what it
-  received). `durationMs` is from the request's arrival to its end.
-  `error` is set when it did not end as it should: `aborted` (the pod
-  went away first), `upstream_body`, `upgrade`, `tunnel`. A process that
-  is killed leaves an `http` without its `http_end`.
+  received). `redacted` is how many places of the credential were
+  replaced in the whole answer: head, body and trailers, or what came
+  through the tunnel from the upstream. `durationMs` is from the
+  request's arrival to its end. `error` is set when it did not end as it
+  should: `aborted` (the pod went away first), `upstream_body`,
+  `upgrade`, `tunnel`, `unredactable` (an upstream's WebSocket frame that
+  cannot be searched). A process that is killed leaves an `http` without
+  its `http_end`.
 - `token`: a fetch of an OAuth token, before the token is used:
   `{"ts","type":"token","binding","host":<token endpoint>,"reason":
   "first_use"|"renewal"|"unauthorized","status":200|null,"expiresIn":
@@ -212,7 +218,9 @@ upstream's host and port alone, whatever a URL names. Then:
    context: `traceparent` with the proxy's span as parent (a new
    sampled trace when the request had no valid one), `tracestate` as it
    came. With `forwardedHost` (name mode): `X-Forwarded-Host: <name>`,
-   `X-Forwarded-Proto: http`.
+   `X-Forwarded-Proto: http`. When its answer is redacted (below): its
+   `Accept-Encoding` is `identity`, and it loses `Range`, `If-Range` and
+   `Sec-WebSocket-Extensions`.
 5. The upstream: resolved with the system's resolver; every address
    checked against `denyPrefixes`, and never one that is no unicast
    address (unspecified, `0.0.0.0/8`, broadcast, multicast), nor a
@@ -227,12 +235,15 @@ upstream's host and port alone, whatever a URL names. Then:
    pooled per binding (16 idle, 90 s).
 6. An upgrade to WebSocket (`Connection: upgrade` with `Upgrade:
    websocket` alone, HTTP/1.1) goes over a pool of the binding's that
-   offers `http/1.1` only; a 101 makes both sides a pipe. A request for
-   another upgrade goes on as a request, without its `Upgrade`.
+   offers `http/1.1` only; a 101 makes both sides a pipe, the upstream's
+   frames redacted on their way. A request for another upgrade goes on
+   as a request, without its `Upgrade`.
 7. The answer loses its hop-by-hop headers and `Alt-Svc`. In the name
    mode a `Location` or `Content-Location` on the upstream's origin
-   (absolute or scheme-relative) becomes `http://<name>…`. Bodies pass
-   as they stream, never rewritten, never buffered whole.
+   (absolute or scheme-relative) becomes `http://<name>…`. Then its
+   reason and header values are redacted, and an answer with a body that
+   cannot be searched is 502 `unredactable` (below). Bodies pass as they
+   stream, never buffered whole, redacted on their way.
 
 CONNECT is 405 `method_not_allowed`. A binding the set holds but that
 cannot be served (no credential, a header value that is no header, a CA
@@ -260,6 +271,66 @@ the `bindings` record and the log say why, never with a value.
   the binding's CA. Only `Bearer` tokens.
 - `clientCertificate`: the chain and key for mTLS to the upstream.
 
+### Redaction
+
+The credential never goes back to the pod, whatever the upstream repeats
+of it: an API key in a quota error's body, a token in `WWW-Authenticate`
+or in a `Location`'s query, a request echoed for debugging
+(`src/redact.rs`). The values, each at least **8 bytes** long, byte for
+byte:
+
+- `headers`: every header's value, and of one of the form `<scheme>
+  <credentials>` (`Bearer …`, `Token …`) the credentials alone too;
+- `basic`: `user:password`, its base64, and the password alone; not the
+  user alone, which is no secret;
+- `oauth2`: the client secret as it is, form-encoded, and the base64 of
+  `client_secret_basic`; the token in use and the one before it;
+- `clientCertificate`: each line of the key's PEM base64, so that the
+  key is found as PEM, joined, or with escaped line breaks. An upstream
+  never receives the key; this is for one that has it from elsewhere.
+
+A shorter value (a tenant header of `42`) is not redacted: it would mask
+ordinary text. A value the upstream changes — escapes (`\/` in JSON),
+encodes otherwise, cuts itself (an API's own paging of a text) — is not
+recognised.
+
+Where a value appears, in the answer's reason (HTTP/1.1), its header
+values, body and trailers, and the upstream's WebSocket frames, it is
+replaced by a mask of the **same length**: `redacted-by-FeOS-binding`
+when it fits, `redacted` when that fits, `*` for the rest, so that a
+24-byte key becomes `redacted-by-FeOS-binding` and a 12-byte one
+`redacted****`. ASCII without spaces, so that a masked header, URL or
+token stays one. Never the value or a hash of it. Its length keeps
+`Content-Length`, a frame's length and every offset true; nothing about
+the answer's framing changes. Overlapping places are masked as one.
+
+A body is searched as it streams. A chunk goes on at once, without a
+copy when it holds no value, but for its end when that end could begin
+one: those bytes, fewer than the longest value, wait for the next chunk,
+so that a value split across chunks is found. A body that ends gives up
+what waited. A WebSocket tunnel is searched frame by frame: each
+payload of the upstream's as it streams, ended with its frame; a value
+split across two frames of one message is not found.
+
+So that every answer can be searched, a request of a binding with a
+value to redact asks for it unencoded and whole: `Accept-Encoding:
+identity` (the pod's own wish for gzip is answered unencoded, as a
+server may), no `Range` or `If-Range` (so that a pod cannot put a value
+together from parts that each hold less of it), no WebSocket extensions
+(permessage-deflate). An answer with a body that comes with a content or
+transfer coding anyway, or a 206, is refused with 502 `unredactable`; one
+without a body (HEAD, 204, 304, an empty one) passes. An upstream's
+WebSocket frame with RSV bits (compressed) or a mask ends the tunnel
+(`http_end` error `unredactable`). Decompressing instead would put a
+decompressor for every coding, and its bombs, into the jailed process,
+and lose the answer's length; servers send identity when asked for it.
+
+The proxy's refusals are redacted too: their message may hold what a
+token endpoint said. So are the records and the log of a token fetch.
+The records count the places replaced (`redacted` in `http` and
+`http_end`), never the values; `feosd` puts the count on the request's
+span (`ferun.redacted`).
+
 ### Refusals
 
 The proxy's own answers carry `FeOS-Binding-Error: <code>` and
@@ -276,6 +347,7 @@ The proxy's own answers carry `FeOS-Binding-Error: <code>` and
 | 429 | `rate_limited` | the binding's rate limit, or its requests in flight |
 | 502 | `unreachable` | no address, none answered, or an upgrade that cannot be carried |
 | 502 | `tls` | the TLS handshake or the server's certificate failed |
+| 502 | `unredactable` | the answer has a body that cannot be searched for the credential: encoded, or a range |
 | 503 | `credential_unavailable` | no OAuth token can be had |
 | 503 | `not_ready` | the pod's bindings have not arrived |
 | 503 | `binding_invalid` | the binding cannot be served |
@@ -285,4 +357,5 @@ The proxy's own answers carry `FeOS-Binding-Error: <code>` and
 
 1024 of the pod's connections at once (more are closed), 256 requests in
 flight per binding, 30 s to read a request's head, 5 s to resolve, 10 s
-to connect, 10 s for TLS, 15 s for a token.
+to connect, 10 s for TLS, 15 s for a token. A body's search holds back
+fewer bytes than the binding's longest value.

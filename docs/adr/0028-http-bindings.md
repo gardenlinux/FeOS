@@ -133,11 +133,31 @@ ADR 0014's sealing, jail, audit file or start order changes.
   buffered whole.
 - In the answer, a `Location` or `Content-Location` on the upstream's
   origin is rewritten to `http://<name>`. **Bodies are never
-  rewritten**: that would mean parsing every content type, compressed
-  and streamed. With `forwardedHost`, the request carries
+  rewritten** to the name: that would mean parsing every content type,
+  compressed and streamed. With `forwardedHost`, the request carries
   `X-Forwarded-Host: <name>` and `X-Forwarded-Proto: http`, so an
   upstream that builds its absolute URLs from them builds the
   binding's. An API that does not is a case for the intercept mode.
+- **Nothing of the credential goes back to the pod.** Upstreams repeat
+  what they were sent: an API key in a quota error's body, a token in
+  `WWW-Authenticate`, a key in a `Location`'s query, a debug echo.
+  `feos-authn` replaces every value of the binding's credential of at
+  least 8 bytes — a header's value, Basic's pair, its base64 and the
+  password, the OAuth client secret in the forms it is sent in, the
+  current and the previous token, the lines of a client key — wherever
+  it appears in the answer: its reason, header values, body and
+  trailers, and the upstream's WebSocket frames. The mask has the
+  value's length (`redacted-by-FeOS-binding`, cut or filled with `*`),
+  never the value or a hash of it, so that `Content-Length` and frame
+  lengths stay true. Bodies are searched as they stream; only the
+  bytes that could begin a value wait for the next chunk, so a value
+  split across chunks is found and nothing is buffered whole. So that
+  every body can be searched, such a request asks for its answer
+  unencoded and whole (`Accept-Encoding: identity`, no `Range`, no
+  WebSocket extensions); an answer that comes encoded or partial anyway
+  is refused (502). Shorter values are left alone: they would mask
+  ordinary text. A value the upstream transforms (escapes, encodes
+  otherwise, splits itself) is not recognised.
 - `feos-authn`'s own refusals carry `FeOS-Binding-Error` and a small
   JSON body with the reason: 403 for a denied destination or path, 502
   for an unreachable upstream or a failed TLS check, 503 when the
@@ -243,7 +263,8 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
 - ADR 0014's audit, written before the answer, gains a record per
   request: binding, method, host, path (no query string), status,
   bytes, duration, the upstream's address, the credential's kind (never
-  its value), and refusals with their reason. Bodies are never
+  its value), how many places of the credential were replaced in the
+  answer (§3), and refusals with their reason. Bodies are never
   recorded.
 - `feosd` publishes the records as the pod's events (ADR 0014) and ships
   them to the sink (ADR 0026) as the pod's egress records, under its
@@ -319,6 +340,13 @@ Moving them to the node address and to names is an open question.
 - **Rewriting bodies in the name mode.** Every content type,
   compression and stream would need a parser in the proxy. The
   intercept mode solves the problem at its root.
+- **Decompressing answers to redact them**, instead of asking for them
+  unencoded: a decompressor for every coding, and its bombs, in the
+  jailed process, and the answer's length lost. Servers send identity
+  when asked for it.
+- **A fixed marker in place of a value**, of its own length: every
+  `Content-Length` and WebSocket frame around it would have to be
+  rewritten too.
 - **A CA made by each run's `feos-authn`**, whose key never leaves it.
   A resumed pod's processes would trust a CA whose key is gone.
 - **One CA per tenant or environment.** One key trusted by many pods;
@@ -338,7 +366,11 @@ Moving them to the node address and to names is an open question.
   same code runs in a sandbox, a preview and production; only the
   binding's values differ.
 - An agent in a sandbox calls the API as the application does, with
-  the project's credential and without seeing it.
+  the project's credential and without seeing it, even where the API
+  repeats it: the answer reaches the pod masked. Answers of a binding
+  with a credential come unencoded from the upstream, more bytes on
+  its leg, and without ranges; an upstream that encodes them regardless
+  is refused.
 - Plaintext passes the pod's link and `feos-authn`, as with ADR 0014's
   TLS bindings. In the intercept mode the pod trusts a CA of its own,
   constrained to the names it intercepts.
@@ -367,6 +399,9 @@ Moving them to the node address and to names is an open question.
 - The intercept mode on ports other than 443; HTTP/2 without TLS (h2c)
   in the name mode, for gRPC clients.
 - Java's keystore, and other runtimes with stores of their own.
+- Upstreams that encode answers whatever they are asked (objects stored
+  with `Content-Encoding: gzip`): decompressing gzip in `feos-authn`
+  after all, or a binding option that trusts such an upstream.
 - A bundle mounted over a system bundle's path cannot be replaced: a
   rename onto a mount fails (`EBUSY`), so `update-ca-certificates`, and
   a package manager that installs or updates `ca-certificates`, fails
