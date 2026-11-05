@@ -5,7 +5,7 @@ use crate::forward_commands::GuestAddress;
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 use feos_proto::guest_service::{
-    guest_service_client::GuestServiceClient, MountVolumesRequest, Volume,
+    guest_service_client::GuestServiceClient, MountVolumesRequest, SetInterceptCasRequest, Volume,
 };
 
 /// What feosd calls in a pod's guest, for development and the guest's
@@ -31,6 +31,16 @@ pub enum GuestCommand {
             value_parser = parse_volume
         )]
         volumes: Vec<Volume>,
+    },
+    /// Set the pod's interception CAs in the guest (ADR 0028), as feosd
+    /// does: none empties them
+    SetInterceptCas {
+        #[arg(
+            long = "ca-file",
+            value_name = "PATH",
+            help = "A PEM file of a CA, oldest first (repeatable)"
+        )]
+        ca_files: Vec<std::path::PathBuf>,
     },
 }
 
@@ -81,6 +91,25 @@ pub async fn handle_guest_command(args: GuestArgs) -> Result<()> {
             if failed {
                 bail!("some volumes are not mounted");
             }
+        }
+        GuestCommand::SetInterceptCas { ca_files } => {
+            let ca_pems = ca_files
+                .iter()
+                .map(std::fs::read_to_string)
+                .collect::<Result<Vec<_>, _>>()?;
+            let count = ca_pems.len();
+            let failed = client
+                .set_intercept_cas(SetInterceptCasRequest { ca_pems })
+                .await?
+                .into_inner()
+                .failed;
+            for failure in &failed {
+                eprintln!("{}: {}", failure.container_id, failure.reason);
+            }
+            if !failed.is_empty() {
+                bail!("some containers keep the CAs they had");
+            }
+            println!("The guest has {count} interception CAs");
         }
     }
     Ok(())

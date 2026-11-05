@@ -300,6 +300,48 @@ ctl container delete exits >/dev/null
 ctl container delete killed >/dev/null
 log "a follow streams what the container writes until it is deleted"
 
+# The pod's interception CAs (ADR 0028 §5), pushed as feosd does: a file
+# every container sees, and in a container created then a bundle of its
+# image's own and the CAs over its image's bundles, and the variables, for
+# every process started there; a change rewrites them in place.
+CA1="${RUN_DIR}/ca1.pem"
+CA2="${RUN_DIR}/ca2.pem"
+printf -- '-----BEGIN CERTIFICATE-----\nZmVvcy1jYS0x\n-----END CERTIFICATE-----\n' >"${CA1}"
+printf -- '-----BEGIN CERTIFICATE-----\nZmVvcy1jYS0y\n-----END CERTIFICATE-----\n' >"${CA2}"
+ctl guest set-intercept-cas --ca-file "${CA1}" >/dev/null
+CA_IMAGE=docker.io/library/alpine:3.20
+ctl container create --image-ref "${CA_IMAGE}" --id ca --env REQUESTS_CA_BUNDLE=/mine.pem \
+  -- sleep 3600 >/dev/null
+ctl container start ca >/dev/null
+caexec() { ctl container exec ca -- "$@"; }
+grep -q ZmVvcy1jYS0x <<<"$(caexec cat /run/feos/intercept-ca.pem)" || fail "no CA file in the container"
+for bundle in /etc/ssl/certs/ca-certificates.crt /etc/ssl/cert.pem; do
+  text="$(caexec cat "${bundle}")"
+  grep -q ZmVvcy1jYS0x <<<"${text}" || fail "${bundle} lacks the CA"
+  [ "$(grep -c 'BEGIN CERTIFICATE' <<<"${text}")" -gt 20 ] || fail "${bundle} lacks the image's own"
+done
+caexec sh -c 'echo x >> /etc/ssl/certs/ca-certificates.crt' 2>/dev/null && fail "the bundle is writable"
+env="$(caexec env)"
+grep -qx "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" <<<"${env}" || fail "no SSL_CERT_FILE: ${env}"
+grep -qx "REQUESTS_CA_BUNDLE=/mine.pem" <<<"${env}" || fail "the spec's REQUESTS_CA_BUNDLE was replaced"
+grep -qx "NODE_EXTRA_CA_CERTS=/run/feos/intercept-ca.pem" <<<"${env}" || fail "no NODE_EXTRA_CA_CERTS"
+grep -qx "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" <<<"$(caexec cat /proc/1/environ | tr '\0' '\n')" ||
+  fail "the container's own process has no SSL_CERT_FILE"
+# main, created before the CAs: the file, and the CA file in an exec, but
+# no bundle until it starts again.
+grep -q ZmVvcy1jYS0x <<<"$(cexec cat /run/feos/intercept-ca.pem)" || fail "main does not see the CA file"
+grep -qx "NODE_EXTRA_CA_CERTS=/run/feos/intercept-ca.pem" <<<"$(cexec env)" || fail "main's exec has no CA file"
+# A change, in place: the mounts see it.
+ctl guest set-intercept-cas --ca-file "${CA1}" --ca-file "${CA2}" >/dev/null
+grep -q ZmVvcy1jYS0y <<<"$(caexec cat /etc/ssl/certs/ca-certificates.crt)" || fail "the bundle was not rewritten"
+grep -q ZmVvcy1jYS0y <<<"$(caexec cat /run/feos/intercept-ca.pem)" || fail "the CA file was not rewritten"
+ctl guest set-intercept-cas >/dev/null
+grep -q ZmVvcy1jYS0 <<<"$(caexec cat /run/feos/intercept-ca.pem)" && fail "the CAs outlived their removal"
+[ "$(grep -c 'BEGIN CERTIFICATE' <<<"$(caexec cat /etc/ssl/certs/ca-certificates.crt)")" -gt 20 ] ||
+  fail "without CAs the bundle lost the image's own"
+ctl container delete ca >/dev/null
+log "the interception CAs reach every container: a file, a bundle over the image's, the variables"
+
 tool() { ctl tool --container main "$@"; }
 printf 'alpha\nbeta\n' | tool write /work/notes.txt
 [ "$(tool read /work/notes.txt)" = "$(printf 'alpha\nbeta')" ] || fail "tool write/read"
