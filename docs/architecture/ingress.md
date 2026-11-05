@@ -494,8 +494,8 @@ A WireGuard peer is one UDP flow, from the device's port to the node's
 rest: the keepalive goes every 25 s, a handshake that is not answered is
 tried again every 5 s. Whatever the network keeps for that flow never
 expires, a flow an outage left broken included; and an endpoint the
-device learnt from a stray packet would lead nowhere for good, as nodes
-never send first. On 2026-11-05 such flows stayed broken after outages
+device learnt from a stray packet would lead nowhere for good, as the
+nodes only answer the instance's traffic. On 2026-11-05 such flows stayed broken after outages
 of the cloud's network, while new connections from the same pods
 worked, until the pods were deleted (ADR 0021, "A lost path is
 repaired").
@@ -1469,7 +1469,9 @@ open question.
   version up; groups of deleted or moved sandboxes are deleted.
 - **In network namespaces** (`make go-test-netns`, `FERUN_TEST_NETNS=1`,
   root): two WireGuard devices in two namespaces handshake and carry a
-  request; peers set again unchanged keep their session; a removed peer
+  request; peers set again unchanged keep their session; a device moved
+  to another port keeps it, and the other side follows the new port; a
+  peer set anew handshakes at once; a removed peer
   stops traffic.
 - **End to end** (`internal/e2e`, `TestIngress…`): instances of `ferund`
   and test nodes on the mesh, and an in-process `ferun-ingress` with a
