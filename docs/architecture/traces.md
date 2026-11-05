@@ -139,7 +139,9 @@ Attributes: `http.request.method`, `url.path` (without the query),
 `ferun.binding`, `ferun.binding.mode` (`name`, `intercept`),
 `ferun.credential` (its kind), `network.peer.address` (the address
 dialed), `http.request.body.size` and `http.response.body.size` (the
-`http_end`'s bytes), and `ferun.error.code` for a refusal. The sink keeps it with
+`http_end`'s bytes), `ferun.redacted` (the `http_end`'s `redacted`, the
+places of the binding's credential replaced in the answer, when there
+were any), and `ferun.error.code` for a refusal. The sink keeps it with
 `source` `egress`; a read of an environment's traces finds it with the
 pod's own spans, and `source=egress` alone.
 

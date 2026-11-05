@@ -14,7 +14,8 @@
 //! ```
 //!
 //! and `http_end` once its body or tunnel ended (`status`, `bytesIn`,
-//! `bytesOut`, `durationMs` from the request's arrival, `error`). Beside
+//! `bytesOut`, `durationMs` from the request's arrival, `redacted`: the
+//! places of the binding's credential replaced in the answer, `error`). Beside
 //! them, `token` (a fetch of an OAuth token) and `bindings` (a set opened).
 //!
 //! `ts` is when a record was written: an `http`'s request began
@@ -81,6 +82,8 @@ pub struct Record {
     pub status: Option<u16>,
     pub bytes_in: Option<u64>,
     pub bytes_out: Option<u64>,
+    /// The places of the binding's credential replaced in the answer.
+    pub redacted: Option<u64>,
     pub duration_ms: Option<f64>,
     pub upstream_addr: Option<String>,
     pub credential: Option<String>,
@@ -306,6 +309,9 @@ fn span_of(head: &Record, end: Option<&Record>, observed: SystemTime) -> Option<
                 i64::try_from(bytes).unwrap_or(i64::MAX),
             ));
         }
+        if let Some(n) = end.redacted.filter(|n| *n > 0) {
+            attributes.push(int("ferun.redacted", i64::try_from(n).unwrap_or(i64::MAX)));
+        }
     }
     // A refusal of feos-authn's own; an end's error (`aborted` and the
     // like) is the end's, not the request's status.
@@ -351,7 +357,7 @@ mod tests {
         "later":"ignored"}"#;
     const END: &str = r#"{"ts":"2026-11-05T10:00:02Z","type":"http_end","binding":"erp",
         "traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331",
-        "status":200,"bytesIn":0,"bytesOut":5120,"durationMs":1250,"error":null}"#;
+        "status":200,"bytesIn":0,"bytesOut":5120,"redacted":2,"durationMs":1250,"error":null}"#;
 
     fn line(text: &str) -> Vec<u8> {
         text.replace('\n', "").into_bytes()
@@ -413,6 +419,7 @@ mod tests {
             attribute(&span, "http.response.body.size"),
             Some(Value::IntValue(5120))
         );
+        assert_eq!(attribute(&span, "ferun.redacted"), Some(Value::IntValue(2)));
         assert_eq!(span.status, None);
     }
 
