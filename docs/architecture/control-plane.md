@@ -1815,8 +1815,12 @@ new version of a binding's secret keeps the pods (`in place`), and the
 kept instance, moved to it, is sent its bindings again. A secret a
 binding names enters no container's environment unless a service's env
 names it itself. A binding whose resolved secret is no valid value (a
-header value with a line break) is left out of the pod's bindings and
-logged; the check says why.
+header value with a line break) is given to the pod without its
+credential, so that its names and version are the same in its clear part
+and in what its `feos-authn` gets, which answers its requests 503
+`binding_invalid`; it is logged, a plan warns of it
+(`bindings.<name>.credential`, the check's words, never the value), and
+the check says why.
 
 **Incidents** (ADR 0028 §6). The leader's loop `env-bindings` (30 s)
 reads, for every environment with bindings, its pods' requests per

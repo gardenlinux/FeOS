@@ -430,6 +430,9 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 	fs = append(fs, spec.Validate(vc, sp, p.currentSpec)...)
 	norm, nfs := spec.Normalise(sp, pins)
 	fs = append(fs, nfs...)
+	if secrets == nil && vc.bindingsOn && !spec.HasErrors(fs) {
+		fs = append(fs, s.bindingValueFindings(ctx, env.ID, norm)...)
+	}
 	baseSpec := p.currentSpec
 	if p.base != p.current {
 		baseSpec = nil

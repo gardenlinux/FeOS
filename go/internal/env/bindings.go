@@ -63,9 +63,12 @@ const (
 // their definitions (a hash of the bindings with their secrets by name and
 // pinned version, never a value). open: with the secrets' values. A
 // binding the deployment no longer has as the template says (another
-// upstream or mode: the pod is being replaced), or whose secret's value
-// is not a valid one (a header value with a line break), is left out and
-// logged.
+// upstream or mode: the pod is being replaced) is left out and logged. A
+// binding whose secret's value is not a valid one (a header value with a
+// line break) is kept without its credential and logged, opened or not:
+// the names and the version are the same in the pod's clear part and in
+// what its feos-authn gets, which answers the binding's requests 503
+// binding_invalid.
 func (s *Service) RowHTTPBindings(ctx context.Context, row store.Sandbox, open bool) ([]*fleetv1.HttpBinding, string,
 	error) {
 	t := row.PodTemplate
@@ -97,13 +100,11 @@ func (s *Service) RowHTTPBindings(ctx context.Context, row store.Sandbox, open b
 			continue
 		}
 		p, def, err := s.resolveBinding(ctx, row.EnvironmentID, tb.Name, b, sp.Secrets, open)
-		if err != nil {
-			var ce *httpcheck.Error
-			if errors.As(err, &ce) {
-				s.log.Warn("a binding's secret is not a valid value; the binding is left out", "sandbox", row.ID,
-					"binding", tb.Name, "err", ce.Msg)
-				continue
-			}
+		if ce := httpcheck.AsError(err); ce != nil {
+			s.log.Warn("a binding's secret is not a valid value; the pod gets the binding without its credential",
+				"sandbox", row.ID, "binding", tb.Name, "err", ce.Msg)
+			p.Credential = nil
+		} else if err != nil {
 			return nil, "", err
 		}
 		out = append(out, p)
@@ -132,7 +133,10 @@ type bindingDef struct {
 
 // resolveBinding is a binding as a pod receives it: its secrets at the
 // versions pins name (0: the latest), opened when open (else their fields
-// are empty), every value checked as the sandbox surface checks it.
+// are empty), every value checked as the sandbox surface checks it. A
+// value that fails its check, or a credential of no known kind, is an
+// *httpcheck.Error beside the binding and its definition, both whole: the
+// definition names every secret whether open or not.
 func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name string, b spec.Binding,
 	pins map[string]spec.SecretRef, open bool) (*fleetv1.HttpBinding, bindingDef, error) {
 	def := bindingDef{Name: name, Binding: b, Versions: map[string]int{}}
@@ -151,7 +155,7 @@ func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name stri
 	}
 	c := b.Credential
 	if c == nil {
-		return nil, def, &httpcheck.Error{Code: httpcheck.CodeInvalidBinding, Msg: "the binding has no credential"}
+		return p, def, &httpcheck.Error{Code: httpcheck.CodeInvalidBinding, Msg: "the binding has no credential"}
 	}
 	val := func(field string, v *spec.EnvValue) (string, error) {
 		if v == nil {
@@ -180,26 +184,26 @@ func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name stri
 		out, err = val(field, v)
 		return out
 	}
+	// bad is the first opened value that fails its check; the fields after
+	// it are still read, so that def names their secrets too.
+	var bad *httpcheck.Error
+	check := func(cerr *httpcheck.Error) {
+		if bad == nil && err == nil && open {
+			bad = cerr
+		}
+	}
 	switch c.Kind {
 	case httpcheck.KindHeaders:
 		h := map[string]string{}
 		for _, k := range slices.Sorted(maps.Keys(c.Headers)) {
 			v := c.Headers[k]
 			h[http.CanonicalHeaderKey(k)] = str("header "+k, &v)
-			if err == nil && open {
-				if cerr := httpcheck.HeaderValue("header "+k, h[http.CanonicalHeaderKey(k)]); cerr != nil {
-					return nil, def, cerr
-				}
-			}
+			check(httpcheck.HeaderValue("header "+k, h[http.CanonicalHeaderKey(k)]))
 		}
 		p.Credential = &fleetv1.HttpBinding_Headers{Headers: &fleetv1.HeaderCredential{Headers: h}}
 	case httpcheck.KindBasic:
 		bc := &fleetv1.BasicCredential{User: str("user", c.User), Password: str("password", c.Password)}
-		if err == nil && open {
-			if cerr := httpcheck.BasicUser("user", bc.User); cerr != nil {
-				return nil, def, cerr
-			}
-		}
+		check(httpcheck.BasicUser("user", bc.User))
 		p.Credential = &fleetv1.HttpBinding_Basic{Basic: bc}
 	case httpcheck.KindOAuth2:
 		p.Credential = &fleetv1.HttpBinding_Oauth2{Oauth2: &fleetv1.OAuthClientCredentials{
@@ -208,19 +212,37 @@ func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name stri
 			Audience: str("audience", c.Audience), ClientAuthInBody: c.ClientAuthInBody}}
 	case httpcheck.KindClientCertificate:
 		cc := &fleetv1.ClientCertificate{CertPem: str("certPem", c.CertPem), KeyPem: str("keyPem", c.KeyPem)}
-		if err == nil && open {
-			if cerr := httpcheck.ClientCertificate("credential", cc.CertPem, cc.KeyPem); cerr != nil {
-				return nil, def, cerr
-			}
-		}
+		check(httpcheck.ClientCertificate("credential", cc.CertPem, cc.KeyPem))
 		p.Credential = &fleetv1.HttpBinding_ClientCertificate{ClientCertificate: cc}
 	default:
-		return nil, def, &httpcheck.Error{Code: httpcheck.CodeInvalidBinding, Msg: "unknown credential kind " + c.Kind}
+		return p, def, &httpcheck.Error{Code: httpcheck.CodeInvalidBinding, Msg: "unknown credential kind " + c.Kind}
 	}
 	if err != nil {
 		return nil, def, err
 	}
+	if bad != nil {
+		return p, def, bad
+	}
 	return p, def, nil
+}
+
+// bindingValueFindings are the warnings of a plan's bindings whose secrets,
+// at the versions it pins, are no valid values (a header value with a line
+// break): their pods would get them without their credentials. A finding
+// has the check's words, never the value; a secret that does not resolve
+// is the references' finding.
+func (s *Service) bindingValueFindings(ctx context.Context, envID uuid.UUID, sp spec.Spec) []spec.Finding {
+	var out []spec.Finding
+	for _, name := range slices.Sorted(maps.Keys(sp.Bindings)) {
+		_, _, err := s.resolveBinding(ctx, envID, name, sp.Bindings[name], sp.Secrets, true)
+		if ce := httpcheck.AsError(err); ce != nil {
+			out = append(out, spec.Finding{Severity: spec.SeverityWarning, Path: "bindings." + name + ".credential",
+				Problem: fmt.Sprintf("a secret it names is no valid value (%s): its pods get the binding without its "+
+					"credential, and feos-authn answers its requests 503 binding_invalid", ce.Msg),
+				Remedy: "set a valid value as a new version of the secret, then plan again"})
+		}
+	}
+	return out
 }
 
 // bindingHosts are the hosts the destination rule judges of a spec's
