@@ -165,15 +165,25 @@ pub fn time(record: &Record, observed: SystemTime) -> SystemTime {
             .ok()
             .and_then(|time| {
                 let nanos = u64::try_from(time.timestamp_nanos_opt()?).ok()?;
-                Some(SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos))
+                SystemTime::UNIX_EPOCH.checked_add(Duration::from_nanos(nanos))
             })
             .unwrap_or(observed),
         Some(serde_json::Value::Number(millis)) => millis
             .as_u64()
-            .map(|millis| SystemTime::UNIX_EPOCH + Duration::from_millis(millis))
+            .and_then(|millis| SystemTime::UNIX_EPOCH.checked_add(Duration::from_millis(millis)))
             .unwrap_or(observed),
         _ => observed,
     }
+}
+
+/// A record's `durationMs`: none for one that is not there, negative, not
+/// finite, or longer than a duration holds. A record is what feos-authn
+/// wrote, and nothing it holds may end the node's tail.
+fn took(record: &Record) -> Duration {
+    record
+        .duration_ms
+        .and_then(|ms| Duration::try_from_secs_f64(ms / 1000.0).ok())
+        .unwrap_or(Duration::ZERO)
 }
 
 fn unix_nanos(time: SystemTime) -> u64 {
@@ -221,11 +231,7 @@ pub fn head_span(head: &Record, observed: SystemTime) -> Option<Span> {
 /// before the record was written.
 pub fn start_unix_nanos(record: &Record, observed: SystemTime) -> i64 {
     let written = time(record, observed);
-    let took = record
-        .duration_ms
-        .filter(|ms| ms.is_finite() && *ms >= 0.0)
-        .map_or(Duration::ZERO, |ms| Duration::from_secs_f64(ms / 1000.0));
-    let start = written.checked_sub(took).unwrap_or(written);
+    let start = written.checked_sub(took(record)).unwrap_or(written);
     i64::try_from(unix_nanos(start)).unwrap_or(i64::MAX)
 }
 
@@ -254,11 +260,7 @@ fn span_of(head: &Record, end: Option<&Record>, observed: SystemTime) -> Option<
     let span_id = hex(head.span_id.as_deref(), 8)?;
     let last = end.unwrap_or(head);
     let finished = time(last, observed);
-    let took = last
-        .duration_ms
-        .filter(|ms| ms.is_finite() && *ms >= 0.0)
-        .map_or(Duration::ZERO, |ms| Duration::from_secs_f64(ms / 1000.0));
-    let started = finished.checked_sub(took).unwrap_or(finished);
+    let started = finished.checked_sub(took(last)).unwrap_or(finished);
     let text = |value: &Option<String>| value.clone().unwrap_or_default();
     let (method, binding) = (text(&head.method), text(&head.binding));
     let mut attributes = vec![
@@ -405,6 +407,53 @@ mod tests {
             Some(Value::IntValue(5120))
         );
         assert_eq!(span.status, None);
+    }
+
+    /// What a record says is feos-authn's: no duration or time in it
+    /// ends the node's tail.
+    #[test]
+    fn a_record_of_any_duration_or_time_is_taken() {
+        let observed = SystemTime::UNIX_EPOCH + Duration::from_secs(1_793_872_802);
+        for ms in [
+            "1e300",
+            "1.7976931348623157e308",
+            "-5",
+            "18446744073709551615000",
+            "0",
+        ] {
+            for ts in [
+                r#""2026-11-05T10:00:01Z""#,
+                "18446744073709551615",
+                r#""+262142-12-31T23:59:59Z""#,
+                "null",
+            ] {
+                let head = format!(
+                    r#"{{"ts":{ts},"type":"http","traceId":"0af7651916cd43dd8448eb211c80319c",
+                    "spanId":"b7ad6b7169203331","durationMs":{ms}}}"#
+                );
+                let end = head.replace(r#""type":"http""#, r#""type":"http_end""#);
+                let (head, end) = (record(&line(&head)).unwrap(), record(&line(&end)).unwrap());
+                let start = start_unix_nanos(&head, observed);
+                assert!(start >= 0, "{ms} {ts}");
+                let mut joiner = Joiner::default();
+                joiner.take(head, observed);
+                let span = joiner.take(end, observed).unwrap();
+                assert!(
+                    span.start_time_unix_nano <= span.end_time_unix_nano,
+                    "{ms} {ts}"
+                );
+            }
+        }
+        // A duration too long for one counts as none.
+        let head = record(&line(
+            &HEAD.replace(r#""durationMs":12"#, r#""durationMs":1e300"#),
+        ));
+        let head = head.unwrap();
+        let written = time(&head, observed);
+        assert_eq!(
+            start_unix_nanos(&head, observed),
+            i64::try_from(unix_nanos(written)).unwrap()
+        );
     }
 
     #[test]
