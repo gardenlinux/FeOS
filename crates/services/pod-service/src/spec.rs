@@ -9,7 +9,7 @@ use feos_proto::microvm::{
     BalloonConfig, CpuConfig, DataDiskConfig, GuestNetworkConfig, GuestRoute, MemoryConfig,
     NetConfig, TapConfig, VmConfig,
 };
-use feos_proto::pod_service::{PodSpec, Resources};
+use feos_proto::pod_service::{PodHttpBindings, PodSpec, Resources};
 use feos_utils::filesystem::volume as feos_volume;
 use feos_utils::pod_id::PodId;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -32,6 +32,12 @@ const MAX_VOLUMES: usize = 8;
 /// feosd's part beside it a few hundred bytes.
 const MAX_METADATA_BYTES: usize = 32 * 1024;
 const MAX_METADATA_KEY: usize = 128;
+/// What a pod's HTTP bindings' clear part may hold (ADR 0028): names, and
+/// the interception CAs' certificates.
+const MAX_HTTP_NAMES: usize = 64;
+const MAX_CA_PEMS: usize = 8;
+const MAX_CA_PEM_BYTES: usize = 64 * 1024;
+const MAX_HTTP_VERSION: usize = 128;
 
 /// Checks a pod's ID, which also names its microVM and its paths: a short
 /// one, or the UUID of a pod made before short IDs (ADR 0019).
@@ -85,8 +91,120 @@ pub fn normalize(mut spec: PodSpec) -> Result<PodSpec, Status> {
     }
     check_volumes(&spec)?;
     check_metadata(&spec)?;
+    if let Some(bindings) = &spec.http_bindings {
+        check_http_bindings(&spec, bindings)?;
+    }
 
     Ok(spec)
+}
+
+/// Checks the clear part of a pod's HTTP bindings (ADR 0028): names that
+/// are DNS labels, intercepted hosts that are host names, each once and in
+/// one of the two only, CAs that are PEM certificates, and a network to
+/// reach them on.
+pub fn check_http_bindings(spec: &PodSpec, bindings: &PodHttpBindings) -> Result<(), Status> {
+    let named = bindings.names.len() + bindings.intercept_hosts.len();
+    if named > MAX_HTTP_NAMES {
+        return Err(Status::invalid_argument(format!(
+            "a pod has at most {MAX_HTTP_NAMES} HTTP bindings' names"
+        )));
+    }
+    if named > 0 && !has_network(spec) {
+        return Err(Status::invalid_argument(
+            "a pod without a network reaches no HTTP bindings",
+        ));
+    }
+    let mut seen = HashSet::new();
+    for name in &bindings.names {
+        if !feos_volume::valid_name(name) {
+            return Err(Status::invalid_argument(format!(
+                "invalid HTTP binding name {name:?}: 1 to 63 lowercase letters, digits and \"-\", beginning and ending with a letter or a digit"
+            )));
+        }
+        if !seen.insert(name.as_str()) {
+            return Err(Status::invalid_argument(format!(
+                "HTTP binding name {name:?} is named twice"
+            )));
+        }
+    }
+    for host in &bindings.intercept_hosts {
+        if !valid_host(host) {
+            return Err(Status::invalid_argument(format!(
+                "invalid intercepted host {host:?}: a lowercase host name of DNS labels, without the final dot"
+            )));
+        }
+        if !seen.insert(host.as_str()) {
+            return Err(Status::invalid_argument(format!(
+                "HTTP binding name {host:?} is named twice"
+            )));
+        }
+    }
+    if bindings.intercept_ca_pems.len() > MAX_CA_PEMS {
+        return Err(Status::invalid_argument(format!(
+            "a pod has at most {MAX_CA_PEMS} interception CAs"
+        )));
+    }
+    let size: usize = bindings.intercept_ca_pems.iter().map(String::len).sum();
+    if size > MAX_CA_PEM_BYTES {
+        return Err(Status::invalid_argument(format!(
+            "the interception CAs take {size} bytes, more than {MAX_CA_PEM_BYTES}"
+        )));
+    }
+    for (index, ca) in bindings.intercept_ca_pems.iter().enumerate() {
+        if !is_certificate_pem(ca) {
+            return Err(Status::invalid_argument(format!(
+                "interception CA {index} is not one PEM block CERTIFICATE"
+            )));
+        }
+    }
+    if bindings.version.len() > MAX_HTTP_VERSION || bindings.version.chars().any(char::is_control) {
+        return Err(Status::invalid_argument(format!(
+            "the HTTP bindings' version is at most {MAX_HTTP_VERSION} printable characters"
+        )));
+    }
+    Ok(())
+}
+
+/// A host name of lowercase DNS labels, without the final dot, which no
+/// address is.
+fn valid_host(host: &str) -> bool {
+    host.len() <= 253
+        && host.parse::<std::net::IpAddr>().is_err()
+        && host.split('.').all(feos_volume::valid_name)
+}
+
+/// Whether `pem` is one PEM block of a certificate: its armor and base64
+/// in between, nothing else but blank lines.
+fn is_certificate_pem(pem: &str) -> bool {
+    const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+    const END: &str = "-----END CERTIFICATE-----";
+    let mut lines = pem.lines().map(str::trim).filter(|line| !line.is_empty());
+    if lines.next() != Some(BEGIN) {
+        return false;
+    }
+    let mut body = 0;
+    for line in lines.by_ref() {
+        if line == END {
+            return body > 0 && lines.next().is_none();
+        }
+        if !line
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+        {
+            return false;
+        }
+        body += line.len();
+    }
+    false
+}
+
+/// The spec without its HTTP bindings' clear part, which SetPodHttpBindings
+/// changes: what two creates of a pod compare.
+pub fn without_http_bindings(spec: &PodSpec) -> PodSpec {
+    PodSpec {
+        http_bindings: None,
+        ..spec.clone()
+    }
 }
 
 /// Checks what the pod's metadata service is to serve: keys that are
@@ -344,6 +462,68 @@ mod tests {
             containers,
             ..Default::default()
         }
+    }
+
+    const CA: &str =
+        "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIU\nAA==\n-----END CERTIFICATE-----\n";
+
+    #[test]
+    fn http_bindings_name_labels_and_hosts_once_with_pem_cas() {
+        let bindings = |names: &[&str], hosts: &[&str], cas: &[&str]| PodHttpBindings {
+            names: names.iter().map(|n| n.to_string()).collect(),
+            intercept_hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            intercept_ca_pems: cas.iter().map(|c| c.to_string()).collect(),
+            version: "3".to_string(),
+        };
+        let pod = spec(vec![container("main")]);
+        let good = bindings(&["erp", "pay-1"], &["api.erp.example"], &[CA, CA]);
+        check_http_bindings(&pod, &good).unwrap();
+        let created = normalize(PodSpec {
+            http_bindings: Some(good.clone()),
+            ..pod.clone()
+        })
+        .unwrap();
+        assert_eq!(created.http_bindings, Some(good));
+        check_http_bindings(&pod, &PodHttpBindings::default()).unwrap();
+
+        for bad in [
+            bindings(&["ERP"], &[], &[]),
+            bindings(&["-erp"], &[], &[]),
+            bindings(&["erp.example"], &[], &[]),
+            bindings(&["erp", "erp"], &[], &[]),
+            bindings(&["erp"], &["erp"], &[]),
+            bindings(&[], &["Api.example"], &[]),
+            bindings(&[], &["api.example."], &[]),
+            bindings(&[], &["10.0.0.1"], &[]),
+            bindings(&[], &["a..b"], &[]),
+            bindings(&[], &[], &["not a certificate"]),
+            bindings(
+                &[],
+                &[],
+                &["-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----"],
+            ),
+            bindings(&[], &[], &[&format!("{CA}{CA}")]),
+        ] {
+            assert!(check_http_bindings(&pod, &bad).is_err(), "{bad:?}");
+        }
+        // A pod without a network reaches none.
+        let isolated = PodSpec {
+            network: Some(PodNetwork {
+                none: true,
+                ..Default::default()
+            }),
+            ..pod.clone()
+        };
+        assert!(check_http_bindings(&isolated, &bindings(&["erp"], &[], &[])).is_err());
+        // Two creates compare without them.
+        let other = PodSpec {
+            http_bindings: Some(bindings(&["crm"], &[], &[])),
+            ..created.clone()
+        };
+        assert_eq!(
+            without_http_bindings(&created),
+            without_http_bindings(&other)
+        );
     }
 
     #[test]

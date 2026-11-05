@@ -911,3 +911,103 @@ async fn without_a_lookup_no_pod_has_names() {
     assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
     assert_eq!(upstream.asked(), [asked("web.", RecordType::AAAA, false)]);
 }
+
+#[tokio::test]
+async fn answers_the_names_of_the_pods_http_bindings_with_the_nodes_address() {
+    let node = Ipv4Addr::new(169, 254, 169, 1);
+    let upstream = upstream().await;
+    let config = Config {
+        http_address: Some(node),
+        ..Default::default()
+    };
+    let (resolver, server) = resolver(config, vec![upstream.address]).await;
+    resolver.set_names(names);
+    resolver.set_client(
+        LOOPBACK.into(),
+        POD,
+        vec![upstream.address],
+        vec!["env-1".to_string()],
+    );
+    let http = HttpNames {
+        names: vec!["erp".to_string(), "web".to_string()],
+        hosts: vec!["api.erp.example".to_string()],
+    };
+    resolver.set_http(LOOPBACK.into(), POD, &http);
+
+    // A, in any case, with a short TTL, never asked upstream; a binding's
+    // name wins over the name tables'.
+    for owner in [
+        "erp.",
+        "ERP.",
+        "web.",
+        "api.erp.example.",
+        "Api.Erp.Example.",
+    ] {
+        let answer = ask_udp(server, &query(owner, RecordType::A)).await;
+        assert_eq!(
+            answer.metadata.response_code,
+            ResponseCode::NoError,
+            "{owner}"
+        );
+        assert!(answer.metadata.authoritative, "{owner}");
+        assert_eq!(addresses(&answer), ips(&["169.254.169.1"]), "{owner}");
+        assert!(answer.answers.iter().all(|record| record.ttl == HTTP_TTL));
+    }
+    let answer = ask_tcp(server, &query("erp.", RecordType::A)).await;
+    assert_eq!(addresses(&answer), ips(&["169.254.169.1"]));
+    // AAAA and every other type: an empty answer.
+    for record_type in [RecordType::AAAA, RecordType::HTTPS, RecordType::MX] {
+        let answer = ask_udp(server, &query("api.erp.example.", record_type)).await;
+        assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+        assert!(answer.answers.is_empty(), "{record_type}");
+    }
+    assert!(upstream.asked().is_empty());
+    // A name below a binding's, or a label of a host, is not a binding's.
+    let answer = ask_udp(server, &query("erp.example.", RecordType::A)).await;
+    assert!(addresses(&answer).is_empty());
+    let answer = ask_udp(server, &query("x.erp.", RecordType::A)).await;
+    assert!(addresses(&answer).is_empty());
+
+    // Another pod resolves the names as before.
+    let (other, other_server) = resolver_at(
+        Ipv6Addr::LOCALHOST.into(),
+        Config {
+            http_address: Some(node),
+            ..Default::default()
+        },
+        vec![upstream.address],
+    )
+    .await;
+    other.set_names(names);
+    let source = IpAddr::V6(Ipv6Addr::LOCALHOST);
+    let answer = ask_udp_from(source, other_server, &query("erp.", RecordType::A)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
+
+    // A set again, or without names: as before. The tables' names come back.
+    resolver.set_client(
+        LOOPBACK.into(),
+        POD,
+        vec![upstream.address],
+        vec!["env-1".to_string()],
+    );
+    let answer = ask_udp(server, &query("erp.", RecordType::A)).await;
+    assert_eq!(addresses(&answer), ips(&["169.254.169.1"]), "kept");
+    resolver.set_http(LOOPBACK.into(), POD, &HttpNames::default());
+    let answer = ask_udp(server, &query("erp.", RecordType::A)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
+    let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
+    assert_eq!(addresses(&answer), ips(&["fd00::a", "fd00::b"]));
+}
+
+#[tokio::test]
+async fn without_the_nodes_address_no_binding_is_answered() {
+    let upstream = upstream().await;
+    let (resolver, server) = resolver(Config::default(), vec![upstream.address]).await;
+    let http = HttpNames {
+        names: vec!["erp".to_string()],
+        hosts: Vec::new(),
+    };
+    resolver.set_http(LOOPBACK.into(), POD, &http);
+    let answer = ask_udp(server, &query("erp.", RecordType::A)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
+}

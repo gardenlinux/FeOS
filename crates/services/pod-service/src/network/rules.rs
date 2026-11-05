@@ -65,6 +65,9 @@ const ND_REDIRECT: u8 = 137;
 const DNS_PORT: u16 = 53;
 /// OTLP's ports, gRPC and HTTP.
 pub const OTLP_PORTS: (u16, u16) = (4317, 4318);
+/// The HTTP bindings' ports at OTLP's address (ADR 0028): the name mode's
+/// plain HTTP and the intercept mode's TLS.
+pub const HTTP_PORTS: (u16, u16) = (80, 443);
 
 /// What the table needs besides the policy.
 #[derive(Clone, Debug, PartialEq)]
@@ -73,7 +76,7 @@ pub struct Options {
     /// reach at port 53 over UDP and TCP: an IPv4 address.
     pub dns: IpAddr,
     /// OTLP's address (`--otlp-address`), which pods reach at
-    /// [`OTLP_PORTS`] over TCP.
+    /// [`OTLP_PORTS`] over TCP, and their HTTP bindings at [`HTTP_PORTS`].
     pub otlp: IpAddr,
     /// The pods' IPv4 addresses (`--pod-ipv4-range`), which are
     /// masqueraded where they leave the node.
@@ -352,6 +355,17 @@ fn input(options: &Options) -> Vec<Rule> {
         ]
         .concat()
     };
+    // The HTTP bindings at OTLP's address (ADR 0028).
+    let http = |port| {
+        [
+            from_pods(),
+            daddr(options.otlp),
+            l4proto(TCP),
+            th_dport(CmpOp::Eq, port),
+            verdict(Verdict::Accept),
+        ]
+        .concat()
+    };
     vec![
         [
             from_pods(),
@@ -375,6 +389,8 @@ fn input(options: &Options) -> Vec<Rule> {
             verdict(Verdict::Accept),
         ]
         .concat(),
+        http(HTTP_PORTS.0),
+        http(HTTP_PORTS.1),
         [from_pods(), verdict(Verdict::Drop)].concat(),
     ]
 }
@@ -779,7 +795,7 @@ mod tests {
     }
 
     #[test]
-    fn input_takes_neighbor_discovery_dns_and_otlp_from_pods() {
+    fn input_takes_neighbor_discovery_dns_otlp_and_http_bindings_from_pods() {
         let table = table(&policy(), &options());
         let rules = &chain(&table, "input").rules;
         assert_eq!(
@@ -826,8 +842,22 @@ mod tests {
             ]
             .concat()
         );
-        assert_eq!(rules[5], [from_pods(), verdict(Verdict::Drop)].concat());
-        assert_eq!(rules.len(), 6);
+        // The HTTP bindings, 80 and 443, over TCP alone.
+        for (rule, port) in rules[5..7].iter().zip([80, 443]) {
+            assert_eq!(
+                rule,
+                &[
+                    from_pods(),
+                    ipv4_daddr(CmpOp::Eq, v4("169.254.169.1")),
+                    l4proto(TCP),
+                    th_dport(CmpOp::Eq, port),
+                    verdict(Verdict::Accept)
+                ]
+                .concat()
+            );
+        }
+        assert_eq!(rules[7], [from_pods(), verdict(Verdict::Drop)].concat());
+        assert_eq!(rules.len(), 8);
         // An IPv6 resolver is matched as such.
         let ipv6 = Options {
             dns: IpAddr::V6(a("fd00::53")),
@@ -1078,6 +1108,8 @@ mod tests {
                 "iifname \"pod-*\" ip daddr 169.254.0.53 udp dport 53 accept",
                 "iifname \"pod-*\" ip daddr 169.254.0.53 tcp dport 53 accept",
                 "iifname \"pod-*\" ip daddr 169.254.169.1 tcp dport 4317-4318 accept",
+                "iifname \"pod-*\" ip daddr 169.254.169.1 tcp dport 80 accept",
+                "iifname \"pod-*\" ip daddr 169.254.169.1 tcp dport 443 accept",
                 "ip saddr 169.254.16.0/20 oifname != \"pod-*\" masquerade",
                 "elements = { 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 192.0.2.7, 224.0.0.0/4 }",
             ] {

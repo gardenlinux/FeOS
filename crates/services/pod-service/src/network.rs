@@ -20,11 +20,11 @@ mod rules;
 
 pub use mesh::PORT as MESH_PORT;
 pub use mesh::{Assignment, Config as MeshConfig, DEVICE as MESH_DEVICE, MTU as MESH_MTU};
-pub use rules::{OTLP_PORTS, TABLE};
+pub use rules::{HTTP_PORTS, OTLP_PORTS, TABLE};
 
 use addresses::{Ipv4Addresses, Ipv6Addresses};
 use devices::PodLink;
-use dns_service::Resolver;
+use dns_service::{HttpNames, Resolver};
 use feos_proto::network_service::{
     traffic_record, Mesh as MeshInfo, PutMeshPeersRequest, TrafficRecord, UpdateMeshPeersRequest,
 };
@@ -266,6 +266,19 @@ fn has_network(info: &PodInfo) -> bool {
     info.spec.as_ref().is_some_and(crate::spec::has_network)
 }
 
+/// The names of the pod's HTTP bindings, as its resolver answers them
+/// (ADR 0028).
+fn http_names(info: &PodInfo) -> HttpNames {
+    info.spec
+        .as_ref()
+        .and_then(|spec| spec.http_bindings.as_ref())
+        .map(|bindings| HttpNames {
+            names: bindings.names.clone(),
+            hosts: bindings.intercept_hosts.clone(),
+        })
+        .unwrap_or_default()
+}
+
 fn pod_network(info: &PodInfo) -> PodNetwork {
     info.spec
         .as_ref()
@@ -456,6 +469,31 @@ impl Network {
     /// at [`OTLP_PORTS`]: an address it holds as it does the resolver's.
     pub fn otlp_address(&self) -> Ipv4Addr {
         self.config.otlp_address
+    }
+
+    /// Where the pods reach their HTTP bindings (ADR 0028), at
+    /// [`HTTP_PORTS`]: the node's address of OTLP's.
+    pub fn http_address(&self) -> Ipv4Addr {
+        self.config.otlp_address
+    }
+
+    /// Has the resolver answer the names of the pod's HTTP bindings as its
+    /// record has them now: after SetPodHttpBindings.
+    pub fn set_http_names(&self, info: &PodInfo) {
+        let (Ok(parts), Ok(address)) = (self.parts(), info.ipv4_address.parse::<Ipv4Addr>()) else {
+            return;
+        };
+        if has_network(info) {
+            parts
+                .resolver
+                .set_http(address.into(), &info.pod_id, &http_names(info));
+        }
+    }
+
+    /// The pod that sends from `address`, as the pods' TAP devices pin it:
+    /// for the HTTP bindings' listeners.
+    pub fn pod_at(&self, address: IpAddr) -> Option<String> {
+        self.directory.pod_at(address.to_canonical())
     }
 
     /// The parts, if the network works.
@@ -809,12 +847,17 @@ impl Network {
             };
             let network = pod_network(pod);
             match self.upstreams(&network) {
-                Ok(upstreams) => parts.resolver.set_client(
-                    address.into(),
-                    &pod.pod_id,
-                    upstreams,
-                    network.name_tables,
-                ),
+                Ok(upstreams) => {
+                    parts.resolver.set_client(
+                        address.into(),
+                        &pod.pod_id,
+                        upstreams,
+                        network.name_tables,
+                    );
+                    parts
+                        .resolver
+                        .set_http(address.into(), &pod.pod_id, &http_names(pod));
+                }
                 Err(e) => warn!("Network: Pod {} gets no DNS: {}", pod.pod_id, e.message()),
             }
         }
@@ -885,6 +928,9 @@ impl Network {
         parts
             .resolver
             .set_client(ipv4.into(), pod_id, upstreams, network.name_tables);
+        parts
+            .resolver
+            .set_http(ipv4.into(), pod_id, &http_names(info));
         Ok(Some(Attachment {
             tap,
             mac: mac(pod_id),
@@ -1088,6 +1134,7 @@ async fn set_up(
             .iter()
             .map(|address| SocketAddr::new(*address, DNS_PORT))
             .collect(),
+        http_address: Some(config.otlp_address),
         ..Default::default()
     });
     let tables = names.clone();
@@ -1328,6 +1375,15 @@ impl Directory {
                 departed.insert(address, (pod_id, now));
             }
         }
+    }
+
+    /// The pod that holds `address` now; none for one that left.
+    fn pod_at(&self, address: IpAddr) -> Option<String> {
+        self.addresses
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&address)
+            .cloned()
     }
 }
 

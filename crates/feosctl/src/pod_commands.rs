@@ -11,9 +11,9 @@ use crossterm::tty::IsTty;
 use feos_proto::pod_service::{
     pod_service_client::PodServiceClient, ContainerSpec, ContainerState, CreatePodRequest,
     DeletePodRequest, GetPodRequest, HibernatePodRequest, ListPodsRequest, PodConsoleInput,
-    PodInfo, PodNetwork, PodSpec, PodState, PodVolume, Resources, RestorePodRequest,
-    ResumePodRequest, StartPodRequest, StopPodRequest, StreamPodEventsRequest, SuspendPodRequest,
-    VolumeMount,
+    PodHttpBindings, PodInfo, PodNetwork, PodSpec, PodState, PodVolume, Resources,
+    RestorePodRequest, ResumePodRequest, SetPodHttpBindingsRequest, StartPodRequest,
+    StopPodRequest, StreamPodEventsRequest, SuspendPodRequest, VolumeMount,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -77,6 +77,9 @@ pub enum PodCommand {
         #[arg(long, help = "Wait until the pod runs")]
         wait: bool,
     },
+    /// Set the clear part of a pod's HTTP bindings (ADR 0028), stated
+    /// whole: what it does not name is gone. `pod get` shows them
+    HttpBindings(HttpBindingsOptions),
     /// Attach to the serial console of a pod's microVM; Ctrl+] leaves
     Console { pod_id: String },
     /// Watch the pods' state changes
@@ -84,6 +87,35 @@ pub enum PodCommand {
         #[arg(help = "Only this pod's")]
         pod_id: Option<String>,
     },
+}
+
+#[derive(Args, Debug)]
+pub struct HttpBindingsOptions {
+    pod_id: String,
+    #[arg(
+        long = "name",
+        value_name = "LABEL",
+        help = "A name-mode binding's name, which the pod's resolver answers with the node's address (repeatable)"
+    )]
+    names: Vec<String>,
+    #[arg(
+        long = "intercept-host",
+        value_name = "HOST",
+        help = "An intercept-mode binding's upstream host name (repeatable)"
+    )]
+    intercept_hosts: Vec<String>,
+    #[arg(
+        long = "ca-file",
+        value_name = "PATH",
+        help = "A PEM file of an interception CA's certificate, oldest first (repeatable)"
+    )]
+    ca_files: Vec<std::path::PathBuf>,
+    #[arg(
+        long,
+        default_value = "",
+        help = "The version of the sealed binding set; a new one has the pod's feos-authn fetch its bindings again"
+    )]
+    version: String,
 }
 
 #[derive(Args, Debug)]
@@ -303,10 +335,36 @@ pub async fn handle_pod_command(args: PodArgs) -> Result<()> {
                 }
             }
         }
+        PodCommand::HttpBindings(opts) => {
+            let pod_id = opts.pod_id.clone();
+            client
+                .set_pod_http_bindings(http_bindings_request(opts)?)
+                .await?;
+            println!("Pod {pod_id} has these HTTP bindings now");
+        }
         PodCommand::Console { pod_id } => console(&mut client, pod_id).await?,
         PodCommand::Events { pod_id } => watch_events(&mut client, pod_id).await?,
     }
     Ok(())
+}
+
+fn http_bindings_request(opts: HttpBindingsOptions) -> Result<SetPodHttpBindingsRequest> {
+    let intercept_ca_pems = opts
+        .ca_files
+        .iter()
+        .map(|path| {
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+        })
+        .collect::<Result<_>>()?;
+    Ok(SetPodHttpBindingsRequest {
+        pod_id: opts.pod_id,
+        http_bindings: Some(PodHttpBindings {
+            names: opts.names,
+            intercept_hosts: opts.intercept_hosts,
+            intercept_ca_pems,
+            version: opts.version,
+        }),
+    })
 }
 
 fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
@@ -350,6 +408,7 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             labels: opts.label.into_iter().collect::<HashMap<_, _>>(),
             volumes: opts.volumes,
             metadata: opts.metadata.into_iter().collect(),
+            http_bindings: None,
         }),
         image_layers: None,
         pull_token: String::new(),
@@ -500,6 +559,20 @@ fn print_pod(pod: &PodInfo) {
     }
     for volume in &spec.volumes {
         println!("  Volume: {} ({})", volume.name, volume.volume_id);
+    }
+    if let Some(http) = &spec.http_bindings {
+        for name in &http.names {
+            println!("  HTTP binding: http://{name}/");
+        }
+        for host in &http.intercept_hosts {
+            println!("  HTTP binding: https://{host}/ (intercepted)");
+        }
+        if !http.intercept_ca_pems.is_empty() {
+            println!("  Interception CAs: {}", http.intercept_ca_pems.len());
+        }
+        if !http.version.is_empty() {
+            println!("  HTTP bindings' version: {}", http.version);
+        }
     }
     println!("  Containers:");
     for container in &spec.containers {
@@ -655,6 +728,49 @@ mod tests {
     struct Cli {
         #[command(subcommand)]
         command: PodCommand,
+    }
+
+    #[test]
+    fn http_bindings_are_stated_whole_with_their_cas_read_from_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = dir.path().join("ca.pem");
+        std::fs::write(
+            &ca,
+            "-----BEGIN CERTIFICATE-----\nAA==\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+        let cli = Cli::try_parse_from([
+            "pod".as_ref(),
+            "http-bindings".as_ref(),
+            "p".as_ref(),
+            "--name".as_ref(),
+            "erp".as_ref(),
+            "--intercept-host".as_ref(),
+            "api.erp.example".as_ref(),
+            "--ca-file".as_ref(),
+            ca.as_os_str(),
+            "--version".as_ref(),
+            "7".as_ref(),
+        ])
+        .unwrap();
+        let PodCommand::HttpBindings(opts) = cli.command else {
+            panic!("not http-bindings");
+        };
+        let request = http_bindings_request(opts).unwrap();
+        let http = request.http_bindings.unwrap();
+        assert_eq!(request.pod_id, "p");
+        assert_eq!(http.names, ["erp"]);
+        assert_eq!(http.intercept_hosts, ["api.erp.example"]);
+        assert!(http.intercept_ca_pems[0].starts_with("-----BEGIN CERTIFICATE-----"));
+        assert_eq!(http.version, "7");
+
+        // None at all: the pod has none.
+        let cli = Cli::try_parse_from(["pod", "http-bindings", "p"]).unwrap();
+        let PodCommand::HttpBindings(opts) = cli.command else {
+            panic!("not http-bindings");
+        };
+        let http = http_bindings_request(opts).unwrap().http_bindings.unwrap();
+        assert_eq!(http, PodHttpBindings::default());
     }
 
     #[test]

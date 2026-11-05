@@ -17,6 +17,12 @@
 //! (ADR 0013). Every query of a pod that is answered becomes a traffic
 //! record (ADR 0013).
 //!
+//! Before its name tables, a pod's HTTP bindings (ADR 0028): the names
+//! of its bindings, a label each in the name mode and the upstream's host
+//! name in the intercept mode, are answered with the node's address for
+//! them (`Config::http_address`), A alone, and an empty answer for every
+//! other type, with a short TTL. Every other pod resolves them as before.
+//!
 //! feosd binds the sockets and hands them over, so that they can come from
 //! socket activation and outlive feosd.
 
@@ -30,7 +36,7 @@ use hickory_proto::op::{Edns, Message, MessageType, OpCode, Query, ResponseCode}
 use hickory_proto::rr::rdata::{A, AAAA};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use log::{debug, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, PoisonError, RwLock};
@@ -68,6 +74,8 @@ const RECORDS: usize = 1024;
 /// How long the answers from name tables may be kept: their addresses
 /// change as replicas come and go.
 pub const NAME_TTL: u32 = 5;
+/// How long the answers for HTTP bindings' names may be kept.
+pub const HTTP_TTL: u32 = 5;
 
 /// The addresses of a name, one label in any case, in the first of the
 /// name tables of a pod that holds it; None when none does.
@@ -81,6 +89,9 @@ pub struct Config {
     /// How long an upstream has to answer over UDP before the next is
     /// asked; over TCP, twice that.
     pub upstream_timeout: Duration,
+    /// Where the pods reach their HTTP bindings (ADR 0028): the node's
+    /// address their names are answered with; none answers them.
+    pub http_address: Option<Ipv4Addr>,
 }
 
 impl Default for Config {
@@ -88,7 +99,29 @@ impl Default for Config {
         Self {
             default_upstreams: Vec::new(),
             upstream_timeout: UPSTREAM_TIMEOUT,
+            http_address: None,
         }
+    }
+}
+
+/// A pod's HTTP bindings' names, as the resolver answers them (ADR 0028):
+/// the name mode's labels and the intercept mode's host names.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HttpNames {
+    pub names: Vec<String>,
+    pub hosts: Vec<String>,
+}
+
+impl HttpNames {
+    /// The names as they are looked up: in lower case, without the final
+    /// dot.
+    fn lookup(&self) -> HashSet<String> {
+        self.names
+            .iter()
+            .chain(&self.hosts)
+            .map(|name| name.trim_end_matches('.').to_ascii_lowercase())
+            .filter(|name| !name.is_empty())
+            .collect()
     }
 }
 
@@ -111,6 +144,8 @@ struct Client {
     upstreams: Vec<SocketAddr>,
     /// The name tables it names, in order.
     tables: Vec<String>,
+    /// Its HTTP bindings' names, in lower case without the final dot.
+    http: HashSet<String>,
     queries: Arc<Semaphore>,
     connections: Arc<Semaphore>,
 }
@@ -158,12 +193,39 @@ impl Resolver {
                 Arc::new(Semaphore::new(MAX_CLIENT_CONNECTIONS)),
             ),
         };
+        // And its HTTP bindings' names, which `set_http` sets.
+        let http = clients
+            .get(&address)
+            .filter(|client| client.pod_id == pod_id)
+            .map(|client| client.http.clone())
+            .unwrap_or_default();
         let client = Client {
             pod_id: pod_id.to_string(),
             upstreams,
             tables,
+            http,
             queries,
             connections,
+        };
+        clients.insert(address, Arc::new(client));
+    }
+
+    /// Answers the names of the HTTP bindings `http` to the pod at
+    /// `address` from now on, in place of those it had; a pod the
+    /// resolver does not serve yet gets them when it is set.
+    pub fn set_http(&self, address: IpAddr, pod_id: &str, http: &HttpNames) {
+        let address = address.to_canonical();
+        let mut clients = self.clients.write().unwrap_or_else(PoisonError::into_inner);
+        let Some(client) = clients.get(&address).filter(|c| c.pod_id == pod_id) else {
+            return;
+        };
+        let client = Client {
+            pod_id: client.pod_id.clone(),
+            upstreams: client.upstreams.clone(),
+            tables: client.tables.clone(),
+            http: http.lookup(),
+            queries: client.queries.clone(),
+            connections: client.connections.clone(),
         };
         clients.insert(address, Arc::new(client));
     }
@@ -374,6 +436,11 @@ impl Resolver {
         };
         let response = match check(&request) {
             Some(code) => respond(&request, Err(code)),
+            None if let Some(answer) = self.http(&request, client) => {
+                let mut response = respond(&request, Ok(answer));
+                response.metadata.authoritative = true;
+                response
+            }
             None if let Some(answer) = self.local(&request, client) => {
                 let mut response = respond(&request, Ok(answer));
                 response.metadata.authoritative = true;
@@ -396,6 +463,33 @@ impl Resolver {
             self.record(client, question, &response);
         }
         encode(&response, limit)
+    }
+
+    /// The answer for a name of the client's HTTP bindings (ADR 0028), if
+    /// the question asks for one: the node's address for them to A,
+    /// nothing to every other type.
+    fn http(&self, request: &Message, client: &Client) -> Option<Message> {
+        if client.http.is_empty() {
+            return None;
+        }
+        let address = self.config.http_address?;
+        let question = request.queries.first()?;
+        if question.query_class() != DNSClass::IN {
+            return None;
+        }
+        let owner = question.name();
+        if !client.http.contains(&record_name(owner)) {
+            return None;
+        }
+        let mut answer = Message::new(0, MessageType::Query, OpCode::Query);
+        if question.query_type() == RecordType::A {
+            answer.add_answer(Record::from_rdata(
+                owner.clone(),
+                HTTP_TTL,
+                RData::A(A(address)),
+            ));
+        }
+        Some(answer)
     }
 
     /// The answer from the client's name tables to the question of

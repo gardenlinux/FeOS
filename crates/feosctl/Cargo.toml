@@ -27,3 +27,5 @@ uuid = { workspace = true }
 
 # CLI specific dependencies
 crossterm = "0.29"
+[dev-dependencies]
+tempfile = { workspace = true }

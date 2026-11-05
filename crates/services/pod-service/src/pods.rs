@@ -67,7 +67,7 @@ use feos_proto::microvm::{
 use feos_proto::pod_service::{
     BakedLayer, Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
     Hibernation as HibernationInfo, HibernationPhase, ImageLayers, MicroVm, PodConsoleInput,
-    PodConsoleOutput, PodEvent, PodInfo, PodSpec, PodState, RestorePodResponse,
+    PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodSpec, PodState, RestorePodResponse,
 };
 use feos_proto::volume_service::{Volume, VolumeCheckpoint, VolumeState};
 use feos_utils::vsock::{self, API_PORT};
@@ -815,6 +815,42 @@ impl Pods {
         self.set_state(pod_id, PodState::Running, "").await;
         self.check_microvm_network(pod_id, attachment.as_ref())
             .await;
+        Ok(())
+    }
+
+    /// Sets the clear part of the pod's HTTP bindings (ADR 0028) in its
+    /// record, stated whole, and while the pod runs, in its resolver's
+    /// answers. A pod that does not run takes it at its next start, resume
+    /// or restore. It does not wait for the pod's lock: a bring-up that
+    /// holds it reads the record when it gets there.
+    pub async fn set_http_bindings(
+        &self,
+        pod_id: &str,
+        bindings: PodHttpBindings,
+    ) -> Result<(), Status> {
+        spec::check_id(pod_id)?;
+        let info = self.info(pod_id)?;
+        let spec = info.spec.clone().unwrap_or_default();
+        spec::check_http_bindings(&spec, &bindings)?;
+        if spec.http_bindings.as_ref() == Some(&bindings) {
+            return Ok(());
+        }
+        self.update(pod_id, |info| {
+            if let Some(spec) = info.spec.as_mut() {
+                spec.http_bindings = Some(bindings);
+            }
+        })
+        .await;
+        let info = self.info(pod_id)?;
+        info!(
+            "Pods: {pod_id}'s HTTP bindings are at version {:?}",
+            info.spec
+                .as_ref()
+                .and_then(|spec| spec.http_bindings.as_ref())
+                .map(|bindings| bindings.version.as_str())
+                .unwrap_or_default()
+        );
+        self.inner.network.set_http_names(&info);
         Ok(())
     }
 
@@ -3240,8 +3276,15 @@ fn shown(mut info: PodInfo) -> PodInfo {
     info
 }
 
+/// Whether a create of `spec` is the create of `existing`: their specs
+/// compare without the HTTP bindings' clear part, which
+/// SetPodHttpBindings changes after the create (ADR 0028).
 fn same_spec(existing: PodInfo, spec: &PodSpec) -> Result<PodInfo, Status> {
-    if existing.spec.as_ref() == Some(spec) {
+    let same = existing
+        .spec
+        .as_ref()
+        .is_some_and(|own| spec::without_http_bindings(own) == spec::without_http_bindings(spec));
+    if same {
         Ok(shown(existing))
     } else {
         Err(Status::already_exists(format!(

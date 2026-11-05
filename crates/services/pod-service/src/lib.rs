@@ -26,8 +26,9 @@ use feos_proto::pod_service::{
     CreatePodRequest, CreatePodResponse, DeletePodRequest, DeletePodResponse, GetPodRequest,
     HibernatePodRequest, HibernatePodResponse, ListPodsRequest, ListPodsResponse, PodConsoleInput,
     PodConsoleOutput, PodEvent, PodInfo, RestorePodRequest, RestorePodResponse, ResumePodRequest,
-    ResumePodResponse, StartPodRequest, StartPodResponse, StopPodRequest, StopPodResponse,
-    StreamPodEventsRequest, SuspendPodRequest, SuspendPodResponse,
+    ResumePodResponse, SetPodHttpBindingsRequest, SetPodHttpBindingsResponse, StartPodRequest,
+    StartPodResponse, StopPodRequest, StopPodResponse, StreamPodEventsRequest, SuspendPodRequest,
+    SuspendPodResponse,
 };
 use feos_proto::volume_service::volume_service_server::VolumeService;
 use feos_proto::volume_service::{
@@ -193,6 +194,17 @@ impl PodService for Pods {
         self.check_serving()?;
         self.resume(&request.into_inner().pod_id).await?;
         Ok(Response::new(ResumePodResponse {}))
+    }
+
+    async fn set_pod_http_bindings(
+        &self,
+        request: Request<SetPodHttpBindingsRequest>,
+    ) -> Result<Response<SetPodHttpBindingsResponse>, Status> {
+        self.check_serving()?;
+        let request = request.into_inner();
+        self.set_http_bindings(&request.pod_id, request.http_bindings.unwrap_or_default())
+            .await?;
+        Ok(Response::new(SetPodHttpBindingsResponse {}))
     }
 
     async fn hibernate_pod(
