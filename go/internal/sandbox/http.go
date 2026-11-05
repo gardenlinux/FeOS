@@ -272,9 +272,11 @@ func (e *Engine) prepareHTTP(ctx context.Context, h *OpHandle) error {
 
 // httpAroundCall pushes an op's pod its part where the op's call does not
 // carry it: before the StartPod or ResumePod (before is true), after a
-// restore's or a repair's calls (before false). A create records the part
-// its spec carried. Best effort: a failure is logged, and the loop tries
-// again.
+// restore's or a repair's calls (before false). A create records no part:
+// a feosd from before ADR 0028 drops the spec's unread, so whether the pod
+// holds it is not known until a push is answered, and the loop sends it
+// once (the same part again changes nothing on a node that took it). Best
+// effort: a failure is logged, and the loop tries again.
 func (e *Engine) httpAroundCall(ctx context.Context, pc podv1.PodServiceClient, h *OpHandle, before bool) {
 	if e.httpSource() == nil {
 		return
@@ -282,9 +284,7 @@ func (e *Engine) httpAroundCall(ctx context.Context, pc podv1.PodServiceClient, 
 	var err error
 	switch {
 	case !before && h.kind == OpCreate:
-		if h.spec != nil {
-			_, err = e.st.SetHTTPPushed(ctx, h.id, h.inc, h.spec.GetHttpBindings().GetVersion())
-		}
+		err = e.st.ResetHTTPPushed(ctx, h.id, h.inc)
 	case before && (h.kind == OpStart || h.kind == OpResume),
 		!before && (h.kind == OpRestore || h.kind == OpRepair):
 		row := h.row

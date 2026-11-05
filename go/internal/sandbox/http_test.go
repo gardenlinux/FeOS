@@ -68,9 +68,10 @@ func (h *harness) waitPushed(id store.Sandbox, version string) {
 	h.t.Fatalf("http_pushed is %q, not %q", h.row(id.ID).HTTPPushed, version)
 }
 
-// A create carries the clear part in its spec; a change reaches the pod
-// at once, by a push, and the pushed version is recorded; the same part
-// again is not sent; a part removed is sent empty.
+// A create carries the clear part in its spec, and records none: the loop
+// sends it once, which changes nothing on the node; a change reaches the
+// pod at once, by a push, and the pushed version is recorded; the same
+// part again is not sent; a part removed is sent empty.
 func TestHTTPBindingsCreateAndPush(t *testing.T) {
 	h := newHarness(t)
 	h.addNode("n1")
@@ -82,7 +83,17 @@ func TestHTTPBindingsCreateAndPush(t *testing.T) {
 	if part := h.nodePart("n1", sb.ID.String()); part.GetVersion() != "v1" || !slices.Equal(part.GetNames(), []string{"erp"}) {
 		t.Fatalf("the create's part: %v", part)
 	}
+	if got := h.row(sb.ID).HTTPPushed; got != "" {
+		t.Fatalf("http_pushed after the create: %q", got)
+	}
+	h.exec(`UPDATE sandboxes SET http_version = 'set' WHERE id = $1`, sb.ID)
+	if err := h.eng().httpBindingsLoop(bg); err != nil {
+		t.Fatal(err)
+	}
 	h.waitPushed(sb, "v1")
+	if part := h.nodePart("n1", sb.ID.String()); part.GetVersion() != "v1" {
+		t.Fatalf("the part after the loop: %v", part)
+	}
 
 	calls := h.watchCalls("n1", podv1.PodService_SetPodHttpBindings_FullMethodName, false)
 	src.set(sb.ID.String(), "v2", "erp", "pay")
@@ -166,5 +177,39 @@ func TestHTTPBindingsLoop(t *testing.T) {
 	}
 	if got := h.row(other.ID).HTTPPushed; got != "" {
 		t.Fatalf("the other row: %q", got)
+	}
+}
+
+// A feosd from before ADR 0028 drops the create's part unread: nothing is
+// recorded as taken, so once the node takes SetPodHttpBindings (upgraded)
+// the loop sends the part.
+func TestHTTPBindingsCreateOnOldNode(t *testing.T) {
+	h := newHarness(t)
+	n1 := h.addNode("n1")
+	src := &fakeHTTP{}
+	h.eng().SetHTTPBindings(src)
+	n1.Script().SetHook(podv1.PodService_CreatePod_FullMethodName, func(_ context.Context, _ string, req any) error {
+		if r, ok := req.(*podv1.CreatePodRequest); ok && r.GetSpec() != nil {
+			r.Spec.HttpBindings = nil
+		}
+		return nil
+	})
+	sb := h.sandbox(512)
+	src.set(sb.ID.String(), "v1", "erp")
+	h.exec(`UPDATE sandboxes SET http_version = 'set' WHERE id = $1`, sb.ID)
+	h.ensure(sb.ID)
+	if part := h.nodePart("n1", sb.ID.String()); part != nil {
+		t.Fatalf("the old node's part: %v", part)
+	}
+	if got := h.row(sb.ID).HTTPPushed; got != "" {
+		t.Fatalf("http_pushed after the old node's create: %q", got)
+	}
+
+	if err := h.eng().httpBindingsLoop(bg); err != nil {
+		t.Fatal(err)
+	}
+	h.waitPushed(sb, "v1")
+	if part := h.nodePart("n1", sb.ID.String()); part.GetVersion() != "v1" {
+		t.Fatalf("the part after the upgrade: %v", part)
 	}
 }

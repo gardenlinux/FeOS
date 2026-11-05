@@ -165,6 +165,16 @@ func (s *Store) SetHTTPPushed(ctx context.Context, sandboxID podid.ID, inc uuid.
 	return tag.RowsAffected() > 0, nil
 }
 
+// ResetHTTPPushed records that the pod of the row's incarnation inc took
+// no clear part yet that a node confirmed: after its create, which a feosd
+// from before ADR 0028 takes without the spec's part. A row of another
+// incarnation, or gone, is left.
+func (s *Store) ResetHTTPPushed(ctx context.Context, sandboxID podid.ID, inc uuid.UUID) error {
+	_, err := s.q.Exec(ctx, `UPDATE sandboxes SET http_pushed = ''
+		WHERE id = $1 AND incarnation = $2 AND http_pushed <> ''`, sandboxID, inc)
+	return err
+}
+
 // HTTPPushCandidates returns the rows on nodes whose pods may hold another
 // clear part of their HTTP bindings than the row's: a pod on one of nodes
 // (running, paused or stopped, materialised, no op), with an HTTP set of

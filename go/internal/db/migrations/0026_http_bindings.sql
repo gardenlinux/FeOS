@@ -18,10 +18,11 @@
 -- new one beside the old.
 --
 -- sandboxes.http_pushed is the version of the clear part of the pod's HTTP
--- bindings (PodSpec.http_bindings) that the pod's node took last, by the
--- create's spec or SetPodHttpBindings, for the pod of the row's
--- incarnation; '' for none, as every pod made before had. A row whose
--- pod's part differs from it gets SetPodHttpBindings.
+-- bindings (PodSpec.http_bindings) that the pod's node took last, by
+-- SetPodHttpBindings answered OK, for the pod of the row's incarnation; ''
+-- for none, as every pod made before had, and after a create, whose spec's
+-- part a feosd from before ADR 0028 drops. A row whose pod's part differs
+-- from it gets SetPodHttpBindings.
 --
 -- env_incidents gains the conditions of an environment's binding (ADR
 -- 0028 §6), on the object binding/<name>: credential_refused,

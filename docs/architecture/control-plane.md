@@ -1772,7 +1772,10 @@ bindings. A create carries it in its spec; the engine sends
   whose part is not the one their node took (256 a pass).
 
 `sandboxes.http_pushed` is the version the node took last for the row's
-incarnation (the create's, or a push's answered OK); a push records an
+incarnation, a push's answered OK. A create records none: a `feosd`
+from before ADR 0028 drops the spec's part unread, so the loop sends the
+part once after every create, which changes nothing on a node that took
+it (`feosd` answers the same part again without a change); a push records an
 activity event `pod_http_bindings` (`sent`, `unimplemented`). A node
 that answers `UNIMPLEMENTED` is recorded and not asked again for ten
 minutes; its pods get the part with their next create. `NOT_FOUND` is
