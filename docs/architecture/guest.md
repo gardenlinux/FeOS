@@ -177,12 +177,22 @@ reaps.
   `REQUESTS_CA_BUNDLE` naming the first of those paths and
   `NODE_EXTRA_CA_CERTS` naming `/run/feos/intercept-ca.pem`. Every exec
   takes the container's environment, so a sandbox's tool calls and an
-  attached service's processes have them too; an exec in a container
-  created before the guest held CAs gets `NODE_EXTRA_CA_CERTS` alone, as
-  its bundle is mounted only at its next start. A change rewrites the CA
-  file and every container's bundle in place, truncated and written,
-  never renamed, so that the mounts see it; a process that read its
-  store sees it after its restart. Without CAs the file is empty and
+  attached service's processes have them too. An exec in a container
+  created before the guest held CAs, as a sandbox's are, gets
+  `NODE_EXTRA_CA_CERTS` and, where its environment names none,
+  `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` naming
+  `/run/feos/intercept/<id>.pem`, `intercept/<id>.pem` in the share
+  directory: the container's system bundle as the exec finds it in its
+  root filesystem (opened as a path and read only if it is a regular
+  file, as a container may have put anything there) and the CAs, made
+  anew whenever that bundle differs from `intercept/exec-system.pem` in
+  the container's directory, where the exec keeps it. Nothing is
+  mounted over the container's own bundle. A change rewrites the CA
+  file and every mounted bundle in place, truncated and written, never
+  renamed, so that the mounts see it, and replaces every bundle in the
+  share directory, of the system bundle kept, by a rename; a process
+  that read its store sees it after its restart. A container's delete
+  removes its bundle in the share directory. Without CAs the file is empty and
   containers created then get nothing; a container adopted then keeps the
   variables it was created with. Containers of a pod without intercept
   bindings are untouched. Java's keystore is not covered.

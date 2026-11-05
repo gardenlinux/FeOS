@@ -12,7 +12,8 @@ the object `binding`, a sandbox its HTTP bindings), ADR 0026 (the node
 address `169.254.169.1`, and the pods' requests through their bindings
 as records in the sink), ADR 0007 and ADR 0004 (for the intercept
 mode, the guest puts the pod's CA into every container: a file, a
-bundle mounted over the image's own, and the environment of every
+bundle mounted over the image's own or, in a container older than the
+CA, one in the pod's shared directory, and the environment of every
 process it starts there).
 
 ## Context
@@ -213,11 +214,24 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
   and the same environment goes to every process the guest starts in a
   container later: `Exec`, a sandbox's tool calls and the supervised
   processes of attached services (ADR 0018). The agent's `curl` and
-  `npm` trust what the application trusts. When the pod's CAs change
-  (above), the guest rewrites each container's CA file and bundle in
-  place, never by a rename, so that the mounts see the new content;
-  a process that read its store at start sees the new CA after its
-  restart. Java's keystore (`cacerts`) is not covered (open question).
+  `npm` trust what the application trusts.
+- **A container older than the pod's first CA** — a sandbox's, which
+  runs before FeCode gives it bindings — has nothing mounted, and its
+  spec names no bundle. Every process the guest starts in it later gets
+  a bundle of the container's own in the pod's shared directory
+  instead, made at that start of the system bundle the container has
+  then (one its package manager installed since included) and the
+  pod's CAs, with `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` naming it
+  and `NODE_EXTRA_CA_CERTS` the CA file, where the process's
+  environment names none. Nothing covers the container's own bundle, so
+  `update-ca-certificates` still replaces it. A process that was running
+  before gets the CAs at its restart; the container needs none.
+- When the pod's CAs change (above), the guest rewrites each container's
+  CA file and mounted bundle in place, never by a rename, so that the
+  mounts see the new content, and replaces the bundles in the shared
+  directory by a rename, so that a reader sees a whole one; a process
+  that read its store at start sees the new CA after its restart.
+  Java's keystore (`cacerts`) is not covered (open question).
 - A client that pins its server's certificate fails here and uses the
   name mode. A client that resolves elsewhere (DNS over HTTPS, a fixed
   address) reaches the real upstream without the credential and fails
@@ -326,8 +340,9 @@ Moving them to the node address and to names is an open question.
 - `feosd` gains two listening sockets, the passing of accepted sockets
   and per-pod answers for bindings' names; the guest gains, for the
   intercept mode, a CA file and a bundle per container mounted over the
-  image's own, and the variables in every container and every process
-  it starts in one; `feos-authn` gains an HTTP proxy,
+  image's own or, for a container older than the CA, kept in the shared
+  directory, and the variables in every container and every process it
+  starts in one; `feos-authn` gains an HTTP proxy,
   an OAuth client and the issuing of leaf certificates; `ferund` gains
   the object `binding`, sealing of HTTP bindings and of the CA, the
   preflight and the incidents; the sink gains egress records.
@@ -343,5 +358,11 @@ Moving them to the node address and to names is an open question.
 - The intercept mode on ports other than 443; HTTP/2 without TLS (h2c)
   in the name mode, for gRPC clients.
 - Java's keystore, and other runtimes with stores of their own.
+- A bundle mounted over a system bundle's path cannot be replaced: a
+  rename onto a mount fails (`EBUSY`), so `update-ca-certificates`, and
+  a package manager that installs or updates `ca-certificates`, fails
+  in a container created with CAs. Images build their store before
+  they run; whether such a container should get the bundle in the
+  shared directory alone, as a container older than the CA does.
 - Moving Kubernetes and TLS bindings to the node address and to names.
 - Quotas per tenant across pods.

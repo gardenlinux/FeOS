@@ -16,10 +16,23 @@
 //! `NODE_EXTRA_CA_CERTS` the CA file; and so does every process started in
 //! it later, which takes the environment of its runtime spec.
 //!
-//! A change of the CAs rewrites the CA file and every container's bundle
-//! in place, truncated and written, never by a rename: a bind mount of a
-//! file holds the inode it was made with. A process that read its store
-//! before reads the new CAs after its restart.
+//! A container created before the guest held CAs, as a sandbox's are, has
+//! no bundle mounted, and its runtime spec names none. A process started
+//! in it later, by an exec, gets one in the share directory instead:
+//! `intercept/<id>.pem`, which it sees in [`EXEC_DEST`], of the system
+//! bundle its root filesystem has at that exec and the CAs, named by
+//! `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` where its environment names
+//! none, beside `NODE_EXTRA_CA_CERTS`. Nothing covers its own bundle, so
+//! its package manager can still replace it, and the next exec takes the
+//! new one. The system bundle it was made of is kept in the container's
+//! directory, as `intercept/exec-system.pem`.
+//!
+//! A change of the CAs rewrites the CA file and every container's mounted
+//! bundle in place, truncated and written, never by a rename: a bind mount
+//! of a file holds the inode it was made with. The exec bundles in the
+//! share directory, which no mount holds, are replaced by a rename, so a
+//! reader sees the old one or the new one, whole. A process that read its
+//! store before reads the new CAs after its restart.
 //!
 //! Containers of a pod without CAs are left as they are.
 
@@ -30,6 +43,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -48,6 +62,12 @@ pub const SYSTEM_BUNDLES: [&str; 3] = [
 const DIR: &str = "intercept";
 const SYSTEM: &str = "system.pem";
 const BUNDLE: &str = "ca-bundle.pem";
+/// The system bundle a container's exec bundle was made of, in `DIR`.
+const EXEC_SYSTEM: &str = "exec-system.pem";
+/// The exec bundles' directory in the share directory, and where a
+/// container sees it.
+const EXEC_DIR: &str = "intercept";
+pub const EXEC_DEST: &str = "/run/feos/intercept";
 /// A system bundle larger than this is not one.
 const MAX_SYSTEM_BUNDLE: u64 = 16 << 20;
 /// The variables, and what each names: the bundle, or the CA file.
@@ -139,23 +159,83 @@ pub fn set_env(env: &mut Vec<String>, injection: &Injection, spec: &HashMap<Stri
     }
 }
 
-/// An exec's environment `env`, in a container that may have been created
-/// before the guest held CAs: the CA file where the guest holds CAs and
-/// `env` names none. The bundle is the container's only if it was created
-/// with it, and then its runtime spec names it already.
-pub fn set_exec_env(share: &Path, env: &mut Vec<String>) {
-    let prefix = format!("{CA_VARIABLE}=");
-    if env.iter().any(|entry| entry.starts_with(&prefix)) {
-        return;
-    }
-    if cas_in(share).is_some() {
+/// An exec's environment `env` in the container `id`, whose directory is
+/// `container` and whose root filesystem is `rootfs`, while the guest
+/// holds CAs in `share`: the CA file where `env` names none, and where it
+/// names no bundle, the container's exec bundle, made first or brought up
+/// to date with its system bundle. A container created with the CAs names
+/// its mounted bundle already. Without CAs, `env` stays as it is. Returns
+/// why the exec bundle could not be made; `env` then names the CA file
+/// alone.
+pub fn set_exec_env(
+    share: &Path,
+    id: &str,
+    container: &Path,
+    rootfs: &Path,
+    env: &mut Vec<String>,
+) -> Result<(), String> {
+    let _change = lock();
+    let Some(cas) = cas_in(share) else {
+        return Ok(());
+    };
+    if !names(env, CA_VARIABLE) {
         env.push(format!("{CA_VARIABLE}={CA_PATH}"));
+    }
+    let unnamed: Vec<&str> = BUNDLE_VARIABLES
+        .iter()
+        .copied()
+        .filter(|name| !names(env, name))
+        .collect();
+    if unnamed.is_empty() {
+        return Ok(());
+    }
+    let root = File::open(rootfs).map_err(|e| format!("{}: {e}", rootfs.display()))?;
+    let system = match SYSTEM_BUNDLES.iter().find(|path| is_file_in(&root, path)) {
+        Some(path) => read_in(&root, path)?,
+        None => String::new(),
+    };
+    // The system bundle is kept for a change of the CAs, which has no
+    // exec to read it at.
+    let dir = container.join(DIR);
+    let kept = dir.join(EXEC_SYSTEM);
+    if !std::fs::read_to_string(&kept).is_ok_and(|kept| kept == system) {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        write_in_place(&kept, system.as_bytes())?;
+    }
+    let bundle = share.join(EXEC_DIR).join(exec_bundle_name(id));
+    let content = bundle_of(&system, &cas);
+    if !std::fs::read_to_string(&bundle).is_ok_and(|now| now == content) {
+        write_replacing(&bundle, content.as_bytes())?;
+    }
+    for name in unnamed {
+        env.push(format!("{name}={EXEC_DEST}/{}", exec_bundle_name(id)));
+    }
+    Ok(())
+}
+
+/// Removes the exec bundle of the container `id` from `share`, if it has
+/// one; its directory goes with the container.
+pub fn forget(share: &Path, id: &str) -> io::Result<()> {
+    match std::fs::remove_file(share.join(EXEC_DIR).join(exec_bundle_name(id))) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
     }
 }
 
+fn exec_bundle_name(id: &str) -> String {
+    format!("{id}.pem")
+}
+
+/// Whether `env`, a process's `KEY=value` entries, names `name`.
+fn names(env: &[String], name: &str) -> bool {
+    let prefix = format!("{name}=");
+    env.iter().any(|entry| entry.starts_with(&prefix))
+}
+
 /// Sets the guest's CAs, `cas` oldest first: the share directory's file
-/// and the bundle of every container below `containers` that has one, all
-/// in place. Returns the containers whose bundle could not be rewritten,
+/// and the bundles of every container below `containers` that has one,
+/// the mounted bundle in place, the exec bundle in the share directory
+/// replaced. Returns the containers whose bundle could not be rewritten,
 /// with why; a failure to write the CA file is an error.
 pub fn publish(
     share: &Path,
@@ -175,19 +255,35 @@ pub fn publish(
     for entry in entries.flatten() {
         let dir = entry.path().join(DIR);
         let id = entry.file_name().to_string_lossy().into_owned();
-        let system = match std::fs::read_to_string(dir.join(SYSTEM)) {
-            Ok(system) => system,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-            Err(e) => {
-                failed.push((id, format!("{}: {e}", dir.join(SYSTEM).display())));
-                continue;
+        let exec_bundle = share.join(EXEC_DIR).join(exec_bundle_name(&id));
+        for result in [
+            rewrite(&dir.join(SYSTEM), &joined, |bundle| {
+                write_in_place(&dir.join(BUNDLE), bundle)
+            }),
+            rewrite(&dir.join(EXEC_SYSTEM), &joined, |bundle| {
+                write_replacing(&exec_bundle, bundle)
+            }),
+        ] {
+            if let Err(e) = result {
+                failed.push((id.clone(), e));
             }
-        };
-        if let Err(e) = write_in_place(&dir.join(BUNDLE), bundle_of(&system, &joined).as_bytes()) {
-            failed.push((id, e));
         }
     }
     Ok(failed)
+}
+
+/// Writes, with `write`, a bundle of the system bundle kept at `system`
+/// and `cas`, if one is kept there.
+fn rewrite(
+    system: &Path,
+    cas: &str,
+    write: impl FnOnce(&[u8]) -> Result<(), String>,
+) -> Result<(), String> {
+    match std::fs::read_to_string(system) {
+        Ok(kept) => write(bundle_of(&kept, cas).as_bytes()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("{}: {e}", system.display())),
+    }
 }
 
 /// A bundle of `system` and `cas`, each block on lines of its own.
@@ -221,12 +317,24 @@ fn write_in_place(path: &Path, content: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Replaces the file at `path` by a new one with `content`, made 0644 in
+/// its directory (0755, made if it is not there) and renamed over it: a
+/// reader sees the old file or the new one, whole.
+fn write_replacing(path: &Path, content: &[u8]) -> Result<(), String> {
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(format!("{}: not a file's path", path.display()));
+    };
+    feos_utils::share::make_share_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // A dot first and no ".pem" last: never another container's bundle.
+    let staged = dir.join(format!(".{}.new", name.to_string_lossy()));
+    write_in_place(&staged, content)?;
+    std::fs::rename(&staged, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Whether `path`, as the container sees it in its root filesystem
 /// `root`, is a regular file; its links are followed inside the root.
 fn is_file_in(root: &File, path: &str) -> bool {
-    open_in(root, path)
-        .and_then(|file| file.metadata())
-        .is_ok_and(|meta| meta.is_file())
+    open_in(root, path).is_ok()
 }
 
 fn read_in(root: &File, path: &str) -> Result<String, String> {
@@ -237,18 +345,27 @@ fn read_in(root: &File, path: &str) -> Result<String, String> {
     Ok(text)
 }
 
-/// Opens `path` in the image's root `root`, its links resolved inside it,
-/// as the container would see them.
+/// Opens `path` in the root `root`, an image's or a running container's,
+/// its links resolved inside it as the container would see them, if it is
+/// a regular file. A container may have put anything there, so it is
+/// opened as a path first and read only once it is known to be a file: a
+/// FIFO would block the read, and a device node would read the guest's
+/// device.
 fn open_in(root: &File, path: &str) -> io::Result<File> {
     let relative = PathBuf::from(path.trim_start_matches('/'));
     let fd = openat2_confined(
         root,
         &relative,
-        OFlag::O_RDONLY,
+        OFlag::O_PATH,
         Mode::empty(),
         ResolveFlag::RESOLVE_IN_ROOT | ResolveFlag::RESOLVE_NO_MAGICLINKS,
     )?;
-    Ok(File::from(fd))
+    let found = File::from(fd);
+    if !found.metadata()?.is_file() {
+        return Err(io::Error::other("not a regular file"));
+    }
+    // The same inode, now open for reading.
+    File::open(format!("/proc/self/fd/{}", found.as_raw_fd()))
 }
 
 #[cfg(test)]
@@ -325,8 +442,9 @@ mod tests {
             Injection::default()
         );
         let mut env = vec!["A=1".to_string()];
-        set_exec_env(&guest.share, &mut env);
+        set_exec_env(&guest.share, "main", &dir, root.path(), &mut env).unwrap();
         assert_eq!(env, ["A=1"]);
+        assert!(!guest.share.join(EXEC_DIR).exists());
     }
 
     #[test]
@@ -438,17 +556,138 @@ mod tests {
                 "NODE_EXTRA_CA_CERTS=/run/feos/intercept-ca.pem",
             ]
         );
-        // An exec in a container made before the CAs: the CA file, unless
-        // it names one.
-        let mut exec = vec!["A=1".to_string()];
-        set_exec_env(&guest.share, &mut exec);
+        // An exec there takes the spec's environment, which names the
+        // bundle: no exec bundle.
+        set_exec_env(&guest.share, "main", &dir, root.path(), &mut env).unwrap();
+        assert_eq!(env.len(), 4);
+        assert!(!guest.share.join(EXEC_DIR).exists());
+    }
+
+    /// The environment of an exec into the container `id`, whose own is
+    /// `env`.
+    fn exec(guest: &Guest, id: &str, root: &Path, env: &[&str]) -> Vec<String> {
+        let mut env: Vec<String> = env.iter().map(|e| e.to_string()).collect();
+        set_exec_env(&guest.share, id, &guest.container(id), root, &mut env).unwrap();
+        env
+    }
+
+    #[test]
+    fn an_exec_in_a_container_made_before_the_cas_gets_a_bundle_in_the_share_directory() {
+        let guest = guest();
+        let root = image(&[("/etc/ssl/certs/ca-certificates.crt", "SYSTEM\n")], &[]);
+        // Created before the CAs: nothing.
+        let dir = guest.container("early");
         assert_eq!(
-            exec,
-            ["A=1", "NODE_EXTRA_CA_CERTS=/run/feos/intercept-ca.pem"]
+            prepare(&guest.share, &dir, root.path()).unwrap(),
+            Injection::default()
         );
-        let mut exec = vec!["NODE_EXTRA_CA_CERTS=/x".to_string()];
-        set_exec_env(&guest.share, &mut exec);
-        assert_eq!(exec, ["NODE_EXTRA_CA_CERTS=/x"]);
+        publish(&guest.share, &guest.containers, &[CA1.into()]).unwrap();
+
+        let env = exec(&guest, "early", root.path(), &["A=1"]);
+        assert_eq!(
+            env,
+            [
+                "A=1",
+                "NODE_EXTRA_CA_CERTS=/run/feos/intercept-ca.pem",
+                "SSL_CERT_FILE=/run/feos/intercept/early.pem",
+                "REQUESTS_CA_BUNDLE=/run/feos/intercept/early.pem",
+            ]
+        );
+        let bundle = guest.share.join(EXEC_DIR).join("early.pem");
+        assert_eq!(
+            std::fs::read_to_string(&bundle).unwrap(),
+            format!("SYSTEM\n{CA1}")
+        );
+        // Its own bundle is its own: nothing covers or changes it.
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("etc/ssl/certs/ca-certificates.crt")).unwrap(),
+            "SYSTEM\n"
+        );
+        // What the exec names stays.
+        let env = exec(
+            &guest,
+            "early",
+            root.path(),
+            &["SSL_CERT_FILE=/mine.pem", "NODE_EXTRA_CA_CERTS=/x"],
+        );
+        assert_eq!(
+            env,
+            [
+                "SSL_CERT_FILE=/mine.pem",
+                "NODE_EXTRA_CA_CERTS=/x",
+                "REQUESTS_CA_BUNDLE=/run/feos/intercept/early.pem",
+            ]
+        );
+
+        // Its package manager replaces its bundle: the next exec takes it,
+        // and the exec bundle is replaced, never rewritten under a reader.
+        let held = File::open(&bundle).unwrap();
+        std::fs::write(
+            root.path().join("etc/ssl/certs/ca-certificates.crt"),
+            "SYSTEM2\n",
+        )
+        .unwrap();
+        exec(&guest, "early", root.path(), &[]);
+        assert_eq!(
+            std::fs::read_to_string(&bundle).unwrap(),
+            format!("SYSTEM2\n{CA1}")
+        );
+        let mut seen = String::new();
+        (&held).read_to_string(&mut seen).unwrap();
+        assert_eq!(seen, format!("SYSTEM\n{CA1}"), "the old one, whole");
+
+        // A change of the CAs replaces it with the system bundle it was
+        // made of; without CAs it is that bundle alone.
+        let failed = publish(&guest.share, &guest.containers, &[CA1.into(), CA2.into()]).unwrap();
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(
+            std::fs::read_to_string(&bundle).unwrap(),
+            format!("SYSTEM2\n{CA1}{CA2}\n")
+        );
+        // A bundle a change could not rewrite is mended by the next exec.
+        std::fs::write(&bundle, "STALE").unwrap();
+        exec(&guest, "early", root.path(), &[]);
+        assert_eq!(
+            std::fs::read_to_string(&bundle).unwrap(),
+            format!("SYSTEM2\n{CA1}{CA2}\n")
+        );
+        publish(&guest.share, &guest.containers, &[]).unwrap();
+        assert_eq!(std::fs::read_to_string(&bundle).unwrap(), "SYSTEM2\n");
+        assert_eq!(exec(&guest, "early", root.path(), &["A=1"]), ["A=1"]);
+        let staged: Vec<_> = std::fs::read_dir(guest.share.join(EXEC_DIR))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(staged, ["early.pem"], "nothing staged is left");
+
+        forget(&guest.share, "early").unwrap();
+        assert!(!bundle.exists());
+        forget(&guest.share, "early").unwrap();
+    }
+
+    #[test]
+    fn a_container_reads_only_regular_files_of_its_root() {
+        let guest = guest();
+        publish(&guest.share, &guest.containers, &[CA1.into()]).unwrap();
+        // A FIFO where the first bundle is would block a read; it is
+        // passed over for the next.
+        let root = image(&[("/etc/ssl/cert.pem", "LIBRE\n")], &[]);
+        let fifo = root.path().join("etc/ssl/certs/ca-certificates.crt");
+        std::fs::create_dir_all(fifo.parent().unwrap()).unwrap();
+        nix::unistd::mkfifo(&fifo, Mode::from_bits_truncate(0o644)).unwrap();
+        exec(&guest, "odd", root.path(), &[]);
+        assert_eq!(
+            std::fs::read_to_string(guest.share.join(EXEC_DIR).join("odd.pem")).unwrap(),
+            format!("LIBRE\n{CA1}")
+        );
+        // A directory is no bundle either.
+        let root = image(&[], &[]);
+        std::fs::create_dir_all(root.path().join("etc/ssl/cert.pem")).unwrap();
+        exec(&guest, "dir", root.path(), &[]);
+        assert_eq!(
+            std::fs::read_to_string(guest.share.join(EXEC_DIR).join("dir.pem")).unwrap(),
+            CA1
+        );
     }
 
     #[test]

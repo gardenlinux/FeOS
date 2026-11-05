@@ -324,9 +324,12 @@ pub fn unmount(id: &str) {
     let _ = umount2(&rootfs, MntFlags::MNT_DETACH);
 }
 
-/// Unmounts everything and removes the container's directory.
+/// Unmounts everything and removes the container's directory and its exec
+/// bundle of the interception CAs.
 pub fn remove(id: &str) -> Result<(), String> {
     unmount(id);
+    super::intercept::forget(Path::new(resolver::SHARE_DIR), id)
+        .map_err(|e| format!("the exec bundle of {id}: {e}"))?;
     match std::fs::remove_dir_all(container_dir(id)) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
             Err(format!("{}: {e}", container_dir(id).display()))
@@ -358,8 +361,10 @@ pub fn intercept(
 }
 
 /// The environment of an exec: the container's own, `overrides` on top, and
-/// a PATH if neither sets one; the pod's CA file where the guest holds
-/// interception CAs and neither names one (ADR 0028 §5).
+/// a PATH if neither sets one; where the guest holds interception CAs, the
+/// pod's CA file and the container's exec bundle where neither names them
+/// (ADR 0028 §5). An exec bundle that cannot be made is logged; the exec
+/// runs without it.
 pub fn exec_env(id: &str, overrides: &HashMap<String, String>) -> Vec<String> {
     let mut env = previous_process(id).map(|(_, env)| env).unwrap_or_default();
     let mut overrides: Vec<_> = overrides.iter().collect();
@@ -372,7 +377,15 @@ pub fn exec_env(id: &str, overrides: &HashMap<String, String>) -> Vec<String> {
         env.push(format!("PATH={DEFAULT_PATH}:{TOOLBOX_PATH}"));
     }
     feos_utils::share::set_ssh_agent_env(&mut env);
-    super::intercept::set_exec_env(Path::new(resolver::SHARE_DIR), &mut env);
+    if let Err(e) = super::intercept::set_exec_env(
+        Path::new(resolver::SHARE_DIR),
+        id,
+        &container_dir(id),
+        &bundle_dir(id).join("rootfs"),
+        &mut env,
+    ) {
+        log::warn!("Container {id}: An exec without the interception CAs' bundle: {e}");
+    }
     env
 }
 
