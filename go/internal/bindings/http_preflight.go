@@ -22,6 +22,7 @@ import (
 
 	fleetv1 "github.com/gardenlinux/feos/go/gen/feos/fleet/v1"
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/bindings/httpcheck"
 )
 
@@ -95,9 +96,42 @@ func (r *HTTPPreflightResult) fail(berr *bindingErr) *HTTPPreflightResult {
 // maxProbePath bounds a probe's path.
 const maxProbePath = 4096
 
+// maxTenantPreflights bounds a tenant's HTTP preflights and environment
+// binding checks in flight on this instance: each resolves, dials out and
+// may take its whole budget. Beyond, 429 too_many_preflights.
+const maxTenantPreflights = 2
+
+// codeTooManyPreflights is the 429 of a tenant with maxTenantPreflights in
+// flight.
+const codeTooManyPreflights = "too_many_preflights"
+
+// takePreflight takes one of the tenant's preflights in flight and returns
+// what gives it back; a 429 when the tenant has maxTenantPreflights.
+func (s *Service) takePreflight(tenant string) (func(), error) {
+	s.preflightMu.Lock()
+	defer s.preflightMu.Unlock()
+	if s.preflights[tenant] >= maxTenantPreflights {
+		return nil, apierr.WithCode(http.StatusTooManyRequests, codeTooManyPreflights,
+			"%d HTTP preflights or binding checks of this tenant are in flight; try again once one has ended",
+			maxTenantPreflights).RetryAfter(1)
+	}
+	if s.preflights == nil {
+		s.preflights = map[string]int{}
+	}
+	s.preflights[tenant]++
+	return func() {
+		s.preflightMu.Lock()
+		defer s.preflightMu.Unlock()
+		if s.preflights[tenant]--; s.preflights[tenant] <= 0 {
+			delete(s.preflights, tenant)
+		}
+	}, nil
+}
+
 // HTTPPreflight is POST /api/v1/http/preflight: {"binding": B, "probe":
 // {"method", "path"}?}. It answers 200 with the result, ok or not; 400
-// only for a body that is not the request's JSON.
+// only for a body that is not the request's JSON; 429 too_many_preflights
+// while the tenant has maxTenantPreflights in flight.
 func (s *Service) HTTPPreflight(w http.ResponseWriter, r *http.Request) {
 	if s.off(w, r) {
 		return
@@ -115,18 +149,32 @@ func (s *Service) HTTPPreflight(w http.ResponseWriter, r *http.Request) {
 		apierr.WriteJSON(w, http.StatusOK, res.fail(bindingErrf(codeInvalidBinding, "binding is required")))
 		return
 	}
+	tenant, _ := auth.TenantFrom(r.Context())
+	release, err := s.takePreflight(tenant.Name)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	defer release()
 	apierr.WriteJSON(w, http.StatusOK, s.httpPreflight(r.Context(), *body.Binding, body.Probe))
 }
 
 // PreflightHTTP runs the preflight of a binding as a pod would receive it
 // (an environment's binding, its secrets resolved), for the environments'
-// check.
-func (s *Service) PreflightHTTP(ctx context.Context, p *fleetv1.HttpBinding, probe *HTTPProbe) *HTTPPreflightResult {
+// check of the tenant's; a 429 too_many_preflights while the tenant has
+// maxTenantPreflights in flight.
+func (s *Service) PreflightHTTP(ctx context.Context, tenant string, p *fleetv1.HttpBinding, probe *HTTPProbe) (
+	*HTTPPreflightResult, error) {
 	if !s.enabled {
 		res := &HTTPPreflightResult{Addresses: []string{}}
-		return res.fail(bindingErrf(codeUnreachable, "HTTP bindings are not enabled on this platform"))
+		return res.fail(bindingErrf(codeUnreachable, "HTTP bindings are not enabled on this platform")), nil
 	}
-	return s.httpPreflight(ctx, inOf(httpBindingOf(p)), probe)
+	release, err := s.takePreflight(tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return s.httpPreflight(ctx, inOf(httpBindingOf(p)), probe), nil
 }
 
 // inOf is a binding as a request would send it.

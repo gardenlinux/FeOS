@@ -1693,8 +1693,12 @@ They come from two places, and from no other:
 | `PUT /api/v1/sandboxes/{id}/http` `{"bindings": [B…]}` | sandbox | 200 the set as `GET` answers it; 400 with a code below; `bindings` absent is 400 (`[]` is none) |
 | `GET /api/v1/sandboxes/{id}/http` | sandbox | `{"version", "bindings": [B…]}`, by name, every secret field `{"set": true}`: a header's value, `password`, `clientSecret`, `keyPem`; `version` `""` for none |
 | `DELETE /api/v1/sandboxes/{id}/http` | sandbox | 204 |
-| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object |
-| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions; 404 `no_binding`, `bindings_off` |
+| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object; 429 `too_many_preflights` |
+| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions; 404 `no_binding`, `bindings_off`; 429 `too_many_preflights` |
+
+A tenant has at most two preflights and checks in flight on an
+instance, together: each resolves, dials out and may take its 10 s.
+Beyond, 429 `too_many_preflights` with `Retry-After: 1`.
 
 A binding B: `{"name", "upstream", "mode", "caPem", "pathPrefixes",
 "forwardedHost", "rateLimit": {"perSecond", "burst"}, "credential": C}`,

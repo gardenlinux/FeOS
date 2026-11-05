@@ -36,11 +36,13 @@ import (
 
 // HTTPBindings is what the environments need of the bindings
 // (*bindings.Service): whether they are on, the destination rule, and the
-// preflight of a binding resolved.
+// preflight of a binding resolved, for a tenant (an error while it has too
+// many in flight).
 type HTTPBindings interface {
 	Enabled() bool
 	CheckDestination(ctx context.Context, host string) error
-	PreflightHTTP(ctx context.Context, b *fleetv1.HttpBinding, probe *bindings.HTTPProbe) *bindings.HTTPPreflightResult
+	PreflightHTTP(ctx context.Context, tenant string, b *fleetv1.HttpBinding, probe *bindings.HTTPProbe) (
+		*bindings.HTTPPreflightResult, error)
 }
 
 // BindingCheckRequest is POST /api/v1/environments/{env}/bindings/{name}/
@@ -287,7 +289,8 @@ func (s *Service) sandboxHTTPNames(ctx context.Context, id podid.ID) ([]string, 
 // the preflight of the binding as the environment's latest deployment has
 // it, its secrets at their latest versions (what the next deployment would
 // pin), from this instance. 404 no_binding for a binding the latest
-// deployment does not have, 404 bindings_off without HTTP bindings.
+// deployment does not have, 404 bindings_off without HTTP bindings, 429
+// too_many_preflights while the tenant has too many in flight.
 func (s *Service) CheckBinding(ctx context.Context, tenant, envRef, name string, req BindingCheckRequest) (
 	*bindings.HTTPPreflightResult, error) {
 	e, err := resolveEnv(ctx, s.st, tenant, envRef, store.NoLock)
@@ -319,5 +322,5 @@ func (s *Service) CheckBinding(ctx context.Context, tenant, envRef, name string,
 		return &bindings.HTTPPreflightResult{Addresses: []string{},
 			Error: &bindings.HTTPPreflightError{Code: ce.Code, Message: ce.Msg}}, nil
 	}
-	return s.d.Bindings.PreflightHTTP(ctx, p, req.Probe), nil
+	return s.d.Bindings.PreflightHTTP(ctx, tenant, p, req.Probe)
 }

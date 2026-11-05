@@ -75,6 +75,11 @@ type Service struct {
 	hooks  sync.Mutex
 	envSrc EnvSource
 	pusher Pusher
+
+	// preflights are the HTTP preflights and environment binding checks
+	// in flight on this instance, by tenant (maxTenantPreflights).
+	preflightMu sync.Mutex
+	preflights  map[string]int
 }
 
 // New returns the Service. It is on when cfg.Enabled is set and cfg.Key is

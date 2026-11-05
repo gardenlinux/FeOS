@@ -37,11 +37,12 @@ func (f *fakeHTTPBindings) CheckDestination(_ context.Context, host string) erro
 	}
 	return nil
 }
-func (f *fakeHTTPBindings) PreflightHTTP(_ context.Context, b *fleetv1.HttpBinding, _ *bindings.HTTPProbe) *bindings.HTTPPreflightResult {
+func (f *fakeHTTPBindings) PreflightHTTP(_ context.Context, _ string, b *fleetv1.HttpBinding, _ *bindings.HTTPProbe) (
+	*bindings.HTTPPreflightResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.last = b
-	return &bindings.HTTPPreflightResult{OK: true, Addresses: []string{"203.0.113.40"}}
+	return &bindings.HTTPPreflightResult{OK: true, Addresses: []string{"203.0.113.40"}}, nil
 }
 
 // shopSpec has an ERP system's API for web and a payment provider's,
