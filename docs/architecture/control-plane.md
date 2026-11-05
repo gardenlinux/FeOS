@@ -72,7 +72,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--ca-dir` | `/etc/ferun/ca` | the issuer: `issuer.crt`, `issuer.key`, `issuer.json`, `bundle.crt`; never `root.key` |
 | `--node-server-names` | the control-plane domain | the DNS names of the instance's certificate on the nodes' port, each under the control-plane domain |
 | `--secret-key-file` | none | 32 bytes (raw, hex or base64) that seal the bindings and the environments' secrets at rest |
-| `--bindings` | off | serve the Kubernetes and SSH bindings; only with `--secret-key-file` |
+| `--bindings` | off | serve the Kubernetes, SSH and HTTP bindings; only with `--secret-key-file` |
 | `--acme-directory` | none | the ACME directory, an https URL (`https://acme-v02.api.letsencrypt.org/directory`), from which the domains' certificates are obtained ([Certificates of domains](#certificates-of-domains)); its terms of service are agreed to. Empty: none is obtained, and domains stay `issuing`. Needs `--secret-key-file`, which seals the keys |
 | `--acme-email` | none | the contact of the platform's ACME account, an email address; changing it updates the account |
 | `--acme-profile` | `shortlived` | the certificate profile the orders ask for (ACME profiles), one the directory lists: Let's Encrypt's `shortlived` is six days (160 hours), `classic` 90 days; empty: the CA's default. A profile the directory does not list fails every order |
