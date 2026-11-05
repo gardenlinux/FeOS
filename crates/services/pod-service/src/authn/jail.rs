@@ -42,14 +42,22 @@ pub const CONTROL_FD: RawFd = 4;
 const BINARY_FD: RawFd = 5;
 
 /// The limits of the process: (resource, soft and hard).
-const RLIMITS: [(libc::__rlimit_resource_t, u64); 5] = [
-    (libc::RLIMIT_CORE, 0),
-    (libc::RLIMIT_NOFILE, 4096),
+const RLIMITS: [(libc::c_int, u64); 5] = [
+    (libc::RLIMIT_CORE as libc::c_int, 0),
+    (libc::RLIMIT_NOFILE as libc::c_int, 4096),
     // Threads count; the user is the process's alone.
-    (libc::RLIMIT_NPROC, 512),
-    (libc::RLIMIT_AS, 4 << 30),
-    (libc::RLIMIT_MEMLOCK, 64 << 10),
+    (libc::RLIMIT_NPROC as libc::c_int, 512),
+    (libc::RLIMIT_AS as libc::c_int, 4 << 30),
+    (libc::RLIMIT_MEMLOCK as libc::c_int, 64 << 10),
 ];
+
+/// The kernel's `struct rlimit64`, as `prlimit64(2)` takes it: the libc
+/// crate has it for glibc alone.
+#[repr(C)]
+struct Rlimit64 {
+    current: u64,
+    max: u64,
+}
 
 /// What a start needs.
 pub struct Start<'a> {
@@ -226,16 +234,16 @@ pub fn spawn(start: &Start<'_>) -> io::Result<i32> {
         // closed on exec anyway.
         libc::syscall(libc::SYS_close_range, BINARY_FD + 1, u32::MAX, 0);
         for (resource, limit) in RLIMITS {
-            let limit = libc::rlimit64 {
-                rlim_cur: limit,
-                rlim_max: limit,
+            let limit = Rlimit64 {
+                current: limit,
+                max: limit,
             };
             if libc::syscall(
                 libc::SYS_prlimit64,
                 0,
                 resource,
-                &limit as *const libc::rlimit64,
-                std::ptr::null_mut::<libc::rlimit64>(),
+                &limit as *const Rlimit64,
+                std::ptr::null_mut::<Rlimit64>(),
             ) != 0
             {
                 fail(7);
