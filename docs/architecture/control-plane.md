@@ -1735,8 +1735,10 @@ hour before its issue, its key PKCS#8 sealed as a credential (bound to
 the pod and the CA's number). `ferund` makes it when the pod first
 needs one: in the PUT that brings a sandbox's first intercepted names,
 at an environment's pod's first create (or its first credentials). A pod
-whose intercepted names change gets a new CA beside the old ones; the
-newest issues; at most eight are kept, the oldest going first. A pod
+that comes to intercept a name its newest CA does not permit gets a new
+CA beside the old ones; one whose names shrink keeps its newest, so that
+a set and a part of it never make CAs by turns; the newest issues; at
+most eight are kept, the oldest going first. A pod
 without intercept bindings is given none of them.
 
 **Sealed to the run.** `IssuePodCredentials` seals a pod's HTTP bindings

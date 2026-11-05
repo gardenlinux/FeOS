@@ -560,8 +560,8 @@ func interceptHosts(bs []httpBinding) []string {
 }
 
 // applyHTTP stores a validated set (nil: none) under the sandbox's row
-// lock, makes a new interception CA when the set's intercepted names
-// differ from the newest CA's, and returns the set as stored, read in the
+// lock, makes a new interception CA when the set intercepts a name the
+// newest CA does not hold, and returns the set as stored, read in the
 // same transaction. The same set again is a no-op, unless what is stored
 // no longer opens (a changed key): then the PUT is the repair. changed
 // reports whether anything was written.

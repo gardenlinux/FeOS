@@ -568,4 +568,19 @@ func TestInterceptCAsBounded(t *testing.T) {
 	if err != nil || len(again) != maxCAs {
 		t.Fatalf("again: %d %v", len(again), err)
 	}
+	// A name more: a new CA. Then, by turns, a part of its names and all of
+	// them: none.
+	pair := []string{"hk.example.test", "hz.example.test"}
+	if _, err := r.svc.ensureCAs(bg, r.st, r.sb1, pair); err != nil {
+		t.Fatal(err)
+	}
+	for _, hosts := range [][]string{{"hz.example.test"}, pair, {"hk.example.test"}, pair} {
+		cas, err := r.svc.ensureCAs(bg, r.st, r.sb1, hosts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if newest := cas[len(cas)-1]; newest.Seq != maxCAs+4 || !slices.Equal(newest.Hosts, pair) {
+			t.Fatalf("%v: newest %d %v", hosts, newest.Seq, newest.Hosts)
+		}
+	}
 }

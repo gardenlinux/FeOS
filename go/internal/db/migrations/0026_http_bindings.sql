@@ -14,7 +14,8 @@
 -- pod_intercept_cas are a pod's interception CAs (ADR 0028 §5), oldest
 -- first by seq: ECDSA P-256, name-constrained to hosts, the intercepted
 -- host names at its issue; the key PKCS#8, sealed like a credential. A
--- pod whose intercepted names change gets a new one beside the old.
+-- pod that comes to intercept a name its newest does not permit gets a
+-- new one beside the old.
 --
 -- sandboxes.http_pushed is the version of the clear part of the pod's HTTP
 -- bindings (PodSpec.http_bindings) that the pod's node took last, by the

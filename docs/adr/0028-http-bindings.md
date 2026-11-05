@@ -186,9 +186,10 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
   key that must outlive the run, and this key is trusted by one pod
   only.
 - The CA carries **name constraints**: permitted DNS names, exactly the
-  intercepted names at its issue. A pod whose set of intercepted names
-  changes gets a new CA beside the old one in its trust files, and
-  `feos-authn` issues from the newest. A process that read its trust
+  intercepted names at its issue. A pod that comes to intercept a name
+  its newest CA does not permit gets a new CA beside the old one in its
+  trust files, and `feos-authn` issues from the newest; one whose names
+  shrink keeps its CA. A process that read its trust
   store before the change reaches the new name after its restart.
 - Leaf certificates live 24 hours and are made in memory at first use.
 - **The CA in every container, not only in the microVM.** Only pods
