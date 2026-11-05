@@ -157,7 +157,7 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `mcpsrv` | the MCP door |
 | `ports` | the port door |
 | `watch` | file watches across instances |
-| `bindings` | Kubernetes and SSH bindings |
+| `bindings` | Kubernetes, SSH and HTTP bindings, the pods' interception CAs, the HTTP preflight; `bindings/httpcheck` the HTTP bindings' rules, shared with the spec ([HTTP bindings](#http-bindings)) |
 | `seal` | AES-256-GCM sealing under `--secret-key-file`'s key: the bindings' credentials, the environments' secrets |
 | `env`, `env/spec`, `env/addons`, `env/ctl`, `env/envdeps` | the environments ([Environments](#environments)) |
 | `ingress/service`, `ingress/table` | ferund's side of the ingress: the API `ferun-ingress` calls, its identity, the table it serves from ([The ingress](#the-ingress)) |
@@ -330,13 +330,14 @@ audit is its activity row.
 | pending re-description | 30 s | tells a sandbox waiting for capacity that there is some |
 | process holds, expired holds | 60 s | releases holds of processes that ended, and expired leases; expired holds only under the same condition |
 | tenant deletion | 60 s | finishes deleting tenants |
+| `sandbox-http-bindings` | 15 s | sends the pods on connected nodes the clear part of their HTTP bindings that their node did not take ([HTTP bindings](#http-bindings)) |
 | watch expiry | 60 s | deletes watches past their lease |
 | `tool-calls-expiry` | 5 s | marks running keyed calls whose lease passed: interrupted if they reached the guest, not run otherwise; only while the leader has led for a call lease (30 s) and the database has not failed within it. Waiters mark the call they wait on themselves after two leases ([Calls that outlive their caller](#calls-that-outlive-their-caller)) |
 | `tool-calls-retention` | 60 s | deletes keyed calls that ended more than an hour ago |
 | stale instances | 60 s | deletes instance rows older than an hour |
 | activity partitions | 1 h | keeps partitions for today and the next two days; drops those past retention |
 | sign-in clean-up | 10 min | deletes stale sign-ins and expired UI sessions |
-| `env-reconcile`, `env-probe`, `env-groups`, `env-volumes`, `env-delete` | 2 s, 1 s, 10 s, 30 s, 5 s | the environments' controller ([Environments](#the-controller)) |
+| `env-reconcile`, `env-probe`, `env-groups`, `env-volumes`, `env-delete`, `env-bindings` | 2 s, 1 s, 10 s, 30 s, 5 s, 30 s | the environments' controller ([Environments](#the-controller)) |
 | `domains-check`, `domains-settle` | 5 s, 30 s | checks the domains that are due; settles the states that changed without a write of the domain's own; only while domains are on ([Domains](#domains)) |
 | `acme-orders` | 30 s | deletes expired ACME challenges; with `--acme-directory`, orders the certificates of the domains that are due, one at a time, and opens `certificate_failing` for renewals that have failed for a day ([Certificates of domains](#certificates-of-domains)); `ferun_leader` `acme` wakes it |
 
@@ -1667,6 +1668,182 @@ pod at its next start, resume or restore. `…/access` shows them with
 their use from the pods' audit records. They stay off by default until
 feosd delivers them ([follow-ups](#follow-ups-for-feosd)).
 
+### HTTP bindings
+
+A pod's HTTP bindings ([ADR 0028](../adr/0028-http-bindings.md)) are the
+HTTP APIs it calls by a name at the node's address, `feos-authn` adding
+the credential. They are on with the same switch as the Kubernetes and
+SSH bindings, `--bindings` and `--secret-key-file` (`internal/bindings`,
+`http*.go`, the rules shared with the spec in `internal/bindings/httpcheck`).
+They come from two places, and from no other:
+
+- **a sandbox's own set**, `PUT /api/v1/sandboxes/{id}/http` (sandbox
+  class), stated whole;
+- **an environment's pod**: the bindings its image service or job names
+  (`"bindings": ["erp"]`), as the deployment its instance or job run
+  belongs to has them ([The deployment spec](#the-deployment-spec)). A
+  pod gets exactly those; an attached service has its sandbox's.
+
+**The routes.**
+
+| Method and path | Class | Answers |
+|---|---|---|
+| `PUT /api/v1/sandboxes/{id}/http` `{"bindings": [B…]}` | sandbox | 200 the set as `GET` answers it; 400 with a code below; `bindings` absent is 400 (`[]` is none) |
+| `GET /api/v1/sandboxes/{id}/http` | sandbox | `{"version", "bindings": [B…]}`, by name, every secret field `{"set": true}`: a header's value, `password`, `clientSecret`, `keyPem`; `version` `""` for none |
+| `DELETE /api/v1/sandboxes/{id}/http` | sandbox | 204 |
+| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object |
+| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions; 404 `no_binding`, `bindings_off` |
+
+A binding B: `{"name", "upstream", "mode", "caPem", "pathPrefixes",
+"forwardedHost", "rateLimit": {"perSecond", "burst"}, "credential": C}`,
+C one of `{"kind": "headers", "headers": {name: value}}`, `{"kind":
+"basic", "user", "password"}`, `{"kind": "oauth2", "tokenUrl",
+"clientId", "clientSecret", "scope", "audience", "clientAuthInBody"}` and
+`{"kind": "clientCertificate", "certPem", "keyPem"}`. `GET` answers
+`upstream` as its origin (`https://host`, the port only when it is not
+443), `mode` and `rateLimit.burst` explicit (`burst` 0 is the rate),
+`rateLimit` null for none, and the header names canonical.
+
+**Validation** (codes as `code` beside `error`):
+
+| Code | When |
+|---|---|
+| `invalid_binding` | a name that is not a DNS label (1 to 63 of `[a-z0-9-]`, not beginning or ending with `-`) or twice in the set; an upstream that is not `https://host[:port]` (a path but `/`, a query, a fragment or userinfo; an IPv6 address); a mode other than `name` and `intercept`; `intercept` on a port other than 443 or of an address; two bindings the pod would resolve as one name (two intercepting one host); a path prefix not beginning with `/`, with a query, a fragment, whitespace, a control character, `\`, an encoded `/`, `\` or `.`, or a `.` or `..` segment, over 1 KiB, twice, or more than 32 (a prefix holds whole segments); a rate over 100,000 or a burst without a rate; no credential, no or an unknown kind, a field of another kind, a missing field; a Basic user with `:`; more than 32 bindings or a set over 1 MiB |
+| `insecure_upstream` | an upstream or a token endpoint over plain `http` |
+| `bad_header` | a header name that is not a token, or `Host`, `Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Content-Length`, `Proxy-*`, `Forwarded`, `X-Forwarded-For`, `-Host`, `-Proto` or `FeOS-Binding-Error`; two names of one header; an empty value, over 8 KiB, with a control character or surrounding whitespace; more than 16 headers |
+| `bad_ca` | a `caPem` without a certificate or with another block |
+| `bad_client_cert` | a client certificate whose key does not parse or match |
+| `destination_denied` | the upstream's or the token endpoint's host is an internal address, resolves to one, or does not resolve (the destination rule of the other bindings, `--deny-prefix`) |
+| `name_taken` | the name the pod would resolve is one an environment with attached services in the sandbox gives it (its tables include theirs) |
+
+**At rest.** `http_bindings` holds a sandbox's set: the upstream, mode,
+CA and options in the clear, the credential's JSON sealed (AES-256-GCM,
+the additional data `ferun/http_bindings/v1`, the sandbox, the name and
+the kind). `sandboxes.http_version` is the set's version, random, new at
+every change; the same set again changes nothing (no version, no push).
+A PUT runs under the sandbox's row lock and validates before, the
+destination rule last.
+
+**The interception CA** (ADR 0028 §5). A pod with an intercept binding
+gets a CA of its own (`pod_intercept_cas`): ECDSA P-256, self-signed,
+basic constraints CA with path length 0, key usage certificate and CRL
+signing, critical name constraints with its permitted DNS names exactly
+the pod's intercepted hosts at its issue (a name constraint permits a
+name's subdomains too; `feos-authn` issues leaves for the exact hosts
+only) and every IPv4 and IPv6 address excluded, valid ten years from an
+hour before its issue, its key PKCS#8 sealed as a credential (bound to
+the pod and the CA's number). `ferund` makes it when the pod first
+needs one: in the PUT that brings a sandbox's first intercepted names,
+at an environment's pod's first create (or its first credentials). A pod
+whose intercepted names change gets a new CA beside the old ones; the
+newest issues; at most eight are kept, the oldest going first. A pod
+without intercept bindings is given none of them.
+
+**Sealed to the run.** `IssuePodCredentials` seals a pod's HTTP bindings
+beside its other sets (`PodBindings.http`, the credential's values as
+stored or resolved) and its CAs, oldest first, each with its key
+(`intercept_cas`). The pod's version (`SealedBindings.version`) covers
+them: for a sandbox, the SHA-256 of `http v1`, the version of its other
+sets, the HTTP set's version and each given CA's certificate digest,
+each followed by a zero byte; it stays the version of its other sets
+without HTTP bindings. For an environment's pod, the same over the
+SHA-256 of its bindings' definitions with the versions of the secrets
+they name, never a value.
+
+**The clear part.** `PodSpec.http_bindings` (`PodHttpBindings`): the name
+mode's names, sorted; the intercepted hosts, sorted; the given CAs'
+certificates, oldest first; the pod's version. None without HTTP
+bindings. A create carries it in its spec; the engine sends
+`SetPodHttpBindings` when it changes, without a restart:
+
+- at once after a PUT or a DELETE that changed the set, and after a kept
+  instance moved to a deployment (its bindings' secrets may have moved),
+  in the background, up to four tries with backoff;
+- before an op's `StartPod` or `ResumePod`, and after a restore's
+  `RestorePod` or a repair's calls, when the node did not take the row's
+  part yet;
+- from the leader's loop `sandbox-http-bindings` (15 s), for the rows of
+  connected nodes, running, paused or stopped without an op, with an
+  HTTP set, a template that names bindings, or a part taken before,
+  whose part is not the one their node took (256 a pass).
+
+`sandboxes.http_pushed` is the version the node took last for the row's
+incarnation (the create's, or a push's answered OK); a push records an
+activity event `pod_http_bindings` (`sent`, `unimplemented`). A node
+that answers `UNIMPLEMENTED` is recorded and not asked again for ten
+minutes; its pods get the part with their next create. `NOT_FOUND` is
+left: the pod's next create carries it. A failed push never fails an op.
+A create delivered again with another part takes it (the test node does;
+[follow-ups](#follow-ups-for-feosd)).
+
+**Preflight.** From the instance, within 10 s: the upstream resolved and
+every address judged by the destination rule; one judged address dialed
+(the dial judged again), TLS 1.2 or later checked against `caPem`, else
+the system's roots, with the client certificate when the credential is
+one; for OAuth 2.0 client credentials a token fetched (`grant_type
+client_credentials`, `scope`, `audience`, the client in Basic or the
+body; the token endpoint's host judged, its certificate checked against the
+system's roots and `caPem`); with a probe, one `GET` or
+`HEAD` of the path (within the binding's prefixes, by whole segments as
+`feos-authn` holds them: `/api` holds `/api` and `/api/x`, not `/apix`)
+with the credential.
+No body and no token is ever answered:
+
+```json
+{"ok": true, "addresses": ["203.0.113.40"],
+ "tls": {"subject": "CN=api.erp.example", "issuer": "CN=…", "notAfter": "2027-01-31T00:00:00Z"},
+ "token": {"expiresIn": 3599}, "probe": {"status": 200, "latencyMs": 120}, "error": null}
+```
+
+Fields not reached are null. Not ok: `error` with the validation's codes,
+or `unreachable`, `tls_failed`, `token_failed` (the token endpoint failed
+or gave no Bearer token), `unauthorized` (the probe answered 401 or 403,
+or the token endpoint refused the client); an environment's check also
+`binding_unresolved` (a secret it names does not resolve). Another
+status of the probe is ok: it is the API's to answer.
+
+**Scoping in environments.** An image service's or job's pod template
+names each of its bindings with its upstream and mode
+(`PodTemplate.httpBindings`): a change of a binding's name, upstream or
+mode, or of the bindings an object names, is a new template, a rollout.
+The rest of a binding, its options and its credential with its secrets'
+pinned versions, is read from the instance's deployment whenever the pod
+asks for its bindings (`env.RowHTTPBindings`): a deployment that pins a
+new version of a binding's secret keeps the pods (`in place`), and the
+kept instance, moved to it, is sent its bindings again. A secret a
+binding names enters no container's environment unless a service's env
+names it itself. A binding whose resolved secret is no valid value (a
+header value with a line break) is left out of the pod's bindings and
+logged; the check says why.
+
+**Incidents** (ADR 0028 §6). The leader's loop `env-bindings` (30 s)
+reads, for every environment with bindings, its pods' requests per
+binding over the last five minutes from their audit records (activity,
+source `authn`, kind `http_request` or `http`, `feos-authn`'s `http`
+records, [sink.md](sink.md#a-pods-egress-records-adr-0028)). A
+binding's requests are those the upstream answered and those
+`feos-authn` refused because the upstream could not be reached
+(`unreachable`, `tls`) or no token could be had
+(`credential_unavailable`); its refusals for the pod's own mistakes
+(`denied_path`, `unknown_binding`, `rate_limited`, `misdirected`,
+`method_not_allowed`, `bad_request`) and of the platform's
+(`denied_destination`, `not_ready`, `binding_invalid`,
+`audit_unavailable`) count for none. With at least five requests it
+opens, on the object `binding/<name>` of the environment's latest
+deployment:
+
+| Condition | While more than half of the requests |
+|---|---|
+| `token_failing` | had no token (`credential_unavailable`) |
+| `credential_refused` | were answered 401 or 403 by the upstream |
+| `upstream_failing` | were answered 429 or 5xx by the upstream, or did not reach it (`unreachable`, `tls`) |
+
+One condition at a time, in that order. The evidence is `egress`:
+`{windowSeconds, requests, refused, failing, tokenFailed, records}`, the
+newest ten records of the binding with the pod's ID. An incident closes
+once its condition no longer holds (also without requests), or its
+binding is gone.
+
 ### The management UI
 
 `web/` is a React app built with Vite into `go/internal/ui/dist`, which
@@ -1782,7 +1959,7 @@ a deleting one.
 | `env_job_runs` | one attempt of a job: template hash, deployment, attempt, phase, exit code, detail, the last 50 lines of its log, redacted and bounded ([Logs](#probes-exits-and-restarts)) |
 | `env_attached` | an attached service: its sandbox and the incarnation of it the service last used, template hash, process ID, phase, restarts, the next restart, probe failures, the last exit, detail |
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
-| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable` or `names_unserved` (`attach_failed` is reserved), opened, closed, summary, evidence; one open per object, deployment and condition |
+| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence; one open per object, deployment and condition |
 | `env_route_tokens` | the route door's tokens, as hashes |
 | `host_labels` | every default host label ever given: its owner, the tenant that first claimed it and alone may claim it again, and the environment that has it, set free when that is deleted |
 
@@ -1886,8 +2063,22 @@ shapes:
   used (info).
 - **Secrets**: every `{"secret": n}` names a tenant secret of the
   environment that exists and is not deleted.
+- **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
+  label each, at most 32, checked as a sandbox's (upstream, mode, CA,
+  prefixes, rate limit, headers), the credential's fields a string,
+  `{value}` or `{secret}` of the environment, `tokenUrl` a literal; the
+  hosts of the upstreams and token endpoints judged by the destination
+  rule; no binding named as a service or addon, and no intercepted host
+  either (the pods' names); no host intercepted twice. Image services
+  and jobs name theirs in `bindings`, each declared and once; an
+  attached service naming any is an error ("attached services use their
+  sandbox's bindings"); a binding no object names is a warning; the
+  names a sandbox's own HTTP bindings resolve are no names of an
+  environment's attached services there. Bindings while they are off
+  are an error.
 - `volumes` and a service's `mounts` are errors: not available yet.
-- At most 1 MiB, 64 services, 32 jobs, 16 addons, 128 routes.
+- At most 1 MiB, 64 services, 32 jobs, 16 addons, 128 routes, 32
+  bindings.
 
 Normalisation fills the defaults, writes durations as Go does, pins
 every image to `<registry>/<repository>@sha256:…` (keeping
@@ -1899,7 +2090,11 @@ effect `in place`, `restarts` (a job's template), `replaces N pods` (an
 image service's), `recreates (downtime)` (an addon's version, plan or
 rendered option), `reprovisions` (an addon's databases or roles), or
 `deletes data` (an addon removed, or of another type); a secret shows by
-its version, an image as written with its digest.
+its version, an image as written with its digest. A binding's entry
+(kind `binding`) is `in place` for its options and credential, a
+secret's new version among them (sealed to the running pods again), and
+`replaces N pods` of the image services that name it (or `restarts` its
+jobs) for its upstream or mode, which their own entries show as well.
 
 ### Plan, apply, revert, clone
 
@@ -1938,7 +2133,7 @@ its version, an image as written with its digest.
 
 ### The controller
 
-The leader runs six loops of `env/ctl`, fenced, none with a node call
+The leader runs seven loops of `env/ctl`, fenced, none with a node call
 inside a transaction:
 
 | Loop | Interval | Does |
@@ -1949,6 +2144,7 @@ inside a transaction:
 | `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments and sandboxes that are gone deleted, once no pod names them ([Names](#names)) |
 | `env-volumes` | 30 s | volumes marked deleting, 64 a pass, deleted on their node once no pod holds them (`FAILED_PRECONDITION`: later, at the end of the queue; `NOT_FOUND`: done), then their rows; a removed node's lose their rows only; records of environments' volumes on a connected node that no pod holds and no row places there are deleted |
 | `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances deleted, its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
+| `env-bindings` | 30 s | the incidents of the environments' HTTP bindings from their pods' requests over the last five minutes ([HTTP bindings](#http-bindings)) |
 
 **The Ensure pool.** The controller runs `Engine.Ensure` for the rows
 that should run, and its other slow work (an addon's provisioning, an
@@ -2514,7 +2710,8 @@ incident has its object, deployment, condition, summary, opening and
 closing, and evidence: `exits`, `logTail` (redacted and bounded), `diff`
 (since the deployed deployment), `placement`, and `pending`, what a deployment
 past its deadline still waited for with the details of those objects'
-instances, credentials redacted. A failed deployment's reason is its
+instances, credentials redacted, and `egress` for a binding's
+([HTTP bindings](#http-bindings)). A failed deployment's reason is its
 incident's summary.
 
 ### The environments' REST API
@@ -2543,6 +2740,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET …/{env}/objects/{kind}/{name}/logs?lines=200&replica=0` | `{lines, source}`, the source `container` or `process`; with `--sink-url` a container's log is the sink's first ([The sink](#the-sink)); 501; 409 "paused" (unless the sink has the instance's lines), `not_running` (also for a replica without an instance yet, or none at all); 404 for a replica beyond the object's ([Logs](#probes-exits-and-restarts)) |
 | `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes, or an attached service's process |
 | `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
+| `POST …/{env}/bindings/{name}/check` `{probe?}` | 200 the preflight's result of the latest deployment's binding, its secrets at their latest versions ([HTTP bindings](#http-bindings)); 404 `no_binding`, `bindings_off` |
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |
 | `ANY …/{env}/http/{path...}` | the route door |
 
@@ -3556,6 +3754,26 @@ changes to feosd it relies on or improves with:
     connection ([Probes, exits and restarts](#probes-exits-and-restarts)).
     The guest reports a container's exit code and serves its log
     ([guest.md](guest.md#containers)).
+12. **HTTP bindings** ([ADR 0028](../adr/0028-http-bindings.md)), what
+    `ferund` relies on:
+    - `SetPodHttpBindings` sets the record's `PodSpec.http_bindings`
+      whole, running or not (an empty part is none), without waiting
+      behind a bring-up; `GetPod` answers the part in the spec;
+    - a `CreatePod` delivered again compares the spec without
+      `http_bindings` and takes the create's part when it differs: the
+      part changes by `SetPodHttpBindings`, and a create's retry carries
+      the newer one;
+    - a restore keeps the checkpoint's part until `ferund` sends its own
+      after `RestorePod`;
+    - when the part's `version` moves, the pod's `feos-authn` fetches its
+      bindings again (`IssuePodCredentials`), whose version is the same;
+    - each request's `http` record of `feos-authn` is published as the
+      pod's audit record, kind `http_request` (or `http`), `detail_json`
+      the record, and shipped to the sink as the pod's egress stream and,
+      with its `http_end`, a client span
+      ([sink.md](sink.md#a-pods-egress-records-adr-0028),
+      [traces.md](traces.md#a-pods-egress)); `ferund`'s incidents read
+      the audit records.
 
 ## Development
 

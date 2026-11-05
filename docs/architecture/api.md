@@ -11,11 +11,11 @@ plane, and between `feosd` and `feos-guest`. They live in
 
 | Package | What it is for | Served by today |
 |---|---|---|
-| `feos.pod.v1` | pods: create, start, stop, delete, suspend, resume, hibernate, restore, console, events | `feosd` |
+| `feos.pod.v1` | pods: create, start, stop, delete, suspend, resume, hibernate, restore, console, events; the clear part of a pod's HTTP bindings (`PodSpec.http_bindings`, `SetPodHttpBindings`, [ADR 0028](../adr/0028-http-bindings.md)) | `feosd` |
 | `feos.volume.v1` | persistent volumes: create, delete, get, list; a pod's spec names them ([node.md](node.md#volumes)) | `feosd` |
 | `feos.disk.v1` | the pods' disks and memory over a chunk store and the object store, internal to the node ([disk.md](disk.md)) | `diskd` |
 | `feos.network.v1` | the pods' security groups (`SecurityGroupService`), their name tables (`NameService`), the records of their traffic (`TrafficService`) and the node's mesh (`MeshService`) | `feosd` |
-| `feos.fleet.v1` | the control plane's API for nodes, on the uplink: join, the node's certificate, telemetry, events, pods' credentials, the node's place on the mesh ([control-plane.md](control-plane.md#nodes)) | `ferund` |
+| `feos.fleet.v1` | the control plane's API for nodes, on the uplink: join, the node's certificate, telemetry, events, pods' credentials and their sealed bindings (Kubernetes, SSH, HTTP and the interception CAs, [control-plane.md](control-plane.md#http-bindings)), the node's place on the mesh ([control-plane.md](control-plane.md#nodes)) | `ferund` |
 | `feos.microvm.v1` | the pods' microVMs, internal to `feosd`, served on no listener | – |
 | `feos.container.v1` | containers: create, start, stop, delete, exec, logs, events | `feosd`, `feos-guest` |
 | `feos.image.v1` | OCI image pulls and the image store | `feosd`, `feos-guest` |
