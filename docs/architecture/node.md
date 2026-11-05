@@ -938,11 +938,13 @@ plane, `feosd` reads them two ways:
 - **Events and spans**: every second, from `authn-audit.offset` (the
   file's inode and an offset), batches of 512 records, at most 8 of a
   pod's in a pass and the pods in turn, a pod with more going on at once
-  after the others: each of a type it
-  knows (`http`, `http_end`, `token`, `bindings`) becomes the pod's audit
-  event (`AuditRecord`, kinds `http_request`, `http_end`, `token`,
-  `bindings`, `detail_json` the line), and each request whose `http_end`
-  came a client span, sent as the pods' own spans are
+  after the others: each `http`, `token` and `bindings` record becomes
+  the pod's audit event (`AuditRecord`, kinds `http_request`, `token`,
+  `bindings`, `detail_json` the line; of the 16384 events feosd keeps
+  until the control plane has them, at most a quarter are request
+  records, so that a flood of requests drops request records, never a
+  pod's other events), and each request whose `http_end` came a client
+  span, sent as the pods' own spans are
   ([traces.md](traces.md)): `<METHOD> <binding>`, from its arrival to its
   end, with its trace context, `http.request.method`, `url.path`,
   `server.address`, `server.port` (not 443), `http.response.status_code`,

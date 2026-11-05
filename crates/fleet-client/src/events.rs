@@ -27,6 +27,12 @@ use tonic::{Status, Streaming};
 
 /// The events kept at most.
 pub const CAPACITY: usize = 16384;
+/// Of them, the pods' request records (audit events of kind
+/// [`REQUEST_KIND`]) kept at most: while the control plane lags, a flood of
+/// requests drops request records, never another event.
+pub const REQUEST_CAPACITY: usize = CAPACITY / 4;
+/// The kind of a request record's audit event (egress::audit_kind).
+const REQUEST_KIND: &str = "http_request";
 /// A batch's limits (fleet.proto).
 const BATCH_EVENTS: usize = 512;
 const BATCH_BYTES: usize = 1 << 20;
@@ -51,6 +57,23 @@ struct Buffer {
     events: VecDeque<Event>,
     dropped: u64,
     capacity: usize,
+    /// The request records among `events`, and how many may be.
+    requests: usize,
+    request_capacity: usize,
+}
+
+impl Buffer {
+    fn pop_front(&mut self) -> Option<Event> {
+        let event = self.events.pop_front()?;
+        if is_request(&event) {
+            self.requests -= 1;
+        }
+        Some(event)
+    }
+}
+
+fn is_request(event: &Event) -> bool {
+    matches!(&event.body, Some(Body::Audit(record)) if record.kind == REQUEST_KIND)
 }
 
 impl Events {
@@ -66,6 +89,8 @@ impl Events {
                 events: VecDeque::new(),
                 dropped: 0,
                 capacity,
+                requests: 0,
+                request_capacity: (capacity / 4).max(1),
             })),
             added: Arc::new(Notify::new()),
             acked: watch::Sender::new(0),
@@ -111,15 +136,26 @@ impl Events {
         let mut buffer = self.buffer();
         let seq = buffer.next;
         buffer.next += 1;
-        if buffer.events.len() >= buffer.capacity {
-            buffer.events.pop_front();
-            buffer.dropped += 1;
-        }
-        buffer.events.push_back(Event {
+        let event = Event {
             seq,
             time: Some(std::time::SystemTime::now().into()),
             body: Some(body),
-        });
+        };
+        let request = is_request(&event);
+        if request && buffer.requests >= buffer.request_capacity {
+            // The newest request record goes, so that the others' order
+            // and every other event stay.
+            buffer.dropped += 1;
+            return;
+        }
+        if buffer.events.len() >= buffer.capacity {
+            buffer.pop_front();
+            buffer.dropped += 1;
+        }
+        if request {
+            buffer.requests += 1;
+        }
+        buffer.events.push_back(event);
         drop(buffer);
         self.added.notify_one();
     }
@@ -168,7 +204,7 @@ impl Events {
                 return Some(batch);
             }
             // An event larger than a batch can never be sent.
-            buffer.events.pop_front()?;
+            buffer.pop_front()?;
             buffer.dropped += 1;
         }
     }
@@ -178,7 +214,7 @@ impl Events {
         let mut buffer = self.buffer();
         let seq = seq.min(buffer.next - 1);
         while buffer.events.front().is_some_and(|event| event.seq <= seq) {
-            buffer.events.pop_front();
+            buffer.pop_front();
         }
         drop(buffer);
         self.acked.send_if_modified(|acked| {
@@ -330,6 +366,29 @@ mod tests {
         let batch = events.batch().unwrap();
         assert_eq!(seqs(&batch), [4, 5, 16]);
         assert_eq!(batch.dropped, 13);
+    }
+
+    #[test]
+    fn a_flood_of_requests_drops_request_records_only() {
+        let events = Events::with_capacity("s", 8);
+        events.node("started", "");
+        for _ in 0..10 {
+            events.audit("p", REQUEST_KIND, "{}");
+        }
+        events.audit("p", "token", "{}");
+        events.pod(PodEvent {
+            pod_id: "p".into(),
+            ..Default::default()
+        });
+        let batch = events.batch().unwrap();
+        // Two of eight may be request records; the rest of them went, and
+        // nothing else did.
+        assert_eq!(seqs(&batch), [1, 2, 3, 12, 13]);
+        assert_eq!(batch.dropped, 8);
+        // Acknowledged, they make room again.
+        events.ack(13);
+        events.audit("p", REQUEST_KIND, "{}");
+        assert_eq!(seqs(&events.batch().unwrap()), [14]);
     }
 
     #[test]

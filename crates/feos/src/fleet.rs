@@ -214,7 +214,7 @@ fn publish_audit(pods: &Pods, events: Events, traces: Traces) {
             Box::pin(async { true })
         })
     };
-    pods.follow_audit(Arc::new(egress::is_published), handler);
+    pods.follow_audit(Arc::new(egress::is_followed), handler);
     let live = pods.clone();
     // Forgets the requests whose ends do not come.
     tokio::spawn(async move {

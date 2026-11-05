@@ -52,11 +52,12 @@ pub const END_WAIT: Duration = Duration::from_secs(600);
 const PENDING: usize = 10_000;
 
 /// The kind of the audit event (feos.fleet.v1.AuditRecord) of a record of
-/// `type`; None for a type the node does not publish.
+/// `type`; None for a type the node does not publish. A request's end is
+/// not published: it completes the request's span ([`Joiner`]), and the
+/// control plane counts requests by their heads.
 pub fn audit_kind(kind: &str) -> Option<&'static str> {
     match kind {
         HTTP_TYPE => Some("http_request"),
-        HTTP_END_TYPE => Some("http_end"),
         "token" => Some("token"),
         "bindings" => Some("bindings"),
         _ => None,
@@ -111,9 +112,15 @@ pub fn is_http(line: &[u8]) -> bool {
     http_record(line).is_some()
 }
 
-/// Whether a line is a record of a type the node publishes as an event.
-pub fn is_published(line: &[u8]) -> bool {
-    record(line).is_some_and(|record| record.kind.as_deref().and_then(audit_kind).is_some())
+/// Whether a line is a record the node follows: one of a type it
+/// publishes as an event, or a request's end, which completes its span.
+pub fn is_followed(line: &[u8]) -> bool {
+    record(line).is_some_and(|record| {
+        record
+            .kind
+            .as_deref()
+            .is_some_and(|kind| kind == HTTP_END_TYPE || audit_kind(kind).is_some())
+    })
 }
 
 /// A pod's requests whose `http` came and whose `http_end` did not yet,
@@ -526,13 +533,16 @@ mod tests {
         assert_eq!(span.status, None, "the upstream answered");
 
         assert!(is_http(&line(HEAD)) && !is_http(&line(END)));
+        // A request's end is followed for its span, not published.
+        assert_eq!(audit_kind(HTTP_TYPE), Some("http_request"));
+        assert_eq!(audit_kind(HTTP_END_TYPE), None);
         for published in [
             line(HEAD),
             line(END),
             br#"{"type":"token","binding":"pay","reason":"first_use"}"#.to_vec(),
             br#"{"type":"bindings","version":"3","http":["erp"],"invalid":[]}"#.to_vec(),
         ] {
-            assert!(is_published(&published));
+            assert!(is_followed(&published));
         }
         for skipped in [
             &br#"{"type":"later"}"#[..],
@@ -540,7 +550,7 @@ mod tests {
             br#"{"binding":"pay"}"#,
         ] {
             assert!(
-                !is_published(skipped),
+                !is_followed(skipped),
                 "{}",
                 String::from_utf8_lossy(skipped)
             );
