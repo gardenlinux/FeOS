@@ -691,9 +691,16 @@ func (p *podService) create(ctx context.Context, id string, spec *podv1.PodSpec,
 	uid, _ := podid.Parse(id)
 	p.mu.Lock()
 	if pd := p.pods[id]; pd != nil {
-		info := clonePod(pd.info)
+		info, err := sameSpec(clonePod(pd.info), spec)
+		if err == nil && !proto.Equal(info.Spec.GetHttpBindings(), spec.GetHttpBindings()) {
+			// The clear part of the HTTP bindings changes by
+			// SetPodHttpBindings, and a create delivered again with
+			// another one takes it (ADR 0028).
+			pd.info.Spec.HttpBindings = cloneHTTPBindings(spec.GetHttpBindings())
+			info = clonePod(pd.info)
+		}
 		p.mu.Unlock()
-		return sameSpec(info, spec)
+		return info, err
 	}
 	info := &podv1.PodInfo{PodId: id, Spec: spec, State: podv1.PodState_POD_STATE_PENDING}
 	if layers != nil {
@@ -741,12 +748,44 @@ func (p *podService) create(ctx context.Context, id string, spec *podv1.PodSpec,
 }
 
 // sameSpec answers a create of a pod that exists: the pod, if the spec is
-// the same.
+// the same but for the clear part of its HTTP bindings.
 func sameSpec(existing *podv1.PodInfo, spec *podv1.PodSpec) (*podv1.PodInfo, error) {
-	if proto.Equal(existing.Spec, spec) {
+	a, b := cloneSpec(existing.Spec), cloneSpec(spec)
+	a.HttpBindings, b.HttpBindings = nil, nil
+	if proto.Equal(a, b) {
 		return existing, nil
 	}
 	return nil, status.Errorf(codes.AlreadyExists, "pod %s exists with another spec", existing.PodId)
+}
+
+func cloneHTTPBindings(b *podv1.PodHttpBindings) *podv1.PodHttpBindings {
+	if b == nil {
+		return nil
+	}
+	return proto.Clone(b).(*podv1.PodHttpBindings)
+}
+
+// SetPodHttpBindings sets the clear part of a pod's HTTP bindings (ADR
+// 0028) in its record, running or not, whole: an empty part is none. It
+// waits behind no bring-up: the part is the record's, which a start,
+// resume or restore takes.
+func (p *podService) SetPodHttpBindings(ctx context.Context, req *podv1.SetPodHttpBindingsRequest) (*podv1.SetPodHttpBindingsResponse, error) {
+	if err := p.n.script.wait(ctx, podv1.PodService_SetPodHttpBindings_FullMethodName); err != nil {
+		return nil, err
+	}
+	id := req.GetPodId()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pd := p.pods[id]
+	if pd == nil {
+		return nil, notFound(id)
+	}
+	part := cloneHTTPBindings(req.GetHttpBindings())
+	if part != nil && len(part.GetNames()) == 0 && len(part.GetInterceptHosts()) == 0 && part.GetVersion() == "" {
+		part = nil
+	}
+	pd.info.Spec.HttpBindings = part
+	return &podv1.SetPodHttpBindingsResponse{}, nil
 }
 
 func (p *podService) StartPod(ctx context.Context, req *podv1.StartPodRequest) (*podv1.StartPodResponse, error) {

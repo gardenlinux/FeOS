@@ -62,7 +62,8 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 		if bindings, version, err = s.bindings.PodBindings(ctx, podID); err != nil {
 			return nil, rpcError(err, "read the pod's bindings")
 		}
-		if bindings != nil && len(bindings.GetKube()) == 0 && len(bindings.GetSsh()) == 0 {
+		if bindings != nil && len(bindings.GetKube()) == 0 && len(bindings.GetSsh()) == 0 &&
+			len(bindings.GetHttp()) == 0 {
 			bindings = nil
 		}
 		if bindings == nil {

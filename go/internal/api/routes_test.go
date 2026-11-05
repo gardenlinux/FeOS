@@ -149,6 +149,10 @@ var bindingRoutes = map[string]class{
 	"POST /api/v1/sandboxes/{id}/ssh/{name}/check": classSandbox,
 	"POST /api/v1/kube/preflight":                  classTenant,
 	"POST /api/v1/ssh/preflight":                   classTenant,
+	"PUT /api/v1/sandboxes/{id}/http":              classSandbox,
+	"GET /api/v1/sandboxes/{id}/http":              classSandbox,
+	"DELETE /api/v1/sandboxes/{id}/http":           classSandbox,
+	"POST /api/v1/http/preflight":                  classTenant,
 }
 
 // oidcRoutes exist only with OIDC.
@@ -365,6 +369,10 @@ func TestBindingRoutes(t *testing.T) {
 		{"POST", "/api/v1/sandboxes/" + id3 + "/ssh/k1/check", bearerOf(tok3), "CheckSSH"},
 		{"POST", "/api/v1/kube/preflight", bearerOf(on.tenantToken), "KubePreflight"},
 		{"POST", "/api/v1/ssh/preflight", bearerOf(on.tenantToken), "SSHPreflight"},
+		{"PUT", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "PutHTTP"},
+		{"GET", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "GetHTTP"},
+		{"DELETE", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "DeleteHTTP"},
+		{"POST", "/api/v1/http/preflight", bearerOf(on.tenantToken), "HTTPPreflight"},
 		{"GET", "/api/v1/sandboxes/" + id3 + "/access", bearerOf(on.tenantToken), "Access"},
 	} {
 		w := on.do(c.method, c.path, c.authz, nil)

@@ -81,7 +81,7 @@ type Watches interface {
 	Delete(http.ResponseWriter, *http.Request)
 }
 
-// Bindings are the Kubernetes and SSH binding handlers
+// Bindings are the Kubernetes, SSH and HTTP binding handlers
 // (*bindings.Service). Off (Enabled false), their routes are not
 // registered, and the access route answers the empty object.
 type Bindings interface {
@@ -95,6 +95,10 @@ type Bindings interface {
 	CheckSSH(http.ResponseWriter, *http.Request)
 	KubePreflight(http.ResponseWriter, *http.Request)
 	SSHPreflight(http.ResponseWriter, *http.Request)
+	PutHTTP(http.ResponseWriter, *http.Request)
+	GetHTTP(http.ResponseWriter, *http.Request)
+	DeleteHTTP(http.ResponseWriter, *http.Request)
+	HTTPPreflight(http.ResponseWriter, *http.Request)
 	Access(http.ResponseWriter, *http.Request)
 }
 
@@ -440,9 +444,9 @@ func (s *server) routes() []route {
 	sandbox("GET /api/v1/sandboxes/{id}/watches/{wid}/events", watchRoute(w, Watches.Events))
 	sandbox("DELETE /api/v1/sandboxes/{id}/watches/{wid}", watchRoute(w, Watches.Delete))
 
-	// The Kubernetes and SSH bindings, only while they are on: off, their
-	// routes fall to the /api/ catch-all, which a client reads as "this
-	// platform has no such surface". The sets are the sandbox's, the
+	// The Kubernetes, SSH and HTTP bindings, only while they are on: off,
+	// their routes fall to the /api/ catch-all, which a client reads as
+	// "this platform has no such surface". The sets are the sandbox's, the
 	// preflights the tenant's (they need no sandbox).
 	if b := s.deps.Bindings; b != nil && b.Enabled() {
 		sandboxHTTP("PUT /api/v1/sandboxes/{id}/kube", b.PutKube)
@@ -454,6 +458,10 @@ func (s *server) routes() []route {
 		sandboxHTTP("POST /api/v1/sandboxes/{id}/ssh/{name}/check", b.CheckSSH)
 		tenant("POST /api/v1/kube/preflight", serve(b.KubePreflight))
 		tenant("POST /api/v1/ssh/preflight", serve(b.SSHPreflight))
+		sandboxHTTP("PUT /api/v1/sandboxes/{id}/http", b.PutHTTP)
+		sandboxHTTP("GET /api/v1/sandboxes/{id}/http", b.GetHTTP)
+		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/http", b.DeleteHTTP)
+		tenant("POST /api/v1/http/preflight", serve(b.HTTPPreflight))
 	}
 
 	// The environments (ADR 0018): the tenant's, and their route door.

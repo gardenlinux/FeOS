@@ -95,6 +95,7 @@ func (f *fakeEngine) Acquire(_ context.Context, id podid.ID, _ model.HoldKind) (
 	return model.Lease{SandboxID: id}, func() {}, nil
 }
 func (f *fakeEngine) Touch(podid.ID)                       {}
+func (f *fakeEngine) PushHTTPBindings(podid.ID)            {}
 func (f *fakeEngine) Sync(context.Context, podid.ID) error { return nil }
 func (f *fakeEngine) State(context.Context, podid.ID) (string, string, error) {
 	return model.StateRunning, "n1", nil

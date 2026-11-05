@@ -578,6 +578,8 @@ func (envEngine) State(context.Context, podid.ID) (string, string, error) {
 	return model.StateRunning, "", nil
 }
 
+func (envEngine) PushHTTPBindings(podid.ID) {}
+
 // envPorts forwards by saying where to.
 type envPorts struct{}
 

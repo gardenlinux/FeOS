@@ -51,6 +51,10 @@ type Engine interface {
 	Sync(ctx context.Context, id podid.ID) error
 	// State reads the row's client state and node; it never wakes it.
 	State(ctx context.Context, id podid.ID) (state, node string, err error)
+	// PushHTTPBindings has the row's pod sent the clear part of its HTTP
+	// bindings (ADR 0028) in the background, when it changed: a new
+	// secret version of a binding, sealed to the running pod again.
+	PushHTTPBindings(id podid.ID)
 }
 
 // Runner is what the environments run in a pod's main container

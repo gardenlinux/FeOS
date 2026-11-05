@@ -50,12 +50,15 @@ const (
 	KindOverbooked     = "overbooked"
 	KindTombstone      = "tombstone"
 	KindPodCredentials = "pod_credentials"
-	KindNodeCert       = "node_cert"
-	KindNodeStart      = "node_start"
-	KindPodState       = "pod_state"
-	KindNodeStarted    = "node_started"
-	KindNodeStopping   = "node_stopping"
-	KindNodeEvent      = "node_event"
+	// KindPodHTTPBindings is a push of a pod's HTTP bindings' clear part
+	// (ADR 0028): its version and the node's answer.
+	KindPodHTTPBindings = "pod_http_bindings"
+	KindNodeCert        = "node_cert"
+	KindNodeStart       = "node_start"
+	KindPodState        = "pod_state"
+	KindNodeStarted     = "node_started"
+	KindNodeStopping    = "node_stopping"
+	KindNodeEvent       = "node_event"
 )
 
 // The categories: the lanes of the timeline.
@@ -72,7 +75,7 @@ func CategoryOf(kind string) string {
 	switch kind {
 	case KindToolStart, KindToolEnd:
 		return CategoryTool
-	case KindPodCredentials, KindNodeCert:
+	case KindPodCredentials, KindNodeCert, KindPodHTTPBindings:
 		return CategoryCredential
 	}
 	return CategoryLifecycle

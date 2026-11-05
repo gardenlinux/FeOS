@@ -316,6 +316,10 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		Sealer: openerOf(sealer)}); err != nil {
 		return nil, fmt.Errorf("the sandbox engine: %w", err)
 	}
+	// A pod's HTTP bindings: the engine sends their clear part, which the
+	// bindings make (ADR 0028), and a PUT has the engine send it.
+	i.Engine.SetHTTPBindings(i.Bindings)
+	i.Bindings.SetPusher(i.Engine)
 	fl = fleet.New(fleet.Config{
 		InstanceID: i.id, TrustDomain: cfg.TrustDomain, NodeCertTTL: cfg.NodeCertTTL, PodCertTTL: cfg.PodCertTTL,
 		RolloutGrace: cfg.RolloutGrace, NodeTTL: cfg.NodeTTL, ConnDrainTimeout: cfg.ConnDrainTimeout,

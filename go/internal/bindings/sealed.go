@@ -16,6 +16,8 @@ import (
 const (
 	tableKube = "kube_bindings"
 	tableSSH  = "ssh_bindings"
+	tableHTTP = "http_bindings"
+	tableCA   = "pod_intercept_cas"
 )
 
 // sealAAD binds a blob to its row: a blob copied into another binding,
