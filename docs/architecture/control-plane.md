@@ -2071,8 +2071,12 @@ shapes:
   environment that exists and is not deleted.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
   label each, at most 32, checked as a sandbox's (upstream, mode, CA,
-  prefixes, rate limit, headers), the credential's fields a string,
-  `{value}` or `{secret}` of the environment, `tokenUrl` a literal; the
+  prefixes, rate limit, headers), the credential's secret fields (a
+  header's value, `password`, `clientSecret`, `keyPem`) a `{secret}` of
+  the environment, never a literal, which would stand in the clear in the
+  spec, its plans, its deployments and the pod's version; its other
+  fields (`user`, `clientId`, `scope`, `audience`, `certPem`) a string,
+  `{value}` or `{secret}`, `tokenUrl` a literal; the
   hosts of the upstreams and token endpoints judged by the destination
   rule; no binding named as a service or addon, and no intercepted host
   either (the pods' names); no host intercepted twice. Image services
