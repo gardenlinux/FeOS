@@ -297,7 +297,10 @@ of the repository.
    `admittedVersion` above 0, and a peer for every worker at
    `<worker>:51820` with `fresh` true. No handshake means that UDP 51820
    does not pass between the pods' network and the workers (IronCore's
-   security groups, Calico, `NODE_CIDR`). `connected` false while ferund
+   security groups, Calico, `NODE_CIDR`). An instance repairs a node with
+   endpoints that it has had no handshake with for 180 s, once a minute,
+   on the next of the ports 51820 to 51835 (`meshRepairs`, `meshPort`):
+   repairs that go on for one node mean that its UDP does not pass. `connected` false while ferund
    runs: the instances may dial only ferund's pods and `FERUN_NODES_IP`
    on 7443 (the NetworkPolicy `ferun-ingress-egress`), so check that
    ferund's pods are `app: ferund` in `ferun`. `GET

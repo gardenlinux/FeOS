@@ -610,6 +610,16 @@ without `--pod-prefix`, is on its cluster's mesh
   a packet to the peer whose /96 holds its destination and takes one from
   a peer only with that peer's key and a source in its /96. `GetMesh`
   shows the node's prefixes, key, port, version and peers.
+- **A restart of `feosd`** keeps the device, which lives in the host's
+  network namespace, with its sessions: the key and port it sets are the
+  device's already, which the kernel leaves as they are, and of the peers
+  kept in `mesh.pb` it sets only those the device has otherwise, such as
+  one whose endpoint the device learnt from its packets, which goes back
+  to the control plane's. The peers of other nodes and of the ingress
+  (ADR 0021) notice nothing. An ingress instance that lost its path to a
+  node repairs it from its side, on a new port
+  ([ingress.md](ingress.md#lost-paths)); the node takes the new endpoint
+  from the control plane as any other.
 - **The rules.** The peers' endpoints are denied to pods, as the node's
   own addresses are, and `prerouting` drops what comes from an address of
   the cluster's ULA through another device than the one it is routed to.

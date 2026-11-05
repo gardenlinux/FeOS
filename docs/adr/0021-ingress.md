@@ -416,6 +416,36 @@ changed these points:
 
   The last condition catches a node that never took the instance as a
   peer, and blocked UDP.
+- **A lost path is repaired; readiness does not wait for every node.**
+  On 2026-11-05 the cloud's network went down for a minute or two every
+  20 to 30 minutes, and some of the instances' WireGuard flows to nodes
+  stayed broken after it was back, while new connections from the same
+  pods worked. A peer's flow keeps its addresses and ports, and the
+  keepalive and the handshake's retries never let it rest, so state the
+  network keeps for it never expires; the agent set its peers only for a
+  new mesh version, which an outage does not bring. One instance had no
+  fresh node with endpoints for four hours and was not ready; another
+  lost one node, stayed ready on the others, and answered that node's
+  services 502 and 503 for over an hour. Deleting the pods, which gives
+  them new addresses, fixed both at once. A restart of `feosd` on the
+  nodes earlier that afternoon changed nothing the instances use: it
+  keeps the device, its key, port and sessions, and the same peers.
+  - An instance repairs the path to a node that runs endpoints and has
+    had no handshake for 180 s, at most once a minute: its device moves
+    to the next of 16 ports from 51820 on, so that every node is reached
+    in a flow new to the network; that node's peer is set anew; and a
+    Hello on its connection tells `ferund` the new endpoint, which
+    reaches the nodes as any new endpoint does. The nodes that answer
+    keep their sessions.
+  - Readiness still needs one fresh node with endpoints, not all of
+    them. The balancer checks no worker's health and `Local` keeps a
+    worker's share to its own instance, so an instance that is not ready
+    drops its worker's share of every service, not only of that node's;
+    and a node whose own network is down would take every other
+    instance out at once. There is no other path to a node's pods to
+    fail over to. An instance that cannot reach a node answers its
+    services 502 or 503, as before, and closes the client's connection,
+    whose next one the balancer likely sends to another worker.
 - **Identity.**
   - Certificates are renewed at half life. A newer certificate presented
     supersedes the older ones after 10 minutes.
@@ -870,7 +900,9 @@ changed these points:
 - **Health checks at the balancer, and its node set.** With checks of
   the nodes' `healthCheckNodePort` (ironcore#1584) the balancer would
   send only to workers with a ready instance: no gap while one restarts,
-  and fewer instances than workers. With the node set honoured
+  and fewer instances than workers. Readiness could then also take out
+  an instance that cannot reach a node the others reach, which needs it
+  to know what the others reach. With the node set honoured
   (cloud-provider-ironcore#618) the label
   `node.kubernetes.io/exclude-from-external-load-balancers` would make
   an edge pool of some workers. The PROXY protocol is for a balancer

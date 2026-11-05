@@ -27,7 +27,7 @@ certificates are ACME's ([control-plane.md](control-plane.md#certificates-of-dom
 
 ```
  clients ──IPv4──▶ LoadBalancer ferun-ingress (80→8080, 443→8443)
-                     │   NetworkPolicy: 8080/8443 from anywhere; 9090, udp/51820 from the workers
+                     │   NetworkPolicy: 8080/8443 from anywhere; 9090, udp/51820-51835 from the workers
                      │   egress: DNS, ferund's 7443, udp/51820 to the workers, nothing else
    StatefulSet ferun-ingress-0/1 (root with NET_ADMIN, seccomp RuntimeDefault, a volume each)
      ├─ proxy:  TLS (SNI: a domain's certificate from the table, else the wildcard's files) → HTTP/1.1 or HTTP/2
@@ -39,7 +39,8 @@ certificates are ACME's ([control-plane.md](control-plane.md#certificates-of-dom
      ├─ agent:  state directory, join, renewal, Hello, Sync with its cache, Wake, Hold
      │          └─ gRPC + JSON, mTLS, ALPN ferun-ingress/1 ──▶ one --control-plane address at a time
      └─ mesh:   WireGuard ferun-mesh, <its /96>::1/128, route <ULA>/64, the nodes as peers
-                  └─ UDP 51820 ⇄ the workers' feos-mesh
+                  ├─ UDP 51820 (a port after it once repaired) ⇄ the workers' feos-mesh at 51820
+                  └─ a node with endpoints and no handshake for 180 s: a new port, its peer set anew
  node:  feos-mesh → forward chain → the pod's group ing-<sandbox id>: tcp <port> from ferun-ingress → pod
  ferund (every instance): the ingress service (Join, RenewCertificate, Hello, Sync, Wake, Hold), the table builder
  ferund (the leader):     mesh-peers (ingress peers too), env-groups (ing-, ferun-ingress, admission), idle pause (fenced)
@@ -88,7 +89,7 @@ Go's syntax, byte sizes as integers with an optional `KiB`, `MiB` or
 | `--listen-http`, `--listen-https`, `--health-listen` | required | an IP address and a port each: the pod's IP, never a wildcard, which would bind the mesh device's address too |
 | `--tls-cert`, `--tls-key` | required | the apps zone's wildcard certificate and its key, PEM, read again every 30 s |
 | `--mesh-device` | `ferun-mesh` | the WireGuard device |
-| `--mesh-port` | `51820` | its UDP port |
+| `--mesh-port` | `51820` | its UDP port; a repair moves the device to one of the 15 after it ([Lost paths](#lost-paths)) |
 | `--mesh-endpoint` | required | where the nodes reach the device: `$(POD_IP):51820` |
 | `--mesh-mtu` | `0` | the device's MTU; 0 computes it ([The mesh](#the-mesh)) |
 | `--wake-hold` | `2m` | how long a request waits while instances of its service are asleep or waking |
@@ -486,6 +487,49 @@ A device that cannot be configured, or read, is configured again every
 2 s while the connection and the table go on. Every 2 s the agent reads
 the device's peers and hands each node's last handshake to the proxy.
 
+### Lost paths
+
+A WireGuard peer is one UDP flow, from the device's port to the node's
+51820, for as long as the peer lives, and the instance never lets it
+rest: the keepalive goes every 25 s, a handshake that is not answered is
+tried again every 5 s. Whatever the network keeps for that flow never
+expires, a flow an outage left broken included; and an endpoint the
+device learnt from a stray packet would lead nowhere for good, as nodes
+never send first. On 2026-11-05 such flows stayed broken after outages
+of the cloud's network, while new connections from the same pods
+worked, until the pods were deleted (ADR 0021, "A lost path is
+repaired").
+
+So the mesh loop repairs a node that is **lost**: one that runs
+endpoints of the table, has had no handshake for 180 s (none, or an
+older one: the freshness of [Admission](#admission)), and has been a
+peer for at least a minute, so that a new peer, or one a repair set
+anew, gets that long. At most once a minute, a repair:
+
+1. moves the device to the next of 16 ports, from `--mesh-port` on
+   (51820 to 51835, cyclic; a port that is taken is skipped), so that
+   every node is reached in a flow that is new to the network. With a
+   `--mesh-endpoint` whose port is not `--mesh-port` (a port forwarded to
+   the device) the port stays;
+2. removes the lost nodes' peers and sets them again: their sessions,
+   timers and learnt endpoints go, their configured endpoints come back,
+   and the kernel handshakes at once;
+3. says Hello again on the current connection with the new endpoint,
+   `<pod IP>:<port>`, which `ferund` keeps, counting the mesh's peers up
+   as for any new endpoint, so that `mesh-peers` gives it to the nodes.
+   A Hello that fails is tried again from the mesh loop, and every new
+   connection's Hello sends the endpoint anyway.
+
+The nodes that answer keep their sessions; they follow the new port with
+the instance's next packet, and the control plane's endpoint after it.
+The port stays until the next repair or a restart, which starts at
+`--mesh-port` again. A node without endpoints is not repaired: it carries
+no traffic, and one that is down has none, so a dead node moves nothing.
+`meshRepairs`, `lastMeshRepair`, `meshPort` and `meshEndpoint` in the
+status, and `ferun_ingress_mesh_repairs_total` and
+`ferun_ingress_mesh_port` in the metrics, show the repairs; each is logged
+("gave the mesh device new paths to them") with the nodes.
+
 `prepare`, the init container's command, writes 0 to
 `net.ipv6.conf.{all,default}.disable_ipv6` where they are not 0, as root,
 and logs what it changed. With `--join-token-source` it also copies that
@@ -675,7 +719,8 @@ endpoint only when all three hold:
    call failed.
 
 An endpoint on a node without a fresh handshake is the last resort: it
-is used only when no other endpoint is usable. A new ingress instance
+is used only when no other endpoint is usable, and its node's path is
+repaired ([Lost paths](#lost-paths)). A new ingress instance
 counts an endpoint only once that endpoint's node holds the group at its
 version, within one `env-groups` pass.
 
@@ -845,6 +890,12 @@ resort):
 
 Otherwise it is 502 "the service did not answer"; a refused connection is
 502 "the service refused the connection; it must listen on [::]:<port>".
+The answer to a dial that failed otherwise (a timeout, no route), and
+503 "no ready instance of <service>" while the service's instances only
+cool down after one, close the client's connection (`Connection: close`,
+GOAWAY on HTTP/2): its next request comes on a new connection, which the
+balancer likely sends to another worker, whose instance may reach the
+node.
 An image service must listen on `[::]`: one that binds `127.0.0.1` or
 `0.0.0.0` alone passes its readiness check, which goes through the port
 door on the pod's loopback, and fails here.
@@ -1105,6 +1156,17 @@ instance out of the balancer until the nodes have handshaken with it,
 without letting one node that never took the instance as a peer keep it
 out for good. A change of the verdict is logged.
 
+Readiness does not need every node with endpoints, and does not drop an
+instance that has lost one node while it reaches another. The balancer
+checks no worker's health and `Local` keeps a worker's share to its own
+instance ([Kubernetes](#kubernetes)): an instance that is not ready drops
+its worker's share of every service, not only of the lost node's, and a
+node whose own network is down would take every other instance out at
+once. A node's pods have no other path to fail over to. The instance
+answers the lost node's services 502 or 503 instead
+([Retries](#retries)), closes the client's connection with them, and
+repairs the path ([Lost paths](#lost-paths)).
+
 ### Status
 
 `/statusz`, and `ferun-ingress status`, which reads it from inside the
@@ -1114,7 +1176,8 @@ connected, the control-plane addresses, whether it joins, the table's
 sequence, age, number of environments and mesh version, the
 certificate's serial, expiry and renew time, the refusals (since the last
 Hello, in all, the last one and when), whether the identity was removed,
-the mesh device, its public key and MTU, each peer with its endpoint,
+the mesh device, its public key, MTU, port and endpoint and the repairs
+of its paths (how many, the last), each peer with its endpoint,
 last handshake and freshness, the held instances, the data path (the
 nodes with endpoints, those fresh and admitted, the number of endpoints),
 readiness and its reason, draining, and the HTTPS certificate's names and
@@ -1138,6 +1201,7 @@ expiry.
 | `ferun_ingress_access_log_sent_total`, `…_dropped_total`, `ferun_ingress_access_log_pending` | access log records the sink took, those dropped (no `--sink-endpoint`, a full buffer, a refusal), those waiting (a batch on its way to the sink included) |
 | `ferun_ingress_spans_sent_total`, `…_dropped_total` | server spans of batched records the sink took, and those dropped (failed, refused or rejected by the sink, or without a tenant) |
 | `ferun_ingress_table_age_seconds`, `ferun_ingress_mesh_nodes{handshake}`, `ferun_ingress_mesh_handshake_age_seconds{node}`, `ferun_ingress_mesh_peers`, `ferun_ingress_mesh_configured` | the table's age and the mesh's health |
+| `ferun_ingress_mesh_repairs_total`, `ferun_ingress_mesh_port` | repairs of the paths to lost nodes ([Lost paths](#lost-paths)); the device's port |
 | `ferun_ingress_info{name,version}`, `ferun_ingress_ready`, `ferun_ingress_draining`, `ferun_ingress_control_connected`, `ferun_ingress_control_refusals_total`, `ferun_ingress_identity_removed`, `ferun_ingress_identity_not_after_seconds`, `ferun_ingress_tls_not_after_seconds` | the instance |
 
 ## Shutdown
@@ -1226,7 +1290,8 @@ On the Gardener shoot
   new connections until the new one is ready (about 20 s on 2026-10-29),
   which the clients' SYN retries turn into a delay.
 - **Two NetworkPolicies.** `ferun-ingress` lets 8080 and 8443 in from
-  anywhere, and the health port and UDP 51820 only from the workers'
+  anywhere, and the health port and UDP 51820 to 51835 (`endPort`, the
+  ports a repair moves the device through) only from the workers'
   network (`NODE_CIDR`). `ferun-ingress-egress` lets the instances dial
   three things and nothing else:
   - DNS: the pods `k8s-app: kube-dns` of `kube-system`, on 53 and on
@@ -1335,8 +1400,10 @@ open question.
 | A force-deleted ingress pod | Two processes may use one key and address, and WireGuard flaps between their endpoints. | until one dies |
 | A database failover | The builders' reads fail and the snapshots stay; streams go on. After 30 s unhealthy the streams end and the agents try other instances. Join, Hello, renewal and Hold fail: holds lapse, but the fence starts only 45 s after `last_seen`. | the data path is unaffected |
 | The ingress cut off from `ferund` | The cached table is served. No wakes: held requests time out with 503. Holds lapse after 30 s, but the fence keeps public services from idling for 15 minutes; after that, a request to a paused instance waits until its client gives up. | 15 minutes |
-| The ingress cut off from a node | The node's handshake goes stale within 180 s and its endpoints become the last resort; until then a failed dial is retried elsewhere and the endpoint cools down for 5 s. | 180 s of extra dials |
-| A node that never took the ingress as a peer | No handshake: its endpoints are the last resort, and readiness ignores the node after 60 s when another node works. | |
+| The ingress cut off from a node | The node's handshake goes stale within 180 s and its endpoints become the last resort; until then a failed dial is retried elsewhere and the endpoint cools down for 5 s. A request with no other endpoint gets 502, then 503 while the endpoint cools down, and its client connection closes. Once stale, the path is repaired every minute ([Lost paths](#lost-paths)) until the node answers. Readiness keeps the instance while another node with endpoints is fresh. | 180 s of extra dials; a minute after the network is back |
+| An outage leaves the flow to a node broken after the network is back (2026-11-05) | WireGuard's retries keep the broken flow alive, so it never heals by itself; the repair moves the device to a new port, a new flow, and sets the node's peer anew; the nodes get the new endpoint through Hello and `mesh-peers`. An instance that had no fresh node with endpoints is ready again with the first node it reaches. | a minute after the node went stale |
+| `feosd` restarts on a node | It keeps the device, its key and port, and the sessions, and sets the peers it kept, which the device has already; an endpoint the device learnt that differs from the control plane's is set back. The instances notice nothing. A node whose device was made anew (after a reboot) has no session: an instance makes a new one 15 s after a packet the node did not answer, or at its rekey within 2 minutes. | none; 15 s after a reboot |
+| A node that never took the ingress as a peer | No handshake: its endpoints are the last resort, and readiness ignores the node after 60 s when another node works. With endpoints, it is repaired every minute, and every repair's new endpoint makes `mesh-peers` send the node its peers again. | |
 | `ferund` cut off from the database | That instance's builder turns unhealthy after 30 s and ends its streams. | 30 s |
 | A new leader | No effect on the table or the data path; `mesh-peers`, `env-groups` and the idle loop pause for the election. | the lease's TTL |
 | A replica stops | It leaves the table in about 100 ms and the idle pooled connections to it are closed; its pod goes after 10 s, which cuts longer requests; the ingress closes what is still open after 30 s. | |
@@ -1379,8 +1446,14 @@ open question.
   (`agent.NewFakeControlPlane`: join and pin, reconnects over the address
   list, renewal, refusals, the fixed key, a new key after every join and
   after a refused one, the cache at the start, a table in parts, wakes,
-  holds, the mesh's handshakes); the program's readiness, shutdown and
-  health listener, and `prepare`'s copy of the join token.
+  holds, the mesh's handshakes); the repair of lost paths on a fake
+  network that keeps broken flows broken (a node whose flow stopped
+  being answered, an outage that broke every flow it carried, a node
+  without endpoints, a forwarded port); the program's readiness, also
+  its recovery after such an outage without a restart, shutdown and
+  health listener, and `prepare`'s copy of the join token; the client
+  connection closed with the answer to an instance that cannot be
+  reached.
 - **Database tests**: the ingresses (join, re-join, removal, the counter
   in commit order with two interleaved Hellos, the fixed key, the key a
   re-join retired, one key per peer across nodes and ingresses with two
