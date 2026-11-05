@@ -42,6 +42,10 @@
 -- activity, and the leader sweeps both tables after ten minutes. No
 -- foreign key: the sweep takes a deleted sandbox's rows too.
 --
+-- env_job_runs_sandbox serves the lookup of the deployment a job's pod
+-- belongs to by its sandbox (EnvInstanceDeployment), which every pod's
+-- bindings read.
+--
 -- Additive: an instance of the previous version neither reads nor writes
 -- the new columns and tables, and a sandbox's delete cascades to them; it
 -- opens none of the new conditions and reads them as any other.
@@ -81,6 +85,8 @@ ALTER TABLE env_incidents ADD CONSTRAINT env_incidents_condition_check
      'credential_refused','upstream_failing','token_failing'));
 ALTER TABLE env_incidents ADD COLUMN held_at timestamptz;
 CREATE INDEX env_incidents_closed ON env_incidents(closed_at) WHERE closed_at IS NOT NULL;
+
+CREATE INDEX env_job_runs_sandbox ON env_job_runs(sandbox_id);
 
 CREATE TABLE http_egress (
   sandbox_id text COLLATE "C" NOT NULL,
