@@ -54,6 +54,12 @@ service PodService {
   // one of a pod without memory, or one whose head is being put, the
   // resume waits for, and restores the pod from its checkpoint.
   rpc ResumePod(ResumePodRequest) returns (ResumePodResponse);
+  // Sets a pod's HTTP bindings' clear part (ADR 0028) in its record and,
+  // while it runs, in its resolver answers and its containers' trust files,
+  // and has its feos-authn fetch its sealed bindings again. The whole part
+  // is stated; what it does not name is gone. A pod that does not run
+  // takes it at its next start, resume or restore.
+  rpc SetPodHttpBindings(SetPodHttpBindingsRequest) returns (SetPodHttpBindingsResponse);
   // Takes the pod off the node into object storage: suspends it if it
   // runs, seals its disk, its volumes and its memory, uploads them with
   // its spec, and frees what it held on the node: its microVM, its disk,
@@ -108,6 +114,31 @@ message PodSpec {
   // take 32 KiB at most. A pod without a network has no metadata service,
   // and no metadata.
   map<string, string> metadata = 6;
+  // The clear part of the pod's HTTP bindings (ADR 0028): the names feosd's
+  // resolver answers with 169.254.169.1 for this pod, and the interception
+  // CAs' certificates the guest puts into every container. The bindings'
+  // upstreams and credentials are never here: they reach the pod's
+  // feos-authn sealed (feos.fleet.v1.PodBindings).
+  PodHttpBindings http_bindings = 7;
+}
+
+// The clear part of a pod's HTTP bindings (ADR 0028). A change states it
+// whole (SetPodHttpBindings).
+message PodHttpBindings {
+  // The name mode's names: DNS labels, 1 to 63 lowercase letters, digits
+  // and "-", answered as "<name>" and "<name>." alone.
+  repeated string names = 1;
+  // The intercept mode's names: the upstreams' host names, lowercase,
+  // answered as they are.
+  repeated string intercept_hosts = 2;
+  // The pod's interception CAs, PEM, oldest first: the guest mounts them,
+  // and a bundle of each container's image's own with them, into every
+  // container (ADR 0028 §5). Empty without intercept bindings.
+  repeated string intercept_ca_pems = 3;
+  // The version of the sealed binding set this part belongs to
+  // (feos.fleet.v1.SealedBindings.version), so that feosd tells the pod's
+  // feos-authn to fetch its bindings again when it moves.
+  string version = 4;
 }
 
 // A volume of a pod, by the name its containers mount it by.
@@ -484,3 +515,10 @@ message PodConsoleInput {
 message PodConsoleOutput {
   bytes output = 1;
 }
+
+message SetPodHttpBindingsRequest {
+  string pod_id = 1;
+  PodHttpBindings http_bindings = 2;
+}
+
+message SetPodHttpBindingsResponse {}

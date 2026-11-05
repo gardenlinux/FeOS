@@ -2256,6 +2256,107 @@ func (x *GetTimeResponse) GetTime() *timestamppb.Timestamp {
 	return nil
 }
 
+type AdjustTimeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// How far the clock is ahead of the host's, in nanoseconds; negative if
+	// it is behind.
+	OffsetNs      int64 `protobuf:"zigzag64,1,opt,name=offset_ns,json=offsetNs,proto3" json:"offset_ns,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdjustTimeRequest) Reset() {
+	*x = AdjustTimeRequest{}
+	mi := &file_feos_host_v1_host_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdjustTimeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdjustTimeRequest) ProtoMessage() {}
+
+func (x *AdjustTimeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_host_v1_host_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdjustTimeRequest.ProtoReflect.Descriptor instead.
+func (*AdjustTimeRequest) Descriptor() ([]byte, []int) {
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *AdjustTimeRequest) GetOffsetNs() int64 {
+	if x != nil {
+		return x.OffsetNs
+	}
+	return 0
+}
+
+type AdjustTimeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whether the offset was large enough to step the clock rather than slew
+	// it.
+	Stepped bool `protobuf:"varint,1,opt,name=stepped,proto3" json:"stepped,omitempty"`
+	// The clock's frequency correction after the call, in parts per billion.
+	FrequencyPpb  int64 `protobuf:"varint,2,opt,name=frequency_ppb,json=frequencyPpb,proto3" json:"frequency_ppb,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdjustTimeResponse) Reset() {
+	*x = AdjustTimeResponse{}
+	mi := &file_feos_host_v1_host_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdjustTimeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdjustTimeResponse) ProtoMessage() {}
+
+func (x *AdjustTimeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_host_v1_host_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdjustTimeResponse.ProtoReflect.Descriptor instead.
+func (*AdjustTimeResponse) Descriptor() ([]byte, []int) {
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *AdjustTimeResponse) GetStepped() bool {
+	if x != nil {
+		return x.Stepped
+	}
+	return false
+}
+
+func (x *AdjustTimeResponse) GetFrequencyPpb() int64 {
+	if x != nil {
+		return x.FrequencyPpb
+	}
+	return 0
+}
+
 type SetNetworkConfigRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Interface name, e.g. "eth0".
@@ -2286,7 +2387,7 @@ type SetNetworkConfigRequest struct {
 
 func (x *SetNetworkConfigRequest) Reset() {
 	*x = SetNetworkConfigRequest{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[33]
+	mi := &file_feos_host_v1_host_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2298,7 +2399,7 @@ func (x *SetNetworkConfigRequest) String() string {
 func (*SetNetworkConfigRequest) ProtoMessage() {}
 
 func (x *SetNetworkConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[33]
+	mi := &file_feos_host_v1_host_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2311,7 +2412,7 @@ func (x *SetNetworkConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetNetworkConfigRequest.ProtoReflect.Descriptor instead.
 func (*SetNetworkConfigRequest) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{33}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SetNetworkConfigRequest) GetInterface() string {
@@ -2384,7 +2485,7 @@ type NetworkRoute struct {
 
 func (x *NetworkRoute) Reset() {
 	*x = NetworkRoute{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[34]
+	mi := &file_feos_host_v1_host_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2396,7 +2497,7 @@ func (x *NetworkRoute) String() string {
 func (*NetworkRoute) ProtoMessage() {}
 
 func (x *NetworkRoute) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[34]
+	mi := &file_feos_host_v1_host_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2409,7 +2510,7 @@ func (x *NetworkRoute) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkRoute.ProtoReflect.Descriptor instead.
 func (*NetworkRoute) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{34}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *NetworkRoute) GetDestination() string {
@@ -2444,7 +2545,7 @@ type SetNetworkConfigResponse struct {
 
 func (x *SetNetworkConfigResponse) Reset() {
 	*x = SetNetworkConfigResponse{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[35]
+	mi := &file_feos_host_v1_host_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2456,7 +2557,7 @@ func (x *SetNetworkConfigResponse) String() string {
 func (*SetNetworkConfigResponse) ProtoMessage() {}
 
 func (x *SetNetworkConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[35]
+	mi := &file_feos_host_v1_host_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2469,7 +2570,7 @@ func (x *SetNetworkConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetNetworkConfigResponse.ProtoReflect.Descriptor instead.
 func (*SetNetworkConfigResponse) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{35}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SetNetworkConfigResponse) GetResolverFailed() []*ResolverFailure {
@@ -2489,7 +2590,7 @@ type ResolverFailure struct {
 
 func (x *ResolverFailure) Reset() {
 	*x = ResolverFailure{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[36]
+	mi := &file_feos_host_v1_host_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2501,7 +2602,7 @@ func (x *ResolverFailure) String() string {
 func (*ResolverFailure) ProtoMessage() {}
 
 func (x *ResolverFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[36]
+	mi := &file_feos_host_v1_host_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2514,7 +2615,7 @@ func (x *ResolverFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolverFailure.ProtoReflect.Descriptor instead.
 func (*ResolverFailure) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{36}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ResolverFailure) GetContainerId() string {
@@ -2539,7 +2640,7 @@ type GetNetworkConfigRequest struct {
 
 func (x *GetNetworkConfigRequest) Reset() {
 	*x = GetNetworkConfigRequest{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[37]
+	mi := &file_feos_host_v1_host_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2551,7 +2652,7 @@ func (x *GetNetworkConfigRequest) String() string {
 func (*GetNetworkConfigRequest) ProtoMessage() {}
 
 func (x *GetNetworkConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[37]
+	mi := &file_feos_host_v1_host_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2564,7 +2665,7 @@ func (x *GetNetworkConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNetworkConfigRequest.ProtoReflect.Descriptor instead.
 func (*GetNetworkConfigRequest) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{37}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{39}
 }
 
 type GetNetworkConfigResponse struct {
@@ -2586,7 +2687,7 @@ type GetNetworkConfigResponse struct {
 
 func (x *GetNetworkConfigResponse) Reset() {
 	*x = GetNetworkConfigResponse{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[38]
+	mi := &file_feos_host_v1_host_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2598,7 +2699,7 @@ func (x *GetNetworkConfigResponse) String() string {
 func (*GetNetworkConfigResponse) ProtoMessage() {}
 
 func (x *GetNetworkConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[38]
+	mi := &file_feos_host_v1_host_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2611,7 +2712,7 @@ func (x *GetNetworkConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNetworkConfigResponse.ProtoReflect.Descriptor instead.
 func (*GetNetworkConfigResponse) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{38}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetNetworkConfigResponse) GetConfigured() bool {
@@ -2687,7 +2788,7 @@ type FreezeFilesystemRequest struct {
 
 func (x *FreezeFilesystemRequest) Reset() {
 	*x = FreezeFilesystemRequest{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[39]
+	mi := &file_feos_host_v1_host_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2699,7 +2800,7 @@ func (x *FreezeFilesystemRequest) String() string {
 func (*FreezeFilesystemRequest) ProtoMessage() {}
 
 func (x *FreezeFilesystemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[39]
+	mi := &file_feos_host_v1_host_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2712,7 +2813,7 @@ func (x *FreezeFilesystemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FreezeFilesystemRequest.ProtoReflect.Descriptor instead.
 func (*FreezeFilesystemRequest) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{39}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *FreezeFilesystemRequest) GetMountpoint() string {
@@ -2732,7 +2833,7 @@ type FreezeFilesystemResponse struct {
 
 func (x *FreezeFilesystemResponse) Reset() {
 	*x = FreezeFilesystemResponse{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[40]
+	mi := &file_feos_host_v1_host_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2744,7 +2845,7 @@ func (x *FreezeFilesystemResponse) String() string {
 func (*FreezeFilesystemResponse) ProtoMessage() {}
 
 func (x *FreezeFilesystemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[40]
+	mi := &file_feos_host_v1_host_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2757,7 +2858,7 @@ func (x *FreezeFilesystemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FreezeFilesystemResponse.ProtoReflect.Descriptor instead.
 func (*FreezeFilesystemResponse) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{40}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *FreezeFilesystemResponse) GetDevice() string {
@@ -2777,7 +2878,7 @@ type ThawFilesystemRequest struct {
 
 func (x *ThawFilesystemRequest) Reset() {
 	*x = ThawFilesystemRequest{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[41]
+	mi := &file_feos_host_v1_host_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2789,7 +2890,7 @@ func (x *ThawFilesystemRequest) String() string {
 func (*ThawFilesystemRequest) ProtoMessage() {}
 
 func (x *ThawFilesystemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[41]
+	mi := &file_feos_host_v1_host_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2802,7 +2903,7 @@ func (x *ThawFilesystemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThawFilesystemRequest.ProtoReflect.Descriptor instead.
 func (*ThawFilesystemRequest) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{41}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *ThawFilesystemRequest) GetMountpoint() string {
@@ -2821,7 +2922,7 @@ type ThawFilesystemResponse struct {
 
 func (x *ThawFilesystemResponse) Reset() {
 	*x = ThawFilesystemResponse{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[42]
+	mi := &file_feos_host_v1_host_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2833,7 +2934,7 @@ func (x *ThawFilesystemResponse) String() string {
 func (*ThawFilesystemResponse) ProtoMessage() {}
 
 func (x *ThawFilesystemResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[42]
+	mi := &file_feos_host_v1_host_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2846,7 +2947,7 @@ func (x *ThawFilesystemResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThawFilesystemResponse.ProtoReflect.Descriptor instead.
 func (*ThawFilesystemResponse) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{42}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ThawFilesystemResponse) GetDevice() string {
@@ -2870,7 +2971,7 @@ type GetMemoryBreakdownRequest struct {
 
 func (x *GetMemoryBreakdownRequest) Reset() {
 	*x = GetMemoryBreakdownRequest{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[43]
+	mi := &file_feos_host_v1_host_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2882,7 +2983,7 @@ func (x *GetMemoryBreakdownRequest) String() string {
 func (*GetMemoryBreakdownRequest) ProtoMessage() {}
 
 func (x *GetMemoryBreakdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[43]
+	mi := &file_feos_host_v1_host_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2895,7 +2996,7 @@ func (x *GetMemoryBreakdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMemoryBreakdownRequest.ProtoReflect.Descriptor instead.
 func (*GetMemoryBreakdownRequest) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{43}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *GetMemoryBreakdownRequest) GetWithProcesses() bool {
@@ -2934,7 +3035,7 @@ type ProcessMemory struct {
 
 func (x *ProcessMemory) Reset() {
 	*x = ProcessMemory{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[44]
+	mi := &file_feos_host_v1_host_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2946,7 +3047,7 @@ func (x *ProcessMemory) String() string {
 func (*ProcessMemory) ProtoMessage() {}
 
 func (x *ProcessMemory) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[44]
+	mi := &file_feos_host_v1_host_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2959,7 +3060,7 @@ func (x *ProcessMemory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessMemory.ProtoReflect.Descriptor instead.
 func (*ProcessMemory) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{44}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *ProcessMemory) GetPid() uint32 {
@@ -3016,7 +3117,7 @@ type SlabCache struct {
 
 func (x *SlabCache) Reset() {
 	*x = SlabCache{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[45]
+	mi := &file_feos_host_v1_host_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3028,7 +3129,7 @@ func (x *SlabCache) String() string {
 func (*SlabCache) ProtoMessage() {}
 
 func (x *SlabCache) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[45]
+	mi := &file_feos_host_v1_host_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3041,7 +3142,7 @@ func (x *SlabCache) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SlabCache.ProtoReflect.Descriptor instead.
 func (*SlabCache) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{45}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *SlabCache) GetName() string {
@@ -3105,7 +3206,7 @@ type MemoryBreakdown struct {
 
 func (x *MemoryBreakdown) Reset() {
 	*x = MemoryBreakdown{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[46]
+	mi := &file_feos_host_v1_host_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3117,7 +3218,7 @@ func (x *MemoryBreakdown) String() string {
 func (*MemoryBreakdown) ProtoMessage() {}
 
 func (x *MemoryBreakdown) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[46]
+	mi := &file_feos_host_v1_host_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3130,7 +3231,7 @@ func (x *MemoryBreakdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryBreakdown.ProtoReflect.Descriptor instead.
 func (*MemoryBreakdown) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{46}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *MemoryBreakdown) GetMemTotalKb() uint64 {
@@ -3326,7 +3427,7 @@ type PreparePauseRequest struct {
 
 func (x *PreparePauseRequest) Reset() {
 	*x = PreparePauseRequest{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[47]
+	mi := &file_feos_host_v1_host_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3338,7 +3439,7 @@ func (x *PreparePauseRequest) String() string {
 func (*PreparePauseRequest) ProtoMessage() {}
 
 func (x *PreparePauseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[47]
+	mi := &file_feos_host_v1_host_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3351,7 +3452,7 @@ func (x *PreparePauseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreparePauseRequest.ProtoReflect.Descriptor instead.
 func (*PreparePauseRequest) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{47}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *PreparePauseRequest) GetSkipSync() bool {
@@ -3411,7 +3512,7 @@ type PreparePauseResponse struct {
 
 func (x *PreparePauseResponse) Reset() {
 	*x = PreparePauseResponse{}
-	mi := &file_feos_host_v1_host_proto_msgTypes[48]
+	mi := &file_feos_host_v1_host_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3423,7 +3524,7 @@ func (x *PreparePauseResponse) String() string {
 func (*PreparePauseResponse) ProtoMessage() {}
 
 func (x *PreparePauseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_host_v1_host_proto_msgTypes[48]
+	mi := &file_feos_host_v1_host_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3436,7 +3537,7 @@ func (x *PreparePauseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreparePauseResponse.ProtoReflect.Descriptor instead.
 func (*PreparePauseResponse) Descriptor() ([]byte, []int) {
-	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{48}
+	return file_feos_host_v1_host_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *PreparePauseResponse) GetBefore() *MemoryBreakdown {
@@ -3666,7 +3767,12 @@ const file_feos_host_v1_host_proto_rawDesc = "" +
 	"\x0fSetTimeResponse\"\x10\n" +
 	"\x0eGetTimeRequest\"A\n" +
 	"\x0fGetTimeResponse\x12.\n" +
-	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\"\x90\x02\n" +
+	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\"0\n" +
+	"\x11AdjustTimeRequest\x12\x1b\n" +
+	"\toffset_ns\x18\x01 \x01(\x12R\boffsetNs\"S\n" +
+	"\x12AdjustTimeResponse\x12\x18\n" +
+	"\astepped\x18\x01 \x01(\bR\astepped\x12#\n" +
+	"\rfrequency_ppb\x18\x02 \x01(\x03R\ffrequencyPpb\"\x90\x02\n" +
 	"\x17SetNetworkConfigRequest\x12\x1c\n" +
 	"\tinterface\x18\x01 \x01(\tR\tinterface\x12\x1b\n" +
 	"\tipv4_cidr\x18\x02 \x01(\tR\bipv4Cidr\x12\x18\n" +
@@ -3773,7 +3879,7 @@ const file_feos_host_v1_host_proto_rawDesc = "" +
 	"\x05steps\x18\x03 \x03(\tR\x05steps\x12\x1f\n" +
 	"\vduration_ms\x18\x04 \x01(\x04R\n" +
 	"durationMs\x12\x1b\n" +
-	"\tzeroed_kb\x18\x05 \x01(\x04R\bzeroedKb2\xb8\r\n" +
+	"\tzeroed_kb\x18\x05 \x01(\x04R\bzeroedKb2\x89\x0e\n" +
 	"\vHostService\x12I\n" +
 	"\bHostname\x12\x1d.feos.host.v1.HostnameRequest\x1a\x1e.feos.host.v1.HostnameResponse\x12F\n" +
 	"\tGetMemory\x12\x1b.feos.host.v1.MemoryRequest\x1a\x1c.feos.host.v1.MemoryResponse\x12O\n" +
@@ -3789,7 +3895,9 @@ const file_feos_host_v1_host_proto_rawDesc = "" +
 	"\x0eGetVersionInfo\x12#.feos.host.v1.GetVersionInfoRequest\x1a$.feos.host.v1.GetVersionInfoResponse\x12=\n" +
 	"\x04Ping\x12\x19.feos.host.v1.PingRequest\x1a\x1a.feos.host.v1.PingResponse\x12F\n" +
 	"\aSetTime\x12\x1c.feos.host.v1.SetTimeRequest\x1a\x1d.feos.host.v1.SetTimeResponse\x12F\n" +
-	"\aGetTime\x12\x1c.feos.host.v1.GetTimeRequest\x1a\x1d.feos.host.v1.GetTimeResponse\x12a\n" +
+	"\aGetTime\x12\x1c.feos.host.v1.GetTimeRequest\x1a\x1d.feos.host.v1.GetTimeResponse\x12O\n" +
+	"\n" +
+	"AdjustTime\x12\x1f.feos.host.v1.AdjustTimeRequest\x1a .feos.host.v1.AdjustTimeResponse\x12a\n" +
 	"\x10SetNetworkConfig\x12%.feos.host.v1.SetNetworkConfigRequest\x1a&.feos.host.v1.SetNetworkConfigResponse\x12a\n" +
 	"\x10GetNetworkConfig\x12%.feos.host.v1.GetNetworkConfigRequest\x1a&.feos.host.v1.GetNetworkConfigResponse\x12a\n" +
 	"\x10FreezeFilesystem\x12%.feos.host.v1.FreezeFilesystemRequest\x1a&.feos.host.v1.FreezeFilesystemResponse\x12[\n" +
@@ -3809,7 +3917,7 @@ func file_feos_host_v1_host_proto_rawDescGZIP() []byte {
 	return file_feos_host_v1_host_proto_rawDescData
 }
 
-var file_feos_host_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_feos_host_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
 var file_feos_host_v1_host_proto_goTypes = []any{
 	(*HostnameRequest)(nil),           // 0: feos.host.v1.HostnameRequest
 	(*HostnameResponse)(nil),          // 1: feos.host.v1.HostnameResponse
@@ -3844,24 +3952,26 @@ var file_feos_host_v1_host_proto_goTypes = []any{
 	(*SetTimeResponse)(nil),           // 30: feos.host.v1.SetTimeResponse
 	(*GetTimeRequest)(nil),            // 31: feos.host.v1.GetTimeRequest
 	(*GetTimeResponse)(nil),           // 32: feos.host.v1.GetTimeResponse
-	(*SetNetworkConfigRequest)(nil),   // 33: feos.host.v1.SetNetworkConfigRequest
-	(*NetworkRoute)(nil),              // 34: feos.host.v1.NetworkRoute
-	(*SetNetworkConfigResponse)(nil),  // 35: feos.host.v1.SetNetworkConfigResponse
-	(*ResolverFailure)(nil),           // 36: feos.host.v1.ResolverFailure
-	(*GetNetworkConfigRequest)(nil),   // 37: feos.host.v1.GetNetworkConfigRequest
-	(*GetNetworkConfigResponse)(nil),  // 38: feos.host.v1.GetNetworkConfigResponse
-	(*FreezeFilesystemRequest)(nil),   // 39: feos.host.v1.FreezeFilesystemRequest
-	(*FreezeFilesystemResponse)(nil),  // 40: feos.host.v1.FreezeFilesystemResponse
-	(*ThawFilesystemRequest)(nil),     // 41: feos.host.v1.ThawFilesystemRequest
-	(*ThawFilesystemResponse)(nil),    // 42: feos.host.v1.ThawFilesystemResponse
-	(*GetMemoryBreakdownRequest)(nil), // 43: feos.host.v1.GetMemoryBreakdownRequest
-	(*ProcessMemory)(nil),             // 44: feos.host.v1.ProcessMemory
-	(*SlabCache)(nil),                 // 45: feos.host.v1.SlabCache
-	(*MemoryBreakdown)(nil),           // 46: feos.host.v1.MemoryBreakdown
-	(*PreparePauseRequest)(nil),       // 47: feos.host.v1.PreparePauseRequest
-	(*PreparePauseResponse)(nil),      // 48: feos.host.v1.PreparePauseResponse
-	nil,                               // 49: feos.host.v1.MemoryBreakdown.MeminfoKbEntry
-	(*timestamppb.Timestamp)(nil),     // 50: google.protobuf.Timestamp
+	(*AdjustTimeRequest)(nil),         // 33: feos.host.v1.AdjustTimeRequest
+	(*AdjustTimeResponse)(nil),        // 34: feos.host.v1.AdjustTimeResponse
+	(*SetNetworkConfigRequest)(nil),   // 35: feos.host.v1.SetNetworkConfigRequest
+	(*NetworkRoute)(nil),              // 36: feos.host.v1.NetworkRoute
+	(*SetNetworkConfigResponse)(nil),  // 37: feos.host.v1.SetNetworkConfigResponse
+	(*ResolverFailure)(nil),           // 38: feos.host.v1.ResolverFailure
+	(*GetNetworkConfigRequest)(nil),   // 39: feos.host.v1.GetNetworkConfigRequest
+	(*GetNetworkConfigResponse)(nil),  // 40: feos.host.v1.GetNetworkConfigResponse
+	(*FreezeFilesystemRequest)(nil),   // 41: feos.host.v1.FreezeFilesystemRequest
+	(*FreezeFilesystemResponse)(nil),  // 42: feos.host.v1.FreezeFilesystemResponse
+	(*ThawFilesystemRequest)(nil),     // 43: feos.host.v1.ThawFilesystemRequest
+	(*ThawFilesystemResponse)(nil),    // 44: feos.host.v1.ThawFilesystemResponse
+	(*GetMemoryBreakdownRequest)(nil), // 45: feos.host.v1.GetMemoryBreakdownRequest
+	(*ProcessMemory)(nil),             // 46: feos.host.v1.ProcessMemory
+	(*SlabCache)(nil),                 // 47: feos.host.v1.SlabCache
+	(*MemoryBreakdown)(nil),           // 48: feos.host.v1.MemoryBreakdown
+	(*PreparePauseRequest)(nil),       // 49: feos.host.v1.PreparePauseRequest
+	(*PreparePauseResponse)(nil),      // 50: feos.host.v1.PreparePauseResponse
+	nil,                               // 51: feos.host.v1.MemoryBreakdown.MeminfoKbEntry
+	(*timestamppb.Timestamp)(nil),     // 52: google.protobuf.Timestamp
 }
 var file_feos_host_v1_host_proto_depIdxs = []int32{
 	12, // 0: feos.host.v1.MemoryResponse.mem_info:type_name -> feos.host.v1.MemInfo
@@ -3870,17 +3980,17 @@ var file_feos_host_v1_host_proto_depIdxs = []int32{
 	19, // 3: feos.host.v1.KernelStats.total:type_name -> feos.host.v1.CpuTime
 	19, // 4: feos.host.v1.KernelStats.per_cpu:type_name -> feos.host.v1.CpuTime
 	22, // 5: feos.host.v1.GetNetworkInfoResponse.devices:type_name -> feos.host.v1.NetDev
-	50, // 6: feos.host.v1.FeosLogEntry.timestamp:type_name -> google.protobuf.Timestamp
-	50, // 7: feos.host.v1.SetTimeRequest.time:type_name -> google.protobuf.Timestamp
-	50, // 8: feos.host.v1.GetTimeResponse.time:type_name -> google.protobuf.Timestamp
-	34, // 9: feos.host.v1.SetNetworkConfigRequest.routes:type_name -> feos.host.v1.NetworkRoute
-	36, // 10: feos.host.v1.SetNetworkConfigResponse.resolver_failed:type_name -> feos.host.v1.ResolverFailure
-	34, // 11: feos.host.v1.GetNetworkConfigResponse.routes:type_name -> feos.host.v1.NetworkRoute
-	44, // 12: feos.host.v1.MemoryBreakdown.processes:type_name -> feos.host.v1.ProcessMemory
-	45, // 13: feos.host.v1.MemoryBreakdown.top_slabs:type_name -> feos.host.v1.SlabCache
-	49, // 14: feos.host.v1.MemoryBreakdown.meminfo_kb:type_name -> feos.host.v1.MemoryBreakdown.MeminfoKbEntry
-	46, // 15: feos.host.v1.PreparePauseResponse.before:type_name -> feos.host.v1.MemoryBreakdown
-	46, // 16: feos.host.v1.PreparePauseResponse.after:type_name -> feos.host.v1.MemoryBreakdown
+	52, // 6: feos.host.v1.FeosLogEntry.timestamp:type_name -> google.protobuf.Timestamp
+	52, // 7: feos.host.v1.SetTimeRequest.time:type_name -> google.protobuf.Timestamp
+	52, // 8: feos.host.v1.GetTimeResponse.time:type_name -> google.protobuf.Timestamp
+	36, // 9: feos.host.v1.SetNetworkConfigRequest.routes:type_name -> feos.host.v1.NetworkRoute
+	38, // 10: feos.host.v1.SetNetworkConfigResponse.resolver_failed:type_name -> feos.host.v1.ResolverFailure
+	36, // 11: feos.host.v1.GetNetworkConfigResponse.routes:type_name -> feos.host.v1.NetworkRoute
+	46, // 12: feos.host.v1.MemoryBreakdown.processes:type_name -> feos.host.v1.ProcessMemory
+	47, // 13: feos.host.v1.MemoryBreakdown.top_slabs:type_name -> feos.host.v1.SlabCache
+	51, // 14: feos.host.v1.MemoryBreakdown.meminfo_kb:type_name -> feos.host.v1.MemoryBreakdown.MeminfoKbEntry
+	48, // 15: feos.host.v1.PreparePauseResponse.before:type_name -> feos.host.v1.MemoryBreakdown
+	48, // 16: feos.host.v1.PreparePauseResponse.after:type_name -> feos.host.v1.MemoryBreakdown
 	0,  // 17: feos.host.v1.HostService.Hostname:input_type -> feos.host.v1.HostnameRequest
 	10, // 18: feos.host.v1.HostService.GetMemory:input_type -> feos.host.v1.MemoryRequest
 	13, // 19: feos.host.v1.HostService.GetCPUInfo:input_type -> feos.host.v1.GetCPUInfoRequest
@@ -3895,34 +4005,36 @@ var file_feos_host_v1_host_proto_depIdxs = []int32{
 	27, // 28: feos.host.v1.HostService.Ping:input_type -> feos.host.v1.PingRequest
 	29, // 29: feos.host.v1.HostService.SetTime:input_type -> feos.host.v1.SetTimeRequest
 	31, // 30: feos.host.v1.HostService.GetTime:input_type -> feos.host.v1.GetTimeRequest
-	33, // 31: feos.host.v1.HostService.SetNetworkConfig:input_type -> feos.host.v1.SetNetworkConfigRequest
-	37, // 32: feos.host.v1.HostService.GetNetworkConfig:input_type -> feos.host.v1.GetNetworkConfigRequest
-	39, // 33: feos.host.v1.HostService.FreezeFilesystem:input_type -> feos.host.v1.FreezeFilesystemRequest
-	41, // 34: feos.host.v1.HostService.ThawFilesystem:input_type -> feos.host.v1.ThawFilesystemRequest
-	43, // 35: feos.host.v1.HostService.GetMemoryBreakdown:input_type -> feos.host.v1.GetMemoryBreakdownRequest
-	47, // 36: feos.host.v1.HostService.PreparePause:input_type -> feos.host.v1.PreparePauseRequest
-	1,  // 37: feos.host.v1.HostService.Hostname:output_type -> feos.host.v1.HostnameResponse
-	11, // 38: feos.host.v1.HostService.GetMemory:output_type -> feos.host.v1.MemoryResponse
-	14, // 39: feos.host.v1.HostService.GetCPUInfo:output_type -> feos.host.v1.GetCPUInfoResponse
-	17, // 40: feos.host.v1.HostService.GetKernelStats:output_type -> feos.host.v1.GetKernelStatsResponse
-	21, // 41: feos.host.v1.HostService.GetNetworkInfo:output_type -> feos.host.v1.GetNetworkInfoResponse
-	7,  // 42: feos.host.v1.HostService.Shutdown:output_type -> feos.host.v1.ShutdownResponse
-	9,  // 43: feos.host.v1.HostService.Reboot:output_type -> feos.host.v1.RebootResponse
-	3,  // 44: feos.host.v1.HostService.UpgradeFeosBinary:output_type -> feos.host.v1.UpgradeFeosBinaryResponse
-	5,  // 45: feos.host.v1.HostService.StreamKernelLogs:output_type -> feos.host.v1.KernelLogEntry
-	24, // 46: feos.host.v1.HostService.StreamFeOSLogs:output_type -> feos.host.v1.FeosLogEntry
-	26, // 47: feos.host.v1.HostService.GetVersionInfo:output_type -> feos.host.v1.GetVersionInfoResponse
-	28, // 48: feos.host.v1.HostService.Ping:output_type -> feos.host.v1.PingResponse
-	30, // 49: feos.host.v1.HostService.SetTime:output_type -> feos.host.v1.SetTimeResponse
-	32, // 50: feos.host.v1.HostService.GetTime:output_type -> feos.host.v1.GetTimeResponse
-	35, // 51: feos.host.v1.HostService.SetNetworkConfig:output_type -> feos.host.v1.SetNetworkConfigResponse
-	38, // 52: feos.host.v1.HostService.GetNetworkConfig:output_type -> feos.host.v1.GetNetworkConfigResponse
-	40, // 53: feos.host.v1.HostService.FreezeFilesystem:output_type -> feos.host.v1.FreezeFilesystemResponse
-	42, // 54: feos.host.v1.HostService.ThawFilesystem:output_type -> feos.host.v1.ThawFilesystemResponse
-	46, // 55: feos.host.v1.HostService.GetMemoryBreakdown:output_type -> feos.host.v1.MemoryBreakdown
-	48, // 56: feos.host.v1.HostService.PreparePause:output_type -> feos.host.v1.PreparePauseResponse
-	37, // [37:57] is the sub-list for method output_type
-	17, // [17:37] is the sub-list for method input_type
+	33, // 31: feos.host.v1.HostService.AdjustTime:input_type -> feos.host.v1.AdjustTimeRequest
+	35, // 32: feos.host.v1.HostService.SetNetworkConfig:input_type -> feos.host.v1.SetNetworkConfigRequest
+	39, // 33: feos.host.v1.HostService.GetNetworkConfig:input_type -> feos.host.v1.GetNetworkConfigRequest
+	41, // 34: feos.host.v1.HostService.FreezeFilesystem:input_type -> feos.host.v1.FreezeFilesystemRequest
+	43, // 35: feos.host.v1.HostService.ThawFilesystem:input_type -> feos.host.v1.ThawFilesystemRequest
+	45, // 36: feos.host.v1.HostService.GetMemoryBreakdown:input_type -> feos.host.v1.GetMemoryBreakdownRequest
+	49, // 37: feos.host.v1.HostService.PreparePause:input_type -> feos.host.v1.PreparePauseRequest
+	1,  // 38: feos.host.v1.HostService.Hostname:output_type -> feos.host.v1.HostnameResponse
+	11, // 39: feos.host.v1.HostService.GetMemory:output_type -> feos.host.v1.MemoryResponse
+	14, // 40: feos.host.v1.HostService.GetCPUInfo:output_type -> feos.host.v1.GetCPUInfoResponse
+	17, // 41: feos.host.v1.HostService.GetKernelStats:output_type -> feos.host.v1.GetKernelStatsResponse
+	21, // 42: feos.host.v1.HostService.GetNetworkInfo:output_type -> feos.host.v1.GetNetworkInfoResponse
+	7,  // 43: feos.host.v1.HostService.Shutdown:output_type -> feos.host.v1.ShutdownResponse
+	9,  // 44: feos.host.v1.HostService.Reboot:output_type -> feos.host.v1.RebootResponse
+	3,  // 45: feos.host.v1.HostService.UpgradeFeosBinary:output_type -> feos.host.v1.UpgradeFeosBinaryResponse
+	5,  // 46: feos.host.v1.HostService.StreamKernelLogs:output_type -> feos.host.v1.KernelLogEntry
+	24, // 47: feos.host.v1.HostService.StreamFeOSLogs:output_type -> feos.host.v1.FeosLogEntry
+	26, // 48: feos.host.v1.HostService.GetVersionInfo:output_type -> feos.host.v1.GetVersionInfoResponse
+	28, // 49: feos.host.v1.HostService.Ping:output_type -> feos.host.v1.PingResponse
+	30, // 50: feos.host.v1.HostService.SetTime:output_type -> feos.host.v1.SetTimeResponse
+	32, // 51: feos.host.v1.HostService.GetTime:output_type -> feos.host.v1.GetTimeResponse
+	34, // 52: feos.host.v1.HostService.AdjustTime:output_type -> feos.host.v1.AdjustTimeResponse
+	37, // 53: feos.host.v1.HostService.SetNetworkConfig:output_type -> feos.host.v1.SetNetworkConfigResponse
+	40, // 54: feos.host.v1.HostService.GetNetworkConfig:output_type -> feos.host.v1.GetNetworkConfigResponse
+	42, // 55: feos.host.v1.HostService.FreezeFilesystem:output_type -> feos.host.v1.FreezeFilesystemResponse
+	44, // 56: feos.host.v1.HostService.ThawFilesystem:output_type -> feos.host.v1.ThawFilesystemResponse
+	48, // 57: feos.host.v1.HostService.GetMemoryBreakdown:output_type -> feos.host.v1.MemoryBreakdown
+	50, // 58: feos.host.v1.HostService.PreparePause:output_type -> feos.host.v1.PreparePauseResponse
+	38, // [38:59] is the sub-list for method output_type
+	17, // [17:38] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
 	17, // [17:17] is the sub-list for extension extendee
 	0,  // [0:17] is the sub-list for field type_name
@@ -3933,14 +4045,14 @@ func file_feos_host_v1_host_proto_init() {
 	if File_feos_host_v1_host_proto != nil {
 		return
 	}
-	file_feos_host_v1_host_proto_msgTypes[47].OneofWrappers = []any{}
+	file_feos_host_v1_host_proto_msgTypes[49].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_feos_host_v1_host_proto_rawDesc), len(file_feos_host_v1_host_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   50,
+			NumMessages:   52,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

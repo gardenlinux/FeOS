@@ -33,6 +33,7 @@ const (
 	HostService_Ping_FullMethodName               = "/feos.host.v1.HostService/Ping"
 	HostService_SetTime_FullMethodName            = "/feos.host.v1.HostService/SetTime"
 	HostService_GetTime_FullMethodName            = "/feos.host.v1.HostService/GetTime"
+	HostService_AdjustTime_FullMethodName         = "/feos.host.v1.HostService/AdjustTime"
 	HostService_SetNetworkConfig_FullMethodName   = "/feos.host.v1.HostService/SetNetworkConfig"
 	HostService_GetNetworkConfig_FullMethodName   = "/feos.host.v1.HostService/GetNetworkConfig"
 	HostService_FreezeFilesystem_FullMethodName   = "/feos.host.v1.HostService/FreezeFilesystem"
@@ -73,6 +74,10 @@ type HostServiceClient interface {
 	SetTime(ctx context.Context, in *SetTimeRequest, opts ...grpc.CallOption) (*SetTimeResponse, error)
 	// Reads CLOCK_REALTIME.
 	GetTime(ctx context.Context, in *GetTimeRequest, opts ...grpc.CallOption) (*GetTimeResponse, error)
+	// Corrects CLOCK_REALTIME by an offset its host measured, and learns the
+	// clock's frequency from the offsets (ADR 0027): an offset over 100 ms
+	// steps the clock, a smaller one is slewed.
+	AdjustTime(ctx context.Context, in *AdjustTimeRequest, opts ...grpc.CallOption) (*AdjustTimeResponse, error)
 	// Configures an interface with static IPv4 and IPv6 addresses, the
 	// default routes, the DNS resolvers and the hostname. A guest has no DHCP: its host pushes
 	// this after every boot and every resume. Pushing the same configuration
@@ -264,6 +269,16 @@ func (c *hostServiceClient) GetTime(ctx context.Context, in *GetTimeRequest, opt
 	return out, nil
 }
 
+func (c *hostServiceClient) AdjustTime(ctx context.Context, in *AdjustTimeRequest, opts ...grpc.CallOption) (*AdjustTimeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdjustTimeResponse)
+	err := c.cc.Invoke(ctx, HostService_AdjustTime_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostServiceClient) SetNetworkConfig(ctx context.Context, in *SetNetworkConfigRequest, opts ...grpc.CallOption) (*SetNetworkConfigResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetNetworkConfigResponse)
@@ -356,6 +371,10 @@ type HostServiceServer interface {
 	SetTime(context.Context, *SetTimeRequest) (*SetTimeResponse, error)
 	// Reads CLOCK_REALTIME.
 	GetTime(context.Context, *GetTimeRequest) (*GetTimeResponse, error)
+	// Corrects CLOCK_REALTIME by an offset its host measured, and learns the
+	// clock's frequency from the offsets (ADR 0027): an offset over 100 ms
+	// steps the clock, a smaller one is slewed.
+	AdjustTime(context.Context, *AdjustTimeRequest) (*AdjustTimeResponse, error)
 	// Configures an interface with static IPv4 and IPv6 addresses, the
 	// default routes, the DNS resolvers and the hostname. A guest has no DHCP: its host pushes
 	// this after every boot and every resume. Pushing the same configuration
@@ -430,6 +449,9 @@ func (UnimplementedHostServiceServer) SetTime(context.Context, *SetTimeRequest) 
 }
 func (UnimplementedHostServiceServer) GetTime(context.Context, *GetTimeRequest) (*GetTimeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTime not implemented")
+}
+func (UnimplementedHostServiceServer) AdjustTime(context.Context, *AdjustTimeRequest) (*AdjustTimeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdjustTime not implemented")
 }
 func (UnimplementedHostServiceServer) SetNetworkConfig(context.Context, *SetNetworkConfigRequest) (*SetNetworkConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetNetworkConfig not implemented")
@@ -708,6 +730,24 @@ func _HostService_GetTime_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostService_AdjustTime_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdjustTimeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).AdjustTime(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_AdjustTime_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).AdjustTime(ctx, req.(*AdjustTimeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostService_SetNetworkConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetNetworkConfigRequest)
 	if err := dec(in); err != nil {
@@ -870,6 +910,10 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTime",
 			Handler:    _HostService_GetTime_Handler,
+		},
+		{
+			MethodName: "AdjustTime",
+			Handler:    _HostService_AdjustTime_Handler,
 		},
 		{
 			MethodName: "SetNetworkConfig",

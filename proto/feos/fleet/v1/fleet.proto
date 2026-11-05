@@ -297,6 +297,79 @@ message SealedBindings {
 message PodBindings {
   repeated KubeBinding kube = 1;
   repeated SshBinding ssh = 2;
+  // ADR 0028: HTTP APIs the pod calls at 169.254.169.1 by a name.
+  repeated HttpBinding http = 3;
+  // The pod's interception CAs, oldest first; feos-authn issues leaf
+  // certificates from the last one. Set when an HTTP binding intercepts.
+  repeated InterceptCa intercept_cas = 4;
+}
+
+// An HTTP API the pod calls by a name (ADR 0028 §1). feos-authn adds the
+// credential and dials the upstream over TLS from the pod's address.
+message HttpBinding {
+  // The name mode's DNS label; in the intercept mode the binding's name for
+  // records and errors, the upstream's host being what the pod resolves.
+  string name = 1;
+  // "https://host[:port]"; plain http is refused.
+  string upstream = 2;
+  // PEM; the WebPKI when empty.
+  string ca_pem = 3;
+  HttpBindingMode mode = 4;
+  // Path prefixes the pod may reach (each beginning
+  // with "/"); all paths when empty.
+  repeated string path_prefixes = 5;
+  // Send X-Forwarded-Host: <name> and X-Forwarded-Proto: http (name mode).
+  bool forwarded_host = 6;
+  // Requests per second per pod and their burst; no limit when unset.
+  RateLimit rate_limit = 7;
+  oneof credential {
+    HeaderCredential headers = 10;
+    BasicCredential basic = 11;
+    OAuthClientCredentials oauth2 = 12;
+    ClientCertificate client_certificate = 13;
+  }
+}
+
+enum HttpBindingMode {
+  HTTP_BINDING_MODE_NAME = 0;
+  HTTP_BINDING_MODE_INTERCEPT = 1;
+}
+
+message HeaderCredential {
+  // Header name to value, e.g. "X-API-Key" or "Authorization".
+  map<string, string> headers = 1;
+}
+
+message BasicCredential {
+  string user = 1;
+  string password = 2;
+}
+
+// OAuth 2.0 client credentials (RFC 6749 §4.4): feos-authn fetches the
+// token and renews it at three quarters of its lifetime.
+message OAuthClientCredentials {
+  // "https://…"; dialed under the same address checks as the upstream.
+  string token_url = 1;
+  string client_id = 2;
+  string client_secret = 3;
+  string scope = 4;
+  string audience = 5;
+  // The client authenticates in the body (client_secret_post) instead of
+  // with Basic (client_secret_basic).
+  bool client_auth_in_body = 6;
+}
+
+message RateLimit {
+  uint32 per_second = 1;
+  uint32 burst = 2;
+}
+
+// An interception CA of a pod (ADR 0028 §5): ECDSA P-256, name-constrained
+// to the intercepted host names at its issue.
+message InterceptCa {
+  string cert_pem = 1;
+  // PKCS#8 PEM.
+  string key_pem = 2;
 }
 
 // A Kubernetes API that the pod reaches on a loopback port in plaintext,

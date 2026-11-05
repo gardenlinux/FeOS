@@ -19,18 +19,19 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PodService_CreatePod_FullMethodName        = "/feos.pod.v1.PodService/CreatePod"
-	PodService_StartPod_FullMethodName         = "/feos.pod.v1.PodService/StartPod"
-	PodService_StopPod_FullMethodName          = "/feos.pod.v1.PodService/StopPod"
-	PodService_DeletePod_FullMethodName        = "/feos.pod.v1.PodService/DeletePod"
-	PodService_GetPod_FullMethodName           = "/feos.pod.v1.PodService/GetPod"
-	PodService_ListPods_FullMethodName         = "/feos.pod.v1.PodService/ListPods"
-	PodService_StreamPodEvents_FullMethodName  = "/feos.pod.v1.PodService/StreamPodEvents"
-	PodService_SuspendPod_FullMethodName       = "/feos.pod.v1.PodService/SuspendPod"
-	PodService_ResumePod_FullMethodName        = "/feos.pod.v1.PodService/ResumePod"
-	PodService_HibernatePod_FullMethodName     = "/feos.pod.v1.PodService/HibernatePod"
-	PodService_RestorePod_FullMethodName       = "/feos.pod.v1.PodService/RestorePod"
-	PodService_StreamPodConsole_FullMethodName = "/feos.pod.v1.PodService/StreamPodConsole"
+	PodService_CreatePod_FullMethodName          = "/feos.pod.v1.PodService/CreatePod"
+	PodService_StartPod_FullMethodName           = "/feos.pod.v1.PodService/StartPod"
+	PodService_StopPod_FullMethodName            = "/feos.pod.v1.PodService/StopPod"
+	PodService_DeletePod_FullMethodName          = "/feos.pod.v1.PodService/DeletePod"
+	PodService_GetPod_FullMethodName             = "/feos.pod.v1.PodService/GetPod"
+	PodService_ListPods_FullMethodName           = "/feos.pod.v1.PodService/ListPods"
+	PodService_StreamPodEvents_FullMethodName    = "/feos.pod.v1.PodService/StreamPodEvents"
+	PodService_SuspendPod_FullMethodName         = "/feos.pod.v1.PodService/SuspendPod"
+	PodService_ResumePod_FullMethodName          = "/feos.pod.v1.PodService/ResumePod"
+	PodService_SetPodHttpBindings_FullMethodName = "/feos.pod.v1.PodService/SetPodHttpBindings"
+	PodService_HibernatePod_FullMethodName       = "/feos.pod.v1.PodService/HibernatePod"
+	PodService_RestorePod_FullMethodName         = "/feos.pod.v1.PodService/RestorePod"
+	PodService_StreamPodConsole_FullMethodName   = "/feos.pod.v1.PodService/StreamPodConsole"
 )
 
 // PodServiceClient is the client API for PodService service.
@@ -89,6 +90,12 @@ type PodServiceClient interface {
 	// one of a pod without memory, or one whose head is being put, the
 	// resume waits for, and restores the pod from its checkpoint.
 	ResumePod(ctx context.Context, in *ResumePodRequest, opts ...grpc.CallOption) (*ResumePodResponse, error)
+	// Sets a pod's HTTP bindings' clear part (ADR 0028) in its record and,
+	// while it runs, in its resolver answers and its containers' trust files,
+	// and has its feos-authn fetch its sealed bindings again. The whole part
+	// is stated; what it does not name is gone. A pod that does not run
+	// takes it at its next start, resume or restore.
+	SetPodHttpBindings(ctx context.Context, in *SetPodHttpBindingsRequest, opts ...grpc.CallOption) (*SetPodHttpBindingsResponse, error)
 	// Takes the pod off the node into object storage: suspends it if it
 	// runs, seals its disk, its volumes and its memory, uploads them with
 	// its spec, and frees what it held on the node: its microVM, its disk,
@@ -230,6 +237,16 @@ func (c *podServiceClient) ResumePod(ctx context.Context, in *ResumePodRequest, 
 	return out, nil
 }
 
+func (c *podServiceClient) SetPodHttpBindings(ctx context.Context, in *SetPodHttpBindingsRequest, opts ...grpc.CallOption) (*SetPodHttpBindingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPodHttpBindingsResponse)
+	err := c.cc.Invoke(ctx, PodService_SetPodHttpBindings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *podServiceClient) HibernatePod(ctx context.Context, in *HibernatePodRequest, opts ...grpc.CallOption) (*HibernatePodResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HibernatePodResponse)
@@ -319,6 +336,12 @@ type PodServiceServer interface {
 	// one of a pod without memory, or one whose head is being put, the
 	// resume waits for, and restores the pod from its checkpoint.
 	ResumePod(context.Context, *ResumePodRequest) (*ResumePodResponse, error)
+	// Sets a pod's HTTP bindings' clear part (ADR 0028) in its record and,
+	// while it runs, in its resolver answers and its containers' trust files,
+	// and has its feos-authn fetch its sealed bindings again. The whole part
+	// is stated; what it does not name is gone. A pod that does not run
+	// takes it at its next start, resume or restore.
+	SetPodHttpBindings(context.Context, *SetPodHttpBindingsRequest) (*SetPodHttpBindingsResponse, error)
 	// Takes the pod off the node into object storage: suspends it if it
 	// runs, seals its disk, its volumes and its memory, uploads them with
 	// its spec, and frees what it held on the node: its microVM, its disk,
@@ -387,6 +410,9 @@ func (UnimplementedPodServiceServer) SuspendPod(context.Context, *SuspendPodRequ
 }
 func (UnimplementedPodServiceServer) ResumePod(context.Context, *ResumePodRequest) (*ResumePodResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResumePod not implemented")
+}
+func (UnimplementedPodServiceServer) SetPodHttpBindings(context.Context, *SetPodHttpBindingsRequest) (*SetPodHttpBindingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetPodHttpBindings not implemented")
 }
 func (UnimplementedPodServiceServer) HibernatePod(context.Context, *HibernatePodRequest) (*HibernatePodResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HibernatePod not implemented")
@@ -573,6 +599,24 @@ func _PodService_ResumePod_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PodService_SetPodHttpBindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPodHttpBindingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PodServiceServer).SetPodHttpBindings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PodService_SetPodHttpBindings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PodServiceServer).SetPodHttpBindings(ctx, req.(*SetPodHttpBindingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _PodService_HibernatePod_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HibernatePodRequest)
 	if err := dec(in); err != nil {
@@ -654,6 +698,10 @@ var PodService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResumePod",
 			Handler:    _PodService_ResumePod_Handler,
+		},
+		{
+			MethodName: "SetPodHttpBindings",
+			Handler:    _PodService_SetPodHttpBindings_Handler,
 		},
 		{
 			MethodName: "HibernatePod",

@@ -24,6 +24,52 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type HttpBindingMode int32
+
+const (
+	HttpBindingMode_HTTP_BINDING_MODE_NAME      HttpBindingMode = 0
+	HttpBindingMode_HTTP_BINDING_MODE_INTERCEPT HttpBindingMode = 1
+)
+
+// Enum value maps for HttpBindingMode.
+var (
+	HttpBindingMode_name = map[int32]string{
+		0: "HTTP_BINDING_MODE_NAME",
+		1: "HTTP_BINDING_MODE_INTERCEPT",
+	}
+	HttpBindingMode_value = map[string]int32{
+		"HTTP_BINDING_MODE_NAME":      0,
+		"HTTP_BINDING_MODE_INTERCEPT": 1,
+	}
+)
+
+func (x HttpBindingMode) Enum() *HttpBindingMode {
+	p := new(HttpBindingMode)
+	*p = x
+	return p
+}
+
+func (x HttpBindingMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HttpBindingMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_feos_fleet_v1_fleet_proto_enumTypes[0].Descriptor()
+}
+
+func (HttpBindingMode) Type() protoreflect.EnumType {
+	return &file_feos_fleet_v1_fleet_proto_enumTypes[0]
+}
+
+func (x HttpBindingMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HttpBindingMode.Descriptor instead.
+func (HttpBindingMode) EnumDescriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{0}
+}
+
 type JoinRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The join token's secret: "feos-join-<secret>", without the pin.
@@ -1311,9 +1357,14 @@ func (x *SealedBindings) GetVersion() string {
 // What a sealed box holds: all of a pod's bindings (ADR 0014). A change
 // states the whole set again.
 type PodBindings struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kube          []*KubeBinding         `protobuf:"bytes,1,rep,name=kube,proto3" json:"kube,omitempty"`
-	Ssh           []*SshBinding          `protobuf:"bytes,2,rep,name=ssh,proto3" json:"ssh,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kube  []*KubeBinding         `protobuf:"bytes,1,rep,name=kube,proto3" json:"kube,omitempty"`
+	Ssh   []*SshBinding          `protobuf:"bytes,2,rep,name=ssh,proto3" json:"ssh,omitempty"`
+	// ADR 0028: HTTP APIs the pod calls at 169.254.169.1 by a name.
+	Http []*HttpBinding `protobuf:"bytes,3,rep,name=http,proto3" json:"http,omitempty"`
+	// The pod's interception CAs, oldest first; feos-authn issues leaf
+	// certificates from the last one. Set when an HTTP binding intercepts.
+	InterceptCas  []*InterceptCa `protobuf:"bytes,4,rep,name=intercept_cas,json=interceptCas,proto3" json:"intercept_cas,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1362,6 +1413,493 @@ func (x *PodBindings) GetSsh() []*SshBinding {
 	return nil
 }
 
+func (x *PodBindings) GetHttp() []*HttpBinding {
+	if x != nil {
+		return x.Http
+	}
+	return nil
+}
+
+func (x *PodBindings) GetInterceptCas() []*InterceptCa {
+	if x != nil {
+		return x.InterceptCas
+	}
+	return nil
+}
+
+// An HTTP API the pod calls by a name (ADR 0028 §1). feos-authn adds the
+// credential and dials the upstream over TLS from the pod's address.
+type HttpBinding struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name mode's DNS label; in the intercept mode the binding's name for
+	// records and errors, the upstream's host being what the pod resolves.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// "https://host[:port]"; plain http is refused.
+	Upstream string `protobuf:"bytes,2,opt,name=upstream,proto3" json:"upstream,omitempty"`
+	// PEM; the WebPKI when empty.
+	CaPem string          `protobuf:"bytes,3,opt,name=ca_pem,json=caPem,proto3" json:"ca_pem,omitempty"`
+	Mode  HttpBindingMode `protobuf:"varint,4,opt,name=mode,proto3,enum=feos.fleet.v1.HttpBindingMode" json:"mode,omitempty"`
+	// Path prefixes the pod may reach (each beginning
+	// with "/"); all paths when empty.
+	PathPrefixes []string `protobuf:"bytes,5,rep,name=path_prefixes,json=pathPrefixes,proto3" json:"path_prefixes,omitempty"`
+	// Send X-Forwarded-Host: <name> and X-Forwarded-Proto: http (name mode).
+	ForwardedHost bool `protobuf:"varint,6,opt,name=forwarded_host,json=forwardedHost,proto3" json:"forwarded_host,omitempty"`
+	// Requests per second per pod and their burst; no limit when unset.
+	RateLimit *RateLimit `protobuf:"bytes,7,opt,name=rate_limit,json=rateLimit,proto3" json:"rate_limit,omitempty"`
+	// Types that are valid to be assigned to Credential:
+	//
+	//	*HttpBinding_Headers
+	//	*HttpBinding_Basic
+	//	*HttpBinding_Oauth2
+	//	*HttpBinding_ClientCertificate
+	Credential    isHttpBinding_Credential `protobuf_oneof:"credential"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HttpBinding) Reset() {
+	*x = HttpBinding{}
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HttpBinding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HttpBinding) ProtoMessage() {}
+
+func (x *HttpBinding) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HttpBinding.ProtoReflect.Descriptor instead.
+func (*HttpBinding) Descriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *HttpBinding) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *HttpBinding) GetUpstream() string {
+	if x != nil {
+		return x.Upstream
+	}
+	return ""
+}
+
+func (x *HttpBinding) GetCaPem() string {
+	if x != nil {
+		return x.CaPem
+	}
+	return ""
+}
+
+func (x *HttpBinding) GetMode() HttpBindingMode {
+	if x != nil {
+		return x.Mode
+	}
+	return HttpBindingMode_HTTP_BINDING_MODE_NAME
+}
+
+func (x *HttpBinding) GetPathPrefixes() []string {
+	if x != nil {
+		return x.PathPrefixes
+	}
+	return nil
+}
+
+func (x *HttpBinding) GetForwardedHost() bool {
+	if x != nil {
+		return x.ForwardedHost
+	}
+	return false
+}
+
+func (x *HttpBinding) GetRateLimit() *RateLimit {
+	if x != nil {
+		return x.RateLimit
+	}
+	return nil
+}
+
+func (x *HttpBinding) GetCredential() isHttpBinding_Credential {
+	if x != nil {
+		return x.Credential
+	}
+	return nil
+}
+
+func (x *HttpBinding) GetHeaders() *HeaderCredential {
+	if x != nil {
+		if x, ok := x.Credential.(*HttpBinding_Headers); ok {
+			return x.Headers
+		}
+	}
+	return nil
+}
+
+func (x *HttpBinding) GetBasic() *BasicCredential {
+	if x != nil {
+		if x, ok := x.Credential.(*HttpBinding_Basic); ok {
+			return x.Basic
+		}
+	}
+	return nil
+}
+
+func (x *HttpBinding) GetOauth2() *OAuthClientCredentials {
+	if x != nil {
+		if x, ok := x.Credential.(*HttpBinding_Oauth2); ok {
+			return x.Oauth2
+		}
+	}
+	return nil
+}
+
+func (x *HttpBinding) GetClientCertificate() *ClientCertificate {
+	if x != nil {
+		if x, ok := x.Credential.(*HttpBinding_ClientCertificate); ok {
+			return x.ClientCertificate
+		}
+	}
+	return nil
+}
+
+type isHttpBinding_Credential interface {
+	isHttpBinding_Credential()
+}
+
+type HttpBinding_Headers struct {
+	Headers *HeaderCredential `protobuf:"bytes,10,opt,name=headers,proto3,oneof"`
+}
+
+type HttpBinding_Basic struct {
+	Basic *BasicCredential `protobuf:"bytes,11,opt,name=basic,proto3,oneof"`
+}
+
+type HttpBinding_Oauth2 struct {
+	Oauth2 *OAuthClientCredentials `protobuf:"bytes,12,opt,name=oauth2,proto3,oneof"`
+}
+
+type HttpBinding_ClientCertificate struct {
+	ClientCertificate *ClientCertificate `protobuf:"bytes,13,opt,name=client_certificate,json=clientCertificate,proto3,oneof"`
+}
+
+func (*HttpBinding_Headers) isHttpBinding_Credential() {}
+
+func (*HttpBinding_Basic) isHttpBinding_Credential() {}
+
+func (*HttpBinding_Oauth2) isHttpBinding_Credential() {}
+
+func (*HttpBinding_ClientCertificate) isHttpBinding_Credential() {}
+
+type HeaderCredential struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Header name to value, e.g. "X-API-Key" or "Authorization".
+	Headers       map[string]string `protobuf:"bytes,1,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HeaderCredential) Reset() {
+	*x = HeaderCredential{}
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HeaderCredential) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HeaderCredential) ProtoMessage() {}
+
+func (x *HeaderCredential) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HeaderCredential.ProtoReflect.Descriptor instead.
+func (*HeaderCredential) Descriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *HeaderCredential) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+type BasicCredential struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BasicCredential) Reset() {
+	*x = BasicCredential{}
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BasicCredential) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BasicCredential) ProtoMessage() {}
+
+func (x *BasicCredential) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BasicCredential.ProtoReflect.Descriptor instead.
+func (*BasicCredential) Descriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *BasicCredential) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+func (x *BasicCredential) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+// OAuth 2.0 client credentials (RFC 6749 §4.4): feos-authn fetches the
+// token and renews it at three quarters of its lifetime.
+type OAuthClientCredentials struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "https://…"; dialed under the same address checks as the upstream.
+	TokenUrl     string `protobuf:"bytes,1,opt,name=token_url,json=tokenUrl,proto3" json:"token_url,omitempty"`
+	ClientId     string `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientSecret string `protobuf:"bytes,3,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	Scope        string `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
+	Audience     string `protobuf:"bytes,5,opt,name=audience,proto3" json:"audience,omitempty"`
+	// The client authenticates in the body (client_secret_post) instead of
+	// with Basic (client_secret_basic).
+	ClientAuthInBody bool `protobuf:"varint,6,opt,name=client_auth_in_body,json=clientAuthInBody,proto3" json:"client_auth_in_body,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *OAuthClientCredentials) Reset() {
+	*x = OAuthClientCredentials{}
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OAuthClientCredentials) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OAuthClientCredentials) ProtoMessage() {}
+
+func (x *OAuthClientCredentials) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OAuthClientCredentials.ProtoReflect.Descriptor instead.
+func (*OAuthClientCredentials) Descriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *OAuthClientCredentials) GetTokenUrl() string {
+	if x != nil {
+		return x.TokenUrl
+	}
+	return ""
+}
+
+func (x *OAuthClientCredentials) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *OAuthClientCredentials) GetClientSecret() string {
+	if x != nil {
+		return x.ClientSecret
+	}
+	return ""
+}
+
+func (x *OAuthClientCredentials) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *OAuthClientCredentials) GetAudience() string {
+	if x != nil {
+		return x.Audience
+	}
+	return ""
+}
+
+func (x *OAuthClientCredentials) GetClientAuthInBody() bool {
+	if x != nil {
+		return x.ClientAuthInBody
+	}
+	return false
+}
+
+type RateLimit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PerSecond     uint32                 `protobuf:"varint,1,opt,name=per_second,json=perSecond,proto3" json:"per_second,omitempty"`
+	Burst         uint32                 `protobuf:"varint,2,opt,name=burst,proto3" json:"burst,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RateLimit) Reset() {
+	*x = RateLimit{}
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RateLimit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RateLimit) ProtoMessage() {}
+
+func (x *RateLimit) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RateLimit.ProtoReflect.Descriptor instead.
+func (*RateLimit) Descriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *RateLimit) GetPerSecond() uint32 {
+	if x != nil {
+		return x.PerSecond
+	}
+	return 0
+}
+
+func (x *RateLimit) GetBurst() uint32 {
+	if x != nil {
+		return x.Burst
+	}
+	return 0
+}
+
+// An interception CA of a pod (ADR 0028 §5): ECDSA P-256, name-constrained
+// to the intercepted host names at its issue.
+type InterceptCa struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	CertPem string                 `protobuf:"bytes,1,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	// PKCS#8 PEM.
+	KeyPem        string `protobuf:"bytes,2,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterceptCa) Reset() {
+	*x = InterceptCa{}
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterceptCa) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterceptCa) ProtoMessage() {}
+
+func (x *InterceptCa) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterceptCa.ProtoReflect.Descriptor instead.
+func (*InterceptCa) Descriptor() ([]byte, []int) {
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *InterceptCa) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *InterceptCa) GetKeyPem() string {
+	if x != nil {
+		return x.KeyPem
+	}
+	return ""
+}
+
 // A Kubernetes API that the pod reaches on a loopback port in plaintext,
 // and to which feos-authn adds the credential.
 type KubeBinding struct {
@@ -1387,7 +1925,7 @@ type KubeBinding struct {
 
 func (x *KubeBinding) Reset() {
 	*x = KubeBinding{}
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[18]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1399,7 +1937,7 @@ func (x *KubeBinding) String() string {
 func (*KubeBinding) ProtoMessage() {}
 
 func (x *KubeBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[18]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1412,7 +1950,7 @@ func (x *KubeBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KubeBinding.ProtoReflect.Descriptor instead.
 func (*KubeBinding) Descriptor() ([]byte, []int) {
-	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{18}
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *KubeBinding) GetName() string {
@@ -1501,7 +2039,7 @@ type ClientCertificate struct {
 
 func (x *ClientCertificate) Reset() {
 	*x = ClientCertificate{}
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[19]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +2051,7 @@ func (x *ClientCertificate) String() string {
 func (*ClientCertificate) ProtoMessage() {}
 
 func (x *ClientCertificate) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[19]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +2064,7 @@ func (x *ClientCertificate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientCertificate.ProtoReflect.Descriptor instead.
 func (*ClientCertificate) Descriptor() ([]byte, []int) {
-	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{19}
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ClientCertificate) GetCertPem() string {
@@ -1560,7 +2098,7 @@ type SshBinding struct {
 
 func (x *SshBinding) Reset() {
 	*x = SshBinding{}
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[20]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1572,7 +2110,7 @@ func (x *SshBinding) String() string {
 func (*SshBinding) ProtoMessage() {}
 
 func (x *SshBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[20]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1585,7 +2123,7 @@ func (x *SshBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SshBinding.ProtoReflect.Descriptor instead.
 func (*SshBinding) Descriptor() ([]byte, []int) {
-	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{20}
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SshBinding) GetName() string {
@@ -1637,7 +2175,7 @@ type JoinMeshRequest struct {
 
 func (x *JoinMeshRequest) Reset() {
 	*x = JoinMeshRequest{}
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[21]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1649,7 +2187,7 @@ func (x *JoinMeshRequest) String() string {
 func (*JoinMeshRequest) ProtoMessage() {}
 
 func (x *JoinMeshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[21]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1662,7 +2200,7 @@ func (x *JoinMeshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinMeshRequest.ProtoReflect.Descriptor instead.
 func (*JoinMeshRequest) Descriptor() ([]byte, []int) {
-	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{21}
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *JoinMeshRequest) GetPublicKey() []byte {
@@ -1693,7 +2231,7 @@ type JoinMeshResponse struct {
 
 func (x *JoinMeshResponse) Reset() {
 	*x = JoinMeshResponse{}
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[22]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1705,7 +2243,7 @@ func (x *JoinMeshResponse) String() string {
 func (*JoinMeshResponse) ProtoMessage() {}
 
 func (x *JoinMeshResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[22]
+	mi := &file_feos_fleet_v1_fleet_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1718,7 +2256,7 @@ func (x *JoinMeshResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinMeshResponse.ProtoReflect.Descriptor instead.
 func (*JoinMeshResponse) Descriptor() ([]byte, []int) {
-	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{22}
+	return file_feos_fleet_v1_fleet_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *JoinMeshResponse) GetPodNetwork() string {
@@ -1834,10 +2372,50 @@ const file_feos_fleet_v1_fleet_proto_rawDesc = "" +
 	"\n" +
 	"ciphertext\x18\x02 \x01(\fR\n" +
 	"ciphertext\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\"j\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\"\xdb\x01\n" +
 	"\vPodBindings\x12.\n" +
 	"\x04kube\x18\x01 \x03(\v2\x1a.feos.fleet.v1.KubeBindingR\x04kube\x12+\n" +
-	"\x03ssh\x18\x02 \x03(\v2\x19.feos.fleet.v1.SshBindingR\x03ssh\"\xfe\x01\n" +
+	"\x03ssh\x18\x02 \x03(\v2\x19.feos.fleet.v1.SshBindingR\x03ssh\x12.\n" +
+	"\x04http\x18\x03 \x03(\v2\x1a.feos.fleet.v1.HttpBindingR\x04http\x12?\n" +
+	"\rintercept_cas\x18\x04 \x03(\v2\x1a.feos.fleet.v1.InterceptCaR\finterceptCas\"\xa4\x04\n" +
+	"\vHttpBinding\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
+	"\bupstream\x18\x02 \x01(\tR\bupstream\x12\x15\n" +
+	"\x06ca_pem\x18\x03 \x01(\tR\x05caPem\x122\n" +
+	"\x04mode\x18\x04 \x01(\x0e2\x1e.feos.fleet.v1.HttpBindingModeR\x04mode\x12#\n" +
+	"\rpath_prefixes\x18\x05 \x03(\tR\fpathPrefixes\x12%\n" +
+	"\x0eforwarded_host\x18\x06 \x01(\bR\rforwardedHost\x127\n" +
+	"\n" +
+	"rate_limit\x18\a \x01(\v2\x18.feos.fleet.v1.RateLimitR\trateLimit\x12;\n" +
+	"\aheaders\x18\n" +
+	" \x01(\v2\x1f.feos.fleet.v1.HeaderCredentialH\x00R\aheaders\x126\n" +
+	"\x05basic\x18\v \x01(\v2\x1e.feos.fleet.v1.BasicCredentialH\x00R\x05basic\x12?\n" +
+	"\x06oauth2\x18\f \x01(\v2%.feos.fleet.v1.OAuthClientCredentialsH\x00R\x06oauth2\x12Q\n" +
+	"\x12client_certificate\x18\r \x01(\v2 .feos.fleet.v1.ClientCertificateH\x00R\x11clientCertificateB\f\n" +
+	"\n" +
+	"credential\"\x96\x01\n" +
+	"\x10HeaderCredential\x12F\n" +
+	"\aheaders\x18\x01 \x03(\v2,.feos.fleet.v1.HeaderCredential.HeadersEntryR\aheaders\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"A\n" +
+	"\x0fBasicCredential\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"\xd8\x01\n" +
+	"\x16OAuthClientCredentials\x12\x1b\n" +
+	"\ttoken_url\x18\x01 \x01(\tR\btokenUrl\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12#\n" +
+	"\rclient_secret\x18\x03 \x01(\tR\fclientSecret\x12\x14\n" +
+	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x1a\n" +
+	"\baudience\x18\x05 \x01(\tR\baudience\x12-\n" +
+	"\x13client_auth_in_body\x18\x06 \x01(\bR\x10clientAuthInBody\"@\n" +
+	"\tRateLimit\x12\x1d\n" +
+	"\n" +
+	"per_second\x18\x01 \x01(\rR\tperSecond\x12\x14\n" +
+	"\x05burst\x18\x02 \x01(\rR\x05burst\"A\n" +
+	"\vInterceptCa\x12\x19\n" +
+	"\bcert_pem\x18\x01 \x01(\tR\acertPem\x12\x17\n" +
+	"\akey_pem\x18\x02 \x01(\tR\x06keyPem\"\xfe\x01\n" +
 	"\vKubeBinding\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\rR\x04port\x12\x16\n" +
@@ -1868,7 +2446,10 @@ const file_feos_fleet_v1_fleet_proto_rawDesc = "" +
 	"\vpod_network\x18\x01 \x01(\tR\n" +
 	"podNetwork\x12\x1d\n" +
 	"\n" +
-	"pod_prefix\x18\x02 \x01(\tR\tpodPrefix2\x87\x04\n" +
+	"pod_prefix\x18\x02 \x01(\tR\tpodPrefix*N\n" +
+	"\x0fHttpBindingMode\x12\x1a\n" +
+	"\x16HTTP_BINDING_MODE_NAME\x10\x00\x12\x1f\n" +
+	"\x1bHTTP_BINDING_MODE_INTERCEPT\x10\x012\x87\x04\n" +
 	"\fFleetService\x12?\n" +
 	"\x04Join\x12\x1a.feos.fleet.v1.JoinRequest\x1a\x1b.feos.fleet.v1.JoinResponse\x12c\n" +
 	"\x10RenewCertificate\x12&.feos.fleet.v1.RenewCertificateRequest\x1a'.feos.fleet.v1.RenewCertificateResponse\x12M\n" +
@@ -1889,72 +2470,90 @@ func file_feos_fleet_v1_fleet_proto_rawDescGZIP() []byte {
 	return file_feos_fleet_v1_fleet_proto_rawDescData
 }
 
-var file_feos_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_feos_fleet_v1_fleet_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_feos_fleet_v1_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_feos_fleet_v1_fleet_proto_goTypes = []any{
-	(*JoinRequest)(nil),                 // 0: feos.fleet.v1.JoinRequest
-	(*JoinResponse)(nil),                // 1: feos.fleet.v1.JoinResponse
-	(*ControlPlaneInstance)(nil),        // 2: feos.fleet.v1.ControlPlaneInstance
-	(*RenewCertificateRequest)(nil),     // 3: feos.fleet.v1.RenewCertificateRequest
-	(*RenewCertificateResponse)(nil),    // 4: feos.fleet.v1.RenewCertificateResponse
-	(*Certificate)(nil),                 // 5: feos.fleet.v1.Certificate
-	(*Telemetry)(nil),                   // 6: feos.fleet.v1.Telemetry
-	(*Versions)(nil),                    // 7: feos.fleet.v1.Versions
-	(*TelemetryResponse)(nil),           // 8: feos.fleet.v1.TelemetryResponse
-	(*EventBatch)(nil),                  // 9: feos.fleet.v1.EventBatch
-	(*Event)(nil),                       // 10: feos.fleet.v1.Event
-	(*AuditRecord)(nil),                 // 11: feos.fleet.v1.AuditRecord
-	(*NodeEvent)(nil),                   // 12: feos.fleet.v1.NodeEvent
-	(*EventAck)(nil),                    // 13: feos.fleet.v1.EventAck
-	(*IssuePodCredentialsRequest)(nil),  // 14: feos.fleet.v1.IssuePodCredentialsRequest
-	(*IssuePodCredentialsResponse)(nil), // 15: feos.fleet.v1.IssuePodCredentialsResponse
-	(*SealedBindings)(nil),              // 16: feos.fleet.v1.SealedBindings
-	(*PodBindings)(nil),                 // 17: feos.fleet.v1.PodBindings
-	(*KubeBinding)(nil),                 // 18: feos.fleet.v1.KubeBinding
-	(*ClientCertificate)(nil),           // 19: feos.fleet.v1.ClientCertificate
-	(*SshBinding)(nil),                  // 20: feos.fleet.v1.SshBinding
-	(*JoinMeshRequest)(nil),             // 21: feos.fleet.v1.JoinMeshRequest
-	(*JoinMeshResponse)(nil),            // 22: feos.fleet.v1.JoinMeshResponse
-	(*timestamppb.Timestamp)(nil),       // 23: google.protobuf.Timestamp
-	(*v1.PodEvent)(nil),                 // 24: feos.pod.v1.PodEvent
-	(*v11.TrafficRecord)(nil),           // 25: feos.network.v1.TrafficRecord
+	(HttpBindingMode)(0),                // 0: feos.fleet.v1.HttpBindingMode
+	(*JoinRequest)(nil),                 // 1: feos.fleet.v1.JoinRequest
+	(*JoinResponse)(nil),                // 2: feos.fleet.v1.JoinResponse
+	(*ControlPlaneInstance)(nil),        // 3: feos.fleet.v1.ControlPlaneInstance
+	(*RenewCertificateRequest)(nil),     // 4: feos.fleet.v1.RenewCertificateRequest
+	(*RenewCertificateResponse)(nil),    // 5: feos.fleet.v1.RenewCertificateResponse
+	(*Certificate)(nil),                 // 6: feos.fleet.v1.Certificate
+	(*Telemetry)(nil),                   // 7: feos.fleet.v1.Telemetry
+	(*Versions)(nil),                    // 8: feos.fleet.v1.Versions
+	(*TelemetryResponse)(nil),           // 9: feos.fleet.v1.TelemetryResponse
+	(*EventBatch)(nil),                  // 10: feos.fleet.v1.EventBatch
+	(*Event)(nil),                       // 11: feos.fleet.v1.Event
+	(*AuditRecord)(nil),                 // 12: feos.fleet.v1.AuditRecord
+	(*NodeEvent)(nil),                   // 13: feos.fleet.v1.NodeEvent
+	(*EventAck)(nil),                    // 14: feos.fleet.v1.EventAck
+	(*IssuePodCredentialsRequest)(nil),  // 15: feos.fleet.v1.IssuePodCredentialsRequest
+	(*IssuePodCredentialsResponse)(nil), // 16: feos.fleet.v1.IssuePodCredentialsResponse
+	(*SealedBindings)(nil),              // 17: feos.fleet.v1.SealedBindings
+	(*PodBindings)(nil),                 // 18: feos.fleet.v1.PodBindings
+	(*HttpBinding)(nil),                 // 19: feos.fleet.v1.HttpBinding
+	(*HeaderCredential)(nil),            // 20: feos.fleet.v1.HeaderCredential
+	(*BasicCredential)(nil),             // 21: feos.fleet.v1.BasicCredential
+	(*OAuthClientCredentials)(nil),      // 22: feos.fleet.v1.OAuthClientCredentials
+	(*RateLimit)(nil),                   // 23: feos.fleet.v1.RateLimit
+	(*InterceptCa)(nil),                 // 24: feos.fleet.v1.InterceptCa
+	(*KubeBinding)(nil),                 // 25: feos.fleet.v1.KubeBinding
+	(*ClientCertificate)(nil),           // 26: feos.fleet.v1.ClientCertificate
+	(*SshBinding)(nil),                  // 27: feos.fleet.v1.SshBinding
+	(*JoinMeshRequest)(nil),             // 28: feos.fleet.v1.JoinMeshRequest
+	(*JoinMeshResponse)(nil),            // 29: feos.fleet.v1.JoinMeshResponse
+	nil,                                 // 30: feos.fleet.v1.HeaderCredential.HeadersEntry
+	(*timestamppb.Timestamp)(nil),       // 31: google.protobuf.Timestamp
+	(*v1.PodEvent)(nil),                 // 32: feos.pod.v1.PodEvent
+	(*v11.TrafficRecord)(nil),           // 33: feos.network.v1.TrafficRecord
 }
 var file_feos_fleet_v1_fleet_proto_depIdxs = []int32{
-	5,  // 0: feos.fleet.v1.JoinResponse.certificate:type_name -> feos.fleet.v1.Certificate
-	2,  // 1: feos.fleet.v1.JoinResponse.instances:type_name -> feos.fleet.v1.ControlPlaneInstance
-	5,  // 2: feos.fleet.v1.RenewCertificateResponse.certificate:type_name -> feos.fleet.v1.Certificate
-	23, // 3: feos.fleet.v1.Certificate.not_before:type_name -> google.protobuf.Timestamp
-	23, // 4: feos.fleet.v1.Certificate.not_after:type_name -> google.protobuf.Timestamp
-	23, // 5: feos.fleet.v1.Certificate.renew_after:type_name -> google.protobuf.Timestamp
-	7,  // 6: feos.fleet.v1.Telemetry.versions:type_name -> feos.fleet.v1.Versions
-	2,  // 7: feos.fleet.v1.TelemetryResponse.instances:type_name -> feos.fleet.v1.ControlPlaneInstance
-	10, // 8: feos.fleet.v1.EventBatch.events:type_name -> feos.fleet.v1.Event
-	23, // 9: feos.fleet.v1.Event.time:type_name -> google.protobuf.Timestamp
-	24, // 10: feos.fleet.v1.Event.pod:type_name -> feos.pod.v1.PodEvent
-	11, // 11: feos.fleet.v1.Event.audit:type_name -> feos.fleet.v1.AuditRecord
-	25, // 12: feos.fleet.v1.Event.traffic:type_name -> feos.network.v1.TrafficRecord
-	12, // 13: feos.fleet.v1.Event.node:type_name -> feos.fleet.v1.NodeEvent
-	5,  // 14: feos.fleet.v1.IssuePodCredentialsResponse.certificate:type_name -> feos.fleet.v1.Certificate
-	16, // 15: feos.fleet.v1.IssuePodCredentialsResponse.bindings:type_name -> feos.fleet.v1.SealedBindings
-	18, // 16: feos.fleet.v1.PodBindings.kube:type_name -> feos.fleet.v1.KubeBinding
-	20, // 17: feos.fleet.v1.PodBindings.ssh:type_name -> feos.fleet.v1.SshBinding
-	19, // 18: feos.fleet.v1.KubeBinding.client_certificate:type_name -> feos.fleet.v1.ClientCertificate
-	0,  // 19: feos.fleet.v1.FleetService.Join:input_type -> feos.fleet.v1.JoinRequest
-	3,  // 20: feos.fleet.v1.FleetService.RenewCertificate:input_type -> feos.fleet.v1.RenewCertificateRequest
-	6,  // 21: feos.fleet.v1.FleetService.ReportTelemetry:input_type -> feos.fleet.v1.Telemetry
-	9,  // 22: feos.fleet.v1.FleetService.PublishEvents:input_type -> feos.fleet.v1.EventBatch
-	14, // 23: feos.fleet.v1.FleetService.IssuePodCredentials:input_type -> feos.fleet.v1.IssuePodCredentialsRequest
-	21, // 24: feos.fleet.v1.FleetService.JoinMesh:input_type -> feos.fleet.v1.JoinMeshRequest
-	1,  // 25: feos.fleet.v1.FleetService.Join:output_type -> feos.fleet.v1.JoinResponse
-	4,  // 26: feos.fleet.v1.FleetService.RenewCertificate:output_type -> feos.fleet.v1.RenewCertificateResponse
-	8,  // 27: feos.fleet.v1.FleetService.ReportTelemetry:output_type -> feos.fleet.v1.TelemetryResponse
-	13, // 28: feos.fleet.v1.FleetService.PublishEvents:output_type -> feos.fleet.v1.EventAck
-	15, // 29: feos.fleet.v1.FleetService.IssuePodCredentials:output_type -> feos.fleet.v1.IssuePodCredentialsResponse
-	22, // 30: feos.fleet.v1.FleetService.JoinMesh:output_type -> feos.fleet.v1.JoinMeshResponse
-	25, // [25:31] is the sub-list for method output_type
-	19, // [19:25] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	6,  // 0: feos.fleet.v1.JoinResponse.certificate:type_name -> feos.fleet.v1.Certificate
+	3,  // 1: feos.fleet.v1.JoinResponse.instances:type_name -> feos.fleet.v1.ControlPlaneInstance
+	6,  // 2: feos.fleet.v1.RenewCertificateResponse.certificate:type_name -> feos.fleet.v1.Certificate
+	31, // 3: feos.fleet.v1.Certificate.not_before:type_name -> google.protobuf.Timestamp
+	31, // 4: feos.fleet.v1.Certificate.not_after:type_name -> google.protobuf.Timestamp
+	31, // 5: feos.fleet.v1.Certificate.renew_after:type_name -> google.protobuf.Timestamp
+	8,  // 6: feos.fleet.v1.Telemetry.versions:type_name -> feos.fleet.v1.Versions
+	3,  // 7: feos.fleet.v1.TelemetryResponse.instances:type_name -> feos.fleet.v1.ControlPlaneInstance
+	11, // 8: feos.fleet.v1.EventBatch.events:type_name -> feos.fleet.v1.Event
+	31, // 9: feos.fleet.v1.Event.time:type_name -> google.protobuf.Timestamp
+	32, // 10: feos.fleet.v1.Event.pod:type_name -> feos.pod.v1.PodEvent
+	12, // 11: feos.fleet.v1.Event.audit:type_name -> feos.fleet.v1.AuditRecord
+	33, // 12: feos.fleet.v1.Event.traffic:type_name -> feos.network.v1.TrafficRecord
+	13, // 13: feos.fleet.v1.Event.node:type_name -> feos.fleet.v1.NodeEvent
+	6,  // 14: feos.fleet.v1.IssuePodCredentialsResponse.certificate:type_name -> feos.fleet.v1.Certificate
+	17, // 15: feos.fleet.v1.IssuePodCredentialsResponse.bindings:type_name -> feos.fleet.v1.SealedBindings
+	25, // 16: feos.fleet.v1.PodBindings.kube:type_name -> feos.fleet.v1.KubeBinding
+	27, // 17: feos.fleet.v1.PodBindings.ssh:type_name -> feos.fleet.v1.SshBinding
+	19, // 18: feos.fleet.v1.PodBindings.http:type_name -> feos.fleet.v1.HttpBinding
+	24, // 19: feos.fleet.v1.PodBindings.intercept_cas:type_name -> feos.fleet.v1.InterceptCa
+	0,  // 20: feos.fleet.v1.HttpBinding.mode:type_name -> feos.fleet.v1.HttpBindingMode
+	23, // 21: feos.fleet.v1.HttpBinding.rate_limit:type_name -> feos.fleet.v1.RateLimit
+	20, // 22: feos.fleet.v1.HttpBinding.headers:type_name -> feos.fleet.v1.HeaderCredential
+	21, // 23: feos.fleet.v1.HttpBinding.basic:type_name -> feos.fleet.v1.BasicCredential
+	22, // 24: feos.fleet.v1.HttpBinding.oauth2:type_name -> feos.fleet.v1.OAuthClientCredentials
+	26, // 25: feos.fleet.v1.HttpBinding.client_certificate:type_name -> feos.fleet.v1.ClientCertificate
+	30, // 26: feos.fleet.v1.HeaderCredential.headers:type_name -> feos.fleet.v1.HeaderCredential.HeadersEntry
+	26, // 27: feos.fleet.v1.KubeBinding.client_certificate:type_name -> feos.fleet.v1.ClientCertificate
+	1,  // 28: feos.fleet.v1.FleetService.Join:input_type -> feos.fleet.v1.JoinRequest
+	4,  // 29: feos.fleet.v1.FleetService.RenewCertificate:input_type -> feos.fleet.v1.RenewCertificateRequest
+	7,  // 30: feos.fleet.v1.FleetService.ReportTelemetry:input_type -> feos.fleet.v1.Telemetry
+	10, // 31: feos.fleet.v1.FleetService.PublishEvents:input_type -> feos.fleet.v1.EventBatch
+	15, // 32: feos.fleet.v1.FleetService.IssuePodCredentials:input_type -> feos.fleet.v1.IssuePodCredentialsRequest
+	28, // 33: feos.fleet.v1.FleetService.JoinMesh:input_type -> feos.fleet.v1.JoinMeshRequest
+	2,  // 34: feos.fleet.v1.FleetService.Join:output_type -> feos.fleet.v1.JoinResponse
+	5,  // 35: feos.fleet.v1.FleetService.RenewCertificate:output_type -> feos.fleet.v1.RenewCertificateResponse
+	9,  // 36: feos.fleet.v1.FleetService.ReportTelemetry:output_type -> feos.fleet.v1.TelemetryResponse
+	14, // 37: feos.fleet.v1.FleetService.PublishEvents:output_type -> feos.fleet.v1.EventAck
+	16, // 38: feos.fleet.v1.FleetService.IssuePodCredentials:output_type -> feos.fleet.v1.IssuePodCredentialsResponse
+	29, // 39: feos.fleet.v1.FleetService.JoinMesh:output_type -> feos.fleet.v1.JoinMeshResponse
+	34, // [34:40] is the sub-list for method output_type
+	28, // [28:34] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_feos_fleet_v1_fleet_proto_init() }
@@ -1969,6 +2568,12 @@ func file_feos_fleet_v1_fleet_proto_init() {
 		(*Event_Node)(nil),
 	}
 	file_feos_fleet_v1_fleet_proto_msgTypes[18].OneofWrappers = []any{
+		(*HttpBinding_Headers)(nil),
+		(*HttpBinding_Basic)(nil),
+		(*HttpBinding_Oauth2)(nil),
+		(*HttpBinding_ClientCertificate)(nil),
+	}
+	file_feos_fleet_v1_fleet_proto_msgTypes[24].OneofWrappers = []any{
 		(*KubeBinding_Token)(nil),
 		(*KubeBinding_ClientCertificate)(nil),
 	}
@@ -1977,13 +2582,14 @@ func file_feos_fleet_v1_fleet_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_feos_fleet_v1_fleet_proto_rawDesc), len(file_feos_fleet_v1_fleet_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   23,
+			NumEnums:      1,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_feos_fleet_v1_fleet_proto_goTypes,
 		DependencyIndexes: file_feos_fleet_v1_fleet_proto_depIdxs,
+		EnumInfos:         file_feos_fleet_v1_fleet_proto_enumTypes,
 		MessageInfos:      file_feos_fleet_v1_fleet_proto_msgTypes,
 	}.Build()
 	File_feos_fleet_v1_fleet_proto = out.File
