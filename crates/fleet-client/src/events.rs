@@ -78,10 +78,15 @@ fn is_request(event: &Event) -> bool {
 
 impl Events {
     pub(crate) fn new(start_id: &str) -> Self {
-        Self::with_capacity(start_id, CAPACITY)
+        Self::with_capacities(start_id, CAPACITY, REQUEST_CAPACITY)
     }
 
+    #[cfg(test)]
     fn with_capacity(start_id: &str, capacity: usize) -> Self {
+        Self::with_capacities(start_id, capacity, (capacity / 4).max(1))
+    }
+
+    fn with_capacities(start_id: &str, capacity: usize, request_capacity: usize) -> Self {
         Self {
             buffer: Arc::new(Mutex::new(Buffer {
                 start_id: start_id.to_string(),
@@ -90,7 +95,7 @@ impl Events {
                 dropped: 0,
                 capacity,
                 requests: 0,
-                request_capacity: (capacity / 4).max(1),
+                request_capacity,
             })),
             added: Arc::new(Notify::new()),
             acked: watch::Sender::new(0),
