@@ -3327,6 +3327,7 @@ dependencies = [
 name = "pod-service"
 version = "0.6.1"
 dependencies = [
+ "base64 0.22.1",
  "dns-service",
  "feos-proto",
  "feos-utils",
@@ -3340,6 +3341,7 @@ dependencies = [
  "prost",
  "prost-types",
  "rtnetlink",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

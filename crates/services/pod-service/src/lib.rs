@@ -5,6 +5,7 @@
 //! pod's services to its guest; their volumes (ADR 0016),
 //! `feos.volume.v1.VolumeService`.
 
+pub mod authn;
 mod bake;
 pub mod disk;
 pub mod forward;

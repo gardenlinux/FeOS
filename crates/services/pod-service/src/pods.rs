@@ -35,6 +35,7 @@ mod stop;
 
 pub use stop::{read_record, StopRecord, Stopped, STOP_RECORD};
 
+use crate::authn::{self, Authn};
 use crate::bake;
 use crate::disk::{volume_disk, Disks};
 use crate::network::{Attachment, Network};
@@ -113,6 +114,10 @@ const REFRESH: Duration = Duration::from_secs(60);
 /// How long a pod's logs may take to be sent before it is suspended,
 /// hibernates or is deleted (ADR 0026).
 pub const LOG_DRAIN: Duration = Duration::from_secs(5);
+/// How long a bring-up waits for the pod's feos-authn to hold its
+/// credentials before it starts the containers (ADR 0014, "What a run
+/// waits for").
+const AUTHN_READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long the guest may take to write the pod's interception CAs.
 const CA_PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a stopped or deleted pod's containers may take to exit after
@@ -177,6 +182,8 @@ struct Inner {
     /// pushed to its guest, so that the last record read is the last one
     /// pushed (ADR 0028).
     ca_pushes: tokio::sync::Mutex<()>,
+    /// The pods' feos-authn processes (ADR 0014, ADR 0028).
+    authn: Authn,
 }
 
 /// Sends what the containers of a running pod wrote to its logs, before
@@ -339,8 +346,11 @@ impl Pods {
         network: Network,
         disks: Disks,
         volumes: Volumes,
+        authn: authn::Config,
     ) -> io::Result<Self> {
         let store = Store::open(dir)?;
+        // Before the pods are looked at: the processes of a feosd before.
+        let authn = Authn::new(authn, dir);
         // A hibernated pod has no addresses on the node.
         let (mut kept, hibernated): (Vec<_>, Vec<_>) = store
             .load()?
@@ -373,8 +383,15 @@ impl Pods {
                 records: tokio::sync::Mutex::new(()),
                 log_drain: OnceLock::new(),
                 ca_pushes: tokio::sync::Mutex::new(()),
+                authn,
             }),
         };
+        let weak = Arc::downgrade(&pods.inner);
+        pods.inner.authn.set_deny_prefixes(Arc::new(move || {
+            weak.upgrade()
+                .map(|inner| inner.network.authn_deny_prefixes())
+                .unwrap_or_default()
+        }));
         let mut pending = Vec::new();
         let mut running = Vec::new();
         let mut purge = Vec::new();
@@ -388,6 +405,13 @@ impl Pods {
             pods.pods().insert(info.pod_id.clone(), Pod::new(info));
         }
         info!("Pods: {} kept", pods.pods().len());
+        // Each pod's feos-authn as it wants one, an adopted one first.
+        let kept: Vec<PodInfo> = pods.pods().values().map(|pod| pod.info.clone()).collect();
+        for info in &kept {
+            pods.want_authn(info);
+        }
+        let unclaimed = pods.inner.authn.clone();
+        tokio::spawn(async move { unclaimed.end_unclaimed().await });
         match pods.apply_network().await {
             Ok(()) => pods.inner.network.start_records(),
             Err(e) => pods
@@ -726,6 +750,7 @@ impl Pods {
         if let Some(pod) = self.forget(pod_id).await? {
             self.announce(&pod.info, true);
         }
+        self.inner.authn.remove(pod_id).await;
         self.inner.volumes.release(pod_id, &[]).await;
         if let Err(e) = self.apply_network().await {
             warn!("Pods: Failed to set the pods' rules: {e}");
@@ -861,6 +886,7 @@ impl Pods {
                 .unwrap_or_default()
         );
         self.inner.network.set_http_names(&info);
+        self.want_authn(&info);
         // A pod that is coming up pushes them itself, before its containers.
         if cas_changed && info.state() == PodState::Running {
             self.repush_intercept_cas(pod_id).await;
@@ -2391,12 +2417,35 @@ impl Pods {
         if let Err(e) = saved.await {
             warn!("Pods: Failed to keep {pod_id}: {e}");
         }
+        // A run of the pod begins or ends with its state.
+        self.want_authn(&info);
         if reason.is_empty() {
             info!("Pods: {pod_id} is {}", state.as_str_name());
         } else {
             info!("Pods: {pod_id} is {}: {reason}", state.as_str_name());
         }
         self.announce(&info, false);
+    }
+
+    /// Has the pod's feos-authn follow its record: a process while the pod
+    /// is coming up or runs with HTTP bindings, a new one for each run,
+    /// with the bindings of its record's version.
+    fn want_authn(&self, info: &PodInfo) {
+        let spec = info.spec.clone().unwrap_or_default();
+        let run = matches!(info.state(), PodState::Pending | PodState::Running)
+            && spec::has_network(&spec)
+            && spec::has_http_bindings(&spec);
+        let version = spec
+            .http_bindings
+            .as_ref()
+            .map(|bindings| bindings.version.clone())
+            .unwrap_or_default();
+        self.inner.authn.want(&info.pod_id, run, &version);
+    }
+
+    /// The pods' feos-authn processes.
+    pub fn authn(&self) -> &Authn {
+        &self.inner.authn
     }
 
     fn announce(&self, info: &PodInfo, deleted: bool) {
@@ -2452,6 +2501,11 @@ impl Pods {
         self.mount_volumes(pod_id, spec).await?;
         // Before any container is created: each gets them (ADR 0028 §5).
         self.push_intercept_cas(pod_id).await?;
+        // Nothing in the pod runs before it has what it was promised.
+        self.inner
+            .authn
+            .wait_ready(pod_id, AUTHN_READY_TIMEOUT)
+            .await?;
         let channel = self.guest_channel(pod_id).await?;
         self.bake_point(pod_id, spec, channel.clone(), pull_token)
             .await?;
@@ -4005,6 +4059,13 @@ mod tests {
                 records: tokio::sync::Mutex::new(()),
                 log_drain: OnceLock::new(),
                 ca_pushes: tokio::sync::Mutex::new(()),
+                authn: Authn::new(
+                    authn::Config {
+                        binary: dir.join("no-feos-authn"),
+                        jail: false,
+                    },
+                    &dir.join("pods"),
+                ),
             }),
         }
     }

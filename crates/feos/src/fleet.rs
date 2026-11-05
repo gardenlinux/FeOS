@@ -179,6 +179,12 @@ pub(crate) fn start(
     };
     let (fleet, incoming) = fleet_client::start(config, node, calls)?;
     ship_logs(&fleet, &pods);
+    // The pods' feos-authn ask for their credentials over the uplink.
+    let issuing = fleet.clone();
+    pods.authn().set_issuer(Arc::new(move |request| {
+        let fleet = issuing.clone();
+        Box::pin(async move { fleet.issue_pod_credentials(request).await })
+    }));
     let sink = fleet.events().clone();
     tokio::spawn(async move {
         loop {

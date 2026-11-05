@@ -95,6 +95,8 @@ tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring
 rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "ring"] }
 x509-parser = "0.18.1"
 pem = "4.0.0"
+# The control socket's messages to a pod's feos-authn (ADR 0028).
+base64 = "0.22.1"
 
 # Workspace crates
 disk-store = { path = "crates/disk-store" }

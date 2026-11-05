@@ -490,6 +490,23 @@ impl Network {
         }
     }
 
+    /// What a pod's `feos-authn` dials none of (ADR 0014, "The jail"):
+    /// `--deny-prefix`, the node's own addresses and the mesh's peers', the
+    /// pods' IPv4 range and the node's prefix for pods.
+    pub fn authn_deny_prefixes(&self) -> Vec<String> {
+        let node = lock(&self.node_addresses).clone();
+        let mut denied = self.denied(&node);
+        if let Some((prefix, len)) = self.pod_prefix().or(self.config.pod_prefix) {
+            denied.push(Prefix::V6(prefix, len));
+        }
+        let mut seen = HashSet::new();
+        denied
+            .iter()
+            .map(ToString::to_string)
+            .filter(|prefix| seen.insert(prefix.clone()))
+            .collect()
+    }
+
     /// The pod that sends from `address`, as the pods' TAP devices pin it:
     /// for the HTTP bindings' listeners.
     pub fn pod_at(&self, address: IpAddr) -> Option<String> {

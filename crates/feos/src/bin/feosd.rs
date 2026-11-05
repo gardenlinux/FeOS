@@ -19,7 +19,8 @@ const STATE_LOCK: &str = "/var/lib/feos/feosd.lock";
 const USAGE: &str = "usage: feosd [--tcp ADDRESS] [--self-upgrade] [--pod-prefix PREFIX]
              [--pod-ipv4-range PREFIX] [--dns-address ADDRESS]
              [--otlp-address ADDRESS] [--dns-upstream ADDRESS]... [--deny-prefix PREFIX]...
-             [--diskd-socket PATH] [--vms-cgroup PATH] [--suspend-on-stop]
+             [--diskd-socket PATH] [--authn-binary PATH] [--vms-cgroup PATH]
+             [--suspend-on-stop]
              [--stop-grace SECONDS]
              [--control-plane HOST:PORT [--control-plane-name NAME]
               [--trust-domain NAME] [--join-token-file PATH] [--node-dir PATH]
@@ -48,6 +49,9 @@ const USAGE: &str = "usage: feosd [--tcp ADDRESS] [--self-upgrade] [--pod-prefix
                            (repeatable)
   --diskd-socket PATH      diskd's socket, which the pods' disks come from;
                            /var/lib/feos/disk/diskd.sock by default
+  --authn-binary PATH      feos-authn, which feosd starts for every running pod
+                           with HTTP bindings (ADR 0028); next to feosd's own
+                           binary by default
   --vms-cgroup PATH        the cgroup the microVMs' cgroups go below, from the
                            root of the hierarchy, such as
                            system.slice/feos-vms.service; the cgroup feosd is
@@ -96,6 +100,8 @@ struct Args {
     self_upgrade: bool,
     network: network::Config,
     diskd_socket: Option<std::path::PathBuf>,
+    /// feos-authn's binary; next to feosd's by default.
+    authn_binary: Option<std::path::PathBuf>,
     /// The cgroup the VMs' cgroups go below; the one feosd is given by
     /// default.
     vms_cgroup: Option<String>,
@@ -173,6 +179,7 @@ impl Args {
                     network.deny_prefixes.push(prefix);
                 }
                 "--diskd-socket" => parsed.diskd_socket = Some(value("a path")?.into()),
+                "--authn-binary" => parsed.authn_binary = Some(value("a path")?.into()),
                 "--vms-cgroup" => {
                     let path = value("a cgroup")?;
                     let cgroup = path.trim_matches('/');
@@ -348,6 +355,10 @@ async fn serve(dns_sockets: Vec<(std::os::fd::OwnedFd, String)>) -> Result<()> {
         fleet,
         suspend_on_stop: args.suspend_on_stop,
         stop_grace: args.stop_grace.unwrap_or(main_server::STOP_GRACE),
+        authn: match args.authn_binary {
+            Some(binary) => pod_service::authn::Config { binary, jail: true },
+            None => pod_service::authn::Config::beside_feosd(),
+        },
         ..ServerOptions::new(args.restarted_after_upgrade, args.self_upgrade)
     })
     .await?;
@@ -397,6 +408,8 @@ mod tests {
         assert!(args.self_upgrade && !args.task_service);
         let args = parse(&["--diskd-socket", "/run/diskd.sock"]).unwrap();
         assert_eq!(args.diskd_socket, Some("/run/diskd.sock".into()));
+        let authn = parse(&["--authn-binary", "/opt/feos-authn"]).unwrap();
+        assert_eq!(authn.authn_binary, Some("/opt/feos-authn".into()));
         assert!(!args.suspend_on_stop);
         assert!(parse(&["--suspend-on-stop"]).unwrap().suspend_on_stop);
         assert_eq!(args.stop_grace, None);

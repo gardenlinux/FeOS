@@ -223,6 +223,8 @@ struct Seen {
     channels: Vec<tonic::transport::Channel>,
     /// The sink the control plane names.
     sink_endpoint: String,
+    /// The pods' credentials asked for.
+    credentials: Vec<IssuePodCredentialsRequest>,
 }
 
 struct ControlPlane {
@@ -395,9 +397,26 @@ impl FleetService for ControlPlane {
 
     async fn issue_pod_credentials(
         &self,
-        _request: Request<IssuePodCredentialsRequest>,
+        request: Request<IssuePodCredentialsRequest>,
     ) -> Result<Response<IssuePodCredentialsResponse>, Status> {
-        Err(Status::unimplemented("not in this test"))
+        self.peer(&request)?;
+        let request = request.into_inner();
+        if request.pod_id != POD {
+            return Err(Status::not_found(format!("no pod {}", request.pod_id)));
+        }
+        self.seen.lock().unwrap().credentials.push(request.clone());
+        Ok(Response::new(IssuePodCredentialsResponse {
+            certificate: Some(Certificate {
+                spiffe_id: format!("spiffe://{TRUST_DOMAIN}/pod/{POD}"),
+                chain: vec![request.csr],
+                ..Default::default()
+            }),
+            bindings: Some(feos_proto::fleet_service::SealedBindings {
+                enc: request.hpke_public_key,
+                ciphertext: b"sealed".to_vec(),
+                version: "7".into(),
+            }),
+        }))
     }
 
     async fn join_mesh(
@@ -777,6 +796,44 @@ async fn a_node_joins_reports_renews_and_serves_its_api() {
     fleet.stopping("restart").await;
     assert!(fleet.events().flush(Duration::from_millis(1)).await);
     assert_eq!(seen.lock().unwrap().events.len(), 3);
+}
+
+#[tokio::test]
+async fn a_pods_credentials_come_over_the_uplink() {
+    let pki = Arc::new(Pki::new());
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let (token, address) = control_plane(pki, seen.clone()).await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("join-token"), format!("{token}\n")).unwrap();
+    let fleet = node(&address, dir.path());
+    // Asked before the uplink is up: it waits for it.
+    let response = fleet
+        .issue_pod_credentials(IssuePodCredentialsRequest {
+            pod_id: POD.into(),
+            csr: b"csr".to_vec(),
+            hpke_public_key: [7; 32].to_vec(),
+        })
+        .await
+        .unwrap();
+    let certificate = response.certificate.unwrap();
+    assert_eq!(certificate.chain, [b"csr".to_vec()]);
+    let bindings = response.bindings.unwrap();
+    assert_eq!(
+        (bindings.enc, bindings.version),
+        ([7; 32].to_vec(), "7".into())
+    );
+    let asked = seen.lock().unwrap().credentials.clone();
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].pod_id, POD);
+    // The control plane's refusal is the answer.
+    let refused = fleet
+        .issue_pod_credentials(IssuePodCredentialsRequest {
+            pod_id: "other".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), tonic::Code::NotFound);
 }
 
 #[tokio::test]

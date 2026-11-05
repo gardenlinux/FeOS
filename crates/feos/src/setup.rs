@@ -64,6 +64,7 @@ pub(crate) async fn initialize_pod_service(
     network: pod_service::network::Config,
     dns_sockets: Vec<(std::os::fd::OwnedFd, String)>,
     diskd_socket: Option<std::path::PathBuf>,
+    authn: pod_service::authn::Config,
 ) -> Result<(
     pod_service::Pods,
     pod_service::Volumes,
@@ -94,7 +95,7 @@ pub(crate) async fn initialize_pod_service(
         disks.socket().display()
     );
     let volumes = pod_service::Volumes::open(pod_service::volumes::VOLUME_DIR, disks.clone())?;
-    let pods = pod_service::Pods::new(vms, dir, network, disks, volumes.clone()).await?;
+    let pods = pod_service::Pods::new(vms, dir, network, disks, volumes.clone(), authn).await?;
     info!("Main: Pod Service is configured.");
     Ok((
         pods,

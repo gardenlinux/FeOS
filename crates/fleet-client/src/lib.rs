@@ -86,6 +86,10 @@ const REPORT_DEADLINE: Duration = Duration::from_secs(3);
 const JOIN_DEADLINE: Duration = Duration::from_secs(10);
 const RENEW_DEADLINE: Duration = Duration::from_secs(10);
 const JOIN_MESH_DEADLINE: Duration = Duration::from_secs(10);
+/// How long a pod's credentials wait for an uplink, and the call's
+/// deadline (ADR 0014).
+const ISSUE_UPLINK_WAIT: Duration = Duration::from_secs(10);
+const ISSUE_DEADLINE: Duration = Duration::from_secs(10);
 /// How long feosd may take to take the mesh's answer before that is
 /// logged. The answer is asked for again once feosd took it, or failed to.
 const TAKE_MESH_DEADLINE: Duration = Duration::from_secs(5);
@@ -211,9 +215,49 @@ pub struct Fleet {
     retire: Arc<watch::Sender<bool>>,
     /// The sink the control plane names (ADR 0026).
     sink: watch::Receiver<Option<sink::Target>>,
+    /// The uplink's channel, while there is one.
+    uplink: watch::Receiver<Option<Channel>>,
 }
 
 impl Fleet {
+    /// Asks the control plane for a pod's credentials (ADR 0014), for the
+    /// pod's feos-authn: over the uplink, on the control plane's threads,
+    /// waiting a while for an uplink when there is none. The control
+    /// plane's errors are the answer; feos-authn tries again.
+    pub async fn issue_pod_credentials(
+        &self,
+        request: feos_proto::fleet_service::IssuePodCredentialsRequest,
+    ) -> Result<feos_proto::fleet_service::IssuePodCredentialsResponse, tonic::Status> {
+        let mut uplink = self.uplink.clone();
+        self.runtime
+            .spawn(async move {
+                let channel = timeout(ISSUE_UPLINK_WAIT, async {
+                    loop {
+                        if let Some(channel) = uplink.borrow_and_update().clone() {
+                            return Some(channel);
+                        }
+                        uplink.changed().await.ok()?;
+                    }
+                })
+                .await
+                .ok()
+                .flatten()
+                .ok_or_else(|| tonic::Status::unavailable("the node has no uplink"))?;
+                let mut client =
+                    feos_proto::fleet_service::fleet_service_client::FleetServiceClient::new(
+                        channel,
+                    );
+                let mut call = tonic::Request::new(request);
+                call.set_timeout(ISSUE_DEADLINE);
+                client
+                    .issue_pod_credentials(call)
+                    .await
+                    .map(tonic::Response::into_inner)
+            })
+            .await
+            .map_err(|e| tonic::Status::internal(format!("the call's task: {e}")))?
+    }
+
     /// The sink the control plane names, and how the node reaches it, as
     /// it changes: none while it names none.
     pub fn sink(&self) -> watch::Receiver<Option<sink::Target>> {
@@ -351,6 +395,7 @@ pub fn start<I: Inventory>(
     let (retire, retired) = watch::channel(false);
     let (nodes, incoming) = Nodes::new(link.name.clone(), retired);
     let (uplink, published) = watch::channel(None);
+    let uplink_channel = published.clone();
     runtime.spawn(events::publish(events.clone(), published));
     let (sink, sink_target) = watch::channel(None);
     let collector = Collector::new(
@@ -387,6 +432,7 @@ pub fn start<I: Inventory>(
             calls,
             retire: Arc::new(retire),
             sink: sink_target,
+            uplink: uplink_channel,
         },
         incoming,
     ))

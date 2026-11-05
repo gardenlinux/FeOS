@@ -198,6 +198,14 @@ fn is_certificate_pem(pem: &str) -> bool {
     false
 }
 
+/// Whether the pod has HTTP bindings that it reaches by a name (ADR
+/// 0028): a pod's feos-authn runs for those.
+pub fn has_http_bindings(spec: &PodSpec) -> bool {
+    spec.http_bindings
+        .as_ref()
+        .is_some_and(|b| !b.names.is_empty() || !b.intercept_hosts.is_empty())
+}
+
 /// The pod's interception CAs, PEM, oldest first; none without.
 pub fn intercept_cas(spec: &PodSpec) -> Vec<String> {
     spec.http_bindings
@@ -493,6 +501,7 @@ mod tests {
         .unwrap();
         assert_eq!(created.http_bindings, Some(good));
         assert_eq!(intercept_cas(&created).len(), 2);
+        assert!(has_http_bindings(&created) && !has_http_bindings(&pod));
         assert!(intercept_cas(&pod).is_empty());
         check_http_bindings(&pod, &PodHttpBindings::default()).unwrap();
 

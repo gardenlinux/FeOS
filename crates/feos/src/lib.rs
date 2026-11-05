@@ -127,6 +127,9 @@ pub struct ServerOptions {
     /// default.
     #[cfg(feature = "host")]
     pub stop_grace: Duration,
+    /// How the pods' feos-authn processes start (ADR 0014, ADR 0028).
+    #[cfg(feature = "host")]
+    pub authn: pod_service::authn::Config,
 }
 
 impl Default for ServerOptions {
@@ -155,6 +158,8 @@ impl ServerOptions {
             suspend_on_stop: false,
             #[cfg(feature = "host")]
             stop_grace: STOP_GRACE,
+            #[cfg(feature = "host")]
+            authn: pod_service::authn::Config::beside_feosd(),
         }
     }
 }
@@ -204,6 +209,7 @@ pub async fn run_server(options: ServerOptions) -> Result<()> {
         options.network,
         options.dns_sockets,
         options.diskd_socket,
+        options.authn,
     )
     .await?;
     let services = Services {
