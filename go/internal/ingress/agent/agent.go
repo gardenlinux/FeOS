@@ -57,11 +57,18 @@ type Config struct {
 	// MeshDevice is the WireGuard device's name; DefaultMeshDevice when
 	// empty.
 	MeshDevice string
-	// MeshPort is its UDP port; DefaultMeshPort when 0.
+	// MeshPort is its UDP port; DefaultMeshPort when 0. A repair of the
+	// paths to the nodes moves the device to one of the 15 ports after it
+	// (repairMesh).
 	MeshPort int
 	// MeshEndpoint is where the nodes reach the device, an IP address and
-	// a port; it is sent in Hello.
+	// a port; it is sent in Hello, at the device's current port when a
+	// repair moved it.
 	MeshEndpoint string
+	// MeshRepairEvery is the least time between two repairs of the paths
+	// to the nodes, and how long a node's peer has to handshake before it
+	// counts as lost; 0 is 60 s. Tests shorten it.
+	MeshRepairEvery time.Duration
 	// MeshMTU is the device's MTU; 0 lets the device compute it from the
 	// interface that holds MeshEndpoint's address (ComputeMTU).
 	MeshMTU int
@@ -103,6 +110,7 @@ type timing struct {
 	refusalWindow                 time.Duration
 	refusalAttempts               int
 	meshPoll                      time.Duration
+	meshStale, meshRepairEvery    time.Duration
 	wakeEvery, wakeTimeout        time.Duration
 	cacheDelay, cacheRefresh      time.Duration
 	syncIdle                      time.Duration
@@ -124,6 +132,8 @@ func defaultTiming() timing {
 		refusalWindow:    refusalWindow,
 		refusalAttempts:  refusalAttempts,
 		meshPoll:         2 * time.Second,
+		meshStale:        meshStale,
+		meshRepairEvery:  meshRepairEvery,
 		wakeEvery:        5 * time.Second,
 		wakeTimeout:      10 * time.Second,
 		cacheDelay:       time.Second,
@@ -175,6 +185,19 @@ type Agent struct {
 	peersSet    bool
 	peersVer    uint64
 	meshPeers   []MeshPeer
+	// meshPort is the device's UDP port: Config.MeshPort, or the one a
+	// repair moved it to. announced is the endpoint the control plane
+	// took in the last Hello; announcing: a Hello that tells it the
+	// endpoint is under way (announce).
+	meshPort   int
+	announced  string
+	announcing bool
+	// meshSince is when each node's key became a peer the agent wants,
+	// or was set anew by a repair; lastRepair and repairs count the
+	// repairs (repairMesh).
+	meshSince   map[wg.Key]time.Time
+	lastRepair  time.Time
+	repairs     uint64
 	state       *wire.State
 	tableAt     time.Time
 	cachedAt    time.Time // the savedAt of table.json, as written or loaded
@@ -221,6 +244,9 @@ func New(cfg Config, deps Deps) (*Agent, error) {
 	if cfg.MeshPort < 1 || cfg.MeshPort > 65535 {
 		return nil, fmt.Errorf("ingress agent: mesh port %d is out of range", cfg.MeshPort)
 	}
+	if cfg.MeshRepairEvery < 0 {
+		return nil, fmt.Errorf("ingress agent: mesh repair interval %s is negative", cfg.MeshRepairEvery)
+	}
 	ep, err := netip.ParseAddrPort(cfg.MeshEndpoint)
 	if err != nil || ep.Port() == 0 || ep.Addr().IsUnspecified() {
 		return nil, fmt.Errorf("ingress agent: mesh endpoint %q is not an IP address and a port", cfg.MeshEndpoint)
@@ -254,6 +280,11 @@ func New(cfg Config, deps Deps) (*Agent, error) {
 		alog:      newAccessLog(cfg.Name),
 		cacheKick: make(chan struct{}, 1),
 		meshKick:  make(chan struct{}, 1),
+		meshPort:  cfg.MeshPort,
+		meshSince: map[wg.Key]time.Time{},
+	}
+	if cfg.MeshRepairEvery > 0 {
+		a.tune.meshRepairEvery = cfg.MeshRepairEvery
 	}
 	if cfg.SinkEndpoint != "" {
 		c, err := sinklog.NewClient(cfg.SinkEndpoint, cfg.TrustDomain, a.sinkIdentity)
@@ -740,6 +771,14 @@ type Status struct {
 	MeshMTU         int        `json:"meshMTU,omitempty"`
 	MeshPeers       []MeshPeer `json:"meshPeers"`
 	LastError       string     `json:"lastError,omitempty"`
+
+	// MeshPort and MeshEndpoint are the device's port and the endpoint
+	// sent in Hello; MeshRepairs counts the repairs of the paths to the
+	// nodes since the start, the last at LastMeshRepair (repairMesh).
+	MeshPort       int       `json:"meshPort"`
+	MeshEndpoint   string    `json:"meshEndpoint"`
+	MeshRepairs    uint64    `json:"meshRepairs"`
+	LastMeshRepair time.Time `json:"lastMeshRepair,omitzero"`
 }
 
 // MeshPeer is a node as the mesh device has it.
@@ -770,6 +809,10 @@ func (a *Agent) Status() Status {
 		MeshDevice:      a.cfg.MeshDevice,
 		MeshPublicKey:   a.wgKey.PublicKey().String(),
 		MeshMTU:         a.cfg.MeshMTU,
+		MeshPort:        a.meshPort,
+		MeshEndpoint:    a.meshEndpointLocked(),
+		MeshRepairs:     a.repairs,
+		LastMeshRepair:  a.lastRepair,
 		MeshPeers:       slices.Clone(a.meshPeers),
 		LastError:       a.lastErr,
 	}

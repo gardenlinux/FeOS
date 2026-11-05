@@ -88,4 +88,15 @@
 // MeshConfigured reports it. Every 2 s, and after the peers changed, the
 // agent reads the device's peers and reports each node's last handshake
 // to OnMesh, the input of the data path's gating.
+//
+// A node that runs endpoints and has had no handshake for 180 s is lost,
+// and the agent repairs its path, at most once a minute: the device moves
+// to the next of 16 ports from MeshPort on, the lost nodes' peers are
+// removed and set again, and a Hello on the current session tells the
+// control plane the new endpoint, which reaches the nodes as any new
+// endpoint does. A WireGuard peer's UDP flow keeps its addresses and ports
+// for good, and the keepalive and the handshake's retries never let it
+// rest, so a flow that an outage left broken in the network, or a learnt
+// endpoint that leads nowhere, would otherwise last until the pod is
+// replaced.
 package agent

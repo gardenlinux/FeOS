@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -54,6 +55,23 @@ const (
 	peerKeepalive     = 25 * time.Second
 )
 
+// The repair of the paths to the nodes (repairMesh).
+const (
+	// meshStale is how old a node's last handshake may be before the node
+	// counts as lost: WireGuard's reject-after time, after which no
+	// session is left; with a keepalive of 25 s a node that answers
+	// handshakes about every 2 minutes. The data path's freshness is the
+	// same.
+	meshStale = 180 * time.Second
+	// meshRepairEvery is the least time between two repairs, and how long
+	// a node's peer, new or set anew, has to handshake before it counts.
+	meshRepairEvery = 60 * time.Second
+	// meshPorts is how many ports the device moves through: the
+	// configured one and the 15 after it, so that a network policy can
+	// name them as a range.
+	meshPorts = 16
+)
+
 // ComputeMTU is the mesh device's MTU over an interface with MTU ifMTU:
 // the interface's MTU less WireGuard's overhead over IPv6, at most 1420
 // and at least 1280. The smaller MTU also clamps the MSS of the
@@ -63,9 +81,11 @@ func ComputeMTU(ifMTU int) int {
 }
 
 // wantMesh makes c the device's configuration and configures it unless it
-// has it already.
+// has it already. The port is the agent's: Config.MeshPort, or the one a
+// repair moved the device to.
 func (a *Agent) wantMesh(c MeshConfig) {
 	a.mu.Lock()
+	c.ListenPort = a.meshPort
 	a.meshWant = c
 	a.mu.Unlock()
 	a.ensureMesh()
@@ -178,8 +198,9 @@ func wgPeers(m wire.Mesh) (peers []wg.Peer, problems []string) {
 
 // meshLoop reads the device's peers every meshPoll, and after the peers
 // were set, and reports each node's last handshake to OnMesh; it also
-// retries setting the peers, warns of an old table and forgets old Wake
-// calls.
+// retries setting the peers, repairs the paths to the nodes it lost,
+// tells the control plane a new endpoint, warns of an old table and
+// forgets old Wake calls.
 func (a *Agent) meshLoop(ctx context.Context) {
 	t := time.NewTicker(a.tune.meshPoll)
 	defer t.Stop()
@@ -188,6 +209,7 @@ func (a *Agent) meshLoop(ctx context.Context) {
 		a.ensureMesh()
 		a.syncPeers()
 		a.pollMesh()
+		a.announce()
 		a.checkTableAge(now)
 		a.sweepWakes(now)
 		select {
@@ -202,8 +224,10 @@ func (a *Agent) meshLoop(ctx context.Context) {
 // pollMesh reads the device's peers, maps their keys to node names
 // through the table's mesh, and reports their handshakes. Without a
 // configured device, or when it cannot be read, no node has one; a device
-// that cannot be read is configured again.
+// that cannot be read is configured again. Nodes it lost it repairs
+// (repairMesh).
 func (a *Agent) pollMesh() {
+	now := time.Now()
 	a.mu.Lock()
 	ok := a.meshOK
 	names := map[wg.Key]string{}
@@ -214,9 +238,16 @@ func (a *Agent) pollMesh() {
 			}
 		}
 	}
+	for k := range names {
+		if _, wanted := a.meshSince[k]; !wanted {
+			a.meshSince[k] = now
+		}
+	}
+	maps.DeleteFunc(a.meshSince, func(k wg.Key, _ time.Time) bool { _, wanted := names[k]; return !wanted })
 	a.mu.Unlock()
 	handshakes := map[string]time.Time{}
 	var peers []MeshPeer
+	read := false
 	if ok {
 		dev, err := a.deps.Mesh.Status()
 		if err != nil {
@@ -226,6 +257,7 @@ func (a *Agent) pollMesh() {
 			a.mu.Unlock()
 			a.ensureMesh()
 		} else {
+			read = true
 			for _, p := range dev.Peers {
 				name, known := names[p.PublicKey]
 				if !known {
@@ -247,4 +279,195 @@ func (a *Agent) pollMesh() {
 	if a.deps.OnMesh != nil {
 		a.deps.OnMesh(handshakes)
 	}
+	if read {
+		if lost, names := a.lostNodes(now, handshakes); len(lost) > 0 {
+			a.repairMesh(now, lost, names)
+		}
+	}
+}
+
+// lostNodes are the nodes the agent repairs the paths to, once
+// meshRepairEvery passed since the last repair, as peers and by name: the
+// nodes with endpoints in the table (the others carry no traffic, and a
+// node that is down has none) whose last handshake on the device
+// (handshakes; the zero time for none) is older than meshStale, and that
+// have been wanted as peers for meshRepairEvery, so that a new peer, or
+// one a repair set anew, has that long to handshake.
+func (a *Agent) lostNodes(now time.Time, handshakes map[string]time.Time) (lost []wg.Peer, names []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.state == nil || now.Sub(a.lastRepair) < a.tune.meshRepairEvery {
+		return nil, nil
+	}
+	peers, _ := wgPeers(a.state.Mesh)
+	var busy map[string]bool
+	for _, p := range a.state.Mesh.Peers {
+		if len(p.PublicKey) != wg.KeyLen {
+			continue
+		}
+		k := wg.Key(p.PublicKey)
+		i := slices.IndexFunc(peers, func(w wg.Peer) bool { return w.PublicKey == k })
+		if i < 0 {
+			continue // not a peer of the device
+		}
+		if hs := handshakes[p.Name]; !hs.IsZero() && now.Sub(hs) < a.tune.meshStale {
+			continue
+		}
+		if since, wanted := a.meshSince[k]; !wanted || now.Sub(since) < a.tune.meshRepairEvery {
+			continue
+		}
+		if busy == nil {
+			busy = endpointNodes(a.state.Envs)
+		}
+		if busy[p.Name] {
+			lost, names = append(lost, peers[i]), append(names, p.Name)
+		}
+	}
+	return lost, names
+}
+
+// endpointNodes are the nodes that run endpoints of the table's
+// environments.
+func endpointNodes(envs map[string]wire.Env) map[string]bool {
+	nodes := map[string]bool{}
+	for _, e := range envs {
+		for _, svc := range e.Services {
+			for _, ep := range svc.Endpoints {
+				nodes[ep.Node] = true
+			}
+		}
+	}
+	return nodes
+}
+
+// repairMesh gives the instance new paths to the nodes it lost
+// (lostNodes), as a restart of its pod would, without one:
+//
+//   - The device moves to the next port of its range, so that every node
+//     is reached in a UDP flow that is new to the network. The flow of a
+//     WireGuard peer keeps its addresses and ports for the peer's life,
+//     and the keepalive and the handshake's retries never let it rest, so
+//     state that the network keeps for it, such as a flow an outage left
+//     broken, would never expire. Where the endpoint's port is not the
+//     device's own (a port forwarded to it), the device keeps its port.
+//   - The lost nodes' peers are removed and set again: their sessions,
+//     timers and the endpoints the device learnt go, their configured
+//     endpoints come back, and the kernel handshakes at once.
+//   - The control plane learns the new endpoint from the next Hello
+//     (announce), and the nodes from it, as any new endpoint.
+//
+// The nodes that answer keep their sessions; they follow the new port with
+// the instance's next packet. A failure is logged; the next repair, or
+// syncPeers, tries again.
+func (a *Agent) repairMesh(now time.Time, lost []wg.Peer, names []string) {
+	a.meshMu.Lock()
+	defer a.meshMu.Unlock()
+	a.mu.Lock()
+	cfg := a.meshCfg
+	ok := a.meshOK && a.meshCfg == a.meshWant && a.state != nil
+	var m wire.Mesh
+	if ok {
+		m = a.state.Mesh
+	}
+	a.lastRepair = now
+	a.mu.Unlock()
+	if !ok {
+		return
+	}
+	from := cfg.ListenPort
+	if a.portMoves() {
+		for i := 1; i < meshPorts; i++ {
+			next := cfg
+			next.ListenPort = a.cfg.MeshPort + (from-a.cfg.MeshPort+i)%meshPorts
+			if err := a.deps.Mesh.Configure(next); err != nil {
+				a.rl.warn("mesh-port", "ingress agent: move the mesh device to another port; trying the next", "err", err, "port", next.ListenPort)
+				continue
+			}
+			cfg = next
+			break
+		}
+	}
+	peers, _ := wgPeers(m)
+	keep := slices.DeleteFunc(slices.Clone(peers), func(p wg.Peer) bool {
+		return slices.ContainsFunc(lost, func(l wg.Peer) bool { return l.PublicKey == p.PublicKey })
+	})
+	err := a.deps.Mesh.SetPeers(keep)
+	if err == nil {
+		err = a.deps.Mesh.SetPeers(peers)
+	}
+	a.mu.Lock()
+	a.meshCfg, a.meshWant, a.meshPort = cfg, cfg, cfg.ListenPort
+	a.peersSet = err == nil
+	if err == nil {
+		a.peersVer = m.Version
+	}
+	for _, p := range lost {
+		a.meshSince[p.PublicKey] = now
+	}
+	a.repairs++
+	a.mu.Unlock()
+	if err != nil {
+		a.rl.error("peers", "ingress agent: set the mesh device's peers; retrying", "err", err, "meshVersion", m.Version)
+	}
+	a.log.Warn("ingress agent: no handshake with nodes that run endpoints; gave the mesh device new paths to them",
+		"nodes", names, "after", a.tune.meshStale, "port", cfg.ListenPort, "fromPort", from)
+	select {
+	case a.meshKick <- struct{}{}:
+	default:
+	}
+}
+
+// portMoves reports whether a repair moves the device's port: when the
+// nodes reach the device at its own port, and the range fits.
+func (a *Agent) portMoves() bool {
+	return int(a.endpoint.Port()) == a.cfg.MeshPort && a.cfg.MeshPort+meshPorts-1 <= 65535
+}
+
+// meshEndpointLocked is the endpoint the nodes reach the device at:
+// Config.MeshEndpoint, at the port a repair moved the device to.
+func (a *Agent) meshEndpointLocked() string {
+	if a.meshPort == a.cfg.MeshPort || !a.portMoves() {
+		return a.cfg.MeshEndpoint
+	}
+	return netip.AddrPortFrom(a.endpoint.Addr(), uint16(a.meshPort)).String()
+}
+
+// announce tells the control plane the device's endpoint when it changed
+// since the last Hello: a Hello on the current session, on a goroutine of
+// its own, one at a time. The control plane counts the mesh's peers up
+// and sends the nodes the new endpoint. A failure is logged and tried
+// again from the mesh loop; the next connection's Hello sends the
+// endpoint anyway.
+func (a *Agent) announce() {
+	a.mu.Lock()
+	s, ctx := a.cur, a.runCtx
+	ep := a.meshEndpointLocked()
+	if s == nil || ctx == nil || a.announcing || a.announced == ep {
+		a.mu.Unlock()
+		return
+	}
+	a.announcing = true
+	pub := a.wgKey.PublicKey()
+	a.goroutines.Add(1)
+	a.mu.Unlock()
+	go func() {
+		defer a.goroutines.Done()
+		cctx, cancel := context.WithTimeout(ctx, a.tune.callTimeout)
+		resp, err := s.client.Hello(cctx, &wire.HelloRequest{PublicKey: pub[:], Endpoint: ep, Version: a.cfg.Version})
+		cancel()
+		if err == nil && resp.Name != a.cfg.Name {
+			err = fmt.Errorf("the control plane answered Hello for ingress %q, not %q", resp.Name, a.cfg.Name)
+		}
+		a.mu.Lock()
+		a.announcing = false
+		if err == nil {
+			a.announced = ep
+		}
+		a.mu.Unlock()
+		if err != nil {
+			a.rl.warn("announce", "ingress agent: tell the control plane the mesh device's new endpoint; retrying", "err", err, "endpoint", ep)
+			return
+		}
+		a.log.Info("ingress agent: the control plane took the mesh device's new endpoint", "endpoint", ep)
+	}()
 }

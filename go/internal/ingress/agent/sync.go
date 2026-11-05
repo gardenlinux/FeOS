@@ -20,17 +20,18 @@ import (
 var errStalled = errors.New("the table stream went silent")
 
 // hello says Hello on the session: it sends the WireGuard public key and
-// endpoint, keeps the instance's place on the mesh in mesh.json and
-// configures the device for it. A device that cannot be configured does
-// not end the session: the mesh loop tries again, and MeshConfigured
-// reports it.
+// endpoint (at the device's current port), keeps the instance's place on
+// the mesh in mesh.json and configures the device for it. A device that
+// cannot be configured does not end the session: the mesh loop tries
+// again, and MeshConfigured reports it.
 func (a *Agent) hello(ctx context.Context, s *session) error {
 	a.mu.Lock()
 	pub := a.wgKey.PublicKey()
+	ep := a.meshEndpointLocked()
 	a.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, a.tune.callTimeout)
 	defer cancel()
-	resp, err := s.client.Hello(cctx, &wire.HelloRequest{PublicKey: pub[:], Endpoint: a.cfg.MeshEndpoint, Version: a.cfg.Version})
+	resp, err := s.client.Hello(cctx, &wire.HelloRequest{PublicKey: pub[:], Endpoint: ep, Version: a.cfg.Version})
 	if err != nil {
 		return err
 	}
@@ -45,6 +46,7 @@ func (a *Agent) hello(ctx context.Context, s *session) error {
 	a.mu.Lock()
 	a.refusals.connected(time.Now())
 	a.lastErr = ""
+	a.announced = ep
 	a.mu.Unlock()
 
 	place := meshPlace{PodNetwork: resp.PodNetwork, Prefix: resp.Prefix, Address: resp.Address}
@@ -76,12 +78,12 @@ func (a *Agent) meshConfigFor(podNetwork, address string) (MeshConfig, error) {
 		return MeshConfig{}, fmt.Errorf("mesh address %q is not an IPv6 address in %s", address, ula)
 	}
 	a.mu.Lock()
-	key := a.wgKey
+	key, port := a.wgKey, a.meshPort
 	a.mu.Unlock()
 	return MeshConfig{
 		Device:     a.cfg.MeshDevice,
 		PrivateKey: key,
-		ListenPort: a.cfg.MeshPort,
+		ListenPort: port,
 		MTU:        a.cfg.MeshMTU,
 		Endpoint:   a.endpoint,
 		Address:    netip.PrefixFrom(addr, 128),

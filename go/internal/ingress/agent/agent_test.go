@@ -159,6 +159,9 @@ type harness struct {
 	cfg  Config
 	// nextMesh, when set, is the mesh device of the next agent started.
 	nextMesh *fakeMesh
+	// device, when set, is the mesh device of the agents started, in
+	// place of their fakeMesh.
+	device MeshDevice
 	// prepare, when set, changes the next agent started before it runs.
 	prepare func(*Agent)
 }
@@ -233,8 +236,12 @@ func (h *harness) start(cfg Config, tune func(*timing)) *testAgent {
 	if h.nextMesh != nil {
 		ta.mesh, h.nextMesh = h.nextMesh, nil
 	}
+	var dev MeshDevice = ta.mesh
+	if h.device != nil {
+		dev = h.device
+	}
 	a, err := New(cfg, Deps{
-		Mesh:    ta.mesh,
+		Mesh:    dev,
 		OnState: ta.rec.onState,
 		OnMesh:  ta.rec.onMesh,
 		Log:     slog.New(slog.NewTextHandler(ta.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
