@@ -178,10 +178,6 @@ struct Inner {
     records: tokio::sync::Mutex<()>,
     /// What sends a pod's logs before it pauses (ADR 0026).
     log_drain: OnceLock<LogDrain>,
-    /// Held while a pod's interception CAs are read from its record and
-    /// pushed to its guest, so that the last record read is the last one
-    /// pushed (ADR 0028).
-    ca_pushes: tokio::sync::Mutex<()>,
     /// The pods' feos-authn processes (ADR 0014, ADR 0028).
     authn: Authn,
 }
@@ -210,6 +206,10 @@ struct Pod {
     /// create or start brought (ADR 0025): in memory only, for the next
     /// bring-up, which takes it.
     pull_token: Option<String>,
+    /// Held while its interception CAs are read from its record and pushed
+    /// to its guest, so that the last record read is the last one pushed
+    /// (ADR 0028): one pod's push waits for no other pod's.
+    ca_push: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Pod {
@@ -222,6 +222,7 @@ impl Pod {
             abandoned: VecDeque::new(),
             busy: None,
             pull_token: None,
+            ca_push: Arc::default(),
         }
     }
 
@@ -382,7 +383,6 @@ impl Pods {
                 stop_record: tokio::sync::Mutex::new(()),
                 records: tokio::sync::Mutex::new(()),
                 log_drain: OnceLock::new(),
-                ca_pushes: tokio::sync::Mutex::new(()),
                 authn,
             }),
         };
@@ -925,7 +925,12 @@ impl Pods {
     /// for a pod with HTTP bindings, or `always`, for a guest that may hold
     /// others. A guest too old to take them fails a pod that has CAs.
     async fn push_intercept_cas(&self, pod_id: &str, always: bool) -> Result<(), Status> {
-        let _push = self.inner.ca_pushes.lock().await;
+        let push = self
+            .pods()
+            .get(pod_id)
+            .map(|pod| pod.ca_push.clone())
+            .ok_or_else(|| Status::not_found(format!("no pod {pod_id}")))?;
+        let _push = push.lock().await;
         let info = self.info(pod_id)?;
         let spec = info.spec.clone().unwrap_or_default();
         // A guest that booted holds none: one that never had any is left
@@ -4126,7 +4131,6 @@ mod tests {
                 stop_record: tokio::sync::Mutex::new(()),
                 records: tokio::sync::Mutex::new(()),
                 log_drain: OnceLock::new(),
-                ca_pushes: tokio::sync::Mutex::new(()),
                 authn: Authn::new(
                     authn::Config {
                         binary: dir.join("no-feos-authn"),
