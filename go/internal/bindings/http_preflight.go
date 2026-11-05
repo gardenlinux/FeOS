@@ -238,7 +238,8 @@ func (s *Service) httpPreflight(ctx context.Context, in httpBindingIn, probe *HT
 }
 
 // checkProbe checks a probe: GET or HEAD, a path beginning with "/"
-// within the binding's prefixes.
+// within the binding's prefixes, by whole segments as feos-authn holds
+// them.
 func checkProbe(p HTTPProbe, prefixes []string) *bindingErr {
 	if p.Method != http.MethodGet && p.Method != http.MethodHead {
 		return bindingErrf(codeInvalidBinding, "probe.method must be GET or HEAD, not %q", p.Method)
@@ -253,7 +254,7 @@ func checkProbe(p HTTPProbe, prefixes []string) *bindingErr {
 	}
 	path, _, _ := strings.Cut(p.Path, "?")
 	for _, pre := range prefixes {
-		if strings.HasPrefix(path, pre) {
+		if httpcheck.WithinPrefix(path, pre) {
 			return nil
 		}
 	}
@@ -335,8 +336,8 @@ func setCredential(req *http.Request, c httpCredential, token string) {
 
 // fetchToken asks the token endpoint for a token (RFC 6749 §4.4): the
 // endpoint's host judged by the destination rule, its addresses again at
-// the dial, its certificate checked against the binding's CA when it has
-// one, else the system's roots.
+// the dial, its certificate checked against the system's roots and the
+// binding's CA.
 func (s *Service) fetchToken(ctx context.Context, c httpCredential, caPEM string) (string, int, *bindingErr) {
 	u, err := url.Parse(c.TokenURL)
 	if err != nil {
@@ -349,7 +350,12 @@ func (s *Service) fetchToken(ctx context.Context, c httpCredential, caPEM string
 	}
 	conf := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caPEM != "" {
-		pool := x509.NewCertPool()
+		// The system's roots and the binding's CA, as feos-authn checks
+		// the token endpoint.
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
 		if !pool.AppendCertsFromPEM([]byte(caPEM)) {
 			return "", 0, bindingErrf(codeBadCA, "caPem holds no certificate")
 		}

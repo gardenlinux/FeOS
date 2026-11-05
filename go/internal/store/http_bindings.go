@@ -169,14 +169,15 @@ func (s *Store) SetHTTPPushed(ctx context.Context, sandboxID podid.ID, inc uuid.
 // clear part of their HTTP bindings than the row's: a pod on one of nodes
 // (running, paused or stopped, materialised, no op), with an HTTP set of
 // its own, a template that names bindings, or a part taken before; at
-// most limit, the least recently updated first. The caller computes each
-// one's part and compares its version with HTTPPushed.
+// most limit, in a random order, so that a pass of many reaches each in
+// turn. The caller computes each one's part and compares its version with
+// HTTPPushed.
 func (s *Store) HTTPPushCandidates(ctx context.Context, nodes []string, limit int) ([]Sandbox, error) {
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxColumns("s")+` FROM sandboxes s
 		WHERE s.node = ANY($1) AND s.materialised AND s.op = ''
 			AND s.client_state IN ('running', 'paused', 'stopped')
 			AND (s.http_version <> '' OR s.http_pushed <> '' OR s.pod_template ? 'httpBindings')
-		ORDER BY s.updated_at, s.id LIMIT $2`, nonNil(nodes), limit))
+		ORDER BY random() LIMIT $2`, nonNil(nodes), limit))
 }
 
 // EnvInstanceDeployment returns the deployment an environment's pod

@@ -227,9 +227,10 @@ func Mode(field, mode string, up Upstream) (string, *Error) {
 }
 
 // PathPrefixes checks the path prefixes a binding may reach: each begins
-// with "/", has no query, fragment, whitespace or control character and no
-// "." or ".." segment, at most MaxPathPrefix bytes; at most
-// MaxPathPrefixes, no two the same.
+// with "/", has no query, fragment, whitespace, control character, "\",
+// encoded "/", "\" or ".", and no "." or ".." segment, at most
+// MaxPathPrefix bytes; at most MaxPathPrefixes, no two the same. A prefix
+// holds whole segments (WithinPrefix).
 func PathPrefixes(field string, ps []string) *Error {
 	if len(ps) > MaxPathPrefixes {
 		return errorf(CodeInvalidBinding, "%s: at most %d path prefixes", field, MaxPathPrefixes)
@@ -246,6 +247,8 @@ func PathPrefixes(field string, ps []string) *Error {
 			return errorf(CodeInvalidBinding, "%s %q must not have a query or fragment", f, p)
 		case !utf8.ValidString(p) || hasControlOrSpace(p):
 			return errorf(CodeInvalidBinding, "%s %q must not have whitespace or control characters", f, p)
+		case strings.Contains(p, `\`) || hasEncodedSeparator(p):
+			return errorf(CodeInvalidBinding, "%s %q must not have \\ or an encoded /, \\ or .", f, p)
 		case seen[p]:
 			return errorf(CodeInvalidBinding, "%s %q is listed twice", f, p)
 		}
@@ -390,6 +393,22 @@ func ClientCertificate(field, certPEM, keyPEM string) *Error {
 		return errorf(CodeBadClientCert, "%s: %v", field, err)
 	}
 	return nil
+}
+
+// WithinPrefix reports whether path (without its query) is within prefix
+// by whole segments, as feos-authn holds them: "/api" holds "/api" and
+// "/api/x", not "/apix"; "/api/" holds "/api/x" alone.
+func WithinPrefix(path, prefix string) bool {
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	return len(path) == len(prefix) || strings.HasSuffix(prefix, "/") || path[len(prefix)] == '/'
+}
+
+// hasEncodedSeparator reports whether s has an encoded "/", "\" or ".".
+func hasEncodedSeparator(s string) bool {
+	l := strings.ToLower(s)
+	return strings.Contains(l, "%2f") || strings.Contains(l, "%5c") || strings.Contains(l, "%2e")
 }
 
 func hasControlOrSpace(s string) bool {

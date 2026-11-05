@@ -123,19 +123,23 @@ own spans on. The request's record in the egress stream
 | `ferun.source` | `egress` |
 | `ferun.*` | the pod's labels, as its own spans carry them |
 
-The span: `trace_id` the request's `traceparent`'s, else a new one;
-`parent_span_id` the `traceparent`'s span; `span_id` new, and the one
-`feos-authn` passes on to the upstream in `traceparent`; `name`
-`<METHOD> <binding>` (`GET erp`); `kind` `SPAN_KIND_CLIENT`;
-`start_time_unix_nano` the request's start, `end_time_unix_nano` its
-end; `status` `STATUS_CODE_ERROR` for a status of 500 and above or a
-refusal of `feos-authn`'s own (the message its code), else unset.
+The span, made of the request's `http` and `http_end` records (joined by
+`spanId`), once its `http_end` came: `trace_id` the record's `traceId`
+(the request's `traceparent`'s, else a new one); `parent_span_id` its
+`parentSpanId`; `span_id` its `spanId`, the one `feos-authn` passes on to
+the upstream in `traceparent`; `name` `<METHOD> <binding>` (`GET erp`);
+`kind` `SPAN_KIND_CLIENT`; `start_time_unix_nano` the request's start,
+`end_time_unix_nano` its end (`http_end`'s `durationMs`, else the
+`http` record's); `status` `STATUS_CODE_ERROR` for a status of 500 and
+above or a refusal of `feos-authn`'s own (the message its code), else
+unset. A request without its `http_end` (a killed process) has no span.
 Attributes: `http.request.method`, `url.path` (without the query),
 `server.address` (the upstream's host), `server.port` (when not 443),
 `http.response.status_code` (left out when none was written),
 `ferun.binding`, `ferun.binding.mode` (`name`, `intercept`),
 `ferun.credential` (its kind), `network.peer.address` (the address
-dialed), and `ferun.error.code` for a refusal. The sink keeps it with
+dialed), `http.request.body.size` and `http.response.body.size` (the
+`http_end`'s bytes), and `ferun.error.code` for a refusal. The sink keeps it with
 `source` `egress`; a read of an environment's traces finds it with the
 pod's own spans, and `source=egress` alone.
 

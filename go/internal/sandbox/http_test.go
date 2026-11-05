@@ -136,3 +136,35 @@ func TestHTTPBindingsAroundOps(t *testing.T) {
 		t.Fatalf("http_pushed after UNIMPLEMENTED: %q", got)
 	}
 }
+
+// The leader's loop sends a pod the part its node did not take: a push
+// that was lost.
+func TestHTTPBindingsLoop(t *testing.T) {
+	h := newHarness(t)
+	h.addNode("n1")
+	src := &fakeHTTP{}
+	h.eng().SetHTTPBindings(src)
+	sb := h.running(512)
+	other := h.running(512)
+	src.set(sb.ID.String(), "v1", "erp")
+	// sb's row has a part its node never took; other's has none at all and
+	// is no candidate.
+	h.exec(`UPDATE sandboxes SET http_version = 'set' WHERE id = $1`, sb.ID)
+	calls := h.watchCalls("n1", podv1.PodService_SetPodHttpBindings_FullMethodName, false)
+	if err := h.eng().httpBindingsLoop(bg); err != nil {
+		t.Fatal(err)
+	}
+	h.waitPushed(sb, "v1")
+	if part := h.nodePart("n1", sb.ID.String()); part.GetVersion() != "v1" {
+		t.Fatalf("the loop's part: %v", part)
+	}
+	if err := h.eng().httpBindingsLoop(bg); err != nil {
+		t.Fatal(err)
+	}
+	if n := calls.count(); n != 1 {
+		t.Fatalf("SetPodHttpBindings calls: %d", n)
+	}
+	if got := h.row(other.ID).HTTPPushed; got != "" {
+		t.Fatalf("the other row: %q", got)
+	}
+}
