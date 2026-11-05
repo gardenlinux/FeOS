@@ -198,6 +198,14 @@ fn is_certificate_pem(pem: &str) -> bool {
     false
 }
 
+/// The pod's interception CAs, PEM, oldest first; none without.
+pub fn intercept_cas(spec: &PodSpec) -> Vec<String> {
+    spec.http_bindings
+        .as_ref()
+        .map(|b| b.intercept_ca_pems.clone())
+        .unwrap_or_default()
+}
+
 /// The spec without its HTTP bindings' clear part, which SetPodHttpBindings
 /// changes: what two creates of a pod compare.
 pub fn without_http_bindings(spec: &PodSpec) -> PodSpec {
@@ -484,6 +492,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(created.http_bindings, Some(good));
+        assert_eq!(intercept_cas(&created).len(), 2);
+        assert!(intercept_cas(&pod).is_empty());
         check_http_bindings(&pod, &PodHttpBindings::default()).unwrap();
 
         for bad in [

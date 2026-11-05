@@ -15,6 +15,32 @@ service GuestService {
   // it is, unless it is to be formatted. Every volume gets an answer of
   // its own; one that fails leaves the others.
   rpc MountVolumes(MountVolumesRequest) returns (MountVolumesResponse);
+  // Sets the pod's interception CAs (ADR 0028 §5), which feosd pushes
+  // before it creates the containers and whenever SetPodHttpBindings
+  // changes them. The guest writes them to intercept-ca.pem in the share
+  // directory, which every container sees at /run/feos/intercept-ca.pem,
+  // and every container created after it gets a bundle of its image's
+  // system bundle and the CAs mounted over the image's bundles, and the
+  // variables naming them. A container that has a bundle has it rewritten
+  // in place, never by a rename, so that its mounts see the new CAs. No
+  // CAs empty the file; containers created then get nothing.
+  rpc SetInterceptCas(SetInterceptCasRequest) returns (SetInterceptCasResponse);
+}
+
+message SetInterceptCasRequest {
+  // PEM certificates, oldest first.
+  repeated string ca_pems = 1;
+}
+
+message SetInterceptCasResponse {
+  // The containers whose bundle could not be rewritten, and why: they
+  // keep the CAs they had.
+  repeated InterceptFailure failed = 1;
+}
+
+message InterceptFailure {
+  string container_id = 1;
+  string reason = 2;
 }
 
 message MountVolumesRequest {

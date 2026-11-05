@@ -49,7 +49,8 @@ use feos_proto::container_service::{
 };
 use feos_proto::disk_service::{Head, MemoryRef};
 use feos_proto::guest_service::{
-    guest_service_client::GuestServiceClient, MountVolumesRequest, Volume as GuestVolume,
+    guest_service_client::GuestServiceClient, MountVolumesRequest, SetInterceptCasRequest,
+    Volume as GuestVolume,
 };
 use feos_proto::host_service::{
     host_service_client::HostServiceClient, FreezeFilesystemRequest, ThawFilesystemRequest,
@@ -112,6 +113,8 @@ const REFRESH: Duration = Duration::from_secs(60);
 /// How long a pod's logs may take to be sent before it is suspended,
 /// hibernates or is deleted (ADR 0026).
 pub const LOG_DRAIN: Duration = Duration::from_secs(5);
+/// How long the guest may take to write the pod's interception CAs.
+const CA_PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a stopped or deleted pod's containers may take to exit after
 /// SIGTERM, before its microVM ends them.
 pub const CONTAINER_GRACE: Duration = Duration::from_secs(10);
@@ -170,6 +173,10 @@ struct Inner {
     records: tokio::sync::Mutex<()>,
     /// What sends a pod's logs before it pauses (ADR 0026).
     log_drain: OnceLock<LogDrain>,
+    /// Held while a pod's interception CAs are read from its record and
+    /// pushed to its guest, so that the last record read is the last one
+    /// pushed (ADR 0028).
+    ca_pushes: tokio::sync::Mutex<()>,
 }
 
 /// Sends what the containers of a running pod wrote to its logs, before
@@ -365,6 +372,7 @@ impl Pods {
                 stop_record: tokio::sync::Mutex::new(()),
                 records: tokio::sync::Mutex::new(()),
                 log_drain: OnceLock::new(),
+                ca_pushes: tokio::sync::Mutex::new(()),
             }),
         };
         let mut pending = Vec::new();
@@ -815,6 +823,7 @@ impl Pods {
         self.set_state(pod_id, PodState::Running, "").await;
         self.check_microvm_network(pod_id, attachment.as_ref())
             .await;
+        self.repush_intercept_cas(pod_id).await;
         Ok(())
     }
 
@@ -835,6 +844,7 @@ impl Pods {
         if spec.http_bindings.as_ref() == Some(&bindings) {
             return Ok(());
         }
+        let cas_changed = spec::intercept_cas(&spec) != bindings.intercept_ca_pems;
         self.update(pod_id, |info| {
             if let Some(spec) = info.spec.as_mut() {
                 spec.http_bindings = Some(bindings);
@@ -851,7 +861,80 @@ impl Pods {
                 .unwrap_or_default()
         );
         self.inner.network.set_http_names(&info);
+        // A pod that is coming up pushes them itself, before its containers.
+        if cas_changed && info.state() == PodState::Running {
+            self.repush_intercept_cas(pod_id).await;
+        }
         Ok(())
+    }
+
+    /// Pushes the pod's interception CAs, as its record has them now, to
+    /// its guest (ADR 0028 §5), which writes them into every container:
+    /// for a pod with HTTP bindings, whose guest may hold others. A guest
+    /// too old to take them fails a pod that has CAs.
+    async fn push_intercept_cas(&self, pod_id: &str) -> Result<(), Status> {
+        let _push = self.inner.ca_pushes.lock().await;
+        let info = self.info(pod_id)?;
+        let Some(spec) = info
+            .spec
+            .as_ref()
+            .filter(|spec| spec.http_bindings.is_some())
+        else {
+            return Ok(());
+        };
+        let cas = spec::intercept_cas(spec);
+        let mut guest = GuestServiceClient::new(self.guest_channel(pod_id).await?);
+        let request = SetInterceptCasRequest {
+            ca_pems: cas.clone(),
+        };
+        let response = match timeout(CA_PUSH_TIMEOUT, guest.set_intercept_cas(request)).await {
+            Err(_) => {
+                return Err(Status::deadline_exceeded(format!(
+                    "the guest did not take the interception CAs within {}s",
+                    CA_PUSH_TIMEOUT.as_secs()
+                )))
+            }
+            Ok(Err(e)) if e.code() == Code::Unimplemented && cas.is_empty() => return Ok(()),
+            Ok(Err(e)) if e.code() == Code::Unimplemented => {
+                return Err(Status::failed_precondition(
+                    "the guest puts no interception CAs into containers: it is older than \
+                     HTTP bindings are",
+                ))
+            }
+            Ok(Err(e)) => {
+                return Err(Status::new(
+                    e.code(),
+                    format!("the guest's interception CAs: {}", e.message()),
+                ))
+            }
+            Ok(Ok(response)) => response.into_inner(),
+        };
+        for failure in response.failed {
+            warn!(
+                "Pods: {pod_id}'s container {} keeps the interception CAs it had: {}",
+                failure.container_id, failure.reason
+            );
+        }
+        if !cas.is_empty() {
+            info!(
+                "Pods: {pod_id}'s guest has its {} interception CAs",
+                cas.len()
+            );
+        }
+        Ok(())
+    }
+
+    /// [`Pods::push_intercept_cas`] for a pod whose containers run: after a
+    /// resume or a restore, whose guest holds the CAs of its suspend, and
+    /// after a change. A failure is logged; the containers keep the CAs
+    /// they have.
+    async fn repush_intercept_cas(&self, pod_id: &str) {
+        if let Err(e) = self.push_intercept_cas(pod_id).await {
+            warn!(
+                "Pods: {pod_id}'s containers keep the interception CAs they have: {}",
+                e.message()
+            );
+        }
     }
 
     /// Takes the pod off the node into object storage (ADR 0008), in a task
@@ -1274,6 +1357,7 @@ impl Pods {
                 Ok(()) => {
                     self.set_state(pod_id, PodState::Running, "").await;
                     info!("Pods: {pod_id} is restored from {key}, with its memory");
+                    self.repush_intercept_cas(pod_id).await;
                     return Ok(RestorePodResponse {
                         pod: Some(self.info(pod_id)?),
                         memory_restored: true,
@@ -2366,6 +2450,8 @@ impl Pods {
             pull_token.filter(|_| !bake::on_layer(&self.info(pod_id).unwrap_or_default()));
         self.wait_for_guest(pod_id).await?;
         self.mount_volumes(pod_id, spec).await?;
+        // Before any container is created: each gets them (ADR 0028 §5).
+        self.push_intercept_cas(pod_id).await?;
         let channel = self.guest_channel(pod_id).await?;
         self.bake_point(pod_id, spec, channel.clone(), pull_token)
             .await?;
@@ -3918,6 +4004,7 @@ mod tests {
                 stop_record: tokio::sync::Mutex::new(()),
                 records: tokio::sync::Mutex::new(()),
                 log_drain: OnceLock::new(),
+                ca_pushes: tokio::sync::Mutex::new(()),
             }),
         }
     }

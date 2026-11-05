@@ -4,13 +4,22 @@
 //! The pod's volumes in its guest (ADR 0016): `feos.guest.v1.GuestService`
 //! `MountVolumes`, which feosd calls once the guest attached and before it
 //! creates the containers. A volume that fails is an answer, never a
-//! panic: this runs in PID 1.
+//! panic: this runs in PID 1. And the pod's interception CAs (ADR 0028),
+//! `SetInterceptCas`, which feosd pushes before it creates the containers
+//! too (`container_service::runtime::intercept`).
 
+use container_service::runtime::intercept;
 use feos_proto::guest_service::guest_service_server::GuestService;
-use feos_proto::guest_service::{MountVolumesRequest, MountVolumesResponse, MountedVolume, Volume};
+use feos_proto::guest_service::{
+    InterceptFailure, MountVolumesRequest, MountVolumesResponse, MountedVolume,
+    SetInterceptCasRequest, SetInterceptCasResponse, Volume,
+};
 use feos_utils::filesystem::disks::{virtio_disks, Disk};
 use feos_utils::filesystem::volume::{self, Plan};
+use feos_utils::filesystem::CONTAINERS_DIR;
+use feos_utils::share::SHARE_DIR;
 use log::{info, warn};
+use std::path::Path;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Instant};
@@ -75,6 +84,33 @@ impl GuestService for GuestApi {
             mounted.push(answer);
         }
         Ok(Response::new(MountVolumesResponse { volumes: mounted }))
+    }
+
+    async fn set_intercept_cas(
+        &self,
+        request: Request<SetInterceptCasRequest>,
+    ) -> Result<Response<SetInterceptCasResponse>, Status> {
+        let cas = request.into_inner().ca_pems;
+        let count = cas.len();
+        let failed = tokio::task::spawn_blocking(move || {
+            intercept::publish(Path::new(SHARE_DIR), Path::new(CONTAINERS_DIR), &cas)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("the CAs' task: {e}")))?
+        .map_err(|e| Status::internal(format!("writing the interception CAs: {e}")))?;
+        for (container, reason) in &failed {
+            warn!("Intercept: Container {container} keeps the CAs it had: {reason}");
+        }
+        info!("Intercept: The pod has {count} interception CAs");
+        Ok(Response::new(SetInterceptCasResponse {
+            failed: failed
+                .into_iter()
+                .map(|(container_id, reason)| InterceptFailure {
+                    container_id,
+                    reason,
+                })
+                .collect(),
+        }))
     }
 }
 

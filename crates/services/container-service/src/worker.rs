@@ -211,8 +211,9 @@ pub async fn create_container(
         let (command, env) = (config.command.clone(), config.env.clone());
         let mounts = config.volume_mounts.clone();
         blocking(move || {
-            let process = bundle::process(&image_dir, &command, &env)?;
-            let volumes = bundle::volume_mounts(&mounts)?;
+            let mut process = bundle::process(&image_dir, &command, &env)?;
+            let mut volumes = bundle::volume_mounts(&mounts)?;
+            bundle::intercept(&id, &image_dir, &env, &mut process.env, &mut volumes)?;
             let spec = bundle::runtime_spec(&id, &process, &volumes);
             bundle::provision(&id, &image_dir, &spec, false)
         })
@@ -273,10 +274,11 @@ async fn adopt_container(
     let image_dir = image_dir(image_uuid);
     let id = container_id.clone();
     let mounts = merged.volume_mounts.clone();
+    let spec_env = merged.env.clone();
     let resolver_error = blocking(move || {
         // The spec it ran with: its command and environment, with the
         // request's on top.
-        let process = match bundle::previous_process(&id) {
+        let mut process = match bundle::previous_process(&id) {
             Some((args, env)) => {
                 let image = bundle::process(&image_dir, &args, &Default::default())?;
                 let mut previous = Process {
@@ -298,7 +300,8 @@ async fn adopt_container(
             }
             None => bundle::process(&image_dir, &config.command, &config.env)?,
         };
-        let volumes = bundle::volume_mounts(&mounts)?;
+        let mut volumes = bundle::volume_mounts(&mounts)?;
+        bundle::intercept(&id, &image_dir, &spec_env, &mut process.env, &mut volumes)?;
         let spec = bundle::runtime_spec(&id, &process, &volumes);
         bundle::provision(&id, &image_dir, &spec, true)
     })

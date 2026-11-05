@@ -335,8 +335,31 @@ pub fn remove(id: &str) -> Result<(), String> {
     }
 }
 
+/// The pod's interception CAs for the container `id` of the image in
+/// `image_dir` (ADR 0028 §5, `intercept`): its bundle's mounts appended
+/// to `mounts`, and their variables set in `env` where `spec`, the
+/// container's environment as its spec states it, does not. Nothing
+/// while the guest holds no CAs.
+pub fn intercept(
+    id: &str,
+    image_dir: &Path,
+    spec: &HashMap<String, String>,
+    env: &mut Vec<String>,
+    mounts: &mut Vec<Value>,
+) -> Result<(), String> {
+    let injection = super::intercept::prepare(
+        Path::new(resolver::SHARE_DIR),
+        &container_dir(id),
+        &image_dir.join("rootfs"),
+    )?;
+    super::intercept::set_env(env, &injection, spec);
+    mounts.extend(injection.mounts);
+    Ok(())
+}
+
 /// The environment of an exec: the container's own, `overrides` on top, and
-/// a PATH if neither sets one.
+/// a PATH if neither sets one; the pod's CA file where the guest holds
+/// interception CAs and neither names one (ADR 0028 §5).
 pub fn exec_env(id: &str, overrides: &HashMap<String, String>) -> Vec<String> {
     let mut env = previous_process(id).map(|(_, env)| env).unwrap_or_default();
     let mut overrides: Vec<_> = overrides.iter().collect();
@@ -349,6 +372,7 @@ pub fn exec_env(id: &str, overrides: &HashMap<String, String>) -> Vec<String> {
         env.push(format!("PATH={DEFAULT_PATH}:{TOOLBOX_PATH}"));
     }
     feos_utils::share::set_ssh_agent_env(&mut env);
+    super::intercept::set_exec_env(Path::new(resolver::SHARE_DIR), &mut env);
     env
 }
 
