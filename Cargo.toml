@@ -4,6 +4,7 @@ members = [
     "crates/diskctl",
     "crates/diskd",
     "crates/feos",
+    "crates/feos-authn",
     "crates/feos-host-init",
     "crates/feos-proto",
     "crates/feos-utils",
