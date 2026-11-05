@@ -225,9 +225,10 @@ upstream's host and port alone, whatever a URL names. Then:
    host, the server checked against the binding's CA, or the WebPKI's
    roots (built in) without one; a failure: 502 `tls`. Connections are
    pooled per binding (16 idle, 90 s).
-6. An upgrade (`Connection: upgrade` with `Upgrade`, HTTP/1.1) goes over
-   a pool of the binding's that offers `http/1.1` only; a 101 makes both
-   sides a pipe.
+6. An upgrade to WebSocket (`Connection: upgrade` with `Upgrade:
+   websocket` alone, HTTP/1.1) goes over a pool of the binding's that
+   offers `http/1.1` only; a 101 makes both sides a pipe. A request for
+   another upgrade goes on as a request, without its `Upgrade`.
 7. The answer loses its hop-by-hop headers and `Alt-Svc`. In the name
    mode a `Location` or `Content-Location` on the upstream's origin
    (absolute or scheme-relative) becomes `http://<name>…`. Bodies pass

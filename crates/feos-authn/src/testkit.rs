@@ -129,8 +129,9 @@ pub struct Seen {
 
 /// An HTTPS upstream on 127.0.0.1 with h2 and http/1.1. Paths:
 /// `/redirect` answers 302 to `https://<its own authority>/next`; `/ws` an
-/// upgrade that echoes; `/big` 1 MiB; `/protected` 401 unless the bearer
-/// token is `tok-2` or later; everything else 200 with "ok".
+/// upgrade to WebSocket that echoes, when it is asked for one; `/big` 1
+/// MiB; `/protected` 401 unless the bearer token is `tok-2` or later;
+/// everything else 200 with "ok".
 pub struct Upstream {
     pub addr: SocketAddr,
     pub seen: Arc<Mutex<Vec<Seen>>>,
@@ -238,7 +239,7 @@ async fn upstream_handler(
                 "https://elsewhere.example/x".parse().unwrap(),
             );
         }
-        "/ws" => {
+        "/ws" if parts.headers.contains_key(http::header::UPGRADE) => {
             if let Some(up) = on_upgrade {
                 tokio::spawn(async move {
                     if let Ok(io) = up.await {
@@ -252,7 +253,7 @@ async fn upstream_handler(
             *resp.body_mut() = Full::new(Bytes::new());
             let h = resp.headers_mut();
             h.insert(http::header::CONNECTION, "Upgrade".parse().unwrap());
-            h.insert(http::header::UPGRADE, "echo".parse().unwrap());
+            h.insert(http::header::UPGRADE, "websocket".parse().unwrap());
         }
         "/big" => *resp.body_mut() = Full::new(Bytes::from(vec![b'x'; BIG])),
         "/protected" => {

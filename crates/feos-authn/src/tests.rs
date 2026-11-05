@@ -233,17 +233,30 @@ async fn name_mode_end_to_end() {
     .await;
     assert_eq!(end["bytesOut"], BIG as u64);
 
+    // An upgrade to another protocol than WebSocket is no upgrade: the
+    // request goes on without it.
+    let req = Request::get("/ws")
+        .header("host", "erp")
+        .header("connection", "upgrade")
+        .header("upgrade", "h2c")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let (status, _, body) = read(send1(&mut s, req).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(&body[..], b"ok");
+    assert!(header(&up.last(), "upgrade").is_empty());
+
     // An upgrade becomes a pipe, over HTTP/1.1 to the upstream.
     let mut s = h1(h.node.connect(&h.feosd, 80).await).await;
     let req = Request::get("/ws")
         .header("host", "erp")
         .header("connection", "upgrade")
-        .header("upgrade", "echo")
+        .header("upgrade", "websocket")
         .body(Full::new(Bytes::new()))
         .unwrap();
     let mut resp = send1(&mut s, req).await;
     assert_eq!(resp.status(), StatusCode::SWITCHING_PROTOCOLS);
-    assert_eq!(resp.headers()["upgrade"], "echo");
+    assert_eq!(resp.headers()["upgrade"], "websocket");
     let io = hyper::upgrade::on(&mut resp).await.unwrap();
     let mut io = TokioIo::new(io);
     io.write_all(b"ping").await.unwrap();
@@ -252,8 +265,10 @@ async fn name_mode_end_to_end() {
     assert_eq!(&buf, b"ping");
     assert_eq!(up.last().version, http::Version::HTTP_11);
     drop(io);
-    let rec = await_record(&h.audit, |r| r["type"] == "http" && r["path"] == "/ws").await;
-    assert_eq!(rec["status"], 101);
+    let rec = await_record(&h.audit, |r| {
+        r["type"] == "http" && r["path"] == "/ws" && r["status"] == 101
+    })
+    .await;
     let end = await_record(&h.audit, |r| {
         r["type"] == "http_end" && r["spanId"] == rec["spanId"]
     })

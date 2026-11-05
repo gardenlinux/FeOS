@@ -340,9 +340,17 @@ fn connection_tokens(h: &HeaderMap) -> Vec<String> {
         .collect()
 }
 
-/// Whether a request asks for an HTTP/1.1 upgrade.
+/// Whether a request asks for the HTTP/1.1 upgrade a binding carries, to
+/// WebSocket: `Connection: upgrade` with `Upgrade: websocket` alone. One
+/// to another protocol is no upgrade here: it goes on as a request, and
+/// its `Upgrade`, hop-by-hop, stays behind.
 pub fn is_upgrade(h: &HeaderMap) -> bool {
-    h.contains_key(UPGRADE) && connection_tokens(h).iter().any(|t| t == "upgrade")
+    let mut upgrades = h.get_all(UPGRADE).iter();
+    let websocket = match (upgrades.next(), upgrades.next()) {
+        (Some(v), None) => v.as_bytes().trim_ascii().eq_ignore_ascii_case(b"websocket"),
+        _ => false,
+    };
+    websocket && connection_tokens(h).iter().any(|t| t == "upgrade")
 }
 
 /// The request's headers for the upstream: without `Host` (the client sets
@@ -939,6 +947,16 @@ mod tests {
         assert_eq!(out[CONNECTION], "upgrade");
         assert_eq!(out["sec-websocket-key"], "k");
         assert!(!is_upgrade(&HeaderMap::new()));
+        // WebSocket alone.
+        ws.insert(UPGRADE, HeaderValue::from_static("WebSocket"));
+        assert!(is_upgrade(&ws));
+        for other in ["h2c", "websocket, h2c", "echo"] {
+            ws.insert(UPGRADE, HeaderValue::from_static(other));
+            assert!(!is_upgrade(&ws), "{other}");
+        }
+        ws.insert(UPGRADE, HeaderValue::from_static("websocket"));
+        ws.append(UPGRADE, HeaderValue::from_static("websocket"));
+        assert!(!is_upgrade(&ws), "two Upgrade headers");
     }
 
     #[test]
