@@ -11,10 +11,10 @@
 //! `intercept/ca-bundle.pem`, that bundle and the CAs, which its runtime
 //! spec mounts read-only over every one of [`SYSTEM_BUNDLES`] the image
 //! has, or over the first when it has none (distroless, scratch). Its
-//! environment names them where the container's spec does not:
-//! `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` the bundle, and
-//! `NODE_EXTRA_CA_CERTS` the CA file; and so does every process started in
-//! it later, which takes the environment of its runtime spec.
+//! environment names them where neither the container's spec nor its
+//! image's `Env` does: `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` the bundle,
+//! and `NODE_EXTRA_CA_CERTS` the CA file; and so does every process
+//! started in it later, which takes the environment of its runtime spec.
 //!
 //! A container created before the guest held CAs, as a sandbox's are, has
 //! no bundle mounted, and its runtime spec names none. A process started
@@ -147,16 +147,48 @@ pub fn prepare(share: &Path, container: &Path, rootfs: &Path) -> Result<Injectio
 
 /// Sets the injection's variables in `env`, a process's `KEY=value`
 /// entries, unless `spec` (the container's own environment as its spec
-/// states it) sets them; a value of an earlier injection is replaced.
-pub fn set_env(env: &mut Vec<String>, injection: &Injection, spec: &HashMap<String, String>) {
+/// states it) sets them, or `image` (its image's `Env`) does to a path of
+/// its own: that one stays, or comes back where an earlier injection
+/// replaced it. A value of an earlier injection is replaced.
+pub fn set_env(
+    env: &mut Vec<String>,
+    injection: &Injection,
+    spec: &HashMap<String, String>,
+    image: &[String],
+) {
     for (name, value) in &injection.env {
         if spec.contains_key(name) {
             continue;
         }
         let prefix = format!("{name}=");
+        let value_in = |entries: &[String]| {
+            entries
+                .iter()
+                .rev()
+                .find_map(|entry| entry.strip_prefix(&prefix))
+                .map(str::to_string)
+        };
+        let value = match value_in(image).filter(|own| !injected(own)) {
+            // The image's: what is there stays, unless it is an injection's.
+            Some(own) => match value_in(env) {
+                Some(now) if !injected(&now) => continue,
+                _ => own,
+            },
+            None => value.clone(),
+        };
         env.retain(|entry| !entry.starts_with(&prefix));
         env.push(format!("{name}={value}"));
     }
+}
+
+/// Whether `value` is a path an injection names: a system bundle it
+/// mounts over, the CA file, or an exec bundle.
+fn injected(value: &str) -> bool {
+    SYSTEM_BUNDLES.contains(&value)
+        || value == CA_PATH
+        || value
+            .strip_prefix(EXEC_DEST)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// An exec's environment `env` in the container `id`, whose directory is
@@ -550,7 +582,7 @@ mod tests {
             // An adopted container's, from its first create.
             "SSL_CERT_FILE=/old".to_string(),
         ];
-        set_env(&mut env, &injection, &spec);
+        set_env(&mut env, &injection, &spec, &[]);
         assert_eq!(
             env,
             [
@@ -565,6 +597,57 @@ mod tests {
         set_exec_env(&guest.share, "main", &dir, root.path(), &mut env).unwrap();
         assert_eq!(env.len(), 4);
         assert!(!guest.share.join(EXEC_DIR).exists());
+    }
+
+    #[test]
+    fn the_images_own_variables_win_and_come_back() {
+        let guest = guest();
+        publish(&guest.share, &guest.containers, &[CA1.into()]).unwrap();
+        let dir = guest.container("main");
+        let root = image(&[("/etc/ssl/certs/ca-certificates.crt", "SYSTEM\n")], &[]);
+        let injection = prepare(&guest.share, &dir, root.path()).unwrap();
+        let image = [
+            "PATH=/bin".to_string(),
+            "SSL_CERT_FILE=/etc/custom.pem".to_string(),
+            "NODE_EXTRA_CA_CERTS=/etc/node.pem".to_string(),
+            // A path an injection names is no image's own.
+            "REQUESTS_CA_BUNDLE=/etc/pki/tls/certs/ca-bundle.crt".to_string(),
+        ];
+        let injected = [
+            "SSL_CERT_FILE=/etc/custom.pem",
+            "NODE_EXTRA_CA_CERTS=/etc/node.pem",
+            "PATH=/bin",
+            "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+        ];
+        // A create: the image's environment.
+        let mut env = image.to_vec();
+        set_env(&mut env, &injection, &HashMap::new(), &image);
+        let mut sorted = env.clone();
+        sorted.sort();
+        let mut want = injected.map(String::from).to_vec();
+        want.sort();
+        assert_eq!(sorted, want);
+        // An adopted container an older guest set every variable of: the
+        // image's come back, an exec bundle's is replaced.
+        let mut env = vec![
+            "PATH=/bin".to_string(),
+            "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt".to_string(),
+            "REQUESTS_CA_BUNDLE=/run/feos/intercept/main.pem".to_string(),
+            format!("NODE_EXTRA_CA_CERTS={CA_PATH}"),
+        ];
+        set_env(&mut env, &injection, &HashMap::new(), &image);
+        let mut sorted = env.clone();
+        sorted.sort();
+        assert_eq!(sorted, want);
+        // Set again, nothing changes.
+        set_env(&mut env, &injection, &HashMap::new(), &image);
+        env.sort();
+        assert_eq!(env, want);
+        // The spec's own still win over the image's.
+        let spec = HashMap::from([("SSL_CERT_FILE".to_string(), "/mine.pem".to_string())]);
+        let mut env = vec!["SSL_CERT_FILE=/mine.pem".to_string()];
+        set_env(&mut env, &injection, &spec, &image);
+        assert!(env.contains(&"SSL_CERT_FILE=/mine.pem".to_string()));
     }
 
     /// The environment of an exec into the container `id`, whose own is

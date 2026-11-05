@@ -174,10 +174,13 @@ reaps.
   `intercept/ca-bundle.pem`, that bundle and the CAs, bind-mounted
   read-only, `nosuid`, `nodev`, `noexec`, over every one of those paths
   the image has, or over `/etc/ssl/certs/ca-certificates.crt` when it has
-  none (libcontainer makes the file); and its environment, where its
-  `ContainerConfig.env` does not set them, `SSL_CERT_FILE` and
-  `REQUESTS_CA_BUNDLE` naming the first of those paths and
-  `NODE_EXTRA_CA_CERTS` naming `/run/feos/intercept-ca.pem`. Every exec
+  none (libcontainer makes the file); and its environment, where neither
+  its `ContainerConfig.env` nor its image's `Env` sets them (an image's
+  value that is one of these paths does not count, so an adopted
+  container's value of an older guest gives way to its image's),
+  `SSL_CERT_FILE` and `REQUESTS_CA_BUNDLE` naming the first of those
+  paths and `NODE_EXTRA_CA_CERTS` naming `/run/feos/intercept-ca.pem`.
+  The bundles are read and written as bytes, text or not. Every exec
   takes the container's environment, so a sandbox's tool calls and an
   attached service's processes have them too. An exec in a container
   created before the guest held CAs, as a sandbox's are, gets

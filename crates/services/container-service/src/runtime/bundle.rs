@@ -341,8 +341,8 @@ pub fn remove(id: &str) -> Result<(), String> {
 /// The pod's interception CAs for the container `id` of the image in
 /// `image_dir` (ADR 0028 §5, `intercept`): its bundle's mounts appended
 /// to `mounts`, and their variables set in `env` where `spec`, the
-/// container's environment as its spec states it, does not. Nothing
-/// while the guest holds no CAs.
+/// container's environment as its spec states it, does not, nor its
+/// image's own. Nothing while the guest holds no CAs.
 pub fn intercept(
     id: &str,
     image_dir: &Path,
@@ -355,9 +355,26 @@ pub fn intercept(
         &container_dir(id),
         &image_dir.join("rootfs"),
     )?;
-    super::intercept::set_env(env, &injection, spec);
+    super::intercept::set_env(env, &injection, spec, &image_env(image_dir));
     mounts.extend(injection.mounts);
     Ok(())
+}
+
+/// The image's own environment, its config's `Env`; none when it does not
+/// read.
+fn image_env(image_dir: &Path) -> Vec<String> {
+    let image: Option<Value> = std::fs::read_to_string(image_dir.join("config.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok());
+    image
+        .as_ref()
+        .and_then(|image| image["config"]["Env"].as_array())
+        .map(|env| {
+            env.iter()
+                .filter_map(|entry| entry.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The environment of an exec: the container's own, `overrides` on top, and
