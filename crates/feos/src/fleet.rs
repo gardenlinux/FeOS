@@ -7,14 +7,19 @@
 
 use feos_proto::container_service::StreamContainerLogsRequest;
 use feos_proto::pod_service::PodInfo;
+use fleet_client::egress::{self, Joiner};
 use fleet_client::{
-    Diskd, Fleet, Incoming, Installed, Inventory, LogStream, Logs, Senders, ShippedPod, Shipper,
-    TracedPod, Traces,
+    Diskd, Events, Fleet, Incoming, Installed, Inventory, LogStream, Logs, Senders, ShippedPod,
+    Shipper, TracedPod, Traces, EGRESS_CONTAINER,
 };
-use log::warn;
+use log::{debug, warn};
 use microvm_service::vmm::installed;
+use pod_service::authn::audit;
 use pod_service::Pods;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 use tokio::runtime::Handle;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -78,7 +83,17 @@ impl Logs for PodLogs {
             .map(|pod| ShippedPod {
                 containers: pod
                     .spec
-                    .map(|spec| spec.containers.into_iter().map(|c| c.name).collect())
+                    .map(|spec| {
+                        // The pod's requests through its HTTP bindings, a
+                        // log of their own (ADR 0028 §6).
+                        let egress = pod_service::has_http_bindings(&spec)
+                            .then(|| EGRESS_CONTAINER.to_string());
+                        spec.containers
+                            .into_iter()
+                            .map(|c| c.name)
+                            .chain(egress)
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 id: pod.pod_id,
                 labels: pod.log_labels,
@@ -92,6 +107,14 @@ impl Logs for PodLogs {
         pod_id: &str,
         request: StreamContainerLogsRequest,
     ) -> Result<LogStream, tonic::Status> {
+        if request.container_id == EGRESS_CONTAINER {
+            let dir = self.0.authn().pod_dir(pod_id);
+            return Ok(Box::pin(audit::follow(
+                dir,
+                request,
+                Arc::new(egress::is_http),
+            )));
+        }
         Ok(Box::pin(self.0.container_logs(pod_id, request).await?))
     }
 }
@@ -133,11 +156,96 @@ fn take_spans(pods: &Pods, shipper: Shipper) -> Traces {
     traces
 }
 
+/// How often the requests that wait for their ends are looked at.
+const EGRESS_EXPIRY: Duration = Duration::from_secs(60);
+/// How often a batch of egress spans is sent before it is dropped.
+const EGRESS_TRIES: u32 = 3;
+
+/// Publishes the records of the pods' feos-authn (ADR 0014, ADR 0028 §6)
+/// from their audit files: each as the pod's audit event, and each request
+/// as a client span once its two records came; one whose end did not come
+/// within [`egress::END_WAIT`] has none. Spans go as the pods' own do,
+/// best effort.
+fn publish_audit(pods: &Pods, events: Events, traces: Traces) {
+    let joiners: Arc<Mutex<HashMap<String, Joiner>>> = Arc::default();
+    let handler: audit::Handler = {
+        let joiners = joiners.clone();
+        Arc::new(move |pod_id: String, lines: Vec<Vec<u8>>| {
+            let observed = SystemTime::now();
+            let mut spans = Vec::new();
+            {
+                let mut joiners = joiners.lock().unwrap_or_else(|e| e.into_inner());
+                let joiner = joiners.entry(pod_id.clone()).or_default();
+                for line in &lines {
+                    let Some(record) = egress::record(line) else {
+                        continue;
+                    };
+                    if let Some(kind) = record.kind.as_deref().and_then(egress::audit_kind) {
+                        events.audit(&pod_id, kind, &String::from_utf8_lossy(line));
+                    }
+                    spans.extend(joiner.take(record, observed));
+                }
+            }
+            let traces = traces.clone();
+            Box::pin(async move {
+                export_spans(&traces, &pod_id, spans).await;
+                true
+            })
+        })
+    };
+    pods.follow_audit(Arc::new(egress::is_published), handler);
+    let live = pods.clone();
+    // Forgets the requests whose ends do not come.
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(EGRESS_EXPIRY).await;
+            let known: std::collections::HashSet<String> =
+                live.list().into_iter().map(|pod| pod.pod_id).collect();
+            let mut joiners = joiners.lock().unwrap_or_else(|e| e.into_inner());
+            for (pod_id, joiner) in joiners.iter_mut() {
+                let forgotten = joiner.expire(SystemTime::now(), egress::END_WAIT);
+                if forgotten > 0 {
+                    debug!(
+                        "Fleet: {forgotten} of pod {pod_id}'s requests have no record of their \
+                         end: no span"
+                    );
+                }
+            }
+            joiners.retain(|pod_id, joiner| known.contains(pod_id) || !joiner.is_empty());
+        }
+    });
+}
+
+async fn export_spans(
+    traces: &Traces,
+    pod_id: &str,
+    spans: Vec<feos_proto::opentelemetry::proto::trace::v1::Span>,
+) {
+    if spans.is_empty() {
+        return;
+    }
+    for attempt in 1..=EGRESS_TRIES {
+        match traces.export_egress(pod_id, spans.clone()).await {
+            Ok(()) => return,
+            Err(e) if attempt < EGRESS_TRIES => {
+                debug!("Fleet: Pod {pod_id}'s egress spans: {}; again", e.message());
+                tokio::time::sleep(Duration::from_secs(u64::from(attempt))).await;
+            }
+            Err(e) => debug!(
+                "Fleet: Pod {pod_id}'s {} egress spans are dropped: {}",
+                spans.len(),
+                e.message()
+            ),
+        }
+    }
+}
+
 /// Ships the pods' logs to the sink the control plane names, and drains
 /// a pod's before it pauses, hibernates or is deleted; and their spans.
 fn ship_logs(fleet: &Fleet, pods: &Pods) {
     let shipper = Shipper::start(PodLogs(pods.clone()), fleet.sink());
     let traces = take_spans(pods, shipper.clone());
+    publish_audit(pods, fleet.events().clone(), traces.clone());
     let drain = shipper.clone();
     pods.set_log_drain(Arc::new(move |pod_id| {
         let shipper = drain.clone();

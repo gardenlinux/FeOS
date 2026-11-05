@@ -43,6 +43,11 @@ pub(crate) fn resource(key: &Key, node: &str, labels: &HashMap<String, String>) 
     all.insert("ferun.container", &key.container);
     all.insert("ferun.log_id", &key.log_id);
     all.insert("ferun.node", node);
+    // A pod's requests through its HTTP bindings (ADR 0028), not a
+    // container's output.
+    if key.container == crate::egress::EGRESS_CONTAINER {
+        all.insert("ferun.source", crate::egress::SOURCE);
+    }
     Resource {
         attributes: all
             .into_iter()
@@ -96,6 +101,8 @@ pub(crate) struct Line {
     pub(crate) text: String,
     /// Lines and bytes it stands for, when the node dropped them.
     pub(crate) dropped: Option<(u64, u64)>,
+    /// Its OTLP severity number; 0 unset (an egress record's, ADR 0028).
+    pub(crate) severity: i32,
 }
 
 impl Line {
@@ -109,6 +116,7 @@ impl Line {
             text: String::from_utf8(entry.line)
                 .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
             dropped: None,
+            severity: 0,
         }
     }
 
@@ -140,6 +148,7 @@ impl Line {
         LogRecord {
             time_unix_nano: u64::try_from(self.time_unix_nano).unwrap_or(0),
             observed_time_unix_nano: unix_nanos(observed),
+            severity_number: self.severity,
             body: Some(AnyValue {
                 value: Some(Value::StringValue(self.text.clone())),
             }),
@@ -198,6 +207,7 @@ impl Dropped {
                 dropped.lines, dropped.bytes
             ),
             dropped: Some((dropped.lines, dropped.bytes)),
+            severity: 0,
         })
     }
 }
@@ -332,6 +342,7 @@ mod tests {
             partial: false,
             text: "x".repeat(len),
             dropped: None,
+            severity: 0,
         }
     }
 
@@ -391,6 +402,15 @@ mod tests {
                 ("ferun.tenant", "acme"),
             ])
         );
+        // A pod's egress records (ADR 0028): their source, too.
+        let egress = Key {
+            container: crate::egress::EGRESS_CONTAINER.into(),
+            ..key
+        };
+        let stamped = super::resource(&egress, "node-1", &labels);
+        let attributes = attributes(&stamped.attributes);
+        assert!(attributes.contains(&("ferun.source".to_string(), "egress".to_string())));
+        assert!(attributes.contains(&("ferun.container".to_string(), "feos-authn".to_string())));
     }
 
     #[test]

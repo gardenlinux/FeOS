@@ -30,7 +30,12 @@
 //!
 //! - `{"v":1,"op":"credentials","hpkePublicKey":<b64>,"csr":<b64 DER>}`.
 //! - `{"v":1,"op":"ready","version":…}`: it holds the bindings of that
-//!   version.
+//!   version; after every set, and after every `hello` once it has one.
+//! - `{"v":1,"op":"error","message":…}`: an answer it cannot use, such as
+//!   a box that does not open; it asks again later itself.
+//!
+//! A `hello` whose `podId` is not the process's closes the connection
+//! (docs/architecture/authn.md).
 
 use nix::cmsg_space;
 use nix::errno::Errno;
@@ -112,6 +117,10 @@ pub enum FromAuthn {
     Ready {
         #[serde(default)]
         version: String,
+    },
+    Error {
+        #[serde(default)]
+        message: String,
     },
     /// One this version does not know: skipped.
     #[serde(other)]
@@ -385,6 +394,12 @@ mod tests {
             decode(br#"{"v":1,"op":"ready","version":"3"}"#),
             Ok(FromAuthn::Ready {
                 version: "3".into()
+            })
+        );
+        assert_eq!(
+            decode(br#"{"v":1,"op":"error","message":"the box does not open"}"#),
+            Ok(FromAuthn::Error {
+                message: "the box does not open".into()
             })
         );
         assert_eq!(

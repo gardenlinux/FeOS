@@ -38,6 +38,9 @@ const MAX_HTTP_NAMES: usize = 64;
 const MAX_CA_PEMS: usize = 8;
 const MAX_CA_PEM_BYTES: usize = 64 * 1024;
 const MAX_HTTP_VERSION: usize = 128;
+/// The name of a pod's egress records' log (ADR 0028 §6), which no
+/// container of a pod with HTTP bindings has: `fleet_client::EGRESS_CONTAINER`.
+const EGRESS_CONTAINER: &str = "feos-authn";
 
 /// Checks a pod's ID, which also names its microVM and its paths: a short
 /// one, or the UUID of a pod made before short IDs (ADR 0019).
@@ -91,11 +94,19 @@ pub fn normalize(mut spec: PodSpec) -> Result<PodSpec, Status> {
     }
     check_volumes(&spec)?;
     check_metadata(&spec)?;
+    // An empty part is none.
+    spec.http_bindings = spec.http_bindings.take().and_then(http_part);
     if let Some(bindings) = &spec.http_bindings {
         check_http_bindings(&spec, bindings)?;
     }
 
     Ok(spec)
+}
+
+/// The clear part of a pod's HTTP bindings as its record keeps it: none
+/// for an empty one.
+pub fn http_part(bindings: PodHttpBindings) -> Option<PodHttpBindings> {
+    (bindings != PodHttpBindings::default()).then_some(bindings)
 }
 
 /// Checks the clear part of a pod's HTTP bindings (ADR 0028): names that
@@ -113,6 +124,13 @@ pub fn check_http_bindings(spec: &PodSpec, bindings: &PodHttpBindings) -> Result
         return Err(Status::invalid_argument(
             "a pod without a network reaches no HTTP bindings",
         ));
+    }
+    // Its egress records are a log of that name (ADR 0028 §6).
+    if named > 0 && spec.containers.iter().any(|c| c.name == EGRESS_CONTAINER) {
+        return Err(Status::invalid_argument(format!(
+            "a pod with HTTP bindings has no container named {EGRESS_CONTAINER:?}: its egress \
+             records' log is"
+        )));
     }
     let mut seen = HashSet::new();
     for name in &bindings.names {
@@ -199,7 +217,8 @@ fn is_certificate_pem(pem: &str) -> bool {
 }
 
 /// Whether the pod has HTTP bindings that it reaches by a name (ADR
-/// 0028): a pod's feos-authn runs for those.
+/// 0028): a pod's feos-authn runs for those, and its egress records are
+/// shipped.
 pub fn has_http_bindings(spec: &PodSpec) -> bool {
     spec.http_bindings
         .as_ref()
@@ -500,6 +519,13 @@ mod tests {
         })
         .unwrap();
         assert_eq!(created.http_bindings, Some(good));
+        // An empty part is none.
+        let empty = normalize(PodSpec {
+            http_bindings: Some(PodHttpBindings::default()),
+            ..pod.clone()
+        })
+        .unwrap();
+        assert_eq!(empty.http_bindings, None);
         assert_eq!(intercept_cas(&created).len(), 2);
         assert!(has_http_bindings(&created) && !has_http_bindings(&pod));
         assert!(intercept_cas(&pod).is_empty());
@@ -534,6 +560,10 @@ mod tests {
             ..pod.clone()
         };
         assert!(check_http_bindings(&isolated, &bindings(&["erp"], &[], &[])).is_err());
+        // Nor one with a container named as its egress records' log.
+        let named = spec(vec![container("feos-authn")]);
+        assert!(check_http_bindings(&named, &bindings(&["erp"], &[], &[])).is_err());
+        check_http_bindings(&named, &PodHttpBindings::default()).unwrap();
         // Two creates compare without them.
         let other = PodSpec {
             http_bindings: Some(bindings(&["crm"], &[], &[])),

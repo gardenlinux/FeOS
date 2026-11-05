@@ -21,6 +21,7 @@
 //! want it, is not adopted. The protocol is in [`control`], the jail in
 //! [`jail`].
 
+pub mod audit;
 pub mod control;
 pub mod jail;
 pub mod listener;
@@ -133,6 +134,8 @@ struct Inner {
     dir: PathBuf,
     issuer: RwLock<Option<Issuer>>,
     deny: RwLock<DenyPrefixes>,
+    /// The resolvers its jail's `resolv.conf` names: the node's upstreams.
+    resolvers: RwLock<Vec<std::net::IpAddr>>,
     pods: Mutex<HashMap<String, Slot>>,
     /// Processes a feosd before this one started, until their pods' slots
     /// take them.
@@ -196,6 +199,7 @@ impl Authn {
                 dir: dir.to_path_buf(),
                 issuer: RwLock::new(None),
                 deny: RwLock::new(Arc::new(Vec::new)),
+                resolvers: RwLock::new(Vec::new()),
                 pods: Mutex::new(HashMap::new()),
                 adopted: Mutex::new(HashMap::new()),
                 uids: Mutex::new(HashSet::new()),
@@ -213,6 +217,16 @@ impl Authn {
 
     pub fn set_deny_prefixes(&self, deny: DenyPrefixes) {
         *self.inner.deny.write().unwrap_or_else(|e| e.into_inner()) = deny;
+    }
+
+    /// The resolvers the processes resolve upstreams with, which their
+    /// jail's `resolv.conf` names, from their next start on.
+    pub fn set_resolvers(&self, resolvers: Vec<std::net::IpAddr>) {
+        *self
+            .inner
+            .resolvers
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = resolvers;
     }
 
     /// The pod's directory, where its process's files are.
@@ -259,6 +273,7 @@ impl Authn {
             let _ = timeout(STOP_GRACE + KILL_WAIT * 2, slot.actor).await;
         }
         let dir = self.pod_dir(pod_id);
+        jail::unlock_root(&dir);
         match tokio::fs::remove_dir_all(&dir).await {
             Err(e) if e.kind() != io::ErrorKind::NotFound => {
                 warn!("Authn: Failed to remove {}: {e}", dir.display())
@@ -642,7 +657,12 @@ fn launch(inner: &Inner, pod_id: &str, uid: u32) -> io::Result<(i32, OwnedFd)> {
         .create(true)
         .mode(0o600)
         .open(dir.join(AUDIT))?;
-    let root = jail::root_dir(&dir)?;
+    let resolvers = inner
+        .resolvers
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let root = jail::root_dir(&dir, &resolvers)?;
     let audit = OwnedFd::from(audit);
     let pid = (inner.launch)(&jail::Start {
         binary: &inner.config.binary,
@@ -778,6 +798,13 @@ async fn read(
                     refetch_backoff = REFETCH_BACKOFF.0;
                     lock(&error).clear();
                 }
+            }
+            Ok(FromAuthn::Error { message }) => {
+                warn!(
+                    "Authn: Pod {}'s feos-authn cannot use its credentials: {message}",
+                    run.pod_id
+                );
+                *lock(&error) = format!("it cannot use its credentials: {message}");
             }
             Ok(FromAuthn::Unknown) => debug!(
                 "Authn: Pod {}'s feos-authn said what this feosd does not know: {}",

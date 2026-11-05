@@ -490,6 +490,12 @@ impl Network {
         }
     }
 
+    /// The node's upstream resolvers (`--dns-upstream`), which a pod's
+    /// `feos-authn` resolves its upstreams with.
+    pub fn dns_upstreams(&self) -> Vec<IpAddr> {
+        self.config.dns_upstreams.clone()
+    }
+
     /// What a pod's `feos-authn` dials none of (ADR 0014, "The jail"):
     /// `--deny-prefix`, the node's own addresses and the mesh's peers', the
     /// pods' IPv4 range and the node's prefix for pods.

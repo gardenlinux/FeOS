@@ -715,6 +715,14 @@ impl Shipping {
                     }
                     let now = Instant::now();
                     let mut line = Line::of(entry);
+                    if self.container == crate::egress::EGRESS_CONTAINER {
+                        // A request: its start and its severity.
+                        let observed = std::time::SystemTime::now();
+                        if let Some(record) = crate::egress::record(line.text.as_bytes()) {
+                            line.time_unix_nano = crate::egress::start_unix_nanos(&record, observed);
+                            line.severity = crate::egress::severity(&record);
+                        }
+                    }
                     batch::redact(&mut line.text, &self.labels.redact);
                     for line in limit.admit(line, now) {
                         if batch.would_overflow(&line) {

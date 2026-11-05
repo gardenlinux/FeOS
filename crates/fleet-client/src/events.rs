@@ -12,7 +12,7 @@
 
 use crate::uplink::describe;
 use feos_proto::fleet_service::fleet_service_client::FleetServiceClient;
-use feos_proto::fleet_service::{event::Body, Event, EventAck, EventBatch, NodeEvent};
+use feos_proto::fleet_service::{event::Body, AuditRecord, Event, EventAck, EventBatch, NodeEvent};
 use feos_proto::pod_service::PodEvent;
 use log::{debug, info, warn};
 use prost::Message;
@@ -79,6 +79,16 @@ impl Events {
     /// A pod's state changed.
     pub fn pod(&self, event: PodEvent) {
         self.push(Body::Pod(event));
+    }
+
+    /// A record of a pod's feos-authn (ADR 0014): its kind, and its fields
+    /// as a JSON object.
+    pub fn audit(&self, pod_id: &str, kind: &str, detail_json: &str) {
+        self.push(Body::Audit(AuditRecord {
+            pod_id: pod_id.to_string(),
+            kind: kind.to_string(),
+            detail_json: detail_json.to_string(),
+        }));
     }
 
     /// Something of feosd itself: "started", or "stopping".

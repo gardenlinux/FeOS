@@ -2,16 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! A pod's `feos-authn`, started in its jail (ADR 0014, "The jail"): a
-//! session of its own, a mount namespace whose root is an empty read-only
-//! tmpfs, its descriptors 0 and 1 on `/dev/null`, 2 `feosd`'s stderr, 3 the
+//! session of its own, a mount namespace whose root is a read-only
+//! directory of the pod's that holds `/etc/resolv.conf`, naming the node's
+//! upstream resolvers (`--dns-upstream`), and `/etc/hosts` alone; its
+//! descriptors 0 and 1 on `/dev/null`, 2 `feosd`'s stderr, 3 the
 //! audit file and 4 the control socket's listener and no other, rlimits, no
 //! capabilities in any set, `no_new_privs`, and a user and group of its own
 //! per running pod, with no supplementary groups. The binary is opened
 //! before and executed from its descriptor, since the new root has none.
 //!
-//! Not yet: the seccomp allowlist, and the network namespace that reaches
-//! only the internet (a veth and blackhole routes); the process dials from
-//! the node's namespace until then, and checks every address itself.
+//! `feos-authn` itself installs its seccomp allowlist and drops what it
+//! may again (docs/architecture/authn.md, "The jail"). Not yet: the
+//! network namespace that reaches only the internet (a veth and blackhole
+//! routes) and the cgroup with `pids.max` and a memory limit; the process
+//! dials from the node's namespace until then, checks every address
+//! itself, and has `RLIMIT_NPROC` and `RLIMIT_AS` for limits.
 //!
 //! Between the fork and the exec the child makes raw system calls alone,
 //! each async-signal-safe, as the child of a process with threads must:
@@ -69,7 +74,7 @@ const STEPS: [&str; 13] = [
     "setsid",
     "the mount namespace",
     "making the mounts private",
-    "mounting the empty root",
+    "mounting the root",
     "pivot_root",
     "its descriptors",
     "the rlimits",
@@ -121,8 +126,7 @@ pub fn spawn(start: &Start<'_>) -> io::Result<i32> {
     };
     let (argv_p, envp_p) = (pointers(&argv), pointers(&envp));
     let root = CString::new(start.root.as_os_str().as_bytes()).map_err(io::Error::other)?;
-    let (tmpfs, dot, slash, empty) = (c"tmpfs", c".", c"/", c"");
-    let options = c"size=4k,mode=0555";
+    let (dot, slash, empty) = (c".", c"/", c"");
     let fds = [
         start.audit.as_raw_fd(),
         start.control.as_raw_fd(),
@@ -167,13 +171,26 @@ pub fn spawn(start: &Start<'_>) -> io::Result<i32> {
             {
                 fail(3);
             }
+            // The root's directory on itself, read-only.
             if libc::mount(
-                tmpfs.as_ptr(),
                 root.as_ptr(),
-                tmpfs.as_ptr(),
-                libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC | libc::MS_RDONLY,
-                options.as_ptr().cast(),
+                root.as_ptr(),
+                std::ptr::null(),
+                libc::MS_BIND,
+                std::ptr::null(),
             ) != 0
+                || libc::mount(
+                    std::ptr::null(),
+                    root.as_ptr(),
+                    std::ptr::null(),
+                    libc::MS_BIND
+                        | libc::MS_REMOUNT
+                        | libc::MS_RDONLY
+                        | libc::MS_NOSUID
+                        | libc::MS_NODEV
+                        | libc::MS_NOEXEC,
+                    std::ptr::null(),
+                ) != 0
             {
                 fail(4);
             }
@@ -319,15 +336,48 @@ pub fn find(pid: i32, start: u64) -> Option<OwnedFd> {
     (start_time(pid) == Some(start)).then_some(fd)
 }
 
-/// The empty directory the process's root is mounted on, in the pod's
-/// directory.
-pub fn root_dir(pod_dir: &Path) -> io::Result<PathBuf> {
-    use std::os::unix::fs::DirBuilderExt;
+/// The directory the process's root is, in the pod's directory: `etc/`
+/// with `resolv.conf`, naming `resolvers`, for the libc's resolver, and
+/// `hosts`; nothing else. Written anew at every start.
+pub fn root_dir(pod_dir: &Path, resolvers: &[std::net::IpAddr]) -> io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     let root = pod_dir.join("authn-root");
-    match std::fs::DirBuilder::new().mode(0o555).create(&root) {
-        Ok(()) => Ok(root),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(root),
-        Err(e) => Err(e),
+    let etc = root.join("etc");
+    // Writable while it is written, read-only for the process.
+    let mode =
+        |dir: &Path, mode| std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode));
+    for dir in [&root, &etc] {
+        match std::fs::DirBuilder::new().mode(0o755).create(dir) {
+            Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+            _ => {}
+        }
+        mode(dir, 0o755)?;
+    }
+    let mut resolv = String::from("# The node's upstream resolvers, for feos-authn.\n");
+    for resolver in resolvers {
+        resolv.push_str(&format!("nameserver {resolver}\n"));
+    }
+    resolv.push_str("options timeout:2 attempts:2\n");
+    let hosts = "127.0.0.1 localhost\n::1 localhost\n";
+    for (name, content) in [("resolv.conf", resolv.as_str()), ("hosts", hosts)] {
+        let path = etc.join(name);
+        let temporary = etc.join(format!(".{name}.new"));
+        std::fs::write(&temporary, content)?;
+        std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o444))?;
+        std::fs::rename(&temporary, &path)?;
+    }
+    mode(&etc, 0o555)?;
+    mode(&root, 0o555)?;
+    Ok(root)
+}
+
+/// Makes the root's directory writable again, for it to be removed with
+/// the pod's directory.
+pub fn unlock_root(pod_dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let root = pod_dir.join("authn-root");
+    for dir in [root.clone(), root.join("etc")] {
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755));
     }
 }
 
@@ -364,7 +414,7 @@ mod tests {
         let (mut ours, audit) = std::os::unix::net::UnixStream::pair().unwrap();
         let (_control_ours, control) = std::os::unix::net::UnixStream::pair().unwrap();
         let (audit, control) = (OwnedFd::from(audit), OwnedFd::from(control));
-        let root = root_dir(dir.path()).unwrap();
+        let root = root_dir(dir.path(), &["192.0.2.53".parse().unwrap()]).unwrap();
         let pid = spawn(&Start {
             binary: &script,
             pod_id: "p",
@@ -395,7 +445,7 @@ mod tests {
         let (_ours, audit) = std::os::unix::net::UnixStream::pair().unwrap();
         let (_control_ours, control) = std::os::unix::net::UnixStream::pair().unwrap();
         let (audit, control) = (OwnedFd::from(audit), OwnedFd::from(control));
-        let root = root_dir(dir.path()).unwrap();
+        let root = root_dir(dir.path(), &["192.0.2.53".parse().unwrap()]).unwrap();
         let pid = spawn(&Start {
             binary: Path::new("/bin/true"),
             pod_id: "p",
@@ -413,6 +463,10 @@ mod tests {
             code == 0 || failed_step(code) == Some("the exec"),
             "failed at {:?}",
             failed_step(code)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("etc/resolv.conf")).unwrap(),
+            "# The node's upstream resolvers, for feos-authn.\nnameserver 192.0.2.53\noptions timeout:2 attempts:2\n"
         );
         // A static binary runs there: glibc's ldconfig, which refuses the
         // options it is given, as itself.

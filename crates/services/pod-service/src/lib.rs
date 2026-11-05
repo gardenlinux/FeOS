@@ -37,6 +37,7 @@ use feos_proto::volume_service::{
     ListVolumesRequest, ListVolumesResponse, Volume,
 };
 pub use pods::{read_record, Beside, LogDrain, Pods, StopRecord, Stopped, LOG_DRAIN, STOP_RECORD};
+pub use spec::has_http_bindings;
 use std::pin::Pin;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;

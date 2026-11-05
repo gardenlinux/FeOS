@@ -386,6 +386,9 @@ impl Pods {
                 authn,
             }),
         };
+        pods.inner
+            .authn
+            .set_resolvers(pods.inner.network.dns_upstreams());
         let weak = Arc::downgrade(&pods.inner);
         pods.inner.authn.set_deny_prefixes(Arc::new(move || {
             weak.upgrade()
@@ -491,8 +494,9 @@ impl Pods {
         spec::check_id(&pod_id)?;
         let spec = spec::normalize(spec)?;
         self.inner.network.check(&spec)?;
-        if let Some(existing) = self.pods().get(&pod_id).map(|pod| pod.info.clone()) {
-            return same_spec(existing, &spec);
+        let existing = self.pods().get(&pod_id).map(|pod| pod.info.clone());
+        if let Some(existing) = existing {
+            return self.created_again(existing, spec).await;
         }
         // The pod claims its volumes before it is recorded, all or none.
         self.inner
@@ -524,7 +528,7 @@ impl Pods {
                     .map(spec::volume_ids)
                     .unwrap_or_default();
                 self.inner.volumes.release(&pod_id, &named).await;
-                return same_spec(existing, &spec);
+                return self.created_again(existing, spec).await;
             }
             Err(Err(e)) => {
                 self.inner.volumes.release(&pod_id, &[]).await;
@@ -852,6 +856,21 @@ impl Pods {
         Ok(())
     }
 
+    /// A create of a pod that is there: the same create if the specs are
+    /// the same but for their HTTP bindings' clear part, which the
+    /// create's replaces (a retry carries the newer one).
+    async fn created_again(&self, existing: PodInfo, spec: PodSpec) -> Result<PodInfo, Status> {
+        let pod_id = existing.pod_id.clone();
+        let same = same_spec(existing, &spec)?;
+        let own = same.spec.as_ref().and_then(|s| s.http_bindings.clone());
+        if own == spec.http_bindings {
+            return Ok(same);
+        }
+        self.set_http_bindings(&pod_id, spec.http_bindings.unwrap_or_default())
+            .await?;
+        Ok(shown(self.info(&pod_id)?))
+    }
+
     /// Sets the clear part of the pod's HTTP bindings (ADR 0028) in its
     /// record, stated whole, and while the pod runs, in its resolver's
     /// answers. A pod that does not run takes it at its next start, resume
@@ -866,13 +885,19 @@ impl Pods {
         let info = self.info(pod_id)?;
         let spec = info.spec.clone().unwrap_or_default();
         spec::check_http_bindings(&spec, &bindings)?;
-        if spec.http_bindings.as_ref() == Some(&bindings) {
+        // Stated again every few seconds: nothing to do when it is the same.
+        let bindings = spec::http_part(bindings);
+        if spec.http_bindings == bindings {
             return Ok(());
         }
-        let cas_changed = spec::intercept_cas(&spec) != bindings.intercept_ca_pems;
+        let cas = bindings
+            .as_ref()
+            .map(|b| b.intercept_ca_pems.clone())
+            .unwrap_or_default();
+        let cas_changed = spec::intercept_cas(&spec) != cas;
         self.update(pod_id, |info| {
             if let Some(spec) = info.spec.as_mut() {
-                spec.http_bindings = Some(bindings);
+                spec.http_bindings = bindings;
             }
         })
         .await;
@@ -896,19 +921,18 @@ impl Pods {
 
     /// Pushes the pod's interception CAs, as its record has them now, to
     /// its guest (ADR 0028 §5), which writes them into every container:
-    /// for a pod with HTTP bindings, whose guest may hold others. A guest
-    /// too old to take them fails a pod that has CAs.
-    async fn push_intercept_cas(&self, pod_id: &str) -> Result<(), Status> {
+    /// for a pod with HTTP bindings, or `always`, for a guest that may hold
+    /// others. A guest too old to take them fails a pod that has CAs.
+    async fn push_intercept_cas(&self, pod_id: &str, always: bool) -> Result<(), Status> {
         let _push = self.inner.ca_pushes.lock().await;
         let info = self.info(pod_id)?;
-        let Some(spec) = info
-            .spec
-            .as_ref()
-            .filter(|spec| spec.http_bindings.is_some())
-        else {
+        let spec = info.spec.clone().unwrap_or_default();
+        // A guest that booted holds none: one that never had any is left
+        // alone.
+        if !always && spec.http_bindings.is_none() {
             return Ok(());
-        };
-        let cas = spec::intercept_cas(spec);
+        }
+        let cas = spec::intercept_cas(&spec);
         let mut guest = GuestServiceClient::new(self.guest_channel(pod_id).await?);
         let request = SetInterceptCasRequest {
             ca_pems: cas.clone(),
@@ -955,7 +979,7 @@ impl Pods {
     /// after a change. A failure is logged; the containers keep the CAs
     /// they have.
     async fn repush_intercept_cas(&self, pod_id: &str) {
-        if let Err(e) = self.push_intercept_cas(pod_id).await {
+        if let Err(e) = self.push_intercept_cas(pod_id, true).await {
             warn!(
                 "Pods: {pod_id}'s containers keep the interception CAs they have: {}",
                 e.message()
@@ -2448,6 +2472,23 @@ impl Pods {
         &self.inner.authn
     }
 
+    /// Follows the pods' audit files (`authn::audit::tail`) from the
+    /// offsets kept beside them: the lines `keep` keeps go to `handler`.
+    pub fn follow_audit(&self, keep: authn::audit::Keep, handler: authn::audit::Handler) {
+        let weak = Arc::downgrade(&self.inner);
+        let pods: Arc<dyn Fn() -> Vec<String> + Send + Sync> = Arc::new(move || {
+            weak.upgrade()
+                .map(|inner| Pods { inner }.pods().keys().cloned().collect())
+                .unwrap_or_default()
+        });
+        tokio::spawn(authn::audit::tail(
+            self.inner.dir.clone(),
+            pods,
+            keep,
+            handler,
+        ));
+    }
+
     /// Serves the pods' HTTP bindings at the node's address (ADR 0028 §2),
     /// on the listeners of `handed` that are bound there and new ones, for
     /// as long as the process runs.
@@ -2520,7 +2561,7 @@ impl Pods {
         self.wait_for_guest(pod_id).await?;
         self.mount_volumes(pod_id, spec).await?;
         // Before any container is created: each gets them (ADR 0028 §5).
-        self.push_intercept_cas(pod_id).await?;
+        self.push_intercept_cas(pod_id, false).await?;
         // Nothing in the pod runs before it has what it was promised.
         self.inner
             .authn
@@ -4195,6 +4236,77 @@ mod tests {
     /// restart of feosd, and a create delivered again with others is the
     /// same create.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn http_bindings_are_set_whole_and_a_repeated_create_takes_its_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let pods = bare_pods(dir.path());
+        let part = |version: &str| PodHttpBindings {
+            version: version.to_string(),
+            ..Default::default()
+        };
+        let spec = |part: Option<PodHttpBindings>| PodSpec {
+            containers: vec![ContainerSpec {
+                name: "main".to_string(),
+                image_ref: "test".to_string(),
+                ..Default::default()
+            }],
+            network: Some(feos_proto::pod_service::PodNetwork {
+                none: true,
+                ..Default::default()
+            }),
+            http_bindings: part,
+            ..Default::default()
+        };
+        let kept = |pods: &Pods| pods.info(POD).unwrap().spec.unwrap().http_bindings;
+        pods.create(POD.to_string(), spec(Some(part("1"))), Beside::default())
+            .await
+            .unwrap();
+        assert_eq!(kept(&pods), Some(part("1")));
+        // A create again: the same spec but for the part, which it takes.
+        let again = pods
+            .create(POD.to_string(), spec(Some(part("2"))), Beside::default())
+            .await
+            .unwrap();
+        assert_eq!(again.spec.unwrap().http_bindings, Some(part("2")));
+        assert_eq!(kept(&pods), Some(part("2")));
+        let mut other = spec(None);
+        other.containers[0].image_ref = "other".to_string();
+        let refused = pods
+            .create(POD.to_string(), other, Beside::default())
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code(), Code::AlreadyExists);
+        // Set whole, the same again, and empty: none.
+        pods.set_http_bindings(POD, part("3")).await.unwrap();
+        pods.set_http_bindings(POD, part("3")).await.unwrap();
+        assert_eq!(kept(&pods), Some(part("3")));
+        pods.set_http_bindings(POD, PodHttpBindings::default())
+            .await
+            .unwrap();
+        assert_eq!(kept(&pods), None);
+        let on_disk = Store::open(dir.path().join("pods"))
+            .unwrap()
+            .load()
+            .unwrap();
+        assert_eq!(on_disk[0].spec.as_ref().unwrap().http_bindings, None);
+        // A pod without a network has no names to be reached by.
+        let named = PodHttpBindings {
+            names: vec!["erp".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            pods.set_http_bindings(POD, named).await.unwrap_err().code(),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            pods.set_http_bindings("b0000000002", part("1"))
+                .await
+                .unwrap_err()
+                .code(),
+            Code::NotFound
+        );
+    }
+
+    #[tokio::test]
     async fn a_pods_log_labels_are_kept_with_it() {
         let dir = tempfile::tempdir().unwrap();
         let pods = bare_pods(dir.path());

@@ -286,6 +286,56 @@ impl Traces {
         self.inner.rescan.notify_one();
     }
 
+    /// Sends the client spans of a pod's requests through its HTTP
+    /// bindings (ADR 0028, `egress`) to the sink, as the pod's own spans
+    /// go: stamped with its labels, and with `ferun.source` `egress` and
+    /// `ferun.container` `feos-authn` on their resource. A pod without
+    /// labels sends none: they are dropped.
+    pub async fn export_egress(
+        &self,
+        pod_id: &str,
+        spans: Vec<feos_proto::opentelemetry::proto::trace::v1::Span>,
+    ) -> Result<(), Status> {
+        use feos_proto::opentelemetry::proto::common::v1::InstrumentationScope;
+        use feos_proto::opentelemetry::proto::trace::v1::{ResourceSpans, ScopeSpans};
+        if spans.is_empty() {
+            return Ok(());
+        }
+        let Some(sender) = self.inner.sender_of(pod_id).await else {
+            return Ok(());
+        };
+        let (channel, node) = (self.inner.sink)()?;
+        let mut request = ExportTraceServiceRequest {
+            resource_spans: vec![ResourceSpans {
+                scope_spans: vec![ScopeSpans {
+                    scope: Some(InstrumentationScope {
+                        name: crate::egress::EGRESS_CONTAINER.to_string(),
+                        ..Default::default()
+                    }),
+                    spans,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        stamp(&mut request, &sender, &node);
+        for spans in &mut request.resource_spans {
+            let resource = spans.resource.get_or_insert_with(Default::default);
+            resource
+                .attributes
+                .push(string("ferun.source", crate::egress::SOURCE));
+            resource
+                .attributes
+                .push(string("ferun.container", crate::egress::EGRESS_CONTAINER));
+        }
+        let mut call = tonic::Request::new(request);
+        call.set_timeout(DEADLINE);
+        timeout(DEADLINE, TraceServiceClient::new(channel).export(call))
+            .await
+            .map_err(|_| Status::unavailable("the sink did not answer in time"))??;
+        Ok(())
+    }
+
     /// Serves OTLP at `address`, gRPC and HTTP, for as long as the process
     /// runs. A port that does not bind is tried again; nothing here ends
     /// feosd.
@@ -365,6 +415,20 @@ impl Inner {
             .await
             .unwrap_or_default();
         self.set_pods(pods);
+    }
+
+    /// The pod `pod_id`, if it has labels; looked for among the pods now
+    /// when it is not known yet.
+    async fn sender_of(&self, pod_id: &str) -> Option<Arc<Sender>> {
+        let known = |pods: &HashMap<IpAddr, Arc<Sender>>| {
+            pods.values().find(|sender| sender.id == pod_id).cloned()
+        };
+        if let Some(sender) = known(&self.pods.read().unwrap_or_else(PoisonError::into_inner)) {
+            return Some(sender);
+        }
+        let _one = self.lookup.lock().await;
+        self.rescan_now().await;
+        known(&self.pods.read().unwrap_or_else(PoisonError::into_inner))
     }
 
     /// The pod that sends from `address`; one not known yet is looked for
@@ -1241,6 +1305,62 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(status.code(), Code::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn a_pods_egress_spans_go_on_stamped_with_their_source() {
+        let took = Arc::new(Mutex::new(Vec::new()));
+        let sink = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let at = sink.local_addr().unwrap();
+        let fake = FakeSink {
+            code: Code::Ok,
+            took: took.clone(),
+        };
+        tokio::spawn(
+            tonic::transport::Server::builder()
+                .add_service(TraceServiceServer::new(fake))
+                .serve_with_incoming(TcpIncoming::from(sink)),
+        );
+        let channel = Endpoint::from_shared(format!("http://{at}"))
+            .unwrap()
+            .connect_lazy();
+        let pods = Fixed(vec![TracedPod {
+            id: "p1".into(),
+            labels: labels(&[("ferun.tenant", "acme"), ("ferun.object", "shop")]),
+            addresses: vec!["169.254.16.5".parse().unwrap()],
+        }]);
+        let traces = Traces::with_sink(pods, Box::new(move || Ok((channel.clone(), "n1".into()))));
+        let span = feos_proto::opentelemetry::proto::trace::v1::Span {
+            name: "GET erp".into(),
+            ..Default::default()
+        };
+        traces.export_egress("p1", vec![span]).await.unwrap();
+        let sent = lock(&took).pop().unwrap();
+        let resource = sent.resource_spans[0].resource.as_ref().unwrap();
+        let attributes = attributes(resource);
+        for pair in [
+            ("ferun.tenant", "acme"),
+            ("ferun.pod", "p1"),
+            ("ferun.node", "n1"),
+            ("service.name", "shop"),
+            ("ferun.source", "egress"),
+            ("ferun.container", "feos-authn"),
+        ] {
+            assert!(
+                attributes.contains(&(pair.0.into(), pair.1.into())),
+                "{pair:?} in {attributes:?}"
+            );
+        }
+        assert_eq!(
+            sent.resource_spans[0].scope_spans[0].spans[0].name,
+            "GET erp"
+        );
+        // A pod without labels sends none.
+        traces
+            .export_egress("unlabelled", vec![Default::default()])
+            .await
+            .unwrap();
+        assert!(lock(&took).is_empty());
     }
 
     #[tokio::test]

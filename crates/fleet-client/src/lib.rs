@@ -30,6 +30,7 @@
 //! node stops".
 
 mod calls;
+pub mod egress;
 mod events;
 mod identity;
 mod node;
@@ -41,6 +42,7 @@ mod traces;
 mod uplink;
 
 pub use calls::{CallsOn, NodeCalls, OnRuntime};
+pub use egress::EGRESS_CONTAINER;
 pub use events::Events;
 pub use identity::NODE_DIR;
 pub use node::{server, Incoming, NodeConn};
