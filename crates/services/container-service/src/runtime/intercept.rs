@@ -119,9 +119,9 @@ pub fn prepare(share: &Path, container: &Path, rootfs: &Path) -> Result<Injectio
         .unwrap_or_default();
     let dir = container.join(DIR);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    write_in_place(&dir.join(SYSTEM), system.as_bytes())?;
+    write_in_place(&dir.join(SYSTEM), &system)?;
     let bundle = dir.join(BUNDLE);
-    write_in_place(&bundle, bundle_of(&system, &cas).as_bytes())?;
+    write_in_place(&bundle, &bundle_of(&system, &cas))?;
     let targets = match present.is_empty() {
         true => vec![SYSTEM_BUNDLES[0]],
         false => present,
@@ -192,20 +192,20 @@ pub fn set_exec_env(
     let root = File::open(rootfs).map_err(|e| format!("{}: {e}", rootfs.display()))?;
     let system = match SYSTEM_BUNDLES.iter().find(|path| is_file_in(&root, path)) {
         Some(path) => read_in(&root, path)?,
-        None => String::new(),
+        None => Vec::new(),
     };
     // The system bundle is kept for a change of the CAs, which has no
     // exec to read it at.
     let dir = container.join(DIR);
     let kept = dir.join(EXEC_SYSTEM);
-    if !std::fs::read_to_string(&kept).is_ok_and(|kept| kept == system) {
+    if !std::fs::read(&kept).is_ok_and(|kept| kept == system) {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        write_in_place(&kept, system.as_bytes())?;
+        write_in_place(&kept, &system)?;
     }
     let bundle = share.join(EXEC_DIR).join(exec_bundle_name(id));
     let content = bundle_of(&system, &cas);
-    if !std::fs::read_to_string(&bundle).is_ok_and(|now| now == content) {
-        write_replacing(&bundle, content.as_bytes())?;
+    if !std::fs::read(&bundle).is_ok_and(|now| now == content) {
+        write_replacing(&bundle, &content)?;
     }
     for name in unnamed {
         env.push(format!("{name}={EXEC_DEST}/{}", exec_bundle_name(id)));
@@ -279,17 +279,21 @@ fn rewrite(
     cas: &str,
     write: impl FnOnce(&[u8]) -> Result<(), String>,
 ) -> Result<(), String> {
-    match std::fs::read_to_string(system) {
-        Ok(kept) => write(bundle_of(&kept, cas).as_bytes()),
+    match std::fs::read(system) {
+        Ok(kept) => write(&bundle_of(&kept, cas)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("{}: {e}", system.display())),
     }
 }
 
-/// A bundle of `system` and `cas`, each block on lines of its own.
-fn bundle_of(system: &str, cas: &str) -> String {
-    let mut bundle = with_newline(system);
-    bundle.push_str(&with_newline(cas));
+/// A bundle of `system` and `cas`, each block on lines of its own. A
+/// system bundle is bytes as the image has them, text or not.
+fn bundle_of(system: &[u8], cas: &str) -> Vec<u8> {
+    let mut bundle = system.to_vec();
+    if !bundle.is_empty() && !bundle.ends_with(b"\n") {
+        bundle.push(b'\n');
+    }
+    bundle.extend_from_slice(with_newline(cas).as_bytes());
     bundle
 }
 
@@ -337,12 +341,12 @@ fn is_file_in(root: &File, path: &str) -> bool {
     open_in(root, path).is_ok()
 }
 
-fn read_in(root: &File, path: &str) -> Result<String, String> {
-    let mut text = String::new();
+fn read_in(root: &File, path: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
     open_in(root, path)
-        .and_then(|file| file.take(MAX_SYSTEM_BUNDLE).read_to_string(&mut text))
+        .and_then(|file| file.take(MAX_SYSTEM_BUNDLE).read_to_end(&mut bytes))
         .map_err(|e| format!("the image's {path}: {e}"))?;
-    Ok(text)
+    Ok(bytes)
 }
 
 /// Opens `path` in the root `root`, an image's or a running container's,
@@ -688,6 +692,39 @@ mod tests {
             std::fs::read_to_string(guest.share.join(EXEC_DIR).join("dir.pem")).unwrap(),
             CA1
         );
+    }
+
+    /// A bundle is bytes: one that is no UTF-8, as a comment in Latin-1
+    /// makes it, is taken as it is, at a create, an exec and a change.
+    #[test]
+    fn a_system_bundle_that_is_no_text_is_taken_as_it_is() {
+        let guest = guest();
+        publish(&guest.share, &guest.containers, &[CA1.into()]).unwrap();
+        let system: &[u8] = b"# Certificat racine \xe9mis\nSYSTEM";
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("etc/ssl/certs/ca-certificates.crt");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, system).unwrap();
+        let dir = guest.container("main");
+        prepare(&guest.share, &dir, root.path()).unwrap();
+        let with = |cas: &str| [system, b"\n", cas.as_bytes()].concat();
+        assert_eq!(
+            std::fs::read(dir.join(DIR).join(BUNDLE)).unwrap(),
+            with(CA1)
+        );
+        let early = guest.container("early");
+        let mut env = Vec::new();
+        set_exec_env(&guest.share, "early", &early, root.path(), &mut env).unwrap();
+        let exec = guest.share.join(EXEC_DIR).join("early.pem");
+        assert_eq!(std::fs::read(&exec).unwrap(), with(CA1));
+        let failed = publish(&guest.share, &guest.containers, &[CA2.into()]).unwrap();
+        assert!(failed.is_empty(), "{failed:?}");
+        let ca2 = format!("{CA2}\n");
+        assert_eq!(
+            std::fs::read(dir.join(DIR).join(BUNDLE)).unwrap(),
+            with(&ca2)
+        );
+        assert_eq!(std::fs::read(&exec).unwrap(), with(&ca2));
     }
 
     #[test]
