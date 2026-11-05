@@ -68,6 +68,12 @@ const REFETCH_BACKOFF: (Duration, Duration) = (Duration::from_secs(2), Duration:
 const POLL: Duration = Duration::from_millis(100);
 /// How long the control plane has to answer a pod's credentials.
 const ISSUE_TIMEOUT: Duration = Duration::from_secs(30);
+/// A pod's connections being handed to its process at a time: past it,
+/// the pod's next one is reset, so that one pod, or its process that does
+/// not read, holds no more of the node's hand-overs.
+pub const HANDING_PER_POD: usize = 64;
+/// How long a hand-over waits for the process to take the connection.
+const HAND_OVER_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Asks the control plane for a pod's credentials (fleet.proto
 /// `IssuePodCredentials`), over feosd's uplink.
@@ -151,6 +157,8 @@ struct Slot {
     current: Arc<Mutex<Option<Arc<Run>>>>,
     /// Why the last start or credentials failed.
     error: Arc<Mutex<String>>,
+    /// The pod's hand-overs in flight ([`HANDING_PER_POD`]).
+    handing: Arc<tokio::sync::Semaphore>,
     actor: JoinHandle<()>,
 }
 
@@ -337,7 +345,9 @@ impl Authn {
 
     /// Hands a connection the pod opened to one of its HTTP bindings at
     /// `port` from `peer` to its process, which reads it; feosd reads
-    /// nothing of it. Fails while the pod has no process to take it.
+    /// nothing of it. Fails while the pod has no process to take it, while
+    /// [`HANDING_PER_POD`] of its connections are being handed over, and
+    /// when the process does not take it within [`HAND_OVER_TIMEOUT`].
     pub async fn pass(
         &self,
         pod_id: &str,
@@ -345,24 +355,32 @@ impl Authn {
         peer: std::net::SocketAddr,
         connection: BorrowedFd<'_>,
     ) -> Result<(), String> {
-        let current = {
+        let (current, handing) = {
             let pods = lock(&self.inner.pods);
             let slot = pods.get(pod_id).ok_or("the pod has no HTTP bindings")?;
             if !slot.wanted.borrow().run {
                 return Err("the pod has no HTTP bindings, or does not run".into());
             }
-            lock(&slot.current).clone()
+            (lock(&slot.current).clone(), slot.handing.clone())
         };
+        let _handing = handing
+            .try_acquire_owned()
+            .map_err(|_| format!("{HANDING_PER_POD} of its connections are being handed over"))?;
         let run = current.ok_or("its feos-authn does not run")?;
         let control = run.control().ok_or("its feos-authn is not connected")?;
         let message = ToAuthn::Conn {
             port,
             peer: peer.to_string(),
         };
-        control
-            .send(&message, Some(connection))
-            .await
-            .map_err(|e| format!("its feos-authn did not take it: {e}"))
+        // A message is one sendmsg: one that did not go when the wait ends
+        // went not at all.
+        match timeout(HAND_OVER_TIMEOUT, control.send(&message, Some(connection))).await {
+            Ok(sent) => sent.map_err(|e| format!("its feos-authn did not take it: {e}")),
+            Err(_) => Err(format!(
+                "its feos-authn did not take it within {}ms",
+                HAND_OVER_TIMEOUT.as_millis()
+            )),
+        }
     }
 
     /// The pid of the pod's process that runs now.
@@ -391,6 +409,7 @@ impl Authn {
             wanted,
             current,
             error,
+            handing: Arc::new(tokio::sync::Semaphore::new(HANDING_PER_POD)),
             actor,
         }
     }
@@ -976,6 +995,26 @@ pub(crate) mod fake {
         })
     }
 
+    /// A launcher whose process takes its control connections and never
+    /// reads them, as one that hangs.
+    pub fn deaf_launcher() -> Launcher {
+        Arc::new(move |start: &jail::Start<'_>| {
+            let listener = start.control.try_clone()?;
+            let child = std::process::Command::new("sleep")
+                .arg("3600")
+                .stdin(std::process::Stdio::null())
+                .spawn()?;
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                while let Ok(raw) = accept(listener.as_raw_fd()) {
+                    // SAFETY: accept returned it, ours alone.
+                    held.push(unsafe { <OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(raw) });
+                }
+            });
+            Ok(child.id() as i32)
+        })
+    }
+
     fn say(fd: &OwnedFd, message: Value) {
         let _ = send(
             fd.as_raw_fd(),
@@ -1178,6 +1217,53 @@ mod tests {
         authn.remove(POD).await;
         assert!(!alive(second));
         assert!(!pod_dir.exists());
+    }
+
+    /// A process that does not read its control socket holds at most
+    /// [`HANDING_PER_POD`] hand-overs, each for [`HAND_OVER_TIMEOUT`] at
+    /// most: the node's other pods keep theirs.
+    #[tokio::test]
+    async fn a_process_that_does_not_read_holds_few_hand_overs_and_briefly() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            binary: PathBuf::from("/nonexistent/feos-authn"),
+            jail: false,
+        };
+        let authn = Authn::with_launcher(config, dir.path(), fake::deaf_launcher());
+        authn.want(POD, true, "");
+        let (_ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+        let peer: std::net::SocketAddr = "169.254.16.5:40000".parse().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while let Err(e) = authn.pass(POD, 80, peer, theirs.as_fd()).await {
+            assert!(Instant::now() < deadline, "never connected: {e}");
+            sleep(Duration::from_millis(20)).await;
+        }
+        // Its socket fills; then a hand-over gives up after its time.
+        let mut sent = 0;
+        let failure = loop {
+            let t0 = Instant::now();
+            match authn.pass(POD, 80, peer, theirs.as_fd()).await {
+                Ok(()) => sent += 1,
+                Err(e) => {
+                    assert!(t0.elapsed() < HAND_OVER_TIMEOUT * 2, "{:?}", t0.elapsed());
+                    break e;
+                }
+            }
+            assert!(sent < 100_000, "the socket never filled");
+        };
+        assert!(failure.contains("within"), "{failure}");
+        // Past the pod's share, hand-overs are refused at once.
+        let t0 = Instant::now();
+        let passes = (0..HANDING_PER_POD + 8).map(|_| authn.pass(POD, 80, peer, theirs.as_fd()));
+        let results = futures::future::join_all(passes).await;
+        let refused = results
+            .iter()
+            .filter(|r| matches!(r, Err(e) if e.contains("being handed over")))
+            .count();
+        assert_eq!(refused, 8, "{results:?}");
+        assert!(results.iter().all(Result::is_err));
+        assert!(t0.elapsed() < HAND_OVER_TIMEOUT * 2, "{:?}", t0.elapsed());
+        authn.remove(POD).await;
     }
 
     #[tokio::test]

@@ -912,7 +912,8 @@ the pod by its source address, which the pod's TAP pins, and hands the
 socket to the pod's process with `conn` without reading a byte; a
 connection from no pod's address, from a pod without names, or one whose
 process does not run or is not connected, is reset. At most 1024 are
-being handed over at a time. The listeners outlive `feosd` as the
+being handed over at a time, 64 of one pod's; one that its process does
+not take within 1 s is reset. The listeners outlive `feosd` as the
 resolver's sockets do, named `http` in `LISTEN_FDNAMES`:
 `feosd-http.socket` ([Packages](#packages)) or `feos-host-init` binds
 them before the node holds the address, and a self-upgrade hands them on;
