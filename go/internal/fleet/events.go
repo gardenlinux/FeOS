@@ -189,18 +189,18 @@ type attribution struct {
 
 // ingestion collects the rows of one batch inside its transaction.
 type ingestion struct {
-	s       *Service
-	tx      *store.Store
-	node    string
-	startID uuid.UUID
-	attr    map[podid.ID]attribution
-	acts    []store.ActivityRow
-	traffic []store.TrafficRow
-	// egress are the batch's counts of the pods' requests through their
-	// HTTP bindings.
-	egress   map[egressKey]*store.EgressCount
+	s        *Service
+	tx       *store.Store
+	node     string
+	startID  uuid.UUID
+	attr     map[podid.ID]attribution
+	acts     []store.ActivityRow
+	traffic  []store.TrafficRow
 	gaps     [][2]int64
 	stopping bool
+	// egress are the batch's counts of the pods' requests through their
+	// HTTP bindings.
+	egress map[egressKey]*store.EgressCount
 	// unknown counts the events without a known body; they are added to
 	// the Service's count once the batch committed.
 	unknown int64
