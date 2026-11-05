@@ -127,8 +127,11 @@ spec:
       app: ferun-ingress
 ---
 # Requests from anywhere; the health port (the kubelet's probes) and the
-# mesh (the workers' feos-mesh, UDP) only from the workers' network. What
-# the instances dial: ferun-ingress-egress, below.
+# mesh (the workers' feos-mesh, UDP) only from the workers' network. The
+# mesh device listens on 51820, or on one of the 15 ports after it once an
+# instance repaired its paths to nodes it lost (docs/architecture/
+# ingress.md, The mesh). What the instances dial: ferun-ingress-egress,
+# below.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -149,7 +152,7 @@ spec:
             cidr: ${NODE_CIDR}
       ports:
         - { protocol: TCP, port: 9090 }
-        - { protocol: UDP, port: 51820 }
+        - { protocol: UDP, port: 51820, endPort: 51835 }
 ---
 # What the instances dial, and nothing else: DNS, ferund's nodes' port,
 # the sink's ingest and the workers' feos-mesh. Requests to the apps' pods go inside the
