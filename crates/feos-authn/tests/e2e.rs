@@ -95,6 +95,11 @@ async fn the_jailed_binary_serves_both_modes() {
     let pid = proc.0.id();
     let mut partner = binding("partner", "https://localhost", &pki.ca_pem);
     partner.mode = HttpBindingMode::Intercept as i32;
+    // A key long enough to be redacted.
+    let mut echo = binding("echo", &format!("https://127.0.0.1:{port}"), &pki.ca_pem);
+    echo.credential = Some(http_binding::Credential::Headers(HeaderCredential {
+        headers: [("X-API-Key".to_string(), "s3cret-0123456789".to_string())].into(),
+    }));
     let set = PodBindings {
         http: vec![
             binding("erp", &format!("https://127.0.0.1:{port}"), &pki.ca_pem),
@@ -102,6 +107,7 @@ async fn the_jailed_binary_serves_both_modes() {
             binding("local", &format!("https://localhost:{port}"), &pki.ca_pem),
             binding("internal", "https://10.1.2.3", &pki.ca_pem),
             partner,
+            echo,
         ],
         intercept_cas: vec![InterceptCa {
             cert_pem: ca.clone(),
@@ -146,6 +152,14 @@ async fn the_jailed_binary_serves_both_modes() {
     let (status, _, _) = read(send1(&mut s, post).await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(&up.last().body[..], b"body");
+
+    // An answer that repeats the key, cut in its middle: masked in the
+    // jail as well.
+    let (status, hdrs, body) = read(send1(&mut s, get("echo", "/fault")).await).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(body.contains("Identifier : redacted*********\""), "{body}");
+    assert_eq!(hdrs["x-quota-key"], "redacted*********");
 
     // The intercept mode: the leaf for exactly the name, then the request
     // goes on to localhost:443, where nothing of the test answers.

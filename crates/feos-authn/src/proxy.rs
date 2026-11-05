@@ -9,10 +9,15 @@
 //! the credential, and goes to the upstream over the binding's pool.
 //!
 //! The answer passes back with its `Location` rewritten to the binding's
-//! name (name mode only); bodies are streamed, never rewritten, never
-//! buffered whole. Upgrades (WebSocket) become a pipe. Every request is
-//! recorded before its answer's head leaves ([`crate::audit`]); a request
-//! whose record cannot be written is refused.
+//! name (name mode only); bodies are streamed, never buffered whole.
+//! Upgrades (WebSocket) become a pipe. Nothing of the credential goes back:
+//! the answer's reason, headers, body and trailers, and a tunnel's frames
+//! from the upstream, are redacted of it ([`crate::redact`]). For that a
+//! request asks for its answer unencoded and whole (no `Accept-Encoding`
+//! but identity, no `Range`, no WebSocket extensions), and an answer that
+//! comes encoded or partial anyway is refused. Every request is recorded
+//! before its answer's head leaves ([`crate::audit`]); a request whose
+//! record cannot be written is refused.
 //!
 //! The proxy's own refusals carry `FeOS-Binding-Error: <code>` and a JSON
 //! body `{"error":{"code":…,"message":…}}`.
@@ -23,13 +28,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use http::header::{
-    HeaderName, HeaderValue, AUTHORIZATION, CACHE_CONTROL, CONNECTION, CONTENT_LOCATION,
-    CONTENT_TYPE, HOST, LOCATION, RETRY_AFTER, UPGRADE,
+    HeaderName, HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CACHE_CONTROL, CONNECTION,
+    CONTENT_ENCODING, CONTENT_LOCATION, CONTENT_TYPE, HOST, IF_RANGE, LOCATION, RANGE, RETRY_AFTER,
+    SEC_WEBSOCKET_EXTENSIONS, TRANSFER_ENCODING, UPGRADE,
 };
 use http::uri::{Authority, PathAndQuery, Scheme};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 use http_body::Body;
 use hyper::body::Incoming;
+use hyper::ext::ReasonPhrase;
 use hyper::service::service_fn;
 use hyper::upgrade::OnUpgrade;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
@@ -42,6 +49,7 @@ use crate::bindings::{is_hop_by_hop, Binding, Credential, Mode, Snapshot, Upstre
 use crate::body::{EndGuard, ProxyBody};
 use crate::dest::{ConnectErrorKind, Net};
 use crate::oauth::TokenError;
+use crate::redact::{Frames, RedactedRead, Redactor, Scanner, Unredactable};
 use crate::trace::TraceContext;
 use crate::upstream::{self, bare_host, HttpClient, UpstreamAddr};
 
@@ -144,6 +152,8 @@ struct Exchange {
     binding: Option<Arc<Binding>>,
     host: Option<String>,
     upstream_addr: Option<String>,
+    /// The places of the credential replaced in the answer's head.
+    redacted: u64,
 }
 
 impl Exchange {
@@ -169,6 +179,7 @@ impl Exchange {
             trace_id: self.trace.trace_id(),
             span_id: self.trace.span_id(),
             parent_span_id: self.trace.parent_span_id(),
+            redacted: self.redacted,
             error,
         })
     }
@@ -183,6 +194,8 @@ impl Exchange {
             bytes_in,
         );
         g.status = status.as_u16();
+        g.redacted
+            .store(self.redacted, std::sync::atomic::Ordering::Relaxed);
         g
     }
 }
@@ -209,14 +222,21 @@ pub async fn handle(
         binding: None,
         host: None,
         upstream_addr: None,
+        redacted: 0,
     };
     match forward(&ctx, &entry, req, &mut x).await {
         Ok(resp) => resp,
-        Err(r) => refuse(&ctx, &x, r),
+        Err(r) => refuse(&ctx, &mut x, r),
     }
 }
 
-fn refuse(ctx: &Ctx, x: &Exchange, r: Refusal) -> Response<ProxyBody> {
+fn refuse(ctx: &Ctx, x: &mut Exchange, mut r: Refusal) -> Response<ProxyBody> {
+    // A message may hold what an upstream or a token endpoint said.
+    if let Some(live) = x.binding.as_ref().and_then(|b| b.live.as_ref().ok()) {
+        let (message, n) = live.redactor().redact_str(&r.message);
+        r.message = message;
+        x.redacted = n;
+    }
     let error = ErrorRec {
         code: r.code.to_string(),
         message: r.message.clone(),
@@ -586,17 +606,19 @@ async fn forward(
         )
     })?;
 
-    let mut token_id = None;
+    let mut token = None;
     let credential: Vec<(HeaderName, HeaderValue)> = match &live.credential {
         Credential::Headers(h) => h.clone(),
         Credential::Basic(v) => vec![(AUTHORIZATION, v.clone())],
         Credential::OAuth2(o) => {
             let t = o.get().await.map_err(token_refusal)?;
-            token_id = Some(t.id);
-            vec![(AUTHORIZATION, t.header)]
+            let header = t.header.clone();
+            token = Some(t);
+            vec![(AUTHORIZATION, header)]
         }
         Credential::ClientCertificate => Vec::new(),
     };
+    let token_id = token.as_ref().map(|t| t.id);
 
     let (mut parts, body) = req.into_parts();
     let upgrade = parts.version == Version::HTTP_11 && is_upgrade(&parts.headers);
@@ -606,6 +628,13 @@ async fn forward(
         None
     };
     let mut headers = upstream_headers(&parts.headers, &live.credential.header_names(), upgrade);
+    let mut redactor = live.redactor();
+    if let Some(t) = &token {
+        redactor.add(&t.secrets);
+    }
+    if !redactor.is_empty() {
+        checkable(&mut headers);
+    }
     x.trace.apply(&mut headers);
     if matches!(entry, Entry::Name) && live.forwarded_host {
         if let Ok(v) = HeaderValue::from_str(&binding.name) {
@@ -638,6 +667,7 @@ async fn forward(
     {
         if replayable {
             if let Some(t) = o.renew_after_unauthorized(id).await {
+                redactor.add(&t.secrets);
                 resp = out
                     .send(&[(AUTHORIZATION, t.header)], ProxyBody::empty())
                     .await?;
@@ -672,10 +702,21 @@ async fn forward(
     } else {
         None
     };
+    if !redactor.is_empty() {
+        let bodiless = parts.method == Method::HEAD
+            || status.is_informational()
+            || status == StatusCode::NO_CONTENT
+            || status == StatusCode::NOT_MODIFIED
+            || rbody.is_end_stream();
+        if let Some(why) = unredactable(&rparts.headers, status).filter(|_| !bodiless) {
+            return Err(Refusal::new(StatusCode::BAD_GATEWAY, "unredactable", why));
+        }
+    }
     downstream_headers(&mut rparts.headers, switching);
     if binding.mode == Mode::Name {
         rewrite_locations(&mut rparts.headers, &live.upstream, &binding.name);
     }
+    x.redacted = redact_head(&redactor, &mut rparts);
     rparts.version = Version::HTTP_11;
 
     // The record, before the head leaves.
@@ -689,15 +730,95 @@ async fn forward(
     }
     let mut guard = x.guard(&ctx.audit, bytes_in, status);
     guard.permit = Some(permit);
+    let scanner = (!redactor.is_empty()).then(|| Scanner::new(redactor, guard.redacted.clone()));
     if let Some((pod, up)) = tunnel_ends {
-        tokio::spawn(tunnel(pod, up, guard));
+        tokio::spawn(tunnel(pod, up, scanner.map(Frames::new), guard));
         return Ok(Response::from_parts(rparts, ProxyBody::empty()));
     }
     let counter = guard.bytes_out.clone();
-    Ok(Response::from_parts(
-        rparts,
-        ProxyBody::counted(rbody, counter).with_guard(guard),
-    ))
+    let mut body = ProxyBody::counted(rbody, counter);
+    if let Some(s) = scanner {
+        body = body.redacted(s);
+    }
+    Ok(Response::from_parts(rparts, body.with_guard(guard)))
+}
+
+/// A request whose answer is redacted asks for it as it can be searched:
+/// unencoded (`Accept-Encoding: identity`; the pod's own wish for gzip is
+/// answered unencoded, as a server may), whole (no `Range`, so that no
+/// value is split across answers the pod puts together) and, for a
+/// WebSocket, without extensions (permessage-deflate).
+fn checkable(h: &mut HeaderMap) {
+    h.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+    h.remove(RANGE);
+    h.remove(IF_RANGE);
+    h.remove(SEC_WEBSOCKET_EXTENSIONS);
+}
+
+/// Why an answer with a body cannot be searched for the credential,
+/// although its request asked for one that can ([`checkable`]): a content
+/// or transfer coding (gzip, br, …), or a range.
+pub fn unredactable(h: &HeaderMap, status: StatusCode) -> Option<String> {
+    let codings = |name| {
+        h.get_all(name)
+            .iter()
+            .flat_map(|v| v.as_bytes().split(|b| *b == b','))
+            .map(|c| String::from_utf8_lossy(c.trim_ascii()).to_ascii_lowercase())
+            .filter(|c| !c.is_empty() && c != "identity")
+            .collect::<Vec<_>>()
+    };
+    let content = codings(CONTENT_ENCODING);
+    if !content.is_empty() {
+        return Some(format!(
+            "the upstream's answer is encoded ({}) although identity was asked for; \
+             it cannot be checked for the binding's credential",
+            content.join(", ")
+        ));
+    }
+    let transfer: Vec<String> = codings(TRANSFER_ENCODING)
+        .into_iter()
+        .filter(|c| c != "chunked")
+        .collect();
+    if !transfer.is_empty() {
+        return Some(format!(
+            "the upstream's answer has the transfer coding {}; \
+             it cannot be checked for the binding's credential",
+            transfer.join(", ")
+        ));
+    }
+    if status == StatusCode::PARTIAL_CONTENT {
+        return Some(
+            "the upstream answered a part although none was asked for; \
+             it cannot be checked for the binding's credential"
+                .into(),
+        );
+    }
+    None
+}
+
+/// Redacts an answer's head: its reason (HTTP/1.1) and header values.
+/// Returns how many places.
+fn redact_head(redactor: &Redactor, parts: &mut http::response::Parts) -> u64 {
+    if redactor.is_empty() {
+        return 0;
+    }
+    let mut n = redactor.redact_headers(&mut parts.headers);
+    if let Some(reason) = parts.extensions.get::<ReasonPhrase>() {
+        let mut b = reason.as_bytes().to_vec();
+        let found = redactor.redact(&mut b);
+        if found > 0 {
+            n += found;
+            match ReasonPhrase::try_from(b) {
+                Ok(r) => {
+                    parts.extensions.insert(r);
+                }
+                Err(_) => {
+                    parts.extensions.remove::<ReasonPhrase>();
+                }
+            }
+        }
+    }
+    n
 }
 
 /// A tunnel's end that counts the bytes read from it.
@@ -747,10 +868,11 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for Counted<T> {
     }
 }
 
-/// After a 101, both sides are a pipe until either ends. An upstream that
-/// closes without TLS's close_notify, as many do, ends the tunnel as a
-/// close would.
-async fn tunnel(pod: OnUpgrade, up: OnUpgrade, guard: EndGuard) {
+/// After a 101, both sides are a pipe until either ends; the upstream's
+/// frames are redacted on their way ([`Frames`]) when there is something
+/// to redact. An upstream that closes without TLS's close_notify, as many
+/// do, ends the tunnel as a close would.
+async fn tunnel(pod: OnUpgrade, up: OnUpgrade, frames: Option<Frames>, guard: EndGuard) {
     let (pod, up) = match tokio::try_join!(pod, up) {
         Ok(ends) => ends,
         Err(e) => {
@@ -766,12 +888,18 @@ async fn tunnel(pod: OnUpgrade, up: OnUpgrade, guard: EndGuard) {
         read: guard.bytes_in.clone(),
     };
     let mut up = Counted {
-        inner: TokioIo::new(up),
+        inner: RedactedRead::new(TokioIo::new(up), frames),
         read: guard.bytes_out.clone(),
     };
     match tokio::io::copy_bidirectional(&mut pod, &mut up).await {
         Ok(_) => guard.finish(None),
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => guard.finish(None),
+        Err(e) if e.get_ref().is_some_and(|i| i.is::<Unredactable>()) => {
+            guard.finish(Some(ErrorRec {
+                code: "unredactable".into(),
+                message: e.to_string(),
+            }))
+        }
         Err(e) => guard.finish(Some(ErrorRec {
             code: "tunnel".into(),
             message: format!("the tunnel failed: {e}"),

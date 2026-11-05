@@ -28,6 +28,7 @@ use crate::intercept::LeafIssuer;
 use crate::keys::Keys;
 use crate::oauth::{self, OAuth};
 use crate::ratelimit::Bucket;
+use crate::redact::{Redactor, Secrets};
 use crate::upstream::{self, Connector, HttpClient, ALPN_H2, ALPN_HTTP11};
 
 /// Requests in flight per binding, streamed bodies and upgrades included
@@ -131,12 +132,27 @@ pub struct Live {
     pub prefixes: Vec<String>,
     pub forwarded_host: bool,
     pub credential: Credential,
+    /// The credential's values, which never go back to the pod; an OAuth
+    /// credential's tokens come with it ([`Live::redactor`]).
+    pub secrets: Arc<Secrets>,
     pub limit: Option<Mutex<Bucket>>,
     pub requests: Arc<Semaphore>,
     /// ALPN h2 and http/1.1.
     pub client: HttpClient,
     /// ALPN http/1.1 only, for upgrades.
     pub client_h1: HttpClient,
+}
+
+impl Live {
+    /// What an answer of the binding's is redacted of now.
+    pub fn redactor(&self) -> Redactor {
+        let mut r = Redactor::default();
+        r.add(&self.secrets);
+        if let Credential::OAuth2(o) = &self.credential {
+            o.add_secrets(&mut r);
+        }
+        r
+    }
 }
 
 pub struct Binding {
@@ -203,6 +219,37 @@ pub fn is_label(s: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// A header credential's values, and of one of the form "<scheme>
+/// <credentials>" ("Bearer …", "Token …") the credentials alone too.
+fn header_secrets(h: &[(HeaderName, HeaderValue)]) -> Secrets {
+    let mut values: Vec<&[u8]> = Vec::new();
+    for (_, v) in h {
+        let v = v.as_bytes();
+        values.push(v);
+        if let Some(sp) = v.iter().position(|&b| b == b' ') {
+            let (scheme, rest) = (&v[..sp], v[sp..].trim_ascii());
+            let token = |b: &u8| b.is_ascii_alphanumeric() || b"-_.".contains(b);
+            if !scheme.is_empty() && scheme.iter().all(token) && !rest.is_empty() {
+                values.push(rest);
+            }
+        }
+    }
+    Secrets::new(values)
+}
+
+/// A client certificate's key: the lines of its PEM's base64, each a value,
+/// so that the key is found in every form text holds it in (the PEM,
+/// joined, with escaped line breaks). An upstream never receives the key;
+/// this is for one that has it from elsewhere.
+fn key_secrets(key_pem: &str) -> Secrets {
+    Secrets::new(
+        key_pem
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("-----") && !l.contains(':')),
+    )
+}
+
 fn header_credential(h: &HashMap<String, String>) -> Result<Credential, String> {
     if h.is_empty() {
         return Err("the header credential names no header".into());
@@ -251,20 +298,30 @@ fn live(
         }
     }
     let mut client_cert = None;
+    // What goes back to the pod is redacted of (crate::redact): the
+    // values as they are sent, and the parts an upstream may repeat alone.
+    let mut secrets = Secrets::default();
     let credential = match &b.credential {
         None => return Err("the binding has no credential".into()),
-        Some(http_binding::Credential::Headers(h)) => header_credential(&h.headers)?,
+        Some(http_binding::Credential::Headers(h)) => {
+            let c = header_credential(&h.headers)?;
+            if let Credential::Headers(h) = &c {
+                secrets = header_secrets(h);
+            }
+            c
+        }
         Some(http_binding::Credential::Basic(basic)) => {
             if basic.user.contains(':') {
                 return Err("the basic credential's user holds a colon".into());
             }
             let pair = format!("{}:{}", basic.user, basic.password);
-            let mut v = HeaderValue::from_str(&format!(
-                "Basic {}",
-                base64::engine::general_purpose::STANDARD.encode(pair)
-            ))
-            .map_err(|_| "the basic credential makes no header".to_string())?;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&pair);
+            let mut v = HeaderValue::from_str(&format!("Basic {b64}"))
+                .map_err(|_| "the basic credential makes no header".to_string())?;
             v.set_sensitive(true);
+            // The user alone is no secret, and would mask its every
+            // mention.
+            secrets = Secrets::new([pair.as_str(), b64.as_str(), basic.password.as_str()]);
             Credential::Basic(v)
         }
         Some(http_binding::Credential::Oauth2(o)) => {
@@ -307,6 +364,7 @@ fn live(
         }
         Some(http_binding::Credential::ClientCertificate(c)) => {
             client_cert = Some(upstream::client_auth(&c.cert_pem, &c.key_pem)?);
+            secrets = key_secrets(&c.key_pem);
             Credential::ClientCertificate
         }
     };
@@ -325,6 +383,8 @@ fn live(
         prefixes: b.path_prefixes.clone(),
         forwarded_host: b.forwarded_host,
         credential,
+        // An OAuth credential's are its own, with its tokens (Live::redactor).
+        secrets: Arc::new(secrets),
         limit,
         requests: Arc::new(Semaphore::new(MAX_REQUESTS_PER_BINDING)),
         client: upstream::client(Connector::new(
@@ -580,6 +640,110 @@ mod tests {
             )),
             ..Default::default()
         }
+    }
+
+    /// What each kind of credential is redacted of: the values as they
+    /// are sent, and the parts an upstream may repeat alone.
+    #[tokio::test]
+    async fn every_credential_is_redacted_in_its_forms() {
+        use feos_proto::fleet_service::{
+            BasicCredential, ClientCertificate, HeaderCredential, OAuthClientCredentials,
+        };
+        let (net, audit) = net_audit();
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let cert = rcgen::CertificateParams::new(vec!["client.test".to_string()])
+            .unwrap()
+            .self_signed(&key)
+            .unwrap();
+        let key_pem = key.serialize_pem();
+        let with = |name: &str, c: http_binding::Credential| HttpBinding {
+            credential: Some(c),
+            ..binding(name, "https://api.example", HttpBindingMode::Name)
+        };
+        let set = PodBindings {
+            http: vec![
+                with(
+                    "headers",
+                    http_binding::Credential::Headers(HeaderCredential {
+                        headers: [
+                            ("X-Auth".to_string(), "Token abcdef123456".to_string()),
+                            ("X-Tenant".to_string(), "42".to_string()),
+                        ]
+                        .into(),
+                    }),
+                ),
+                with(
+                    "basic",
+                    http_binding::Credential::Basic(BasicCredential {
+                        user: "svc-user".into(),
+                        password: "pa55-w0rd".into(),
+                    }),
+                ),
+                with(
+                    "oauth",
+                    http_binding::Credential::Oauth2(OAuthClientCredentials {
+                        token_url: "https://login.example/token".into(),
+                        client_id: "id".into(),
+                        client_secret: "se:cret-value".into(),
+                        ..Default::default()
+                    }),
+                ),
+                with(
+                    "mtls",
+                    http_binding::Credential::ClientCertificate(ClientCertificate {
+                        cert_pem: cert.pem(),
+                        key_pem: key_pem.clone(),
+                    }),
+                ),
+            ],
+            ..Default::default()
+        };
+        let s = snapshot(set, "v1".into(), None, &net, &audit);
+        let redact = |name: &str, text: &str| {
+            let live = s.by_name[name].live.as_ref().unwrap();
+            live.redactor().redact_str(text)
+        };
+        let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
+
+        let (out, n) = redact("headers", "Token abcdef123456 | abcdef123456 | tenant 42");
+        assert_eq!(n, 2);
+        assert_eq!(out, "redacted********** | redacted**** | tenant 42");
+
+        let pair = b64("svc-user:pa55-w0rd");
+        let (out, n) = redact(
+            "basic",
+            &format!("Basic {pair} | svc-user:pa55-w0rd | pa55-w0rd | svc-user"),
+        );
+        assert_eq!(n, 3);
+        assert!(!out.contains("pa55") && !out.contains(&pair), "{out}");
+        assert!(
+            out.ends_with("| svc-user"),
+            "the user alone is no secret: {out}"
+        );
+
+        let basic = b64("id:se%3Acret-value");
+        let (out, n) = redact("oauth", &format!("se:cret-value se%3Acret-value {basic}"));
+        assert_eq!(n, 3);
+        assert!(!out.contains("cret") && !out.contains(&basic), "{out}");
+
+        // The key as PEM, joined, and with its line breaks escaped (JSON).
+        let joined: String = key_pem
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect();
+        for text in [
+            key_pem.clone(),
+            joined.clone(),
+            key_pem.replace('\n', "\\n"),
+        ] {
+            let (out, n) = redact("mtls", &text);
+            assert!(n > 0);
+            for line in key_pem.lines().filter(|l| !l.starts_with("-----")) {
+                assert!(!out.contains(line), "{line} in {out}");
+            }
+        }
+        // The certificate is public: not redacted.
+        assert_eq!(redact("mtls", &cert.pem()).1, 0);
     }
 
     #[tokio::test]

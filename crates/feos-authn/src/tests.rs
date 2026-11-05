@@ -21,7 +21,7 @@ use http::{Request, StatusCode};
 use http_body_util::Full;
 use hyper_util::rt::TokioIo;
 use serde_json::Value;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 use crate::audit::Audit;
 use crate::keys::Keys;
@@ -259,10 +259,8 @@ async fn name_mode_end_to_end() {
     assert_eq!(resp.headers()["upgrade"], "websocket");
     let io = hyper::upgrade::on(&mut resp).await.unwrap();
     let mut io = TokioIo::new(io);
-    io.write_all(b"ping").await.unwrap();
-    let mut buf = [0u8; 4];
-    io.read_exact(&mut buf).await.unwrap();
-    assert_eq!(&buf, b"ping");
+    io.write_all(&ws_client_frame(b"ping")).await.unwrap();
+    assert_eq!(ws_read(&mut io).await.unwrap(), b"ping");
     assert_eq!(up.last().version, http::Version::HTTP_11);
     drop(io);
     let rec = await_record(&h.audit, |r| {
@@ -273,8 +271,9 @@ async fn name_mode_end_to_end() {
         r["type"] == "http_end" && r["spanId"] == rec["spanId"]
     })
     .await;
-    assert_eq!(end["bytesIn"], 4, "{end}");
-    assert_eq!(end["bytesOut"], 4);
+    // A client's frame of "ping" is 10 bytes, a server's 6.
+    assert_eq!(end["bytesIn"], 10, "{end}");
+    assert_eq!(end["bytesOut"], 6);
 
     // No record holds the credential.
     let all = std::fs::read_to_string(&h.audit).unwrap();
@@ -837,4 +836,322 @@ async fn control_protocol() {
         &[],
     );
     assert!(third.closed());
+}
+
+/// The answer to a request, as the pod gets it: its head and body.
+async fn answer(
+    s: &mut hyper::client::conn::http1::SendRequest<Full<Bytes>>,
+    req: Request<Full<Bytes>>,
+) -> (http::response::Parts, Bytes) {
+    let (parts, body) = send1(s, req).await.into_parts();
+    let body = http_body_util::BodyExt::collect(body).await.unwrap();
+    (parts, body.to_bytes())
+}
+
+fn fault_body(credential: &str) -> String {
+    format!(
+        r#"{{"fault":{{"faultstring":"Rate limit quota violation. Quota limit exceeded. Identifier : {credential}","detail":{{"errorcode":"policies.ratelimit.QuotaViolation"}}}}}}"#
+    )
+}
+
+/// The incident: an upstream repeated the API key in a 500's body, which
+/// went to the pod as it came. Nothing of the key reaches the pod now: not
+/// in the body (cut in the middle of the key), a header, a trailer, the
+/// reason or a WebSocket frame; an answer that cannot be checked is
+/// refused; what was replaced is counted, never recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn answers_never_carry_the_credential() {
+    // 24 bytes: its mask is the marker exactly.
+    const KEY: &str = "erp-key-0123456789abcdef";
+    const MASK: &str = "redacted-by-FeOS-binding";
+    let pki = Pki::new();
+    let up = Upstream::start(pki.server_config(&["api.erp.test", "api.erp2.test"])).await;
+    let up1 = Upstream::start(pki.server_config_alpn(&["api.erp1.test"], &[b"http/1.1"])).await;
+    let mut r = MapResolver::default();
+    r.0.insert(("api.erp.test".into(), up.addr.port()), local(up.addr));
+    r.0.insert(("api.erp2.test".into(), 443), local(up.addr));
+    r.0.insert(("api.erp1.test".into(), up1.addr.port()), local(up1.addr));
+    let h = start(r).await;
+    let erp = format!("https://api.erp.test:{}", up.addr.port());
+    let (ca, ca_key) = intercept_ca(&["api.erp2.test"]);
+    let mut erp2 = headers(
+        "erp2",
+        "https://api.erp2.test",
+        &pki.ca_pem,
+        &[("X-API-Key", KEY)],
+    );
+    erp2.mode = HttpBindingMode::Intercept as i32;
+    let set = PodBindings {
+        http: vec![
+            erp2,
+            headers("erp", &erp, &pki.ca_pem, &[("X-API-Key", KEY)]),
+            headers(
+                "erp1",
+                &format!("https://api.erp1.test:{}", up1.addr.port()),
+                &pki.ca_pem,
+                &[("X-API-Key", KEY)],
+            ),
+            // Too short to be redacted: its answers pass as they came.
+            headers("short", &erp, &pki.ca_pem, &[("X-API-Key", "k3y")]),
+        ],
+        intercept_cas: vec![InterceptCa {
+            cert_pem: ca.clone(),
+            key_pem: ca_key,
+        }],
+        ..Default::default()
+    };
+    h.feosd.hello(&[], None);
+    h.feosd.answer(&set, "v1");
+    h.feosd.ready("v1");
+    let mut s = h1(h.node.connect(&h.feosd, 80).await).await;
+
+    // The body and a header. The pod asked for gzip and a range; the
+    // upstream was asked for neither.
+    let req = Request::get("/fault")
+        .header("host", "erp")
+        .header("accept-encoding", "gzip, br")
+        .header("range", "bytes=0-99")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let (parts, body) = answer(&mut s, req).await;
+    assert_eq!(parts.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(std::str::from_utf8(&body).unwrap(), fault_body(MASK));
+    assert_eq!(parts.headers["x-quota-key"], MASK);
+    let seen = up.last();
+    assert_eq!(header(&seen, "accept-encoding"), vec!["identity"]);
+    assert!(header(&seen, "range").is_empty());
+    assert_eq!(header(&seen, "x-api-key"), vec![KEY]);
+    let rec = await_record(&h.audit, |r| r["type"] == "http" && r["path"] == "/fault").await;
+    assert_eq!(rec["redacted"], 1, "the header: {rec}");
+    let end = await_record(&h.audit, |r| {
+        r["type"] == "http_end" && r["spanId"] == rec["spanId"]
+    })
+    .await;
+    // The trailer too, which an HTTP/1.1 pod does not get.
+    assert_eq!(
+        end["redacted"], 3,
+        "the header, the body, the trailer: {end}"
+    );
+    assert_eq!(end["bytesOut"], fault_body(KEY).len());
+
+    // HTTP/2 under the upstream's own name: the trailer as well.
+    let tls = tls_connect(
+        h.node.connect(&h.feosd, 443).await,
+        tls_client(&ca, &[b"h2"]),
+        "api.erp2.test",
+    )
+    .await
+    .unwrap();
+    let (mut send2, conn) = hyper::client::conn::http2::handshake(
+        hyper_util::rt::TokioExecutor::new(),
+        TokioIo::new(tls),
+    )
+    .await
+    .unwrap();
+    tokio::spawn(conn);
+    let req = Request::get("https://api.erp2.test/fault")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let (parts, body) = send2.send_request(req).await.unwrap().into_parts();
+    let collected = http_body_util::BodyExt::collect(body).await.unwrap();
+    let trailers = collected.trailers().cloned().unwrap();
+    assert_eq!(trailers["x-debug"], format!("key={MASK}").as_str());
+    assert_eq!(parts.headers["x-quota-key"], MASK);
+    assert_eq!(
+        std::str::from_utf8(&collected.to_bytes()).unwrap(),
+        fault_body(MASK)
+    );
+
+    // WWW-Authenticate and the reason (HTTP/1.1 upstreams have one).
+    for name in ["erp", "erp1"] {
+        let (parts, _) = answer(&mut s, get(name, "/echo-header")).await;
+        assert_eq!(parts.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            parts.headers["www-authenticate"],
+            format!(r#"Bearer error="invalid_token", error_description="{MASK} is refused""#)
+                .as_str()
+        );
+        assert_eq!(parts.headers["x-echo"], MASK);
+        if name == "erp1" {
+            let reason = parts.extensions.get::<hyper::ext::ReasonPhrase>().unwrap();
+            assert_eq!(reason.as_bytes(), format!("Refused {MASK}").as_bytes());
+        }
+    }
+    assert_eq!(up1.last().version, http::Version::HTTP_11);
+
+    // An answer that cannot be searched is refused; one without a body is
+    // not.
+    for path in ["/gzip", "/partial"] {
+        let (parts, body) = answer(&mut s, get("erp", path)).await;
+        assert_eq!(parts.status, StatusCode::BAD_GATEWAY, "{path}");
+        assert_eq!(refusal_code(&parts.headers, &body), "unredactable");
+    }
+    let head = Request::head("/gzip")
+        .header("host", "erp")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let (parts, _) = answer(&mut s, head).await;
+    assert_eq!(parts.status, StatusCode::OK);
+    assert_eq!(parts.headers["content-encoding"], "gzip");
+
+    // Nothing to redact: as it came, gzip asked for and all.
+    let req = Request::get("/fault")
+        .header("host", "short")
+        .header("accept-encoding", "gzip")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let (_, body) = answer(&mut s, req).await;
+    assert_eq!(std::str::from_utf8(&body).unwrap(), fault_body("k3y"));
+    assert_eq!(header(&up.last(), "accept-encoding"), vec!["gzip"]);
+
+    // A large body without the key passes whole, its length announced.
+    let (parts, body) = answer(&mut s, get("erp", "/big")).await;
+    assert_eq!(parts.headers["content-length"], BIG.to_string().as_str());
+    assert_eq!(body.len(), BIG);
+    assert!(body.iter().all(|b| *b == b'x'));
+
+    // A WebSocket: no extensions asked for, frames redacted.
+    let mut s = h1(h.node.connect(&h.feosd, 80).await).await;
+    let req = Request::get("/ws")
+        .header("host", "erp")
+        .header("connection", "upgrade")
+        .header("upgrade", "websocket")
+        .header("sec-websocket-extensions", "permessage-deflate")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let mut resp = send1(&mut s, req).await;
+    assert_eq!(resp.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert!(header(&up.last(), "sec-websocket-extensions").is_empty());
+    let io = hyper::upgrade::on(&mut resp).await.unwrap();
+    let mut io = TokioIo::new(io);
+    io.write_all(&ws_client_frame(b"key")).await.unwrap();
+    assert_eq!(
+        ws_read(&mut io).await.unwrap(),
+        format!("your key is {MASK}").as_bytes()
+    );
+    io.write_all(&ws_client_frame(b"hello")).await.unwrap();
+    assert_eq!(ws_read(&mut io).await.unwrap(), b"hello");
+    drop(io);
+    let rec = await_record(&h.audit, |r| {
+        r["type"] == "http" && r["path"] == "/ws" && r["status"] == 101
+    })
+    .await;
+    let end = await_record(&h.audit, |r| {
+        r["type"] == "http_end" && r["spanId"] == rec["spanId"]
+    })
+    .await;
+    assert_eq!(end["redacted"], 1, "{end}");
+
+    let all = std::fs::read_to_string(&h.audit).unwrap();
+    assert!(!all.contains(KEY));
+}
+
+/// Basic's user and password in every form, an OAuth token, and the
+/// client secret in what a token endpoint says: none reaches the pod.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn basic_and_oauth_credentials_are_redacted() {
+    const TOKEN: &str = "access-token-0123456789-";
+    const SECRET: &str = "client-s3cret-value";
+    let pki = Pki::new();
+    let up = Upstream::start(pki.server_config(&["api.test"])).await;
+    let tokens = TokenServer::start_with(pki.server_config(&["login.test"]), 3600, TOKEN).await;
+    let failing = TokenServer::start(pki.server_config(&["login.test"]), 3600).await;
+    let basic_of_client = base64::engine::general_purpose::STANDARD.encode(format!("id:{SECRET}"));
+    // The secret again where the code is cut, at 64 characters.
+    *failing.error.lock().unwrap() = Some(format!("bad {SECRET} {basic_of_client} {SECRET}"));
+    let mut r = MapResolver::default();
+    r.0.insert(("api.test".into(), up.addr.port()), local(up.addr));
+    r.0.insert(
+        ("login.test".into(), tokens.addr.port()),
+        local(tokens.addr),
+    );
+    r.0.insert(
+        ("login.test".into(), failing.addr.port()),
+        local(failing.addr),
+    );
+    let h = start(r).await;
+    let upstream = format!("https://api.test:{}", up.addr.port());
+    let oauth = |name: &str, port: u16| HttpBinding {
+        name: name.into(),
+        upstream: upstream.clone(),
+        ca_pem: pki.ca_pem.clone(),
+        credential: Some(http_binding::Credential::Oauth2(OAuthClientCredentials {
+            token_url: format!("https://login.test:{port}/token"),
+            client_id: "id".into(),
+            client_secret: SECRET.into(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    let set = PodBindings {
+        http: vec![
+            HttpBinding {
+                name: "pay".into(),
+                upstream: upstream.clone(),
+                ca_pem: pki.ca_pem.clone(),
+                credential: Some(http_binding::Credential::Basic(BasicCredential {
+                    user: "svc-user".into(),
+                    password: "pa55-w0rd-xyz!".into(),
+                })),
+                ..Default::default()
+            },
+            oauth("graph", tokens.addr.port()),
+            oauth("fail", failing.addr.port()),
+        ],
+        ..Default::default()
+    };
+    h.feosd.hello(&[], None);
+    h.feosd.answer(&set, "v1");
+    h.feosd.ready("v1");
+    let mut s = h1(h.node.connect(&h.feosd, 80).await).await;
+
+    // Basic: the header's value, the pair and the password.
+    let (parts, body) = answer(&mut s, get("pay", "/fault")).await;
+    let forms = echoed(&up.last().headers);
+    assert_eq!(forms.len(), 3, "{forms:?}");
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert_eq!(body.len(), fault_body(&forms.join(" / ")).len());
+    for f in &forms {
+        assert!(!body.contains(f.as_str()), "{f} in {body}");
+        assert!(!parts.headers["x-quota-key"]
+            .to_str()
+            .unwrap()
+            .contains(f.as_str()));
+    }
+    assert!(!body.contains("pa55-w0rd"), "{body}");
+
+    // OAuth: the token, with its scheme and alone.
+    let (parts, body) = answer(&mut s, get("graph", "/fault")).await;
+    let forms = echoed(&up.last().headers);
+    assert_eq!(forms, vec![format!("Bearer {TOKEN}1"), format!("{TOKEN}1")]);
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!body.contains(TOKEN), "{body}");
+    assert!(!parts.headers["x-quota-key"]
+        .to_str()
+        .unwrap()
+        .contains(TOKEN));
+    let (parts, _) = answer(&mut s, get("graph", "/echo-header")).await;
+    assert!(!parts.headers["www-authenticate"]
+        .to_str()
+        .unwrap()
+        .contains(TOKEN));
+
+    // A token endpoint that repeats the client secret: the refusal says
+    // what it said, without it.
+    let (parts, body) = answer(&mut s, get("fail", "/")).await;
+    assert_eq!(parts.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        refusal_code(&parts.headers, &body),
+        "credential_unavailable"
+    );
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(body.contains("(bad redacted"), "{body}");
+    assert!(!body.contains(&basic_of_client), "{body}");
+    // Not even the part before the cut.
+    assert!(!body.contains("client-"), "{body}");
+
+    let all = std::fs::read_to_string(&h.audit).unwrap();
+    for v in [SECRET, &basic_of_client, TOKEN, "pa55-w0rd"] {
+        assert!(!all.contains(v), "{v} in the audit");
+    }
 }

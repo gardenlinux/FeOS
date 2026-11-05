@@ -14,6 +14,10 @@
 //! for a fetch. A failed fetch is not tried again for a few seconds, so
 //! that a failing endpoint is not hammered by a pod's retries; a token
 //! still valid serves meanwhile.
+//!
+//! The client secret in every form it is sent in, and the current and the
+//! previous token, are what an answer to the pod is redacted of
+//! ([`crate::redact`]); so is what the token endpoint says in an error.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -28,6 +32,7 @@ use serde::Deserialize;
 
 use crate::audit::{self, Audit, ErrorRec, TokenRecord};
 use crate::body::ProxyBody;
+use crate::redact::{Redactor, Secrets};
 use crate::upstream::{self, HttpClient, UpstreamAddr};
 
 /// A token endpoint's answer may be this large.
@@ -53,6 +58,8 @@ pub struct Config {
 pub struct Token {
     /// `Authorization: Bearer …`, marked sensitive.
     pub header: HeaderValue,
+    /// The token, to be redacted.
+    pub secrets: Arc<Secrets>,
     /// Which fetch it came from, to tell a renewed token from the one a
     /// request used.
     pub id: u64,
@@ -71,15 +78,47 @@ pub enum TokenError {
 #[derive(Default)]
 struct State {
     token: Option<Token>,
+    /// The token before the current one, which may still be valid.
+    previous: Option<Arc<Secrets>>,
     failed: Option<(Instant, TokenError)>,
     unauthorized_renewal: Option<Instant>,
     /// A renewal runs in the background while the token serves.
     renewing: bool,
 }
 
+impl State {
+    fn keep(&mut self, t: Token) {
+        if let Some(old) = self.token.replace(t) {
+            self.previous = Some(old.secrets);
+        }
+    }
+}
+
+/// The client secret in the forms it is sent in: as it is, form-encoded,
+/// and in `client_secret_basic`'s header.
+fn secrets(cfg: &Config) -> Secrets {
+    let encoded = form_urlencoded::byte_serialize(cfg.client_secret.as_bytes()).collect::<String>();
+    let basic = basic_pair(cfg);
+    Secrets::new([
+        cfg.client_secret.as_bytes(),
+        encoded.as_bytes(),
+        basic.as_bytes(),
+    ])
+}
+
+/// client_secret_basic's credentials: the ID and secret form-encoded, then
+/// base64 (RFC 6749 §2.3.1).
+fn basic_pair(cfg: &Config) -> String {
+    let enc = |s: &str| form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
+    let pair = format!("{}:{}", enc(&cfg.client_id), enc(&cfg.client_secret));
+    base64::engine::general_purpose::STANDARD.encode(pair)
+}
+
 pub struct OAuth {
     binding: String,
     cfg: Config,
+    /// The client secret's forms.
+    secrets: Arc<Secrets>,
     client: HttpClient,
     audit: Arc<Audit>,
     /// Never held across a fetch.
@@ -107,6 +146,7 @@ impl OAuth {
     pub fn new(binding: String, cfg: Config, client: HttpClient, audit: Arc<Audit>) -> OAuth {
         OAuth {
             binding,
+            secrets: Arc::new(secrets(&cfg)),
             cfg,
             client,
             audit,
@@ -118,6 +158,19 @@ impl OAuth {
 
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Adds what an answer is redacted of: the client secret's forms, the
+    /// current token and the one before it.
+    pub fn add_secrets(&self, r: &mut Redactor) {
+        r.add(&self.secrets);
+        let st = self.state();
+        if let Some(t) = &st.token {
+            r.add(&t.secrets);
+        }
+        if let Some(p) = &st.previous {
+            r.add(p);
+        }
     }
 
     /// The token for a request: the kept one while it is valid, which
@@ -163,7 +216,7 @@ impl OAuth {
         let mut st = self.state();
         match fetched {
             Ok(t) => {
-                st.token = Some(t.clone());
+                st.keep(t.clone());
                 st.failed = None;
                 Ok(t)
             }
@@ -193,7 +246,7 @@ impl OAuth {
         match fetched {
             None => {}
             Some(Ok(t)) => {
-                st.token = Some(t);
+                st.keep(t);
                 st.failed = None;
             }
             Some(Err(e)) => {
@@ -227,13 +280,16 @@ impl OAuth {
                 return None;
             }
             st.unauthorized_renewal = Some(now);
-            st.token = None;
+            // The refused token serves no more; it is still redacted.
+            if let Some(old) = st.token.take() {
+                st.previous = Some(old.secrets);
+            }
         }
         let fetched = self.fetch("unauthorized").await;
         let mut st = self.state();
         match fetched {
             Ok(t) => {
-                st.token = Some(t.clone());
+                st.keep(t.clone());
                 st.failed = None;
                 Some(t)
             }
@@ -264,20 +320,10 @@ impl OAuth {
         f.finish()
     }
 
-    /// client_secret_basic: the ID and secret form-encoded, then Basic
-    /// (RFC 6749 §2.3.1).
+    /// client_secret_basic (RFC 6749 §2.3.1).
     fn basic(&self) -> Result<HeaderValue, String> {
-        let enc = |s: &str| form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
-        let pair = format!(
-            "{}:{}",
-            enc(&self.cfg.client_id),
-            enc(&self.cfg.client_secret)
-        );
-        let mut v = HeaderValue::from_str(&format!(
-            "Basic {}",
-            base64::engine::general_purpose::STANDARD.encode(pair)
-        ))
-        .map_err(|_| "the client's credentials make no header".to_string())?;
+        let mut v = HeaderValue::from_str(&format!("Basic {}", basic_pair(&self.cfg)))
+            .map_err(|_| "the client's credentials make no header".to_string())?;
         v.set_sensitive(true);
         Ok(v)
     }
@@ -293,6 +339,9 @@ impl OAuth {
                 Err("the token endpoint did not answer in time".to_string()),
             ),
         };
+        // What the endpoint said goes into the record, the log and the
+        // pod's refusal: never with the secret in it.
+        let outcome = outcome.map_err(|m| self.said(&m, usize::MAX));
         let (expires_in, error) = match &outcome {
             Ok((_, lifetime)) => (Some(lifetime.as_secs()), None),
             Err(m) => (
@@ -326,10 +375,20 @@ impl OAuth {
         let now = Instant::now();
         Ok(Token {
             header,
+            secrets: Arc::new(Secrets::new([token.as_bytes()])),
             id: self.fetches.fetch_add(1, Ordering::Relaxed) + 1,
             renew_at: now + lifetime.mul_f64(0.75),
             expires_at: now + lifetime,
         })
+    }
+
+    /// What the token endpoint said, for a message: redacted of the secret
+    /// and the tokens, then cut to `max` characters, so that no cut leaves
+    /// a part of one.
+    fn said(&self, s: &str, max: usize) -> String {
+        let mut r = Redactor::default();
+        self.add_secrets(&mut r);
+        r.redact_str(s).0.chars().take(max).collect()
     }
 
     /// One request to the token endpoint: its status, and the token and its
@@ -377,7 +436,7 @@ impl OAuth {
         };
         if !status.is_success() {
             let code = serde_json::from_slice::<ErrorResponse>(&body)
-                .map(|e| format!(" ({})", e.error.chars().take(64).collect::<String>()))
+                .map(|e| format!(" ({})", self.said(&e.error, 64)))
                 .unwrap_or_default();
             return (
                 Some(status.as_u16()),
@@ -398,7 +457,7 @@ impl OAuth {
                 Some(status.as_u16()),
                 Err(format!(
                     "the token endpoint gave a token of type {:?}, not Bearer",
-                    parsed.token_type.chars().take(32).collect::<String>()
+                    self.said(&parsed.token_type, 32)
                 )),
             );
         }

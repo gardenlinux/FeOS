@@ -4,12 +4,14 @@
 //! Bodies as they pass: streamed frame by frame, never buffered whole, and
 //! counted. An answer's body carries its request's [`EndGuard`], which
 //! writes the `http_end` record when the body is done or dropped, and holds
-//! the binding's concurrency permit until then.
+//! the binding's concurrency permit until then. An upstream's answer is
+//! redacted of the binding's credential as it streams ([`crate::redact`]):
+//! its data, which keeps its length, and its trailers.
 
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -18,6 +20,7 @@ use hyper::body::Incoming;
 use tokio::sync::OwnedSemaphorePermit;
 
 use crate::audit::{self, Audit, ErrorRec, HttpEndRecord};
+use crate::redact::Scanner;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -32,6 +35,54 @@ pub struct ProxyBody {
     kind: Kind,
     counter: Option<Arc<AtomicU64>>,
     guard: Option<EndGuard>,
+    redact: Option<Box<Redacting>>,
+}
+
+/// A body's redaction: its search, and trailers that wait for what the
+/// search held back.
+struct Redacting {
+    scanner: Scanner,
+    trailers: Option<http::HeaderMap>,
+    ended: bool,
+}
+
+impl Redacting {
+    fn poll(
+        &mut self,
+        inner: &mut Incoming,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        loop {
+            if let Some(t) = self.trailers.take() {
+                return Poll::Ready(Some(Ok(Frame::trailers(t))));
+            }
+            if self.ended {
+                return Poll::Ready(None);
+            }
+            let rest = match ready!(Pin::new(&mut *inner).poll_frame(cx)) {
+                Some(Err(e)) => return Poll::Ready(Some(Err(BoxError::from(e)))),
+                Some(Ok(frame)) => match frame.into_data() {
+                    Ok(data) => self.scanner.push(data),
+                    Err(frame) => {
+                        let Ok(mut t) = frame.into_trailers() else {
+                            continue;
+                        };
+                        let n = self.scanner.redactor().redact_headers(&mut t);
+                        self.scanner.count(n);
+                        self.trailers = Some(t);
+                        self.scanner.finish()
+                    }
+                },
+                None => {
+                    self.ended = true;
+                    self.scanner.finish()
+                }
+            };
+            if !rest.is_empty() {
+                return Poll::Ready(Some(Ok(Frame::data(rest))));
+            }
+        }
+    }
 }
 
 impl ProxyBody {
@@ -45,6 +96,7 @@ impl ProxyBody {
             kind: Kind::Full((!b.is_empty()).then_some(b)),
             counter: None,
             guard: None,
+            redact: None,
         }
     }
 
@@ -54,7 +106,19 @@ impl ProxyBody {
             kind: Kind::Incoming(inner),
             counter: Some(counter),
             guard: None,
+            redact: None,
         }
+    }
+
+    /// A body passed on redacted by `scanner`, which counts what it
+    /// replaced.
+    pub fn redacted(mut self, scanner: Scanner) -> ProxyBody {
+        self.redact = Some(Box::new(Redacting {
+            scanner,
+            trailers: None,
+            ended: false,
+        }));
+        self
     }
 
     /// Ends the exchange of `guard` with this body: its bytes count as the
@@ -85,11 +149,14 @@ impl Body for ProxyBody {
         let this = self.get_mut();
         let polled = match &mut this.kind {
             Kind::Full(b) => Poll::Ready(b.take().map(|b| Ok(Frame::data(b)))),
-            Kind::Incoming(inner) => match Pin::new(inner).poll_frame(cx) {
-                Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(BoxError::from(e)))),
-                Poll::Ready(Some(Ok(f))) => Poll::Ready(Some(Ok(f))),
-                Poll::Ready(None) => Poll::Ready(None),
-                Poll::Pending => Poll::Pending,
+            Kind::Incoming(inner) => match &mut this.redact {
+                Some(r) => r.poll(inner, cx),
+                None => match Pin::new(inner).poll_frame(cx) {
+                    Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(BoxError::from(e)))),
+                    Poll::Ready(Some(Ok(f))) => Poll::Ready(Some(Ok(f))),
+                    Poll::Ready(None) => Poll::Ready(None),
+                    Poll::Pending => Poll::Pending,
+                },
             },
         };
         match &polled {
@@ -116,16 +183,30 @@ impl Body for ProxyBody {
     }
 
     fn is_end_stream(&self) -> bool {
-        match &self.kind {
-            Kind::Full(b) => b.is_none(),
-            Kind::Incoming(i) => i.is_end_stream(),
+        match (&self.kind, &self.redact) {
+            (Kind::Full(b), _) => b.is_none(),
+            (Kind::Incoming(i), None) => i.is_end_stream(),
+            (Kind::Incoming(i), Some(r)) => {
+                r.trailers.is_none() && (r.ended || (i.is_end_stream() && r.scanner.held() == 0))
+            }
         }
     }
 
     fn size_hint(&self) -> SizeHint {
         match &self.kind {
             Kind::Full(b) => SizeHint::with_exact(b.as_ref().map_or(0, |b| b.len() as u64)),
-            Kind::Incoming(i) => i.size_hint(),
+            Kind::Incoming(i) => {
+                let inner = i.size_hint();
+                // What the search holds back is still to come; the mask
+                // keeps every length.
+                let held = self.redact.as_ref().map_or(0, |r| r.scanner.held() as u64);
+                let mut h = SizeHint::new();
+                h.set_lower(inner.lower().saturating_add(held));
+                if let Some(u) = inner.upper() {
+                    h.set_upper(u.saturating_add(held).max(h.lower()));
+                }
+                h
+            }
         }
     }
 }
@@ -152,6 +233,8 @@ pub struct EndGuard {
     pub start: Instant,
     pub bytes_in: Arc<AtomicU64>,
     pub bytes_out: Arc<AtomicU64>,
+    /// The places of the binding's credential replaced in the answer.
+    pub redacted: Arc<AtomicU64>,
     pub permit: Option<OwnedSemaphorePermit>,
     done: bool,
 }
@@ -174,6 +257,7 @@ impl EndGuard {
             start,
             bytes_in,
             bytes_out: Arc::new(AtomicU64::new(0)),
+            redacted: Arc::new(AtomicU64::new(0)),
             permit: None,
             done: false,
         }
@@ -197,6 +281,7 @@ impl EndGuard {
             status: self.status,
             bytes_in: self.bytes_in.load(Ordering::Relaxed),
             bytes_out: self.bytes_out.load(Ordering::Relaxed),
+            redacted: self.redacted.load(Ordering::Relaxed),
             duration_ms: self.start.elapsed().as_millis() as u64,
             error,
         };

@@ -6,7 +6,9 @@
 //! and that `feosd` reads and ships. A record is written before its answer
 //! leaves; a request whose record cannot be written is refused.
 //!
-//! Records never hold a credential's value, a query string or a body.
+//! Records never hold a credential's value, a query string or a body;
+//! where the answer to the pod held a value of the binding's credential,
+//! they count the places it was replaced (`redacted`, [`crate::redact`]).
 //! The kinds, by `type`:
 //!
 //! - `http`: a request through an HTTP binding, written when its answer's
@@ -61,6 +63,9 @@ pub struct HttpRecord<'a> {
     pub trace_id: String,
     pub span_id: String,
     pub parent_span_id: Option<String>,
+    /// The places of the binding's credential replaced in the answer's
+    /// head (reason and header values) or in a refusal's message.
+    pub redacted: u64,
     pub error: Option<ErrorRec>,
 }
 
@@ -80,6 +85,10 @@ pub struct HttpEndRecord<'a> {
     /// The answer body's bytes, to the pod; for an upgrade, the bytes it
     /// received through the tunnel.
     pub bytes_out: u64,
+    /// The places of the binding's credential replaced in the whole
+    /// answer: its head, body and trailers, or what came through the
+    /// tunnel from the upstream.
+    pub redacted: u64,
     /// From the request's arrival to its end.
     pub duration_ms: u64,
     /// Set when the exchange did not end as it should: the upstream's body
@@ -177,6 +186,7 @@ mod tests {
                 trace_id: "0af7651916cd43dd8448eb211c80319c".into(),
                 span_id: "b7ad6b7169203331".into(),
                 parent_span_id: None,
+                redacted: 0,
                 error: None,
             })
             .unwrap();
