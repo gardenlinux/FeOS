@@ -13,11 +13,27 @@
 //! records.
 
 pub mod audit;
+pub mod bindings;
+pub mod body;
+pub mod control;
 pub mod dest;
 pub mod hpke;
+pub mod intercept;
 pub mod jail;
 pub mod keys;
+pub mod oauth;
+pub mod proxy;
 pub mod ratelimit;
 pub mod trace;
+pub mod upstream;
 
+// The test kit names the crate as its integration tests do.
+#[cfg(test)]
+extern crate self as feos_authn;
+#[cfg(test)]
+mod testkit;
+#[cfg(test)]
+mod tests;
+
+pub use control::Authn;
 pub use dest::Net;

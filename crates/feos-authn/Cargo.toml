@@ -11,6 +11,10 @@ workspace = true
 name = "feos_authn"
 path = "src/lib.rs"
 
+[[bin]]
+name = "feos-authn"
+path = "src/main.rs"
+
 [dependencies]
 feos-proto = { workspace = true }
 prost = { workspace = true }
