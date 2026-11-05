@@ -60,20 +60,19 @@ pub struct Upstream {
 }
 
 impl Upstream {
+    /// The upstream of `s`; its error never repeats `s`, which may hold a
+    /// user and password.
     pub fn parse(s: &str) -> Result<Upstream, String> {
-        let rest = s
-            .strip_prefix("https://")
-            .ok_or_else(|| format!("the upstream {s:?} is not https://host[:port]"))?;
+        let not = || "the upstream is not https://host[:port]".to_string();
+        let rest = s.strip_prefix("https://").ok_or_else(not)?;
         let rest = rest.strip_suffix('/').unwrap_or(rest);
         if rest.is_empty() || rest.contains(['/', '?', '#', '@']) {
-            return Err(format!("the upstream {s:?} is not https://host[:port]"));
+            return Err(not());
         }
-        let uri: Uri = format!("https://{rest}/")
-            .parse()
-            .map_err(|_| format!("the upstream {s:?} is not https://host[:port]"))?;
+        let uri: Uri = format!("https://{rest}/").parse().map_err(|_| not())?;
         let host = upstream::bare_host(uri.host().unwrap_or_default()).to_ascii_lowercase();
         if host.is_empty() {
-            return Err(format!("the upstream {s:?} has no host"));
+            return Err("the upstream has no host".into());
         }
         let port = uri.port_u16().unwrap_or(443);
         let shown = if host.contains(':') {
@@ -465,6 +464,15 @@ mod tests {
             "api.example",
         ] {
             assert!(Upstream::parse(bad).is_err(), "{bad}");
+        }
+        // Its error does not repeat it.
+        for bad in [
+            "https://user:s3cret@api.example",
+            "http://user:s3cret@api.example",
+            "https://api.example/s3cret",
+        ] {
+            let e = Upstream::parse(bad).unwrap_err();
+            assert!(!e.contains("s3cret"), "{e}");
         }
     }
 
