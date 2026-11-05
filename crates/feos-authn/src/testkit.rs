@@ -280,11 +280,12 @@ pub type TokenRequest = (String, Option<String>);
 
 /// An OAuth 2.0 token endpoint over HTTPS at `/token`: tokens `tok-1`,
 /// `tok-2`, … with the given lifetime; it records each request's form and
-/// Authorization.
+/// Authorization, and answers after `delay_ms`.
 pub struct TokenServer {
     pub addr: SocketAddr,
     pub fetches: Arc<AtomicU64>,
     pub requests: Arc<Mutex<Vec<TokenRequest>>>,
+    pub delay_ms: Arc<AtomicU64>,
 }
 
 impl TokenServer {
@@ -293,22 +294,25 @@ impl TokenServer {
         let addr = l.local_addr().unwrap();
         let fetches = Arc::new(AtomicU64::new(0));
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let delay_ms = Arc::new(AtomicU64::new(0));
         let acceptor = tokio_rustls::TlsAcceptor::from(config);
-        let (f, r) = (fetches.clone(), requests.clone());
+        let (f, r, d) = (fetches.clone(), requests.clone(), delay_ms.clone());
         tokio::spawn(async move {
             loop {
                 let Ok((tcp, _)) = l.accept().await else {
                     return;
                 };
-                let (acceptor, f, r) = (acceptor.clone(), f.clone(), r.clone());
+                let (acceptor, f, r, d) = (acceptor.clone(), f.clone(), r.clone(), d.clone());
                 tokio::spawn(async move {
                     let Ok(tls) = acceptor.accept(tcp).await else {
                         return;
                     };
                     let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
                     let svc = service_fn(move |req: Request<Incoming>| {
-                        let (f, r) = (f.clone(), r.clone());
+                        let (f, r, d) = (f.clone(), r.clone(), d.clone());
                         async move {
+                            let delay = d.load(Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
                             let auth = req
                                 .headers()
                                 .get(http::header::AUTHORIZATION)
@@ -345,6 +349,7 @@ impl TokenServer {
             addr,
             fetches,
             requests,
+            delay_ms,
         }
     }
 }

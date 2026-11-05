@@ -8,13 +8,15 @@
 //! as the upstream; its server is checked against the WebPKI and the
 //! binding's CA.
 //!
-//! One fetch at a time per binding: requests that need a token while one
-//! is fetched wait for it. A failed fetch is not tried again for a few
-//! seconds, so that a failing endpoint is not hammered by a pod's retries;
-//! a token still valid serves meanwhile.
+//! One fetch at a time per binding. While the token is valid it serves,
+//! and a renewal after three quarters of its lifetime runs in the
+//! background, one at a time; only a request without a valid token waits
+//! for a fetch. A failed fetch is not tried again for a few seconds, so
+//! that a failing endpoint is not hammered by a pod's retries; a token
+//! still valid serves meanwhile.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -71,6 +73,8 @@ struct State {
     token: Option<Token>,
     failed: Option<(Instant, TokenError)>,
     unauthorized_renewal: Option<Instant>,
+    /// A renewal runs in the background while the token serves.
+    renewing: bool,
 }
 
 pub struct OAuth {
@@ -78,7 +82,10 @@ pub struct OAuth {
     cfg: Config,
     client: HttpClient,
     audit: Arc<Audit>,
-    state: tokio::sync::Mutex<State>,
+    /// Never held across a fetch.
+    state: Mutex<State>,
+    /// Held across a fetch: one at a time.
+    fetching: tokio::sync::Mutex<()>,
     fetches: AtomicU64,
 }
 
@@ -103,33 +110,58 @@ impl OAuth {
             cfg,
             client,
             audit,
-            state: tokio::sync::Mutex::new(State::default()),
+            state: Mutex::new(State::default()),
+            fetching: tokio::sync::Mutex::new(()),
             fetches: AtomicU64::new(0),
         }
     }
 
-    /// The token for a request: the kept one, a renewed one after three
-    /// quarters of its lifetime, or a first.
-    pub async fn get(&self) -> Result<Token, TokenError> {
-        let mut st = self.state.lock().await;
-        let now = Instant::now();
-        if let Some(t) = &st.token
-            && now < t.renew_at
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The token for a request: the kept one while it is valid, which
+    /// past three quarters of its lifetime starts a renewal in the
+    /// background; without a valid one, a fetch this request waits for.
+    pub async fn get(self: &Arc<Self>) -> Result<Token, TokenError> {
         {
-            return Ok(t.clone());
+            let mut st = self.state();
+            let now = Instant::now();
+            if let Some(t) = st.token.clone().filter(|t| now < t.expires_at) {
+                let paused = st
+                    .failed
+                    .as_ref()
+                    .is_some_and(|(at, _)| now < *at + FAILURE_PAUSE);
+                if now >= t.renew_at && !st.renewing && !paused {
+                    st.renewing = true;
+                    let o = self.clone();
+                    tokio::spawn(async move { o.renew().await });
+                }
+                return Ok(t);
+            }
         }
-        let valid = st.token.clone().filter(|t| now < t.expires_at);
-        if let Some((at, e)) = &st.failed
-            && now < *at + FAILURE_PAUSE
-        {
-            return valid.ok_or_else(|| e.clone());
-        }
-        let reason = if st.token.is_some() {
-            "renewal"
-        } else {
-            "first_use"
+        let _one = self.fetching.lock().await;
+        let reason = {
+            let st = self.state();
+            let now = Instant::now();
+            // Fetched while this request waited.
+            if let Some(t) = st.token.clone().filter(|t| now < t.expires_at) {
+                return Ok(t);
+            }
+            if let Some((at, e)) = &st.failed
+                && now < *at + FAILURE_PAUSE
+            {
+                return Err(e.clone());
+            }
+            if st.token.is_some() {
+                "renewal"
+            } else {
+                "first_use"
+            }
         };
-        match self.fetch(reason).await {
+        let fetched = self.fetch(reason).await;
+        let mut st = self.state();
+        match fetched {
             Ok(t) => {
                 st.token = Some(t.clone());
                 st.failed = None;
@@ -137,39 +169,69 @@ impl OAuth {
             }
             Err(e) => {
                 st.failed = Some((Instant::now(), e.clone()));
-                match valid {
-                    Some(t) => {
-                        log::warn!(
-                            "binding {}: renew its token: {e:?}; the current one serves",
-                            self.binding
-                        );
-                        Ok(t)
-                    }
-                    None => Err(e),
-                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Renews the token while it serves; a failure leaves it serving
+    /// until it expires.
+    async fn renew(self: Arc<Self>) {
+        let _one = self.fetching.lock().await;
+        let fresh = self
+            .state()
+            .token
+            .as_ref()
+            .is_some_and(|t| Instant::now() < t.renew_at);
+        let fetched = match fresh {
+            // Renewed after a 401 meanwhile.
+            true => None,
+            false => Some(self.fetch("renewal").await),
+        };
+        let mut st = self.state();
+        st.renewing = false;
+        match fetched {
+            None => {}
+            Some(Ok(t)) => {
+                st.token = Some(t);
+                st.failed = None;
+            }
+            Some(Err(e)) => {
+                log::warn!(
+                    "binding {}: renew its token: {e:?}; the current one serves",
+                    self.binding
+                );
+                st.failed = Some((Instant::now(), e));
             }
         }
     }
 
     /// After a 401 to a request that carried the token `used`: a token to
     /// repeat it with, if there is a newer one or one can be fetched; None
-    /// to pass the 401 on.
+    /// to pass the 401 on. The refused token serves no other request: they
+    /// wait for the new one.
     pub async fn renew_after_unauthorized(&self, used: u64) -> Option<Token> {
-        let mut st = self.state.lock().await;
-        if let Some(t) = &st.token
-            && t.id != used
+        let _one = self.fetching.lock().await;
         {
-            return Some(t.clone());
+            let mut st = self.state();
+            if let Some(t) = &st.token
+                && t.id != used
+            {
+                return Some(t.clone());
+            }
+            let now = Instant::now();
+            if st
+                .unauthorized_renewal
+                .is_some_and(|at| now < at + UNAUTHORIZED_RENEWAL_PAUSE)
+            {
+                return None;
+            }
+            st.unauthorized_renewal = Some(now);
+            st.token = None;
         }
-        let now = Instant::now();
-        if st
-            .unauthorized_renewal
-            .is_some_and(|at| now < at + UNAUTHORIZED_RENEWAL_PAUSE)
-        {
-            return None;
-        }
-        st.unauthorized_renewal = Some(now);
-        match self.fetch("unauthorized").await {
+        let fetched = self.fetch("unauthorized").await;
+        let mut st = self.state();
+        match fetched {
             Ok(t) => {
                 st.token = Some(t.clone());
                 st.failed = None;
@@ -180,7 +242,6 @@ impl OAuth {
                     "binding {}: renew its token after a 401: {e:?}",
                     self.binding
                 );
-                st.token = None;
                 st.failed = Some((Instant::now(), e));
                 None
             }

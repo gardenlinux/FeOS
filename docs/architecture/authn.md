@@ -244,12 +244,14 @@ the `bindings` record and the log say why, never with a value.
 - `basic`: `Authorization: Basic`.
 - `oauth2`: client credentials (RFC 6749 §4.4). The token is fetched at
   first use (one fetch at a time per binding), kept in memory, renewed
-  at three quarters of its lifetime (`expires_in`, 15 minutes when the
-  endpoint says none); the old token serves while a renewal fails. A
-  failed fetch is not tried again for 5 seconds. On a 401 from the
-  upstream the token is renewed (at most once per 10 seconds per
-  binding) and an idempotent request without a body is repeated once;
-  any other request gets the 401, and the next one the new token. The
+  in the background at three quarters of its lifetime (`expires_in`, 15
+  minutes when the endpoint says none) while it serves on; only a
+  request without a valid token waits for a fetch, and the old token
+  serves while a renewal fails. A failed fetch is not tried again for 5
+  seconds. On a 401 from the upstream the token is renewed (at most once
+  per 10 seconds per binding), the requests meanwhile wait for the new
+  one, and an idempotent request without a body is repeated once; any
+  other request gets the 401, and the next one the new token. The
   client authenticates with Basic of the form-encoded ID and secret, or
   in the body (`clientAuthInBody`). The token endpoint is dialed under
   the same address checks, its server checked against the WebPKI and

@@ -560,19 +560,90 @@ async fn oauth_tokens_renew() {
     let (status, _, _) = read(send1(&mut s, get("graph", "/protected")).await).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(tokens.fetches.load(std::sync::atomic::Ordering::SeqCst), 2);
-    // Renewed after three quarters of its 2 s.
+    // Past three quarters of its 2 s it serves on, and is renewed in the
+    // background; the next request has the new one.
     tokio::time::sleep(Duration::from_millis(1600)).await;
     let (status, _, _) = read(send1(&mut s, get("graph", "/protected")).await).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(tokens.fetches.load(std::sync::atomic::Ordering::SeqCst), 3);
-    assert_eq!(header(&up.last(), "authorization"), vec!["Bearer tok-3"]);
+    assert_eq!(header(&up.last(), "authorization"), vec!["Bearer tok-2"]);
     await_record(&h.audit, |r| {
         r["type"] == "token" && r["reason"] == "renewal"
     })
     .await;
+    assert_eq!(tokens.fetches.load(std::sync::atomic::Ordering::SeqCst), 3);
+    let (status, _, _) = read(send1(&mut s, get("graph", "/protected")).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header(&up.last(), "authorization"), vec!["Bearer tok-3"]);
 
     let all = std::fs::read_to_string(&h.audit).unwrap();
     assert!(!all.contains("tok-") && !all.contains("se:cret") && !all.contains("se%3Acret"));
+}
+
+/// A slow token endpoint stalls no request while the token is valid: the
+/// renewal runs in the background, one at a time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_renewal_does_not_stall_requests() {
+    let pki = Pki::new();
+    let up = Upstream::start(pki.server_config(&["api.graph.test"])).await;
+    let tokens = TokenServer::start(pki.server_config(&["login.test"]), 4).await;
+    let mut r = MapResolver::default();
+    r.0.insert(("api.graph.test".into(), up.addr.port()), local(up.addr));
+    r.0.insert(
+        ("login.test".into(), tokens.addr.port()),
+        local(tokens.addr),
+    );
+    let h = start(r).await;
+    let b = HttpBinding {
+        name: "graph".into(),
+        upstream: format!("https://api.graph.test:{}", up.addr.port()),
+        ca_pem: pki.ca_pem.clone(),
+        credential: Some(http_binding::Credential::Oauth2(OAuthClientCredentials {
+            token_url: format!("https://login.test:{}/token", tokens.addr.port()),
+            client_id: "id".into(),
+            client_secret: "secret".into(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    h.feosd.hello(&[], None);
+    h.feosd.answer(
+        &PodBindings {
+            http: vec![b],
+            ..Default::default()
+        },
+        "v1",
+    );
+    h.feosd.ready("v1");
+    let mut s = h1(h.node.connect(&h.feosd, 80).await).await;
+    let fetches = || tokens.fetches.load(std::sync::atomic::Ordering::SeqCst);
+    let (status, _, _) = read(send1(&mut s, get("graph", "/")).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fetches(), 1);
+
+    // Past three quarters of its 4 s, the endpoint takes 700 ms.
+    tokens
+        .delay_ms
+        .store(700, std::sync::atomic::Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(3100)).await;
+    for _ in 0..3 {
+        let t0 = Instant::now();
+        let (status, _, _) = read(send1(&mut s, get("graph", "/")).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            t0.elapsed() < Duration::from_millis(400),
+            "{:?}",
+            t0.elapsed()
+        );
+        assert_eq!(header(&up.last(), "authorization"), vec!["Bearer tok-1"]);
+    }
+    await_record(&h.audit, |r| {
+        r["type"] == "token" && r["reason"] == "renewal"
+    })
+    .await;
+    assert_eq!(fetches(), 2, "one renewal");
+    let (status, _, _) = read(send1(&mut s, get("graph", "/")).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(header(&up.last(), "authorization"), vec!["Bearer tok-2"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
