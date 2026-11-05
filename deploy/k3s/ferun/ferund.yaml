@@ -114,6 +114,9 @@ spec:
             # Seals environments' secrets and addons' credentials at rest.
             - name: FERUN_SECRET_KEY_FILE
               value: /etc/ferun/secret-key/key
+            # The sandboxes' Kubernetes, SSH and HTTP bindings (ADR 0028).
+            - name: FERUN_BINDINGS
+              value: "true"
           ports:
             - name: http
               containerPort: 8100
