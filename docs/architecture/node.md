@@ -936,7 +936,9 @@ plane, `feosd` reads them two ways:
   ID, `authn-audit.id`, is made with the file, and the offsets are bytes
   in it, so one stream holds the pod's runs on the node.
 - **Events and spans**: every second, from `authn-audit.offset` (the
-  file's inode and an offset), batches of 512 records: each of a type it
+  file's inode and an offset), batches of 512 records, at most 8 of a
+  pod's in a pass and the pods in turn, a pod with more going on at once
+  after the others: each of a type it
   knows (`http`, `http_end`, `token`, `bindings`) becomes the pod's audit
   event (`AuditRecord`, kinds `http_request`, `http_end`, `token`,
   `bindings`, `detail_json` the line), and each request whose `http_end`
@@ -951,6 +953,14 @@ plane, `feosd` reads them two ways:
   without its `http_end` after 10 minutes (a process that was killed) has
   none, nor one whose `http` came before `feosd` started. Spans are best
   effort: three tries, then dropped. Unknown types are skipped.
+
+The file is the process's to append to as long as it runs, so it is not
+renamed: once it holds more than 64 MiB on disk, `feosd` punches a hole
+over what it has read but the last 16 MiB of lines
+(`FALLOC_FL_PUNCH_HOLE`). The file keeps its length and every offset,
+the egress log's and `authn-audit.offset`; both readers pass over the
+hole. A tail more than 64 MiB behind skips to the last 16 MiB first, and
+logs how much it dropped.
 
 ## A pod's microVM
 

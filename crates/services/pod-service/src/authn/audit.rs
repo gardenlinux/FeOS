@@ -15,13 +15,24 @@
 //!
 //! Lines are read whole: a line that is not ended yet waits, and one longer
 //! than [`MAX_LINE`] is skipped.
+//!
+//! The file is the process's to append to as long as it runs, so it is not
+//! renamed: once it holds more than [`MAX_FILE`] on disk, `tail` frees
+//! what it has read, but the last [`KEEP`] bytes, by punching a hole over
+//! the file's head ([`compact`]). Every offset stays what it was; a hole
+//! reads as zeros, which the readers skip. A tail more than [`MAX_FILE`]
+//! behind skips to the last [`KEEP`] bytes, and says so.
 
 use super::AUDIT;
 use feos_proto::container_service::{log_entry::Source, LogEntry, StreamContainerLogsRequest};
 use futures::future::BoxFuture;
 use log::{debug, warn};
+use nix::errno::Errno;
+use nix::fcntl::{fallocate, FallocateFlags};
+use nix::unistd::{lseek, Whence};
 use std::io::{self, SeekFrom};
-use std::os::unix::fs::MetadataExt;
+use std::os::fd::AsFd;
+use std::os::unix::fs::{FileExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -44,6 +55,14 @@ const BATCH_LINES: usize = 512;
 const BATCH_BYTES: usize = 1 << 20;
 /// How often `tail` looks at the files.
 const TAIL_PERIOD: Duration = Duration::from_secs(1);
+/// A pod's batches in a pass of `tail`; then the next pod's turn.
+const BATCHES_PER_PASS: usize = 8;
+/// The most of a pod's audit file kept on disk; past it, what was read is
+/// freed.
+pub const MAX_FILE: u64 = 64 << 20;
+/// What a compaction keeps of what was read: the egress log follows the
+/// file at its own pace.
+pub const KEEP: u64 = 16 << 20;
 
 /// Which lines are read: those of `"type":"http"`.
 pub type Keep = Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
@@ -184,6 +203,7 @@ async fn follow_from(
         (from, _) if (request.log_id.is_empty() || request.log_id == id) && from <= len => from,
         _ => 0,
     };
+    offset = past_hole(&file, offset, len);
     file.seek(SeekFrom::Start(offset)).await?;
     let mut pending: Vec<u8> = Vec::new();
     let mut skipping = false;
@@ -197,7 +217,14 @@ async fn follow_from(
             tokio::time::sleep(POLL).await;
             continue;
         }
-        pending.extend_from_slice(&chunk[..read]);
+        let mut data = &chunk[..read];
+        if pending.is_empty() && !skipping {
+            // What a compaction freed under the reader.
+            let zeros = data.iter().take_while(|b| **b == 0).count();
+            offset += zeros as u64;
+            data = &data[zeros..];
+        }
+        pending.extend_from_slice(data);
         let mut consumed = 0;
         while let Some(end) = pending[consumed..].iter().position(|b| *b == b'\n') {
             let line = &pending[consumed..consumed + end];
@@ -235,14 +262,24 @@ pub async fn tail(
     keep: Keep,
     handler: Handler,
 ) {
+    // Which pod goes first, moved on every pass.
+    let mut first = 0usize;
     loop {
         let listed = pods.clone();
         let ids = tokio::task::spawn_blocking(move || listed())
             .await
             .unwrap_or_default();
-        for pod_id in ids {
-            let pod_dir = dir.join(&pod_id);
+        let mut more = false;
+        for turn in 0..ids.len() {
+            let pod_id = &ids[(first + turn) % ids.len()];
+            let pod_dir = dir.join(pod_id);
+            let mut batches = 0;
             loop {
+                if batches == BATCHES_PER_PASS {
+                    more = true;
+                    break;
+                }
+                batches += 1;
                 match read_batch(&pod_dir, &keep).await {
                     Ok(None) => break,
                     Ok(Some((lines, end, inode))) => {
@@ -260,8 +297,102 @@ pub async fn tail(
                     }
                 }
             }
+            if let Err(e) = compact(&pod_dir, MAX_FILE, KEEP).await {
+                warn!("Audit: Pod {pod_id}'s audit file is not compacted: {e}");
+            }
         }
-        tokio::time::sleep(TAIL_PERIOD).await;
+        first = first.wrapping_add(1);
+        match more {
+            // A pod with more to read goes on at once, after the others.
+            true => tokio::task::yield_now().await,
+            false => tokio::time::sleep(TAIL_PERIOD).await,
+        }
+    }
+}
+
+/// Frees what was read of a pod's audit file in `dir` once it holds more
+/// than `max` bytes on disk: a hole over its head, up to the kept offset
+/// but the last `keep` bytes' lines; the file keeps its length and its
+/// offsets. A kept offset more than `max` behind its end moves to those
+/// lines first: what lay between is dropped, and said.
+async fn compact(dir: &Path, max: u64, keep: u64) -> io::Result<()> {
+    let path = dir.join(AUDIT);
+    let meta = match tokio::fs::metadata(&path).await {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.blocks() * 512 <= max {
+        return Ok(());
+    }
+    let (inode, len) = (meta.ino(), meta.len());
+    let offset = match load_offset(dir).await {
+        Some((kept, offset)) if kept == inode && offset <= len => offset,
+        _ => 0,
+    };
+    let from = len.saturating_sub(keep);
+    let (cut, dropped) = tokio::task::spawn_blocking(move || {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        if file.metadata()?.ino() != inode {
+            return Ok((0, false));
+        }
+        let (cut, dropped) = match offset {
+            // Read: freed up to the kept lines.
+            offset if offset > from => (line_start(&file, from)?.min(offset), false),
+            // Unread past the cap: dropped up to the kept lines.
+            offset if len - offset > max => (line_start(&file, from)?, true),
+            offset => (offset, false),
+        };
+        if cut > 0 {
+            let flags = FallocateFlags::FALLOC_FL_PUNCH_HOLE | FallocateFlags::FALLOC_FL_KEEP_SIZE;
+            let cut_at = i64::try_from(cut).map_err(io::Error::other)?;
+            fallocate(&file, flags, 0, cut_at)?;
+        }
+        Ok::<_, io::Error>((cut, dropped))
+    })
+    .await
+    .map_err(io::Error::other)??;
+    if dropped {
+        warn!(
+            "Audit: {} bytes of records in {} were not read and are dropped: the file keeps \
+             {max} bytes at most",
+            cut - offset,
+            dir.join(AUDIT).display()
+        );
+        store_offset(dir, inode, cut).await?;
+    }
+    Ok(())
+}
+
+/// The offset of the first line that starts at or past `from`; past the
+/// longest a line may be, `from` and that length.
+fn line_start(file: &std::fs::File, from: u64) -> io::Result<u64> {
+    if from == 0 {
+        return Ok(0);
+    }
+    let mut bytes = vec![0u8; MAX_LINE + 1];
+    let read = file.read_at(&mut bytes, from - 1)?;
+    Ok(match bytes[..read].iter().position(|b| *b == b'\n') {
+        Some(at) => from + at as u64,
+        None => from - 1 + read as u64,
+    })
+}
+
+/// The first offset at or past `offset` that holds data, below `len`: a
+/// compaction's hole is passed over, not read.
+fn past_hole(file: &impl AsFd, offset: u64, len: u64) -> u64 {
+    let Ok(at) = i64::try_from(offset) else {
+        return offset;
+    };
+    match lseek(file.as_fd(), at, Whence::SeekData) {
+        Ok(data) => u64::try_from(data)
+            .unwrap_or(offset)
+            .clamp(offset, len.max(offset)),
+        Err(Errno::ENXIO) => len.max(offset),
+        Err(_) => offset,
     }
 }
 
@@ -279,6 +410,7 @@ async fn read_batch(dir: &Path, keep: &Keep) -> io::Result<Option<(Vec<Vec<u8>>,
         Some((kept, offset)) if kept == inode && offset <= len => offset,
         _ => 0,
     };
+    let offset = past_hole(&file, offset, len);
     if offset >= len {
         return Ok(None);
     }
@@ -288,8 +420,11 @@ async fn read_batch(dir: &Path, keep: &Keep) -> io::Result<Option<(Vec<Vec<u8>>,
     let mut bytes = vec![0u8; want];
     let read = file.read(&mut bytes).await?;
     bytes.truncate(read);
+    // The rest of a hole's last block.
+    let zeros = bytes.iter().take_while(|b| **b == 0).count();
+    let offset = offset + zeros as u64;
     let (mut lines, mut end, mut size) = (Vec::new(), offset, 0);
-    let mut rest = bytes.as_slice();
+    let mut rest = &bytes[zeros..];
     while let Some(at) = rest.iter().position(|b| *b == b'\n') {
         let line = &rest[..at];
         if line.len() <= MAX_LINE && keep(line) {
@@ -306,6 +441,9 @@ async fn read_batch(dir: &Path, keep: &Keep) -> io::Result<Option<(Vec<Vec<u8>>,
         // An unfinished line; one beyond the longest a line may be goes.
         if rest.len() > MAX_LINE {
             return Ok(Some((Vec::new(), offset + rest.len() as u64, inode)));
+        }
+        if zeros > 0 {
+            return Ok(Some((Vec::new(), offset, inode)));
         }
         return Ok(None);
     }
@@ -486,5 +624,125 @@ mod tests {
         let (inode, offset) = load_offset(&pod_dir).await.unwrap();
         assert_eq!(offset, (A.len() + TOKEN.len() + B.len()) as u64);
         assert_eq!(inode, std::fs::metadata(pod_dir.join(AUDIT)).unwrap().ino());
+    }
+
+    /// A busy pod's records take their turn: a quiet pod's batch goes
+    /// before the busy one's ninth.
+    #[tokio::test]
+    async fn the_tail_takes_the_pods_in_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        for pod in ["busy", "quiet"] {
+            std::fs::create_dir(dir.path().join(pod)).unwrap();
+        }
+        let busy = A.repeat(BATCH_LINES * (BATCHES_PER_PASS + 2));
+        append(&dir.path().join("busy"), &busy);
+        append(&dir.path().join("quiet"), B);
+        let taken: Arc<Mutex<Vec<String>>> = Arc::default();
+        let handler: Handler = {
+            let taken = taken.clone();
+            Arc::new(move |pod, _lines| {
+                taken.lock().unwrap().push(pod);
+                Box::pin(async { true })
+            })
+        };
+        let pods: Arc<dyn Fn() -> Vec<String> + Send + Sync> =
+            Arc::new(|| vec!["busy".to_string(), "quiet".to_string()]);
+        let task = tokio::spawn(tail(dir.path().to_path_buf(), pods, keep(), handler));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while taken.lock().unwrap().len() < BATCHES_PER_PASS + 3 {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        task.abort();
+        let taken = taken.lock().unwrap().clone();
+        let quiet = taken.iter().position(|pod| pod == "quiet").unwrap();
+        assert_eq!(quiet, BATCHES_PER_PASS, "{taken:?}");
+        assert_eq!(
+            taken.iter().filter(|pod| *pod == "busy").count(),
+            BATCHES_PER_PASS + 2
+        );
+    }
+
+    fn allocated(path: &Path) -> u64 {
+        std::fs::metadata(path).unwrap().blocks() * 512
+    }
+
+    /// Past its cap the file's head is freed, its length and offsets kept;
+    /// its readers pass over the hole. A tail too far behind skips ahead.
+    #[tokio::test]
+    async fn a_file_past_its_cap_frees_what_was_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AUDIT);
+        let (max, keep_bytes) = (1u64 << 20, 256u64 << 10);
+        // Lines of 1000 bytes, numbered.
+        let line = |n: usize| {
+            let head = format!("{{\"type\":\"http\",\"n\":{n},\"pad\":\"");
+            format!("{head}{}\"}}\n", "x".repeat(1000 - head.len() - 3))
+        };
+        let lines: String = (0..3000).map(line).collect();
+        append(dir.path(), &lines);
+        let len = lines.len() as u64;
+        let inode = std::fs::metadata(&path).unwrap().ino();
+        // Under its cap, or nothing read: nothing is freed.
+        compact(dir.path(), 64 << 20, keep_bytes).await.unwrap();
+        compact(dir.path(), 4 << 20, keep_bytes).await.unwrap();
+        assert!(allocated(&path) >= len);
+
+        store_offset(dir.path(), inode, len).await.unwrap();
+        compact(dir.path(), max, keep_bytes).await.unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert_eq!((meta.ino(), meta.len()), (inode, len), "the same file");
+        assert!(
+            allocated(&path) <= keep_bytes + (64 << 10),
+            "{}",
+            allocated(&path)
+        );
+        assert_eq!(load_offset(dir.path()).await, Some((inode, len)));
+        let bytes = std::fs::read(&path).unwrap();
+        let kept = bytes.iter().position(|b| *b != 0).unwrap();
+        assert_eq!(kept % 1000, 0, "a line's start");
+        assert!(len - kept as u64 >= keep_bytes - 1000);
+
+        // The egress log from the start: the kept lines, whole, at their
+        // offsets.
+        let mut stream = follow(
+            dir.path().to_path_buf(),
+            StreamContainerLogsRequest {
+                follow: true,
+                tail: true,
+                ..Default::default()
+            },
+            keep(),
+        );
+        let first = next(&mut stream).await;
+        assert_eq!(first.offset, kept as u64);
+        assert_eq!(first.line, line(kept / 1000).trim_end().as_bytes());
+        drop(stream);
+        // A tail whose offset is gone starts at the kept lines too.
+        tokio::fs::remove_file(dir.path().join(OFFSET))
+            .await
+            .unwrap();
+        let mut batch = read_batch(dir.path(), &keep()).await.unwrap().unwrap();
+        while batch.0.is_empty() {
+            store_offset(dir.path(), inode, batch.1).await.unwrap();
+            batch = read_batch(dir.path(), &keep()).await.unwrap().unwrap();
+        }
+        assert_eq!(batch.0[0], line(kept / 1000).trim_end().as_bytes());
+
+        // Unread past the cap: the oldest are dropped, the offset moves.
+        store_offset(dir.path(), inode, len).await.unwrap();
+        let more: String = (3000..5000).map(line).collect();
+        append(dir.path(), &more);
+        let len = len + more.len() as u64;
+        compact(dir.path(), max, keep_bytes).await.unwrap();
+        let (_, offset) = load_offset(dir.path()).await.unwrap();
+        assert!(offset > len - keep_bytes - 1000 && offset <= len - keep_bytes + 1000);
+        assert_eq!(offset % 1000, 0, "a line's start");
+        assert!(allocated(&path) <= keep_bytes + (64 << 10));
+        let batch = read_batch(dir.path(), &keep()).await.unwrap().unwrap();
+        assert_eq!(
+            batch.0[0],
+            line(offset as usize / 1000).trim_end().as_bytes()
+        );
     }
 }
