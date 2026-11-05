@@ -500,7 +500,8 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 }
 
 // keep updates a kept instance in place: its deployment, and its row's
-// idle_after_s.
+// idle_after_s. A pod with HTTP bindings whose deployment moved is sent
+// them again: their credentials are the deployment's.
 func (c *Controller) keep(ctx context.Context, v *view, r store.EnvInstanceRow, idle int) {
 	needDeployment := r.Instance.Deployment != v.targetNum && v.targetNum > 0
 	needIdle := r.Sandbox.IdleAfterS == nil || *r.Sandbox.IdleAfterS != idle
@@ -527,6 +528,13 @@ func (c *Controller) keep(ctx context.Context, v *view, r store.EnvInstanceRow, 
 	})
 	if err != nil && ctx.Err() == nil && !errors.Is(err, store.ErrNoRow) {
 		c.rl.warn("keep", "cannot update a kept instance", "sandbox", r.Sandbox.ID, "err", err)
+		return
+	}
+	if err == nil && needDeployment && r.Sandbox.PodTemplate != nil && len(r.Sandbox.PodTemplate.HTTPBindings) > 0 {
+		// The deployment's bindings may seal other credentials (a new
+		// secret version): the pod is sent them again, and its
+		// feos-authn fetches them (ADR 0028).
+		c.d.Engine.PushHTTPBindings(r.Sandbox.ID)
 	}
 }
 

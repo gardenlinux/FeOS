@@ -51,6 +51,15 @@ const (
 // doors serve it (ADR 0021): the route door alone for an attached
 // service; the ingress and the route door for an image service of a
 // public environment.
+//
+// It may also implement interface{ HTTPBindings() bool }: whether the
+// platform has HTTP bindings on (ADR 0028); a spec with bindings is an
+// error when it has not. Without it, they are on.
+//
+// It may also implement interface{ Destination(host string) error }: the
+// destination rule's word on the host of a binding's upstream or token
+// endpoint, which the caller asked before it validates (nil: a
+// destination); an error is a finding. Without it, no host is judged.
 type ValidateContext interface {
 	// Mode is what the validation is for.
 	Mode() Mode
@@ -97,6 +106,10 @@ type SandboxInfo struct {
 	// sandbox must not share one, or a process there reaches whichever
 	// environment's comes first.
 	Names []SandboxName
+	// HTTPNames are the names the sandbox's own HTTP bindings (ADR 0028)
+	// make its resolver answer, which no name of an environment there may
+	// be.
+	HTTPNames []string
 }
 
 // SandboxName is a name an environment gives a sandbox its attached
@@ -207,6 +220,7 @@ func Validate(vc ValidateContext, s Spec, prev *Spec) []Finding {
 	for _, name := range slices.Sorted(maps.Keys(s.Routes)) {
 		v.route(name, s.Routes[name])
 	}
+	v.bindings()
 	v.routePaths()
 	v.secrets()
 	v.attachedPorts()
@@ -247,6 +261,7 @@ func (v *validator) limits() {
 	}{
 		{"services", len(v.s.Services), MaxServices}, {"jobs", len(v.s.Jobs), MaxJobs},
 		{"addons", len(v.s.Addons), MaxAddons}, {"routes", len(v.s.Routes), MaxRoutes},
+		{"bindings", len(v.s.Bindings), MaxBindings},
 	} {
 		if l.n > l.max {
 			v.errorf(l.kind, "split the environment", "%d %s; at most %d are allowed", l.n, l.kind, l.max)
@@ -262,6 +277,7 @@ func (v *validator) limits() {
 	}{
 		{"services", slices.Collect(maps.Keys(v.s.Services))}, {"jobs", slices.Collect(maps.Keys(v.s.Jobs))},
 		{"addons", slices.Collect(maps.Keys(v.s.Addons))}, {"routes", slices.Collect(maps.Keys(v.s.Routes))},
+		{"bindings", slices.Collect(maps.Keys(v.s.Bindings))},
 	} {
 		for _, n := range kind.names {
 			if !IsName(n) {
@@ -378,6 +394,12 @@ func (v *validator) service(name string, svc Service) {
 		sandbox = svc.Sandbox
 	}
 	v.env(p+".env", svc.Env, runtime == RuntimeImage, sandbox)
+	if runtime == RuntimeAttached && len(svc.Bindings) > 0 {
+		v.errorf(p+".bindings", "remove bindings: set the sandbox's HTTP bindings (PUT /api/v1/sandboxes/{id}/http), or "+
+			"run the service as an image", "attached services use their sandbox's bindings")
+	} else {
+		v.bindingRefs(p+".bindings", svc.Bindings)
+	}
 }
 
 // sandbox checks an attached service's sandbox.
@@ -700,6 +722,7 @@ func (v *validator) job(name string, j Job) {
 	v.resources(p+".resources", j.Resources)
 	v.imageCredentials(p+".imageCredentials", j.ImageCredentials)
 	v.env(p+".env", j.Env, true, "")
+	v.bindingRefs(p+".bindings", j.Bindings)
 }
 
 func (v *validator) addon(name string, a Addon) {
@@ -939,7 +962,21 @@ func (v *validator) sandboxNames() {
 	}
 	for _, sb := range slices.Sorted(maps.Keys(sandboxes)) {
 		info, ok := v.vc.Sandbox(sb)
-		if !ok || len(info.Names) == 0 {
+		if !ok {
+			continue
+		}
+		for _, name := range SandboxNames(v.s, sb) {
+			if !slices.Contains(info.HTTPNames, name) {
+				continue
+			}
+			p := "services." + name
+			if _, ok := v.s.Addons[name]; ok {
+				p = "addons." + name
+			}
+			v.add(sev, p, "rename it, or rename the sandbox's HTTP binding",
+				"%s is the name of an HTTP binding of sandbox %s: its resolver would answer the binding", name, sb)
+		}
+		if len(info.Names) == 0 {
 			continue
 		}
 		others := map[string][]string{}
@@ -985,7 +1022,7 @@ func SandboxNames(s Spec, sandbox string) []string {
 }
 
 // Referenced returns the secrets the env values of the spec's services
-// and jobs reference, by name.
+// and jobs and the credentials of its bindings reference, by name.
 func Referenced(s Spec) []string {
 	set := map[string]bool{}
 	add := func(env map[string]EnvValue) {
@@ -1012,6 +1049,9 @@ func Referenced(s Spec) []string {
 	for _, j := range s.Jobs {
 		add(j.Env)
 		creds(j.ImageCredentials)
+	}
+	for _, b := range s.Bindings {
+		add(b.Credential.Values())
 	}
 	return slices.Sorted(maps.Keys(set))
 }

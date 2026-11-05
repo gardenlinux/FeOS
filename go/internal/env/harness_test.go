@@ -166,6 +166,8 @@ type harnessOptions struct {
 	appsZone string
 	// appsZoneOwners is Deps.AppsZoneOwners.
 	appsZoneOwners []string
+	// bindings is Deps.Bindings.
+	bindings HTTPBindings
 }
 
 func newHarness(t *testing.T, o harnessOptions) *harness {
@@ -174,7 +176,7 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	st := store.New(d)
 	h := &harness{t: t, d: d, st: st, eng: &fakeEngine{bad: map[string]string{}}, ports: &fakePorts{}}
 	deps := Deps{InstanceID: "i1", DB: d, Store: st, Engine: h.eng, AppsZone: o.appsZone,
-		AppsZoneOwners: o.appsZoneOwners, Log: dbtest.Logger(t)}
+		AppsZoneOwners: o.appsZoneOwners, Bindings: o.bindings, Log: dbtest.Logger(t)}
 	if !o.noSealer {
 		sl, err := seal.New(make([]byte, 32))
 		if err != nil {

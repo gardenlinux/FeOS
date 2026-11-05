@@ -20,7 +20,7 @@ type AddonEffect func(name string, prev, next Addon) string
 
 // Diff lists the changes from prev to next, both normalised, one entry
 // per changed object, ordered by kind (services, jobs, addons, routes,
-// secrets) and name; nil prev is an environment without a deployment (every
+// secrets, bindings) and name; nil prev is an environment without a deployment (every
 // object an add), nil next one whose objects all go. An update lists its
 // changed fields and the effect on the running pods: "in place" (adds
 // and removes but an addon's, routes, secrets, replicas, ports,
@@ -33,7 +33,12 @@ type AddonEffect func(name string, prev, next Addon) string
 // Secret values never appear; versions do: a service whose referenced
 // secret moves to another version shows the change in its env, with the
 // effect of a changed template. An image shows as written with its
-// digest: "ghcr.io/acme/x:1.4 (sha256:…)".
+// digest: "ghcr.io/acme/x:1.4 (sha256:…)". A binding (ADR 0028) whose
+// credential or options change, a referenced secret's version among
+// them, is sealed to the running pods again: "in place"; one whose
+// upstream or mode changes replaces the pods of the image services that
+// name it and restarts the jobs, as their own entries show (a binding
+// named, its upstream and its mode are part of their template).
 func Diff(prev, next *Spec) []DiffEntry { return DiffWith(prev, next, nil) }
 
 // DiffWith is Diff with the effects of addons' option updates told by
@@ -74,6 +79,11 @@ func DiffWith(prev, next *Spec, addonEffect AddonEffect) []DiffEntry {
 		d.object(KindSecret, name, inA, inB, func() ([]FieldChange, string) {
 			return changes(view(a), view(b)), EffectInPlace
 		})
+	}
+	for _, name := range unionKeys(prev.Bindings, next.Bindings) {
+		a, inA := prev.Bindings[name]
+		b, inB := next.Bindings[name]
+		d.object(KindBinding, name, inA, inB, func() ([]FieldChange, string) { return d.binding(name, a, b) })
 	}
 	if d.out == nil {
 		return []DiffEntry{}
@@ -116,8 +126,12 @@ func (d *differ) service(a, b Service) ([]FieldChange, string) {
 	ta, tb := d.template(a, d.prev), d.template(b, d.next)
 	changed := !reflect.DeepEqual(ta, tb)
 	if len(fields) == 0 && changed {
-		// Only what it references changed: a referenced service's port.
+		// Only what it references changed: a referenced service's port, a
+		// named binding's upstream or mode.
 		fields = changes(map[string]any{"env": ta["env"]}, map[string]any{"env": tb["env"]})
+		if !reflect.DeepEqual(ta["bindings"], tb["bindings"]) {
+			fields = append(fields, FieldChange{Path: "bindings", From: ta["bindings"], To: tb["bindings"]})
+		}
 	}
 	switch {
 	case runtimeOf(a) != runtimeOf(b):
@@ -148,10 +162,17 @@ func (d *differ) job(a, b Job) ([]FieldChange, string) {
 	va["image"], vb["image"] = imageDisplay(a.Image, a.ImageAsWritten), imageDisplay(b.Image, b.ImageAsWritten)
 	va["env"], vb["env"] = envView(a.Env, d.prev, false), envView(b.Env, d.next, false)
 	fields := changes(clean(va), clean(vb))
+	if reflect.DeepEqual(va["bindings"], vb["bindings"]) && !reflect.DeepEqual(bindingsTemplate(a.Bindings, d.prev),
+		bindingsTemplate(b.Bindings, d.next)) {
+		fields = append(fields, FieldChange{Path: "bindings", From: bindingsTemplate(a.Bindings, d.prev),
+			To: bindingsTemplate(b.Bindings, d.next)})
+	}
 	ta := map[string]any{"image": a.Image, "command": a.Command, "env": envView(a.Env, d.prev, true),
-		"resources": view(a.Resources), "imageCredentials": toAny(a.ImageCredentials)}
+		"resources": view(a.Resources), "imageCredentials": toAny(a.ImageCredentials),
+		"bindings": bindingsTemplate(a.Bindings, d.prev)}
 	tb := map[string]any{"image": b.Image, "command": b.Command, "env": envView(b.Env, d.next, true),
-		"resources": view(b.Resources), "imageCredentials": toAny(b.ImageCredentials)}
+		"resources": view(b.Resources), "imageCredentials": toAny(b.ImageCredentials),
+		"bindings": bindingsTemplate(b.Bindings, d.next)}
 	if reflect.DeepEqual(ta, tb) {
 		return fields, EffectInPlace
 	}
@@ -205,7 +226,87 @@ func (d *differ) template(s Service, sp *Spec) map[string]any {
 			"env": envView(s.Env, sp, true)}
 	}
 	return map[string]any{"image": s.Image, "command": s.Command, "env": envView(s.Env, sp, true),
-		"resources": view(s.Resources), "imageCredentials": toAny(s.ImageCredentials)}
+		"resources": view(s.Resources), "imageCredentials": toAny(s.ImageCredentials),
+		"bindings": bindingsTemplate(s.Bindings, sp)}
+}
+
+// bindingsTemplate is what of an object's bindings its template holds:
+// each binding it names with its upstream and mode, by name.
+func bindingsTemplate(names []string, sp *Spec) any {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(names))
+	for _, n := range names {
+		b, ok := sp.Bindings[n]
+		if !ok {
+			out = append(out, map[string]any{"name": n})
+			continue
+		}
+		up, mode := BindingTemplate(b)
+		out = append(out, map[string]any{"name": n, "upstream": up, "mode": mode})
+	}
+	return out
+}
+
+// binding is a binding's update: its fields with the secrets' versions,
+// and its effect, in place unless its upstream or mode changed.
+func (d *differ) binding(name string, a, b Binding) ([]FieldChange, string) {
+	fields := changes(bindingView(a, d.prev), bindingView(b, d.next))
+	if len(fields) == 0 {
+		return nil, EffectInPlace
+	}
+	ua, ma := BindingTemplate(a)
+	ub, mb := BindingTemplate(b)
+	if ua == ub && ma == mb {
+		return fields, EffectInPlace
+	}
+	replicas, jobs := 0, false
+	for _, svc := range d.next.Services {
+		if runtimeOf(svc) == RuntimeImage && slices.Contains(svc.Bindings, name) {
+			if svc.Replicas != nil {
+				replicas += *svc.Replicas
+			} else {
+				replicas += DefaultReplicas
+			}
+		}
+	}
+	for _, j := range d.next.Jobs {
+		jobs = jobs || slices.Contains(j.Bindings, name)
+	}
+	switch {
+	case replicas > 0:
+		return fields, EffectReplaces(replicas)
+	case jobs:
+		return fields, EffectRestarts
+	}
+	return fields, EffectInPlace
+}
+
+// bindingView is a binding as its diff shows it: its credential's values
+// in their JSON form, a secret with the version sp pins.
+func bindingView(b Binding, sp *Spec) map[string]any {
+	v := view(b)
+	if b.Credential == nil {
+		return v
+	}
+	c := view(b.Credential)
+	for path, val := range b.Credential.Values() {
+		shown := toAny(val)
+		if val.Kind == EnvSecret {
+			shown = map[string]any{"secret": val.Secret, "version": float64(sp.Secrets[val.Secret].Version)}
+		}
+		if h, ok := strings.CutPrefix(path, "headers."); ok {
+			hs, _ := c["headers"].(map[string]any)
+			if hs != nil {
+				hs[h] = shown
+			}
+			continue
+		}
+		c[path] = shown
+	}
+	v["credential"] = c
+	return v
 }
 
 // envView is env as a diff shows it: each value in its JSON form, a
@@ -293,8 +394,10 @@ func walkChanges(path string, a, b any, out *[]FieldChange) {
 		parent, key = path[:i], path[i+1:]
 	}
 	parentKey := parent[strings.LastIndexByte(parent, '.')+1:]
-	// An env value is one field, whatever its form.
-	byMember := aIsMap && bIsMap && !(parentKey == "env" && parent != "")
+	// An env value is one field, whatever its form, and so is a value of
+	// a binding's credential (a header's among them).
+	value := parent != "" && (parentKey == "env" || parentKey == "headers" || (parentKey == "credential" && key != "headers"))
+	byMember := aIsMap && bIsMap && !value
 	if !byMember && (aIsMap || bIsMap) && (a == nil || b == nil) {
 		byMember = key == "env" || key == "options"
 	}

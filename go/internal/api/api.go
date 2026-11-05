@@ -50,6 +50,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/db"
 	envs "github.com/gardenlinux/feos/go/internal/env"
@@ -133,6 +134,8 @@ type Environments interface {
 	Logs(ctx context.Context, tenant, envRef, kind, name string, lines, replica int) (envs.LogsAnswer, error)
 	RestartService(ctx context.Context, tenant, envRef, name string) error
 	RunJob(ctx context.Context, tenant, envRef, name string) error
+	CheckBinding(ctx context.Context, tenant, envRef, name string, req envs.BindingCheckRequest) (
+		*bindings.HTTPPreflightResult, error)
 	CreateRouteToken(ctx context.Context, tenant, envRef string) (envs.RouteToken, error)
 	RevokeRouteTokens(ctx context.Context, tenant, envRef string) error
 	SetPublic(ctx context.Context, tenant, envRef string, public bool, hostLabel string) (envs.PublicAnswer, error)

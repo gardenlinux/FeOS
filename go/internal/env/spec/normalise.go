@@ -30,7 +30,9 @@ type Pins struct {
 
 // Normalise returns the spec's normalised form, the one ferund stores,
 // hashes and diffs: defaults filled (replicas, resources, readiness
-// timing, rollout and job timeouts, job on, an addon's plan), Runtime
+// timing, rollout and job timeouts, job on, an addon's plan, a binding's
+// mode and burst, its upstream as its origin; the binding names of
+// services and jobs sorted), Runtime
 // explicit on every service, durations as Go's time.Duration.String
 // writes them ("15m0s"), Image pinned (and ImageAsWritten kept) for every
 // image found in p.Images, a digest reference kept as written, every
@@ -67,6 +69,12 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 	}
 	if len(s.Routes) > 0 {
 		out.Routes = maps.Clone(s.Routes)
+	}
+	if len(s.Bindings) > 0 {
+		out.Bindings = make(map[string]Binding, len(s.Bindings))
+		for name, b := range s.Bindings {
+			out.Bindings[name] = normBinding(b)
+		}
 	}
 	referenced := Referenced(s)
 	for _, name := range slices.Sorted(maps.Keys(s.Secrets)) {
@@ -142,9 +150,43 @@ func normReadiness(r *Readiness) *Readiness {
 	return &out
 }
 
+// normBinding writes a binding's upstream as its origin, its mode and its
+// rate limit's burst explicit; one that is none stays as written
+// (Validate refused it).
+func normBinding(b Binding) Binding {
+	out := b
+	out.Upstream, out.Mode = BindingTemplate(b)
+	if b.RateLimit != nil {
+		rl := *b.RateLimit
+		if rl.PerSecond > 0 && rl.Burst == 0 {
+			rl.Burst = rl.PerSecond
+		}
+		out.RateLimit = &rl
+	}
+	if b.Credential != nil {
+		c := *b.Credential
+		c.Headers = maps.Clone(b.Credential.Headers)
+		out.Credential = &c
+	}
+	out.PathPrefixes = slices.Clone(b.PathPrefixes)
+	return out
+}
+
+// normBindingNames are an object's binding names sorted, without
+// duplicates; none: nil.
+func normBindingNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := slices.Clone(names)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 func normService(svc Service, p Pins) Service {
 	out := svc
 	out.Env = maps.Clone(svc.Env)
+	out.Bindings = normBindingNames(svc.Bindings)
 	out.Mounts = nil
 	out.Readiness = normReadiness(svc.Readiness)
 	if out.Runtime == "" {
@@ -179,6 +221,7 @@ func normService(svc Service, p Pins) Service {
 func normJob(j Job, p Pins) Job {
 	out := j
 	out.Env = maps.Clone(j.Env)
+	out.Bindings = normBindingNames(j.Bindings)
 	out.Image, out.ImageAsWritten = pin(j.Image, j.ImageAsWritten, p)
 	if IsJobOnDeploy(out.On) {
 		out.On = JobOnStored

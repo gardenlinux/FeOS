@@ -426,13 +426,21 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 		}
 		sealer = sl
 	}
+	var hb env.HTTPBindings
+	if i.Bindings != nil {
+		hb = i.Bindings
+	}
 	s, err := env.New(env.Deps{
 		InstanceID: i.id, DB: i.DB, Store: i.Store, Elector: i.Elector, Conns: i.Links, Engine: i.Engine,
 		Runner: runner, Ports: fwd, Sealer: sealer, AppsZone: i.cfg.AppsZone, EnvChanged: i.Domains.EnvChanged,
-		AppsZoneOwners: i.cfg.AppsZoneOwners, SinkURL: i.cfg.SinkURL, Log: i.log,
+		AppsZoneOwners: i.cfg.AppsZoneOwners, SinkURL: i.cfg.SinkURL, Bindings: hb, Log: i.log,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if i.Bindings != nil {
+		// An environment's pods get the bindings their objects name.
+		i.Bindings.SetEnvSource(s)
 	}
 	i.Engine.SetSecretResolver(s.RowSecret)
 	i.Engine.SetPrepareHook(s.PrepareHook)

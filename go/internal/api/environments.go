@@ -54,6 +54,7 @@ func (s *server) envRoutes(add func(c class, pattern string, h http.Handler)) {
 	env("GET /api/v1/environments/{env}/traffic", s.traffic)
 	env("POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
 	env("POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
+	env("POST /api/v1/environments/{env}/bindings/{name}/check", s.checkBinding)
 	env("POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
 	env("DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
 	env("PUT /api/v1/environments/{env}/public", s.setEnvPublic)
@@ -446,6 +447,21 @@ func (s *server) runJob(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return noContent(w, http.StatusAccepted)
+}
+
+// checkBinding is POST …/bindings/{name}/check {"probe"?}: the preflight of
+// the environment's binding with its secrets' latest versions, 200 with
+// the result, ok or not.
+func (s *server) checkBinding(w http.ResponseWriter, r *http.Request) error {
+	var req envs.BindingCheckRequest
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	res, err := s.deps.Environments.CheckBinding(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name"), req)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, res)
 }
 
 func (s *server) createRouteToken(w http.ResponseWriter, r *http.Request) error {

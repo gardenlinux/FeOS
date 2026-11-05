@@ -240,6 +240,16 @@ func (s *Service) envPodBindings(ctx context.Context, row store.Sandbox) (*fleet
 	return out, version, nil
 }
 
+// CheckDestination is the destination rule on a binding's host, as a PUT
+// applies it: nil for a destination, else why not. The environments' plans
+// ask it of their bindings' hosts.
+func (s *Service) CheckDestination(ctx context.Context, host string) error {
+	if berr := s.dest.checkDestination(ctx, host); berr != nil {
+		return berr
+	}
+	return nil
+}
+
 // rowOf reads a pod's row; nil when there is none.
 func (s *Service) rowOf(ctx context.Context, id podid.ID) (*store.Sandbox, error) {
 	row, err := s.st.GetSandbox(ctx, id)
