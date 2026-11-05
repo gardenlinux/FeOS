@@ -5,6 +5,7 @@ package ctl
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -89,5 +90,110 @@ func TestServiceBindings(t *testing.T) {
 	})
 	if got := rows[0].Sandbox.PodTemplate.HTTPBindings[0].Upstream; got != "https://api2.erp.example" {
 		t.Fatalf("the new pod's upstream: %s", got)
+	}
+}
+
+// auditHTTP records a pod's requests through a binding as feosd publishes
+// them (activity, source authn, kind http_request), n of them with status,
+// or refused with code when it is set.
+func (h *harness) auditHTTP(sb store.Sandbox, binding string, n, status int, code string) {
+	h.t.Helper()
+	detail := fmt.Sprintf(`{"type":"http","binding":%q,"method":"GET","path":"/odata/Orders","status":%d,"error":null}`,
+		binding, status)
+	if code != "" {
+		detail = fmt.Sprintf(`{"type":"http","binding":%q,"method":"GET","path":"/odata/Orders","status":%d,`+
+			`"error":{"code":%q,"message":"no"}}`, binding, status, code)
+	}
+	for range n {
+		h.exec(`INSERT INTO activity (ts_ns, sandbox_id, pod_id, tenant_id, source, kind, category, name, detail)
+			VALUES ((extract(epoch FROM now()) * 1e9)::bigint, $1, $1, $2, 'authn', 'http_request', 'credential', 'x', $3)`,
+			sb.ID, sb.Owner, detail)
+	}
+}
+
+// The incidents of a binding: opened from its pods' requests in the last
+// five minutes, one condition at a time, closed when it no longer holds.
+func TestBindingIncidents(t *testing.T) {
+	h := newHarness(t, options{})
+	h.addNode("n1")
+	env := h.newEnv("stage")
+	h.putSecret(env.ID, "erp-key", "one")
+	r1 := h.apply(env.ID, bindingSpec(1, "https://api.erp.example"))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+	pod := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox
+	pass := func() {
+		t.Helper()
+		if err := h.c.bindingsLoop(bg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openOf := func() map[string]store.EnvIncident {
+		t.Helper()
+		out := map[string]store.EnvIncident{}
+		for _, i := range h.incidents(env.ID, true) {
+			out[i.Object+" "+i.Condition] = i
+		}
+		return out
+	}
+
+	// Too few requests, or mostly fine: nothing.
+	h.auditHTTP(pod, "erp", 3, 401, "")
+	pass()
+	if len(openOf()) != 0 {
+		t.Fatalf("incidents from 3 requests: %v", openOf())
+	}
+	h.auditHTTP(pod, "erp", 4, 200, "")
+	pass()
+	if len(openOf()) != 0 {
+		t.Fatalf("incidents from 3 of 7 refused: %v", openOf())
+	}
+
+	// Mostly 401 and 403: credential_refused, with the records.
+	h.auditHTTP(pod, "erp", 3, 403, "")
+	pass()
+	i, ok := openOf()["binding/erp credential_refused"]
+	if !ok || len(openOf()) != 1 || i.Deployment != r1 {
+		t.Fatalf("credential refused: %v", openOf())
+	}
+	var ev struct {
+		Egress egressEvidence `json:"egress"`
+	}
+	if err := json.Unmarshal(i.Evidence, &ev); err != nil || ev.Egress.Requests != 10 || ev.Egress.Refused != 6 ||
+		len(ev.Egress.Records) != bindingEvidence {
+		t.Fatalf("evidence %s: %v", i.Evidence, err)
+	}
+	pass()
+	if n := len(h.incidents(env.ID, false)); n != 1 {
+		t.Fatalf("a second pass opened again: %d incidents", n)
+	}
+
+	// The window moves on: the old records age out, the upstream fails.
+	h.exec(`UPDATE activity SET ts_ns = ts_ns - $1 WHERE kind = 'http_request'`, (6 * time.Minute).Nanoseconds())
+	h.auditHTTP(pod, "erp", 4, 503, "")
+	h.auditHTTP(pod, "erp", 1, 502, "unreachable")
+	h.auditHTTP(pod, "erp", 1, 502, "tls")
+	h.auditHTTP(pod, "erp", 1, 200, "")
+	pass()
+	open := openOf()
+	if _, ok := open["binding/erp upstream_failing"]; !ok || len(open) != 1 {
+		t.Fatalf("upstream failing: %v", open)
+	}
+
+	// The token endpoint fails; the pod's own mistakes count for nothing.
+	h.exec(`UPDATE activity SET ts_ns = ts_ns - $1 WHERE kind = 'http_request'`, (6 * time.Minute).Nanoseconds())
+	h.auditHTTP(pod, "erp", 5, 503, "credential_unavailable")
+	h.auditHTTP(pod, "erp", 20, 403, "denied_path")
+	h.auditHTTP(pod, "erp", 20, 429, "rate_limited")
+	pass()
+	open = openOf()
+	if _, ok := open["binding/erp token_failing"]; !ok || len(open) != 1 {
+		t.Fatalf("token failing: %v", open)
+	}
+
+	// Quiet: closed.
+	h.exec(`UPDATE activity SET ts_ns = ts_ns - $1 WHERE kind = 'http_request'`, (6 * time.Minute).Nanoseconds())
+	pass()
+	if open := openOf(); len(open) != 0 {
+		t.Fatalf("after the window: %v", open)
 	}
 }

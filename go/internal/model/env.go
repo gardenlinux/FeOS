@@ -96,6 +96,15 @@ const (
 	ConditionDomainRecordWrong = "domain_record_wrong"
 	ConditionDomainDeactivated = "domain_deactivated"
 	ConditionDomainSuperseded  = "domain_superseded"
+	// The conditions of an HTTP binding of the environment (ADR 0028 §6),
+	// on the object "binding/<name>", from its pods' requests over the
+	// last five minutes: mostly refused by the upstream with 401 or 403
+	// (CredentialRefused), mostly 429, 5xx or an upstream that could not
+	// be reached (UpstreamFailing), its token endpoint failing
+	// (TokenFailing).
+	ConditionCredentialRefused = "credential_refused"
+	ConditionUpstreamFailing   = "upstream_failing"
+	ConditionTokenFailing      = "token_failing"
 )
 
 // The states of an environment in the list (GET /api/v1/environments)

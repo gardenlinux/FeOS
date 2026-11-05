@@ -22,8 +22,13 @@
 -- incarnation; '' for none, as every pod made before had. A row whose
 -- pod's part differs from it gets SetPodHttpBindings.
 --
+-- env_incidents gains the conditions of an environment's binding (ADR
+-- 0028 §6), on the object binding/<name>: credential_refused,
+-- upstream_failing, token_failing.
+--
 -- Additive: an instance of the previous version neither reads nor writes
--- the new columns and tables, and a sandbox's delete cascades to them.
+-- the new columns and tables, and a sandbox's delete cascades to them; it
+-- opens none of the new conditions and reads them as any other.
 
 ALTER TABLE sandboxes ADD COLUMN http_version text NOT NULL DEFAULT '';
 ALTER TABLE sandboxes ADD COLUMN http_pushed text NOT NULL DEFAULT '';
@@ -51,3 +56,10 @@ CREATE TABLE pod_intercept_cas (
   sealed_key bytea NOT NULL,                   -- 0x01 || nonce(12) || AES-256-GCM(PKCS#8 PEM)
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (sandbox_id, seq));
+
+ALTER TABLE env_incidents DROP CONSTRAINT env_incidents_condition_check;
+ALTER TABLE env_incidents ADD CONSTRAINT env_incidents_condition_check
+  CHECK (condition IN ('rollout_failed','crash_loop','job_failed','no_capacity',
+     'addon_unhealthy','volume_unavailable','attach_failed','names_unserved',
+     'domain_record_wrong','domain_deactivated','domain_superseded','certificate_failing',
+     'credential_refused','upstream_failing','token_failing'));

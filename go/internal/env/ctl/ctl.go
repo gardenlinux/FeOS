@@ -343,6 +343,7 @@ func (c *Controller) Loops() []model.Loop {
 		{Name: LoopNames, Interval: namesEvery, Run: c.namesLoop},
 		{Name: LoopVolumes, Interval: volumesEvery, Run: c.volumesLoop},
 		{Name: LoopDelete, Interval: deleteEvery, Run: c.deleteLoop},
+		{Name: LoopBindings, Interval: bindingsEvery, Run: c.bindingsLoop},
 	}
 }
 

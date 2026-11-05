@@ -201,7 +201,7 @@ TABLE env_incidents
   COLUMN summary text NOT NULL DEFAULT ''::text
   COLUMN evidence jsonb NOT NULL DEFAULT '{}'::jsonb
   COLUMN deployment integer NOT NULL
-  CONSTRAINT CHECK ((condition = ANY (ARRAY['rollout_failed'::text, 'crash_loop'::text, 'job_failed'::text, 'no_capacity'::text, 'addon_unhealthy'::text, 'volume_unavailable'::text, 'attach_failed'::text, 'names_unserved'::text, 'domain_record_wrong'::text, 'domain_deactivated'::text, 'domain_superseded'::text, 'certificate_failing'::text])))
+  CONSTRAINT CHECK ((condition = ANY (ARRAY['rollout_failed'::text, 'crash_loop'::text, 'job_failed'::text, 'no_capacity'::text, 'addon_unhealthy'::text, 'volume_unavailable'::text, 'attach_failed'::text, 'names_unserved'::text, 'domain_record_wrong'::text, 'domain_deactivated'::text, 'domain_superseded'::text, 'certificate_failing'::text, 'credential_refused'::text, 'upstream_failing'::text, 'token_failing'::text])))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX env_incidents_env ON public.env_incidents USING btree (env_id, id)

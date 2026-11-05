@@ -16,7 +16,7 @@ import (
 // evidence is what an incident keeps of what the controller saw (§4.9):
 // the container's last exits, the end of its log, a failed rollout's diff
 // against the deployed deployment, why an instance could not be placed, what
-// a deployment past its deadline waited for.
+// a deployment past its deadline waited for, a binding's requests.
 type evidence struct {
 	Exits     []store.EnvExit  `json:"exits,omitempty"`
 	LogTail   []string         `json:"logTail,omitempty"`
@@ -25,6 +25,9 @@ type evidence struct {
 	// Pending is what a deployment past its deadline still waited for, and
 	// the details of those objects' instances.
 	Pending []string `json:"pending,omitempty"`
+	// Egress is what a binding's incident saw of its pods' requests (ADR
+	// 0028 §6).
+	Egress *egressEvidence `json:"egress,omitempty"`
 }
 
 func (e evidence) json() json.RawMessage {
