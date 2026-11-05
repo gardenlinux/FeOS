@@ -1,0 +1,56 @@
+[package]
+name = "feos-authn"
+version.workspace = true
+edition.workspace = true
+description = "A pod's credentials on its node (ADR 0014): its HTTP bindings (ADR 0028)"
+
+[lints]
+workspace = true
+
+[lib]
+name = "feos_authn"
+path = "src/lib.rs"
+
+[[bin]]
+name = "feos-authn"
+path = "src/main.rs"
+
+[dependencies]
+feos-proto = { workspace = true }
+prost = { workspace = true }
+tokio = { workspace = true }
+hyper = { workspace = true, features = ["client", "server", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { workspace = true }
+# Leaf certificates from the pod's interception CA, which it parses.
+rcgen = { workspace = true, features = ["x509-parser"] }
+log = { workspace = true }
+env_logger = { workspace = true }
+clap = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+# HTTP's types and bodies, the versions hyper has.
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+tower-service = "0.3"
+form_urlencoded = "1"
+base64 = "0.22"
+# rcgen's dates.
+time = "0.3"
+# The WebPKI's roots, built in: the jail has no system store.
+webpki-roots = "1"
+# HPKE's HKDF and ChaCha20-Poly1305, and randomness: rustls's provider.
+ring = "0.17"
+# HPKE's X25519 with a key that opens more than one box; ring's X25519
+# keys are single-use.
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+x509-parser = { workspace = true, features = ["verify"] }

@@ -1,0 +1,617 @@
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
+//! What the end-to-end tests play: a fake `feosd` on the control socket
+//! (hello, the sealed bindings, the pod's connections as descriptors), a
+//! test PKI, an HTTPS upstream that tells what it received, and an OAuth
+//! token endpoint. Shared by the in-process tests (`src/tests.rs`) and
+//! the test of the jailed binary (`tests/e2e.rs`), which includes this
+//! file.
+
+#![allow(dead_code)]
+
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::io::{IoSlice, IoSliceMut};
+use std::net::SocketAddr;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use base64::Engine;
+use bytes::Bytes;
+use feos_proto::fleet_service::PodBindings;
+use http::{HeaderMap, Request, Response, StatusCode};
+use http_body_util::{BodyExt, Full};
+use hyper::body::Incoming;
+use hyper::service::service_fn;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use nix::sys::socket::{
+    bind, connect, listen, recvmsg, sendmsg, setsockopt, socket, sockopt, AddressFamily, Backlog,
+    ControlMessage, ControlMessageOwned, MsgFlags, SockFlag, SockType, UnixAddr,
+};
+use prost::Message;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
+use serde_json::{json, Value};
+use tokio::net::{TcpListener, TcpStream};
+use x25519_dalek::StaticSecret;
+
+pub const POD_ID: &str = "k2v8d0h3q9x";
+
+/// A CA for the upstreams' server certificates.
+pub struct Pki {
+    issuer: rcgen::Issuer<'static, rcgen::KeyPair>,
+    pub ca_pem: String,
+}
+
+impl Pki {
+    pub fn new() -> Pki {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut p = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+        p.distinguished_name
+            .push(rcgen::DnType::CommonName, "test upstream CA");
+        p.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        p.key_usages = vec![
+            rcgen::KeyUsagePurpose::KeyCertSign,
+            rcgen::KeyUsagePurpose::CrlSign,
+        ];
+        let cert = p.self_signed(&key).unwrap();
+        let ca_pem = cert.pem();
+        Pki {
+            issuer: rcgen::Issuer::new(p, key),
+            ca_pem,
+        }
+    }
+
+    /// A server certificate for `names` (DNS names or IP addresses).
+    pub fn leaf(&self, names: &[&str]) -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let mut p =
+            rcgen::CertificateParams::new(names.iter().map(|n| n.to_string()).collect::<Vec<_>>())
+                .unwrap();
+        p.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
+        let cert = p.signed_by(&key, &self.issuer).unwrap();
+        (
+            vec![cert.der().clone()],
+            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())),
+        )
+    }
+
+    pub fn server_config(&self, names: &[&str]) -> Arc<rustls::ServerConfig> {
+        let (chain, key) = self.leaf(names);
+        let mut c = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(chain, key)
+        .unwrap();
+        c.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Arc::new(c)
+    }
+}
+
+/// An interception CA, ECDSA P-256, name-constrained to `names`: cert and
+/// key PEM.
+pub fn intercept_ca(names: &[&str]) -> (String, String) {
+    let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let mut p = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    p.distinguished_name
+        .push(rcgen::DnType::CommonName, "FeOS interception CA");
+    p.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
+    p.key_usages = vec![
+        rcgen::KeyUsagePurpose::KeyCertSign,
+        rcgen::KeyUsagePurpose::CrlSign,
+    ];
+    p.name_constraints = Some(rcgen::NameConstraints {
+        permitted_subtrees: names
+            .iter()
+            .map(|n| rcgen::GeneralSubtree::DnsName(n.to_string()))
+            .collect(),
+        excluded_subtrees: vec![],
+    });
+    let cert = p.self_signed(&key).unwrap();
+    (cert.pem(), key.serialize_pem())
+}
+
+/// What an upstream received.
+#[derive(Clone, Debug)]
+pub struct Seen {
+    pub method: String,
+    pub uri: String,
+    pub version: http::Version,
+    pub headers: HeaderMap,
+    pub body: Bytes,
+}
+
+/// An HTTPS upstream on 127.0.0.1 with h2 and http/1.1. Paths:
+/// `/redirect` answers 302 to `https://<its own authority>/next`; `/ws` an
+/// upgrade that echoes; `/big` 1 MiB; `/protected` 401 unless the bearer
+/// token is `tok-2` or later; everything else 200 with "ok".
+pub struct Upstream {
+    pub addr: SocketAddr,
+    pub seen: Arc<Mutex<Vec<Seen>>>,
+}
+
+pub const BIG: usize = 1 << 20;
+
+impl Upstream {
+    pub async fn start(config: Arc<rustls::ServerConfig>) -> Upstream {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let acceptor = tokio_rustls::TlsAcceptor::from(config);
+        let s = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((tcp, _)) = l.accept().await else {
+                    return;
+                };
+                let (acceptor, s) = (acceptor.clone(), s.clone());
+                tokio::spawn(async move {
+                    let Ok(tls) = acceptor.accept(tcp).await else {
+                        return;
+                    };
+                    let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
+                    let svc = service_fn(move |req| upstream_handler(req, s.clone()));
+                    let io = TokioIo::new(tls);
+                    if h2 {
+                        let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                            .serve_connection(io, svc)
+                            .await;
+                    } else {
+                        let _ = hyper::server::conn::http1::Builder::new()
+                            .serve_connection(io, svc)
+                            .with_upgrades()
+                            .await;
+                    }
+                });
+            }
+        });
+        Upstream { addr, seen }
+    }
+
+    pub fn last(&self) -> Seen {
+        self.seen
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .expect("a request")
+    }
+
+    pub fn count(&self) -> usize {
+        self.seen.lock().unwrap().len()
+    }
+}
+
+/// The authority a request named: HTTP/2's, or HTTP/1.1's Host.
+pub fn authority(s: &Seen) -> String {
+    match s.headers.get(http::header::HOST) {
+        Some(h) => h.to_str().unwrap().to_string(),
+        None => s
+            .uri
+            .parse::<http::Uri>()
+            .unwrap()
+            .authority()
+            .unwrap()
+            .to_string(),
+    }
+}
+
+async fn upstream_handler(
+    req: Request<Incoming>,
+    seen: Arc<Mutex<Vec<Seen>>>,
+) -> Result<Response<Full<Bytes>>, Infallible> {
+    let (mut parts, body) = req.into_parts();
+    let path = parts.uri.path().to_string();
+    let on_upgrade = parts.extensions.remove::<hyper::upgrade::OnUpgrade>();
+    let body = body
+        .collect()
+        .await
+        .map(|b| b.to_bytes())
+        .unwrap_or_default();
+    let s = Seen {
+        method: parts.method.to_string(),
+        uri: parts.uri.to_string(),
+        version: parts.version,
+        headers: parts.headers.clone(),
+        body: body.clone(),
+    };
+    let location_host = authority(&s);
+    seen.lock().unwrap().push(s);
+    let mut resp = Response::new(Full::new(Bytes::from_static(b"ok")));
+    match path.as_str() {
+        "/redirect" => {
+            *resp.status_mut() = StatusCode::FOUND;
+            resp.headers_mut().insert(
+                http::header::LOCATION,
+                format!("https://{location_host}/next?page=2")
+                    .parse()
+                    .unwrap(),
+            );
+            resp.headers_mut().insert(
+                http::header::CONTENT_LOCATION,
+                "https://elsewhere.example/x".parse().unwrap(),
+            );
+        }
+        "/ws" => {
+            if let Some(up) = on_upgrade {
+                tokio::spawn(async move {
+                    if let Ok(io) = up.await {
+                        let mut io = TokioIo::new(io);
+                        let (mut r, mut w) = tokio::io::split(&mut io);
+                        let _ = tokio::io::copy(&mut r, &mut w).await;
+                    }
+                });
+            }
+            *resp.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+            *resp.body_mut() = Full::new(Bytes::new());
+            let h = resp.headers_mut();
+            h.insert(http::header::CONNECTION, "Upgrade".parse().unwrap());
+            h.insert(http::header::UPGRADE, "echo".parse().unwrap());
+        }
+        "/big" => *resp.body_mut() = Full::new(Bytes::from(vec![b'x'; BIG])),
+        "/protected" => {
+            let ok = parts
+                .headers
+                .get(http::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer tok-"))
+                .and_then(|n| n.parse::<u64>().ok())
+                .is_some_and(|n| n >= 2);
+            if !ok {
+                *resp.status_mut() = StatusCode::UNAUTHORIZED;
+            }
+        }
+        _ => {
+            resp.headers_mut()
+                .insert("alt-svc", "h3=\":443\"".parse().unwrap());
+        }
+    }
+    Ok(resp)
+}
+
+/// A token request: its form and its Authorization.
+pub type TokenRequest = (String, Option<String>);
+
+/// An OAuth 2.0 token endpoint over HTTPS at `/token`: tokens `tok-1`,
+/// `tok-2`, … with the given lifetime; it records each request's form and
+/// Authorization.
+pub struct TokenServer {
+    pub addr: SocketAddr,
+    pub fetches: Arc<AtomicU64>,
+    pub requests: Arc<Mutex<Vec<TokenRequest>>>,
+}
+
+impl TokenServer {
+    pub async fn start(config: Arc<rustls::ServerConfig>, expires_in: u64) -> TokenServer {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let fetches = Arc::new(AtomicU64::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let acceptor = tokio_rustls::TlsAcceptor::from(config);
+        let (f, r) = (fetches.clone(), requests.clone());
+        tokio::spawn(async move {
+            loop {
+                let Ok((tcp, _)) = l.accept().await else {
+                    return;
+                };
+                let (acceptor, f, r) = (acceptor.clone(), f.clone(), r.clone());
+                tokio::spawn(async move {
+                    let Ok(tls) = acceptor.accept(tcp).await else {
+                        return;
+                    };
+                    let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
+                    let svc = service_fn(move |req: Request<Incoming>| {
+                        let (f, r) = (f.clone(), r.clone());
+                        async move {
+                            let auth = req
+                                .headers()
+                                .get(http::header::AUTHORIZATION)
+                                .map(|v| v.to_str().unwrap().to_string());
+                            let body = req.into_body().collect().await.unwrap().to_bytes();
+                            r.lock()
+                                .unwrap()
+                                .push((String::from_utf8_lossy(&body).to_string(), auth));
+                            let n = f.fetch_add(1, Ordering::SeqCst) + 1;
+                            let token = json!({
+                                "access_token": format!("tok-{n}"),
+                                "token_type": "bearer",
+                                "expires_in": expires_in,
+                            });
+                            Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(
+                                token.to_string(),
+                            ))))
+                        }
+                    });
+                    let io = TokioIo::new(tls);
+                    if h2 {
+                        let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                            .serve_connection(io, svc)
+                            .await;
+                    } else {
+                        let _ = hyper::server::conn::http1::Builder::new()
+                            .serve_connection(io, svc)
+                            .await;
+                    }
+                });
+            }
+        });
+        TokenServer {
+            addr,
+            fetches,
+            requests,
+        }
+    }
+}
+
+/// feosd's side of the control socket.
+pub fn seqpacket_listener(path: &Path) -> OwnedFd {
+    let fd = socket(
+        AddressFamily::Unix,
+        SockType::SeqPacket,
+        SockFlag::SOCK_CLOEXEC,
+        None,
+    )
+    .unwrap();
+    bind(fd.as_raw_fd(), &UnixAddr::new(path).unwrap()).unwrap();
+    listen(&fd, Backlog::new(8).unwrap()).unwrap();
+    fd
+}
+
+pub struct Feosd {
+    pub fd: OwnedFd,
+}
+
+impl Feosd {
+    /// Connects to the control socket at `path`.
+    pub fn connect(path: &Path) -> Feosd {
+        let fd = socket(
+            AddressFamily::Unix,
+            SockType::SeqPacket,
+            SockFlag::SOCK_CLOEXEC,
+            None,
+        )
+        .unwrap();
+        setsockopt(
+            &fd,
+            sockopt::ReceiveTimeout,
+            &nix::sys::time::TimeVal::new(15, 0),
+        )
+        .unwrap();
+        let addr = UnixAddr::new(path).unwrap();
+        for _ in 0..200 {
+            if connect(fd.as_raw_fd(), &addr).is_ok() {
+                return Feosd { fd };
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("connect to {}", path.display());
+    }
+
+    pub fn send(&self, msg: &Value, fds: &[RawFd]) {
+        let raw = msg.to_string();
+        let iov = [IoSlice::new(raw.as_bytes())];
+        let cmsg = [ControlMessage::ScmRights(fds)];
+        let cmsgs: &[ControlMessage] = if fds.is_empty() { &[] } else { &cmsg };
+        sendmsg::<()>(self.fd.as_raw_fd(), &iov, cmsgs, MsgFlags::empty(), None).unwrap();
+    }
+
+    /// The next message, within 15 seconds.
+    pub fn recv(&self) -> Value {
+        let mut buf = vec![0u8; 1 << 20];
+        let mut iov = [IoSliceMut::new(&mut buf)];
+        let mut cmsg = nix::cmsg_space!([RawFd; 4]);
+        let msg = recvmsg::<()>(
+            self.fd.as_raw_fd(),
+            &mut iov,
+            Some(&mut cmsg),
+            MsgFlags::empty(),
+        )
+        .expect("a message from feos-authn");
+        for c in msg.cmsgs().unwrap() {
+            if let ControlMessageOwned::ScmRights(_) = c {
+                panic!("feos-authn sent descriptors");
+            }
+        }
+        let n = msg.bytes;
+        assert!(n > 0, "feos-authn closed the control connection");
+        serde_json::from_slice(&buf[..n]).unwrap()
+    }
+
+    /// Whether feos-authn closed the connection: the next read is its end.
+    pub fn closed(&self) -> bool {
+        let mut buf = [0u8; 64];
+        let mut iov = [IoSliceMut::new(&mut buf)];
+        matches!(
+            recvmsg::<()>(self.fd.as_raw_fd(), &mut iov, None, MsgFlags::empty()),
+            Ok(m) if m.bytes == 0
+        )
+    }
+
+    pub fn hello(&self, deny: &[&str], source_v4: Option<&str>) {
+        self.send(
+            &json!({"v": 1, "op": "hello", "podId": POD_ID, "denyPrefixes": deny,
+                "sourceV4": source_v4, "sourceV6": null}),
+            &[],
+        );
+    }
+
+    /// Answers a credentials request with `set` sealed to its key, as the
+    /// control plane does; returns the request.
+    pub fn answer(&self, set: &PodBindings, version: &str) -> Value {
+        self.answer_for(set, version, POD_ID)
+    }
+
+    /// As [`Feosd::answer`], sealed for `pod`.
+    pub fn answer_for(&self, set: &PodBindings, version: &str, pod: &str) -> Value {
+        let req = self.recv();
+        assert_eq!(req["op"], "credentials", "{req}");
+        assert_eq!(req["v"], 1);
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let pk: [u8; 32] = b64
+            .decode(req["hpkePublicKey"].as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert!(!b64.decode(req["csr"].as_str().unwrap()).unwrap().is_empty());
+        let mut eph = [0u8; 32];
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut eph).unwrap();
+        let (enc, ct) = feos_authn::hpke::seal(
+            pk,
+            &StaticSecret::from(eph),
+            feos_authn::hpke::BINDINGS_INFO,
+            &feos_authn::hpke::bindings_aad(pod, version),
+            &set.encode_to_vec(),
+        )
+        .unwrap();
+        self.send(
+            &json!({"v": 1, "op": "credentials", "certificate": null,
+                "bindings": {"enc": b64.encode(enc), "ciphertext": b64.encode(ct),
+                    "version": version}}),
+            &[],
+        );
+        req
+    }
+
+    /// Expects the `ready` of `version`.
+    pub fn ready(&self, version: &str) {
+        let m = self.recv();
+        assert_eq!(m, json!({"v": 1, "op": "ready", "version": version}));
+    }
+}
+
+/// The node's address for the tests: connections of "the pod" to it are
+/// accepted here and passed to feos-authn, as feosd does.
+pub struct Node {
+    pub listener: TcpListener,
+}
+
+impl Node {
+    pub async fn new() -> Node {
+        Node {
+            listener: TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        }
+    }
+
+    /// A connection of the pod's to `port`, passed to feos-authn.
+    pub async fn connect(&self, feosd: &Feosd, port: u16) -> TcpStream {
+        let client = TcpStream::connect(self.listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (server, peer) = self.listener.accept().await.unwrap();
+        let fd: OwnedFd = server.into_std().unwrap().into();
+        feosd.send(
+            &json!({"v": 1, "op": "conn", "port": port, "peer": peer.to_string()}),
+            &[fd.as_raw_fd()],
+        );
+        drop(fd);
+        client
+    }
+}
+
+/// An HTTP/1.1 client on a pod's connection.
+pub async fn h1(stream: TcpStream) -> hyper::client::conn::http1::SendRequest<Full<Bytes>> {
+    let (send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        let _ = conn.with_upgrades().await;
+    });
+    send
+}
+
+/// Sends on an HTTP/1.1 client once its connection is ready again.
+pub async fn send1(
+    s: &mut hyper::client::conn::http1::SendRequest<Full<Bytes>>,
+    req: Request<Full<Bytes>>,
+) -> Response<Incoming> {
+    s.ready().await.unwrap();
+    s.send_request(req).await.unwrap()
+}
+
+/// A request's answer: status, headers and the whole body.
+pub async fn read(resp: Response<Incoming>) -> (StatusCode, HeaderMap, Bytes) {
+    let (parts, body) = resp.into_parts();
+    let body = body.collect().await.unwrap().to_bytes();
+    (parts.status, parts.headers, body)
+}
+
+pub fn get(host: &str, path: &str) -> Request<Full<Bytes>> {
+    Request::get(path)
+        .header(http::header::HOST, host)
+        .body(Full::new(Bytes::new()))
+        .unwrap()
+}
+
+/// A TLS client config that trusts the PEM CA, with ALPN.
+pub fn tls_client(ca_pem: &str, alpn: &[&[u8]]) -> Arc<rustls::ClientConfig> {
+    let mut roots = rustls::RootCertStore::empty();
+    for c in rustls::pki_types::pem::PemObject::pem_slice_iter(ca_pem.as_bytes()) {
+        roots.add(c.unwrap()).unwrap();
+    }
+    let mut c = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    c.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
+    Arc::new(c)
+}
+
+pub async fn tls_connect(
+    stream: TcpStream,
+    config: Arc<rustls::ClientConfig>,
+    sni: &str,
+) -> std::io::Result<tokio_rustls::client::TlsStream<TcpStream>> {
+    tokio_rustls::TlsConnector::from(config)
+        .connect(ServerName::try_from(sni.to_string()).unwrap(), stream)
+        .await
+}
+
+/// The audit file's records.
+pub fn records(path: &Path) -> Vec<Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+/// Waits until a record matches.
+pub async fn await_record(path: &Path, f: impl Fn(&Value) -> bool) -> Value {
+    for _ in 0..200 {
+        if let Some(r) = records(path).into_iter().find(&f) {
+            return r;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("no such record in {:#?}", records(path));
+}
+
+/// A resolver of fixed answers, (host, port) to addresses.
+#[derive(Default)]
+pub struct MapResolver(pub HashMap<(String, u16), Vec<SocketAddr>>);
+
+impl feos_authn::dest::Resolve for MapResolver {
+    fn resolve(&self, host: &str, port: u16) -> feos_authn::dest::ResolveFuture {
+        let r = self
+            .0
+            .get(&(host.to_string(), port))
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("no test address for {host}:{port}")));
+        Box::pin(async move { r })
+    }
+}
+
+/// Takes the descriptor a test made, for a process that owns it.
+pub fn owned(fd: RawFd) -> OwnedFd {
+    // SAFETY: the caller hands over a descriptor nothing else owns.
+    unsafe { OwnedFd::from_raw_fd(fd) }
+}

@@ -28,6 +28,9 @@ Parts that are decided but not built are marked as such.
 - **`diskd`**: the pods' disks, and the node's object store
   ([disk.md](disk.md)).
 - **The jailer and Firecracker**, one process per running pod.
+- **`feos-authn`**, one per running pod with bindings: the pod's
+  credentials, jailed, with its HTTP bindings at `169.254.169.1`
+  ([authn.md](authn.md)).
 
 ## Machine setup: feos-host-init
 

@@ -36,6 +36,7 @@ packages: firecracker guest package-binaries $(NFPM) ## Build the node's .deb pa
 # Per package, so that no binary carries another's features.
 package-binaries:
 	cargo build --release --features git-version --target=$(MUSL_TARGET) -p feos --bin feosd
+	cargo build --release --target=$(MUSL_TARGET) -p feos-authn
 	cargo build --release --target=$(MUSL_TARGET) -p feosctl
 	cargo build --release --target=$(MUSL_TARGET) -p diskd
 	cargo build --release --target=$(MUSL_TARGET) -p diskctl

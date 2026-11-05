@@ -1,0 +1,9 @@
+{
+  "podId": "k2v8d0h3q9x",
+  "hpkePrivateKey": "6c1f5d7ae0b24b8f9a3e57c2d40b1e9f8a6d3c5b7e2f1a0d9c8b7a6f5e4d3c2b",
+  "hpkePublicKey": "b30af687d94a0109f0352757a2f086c93e97c0c320d12e219603a934064e5751",
+  "version": "v3",
+  "enc": "e0oYkNCgtrQ6gfPdRQ7vcdV2Y77ewPsz28Wqvb6O0hQ=",
+  "ciphertext": "7pbspcJP4373U8ILVAJvICzxrBWhZvHwcvDyi/Chp4w1Sck27TEL5tam6clpQVphaL/2gzOq5b0ZpCJgmisDWvQuU22cEBRq0v/k4V3l5IWLppD7E1vvH2NE+6l/8wZAwkMaQGHlg3JmVwKW2qHaaGd01Cg70J/tC1t/GaBMSe04NNNnTJT5YlzH6aXqvZ7fjbeMyNSNptTd2GwLnn+aJ2kLa63Ddksbaknn/XE2zkWkySQpiRypPhr3XE3cggTwoiRQgcgAG6XqyiIgeAPQ2nQoRkTxUV+s1M8BDVF6Ttiihg/IjRXuJz80TBx6cMh5wgNggacrm/rDtVpWqTmk68LzkANJjRkhdgO9VmZqv0AjCIyPzxcvqg34DmTy0nG5qOAjQhAgQEtGpj+MJD5YYwD5aJsbt7M9rGA9/BwnmNxgOi6GyF1fOllPbugFVrfPs32MvFDff8BG0qCPRV2Svw+pmcstqWwmXI/16IR0t8dDg+43lbQLQUHAJ6ZE7kLa7+Pl5ATG7Fgv3G9UeK32sdj03/WR9InyJTMylzeJyO/4ncXib+VGy5W9lpNH80tTDdxC0lXVgdHdKde3lHtMmgmVTsFOaF9DboZ9MehnOoJD3m24xvysxuoKpQGZi3jMuh0RKSBrC+VmjwxjTTYM8wnwmri9+3rbF9vLfG4=",
+  "sealedBy": "go/internal/pki.Seal (TestBindingsVector, FEOS_WRITE_BINDINGS_VECTOR=1)"
+}
