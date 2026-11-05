@@ -188,7 +188,8 @@ func (e *Engine) pushHTTP(ctx context.Context, id podid.ID) error {
 }
 
 // pushRow sends the row's pod its part, through pc when given (an op's
-// client), unless its node took it already.
+// client), unless its node took it already; row.HTTPPushed is what was
+// read before.
 func (e *Engine) pushRow(ctx context.Context, row store.Sandbox, pc podv1.PodServiceClient) error {
 	part, err := e.httpPart(ctx, row)
 	if err != nil {
@@ -224,7 +225,10 @@ func (e *Engine) pushRow(ctx context.Context, row store.Sandbox, pc podv1.PodSer
 	default:
 		return fmt.Errorf("SetPodHttpBindings on node %s: %w", row.Node, err)
 	}
-	if _, err := e.st.SetHTTPPushed(ctx, row.ID, row.Incarnation, part.GetVersion()); err != nil {
+	// Against the http_pushed read before the push: a concurrent push (the
+	// loop's, another instance's) leaves it unknown, and the loop pushes
+	// again.
+	if _, err := e.st.SetHTTPPushed(ctx, row.ID, row.Incarnation, row.HTTPPushed, part.GetVersion()); err != nil {
 		return fmt.Errorf("record the pushed HTTP bindings: %w", err)
 	}
 	e.recordHTTPPush(row, part.GetVersion(), "sent")

@@ -1772,7 +1772,10 @@ bindings. A create carries it in its spec; the engine sends
   whose part is not the one their node took (256 a pass).
 
 `sandboxes.http_pushed` is the version the node took last for the row's
-incarnation, a push's answered OK. A create records none: a `feosd`
+incarnation, a push's answered OK, recorded against the value the
+pusher read before it pushed: when another push (the loop's, another
+instance's) changed it meanwhile, the node may hold that one's part, and
+it becomes `unknown`, which the loop pushes again. A create records none: a `feosd`
 from before ADR 0028 drops the spec's part unread, so the loop sends the
 part once after every create, which changes nothing on a node that took
 it (`feosd` answers the same part again without a change); a push records an
