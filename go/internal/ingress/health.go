@@ -222,6 +222,10 @@ func (p *Program) Metrics(w io.Writer) {
 			float64(leaf.NotAfter.Unix()))
 	}
 	gauge("ferun_ingress_mesh_configured", "1 when the mesh device is configured.", boolValue(as.MeshConfigured))
+	gauge("ferun_ingress_mesh_port", "The mesh device's UDP port.", float64(as.MeshPort))
+	proxy.WriteMetric(bw, "ferun_ingress_mesh_repairs_total", "counter",
+		"Repairs of the paths to nodes with endpoints that had no handshake for 180 s: a new port and their peers set anew.",
+		proxy.Sample{Value: float64(as.MeshRepairs)})
 	gauge("ferun_ingress_mesh_peers", "Peers of the mesh device that are nodes of the table.", float64(len(as.MeshPeers)))
 	var ages []proxy.Sample
 	for _, mp := range as.MeshPeers {

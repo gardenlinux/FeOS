@@ -257,6 +257,9 @@ type progHarness struct {
 	logs   *syncBuf
 	mu     sync.Mutex
 	routes map[string]string
+	// mesh, when set, is the program's mesh device in place of a
+	// fakeMesh.
+	mesh   agent.MeshDevice
 	prog   *Program
 	cancel context.CancelFunc
 	done   chan error
@@ -341,7 +344,11 @@ func (h *progHarness) dial(ctx context.Context, _, addr string) (net.Conn, error
 // start makes the program and runs it until the test ends or stop.
 func (h *progHarness) start() {
 	h.t.Helper()
-	prog, err := New(h.cfg, Deps{Mesh: &fakeMesh{}, Dial: h.dial, Log: NewLogger(h.logs, LogFormatText, -4)})
+	var mesh agent.MeshDevice = &fakeMesh{}
+	if h.mesh != nil {
+		mesh = h.mesh
+	}
+	prog, err := New(h.cfg, Deps{Mesh: mesh, Dial: h.dial, Log: NewLogger(h.logs, LogFormatText, -4)})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -372,6 +379,23 @@ func (h *progHarness) waitReady() {
 		time.Sleep(20 * time.Millisecond)
 	}
 	h.t.Fatalf("not ready: %s", last)
+}
+
+// waitNotReady waits for /readyz to answer 503 with a reason that holds
+// want.
+func (h *progHarness) waitNotReady(want string) {
+	h.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		code, body := h.health("/readyz")
+		if code == http.StatusServiceUnavailable && strings.Contains(body, want) {
+			return
+		}
+		last = fmt.Sprintf("%d %s", code, body)
+		time.Sleep(20 * time.Millisecond)
+	}
+	h.t.Fatalf("not unready with %q: %s", want, last)
 }
 
 // health GETs a path of the health listener.

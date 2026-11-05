@@ -131,6 +131,7 @@ func New(cfg Config, deps Deps) (*Program, error) {
 		MeshPort:         cfg.MeshPort,
 		MeshEndpoint:     cfg.MeshEndpoint,
 		MeshMTU:          cfg.MeshMTU,
+		MeshRepairEvery:  cfg.meshRepairEvery,
 		Version:          cfg.Version,
 		SinkEndpoint:     cfg.SinkEndpoint,
 	}, agent.Deps{

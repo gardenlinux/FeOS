@@ -127,6 +127,9 @@ type Config struct {
 	// Version is the build's version, sent in Hello and shown in the
 	// status. Not a flag.
 	Version string
+	// meshRepairEvery is the agent's Config.MeshRepairEvery: 0, its
+	// default, but in tests. Not a flag.
+	meshRepairEvery time.Duration
 }
 
 // Default returns the configuration of serve with every default of §7.1
