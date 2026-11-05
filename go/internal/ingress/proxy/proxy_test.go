@@ -191,6 +191,8 @@ type result struct {
 	header http.Header
 	body   string
 	err    error
+	// close: the answer closes the connection.
+	close bool
 }
 
 func send(ctx context.Context, srv *httptest.Server, method, host, path string, body io.Reader) result {
@@ -205,7 +207,7 @@ func send(ctx context.Context, srv *httptest.Server, method, host, path string, 
 	}
 	defer res.Body.Close()
 	b, err := io.ReadAll(res.Body)
-	return result{status: res.StatusCode, header: res.Header, body: string(b), err: err}
+	return result{status: res.StatusCode, header: res.Header, body: string(b), err: err, close: res.Close}
 }
 
 func get(t *testing.T, srv *httptest.Server, host, path string) result {
@@ -522,6 +524,42 @@ func TestGatingHandshake(t *testing.T) {
 	dp := p.DataPath()
 	if dp.Endpoints != 1 || len(dp.EndpointNodes) != 1 || len(dp.FreshAdmittedNodes) != 1 {
 		t.Errorf("data path %+v", dp)
+	}
+}
+
+// An answer given because no instance could be reached, a failed dial
+// or instances that only cool down after one, closes the client's
+// connection, so that its next request may reach another instance of the
+// ingress through the balancer: one whose path to the node works. Other
+// answers keep it.
+func TestUnreachableClosesTheConnection(t *testing.T) {
+	fn := newFakeNet()
+	fn.failDial("[fd00::2]:8080", errors.New("i/o timeout"))
+	upstream(t, fn, "fresh", "fd00::1")
+	p, srv := newTestProxy(t, Config{PendingHold: 50 * time.Millisecond}, Deps{}, fn, "n1")
+	p.cool = 300 * time.Millisecond
+	p.SetState(testState(svc("web", ep("w2", "fd00::2", "n2"))))
+	r := get(t, srv, testHost, "/")
+	wantPlain(t, r, 502, textNoAnswer)
+	if !r.close {
+		t.Error("the failed dial's answer keeps the connection")
+	}
+	r = get(t, srv, testHost, "/")
+	wantPlain(t, r, 503, "no ready instance of web")
+	if !r.close {
+		t.Error("the answer while the instance cools down keeps the connection")
+	}
+	p.SetState(testState(svc("web", ep("w1", "fd00::1", "n1"))))
+	if r := get(t, srv, testHost, "/"); r.status != http.StatusOK || r.close {
+		t.Errorf("a served request: %d, close %v", r.status, r.close)
+	}
+	pending := svc("web")
+	pending.Pending = 1
+	p.SetState(testState(pending))
+	r = get(t, srv, testHost, "/")
+	wantPlain(t, r, 503, "no ready instance of web")
+	if r.close {
+		t.Error("a pending instance's answer closes the connection")
 	}
 }
 

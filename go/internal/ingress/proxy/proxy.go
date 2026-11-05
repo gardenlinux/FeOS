@@ -1048,6 +1048,13 @@ func (q *request) failed(v *view, tg target, ep *endpoint, port int, exclude map
 			fmt.Sprintf("the service refused the connection; it must listen on [::]:%d", port), 0}.write(q.w)
 		return false
 	}
+	if !sent {
+		// A dial that failed closes the client's connection: its next
+		// request comes on a new one, which the balancer may send to
+		// another instance of the ingress, one that may reach the node.
+		reply{http.StatusBadGateway, textNoAnswer, 0}.writeClosing(q.w)
+		return false
+	}
 	reply{http.StatusBadGateway, textNoAnswer, 0}.write(q.w)
 	return false
 }
@@ -1083,6 +1090,13 @@ func (r reply) write(w http.ResponseWriter) {
 		w.Header().Set("Retry-After", strconv.Itoa(r.retryAfter))
 	}
 	http.Error(w, r.text, r.status)
+}
+
+// writeClosing writes r and ends the client's connection after it:
+// HTTP/1.1's Connection: close, a GOAWAY on HTTP/2.
+func (r reply) writeClosing(w http.ResponseWriter) {
+	w.Header().Set("Connection", "close")
+	r.write(w)
 }
 
 // recorder notes a response's status and size for the metrics and the

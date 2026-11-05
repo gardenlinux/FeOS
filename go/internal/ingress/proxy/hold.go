@@ -97,7 +97,14 @@ func (q *request) hold(v *view, tg target, info pickInfo) bool {
 		c = pendingHold
 	}
 	if c == noHold {
-		reply{http.StatusServiceUnavailable, "no ready instance of " + svc.name, 5}.write(q.w)
+		r := reply{http.StatusServiceUnavailable, "no ready instance of " + svc.name, 5}
+		if !info.coolUntil.IsZero() {
+			// Instances that only cool down after a failed dial: as
+			// that dial's answer, the client's connection closes.
+			r.writeClosing(q.w)
+		} else {
+			r.write(q.w)
+		}
 		return false
 	}
 	q.wait.raise(c, p.cfg)
