@@ -188,6 +188,12 @@ an hour before its end; a new set starts with none. ALPN offers `h2` and
 
 ### A request
 
+A request whose path does not begin with `/` (an asterisk, an
+authority-form request, an HTTP/2 `:path` without its `/`) is 400
+`bad_request`. The upstream's URL is the binding's origin and the
+request's path and query, and a binding's connections dial its
+upstream's host and port alone, whatever a URL names. Then:
+
 1. The binding's path prefixes, when it has any: a prefix holds whole
    segments (`/api` holds `/api` and `/api/x`, not `/apix`); a path with
    dot segments, `\`, or encoded `/`, `\` or `.` is refused. Outside:
@@ -255,6 +261,7 @@ The proxy's own answers carry `FeOS-Binding-Error: <code>` and
 
 | Status | Code | |
 |---|---|---|
+| 400 | `bad_request` | the request's path does not begin with `/` |
 | 403 | `denied_destination` | the upstream (or token endpoint, as 503) resolves to a denied address |
 | 403 | `denied_path` | the path is outside the binding's prefixes |
 | 404 | `unknown_binding` | no binding of the name, or none any more |

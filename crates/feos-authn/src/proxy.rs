@@ -26,7 +26,7 @@ use http::header::{
     HeaderName, HeaderValue, AUTHORIZATION, CACHE_CONTROL, CONNECTION, CONTENT_LOCATION,
     CONTENT_TYPE, HOST, LOCATION, RETRY_AFTER, UPGRADE,
 };
-use http::uri::Authority;
+use http::uri::{Authority, PathAndQuery, Scheme};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 use http_body::Body;
 use hyper::body::Incoming;
@@ -303,6 +303,30 @@ pub fn check_path(path: &str, prefixes: &[String]) -> Result<(), String> {
     }
 }
 
+/// The upstream's URI for a request: the binding's origin, fixed, and
+/// the request's path and query, which must begin with "/". Anything else
+/// is refused: an asterisk, none (an authority-form request), or a path
+/// without its "/", which HTTP/2 lets through and which after the origin
+/// would name another host ("@other.example/", ".other.example/", ":1/").
+pub fn upstream_uri(up: &Upstream, pq: Option<&PathAndQuery>) -> Result<Uri, Refusal> {
+    let refused = || {
+        Refusal::new(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "the request's path does not begin with /",
+        )
+    };
+    let pq = pq
+        .filter(|pq| pq.as_str().starts_with('/'))
+        .ok_or_else(refused)?;
+    Uri::builder()
+        .scheme(Scheme::HTTPS)
+        .authority(up.authority.as_str())
+        .path_and_query(pq.clone())
+        .build()
+        .map_err(|_| refused())
+}
+
 /// The lowercase tokens of a message's `Connection` headers.
 fn connection_tokens(h: &HeaderMap) -> Vec<String> {
     h.get_all(CONNECTION)
@@ -526,6 +550,7 @@ async fn forward(
             "a binding does not take CONNECT",
         ));
     }
+    let uri = upstream_uri(&live.upstream, req.uri().path_and_query())?;
     check_path(req.uri().path(), &live.prefixes)
         .map_err(|m| Refusal::new(StatusCode::FORBIDDEN, "denied_path", m))?;
     if let Some(limit) = &live.limit {
@@ -570,20 +595,6 @@ async fn forward(
     } else {
         None
     };
-    let pq = parts
-        .uri
-        .path_and_query()
-        .map(|p| p.as_str())
-        .unwrap_or("/");
-    let uri: Uri = format!("{}{pq}", live.upstream.origin())
-        .parse()
-        .map_err(|_| {
-            Refusal::new(
-                StatusCode::BAD_REQUEST,
-                "bad_request",
-                "the request's path makes no URL",
-            )
-        })?;
     let mut headers = upstream_headers(&parts.headers, &live.credential.header_names(), upgrade);
     x.trace.apply(&mut headers);
     if matches!(entry, Entry::Name) && live.forwarded_host {
@@ -806,6 +817,29 @@ mod tests {
         rewrite_locations(&mut h, &u, "pay");
         assert_eq!(h[LOCATION], "http://pay/next");
         assert_eq!(h[CONTENT_LOCATION], "/same");
+    }
+
+    #[test]
+    fn the_upstream_uri_keeps_the_bindings_origin() {
+        let u = up("https://api.erp.example");
+        let pq = |s: &'static str| PathAndQuery::from_static(s);
+        let uri = upstream_uri(&u, Some(&pq("/odata/x?$top=1"))).unwrap();
+        assert_eq!(uri, "https://api.erp.example/odata/x?$top=1");
+        let uri = upstream_uri(&up("https://[2001:db8::1]:8443"), Some(&pq("/"))).unwrap();
+        assert_eq!(uri, "https://[2001:db8::1]:8443/");
+        // What would name another host after the origin, an asterisk, a
+        // query alone, or no path at all: refused.
+        for bad in [
+            "@attacker.example/",
+            ".attacker.example/",
+            ":1/",
+            "*",
+            "?x=1",
+        ] {
+            let r = upstream_uri(&u, Some(&pq(bad))).unwrap_err();
+            assert_eq!((r.status, r.code), (StatusCode::BAD_REQUEST, "bad_request"));
+        }
+        assert!(upstream_uri(&u, None).is_err());
     }
 
     #[test]

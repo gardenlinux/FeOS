@@ -286,7 +286,12 @@ fn live(
                 None,
                 &[ALPN_H2, ALPN_HTTP11],
             )?;
-            let client = upstream::client(Connector::new(net.clone(), tls));
+            let client = upstream::client(Connector::new(
+                net.clone(),
+                tls,
+                token_url.host().unwrap_or_default(),
+                token_url.port_u16().unwrap_or(443),
+            ));
             Credential::OAuth2(Arc::new(OAuth::new(
                 b.name.clone(),
                 oauth::Config {
@@ -318,14 +323,24 @@ fn live(
         .filter(|r| r.per_second > 0)
         .map(|r| Mutex::new(Bucket::new(r.per_second, r.burst, Instant::now())));
     Ok(Live {
-        upstream,
         prefixes: b.path_prefixes.clone(),
         forwarded_host: b.forwarded_host,
         credential,
         limit,
         requests: Arc::new(Semaphore::new(MAX_REQUESTS_PER_BINDING)),
-        client: upstream::client(Connector::new(net.clone(), tls)),
-        client_h1: upstream::client(Connector::new(net.clone(), tls_h1)),
+        client: upstream::client(Connector::new(
+            net.clone(),
+            tls,
+            &upstream.host,
+            upstream.port,
+        )),
+        client_h1: upstream::client(Connector::new(
+            net.clone(),
+            tls_h1,
+            &upstream.host,
+            upstream.port,
+        )),
+        upstream,
     })
 }
 

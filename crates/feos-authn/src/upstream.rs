@@ -109,15 +109,26 @@ pub fn tls_config(
 }
 
 /// Dials an upstream for hyper's client: the destination rule, then TLS.
+/// It dials its own host and port, the binding's, whatever URI hyper
+/// asks for: a URI that names another is refused before anything is
+/// resolved or dialed.
 #[derive(Clone)]
 pub struct Connector {
     net: Arc<Net>,
     tls: Arc<ClientConfig>,
+    /// Lowercase, without an IPv6 literal's brackets.
+    host: Arc<str>,
+    port: u16,
 }
 
 impl Connector {
-    pub fn new(net: Arc<Net>, tls: Arc<ClientConfig>) -> Connector {
-        Connector { net, tls }
+    pub fn new(net: Arc<Net>, tls: Arc<ClientConfig>, host: &str, port: u16) -> Connector {
+        Connector {
+            net,
+            tls,
+            host: bare_host(host).to_ascii_lowercase().into(),
+            port,
+        }
     }
 }
 
@@ -140,10 +151,16 @@ impl tower_service::Service<Uri> for Connector {
     fn call(&mut self, uri: Uri) -> Self::Future {
         let net = self.net.clone();
         let tls = TlsConnector::from(self.tls.clone());
+        let (host, port) = (self.host.to_string(), self.port);
         Box::pin(async move {
             use ConnectErrorKind::*;
-            let host = bare_host(uri.host().unwrap_or_default()).to_string();
-            let port = uri.port_u16().unwrap_or(443);
+            let asked = bare_host(uri.host().unwrap_or_default());
+            if !asked.eq_ignore_ascii_case(&host) || uri.port_u16().unwrap_or(443) != port {
+                return Err(ConnectError::new(
+                    Denied,
+                    format!("a request for another host than {host}:{port}"),
+                ));
+            }
             let name = ServerName::try_from(host.clone())
                 .map_err(|_| ConnectError::new(Tls, format!("{host} is no server name")))?;
             let (tcp, addr) = net.dial(&host, port).await?;
@@ -245,4 +262,50 @@ pub fn connect_error(e: &hyper_util::client::legacy::Error) -> ConnectError {
         None => e.to_string(),
     };
     ConnectError::new(ConnectErrorKind::Unreachable, what)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dest::{NetConfig, Resolve, ResolveFuture};
+    use std::sync::Mutex;
+    use tower_service::Service;
+
+    /// Resolves every name to `addr`, and says which it was asked for.
+    struct Recording {
+        addr: SocketAddr,
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Resolve for Recording {
+        fn resolve(&self, host: &str, port: u16) -> ResolveFuture {
+            self.asked.lock().unwrap().push(format!("{host}:{port}"));
+            let a = self.addr;
+            Box::pin(async move { Ok(vec![a]) })
+        }
+    }
+
+    #[tokio::test]
+    async fn the_connector_dials_its_own_host_only() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let net = Arc::new(Net::new(Arc::new(Recording {
+            addr: l.local_addr().unwrap(),
+            asked: asked.clone(),
+        })));
+        net.set(Some(NetConfig::default()));
+        let tls = tls_config(roots("", false).unwrap(), None, &[ALPN_HTTP11]).unwrap();
+        let mut c = Connector::new(net, tls, "API.erp.example", 443);
+        for other in [
+            "https://attacker.example/",
+            "https://api.erp.example:8443/",
+            "https://api.erp.example.attacker.example/",
+        ] {
+            let e = c.call(other.parse().unwrap()).await.err().unwrap();
+            assert_eq!(e.kind, ConnectErrorKind::Denied, "{other}");
+        }
+        assert!(asked.lock().unwrap().is_empty(), "nothing resolved");
+        let accepted = tokio::time::timeout(Duration::from_millis(100), l.accept()).await;
+        assert!(accepted.is_err(), "nothing dialed");
+    }
 }

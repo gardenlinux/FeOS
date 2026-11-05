@@ -390,6 +390,99 @@ async fn intercept_mode_end_to_end() {
     assert!(!e.contains("certificate"), "{e}");
 }
 
+/// HTTP/2 lets a request's `:path` go without its "/": after the
+/// upstream's origin it would name another host ("@attacker.test/"
+/// makes `https://api.partner.test@attacker.test/`). It is refused, and
+/// nothing dials anywhere else.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_path_without_its_slash_never_reaches_another_host() {
+    let pki = Pki::new();
+    let up = Upstream::start(pki.server_config(&["api.partner.test"])).await;
+    let attacker = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dialed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut r = MapResolver::default();
+    r.0.insert(("api.partner.test".into(), 443), local(up.addr));
+    for other in [
+        ("attacker.test", 443),
+        ("api.partner.test.attacker.test", 443),
+        ("api.partner.test", 1),
+    ] {
+        r.0.insert(
+            (other.0.into(), other.1),
+            local(attacker.local_addr().unwrap()),
+        );
+    }
+    {
+        let dialed = dialed.clone();
+        tokio::spawn(async move {
+            while attacker.accept().await.is_ok() {
+                dialed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+    }
+    let h = start(r).await;
+    let (ca, ca_key) = intercept_ca(&["api.partner.test"]);
+    let b = HttpBinding {
+        name: "partner".into(),
+        upstream: "https://api.partner.test".into(),
+        ca_pem: pki.ca_pem.clone(),
+        mode: HttpBindingMode::Intercept as i32,
+        credential: Some(http_binding::Credential::Basic(BasicCredential {
+            user: "u".into(),
+            password: "p".into(),
+        })),
+        ..Default::default()
+    };
+    h.feosd.hello(&[], None);
+    h.feosd.answer(
+        &PodBindings {
+            http: vec![b],
+            intercept_cas: vec![InterceptCa {
+                cert_pem: ca.clone(),
+                key_pem: ca_key,
+            }],
+            ..Default::default()
+        },
+        "v1",
+    );
+    h.feosd.ready("v1");
+    let tls = tls_connect(
+        h.node.connect(&h.feosd, 443).await,
+        tls_client(&ca, &[b"h2"]),
+        "api.partner.test",
+    )
+    .await
+    .unwrap();
+    let (mut send, conn) = hyper::client::conn::http2::handshake(
+        hyper_util::rt::TokioExecutor::new(),
+        TokioIo::new(tls),
+    )
+    .await
+    .unwrap();
+    tokio::spawn(conn);
+    for path in ["@attacker.test/", ".attacker.test/", ":1/", "?x=1"] {
+        let mut parts = http::uri::Parts::default();
+        parts.scheme = Some(http::uri::Scheme::HTTPS);
+        parts.authority = Some(http::uri::Authority::from_static("api.partner.test"));
+        parts.path_and_query = Some(http::uri::PathAndQuery::from_static(path));
+        let mut req = Request::new(Full::new(Bytes::new()));
+        *req.uri_mut() = http::Uri::from_parts(parts).unwrap();
+        let (status, hdrs, body) = read(send.send_request(req).await.unwrap()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{path}");
+        assert_eq!(refusal_code(&hdrs, &body), "bad_request", "{path}");
+    }
+    // The connection serves on; what was refused reached nobody.
+    let req = Request::get("https://api.partner.test/ok")
+        .body(Full::new(Bytes::new()))
+        .unwrap();
+    let (status, _, _) = read(send.send_request(req).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(up.count(), 1);
+    assert_eq!(authority(&up.last()), "api.partner.test");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(dialed.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn oauth_tokens_renew() {
     let pki = Pki::new();
