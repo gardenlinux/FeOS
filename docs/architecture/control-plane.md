@@ -1715,7 +1715,7 @@ C one of `{"kind": "headers", "headers": {name: value}}`, `{"kind":
 | `bad_header` | a header name that is not a token, or `Host`, `Connection`, `Keep-Alive`, `TE`, `Trailer`, `Transfer-Encoding`, `Upgrade`, `Content-Length`, `Proxy-*`, `Forwarded`, `X-Forwarded-For`, `-Host`, `-Proto` or `FeOS-Binding-Error`; two names of one header; an empty value, over 8 KiB, with a control character or surrounding whitespace; more than 16 headers |
 | `bad_ca` | a `caPem` without a certificate or with another block |
 | `bad_client_cert` | a client certificate whose key does not parse or match |
-| `destination_denied` | the upstream's or the token endpoint's host is an internal address, resolves to one, or does not resolve (the destination rule of the other bindings, `--deny-prefix`) |
+| `destination_denied` | the upstream's or the token endpoint's host is an internal address, resolves to one, or does not resolve (the destination rule of the other bindings, `--deny-prefix`); the message names no address a name resolved to, and a preflight answers no `addresses` with it |
 | `name_taken` | the name the pod would resolve is one an environment with attached services in the sandbox gives it (its tables include theirs) |
 
 **At rest.** `http_bindings` holds a sandbox's set: the upstream, mode,

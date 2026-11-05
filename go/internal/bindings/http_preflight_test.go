@@ -196,18 +196,19 @@ func TestHTTPPreflightDestinationRule(t *testing.T) {
 	body := map[string]any{"binding": map[string]any{"upstream": f.srv.URL, "caPem": ca,
 		"credential": map[string]any{"kind": "headers", "headers": map[string]any{"X-API-Key": httpAPIKey}}}}
 	res := r.httpPreflight(body)
-	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 1 {
+	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 0 {
 		t.Fatalf("loopback: %+v %+v", res, res.Error)
 	}
 	r.svc.dest.allowDest = allowLoopback // the resolution passes; the dial's rule stays the deny policy
 	res = r.httpPreflight(body)
-	if res.OK || res.Error.Code != codeDestinationDenied || res.TLS != nil {
+	if res.OK || res.Error.Code != codeDestinationDenied || res.TLS != nil || len(res.Addresses) != 0 {
 		t.Fatalf("loopback at the dial: %+v %+v", res, res.Error)
 	}
-	// The name of an internal host.
+	// The name of an internal host: no address it resolved to is answered.
 	res = r.httpPreflight(map[string]any{"binding": map[string]any{"upstream": "https://mixed.test",
 		"credential": map[string]any{"kind": "headers", "headers": map[string]any{"X-API-Key": httpAPIKey}}}})
-	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 2 {
+	if res.OK || res.Error.Code != codeDestinationDenied || len(res.Addresses) != 0 ||
+		strings.Contains(res.Error.Message, "192.168") || strings.Contains(res.Error.Message, "203.0.113") {
 		t.Fatalf("a name with an internal address: %+v %+v", res, res.Error)
 	}
 }

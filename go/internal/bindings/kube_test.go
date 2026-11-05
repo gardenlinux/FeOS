@@ -251,7 +251,7 @@ func TestKubePutValidationCodes(t *testing.T) {
 		setBody(with("port", 10001)):           "bindings[0]: port 10001 is reserved (10000–10002 are the sandbox's own vsock ports)",
 		setBody(ok(), with("name", "staging")): `bindings[1]: duplicate port 6443`,
 		setBody(with("server", "https://internal.test:6443")): "bindings[0] (prod): server host internal.test resolves to " +
-			"10.43.0.1 is an internal address (10.0.0.0/8)",
+			"an internal address",
 	} {
 		_, raw := r.sandboxCall(http.MethodPut, "/kube", body)
 		if msg, _ := codeOf(raw); msg != want {

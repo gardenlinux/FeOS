@@ -284,9 +284,10 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
 - **Preflight** (`POST /api/v1/http/preflight`), before anything is
   stored: resolve and check the upstream, connect, check TLS, fetch a
   token where the credential is OAuth, and, if asked, send one `GET` or
-  `HEAD` to a given path with the credential. It answers the addresses,
-  the server certificate's subject and issuer, the token's lifetime, the
-  status and the latency, never a body.
+  `HEAD` to a given path with the credential. It answers the addresses
+  (none for a denied destination: the preflight is no resolver of the
+  platform's own networks), the server certificate's subject and issuer,
+  the token's lifetime, the status and the latency, never a body.
 - The pod's security groups apply as to its own connections. An
   environment's default egress table reaches the internet (ADR 0018),
   so a binding needs no rule of its own there.

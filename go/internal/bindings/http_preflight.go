@@ -80,9 +80,15 @@ type HTTPPreflightResult struct {
 	Error     *HTTPPreflightError `json:"error"`
 }
 
+// fail is the result not ok for berr; a denied destination answers no
+// address, so that the preflight is no resolver of the platform's own
+// networks.
 func (r *HTTPPreflightResult) fail(berr *bindingErr) *HTTPPreflightResult {
 	r.OK = false
 	r.Error = &HTTPPreflightError{Code: berr.code, Message: berr.msg}
+	if berr.code == codeDestinationDenied {
+		r.Addresses = []string{}
+	}
 	return r
 }
 
@@ -271,8 +277,9 @@ func hasCtl(s string) bool {
 }
 
 // resolveChecked resolves host (an address stands as it is) and judges
-// every address by the destination rule; it returns the addresses, and
-// an error when there is none or one is refused.
+// every address by the destination rule; it returns the addresses, or
+// none and an error when there is none or one is refused, which names no
+// address the name resolved to.
 func (s *Service) resolveChecked(ctx context.Context, host string) ([]netip.Addr, *bindingErr) {
 	var addrs []netip.Addr
 	if a, err := netip.ParseAddr(host); err == nil {
@@ -291,7 +298,10 @@ func (s *Service) resolveChecked(ctx context.Context, host string) ([]netip.Addr
 	}
 	for _, a := range addrs {
 		if err := s.dest.allowDest(a); err != nil {
-			return addrs, bindingErrf(codeDestinationDenied, "upstream host %s resolves to %v", host, err)
+			if a.String() == host {
+				return nil, bindingErrf(codeDestinationDenied, "upstream host %v", err)
+			}
+			return nil, bindingErrf(codeDestinationDenied, "upstream host %s resolves to an internal address", host)
 		}
 	}
 	return addrs, nil
@@ -470,7 +480,7 @@ func sanitize(s string) string {
 func classifyHTTPErr(target string, err error) *bindingErr {
 	var denied *errDialDenied
 	if errors.As(err, &denied) {
-		return bindingErrf(codeDestinationDenied, "%s: %v", target, denied.err)
+		return bindingErrf(codeDestinationDenied, "%s: the address dialed is an internal one", target)
 	}
 	if isTLSError(err) {
 		return bindingErrf(codeTLSFailed, "%s: TLS: %v", target, unwrapURLError(err))

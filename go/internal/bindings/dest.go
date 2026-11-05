@@ -70,7 +70,9 @@ func lookupIPv4(ctx context.Context, host string) ([]netip.Addr, error) {
 // checkDestination applies the rule to a server host at validation: an
 // address as it is, a name by every address it resolves to now. One
 // internal address is enough to refuse: a name that answers with both can
-// be made to answer with the internal one only.
+// be made to answer with the internal one only. A name's refusal names no
+// address it resolved to, so that the rule is no resolver of the
+// platform's own networks.
 func (d *destRule) checkDestination(ctx context.Context, host string) *bindingErr {
 	if a, err := netip.ParseAddr(host); err == nil {
 		if err := d.allowDest(a); err != nil {
@@ -91,7 +93,7 @@ func (d *destRule) checkDestination(ctx context.Context, host string) *bindingEr
 	}
 	for _, a := range addrs {
 		if err := d.allowDest(a); err != nil {
-			return bindingErrf(codeDestinationDenied, "server host %s resolves to %v", host, err)
+			return bindingErrf(codeDestinationDenied, "server host %s resolves to an internal address", host)
 		}
 	}
 	return nil
