@@ -17,9 +17,10 @@
 # without holding it, routes the guest's addresses to the TAP, passes DNS
 # for 169.254.0.53 on to a public resolver, and NATs to this machine over
 # a veth pair; this machine NATs again. Needs sudo for the namespace and
-# for this machine's NAT (the veth pair and iptables rules, all removed on
-# exit), /dev/kvm, Firecracker (make firecracker), the guest (make guest)
-# and internet access for the pull.
+# for this machine's NAT (the veth pair, iptables rules and, where this
+# machine filters forwarding in nftables' inet filter table too, rules
+# there, all removed on exit), /dev/kvm, Firecracker (make firecracker),
+# the guest (make guest) and internet access for the pull.
 set -euo pipefail
 export PATH="$PATH:/sbin:/usr/sbin"
 
@@ -46,6 +47,8 @@ TIMEOUT=60
 NS=feos-guest-test-$$
 # This machine's end of the veth pair; the namespace's is "uplink".
 UPLINK=feos-gt$$
+# The comment on this run's rules in this machine's nftables.
+NFT_TAG=feos-guest-test-$$
 # A /30 of 192.168.102.0/24 that holds no address of this machine, looked
 # for from one that the pid picks.
 for i in $(seq 0 63); do
@@ -97,6 +100,11 @@ cleanup_net() {
   sudo iptables -t nat -D POSTROUTING -s "${UPLINK_NET}" -o "${EGRESS}" -j MASQUERADE 2>/dev/null || true
   sudo iptables -D FORWARD -i "${UPLINK}" -o "${EGRESS}" -j ACCEPT 2>/dev/null || true
   sudo iptables -D FORWARD -i "${EGRESS}" -o "${UPLINK}" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+  local handle
+  for handle in $(sudo nft -a list chain inet filter forward 2>/dev/null |
+    awk -v tag="comment \"${NFT_TAG}\"" 'index($0, tag) {print $NF}'); do
+    sudo nft delete rule inet filter forward handle "${handle}" || true
+  done
   # The TAP and the veth pair go with the namespace.
   sudo ip netns del "${NS}" 2>/dev/null || true
   sudo ip link del "${UPLINK}" 2>/dev/null || true
@@ -122,6 +130,13 @@ sudo iptables -t nat -A POSTROUTING -s "${UPLINK_NET}" -o "${EGRESS}" -j MASQUER
 # runners.
 sudo iptables -I FORWARD -i "${UPLINK}" -o "${EGRESS}" -j ACCEPT
 sudo iptables -I FORWARD -i "${EGRESS}" -o "${UPLINK}" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+# A forwarded packet passes only if every chain on the hook accepts it:
+# where this machine's nftables filter forwarding in a chain of their own,
+# as nftables.conf's inet filter does, the same two rules there.
+if sudo nft list chain inet filter forward >/dev/null 2>&1; then
+  sudo nft "insert rule inet filter forward iifname \"${UPLINK}\" oifname \"${EGRESS}\" accept comment \"${NFT_TAG}\""
+  sudo nft "insert rule inet filter forward iifname \"${EGRESS}\" oifname \"${UPLINK}\" ct state established,related accept comment \"${NFT_TAG}\""
+fi
 
 node ip link set lo up
 node ip addr add "${NS_UPLINK_IP}/30" dev uplink
