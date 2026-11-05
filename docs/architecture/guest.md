@@ -158,6 +158,34 @@ reaps.
   mounts of `/run/feos/volumes/<name>`, read-write or read-only,
   `nosuid` and `nodev`, after FeOS's own. A create, and an adoption,
   fails while a volume it mounts is not mounted.
+- **The pod's interception CAs** (ADR 0028 §5), for a pod with intercept
+  bindings: feosd pushes them with `GuestService.SetInterceptCas` before
+  it creates a bring-up's containers, after a resume or a restore with
+  memory, and when `SetPodHttpBindings` changes them. The guest writes
+  them to `intercept-ca.pem` in the share directory, which every
+  container sees read-only at `/run/feos/intercept-ca.pem`. A container
+  created or adopted while the guest holds CAs, init, sidecar or main,
+  gets in its directory `intercept/system.pem`, a copy of its image's
+  system bundle, the first of `/etc/ssl/certs/ca-certificates.crt`,
+  `/etc/pki/tls/certs/ca-bundle.crt` and `/etc/ssl/cert.pem` that its
+  image has (read with its links resolved in the image's root), and
+  `intercept/ca-bundle.pem`, that bundle and the CAs, bind-mounted
+  read-only, `nosuid`, `nodev`, `noexec`, over every one of those paths
+  the image has, or over `/etc/ssl/certs/ca-certificates.crt` when it has
+  none (libcontainer makes the file); and its environment, where its
+  `ContainerConfig.env` does not set them, `SSL_CERT_FILE` and
+  `REQUESTS_CA_BUNDLE` naming the first of those paths and
+  `NODE_EXTRA_CA_CERTS` naming `/run/feos/intercept-ca.pem`. Every exec
+  takes the container's environment, so a sandbox's tool calls and an
+  attached service's processes have them too; an exec in a container
+  created before the guest held CAs gets `NODE_EXTRA_CA_CERTS` alone, as
+  its bundle is mounted only at its next start. A change rewrites the CA
+  file and every container's bundle in place, truncated and written,
+  never renamed, so that the mounts see it; a process that read its
+  store sees it after its restart. Without CAs the file is empty and
+  containers created then get nothing; a container adopted then keeps the
+  variables it was created with. Containers of a pod without intercept
+  bindings are untouched. Java's keystore is not covered.
 - A container's hostname is its ID.
 - The task service runs containers with libcontainer and is the subreaper
   of their processes. Exec joins a container's namespaces from the task

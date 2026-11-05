@@ -93,8 +93,10 @@ Each binary is named after where it runs ([ADR 0003](adr/0003-programs.md)):
 - **`feosctl`** (`crates/feosctl`): the client. For development and the
   guest's tests it also has `container create --volume NAME:PATH[:ro]`
   with the command verbatim after `--`, `container logs [--tail N]
-  [--follow]`, and `guest mount-volumes`, the guest's internal call with
-  which feosd mounts a pod's volumes before it creates the containers.
+  [--follow]`, `guest mount-volumes`, the guest's internal call with
+  which feosd mounts a pod's volumes before it creates the containers, and
+  `guest set-intercept-cas`, with which it gives the guest the pod's
+  interception CAs (ADR 0028).
 - **`diskd`** (`crates/diskd`): the disk daemon, one per node next to
   `feosd`, as root. It serves pods' disks as ublk block devices over a
   content-addressed chunk store tiered to S3, and their memory through

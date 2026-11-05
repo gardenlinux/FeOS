@@ -87,8 +87,13 @@ nothing of the machine up but the pods' network ([below](#the-pods-network)).
 - `HostService.Reboot` and `Shutdown` send PID 1 `SIGRTMIN+5` and
   `SIGRTMIN+4`; in a PID namespace of its own, as in a container, they
   fail with `FAILED_PRECONDITION`. `UpgradeFeosBinary` replaces the binary and runs it with
-  the same pid, and the resolver's sockets, only with `--self-upgrade`;
+  the same pid, and the resolver's sockets and the HTTP bindings'
+  listeners, only with `--self-upgrade`;
   without, the call fails with `FAILED_PRECONDITION`.
+- `--authn-binary PATH` names `feos-authn`, which it starts for every
+  running pod with HTTP bindings
+  ([below](#a-pods-feos-authn-and-its-http-bindings)); next to its own
+  binary by default, `/usr/sbin/feos-authn` from the package.
 - It is the subreaper of its children. Pods and the task service outlive
   it: a `feosd` that starts again takes the running pods over and keeps the
   running task service. In a container they end with it
@@ -129,6 +134,7 @@ nothing of the machine up but the pods' network ([below](#the-pods-network)).
 | Path | Holds |
 |---|---|
 | `/var/lib/feos/pods/<id>.pb` | a pod: its spec, its state and why, its addresses (a `feos.pod.v1.PodInfo`) |
+| `/var/lib/feos/pods/<id>/` | a pod's `feos-authn` ([below](#a-pods-feos-authn-and-its-http-bindings)): its control socket `authn.sock`, its run's record `authn.json` (pid, start time, user), its audit file `authn-audit.ndjson` with `authn-audit.id` and the offset `feosd` published to, `authn-audit.offset`, and its root `authn-root/` |
 | `/var/lib/feos/pods/next-ipv6-address` | the counter of the pods' IPv6 addresses: the next one handed out |
 | `/var/lib/feos/pods/ipv4-addresses` | the pods' IPv4 addresses: the lowest never handed out, and those freed since, the longest free first, with when |
 | `/var/lib/feos/security-groups/<id>.pb` | a security group (a `feos.network.v1.SecurityGroup`) |
@@ -626,6 +632,14 @@ name's IPv6 addresses, A with its IPv4 addresses (the loopback of a
 sandbox's own attached services), each with a TTL of 5 s, and no record
 of another type. Every other name goes upstream.
 
+Before the name tables, the names of a pod's HTTP bindings
+(`PodSpec.http_bindings`, ADR 0028): each of `names`, a DNS label, and
+each of `intercept_hosts`, a host name, in any case, the resolver
+answers itself with authority: A with `169.254.169.1` (`--otlp-address`),
+nothing to AAAA and every other type, TTL 5 s; for that pod alone, every
+other pod resolves them as before. `SetPodHttpBindings` changes them at
+once.
+
 Answers pass as the upstream gave them: pods have IPv4, so nothing is
 synthesized. The resolver takes `ech` out of HTTPS records, and records
 every query it answers, its own answers too.
@@ -696,7 +710,7 @@ traffic is not theirs:
 | Chain | What it does |
 |---|---|
 | `prerouting` (filter, -150) | from a pod's TAP: drops packets whose source is not routed back out the TAP (`fib saddr . iif oif missing`), of either family, logged as `spoofed`, and router advertisements and redirects of both families; on a mesh, the same for a source in the cluster's ULA through any device |
-| `input` | from pods takes neighbor solicitations and advertisements, DNS to the resolver's address over UDP and TCP, and OTLP to OTLP's address, TCP ports 4317 and 4318 ([traces.md](traces.md)), and drops the rest |
+| `input` | from pods takes neighbor solicitations and advertisements, DNS to the resolver's address over UDP and TCP, OTLP to OTLP's address, TCP ports 4317 and 4318 ([traces.md](traces.md)), and the HTTP bindings there, TCP ports 80 and 443 (ADR 0028), and drops the rest |
 | `forward` | copies the first 4 packets of the TCP connections pods open to nflog group 3 (`ct direction original`, `ct original packets < 5`), of both families, before anything else; accepts what belongs to a connection; drops invalid packets from and to pods; then jumps to `from-pods` what comes from a TAP and to `to-pods` what goes to one |
 | `from-pods`, `to-pods` | go through the verdict maps `pod-out` (by input interface) and `pod-in` (by output interface) to the pod's chains, and drop and log (`no-rule`) what a TAP the maps do not have sends or receives, such as one whose rules failed to be written |
 | `out-<TAP>`, `in-<TAP>` | a pod's chains: drop and log (`deny`) what goes to or comes from a denied address, `return` what a rule of the pod's groups allows, drop and log (`no-rule`) the rest; `out-` of both families, `in-` of IPv6 alone, since nothing new comes in over IPv4 |
@@ -784,6 +798,155 @@ device. A pod that left, deleted or hibernated, is known by its
 addresses for five minutes more, unless another pod holds one of them by
 then: the ends of the connections that its delete or hibernation ends
 are read after it left.
+
+## A pod's feos-authn and its HTTP bindings
+
+A pod calls an HTTP API by a name, at the node's address
+([ADR 0028](../adr/0028-http-bindings.md)); the pod's `feos-authn`
+([ADR 0014](../adr/0014-identity-and-credentials.md),
+[authn.md](authn.md)) adds the credential and dials the upstream.
+`feosd`'s part: the clear part of the bindings in the pod's record, the
+resolver's answers ([DNS](#dns)), one process per running pod, the
+listeners, the CAs in the guest ([guest.md](guest.md#containers)), and the
+records.
+
+### The clear part
+
+`PodSpec.http_bindings` (`PodHttpBindings`): the name mode's `names`
+(DNS labels), the intercept mode's `intercept_hosts` (lowercase host
+names), each once in the two, `intercept_ca_pems` (one PEM certificate
+each, at most 8 and 64 KiB), and the `version` of the sealed set. A pod
+without a network has no names; a pod with names has no container named
+`feos-authn`, the name of its egress records' log. Upstreams and
+credentials are never here: they reach `feos-authn` sealed.
+
+`SetPodHttpBindings` sets the part whole, running or not, and without
+waiting for the pod's lock: a bring-up reads the record when it gets
+there. An empty part is none; a part like the record's changes nothing,
+so the control plane may state it as often as it likes. It is kept in the
+pod's record and so in a hibernation's checkpoint; a restore keeps the
+checkpoint's until the control plane sends its own. A `CreatePod`
+delivered again compares its spec with the record's without the part,
+and takes the create's. While the pod runs a change takes effect at once:
+the resolver's answers, the CAs in the guest when they changed, a process
+started or ended when the pod gains its first names or loses its last,
+and `refetch` to the process when the version moved. `feosctl pod
+http-bindings <pod> [--name LABEL]… [--intercept-host HOST]… [--ca-file
+PEM]… [--version V]` sets it, `feosctl pod get` shows it.
+
+### The process
+
+A pod that is coming up or runs (`PENDING`, `RUNNING`) with a network and
+names has one `feos-authn`, a new process for each run: a start, a resume,
+a restore, or its first names while it runs. The run ends when the pod is
+suspended (hibernating too), stopped, deleted, failed, or left without
+names; the process gets SIGTERM and SIGKILL after 2 s. One that exits
+while its pod wants it is started again, after 1 s, doubling up to 30 s.
+A bring-up starts the containers only once the process holds its
+credentials (`ready`), 60 s at most, or the pod fails with why (ADR 0014,
+"What a run waits for"); a resume or a restore does not wait.
+
+For each run `feosd` makes the pod's directory `/var/lib/feos/pods/<id>/`
+(0700), binds `authn.sock` there, a `SOCK_SEQPACKET` socket (0600), opens
+`authn-audit.ndjson` (`O_APPEND`, 0600), and starts
+
+    feos-authn --pod-id <id> --control-fd 4 --audit-fd 3
+
+with fd 3 the audit file, fd 4 the listening control socket, 0 and 1
+`/dev/null`, 2 `feosd`'s stderr (its log) and nothing else, in its jail:
+
+- a session of its own and a mount namespace whose root is `authn-root/`,
+  bind-mounted read-only, `nosuid`, `nodev`, `noexec`, which holds
+  `etc/resolv.conf`, naming `--dns-upstream` (the pods' default
+  upstreams), and `etc/hosts` alone; the binary is executed from its
+  descriptor (`execveat`), opened before;
+- a user and group of its own per running pod, from 2,000,000,000 up
+  (the microVMs' are from 1,000,000), without supplementary groups;
+- every capability dropped from the bounding set, the user's change
+  clearing the others and `capset` the inheritable set, `no_new_privs`;
+- rlimits: no core file, 4096 descriptors, 512 threads, 4 GiB of address
+  space, 64 KiB locked.
+
+`feos-authn` drops what it may again, and installs its seccomp allowlist
+itself ([authn.md](authn.md#the-jail)). **Not built yet**: the network
+namespace (a veth, blackhole routes for `--deny-prefix` and the node's
+networks) and the pod's second address (ADR 0014): the process dials from
+the node's own namespace and address, and checks every address against
+the prefixes `hello` names itself; and the cgroup with `pids.max` and a
+memory limit, for which the rlimits stand meanwhile.
+
+The run's record, `authn.json`, holds its pid, its start time (the 22nd
+field of `/proc/<pid>/stat`) and its user. A `feosd` that starts again
+adopts every process whose pid and start time still match, through a
+pidfd, dials its socket and says `hello` again; it ends those whose pods
+do not want one, and removes the records of those that are gone. The
+processes outlive a restart of `feosd` as the microVMs do; a stop of
+`feosd` that suspends its pods ends them with the run, or the next
+`feosd` does.
+
+### The control protocol
+
+One JSON object per message on `authn.sock`, at most 1 MiB, `"v":1` in
+each; `feosd`'s end has a send buffer of 2 MiB (`SO_SNDBUFFORCE`).
+[authn.md](authn.md#the-control-protocol) is the other side.
+
+| from | `op` | fields | |
+|---|---|---|---|
+| `feosd` | `hello` | `podId`, `denyPrefixes`, `sourceV4`, `sourceV6` | first on every connection; the prefixes are `--deny-prefix`, the node's addresses and the mesh peers', the pods' IPv4 range and the node's prefix for pods; the sources null (no second address yet) |
+| `feos-authn` | `credentials` | `hpkePublicKey`, `csr` (base64) | `feosd` calls the control plane's `IssuePodCredentials` over its uplink with the pod's ID (10 s for an uplink, 10 s for the call) |
+| `feosd` | `credentials` | `certificate` (`spiffeId`, `chain` and `trustBundle` base64 DER, `notBefore`, `notAfter`, `renewAfter` Unix seconds) or null, `bindings` (`enc`, `ciphertext` base64, `version`) or null | the answer |
+| `feosd` | `error` | `message` | no answer: the control plane's error, or a node without a control plane |
+| `feos-authn` | `ready` | `version` | it holds that set; after every `hello` once it has one. While the version is not the record's, `feosd` sends `refetch` after 2 s, doubling up to 60 s |
+| `feos-authn` | `error` | `message` | an answer it cannot use; it asks again itself |
+| `feosd` | `refetch` | | the record's version moved |
+| `feosd` | `conn` | `port`, `peer`, and the connection's fd (`SCM_RIGHTS`, non-blocking) | a connection of the pod's |
+
+### The listeners
+
+`feosd` listens at `169.254.169.1` (`--otlp-address`), TCP 80 for the
+name mode and 443 for the intercept mode. It accepts a connection, knows
+the pod by its source address, which the pod's TAP pins, and hands the
+socket to the pod's process with `conn` without reading a byte; a
+connection from no pod's address, from a pod without names, or one whose
+process does not run or is not connected, is reset. At most 1024 are
+being handed over at a time. The listeners outlive `feosd` as the
+resolver's sockets do, named `http` in `LISTEN_FDNAMES`:
+`feosd-http.socket` ([Packages](#packages)) or `feos-host-init` binds
+them before the node holds the address, and a self-upgrade hands them on;
+without, `feosd` binds its own (`IP_FREEBIND`), and again every 10 s a
+port that does not bind.
+
+### The records
+
+`feos-authn` writes a record per line to its audit file
+([authn.md](authn.md#the-audit-file)): a request's `http` and
+`http_end`, joined by `spanId`, `token` and `bindings`. With a control
+plane, `feosd` reads them two ways:
+
+- **The egress log**: for every running pod with labels and names, a
+  stream of container `feos-authn` beside its containers', whose resource
+  has `ferun.source` `egress` ([sink.md](sink.md)): the audit file
+  followed as a guest's log is, from the sink's position, its `http`
+  records alone, each at its request's start (`ts` less `durationMs`) and
+  with a severity (17 for 5xx or a refusal, 13 for 4xx, else 9). Its log
+  ID, `authn-audit.id`, is made with the file, and the offsets are bytes
+  in it, so one stream holds the pod's runs on the node.
+- **Events and spans**: every second, from `authn-audit.offset` (the
+  file's inode and an offset), batches of 512 records: each of a type it
+  knows (`http`, `http_end`, `token`, `bindings`) becomes the pod's audit
+  event (`AuditRecord`, kinds `http_request`, `http_end`, `token`,
+  `bindings`, `detail_json` the line), and each request whose `http_end`
+  came a client span, sent as the pods' own spans are
+  ([traces.md](traces.md)): `<METHOD> <binding>`, from its arrival to its
+  end, with its trace context, `http.request.method`, `url.path`,
+  `server.address`, `server.port` (not 443), `http.response.status_code`,
+  `ferun.binding`, `ferun.binding.mode`, `ferun.credential`,
+  `network.peer.address`, the bodies' sizes, `ferun.error.code` and an
+  error status for a refusal or 5xx; its resource the pod's labels,
+  `ferun.source` `egress` and `ferun.container` `feos-authn`. A request
+  without its `http_end` after 10 minutes (a process that was killed) has
+  none, nor one whose `http` came before `feosd` started. Spans are best
+  effort: three tries, then dropped. Unknown types are skipped.
 
 ## A pod's microVM
 
@@ -1068,7 +1231,7 @@ packages from https://apt.fecode.dev
 
 | Package | Contents |
 |---|---|
-| `feosd` | `/usr/sbin/feosd`, `feosd.service`, `feos-vms.service`, `feosd.socket`, the group `feos` (sysusers), `/etc/default/feosd`, `/etc/apt/apt.conf.d/50feosd` |
+| `feosd` | `/usr/sbin/feosd`, `feosd.service`, `feos-vms.service`, `feosd.socket`, `feosd-http.socket`, the group `feos` (sysusers), `/etc/default/feosd`, `/etc/apt/apt.conf.d/50feosd` |
 | `feosctl` | `/usr/bin/feosctl` |
 | `diskd` | `/usr/sbin/diskd`, `/usr/sbin/diskctl`, `diskd.service`, `/etc/default/diskd`, `/usr/lib/modules-load.d/diskd.conf` |
 | `feos-firecracker-<version>` | `/usr/lib/feos/firecracker/<version>/{firecracker,jailer}` |
@@ -1105,6 +1268,13 @@ another moves the socket with a drop-in, as the unit says. Installing the
 package stops a running `feosd` first when the socket is not active yet:
 a `feosd` from before the socket holds the address itself. Removing the
 package stops the socket too.
+
+`feosd-http.socket` holds the HTTP bindings' listeners, TCP at
+`169.254.169.1:80` and `:443`, `FreeBind=yes`, named `http`, with
+`Service=feosd.service`; `feosd.service` wants it and takes the sockets of
+both units (`Sockets=feosd.socket feosd-http.socket`). A connection while
+`feosd` is stopped waits in its backlog and starts `feosd`. A node whose
+`--otlp-address` is another moves it with a drop-in, as the unit says.
 
 `diskd.service` is `Type=notify`: active once diskd serves, its devices
 recovered; `feosd.service` wants it and starts after it. `KillMode=process`
