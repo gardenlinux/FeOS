@@ -952,7 +952,9 @@ plane, `feosd` reads them two ways:
   `ferun.source` `egress` and `ferun.container` `feos-authn`. A request
   without its `http_end` after 10 minutes (a process that was killed) has
   none, nor one whose `http` came before `feosd` started. Spans are best
-  effort: three tries, then dropped. Unknown types are skipped.
+  effort, sent by a task of their own that the tail never waits for:
+  three tries, then dropped, and a batch past 64 waiting is dropped at
+  once. Unknown types are skipped.
 
 The file is the process's to append to as long as it runs, so it is not
 renamed: once it holds more than 64 MiB on disk, `feosd` punches a hole

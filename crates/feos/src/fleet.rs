@@ -160,14 +160,29 @@ fn take_spans(pods: &Pods, shipper: Shipper) -> Traces {
 const EGRESS_EXPIRY: Duration = Duration::from_secs(60);
 /// How often a batch of egress spans is sent before it is dropped.
 const EGRESS_TRIES: u32 = 3;
+/// The batches of egress spans that wait to be sent; past them, a batch is
+/// dropped.
+const EGRESS_QUEUE: usize = 64;
+
+type EgressSpans = (
+    String,
+    Vec<feos_proto::opentelemetry::proto::trace::v1::Span>,
+);
 
 /// Publishes the records of the pods' feos-authn (ADR 0014, ADR 0028 §6)
 /// from their audit files: each as the pod's audit event, and each request
 /// as a client span once its two records came; one whose end did not come
 /// within [`egress::END_WAIT`] has none. Spans go as the pods' own do,
-/// best effort.
+/// best effort, from a task of their own: the tail, which reads every
+/// pod's records in turn, never waits for them.
 fn publish_audit(pods: &Pods, events: Events, traces: Traces) {
     let joiners: Arc<Mutex<HashMap<String, Joiner>>> = Arc::default();
+    let (exports, mut exporting) = tokio::sync::mpsc::channel::<EgressSpans>(EGRESS_QUEUE);
+    tokio::spawn(async move {
+        while let Some((pod_id, spans)) = exporting.recv().await {
+            export_spans(&traces, &pod_id, spans).await;
+        }
+    });
     let handler: audit::Handler = {
         let joiners = joiners.clone();
         Arc::new(move |pod_id: String, lines: Vec<Vec<u8>>| {
@@ -186,11 +201,17 @@ fn publish_audit(pods: &Pods, events: Events, traces: Traces) {
                     spans.extend(joiner.take(record, observed));
                 }
             }
-            let traces = traces.clone();
-            Box::pin(async move {
-                export_spans(&traces, &pod_id, spans).await;
-                true
-            })
+            if !spans.is_empty()
+                && let Err(e) = exports.try_send((pod_id, spans))
+            {
+                let (pod_id, spans) = e.into_inner();
+                debug!(
+                    "Fleet: Pod {pod_id}'s {} egress spans are dropped: {EGRESS_QUEUE} batches \
+                     wait to be sent",
+                    spans.len()
+                );
+            }
+            Box::pin(async { true })
         })
     };
     pods.follow_audit(Arc::new(egress::is_published), handler);
