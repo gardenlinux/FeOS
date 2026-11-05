@@ -92,7 +92,8 @@ func must(t *testing.T, step string, err error) {
 // 127.0.0.1 in one namespace, NS1, while one of them, wgB, sits in a
 // second, NS2: it is made in NS1 and moved, so its UDP socket stays in NS1.
 // An HTTP request from NS1 to a listener on wgB's address in NS2 goes
-// through the tunnel. Needs root and a kernel with WireGuard;
+// through the tunnel, also after wgA moved to another port and after its
+// peer was set anew. Needs root and a kernel with WireGuard;
 // hack/go/netns-test runs it.
 func TestNetnsWireGuard(t *testing.T) {
 	if os.Getenv("FERUN_TEST_NETNS") != "1" || os.Geteuid() != 0 {
@@ -333,6 +334,63 @@ func TestNetnsWireGuard(t *testing.T) {
 	}))
 	if body, err := request(10 * time.Second); err != nil || body != "through the tunnel" {
 		t.Fatalf("request after setting the same peers: %q, %v", body, err)
+	}
+
+	// A move to another port, as the agent's repair of a lost path does:
+	// wgA keeps its session, and wgB, whose peer still names 51821,
+	// follows the new port with wgA's next packet.
+	must(t, "move wgA's port", ns1.do(func() error {
+		if err := Configure("wgA", privA, 51831); err != nil {
+			return err
+		}
+		d, err := Get("wgA")
+		if err != nil {
+			return err
+		}
+		if d.ListenPort != 51831 || len(d.Peers) != 1 || !d.Peers[0].LastHandshake.Equal(before.LastHandshake) {
+			return fmt.Errorf("after the move: port %d, peers %+v, handshake before %v", d.ListenPort, d.Peers, before.LastHandshake)
+		}
+		return nil
+	}))
+	if body, err := request(10 * time.Second); err != nil || body != "through the tunnel" {
+		t.Fatalf("request after the move: %q, %v", body, err)
+	}
+	must(t, "wgB follows the port", ns2.do(func() error {
+		d, err := Get("wgB")
+		if err != nil {
+			return err
+		}
+		if len(d.Peers) != 1 || d.Peers[0].Endpoint != netip.MustParseAddrPort("127.0.0.1:51831") {
+			return fmt.Errorf("wgB's peers after the move: %+v", d.Peers)
+		}
+		return nil
+	}))
+	// Set anew, the peer has no session and handshakes at once, without
+	// a packet of its own to send.
+	must(t, "the peer set anew", ns1.do(func() error {
+		if err := SetPeers("wgA", nil); err != nil {
+			return err
+		}
+		if err := SetPeers("wgA", []Peer{peerB}); err != nil {
+			return err
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			d, err := Get("wgA")
+			if err != nil {
+				return err
+			}
+			if len(d.Peers) == 1 && !d.Peers[0].LastHandshake.IsZero() {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("no handshake within 5 s of setting the peer anew: %+v", d.Peers)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}))
+	if body, err := request(10 * time.Second); err != nil || body != "through the tunnel" {
+		t.Fatalf("request after setting the peer anew: %q, %v", body, err)
 	}
 
 	// Without the peer, nothing goes through.
