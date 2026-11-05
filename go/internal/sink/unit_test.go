@@ -62,7 +62,7 @@ func TestExtract(t *testing.T) {
 }
 
 func TestParseSelectorSource(t *testing.T) {
-	for src, ok := range map[string]bool{"": true, "ingress": true, "container": true, "node": false} {
+	for src, ok := range map[string]bool{"": true, "ingress": true, "egress": true, "container": true, "node": false} {
 		s, err := parseSelector(url.Values{"environment": {"e1"}, "source": {src}})
 		if (err == nil) != ok || (ok && s.Source != src) {
 			t.Errorf("source %q: %+v, %v", src, s, err)
@@ -234,6 +234,19 @@ func TestParseExport(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].Labels.Source != SourceIngress || got[0].Labels.Node != "" ||
 		got[0].Lines[0].Level != LevelWarn {
 		t.Fatalf("an ingress's stream: %+v, %v", got, err)
+	}
+	// A pod's egress records (ADR 0028) are its node's, in a stream of
+	// their own.
+	egress := exportRequest(resourceAttrs("p1", "feos-authn", "E1", "acme", map[string]string{attrSource: SourceEgress,
+		"ferun.environment": "e1", "ferun.kind": "service", "ferun.object": "web"}),
+		record(0, 1, "", `{"ts":"2026-11-05T01:00:00Z","type":"http","binding":"erp","status":503,"level":"error"}`))
+	got, err = parseExport(egress, ingestPeer{node: "node-1"}, now)
+	if err != nil || len(got) != 1 || got[0].Labels.Source != SourceEgress || got[0].Labels.Node != "node-1" ||
+		got[0].Labels.Object != "web" || got[0].Lines[0].Level != LevelError {
+		t.Fatalf("a pod's egress stream: %+v, %v", got, err)
+	}
+	if _, err := parseExport(egress, ingestPeer{ingress: "in-0"}, now); !errors.Is(err, errNotYours) {
+		t.Errorf("an ingress wrote a pod's egress: %v", err)
 	}
 	asNode := exportRequest(resourceAttrs("ingress/in-0", "e1/web", "L1", "acme", nil), record(0, 1, "", "x"))
 	for _, c := range []struct {

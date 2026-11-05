@@ -137,6 +137,63 @@ dropped lines has `log.offset` of the first line it dropped and
 last line stored, which the node then sends again and the sink stores
 once.
 
+### A pod's egress records (ADR 0028)
+
+Every request a pod sends through one of its HTTP bindings is a record
+of its `feos-authn`, which `feosd` ships to the sink as the pod's
+**egress** stream, and as a client span on the traces' path
+([traces.md](traces.md#a-pods-egress)). This is the contract `feosd`
+follows.
+
+- **Stream**: one per run of the pod's `feos-authn`. Its resource has
+  the pod's `log_labels`, as its containers' streams have them, and the
+  node's attributes, with `ferun.container` = `feos-authn`,
+  `ferun.log_id` = an ID `feosd` gives the run (a UUID) and
+  `ferun.source` = `egress`. It comes from the node's certificate as
+  every other stream of a pod; an ingress cannot write one.
+- **Records**: one `LogRecord` per request, in the order `feos-authn`
+  wrote them: `time_unix_nano` the request's start, `log.offset` its
+  number in the stream from 0, `log.next_offset` the number after,
+  `log.iostream` none. `Positions` answers as for any stream, so a
+  `feosd` that restarts goes on after the last record the sink has.
+- **Body**: the record as one JSON object, these fields always present:
+
+  | field | value |
+  |---|---|
+  | `ts` | the request's start, RFC 3339 with nanoseconds, UTC |
+  | `type` | `http` |
+  | `binding` | the binding's name |
+  | `mode` | `name` or `intercept` |
+  | `method` | the request's method |
+  | `host` | the upstream's host (its port when it is not 443: `host:port`) |
+  | `path` | the request's path, without the query |
+  | `status` | the status the pod was answered (the upstream's, or `feos-authn`'s own for a refusal); 0 when none was written |
+  | `bytesIn`, `bytesOut` | the request's body bytes the upstream got, the answer's body bytes the pod got |
+  | `durationMs` | until the answer's last byte, or the end of an upgraded connection |
+  | `upstreamAddr` | `address:port` dialed; `""` when none was |
+  | `credential` | the credential's kind: `headers`, `basic`, `oauth2`, `clientCertificate` (never its value) |
+  | `traceId`, `spanId` | the request's span, lowercase hex; `traceId` the pod's when its request carried `traceparent` |
+  | `error` | `null`, or `{"code", "message"}` when `feos-authn` refused the request itself (`FeOS-Binding-Error`) |
+  | `level` | `error` for a status of 500 and above or a refusal, `warn` for 400 to 499, else `info` |
+
+  The codes of `error`: `path_denied` (403, outside the binding's
+  prefixes), `destination_denied` (403, the destination rule),
+  `unreachable` (502), `tls_failed` (502), `token_failed` (503, the
+  token endpoint failed), `rate_limited` (429, the binding's limit),
+  `connection_limit` (429, the connections per binding and pod). A
+  message never holds a credential, a token or a body. Query strings
+  and bodies are never recorded.
+- **Audit**: `feosd` also publishes each record as the pod's audit
+  record (`AuditRecord`, kind `http_request`, `detail_json` the same
+  object), which `ferund` keeps in its activity log (source `authn`)
+  and watches for the bindings' incidents ([control-plane.md](control-plane.md#http-bindings)).
+- **Batches, limits**: as a container's stream. A record the limit
+  drops is counted in the node's dropped-lines record.
+- **Reading**: `GET /api/v1/logs?environment=<id>&source=egress` (and
+  `kind`, `object` for a service's pods), `GET /api/v1/log-streams` with
+  `source` `egress`; the line's text is the JSON above, its level the
+  record's `level`.
+
 ## The ingress's access log
 
 `ferun-ingress` writes every request it answered for an environment
@@ -178,9 +235,10 @@ is not kept, and the agent counts its records as dropped.
   counts what overflows it. A batch refused with `INVALID_ARGUMENT` or
   `RESOURCE_EXHAUSTED` is dropped and counted, as is a record without a
   tenant.
-- **Reading**: the selector `source` (`ingress` or `container`; none:
-  both) picks them; a stream's JSON has `source` (`log_streams.source`,
-  migration `0003`, `container` for every stream before it). `ferund`'s
+- **Reading**: the selector `source` (`ingress`, `egress` or
+  `container`; none: all) picks them; a stream's JSON has `source`
+  (`log_streams.source`, migration `0003`, `container` for every stream
+  before it). `ferund`'s
   `GET /api/v1/environments/{env}/access-logs` reads them from the sink
   (`environment`, `source=ingress`, `trace`, backward from `before`,
   `since=0`) and answers its `AccessLogList`; the sink is the only
@@ -213,7 +271,9 @@ database (`sink`, migrations of its own), two ports:
   record without `log.offset` is refused. A stream's `node` is the name
   in the node's certificate, not `ferun.node`; the sink does not check
   that the node runs the pod. A stream's `source` is `ingress` for
-  `ferun.source` `ingress`, else `container`.
+  `ferun.source` `ingress`, `egress` for `egress` (a pod's requests
+  through its HTTP bindings, from a node's certificate), else
+  `container`.
 - **API** (HTTP, `--listen`, default `:8080`): the routes below, behind
   the cluster's Gateway at `run.<domain>/api/v1/logs` and
   `/api/v1/log-streams`; `/healthz`, 200 once the ingest serves and while

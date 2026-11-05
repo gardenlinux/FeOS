@@ -60,7 +60,7 @@ func (k StreamKey) less(o StreamKey) bool {
 // Labels are a stream's labels, set by ferund through the node (sink.md,
 // The OTLP shape) or by the ingress; Attrs are all its resource
 // attributes. Node is "" for an ingress's stream; Source is
-// SourceIngress or SourceContainer.
+// SourceIngress, SourceEgress or SourceContainer.
 type Labels struct {
 	Tenant, Node, Instance, Environment, Kind, Object, Job string
 	// Deployment is ferun.deployment (or its earlier word ferun.release);
