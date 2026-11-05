@@ -316,8 +316,8 @@ pub struct Network {
     directory: Arc<Directory>,
     /// The policy and the table in the kernel.
     applied: tokio::sync::Mutex<Option<(Policy, Table)>>,
-    /// The node's addresses, as last read.
-    node_addresses: Mutex<Vec<IpAddr>>,
+    /// The node's addresses, as last read; None before they were.
+    node_addresses: Mutex<Option<Vec<IpAddr>>>,
     collector: Mutex<Option<Collector>>,
 }
 
@@ -426,7 +426,7 @@ impl Network {
             broken: Mutex::new(None),
             directory: Arc::default(),
             applied: tokio::sync::Mutex::new(None),
-            node_addresses: Mutex::new(Vec::new()),
+            node_addresses: Mutex::new(None),
             collector: Mutex::new(None),
         }
     }
@@ -452,7 +452,7 @@ impl Network {
             broken: Mutex::new(None),
             directory: Arc::default(),
             applied: tokio::sync::Mutex::new(None),
-            node_addresses: Mutex::new(Vec::new()),
+            node_addresses: Mutex::new(None),
             collector: Mutex::new(None),
         }
     }
@@ -498,19 +498,24 @@ impl Network {
 
     /// What a pod's `feos-authn` dials none of (ADR 0014, "The jail"):
     /// `--deny-prefix`, the node's own addresses and the mesh's peers', the
-    /// pods' IPv4 range and the node's prefix for pods.
-    pub fn authn_deny_prefixes(&self) -> Vec<String> {
-        let node = lock(&self.node_addresses).clone();
+    /// pods' IPv4 range, the node's prefix for pods, and what no pod
+    /// reaches ever (loopback, link-local, multicast, unspecified). None
+    /// before the node's addresses were read.
+    pub fn authn_deny_prefixes(&self) -> Option<Vec<String>> {
+        let node = lock(&self.node_addresses).clone()?;
         let mut denied = self.denied(&node);
         if let Some((prefix, len)) = self.pod_prefix().or(self.config.pod_prefix) {
             denied.push(Prefix::V6(prefix, len));
         }
+        denied.extend(network_service::always_denied());
         let mut seen = HashSet::new();
-        denied
-            .iter()
-            .map(ToString::to_string)
-            .filter(|prefix| seen.insert(prefix.clone()))
-            .collect()
+        Some(
+            denied
+                .iter()
+                .map(ToString::to_string)
+                .filter(|prefix| seen.insert(prefix.clone()))
+                .collect(),
+        )
     }
 
     /// The pod that sends from `address`, as the pods' TAP devices pin it:
@@ -743,7 +748,10 @@ impl Network {
         if pods.iter().flatten().any(|pods| pods.contains(&host)) {
             return Some("it is a pod's");
         }
-        if lock(&self.node_addresses).contains(&address) {
+        if lock(&self.node_addresses)
+            .as_ref()
+            .is_some_and(|node| node.contains(&address))
+        {
             return Some("it is the node's");
         }
         None
@@ -1031,12 +1039,12 @@ impl Network {
         };
         let node = match node {
             Ok(node) => {
-                *lock(&self.node_addresses) = node.clone();
+                *lock(&self.node_addresses) = Some(node.clone());
                 node
             }
             Err(e) => {
                 warn!("Network: The node's addresses do not read: {e}");
-                lock(&self.node_addresses).clone()
+                lock(&self.node_addresses).clone().unwrap_or_default()
             }
         };
         let pods: Vec<&PodInfo> = pods.iter().filter(|pod| has_network(pod)).collect();
@@ -1469,7 +1477,7 @@ mod tests {
             broken: Mutex::new(None),
             directory: Arc::default(),
             applied: tokio::sync::Mutex::new(None),
-            node_addresses: Mutex::new(vec!["192.0.2.7".parse().unwrap()]),
+            node_addresses: Mutex::new(Some(vec!["192.0.2.7".parse().unwrap()])),
             collector: Mutex::new(None),
         }
     }
@@ -1512,6 +1520,27 @@ mod tests {
             dns_upstreams: upstreams.iter().map(|u| u.to_string()).collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn feos_authn_dials_none_of_the_nodes_or_what_no_pod_reaches() {
+        let network = network(lab());
+        let deny = network.authn_deny_prefixes().unwrap();
+        for prefix in [
+            "192.0.2.7/32",
+            "fd00:fe05:1::/64",
+            "127.0.0.0/8",
+            "::1/128",
+            "169.254.0.0/16",
+            "fe80::/10",
+        ] {
+            assert!(deny.iter().any(|p| p == prefix), "{prefix} in {deny:?}");
+        }
+        let unique: HashSet<&String> = deny.iter().collect();
+        assert_eq!(unique.len(), deny.len());
+        // Before the node's addresses are read, there is no list to say.
+        *lock(&network.node_addresses) = None;
+        assert_eq!(network.authn_deny_prefixes(), None);
     }
 
     #[test]

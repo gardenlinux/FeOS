@@ -27,6 +27,7 @@ pub use policy::{
     DENY4, DENY6, INTERNET4, INTERNET6,
 };
 pub use prefix::{Family, Prefix};
+pub use registry::always_denied;
 pub use service::SecurityGroups;
 pub use store::Store;
 

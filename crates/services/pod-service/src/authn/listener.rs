@@ -220,6 +220,7 @@ mod tests {
             jail: false,
         };
         let authn = Authn::with_launcher(config, dir.path(), fake::launcher(seen.clone()));
+        authn.set_deny_prefixes(Vec::new());
         authn.set_issuer(Arc::new(|_| {
             Box::pin(async { Ok(IssuePodCredentialsResponse::default()) })
         }));

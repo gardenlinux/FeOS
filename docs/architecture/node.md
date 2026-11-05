@@ -895,7 +895,7 @@ each; `feosd`'s end has a send buffer of 2 MiB (`SO_SNDBUFFORCE`).
 
 | from | `op` | fields | |
 |---|---|---|---|
-| `feosd` | `hello` | `podId`, `denyPrefixes`, `sourceV4`, `sourceV6` | first on every connection; the prefixes are `--deny-prefix`, the node's addresses and the mesh peers', the pods' IPv4 range and the node's prefix for pods; the sources null (no second address yet) |
+| `feosd` | `hello` | `podId`, `denyPrefixes`, `sourceV4`, `sourceV6` | first on every connection, once the pods' rules have read the node's addresses (after a restart too); the prefixes are `--deny-prefix`, the node's addresses and the mesh peers', the pods' IPv4 range, the node's prefix for pods and those no pod reaches (loopback, link-local, multicast, unspecified); the sources null (no second address yet). Again on the connection whenever the list changes |
 | `feos-authn` | `credentials` | `hpkePublicKey`, `csr` (base64) | `feosd` calls the control plane's `IssuePodCredentials` over its uplink with the pod's ID (10 s for an uplink, 10 s for the call) |
 | `feosd` | `credentials` | `certificate` (`spiffeId`, `chain` and `trustBundle` base64 DER, `notBefore`, `notAfter`, `renewAfter` Unix seconds) or null, `bindings` (`enc`, `ciphertext` base64, `version`) or null | the answer |
 | `feosd` | `error` | `message` | no answer: the control plane's error, or a node without a control plane |

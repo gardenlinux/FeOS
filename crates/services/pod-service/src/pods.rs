@@ -389,12 +389,6 @@ impl Pods {
         pods.inner
             .authn
             .set_resolvers(pods.inner.network.dns_upstreams());
-        let weak = Arc::downgrade(&pods.inner);
-        pods.inner.authn.set_deny_prefixes(Arc::new(move || {
-            weak.upgrade()
-                .map(|inner| inner.network.authn_deny_prefixes())
-                .unwrap_or_default()
-        }));
         let mut pending = Vec::new();
         let mut running = Vec::new();
         let mut purge = Vec::new();
@@ -408,7 +402,8 @@ impl Pods {
             pods.pods().insert(info.pod_id.clone(), Pod::new(info));
         }
         info!("Pods: {} kept", pods.pods().len());
-        // Each pod's feos-authn as it wants one, an adopted one first.
+        // Each pod's feos-authn as it wants one, an adopted one first; each
+        // says hello once the rules below read the node's addresses.
         let kept: Vec<PodInfo> = pods.pods().values().map(|pod| pod.info.clone()).collect();
         for info in &kept {
             pods.want_authn(info);
@@ -2849,10 +2844,16 @@ impl Pods {
         self.inner.network.attach(&self.info(pod_id)?).await
     }
 
-    /// Writes the pods' rules for the pods there are.
+    /// Writes the pods' rules for the pods there are, and tells the pods'
+    /// feos-authn what they may not dial, as the rules found the node's
+    /// addresses and the mesh's peers.
     async fn apply_network(&self) -> io::Result<()> {
         let pods = self.list();
-        self.inner.network.apply(&pods).await
+        let applied = self.inner.network.apply(&pods).await;
+        if let Some(deny) = self.inner.network.authn_deny_prefixes() {
+            self.inner.authn.set_deny_prefixes(deny);
+        }
+        applied
     }
 
     /// Writes the pods' rules again whenever the security groups or the

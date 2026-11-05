@@ -88,10 +88,6 @@ pub type Issuer = Arc<
 /// Starts a process, as [`jail::spawn`] does: a test starts a fake.
 pub type Launcher = Arc<dyn Fn(&jail::Start<'_>) -> io::Result<i32> + Send + Sync>;
 
-/// The prefixes a pod's `feos-authn` dials none of: feosd's `--deny-prefix`
-/// set and the node's own networks, as they are when it says hello.
-pub type DenyPrefixes = Arc<dyn Fn() -> Vec<String> + Send + Sync>;
-
 /// How the processes are started.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
@@ -139,7 +135,10 @@ struct Inner {
     /// The pods' directories are below it.
     dir: PathBuf,
     issuer: RwLock<Option<Issuer>>,
-    deny: RwLock<DenyPrefixes>,
+    /// The prefixes the processes dial none of: feosd's `--deny-prefix`
+    /// set, the node's own networks and those denied always; None until
+    /// the node's addresses are known, and nothing says hello before.
+    deny: watch::Sender<Option<Vec<String>>>,
     /// The resolvers its jail's `resolv.conf` names: the node's upstreams.
     resolvers: RwLock<Vec<std::net::IpAddr>>,
     pods: Mutex<HashMap<String, Slot>>,
@@ -206,7 +205,7 @@ impl Authn {
                 launch,
                 dir: dir.to_path_buf(),
                 issuer: RwLock::new(None),
-                deny: RwLock::new(Arc::new(Vec::new)),
+                deny: watch::Sender::new(None),
                 resolvers: RwLock::new(Vec::new()),
                 pods: Mutex::new(HashMap::new()),
                 adopted: Mutex::new(HashMap::new()),
@@ -223,8 +222,17 @@ impl Authn {
         *self.inner.issuer.write().unwrap_or_else(|e| e.into_inner()) = Some(issuer);
     }
 
-    pub fn set_deny_prefixes(&self, deny: DenyPrefixes) {
-        *self.inner.deny.write().unwrap_or_else(|e| e.into_inner()) = deny;
+    /// The prefixes the processes dial none of, as they are now: the first
+    /// list lets them say hello, and every process connected is told a
+    /// list that changed, by a hello again.
+    pub fn set_deny_prefixes(&self, deny: Vec<String>) {
+        self.inner.deny.send_if_modified(|now| {
+            let changed = now.as_ref() != Some(&deny);
+            if changed {
+                *now = Some(deny);
+            }
+            changed
+        });
     }
 
     /// The resolvers the processes resolve upstreams with, which their
@@ -712,9 +720,10 @@ fn write_record(dir: &Path, record: &Record) -> io::Result<()> {
     std::fs::rename(temporary, dir.join(RECORD))
 }
 
-/// Dials the run's control socket and says hello; reads what the process
-/// says from then on. A process that cannot be dialed is ended: one that
-/// cannot be told anything serves nothing, and its exit starts another.
+/// Dials the run's control socket, says hello once the node's deny
+/// prefixes are known, and reads what the process says from then on. A
+/// process that cannot be dialed is ended: one that cannot be told
+/// anything serves nothing, and its exit starts another.
 async fn connect(
     inner: &Arc<Inner>,
     run: &Arc<Run>,
@@ -736,14 +745,51 @@ async fn connect(
             return;
         }
     };
-    let deny = inner.deny.read().unwrap_or_else(|e| e.into_inner()).clone();
-    let hello = ToAuthn::Hello {
+    tokio::spawn(read(inner.clone(), run.clone(), control, wanted, error));
+}
+
+fn hello(run: &Run, deny: Vec<String>) -> ToAuthn {
+    ToAuthn::Hello {
         pod_id: run.pod_id.clone(),
-        deny_prefixes: deny(),
+        deny_prefixes: deny,
         source_v4: None,
         source_v6: None,
+    }
+}
+
+/// Says hello once the node's deny prefixes are known, then reads what the
+/// run's process says until it closes its end, and says hello again when
+/// the prefixes change.
+async fn read(
+    inner: Arc<Inner>,
+    run: Arc<Run>,
+    control: Arc<Control>,
+    wanted: watch::Receiver<Wanted>,
+    error: Arc<Mutex<String>>,
+) {
+    let mut deny = inner.deny.subscribe();
+    // A hello with fewer prefixes would let the process dial what it may
+    // not: none before the node's are known. The process says nothing
+    // before its hello; its end closing ends the wait.
+    let mut said = loop {
+        if let Some(list) = deny.borrow_and_update().clone() {
+            break list;
+        }
+        *lock(&error) = "it waits for the node's network".into();
+        tokio::select! {
+            changed = deny.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+            }
+            received = control.recv() => {
+                if !matches!(received, Ok(Some(_))) {
+                    return;
+                }
+            }
+        }
     };
-    if let Err(e) = control.send(&hello, None).await {
+    if let Err(e) = control.send(&hello(&run, said.clone()), None).await {
         warn!(
             "Authn: Pod {}'s feos-authn (pid {}) did not take its hello: {e}; ending it",
             run.pod_id, run.pid
@@ -752,25 +798,31 @@ async fn connect(
         return;
     }
     run.set_control(Some(control.clone()));
-    tokio::spawn(read(inner.clone(), run.clone(), control, wanted, error));
-}
-
-/// Reads what the run's process says until it closes its end.
-async fn read(
-    inner: Arc<Inner>,
-    run: Arc<Run>,
-    control: Arc<Control>,
-    wanted: watch::Receiver<Wanted>,
-    error: Arc<Mutex<String>>,
-) {
+    let mut deny_open = true;
     let mut refetch_backoff = REFETCH_BACKOFF.0;
     loop {
-        let bytes = match control.recv().await {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => break,
-            Err(e) => {
-                warn!("Authn: Pod {}'s control socket: {e}", run.pod_id);
-                break;
+        let bytes = tokio::select! {
+            received = control.recv() => match received {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => break,
+                Err(e) => {
+                    warn!("Authn: Pod {}'s control socket: {e}", run.pod_id);
+                    break;
+                }
+            },
+            changed = deny.changed(), if deny_open => {
+                deny_open = changed.is_ok();
+                let now = deny.borrow_and_update().clone();
+                if let Some(list) = now.filter(|list| *list != said) {
+                    if let Err(e) = control.send(&hello(&run, list.clone()), None).await {
+                        warn!(
+                            "Authn: Pod {}'s feos-authn did not take its new hello: {e}",
+                            run.pod_id
+                        );
+                    }
+                    said = list;
+                }
+                continue;
             }
         };
         match control::decode(&bytes) {
@@ -1102,12 +1154,20 @@ mod tests {
         })
     }
 
-    fn authn(dir: &Path, seen: &fake::Shared) -> Authn {
+    /// Processes of the fake, before the node's prefixes are known.
+    fn authn_unready(dir: &Path, seen: &fake::Shared) -> Authn {
         let config = Config {
             binary: PathBuf::from("/nonexistent/feos-authn"),
             jail: false,
         };
         Authn::with_launcher(config, dir, fake::launcher(seen.clone()))
+    }
+
+    /// Processes of the fake, which say hello at once.
+    fn authn(dir: &Path, seen: &fake::Shared) -> Authn {
+        let authn = authn_unready(dir, seen);
+        authn.set_deny_prefixes(Vec::new());
+        authn
     }
 
     fn ops(seen: &fake::Shared) -> Vec<String> {
@@ -1139,12 +1199,20 @@ mod tests {
     async fn a_run_gets_its_credentials_takes_connections_and_ends_with_its_pod() {
         let dir = tempfile::tempdir().unwrap();
         let seen = fake::Shared::default();
-        let authn = authn(dir.path(), &seen);
+        let authn = authn_unready(dir.path(), &seen);
         let version = Arc::new(Mutex::new("v1".to_string()));
         authn.set_issuer(issuer(version.clone()));
-        authn.set_deny_prefixes(Arc::new(|| vec!["10.0.0.0/8".to_string()]));
 
+        // Nothing says hello before the node's prefixes are known.
         authn.want(POD, true, "v1");
+        let error = authn
+            .wait_ready(POD, Duration::from_millis(500))
+            .await
+            .unwrap_err();
+        assert!(error.message().contains("the node's network"), "{error}");
+        assert!(authn.pid(POD).is_some());
+        assert!(ops(&seen).is_empty(), "{:?}", ops(&seen));
+        authn.set_deny_prefixes(vec!["10.0.0.0/8".to_string()]);
         authn
             .wait_ready(POD, Duration::from_secs(10))
             .await
@@ -1155,6 +1223,18 @@ mod tests {
         assert_eq!(hello["podId"], POD);
         assert_eq!(hello["denyPrefixes"], serde_json::json!(["10.0.0.0/8"]));
         assert_eq!(hello["sourceV4"], serde_json::Value::Null);
+        // A list that changes is said again; the same one is not.
+        authn.set_deny_prefixes(vec!["10.0.0.0/8".to_string()]);
+        authn.set_deny_prefixes(vec!["10.0.0.0/8".to_string(), "fd00::/8".to_string()]);
+        within("the hello again", || {
+            lock(&seen).messages.iter().any(|m| {
+                m["op"] == "hello"
+                    && m["denyPrefixes"] == serde_json::json!(["10.0.0.0/8", "fd00::/8"])
+            })
+        })
+        .await;
+        let hellos = ops(&seen).iter().filter(|op| *op == "hello").count();
+        assert_eq!(hellos, 2);
         let answer = lock(&seen).messages[1].clone();
         assert_eq!(
             answer["certificate"]["spiffeId"],
@@ -1230,6 +1310,7 @@ mod tests {
             jail: false,
         };
         let authn = Authn::with_launcher(config, dir.path(), fake::deaf_launcher());
+        authn.set_deny_prefixes(Vec::new());
         authn.want(POD, true, "");
         let (_ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
         let peer: std::net::SocketAddr = "169.254.16.5:40000".parse().unwrap();

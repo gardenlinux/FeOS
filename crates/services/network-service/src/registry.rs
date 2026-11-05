@@ -112,7 +112,7 @@ pub(crate) fn internet4() -> Vec<Range> {
 }
 
 /// The prefixes that are denied always, of both families.
-pub(crate) fn always_denied() -> impl Iterator<Item = Prefix> {
+pub fn always_denied() -> impl Iterator<Item = Prefix> {
     ALWAYS_DENIED
         .iter()
         .filter_map(|prefix| prefix.parse::<Prefix>().ok())
