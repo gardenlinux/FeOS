@@ -201,9 +201,11 @@ TABLE env_incidents
   COLUMN summary text NOT NULL DEFAULT ''::text
   COLUMN evidence jsonb NOT NULL DEFAULT '{}'::jsonb
   COLUMN deployment integer NOT NULL
+  COLUMN held_at timestamp with time zone
   CONSTRAINT CHECK ((condition = ANY (ARRAY['rollout_failed'::text, 'crash_loop'::text, 'job_failed'::text, 'no_capacity'::text, 'addon_unhealthy'::text, 'volume_unavailable'::text, 'attach_failed'::text, 'names_unserved'::text, 'domain_record_wrong'::text, 'domain_deactivated'::text, 'domain_superseded'::text, 'certificate_failing'::text, 'credential_refused'::text, 'upstream_failing'::text, 'token_failing'::text])))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX env_incidents_closed ON public.env_incidents USING btree (closed_at) WHERE (closed_at IS NOT NULL)
   CREATE INDEX env_incidents_env ON public.env_incidents USING btree (env_id, id)
   CREATE UNIQUE INDEX env_incidents_open ON public.env_incidents USING btree (env_id, object, deployment, condition) WHERE (closed_at IS NULL)
   CREATE UNIQUE INDEX env_incidents_pkey ON public.env_incidents USING btree (id)
@@ -257,6 +259,7 @@ TABLE env_job_runs
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX env_job_runs_job ON public.env_job_runs USING btree (env_id, job, id)
+  CREATE INDEX env_job_runs_sandbox ON public.env_job_runs USING btree (sandbox_id)
   CREATE UNIQUE INDEX env_job_runs_pkey ON public.env_job_runs USING btree (id)
 TABLE env_route_tokens
   COLUMN hash text NOT NULL
@@ -384,6 +387,27 @@ TABLE http_bindings
   CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (sandbox_id, name)
   CREATE UNIQUE INDEX http_bindings_pkey ON public.http_bindings USING btree (sandbox_id, name)
+TABLE http_egress
+  COLUMN sandbox_id text COLLATE "C" NOT NULL
+  COLUMN binding text NOT NULL
+  COLUMN minute timestamp with time zone NOT NULL
+  COLUMN requests bigint NOT NULL DEFAULT 0
+  COLUMN refused bigint NOT NULL DEFAULT 0
+  COLUMN failing bigint NOT NULL DEFAULT 0
+  COLUMN token_failed bigint NOT NULL DEFAULT 0
+  CONSTRAINT PRIMARY KEY (sandbox_id, binding, minute)
+  CREATE INDEX http_egress_minute ON public.http_egress USING btree (minute)
+  CREATE UNIQUE INDEX http_egress_pkey ON public.http_egress USING btree (sandbox_id, binding, minute)
+TABLE http_egress_records
+  COLUMN id bigint NOT NULL GENERATED ALWAYS AS IDENTITY
+  COLUMN sandbox_id text COLLATE "C" NOT NULL
+  COLUMN binding text NOT NULL
+  COLUMN arrived_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN detail jsonb NOT NULL
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX http_egress_records_arrived ON public.http_egress_records USING btree (arrived_at)
+  CREATE INDEX http_egress_records_binding ON public.http_egress_records USING btree (sandbox_id, binding, id)
+  CREATE UNIQUE INDEX http_egress_records_pkey ON public.http_egress_records USING btree (id)
 TABLE image_bakes
   COLUMN image text COLLATE "C" NOT NULL
   COLUMN guest_version text COLLATE "C" NOT NULL
