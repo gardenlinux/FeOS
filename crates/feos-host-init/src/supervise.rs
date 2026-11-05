@@ -4,8 +4,9 @@
 //! Runs feosd and diskd, and starts each again when it ends. feosd
 //! replaces its own binary in an upgrade and runs it with the same pid, so
 //! the wait goes on across an upgrade. The pods' disks outlive diskd: the
-//! next one takes them over. The pods' resolver's sockets outlive feosd:
-//! feos-host-init holds them and hands them to every feosd it starts.
+//! next one takes them over. The pods' resolver's sockets and their HTTP
+//! bindings' listeners outlive feosd: feos-host-init holds them and hands
+//! them to every feosd it starts.
 
 use feos_utils::listen_fds;
 use log::{error, info, warn};
@@ -20,6 +21,12 @@ const FEOSD: &CStr = c"/usr/sbin/feosd";
 /// The pods' resolver at feosd's default `--dns-address`
 /// (`dns_service::ADDRESS`), which feos-host-init does not change.
 const RESOLVER: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(169, 254, 0, 53), 53);
+/// The pods' HTTP bindings at feosd's default `--otlp-address`, the name
+/// mode's port and the intercept mode's (ADR 0028).
+const HTTP_BINDINGS: [SocketAddrV4; 2] = [
+    SocketAddrV4::new(Ipv4Addr::new(169, 254, 169, 1), 80),
+    SocketAddrV4::new(Ipv4Addr::new(169, 254, 169, 1), 443),
+];
 /// feosd replaces its own binary here, and serves on TCP: a node whose
 /// operating system is FeOS has no package manager, and no other way in.
 const FEOSD_ARGS: &[&str] = &["--self-upgrade", "--tcp", "[::]:1337"];
@@ -57,7 +64,28 @@ pub fn resolver_sockets() -> Option<(OwnedFd, OwnedFd)> {
     }
 }
 
-pub async fn run_feosd(pod_prefix: Option<(Ipv6Addr, u8)>, resolver: Option<(OwnedFd, OwnedFd)>) {
+/// The pods' HTTP bindings' listeners, bound before the node holds their
+/// address, which `feosd` takes from every start to the next (ADR 0028):
+/// a connection waits in their backlog while `feosd` restarts. Without,
+/// `feosd` binds its own.
+pub fn http_listeners() -> Vec<OwnedFd> {
+    HTTP_BINDINGS
+        .iter()
+        .filter_map(|address| match listen_fds::listen_freely(*address) {
+            Ok(fd) => Some(fd),
+            Err(e) => {
+                error!("Failed to bind the pods' HTTP bindings' listener at {address}: {e}");
+                None
+            }
+        })
+        .collect()
+}
+
+pub async fn run_feosd(
+    pod_prefix: Option<(Ipv6Addr, u8)>,
+    resolver: Option<(OwnedFd, OwnedFd)>,
+    http: Vec<OwnedFd>,
+) {
     let mut argv = vec![CString::from(FEOSD)];
     argv.extend(
         feosd_args(pod_prefix)
@@ -72,6 +100,7 @@ pub async fn run_feosd(pod_prefix: Option<(Ipv6Addr, u8)>, resolver: Option<(Own
                 (tcp.as_fd(), listen_fds::DNS),
             ]
         })
+        .chain(http.iter().map(|fd| (fd.as_fd(), listen_fds::HTTP)))
         .collect();
     loop {
         // Not a std child: the reaper owns waitpid in PID 1, and the child

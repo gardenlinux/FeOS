@@ -47,7 +47,8 @@ async fn main() {
     let pod_prefix = machine::set_up().await;
     tokio::spawn(supervise::run_diskd());
     let resolver = supervise::resolver_sockets();
-    tokio::spawn(supervise::run_feosd(pod_prefix, resolver));
+    let http = supervise::http_listeners();
+    tokio::spawn(supervise::run_feosd(pod_prefix, resolver, http));
 
     // PID 1 must never exit: the kernel panics when it does.
     std::future::pending::<()>().await;

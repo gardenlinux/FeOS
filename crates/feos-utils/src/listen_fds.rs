@@ -8,7 +8,9 @@
 //! The pods' resolver outlives `feosd` so (ADR 0010): systemd's
 //! `feosd.socket` or `feos-host-init` holds its sockets and hands them to
 //! every `feosd` it starts, and a self-upgrade hands them to the new image.
-//! A query that comes while `feosd` restarts waits in them.
+//! A query that comes while `feosd` restarts waits in them. So do the
+//! listeners of the pods' HTTP bindings (ADR 0028), [`HTTP`], from
+//! `feosd-http.socket`: a connection waits in their backlog.
 
 use nix::fcntl::{fcntl, open, FcntlArg, FdFlag, OFlag};
 use nix::sys::socket::{
@@ -26,6 +28,8 @@ use std::sync::{Mutex, PoisonError};
 
 /// The name of the resolver's sockets.
 pub const DNS: &str = "dns";
+/// The name of the HTTP bindings' listeners (ADR 0028).
+pub const HTTP: &str = "http";
 /// The first fd handed over.
 const FIRST: RawFd = 3;
 /// More are not taken: a wrong `LISTEN_FDS` must not take the process's own
@@ -146,6 +150,58 @@ pub fn bind_freely(address: SocketAddrV4) -> io::Result<(OwnedFd, OwnedFd)> {
     let tcp = bound(SockType::Stream)?;
     listen(&tcp, Backlog::MAXCONN)?;
     Ok((udp, tcp))
+}
+
+/// A listening TCP socket bound to `address`, which the machine need not
+/// hold yet (`IP_FREEBIND`), closed on exec.
+pub fn listen_freely(address: SocketAddrV4) -> io::Result<OwnedFd> {
+    let fd = socket(
+        AddressFamily::Inet,
+        SockType::Stream,
+        SockFlag::SOCK_CLOEXEC,
+        None,
+    )?;
+    setsockopt(&fd, sockopt::IpFreebind, &true)?;
+    setsockopt(&fd, sockopt::ReuseAddr, &true)?;
+    bind(fd.as_raw_fd(), &SockaddrIn::from(address))?;
+    listen(&fd, Backlog::MAXCONN)?;
+    Ok(fd)
+}
+
+/// Of the handed sockets, the listening TCP ones bound to `address` at
+/// one of `ports`, by port; the others are closed, and the reasons
+/// returned.
+pub fn listeners_at(
+    sockets: Vec<(OwnedFd, String)>,
+    address: std::net::IpAddr,
+    ports: &[u16],
+) -> (Vec<(u16, TcpListener)>, Vec<String>) {
+    let (mut taken, mut refused): (Vec<(u16, TcpListener)>, _) = (Vec::new(), Vec::new());
+    for (fd, name) in sockets {
+        let what = format!("socket {name} (fd {})", fd.as_raw_fd());
+        let listening = nix::sys::socket::getsockopt(&fd, sockopt::AcceptConn).unwrap_or(false);
+        let stream = matches!(
+            nix::sys::socket::getsockopt(&fd, sockopt::SockType),
+            Ok(SockType::Stream)
+        );
+        if !listening || !stream {
+            refused.push(format!("{what} is not a listening TCP socket"));
+            continue;
+        }
+        let listener = TcpListener::from(fd);
+        match listener.local_addr() {
+            Ok(local)
+                if local.ip() == address
+                    && ports.contains(&local.port())
+                    && !taken.iter().any(|(port, _)| *port == local.port()) =>
+            {
+                taken.push((local.port(), listener));
+            }
+            Ok(local) => refused.push(format!("{what} is bound to {local}, not wanted")),
+            Err(e) => refused.push(format!("{what}: {e}")),
+        }
+    }
+    (taken, refused)
 }
 
 /// Keeps a copy of the socket to hand to the image this process execs
@@ -400,6 +456,27 @@ mod tests {
         assert!(nix::sys::socket::getsockopt(&tcp, sockopt::AcceptConn).unwrap());
         assert_eq!(UdpSocket::from(udp).local_addr().unwrap().ip(), ip);
         assert_eq!(TcpListener::from(tcp).local_addr().unwrap().ip(), ip);
+    }
+
+    #[test]
+    fn listeners_are_taken_by_their_ports() {
+        let ip = Ipv4Addr::new(192, 0, 2, 80);
+        let first = listen_freely(SocketAddrV4::new(ip, 0)).unwrap();
+        let port = TcpListener::from(first.try_clone().unwrap())
+            .local_addr()
+            .unwrap()
+            .port();
+        let elsewhere = listen_freely(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 81), 0)).unwrap();
+        let (udp, _) = bind_freely(SocketAddrV4::new(ip, 0)).unwrap();
+        let sockets = vec![
+            (udp, HTTP.to_string()),
+            (elsewhere, HTTP.to_string()),
+            (first, HTTP.to_string()),
+        ];
+        let (taken, refused) = listeners_at(sockets, ip.into(), &[port, 1]);
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].0, port);
+        assert_eq!(refused.len(), 2, "{refused:?}");
     }
 
     #[test]

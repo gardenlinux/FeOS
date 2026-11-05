@@ -3,11 +3,14 @@ Description=FeOS node agent
 Documentation=https://github.com/gardenlinux/FeOS
 After=network-online.target diskd.service feos-vms.service
 Wants=network-online.target diskd.service feos-vms.service
-# The pods' resolver's sockets, which outlive feosd (feosd.socket).
-Wants=feosd.socket
+# The pods' resolver's sockets and the HTTP bindings' listeners, which
+# outlive feosd (feosd.socket, feosd-http.socket).
+Wants=feosd.socket feosd-http.socket
 
 [Service]
 Type=notify
+# The sockets of both units; a service takes only its namesake's otherwise.
+Sockets=feosd.socket feosd-http.socket
 EnvironmentFile=-/etc/default/feosd
 # The microVMs' cgroups are feos-vms.service's: from systemd 258 on, a
 # service whose cgroup has controllers on for its children cannot start.

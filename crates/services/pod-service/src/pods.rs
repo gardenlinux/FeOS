@@ -2448,6 +2448,26 @@ impl Pods {
         &self.inner.authn
     }
 
+    /// Serves the pods' HTTP bindings at the node's address (ADR 0028 §2),
+    /// on the listeners of `handed` that are bound there and new ones, for
+    /// as long as the process runs.
+    pub fn serve_http(&self, handed: Vec<(std::os::fd::OwnedFd, String)>) {
+        let weak = Arc::downgrade(&self.inner);
+        let lookup: authn::listener::Lookup = Arc::new(move |address| {
+            weak.upgrade()
+                .and_then(|inner| inner.network.pod_at(address))
+        });
+        let address = self.inner.network.http_address();
+        let authn = self.inner.authn.clone();
+        tokio::spawn(authn::listener::serve_all(
+            handed,
+            address,
+            &[crate::network::HTTP_PORTS.0, crate::network::HTTP_PORTS.1],
+            authn,
+            lookup,
+        ));
+    }
+
     fn announce(&self, info: &PodInfo, deleted: bool) {
         let _ = self.inner.events.send(PodEvent {
             pod_id: info.pod_id.clone(),

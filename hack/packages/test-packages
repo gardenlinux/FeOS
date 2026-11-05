@@ -494,6 +494,17 @@ in_node journalctl -u feosd --no-pager -n 300 |
   contains "The resolver takes the UDP socket handed to feosd" || fail "feosd bound a socket of its own"
 log "the pods' resolver's sockets are feosd.socket's: a query while feosd is stopped starts it and is answered"
 
+# The HTTP bindings' listeners are feosd-http.socket's, which feosd takes
+# (ADR 0028); a pod without bindings is reset there.
+for port in 80 443; do
+  in_node ss -Hlnpt src "169.254.169.1:${port}" | contains -F '"feosd"' ||
+    fail "feosd does not serve the HTTP bindings at port ${port}: $(in_node ss -Hlnpt src 169.254.169.1)"
+done
+in_node journalctl -u feosd --no-pager -n 300 |
+  contains "Taking the listener at 169.254.169.1:80 handed to feosd" ||
+  fail "feosd bound an HTTP bindings' listener of its own"
+log "the HTTP bindings' listeners are feosd-http.socket's"
+
 # The pod's disk outlives diskd: the next diskd takes its device over.
 in_node systemctl restart diskd
 await "diskd did not come back" in_node systemctl is-active diskd
@@ -525,6 +536,9 @@ in_node dpkg -r feosd >/dev/null
 if in_node systemctl is-active feosd >/dev/null 2>&1; then fail "feosd runs after its removal"; fi
 if in_node systemctl is-active feosd.socket >/dev/null 2>&1; then
   fail "feosd.socket is active after the removal"
+fi
+if in_node systemctl is-active feosd-http.socket >/dev/null 2>&1; then
+  fail "feosd-http.socket is active after the removal"
 fi
 in_node sh -c 'dpkg -i /opt/packages/feosd_*.deb' >/dev/null
 await "feosd is not active again" in_node systemctl is-active feosd

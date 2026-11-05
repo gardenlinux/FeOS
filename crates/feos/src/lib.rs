@@ -112,6 +112,10 @@ pub struct ServerOptions {
     /// resolver's, which outlive it.
     #[cfg(feature = "host")]
     pub dns_sockets: Vec<(std::os::fd::OwnedFd, String)>,
+    /// The HTTP bindings' listeners handed to `feosd` (ADR 0028), which
+    /// outlive it as the resolver's do.
+    #[cfg(feature = "host")]
+    pub http_sockets: Vec<(std::os::fd::OwnedFd, String)>,
     /// diskd's socket, which the pods' disks come from (ADR 0011); its
     /// default when unset.
     #[cfg(feature = "host")]
@@ -150,6 +154,8 @@ impl ServerOptions {
             network: Default::default(),
             #[cfg(feature = "host")]
             dns_sockets: Vec::new(),
+            #[cfg(feature = "host")]
+            http_sockets: Vec::new(),
             #[cfg(feature = "host")]
             diskd_socket: None,
             #[cfg(feature = "host")]
@@ -212,6 +218,8 @@ pub async fn run_server(options: ServerOptions) -> Result<()> {
         options.authn,
     )
     .await?;
+    #[cfg(feature = "host")]
+    pods.serve_http(options.http_sockets);
     let services = Services {
         #[cfg(feature = "host")]
         pods,

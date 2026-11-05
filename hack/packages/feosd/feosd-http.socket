@@ -1,0 +1,24 @@
+[Unit]
+Description=FeOS pods' HTTP bindings
+Documentation=https://github.com/gardenlinux/FeOS
+
+# The listeners of the pods' HTTP bindings at the node's address (ADR 0028):
+# port 80 for the name mode, 443 for the intercept mode. feosd hands each
+# connection to its pod's feos-authn. They outlive restarts and upgrades of
+# feosd, so that a pod's connection waits in them meanwhile, and one while
+# feosd is stopped starts it. feosd.service wants this unit and takes its
+# sockets (Sockets=). The address is feosd's --otlp-address: a node that
+# moves it moves these sockets with a drop-in, such as
+# /etc/systemd/system/feosd-http.socket.d/address.conf:
+#
+#   [Socket]
+#   ListenStream=
+#   ListenStream=169.254.170.1:80
+#   ListenStream=169.254.170.1:443
+[Socket]
+ListenStream=169.254.169.1:80
+ListenStream=169.254.169.1:443
+# feosd gives the node the address after it starts.
+FreeBind=yes
+FileDescriptorName=http
+Service=feosd.service

@@ -281,7 +281,8 @@ impl Args {
 
 fn main() -> Result<()> {
     // The resolver's sockets, if systemd, feos-host-init or the feosd
-    // before a self-upgrade handed them over (ADR 0010).
+    // before a self-upgrade handed them over (ADR 0010), and the HTTP
+    // bindings' listeners (ADR 0028).
     // SAFETY: the process has no other threads yet.
     let dns_sockets = unsafe { feos_utils::listen_fds::take() };
     serve(dns_sockets)
@@ -347,10 +348,15 @@ async fn serve(dns_sockets: Vec<(std::os::fd::OwnedFd, String)>) -> Result<()> {
         version: feos_utils::version::full_version_string(),
         ..config
     });
+    // The HTTP bindings' listeners, and the resolver's sockets.
+    let (http_sockets, dns_sockets) = dns_sockets
+        .into_iter()
+        .partition(|(_, name)| name == feos_utils::listen_fds::HTTP);
     run_server(ServerOptions {
         tcp: args.tcp,
         network: args.network,
         dns_sockets,
+        http_sockets,
         diskd_socket: args.diskd_socket,
         fleet,
         suspend_on_stop: args.suspend_on_stop,
