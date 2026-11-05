@@ -249,6 +249,13 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
   them to the sink (ADR 0026) as the pod's egress records, under its
   labels, each a client span with the request's trace context: the
   ingress's access log (ADR 0021) in the other direction.
+- **The records live in the sink, and only there.** `ferund` keeps none
+  of a pod's requests in its activity log: a busy pod would fill
+  Postgres with a row per request for the activity's retention. Of the
+  events it keeps what the incidents below need, bounded: the requests
+  counted per pod, binding and minute of the database's clock, and the
+  newest few records of each pod's binding as evidence, both deleted
+  after minutes.
 - `ferund` opens an incident (ADR 0018) for a binding of an environment
   whose answers are mostly 401 or 403 for five minutes ("credential
   refused"), mostly 429 or 5xx ("upstream failing"), or whose token

@@ -268,7 +268,9 @@ that outlive their caller](#calls-that-outlive-their-caller));
 `sandbox_image_credentials` (a sandbox's sealed image credentials);
 `activity` and `traffic_records`, partitioned by day; `issued_certs`
 (pods' certificates); `watches`;
-`kube_bindings`, `ssh_bindings`; `auth_logins`, `ui_sessions`;
+`kube_bindings`, `ssh_bindings`, `http_bindings`, `pod_intercept_cas`,
+`http_egress`, `http_egress_records` ([HTTP bindings](#http-bindings));
+`auth_logins`, `ui_sessions`;
 `environments`, `env_deployments`, `env_tags`, `env_secrets`,
 `env_instances`, `env_job_runs`, `env_attached`, `env_volumes`,
 `env_incidents`, `env_route_tokens` ([Environments](#environments));
@@ -1822,12 +1824,18 @@ and in what its `feos-authn` gets, which answers its requests 503
 (`bindings.<name>.credential`, the check's words, never the value), and
 the check says why.
 
-**Incidents** (ADR 0028 §6). The leader's loop `env-bindings` (30 s)
-reads, for every environment with bindings, its pods' requests per
-binding over the last five minutes from their audit records (activity,
-source `authn`, kind `http_request` or `http`, `feos-authn`'s `http`
-records, [sink.md](sink.md#a-pods-egress-records-adr-0028)). A
-binding's requests are those the upstream answered and those
+**Incidents** (ADR 0028 §6). A pod's requests through its bindings are
+the sink's records ([sink.md](sink.md#a-pods-egress-records-adr-0028)):
+`ferund` keeps none of them as activity. Of the audit events `feosd`
+publishes of them (kind `http_request` or `http`, `feos-authn`'s `http`
+records; `http_end` it drops) it counts, in the batch's transaction and
+so once each, those of a sandbox's pod that name a binding and count
+below, per pod, binding and minute of the database's clock at their
+arrival (`http_egress`), and keeps the newest ten records of each pod's
+binding (`http_egress_records`); the leader's loop `env-bindings` (30 s)
+deletes both after ten minutes by the database's clock. That loop
+reads, for every environment with bindings, its pods' counts per binding
+of the current minute and the five before it. A binding's requests are those the upstream answered and those
 `feos-authn` refused because the upstream could not be reached
 (`unreachable`, `tls`) or no token could be had
 (`credential_unavailable`); its refusals for the pod's own mistakes
@@ -1846,7 +1854,8 @@ deployment:
 
 One condition at a time, in that order. The evidence is `egress`:
 `{windowSeconds, requests, refused, failing, tokenFailed, records}`, the
-newest ten records of the binding with the pod's ID. An incident closes
+newest ten kept records of the binding's requests within the window,
+each with the pod's ID. An incident closes
 once its condition no longer holds (also without requests), or its
 binding is gone.
 

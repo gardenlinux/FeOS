@@ -6,6 +6,7 @@ package fleet
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -572,5 +573,91 @@ func TestPublishEventsStopping(t *testing.T) {
 	}
 	if n := h.node("n1"); !n.StoppingUntil.IsZero() {
 		t.Fatal("a duplicate stopping event set the rollout deadline")
+	}
+}
+
+// A pod's requests through its HTTP bindings are no activity: their http
+// records are counted per pod, binding and minute, the newest kept as
+// evidence, once each when a batch comes again; their http_end, a foreign
+// pod's and the pod's own mistakes count for nothing; the other records of
+// feos-authn stay activity.
+func TestPublishEventsEgress(t *testing.T) {
+	h := newHarness(t)
+	serial := h.joined("n1")
+	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+		t.Fatal(err)
+	}
+	pod := podid.Mint()
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: pod, Owner: "acme", Image: "alpine", VCPUs: 1,
+		MemoryMiB: 512}); err != nil {
+		t.Fatal(err)
+	}
+	h.exec("UPDATE sandboxes SET node = 'n1', client_state = 'running' WHERE id = $1", pod)
+	start := uuid.New()
+	audit := func(seq uint64, podID, kind, detail string) *fleetv1.Event {
+		return &fleetv1.Event{Seq: seq, Body: &fleetv1.Event_Audit{Audit: &fleetv1.AuditRecord{PodId: podID, Kind: kind,
+			DetailJson: detail}}}
+	}
+	http := func(status int, errJSON string) string {
+		return fmt.Sprintf(`{"type":"http","binding":"erp","method":"GET","path":"/odata","status":%d,"error":%s}`,
+			status, errJSON)
+	}
+	var events []*fleetv1.Event
+	seq := uint64(0)
+	add := func(podID, kind, detail string) {
+		seq++
+		events = append(events, audit(seq, podID, kind, detail))
+	}
+	for range 12 {
+		add(pod.String(), "http_request", http(200, "null"))
+	}
+	add(pod.String(), "http_request", http(401, "null"))
+	add(pod.String(), "http_request", http(503, "null"))
+	add(pod.String(), "http", http(502, `{"code":"unreachable","message":"x"}`))
+	add(pod.String(), "http_request", http(503, `{"code":"credential_unavailable","message":"x"}`))
+	add(pod.String(), "http_request", http(403, `{"code":"denied_path","message":"x"}`))
+	add(pod.String(), "http_end", `{"type":"http_end","binding":"erp","status":200}`)
+	add(pod.String(), "http_request", `{"type":"http","binding":null,"status":404,"error":{"code":"unknown_binding"}}`)
+	add(podid.Mint().String(), "http_request", http(200, "null"))
+	add(pod.String(), "token", `{"type":"token","binding":"erp"}`)
+	b := batch(start, 0, events...)
+	acks, err := h.publish("n1", serial, b, b)
+	if err != nil || len(acks) != 2 {
+		t.Fatalf("acks %v, %v", ackSeqs(acks), err)
+	}
+	if n := h.count("SELECT count(*) FROM activity WHERE kind IN ('http_request', 'http', 'http_end')"); n != 0 {
+		t.Fatalf("%d activity rows of requests", n)
+	}
+	if n := h.count("SELECT count(*) FROM activity WHERE kind = 'token' AND sandbox_id = $1", pod); n != 1 {
+		t.Fatalf("token records: %d", n)
+	}
+	var requests, refused, failing, tokenFailed int64
+	if err := h.d.Pool.QueryRow(bg, `SELECT sum(requests), sum(refused), sum(failing), sum(token_failed)
+		FROM http_egress WHERE sandbox_id = $1 AND binding = 'erp'`, pod).Scan(&requests, &refused, &failing,
+		&tokenFailed); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 16 || refused != 1 || failing != 2 || tokenFailed != 1 {
+		t.Fatalf("counts %d %d %d %d", requests, refused, failing, tokenFailed)
+	}
+	if n := h.count("SELECT count(*) FROM http_egress"); n != 1 {
+		t.Fatalf("%d count rows", n)
+	}
+	if n := h.count("SELECT count(*) FROM http_egress_records WHERE sandbox_id = $1", pod); n != store.EgressKeep {
+		t.Fatalf("%d records kept", n)
+	}
+	var newest string
+	h.scalar(&newest, "SELECT detail->'error'->>'code' FROM http_egress_records ORDER BY id DESC LIMIT 1")
+	if newest != "credential_unavailable" {
+		t.Fatalf("the newest record: %s", newest)
+	}
+	// Swept by the database's clock.
+	h.exec("UPDATE http_egress SET minute = minute - interval '11 minutes'")
+	h.exec("UPDATE http_egress_records SET arrived_at = arrived_at - interval '11 minutes'")
+	if err := h.st.SweepEgress(bg, 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.count("SELECT (SELECT count(*) FROM http_egress) + (SELECT count(*) FROM http_egress_records)"); n != 0 {
+		t.Fatalf("%d rows after the sweep", n)
 	}
 }

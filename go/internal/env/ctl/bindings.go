@@ -17,10 +17,12 @@ import (
 )
 
 // The incidents of an environment's HTTP bindings (ADR 0028 §6): every
-// bindingsEvery the leader reads, per binding, the audit records of the
+// bindingsEvery the leader reads, per binding, the counts of the
 // environment's pods' requests through it over the last bindingWindow
-// (activity, source authn, kind http_request or http: feos-authn's "http"
-// records, which feosd publishes as the pods' events). Its requests are
+// (http_egress: feos-authn's "http" records, which feosd publishes as the
+// pods' events, counted per pod, binding and minute at their arrival; the
+// records themselves are the sink's), and sweeps the counts and the kept
+// records older than bindingKeep. Its requests are
 // those the upstream answered and those feos-authn refused because the
 // upstream could not be reached (unreachable, tls) or no token could be
 // had (credential_unavailable); its refusals for the pod's own mistakes
@@ -42,7 +44,10 @@ const (
 	bindingsEvery      = 30 * time.Second
 	bindingWindow      = 5 * time.Minute
 	bindingMinRequests = 5
-	bindingEvidence    = 10
+	bindingEvidence    = store.EgressKeep
+	// bindingKeep is how long the counts and records of the pods' requests
+	// are kept: twice the window.
+	bindingKeep = 2 * bindingWindow
 )
 
 // egressEvidence is a binding incident's evidence: the window's counts
@@ -94,6 +99,12 @@ func bindingSummary(name, cond string, n, of int64) string {
 // bindingsLoop opens and closes the bindings' incidents of every
 // environment with bindings.
 func (c *Controller) bindingsLoop(ctx context.Context) error {
+	if err := c.st.SweepEgress(ctx, bindingKeep); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c.rl.warn("bindings-sweep", "cannot sweep the bindings' request counts", "err", err)
+	}
 	envs, err := c.st.BindingEnvs(ctx)
 	if err != nil {
 		return fmt.Errorf("bindings: %w", err)

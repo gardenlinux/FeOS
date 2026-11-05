@@ -27,6 +27,15 @@
 -- 0028 §6), on the object binding/<name>: credential_refused,
 -- upstream_failing, token_failing.
 --
+-- http_egress is what those incidents read of a pod's requests through its
+-- HTTP bindings: feos-authn's http records, which feosd publishes as the
+-- pod's audit events, counted per pod, binding and minute of the
+-- database's clock at their arrival; http_egress_records keeps the newest
+-- ten of a pod's binding as the incidents' evidence. The records
+-- themselves are the sink's (ADR 0026): ferund keeps none of them as
+-- activity, and the leader sweeps both tables after ten minutes. No
+-- foreign key: the sweep takes a deleted sandbox's rows too.
+--
 -- Additive: an instance of the previous version neither reads nor writes
 -- the new columns and tables, and a sandbox's delete cascades to them; it
 -- opens none of the new conditions and reads them as any other.
@@ -64,3 +73,23 @@ ALTER TABLE env_incidents ADD CONSTRAINT env_incidents_condition_check
      'addon_unhealthy','volume_unavailable','attach_failed','names_unserved',
      'domain_record_wrong','domain_deactivated','domain_superseded','certificate_failing',
      'credential_refused','upstream_failing','token_failing'));
+
+CREATE TABLE http_egress (
+  sandbox_id text COLLATE "C" NOT NULL,
+  binding text NOT NULL,
+  minute timestamptz NOT NULL,                 -- date_trunc('minute', now()) at the arrival
+  requests bigint NOT NULL DEFAULT 0,          -- answered by the upstream, or refused unreachable, tls, credential_unavailable
+  refused bigint NOT NULL DEFAULT 0,           -- of them answered 401 or 403 by the upstream
+  failing bigint NOT NULL DEFAULT 0,           -- answered 429 or 5xx by it, or unreachable, tls
+  token_failed bigint NOT NULL DEFAULT 0,      -- credential_unavailable
+  PRIMARY KEY (sandbox_id, binding, minute));
+CREATE INDEX http_egress_minute ON http_egress(minute);
+
+CREATE TABLE http_egress_records (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  sandbox_id text COLLATE "C" NOT NULL,
+  binding text NOT NULL,
+  arrived_at timestamptz NOT NULL DEFAULT now(),
+  detail jsonb NOT NULL);                      -- the http record as feos-authn wrote it
+CREATE INDEX http_egress_records_binding ON http_egress_records(sandbox_id, binding, id);
+CREATE INDEX http_egress_records_arrived ON http_egress_records(arrived_at);

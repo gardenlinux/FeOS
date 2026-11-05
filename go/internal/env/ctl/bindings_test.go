@@ -93,9 +93,9 @@ func TestServiceBindings(t *testing.T) {
 	}
 }
 
-// auditHTTP records a pod's requests through a binding as feosd publishes
-// them (activity, source authn, kind http_request), n of them with status,
-// or refused with code when it is set.
+// auditHTTP records a pod's requests through a binding as ferund counts
+// the http records feosd publishes (http_egress and its kept records), n
+// of them with status, or refused with code when it is set.
 func (h *harness) auditHTTP(sb store.Sandbox, binding string, n, status int, code string) {
 	h.t.Helper()
 	detail := fmt.Sprintf(`{"type":"http","binding":%q,"method":"GET","path":"/odata/Orders","status":%d,"error":null}`,
@@ -104,11 +104,36 @@ func (h *harness) auditHTTP(sb store.Sandbox, binding string, n, status int, cod
 		detail = fmt.Sprintf(`{"type":"http","binding":%q,"method":"GET","path":"/odata/Orders","status":%d,`+
 			`"error":{"code":%q,"message":"no"}}`, binding, status, code)
 	}
-	for range n {
-		h.exec(`INSERT INTO activity (ts_ns, sandbox_id, pod_id, tenant_id, source, kind, category, name, detail)
-			VALUES ((extract(epoch FROM now()) * 1e9)::bigint, $1, $1, $2, 'authn', 'http_request', 'credential', 'x', $3)`,
-			sb.ID, sb.Owner, detail)
+	cl := store.ClassifyEgress(status, code != "", code)
+	if !cl.Counted {
+		return
 	}
+	c := store.EgressCount{SandboxID: sb.ID, Binding: binding}
+	for range n {
+		c.Requests++
+		for _, f := range []struct {
+			on bool
+			n  *int64
+		}{{cl.Refused, &c.Refused}, {cl.Failing, &c.Failing}, {cl.TokenFailed, &c.TokenFailed}} {
+			if f.on {
+				*f.n++
+			}
+		}
+		c.Records = append(c.Records, json.RawMessage(detail))
+	}
+	if len(c.Records) > store.EgressKeep {
+		c.Records = c.Records[len(c.Records)-store.EgressKeep:]
+	}
+	if err := h.st.AddEgress(bg, []store.EgressCount{c}); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// ageEgress moves the pods' requests out of the window.
+func (h *harness) ageEgress() {
+	h.t.Helper()
+	h.exec(`UPDATE http_egress SET minute = minute - interval '6 minutes'`)
+	h.exec(`UPDATE http_egress_records SET arrived_at = arrived_at - interval '6 minutes'`)
 }
 
 // The incidents of a binding: opened from its pods' requests in the last
@@ -168,7 +193,7 @@ func TestBindingIncidents(t *testing.T) {
 	}
 
 	// The window moves on: the old records age out, the upstream fails.
-	h.exec(`UPDATE activity SET ts_ns = ts_ns - $1 WHERE kind = 'http_request'`, (6 * time.Minute).Nanoseconds())
+	h.ageEgress()
 	h.auditHTTP(pod, "erp", 4, 503, "")
 	h.auditHTTP(pod, "erp", 1, 502, "unreachable")
 	h.auditHTTP(pod, "erp", 1, 502, "tls")
@@ -180,7 +205,7 @@ func TestBindingIncidents(t *testing.T) {
 	}
 
 	// The token endpoint fails; the pod's own mistakes count for nothing.
-	h.exec(`UPDATE activity SET ts_ns = ts_ns - $1 WHERE kind = 'http_request'`, (6 * time.Minute).Nanoseconds())
+	h.ageEgress()
 	h.auditHTTP(pod, "erp", 5, 503, "credential_unavailable")
 	h.auditHTTP(pod, "erp", 20, 403, "denied_path")
 	h.auditHTTP(pod, "erp", 20, 429, "rate_limited")
@@ -191,9 +216,18 @@ func TestBindingIncidents(t *testing.T) {
 	}
 
 	// Quiet: closed.
-	h.exec(`UPDATE activity SET ts_ns = ts_ns - $1 WHERE kind = 'http_request'`, (6 * time.Minute).Nanoseconds())
+	h.ageEgress()
 	pass()
 	if open := openOf(); len(open) != 0 {
 		t.Fatalf("after the window: %v", open)
+	}
+
+	// The counts and records are swept after twice the window.
+	h.ageEgress()
+	pass()
+	var left int
+	if err := h.d.Pool.QueryRow(bg, `SELECT (SELECT count(*) FROM http_egress) +
+		(SELECT count(*) FROM http_egress_records)`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("%d rows after the sweep: %v", left, err)
 	}
 }
