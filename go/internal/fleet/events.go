@@ -485,6 +485,9 @@ func auditName(kind string, f map[string]any) string {
 	switch kind {
 	case "kube_request":
 		return strings.Join(strings.Fields(field("method")+" "+field("path")+" "+field("status")), " ")
+	case "http_request":
+		// ADR 0028: "GET erp /odata/Orders 200".
+		return strings.Join(strings.Fields(field("method")+" "+field("binding")+" "+field("path")+" "+field("status")), " ")
 	case "ssh_signature":
 		return "ssh signature (" + field("binding") + ")"
 	case "kube_deny", "ssh_deny":

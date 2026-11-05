@@ -100,6 +100,23 @@ type PodTemplate struct {
 	// credentials is replaced, while a secret's new value is the same
 	// template (version 0).
 	ImageCredentials *TemplateCredentials `json:"imageCredentials,omitempty"`
+	// HTTPBindings are the HTTP bindings (ADR 0028) the pod's object
+	// names, by name: what of each makes the pod another (its name, its
+	// upstream and its mode, which its resolver and trust files follow).
+	// The rest of a binding, its credential with its secrets' versions
+	// among it, is read from the instance's deployment whenever the pod
+	// asks for its bindings, so that a new secret version is sealed to the
+	// running pod again and replaces none. Hash takes them.
+	HTTPBindings []TemplateHTTPBinding `json:"httpBindings,omitempty"`
+}
+
+// TemplateHTTPBinding is an HTTP binding a pod's object names: its name,
+// its upstream ("https://host[:port]") and its mode ("name",
+// "intercept").
+type TemplateHTTPBinding struct {
+	Name     string `json:"name"`
+	Upstream string `json:"upstream"`
+	Mode     string `json:"mode"`
 }
 
 // TemplateCredentials are an environment's pod's login for its image's
@@ -208,9 +225,10 @@ func (t PodTemplate) HasCredential() bool {
 // canonical JSON of what the pod runs, that is the image (pinned to its
 // digest), the resources, and the template without its labels (command,
 // env with secrets as name and version, volumes, mounts, security groups
-// in sorted order, then name tables in order and the ingress group flag,
-// each only when there are any or it is set, so that a template without
-// them hashes as before they were). Equal pods hash equal: a nil and an
+// in sorted order, then name tables in order, the ingress group flag, the
+// image credentials and the HTTP bindings (name, upstream and mode), each
+// only when there are any or it is set, so that a template without them
+// hashes as before they were). Equal pods hash equal: a nil and an
 // empty list or map hash alike. What an instance is not rebuilt for (its
 // labels, the idle policy, the deployment) is not in it.
 func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
@@ -230,11 +248,13 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		IngressGroup   bool                     `json:"ingressGroup,omitempty"`
 		// Without credentials, a template hashes as before them.
 		ImageCredentials *TemplateCredentials `json:"imageCredentials,omitempty"`
+		// Without HTTP bindings, a template hashes as before them.
+		HTTPBindings []TemplateHTTPBinding `json:"httpBindings,omitempty"`
 	}{
 		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 		Command: nonNil(t.Command), Env: t.Env, Volumes: nonNil(t.Volumes), Mounts: nonNil(t.Mounts),
 		SecurityGroups: nonNil(groups), NameTables: t.NameTables, IngressGroup: t.IngressGroup,
-		ImageCredentials: t.ImageCredentials,
+		ImageCredentials: t.ImageCredentials, HTTPBindings: t.HTTPBindings,
 	}
 	if h.Env == nil {
 		h.Env = map[string]TemplateValue{}

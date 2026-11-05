@@ -434,6 +434,12 @@ func (b *fakeBindings) KubePreflight(w http.ResponseWriter, _ *http.Request) {
 func (b *fakeBindings) SSHPreflight(w http.ResponseWriter, _ *http.Request) {
 	b.answer(w, "SSHPreflight")
 }
+func (b *fakeBindings) PutHTTP(w http.ResponseWriter, _ *http.Request)    { b.answer(w, "PutHTTP") }
+func (b *fakeBindings) GetHTTP(w http.ResponseWriter, _ *http.Request)    { b.answer(w, "GetHTTP") }
+func (b *fakeBindings) DeleteHTTP(w http.ResponseWriter, _ *http.Request) { b.answer(w, "DeleteHTTP") }
+func (b *fakeBindings) HTTPPreflight(w http.ResponseWriter, _ *http.Request) {
+	b.answer(w, "HTTPPreflight")
+}
 func (b *fakeBindings) Access(w http.ResponseWriter, _ *http.Request) {
 	if !b.on {
 		// The real service's answer while off.

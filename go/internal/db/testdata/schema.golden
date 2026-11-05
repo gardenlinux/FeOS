@@ -201,7 +201,7 @@ TABLE env_incidents
   COLUMN summary text NOT NULL DEFAULT ''::text
   COLUMN evidence jsonb NOT NULL DEFAULT '{}'::jsonb
   COLUMN deployment integer NOT NULL
-  CONSTRAINT CHECK ((condition = ANY (ARRAY['rollout_failed'::text, 'crash_loop'::text, 'job_failed'::text, 'no_capacity'::text, 'addon_unhealthy'::text, 'volume_unavailable'::text, 'attach_failed'::text, 'names_unserved'::text, 'domain_record_wrong'::text, 'domain_deactivated'::text, 'domain_superseded'::text, 'certificate_failing'::text])))
+  CONSTRAINT CHECK ((condition = ANY (ARRAY['rollout_failed'::text, 'crash_loop'::text, 'job_failed'::text, 'no_capacity'::text, 'addon_unhealthy'::text, 'volume_unavailable'::text, 'attach_failed'::text, 'names_unserved'::text, 'domain_record_wrong'::text, 'domain_deactivated'::text, 'domain_superseded'::text, 'certificate_failing'::text, 'credential_refused'::text, 'upstream_failing'::text, 'token_failing'::text])))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX env_incidents_env ON public.env_incidents USING btree (env_id, id)
@@ -363,6 +363,27 @@ TABLE host_labels
   CONSTRAINT UNIQUE (env_id)
   CREATE UNIQUE INDEX host_labels_env_id_key ON public.host_labels USING btree (env_id)
   CREATE UNIQUE INDEX host_labels_pkey ON public.host_labels USING btree (label)
+TABLE http_bindings
+  COLUMN sandbox_id text COLLATE "C" NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN upstream text NOT NULL
+  COLUMN mode text NOT NULL
+  COLUMN ca_pem text NOT NULL DEFAULT ''::text
+  COLUMN path_prefixes text[] NOT NULL DEFAULT '{}'::text[]
+  COLUMN forwarded_host boolean NOT NULL DEFAULT false
+  COLUMN rate_per_second integer NOT NULL DEFAULT 0
+  COLUMN rate_burst integer NOT NULL DEFAULT 0
+  COLUMN credential_kind text NOT NULL
+  COLUMN sealed bytea NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((credential_kind = ANY (ARRAY['headers'::text, 'basic'::text, 'oauth2'::text, 'clientCertificate'::text])))
+  CONSTRAINT CHECK ((mode = ANY (ARRAY['name'::text, 'intercept'::text])))
+  CONSTRAINT CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
+  CONSTRAINT CHECK ((rate_burst >= 0))
+  CONSTRAINT CHECK ((rate_per_second >= 0))
+  CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (sandbox_id, name)
+  CREATE UNIQUE INDEX http_bindings_pkey ON public.http_bindings USING btree (sandbox_id, name)
 TABLE image_bakes
   COLUMN image text COLLATE "C" NOT NULL
   COLUMN guest_version text COLLATE "C" NOT NULL
@@ -620,6 +641,17 @@ TABLE nodes
   CONSTRAINT UNIQUE (mesh_subnet)
   CREATE UNIQUE INDEX nodes_mesh_subnet_key ON public.nodes USING btree (mesh_subnet)
   CREATE UNIQUE INDEX nodes_pkey ON public.nodes USING btree (name)
+TABLE pod_intercept_cas
+  COLUMN sandbox_id text COLLATE "C" NOT NULL
+  COLUMN seq integer NOT NULL
+  COLUMN hosts text[] NOT NULL
+  COLUMN cert_pem text NOT NULL
+  COLUMN sealed_key bytea NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((seq >= 1))
+  CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (sandbox_id, seq)
+  CREATE UNIQUE INDEX pod_intercept_cas_pkey ON public.pod_intercept_cas USING btree (sandbox_id, seq)
 TABLE pod_network
   COLUMN id boolean NOT NULL DEFAULT true
   COLUMN ula cidr NOT NULL
@@ -720,6 +752,8 @@ TABLE sandboxes
   COLUMN address text NOT NULL DEFAULT ''::text
   COLUMN tenant_job boolean NOT NULL DEFAULT false
   COLUMN log_labels jsonb NOT NULL DEFAULT '{}'::jsonb
+  COLUMN http_version text NOT NULL DEFAULT ''::text
+  COLUMN http_pushed text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((vcpus >= 1) AND (vcpus <= 32)))

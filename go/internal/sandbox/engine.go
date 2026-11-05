@@ -298,6 +298,8 @@ type Engine struct {
 
 	runner *runner
 	syncs  syncer
+	// httpPush are the background pushes of pods' HTTP bindings (http.go).
+	httpPush httpPushes
 
 	// bg owns the engine's background work (finishes, syncs, renewals,
 	// detached node calls); it ends when Run returns.

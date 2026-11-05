@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -44,10 +45,12 @@ const (
 	lookupTimeout   = 5 * time.Second
 )
 
-// Service is the Kubernetes and SSH bindings of ferund: the REST handlers
-// of both sets, the preflights and the check, the access route, and the
-// source of a pod's bindings that fleet seals into IssuePodCredentials.
-// It implements fleet.BindingsSource and ports.KubePorts.
+// Service is the Kubernetes, SSH and HTTP bindings of ferund: the REST
+// handlers of the sets, the preflights and the check, the access route,
+// the source of a pod's bindings that fleet seals into
+// IssuePodCredentials, and the clear part of its HTTP bindings that the
+// engine sends its node. It implements fleet.BindingsSource and
+// ports.KubePorts.
 type Service struct {
 	enabled bool
 	sealer  *seal.Sealer // nil when off
@@ -63,9 +66,15 @@ type Service struct {
 	// betweenReads, when set (by tests only), runs inside snapshot between
 	// the read of the Kubernetes set and that of the SSH set.
 	betweenReads func()
-	// afterApply, when set (by tests only), runs in PutKube and PutSSH
-	// after the write has committed and before the answer is written.
+	// afterApply, when set (by tests only), runs in PutKube, PutSSH and
+	// PutHTTP after the write has committed and before the answer is
+	// written.
 	afterApply func()
+
+	// The hooks set after New (SetEnvSource, SetPusher).
+	hooks  sync.Mutex
+	envSrc EnvSource
+	pusher Pusher
 }
 
 // New returns the Service. It is on when cfg.Enabled is set and cfg.Key is
@@ -101,14 +110,23 @@ func New(cfg Config, st *store.Store, d *db.DB) (*Service, error) {
 func (s *Service) Enabled() bool { return s.enabled }
 
 // PodBindings returns a pod's bindings, opened from their sealing at rest,
-// and the version of the two sets, for IssuePodCredentials to seal to the
-// run's key. A pod without bindings, a sandbox that does not exist, or the
-// surfaces off: nil and "". Both sets and their versions are read in one
+// and their version, for IssuePodCredentials to seal to the run's key: a
+// sandbox's Kubernetes, SSH and HTTP sets and its interception CAs, or an
+// environment's pod's HTTP bindings (those its object names) and its CAs.
+// A pod without bindings, a sandbox that does not exist, or the surfaces
+// off: nil and "". A sandbox's sets and their versions are read in one
 // REPEATABLE READ snapshot, so the version names exactly the bindings
 // returned.
 func (s *Service) PodBindings(ctx context.Context, podID podid.ID) (*fleetv1.PodBindings, string, error) {
 	if !s.enabled {
 		return nil, "", nil
+	}
+	row, err := s.rowOf(ctx, podID)
+	if err != nil || row == nil {
+		return nil, "", err
+	}
+	if isEnvPod(*row) {
+		return s.envPodBindings(ctx, *row)
 	}
 	snap, err := s.snapshot(ctx, podID)
 	if errors.Is(err, errNoSandbox) {
@@ -125,7 +143,11 @@ func (s *Service) PodBindings(ctx context.Context, podID podid.ID) (*fleetv1.Pod
 	if err != nil {
 		return nil, "", err
 	}
-	if len(kube) == 0 && len(ssh) == 0 {
+	http, err := s.openHTTP(podID, snap.http)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(kube) == 0 && len(ssh) == 0 && len(http) == 0 {
 		return nil, "", nil
 	}
 	out := &fleetv1.PodBindings{}
@@ -135,7 +157,14 @@ func (s *Service) PodBindings(ctx context.Context, podID podid.ID) (*fleetv1.Pod
 	for _, b := range ssh {
 		out.Ssh = append(out.Ssh, b.proto())
 	}
-	return out, podVersion(snap.kubeVersion, snap.sshVersion, ssh), nil
+	for _, b := range http {
+		out.Http = append(out.Http, b.proto())
+	}
+	cas := givenCAs(http, snap.cas)
+	if out.InterceptCas, err = s.openCAs(podID, cas); err != nil {
+		return nil, "", err
+	}
+	return out, podVersionHTTP(podVersion(snap.kubeVersion, snap.sshVersion, ssh), snap.httpVersion, cas), nil
 }
 
 // KubePorts returns the loopback ports of a sandbox's Kubernetes bindings,
@@ -173,16 +202,18 @@ func (s *Service) fail(w http.ResponseWriter, r *http.Request, err error) {
 	apierr.Write(w, err)
 }
 
-// podSnapshot is a sandbox's two stored sets and their versions, read in
-// one snapshot.
+// podSnapshot is a sandbox's stored sets, their versions and its
+// interception CAs, read in one snapshot.
 type podSnapshot struct {
-	kubeVersion, sshVersion string
-	kube                    []store.KubeBinding
-	ssh                     []store.SSHBinding
+	kubeVersion, sshVersion, httpVersion string
+	kube                                 []store.KubeBinding
+	ssh                                  []store.SSHBinding
+	http                                 []store.HTTPBinding
+	cas                                  []store.InterceptCA
 }
 
-// snapshot reads both sets of a sandbox in one REPEATABLE READ, read-only
-// transaction; errNoSandbox when the sandbox does not exist.
+// snapshot reads the sets and CAs of a sandbox in one REPEATABLE READ,
+// read-only transaction; errNoSandbox when the sandbox does not exist.
 func (s *Service) snapshot(ctx context.Context, id podid.ID) (podSnapshot, error) {
 	var snap podSnapshot
 	tx, err := s.d.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -201,6 +232,12 @@ func (s *Service) snapshot(ctx context.Context, id podid.ID) (podSnapshot, error
 	}
 	if err == nil {
 		snap.sshVersion, snap.ssh, err = st.SSHBindings(ctx, id)
+	}
+	if err == nil {
+		snap.httpVersion, snap.http, err = st.HTTPBindings(ctx, id)
+	}
+	if err == nil {
+		snap.cas, err = st.InterceptCAs(ctx, id)
 	}
 	if errors.Is(err, model.ErrNotFound) {
 		return snap, errNoSandbox

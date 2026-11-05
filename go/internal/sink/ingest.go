@@ -36,10 +36,12 @@ const (
 	maxKeys          = 1000
 )
 
-// A stream's sources: an ingress's access log (ferun.source), and a
-// container's output (any other).
+// A stream's sources: an ingress's access log (ferun.source ingress), a
+// pod's requests through its HTTP bindings (ferun.source egress, ADR
+// 0028), and a container's output (any other).
 const (
 	SourceIngress   = "ingress"
+	SourceEgress    = "egress"
 	SourceContainer = "container"
 	// ingressPod starts the ferun.pod of an ingress's streams, the
 	// instance's name follows.
@@ -212,7 +214,8 @@ var errNotYours = errors.New("not the peer's stream")
 // log.offset, a resource without its key or tenant, and more than
 // maxExportRecords records are refused. A stream with ferun.source
 // ingress is an ingress's whose name its ferun.pod has (ingress/<name>),
-// every other a node's, never of an ingress/ pod: one of another peer
+// every other (a container's, or egress, a pod's requests through its
+// HTTP bindings) a node's, never of an ingress/ pod: one of another peer
 // refuses the request with errNotYours. A record's time is its own, else
 // when the node read it, else now; its text is made valid UTF-8 without
 // NULs, which PostgreSQL's text cannot hold.
@@ -240,9 +243,8 @@ func parseExport(req *otlplogsv1.ExportLogsServiceRequest, p ingestPeer, now tim
 		if attrs[attrTenant] == "" {
 			return nil, fmt.Errorf("resource %d: %s is required", i, attrTenant)
 		}
-		source := SourceContainer
-		if attrs[attrSource] == SourceIngress {
-			source = SourceIngress
+		source := sourceOf(attrs[attrSource])
+		if source == SourceIngress {
 			if p.ingress == "" || key.Pod != ingressPod+p.ingress {
 				return nil, fmt.Errorf("resource %d: %w: a stream of %s %s is the ingress's of its %s alone", i, errNotYours,
 					attrSource, SourceIngress, attrPod)
@@ -270,6 +272,21 @@ func parseExport(req *otlplogsv1.ExportLogsServiceRequest, p ingestPeer, now tim
 		}
 	}
 	return out, nil
+}
+
+// sourceOf is a stream's source by its ferun.source: ingress, egress, or
+// container for any other.
+func sourceOf(attr string) string {
+	switch attr {
+	case SourceIngress, SourceEgress:
+		return attr
+	}
+	return SourceContainer
+}
+
+// validSource reports whether a selector's source is one (or none).
+func validSource(s string) bool {
+	return s == "" || s == SourceIngress || s == SourceEgress || s == SourceContainer
 }
 
 // deploymentAttr is the attribute that holds a stream's deployment:

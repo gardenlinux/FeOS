@@ -89,6 +89,56 @@ func TestCreateIsIdempotentBySpec(t *testing.T) {
 	wantCode(t, err, codes.InvalidArgument, `container "main" has no image`)
 }
 
+// The clear part of a pod's HTTP bindings (ADR 0028) is the record's:
+// SetPodHttpBindings sets it whole, running or not, and a create delivered
+// again with another one takes it instead of refusing.
+func TestSetPodHttpBindings(t *testing.T) {
+	e := newEnv(t)
+	in := e.instance("i1", caIss)
+	e.start("n1", in)
+	pc := pods(t, in, "n1")
+
+	id := podid.Mint()
+	spec := sandboxSpec(id, "inc-1")
+	spec.HttpBindings = &podv1.PodHttpBindings{Names: []string{"erp"}, Version: "v1"}
+	if _, err := create(t, pc, id.String(), spec); err != nil {
+		t.Fatal(err)
+	}
+	part := func() *podv1.PodHttpBindings {
+		t.Helper()
+		info, err := pc.GetPod(t.Context(), &podv1.GetPodRequest{PodId: id.String()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.GetSpec().GetHttpBindings()
+	}
+	if p := part(); p.GetVersion() != "v1" {
+		t.Fatalf("the create's part: %v", p)
+	}
+	v2 := &podv1.PodHttpBindings{Names: []string{"erp", "pay"}, InterceptHosts: []string{"api.erp.example"},
+		InterceptCaPems: []string{"-----BEGIN CERTIFICATE-----"}, Version: "v2"}
+	if _, err := pc.SetPodHttpBindings(t.Context(), &podv1.SetPodHttpBindingsRequest{PodId: id.String(),
+		HttpBindings: v2}); err != nil {
+		t.Fatal(err)
+	}
+	if p := part(); !proto.Equal(p, v2) {
+		t.Fatalf("the set part: %v", p)
+	}
+	again, err := create(t, pc, id.String(), spec)
+	if err != nil || again.GetSpec().GetHttpBindings().GetVersion() != "v1" || part().GetVersion() != "v1" {
+		t.Fatalf("a create again with another part: %v, %v", again, err)
+	}
+	if _, err := pc.SetPodHttpBindings(t.Context(), &podv1.SetPodHttpBindingsRequest{PodId: id.String(),
+		HttpBindings: &podv1.PodHttpBindings{}}); err != nil {
+		t.Fatal(err)
+	}
+	if p := part(); p != nil {
+		t.Fatalf("an empty part: %v", p)
+	}
+	_, err = pc.SetPodHttpBindings(t.Context(), &podv1.SetPodHttpBindingsRequest{PodId: podid.Mint().String()})
+	wantPrefix(t, err, codes.NotFound, "no pod ")
+}
+
 func TestTAPPrefixCollision(t *testing.T) {
 	e := newEnv(t)
 	in := e.instance("i1", caIss)

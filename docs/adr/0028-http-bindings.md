@@ -259,7 +259,7 @@ on-behalf-of) and request signing schemes. Both are later ADRs.
   plan shows binding changes. A new version of a referenced secret is
   sealed to the running pods again without a restart; a change of name,
   upstream or mode is a rollout.
-- **Preflight** (`POST /api/v1/bindings/preflight`), before anything is
+- **Preflight** (`POST /api/v1/http/preflight`), before anything is
   stored: resolve and check the upstream, connect, check TLS, fetch a
   token where the credential is OAuth, and, if asked, send one `GET` or
   `HEAD` to a given path with the credential. It answers the addresses,

@@ -61,6 +61,12 @@ func fakeLookup(_ context.Context, host string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("203.0.113.10")}, nil
 	case "git.example.test":
 		return []netip.Addr{netip.MustParseAddr("203.0.113.30")}, nil
+	case "api.erp.example.test":
+		return []netip.Addr{netip.MustParseAddr("203.0.113.40")}, nil
+	case "auth.erp.example.test":
+		return []netip.Addr{netip.MustParseAddr("203.0.113.41")}, nil
+	case "pay.example.test":
+		return []netip.Addr{netip.MustParseAddr("203.0.113.42")}, nil
 	case "internal.test":
 		return []netip.Addr{netip.MustParseAddr("10.43.0.1")}, nil
 	case "mixed.test":
@@ -175,6 +181,10 @@ func (r *rig) mux() http.Handler {
 		mux.HandleFunc("POST /api/v1/sandboxes/{id}/ssh/{name}/check", sandbox(s.CheckSSH))
 		mux.HandleFunc("POST /api/v1/kube/preflight", tenant(s.KubePreflight))
 		mux.HandleFunc("POST /api/v1/ssh/preflight", tenant(s.SSHPreflight))
+		mux.HandleFunc("PUT /api/v1/sandboxes/{id}/http", sandbox(s.PutHTTP))
+		mux.HandleFunc("GET /api/v1/sandboxes/{id}/http", sandbox(s.GetHTTP))
+		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}/http", sandbox(s.DeleteHTTP))
+		mux.HandleFunc("POST /api/v1/http/preflight", tenant(s.HTTPPreflight))
 	}
 	mux.HandleFunc("GET /api/v1/sandboxes/{id}/access", tenant(s.Access))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, req *http.Request) {

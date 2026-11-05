@@ -71,7 +71,8 @@ type traceSpan struct {
 
 // parseTraceExport reads a request into documents (traces.md, The sink).
 // A ResourceSpans without ferun.tenant and ferun.pod, or of another peer
-// (a node's: ferun.source not ingress, ferun.pod not ingress/…; an
+// (a node's: ferun.source not ingress (a container's spans, or egress, a
+// pod's requests through its HTTP bindings), ferun.pod not ingress/…; an
 // ingress's: ferun.source ingress, ferun.pod ingress/<its name>), refuses
 // the request with errNotYours; more than maxExportSpans spans refuse it
 // too. A span without a valid trace or span ID is left out and counted in
@@ -97,9 +98,8 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 		if tenant == "" || pod == "" {
 			return nil, 0, fmt.Errorf("resource %d: %w: %s and %s are required", i, errNotYours, attrTenant, attrPod)
 		}
-		source := SourceContainer
-		if text[attrSource] == SourceIngress {
-			source = SourceIngress
+		source := sourceOf(text[attrSource])
+		if source == SourceIngress {
 			if p.ingress == "" || pod != ingressPod+p.ingress {
 				return nil, 0, fmt.Errorf("resource %d: %w: spans of %s %s are the ingress's of its %s alone", i, errNotYours,
 					attrSource, SourceIngress, attrPod)

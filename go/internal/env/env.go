@@ -77,7 +77,11 @@ type Deps struct {
 	SinkURL string
 	// SinkClient asks the sink; nil: a client with a 10 s timeout.
 	SinkClient *http.Client
-	Log        *slog.Logger
+	// Bindings are the HTTP bindings (ADR 0028), for the plans' checks of
+	// an environment's bindings and their check route; nil: off, and a
+	// spec with bindings is refused.
+	Bindings HTTPBindings
+	Log      *slog.Logger
 	// EnvChanged runs in the transaction that changed an environment's
 	// publicity or marked it deleting, with its row locked: the domains
 	// bound to it derive their states again (internal/domains). nil:

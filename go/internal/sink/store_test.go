@@ -688,6 +688,44 @@ func TestTraces(t *testing.T) {
 	}
 }
 
+// A pod's egress records (ADR 0028) are a stream of source egress beside
+// its containers': the selector source picks them, in the tail and in the
+// index, and the stream's JSON says so.
+func TestEgressSource(t *testing.T) {
+	s, idx, lg := newTestStore(t, testConfig())
+	ctx := context.Background()
+	egress := envLabels("acme", "e", 0)
+	egress.Source = SourceEgress
+	rec := func(i int) string {
+		return fmt.Sprintf(`{"type":"http","binding":"erp","method":"GET","status":%d,"level":"info"}`, 200+i)
+	}
+	if err := s.Ingest(ctx, batch(StreamKey{"p", "feos-authn", "E1"}, egress, lines(0, base, 3, rec))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ingest(ctx, batch(StreamKey{"p", "main", "L1"}, envLabels("acme", "e", 0),
+		lines(0, base, 2, func(i int) string { return fmt.Sprintf("INFO line %d", i) }))); err != nil {
+		t.Fatal(err)
+	}
+	for _, indexed := range []bool{false, true} {
+		if indexed {
+			idx.sync(lg)
+		}
+		got := texts(mustRead(t, s, "acme", url.Values{"environment": {"e"}, "source": {"egress"}, "since": {"0"}}), true)
+		if len(got) != 3 || !strings.Contains(got[0], `"binding":"erp"`) {
+			t.Fatalf("egress (indexed %v): %q", indexed, got)
+		}
+		got = texts(mustRead(t, s, "acme", url.Values{"environment": {"e"}, "source": {"container"}, "since": {"0"}}), true)
+		if len(got) != 2 {
+			t.Fatalf("container (indexed %v): %q", indexed, got)
+		}
+	}
+	var source string
+	if err := s.db.Pool.QueryRow(ctx, "SELECT source FROM log_streams WHERE container = 'feos-authn'").Scan(&source); err != nil ||
+		source != SourceEgress {
+		t.Fatalf("the stream's source: %q %v", source, err)
+	}
+}
+
 func TestRetentionAndDelete(t *testing.T) {
 	cfg := testConfig()
 	cfg.Retention = 24 * time.Hour

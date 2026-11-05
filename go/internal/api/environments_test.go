@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	envs "github.com/gardenlinux/feos/go/internal/env"
@@ -200,6 +201,11 @@ func (f *fakeEnvs) RestartService(_ context.Context, tenant, env, name string) e
 }
 func (f *fakeEnvs) RunJob(_ context.Context, tenant, env, name string) error {
 	return f.do(envCall{"RunJob", tenant, env, []any{name}}, nil)
+}
+func (f *fakeEnvs) CheckBinding(_ context.Context, tenant, env, name string, req envs.BindingCheckRequest) (
+	*bindings.HTTPPreflightResult, error) {
+	out := &bindings.HTTPPreflightResult{}
+	return out, f.do(envCall{"CheckBinding", tenant, env, []any{name, req}}, out)
 }
 func (f *fakeEnvs) CreateRouteToken(_ context.Context, tenant, env string) (envs.RouteToken, error) {
 	var out envs.RouteToken
@@ -577,6 +583,8 @@ func (envEngine) Sync(context.Context, podid.ID) error { return nil }
 func (envEngine) State(context.Context, podid.ID) (string, string, error) {
 	return model.StateRunning, "", nil
 }
+
+func (envEngine) PushHTTPBindings(podid.ID) {}
 
 // envPorts forwards by saying where to.
 type envPorts struct{}

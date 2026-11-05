@@ -227,7 +227,7 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 // group ing-<sandbox id> (IngressGroup; the insert appends the group), so
 // that the first publish rolls the service once and later ones never.
 func (c *Controller) planImage(v *view, kind, name, image string, command []string, env map[string]spec.EnvValue,
-	res *spec.Resources, creds *spec.ImageCredentials) *podPlan {
+	res *spec.Resources, creds *spec.ImageCredentials, bindings []string) *podPlan {
 	p := &podPlan{kind: kind, name: name, image: image}
 	p.vcpus, p.memoryMB = resourcesOf(res)
 	vals, wait, err := c.renderEnv(v, env)
@@ -243,8 +243,32 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 		IngressGroup:   kind == spec.KindService && v.env.IngressGroup,
 	}
 	p.template.ImageCredentials = templateCredentials(creds)
+	if p.template.HTTPBindings, err = templateBindings(v.target, bindings); err != nil {
+		p.err = fmt.Errorf("%s %s: %w", kind, name, err)
+		return p
+	}
 	p.finish(v.env.ID)
 	return p
+}
+
+// templateBindings are the HTTP bindings (ADR 0028) an object names as its
+// pod's template keeps them: by name, each with its upstream and mode,
+// what makes the pod another; the rest is read from the instance's
+// deployment whenever the pod asks for its bindings.
+func templateBindings(target *spec.Spec, names []string) ([]model.TemplateHTTPBinding, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	out := make([]model.TemplateHTTPBinding, 0, len(names))
+	for _, n := range slices.Sorted(slices.Values(names)) {
+		b, ok := target.Bindings[n]
+		if !ok {
+			return nil, fmt.Errorf("no binding %s", n)
+		}
+		up, mode := spec.BindingTemplate(b)
+		out = append(out, model.TemplateHTTPBinding{Name: n, Upstream: up, Mode: mode})
+	}
+	return slices.CompactFunc(out, func(a, b model.TemplateHTTPBinding) bool { return a.Name == b.Name }), nil
 }
 
 // templateCredentials is a login for an image's registry as a pod's
@@ -265,7 +289,7 @@ func templateCredentials(c *spec.ImageCredentials) *model.TemplateCredentials {
 
 // planService renders an image service of the target.
 func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan {
-	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources, s.ImageCredentials)
+	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources, s.ImageCredentials, s.Bindings)
 	p.idle = idleOf(s)
 	p.check = checkOf(s)
 	return p
@@ -273,7 +297,7 @@ func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan 
 
 // planJob renders a job of the target.
 func (c *Controller) planJob(v *view, name string, j spec.Job) *podPlan {
-	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources, j.ImageCredentials)
+	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources, j.ImageCredentials, j.Bindings)
 }
 
 // planAttached renders an attached service of the target: its process.

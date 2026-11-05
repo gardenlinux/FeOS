@@ -559,9 +559,13 @@ func (e *Engine) execute(ctx context.Context, h *OpHandle) (callResult, observat
 	if err := e.prepareNode(ctx, h); err != nil {
 		return callResult{err: err}, observation{}, false
 	}
+	e.httpAroundCall(ctx, pc, h, true)
 	res := e.callOp(ctx, pc, h)
 	if res.pod != nil {
 		e.noteAddress(h, res.pod)
+	}
+	if res.err == nil && !res.skipped && !res.postponed {
+		e.httpAroundCall(ctx, pc, h, false)
 	}
 	obs := e.watchPod(ctx, h.target, h.id, h.inc, func() {
 		mctx, cancel := context.WithTimeout(e.bg, 10*time.Second)

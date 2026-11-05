@@ -108,6 +108,41 @@ network these variables, each unless the container's own environment
 Only the traces' endpoint is set, so an SDK sends neither logs nor
 metrics there. A pod's logs stay its output (sink.md).
 
+## A pod's egress
+
+A pod's request through one of its HTTP bindings (ADR 0028) is a client
+span of the pod's `feos-authn`, which `feosd` sends to the sink's
+`TraceService/Export` with its node certificate, as it sends the pods'
+own spans on. The request's record in the egress stream
+([sink.md](sink.md#a-pods-egress-records-adr-0028)) carries the same
+`traceId` and `spanId`.
+
+| resource attribute | value |
+|---|---|
+| `service.name` | the pod's `ferun.object`, else its `ferun.job`, else `unknown_service`: the span is the pod's call |
+| `ferun.source` | `egress` |
+| `ferun.*` | the pod's labels, as its own spans carry them |
+
+The span, made of the request's `http` and `http_end` records (joined by
+`spanId`), once its `http_end` came: `trace_id` the record's `traceId`
+(the request's `traceparent`'s, else a new one); `parent_span_id` its
+`parentSpanId`; `span_id` its `spanId`, the one `feos-authn` passes on to
+the upstream in `traceparent`; `name` `<METHOD> <binding>` (`GET erp`);
+`kind` `SPAN_KIND_CLIENT`; `start_time_unix_nano` the request's start,
+`end_time_unix_nano` its end (`http_end`'s `durationMs`, else the
+`http` record's); `status` `STATUS_CODE_ERROR` for a status of 500 and
+above or a refusal of `feos-authn`'s own (the message its code), else
+unset. A request without its `http_end` (a killed process) has no span.
+Attributes: `http.request.method`, `url.path` (without the query),
+`server.address` (the upstream's host), `server.port` (when not 443),
+`http.response.status_code` (left out when none was written),
+`ferun.binding`, `ferun.binding.mode` (`name`, `intercept`),
+`ferun.credential` (its kind), `network.peer.address` (the address
+dialed), `http.request.body.size` and `http.response.body.size` (the
+`http_end`'s bytes), and `ferun.error.code` for a refusal. The sink keeps it with
+`source` `egress`; a read of an environment's traces finds it with the
+pod's own spans, and `source=egress` alone.
+
 ## The ingress
 
 `ferun-ingress` sends one span per request it writes to its access log,
@@ -200,7 +235,7 @@ span:
 |---|---|---|
 | `ts` | datetime (ns), the timestamp field, fast | `start_time_unix_nano` |
 | `tenant` | raw text, the tag field | `ferun.tenant` |
-| `environment`, `kind`, `object`, `instance`, `job`, `source`, `pod`, `node` | raw text | the `ferun.*` attributes; `source` `container` unless `ingress` |
+| `environment`, `kind`, `object`, `instance`, `job`, `source`, `pod`, `node` | raw text | the `ferun.*` attributes; `source` `ingress` or `egress` as `ferun.source` says, else `container` |
 | `replica`, `release`, `attempt` | u64 | the `ferun.*` attributes; `release` is the deployment, under the label's earlier word, as the log index has it (sink.md) |
 | `trace_id`, `span_id`, `parent_span_id` | raw text, lower-case hex, `trace_id` fast | the span |
 | `trace_state` | stored, not indexed | the span |

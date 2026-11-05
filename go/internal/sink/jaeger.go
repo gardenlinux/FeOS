@@ -153,12 +153,13 @@ func (t *Traces) Find(ctx context.Context, q quickwit.SpanQuery, limit int) ([][
 }
 
 // parseSpanSelector reads FeRun's selectors of the trace reads:
-// environment, object, job, instance and source (ingress or container).
+// environment, object, job, instance and source (ingress, egress or
+// container).
 func parseSpanSelector(v url.Values, tenant string) (quickwit.SpanQuery, error) {
 	q := quickwit.SpanQuery{Tenant: tenant, Environment: v.Get("environment"), Object: v.Get("object"), Job: v.Get("job"),
 		Instance: v.Get("instance"), Source: v.Get("source")}
-	if q.Source != "" && q.Source != SourceIngress && q.Source != SourceContainer {
-		return quickwit.SpanQuery{}, fmt.Errorf("source must be ingress or container")
+	if !validSource(q.Source) {
+		return quickwit.SpanQuery{}, fmt.Errorf("source must be ingress, egress or container")
 	}
 	return q, nil
 }

@@ -50,6 +50,11 @@ type validateCtx struct {
 	// environment is public.
 	zone, host string
 	public     bool
+	// bindingsOn: HTTP bindings are on (Deps.Bindings); destinations are
+	// the destination rule's words on the hosts of the spec's bindings,
+	// asked before it is validated.
+	bindingsOn   bool
+	destinations map[string]error
 }
 
 type imageAnswer struct {
@@ -98,6 +103,17 @@ func (v *validateCtx) Image(image string) (string, error) {
 // any route.
 func (v *validateCtx) IngressHost() (host string, public, ok bool) {
 	return v.host, v.public, v.zone != ""
+}
+
+// HTTPBindings reports whether HTTP bindings are on (ADR 0028).
+func (v *validateCtx) HTTPBindings() bool { return v.bindingsOn }
+
+// Destination is the destination rule's word on a binding's host.
+func (v *validateCtx) Destination(host string) error {
+	if err, ok := v.destinations[host]; ok {
+		return err
+	}
+	return nil
 }
 
 // BlueprintTypes are the registered addon types.
@@ -222,7 +238,13 @@ func (s *Service) resolveImages(ctx context.Context, env *store.Environment, ask
 func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Environment, sp spec.Spec, mode spec.Mode,
 	secrets map[string]spec.SecretInfo) (*validateCtx, spec.Pins, error) {
 	vc := &validateCtx{mode: mode, sandboxes: map[string]spec.SandboxInfo{}, secrets: secrets,
-		volumes: map[string]spec.AddonData{}, blueprint: s.d.Blueprint, zone: s.d.AppsZone}
+		volumes: map[string]spec.AddonData{}, blueprint: s.d.Blueprint, zone: s.d.AppsZone,
+		bindingsOn: s.d.Bindings != nil && s.d.Bindings.Enabled(), destinations: map[string]error{}}
+	if vc.bindingsOn {
+		for _, host := range bindingHosts(sp) {
+			vc.destinations[host] = s.d.Bindings.CheckDestination(ctx, host)
+		}
+	}
 	if env != nil {
 		vc.public = env.Public
 		if vc.zone != "" && env.HostLabel != "" {
@@ -267,7 +289,11 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil {
 			return nil, pins, fmt.Errorf("sandbox %s: %w", id, err)
 		}
-		vc.sandboxes[id.String()] = spec.SandboxInfo{ID: id.String(), Attachable: attachable(sb)}
+		info := spec.SandboxInfo{ID: id.String(), Attachable: attachable(sb)}
+		if info.HTTPNames, err = s.sandboxHTTPNames(ctx, id); err != nil {
+			return nil, pins, err
+		}
+		vc.sandboxes[id.String()] = info
 		ids = append(ids, id.String())
 	}
 	if len(ids) > 0 {

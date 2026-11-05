@@ -158,6 +158,8 @@ func TestParseTraceExport(t *testing.T) {
 
 	// The peers' rules.
 	ingress := map[string]string{attrTenant: "acme", attrPod: "ingress/in-0", attrSource: SourceIngress, attrServiceName: "ferun-ingress"}
+	egress := podAttrs("acme", "e", "api")
+	egress[attrSource], egress[attrContainer] = SourceEgress, "feos-authn"
 	for _, c := range []struct {
 		what  string
 		attrs map[string]string
@@ -166,6 +168,8 @@ func TestParseTraceExport(t *testing.T) {
 	}{
 		{"a node's pod", podAttrs("acme", "e", "api"), ingestPeer{node: "node-1"}, true},
 		{"an ingress's own", ingress, ingestPeer{ingress: "in-0"}, true},
+		{"a pod's egress", egress, ingestPeer{node: "node-1"}, true},
+		{"a pod's egress from an ingress", egress, ingestPeer{ingress: "in-0"}, false},
 		{"an ingress's of another", ingress, ingestPeer{ingress: "in-1"}, false},
 		{"a node's as an ingress", ingress, ingestPeer{node: "node-1"}, false},
 		{"an ingress's as a pod", map[string]string{attrTenant: "acme", attrPod: "abcdefghjkm"}, ingestPeer{ingress: "in-0"}, false},
@@ -180,7 +184,7 @@ func TestParseTraceExport(t *testing.T) {
 		if !c.ok && !errors.Is(err, errNotYours) {
 			t.Errorf("%s: %v, want errNotYours", c.what, err)
 		}
-		if c.ok && c.attrs[attrSource] == SourceIngress && spans[0].doc.Source != SourceIngress {
+		if want := sourceOf(c.attrs[attrSource]); c.ok && spans[0].doc.Source != want {
 			t.Errorf("%s: source %q", c.what, spans[0].doc.Source)
 		}
 	}

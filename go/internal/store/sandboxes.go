@@ -59,6 +59,11 @@ type Sandbox struct {
 	RunID            string
 	KubeVersion      string
 	SSHVersion       string
+	// HTTPVersion is the version of the sandbox's own HTTP set (ADR 0028),
+	// "" for none; HTTPPushed the version of the clear part of the pod's
+	// HTTP bindings that its node took last ("" for none).
+	HTTPVersion string
+	HTTPPushed  string
 
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -125,7 +130,7 @@ func sandboxColumns(p string) string {
 		"pending_since", "unreachable_since", "run_id", "kube_version", "ssh_version",
 		"created_at", "updated_at", "last_active_at", "paused_at", "policy_failed", "policy_failures",
 		"policy_not_before", "environment_id", "pod_template", "pin_node", "idle_after_s", "address", "tenant_job",
-		"log_labels"}
+		"log_labels", "http_version", "http_pushed"}
 	if p != "" {
 		for i, c := range cols {
 			cols[i] = p + "." + c
@@ -150,7 +155,7 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 		&pendingSince, &unreachableSince, &s.RunID, &s.KubeVersion, &s.SSHVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastActiveAt, &pausedAt, &s.PolicyFailed, &s.PolicyFailures,
 		&policyNotBefore, &envID, &template, &s.PinNode, &s.IdleAfterS, &s.Address, &s.TenantJob,
-		&s.LogLabels)
+		&s.LogLabels, &s.HTTPVersion, &s.HTTPPushed)
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -532,7 +537,9 @@ func nullableColumn(name string, lifecycle bool, get func(*Sandbox) string) sand
 // write is one of client_state, node, op*, incarnation, materialised or
 // the checkpoint columns. id, owner, image, vcpus, memory_mib,
 // environment_id, pod_template, tenant_job, log_labels and created_at are never written; gen and
-// updated_at are UpdateSandbox's.
+// updated_at are UpdateSandbox's; http_version and http_pushed are written
+// by queries of their own (SetHTTPBindings, SetHTTPPushed) and left as
+// they are.
 var sandboxWritable = []sandboxColumn{
 	plainColumn("incarnation", true, func(s *Sandbox) uuid.UUID { return s.Incarnation }),
 	plainColumn("image_ref", false, func(s *Sandbox) string { return s.ImageRef }),

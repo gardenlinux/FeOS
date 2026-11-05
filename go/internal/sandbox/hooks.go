@@ -64,6 +64,7 @@ type engineHooks struct {
 	prepare PrepareHook
 	redact  LogRedactor
 	access  func(ctx context.Context, pinned string, auth model.RegistryCredentials) error
+	http    HTTPBindings
 }
 
 // SetSecretResolver sets what a pod template's secrets are unsealed with;
@@ -233,6 +234,9 @@ func (e *Engine) prepareSpec(ctx context.Context, h *OpHandle) error {
 		return &prepareError{node: h.target, kind: h.kind, err: err}
 	}
 	h.spec = spec
+	if err := e.prepareHTTP(ctx, h); err != nil {
+		return &prepareError{node: h.target, kind: h.kind, err: err}
+	}
 	if err := e.prepareRedact(ctx, h); err != nil {
 		return &prepareError{node: h.target, kind: h.kind, err: err}
 	}

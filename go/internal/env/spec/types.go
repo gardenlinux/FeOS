@@ -24,6 +24,10 @@ type Spec struct {
 	Addons   map[string]Addon     `json:"addons,omitempty"`
 	Routes   map[string]Route     `json:"routes,omitempty"`
 	Secrets  map[string]SecretRef `json:"secrets,omitempty"`
+	// Bindings are the HTTP APIs the environment's pods call by a name
+	// (ADR 0028), whose credentials the platform adds; a service or a job
+	// gets those it names, and no other.
+	Bindings map[string]Binding `json:"bindings,omitempty"`
 	// Volumes is a kind that is not available yet: its presence is an
 	// error finding "volumes for services are not available yet" (addons
 	// have volumes of their own). It is a field so that the finding can
@@ -82,6 +86,10 @@ type Service struct {
 	// Mounts is not available yet: its presence is an error finding
 	// "volumes for services are not available yet".
 	Mounts json.RawMessage `json:"mounts,omitempty"`
+	// Bindings are the environment's bindings the service's pods get, by
+	// name (ADR 0028). Image runtime only: an attached service has its
+	// sandbox's.
+	Bindings []string `json:"bindings,omitempty"`
 }
 
 // Port is a named port of a service.
@@ -154,6 +162,84 @@ type Job struct {
 	Timeout string `json:"timeout,omitempty"`
 	// Retries is how many attempts follow a failed one: 0..5.
 	Retries int `json:"retries,omitempty"`
+	// Bindings are the environment's bindings the job's pods get, by name
+	// (ADR 0028).
+	Bindings []string `json:"bindings,omitempty"`
+}
+
+// Binding is an HTTP API an environment's pods call by a name (ADR 0028):
+// "http://<name>/…" in the name mode, the upstream's own name in the
+// intercept mode. The platform adds the credential, whose fields are
+// literals or the environment's secrets, so that the secrets' values are
+// never in the spec and keep their versions.
+type Binding struct {
+	// Upstream is "https://host[:port]"; plain http is refused.
+	Upstream string `json:"upstream"`
+	// Mode is "name" (the default) or "intercept".
+	Mode string `json:"mode,omitempty"`
+	// CaPem is the upstream's CA, PEM; "": the WebPKI.
+	CaPem string `json:"caPem,omitempty"`
+	// PathPrefixes are the paths the pods may reach; none: all.
+	PathPrefixes []string `json:"pathPrefixes,omitempty"`
+	// ForwardedHost sends X-Forwarded-Host and X-Forwarded-Proto (the name
+	// mode).
+	ForwardedHost bool `json:"forwardedHost,omitempty"`
+	// RateLimit is per pod; nil: none.
+	RateLimit *BindingRateLimit `json:"rateLimit,omitempty"`
+	// Credential is what the platform adds to each request.
+	Credential *BindingCredential `json:"credential,omitempty"`
+}
+
+// BindingRateLimit is a binding's rate limit per pod: requests per second
+// and their burst (0: the rate).
+type BindingRateLimit struct {
+	PerSecond int `json:"perSecond,omitempty"`
+	Burst     int `json:"burst,omitempty"`
+}
+
+// BindingCredential is a binding's credential: Kind and the fields of its
+// kind, each a string, {"value": s} or {"secret": n}; tokenUrl a literal.
+//
+//	headers            headers: header name to value
+//	basic              user, password
+//	oauth2             tokenUrl, clientId, clientSecret, scope, audience, clientAuthInBody
+//	clientCertificate  certPem, keyPem
+type BindingCredential struct {
+	Kind             string              `json:"kind"`
+	Headers          map[string]EnvValue `json:"headers,omitempty"`
+	User             *EnvValue           `json:"user,omitempty"`
+	Password         *EnvValue           `json:"password,omitempty"`
+	TokenURL         *EnvValue           `json:"tokenUrl,omitempty"`
+	ClientID         *EnvValue           `json:"clientId,omitempty"`
+	ClientSecret     *EnvValue           `json:"clientSecret,omitempty"`
+	Scope            *EnvValue           `json:"scope,omitempty"`
+	Audience         *EnvValue           `json:"audience,omitempty"`
+	ClientAuthInBody bool                `json:"clientAuthInBody,omitempty"`
+	CertPem          *EnvValue           `json:"certPem,omitempty"`
+	KeyPem           *EnvValue           `json:"keyPem,omitempty"`
+}
+
+// Values are the credential's value fields by their path in it
+// ("headers.X-API-Key", "password"), set ones only.
+func (c *BindingCredential) Values() map[string]EnvValue {
+	out := map[string]EnvValue{}
+	if c == nil {
+		return out
+	}
+	for k, v := range c.Headers {
+		out["headers."+k] = v
+	}
+	for _, f := range []struct {
+		name string
+		v    *EnvValue
+	}{{"user", c.User}, {"password", c.Password}, {"tokenUrl", c.TokenURL}, {"clientId", c.ClientID},
+		{"clientSecret", c.ClientSecret}, {"scope", c.Scope}, {"audience", c.Audience}, {"certPem", c.CertPem},
+		{"keyPem", c.KeyPem}} {
+		if f.v != nil {
+			out[f.name] = *f.v
+		}
+	}
+	return out
 }
 
 // ImageCredentials are a service's or job's login for its image's registry
@@ -468,6 +554,7 @@ const (
 	KindAddon   = "addon"
 	KindRoute   = "route"
 	KindSecret  = "secret"
+	KindBinding = "binding"
 )
 
 // The defaults and limits of the contract's §3.
@@ -477,6 +564,7 @@ const (
 	MaxJobs      = 32
 	MaxAddons    = 16
 	MaxRoutes    = 128
+	MaxBindings  = 32
 	// MaxRoutePathBytes bounds a route's path, which every instance of
 	// ferun-ingress holds for every public environment.
 	MaxRoutePathBytes = 1024
@@ -565,7 +653,8 @@ func EffectReplaces(n int) string {
 
 // DiffEntry is the change of one object between two deployments.
 type DiffEntry struct {
-	// Kind is KindService, KindJob, KindAddon, KindRoute or KindSecret.
+	// Kind is KindService, KindJob, KindAddon, KindRoute, KindSecret or
+	// KindBinding.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	// Change is ChangeAdd, ChangeRemove or ChangeUpdate.
