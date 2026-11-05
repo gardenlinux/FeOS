@@ -42,7 +42,9 @@ fn spawn(dir: &Path) -> (Process, Feosd) {
         .unwrap();
     let (afd, lfd) = (audit.as_raw_fd(), listener.as_raw_fd());
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_feos-authn"));
+    // The test's upstreams are on the loopback address.
     cmd.args(["--pod-id", POD_ID, "--audit-fd", "3", "--control-fd", "4"])
+        .arg("--allow-loopback")
         .env("RUST_LOG", "debug");
     // SAFETY: only async-signal-safe calls between fork and exec.
     unsafe {

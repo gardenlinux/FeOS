@@ -90,8 +90,16 @@ pub fn canonical(a: IpAddr) -> IpAddr {
 
 /// Judges one address: Ok, or why not. Besides the deny prefixes, an
 /// address that is no unicast destination at all (unspecified, "this
-/// network", broadcast, multicast) is never dialed.
+/// network", broadcast, multicast) is never dialed, nor one of the node's
+/// own (loopback, link-local: the node's services at 169.254.169.1 and
+/// its resolver among them), IPv4-mapped ones too: feos-authn runs in the
+/// node's network namespace.
 pub fn check(a: IpAddr, deny: &[Prefix]) -> Result<(), String> {
+    check_address(a, deny, false)
+}
+
+/// [`check`], with the loopback address allowed for `loopback_ok`.
+fn check_address(a: IpAddr, deny: &[Prefix], loopback_ok: bool) -> Result<(), String> {
     let a = canonical(a);
     let never = match a {
         IpAddr::V4(v4) => v4.octets()[0] == 0 || v4.is_broadcast() || v4.is_multicast(),
@@ -99,6 +107,13 @@ pub fn check(a: IpAddr, deny: &[Prefix]) -> Result<(), String> {
     };
     if never {
         return Err(format!("{a} is not a unicast address"));
+    }
+    let node = match a {
+        IpAddr::V4(v4) => (v4.is_loopback() && !loopback_ok) || v4.is_link_local(),
+        IpAddr::V6(v6) => (v6.is_loopback() && !loopback_ok) || v6.is_unicast_link_local(),
+    };
+    if node {
+        return Err(format!("{a} is a loopback or link-local address"));
     }
     match deny.iter().find(|p| p.contains(a)) {
         Some(p) => Err(format!("{a} is an internal address ({p})")),
@@ -176,6 +191,8 @@ impl Resolve for SystemResolver {
 pub struct Net {
     config: RwLock<Option<Arc<NetConfig>>>,
     resolver: Arc<dyn Resolve>,
+    /// Upstreams on the loopback address are dialed: for tests alone.
+    loopback_ok: bool,
 }
 
 impl Net {
@@ -183,6 +200,16 @@ impl Net {
         Net {
             config: RwLock::new(None),
             resolver,
+            loopback_ok: false,
+        }
+    }
+
+    /// A network whose upstreams may be on the loopback address, as a
+    /// test's are; never in a pod's process.
+    pub fn allowing_loopback(resolver: Arc<dyn Resolve>) -> Net {
+        Net {
+            loopback_ok: true,
+            ..Net::new(resolver)
         }
     }
 
@@ -222,7 +249,7 @@ impl Net {
             ));
         }
         for a in &addrs {
-            check(a.ip(), &cfg.deny)
+            check_address(a.ip(), &cfg.deny, self.loopback_ok)
                 .map_err(|why| ConnectError::new(Denied, format!("{host}: {why}")))?;
         }
         let mut last = String::new();
@@ -320,6 +347,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_nodes_own_addresses_are_never_dialed() {
+        for node in [
+            "127.0.0.1",
+            "127.53.0.1",
+            "::1",
+            "169.254.169.1",
+            "169.254.169.254",
+            "169.254.0.53",
+            "fe80::1",
+            "febf::1",
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.1",
+        ] {
+            let a: IpAddr = node.parse().unwrap();
+            assert!(check(a, &[]).is_err(), "{node}");
+            // A test's loopback upstream: link-local stays refused.
+            let loopback = canonical(a).is_loopback();
+            assert_eq!(check_address(a, &[], true).is_ok(), loopback, "{node}");
+        }
+        assert!(check("fec0::1".parse().unwrap(), &[]).is_ok());
+    }
+
     struct Fixed(Vec<SocketAddr>);
 
     impl Resolve for Fixed {
@@ -333,7 +383,13 @@ mod tests {
     async fn one_denied_address_refuses_the_name() {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let ok = l.local_addr().unwrap();
-        let net = Net::new(Arc::new(Fixed(vec![ok, "10.0.0.1:443".parse().unwrap()])));
+        // Strict: the loopback address is the node's.
+        let net = Net::new(Arc::new(Fixed(vec![ok])));
+        net.set(Some(NetConfig::default()));
+        let e = net.dial("api.example", ok.port()).await.unwrap_err();
+        assert_eq!(e.kind, ConnectErrorKind::Denied);
+        let net =
+            Net::allowing_loopback(Arc::new(Fixed(vec![ok, "10.0.0.1:443".parse().unwrap()])));
         // Nothing is dialed before feosd's hello.
         let e = net.dial("api.example", 443).await.unwrap_err();
         assert_eq!(e.kind, ConnectErrorKind::Unreachable);
@@ -347,7 +403,7 @@ mod tests {
         let e = net.dial("10.0.0.1", 443).await.unwrap_err();
         assert_eq!(e.kind, ConnectErrorKind::Denied);
         // The checked address is dialed, from the given source.
-        let net = Net::new(Arc::new(Fixed(vec![ok])));
+        let net = Net::allowing_loopback(Arc::new(Fixed(vec![ok])));
         net.set(Some(NetConfig {
             deny: deny(&["10.0.0.0/8"]),
             source_v4: Some("127.0.0.1".parse().unwrap()),
@@ -367,7 +423,7 @@ mod tests {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
         drop(l);
-        let net = Net::new(Arc::new(Fixed(vec![addr])));
+        let net = Net::allowing_loopback(Arc::new(Fixed(vec![addr])));
         net.set(Some(NetConfig::default()));
         let e = net.dial("api.example", addr.port()).await.unwrap_err();
         assert_eq!(e.kind, ConnectErrorKind::Unreachable);

@@ -50,7 +50,7 @@ async fn start(resolver: MapResolver) -> Harness {
         POD_ID.into(),
         Keys::generate().unwrap(),
         Arc::new(Audit::new(file.into())),
-        Arc::new(Net::new(Arc::new(resolver))),
+        Arc::new(Net::allowing_loopback(Arc::new(resolver))),
     ));
     tokio::spawn(async move {
         let _ = authn.run(listener).await;

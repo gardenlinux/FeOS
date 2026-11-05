@@ -40,6 +40,10 @@ struct Args {
     /// for debugging only.
     #[arg(long, hide = true)]
     no_jail: bool,
+    /// Dial upstreams on the loopback address, which are the node's
+    /// otherwise: for tests only.
+    #[arg(long, hide = true)]
+    allow_loopback: bool,
 }
 
 fn main() -> ExitCode {
@@ -100,10 +104,13 @@ fn main() -> ExitCode {
         log::error!("enter the jail: {e}");
         return ExitCode::FAILURE;
     }
-    let pod_id = args.pod_id;
+    let (pod_id, allow_loopback) = (args.pod_id, args.allow_loopback);
     log::info!("feos-authn {} for pod {pod_id}", env!("CARGO_PKG_VERSION"));
     runtime.block_on(async move {
-        let net = Arc::new(Net::new(Arc::new(SystemResolver)));
+        let net = Arc::new(match allow_loopback {
+            true => Net::allowing_loopback(Arc::new(SystemResolver)),
+            false => Net::new(Arc::new(SystemResolver)),
+        });
         let authn = Arc::new(Authn::new(pod_id, keys, Arc::new(Audit::new(audit)), net));
         match authn.run(control).await {
             Ok(()) => ExitCode::SUCCESS,

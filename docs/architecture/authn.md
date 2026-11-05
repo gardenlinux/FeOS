@@ -214,7 +214,9 @@ upstream's host and port alone, whatever a URL names. Then:
    `X-Forwarded-Proto: http`.
 5. The upstream: resolved with the system's resolver; every address
    checked against `denyPrefixes`, and never one that is no unicast
-   address (unspecified, `0.0.0.0/8`, broadcast, multicast). One denied
+   address (unspecified, `0.0.0.0/8`, broadcast, multicast), nor a
+   loopback or link-local one (`127.0.0.0/8`, `::1`, `169.254.0.0/16`,
+   `fe80::/10`), IPv4-mapped ones too, whatever `hello` says. One denied
    address refuses the name: 403 `denied_destination`. The checked
    address is dialed, bound to `sourceV4`/`sourceV6` when given
    (`IP_BIND_ADDRESS_NO_PORT`); nothing answers: 502 `unreachable`.
