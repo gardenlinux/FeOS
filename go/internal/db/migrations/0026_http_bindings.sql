@@ -25,7 +25,12 @@
 --
 -- env_incidents gains the conditions of an environment's binding (ADR
 -- 0028 §6), on the object binding/<name>: credential_refused,
--- upstream_failing, token_failing.
+-- upstream_failing, token_failing; and held_at, when the controller last
+-- saw an incident's condition hold (NULL: at its opening). A binding's
+-- incident closes only after a whole window in which its condition did
+-- not hold, one closed within the hour is opened again rather than a new
+-- one, and the leader deletes a binding's incidents 30 days after they
+-- closed (env_incidents_closed).
 --
 -- http_egress is what those incidents read of a pod's requests through its
 -- HTTP bindings: feos-authn's http records, which feosd publishes as the
@@ -73,6 +78,8 @@ ALTER TABLE env_incidents ADD CONSTRAINT env_incidents_condition_check
      'addon_unhealthy','volume_unavailable','attach_failed','names_unserved',
      'domain_record_wrong','domain_deactivated','domain_superseded','certificate_failing',
      'credential_refused','upstream_failing','token_failing'));
+ALTER TABLE env_incidents ADD COLUMN held_at timestamptz;
+CREATE INDEX env_incidents_closed ON env_incidents(closed_at) WHERE closed_at IS NOT NULL;
 
 CREATE TABLE http_egress (
   sandbox_id text COLLATE "C" NOT NULL,

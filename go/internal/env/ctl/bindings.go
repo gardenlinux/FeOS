@@ -37,8 +37,11 @@ import (
 //
 // An incident opens on the binding's object, binding/<name>, of the
 // environment's latest deployment, with the counts and the newest records
-// as evidence, and closes once its condition no longer holds (no requests
-// among it), or the binding is gone.
+// as evidence, or one of that deployment closed within bindingReopen opens
+// again; it closes once its condition has not held for a whole
+// bindingWindow (no requests among it), so that a rate around a half does
+// not open and close it by turns, or at once when the binding is gone. A
+// binding's incidents are deleted bindingRetention after they closed.
 const (
 	LoopBindings       = "env-bindings"
 	bindingsEvery      = 30 * time.Second
@@ -48,6 +51,11 @@ const (
 	// bindingKeep is how long the counts and records of the pods' requests
 	// are kept: twice the window.
 	bindingKeep = 2 * bindingWindow
+	// bindingReopen is how recently a binding's incident must have closed
+	// to be opened again rather than anew.
+	bindingReopen = time.Hour
+	// bindingRetention is how long a binding's closed incident is kept.
+	bindingRetention = 30 * 24 * time.Hour
 )
 
 // egressEvidence is a binding incident's evidence: the window's counts
@@ -105,6 +113,14 @@ func (c *Controller) bindingsLoop(ctx context.Context) error {
 		}
 		c.rl.warn("bindings-sweep", "cannot sweep the bindings' request counts", "err", err)
 	}
+	if n, err := c.st.DeleteClosedIncidents(ctx, bindingConditions, bindingRetention); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c.rl.warn("bindings-retention", "cannot delete the bindings' old incidents", "err", err)
+	} else if n > 0 {
+		c.log.Info("deleted bindings' incidents past their retention", "incidents", n, "retention", bindingRetention)
+	}
 	envs, err := c.st.BindingEnvs(ctx)
 	if err != nil {
 		return fmt.Errorf("bindings: %w", err)
@@ -146,12 +162,21 @@ func (c *Controller) stepBindings(ctx context.Context, e store.BindingEnv) error
 		cond, n := bindingCondition(st)
 		for _, other := range bindingConditions {
 			if other != cond && isOpen[obj+" "+other] {
-				if err := c.closeBindingIncident(ctx, e, obj, other); err != nil {
+				if err := c.closeBindingIncident(ctx, e, obj, other, bindingWindow); err != nil {
 					return err
 				}
 			}
 		}
-		if cond == "" || isOpen[obj+" "+cond] {
+		if cond == "" {
+			continue
+		}
+		if isOpen[obj+" "+cond] {
+			if err := c.fenced(ctx, func(tx *store.Store) error {
+				_, err := tx.HoldIncidents(ctx, e.ID, obj, cond)
+				return err
+			}); err != nil {
+				return err
+			}
 			continue
 		}
 		records, err := c.st.EgressRecords(ctx, e.ID, name, bindingWindow, bindingEvidence)
@@ -160,13 +185,15 @@ func (c *Controller) stepBindings(ctx context.Context, e store.BindingEnv) error
 		}
 		ev := evidence{Egress: &egressEvidence{WindowSeconds: int(bindingWindow / time.Second), Requests: st.Requests,
 			Refused: st.Refused, Failing: st.Failing, TokenFailed: st.TokenFailed, Records: records}}
-		c.incident(ctx, e.ID, obj, e.Deployment, cond, bindingSummary(name, cond, n, st.Requests), ev)
+		if err := c.bindingIncident(ctx, e, obj, cond, bindingSummary(name, cond, n, st.Requests), ev); err != nil {
+			return err
+		}
 	}
 	// A binding that is gone has no incident.
 	for _, i := range open {
 		name, ok := strings.CutPrefix(i.Object, spec.KindBinding+"/")
 		if ok && !slices.Contains(e.Bindings, name) && slices.Contains(bindingConditions, i.Condition) {
-			if err := c.closeBindingIncident(ctx, e, i.Object, i.Condition); err != nil {
+			if err := c.closeBindingIncident(ctx, e, i.Object, i.Condition, 0); err != nil {
 				return err
 			}
 		}
@@ -174,9 +201,37 @@ func (c *Controller) stepBindings(ctx context.Context, e store.BindingEnv) error
 	return nil
 }
 
-func (c *Controller) closeBindingIncident(ctx context.Context, e store.BindingEnv, obj, cond string) error {
+// bindingIncident opens a binding's incident on the environment's latest
+// deployment, or opens again one of it that closed within bindingReopen.
+func (c *Controller) bindingIncident(ctx context.Context, e store.BindingEnv, obj, cond, summary string,
+	ev evidence) error {
 	return c.fenced(ctx, func(tx *store.Store) error {
-		n, err := tx.EnvCtlCloseObjectIncidents(ctx, e.ID, obj, cond)
+		i := store.EnvIncident{EnvID: e.ID, Object: obj, Deployment: e.Deployment, Condition: cond, Summary: summary,
+			Evidence: ev.json()}
+		reopened, err := tx.ReopenIncident(ctx, i, bindingReopen)
+		if err != nil {
+			return err
+		}
+		if reopened {
+			c.log.Info("incident reopened", "environment", e.ID, "object", obj, "deployment", e.Deployment,
+				"condition", cond, "summary", summary)
+			return nil
+		}
+		opened, err := openIncident(ctx, tx, e.ID, obj, e.Deployment, cond, summary, ev)
+		if opened {
+			c.log.Info("incident opened", "environment", e.ID, "object", obj, "deployment", e.Deployment,
+				"condition", cond, "summary", summary)
+		}
+		return err
+	})
+}
+
+// closeBindingIncident closes a binding's open incidents of cond whose
+// condition has not held for clean (0: at once).
+func (c *Controller) closeBindingIncident(ctx context.Context, e store.BindingEnv, obj, cond string,
+	clean time.Duration) error {
+	return c.fenced(ctx, func(tx *store.Store) error {
+		n, err := tx.CloseUnheldIncidents(ctx, e.ID, obj, cond, clean)
 		if n > 0 {
 			c.log.Info("incident closed", "environment", e.ID, "object", obj, "condition", cond)
 		}

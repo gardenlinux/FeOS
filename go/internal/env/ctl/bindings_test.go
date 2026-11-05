@@ -136,8 +136,18 @@ func (h *harness) ageEgress() {
 	h.exec(`UPDATE http_egress_records SET arrived_at = arrived_at - interval '6 minutes'`)
 }
 
+// ageIncidents moves the binding incidents' last holding (of cond, or all
+// for "") a window back.
+func (h *harness) ageIncidents(cond string) {
+	h.t.Helper()
+	h.exec(`UPDATE env_incidents SET opened_at = opened_at - interval '6 minutes',
+		held_at = held_at - interval '6 minutes' WHERE object LIKE 'binding/%' AND ($1 = '' OR condition = $1)`, cond)
+}
+
 // The incidents of a binding: opened from its pods' requests in the last
-// five minutes, one condition at a time, closed when it no longer holds.
+// five minutes, one condition at a time; closed only after a whole window
+// in which their condition did not hold, opened again when it holds again
+// within the hour, deleted 30 days after they closed.
 func TestBindingIncidents(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
@@ -160,48 +170,69 @@ func TestBindingIncidents(t *testing.T) {
 		}
 		return out
 	}
+	wantOpen := func(what string, conds ...string) map[string]store.EnvIncident {
+		t.Helper()
+		open := openOf()
+		for _, c := range conds {
+			if _, ok := open["binding/erp "+c]; !ok {
+				t.Fatalf("%s: %s not open: %v", what, c, open)
+			}
+		}
+		if len(open) != len(conds) {
+			t.Fatalf("%s: open %v, want %v", what, open, conds)
+		}
+		return open
+	}
 
 	// Too few requests, or mostly fine: nothing.
 	h.auditHTTP(pod, "erp", 3, 401, "")
 	pass()
-	if len(openOf()) != 0 {
-		t.Fatalf("incidents from 3 requests: %v", openOf())
-	}
+	wantOpen("3 requests")
 	h.auditHTTP(pod, "erp", 4, 200, "")
 	pass()
-	if len(openOf()) != 0 {
-		t.Fatalf("incidents from 3 of 7 refused: %v", openOf())
-	}
+	wantOpen("3 of 7 refused")
 
 	// Mostly 401 and 403: credential_refused, with the records.
 	h.auditHTTP(pod, "erp", 3, 403, "")
 	pass()
-	i, ok := openOf()["binding/erp credential_refused"]
-	if !ok || len(openOf()) != 1 || i.Deployment != r1 {
-		t.Fatalf("credential refused: %v", openOf())
+	refused := wantOpen("credential refused", model.ConditionCredentialRefused)["binding/erp credential_refused"]
+	if refused.Deployment != r1 {
+		t.Fatalf("on deployment %d", refused.Deployment)
 	}
 	var ev struct {
 		Egress egressEvidence `json:"egress"`
 	}
-	if err := json.Unmarshal(i.Evidence, &ev); err != nil || ev.Egress.Requests != 10 || ev.Egress.Refused != 6 ||
+	if err := json.Unmarshal(refused.Evidence, &ev); err != nil || ev.Egress.Requests != 10 || ev.Egress.Refused != 6 ||
 		len(ev.Egress.Records) != bindingEvidence {
-		t.Fatalf("evidence %s: %v", i.Evidence, err)
+		t.Fatalf("evidence %s: %v", refused.Evidence, err)
 	}
 	pass()
 	if n := len(h.incidents(env.ID, false)); n != 1 {
 		t.Fatalf("a second pass opened again: %d incidents", n)
 	}
 
-	// The window moves on: the old records age out, the upstream fails.
+	// The window moves on: the old records age out, the upstream fails. The
+	// refusals held within the window: their incident stays open until a
+	// whole window passed without them.
 	h.ageEgress()
 	h.auditHTTP(pod, "erp", 4, 503, "")
 	h.auditHTTP(pod, "erp", 1, 502, "unreachable")
 	h.auditHTTP(pod, "erp", 1, 502, "tls")
 	h.auditHTTP(pod, "erp", 1, 200, "")
 	pass()
-	open := openOf()
-	if _, ok := open["binding/erp upstream_failing"]; !ok || len(open) != 1 {
-		t.Fatalf("upstream failing: %v", open)
+	wantOpen("upstream failing", model.ConditionCredentialRefused, model.ConditionUpstreamFailing)
+	h.ageIncidents(model.ConditionCredentialRefused)
+	pass()
+	wantOpen("a window without refusals", model.ConditionUpstreamFailing)
+
+	// Refused again within the hour: the same incident, open again.
+	h.ageEgress()
+	h.auditHTTP(pod, "erp", 6, 401, "")
+	pass()
+	again := wantOpen("refused again", model.ConditionCredentialRefused,
+		model.ConditionUpstreamFailing)["binding/erp credential_refused"]
+	if again.ID != refused.ID || len(h.incidents(env.ID, false)) != 2 {
+		t.Fatalf("reopened %d, was %d; %d incidents", again.ID, refused.ID, len(h.incidents(env.ID, false)))
 	}
 
 	// The token endpoint fails; the pod's own mistakes count for nothing.
@@ -210,16 +241,28 @@ func TestBindingIncidents(t *testing.T) {
 	h.auditHTTP(pod, "erp", 20, 403, "denied_path")
 	h.auditHTTP(pod, "erp", 20, 429, "rate_limited")
 	pass()
-	open = openOf()
-	if _, ok := open["binding/erp token_failing"]; !ok || len(open) != 1 {
-		t.Fatalf("token failing: %v", open)
-	}
+	wantOpen("token failing", model.ConditionCredentialRefused, model.ConditionUpstreamFailing,
+		model.ConditionTokenFailing)
 
-	// Quiet: closed.
+	// Quiet: open while their conditions held within the window, closed
+	// after a whole window without them.
 	h.ageEgress()
 	pass()
-	if open := openOf(); len(open) != 0 {
-		t.Fatalf("after the window: %v", open)
+	wantOpen("quiet", model.ConditionCredentialRefused, model.ConditionUpstreamFailing, model.ConditionTokenFailing)
+	h.ageIncidents("")
+	pass()
+	wantOpen("after the window")
+
+	// Kept 30 days after they closed.
+	h.exec(`UPDATE env_incidents SET closed_at = closed_at - interval '29 days'`)
+	pass()
+	if n := len(h.incidents(env.ID, false)); n != 3 {
+		t.Fatalf("%d incidents within their retention", n)
+	}
+	h.exec(`UPDATE env_incidents SET closed_at = closed_at - interval '2 days'`)
+	pass()
+	if n := len(h.incidents(env.ID, false)); n != 0 {
+		t.Fatalf("%d incidents past their retention", n)
 	}
 
 	// The counts and records are swept after twice the window.

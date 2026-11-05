@@ -1855,9 +1855,15 @@ deployment:
 One condition at a time, in that order. The evidence is `egress`:
 `{windowSeconds, requests, refused, failing, tokenFailed, records}`, the
 newest ten kept records of the binding's requests within the window,
-each with the pod's ID. An incident closes
-once its condition no longer holds (also without requests), or its
-binding is gone.
+each with the pod's ID. Every pass that sees an open incident's
+condition hold records it (`held_at`, the database's clock). An
+incident closes only once its condition has not held for a whole window
+(also without requests), so that a share around a half does not open
+and close it by turns, and at once when its binding is gone. A
+condition that holds again within an hour of its incident's close, on
+the same deployment, opens that incident again (`closed_at` cleared, its
+summary and evidence the new ones) instead of a new one. The loop
+deletes a binding's incidents 30 days after they closed.
 
 ### The management UI
 
@@ -1974,7 +1980,7 @@ a deleting one.
 | `env_job_runs` | one attempt of a job: template hash, deployment, attempt, phase, exit code, detail, the last 50 lines of its log, redacted and bounded ([Logs](#probes-exits-and-restarts)) |
 | `env_attached` | an attached service: its sandbox and the incarnation of it the service last used, template hash, process ID, phase, restarts, the next restart, probe failures, the last exit, detail |
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
-| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence; one open per object, deployment and condition |
+| `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence, when a binding's condition last held; one open per object, deployment and condition; a binding's deleted 30 days after it closed |
 | `env_route_tokens` | the route door's tokens, as hashes |
 | `host_labels` | every default host label ever given: its owner, the tenant that first claimed it and alone may claim it again, and the environment that has it, set free when that is deleted |
 
