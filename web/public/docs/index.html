@@ -12,47 +12,47 @@ A snapshot of docs/: where the two differ, docs/ is right.
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark light">
 <title>FeRun and FeOS</title>
+<script>
+  // The UI's theme before the first paint: ferun-theme in localStorage
+  // (the same origin as the UI, so the UI's toggle holds here too), dark
+  // by default, as in the UI.
+  (function () {
+    var theme = 'dark';
+    try { theme = localStorage.getItem('ferun-theme') || 'dark'; } catch (e) { /* default */ }
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
 <style>
-/* Layout: one reading column for prose, full-width figure plates for the diagrams; colour = layer (FeRun indigo, FeOS iron ochre, infra grey, mesh teal) */
+/* Layout: one reading column for prose, full-width figure plates for the diagrams; colour = layer (FeRun indigo, FeOS iron ochre, infra grey, mesh teal). Dark first, as the UI; light on [data-theme="light"]. */
 :root {
-  --bg: #f3f4f7;
-  --surface: #ffffff;
-  --fg: #14171c;
-  --fg2: #3a414d;
-  --muted: #5f6878;
-  --line: #d5d9e1;
-  --run: #3445b4;
-  --run-soft: #e6e9fb;
-  --run-wash: #f3f4fd;
-  --os: #a4540b;
-  --os-soft: #fbecd8;
-  --os-wash: #fdf7ef;
-  --ext: #5a6373;
-  --ext-soft: #eceef2;
-  --net: #0a7a69;
+  --bg: #0e1115;
+  --surface: #151a21;
+  --fg: #e7eaf0;
+  --fg2: #c2c8d2;
+  --muted: #939cab;
+  --line: #2a303a;
+  --run: #9ba7ff;
+  --run-soft: #1f2547;
+  --run-wash: #131830;
+  --os: #f0a64f;
+  --os-soft: #35250f;
+  --os-wash: #1d1810;
+  --ext: #a8b0bd;
+  --ext-soft: #1f252d;
+  --net: #46c9b3;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0e1115; --surface: #151a21; --fg: #e7eaf0; --fg2: #c2c8d2; --muted: #939cab; --line: #2a303a;
-    --run: #9ba7ff; --run-soft: #1f2547; --run-wash: #131830;
-    --os: #f0a64f; --os-soft: #35250f; --os-wash: #1d1810;
-    --ext: #a8b0bd; --ext-soft: #1f252d;
-    --net: #46c9b3;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #0e1115; --surface: #151a21; --fg: #e7eaf0; --fg2: #c2c8d2; --muted: #939cab; --line: #2a303a;
-  --run: #9ba7ff; --run-soft: #1f2547; --run-wash: #131830;
-  --os: #f0a64f; --os-soft: #35250f; --os-wash: #1d1810;
-  --ext: #a8b0bd; --ext-soft: #1f252d;
-  --net: #46c9b3;
   color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f3f4f7; --surface: #ffffff; --fg: #14171c; --fg2: #3a414d; --muted: #5f6878; --line: #d5d9e1;
+  --run: #3445b4; --run-soft: #e6e9fb; --run-wash: #f3f4fd;
+  --os: #a4540b; --os-soft: #fbecd8; --os-wash: #fdf7ef;
+  --ext: #5a6373; --ext-soft: #eceef2;
+  --net: #0a7a69;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -96,6 +96,12 @@ h1 .run { color: var(--run); }
 h1 .os { color: var(--os); }
 .lede { font-size: 18px; line-height: 1.55; color: var(--fg2); margin: 0 0 14px; max-width: 66ch; }
 .src { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
+.theme {
+  margin-left: auto; font: inherit; font-size: 13px; color: var(--fg2); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer;
+}
+.theme:hover { color: var(--fg); border-color: var(--muted); }
+.theme:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
 
 nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-block: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; margin-bottom: 8px; }
 nav.toc a { color: var(--fg2); text-decoration: none; }
@@ -212,6 +218,7 @@ footer code { font-size: 12px; }
     <p class="lede"><b>FeOS</b> is everything that runs on the nodes. It runs pods: Firecracker microVMs with containers in them that cost no memory while idle and are back in under a second. <b>FeRun</b> is the control plane above it, the Go program <code>ferund</code> in replicas over one PostgreSQL. It knows who owns each pod, where it runs and when it may sleep. FeCode builds its sandboxes, environments and builds on top of it.</p>
     <p class="src">A picture of <code>docs/overview.md</code>, <code>docs/architecture/</code> and <code>docs/adr/</code> in the FeOS repository at <code>f4dd725</code>. It is a snapshot: where it and those pages differ, the pages are right.</p>
   </div>
+  <button class="theme" id="theme-toggle" type="button">Light mode</button>
 </header>
 
 <nav class="toc" aria-label="Contents">
@@ -881,5 +888,22 @@ footer code { font-size: 12px; }
 </footer>
 
 </div>
+<script>
+  // The toggle writes the key the UI's toggle writes.
+  (function () {
+    var root = document.documentElement;
+    var button = document.getElementById('theme-toggle');
+    function label() {
+      button.textContent = root.dataset.theme === 'light' ? 'Dark mode' : 'Light mode';
+    }
+    label();
+    button.addEventListener('click', function () {
+      var next = root.dataset.theme === 'light' ? 'dark' : 'light';
+      root.dataset.theme = next;
+      try { localStorage.setItem('ferun-theme', next); } catch (e) { /* this page only */ }
+      label();
+    });
+  })();
+</script>
 </body>
 </html>

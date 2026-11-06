@@ -1913,7 +1913,8 @@ of ferund's API tests (`go/internal/api/testdata/ferun`).
 Beside the UI, the build carries the architecture page,
 `web/public/docs/index.html`: FeRun and FeOS on one page with their
 diagrams, a snapshot of these documents, served without sign-in at
-`/docs/` (`/docs` redirects there). A directory of the build with an
+`/docs/` (`/docs` redirects there), in the UI's theme (`ferun-theme`,
+dark by default) with a toggle of its own. A directory of the build with an
 `index.html` of its own is served as that page; every other path that
 names no file gets the UI's `index.html`.
 
