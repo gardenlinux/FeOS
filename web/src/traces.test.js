@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import {
   attrValue, barOf, bindingOf, criticalByService, criticalPath, firstFolds, foldLevel, fromJaeger, isCall, offsetText, selfUs,
   serviceHues, shownRows, spanRows, spanTitle, summaryOf, summaryText, traceFocusOf, traceQueryOf, traceRangeOf,
-  traceSearchParams, whereOf,
+  traceSearchParams, waitParts, whereOf,
 } from './traces.js'
 
 const T = 1793361600000000
@@ -259,4 +259,16 @@ test('a request out through an HTTP secret is a client span that names it', () =
   assert.equal(whereOf(span), 'api#1')
   assert.equal(bindingOf({ ...span, kind: 'server' }), '')
   assert.equal(bindingOf({ ...span, attributes: [] }), '')
+})
+
+test('a span waits where its own spans run, and a call without one waits whole', () => {
+  const s = span('in', '', 0, 100)
+  // [10,40) and [30,50) merge; [90,130) is cut at the end; one after the end is none.
+  assert.deepEqual(
+    waitParts(s, [span('a', 'in', 10, 30), span('b', 'in', 30, 20), span('c', 'in', 90, 40), span('late', 'in', 200, 5)]).map(([a, b]) => [a - T, b - T]),
+    [[10, 50], [90, 100]],
+  )
+  assert.deepEqual(waitParts(s, []), [])
+  assert.deepEqual(waitParts({ ...s, kind: 'client' }, []).map(([a, b]) => [a - T, b - T]), [[0, 100]])
+  assert.deepEqual(waitParts({ ...s, kind: 'producer', durationUs: 0 }, []), [])
 })

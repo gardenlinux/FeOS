@@ -326,6 +326,22 @@ export function selfUs(span, children) {
   return Math.max(0, span.durationUs - busy);
 }
 
+// waitParts are the parts of a span spent waiting, [start, end) in µs,
+// merged: the time its own spans cover, and the whole of a call (a
+// request out, a message sent) without a span of its own below it, which
+// waits on something the trace does not see.
+export function waitParts(span, children) {
+  const parts = (children || []).map((c) => within(c, span)).filter(Boolean).sort((a, b) => a.start - b.start);
+  if (!parts.length) return isCall(span) && span.durationUs > 0 ? [[span.startUs, span.startUs + span.durationUs]] : [];
+  const out = [];
+  for (const p of parts) {
+    const last = out[out.length - 1];
+    if (last && p.start <= last[1]) last[1] = Math.max(last[1], p.end);
+    else out.push([p.start, p.end]);
+  }
+  return out;
+}
+
 // SERVICE_HUES is how many services get a hue of their own; the rest are
 // grey.
 export const SERVICE_HUES = 7;

@@ -10,7 +10,7 @@ import { queryOf } from '../logs.js';
 import {
   TRACE_RANGES, attrValue, barOf, bindingOf, clockOfUs, criticalByService, criticalPath, firstFolds, foldLevel, fromJaeger,
   isCall, offsetText, selfUs, serviceHues, shownRows, spanRows, spanTitle, summaryOf, summaryText, traceFocusOf,
-  traceQueryOf, traceRangeOf, traceSearchParams, usText, whereOf,
+  traceQueryOf, traceRangeOf, traceSearchParams, usText, waitParts, whereOf,
 } from '../traces.js';
 import { useTimeZone } from './LogSearch.jsx';
 
@@ -18,8 +18,9 @@ import { useTimeZone } from './LogSearch.jsx';
 // waterfall, each span a row, its service and name above a bar placed by
 // its start and duration in the trace, the bars sharing one track so that
 // they line up however deep a span sits, the tree's lines in a gutter
-// beside it; spans fold, each service has its colour, and the critical
-// path runs through the bars and is summed up by service above them. A
+// beside it; spans fold, each service has its colour, a bar is solid where
+// its span works and hatched where it waits, and the critical path is
+// summed up by service above them. A
 // row opened shows the span's attributes, events, links and resource. A
 // trace link in the Logs tab opens it here, and the trace leads to its
 // lines there. Without a trace the tab lists the recent traces of the
@@ -166,7 +167,9 @@ const hue = (hues, service) => `tr-c${hues.has(service) ? hues.get(service) : 0}
 // gutter as wide as the trace is deep. A span's colour is its service's,
 // a request out or a message sent has an arrow before its name, and a
 // folded span shows its children's bars inside its own, as Jaeger draws
-// them. The line through a bar is the critical path. A trace opens with
+// them. A bar is solid where its span works itself and hatched where it
+// waits: on its own spans, or, a call without one, on what the trace does
+// not see (waitParts). A trace opens with
 // about FOLD_BUDGET rows (firstFolds): every failure, then the longest
 // spans. The arrow keys walk the tree.
 function Waterfall({ trace, rows, path, hues, onTrace }) {
@@ -274,9 +277,9 @@ function Waterfall({ trace, rows, path, hues, onTrace }) {
                     const b = barOf(c, trace);
                     return <span key={c.spanId} className={`tr-sub ${hue(hues, c.service)}`} style={{ left: `${b.left}%`, width: `${b.width}%` }} />;
                   })}
-                  {(path.get(id) || []).map(([a, z]) => {
+                  {!isFolded && waitParts(s, kids.get(id)).map(([a, z]) => {
                     const b = barOf({ startUs: a, durationUs: z - a }, trace);
-                    return <span key={a} className="tr-crit" style={{ left: `${b.left}%`, width: `${b.width}%` }} />;
+                    return <span key={a} className={`tr-wait ${hue(hues, s.service)}`} style={{ left: `${b.left}%`, width: `${b.width}%` }} />;
                   })}
                 </span>
               </button>
@@ -304,7 +307,7 @@ function CriticalPath({ rows, path, hues }) {
     <section className="tr-path">
       <p className="tr-path-head">
         <span className="k">critical path</span> <b>{usText(total)}</b>
-        <span className="tr-key"><i className="tr-key-bar tr-c0" /> the time each span alone held the request up</span>
+        <span className="tr-key">the time each service alone held the request up</span>
       </p>
       <div className="tr-share" aria-hidden="true">
         {by.map(([svc, us]) => <span key={svc} className={hue(hues, svc)} style={{ flexGrow: us }} title={`${svc} · ${usText(us)}`} />)}

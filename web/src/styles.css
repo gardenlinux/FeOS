@@ -920,13 +920,19 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .tr-more { flex: none; padding: 0 5px; border-radius: 8px; background: var(--panel3); font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .tr-dur { flex: none; margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tr-track { position: relative; display: block; height: 8px; border-radius: var(--tr-r); background: rgba(128,128,128,.1); }
-.tr-bar, .tr-sub, .tr-crit { position: absolute; }
+.tr-bar, .tr-sub, .tr-wait { position: absolute; }
 .tr-bar, .tr-sub { min-width: 2px; }
 .tr-bar { top: 0; bottom: 0; border-radius: var(--tr-r); background: var(--c); }
 .tr-span.bad .tr-bar { box-shadow: 0 0 0 2px var(--danger); }
 .tr-sub { top: 2px; bottom: 2px; border-radius: 1px; background: var(--c); }
-/* the critical path: white on every service's hue, in both themes */
-.tr-crit { top: 3px; height: 2px; border-radius: 1px; background: #ffffff; }
+/* a span waiting on its own spans, or a call on what the trace does not
+   see: hatched over its bar, in its service's hue on a pale ground, held
+   together by a 1 px edge drawn inside, so that the bar keeps its size */
+.tr-wait {
+  top: 0; bottom: 0; min-width: 1px;
+  background: repeating-linear-gradient(135deg, var(--c) 0 1.5px, transparent 1.5px 4.5px), color-mix(in srgb, var(--c) 22%, var(--panel));
+  box-shadow: inset 0 0 0 1px var(--c);
+}
 .tr-span.bad .tr-name { color: var(--danger); }
 .tr-detail { display: flex; flex-direction: column; gap: 8px; padding: 4px 6px 10px; min-width: 0; }
 .tr-detail section { min-width: 0; }
