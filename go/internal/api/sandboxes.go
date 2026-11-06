@@ -201,7 +201,8 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 			return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
 		}
 		row, err = tx.CreateMintedSandbox(r.Context(), func(id podid.ID) store.NewSandbox {
-			n := store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB}
+			n := store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
+				MadeBy: auth.MadeBy(r.Context())}
 			if req.Attachable {
 				n.PodTemplate = attachableTemplate(id)
 			}
@@ -213,7 +214,7 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		if err := s.keepCredentials(r.Context(), tx, row.ID, req.ImageCredentials); err != nil {
 			return err
 		}
-		_, err = tx.CreateSandboxToken(r.Context(), hash, row.ID, firstTokenLabel)
+		_, err = tx.CreateSandboxToken(r.Context(), hash, row.ID, firstTokenLabel, auth.MadeBy(r.Context()))
 		return err
 	})
 	if err != nil {
@@ -380,7 +381,7 @@ func (s *server) createSandboxToken(w http.ResponseWriter, r *http.Request) erro
 		if err != nil {
 			return err
 		}
-		tok, err = tx.CreateSandboxToken(r.Context(), hash, id, req.Label)
+		tok, err = tx.CreateSandboxToken(r.Context(), hash, id, req.Label, auth.MadeBy(r.Context()))
 		if errors.Is(err, model.ErrNotFound) {
 			return errUnknownSandbox(id.String())
 		}

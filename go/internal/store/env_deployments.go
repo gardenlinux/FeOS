@@ -35,10 +35,13 @@ type EnvDeployment struct {
 	FinishedAt      time.Time // zero: NULL
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// MadeBy is the principal that made it (ADR 0031), beside the
+	// client's Author; "": ferund.
+	MadeBy string
 }
 
 const deploymentSummaryCols = `env_id, number, base, author, message, annotations, origin, origin_ref, state, reason,
-	started_at, finished_at, created_at, updated_at`
+	started_at, finished_at, created_at, updated_at, made_by`
 
 // deploymentCols are the summary's columns and the spec, last.
 const deploymentCols = deploymentSummaryCols + ", spec"
@@ -47,7 +50,7 @@ func scanDeployment(row pgx.Row, withSpec bool) (EnvDeployment, error) {
 	var r EnvDeployment
 	var started, finished *time.Time
 	dst := []any{&r.EnvID, &r.Number, &r.Base, &r.Author, &r.Message, &r.Annotations, &r.Origin, &r.OriginRef,
-		&r.State, &r.Reason, &started, &finished, &r.CreatedAt, &r.UpdatedAt}
+		&r.State, &r.Reason, &started, &finished, &r.CreatedAt, &r.UpdatedAt, &r.MadeBy}
 	var spec []byte
 	if withSpec {
 		dst = append(dst, &spec)
@@ -76,10 +79,10 @@ func (s *Store) InsertDeployment(ctx context.Context, r EnvDeployment) (EnvDeplo
 		return EnvDeployment{}, fmt.Errorf("insert deployment %d: %w", r.Number, err)
 	}
 	out, err := scanDeployment(s.q.QueryRow(ctx, `INSERT INTO env_deployments (env_id, number, spec, base, author, message,
-			annotations, origin, origin_ref, state, reason, started_at, finished_at)
-		VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13) RETURNING `+deploymentCols,
+			annotations, origin, origin_ref, state, reason, started_at, finished_at, made_by)
+		VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14) RETURNING `+deploymentCols,
 		r.EnvID, r.Number, string(r.Spec), r.Base, r.Author, r.Message, ann, r.Origin, r.OriginRef, r.State, r.Reason,
-		nullTime(r.StartedAt), nullTime(r.FinishedAt)), true)
+		nullTime(r.StartedAt), nullTime(r.FinishedAt), r.MadeBy), true)
 	if err != nil {
 		return EnvDeployment{}, insertError(fmt.Sprintf("insert deployment %d of environment %s", r.Number, r.EnvID), err)
 	}
@@ -160,6 +163,9 @@ func (s *Store) ReplaceDeployments(ctx context.Context, envID uuid.UUID, below i
 
 // EnvTag is a row of env_tags: a movable name of a deployment.
 type EnvTag struct {
+	// MadeBy is the principal that set it last (ADR 0031); written, not
+	// read back.
+	MadeBy  string
 	EnvID   uuid.UUID
 	Tag     string
 	Number  int
@@ -178,9 +184,11 @@ func scanTag(row pgx.Row) (EnvTag, error) {
 // PutTag points a tag at a deployment (moved_at = now()), creating or moving
 // it; a deployment the environment does not have is ErrNoRow.
 func (s *Store) PutTag(ctx context.Context, t EnvTag) (EnvTag, error) {
-	out, err := scanTag(s.q.QueryRow(ctx, `INSERT INTO env_tags (env_id, tag, number, moved_by) VALUES ($1, $2, $3, $4)
-		ON CONFLICT (env_id, tag) DO UPDATE SET number = excluded.number, moved_by = excluded.moved_by, moved_at = now()
-		RETURNING `+tagCols, t.EnvID, t.Tag, t.Number, t.MovedBy))
+	out, err := scanTag(s.q.QueryRow(ctx, `INSERT INTO env_tags (env_id, tag, number, moved_by, made_by)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (env_id, tag) DO UPDATE SET number = excluded.number, moved_by = excluded.moved_by,
+			made_by = excluded.made_by, moved_at = now()
+		RETURNING `+tagCols, t.EnvID, t.Tag, t.Number, t.MovedBy, t.MadeBy))
 	if err != nil {
 		return EnvTag{}, insertError(fmt.Sprintf("put tag %s of environment %s", t.Tag, t.EnvID), err)
 	}

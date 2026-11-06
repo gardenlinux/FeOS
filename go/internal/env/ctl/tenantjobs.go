@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -96,6 +97,7 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 	if len(secrets) > 0 && c.d.Sealer == nil {
 		return store.TenantJob{}, false, errNoSealer
 	}
+	madeBy := auth.MadeBy(ctx)
 	var auth model.RegistryCredentials
 	if rs.ImageCredentials != nil {
 		auth = *rs.ImageCredentials
@@ -151,7 +153,7 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 		}
 		job, err = tx.InsertTenantJob(ctx, store.TenantJob{ID: row.ID, Owner: owner, Key: rs.Key, RequestHash: rs.Hash,
 			Image: rs.Image, ImageRef: ref, VCPUs: rs.VCPUs, MemoryMiB: rs.MemoryMiB, ResultPath: rs.ResultPath,
-			Labels: rs.Labels, LogRetentionDays: rs.LogRetentionDays}, sealed, rs.Deadline)
+			Labels: rs.Labels, LogRetentionDays: rs.LogRetentionDays, MadeBy: madeBy}, sealed, rs.Deadline)
 		return err
 	})
 	if errors.Is(err, store.ErrExists) && rs.Key != "" {

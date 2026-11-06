@@ -236,6 +236,8 @@ func collectDomainViews(rows pgx.Rows, err error) ([]DomainView, error) {
 // NewDomain is what a claim's create sets; the other columns take their
 // defaults (unverified, checked at once).
 type NewDomain struct {
+	// MadeBy is the principal that claims it (ADR 0031).
+	MadeBy        string
 	ID            uuid.UUID
 	Owner         string
 	Name          string
@@ -255,9 +257,10 @@ func (s *Store) InsertDomain(ctx context.Context, n NewDomain) (Domain, error) {
 	if err != nil {
 		return Domain{}, fmt.Errorf("insert domain %s: %w", n.Name, err)
 	}
-	d, err := scanDomain(s.q.QueryRow(ctx, `INSERT INTO domains (id, owner, name, labels, token, found, state, reason)
-		VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8) RETURNING `+domainCols,
-		n.ID, n.Owner, n.Name, labels, n.Token, found, n.State, n.Reason))
+	d, err := scanDomain(s.q.QueryRow(ctx, `INSERT INTO domains (id, owner, name, labels, token, found, state, reason,
+			made_by)
+		VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9) RETURNING `+domainCols,
+		n.ID, n.Owner, n.Name, labels, n.Token, found, n.State, n.Reason, n.MadeBy))
 	if err != nil {
 		return Domain{}, insertError("insert domain "+n.Name, err)
 	}

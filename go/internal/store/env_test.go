@@ -510,13 +510,13 @@ func TestEnvSecretsAndRouteTokens(t *testing.T) {
 	}
 
 	// Route tokens.
-	if _, err := s.InsertRouteToken(bg, "hash1", e.ID); err != nil {
+	if _, err := s.InsertRouteToken(bg, "hash1", e.ID, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.InsertRouteToken(bg, "hash1", e.ID); !errors.Is(err, store.ErrExists) {
+	if _, err := s.InsertRouteToken(bg, "hash1", e.ID, ""); !errors.Is(err, store.ErrExists) {
 		t.Fatalf("hash taken: %v", err)
 	}
-	if _, err := s.InsertRouteToken(bg, "hash2", uuid.New()); !errors.Is(err, store.ErrNoRow) {
+	if _, err := s.InsertRouteToken(bg, "hash2", uuid.New(), ""); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("unknown environment: %v", err)
 	}
 	rt, err := s.ResolveRouteToken(bg, "hash1")

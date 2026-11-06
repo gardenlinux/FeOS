@@ -27,6 +27,9 @@ type Error struct {
 	Code   string
 	// Header is set on the response, e.g. Retry-After.
 	Header http.Header
+	// Role and Scope are a role_required answer's (ADR 0031): the role
+	// the principal lacks, and on what ("tenant" or "environment").
+	Role, Scope string
 }
 
 func (e *Error) Error() string { return e.Msg }
@@ -66,9 +69,22 @@ func RetryAfterOf(err error, def int) int {
 	return int((d + time.Second - 1) / time.Second)
 }
 
+// CodeRoleRequired is the code of a 403 for a principal that sees what it
+// names but lacks the role for what it asks (ADR 0031).
+const CodeRoleRequired = "role_required"
+
+// RoleRequired is 403 {"code": "role_required", "role", "scope"}: the
+// principal needs role on scope ("tenant" or "environment").
+func RoleRequired(role, scope string) *Error {
+	return &Error{Status: http.StatusForbidden, Code: CodeRoleRequired, Role: role, Scope: scope,
+		Msg: fmt.Sprintf("this needs the role %s on the %s", role, scope)}
+}
+
 type body struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
+	Role  string `json:"role,omitempty"`
+	Scope string `json:"scope,omitempty"`
 }
 
 // Write answers err: an *Error with its status and body, anything else with
@@ -83,7 +99,7 @@ func Write(w http.ResponseWriter, err error) {
 			w.Header().Add(k, v)
 		}
 	}
-	WriteJSON(w, e.Status, body{Error: e.Msg, Code: e.Code})
+	WriteJSON(w, e.Status, body{Error: e.Msg, Code: e.Code, Role: e.Role, Scope: e.Scope})
 }
 
 // WriteJSON answers v as JSON with status.

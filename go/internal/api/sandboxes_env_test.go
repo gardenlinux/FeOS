@@ -36,7 +36,7 @@ func (e *env) instanceRow() (store.Sandbox, string) {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if _, err := e.st.CreateSandboxToken(ctx, hash, sb.ID, "smuggled"); err != nil {
+	if _, err := e.st.CreateSandboxToken(ctx, hash, sb.ID, "smuggled", ""); err != nil {
 		e.t.Fatal(err)
 	}
 	return sb, tok

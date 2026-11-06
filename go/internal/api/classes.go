@@ -131,9 +131,10 @@ func (s *server) basicAdmin(r *http.Request) (a auth.Admin, present bool, err er
 	return auth.Admin{User: u, Method: auth.AdminBasic}, true, nil
 }
 
-// sessionAdmin resolves the request's session cookie to a signed-in admin.
-// ok is false when there is no cookie, or no valid admin session of it.
-func (s *server) sessionAdmin(r *http.Request) (store.UISession, bool, error) {
+// session resolves the request's session cookie to a signed-in person,
+// an operator or not. ok is false when there is no cookie, or no valid
+// session of it (expired, ended, or its person disabled).
+func (s *server) session(r *http.Request) (store.UISession, bool, error) {
 	if s.oidc == nil || s.st == nil {
 		return store.UISession{}, false, nil
 	}
@@ -142,7 +143,7 @@ func (s *server) sessionAdmin(r *http.Request) (store.UISession, bool, error) {
 		return store.UISession{}, false, nil
 	}
 	hash := store.HashToken(c.Value)
-	sess, err := s.st.AdminSession(r.Context(), hash)
+	sess, err := s.st.UISessionOf(r.Context(), hash)
 	if errors.Is(err, store.ErrNoRow) {
 		return store.UISession{}, false, nil
 	}
@@ -163,7 +164,7 @@ func adminOf(sess store.UISession) auth.Admin {
 	if user == "" {
 		user = sess.Email
 	}
-	return auth.Admin{User: user, Sub: sess.Sub, Method: auth.AdminOIDC}
+	return auth.Admin{User: user, Sub: sess.Sub, Method: auth.AdminOIDC, Person: sess.PersonID}
 }
 
 // checkCSRF refuses a request authenticated by a cookie that a page of
@@ -226,15 +227,19 @@ func (s *server) admin(h apiHandler) http.Handler {
 			}
 			return h(w, r.WithContext(auth.WithAdmin(r.Context(), a)))
 		}
-		sess, ok, err := s.sessionAdmin(r)
+		sess, ok, err := s.session(r)
 		if err != nil {
 			return err
 		}
-		if ok {
+		if ok && sess.Admin {
 			if err := s.checkCSRF(r); err != nil {
 				return err
 			}
 			return h(w, r.WithContext(auth.WithAdmin(r.Context(), adminOf(sess))))
+		}
+		if ok {
+			// A person who is no operator: signed in, but not for this.
+			return apierr.New(http.StatusForbidden, "operators only")
 		}
 		s.challengeBasic(w, r)
 		return apierr.New(http.StatusUnauthorized, "admin sign-in required")

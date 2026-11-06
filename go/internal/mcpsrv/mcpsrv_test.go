@@ -704,7 +704,7 @@ func TestTokenTouch(t *testing.T) {
 	token := uuid.NewString()
 	sb := h.env.NewSandbox()
 	sb.TokenHash = store.HashToken(token)
-	if _, err := h.env.Store.CreateSandboxToken(bg, sb.TokenHash, sb.ID, "default"); err != nil {
+	if _, err := h.env.Store.CreateSandboxToken(bg, sb.TokenHash, sb.ID, "default", ""); err != nil {
 		t.Fatal(err)
 	}
 	h.tokens.mu.Lock()

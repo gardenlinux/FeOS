@@ -16,6 +16,9 @@ import (
 // (internal/seal, AAD envdeps.SecretAAD). A version is never changed; a
 // deleted secret's versions keep resolving while a deployment pins them.
 type EnvSecret struct {
+	// MadeBy is the principal that set the version (ADR 0031); written,
+	// not read back.
+	MadeBy  string
 	EnvID   uuid.UUID
 	Name    string
 	Version int
@@ -54,9 +57,10 @@ func collectSecrets(rows pgx.Rows, err error) ([]EnvSecret, error) {
 // environment's row (FOR UPDATE): a version that exists is ErrExists, an
 // unknown environment ErrNoRow.
 func (s *Store) InsertSecret(ctx context.Context, sec EnvSecret) (EnvSecret, error) {
-	out, err := scanSecret(s.q.QueryRow(ctx, `INSERT INTO env_secrets (env_id, name, version, sealed, system, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+secretCols, sec.EnvID, sec.Name, sec.Version, sec.Sealed, sec.System,
-		sec.CreatedBy))
+	out, err := scanSecret(s.q.QueryRow(ctx, `INSERT INTO env_secrets (env_id, name, version, sealed, system, created_by,
+			made_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+secretCols, sec.EnvID, sec.Name, sec.Version, sec.Sealed,
+		sec.System, sec.CreatedBy, sec.MadeBy))
 	if err != nil {
 		return EnvSecret{}, insertError(fmt.Sprintf("insert secret %s version %d", sec.Name, sec.Version), err)
 	}

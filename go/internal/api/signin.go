@@ -16,16 +16,21 @@ import (
 	"strings"
 
 	"github.com/gardenlinux/feos/go/internal/activity"
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// This file is human sign-in (§11 "Human sign-in"): people sign in to the
-// UI and the admin API through the OIDC provider FeCode, FeRun and FeChat
-// share; an admin (the provider's groups claim holds --oidc-admin-group)
-// gets a session, kept in ui_sessions and named by the cookie
-// ferun_session. A sign-in under way lives in auth_logins, so that it may
-// complete on another instance than it began on. Machine credentials
+// This file is human sign-in (§11 "Human sign-in", ADR 0031): people sign
+// in to the UI and the API through the OIDC provider FeCode, FeRun and
+// FeChat share. Everyone the provider lets in is a person (people) and gets
+// a session, kept in ui_sessions and named by the cookie ferun_session; an
+// operator's (the provider's groups claim holds --oidc-admin-group) is
+// marked admin. A sign-in under way lives in auth_logins, so that it may
+// complete on another instance than it began on. The provider's
+// back-channel logout ends the sessions of its sid. Machine credentials
 // (tenant and sandbox tokens, /mcp) are not touched by any of it.
 
 // loginCookieAge is the life of the ferun_login cookie, the sign-in's
@@ -42,6 +47,7 @@ func (s *server) signInRoutes(public func(string, http.Handler)) {
 	if s.oidc != nil {
 		public("GET /auth/login", http.HandlerFunc(s.login))
 		public("GET /auth/callback", http.HandlerFunc(s.callback))
+		public("POST /auth/backchannel-logout", http.HandlerFunc(s.backchannelLogout))
 	}
 }
 
@@ -53,8 +59,59 @@ func (s *server) authConfig(w http.ResponseWriter, _ *http.Request) error {
 	}{s.oidc != nil, len(s.cfg.AdminUsers) > 0})
 }
 
-// authMe is GET /auth/me: who is signed in. Basic credentials that pass
-// win, as on the admin routes; then the session.
+// meTenant is a tenant of /auth/me: the person's role on it ("" with
+// grants on environments alone) and their grants on its environments.
+type meTenant struct {
+	Tenant       string          `json:"tenant"`
+	Role         string          `json:"role"`
+	Environments []meEnvironment `json:"environments"`
+}
+
+type meEnvironment struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+// myTenants lists a session's tenants: an operator's are every tenant, as
+// admin; a person's those of their grants.
+func (s *server) myTenants(r *http.Request, sess store.UISession) ([]meTenant, error) {
+	out := []meTenant{}
+	if sess.Admin {
+		names, err := s.st.LiveTenantNames(r.Context())
+		if err != nil {
+			return nil, internalf("tenants: %v", err)
+		}
+		for _, n := range names {
+			out = append(out, meTenant{Tenant: n, Role: auth.RoleAdmin.String(), Environments: []meEnvironment{}})
+		}
+		return out, nil
+	}
+	if sess.PersonID == uuid.Nil {
+		return out, nil
+	}
+	gs, err := s.st.PersonGrants(r.Context(), sess.PersonID)
+	if err != nil {
+		return nil, internalf("grants: %v", err)
+	}
+	for _, g := range gs {
+		if len(out) == 0 || out[len(out)-1].Tenant != g.Tenant {
+			out = append(out, meTenant{Tenant: g.Tenant, Environments: []meEnvironment{}})
+		}
+		t := &out[len(out)-1]
+		if g.EnvironmentID == uuid.Nil {
+			t.Role = g.Role
+		} else {
+			t.Environments = append(t.Environments, meEnvironment{ID: g.EnvironmentID.String(), Name: g.EnvironmentName,
+				Role: g.Role})
+		}
+	}
+	return out, nil
+}
+
+// authMe is GET /auth/me: who is signed in, whether an operator, and the
+// person's tenants with their roles. Basic credentials that pass win, as
+// on the admin routes; then the session.
 func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if a, present, err := s.basicAdmin(r); present && err == nil {
 		return writeJSON(w, http.StatusOK, struct {
@@ -63,23 +120,32 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 			Method   string `json:"method"`
 		}{a.User, true, a.Method})
 	}
-	sess, ok, err := s.sessionAdmin(r)
+	sess, ok, err := s.session(r)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return apierr.New(http.StatusUnauthorized, "not signed in")
 	}
-	a := adminOf(sess)
+	tenants, err := s.myTenants(r, sess)
+	if err != nil {
+		return err
+	}
+	person := ""
+	if sess.PersonID != uuid.Nil {
+		person = sess.PersonID.String()
+	}
 	return writeJSON(w, http.StatusOK, struct {
-		Sub      string `json:"sub"`
-		Email    string `json:"email"`
-		Name     string `json:"name"`
-		Username string `json:"username"`
-		Picture  string `json:"picture"`
-		Admin    bool   `json:"admin"`
-		Method   string `json:"method"`
-	}{sess.Sub, sess.Email, sess.Name, sess.Username, sess.Picture, true, a.Method})
+		Sub      string     `json:"sub"`
+		Person   string     `json:"person"`
+		Email    string     `json:"email"`
+		Name     string     `json:"name"`
+		Username string     `json:"username"`
+		Picture  string     `json:"picture"`
+		Admin    bool       `json:"admin"`
+		Method   string     `json:"method"`
+		Tenants  []meTenant `json:"tenants"`
+	}{sess.Sub, person, sess.Email, sess.Name, sess.Username, sess.Picture, sess.Admin, auth.AdminOIDC, tenants})
 }
 
 // randomToken returns 32 random bytes, base64url without padding.
@@ -168,8 +234,9 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 // callback is GET /auth/callback: the provider's answer. The state must be
 // the browser's (ferun_login) and a sign-in begun less than 10 minutes ago
 // (taken once); the code is exchanged, the ID token verified, userinfo
-// read. An admin gets a session and goes on to where the sign-in began;
-// anyone else gets a page that says they have no access, and no session.
+// read, and the person recorded (people). Everyone gets a session, an
+// operator's marked admin, and goes on to where the sign-in began; a
+// person an operator disabled gets a page that says so, and no session.
 func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	again := "/auth/login"
@@ -242,24 +309,32 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := personOf(idt.claims, info)
-	if !slices.Contains(p.Groups, s.oidc.cfg.AdminGroup) {
-		who := p.Email
-		if who == "" {
-			who = p.Username
-		}
-		s.log.Info("sign-in refused: not an admin", "sub", p.Sub, "email", p.Email, "username", p.Username)
+	operator := s.oidc.cfg.AdminGroup != "" && slices.Contains(p.Groups, s.oidc.cfg.AdminGroup)
+	who := p.Email
+	if who == "" {
+		who = p.Username
+	}
+	pr, err := s.st.UpsertPerson(r.Context(), s.oidc.cfg.Issuer, p.Sub, p.Email, p.Name)
+	if err != nil {
+		s.log.Warn("sign-in: record the person", "err", err)
+		page(w, http.StatusInternalServerError, "Sign-in failed", "FeRun could not record the sign-in. Try again.", again, "Start again")
+		return
+	}
+	if pr.Disabled() {
+		s.log.Info("sign-in refused: the person is disabled", "person", pr.ID, "sub", p.Sub, "email", p.Email)
 		out := "/"
 		if d.EndSessionEndpoint != "" {
 			out = d.EndSessionEndpoint
 		}
-		page(w, http.StatusForbidden, "No access", "Your account "+who+" has no access to FeRun.", out, "Sign out")
+		page(w, http.StatusForbidden, "No access", "Your account "+who+" is disabled in FeRun.", out, "Sign out")
 		return
 	}
 	id, err := randomToken()
 	if err == nil {
 		_, err = s.st.InsertUISession(r.Context(), store.UISession{
 			IDHash: store.HashToken(id), Sub: p.Sub, Email: p.Email, Name: p.Name, Username: p.Username,
-			Picture: p.Picture, Groups: p.Groups, Admin: true, IDToken: idt.raw,
+			Picture: p.Picture, Groups: p.Groups, Admin: operator, IDToken: idt.raw, PersonID: pr.ID,
+			SID: idt.claims.str("sid"),
 		}, s.cfg.SessionTTL)
 	}
 	if err != nil {
@@ -268,13 +343,14 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, s.cookie(cookieSession, id, "/", int(s.cfg.SessionTTL.Seconds())))
-	s.log.Info("signed in", "sub", p.Sub, "email", p.Email, "username", p.Username, "github_id", p.GitHubID)
-	who := p.Username
-	if who == "" {
-		who = p.Email
+	s.log.Info("signed in", "person", pr.ID, "sub", p.Sub, "email", p.Email, "username", p.Username,
+		"github_id", p.GitHubID, "operator", operator)
+	if p.Username != "" {
+		who = p.Username
 	}
 	s.record(r.Context(), store.ActivityRow{Kind: "sign_in", Category: activity.CategoryCredential, Name: "sign in: " + who,
-		Detail: detail(map[string]any{"sub": p.Sub, "email": p.Email, "username": p.Username})})
+		Detail: detail(map[string]any{"sub": p.Sub, "email": p.Email, "username": p.Username, "person": pr.ID.String(),
+			"operator": operator})})
 	http.Redirect(w, r, login.Next, http.StatusFound)
 }
 
@@ -311,6 +387,56 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, struct {
 		Redirect string `json:"redirect"`
 	}{redirect})
+}
+
+// backchannelLogout is POST /auth/backchannel-logout, the provider's
+// back-channel logout (OpenID Connect Back-Channel Logout 1.0): the form's
+// logout_token, verified (verifyLogout), ends every session of its sid
+// (and sub, when it names one) on every instance, as their rows go. 200
+// with an empty body; 400 {"error", "error_description"} for a token that
+// does not verify; never cached.
+func (s *server) backchannelLogout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	bad := func(desc string) {
+		apierr.WriteJSON(w, http.StatusBadRequest, struct {
+			Error       string `json:"error"`
+			Description string `json:"error_description"`
+		}{"invalid_request", desc})
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxProviderBody)
+	raw := ""
+	if err := r.ParseForm(); err == nil {
+		raw = r.PostForm.Get("logout_token")
+	}
+	if raw == "" {
+		bad("logout_token is required")
+		return
+	}
+	d, err := s.oidc.discovery(r.Context())
+	if err != nil {
+		s.log.Warn("back-channel logout: the provider's discovery failed", "err", err)
+		bad("the provider cannot be reached")
+		return
+	}
+	sid, sub, err := s.oidc.verifyLogout(r.Context(), d, raw)
+	if err != nil {
+		s.log.Info("back-channel logout refused", "err", err)
+		var re *errRefused
+		if errors.As(err, &re) {
+			bad(re.reason)
+		} else {
+			bad("the logout token did not verify")
+		}
+		return
+	}
+	n, err := s.st.DeleteUISessionsBySID(r.Context(), sid, sub)
+	if err != nil {
+		s.log.Warn("back-channel logout: end the sessions", "err", err)
+		writeError(w, internalf("end the sessions: %v", err))
+		return
+	}
+	s.log.Info("back-channel logout", "sub", sub, "sessions", n)
+	w.WriteHeader(http.StatusOK)
 }
 
 // pageTemplate is the plain page of a sign-in that did not end in the UI.

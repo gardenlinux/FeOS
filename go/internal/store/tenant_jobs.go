@@ -18,8 +18,11 @@ import (
 // its end. Its pod is the sandbox row of the same ID (tenant_job) while
 // it has not ended. Its sealed secrets are read apart (TenantJobSealed).
 type TenantJob struct {
-	ID    podid.ID
-	Owner string
+	// MadeBy is the principal that created it (ADR 0031); written by
+	// InsertTenantJob, not read back.
+	MadeBy string
+	ID     podid.ID
+	Owner  string
 	// Key is the create's Idempotency-Key; "": none.
 	Key string
 	// RequestHash is the create's body's hash.
@@ -79,10 +82,11 @@ func (s *Store) InsertTenantJob(ctx context.Context, r TenantJob, sealed []byte,
 		return TenantJob{}, err
 	}
 	out, err := scanTenantJob(s.q.QueryRow(ctx, `INSERT INTO jobs (id, owner, idempotency_key, request_hash, image, image_ref,
-			vcpus, memory_mib, result_path, labels, sealed, deadline_at, log_retention_days)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13) RETURNING `+tenantJobCols,
+			vcpus, memory_mib, result_path, labels, sealed, deadline_at, log_retention_days, made_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13, $14)
+		RETURNING `+tenantJobCols,
 		r.ID, r.Owner, nullString(r.Key), r.RequestHash, r.Image, r.ImageRef, r.VCPUs, r.MemoryMiB, r.ResultPath, labels,
-		sealed, interval(deadline), nullPositive(r.LogRetentionDays)))
+		sealed, interval(deadline), nullPositive(r.LogRetentionDays), r.MadeBy))
 	if err != nil {
 		return TenantJob{}, insertError("insert job "+r.ID.String(), err)
 	}

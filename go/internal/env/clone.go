@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -349,13 +350,13 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		}
 		for i, sec := range secrets {
 			if _, err := tx.InsertSecret(ctx, store.EnvSecret{EnvID: e.ID, Name: sec.name, Version: 1, Sealed: sealed[i],
-				CreatedBy: author}); err != nil {
+				CreatedBy: author, MadeBy: auth.MadeBy(ctx)}); err != nil {
 				return err
 			}
 		}
 		if _, err := tx.InsertDeployment(ctx, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: specJSON, Author: req.Author,
 			Annotations: annotations, Origin: model.OriginClone, OriginRef: fmt.Sprintf("%s/%d", src.ID, number),
-			State: model.DeploymentWaiting}); err != nil {
+			State: model.DeploymentWaiting, MadeBy: auth.MadeBy(ctx)}); err != nil {
 			return err
 		}
 		after := e

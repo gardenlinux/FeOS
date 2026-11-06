@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -18,31 +19,49 @@ import (
 // most.
 const tokenTouchInterval = "1 minute"
 
-// TenantToken is a row of tenant_tokens. Only the hash is stored.
+// TenantToken is a row of tenant_tokens. Only the hash is stored. Role and
+// EnvironmentID are the token's own grant, minted with it (ADR 0031):
+// EnvironmentID uuid.Nil is the tenant.
 type TenantToken struct {
-	Hash       string
-	TenantID   string
-	Label      string
-	CreatedAt  time.Time
-	LastUsedAt time.Time // zero: never used
+	Hash          string
+	TenantID      string
+	Label         string
+	Role          string
+	EnvironmentID uuid.UUID
+	MadeBy        string
+	CreatedAt     time.Time
+	LastUsedAt    time.Time // zero: never used
 }
+
+const tenantTokenCols = "hash, tenant_id, label, role, environment_id, made_by, created_at, last_used_at"
 
 func scanTenantToken(row pgx.Row) (TenantToken, error) {
 	var t TenantToken
 	var used *time.Time
-	if err := row.Scan(&t.Hash, &t.TenantID, &t.Label, &t.CreatedAt, &used); err != nil {
+	var env *uuid.UUID
+	if err := row.Scan(&t.Hash, &t.TenantID, &t.Label, &t.Role, &env, &t.MadeBy, &t.CreatedAt, &used); err != nil {
 		return TenantToken{}, err
 	}
-	t.LastUsedAt = timeOf(used)
+	t.LastUsedAt, t.EnvironmentID = timeOf(used), uuidOf(env)
 	return t, nil
 }
 
-// CreateTenantToken stores a tenant token by its hash. ErrNoRow when the
-// tenant does not exist.
+// CreateTenantToken stores a tenant token by its hash, admin on its
+// tenant. ErrNoRow when the tenant does not exist.
 func (s *Store) CreateTenantToken(ctx context.Context, hash, tenant, label string) (TenantToken, error) {
-	t, err := scanTenantToken(s.q.QueryRow(ctx, `INSERT INTO tenant_tokens (hash, tenant_id, label) VALUES ($1, $2, $3)
-		RETURNING hash, tenant_id, label, created_at, last_used_at`, hash, tenant, label))
-	if isForeignKeyViolation(err) {
+	return s.InsertTenantToken(ctx, TenantToken{Hash: hash, TenantID: tenant, Label: label, Role: "admin"})
+}
+
+// InsertTenantToken stores a tenant token by its hash with its role, scope
+// and maker (the fields the database sets are ignored). ErrNoRow when the
+// tenant does not exist or the scope is not an environment of it.
+func (s *Store) InsertTenantToken(ctx context.Context, n TenantToken) (TenantToken, error) {
+	t, err := scanTenantToken(s.q.QueryRow(ctx, `INSERT INTO tenant_tokens (hash, tenant_id, label, role,
+			environment_id, made_by)
+		SELECT $1, $2, $3, $4, $5, $6
+		WHERE $5::uuid IS NULL OR EXISTS (SELECT 1 FROM environments WHERE id = $5 AND owner = $2)
+		RETURNING `+tenantTokenCols, n.Hash, n.TenantID, n.Label, n.Role, nullUUID(n.EnvironmentID), n.MadeBy))
+	if isForeignKeyViolation(err) || errors.Is(err, pgx.ErrNoRows) {
 		return TenantToken{}, ErrNoRow
 	}
 	return t, err
@@ -55,7 +74,7 @@ func (s *Store) ListTenantTokens(ctx context.Context, tenant string) ([]TenantTo
 
 // listTenantTokens returns the tokens of tenant, or of every tenant for "".
 func (s *Store) listTenantTokens(ctx context.Context, tenant string) ([]TenantToken, error) {
-	rows, err := s.q.Query(ctx, `SELECT hash, tenant_id, label, created_at, last_used_at FROM tenant_tokens
+	rows, err := s.q.Query(ctx, `SELECT `+tenantTokenCols+` FROM tenant_tokens
 		WHERE $1 = '' OR tenant_id = $1 ORDER BY tenant_id, created_at, hash`, tenant)
 	if err != nil {
 		return nil, err
@@ -108,11 +127,12 @@ func scanSandboxToken(row pgx.Row) (SandboxToken, error) {
 	return t, nil
 }
 
-// CreateSandboxToken stores a sandbox token by its hash;
-// model.ErrNotFound when the sandbox does not exist.
-func (s *Store) CreateSandboxToken(ctx context.Context, hash string, sandboxID podid.ID, label string) (SandboxToken, error) {
-	t, err := scanSandboxToken(s.q.QueryRow(ctx, `INSERT INTO sandbox_tokens (hash, sandbox_id, label) VALUES ($1, $2, $3)
-		RETURNING hash, sandbox_id, label, created_at, last_used_at`, hash, sandboxID, label))
+// CreateSandboxToken stores a sandbox token by its hash, made by madeBy
+// (a principal, ADR 0031; "" for ferund); model.ErrNotFound when the
+// sandbox does not exist.
+func (s *Store) CreateSandboxToken(ctx context.Context, hash string, sandboxID podid.ID, label, madeBy string) (SandboxToken, error) {
+	t, err := scanSandboxToken(s.q.QueryRow(ctx, `INSERT INTO sandbox_tokens (hash, sandbox_id, label, made_by)
+		VALUES ($1, $2, $3, $4) RETURNING hash, sandbox_id, label, created_at, last_used_at`, hash, sandboxID, label, madeBy))
 	if isForeignKeyViolation(err) {
 		return SandboxToken{}, model.ErrNotFound
 	}

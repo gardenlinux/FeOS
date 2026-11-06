@@ -481,7 +481,7 @@ func TestRouteDoor(t *testing.T) {
 	// FeRun credential: a tenant's or a sandbox's token as its bearer is
 	// refused and nothing forwarded; any other passes, as above.
 	sandboxTok := "sandbox-token"
-	if _, err := h.st.CreateSandboxToken(ctx, store.HashToken(sandboxTok), sb, "s"); err != nil {
+	if _, err := h.st.CreateSandboxToken(ctx, store.HashToken(sandboxTok), sb, "s", ""); err != nil {
 		t.Fatal(err)
 	}
 	forwards := func() int {

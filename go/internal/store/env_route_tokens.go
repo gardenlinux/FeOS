@@ -32,11 +32,12 @@ func scanRouteToken(row pgx.Row) (EnvRouteToken, error) {
 	return t, nil
 }
 
-// InsertRouteToken stores a route token of the environment by its hash;
-// ErrNoRow for an unknown environment, ErrExists for a hash taken.
-func (s *Store) InsertRouteToken(ctx context.Context, hash string, envID uuid.UUID) (EnvRouteToken, error) {
-	t, err := scanRouteToken(s.q.QueryRow(ctx, `INSERT INTO env_route_tokens (hash, env_id) VALUES ($1, $2)
-		RETURNING `+routeTokenCols, hash, envID))
+// InsertRouteToken stores a route token of the environment by its hash,
+// made by madeBy (a principal, ADR 0031); ErrNoRow for an unknown
+// environment, ErrExists for a hash taken.
+func (s *Store) InsertRouteToken(ctx context.Context, hash string, envID uuid.UUID, madeBy string) (EnvRouteToken, error) {
+	t, err := scanRouteToken(s.q.QueryRow(ctx, `INSERT INTO env_route_tokens (hash, env_id, made_by) VALUES ($1, $2, $3)
+		RETURNING `+routeTokenCols, hash, envID, madeBy))
 	if err != nil {
 		return EnvRouteToken{}, insertError("insert route token of environment "+envID.String(), err)
 	}

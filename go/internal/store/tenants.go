@@ -24,18 +24,46 @@ type Tenant struct {
 	ID         string // the tenant's name
 	CreatedAt  time.Time
 	DeletingAt time.Time // zero unless a DELETE is under way
+	// Zone is the zone of its default hosts (ADR 0031); "": the apps
+	// zone.
+	Zone string
+	// MadeBy is the person who made it; uuid.Nil: an operator's tenant.
+	MadeBy uuid.UUID
+	Limits TenantLimits
+}
+
+// TenantLimits are a tenant's limits on what it asks for (ADR 0031,
+// "Quotas per tenant"); nil: no limit.
+type TenantLimits struct {
+	Sandboxes, Environments, RunningJobs, VCPUs *int
+	MemoryMiB                                   *int64
 }
 
 // Deleting reports whether the tenant is being deleted.
 func (t *Tenant) Deleting() bool { return !t.DeletingAt.IsZero() }
 
+const tenantCols = `id, created_at, deleting_at, coalesce(zone, ''), made_by, limit_sandboxes, limit_environments,
+	limit_running_jobs, limit_vcpus, limit_memory_mib`
+
+// tenantTargets are the scan targets of tenantCols for t, and the
+// function that finishes the scan.
+func tenantTargets(t *Tenant) ([]any, func()) {
+	var deleting *time.Time
+	var madeBy *uuid.UUID
+	l := &t.Limits
+	return []any{&t.ID, &t.CreatedAt, &deleting, &t.Zone, &madeBy, &l.Sandboxes, &l.Environments, &l.RunningJobs,
+			&l.VCPUs, &l.MemoryMiB}, func() {
+			t.DeletingAt, t.MadeBy = timeOf(deleting), uuidOf(madeBy)
+		}
+}
+
 func scanTenant(row pgx.Row) (Tenant, error) {
 	var t Tenant
-	var deleting *time.Time
-	if err := row.Scan(&t.ID, &t.CreatedAt, &deleting); err != nil {
+	targets, finish := tenantTargets(&t)
+	if err := row.Scan(targets...); err != nil {
 		return Tenant{}, err
 	}
-	t.DeletingAt = timeOf(deleting)
+	finish()
 	return t, nil
 }
 
@@ -43,7 +71,7 @@ func scanTenant(row pgx.Row) (Tenant, error) {
 // existing row and false when the name is taken.
 func (s *Store) CreateTenant(ctx context.Context, id string) (Tenant, bool, error) {
 	t, err := scanTenant(s.q.QueryRow(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT (id) DO NOTHING
-		RETURNING id, created_at, deleting_at`, id))
+		RETURNING `+tenantCols, id))
 	if err == nil {
 		return t, true, nil
 	}
@@ -61,7 +89,7 @@ func (s *Store) GetTenant(ctx context.Context, id string) (Tenant, error) {
 
 // LockTenant reads a tenant and locks its row; ErrNoRow if there is none.
 func (s *Store) LockTenant(ctx context.Context, id string, lock RowLock) (Tenant, error) {
-	t, err := scanTenant(s.q.QueryRow(ctx, "SELECT id, created_at, deleting_at FROM tenants WHERE id = $1 "+string(lock), id))
+	t, err := scanTenant(s.q.QueryRow(ctx, "SELECT "+tenantCols+" FROM tenants WHERE id = $1 "+string(lock), id))
 	return t, noRow(err, ErrNoRow)
 }
 
@@ -79,7 +107,9 @@ type TenantInfo struct {
 // sandboxes (an environment's instance rows are none), of environments
 // (those being deleted are none) and its tokens (oldest first).
 func (s *Store) ListTenants(ctx context.Context) ([]TenantInfo, error) {
-	rows, err := s.q.Query(ctx, `SELECT t.id, t.created_at, t.deleting_at,
+	rows, err := s.q.Query(ctx, `SELECT `+prefixed("t", []string{"id", "created_at", "deleting_at"})+`,
+			coalesce(t.zone, ''), t.made_by, t.limit_sandboxes, t.limit_environments, t.limit_running_jobs,
+			t.limit_vcpus, t.limit_memory_mib,
 			(SELECT count(*) FROM sandboxes s WHERE s.owner = t.id AND s.environment_id IS NULL AND NOT s.tenant_job),
 			(SELECT count(*) FROM environments e WHERE e.owner = t.id AND NOT e.deleting)
 		FROM tenants t ORDER BY t.id`)
@@ -88,9 +118,9 @@ func (s *Store) ListTenants(ctx context.Context) ([]TenantInfo, error) {
 	}
 	tenants, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (TenantInfo, error) {
 		var ti TenantInfo
-		var deleting *time.Time
-		err := r.Scan(&ti.ID, &ti.CreatedAt, &deleting, &ti.SandboxCount, &ti.EnvironmentCount)
-		ti.DeletingAt = timeOf(deleting)
+		targets, finish := tenantTargets(&ti.Tenant)
+		err := r.Scan(append(targets, &ti.SandboxCount, &ti.EnvironmentCount)...)
+		finish()
 		return ti, err
 	})
 	if err != nil {

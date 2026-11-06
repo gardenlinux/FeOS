@@ -125,11 +125,16 @@ func TestSignIn(t *testing.T) {
 	// The session works on both instances.
 	for _, e := range []*env{a, b} {
 		w = e.serve(withCookie(request{method: "GET", path: "/auth/me"}, sc))
-		expect(t, w, http.StatusOK, `{"sub":"0b8c5ef1-0000-4000-8000-000000000001","email":"ada@example.test","name":"Ada",`+
-			`"username":"ada","picture":"https://example.test/ada.png","admin":true,"method":"oidc"}`+"\n")
+		expect(t, w, http.StatusOK, "")
+		if me := decode[me](t, w); me.Sub != "0b8c5ef1-0000-4000-8000-000000000001" || me.Email != "ada@example.test" ||
+			me.Name != "Ada" || me.Username != "ada" || me.Picture != "https://example.test/ada.png" || !me.Admin ||
+			me.Method != "oidc" || me.Person == "" || len(me.Tenants) != 1 || me.Tenants[0].Tenant != testTenant ||
+			me.Tenants[0].Role != "admin" {
+			t.Fatalf("me %+v", me)
+		}
 		expect(t, e.serve(withCookie(request{method: "GET", path: "/api/v1/admin/tenants"}, sc)), http.StatusOK, "")
 	}
-	sess, err := a.st.AdminSession(context.Background(), store.HashToken(sc.Value))
+	sess, err := a.st.UISessionOf(context.Background(), store.HashToken(sc.Value))
 	if err != nil || strings.Join(sess.Groups, ",") != "admins" || sess.IDToken == "" {
 		t.Fatalf("session %+v %v", sess, err)
 	}
@@ -312,7 +317,6 @@ func TestSignInRefusals(t *testing.T) {
 		{"userinfo of another subject", func(p *testProvider) {
 			p.userinfoSub = "someone-else"
 		}, adminClaims(), 400, "userinfo names another subject than the ID token", ""},
-		{"not an admin", nil, userClaims(), 403, "Your account bob@example.test has no access to FeRun.", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -344,6 +348,13 @@ func TestSignInRefusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// me is the answer of /auth/me.
+type me struct {
+	Sub, Person, Email, Name, Username, Picture, Method string
+	Admin                                               bool
+	Tenants                                             []meTenant
 }
 
 // The browser's state: a missing or another login cookie is refused, an

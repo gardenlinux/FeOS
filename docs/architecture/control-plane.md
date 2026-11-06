@@ -253,7 +253,8 @@ replicate synchronously ([Operations](#operations)).
 | `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, label, deployments, deletion (its tenant's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
 
 The tables: `instances`, `leases`, `cluster_secrets`; `tenants`,
-`tenant_tokens`; `nodes`, `node_telemetry` (the hot row, about a hundred
+`tenant_tokens`; `people`, `grants`, `invitations` ([People and
+grants](#people-and-grants)); `nodes`, `node_telemetry` (the hot row, about a hundred
 updates a second at 512 nodes, never locked by placement), `node_certs`
 (every node certificate issued), `join_tokens` (of kind `node` or
 `ingress`), `node_starts`, `event_gaps`; `pod_network` (the mesh's ULA,
@@ -280,7 +281,13 @@ domains](#certificates-of-domains)); `jobs` (the tenants' jobs,
 [Tenants' jobs](#tenants-jobs)); `service_tokens` (the sink's tokens,
 [The sink](#the-sink)).
 Tokens are stored as SHA-256 hashes only, and shown once, at their
-creation.
+creation. The rows ferund makes for a principal carry it in `made_by`
+(ADR 0031): `person:<people.id>`, `token:<tenant token hash>` or
+`basic:<user>`, beside the free `author` a client sends; that is
+`env_deployments` (answered as `madeBy`), `env_secrets`, `env_tags`,
+`env_route_tokens`, `domains`, `sandboxes`, `sandbox_tokens`, `jobs`,
+`tenant_tokens`, `grants` and `invitations`; `''` is ferund's own or a
+row of a version before `0027`.
 `placements`, which held the placement decisions and was written and read
 by nothing since `0003` emptied it, was dropped by `0008`. A placement's
 audit is its activity row.
@@ -1286,16 +1293,41 @@ rolling deploy sends no requests to an instance no node has dialled yet.
 
 ### Human sign-in
 
-People sign in to the UI and the admin API with OIDC (`--oidc-issuer`):
-FeCode, FeRun and FeChat share one provider. ferund is a confidential
+People sign in to the UI and the API with OIDC (`--oidc-issuer`):
+FeCode, FeRun and FeChat share one provider, and whom it lets in, and to
+which products, is its decision (FeCode's ADR 0020). ferund is a confidential
 client (`client_secret_basic`), with the authorization code flow, PKCE,
 `state` and `nonce`; the ID token's signature (RS256, ES256 or EdDSA, from
 the provider's keys) and claims are checked with the standard library.
 The keys are fetched again on an unknown key ID, at most once a minute,
-counting the first fetch. A person whose `groups` claim holds
-`--oidc-admin-group` gets a session in the database, so that a sign-in
-begun on one instance completes on another and a sign-out ends it
-everywhere; anyone else gets "no access" and no session. A request with
+counting the first fetch. Everyone the provider lets in is a person, a
+row of `people` keyed by the issuer and the `sub` with an ID of
+ferund's, its e-mail address and name the last sign-in's (for display
+only), and gets a session in the database, so that a sign-in begun on
+one instance completes on another and a sign-out ends it everywhere. A
+person whose `groups` claim holds `--oidc-admin-group` is an operator:
+the session is marked `admin`, and only such a session reaches the admin
+routes (anyone else's is 403 "operators only"). A person an operator
+disabled (`people.disabled_at`) gets a page "Your account … is disabled
+in FeRun" and no session, and their sessions resolve no more at once.
+The session keeps the ID token's `sid`. `GET /auth/me` answers who is
+signed in: `sub`, `person`, `email`, `name`, `username`, `picture`,
+`admin` (an operator), `method` and `tenants`, each `{tenant, role,
+environments: [{id, name, role}]}` with the person's grants (`role` ""
+for a tenant where they hold environment grants alone); an operator's
+are every tenant, as `admin`.
+
+`POST /auth/backchannel-logout` is the provider's back-channel logout
+(OpenID Connect Back-Channel Logout 1.0), the URI of ferund's client: the
+form's `logout_token` is checked as the ID token is (the provider's keys,
+`iss` exactly the issuer, `aud` holding the client ID) and further
+needs an `iat` of the last ten minutes, an unexpired `exp` when it has
+one, `events` with `http://schemas.openid.net/event/backchannel-logout`
+as an object, no `nonce`, and a `sid`. It ends every session with that
+`sid` (and that `sub`, when the token names one) on every instance, as
+their rows go, and answers 200; a token that does not verify is 400
+`{"error": "invalid_request", "error_description"}`; both `Cache-Control:
+no-store`. A sign-out ends sessions only: tokens live on. A request with
 the session cookie that changes something must carry `X-Requested-With:
 ferun` and, with an `Origin`, the public URL's; ferund sends no CORS
 headers. Basic credentials, when present, are checked first, and a
@@ -1312,6 +1344,29 @@ login dialog, only with `--admin-users` and only to a request without
 `X-Requested-With: ferun`: the UI sends that header on every request and
 shows its own sign-in screen on a 401, so a session that expired does
 not bring up the browser's dialog over it.
+
+### People and grants
+
+ADR 0031 gives the tenants members. A **grant** (`grants`) gives a
+principal a role in a scope: the principal is a person (`person_id`) or
+a tenant token (`token_hash`), exactly one; the scope is the tenant
+(`environment_id` NULL) or one environment of it; the role is `read`,
+`write` or `admin`, each including the one before. A principal holds at
+most one grant per scope; its role on an environment is the higher of
+its tenant grant and its grant there, its role on the tenant its tenant
+grant alone. A grant on an environment goes with the environment, every
+grant with its tenant, person or token. A tenant token's own grant is
+on its row, minted with it (`tenant_tokens.role`, `environment_id`):
+every token made before `0027`, and every token made without a role, is
+`admin` on its tenant, so FeCode and FeChat go on unchanged; a token's
+grants rows add to it. `invitations` hold single-use links with a role
+and a scope (their secret hashed, `used_by` and `used_at` once taken).
+`tenants` carry their `zone` (NULL: the apps zone), the person who made
+them (`made_by`, NULL for an operator's) and their limits
+(`limit_sandboxes`, `limit_environments`, `limit_running_jobs`,
+`limit_vcpus`, `limit_memory_mib`; NULL: none). A person is never
+deleted; `disabled_at` ends their sessions and every grant's effect, the
+grants kept.
 
 ### Tools and MCP
 

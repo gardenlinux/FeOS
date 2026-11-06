@@ -38,7 +38,7 @@ func TestLegacySandboxBesideShortIDs(t *testing.T) {
 	// Its tokens, holds and booking.
 	for _, sb := range []store.Sandbox{legacy, short} {
 		hash := store.HashToken("token of " + string(sb.ID))
-		if _, err := s.CreateSandboxToken(bg, hash, sb.ID, "default"); err != nil {
+		if _, err := s.CreateSandboxToken(bg, hash, sb.ID, "default", ""); err != nil {
 			t.Fatal(err)
 		}
 		if id, owner, err := s.ResolveSandboxToken(bg, hash); err != nil || id != sb.ID || owner != "acme" {

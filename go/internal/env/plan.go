@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -559,7 +560,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		number := e.Deployment + 1
 		r, err := tx.InsertDeployment(ctx, store.EnvDeployment{EnvID: e.ID, Number: number, Spec: specJSON, Base: a.base,
 			Author: a.author, Message: a.message, Annotations: a.annotations, Origin: a.origin, OriginRef: a.originRef,
-			State: model.DeploymentWaiting})
+			State: model.DeploymentWaiting, MadeBy: auth.MadeBy(ctx)})
 		if err != nil {
 			return err
 		}

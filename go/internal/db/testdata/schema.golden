@@ -125,6 +125,7 @@ TABLE domains
   COLUMN issue_backoff_s integer NOT NULL DEFAULT 0
   COLUMN issue_error text NOT NULL DEFAULT ''::text
   COLUMN issue_failing_since timestamp with time zone
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (((env_id IS NULL) OR (bound_at IS NOT NULL)))
   CONSTRAINT CHECK (((name ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'::text) AND (length(name) <= 253)))
   CONSTRAINT CHECK (((verification <> 'verified'::text) OR (verified_at IS NOT NULL)))
@@ -184,6 +185,7 @@ TABLE env_deployments
   COLUMN finished_at timestamp with time zone
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK ((base >= 0))
   CONSTRAINT CHECK ((number >= 1))
   CONSTRAINT CHECK ((origin = ANY (ARRAY['apply'::text, 'revert'::text, 'clone'::text, 'object'::text])))
@@ -266,6 +268,7 @@ TABLE env_route_tokens
   COLUMN env_id uuid NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN last_used_at timestamp with time zone
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (hash)
   CREATE INDEX env_route_tokens_env ON public.env_route_tokens USING btree (env_id)
@@ -280,6 +283,7 @@ TABLE env_secrets
   COLUMN deleted_at timestamp with time zone
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (
 CASE
     WHEN system THEN (name ~ '^addon\.[a-z0-9._-]{1,121}$'::text)
@@ -295,6 +299,7 @@ TABLE env_tags
   COLUMN number integer NOT NULL
   COLUMN moved_by text NOT NULL DEFAULT ''::text
   COLUMN moved_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK ((tag ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'::text))
   CONSTRAINT FOREIGN KEY (env_id, number) REFERENCES env_deployments(env_id, number) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (env_id, tag)
@@ -355,6 +360,28 @@ TABLE event_gaps
   CONSTRAINT PRIMARY KEY (node, start_id, from_seq)
   CREATE INDEX event_gaps_detected ON public.event_gaps USING btree (node, start_id, detected_at)
   CREATE UNIQUE INDEX event_gaps_pkey ON public.event_gaps USING btree (node, start_id, from_seq)
+TABLE grants
+  COLUMN id bigint NOT NULL GENERATED ALWAYS AS IDENTITY
+  COLUMN tenant_id text NOT NULL
+  COLUMN person_id uuid
+  COLUMN token_hash text
+  COLUMN environment_id uuid
+  COLUMN role text NOT NULL
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((num_nonnulls(person_id, token_hash) = 1))
+  CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
+  CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (token_hash) REFERENCES tenant_tokens(hash) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX grants_environment ON public.grants USING btree (environment_id) WHERE (environment_id IS NOT NULL)
+  CREATE INDEX grants_person ON public.grants USING btree (person_id) WHERE (person_id IS NOT NULL)
+  CREATE INDEX grants_token ON public.grants USING btree (token_hash) WHERE (token_hash IS NOT NULL)
+  CREATE UNIQUE INDEX grants_pkey ON public.grants USING btree (id)
+  CREATE UNIQUE INDEX grants_principal_scope ON public.grants USING btree (tenant_id, COALESCE((person_id)::text, token_hash), COALESCE((environment_id)::text, ''::text))
 TABLE host_labels
   COLUMN label text NOT NULL
   COLUMN owner text NOT NULL
@@ -479,6 +506,24 @@ TABLE instances
   COLUMN stopping timestamp with time zone
   CONSTRAINT PRIMARY KEY (id)
   CREATE UNIQUE INDEX instances_pkey ON public.instances USING btree (id)
+TABLE invitations
+  COLUMN hash text NOT NULL
+  COLUMN tenant_id text NOT NULL
+  COLUMN environment_id uuid
+  COLUMN role text NOT NULL
+  COLUMN made_by text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN expires_at timestamp with time zone NOT NULL
+  COLUMN used_by uuid
+  COLUMN used_at timestamp with time zone
+  CONSTRAINT CHECK (((used_by IS NULL) OR (used_at IS NOT NULL)))
+  CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
+  CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (used_by) REFERENCES people(id) ON DELETE SET NULL
+  CONSTRAINT PRIMARY KEY (hash)
+  CREATE INDEX invitations_tenant ON public.invitations USING btree (tenant_id, created_at)
+  CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (hash)
 TABLE issued_certs
   COLUMN serial text NOT NULL
   COLUMN pod_id text COLLATE "C" NOT NULL
@@ -516,6 +561,7 @@ TABLE jobs
   COLUMN finished_at timestamp with time zone
   COLUMN deadline_at timestamp with time zone NOT NULL
   COLUMN log_retention_days integer
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (((finished_at IS NULL) = (phase = ANY (ARRAY['queued'::text, 'running'::text]))))
   CONSTRAINT CHECK (((log_retention_days >= 1) AND (log_retention_days <= 400)))
   CONSTRAINT CHECK ((id ~ '^[a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}$'::text))
@@ -665,6 +711,19 @@ TABLE nodes
   CONSTRAINT UNIQUE (mesh_subnet)
   CREATE UNIQUE INDEX nodes_mesh_subnet_key ON public.nodes USING btree (mesh_subnet)
   CREATE UNIQUE INDEX nodes_pkey ON public.nodes USING btree (name)
+TABLE people
+  COLUMN id uuid NOT NULL DEFAULT gen_random_uuid()
+  COLUMN issuer text NOT NULL
+  COLUMN sub text NOT NULL
+  COLUMN email text NOT NULL DEFAULT ''::text
+  COLUMN name text NOT NULL DEFAULT ''::text
+  COLUMN first_seen timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN last_seen timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN disabled_at timestamp with time zone
+  CONSTRAINT PRIMARY KEY (id)
+  CONSTRAINT UNIQUE (issuer, sub)
+  CREATE UNIQUE INDEX people_issuer_sub_key ON public.people USING btree (issuer, sub)
+  CREATE UNIQUE INDEX people_pkey ON public.people USING btree (id)
 TABLE pod_intercept_cas
   COLUMN sandbox_id text COLLATE "C" NOT NULL
   COLUMN seq integer NOT NULL
@@ -727,6 +786,7 @@ TABLE sandbox_tokens
   COLUMN label text NOT NULL DEFAULT ''::text
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN last_used_at timestamp with time zone
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (hash)
   CREATE INDEX sandbox_tokens_sandbox ON public.sandbox_tokens USING btree (sandbox_id, created_at)
@@ -778,6 +838,7 @@ TABLE sandboxes
   COLUMN log_labels jsonb NOT NULL DEFAULT '{}'::jsonb
   COLUMN http_version text NOT NULL DEFAULT ''::text
   COLUMN http_pushed text NOT NULL DEFAULT ''::text
+  COLUMN made_by text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((vcpus >= 1) AND (vcpus <= 32)))
@@ -844,6 +905,11 @@ TABLE tenant_tokens
   COLUMN label text NOT NULL DEFAULT ''::text
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN last_used_at timestamp with time zone
+  COLUMN role text NOT NULL DEFAULT 'admin'::text
+  COLUMN environment_id uuid
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
+  CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (hash)
   CREATE INDEX tenant_tokens_tenant ON public.tenant_tokens USING btree (tenant_id, created_at)
@@ -852,8 +918,22 @@ TABLE tenants
   COLUMN id text NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN deleting_at timestamp with time zone
+  COLUMN zone text
+  COLUMN made_by uuid
+  COLUMN limit_sandboxes integer
+  COLUMN limit_environments integer
+  COLUMN limit_running_jobs integer
+  COLUMN limit_vcpus integer
+  COLUMN limit_memory_mib bigint
   CONSTRAINT CHECK ((id ~ '^[a-z0-9][a-z0-9.-]{1,62}$'::text))
+  CONSTRAINT CHECK ((limit_environments >= 0))
+  CONSTRAINT CHECK ((limit_memory_mib >= 0))
+  CONSTRAINT CHECK ((limit_running_jobs >= 0))
+  CONSTRAINT CHECK ((limit_sandboxes >= 0))
+  CONSTRAINT CHECK ((limit_vcpus >= 0))
+  CONSTRAINT FOREIGN KEY (made_by) REFERENCES people(id) ON DELETE SET NULL
   CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX tenants_made_by ON public.tenants USING btree (made_by) WHERE (made_by IS NOT NULL)
   CREATE UNIQUE INDEX tenants_pkey ON public.tenants USING btree (id)
 TABLE tool_calls
   COLUMN id uuid NOT NULL DEFAULT gen_random_uuid()
@@ -920,8 +1000,13 @@ TABLE ui_sessions
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN expires_at timestamp with time zone NOT NULL
   COLUMN last_seen_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN person_id uuid
+  COLUMN sid text NOT NULL DEFAULT ''::text
+  CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id_hash)
   CREATE INDEX ui_sessions_expires ON public.ui_sessions USING btree (expires_at)
+  CREATE INDEX ui_sessions_person ON public.ui_sessions USING btree (person_id) WHERE (person_id IS NOT NULL)
+  CREATE INDEX ui_sessions_sid ON public.ui_sessions USING btree (sid) WHERE (sid <> ''::text)
   CREATE INDEX ui_sessions_sub ON public.ui_sessions USING btree (sub)
   CREATE UNIQUE INDEX ui_sessions_pkey ON public.ui_sessions USING btree (id_hash)
 TABLE watches

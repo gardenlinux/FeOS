@@ -38,8 +38,8 @@ func TestAuthLogins(t *testing.T) {
 	}
 }
 
-// Sessions: only an admin's that has not expired resolves; the touch is
-// throttled; a sign-out returns what it deleted.
+// Sessions: everyone's that has not expired resolves, marked admin or
+// not; the touch is throttled; a sign-out returns what it deleted.
 func TestUISessions(t *testing.T) {
 	s, _ := newStore(t)
 	u, err := s.InsertUISession(bg, store.UISession{IDHash: "h1", Sub: "sub", Email: "e", Name: "n", Username: "u",
@@ -54,12 +54,15 @@ func TestUISessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(5 * time.Millisecond)
-	got, err := s.AdminSession(bg, "h1")
-	if err != nil || got.Sub != "sub" || got.IDToken != "tok" {
+	got, err := s.UISessionOf(bg, "h1")
+	if err != nil || got.Sub != "sub" || got.IDToken != "tok" || !got.Admin {
 		t.Fatalf("h1 %+v %v", got, err)
 	}
-	for _, h := range []string{"h2", "h3", "nope"} {
-		if _, err := s.AdminSession(bg, h); !errors.Is(err, store.ErrNoRow) {
+	if got, err := s.UISessionOf(bg, "h2"); err != nil || got.Admin {
+		t.Fatalf("h2 %+v %v", got, err)
+	}
+	for _, h := range []string{"h3", "nope"} {
+		if _, err := s.UISessionOf(bg, h); !errors.Is(err, store.ErrNoRow) {
 			t.Fatalf("%s: %v", h, err)
 		}
 	}

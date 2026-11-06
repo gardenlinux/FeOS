@@ -73,13 +73,22 @@ type tenantTokenInfo struct {
 	Hash       string `json:"hash"`
 	HashPrefix string `json:"hashPrefix"`
 	Label      string `json:"label"`
-	CreatedAt  string `json:"createdAt"`
-	LastUsedAt string `json:"lastUsedAt,omitempty"`
+	// Role and Environment are the token's own grant (ADR 0031):
+	// Environment is its scope's environment ID, "" for the tenant.
+	Role        string `json:"role"`
+	Environment string `json:"environment,omitempty"`
+	MadeBy      string `json:"madeBy,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	LastUsedAt  string `json:"lastUsedAt,omitempty"`
 }
 
 func tenantTokenOf(t store.TenantToken) tenantTokenInfo {
-	return tenantTokenInfo{Hash: t.Hash, HashPrefix: t.Hash[:8], Label: t.Label, CreatedAt: rfc3339(t.CreatedAt),
-		LastUsedAt: rfc3339(t.LastUsedAt)}
+	env := ""
+	if t.EnvironmentID != uuid.Nil {
+		env = t.EnvironmentID.String()
+	}
+	return tenantTokenInfo{Hash: t.Hash, HashPrefix: t.Hash[:8], Label: t.Label, Role: t.Role, Environment: env,
+		MadeBy: t.MadeBy, CreatedAt: rfc3339(t.CreatedAt), LastUsedAt: rfc3339(t.LastUsedAt)}
 }
 
 type tenantInfo struct {
@@ -144,7 +153,9 @@ func (s *server) createTenant(w http.ResponseWriter, r *http.Request) error {
 			}
 			return apierr.New(http.StatusConflict, "tenant %s already exists", req.Name)
 		}
-		_, err = tx.CreateTenantToken(r.Context(), hash, req.Name, tenantTokenLabel)
+		a, _ := auth.AdminFrom(r.Context())
+		_, err = tx.InsertTenantToken(r.Context(), store.TenantToken{Hash: hash, TenantID: req.Name,
+			Label: tenantTokenLabel, Role: auth.RoleAdmin.String(), MadeBy: a.Principal().String()})
 		return err
 	})
 	if err != nil {
@@ -217,14 +228,24 @@ func (s *server) listTenantTokens(w http.ResponseWriter, r *http.Request) error 
 }
 
 // createTenantToken is POST /api/v1/admin/tenants/{tenant}/tokens
-// {label?}: another token of the tenant, shown once.
+// {label?, role?, environment?}: another token of the tenant, shown once,
+// with its own grant (ADR 0031): role read, write or admin (the default),
+// on the environment of that ID or name, or on the tenant.
 func (s *server) createTenantToken(w http.ResponseWriter, r *http.Request) error {
 	name := r.PathValue("tenant")
 	var req struct {
-		Label string `json:"label"`
+		Label       string `json:"label"`
+		Role        string `json:"role"`
+		Environment string `json:"environment"`
 	}
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
+	}
+	if req.Role == "" {
+		req.Role = auth.RoleAdmin.String()
+	}
+	if _, ok := auth.ParseRole(req.Role); !ok {
+		return apierr.New(http.StatusBadRequest, "role must be read, write or admin, got %q", req.Role)
 	}
 	token, hash, err := mintTenantToken()
 	if err != nil {
@@ -235,8 +256,21 @@ func (s *server) createTenantToken(w http.ResponseWriter, r *http.Request) error
 		if err := lockTenantForToken(r.Context(), tx, name); err != nil {
 			return err
 		}
+		var env uuid.UUID
+		if req.Environment != "" {
+			id, err := tx.EnvironmentRef(r.Context(), name, req.Environment)
+			if isNoRow(err) {
+				return apierr.New(http.StatusNotFound, "tenant %s has no environment %s", name, req.Environment)
+			}
+			if err != nil {
+				return err
+			}
+			env = id
+		}
+		a, _ := auth.AdminFrom(r.Context())
 		var err error
-		tok, err = tx.CreateTenantToken(r.Context(), hash, name, req.Label)
+		tok, err = tx.InsertTenantToken(r.Context(), store.TenantToken{Hash: hash, TenantID: name, Label: req.Label,
+			Role: req.Role, EnvironmentID: env, MadeBy: a.Principal().String()})
 		if isNoRow(err) {
 			return apierr.New(http.StatusNotFound, "unknown tenant %s", name)
 		}

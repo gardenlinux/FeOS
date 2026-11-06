@@ -510,7 +510,7 @@ func TestLegacySandboxID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.CreateSandboxToken(ctx, hash, legacy, firstTokenLabel); err != nil {
+	if _, err := e.st.CreateSandboxToken(ctx, hash, legacy, firstTokenLabel, ""); err != nil {
 		t.Fatal(err)
 	}
 	short, _ := e.createSandbox()

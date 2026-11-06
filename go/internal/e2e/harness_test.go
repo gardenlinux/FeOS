@@ -602,7 +602,7 @@ func (c *cluster) createID(id podid.ID, attachable bool) sandbox {
 		if !created {
 			return fmt.Errorf("sandbox %s exists", id)
 		}
-		_, err = tx.CreateSandboxToken(bg, store.HashToken(token), id, "default")
+		_, err = tx.CreateSandboxToken(bg, store.HashToken(token), id, "default", "")
 		return err
 	})
 	if err != nil {

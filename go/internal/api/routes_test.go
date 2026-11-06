@@ -158,8 +158,9 @@ var bindingRoutes = map[string]class{
 
 // oidcRoutes exist only with OIDC.
 var oidcRoutes = map[string]class{
-	"GET /auth/login":    classPublic,
-	"GET /auth/callback": classPublic,
+	"GET /auth/login":               classPublic,
+	"GET /auth/callback":            classPublic,
+	"POST /auth/backchannel-logout": classPublic,
 }
 
 // concrete turns a pattern into a request: its method (GET when it names

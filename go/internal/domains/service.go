@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/leader"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -306,7 +307,7 @@ func (s *Service) CreateDomain(ctx context.Context, tenant string, req CreateReq
 					"verify or delete one first", tenant, n)
 		}
 		_, err = tx.InsertDomain(ctx, store.NewDomain{ID: id, Owner: tenant, Name: name, Labels: req.Labels,
-			Token: token, State: StateUnverified, Reason: ReasonUnverified})
+			Token: token, State: StateUnverified, Reason: ReasonUnverified, MadeBy: auth.MadeBy(ctx)})
 		return err
 	})
 	if err != nil {

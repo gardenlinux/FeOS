@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -396,7 +397,8 @@ func (s *Service) PutTag(ctx context.Context, tenant, env, tag string, req PutTa
 	if by == "" {
 		by = tenant
 	}
-	t, err := s.st.PutTag(ctx, store.EnvTag{EnvID: e.ID, Tag: tag, Number: req.Deployment, MovedBy: by})
+	t, err := s.st.PutTag(ctx, store.EnvTag{EnvID: e.ID, Tag: tag, Number: req.Deployment, MovedBy: by,
+		MadeBy: auth.MadeBy(ctx)})
 	if errors.Is(err, store.ErrNoRow) {
 		return Tag{}, errNoDeployment()
 	}
@@ -490,7 +492,7 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 			return fmt.Errorf("seal secret %s: %w", name, err)
 		}
 		_, err = tx.InsertSecret(ctx, store.EnvSecret{EnvID: e.ID, Name: name, Version: version, Sealed: sealed,
-			CreatedBy: by})
+			CreatedBy: by, MadeBy: auth.MadeBy(ctx)})
 		return err
 	})
 	if err != nil {
@@ -713,7 +715,7 @@ func (s *Service) CreateRouteToken(ctx context.Context, tenant, env string) (Rou
 	if err != nil {
 		return RouteToken{}, fmt.Errorf("mint a route token: %w", err)
 	}
-	if _, err := s.st.InsertRouteToken(ctx, hash, e.ID); errors.Is(err, store.ErrNoRow) {
+	if _, err := s.st.InsertRouteToken(ctx, hash, e.ID, auth.MadeBy(ctx)); errors.Is(err, store.ErrNoRow) {
 		return RouteToken{}, errNoEnvironment()
 	} else if err != nil {
 		return RouteToken{}, err

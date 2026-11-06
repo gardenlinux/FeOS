@@ -69,11 +69,11 @@ func TestTenantsAndTokens(t *testing.T) {
 
 	// Sandbox tokens.
 	sbTok := store.HashToken("sandbox-token")
-	st, err := s.CreateSandboxToken(bg, sbTok, sb.ID, "default")
+	st, err := s.CreateSandboxToken(bg, sbTok, sb.ID, "default", "")
 	if err != nil || st.SandboxID != sb.ID {
 		t.Fatalf("sandbox token %+v %v", st, err)
 	}
-	if _, err := s.CreateSandboxToken(bg, store.HashToken("y"), podid.Mint(), ""); !errors.Is(err, model.ErrNotFound) {
+	if _, err := s.CreateSandboxToken(bg, store.HashToken("y"), podid.Mint(), "", ""); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("token of a missing sandbox: %v", err)
 	}
 	id, owner, err := s.ResolveSandboxToken(bg, sbTok)
@@ -244,7 +244,7 @@ func TestSandboxTokenOfDeletedSandbox(t *testing.T) {
 	mkTenant(t, s, "acme")
 	sb := mkSandbox(t, s, "acme")
 	h := store.HashToken("t")
-	_, err := s.CreateSandboxToken(bg, h, sb.ID, "")
+	_, err := s.CreateSandboxToken(bg, h, sb.ID, "", "")
 	must(t, err)
 	_, err = s.DeleteSandbox(bg, sb.ID)
 	must(t, err)

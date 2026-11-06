@@ -264,6 +264,8 @@ type NewSandbox struct {
 	TenantJob bool
 	// LogLabels are the labels of the pod's logs (model.Log*); nil: none.
 	LogLabels map[string]string
+	// MadeBy is the principal that asked for it (ADR 0031); "": ferund.
+	MadeBy string
 }
 
 // CreateSandbox inserts the sandbox unless its ID exists. It returns the
@@ -281,10 +283,10 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 	}
 	for range 3 {
 		sb, err := scanSandbox(s.q.QueryRow(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, image_ref,
-				environment_id, pod_template, pin_node, idle_after_s, tenant_job, log_labels)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb) ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
+				environment_id, pod_template, pin_node, idle_after_s, tenant_job, log_labels, made_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb, $13) ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
 			n.ID, n.Owner, n.Image, n.VCPUs, n.MemoryMiB, n.ImageRef, nullUUID(n.EnvironmentID), template, n.PinNode,
-			n.IdleAfterS, n.TenantJob, logLabels))
+			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy))
 		if err == nil {
 			return sb, true, s.Notify(ctx, chanSandbox, sb.ID.String())
 		}

@@ -347,6 +347,73 @@ func (p *provider) verify(ctx context.Context, d *discovery, raw, nonce string) 
 	return idToken{raw: raw, claims: c}, nil
 }
 
+// The back-channel logout token's fixed parts (OpenID Connect Back-Channel
+// Logout 1.0, §2.4).
+const (
+	// backchannelEvent is the member of the events claim a logout token
+	// must have.
+	backchannelEvent = "http://schemas.openid.net/event/backchannel-logout"
+	// logoutTokenMaxAge is how old a logout token's iat may be: the
+	// provider sends it as the person signs out.
+	logoutTokenMaxAge = 10 * time.Minute
+)
+
+// verifyLogout checks a back-channel logout token (§2.6): its signature by
+// the provider's keys (fetched again once for an unknown key id), iss
+// exactly the issuer, aud holding the client id, iat within the last ten
+// minutes (and not ahead by more than the skew), exp (when present) not
+// past, events holding the back-channel logout event as an object, no
+// nonce, and a sid. It returns the sid and the sub ("" when absent).
+func (p *provider) verifyLogout(ctx context.Context, d *discovery, raw string) (sid, sub string, err error) {
+	keys, err := p.keySet(ctx, d, false)
+	if err != nil {
+		return "", "", err
+	}
+	payload, err := verifyJWS(raw, keys)
+	if errors.Is(err, errUnknownKey) {
+		if keys, err = p.keySet(ctx, d, true); err != nil {
+			return "", "", err
+		}
+		payload, err = verifyJWS(raw, keys)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	var c claims
+	if err := json.Unmarshal(payload, &c); err != nil {
+		return "", "", refused("the token's claims are not a JSON object")
+	}
+	if iss := c.str("iss"); iss != p.cfg.Issuer {
+		return "", "", refusedf("the token's issuer is not the configured one", "%q is not %q", iss, p.cfg.Issuer)
+	}
+	if !slices.Contains(c.strs("aud"), p.cfg.ClientID) {
+		return "", "", refused("the token is not for this client (aud)")
+	}
+	now := p.now()
+	iat, ok := c.num("iat")
+	if !ok || !unixSeconds(iat).Before(now.Add(clockSkew)) || unixSeconds(iat).Before(now.Add(-logoutTokenMaxAge)) {
+		return "", "", refused("the token's iat is not recent")
+	}
+	if exp, ok := c.num("exp"); ok && !now.Add(-clockSkew).Before(unixSeconds(exp)) {
+		return "", "", refused("the token has expired")
+	}
+	var events map[string]json.RawMessage
+	if raw, ok := c["events"]; !ok || json.Unmarshal(raw, &events) != nil {
+		return "", "", refused("the token has no events")
+	}
+	var event map[string]json.RawMessage
+	if raw, ok := events[backchannelEvent]; !ok || json.Unmarshal(raw, &event) != nil || event == nil {
+		return "", "", refused("the token is not a back-channel logout")
+	}
+	if _, ok := c["nonce"]; ok {
+		return "", "", refused("a logout token has no nonce")
+	}
+	if sid = c.str("sid"); sid == "" {
+		return "", "", refused("the token names no session (sid)")
+	}
+	return sid, c.str("sub"), nil
+}
+
 // unixSeconds converts a NumericDate.
 func unixSeconds(f float64) time.Time {
 	if f > float64(math.MaxInt64/int64(time.Second)) {
