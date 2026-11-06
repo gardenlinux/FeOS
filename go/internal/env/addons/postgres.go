@@ -67,6 +67,19 @@ var postgresReservedRoles = []string{
 // provisioning would grant on.
 var postgresReservedDatabases = []string{"template0", "template1", "postgres"}
 
+// postgres's options, which its validation reads (checkNames).
+var (
+	postgresDatabases = Option{Name: "databases", Kind: OptionList, Default: []string{},
+		Pattern: postgresName.String(), Reserved: postgresReservedDatabases, Unique: true,
+		Description: "The databases to create. Provisioning creates the missing ones and never drops one. " +
+			"A reference's database is the first listed (else postgres) unless it names another."}
+	postgresRoles = Option{Name: "roles", Kind: OptionList, Default: []string{},
+		Pattern: postgresName.String(), Reserved: postgresReservedRoles, ReservedPrefixes: []string{"pg_"}, Unique: true,
+		Description: "Login roles, each with a generated password, CONNECT and CREATE on every listed database " +
+			"and a schema of its own name in each. They need a database; a reference names one with the field role. " +
+			"A role no longer listed is not dropped."}
+)
+
 func (postgres) Type() string       { return "postgres" }
 func (postgres) Versions() []string { return []string{"16", "17"} }
 func (postgres) DefaultPlan() string {
@@ -86,6 +99,10 @@ func (postgres) OutputKeys() []string {
 	return []string{"host", "port", "user", "password", "database", "url"}
 }
 
+func (postgres) OutputFields() []string { return []string{"role", "database"} }
+
+func (postgres) Options() []Option { return []Option{postgresDatabases, postgresRoles} }
+
 // postgresOptions are a postgres addon's options as read.
 type postgresOptions struct {
 	databases, roles []string
@@ -94,13 +111,13 @@ type postgresOptions struct {
 // options reads a's options, with every finding about them (prev: the
 // current deployment's addon, for what provisioning leaves behind).
 func (p postgres) options(prev *Addon, a Addon) (postgresOptions, []spec.Finding) {
-	fs := unknownOptions(p.Type(), a.Options, "databases", "roles")
-	dbItems, dfs := stringList(a.Options, "databases")
-	roleItems, rfs := stringList(a.Options, "roles")
+	fs := unknownOptions(p, a.Options)
+	dbItems, dfs := stringList(a.Options, postgresDatabases.Name)
+	roleItems, rfs := stringList(a.Options, postgresRoles.Name)
 	fs = append(fs, dfs...)
-	fs = append(fs, checkNames("databases", dbItems, postgresReservedDatabases, false)...)
+	fs = append(fs, checkNames(postgresDatabases, dbItems)...)
 	fs = append(fs, rfs...)
-	fs = append(fs, checkNames("roles", roleItems, postgresReservedRoles, true)...)
+	fs = append(fs, checkNames(postgresRoles, roleItems)...)
 	dbs, roles := names(dbItems), names(roleItems)
 	if len(roles) > 0 && len(dbs) == 0 {
 		fs = append(fs, errorf("options.roles", "roles need a database: a role gets CONNECT, CREATE and a schema in "+
@@ -135,11 +152,12 @@ func (p postgres) options(prev *Addon, a Addon) (postgresOptions, []spec.Finding
 	return postgresOptions{databases: dbs, roles: roles}, fs
 }
 
-// checkNames checks the items of list key, in their order: a string,
-// the name rule, the reserved names (and, for roles, the pg_ prefix),
-// duplicates.
-func checkNames(key string, items []listItem, reserved []string, role bool) []spec.Finding {
+// checkNames checks the items of list option opt, in their order: a
+// string, the name rule (postgresName, opt's pattern), opt's reserved
+// names and prefixes, duplicates.
+func checkNames(opt Option, items []listItem) []spec.Finding {
 	var fs []spec.Finding
+	key := opt.Name
 	what := strings.TrimSuffix(key, "s")
 	seen := map[string]bool{}
 	for _, it := range items {
@@ -151,7 +169,9 @@ func checkNames(key string, items []listItem, reserved []string, role bool) []sp
 		case !postgresName.MatchString(n):
 			fs = append(fs, errorf(path, fmt.Sprintf("%s name %q is not a lowercase identifier", what, n),
 				"use a-z, 0-9 and _, starting with a letter, at most 63 characters"))
-		case slices.Contains(reserved, n) || role && strings.HasPrefix(n, "pg_"):
+		case slices.Contains(opt.Reserved, n) || slices.ContainsFunc(opt.ReservedPrefixes, func(p string) bool {
+			return strings.HasPrefix(n, p)
+		}):
 			fs = append(fs, errorf(path, fmt.Sprintf("%s name %s is reserved", what, n), "choose another name"))
 		case seen[n]:
 			fs = append(fs, errorf(path, fmt.Sprintf("%s %s is listed twice", what, n), "list it once"))
@@ -225,7 +245,7 @@ func (p postgres) Render(a Addon, _ Context) (Instance, error) {
 // the database (default: the first listed, else postgres; a role's must
 // be listed).
 func (p postgres) Outputs(a Addon, c Context, ref Ref) ([]model.TemplatePart, error) {
-	if err := checkRef(p.Type(), ref, p.OutputKeys(), "role", "database"); err != nil {
+	if err := checkRef(p.Type(), ref, p.OutputKeys(), p.OutputFields()...); err != nil {
 		return nil, err
 	}
 	// The options' own problems are Validate's findings; a reference

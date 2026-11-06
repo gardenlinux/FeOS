@@ -112,6 +112,7 @@ type Environments interface {
 	GetEnv(ctx context.Context, tenant, envRef string) (envs.EnvStatus, error)
 	DeleteEnv(ctx context.Context, tenant, envRef string) error
 	PlanSpec(ctx context.Context, tenant string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error)
+	Addons(ctx context.Context, tenant string) (envs.AddonCatalog, error)
 	Plan(ctx context.Context, tenant, envRef string, req envs.PlanRequest) (envs.PlanAnswer, error)
 	Apply(ctx context.Context, tenant, envRef string, req envs.ApplyRequest) (envs.ApplyAnswer, error)
 	Deployments(ctx context.Context, tenant, envRef string, limit int) (envs.DeploymentList, error)

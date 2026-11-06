@@ -51,11 +51,23 @@ func (nats) Plans() map[string]Plan {
 	}
 }
 
+// natsJetStreamOption is nats's option, which jetstream reads.
+var natsJetStreamOption = Option{Name: "jetstream", Kind: OptionBoolean, Default: natsJetStreamDefault,
+	Description: "JetStream, with its store on the addon's volume. Without it the server keeps nothing and " +
+		"the addon has no volume; turning it off later no longer serves the streams on the volume."}
+
+// natsJetStreamDefault is the jetstream option's default.
+const natsJetStreamDefault = true
+
 func (nats) OutputKeys() []string { return []string{"host", "port", "user", "password", "url"} }
 
+func (nats) OutputFields() []string { return nil }
+
+func (nats) Options() []Option { return []Option{natsJetStreamOption} }
+
 func (n nats) jetstream(a Addon) (bool, []spec.Finding) {
-	fs := unknownOptions(n.Type(), a.Options, "jetstream")
-	js, jfs := boolOption(a.Options, "jetstream", true)
+	fs := unknownOptions(n, a.Options)
+	js, jfs := boolOption(a.Options, natsJetStreamOption.Name, natsJetStreamDefault)
 	return js, append(fs, jfs...)
 }
 
@@ -107,7 +119,7 @@ func (n nats) Render(a Addon, _ Context) (Instance, error) {
 // Outputs: host, port, user ("nats"), password and url
 // nats://nats:<password>@[addr]:4222. No fields.
 func (n nats) Outputs(_ Addon, c Context, ref Ref) ([]model.TemplatePart, error) {
-	if err := checkRef(n.Type(), ref, n.OutputKeys()); err != nil {
+	if err := checkRef(n.Type(), ref, n.OutputKeys(), n.OutputFields()...); err != nil {
 		return nil, err
 	}
 	switch ref.Key {

@@ -44,8 +44,8 @@ func planOf(b Blueprint, a Addon) (name string, p Plan, ok bool) {
 	return name, p, ok
 }
 
-// sortedPlans are b's plan names, smallest first (by memory, then name).
-func sortedPlans(b Blueprint) []string {
+// SortedPlans are b's plan names, smallest first (by memory, then name).
+func SortedPlans(b Blueprint) []string {
 	plans := b.Plans()
 	out := slices.Collect(maps.Keys(plans))
 	slices.SortFunc(out, func(x, y string) int {
@@ -75,7 +75,7 @@ func checkVersionPlan(b Blueprint, prev *Addon, next Addon, hasVolume bool) []sp
 	name, plan, ok := planOf(b, next)
 	if !ok {
 		fs = append(fs, errorf("plan", fmt.Sprintf("%s has no plan %q", b.Type(), name),
-			"use one of "+strings.Join(sortedPlans(b), ", ")))
+			"use one of "+strings.Join(SortedPlans(b), ", ")))
 		return fs
 	}
 	if prev == nil || !hasVolume {
@@ -101,10 +101,11 @@ func sameType(prev *Addon, typ string) *Addon {
 	return prev
 }
 
-// unknownOptions are the error findings of options keys that are not
-// among known, in key order.
-func unknownOptions(typ string, opts map[string]any, known ...string) []spec.Finding {
+// unknownOptions are the error findings of options keys that b does not
+// declare (Blueprint.Options), in key order.
+func unknownOptions(b Blueprint, opts map[string]any) []spec.Finding {
 	var fs []spec.Finding
+	typ, known := b.Type(), optionNames(b)
 	for _, k := range slices.Sorted(maps.Keys(opts)) {
 		if !slices.Contains(known, k) {
 			fs = append(fs, errorf("options."+k, fmt.Sprintf("%s has no option %q", typ, k),
@@ -112,6 +113,15 @@ func unknownOptions(typ string, opts map[string]any, known ...string) []spec.Fin
 		}
 	}
 	return fs
+}
+
+// optionNames are the names of b's options, in its order.
+func optionNames(b Blueprint) []string {
+	var out []string
+	for _, o := range b.Options() {
+		out = append(out, o.Name)
+	}
+	return out
 }
 
 func optionsRemedy(known []string) string {

@@ -61,6 +61,9 @@ type fakeEngine struct {
 	mu       sync.Mutex
 	bad      map[string]string
 	resolved []string
+	// moved maps an image to the digest reference it resolves to instead
+	// of digestOf's: a tag that moved.
+	moved map[string]string
 	// restartErr is Restart's answer.
 	restartErr error
 }
@@ -88,6 +91,9 @@ func (f *fakeEngine) ResolveImage(_ context.Context, image string, _ model.Regis
 	f.resolved = append(f.resolved, image)
 	if e, ok := f.bad[image]; ok {
 		return "", errors.New(e)
+	}
+	if d, ok := f.moved[image]; ok {
+		return d, nil
 	}
 	return digestOf(image), nil
 }

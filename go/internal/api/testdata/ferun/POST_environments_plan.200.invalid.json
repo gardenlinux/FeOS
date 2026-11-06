@@ -35,6 +35,7 @@
         "problem": "an attached service runs once",
         "remedy": "remove replicas, or run the service as an image"
       }
-    ]
+    ],
+    "images": {}
   }
 }

@@ -22,6 +22,8 @@ func (fake) Validate(*Addon, Addon) []spec.Finding   { return nil }
 func (fake) Credentials(Addon) []string              { return []string{"password"} }
 func (fake) Render(Addon, Context) (Instance, error) { return Instance{Image: "fake:1"}, nil }
 func (fake) OutputKeys() []string                    { return []string{"url"} }
+func (fake) OutputFields() []string                  { return nil }
+func (fake) Options() []Option                       { return nil }
 func (fake) Provision(Addon, Context) []Step         { return nil }
 func (fake) Outputs(Addon, Context, Ref) ([]model.TemplatePart, error) {
 	return []model.TemplatePart{{Value: "fake://"}, {Credential: "password", Escape: model.EscapeURL}}, nil

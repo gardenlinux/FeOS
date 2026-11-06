@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 )
 
@@ -238,6 +239,8 @@ type PlanSpecAnswer struct {
 	// Valid: no error finding.
 	Valid    bool           `json:"valid"`
 	Findings []spec.Finding `json:"findings"`
+	// Images are the pins, as PlanAnswer's.
+	Images map[string]string `json:"images"`
 }
 
 // PlanRequest is POST /api/v1/environments/{env}/plan.
@@ -256,6 +259,54 @@ type PlanAnswer struct {
 	// current deployment (0: none); an apply passes Current as its base.
 	Base    int `json:"base"`
 	Current int `json:"current"`
+	// Images are the pins the plan resolved (ADR 0032): every image of an
+	// image service or a job that is not a digest reference, as written,
+	// to the digest reference it resolved to
+	// ("<registry>/<repository>@sha256:…"), which the normalised spec
+	// runs. A client that writes them into its spec (image the pin,
+	// imageAsWritten the key) applies what the plan showed, even when a
+	// tag moves before the apply. An image that did not resolve is not a
+	// key (the plan warned at its path); a digest reference is never one
+	// (it stays as written). {} when the spec did not parse.
+	Images map[string]string `json:"images"`
+}
+
+// AddonCatalog is GET /api/v1/addons: the addon types this ferund runs,
+// by type (ADR 0032), as their blueprints declare them.
+type AddonCatalog struct {
+	Addons []AddonType `json:"addons"`
+}
+
+// AddonType is a blueprint in the catalog.
+type AddonType struct {
+	// Type is what a spec's addons.*.type names.
+	Type string `json:"type"`
+	// Versions are the versions a spec may name, oldest first;
+	// DefaultVersion the newest, which a new addon is offered with (a
+	// spec must name its version: a default would change under a running
+	// addon).
+	Versions       []string `json:"versions"`
+	DefaultVersion string   `json:"defaultVersion"`
+	// Plans are the sizes, smallest first; DefaultPlan the plan of an
+	// addon that names none.
+	Plans       []AddonPlan `json:"plans"`
+	DefaultPlan string      `json:"defaultPlan"`
+	// OutputKeys are the keys a reference ({addon, key}) may name,
+	// OutputFields the fields it may name besides them ([] for none).
+	OutputKeys   []string `json:"outputKeys"`
+	OutputFields []string `json:"outputFields"`
+	// Options are the options the blueprint declares; any other is an
+	// error of the plan.
+	Options []addons.Option `json:"options"`
+}
+
+// AddonPlan is a plan of an addon type: the pod's size and the volume's
+// when it is first created (never resized).
+type AddonPlan struct {
+	Name      string `json:"name"`
+	VCPUs     int    `json:"vcpus"`
+	MemoryMib int    `json:"memoryMib"`
+	VolumeMib int    `json:"volumeMib"`
 }
 
 // ApplyRequest is POST /api/v1/environments/{env}/deployments.
