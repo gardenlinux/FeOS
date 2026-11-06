@@ -494,6 +494,12 @@ export const api = {
       throw e;
     }
   },
+
+  // Platform: an operator mints a tenant's token with a role (ferund's
+  // default: admin), on the tenant or on one environment (name or ID).
+  mintTenantToken: (name, { label = '', role = '', environment = '' } = {}) =>
+    adminCall('POST', `/tenants/${enc(name)}/tokens`,
+      { label, ...(role ? { role } : {}), ...(environment ? { environment } : {}) }),
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

@@ -73,6 +73,10 @@ export function nodeRows(nodes) {
       stoppingUntil: n.stoppingUntil || '',
       drainStartedAt: n.drainStartedAt || '',
       removedAt: n.removedAt || '',
+      // feosd's versions: an object of strings and lists of strings.
+      versions: n.versions && typeof n.versions === 'object' ? n.versions : null,
+      meshPrefix: n.meshPrefix || '',
+      meshEndpoint: n.meshEndpoint || '',
     };
   });
   const order = (r) => (r.status === 'removed' ? 1 : 0);
