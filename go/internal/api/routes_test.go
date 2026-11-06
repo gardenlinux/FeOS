@@ -176,6 +176,13 @@ var bindingRoutes = map[string]class{
 	"GET /api/v1/sandboxes/{id}/http":              classSandbox,
 	"DELETE /api/v1/sandboxes/{id}/http":           classSandbox,
 	"POST /api/v1/http/preflight":                  classTenant,
+	"GET /api/v1/credentials":                      classTenant,
+	"GET /api/v1/credentials/{name}":               classTenant,
+	"PUT /api/v1/credentials/{name}":               classTenant,
+	"DELETE /api/v1/credentials/{name}":            classTenant,
+	"POST /api/v1/credentials/{name}/check":        classTenant,
+	"GET /api/v1/sandboxes/{id}/credentials":       classTenant,
+	"PUT /api/v1/sandboxes/{id}/credentials":       classTenant,
 }
 
 // oidcRoutes exist only with OIDC.
