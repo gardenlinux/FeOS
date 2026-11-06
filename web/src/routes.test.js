@@ -29,7 +29,7 @@ describe('parsePath', () => {
   });
 
   it('the tenant views are those that need a tenant token', () => {
-    expect([...TENANT_VIEWS].sort()).toEqual(['environments', 'overview', 'sandboxes', 'tools']);
+    expect([...TENANT_VIEWS].sort()).toEqual(['environments', 'newEnvironment', 'overview', 'sandboxes', 'tools']);
   });
 });
 
@@ -98,7 +98,10 @@ describe('the environments routes', () => {
       expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
-    expect(ENV_TABS).toEqual(['overview', 'deployments', 'incidents', 'logs', 'traces']);
+    expect(ENV_TABS).toEqual(['overview', 'builder', 'deployments', 'incidents', 'logs', 'traces']);
+    expect(parsePath('/tenants/fecode/environments/e/builder')).toEqual(env({ env: 'e', tab: 'builder' }));
+    expect(envPath('fecode', 'e', 'builder')).toBe('/tenants/fecode/environments/e/builder');
+    expect(parsePath('/tenants/fecode/new-environment')).toEqual({ view: 'newEnvironment', tenant: 'fecode' });
     expect(parsePath('/tenants/fecode/environments/e/traces/4bf92f3577b34da6a3ce929d0e0e4736'))
       .toEqual(env({ env: 'e', tab: 'traces', item: '4bf92f3577b34da6a3ce929d0e0e4736' }));
     expect(parsePath('/tenants/fecode/environments/e/traces?service=api&since=1d'))

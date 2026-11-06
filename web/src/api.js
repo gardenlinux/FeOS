@@ -33,10 +33,13 @@ export const CSRF_VALUE = 'ferun';
 // ApiError is a failed request: the server's {"error"} text and the
 // status.
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, body = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    // body is the refusal's JSON: an environment's code, findings or
+    // current deployment.
+    this.body = body;
   }
 }
 
@@ -63,7 +66,8 @@ export async function request(method, path, { body, authorization } = {}) {
   if (!resp.ok) {
     // ferund's refusals say {error}; the log store's Jaeger API {errors: [{msg}]}.
     const jaeger = data && Array.isArray(data.errors) && data.errors[0] && data.errors[0].msg;
-    throw new ApiError((data && data.error) || jaeger || `${method} ${path}: HTTP ${resp.status}`, resp.status);
+    throw new ApiError((data && data.error) || jaeger || `${method} ${path}: HTTP ${resp.status}`, resp.status,
+      data && typeof data === 'object' ? data : null);
   }
   return data;
 }
@@ -317,9 +321,10 @@ export const api = {
   // public keys, never key material.
   getAccess: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/access`),
 
-  // As the tenant, read-only: its environments. env is the name or the
-  // UUID. The UI applies, reverts and deletes nothing, and reads no
-  // secret and no route token.
+  // As the tenant: its environments. env is the name or the UUID. The
+  // UI writes deployments and secrets' values through the builder (ADR
+  // 0032) and nothing else: it reverts and deletes nothing, and reads no
+  // secret's value and no route token.
   listEnvironments: (labels = []) => tenantCall('GET', '/environments' + labelQuery(labels)),
   getEnvironment: (env) => tenantCall('GET', `/environments/${enc(env)}`),
   listDeployments: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
@@ -347,6 +352,32 @@ export const api = {
   getTrace: (env, trace) => tenantCall('GET', `/jaeger/api/traces/${enc(trace)}${query({ environment: env })}`),
   findTraces: (params) => tenantCall('GET', `/jaeger/api/traces?${params}`),
   followLogs: (params, signal) => tenantStream(`/logs?${params}&follow=1`, signal),
+
+  // The builder's (ADR 0032). A plan of an environment answers {valid,
+  // findings, diff, base, current} and, from a ferund that pins at plan,
+  // images {as written: pinned}; one without an environment {valid,
+  // findings}. An apply answers 201 the deployment, 200 unchanged, 422
+  // invalid_spec with findings, 409 base_mismatch with current (the
+  // ApiError's body).
+  // A create with the same ID and name again answers 200 with it.
+  createEnvironment: (name, id) => tenantCall('POST', '/environments', id ? { name, id } : { name }),
+  planEnvironment: (env, spec, base) => tenantCall('POST', `/environments/${enc(env)}/plan`, { spec, base }),
+  planSpec: (spec) => tenantCall('POST', '/environments/plan', { spec }),
+  applyDeployment: (env, { spec, base, message }) =>
+    tenantCall('POST', `/environments/${enc(env)}/deployments`, message ? { spec, base, message } : { spec, base }),
+  // The secrets' names and latest versions, never a value; a put makes a
+  // new version, {name, version}.
+  listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
+  putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
+  // The addons' catalog; null from a ferund that has none (404).
+  addonCatalog: async () => {
+    try {
+      return await tenantCall('GET', '/addons');
+    } catch (e) {
+      if (e.status === 404 || e.status === 405) return null;
+      throw e;
+    }
+  },
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

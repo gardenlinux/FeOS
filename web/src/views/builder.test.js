@@ -101,6 +101,9 @@ describe('draft', () => {
     expect(proposeMessage(diff, spec)).toBe(
       'expense-service: image ghcr.io/acme/expense:1.3 → ghcr.io/acme/expense:1.4; route /api added; addon nats removed');
     expect(proposeMessage([], spec)).toBe('');
+    const pinned = 'ghcr.io/acme/web@sha256:' + 'ab'.repeat(32);
+    expect(proposeMessage([{ kind: 'service', name: 'web', change: 'update', fields: [{ path: 'image', from: pinned, to: 'web:2' }] }], spec))
+      .toBe('web: image ghcr.io/acme/web@sha256:abababababab… → web:2');
   });
 
   it('stores a draft without anything but its spec, base, source and name', () => {

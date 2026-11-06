@@ -16,6 +16,7 @@ import { Tenants } from './views/Tenants.jsx';
 import { Sandboxes } from './views/Sandboxes.jsx';
 import { Tools } from './views/Tools.jsx';
 import { Environments } from './views/Environments.jsx';
+import { NewEnvironment } from './views/NewEnvironment.jsx';
 import { Nodes } from './views/Nodes.jsx';
 import { NodeDetail } from './views/NodeDetail.jsx';
 import { JoinTokens } from './views/JoinTokens.jsx';
@@ -132,6 +133,7 @@ export default function App() {
           {!needsGate && route.view === 'environments' && (
             <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
               replica={route.replica} search={route.search} navigate={navigate} />)}
+          {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.tenant} tenant={route.tenant} navigate={navigate} />}
           {route.view === 'nodes' && <Nodes navigate={navigate} />}
           {route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
           {route.view === 'joinTokens' && <JoinTokens />}
@@ -171,7 +173,7 @@ function Sidebar({ route, navigate }) {
           <div className="snav-label">tenant · <span className="mono">{t}</span></div>
           <NavItem icon="dashboard" label="Overview" active={route.view === 'overview'} onClick={() => navigate(`/tenants/${enc(t)}`)} />
           <NavItem icon="box" label="Sandboxes" active={route.view === 'sandboxes'} onClick={() => navigate(`/tenants/${enc(t)}/sandboxes`)} />
-          <NavItem icon="blocks" label="Environments" active={route.view === 'environments'} onClick={() => navigate(envPath(t))} />
+          <NavItem icon="blocks" label="Environments" active={route.view === 'environments' || route.view === 'newEnvironment'} onClick={() => navigate(envPath(t))} />
           <NavItem icon="terminal" label="Tools" active={route.view === 'tools'} onClick={() => navigate(`/tenants/${enc(t)}/tools`)} />
         </nav>
       )}
@@ -232,7 +234,8 @@ function Topbar({ route, navigate, me, onSignOut }) {
         {route.view === 'sandboxes' && <>{sep}{crumb('sandboxes', `/tenants/${enc(t)}/sandboxes`)}</>}
         {route.view === 'sandboxes' && route.sel && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
         {route.view === 'tools' && <>{sep}<span className="crumb">tools</span></>}
-        {route.view === 'environments' && <>{sep}{crumb('environments', envPath(t))}</>}
+        {(route.view === 'environments' || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
+        {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
         {route.view === 'environments' && route.env && <>{sep}{crumb(route.env, envPath(t, route.env))}</>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && (
           <>{sep}{crumb(route.tab, envPath(t, route.env, route.tab))}</>)}

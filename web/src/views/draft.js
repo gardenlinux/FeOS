@@ -290,7 +290,7 @@ function routeWord(spec, name) {
 function short(v) {
   if (v === null || v === undefined) return 'none';
   if (typeof v !== 'string') return JSON.stringify(v);
-  return v.replace(/ \(sha256:[0-9a-f]{64}\)$/, '');
+  return v.replace(/ \(sha256:[0-9a-f]{64}\)$/, '').replace(/@sha256:([0-9a-f]{12})[0-9a-f]{52}$/, '@sha256:$1…');
 }
 
 // ------------------------------------------------------------- storage --
@@ -304,10 +304,13 @@ export function draftKey(tenant, env) {
 }
 
 // encodeDraft is what storage keeps: the spec, the base, where the draft
-// came from and, for a new environment, its name. Never a secret's
-// value: the draft holds none.
+// came from and, for a new environment, its name and the ID it is
+// created with (so that a create repeated after a failed step is the
+// same environment). Never a secret's value: the draft holds none.
 export function encodeDraft(d) {
-  return JSON.stringify({ v: 1, spec: d.spec || {}, base: d.base || 0, source: d.source || '', name: d.name || '' });
+  const out = { v: 1, spec: d.spec || {}, base: d.base || 0, source: d.source || '', name: d.name || '' };
+  if (d.id) out.id = d.id;
+  return JSON.stringify(out);
 }
 
 // decodeDraft reads it back; null for anything else.
@@ -316,8 +319,20 @@ export function decodeDraft(text) {
   try {
     const v = JSON.parse(text);
     if (!isObject(v) || v.v !== 1 || !isObject(v.spec) || typeof v.base !== 'number') return null;
-    return { spec: v.spec, base: v.base, source: String(v.source || ''), name: String(v.name || '') };
+    const d = { spec: v.spec, base: v.base, source: String(v.source || ''), name: String(v.name || '') };
+    if (typeof v.id === 'string' && v.id) d.id = v.id;
+    return d;
   } catch {
     return null;
   }
+}
+
+// newEnvID is a new environment's UUID (version 4), which the builder
+// sends with its create.
+export function newEnvID(random = (b) => globalThis.crypto.getRandomValues(b)) {
+  const b = random(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }

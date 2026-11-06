@@ -9,6 +9,11 @@
 //   localStorage   ferun-theme     dark or light
 //                  ferun-tenants   {tenant: token}, the tenant tokens this
 //                                  browser minted or was given
+//                  ferun-draft:<tenant>/<env>
+//                                  the deployment builder's draft of an
+//                                  environment, "<tenant>/" a new one's
+//                                  (views/draft.js): a spec and its base,
+//                                  never a secret's value
 //   sessionStorage ferun-admin     "user:password" of a Basic sign-in, for
 //                                  the life of the tab only
 
@@ -38,7 +43,8 @@ export function readItem(kind, key) {
   }
 }
 
-// writeItem stores value, or removes the key when value is empty.
+// writeItem stores value, or removes the key when value is empty; it
+// returns false when storage refused and the value lives in memory.
 export function writeItem(kind, key, value) {
   const k = `${kind}/${key}`;
   try {
@@ -47,7 +53,9 @@ export function writeItem(kind, key, value) {
     if (value) s.setItem(key, value);
     else s.removeItem(key);
     memory.delete(k);
+    return true;
   } catch {
     memory.set(k, value || '');
+    return false;
   }
 }
