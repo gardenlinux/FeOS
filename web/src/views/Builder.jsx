@@ -8,37 +8,39 @@ import { ErrBox } from '../components.jsx';
 import { readItem, writeItem } from '../storage.js';
 import { envPath } from '../routes.js';
 import { mayBuild, useAccess } from '../people.js';
-import { DiffView } from './Environments.jsx';
-import { heavyEffect } from './envs.js';
+import { fmtValue, heavyEffect, statusState } from './envs.js';
 import {
-  SPEC_KINDS, addService, decodeDraft, newEnvID, draftKey, encodeDraft, getObject, isDnsLabel, isObject, isSecretName,
-  objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
+  SPEC_KINDS, addService, decodeDraft, deployBlock, draftKey, draftWords, encodeDraft, getObject, isDnsLabel, isSecretName,
+  keyOfKind, kindOf, newEnvID, objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
 } from './draft.js';
 import { referencesOf, referencesTo, refLine, refsFrom, removeWithRefs, secretNames } from './refs.js';
 import { groupFindings, severityCounts, unitKey, worst } from './findings.js';
-import { rebase, resolve } from './rebase.js';
+import { changesSince, rebase, resolve } from './rebase.js';
 import { applyPins, imageView, pinSecret, secretPins } from './pins.js';
 import { builtinCatalog, newAddon, readCatalog } from './catalog.js';
 import { planner } from './planner.js';
 import { AddonForm, FindingList, JobForm, RawForm, RouteForm, SecretForm, ServiceForm } from './BuilderForms.jsx';
-import { GraphView, summary } from './GraphView.jsx';
+import { GraphView, MARK, summary } from './GraphView.jsx';
+import { changeList, diffMarks, removedOf } from './graph.js';
+import '../styles/builder.css';
 
-// The deployment builder (ADR 0032): an environment's tab Builder and the
-// page of a new environment. It edits
-// a draft, a spec in the API's JSON and its base, in forms and as JSON
-// text (two views of the one draft), keeps it in this browser's storage,
-// plans it 500 ms after every change, shows the findings at the objects
-// and fields their paths name and the diff against the base, and applies
-// it with its base; a refused base rebases object by object. It writes
-// deployments and secrets' values, nothing else. From 900 px the objects
-// are a graph (GraphView.jsx) with the open object's form beside it;
-// below, a list of cards that open their form at full width.
+// The deployment builder (ADR 0032): an environment's "New deployment"
+// and the page of a new environment. It edits a draft of the next
+// deployment, a spec in the API's JSON and its base (the deployment it
+// starts from), in forms and as JSON text (two views of the one draft),
+// keeps it in this browser's storage, plans it 500 ms after every change,
+// and deploys it with its base after a review; a refused base rebases
+// object by object. A band above says what the draft is, how many objects
+// it changes and that nothing changes until it is deployed. From 900 px
+// the objects are a graph (GraphView.jsx) with the open object's form, or
+// the review, beside it; below, a list of cards that open their form at
+// full width. It writes deployments and secrets' values, nothing else.
 
 const HISTORY = 100;
 
 // ObjectList is the draft's objects by kind, each a card with its
 // summary, its findings' worst severity and its references as lines.
-export function ObjectList({ spec, groups, open, onOpen, onAdd, pins, catalog }) {
+export function ObjectList({ spec, groups, open, onOpen, onAdd, pins, catalog, marks }) {
   const refs = useMemo(() => referencesOf(spec), [spec]);
   const pinByName = new Map((pins || []).map((p) => [p.name, p]));
   return (
@@ -61,14 +63,15 @@ export function ObjectList({ spec, groups, open, onOpen, onAdd, pins, catalog })
               const fs = groups.objects.get(u) || [];
               const sev = worst(fs);
               const obj = key === 'secrets' ? null : getObject(spec, key, name);
-              const lines = key === 'secrets'
-                ? referencesTo(spec, 'secrets', name, refs).map((r) => `${r.from.name} · ${refLine(r)}`)
+              const lines = key === 'secrets' ? secretLines(referencesTo(spec, 'secrets', name, refs))
                 : key === 'routes' ? [] : refsFrom(spec, key, name, refs).map(refLine);
               const pin = pinByName.get(name);
+              const m = marks && marks.get(u);
               return (
-                <button key={u} className={'b-card' + (open === u ? ' on' : '') + (sev ? ' ' + sev : '')} onClick={() => onOpen(u)}>
+                <button key={u} className={'b-card' + (open === u ? ' on' : '') + (sev ? ' ' + sev : '') + (m ? ' m-' + m : '')} onClick={() => onOpen(u)}>
                   <span className="b-cardhead">
                     <span className="mono strong">{name}</span>
+                    {m && <span className={'g-mark m-' + m} title={MARK[m][1] + ' by this draft'}>{MARK[m][0]}</span>}
                     {sev && <span className={'badge ' + (sev === 'error' ? 'bad' : sev === 'warning' ? 'warn' : '')}>{fs.length} {sev === 'info' ? 'note' : sev}{fs.length > 1 ? 's' : ''}</span>}
                     {pin && pin.missing && <span className="badge bad">missing</span>}
                     {pin && pin.newer && <span className="badge warn">v{pin.latest} newer</span>}
@@ -84,6 +87,15 @@ export function ObjectList({ spec, groups, open, onOpen, onAdd, pins, catalog })
       })}
     </div>
   );
+}
+
+// secretLines are a secret card's lines: who uses it by a variable or a
+// credential, one each; the registry logins folded into one line.
+export function secretLines(refs) {
+  const logins = [...new Set(refs.filter((r) => r.via === 'imageCredentials').map((r) => r.from.name))];
+  const lines = refs.filter((r) => r.via !== 'imageCredentials').map((r) => `${r.from.name} · ${refLine(r)}`);
+  if (logins.length) lines.push(`registry login of ${logins.join(', ')}`);
+  return lines;
 }
 
 function AddAddonButton({ catalog, onAdd }) {
@@ -130,10 +142,13 @@ export function Builder({ tenant, env, st, navigate }) {
   const key = draftKey(tenant, env);
   const [draft, setDraftState] = useState(null);
   const draftRef = useRef(null);
+  const [baseSpec, setBaseSpec] = useState(null);
   const [loadErr, setLoadErr] = useState('');
   const [storageOk, setStorageOk] = useState(true);
   const [view, setView] = useState('forms');
-  const [open, setOpen] = useState('');
+  const [open, setOpenState] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+  const [hover, setHover] = useState('');
   const history = useRef({ past: [], future: [], at: 0 });
   const [, setHist] = useState(0);
   const [plan, setPlan] = useState(null);
@@ -148,6 +163,8 @@ export function Builder({ tenant, env, st, navigate }) {
   const [applied, setApplied] = useState(null);
   const wide = useWide();
   const [focus, setFocus] = useState(true);
+  // An object opened closes the review, which takes the same place.
+  const setOpen = useCallback((u) => { setOpenState(u); if (u) setReviewing(false); }, []);
 
   // set replaces the draft and stores it; record pushes the draft before
   // onto the undo history (edits within a second are one step).
@@ -178,14 +195,16 @@ export function Builder({ tenant, env, st, navigate }) {
   const loadLatest = useCallback(async (n) => {
     const spec = await fetchSpec(n);
     history.current = { past: [], future: [], at: 0 };
+    setBaseSpec(spec);
     set({ spec, base: n, source: n > 0 ? `deployment ${n}` : 'empty', name: '' }, { record: false, store: false });
     writeItem('localStorage', key, '');
   }, [fetchSpec, set, key]);
 
   // rebaseOnto takes d's changes since its base onto deployment n.
   const rebaseOnto = useCallback(async (d, n) => {
-    const [baseSpec, latestSpec] = await Promise.all([fetchSpec(d.base), fetchSpec(n)]);
-    const r = rebase(baseSpec, d.spec, latestSpec);
+    const [base, latestSpec] = await Promise.all([fetchSpec(d.base), fetchSpec(n)]);
+    const r = rebase(base, d.spec, latestSpec);
+    setBaseSpec(latestSpec);
     set({ ...d, spec: r.spec, base: n, source: `${d.source || 'a draft'}, rebased onto deployment ${n}` }, { record: true });
     setConflicts(r.conflicts.length ? { list: r.conflicts, from: d.base, to: n } : null);
     setNotice(`Rebased from deployment ${d.base || 'none'} onto deployment ${n}: ${r.applied.length} change${r.applied.length === 1 ? '' : 's'} kept`
@@ -202,14 +221,17 @@ export function Builder({ tenant, env, st, navigate }) {
     const latest = isNew ? 0 : st.deployment;
     (async () => {
       if (readOnly) {
-        set({ spec: await fetchSpec(latest), base: latest, source: latest > 0 ? `deployment ${latest}` : 'empty', name: '' },
-          { record: false, store: false });
+        const spec = await fetchSpec(latest);
+        setBaseSpec(spec);
+        set({ spec, base: latest, source: latest > 0 ? `deployment ${latest}` : 'empty', name: '' }, { record: false, store: false });
         return;
       }
-      if (stored && stored.base === latest) set(stored, { record: false, store: false });
-      else if (stored && !isNew) await rebaseOnto(stored, latest);
-      else if (stored) set(stored, { record: false, store: false });
-      else if (isNew) set({ spec: {}, base: 0, source: 'empty', name: '' }, { record: false, store: false });
+      if (stored && stored.base === latest) {
+        setBaseSpec(await fetchSpec(latest));
+        set(stored, { record: false, store: false });
+      } else if (stored && !isNew) await rebaseOnto(stored, latest);
+      else if (stored) { setBaseSpec({}); set(stored, { record: false, store: false }); }
+      else if (isNew) { setBaseSpec({}); set({ spec: {}, base: 0, source: 'empty', name: '' }, { record: false, store: false }); }
       else await loadLatest(latest);
     })().catch((e) => setLoadErr(e.message));
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -286,7 +308,15 @@ export function Builder({ tenant, env, st, navigate }) {
   const stale = plan && draft && plan.spec !== draft.spec;
   const pinned = answer && 'images' in answer ? applyPins(spec, answer.images) : null;
   const latest = isNew ? 0 : (answer && typeof answer.current === 'number' ? Math.max(answer.current, st ? st.deployment : 0) : (st ? st.deployment : 0));
-  const behind = draft && !isNew && !readOnly && latest > draft.base;
+  // The draft's changes against its base, object by object: the marks
+  // on the nodes and the band's count, at once; the plan's diff says
+  // their effects.
+  const changes = useMemo(() => (baseSpec && draft ? changeList(changesSince(baseSpec, spec)) : []), [baseSpec, spec]); // eslint-disable-line react-hooks/exhaustive-deps
+  const marks = useMemo(() => diffMarks(changes), [changes]);
+  const removed = useMemo(() => removedOf(changes, spec), [changes, spec]);
+  const words = draftWords({
+    isNew, readOnly, base: draft ? draft.base : 0, latest, deployed: st ? st.deployed : 0, state: statusState(st), changes: changes.length,
+  });
 
   // ------------------------------------------------------------ editing --
   const undo = () => {
@@ -335,6 +365,15 @@ export function Builder({ tenant, env, st, navigate }) {
   };
 
   const exportDraft = () => download(`${env || draft.name || 'new-environment'}.json`, specText(spec));
+  const discard = (n) => {
+    setConflicts(null);
+    setNotice('');
+    setReviewing(false);
+    setOpen('');
+    if (isNew) set({ spec: {}, base: 0, source: 'empty', name: draftRef.current.name }, { record: true });
+    else if (n === 0) set({ ...draftRef.current, spec: {}, source: 'empty' }, { record: true });
+    else loadLatest(n).catch((e) => setLoadErr(e.message));
+  };
 
   if (loadErr) return <ErrBox error={loadErr} />;
   if (!draft) return <p className="empty">Loading the draft…</p>;
@@ -344,49 +383,63 @@ export function Builder({ tenant, env, st, navigate }) {
       onAgain={() => { setApplied(null); draftRef.current = null; setDraftState(null); loadLatest(applied.number).catch((e) => setLoadErr(e.message)); }} />;
   }
 
-  const openUnit = open;
   const entry = { public: !!(st && st.public), hosts: (st && st.hosts) || [], env: isNew ? draft.name : env };
+  const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const editor = (
     <fieldset className="b-fieldset" disabled={readOnly}>
-      <Editor unit={openUnit} spec={spec} groups={groups} pins={pins} catalog={catalog} isNew={isNew}
+      <Editor unit={open} spec={spec} groups={groups} pins={pins} catalog={catalog} isNew={isNew}
         knownSecrets={knownSecrets} setSecret={setSecret} edit={edit} setOpen={setOpen}
-        empty={!readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0}
+        empty={empty}
         onFirst={(image) => { const r = addService(draftRef.current.spec, image); edit(r.spec); setOpen(unitKey('services', r.name)); }} />
     </fieldset>
   );
+  const review = !readOnly && (
+    <ReviewPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} findings={findings}
+      pinned={pinned} applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
+      changes={changes} next={words.next} onOpen={setOpen} onClose={() => setReviewing(false)}
+      onApply={async (message, setBusy, setErr) => {
+        setBusy(true);
+        setErr('');
+        try {
+          const res = await applyDraft({ draftRef, set, edit, isNew, env, answer, message, pending, bumpPending });
+          if (res.unchanged) {
+            setNotice(`Nothing changes: the draft equals deployment ${res.number}.`);
+          } else {
+            writeItem('localStorage', key, '');
+            if (isNew) navigate(envPath(tenant, draftRef.current.name));
+            else setApplied(res);
+          }
+        } catch (e) {
+          if (e.status === 409 && e.body && e.body.code === 'base_mismatch') {
+            await rebaseOnto(draftRef.current, e.body.current);
+          } else if (e.status === 422 && e.body && Array.isArray(e.body.findings)) {
+            setApplyFindings(e.body.findings);
+            setErr(e.message);
+          } else {
+            setErr(e.message);
+          }
+        } finally {
+          setBusy(false);
+        }
+      }} />
+  );
+  const side = reviewing && review ? review : open ? <ObjectPanel unit={open} onClose={() => setOpen('')}>{editor}</ObjectPanel>
+    : empty && view === 'forms' ? editor : null;
+  const canReview = !readOnly;
+
   return (
-    <div className={'builder' + (openUnit ? ' has-open' : '') + (wide ? ' wide' : '')}>
-      <div className="b-toolbar">
-        {isNew && <NewEnvName name={draft.name} onChange={(name) => set({ ...draftRef.current, name }, { record: false })} />}
-        <span className="muted small">
-          {readOnly && <span className="badge">read-only</span>}{' '}
-          {isNew ? 'a new environment' : <>from <span className="mono">{draft.source || '—'}</span> · base <span className="mono">{draft.base || 'none'}</span></>}
-        </span>
-        <span className="spacer" />
-        <span className="b-seg">
-          <button className={'ghost mini' + (view === 'forms' ? ' on' : '')} onClick={() => setView('forms')}><Icon name="blocks" size={12} /> Forms</button>
-          <button className={'ghost mini' + (view === 'json' ? ' on' : '')} onClick={() => setView('json')}><Icon name="file" size={12} /> JSON</button>
-        </span>
-        {!readOnly && <button className="ghost mini" disabled={!history.current.past.length} onClick={undo} title="undo">Undo</button>}
-        {!readOnly && <button className="ghost mini" disabled={!history.current.future.length} onClick={redo} title="redo">Redo</button>}
-        <button className="ghost mini" onClick={exportDraft} title="the draft's spec as a file">Export</button>
-        {!readOnly && <ImportButton onSpec={(s) => { edit(s); setNotice('Imported: the plan shows what it changes against the base.'); }} onError={setNotice} />}
-        {!readOnly && <StartOver isNew={isNew} latest={latest} onStart={(n) => {
-          setConflicts(null);
-          setNotice('');
-          if (isNew) set({ spec: {}, base: 0, source: 'empty', name: draftRef.current.name }, { record: true });
-          else if (n === 0) set({ ...draftRef.current, spec: {}, source: 'empty' }, { record: true });
-          else loadLatest(n).catch((e) => setLoadErr(e.message));
-        }} />}
-      </div>
+    <div className={'builder' + (open || reviewing ? ' has-open' : '') + (wide ? ' wide' : '')}>
+      <Band words={words} readOnly={readOnly} isNew={isNew} draft={draft} plan={plan} planning={planning || stale}
+        changes={changes.length} view={view} setView={setView}
+        undo={history.current.past.length ? undo : null} redo={history.current.future.length ? redo : null}
+        onExport={exportDraft} onImport={(s) => { edit(s); setNotice('Imported: the review shows what it changes against the base.'); }}
+        onError={setNotice} onDiscard={discard} latest={latest}
+        onName={(name) => set({ ...draftRef.current, name }, { record: false })}
+        onRebase={() => rebaseOnto(draftRef.current, latest).catch((e) => setNotice(e.message))}
+        reviewing={reviewing} onReview={canReview ? () => { setReviewing((r) => !r); setOpenState(''); } : null} conflicts={!!conflicts} />
       {!storageOk && <p className="notice small">This browser keeps no storage for this page: the draft lives in memory and is gone with the page. Export it to keep it.</p>}
       {notice && <div className="message"><Icon name="alert" size={14} /><span>{notice}</span>
         <span className="spacer" /><button className="iconbtn" onClick={() => setNotice('')}><Icon name="x" size={12} /></button></div>}
-      {behind && !conflicts && (
-        <div className="message"><Icon name="alert" size={14} />
-          <span>Deployment {latest} is newer than this draft's base {draft.base || '(none)'}.</span>
-          <button className="mini" onClick={() => rebaseOnto(draftRef.current, latest).catch((e) => setNotice(e.message))}>Rebase onto {latest}</button>
-        </div>)}
       {conflicts && (
         <Conflicts conflicts={conflicts} onPick={(c, choice) => {
           edit(resolve(draftRef.current.spec, c, choice));
@@ -395,67 +448,125 @@ export function Builder({ tenant, env, st, navigate }) {
         }} />)}
       {secretsErr && <p className="notice small">The secrets cannot be read: {secretsErr}</p>}
 
-      {readOnly && (
-        <p className="notice small">Your role does not allow changes here: it needs write on this {isNew ? 'tenant' : 'environment'}.
-          The builder shows the latest deployment's spec.</p>)}
-      {view === 'json' && <JsonView spec={spec} onSpec={(s) => edit(s)} readOnly={readOnly} />}
-      {view === 'forms' && wide && (
-        <div className={'b-gmain' + (!openUnit && !(objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0) ? ' solo' : '')}>
-          <div className="b-gcol">
-            <div className="b-gbar">
-              <span className="sect">the environment</span>
-              <span className="spacer" />
-              {!readOnly && <>
-                <button className="ghost mini" onClick={() => addObject('services')}><Icon name="plus" size={12} /> service</button>
-                <button className="ghost mini" onClick={() => addObject('jobs')}><Icon name="plus" size={12} /> job</button>
-                <AddAddonButton catalog={catalog} onAdd={(type) => addObject('addons', type)} />
-                <button className="ghost mini" onClick={() => addObject('routes')}><Icon name="plus" size={12} /> route</button>
-                <button className="ghost mini" onClick={() => addObject('secrets')}><Icon name="plus" size={12} /> secret</button>
-              </>}
-              <label className="b-focus small" title="dim what is not next to the open object">
-                <input type="checkbox" checked={focus} onChange={(e) => setFocus(e.target.checked)} /> focus</label>
-            </div>
-            <GraphView spec={spec} groups={groups} diff={isNew || !answer ? null : answer.diff} open={openUnit} onOpen={setOpen}
-              entry={entry} catalog={catalog} knownSecrets={knownSecrets} pins={pins} edit={readOnly ? null : edit} focus={focus} />
-          </div>
-          <div className="b-editor">{editor}</div>
-        </div>)}
-      {view === 'forms' && !wide && (
-        <div className="b-main">
-          <ObjectList spec={spec} groups={groups} open={openUnit} pins={pins} catalog={catalog} onOpen={setOpen} onAdd={readOnly ? null : addObject} />
-          <div className="b-editor">
-            <button className="ghost mini b-back" onClick={() => setOpen('')}><Icon name="arrowLeft" size={12} /> the objects</button>
-            {editor}
-          </div>
-        </div>)}
+      <div className={'b-gmain' + (side ? '' : ' solo')}>
+        <div className="b-gcol">
+          {view === 'json' && <JsonView spec={spec} onSpec={(s) => edit(s)} readOnly={readOnly} />}
+          {view === 'forms' && wide && (
+            <>
+              <div className="b-gbar">
+                <span className="muted small b-ghint">{readOnly ? 'Click an object to see it.' : <>Click an object to change it; drag a handle <span className="b-dot" /> onto another to connect them.</>}</span>
+                <span className="spacer" />
+                {!readOnly && <>
+                  <button className="ghost mini" onClick={() => addObject('services')}><Icon name="plus" size={12} /> service</button>
+                  <button className="ghost mini" onClick={() => addObject('jobs')}><Icon name="plus" size={12} /> job</button>
+                  <AddAddonButton catalog={catalog} onAdd={(type) => addObject('addons', type)} />
+                  <button className="ghost mini" onClick={() => addObject('routes')}><Icon name="plus" size={12} /> route</button>
+                </>}
+                <label className="b-focus small" title="dim what is not next to the open object">
+                  <input type="checkbox" checked={focus} onChange={(e) => setFocus(e.target.checked)} /> focus</label>
+              </div>
+              <GraphView spec={spec} groups={groups} marks={marks} removed={removed} open={open} onOpen={setOpen}
+                entry={entry} catalog={catalog} knownSecrets={knownSecrets} pins={pins} edit={readOnly ? null : edit} focus={focus}
+                hover={hover} onHover={setHover} onAddSecret={() => addObject('secrets')} />
+            </>)}
+          {view === 'forms' && !wide && (
+            <ObjectList spec={spec} groups={groups} open={open} pins={pins} catalog={catalog} marks={marks} onOpen={setOpen}
+              onAdd={readOnly ? null : addObject} />)}
+        </div>
+        {side && <div className="b-side">
+          {!wide && <button className="ghost mini b-back" onClick={() => { setOpen(''); setReviewing(false); }}><Icon name="arrowLeft" size={12} /> the objects</button>}
+          {side}
+        </div>}
+      </div>
+    </div>
+  );
+}
 
-      {!readOnly && <PlanPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} pinned={pinned}
-        applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
-        onApply={async (message, setBusy, setErr) => {
-          setBusy(true);
-          setErr('');
-          try {
-            const res = await applyDraft({ draftRef, set, edit, isNew, env, answer, message, pending, bumpPending });
-            if (res.unchanged) {
-              setNotice(`Nothing changes: the draft equals deployment ${res.number}.`);
-            } else {
-              writeItem('localStorage', key, '');
-              if (isNew) navigate(envPath(tenant, draftRef.current.name));
-              else setApplied(res);
-            }
-          } catch (e) {
-            if (e.status === 409 && e.body && e.body.code === 'base_mismatch') {
-              await rebaseOnto(draftRef.current, e.body.current);
-            } else if (e.status === 422 && e.body && Array.isArray(e.body.findings)) {
-              setApplyFindings(e.body.findings);
-              setErr(e.message);
-            } else {
-              setErr(e.message);
-            }
-          } finally {
-            setBusy(false);
-          }
-        }} />}
+// Band says what the builder edits: the draft of which deployment, from
+// which, how many changes, that nothing changes until it is deployed; and
+// carries the draft's actions and the way to its review.
+function Band({ words, readOnly, isNew, draft, plan, planning, changes, view, setView, undo, redo, onExport, onImport, onError,
+  onDiscard, latest, onName, onRebase, reviewing, onReview, conflicts }) {
+  const answer = plan && plan.answer;
+  const errors = answer ? severityCounts(answer.findings || []).error : 0;
+  return (
+    <div className="b-band">
+      <div className="b-bandtext">
+        <div className="b-bandtitle">
+          <Icon name="blocks" size={15} />
+          <span className="strong">{words.title}</span>
+          {words.from && <span className="muted">{words.from}</span>}
+          {words.behind > 0 && (
+            <span className="warntext small">· deployment {words.behind} is newer <button className="mini" onClick={onRebase}>Rebase onto {words.behind}</button></span>)}
+        </div>
+        <div className="b-bandsub small">
+          {isNew && <NewEnvName name={draft.name} onChange={onName} />}
+          {!readOnly && <span className={'b-count' + (changes ? ' some' : '')}>{words.count}</span>}
+          {!readOnly && (planning ? <span className="muted">planning…</span>
+            : plan && plan.error ? <span className="bad">the plan failed: {plan.error}</span>
+              : errors > 0 ? <button className="b-link bad" onClick={onReview}>{errors} error{errors === 1 ? '' : 's'} in the plan</button>
+                : answer ? <span className="muted"><Icon name="check" size={11} /> the plan accepts it</span> : null)}
+          <span className="muted">{readOnly
+            ? 'Your role does not allow changes here: it needs write on this environment. You see the latest deployment\'s spec.'
+            : isNew ? 'Nothing exists until you deploy. The draft is kept in this browser.'
+              : 'Nothing changes in the environment until you deploy. The draft is kept in this browser.'}</span>
+        </div>
+      </div>
+      <div className="b-bandactions">
+        {!readOnly && <button className="ghost mini" disabled={!undo} onClick={undo || undefined} title="undo"><Icon name="undo" size={12} /> Undo</button>}
+        {!readOnly && <button className="ghost mini" disabled={!redo} onClick={redo || undefined} title="redo">Redo</button>}
+        {!readOnly && <DiscardDraft isNew={isNew} latest={latest} changes={changes} onDiscard={onDiscard} />}
+        {!readOnly && <ImportButton onSpec={onImport} onError={onError} />}
+        <button className="ghost mini" onClick={onExport} title="the draft's spec as a JSON file">Export</button>
+        <span className="b-seg">
+          <button className={'ghost mini' + (view === 'forms' ? ' on' : '')} onClick={() => setView('forms')}><Icon name="blocks" size={12} /> Forms</button>
+          <button className={'ghost mini' + (view === 'json' ? ' on' : '')} onClick={() => setView('json')}><Icon name="file" size={12} /> JSON</button>
+        </span>
+        {onReview && (
+          <button className={'primary' + (reviewing ? ' on' : '')} onClick={onReview}
+            title={conflicts ? 'decide the conflicts first' : 'the changes, their effects and the deploy'}>
+            <Icon name="check" size={13} /> Review &amp; deploy{changes > 0 ? ` (${changes})` : ''}</button>)}
+      </div>
+    </div>
+  );
+}
+
+function DiscardDraft({ isNew, latest, changes, onDiscard }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="b-addaddon">
+      <button className="ghost mini" onClick={() => setOpen((o) => !o)} title="start over">Discard draft</button>
+      {open && (
+        <span className="b-pop right b-discard">
+          <span className="small">{changes > 0 ? `Discard ${changes} change${changes === 1 ? '' : 's'}?` : 'Start over?'}</span>
+          {!isNew && latest > 0 && (
+            <button className="mini danger" onClick={() => { setOpen(false); onDiscard(latest); }}>Start again from deployment {latest}</button>)}
+          <button className="ghost mini" onClick={() => { setOpen(false); onDiscard(0); }}>Start from an empty spec</button>
+          <button className="ghost mini" onClick={() => setOpen(false)}>Keep the draft</button>
+        </span>)}
+    </span>
+  );
+}
+
+// ObjectPanel is the open object's form beside the graph, titled with
+// what it is and where its changes go.
+function ObjectPanel({ unit, onClose, children }) {
+  const i = unit.indexOf('/');
+  const key = unit.slice(0, i);
+  const name = unit.slice(i + 1);
+  const one = (kindOf(key) || { one: key }).one;
+  const where = key === 'secrets'
+    ? 'a value goes to the environment at once; the draft pins its version'
+    : 'changes go into the draft';
+  return (
+    <div className="b-panel">
+      <div className="b-panelhead">
+        <span className="small"><span className="muted">{one}</span> <span className="mono strong">{name || 'new'}</span>
+          <span className="muted"> — {where}</span></span>
+        <span className="spacer" />
+        <button className="iconbtn" title="close" onClick={onClose}><Icon name="x" size={13} /></button>
+      </div>
+      {children}
     </div>
   );
 }
@@ -524,20 +635,6 @@ function ImportButton({ onSpec, onError }) {
         else onSpec(r.spec);
       }} />
     </>
-  );
-}
-
-function StartOver({ isNew, latest, onStart }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="b-addaddon">
-      <button className="ghost mini" onClick={() => setOpen((o) => !o)}>Start over</button>
-      {open && (
-        <span className="b-pop right">
-          {!isNew && latest > 0 && <button className="ghost mini" onClick={() => { setOpen(false); onStart(latest); }}>from deployment {latest}</button>}
-          <button className="ghost mini" onClick={() => { setOpen(false); onStart(0); }}>empty</button>
-        </span>)}
-    </span>
   );
 }
 
@@ -710,10 +807,13 @@ function Conflicts({ conflicts, onPick }) {
   );
 }
 
-// PlanPanel is the plan's answer: its verdict, the findings without an
-// object, the diff against the base with each change's effect, and the
-// apply with a message the builder proposes.
-export function PlanPanel({ isNew, draft, plan, planning, groups, pinned, applyFindings, pins, conflicts = 0, onApply }) {
+// ReviewPanel is the review before a deployment: the changes object by
+// object with their effects (the plan's diff against the base), the
+// findings (errors block), the images that do not resolve, the secrets
+// without a value, an acceptance of data loss or downtime, the message
+// the builder proposes, and the deploy.
+export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [], pinned, applyFindings, pins, conflicts = 0,
+  changes = [], next = 0, onApply, onOpen = () => {}, onClose }) {
   const answer = plan && plan.answer;
   const diff = answer && answer.diff ? answer.diff : [];
   const heavy = diff.filter((d) => heavyEffect(d.effect));
@@ -722,55 +822,105 @@ export function PlanPanel({ isNew, draft, plan, planning, groups, pinned, applyF
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const proposed = proposeMessage(diff, draft.spec);
+  const proposed = proposeMessage(isNew ? changes.map((c) => ({ kind: c.kind, name: c.name, change: c.change })) : diff, draft.spec);
   useEffect(() => { setAck(false); }, [heavy.length]);
-  const counts = severityCounts(applyFindings || (answer && answer.findings) || []);
+  const all = applyFindings || (answer && answer.findings) || findings;
+  const counts = severityCounts(all);
   const unresolved = pinned ? pinned.unresolved : [];
   const missing = (pins || []).filter((p) => p.missing).map((p) => p.name);
-  const nothing = !isNew && answer && answer.valid && diff.length === 0;
-  const blocked = busy || planning || !answer || !answer.valid || unresolved.length > 0 || (heavy.length > 0 && !ack)
-    || nothing || (isNew && !isDnsLabel(draft.name)) || conflicts > 0;
+  const block = deployBlock({ isNew, name: draft.name, planning, answer, diff, unresolved, heavy: heavy.length, ack, conflicts, busy });
+  const open = (kind, name) => {
+    const key = keyOfKind(kind);
+    if (key && key !== 'routes') onOpen(unitKey(key, name));
+    else if (key === 'routes') onOpen(unitKey('routes', name));
+  };
   return (
-    <div className="b-plan">
+    <div className="b-review">
+      <div className="b-panelhead">
+        <span className="strong">Review deployment {next}</span>
+        <span className="muted small">{isNew ? 'of a new environment' : `against deployment ${draft.base || '(none)'}`}</span>
+        <span className="spacer" />
+        {onClose && <button className="iconbtn" title="close" onClick={onClose}><Icon name="x" size={13} /></button>}
+      </div>
       <div className="b-planhead">
-        <h3>Plan</h3>
         {planning && <span className="muted small">planning…</span>}
         {!planning && answer && (answer.valid
-          ? <span className="badge ok">valid</span>
+          ? <span className="badge ok">the plan accepts it</span>
           : <span className="badge bad">{counts.error} error{counts.error === 1 ? '' : 's'}</span>)}
         {!planning && answer && counts.warning > 0 && <span className="badge warn">{counts.warning} warning{counts.warning === 1 ? '' : 's'}</span>}
         {plan && plan.error && <span className="bad small">{plan.error}</span>}
-        <span className="spacer" />
-        {!isNew && answer && <span className="muted small">against deployment {answer.base || '(none)'}</span>}
       </div>
-      <FindingList list={groups.global} />
+      {all.length > 0 && (
+        <div className="b-revsect">
+          <div className="sect">findings{counts.error > 0 ? ' · errors block the deploy' : ''}</div>
+          <FindingList list={all} />
+        </div>)}
       {missing.length > 0 && !isNew && (
-        <p className="bad small">Missing secrets: {missing.join(', ')}. Open each to set a value.</p>)}
+        <p className="bad small">Secrets without a value: {missing.join(', ')}. Open each in the secrets list to set one.</p>)}
       {pinned === null && answer && (
-        <p className="panel-note">This ferund answers no image pins with a plan; it pins the images at apply.</p>)}
+        <p className="panel-note">This ferund answers no image pins with a plan; it pins the images at deploy.</p>)}
       {unresolved.length > 0 && (
-        <p className="bad small">These images do not resolve, so the builder does not apply: {unresolved.join(', ')}</p>)}
-      {isNew
-        ? <p className="muted small">A new environment: everything in the draft is added with deployment 1.</p>
-        : <DiffView diff={diff} empty={answer ? 'No changes against the base.' : 'Not planned yet.'} />}
+        <p className="bad small">These images do not resolve, so the builder does not deploy: {unresolved.join(', ')}</p>)}
+      <div className="b-revsect">
+        <div className="sect">changes{isNew ? ' · everything is added with deployment 1' : ''}</div>
+        {isNew
+          ? (changes.length === 0
+            ? <p className="empty small">Nothing in the draft yet.</p>
+            : <ul className="b-changes">{changes.map((c) => (
+              <li key={c.unit} className="b-change"><span className={'g-mark m-' + c.change}>{MARK[c.change][0]}</span>
+                <button className="b-link" onClick={() => open(c.kind, c.name)}>{c.kind} <span className="mono">{c.name}</span></button>
+                <span className="spacer" /><span className="muted small">added</span></li>))}</ul>)
+          : diff.length === 0
+            ? <p className="empty small">{answer ? 'Nothing changes against the base.' : 'Not planned yet.'}</p>
+            : <ul className="b-changes">{diff.map((d) => <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={open} />)}</ul>}
+      </div>
       <div className="b-apply">
         {heavy.length > 0 && (
           <label className="b-ack">
             <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-            <span>I accept: {heavy.map((d) => `${d.kind}/${d.name} ${d.effect}`).join('; ')}</span>
+            <span>I accept: {heavy.map((d) => `${d.kind} ${d.name} ${d.effect}`).join('; ')}</span>
           </label>)}
-        <div className="b-row">
-          <input className="grow" placeholder={proposed || 'a message for the deployment'} value={touched ? message : proposed}
+        <label className="b-field">
+          <span className="b-label">message</span>
+          <input placeholder={proposed || 'what this deployment does'} value={touched ? message : proposed}
             onChange={(e) => { setTouched(true); setMessage(e.target.value); }} />
-          <button className="primary" disabled={blocked}
-            onClick={() => onApply(touched ? message : proposed, setBusy, setErr)}>
-            <Icon name="check" size={13} /> {isNew ? 'Create and apply' : 'Apply'}</button>
+        </label>
+        <div className="b-row">
+          <button className="primary" disabled={!!block} onClick={() => onApply(touched ? message : proposed, setBusy, setErr)}>
+            <Icon name="check" size={13} /> {isNew ? `Create ${draft.name || 'the environment'} with deployment 1` : `Deploy as deployment ${next}`}</button>
+          {block && <span className="muted small">{block}</span>}
         </div>
         {err && <p className="bad small">{err}</p>}
-        {nothing && <p className="muted small">Nothing to apply: the draft equals its base.</p>}
-        {conflicts > 0 && <p className="warntext small">Decide the conflicts above first.</p>}
       </div>
     </div>
+  );
+}
+
+// ChangeRow is one object's change in the review: what, its effect, and
+// its fields from → to.
+function ChangeRow({ d, onOpen }) {
+  const heavy = heavyEffect(d.effect);
+  const tone = heavy ? 'bad' : d.effect === 'in place' ? 'ok' : 'warn';
+  return (
+    <li className="b-change">
+      <div className="b-changehead">
+        <span className={'g-mark m-' + d.change} title={MARK[d.change] ? MARK[d.change][1] : d.change}>{MARK[d.change] ? MARK[d.change][0] : '~'}</span>
+        <button className="b-link" onClick={() => onOpen(d.kind, d.name)}>{d.kind} <span className="mono">{d.name}</span></button>
+        <span className="muted small">{d.change === 'add' ? 'added' : d.change === 'remove' ? 'removed' : 'changed'}</span>
+        <span className="spacer" />
+        {d.effect && <span className={'badge ' + tone}>{d.effect}</span>}
+      </div>
+      {(d.fields || []).length > 0 && (
+        <div className="b-fields">
+          {d.fields.map((f) => (
+            <div key={f.path} className="b-fieldchange small">
+              <span className="mono muted">{f.path}</span>
+              <span className="mono b-from" title={fmtValue(f.from)}>{fmtValue(f.from)}</span>
+              <span className="muted">→</span>
+              <span className="mono b-to" title={fmtValue(f.to)}>{fmtValue(f.to)}</span>
+            </div>))}
+        </div>)}
+    </li>
   );
 }
 
@@ -778,16 +928,17 @@ function Applied({ applied, tenant, env, st, navigate, onAgain }) {
   const rollout = st && st.rollout && st.rollout.deployment === applied.number ? st.rollout : null;
   return (
     <div className="b-applied">
-      <h3><Icon name="check" size={15} /> Deployment {applied.number} applied</h3>
+      <h3><Icon name="check" size={15} /> Deployment {applied.number} made</h3>
       <p>
         {rollout ? <>Its rollout: <span className="mono">{rollout.state}</span>{rollout.reason ? ` · ${rollout.reason}` : ''}</>
           : <>It waits for its rollout ({applied.state}).</>}
       </p>
-      <DiffView diff={applied.diff} />
+      {(applied.diff || []).length > 0 && <ul className="b-changes">{applied.diff.map((d) => (
+        <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={() => navigate(envPath(tenant, env, 'deployments', applied.number))} />))}</ul>}
       <div className="b-row">
         <button onClick={() => navigate(envPath(tenant, env))}>The overview</button>
         <button onClick={() => navigate(envPath(tenant, env, 'deployments', applied.number))}>Deployment {applied.number}</button>
-        <button className="primary" onClick={onAgain}>Edit again</button>
+        <button className="primary" onClick={onAgain}><Icon name="plus" size={13} /> New deployment</button>
       </div>
     </div>
   );

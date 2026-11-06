@@ -113,12 +113,12 @@ describe('the environments routes', () => {
       'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings',
     ]);
     for (const tab of ENV_TABS) expect(ENV_TAB_LABELS[tab]).toBeTruthy();
-    expect(ENV_TAB_LABELS.builder).toBe('Edit');
+    expect(ENV_TAB_LABELS.builder).toBe('New deployment');
     for (const tab of ['traffic', 'secrets', 'access', 'settings']) {
       expect(parsePath(`/tenants/fecode/environments/e/${tab}`)).toEqual(env({ env: 'e', tab }));
       expect(envPath('fecode', 'e', tab)).toBe(`/tenants/fecode/environments/e/${tab}`);
     }
-    // Edit's other name leads to the builder; an item on a tab without items is dropped.
+    // The builder's other name (edit) leads to the builder; an item on a tab without items is dropped.
     expect(parsePath('/tenants/fecode/environments/e/edit')).toEqual(env({ env: 'e', tab: 'builder' }));
     expect(parsePath('/tenants/fecode/environments/e/secrets/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
     expect(parsePath('/tenants/fecode/environments/e/builder')).toEqual(env({ env: 'e', tab: 'builder' }));

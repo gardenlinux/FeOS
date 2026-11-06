@@ -5,12 +5,12 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { fixture, response } from '../testing/ferun.js';
-import { JsonView, ObjectList, PlanPanel } from './Builder.jsx';
+import { JsonView, ObjectList, ReviewPanel, secretLines } from './Builder.jsx';
 import { AddonForm, RouteForm, SecretForm, ServiceForm } from './BuilderForms.jsx';
 import { checkNewer } from './pins.js';
 import { builtinCatalog, readCatalog } from './catalog.js';
 import { groupFindings } from './findings.js';
-import { proposeMessage, setObject } from './draft.js';
+import { deployBlock, draftWords, proposeMessage, setObject } from './draft.js';
 import { referencesTo } from './refs.js';
 
 // The builder's views, rendered with ferund's fixtures: the list of
@@ -140,53 +140,106 @@ describe('the forms', () => {
   });
 });
 
-describe('PlanPanel', () => {
+describe('ReviewPanel', () => {
   const draft = { spec: STORED, base: 6, name: '' };
-  const panel = (plan, extra = {}) => html(<PlanPanel isNew={false} draft={draft} plan={plan} planning={false}
+  const panel = (plan, extra = {}) => html(<ReviewPanel isNew={false} draft={draft} plan={plan} planning={false} next={7}
     groups={none} pinned={null} applyFindings={null} pins={[]} onApply={nop} {...extra} />);
-  const applyButton = (out) => /<button class="primary"[^>]*>/.exec(out)[0];
+  const deployButton = (out) => /<button class="primary"[^>]*>/.exec(out)[0];
 
-  it('shows the diff and proposes the message', () => {
+  it('lists the changes object by object with their effects and proposes the message', () => {
     const out = panel({ answer: PLAN, spec: STORED, base: 6 });
-    expect(out).toContain('<span class="badge ok">valid</span>');
-    expect(out).toContain('service/expense-service');
-    expect(out).toContain('against deployment 6');
+    const t = text(<ReviewPanel isNew={false} draft={draft} plan={{ answer: PLAN }} planning={false} next={7} groups={none}
+      pinned={null} applyFindings={null} pins={[]} onApply={nop} />);
+    expect(t).toContain('Review deployment 7 against deployment 6');
+    expect(t).toContain('the plan accepts it');
+    expect(t).toContain('service expense-service changed replaces 2 pods');
+    expect(t).toContain('job migrate changed restarts');
     expect(out).toContain(`value="${proposeMessage(PLAN.diff, STORED)}"`);
-    expect(applyButton(out)).not.toContain('disabled');
-    expect(out).toContain('pins the images at apply');
+    expect(deployButton(out)).not.toContain('disabled');
+    expect(t).toContain('Deploy as deployment 7');
+    expect(out).toContain('pins the images at deploy');
+  });
+
+  it('has nothing to deploy when nothing changes', () => {
+    const t = text(<ReviewPanel isNew={false} draft={draft} plan={{ answer: { ...PLAN, diff: [] } }} planning={false} next={7}
+      groups={none} pinned={null} applyFindings={null} pins={[]} onApply={nop} />);
+    expect(t).toContain('Nothing changes against the base.');
+    expect(t).toContain('no changes to deploy');
+    expect(deployButton(panel({ answer: { ...PLAN, diff: [] } }))).toContain('disabled');
   });
 
   it('asks again for data loss and downtime', () => {
     const diff = [{ kind: 'addon', name: 'nats', change: 'remove', fields: [], effect: 'deletes data' }];
     const out = panel({ answer: { ...PLAN, diff }, spec: STORED, base: 6 });
-    expect(out).toContain('I accept: addon/nats deletes data');
-    expect(applyButton(out)).toContain('disabled');
+    expect(out).toContain('I accept: addon nats deletes data');
+    expect(out).toContain('<span class="badge bad">deletes data</span>');
+    expect(deployButton(out)).toContain('disabled');
   });
 
   it('waits for the conflicts of a rebase', () => {
     const out = panel({ answer: PLAN, spec: STORED, base: 6 }, { conflicts: 1 });
-    expect(out).toContain('Decide the conflicts above first.');
-    expect(applyButton(out)).toContain('disabled');
+    expect(out).toContain('decide the conflicts first');
+    expect(deployButton(out)).toContain('disabled');
   });
 
-  it('holds the apply while images do not resolve or the plan has errors', () => {
+  it('holds the deploy while images do not resolve or the plan has errors', () => {
     const unresolved = panel({ answer: { ...PLAN, images: {} }, spec: STORED, base: 6 },
       { pinned: { spec: STORED, unresolved: ['ghcr.io/acme/x:1'], supported: true } });
-    expect(unresolved).toContain('These images do not resolve, so the builder does not apply: ghcr.io/acme/x:1');
-    expect(applyButton(unresolved)).toContain('disabled');
-    const invalid = panel({ answer: { valid: false, findings: INVALID.findings, diff: [], base: 6, current: 6 }, spec: STORED, base: 6 },
-      { groups: { global: [{ severity: 'error', path: '', problem: 'the spec is not valid JSON', remedy: '' }], objects: new Map() } });
+    expect(unresolved).toContain('These images do not resolve, so the builder does not deploy: ghcr.io/acme/x:1');
+    expect(deployButton(unresolved)).toContain('disabled');
+    const invalid = panel({ answer: { valid: false, findings: INVALID.findings, diff: [], base: 6, current: 6 }, spec: STORED, base: 6 });
     expect(invalid).toContain('2 errors');
-    expect(invalid).toContain('the spec is not valid JSON');
-    expect(applyButton(invalid)).toContain('disabled');
+    expect(invalid).toContain('errors block the deploy');
+    expect(invalid).toContain(INVALID.findings[0].problem.replace(/'/g, '&#x27;'));
+    expect(invalid).toContain('the plan has errors: fix them first');
+    expect(deployButton(invalid)).toContain('disabled');
   });
 
   it('says a new environment adds everything', () => {
-    const out = html(<PlanPanel isNew draft={{ spec: STORED, base: 0, name: 'shop' }} plan={{ answer: { valid: true, findings: [] } }}
-      planning={false} groups={none} pinned={null} applyFindings={null} pins={[]} onApply={nop} />);
-    expect(out).toContain('everything in the draft is added with deployment 1');
-    expect(out).toContain('Create and apply');
-    expect(/<button class="primary"[^>]*>/.exec(out)[0]).not.toContain('disabled');
+    const changes = [{ key: 'services', kind: 'service', name: 'web', change: 'add', unit: 'services/web' }];
+    const t = text(<ReviewPanel isNew draft={{ spec: STORED, base: 0, name: 'shop' }} plan={{ answer: { valid: true, findings: [] } }}
+      planning={false} next={1} changes={changes} groups={none} pinned={null} applyFindings={null} pins={[]} onApply={nop} />);
+    expect(t).toContain('Review deployment 1 of a new environment');
+    expect(t).toContain('everything is added with deployment 1');
+    expect(t).toContain('+ service web');
+    expect(t).toContain('Create shop with deployment 1');
+  });
+});
+
+describe('the band', () => {
+  it('says which deployment the draft becomes and where it starts', () => {
+    expect(draftWords({ base: 13, latest: 13, deployed: 13, state: 'deployed', changes: 0 }))
+      .toEqual({ title: 'Draft of deployment 14', from: 'starts from deployment 13 (deployed)', behind: 0, count: 'no changes yet', next: 14 });
+    expect(draftWords({ base: 13, latest: 13, deployed: 12, state: 'failed', changes: 3 }))
+      .toMatchObject({ from: 'starts from deployment 13 (failed)', count: '3 changes' });
+    expect(draftWords({ base: 11, latest: 13, deployed: 13, changes: 1 })).toMatchObject({
+      title: 'Draft of deployment 14', from: 'starts from deployment 11 (replaced)', behind: 13, count: '1 change' });
+    expect(draftWords({ base: 0, latest: 0 })).toMatchObject({ title: 'Draft of deployment 1', from: 'starts from an empty spec' });
+    expect(draftWords({ isNew: true, changes: 2 })).toMatchObject({ title: 'Draft of deployment 1 of a new environment', next: 1, count: '2 changes' });
+    expect(draftWords({ readOnly: true, latest: 13 })).toMatchObject({ title: 'Deployment 13', from: 'read-only' });
+  });
+
+  it('says why a draft cannot be deployed yet, in the order to fix it', () => {
+    const ok = { answer: { valid: true }, diff: [{}] };
+    expect(deployBlock(ok)).toBe('');
+    expect(deployBlock({ ...ok, diff: [] })).toBe('no changes to deploy');
+    expect(deployBlock({ ...ok, diff: [], isNew: true, name: 'shop' })).toBe('');
+    expect(deployBlock({ ...ok, isNew: true, name: 'Shop!' })).toBe('name the environment first');
+    expect(deployBlock({ ...ok, planning: true })).toBe('planning…');
+    expect(deployBlock({ ...ok, answer: { valid: false } })).toBe('the plan has errors: fix them first');
+    expect(deployBlock({ ...ok, heavy: 1 })).toBe('accept the data loss or downtime first');
+    expect(deployBlock({ ...ok, heavy: 1, ack: true })).toBe('');
+    expect(deployBlock({ ...ok, conflicts: 2, planning: true })).toBe('decide the conflicts first');
+  });
+
+  it('folds a secret card\'s registry logins into one line', () => {
+    const spec = setObject(STORED, 'services', 'web', { ...STORED.services.web,
+      imageCredentials: { username: 'ci', password: { secret: 'internal-token' } } });
+    expect(secretLines(referencesTo(spec, 'secrets', 'internal-token'))).toEqual([
+      'approval-service · APPROVAL_INTERNAL_TOKEN → secret internal-token',
+      'expense-service · EXPENSA_INTERNAL_TOKEN → secret internal-token',
+      'registry login of web',
+    ]);
   });
 });
 

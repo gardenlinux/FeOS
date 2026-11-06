@@ -152,7 +152,7 @@ export const NAV_GROUPS = [
 
 // ENV_NAV are an environment's pages in its subtree, by the tabs of its
 // route (routes.js ENV_TABS; a tab ferund's UI does not have is left
-// out), with their icons; builder is the builder, "Edit".
+// out), with their icons; builder is the builder, "New deployment".
 export const ENV_NAV = [
   { tab: 'overview', label: 'Overview', icon: 'dashboard' },
   { tab: 'deployments', label: 'Deployments', icon: 'history' },
@@ -163,7 +163,7 @@ export const ENV_NAV = [
   { tab: 'secrets', label: 'Secrets', icon: 'lock' },
   { tab: 'access', label: 'Domains & access', icon: 'globe' },
   { tab: 'settings', label: 'Settings', icon: 'settings' },
-  { tab: 'builder', label: 'Edit', icon: 'blocks' },
+  { tab: 'builder', label: 'New deployment', icon: 'plus' },
 ];
 
 // PLATFORM_NAV are the operators' pages, the platform's space.

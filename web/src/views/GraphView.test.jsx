@@ -10,7 +10,8 @@ import { builtinCatalog } from './catalog.js';
 import { groupFindings } from './findings.js';
 
 // The graph rendered with ferund's fixtures: nodes with their findings
-// and the plan's marks, the edges' labels, the entry's hosts or door.
+// and the draft's marks, the folded edges' labels, the secrets as markers
+// and a list, the entry's hosts or door.
 
 const STORED = response('GET_environments_env_deployments_n.200').spec;
 const WRITTEN = fixture('POST_environments_env_deployments.422').request.spec;
@@ -21,21 +22,34 @@ const nop = () => {};
 
 const render = (props) => renderToStaticMarkup(
   <GraphView spec={STORED} groups={none} diff={null} open="" onOpen={nop} catalog={builtinCatalog()} knownSecrets={[]}
-    pins={[]} edit={nop} focus entry={{ public: STATUS.public, hosts: STATUS.hosts, env: STATUS.name }} {...props} />);
+    pins={[]} edit={nop} focus marks={new Map()} removed={[]} entry={{ public: STATUS.public, hosts: STATUS.hosts, env: STATUS.name }} {...props} />);
 
 describe('GraphView', () => {
-  it('draws the objects, the references and the routes from the entry', () => {
+  it('draws the objects, one edge per pair, the routes from the entry, and the secrets beside', () => {
     const out = render({});
-    expect(out.match(/class="g-node /g)).toHaveLength(8);
+    expect(out.match(/class="g-node /g)).toHaveLength(7);
     expect(out).toContain('expensa-stage-fecode.apps.fecode.dev');
     expect(out).toContain('>/api/expense<');
-    expect(out).toContain('>EXPENSA_DATABASE_URL · url<');
-    expect(out.match(/class="g-edge /g)).toHaveLength(10);
+    expect(out).toContain('>EXPENSA_DATABASE_URL<');
+    expect(out.match(/class="g-edge /g)).toHaveLength(8);
+    // The secret is a marker on its users and a line of the list, no node.
+    expect(out.match(/1 secret</g)).toHaveLength(2);
+    expect(out).toContain('class="g-secret"');
+    expect(out).toContain('>internal-token<');
+    // The job no route reaches is in the lane.
+    expect(out).toContain('no route reaches these');
     // Handles on the entry, the image services and the job.
     expect(out.match(/class="g-handle"/g)).toHaveLength(5);
-    // A read-only builder (no edit) draws no handles.
+    // A read-only builder (no edit) draws no handles and adds no secret.
     expect(render({ edit: null })).not.toContain('class="g-handle"');
-    expect(out).toContain('environment <span class="mono">expensa-stage</span>');
+  });
+
+  it('folds references between two objects into one edge labelled with the first and a count', () => {
+    const spec = { ...STORED, services: { ...STORED.services, 'expense-service': { ...STORED.services['expense-service'],
+      env: { ...STORED.services['expense-service'].env, APPROVAL_ADMIN: { service: 'approval-service', port: 'http', key: 'host' } } } } };
+    const out = render({ spec });
+    expect(out).toContain('>EXPENSA_APPROVAL_URL</span><span class="g-more">+1</span>');
+    expect(out).toContain('title="EXPENSA_APPROVAL_URL → approval-service:http · url\nAPPROVAL_ADMIN → approval-service:http · host"');
   });
 
   it('shows the route door of an environment that is not public', () => {
@@ -44,17 +58,17 @@ describe('GraphView', () => {
     expect(out).toContain('/api/v1/environments/stage/http/…');
   });
 
-  it('marks findings and the plan changes on their nodes, and dims what is not next to the open one', () => {
+  it('marks findings and the draft changes on their nodes, and dims what is not next to the open one', () => {
     const groups = groupFindings(INVALID.findings, WRITTEN);
-    const out = render({ spec: WRITTEN, groups, diff: [{ kind: 'service', name: 'expense-service', change: 'update' },
-      { kind: 'addon', name: 'gone', change: 'remove' }], open: 'services/expense-service' });
+    const marks = new Map([['services/expense-service', 'update']]);
+    const out = render({ spec: WRITTEN, groups, marks, removed: [{ key: 'addons', name: 'gone' }], open: 'services/expense-service' });
     expect(out).toContain('class="g-node k-services error m-update on"');
-    // mysql is referenced, not declared; gone the plan removes.
+    expect(out).toContain('title="changed by this draft">~</span>');
+    // mysql is referenced, not declared; gone the draft removes.
     expect(out).toContain('class="g-node k-addons missing"');
     expect(out).toContain('class="g-node k-addons m-remove dim removed"');
-    expect(out).toContain('the plan removes it');
+    expect(out).toContain('removed by this draft');
     expect(out).toContain('class="g-node k-entry dim"');
-    expect(out).toContain('class="g-label mono error full"');
     expect(out).toContain('>2</span>');
   });
 });
