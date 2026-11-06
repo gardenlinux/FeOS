@@ -18,8 +18,19 @@
 --
 -- Not additive for one statement: an instance of the previous version
 -- claims a label with ON CONFLICT (label), which has no constraint to
--- match from here on, so its first publishes and chosen labels fail until
--- it is replaced in the rolling deploy. Its reads are unchanged.
+-- match from here on ("there is no unique or exclusion constraint
+-- matching the ON CONFLICT specification"), so its first publishes of an
+-- environment (PUT …/public true on one that never had a label) and its
+-- chosen labels (PUT …/host-label) answer 500 until the rolling deploy
+-- has replaced it; a retry on a new instance succeeds. Its reads are
+-- unchanged. No index keeps it working: ON CONFLICT (label) infers only a
+-- unique index on label alone without a predicate (a partial one WHERE
+-- zone = '' it does not take), and a unique label across zones is what
+-- this migration ends: a person's tenant would block the apps zone's
+-- plain names, and a tenant moved to another zone could not keep its
+-- labels. Keeping the old rows' label unique beside a second column for
+-- the other zones' would keep it working, at the price of a schema of
+-- two label columns for the window of one rollout; not worth it.
 
 ALTER TABLE host_labels ADD COLUMN zone text NOT NULL DEFAULT '';
 ALTER TABLE host_labels DROP CONSTRAINT host_labels_pkey;
