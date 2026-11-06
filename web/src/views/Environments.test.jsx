@@ -452,10 +452,10 @@ describe('the logs', () => {
 // token.
 describe('read-only', () => {
   it('calls only the reading routes', () => {
-    const src = ['./Environments.jsx', './LogSearch.jsx'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
+    const src = ['./Environments.jsx', './LogSearch.jsx', './Traces.jsx'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
-    expect(used).toEqual(['followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'listDeployments', 'listEnvironments',
-      'listIncidents', 'objectLogs', 'searchLogs']);
+    expect(used).toEqual(['findTraces', 'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments',
+      'listEnvironments', 'listIncidents', 'objectLogs', 'searchLogs']);
     expect(src).not.toMatch(/route-tokens|\/secrets|revert\(|deleteEnv/);
   });
 });

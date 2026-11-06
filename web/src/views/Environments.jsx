@@ -10,6 +10,7 @@ import { newest } from '../poll.js';
 import { envPath } from '../routes.js';
 import { focusOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
+import { Traces } from './Traces.jsx';
 import {
   KIND_TITLES, changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence,
   heavyEffect, incidentObject, isAttached, labelPairs, logReplicas, logSourceText, logsProblem, objectSummary,
@@ -229,6 +230,7 @@ const TABS = [
   { key: 'deployments', label: 'Deployments', icon: 'history' },
   { key: 'incidents', label: 'Incidents', icon: 'alert' },
   { key: 'logs', label: 'Logs', icon: 'file' },
+  { key: 'traces', label: 'Traces', icon: 'activity' },
 ];
 
 function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
@@ -325,6 +327,11 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
       {activeTab === 'logs' && (
         <div className="tabbody">
           <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />
+        </div>
+      )}
+      {activeTab === 'traces' && (
+        <div className="tabbody">
+          <Traces tenant={tenant} env={env} st={st} item={item} search={search} navigate={navigate} />
         </div>
       )}
     </section>

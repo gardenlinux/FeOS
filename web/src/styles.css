@@ -22,6 +22,9 @@
   --danger: #ef5449;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius: 8px;
+  /* the services' hues in a trace (traces.js, serviceHues) */
+  --svc-1: #3987e5; --svc-2: #d95926; --svc-3: #199e70; --svc-4: #c98500;
+  --svc-5: #d55181; --svc-6: #2f9e2f; --svc-7: #9085e9;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -539,6 +542,7 @@ tr:hover .iconbtn { opacity: 1; }
   --ok: #178f4e;
   --warn: #a06f0e;
   --danger: #cf362b;
+  --svc-1: #2a78d6; --svc-7: #6250d6; --svc-6: #008300;
 }
 [data-theme="light"] body { background: var(--bg0); color: var(--text); }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: #c3cedb; border-color: var(--bg0); }
@@ -831,6 +835,113 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
   align-self: stretch; max-height: 260px; overflow: auto; margin: 0; padding: 8px 10px;
   border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel); font-size: 11.5px;
 }
+/* the Traces tab: a trace's spans as a waterfall. Each span is a row:
+   its service and name on a line, its bar beneath on one track every row
+   shares, so that bars line up at any depth; the tree's lines and fold
+   buttons in a gutter as wide as the trace is deep */
+.tr { --tr-r: 2px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tr-head { margin: 0; }
+.tr-facts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; margin: 0; font-size: 12.5px; }
+.tr-facts .k, .tr-detail .k, .tr-path-head .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.tr-services { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
+.tr-services > span { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 12px; }
+.tr-c0 { --c: #7d8a99; }
+.tr-c1 { --c: var(--svc-1); }
+.tr-c2 { --c: var(--svc-2); }
+.tr-c3 { --c: var(--svc-3); }
+.tr-c4 { --c: var(--svc-4); }
+.tr-c5 { --c: var(--svc-5); }
+.tr-c6 { --c: var(--svc-6); }
+.tr-c7 { --c: var(--svc-7); }
+.tr-dot { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: var(--tr-r); background: var(--c); }
+.tr-path { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tr-path-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0; font-size: 12.5px; }
+.tr-path-head b { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.tr-key { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.tr-key-bar { position: relative; display: inline-block; width: 20px; height: 8px; border-radius: var(--tr-r); background: var(--c); }
+.tr-key-bar::after { content: ""; position: absolute; top: 3px; left: 3px; right: 3px; height: 2px; border-radius: 1px; background: #ffffff; }
+.tr-share { display: flex; gap: 2px; height: 8px; }
+.tr-share span { flex: 0 1 0; min-width: 2px; background: var(--c); }
+.tr-share span:first-child { border-radius: var(--tr-r) 0 0 var(--tr-r); }
+.tr-share span:last-child { border-radius: 0 var(--tr-r) var(--tr-r) 0; }
+.tr-share span:only-child { border-radius: var(--tr-r); }
+.tr-legend { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.tr-legend li { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); }
+.tr-legend-us { color: var(--text); font-variant-numeric: tabular-nums; }
+.tr-fall { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tr-tools { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.tr-tools-fold { display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.tr-tools-fold .linkbtn:disabled { color: var(--muted); text-decoration: none; }
+.tr-axis {
+  display: flex; justify-content: space-between; padding: 0 0 2px; border-bottom: 1px solid var(--border);
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+}
+.tr-spans { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+/* --mid is the height of the label's middle, where the tree's lines bend
+   into a row */
+.tr-span { --mid: 14px; position: relative; border-bottom: 1px solid var(--border-soft); }
+.tr-span.lit { background: rgba(91,157,248,.05); }
+.tr-span.on { background: var(--panel2); }
+.tr-rails { position: absolute; inset: 0 auto 0 0; pointer-events: none; }
+.tr-rail { position: absolute; top: -1px; bottom: 0; width: var(--step); }
+.tr-rail::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(var(--step) / 2); border-left: 1px solid var(--border); }
+.tr-rail.end::before { bottom: auto; height: var(--mid); }
+.tr-rail.tee::after, .tr-rail.end::after {
+  content: ""; position: absolute; top: var(--mid); left: calc(var(--step) / 2); width: calc(var(--step) / 2 + 2px);
+  border-top: 1px solid var(--border);
+}
+/* a leaf's bend runs on to its name, past the fold button's place and the
+   label's gap (LABEL_GAP in Traces.jsx) */
+.tr-rail.leaf::after { width: calc(var(--step) + 6px); }
+.tr-rail.down::before { top: calc(var(--mid) + 7px); }
+.tr-rail.lit::before, .tr-rail.lit::after { border-color: var(--accent); }
+.tr-fold {
+  position: absolute; z-index: 1; top: calc(var(--mid) - 10px); display: grid; place-items: center;
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted);
+}
+.tr-fold:hover { background: var(--accent-dim); color: var(--text); }
+.tr-fold:focus-visible, .tr-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tr-row {
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%;
+  padding: 5px 4px 6px 0; border: 0; border-radius: 0; background: none; font: inherit; text-align: left; color: var(--text); white-space: normal;
+}
+.tr-row:hover { background: var(--accent-dim); }
+.tr-label { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 18px; font-size: 12.5px; }
+.tr-label .icon { flex: none; color: var(--danger); }
+.tr-svc {
+  flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+}
+.tr-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-call { color: var(--muted); }
+.tr-binding { flex: none; padding: 0 5px; border-radius: 8px; background: var(--accent-dim); font-size: 10.5px; color: var(--accent); }
+.tr-more { flex: none; padding: 0 5px; border-radius: 8px; background: var(--panel3); font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.tr-dur { flex: none; margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tr-track { position: relative; display: block; height: 8px; border-radius: var(--tr-r); background: rgba(128,128,128,.1); }
+.tr-bar, .tr-sub, .tr-crit { position: absolute; }
+.tr-bar, .tr-sub { min-width: 2px; }
+.tr-bar { top: 0; bottom: 0; border-radius: var(--tr-r); background: var(--c); }
+.tr-span.bad .tr-bar { box-shadow: 0 0 0 2px var(--danger); }
+.tr-sub { top: 2px; bottom: 2px; border-radius: 1px; background: var(--c); }
+/* the critical path: white on every service's hue, in both themes */
+.tr-crit { top: 3px; height: 2px; border-radius: 1px; background: #ffffff; }
+.tr-span.bad .tr-name { color: var(--danger); }
+.tr-detail { display: flex; flex-direction: column; gap: 8px; padding: 4px 6px 10px; min-width: 0; }
+.tr-detail section { min-width: 0; }
+.tr-failed { margin: 0; color: var(--danger); font-size: 12.5px; overflow-wrap: anywhere; }
+.tr-h { margin: 0 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.tr-attrs {
+  display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); gap: 2px 16px; margin: 0;
+  font-family: var(--mono); font-size: 12px;
+}
+.tr-attrs div { display: contents; }
+.tr-attrs dt { color: var(--muted); overflow-wrap: anywhere; }
+.tr-attrs dd { margin: 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tr-events, .tr-links { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; }
+.tr-events .tr-attrs { margin: 2px 0 0 12px; }
+.tr-tbl tr.bad td:first-child { color: var(--danger); }
+.tr-tbl td { white-space: nowrap; }
+.tr-tbl .icon { vertical-align: -1px; color: var(--danger); }
 .message {
   display: flex; align-items: flex-start; gap: 8px;
   color: var(--warn); background: rgba(224,168,60,.07);

@@ -61,7 +61,9 @@ export async function request(method, path, { body, authorization } = {}) {
     // A plain-text answer (a door's own error): the status says enough.
   }
   if (!resp.ok) {
-    throw new ApiError((data && data.error) || `${method} ${path}: HTTP ${resp.status}`, resp.status);
+    // ferund's refusals say {error}; the log store's Jaeger API {errors: [{msg}]}.
+    const jaeger = data && Array.isArray(data.errors) && data.errors[0] && data.errors[0].msg;
+    throw new ApiError((data && data.error) || jaeger || `${method} ${path}: HTTP ${resp.status}`, resp.status);
   }
   return data;
 }
@@ -339,6 +341,11 @@ export const api = {
   // GET /api/v1/logs (logs.js, sinkParams). A page's lines are oldest
   // first; followLogs reads new lines as they come.
   searchLogs: (params) => tenantCall('GET', `/logs?${params}`),
+  // Its traces, in the shape of Jaeger's HTTP query API (ADR 0026 §10):
+  // a trace by its ID within an environment (its ID), and a search
+  // (traces.js, traceSearchParams).
+  getTrace: (env, trace) => tenantCall('GET', `/jaeger/api/traces/${enc(trace)}${query({ environment: env })}`),
+  findTraces: (params) => tenantCall('GET', `/jaeger/api/traces?${params}`),
   followLogs: (params, signal) => tenantStream(`/logs?${params}&follow=1`, signal),
 };
 

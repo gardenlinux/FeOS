@@ -35,7 +35,7 @@ const FOLLOW_AGAIN_MS = 5000;
 // useTimeZone is the zone the times show in, local or utc: the viewer's
 // pick, kept by the browser.
 const TZ_KEY = 'ferun.logs.timezone';
-function useTimeZone() {
+export function useTimeZone() {
   const [tz, setTz] = useState(() => (readItem('localStorage', TZ_KEY) === 'utc' ? 'utc' : 'local'));
   const pick = (v) => {
     setTz(v);
@@ -419,7 +419,7 @@ function Lines({ search, onAtEnd, many, trace, onTrace, q, onWord, utc, allKept 
                 </span>
                 <span className="lg-acts">
                   {l.trace && l.trace !== trace && (
-                    <button type="button" className="lg-trace" onClick={() => onTrace(l.trace)} title={`every line of trace ${l.trace}`}>trace</button>
+                    <button type="button" className="lg-trace" onClick={() => onTrace(l.trace)} title={`the spans of trace ${l.trace}`}>trace</button>
                   )}
                   {l.record && (
                     <button type="button" className="lg-open" aria-expanded={opened} onClick={() => toggle(l.key)}
@@ -457,7 +457,9 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly }) 
     for (const k of Object.keys(next)) if (next[k] == null || next[k] === '') delete next[k];
     navigate(envPath(tenant, env, 'logs', next.object || '', next.object && next.replica != null ? next.replica : null, queryOf(next)));
   };
-  const onTrace = (trace) => navigate(envPath(tenant, env, 'logs', '', null, queryOf({ trace })));
+  // A trace link opens the trace's spans in the Traces tab, which lead
+  // back to every line of it here.
+  const onTrace = (trace) => navigate(envPath(tenant, env, 'traces', trace));
   const onWord = (word, not) => {
     const q = toggleWord(focus.q, word, not);
     if (q != null) set({ q });
@@ -475,6 +477,7 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly }) 
             <span className="k">trace</span> <code>{focus.trace}</code>
             <span className="muted small">every line of this request: its record at the ingress, what the containers logged with its ID, what they called out</span>
             <span className="spacer" />
+            <button type="button" className="linkbtn" onClick={() => onTrace(focus.trace)}>its spans</button>
             <button type="button" className="linkbtn" onClick={() => set({ trace: undefined })}>leave the trace</button>
           </div>
         )}

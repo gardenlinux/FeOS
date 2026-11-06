@@ -98,7 +98,12 @@ describe('the environments routes', () => {
       expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
-    expect(ENV_TABS).toEqual(['overview', 'deployments', 'incidents', 'logs']);
+    expect(ENV_TABS).toEqual(['overview', 'deployments', 'incidents', 'logs', 'traces']);
+    expect(parsePath('/tenants/fecode/environments/e/traces/4bf92f3577b34da6a3ce929d0e0e4736'))
+      .toEqual(env({ env: 'e', tab: 'traces', item: '4bf92f3577b34da6a3ce929d0e0e4736' }));
+    expect(parsePath('/tenants/fecode/environments/e/traces?service=api&since=1d'))
+      .toEqual(env({ env: 'e', tab: 'traces', search: '?service=api&since=1d' }));
+    expect(envPath('fecode', 'e', 'traces', '', null, '?service=api')).toBe('/tenants/fecode/environments/e/traces?service=api');
   });
 });
 
