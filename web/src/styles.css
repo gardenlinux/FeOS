@@ -1378,3 +1378,6 @@ button.g-body:hover { background: var(--panel3); }
 @media (min-width: 821px) {
   .env-tabs { display: none; }
 }
+@media (min-width: 821px) {
+  .pane:has(> .env-tabs) > .tabbody { padding-top: 2px; }
+}

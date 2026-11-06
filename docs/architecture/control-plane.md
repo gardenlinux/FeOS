@@ -2187,12 +2187,39 @@ its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;
 and an object's logs, where the 501 of a node that serves none and the
-409 of a paused instance are messages, not errors.
-It polls (the list every 4 s, an environment every 3 s, the rest every
-5 s) and shows no secret value and no route token.
+409 of a paused instance are messages, not errors; its traffic per
+service (`…/traffic`, 1 h or 24 h) and the ingress's records
+(`…/access-logs`); its secrets' names and versions, a new value (never
+shown again) and a delete; its domains and access (publish with a host
+label, the bound domains, a route token minted and shown once, all
+revoked at once); and its settings (a clone, the delete). The writes
+beside the builder follow the role on the environment: a revert (to
+the deployed deployment from the head when the latest failed, or to any
+earlier one), tags, a service's restart, a job's run and a binding's
+check with `write`; public, the host label and route tokens with
+`admin`. It polls (the list every 4 s, an environment every 3 s, the
+rest every 5 s) and reads no secret's value.
 
-The environment's tab Builder and `/tenants/<t>/new-environment` are
-the deployment builder (ADR 0032), the only part that writes: a draft,
+The tenant's domains (`/tenants/<t>/domains[/<id>]`) show each claim
+with its state in words and its way (claimed, verified, bound, routed,
+certificate, served, from `domains.Derive`'s states), the records to
+set with what DNS answers now (`found`), the check, the binding (admin
+on the environments), the certificate and the delete; the claim needs
+admin on the tenant. The tenant's jobs (`/tenants/<t>/jobs[/<id>]`)
+list the runs to completion with their phases, run a new one (write on
+the tenant; the command one argument per line, secrets never shown
+again), and show a run's log tail, result, cancel and delete. Usage
+shows the quota's use against each limit and where vCPUs and memory are
+booked; Settings the tenant, the role and leaving it. A sandbox's page
+says its state in words with what it costs, and its Connect tab mints a
+token (shown once) beside the MCP address, ready snippets and the
+tools' reference; a new sandbox takes `attachable` and image
+credentials. The platform's pages add the ingresses, every person
+(disable, enable), a tenant's limits and zone, and join tokens of kind
+`ingress`.
+
+The Edit action (the route's tab `builder`) and `/tenants/<t>/new-environment` are
+the deployment builder (ADR 0032), the main part that writes: a draft,
 a spec and its base, from the latest deployment, empty or an imported
 file, kept in the browser's local storage per tenant and environment
 (`ferun-draft:<tenant>/<env>`, `ferun-draft:<tenant>/` for a new one;
