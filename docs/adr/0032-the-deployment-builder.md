@@ -133,34 +133,40 @@ resolved again, a secret's new version rolled in unasked).
 
 ### The graph
 
-- **Nodes**: services, jobs, addons, bindings and secrets, and one
-  **entry**: the environment's hosts as `ferund` reports them, or, for
-  an environment that is not public, the route door with its route
-  tokens. An attached service's sandbox is a node outside the
-  environment's frame.
-- **Edges** are references, drawn from the object that holds them:
-  - a variable `{addon, key, …}` to the addon, labelled with the
-    variable and the key (and a role);
-  - a variable `{service, port, key}` to that service's port;
-  - a variable `{secret}`, and `imageCredentials` (dashed), to the
-    secret;
-  - a service's or job's `bindings` to each binding, a binding's
-    credential to its secrets;
-  - an attached service to its sandbox;
-  - a **route** from the entry to a service's port, labelled with its
-    path. Routes are edges, not nodes.
+The graph shows the environment's architecture, not each of its
+variables: a person reads from it who reaches whom.
+
+- **What is edited is said first.** A band above the graph names the
+  draft: "Draft of deployment N+1, starts from deployment N", the number
+  of changes against the base, the plan's verdict, and that nothing
+  changes in the environment until it is deployed; its main action is
+  "Review & deploy". The environment's page names it "New deployment".
+- **Nodes**: services, jobs, addons and bindings, and one **entry**: the
+  environment's hosts as `ferund` reports them, or, for an environment
+  that is not public, the route door with its route tokens. An attached
+  service's sandbox is a node outside the environment's frame.
+- **Edges**: one per pair of objects, drawn from the object that holds
+  the references: variables `{addon, …}` and `{service, …}`, a service's
+  or job's `bindings`, an attached service to its sandbox, and a
+  **route** from the entry to a service, labelled with its path. Several
+  references between one pair fold into one edge, labelled with the
+  first and a count, all of them on hover and in the object's form; a
+  job's edges are dashed.
+- **Secrets are no edges.** A node shows how many secrets it names and
+  a key for a registry login; the secrets stand in a list below the
+  graph, each with its pinned and latest version and its users, where a
+  value is set.
 - Kinds to come slot in without changing the rest: volumes and mounts
   (ADR 0016, when services get them) as nodes with an edge from their
   service; security groups of a tenant's own as frames around their
   members. The graph does not wait for them.
 - **The layout is automatic and the same for everyone**: columns by
-  kind (the entry; services, then jobs; addons and bindings; secrets),
-  in each column an order that keeps edges short (by the mean position
-  of a node's neighbours, ties by name). A service that another service
-  or a job calls stands in a column of the services right of its
-  caller, so that every reference runs left to right (a cycle is cut
-  where it closes); an edge that passes a column runs through a gap
-  between its nodes. No positions are stored: not in
+  dependency, the entry first, then what the routes reach, then what
+  those call, the addons and bindings last, so that every edge runs left
+  to right (a cycle is cut where it closes); what no route reaches (a
+  job, a load generator) stands in a lane below, left of what it calls.
+  In each column an order that keeps edges short (by the mean position
+  of a node's neighbours, ties by name). No positions are stored: not in
   the spec, since a position changes nothing of the environment, not in
   a deployment's annotations, which are the caller's and 4 KiB, and not
   in a table of their own, where they would be stale for every object an
