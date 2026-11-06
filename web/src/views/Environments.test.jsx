@@ -8,8 +8,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveTenant } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
-  DiffView, EnvOverview, EnvTable, IncidentTable, IncidentView, LogsBody, DeploymentTable, DeploymentView,
+  BindingCard, DiffView, EnvHead, EnvOverview, EnvTable, IncidentTable, IncidentView, LogsBody, DeploymentTable,
+  DeploymentView, ObjectCard, TagsBox, envCan,
 } from './Environments.jsx';
+import {
+  AccessTable, CloneBox, DeleteBox, DomainsBox, PublicBox, RouteTokenBox, SecretsTable, TrafficTable,
+} from './EnvTabs.jsx';
 import { logsProblem } from './envs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { focusOf } from '../logs.js';
@@ -38,20 +42,21 @@ describe('EnvTable', () => {
   const list = response('GET_environments.200').environments;
   const table = (envs, filtered = false) => html(<EnvTable envs={envs} filtered={filtered} tenant={T} navigate={nav} onLabel={() => {}} />);
 
-  it('lists name, labels, deployment, deployed, state, open incidents and created', () => {
+  it('lists state, name, deployments in words, hosts, labels, open incidents and created', () => {
     const out = table(list);
-    expect(out.match(/<th[ >]/g)).toHaveLength(8);
+    expect(out.match(/<th[ >]/g)).toHaveLength(7);
     expect(count(out, 'class="clickable"')).toBe(3);
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage"');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-prod"');
     expect(out).toContain('>fecode.class=<b>stage</b></button>');
     expect(out).toContain('title="filter by fecode.class=production"');
-    // Stage rolls 7 while 6 serves: the deployed number stands out.
-    expect(out).toContain('<td class="col-num mono">7</td>');
-    expect(out).toContain('class="col-num mono warntext" title="the latest deployment is not deployed">6</td>');
-    expect(out).toContain('class="state-label moving"');
-    expect(out).toContain('>deploying</span>');
-    expect(count(out, '>deployed</span>')).toBe(2);
+    // Stage rolls 7 while 6 serves, in words; the others are deployed.
+    expect(out).toContain('class="mono small nowrap state-label moving">7 deploying · 6 serves</td>');
+    expect(out).toContain('>4 deployed</td>');
+    expect(out).toContain('>3 deployed</td>');
+    // A public one shows its hosts, teal; the others serve at the route door only.
+    expect(out).toContain('<span class="mono host">expensa-stage-fecode.apps.fecode.dev</span>');
+    expect(count(out, 'route door only')).toBe(2);
     expect(out).toContain('<span class="badge bad">1 open</span>');
     expect(count(out, '<span class="muted">0</span>')).toBe(2);
   });
@@ -166,7 +171,7 @@ describe('EnvOverview', () => {
     expect(out).toContain('<td class="mono">/api/expense</td><td class="mono">expense-service</td><td class="col-num mono">8081</td>');
     expect(out).toContain('<td class="mono">/</td><td class="mono">web</td><td class="col-num mono">5173</td>');
     expect(text(<EnvOverview st={PREVIEW} tenant={T} navigate={nav} />))
-      .toContain('Served at /api/v1/environments/expensa-login-3f9a/http/… to a route token');
+      .toContain('The route door serves them all at /api/v1/environments/expensa-login-3f9a/http/… to a route token');
   });
 
   it('a new environment: no deployment, no objects, no routes', () => {
@@ -192,7 +197,10 @@ describe('DeploymentTable', () => {
     expect(count(out, 'class="clickable"')).toBe(3);
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/7"');
     expect(count(out, '<span class="badge acc">latest</span>')).toBe(1);
-    expect(out).toContain('<span class="badge" title="tag">v1.3</span>');
+    expect(out).toContain('title="tag"><svg');
+    expect(out).toMatch(/<\/svg> v1\.3<\/span>/);
+    // Without the actions no revert is offered.
+    expect(out).not.toContain('Revert to this');
     expect(out).toContain('>replaced</span>');
     expect(out).toContain('title="fecode:0193a000-aaaa-7bbb-8ccc-000000000001"');
     expect(out).toContain('stage follows main at revision 12');
@@ -446,15 +454,229 @@ describe('the logs', () => {
   });
 });
 
-// The view reads and never writes: it calls the environments' GETs of
-// the client only, and offers no apply, revert, delete, secret or route
-// token.
-describe('read-only', () => {
-  it('calls only the reading routes', () => {
-    const src = ['./Environments.jsx', './LogSearch.jsx', './Traces.jsx'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
+// The view calls the environments' routes of the client and no other:
+// its reads, and its operations (ADR 0018), each behind its role.
+describe('the routes it calls', () => {
+  it('are the reads and the operations of an environment', () => {
+    const src = ['./Environments.jsx', './EnvTabs.jsx', './LogSearch.jsx', './Traces.jsx']
+      .map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
-    expect(used).toEqual(['findTraces', 'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments',
-      'listEnvironments', 'listIncidents', 'objectLogs', 'searchLogs']);
-    expect(src).not.toMatch(/route-tokens|\/secrets|revert\(|deleteEnv/);
+    expect(used).toEqual([
+      'accessLogs', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag', 'findTraces',
+      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments', 'listEnvironments',
+      'listIncidents', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'restartService',
+      'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
+    ]);
+  });
+});
+
+// The environment's head and its operations (ADR 0018), each with the
+// role it needs.
+const ALL = { write: true, admin: true, del: true, clone: true };
+const NONE = { write: false, admin: false, del: false, clone: false };
+
+describe('envCan', () => {
+  it('reads the roles: the higher of the tenant grant and the environment grant', () => {
+    expect(envCan({ role: 'read', environments: [{ id: 'e1', name: 'stage', role: 'write' }] }, 'stage'))
+      .toEqual({ write: true, admin: false, del: false, clone: false });
+    expect(envCan({ role: 'write', environments: [] }, 'stage')).toEqual({ write: true, admin: false, del: true, clone: true });
+    expect(envCan({ role: '', environments: [{ id: 'e1', name: 'stage', role: 'admin' }] }, 'e1'))
+      .toEqual({ write: true, admin: true, del: true, clone: false });
+    expect(envCan({ role: 'read', environments: [] }, 'stage')).toEqual(NONE);
+  });
+});
+
+describe('EnvHead', () => {
+  const head = (st, ec = ALL, extra = {}) => html(<EnvHead st={st} env={st.name} tenant={T} ec={ec} domains={[]} editing={false}
+    lastOk={0} changed={nav} navigate={nav} {...extra} />);
+
+  it('names the environment, its state in words, Revert to the one that serves, and Edit', () => {
+    const out = head(STAGE);
+    expect(out).toContain('<span class="kind">Environment</span><h1 class="mono">expensa-stage</h1>');
+    expect(out).toContain('7 deploying · 6 serves');
+    expect(out).toContain('Revert to 6');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/builder"');
+    expect(out).toContain('class="button primary"');
+    // public at its host, teal and a link
+    expect(out).toContain('<a class="mono host" href="https://expensa-stage-fecode.apps.fecode.dev"');
+    expect(out).toContain('fecode.class=<b>stage</b>');
+  });
+
+  it('offers no revert while the latest serves, and disables it without write', () => {
+    const deployed = { ...STAGE, deployed: 7, rollout: { ...STAGE.rollout, state: 'deployed' } };
+    expect(head(deployed)).not.toContain('Revert to');
+    expect(head(deployed)).toContain('7 deployed');
+    expect(head(STAGE, NONE)).toContain('disabled="" title="needs write on this environment"');
+  });
+
+  it('shows Done while the builder is open, and the default host that answers 404 while a domain is served', () => {
+    const st = { ...STAGE, hosts: ['kino.example.com'], hostLabel: 'stage--kino' };
+    const out = html(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing lastOk={0} changed={nav} navigate={nav}
+      domains={[{ id: 'd', name: 'kino.example.com', state: 'served', environment: { id: st.id, name: st.name } }]} />);
+    expect(out).toContain('Done');
+    expect(out).not.toContain('class="button primary"');
+    expect(text(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing={false} lastOk={0} changed={nav} navigate={nav}
+      domains={[{ id: 'd', name: 'kino.example.com', state: 'served', environment: { id: st.id, name: st.name } }]} />))
+      .toContain('default host stage--kino (404 while a domain is served)');
+  });
+
+  it('says not public for one the route door alone serves', () => {
+    expect(text(<EnvHead st={{ ...PREVIEW, public: false, hosts: [] }} env="p" tenant={T} ec={ALL} domains={[]} lastOk={0}
+      changed={nav} navigate={nav} />)).toContain('not public · route door only');
+  });
+});
+
+describe('the actions on objects', () => {
+  const card = (o, ec, spec = null) => html(<ObjectCard o={o} env="expensa-stage" latest={7} tenant={T} navigate={nav}
+    logsTo={() => '/x'} spec={spec} ec={ec} />);
+  const svc = STAGE.objects.find((o) => o.name === 'expense-service');
+  const job = STAGE.objects.find((o) => o.kind === 'job');
+
+  it('restart a service and run a job, with write on the environment', () => {
+    expect(card(svc, ALL)).toContain('Restart');
+    expect(card(svc, ALL)).toContain('<table class="tbl inst-tbl">');
+    expect(card(job, ALL)).toContain('Run now');
+    expect(card(job, ALL)).not.toContain('>manual</span>');
+    expect(card(svc, NONE)).toContain('disabled="" title="needs write on this environment"');
+    // Without ec (a read-only render) no action shows.
+    expect(card(svc, null)).not.toContain('Restart');
+  });
+
+  it("marks a job on: manual, its Run now primary", () => {
+    const out = card(job, ALL, { jobs: { migrate: { on: 'manual' } } });
+    expect(out).toContain('>manual</span>');
+    expect(out).toContain('class="mini primary"');
+  });
+
+  it("lists the latest deployment's bindings in the overview, each with Check", () => {
+    const spec = { services: { 'expense-service': { bindings: ['erp'] } }, bindings: { erp: { upstream: 'https://erp.example', credential: { kind: 'basic' } } } };
+    const out = html(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />);
+    expect(out).toContain('bindings <span class="count">· 1</span>');
+    expect(out).toContain('https://erp.example');
+    expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />)).toContain('name · basic · used by service/expense-service');
+    expect(out).toContain('Check');
+  });
+
+  it("shows a binding check's result", () => {
+    const b = { name: 'erp', upstream: 'https://erp.example', mode: 'name', credential: 'oauth2', users: [] };
+    const res = { ok: false, addresses: ['203.0.113.40'], tls: null, token: null, probe: { status: 401, latencyMs: 80 }, error: 'unauthorized' };
+    const all = text(<BindingCard b={b} env="e" ec={ALL} result={res} />);
+    expect(all).toContain('result not ok');
+    expect(all).toContain('error unauthorized');
+    expect(all).toContain('addresses 203.0.113.40');
+    expect(all).toContain('probe HTTP 401 in 80 ms');
+  });
+});
+
+describe('reverts and tags', () => {
+  const deployments = response('GET_environments_env_deployments.200').deployments;
+  const tags = response('GET_environments_env_tags.200').tags;
+
+  it('offers a revert on each deployment but the latest', () => {
+    const out = html(<DeploymentTable deployments={deployments} latest={7} tenant={T} env="expensa-stage" navigate={nav}
+      ec={ALL} onRevert={async () => ({})} />);
+    expect(count(out, 'Revert to this')).toBe(2);
+    expect(out).toContain("title=\"a new deployment with deployment 6&#x27;s spec\"");
+  });
+
+  it('lists the tags with move and delete, disabled without write', () => {
+    const out = html(<TagsBox env="expensa-stage" tags={tags} ec={ALL} tenant={T} navigate={nav} onChange={nav} />);
+    expect(out).toContain('v1.3');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/6"');
+    expect(out).toContain('>Move</button>');
+    expect(out).toContain('Delete');
+    expect(html(<TagsBox env="e" tags={tags} ec={NONE} tenant={T} navigate={nav} onChange={nav} />))
+      .toContain('title="needs write on this environment"');
+    expect(text(<TagsBox env="e" tags={[]} ec={ALL} tenant={T} navigate={nav} onChange={nav} />)).toContain('No tags.');
+  });
+});
+
+describe('the traffic tab', () => {
+  it('lists each service: requests, errors, p50, p95 and a sparkline', () => {
+    const t = response('GET_environments_env_traffic.200');
+    const out = html(<TrafficTable traffic={t} />);
+    expect(out).toContain('<td class="mono strong">api</td>');
+    expect(out).toContain('3.1 ms');
+    expect(out).toContain('3.4 ms');
+    expect(out).toContain('<svg class="spark"');
+    expect(out).toContain('<polyline class="spark-req"');
+    expect(html(<TrafficTable traffic={{ services: [] }} />)).toContain('No requests through the ingress in this window.');
+  });
+
+  it("shows the ingress's access log, a trace linked to the Traces tab", () => {
+    const recs = response('GET_environments_env_access-logs.200').records;
+    const out = html(<AccessTable records={[...recs].reverse()} tenant={T} env="expensa-stage" navigate={nav} />);
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/traces/0af7651916cd43dd8448eb211c80319c"');
+    expect(out).toContain('class="col-num mono bad" title="5xx">503</td>');
+    expect(out).toContain('held 2.4 s while the service woke');
+    expect(out).toContain('/api/login');
+    expect(out.indexOf('0af76519')).toBeLessThan(out.indexOf('4bf92f35'));
+  });
+});
+
+describe('the secrets tab', () => {
+  const secrets = response('GET_environments_env_secrets.200').secrets;
+  it('lists names, versions and who set them, never a value', () => {
+    const out = html(<SecretsTable secrets={secrets} ec={ALL} editing="" setEditing={nav} onPut={nav} onDelete={nav} />);
+    expect(out).toContain('<td class="mono strong">internal-token</td><td class="col-num mono">v3</td>');
+    expect(out).toContain('fecode:0193a000-aaaa-7bbb-8ccc-000000000001');
+    expect(out).toContain('Set value');
+    expect(out).not.toContain('type="password"');
+    const editing = html(<SecretsTable secrets={secrets} ec={ALL} editing="internal-token" setEditing={nav} onPut={nav} onDelete={nav} />);
+    expect(editing).toContain('type="password"');
+    expect(editing).toContain('shown never again once stored');
+    expect(html(<SecretsTable secrets={secrets} ec={NONE} editing="" setEditing={nav} onPut={nav} onDelete={nav} />))
+      .toContain('disabled="" title="needs write on this environment"');
+  });
+});
+
+describe('the domains & access tab', () => {
+  it('publishes with a host label, admin on the environment, and says the first publish rolls', () => {
+    const off = { ...STAGE, public: false, hosts: [] };
+    const all = text(<PublicBox env="e" st={off} ec={ALL} domains={[]} changed={nav} />);
+    expect(all).toContain('not public');
+    expect(all).toContain('Publish');
+    expect(all).toContain('The first publish rolls the image services once');
+    const on = html(<PublicBox env="e" st={STAGE} ec={ALL} domains={[]} changed={nav} />);
+    expect(on).toContain('Unpublish');
+    expect(on).toContain('<a class="mono host" href="https://expensa-stage-fecode.apps.fecode.dev"');
+    expect(html(<PublicBox env="e" st={off} ec={{ ...ALL, admin: false }} domains={[]} changed={nav} />))
+      .toContain('title="needs admin on this environment"');
+  });
+
+  it('lists the domains bound to it, linked to their pages', () => {
+    const domains = [{ id: 'd-1', name: 'kino.example.com', state: 'served', verification: 'verified', environment: { id: STAGE.id, name: STAGE.name } },
+      { id: 'd-2', name: 'x.example.org', state: 'served', environment: { id: 'o', name: 'o' } }];
+    const out = html(<DomainsBox tenant={T} st={STAGE} domains={domains} navigate={nav} />);
+    expect(out).toContain('href="/tenants/fecode/domains/d-1"');
+    expect(out).not.toContain('x.example.org');
+    expect(text(<DomainsBox tenant={T} st={STAGE} domains={[]} navigate={nav} />)).toContain('No domain is bound to this environment.');
+  });
+
+  it('mints route tokens and revokes them all, admin on the environment', () => {
+    const all = text(<RouteTokenBox env="expensa-stage" ec={ALL} />);
+    expect(all).toContain('/api/v1/environments/expensa-stage/http/…');
+    expect(all).toContain('X-FeRun-Route-Token');
+    expect(all).toContain('Mint a route token');
+    expect(all).toContain('Revoke all');
+    expect(count(html(<RouteTokenBox env="e" ec={NONE} />), 'title="needs admin on this environment"')).toBe(2);
+  });
+});
+
+describe('the settings tab', () => {
+  it('clones, saying data is not copied and attached services are dropped, write on the tenant', () => {
+    const all = text(<CloneBox tenant={T} env="e" st={STAGE} ec={ALL} changed={nav} navigate={nav} />);
+    expect(all).toContain('Its data is not copied');
+    expect(all).toContain('Attached services are dropped');
+    expect(html(<CloneBox tenant={T} env="e" st={STAGE} ec={NONE} changed={nav} navigate={nav} />))
+      .toContain('title="needs write on the tenant"');
+  });
+
+  it('deletes, saying what goes, admin on the environment or write on the tenant', () => {
+    const all = text(<DeleteBox tenant={T} env="e" st={STAGE} ec={ALL} changed={nav} navigate={nav} />);
+    expect(all).toContain('removes its instances and their volumes, with its addons\' data');
+    expect(all).toContain('Delete environment');
+    expect(html(<DeleteBox tenant={T} env="e" st={STAGE} ec={NONE} changed={nav} navigate={nav} />))
+      .toContain('title="needs admin on this environment or write on the tenant"');
   });
 });

@@ -263,3 +263,213 @@ export function rolloutNote(st) {
   if (r.state === 'failed') return 'no deployment was deployed before it';
   return '';
 }
+
+// ------------------------------------------------------------ operations --
+
+// revertOffer is the deployment the page head offers to revert to: the
+// deployed one, while the latest is another and failed or is still
+// waiting or deploying; else 0.
+export function revertOffer(st) {
+  const r = st && st.rollout;
+  if (!r || st.deleting || !(st.deployed > 0) || st.deployed === st.deployment) return 0;
+  return ['failed', 'waiting', 'deploying'].includes(r.state) ? st.deployed : 0;
+}
+
+// mayRevertTo tells the deployments one can revert to: any but the
+// latest, whose revert would change nothing.
+export function mayRevertTo(n, latest) {
+  return Number(n) > 0 && Number(n) !== Number(latest);
+}
+
+// tagPlan says what putting tag name on deployment n does: nothing for
+// an empty name, a new tag, or moving one from the deployment it names
+// ('here' when it names n already).
+export function tagPlan(tags, name, n) {
+  const t = String(name || '').trim();
+  if (!t) return { kind: 'none', tag: '' };
+  const cur = (tags || []).find((x) => x.tag === t);
+  if (!cur) return { kind: 'new', tag: t };
+  if (Number(cur.deployment) === Number(n)) return { kind: 'here', tag: t };
+  return { kind: 'move', tag: t, from: cur.deployment };
+}
+
+// specBindings lists a spec's HTTP bindings (ADR 0028) with the objects
+// that name them.
+export function specBindings(spec) {
+  const s = spec || {};
+  const users = (name) => ['services', 'jobs'].flatMap((key) => Object.entries(s[key] || {})
+    .filter(([, o]) => Array.isArray(o && o.bindings) && o.bindings.includes(name))
+    .map(([n]) => `${key === 'services' ? 'service' : 'job'}/${n}`));
+  return Object.entries(s.bindings || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, b]) => ({
+    name,
+    upstream: (b && b.upstream) || '',
+    mode: (b && b.mode) || 'name',
+    credential: (b && b.credential && b.credential.kind) || '',
+    users: users(name),
+  }));
+}
+
+// jobTrigger is when a job of the spec runs: on each deploy that changes
+// it (the default), or only when asked.
+export function jobTrigger(spec, name) {
+  const j = spec && spec.jobs && spec.jobs[name];
+  return j && j.on === 'manual' ? 'manual' : 'deploy';
+}
+
+// actionProblem says a refused object action in the page's words: a job
+// that runs already (409 busy) waits for its run, ferund's text kept.
+export function actionProblem(e) {
+  const text = (e && e.message) || String(e);
+  const code = e && e.body && e.body.code;
+  if (e && e.status === 409 && (code === 'busy' || /runs already/.test(text))) {
+    return `${text} — a new run starts once it ends; try again then.`;
+  }
+  if (e && e.status === 409 && code === 'not_ready') return `${text} — the job's deployment is not ready yet.`;
+  return text;
+}
+
+// preflightRows renders a binding check's result (the preflight's,
+// control-plane.md "HTTP bindings") as rows: what was reached, in
+// order; the fields not reached are left out.
+export function preflightRows(res) {
+  if (!res) return [];
+  const rows = [];
+  rows.push({ k: 'result', v: res.ok ? 'ok' : 'not ok', tone: res.ok ? 'ok' : 'bad' });
+  if (res.error) {
+    const e = res.error;
+    const v = typeof e === 'string' ? e : [e.code, e.message].filter(Boolean).join(': ');
+    rows.push({ k: 'error', v, tone: 'bad' });
+  }
+  if ((res.addresses || []).length > 0) rows.push({ k: 'addresses', v: res.addresses.join(', ') });
+  if (res.tls) {
+    rows.push({ k: 'tls subject', v: res.tls.subject || '—' });
+    rows.push({ k: 'tls issuer', v: res.tls.issuer || '—' });
+    if (res.tls.notAfter) rows.push({ k: 'valid until', v: res.tls.notAfter, time: true });
+  }
+  if (res.token) rows.push({ k: 'token', v: `fetched, expires in ${res.token.expiresIn} s` });
+  if (res.probe) {
+    rows.push({ k: 'probe', v: `HTTP ${res.probe.status} in ${res.probe.latencyMs} ms`, tone: res.probe.status < 400 ? 'ok' : 'warn' });
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------- traffic --
+
+// sparkPoints are an SVG polyline's points of series[key] in a box w×h,
+// the oldest left, scaled to max (the series' own by default, so that
+// errors can be drawn to the scale of the requests); a bucket without a
+// value (null) sits on the floor.
+export function sparkPoints(series, key, w = 120, h = 24, top = 0) {
+  const list = series || [];
+  if (list.length === 0) return '';
+  const vals = list.map((p) => Number(p[key]) || 0);
+  const max = top > 0 ? top : Math.max(...vals);
+  const step = list.length > 1 ? w / (list.length - 1) : 0;
+  const r = (v) => Math.round(v * 10) / 10;
+  return vals.map((v, i) => `${r(i * step)},${r(max > 0 ? h - (v / max) * (h - 1) - 0.5 : h - 0.5)}`).join(' ');
+}
+
+// fmtLatency renders a percentile in ms; null is a window without
+// requests.
+export function fmtLatency(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const v = Number(ms);
+  if (v >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)} s`;
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms`;
+}
+
+// errorShare is the share of a service's requests that failed, "0 %"
+// without errors, "—" without requests.
+export function errorShare(s) {
+  if (!s || !s.requests) return '—';
+  if (!s.errors) return '0 %';
+  const p = (s.errors / s.requests) * 100;
+  return `${p >= 10 ? Math.round(p) : p.toFixed(1)} %`;
+}
+
+// statusTone is the tone of an access log record's status: 5xx (and none
+// written) bad, 4xx warn.
+export function statusTone(status) {
+  const s = Number(status) || 0;
+  if (s === 0 || s >= 500) return 'bad';
+  if (s >= 400) return 'warn';
+  return 'ok';
+}
+
+// olderCursor is the beforeTsNs of the page before records (ascending):
+// its first record's; '' for none.
+export function olderCursor(records) {
+  const list = records || [];
+  return list.length > 0 ? String(list[0].tsNs) : '';
+}
+
+// newestFirst merges pages of access log records (each ascending) into
+// one list, newest first, each record once.
+export function newestFirst(...pages) {
+  const seen = new Set();
+  const all = [];
+  for (const r of pages.flat()) {
+    const k = `${r.tsNs}/${r.spanId || ''}/${r.instance || ''}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    all.push(r);
+  }
+  const ns = (r) => (/^\d+$/.test(String(r.tsNs)) ? BigInt(r.tsNs) : 0n);
+  return all.sort((a, b) => (ns(b) > ns(a) ? 1 : ns(b) < ns(a) ? -1 : 0));
+}
+
+// ------------------------------------------------------ domains & access --
+
+// SERVED_STATES are the domain states in which the ingress serves it, so
+// that the environment's default host answers 404 (ADR 0021).
+const SERVED_STATES = new Set(['served', 'dns-moved']);
+
+// envDomains are the tenant's domains bound to an environment.
+export function envDomains(domains, st) {
+  if (!st) return [];
+  return (domains || []).filter((d) => d.environment && (d.environment.id === st.id || d.environment.name === st.name));
+}
+
+// defaultHost is an environment's default host: {host, label, serving};
+// while one of its domains is served the hosts are those and the default
+// host (its label kept) answers 404, so host is '' unless a host of the
+// status is it. null: it has none (not public yet, no apps zone).
+export function defaultHost(st, domains) {
+  if (!st) return null;
+  const served = new Set(envDomains(domains, st).filter((d) => SERVED_STATES.has(d.state)).map((d) => d.name));
+  const label = st.hostLabel || '';
+  const own = (st.hosts || []).find((h) => !served.has(h) && (!label || h.startsWith(label + '.')));
+  if (own) return { host: own, label: label || own.split('.')[0], serving: true };
+  if (label) return { host: '', label, serving: false };
+  return null;
+}
+
+// routeCurl is a request through the route door with a route token.
+export function routeCurl(origin, env, token, path = '/') {
+  const p = String(path || '/').replace(/^\/+/, '');
+  return `curl -H 'X-FeRun-Route-Token: ${token}' ${origin}/api/v1/environments/${encodeURIComponent(env)}/http/${p}`;
+}
+
+// publishNote says what a publish or unpublish did ({public, hosts,
+// rolling}).
+export function publishNote(res) {
+  if (!res) return '';
+  if (!res.public) return 'Unpublished: the ingress stops serving it within a moment; the route door still serves it with a route token.';
+  const at = (res.hosts || []).length > 0 ? ` at ${res.hosts.join(', ')}` : '';
+  return res.rolling
+    ? `Public${at}. This first publish rolls the image services once, so that their pods join the ingress's group.`
+    : `Public${at}.`;
+}
+
+// ----------------------------------------------------------------- clone --
+
+// cloneBody is a clone's request: the new name, the deployment whose
+// spec it takes (0: the latest), and each secret copied or left out.
+export function cloneBody({ name, deployment, copy }) {
+  const body = { name: String(name || '').trim() };
+  if (Number(deployment) > 0) body.deployment = Number(deployment);
+  const secrets = {};
+  for (const [k, v] of Object.entries(copy || {})) if (v) secrets[k] = { copy: true };
+  if (Object.keys(secrets).length > 0) body.secrets = secrets;
+  return body;
+}

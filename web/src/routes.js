@@ -18,10 +18,11 @@
 //   /tenants/:t/new-environment         the builder of a new environment
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments; tab:
-//                                       overview, builder, deployments[/:n],
-//                                       incidents[/:id],
+//                                       overview, builder (Edit),
+//                                       deployments[/:n], incidents[/:id],
 //                                       logs[/:kind/:name[/:replica]][?search],
-//                                       traces[/:trace][?search]
+//                                       traces[/:trace][?search], traffic,
+//                                       secrets, access, settings
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
 //   /join-tokens                        join tokens
 //   /instances                          the control plane's instances
@@ -37,8 +38,25 @@ function decode(s) {
   }
 }
 
-// ENV_TABS are the tabs of an environment.
-export const ENV_TABS = ['overview', 'builder', 'deployments', 'incidents', 'logs', 'traces'];
+// ENV_TABS are the pages of an environment; builder is its editor,
+// reached by Edit.
+export const ENV_TABS = [
+  'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings',
+];
+
+// ENV_TAB_LABELS name them.
+export const ENV_TAB_LABELS = {
+  overview: 'Overview',
+  builder: 'Edit',
+  deployments: 'Deployments',
+  incidents: 'Incidents',
+  logs: 'Logs',
+  traces: 'Traces',
+  traffic: 'Traffic',
+  secrets: 'Secrets',
+  access: 'Domains & access',
+  settings: 'Settings',
+};
 
 // SEARCH_TABS are the tabs whose search is in the address's query.
 const SEARCH_TABS = new Set(['logs', 'traces']);
@@ -78,9 +96,10 @@ export function envPath(tenant, env = '', tab = 'overview', item = '', replica =
   return p;
 }
 
-// EARLIER_TABS maps an environment tab's earlier name to its name: the
-// deployments were the releases (ADR 0018, "The deployments' word").
-const EARLIER_TABS = { releases: 'deployments' };
+// EARLIER_TABS maps an environment tab's earlier or other name to its
+// name: the deployments were the releases (ADR 0018, "The deployments'
+// word"); the builder is what Edit opens.
+const EARLIER_TABS = { releases: 'deployments', edit: 'builder' };
 
 // canonicalPath is pathname with an environment tab's earlier name
 // replaced by its name, so that an old link redirects; else pathname.

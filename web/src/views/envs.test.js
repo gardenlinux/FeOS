@@ -8,6 +8,8 @@ import {
   changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence, heavyEffect,
   incidentObject, logReplicas, logSourceText, logsProblem, objectSummary, objectTone, originText, parseLabelFilter,
   phaseTone, deploymentTone, rolloutNote, statusState,
+  actionProblem, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, jobTrigger, mayRevertTo, newestFirst,
+  olderCursor, preflightRows, publishNote, revertOffer, routeCurl, sparkPoints, specBindings, statusTone, tagPlan,
 } from './envs.js';
 
 // The environments view's arithmetic, on ferund's fixtures: stage rolls
@@ -208,5 +210,157 @@ describe('incidents', () => {
     expect(hasEvidence({ pending: ['addon postgres is not ready'] })).toBe(true);
     expect(hasEvidence({})).toBe(false);
     expect(hasEvidence(null)).toBe(false);
+  });
+});
+
+describe('the operations', () => {
+  it('offer a revert to the deployed deployment while the latest failed or is under way', () => {
+    expect(revertOffer(STAGE)).toBe(6);
+    expect(revertOffer({ ...STAGE, rollout: { ...STAGE.rollout, state: 'failed' } })).toBe(6);
+    expect(revertOffer({ ...STAGE, rollout: { ...STAGE.rollout, state: 'waiting' } })).toBe(6);
+    expect(revertOffer({ ...STAGE, deployed: 7, rollout: { ...STAGE.rollout, state: 'deployed' } })).toBe(0);
+    expect(revertOffer({ ...STAGE, deployed: 0, rollout: { ...STAGE.rollout, state: 'failed' } })).toBe(0);
+    expect(revertOffer({ ...STAGE, deleting: true })).toBe(0);
+    expect(revertOffer(response('POST_environments.201'))).toBe(0);
+    expect(revertOffer(null)).toBe(0);
+  });
+
+  it('revert to any deployment but the latest', () => {
+    expect(mayRevertTo(6, 7)).toBe(true);
+    expect(mayRevertTo('6', 7)).toBe(true);
+    expect(mayRevertTo(7, 7)).toBe(false);
+    expect(mayRevertTo(0, 7)).toBe(false);
+  });
+
+  it('put a tag new, move it, or find it there already', () => {
+    const tags = response('GET_environments_env_tags.200').tags;
+    expect(tagPlan(tags, ' ', 7)).toEqual({ kind: 'none', tag: '' });
+    expect(tagPlan(tags, 'v1.4', 7)).toEqual({ kind: 'new', tag: 'v1.4' });
+    expect(tagPlan(tags, 'v1.3', 7)).toEqual({ kind: 'move', tag: 'v1.3', from: 6 });
+    expect(tagPlan(tags, 'v1.3', '6')).toEqual({ kind: 'here', tag: 'v1.3' });
+  });
+
+  it("read a spec's bindings with their users, and when a job runs", () => {
+    const spec = {
+      services: { api: { bindings: ['github'] }, web: {} },
+      jobs: { sync: { bindings: ['github', 'erp'], on: 'manual' }, migrate: {} },
+      bindings: {
+        github: { upstream: 'https://api.github.com', credential: { kind: 'headers' } },
+        erp: { upstream: 'https://erp.example', mode: 'intercept', credential: { kind: 'oauth2' } },
+      },
+    };
+    expect(specBindings(spec)).toEqual([
+      { name: 'erp', upstream: 'https://erp.example', mode: 'intercept', credential: 'oauth2', users: ['job/sync'] },
+      { name: 'github', upstream: 'https://api.github.com', mode: 'name', credential: 'headers', users: ['service/api', 'job/sync'] },
+    ]);
+    expect(specBindings(null)).toEqual([]);
+    expect(jobTrigger(spec, 'sync')).toBe('manual');
+    expect(jobTrigger(spec, 'migrate')).toBe('deploy');
+    expect(jobTrigger(null, 'x')).toBe('deploy');
+  });
+
+  it("say a busy job's refusal with what to do, other refusals as ferund words them", () => {
+    const busy = new ApiError('job migrate runs already (deployment 7, attempt 1)', 409, { code: 'busy' });
+    expect(actionProblem(busy)).toBe('job migrate runs already (deployment 7, attempt 1) — a new run starts once it ends; try again then.');
+    expect(actionProblem(new ApiError('not yet', 409, { code: 'not_ready' }))).toContain("the job's deployment is not ready yet");
+    expect(actionProblem(new ApiError('Your role does not allow this', 403))).toBe('Your role does not allow this');
+  });
+
+  it("render a binding's check: what was reached, the rest left out", () => {
+    const ok = {
+      ok: true, addresses: ['203.0.113.40'],
+      tls: { subject: 'CN=api.erp.example', issuer: 'CN=R11', notAfter: '2027-01-31T00:00:00Z' },
+      token: { expiresIn: 3599 }, probe: { status: 200, latencyMs: 120 }, error: null,
+    };
+    expect(preflightRows(ok)).toEqual([
+      { k: 'result', v: 'ok', tone: 'ok' },
+      { k: 'addresses', v: '203.0.113.40' },
+      { k: 'tls subject', v: 'CN=api.erp.example' },
+      { k: 'tls issuer', v: 'CN=R11' },
+      { k: 'valid until', v: '2027-01-31T00:00:00Z', time: true },
+      { k: 'token', v: 'fetched, expires in 3599 s' },
+      { k: 'probe', v: 'HTTP 200 in 120 ms', tone: 'ok' },
+    ]);
+    const bad = { ok: false, addresses: [], tls: null, token: null, probe: null, error: { code: 'tls_failed', message: 'x509: unknown authority' } };
+    expect(preflightRows(bad)).toEqual([
+      { k: 'result', v: 'not ok', tone: 'bad' },
+      { k: 'error', v: 'tls_failed: x509: unknown authority', tone: 'bad' },
+    ]);
+    expect(preflightRows({ ok: false, error: 'unreachable' })[1].v).toBe('unreachable');
+    expect(preflightRows(null)).toEqual([]);
+  });
+});
+
+describe('the traffic', () => {
+  const T = response('GET_environments_env_traffic.200');
+  const api = T.services[0];
+
+  it('draws a series in its box, the oldest left, an empty bucket on the floor', () => {
+    expect(sparkPoints([{ requests: 0 }, { requests: 2 }, { requests: 1 }], 'requests', 10, 10)).toBe('0,9.5 5,0.5 10,5');
+    expect(sparkPoints([{ errors: 1 }, { errors: 0 }], 'errors', 10, 10, 2)).toBe('0,5 10,9.5');
+    expect(sparkPoints([], 'requests')).toBe('');
+    const pts = sparkPoints(api.series, 'requests', 120, 24).split(' ');
+    expect(pts).toHaveLength(api.series.length);
+    expect(pts[0]).toBe('0,23.5');
+    expect(pts[pts.length - 1].startsWith('120,')).toBe(true);
+  });
+
+  it('renders latencies and error shares', () => {
+    expect(fmtLatency(3.1)).toBe('3.1 ms');
+    expect(fmtLatency(412.4)).toBe('412 ms');
+    expect(fmtLatency(2400)).toBe('2.4 s');
+    expect(fmtLatency(null)).toBe('—');
+    expect(errorShare(api)).toBe('0 %');
+    expect(errorShare({ requests: 1000, errors: 18 })).toBe('1.8 %');
+    expect(errorShare({ requests: 4, errors: 2 })).toBe('50 %');
+    expect(errorShare({ requests: 0, errors: 0 })).toBe('—');
+  });
+
+  it('tones statuses and pages the access log back, newest first', () => {
+    expect([200, 302, 404, 503, 0].map(statusTone)).toEqual(['ok', 'ok', 'warn', 'bad', 'bad']);
+    const recs = response('GET_environments_env_access-logs.200').records;
+    expect(olderCursor(recs)).toBe('1761739200125000000');
+    expect(olderCursor([])).toBe('');
+    const older = [{ ...recs[0], tsNs: '1761739100000000000', spanId: 'a' }];
+    const merged = newestFirst(recs, older, recs);
+    expect(merged.map((r) => r.tsNs)).toEqual(['1761739201500000000', '1761739200125000000', '1761739100000000000']);
+  });
+});
+
+describe('domains and access', () => {
+  const domains = [
+    { id: 'd-1', name: 'kino.example.com', state: 'served', environment: { id: STAGE.id, name: STAGE.name } },
+    { id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns', environment: { id: STAGE.id, name: STAGE.name } },
+    { id: 'd-3', name: 'other.example.org', state: 'served', environment: { id: 'x', name: 'other' } },
+    { id: 'd-4', name: 'free.example.org', state: 'unverified', environment: null },
+  ];
+
+  it("are the environment's bound domains", () => {
+    expect(envDomains(domains, STAGE).map((d) => d.id)).toEqual(['d-1', 'd-2']);
+    expect(envDomains(null, STAGE)).toEqual([]);
+    expect(envDomains(domains, null)).toEqual([]);
+  });
+
+  it('name the default host, which answers 404 while a domain is served', () => {
+    expect(defaultHost(STAGE, [])).toEqual({ host: 'expensa-stage-fecode.apps.fecode.dev', label: 'expensa-stage-fecode', serving: true });
+    const onDomain = { ...STAGE, hosts: ['kino.example.com'], hostLabel: 'stage--kino' };
+    expect(defaultHost(onDomain, domains)).toEqual({ host: '', label: 'stage--kino', serving: false });
+    expect(defaultHost({ ...STAGE, public: false, hosts: [] }, [])).toBe(null);
+  });
+
+  it('show a curl through the route door, and what a publish did', () => {
+    expect(routeCurl('https://run.example.com', 'expensa-stage', 'tok', '/api/x'))
+      .toBe("curl -H 'X-FeRun-Route-Token: tok' https://run.example.com/api/v1/environments/expensa-stage/http/api/x");
+    expect(routeCurl('', 'a b', 't')).toBe("curl -H 'X-FeRun-Route-Token: t' /api/v1/environments/a%20b/http/");
+    expect(publishNote(response('PUT_environments_env_public.200')))
+      .toBe('Public at expensa-stage-fecode.apps.fecode.dev. This first publish rolls the image services once, so that their pods join the ingress\'s group.');
+    expect(publishNote({ public: true, hosts: [], rolling: false })).toBe('Public.');
+    expect(publishNote({ public: false, hosts: [] })).toContain('Unpublished');
+  });
+
+  it('clone with the chosen deployment and the secrets copied', () => {
+    expect(cloneBody({ name: ' demo ', deployment: 6, copy: { 'internal-token': true, other: false } }))
+      .toEqual({ name: 'demo', deployment: 6, secrets: { 'internal-token': { copy: true } } });
+    expect(cloneBody({ name: 'demo', deployment: 0, copy: {} })).toEqual({ name: 'demo' });
   });
 });

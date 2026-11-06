@@ -2,32 +2,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LOG_LINES, api } from '../api.js';
+import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, CopyBtn, ErrBox, KV, LiveBadge, StateLabel, useNow, usePoll } from '../components.jsx';
+import { Ago, ArmButton, CopyBtn, ErrBox, KV, LiveBadge, StateLabel, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
-import { envPath, newEnvPath } from '../routes.js';
+import { ENV_TABS, ENV_TAB_LABELS, envPath, newEnvPath } from '../routes.js';
 import { focusOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { Traces } from './Traces.jsx';
 import { Builder } from './Builder.jsx';
-import { useAccess } from '../people.js';
+import { deploymentText } from './Home.jsx';
+import { atLeast, envRole, useAccess } from '../people.js';
+import { useSummary } from '../summary.jsx';
 import {
-  KIND_TITLES, changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence,
-  heavyEffect, incidentObject, isAttached, labelPairs, logReplicas, logSourceText, logsProblem, objectSummary,
-  objectTone, originText, parseLabelFilter, phaseTone, deploymentTone, rolloutNote, statusState,
+  KIND_TITLES, changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, groupObjects,
+  hasEvidence, heavyEffect, incidentObject, isAttached, jobTrigger, labelPairs, logSourceText, logsProblem,
+  mayRevertTo, objectSummary, objectTone, originText, parseLabelFilter, phaseTone, deploymentTone, preflightRows,
+  revertOffer, rolloutNote, specBindings, statusState, tagPlan,
 } from './envs.js';
+import {
+  AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SecretsTab, SettingsTab, TrafficTab, useOp,
+} from './EnvTabs.jsx';
+import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
-// environment with its tabs: the overview (the rollout, the objects of
-// its target deployment with their instances, the routes), the builder
-// (Builder.jsx, ADR 0032: a draft planned on every change and applied as
-// the next deployment), its deployments (a deployment's diff and
-// normalised spec), its incidents (with their evidence) and the logs of
-// an object. Besides the builder's deployments and secrets' values this
-// view writes nothing: it reverts and deletes nothing, and reads no
-// secret's value and no route token.
+// environment's page: a head with its state in words, Revert (while the
+// latest deployment failed or is under way and an earlier one serves)
+// and Edit, the builder (Builder.jsx, ADR 0032); then its pages: the
+// overview (the rollout, the objects of its target deployment with their
+// instances and actions, its bindings with their check, the routes), its
+// deployments (revert, tags; a deployment's diff and normalised spec),
+// its incidents (with their evidence), the logs and traces, and
+// (EnvTabs.jsx) its traffic, secrets, domains and access, and settings.
+// No secret's value is ever read; a route token shows once, at its mint.
 // The environment, the tab and its item are the route's:
 // /tenants/:t/environments/:env/:tab/:item.
 
@@ -40,20 +48,26 @@ export function Environments({ tenant, env, tab, item, replica, search, navigate
   return <EnvList tenant={tenant} navigate={navigate} />;
 }
 
+// envCan is what a role may do on an environment (ADR 0031, the route
+// needs): write on it (revert, tags, secrets, restarts, runs, checks),
+// admin on it (public, route tokens), a delete (admin on it or write on
+// the tenant), a clone (write on the tenant).
+export function envCan(access, env) {
+  const role = envRole(access, env);
+  const writeTenant = atLeast((access && access.role) || '', 'write');
+  return {
+    write: atLeast(role, 'write'),
+    admin: atLeast(role, 'admin'),
+    del: atLeast(role, 'admin') || writeTenant,
+    clone: writeTenant,
+  };
+}
+
 // ---------------------------------------------------------------- widgets --
 
 // Link is a link within the UI: a real href (so that a new tab works),
 // the router on a plain click.
-function Link({ to, navigate, className, title, children }) {
-  return (
-    <a href={to} className={className} title={title} onClick={(e) => {
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      navigate(to);
-    }}>{children}</a>
-  );
-}
+const Link = EnvLink;
 
 export function ToneDot({ tone, title }) {
   return <span className={'sdot ' + tone} title={title} />;
@@ -122,62 +136,61 @@ function EnvList({ tenant, navigate }) {
   const counts = useMemo(() => envCounts(envs), [envs]);
 
   return (
-    <div className="single">
+    <>
+      <header className="pagehead">
+        <div className="pagehead-title">
+          <h1>Environments</h1>
+          <span className="pagehead-actions">
+            <button className="primary" disabled={!access.can.writeTenant} title={access.can.writeTenant ? '' : 'needs write on this tenant'}
+              onClick={() => navigate(newEnvPath(tenant))}>
+              <Icon name="plus" size={14} /> New environment</button>
+          </span>
+        </div>
+        <div className="facts">
+          <span><b>{envs ? envs.length : '…'}</b> environment{envs && envs.length === 1 ? '' : 's'}{labels.length > 0 ? ' with these labels' : ''}</span>
+          <span className="ok" title="deployed">● <b>{counts.deployed}</b> deployed</span>
+          {counts.deploying > 0 && <span className="acc" title="waiting or deploying">● <b>{counts.deploying}</b> deploying</span>}
+          {counts.failed > 0 && <span className="bad" title="the latest deployment failed">● <b>{counts.failed}</b> failed</span>}
+          {counts.incidents > 0 && <span className="bad" title="open incidents">▲ <b>{counts.incidents}</b> open incident{counts.incidents === 1 ? '' : 's'}</span>}
+        </div>
+      </header>
       <section className="pane">
         <div className="pane-toolbar">
-          <h2>
-            <Icon name="blocks" size={15} /> Environments
-            <span className="count">{envs ? envs.length : '…'}</span>
-          </h2>
-          <span className="mini-stats muted">
-            <span className="ok" title="deployed">● {counts.deployed}</span>
-            <span className="warn" title="waiting or deploying">● {counts.deploying}</span>
-            {counts.failed > 0 && <span className="bad" title="the latest deployment failed">● {counts.failed}</span>}
-            {counts.incidents > 0 && <span className="bad" title="open incidents">▲ {counts.incidents}</span>}
-          </span>
-          <span className="spacer" />
-          {access.can.writeTenant && (
-            <button className="primary mini" onClick={() => navigate(newEnvPath(tenant))}>
-              <Icon name="plus" size={12} /> New environment</button>)}
+          <form className="filterbar slim grow" onSubmit={(e) => {
+            e.preventDefault();
+            const p = parseLabelFilter(draft);
+            setBad(p.bad);
+            addLabels(p.labels);
+            setDraft(p.bad.join(' '));
+          }}>
+            <span className="searchwrap grow">
+              <Icon name="search" size={13} />
+              <input className="searchbare" placeholder="filter by label: key=value, then Enter" value={draft}
+                onChange={(e) => { setDraft(e.target.value); setBad([]); }} />
+            </span>
+            {labels.map((l) => (
+              <button key={l} type="button" className="chipbtn on mono" title="remove this filter"
+                onClick={() => setLabels((cur) => cur.filter((x) => x !== l))}>
+                {l} <Icon name="x" size={11} />
+              </button>
+            ))}
+          </form>
           <LiveBadge lastOk={lastOk} />
         </div>
         <ErrBox error={err} />
-
-        <form className="filterbar slim" onSubmit={(e) => {
-          e.preventDefault();
-          const p = parseLabelFilter(draft);
-          setBad(p.bad);
-          addLabels(p.labels);
-          setDraft(p.bad.join(' '));
-        }}>
-          <span className="searchwrap grow">
-            <Icon name="search" size={13} />
-            <input className="searchbare" placeholder="filter by label: key=value, then Enter" value={draft}
-              onChange={(e) => { setDraft(e.target.value); setBad([]); }} />
-          </span>
-          {labels.map((l) => (
-            <button key={l} type="button" className="chipbtn on mono" title="remove this filter"
-              onClick={() => setLabels((cur) => cur.filter((x) => x !== l))}>
-              {l} <Icon name="x" size={11} />
-            </button>
-          ))}
-        </form>
         {bad.length > 0 && <p className="notice small">A label filter is key=value: {bad.join(', ')}</p>}
 
         <EnvTable envs={envs} filtered={labels.length > 0} tenant={tenant} navigate={navigate}
           onLabel={(k, v) => addLabels([`${k}=${v}`])} />
         {!envs && !err && <p className="empty">Loading…</p>}
-        <p className="footnote muted small">
-          Environments are made and changed through ferund's API, by FeCode, an agent or the builder of an
-          environment's tab Builder; this view reverts and deletes nothing, and reads no secret's value and no route token.
-        </p>
       </section>
-    </div>
+    </>
   );
 }
 
-// EnvTable is the environments' table (GET /api/v1/environments); a
-// label chip filters by its label.
+// EnvTable is the environments' table (GET /api/v1/environments): the
+// state, the deployments in words, the hosts; a label chip filters by its
+// label.
 export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
   const list = envs || [];
   return (
@@ -186,12 +199,11 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
         <table className="tbl envs-tbl">
           <thead>
             <tr>
-              <th className="col-state">state</th>
+              <th className="col-state" />
               <th>name</th>
+              <th>deployment</th>
+              <th>hosts</th>
               <th>labels</th>
-              <th className="col-num">deployment</th>
-              <th className="col-num">deployed</th>
-              <th>state</th>
               <th className="col-num">incidents</th>
               <th className="col-when">created</th>
             </tr>
@@ -207,13 +219,15 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
                     <Link to={to} navigate={navigate} className="mono strong">{e.name}</Link>
                     <span className="muted small mono idsub" title={e.id}>{shortId(e.id)}</span>
                   </td>
-                  <td><Labels labels={e.labels} onLabel={onLabel} /></td>
-                  <td className="col-num mono">{e.deployment || '—'}</td>
-                  <td className={'col-num mono' + (e.deployed !== e.deployment ? ' warntext' : '')}
-                    title={e.deployed !== e.deployment ? 'the latest deployment is not deployed' : ''}>
-                    {e.deployed || '—'}
+                  <td className={'mono small nowrap state-label ' + tone}>{deploymentText(e)}</td>
+                  <td className="small">
+                    {e.public
+                      ? ((e.hosts || []).length > 0
+                        ? <div className="envs-hosts">{e.hosts.map((h) => <span key={h} className="mono host">{h}</span>)}</div>
+                        : <span className="muted">public, no host</span>)
+                      : <span className="muted">route door only</span>}
                   </td>
-                  <td><ToneLabel tone={tone}>{e.state}</ToneLabel></td>
+                  <td><Labels labels={e.labels} onLabel={onLabel} /></td>
                   <td className="col-num">
                     {e.openIncidents > 0
                       ? <span className="badge bad">{e.openIncidents} open</span>
@@ -234,21 +248,22 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
 
 // ----------------------------------------------------------------- detail --
 
-const TABS = [
-  { key: 'overview', label: 'Overview', icon: 'gauge' },
-  { key: 'builder', label: 'Builder', icon: 'blocks' },
-  { key: 'deployments', label: 'Deployments', icon: 'history' },
-  { key: 'incidents', label: 'Incidents', icon: 'alert' },
-  { key: 'logs', label: 'Logs', icon: 'file' },
-  { key: 'traces', label: 'Traces', icon: 'activity' },
-];
+// TAB_ICONS are the icons of the pages in the tab bar; the builder is
+// reached by Edit.
+const TAB_ICONS = {
+  overview: 'gauge', deployments: 'history', incidents: 'alert', logs: 'file', traces: 'activity', traffic: 'chart',
+  secrets: 'key', access: 'globe', settings: 'settings',
+};
+const TABS = ENV_TABS.filter((t) => t !== 'builder');
 
 function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
   const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
   const [gone, setGone] = useState(false);
+  const access = useAccess(tenant);
+  const sum = useSummary();
   const list = envPath(tenant);
-  const activeTab = TABS.some((t) => t.key === tab) ? tab : 'overview';
+  const activeTab = ENV_TABS.includes(tab) ? tab : 'overview';
 
   const refresh = useCallback(async () => {
     try {
@@ -262,10 +277,14 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
   }, [env]);
   const lastOk = usePoll(refresh, 3000);
   useNow(1000);
+  // changed follows a write: the page and the tenant's summary read again.
+  const sumRefresh = sum.refresh;
+  const changed = useCallback(() => { refresh(); sumRefresh(); }, [refresh, sumRefresh]);
+  const ec = envCan(access, (st && st.id) || env);
 
   // Escape goes up: from an item to its tab's list, from there to the
-  // environments.
-  const up = item ? envPath(tenant, env, activeTab) : list;
+  // environments; from the builder to the overview.
+  const up = item ? envPath(tenant, env, activeTab) : activeTab === 'builder' ? envPath(tenant, env) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -282,92 +301,153 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
       </section>
     );
   }
-  const state = statusState(st);
+  const body = (el) => (st ? el : !err && <p className="empty">Loading…</p>);
 
   return (
-    <section className="pane pane-detail">
-      <div className="detail-head">
-        <button className="iconbtn" title="back to the environments (Esc)" onClick={() => navigate(list)}>
-          <Icon name="arrowLeft" size={15} /></button>
-        <ToneDot tone={deploymentTone(state)} title={state} />
-        <div className="detail-title">
-          <span className="mono uuid">
-            {st ? st.name : env}
-            {st && st.deleting && <span className="badge warn">deleting</span>}
-          </span>
-          <span className="muted small">
-            {st
-              ? <>deployment {st.deployment || '—'} · deployed {st.deployed || '—'} · <span className="mono">{st.id}</span></>
-              : 'loading…'}
-          </span>
+    <>
+      <EnvHead st={st} env={env} tenant={tenant} ec={ec} domains={sum.domains} editing={activeTab === 'builder'}
+        lastOk={lastOk} changed={changed} navigate={navigate} />
+      <section className="pane pane-detail">
+        <div className="tabbar env-tabs">
+          {TABS.map((t) => {
+            const to = envPath(tenant, env, t);
+            return (
+              <a key={t} href={to} className={'tab' + (activeTab === t ? ' on' : '')}
+                onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } }}>
+                <Icon name={TAB_ICONS[t]} size={14} /> {ENV_TAB_LABELS[t]}
+                {t === 'incidents' && st && st.openIncidents > 0 && (
+                  <span className="tabcount" title="open incidents">{st.openIncidents}</span>)}
+              </a>
+            );
+          })}
         </div>
-        {st && <CopyBtn text={st.id} title="copy the environment's ID" />}
-        <LiveBadge lastOk={lastOk} />
-      </div>
+        <ErrBox error={err} />
 
-      <div className="tabbar">
-        {TABS.map((t) => (
-          <button key={t.key} className={'tab' + (activeTab === t.key ? ' on' : '')}
-            onClick={() => navigate(envPath(tenant, env, t.key))}>
-            <Icon name={t.icon} size={14} /> {t.label}
-            {t.key === 'incidents' && st && st.openIncidents > 0 && (
-              <span className="tabcount" title="open incidents">{st.openIncidents}</span>)}
-          </button>
-        ))}
-      </div>
-      <ErrBox error={err} />
+        {activeTab === 'overview' && (
+          <div className="tabbody">{body(<OverviewTab st={st} tenant={tenant} ec={ec} changed={changed} navigate={navigate} />)}</div>)}
+        {activeTab === 'builder' && (
+          <div className="tabbody">{body(<Builder key={st && st.id} tenant={tenant} env={st && st.name} st={st} navigate={navigate} />)}</div>)}
+        {activeTab === 'deployments' && (
+          <div className="tabbody">
+            <DeploymentsTab tenant={tenant} env={env} st={st} item={item} ec={ec} changed={changed} navigate={navigate} />
+          </div>)}
+        {activeTab === 'incidents' && (
+          <div className="tabbody">
+            {item
+              ? <IncidentPane key={item} tenant={tenant} env={env} id={item} navigate={navigate} />
+              : <IncidentsList tenant={tenant} env={env} navigate={navigate} />}
+          </div>)}
+        {activeTab === 'logs' && (
+          <div className="tabbody">
+            <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />
+          </div>)}
+        {activeTab === 'traces' && (
+          <div className="tabbody">
+            <Traces tenant={tenant} env={env} st={st} item={item} search={search} navigate={navigate} />
+          </div>)}
+        {activeTab === 'traffic' && (
+          <div className="tabbody"><TrafficTab tenant={tenant} env={env} navigate={navigate} /></div>)}
+        {activeTab === 'secrets' && (
+          <div className="tabbody"><SecretsTab env={env} st={st} ec={ec} changed={changed} /></div>)}
+        {activeTab === 'access' && (
+          <div className="tabbody">
+            <AccessTab tenant={tenant} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />
+          </div>)}
+        {activeTab === 'settings' && (
+          <div className="tabbody"><SettingsTab tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} /></div>)}
+      </section>
+    </>
+  );
+}
 
-      {activeTab === 'overview' && (
-        <div className="tabbody">
-          {st ? <EnvOverview st={st} tenant={tenant} navigate={navigate} /> : !err && <p className="empty">Loading…</p>}
-        </div>
-      )}
-      {activeTab === 'builder' && (
-        <div className="tabbody">
-          {st ? <Builder key={st.id} tenant={tenant} env={st.name} st={st} navigate={navigate} />
-            : !err && <p className="empty">Loading…</p>}
-        </div>
-      )}
-      {activeTab === 'deployments' && (
-        <div className="tabbody">
-          <DeploymentsTab tenant={tenant} env={env} st={st} item={item} navigate={navigate} />
-        </div>
-      )}
-      {activeTab === 'incidents' && (
-        <div className="tabbody">
-          {item
-            ? <IncidentPane key={item} tenant={tenant} env={env} id={item} navigate={navigate} />
-            : <IncidentsList tenant={tenant} env={env} navigate={navigate} />}
-        </div>
-      )}
-      {activeTab === 'logs' && (
-        <div className="tabbody">
-          <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />
-        </div>
-      )}
-      {activeTab === 'traces' && (
-        <div className="tabbody">
-          <Traces tenant={tenant} env={env} st={st} item={item} search={search} navigate={navigate} />
-        </div>
-      )}
-    </section>
+// EnvHead is an environment's page head: its name, its state in words,
+// Revert to the deployment that serves while a later one failed or is
+// under way, and Edit (the builder; Done while it is open); then its
+// facts: public at which hosts, the default host, labels, created.
+export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed, navigate }) {
+  const [op, run, clear] = useOp();
+  const state = statusState(st);
+  const tone = deploymentTone(state);
+  const offer = revertOffer(st);
+  const dh = defaultHost(st, domains || []);
+  const builder = envPath(tenant, env, 'builder');
+  const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
+  const revert = async () => {
+    const r = await run(() => api.revertDeployment(st.name, offer, { base: st.deployment }),
+      (res) => `Deployment ${res.number} reverts to ${offer}.`);
+    if (r) { changed(); navigate(envPath(tenant, st.name, 'deployments', r.number)); }
+  };
+  return (
+    <header className="pagehead envhead">
+      <div className="pagehead-title">
+        <span className="kind">Environment</span>
+        <h1 className="mono">{st ? st.name : env}</h1>
+        {st && (
+          <span className={'state-label ' + tone}>
+            <ToneDot tone={tone} title={state} />
+            {st.deleting ? 'deleting' : deploymentText({ deployment: st.deployment, deployed: st.deployed, state })}
+          </span>)}
+        {lastOk > 0 && <LiveBadge lastOk={lastOk} />}
+        <span className="pagehead-actions">
+          {offer > 0 && (
+            <ConfirmButton label={`Revert to ${offer}`} confirmLabel={`Revert to ${offer}: a new deployment`} icon="undo"
+              disabled={!ec.write || !!(op && op.busy)}
+              title={ec.write ? `a new deployment with deployment ${offer}'s spec` : NEEDS.write} onConfirm={revert} />)}
+          {editing
+            ? <a className="button" href={envPath(tenant, env)} onClick={go(envPath(tenant, env))}><Icon name="check" size={14} /> Done</a>
+            : (
+              <a className="button primary" href={builder} onClick={go(builder)}
+                title={ec.write ? 'change the environment: a draft, planned, applied as the next deployment' : 'read-only: needs write on this environment'}>
+                <Icon name="blocks" size={14} /> Edit</a>)}
+        </span>
+      </div>
+      {st && (
+        <div className="facts">
+          {st.public
+            ? (
+              <span><b>public</b>{(st.hosts || []).length > 0 && <> at {st.hosts.map((h, i) => (
+                <Fragment key={h}>{i > 0 && ', '}<HostLink host={h} /></Fragment>))}</>}</span>)
+            : <span>not public · route door only</span>}
+          {dh && !dh.serving && (
+            <span>default host <span className="mono host dim">{dh.label}</span> <span className="muted">(404 while a domain is served)</span></span>)}
+          {dh && dh.serving && (st.hosts || []).length > 1 && <span>default host <HostLink host={dh.host} /></span>}
+          {labelPairs(st.labels).length > 0 && <span className="facts-labels">labels <Labels labels={st.labels} /></span>}
+          <span>created <b title={fmtDateTime(st.createdAt)}>{fmtDate(st.createdAt)}</b></span>
+          <span className="mono small" title="the environment's ID">{shortId(st.id)} <CopyBtn text={st.id} mini title="copy the environment's ID" /></span>
+        </div>)}
+      {op && op.tone === 'bad' ? <ErrBox error={op.text} /> : <OpNote op={op} onDismiss={clear} />}
+    </header>
   );
 }
 
 // --------------------------------------------------------------- overview --
 
+// OverviewTab reads the latest deployment's spec once per deployment,
+// for what the status does not say: when a job runs, and the bindings.
+function OverviewTab({ st, tenant, ec, changed, navigate }) {
+  const [spec, setSpec] = useState(null);
+  const n = st.deployment;
+  useEffect(() => {
+    let live = true;
+    if (!n) { setSpec(null); return undefined; }
+    api.getDeployment(st.name, n).then((d) => { if (live) setSpec(d.spec || {}); }, () => { if (live) setSpec(null); });
+    return () => { live = false; };
+  }, [st.name, n]);
+  return <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} ec={ec} changed={changed} />;
+}
+
 // EnvOverview is an environment's status (GET /api/v1/environments/{env}):
 // the rollout, the objects of the target deployment by kind with their
-// instances, and the routes.
-export function EnvOverview({ st, tenant, navigate }) {
+// instances and actions (with ec, what the role may do), the bindings of
+// the latest deployment's spec, and the routes.
+export function EnvOverview({ st, tenant, navigate, spec = null, ec = null, changed = () => {} }) {
   const groups = groupObjects(st.objects);
+  const bindings = specBindings(spec);
   const logsTo = (o, replica = null) => envPath(tenant, st.name, 'logs', `${o.kind}/${o.name}`, replica);
   return (
     <>
       <RolloutBox st={st} tenant={tenant} navigate={navigate} />
       <div className="kv-grid">
-        <KV k="environment ID"><span className="mono">{st.id}</span> <CopyBtn text={st.id} mini /></KV>
-        <KV k="labels"><Labels labels={st.labels} /></KV>
         <KV k="deployments">
           latest <span className="mono">{st.deployment || '—'}</span>, deployed <span className="mono">{st.deployed || '—'}</span>
         </KV>
@@ -379,19 +459,24 @@ export function EnvOverview({ st, tenant, navigate }) {
               </Link>)
             : <span className="muted">none</span>}
         </KV>
-        <KV k="created">{fmtDate(st.createdAt)} <Ago iso={st.createdAt} /></KV>
       </div>
 
       {groups.map(({ kind, objects }) => (
         <div key={kind} className="envsect">
           <div className="sect">{KIND_TITLES[kind] || kind} <span className="count">· {objects.length}</span></div>
           {objects.map((o) => (
-            <ObjectCard key={`${o.kind}/${o.name}`} o={o} latest={st.deployment} tenant={tenant} navigate={navigate}
-              logsTo={(replica) => logsTo(o, replica)} />
+            <ObjectCard key={`${o.kind}/${o.name}`} o={o} env={st.name} latest={st.deployment} tenant={tenant} navigate={navigate}
+              spec={spec} ec={ec} changed={changed} logsTo={(replica) => logsTo(o, replica)} />
           ))}
         </div>
       ))}
       {groups.length === 0 && <p className="empty">No objects: the environment has no deployment yet.</p>}
+
+      {bindings.length > 0 && (
+        <div className="envsect">
+          <div className="sect">bindings <span className="count">· {bindings.length}</span></div>
+          {bindings.map((b) => <BindingCard key={b.name} b={b} env={st.name} ec={ec} />)}
+        </div>)}
 
       <RoutesTable routes={st.routes} env={st.name} />
     </>
@@ -429,25 +514,82 @@ export function RolloutBox({ st, tenant, navigate }) {
 
 // ObjectCard is one object: an image service or an addon with its
 // instances (each links its logs), an attached service with its process,
-// a job with its last run.
-export function ObjectCard({ o, latest, tenant, navigate, logsTo }) {
+// a job with its last run; with ec its action: a service's Restart, a
+// job's Run now.
+export function ObjectCard({ o, env, latest, tenant, navigate, logsTo, spec = null, ec = null, changed = () => {} }) {
   const tone = objectTone(o);
   const withInstances = o.kind === 'addon' || (o.kind === 'service' && !isAttached(o));
+  const [op, run, clear] = useOp();
+  const busy = !!(op && op.busy);
+  const manual = o.kind === 'job' && jobTrigger(spec, o.name) === 'manual';
   return (
     <div className="envobj">
       <div className="envobj-head">
         <ToneDot tone={tone} title={o.phase || ''} />
         <span className="mono strong">{o.name}</span>
         <span className="muted small">{objectSummary(o)}</span>
+        {manual && <span className="badge" title="on: manual — it runs only when asked">manual</span>}
         <span className="spacer" />
+        {ec && o.kind === 'service' && (
+          <button className="mini" disabled={!ec.write || busy}
+            title={ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : NEEDS.write}
+            onClick={() => run(() => api.restartService(env, o.name).then(() => true),
+              isAttached(o) ? `${o.name}: its process restarts.` : `${o.name}: its replicas restart one at a time, each once the one before is live again.`)
+              .then((r) => { if (r) changed(); })}>
+            <Icon name="refresh" size={12} /> Restart</button>)}
+        {ec && o.kind === 'job' && (
+          <button className={'mini' + (manual ? ' primary' : '')} disabled={!ec.write || busy}
+            title={ec.write ? 'a new run of the job, of the latest deployment' : NEEDS.write}
+            onClick={() => run(() => api.runJob(env, o.name).then(() => true), `${o.name}: a new run starts.`)
+              .then((r) => { if (r) changed(); })}>
+            <Icon name="play" size={12} /> Run now</button>)}
         {!withInstances && (
           <Link to={logsTo(null)} navigate={navigate} className="small envobj-logs">
             <Icon name="file" size={12} /> logs
           </Link>)}
       </div>
+      <OpNote op={op} onDismiss={clear} />
       {isAttached(o) && <AttachedLine o={o} tenant={tenant} navigate={navigate} />}
       {o.kind === 'job' && <JobLine run={o.lastRun} />}
       {withInstances && <InstanceTable instances={o.instances} latest={latest} navigate={navigate} logsTo={logsTo} />}
+    </div>
+  );
+}
+
+// BindingCard is an HTTP binding of the latest deployment (ADR 0028):
+// its upstream, mode, credential's kind and users; Check runs its
+// preflight with the secrets' latest versions.
+export function BindingCard({ b, env, ec, result = null }) {
+  const [op, run] = useOp();
+  const res = result || (op && op.result) || null;
+  const busy = !!(op && op.busy);
+  return (
+    <div className="envobj envbinding">
+      <div className="envobj-head">
+        <span className={'sdot ' + (res ? (res.ok ? 'running' : 'failed') : 'absent')} title={res ? (res.ok ? 'ok' : 'not ok') : 'not checked'} />
+        <span className="mono strong">{b.name}</span>
+        <span className="mono small host">{b.upstream}</span>
+        <span className="muted small">{b.mode}{b.credential ? ` · ${b.credential}` : ''}{b.users.length ? ` · used by ${b.users.join(', ')}` : ''}</span>
+        <span className="spacer" />
+        {ec && (
+          <button className="mini" disabled={!ec.write || busy} title={ec.write ? 'resolve, dial, check TLS and the credential, from an instance' : NEEDS.write}
+            onClick={() => run(() => api.checkBinding(env, b.name), '')}>
+            <Icon name="check" size={12} /> {busy ? 'Checking…' : 'Check'}</button>)}
+      </div>
+      {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
+      {res && <PreflightResult res={res} />}
+    </div>
+  );
+}
+
+// PreflightResult is a binding check's answer as rows.
+export function PreflightResult({ res }) {
+  return (
+    <div className="kv-grid preflight">
+      {preflightRows(res).map((r) => (
+        <KV key={r.k} k={r.k} className={'mono small ' + (r.tone || '')}>
+          {r.time ? <>{fmtDateTime(r.v)} <Ago iso={r.v} /></> : r.v}
+        </KV>))}
     </div>
   );
 }
@@ -573,7 +715,8 @@ export function RoutesTable({ routes, env }) {
             </table>
           </div>)}
       <p className="panel-note">
-        Served at <code>/api/v1/environments/{env}/http/…</code> to a route token of the environment; this view mints none.
+        The route door serves them all at <code>/api/v1/environments/{env}/http/…</code> to a route token of the
+        environment (Domains &amp; access mints one); the ingress serves those to image services at the public hosts.
       </p>
     </div>
   );
@@ -581,38 +724,69 @@ export function RoutesTable({ routes, env }) {
 
 // --------------------------------------------------------------- deployments --
 
-// DeploymentsTab polls the deployments (newest first) and shows the list, or
-// one deployment. The spec and diff of a deployment never change, so they are
-// read once; its state, reason, finish and tags do, so the polled list's
-// entry is laid over them.
-function DeploymentsTab({ tenant, env, st, item, navigate }) {
+// DeploymentsTab polls the deployments (newest first) and the tags, and
+// shows the list, or one deployment. The spec and diff of a deployment
+// never change, so they are read once; its state, reason, finish and
+// tags do, so the polled list's entry is laid over them.
+function DeploymentsTab({ tenant, env, st, item, ec, changed, navigate }) {
   const [deployments, setDeployments] = useState(null);
+  const [tags, setTags] = useState(null);
   const [err, setErr] = useState('');
   const refresh = useCallback(async () => {
     try {
-      setDeployments((await api.listDeployments(env)).deployments || []);
+      const [d, t] = await Promise.all([api.listDeployments(env), api.listTags(env)]);
+      setDeployments(d.deployments || []);
+      setTags(t.tags || []);
       setErr('');
     } catch (e) {
       setErr(e.message);
     }
   }, [env]);
   usePoll(refresh, 5000);
+  const latest = st ? st.deployment : 0;
+  const after = () => { refresh(); changed(); };
+  const revert = (n) => api.revertDeployment(env, n, { base: latest }).then((r) => {
+    after();
+    navigate(envPath(tenant, env, 'deployments', r.number));
+    return r;
+  });
 
   if (item) {
     const listed = (deployments || []).find((r) => String(r.number) === item) || null;
-    return <DeploymentPane key={item} tenant={tenant} env={env} n={item} listed={listed} navigate={navigate} />;
+    return (
+      <DeploymentPane key={item} tenant={tenant} env={env} n={item} listed={listed} latest={latest} tags={tags} ec={ec}
+        onRevert={revert} onTags={after} navigate={navigate} />
+    );
   }
   return (
     <>
       <ErrBox error={err} />
-      <DeploymentTable deployments={deployments} latest={st ? st.deployment : 0} tenant={tenant} env={env} navigate={navigate} />
+      <DeploymentTable deployments={deployments} latest={latest} tenant={tenant} env={env} navigate={navigate}
+        ec={ec} onRevert={revert} />
       {!deployments && !err && <p className="empty">Loading…</p>}
+      {tags && <TagsBox env={env} tags={tags} ec={ec} tenant={tenant} navigate={navigate} onChange={after} />}
     </>
   );
 }
 
-// DeploymentTable is the deployments' table.
-export function DeploymentTable({ deployments, latest, tenant, env, navigate }) {
+// RevertButton makes a new deployment with deployment n's spec, after a
+// second click.
+function RevertButton({ n, ec, onRevert, label = 'Revert to this' }) {
+  const [op, run] = useOp();
+  return (
+    <>
+      <ConfirmButton className="mini" label={label} confirmLabel={`Revert to ${n}: sure?`} icon="undo"
+        disabled={!ec || !ec.write || !!(op && op.busy)}
+        title={ec && ec.write ? `a new deployment with deployment ${n}'s spec` : NEEDS.write}
+        onConfirm={() => run(() => onRevert(n), '')} />
+      {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
+    </>
+  );
+}
+
+// DeploymentTable is the deployments' table; with ec each but the latest
+// offers its revert.
+export function DeploymentTable({ deployments, latest, tenant, env, navigate, ec = null, onRevert = null }) {
   const list = deployments || [];
   return (
     <>
@@ -628,6 +802,7 @@ export function DeploymentTable({ deployments, latest, tenant, env, navigate }) 
               <th>annotations</th>
               <th className="col-when">created</th>
               <th className="col-when">finished</th>
+              {onRevert && <th className="col-quick" />}
             </tr>
           </thead>
           <tbody>
@@ -641,7 +816,7 @@ export function DeploymentTable({ deployments, latest, tenant, env, navigate }) 
                   <td className="nowrap">
                     <ToneLabel tone={deploymentTone(r.state)}>{r.state}</ToneLabel>
                     {r.number === latest && <span className="badge acc">latest</span>}
-                    {(r.tags || []).map((t) => <span key={t} className="badge" title="tag">{t}</span>)}
+                    {(r.tags || []).map((t) => <span key={t} className="badge tagbadge" title="tag"><Icon name="tag" size={10} /> {t}</span>)}
                   </td>
                   <td className="small nowrap">{originText(r)}</td>
                   <td className="small trunc mono" title={r.author}>{r.author || <span className="muted">—</span>}</td>
@@ -652,6 +827,10 @@ export function DeploymentTable({ deployments, latest, tenant, env, navigate }) 
                   <td><Annotations annotations={r.annotations} /></td>
                   <td className="col-when"><Ago iso={r.createdAt} /></td>
                   <td className="col-when">{r.finishedAt ? <Ago iso={r.finishedAt} /> : <span className="muted">—</span>}</td>
+                  {onRevert && (
+                    <td className="col-quick" onClick={(e) => e.stopPropagation()}>
+                      {mayRevertTo(r.number, latest) && <RevertButton n={r.number} ec={ec} onRevert={onRevert} />}
+                    </td>)}
                 </tr>
               );
             })}
@@ -663,24 +842,129 @@ export function DeploymentTable({ deployments, latest, tenant, env, navigate }) 
   );
 }
 
-function DeploymentPane({ tenant, env, n, listed, navigate }) {
+// TagsBox lists the environment's tags: each names a deployment and
+// moves only by an explicit call, which is recorded (ADR 0018).
+export function TagsBox({ env, tags, ec, tenant, navigate, onChange }) {
+  const [op, run, clear] = useOp();
+  const [armed, arm, disarm] = useArm();
+  const [moving, setMoving] = useState('');
+  const [to, setTo] = useState('');
+  const busy = !!(op && op.busy);
+  const can = ec && ec.write;
+  return (
+    <div className="envsect">
+      <div className="sect">tags <span className="count">· {tags.length}</span></div>
+      {tags.length === 0
+        ? <p className="empty small">No tags. A deployment's page tags it.</p>
+        : (
+          <div className="tblwrap">
+            <table className="tbl tags-tbl">
+              <thead><tr><th>tag</th><th className="col-num">deployment</th><th>moved by</th><th className="col-when">moved</th><th className="col-quick" /></tr></thead>
+              <tbody>
+                {tags.map((t) => (
+                  <tr key={t.tag}>
+                    <td className="mono strong"><Icon name="tag" size={11} /> {t.tag}</td>
+                    <td className="col-num mono">
+                      <Link to={envPath(tenant, env, 'deployments', t.deployment)} navigate={navigate}>{t.deployment}</Link>
+                    </td>
+                    <td className="mono small trunc" title={t.movedBy}>{t.movedBy || <span className="muted">—</span>}</td>
+                    <td className="col-when"><Ago iso={t.movedAt} /></td>
+                    <td className="col-quick nowrap">
+                      {moving === t.tag
+                        ? (
+                          <form className="inlineform" onSubmit={(e) => {
+                            e.preventDefault();
+                            run(() => api.putTag(env, t.tag, Number(to)), `${t.tag} moved to deployment ${to}.`)
+                              .then((r) => { if (r) { setMoving(''); onChange(); } });
+                          }}>
+                            <input className="mono tiny" inputMode="numeric" placeholder="n" value={to} autoFocus
+                              onChange={(e) => setTo(e.target.value.replace(/\D/g, ''))} />
+                            <button className="mini primary" type="submit" disabled={!to || busy}>Move</button>
+                            <button className="mini ghost" type="button" onClick={() => setMoving('')}>Cancel</button>
+                          </form>)
+                        : (
+                          <button className="mini" disabled={!can || busy} title={can ? 'name another deployment' : NEEDS.write}
+                            onClick={() => { setMoving(t.tag); setTo(String(t.deployment)); }}>Move</button>)}{' '}
+                      <ArmButton armKey={t.tag} armed={armed} arm={arm} disarm={disarm} className="mini" disabled={!can || busy}
+                        title={can ? 'delete the tag; the deployment stays' : NEEDS.write}
+                        onConfirm={() => run(() => api.deleteTag(env, t.tag).then(() => true), `${t.tag} deleted.`)
+                          .then((r) => { if (r) onChange(); })}>Delete</ArmButton>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>)}
+      <OpNote op={op} onDismiss={clear} />
+    </div>
+  );
+}
+
+// TagForm puts a tag on deployment n: a new one, or one moved here.
+function TagForm({ env, n, tags, ec, onChange }) {
+  const [name, setName] = useState('');
+  const [op, run, clear] = useOp();
+  const plan = tagPlan(tags, name, n);
+  const can = ec && ec.write;
+  const label = plan.kind === 'move' ? `Move ${plan.tag} here from ${plan.from}` : plan.kind === 'here' ? 'Tagged already' : 'Tag';
+  return (
+    <>
+      <form className="inlineform" title={can ? '' : NEEDS.write} onSubmit={(e) => {
+        e.preventDefault();
+        if (plan.kind !== 'new' && plan.kind !== 'move') return;
+        run(() => api.putTag(env, plan.tag, Number(n)), `${plan.tag} names deployment ${n}.`)
+          .then((r) => { if (r) { setName(''); onChange(); } });
+      }}>
+        <input className="mono" placeholder="tag, e.g. v1.4" value={name} disabled={!can} onChange={(e) => setName(e.target.value)} />
+        <button className="mini" type="submit" disabled={!can || (plan.kind !== 'new' && plan.kind !== 'move') || !!(op && op.busy)}>
+          <Icon name="tag" size={12} /> {label}</button>
+      </form>
+      <OpNote op={op} onDismiss={clear} />
+    </>
+  );
+}
+
+function DeploymentPane({ tenant, env, n, listed, latest, tags, ec, onRevert, onTags, navigate }) {
   const [rel, setRel] = useState(null);
   const [err, setErr] = useState('');
+  const [armed, arm, disarm] = useArm();
+  const [op, run] = useOp();
   useEffect(() => {
     let live = true;
     api.getDeployment(env, n).then((r) => { if (live) setRel(r); }, (e) => { if (live) setErr(e.message); });
     return () => { live = false; };
   }, [env, n]);
   const shown = rel && listed ? { ...rel, ...listed } : rel;
+  const mine = (tags || []).filter((t) => String(t.deployment) === String(n));
+  const can = ec && ec.write;
   return (
     <>
-      <div className="subhead">
+      <div className="subhead envsubhead">
         <button className="ghost mini" onClick={() => navigate(envPath(tenant, env, 'deployments'))}>
           <Icon name="arrowLeft" size={13} /> deployments</button>
+        <span className="spacer" />
+        {mayRevertTo(n, latest) && <RevertButton n={Number(n)} ec={ec} onRevert={onRevert} />}
       </div>
       <ErrBox error={err} />
       {!rel && !err && <p className="empty">Loading…</p>}
       {shown && <DeploymentView rel={shown} />}
+      {shown && tags && (
+        <div className="envsect">
+          <div className="sect">tags</div>
+          <div className="envtags">
+            {mine.map((t) => (
+              <span key={t.tag} className="badge tagbadge">
+                <Icon name="tag" size={10} /> {t.tag}
+                <ArmButton armKey={t.tag} armed={armed} arm={arm} disarm={disarm} className="iconbtn mini" disabled={!can}
+                  title={can ? `delete ${t.tag}` : NEEDS.write} confirmLabel="×?"
+                  onConfirm={() => run(() => api.deleteTag(env, t.tag).then(() => true), '').then((r) => { if (r) onTags(); })}>
+                  <Icon name="x" size={10} /></ArmButton>
+              </span>))}
+            {mine.length === 0 && <span className="muted small">none</span>}
+          </div>
+          {op && op.tone === 'bad' && <ErrBox error={op.text} />}
+          <TagForm env={env} n={n} tags={tags} ec={ec} onChange={onTags} />
+        </div>)}
     </>
   );
 }
