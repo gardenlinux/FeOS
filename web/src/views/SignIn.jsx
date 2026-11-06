@@ -34,33 +34,29 @@ export function SignIn({ config, next, notice, onSignedIn }) {
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState(storedEmail);
   const oidc = !!(config && config.oidc);
-  const basic = !!(config && config.basic);
+  // Basic is the screen's way in only where there is no provider (a
+  // machine of one's own); with a provider, Basic stays for scripts.
+  const basic = !oidc && !!(config && config.basic);
 
   return (
     <div className="login">
       <div className="login-card">
         <div className="login-brand"><Icon name="box" size={22} /> FeRun</div>
-        <p className="muted">The control plane of FeOS: sandboxes, tenants and nodes.</p>
         {notice && <p className="notice small">{notice}</p>}
         {oidc && (
           <form action="/auth/login" method="get" onSubmit={(e) => {
             e.preventDefault();
-            if (!looksLikeEmail(email)) return;
+            if (!looksLikeEmail(email)) { setErr('Enter your e-mail address.'); return; }
             rememberEmail(email.trim());
             window.location.assign(loginURL(next, email));
           }}>
-            <label className="small muted" htmlFor="signin-email">Your e-mail address</label>
-            <input id="signin-email" type="email" name="login_hint" value={email} autoFocus
-              autoComplete="username email" inputMode="email" placeholder="you@company.com"
-              onChange={(e) => setEmail(e.target.value)} />
+            <input type="email" name="login_hint" value={email} autoFocus required aria-label="E-mail address"
+              autoComplete="username email" inputMode="email" placeholder="E-mail address"
+              onChange={(e) => { setEmail(e.target.value); setErr(''); }} />
             <input type="hidden" name="next" value={next || '/'} />
-            <button type="submit" className="primary" disabled={!looksLikeEmail(email)}>
-              <Icon name="login" size={15} /> Continue
-            </button>
-            <p className="small muted">Your company's sign-in or your password comes next.</p>
+            <button type="submit" className="primary">Sign in</button>
           </form>
         )}
-        {oidc && basic && <div className="or muted small">or with an operator's password</div>}
         {basic && (
           <form onSubmit={async (e) => {
             e.preventDefault();
@@ -75,12 +71,12 @@ export function SignIn({ config, next, notice, onSignedIn }) {
               setBusy(false);
             }
           }}>
-            <input value={user} autoFocus={!oidc} placeholder="user" autoComplete="username"
+            <input value={user} autoFocus placeholder="user" autoComplete="username"
               onChange={(e) => setUser(e.target.value)} />
             <input type="password" value={pass} placeholder="password" autoComplete="current-password"
               onChange={(e) => setPass(e.target.value)} />
-            <button type="submit" className={oidc ? '' : 'primary'} disabled={busy || !user}>
-              {busy ? 'checking…' : 'Sign in with the password'}
+            <button type="submit" className="primary" disabled={busy || !user}>
+              {busy ? 'checking…' : 'Sign in'}
             </button>
           </form>
         )}

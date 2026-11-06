@@ -19,8 +19,9 @@ describe('SignIn', () => {
     expect(out).toContain('action="/auth/login"');
     expect(out).toContain('name="login_hint"');
     expect(out).toContain('value="/tenants/acme/sandboxes"');
-    expect(out).toContain('Continue');
+    expect(out).toContain('Sign in');
     expect(out).not.toContain('type="password"');
+    expect(out).not.toContain('control plane');
   });
 
   it('checks the address before it goes on', () => {
@@ -38,10 +39,10 @@ describe('SignIn', () => {
     expect(out).not.toContain('type="email"');
   });
 
-  it('with both: both', () => {
+  it('with both: the address alone (Basic stays for scripts)', () => {
     const out = render({ oidc: true, basic: true });
     expect(out).toContain('action="/auth/login"');
-    expect(out).toContain('type="password"');
+    expect(out).not.toContain('type="password"');
   });
 
   it('with neither: says so', () => {
