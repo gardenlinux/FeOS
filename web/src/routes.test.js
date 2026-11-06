@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { ENV_TABS, TENANT_VIEWS, canonicalPath, envPath, parsePath } from './routes.js';
+import { ENV_TABS, ENV_TAB_LABELS, TENANT_VIEWS, canonicalPath, envPath, parsePath } from './routes.js';
 import { fmtAgo, fmtDurNs, fmtMsTime, fmtNs, fmtSeconds, prettyJson } from './format.js';
 import { ADMIN_KEY, readItem, writeItem } from './storage.js';
 
@@ -80,7 +80,7 @@ describe('the environments routes', () => {
   });
 
   it('reads an unknown tab as the overview, half an object as none, a bad replica as none', () => {
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/secrets')).toEqual(env({ env: 'expensa-stage' }));
+    expect(parsePath('/tenants/fecode/environments/expensa-stage/settingz')).toEqual(env({ env: 'expensa-stage' }));
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service'))
       .toEqual(env({ env: 'expensa-stage', tab: 'logs' }));
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/addon/postgres/x'))
@@ -109,7 +109,18 @@ describe('the environments routes', () => {
       expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
-    expect(ENV_TABS).toEqual(['overview', 'builder', 'deployments', 'incidents', 'logs', 'traces']);
+    expect(ENV_TABS).toEqual([
+      'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings',
+    ]);
+    for (const tab of ENV_TABS) expect(ENV_TAB_LABELS[tab]).toBeTruthy();
+    expect(ENV_TAB_LABELS.builder).toBe('Edit');
+    for (const tab of ['traffic', 'secrets', 'access', 'settings']) {
+      expect(parsePath(`/tenants/fecode/environments/e/${tab}`)).toEqual(env({ env: 'e', tab }));
+      expect(envPath('fecode', 'e', tab)).toBe(`/tenants/fecode/environments/e/${tab}`);
+    }
+    // Edit's other name leads to the builder; an item on a tab without items is dropped.
+    expect(parsePath('/tenants/fecode/environments/e/edit')).toEqual(env({ env: 'e', tab: 'builder' }));
+    expect(parsePath('/tenants/fecode/environments/e/secrets/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
     expect(parsePath('/tenants/fecode/environments/e/builder')).toEqual(env({ env: 'e', tab: 'builder' }));
     expect(envPath('fecode', 'e', 'builder')).toBe('/tenants/fecode/environments/e/builder');
     expect(parsePath('/tenants/fecode/new-environment')).toEqual({ view: 'newEnvironment', tenant: 'fecode' });
