@@ -89,13 +89,14 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--mcp-allowed-origins` | none | the Origins `/mcp` accepts; empty refuses every request with an Origin |
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
 | `--apps-zone` | empty | the DNS zone of public environments' default hosts, `<label>.<zone>`, which `ferun-ingress` serves ([The ingress](#the-ingress)); empty: no hosts, and no environment can be made public |
+| `--tenant-zone` | empty | the DNS zone of the default hosts of the tenants people make (ADR 0031), such as `apps.run.example.com`, which `ferun-ingress` serves with a wildcard of its own; needs `--apps-zone`, and neither may be or lie under the other; empty: every tenant's hosts are under `--apps-zone` ([Public environments](#public-environments)) |
 | `--apps-zone-owners` | none | the tenants that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<project>.<zone>` ([Public environments](#public-environments)); empty: none may |
 | `--edge-name` | empty | the name tenants' domains point at with a CNAME, such as `edge.fecode.dev`, which the operator publishes with the balancer's addresses ([Domains](#domains)); empty: domains are off |
 | `--edge-address` | none | an edge address beside what `--edge-name` resolves to, which a domain's A and AAAA records may name; repeatable |
 | `--domain-challenge-label` | `_ferun-challenge` | the label of a claim's TXT record, `<label>.<name>`; a lowercase DNS label that may hold `_` |
 | `--domain-grace` | `72h` | how long a record of a verified domain may answer wrong before the domain is deactivated |
 | `--domain-unverified-max` | 50 | the most claims a tenant may hold that are not verified |
-| `--domain-reserved` | none | a zone no domain may be or be under (the platform's own domain, where `run`, `id` and `edge` are), beside the apps zone and `--edge-name`; repeatable |
+| `--domain-reserved` | none | a zone no domain may be or be under (the platform's own domain, where `run`, `id` and `edge` are), beside the apps zone, the tenant zone and `--edge-name`; repeatable |
 | `--dns-resolver` | the system's resolvers (`/etc/resolv.conf`) | the DNS resolver, `host:port`, the domains' checks ask |
 | `--default-image` | `ghcr.io/maltej/debian-ai:latest` | the image of a sandbox created without one |
 | `--image-bakes` | true | a create names the baked layers of its image and lets its node bake it ([Images](#images), ADR 0025); false: neither |
@@ -1361,7 +1362,10 @@ every token made before `0027`, and every token made without a role, is
 `admin` on its tenant, so FeCode and FeChat go on unchanged; a token's
 grants rows add to it. `invitations` hold single-use links with a role
 and a scope (their secret hashed, `used_by` and `used_at` once taken).
-`tenants` carry their `zone` (NULL: the apps zone), the person who made
+`tenants` carry their `zone` (NULL: the apps zone; the tenant zone's
+name for a tenant a person makes while there is one,
+`model.Zones.ForNewTenant` and `store.MakeTenant`; [Public
+environments](#public-environments)), the person who made
 them (`made_by`, NULL for an operator's) and their limits
 (`limit_sandboxes`, `limit_environments`, `limit_running_jobs`,
 `limit_vcpus`, `limit_memory_mib`; NULL: none). A person is never
@@ -2098,7 +2102,7 @@ a deleting one.
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
 | `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence, when a binding's condition last held; one open per object, deployment and condition; a binding's deleted 30 days after it closed |
 | `env_route_tokens` | the route door's tokens, as hashes |
-| `host_labels` | every default host label ever given: its owner, the tenant that first claimed it and alone may claim it again, and the environment that has it, set free when that is deleted |
+| `host_labels` | every default host label ever given, per zone (`zone`: `''` for the apps zone, else the zone's name; key `(zone, label)`, `0029`): its owner, the tenant that first claimed it there and alone may claim it again, and the environment that has it, set free when that is deleted |
 
 `hosts_written` of `env_instances` and `env_attached`, the hash of the
 hosts block that ferund wrote into a pod before its names moved into
@@ -2977,7 +2981,8 @@ A job the tenant does not have is 404 "no such job". Not built (ADR
 
 `ferun-ingress` ([ADR 0021](../adr/0021-ingress.md),
 [ingress.md](ingress.md)) serves public environments' hosts,
-`https://<label>.<apps zone>/…`, straight to their image services' pods:
+`https://<label>.<zone>/…` under the apps zone or the tenant zone,
+straight to their image services' pods:
 a program of its own and a peer on the pods' mesh, which connects out to
 `ferund` on the nodes' port as a node does and serves from the table
 `ferund` streams to it. `ferund` never calls it, carries none of its
@@ -3002,7 +3007,8 @@ ingress serves an environment only once its tenant made it public, `PUT
   `env-groups` pass. Label and `ingress_group` stay, so publishing again
   rolls nothing.
 - **Refusals**: 409 for publishing while `--apps-zone` is empty, the
-  platform's switch, and for either while the environment or its tenant
+  platform's switch, or while the tenant's zone is one the platform does
+  not serve, and for either while the environment or its tenant
   is being deleted. A clone never copies `public`; deploying the ingress
   makes nothing public.
 - **The label** is `<environment>-<tenant>` when it names that pair
@@ -3032,7 +3038,33 @@ ingress serves an environment only once its tenant made it public, `PUT
   unless `host_labels` registers it to the tenant already; the rest is
   as for a chosen label. A tenant made later whose natural label the
   owner holds gets its fallback. Every other tenant's plain label is the
-  chosen form's 400.
+  chosen form's 400, and so is an owner's while its hosts are in the
+  tenant zone.
+- **Zones** (ADR 0031): a host is `<label>.<zone>` in its tenant's zone,
+  `tenants.zone`: NULL for the apps zone (`--apps-zone`), the tenants
+  operators make; the tenant zone (`--tenant-zone`, such as
+  `apps.run.example.com`) for the tenants people make, set at their
+  creation. A label is a name in its zone: `host_labels` registers it
+  per zone, so a label taken in the tenant zone is free in the apps
+  zone. The tenant zone has no owners, hence no plain labels. The
+  status, the listing, the plans' route URLs and the ingress's table all
+  use the tenant's zone; a zone the platform does not serve (any more)
+  gives no default host. No domain can be the tenant zone or a name
+  under it ([Domains](#domains)).
+- **Moving a tenant**, `PUT /api/v1/admin/tenants/{tenant}/zone
+  {"zone": "<the apps zone's or the tenant zone's name>"}` (admin
+  class): under the tenant's row lock, `tenants.zone` changes and every
+  environment that holds a label moves it into the new zone as a
+  changed label moves (`store.SetTenantZone`): kept where it is free or
+  the tenant's there, and not a plain one unless the tenant owns the new
+  zone's plain names, else its natural label or its fallback there; the
+  labels left behind stay the tenant's in their zone. `ferun_ingress`
+  `env:<id>` for each, so the old hosts answer 404 at once. The answer
+  is `{tenant, zone, environments: [{id, name, hostLabel,
+  hostLabelBefore, host}]}`; 400 for any other zone, 404 for an unknown
+  tenant, 409 while it is being deleted; an activity row
+  `tenant_zone_set`. `GET /api/v1/admin/tenants` shows each tenant's
+  `zone`.
 
 ### The ingress service
 
@@ -3053,11 +3085,11 @@ port](#the-nodes-port), [api.md](api.md#the-ingresss-api)), from
   makes the presenting certificate current, superseding the older ones
   10 minutes ahead, and puts the instance on the mesh with its fixed key
   ([The pods' mesh](#the-pods-mesh)); its answer is the ULA, the
-  instance's /96 and address, the apps zone and the answering instance.
+  instance's /96 and address, the apps zone, the tenant zone and the answering instance.
   `ingress_certs` records every certificate.
 - **Sync** streams the instance's table: whole, then the environments
   put and removed, the mesh's nodes when their version changes, `Self`
-  (its address, the apps zone, its admitted version of `ferun-ingress`)
+  (its address, the apps zone, the tenant zone, its admitted version of `ferun-ingress`)
   when its row changes, the ACME challenges, all of them, when they
   change, and an empty table every 10 s that records the instance as
   seen. Once it has sent the challenges it records their tokens as the
@@ -3249,7 +3281,7 @@ by UUID or name.
   and must be a host name of ASCII letters, digits and hyphens of at
   least two labels whose last begins with a letter: no wildcard, no
   address; an internationalized name is given as its A-label, and one in
-  Unicode is refused with that hint. The apps zone, `--edge-name` and
+  Unicode is refused with that hint. The apps zone, the tenant zone, `--edge-name` and
   every `--domain-reserved` zone, and every name under them, are
   reserved. Any number of claims may name one name, of one tenant or of
   several; a tenant holds at most `--domain-unverified-max` claims that
@@ -3604,6 +3636,16 @@ that dial the instances.
   ferund is already of 0011's base, then ferund, then restart feos-node's
   pods, at which each node takes its /96. Until that restart, pods on
   different nodes do not reach each other over the mesh.
+- **Labels per zone, `0029`.** `host_labels` gets its zone and the key
+  `(zone, label)`, and `environments.host_label` loses its unique index
+  (ADR 0031, the tenant zone). An instance of the previous version beside
+  it claims labels with `ON CONFLICT (label)`, which no constraint
+  matches any more: its first publishes and chosen labels fail with 500
+  until the rolling deploy replaces it; everything else it does, reads
+  of labels included, goes on. Roll ferun-ingress with the tenant zone's
+  certificate before ferund gets `--tenant-zone`; an ingress of before
+  serves the tenant zone's hosts with the apps zone's wildcard and keeps
+  their cookies' `Domain`.
 - **Clients first for `0021`.** From `0021` on, the environments' API
   answers the release states, `deployed` and the stopping phase in
   their new words alone (ADR 0018, "The states' words"): roll a FeCode

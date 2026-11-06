@@ -317,6 +317,15 @@ Two things outside FeRun shape this:
   certificate, cookies made host-only by the ingress, no claims of names
   under it, labels by ADR 0021, and no plain labels, since it has no
   owners.
+- A label is a name in its zone: `host_labels` registers it per zone,
+  so a label taken in the tenant zone is free in the apps zone. A move
+  keeps each environment's label where it may (free or the tenant's in
+  the new zone, and not a plain one where the tenant owns none), else
+  gives it its natural label or its fallback there, and leaves the old
+  ones the tenant's. The operator moves a tenant with `PUT
+  /api/v1/admin/tenants/{tenant}/zone`, and gives ferun-ingress the
+  zone's wildcard as files of its own (`--tenant-zone-tls-cert`,
+  `--tenant-zone-tls-key`), served for every name it covers.
 - A zone of its own keeps the labels of the platform's products out of
   reach of anyone who makes a tenant. A registrable domain of its own
   also keeps the platform's cookies, reputation and blocklist entries
