@@ -6,13 +6,15 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, ErrBox, LiveBadge, useNow, usePoll } from '../components.jsx';
 import { fmtDateTime } from '../format.js';
+import { credentialsOf } from './sandboxes.js';
 
-// What a sandbox can reach beyond itself: the Kubernetes clusters and SSH
-// servers bound to it, each with what the audit log says it was used for,
-// and the newest refusals. Read with the tenant's token; the sets are
+// The credentials a sandbox uses but never sees: the Kubernetes clusters
+// and SSH servers bound to it, each with what the audit log says it was
+// used for, and the newest refusals. Read with the session; the sets are
 // changed with the sandbox's token, by the client that owns them, not
-// here. No credential reaches this view: fingerprints and public keys
-// only. Where ferund runs without bindings, kube and ssh are null.
+// here, and the HTTP bindings (ADR 0028) are read with that token only.
+// No credential reaches this view: fingerprints and public keys only.
+// Where ferund runs without bindings, kube and ssh are null.
 
 export function Access({ sandboxId }) {
   const [data, setData] = useState(null);
@@ -36,7 +38,8 @@ export function Access({ sandboxId }) {
     <div className="access">
       <div className="access-head">
         <span className="muted small">
-          The credentials stay on the node; the sandbox sees a local endpoint only.
+          Credentials the sandbox uses but never sees: they stay on its node, and the sandbox reaches a local
+          endpoint that adds them.
         </span>
         <span className="spacer" />
         <LiveBadge lastOk={lastOk} />
@@ -109,6 +112,12 @@ export function Access({ sandboxId }) {
         </table></div>
       )}
 
+      <h3 className="sect"><Icon name="globe" size={13} /> HTTP APIs</h3>
+      <p className="muted small">
+        HTTP bindings are set and read with the sandbox's own token (<code className="mono">PUT /api/v1/sandboxes/&lt;id&gt;/http</code>),
+        by the agent or the client that owns the sandbox; they don't show here yet.
+      </p>
+
       <h3 className="sect"><Icon name="x" size={13} /> Refusals</h3>
       {denies.length === 0 && <p className="empty">Nothing refused.</p>}
       {denies.length > 0 && (
@@ -147,4 +156,56 @@ function Use({ use, unit }) {
 
 function Disabled() {
   return <p className="empty">Not enabled on this platform.</p>;
+}
+
+// ImageCredentials sets, replaces or removes the login a sandbox's
+// creates pull its image with (ADR 0025): sealed in ferund, never
+// answered, so the form cannot say whether there is one. A pod that runs
+// keeps running; the next create asks the registry with it. write: the
+// session may change them (a tenant grant write).
+export function ImageCredentials({ sandboxId, write }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState('');
+  const why = write ? undefined : 'needs write on this tenant';
+  const run = async (label, fn, ok) => {
+    setBusy(label); setErr(''); setDone('');
+    try {
+      await fn();
+      setDone(ok);
+      setUsername(''); setPassword('');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+  return (
+    <div className="sbx-imagecreds">
+      <p className="muted small">
+        The registry login for a private image. ferund keeps it sealed and never shows it again, nor whether one is set;
+        a pod that runs keeps running, and the sandbox's next create pulls with it.
+      </p>
+      <ErrBox error={err} />
+      {done && <p className="ok small"><Icon name="check" size={12} /> {done}</p>}
+      <form className="createpanel" onSubmit={(e) => {
+        e.preventDefault();
+        run('set', () => api.putImageCredentials(sandboxId, credentialsOf(username, password)),
+          'Login set. It replaced any login before.');
+      }}>
+        <input placeholder="username" autoComplete="off" value={username} disabled={!write} title={why}
+          onChange={(e) => setUsername(e.target.value)} />
+        <input type="password" placeholder="password or token" autoComplete="new-password" value={password}
+          disabled={!write} title={why} onChange={(e) => setPassword(e.target.value)} />
+        <button type="submit" className="primary" disabled={!write || !!busy} title={why}>
+          <Icon name="key" size={14} /> Set or replace</button>
+        <button type="button" className="ghost" disabled={!write || !!busy}
+          title={why || 'pull anonymously from now on'}
+          onClick={() => run('remove', () => api.deleteImageCredentials(sandboxId), 'Removed: the next create pulls anonymously.')}>
+          Remove</button>
+      </form>
+    </div>
+  );
 }
