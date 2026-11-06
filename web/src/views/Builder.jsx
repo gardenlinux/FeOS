@@ -179,7 +179,7 @@ export function Builder({ tenant, env, st, navigate }) {
   const rebaseOnto = useCallback(async (d, n) => {
     const [baseSpec, latestSpec] = await Promise.all([fetchSpec(d.base), fetchSpec(n)]);
     const r = rebase(baseSpec, d.spec, latestSpec);
-    set({ ...d, spec: r.spec, base: n }, { record: true });
+    set({ ...d, spec: r.spec, base: n, source: `${d.source || 'a draft'}, rebased onto deployment ${n}` }, { record: true });
     setConflicts(r.conflicts.length ? { list: r.conflicts, from: d.base, to: n } : null);
     setNotice(`Rebased from deployment ${d.base || 'none'} onto deployment ${n}: ${r.applied.length} change${r.applied.length === 1 ? '' : 's'} kept`
       + (r.conflicts.length ? `, ${r.conflicts.length} conflict${r.conflicts.length === 1 ? '' : 's'} to decide.` : '.'));
@@ -383,7 +383,7 @@ export function Builder({ tenant, env, st, navigate }) {
           </div>)}
 
       <PlanPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} pinned={pinned}
-        applyFindings={applyFindings} pins={pins}
+        applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
         onApply={async (message, setBusy, setErr) => {
           setBusy(true);
           setErr('');
@@ -666,7 +666,7 @@ function Conflicts({ conflicts, onPick }) {
 // PlanPanel is the plan's answer: its verdict, the findings without an
 // object, the diff against the base with each change's effect, and the
 // apply with a message the builder proposes.
-export function PlanPanel({ isNew, draft, plan, planning, groups, pinned, applyFindings, pins, onApply }) {
+export function PlanPanel({ isNew, draft, plan, planning, groups, pinned, applyFindings, pins, conflicts = 0, onApply }) {
   const answer = plan && plan.answer;
   const diff = answer && answer.diff ? answer.diff : [];
   const heavy = diff.filter((d) => heavyEffect(d.effect));
@@ -682,7 +682,7 @@ export function PlanPanel({ isNew, draft, plan, planning, groups, pinned, applyF
   const missing = (pins || []).filter((p) => p.missing).map((p) => p.name);
   const nothing = !isNew && answer && answer.valid && diff.length === 0;
   const blocked = busy || planning || !answer || !answer.valid || unresolved.length > 0 || (heavy.length > 0 && !ack)
-    || nothing || (isNew && !isDnsLabel(draft.name));
+    || nothing || (isNew && !isDnsLabel(draft.name)) || conflicts > 0;
   return (
     <div className="b-plan">
       <div className="b-planhead">
@@ -721,6 +721,7 @@ export function PlanPanel({ isNew, draft, plan, planning, groups, pinned, applyF
         </div>
         {err && <p className="bad small">{err}</p>}
         {nothing && <p className="muted small">Nothing to apply: the draft equals its base.</p>}
+        {conflicts > 0 && <p className="warntext small">Decide the conflicts above first.</p>}
       </div>
     </div>
   );

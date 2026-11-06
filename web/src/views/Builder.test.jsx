@@ -150,6 +150,12 @@ describe('PlanPanel', () => {
     expect(applyButton(out)).toContain('disabled');
   });
 
+  it('waits for the conflicts of a rebase', () => {
+    const out = panel({ answer: PLAN, spec: STORED, base: 6 }, { conflicts: 1 });
+    expect(out).toContain('Decide the conflicts above first.');
+    expect(applyButton(out)).toContain('disabled');
+  });
+
   it('holds the apply while images do not resolve or the plan has errors', () => {
     const unresolved = panel({ answer: { ...PLAN, images: {} }, spec: STORED, base: 6 },
       { pinned: { spec: STORED, unresolved: ['ghcr.io/acme/x:1'], supported: true } });

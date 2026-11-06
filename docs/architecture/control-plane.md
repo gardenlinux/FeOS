@@ -1897,16 +1897,41 @@ or gone once its row is older than 15 s; the API's `live` and `fresh`
 say which, on the database clock.
 
 Behind the tenant gate, with a tenant's token that the UI minted and
-keeps in the browser, it shows the tenant's sandboxes and, read only, its
+keeps in the browser, it shows the tenant's sandboxes and its
 environments (`/tenants/<t>/environments[/<env>[/<tab>]]`): the
 list, with label filters; an environment's overview (its rollout, its
 objects by kind with their instances, its routes, its open incidents);
-its deployments with their tags, annotations, diff and spec; its incidents
+its deployments with their tags, annotations, diff and spec (which it
+exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;
 and an object's logs, where the 501 of a node that serves none and the
 409 of a paused instance are messages, not errors.
 It polls (the list every 4 s, an environment every 3 s, the rest every
-5 s), writes nothing, and shows no secret value and no route token. The
+5 s) and shows no secret value and no route token.
+
+The environment's tab Builder and `/tenants/<t>/new-environment` are
+the deployment builder (ADR 0032), the only part that writes: a draft,
+a spec and its base, from the latest deployment, empty or an imported
+file, kept in the browser's local storage per tenant and environment
+(`ferun-draft:<tenant>/<env>`, `ferun-draft:<tenant>/` for a new one;
+in memory where storage refuses), edited in forms of image services,
+jobs, addons (from `GET /api/v1/addons`, a built-in list where ferund
+answers none), routes and secrets, or as JSON text. It plans 500 ms
+after every change, one plan in flight, shows each finding at the
+object and field its path names and the diff against the base, and
+applies with the base and a message it proposes from the diff, after
+it wrote the plan's `images` pins into the draft (a ferund that answers
+none pins at apply); `deletes data` and `recreates (downtime)` are asked
+again, and a `409 base_mismatch` rebases the draft object by object onto
+the current deployment, with the conflicts to decide. A secret's value
+goes to `PUT …/secrets/{name}` at once and the draft pins the version it
+made; a new environment's values stay in the page until its first apply,
+which creates the environment (with an ID the draft keeps, so that a
+repeat is the same create), writes them, and applies deployment 1. The
+draft's operations are pure modules beside `views/envs.js` (`draft.js`,
+`refs.js`, `findings.js`, `rebase.js`, `pins.js`, `catalog.js`,
+`planner.js`). Below 900 px the objects are cards that open their form
+at full width. The
 instance tables fit a 1280 px wide window. Its tests read the fixtures
 of ferund's API tests (`go/internal/api/testdata/ferun`).
 
