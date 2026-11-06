@@ -5,46 +5,53 @@
 // table has them:
 //
 //   sign-in  /auth/config, /auth/me, /auth/login, /auth/logout: who is
-//            signed in, and how one signs in (OIDC through the provider, or
-//            Basic with --admin-users).
-//   admin    /api/v1/admin/…: the session cookie of an OIDC sign-in, or the
-//            Basic credentials of this tab (sessionStorage). Tenants, nodes,
-//            join tokens, instances and the activity log.
-//   tenant   /api/v1/sandboxes, /api/v1/tools, /api/v1/environments: a
-//            tenant's token as Bearer.
-//            Tenant tokens are stored as hashes only, so the UI cannot read
-//            one back: it keeps the tokens it minted (localStorage) and works
-//            "as the tenant" with them.
+//            signed in, their tenants with their roles, and how one signs
+//            in (OIDC through the provider, or Basic with --admin-users).
+//   admin    /api/v1/admin/…: an operator's session cookie, or the Basic
+//            credentials of this tab (sessionStorage). Tenants, nodes,
+//            join tokens, instances and the activity log. The UI calls
+//            them for operators only.
+//   tenant   /api/v1/sandboxes, /api/v1/tools, /api/v1/environments,
+//            /api/v1/tenant/…: the person's session, the tenant named in
+//            the header FeRun-Tenant (ADR 0031). The browser keeps no
+//            tenant token: what the person's role allows, the session
+//            does, and ferund decides.
 //
-// The UI never holds a sandbox's token: it shows a new one once and
-// forgets it. Every request carries X-Requested-With: ferun (ferund
-// refuses a cookie-authenticated change without it) and sends cookies to
-// the same origin only. A 401 on an admin route ends the sign-in: the UI
-// returns to the sign-in screen.
+// The UI never holds a sandbox's token or a tenant's: it shows a new one
+// once and forgets it. Every request carries X-Requested-With: ferun
+// (ferund refuses a cookie-authenticated change without it) and sends
+// cookies to the same origin only. A 401 on an admin or a tenant route
+// ends the sign-in: the UI returns to the sign-in screen.
 
 import { ADMIN_KEY, TENANTS_KEY, readItem, writeItem } from './storage.js';
-import { sha256Hex } from './sha256.js';
 
 const V1 = '/api/v1';
 
 export const CSRF_HEADER = 'X-Requested-With';
 export const CSRF_VALUE = 'ferun';
 
+// TENANT_HEADER names the tenant a session acts in.
+export const TENANT_HEADER = 'FeRun-Tenant';
+
 // ApiError is a failed request: the server's {"error"} text and the
 // status.
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, body = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    // body is the refusal's JSON: an environment's code, findings or
+    // current deployment.
+    this.body = body;
   }
 }
 
 // request makes one call and returns the answer's JSON ({} for an empty
 // body). A failure throws an ApiError with the server's "error" text, or
 // "<METHOD> <path>: HTTP <status>" when the body has none.
-export async function request(method, path, { body, authorization } = {}) {
+export async function request(method, path, { body, authorization, tenant } = {}) {
   const headers = { [CSRF_HEADER]: CSRF_VALUE };
+  if (tenant) headers[TENANT_HEADER] = tenant;
   if (authorization) headers.Authorization = authorization;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const resp = await fetch(path, {
@@ -61,11 +68,30 @@ export async function request(method, path, { body, authorization } = {}) {
     // A plain-text answer (a door's own error): the status says enough.
   }
   if (!resp.ok) {
+    if (data && data.code === ROLE_REQUIRED) data.error = roleRequiredText(data);
     // ferund's refusals say {error}; the log store's Jaeger API {errors: [{msg}]}.
     const jaeger = data && Array.isArray(data.errors) && data.errors[0] && data.errors[0].msg;
-    throw new ApiError((data && data.error) || jaeger || `${method} ${path}: HTTP ${resp.status}`, resp.status);
+    throw new ApiError((data && data.error) || jaeger || `${method} ${path}: HTTP ${resp.status}`, resp.status,
+      data && typeof data === 'object' ? data : null);
   }
   return data;
+}
+
+// ROLE_REQUIRED is the code of a 403 for a principal that sees what it
+// names but lacks the role (ADR 0031): {"code", "role", "scope"}.
+export const ROLE_REQUIRED = 'role_required';
+
+// roleRequiredText says a role_required refusal in the UI's words.
+export function roleRequiredText(body) {
+  const role = (body && body.role) || 'a higher role';
+  const scope = body && body.scope === 'environment' ? 'this environment' : 'this tenant';
+  return `Your role does not allow this: it needs ${role} on ${scope}.`;
+}
+
+// notAvailable tells a ferund that has no such route (an older one, or a
+// surface that is off): 404 "no such route: …", never a 405.
+export function notAvailable(e) {
+  return !!e && e.status === 404 && /^no such route/.test(e.message || '');
 }
 
 // --------------------------------------------------------------- sign-in --
@@ -154,48 +180,16 @@ export const auth = {
   },
 };
 
-// ----------------------------------------------------------- tenant tokens --
+// ------------------------------------------------------------ the tenant --
 
-function tenantMap() {
-  try {
-    const m = JSON.parse(readItem('localStorage', TENANTS_KEY) || '{}');
-    return m && typeof m === 'object' ? m : {};
-  } catch {
-    return {};
-  }
+// forgetTenantTokens removes the tenant tokens an earlier UI kept in this
+// browser (localStorage ferun-tenants): the session acts now, and a
+// token lying in storage is one an attacker's script could take.
+export function forgetTenantTokens() {
+  if (readItem('localStorage', TENANTS_KEY)) writeItem('localStorage', TENANTS_KEY, '');
 }
 
-// tokenListeners hear that the stored tenant tokens changed.
-const tokenListeners = new Set();
-
-export function onTenantTokens(fn) {
-  tokenListeners.add(fn);
-  return () => tokenListeners.delete(fn);
-}
-
-export function getTenantToken(name) {
-  return tenantMap()[name] || '';
-}
-
-export function setTenantToken(name, token) {
-  const m = tenantMap();
-  if (token) m[name] = token;
-  else delete m[name];
-  writeItem('localStorage', TENANTS_KEY, Object.keys(m).length ? JSON.stringify(m) : '');
-  for (const fn of tokenListeners) fn();
-}
-
-// storedTokenHash is the hash of the tenant token this browser holds for
-// name, as the tenant's token list shows it; '' when it holds none.
-const hashCache = new Map();
-export function storedTokenHash(name) {
-  const tok = getTenantToken(name);
-  if (!tok) return '';
-  if (!hashCache.has(tok)) hashCache.set(tok, sha256Hex(tok));
-  return hashCache.get(tok);
-}
-
-// The tenant the current route acts as (set by the router).
+// The tenant the current route acts in (set by the router).
 let activeTenant = '';
 export function setActiveTenant(name) {
   activeTenant = name || '';
@@ -212,16 +206,25 @@ async function adminCall(method, path, body) {
   }
 }
 
+// sessionCall is a call of the session that names no tenant: making a
+// tenant, an invitation's acceptance.
+async function sessionCall(method, path, body) {
+  try {
+    return await request(method, V1 + path, { body });
+  } catch (e) {
+    if (e.status === 401) signedOut();
+    throw e;
+  }
+}
+
+// tenantCall is a call in the tenant of the route, with the session.
 async function tenantCall(method, path, body) {
   const tenant = activeTenant;
-  const tok = getTenantToken(tenant);
-  if (!tok) throw new ApiError(`this browser holds no token of tenant ${tenant}`, 0);
+  if (!tenant) throw new ApiError('no tenant chosen', 0);
   try {
-    return await request(method, V1 + path, { body, authorization: 'Bearer ' + tok });
+    return await request(method, V1 + path, { body, tenant });
   } catch (e) {
-    // A token revoked elsewhere, or a tenant deleted: forget it, so that
-    // the view asks for another.
-    if (e.status === 401 && getTenantToken(tenant) === tok) setTenantToken(tenant, '');
+    if (e.status === 401) signedOut();
     throw e;
   }
 }
@@ -231,13 +234,13 @@ async function tenantCall(method, path, body) {
 // lets it.
 async function tenantStream(path, signal) {
   const tenant = activeTenant;
-  const tok = getTenantToken(tenant);
-  if (!tok) throw new ApiError(`this browser holds no token of tenant ${tenant}`, 0);
+  if (!tenant) throw new ApiError('no tenant chosen', 0);
   const resp = await fetch(V1 + path, {
-    headers: { [CSRF_HEADER]: CSRF_VALUE, Authorization: 'Bearer ' + tok, Accept: 'application/x-ndjson' },
+    headers: { [CSRF_HEADER]: CSRF_VALUE, [TENANT_HEADER]: tenant, Accept: 'application/x-ndjson' },
     credentials: 'same-origin',
     signal,
   });
+  if (resp.status === 401) signedOut();
   if (!resp.ok) throw new ApiError(`GET ${V1 + path}: HTTP ${resp.status}`, resp.status);
   return resp.body.getReader();
 }
@@ -267,7 +270,7 @@ export const LOG_LINES = 200;
 export const ACTIVITY_LIMIT = 300;
 
 export const api = {
-  // Admin: tenants and their tokens.
+  // Admin: every tenant and its tokens (an operator's).
   listTenants: () => adminCall('GET', '/tenants'),
   createTenant: (name) => adminCall('POST', '/tenants', { name }),
   deleteTenant: (name) => adminCall('DELETE', `/tenants/${enc(name)}`),
@@ -297,7 +300,7 @@ export const api = {
   listActivity: (sandboxId, { beforeTsNs, source } = {}) =>
     adminCall('GET', `/sandboxes/${enc(sandboxId)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
 
-  // As the tenant.
+  // In the tenant.
   listSandboxes: () => tenantCall('GET', '/sandboxes'),
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
@@ -347,6 +350,48 @@ export const api = {
   getTrace: (env, trace) => tenantCall('GET', `/jaeger/api/traces/${enc(trace)}${query({ environment: env })}`),
   findTraces: (params) => tenantCall('GET', `/jaeger/api/traces?${params}`),
   followLogs: (params, signal) => tenantStream(`/logs?${params}&follow=1`, signal),
+
+  // People (ADR 0031): a person's tenants, their members, invitations,
+  // tokens and the quota's use. A ferund without these routes answers
+  // 404 "no such route" (notAvailable).
+  //
+  // A new tenant, its maker its admin: {tenant, role}.
+  createOwnTenant: (name) => sessionCall('POST', '/tenants', { name }),
+  // The tenant as the session sees it: {tenant, role, environments}.
+  getTenant: () => tenantCall('GET', '/tenant'),
+  // The members: {members: [{person, name, email, role, environments:
+  // [{id, name, role}]}]}, role the tenant grant's ('' with grants on
+  // environments alone).
+  listMembers: () => tenantCall('GET', '/tenant/members'),
+  // A grant of a member on the tenant (environment '') or on one of its
+  // environments (its ID); its removal. The last admin stays (ferund).
+  putGrant: (person, { role, environment = '' }) =>
+    tenantCall('PUT', `/tenant/members/${enc(person)}/grants`, environment ? { role, environment } : { role }),
+  deleteGrant: (person, environment = '') =>
+    tenantCall('DELETE', `/tenant/members/${enc(person)}/grants${query({ environment })}`),
+  // Leaving the tenant: every grant of the session's person in it.
+  leaveTenant: () => tenantCall('POST', '/tenant/leave'),
+  // Invitations: single-use links with a role and a scope, valid 7 days;
+  // a new one answers its secret once ({id, token, url?, role,
+  // environment, expiresAt}).
+  listInvitations: () => tenantCall('GET', '/tenant/invitations'),
+  createInvitation: ({ role, environment = '' }) =>
+    tenantCall('POST', '/tenant/invitations', environment ? { role, environment } : { role }),
+  revokeInvitation: (id) => tenantCall('DELETE', `/tenant/invitations/${enc(id)}`),
+  // An invitation by its link's secret, for the person who opens it:
+  // what it grants ({tenant, role, environment?, expiresAt}); its
+  // acceptance gives the session's person the grant.
+  getInvitation: (token) => sessionCall('GET', `/invitations/${enc(token)}`),
+  acceptInvitation: (token) => sessionCall('POST', `/invitations/${enc(token)}/accept`),
+  // The tenant's tokens, with a role and an optional environment, never
+  // above the minter's; a new one answers its secret once.
+  listTokensOfTenant: () => tenantCall('GET', '/tenant/tokens'),
+  mintTokenOfTenant: ({ label, role, environment = '' }) =>
+    tenantCall('POST', '/tenant/tokens', environment ? { label, role, environment } : { label, role }),
+  revokeTokenOfTenant: (hash) => tenantCall('DELETE', `/tenant/tokens/${enc(hash)}`),
+  // The quota: {limits, use}, each {sandboxes, environments, runningJobs,
+  // vcpus, memoryMib}; a limit absent or 0 is none.
+  getQuota: () => tenantCall('GET', '/tenant/quota'),
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

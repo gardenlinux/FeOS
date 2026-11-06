@@ -1,71 +1,43 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState } from 'react';
-import { api, setTenantToken } from '../api.js';
-import { sha256Hex } from '../sha256.js';
+import React from 'react';
 import { Icon } from '../Icon.jsx';
 
-// TenantGate stands in for a tenant's pages while this browser holds no
-// token of the tenant. ferund keeps tenant tokens as hashes only, so none
-// can be read back: the operator mints one for this browser, or pastes
-// one they have.
+// TenantGate stands in for a page the sign-in may not open (people.js,
+// viewGate): an operator's page, a tenant it is no member of, a page its
+// role does not offer, or a tenant's page under a Basic sign-in, which
+// the tenant routes do not take. The UI calls nothing for it.
 
-export function TenantGate({ tenant, user }) {
-  const [tok, setTok] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
+const TEXTS = {
+  operator: {
+    icon: 'shield', title: 'For operators',
+    text: 'This page is the operators\' of this FeRun: nodes, join tokens and instances.',
+  },
+  member: {
+    icon: 'lock', title: 'No such tenant',
+    text: 'There is no tenant of this name that you are a member of. An admin of a tenant can invite you.',
+  },
+  role: {
+    icon: 'lock', title: 'Not with your role',
+    text: 'Your role in this tenant does not offer this page.',
+  },
+  basic: {
+    icon: 'key', title: 'Sign in with the provider to work in a tenant',
+    text: 'A password sign-in is an operator\'s for the operators\' pages; a tenant\'s pages act with a '
+      + 'person\'s session. Sign out and sign in with the provider.',
+  },
+};
 
-  const mint = async () => {
-    setBusy(true);
-    setErr('');
-    try {
-      const res = await api.createTenantToken(tenant, `FeRun UI${user ? ` (${user})` : ''}`);
-      setTenantToken(tenant, res.token);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
+export function TenantGate({ reason, tenant, navigate }) {
+  const t = TEXTS[reason] || TEXTS.member;
   return (
     <section className="pane gate">
-      <h2><Icon name="key" size={15} /> A token of tenant “{tenant}”</h2>
-      <p className="muted">
-        This browser holds no token of the tenant. ferund stores tenant tokens as hashes, so a token cannot be
-        read back: mint one for this browser (it shows in the tenant's tokens, and can be revoked there), or
-        paste one you have.
-      </p>
+      <h2><Icon name={t.icon} size={15} /> {t.title}{reason !== 'operator' && tenant ? <> · <span className="mono">{tenant}</span></> : null}</h2>
+      <p className="muted">{t.text}</p>
       <div className="actionrow">
-        <button className="primary" disabled={busy} onClick={mint}>
-          <Icon name="key" size={14} /> Mint a token for this browser
-        </button>
+        <button className="ghost" onClick={() => navigate('/tenants')}><Icon name="arrowLeft" size={14} /> Your tenants</button>
       </div>
-      <form className="createpanel" onSubmit={async (e) => {
-        e.preventDefault();
-        const t = tok.trim();
-        if (!t) return;
-        setBusy(true);
-        setErr('');
-        try {
-          // The tenant's tokens are listed by hash: a token of another
-          // tenant, or a revoked one, is not among them.
-          const hash = sha256Hex(t);
-          const { tokens } = await api.listTenantTokens(tenant);
-          if (!(tokens || []).some((x) => x.hash === hash)) throw new Error(`that is not a token of tenant ${tenant}`);
-          setTenantToken(tenant, t);
-        } catch (e2) {
-          setErr(e2.message);
-        } finally {
-          setBusy(false);
-        }
-      }}>
-        <input type="password" value={tok} placeholder="or paste a tenant token" autoComplete="off"
-          onChange={(e) => setTok(e.target.value)} />
-        <button type="submit" disabled={busy || !tok.trim()}>Use it</button>
-      </form>
-      {err && <p className="error">{err}</p>}
     </section>
   );
 }

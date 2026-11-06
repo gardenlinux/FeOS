@@ -175,13 +175,13 @@ describe('certState and joinTokenState', () => {
 });
 
 describe('tokenRows', () => {
-  it('marks the token this browser holds and sorts newest first', () => {
+  it('sorts newest first', () => {
     const rows = tokenRows([
       { hash: 'aa', hashPrefix: 'aa', createdAt: '2026-10-16T10:00:00Z' },
       { hash: 'bb', hashPrefix: 'bb', createdAt: '2026-10-16T11:00:00Z' },
-    ], 'aa');
-    expect(rows.map((r) => [r.hash, r.held])).toEqual([['bb', false], ['aa', true]]);
-    expect(tokenRows(null, '')).toEqual([]);
+    ]);
+    expect(rows.map((r) => r.hash)).toEqual(['bb', 'aa']);
+    expect(tokenRows(null)).toEqual([]);
   });
 });
 

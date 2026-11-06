@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, getTenantToken, mcpURL } from '../api.js';
+import { api, mcpURL } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import {
   Ago, ArmButton, CopyBtn, ErrBox, LiveBadge, StateDot, StateLabel, TokenOnce, useArm, useNow, usePoll,
@@ -12,10 +12,13 @@ import { createHints, fleetDefaults, fmtSize, sandboxCounts } from './fleet.js';
 import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
 import { Access } from './Access.jsx';
+import { useAccess } from '../people.js';
 
 // A tenant's sandboxes: the list, and a sandbox's detail with its tabs
 // (overview, activity, tokens, access, network). The selection and the
-// tab are the route's: /tenants/:t/sandboxes/:id/:tab.
+// tab are the route's: /tenants/:t/sandboxes/:id/:tab. The changes need a
+// tenant grant write; the activity and the network are the operators'
+// (the activity log carries tool params and outputs), as is a node.
 
 export function Sandboxes({ tenant, sel, tab, navigate }) {
   const [sandboxes, setSandboxes] = useState(null);
@@ -26,6 +29,7 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
   const [createdToken, setCreatedToken] = useState(null);
   const [q, setQ] = useState('');
   const base = `/tenants/${encodeURIComponent(tenant)}/sandboxes`;
+  const { can: c } = useAccess(tenant);
 
   const refresh = useCallback(async () => {
     try {
@@ -41,13 +45,14 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
 
   // The create form names the platform's defaults and bounds, which the
   // nodes view's answer carries (GET /api/v1/admin/nodes); read once, when
-  // the form first opens. Without them the form says "the default".
+  // the form first opens, by an operator only. Without them the form says
+  // "the default".
   useEffect(() => {
-    if (!showCreate || defaults) return undefined;
+    if (!showCreate || defaults || !c.operator) return undefined;
     let live = true;
     api.listNodes().then((res) => { if (live && res.defaults) setDefaults(res.defaults); }, () => {});
     return () => { live = false; };
-  }, [showCreate, defaults]);
+  }, [showCreate, defaults, c.operator]);
 
   // Escape closes the detail.
   useEffect(() => {
@@ -92,7 +97,7 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
   if (sel && selSb) {
     return (
       <SandboxDetail key={selSb.sandboxId} tenant={tenant} sb={selSb} tab={tab} busy={busy} act={act} err={err}
-        refresh={refresh} navigate={navigate} base={base} />
+        refresh={refresh} navigate={navigate} base={base} can={c} />
     );
   }
 
@@ -112,12 +117,13 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
           </span>
           <span className="spacer" />
           <LiveBadge lastOk={lastOk} />
-          <button className={'ghost mini' + (showCreate ? ' on' : '')} onClick={() => setShowCreate(!showCreate)}>
-            <Icon name="plus" size={13} /> new
-          </button>
+          {c.writeTenant && (
+            <button className={'ghost mini' + (showCreate ? ' on' : '')} onClick={() => setShowCreate(!showCreate)}>
+              <Icon name="plus" size={13} /> new
+            </button>)}
         </div>
 
-        {showCreate && (
+        {showCreate && c.writeTenant && (
           <CreatePanel busy={busy} act={act} defaults={defaults}
             onDone={(tok) => { setCreatedToken(tok); setShowCreate(false); }}
             onCancel={() => setShowCreate(false)} />
@@ -166,11 +172,11 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
                   <td className="col-when"><Ago iso={sb.updatedAt} /></td>
                   <td className="col-when muted">{fmtDate(sb.createdAt)}</td>
                   <td className="col-quick" onClick={(e) => e.stopPropagation()}>
-                    {sb.clientState === 'running' && (
+                    {c.writeTenant && sb.clientState === 'running' && (
                       <button className="iconbtn mini" title="pause" disabled={!!busy}
                         onClick={() => act('pause', () => api.pauseSandbox(sb.sandboxId))}>
                         <Icon name="pause" size={12} /></button>)}
-                    {(sb.clientState === 'paused' || sb.clientState === 'hibernated') && (
+                    {c.writeTenant && (sb.clientState === 'paused' || sb.clientState === 'hibernated') && (
                       <button className="iconbtn mini"
                         title={sb.clientState === 'hibernated' ? 'resume from the checkpoint' : 'resume'}
                         disabled={!!busy}
@@ -220,19 +226,25 @@ export function CreatePanel({ act, busy, defaults, onDone, onCancel }) {
   );
 }
 
-const TABS = [
+// TABS are a sandbox's tabs; operator: an operator's only (admin routes).
+export const TABS = [
   { key: 'overview', label: 'Overview', icon: 'gauge' },
-  { key: 'activity', label: 'Activity', icon: 'activity' },
+  { key: 'activity', label: 'Activity', icon: 'activity', operator: true },
   { key: 'tokens', label: 'Tokens', icon: 'key' },
   { key: 'access', label: 'Access', icon: 'lock' },
-  { key: 'network', label: 'Network', icon: 'globe' },
+  { key: 'network', label: 'Network', icon: 'globe', operator: true },
 ];
 
-function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, base }) {
+// sandboxTabs are the tabs can offers.
+export function sandboxTabs(can) {
+  return TABS.filter((t) => !t.operator || (can && can.operator));
+}
+
+function SandboxDetail({ sb, tab, busy, act, err, refresh, navigate, base, can: c }) {
   const [armed, arm, disarm] = useArm();
   const here = `${base}/${sb.sandboxId}`;
-  const activeTab = TABS.some((t) => t.key === tab) ? tab : 'overview';
-  const tenantToken = getTenantToken(tenant);
+  const tabs = sandboxTabs(c);
+  const activeTab = tabs.some((t) => t.key === tab) ? tab : 'overview';
   const load = useCallback((source) => api.listActivity(sb.sandboxId, { source }), [sb.sandboxId]);
 
   return (
@@ -249,7 +261,7 @@ function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, bas
       </div>
 
       <div className="tabbar">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.key} className={'tab' + (activeTab === t.key ? ' on' : '')}
             onClick={() => navigate(`${here}/${t.key}`)}>
             <Icon name={t.icon} size={14} /> {t.label}
@@ -270,14 +282,12 @@ function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, bas
             <span className="k">image</span><span className="v mono">{sb.image || 'the default image'}</span>
             <span className="k">node</span>
             <span className="mono v">
-              {sb.node
+              {sb.node && c.operator
                 ? <a href={`/nodes/${encodeURIComponent(sb.node)}`} onClick={(e) => { e.preventDefault(); navigate(`/nodes/${encodeURIComponent(sb.node)}`); }}>{sb.node}</a>
-                : '—'}
+                : sb.node || '—'}
             </span>
             <span className="k">size</span><span className="mono v">{fmtSize(sb)}</span>
             <span className="k">owner</span><span className="mono v">{sb.owner || '—'}</span>
-            <span className="k">tenant token</span>
-            <span className="mono v">…{tenantToken.slice(-12)} <CopyBtn text={tenantToken} mini /></span>
             <span className="k">created</span>
             <span className="v">{fmtDate(sb.createdAt)} <Ago iso={sb.createdAt} /></span>
             <span className="k">last activity</span>
@@ -292,11 +302,11 @@ function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, bas
           </div>
 
           <div className="actionrow">
-            {sb.clientState === 'running' && (
+            {c.writeTenant && sb.clientState === 'running' && (
               <button className="primary" disabled={!!busy}
                 onClick={() => act('pause', () => api.pauseSandbox(sb.sandboxId))}>
                 <Icon name="pause" size={14} /> Pause</button>)}
-            {(sb.clientState === 'paused' || sb.clientState === 'hibernated') && (
+            {c.writeTenant && (sb.clientState === 'paused' || sb.clientState === 'hibernated') && (
               <button className="primary" disabled={!!busy}
                 title={sb.clientState === 'hibernated' ? 'restore from the checkpoint, on a node with the same object store' : 'resume'}
                 onClick={() => act('resume', () => api.resumeSandbox(sb.sandboxId))}>
@@ -305,12 +315,13 @@ function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, bas
               <Icon name="refresh" size={14} /> Refresh</button>
             {busy && <span className="muted small">{busy}…</span>}
             <span className="spacer" />
-            <ArmButton armKey={sb.sandboxId} armed={armed} arm={arm} disarm={disarm} icon="trash"
-              confirmLabel="really delete?" disabled={!!busy}
-              onConfirm={() => act('delete', async () => {
-                await api.deleteSandbox(sb.sandboxId);
-                navigate(base);
-              })}>Delete</ArmButton>
+            {c.writeTenant && (
+              <ArmButton armKey={sb.sandboxId} armed={armed} arm={arm} disarm={disarm} icon="trash"
+                confirmLabel="really delete?" disabled={!!busy}
+                onConfirm={() => act('delete', async () => {
+                  await api.deleteSandbox(sb.sandboxId);
+                  navigate(base);
+                })}>Delete</ArmButton>)}
           </div>
 
           <div className="connectbox">
@@ -330,7 +341,7 @@ function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, bas
         <div className="tabbody"><Activity load={load} /></div>
       )}
       {activeTab === 'tokens' && (
-        <div className="tabbody"><Tokens sandboxId={sb.sandboxId} /></div>
+        <div className="tabbody"><Tokens sandboxId={sb.sandboxId} write={c.writeTenant} /></div>
       )}
       {activeTab === 'access' && (
         <div className="tabbody"><Access sandboxId={sb.sandboxId} /></div>
@@ -342,7 +353,7 @@ function SandboxDetail({ tenant, sb, tab, busy, act, err, refresh, navigate, bas
   );
 }
 
-function Tokens({ sandboxId }) {
+function Tokens({ sandboxId, write }) {
   const [tokens, setTokens] = useState(null);
   const [label, setLabel] = useState('');
   const [fresh, setFresh] = useState('');
@@ -376,9 +387,10 @@ function Tokens({ sandboxId }) {
               <td className="col-when muted">{fmtDate(t.createdAt)}</td>
               <td className="col-when">{t.lastUsedAt ? <Ago iso={t.lastUsedAt} /> : <span className="muted">never</span>}</td>
               <td className="col-quick">
-                <ArmButton armKey={t.hash} armed={armed} arm={arm} disarm={disarm} icon="trash"
-                  className="mini" confirmLabel="revoke?"
-                  onConfirm={() => api.revokeToken(sandboxId, t.hash).then(refresh, (e) => setErr(e.message))}>Revoke</ArmButton>
+                {write && (
+                  <ArmButton armKey={t.hash} armed={armed} arm={arm} disarm={disarm} icon="trash"
+                    className="mini" confirmLabel="revoke?"
+                    onConfirm={() => api.revokeToken(sandboxId, t.hash).then(refresh, (e) => setErr(e.message))}>Revoke</ArmButton>)}
               </td>
             </tr>
           ))}
@@ -386,7 +398,7 @@ function Tokens({ sandboxId }) {
       </table></div>
       {tokens && tokens.length === 0 && <p className="empty">No tokens.</p>}
 
-      <form className="createpanel" onSubmit={async (e) => {
+      {write && <form className="createpanel" onSubmit={async (e) => {
         e.preventDefault();
         try {
           const res = await api.createToken(sandboxId, label.trim());
@@ -399,7 +411,7 @@ function Tokens({ sandboxId }) {
       }}>
         <input placeholder="label (e.g. laptop, claude code)" value={label} onChange={(e) => setLabel(e.target.value)} />
         <button type="submit" className="primary"><Icon name="key" size={14} /> Mint a token</button>
-      </form>
+      </form>}
     </div>
   );
 }

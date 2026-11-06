@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useReducer, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  api, auth, getTenantToken, onSignedOut, onTenantTokens, setActiveTenant, setBasic,
+  auth, forgetTenantTokens, onSignedOut, setActiveTenant, setBasic,
 } from './api.js';
 import { Icon } from './Icon.jsx';
 import { Avatar, ThemeToggle, usePoll } from './components.jsx';
-import { TENANT_VIEWS, canonicalPath, envPath, parsePath } from './routes.js';
+import { canonicalPath, envPath, parsePath } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
+import { InviteAccept, Members, MyTenants, RoleBadge, Tokens } from './views/People.jsx';
 import { Overview } from './views/Overview.jsx';
 import { Tenants } from './views/Tenants.jsx';
 import { Sandboxes } from './views/Sandboxes.jsx';
@@ -20,10 +21,20 @@ import { Nodes } from './views/Nodes.jsx';
 import { NodeDetail } from './views/NodeDetail.jsx';
 import { JoinTokens } from './views/JoinTokens.jsx';
 import { Instances } from './views/Instances.jsx';
+import {
+  MeContext, isOperator, myTenants, roleLabel, tenantAccess, tenantHome, tenantNav, viewGate,
+} from './people.js';
 
-// The management UI of FeRun. Before anything else it asks ferund who is
-// signed in (/auth/me) and how one signs in (/auth/config); signed out,
-// or once an admin call is answered 401, it shows the sign-in screen.
+// The management UI of FeRun, the tenants' console (ADR 0031). Before
+// anything else it asks ferund who is signed in (/auth/me: the person,
+// whether an operator, their tenants with their roles) and how one signs
+// in (/auth/config); signed out, or once a call is answered 401, it shows
+// the sign-in screen. /auth/me decides what the UI offers (people.js):
+// operators get the operators' pages, everyone their tenants.
+
+// ME_POLL_MS is how often the UI asks /auth/me again, so that a grant
+// given or taken elsewhere shows.
+const ME_POLL_MS = 60000;
 
 // useRoute follows the location, its path and query; a path under an
 // earlier name is replaced by its canonical one (canonicalPath). A new
@@ -63,12 +74,12 @@ export function displayName(me) {
 export default function App() {
   const [session, setSession] = useState({ phase: 'loading' });
   const [route, navigate] = useRoute();
-  const [, bump] = useReducer((x) => x + 1, 0);
 
   const check = useCallback(async () => {
     try {
       const [config, me] = await Promise.all([auth.config(), auth.me()]);
       if (!me) setBasic('');
+      forgetTenantTokens();
       setSession({ phase: me ? 'in' : 'out', config, me });
     } catch (e) {
       setSession({ phase: 'error', error: e.message });
@@ -78,7 +89,19 @@ export default function App() {
   useEffect(() => onSignedOut(() => setSession((s) => ({
     ...s, phase: 'out', me: null, notice: 'Your sign-in has ended. Sign in again.',
   }))), []);
-  useEffect(() => onTenantTokens(bump), []);
+  // reload asks /auth/me again and returns it (null: signed out).
+  const reload = useCallback(async () => {
+    const me = await auth.me();
+    setSession((s) => (me ? { ...s, phase: 'in', me } : { ...s, phase: 'out', me: null }));
+    return me;
+  }, []);
+  const signedIn = session.phase === 'in';
+  useEffect(() => {
+    if (!signedIn) return undefined;
+    const id = setInterval(() => { reload().catch(() => {}); }, ME_POLL_MS);
+    return () => clearInterval(id);
+  }, [signedIn, reload]);
+  const meCtx = useMemo(() => ({ me: session.me || null, reload }), [session.me, reload]);
 
   // The tenant the route acts as, set during render: the views' effects
   // run before this component's, and call the API at once.
@@ -105,8 +128,9 @@ export default function App() {
   }
 
   const me = session.me;
-  const user = me.username || me.email || '';
-  const needsGate = TENANT_VIEWS.has(route.view) && route.tenant && !getTenantToken(route.tenant);
+  const operator = isOperator(me);
+  const gate = viewGate(me, route);
+  const needsGate = !!gate;
   const signOut = async () => {
     let to = '/';
     try {
@@ -118,44 +142,43 @@ export default function App() {
   };
 
   return (
+    <MeContext.Provider value={meCtx}>
     <div className="app">
-      <Sidebar route={route} navigate={navigate} />
+      <Sidebar route={route} navigate={navigate} me={me} />
       <div className="main">
         <Topbar route={route} navigate={navigate} me={me} onSignOut={signOut} />
         <main className="content">
-          {route.view === 'tenants' && <Tenants navigate={navigate} user={user} />}
-          {needsGate && <TenantGate key={route.tenant} tenant={route.tenant} user={user} />}
+          {route.view === 'tenants' && (operator ? <Tenants navigate={navigate} /> : <MyTenants navigate={navigate} />)}
+          {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
+          {needsGate && <TenantGate key={route.tenant} reason={gate} tenant={route.tenant} navigate={navigate} />}
           {!needsGate && route.view === 'overview' && <Overview key={route.tenant} tenant={route.tenant} navigate={navigate} />}
           {!needsGate && route.view === 'sandboxes' && (
             <Sandboxes key={route.tenant} tenant={route.tenant} sel={route.sel} tab={route.tab} navigate={navigate} />)}
           {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
+          {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+          {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
           {!needsGate && route.view === 'environments' && (
             <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
               replica={route.replica} search={route.search} navigate={navigate} />)}
-          {route.view === 'nodes' && <Nodes navigate={navigate} />}
-          {route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
-          {route.view === 'joinTokens' && <JoinTokens />}
-          {route.view === 'instances' && <Instances />}
+          {!needsGate && route.view === 'nodes' && <Nodes navigate={navigate} />}
+          {!needsGate && route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
+          {!needsGate && route.view === 'joinTokens' && <JoinTokens />}
+          {!needsGate && route.view === 'instances' && <Instances />}
         </main>
       </div>
     </div>
+    </MeContext.Provider>
   );
 }
 
 // ------------------------------------------------------------------ shell --
 
-function Sidebar({ route, navigate }) {
-  const [tenants, setTenants] = useState([]);
-  const refresh = useCallback(async () => {
-    try {
-      setTenants((await api.listTenants()).tenants || []);
-    } catch {
-      // The sidebar's list is a convenience; the views show the errors.
-    }
-  }, []);
-  usePoll(refresh, 8000);
-
+function Sidebar({ route, navigate, me }) {
+  const tenants = myTenants(me);
+  const operator = isOperator(me);
   const t = route.tenant;
+  const access = tenantAccess(me, t);
+  const nav = t ? tenantNav(access) : [];
   const enc = encodeURIComponent;
   const link = (to) => (e) => { e.preventDefault(); navigate(to); };
 
@@ -166,35 +189,38 @@ function Sidebar({ route, navigate }) {
         <span className="brand-name">FeRun</span>
       </a>
 
-      {t && (
+      {t && nav.length > 0 && (
         <nav className="snav">
           <div className="snav-label">tenant · <span className="mono">{t}</span></div>
-          <NavItem icon="dashboard" label="Overview" active={route.view === 'overview'} onClick={() => navigate(`/tenants/${enc(t)}`)} />
-          <NavItem icon="box" label="Sandboxes" active={route.view === 'sandboxes'} onClick={() => navigate(`/tenants/${enc(t)}/sandboxes`)} />
-          <NavItem icon="blocks" label="Environments" active={route.view === 'environments'} onClick={() => navigate(envPath(t))} />
-          <NavItem icon="terminal" label="Tools" active={route.view === 'tools'} onClick={() => navigate(`/tenants/${enc(t)}/tools`)} />
+          {nav.map((n) => (
+            <NavItem key={n.view} icon={n.icon} label={n.label} active={(n.views || [n.view]).includes(route.view)}
+              onClick={() => navigate(n.view === 'environments' ? envPath(t) : `/tenants/${enc(t)}${n.path}`)} />
+          ))}
+        </nav>
+      )}
+
+      {operator && (
+        <nav className="snav">
+          <div className="snav-label">platform</div>
+          <NavItem icon="users" label="Tenants" active={route.view === 'tenants'} onClick={() => navigate('/tenants')} />
+          <NavItem icon="server" label="Nodes" active={route.view === 'nodes' || route.view === 'node'} onClick={() => navigate('/nodes')} />
+          <NavItem icon="ticket" label="Join tokens" active={route.view === 'joinTokens'} onClick={() => navigate('/join-tokens')} />
+          <NavItem icon="layers" label="Instances" active={route.view === 'instances'} onClick={() => navigate('/instances')} />
         </nav>
       )}
 
       <nav className="snav">
-        <div className="snav-label">platform</div>
-        <NavItem icon="users" label="Tenants" active={route.view === 'tenants'} onClick={() => navigate('/tenants')} />
-        <NavItem icon="server" label="Nodes" active={route.view === 'nodes' || route.view === 'node'} onClick={() => navigate('/nodes')} />
-        <NavItem icon="ticket" label="Join tokens" active={route.view === 'joinTokens'} onClick={() => navigate('/join-tokens')} />
-        <NavItem icon="layers" label="Instances" active={route.view === 'instances'} onClick={() => navigate('/instances')} />
-      </nav>
-
-      <nav className="snav">
-        <div className="snav-label">{t ? 'switch tenant' : 'work as a tenant'}</div>
+        <div className="snav-label">{operator ? 'tenants' : 'your tenants'}</div>
+        {!operator && (
+          <NavItem icon="users" label="All yours" active={route.view === 'tenants'} onClick={() => navigate('/tenants')} />
+        )}
         <div className="tenantlist">
           {tenants.map((tn) => (
-            <button key={tn.name} className={'tenantchip' + (t === tn.name ? ' on' : '')}
-              title={getTenantToken(tn.name) ? 'this browser holds a token of the tenant' : 'this browser holds no token of the tenant'}
-              onClick={() => navigate(`/tenants/${enc(tn.name)}`)}>
-              <span className="tenantchip-name">
-                {tn.name}{!getTenantToken(tn.name) && <Icon name="lock" size={11} className="dim" />}
-              </span>
-              <span className="tenantchip-count mono">{tn.sandboxCount}</span>
+            <button key={tn.tenant} className={'tenantchip' + (t === tn.tenant ? ' on' : '')}
+              title={`your role: ${roleLabel(tn) || 'none'}`}
+              onClick={() => navigate(tenantHome(tenantAccess(me, tn.tenant)))}>
+              <span className="tenantchip-name">{tn.tenant}</span>
+              {!operator && <RoleBadge role={roleLabel(tn)} />}
             </button>
           ))}
           {tenants.length === 0 && <span className="muted small">—</span>}
@@ -232,6 +258,9 @@ function Topbar({ route, navigate, me, onSignOut }) {
         {route.view === 'sandboxes' && <>{sep}{crumb('sandboxes', `/tenants/${enc(t)}/sandboxes`)}</>}
         {route.view === 'sandboxes' && route.sel && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
         {route.view === 'tools' && <>{sep}<span className="crumb">tools</span></>}
+        {route.view === 'members' && <>{sep}<span className="crumb">members</span></>}
+        {route.view === 'tokens' && <>{sep}<span className="crumb">tokens</span></>}
+        {route.view === 'invite' && <span className="crumb">invitation</span>}
         {route.view === 'environments' && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'environments' && route.env && <>{sep}{crumb(route.env, envPath(t, route.env))}</>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && (
@@ -244,13 +273,11 @@ function Topbar({ route, navigate, me, onSignOut }) {
         {route.view === 'instances' && <span className="crumb">instances</span>}
       </nav>
       <span className="spacer" />
-      {t && getTenantToken(t) && (
-        <span className="muted mono small tokenhint" title="the tenant token this browser works with">token …{getTenantToken(t).slice(-8)}</span>
-      )}
       <span className="userbox" title={me.email || me.username || ''}>
         <Avatar src={me.picture} name={displayName(me)} />
         <span className="username">{displayName(me)}</span>
         {me.method === 'basic' && <span className="muted small">(password)</span>}
+        {isOperator(me) && <span className="badge acc" title="an operator of this FeRun">operator</span>}
       </span>
       <button className="ghost mini" onClick={onSignOut}><Icon name="logout" size={13} /> Sign out</button>
     </header>
