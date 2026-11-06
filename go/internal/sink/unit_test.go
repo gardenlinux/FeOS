@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -148,13 +149,26 @@ func TestTenants(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != pathTenant {
+		if r.URL.Path != pathTenant || r.URL.Query().Get("filter") != "environments" {
 			http.NotFound(w, r)
 			return
 		}
-		switch r.Header.Get("Authorization") {
+		session := ""
+		if c, err := r.Cookie("ferun_session"); err == nil {
+			session = c.Value + " " + r.Header.Get("FeRun-Tenant")
+		}
+		switch r.Header.Get("Authorization") + session {
 		case "Bearer good":
+			// A ferund of before people answers the tenant alone.
 			_, _ = w.Write([]byte(`{"tenant":"acme"}`))
+		case "Bearer reader":
+			_, _ = w.Write([]byte(`{"tenant":"acme","role":"read","environments":[]}`))
+		case "Bearer stage":
+			_, _ = w.Write([]byte(`{"tenant":"acme","role":"","environments":["e1",""]}`))
+		case "s1 acme":
+			_, _ = w.Write([]byte(`{"tenant":"acme","role":"write","environments":["e1"]}`))
+		case "s1 other":
+			http.Error(w, `{"error":"no such tenant"}`, http.StatusNotFound)
 		case "Bearer broken":
 			http.Error(w, "boom", http.StatusInternalServerError)
 		default:
@@ -168,27 +182,53 @@ func TestTenants(t *testing.T) {
 	now := time.Now()
 	ts.now = func() time.Time { return now }
 	ctx := context.Background()
+	good := Credential{Authorization: "Bearer good"}
 	for range 3 {
-		if got, err := ts.Resolve(ctx, "Bearer good"); err != nil || got != "acme" {
-			t.Fatalf("Resolve = %q, %v", got, err)
+		if got, err := ts.Resolve(ctx, good); err != nil || !reflect.DeepEqual(got, Access{Tenant: "acme", All: true, Write: true}) {
+			t.Fatalf("Resolve = %+v, %v", got, err)
 		}
 	}
 	if calls.Load() != 1 {
 		t.Errorf("%d calls; the answer was not kept", calls.Load())
 	}
 	now = now.Add(61 * time.Second)
-	if _, err := ts.Resolve(ctx, "Bearer good"); err != nil || calls.Load() != 2 {
+	if _, err := ts.Resolve(ctx, good); err != nil || calls.Load() != 2 {
 		t.Errorf("after the TTL: %v, %d calls", err, calls.Load())
 	}
+	for _, c := range []struct {
+		c    Credential
+		want Access
+	}{
+		{Credential{Authorization: "Bearer reader"}, Access{Tenant: "acme", All: true}},
+		{Credential{Authorization: "Bearer stage"}, Access{Tenant: "acme", Envs: []string{"e1"}}},
+		{Credential{Session: "s1", Tenant: "acme"}, Access{Tenant: "acme", All: true, Write: true}},
+	} {
+		if got, err := ts.Resolve(ctx, c.c); err != nil || !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%+v: %+v, %v", c.c, got, err)
+		}
+	}
+	// A session's answer is kept for sessionTTL, per tenant.
+	n := calls.Load()
 	var ref *refusal
-	_, err := ts.Resolve(ctx, "Bearer bad")
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "other"}); !errors.As(err, &ref) || ref.status != 404 {
+		t.Errorf("another tenant: %v", err)
+	}
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "acme"}); err != nil || calls.Load() != n+1 {
+		t.Errorf("kept: %v, %d calls", err, calls.Load()-n)
+	}
+	now = now.Add(sessionTTL)
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "acme"}); err != nil || calls.Load() != n+2 {
+		t.Errorf("after sessionTTL: %v, %d calls", err, calls.Load()-n)
+	}
+	_, err := ts.Resolve(ctx, Credential{Authorization: "Bearer bad"})
 	if !errors.As(err, &ref) || ref.status != 401 || string(ref.body) != `{"error":"unknown token"}` {
 		t.Errorf("refusal: %v", err)
 	}
-	if _, err := ts.Resolve(ctx, "Bearer bad"); err == nil || calls.Load() != 4 {
+	n = calls.Load()
+	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer bad"}); err == nil || calls.Load() != n+1 {
 		t.Errorf("a refusal was kept: %v, %d calls", err, calls.Load())
 	}
-	if _, err := ts.Resolve(ctx, "Bearer broken"); err == nil || errors.As(err, &ref) {
+	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer broken"}); err == nil || errors.As(err, &ref) {
 		t.Errorf("a failure: %v", err)
 	}
 }

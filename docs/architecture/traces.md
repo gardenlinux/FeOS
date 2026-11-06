@@ -259,9 +259,10 @@ object, bytes as base64 text.
 
 ### Reading: Jaeger's query API
 
-Under `/api/v1/jaeger`, with a tenant's token as `GET /api/v1/logs`
-takes it (sink.md, Reading); every query is the tenant's own, whatever
-it asks. The paths and answers are those of Jaeger's HTTP query API
+Under `/api/v1/jaeger`, with a reader as `GET /api/v1/logs` takes it
+(sink.md, Readers); every query is the tenant's own, whatever it asks,
+and a reader of environments only (ADR 0031) reads the spans of those:
+a trace's other spans are left out. The paths and answers are those of Jaeger's HTTP query API
 (`jaeger-query`'s `/api/…`), so a client of that API, Grafana's Jaeger
 data source among them, reads them with the base URL
 `<sink>/api/v1/jaeger` and the token as a header.
@@ -311,7 +312,8 @@ among them). A span is `{"traceID", "spanID", "operationName",
 ### Reading: the ingress's traffic
 
 `GET /api/v1/traffic?environment=<ID>&service=<name>[&service=…]&since=&until=&step=`,
-with a tenant's token as above: the requests the ingress answered for
+with a reader as above (404 "no such environment" for an environment
+it may not read): the requests the ingress answered for
 each service of the tenant's environment, counted from its server spans
 (source `ingress`, the service as `object`). `ferund`'s
 `…/environments/{env}/traffic` reads it (control-plane.md). `since` and

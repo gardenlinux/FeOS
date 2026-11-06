@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 )
 
 // api is the HTTP API (sink.md, Reading).
@@ -60,16 +61,62 @@ func (a *api) healthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
-// tenant resolves the request's token to its tenant through ferund; a
-// refusal of ferund is passed on as it came.
-func (a *api) tenant(h func(w http.ResponseWriter, r *http.Request, tenant string)) http.HandlerFunc {
+// The header a change made with a session's cookie must carry, as
+// ferund's own (a page of another origin cannot set it without CORS,
+// which the sink never grants).
+const (
+	csrfHeader = "X-Requested-With"
+	csrfValue  = "ferun"
+)
+
+// crossOrigin is net/http's cross-origin check: Sec-Fetch-Site, or
+// without it Origin against Host. The sink is served under ferund's host,
+// so that ferund's pages are of its own origin.
+var crossOrigin http.CrossOriginProtection
+
+// credential is the reader's credential: a token (Authorization: Bearer
+// …), else a person's session (its cookie, where the sink is served under
+// ferund's host), which names its tenant in FeRun-Tenant and whose
+// changes need X-Requested-With: ferun and a request of the same origin,
+// as ferund's do (ADR 0031).
+func credential(r *http.Request) (Credential, error) {
+	c := Credential{Tenant: r.Header.Get(auth.TenantHeader)}
+	if v := r.Header.Get("Authorization"); strings.HasPrefix(v, "Bearer ") && len(v) > len("Bearer ") {
+		c.Authorization = v
+		return c, nil
+	}
+	ck, err := r.Cookie(auth.SessionCookie)
+	if err != nil || ck.Value == "" {
+		return c, apierr.New(http.StatusUnauthorized, "a tenant's token (Authorization: Bearer …) or a session is required")
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+	default:
+		if r.Header.Get(csrfHeader) != csrfValue {
+			return c, apierr.New(http.StatusForbidden, "missing %s header", csrfHeader)
+		}
+		if err := crossOrigin.Check(r); err != nil {
+			return c, apierr.New(http.StatusForbidden, "cross-origin request refused")
+		}
+	}
+	if c.Tenant == "" {
+		return c, apierr.New(http.StatusBadRequest, "a session names its tenant in the %s header", auth.TenantHeader)
+	}
+	c.Session = ck.Value
+	return c, nil
+}
+
+// tenant resolves the request's reader to what it may read through
+// ferund; a refusal of ferund is passed on as it came, and a reader that
+// may read nothing of the tenant is answered as an unknown tenant.
+func (a *api) tenant(h func(w http.ResponseWriter, r *http.Request, acc Access)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") || len(auth) <= len("Bearer ") {
-			apierr.Write(w, apierr.New(http.StatusUnauthorized, "a tenant's token is required (Authorization: Bearer …)"))
+		c, err := credential(r)
+		if err != nil {
+			apierr.Write(w, err)
 			return
 		}
-		t, err := a.tenants.Resolve(r.Context(), auth)
+		acc, err := a.tenants.Resolve(r.Context(), c)
 		var ref *refusal
 		if errors.As(err, &ref) {
 			if ref.contentType != "" {
@@ -81,19 +128,25 @@ func (a *api) tenant(h func(w http.ResponseWriter, r *http.Request, tenant strin
 		}
 		if err != nil {
 			a.log.Warn("resolve a tenant", "err", err)
-			apierr.Write(w, apierr.New(http.StatusBadGateway, "cannot ask ferund for the token's tenant"))
+			apierr.Write(w, apierr.New(http.StatusBadGateway, "cannot ask ferund for the reader's tenant"))
 			return
 		}
-		h(w, r, t)
+		if acc.none() {
+			apierr.Write(w, apierr.New(http.StatusNotFound, "no such tenant"))
+			return
+		}
+		h(w, r, acc)
 	}
 }
 
-func (a *api) logs(w http.ResponseWriter, r *http.Request, tenant string) {
+func (a *api) logs(w http.ResponseWriter, r *http.Request, acc Access) {
 	q, err := parseQuery(r.URL.Query(), time.Now())
 	if err != nil {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 		return
 	}
+	q.Sel.Within = acc.within()
+	tenant := acc.Tenant
 	if q.Follow {
 		a.follow(w, r, tenant, q)
 		return
@@ -106,13 +159,15 @@ func (a *api) logs(w http.ResponseWriter, r *http.Request, tenant string) {
 	writeJSON(w, http.StatusOK, res.page(q.Forward))
 }
 
-func (a *api) streams(w http.ResponseWriter, r *http.Request, tenant string) {
+func (a *api) streams(w http.ResponseWriter, r *http.Request, acc Access) {
 	v := r.URL.Query()
 	sel, err := parseSelector(v)
 	if err != nil {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 		return
 	}
+	sel.Within = acc.within()
+	tenant := acc.Tenant
 	since := time.Now().Add(-7 * 24 * time.Hour).UnixNano()
 	if t := v.Get("since"); t != "" {
 		if since, err = parseTime("since", t); err != nil {
@@ -134,7 +189,14 @@ func (a *api) streams(w http.ResponseWriter, r *http.Request, tenant string) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (a *api) deleteStreams(w http.ResponseWriter, r *http.Request, tenant string) {
+// deleteStreams needs write on the tenant (FeCode's token, which deletes
+// an environment's streams with the environment).
+func (a *api) deleteStreams(w http.ResponseWriter, r *http.Request, acc Access) {
+	if !acc.Write {
+		apierr.Write(w, apierr.RoleRequired("write", "tenant"))
+		return
+	}
+	tenant := acc.Tenant
 	v := r.URL.Query()
 	env, job := v.Get("environment"), v.Get("job")
 	if (env == "") == (job == "") || len(v) != 1 {

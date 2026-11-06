@@ -72,9 +72,14 @@ type SpanLink struct {
 // range of durations (0: open), and attributes each with its value in
 // the span's or the resource's attributes; with Failed only the
 // ingress's spans of failed requests (Failed); at most Max hits.
+// Environments, when not nil, bounds the spans to those of the
+// environments it names (a reader's grants on environments, ADR 0031):
+// a span of no environment is none of them, and an empty list selects
+// nothing.
 type SpanQuery struct {
 	Tenant                                     string
 	Environment, Object, Job, Instance, Source string
+	Environments                               []string
 	TraceID, Service, Operation                string
 	Tags                                       map[string]string
 	SinceNs, UntilNs                           int64
@@ -93,6 +98,16 @@ func (q SpanQuery) String() string {
 	}
 	term("tenant", q.Tenant)
 	term("environment", q.Environment)
+	if q.Environments != nil {
+		var or []string
+		for _, e := range q.Environments {
+			or = append(or, "environment:"+quote(e))
+		}
+		if len(or) == 0 {
+			or = []string{"NOT *"}
+		}
+		c = append(c, "("+strings.Join(or, " OR ")+")")
+	}
 	term("object", q.Object)
 	term("job", q.Job)
 	term("instance", q.Instance)
@@ -167,6 +182,9 @@ func (q *SpanQuery) Match(d *SpanDoc) bool {
 	if !eq(q.Tenant, d.Tenant) || !eq(q.Environment, d.Environment) || !eq(q.Object, d.Object) || !eq(q.Job, d.Job) ||
 		!eq(q.Instance, d.Instance) || !eq(q.Source, d.Source) || !eq(q.TraceID, d.TraceID) ||
 		!eq(q.Service, d.ServiceName) || !eq(q.Operation, d.SpanName) {
+		return false
+	}
+	if q.Environments != nil && (d.Environment == "" || !slices.Contains(q.Environments, d.Environment)) {
 		return false
 	}
 	if (q.SinceNs > 0 && d.TS < q.SinceNs) || (q.UntilNs > 0 && d.TS > q.UntilNs) {

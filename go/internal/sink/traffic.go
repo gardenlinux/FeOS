@@ -155,10 +155,14 @@ func parseTrafficQuery(v url.Values, tenant string) (TrafficQuery, error) {
 	return q, nil
 }
 
-func (a *api) traffic(w http.ResponseWriter, r *http.Request, tenant string) {
-	q, err := parseTrafficQuery(r.URL.Query(), tenant)
+func (a *api) traffic(w http.ResponseWriter, r *http.Request, acc Access) {
+	q, err := parseTrafficQuery(r.URL.Query(), acc.Tenant)
 	if err != nil {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
+		return
+	}
+	if !acc.mayRead(q.Environment) {
+		apierr.Write(w, apierr.New(http.StatusNotFound, "no such environment"))
 		return
 	}
 	services, err := a.traces.Traffic(r.Context(), q)

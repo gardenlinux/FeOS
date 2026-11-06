@@ -278,7 +278,8 @@ func selects(tenant string, sel Selector, d *quickwit.Doc) bool {
 	return d.Tenant == tenant && eq(sel.Environment, d.Environment) && eq(sel.Kind, d.Kind) && eq(sel.Object, d.Object) &&
 		eq(sel.Instance, d.Instance) && eq(sel.Container, d.Container) && eq(sel.Job, d.Job) && eq(sel.Stream, d.Stream) &&
 		eq(sel.Source, d.Source) && (sel.Replica == nil || *sel.Replica == d.Replica) &&
-		(sel.Attempt == nil || *sel.Attempt == d.Attempt)
+		(sel.Attempt == nil || *sel.Attempt == d.Attempt) &&
+		(sel.Within == nil || (d.Environment != "" && slices.Contains(sel.Within, d.Environment)))
 }
 
 // joinKey is a stream's source, whose lines a partial one joins.

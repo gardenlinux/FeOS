@@ -70,7 +70,7 @@ func (t *Traces) names(ctx context.Context, q quickwit.SpanQuery, sinceNs int64,
 // maxTraceSpans; none: nil.
 func (t *Traces) Trace(ctx context.Context, sel quickwit.SpanQuery) ([]quickwit.SpanDoc, error) {
 	q := quickwit.SpanQuery{Tenant: sel.Tenant, TraceID: sel.TraceID, Environment: sel.Environment, Object: sel.Object,
-		Job: sel.Job, Instance: sel.Instance, Source: sel.Source, Max: maxTraceSpans}
+		Job: sel.Job, Instance: sel.Instance, Source: sel.Source, Environments: sel.Environments, Max: maxTraceSpans}
 	spans, err := t.index.SearchSpans(ctx, t.pattern(), q)
 	if err != nil {
 		return nil, fmt.Errorf("index: %w", err)
@@ -154,10 +154,11 @@ func (t *Traces) Find(ctx context.Context, q quickwit.SpanQuery, limit int) ([][
 
 // parseSpanSelector reads FeRun's selectors of the trace reads:
 // environment, object, job, instance and source (ingress, egress or
-// container).
-func parseSpanSelector(v url.Values, tenant string) (quickwit.SpanQuery, error) {
-	q := quickwit.SpanQuery{Tenant: tenant, Environment: v.Get("environment"), Object: v.Get("object"), Job: v.Get("job"),
-		Instance: v.Get("instance"), Source: v.Get("source")}
+// container); the reader's tenant, and its environments when it reads
+// those only.
+func parseSpanSelector(v url.Values, acc Access) (quickwit.SpanQuery, error) {
+	q := quickwit.SpanQuery{Tenant: acc.Tenant, Environment: v.Get("environment"), Object: v.Get("object"), Job: v.Get("job"),
+		Instance: v.Get("instance"), Source: v.Get("source"), Environments: acc.within()}
 	if !validSource(q.Source) {
 		return quickwit.SpanQuery{}, fmt.Errorf("source must be ingress, egress or container")
 	}
@@ -180,8 +181,8 @@ func parseTraceID(s string) (string, error) {
 
 // parseTraceSearch reads the parameters of a search of traces (Jaeger's
 // GET /api/traces and FeRun's selectors); now is the default of end.
-func parseTraceSearch(v url.Values, tenant string, now time.Time) (quickwit.SpanQuery, int, error) {
-	q, err := parseSpanSelector(v, tenant)
+func parseTraceSearch(v url.Values, acc Access, now time.Time) (quickwit.SpanQuery, int, error) {
+	q, err := parseSpanSelector(v, acc)
 	if err != nil {
 		return q, 0, err
 	}
@@ -415,7 +416,7 @@ func jaegerTraceOf(spans []quickwit.SpanDoc) jaegerTrace {
 }
 
 // The handlers of /api/v1/jaeger/api/… (traces.md, Reading), each with
-// the tenant of the request's token.
+// what the request's reader may read.
 
 func (a *api) jaegerFail(w http.ResponseWriter, r *http.Request, status int, msg string) {
 	writeJSON(w, status, jaegerAnswer{Errors: []jaegerError{{Code: status, Msg: msg}}})
@@ -429,8 +430,8 @@ func (a *api) jaegerRead(w http.ResponseWriter, r *http.Request, err error) {
 	a.jaegerFail(w, r, http.StatusServiceUnavailable, "the sink cannot answer now")
 }
 
-func (a *api) jaegerNames(w http.ResponseWriter, r *http.Request, tenant string) {
-	sel, err := parseSpanSelector(r.URL.Query(), tenant)
+func (a *api) jaegerNames(w http.ResponseWriter, r *http.Request, acc Access) {
+	sel, err := parseSpanSelector(r.URL.Query(), acc)
 	if err != nil {
 		a.jaegerFail(w, r, http.StatusBadRequest, err.Error())
 		return
@@ -453,8 +454,8 @@ func (a *api) jaegerNames(w http.ResponseWriter, r *http.Request, tenant string)
 	writeJSON(w, http.StatusOK, jaegerAnswer{Data: names, Total: len(names)})
 }
 
-func (a *api) jaegerTrace(w http.ResponseWriter, r *http.Request, tenant string) {
-	sel, err := parseSpanSelector(r.URL.Query(), tenant)
+func (a *api) jaegerTrace(w http.ResponseWriter, r *http.Request, acc Access) {
+	sel, err := parseSpanSelector(r.URL.Query(), acc)
 	if err != nil {
 		a.jaegerFail(w, r, http.StatusBadRequest, err.Error())
 		return
@@ -475,8 +476,8 @@ func (a *api) jaegerTrace(w http.ResponseWriter, r *http.Request, tenant string)
 	writeJSON(w, http.StatusOK, jaegerAnswer{Data: []jaegerTrace{jaegerTraceOf(spans)}, Total: 1})
 }
 
-func (a *api) jaegerFind(w http.ResponseWriter, r *http.Request, tenant string) {
-	q, limit, err := parseTraceSearch(r.URL.Query(), tenant, time.Now())
+func (a *api) jaegerFind(w http.ResponseWriter, r *http.Request, acc Access) {
+	q, limit, err := parseTraceSearch(r.URL.Query(), acc, time.Now())
 	if err != nil {
 		a.jaegerFail(w, r, http.StatusBadRequest, err.Error())
 		return

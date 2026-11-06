@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -201,14 +202,20 @@ func TestParseTraceExport(t *testing.T) {
 
 func TestParseTraceSearch(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	q, limit, err := parseTraceSearch(url.Values{}, "acme", now)
-	if err != nil || limit != 20 || q.Tenant != "acme" || q.UntilNs != now.UnixNano() || q.SinceNs != now.Add(-time.Hour).UnixNano() {
+	q, limit, err := parseTraceSearch(url.Values{}, Access{Tenant: "acme", All: true}, now)
+	if err != nil || limit != 20 || q.Tenant != "acme" || q.UntilNs != now.UnixNano() || q.SinceNs != now.Add(-time.Hour).UnixNano() ||
+		q.Environments != nil {
 		t.Errorf("defaults: %+v %d %v", q, limit, err)
+	}
+	// A reader of environments only reads theirs.
+	if q, _, err := parseTraceSearch(url.Values{}, Access{Tenant: "acme", Envs: []string{"e1"}}, now); err != nil ||
+		!slices.Equal(q.Environments, []string{"e1"}) {
+		t.Errorf("a reader of e1: %+v %v", q, err)
 	}
 	v := url.Values{"service": {"api"}, "operation": {"GET /"}, "start": {"1000"}, "end": {"2000"}, "minDuration": {"1.5ms"},
 		"maxDuration": {"2s"}, "tags": {`{"http.method":"GET","code":500,"ok":true}`}, "limit": {"500"},
 		"environment": {"e1"}, "object": {"o"}, "job": {"j"}, "instance": {"i"}, "source": {"ingress"}}
-	q, limit, err = parseTraceSearch(v, "acme", now)
+	q, limit, err = parseTraceSearch(v, Access{Tenant: "acme", All: true}, now)
 	if err != nil || limit != 100 || q.Service != "api" || q.Operation != "GET /" || q.SinceNs != 1_000_000 || q.UntilNs != 2_000_999 ||
 		q.MinDurationNs != 1_500_000 || q.MaxDurationNs != 2e9 || q.Tags["http.method"] != "GET" || q.Tags["code"] != "500" ||
 		q.Tags["ok"] != "true" || q.Environment != "e1" || q.Object != "o" || q.Job != "j" || q.Instance != "i" || q.Source != "ingress" {
@@ -219,7 +226,7 @@ func TestParseTraceSearch(t *testing.T) {
 		{"tags": {"x"}}, {"tags": {`{"a":{"b":1}}`}}, {"tags": {`{"a\\b":"1"}`}}, {"tags": {`{"":"1"}`}},
 		{"limit": {"x"}}, {"source": {"pod"}},
 	} {
-		if _, _, err := parseTraceSearch(bad, "acme", now); err == nil {
+		if _, _, err := parseTraceSearch(bad, Access{Tenant: "acme", All: true}, now); err == nil {
 			t.Errorf("%v: no error", bad)
 		}
 	}

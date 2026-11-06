@@ -89,6 +89,9 @@ func selectStreams(ctx context.Context, q db.Querier, tenant string, f streamFil
 			add(c.col+" = ?", c.v)
 		}
 	}
+	if f.sel.Within != nil {
+		add("environment = ANY(?)", f.sel.Within)
+	}
 	if f.sel.Replica != nil {
 		add("replica = ?", *f.sel.Replica)
 	}
