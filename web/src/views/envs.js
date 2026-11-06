@@ -482,3 +482,269 @@ export function deploymentText(e) {
   const serves = e.deployed && e.deployed !== e.deployment ? ` · ${e.deployed} serves` : '';
   return `${e.deployment} ${e.state}${serves}`;
 }
+
+// ---------------------------------------------------------------- objects --
+
+// KIND_NAMES name an object's kind in its page's head.
+export const KIND_NAMES = { service: 'Service', addon: 'Addon', job: 'Job' };
+
+// SPEC_KEYS are the spec's maps of the kinds.
+const SPEC_KEYS = { service: 'services', addon: 'addons', job: 'jobs' };
+
+// splitItem splits "<kind>/<name>"; null without a kind.
+export function splitItem(item) {
+  const s = String(item || '');
+  const i = s.indexOf('/');
+  if (i <= 0 || i === s.length - 1) return null;
+  return { kind: s.slice(0, i), name: s.slice(i + 1) };
+}
+
+// specObject is the object kind/name of a spec, null when it has none.
+export function specObject(spec, kind, name) {
+  const map = spec && SPEC_KEYS[kind] ? spec[SPEC_KEYS[kind]] : null;
+  const o = map && Object.prototype.hasOwnProperty.call(map, name) ? map[name] : null;
+  return o && typeof o === 'object' ? o : null;
+}
+
+// shortImage is an image reference without its registry and path: the
+// repository's last segment with its tag ("expense:1.4"), or with the
+// first 12 hex digits of its digest.
+export function shortImage(ref) {
+  const s = String(ref || '');
+  if (!s) return '';
+  const at = s.indexOf('@');
+  const base = at >= 0 ? s.slice(0, at) : s;
+  const last = base.slice(base.lastIndexOf('/') + 1);
+  if (at < 0) return last;
+  const digest = s.slice(at + 1).replace(/^sha256:/, '');
+  return `${last}@${digest.slice(0, 12)}`;
+}
+
+// objectImage is what an image service or a job runs: the image as the
+// spec wrote it, the digest reference it is pinned to, and a short form
+// of the one as written; without the spec, the instances' image (the
+// pin alone).
+export function objectImage(o, spec) {
+  const so = o ? specObject(spec, o.kind, o.name) : null;
+  let pinned = '';
+  let written = '';
+  if (so && so.image) {
+    pinned = String(so.image).includes('@sha256:') ? so.image : '';
+    written = so.imageAsWritten || so.image;
+  }
+  if (!written && o) {
+    const i = (o.instances || []).find((x) => x.image);
+    if (i) { pinned = i.image; written = i.image; }
+  }
+  const m = /@(sha256:[0-9a-f]+)$/.exec(pinned);
+  return { written, pinned, digest: m ? m[1] : '', short: shortImage(written) };
+}
+
+// instanceDeployments are the deployments an object's instances run,
+// ascending.
+export function instanceDeployments(o) {
+  return [...new Set((o && o.instances || []).map((i) => i.deployment).filter((n) => n > 0))].sort((a, b) => a - b);
+}
+
+// restartsOf counts an object's restarts: its instances' together, an
+// attached service's own.
+export function restartsOf(o) {
+  if (!o) return 0;
+  if (o.kind === 'service' && isAttached(o)) return o.restarts || 0;
+  return (o.instances || []).reduce((n, i) => n + (i.restarts || 0), 0);
+}
+
+// readyText is an object's ready count: "1/2" for an image service and
+// an addon (the addon's ready instances of its instances), '' else.
+export function readyText(o) {
+  if (!o) return '';
+  if (o.kind === 'service' && !isAttached(o)) return `${o.ready || 0}/${o.desired || 0}`;
+  if (o.kind === 'addon') {
+    const list = o.instances || [];
+    return `${list.filter((i) => i.phase === 'ready').length}/${list.length}`;
+  }
+  return '';
+}
+
+// objectStateText is an object's state in a few words, for its page's
+// head: an image service's ready replicas, an attached service's and an
+// addon's phase, a job's last run.
+export function objectStateText(o) {
+  if (!o) return 'not in the latest deployment';
+  switch (o.kind) {
+    case 'service':
+      if (isAttached(o)) return o.phase || 'starting';
+      return `${o.ready || 0} of ${o.desired || 0} ready${idleText(o)}`;
+    case 'addon':
+      return o.phase === 'ready' && !o.provisioned ? 'ready, not provisioned yet' : (o.phase || 'starting');
+    case 'job':
+      return o.lastRun ? `last run ${o.lastRun.phase}` : 'not run yet';
+    default:
+      return o.phase || '';
+  }
+}
+
+// fmtCount renders a count short: 980, 1.2k, 34k, 1.2M.
+export function fmtCount(n) {
+  const v = Number(n) || 0;
+  if (v < 1000) return String(v);
+  if (v < 1e6) return `${v < 1e4 ? (v / 1000).toFixed(1) : Math.round(v / 1000)}k`;
+  return `${(v / 1e6).toFixed(1)}M`;
+}
+
+// trafficOf is a service's line of a traffic answer, null without one.
+export function trafficOf(traffic, name) {
+  return ((traffic && traffic.services) || []).find((s) => s.service === name) || null;
+}
+
+// envValueRef is what an environment variable's value is: a plain
+// string (also {value}), or a reference to a secret (with the version the
+// spec pins, 0: none), an addon's output or a service's address; target
+// is the name it names, ref its "<kind>/<name>".
+export function envValueRef(v, spec) {
+  if (typeof v === 'string') return { form: 'plain', text: v, ref: '' };
+  if (!v || typeof v !== 'object') return { form: 'plain', text: v == null ? '' : String(v), ref: '' };
+  if ('value' in v) return { form: 'plain', text: String(v.value), ref: '' };
+  if (v.secret) {
+    const pin = spec && spec.secrets && spec.secrets[v.secret];
+    const version = (pin && pin.version) || 0;
+    return { form: 'secret', target: v.secret, version, text: `secret ${v.secret}${version ? ` v${version}` : ''}`, ref: `secret/${v.secret}` };
+  }
+  if (v.addon) {
+    const fields = Object.entries(v).filter(([k]) => k !== 'addon' && k !== 'key').sort(([a], [b]) => a.localeCompare(b));
+    const extra = fields.length ? ` (${fields.map(([k, x]) => `${k} ${x}`).join(', ')})` : '';
+    return { form: 'addon', target: v.addon, key: v.key || '', detail: extra, text: `${v.key || 'output'} of addon ${v.addon}${extra}`, ref: `addon/${v.addon}` };
+  }
+  if (v.service) {
+    const port = v.port !== undefined && v.port !== '' ? ` port ${v.port}` : '';
+    return { form: 'service', target: v.service, key: v.key || 'url', detail: port, text: `${v.key || 'url'} of service ${v.service}${port}`, ref: `service/${v.service}` };
+  }
+  return { form: 'plain', text: JSON.stringify(v), ref: '' };
+}
+
+// envRows are an object's environment variables, sorted, each with
+// envValueRef's reading.
+export function envRows(so, spec) {
+  return Object.entries((so && so.env) || {}).sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, v]) => ({ name, ...envValueRef(v, spec) }));
+}
+
+// readinessText says a readiness check: "GET :http/readyz", "TCP :5432",
+// "exec pg_isready", with its timing.
+export function readinessText(r) {
+  if (!r || typeof r !== 'object') return '';
+  let s = '';
+  if (r.http) s = `HTTP GET :${r.http.port}${r.http.path || '/'}`;
+  else if (r.tcp) s = `TCP :${r.tcp.port}`;
+  else if (r.exec) s = `exec ${(r.exec.command || []).join(' ')}`;
+  else return '';
+  const t = [];
+  if (r.period) t.push(`every ${r.period}`);
+  if (r.initialDelay && r.initialDelay !== '0s') t.push(`after ${r.initialDelay}`);
+  if (r.failureThreshold) t.push(`unready after ${r.failureThreshold} failure${r.failureThreshold === 1 ? '' : 's'}`);
+  return t.length ? `${s} · ${t.join(', ')}` : s;
+}
+
+// resourcesText says a pod's size: "1 vCPU · 512 MiB".
+export function resourcesText(r) {
+  if (!r || typeof r !== 'object') return '';
+  const parts = [];
+  if (r.vcpus) parts.push(`${r.vcpus} vCPU${r.vcpus === 1 ? '' : 's'}`);
+  if (r.memoryMib) parts.push(r.memoryMib >= 1024 && r.memoryMib % 1024 === 0 ? `${r.memoryMib / 1024} GiB` : `${r.memoryMib} MiB`);
+  return parts.join(' · ');
+}
+
+// definitionRows are an object's definition as the spec has it, as rows
+// {k, v, mono}: the fields of its kind that are set, in the order one
+// reads them; an image as written with its pin beside it (pinned).
+export function definitionRows(so, kind) {
+  if (!so) return [];
+  const rows = [];
+  const add = (k, v, extra = {}) => { if (v !== '' && v !== undefined && v !== null) rows.push({ k, v: String(v), ...extra }); };
+  if (kind === 'addon') {
+    add('type', so.type, { mono: true });
+    add('version', so.version, { mono: true });
+    add('plan', so.plan || 'the default plan');
+    for (const [k, v] of Object.entries(so.options || {}).sort(([a], [b]) => a.localeCompare(b))) {
+      add(`option ${k}`, Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : v, { mono: true });
+    }
+    return rows;
+  }
+  if (kind === 'service') add('runtime', so.runtime || 'image');
+  if (so.sandbox) add('sandbox', so.sandbox, { mono: true, sandbox: true });
+  if (so.image) {
+    const pinned = String(so.image).includes('@sha256:') ? so.image : '';
+    add('image', so.imageAsWritten || so.image, { mono: true, pinned });
+  }
+  if (so.imageCredentials) {
+    const u = envValueRef(so.imageCredentials.username);
+    const p = envValueRef(so.imageCredentials.password);
+    add('registry login', `${u.form === 'secret' ? `secret ${u.target}` : u.text} · ${p.form === 'secret' ? `secret ${p.target}` : 'a literal password'}`
+      + ' (the latest versions, at each pod)');
+  }
+  if ((so.command || []).length) add('command', so.command.join(' '), { mono: true });
+  add('working directory', so.cwd, { mono: true });
+  if ((so.ports || []).length) add('ports', so.ports.map((p) => `${p.name} ${p.port}`).join(', '), { mono: true });
+  if (so.replicas !== undefined) add('replicas', so.replicas, { mono: true });
+  add('resources', resourcesText(so.resources));
+  add('readiness', readinessText(so.readiness), { mono: true });
+  if (kind === 'service') add('idle', so.idle ? (so.idle === '0s' || so.idle === 'never' ? 'never paused' : `paused after ${so.idle} without a request`) : '');
+  if (so.rollout && so.rollout.timeout) add('rollout timeout', so.rollout.timeout, { mono: true });
+  if (kind === 'job') {
+    add('runs', so.on === 'manual' ? 'when asked (on: manual)' : 'with each deployment that changes it (on: deploy)');
+    add('timeout', so.timeout, { mono: true });
+    if (so.retries !== undefined) add('retries', so.retries, { mono: true });
+  }
+  if (so.mounts) add('mounts', JSON.stringify(so.mounts), { mono: true });
+  return rows;
+}
+
+// routesTo are the routes of the status that send to service name, with
+// the spec's port as written (a name) beside the resolved number.
+export function routesTo(st, spec, name) {
+  const written = (spec && spec.routes) || {};
+  return ((st && st.routes) || []).filter((r) => r.service === name).map((r) => {
+    const w = written[r.name];
+    const as = w && w.port !== undefined && String(w.port) !== String(r.port) ? String(w.port) : '';
+    return { ...r, portAsWritten: as };
+  });
+}
+
+// usedBy are the objects of the spec whose environment names kind/name
+// (an addon's output, a service's address): [{from, var, text}].
+export function usedBy(spec, kind, name) {
+  const out = [];
+  for (const k of ['service', 'job']) {
+    for (const [n, o] of Object.entries((spec && spec[SPEC_KEYS[k]]) || {}).sort(([a], [b]) => a.localeCompare(b))) {
+      for (const row of envRows(o, spec)) {
+        if (row.ref === `${kind}/${name}`) out.push({ from: `${k}/${n}`, var: row.name, text: row.key || '' });
+      }
+    }
+  }
+  return out;
+}
+
+// CHANGES_READ is how many of the newest deployments an object's page
+// reads for the changes to it: each is a request of its own.
+export const CHANGES_READ = 10;
+
+// changesTo are the changes to kind/name in deployments (each with its
+// diff, newest first): [{number, state, author, message, createdAt,
+// change, effect, fields}].
+export function changesTo(deployments, kind, name) {
+  const out = [];
+  for (const d of deployments || []) {
+    const e = (d.diff || []).find((x) => x.kind === kind && x.name === name);
+    if (!e) continue;
+    out.push({
+      number: d.number, state: d.state, author: d.author || '', message: d.message || '', createdAt: d.createdAt || '',
+      change: e.change, effect: e.effect || '', fields: e.fields || [],
+    });
+  }
+  return out;
+}
+
+// objectIncidents are the incidents of kind/name.
+export function objectIncidents(incidents, kind, name) {
+  return (incidents || []).filter((i) => i.object === `${kind}/${name}`);
+}

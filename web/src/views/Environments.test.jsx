@@ -9,7 +9,7 @@ import { api, setActiveTenant } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
   BindingCard, DiffView, EnvHead, EnvOverview, EnvTable, IncidentTable, IncidentView, LogsBody, DeploymentTable,
-  DeploymentView, ObjectCard, TagsBox, envCan,
+  DeploymentView, ObjectRow, TagsBox, envCan,
 } from './Environments.jsx';
 import {
   AccessTable, CloneBox, DeleteBox, DomainsBox, PublicBox, RouteTokenBox, SecretsTable, TrafficTable,
@@ -94,82 +94,100 @@ describe('EnvOverview', () => {
     expect(overview(st)).toContain('<div class="rollout-reason">secrets need --secret-key-file</div>');
   });
 
-  it('groups the objects by kind', () => {
+  it('groups the objects by kind, one row each, its name a link to its page', () => {
     const out = overview(STAGE);
     expect(out).toContain('<div class="sect">services <span class="count">· 3</span></div>');
     expect(out).toContain('<div class="sect">addons <span class="count">· 2</span></div>');
     expect(out).toContain('<div class="sect">jobs <span class="count">· 1</span></div>');
-    expect(count(out, 'class="envobj"')).toBe(6);
+    expect(count(out, '<tr class="obj-row')).toBe(6);
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service"');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/addon/postgres"');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/job/migrate"');
+    // Every object links its logs; no node shows while the replicas are folded.
+    expect(count(out, '> Logs</a>')).toBe(6);
+    expect(out).not.toContain('href="/nodes/');
   });
 
-  it("lists an image service's instances: replica, phase, state, node, address, deployment, restarts, last exit, and its detail under it", () => {
-    const out = overview(STAGE);
-    const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />);
-    expect(all).toContain('expense-service image · 1 / 2 ready');
-    // Five pods of three image services, two of addons.
-    expect(count(out, 'title="instance ')).toBe(7);
+  it("sums an image service up: its image short, ready, restarts, the deployments it runs; its replicas folded", () => {
+    const spec = response('GET_environments_env_deployments_n.200').spec;
+    const out = html(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} />);
+    const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} />);
+    expect(out).toContain('title="ghcr.io/acme/expense:1.4\npinned to ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a">expense:1.4</span>');
+    expect(all).toContain('1/2 3 instances');
+    expect(all).toContain('1/1 1 replica');
+    // Three restarts, the last exit 1; replica 1 of deployment 6 still runs, muted.
+    expect(out).toContain('<td class="col-num mono warntext" title="last exit 1">3<span class="bad small"> · exit 1</span></td>');
+    expect(out).toContain('<span class="mono"><span class="muted" title="an older deployment still runs here">6</span> · 7</span>');
+    expect(count(out, 'aria-expanded="false"')).toBe(5);
+    expect(count(out, 'title="instance ')).toBe(0);
+    // Without the spec, the pin the instances run.
+    expect(overview(STAGE)).toContain('>web@4e1f0c2a9b7d</span>');
+  });
+
+  it("shows a service's traffic of the last hour", () => {
+    const traffic = { services: [{ service: 'web', requests: 12840, errors: 64, p95Ms: 41 }] };
+    const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} traffic={traffic} />);
+    expect(all).toContain('13k req · 0.5 % err · p95 41.0 ms');
+  });
+
+  it("unfolds an object's instances: replica, phase, state, address, deployment, restarts, last exit, logs, the node last", () => {
+    const svc = STAGE.objects.find((o) => o.name === 'expense-service');
+    const row = (ec) => html(<table><tbody><ObjectRow o={svc} st={STAGE} tenant={T} navigate={nav} ec={ec} open /></tbody></table>);
+    const out = row(null);
+    expect(count(out, 'title="instance ')).toBe(3);
     expect(out).toContain('title="instance 0193d5e6-0000-7000-8000-000000000004"');
-    // The detail is a line of its own under its pod.
     expect(out).toContain('<tr class="inst-detail"><td colSpan="10" class="small detailcell">exited with code 1; restarting in 4s</td></tr>');
-    expect(count(out, 'class="inst-detail')).toBe(1);
     expect(out).toContain('<td class="col-num mono warntext">3</td>');
     expect(out).toContain('<td class="col-num mono bad">1</td>');
-    expect(out).toContain('class="state-label failed"');
     expect(out).toContain('>exited</span>');
-    expect(out).toContain('<td class="mono small cut-start" title="fd6b:a01:3::15">fd6b:a01:3::15</td>');
-    expect(out).toContain('href="/nodes/n2"');
-    // Replica 1 of deployment 6 still serves: muted as an older deployment's.
+    expect(out).toContain('<td class="mono small muted cut-start" title="fd6b:a01:3::15">fd6b:a01:3::15</td>');
     expect(out).toContain('class="col-num mono muted" title="an older deployment&#x27;s instance">6</td>');
-    expect(count(out, 'title="an older deployment&#x27;s instance"')).toBe(1);
-    // Each instance links its replica's logs.
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service/1"');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service/0"');
-    // Objects with instances link their logs per instance; the job, in its
-    // head.
-    expect(count(out, 'class="small envobj-logs"')).toBe(1);
-    expect(count(overview(PREVIEW), 'class="small envobj-logs"')).toBe(3);
+    // The node: small muted text, a link for an operator only.
+    expect(out).toContain('<td class="small muted inst-node cut-start" title="n2">n2</td>');
+    expect(out).not.toContain('href="/nodes/');
+    expect(row({ ...ALL, operator: true })).toContain('href="/nodes/n2"');
   });
 
-  it('shows an addon with type, version, plan and provisioning, and its instance', () => {
+  it('shows an addon with type, version, plan and provisioning', () => {
     const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />);
-    expect(all).toContain('postgres postgres 17 · plan small · provisioned');
-    expect(all).toContain('nats nats 2 · plan small · provisioned');
+    expect(all).toContain('postgres postgres 17 small 1/1 1 replica');
+    const unprov = { ...STAGE, objects: [{ ...STAGE.objects.find((o) => o.name === 'nats'), provisioned: false }] };
+    expect(text(<EnvOverview st={unprov} tenant={T} navigate={nav} />)).toContain('small · not provisioned');
     expect(html(<EnvOverview st={STAGE} tenant={T} navigate={nav} />))
-      .toContain('href="/tenants/fecode/environments/expensa-stage/logs/addon/postgres/0"');
+      .toContain('href="/tenants/fecode/environments/expensa-stage/logs/addon/postgres"');
   });
 
   it("shows a job's last run", () => {
     const out = overview(STAGE);
     const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />);
-    expect(all).toContain('migrate deployment 7, attempt 1: succeeded (exit 0)');
-    expect(all).toContain('deployment 7 attempt 1 phase succeeded exit 0 finished');
+    expect(all).toContain('migrate — with each deployment succeeded attempt 1 · exit 0');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/job/migrate"');
     const failed = { ...STAGE, objects: [{ kind: 'job', name: 'migrate', lastRun: {
       deployment: 7, attempt: 2, phase: 'failed', exitCode: null, finishedAt: '2026-10-18T14:03:37Z',
       detail: 'the node did not report an exit status' } }] };
-    expect(overview(failed)).toContain('<div class="envobj-detail">the node did not report an exit status</div>');
+    expect(overview(failed)).toContain('<td colSpan="7" class="small detailcell">the node did not report an exit status</td>');
     const never = { ...STAGE, objects: [{ kind: 'job', name: 'seed', lastRun: null }] };
-    expect(text(<EnvOverview st={never} tenant={T} navigate={nav} />)).toContain('It has not run yet.');
+    expect(text(<EnvOverview st={never} tenant={T} navigate={nav} />)).toContain('not run yet');
   });
 
   it('shows attached services with their sandbox, phase, restarts, last exit and detail, without instances', () => {
     const out = overview(PREVIEW);
     const all = text(<EnvOverview st={PREVIEW} tenant={T} navigate={nav} />);
-    expect(all).toContain('web attached · starting');
+    expect(all).toContain('web attached · 0193b0aa');
     expect(out).toContain('href="/tenants/fecode/sandboxes/0193b0aa-1111-7222-8333-444455556601"');
-    expect(out).toContain('<div class="envobj-detail">cwd /workspace/expensa/web does not exist yet</div>');
-    expect(all).toContain('restarts 1 last exit 2');
-    // Only the two addons have instance tables.
-    expect(count(out, 'class="tbl inst-tbl"')).toBe(2);
-    expect(count(out, 'title="instance ')).toBe(2);
+    expect(out).toContain('<td colSpan="7" class="small detailcell">cwd /workspace/expensa/web does not exist yet</td>');
+    expect(out).toContain('title="last exit 2">1<span class="bad small"> · exit 2</span>');
+    // Only the two addons fold instances.
+    expect(count(out, 'class="linkbtn obj-fold"')).toBe(2);
     expect(out).toContain('class="rollout running"');
     expect(all).toContain('every object matches it');
   });
 
-  it('lists the routes with their ports resolved', () => {
+  it('lists the routes with their ports resolved, each service a link to its page', () => {
     const out = overview(PREVIEW);
-    expect(out).toContain('<td class="mono">/api/expense</td><td class="mono">expense-service</td><td class="col-num mono">8081</td>');
-    expect(out).toContain('<td class="mono">/</td><td class="mono">web</td><td class="col-num mono">5173</td>');
+    expect(out).toContain('<td class="mono">/api/expense</td><td class="mono"><a href="/tenants/fecode/environments/expensa-login-3f9a/objects/service/expense-service">expense-service</a></td><td class="col-num mono">8081</td>');
     expect(text(<EnvOverview st={PREVIEW} tenant={T} navigate={nav} />))
       .toContain('The route door serves them all at /api/v1/environments/expensa-login-3f9a/http/… to a route token');
   });
@@ -297,7 +315,7 @@ describe('IncidentTable', () => {
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/incidents/12"');
     expect(out).toContain('<td class="nowrap">crash loop</td>');
     expect(out).toContain('<td class="nowrap">job failed</td>');
-    expect(out).toContain('<td class="mono small nowrap">service/expense-service</td>');
+    expect(out).toContain('<td class="mono small nowrap"><a href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service">service/expense-service</a></td>');
     expect(out).toContain('expense-service (deployment 7) exited 3 times within 10 minutes, last with code 1');
     expect(out).toContain('<span class="bad small">open</span>');
     expect(out).toContain('class="sdot failed" title="open"');
@@ -472,17 +490,18 @@ describe('the routes it calls', () => {
 
 // The environment's head and its operations (ADR 0018), each with the
 // role it needs.
-const ALL = { write: true, admin: true, del: true, clone: true };
-const NONE = { write: false, admin: false, del: false, clone: false };
+const ALL = { write: true, admin: true, del: true, clone: true, operator: false };
+const NONE = { write: false, admin: false, del: false, clone: false, operator: false };
 
 describe('envCan', () => {
   it('reads the roles: the higher of the tenant grant and the environment grant', () => {
     expect(envCan({ role: 'read', environments: [{ id: 'e1', name: 'stage', role: 'write' }] }, 'stage'))
-      .toEqual({ write: true, admin: false, del: false, clone: false });
-    expect(envCan({ role: 'write', environments: [] }, 'stage')).toEqual({ write: true, admin: false, del: true, clone: true });
+      .toEqual({ write: true, admin: false, del: false, clone: false, operator: false });
+    expect(envCan({ role: 'write', environments: [] }, 'stage')).toEqual({ write: true, admin: false, del: true, clone: true, operator: false });
     expect(envCan({ role: '', environments: [{ id: 'e1', name: 'stage', role: 'admin' }] }, 'e1'))
-      .toEqual({ write: true, admin: true, del: true, clone: false });
+      .toEqual({ write: true, admin: true, del: true, clone: false, operator: false });
     expect(envCan({ role: 'read', environments: [] }, 'stage')).toEqual(NONE);
+    expect(envCan({ role: 'admin', environments: [], operator: true }, 'stage').operator).toBe(true);
   });
 });
 
@@ -527,8 +546,8 @@ describe('EnvHead', () => {
 });
 
 describe('the actions on objects', () => {
-  const card = (o, ec, spec = null) => html(<ObjectCard o={o} env="expensa-stage" latest={7} tenant={T} navigate={nav}
-    logsTo={() => '/x'} spec={spec} ec={ec} />);
+  const card = (o, ec, spec = null) => html(<table><tbody><ObjectRow o={o} st={STAGE} tenant={T} navigate={nav}
+    spec={spec} ec={ec} open /></tbody></table>);
   const svc = STAGE.objects.find((o) => o.name === 'expense-service');
   const job = STAGE.objects.find((o) => o.kind === 'job');
 

@@ -2182,7 +2182,14 @@ person accepts it with a click.
 In a tenant the UI shows its sandboxes and its environments
 (`/tenants/<t>/environments[/<env>[/<tab>]]`): the
 list, with label filters; an environment's overview (its rollout, its
-objects by kind with their instances, its routes, its open incidents);
+objects by kind, a row each with its image, ready replicas, last hour's
+traffic, restarts and the deployments it runs, the instances folded
+under it, its routes, its open incidents); an object's page
+(`…/objects/<kind>/<name>`: its definition as the latest deployment's
+normalised spec has it, a secret at its pinned version and references
+as links, the routes to it, who uses it, its instances with the node a
+link for operators only, its incidents, and the deployments of the last
+ten whose diff changed it, one read each);
 its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;

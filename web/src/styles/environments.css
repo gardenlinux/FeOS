@@ -93,3 +93,81 @@ button.confirm.armed { border-color: var(--accent); background: rgba(var(--accen
 }
 .envbox .inlineform input:not([type]) { min-width: 260px; }
 .envbox-danger > button { margin-top: 4px; }
+
+/* the overview's objects: a row each, the instances folded under it */
+.obj-tbl td { padding: 5px 8px; }
+.obj-tbl td.col-num { white-space: nowrap; }
+.obj-tbl th:nth-child(2) { width: 22%; }
+.obj-tbl td.cut { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.obj-tbl .obj-name a { text-decoration: none; }
+.obj-tbl .obj-name a:hover { text-decoration: underline; }
+.obj-tbl tr.has-detail > td, .obj-tbl tr.unfolded > td { border-bottom: none; }
+.obj-tbl tr.obj-detail > td { padding-top: 0; color: var(--warn); }
+.obj-tbl tr.obj-detail .envop-note { margin: 0; }
+.obj-tbl tr.obj-instances > td { padding: 0 8px 8px; }
+.obj-tbl tr.obj-instances .tblwrap { border: 1px solid var(--border-soft); border-radius: 4px; background: var(--panel2); }
+.obj-actions { display: inline-flex; align-items: center; gap: 10px; }
+.obj-actions a { display: inline-flex; align-items: center; gap: 4px; }
+.obj-actions button.mini { display: inline-flex; align-items: center; gap: 4px; }
+.obj-fold { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: 12px; margin-left: 4px; }
+.obj-fold:hover { color: var(--accent); }
+.obj-image { cursor: default; }
+.obj-traffic .mono { color: var(--text); }
+.obj-traffic { color: var(--muted); }
+
+/* the instances: the node last, small and muted (.tbl: over styles.css,
+   which loads after) */
+.tbl.inst-tbl { min-width: 760px; }
+.tbl.inst-tbl th:nth-child(1) { width: 72px; }
+.tbl.inst-tbl th:nth-child(2) { width: 84px; }
+.tbl.inst-tbl th:nth-child(3) { width: 100px; }
+.tbl.inst-tbl th:nth-child(4) { width: auto; }
+.tbl.inst-tbl th:nth-child(5) { width: 100px; }
+.tbl.inst-tbl th:nth-child(6) { width: 80px; }
+.tbl.inst-tbl th:nth-child(7) { width: 76px; }
+.tbl.inst-tbl th:nth-child(8) { width: 92px; }
+.tbl.inst-tbl th:nth-child(9) { width: 44px; }
+.tbl.inst-tbl th:nth-child(10) { width: 150px; }
+.tbl.inst-tbl td.inst-node { font-size: 11.5px; }
+
+/* an object's page */
+.objpage > .sect:first-child, .objpage > .message:first-child + .sect { margin-top: 2px; }
+.objpage .message { margin-bottom: 10px; }
+.objdef { grid-template-columns: 130px minmax(0, 1fr); }
+.objpin { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; font-size: 11.5px; }
+.objenv-tbl td { padding: 4px 8px; }
+.objenv-tbl .objenv-name { width: 30%; white-space: nowrap; }
+.objenv-tbl .objenv-value { overflow-wrap: anywhere; }
+.objref { display: inline-flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.objchips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.labelchip.on { border-color: rgba(var(--accent-rgb), .55); color: var(--text); }
+a.objchip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 9px; border: 1px solid var(--border-soft);
+  border-radius: 4px; text-decoration: none; color: var(--text);
+}
+a.objchip:hover { border-color: var(--net); }
+.objchanges { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.objchange { border: 1px solid var(--border-soft); border-radius: 5px; padding: 7px 10px; }
+.objchange .diff-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.objchange-msg { margin: 3px 0 2px; color: var(--muted); }
+.objchange .tblwrap { margin-top: 4px; }
+.objinc-tbl td { padding: 4px 8px; }
+.objroutes-tbl td { white-space: nowrap; }
+.tbl.objused-tbl { width: auto; min-width: 50%; }
+.objused-tbl td { padding: 4px 16px 4px 8px; }
+.lg-objpage { margin-left: 6px; white-space: nowrap; }
+
+@media (max-width: 820px) {
+  .objdef { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
+  .objdef .v { margin-bottom: 5px; }
+  .obj-tbl td.cut { max-width: 140px; }
+  /* narrow: the name, what runs, ready and the actions stay */
+  .obj-service th:nth-child(5), .obj-service tr.obj-row > td:nth-child(5),
+  .obj-service th:nth-child(7), .obj-service tr.obj-row > td:nth-child(7),
+  .obj-addon th:nth-child(4), .obj-addon tr.obj-row > td:nth-child(4),
+  .obj-addon th:nth-child(7), .obj-addon tr.obj-row > td:nth-child(7),
+  .obj-job th:nth-child(3), .obj-job tr.obj-row > td:nth-child(3),
+  .obj-job th:nth-child(4), .obj-job tr.obj-row > td:nth-child(4),
+  .obj-job th:nth-child(6), .obj-job tr.obj-row > td:nth-child(6),
+  .obj-job th:nth-child(7), .obj-job tr.obj-row > td:nth-child(7) { display: none; }
+}

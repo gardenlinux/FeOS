@@ -22,7 +22,9 @@
 //                                       deployments[/:n], incidents[/:id],
 //                                       logs[/:kind/:name[/:replica]][?search],
 //                                       traces[/:trace][?search], traffic,
-//                                       secrets, access, settings
+//                                       secrets, access, settings,
+//                                       objects/:kind/:name (an object's
+//                                       page, reached from the overview)
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
 //   /join-tokens                        join tokens
 //   /instances                          the control plane's instances
@@ -39,9 +41,10 @@ function decode(s) {
 }
 
 // ENV_TABS are the pages of an environment; builder is its editor,
-// reached by Edit.
+// reached by Edit; objects holds an object's page, reached from the
+// overview (no entry of the sidebar: ENV_NAV leaves it out).
 export const ENV_TABS = [
-  'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings',
+  'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings', 'objects',
 ];
 
 // ENV_TAB_LABELS name them.
@@ -56,6 +59,7 @@ export const ENV_TAB_LABELS = {
   secrets: 'Secrets',
   access: 'Domains & access',
   settings: 'Settings',
+  objects: 'Objects',
 };
 
 // SEARCH_TABS are the tabs whose search is in the address's query.
@@ -66,13 +70,15 @@ const SEARCH_TABS = new Set(['logs', 'traces']);
 // item: a deployment's number, an incident's ID, a trace's ID, or the
 // "<kind>/<name>" of the object whose logs show, with the replica (null
 // unless given: every replica); and the logs' or traces' search, the
-// address's query (logs.js, traces.js).
+// address's query (logs.js, traces.js); on the objects tab the
+// "<kind>/<name>" of the object whose page it is.
 function envRoute(tenant, seg, search) {
   const env = seg[0] || '';
   const tab = env && ENV_TABS.includes(seg[1]) ? seg[1] : 'overview';
   let item = '';
   let replica = null;
   if (tab === 'deployments' || tab === 'incidents' || tab === 'traces') item = seg[2] || '';
+  if (tab === 'objects' && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
   if (tab === 'logs' && seg[2] && seg[3]) {
     item = `${seg[2]}/${seg[3]}`;
     if (/^\d+$/.test(seg[4] || '')) replica = Number(seg[4]);

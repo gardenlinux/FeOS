@@ -105,13 +105,19 @@ describe('the environments routes', () => {
     expect(envPath('fecode', 'e', 'deployments', '', 3)).toBe('/tenants/fecode/environments/e/deployments');
     for (const [tab, item, replica, search] of [['overview', '', null, ''], ['deployments', '', null, ''],
       ['deployments', '6', null, ''], ['incidents', '12', null, ''], ['logs', '', null, ''], ['logs', 'job/migrate', null, ''],
-      ['logs', 'service/web', 0, ''], ['logs', 'service/web', 3, '?q=a+b'], ['logs', '', null, '?trace=x']]) {
+      ['logs', 'service/web', 0, ''], ['logs', 'service/web', 3, '?q=a+b'], ['logs', '', null, '?trace=x'],
+      ['objects', 'service/web', null, ''], ['objects', 'addon/postgres', null, ''], ['objects', '', null, '']]) {
       expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
     expect(ENV_TABS).toEqual([
-      'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings',
+      'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings', 'objects',
     ]);
+    // An object's page: its kind and name; a replica or a search is not its.
+    expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/tenants/fecode/environments/e/objects/service/web%20api');
+    expect(parsePath('/tenants/fecode/environments/e/objects/job/migrate/2?q=x'))
+      .toEqual(env({ env: 'e', tab: 'objects', item: 'job/migrate' }));
+    expect(parsePath('/tenants/fecode/environments/e/objects/job')).toEqual(env({ env: 'e', tab: 'objects' }));
     for (const tab of ENV_TABS) expect(ENV_TAB_LABELS[tab]).toBeTruthy();
     expect(ENV_TAB_LABELS.builder).toBe('Edit');
     for (const tab of ['traffic', 'secrets', 'access', 'settings']) {

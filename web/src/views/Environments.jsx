@@ -15,22 +15,25 @@ import { Builder } from './Builder.jsx';
 import { atLeast, envRole, useAccess } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import {
-  KIND_TITLES, changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, groupObjects,
-  hasEvidence, heavyEffect, incidentObject, isAttached, jobTrigger, labelPairs, logSourceText, logsProblem,
-  mayRevertTo, objectSummary, objectTone, originText, parseLabelFilter, phaseTone, deploymentTone, preflightRows,
-  deploymentText, revertOffer, rolloutNote, specBindings, statusState, tagPlan,
+  KIND_TITLES, changeTone, conditionText, defaultHost, envCounts, errorShare, exitText, findObject, fmtCount, fmtLatency,
+  fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments, isAttached, jobTrigger, labelPairs,
+  logSourceText, logsProblem, mayRevertTo, objectImage, objectStateText, objectTone, originText, parseLabelFilter,
+  phaseTone, deploymentTone, preflightRows, deploymentText, readyText, restartsOf, revertOffer, rolloutNote, specBindings,
+  statusState, tagPlan, trafficOf,
 } from './envs.js';
 import {
   AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SecretsTab, SettingsTab, TrafficTab, useOp,
 } from './EnvTabs.jsx';
+import { ObjectPage } from './ObjectPage.jsx';
 import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
 // environment's page: a head with its state in words, Revert (while the
 // latest deployment failed or is under way and an earlier one serves)
 // and Edit, the builder (Builder.jsx, ADR 0032); then its pages: the
-// overview (the rollout, the objects of its target deployment with their
-// instances and actions, its bindings with their check, the routes), its
+// overview (the rollout, the objects of its target deployment as rows
+// with their actions and folded instances, its bindings with their check,
+// the routes), an object's page (ObjectPage.jsx), its
 // deployments (revert, tags; a deployment's diff and normalised spec),
 // its incidents (with their evidence), the logs and traces, and
 // (EnvTabs.jsx) its traffic, secrets, domains and access, and settings.
@@ -50,7 +53,8 @@ export function Environments({ tenant, env, tab, item, replica, search, navigate
 // envCan is what a role may do on an environment (ADR 0031, the route
 // needs): write on it (revert, tags, secrets, restarts, runs, checks),
 // admin on it (public, route tokens), a delete (admin on it or write on
-// the tenant), a clone (write on the tenant).
+// the tenant), a clone (write on the tenant); operator: the nodes are
+// theirs to open.
 export function envCan(access, env) {
   const role = envRole(access, env);
   const writeTenant = atLeast((access && access.role) || '', 'write');
@@ -59,6 +63,7 @@ export function envCan(access, env) {
     admin: atLeast(role, 'admin'),
     del: atLeast(role, 'admin') || writeTenant,
     clone: writeTenant,
+    operator: !!(access && access.operator),
   };
 }
 
@@ -253,7 +258,7 @@ const TAB_ICONS = {
   overview: 'gauge', deployments: 'history', incidents: 'alert', logs: 'file', traces: 'activity', traffic: 'chart',
   secrets: 'key', access: 'globe', settings: 'settings',
 };
-const TABS = ENV_TABS.filter((t) => t !== 'builder');
+const TABS = ENV_TABS.filter((t) => t !== 'builder' && t !== 'objects');
 
 function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
   const [st, setSt] = useState(null);
@@ -262,7 +267,8 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
   const access = useAccess(tenant);
   const sum = useSummary();
   const list = envPath(tenant);
-  const activeTab = ENV_TABS.includes(tab) ? tab : 'overview';
+  // The objects tab without an object is the overview, which lists them.
+  const activeTab = ENV_TABS.includes(tab) && !(tab === 'objects' && !item) ? tab : 'overview';
 
   const refresh = useCallback(async () => {
     try {
@@ -282,8 +288,8 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
   const ec = envCan(access, (st && st.id) || env);
 
   // Escape goes up: from an item to its tab's list, from there to the
-  // environments; from the builder to the overview.
-  const up = item ? envPath(tenant, env, activeTab) : activeTab === 'builder' ? envPath(tenant, env) : list;
+  // environments; from the builder and an object's page to the overview.
+  const up = activeTab === 'builder' || activeTab === 'objects' ? envPath(tenant, env) : item ? envPath(tenant, env, activeTab) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -301,6 +307,16 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
     );
   }
   const body = (el) => (st ? el : !err && <p className="empty">Loading…</p>);
+
+  // An object's page has its own head, inside the environment.
+  if (activeTab === 'objects') {
+    return (
+      <>
+        <ErrBox error={err} />
+        {body(<ObjectPage key={item} tenant={tenant} st={st} item={item} ec={ec} lastOk={lastOk} changed={changed} navigate={navigate} />)}
+      </>
+    );
+  }
 
   return (
     <>
@@ -422,27 +438,42 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
 // --------------------------------------------------------------- overview --
 
 // OverviewTab reads the latest deployment's spec once per deployment,
-// for what the status does not say: when a job runs, and the bindings.
+// for what the status does not say: the images as written, when a job
+// runs, the bindings; and the services' traffic of the last hour once a
+// minute (none while the log store does not answer).
 function OverviewTab({ st, tenant, ec, changed, navigate }) {
+  const spec = useLatestSpec(st);
+  const [traffic, setTraffic] = useState(null);
+  const env = st.name;
+  const readTraffic = useCallback(async () => {
+    try { setTraffic(await api.traffic(env, '1h')); } catch { setTraffic(null); }
+  }, [env]);
+  usePoll(readTraffic, 60000);
+  return <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed} />;
+}
+
+// useLatestSpec is the spec of the status's latest deployment, read once
+// per deployment; null before, without one, or when it cannot be read.
+export function useLatestSpec(st) {
   const [spec, setSpec] = useState(null);
-  const n = st.deployment;
+  const n = st ? st.deployment : 0;
+  const env = st ? st.name : '';
   useEffect(() => {
     let live = true;
     if (!n) { setSpec(null); return undefined; }
-    api.getDeployment(st.name, n).then((d) => { if (live) setSpec(d.spec || {}); }, () => { if (live) setSpec(null); });
+    api.getDeployment(env, n).then((d) => { if (live) setSpec(d.spec || {}); }, () => { if (live) setSpec(null); });
     return () => { live = false; };
-  }, [st.name, n]);
-  return <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} ec={ec} changed={changed} />;
+  }, [env, n]);
+  return spec;
 }
 
 // EnvOverview is an environment's status (GET /api/v1/environments/{env}):
-// the rollout, the objects of the target deployment by kind with their
-// instances and actions (with ec, what the role may do), the bindings of
-// the latest deployment's spec, and the routes.
-export function EnvOverview({ st, tenant, navigate, spec = null, ec = null, changed = () => {} }) {
+// the rollout, the objects of the target deployment by kind as rows (each
+// links its page; with ec, what the role may do), the bindings of the
+// latest deployment's spec, and the routes.
+export function EnvOverview({ st, tenant, navigate, spec = null, traffic = null, ec = null, changed = () => {} }) {
   const groups = groupObjects(st.objects);
   const bindings = specBindings(spec);
-  const logsTo = (o, replica = null) => envPath(tenant, st.name, 'logs', `${o.kind}/${o.name}`, replica);
   return (
     <>
       <RolloutBox st={st} tenant={tenant} navigate={navigate} />
@@ -463,10 +494,8 @@ export function EnvOverview({ st, tenant, navigate, spec = null, ec = null, chan
       {groups.map(({ kind, objects }) => (
         <div key={kind} className="envsect">
           <div className="sect">{KIND_TITLES[kind] || kind} <span className="count">· {objects.length}</span></div>
-          {objects.map((o) => (
-            <ObjectCard key={`${o.kind}/${o.name}`} o={o} env={st.name} latest={st.deployment} tenant={tenant} navigate={navigate}
-              spec={spec} ec={ec} changed={changed} logsTo={(replica) => logsTo(o, replica)} />
-          ))}
+          <ObjectRows kind={kind} objects={objects} st={st} tenant={tenant} navigate={navigate} spec={spec}
+            traffic={traffic} ec={ec} changed={changed} />
         </div>
       ))}
       {groups.length === 0 && <p className="empty">No objects: the environment has no deployment yet.</p>}
@@ -477,7 +506,7 @@ export function EnvOverview({ st, tenant, navigate, spec = null, ec = null, chan
           {bindings.map((b) => <BindingCard key={b.name} b={b} env={st.name} ec={ec} />)}
         </div>)}
 
-      <RoutesTable routes={st.routes} env={st.name} />
+      <RoutesTable routes={st.routes} env={st.name} tenant={tenant} navigate={navigate} />
     </>
   );
 }
@@ -511,47 +540,226 @@ export function RolloutBox({ st, tenant, navigate }) {
   );
 }
 
-// ObjectCard is one object: an image service or an addon with its
-// instances (each links its logs), an attached service with its process,
-// a job with its last run; with ec its action: a service's Restart, a
-// job's Run now.
-export function ObjectCard({ o, env, latest, tenant, navigate, logsTo, spec = null, ec = null, changed = () => {} }) {
+// objectTo is the path of an object's page.
+export const objectTo = (tenant, env, o) => envPath(tenant, env, 'objects', `${o.kind}/${o.name}`);
+
+// ROW_HEADS are the columns of a kind's rows.
+const ROW_HEADS = {
+  service: ['name', 'image', 'ready', 'traffic · 1 h', 'restarts', 'deployment'],
+  addon: ['name', 'type', 'plan', 'ready', 'restarts', 'deployment'],
+  job: ['name', 'image', 'runs', 'last run', 'finished', 'deployment'],
+};
+
+// ObjectRows are a kind's objects, one row each (ObjectRow).
+export function ObjectRows({ kind, objects, st, tenant, navigate, spec = null, traffic = null, ec = null, changed = () => {} }) {
+  const heads = ROW_HEADS[kind] || ['name', '', '', '', '', 'deployment'];
+  return (
+    <div className="tblwrap">
+      <table className={`tbl obj-tbl obj-${kind}`}>
+        <thead>
+          <tr>
+            <th className="col-state" />
+            {heads.map((h, i) => <th key={i} className={h === 'restarts' ? 'col-num' : ''}>{h}</th>)}
+            <th className="col-quick" />
+          </tr>
+        </thead>
+        <tbody>
+          {objects.map((o) => (
+            <ObjectRow key={`${o.kind}/${o.name}`} o={o} st={st} tenant={tenant} navigate={navigate} spec={spec}
+              traffic={traffic} ec={ec} changed={changed} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ObjectRow is one object: its state, its name (a link to its page), the
+// image short (the pin on hover), what is ready, an image service's
+// traffic, the restarts, the deployments it runs and its actions; an
+// image service's and an addon's instances fold under a toggle, an
+// attached service's and a job's detail take a line of their own.
+export function ObjectRow({ o, st, tenant, navigate, spec = null, traffic = null, ec = null, changed = () => {}, open: openAt = false }) {
+  const [open, setOpen] = useState(openAt);
+  const [op, run, clear] = useOp();
+  const env = st.name;
   const tone = objectTone(o);
   const withInstances = o.kind === 'addon' || (o.kind === 'service' && !isAttached(o));
-  const [op, run, clear] = useOp();
   const busy = !!(op && op.busy);
   const manual = o.kind === 'job' && jobTrigger(spec, o.name) === 'manual';
+  const logs = envPath(tenant, env, 'logs', `${o.kind}/${o.name}`);
+  const n = (o.instances || []).length;
+  const cols = 8;
+  const detail = isAttached(o) ? o.detail : o.kind === 'job' && o.lastRun ? o.lastRun.detail : '';
+
+  const actions = (
+    <span className="obj-actions">
+      <Link to={logs} navigate={navigate} className="small"><Icon name="file" size={12} /> Logs</Link>
+      {ec && o.kind === 'service' && (
+        <button className="mini" disabled={!ec.write || busy}
+          title={ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : NEEDS.write}
+          onClick={() => run(() => api.restartService(env, o.name).then(() => true), restartNote(o)).then((r) => { if (r) changed(); })}>
+          <Icon name="refresh" size={12} /> Restart</button>)}
+      {ec && o.kind === 'job' && (
+        <button className={'mini' + (manual ? ' primary' : '')} disabled={!ec.write || busy}
+          title={ec.write ? 'a new run of the job, of the latest deployment' : NEEDS.write}
+          onClick={() => run(() => api.runJob(env, o.name).then(() => true), `${o.name}: a new run starts.`)
+            .then((r) => { if (r) changed(); })}>
+          <Icon name="play" size={12} /> Run now</button>)}
+    </span>
+  );
+  const cells = o.kind === 'job'
+    ? <JobCells o={o} spec={spec} manual={manual} />
+    : o.kind === 'addon'
+      ? <AddonCells o={o} latest={st.deployment} n={n} open={open} setOpen={setOpen} />
+      : <ServiceCells o={o} spec={spec} traffic={traffic} latest={st.deployment} n={n} open={open} setOpen={setOpen} tenant={tenant} navigate={navigate} />;
   return (
-    <div className="envobj">
-      <div className="envobj-head">
-        <ToneDot tone={tone} title={o.phase || ''} />
-        <span className="mono strong">{o.name}</span>
-        <span className="muted small">{objectSummary(o)}</span>
-        {manual && <span className="badge" title="on: manual — it runs only when asked">manual</span>}
-        <span className="spacer" />
-        {ec && o.kind === 'service' && (
-          <button className="mini" disabled={!ec.write || busy}
-            title={ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : NEEDS.write}
-            onClick={() => run(() => api.restartService(env, o.name).then(() => true),
-              isAttached(o) ? `${o.name}: its process restarts.` : `${o.name}: its replicas restart one at a time, each once the one before is live again.`)
-              .then((r) => { if (r) changed(); })}>
-            <Icon name="refresh" size={12} /> Restart</button>)}
-        {ec && o.kind === 'job' && (
-          <button className={'mini' + (manual ? ' primary' : '')} disabled={!ec.write || busy}
-            title={ec.write ? 'a new run of the job, of the latest deployment' : NEEDS.write}
-            onClick={() => run(() => api.runJob(env, o.name).then(() => true), `${o.name}: a new run starts.`)
-              .then((r) => { if (r) changed(); })}>
-            <Icon name="play" size={12} /> Run now</button>)}
-        {!withInstances && (
-          <Link to={logsTo(null)} navigate={navigate} className="small envobj-logs">
-            <Icon name="file" size={12} /> logs
-          </Link>)}
-      </div>
-      <OpNote op={op} onDismiss={clear} />
-      {isAttached(o) && <AttachedLine o={o} tenant={tenant} navigate={navigate} />}
-      {o.kind === 'job' && <JobLine run={o.lastRun} />}
-      {withInstances && <InstanceTable instances={o.instances} latest={latest} navigate={navigate} logsTo={logsTo} />}
-    </div>
+    <>
+      <tr className={'obj-row' + (open && withInstances ? ' unfolded' : '') + (detail || (op && op.text) ? ' has-detail' : '')}>
+        <td className="col-state"><ToneDot tone={tone} title={o.phase || objectStateText(o)} /></td>
+        <td className="nowrap obj-name">
+          <Link to={objectTo(tenant, env, o)} navigate={navigate} className="mono strong" title={`the ${o.kind}'s page: its definition, instances and changes`}>{o.name}</Link>
+        </td>
+        {cells}
+        <td className="col-quick">{actions}</td>
+      </tr>
+      {detail && <tr className="obj-detail"><td /><td colSpan={cols - 1} className="small detailcell">{detail}</td></tr>}
+      {op && op.text && (
+        <tr className="obj-detail"><td /><td colSpan={cols - 1}><OpNote op={op} onDismiss={clear} /></td></tr>)}
+      {withInstances && open && (
+        <tr className="obj-instances">
+          <td />
+          <td colSpan={cols - 1}>
+            <InstanceTable instances={o.instances} latest={st.deployment} navigate={navigate} operator={!!(ec && ec.operator)}
+              logsTo={(replica) => envPath(tenant, env, 'logs', `${o.kind}/${o.name}`, replica)} />
+          </td>
+        </tr>)}
+    </>
+  );
+}
+
+function restartNote(o) {
+  return isAttached(o)
+    ? `${o.name}: its process restarts.`
+    : `${o.name}: its replicas restart one at a time, each once the one before is live again.`;
+}
+
+// ImageShort is an image as written, short; the whole reference and its
+// pin on hover.
+export function ImageShort({ image }) {
+  if (!image || !image.written) return <span className="muted">—</span>;
+  const title = image.pinned && image.pinned !== image.written ? `${image.written}\npinned to ${image.pinned}` : image.written;
+  return <span className="mono small obj-image" title={title}>{image.short}</span>;
+}
+
+// FoldToggle unfolds an object's instances.
+function FoldToggle({ n, desired, open, setOpen }) {
+  if (n === 0) return <span className="muted small">no instances yet</span>;
+  const word = desired && n !== desired ? `${n} instances` : `${n} replica${n === 1 ? '' : 's'}`;
+  return (
+    <button type="button" className="linkbtn obj-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} /> {word}
+    </button>
+  );
+}
+
+// Deployments is the deployments an object's instances run; an older
+// one than the latest muted.
+function Deployments({ list, latest }) {
+  if (list.length === 0) return <span className="muted">—</span>;
+  return (
+    <span className="mono">
+      {list.map((d, i) => (
+        <Fragment key={d}>{i > 0 && ' · '}{latest > 0 && d < latest
+          ? <span className="muted" title="an older deployment still runs here">{d}</span>
+          : d}</Fragment>))}
+    </span>
+  );
+}
+
+function Restarts({ n, lastExit }) {
+  return (
+    <td className={'col-num mono' + (n > 0 ? ' warntext' : '')} title={lastExit != null ? `last exit ${lastExit}` : undefined}>
+      {n}{lastExit != null && lastExit !== 0 && <span className="bad small"> · exit {lastExit}</span>}
+    </td>
+  );
+}
+
+function ServiceCells({ o, spec, traffic, latest, n, open, setOpen, tenant, navigate }) {
+  if (isAttached(o)) {
+    const sb = `/tenants/${encodeURIComponent(tenant)}/sandboxes/${o.sandbox}`;
+    return (
+      <>
+        <td className="small nowrap">attached · <Link to={sb} navigate={navigate} className="mono" title={o.sandbox}>{shortId(o.sandbox)}</Link></td>
+        <td><ToneLabel tone={phaseTone(o.phase)}>{o.phase || 'starting'}</ToneLabel></td>
+        <td><TrafficCell s={trafficOf(traffic, o.name)} /></td>
+        <Restarts n={o.restarts || 0} lastExit={o.lastExit} />
+        <td className="muted">—</td>
+      </>
+    );
+  }
+  const lastExit = (o.instances || []).map((i) => i.lastExit).find((x) => x != null && x !== 0);
+  return (
+    <>
+      <td className="cut"><ImageShort image={objectImage(o, spec)} /></td>
+      <td className="nowrap">
+        <span className="mono">{readyText(o)}</span>{' '}
+        <FoldToggle n={n} desired={o.desired} open={open} setOpen={setOpen} />
+      </td>
+      <td><TrafficCell s={trafficOf(traffic, o.name)} /></td>
+      <Restarts n={restartsOf(o)} lastExit={lastExit} />
+      <td><Deployments list={instanceDeployments(o)} latest={latest} /></td>
+    </>
+  );
+}
+
+function AddonCells({ o, latest, n, open, setOpen }) {
+  return (
+    <>
+      <td className="mono small nowrap">{o.type} {o.version}</td>
+      <td className="small nowrap">{o.plan}{!o.provisioned && <span className="warntext"> · not provisioned</span>}</td>
+      <td className="nowrap">
+        <span className="mono">{readyText(o)}</span>{' '}
+        <FoldToggle n={n} desired={1} open={open} setOpen={setOpen} />
+      </td>
+      <Restarts n={restartsOf(o)} lastExit={null} />
+      <td><Deployments list={instanceDeployments(o)} latest={latest} /></td>
+    </>
+  );
+}
+
+function JobCells({ o, spec, manual }) {
+  const r = o.lastRun;
+  return (
+    <>
+      <td className="cut"><ImageShort image={objectImage(o, spec)} /></td>
+      <td className="small nowrap">{manual ? <span className="badge" title="on: manual — it runs only when asked">manual</span> : 'with each deployment'}</td>
+      <td className="nowrap">
+        {r
+          ? (
+            <>
+              <ToneLabel tone={phaseTone(r.phase)}>{r.phase}</ToneLabel>
+              <span className="muted small"> attempt {r.attempt}</span>
+              {r.exitCode != null && <span className={'mono small' + (r.exitCode ? ' bad' : ' muted')}> · exit {r.exitCode}</span>}
+            </>)
+          : <span className="muted">not run yet</span>}
+      </td>
+      <td>{r && r.finishedAt ? <Ago iso={r.finishedAt} /> : <span className="muted">—</span>}</td>
+      <td className="mono">{r ? r.deployment : <span className="muted">—</span>}</td>
+    </>
+  );
+}
+
+// TrafficCell is a service's requests of the last hour, its errors'
+// share and p95.
+function TrafficCell({ s }) {
+  if (!s) return <span className="muted">—</span>;
+  return (
+    <span className="small nowrap obj-traffic" title={`${s.requests} requests through the ingress in the last hour, ${s.errors} of them 5xx; p95 ${fmtLatency(s.p95Ms)}`}>
+      <span className="mono">{fmtCount(s.requests)}</span> req
+      {s.requests > 0 && <> · <span className={'mono' + (s.errors > 0 ? ' bad' : '')}>{errorShare(s)}</span> err</>}
+      {s.p95Ms != null && <> · p95 <span className="mono">{fmtLatency(s.p95Ms)}</span></>}
+    </span>
   );
 }
 
@@ -593,22 +801,8 @@ export function PreflightResult({ res }) {
   );
 }
 
-function AttachedLine({ o, tenant, navigate }) {
-  const sb = `/tenants/${encodeURIComponent(tenant)}/sandboxes/${o.sandbox}`;
-  return (
-    <>
-      <div className="envobj-line">
-        <span><span className="k">sandbox</span><Link to={sb} navigate={navigate} className="mono">{o.sandbox}</Link></span>
-        <span><span className="k">phase</span><ToneLabel tone={phaseTone(o.phase)}>{o.phase}</ToneLabel></span>
-        <span><span className="k">restarts</span><span className={'mono' + (o.restarts > 0 ? ' warntext' : '')}>{o.restarts || 0}</span></span>
-        <span><span className="k">last exit</span><span className="mono">{o.lastExit === null || o.lastExit === undefined ? '—' : o.lastExit}</span></span>
-      </div>
-      {o.detail && <div className="envobj-detail">{o.detail}</div>}
-    </>
-  );
-}
-
-function JobLine({ run }) {
+// JobLine is a job's last run.
+export function JobLine({ run }) {
   if (!run) return <div className="envobj-line muted">It has not run yet.</div>;
   return (
     <>
@@ -627,8 +821,9 @@ function JobLine({ run }) {
 
 // InstanceTable lists an object's pods; one of an older deployment than the
 // latest is muted, a stopping one dimmed. A pod's detail, when it has one,
-// takes a line of its own under the pod.
-export function InstanceTable({ instances, latest, navigate, logsTo }) {
+// takes a line of its own under the pod. Its node comes last, small: a
+// link for an operator (the nodes are theirs), text for everyone else.
+export function InstanceTable({ instances, latest, navigate, logsTo, operator = false }) {
   const list = instances || [];
   if (list.length === 0) return <div className="envobj-line muted">No instances yet.</div>;
   return (
@@ -639,13 +834,13 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
             <th className="col-num">replica</th>
             <th>phase</th>
             <th>state</th>
-            <th>node</th>
             <th>address</th>
             <th className="col-num">deployment</th>
             <th className="col-num">restarts</th>
             <th className="col-num">last exit</th>
             <th className="col-when">ready since</th>
             <th className="col-quick" />
+            <th>node</th>
           </tr>
         </thead>
         <tbody>
@@ -658,12 +853,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
                   <td className="col-num mono">{i.replica}</td>
                   <td><ToneLabel tone={phaseTone(i.phase)}>{i.phase}</ToneLabel></td>
                   <td><StateLabel state={i.state} /></td>
-                  <td className="mono cut-start" title={i.node || undefined}>
-                    {i.node
-                      ? <Link to={`/nodes/${encodeURIComponent(i.node)}`} navigate={navigate}>{i.node}</Link>
-                      : <span className="muted">—</span>}
-                  </td>
-                  <td className="mono small cut-start" title={i.address || undefined}>{i.address || <span className="muted">—</span>}</td>
+                  <td className="mono small muted cut-start" title={i.address || undefined}>{i.address || '—'}</td>
                   <td className={'col-num mono' + (old ? ' muted' : '')} title={old ? "an older deployment's instance" : ''}>{i.deployment}</td>
                   <td className={'col-num mono' + (i.restarts > 0 ? ' warntext' : '')}>{i.restarts}</td>
                   <td className={'col-num mono' + (i.lastExit ? ' bad' : '')}>
@@ -672,6 +862,11 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
                   <td className="col-when">{i.readySince ? <Ago iso={i.readySince} /> : <span className="muted">—</span>}</td>
                   <td className="col-quick">
                     <Link to={logsTo(i.replica)} navigate={navigate} className="small">logs</Link>
+                  </td>
+                  <td className="small muted inst-node cut-start" title={i.node || undefined}>
+                    {i.node && operator
+                      ? <Link to={`/nodes/${encodeURIComponent(i.node)}`} navigate={navigate} className="muted">{i.node}</Link>
+                      : (i.node || '—')}
                   </td>
                 </tr>
                 {i.detail && (
@@ -689,8 +884,9 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
 }
 
 // RoutesTable lists the routes of the deployed deployment (the latest when
-// none is deployed), their ports resolved.
-export function RoutesTable({ routes, env }) {
+// none is deployed), their ports resolved; with navigate a service links
+// its page.
+export function RoutesTable({ routes, env, tenant = '', navigate = null }) {
   const list = routes || [];
   return (
     <div className="envsect">
@@ -706,7 +902,11 @@ export function RoutesTable({ routes, env }) {
                   <tr key={r.name}>
                     <td className="mono">{r.name}</td>
                     <td className="mono">{r.path}</td>
-                    <td className="mono">{r.service}</td>
+                    <td className="mono">
+                      {navigate
+                        ? <Link to={envPath(tenant, env, 'objects', `service/${r.service}`)} navigate={navigate}>{r.service}</Link>
+                        : r.service}
+                    </td>
                     <td className="col-num mono">{r.port}</td>
                   </tr>
                 ))}
@@ -1105,7 +1305,11 @@ export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
                   <td className="col-state"><ToneDot tone={open ? 'failed' : 'absent'} title={open ? 'open' : 'closed'} /></td>
                   <td className="col-num"><Link to={to} navigate={navigate} className="mono">{i.id}</Link></td>
                   <td className="nowrap">{conditionText(i.condition)}</td>
-                  <td className="mono small nowrap">{i.object}</td>
+                  <td className="mono small nowrap">
+                    {incidentObject(i.object).hasLogs
+                      ? <Link to={envPath(tenant, env, 'objects', i.object)} navigate={navigate}>{i.object}</Link>
+                      : i.object}
+                  </td>
                   <td className="col-num mono">{i.deployment}</td>
                   <td className="small msgcell">{i.summary}</td>
                   <td className="col-when"><Ago iso={i.openedAt} /></td>
@@ -1164,7 +1368,9 @@ export function IncidentView({ inc, tenant, env, navigate }) {
       <p className="incident-summary">{inc.summary}</p>
       <div className="kv-grid">
         <KV k="object">
-          <span className="mono">{inc.object}</span>
+          {obj.hasLogs
+            ? <Link to={envPath(tenant, env, 'objects', inc.object)} navigate={navigate} className="mono">{inc.object}</Link>
+            : <span className="mono">{inc.object}</span>}
           {obj.hasLogs && <> · <Link to={envPath(tenant, env, 'logs', inc.object)} navigate={navigate}>its logs</Link></>}
         </KV>
         <KV k="deployment">
@@ -1223,11 +1429,12 @@ function LogsTab({ tenant, env, st, item, replica, search, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
   const o = findObject(st.objects || [], item);
   const focus = focusOf(item, replica, search);
-  const tail = item ? <LogsPane key={`${item}/${replica}`} env={env} item={item} replica={replica || 0} o={o} /> : null;
+  const page = o ? envPath(tenant, env, 'objects', item) : '';
+  const tail = item ? <LogsPane key={`${item}/${replica}`} env={env} item={item} replica={replica || 0} o={o} page={page} navigate={navigate} /> : null;
   return <LogSearch tenant={tenant} env={env} st={st} focus={focus} navigate={navigate} tail={tail} tailOnly={!!(o && isAttached(o))} />;
 }
 
-function LogsPane({ env, item, replica, o }) {
+function LogsPane({ env, item, replica, o, page, navigate }) {
   const [result, setResult] = useState(null);
   const i = item.indexOf('/');
   const kind = item.slice(0, i);
@@ -1257,7 +1464,9 @@ function LogsPane({ env, item, replica, o }) {
   return (
     <div className="logs">
       <div className="pane-toolbar">
-        <h2><Icon name="file" size={14} /> <span className="mono">{item}</span>{replica > 0 && <span className="muted"> · replica {replica}</span>}</h2>
+        <h2><Icon name="file" size={14} />{' '}
+          {page ? <Link to={page} navigate={navigate} className="mono" title="the object's page">{item}</Link> : <span className="mono">{item}</span>}
+          {replica > 0 && <span className="muted"> · replica {replica}</span>}</h2>
         {result && result.source && (
           <span className="muted small">
             {logSourceText(result.source, o, replica)} · the last {result.lines.length} lines
