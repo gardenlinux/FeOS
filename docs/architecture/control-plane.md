@@ -1901,13 +1901,16 @@ HTTP APIs it calls by a name at the node's address, `feos-authn` adding
 the credential. They are on with the same switch as the Kubernetes and
 SSH bindings, `--bindings` and `--secret-key-file` (`internal/bindings`,
 `http*.go`, the rules shared with the spec in `internal/bindings/httpcheck`).
-They come from two places, and from no other:
+They come from three places, and from no other:
 
 - **a sandbox's own set**, `PUT /api/v1/sandboxes/{id}/http` (sandbox
   class), stated whole;
+- **the tenant's credentials a sandbox names**, at their latest versions
+  ([Credentials of a tenant](#credentials-of-a-tenant));
 - **an environment's pod**: the bindings its image service or job names
   (`"bindings": ["erp"]`), as the deployment its instance or job run
-  belongs to has them ([The deployment spec](#the-deployment-spec)). A
+  belongs to has them ([The deployment spec](#the-deployment-spec)), a
+  binding that names a credential at the version the deployment pins. A
   pod gets exactly those; an attached service has its sandbox's.
 
 **The routes.**
@@ -2098,6 +2101,62 @@ condition that holds again within an hour of its incident's close, on
 the same deployment, opens that incident again (`closed_at` cleared, its
 summary and evidence the new ones) instead of a new one. The loop
 deletes a binding's incidents 30 days after they closed.
+
+### Credentials of a tenant
+
+A credential ([ADR 0033](../adr/0033-credentials-of-a-tenant.md)) is an
+HTTP binding's definition that a tenant states once and its sandboxes and
+environments use by name (`internal/bindings/credentials.go`,
+`internal/store/tenant_credentials.go`). It is on with the HTTP bindings.
+
+| Method and path | Need | Answers |
+|---|---|---|
+| `GET /api/v1/credentials` | read on the tenant | `{credentials}`: the latest version of each, with `usedBy` |
+| `GET /api/v1/credentials/{name}` | read on the tenant | the latest version; 404 `no_credential` |
+| `PUT /api/v1/credentials/{name}` | write on the tenant | 201 a new version, 200 the same definition again; 422 as a binding's PUT |
+| `DELETE /api/v1/credentials/{name}` | write on the tenant | 204; 409 `credential_in_use`, naming its users |
+| `POST /api/v1/credentials/{name}/check` | write on the tenant | the preflight of the latest version, `{probe}` optional |
+| `GET /api/v1/sandboxes/{id}/credentials` | read on the tenant | `{credentials}`: the names the sandbox names |
+| `PUT /api/v1/sandboxes/{id}/credentials` | write on the tenant | the same, after the whole list is stated |
+
+A PUT's body is a binding of a sandbox's set without its name (the
+path's): upstream, mode, CA, path prefixes, forwarded host, rate limit and
+credential, checked by the same rules and the destination rule. Every
+write that changes the definition makes version n+1 (`tenant_credentials`,
+one row per version, the credential sealed and bound to the tenant, the
+name and the version); the same definition again makes none. A secret
+field sent as `{"set": true}` keeps the latest version's value, so that a
+GET's answer, edited and sent back, keeps the secrets it did not touch;
+keeping a field the latest version has not (another kind, a header it
+lacks) is a 422. No answer carries a secret: each answers `{"set": true}`.
+`usedBy` lists the sandboxes that name the credential and each
+environment whose latest or deployed deployment pins it, with the
+versions both pin.
+
+**A sandbox** names credentials at its create (`credentials`) or by the
+PUT (`sandbox_credentials`); each must exist, two must not make the pod
+resolve one name, and none may share a name with the sandbox's own set or
+a name an environment gives it (409 `name_taken`). Its pod gets each at
+its latest version as a binding named by the credential, beside its own
+set; its bindings' version covers both, so a new version of a credential
+moves it: the PUT that wrote it makes the interception CAs each such
+sandbox needs and pushes the pod its clear part, and its feos-authn
+fetches the new credential. Nothing restarts.
+
+**An environment's binding** may name a credential instead of stating
+one: `{"tenantCredential": {"name": "github"}}`, with no other field of
+its own. A plan reads the tenant's credentials; one the tenant lacks, a
+version it lacks, or a field of the binding's own is an error at the
+binding. An apply pins the latest version (`"version"`) and writes the
+version's upstream and mode into the normalised binding, which decide
+whether a pod is another; the pods get the pinned version, opened when
+they ask for their bindings. A newer version reaches the environment with
+a deployment that moves the pin: in place unless the upstream or the mode
+changed.
+
+**A delete** is refused while a sandbox names the credential or the
+latest or the deployed deployment of an environment pins it; then every
+version goes.
 
 ### The management UI
 
