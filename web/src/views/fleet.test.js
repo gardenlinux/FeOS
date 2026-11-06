@@ -3,8 +3,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  canDrain, certState, createHints, fleetDefaults, fmtBytes, fmtBytesOf, fmtSeconds, fmtSize, joinTokenState, memBar,
-  nodeRows, sandboxCounts, settingsForm, settingsPatch, stopping, tenantDeleteText, tokenRows, vcpuCapacityText,
+  canDrain, certState, createHints, fleetDefaults, fmtBytes, fmtBytesOf, fmtSeconds, joinTokenState, memBar,
+  nodeRows, settingsForm, settingsPatch, stopping, tenantDeleteText, tokenRows, vcpuCapacityText,
 } from './fleet.js';
 
 // The node view's rows, from GET /api/v1/admin/nodes as ferund renders
@@ -197,28 +197,12 @@ describe('tenantDeleteText', () => {
   });
 });
 
-describe('sizes and counts', () => {
-  it('renders a sandbox size', () => {
-    expect(fmtSize({ vcpus: 4, memoryMib: 8192 })).toBe('4 vCPU · 8.0 GiB');
-    expect(fmtSize({ vcpus: 2, memoryMib: 512 })).toBe('2 vCPU · 512 MiB');
-    expect(fmtSize({})).toBe('—');
-  });
-
+describe('sizes', () => {
   it('formats host sizes', () => {
     expect(fmtBytes(66000000000)).toBe('61.5 GiB');
     expect(fmtBytes('214748364800')).toBe('200.0 GiB');
     expect(fmtBytes(3 * 2 ** 40)).toBe('3.0 TiB');
     expect(fmtBytes(0)).toBe('0 B');
-  });
-
-  it('counts failed and lost as errors, hibernated on its own (the Overview’s count)', () => {
-    const c = sandboxCounts([
-      { clientState: 'running' }, { clientState: 'running' }, { clientState: 'paused' },
-      { clientState: 'hibernated' }, { clientState: 'failed' }, { clientState: 'lost' },
-      { clientState: 'pending' }, { clientState: 'resuming' },
-    ]);
-    expect(c).toEqual({ running: 2, paused: 1, hibernated: 1, error: 2, other: 2 });
-    expect(sandboxCounts(null)).toEqual({ running: 0, paused: 0, hibernated: 0, error: 0, other: 0 });
   });
 });
 

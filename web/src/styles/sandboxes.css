@@ -1,0 +1,105 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The sandbox pages: the list with its counts, the create form, a
+   sandbox's head with its state in words, Connect's steps, the tool
+   reference, the idle rules. Ochre is what runs as a pod. */
+
+.sbx-page { display: flex; flex-direction: column; max-width: 1280px; }
+.pagehead-actions { margin-left: auto; display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* the counts by state, each with its dot */
+.sbx-counts { display: inline-flex; flex-wrap: wrap; gap: 4px 16px; }
+.sbx-count { display: inline-flex; align-items: center; gap: 6px; }
+.sbx-count b { font-variant-numeric: tabular-nums; }
+.sbx-count.zero { opacity: .55; }
+
+.sbx-table td { white-space: nowrap; }
+.sbx-id { display: inline-flex; align-items: center; gap: 5px; }
+
+/* the head: the state's word, the sentence, the description */
+.sbx-state {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px;
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 9px; color: var(--text);
+}
+.sbx-state-word { font-size: 11.5px; color: var(--muted); }
+.sbx-state.s-running .sbx-state-word { color: var(--ok); }
+.sbx-state.s-failed, .sbx-state.s-lost { border-color: rgba(242, 119, 107, .5); }
+.sbx-state.s-failed .sbx-state-word, .sbx-state.s-lost .sbx-state-word { color: var(--danger); }
+.sbx-state.s-unknown .sbx-state-word { color: var(--warn); }
+.sbx-desc { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.sbx-desc::before { content: "status · "; color: var(--muted); }
+.sbx-page .tabbar { overflow-x: auto; scrollbar-width: none; }
+.sbx-page .tab { flex: none; }
+
+/* the create form */
+.sbx-form { display: flex; flex-direction: column; gap: 14px; max-width: 720px; padding: 4px 2px; }
+.sbx-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sbx-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.sbx-hint { font-size: 12px; color: var(--muted); }
+.sbx-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.sbx-row .sbx-field { flex: 1 1 180px; }
+.sbx-row .sbx-field input.num { width: 100%; }
+.sbx-row-hint { flex: 1 1 100%; }
+.sbx-check { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.sbx-check input { margin-top: 3px; accent-color: var(--accent); }
+.sbx-fieldset { border: 1px solid var(--border-soft); border-radius: 4px; padding: 8px 12px 12px; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.sbx-fieldset legend { font-size: 12px; font-weight: 600; padding: 0 4px; }
+.sbx-formactions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* the overview */
+.sbx-kv { grid-template-columns: 120px minmax(0, 1fr); max-width: 860px; }
+.sbx-idle { margin-top: 10px; max-width: 860px; }
+.sbx-idle .sect { display: flex; align-items: center; gap: 6px; }
+.sbx-idle ul { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 7px; font-size: 13px; }
+.sbx-idle li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.sbx-idle b { color: var(--text); font-weight: 650; }
+.sbx-li-dot { display: inline-flex; justify-content: center; }
+
+/* Connect */
+.sbx-connect { display: flex; flex-direction: column; gap: 6px; max-width: 980px; }
+.sbx-step { border-top: 1px solid var(--border-soft); padding: 12px 0 4px; }
+.sbx-step:first-of-type { border-top: 0; padding-top: 2px; }
+.sbx-step h3 { font-size: 13.5px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.sbx-stepno {
+  display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 3px;
+  font-size: 11px; font-family: var(--mono); background: rgba(var(--accent-rgb), .14); color: var(--accent);
+}
+.sbx-step p { margin: 2px 0 6px; }
+.sbx-snip-h { margin: 10px 0 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+.sbx-once-note { margin: 6px 0 0; }
+
+/* the tool reference */
+.sbx-tools .searchwrap input { min-width: 140px; }
+.sbx-tool { border-top: 1px solid var(--border-soft); }
+.sbx-tool:first-of-type { border-top: 0; }
+.sbx-tool summary {
+  display: grid; grid-template-columns: minmax(110px, max-content) minmax(0, 1fr) auto; gap: 12px; align-items: baseline;
+  padding: 7px 4px; cursor: pointer; list-style: none;
+}
+.sbx-tool summary::-webkit-details-marker { display: none; }
+.sbx-tool summary:hover { background: rgba(var(--accent-rgb), .05); }
+.sbx-tool[open] summary .mono.strong { color: var(--accent); }
+.sbx-tool > :not(summary) { margin-left: 4px; margin-right: 4px; }
+.sbx-tool .schemapre { margin-bottom: 10px; }
+.trunc-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.sbx-tool-params { white-space: nowrap; }
+
+/* Credentials and Settings */
+.sbx-imagecreds { max-width: 860px; }
+.sbx-imagecreds p { margin: 2px 0 6px; }
+.sbx-danger {
+  display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  border: 1px solid rgba(242, 119, 107, .35); border-radius: 4px; padding: 10px 12px; max-width: 860px;
+}
+.sbx-danger > div { flex: 1 1 320px; }
+.sbx-danger p { margin: 2px 0 0; }
+
+@media (max-width: 820px) {
+  .sbx-tool summary { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .sbx-tool-params { white-space: normal; }
+  .sbx-kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .pagehead-actions { margin-left: 0; }
+}

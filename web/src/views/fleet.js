@@ -165,29 +165,6 @@ export function settingsPatch(base, form) {
   return out;
 }
 
-// fmtSize renders a sandbox's size.
-export function fmtSize(sb) {
-  const v = Number(sb.vcpus || 0);
-  const m = Number(sb.memoryMib || 0);
-  if (!v && !m) return '—';
-  return `${v} vCPU · ${fmtBytes(m * 2 ** 20)}`;
-}
-
-// sandboxCounts buckets the sandboxes by clientState: hibernated is its
-// own bucket (its checkpoint is in the object store, nothing on a node),
-// and failed and lost are the errors.
-export function sandboxCounts(sandboxes) {
-  const c = { running: 0, paused: 0, hibernated: 0, error: 0, other: 0 };
-  for (const s of sandboxes || []) {
-    if (s.clientState === 'running') c.running++;
-    else if (s.clientState === 'paused') c.paused++;
-    else if (s.clientState === 'hibernated') c.hibernated++;
-    else if (s.clientState === 'failed' || s.clientState === 'lost') c.error++;
-    else c.other++;
-  }
-  return c;
-}
-
 // joinTokenState is a join token's state at now (ms): used, expired or
 // open.
 export function joinTokenState(t, now = Date.now()) {
