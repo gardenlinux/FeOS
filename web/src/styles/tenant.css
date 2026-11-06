@@ -1,0 +1,89 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The tenant's Jobs, Usage and Settings pages. */
+.tenantpage { display: flex; flex-direction: column; gap: 14px; max-width: 1280px; }
+.tenantpage > .pagehead { margin-bottom: 0; }
+.facts b.bad { color: var(--danger); }
+.facts b.ok { color: var(--ok); }
+.facts b.warn { color: var(--warn); }
+.pagehead-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.danger-zone { border-color: rgba(239, 84, 73, .28); }
+.danger-zone p { margin: 0 0 10px; }
+
+/* jobs */
+.jobs-tbl .labels { flex-wrap: wrap; }
+.jobform { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.jf-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.jf-field.wide, .jf-row.wide, .jf-actions.wide, .jf-errors { grid-column: 1 / -1; }
+.jf-label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.jf-hint { font-size: 11.5px; line-height: 1.4; }
+.jf-field > input:not(.num):not(.short), .jf-field > textarea { width: 100%; }
+.jf-row { display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); gap: 12px 16px; align-items: start; }
+.jf-row .jf-field { max-width: 260px; }
+.jf-row .jf-field:last-child { max-width: none; }
+.jf-creds { display: flex; gap: 6px; }
+.jf-creds input { flex: 1; min-width: 0; }
+.secretarea { -webkit-text-security: disc; }
+.secretarea:focus { -webkit-text-security: none; }
+.jf-errors { margin: 0; padding-left: 18px; color: var(--warn); font-size: 12.5px; }
+.jf-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.jobwhy {
+  display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--border-soft); border-left: 3px solid var(--border);
+}
+.jobwhy > .sdot { margin-top: 4px; }
+.jobwhy.running { border-left-color: var(--ok); }
+.jobwhy.moving { border-left-color: var(--accent); }
+.jobwhy.failed { border-left-color: var(--danger); }
+.jobwhy-word { color: var(--muted); margin-right: 4px; }
+.jobwhy.failed .jobwhy-word { color: var(--danger); }
+.jobwhy-detail { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.job-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; align-items: start; }
+.jobresult { max-height: 40vh; }
+.joblog { max-height: 55vh; }
+
+/* usage */
+.usage-rows { display: flex; flex-direction: column; }
+.usage-row { padding: 12px 2px; border-top: 1px solid var(--border-soft); }
+.usage-row:first-child { border-top: 0; padding-top: 4px; }
+.usage-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.usage-k { font-weight: 600; min-width: 110px; }
+.usage-v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.usage-v .muted { font-size: 13px; font-weight: 400; }
+.usage-bar { display: block; height: 6px; background: var(--border-soft); border-radius: 3px; overflow: hidden; margin: 6px 0 6px; }
+.usage-bar > span { display: block; height: 100%; background: var(--accent); }
+.usage-bar.os > span { background: var(--os); }
+.usage-bar.none { background: repeating-linear-gradient(90deg, var(--border-soft) 0 6px, transparent 6px 10px); }
+.usage-row.t-warn .usage-bar > span { background: var(--warn); }
+.usage-row.t-bad .usage-bar > span { background: var(--danger); }
+.usage-row.t-bad .usage-v { color: var(--danger); }
+.usage-what { margin: 2px 0 0; line-height: 1.45; }
+
+.booked-bars { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 12px; }
+.booked-bar { display: grid; grid-template-columns: 110px minmax(0, 1fr) 150px; gap: 12px; align-items: center; }
+.booked-bar .stack { display: flex; height: 10px; background: var(--border-soft); border-radius: 3px; overflow: hidden; }
+.booked-bar .stack > span { display: block; height: 100%; }
+.booked-bar .stack > span + span { border-left: 1px solid var(--panel); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+/* all of it runs as a pod, so ochre: awake full, asleep paler,
+   hibernated hollow (the state dots' forms), jobs and environments
+   in their own shades */
+.sw-awake { background: var(--os); }
+.sw-asleep { background: color-mix(in srgb, var(--os) 55%, var(--panel)); }
+.sw-hibernated { background: transparent; box-shadow: inset 0 0 0 1.5px var(--os); }
+.sw-other { background: color-mix(in srgb, var(--os) 30%, var(--panel)); }
+.sw-jobs { background: color-mix(in srgb, var(--os) 70%, var(--text)); }
+.sw-environments { background: repeating-linear-gradient(135deg, var(--os) 0 3px, color-mix(in srgb, var(--os) 40%, var(--panel)) 3px 6px); }
+.booked-tbl td:first-child { white-space: nowrap; }
+
+@media (max-width: 820px) {
+  .jobform { grid-template-columns: minmax(0, 1fr); }
+  .jf-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .jf-row .jf-field { max-width: none; }
+  .job-grid { grid-template-columns: minmax(0, 1fr); }
+  .booked-bar { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
