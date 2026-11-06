@@ -26,7 +26,8 @@ import (
 // This file is human sign-in (§11 "Human sign-in", ADR 0031): people sign
 // in to the UI and the API through the OIDC provider FeCode, FeRun and
 // FeChat share. Everyone the provider lets in is a person (people) and gets
-// a session, kept in ui_sessions and named by the cookie ferun_session; an
+// a session, kept in ui_sessions and named by the cookie
+// __Host-ferun_session (auth.SessionCookie); an
 // operator's (the provider's groups claim holds --oidc-admin-group) is
 // marked admin. A sign-in under way lives in auth_logins, so that it may
 // complete on another instance than it began on. The provider's
@@ -182,6 +183,18 @@ func (s *server) redirectURI() string { return s.cfg.PublicURL + "/auth/callback
 func (s *server) cookie(name, value, path string, maxAge int) *http.Cookie {
 	return &http.Cookie{Name: name, Value: value, Path: path, MaxAge: maxAge, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secure}
+}
+
+// setSessionCookie sets the session's cookie, __Host-: Secure whatever
+// the public URL (browsers take Secure cookies from http://localhost),
+// Path=/, no Domain. It clears the cookie's old name
+// (auth.OldSessionCookie), which a session of the release before has.
+// maxAge < 0 clears both.
+func (s *server) setSessionCookie(w http.ResponseWriter, value string, maxAge int) {
+	c := s.cookie(cookieSession, value, "/", maxAge)
+	c.Secure = true
+	http.SetCookie(w, c)
+	http.SetCookie(w, s.cookie(auth.OldSessionCookie, "", "/", -1))
 }
 
 // login is GET /auth/login?next=<path>: a new sign-in (state, nonce and a
@@ -342,7 +355,7 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusInternalServerError, "Sign-in failed", "FeRun could not record the session. Try again.", again, "Start again")
 		return
 	}
-	http.SetCookie(w, s.cookie(cookieSession, id, "/", int(s.cfg.SessionTTL.Seconds())))
+	s.setSessionCookie(w, id, int(s.cfg.SessionTTL.Seconds()))
 	s.log.Info("signed in", "person", pr.ID, "sub", p.Sub, "email", p.Email, "username", p.Username,
 		"github_id", p.GitHubID, "operator", operator)
 	if p.Username != "" {
@@ -362,12 +375,11 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 // signs out of Basic the same way).
 func (s *server) logout(w http.ResponseWriter, r *http.Request) error {
 	redirect := "/"
-	c, err := r.Cookie(cookieSession)
-	if err == nil && c.Value != "" && s.oidc != nil && s.st != nil {
+	if session := auth.SessionOf(r); session != "" && s.oidc != nil && s.st != nil {
 		if err := s.checkCSRF(r); err != nil {
 			return err
 		}
-		sess, err := s.st.DeleteUISession(r.Context(), store.HashToken(c.Value))
+		sess, err := s.st.DeleteUISession(r.Context(), store.HashToken(session))
 		if err != nil && !isNoRow(err) {
 			return internalf("sign out: %v", err)
 		}
@@ -383,7 +395,7 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	}
-	http.SetCookie(w, s.cookie(cookieSession, "", "/", -1))
+	s.setSessionCookie(w, "", -1)
 	return writeJSON(w, http.StatusOK, struct {
 		Redirect string `json:"redirect"`
 	}{redirect})

@@ -22,6 +22,8 @@ import (
 	commonv1 "github.com/gardenlinux/feos/go/gen/otlp/common/v1"
 	logsv1 "github.com/gardenlinux/feos/go/gen/otlp/logs/v1"
 	resourcev1 "github.com/gardenlinux/feos/go/gen/otlp/resource/v1"
+
+	"github.com/gardenlinux/feos/go/internal/auth"
 )
 
 const traceA = "4bf92f3577b34da6a3ce929d0e0e4736"
@@ -154,7 +156,9 @@ func TestTenants(t *testing.T) {
 			return
 		}
 		session := ""
-		if c, err := r.Cookie("ferun_session"); err == nil {
+		// A ferund of the release before reads the cookie's old name,
+		// which the sink passes on beside the new one.
+		if c, err := r.Cookie(auth.OldSessionCookie); err == nil {
 			session = c.Value + " " + r.Header.Get("FeRun-Tenant")
 		}
 		switch r.Header.Get("Authorization") + session {

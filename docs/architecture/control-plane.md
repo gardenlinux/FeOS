@@ -1332,7 +1332,16 @@ as an object, no `nonce`, and a `sid`. It ends every session with that
 `sid` (and that `sub`, when the token names one) on every instance, as
 their rows go, and answers 200; a token that does not verify is 400
 `{"error": "invalid_request", "error_description"}`; both `Cache-Control:
-no-store`. A sign-out ends sessions only: tokens live on. A request with
+no-store`. A sign-out ends sessions only: tokens live on. The session's
+cookie is `__Host-ferun_session` (`auth.SessionCookie`): HttpOnly,
+SameSite=Lax, Secure whatever the public URL (browsers take it from
+`http://localhost` too), `Path=/`, no `Domain`, so that no app of a
+tenant in a zone below ferund's host (`apps.run.<domain>`) can set one
+the browser sends to ferund. Its name before, `ferun_session`, is read
+too for one release (sessions of the release before survive its
+rollout; a sign-in or sign-out clears it), and ferund and the sink pass
+a session on under both names, so that a peer of the release before
+finds it; the release after drops the old name. A request with
 the session cookie that changes something must carry `X-Requested-With:
 ferun` and, with an `Origin`, the public URL's; ferund sends no CORS
 headers. Basic credentials, when present, are checked first, and a
@@ -3639,7 +3648,7 @@ nor waits for. `ferund`'s part:
   start>&limit=500`, paged by its `cursor` up to `lines` and the answer's
   budget (8 KiB a line, 4 MiB), with the caller's own credentials
   (`auth.Tenant.PassOn`: its bearer, or a session's cookie
-  `ferun_session` and `FeRun-Tenant`), so that the sink answers what the
+  `__Host-ferun_session` and `FeRun-Tenant`), so that the sink answers what the
   caller may read only (ADR 0031). A sink that fails or has no
   line leaves the read to the node, as before; a paused instance whose
   lines the sink has is answered, not 409 "paused". A tenant's job's log

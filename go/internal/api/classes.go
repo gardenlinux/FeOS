@@ -140,11 +140,11 @@ func (s *server) session(r *http.Request) (store.UISession, bool, error) {
 	if s.oidc == nil || s.st == nil {
 		return store.UISession{}, false, nil
 	}
-	c, err := r.Cookie(cookieSession)
-	if err != nil || c.Value == "" {
+	session := auth.SessionOf(r)
+	if session == "" {
 		return store.UISession{}, false, nil
 	}
-	hash := store.HashToken(c.Value)
+	hash := store.HashToken(session)
 	sess, err := s.st.UISessionOf(r.Context(), hash)
 	if errors.Is(err, store.ErrNoRow) {
 		return store.UISession{}, false, nil
@@ -387,9 +387,7 @@ func (s *server) tenantPrincipal(w http.ResponseWriter, r *http.Request) (auth.T
 		return auth.Tenant{}, errNoTenant()
 	}
 	t := auth.Tenant{Name: named, Principal: auth.Principal{Person: sess.PersonID, Operator: sess.Admin}}
-	if c, err := r.Cookie(cookieSession); err == nil {
-		t.Session = c.Value
-	}
+	t.Session = auth.SessionOf(r)
 	grantRoles(&t, roles)
 	if sess.Admin {
 		t.Role = auth.RoleAdmin

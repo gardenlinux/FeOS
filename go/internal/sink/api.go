@@ -85,8 +85,8 @@ func credential(r *http.Request) (Credential, error) {
 		c.Authorization = v
 		return c, nil
 	}
-	ck, err := r.Cookie(auth.SessionCookie)
-	if err != nil || ck.Value == "" {
+	session := auth.SessionOf(r)
+	if session == "" {
 		return c, apierr.New(http.StatusUnauthorized, "a tenant's token (Authorization: Bearer …) or a session is required")
 	}
 	switch r.Method {
@@ -102,7 +102,7 @@ func credential(r *http.Request) (Credential, error) {
 	if c.Tenant == "" {
 		return c, apierr.New(http.StatusBadRequest, "a session names its tenant in the %s header", auth.TenantHeader)
 	}
-	c.Session = ck.Value
+	c.Session = session
 	return c, nil
 }
 

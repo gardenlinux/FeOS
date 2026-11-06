@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
 )
@@ -29,7 +30,7 @@ func accessFerund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	who := r.Header.Get("Authorization")
-	if c, err := r.Cookie("ferun_session"); who == "" && err == nil {
+	if c, err := r.Cookie(auth.SessionCookie); who == "" && err == nil {
 		who = "session " + c.Value + " " + r.Header.Get("FeRun-Tenant")
 	}
 	switch who {
@@ -95,7 +96,7 @@ func TestReaderAccess(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer "+who.token)
 		}
 		if who.session != "" {
-			r.AddCookie(&http.Cookie{Name: "ferun_session", Value: who.session})
+			r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: who.session})
 			r.Header.Set("FeRun-Tenant", "acme")
 		}
 		for k, v := range who.header {
@@ -175,9 +176,10 @@ func TestReaderAccess(t *testing.T) {
 		}
 	}
 
-	// A session without its tenant is asked to name it.
+	// A session without its tenant is asked to name it (here under the
+	// cookie's old name, which the sink takes for one release).
 	r, _ := http.NewRequest("GET", srv.URL+"/api/v1/log-streams?environment=e1", nil)
-	r.AddCookie(&http.Cookie{Name: "ferun_session", Value: "s"})
+	r.AddCookie(&http.Cookie{Name: auth.OldSessionCookie, Value: "s"})
 	if resp, err := http.DefaultClient.Do(r); err != nil || resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("a session without FeRun-Tenant: %v %v", resp, err)
 	}

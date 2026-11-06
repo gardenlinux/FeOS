@@ -100,11 +100,39 @@ func (p Principal) String() string {
 
 // SessionCookie is the cookie of a person's session, and TenantHeader
 // the header in which a session names its tenant (ADR 0031). The sink
-// takes both too and asks ferund with them (ADR 0026).
+// takes both too and asks ferund with them (ADR 0026). The cookie is
+// __Host- (Secure, Path=/, no Domain): the tenants' apps live in zones
+// below ferund's host (apps.run.<domain>), and the prefix keeps the
+// browser from taking a cookie for ferund's host that one of them set.
+//
+// OldSessionCookie is its name before (ferun_session), still read and
+// passed on for one release, so that the sessions of the release before
+// survive its rollout and a sink or ferund of that release still finds
+// the session: drop it, SessionOf's fallback and SessionCookieHeader's
+// second cookie in the release after.
 const (
-	SessionCookie = "ferun_session"
-	TenantHeader  = "FeRun-Tenant"
+	SessionCookie    = "__Host-ferun_session"
+	OldSessionCookie = "ferun_session"
+	TenantHeader     = "FeRun-Tenant"
 )
+
+// SessionOf is the value of r's session cookie, SessionCookie or else
+// OldSessionCookie; "" when it has neither.
+func SessionOf(r *http.Request) string {
+	for _, name := range []string{SessionCookie, OldSessionCookie} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			return c.Value
+		}
+	}
+	return ""
+}
+
+// SessionCookieHeader is a Cookie header that passes the session on, under
+// both names for the release that reads both (OldSessionCookie).
+func SessionCookieHeader(session string) string {
+	return (&http.Cookie{Name: SessionCookie, Value: session}).String() + "; " +
+		(&http.Cookie{Name: OldSessionCookie, Value: session}).String()
+}
 
 // Tenant is a request made in a tenant: with a tenant's token, or with a
 // person's session that names the tenant (FeRun-Tenant).
@@ -140,7 +168,7 @@ func (t Tenant) PassOn(h http.Header) {
 	case t.Token != "":
 		h.Set("Authorization", "Bearer "+t.Token)
 	case t.Passable():
-		h.Set("Cookie", (&http.Cookie{Name: SessionCookie, Value: t.Session}).String())
+		h.Set("Cookie", SessionCookieHeader(t.Session))
 		h.Set(TenantHeader, t.Name)
 	}
 }

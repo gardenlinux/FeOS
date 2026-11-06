@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -72,6 +73,14 @@ func signIn(t *testing.T, a, b *env, p *testProvider, claims map[string]any) *ht
 	sc := cookieNamed(w, cookieSession)
 	if sc == nil {
 		t.Fatalf("no session cookie: %s", w.Body.String())
+	}
+	// __Host-: Secure, Path=/, no Domain, even on http; the old name is
+	// cleared.
+	if !sc.Secure || sc.Path != "/" || sc.Domain != "" || !sc.HttpOnly {
+		t.Fatalf("session cookie %+v", sc)
+	}
+	if old := cookieNamed(w, auth.OldSessionCookie); old == nil || old.MaxAge >= 0 {
+		t.Fatalf("old session cookie not cleared: %+v", old)
 	}
 	return sc
 }
@@ -173,6 +182,13 @@ func TestSignIn(t *testing.T) {
 	w = a.serve(withCookie(request{method: "GET", path: "/auth/me", header: http.Header{"Authorization": {adminAuth()}}}, sc))
 	expect(t, w, http.StatusOK, `{"username":"admin","admin":true,"method":"basic"}`+"\n")
 
+	// The session under the cookie's old name (a session of the release
+	// before) is honoured, for one release.
+	old := &http.Cookie{Name: auth.OldSessionCookie, Value: sc.Value}
+	if w := a.serve(withCookie(request{method: "GET", path: "/auth/me"}, old)); w.Code != http.StatusOK {
+		t.Fatalf("old cookie: %d %s", w.Code, w.Body.String())
+	}
+
 	// Sign-out: CSRF first, then the session ends everywhere and the
 	// browser goes to the provider's end-session endpoint.
 	w = b.serve(withCookie(request{method: "POST", path: "/auth/logout"}, sc))
@@ -187,6 +203,9 @@ func TestSignIn(t *testing.T) {
 	}
 	if c := cookieNamed(w, cookieSession); c == nil || c.MaxAge >= 0 {
 		t.Fatalf("session cookie not cleared: %+v", c)
+	}
+	if c := cookieNamed(w, auth.OldSessionCookie); c == nil || c.MaxAge >= 0 {
+		t.Fatalf("old session cookie not cleared: %+v", c)
 	}
 	expect(t, a.serve(withCookie(request{method: "GET", path: "/auth/me"}, sc)), http.StatusUnauthorized, errBody("not signed in"))
 	w = a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/tenants"}, sc))

@@ -305,7 +305,8 @@ and the ingresses' (`spiffe://<td>/ingress/<name>`).
 **Readers** (ADR 0031). A read brings a FeRun token (`Authorization:
 Bearer …`), or, where the sink is served under `ferund`'s host (the
 Gateway's `run.<domain>`), a person's session: the cookie
-`ferun_session` and the tenant in `FeRun-Tenant` (400 without it). A
+`__Host-ferun_session` (or, for one release, its old name
+`ferun_session`) and the tenant in `FeRun-Tenant` (400 without it). A
 session's change (`DELETE`) needs `X-Requested-With: ferun` and a
 request of the same origin (`Sec-Fetch-Site`, or `Origin` against
 `Host`; 403 otherwise), as `ferund`'s own. The sink asks `ferund` `GET

@@ -166,7 +166,7 @@ func (t *Tenants) Resolve(ctx context.Context, c Credential) (Access, error) {
 	if c.Authorization != "" {
 		req.Header.Set("Authorization", c.Authorization)
 	} else {
-		req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: c.Session})
+		req.Header.Set("Cookie", auth.SessionCookieHeader(c.Session))
 		ttl = min(ttl, sessionTTL)
 	}
 	if c.Tenant != "" {
