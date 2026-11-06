@@ -45,7 +45,7 @@ export function inWords(deltaMs) {
   const min = Math.round(deltaMs / 60000);
   if (min < 60) return `in ${Math.max(1, min)} min`;
   const h = Math.round(min / 60);
-  if (h < 48) return `in ${h} h`;
+  if (h < 72) return `in ${h} h`;
   return `in ${Math.round(h / 24)} d`;
 }
 

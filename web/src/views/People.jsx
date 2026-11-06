@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, notAvailable } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, ArmButton, ErrBox, LiveBadge, Secret, useArm, useNow, usePoll } from '../components.jsx';
+import { Ago, ArmButton, ErrBox, LiveBadge, PageHead, Secret, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate } from '../format.js';
 import {
   ROLES, grantableRoles, invitationState, inviteLink, myTenants, personLabel, quotaRows, fmtQuota, roleLabel, scopeLabel,
@@ -40,6 +40,8 @@ export function MyTenants({ navigate }) {
 
   return (
     <div className="tenants single">
+      <PageHead kind="Tenants" title="Your tenants"
+        facts={<span>A tenant holds sandboxes, environments, domains and the people who may use them.</span>} />
       <section className="pane">
         <div className="pane-toolbar">
           <h2><Icon name="users" size={15} /> Your tenants <span className="count">{tenants.length}</span></h2>
@@ -164,6 +166,8 @@ export function Members({ tenant, navigate }) {
 
   return (
     <div className="single">
+      <PageHead kind="Tenant" title="People"
+        facts={<span>Members with a role on the tenant or on single environments; invitations bring new ones in.</span>} />
       <section className="pane">
         <div className="pane-toolbar">
           <h2><Icon name="users" size={15} /> Members {!missing && <span className="count">{members ? members.length : '…'}</span>}</h2>
@@ -415,6 +419,8 @@ export function Tokens({ tenant }) {
 
   return (
     <div className="single">
+      <PageHead kind="Tenant" title="Tokens"
+        facts={<span>For CI and automation: a role on the tenant or on one environment, never above yours. A token shows once.</span>} />
       <section className="pane">
         <div className="pane-toolbar">
           <h2><Icon name="key" size={15} /> Tokens {!missing && <span className="count">{tokens ? tokens.length : '…'}</span>}</h2>

@@ -23,6 +23,22 @@ export function useTheme() {
   return [theme, toggle];
 }
 
+// PageHead is a page's head (the concept's object page): what it is, its
+// name, its state, its main actions on the right, a row of facts below.
+export function PageHead({ kind, title, mono = false, state, actions, facts }) {
+  return (
+    <header className="pagehead">
+      <div className="pagehead-title">
+        {kind && <span className="kind">{kind}</span>}
+        <h1 className={mono ? 'mono' : ''}>{title}</h1>
+        {state}
+        {actions && <span className="pagehead-actions">{actions}</span>}
+      </div>
+      {facts && <div className="facts">{facts}</div>}
+    </header>
+  );
+}
+
 // BrandMark is FeRun's mark: the box of the sign-in screen.
 export function BrandMark({ size = 30 }) {
   return (
