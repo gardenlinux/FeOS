@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  atLeast, can, envRole, fmtQuota, grantableRoles, higher, inviteLink, myTenants, quotaRows, roleLabel, tenantAccess,
+  atLeast, can, envRole, mayBuild, fmtQuota, grantableRoles, higher, inviteLink, myTenants, quotaRows, roleLabel, tenantAccess,
   tenantHome, tenantNav, viewGate,
 } from './people.js';
 import { parsePath } from './routes.js';
@@ -24,6 +24,23 @@ const ANNA = {
     { tenant: 'shop', role: '', environments: [{ id: 'e-s1', name: 'shop-prod', role: 'read' }] },
   ],
 };
+
+describe('the builder', () => {
+  it('changes a new environment with write on the tenant, one environment with write on it', () => {
+    const zeta = tenantAccess(ANNA, 'zeta');
+    expect(mayBuild(zeta, '')).toBe(false);
+    expect(mayBuild(zeta, 'stage')).toBe(true);
+    expect(mayBuild(zeta, 'e-z1')).toBe(true);
+    expect(mayBuild(zeta, 'prod')).toBe(false);
+    const shop = tenantAccess(ANNA, 'shop');
+    expect(mayBuild(shop, 'shop-prod')).toBe(false);
+    expect(mayBuild(shop, '')).toBe(false);
+    const acme = tenantAccess(ANNA, 'acme');
+    expect(mayBuild(acme, '')).toBe(true);
+    expect(mayBuild(acme, 'anything')).toBe(true);
+    expect(mayBuild(tenantAccess(null, 'acme'), 'x')).toBe(false);
+  });
+});
 
 describe('roles', () => {
   it('each includes the one before; none is below read', () => {

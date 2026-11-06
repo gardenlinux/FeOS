@@ -12,6 +12,7 @@ import { focusOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { Traces } from './Traces.jsx';
 import { Builder } from './Builder.jsx';
+import { useAccess } from '../people.js';
 import {
   KIND_TITLES, changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence,
   heavyEffect, incidentObject, isAttached, labelPairs, logReplicas, logSourceText, logsProblem, objectSummary,
@@ -91,6 +92,8 @@ function Annotations({ annotations }) {
 // ------------------------------------------------------------------- list --
 
 function EnvList({ tenant, navigate }) {
+  // A new environment needs write on the tenant (ADR 0031).
+  const access = useAccess(tenant);
   const [envs, setEnvs] = useState(null);
   const [err, setErr] = useState('');
   const [labels, setLabels] = useState([]);
@@ -133,8 +136,9 @@ function EnvList({ tenant, navigate }) {
             {counts.incidents > 0 && <span className="bad" title="open incidents">▲ {counts.incidents}</span>}
           </span>
           <span className="spacer" />
-          <button className="primary mini" onClick={() => navigate(newEnvPath(tenant))}>
-            <Icon name="plus" size={12} /> New environment</button>
+          {access.can.writeTenant && (
+            <button className="primary mini" onClick={() => navigate(newEnvPath(tenant))}>
+              <Icon name="plus" size={12} /> New environment</button>)}
           <LiveBadge lastOk={lastOk} />
         </div>
         <ErrBox error={err} />

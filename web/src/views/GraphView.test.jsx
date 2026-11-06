@@ -33,6 +33,8 @@ describe('GraphView', () => {
     expect(out.match(/class="g-edge /g)).toHaveLength(10);
     // Handles on the entry, the image services and the job.
     expect(out.match(/class="g-handle"/g)).toHaveLength(5);
+    // A read-only builder (no edit) draws no handles.
+    expect(render({ edit: null })).not.toContain('class="g-handle"');
     expect(out).toContain('environment <span class="mono">expensa-stage</span>');
   });
 

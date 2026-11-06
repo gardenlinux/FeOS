@@ -85,6 +85,15 @@ export function envRole(access, env) {
   return higher((access && access.role) || '', g ? g.role : '');
 }
 
+// mayBuild tells whether the deployment builder may change env (its ID
+// or name; '' for a new environment, ADR 0032): a new one needs write on
+// the tenant, a deployment or a secret's value write on the environment
+// (envRole). Below that the builder is a read-only view.
+export function mayBuild(access, env) {
+  if (!env) return can(access).writeTenant;
+  return atLeast(envRole(access, env), 'write');
+}
+
 // can is what a tenant's pages offer for an access, by the routes' needs
 // (go/internal/api: the route table).
 export function can(access) {

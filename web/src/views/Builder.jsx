@@ -7,6 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { ErrBox } from '../components.jsx';
 import { readItem, writeItem } from '../storage.js';
 import { envPath } from '../routes.js';
+import { mayBuild, useAccess } from '../people.js';
 import { DiffView } from './Environments.jsx';
 import { heavyEffect } from './envs.js';
 import {
@@ -50,7 +51,7 @@ export function ObjectList({ spec, groups, open, onOpen, onAdd, pins, catalog })
             <div className="b-kindhead">
               <span className="sect">{title} <span className="count">· {names.length}</span></span>
               <span className="spacer" />
-              {key !== 'bindings' && (
+              {key !== 'bindings' && onAdd && (
                 key === 'addons'
                   ? <AddAddonButton catalog={catalog} onAdd={(type) => onAdd(key, type)} />
                   : <button className="ghost mini" onClick={() => onAdd(key)}><Icon name="plus" size={12} /> {one}</button>)}
@@ -119,6 +120,13 @@ function useWide() {
 
 export function Builder({ tenant, env, st, navigate }) {
   const isNew = !env;
+  // What the role allows (ADR 0031): a new environment needs write on the
+  // tenant, a deployment and a secret's value write on the environment
+  // (the tenant grant or the environment's, the higher). Below that the
+  // builder shows the latest deployment's spec and changes nothing: no
+  // plan (it needs write), no apply, no secret written, no draft stored.
+  const access = useAccess(tenant);
+  const readOnly = !mayBuild(access, isNew ? '' : (st && st.id) || env);
   const key = draftKey(tenant, env);
   const [draft, setDraftState] = useState(null);
   const draftRef = useRef(null);
@@ -160,7 +168,9 @@ export function Builder({ tenant, env, st, navigate }) {
     setDraftState(next);
     if (store) setStorageOk(writeItem('localStorage', key, encodeDraft(next)));
   }, [key]);
-  const edit = useCallback((spec, opts) => set({ ...draftRef.current, spec }, opts), [set]);
+  const edit = useCallback((spec, opts) => {
+    if (!readOnly) set({ ...draftRef.current, spec }, opts);
+  }, [set, readOnly]);
 
   const fetchSpec = useCallback(async (n) => (n > 0 ? (await api.getDeployment(env, n)).spec || {} : {}), [env]);
 
@@ -191,6 +201,11 @@ export function Builder({ tenant, env, st, navigate }) {
     const stored = decodeDraft(readItem('localStorage', key));
     const latest = isNew ? 0 : st.deployment;
     (async () => {
+      if (readOnly) {
+        set({ spec: await fetchSpec(latest), base: latest, source: latest > 0 ? `deployment ${latest}` : 'empty', name: '' },
+          { record: false, store: false });
+        return;
+      }
       if (stored && stored.base === latest) set(stored, { record: false, store: false });
       else if (stored && !isNew) await rebaseOnto(stored, latest);
       else if (stored) set(stored, { record: false, store: false });
@@ -235,13 +250,14 @@ export function Builder({ tenant, env, st, navigate }) {
   }
   useEffect(() => () => plannerRef.current.stop(), []);
   useEffect(() => {
-    if (draft) plannerRef.current.change({ spec: draft.spec, base: draft.base, env, isNew });
+    if (draft && !readOnly) plannerRef.current.change({ spec: draft.spec, base: draft.base, env, isNew });
   }, [draft && draft.spec, draft && draft.base]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // setSecret writes a value: at once through the secrets API, pinning
   // the version it made; for a new environment into memory, until the
   // first apply writes it.
   const setSecret = useCallback(async (name, value) => {
+    if (readOnly) throw new Error('Your role does not allow this: it needs write on this environment.');
     if (!isSecretName(name)) throw new Error(`${name} is not a secret name: a-z, 0-9, '.', '_' and '-'`);
     if (isNew) {
       pending.current.set(name, value);
@@ -254,7 +270,7 @@ export function Builder({ tenant, env, st, navigate }) {
     edit(pinSecret(draftRef.current.spec, name, v.version));
     refreshSecrets();
     return v.version;
-  }, [env, isNew, edit, refreshSecrets]);
+  }, [env, isNew, edit, refreshSecrets, readOnly]);
 
   // ----------------------------------------------------------- derived --
   const spec = draft ? draft.spec : {};
@@ -270,7 +286,7 @@ export function Builder({ tenant, env, st, navigate }) {
   const stale = plan && draft && plan.spec !== draft.spec;
   const pinned = answer && 'images' in answer ? applyPins(spec, answer.images) : null;
   const latest = isNew ? 0 : (answer && typeof answer.current === 'number' ? Math.max(answer.current, st ? st.deployment : 0) : (st ? st.deployment : 0));
-  const behind = draft && !isNew && latest > draft.base;
+  const behind = draft && !isNew && !readOnly && latest > draft.base;
 
   // ------------------------------------------------------------ editing --
   const undo = () => {
@@ -331,16 +347,19 @@ export function Builder({ tenant, env, st, navigate }) {
   const openUnit = open;
   const entry = { public: !!(st && st.public), hosts: (st && st.hosts) || [], env: isNew ? draft.name : env };
   const editor = (
-    <Editor unit={openUnit} spec={spec} groups={groups} pins={pins} catalog={catalog} isNew={isNew}
-      knownSecrets={knownSecrets} setSecret={setSecret} edit={edit} setOpen={setOpen}
-      empty={objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0}
-      onFirst={(image) => { const r = addService(draftRef.current.spec, image); edit(r.spec); setOpen(unitKey('services', r.name)); }} />
+    <fieldset className="b-fieldset" disabled={readOnly}>
+      <Editor unit={openUnit} spec={spec} groups={groups} pins={pins} catalog={catalog} isNew={isNew}
+        knownSecrets={knownSecrets} setSecret={setSecret} edit={edit} setOpen={setOpen}
+        empty={!readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0}
+        onFirst={(image) => { const r = addService(draftRef.current.spec, image); edit(r.spec); setOpen(unitKey('services', r.name)); }} />
+    </fieldset>
   );
   return (
     <div className={'builder' + (openUnit ? ' has-open' : '') + (wide ? ' wide' : '')}>
       <div className="b-toolbar">
         {isNew && <NewEnvName name={draft.name} onChange={(name) => set({ ...draftRef.current, name }, { record: false })} />}
         <span className="muted small">
+          {readOnly && <span className="badge">read-only</span>}{' '}
           {isNew ? 'a new environment' : <>from <span className="mono">{draft.source || '—'}</span> · base <span className="mono">{draft.base || 'none'}</span></>}
         </span>
         <span className="spacer" />
@@ -348,17 +367,17 @@ export function Builder({ tenant, env, st, navigate }) {
           <button className={'ghost mini' + (view === 'forms' ? ' on' : '')} onClick={() => setView('forms')}><Icon name="blocks" size={12} /> Forms</button>
           <button className={'ghost mini' + (view === 'json' ? ' on' : '')} onClick={() => setView('json')}><Icon name="file" size={12} /> JSON</button>
         </span>
-        <button className="ghost mini" disabled={!history.current.past.length} onClick={undo} title="undo">Undo</button>
-        <button className="ghost mini" disabled={!history.current.future.length} onClick={redo} title="redo">Redo</button>
+        {!readOnly && <button className="ghost mini" disabled={!history.current.past.length} onClick={undo} title="undo">Undo</button>}
+        {!readOnly && <button className="ghost mini" disabled={!history.current.future.length} onClick={redo} title="redo">Redo</button>}
         <button className="ghost mini" onClick={exportDraft} title="the draft's spec as a file">Export</button>
-        <ImportButton onSpec={(s) => { edit(s); setNotice('Imported: the plan shows what it changes against the base.'); }} onError={setNotice} />
-        <StartOver isNew={isNew} latest={latest} onStart={(n) => {
+        {!readOnly && <ImportButton onSpec={(s) => { edit(s); setNotice('Imported: the plan shows what it changes against the base.'); }} onError={setNotice} />}
+        {!readOnly && <StartOver isNew={isNew} latest={latest} onStart={(n) => {
           setConflicts(null);
           setNotice('');
           if (isNew) set({ spec: {}, base: 0, source: 'empty', name: draftRef.current.name }, { record: true });
           else if (n === 0) set({ ...draftRef.current, spec: {}, source: 'empty' }, { record: true });
           else loadLatest(n).catch((e) => setLoadErr(e.message));
-        }} />
+        }} />}
       </div>
       {!storageOk && <p className="notice small">This browser keeps no storage for this page: the draft lives in memory and is gone with the page. Export it to keep it.</p>}
       {notice && <div className="message"><Icon name="alert" size={14} /><span>{notice}</span>
@@ -376,36 +395,41 @@ export function Builder({ tenant, env, st, navigate }) {
         }} />)}
       {secretsErr && <p className="notice small">The secrets cannot be read: {secretsErr}</p>}
 
-      {view === 'json' && <JsonView spec={spec} onSpec={(s) => edit(s)} />}
+      {readOnly && (
+        <p className="notice small">Your role does not allow changes here: it needs write on this {isNew ? 'tenant' : 'environment'}.
+          The builder shows the latest deployment's spec.</p>)}
+      {view === 'json' && <JsonView spec={spec} onSpec={(s) => edit(s)} readOnly={readOnly} />}
       {view === 'forms' && wide && (
         <div className={'b-gmain' + (!openUnit && !(objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0) ? ' solo' : '')}>
           <div className="b-gcol">
             <div className="b-gbar">
               <span className="sect">the environment</span>
               <span className="spacer" />
-              <button className="ghost mini" onClick={() => addObject('services')}><Icon name="plus" size={12} /> service</button>
-              <button className="ghost mini" onClick={() => addObject('jobs')}><Icon name="plus" size={12} /> job</button>
-              <AddAddonButton catalog={catalog} onAdd={(type) => addObject('addons', type)} />
-              <button className="ghost mini" onClick={() => addObject('routes')}><Icon name="plus" size={12} /> route</button>
-              <button className="ghost mini" onClick={() => addObject('secrets')}><Icon name="plus" size={12} /> secret</button>
+              {!readOnly && <>
+                <button className="ghost mini" onClick={() => addObject('services')}><Icon name="plus" size={12} /> service</button>
+                <button className="ghost mini" onClick={() => addObject('jobs')}><Icon name="plus" size={12} /> job</button>
+                <AddAddonButton catalog={catalog} onAdd={(type) => addObject('addons', type)} />
+                <button className="ghost mini" onClick={() => addObject('routes')}><Icon name="plus" size={12} /> route</button>
+                <button className="ghost mini" onClick={() => addObject('secrets')}><Icon name="plus" size={12} /> secret</button>
+              </>}
               <label className="b-focus small" title="dim what is not next to the open object">
                 <input type="checkbox" checked={focus} onChange={(e) => setFocus(e.target.checked)} /> focus</label>
             </div>
             <GraphView spec={spec} groups={groups} diff={isNew || !answer ? null : answer.diff} open={openUnit} onOpen={setOpen}
-              entry={entry} catalog={catalog} knownSecrets={knownSecrets} pins={pins} edit={edit} focus={focus} />
+              entry={entry} catalog={catalog} knownSecrets={knownSecrets} pins={pins} edit={readOnly ? null : edit} focus={focus} />
           </div>
           <div className="b-editor">{editor}</div>
         </div>)}
       {view === 'forms' && !wide && (
         <div className="b-main">
-          <ObjectList spec={spec} groups={groups} open={openUnit} pins={pins} catalog={catalog} onOpen={setOpen} onAdd={addObject} />
+          <ObjectList spec={spec} groups={groups} open={openUnit} pins={pins} catalog={catalog} onOpen={setOpen} onAdd={readOnly ? null : addObject} />
           <div className="b-editor">
             <button className="ghost mini b-back" onClick={() => setOpen('')}><Icon name="arrowLeft" size={12} /> the objects</button>
             {editor}
           </div>
         </div>)}
 
-      <PlanPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} pinned={pinned}
+      {!readOnly && <PlanPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} pinned={pinned}
         applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
         onApply={async (message, setBusy, setErr) => {
           setBusy(true);
@@ -431,7 +455,7 @@ export function Builder({ tenant, env, st, navigate }) {
           } finally {
             setBusy(false);
           }
-        }} />
+        }} />}
     </div>
   );
 }
@@ -642,7 +666,7 @@ function NewSecret({ isNew, spec, setSecret, onDone }) {
 // JsonView is the draft as JSON: an edit is parsed on each change; text
 // that does not parse is marked, and the draft keeps the last one that
 // did.
-export function JsonView({ spec, onSpec }) {
+export function JsonView({ spec, onSpec, readOnly = false }) {
   const [text, setText] = useState(() => specText(spec));
   const [err, setErr] = useState('');
   const mine = useRef(null);
@@ -651,7 +675,7 @@ export function JsonView({ spec, onSpec }) {
   }, [spec]);
   return (
     <div className="b-json">
-      <textarea className={'mono b-text' + (err ? ' bad-input' : '')} spellCheck={false} value={text}
+      <textarea className={'mono b-text' + (err ? ' bad-input' : '')} spellCheck={false} value={text} readOnly={readOnly}
         onChange={(e) => {
           setText(e.target.value);
           const r = parseSpecText(e.target.value);

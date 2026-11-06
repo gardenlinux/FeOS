@@ -997,6 +997,7 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
    object's form, the plan below; below 900 px the list is cards and an
    open form takes the full width. */
 .builder { display: flex; flex-direction: column; gap: 10px; }
+.b-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .b-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .b-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; padding: 1px; }
 .b-seg button.on { background: var(--accent-dim); color: var(--text); }

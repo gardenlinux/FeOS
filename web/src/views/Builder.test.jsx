@@ -32,6 +32,13 @@ const ctx = (spec, findings = [], extra = {}) => ({
 });
 
 describe('ObjectList', () => {
+  it('offers no adds without onAdd (a read-only builder)', () => {
+    const out = html(<ObjectList spec={STORED} groups={none} open="" pins={[]} catalog={builtinCatalog()} onOpen={nop} onAdd={null} />);
+    expect(out).not.toContain('addon</button>');
+    expect(out).toContain('class="b-card"');
+    expect(html(<JsonView spec={STORED} onSpec={nop} readOnly />)).toContain('readonly=""');
+  });
+
   it('lists the objects by kind as cards with their references as lines', () => {
     const pins = [{ name: 'internal-token', pinned: 3, latest: 3, newer: false, missing: false }];
     const out = text(<ObjectList spec={STORED} groups={none} open="services/web" pins={pins} catalog={builtinCatalog()} onOpen={nop} onAdd={nop} />);

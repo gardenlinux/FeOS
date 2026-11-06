@@ -2179,7 +2179,12 @@ repeat is the same create), writes them, and applies deployment 1. The
 draft's operations are pure modules beside `views/envs.js` (`draft.js`,
 `refs.js`, `findings.js`, `rebase.js`, `pins.js`, `catalog.js`,
 `planner.js`). Below 900 px the objects are cards that open their form
-at full width. The
+at full width. The role decides what it offers (`people.js`, `mayBuild`):
+"New environment" needs `write` on the tenant, a change of an
+environment `write` on it (the tenant grant or the environment's); below
+that the builder shows the latest deployment's spec read-only, plans
+nothing (a plan needs `write`), applies nothing, writes no secret and
+stores no draft. The
 instance tables fit a 1280 px wide window. Its tests read the fixtures
 of ferund's API tests (`go/internal/api/testdata/ferun`).
 

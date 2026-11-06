@@ -176,7 +176,7 @@ export function GraphView({ spec, groups, diff, open, onOpen, entry, catalog, kn
             findings={(groups.objects.get(n.id) || []).length} mark={marks.get(n.id)} on={open === n.id} dim={dim(n.id)}
             target={drag && drag.hit && drag.hit.id === n.id ? (drag.action ? 'ok' : 'no') : ''}
             targetPort={drag && drag.action && drag.hit && drag.hit.id === n.id ? drag.hit.port : -1}
-            onOpen={onOpen} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPick={pick} />
+            onOpen={onOpen} drawable={!!edit} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPick={pick} />
         ))}
         {offer && (
           <div className="g-offer" style={{ left: offerLeft(offer.x), top: offer.y + 6, width: OFFER_W }}>
@@ -190,7 +190,7 @@ export function GraphView({ spec, groups, diff, open, onOpen, entry, catalog, kn
   );
 }
 
-function GraphNode({ n, spec, pin, tone, findings, mark, on, dim, target, targetPort, onOpen, onPointerDown, onPointerMove, onPointerUp, onPick }) {
+function GraphNode({ n, spec, pin, tone, findings, mark, on, dim, target, targetPort, onOpen, drawable = true, onPointerDown, onPointerMove, onPointerUp, onPick }) {
   const opens = !n.missing && !n.removed && n.key !== 'entry' && n.key !== 'sandbox';
   const cls = 'g-node k-' + n.key + (tone ? ' ' + tone : '') + (mark ? ' m-' + mark : '') + (on ? ' on' : '') + (dim ? ' dim' : '')
     + (n.missing ? ' missing' : '') + (n.removed ? ' removed' : '') + (target ? ' t-' + target : '');
@@ -222,7 +222,7 @@ function GraphNode({ n, spec, pin, tone, findings, mark, on, dim, target, target
       {n.key === 'entry' && (n.hosts.length ? n.hosts : [`/api/v1/environments/${n.env || '{env}'}/http/…`]).map((h, i) => (
         <span key={i} className="g-port g-host mono small" style={{ top: SIZE.head + i * SIZE.row, height: SIZE.row }} title={h}>{h}</span>
       ))}
-      {canDrag(n) && (
+      {drawable && canDrag(n) && (
         <button type="button" className="g-handle" style={{ top: SIZE.head / 2 - 7 }}
           title={n.key === 'entry' ? 'drag onto a service\'s port: a route' : 'drag onto an addon, a secret, a service or a binding: a reference'}
           aria-label={n.key === 'entry' ? 'add a route' : `add a reference from ${n.name}`}
