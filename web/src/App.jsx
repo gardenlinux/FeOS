@@ -25,8 +25,9 @@ import { Instances } from './views/Instances.jsx';
 // signed in (/auth/me) and how one signs in (/auth/config); signed out,
 // or once an admin call is answered 401, it shows the sign-in screen.
 
-// useRoute follows the location; a path under an earlier name is
-// replaced by its canonical one (canonicalPath).
+// useRoute follows the location, its path and query; a path under an
+// earlier name is replaced by its canonical one (canonicalPath). A new
+// path scrolls to the top, a new query alone (a search) does not.
 function useRoute() {
   const [path, setPath] = useState(() => canonical());
   useEffect(() => {
@@ -35,21 +36,22 @@ function useRoute() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const navigate = useCallback((to) => {
-    if (to !== location.pathname) {
+    if (to !== location.pathname + location.search) {
+      const samePath = to.split('?')[0] === location.pathname;
       history.pushState(null, '', to);
       setPath(to);
-      window.scrollTo(0, 0);
+      if (!samePath) window.scrollTo(0, 0);
     }
   }, []);
   return [parsePath(path), navigate];
 }
 
-// canonical is the location's path, replaced in the history by its
-// canonical one when it differs.
+// canonical is the location's path and query, the path replaced in the
+// history by its canonical one when it differs.
 function canonical() {
   const canon = canonicalPath(location.pathname);
   if (canon !== location.pathname) history.replaceState(null, '', canon + location.search + location.hash);
-  return canon;
+  return canon + location.search;
 }
 
 // displayName is how the header names the signed-in person.
@@ -129,7 +131,7 @@ export default function App() {
           {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
           {!needsGate && route.view === 'environments' && (
             <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
-              replica={route.replica} navigate={navigate} />)}
+              replica={route.replica} search={route.search} navigate={navigate} />)}
           {route.view === 'nodes' && <Nodes navigate={navigate} />}
           {route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
           {route.view === 'joinTokens' && <JoinTokens />}
@@ -235,7 +237,7 @@ function Topbar({ route, navigate, me, onSignOut }) {
         {route.view === 'environments' && route.env && route.tab !== 'overview' && (
           <>{sep}{crumb(route.tab, envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
-          <>{sep}<span className="crumb mono">{route.item}{route.replica > 0 ? ` · replica ${route.replica}` : ''}</span></>)}
+          <>{sep}<span className="crumb mono">{route.item}{route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
         {(route.view === 'nodes' || route.view === 'node') && crumb('nodes', '/nodes')}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}
         {route.view === 'joinTokens' && <span className="crumb">join tokens</span>}

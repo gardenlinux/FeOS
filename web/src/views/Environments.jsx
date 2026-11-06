@@ -8,6 +8,8 @@ import { Ago, CopyBtn, ErrBox, KV, LiveBadge, StateLabel, useNow, usePoll } from
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
 import { envPath } from '../routes.js';
+import { focusOf } from '../logs.js';
+import { LogSearch } from './LogSearch.jsx';
 import {
   KIND_TITLES, changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence,
   heavyEffect, incidentObject, isAttached, labelPairs, logReplicas, logSourceText, logsProblem, objectSummary,
@@ -24,10 +26,10 @@ import {
 // The environment, the tab and its item are the route's:
 // /tenants/:t/environments/:env/:tab/:item.
 
-export function Environments({ tenant, env, tab, item, replica, navigate }) {
+export function Environments({ tenant, env, tab, item, replica, search, navigate }) {
   if (env) {
     return (
-      <EnvDetail key={env} tenant={tenant} env={env} tab={tab} item={item} replica={replica} navigate={navigate} />
+      <EnvDetail key={env} tenant={tenant} env={env} tab={tab} item={item} replica={replica} search={search} navigate={navigate} />
     );
   }
   return <EnvList tenant={tenant} navigate={navigate} />;
@@ -229,7 +231,7 @@ const TABS = [
   { key: 'logs', label: 'Logs', icon: 'file' },
 ];
 
-function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
+function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
   const [st, setSt] = useState(null);
   const [err, setErr] = useState('');
   const [gone, setGone] = useState(false);
@@ -322,7 +324,7 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
       )}
       {activeTab === 'logs' && (
         <div className="tabbody">
-          <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} navigate={navigate} />
+          <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />
         </div>
       )}
     </section>
@@ -336,7 +338,7 @@ function EnvDetail({ tenant, env, tab, item, replica, navigate }) {
 // instances, and the routes.
 export function EnvOverview({ st, tenant, navigate }) {
   const groups = groupObjects(st.objects);
-  const logsTo = (o, replica = 0) => envPath(tenant, st.name, 'logs', `${o.kind}/${o.name}`, replica);
+  const logsTo = (o, replica = null) => envPath(tenant, st.name, 'logs', `${o.kind}/${o.name}`, replica);
   return (
     <>
       <RolloutBox st={st} tenant={tenant} navigate={navigate} />
@@ -416,7 +418,7 @@ export function ObjectCard({ o, latest, tenant, navigate, logsTo }) {
         <span className="muted small">{objectSummary(o)}</span>
         <span className="spacer" />
         {!withInstances && (
-          <Link to={logsTo(0)} navigate={navigate} className="small envobj-logs">
+          <Link to={logsTo(null)} navigate={navigate} className="small envobj-logs">
             <Icon name="file" size={12} /> logs
           </Link>)}
       </div>
@@ -909,47 +911,12 @@ export function IncidentView({ inc, tenant, env, navigate }) {
 
 // ------------------------------------------------------------------- logs --
 
-function LogsTab({ tenant, env, st, item, replica, navigate }) {
-  const objects = st ? st.objects || [] : [];
-  const o = findObject(objects, item);
-  return (
-    <>
-      <LogPicker objects={objects} item={item} replica={replica} o={o}
-        onPick={(it, rep) => navigate(envPath(tenant, env, 'logs', it, rep))} />
-      {item
-        ? <LogsPane key={`${item}/${replica}`} env={env} item={item} replica={replica} o={o} />
-        : <p className="empty">Pick an object to read the last {LOG_LINES} lines of its log.</p>}
-    </>
-  );
-}
-
-// LogPicker offers the objects of the status, and an image service's
-// replicas.
-export function LogPicker({ objects, item, replica, o, onPick }) {
-  const replicas = o ? logReplicas(o) : [];
-  return (
-    <>
-      <div className="chiprow">
-        <span className="k">object</span>
-        {(objects || []).map((x) => {
-          const it = `${x.kind}/${x.name}`;
-          return (
-            <button key={it} className={'chipbtn mono objchip' + (it === item ? ' on' : '')} onClick={() => onPick(it, 0)}>
-              <span className="muted">{x.kind}/</span>{x.name}
-            </button>
-          );
-        })}
-        {(objects || []).length === 0 && <span className="muted small">—</span>}
-      </div>
-      {replicas.length > 1 && (
-        <div className="chiprow">
-          <span className="k">replica</span>
-          {replicas.map((r) => (
-            <button key={r} className={'chipbtn mono' + (r === replica ? ' on' : '')} onClick={() => onPick(item, r)}>{r}</button>
-          ))}
-        </div>)}
-    </>
-  );
+function LogsTab({ tenant, env, st, item, replica, search, navigate }) {
+  if (!st) return <p className="empty">Loading…</p>;
+  const o = findObject(st.objects || [], item);
+  const focus = focusOf(item, replica, search);
+  const tail = item ? <LogsPane key={`${item}/${replica}`} env={env} item={item} replica={replica || 0} o={o} /> : null;
+  return <LogSearch tenant={tenant} env={env} st={st} focus={focus} navigate={navigate} tail={tail} tailOnly={!!(o && isAttached(o))} />;
 }
 
 function LogsPane({ env, item, replica, o }) {

@@ -224,6 +224,22 @@ async function tenantCall(method, path, body) {
   }
 }
 
+// tenantStream opens a tenant's streaming answer and returns its body's
+// reader: the log store's follow (NDJSON), read for as long as signal
+// lets it.
+async function tenantStream(path, signal) {
+  const tenant = activeTenant;
+  const tok = getTenantToken(tenant);
+  if (!tok) throw new ApiError(`this browser holds no token of tenant ${tenant}`, 0);
+  const resp = await fetch(V1 + path, {
+    headers: { [CSRF_HEADER]: CSRF_VALUE, Authorization: 'Bearer ' + tok, Accept: 'application/x-ndjson' },
+    credentials: 'same-origin',
+    signal,
+  });
+  if (!resp.ok) throw new ApiError(`GET ${V1 + path}: HTTP ${resp.status}`, resp.status);
+  return resp.body.getReader();
+}
+
 function query(params) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -317,6 +333,13 @@ export const api = {
   // (never woken for its logs).
   objectLogs: (env, kind, name, { lines = LOG_LINES, replica = 0 } = {}) =>
     tenantCall('GET', `/environments/${enc(env)}/objects/${enc(kind)}/${enc(name)}/logs${query({ lines, replica })}`),
+  // The log store, ferun-sink (ADR 0026, docs/architecture/sink.md,
+  // Reading): its routes are served beside ferund's at the same address
+  // and take the same tenant token. params is a URLSearchParams of
+  // GET /api/v1/logs (logs.js, sinkParams). A page's lines are oldest
+  // first; followLogs reads new lines as they come.
+  searchLogs: (params) => tenantCall('GET', `/logs?${params}`),
+  followLogs: (params, signal) => tenantStream(`/logs?${params}&follow=1`, signal),
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

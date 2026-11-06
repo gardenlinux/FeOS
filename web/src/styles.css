@@ -731,6 +731,97 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
   background: var(--bg1); border: 1px solid var(--border-soft); border-radius: 7px;
   padding: 9px 11px; font-size: 12px; line-height: 1.5; max-height: 60vh; overflow: auto; margin: 6px 0;
 }
+/* the Logs tab: a search of the log store over its lines, the newest at
+   the bottom; a line is its time, its object#replica (when the search
+   reads more than one), its level and its text, a record's message and
+   key=value, opened to every field */
+.lg { display: flex; flex-direction: column; }
+.lg-form { display: flex; flex-direction: column; }
+.lg-chips { margin: 0 0 6px; }
+.lg-searchrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 2px 0 8px; }
+.lg-searchrow .searchwrap { min-width: 300px; }
+.lg-levels { display: flex; flex-wrap: wrap; gap: 6px; }
+.chipbtn.lg-lvlchip.lvl-error.on { color: var(--danger); background: rgba(239,84,73,.1); border-color: rgba(239,84,73,.5); }
+.chipbtn.lg-lvlchip.lvl-warn.on { color: var(--warn); background: rgba(224,168,60,.1); border-color: rgba(224,168,60,.5); }
+.lg-range { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.lg-range .chiprow { margin: 0; }
+.lg-fromto { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.lg-fromto label { display: inline-flex; align-items: center; gap: 6px; }
+.lg-fromto .k, .lg-tracebar .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.lg-fromto input { padding: 3px 6px; font-size: 12px; }
+.lg-tracebar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 8px; padding: 6px 10px;
+  border: 1px solid rgba(91,157,248,.5); border-radius: 7px; background: var(--accent-dim);
+}
+.lg-tracebar code { font-size: 12px; overflow-wrap: anywhere; }
+.linkbtn { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; border-radius: 0; }
+.linkbtn:hover { text-decoration: underline; }
+.lg-count { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 10px 0 6px; font-size: 12px; color: var(--muted); }
+.lg-view {
+  height: calc(100vh - 330px); min-height: 320px; overflow: auto; overscroll-behavior: contain;
+  padding: 0 4px 4px; background: var(--bg1); border: 1px solid var(--border-soft); border-radius: 7px;
+}
+.lg-view:focus { outline: none; border-color: var(--border); }
+.lg-edge { margin: 8px 0 4px; text-align: center; font-size: 12px; color: var(--muted); }
+.lg-lines { list-style: none; margin: 0; padding: 0; }
+.lg-lines > li + li { border-top: 1px solid rgba(128,128,128,.09); }
+.lg-row {
+  display: grid; grid-template-columns: 92px 120px 40px minmax(0, 1fr) auto; gap: 10px; align-items: baseline;
+  padding: 3px 6px; border-radius: 5px; font-family: var(--mono); font-size: 12px; line-height: 1.5;
+}
+.notag .lg-row { grid-template-columns: 92px 40px minmax(0, 1fr) auto; }
+.lg-row.lg-opens { cursor: pointer; }
+.lg-row.lg-opens:hover, .lg-lines li.open > .lg-row { background: var(--panel2); }
+.lg-lines li.lvl-error > .lg-row { background: rgba(239,84,73,.07); }
+.lg-lines li.lvl-warn > .lg-row { background: rgba(224,168,60,.05); }
+.lg-row time { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.lg-tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--accent); }
+.lg-lvl { font-size: 10.5px; text-transform: uppercase; color: var(--muted); }
+.lvl-warn .lg-lvl { color: var(--warn); }
+.lvl-error .lg-lvl { color: var(--danger); font-weight: 600; }
+.lg-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+.lvl-debug .lg-body { opacity: .75; }
+.lg-msg { color: var(--text); }
+.lvl-error .lg-msg, .lvl-error .lg-body { color: var(--text); }
+.lg-k { color: var(--muted); opacity: .62; }
+.lg-err { color: var(--warn); }
+.lg-req .lg-body { color: var(--text); }
+.lg-mark { color: var(--accent); }
+.lg-status { font-weight: 600; color: var(--ok); }
+.lvl-warn .lg-status, .lg-status.warn { color: var(--warn); }
+.lvl-error .lg-status, .lg-status.bad { color: var(--danger); }
+.lg-rest { color: var(--muted); }
+.lg-binding { color: var(--accent); }
+.lg-refused { color: var(--danger); }
+.lg-acts { display: inline-flex; align-items: center; gap: 4px; }
+.lg-trace, .lg-pick {
+  padding: 0 7px; border: 1px solid var(--border); border-radius: 999px; background: none;
+  font-family: var(--mono); font-size: 10.5px; line-height: 1.6; color: var(--muted);
+}
+.lg-row:hover .lg-trace { color: var(--accent); }
+.lg-trace:hover, .lg-pick:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-dim); }
+.lg-open { padding: 2px; border: none; border-radius: 4px; background: none; color: var(--muted); }
+.lg-open:hover, .lg-open[aria-expanded="true"] { background: var(--panel3); color: var(--text); }
+.lg-lines li.lg-day { padding: 10px 6px 3px; border-top: none; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.lg-fields { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 4px 8px 10px 288px; }
+.notag .lg-fields { padding-left: 158px; }
+.lg-fields dl {
+  display: grid; grid-template-columns: minmax(80px, max-content) minmax(0, 1fr) auto; gap: 2px 16px;
+  align-self: stretch; margin: 0; font-size: 12px;
+}
+.lg-fields dl > div { display: contents; }
+.lg-fields dt { color: var(--muted); }
+.lg-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lg-picks { display: inline-flex; gap: 4px; }
+.lg-pick { color: var(--muted); }
+.lg-pick.on { color: var(--text); border-color: rgba(91,157,248,.5); background: var(--accent-dim); }
+.lg-pick:disabled { opacity: .45; }
+.lg-asis { padding: 0; border: none; background: none; font-size: 12px; color: var(--muted); }
+.lg-asis:hover { color: var(--text); }
+.lg-raw {
+  align-self: stretch; max-height: 260px; overflow: auto; margin: 0; padding: 8px 10px;
+  border: 1px solid var(--border-soft); border-radius: 6px; background: var(--panel); font-size: 11.5px;
+}
 .message {
   display: flex; align-items: flex-start; gap: 8px;
   color: var(--warn); background: rgba(224,168,60,.07);

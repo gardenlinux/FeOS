@@ -34,7 +34,7 @@ describe('parsePath', () => {
 });
 
 describe('the environments routes', () => {
-  const env = (rest) => ({ view: 'environments', tenant: 'fecode', env: '', tab: 'overview', item: '', replica: 0, ...rest });
+  const env = (rest) => ({ view: 'environments', tenant: 'fecode', env: '', tab: 'overview', item: '', replica: null, search: '', ...rest });
 
   it('maps the list, an environment and its tabs', () => {
     expect(parsePath('/tenants/fecode/environments')).toEqual(env({}));
@@ -68,7 +68,7 @@ describe('the environments routes', () => {
       .toEqual(env({ env: 'expensa-stage', tab: 'logs', item: 'service/expense-service', replica: 1 }));
   });
 
-  it('reads an unknown tab as the overview, half an object as none, a bad replica as 0', () => {
+  it('reads an unknown tab as the overview, half an object as none, a bad replica as none', () => {
     expect(parsePath('/tenants/fecode/environments/expensa-stage/secrets')).toEqual(env({ env: 'expensa-stage' }));
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service'))
       .toEqual(env({ env: 'expensa-stage', tab: 'logs' }));
@@ -81,14 +81,22 @@ describe('the environments routes', () => {
     expect(envPath('fecode', 'expensa-stage')).toBe('/tenants/fecode/environments/expensa-stage');
     expect(envPath('fecode', 'expensa-stage', 'overview', 'x')).toBe('/tenants/fecode/environments/expensa-stage');
     expect(envPath('fecode', 'expensa-stage', 'deployments', 7)).toBe('/tenants/fecode/environments/expensa-stage/deployments/7');
-    expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service', 0))
+    expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service'))
       .toBe('/tenants/fecode/environments/expensa-stage/logs/service/expense-service');
+    expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service', 0))
+      .toBe('/tenants/fecode/environments/expensa-stage/logs/service/expense-service/0');
+    expect(envPath('fecode', 'e', 'logs', '', null, '?q=timeout&level=error'))
+      .toBe('/tenants/fecode/environments/e/logs?q=timeout&level=error');
+    expect(envPath('fecode', 'e', 'logs', 'service/web', 1, '?source=ingress'))
+      .toBe('/tenants/fecode/environments/e/logs/service/web/1?source=ingress');
+    expect(envPath('fecode', 'e', 'overview', '', null, '?q=x')).toBe('/tenants/fecode/environments/e');
     expect(envPath('a b', 'e', 'logs', 'service/web', 2)).toBe('/tenants/a%20b/environments/e/logs/service/web/2');
     expect(envPath('fecode', 'e', 'deployments', '', 3)).toBe('/tenants/fecode/environments/e/deployments');
-    for (const [tab, item, replica] of [['overview', '', 0], ['deployments', '', 0], ['deployments', '6', 0],
-      ['incidents', '12', 0], ['logs', '', 0], ['logs', 'job/migrate', 0], ['logs', 'service/web', 3]]) {
-      expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica)))
-        .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica });
+    for (const [tab, item, replica, search] of [['overview', '', null, ''], ['deployments', '', null, ''],
+      ['deployments', '6', null, ''], ['incidents', '12', null, ''], ['logs', '', null, ''], ['logs', 'job/migrate', null, ''],
+      ['logs', 'service/web', 0, ''], ['logs', 'service/web', 3, '?q=a+b'], ['logs', '', null, '?trace=x']]) {
+      expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
+        .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
     expect(ENV_TABS).toEqual(['overview', 'deployments', 'incidents', 'logs']);
   });

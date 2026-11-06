@@ -8,9 +8,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveTenant, setTenantToken } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
-  DiffView, EnvOverview, EnvTable, IncidentTable, IncidentView, LogPicker, LogsBody, DeploymentTable, DeploymentView,
+  DiffView, EnvOverview, EnvTable, IncidentTable, IncidentView, LogsBody, DeploymentTable, DeploymentView,
 } from './Environments.jsx';
 import { logsProblem } from './envs.js';
+import { LogSearch } from './LogSearch.jsx';
+import { focusOf } from '../logs.js';
 
 // The environments view, rendered with ferund's fixtures as its answers:
 // the list, an environment's objects and instances per kind with its
@@ -116,7 +118,7 @@ describe('EnvOverview', () => {
     expect(count(out, 'title="an older deployment&#x27;s instance"')).toBe(1);
     // Each instance links its replica's logs.
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service/1"');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service"');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service/0"');
     // Objects with instances link their logs per instance; the job, in its
     // head.
     expect(count(out, 'class="small envobj-logs"')).toBe(1);
@@ -128,7 +130,7 @@ describe('EnvOverview', () => {
     expect(all).toContain('postgres postgres 17 · plan small · provisioned');
     expect(all).toContain('nats nats 2 · plan small · provisioned');
     expect(html(<EnvOverview st={STAGE} tenant={T} navigate={nav} />))
-      .toContain('href="/tenants/fecode/environments/expensa-stage/logs/addon/postgres"');
+      .toContain('href="/tenants/fecode/environments/expensa-stage/logs/addon/postgres/0"');
   });
 
   it("shows a job's last run", () => {
@@ -409,18 +411,39 @@ describe('the logs', () => {
     expect(out).toContain('no such object: service/nope');
   });
 
-  it("offer the status's objects, and an image service's replicas", () => {
-    const pick = (item, replica = 0) => {
-      const o = STAGE.objects.find((x) => `${x.kind}/${x.name}` === item) || null;
-      return html(<LogPicker objects={STAGE.objects} item={item} replica={replica} o={o} onPick={() => {}} />);
-    };
-    const out = pick('service/expense-service', 1);
-    expect(count(out, 'class="chipbtn mono')).toBe(6 + 2);
-    expect(out).toContain('<button class="chipbtn mono objchip on"><span class="muted">service/</span>expense-service</button>');
-    expect(out).toContain('<button class="chipbtn mono on">1</button>');
-    expect(out).toContain('<button class="chipbtn mono">0</button>');
-    expect(pick('addon/postgres')).not.toContain('replica');
-    expect(pick('job/migrate')).toContain('<span class="muted">job/</span>migrate</button>');
+  it("offer the status's objects, an image service's replicas and sources, the words, levels and time", () => {
+    const search = (item, replica = null, query = '') => html(<LogSearch tenant={T} env="expensa-stage" st={STAGE}
+      focus={focusOf(item, replica, query)} navigate={nav} tail={null} />);
+    const out = search('service/expense-service', 1, '?q=timeout&level=error,warn');
+    expect(out).toContain('<button type="button" class="chipbtn mono objchip on"><span class="muted">service/</span>expense-service</button>');
+    expect(out).toContain('<button type="button" class="chipbtn mono on" aria-pressed="true">1</button>');
+    expect(out).toContain('aria-pressed="false">every</button>');
+    // A replica is a container's: its output, or what it sent out.
+    expect(out).not.toContain('>requests</button>');
+    expect(out).toContain('aria-pressed="true">output</button>');
+    expect(search('service/expense-service')).toContain('aria-pressed="false">requests</button>');
+    expect(out).toContain('value="timeout"');
+    expect(out).toContain('class="chipbtn mono lg-lvlchip lvl-error on"');
+    expect(out).toContain('class="chipbtn mono lg-lvlchip lvl-warn on"');
+    expect(out).toContain('class="chipbtn mono lg-lvlchip lvl-info"');
+    expect(out).toContain('class="chipbtn on" aria-pressed="true">1 h</button>');
+    // An addon has output only, no replicas to pick; every object has
+    // no replica row either.
+    expect(search('addon/postgres')).not.toContain('>replica<');
+    expect(search('addon/postgres')).not.toContain('>requests</button>');
+    expect(search('').match(/class="chipbtn on">every object/)).toBeTruthy();
+    // A trace's search reads all the store keeps, and can be left.
+    const tr = search('', null, '?trace=4bf92f3577b34da6a3ce929d0e0e4736');
+    expect(tr).toContain('<code>4bf92f3577b34da6a3ce929d0e0e4736</code>');
+    expect(tr).toContain('aria-pressed="true">all kept</button>');
+    expect(tr).toContain('leave the trace');
+  });
+
+  it("show an attached service's process output alone, from its node", () => {
+    const out = html(<LogSearch tenant={T} env="expensa-preview" st={PREVIEW} focus={focusOf('service/web', null, '')}
+      navigate={nav} tail={<p className="tail">the tail</p>} tailOnly />);
+    expect(out).toContain('<p class="tail">the tail</p>');
+    expect(out).not.toContain('aria-label="search the logs"');
   });
 });
 
@@ -429,10 +452,10 @@ describe('the logs', () => {
 // token.
 describe('read-only', () => {
   it('calls only the reading routes', () => {
-    const src = readFileSync(new URL('./Environments.jsx', import.meta.url), 'utf8');
+    const src = ['./Environments.jsx', './LogSearch.jsx'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
-    expect(used).toEqual(['getDeployment', 'getEnvironment', 'getIncident', 'listDeployments', 'listEnvironments',
-      'listIncidents', 'objectLogs']);
+    expect(used).toEqual(['followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'listDeployments', 'listEnvironments',
+      'listIncidents', 'objectLogs', 'searchLogs']);
     expect(src).not.toMatch(/route-tokens|\/secrets|revert\(|deleteEnv/);
   });
 });
