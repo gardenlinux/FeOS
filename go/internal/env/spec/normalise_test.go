@@ -158,6 +158,49 @@ func TestNormaliseRules(t *testing.T) {
 	}
 }
 
+// A spec with a plan's pins written in (image the pin, imageAsWritten the
+// image as written; ADR 0032) normalises to what the plan normalised,
+// without pins: what the plan showed is what an apply runs, even once a
+// tag moved.
+func TestNormaliseWrittenPins(t *testing.T) {
+	const tag, pinned = "ghcr.io/acme/expense:1.4", "ghcr.io/acme/expense@" + digestExpense14
+	draft := Spec{
+		Services: map[string]Service{"api": {Image: tag}, "web": {Image: "nginx:1.27"}},
+		Jobs:     map[string]Job{"migrate": {Image: tag}},
+	}
+	planned, _ := Normalise(draft, Pins{Images: map[string]string{tag: pinned, "nginx:1.27": "docker.io/library/nginx@" +
+		digestWeb13}})
+	// The client writes every pin into its draft.
+	written := Spec{Services: map[string]Service{}, Jobs: map[string]Job{}}
+	for name, svc := range planned.Services {
+		written.Services[name] = Service{Image: svc.Image, ImageAsWritten: svc.ImageAsWritten}
+	}
+	written.Jobs["migrate"] = Job{Image: planned.Jobs["migrate"].Image, ImageAsWritten: tag}
+	// The tag moved since: the apply's pins name another digest.
+	moved := Pins{Images: map[string]string{tag: "ghcr.io/acme/expense@" + digestExpense13}}
+	applied, _ := Normalise(written, moved)
+	if !EqualNormalised(applied, planned) || Hash(applied) != Hash(planned) {
+		t.Fatalf("applied %s\nplanned %s", marshalSpec(t, applied), marshalSpec(t, planned))
+	}
+	if api := applied.Services["api"]; api.Image != pinned || api.ImageAsWritten != tag {
+		t.Fatalf("api %+v", api)
+	}
+	// "Check for a newer image" writes the image as written back: the
+	// tag resolves again, to where it moved.
+	back := written
+	back.Services = map[string]Service{"api": {Image: tag, ImageAsWritten: tag}}
+	if api, _ := Normalise(back, moved); api.Services["api"].Image != "ghcr.io/acme/expense@"+digestExpense13 ||
+		api.Services["api"].ImageAsWritten != tag {
+		t.Fatalf("checked %+v", api.Services["api"])
+	}
+	// One that does not resolve keeps no stale image as written.
+	stale := Spec{Services: map[string]Service{"api": {Image: "ghcr.io/acme/expense:1.5", ImageAsWritten: tag}}}
+	if got, _ := Normalise(stale, Pins{}); got.Services["api"].Image != "ghcr.io/acme/expense:1.5" ||
+		got.Services["api"].ImageAsWritten != "" {
+		t.Fatalf("unresolved %+v", got.Services["api"])
+	}
+}
+
 func TestMergePatch(t *testing.T) {
 	// RFC 7396, appendix A.
 	cases := []struct{ doc, patch, want string }{
