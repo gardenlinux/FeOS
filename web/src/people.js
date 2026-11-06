@@ -118,32 +118,52 @@ export function can(access) {
   };
 }
 
-// TENANT_NAV are a tenant's pages in the sidebar, in its groups (run:
-// what runs, connect: what connects it to the world, tenant: who may and
-// how much), each with what it needs of can() and its layer's colour
-// (os: what runs as a pod, run: what FeRun keeps, net: the network).
-// Home and the environments for every member, the sandboxes and jobs
-// with a tenant grant, the tokens for its admin.
+// TENANT_NAV are a tenant's pages in the sidebar, in its groups, each
+// with what it needs of can() and its layer's colour (os: what runs as a
+// pod, run: what FeRun keeps, net: the network). The environments are a
+// section of their own: each one with its pages (ENV_NAV), the one open
+// unfolded, since the UI is used in an environment; the tenant's other
+// things below, the sandboxes last of them (agents use them through the
+// API, people rarely through the UI). Home and the environments for every
+// member, the sandboxes and jobs with a tenant grant, the tokens for its
+// admin.
 export const TENANT_NAV = [
   { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '', layer: 'run' },
-  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'run', layer: 'os',
-    views: ['sandboxes', 'tools'] },
-  { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'run',
+  { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env',
     layer: 'run', views: ['environments', 'newEnvironment'] },
-  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'run', layer: 'os' },
-  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'connect', layer: 'net' },
-  { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'tenant', layer: '' },
-  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'tenant', layer: '' },
-  { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'tenant', layer: '' },
-  { view: 'settings', label: 'Settings', icon: 'settings', path: '/settings', needs: 'members', group: 'tenant', layer: '' },
+  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant', layer: 'net' },
+  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'tenant', layer: 'os' },
+  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'tenant', layer: 'os',
+    views: ['sandboxes', 'tools'] },
+  { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage', layer: '' },
+  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage', layer: '' },
+  { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'manage', layer: '' },
+  { view: 'settings', label: 'Settings', icon: 'settings', path: '/settings', needs: 'members', group: 'manage', layer: '' },
 ];
 
-// NAV_GROUPS name the sidebar's groups, in order.
+// NAV_GROUPS name the sidebar's groups, in order; env is the
+// environments' section.
 export const NAV_GROUPS = [
   { key: '', label: '' },
-  { key: 'run', label: 'Run' },
-  { key: 'connect', label: 'Connect' },
+  { key: 'env', label: 'Environments' },
   { key: 'tenant', label: 'Tenant' },
+  { key: 'manage', label: 'Manage' },
+];
+
+// ENV_NAV are an environment's pages in its subtree, by the tabs of its
+// route (routes.js ENV_TABS; a tab ferund's UI does not have is left
+// out), with their icons; builder is the builder, "Edit".
+export const ENV_NAV = [
+  { tab: 'overview', label: 'Overview', icon: 'dashboard' },
+  { tab: 'deployments', label: 'Deployments', icon: 'history' },
+  { tab: 'incidents', label: 'Incidents', icon: 'alert' },
+  { tab: 'logs', label: 'Logs', icon: 'file' },
+  { tab: 'traces', label: 'Traces', icon: 'activity' },
+  { tab: 'traffic', label: 'Traffic', icon: 'chart' },
+  { tab: 'secrets', label: 'Secrets', icon: 'lock' },
+  { tab: 'access', label: 'Domains & access', icon: 'globe' },
+  { tab: 'settings', label: 'Settings', icon: 'settings' },
+  { tab: 'builder', label: 'Edit', icon: 'blocks' },
 ];
 
 // PLATFORM_NAV are the operators' pages, the platform's space.

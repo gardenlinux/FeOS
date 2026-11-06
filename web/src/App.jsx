@@ -7,7 +7,7 @@ import {
 } from './api.js';
 import { Icon } from './Icon.jsx';
 import { Avatar, BrandMark, ThemeToggle } from './components.jsx';
-import { canonicalPath, envPath, parsePath } from './routes.js';
+import { ENV_TABS, canonicalPath, envPath, parsePath } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
@@ -29,8 +29,10 @@ import { Ingresses, PlatformPeople } from './views/Platform.jsx';
 import { Palette, usePaletteKey } from './views/Palette.jsx';
 import { SummaryProvider, useSummary } from './summary.jsx';
 import { entries } from './search.js';
+import { deploymentTone } from './views/envs.js';
+import { ToneDot } from './views/Environments.jsx';
 import {
-  MeContext, NAV_GROUPS, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants, roleLabel,
+  ENV_NAV, MeContext, NAV_GROUPS, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants, roleLabel,
   tenantAccess, tenantHome, tenantNav, viewGate,
 } from './people.js';
 
@@ -250,6 +252,9 @@ function Sidebar({ route, navigate, me, onSearch, onSignOut }) {
       {!platform && t && nav.length > 0 && NAV_GROUPS.map((g) => {
         const items = nav.filter((n) => n.group === g.key);
         if (items.length === 0) return null;
+        if (g.key === 'env') {
+          return <EnvSection key="env" route={route} navigate={navigate} canCreate={can(access).writeTenant} />;
+        }
         return (
           <nav key={g.key || 'top'} className="snav">
             {g.label && <div className="snav-label">{g.label}</div>}
@@ -337,6 +342,75 @@ function Switcher({ route, navigate, me, platform }) {
             </>)}
         </div>)}
     </div>
+  );
+}
+
+// ENV_SHOWN bounds the environments the section lists; the rest are a
+// click away in the list.
+const ENV_SHOWN = 12;
+
+// EnvSection is the sidebar's environments: each with its state and its
+// open incidents, the one the route is in unfolded into its pages; the
+// list and a new one from the section's head.
+function EnvSection({ route, navigate, canCreate }) {
+  const { environments, counts } = useSummary();
+  const t = route.tenant;
+  const envs = environments || [];
+  const here = route.view === 'environments' ? route.env : '';
+  const open = envs.find((e) => e.name === here || e.id === here);
+  const shown = envs.slice(0, ENV_SHOWN);
+  if (open && !shown.includes(open)) shown.push(open);
+  const tabs = ENV_NAV.filter((n) => ENV_TABS.includes(n.tab));
+  const go = (to) => (e) => { e.preventDefault(); navigate(to); };
+  const listOn = (route.view === 'environments' && !route.env) || route.view === 'newEnvironment';
+  return (
+    <nav className="snav envnav">
+      <div className="snav-label snav-label-row">
+        <a href={envPath(t)} onClick={go(envPath(t))} className={listOn ? 'on' : ''}>Environments</a>
+        {counts.environments && counts.environments.tone && (
+          <span className="snav-count bad" title="open incidents">{counts.environments.n}</span>)}
+        {canCreate && (
+          <a className="snav-add" href={`/tenants/${encodeURIComponent(t)}/new-environment`}
+            onClick={go(`/tenants/${encodeURIComponent(t)}/new-environment`)} title="new environment">
+            <Icon name="plus" size={13} /></a>)}
+      </div>
+      {environments === null && <div className="sidehint muted small">…</div>}
+      {environments && envs.length === 0 && (
+        <div className="sidehint muted small">None yet.{canCreate ? ' + makes the first.' : ''}</div>)}
+      {shown.map((e) => {
+        const isOpen = open === e;
+        return (
+          <div key={e.id} className={'envnode' + (isOpen ? ' open' : '')}>
+            <a className={'snav-item envitem' + (isOpen && route.tab === 'overview' ? ' on' : '') + (isOpen ? ' here' : '')}
+              href={envPath(t, e.name)} onClick={go(envPath(t, e.name))} aria-expanded={isOpen}>
+              <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={12} />
+              <ToneDot tone={deploymentTone(e.state)} title={e.state} />
+              <span className="envname">{e.name}</span>
+              {Number(e.openIncidents) > 0 && <span className="snav-count bad" title="open incidents">{e.openIncidents}</span>}
+            </a>
+            {isOpen && (
+              <div className="envtabs">
+                {tabs.map((n) => {
+                  const to = envPath(t, e.name, n.tab);
+                  const on = route.tab === n.tab && n.tab !== 'overview';
+                  if (n.tab === 'overview') return null;
+                  return (
+                    <a key={n.tab} className={'snav-item envtab' + (on ? ' on' : '')} href={to} onClick={go(to)}
+                      aria-current={on ? 'page' : undefined}>
+                      <Icon name={n.icon} size={13} /> <span>{n.label}</span>
+                      {n.tab === 'incidents' && Number(e.openIncidents) > 0 && (
+                        <span className="snav-count bad">{e.openIncidents}</span>)}
+                    </a>
+                  );
+                })}
+              </div>)}
+          </div>
+        );
+      })}
+      {envs.length > shown.length && (
+        <a className="snav-item envmore" href={envPath(t)} onClick={go(envPath(t))}>
+          <span>{envs.length - shown.length} more…</span></a>)}
+    </nav>
   );
 }
 

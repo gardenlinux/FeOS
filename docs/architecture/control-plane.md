@@ -2132,10 +2132,14 @@ tokens an earlier UI kept in `localStorage` (`ferun-tenants`) are removed
 at sign-in. The sidebar has two spaces, which a switcher at its top
 picks: a tenant, from the person's tenants with their roles, and for
 operators the platform (fleet: nodes, ingresses, control plane, join
-tokens; accounts: tenants, people). In a tenant it orders the pages of
-the role by purpose (`TENANT_NAV` in `web/src/people.js`): Home; run:
-sandboxes, environments, jobs; connect: domains; tenant: people, tokens,
-usage, settings. Home and the environments, domains, people, usage and
+tokens; accounts: tenants, people). In a tenant it shows the pages of
+the role (`TENANT_NAV` in `web/src/people.js`): Home; the environments,
+each with its state and open incidents, the one open unfolded into its
+pages (`ENV_NAV`: deployments, incidents, logs, traces, … and Edit, the
+builder), since people use the UI in an environment; then the tenant's
+domains, jobs and sandboxes (last: agents use sandboxes through the API
+and FeCode, people rarely through the UI); then people, tokens, usage
+and settings. Home and the environments, domains, people, usage and
 settings go to every member; sandboxes, jobs and the tools' reference
 with a tenant grant; tokens to its admin. Each entry's icon has its
 layer's colour, as on the architecture page (FeOS ochre for what runs as

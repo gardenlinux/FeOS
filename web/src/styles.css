@@ -1354,3 +1354,23 @@ button.g-body:hover { background: var(--panel3); }
 }
 .pagehead-actions { margin-left: auto; display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .pagehead h1.mono { font-size: 18px; }
+
+/* the sidebar's environments: each one a node, the open one unfolded */
+.snav-label-row { display: flex; align-items: center; gap: 6px; }
+.snav-label-row a { color: inherit; }
+.snav-label-row a:hover, .snav-label-row a.on { color: var(--text); text-decoration: none; }
+.snav-label-row .snav-count { margin-left: 0; }
+.snav-add { margin-left: auto; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; color: var(--muted); }
+.snav-add:hover { background: var(--panel2); color: var(--text); }
+.envitem { gap: 7px; padding-left: 6px; }
+.envitem .icon { color: var(--muted); }
+.envitem .envname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.envitem.here { color: var(--text); font-weight: 600; }
+.envtabs { margin: 1px 0 6px 13px; padding-left: 8px; border-left: 1px solid var(--border); }
+.envtab { font-size: 13px; padding: 4px 8px; gap: 8px; }
+.envtab .icon { color: var(--muted); }
+.envtab.on .icon { color: var(--accent); }
+.envmore { font-size: 12.5px; padding-left: 26px; }
+@media (max-width: 820px) {
+  .envnav { display: none; }
+}
