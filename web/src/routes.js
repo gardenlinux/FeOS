@@ -11,6 +11,9 @@
 //   /tenants/:t/tools                   the tools of its sandboxes
 //   /tenants/:t/jobs[/:id]              its jobs (runs to completion)
 //   /tenants/:t/domains[/:id]           its domains
+//   /tenants/:t/credentials[/:name[/edit]]
+//                                       its credentials (ADR 0033)
+//   /tenants/:t/new-credential          the form of a new credential
 //   /tenants/:t/members                 its people: members and invitations
 //   /tenants/:t/tokens                  its tokens
 //   /tenants/:t/usage                   its use against its limits
@@ -149,6 +152,10 @@ export function parsePath(pathname) {
   if (seg[2] === 'tokens') return { view: 'tokens', tenant };
   if (seg[2] === 'jobs') return { view: 'jobs', tenant, sel: seg[3] || '' };
   if (seg[2] === 'domains') return { view: 'domains', tenant, sel: seg[3] || '' };
+  if (seg[2] === 'credentials') {
+    return { view: 'credentials', tenant, sel: seg[3] || '', tab: seg[3] && seg[4] === 'edit' ? 'edit' : '' };
+  }
+  if (seg[2] === 'new-credential') return { view: 'newCredential', tenant };
   if (seg[2] === 'usage') return { view: 'usage', tenant };
   if (seg[2] === 'settings') return { view: 'settings', tenant };
   if (seg[2] === 'new-environment') return { view: 'newEnvironment', tenant };

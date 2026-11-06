@@ -106,10 +106,10 @@ describe('me → navigation', () => {
 
   it('a tenant\'s pages by role', () => {
     const views = (me, t) => tenantNav(tenantAccess(me, t)).map((n) => n.view);
-    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'jobs', 'sandboxes', 'members', 'tokens',
+    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'credentials', 'jobs', 'sandboxes', 'members',
+      'tokens', 'usage', 'settings']);
+    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'jobs', 'sandboxes', 'members',
       'usage', 'settings']);
-    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'jobs', 'sandboxes', 'members', 'usage',
-      'settings']);
     expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'members', 'usage', 'settings']);
     expect(views(ANNA, 'nope')).toEqual([]);
     expect(views(BASIC, 'acme')).toEqual([]);
@@ -137,6 +137,11 @@ describe('me → navigation', () => {
     expect(viewGate(ANNA, parsePath('/tenants/shop'))).toBe('');
     expect(viewGate(ANNA, parsePath('/tenants/other'))).toBe('member');
     expect(viewGate(OPERATOR, parsePath('/tenants/brand-new/members'))).toBe('');
+    // The credentials (ADR 0033): read on the tenant; a new one write.
+    expect(viewGate(ANNA, parsePath('/tenants/zeta/credentials/github'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/shop/credentials'))).toBe('role');
+    expect(viewGate(ANNA, parsePath('/tenants/acme/new-credential'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/zeta/new-credential'))).toBe('role');
   });
 
   it('a Basic sign-in has the operators\' pages but acts in no tenant', () => {

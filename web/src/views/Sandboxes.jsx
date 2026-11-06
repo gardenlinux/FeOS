@@ -19,6 +19,7 @@ import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
 import { Access, ImageCredentials } from './Access.jsx';
 import { Connect } from './SandboxConnect.jsx';
+import { CredentialPicker, SandboxCredentials } from './Credentials.jsx';
 import '../styles/sandboxes.css';
 
 // A tenant's sandboxes: the list, the create form and a sandbox's page
@@ -272,7 +273,7 @@ function NewSandbox({ base, navigate, can: c, busy, err, onCreate }) {
 // createSandbox's arguments.
 export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCancel }) {
   const hints = createHints(fleetDefaults(defaults));
-  const [f, setF] = useState({ image: '', vcpus: '', memoryMib: '', attachable: false, username: '', password: '' });
+  const [f, setF] = useState({ image: '', vcpus: '', memoryMib: '', attachable: false, username: '', password: '', credentials: [] });
   const [bad, setBad] = useState('');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   return (
@@ -322,6 +323,7 @@ export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCance
         </div>
         <span className="sbx-hint">Sealed in ferund and never shown again; rotate or remove it later under the sandbox's Credentials.</span>
       </fieldset>
+      <CredentialPicker value={f.credentials} disabled={disabled} onChange={(credentials) => setF({ ...f, credentials })} />
       {bad && <p className="error">{bad}</p>}
       <div className="sbx-formactions">
         <button type="submit" className="primary" disabled={disabled || !!busy} title={disabled ? WRITE_REASON : undefined}>
@@ -403,6 +405,8 @@ function SandboxPage({ tenant, sb, tab, busy, act, err, navigate, base, can: c, 
           {cur === 'connect' && <Connect sandboxId={sb.sandboxId} write={c.writeTenant} fresh={fresh} onFreshSeen={onFreshSeen} />}
           {cur === 'credentials' && (
             <>
+              <h3 className="sect sect-first"><Icon name="plug" size={13} /> HTTP APIs</h3>
+              <SandboxCredentials tenant={tenant} sandboxId={sb.sandboxId} write={c.writeTenant} navigate={navigate} />
               <Access sandboxId={sb.sandboxId} />
               <h3 className="sect"><Icon name="key" size={13} /> Image credentials</h3>
               <ImageCredentials sandboxId={sb.sandboxId} write={c.writeTenant} />

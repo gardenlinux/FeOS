@@ -132,6 +132,8 @@ export const TENANT_NAV = [
   { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env',
     layer: 'run', views: ['environments', 'newEnvironment'] },
   { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant', layer: 'net' },
+  { view: 'credentials', label: 'Credentials', icon: 'plug', path: '/credentials', needs: 'readTenant', group: 'tenant',
+    layer: 'net', views: ['credentials', 'newCredential'] },
   { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'tenant', layer: 'os' },
   { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'tenant', layer: 'os',
     views: ['sandboxes', 'tools'] },
@@ -182,9 +184,9 @@ export const PLATFORM_GROUPS = [
 ];
 
 // VIEW_NEEDS are what the tenant's pages outside the sidebar need: a
-// new environment's builder (ADR 0032) a tenant grant write, the tools'
-// reference a tenant grant.
-const VIEW_NEEDS = { newEnvironment: 'writeTenant', tools: 'readTenant' };
+// new environment's builder (ADR 0032) and a new credential's form (ADR
+// 0033) a tenant grant write, the tools' reference a tenant grant.
+const VIEW_NEEDS = { newEnvironment: 'writeTenant', newCredential: 'writeTenant', tools: 'readTenant' };
 
 // tenantNav is the tenant's pages that access offers.
 export function tenantNav(access) {
