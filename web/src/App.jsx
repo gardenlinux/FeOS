@@ -164,7 +164,7 @@ export default function App() {
       {!needsGate && route.view === 'overview' && <Home key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'sandboxes' && (
         <Sandboxes key={route.tenant} tenant={route.tenant} sel={route.sel} tab={route.tab} navigate={navigate} />)}
-      {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
+      {!needsGate && route.view === 'tools' && <Tools key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'jobs' && <Jobs key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
       {!needsGate && route.view === 'domains' && <Domains key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
       {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
@@ -446,7 +446,8 @@ function Topbar({ route, navigate }) {
       <nav className="crumbs">
         {t && crumb(t, `/tenants/${enc(t)}`, true)}
         {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
-        {route.view === 'sandboxes' && route.sel && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
+        {route.view === 'sandboxes' && route.sel === 'new' && <>{sep}<span className="crumb">new</span></>}
+        {route.view === 'sandboxes' && route.sel && route.sel !== 'new' && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
         {route.view === 'jobs' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
         {route.view === 'invite' && <span className="crumb">invitation</span>}
