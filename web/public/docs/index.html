@@ -95,6 +95,15 @@ h1 {
 h1 .run { color: var(--run); }
 h1 .os { color: var(--os); }
 .lede { font-size: 18px; line-height: 1.55; color: var(--fg2); margin: 0 0 14px; max-width: 66ch; }
+.layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 28px; max-width: 760px; margin: 0 0 16px; }
+.layer { border-left: 3px solid; padding: 2px 0 2px 12px; min-width: 0; }
+.layer.run { border-color: var(--run); }
+.layer.os { border-color: var(--os); }
+.layer p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--fg2); }
+.layer .lname { font-family: var(--sans); font-weight: 700; font-size: 17px; margin: 0 0 2px; }
+.layer.run .lname { color: var(--run); }
+.layer.os .lname { color: var(--os); }
+.layer .lname span { font-weight: 500; font-size: 13px; color: var(--muted); margin-left: 6px; }
 .src { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
 .theme {
   margin-left: auto; font: inherit; font-size: 13px; color: var(--fg2); background: var(--surface);
@@ -215,7 +224,11 @@ footer code { font-size: 12px; }
   <div class="head-text">
     <p class="eyebrow"><a href="/">FeRun</a> · Architecture · as of 6 November 2026</p>
     <h1><span class="run">FeRun</span> and <span class="os">FeOS</span></h1>
-    <p class="lede"><b>FeOS</b> is everything that runs on the nodes. It runs pods: Firecracker microVMs with containers in them that cost no memory while idle and are back in under a second. <b>FeRun</b> is the control plane above it, the Go program <code>ferund</code> in replicas over one PostgreSQL. It knows who owns each pod, where it runs and when it may sleep. FeCode builds its sandboxes, environments and builds on top of it.</p>
+    <p class="lede">Two products on one technology: <b>agent sandboxes</b>, workspaces in which an LLM agent runs commands and tools for its user, often for days, and an <b>isolated container runtime</b>, a container as a service (CaaS) for customers' own images. Both run on the same unit, the pod: a Firecracker microVM with containers in it, which costs no memory while idle and is back in under a second.</p>
+    <div class="layers">
+      <div class="layer run"><p class="lname">FeRun <span>the cluster component</span></p><p><code>ferund</code> in replicas over one PostgreSQL. It knows the tenants, places pods on nodes and decides when they sleep. Only FeRun knows whether a pod is a sandbox or a service.</p></div>
+      <div class="layer os"><p class="lname">FeOS <span>on the node</span></p><p><code>feosd</code>, <code>diskd</code> and the guest. They run the pods: the microVMs, their disks, their network and their snapshots.</p></div>
+    </div>
     <p class="src">A picture of <code>docs/overview.md</code>, <code>docs/architecture/</code> and <code>docs/adr/</code> in the FeOS repository at <code>f4dd725</code>. It is a snapshot: where it and those pages differ, the pages are right.</p>
   </div>
   <button class="theme" id="theme-toggle" type="button">Light mode</button>
