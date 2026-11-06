@@ -449,18 +449,19 @@ function ServiceRefEditor({ v, targets, onChange }) {
 }
 
 // AddReference asks for a target and its key and proposes the variable's
-// name: DATABASE_URL for a postgres's url.
-export function AddReference({ targets, catalog, onAdd, onCancel }) {
+// name: DATABASE_URL for a postgres's url. initial preselects a target
+// ({id: "addons/db", port}), as a drop on the graph does.
+export function AddReference({ targets, catalog, onAdd, onCancel, initial }) {
   const all = [
     ...targets.addons.map((a) => ({ id: `addons/${a.name}`, key: 'addons', name: a.name, label: `addon ${a.name} (${a.type})`, a })),
     ...targets.services.map((s) => ({ id: `services/${s.name}`, key: 'services', name: s.name, label: `service ${s.name}`, s })),
     ...targets.secrets.map((n) => ({ id: `secrets/${n}`, key: 'secrets', name: n, label: `secret ${n}` })),
   ];
-  const [id, setId] = useState(all[0] ? all[0].id : '');
+  const [id, setId] = useState(initial && all.some((x) => x.id === initial.id) ? initial.id : all[0] ? all[0].id : '');
   const t = all.find((x) => x.id === id);
   const keys = !t ? [] : t.key === 'addons' ? t.a.keys : t.key === 'services' ? SERVICE_KEYS : [];
   const [key, setKey] = useState('');
-  const [port, setPort] = useState('');
+  const [port, setPort] = useState(initial && initial.port !== undefined && initial.port !== '' ? String(initial.port) : '');
   const [fields, setFields] = useState({});
   const k = key || (keys.includes('url') ? 'url' : keys[0] || '');
   const p = port || (t && t.s ? String(t.s.ports[0] || '') : '');

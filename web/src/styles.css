@@ -1054,6 +1054,102 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .b-applied { display: flex; flex-direction: column; gap: 8px; }
 a.button.mini { padding: 3px 8px; font-size: 12px; border-radius: 6px; margin: 6px 0; }
 
+/* The builder's graph (GraphView.jsx, graph.js): HTML nodes placed by the
+   layout over an SVG layer of edges, in a canvas that scrolls; the open
+   object's form beside it. */
+.b-gmain { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); gap: 14px; align-items: start; }
+.b-gmain.solo { grid-template-columns: minmax(0, 1fr); }
+.b-gmain.solo > .b-editor { display: none; }
+.b-gcol { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.b-gbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.b-gbar .sect { margin: 0; }
+.b-focus { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); margin-left: 6px; }
+.builder.wide .b-editor { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow: auto; }
+.g-canvas {
+  overflow: auto; max-height: calc(100vh - 230px); min-height: 320px; border: 1px solid var(--border-soft); border-radius: 10px;
+  background-color: var(--bg1);
+  background-image: radial-gradient(var(--border-soft) 1px, transparent 1px); background-size: 18px 18px;
+}
+.g-plane { position: relative; }
+.g-plane.dragging, .g-plane.dragging * { cursor: crosshair; user-select: none; }
+.g-frame { position: absolute; border: 1px dashed var(--border); border-radius: 12px; pointer-events: none; }
+.g-framelabel { position: absolute; top: 6px; left: 12px; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+.g-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.g-edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .55; transition: opacity .12s; }
+.g-edge.v-route { stroke: var(--accent); opacity: .8; }
+.g-edge.dashed { stroke-dasharray: 5 4; }
+.g-edge.error { stroke: var(--danger); opacity: .95; }
+.g-edge.warning { stroke: var(--warn); opacity: .9; }
+.g-edge.on { stroke-width: 2.2; opacity: 1; }
+.g-edge.m-add { stroke: var(--ok); }
+.g-edge.dim, .g-label.dim, .g-node.dim { opacity: .22; }
+.g-edge.dim.error { opacity: .4; }
+.g-drawing { stroke: var(--accent); stroke-dasharray: 4 4; opacity: .9; }
+.g-drawing.ok { stroke-dasharray: none; stroke-width: 2; }
+.g-arrowhead { fill: var(--muted); }
+.g-label {
+  position: absolute; z-index: 2; font-size: 10.5px; line-height: 13px; padding: 0 4px; border: none; border-radius: 4px;
+  background: var(--bg1); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.g-label.full { z-index: 5; color: var(--text); }
+.g-label:hover, .g-label:focus-visible { color: var(--text); background: var(--panel3); }
+.g-label.error { color: var(--danger); }
+.g-label.warning { color: var(--warn); }
+.g-node {
+  position: absolute; z-index: 3; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+  transition: opacity .12s, border-color .12s;
+}
+.g-node.k-entry { background: var(--panel); border-color: var(--accent); }
+.g-node.k-sandbox { border-style: dashed; background: var(--panel); }
+.g-node.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.g-node.error { border-left: 3px solid var(--danger); }
+.g-node.warning { border-left: 3px solid var(--warn); }
+.g-node.missing { border: 1px dashed var(--danger); background: transparent; }
+.g-node.removed { border: 1px dashed var(--danger); background: transparent; opacity: .7; }
+.g-node.m-add { box-shadow: inset 0 3px 0 var(--ok); }
+.g-node.m-update { box-shadow: inset 0 3px 0 var(--warn); }
+.g-node.on.m-add { box-shadow: 0 0 0 1px var(--accent), inset 0 3px 0 var(--ok); }
+.g-node.on.m-update { box-shadow: 0 0 0 1px var(--accent), inset 0 3px 0 var(--warn); }
+.g-node.t-ok { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok); }
+.g-node.t-no { border-color: var(--danger); }
+.g-body {
+  display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: 100%; height: 100%; text-align: left;
+  padding: 6px 10px; background: transparent; border: none; border-radius: 8px; color: inherit; white-space: normal;
+}
+button.g-body:hover { background: var(--panel3); }
+.g-head { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.g-head .badge { margin-left: 0; }
+.g-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); flex: none; }
+.g-name, .g-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.g-name { flex: 1; }
+.g-mark { font-weight: 700; font-size: 12px; flex: none; }
+.g-mark.m-add { color: var(--ok); }
+.g-mark.m-update { color: var(--warn); }
+.g-mark.m-remove { color: var(--danger); }
+.g-port {
+  position: absolute; left: 0; right: 16px; display: flex; align-items: center; gap: 5px; padding-left: 10px;
+  pointer-events: none; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px;
+}
+.g-port.t-ok { color: var(--ok); }
+.g-dot { position: absolute; left: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--panel); border: 1.5px solid var(--accent); }
+.g-host { color: var(--text); }
+.g-handle {
+  position: absolute; right: -7px; width: 14px; height: 14px; padding: 0; border-radius: 50%; z-index: 4;
+  background: var(--panel); border: 2px solid var(--accent); cursor: crosshair; touch-action: none;
+}
+.g-handle:hover, .g-handle:focus-visible { background: var(--accent); }
+.g-offer {
+  position: absolute; z-index: 10; background: var(--panel3); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); padding: 8px;
+}
+.g-offerbody { display: flex; flex-direction: column; gap: 6px; }
+.g-offerbody .sect { margin: 0; }
+.g-offer .b-addref { border: none; padding: 0; }
+.g-picks { display: flex; flex-direction: column; align-items: stretch; gap: 2px; max-height: 260px; overflow: auto; }
+.g-picks button { justify-content: flex-start; text-align: left; }
+[data-theme="light"] .g-offer { box-shadow: 0 8px 24px rgba(20, 40, 70, .18); }
+[data-theme="light"] .g-edge { opacity: .7; }
+
 @media (max-width: 900px) {
   .b-main { grid-template-columns: minmax(0, 1fr); }
   .tabbar { overflow-x: auto; }

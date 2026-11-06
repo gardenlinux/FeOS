@@ -20,16 +20,18 @@ import { applyPins, imageView, pinSecret, secretPins } from './pins.js';
 import { builtinCatalog, newAddon, readCatalog } from './catalog.js';
 import { planner } from './planner.js';
 import { AddonForm, FindingList, JobForm, RawForm, RouteForm, SecretForm, ServiceForm } from './BuilderForms.jsx';
+import { GraphView, summary } from './GraphView.jsx';
 
-// The deployment builder (ADR 0032), step 1 without the graph: an
-// environment's tab Builder and the page of a new environment. It edits
+// The deployment builder (ADR 0032): an environment's tab Builder and the
+// page of a new environment. It edits
 // a draft, a spec in the API's JSON and its base, in forms and as JSON
 // text (two views of the one draft), keeps it in this browser's storage,
 // plans it 500 ms after every change, shows the findings at the objects
 // and fields their paths name and the diff against the base, and applies
 // it with its base; a refused base rebases object by object. It writes
-// deployments and secrets' values, nothing else. Below 900 px the list of
-// objects is cards that open their form at full width.
+// deployments and secrets' values, nothing else. From 900 px the objects
+// are a graph (GraphView.jsx) with the open object's form beside it;
+// below, a list of cards that open their form at full width.
 
 const HISTORY = 100;
 
@@ -97,27 +99,20 @@ function AddAddonButton({ catalog, onAdd }) {
   );
 }
 
-// summary is a card's line under its name.
-function summary(key, o, pin) {
-  if (key === 'secrets') {
-    if (!pin) return '';
-    const p = pin.pinned ? `pinned ${pin.pinned}` : 'latest when applied';
-    return pin.latest ? `${p} · latest ${pin.latest}` : p;
-  }
-  if (!isObject(o)) return '';
-  switch (key) {
-    case 'services': {
-      if (o.runtime === 'attached') return `attached · sandbox ${o.sandbox || '—'}`;
-      const v = imageView(o);
-      const ports = (Array.isArray(o.ports) ? o.ports : []).map((p) => p && `${p.name}:${p.port}`).join(' ');
-      return [v.written || 'no image yet', v.digest ? 'pinned' : '', ports].filter(Boolean).join(' · ');
-    }
-    case 'jobs': return [imageView(o).written || 'no image yet', o.on === 'manual' ? 'when asked' : 'with deployments'].join(' · ');
-    case 'addons': return [o.type, o.version, o.plan].filter(Boolean).join(' · ');
-    case 'routes': return `${o.path || '?'} → ${o.service || '?'}${o.port !== undefined ? ':' + o.port : ''}`;
-    case 'bindings': return o.upstream || '';
-    default: return '';
-  }
+// useWide says whether the page is wide enough for the graph: wider than
+// the 900 px below which the CSS lays out the list.
+const WIDE = '(min-width: 901px)';
+function useWide() {
+  const q = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(WIDE) : null);
+  const [wide, setWide] = useState(() => { const m = q(); return m ? m.matches : false; });
+  useEffect(() => {
+    const m = q();
+    if (!m) return undefined;
+    const f = () => setWide(m.matches);
+    m.addEventListener('change', f);
+    return () => m.removeEventListener('change', f);
+  }, []);
+  return wide;
 }
 
 // ---------------------------------------------------------------- builder --
@@ -143,6 +138,8 @@ export function Builder({ tenant, env, st, navigate }) {
   const [conflicts, setConflicts] = useState(null);
   const [notice, setNotice] = useState('');
   const [applied, setApplied] = useState(null);
+  const wide = useWide();
+  const [focus, setFocus] = useState(true);
 
   // set replaces the draft and stores it; record pushes the draft before
   // onto the undo history (edits within a second are one step).
@@ -332,8 +329,15 @@ export function Builder({ tenant, env, st, navigate }) {
   }
 
   const openUnit = open;
+  const entry = { public: !!(st && st.public), hosts: (st && st.hosts) || [], env: isNew ? draft.name : env };
+  const editor = (
+    <Editor unit={openUnit} spec={spec} groups={groups} pins={pins} catalog={catalog} isNew={isNew}
+      knownSecrets={knownSecrets} setSecret={setSecret} edit={edit} setOpen={setOpen}
+      empty={objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0}
+      onFirst={(image) => { const r = addService(draftRef.current.spec, image); edit(r.spec); setOpen(unitKey('services', r.name)); }} />
+  );
   return (
-    <div className={'builder' + (openUnit ? ' has-open' : '')}>
+    <div className={'builder' + (openUnit ? ' has-open' : '') + (wide ? ' wide' : '')}>
       <div className="b-toolbar">
         {isNew && <NewEnvName name={draft.name} onChange={(name) => set({ ...draftRef.current, name }, { record: false })} />}
         <span className="muted small">
@@ -372,19 +376,34 @@ export function Builder({ tenant, env, st, navigate }) {
         }} />)}
       {secretsErr && <p className="notice small">The secrets cannot be read: {secretsErr}</p>}
 
-      {view === 'json'
-        ? <JsonView spec={spec} onSpec={(s) => edit(s)} />
-        : (
-          <div className="b-main">
-            <ObjectList spec={spec} groups={groups} open={openUnit} pins={pins} catalog={catalog} onOpen={setOpen} onAdd={addObject} />
-            <div className="b-editor">
-              <button className="ghost mini b-back" onClick={() => setOpen('')}><Icon name="arrowLeft" size={12} /> the objects</button>
-              <Editor unit={openUnit} spec={spec} groups={groups} pins={pins} catalog={catalog} isNew={isNew}
-                knownSecrets={knownSecrets} setSecret={setSecret} edit={edit} setOpen={setOpen}
-                empty={objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0}
-                onFirst={(image) => { const r = addService(draftRef.current.spec, image); edit(r.spec); setOpen(unitKey('services', r.name)); }} />
+      {view === 'json' && <JsonView spec={spec} onSpec={(s) => edit(s)} />}
+      {view === 'forms' && wide && (
+        <div className={'b-gmain' + (!openUnit && !(objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0) ? ' solo' : '')}>
+          <div className="b-gcol">
+            <div className="b-gbar">
+              <span className="sect">the environment</span>
+              <span className="spacer" />
+              <button className="ghost mini" onClick={() => addObject('services')}><Icon name="plus" size={12} /> service</button>
+              <button className="ghost mini" onClick={() => addObject('jobs')}><Icon name="plus" size={12} /> job</button>
+              <AddAddonButton catalog={catalog} onAdd={(type) => addObject('addons', type)} />
+              <button className="ghost mini" onClick={() => addObject('routes')}><Icon name="plus" size={12} /> route</button>
+              <button className="ghost mini" onClick={() => addObject('secrets')}><Icon name="plus" size={12} /> secret</button>
+              <label className="b-focus small" title="dim what is not next to the open object">
+                <input type="checkbox" checked={focus} onChange={(e) => setFocus(e.target.checked)} /> focus</label>
             </div>
-          </div>)}
+            <GraphView spec={spec} groups={groups} diff={isNew || !answer ? null : answer.diff} open={openUnit} onOpen={setOpen}
+              entry={entry} catalog={catalog} knownSecrets={knownSecrets} pins={pins} edit={edit} focus={focus} />
+          </div>
+          <div className="b-editor">{editor}</div>
+        </div>)}
+      {view === 'forms' && !wide && (
+        <div className="b-main">
+          <ObjectList spec={spec} groups={groups} open={openUnit} pins={pins} catalog={catalog} onOpen={setOpen} onAdd={addObject} />
+          <div className="b-editor">
+            <button className="ghost mini b-back" onClick={() => setOpen('')}><Icon name="arrowLeft" size={12} /> the objects</button>
+            {editor}
+          </div>
+        </div>)}
 
       <PlanPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} pinned={pinned}
         applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
