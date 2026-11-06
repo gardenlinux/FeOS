@@ -1978,7 +1978,7 @@ deletes a binding's incidents 30 days after they closed.
 `web/` is a React app built with Vite into `go/internal/ui/dist`, which
 ferund embeds; only `dist/.keep` is committed, so the module builds
 without npm, and such a build answers the UI's routes with 404. It shows
-tenants and their tokens, sandboxes with their activity, network and
+tenants with their members and tokens, sandboxes with their activity, network and
 access, nodes with their certificates and capacity, join tokens, and
 instances with the leader, and signs people in through `/auth/`. A
 tenant's delete asks with the number of its sandboxes and environments
@@ -1994,9 +1994,42 @@ live, stopping while it stops but still writes its row (it serves on),
 or gone once its row is older than 15 s; the API's `live` and `fresh`
 say which, on the database clock.
 
-Behind the tenant gate, with a tenant's token that the UI minted and
-keeps in the browser, it shows the tenant's sandboxes and, read only, its
-environments (`/tenants/<t>/environments[/<env>[/<tab>]]`): the
+The UI is the tenants' console ([ADR 0031](../adr/0031-people-in-ferun.md)).
+`/auth/me` decides what it offers (`web/src/people.js`): an operator gets
+the operators' pages (tenants, nodes, join tokens, instances, a sandbox's
+activity and network) and acts in every tenant as its admin; everyone
+else gets their tenants with their roles ("Your tenants", a new one with
+`POST /api/v1/tenants`), never an operator's page, and the UI calls no
+admin route for them. The browser keeps no tenant token: every tenant
+page calls with the session and names its tenant in `FeRun-Tenant`; the
+tokens an earlier UI kept in `localStorage` (`ferun-tenants`) are removed
+at sign-in. In a tenant the sidebar offers the pages of the role (the
+overview, environments and members to every member; sandboxes and tools
+with a tenant grant; tokens to its admin), and a page hides the actions
+the role lacks (a sandbox's create, pause, resume, delete and tokens need
+`write` on the tenant); ferund decides anyway, and a 403 `role_required`
+reads "Your role does not allow this: it needs write on this tenant.". A
+person with grants on environments alone opens a tenant at those
+environments. A Basic sign-in (`--admin-users`) has the operators' pages
+but no tenant's: the tenant routes take a person's session or a token.
+
+The people's pages call the routes of members, invitations, tokens and
+quotas (`web/src/api.js`): `GET /api/v1/tenant/members`, `PUT|DELETE
+/api/v1/tenant/members/{person}/grants` (`{role, environment?}`, `?environment=`),
+`POST /api/v1/tenant/leave`, `GET|POST /api/v1/tenant/invitations`,
+`DELETE /api/v1/tenant/invitations/{id}`, `GET /api/v1/invitations/{token}`
+and `POST …/accept` (the session's, no tenant header), `GET|POST
+/api/v1/tenant/tokens` (`{label, role, environment?}`), `DELETE
+/api/v1/tenant/tokens/{hash}` and `GET /api/v1/tenant/quota` (`{limits,
+use}`, each `{sandboxes, environments, runningJobs, vcpus, memoryMib}`).
+A ferund without one answers 404 "no such route", and the page says it
+is not available; the quota card on a tenant's overview is left out. An
+invitation is shown once as a link, `/invite/<token>` (or the answer's
+`url`); opened signed out, the sign-in returns to it, and the signed-in
+person accepts it with a click.
+
+In a tenant the UI shows its sandboxes and its environments
+(`/tenants/<t>/environments[/<env>[/<tab>]]`): the
 list, with label filters; an environment's overview (its rollout, its
 objects by kind with their instances, its routes, its open incidents);
 its deployments with their tags, annotations, diff and spec; its incidents
