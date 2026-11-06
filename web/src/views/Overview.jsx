@@ -8,9 +8,14 @@ import { Ago, ErrBox, LiveBadge, StateDot, useNow, usePoll } from '../components
 import { eventDescription, eventTitle, keyOf, levelOf } from '../events.jsx';
 import { fmtNs, shortId } from '../format.js';
 import { sandboxCounts } from './fleet.js';
+import { envRole, useAccess } from '../people.js';
+import { envPath } from '../routes.js';
+import { QuotaCard, RoleBadge } from './People.jsx';
 
 // A tenant at a glance: its sandboxes by state, the most recently active
-// ones, and one stream of the newest events of the busiest sandboxes.
+// ones, the quota's use, and for operators one stream of the newest
+// events of the busiest sandboxes (the activity log is theirs). A person
+// with grants on environments alone sees those environments.
 
 const FEED_SOURCES = 4; // how many of the most recently active sandboxes feed the stream
 const FEED_TAIL = 40; // events per sandbox
@@ -22,6 +27,38 @@ export function mostRecent(sandboxes) {
 }
 
 export function Overview({ tenant, navigate }) {
+  const access = useAccess(tenant);
+  if (!access.can.readTenant) return <EnvOnlyOverview tenant={tenant} access={access} navigate={navigate} />;
+  return <TenantOverview tenant={tenant} navigate={navigate} operator={access.can.operator} role={access.role} />;
+}
+
+// EnvOnlyOverview is the overview of a person whose grants are on
+// environments alone: those environments, with the role on each.
+function EnvOnlyOverview({ tenant, access, navigate }) {
+  return (
+    <div className="overview">
+      <div className="pane-toolbar">
+        <h2><Icon name="dashboard" size={15} /> Overview <span className="muted dim">· tenant {tenant}</span></h2>
+      </div>
+      <section className="pane">
+        <div className="pane-toolbar"><h2><Icon name="blocks" size={14} /> Your environments</h2></div>
+        <div className="tblwrap"><table className="tbl">
+          <tbody>
+            {access.environments.map((e) => (
+              <tr key={e.id} className="clickable" onClick={() => navigate(envPath(tenant, e.name))}>
+                <td className="strong">{e.name}</td>
+                <td><RoleBadge role={envRole(access, e.id)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table></div>
+        <p className="hint">Your grants are on these environments, not on the whole tenant.</p>
+      </section>
+    </div>
+  );
+}
+
+function TenantOverview({ tenant, navigate, operator, role }) {
   const [sandboxes, setSandboxes] = useState(null);
   const [feed, setFeed] = useState(null);
   const [err, setErr] = useState('');
@@ -33,6 +70,7 @@ export function Overview({ tenant, navigate }) {
       const list = res.sandboxes || [];
       setSandboxes(list);
       setErr('');
+      if (!operator) return;
       const hot = mostRecent(list).slice(0, FEED_SOURCES);
       const chunks = await Promise.all(hot.map(async (sb) => {
         try {
@@ -48,7 +86,7 @@ export function Overview({ tenant, navigate }) {
     } catch (e) {
       setErr(e.message);
     }
-  }, []);
+  }, [operator]);
   const lastOk = usePoll(refresh, 4000);
   useNow(1000);
 
@@ -60,6 +98,7 @@ export function Overview({ tenant, navigate }) {
     <div className="overview">
       <div className="pane-toolbar">
         <h2><Icon name="dashboard" size={15} /> Overview <span className="muted dim">· tenant {tenant}</span></h2>
+        <span className="muted small">your role: <RoleBadge role={role} /></span>
         <span className="spacer" />
         <LiveBadge lastOk={lastOk} />
       </div>
@@ -74,6 +113,8 @@ export function Overview({ tenant, navigate }) {
         <StatCard label="errors" value={counts.error} icon="x" tone={counts.error ? 'bad' : ''} hint="failed or lost" />
         <StatCard label="nodes" value={nodes} icon="server" hint="that hold the tenant's sandboxes" />
       </div>
+
+      <QuotaCard />
 
       <div className="overview-grid">
         <section className="pane">
@@ -102,7 +143,7 @@ export function Overview({ tenant, navigate }) {
             </p>)}
         </section>
 
-        <section className="pane">
+        {operator && <section className="pane">
           <div className="pane-toolbar">
             <h2><Icon name="activity" size={14} /> Activity</h2>
             <span className="muted small">of the {FEED_SOURCES} most recently active sandboxes</span>
@@ -121,7 +162,7 @@ export function Overview({ tenant, navigate }) {
             {feed && feed.length === 0 && <p className="empty">No events yet.</p>}
             {!feed && !err && <p className="empty">Loading…</p>}
           </div>
-        </section>
+        </section>}
       </div>
     </div>
   );

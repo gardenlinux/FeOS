@@ -3,16 +3,15 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ApiError, api, auth, basicHeader, getBasic, getTenantToken, labelQuery, loginURL, onSignedOut, onTenantTokens, request,
-  setActiveTenant, setBasic, setTenantToken, storedTokenHash,
+  ApiError, api, auth, basicHeader, forgetTenantTokens, getBasic, labelQuery, loginURL, notAvailable, onSignedOut,
+  request, setActiveTenant, setBasic,
 } from './api.js';
-import { sha256Hex } from './sha256.js';
 import { fixture, requestOf, serveFixtures } from './testing/ferun.js';
 
 // The client's contract with ferund: X-Requested-With: ferun and
 // same-origin credentials on every request, Basic from this tab's
-// sessionStorage, tenant tokens as Bearer from localStorage, a 401 on an
-// admin route ending the sign-in.
+// sessionStorage, the session in a tenant named by FeRun-Tenant (no
+// token in the browser), a 401 ending the sign-in.
 
 class MemoryStorage {
   constructor() { this.m = new Map(); }
@@ -145,20 +144,19 @@ describe('sign-in', () => {
   });
 });
 
-describe('tenant tokens', () => {
-  it('are kept per tenant in localStorage and sent as Bearer', async () => {
-    setTenantToken('acme', 'tok-1');
-    expect(JSON.parse(localStorage.getItem('ferun-tenants'))).toEqual({ acme: 'tok-1' });
+describe('the tenant, with the session', () => {
+  it('names the tenant in FeRun-Tenant and sends no token', async () => {
     setActiveTenant('acme');
     answer(200, { sandboxes: [] });
     await api.listSandboxes();
     expect(calls[0].path).toBe('/api/v1/sandboxes');
-    expect(calls[0].init.headers.Authorization).toBe('Bearer tok-1');
+    expect(calls[0].init.headers['FeRun-Tenant']).toBe('acme');
+    expect(calls[0].init.headers.Authorization).toBeUndefined();
     expect(calls[0].init.headers['X-Requested-With']).toBe('ferun');
+    expect(calls[0].init.credentials).toBe('same-origin');
   });
 
   it('a create names no sandbox ID: ferund mints it', async () => {
-    setTenantToken('acme', 'tok-1');
     setActiveTenant('acme');
     answer(201, { status: { sandboxId: 'abcdefghjkm' }, token: 't', created: true });
     const res = await api.createSandbox('img:1', 2, 512);
@@ -168,28 +166,83 @@ describe('tenant tokens', () => {
     expect(res.status.sandboxId).toBe('abcdefghjkm');
   });
 
-  it('a refused token is forgotten, and the listeners hear it', async () => {
-    setTenantToken('acme', 'tok-1');
+  it('a 401 ends the sign-in', async () => {
     setActiveTenant('acme');
     const heard = vi.fn();
-    const off = onTenantTokens(heard);
-    answer(401, { error: 'unknown tenant token' });
-    await expect(api.listSandboxes()).rejects.toThrow('unknown tenant token');
-    expect(getTenantToken('acme')).toBe('');
+    const off = onSignedOut(heard);
+    answer(401, { error: 'tenant bearer required' });
+    await expect(api.listSandboxes()).rejects.toThrow('tenant bearer required');
     expect(heard).toHaveBeenCalled();
     off();
   });
 
-  it('a tenant call without a token fails before the network', async () => {
-    setActiveTenant('nobody');
-    await expect(api.listSandboxes()).rejects.toThrow('this browser holds no token of tenant nobody');
+  it('a tenant call without a tenant fails before the network', async () => {
+    setActiveTenant('');
+    await expect(api.listSandboxes()).rejects.toThrow('no tenant chosen');
     expect(calls).toHaveLength(0);
   });
 
-  it('storedTokenHash is ferund’s hash of the token', () => {
-    setTenantToken('acme', 'tok-1');
-    expect(storedTokenHash('acme')).toBe(sha256Hex('tok-1'));
-    expect(storedTokenHash('other')).toBe('');
+  it('says a role_required refusal in the UI\'s words, and keeps the body', async () => {
+    setActiveTenant('acme');
+    answer(403, { error: 'this needs the role write on the tenant', code: 'role_required', role: 'write', scope: 'tenant' });
+    const e = await api.pauseSandbox('abcdefghjkm').then(() => null, (x) => x);
+    expect(e).toMatchObject({ status: 403, message: 'Your role does not allow this: it needs write on this tenant.' });
+    expect(e.body).toMatchObject({ code: 'role_required', role: 'write' });
+    answer(403, { error: 'x', code: 'role_required', role: 'admin', scope: 'environment' });
+    await expect(api.getEnvironment('e')).rejects.toThrow('it needs admin on this environment.');
+  });
+
+  it('tells a ferund without the route', () => {
+    expect(notAvailable(new ApiError('no such route: GET /api/v1/tenant/members', 404))).toBe(true);
+    expect(notAvailable(new ApiError('no such tenant', 404))).toBe(false);
+    expect(notAvailable(new ApiError('no such route: x', 403))).toBe(false);
+    expect(notAvailable(null)).toBe(false);
+  });
+
+  it('forgets the tenant tokens an earlier UI kept', () => {
+    localStorage.setItem('ferun-tenants', JSON.stringify({ acme: 'tok-1' }));
+    localStorage.setItem('ferun-theme', 'light');
+    forgetTenantTokens();
+    expect(localStorage.getItem('ferun-tenants')).toBeNull();
+    expect(localStorage.getItem('ferun-theme')).toBe('light');
+  });
+
+  it('the people\'s routes', async () => {
+    setActiveTenant('acme');
+    await api.createOwnTenant('mine');
+    await api.listMembers();
+    await api.putGrant('p-1', { role: 'write' });
+    await api.putGrant('p-1', { role: 'read', environment: 'env-1' });
+    await api.deleteGrant('p-1');
+    await api.deleteGrant('p-1', 'env-1');
+    await api.leaveTenant();
+    await api.createInvitation({ role: 'read' });
+    await api.createInvitation({ role: 'write', environment: 'env-1' });
+    await api.revokeInvitation('i/1');
+    await api.acceptInvitation('sec ret');
+    await api.mintTokenOfTenant({ label: 'ci', role: 'read', environment: 'env-1' });
+    await api.revokeTokenOfTenant('ab');
+    await api.getQuota();
+    expect(calls.map((c) => [c.init.method, c.path, c.init.body ? JSON.parse(c.init.body) : null])).toEqual([
+      ['POST', '/api/v1/tenants', { name: 'mine' }],
+      ['GET', '/api/v1/tenant/members', null],
+      ['PUT', '/api/v1/tenant/members/p-1/grants', { role: 'write' }],
+      ['PUT', '/api/v1/tenant/members/p-1/grants', { role: 'read', environment: 'env-1' }],
+      ['DELETE', '/api/v1/tenant/members/p-1/grants', null],
+      ['DELETE', '/api/v1/tenant/members/p-1/grants?environment=env-1', null],
+      ['POST', '/api/v1/tenant/leave', null],
+      ['POST', '/api/v1/tenant/invitations', { role: 'read' }],
+      ['POST', '/api/v1/tenant/invitations', { role: 'write', environment: 'env-1' }],
+      ['DELETE', '/api/v1/tenant/invitations/i%2F1', null],
+      ['POST', '/api/v1/invitations/sec%20ret/accept', null],
+      ['POST', '/api/v1/tenant/tokens', { label: 'ci', role: 'read', environment: 'env-1' }],
+      ['DELETE', '/api/v1/tenant/tokens/ab', null],
+      ['GET', '/api/v1/tenant/quota', null],
+    ]);
+    // Making a tenant and accepting an invitation name no tenant.
+    expect(calls[0].init.headers['FeRun-Tenant']).toBeUndefined();
+    expect(calls[10].init.headers['FeRun-Tenant']).toBeUndefined();
+    expect(calls[1].init.headers['FeRun-Tenant']).toBe('acme');
   });
 
   it('admin token routes', async () => {
@@ -242,7 +295,6 @@ describe('the environments routes', () => {
   const PREVIEW_ID = '0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b03';
 
   beforeEach(() => {
-    setTenantToken('fecode', 'tok-fecode');
     setActiveTenant('fecode');
   });
 
@@ -263,7 +315,7 @@ describe('the environments routes', () => {
     const got = requestOf(calls[0]);
     if (exactQuery) expect(got).toEqual({ method: fx.method, path: fx.path, query: fx.query });
     else expect({ method: got.method, path: got.path }).toEqual({ method: fx.method, path: fx.path });
-    expect(calls[0].init.headers.Authorization).toBe('Bearer tok-fecode');
+    expect(calls[0].init.headers['FeRun-Tenant']).toBe('fecode');
     return { fx, out, err };
   }
 
@@ -335,21 +387,5 @@ describe('the environments routes', () => {
     await api.objectLogs(STAGE, 'job', 'migrate');
     expect(calls.map((c) => c.init.method)).toEqual(Array(7).fill('GET'));
     expect(calls.every((c) => c.init.body === undefined)).toBe(true);
-  });
-});
-
-describe('sha256Hex', () => {
-  it('matches the standard vectors', () => {
-    expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
-    expect(sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
-    expect(sha256Hex('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq'))
-      .toBe('248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1');
-  });
-
-  it('hashes UTF-8 bytes, and messages at the block boundaries', () => {
-    expect(sha256Hex('ä')).toBe('33e6d73fee82904c8d7afb78de1154d1e8dc2a0edb08120e63df5b9385c2d9cc');
-    expect(sha256Hex('a'.repeat(55))).toBe('9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318');
-    expect(sha256Hex('a'.repeat(56))).toBe('b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a');
-    expect(sha256Hex('a'.repeat(64))).toBe('ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb');
   });
 });

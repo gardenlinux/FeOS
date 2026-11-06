@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { api, setActiveTenant, setTenantToken } from '../api.js';
+import { api, setActiveTenant } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
   DiffView, EnvOverview, EnvTable, IncidentTable, IncidentView, LogsBody, DeploymentTable, DeploymentView,
@@ -379,7 +379,6 @@ describe('the logs', () => {
   // The refusals come from ferund's fixtures through the client, as the
   // view reads them.
   async function refusal(name, call) {
-    setTenantToken(T, 'tok-fecode');
     setActiveTenant(T);
     serveFixtures(name);
     const e = await call().then(() => null, (x) => x);

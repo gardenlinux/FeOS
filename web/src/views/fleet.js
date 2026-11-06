@@ -197,11 +197,9 @@ export function joinTokenState(t, now = Date.now()) {
   return 'open';
 }
 
-// tokenRows marks the tokens of a tenant's list that this browser holds
-// (by hash) and orders them newest first.
-export function tokenRows(tokens, heldHash) {
-  return (tokens || [])
-    .map((t) => ({ ...t, held: !!heldHash && t.hash === heldHash }))
+// tokenRows orders the tokens of a tenant's list newest first.
+export function tokenRows(tokens) {
+  return [...(tokens || [])]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
 

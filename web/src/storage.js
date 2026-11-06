@@ -7,8 +7,8 @@
 // lives as long as the page.
 //
 //   localStorage   ferun-theme     dark or light
-//                  ferun-tenants   {tenant: token}, the tenant tokens this
-//                                  browser minted or was given
+//                  ferun-tenants   an earlier UI's tenant tokens: removed at
+//                                  sign-in (api.js, forgetTenantTokens)
 //   sessionStorage ferun-admin     "user:password" of a Basic sign-in, for
 //                                  the life of the tab only
 

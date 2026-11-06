@@ -20,6 +20,9 @@ describe('parsePath', () => {
     expect(parsePath('/nodes/node-a/certs')).toEqual({ view: 'node', node: 'node-a', tab: 'certs' });
     expect(parsePath('/join-tokens')).toEqual({ view: 'joinTokens' });
     expect(parsePath('/instances')).toEqual({ view: 'instances' });
+    expect(parsePath('/invite/abc_DEF-1')).toEqual({ view: 'invite', token: 'abc_DEF-1' });
+    expect(parsePath('/tenants/acme/members')).toEqual({ view: 'members', tenant: 'acme' });
+    expect(parsePath('/tenants/acme/tokens')).toEqual({ view: 'tokens', tenant: 'acme' });
     expect(parsePath('/no/such/page')).toEqual({ view: 'tenants' });
   });
 
@@ -28,8 +31,8 @@ describe('parsePath', () => {
     expect(parsePath('/tenants/%E0%A4%A').tenant).toBe('%E0%A4%A');
   });
 
-  it('the tenant views are those that need a tenant token', () => {
-    expect([...TENANT_VIEWS].sort()).toEqual(['environments', 'overview', 'sandboxes', 'tools']);
+  it('the tenant views are those that act in a tenant', () => {
+    expect([...TENANT_VIEWS].sort()).toEqual(['environments', 'members', 'overview', 'sandboxes', 'tokens', 'tools']);
   });
 });
 

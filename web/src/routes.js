@@ -9,6 +9,8 @@
 //   /tenants/:t/sandboxes[/:id[/:tab]]  its sandboxes; tab: overview, activity,
 //                                       tokens, access, network
 //   /tenants/:t/tools                   the tools of its sandboxes
+//   /tenants/:t/members                 its members and invitations
+//   /tenants/:t/tokens                  its tokens
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments, read-only; tab:
 //                                       overview, deployments[/:n],
@@ -18,6 +20,7 @@
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
 //   /join-tokens                        join tokens
 //   /instances                          the control plane's instances
+//   /invite/:token                      an invitation, to accept
 
 function decode(s) {
   try {
@@ -96,6 +99,8 @@ export function parsePath(pathname) {
       return { view: 'joinTokens' };
     case 'instances':
       return { view: 'instances' };
+    case 'invite':
+      return { view: 'invite', token: seg[1] || '' };
     case 'tenants':
       break;
     default:
@@ -104,10 +109,12 @@ export function parsePath(pathname) {
   if (seg.length === 1) return { view: 'tenants' };
   const tenant = seg[1];
   if (seg[2] === 'tools') return { view: 'tools', tenant };
+  if (seg[2] === 'members') return { view: 'members', tenant };
+  if (seg[2] === 'tokens') return { view: 'tokens', tenant };
   if (seg[2] === 'environments') return envRoute(tenant, seg.slice(3), search);
   if (seg[2] === 'sandboxes') return { view: 'sandboxes', tenant, sel: seg[3] || '', tab: seg[4] || 'overview' };
   return { view: 'overview', tenant };
 }
 
-// TENANT_VIEWS are the views that act as a tenant: they need its token.
-export const TENANT_VIEWS = new Set(['overview', 'sandboxes', 'tools', 'environments']);
+// TENANT_VIEWS are the views that act in a tenant, with the session.
+export const TENANT_VIEWS = new Set(['overview', 'sandboxes', 'tools', 'environments', 'members', 'tokens']);

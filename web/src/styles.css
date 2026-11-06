@@ -964,3 +964,26 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 [data-theme="light"] .rollout.failed .rollout-reason { color: #8f2018; }
 [data-theme="light"] .message { background: rgba(160,111,14,.07); border-color: rgba(160,111,14,.4); }
 [data-theme="light"] .badge.bad, [data-theme="light"] .tabcount { border-color: rgba(207,54,43,.45); }
+
+/* ---------------------------------------------------------------- people -- */
+.tenantchip .badge { margin-left: auto; }
+.grantchip {
+  display: inline-flex; align-items: center; gap: 2px; margin: 0 6px 4px 0; padding: 1px 4px 1px 8px;
+  border: 1px solid var(--border); border-radius: 999px; white-space: nowrap;
+}
+.inlineform { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.tbl.members td { vertical-align: top; }
+.quota { margin: 14px 0; }
+.quotagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 18px; padding: 4px 2px 6px; }
+.quotarow { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: baseline; }
+.quota-label { color: var(--muted); font-size: 12px; }
+.quota-num { font-size: 12.5px; }
+.quotabar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--panel3); overflow: hidden; }
+.quotabar > span { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.quotarow.t-warn .quotabar > span { background: var(--warn); }
+.quotarow.t-bad .quotabar > span { background: var(--danger); }
+.quotarow.t-bad .quota-num { color: var(--danger); }
+@media (max-width: 820px) {
+  .content { padding: 12px 16px 60px; }
+  .gate { max-width: none; }
+}
