@@ -2129,9 +2129,30 @@ else gets their tenants with their roles ("Your tenants", a new one with
 admin route for them. The browser keeps no tenant token: every tenant
 page calls with the session and names its tenant in `FeRun-Tenant`; the
 tokens an earlier UI kept in `localStorage` (`ferun-tenants`) are removed
-at sign-in. In a tenant the sidebar offers the pages of the role (the
-overview, environments and members to every member; sandboxes and tools
-with a tenant grant; tokens to its admin), and a page hides the actions
+at sign-in. The sidebar has two spaces, which a switcher at its top
+picks: a tenant, from the person's tenants with their roles, and for
+operators the platform (fleet: nodes, ingresses, control plane, join
+tokens; accounts: tenants, people). In a tenant it orders the pages of
+the role by purpose (`TENANT_NAV` in `web/src/people.js`): Home; run:
+sandboxes, environments, jobs; connect: domains; tenant: people, tokens,
+usage, settings. Home and the environments, domains, people, usage and
+settings go to every member; sandboxes, jobs and the tools' reference
+with a tenant grant; tokens to its admin. Each entry's icon has its
+layer's colour, as on the architecture page (FeOS ochre for what runs as
+a pod, FeRun indigo, teal for the network), and a count: what needs
+someone on Home, open incidents on the environments, domains in trouble.
+Home lists first what needs someone, each item with the page that fixes
+it (`web/src/attention.js`): the environments' open incidents, a failed
+deployment without one, sandboxes `failed`, `lost` or `unknown`, domains
+whose state needs someone, open invitations that end within 48 h, and
+limits from 80 % of their quota; then the environments, the most
+recently active sandboxes and the use against the limits. One summary
+per tenant (`web/src/summary.jsx`, every 15 s) reads the lists for Home,
+the counts and the search; the open incidents one by one for at most 8
+environments, the rest by their count. ⌘K (or Ctrl+K) searches the
+pages, the person's tenants and the tenant's things by name or ID (a
+prefix of a sandbox's ID too), and opens "prod#13" or "prod 13" as
+deployment 13 of prod (`web/src/search.js`). A page hides the actions
 the role lacks (a sandbox's create, pause, resume, delete and tokens need
 `write` on the tenant); ferund decides anyway, and a 403 `role_required`
 reads "Your role does not allow this: it needs write on this tenant.". A
