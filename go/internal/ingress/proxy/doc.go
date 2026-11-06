@@ -37,7 +37,8 @@
 // the table changes, the open connections to what it no longer routes
 // to are closed, upgraded ones included (Proxy.cutConns).
 //
-// On a host under the apps zone, the proxy makes every cookie of a
-// response host-only (cookies.go): an app can then set no cookie for
-// other apps under the zone, nor for the platform's hosts beside it.
+// On a host under the apps zone or the tenant zone (ADR 0031), the proxy
+// makes every cookie of a response host-only (cookies.go): an app can then
+// set no cookie for other apps under the zone, nor for the platform's
+// hosts beside it.
 package proxy

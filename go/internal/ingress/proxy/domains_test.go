@@ -230,3 +230,44 @@ func TestChallengesChangeTable(t *testing.T) {
 		t.Fatal("new challenges kept the table")
 	}
 }
+
+// With the tenant zone's wildcard (ADR 0031), TLS picks it for every name
+// it covers, the apps zone's for the rest, and a domain's own before
+// either.
+func TestTenantZoneCertificateBySNI(t *testing.T) {
+	const tenantZone = "apps.run.example"
+	certFile, keyFile := writePair(t, t.TempDir(), "*."+testZone)
+	apps, err := LoadPair(certFile, keyFile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certFile, keyFile = writePair(t, t.TempDir(), "*."+tenantZone)
+	tenant, err := LoadPair(certFile, keyFile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := New(Config{}, Deps{})
+	p.SetState(withDomains(domainOf(t, testDomain, testDomain)))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := p.HTTPSServer(apps, tenant)
+	go func() { _ = hs.ServeTLS(ln, "", "") }()
+	defer hs.Close()
+	addr := ln.Addr().String()
+	for sni, want := range map[string]string{
+		"web-acme." + tenantZone:        "*." + tenantZone,
+		"WEB--Shop." + tenantZone + ".": "*." + tenantZone,
+		testHost:                        "*." + testZone,
+		"a.b." + tenantZone:             "*." + testZone, // a wildcard covers one label
+		tenantZone:                      "*." + testZone,
+		"unknown.example":               "*." + testZone,
+		"":                              "*." + testZone,
+		testDomain:                      testDomain,
+	} {
+		if got := handshake(t, addr, sni); !slices.Equal(got, []string{want}) {
+			t.Errorf("SNI %q got %v, want %s", sni, got, want)
+		}
+	}
+}

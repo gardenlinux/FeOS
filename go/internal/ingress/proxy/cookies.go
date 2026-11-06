@@ -16,7 +16,7 @@ import (
 const maxCookieLogHosts = 4096
 
 // hostOnlyCookies makes every cookie that a response sets on host (a
-// canonical host under the apps zone) host-only: each Domain attribute
+// canonical host under the apps zone or the tenant zone) host-only: each Domain attribute
 // of a Set-Cookie header whose value, without a leading dot and in lower
 // case, is not host itself is removed. So an app can set no cookie for
 // other apps under the zone, nor for the platform's hosts beside it. A

@@ -166,7 +166,7 @@ func (p *Proxy) Metrics(w io.Writer) {
 		counter("ferun_ingress_idle_hold_renew_failures_total",
 			"Renewals of the idle holds that failed.", m.holdRenewFailures.Load()),
 		counter("ferun_ingress_cookie_domains_removed_total",
-			"Domain attributes removed from Set-Cookie headers on hosts under the apps zone.",
+			"Domain attributes removed from Set-Cookie headers on hosts under the apps zone or the tenant zone.",
 			m.cookieDomains.Load()),
 		counter("ferun_ingress_upstream_connections_cut_total",
 			"Open connections to instances closed because the table no longer routes to them.",
