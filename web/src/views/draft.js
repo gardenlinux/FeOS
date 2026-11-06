@@ -336,3 +336,36 @@ export function newEnvID(random = (b) => globalThis.crypto.getRandomValues(b)) {
   const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
+
+// ---------------------------------------------------------------- words --
+
+// draftWords say what a draft is, for the builder's band: the deployment
+// it becomes, the one it starts from with that one's state, whether a
+// newer one exists, and how many objects it changes. latest is the
+// environment's latest deployment, deployed the one that serves, state
+// the latest's rollout state.
+export function draftWords({ isNew = false, readOnly = false, base = 0, latest = 0, deployed = 0, state = '', changes = 0 }) {
+  const count = changes === 0 ? 'no changes yet' : `${changes} change${changes === 1 ? '' : 's'}`;
+  if (isNew) return { title: 'Draft of deployment 1 of a new environment', from: '', behind: 0, count, next: 1 };
+  if (readOnly) {
+    return { title: latest ? `Deployment ${latest}` : 'No deployment yet', from: 'read-only', behind: 0, count: '', next: latest + 1 };
+  }
+  const baseState = base === deployed ? 'deployed' : base === latest ? state || 'latest' : 'replaced';
+  const from = base > 0 ? `starts from deployment ${base} (${baseState})` : 'starts from an empty spec';
+  return { title: `Draft of deployment ${latest + 1}`, from, behind: latest > base ? latest : 0, count, next: latest + 1 };
+}
+
+// deployBlock is why a draft cannot be deployed yet, '' when it can:
+// in the order a person fixes them.
+export function deployBlock({ isNew = false, name = '', planning = false, answer = null, diff = [], unresolved = [],
+  heavy = 0, ack = false, conflicts = 0, busy = false }) {
+  if (busy) return 'deploying…';
+  if (isNew && !isDnsLabel(name)) return 'name the environment first';
+  if (conflicts > 0) return 'decide the conflicts first';
+  if (planning || !answer) return 'planning…';
+  if (!answer.valid) return 'the plan has errors: fix them first';
+  if (!isNew && diff.length === 0) return 'no changes to deploy';
+  if (unresolved.length > 0) return 'images that do not resolve';
+  if (heavy > 0 && !ack) return 'accept the data loss or downtime first';
+  return '';
+}

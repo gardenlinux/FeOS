@@ -413,7 +413,7 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
             : (
               <a className="button primary" href={builder} onClick={go(builder)}
                 title={ec.write ? 'change the environment: a draft, planned, applied as the next deployment' : 'read-only: needs write on this environment'}>
-                <Icon name="blocks" size={14} /> Edit</a>)}
+                <Icon name="plus" size={14} /> New deployment</a>)}
         </span>
       </div>
       {st && (

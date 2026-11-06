@@ -18,7 +18,7 @@
 //   /tenants/:t/new-environment         the builder of a new environment
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments; tab:
-//                                       overview, builder (Edit),
+//                                       overview, builder (New deployment),
 //                                       deployments[/:n], incidents[/:id],
 //                                       logs[/:kind/:name[/:replica]][?search],
 //                                       traces[/:trace][?search], traffic,
@@ -50,7 +50,7 @@ export const ENV_TABS = [
 // ENV_TAB_LABELS name them.
 export const ENV_TAB_LABELS = {
   overview: 'Overview',
-  builder: 'Edit',
+  builder: 'New deployment',
   deployments: 'Deployments',
   incidents: 'Incidents',
   logs: 'Logs',
