@@ -520,7 +520,7 @@ export function QuotaCard() {
           <div key={r.key} className={'quotarow' + (r.tone ? ' t-' + r.tone : '')}>
             <span className="quota-label">{r.label}</span>
             <span className="quota-num mono">
-              {fmtQuota(r, r.use)}{r.limit > 0 ? <span className="muted"> / {fmtQuota(r, r.limit)}</span> : <span className="muted"> · no limit</span>}
+              {fmtQuota(r, r.use)}{r.limit !== null ? <span className="muted"> / {fmtQuota(r, r.limit)}</span> : <span className="muted"> · no limit</span>}
             </span>
             <span className="quotabar" aria-hidden="true">
               <span style={{ width: r.share === null ? '0%' : `${Math.min(100, Math.round(r.share * 100))}%` }} />

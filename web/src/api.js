@@ -391,7 +391,7 @@ export const api = {
     tenantCall('POST', '/tenant/tokens', environment ? { label, role, environment } : { label, role }),
   revokeTokenOfTenant: (hash) => tenantCall('DELETE', `/tenant/tokens/${enc(hash)}`),
   // The quota: {limits, use}, each {sandboxes, environments, runningJobs,
-  // vcpus, memoryMib}; a limit absent or 0 is none.
+  // vcpus, memoryMib}; a limit left out is none, 0 is a limit.
   getQuota: () => tenantCall('GET', '/tenant/quota'),
 
   // The builder's (ADR 0032). A plan of an environment answers {valid,

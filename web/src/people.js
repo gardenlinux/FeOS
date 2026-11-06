@@ -175,11 +175,12 @@ export function grantableRoles(role) {
   return ROLES.filter((r) => rank(r) <= rank(role));
 }
 
-// inviteLink is an invitation's link: ferund's url when it answers one,
-// else /invite/<token> on this origin.
+// inviteLink is an invitation's link: ferund's url (<public URL>/invite/
+// <token>, ADR 0031 D4; a path when ferund has no public URL, made
+// absolute on this origin), else /invite/<token> on this origin.
 export function inviteLink(origin, inv) {
   if (!inv) return '';
-  if (inv.url) return inv.url;
+  if (inv.url) return inv.url.startsWith('/') ? `${origin}${inv.url}` : inv.url;
   return inv.token ? `${origin}/invite/${encodeURIComponent(inv.token)}` : '';
 }
 
@@ -193,15 +194,18 @@ export const QUOTA_ITEMS = [
 ];
 
 // quotaRows is the use against the limits: per item the use, the limit
-// (0: none), the share (null without a limit) and a tone: warn from 80%,
-// bad at the limit.
+// (null when ferund leaves it out: none; 0 is a limit, ADR 0031), the
+// share (null without a limit; a limit of 0 is full) and a tone: warn
+// from 80%, bad at the limit.
 export function quotaRows(q) {
   const limits = (q && q.limits) || {};
   const use = (q && q.use) || {};
   return QUOTA_ITEMS.map((it) => {
     const u = Number(use[it.key]) || 0;
-    const l = Number(limits[it.key]) || 0;
-    const share = l > 0 ? u / l : null;
+    const raw = limits[it.key];
+    const l = raw === undefined || raw === null || raw === '' || !Number.isFinite(Number(raw)) ? null : Number(raw);
+    let share = null;
+    if (l !== null) share = l > 0 ? u / l : 1;
     let tone = '';
     if (share !== null && share >= 1) tone = 'bad';
     else if (share !== null && share >= 0.8) tone = 'warn';

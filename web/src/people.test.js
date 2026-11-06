@@ -135,24 +135,28 @@ describe('invitations and the quota', () => {
   it('an invitation\'s link: ferund\'s, else /invite/<token> here', () => {
     expect(inviteLink('https://run.example', { token: 'a b' })).toBe('https://run.example/invite/a%20b');
     expect(inviteLink('https://run.example', { token: 'x', url: 'https://elsewhere/invite/x' })).toBe('https://elsewhere/invite/x');
+    expect(inviteLink('https://run.example', { token: 'x', url: '/invite/x' })).toBe('https://run.example/invite/x');
     expect(inviteLink('https://run.example', null)).toBe('');
   });
 
   it('the use against the limits, warn from 80%, bad at the limit, none without a limit', () => {
     const rows = quotaRows({
-      limits: { sandboxes: 10, environments: 5, runningJobs: 0, vcpus: 8, memoryMib: 8192 },
-      use: { sandboxes: 3, environments: 4, runningJobs: 2, vcpus: 8, memoryMib: '2048' },
+      limits: { sandboxes: 10, environments: 5, runningJobs: 0, memoryMib: 8192 },
+      use: { sandboxes: 3, environments: 4, runningJobs: 0, vcpus: 8, memoryMib: '2048' },
     });
     expect(rows.map((r) => [r.key, r.use, r.limit, r.tone])).toEqual([
       ['sandboxes', 3, 10, ''],
       ['environments', 4, 5, 'warn'],
-      ['runningJobs', 2, 0, ''],
-      ['vcpus', 8, 8, 'bad'],
+      ['runningJobs', 0, 0, 'bad'],
+      ['vcpus', 8, null, ''],
       ['memoryMib', 2048, 8192, ''],
     ]);
-    expect(rows[2].share).toBeNull();
+    // 0 is a limit (nothing more may start); a limit left out is none.
+    expect(rows[2].share).toBe(1);
+    expect(rows[3].share).toBeNull();
     expect(fmtQuota(rows[4], 2048)).toBe('2 GiB');
     expect(fmtQuota(rows[4], 512)).toBe('512 MiB');
-    expect(quotaRows(null).every((r) => r.use === 0 && r.limit === 0)).toBe(true);
+    expect(quotaRows(null).every((r) => r.use === 0 && r.limit === null)).toBe(true);
+    expect(quotaRows({ limits: { vcpus: null } })[3].limit).toBeNull();
   });
 });
