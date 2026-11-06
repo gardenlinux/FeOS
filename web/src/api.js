@@ -292,8 +292,11 @@ export const api = {
     adminCall('GET', `/nodes/${enc(node)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
 
   // Admin: join tokens and the control plane's instances.
-  createJoinToken: ({ ttlSeconds, node } = {}) =>
-    adminCall('POST', '/join-tokens', { ttlSeconds: ttlSeconds || 0, node: node || '' }),
+  // kind: node (the default) or ingress, with the ingress's name.
+  createJoinToken: ({ ttlSeconds, node, kind, name } = {}) =>
+    adminCall('POST', '/join-tokens', {
+      ttlSeconds: ttlSeconds || 0, node: node || '', ...(kind ? { kind } : {}), ...(name ? { name } : {}),
+    }),
   listJoinTokens: () => adminCall('GET', '/join-tokens'),
   revokeJoinToken: (id) => adminCall('DELETE', `/join-tokens/${enc(id)}`),
   listInstances: () => adminCall('GET', '/instances'),
@@ -308,8 +311,20 @@ export const api = {
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
   // status.sandboxId.
-  createSandbox: (image, vcpus = 0, memoryMib = 0) =>
-    tenantCall('POST', '/sandboxes', { image, vcpus, memoryMib }),
+  // attachable lets an environment's attached service run in it;
+  // imageCredentials ({username, password}) pull a private image (ADR
+  // 0025), sealed, never answered.
+  createSandbox: (image, vcpus = 0, memoryMib = 0, { attachable = false, imageCredentials = null } = {}) =>
+    tenantCall('POST', '/sandboxes', {
+      image, vcpus, memoryMib,
+      ...(attachable ? { attachable: true } : {}),
+      ...(imageCredentials ? { imageCredentials } : {}),
+    }),
+  putImageCredentials: (sandboxId, creds) => tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
+  deleteImageCredentials: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
+  // An HTTP binding's preflight (ADR 0028): {binding, probe{method,path}}
+  // answers {ok, addresses, tls, token, probe, error}.
+  httpPreflight: (binding, probe) => tenantCall('POST', '/http/preflight', probe ? { binding, probe } : { binding }),
   deleteSandbox: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}`),
   pauseSandbox: (sandboxId) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/pause`),
   resumeSandbox: (sandboxId) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/resume`),
@@ -325,8 +340,8 @@ export const api = {
 
   // As the tenant: its environments. env is the name or the UUID. The
   // UI writes deployments and secrets' values through the builder (ADR
-  // 0032) and nothing else: it reverts and deletes nothing, and reads no
-  // secret's value and no route token.
+  // 0032); it reads no secret's value, and a route token only as its
+  // mint answers it, once.
   listEnvironments: (labels = []) => tenantCall('GET', '/environments' + labelQuery(labels)),
   getEnvironment: (env) => tenantCall('GET', `/environments/${enc(env)}`),
   listDeployments: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
@@ -413,6 +428,63 @@ export const api = {
   // new version, {name, version}.
   listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
   putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
+  // An environment's operations beside the builder (ADR 0018).
+  deleteEnvironment: (env) => tenantCall('DELETE', `/environments/${enc(env)}`),
+  // A revert makes a new deployment with deployment n's spec, against
+  // base, the latest deployment's number.
+  revertDeployment: (env, n, { base, message } = {}) =>
+    tenantCall('POST', `/environments/${enc(env)}/deployments/${enc(n)}/revert`, message ? { base, message } : { base }),
+  listTags: (env) => tenantCall('GET', `/environments/${enc(env)}/tags`),
+  putTag: (env, tag, deployment) => tenantCall('PUT', `/environments/${enc(env)}/tags/${enc(tag)}`, { deployment }),
+  deleteTag: (env, tag) => tenantCall('DELETE', `/environments/${enc(env)}/tags/${enc(tag)}`),
+  // A clone: {name, deployment?, labels?, secrets: {name: {copy: true} | {value}}}.
+  cloneEnvironment: (env, body) => tenantCall('POST', `/environments/${enc(env)}/clone`, body),
+  deleteSecret: (env, name) => tenantCall('DELETE', `/environments/${enc(env)}/secrets/${enc(name)}`),
+  restartService: (env, name) => tenantCall('POST', `/environments/${enc(env)}/services/${enc(name)}/restart`),
+  runJob: (env, name) => tenantCall('POST', `/environments/${enc(env)}/jobs/${enc(name)}/run`),
+  checkBinding: (env, name, probe) =>
+    tenantCall('POST', `/environments/${enc(env)}/bindings/${enc(name)}/check`, probe ? { probe } : {}),
+  // The route door's token: a mint answers it once ({token}); one delete
+  // revokes every one.
+  mintRouteToken: (env) => tenantCall('POST', `/environments/${enc(env)}/route-tokens`),
+  revokeRouteTokens: (env) => tenantCall('DELETE', `/environments/${enc(env)}/route-tokens`),
+  // Publish or unpublish at the ingress, with an optional host label:
+  // {public, hosts, rolling}.
+  setPublic: (env, isPublic, hostLabel) =>
+    tenantCall('PUT', `/environments/${enc(env)}/public`, hostLabel ? { public: isPublic, hostLabel } : { public: isPublic }),
+  // The ingress's records of an environment, newest first, and its
+  // traffic per service over window (1h or 24h).
+  accessLogs: (env, { limit = 200, beforeTsNs, traceId } = {}) =>
+    tenantCall('GET', `/environments/${enc(env)}/access-logs${query({ limit, beforeTsNs, traceId })}`),
+  traffic: (env, window = '1h') => tenantCall('GET', `/environments/${enc(env)}/traffic${query({ window })}`),
+
+  // The tenant's domains (ADR 0021): a claim answers the records to set;
+  // a domain is bound to one environment, or none.
+  listDomains: (params = {}) => tenantCall('GET', '/domains' + query(params)),
+  getDomain: (id) => tenantCall('GET', `/domains/${enc(id)}`),
+  claimDomain: (name) => tenantCall('POST', '/domains', { name }),
+  deleteDomain: (id) => tenantCall('DELETE', `/domains/${enc(id)}`),
+  checkDomain: (id) => tenantCall('POST', `/domains/${enc(id)}/check`),
+  bindDomain: (id, environment) => tenantCall('PUT', `/domains/${enc(id)}/environment`, { environment }),
+  unbindDomain: (id) => tenantCall('DELETE', `/domains/${enc(id)}/environment`),
+
+  // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion.
+  listJobs: (labels = []) => tenantCall('GET', '/jobs' + labelQuery(labels)),
+  getJob: (id) => tenantCall('GET', `/jobs/${enc(id)}`),
+  createJob: (body) => tenantCall('POST', '/jobs', body),
+  jobLogs: (id) => tenantCall('GET', `/jobs/${enc(id)}/logs`),
+  cancelJob: (id) => tenantCall('POST', `/jobs/${enc(id)}/cancel`),
+  deleteJob: (id) => tenantCall('DELETE', `/jobs/${enc(id)}`),
+
+  // Admin: the ingresses, the people, a tenant's limits and zone.
+  listIngresses: () => adminCall('GET', '/ingresses'),
+  removeIngress: (name) => adminCall('DELETE', `/ingresses/${enc(name)}`),
+  listPeople: () => adminCall('GET', '/people'),
+  disablePerson: (person) => adminCall('POST', `/people/${enc(person)}/disable`),
+  enablePerson: (person) => adminCall('POST', `/people/${enc(person)}/enable`),
+  setTenantLimits: (name, limits) => adminCall('PUT', `/tenants/${enc(name)}/limits`, limits),
+  setTenantZone: (name, zone) => adminCall('PUT', `/tenants/${enc(name)}/zone`, { zone }),
+
   // The addons' catalog; null from a ferund that has none (404).
   addonCatalog: async () => {
     try {

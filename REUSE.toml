@@ -51,3 +51,11 @@ path = ["proto/opentelemetry/**"]
 precedence = "override"
 SPDX-FileCopyrightText = "The OpenTelemetry Authors"
 SPDX-License-Identifier = "Apache-2.0"
+
+# JetBrains Mono v2.304, the UI's monospace face, as released (its
+# webfonts, three weights).
+[[annotations]]
+path = ["web/src/fonts/JetBrainsMono-*.woff2"]
+precedence = "override"
+SPDX-FileCopyrightText = "2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)"
+SPDX-License-Identifier = "OFL-1.1"

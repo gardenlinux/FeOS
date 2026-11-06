@@ -118,22 +118,53 @@ export function can(access) {
   };
 }
 
-// TENANT_NAV are a tenant's pages in the sidebar, with what each needs
-// of can(): the overview and the environments for every member, the
-// sandboxes and tools with a tenant grant, the tokens for its admin.
+// TENANT_NAV are a tenant's pages in the sidebar, in its groups (run:
+// what runs, connect: what connects it to the world, tenant: who may and
+// how much), each with what it needs of can() and its layer's colour
+// (os: what runs as a pod, run: what FeRun keeps, net: the network).
+// Home and the environments for every member, the sandboxes and jobs
+// with a tenant grant, the tokens for its admin.
 export const TENANT_NAV = [
-  { view: 'overview', label: 'Overview', icon: 'dashboard', path: '', needs: 'members' },
-  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant' },
-  { view: 'environments', label: 'Environments', icon: 'blocks', path: '/environments', needs: 'environments',
-    views: ['environments', 'newEnvironment'] },
-  { view: 'tools', label: 'Tools', icon: 'terminal', path: '/tools', needs: 'readTenant' },
-  { view: 'members', label: 'Members', icon: 'users', path: '/members', needs: 'members' },
-  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant' },
+  { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '', layer: 'run' },
+  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'run', layer: 'os',
+    views: ['sandboxes', 'tools'] },
+  { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'run',
+    layer: 'run', views: ['environments', 'newEnvironment'] },
+  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'run', layer: 'os' },
+  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'connect', layer: 'net' },
+  { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'tenant', layer: '' },
+  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'tenant', layer: '' },
+  { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'tenant', layer: '' },
+  { view: 'settings', label: 'Settings', icon: 'settings', path: '/settings', needs: 'members', group: 'tenant', layer: '' },
+];
+
+// NAV_GROUPS name the sidebar's groups, in order.
+export const NAV_GROUPS = [
+  { key: '', label: '' },
+  { key: 'run', label: 'Run' },
+  { key: 'connect', label: 'Connect' },
+  { key: 'tenant', label: 'Tenant' },
+];
+
+// PLATFORM_NAV are the operators' pages, the platform's space.
+export const PLATFORM_NAV = [
+  { view: 'nodes', label: 'Nodes', icon: 'server', path: '/nodes', group: 'fleet', layer: 'os', views: ['nodes', 'node'] },
+  { view: 'ingresses', label: 'Ingresses', icon: 'route', path: '/ingresses', group: 'fleet', layer: 'net' },
+  { view: 'instances', label: 'Control plane', icon: 'network', path: '/instances', group: 'fleet', layer: 'run' },
+  { view: 'joinTokens', label: 'Join tokens', icon: 'ticket', path: '/join-tokens', group: 'fleet', layer: '' },
+  { view: 'tenants', label: 'Tenants', icon: 'building', path: '/tenants', group: 'accounts', layer: 'run' },
+  { view: 'people', label: 'People', icon: 'users', path: '/people', group: 'accounts', layer: '' },
+];
+
+export const PLATFORM_GROUPS = [
+  { key: 'fleet', label: 'Fleet' },
+  { key: 'accounts', label: 'Accounts' },
 ];
 
 // VIEW_NEEDS are what the tenant's pages outside the sidebar need: a
-// new environment's builder (ADR 0032) a tenant grant write.
-const VIEW_NEEDS = { newEnvironment: 'writeTenant' };
+// new environment's builder (ADR 0032) a tenant grant write, the tools'
+// reference a tenant grant.
+const VIEW_NEEDS = { newEnvironment: 'writeTenant', tools: 'readTenant' };
 
 // tenantNav is the tenant's pages that access offers.
 export function tenantNav(access) {
@@ -142,7 +173,7 @@ export function tenantNav(access) {
 }
 
 // OPERATOR_VIEWS are the operators' pages.
-export const OPERATOR_VIEWS = new Set(['nodes', 'node', 'joinTokens', 'instances']);
+export const OPERATOR_VIEWS = new Set(['nodes', 'node', 'joinTokens', 'instances', 'ingresses', 'people']);
 
 // viewGate decides a route for a sign-in: '' when the view may show,
 // 'operator' for an operator's page a person opened, 'basic' for a
@@ -240,4 +271,12 @@ export function scopeLabel(environment, envs) {
   if (!environment) return 'the tenant';
   const e = (envs || []).find((x) => x.id === environment || x.name === environment);
   return `environment ${e ? e.name : environment}`;
+}
+
+// invitationState is an invitation's state: used, expired or open.
+export function invitationState(inv, now = Date.now()) {
+  if (inv.usedAt || inv.usedBy) return 'used';
+  const exp = Date.parse(inv.expiresAt || '');
+  if (!Number.isNaN(exp) && exp <= now) return 'expired';
+  return 'open';
 }

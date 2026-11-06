@@ -106,9 +106,11 @@ describe('me → navigation', () => {
 
   it('a tenant\'s pages by role', () => {
     const views = (me, t) => tenantNav(tenantAccess(me, t)).map((n) => n.view);
-    expect(views(ANNA, 'acme')).toEqual(['overview', 'sandboxes', 'environments', 'tools', 'members', 'tokens']);
-    expect(views(ANNA, 'zeta')).toEqual(['overview', 'sandboxes', 'environments', 'tools', 'members']);
-    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'members']);
+    expect(views(ANNA, 'acme')).toEqual(['overview', 'sandboxes', 'environments', 'jobs', 'domains', 'members', 'tokens',
+      'usage', 'settings']);
+    expect(views(ANNA, 'zeta')).toEqual(['overview', 'sandboxes', 'environments', 'jobs', 'domains', 'members', 'usage',
+      'settings']);
+    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'members', 'usage', 'settings']);
     expect(views(ANNA, 'nope')).toEqual([]);
     expect(views(BASIC, 'acme')).toEqual([]);
   });

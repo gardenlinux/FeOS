@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, LiveBadge, Secret, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate } from '../format.js';
 import {
-  ROLES, grantableRoles, inviteLink, myTenants, personLabel, quotaRows, fmtQuota, roleLabel, scopeLabel,
+  ROLES, grantableRoles, invitationState, inviteLink, myTenants, personLabel, quotaRows, fmtQuota, roleLabel, scopeLabel,
   tenantAccess, tenantHome, useAccess, useMe,
 } from '../people.js';
 
@@ -266,13 +266,8 @@ function EnvGrantForm({ envs, onGrant }) {
   );
 }
 
-// invitationState is an invitation's state: used, expired or open.
-export function invitationState(inv, now = Date.now()) {
-  if (inv.usedAt || inv.usedBy) return 'used';
-  const exp = Date.parse(inv.expiresAt || '');
-  if (!Number.isNaN(exp) && exp <= now) return 'expired';
-  return 'open';
-}
+// invitationState lives in people.js; this module re-exports it.
+export { invitationState };
 
 // ScopeRoleFields are the role and scope of an invitation or a token,
 // never above the maker's role.

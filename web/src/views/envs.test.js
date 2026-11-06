@@ -22,9 +22,9 @@ const obj = (st, kind, name) => st.objects.find((o) => o.kind === kind && o.name
 describe('tones', () => {
   it('of deployment states', () => {
     expect(deploymentTone('deployed')).toBe('running');
-    expect(deploymentTone('deploying')).toBe('paused');
-    expect(deploymentTone('waiting')).toBe('paused');
-    expect(deploymentTone('deleting')).toBe('paused');
+    expect(deploymentTone('deploying')).toBe('moving');
+    expect(deploymentTone('waiting')).toBe('moving');
+    expect(deploymentTone('deleting')).toBe('moving');
     expect(deploymentTone('failed')).toBe('failed');
     expect(deploymentTone('replaced')).toBe('absent');
     expect(deploymentTone('none')).toBe('absent');
@@ -33,9 +33,9 @@ describe('tones', () => {
   it('of phases and job runs', () => {
     expect(phaseTone('ready')).toBe('running');
     expect(phaseTone('succeeded')).toBe('running');
-    expect(phaseTone('starting')).toBe('paused');
-    expect(phaseTone('unready')).toBe('paused');
-    expect(phaseTone('running')).toBe('paused');
+    expect(phaseTone('starting')).toBe('moving');
+    expect(phaseTone('unready')).toBe('moving');
+    expect(phaseTone('running')).toBe('moving');
     expect(phaseTone('exited')).toBe('failed');
     expect(phaseTone('failed')).toBe('failed');
     expect(phaseTone('stopping')).toBe('absent');
@@ -46,13 +46,13 @@ describe('tones', () => {
     // replicas ready green.
     expect(objectTone(obj(STAGE, 'service', 'expense-service'))).toBe('failed');
     expect(objectTone(obj(STAGE, 'service', 'approval-service'))).toBe('running');
-    expect(objectTone({ kind: 'service', runtime: 'image', desired: 2, ready: 1, instances: [] })).toBe('paused');
+    expect(objectTone({ kind: 'service', runtime: 'image', desired: 2, ready: 1, instances: [] })).toBe('moving');
     expect(objectTone({ kind: 'service', runtime: 'image', desired: 0, ready: 0, instances: [] })).toBe('absent');
     expect(objectTone(obj(STAGE, 'addon', 'postgres'))).toBe('running');
-    expect(objectTone({ ...obj(STAGE, 'addon', 'postgres'), provisioned: false })).toBe('paused');
+    expect(objectTone({ ...obj(STAGE, 'addon', 'postgres'), provisioned: false })).toBe('moving');
     expect(objectTone(obj(STAGE, 'job', 'migrate'))).toBe('running');
     expect(objectTone({ kind: 'job', name: 'seed', lastRun: null })).toBe('absent');
-    expect(objectTone(obj(PREVIEW, 'service', 'web'))).toBe('paused');
+    expect(objectTone(obj(PREVIEW, 'service', 'web'))).toBe('moving');
     expect(objectTone(obj(PREVIEW, 'service', 'expense-service'))).toBe('running');
   });
 });

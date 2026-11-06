@@ -23,10 +23,19 @@ export function useTheme() {
   return [theme, toggle];
 }
 
+// BrandMark is FeRun's mark: the box of the sign-in screen.
+export function BrandMark({ size = 30 }) {
+  return (
+    <span className="brand-mark" style={{ width: size, height: size, borderRadius: Math.round(size / 4) }} aria-hidden="true">
+      <Icon name="box" size={Math.round(size * 0.55)} />
+    </span>
+  );
+}
+
 export function ThemeToggle() {
   const [theme, toggle] = useTheme();
   return (
-    <button className="ghost mini icon-only" onClick={toggle}
+    <button className="iconbtn" onClick={toggle}
       title={theme === 'dark' ? 'light mode' : 'dark mode'}>
       <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} />
     </button>
@@ -80,13 +89,18 @@ export function useArm(ms = 2600) {
 
 // ---------------------------------------------------------------- widgets --
 
-// The class of a state's dot: running green, paused amber, hibernated
-// blue, failed and lost red, everything else grey.
+// The class of a state's dot, in the form of the architecture page's
+// states: running filled green; paused filled grey (on its node, no
+// memory); hibernated hollow (only in the object store); on its way
+// (creating, pausing, resuming, hibernating) a dashed ring; failed and
+// lost red; unknown amber; everything else grey.
 export function stateClass(state) {
   switch (state) {
     case 'running': case 'ready': return 'running';
-    case 'paused': case 'joined': case 'pausing': case 'resuming': case 'creating': return 'paused';
-    case 'hibernated': case 'hibernating': return 'hibernated';
+    case 'paused': case 'joined': return 'paused';
+    case 'pending': case 'pausing': case 'resuming': case 'creating': case 'hibernating': return 'moving';
+    case 'hibernated': return 'hibernated';
+    case 'unknown': return 'unknown';
     case 'failed': case 'lost': case 'down': return 'failed';
     default: return 'absent';
   }

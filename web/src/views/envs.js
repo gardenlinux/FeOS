@@ -14,7 +14,7 @@
 export function deploymentTone(state) {
   switch (state) {
     case 'deployed': return 'running';
-    case 'waiting': case 'deploying': case 'deleting': return 'paused';
+    case 'waiting': case 'deploying': case 'deleting': return 'moving';
     case 'failed': return 'failed';
     default: return 'absent';
   }
@@ -25,7 +25,7 @@ export function deploymentTone(state) {
 export function phaseTone(phase) {
   switch (phase) {
     case 'ready': case 'succeeded': return 'running';
-    case 'starting': case 'unready': case 'running': return 'paused';
+    case 'starting': case 'unready': case 'running': return 'moving';
     case 'exited': case 'failed': return 'failed';
     default: return 'absent';
   }
@@ -45,9 +45,9 @@ export function objectTone(o) {
   if (o.kind === 'service' && !isAttached(o)) {
     if ((o.instances || []).some((i) => i.phase === 'exited' || i.phase === 'failed')) return 'failed';
     if (!o.desired) return 'absent';
-    return (o.ready || 0) >= o.desired ? 'running' : 'paused';
+    return (o.ready || 0) >= o.desired ? 'running' : 'moving';
   }
-  if (o.kind === 'addon' && o.phase === 'ready' && !o.provisioned) return 'paused';
+  if (o.kind === 'addon' && o.phase === 'ready' && !o.provisioned) return 'moving';
   return phaseTone(o.phase);
 }
 

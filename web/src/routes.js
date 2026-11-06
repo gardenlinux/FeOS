@@ -9,8 +9,12 @@
 //   /tenants/:t/sandboxes[/:id[/:tab]]  its sandboxes; tab: overview, activity,
 //                                       tokens, access, network
 //   /tenants/:t/tools                   the tools of its sandboxes
-//   /tenants/:t/members                 its members and invitations
+//   /tenants/:t/jobs[/:id]              its jobs (runs to completion)
+//   /tenants/:t/domains[/:id]           its domains
+//   /tenants/:t/members                 its people: members and invitations
 //   /tenants/:t/tokens                  its tokens
+//   /tenants/:t/usage                   its use against its limits
+//   /tenants/:t/settings                the tenant itself
 //   /tenants/:t/new-environment         the builder of a new environment
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments; tab:
@@ -21,6 +25,8 @@
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
 //   /join-tokens                        join tokens
 //   /instances                          the control plane's instances
+//   /ingresses                          the ingresses
+//   /people                             every person (operators)
 //   /invite/:token                      an invitation, to accept
 
 function decode(s) {
@@ -100,6 +106,10 @@ export function parsePath(pathname) {
       return { view: 'joinTokens' };
     case 'instances':
       return { view: 'instances' };
+    case 'ingresses':
+      return { view: 'ingresses' };
+    case 'people':
+      return { view: 'people' };
     case 'invite':
       return { view: 'invite', token: seg[1] || '' };
     case 'tenants':
@@ -112,6 +122,10 @@ export function parsePath(pathname) {
   if (seg[2] === 'tools') return { view: 'tools', tenant };
   if (seg[2] === 'members') return { view: 'members', tenant };
   if (seg[2] === 'tokens') return { view: 'tokens', tenant };
+  if (seg[2] === 'jobs') return { view: 'jobs', tenant, sel: seg[3] || '' };
+  if (seg[2] === 'domains') return { view: 'domains', tenant, sel: seg[3] || '' };
+  if (seg[2] === 'usage') return { view: 'usage', tenant };
+  if (seg[2] === 'settings') return { view: 'settings', tenant };
   if (seg[2] === 'new-environment') return { view: 'newEnvironment', tenant };
   if (seg[2] === 'environments') return envRoute(tenant, seg.slice(3), search);
   if (seg[2] === 'sandboxes') return { view: 'sandboxes', tenant, sel: seg[3] || '', tab: seg[4] || 'overview' };

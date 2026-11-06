@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { auth, loginURL } from '../api.js';
 import { Icon } from '../Icon.jsx';
+import { BrandMark } from '../components.jsx';
 
 // The sign-in screen. With OIDC, the person types their address and goes
 // to the provider through /auth/login with it as login_hint: the provider
@@ -42,7 +43,7 @@ export function SignIn({ config, next, notice, onSignedIn }) {
     <div className="login">
       <div className="login-card">
         <div className="login-brand">
-          <div className="login-mark"><Icon name="box" size={26} /></div>
+          <BrandMark size={48} />
           <div>
             <div className="login-name">FeRun</div>
             <div className="login-tag">Containers and agent sandboxes on microVMs</div>

@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   auth, forgetTenantTokens, onSignedOut, setActiveTenant, setBasic,
 } from './api.js';
 import { Icon } from './Icon.jsx';
-import { Avatar, ThemeToggle, usePoll } from './components.jsx';
+import { Avatar, BrandMark, ThemeToggle } from './components.jsx';
 import { canonicalPath, envPath, parsePath } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
 import { InviteAccept, Members, MyTenants, RoleBadge, Tokens } from './views/People.jsx';
-import { Overview } from './views/Overview.jsx';
+import { Home } from './views/Home.jsx';
 import { Tenants } from './views/Tenants.jsx';
 import { Sandboxes } from './views/Sandboxes.jsx';
 import { Tools } from './views/Tools.jsx';
@@ -22,8 +22,16 @@ import { Nodes } from './views/Nodes.jsx';
 import { NodeDetail } from './views/NodeDetail.jsx';
 import { JoinTokens } from './views/JoinTokens.jsx';
 import { Instances } from './views/Instances.jsx';
+import { Jobs } from './views/Jobs.jsx';
+import { Domains } from './views/Domains.jsx';
+import { TenantSettings, Usage } from './views/TenantPages.jsx';
+import { Ingresses, PlatformPeople } from './views/Platform.jsx';
+import { Palette, usePaletteKey } from './views/Palette.jsx';
+import { SummaryProvider, useSummary } from './summary.jsx';
+import { entries } from './search.js';
 import {
-  MeContext, isOperator, myTenants, roleLabel, tenantAccess, tenantHome, tenantNav, viewGate,
+  MeContext, NAV_GROUPS, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants, roleLabel,
+  tenantAccess, tenantHome, tenantNav, viewGate,
 } from './people.js';
 
 // The management UI of FeRun, the tenants' console (ADR 0031). Before
@@ -113,7 +121,7 @@ export default function App() {
     return (
       <div className="login">
         <div className="login-card">
-          <div className="login-brand"><Icon name="box" size={22} /> FeRun</div>
+          <div className="login-brand"><BrandMark size={36} /> <span className="login-name">FeRun</span></div>
           <p className="error">ferund cannot be reached: {session.error}</p>
           <button className="primary" onClick={check}><Icon name="refresh" size={14} /> Try again</button>
         </div>
@@ -142,126 +150,227 @@ export default function App() {
     location.assign(to);
   };
 
+  const access = tenantAccess(me, route.tenant);
+  const tenantCan = can(access);
   return (
     <MeContext.Provider value={meCtx}>
-    <div className="app">
-      <Sidebar route={route} navigate={navigate} me={me} />
-      <div className="main">
-        <Topbar route={route} navigate={navigate} me={me} onSignOut={signOut} />
-        <main className="content">
-          {route.view === 'tenants' && (operator ? <Tenants navigate={navigate} /> : <MyTenants navigate={navigate} />)}
-          {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
-          {needsGate && <TenantGate key={route.tenant} reason={gate} tenant={route.tenant} navigate={navigate} />}
-          {!needsGate && route.view === 'overview' && <Overview key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-          {!needsGate && route.view === 'sandboxes' && (
-            <Sandboxes key={route.tenant} tenant={route.tenant} sel={route.sel} tab={route.tab} navigate={navigate} />)}
-          {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
-          {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-          {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
-          {!needsGate && route.view === 'environments' && (
-            <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
-              replica={route.replica} search={route.search} navigate={navigate} />)}
-          {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-          {!needsGate && route.view === 'nodes' && <Nodes navigate={navigate} />}
-          {!needsGate && route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
-          {!needsGate && route.view === 'joinTokens' && <JoinTokens />}
-          {!needsGate && route.view === 'instances' && <Instances />}
-        </main>
-      </div>
-    </div>
+    <SummaryProvider tenant={needsGate ? '' : route.tenant || ''} can={tenantCan}>
+    <Shell route={route} navigate={navigate} me={me} onSignOut={signOut}>
+      {route.view === 'tenants' && (operator ? <Tenants navigate={navigate} /> : <MyTenants navigate={navigate} />)}
+      {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
+      {needsGate && <TenantGate key={route.tenant} reason={gate} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'overview' && <Home key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'sandboxes' && (
+        <Sandboxes key={route.tenant} tenant={route.tenant} sel={route.sel} tab={route.tab} navigate={navigate} />)}
+      {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
+      {!needsGate && route.view === 'jobs' && <Jobs key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
+      {!needsGate && route.view === 'domains' && <Domains key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
+      {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
+      {!needsGate && route.view === 'usage' && <Usage key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'settings' && <TenantSettings key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'environments' && (
+        <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
+          replica={route.replica} search={route.search} navigate={navigate} />)}
+      {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'nodes' && <Nodes navigate={navigate} />}
+      {!needsGate && route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
+      {!needsGate && route.view === 'joinTokens' && <JoinTokens />}
+      {!needsGate && route.view === 'instances' && <Instances />}
+      {!needsGate && route.view === 'ingresses' && <Ingresses navigate={navigate} />}
+      {!needsGate && route.view === 'people' && <PlatformPeople navigate={navigate} />}
+    </Shell>
+    </SummaryProvider>
     </MeContext.Provider>
   );
 }
 
 // ------------------------------------------------------------------ shell --
 
-function Sidebar({ route, navigate, me }) {
-  const tenants = myTenants(me);
+// platformSpace tells whether a route is in the operators' space: their
+// pages, and the list of every tenant.
+function platformSpace(route, operator) {
+  return OPERATOR_VIEWS.has(route.view) || (operator && route.view === 'tenants');
+}
+
+// Shell is the sidebar, the topbar and the page, and the search above
+// them.
+function Shell({ route, navigate, me, onSignOut, children }) {
+  const [searching, setSearching] = useState(false);
+  const open = useCallback(() => setSearching(true), []);
+  usePaletteKey(open);
+  const summary = useSummary();
   const operator = isOperator(me);
+  const all = useMemo(() => entries({
+    tenant: route.tenant || '',
+    nav: route.tenant ? tenantNav(tenantAccess(me, route.tenant)) : [],
+    platform: operator ? PLATFORM_NAV : [],
+    tenants: myTenants(me),
+    summary,
+  }), [route.tenant, me, operator, summary]);
+  return (
+    <div className="app">
+      <Sidebar route={route} navigate={navigate} me={me} onSearch={open} onSignOut={onSignOut} />
+      <div className="main">
+        <Topbar route={route} navigate={navigate} />
+        <main className="content">{children}</main>
+      </div>
+      {searching && (
+        <Palette all={all} tenant={route.tenant || ''} environments={summary.environments || []}
+          onClose={() => setSearching(false)} navigate={navigate} />)}
+    </div>
+  );
+}
+
+function Sidebar({ route, navigate, me, onSearch, onSignOut }) {
+  const operator = isOperator(me);
+  const platform = platformSpace(route, operator);
   const t = route.tenant;
   const access = tenantAccess(me, t);
   const nav = t ? tenantNav(access) : [];
+  const { counts } = useSummary();
   const enc = encodeURIComponent;
-  const link = (to) => (e) => { e.preventDefault(); navigate(to); };
+  const toOf = (n) => (n.view === 'environments' ? envPath(t) : `/tenants/${enc(t)}${n.path}`);
+  const on = (n) => (n.views || [n.view]).includes(route.view);
 
   return (
     <aside className="sidebar">
-      <a className="brand" href="/tenants" onClick={link('/tenants')}>
-        <span className="brand-mark"><Icon name="box" size={17} /></span>
+      <a className="brand" href={t ? `/tenants/${enc(t)}` : '/tenants'}
+        onClick={(e) => { e.preventDefault(); navigate(t ? `/tenants/${enc(t)}` : '/tenants'); }}>
+        <BrandMark size={30} />
         <span className="brand-name">FeRun</span>
       </a>
 
-      {t && nav.length > 0 && (
-        <nav className="snav">
-          <div className="snav-label">tenant · <span className="mono">{t}</span></div>
-          {nav.map((n) => (
-            <NavItem key={n.view} icon={n.icon} label={n.label} active={(n.views || [n.view]).includes(route.view)}
-              onClick={() => navigate(n.view === 'environments' ? envPath(t) : `/tenants/${enc(t)}${n.path}`)} />
+      <Switcher route={route} navigate={navigate} me={me} platform={platform} />
+
+      <button className="sidesearch" onClick={onSearch}>
+        <Icon name="search" size={14} /> <span>Search or jump to…</span> <kbd>⌘K</kbd>
+      </button>
+
+      {!platform && t && nav.length > 0 && NAV_GROUPS.map((g) => {
+        const items = nav.filter((n) => n.group === g.key);
+        if (items.length === 0) return null;
+        return (
+          <nav key={g.key || 'top'} className="snav">
+            {g.label && <div className="snav-label">{g.label}</div>}
+            {items.map((n) => (
+              <NavItem key={n.view} item={n} active={on(n)} count={counts[n.view]} to={toOf(n)} navigate={navigate} />
+            ))}
+          </nav>
+        );
+      })}
+
+      {platform && PLATFORM_GROUPS.map((g) => (
+        <nav key={g.key} className="snav">
+          <div className="snav-label">{g.label}</div>
+          {PLATFORM_NAV.filter((n) => n.group === g.key).map((n) => (
+            <NavItem key={n.view} item={n} active={on(n)} to={n.path} navigate={navigate} />
           ))}
         </nav>
-      )}
+      ))}
 
-      {operator && (
-        <nav className="snav">
-          <div className="snav-label">platform</div>
-          <NavItem icon="users" label="Tenants" active={route.view === 'tenants'} onClick={() => navigate('/tenants')} />
-          <NavItem icon="server" label="Nodes" active={route.view === 'nodes' || route.view === 'node'} onClick={() => navigate('/nodes')} />
-          <NavItem icon="ticket" label="Join tokens" active={route.view === 'joinTokens'} onClick={() => navigate('/join-tokens')} />
-          <NavItem icon="layers" label="Instances" active={route.view === 'instances'} onClick={() => navigate('/instances')} />
-        </nav>
-      )}
-
-      <nav className="snav">
-        <div className="snav-label">{operator ? 'tenants' : 'your tenants'}</div>
-        {!operator && (
-          <NavItem icon="users" label="All yours" active={route.view === 'tenants'} onClick={() => navigate('/tenants')} />
-        )}
-        <div className="tenantlist">
-          {tenants.map((tn) => (
-            <button key={tn.tenant} className={'tenantchip' + (t === tn.tenant ? ' on' : '')}
-              title={`your role: ${roleLabel(tn) || 'none'}`}
-              onClick={() => navigate(tenantHome(tenantAccess(me, tn.tenant)))}>
-              <span className="tenantchip-name">{tn.tenant}</span>
-              {!operator && <RoleBadge role={roleLabel(tn)} />}
-            </button>
-          ))}
-          {tenants.length === 0 && <span className="muted small">—</span>}
-        </div>
-      </nav>
+      {!platform && !t && (
+        <p className="sidehint muted small">Choose a tenant above, or make one.</p>)}
 
       <div className="sidebar-foot">
-        <span className="muted small">FeOS control plane</span>
+        <span className="userbox" title={me.email || me.username || ''}>
+          <Avatar src={me.picture} name={displayName(me)} />
+          <span className="username">{displayName(me)}</span>
+        </span>
+        <span className="spacer" />
+        <a className="iconbtn" href="/docs/" title="the architecture of FeRun and FeOS"><Icon name="book" size={14} /></a>
         <ThemeToggle />
+        <button className="iconbtn" onClick={onSignOut} title="sign out"><Icon name="logout" size={14} /></button>
       </div>
     </aside>
   );
 }
 
-function NavItem({ icon, label, active, onClick }) {
+// Switcher is where one works: one of the person's tenants with the role
+// in it, or, for operators, the platform.
+function Switcher({ route, navigate, me, platform }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  const operator = isOperator(me);
+  const tenants = myTenants(me);
+  const t = route.tenant;
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const go = (to) => { setOpen(false); navigate(to); };
+  const current = platform ? 'Platform' : t || 'Choose a tenant';
+  const role = !platform && t ? roleLabel(tenants.find((x) => x.tenant === t)) || (operator ? 'operator' : '') : '';
+
   return (
-    <button className={'snav-item' + (active ? ' on' : '')} onClick={onClick}>
-      <Icon name={icon} size={15} /> <span>{label}</span>
-    </button>
+    <div className="switcher" ref={box}>
+      <button className={'switch' + (open ? ' on' : '')} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <Icon name={platform ? 'server' : 'building'} size={14} />
+        <span className="switch-name">{current}</span>
+        {role && <span className="switch-role">{role}</span>}
+        <Icon name="chevronDown" size={13} />
+      </button>
+      {open && (
+        <div className="switch-menu" role="menu">
+          <div className="switch-label">{operator ? 'tenants you are a member of' : 'your tenants'}</div>
+          {tenants.map((tn) => (
+            <button key={tn.tenant} role="menuitem" className={'switch-item' + (tn.tenant === t && !platform ? ' on' : '')}
+              onClick={() => go(tenantHome(tenantAccess(me, tn.tenant)))}>
+              <span className="mono">{tn.tenant}</span>
+              <span className="switch-role">{roleLabel(tn)}</span>
+            </button>
+          ))}
+          {tenants.length === 0 && <div className="switch-empty muted small">none yet</div>}
+          <button role="menuitem" className="switch-item" onClick={() => go('/tenants')}>
+            <Icon name="plus" size={13} /> {operator ? 'every tenant' : 'all yours, or a new one'}
+          </button>
+          {operator && (
+            <>
+              <div className="switch-sep" />
+              <button role="menuitem" className={'switch-item' + (platform ? ' on' : '')} onClick={() => go('/nodes')}>
+                <Icon name="server" size={13} /> Platform <span className="switch-role">operator</span>
+              </button>
+            </>)}
+        </div>)}
+    </div>
   );
 }
 
-function Topbar({ route, navigate, me, onSignOut }) {
+function NavItem({ item, active, count, to, navigate }) {
+  return (
+    <a className={'snav-item' + (active ? ' on' : '') + (item.layer ? ' l-' + item.layer : '')} href={to}
+      onClick={(e) => { e.preventDefault(); navigate(to); }} aria-current={active ? 'page' : undefined}>
+      <Icon name={item.icon} size={15} /> <span>{item.label}</span>
+      {count && <span className={'snav-count' + (count.tone ? ' ' + count.tone : '')}>{count.n}</span>}
+    </a>
+  );
+}
+
+// CRUMB_NAMES name the tenant's pages in the trail.
+const CRUMB_NAMES = {
+  sandboxes: 'sandboxes', tools: 'tools', jobs: 'jobs', domains: 'domains', members: 'people', tokens: 'tokens',
+  usage: 'usage', settings: 'settings',
+};
+
+function Topbar({ route, navigate }) {
   const t = route.tenant;
   const enc = encodeURIComponent;
   const crumb = (label, to, strong) => (
     <button className={'crumb' + (strong ? ' strong' : '')} onClick={() => navigate(to)}>{label}</button>
   );
   const sep = <span className="crumb-sep">/</span>;
+  const page = CRUMB_NAMES[route.view];
   return (
     <header className="topbar">
       <nav className="crumbs">
-        {(route.view === 'tenants' || t) && crumb('tenants', '/tenants')}
-        {t && <>{sep}{crumb(t, `/tenants/${enc(t)}`, true)}</>}
-        {route.view === 'sandboxes' && <>{sep}{crumb('sandboxes', `/tenants/${enc(t)}/sandboxes`)}</>}
+        {t && crumb(t, `/tenants/${enc(t)}`, true)}
+        {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
         {route.view === 'sandboxes' && route.sel && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
-        {route.view === 'tools' && <>{sep}<span className="crumb">tools</span></>}
-        {route.view === 'members' && <>{sep}<span className="crumb">members</span></>}
-        {route.view === 'tokens' && <>{sep}<span className="crumb">tokens</span></>}
+        {(route.view === 'jobs' || route.view === 'domains') && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'invite' && <span className="crumb">invitation</span>}
         {(route.view === 'environments' || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
@@ -270,19 +379,14 @@ function Topbar({ route, navigate, me, onSignOut }) {
           <>{sep}{crumb(route.tab, envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
           <>{sep}<span className="crumb mono">{route.item}{route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
-        {(route.view === 'nodes' || route.view === 'node') && crumb('nodes', '/nodes')}
+        {route.view === 'tenants' && <span className="crumb strong">tenants</span>}
+        {(route.view === 'nodes' || route.view === 'node') && crumb('nodes', '/nodes', route.view === 'nodes')}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}
-        {route.view === 'joinTokens' && <span className="crumb">join tokens</span>}
-        {route.view === 'instances' && <span className="crumb">instances</span>}
+        {route.view === 'joinTokens' && <span className="crumb strong">join tokens</span>}
+        {route.view === 'instances' && <span className="crumb strong">control plane</span>}
+        {route.view === 'ingresses' && <span className="crumb strong">ingresses</span>}
+        {route.view === 'people' && <span className="crumb strong">people</span>}
       </nav>
-      <span className="spacer" />
-      <span className="userbox" title={me.email || me.username || ''}>
-        <Avatar src={me.picture} name={displayName(me)} />
-        <span className="username">{displayName(me)}</span>
-        {me.method === 'basic' && <span className="muted small">(password)</span>}
-        {isOperator(me) && <span className="badge acc" title="an operator of this FeRun">operator</span>}
-      </span>
-      <button className="ghost mini" onClick={onSignOut}><Icon name="logout" size={13} /> Sign out</button>
     </header>
   );
 }

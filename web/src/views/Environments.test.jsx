@@ -49,7 +49,7 @@ describe('EnvTable', () => {
     // Stage rolls 7 while 6 serves: the deployed number stands out.
     expect(out).toContain('<td class="col-num mono">7</td>');
     expect(out).toContain('class="col-num mono warntext" title="the latest deployment is not deployed">6</td>');
-    expect(out).toContain('class="state-label paused"');
+    expect(out).toContain('class="state-label moving"');
     expect(out).toContain('>deploying</span>');
     expect(count(out, '>deployed</span>')).toBe(2);
     expect(out).toContain('<span class="badge bad">1 open</span>');
@@ -68,7 +68,7 @@ describe('EnvOverview', () => {
 
   it('shows the rollout: deployment 7 rolls while 6 serves, the open incident linked', () => {
     const out = overview(STAGE);
-    expect(out).toContain('class="rollout paused"');
+    expect(out).toContain('class="rollout moving"');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/7"');
     expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />)).toContain('deployment 6 serves meanwhile');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/incidents" class="bad">1 open</a>');
