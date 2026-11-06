@@ -974,6 +974,7 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .inlineform { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
 .tbl.members td { vertical-align: top; }
 .quota { margin: 14px 0; }
+.single > .pane + .pane { margin-top: 14px; }
 .quotagrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 18px; padding: 4px 2px 6px; }
 .quotarow { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: baseline; }
 .quota-label { color: var(--muted); font-size: 12px; }
@@ -985,5 +986,8 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .quotarow.t-bad .quota-num { color: var(--danger); }
 @media (max-width: 820px) {
   .content { padding: 12px 16px 60px; }
+  .topbar { padding: 8px 16px; gap: 8px; }
+  .crumbs { overflow: hidden; }
+  .username { display: none; }
   .gate { max-width: none; }
 }

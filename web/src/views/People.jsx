@@ -166,7 +166,7 @@ export function Members({ tenant, navigate }) {
     <div className="single">
       <section className="pane">
         <div className="pane-toolbar">
-          <h2><Icon name="users" size={15} /> Members <span className="count">{members ? members.length : '…'}</span></h2>
+          <h2><Icon name="users" size={15} /> Members {!missing && <span className="count">{members ? members.length : '…'}</span>}</h2>
           <span className="muted small">your role: <RoleBadge role={roleLabel(access)} /></span>
           <span className="spacer" />
           {!missing && <LiveBadge lastOk={lastOk} />}
@@ -319,7 +319,7 @@ function Invitations({ envs, role: myRole }) {
   return (
     <section className="pane">
       <div className="pane-toolbar">
-        <h2><Icon name="ticket" size={15} /> Invitations <span className="count">{list ? list.length : '…'}</span></h2>
+        <h2><Icon name="ticket" size={15} /> Invitations {!missing && <span className="count">{list ? list.length : '…'}</span>}</h2>
       </div>
       {missing && <NotAvailable what="Invitations" />}
       {!missing && (
@@ -422,7 +422,7 @@ export function Tokens({ tenant }) {
     <div className="single">
       <section className="pane">
         <div className="pane-toolbar">
-          <h2><Icon name="key" size={15} /> Tokens <span className="count">{tokens ? tokens.length : '…'}</span></h2>
+          <h2><Icon name="key" size={15} /> Tokens {!missing && <span className="count">{tokens ? tokens.length : '…'}</span>}</h2>
           <span className="spacer" />
           {!missing && <LiveBadge lastOk={lastOk} />}
         </div>
