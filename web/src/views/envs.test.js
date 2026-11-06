@@ -10,6 +10,9 @@ import {
   phaseTone, deploymentTone, rolloutNote, statusState,
   actionProblem, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, jobTrigger, mayRevertTo, newestFirst,
   olderCursor, preflightRows, publishNote, revertOffer, routeCurl, sparkPoints, specBindings, statusTone, tagPlan,
+  CHANGES_READ, KIND_NAMES, changesTo, definitionRows, envRows, envValueRef, fmtCount, instanceDeployments, objectImage,
+  objectIncidents, objectStateText, readinessText, readyText, resourcesText, restartsOf, routesTo, shortImage, specObject,
+  splitItem, trafficOf, usedBy,
 } from './envs.js';
 
 // The environments view's arithmetic, on ferund's fixtures: stage rolls
@@ -362,5 +365,131 @@ describe('domains and access', () => {
     expect(cloneBody({ name: ' demo ', deployment: 6, copy: { 'internal-token': true, other: false } }))
       .toEqual({ name: 'demo', deployment: 6, secrets: { 'internal-token': { copy: true } } });
     expect(cloneBody({ name: 'demo', deployment: 0, copy: {} })).toEqual({ name: 'demo' });
+  });
+});
+
+describe("an object's page", () => {
+  const SPEC = response('GET_environments_env_deployments_n.200').spec;
+  const DEP = response('GET_environments_env_deployments_n.200');
+  const svc = obj(STAGE, 'service', 'expense-service');
+
+  it('splits "<kind>/<name>" and finds an object of the spec', () => {
+    expect(splitItem('service/web')).toEqual({ kind: 'service', name: 'web' });
+    expect(splitItem('service/')).toBe(null);
+    expect(splitItem('web')).toBe(null);
+    expect(specObject(SPEC, 'addon', 'postgres').type).toBe('postgres');
+    expect(specObject(SPEC, 'service', 'nope')).toBe(null);
+    expect(specObject(SPEC, 'route', 'root')).toBe(null);
+    expect(specObject(null, 'service', 'web')).toBe(null);
+  });
+
+  it('shortens images: the last segment with its tag, or 12 digits of its digest', () => {
+    expect(shortImage('ghcr.io/acme/expense:1.4')).toBe('expense:1.4');
+    expect(shortImage('registry:5000/a/b/web@sha256:4e1f0c2a9b7d3e5f6a8c')).toBe('web@4e1f0c2a9b7d');
+    expect(shortImage('nginx')).toBe('nginx');
+    expect(shortImage('')).toBe('');
+    const im = objectImage(svc, SPEC);
+    expect(im.written).toBe('ghcr.io/acme/expense:1.4');
+    expect(im.short).toBe('expense:1.4');
+    expect(im.digest).toBe('sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a');
+    // Without the spec: the instances' pin.
+    expect(objectImage(svc, null).short).toBe('expense-service@4e1f0c2a9b7d');
+    expect(objectImage({ kind: 'job', name: 'x' }, null).written).toBe('');
+  });
+
+  it('sums the instances: ready, restarts, the deployments they run', () => {
+    expect(readyText(svc)).toBe('1/2');
+    expect(readyText(obj(STAGE, 'addon', 'postgres'))).toBe('1/1');
+    expect(readyText(obj(STAGE, 'job', 'migrate'))).toBe('');
+    expect(restartsOf(svc)).toBe(3);
+    expect(restartsOf(obj(PREVIEW, 'service', 'expense-service'))).toBe(1);
+    expect(instanceDeployments(svc)).toEqual([6, 7]);
+    expect(instanceDeployments(obj(STAGE, 'job', 'migrate'))).toEqual([]);
+    expect(objectStateText(svc)).toBe('1 of 2 ready');
+    expect(objectStateText(obj(PREVIEW, 'service', 'web'))).toBe('starting');
+    expect(objectStateText({ ...obj(STAGE, 'addon', 'nats'), provisioned: false })).toBe('ready, not provisioned yet');
+    expect(objectStateText(obj(STAGE, 'job', 'migrate'))).toBe('last run succeeded');
+    expect(objectStateText(null)).toBe('not in the latest deployment');
+  });
+
+  it('counts short and finds a service in the traffic', () => {
+    expect(fmtCount(980)).toBe('980');
+    expect(fmtCount(1234)).toBe('1.2k');
+    expect(fmtCount(34567)).toBe('35k');
+    expect(fmtCount(1234567)).toBe('1.2M');
+    const t = response('GET_environments_env_traffic.200');
+    const first = t.services[0];
+    expect(trafficOf(t, first.service)).toBe(first);
+    expect(trafficOf(t, 'nope')).toBe(null);
+    expect(trafficOf(null, 'web')).toBe(null);
+  });
+
+  it('reads environment values: plain, a secret at its pinned version, references to addons and services', () => {
+    const rows = envRows(SPEC.services['expense-service'], SPEC);
+    const by = Object.fromEntries(rows.map((r) => [r.name, r]));
+    expect(rows.map((r) => r.name)).toEqual([
+      'EXPENSA_APPROVAL_URL', 'EXPENSA_DATABASE_URL', 'EXPENSA_HTTP_ADDR', 'EXPENSA_INTERNAL_TOKEN', 'EXPENSA_NATS_URL',
+    ]);
+    expect(by.EXPENSA_HTTP_ADDR).toEqual({ name: 'EXPENSA_HTTP_ADDR', form: 'plain', text: '[::]:8080', ref: '' });
+    expect(by.EXPENSA_INTERNAL_TOKEN).toMatchObject({ form: 'secret', text: 'secret internal-token v3', ref: 'secret/internal-token', version: 3 });
+    expect(by.EXPENSA_DATABASE_URL).toMatchObject({ form: 'addon', ref: 'addon/postgres', text: 'url of addon postgres (database expensa, role expense_svc)' });
+    expect(by.EXPENSA_APPROVAL_URL).toMatchObject({ form: 'service', ref: 'service/approval-service', text: 'url of service approval-service port http' });
+    expect(envValueRef({ value: 'x' }).text).toBe('x');
+    expect(envValueRef({ secret: 'k' }, {}).text).toBe('secret k');
+  });
+
+  it("lists a service's definition: image as written and its pin, command, ports, replicas, size, readiness, rollout", () => {
+    const rows = definitionRows(SPEC.services['expense-service'], 'service');
+    const by = Object.fromEntries(rows.map((r) => [r.k, r]));
+    expect(rows.map((r) => r.k)).toEqual(['runtime', 'image', 'command', 'ports', 'replicas', 'resources', 'readiness', 'rollout timeout']);
+    expect(by.image).toMatchObject({ v: 'ghcr.io/acme/expense:1.4', pinned: SPEC.services['expense-service'].image });
+    expect(by.ports.v).toBe('http 8080');
+    expect(by.resources.v).toBe('1 vCPU · 512 MiB');
+    expect(by.readiness.v).toBe('HTTP GET :http/readyz · every 2s, unready after 3 failures');
+    expect(definitionRows({ runtime: 'image', image: 'x:1', idle: '15m' }, 'service').find((r) => r.k === 'idle').v)
+      .toBe('paused after 15m without a request');
+    expect(readinessText({ tcp: { port: 5432 }, initialDelay: '5s' })).toBe('TCP :5432 · after 5s');
+    expect(readinessText({ exec: { command: ['pg_isready'] } })).toBe('exec pg_isready');
+    expect(resourcesText({ vcpus: 2, memoryMib: 2048 })).toBe('2 vCPUs · 2 GiB');
+  });
+
+  it("lists a job's and an addon's definition", () => {
+    const job = Object.fromEntries(definitionRows(SPEC.jobs.migrate, 'job').map((r) => [r.k, r.v]));
+    expect(job.runs).toBe('with each deployment that changes it (on: deploy)');
+    expect(job.timeout).toBe('10m0s');
+    expect(job.retries).toBe('1');
+    expect(job.command).toBe('/app/expense-service migrate');
+    const pg = Object.fromEntries(definitionRows(SPEC.addons.postgres, 'addon').map((r) => [r.k, r.v]));
+    expect(pg).toEqual({ type: 'postgres', version: '17', plan: 'small', 'option databases': 'expensa', 'option roles': 'expense_svc, approval_svc' });
+    expect(definitionRows(null, 'service')).toEqual([]);
+  });
+
+  it('finds the routes to a service and who uses an object', () => {
+    const r = routesTo(STAGE, SPEC, 'expense-service');
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ name: 'api-expense', path: '/api/expense', port: 8080, portAsWritten: 'http' });
+    expect(routesTo(STAGE, SPEC, 'nope')).toEqual([]);
+    expect(usedBy(SPEC, 'addon', 'postgres')).toEqual([
+      { from: 'service/approval-service', var: 'APPROVAL_DATABASE_URL', text: 'url' },
+      { from: 'service/expense-service', var: 'EXPENSA_DATABASE_URL', text: 'url' },
+      { from: 'job/migrate', var: 'EXPENSA_DATABASE_URL', text: 'url' },
+    ]);
+    expect(usedBy(SPEC, 'service', 'approval-service')).toEqual([
+      { from: 'service/expense-service', var: 'EXPENSA_APPROVAL_URL', text: 'url' },
+    ]);
+  });
+
+  it('finds the changes to an object in the deployments read, and its incidents', () => {
+    const list = [DEP, { number: 6, state: 'replaced', diff: [] }, { number: 5, state: 'replaced', diff: [{ kind: 'job', name: 'migrate', change: 'add', fields: [] }] }];
+    expect(changesTo(list, 'service', 'web')).toEqual([{
+      number: 7, state: DEP.state, author: DEP.author, message: DEP.message, createdAt: DEP.createdAt, change: 'update',
+      effect: 'replaces 1 pod', fields: DEP.diff.find((d) => d.name === 'web').fields,
+    }]);
+    expect(changesTo(list, 'job', 'migrate').map((c) => c.number)).toEqual([7, 5]);
+    expect(changesTo(list, 'addon', 'nats')).toEqual([]);
+    expect(CHANGES_READ).toBe(10);
+    const inc = response('GET_environments_env_incidents.200').incidents;
+    expect(objectIncidents(inc, 'service', 'expense-service').map((i) => i.id)).toEqual(['12']);
+    expect(KIND_NAMES.service).toBe('Service');
   });
 });

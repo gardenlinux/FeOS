@@ -198,8 +198,9 @@ function Chips({ label, value, options, onChange, mono }) {
   );
 }
 
-// What picks the object, its replica and the source.
-function What({ objects, focus, set }) {
+// What picks the object, its replica and the source; the object picked
+// links its page (pageOf).
+function What({ objects, focus, set, pageOf, navigate }) {
   const o = focus.object ? objects.find((x) => `${x.kind}/${x.name}` === focus.object) : null;
   const replicas = o ? logReplicas(o) : [];
   const kind = o ? o.kind : focus.object ? focus.object.split('/')[0] : '';
@@ -226,6 +227,10 @@ function What({ objects, focus, set }) {
           );
         })}
         {!listed && <button type="button" className="chipbtn mono on">{focus.object} <span className="muted">(gone)</span></button>}
+        {o && pageOf && (
+          <a className="small lg-objpage" href={pageOf(focus.object)} title="its definition, instances and changes"
+            onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(pageOf(focus.object)); } }}>
+            {focus.object}’s page →</a>)}
       </div>
       {(replicas.length > 1 || focus.replica != null) && (
         <Chips label="replica" mono value={focus.replica == null ? 'all' : String(focus.replica)}
@@ -481,7 +486,8 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly }) 
             <button type="button" className="linkbtn" onClick={() => set({ trace: undefined })}>leave the trace</button>
           </div>
         )}
-        <What objects={objects} focus={focus} set={set} />
+        <What objects={objects} focus={focus} set={set} navigate={navigate}
+          pageOf={(item) => envPath(tenant, env, 'objects', item)} />
         {!tailOnly && <>
         <div className="lg-searchrow">
           <label className="searchwrap grow">
