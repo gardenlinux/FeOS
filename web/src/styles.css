@@ -543,9 +543,6 @@ tr:hover .iconbtn { opacity: 1; }
 }
 .login-card button.primary:hover { filter: brightness(1.08); background: var(--accent); }
 .login-card .error, .login-card .notice { margin-top: 14px; }
-.login-foot { margin-top: 18px; text-align: center; font-size: 13px; color: var(--muted); }
-.login-foot a { color: var(--muted); }
-.login-foot a:hover { color: var(--text); }
 @media (max-width: 480px) { .login-card { padding: 30px 22px 24px; } .login-name { font-size: 24px; } }
 .gate { max-width: 560px; }
 .gate h2 { font-size: 14px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }

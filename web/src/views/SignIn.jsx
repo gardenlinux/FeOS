@@ -61,7 +61,7 @@ export function SignIn({ config, next, notice, onSignedIn }) {
               autoComplete="username email" inputMode="email" placeholder="you@company.com"
               onChange={(e) => { setEmail(e.target.value); setErr(''); }} />
             <input type="hidden" name="next" value={next || '/'} />
-            <button type="submit" className="primary">Sign in <Icon name="login" size={17} /></button>
+            <button type="submit" className="primary">Sign in</button>
           </form>
         )}
         {basic && (
@@ -94,7 +94,6 @@ export function SignIn({ config, next, notice, onSignedIn }) {
         )}
         {err && <p className="error">{err}</p>}
       </div>
-      <div className="login-foot"><a href="/docs/">How FeRun works</a></div>
     </div>
   );
 }
