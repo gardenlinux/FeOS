@@ -438,13 +438,17 @@ function Topbar({ route, navigate }) {
   );
   const sep = <span className="crumb-sep">/</span>;
   const page = CRUMB_NAMES[route.view];
+  const { domains } = useSummary();
+  // A domain's page is addressed by its ID; the trail names it.
+  const domainName = (sel) => ((domains || []).find((d) => d.id === sel) || {}).name || sel;
   return (
     <header className="topbar">
       <nav className="crumbs">
         {t && crumb(t, `/tenants/${enc(t)}`, true)}
         {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
         {route.view === 'sandboxes' && route.sel && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
-        {(route.view === 'jobs' || route.view === 'domains') && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
+        {route.view === 'jobs' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
+        {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
         {route.view === 'invite' && <span className="crumb">invitation</span>}
         {(route.view === 'environments' || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
