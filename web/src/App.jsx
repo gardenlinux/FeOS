@@ -17,6 +17,7 @@ import { Tenants } from './views/Tenants.jsx';
 import { Sandboxes } from './views/Sandboxes.jsx';
 import { Tools } from './views/Tools.jsx';
 import { Environments } from './views/Environments.jsx';
+import { NewEnvironment } from './views/NewEnvironment.jsx';
 import { Nodes } from './views/Nodes.jsx';
 import { NodeDetail } from './views/NodeDetail.jsx';
 import { JoinTokens } from './views/JoinTokens.jsx';
@@ -160,6 +161,7 @@ export default function App() {
           {!needsGate && route.view === 'environments' && (
             <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
               replica={route.replica} search={route.search} navigate={navigate} />)}
+          {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.tenant} tenant={route.tenant} navigate={navigate} />}
           {!needsGate && route.view === 'nodes' && <Nodes navigate={navigate} />}
           {!needsGate && route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
           {!needsGate && route.view === 'joinTokens' && <JoinTokens />}
@@ -261,7 +263,8 @@ function Topbar({ route, navigate, me, onSignOut }) {
         {route.view === 'members' && <>{sep}<span className="crumb">members</span></>}
         {route.view === 'tokens' && <>{sep}<span className="crumb">tokens</span></>}
         {route.view === 'invite' && <span className="crumb">invitation</span>}
-        {route.view === 'environments' && <>{sep}{crumb('environments', envPath(t))}</>}
+        {(route.view === 'environments' || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
+        {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
         {route.view === 'environments' && route.env && <>{sep}{crumb(route.env, envPath(t, route.env))}</>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && (
           <>{sep}{crumb(route.tab, envPath(t, route.env, route.tab))}</>)}

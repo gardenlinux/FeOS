@@ -320,9 +320,10 @@ export const api = {
   // public keys, never key material.
   getAccess: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/access`),
 
-  // As the tenant, read-only: its environments. env is the name or the
-  // UUID. The UI applies, reverts and deletes nothing, and reads no
-  // secret and no route token.
+  // As the tenant: its environments. env is the name or the UUID. The
+  // UI writes deployments and secrets' values through the builder (ADR
+  // 0032) and nothing else: it reverts and deletes nothing, and reads no
+  // secret's value and no route token.
   listEnvironments: (labels = []) => tenantCall('GET', '/environments' + labelQuery(labels)),
   getEnvironment: (env) => tenantCall('GET', `/environments/${enc(env)}`),
   listDeployments: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
@@ -392,6 +393,32 @@ export const api = {
   // The quota: {limits, use}, each {sandboxes, environments, runningJobs,
   // vcpus, memoryMib}; a limit absent or 0 is none.
   getQuota: () => tenantCall('GET', '/tenant/quota'),
+
+  // The builder's (ADR 0032). A plan of an environment answers {valid,
+  // findings, diff, base, current} and, from a ferund that pins at plan,
+  // images {as written: pinned}; one without an environment {valid,
+  // findings}. An apply answers 201 the deployment, 200 unchanged, 422
+  // invalid_spec with findings, 409 base_mismatch with current (the
+  // ApiError's body).
+  // A create with the same ID and name again answers 200 with it.
+  createEnvironment: (name, id) => tenantCall('POST', '/environments', id ? { name, id } : { name }),
+  planEnvironment: (env, spec, base) => tenantCall('POST', `/environments/${enc(env)}/plan`, { spec, base }),
+  planSpec: (spec) => tenantCall('POST', '/environments/plan', { spec }),
+  applyDeployment: (env, { spec, base, message }) =>
+    tenantCall('POST', `/environments/${enc(env)}/deployments`, message ? { spec, base, message } : { spec, base }),
+  // The secrets' names and latest versions, never a value; a put makes a
+  // new version, {name, version}.
+  listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
+  putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
+  // The addons' catalog; null from a ferund that has none (404).
+  addonCatalog: async () => {
+    try {
+      return await tenantCall('GET', '/addons');
+    } catch (e) {
+      if (e.status === 404 || e.status === 405) return null;
+      throw e;
+    }
+  },
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

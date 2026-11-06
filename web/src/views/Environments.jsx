@@ -7,23 +7,26 @@ import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, ErrBox, KV, LiveBadge, StateLabel, useNow, usePoll } from '../components.jsx';
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
-import { envPath } from '../routes.js';
+import { envPath, newEnvPath } from '../routes.js';
 import { focusOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { Traces } from './Traces.jsx';
+import { Builder } from './Builder.jsx';
 import {
   KIND_TITLES, changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence,
   heavyEffect, incidentObject, isAttached, labelPairs, logReplicas, logSourceText, logsProblem, objectSummary,
   objectTone, originText, parseLabelFilter, phaseTone, deploymentTone, rolloutNote, statusState,
 } from './envs.js';
 
-// A tenant's environments, read-only: the list with a label filter, and
-// an environment with its tabs: the overview (the rollout, the objects
-// of its target deployment with their instances, the routes), its deployments
-// (a deployment's diff and normalised spec), its incidents (with their
-// evidence) and the logs of an object. Environments are made and changed
-// through ferund's API (FeCode applies the deployments); this view applies,
-// reverts and deletes nothing, and reads no secret and no route token.
+// A tenant's environments: the list with a label filter, and an
+// environment with its tabs: the overview (the rollout, the objects of
+// its target deployment with their instances, the routes), the builder
+// (Builder.jsx, ADR 0032: a draft planned on every change and applied as
+// the next deployment), its deployments (a deployment's diff and
+// normalised spec), its incidents (with their evidence) and the logs of
+// an object. Besides the builder's deployments and secrets' values this
+// view writes nothing: it reverts and deletes nothing, and reads no
+// secret's value and no route token.
 // The environment, the tab and its item are the route's:
 // /tenants/:t/environments/:env/:tab/:item.
 
@@ -130,6 +133,8 @@ function EnvList({ tenant, navigate }) {
             {counts.incidents > 0 && <span className="bad" title="open incidents">▲ {counts.incidents}</span>}
           </span>
           <span className="spacer" />
+          <button className="primary mini" onClick={() => navigate(newEnvPath(tenant))}>
+            <Icon name="plus" size={12} /> New environment</button>
           <LiveBadge lastOk={lastOk} />
         </div>
         <ErrBox error={err} />
@@ -159,8 +164,8 @@ function EnvList({ tenant, navigate }) {
           onLabel={(k, v) => addLabels([`${k}=${v}`])} />
         {!envs && !err && <p className="empty">Loading…</p>}
         <p className="footnote muted small">
-          Read-only: environments are made and changed through ferund's API, by FeCode or another client;
-          this view applies, reverts and deletes nothing, and reads no secret and no route token.
+          Environments are made and changed through ferund's API, by FeCode, an agent or the builder of an
+          environment's tab Builder; this view reverts and deletes nothing, and reads no secret's value and no route token.
         </p>
       </section>
     </div>
@@ -227,6 +232,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
 
 const TABS = [
   { key: 'overview', label: 'Overview', icon: 'gauge' },
+  { key: 'builder', label: 'Builder', icon: 'blocks' },
   { key: 'deployments', label: 'Deployments', icon: 'history' },
   { key: 'incidents', label: 'Incidents', icon: 'alert' },
   { key: 'logs', label: 'Logs', icon: 'file' },
@@ -310,6 +316,12 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
       {activeTab === 'overview' && (
         <div className="tabbody">
           {st ? <EnvOverview st={st} tenant={tenant} navigate={navigate} /> : !err && <p className="empty">Loading…</p>}
+        </div>
+      )}
+      {activeTab === 'builder' && (
+        <div className="tabbody">
+          {st ? <Builder key={st.id} tenant={tenant} env={st.name} st={st} navigate={navigate} />
+            : !err && <p className="empty">Loading…</p>}
         </div>
       )}
       {activeTab === 'deployments' && (
@@ -703,7 +715,9 @@ export function DeploymentView({ rel }) {
       <DiffView diff={rel.diff} />
       <details className="specbox">
         <summary>The spec, normalised: defaults filled, images pinned to digests, secret versions pinned</summary>
-        <div className="snippet"><pre className="specpre">{spec}</pre><CopyBtn text={spec} title="copy the spec" /></div>
+        <div className="snippet"><pre className="specpre">{spec}</pre><CopyBtn text={spec} title="copy the spec" />
+          <a className="button mini" download={`deployment-${rel.number}.json`} title="export the spec as a file"
+            href={`data:application/json;charset=utf-8,${encodeURIComponent(spec)}`}>Export</a></div>
       </details>
     </div>
   );

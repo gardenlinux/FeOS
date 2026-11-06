@@ -11,9 +11,10 @@
 //   /tenants/:t/tools                   the tools of its sandboxes
 //   /tenants/:t/members                 its members and invitations
 //   /tenants/:t/tokens                  its tokens
+//   /tenants/:t/new-environment         the builder of a new environment
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
-//                                       its environments, read-only; tab:
-//                                       overview, deployments[/:n],
+//                                       its environments; tab:
+//                                       overview, builder, deployments[/:n],
 //                                       incidents[/:id],
 //                                       logs[/:kind/:name[/:replica]][?search],
 //                                       traces[/:trace][?search]
@@ -31,7 +32,7 @@ function decode(s) {
 }
 
 // ENV_TABS are the tabs of an environment.
-export const ENV_TABS = ['overview', 'deployments', 'incidents', 'logs', 'traces'];
+export const ENV_TABS = ['overview', 'builder', 'deployments', 'incidents', 'logs', 'traces'];
 
 // SEARCH_TABS are the tabs whose search is in the address's query.
 const SEARCH_TABS = new Set(['logs', 'traces']);
@@ -111,10 +112,24 @@ export function parsePath(pathname) {
   if (seg[2] === 'tools') return { view: 'tools', tenant };
   if (seg[2] === 'members') return { view: 'members', tenant };
   if (seg[2] === 'tokens') return { view: 'tokens', tenant };
+  if (seg[2] === 'new-environment') return { view: 'newEnvironment', tenant };
   if (seg[2] === 'environments') return envRoute(tenant, seg.slice(3), search);
   if (seg[2] === 'sandboxes') return { view: 'sandboxes', tenant, sel: seg[3] || '', tab: seg[4] || 'overview' };
   return { view: 'overview', tenant };
 }
 
 // TENANT_VIEWS are the views that act in a tenant, with the session.
-export const TENANT_VIEWS = new Set(['overview', 'sandboxes', 'tools', 'environments', 'members', 'tokens']);
+export const TENANT_VIEWS = new Set([
+  'overview',
+  'sandboxes',
+  'tools',
+  'environments',
+  'newEnvironment',
+  'members',
+  'tokens',
+]);
+
+// newEnvPath is the builder of a new environment.
+export function newEnvPath(tenant) {
+  return `/tenants/${encodeURIComponent(tenant)}/new-environment`;
+}

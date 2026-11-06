@@ -1,0 +1,209 @@
+{
+  "method": "GET",
+  "path": "/api/v1/addons",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "the addon types' blueprints, the same for every tenant; env's TestAddonCatalog holds this file to the registered blueprints",
+  "response": {
+    "addons": [
+      {
+        "type": "nats",
+        "versions": [
+          "2"
+        ],
+        "defaultVersion": "2",
+        "plans": [
+          {
+            "name": "dev",
+            "vcpus": 1,
+            "memoryMib": 128,
+            "volumeMib": 1024
+          },
+          {
+            "name": "small",
+            "vcpus": 1,
+            "memoryMib": 512,
+            "volumeMib": 10240
+          }
+        ],
+        "defaultPlan": "small",
+        "outputKeys": [
+          "host",
+          "port",
+          "user",
+          "password",
+          "url"
+        ],
+        "outputFields": [],
+        "options": [
+          {
+            "name": "jetstream",
+            "kind": "boolean",
+            "required": false,
+            "default": true,
+            "description": "JetStream, with its store on the addon's volume. Without it the server keeps nothing and the addon has no volume; turning it off later no longer serves the streams on the volume.",
+            "values": [],
+            "pattern": "",
+            "reserved": [],
+            "reservedPrefixes": [],
+            "unique": false
+          }
+        ]
+      },
+      {
+        "type": "postgres",
+        "versions": [
+          "16",
+          "17"
+        ],
+        "defaultVersion": "17",
+        "plans": [
+          {
+            "name": "dev",
+            "vcpus": 1,
+            "memoryMib": 256,
+            "volumeMib": 1024
+          },
+          {
+            "name": "small",
+            "vcpus": 1,
+            "memoryMib": 1024,
+            "volumeMib": 10240
+          },
+          {
+            "name": "medium",
+            "vcpus": 2,
+            "memoryMib": 4096,
+            "volumeMib": 51200
+          },
+          {
+            "name": "large",
+            "vcpus": 4,
+            "memoryMib": 16384,
+            "volumeMib": 204800
+          }
+        ],
+        "defaultPlan": "small",
+        "outputKeys": [
+          "host",
+          "port",
+          "user",
+          "password",
+          "database",
+          "url"
+        ],
+        "outputFields": [
+          "role",
+          "database"
+        ],
+        "options": [
+          {
+            "name": "databases",
+            "kind": "list",
+            "required": false,
+            "default": [],
+            "description": "The databases to create. Provisioning creates the missing ones and never drops one. A reference's database is the first listed (else postgres) unless it names another.",
+            "values": [],
+            "pattern": "^[a-z][a-z0-9_]{0,62}$",
+            "reserved": [
+              "template0",
+              "template1",
+              "postgres"
+            ],
+            "reservedPrefixes": [],
+            "unique": true
+          },
+          {
+            "name": "roles",
+            "kind": "list",
+            "required": false,
+            "default": [],
+            "description": "Login roles, each with a generated password, CONNECT and CREATE on every listed database and a schema of its own name in each. They need a database; a reference names one with the field role. A role no longer listed is not dropped.",
+            "values": [],
+            "pattern": "^[a-z][a-z0-9_]{0,62}$",
+            "reserved": [
+              "postgres",
+              "public",
+              "none",
+              "current_user",
+              "current_role",
+              "session_user",
+              "information_schema"
+            ],
+            "reservedPrefixes": [
+              "pg_"
+            ],
+            "unique": true
+          }
+        ]
+      },
+      {
+        "type": "valkey",
+        "versions": [
+          "7.2",
+          "8"
+        ],
+        "defaultVersion": "8",
+        "plans": [
+          {
+            "name": "dev",
+            "vcpus": 1,
+            "memoryMib": 128,
+            "volumeMib": 256
+          },
+          {
+            "name": "small",
+            "vcpus": 1,
+            "memoryMib": 512,
+            "volumeMib": 2048
+          },
+          {
+            "name": "medium",
+            "vcpus": 1,
+            "memoryMib": 2048,
+            "volumeMib": 8192
+          },
+          {
+            "name": "large",
+            "vcpus": 2,
+            "memoryMib": 8192,
+            "volumeMib": 32768
+          }
+        ],
+        "defaultPlan": "small",
+        "outputKeys": [
+          "host",
+          "port",
+          "user",
+          "password",
+          "url"
+        ],
+        "outputFields": [],
+        "options": [
+          {
+            "name": "maxmemoryPolicy",
+            "kind": "oneOf",
+            "required": false,
+            "default": "noeviction",
+            "description": "What valkey does at its memory limit (70% of the plan's memory): noeviction refuses writes, the others evict keys (allkeys-*: any key, volatile-*: keys with a TTL).",
+            "values": [
+              "volatile-lru",
+              "volatile-lfu",
+              "volatile-random",
+              "volatile-ttl",
+              "allkeys-lru",
+              "allkeys-lfu",
+              "allkeys-random",
+              "noeviction"
+            ],
+            "pattern": "",
+            "reserved": [],
+            "reservedPrefixes": [],
+            "unique": false
+          }
+        ]
+      }
+    ]
+  }
+}

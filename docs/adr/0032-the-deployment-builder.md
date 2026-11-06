@@ -156,7 +156,11 @@ resolved again, a secret's new version rolled in unasked).
 - **The layout is automatic and the same for everyone**: columns by
   kind (the entry; services, then jobs; addons and bindings; secrets),
   in each column an order that keeps edges short (by the mean position
-  of a node's neighbours, ties by name). No positions are stored: not in
+  of a node's neighbours, ties by name). A service that another service
+  or a job calls stands in a column of the services right of its
+  caller, so that every reference runs left to right (a cycle is cut
+  where it closes); an edge that passes a column runs through a gap
+  between its nodes. No positions are stored: not in
   the spec, since a position changes nothing of the environment, not in
   a deployment's annotations, which are the caller's and 4 KiB, and not
   in a table of their own, where they would be stale for every object an
