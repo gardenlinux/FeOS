@@ -1910,6 +1910,13 @@ It polls (the list every 4 s, an environment every 3 s, the rest every
 instance tables fit a 1280 px wide window. Its tests read the fixtures
 of ferund's API tests (`go/internal/api/testdata/ferun`).
 
+Beside the UI, the build carries the architecture page,
+`web/public/docs/index.html`: FeRun and FeOS on one page with their
+diagrams, a snapshot of these documents, served without sign-in at
+`/docs/` (`/docs` redirects there). A directory of the build with an
+`index.html` of its own is served as that page; every other path that
+names no file gets the UI's `index.html`.
+
 ## Environments
 
 An environment ([ADR 0018](../adr/0018-environments-and-releases.md)) is

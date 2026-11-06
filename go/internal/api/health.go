@@ -36,7 +36,9 @@ func (s *server) readyz(w http.ResponseWriter, r *http.Request) {
 }
 
 // ui serves the management UI to GET and HEAD: a file of the build when
-// the path names one, else index.html (the UI routes deep links itself).
+// the path names one, a directory's own index.html when it has one (the
+// architecture page at /docs/, web/public/docs), else the UI's index.html
+// (the UI routes deep links itself).
 // Without a build, a plain 404 says so. (It is mounted for every method,
 // because the method-less patterns of the doors make a "GET /" pattern
 // ambiguous to the mux.)
@@ -66,14 +68,25 @@ func (s *server) uiFiles() http.Handler {
 	}
 	files := http.FileServerFS(ui)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/")
+		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/")
 		if name != "" && fs.ValidPath(name) {
-			if st, err := fs.Stat(ui, name); err == nil && !st.IsDir() {
-				files.ServeHTTP(w, r)
-				return
+			if st, err := fs.Stat(ui, name); err == nil {
+				// A directory with an index.html of its own is a page
+				// beside the UI; the file server answers it, and
+				// redirects /docs to /docs/ so that its links resolve.
+				if !st.IsDir() || hasIndex(ui, name) {
+					files.ServeHTTP(w, r)
+					return
+				}
 			}
 		}
 		// The index for "/", directories and every route of the UI.
 		http.ServeFileFS(w, r, ui, "index.html")
 	})
+}
+
+// hasIndex reports whether the directory dir of fsys holds an index.html.
+func hasIndex(fsys fs.FS, dir string) bool {
+	st, err := fs.Stat(fsys, dir+"/index.html")
+	return err == nil && !st.IsDir()
 }

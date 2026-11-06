@@ -5,6 +5,7 @@ FeOS Documentation
 |---|---|
 | what FeOS is, what it is for, where it stands | [overview.md](overview.md) |
 | how the node, the guest, the API and the control plane work | [architecture/](architecture/) |
+| the whole on one page, with diagrams | [web/public/docs/index.html](../web/public/docs/index.html), served by ferund at `/docs/` |
 | why it is built this way | [adr/](adr/) |
 | where it protects less than intended, and what closes it | [security.md](security.md) |
 | how to build, test and contribute | [development.md](development.md) |

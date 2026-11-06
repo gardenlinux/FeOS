@@ -1,0 +1,885 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+SPDX-License-Identifier: Apache-2.0
+-->
+<!--
+The architecture of FeRun and FeOS on one page, served by ferund at
+/docs/ beside the management UI (Vite copies web/public into the build).
+A snapshot of docs/: where the two differ, docs/ is right.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>FeRun and FeOS</title>
+<style>
+/* Layout: one reading column for prose, full-width figure plates for the diagrams; colour = layer (FeRun indigo, FeOS iron ochre, infra grey, mesh teal) */
+:root {
+  --bg: #f3f4f7;
+  --surface: #ffffff;
+  --fg: #14171c;
+  --fg2: #3a414d;
+  --muted: #5f6878;
+  --line: #d5d9e1;
+  --run: #3445b4;
+  --run-soft: #e6e9fb;
+  --run-wash: #f3f4fd;
+  --os: #a4540b;
+  --os-soft: #fbecd8;
+  --os-wash: #fdf7ef;
+  --ext: #5a6373;
+  --ext-soft: #eceef2;
+  --net: #0a7a69;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1115; --surface: #151a21; --fg: #e7eaf0; --fg2: #c2c8d2; --muted: #939cab; --line: #2a303a;
+    --run: #9ba7ff; --run-soft: #1f2547; --run-wash: #131830;
+    --os: #f0a64f; --os-soft: #35250f; --os-wash: #1d1810;
+    --ext: #a8b0bd; --ext-soft: #1f252d;
+    --net: #46c9b3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1115; --surface: #151a21; --fg: #e7eaf0; --fg2: #c2c8d2; --muted: #939cab; --line: #2a303a;
+  --run: #9ba7ff; --run-soft: #1f2547; --run-wash: #131830;
+  --os: #f0a64f; --os-soft: #35250f; --os-wash: #1d1810;
+  --ext: #a8b0bd; --ext-soft: #1f252d;
+  --net: #46c9b3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: env(safe-area-inset-top, 0px) calc(64px + env(safe-area-inset-bottom, 0px));
+}
+.wrap { max-width: 1200px; margin: 0 auto; }
+.prose { max-width: 70ch; }
+a { color: var(--run); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; border-radius: 2px; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+
+/* header */
+header.top { display: flex; gap: 28px; align-items: flex-start; padding-block: 56px 28px; flex-wrap: wrap; }
+.tile {
+  flex: none; width: 96px; height: 104px; border: 1.5px solid var(--os); border-radius: 4px;
+  background: var(--os-soft); color: var(--fg); display: grid; grid-template-rows: auto 1fr auto auto;
+  padding: 6px 8px; font-family: var(--mono); line-height: 1.1;
+}
+.tile .z { font-size: 12px; color: var(--muted); }
+.tile .sym { font-family: var(--sans); font-weight: 750; font-size: 40px; color: var(--os); align-self: center; }
+.tile .nm { font-size: 11px; }
+.tile .am { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.head-text { flex: 1 1 420px; min-width: 0; }
+.eyebrow { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+.eyebrow a { color: inherit; }
+h1 {
+  font-family: var(--sans); font-weight: 760; letter-spacing: -0.015em;
+  font-size: clamp(2.3rem, 5.2vw, 3.6rem); line-height: 1.04; margin: 0 0 16px; text-wrap: balance;
+}
+h1 .run { color: var(--run); }
+h1 .os { color: var(--os); }
+.lede { font-size: 18px; line-height: 1.55; color: var(--fg2); margin: 0 0 14px; max-width: 66ch; }
+.src { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
+
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-block: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; margin-bottom: 8px; }
+nav.toc a { color: var(--fg2); text-decoration: none; }
+nav.toc a:hover { color: var(--run); text-decoration: underline; }
+
+section { padding-block: 40px 8px; }
+h2 { font-family: var(--sans); font-weight: 700; font-size: 1.75rem; line-height: 1.15; margin: 0 0 12px; text-wrap: balance; letter-spacing: -0.01em; }
+h3 { font-family: var(--sans); font-weight: 600; font-size: 1.05rem; margin: 24px 0 8px; }
+p { margin: 0 0 14px; }
+
+/* legend */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--fg2); margin: 4px 0 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
+.sw.run { background: var(--run-soft); border-color: var(--run); }
+.sw.os { background: var(--os-soft); border-color: var(--os); }
+.sw.ext { background: var(--ext-soft); border-color: var(--ext); }
+.sw.cli { background: var(--surface); border-color: var(--muted); border-style: dashed; }
+.sw.net { width: 22px; height: 0; border: 0; border-top: 2.5px solid var(--net); border-radius: 0; }
+
+/* figures */
+figure { margin: 8px 0 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 14px 12px; }
+.fig-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.fig-scroll svg { display: block; width: 100%; height: auto; min-width: 1000px; }
+figcaption { font-size: 14px; color: var(--fg2); margin-top: 10px; max-width: 92ch; line-height: 1.55; }
+figcaption b { font-weight: 600; color: var(--fg); }
+.fig-no { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
+
+/* svg */
+.dg text { font-family: var(--sans); font-size: 11.5px; fill: var(--muted); }
+.dg .t { font-family: var(--sans); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.dg .tm { font-family: var(--mono); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.dg .tm2 { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--fg); }
+.dg .lb { font-family: var(--mono); font-size: 11px; fill: var(--fg2); }
+.dg .lbn { font-family: var(--mono); font-size: 11px; fill: var(--net); font-weight: 500; }
+.dg .rt { font-family: var(--sans); font-size: 12px; font-weight: 600; letter-spacing: 0.09em; }
+.dg .rt.run { fill: var(--run); }
+.dg .rt.os { fill: var(--os); }
+.dg .reg-run { fill: var(--run-wash); stroke: var(--run); stroke-opacity: 0.4; stroke-width: 1.2; }
+.dg .reg-os { fill: var(--os-wash); stroke: var(--os); stroke-opacity: 0.45; stroke-width: 1.2; }
+.dg .b-run { fill: var(--run-soft); stroke: var(--run); stroke-width: 1.2; }
+.dg .b-runl { fill: var(--surface); stroke: var(--run); stroke-width: 1.2; }
+.dg .b-os { fill: var(--os-soft); stroke: var(--os); stroke-width: 1.2; }
+.dg .b-node { fill: var(--surface); stroke: var(--os); stroke-width: 1.2; }
+.dg .b-vm { fill: var(--os-wash); stroke: var(--os); stroke-width: 1; stroke-dasharray: 5 3; }
+.dg .b-ext { fill: var(--ext-soft); stroke: var(--ext); stroke-width: 1.2; }
+.dg .b-cli { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.dg .b-plain { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.dg .b-plain2 { fill: var(--surface); stroke: var(--os); stroke-opacity: 0.55; stroke-width: 1; }
+.dg .b-net { fill: var(--surface); stroke: var(--net); stroke-width: 1.4; }
+.dg .b-frame { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 6 4; }
+.dg .b-cont { fill: none; stroke: var(--os); stroke-opacity: 0.6; stroke-width: 1.2; stroke-dasharray: 6 4; }
+.dg .b-envf { fill: var(--run-wash); stroke: var(--run); stroke-opacity: 0.5; stroke-width: 1.2; }
+.dg .ln { stroke: var(--fg2); stroke-width: 1.4; fill: none; }
+.dg .ln-net { stroke: var(--net); stroke-width: 2.2; fill: none; }
+.dg .mk { fill: var(--fg2); }
+.dg .mkn { fill: var(--net); }
+.dg .dot { fill: var(--fg2); }
+
+/* tables */
+.tbl { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.5; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.prog { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+td.nw { white-space: nowrap; }
+.pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.pill.run { color: var(--run); border-color: var(--run); background: var(--run-soft); }
+.pill.os { color: var(--os); border-color: var(--os); background: var(--os-soft); }
+.pill.ext { color: var(--ext); border-color: var(--ext); background: var(--ext-soft); }
+.pill.net { color: var(--net); border-color: var(--net); background: var(--surface); }
+
+/* package groups */
+.groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; min-width: 0; }
+.group h3 { margin: 0 0 4px; font-size: 15px; }
+.group .pk { font-family: var(--mono); font-size: 12px; color: var(--run); margin: 0 0 8px; overflow-wrap: anywhere; }
+.group p { font-size: 14px; color: var(--fg2); margin: 0; }
+
+/* lists */
+ul.facts { padding-left: 20px; margin: 0 0 14px; max-width: 80ch; }
+ul.facts li { margin-bottom: 6px; }
+.times { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.time { border-left: 3px solid var(--os); padding: 4px 0 4px 12px; min-width: 0; }
+.time .v { font-family: var(--mono); font-weight: 600; font-size: 18px; font-variant-numeric: tabular-nums; }
+.time .k { font-size: 13.5px; color: var(--fg2); }
+.time code { white-space: nowrap; }
+.principles { list-style: none; padding: 0; margin: 8px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
+.principles li { padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.principles b { display: block; font-weight: 600; }
+.principles span { color: var(--fg2); font-size: 14.5px; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+footer code { font-size: 12px; }
+
+@media (max-width: 560px) {
+  header.top { padding-block: 32px 20px; gap: 18px; }
+  .tile { width: 76px; height: 86px; }
+  .tile .sym { font-size: 30px; }
+  .lede { font-size: 16.5px; }
+  h2 { font-size: 1.5rem; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="tile" aria-hidden="true"><span class="z">26</span><span class="sym">Fe</span><span class="nm">Iron</span><span class="am">55.845</span></div>
+  <div class="head-text">
+    <p class="eyebrow"><a href="/">FeRun</a> · Architecture · as of 6 November 2026</p>
+    <h1><span class="run">FeRun</span> and <span class="os">FeOS</span></h1>
+    <p class="lede"><b>FeOS</b> is everything that runs on the nodes. It runs pods: Firecracker microVMs with containers in them that cost no memory while idle and are back in under a second. <b>FeRun</b> is the control plane above it, the Go program <code>ferund</code> in replicas over one PostgreSQL. It knows who owns each pod, where it runs and when it may sleep. FeCode builds its sandboxes, environments and builds on top of it.</p>
+    <p class="src">A picture of <code>docs/overview.md</code>, <code>docs/architecture/</code> and <code>docs/adr/</code> in the FeOS repository at <code>f4dd725</code>. It is a snapshot: where it and those pages differ, the pages are right.</p>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <a href="#overview">Overview</a>
+  <a href="#components">Components</a>
+  <a href="#connections">Connections</a>
+  <a href="#node">Inside a node</a>
+  <a href="#request">A request's path</a>
+  <a href="#pod-life">A pod's life</a>
+  <a href="#caas">CaaS</a>
+  <a href="#ferund">Inside ferund</a>
+  <a href="#principles">Principles</a>
+  <a href="#open">Not built yet</a>
+</nav>
+
+<!-- ============ Overview ============ -->
+<section id="overview">
+  <h2>Overview</h2>
+  <p class="prose">FeRun on top, FeOS below. Each arrow points away from the side that opens the connection. The direction that matters most is the one from the node upwards: no node opens a port for control.</p>
+  <div class="legend" aria-hidden="true">
+    <span><i class="sw run"></i>FeRun</span>
+    <span><i class="sw os"></i>FeOS</span>
+    <span><i class="sw ext"></i>Infrastructure</span>
+    <span><i class="sw cli"></i>Clients</span>
+    <span><i class="sw net"></i>Pod mesh (WireGuard)</span>
+  </div>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1160 900" role="img" aria-label="FeRun as the control plane with ferund, ferun-ingress, ferun-sink, feos-k8s and PostgreSQL; below it FeOS nodes with feosd, diskd and microVM pods. Nodes connect to ferund over mTLS; public traffic goes through ferun-ingress and the WireGuard mesh straight to the pods.">
+  <defs>
+    <marker id="m1" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+    <marker id="m1n" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mkn"/></marker>
+  </defs>
+
+  <!-- clients -->
+  <rect class="b-cli" x="290" y="20" width="140" height="48" rx="4"/>
+  <text class="t" x="360" y="40" text-anchor="middle">FeCode</text>
+  <text x="360" y="57" text-anchor="middle">backend · REST</text>
+  <rect class="b-cli" x="445" y="20" width="140" height="48" rx="4"/>
+  <text class="t" x="515" y="40" text-anchor="middle">Agents</text>
+  <text x="515" y="57" text-anchor="middle">MCP tools</text>
+  <rect class="b-cli" x="600" y="20" width="130" height="48" rx="4"/>
+  <text class="t" x="665" y="40" text-anchor="middle">Admins</text>
+  <text x="665" y="57" text-anchor="middle">UI · OIDC</text>
+  <rect class="b-cli" x="860" y="20" width="200" height="48" rx="4"/>
+  <text class="t" x="960" y="40" text-anchor="middle">Visitors</text>
+  <text x="960" y="57" text-anchor="middle">browsers, app clients</text>
+  <path class="ln" d="M360 68V100" marker-end="url(#m1)"/>
+  <path class="ln" d="M515 68V100" marker-end="url(#m1)"/>
+  <path class="ln" d="M665 68V100" marker-end="url(#m1)"/>
+  <path class="ln" d="M960 68V100" marker-end="url(#m1)"/>
+
+  <!-- balancers -->
+  <rect class="b-ext" x="290" y="100" width="440" height="44" rx="4"/>
+  <text class="t" x="510" y="119" text-anchor="middle">HTTPS balancer</text>
+  <text x="510" y="136" text-anchor="middle">no sticky sessions</text>
+  <rect class="b-ext" x="860" y="100" width="200" height="44" rx="4"/>
+  <text class="t" x="960" y="119" text-anchor="middle">L4 balancer</text>
+  <text x="960" y="136" text-anchor="middle">apps zone · domains</text>
+
+  <!-- FeRun region -->
+  <rect class="reg-run" x="16" y="170" width="1128" height="330" rx="8"/>
+  <text class="rt run" x="32" y="191">FERUN · CONTROL PLANE</text>
+  <text x="32" y="207">Go · go/</text>
+
+  <path class="ln" d="M614 144V216" marker-end="url(#m1)"/>
+  <text class="lb" x="622" y="186">REST · MCP · UI</text>
+  <path class="ln" d="M960 144V216" marker-end="url(#m1)"/>
+  <text class="lb" x="968" y="186">HTTPS :443</text>
+
+  <rect class="b-ext" x="40" y="226" width="200" height="84" rx="4"/>
+  <text class="t" x="140" y="254" text-anchor="middle">PostgreSQL</text>
+  <text x="140" y="273" text-anchor="middle">17 or newer</text>
+  <text x="140" y="291" text-anchor="middle">replicated synchronously</text>
+
+  <rect class="b-run" x="290" y="216" width="440" height="104" rx="4"/>
+  <text class="tm" x="306" y="238">ferund</text>
+  <text x="306" y="256">replicas · any one serves any request · a leader by lease</text>
+  <rect class="b-plain" x="306" y="268" width="200" height="40" rx="3"/>
+  <text class="tm2" x="406" y="285" text-anchor="middle">:7443 nodes' port</text>
+  <text x="406" y="301" text-anchor="middle">TLS 1.3 · by ALPN</text>
+  <rect class="b-plain" x="514" y="268" width="200" height="40" rx="3"/>
+  <text class="tm2" x="614" y="285" text-anchor="middle">:8100 front doors</text>
+  <text x="614" y="301" text-anchor="middle">REST · /mcp · /fwd · UI</text>
+
+  <path class="ln" d="M290 268H240" marker-end="url(#m1)"/>
+  <text class="lb" x="265" y="260" text-anchor="middle">SQL</text>
+
+  <rect class="b-run" x="860" y="216" width="200" height="90" rx="4"/>
+  <text class="tm" x="960" y="238" text-anchor="middle">ferun-ingress</text>
+  <text x="960" y="256" text-anchor="middle">instances · own /96</text>
+  <text x="960" y="273" text-anchor="middle">TLS by SNI → pod</text>
+  <text x="960" y="290" text-anchor="middle">table kept in cache</text>
+  <path class="ln" d="M860 250H730" marker-end="url(#m1)"/>
+  <text class="lb" x="795" y="242" text-anchor="middle">Sync · Wake · Hold</text>
+  <text class="lb" x="795" y="266" text-anchor="middle">:7443 · mTLS</text>
+
+  <rect class="b-run" x="40" y="380" width="200" height="80" rx="4"/>
+  <text class="tm" x="140" y="406" text-anchor="middle">feos-k8s</text>
+  <text x="140" y="425" text-anchor="middle">joins new workers</text>
+  <text x="140" y="443" text-anchor="middle">drains on cordon</text>
+  <path class="ln" d="M240 420H300V320" marker-end="url(#m1)"/>
+  <text class="lb" x="246" y="438">admin API</text>
+
+  <rect class="b-run" x="540" y="380" width="180" height="80" rx="4"/>
+  <text class="tm" x="630" y="406" text-anchor="middle">ferun-sink</text>
+  <text x="630" y="425" text-anchor="middle">OTLP ingest :4317</text>
+  <text x="630" y="443" text-anchor="middle">logs · spans · quota</text>
+  <rect class="b-ext" x="770" y="380" width="140" height="80" rx="4"/>
+  <text class="tm" x="840" y="406" text-anchor="middle">Kafka</text>
+  <text x="840" y="425" text-anchor="middle">log of record</text>
+  <text x="840" y="443" text-anchor="middle">topics by retention</text>
+  <rect class="b-ext" x="950" y="380" width="120" height="80" rx="4"/>
+  <text class="tm" x="1010" y="406" text-anchor="middle">Quickwit</text>
+  <text x="1010" y="425" text-anchor="middle">index for</text>
+  <text x="1010" y="443" text-anchor="middle">logs + traces</text>
+  <path class="ln" d="M720 420H770" marker-end="url(#m1)"/>
+  <path class="ln" d="M910 420H950" marker-end="url(#m1)"/>
+
+  <!-- node bus to ferund -->
+  <path class="ln" d="M186 622V530H650V622"/>
+  <path class="ln" d="M420 530V320" marker-end="url(#m1)"/>
+  <circle class="dot" cx="420" cy="530" r="3"/>
+  <text class="lb" x="412" y="372" text-anchor="end">mTLS · :7443</text>
+  <text class="lb" x="412" y="388" text-anchor="end">dialled by node</text>
+  <text class="lb" x="412" y="404" text-anchor="end">feos.* + uplink</text>
+
+  <!-- logs to sink -->
+  <path class="ln" d="M690 622V460" marker-end="url(#m1)"/>
+  <text class="lb" x="698" y="516">OTLP · logs + spans</text>
+
+  <!-- mesh from ingress -->
+  <path class="ln-net" d="M1060 262H1100V592" marker-end="url(#m1n)"/>
+  <text class="lbn" x="1116" y="430" text-anchor="middle" transform="rotate(90 1116 430)">WireGuard · UDP 51820</text>
+
+  <!-- FeOS region -->
+  <rect class="reg-os" x="16" y="556" width="1128" height="258" rx="8"/>
+  <text class="rt os" x="32" y="577">FEOS · NODES</text>
+  <text x="200" y="577">Rust · static musl · systemd, feos-host-init or Kubernetes</text>
+
+  <!-- Node A -->
+  <rect class="b-node" x="40" y="592" width="510" height="206" rx="6"/>
+  <text class="lb" x="534" y="611" text-anchor="end">node A</text>
+  <rect class="b-os" x="56" y="622" width="260" height="50" rx="4"/>
+  <text class="tm" x="72" y="643">feosd</text>
+  <text x="72" y="661">API · pods · network · DNS · mesh</text>
+  <rect class="b-os" x="332" y="622" width="202" height="50" rx="4"/>
+  <text class="tm" x="348" y="643">diskd</text>
+  <text x="348" y="661">ublk disks · cache · S3</text>
+  <rect class="b-vm" x="56" y="690" width="230" height="96" rx="4"/>
+  <text x="68" y="706">microVM in Firecracker</text>
+  <rect class="b-os" x="68" y="714" width="206" height="28" rx="3"/>
+  <text class="tm2" x="171" y="732" text-anchor="middle">feos-guest · PID 1</text>
+  <rect class="b-plain" x="68" y="750" width="100" height="26" rx="3"/>
+  <text x="118" y="767" text-anchor="middle">container</text>
+  <rect class="b-plain" x="174" y="750" width="100" height="26" rx="3"/>
+  <text x="224" y="767" text-anchor="middle">container</text>
+  <rect class="b-vm" x="302" y="690" width="232" height="96" rx="4"/>
+  <text x="314" y="706">microVM in Firecracker</text>
+  <rect class="b-os" x="314" y="714" width="208" height="28" rx="3"/>
+  <text class="tm2" x="418" y="732" text-anchor="middle">feos-guest · PID 1</text>
+  <rect class="b-plain" x="314" y="750" width="101" height="26" rx="3"/>
+  <text x="364.5" y="767" text-anchor="middle">container</text>
+  <rect class="b-plain" x="421" y="750" width="101" height="26" rx="3"/>
+  <text x="471.5" y="767" text-anchor="middle">container</text>
+
+  <!-- Node B -->
+  <rect class="b-node" x="610" y="592" width="510" height="206" rx="6"/>
+  <text class="lb" x="1080" y="611" text-anchor="end">node B</text>
+  <rect class="b-os" x="626" y="622" width="260" height="50" rx="4"/>
+  <text class="tm" x="642" y="643">feosd</text>
+  <text x="642" y="661">API · pods · network · DNS · mesh</text>
+  <rect class="b-os" x="902" y="622" width="202" height="50" rx="4"/>
+  <text class="tm" x="918" y="643">diskd</text>
+  <text x="918" y="661">ublk disks · cache · S3</text>
+  <rect class="b-vm" x="626" y="690" width="230" height="96" rx="4"/>
+  <text x="638" y="706">microVM in Firecracker</text>
+  <rect class="b-os" x="638" y="714" width="206" height="28" rx="3"/>
+  <text class="tm2" x="741" y="732" text-anchor="middle">feos-guest · PID 1</text>
+  <rect class="b-plain" x="638" y="750" width="100" height="26" rx="3"/>
+  <text x="688" y="767" text-anchor="middle">container</text>
+  <rect class="b-plain" x="744" y="750" width="100" height="26" rx="3"/>
+  <text x="794" y="767" text-anchor="middle">container</text>
+  <rect class="b-vm" x="872" y="690" width="232" height="96" rx="4"/>
+  <text x="884" y="706">microVM in Firecracker</text>
+  <rect class="b-os" x="884" y="714" width="208" height="28" rx="3"/>
+  <text class="tm2" x="988" y="732" text-anchor="middle">feos-guest · PID 1</text>
+  <rect class="b-plain" x="884" y="750" width="101" height="26" rx="3"/>
+  <text x="934.5" y="767" text-anchor="middle">container</text>
+  <rect class="b-plain" x="991" y="750" width="101" height="26" rx="3"/>
+  <text x="1041.5" y="767" text-anchor="middle">container</text>
+
+  <!-- mesh between nodes -->
+  <path class="ln-net" d="M550 700H610" marker-start="url(#m1n)" marker-end="url(#m1n)"/>
+  <text class="lbn" x="580" y="690" text-anchor="middle">mesh</text>
+
+  <!-- object storage -->
+  <path class="ln" d="M295 798V840" marker-start="url(#m1)" marker-end="url(#m1)"/>
+  <text class="lb" x="304" y="826">layers · hibernation</text>
+  <path class="ln" d="M865 798V840" marker-start="url(#m1)" marker-end="url(#m1)"/>
+  <text class="lb" x="874" y="826">layers · hibernation</text>
+  <rect class="b-ext" x="40" y="840" width="1080" height="52" rx="4"/>
+  <text class="t" x="580" y="861" text-anchor="middle">Object storage (S3)</text>
+  <text x="580" y="879" text-anchor="middle">diskd: sealed layers, chunks, hibernated pods · Quickwit: index and cold store</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 1</span><b>Two layers, one direction of control.</b> Every <code>feosd</code> connects over mTLS to every <code>ferund</code> instance. On the node connection ferund calls the node's <code>feos.*</code> APIs; on the uplink the node reports telemetry (every 5 s) and events. Application traffic takes another path: from the L4 balancer through <code>ferun-ingress</code> and the WireGuard mesh straight to the pod, never through ferund. Two nodes stand in for all of them.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ Components ============ -->
+<section id="components">
+  <h2>Components</h2>
+  <p class="prose">One monorepo: the node's programs in Rust under <code>crates/</code>, FeRun in Go under <code>go/</code>, the management UI in <code>web/</code>, and the contract between the layers as gRPC in <code>proto/feos/</code>.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Program</th><th>Layer</th><th>Runs as</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="prog">ferund</td><td><span class="pill run">FeRun · Go</span></td><td>replicas over one PostgreSQL, three in production</td><td>Tenants and tokens, sandboxes with placement, pause and hibernation, environments and deployments, the fleet and its CA, ACME for domains, REST, MCP, the port door, the management UI. Any instance serves any request; a leader, by a 15 s lease, runs the background loops.</td></tr>
+        <tr><td class="prog">ferun-ingress</td><td><span class="pill run">FeRun · Go</span></td><td>instances behind an L4 balancer of their own</td><td>HTTPS for public environments. A peer on the pod mesh with its own /96; routes from a table ferund streams to it, keeps idle services awake and wakes sleeping ones.</td></tr>
+        <tr><td class="prog">ferun-sink</td><td><span class="pill run">FeRun · Go</span></td><td>a service beside ferund, with a database of its own</td><td>Takes logs and spans over OTLP from nodes and the ingress, appends them to Kafka, Quickwit indexes them. Serves <code>/api/v1/logs</code>, <code>/api/v1/log-streams</code> and the Jaeger API; a quota per tenant.</td></tr>
+        <tr><td class="prog">feos-k8s</td><td><span class="pill run">FeRun · Go</span></td><td>one replica beside ferund, on Kubernetes</td><td>The bridge to Kubernetes: makes join tokens for new nodes and puts them into the secret <code>feosd-join</code>, drains replaced ones in FeRun. One pass every 5 s, no watch.</td></tr>
+        <tr><td class="prog">feosd</td><td><span class="pill os">FeOS · Rust</span></td><td>under systemd or <code>feos-host-init</code>; on Kubernetes in the pod <code>feos-node</code></td><td>The node agent. Runs pods as Firecracker in its jailer, with snapshots, the balloon and volumes. Builds the pods' network (TAP, nftables, DNS, mesh) and ships their logs to the sink. Serves its API on <code>/run/feos/api.sock</code> and on the node connection.</td></tr>
+        <tr><td class="prog">diskd</td><td><span class="pill os">FeOS · Rust</span></td><td>beside feosd, one per node</td><td>The pods' disks as ublk devices over sealed, content-addressed layers; a local cache with S3 behind it. Hibernation into the object store, and memory served lazily on restore through userfaultfd.</td></tr>
+        <tr><td class="prog">feos-guest</td><td><span class="pill os">FeOS · Rust</span></td><td>PID 1 in every microVM</td><td>Starts the containers with libcontainer and serves tools, watches and port forwards. Talks to feosd over vsock; its time and network are pushed by the host.</td></tr>
+        <tr><td class="prog">feos-authn</td><td><span class="pill os">FeOS · Rust</span></td><td>one process per pod with bindings</td><td>HTTP bindings at <code>169.254.169.1</code>: adds the credential (headers, Basic, OAuth client credentials, a client certificate) and calls the upstream over TLS. The credential never reaches the pod.</td></tr>
+        <tr><td class="prog">Firecracker</td><td><span class="pill ext">external</span></td><td>one process per running pod</td><td>The only VMM, always in its jailer with a cgroup of its own. Nodes keep the versions their snapshots need.</td></tr>
+        <tr><td class="prog">feos-host-init</td><td><span class="pill os">FeOS · Rust</span></td><td>PID 1 of a node whose operating system is FeOS</td><td>Sets the machine up (DHCP, NTP, mounts) and keeps diskd and feosd running. On Debian, Garden Linux or Kubernetes the distribution does that.</td></tr>
+        <tr><td class="prog">feosctl</td><td><span class="pill os">FeOS · Rust</span></td><td>anywhere</td><td>The command-line client for a node's Unix socket.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ Connections ============ -->
+<section id="connections">
+  <h2>Who talks to whom</h2>
+  <p class="prose">Every connection of the platform, with its path and purpose. The nodes' port <code>:7443</code> routes strictly by ALPN: node connections, uplinks, joins and the ingress share the one listener.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>From → To</th><th>Path</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td class="nw">FeCode, agents, admins → <code>ferund :8100</code></td><td>HTTPS through a balancer without sticky sessions, a bearer token or an OIDC session</td><td>REST, MCP at <code>/mcp</code>, ports at <code>/fwd/</code>, sign-in at <code>/auth/</code>, the UI, this page at <code>/docs/</code></td></tr>
+        <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>TLS 1.3, the node's client certificate, ALPN <code>feos-node/1</code></td><td>The node connection: the node is the HTTP/2 server, ferund the gRPC client of <code>feos.pod.v1</code>, <code>volume.v1</code>, <code>network.v1</code> and the other APIs</td></tr>
+        <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>ALPN <code>h2</code>, the node's certificate (without one: join only)</td><td>The uplink, <code>feos.fleet.v1</code>: join with a one-time token, certificate renewal (168 h), telemetry every 5 s, events, <code>JoinMesh</code>, the pods' credentials</td></tr>
+        <tr><td class="nw"><code>ferun-ingress</code> → <code>ferund :7443</code></td><td>ALPN <code>ferun-ingress/1</code>, gRPC with JSON, mTLS</td><td>Join, Hello, <code>Sync</code> (the versioned routing table as a stream, heartbeat every 10 s), <code>Wake</code>, <code>Hold</code></td></tr>
+        <tr><td class="nw">Internet → <code>ferun-ingress</code></td><td>an L4 balancer, 80/443 → 8080/8443</td><td>TLS by SNI: a domain's certificate from the table, else the apps zone's wildcard. Port 80 answers ACME HTTP-01, everything else gets a 308 to HTTPS</td></tr>
+        <tr><td class="nw"><code>ferun-ingress</code> → pod</td><td><span class="pill net">mesh</span> WireGuard <code>ferun-mesh</code>, UDP 51820</td><td>HTTP/1.1 to <code>[pod IPv6]:port</code>, admitted by the group <code>ing-&lt;sandbox-id&gt;</code> on the node</td></tr>
+        <tr><td class="nw">pod ↔ pod across nodes</td><td><span class="pill net">mesh</span> WireGuard <code>feos-mesh</code>, UDP 51820</td><td>IPv6 from the cluster's ULA /64, a /96 per node; ferund hands out the peers</td></tr>
+        <tr><td class="nw"><code>feos-guest</code> → <code>feosd</code></td><td>vsock, port 10001</td><td><code>LifecycleService.Attach</code> held open; over it the guest API, the time (ADR 0027) and the network</td></tr>
+        <tr><td class="nw">pod → <code>169.254.0.53</code></td><td>DNS, UDP/TCP 53</td><td>The resolver in feosd; answers the names of the name tables itself, on sockets that outlive a feosd restart</td></tr>
+        <tr><td class="nw">pod → <code>169.254.169.1</code></td><td>OTLP :4317/:4318, HTTP :80/:443</td><td>The application's spans; HTTP bindings, whose connections feosd passes as an fd to the pod's <code>feos-authn</code></td></tr>
+        <tr><td class="nw"><code>feosd</code> → <code>ferun-sink :4317</code></td><td>OTLP gRPC, mTLS with the node's certificate</td><td>Container logs from the stored offset, spans, the bindings' egress records</td></tr>
+        <tr><td class="nw"><code>ferun-ingress</code> → <code>ferun-sink</code></td><td>OTLP, mTLS with the ingress's certificate</td><td>The access log and a span for every request</td></tr>
+        <tr><td class="nw"><code>ferun-sink</code> → Kafka → Quickwit</td><td>topics <code>ferun-logs-v5-&lt;n&gt;d</code>, <code>ferun-traces-v4-&lt;n&gt;d</code></td><td>Kafka is the log of record, Quickwit the index and the cold store</td></tr>
+        <tr><td class="nw">FeCode → <code>ferun-sink</code></td><td>HTTPS, the FeRun token as bearer</td><td><code>/api/v1/logs</code>, live tail, <code>/api/v1/jaeger/api/…</code></td></tr>
+        <tr><td class="nw"><code>ferund</code> → <code>ferun-sink</code></td><td>HTTP inside the cluster (<code>--sink-url</code>)</td><td>Reads logs and access logs, traffic per service</td></tr>
+        <tr><td class="nw"><code>ferund</code> → PostgreSQL</td><td>pgx, PostgreSQL 17 or newer, replicated synchronously</td><td>All state. The database's clock decides every lease, TTL and deadline</td></tr>
+        <tr><td class="nw"><code>diskd</code> ↔ S3</td><td>S3 API, path-style</td><td>Sealed layers, chunks, hibernated pods with their memory and volumes</td></tr>
+        <tr><td class="nw"><code>feos-k8s</code> → Kubernetes, <code>ferund</code></td><td>service account; admin API with Basic</td><td>Join tokens per node, drains on cordon, cleanup of removed nodes</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ Node ============ -->
+<section id="node">
+  <h2>Inside a node</h2>
+  <p class="prose">On Kubernetes, FeOS runs as the DaemonSet <code>feos-node</code>: one pod per node, with the containers <code>diskd</code> and <code>feosd</code>. The microVMs live in feosd's container. A planned stop suspends them, and the next feosd resumes them (ADR 0020). Under systemd the same processes run without the pod around them.</p>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1120 700" role="img" aria-label="Inside a node: feosd with fleet client, API, pod and network modules; per pod a Firecracker process with a microVM holding feos-guest as PID 1, the task service and containers; one feos-authn per pod; diskd with layer store, cache, memory server and ublk devices that reach the microVM as virtio-blk.">
+  <defs>
+    <marker id="m2" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+    <marker id="m2n" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mkn"/></marker>
+  </defs>
+
+  <!-- externals -->
+  <rect class="b-run" x="68" y="16" width="160" height="44" rx="4"/>
+  <text class="tm" x="148" y="35" text-anchor="middle">ferund</text>
+  <text x="148" y="52" text-anchor="middle">:7443 · mTLS</text>
+  <rect class="b-run" x="402" y="16" width="160" height="44" rx="4"/>
+  <text class="tm" x="482" y="35" text-anchor="middle">ferun-sink</text>
+  <text x="482" y="52" text-anchor="middle">:4317 · OTLP</text>
+  <rect class="b-net" x="576" y="16" width="150" height="44" rx="4"/>
+  <text class="t" x="651" y="35" text-anchor="middle">Mesh peers</text>
+  <text x="651" y="52" text-anchor="middle">ingress, other nodes</text>
+  <rect class="b-ext" x="890" y="16" width="160" height="44" rx="4"/>
+  <text class="t" x="970" y="35" text-anchor="middle">Object storage</text>
+  <text x="970" y="52" text-anchor="middle">S3</text>
+
+  <!-- node -->
+  <rect class="b-frame" x="20" y="96" width="1080" height="588" rx="8"/>
+  <text x="36" y="676">a node · on Kubernetes the pod feos-node of the DaemonSet (ADR 0020); under systemd the same, without the pod</text>
+
+  <!-- feosd container -->
+  <rect class="b-cont" x="36" y="136" width="724" height="520" rx="6"/>
+  <text class="lb" x="52" y="648">container feosd</text>
+  <rect class="b-os" x="52" y="164" width="692" height="84" rx="4"/>
+  <text class="tm" x="68" y="186">feosd</text>
+  <rect class="b-plain" x="68" y="196" width="160" height="40" rx="3"/>
+  <text class="tm2" x="148" y="212" text-anchor="middle">fleet-client</text>
+  <text x="148" y="228" text-anchor="middle">join · telemetry</text>
+  <rect class="b-plain" x="240" y="196" width="150" height="40" rx="3"/>
+  <text class="tm2" x="315" y="212" text-anchor="middle">API feos.*</text>
+  <text x="315" y="228" text-anchor="middle">api.sock · ferund</text>
+  <rect class="b-plain" x="402" y="196" width="160" height="40" rx="3"/>
+  <text class="tm2" x="482" y="212" text-anchor="middle">pods · microVMs</text>
+  <text x="482" y="228" text-anchor="middle">snapshots · logs</text>
+  <rect class="b-plain" x="574" y="196" width="154" height="40" rx="3"/>
+  <text class="tm2" x="651" y="212" text-anchor="middle">network · DNS</text>
+  <text x="651" y="228" text-anchor="middle">TAP · nftables · WG</text>
+
+  <!-- arrows up -->
+  <path class="ln" d="M148 196V60" marker-end="url(#m2)"/>
+  <text class="lb" x="156" y="76">mTLS, dialled by node</text>
+  <text class="lb" x="156" y="90">node connection + uplink</text>
+  <path class="ln" d="M482 196V60" marker-end="url(#m2)"/>
+  <text class="lb" x="490" y="76">OTLP: logs, spans</text>
+  <text class="lb" x="490" y="90">egress records</text>
+  <path class="ln-net" d="M651 196V60" marker-start="url(#m2n)" marker-end="url(#m2n)"/>
+  <text class="lbn" x="659" y="76">WireGuard feos-mesh</text>
+  <text class="lbn" x="659" y="90">UDP 51820</text>
+  <path class="ln" d="M970 164V60" marker-start="url(#m2)" marker-end="url(#m2)"/>
+  <text class="lb" x="978" y="76">layers, chunks</text>
+  <text class="lb" x="978" y="90">hibernation</text>
+
+  <!-- firecracker + microVM -->
+  <rect class="b-vm" x="52" y="268" width="476" height="364" rx="4"/>
+  <text class="tm2" x="68" y="288">jailer → Firecracker</text>
+  <text x="68" y="304">one process per pod, with its own chroot and cgroup</text>
+  <rect class="b-plain" x="68" y="316" width="444" height="300" rx="4"/>
+  <text class="t" x="84" y="336">microVM (KVM)</text>
+  <rect class="b-os" x="84" y="348" width="412" height="50" rx="3"/>
+  <text class="tm" x="100" y="369">feos-guest · PID 1</text>
+  <text x="100" y="387">time and network pushed by the host · guest API</text>
+  <rect class="b-os" x="84" y="410" width="412" height="40" rx="3"/>
+  <text class="tm2" x="100" y="435">task service · libcontainer</text>
+  <rect class="b-plain2" x="84" y="462" width="200" height="50" rx="3"/>
+  <text class="tm2" x="184" y="483" text-anchor="middle">container main</text>
+  <text x="184" y="501" text-anchor="middle">the workload's image</text>
+  <rect class="b-plain2" x="296" y="462" width="200" height="50" rx="3"/>
+  <text class="tm2" x="396" y="483" text-anchor="middle">container …</text>
+  <text x="396" y="501" text-anchor="middle">one or more per pod</text>
+  <rect class="b-plain2" x="84" y="524" width="412" height="32" rx="3"/>
+  <text x="100" y="545">virtio-net (TAP): IPv6 from the node's /96 · IPv4 /32</text>
+  <rect class="b-plain2" x="84" y="566" width="412" height="38" rx="3"/>
+  <text x="100" y="590">virtio-blk: data · volume0 · volume1 …</text>
+
+  <!-- vsock + TAP -->
+  <path class="ln" d="M440 348V236" marker-end="url(#m2)"/>
+  <text class="lb" x="432" y="262" text-anchor="end">vsock :10001</text>
+  <path class="ln" d="M496 540H536V256H651V236" marker-start="url(#m2)" marker-end="url(#m2)"/>
+
+  <!-- authn + more pods -->
+  <rect class="b-os" x="552" y="268" width="192" height="150" rx="4"/>
+  <text class="tm" x="568" y="289">feos-authn</text>
+  <text x="568" y="308">one per pod with bindings</text>
+  <text x="568" y="324">own process, jailed</text>
+  <text class="lb" x="568" y="346">169.254.169.1 :80/:443</text>
+  <text x="568" y="364">adds the credential</text>
+  <text x="568" y="380">and calls the upstream</text>
+  <text x="568" y="396">over TLS · audit → sink</text>
+  <path class="ln" d="M700 236V268" marker-end="url(#m2)"/>
+  <text class="lb" x="692" y="258" text-anchor="end">fd</text>
+
+  <rect class="b-cli" x="552" y="438" width="192" height="102" rx="4"/>
+  <text class="tm2" x="648" y="476" text-anchor="middle">more pods</text>
+  <text x="648" y="496" text-anchor="middle">each with Firecracker,</text>
+  <text x="648" y="512" text-anchor="middle">TAP, disk, feos-authn</text>
+
+  <!-- diskd container -->
+  <rect class="b-cont" x="776" y="136" width="308" height="520" rx="6"/>
+  <text class="lb" x="792" y="648">container diskd</text>
+  <rect class="b-os" x="792" y="164" width="276" height="468" rx="4"/>
+  <text class="tm" x="808" y="186">diskd</text>
+  <rect class="b-plain" x="808" y="200" width="244" height="50" rx="3"/>
+  <text class="tm2" x="820" y="220">layer store</text>
+  <text x="820" y="238">sealed, content-addressed</text>
+  <rect class="b-plain" x="808" y="262" width="244" height="50" rx="3"/>
+  <text class="tm2" x="820" y="282">chunk cache</text>
+  <text x="820" y="300">local, 8 GiB budget</text>
+  <rect class="b-plain" x="808" y="324" width="244" height="50" rx="3"/>
+  <text class="tm2" x="820" y="344">memory server</text>
+  <text x="820" y="362">userfaultfd: lazy memory</text>
+  <rect class="b-plain" x="808" y="386" width="244" height="50" rx="3"/>
+  <text class="tm2" x="820" y="406">hibernation</text>
+  <text x="820" y="424">into the store, head last</text>
+  <rect class="b-plain" x="808" y="560" width="244" height="50" rx="3"/>
+  <text class="tm2" x="820" y="580">ublk devices</text>
+  <text x="820" y="598">one disk per pod and volume</text>
+  <path class="ln" d="M808 585H496" marker-end="url(#m2)"/>
+  <text class="lb" x="650" y="578" text-anchor="middle">ublk → virtio-blk</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 2</span><b>Credentials and disks come from the host, not from the pod.</b> feosd starts each pod as a Firecracker process of its own in the jailer. The guest dials the host over vsock and gets its time and network pushed; it runs no DHCP and no NTP. diskd serves the disks as ublk devices. A request to <code>169.254.169.1</code> reaches feosd, which passes the connection with <code>SCM_RIGHTS</code> to the pod's feos-authn. Under systemd, pods outlive a restart of feosd; in a Kubernetes pod they end with the container, so a planned stop suspends them first.</figcaption>
+  </figure>
+
+  <h3>A pod's network</h3>
+  <ul class="facts">
+    <li>An <b>IPv6 address</b> from the node's prefix: one the network routes to the node (<code>--pod-prefix</code>), or a /96 that ferund draws from the cluster's ULA /64 (<code>--pod-network mesh</code>). Plus an <b>IPv4 /32</b> from <code>169.254.16.0/20</code>, only for leaving the node through masquerade.</li>
+    <li>A <b>routed TAP device</b> per pod, pinned to its addresses and named by the pod's 11-character ID. Proxy ARP answers for the IPv4 gateway <code>169.254.0.1</code>.</li>
+    <li><b>Security groups</b> as nftables chains per pod and direction in the table <code>inet feos</code>. Rules only allow, without order; ferund sends them with a version per group.</li>
+    <li><b>DNS</b> at <code>169.254.0.53</code> from feosd, with the environments' name tables. <b>Metadata</b> through Firecracker's MMDS v2.</li>
+    <li><b>Traffic records</b>: flows from connection tracking, drops, DNS queries and server names, without eBPF and with nothing in the data path.</li>
+  </ul>
+</section>
+
+<!-- ============ Request ============ -->
+<section id="request">
+  <h2>A request's path</h2>
+  <p class="prose">A visitor opens a public environment's host under the apps zone, or a domain its tenant bound to it. ferund is not in the data path. It only supplies the table and wakes pods when asked.</p>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1200 310" role="img" aria-label="Request path: visitor, L4 balancer, ferun-ingress, WireGuard mesh, node with nftables, pod. Below it ferund, which streams the table with Sync, takes Wake and Hold, and wakes sleeping pods over the node connection.">
+  <defs>
+    <marker id="m3" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+    <marker id="m3n" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mkn"/></marker>
+  </defs>
+  <rect class="b-cli" x="16" y="40" width="120" height="80" rx="4"/>
+  <text class="t" x="76" y="76" text-anchor="middle">Visitor</text>
+  <text x="76" y="94" text-anchor="middle">browser</text>
+
+  <rect class="b-ext" x="201" y="40" width="140" height="80" rx="4"/>
+  <text class="t" x="271" y="68" text-anchor="middle">L4 balancer</text>
+  <text x="271" y="86" text-anchor="middle">apps zone</text>
+  <text x="271" y="102" text-anchor="middle">or a domain</text>
+
+  <rect class="b-run" x="406" y="40" width="220" height="80" rx="4"/>
+  <text class="tm" x="516" y="62" text-anchor="middle">ferun-ingress</text>
+  <text x="516" y="80" text-anchor="middle">TLS by SNI</text>
+  <text x="516" y="96" text-anchor="middle">host → environment → route</text>
+  <text x="516" y="112" text-anchor="middle">→ service → endpoint</text>
+
+  <rect class="b-net" x="691" y="40" width="130" height="80" rx="4"/>
+  <text class="t" x="756" y="68" text-anchor="middle">Pod mesh</text>
+  <text x="756" y="86" text-anchor="middle">WireGuard</text>
+  <text x="756" y="102" text-anchor="middle">a /96 per node</text>
+
+  <rect class="b-os" x="886" y="40" width="130" height="80" rx="4"/>
+  <text class="t" x="951" y="68" text-anchor="middle">Node</text>
+  <text x="951" y="86" text-anchor="middle">feos-mesh</text>
+  <text x="951" y="102" text-anchor="middle">nftables ing-&lt;id&gt;</text>
+
+  <rect class="b-os" x="1081" y="40" width="100" height="80" rx="4"/>
+  <text class="t" x="1131" y="76" text-anchor="middle">Pod</text>
+  <text x="1131" y="94" text-anchor="middle">[IPv6]:port</text>
+
+  <path class="ln" d="M136 80H201" marker-end="url(#m3)"/>
+  <text class="lb" x="168" y="72" text-anchor="middle">HTTPS</text>
+  <path class="ln" d="M341 80H406" marker-end="url(#m3)"/>
+  <text class="lb" x="373" y="72" text-anchor="middle">:8443</text>
+  <path class="ln-net" d="M626 80H691" marker-end="url(#m3n)"/>
+  <text class="lbn" x="658" y="72" text-anchor="middle">HTTP/1.1</text>
+  <path class="ln-net" d="M821 80H886" marker-end="url(#m3n)"/>
+  <text class="lbn" x="853" y="72" text-anchor="middle">UDP 51820</text>
+  <path class="ln" d="M1016 80H1081" marker-end="url(#m3)"/>
+  <text class="lb" x="1048" y="72" text-anchor="middle">TAP</text>
+
+  <rect class="b-run" x="406" y="220" width="220" height="70" rx="4"/>
+  <text class="tm" x="516" y="244" text-anchor="middle">ferund</text>
+  <text x="516" y="262" text-anchor="middle">builds the routing table</text>
+  <text x="516" y="278" text-anchor="middle">wakes pods through their node</text>
+
+  <path class="ln" d="M456 220V120" marker-end="url(#m3)"/>
+  <text class="lb" x="448" y="172" text-anchor="end">Sync stream:</text>
+  <text class="lb" x="448" y="187" text-anchor="end">versioned table</text>
+  <path class="ln" d="M576 120V220" marker-end="url(#m3)"/>
+  <text class="lb" x="584" y="172">Wake, Hold</text>
+  <text class="lb" x="584" y="187">every 10 s</text>
+  <path class="ln" d="M626 255H951V120" marker-end="url(#m3)"/>
+  <text class="lb" x="788" y="247" text-anchor="middle">ResumePod on the node connection</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 3</span><b>No byte of the application passes through ferund.</b> Every ingress instance keeps the table in its cache and goes on routing while ferund is down. An endpoint is usable when its port is admitted, the node's group version is at least the admitted one, and the node's WireGuard handshake is younger than 180 s. When the service sleeps, the ingress holds the request and calls <code>Wake</code>. ferund wakes the pod over the node connection, and holds every 10 s keep it awake while requests come in. ferund gets certificates for tenants' domains over ACME (HTTP-01 through the ingress; by default Let's Encrypt's six-day <code>shortlived</code> profile).</figcaption>
+  </figure>
+</section>
+
+<!-- ============ Pod life ============ -->
+<section id="pod-life">
+  <h2>A pod's life</h2>
+  <p class="prose">This is how FeCode sees a sandbox's state (<code>clientState</code>). Pausing and hibernating make the difference between "costs memory" and "costs nothing".</p>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1200 320" role="img" aria-label="States: pending, creating, running, pausing, paused, hibernating, hibernated; from paused through resuming back to running; from hibernated by a restore on any node back to creating.">
+  <defs>
+    <marker id="m4" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+  </defs>
+  <rect class="b-plain" x="16" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="81" y="82" text-anchor="middle">pending</text>
+  <text x="81" y="99" text-anchor="middle">no pod yet</text>
+  <rect class="b-os" x="189" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="254" y="82" text-anchor="middle">creating</text>
+  <text x="254" y="99" text-anchor="middle">create · restore</text>
+  <rect class="b-os" x="362" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="427" y="82" text-anchor="middle">running</text>
+  <text x="427" y="99" text-anchor="middle">books RAM and CPU</text>
+  <rect class="b-os" x="535" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="600" y="82" text-anchor="middle">pausing</text>
+  <text x="600" y="99" text-anchor="middle">writes snapshot</text>
+  <rect class="b-plain" x="708" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="773" y="82" text-anchor="middle">paused</text>
+  <text x="773" y="99" text-anchor="middle">snapshot on node</text>
+  <rect class="b-plain" x="881" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="946" y="82" text-anchor="middle">hibernating</text>
+  <text x="946" y="99" text-anchor="middle">into the store</text>
+  <rect class="b-plain" x="1054" y="60" width="130" height="50" rx="4"/>
+  <text class="tm2" x="1119" y="82" text-anchor="middle">hibernated</text>
+  <text x="1119" y="99" text-anchor="middle">only in the store</text>
+
+  <path class="ln" d="M146 85H189" marker-end="url(#m4)"/>
+  <text class="lb" x="167.5" y="48" text-anchor="middle">op</text>
+  <path class="ln" d="M319 85H362" marker-end="url(#m4)"/>
+  <path class="ln" d="M492 85H535" marker-end="url(#m4)"/>
+  <text class="lb" x="513.5" y="48" text-anchor="middle">idle 10 s</text>
+  <path class="ln" d="M665 85H708" marker-end="url(#m4)"/>
+  <path class="ln" d="M838 85H881" marker-end="url(#m4)"/>
+  <text class="lb" x="859.5" y="48" text-anchor="middle">--hibernate-after</text>
+  <path class="ln" d="M1011 85H1054" marker-end="url(#m4)"/>
+
+  <rect class="b-os" x="535" y="190" width="130" height="50" rx="4"/>
+  <text class="tm2" x="600" y="212" text-anchor="middle">resuming</text>
+  <text x="600" y="229" text-anchor="middle">resume in place</text>
+  <path class="ln" d="M773 110V215H665" marker-end="url(#m4)"/>
+  <text class="lb" x="781" y="160">request, tool call,</text>
+  <text class="lb" x="781" y="175">wake from ingress</text>
+  <path class="ln" d="M535 215H427V110" marker-end="url(#m4)"/>
+
+  <path class="ln" d="M1119 110V290H254V110" marker-end="url(#m4)"/>
+  <text class="lb" x="686" y="282" text-anchor="middle">restore on any node of the same store, memory lazily</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 4</span><b>Filled states book room on the node, empty ones do not.</b> A paused pod lies as a snapshot on its node and costs no memory. A hibernated one lies only in the object store and can come back on any node of the same store. Where the snapshot's pins (Firecracker version, CPU model, host kernel) fit the target node, diskd serves the memory lazily; otherwise the pod boots on its disk. Not shown: <code>stopped</code> and <code>failed</code>, <code>unknown</code> (node down, a sync resolves it) and <code>lost</code> (the pod is gone and there is no checkpoint).</figcaption>
+  </figure>
+  <div class="times">
+    <div class="time"><div class="v">10 s</div><div class="k">without activity, then a pause (<code>--idle-pause</code>, default)</div></div>
+    <div class="time"><div class="v">off</div><div class="k">by default; <code>--hibernate-after</code> sets how long a paused sandbox waits before it hibernates</div></div>
+    <div class="time"><div class="v">15 min</div><div class="k">an attached service keeps its sandbox awake until it has been idle this long (ADR 0018)</div></div>
+    <div class="time"><div class="v">120 s + 4 s/GiB</div><div class="k">a snapshot's budget; past it, the suspend fails</div></div>
+  </div>
+</section>
+
+<!-- ============ CaaS ============ -->
+<section id="caas">
+  <h2>CaaS on the sandbox engine</h2>
+  <p class="prose">Environments are not a second system. Every pod of an environment is a row in the same table <code>sandboxes</code> as an agent's sandbox, and the same engine places, pauses and moves it (ADR 0018).</p>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1200 290" role="img" aria-label="FeCode writes a deployment into an environment; deployments are numbered and immutable; the controller brings the environment to its latest deployment; service, job and addon become sandbox rows that the sandbox engine runs as pods on nodes; route, secret and binding make no pods.">
+  <defs>
+    <marker id="m5" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+  </defs>
+  <rect class="b-cli" x="16" y="110" width="140" height="60" rx="4"/>
+  <text class="t" x="86" y="135" text-anchor="middle">FeCode</text>
+  <text x="86" y="153" text-anchor="middle">fecode.yaml → spec</text>
+  <path class="ln" d="M156 140H206" marker-end="url(#m5)"/>
+  <text class="lb" x="181" y="132" text-anchor="middle">deploy</text>
+
+  <rect class="b-envf" x="206" y="30" width="250" height="200" rx="6"/>
+  <text class="t" x="222" y="52">Environment</text>
+  <text x="222" y="68">e.g. a project's prod</text>
+  <rect class="b-plain" x="226" y="82" width="190" height="60" rx="3"/>
+  <text class="lb" x="238" y="95">#1</text>
+  <rect class="b-plain" x="236" y="98" width="190" height="60" rx="3"/>
+  <text class="lb" x="248" y="111">#2</text>
+  <rect class="b-run" x="246" y="114" width="190" height="96" rx="3"/>
+  <text class="tm2" x="260" y="136">Deployment #3</text>
+  <text x="260" y="154">the whole spec, immutable</text>
+  <text x="260" y="170">base: CAS · plan · revert</text>
+  <text x="260" y="186">who, why, annotations</text>
+
+  <path class="ln" d="M456 140H506" marker-end="url(#m5)"/>
+  <text class="lb" x="481" y="132" text-anchor="middle">latest</text>
+  <rect class="b-run" x="506" y="110" width="170" height="60" rx="4"/>
+  <text class="tm2" x="591" y="134" text-anchor="middle">Controller</text>
+  <text x="591" y="152" text-anchor="middle">goal: latest deployment</text>
+
+  <path class="ln" d="M676 140H700"/>
+  <path class="ln" d="M700 60V210"/>
+  <path class="ln" d="M700 60H726" marker-end="url(#m5)"/>
+  <path class="ln" d="M700 110H726" marker-end="url(#m5)"/>
+  <path class="ln" d="M700 160H726" marker-end="url(#m5)"/>
+  <path class="ln" d="M700 210H726" marker-end="url(#m5)"/>
+
+  <rect class="b-runl" x="726" y="40" width="190" height="40" rx="3"/>
+  <text class="tm2" x="740" y="57">service</text>
+  <text x="740" y="72">image or attached</text>
+  <rect class="b-runl" x="726" y="90" width="190" height="40" rx="3"/>
+  <text class="tm2" x="740" y="107">job</text>
+  <text x="740" y="122">deploy job or manual</text>
+  <rect class="b-runl" x="726" y="140" width="190" height="40" rx="3"/>
+  <text class="tm2" x="740" y="157">addon</text>
+  <text x="740" y="172">postgres · valkey · nats</text>
+  <rect class="b-cli" x="726" y="190" width="190" height="40" rx="3"/>
+  <text class="tm2" x="740" y="207">route · secret · binding</text>
+  <text x="740" y="222">no pods of their own</text>
+
+  <path class="ln" d="M916 60H976" marker-end="url(#m5)"/>
+  <path class="ln" d="M916 110H976" marker-end="url(#m5)"/>
+  <path class="ln" d="M916 160H976" marker-end="url(#m5)"/>
+  <text class="lb" x="946" y="52" text-anchor="middle">per pod</text>
+
+  <rect class="b-run" x="976" y="50" width="208" height="120" rx="4"/>
+  <text class="tm2" x="992" y="74">Sandbox rows</text>
+  <text class="lb" x="992" y="94">environment_id</text>
+  <text class="lb" x="992" y="110">pod_template</text>
+  <text class="lb" x="992" y="126">pin_node · idle_after_s</text>
+  <text x="992" y="150">like any agent's sandbox</text>
+  <path class="ln" d="M1080 170V200" marker-end="url(#m5)"/>
+  <rect class="b-run" x="976" y="200" width="208" height="60" rx="4"/>
+  <text class="tm2" x="1080" y="224" text-anchor="middle">Sandbox engine</text>
+  <text x="1080" y="242" text-anchor="middle">placement · ops · pause</text>
+  <text class="lb" x="1080" y="280" text-anchor="middle">→ pods on the nodes</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 5</span><b>An environment changes only by deployments.</b> Each is numbered, immutable and holds the whole spec, its base for compare-and-swap, its author, reason and annotations; images are pinned to digests. The controller brings the environment to its latest deployment and keeps it there. When a rollout fails, the last deployed one keeps serving, and an incident names the cause. Image services roll with a surge of one and scale to zero. Builds run as <b>tenant jobs</b> (<code>/api/v1/jobs</code>): one pod without an environment, run to its end exactly once.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ ferund ============ -->
+<section id="ferund">
+  <h2>Inside ferund</h2>
+  <p class="prose">One Go module (<code>github.com/gardenlinux/feos/go</code>), built static, with fixed dependencies: the standard library, pgx, gRPC, Protobuf, the MCP SDK, uuid, x/crypto, x/sync. The packages under <code>go/internal/</code>, grouped by what they do:</p>
+  <div class="groups">
+    <div class="group"><h3>Front doors</h3><p class="pk">api · auth · apierr · mcpsrv · ports · watch · ui</p><p>REST with its auth classes, OIDC sign-in, MCP for agents, the port door at <code>/fwd/</code>, file watches across instances, the embedded UI and this page.</p></div>
+    <div class="group"><h3>Sandbox engine</h3><p class="pk">sandbox · tools · podid</p><p>States, ops, placement (<code>binpack</code> or <code>spread</code>), sync and reconcile, tombstones, policies, images. Keyed tool calls outlive their caller (ADR 0023).</p></div>
+    <div class="group"><h3>Environments</h3><p class="pk">env · env/spec · env/addons · env/ctl · env/envdeps</p><p>Deployments with plan, base, revert and tags; the controller; addons on volumes; secrets; the route door; tenants' jobs.</p></div>
+    <div class="group"><h3>Fleet</h3><p class="pk">nodelink · fleet · mesh · pki · leader</p><p>The nodes' port with ALPN and stream budgets, joins, certificates, telemetry, events, each node's /96 and its peers, the CA with SPIFFE IDs, the leader lease.</p></div>
+    <div class="group"><h3>Edge</h3><p class="pk">ingress/service · ingress/table · routing · domains · acme</p><p>The API ferun-ingress calls and the table it routes from. Domains with a TXT proof and hourly checks, certificates over ACME.</p></div>
+    <div class="group"><h3>Secrets</h3><p class="pk">seal · bindings</p><p>AES-256-GCM under <code>--secret-key-file</code> for bindings and secrets. Kubernetes, SSH and HTTP bindings, the interception CA per pod, the HTTP preflight.</p></div>
+    <div class="group"><h3>State</h3><p class="pk">db · store · model · activity · config</p><p>PostgreSQL 17, READ COMMITTED with explicit row locks and retries, the embedded schema with its migrations, the partitioned activity log.</p></div>
+    <div class="group"><h3>Tests and operations</h3><p class="pk">testnode · e2e · server · kube · feosk8s</p><p>A Go implementation of the node's side for tests, end-to-end tests with several instances, the assembly of one instance, the feos-k8s controller.</p></div>
+  </div>
+</section>
+
+<!-- ============ Principles ============ -->
+<section id="principles">
+  <h2>Principles</h2>
+  <ul class="principles">
+    <li><b>Nodes open no port for control.</b><span>They connect out to every instance of the control plane, with no broker in between.</span></li>
+    <li><b>No credential enters a pod.</b><span>What a workload may use, feos-authn on the host adds or signs with.</span></li>
+    <li><b>Pods outlive their node agent.</b><span>A restart or upgrade of feosd leaves the pods running, and the new feosd takes them over. On Kubernetes they are suspended and resumed for it.</span></li>
+    <li><b>A snapshot pins what it was written on.</b><span>The Firecracker version, the CPU model and the host's kernel. Nodes keep the Firecracker versions their snapshots need.</span></li>
+    <li><b>PID 1 stays small.</b><span>feos-host-init and feos-guest must not die; work that can fail runs in processes that can be restarted.</span></li>
+    <li><b>Static musl, syscalls first.</b><span>No shared libraries, no shelling out to userspace tools. The one exception: <code>mke2fs</code> for new volumes in the guest.</span></li>
+    <li><b>The database's clock decides.</b><span>Every lease, TTL and deadline in ferund uses PostgreSQL's <code>now()</code>. No node call inside a transaction.</span></li>
+    <li><b>FeOS knows pods.</b><span>Whether a pod is an agent's sandbox or a customer's service, only FeRun knows.</span></li>
+  </ul>
+</section>
+
+<!-- ============ Not built yet ============ -->
+<section id="open">
+  <h2>Not built yet</h2>
+  <p class="prose">Decided, but not built or only in part, per the ADR index and the architecture docs:</p>
+  <ul class="facts">
+    <li><b>Images through the node</b> (ADR 0022): the guest still pulls with the registry's token; feosd is to pull the layers and bake them into a sealed layer of diskd's.</li>
+    <li><b>Pod identity</b> (ADR 0014): only feos-authn's HTTP side is built. The SPIFFE identity, FeID and the TLS, Kubernetes and SSH bindings are missing; the jail has no network namespace of its own yet.</li>
+    <li><b>Traffic records</b> (ADR 0013) are made on the node but do not reach the control plane yet.</li>
+    <li><b>Environments</b>: no volumes for services, no MCP tools and no CLI, no addon backups, no data on a clone.</li>
+    <li><b>Ingress</b>: no DNS-01 wildcard, no L4, no h2c.</li>
+    <li><b>diskd</b>: no sweep of old layers yet, no disk size per pod.</li>
+  </ul>
+</section>
+
+<footer>
+  Drawn from <code>docs/overview.md</code>, <code>docs/architecture/</code> (control-plane, node, disk, guest, ingress, sink, traces, authn, kubernetes) and <code>docs/adr/README.md</code>. The page is <code>web/public/docs/index.html</code>; ferund serves it at <code>/docs/</code>.
+</footer>
+
+</div>
+</body>
+</html>
