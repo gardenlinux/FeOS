@@ -64,7 +64,7 @@ const NODE = {
 };
 
 const table = (nodes) => renderToStaticMarkup(
-  <NodesTable rows={nodeRows(nodes)} now={0} armed="" arm={() => {}} disarm={() => {}} onDrain={() => {}} onOpen={() => {}} />);
+  <NodesTable rows={nodeRows(nodes)} now={0} armed="" arm={() => {}} disarm={() => {}} onUndrain={() => {}} onOpen={() => {}} />);
 
 describe('NodesTable', () => {
   it('labels the memory bar with the memory in use of the total, the bar filled as much', () => {
@@ -75,28 +75,50 @@ describe('NodesTable', () => {
     expect(out).not.toContain('40.5 GiB /');
   });
 
-  it('books vCPUs, memory and slots against what the node may book, in one column', () => {
+  it('books vCPUs, memory and slots against what the node may book, as bars', () => {
     const out = table([NODE]);
-    expect(out).toContain('>24 / 64 vCPU</div>');
-    expect(out).toContain('>12.0 / 63.0 GiB</div>');
-    expect(out).toContain('>12 / 32 slots</div>');
+    expect(out).toContain('>24 / 64</span>');
+    expect(out).toContain('>12.0 / 63.0 GiB</span>');
+    expect(out).toContain('>12 / 32</span>');
+    // 24 of 64 vCPUs: 38%.
+    expect(out).toContain('title="vCPU: 24 / 64 booked (38%)"');
+    expect(out).toContain('width:38%');
   });
 
-  it('has ten compact columns, the link under the last telemetry', () => {
+  it('has eight compact columns, the state as a dot with its word under the name', () => {
     const out = table([NODE, { ...NODE, node: 'lab-2', connected: false, connections: 0 }]);
     expect(out).toContain('class="tbl nodes-tbl"');
-    expect(out.match(/<th[ >]/g)).toHaveLength(10);
+    expect(out.match(/<th[ >]/g)).toHaveLength(8);
     expect(out).toContain('>connected ×2</div>');
+    expect(out).toContain('<span class="sdot running"></span>ready</span>');
   });
 
-  // The armed button grows by one character, so that arming it does not
-  // push the actions column out of a 1280 px window.
-  it('asks briefly before a drain or an undrain', () => {
-    const armed = (node) => renderToStaticMarkup(
-      <NodesTable rows={nodeRows([node])} now={0} armed={'drain:' + node.node} arm={() => {}} disarm={() => {}}
-        onDrain={() => {}} onOpen={() => {}} />);
-    expect(armed(NODE)).toContain('>drain?</button>');
-    expect(armed({ ...NODE, draining: true })).toContain('>undrain?</button>');
+  it('shows a draining node with a dashed amber dot and offers an undrain; a drain opens the node first', () => {
+    const draining = table([{ ...NODE, draining: true }]);
+    expect(draining).toContain('class="sdot draining"');
+    expect(draining).toContain('>undrain</button>');
+    expect(draining).not.toContain('drain…');
+    expect(table([NODE])).toContain('>drain…</button>');
+  });
+
+  it('asks briefly before an undrain', () => {
+    const out = renderToStaticMarkup(
+      <NodesTable rows={nodeRows([{ ...NODE, draining: true }])} now={0} armed={'undrain:' + NODE.node} arm={() => {}}
+        disarm={() => {}} onUndrain={() => {}} onOpen={() => {}} />);
+    expect(out).toContain('>undrain?</button>');
+  });
+
+  it('shows the versions of feosd and the kernel', () => {
+    const out = table([{ ...NODE, versions: { feosd: '0.6.1', kernel: '6.12', firecracker: ['1.10'] } }]);
+    expect(out).toContain('<span class="k">feosd</span><span>0.6.1</span>');
+    expect(out).toContain('<span class="k">kernel</span><span>6.12</span>');
+    expect(out).not.toContain('firecracker');
+  });
+
+  it('books nothing for a node without telemetry yet', () => {
+    const out = table([{ node: 'new', status: 'joined' }]);
+    expect(out).toContain('no telemetry yet');
+    expect(out).not.toContain('capbar');
   });
 
   // The link is to the instance that answered: a ready node connected to

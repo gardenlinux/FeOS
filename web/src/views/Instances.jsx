@@ -6,6 +6,8 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ErrBox, LiveBadge, StateDot, useNow, usePoll } from '../components.jsx';
 import { fmtDateTime } from '../format.js';
+import { instanceVersions } from './platformData.js';
+import { Dot, Fact, PageHead } from './platformParts.jsx';
 
 // The control plane: its instances (every ferund that serves, or served
 // recently) and which of them leads, running the loops that only one may
@@ -29,7 +31,7 @@ export function InstancesTable({ instances, leader }) {
       <table className="tbl">
         <thead>
           <tr>
-            <th className="col-state">live</th><th>instance</th><th>address</th><th>nodes' address</th>
+            <th className="col-state" /><th>instance</th><th>address</th><th>nodes' address</th>
             <th>version</th><th>started</th><th>last seen</th><th>stopping</th>
           </tr>
         </thead>
@@ -75,33 +77,59 @@ export function Instances() {
 
   const leader = data && data.leader;
   const instances = (data && data.instances) || [];
+  const live = instances.filter((i) => i.live).length;
+  const stoppingN = instances.filter((i) => !i.live && i.fresh).length;
+  const gone = instances.length - live - stoppingN;
+  const versions = instanceVersions(instances);
+  const leaderRow = leader && instances.find((i) => i.id === leader.id);
 
   return (
-    <div className="single">
-      <section className="pane">
-        <div className="pane-toolbar">
-          <h2><Icon name="layers" size={15} /> Instances <span className="count">{data ? instances.length : '…'}</span></h2>
-          <span className="spacer" />
-          <LiveBadge lastOk={lastOk} />
-        </div>
-        <ErrBox error={err} />
-        {data && (
-          <div className="kv-grid">
-            <span className="k">leader</span>
-            <span className="v">
-              {leader
-                ? <><span className="mono strong">{leader.id}</span> <span className="muted">epoch {leader.epoch}, since {fmtDateTime(leader.since)} (<Ago iso={leader.since} />)</span></>
-                : <span className="warn">none: no instance holds the lease</span>}
-            </span>
+    <div className="platform">
+      <PageHead title="Control plane"
+        state={data && (leader
+          ? <span className="dotword running" title="an instance holds the leader's lease"><Dot cls="running" />led</span>
+          : <span className="dotword unknown" title="no instance holds the lease"><Dot cls="unknown" />no leader</span>)}
+        actions={<LiveBadge lastOk={lastOk} />}
+        facts={data && <>
+          <Fact className="ok" n={live}>live</Fact>
+          {stoppingN > 0 && <Fact className="warn" n={stoppingN}>stopping</Fact>}
+          {gone > 0 && <Fact n={gone}>gone</Fact>}
+          {versions.length > 0 && (
+            <span className={versions.length > 1 ? 'warn' : ''} title={versions.length > 1 ? 'more than one version serves: a rollout under way' : ''}>
+              ferund <span className="mono">{versions.map((v) => (versions.length > 1 ? `${v.version} ×${v.count}` : v.version)).join(', ')}</span>
+            </span>)}
+        </>} />
+
+      {data && (
+        <section className="pane">
+          <div className="leader-card">
+            <span className="crown"><Icon name="crown" size={18} /></span>
+            {leader
+              ? <>
+                <div>
+                  <div className="muted small">leader</div>
+                  <div className="mono big">{leader.id}</div>
+                </div>
+                <div><div className="muted small">epoch</div><div className="mono big">{leader.epoch}</div></div>
+                <div><div className="muted small">since</div><div>{fmtDateTime(leader.since)} <Ago iso={leader.since} /></div></div>
+                {leaderRow && <div><div className="muted small">version</div><div className="mono">{leaderRow.version || '—'}</div></div>}
+              </>
+              : <span className="warn">No instance holds the leader's lease: the loops that only one may run (node expiry, idle
+                pause, drains, repairs, tenant deletion) wait until one takes it.</span>}
           </div>
-        )}
+        </section>)}
+
+      <section className="pane">
+        <div className="pane-toolbar"><h2><Icon name="layers" size={14} /> Instances <span className="count">{data ? instances.length : '…'}</span></h2></div>
+        <ErrBox error={err} />
         <InstancesTable instances={instances} leader={leader} />
         {data && instances.length === 0 && <p className="empty">No instances.</p>}
         {!data && !err && <p className="empty">Loading…</p>}
         <p className="muted small footnote">
           An instance writes its row every few seconds and counts as live while the row is fresh and it is not
           stopping. A stopping instance finishes its requests and ops, and stays listed to the nodes until it
-          closes their connections; it is gone once its row is older than 15 s.
+          closes their connections; it is gone once its row is older than 15 s. The leader holds a lease in the
+          database; each new holder takes the next epoch.
         </p>
       </section>
     </div>

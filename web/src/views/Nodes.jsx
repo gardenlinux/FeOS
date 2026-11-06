@@ -4,19 +4,21 @@
 import React, { useCallback, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, ArmButton, ErrBox, LiveBadge, StateDot, useArm, useNow, usePoll } from '../components.jsx';
+import { Ago, ArmButton, ErrBox, LiveBadge, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtNs, nsToDate } from '../format.js';
-import { canDrain, fleetDefaults, fmtBytes, fmtBytesOf, memBar, nodeRows, stopping, vcpuCapacityText } from './fleet.js';
+import { canDrain, fleetDefaults, fmtBytes, memBar, nodeRows, stopping } from './fleet.js';
+import { capacityBars, fleetCapacity, nodeDot, nodeVersions, versionSpread } from './platformData.js';
+import { CapBars, DotWord, Fact, PageHead } from './platformParts.jsx';
 
-// The nodes: one row per node that joined, with its telemetry, what
-// placement booked on it, its connection to this instance and its
-// certificate. Refreshed every 5 s. A row opens the node.
+// The nodes: one row per node that joined, with what placement booked on
+// it against what it may book, its telemetry, its versions, its link to
+// this instance and its certificate. Refreshed every 5 s. A row opens the
+// node, where a drain shows first what it moves.
 
 export function Nodes({ navigate }) {
   const [nodes, setNodes] = useState(null);
   const [defaults, setDefaults] = useState(null);
   const [err, setErr] = useState('');
-  const [lastOk, setLastOk] = useState(0);
   const [armed, arm, disarm] = useArm();
   const now = useNow(5000);
 
@@ -26,20 +28,17 @@ export function Nodes({ navigate }) {
       setNodes(res.nodes || []);
       setDefaults(res.defaults || null);
       setErr('');
-      setLastOk(Date.now());
     } catch (e) {
       setErr(e.message);
     }
   }, []);
-  usePoll(load, 5000);
+  const lastOk = usePoll(load, 5000);
 
-  // A drain keeps placement off the node and moves its sandboxes into the
-  // object store; an undrain ends it. The leader does the work: the row's
-  // description shows the progress on the next polls.
-  const drainAct = async (r) => {
+  // An undrain from the list; a drain opens the node, which shows first
+  // what it moves.
+  const undrain = async (r) => {
     try {
-      if (r.draining) await api.nodeUndrain(r.node);
-      else await api.nodeDrain(r.node);
+      await api.nodeUndrain(r.node);
     } catch (e) {
       setErr(e.message);
     }
@@ -47,38 +46,51 @@ export function Nodes({ navigate }) {
   };
 
   const rows = nodeRows(nodes);
-  const counts = {
-    ready: rows.filter((r) => r.status === 'ready').length,
-    down: rows.filter((r) => r.status === 'down').length,
-    draining: rows.filter((r) => r.draining).length,
-  };
-  const open = (r) => navigate(`/nodes/${encodeURIComponent(r.node)}`);
+  const count = (f) => rows.filter(f).length;
+  const ready = count((r) => r.status === 'ready' && !r.draining);
+  const down = count((r) => r.status === 'down');
+  const draining = count((r) => r.draining && r.status !== 'down' && r.status !== 'removed');
+  const joined = count((r) => r.status === 'joined');
+  const removed = count((r) => r.status === 'removed');
+  const feosd = versionSpread(nodes);
+  const fleet = fleetCapacity(rows);
+  const open = (r, tab = '') => navigate(`/nodes/${encodeURIComponent(r.node)}${tab ? '/' + tab : ''}`);
+  const join = (e) => { e.preventDefault(); navigate('/join-tokens?kind=node'); };
 
   return (
-    <div className="single">
+    <div className="platform">
+      <PageHead title="Nodes"
+        state={nodes && <LiveBadge lastOk={lastOk} />}
+        actions={<a className="button primary" href="/join-tokens?kind=node" onClick={join}><Icon name="ticket" size={14} /> Join a node</a>}
+        facts={nodes && <>
+          <Fact n={rows.length - removed}>node{rows.length - removed === 1 ? '' : 's'}</Fact>
+          <Fact className="ok" n={ready}>ready</Fact>
+          {joined > 0 && <Fact n={joined}>joined</Fact>}
+          {draining > 0 && <Fact className="warn" n={draining}>draining</Fact>}
+          {down > 0 && <Fact className="bad" n={down}>down</Fact>}
+          {removed > 0 && <Fact n={removed}>removed</Fact>}
+          {feosd.length > 0 && (
+            <span className={feosd.length > 1 ? 'warn' : ''} title={feosd.length > 1 ? 'more than one feosd version: a rollout under way, or a node left behind' : ''}>
+              feosd {feosd.map((v) => (feosd.length > 1 ? `${v.version} ×${v.count}` : v.version)).join(', ')}
+            </span>)}
+        </>} />
+
+      {fleet.nodes > 0 && (
+        <section className="pane">
+          <div className="pane-toolbar">
+            <h2><Icon name="gauge" size={14} /> Booked across the fleet</h2>
+            <span className="muted small">the {fleet.nodes} ready node{fleet.nodes === 1 ? '' : 's'} placement books on</span>
+          </div>
+          <div className="fleet-cap"><CapBars bars={fleet.bars} big /></div>
+        </section>)}
+
       <section className="pane">
-        <div className="pane-toolbar">
-          <h2>
-            <Icon name="server" size={15} /> Nodes
-            <span className="count">{nodes ? rows.length : '…'}</span>
-          </h2>
-          <span className="mini-stats muted">
-            <span className="ok" title="ready">● {counts.ready}</span>
-            {counts.down > 0 && <span className="bad" title="down">● {counts.down}</span>}
-            {counts.draining > 0 && <span className="warn" title="draining">▣ {counts.draining}</span>}
-          </span>
-          <span className="spacer" />
-          <LiveBadge lastOk={lastOk} />
-          <button className="ghost mini" onClick={() => navigate('/join-tokens')}>
-            <Icon name="ticket" size={13} /> join a node
-          </button>
-        </div>
         <ErrBox error={err} />
-        <NodesTable rows={rows} now={now} armed={armed} arm={arm} disarm={disarm} onDrain={drainAct} onOpen={open} />
+        <NodesTable rows={rows} now={now} armed={armed} arm={arm} disarm={disarm} onUndrain={undrain} onOpen={open} />
         {nodes && rows.length === 0 && (
           <p className="empty">
             No node has joined yet. A node joins with a join token:{' '}
-            <a href="/join-tokens" onClick={(e) => { e.preventDefault(); navigate('/join-tokens'); }}>make one →</a>
+            <a href="/join-tokens?kind=node" onClick={join}>make one →</a>
           </p>
         )}
         {!nodes && !err && <p className="empty">Loading…</p>}
@@ -89,22 +101,20 @@ export function Nodes({ navigate }) {
 }
 
 // NodesTable is the nodes' table: rows from nodeRows, now in ms for the
-// restart notes, the arm state of the drain buttons, and what a drain and
-// a click on a row do. It fits a 1280 px window and scrolls sideways in
-// a narrower one.
-export function NodesTable({ rows, now, armed, arm, disarm, onDrain, onOpen }) {
+// restart notes, the arm state of the undrain buttons, what an undrain
+// and a click on a row do (onOpen(row, tab)). A drain opens the node,
+// whose page shows what it moves. It scrolls sideways in a narrow window.
+export function NodesTable({ rows, now, armed, arm, disarm, onUndrain, onOpen }) {
   return (
     <div className="tblwrap"><table className="tbl nodes-tbl">
       <thead>
         <tr>
-          <th className="col-state" title="status" />
           <th>node</th>
-          <th title="the node's last telemetry; connected to the instance that answered, and its node connections there">seen</th>
-          <th className="col-bar" title="the host's memory in use, of its total">memory</th>
-          <th>load1</th>
-          <th>disk free</th>
-          <th>running / paused</th>
           <th title="what placement booked on the node, against what it may book: vCPUs, memory, sandboxes against slots">booked</th>
+          <th title="the host's memory in use of its total, load1, disk free">host</th>
+          <th title="sandboxes on the node, from its telemetry">running / paused</th>
+          <th>versions</th>
+          <th title="the node's last telemetry; connected to the instance that answered, and its node connections there">seen</th>
           <th>certificate</th>
           <th className="col-quick" />
         </tr>
@@ -112,16 +122,33 @@ export function NodesTable({ rows, now, armed, arm, disarm, onDrain, onOpen }) {
       <tbody>
         {rows.map((r) => {
           const mem = memBar(r);
+          const st = nodeDot(r);
+          const versions = nodeVersions(r.versions).filter(([k]) => k === 'feosd' || k === 'kernel');
           return (
             <tr key={r.key} className={'clickable ' + r.cls} onClick={() => onOpen(r)}>
-              <td className="col-state"><StateDot state={r.status} title={r.status} /></td>
               <td className="col-node">
-                <span className="mono strong">{r.node}</span> <span className="muted small">{r.status}</span>
+                <span className="mono strong">{r.node}</span>
+                <div><DotWord st={st} /></div>
                 {r.hostname && r.hostname !== r.node && <div className="muted small mono">{r.hostname}</div>}
-                {r.draining && <div className="warn small">draining: no new sandboxes</div>}
                 {r.identityForked && <div className="bad small" title="two holders of the node's identity were seen">identity forked</div>}
                 {stopping(r, now) && <div className="muted small">feosd restarting</div>}
                 {r.description && <div className="muted small">{r.description}</div>}
+              </td>
+              <td>{r.status === 'joined' && !r.lastSeenNs
+                ? <span className="muted small">no telemetry yet</span>
+                : <CapBars bars={capacityBars(r)} />}</td>
+              <td className="small nowrap">
+                <div className="membar" title={mem.title}>
+                  <div className="membar-fill" style={{ width: r.memPct + '%' }} />
+                  <span className="membar-label mono">{mem.label}</span>
+                </div>
+                <div className="mono muted">load {r.load1.toFixed(2)} · {fmtBytes(r.diskAvail)} free</div>
+              </td>
+              <td className="mono nowrap">{r.running} / {r.paused}</td>
+              <td>
+                {versions.length
+                  ? <div className="pf-versions mono">{versions.map(([k, v]) => <React.Fragment key={k}><span className="k">{k}</span><span>{v}</span></React.Fragment>)}</div>
+                  : <span className="muted">—</span>}
               </td>
               <td className="small nowrap">
                 <div className="muted" title={nsToDate(r.lastSeenNs)}>{r.lastSeenNs ? fmtNs(r.lastSeenNs) : '—'}</div>
@@ -130,22 +157,6 @@ export function NodesTable({ rows, now, armed, arm, disarm, onDrain, onOpen }) {
                   : r.status === 'down' || r.status === 'removed'
                     ? <div className="muted">not connected</div>
                     : <div className="muted" title="not connected to this instance; it may be to another">—</div>}
-              </td>
-              <td className="col-bar">
-                <div className="membar" title={mem.title}>
-                  <div className="membar-fill" style={{ width: r.memPct + '%' }} />
-                  <span className="membar-label mono">{mem.label}</span>
-                </div>
-              </td>
-              <td className="mono nowrap">{r.load1.toFixed(2)}</td>
-              <td className="mono nowrap">{fmtBytes(r.diskAvail)}</td>
-              <td className="mono nowrap">{r.running} / {r.paused}</td>
-              <td className="mono small nowrap">
-                <div title={r.vcpusCapacity ? `${r.cpus} cores × ${r.cpuOvercommit}` : 'CPU not gated'}>
-                  {r.vcpusBooked} / {vcpuCapacityText(r.vcpusCapacity)} vCPU
-                </div>
-                <div title={`total less ${fmtBytes(r.memHeadroom)} headroom`}>{fmtBytesOf(r.memBooked, r.memCapacity)}</div>
-                <div title="sandboxes booked, against the node's slots">{r.booked} / {r.slots} slots</div>
               </td>
               <td className="small nowrap">
                 {r.certSerial
@@ -156,12 +167,12 @@ export function NodesTable({ rows, now, armed, arm, disarm, onDrain, onOpen }) {
                   : <span className="muted">—</span>}
               </td>
               <td className="col-quick" onClick={(e) => e.stopPropagation()}>
-                {canDrain(r) && (
-                  <ArmButton armKey={'drain:' + r.node} armed={armed} arm={arm} disarm={disarm}
-                    className="mini" onConfirm={() => onDrain(r)}
-                    confirmLabel={r.draining ? 'undrain?' : 'drain?'}>
-                    {r.draining ? 'undrain' : 'drain'}
-                  </ArmButton>
+                {canDrain(r) && r.draining && (
+                  <ArmButton armKey={'undrain:' + r.node} armed={armed} arm={arm} disarm={disarm}
+                    className="mini" onConfirm={() => onUndrain(r)} confirmLabel="undrain?">undrain</ArmButton>
+                )}
+                {canDrain(r) && !r.draining && (
+                  <button className="mini" title="see what a drain moves, then drain" onClick={() => onOpen(r, 'overview?drain=1')}>drain…</button>
                 )}
                 <button className="iconbtn mini" title="open the node" onClick={() => onOpen(r)}>
                   <Icon name="chevronRight" size={13} /></button>
