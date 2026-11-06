@@ -22,6 +22,7 @@ describe('SignIn', () => {
     expect(out).toContain('Sign in');
     expect(out).not.toContain('type="password"');
     expect(out).not.toContain('control plane');
+    expect(out).not.toContain('Signing in');
   });
 
   it('checks the address before it goes on', () => {
