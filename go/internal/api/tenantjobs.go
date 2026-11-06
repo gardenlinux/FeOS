@@ -27,16 +27,18 @@ type TenantJobs interface {
 
 // tenantJobRoutes registers the jobs' routes, tenant class, each a thin adapter
 // of a request to one method of Deps.TenantJobs; none without the service.
-func (s *server) tenantJobRoutes(tenant func(pattern string, h apiHandler)) {
+// A tenant's job is the tenant's (ADR 0031): its routes need a tenant
+// grant.
+func (s *server) tenantJobRoutes(tenant func(n need, pattern string, h apiHandler)) {
 	if s.deps.TenantJobs == nil {
 		return
 	}
-	tenant("POST /api/v1/jobs", s.createTenantJob)
-	tenant("GET /api/v1/jobs", s.listTenantJobs)
-	tenant("GET /api/v1/jobs/{id}", s.getTenantJob)
-	tenant("DELETE /api/v1/jobs/{id}", s.deleteTenantJob)
-	tenant("GET /api/v1/jobs/{id}/logs", s.tenantJobLogs)
-	tenant("POST /api/v1/jobs/{id}/cancel", s.cancelTenantJob)
+	tenant(onTenant(write), "POST /api/v1/jobs", s.createTenantJob)
+	tenant(onTenant(read), "GET /api/v1/jobs", s.listTenantJobs)
+	tenant(onTenant(read), "GET /api/v1/jobs/{id}", s.getTenantJob)
+	tenant(onTenant(write), "DELETE /api/v1/jobs/{id}", s.deleteTenantJob)
+	tenant(onTenant(read), "GET /api/v1/jobs/{id}/logs", s.tenantJobLogs)
+	tenant(onTenant(write), "POST /api/v1/jobs/{id}/cancel", s.cancelTenantJob)
 }
 
 // createTenantJob is POST /api/v1/jobs, with an Idempotency-Key as the tool

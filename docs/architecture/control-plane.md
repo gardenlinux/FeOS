@@ -1245,8 +1245,8 @@ The routes, bodies, status codes and texts are the sandbox system's;
 
 | Class | Routes | Credential |
 |---|---|---|
-| admin | `/api/v1/admin/…` | an admin's UI session (cookie), or Basic with `--admin-users` |
-| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/tenant` | a tenant's token |
+| admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users` |
+| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/tenant` | a tenant's token, or a person's session naming its tenant in `FeRun-Tenant`, with the role and scope each route states ([People and grants](#people-and-grants)) |
 | sandbox | `/api/v1/sandboxes/{id}/…`: exec, files, dirs, search, fetch, processes, calls, watches, bindings | the sandbox's own token |
 | mcp | `/mcp` | the sandbox's token, with the door's own answers |
 | forward | `/fwd/…`, `/api/v1/sandboxes/{id}/ports/…` | the sandbox's token in `Authorization` alone ([ports](#ports)) |
@@ -1367,6 +1367,49 @@ them (`made_by`, NULL for an operator's) and their limits
 `limit_vcpus`, `limit_memory_mib`; NULL: none). A person is never
 deleted; `disabled_at` ends their sessions and every grant's effect, the
 grants kept.
+
+**The tenant class takes a principal.** A bearer is a tenant token, its
+tenant its own: a `FeRun-Tenant` header that names another is 404 "no
+such tenant". Without a bearer, a person's session cookie acts in the
+tenant its `FeRun-Tenant` names (400 "a session names its tenant in the
+FeRun-Tenant header" without it), with the CSRF rules of an operator's
+session (`X-Requested-With: ferun` on a change, an `Origin` the public
+URL's); a tenant where the person holds no grant is 404 "no such
+tenant", and an operator's session holds `admin` in every tenant,
+recorded as the operator's own. A session of a version before people
+(no person) and an unknown cookie are 401 "tenant bearer required", as
+no credential is. Every tenant-class route states its need at the route
+in the route table (`go/internal/api`), and `TestRouteNeeds` holds the
+list:
+
+| Need | Routes |
+|---|---|
+| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/tenant` |
+| read on the tenant | `GET /api/v1/tools`, the sandboxes' reads (list, get, tokens, access), `POST /api/v1/environments/plan`, the tenants' jobs' reads |
+| write on the tenant | a sandbox's create, delete, pause, resume, image credentials and tokens, the preflights, `POST /api/v1/environments`, `…/{env}/clone`, a tenant job's create, cancel and delete |
+| admin on the tenant | a domain's claim, check and deletion |
+| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic |
+| write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
+| admin on the environment | its route tokens, `public` and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
+| admin on the environment, or write on the tenant | `DELETE …/{env}` |
+
+On an environment the higher of the principal's tenant grant and its
+grant there counts; an environment it holds no role on is 404 "no such
+environment", as an absent one. A principal that sees what it names but
+lacks the role is 403 `{"error": "this needs the role <role> on the
+<tenant|environment>", "code": "role_required", "role", "scope"}`. A
+deployment (apply, revert, an object's change) is judged by what it
+changes: one whose services of runtime `attached` differ from the
+current deployment's needs write on the tenant (they run in its
+sandboxes), else 403 `role_required` with the scope `tenant`; one that
+keeps them passes for a writer of the environment alone. Callers inside
+ferund carry no principal and are not checked. The admin API mints
+tenant tokens with `{label, role, environment}` (role `admin` by
+default, the environment by ID or name), and lists them with `role`,
+`environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
+sandbox token is its sandbox's, and the door's answers are as before.
+The sink's reads on a session's behalf (logs, traffic, access logs) have
+no token to pass on yet (D7).
 
 ### Tools and MCP
 

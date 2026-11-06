@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db"
@@ -258,29 +260,218 @@ func (s *server) challengeBasic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 }
 
-// tenant is the tenant class: the bearer is a tenant's token.
-func (s *server) tenant(h apiHandler) http.Handler {
+// tenantHeader names the tenant a person's session acts in (ADR 0031); a
+// token's tenant is its own.
+const tenantHeader = "FeRun-Tenant"
+
+// scope is what a tenant-class route's role is checked on.
+type scope int
+
+const (
+	// scopeTenant: the principal's tenant grant.
+	scopeTenant scope = iota
+	// scopeEnv: the path's {env}, the higher of the principal's tenant
+	// grant and its grant on that environment.
+	scopeEnv
+	// scopeHandler: the handler checks, on what the request names (a
+	// domain's binding: the environments it leaves and joins).
+	scopeHandler
+)
+
+// need is the role and scope a tenant-class route needs of its principal,
+// stated at the route (ADR 0031). A need of RoleNone on the tenant is a
+// member's: any grant in the tenant, the answer filtered to what the
+// principal may read.
+type need struct {
+	role  auth.Role
+	scope scope
+	// orTenant is, on scopeEnv, a tenant role that suffices too (an
+	// environment's deletion: its admin, or write on the tenant).
+	orTenant auth.Role
+}
+
+func onTenant(r auth.Role) need { return need{role: r} }
+func onEnv(r auth.Role) need    { return need{role: r, scope: scopeEnv} }
+
+// member is the need of the routes every principal of the tenant may
+// call, whose answers are filtered to what it may read.
+var member = need{}
+
+// String is the need as the route table's test states it.
+func (n need) String() string {
+	switch {
+	case n.scope == scopeHandler:
+		return n.role.String() + " checked by the handler"
+	case n.scope == scopeEnv && n.orTenant != auth.RoleNone:
+		return n.role.String() + " environment or " + n.orTenant.String() + " tenant"
+	case n.scope == scopeEnv:
+		return n.role.String() + " environment"
+	case n.role == auth.RoleNone:
+		return "member"
+	}
+	return n.role.String() + " tenant"
+}
+
+// errNoTenant is the answer for a tenant the principal is no member of,
+// absent or foreign alike, and for a token's request that names another
+// tenant than its own.
+func errNoTenant() error { return apierr.New(http.StatusNotFound, "no such tenant") }
+
+// errNoEnvironment is the environments' answer for an environment the
+// principal may not see (env.errNoEnvironment's text).
+func errNoEnvironment() error { return apierr.New(http.StatusNotFound, "no such environment") }
+
+// tenant is the tenant class: the principal is a tenant's token (the
+// bearer), or a person's session that names its tenant in FeRun-Tenant,
+// with the CSRF rules of a session. Then the route's need is checked
+// (allow).
+func (s *server) tenant(n need, h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
-		tok := bearer(r)
-		if tok == "" {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
-			return apierr.New(http.StatusUnauthorized, "tenant bearer required")
+		t, err := s.tenantPrincipal(w, r)
+		if err != nil {
+			return err
 		}
+		r = r.WithContext(auth.WithTenant(r.Context(), t))
+		if err := s.allow(r, t, n); err != nil {
+			return err
+		}
+		return h(w, r)
+	})
+}
+
+// tenantPrincipal resolves the principal of a tenant-class request and
+// its grants in the tenant.
+func (s *server) tenantPrincipal(w http.ResponseWriter, r *http.Request) (auth.Tenant, error) {
+	ctx := r.Context()
+	named := r.Header.Get(tenantHeader)
+	if tok := bearer(r); tok != "" {
 		hash := store.HashToken(tok)
-		name, err := s.st.ResolveTenantToken(r.Context(), hash)
+		name, roles, err := s.st.TokenAccess(ctx, hash)
 		if errors.Is(err, model.ErrUnknownToken) {
-			return apierr.New(http.StatusUnauthorized, "unknown tenant token")
+			return auth.Tenant{}, apierr.New(http.StatusUnauthorized, "unknown tenant token")
 		}
 		if err != nil {
-			return fmt.Errorf("token lookup: %w", err)
+			return auth.Tenant{}, fmt.Errorf("token lookup: %w", err)
+		}
+		if named != "" && named != name {
+			return auth.Tenant{}, errNoTenant()
 		}
 		if s.touches.due("t:" + hash) {
-			if err := s.st.TouchTenantToken(r.Context(), hash); err != nil {
+			if err := s.st.TouchTenantToken(ctx, hash); err != nil {
 				s.log.Warn("touch a tenant token", "err", err)
 			}
 		}
-		return h(w, r.WithContext(auth.WithTenant(r.Context(), auth.Tenant{Name: name, Token: tok})))
-	})
+		t := auth.Tenant{Name: name, Token: tok, Principal: auth.Principal{TokenHash: hash}}
+		grantRoles(&t, roles)
+		return t, nil
+	}
+	sess, ok, err := s.session(r)
+	if err != nil {
+		return auth.Tenant{}, err
+	}
+	if !ok || sess.PersonID == uuid.Nil {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
+		return auth.Tenant{}, apierr.New(http.StatusUnauthorized, "tenant bearer required")
+	}
+	if err := s.checkCSRF(r); err != nil {
+		return auth.Tenant{}, err
+	}
+	if named == "" {
+		return auth.Tenant{}, apierr.New(http.StatusBadRequest, "a session names its tenant in the %s header", tenantHeader)
+	}
+	roles, exists, err := s.st.PersonAccess(ctx, named, sess.PersonID)
+	if err != nil {
+		return auth.Tenant{}, fmt.Errorf("grants: %w", err)
+	}
+	if !exists || (!sess.Admin && len(roles) == 0) {
+		return auth.Tenant{}, errNoTenant()
+	}
+	t := auth.Tenant{Name: named, Principal: auth.Principal{Person: sess.PersonID, Operator: sess.Admin}}
+	grantRoles(&t, roles)
+	if sess.Admin {
+		t.Role = auth.RoleAdmin
+	}
+	return t, nil
+}
+
+// grantRoles sets a principal's roles from its grants: per scope the
+// highest.
+func grantRoles(t *auth.Tenant, roles []store.RoleAt) {
+	for _, ra := range roles {
+		role, ok := auth.ParseRole(ra.Role)
+		if !ok {
+			continue
+		}
+		if ra.EnvironmentID == uuid.Nil {
+			t.Role = max(t.Role, role)
+			continue
+		}
+		if t.Envs == nil {
+			t.Envs = map[uuid.UUID]auth.Role{}
+		}
+		t.Envs[ra.EnvironmentID] = max(t.Envs[ra.EnvironmentID], role)
+	}
+}
+
+// allow checks a route's need: on the tenant, the principal's tenant
+// grant; on an environment, the higher of that and its grant there, an
+// environment it holds no role on being absent (404). A role too low is
+// 403 role_required.
+func (s *server) allow(r *http.Request, t auth.Tenant, n need) error {
+	switch n.scope {
+	case scopeTenant:
+		if t.Role >= n.role {
+			return nil
+		}
+		return apierr.RoleRequired(n.role.String(), "tenant")
+	case scopeEnv:
+		if t.Role >= n.role || (n.orTenant != auth.RoleNone && t.Role >= n.orTenant) {
+			return nil
+		}
+		if t.Role == auth.RoleNone && len(t.Envs) == 0 {
+			return errNoEnvironment()
+		}
+		return s.allowEnv(r, t, r.PathValue("env"), n.role)
+	}
+	return nil
+}
+
+// allowEnv checks role on the environment of t's tenant that ref names
+// (its ID or its name).
+func (s *server) allowEnv(r *http.Request, t auth.Tenant, ref string, role auth.Role) error {
+	if t.Role >= role {
+		return nil
+	}
+	id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
+	if isNoRow(err) {
+		return errNoEnvironment()
+	}
+	if err != nil {
+		return fmt.Errorf("environment %s: %w", ref, err)
+	}
+	return allowEnvID(t, id, role)
+}
+
+// allowEnvID checks role on the environment id: none is 404, too low 403.
+func allowEnvID(t auth.Tenant, id uuid.UUID, role auth.Role) error {
+	switch have := t.EnvRole(id); {
+	case have == auth.RoleNone:
+		return errNoEnvironment()
+	case have < role:
+		return apierr.RoleRequired(role.String(), "environment")
+	}
+	return nil
+}
+
+// mayReadEnv reports whether the request's principal may read the
+// environment of that ID (a list's filter).
+func mayReadEnv(r *http.Request, id string) bool {
+	t, _ := auth.TenantFrom(r.Context())
+	if t.MayOnTenant(auth.RoleRead) {
+		return true
+	}
+	u, err := uuid.Parse(id)
+	return err == nil && t.EnvRole(u) >= auth.RoleRead
 }
 
 // sandbox is the sandbox class: the bearer is a sandbox's token, and the

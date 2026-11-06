@@ -6,8 +6,11 @@
 // bindings) and the management UI. It owns the route table and the auth
 // class of every route, stated at the route and nowhere else:
 //
-//	admin     /api/v1/admin/…            an admin's UI session, or Basic (--admin-users)
-//	tenant    /api/v1/sandboxes[/{id}]   a tenant's token: create, list, delete,
+//	admin     /api/v1/admin/…            an operator's UI session, or Basic (--admin-users)
+//	tenant    /api/v1/sandboxes[/{id}]   a tenant's token, or a person's session that
+//	                                     names its tenant (FeRun-Tenant), with
+//	                                     the role and scope each route states
+//	                                     (ADR 0031): create, list, delete,
 //	          /api/v1/tools              pause, resume, tokens, access; the
 //	          /api/v1/environments[/…]   environments (ADR 0018) but their door;
 //	          /api/v1/domains[/…]        the domains (ADR 0021)
@@ -29,7 +32,8 @@
 // sandbox route, not even for a sandbox the tenant owns (the forward class
 // answers it 401 "forwarding needs a sandbox token"), and a sandbox's
 // token is unknown on a tenant route. Whoever names something they may not
-// see gets the answer of an absent thing (404), never a 403. Every
+// see gets the answer of an absent thing (404); a principal that sees it
+// but lacks the role gets 403 role_required. Every
 // unknown route under /api/ is a 404 {"error": "no such route: METHOD
 // PATH"}, never a 405: clients match that text.
 //
@@ -50,6 +54,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/db"
@@ -356,12 +361,21 @@ const (
 	classService class = "service"
 )
 
-// route is one line of the route table.
+// route is one line of the route table. need is a tenant-class route's
+// role and scope (ADR 0031); nil for the other classes.
 type route struct {
 	pattern string
 	class   class
+	need    *need
 	handler http.Handler
 }
+
+// The roles, short, for the route table.
+const (
+	read  = auth.RoleRead
+	write = auth.RoleWrite
+	admin = auth.RoleAdmin
+)
 
 // routes is the route table. Every line names its auth class, so that
 // the credential a route takes is read from the line that registers it.
@@ -370,8 +384,10 @@ func (s *server) routes() []route {
 	add := func(c class, pattern string, h http.Handler) {
 		rs = append(rs, route{pattern: pattern, class: c, handler: h})
 	}
-	admin := func(pattern string, h apiHandler) { add(classAdmin, pattern, s.admin(h)) }
-	tenant := func(pattern string, h apiHandler) { add(classTenant, pattern, s.tenant(h)) }
+	operator := func(pattern string, h apiHandler) { add(classAdmin, pattern, s.admin(h)) }
+	tenant := func(n need, pattern string, h apiHandler) {
+		rs = append(rs, route{pattern: pattern, class: classTenant, need: &n, handler: s.tenant(n, h)})
+	}
 	sandbox := func(pattern string, h apiHandler) { add(classSandbox, pattern, s.sandbox(h)) }
 	sandboxHTTP := func(pattern string, h func(http.ResponseWriter, *http.Request)) {
 		add(classSandbox, pattern, s.sandbox(serve(h)))
@@ -383,42 +399,44 @@ func (s *server) routes() []route {
 	// instances, the instances and the activity log. Nobody's tenant: the
 	// activity log carries full tool params and outputs, and a drain takes
 	// capacity from everyone.
-	admin("GET /api/v1/admin/tenants", s.listTenants)
-	admin("POST /api/v1/admin/tenants", s.createTenant)
-	admin("DELETE /api/v1/admin/tenants/{tenant}", s.deleteTenant)
-	admin("GET /api/v1/admin/tenants/{tenant}/tokens", s.listTenantTokens)
-	admin("POST /api/v1/admin/tenants/{tenant}/tokens", s.createTenantToken)
-	admin("DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}", s.revokeTenantToken)
-	admin("GET /api/v1/admin/nodes", s.listNodes)
-	admin("PATCH /api/v1/admin/nodes/{node}", s.patchNode)
-	admin("DELETE /api/v1/admin/nodes/{node}", s.removeNode)
-	admin("POST /api/v1/admin/nodes/{node}/drain", s.drainNode)
-	admin("POST /api/v1/admin/nodes/{node}/undrain", s.undrainNode)
-	admin("GET /api/v1/admin/nodes/{node}/certs", s.listNodeCerts)
-	admin("GET /api/v1/admin/nodes/{node}/activity", s.nodeActivity)
-	admin("GET /api/v1/admin/sandboxes/{id}/activity", s.sandboxActivity)
-	admin("POST /api/v1/admin/join-tokens", s.createJoinToken)
-	admin("GET /api/v1/admin/join-tokens", s.listJoinTokens)
-	admin("DELETE /api/v1/admin/join-tokens/{id}", s.revokeJoinToken)
-	admin("GET /api/v1/admin/ingresses", s.listIngresses)
-	admin("DELETE /api/v1/admin/ingresses/{name}", s.removeIngress)
-	admin("GET /api/v1/admin/instances", s.listInstances)
+	operator("GET /api/v1/admin/tenants", s.listTenants)
+	operator("POST /api/v1/admin/tenants", s.createTenant)
+	operator("DELETE /api/v1/admin/tenants/{tenant}", s.deleteTenant)
+	operator("GET /api/v1/admin/tenants/{tenant}/tokens", s.listTenantTokens)
+	operator("POST /api/v1/admin/tenants/{tenant}/tokens", s.createTenantToken)
+	operator("DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}", s.revokeTenantToken)
+	operator("GET /api/v1/admin/nodes", s.listNodes)
+	operator("PATCH /api/v1/admin/nodes/{node}", s.patchNode)
+	operator("DELETE /api/v1/admin/nodes/{node}", s.removeNode)
+	operator("POST /api/v1/admin/nodes/{node}/drain", s.drainNode)
+	operator("POST /api/v1/admin/nodes/{node}/undrain", s.undrainNode)
+	operator("GET /api/v1/admin/nodes/{node}/certs", s.listNodeCerts)
+	operator("GET /api/v1/admin/nodes/{node}/activity", s.nodeActivity)
+	operator("GET /api/v1/admin/sandboxes/{id}/activity", s.sandboxActivity)
+	operator("POST /api/v1/admin/join-tokens", s.createJoinToken)
+	operator("GET /api/v1/admin/join-tokens", s.listJoinTokens)
+	operator("DELETE /api/v1/admin/join-tokens/{id}", s.revokeJoinToken)
+	operator("GET /api/v1/admin/ingresses", s.listIngresses)
+	operator("DELETE /api/v1/admin/ingresses/{name}", s.removeIngress)
+	operator("GET /api/v1/admin/instances", s.listInstances)
 
 	// Tenants: the sandbox as a thing one owns, and the tokens that reach
 	// into it. A foreign sandbox is indistinguishable from an absent one.
-	tenant("GET /api/v1/tools", s.listTools)
-	tenant("POST /api/v1/sandboxes", s.createSandbox)
-	tenant("GET /api/v1/sandboxes", s.listSandboxes)
-	tenant("GET /api/v1/sandboxes/{id}", s.getSandbox)
-	tenant("DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
-	tenant("POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
-	tenant("POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
-	tenant("PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
-	tenant("DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
-	tenant("GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
-	tenant("POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
-	tenant("DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
-	tenant("GET /api/v1/sandboxes/{id}/access", s.access)
+	// A sandbox is the tenant's, never an environment's (ADR 0031): its
+	// routes need a tenant grant.
+	tenant(onTenant(read), "GET /api/v1/tools", s.listTools)
+	tenant(onTenant(write), "POST /api/v1/sandboxes", s.createSandbox)
+	tenant(onTenant(read), "GET /api/v1/sandboxes", s.listSandboxes)
+	tenant(onTenant(read), "GET /api/v1/sandboxes/{id}", s.getSandbox)
+	tenant(onTenant(write), "DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
+	tenant(onTenant(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
+	tenant(onTenant(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
+	tenant(onTenant(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
+	tenant(onTenant(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
+	tenant(onTenant(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
+	tenant(onTenant(write), "POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
+	tenant(onTenant(write), "DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
+	tenant(onTenant(read), "GET /api/v1/sandboxes/{id}/access", s.access)
 
 	// The sandbox's own token: the tool baseline over REST. Each route
 	// makes the same tools.Runner call that MCP makes, with the call's id
@@ -459,16 +477,16 @@ func (s *server) routes() []route {
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/ssh", b.GetSSH)
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/ssh", b.DeleteSSH)
 		sandboxHTTP("POST /api/v1/sandboxes/{id}/ssh/{name}/check", b.CheckSSH)
-		tenant("POST /api/v1/kube/preflight", serve(b.KubePreflight))
-		tenant("POST /api/v1/ssh/preflight", serve(b.SSHPreflight))
+		tenant(onTenant(write), "POST /api/v1/kube/preflight", serve(b.KubePreflight))
+		tenant(onTenant(write), "POST /api/v1/ssh/preflight", serve(b.SSHPreflight))
 		sandboxHTTP("PUT /api/v1/sandboxes/{id}/http", b.PutHTTP)
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/http", b.GetHTTP)
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/http", b.DeleteHTTP)
-		tenant("POST /api/v1/http/preflight", serve(b.HTTPPreflight))
+		tenant(onTenant(write), "POST /api/v1/http/preflight", serve(b.HTTPPreflight))
 	}
 
 	// The environments (ADR 0018): the tenant's, and their route door.
-	s.envRoutes(add)
+	s.envRoutes(tenant, add)
 
 	// The domains (ADR 0021): the tenant's claims on names, and their
 	// bindings to its environments.
@@ -479,7 +497,7 @@ func (s *server) routes() []route {
 
 	// The sink (ADR 0026): a token's tenant, its instances' certificates
 	// and their service tokens.
-	s.sinkRoutes(admin, tenant, service)
+	s.sinkRoutes(operator, service, tenant)
 
 	// The doors with classes of their own: their answers are plain text
 	// (forward) or the MCP door's, not this API's JSON.

@@ -21,43 +21,50 @@ import (
 
 // envRoutes registers the environments' routes on add; none without the
 // service.
-func (s *server) envRoutes(add func(c class, pattern string, h http.Handler)) {
+//
+// Each states its role and scope (ADR 0031): what reaches beyond one
+// environment (the list, a create, a clone, a spec without an
+// environment) the tenant's grant, the rest the environment's, where the
+// higher of the tenant's and the environment's grant counts. A deletion is
+// the environment's admin's or the tenant's writer's.
+func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
+	add func(c class, pattern string, h http.Handler)) {
 	e := s.deps.Environments
 	if e == nil {
 		return
 	}
-	env := func(pattern string, h apiHandler) { add(classTenant, pattern, s.tenant(s.envHandler(h))) }
-	env("POST /api/v1/environments", s.createEnv)
-	env("GET /api/v1/environments", s.listEnvs)
-	env("POST /api/v1/environments/plan", s.planSpec)
-	env("GET /api/v1/environments/{env}", s.getEnv)
-	env("DELETE /api/v1/environments/{env}", s.deleteEnv)
-	env("POST /api/v1/environments/{env}/plan", s.planEnv)
-	env("POST /api/v1/environments/{env}/deployments", s.applyDeployment)
-	env("GET /api/v1/environments/{env}/deployments", s.listDeployments)
-	env("GET /api/v1/environments/{env}/deployments/{n}", s.getDeployment)
-	env("POST /api/v1/environments/{env}/deployments/{n}/revert", s.revertDeployment)
-	env("PUT /api/v1/environments/{env}/objects/{kind}/{name}", s.putObject)
-	env("DELETE /api/v1/environments/{env}/objects/{kind}/{name}", s.deleteObject)
-	env("GET /api/v1/environments/{env}/objects/{kind}/{name}/logs", s.objectLogs)
-	env("GET /api/v1/environments/{env}/tags", s.listTags)
-	env("GET /api/v1/environments/{env}/tags/{tag}", s.getTag)
-	env("PUT /api/v1/environments/{env}/tags/{tag}", s.putTag)
-	env("DELETE /api/v1/environments/{env}/tags/{tag}", s.deleteTag)
-	env("POST /api/v1/environments/{env}/clone", s.cloneEnv)
-	env("GET /api/v1/environments/{env}/secrets", s.listSecrets)
-	env("PUT /api/v1/environments/{env}/secrets/{name}", s.putSecret)
-	env("DELETE /api/v1/environments/{env}/secrets/{name}", s.deleteSecret)
-	env("GET /api/v1/environments/{env}/incidents", s.listIncidents)
-	env("GET /api/v1/environments/{env}/incidents/{id}", s.getIncident)
-	env("GET /api/v1/environments/{env}/access-logs", s.accessLogs)
-	env("GET /api/v1/environments/{env}/traffic", s.traffic)
-	env("POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
-	env("POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
-	env("POST /api/v1/environments/{env}/bindings/{name}/check", s.checkBinding)
-	env("POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
-	env("DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
-	env("PUT /api/v1/environments/{env}/public", s.setEnvPublic)
+	env := func(n need, pattern string, h apiHandler) { tenant(n, pattern, s.envHandler(h)) }
+	env(onTenant(write), "POST /api/v1/environments", s.createEnv)
+	env(member, "GET /api/v1/environments", s.listEnvs)
+	env(onTenant(read), "POST /api/v1/environments/plan", s.planSpec)
+	env(onEnv(read), "GET /api/v1/environments/{env}", s.getEnv)
+	env(need{role: admin, scope: scopeEnv, orTenant: write}, "DELETE /api/v1/environments/{env}", s.deleteEnv)
+	env(onEnv(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
+	env(onEnv(write), "POST /api/v1/environments/{env}/deployments", s.applyDeployment)
+	env(onEnv(read), "GET /api/v1/environments/{env}/deployments", s.listDeployments)
+	env(onEnv(read), "GET /api/v1/environments/{env}/deployments/{n}", s.getDeployment)
+	env(onEnv(write), "POST /api/v1/environments/{env}/deployments/{n}/revert", s.revertDeployment)
+	env(onEnv(write), "PUT /api/v1/environments/{env}/objects/{kind}/{name}", s.putObject)
+	env(onEnv(write), "DELETE /api/v1/environments/{env}/objects/{kind}/{name}", s.deleteObject)
+	env(onEnv(read), "GET /api/v1/environments/{env}/objects/{kind}/{name}/logs", s.objectLogs)
+	env(onEnv(read), "GET /api/v1/environments/{env}/tags", s.listTags)
+	env(onEnv(read), "GET /api/v1/environments/{env}/tags/{tag}", s.getTag)
+	env(onEnv(write), "PUT /api/v1/environments/{env}/tags/{tag}", s.putTag)
+	env(onEnv(write), "DELETE /api/v1/environments/{env}/tags/{tag}", s.deleteTag)
+	env(onTenant(write), "POST /api/v1/environments/{env}/clone", s.cloneEnv)
+	env(onEnv(read), "GET /api/v1/environments/{env}/secrets", s.listSecrets)
+	env(onEnv(write), "PUT /api/v1/environments/{env}/secrets/{name}", s.putSecret)
+	env(onEnv(write), "DELETE /api/v1/environments/{env}/secrets/{name}", s.deleteSecret)
+	env(onEnv(read), "GET /api/v1/environments/{env}/incidents", s.listIncidents)
+	env(onEnv(read), "GET /api/v1/environments/{env}/incidents/{id}", s.getIncident)
+	env(onEnv(read), "GET /api/v1/environments/{env}/access-logs", s.accessLogs)
+	env(onEnv(read), "GET /api/v1/environments/{env}/traffic", s.traffic)
+	env(onEnv(write), "POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
+	env(onEnv(write), "POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
+	env(onEnv(write), "POST /api/v1/environments/{env}/bindings/{name}/check", s.checkBinding)
+	env(onEnv(admin), "POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
+	env(onEnv(admin), "DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
+	env(onEnv(admin), "PUT /api/v1/environments/{env}/public", s.setEnvPublic)
 	add(classRoute, "/api/v1/environments/{env}/http/{path...}", http.HandlerFunc(e.ServeRoute))
 }
 
@@ -138,6 +145,14 @@ func (s *server) listEnvs(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// The list holds what the principal may read (ADR 0031).
+	readable := list.Environments[:0]
+	for _, e := range list.Environments {
+		if mayReadEnv(r, e.ID) {
+			readable = append(readable, e)
+		}
+	}
+	list.Environments = readable
 	return writeJSON(w, http.StatusOK, list)
 }
 

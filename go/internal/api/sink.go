@@ -33,8 +33,9 @@ const (
 	serviceCertsPerHour = 10
 )
 
-func (s *server) sinkRoutes(admin, tenant, service func(pattern string, h apiHandler)) {
-	tenant("GET /api/v1/tenant", s.getTenant)
+func (s *server) sinkRoutes(admin, service func(pattern string, h apiHandler),
+	tenant func(n need, pattern string, h apiHandler)) {
+	tenant(member, "GET /api/v1/tenant", s.getTenant)
 	service("POST /api/v1/service-certificates", s.issueServiceCert)
 	admin("GET /api/v1/admin/service-tokens", s.listServiceTokens)
 	admin("DELETE /api/v1/admin/service-tokens/{id}", s.revokeServiceToken)

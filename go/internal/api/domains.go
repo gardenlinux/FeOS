@@ -5,10 +5,14 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/domains"
 )
 
@@ -27,17 +31,75 @@ type Domains interface {
 // domainRoutes registers the domains' routes, tenant class, each a thin
 // adapter of a request to one method of Deps.Domains; none without the
 // service.
-func (s *server) domainRoutes(tenant func(pattern string, h apiHandler)) {
+//
+// A claim is the tenant's (ADR 0021): claiming, checking and deleting
+// need admin on the tenant; a binding admin on the environments it leaves
+// and joins, which the handler checks; the list and a domain answer what
+// the principal may read: every domain with read on the tenant, else
+// those bound to an environment it reads.
+func (s *server) domainRoutes(tenant func(n need, pattern string, h apiHandler)) {
 	if s.deps.Domains == nil {
 		return
 	}
-	tenant("POST /api/v1/domains", s.createDomain)
-	tenant("GET /api/v1/domains", s.listDomains)
-	tenant("GET /api/v1/domains/{id}", s.getDomain)
-	tenant("DELETE /api/v1/domains/{id}", s.deleteDomain)
-	tenant("PUT /api/v1/domains/{id}/environment", s.bindDomain)
-	tenant("DELETE /api/v1/domains/{id}/environment", s.unbindDomain)
-	tenant("POST /api/v1/domains/{id}/check", s.checkDomain)
+	bindings := need{role: admin, scope: scopeHandler}
+	tenant(onTenant(admin), "POST /api/v1/domains", s.createDomain)
+	tenant(member, "GET /api/v1/domains", s.listDomains)
+	tenant(member, "GET /api/v1/domains/{id}", s.getDomain)
+	tenant(onTenant(admin), "DELETE /api/v1/domains/{id}", s.deleteDomain)
+	tenant(bindings, "PUT /api/v1/domains/{id}/environment", s.bindDomain)
+	tenant(bindings, "DELETE /api/v1/domains/{id}/environment", s.unbindDomain)
+	tenant(onTenant(admin), "POST /api/v1/domains/{id}/check", s.checkDomain)
+}
+
+// mayReadDomain reports whether the request's principal may read d.
+func mayReadDomain(r *http.Request, d domains.Domain) bool {
+	t, _ := auth.TenantFrom(r.Context())
+	if t.MayOnTenant(read) {
+		return true
+	}
+	return d.Environment != nil && mayReadEnv(r, *d.Environment)
+}
+
+// errNoDomain is the domains' answer for one the principal may not see.
+func errNoDomain() error { return apierr.New(http.StatusNotFound, "no such domain") }
+
+// visibleDomain reads the domain of the path for a principal that may
+// read it; 404 else.
+func (s *server) visibleDomain(r *http.Request) (domains.Domain, error) {
+	d, err := s.deps.Domains.GetDomain(r.Context(), tenantOf(r), r.PathValue("id"))
+	if err != nil {
+		return domains.Domain{}, err
+	}
+	if !mayReadDomain(r, d) {
+		return domains.Domain{}, errNoDomain()
+	}
+	return d, nil
+}
+
+// allowBinding checks admin on the environment a domain is bound to, if
+// any, and on the one it is to be bound to (ref, "" for none).
+func (s *server) allowBinding(r *http.Request, ref string) error {
+	t, _ := auth.TenantFrom(r.Context())
+	if t.MayOnTenant(admin) {
+		return nil
+	}
+	d, err := s.visibleDomain(r)
+	if err != nil {
+		return err
+	}
+	if d.Environment != nil {
+		id, err := uuid.Parse(*d.Environment)
+		if err != nil {
+			return fmt.Errorf("domain %s: environment %q: %w", d.ID, *d.Environment, err)
+		}
+		if err := allowEnvID(t, id, admin); err != nil {
+			return err
+		}
+	}
+	if ref == "" {
+		return nil
+	}
+	return s.allowEnv(r, t, ref, admin)
 }
 
 func (s *server) createDomain(w http.ResponseWriter, r *http.Request) error {
@@ -67,11 +129,18 @@ func (s *server) listDomains(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	readable := list.Domains[:0]
+	for _, d := range list.Domains {
+		if mayReadDomain(r, d) {
+			readable = append(readable, d)
+		}
+	}
+	list.Domains = readable
 	return writeJSON(w, http.StatusOK, list)
 }
 
 func (s *server) getDomain(w http.ResponseWriter, r *http.Request) error {
-	d, err := s.deps.Domains.GetDomain(r.Context(), tenantOf(r), r.PathValue("id"))
+	d, err := s.visibleDomain(r)
 	if err != nil {
 		return err
 	}
@@ -91,6 +160,9 @@ func (s *server) bindDomain(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
+	if err := s.allowBinding(r, req.Environment); err != nil {
+		return err
+	}
 	d, err := s.deps.Domains.BindDomain(r.Context(), tenantOf(r), r.PathValue("id"), req.Environment)
 	if err != nil {
 		return err
@@ -99,6 +171,9 @@ func (s *server) bindDomain(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) unbindDomain(w http.ResponseWriter, r *http.Request) error {
+	if err := s.allowBinding(r, ""); err != nil {
+		return err
+	}
 	d, err := s.deps.Domains.UnbindDomain(r.Context(), tenantOf(r), r.PathValue("id"))
 	if err != nil {
 		return err

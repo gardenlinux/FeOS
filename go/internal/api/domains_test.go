@@ -17,7 +17,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/domains"
@@ -28,8 +27,6 @@ import (
 // fakeDomains is the domains service of the tests that do not use it:
 // every route answers 404.
 type fakeDomains struct{}
-
-func errNoDomain() error { return apierr.New(http.StatusNotFound, "no such domain") }
 
 func (fakeDomains) CreateDomain(context.Context, string, domains.CreateRequest) (domains.Domain, error) {
 	return domains.Domain{}, errNoDomain()

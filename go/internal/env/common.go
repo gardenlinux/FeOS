@@ -148,7 +148,7 @@ func deploymentInfo(r store.EnvDeployment, tags []string) DeploymentInfo {
 		ann = map[string]string{}
 	}
 	return DeploymentInfo{Number: r.Number, State: r.State, Origin: r.Origin, OriginRef: r.OriginRef, Author: r.Author,
-		Message: r.Message, Annotations: ann, Base: r.Base, Reason: r.Reason, CreatedAt: rfc3339(r.CreatedAt),
+		MadeBy: r.MadeBy, Message: r.Message, Annotations: ann, Base: r.Base, Reason: r.Reason, CreatedAt: rfc3339(r.CreatedAt),
 		StartedAt: rfc3339(r.StartedAt), FinishedAt: rfc3339(r.FinishedAt), Tags: tags}
 }
 

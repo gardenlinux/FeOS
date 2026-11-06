@@ -283,9 +283,13 @@ type DeploymentInfo struct {
 	State string `json:"state"`
 	// Origin is model.Origin…; OriginRef the reverted deployment's number,
 	// the cloned "<env id>/<number>" or the object "<kind>/<name>".
-	Origin      string            `json:"origin"`
-	OriginRef   string            `json:"originRef"`
-	Author      string            `json:"author"`
+	Origin    string `json:"origin"`
+	OriginRef string `json:"originRef"`
+	Author    string `json:"author"`
+	// MadeBy is the principal that made it, as ferund saw it (ADR 0031):
+	// "person:<id>", "token:<hash>" or "basic:<user>"; "" for ferund's
+	// own, then left out. Author is the client's free text beside it.
+	MadeBy      string            `json:"madeBy,omitempty"`
 	Message     string            `json:"message"`
 	Annotations map[string]string `json:"annotations"`
 	Base        int               `json:"base"`
