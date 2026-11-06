@@ -142,12 +142,32 @@ Two things outside FeRun shape this:
   "role": "write"}`).
 - A tenant always has an admin: the last admin grant cannot be removed
   or lowered.
+- Where a route touches both scopes, the implementation reads the rules
+  above so:
+  - deleting an environment needs `admin` on it **or** `write` on the
+    tenant: either suffices;
+  - the list of environments answers every member, filtered for a
+    principal without a tenant grant to the environments it holds a
+    grant on;
+  - a plan without an environment (`POST /api/v1/environments/plan`,
+    which reads nothing of the tenant's) needs `read` on the tenant;
+  - the preflights (`POST /api/v1/{kube,ssh,http}/preflight`), which
+    check what a sandbox would get, need `write` on the tenant, as the
+    sandboxes do.
 
 ### People make tenants and invite each other
 
 - A signed-in person makes a tenant, named by today's rules, and holds
   `admin` on it. Names the platform needs stay reserved (`operator`, the
-  zone owners', `admin`, `api`, `www` and the platform's host labels).
+  zone owners', `admin`, `api`, `www` and the platform's host labels):
+  422 `reserved_name` for `operator`, `admin`, `api`, `www`, the apps
+  zone's owners (`--apps-zone-owners`) and the first label of the public
+  URL's host, of `--edge-name`, of `--apps-zone` and of `--tenant-zone`.
+  An operator who makes a tenant with `POST /api/v1/tenants` (with a
+  session) gets a person's tenant: its maker, the `admin` grant, the
+  default limits and the tenant zone, but no bound of
+  `--tenants-per-person`; `POST /api/v1/admin/tenants` stays the
+  operators' tenant of before, in the apps zone, with its token.
   `--tenant-creation` says who may make tenants, `people` or
   `operators`; `--tenants-per-person` bounds how many tenants one person
   may hold as their maker (3).
@@ -160,7 +180,14 @@ Two things outside FeRun shape this:
 
 ### The API takes a person as it takes a token
 
-- The tenant class accepts a person's session beside a token. A session
+- The tenant class accepts a person's session beside a token. The
+  session's cookie is `__Host-ferun_session` (Secure, `Path=/`, no
+  `Domain`): the tenant zone lies below `ferund`'s host
+  (`apps.run.<domain>` beside `run.<domain>`), and the prefix keeps an
+  app there from setting a cookie the browser sends to `ferund`. The
+  name before, `ferun_session`, is read and passed on for one release,
+  so that sessions survive the rollout and a sink or `ferund` of before
+  finds the session; the release after drops it. A session
   names its tenant in the header `FeRun-Tenant`; a token's tenant is its
   own, and a header that names another is answered as an unknown tenant.
   A session's changes need `X-Requested-With: ferun` and, with an
@@ -184,8 +211,11 @@ Two things outside FeRun shape this:
   sink for a tenant, and the sink trusts `ferund`'s answer alone. A
   principal of environments only is answered only a sink that says it
   filters (`?filter=environments`), since a sink of before reads any
-  answer as the whole tenant's. Deleting streams needs `write` on the
-  tenant.
+  answer as the whole tenant's. Deleting streams
+  (`DELETE /api/v1/log-streams`) needs `write` on the tenant, also for a
+  stream of one environment: the sink's deletion is the tenant's, not an
+  environment's, and a principal of environments only deletes nothing
+  there.
 
 ### The UI is the tenants' console
 
@@ -325,7 +355,12 @@ Two things outside FeRun shape this:
   under it, labels by ADR 0021, and no plain labels, since it has no
   owners.
 - A label is a name in its zone: `host_labels` registers it per zone,
-  so a label taken in the tenant zone is free in the apps zone. A move
+  so a label taken in the tenant zone is free in the apps zone. The
+  migration that keys the labels by zone breaks the label claims of a
+  `ferund` of before during the rolling deploy (its `ON CONFLICT (label)`
+  matches no key any more): its first publishes and chosen labels fail
+  until it is replaced. No index keeps both, so the window is accepted
+  and documented (control-plane.md, "Labels per zone"). A move
   keeps each environment's label where it may (free or the tenant's in
   the new zone, and not a plain one where the tenant owns none), else
   gives it its natural label or its fallback there, and leaves the old
