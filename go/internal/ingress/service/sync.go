@@ -317,7 +317,7 @@ func (s *Service) readSelf(ctx context.Context, p nodelink.IngressPeer) (wire.Se
 			p.Name, helloFirstText)
 	}
 	return wire.Self{Name: g.Name, Address: g.MeshAddress, AppsZone: s.cfg.AppsZone,
-		AdmittedVersion: uint64(max(g.GroupVersion, 0))}, nil
+		TenantZone: s.cfg.TenantZone, AdmittedVersion: uint64(max(g.GroupVersion, 0))}, nil
 }
 
 // rereadSelf reads the ingress's row again for its stream: Self as it is

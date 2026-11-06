@@ -22,6 +22,7 @@ var routeClasses = map[string]class{
 	"GET /api/v1/admin/tenants/{tenant}/tokens":           classAdmin,
 	"POST /api/v1/admin/tenants/{tenant}/tokens":          classAdmin,
 	"DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}": classAdmin,
+	"PUT /api/v1/admin/tenants/{tenant}/zone":             classAdmin,
 	"GET /api/v1/admin/nodes":                             classAdmin,
 	"PATCH /api/v1/admin/nodes/{node}":                    classAdmin,
 	"DELETE /api/v1/admin/nodes/{node}":                   classAdmin,

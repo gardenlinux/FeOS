@@ -11,14 +11,15 @@ the ingress joins), [ADR 0018](../adr/0018-environments-and-releases.md)
 [control-plane.md](control-plane.md); the deployment on Gardener is in
 [deploy/gardener/README.md](../../deploy/gardener/README.md#the-ingress).
 
-`ferun-ingress` serves `https://<label>.<apps zone>/…` and the tenants'
+`ferun-ingress` serves `https://<label>.<zone>/…`, where the zone is the
+apps zone or the tenant zone of the tenants people make (ADR 0031), and the tenants'
 domains of the environments whose tenant made them public, straight to their image
 services' pods over IPv6 on the pods' mesh. It has no REST API, no
 database and no tenant's token: it connects out to `ferund` on the
 nodes' port, as a node does, and serves from the table `ferund` streams
 to it. A rollout or an outage of `ferund` cuts no request.
 
-Not built: `http` traffic records, tenant zones, certificates over
+Not built: `http` traffic records, zones of a tenant's own, certificates over
 DNS-01 (a zone's wildcard), L4 routes and h2c upstreams. The domains'
 claims, checks and states are `ferund`'s domains core; their
 certificates are ACME's ([control-plane.md](control-plane.md#certificates-of-domains)).
@@ -30,7 +31,7 @@ certificates are ACME's ([control-plane.md](control-plane.md#certificates-of-dom
                      │   NetworkPolicy: 8080/8443 from anywhere; 9090, udp/51820-51835 from the workers
                      │   egress: DNS, ferund's 7443, udp/51820 to the workers, nothing else
    StatefulSet ferun-ingress-0/1 (root with NET_ADMIN, seccomp RuntimeDefault, a volume each)
-     ├─ proxy:  TLS (SNI: a domain's certificate from the table, else the wildcard's files) → HTTP/1.1 or HTTP/2
+     ├─ proxy:  TLS (SNI: a domain's certificate from the table, else the tenant zone's wildcard where it covers the name, else the apps zone's) → HTTP/1.1 or HTTP/2
      │          port 80: ACME HTTP-01 answers from the table, else 308 to https
      │          → host → environment → route → service → endpoint
      │          ├─ usable: port admitted ∧ group version ≥ admitted ∧ node's handshake < 180 s
@@ -88,6 +89,7 @@ Go's syntax, byte sizes as integers with an optional `KiB`, `MiB` or
 | `--sink-endpoint` | none | the sink's ingest, `host:port`, where the access log goes ([Access log](#access-log)); a name is resolved by the instance, any of its addresses serves; empty: the access log is not kept, its records counted as dropped (logged once at start) |
 | `--listen-http`, `--listen-https`, `--health-listen` | required | an IP address and a port each: the pod's IP, never a wildcard, which would bind the mesh device's address too |
 | `--tls-cert`, `--tls-key` | required | the apps zone's wildcard certificate and its key, PEM, read again every 30 s |
+| `--tenant-zone-tls-cert`, `--tenant-zone-tls-key` | empty | the tenant zone's wildcard certificate and its key (ADR 0031), PEM, read again every 30 s, served for every name it covers; both or neither ([The tenant zone](#the-tenant-zone)) |
 | `--mesh-device` | `ferun-mesh` | the WireGuard device |
 | `--mesh-port` | `51820` | its UDP port; a repair moves the device to one of the 15 after it ([Lost paths](#lost-paths)) |
 | `--mesh-endpoint` | required | where the nodes reach the device: `$(POD_IP):51820` |
@@ -244,8 +246,8 @@ comes.
 
 On a connection the agent says `Hello` first: its WireGuard public key,
 its endpoint and its version. Hello takes the instance's place on the
-mesh and answers the cluster's ULA, its /96 and address, the apps zone
-and the answering instance; the agent keeps `mesh.json` and configures
+mesh and answers the cluster's ULA, its /96 and address, the apps zone,
+the tenant zone and the answering instance; the agent keeps `mesh.json` and configures
 the device ([The mesh](#the-mesh)). `Sync` then streams the table. A
 message out of sequence, or a stream that ends or stays silent for 45 s,
 makes the agent connect again.
@@ -291,7 +293,8 @@ The table is what the ingress routes, one entry per public environment
 (`wire.Env`, [api.md](api.md#the-ingresss-api)):
 
 - its ID, tenant, name and hosts: its served domains, else
-  `<label>.<apps zone>` while the platform has an apps zone: an
+  `<label>.<zone>` in its tenant's zone while the platform serves that
+  zone (the apps zone, or the tenant zone, ADR 0031): an
   environment on a domain of its own is not served at its default host
   (ADR 0021);
 - its **domains** (`domains`): each served domain's name, its
@@ -324,7 +327,7 @@ The table is what the ingress routes, one entry per public environment
 
 Beside the environments the table holds the mesh, the nodes with their
 keys, endpoints and /96s at the peers' version, `Self`: the
-instance's name, mesh address, the apps zone and its admitted version
+instance's name, mesh address, the apps zone, the tenant zone and its admitted version
 ([Admission](#admission)), and the **challenges**: every pending ACME
 HTTP-01 answer (`acme_challenges` whose `expires_at` is ahead, at most
 1024), each its token, host and key authorization, for every instance. An environment that is not public, is being
@@ -567,14 +570,17 @@ without them.
   rolls nothing.
 - Refused with 409: publishing while the platform has no apps zone ("the
   platform serves no apps zone (--apps-zone); an environment cannot be
-  public"), and either while the environment or its tenant is being
+  public") or serves not the tenant's zone ("the platform serves no zone
+  old.example.com, tenant acme's; …", a zone left behind by a changed
+  `--tenant-zone`), and either while the environment or its tenant is being
   deleted. A call that changes nothing writes nothing.
 - A change notifies `ferun_ingress env:<id>`, wakes `env-reconcile` and
   `env-groups`, and is logged with the tenant and the environment.
 
 `--apps-zone` (`FERUN_APPS_ZONE`) of `ferund` names the zone; empty, the
 default, is the platform's switch: no environment has a host, and none
-can be published. Deploying the ingress makes no environment public, and
+can be published. `--tenant-zone` (`FERUN_TENANT_ZONE`) names the
+second zone, the tenant zone ([The tenant zone](#the-tenant-zone)). Deploying the ingress makes no environment public, and
 a clone never copies `public`.
 
 `GET /api/v1/environments` and `GET …/{env}` show `public` and `hosts`
@@ -593,8 +599,9 @@ every host of its environment.
 
 ### Host labels
 
-An environment's default host is `<label>.<apps zone>`. The label is
-given at its first publish, or chosen by its tenant (below), and changes
+An environment's default host is `<label>.<zone>`, in its tenant's zone
+(`tenants.zone`: the apps zone for none, else the tenant zone, ADR 0031).
+The label is a name in that zone, given at its first publish, or chosen by its tenant (below), and changes
 only when its tenant chooses another:
 
 - **natural**: `<environment>-<tenant>`, when it names that pair alone
@@ -617,7 +624,9 @@ only when its tenant chooses another:
   label the environment had or would get; that one stays the tenant's;
 - **plain**: a chosen label without `--`, which only a tenant that owns
   the apps zone may choose (`--apps-zone-owners`, FeCode's installation
-  `fecode`, for a project's production at `<project>.<apps zone>`): a
+  `fecode`, for a project's production at `<project>.<apps zone>`), and
+  only while its hosts are in the apps zone: the tenant zone has no
+  owners, and a plain label there is a 400. A plain label is a
   DNS label of at most 63 characters, not ending in a hyphen and 16 hex
   characters. One whose part after its first hyphen names an existing
   tenant is refused (409 `host_label_taken`), since it is the natural
@@ -637,13 +646,19 @@ holds gets its fallback, as for a label another tenant holds. A host
 that reads as `<environment>-<tenant>` is that tenant's or the zone's
 owner's.
 
-`host_labels` registers every label ever given with the tenant that
-first claimed it. A claim is one atomic upsert, the chosen label, or the
+`host_labels` registers every label ever given, per zone (`zone`: `''`
+for the apps zone, else the zone's name, migration `0029`), with the
+tenant that first claimed it there: a label taken in the tenant zone is
+not taken in the apps zone, so whoever makes a tenant cannot reach the
+labels of the platform's products. A claim is one atomic upsert, the chosen label, or the
 natural label first, then the fallback: a label is free only for its owner, and only once its
 environment is gone (the foreign key sets it free on delete). So a host,
 its cookies, service workers and HSTS never pass to another tenant; a
 tenant created again under the same name inherits its labels.
-`environments.host_label` mirrors the claim, with a unique index.
+`environments.host_label` mirrors the claim; `host_labels` (its key
+`(zone, label)` and its unique `env_id`) keeps one host per environment
+and one environment per host, so the label alone is no longer unique
+there.
 
 ### The route door beside the ingress
 
@@ -804,8 +819,8 @@ host 404 "no such host".
   body received before the request reads it ([Limits](#limits)); no
   write timeout and no timeout for an upstream's response headers, so
   that streams and long polls live.
-- On a host under the apps zone, every cookie of a response is made
-  host-only ([Cookies](#cookies)).
+- On a host under the apps zone or the tenant zone, every cookie of a
+  response is made host-only ([Cookies](#cookies)).
 
 ### Trace context
 
@@ -1083,7 +1098,7 @@ seen between 45 s and 15 minutes ago. An ingress is seen at every Hello,
 every Sync heartbeat (10 s) and every Hold. After 15 minutes it counts as
 gone; one that left cleanly never fences.
 
-## TLS and the apps zone
+## TLS and the zones
 
 ### The certificate
 
@@ -1097,7 +1112,9 @@ handshake on; a certificate that does not parse, whose key is not its
 own, or that is not for its name is logged and its host gets the
 wildcard.
 
-Every other SNI, or none, gets the operator's wildcard `*.<apps zone>`,
+An SNI that the tenant zone's wildcard covers (`--tenant-zone-tls-cert`,
+one label under the zone, as a wildcard does) gets that one. Every other
+SNI, or none, gets the operator's wildcard `*.<apps zone>`. Both come
 from files that cert-manager renews into a Secret and the kubelet into
 the pod. They are read again every 30 s, and a pair that changed and
 loads replaces the one in use; one that does not load keeps it. An
@@ -1112,12 +1129,49 @@ The Gardener deployment derives it from its domain, `apps.<DOMAIN>`
 wildcard record `*.<apps zone>` pointing at the ingress's balancer, DNS
 only.
 
+### The tenant zone
+
+The tenants that people make get their default hosts under a zone of
+their own (ADR 0031), such as `apps.run.example.com`, so that their
+labels and cookies stay away from the apps zone, where the platform's
+products have their hosts. `--tenant-zone` of `ferund` names it (empty:
+none; it needs `--apps-zone`, and neither zone may be or lie under the
+other); `Hello` and `Self` hand it to the ingress as `tenantZone`. It
+has the apps zone's rules: an operator's wildcard certificate, cookies
+made host-only, no claims of names under it, the labels above, and no
+plain labels, since it has no owners.
+
+- **A tenant's zone** is `tenants.zone` (migration `0027`): NULL, the
+  apps zone, for the tenants operators make
+  (`POST /api/v1/admin/tenants`) and for every tenant while there is no
+  tenant zone; the tenant zone's name for the tenants people make, set
+  at their creation (`model.Zones.ForNewTenant`, `store.MakeTenant`).
+  FeCode's tenant `fecode` stays in the apps zone with its plain labels.
+- **An operator moves a tenant**, `PUT /api/v1/admin/tenants/{tenant}/zone
+  {"zone": "apps.run.example.com"}` (or the apps zone's name). Its
+  environments' hosts move as a changed label does: each keeps its
+  label where it may in the new zone (free, or the tenant's there, and
+  not a plain one unless the tenant owns the new zone's plain names),
+  else gets its natural label or its fallback there; the labels left
+  behind stay the tenant's. The old hosts answer 404 at once. The
+  answer lists every environment with its label before and after and
+  its new host; an activity row `tenant_zone_set` records the move.
+- A tenant whose `tenants.zone` names a zone the platform does not serve
+  (after `--tenant-zone` changed) has no default hosts, and publishing is
+  a 409, until an operator moves it.
+- **The operator** publishes a wildcard record `*.<tenant zone>` to the
+  ingress's balancer, a wildcard certificate for it into the ingress's
+  pods (`--tenant-zone-tls-cert`, `--tenant-zone-tls-key`), and, as for
+  the apps zone, a Public Suffix List entry is recommended. Without that
+  certificate the tenant zone's hosts get the apps zone's wildcard,
+  which no client accepts for them.
+
 ### Cookies
 
 Apps under `apps.fecode.dev` share their registrable domain with the
 platform's hosts (`run`, `id`, FeCode), so an app could set cookies for
 `fecode.dev` that reach them (cookie tossing, login CSRF) or for other
-apps under the zone. On a host under the apps zone the ingress therefore
+apps under the zone. On a host under the apps zone or the tenant zone the ingress therefore
 removes, from every `Set-Cookie` header of a response (any status, a
 1xx's and an upgrade's included), each `Domain` attribute whose value,
 without a leading dot and in lower case, is anything but the request's
@@ -1202,7 +1256,7 @@ expiry.
 | `ferun_ingress_spans_sent_total`, `…_dropped_total` | server spans of batched records the sink took, and those dropped (failed, refused or rejected by the sink, or without a tenant) |
 | `ferun_ingress_table_age_seconds`, `ferun_ingress_mesh_nodes{handshake}`, `ferun_ingress_mesh_handshake_age_seconds{node}`, `ferun_ingress_mesh_peers`, `ferun_ingress_mesh_configured` | the table's age and the mesh's health |
 | `ferun_ingress_mesh_repairs_total`, `ferun_ingress_mesh_port` | repairs of the paths to lost nodes ([Lost paths](#lost-paths)); the device's port |
-| `ferun_ingress_info{name,version}`, `ferun_ingress_ready`, `ferun_ingress_draining`, `ferun_ingress_control_connected`, `ferun_ingress_control_refusals_total`, `ferun_ingress_identity_removed`, `ferun_ingress_identity_not_after_seconds`, `ferun_ingress_tls_not_after_seconds` | the instance |
+| `ferun_ingress_info{name,version}`, `ferun_ingress_ready`, `ferun_ingress_draining`, `ferun_ingress_control_connected`, `ferun_ingress_control_refusals_total`, `ferun_ingress_identity_removed`, `ferun_ingress_identity_not_after_seconds`, `ferun_ingress_tls_not_after_seconds`, `ferun_ingress_tenant_zone_tls_not_after_seconds` (with a tenant zone's certificate) | the instance |
 
 ## Shutdown
 
@@ -1276,7 +1330,10 @@ On the Gardener shoot
   pod's start, so a token put into the Secret later takes a deletion of
   the pod.
 - **The certificate** `apps-wildcard`, `*.${APPS_ZONE}`, from
-  cert-manager's DNS-01 issuer into the Secret `apps-wildcard-tls`.
+  cert-manager's DNS-01 issuer into the Secret `apps-wildcard-tls`; with
+  a tenant zone, a second one, `*.<tenant zone>`, into a Secret of its
+  own, mounted beside it and named by `--tenant-zone-tls-cert` and
+  `--tenant-zone-tls-key` ([deploy/gardener/README.md](../../deploy/gardener/README.md)).
 - **The balancer**, the Service `ferun-ingress` of type `LoadBalancer`
   (80 → 8080, 443 → 8443), with `externalTrafficPolicy: Local`: a
   worker passes a connection only to its own instance, without

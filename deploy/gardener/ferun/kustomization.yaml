@@ -116,6 +116,12 @@ patches:
                   # none does. FeCode's installation: fecode.
                   - name: FERUN_APPS_ZONE_OWNERS
                     value: '${APPS_ZONE_OWNERS}'
+                  # The zone of the default hosts of the tenants people make
+                  # (ADR 0031), served by ferun-ingress with its own
+                  # wildcard (../ferun-ingress/tenant-zone.yaml); empty,
+                  # every tenant's hosts are under the apps zone.
+                  - name: FERUN_TENANT_ZONE
+                    value: '${TENANT_ZONE}'
                   - name: FERUN_EDGE_NAME
                     value: '${EDGE_NAME}'
                   - name: FERUN_EDGE_ADDRESS

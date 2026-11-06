@@ -17,6 +17,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -175,7 +176,7 @@ type Builder struct {
 
 	db    *db.DB
 	st    *store.Store
-	zone  string
+	zones model.Zones
 	log   *slog.Logger
 	specs *Specs
 
@@ -193,10 +194,10 @@ type Builder struct {
 	kick    chan struct{} // one deep: Use and its release
 }
 
-// NewBuilder returns the builder of the table for the apps zone zone
-// ("": no hosts): it follows d's notifications and reads with st (a
+// NewBuilder returns the builder of the table for the platform's zones
+// (an empty apps zone: no default hosts): it follows d's notifications and reads with st (a
 // Store on d when nil).
-func NewBuilder(d *db.DB, st *store.Store, zone string, log *slog.Logger) *Builder {
+func NewBuilder(d *db.DB, st *store.Store, zones model.Zones, log *slog.Logger) *Builder {
 	if st == nil {
 		st = store.New(d)
 	}
@@ -204,7 +205,7 @@ func NewBuilder(d *db.DB, st *store.Store, zone string, log *slog.Logger) *Build
 		log = slog.Default()
 	}
 	return &Builder{Debounce: DefaultDebounce, Full: DefaultFull, Health: DefaultHealth,
-		db: d, st: st, zone: zone, log: log.With("component", "ingress-table"), specs: NewSpecs(st),
+		db: d, st: st, zones: zones, log: log.With("component", "ingress-table"), specs: NewSpecs(st),
 		warned: map[uuid.UUID]time.Time{}, domainWarned: map[uuid.UUID]time.Time{}, changed: make(chan struct{}),
 		kick: make(chan struct{}, 1)}
 }
@@ -574,7 +575,7 @@ func (b *Builder) readAll(ctx context.Context) error {
 // build builds an environment's entry (BuildEnv) and warns of the
 // domains it left out.
 func (b *Builder) build(ctx context.Context, e EnvRows) (wire.Env, []podid.ID, error) {
-	env, ids, err := BuildEnv(b.zone, e, b.specs.For(ctx, e))
+	env, ids, err := BuildEnv(b.zones, e, b.specs.For(ctx, e))
 	if err == nil && len(env.Domains) < len(e.Domains) {
 		b.warnDomain(e.ID, "ingress table: domains of an environment are left out: its entry cannot take them",
 			"environment", e.ID, "domains", len(e.Domains), "served", len(env.Domains))

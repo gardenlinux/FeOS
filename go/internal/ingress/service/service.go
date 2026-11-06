@@ -39,6 +39,9 @@ type Config struct {
 	// AppsZone is the zone of public environments' default hosts
 	// (--apps-zone); "" serves no host.
 	AppsZone string
+	// TenantZone is the zone of the default hosts of the tenants people
+	// make (--tenant-zone, ADR 0031); "": none.
+	TenantZone string
 	// CertTTL is the lifetime of an ingress's certificates
 	// (--node-cert-ttl); renewed at half of it.
 	CertTTL time.Duration
@@ -63,7 +66,7 @@ type Deps struct {
 	// Engine wakes asleep instances (Wake); nil: none is woken.
 	Engine Engine
 	// Builder keeps the ingress's table that Sync streams; Run runs it.
-	// Nil: one on DB and Store for Config.AppsZone.
+	// Nil: one on DB and Store for Config's zones.
 	Builder *table.Builder
 }
 
@@ -179,7 +182,7 @@ func New(cfg Config, deps Deps) *Service {
 	}
 	tbl := deps.Builder
 	if tbl == nil {
-		tbl = table.NewBuilder(deps.DB, st, cfg.AppsZone, cfg.Log)
+		tbl = table.NewBuilder(deps.DB, st, model.Zones{Apps: cfg.AppsZone, Tenant: cfg.TenantZone}, cfg.Log)
 	}
 	s := &Service{
 		cfg: cfg, d: deps.DB, st: st, iss: deps.Issuer, links: deps.Links, engine: deps.Engine, tbl: tbl,

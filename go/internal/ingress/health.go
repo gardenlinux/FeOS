@@ -136,6 +136,10 @@ type Status struct {
 	// TLSNotAfter and TLSNames describe the HTTPS certificate in use.
 	TLSNotAfter time.Time `json:"tlsNotAfter,omitzero"`
 	TLSNames    []string  `json:"tlsNames,omitempty"`
+	// TenantZoneTLSNotAfter and TenantZoneTLSNames describe the tenant
+	// zone's certificate in use, when there is one.
+	TenantZoneTLSNotAfter time.Time `json:"tenantZoneTlsNotAfter,omitzero"`
+	TenantZoneTLSNames    []string  `json:"tenantZoneTlsNames,omitempty"`
 }
 
 // MeshPeer is a node on the mesh device, and whether its last handshake
@@ -176,6 +180,11 @@ func (p *Program) Status() Status {
 	if leaf := p.certs.Leaf(); leaf != nil {
 		st.TLSNotAfter = leaf.NotAfter
 		st.TLSNames = leaf.DNSNames
+	}
+	if p.tenantCerts != nil {
+		if leaf := p.tenantCerts.Leaf(); leaf != nil {
+			st.TenantZoneTLSNotAfter, st.TenantZoneTLSNames = leaf.NotAfter, leaf.DNSNames
+		}
 	}
 	return st
 }
@@ -220,6 +229,12 @@ func (p *Program) Metrics(w io.Writer) {
 	if leaf := p.certs.Leaf(); leaf != nil {
 		gauge("ferun_ingress_tls_not_after_seconds", "When the HTTPS certificate in use expires, in Unix seconds.",
 			float64(leaf.NotAfter.Unix()))
+	}
+	if p.tenantCerts != nil {
+		if leaf := p.tenantCerts.Leaf(); leaf != nil {
+			gauge("ferun_ingress_tenant_zone_tls_not_after_seconds",
+				"When the tenant zone's HTTPS certificate in use expires, in Unix seconds.", float64(leaf.NotAfter.Unix()))
+		}
 	}
 	gauge("ferun_ingress_mesh_configured", "1 when the mesh device is configured.", boolValue(as.MeshConfigured))
 	gauge("ferun_ingress_mesh_port", "The mesh device's UDP port.", float64(as.MeshPort))

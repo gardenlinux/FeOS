@@ -130,6 +130,6 @@ func (s *Service) Hello(ctx context.Context, req *wire.HelloRequest) (*wire.Hell
 	}
 	return &wire.HelloResponse{
 		Name: p.Name, PodNetwork: ula.String(), Prefix: j.Prefix, Address: j.Address,
-		AppsZone: s.cfg.AppsZone, Instance: s.cfg.InstanceID,
+		AppsZone: s.cfg.AppsZone, TenantZone: s.cfg.TenantZone, Instance: s.cfg.InstanceID,
 	}, nil
 }

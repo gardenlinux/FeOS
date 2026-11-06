@@ -208,6 +208,10 @@ type Config struct {
 	// (--drain-timeout).
 	TelemetryInterval, NodeTTL, LostGrace, DrainTimeout time.Duration
 
+	// Zones are the platform's zones of default hosts (ADR 0021, ADR
+	// 0031), which an operator moves tenants between.
+	Zones model.Zones
+
 	Log *slog.Logger
 }
 
@@ -429,6 +433,7 @@ func (s *server) routes() []route {
 	operator("GET /api/v1/admin/tenants/{tenant}/tokens", s.listTenantTokens)
 	operator("POST /api/v1/admin/tenants/{tenant}/tokens", s.createTenantToken)
 	operator("DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}", s.revokeTenantToken)
+	operator("PUT /api/v1/admin/tenants/{tenant}/zone", s.setTenantZone)
 	operator("GET /api/v1/admin/nodes", s.listNodes)
 	operator("PATCH /api/v1/admin/nodes/{node}", s.patchNode)
 	operator("DELETE /api/v1/admin/nodes/{node}", s.removeNode)

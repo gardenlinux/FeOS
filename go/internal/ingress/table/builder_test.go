@@ -184,7 +184,7 @@ func (f *fixture) setPhase(t *testing.T, id podid.ID, phase string) {
 // until the test ends.
 func (f *fixture) builder(t *testing.T, mod ...func(b *Builder)) *Builder {
 	t.Helper()
-	b := NewBuilder(f.d, store.On(f.q), "apps.example", dbtest.Logger(t))
+	b := NewBuilder(f.d, store.On(f.q), model.Zones{Apps: "apps.example"}, dbtest.Logger(t))
 	b.Debounce, b.Full = 10*time.Millisecond, time.Hour
 	for _, m := range mod {
 		m(b)

@@ -92,14 +92,14 @@ func TestMembersAndInvitations(t *testing.T) {
 	}
 
 	// The tenants a person made.
-	tn, created, err := s.InsertTenant(bg, store.Tenant{ID: "mine", MadeBy: a.ID})
+	tn, created, err := s.MakeTenant(bg, "mine", store.NewTenant{MadeBy: a.ID})
 	if err != nil || !created || tn.MadeBy != a.ID {
 		t.Fatalf("insert %+v %v %v", tn, created, err)
 	}
 	if n, err := s.CountTenantsMadeBy(bg, a.ID); err != nil || n != 1 {
 		t.Fatalf("made %d %v", n, err)
 	}
-	if _, created, err := s.InsertTenant(bg, store.Tenant{ID: "mine"}); err != nil || created {
+	if _, created, err := s.MakeTenant(bg, "mine", store.NewTenant{}); err != nil || created {
 		t.Fatalf("again %v %v", created, err)
 	}
 }

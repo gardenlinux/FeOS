@@ -130,6 +130,28 @@ func TestParseRequired(t *testing.T) {
 	}
 }
 
+// The tenant zone's certificate (ADR 0031) is optional, its two files go
+// together, from the flags or FERUN_INGRESS_TENANT_ZONE_TLS_*.
+func TestParseTenantZoneTLS(t *testing.T) {
+	t.Parallel()
+	c, err := Parse(nil, getenvOf(requiredEnv()))
+	if err != nil || c.TenantZoneTLSCert != "" || c.TenantZoneTLSKey != "" {
+		t.Fatalf("default %q %q %v", c.TenantZoneTLSCert, c.TenantZoneTLSKey, err)
+	}
+	env := requiredEnv()
+	env["FERUN_INGRESS_TENANT_ZONE_TLS_CERT"] = "/tenant-tls/tls.crt"
+	env["FERUN_INGRESS_TENANT_ZONE_TLS_KEY"] = "/tenant-tls/tls.key"
+	if c, err = Parse(nil, getenvOf(env)); err != nil || c.TenantZoneTLSCert != "/tenant-tls/tls.crt" ||
+		c.TenantZoneTLSKey != "/tenant-tls/tls.key" {
+		t.Fatalf("from the variables %q %q %v", c.TenantZoneTLSCert, c.TenantZoneTLSKey, err)
+	}
+	for _, args := range [][]string{{"--tenant-zone-tls-cert", "/a.crt"}, {"--tenant-zone-tls-key", "/a.key"}} {
+		if _, err := Parse(args, getenvOf(requiredEnv())); err == nil || !strings.Contains(err.Error(), "go together") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+}
+
 func TestParseListen(t *testing.T) {
 	t.Parallel()
 	for _, addr := range []string{"0.0.0.0:8080", "[::]:8443", ":9090", "localhost:8080", "100.64.1.2", "fd00::1:8080", "*:80"} {

@@ -214,7 +214,11 @@ func (s *Service) hosts(ctx context.Context, e store.Environment) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	return hostsOf(e, s.d.AppsZone, ds[e.ID]), nil
+	zone, err := s.hostZone(ctx, s.st, e.Owner)
+	if err != nil {
+		return nil, err
+	}
+	return hostsOf(e, zone, ds[e.ID]), nil
 }
 
 // summaryOf is an environment as its tenant's listing shows it, with its

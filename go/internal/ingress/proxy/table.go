@@ -61,8 +61,9 @@ type table struct {
 	// the routing from a heartbeat.
 	src   *wire.State
 	hosts map[string]*envRoutes
-	// zone is the apps zone, lower case and without a trailing dot.
-	zone string
+	// zones are the zones of default hosts, the apps zone and the tenant
+	// zone (ADR 0031), lower case and without a trailing dot; "": none.
+	zones []string
 	// admitted is the version of the group ferun-ingress at which this
 	// ingress entered it (Self.AdmittedVersion).
 	admitted uint64
@@ -148,7 +149,7 @@ func buildTable(s *wire.State, log *slog.Logger, old *table) *table {
 	t := &table{
 		src:        s.Clone(),
 		hosts:      map[string]*envRoutes{},
-		zone:       canonicalHost(s.Self.AppsZone),
+		zones:      zonesOf(s.Self),
 		admitted:   s.Self.AdmittedVersion,
 		addrs:      map[string]bool{},
 		dials:      map[string]dialTarget{},
@@ -360,7 +361,27 @@ func (t *table) resolve(host, raw string) (target, *reply) {
 	return tg, nil
 }
 
-// underZone reports whether a canonical host lies under the apps zone.
+// zonesOf are the zones of default hosts that s names, canonical.
+func zonesOf(s wire.Self) []string {
+	var out []string
+	for _, z := range []string{s.AppsZone, s.TenantZone} {
+		if z = canonicalHost(z); z != "" {
+			out = append(out, z)
+		}
+	}
+	return out
+}
+
+// underZone reports whether a canonical host lies under a zone of default
+// hosts: the apps zone or the tenant zone.
 func (t *table) underZone(host string) bool {
-	return t != nil && t.zone != "" && strings.HasSuffix(host, "."+t.zone)
+	if t == nil {
+		return false
+	}
+	for _, z := range t.zones {
+		if strings.HasSuffix(host, "."+z) {
+			return true
+		}
+	}
+	return false
 }

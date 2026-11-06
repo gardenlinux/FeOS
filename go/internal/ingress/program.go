@@ -81,6 +81,8 @@ type Program struct {
 	agent *agent.Agent
 	proxy *proxy.Proxy
 	certs *proxy.Certs
+	// tenantCerts is the tenant zone's wildcard; nil: none.
+	tenantCerts *proxy.Certs
 
 	lisHTTP, lisHTTPS, lisHealth net.Listener
 	httpSrv, httpsSrv, healthSrv *http.Server
@@ -120,6 +122,11 @@ func New(cfg Config, deps Deps) (*Program, error) {
 		return nil, fmt.Errorf("ferun-ingress: %w", err)
 	}
 	p := &Program{cfg: cfg, log: log, now: time.Now, certs: certs}
+	if cfg.TenantZoneTLSCert != "" {
+		if p.tenantCerts, err = proxy.LoadPair(cfg.TenantZoneTLSCert, cfg.TenantZoneTLSKey, log); err != nil {
+			return nil, fmt.Errorf("ferun-ingress: the tenant zone's certificate: %w", err)
+		}
+	}
 	a, err := agent.New(agent.Config{
 		Name:             cfg.Name,
 		StateDir:         cfg.StateDir,
@@ -164,7 +171,7 @@ func New(cfg Config, deps Deps) (*Program, error) {
 	if err := p.listen(); err != nil {
 		return nil, err
 	}
-	p.httpsSrv = p.proxy.HTTPSServer(certs)
+	p.httpsSrv = p.proxy.HTTPSServer(certs, p.tenantCerts)
 	p.httpSrv = p.proxy.HTTPServer()
 	p.healthSrv = &http.Server{
 		Handler:           p.healthHandler(),
@@ -280,6 +287,9 @@ func (p *Program) Run(ctx context.Context) error {
 	var loops sync.WaitGroup
 	loops.Go(func() { p.proxy.Run(loopCtx) })
 	loops.Go(func() { p.certs.Run(loopCtx) })
+	if p.tenantCerts != nil {
+		loops.Go(func() { p.tenantCerts.Run(loopCtx) })
+	}
 
 	failed := make(chan error, 3)
 	var servers sync.WaitGroup

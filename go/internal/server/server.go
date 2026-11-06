@@ -330,13 +330,13 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	i.Fleet = fl
 	fleetv1.RegisterFleetServiceServer(i.Links.Uplink(), fl.UplinkServer())
 	fleetv1.RegisterFleetServiceServer(i.Links.Join(), fl.JoinServer())
-	tbl := table.NewBuilder(i.DB, i.Store, cfg.AppsZone, i.log)
+	tbl := table.NewBuilder(i.DB, i.Store, cfg.Zones(), i.log)
 	if sealer != nil {
 		tbl.Sealer = sealer
 	}
 	ing = ingresssvc.New(ingresssvc.Config{
-		InstanceID: i.id, TrustDomain: cfg.TrustDomain, AppsZone: cfg.AppsZone, CertTTL: cfg.NodeCertTTL,
-		SupersedeGrace: ingressSupersedeGrace, PodNetwork: i.podNetwork, Log: i.log,
+		InstanceID: i.id, TrustDomain: cfg.TrustDomain, AppsZone: cfg.AppsZone, TenantZone: cfg.TenantZone,
+		CertTTL: cfg.NodeCertTTL, SupersedeGrace: ingressSupersedeGrace, PodNetwork: i.podNetwork, Log: i.log,
 	}, ingresssvc.Deps{DB: i.DB, Store: i.Store, Issuer: i.Issuer, Links: i.Links, Engine: i.Engine,
 		Builder: tbl})
 	i.Ingress = ing
@@ -384,7 +384,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		DefaultVCPUs: cfg.DefaultVCPUs, DefaultMemoryMiB: cfg.DefaultMemoryMiB, JoinTokenTTL: config.JoinTokenTTL,
 		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
 		DrainTimeout: cfg.DrainTimeout, TenantCreation: cfg.TenantCreation, TenantsPerPerson: cfg.TenantsPerPerson,
-		ReservedTenantNames: reservedTenantNames(cfg), TenantDefaults: tenantDefaults(cfg), Log: i.log,
+		ReservedTenantNames: reservedTenantNames(cfg), TenantDefaults: tenantDefaults(cfg), Zones: cfg.Zones(),
+		Log: i.log,
 	}, deps)
 
 	// The front doors' listener, last.
@@ -435,7 +436,7 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 	s, err := env.New(env.Deps{
 		InstanceID: i.id, DB: i.DB, Store: i.Store, Elector: i.Elector, Conns: i.Links, Engine: i.Engine,
 		Runner: runner, Ports: fwd, Sealer: sealer, AppsZone: i.cfg.AppsZone, EnvChanged: i.Domains.EnvChanged,
-		AppsZoneOwners: i.cfg.AppsZoneOwners, SinkURL: i.cfg.SinkURL, Bindings: hb, Log: i.log,
+		AppsZoneOwners: i.cfg.AppsZoneOwners, TenantZone: i.cfg.TenantZone, SinkURL: i.cfg.SinkURL, Bindings: hb, Log: i.log,
 	})
 	if err != nil {
 		return nil, err
@@ -452,13 +453,12 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 
 // newDomains builds the domains' core (ADR 0021): its checks ask
 // --dns-resolver, or the system's resolvers without it; the apps zone,
-// the edge's name and every --domain-reserved zone cannot be claimed.
+// the tenant zone (ADR 0031), the edge's name and every --domain-reserved
+// zone cannot be claimed.
 func (i *Instance) newDomains() (*domains.Service, error) {
 	cfg := i.cfg
 	reserved := slices.Clone(cfg.DomainReserved)
-	if cfg.AppsZone != "" {
-		reserved = append(reserved, cfg.AppsZone)
-	}
+	reserved = append(reserved, cfg.Zones().Names()...)
 	s, err := domains.New(domains.Config{
 		EdgeName: cfg.EdgeName, EdgeAddresses: cfg.EdgeAddresses, ChallengeLabel: cfg.DomainChallengeLabel,
 		Grace: cfg.DomainGrace, UnverifiedMax: cfg.DomainUnverifiedMax, Reserved: reserved, Log: i.log,
@@ -941,7 +941,7 @@ func sealerOf(sl *seal.Sealer) api.Sealer {
 // --edge-name and of --apps-zone.
 func reservedTenantNames(cfg config.Config) []string {
 	out := slices.Clone(cfg.AppsZoneOwners)
-	hosts := []string{cfg.EdgeName, cfg.AppsZone}
+	hosts := []string{cfg.EdgeName, cfg.AppsZone, cfg.TenantZone}
 	if u, err := url.Parse(cfg.PublicURL); err == nil {
 		hosts = append(hosts, u.Hostname())
 	}

@@ -79,6 +79,10 @@ type Config struct {
 	// TLSCert and TLSKey are the HTTPS listener's certificate (the apps
 	// zone's wildcard) and key, PEM, read again every 30 s.
 	TLSCert, TLSKey string
+	// TenantZoneTLSCert and TenantZoneTLSKey are the tenant zone's wildcard
+	// (ADR 0031) and its key, PEM, read again every 30 s: served for every
+	// SNI it covers; "" both: none, every default host gets TLSCert.
+	TenantZoneTLSCert, TenantZoneTLSKey string
 	// MeshDevice is the WireGuard device's name.
 	MeshDevice string
 	// MeshPort is its UDP port.
@@ -206,6 +210,9 @@ func registerServe(fs *flag.FlagSet, c *Config) *string {
 		"the listener of /healthz, /readyz, /metrics and /statusz, an IP address and a port, never a wildcard (required)")
 	fs.StringVar(&c.TLSCert, "tls-cert", c.TLSCert, "the HTTPS certificate file (PEM), the apps zone's wildcard, read again every 30 s (required)")
 	fs.StringVar(&c.TLSKey, "tls-key", c.TLSKey, "the key file (PEM) of --tls-cert (required)")
+	fs.StringVar(&c.TenantZoneTLSCert, "tenant-zone-tls-cert", c.TenantZoneTLSCert,
+		"the tenant zone's wildcard certificate file (PEM), served for every name it covers, read again every 30 s; empty: none")
+	fs.StringVar(&c.TenantZoneTLSKey, "tenant-zone-tls-key", c.TenantZoneTLSKey, "the key file (PEM) of --tenant-zone-tls-cert")
 	fs.StringVar(&c.MeshDevice, "mesh-device", c.MeshDevice, "the WireGuard device on the pods' mesh")
 	fs.IntVar(&c.MeshPort, "mesh-port", c.MeshPort, "the WireGuard device's UDP port")
 	fs.StringVar(&c.MeshEndpoint, "mesh-endpoint", c.MeshEndpoint,
@@ -291,6 +298,9 @@ func (c *Config) Validate() error {
 	}
 	if c.TLSKey == "" {
 		bad("--tls-key is required")
+	}
+	if (c.TenantZoneTLSCert == "") != (c.TenantZoneTLSKey == "") {
+		bad("--tenant-zone-tls-cert and --tenant-zone-tls-key go together")
 	}
 	if c.MeshDevice == "" || len(c.MeshDevice) > maxDeviceName || strings.ContainsAny(c.MeshDevice, "/: \t\n") {
 		bad("--mesh-device %q is not a device name (1 to %d characters, no slash, colon or blank)", c.MeshDevice, maxDeviceName)

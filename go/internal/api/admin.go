@@ -104,6 +104,9 @@ type tenantInfo struct {
 	// MadeBy is the person who made it (ADR 0031); "": an operator.
 	MadeBy string     `json:"madeBy,omitempty"`
 	Limits limitsView `json:"limits"`
+	// Zone is the zone of its default hosts (ADR 0031): the apps zone's
+	// name or the tenant zone's, "" while the platform serves neither.
+	Zone string `json:"zone"`
 }
 
 // listTenants is GET /api/v1/admin/tenants, ordered by name.
@@ -118,7 +121,8 @@ func (s *server) listTenants(w http.ResponseWriter, r *http.Request) error {
 	for _, t := range ts {
 		ti := tenantInfo{Name: t.ID, CreatedAt: rfc3339(t.CreatedAt), SandboxCount: t.SandboxCount,
 			EnvironmentCount: t.EnvironmentCount, Tokens: make([]tenantTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting(),
-			MadeBy: idOrEmpty(t.MadeBy), Limits: limitsOf(t.Limits)}
+			MadeBy: idOrEmpty(t.MadeBy), Limits: limitsOf(t.Limits),
+			Zone: s.cfg.Zones.Of(t.Zone)}
 		for _, tk := range t.Tokens {
 			ti.Tokens = append(ti.Tokens, tenantTokenOf(tk))
 		}
@@ -175,6 +179,82 @@ func (s *server) createTenant(w http.ResponseWriter, r *http.Request) error {
 		CreatedAt    string `json:"createdAt"`
 		SandboxCount int    `json:"sandboxCount"`
 	}{req.Name, token, rfc3339(t.CreatedAt), 0})
+}
+
+// zoneMove is one environment that moving its tenant to another zone
+// moved: its label before and after, and its default host now.
+type zoneMove struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	HostLabel string `json:"hostLabel"`
+	Before    string `json:"hostLabelBefore"`
+	Host      string `json:"host"`
+}
+
+// setTenantZone is PUT /api/v1/admin/tenants/{tenant}/zone {zone}: an
+// operator moves the tenant to the apps zone or the tenant zone, named by
+// its name (ADR 0031), and its environments' default hosts with it, as a
+// changed label moves a host (store.SetTenantZone): the old hosts answer
+// 404 at once. A label that cannot move, another tenant's in the new zone
+// or a plain one where the tenant owns no plain names, gives way to the
+// environment's natural label or its fallback. It answers the tenant's
+// zone and every environment that holds a label; 400 for a zone the
+// platform does not serve, 404 for an unknown tenant, 409 while it is
+// being deleted.
+func (s *server) setTenantZone(w http.ResponseWriter, r *http.Request) error {
+	name := r.PathValue("tenant")
+	var req struct {
+		Zone string `json:"zone"`
+	}
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	zones := s.cfg.Zones
+	zone, ok := zones.Column(req.Zone)
+	if !ok {
+		return apierr.New(http.StatusBadRequest, "zone must be one the platform serves, %s; got %q",
+			strings.Join(zones.Names(), " or "), req.Zone)
+	}
+	var moves []store.ZoneMove
+	var before string
+	err := s.st.InTx(r.Context(), func(tx *store.Store) error {
+		t, err := tx.LockTenant(r.Context(), name, store.ForUpdate)
+		if isNoRow(err) {
+			return apierr.New(http.StatusNotFound, "unknown tenant %s", name)
+		}
+		if err != nil {
+			return err
+		}
+		if t.Deleting() {
+			return apierr.New(http.StatusConflict, "tenant %s is being deleted", name)
+		}
+		before = t.Zone
+		moves, err = tx.SetTenantZone(r.Context(), name, zone, zones.PlainLabels(name, zone))
+		return err
+	})
+	if err != nil {
+		return passOr(err, "set the tenant's zone")
+	}
+	host := zones.Of(zone)
+	out := struct {
+		Tenant       string     `json:"tenant"`
+		Zone         string     `json:"zone"`
+		Environments []zoneMove `json:"environments"`
+	}{Tenant: name, Zone: host, Environments: make([]zoneMove, 0, len(moves))}
+	for _, m := range moves {
+		out.Environments = append(out.Environments, zoneMove{ID: m.EnvID.String(), Name: m.Name, HostLabel: m.To,
+			Before: m.From, Host: m.To + "." + host})
+	}
+	if before != zone {
+		by := adminOfRequest(r)
+		s.log.Info("tenant moved to another zone", "tenant", name, "zone", host, "from", zones.Of(before),
+			"environments", len(moves), "by", by)
+		s.record(r.Context(), store.ActivityRow{TenantID: name, Kind: "tenant_zone_set", Category: "lifecycle",
+			Name: "tenant " + name + " moved to zone " + host + " by " + by,
+			Detail: detail(map[string]any{"tenant": name, "zone": host, "from": zones.Of(before), "by": by,
+				"environments": out.Environments})})
+	}
+	return writeJSON(w, http.StatusOK, out)
 }
 
 // deleteTenant is DELETE /api/v1/admin/tenants/{tenant}: its tokens go at

@@ -42,25 +42,6 @@ func (s *Store) CountTenantsMadeBy(ctx context.Context, person uuid.UUID) (int, 
 	return n, err
 }
 
-// InsertTenant inserts a tenant with its maker (uuid.Nil: an operator's)
-// and limits; the other fields are the database's. It returns the new row
-// and true, or the existing row and false when the name is taken.
-func (s *Store) InsertTenant(ctx context.Context, n Tenant) (Tenant, bool, error) {
-	l := n.Limits
-	t, err := scanTenant(s.q.QueryRow(ctx, `INSERT INTO tenants (id, made_by, limit_sandboxes, limit_environments,
-			limit_running_jobs, limit_vcpus, limit_memory_mib)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING RETURNING `+tenantCols,
-		n.ID, nullUUID(n.MadeBy), l.Sandboxes, l.Environments, l.RunningJobs, l.VCPUs, l.MemoryMiB))
-	if err == nil {
-		return t, true, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return Tenant{}, false, err
-	}
-	t, err = s.GetTenant(ctx, n.ID)
-	return t, false, err
-}
-
 // MemberGrant is one grant of a member, with its environment's name.
 type MemberGrant struct {
 	Role            string

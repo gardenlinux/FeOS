@@ -34,6 +34,7 @@
 # DNS records the operator creates, DNS only, at the address of the
 # Service ferun-ingress (kubectl -n ferun-ingress get svc ferun-ingress):
 #   *.${APPS_ZONE}  A <address>
+#   *.<TENANT_ZONE> A <address>, with a tenant zone (tenant-zone.yaml)
 #   edge.${DOMAIN}  A <address>, reserved for domains later
 #
 # Never force-delete these pods (--force, --grace-period=0): a pod's name
@@ -378,6 +379,12 @@ spec:
               value: /etc/ferun-ingress/tls/tls.crt
             - name: FERUN_INGRESS_TLS_KEY
               value: /etc/ferun-ingress/tls/tls.key
+            # The tenant zone's wildcard (tenant-zone.yaml), only with
+            # TENANT_ZONE: empty, none (the optional Secret is absent then).
+            - name: FERUN_INGRESS_TENANT_ZONE_TLS_CERT
+              value: "${TENANT_ZONE_TLS_CERT}"
+            - name: FERUN_INGRESS_TENANT_ZONE_TLS_KEY
+              value: "${TENANT_ZONE_TLS_KEY}"
             # The container's memory limit in bytes: the instance sets the
             # Go runtime's soft limit (GOMEMLIMIT) to 90% of it, so that
             # garbage collection works harder before the kernel kills it.
@@ -431,6 +438,9 @@ spec:
             - name: tls
               mountPath: /etc/ferun-ingress/tls
               readOnly: true
+            - name: tenant-tls
+              mountPath: /etc/ferun-ingress/tenant-tls
+              readOnly: true
             - name: join
               mountPath: /join
               readOnly: true
@@ -439,6 +449,12 @@ spec:
           secret:
             secretName: apps-wildcard-tls
             defaultMode: 0400
+        # Optional: there is none without TENANT_ZONE.
+        - name: tenant-tls
+          secret:
+            secretName: tenant-wildcard-tls
+            defaultMode: 0400
+            optional: true
         # Every instance's token: the init container's alone.
         - name: join-secret
           secret:

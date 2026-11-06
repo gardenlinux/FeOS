@@ -49,9 +49,9 @@ type validateCtx struct {
 	volumes   map[string]spec.AddonData
 	blueprint func(typ string) (addons.Blueprint, bool)
 	// zone is the apps zone (Deps.AppsZone); host the environment's first
-	// host (hostsOf), else its default host under the zone ("" without an
-	// environment, or for one never published), public whether the
-	// environment is public.
+	// host (hostsOf), else its default host under its tenant's zone (""
+	// without an environment, or for one never published), public whether
+	// the environment is public.
 	zone, host string
 	public     bool
 	// bindingsOn: HTTP bindings are on (Deps.Bindings); destinations are
@@ -251,8 +251,12 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	}
 	if env != nil {
 		vc.public = env.Public
-		if vc.zone != "" && env.HostLabel != "" {
-			vc.host = env.HostLabel + "." + vc.zone
+		zone, err := s.hostZone(ctx, s.st, env.Owner)
+		if err != nil {
+			return nil, spec.Pins{}, err
+		}
+		if zone != "" && env.HostLabel != "" {
+			vc.host = env.HostLabel + "." + zone
 		}
 		// A public environment on a domain of its own is served there.
 		hosts, err := s.hosts(ctx, *env)

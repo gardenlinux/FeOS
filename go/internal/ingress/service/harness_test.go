@@ -31,6 +31,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/ingress/table"
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/nodelink"
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -145,7 +146,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := table.NewBuilder(d, o.tableStore, testZone, log)
+	b := table.NewBuilder(d, o.tableStore, model.Zones{Apps: testZone}, log)
 	b.Debounce = 10 * time.Millisecond
 	if o.tableMod != nil {
 		o.tableMod(b)

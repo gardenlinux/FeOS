@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -38,7 +39,8 @@ func byToken(tok, method, path string, body any) request {
 // it), and --tenant-creation operators keeps it to operators.
 func TestPersonTenants(t *testing.T) {
 	t.Parallel()
-	w := newPeopleWorld(t, envOptions{})
+	const tz = "apps.run.example.com"
+	w := newPeopleWorld(t, envOptions{zones: model.Zones{Apps: "apps.example.com", Tenant: tz}})
 	e := w.e
 	e.srv.cfg.TenantsPerPerson = 2
 	e.srv.cfg.ReservedTenantNames = []string{"fecode", "run"}
@@ -52,7 +54,7 @@ func TestPersonTenants(t *testing.T) {
 		t.Fatalf("created %v", got)
 	}
 	tn, err := e.st.GetTenant(context.Background(), "shop")
-	if err != nil || tn.MadeBy != w.persons["p"] {
+	if err != nil || tn.MadeBy != w.persons["p"] || tn.Zone != tz {
 		t.Fatalf("tenant %+v %v", tn, err)
 	}
 	expect(t, e.serve(as(p, "shop", "GET", "/api/v1/tenant", nil)), http.StatusOK, "")
@@ -68,6 +70,11 @@ func TestPersonTenants(t *testing.T) {
 	op := w.person(t, "op", true)
 	for _, name := range []string{"o1", "o2", "o3"} {
 		expect(t, create(op, name), http.StatusCreated, "")
+	}
+	// An operator's tenant made here is a person's tenant: in the tenant
+	// zone, with its maker.
+	if tn, err := e.st.GetTenant(context.Background(), "o1"); err != nil || tn.Zone != tz || tn.MadeBy != w.persons["op"] {
+		t.Fatalf("operator's tenant %+v %v", tn, err)
 	}
 	// Concurrent creates of one person pass the bound no more than one
 	// at a time does.

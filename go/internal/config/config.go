@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gardenlinux/feos/go/internal/mesh"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -195,6 +196,13 @@ type Config struct {
 	// tenant"); negative: none.
 	TenantDefaultSandboxes, TenantDefaultEnvironments, TenantDefaultRunningJobs, TenantDefaultVCPUs int
 	TenantDefaultMemoryMiB                                                                          int64
+	// TenantZone is the zone of the default hosts of the tenants that
+	// people make (ADR 0031), such as apps.run.example.com, which
+	// ferun-ingress serves with a wildcard certificate of its own; the
+	// tenants that operators make keep AppsZone. Empty: every tenant's
+	// hosts are under AppsZone. It needs AppsZone, and neither lies
+	// under the other.
+	TenantZone string
 	// EdgeName is the name tenants' domains point at with a CNAME (ADR
 	// 0021), such as edge.fecode.dev, which the operator publishes with the
 	// balancer's addresses; empty: domains are off.
@@ -283,6 +291,12 @@ type Config struct {
 }
 
 // Default returns the configuration of serve with every default of §3 and
+// Zones are the platform's zones of default hosts: the apps zone, its
+// owners and the tenant zone (ADR 0021, ADR 0031).
+func (c Config) Zones() model.Zones {
+	return model.Zones{Apps: c.AppsZone, AppsOwners: c.AppsZoneOwners, Tenant: c.TenantZone}
+}
+
 // no database URL.
 func Default() Config {
 	return Config{
@@ -427,6 +441,8 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"the limit of vCPUs over the sandboxes, services, addons and running jobs of a tenant a person makes; negative: none")
 	fs.Int64Var(&c.TenantDefaultMemoryMiB, "tenant-default-memory-mib", c.TenantDefaultMemoryMiB,
 		"the limit of memory (MiB) over the sandboxes, services, addons and running jobs of a tenant a person makes; negative: none")
+	fs.StringVar(&c.TenantZone, "tenant-zone", c.TenantZone,
+		"the DNS zone of the default hosts of the tenants people make (ADR 0031), served by ferun-ingress with a wildcard of its own; needs --apps-zone; empty: every tenant's hosts are under --apps-zone")
 	fs.StringVar(&c.EdgeName, "edge-name", c.EdgeName,
 		"the name tenants' domains point at with a CNAME (ADR 0021), e.g. edge.fecode.dev; empty: domains are off")
 	fs.Var((*addrList)(&c.EdgeAddresses), "edge-address",
@@ -563,6 +579,17 @@ func (c *Config) Validate() error {
 	if c.AppsZone != "" {
 		if err := pki.ValidateDomain(c.AppsZone); err != nil {
 			bad("--apps-zone: %w", err)
+		}
+	}
+	if c.TenantZone != "" {
+		switch err := pki.ValidateDomain(c.TenantZone); {
+		case err != nil:
+			bad("--tenant-zone: %w", err)
+		case c.AppsZone == "":
+			bad("--tenant-zone needs --apps-zone")
+		case c.TenantZone == c.AppsZone || strings.HasSuffix(c.TenantZone, "."+c.AppsZone) ||
+			strings.HasSuffix(c.AppsZone, "."+c.TenantZone):
+			bad("--tenant-zone %s and --apps-zone %s: neither may be or lie under the other", c.TenantZone, c.AppsZone)
 		}
 	}
 	for _, tn := range c.AppsZoneOwners {

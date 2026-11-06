@@ -99,9 +99,13 @@ func (s *Service) ListEnvs(ctx context.Context, tenant string, labels map[string
 	if err != nil {
 		return EnvList{}, fmt.Errorf("list environments: %w", err)
 	}
+	zone, err := s.hostZone(ctx, s.st, tenant)
+	if err != nil {
+		return EnvList{}, fmt.Errorf("list environments: %w", err)
+	}
 	out := EnvList{Environments: make([]EnvSummary, 0, len(rows))}
 	for _, r := range rows {
-		out.Environments = append(out.Environments, summaryOf(r, s.d.AppsZone, domains[r.ID]))
+		out.Environments = append(out.Environments, summaryOf(r, zone, domains[r.ID]))
 	}
 	return out, nil
 }

@@ -117,8 +117,10 @@ func (s *server) reservedTenantName(name string) bool {
 // makes a tenant and holds admin on it (ADR 0031). --tenant-creation
 // operators keeps it to operators; --tenants-per-person bounds the
 // tenants a person made that are not being deleted (operators are not
-// bound). The tenant gets the default limits (--tenant-default-*). No
-// token: the session acts.
+// bound). The tenant gets the default limits (--tenant-default-*) and its
+// default hosts in the tenant zone (--tenant-zone; the apps zone without
+// one), an operator's as well: what this route makes is a person's
+// tenant. No token: the session acts.
 func (s *server) createPersonTenant(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	var req struct {
@@ -154,8 +156,8 @@ func (s *server) createPersonTenant(w http.ResponseWriter, r *http.Request) erro
 		}
 		var created bool
 		var err error
-		t, created, err = tx.InsertTenant(r.Context(), store.Tenant{ID: req.Name, MadeBy: sess.PersonID,
-			Limits: s.cfg.TenantDefaults})
+		t, created, err = tx.MakeTenant(r.Context(), req.Name, store.NewTenant{Zone: s.cfg.Zones.ForNewTenant(true),
+			MadeBy: sess.PersonID, Limits: s.cfg.TenantDefaults})
 		if err != nil {
 			return err
 		}

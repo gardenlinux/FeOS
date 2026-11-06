@@ -52,6 +52,7 @@ type FakeControlPlane struct {
 	iss        *pki.Issuer
 	td         string
 	appsZone   string
+	tenantZone string
 	podNetwork netip.Prefix
 	lis        net.Listener
 	addr       string
@@ -96,6 +97,8 @@ type FakeConfig struct {
 	TrustDomain string
 	// AppsZone is the zone Hello and Self answer. Default "apps.test".
 	AppsZone string
+	// TenantZone is the tenant zone Hello and Self answer; "": none.
+	TenantZone string
 	// PodNetwork is the cluster's ULA. Default fd00:1:2::/48.
 	PodNetwork netip.Prefix
 	// CertTTL is the lifetime of issued certificates. Default 1 h.
@@ -172,6 +175,7 @@ func NewFakeControlPlane(dir string, cfg FakeConfig) (*FakeControlPlane, error) 
 		iss:        iss,
 		td:         cfg.TrustDomain,
 		appsZone:   cfg.AppsZone,
+		tenantZone: cfg.TenantZone,
 		podNetwork: cfg.PodNetwork.Masked(),
 		lis:        lis,
 		addr:       lis.Addr().String(),
@@ -645,7 +649,7 @@ func (f *FakeControlPlane) issueLocked(csr []byte, name string) (wire.Certificat
 }
 
 func (f *FakeControlPlane) selfLocked(name string) wire.Self {
-	s := wire.Self{Name: name, AppsZone: f.appsZone, AdmittedVersion: f.admitted[name]}
+	s := wire.Self{Name: name, AppsZone: f.appsZone, TenantZone: f.tenantZone, AdmittedVersion: f.admitted[name]}
 	if sub, ok := f.subnets[name]; ok {
 		s.Address = mesh.HostAddress(mesh.NodePrefix(f.podNetwork, sub)).String()
 	}
@@ -807,6 +811,7 @@ func (s *fakeService) Hello(ctx context.Context, req *wire.HelloRequest) (*wire.
 		Prefix:     prefix.String(),
 		Address:    mesh.HostAddress(prefix).String(),
 		AppsZone:   f.appsZone,
+		TenantZone: f.tenantZone,
 		Instance:   "fake",
 	}, nil
 }

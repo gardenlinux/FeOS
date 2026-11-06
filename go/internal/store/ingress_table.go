@@ -24,6 +24,9 @@ type IngressRoutingRow struct {
 	Owner     string // the tenant
 	Name      string
 	HostLabel string
+	// Zone is its tenant's zone (tenants.zone; "": the apps zone), which
+	// its label is in.
+	Zone string
 	// Deployment is the environment's latest desired deployment, Deployed its
 	// latest deployed one (0: none).
 	Deployment, Deployed int
@@ -63,7 +66,7 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 	if envIDs != nil && len(envIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := s.q.Query(ctx, `SELECT e.id, e.owner, e.name, e.host_label, e.deployment, e.deployed, e.created_at,
+	rows, err := s.q.Query(ctx, `SELECT e.id, e.owner, e.name, e.host_label, coalesce(t.zone, ''), e.deployment, e.deployed, e.created_at,
 			i.sandbox_id, i.object, i.replica, i.deployment, i.phase, i.ingress_ports,
 			s.address, s.client_state, s.op, coalesce(s.node, ''), coalesce(n.ingress_group_version, 0), s.idle_after_s
 		FROM environments e
@@ -81,7 +84,7 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 		var row IngressRoutingRow
 		var sandbox, object, phase, address, state, op *string
 		var replica, deployment *int
-		if err := r.Scan(&row.EnvID, &row.Owner, &row.Name, &row.HostLabel, &row.Deployment, &row.Deployed, &row.CreatedAt,
+		if err := r.Scan(&row.EnvID, &row.Owner, &row.Name, &row.HostLabel, &row.Zone, &row.Deployment, &row.Deployed, &row.CreatedAt,
 			&sandbox, &object, &replica, &deployment, &phase, &row.IngressPorts,
 			&address, &state, &op, &row.Node, &row.NodeGroupVersion, &row.IdleAfterS); err != nil {
 			return IngressRoutingRow{}, err

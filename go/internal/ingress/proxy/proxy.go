@@ -529,12 +529,20 @@ func (p *Proxy) answerChallenge(w http.ResponseWriter, r *http.Request, host str
 }
 
 // GetCertificate is the HTTPS listener's choice of certificate: by SNI,
-// a domain's own from the table, else the operator's wildcard of c.
-func (p *Proxy) GetCertificate(c *Certs) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+// a domain's own from the table, else the first of zones (the tenant
+// zone's wildcard, ADR 0031) that covers the name, else the operator's
+// wildcard of c, the apps zone's.
+func (p *Proxy) GetCertificate(c *Certs, zones ...*Certs) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		if hello.ServerName != "" {
-			if cert := p.cur.Load().t.cert(canonicalHost(hello.ServerName)); cert != nil {
+			name := canonicalHost(hello.ServerName)
+			if cert := p.cur.Load().t.cert(name); cert != nil {
 				return cert, nil
+			}
+			for _, z := range zones {
+				if z != nil && z.covers(name) {
+					return z.GetCertificate(hello)
+				}
 			}
 		}
 		return c.GetCertificate(hello)
@@ -542,12 +550,13 @@ func (p *Proxy) GetCertificate(c *Certs) func(*tls.ClientHelloInfo) (*tls.Certif
 }
 
 // HTTPSServer returns the HTTPS server with its limits, serving
-// ServeHTTPS with the domains' certificates of the table by SNI, else the
-// certificate of c. The caller sets the address or serves a listener
+// ServeHTTPS with the domains' certificates of the table by SNI, else a
+// certificate of zones that covers the name, else the certificate of c
+// (GetCertificate). The caller sets the address or serves a listener
 // (ServeTLS with empty file names).
-func (p *Proxy) HTTPSServer(c *Certs) *http.Server {
+func (p *Proxy) HTTPSServer(c *Certs, zones ...*Certs) *http.Server {
 	tc := c.TLSConfig()
-	tc.GetCertificate = p.GetCertificate(c)
+	tc.GetCertificate = p.GetCertificate(c, zones...)
 	return &http.Server{
 		Handler:           p.ServeHTTPS(),
 		TLSConfig:         tc,

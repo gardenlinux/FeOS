@@ -156,7 +156,7 @@ content type `application/grpc+json`. Method names are
 |---|---|---|
 | `Join` | the ingress join server, without a client certificate | `{token, name, csr}` → `{name, certificate}` |
 | `RenewCertificate` | the ingress server, with the instance's certificate | `{csr}` → `{certificate}` |
-| `Hello` | the ingress server | `{publicKey, endpoint, version}` → `{name, podNetwork, prefix, address, appsZone, instance}` |
+| `Hello` | the ingress server | `{publicKey, endpoint, version}` → `{name, podNetwork, prefix, address, appsZone, tenantZone?, instance}` |
 | `Sync` | the ingress server, streaming | `{}` → a stream of `Table` |
 | `Wake` | the ingress server | `{env, service}` → `{waking, retryAfterSeconds}` |
 | `Hold` | the ingress server | `{hold, release, leaving}` → `{held, refused: [{instance, reason}], leaseSeconds}` |
@@ -188,7 +188,7 @@ content type `application/grpc+json`. Method names are
   certificate of their own, each its chain (DER, leaf first) and private
   key (PKCS #8 DER), and each name is in `hosts` too; `Mesh` is
   `{version, peers: [{name, publicKey, endpoint, prefix}]}`, the nodes
-  alone; `Self` is `{name, address, appsZone, admittedVersion}`. The
+  alone; `Self` is `{name, address, appsZone, tenantZone?, admittedVersion}` (`tenantZone`, ADR 0031, left out without one). The
   receiver keeps the state (`wire.State`, `Apply`): a delta or a part
   whose `seq` is not the next ends the stream, and the ingress connects
   again.

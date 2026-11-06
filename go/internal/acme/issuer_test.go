@@ -238,7 +238,7 @@ func (in *fakeIngress) answered() int {
 func (f *fixture) startIngress(name string) *fakeIngress {
 	f.t.Helper()
 	f.mkIngressRow(name)
-	b := table.NewBuilder(f.d, f.st, "apps.example", dbtest.Logger(f.t))
+	b := table.NewBuilder(f.d, f.st, model.Zones{Apps: "apps.example"}, dbtest.Logger(f.t))
 	b.Debounce, b.Full, b.Sealer = 10*time.Millisecond, time.Hour, f.sl
 	in := &fakeIngress{name: name, b: b, p: proxy.New(proxy.Config{}, proxy.Deps{}), served: map[string]string{}}
 	ctx, cancel := context.WithCancel(bg)

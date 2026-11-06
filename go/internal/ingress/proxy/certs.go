@@ -20,10 +20,12 @@ import (
 // certsEvery is how often the certificate files are read again.
 const certsEvery = 30 * time.Second
 
-// Certs is the HTTPS listener's certificate: the operator's wildcard
-// for the apps zone, which cert-manager renews into a Secret that the
-// kubelet updates in the mounted files. Every SNI, or none, gets it; an
-// unknown host is answered 404 by the proxy.
+// Certs is a certificate of the HTTPS listener from files: the
+// operator's wildcard for the apps zone, or the one for the tenant zone
+// (ADR 0031), which cert-manager renews into a Secret that the kubelet
+// updates in the mounted files. The apps zone's is the default: every SNI
+// that no other certificate covers, or none, gets it; an unknown host is
+// answered 404 by the proxy.
 type Certs struct {
 	certFile, keyFile string
 	log               *slog.Logger
@@ -121,6 +123,13 @@ func (c *Certs) turn() {
 // client's SNI.
 func (c *Certs) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return c.cur.Load(), nil
+}
+
+// covers reports whether the certificate in use is valid for the
+// canonical host name (a wildcard covering one label).
+func (c *Certs) covers(name string) bool {
+	leaf := c.Leaf()
+	return name != "" && leaf != nil && leaf.VerifyHostname(name) == nil
 }
 
 // Leaf is the certificate in use.

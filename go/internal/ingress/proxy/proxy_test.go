@@ -1068,8 +1068,9 @@ func TestHostOnlyCookies(t *testing.T) {
 	}
 }
 
-// The proxy makes cookies host-only on hosts under the apps zone, on
-// every status, and leaves those of other hosts alone.
+// The proxy makes cookies host-only on hosts under the apps zone and the
+// tenant zone (ADR 0031), on every status, and leaves those of other
+// hosts alone.
 func TestCookieFilter(t *testing.T) {
 	fn := newFakeNet()
 	handlerAt(t, fn, "fd00::1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1085,7 +1086,9 @@ func TestCookieFilter(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	}))
 	p, srv := newTestProxy(t, Config{}, Deps{}, fn, "n1")
-	p.SetState(stateWith(wire.Self{AppsZone: "Apps.Example."}, []string{testHost, "custom.example.org"},
+	const tenantHost = "web-acme.apps.run.example"
+	p.SetState(stateWith(wire.Self{AppsZone: "Apps.Example.", TenantZone: "apps.run.example"},
+		[]string{testHost, "custom.example.org", tenantHost},
 		svc("web", ep("w1", "fd00::1", "n1"))))
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	var early []string
@@ -1115,6 +1118,13 @@ func TestCookieFilter(t *testing.T) {
 		t.Errorf("early hints' cookies %q", early)
 	}
 	if p.m.cookieDomains.Load() != 3 {
+		t.Errorf("removed %d", p.m.cookieDomains.Load())
+	}
+	want = []string{"a=1; Path=/", "b=2", "c=3", "d=4; Domain=" + tenantHost}
+	if got := do(tenantHost); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("in the tenant zone: %q, want %q", got, want)
+	}
+	if p.m.cookieDomains.Load() != 6 {
 		t.Errorf("removed %d", p.m.cookieDomains.Load())
 	}
 	want = []string{"a=1; Domain=apps.example; Path=/", "b=2", "c=3; domain=.example", "d=4; Domain=custom.example.org"}

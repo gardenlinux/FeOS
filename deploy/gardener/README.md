@@ -97,6 +97,7 @@ on make's command line wins over the file.
 | `ACME_DIRECTORY`, `ACME_PROFILE`, `ACME_EMAIL` | the domains' certificates (ADR 0021), which ferund orders over HTTP-01 through ferun-ingress's port 80: the CA's directory (empty: none is ordered, domains stay `issuing`), the profile (default `shortlived`, six days, renewed after three), the account's contact (optional) ([`config.env.example`](config.env.example)) |
 | `APPS_ZONE` | the zone of public environments' default hosts, `<label>.<APPS_ZONE>`, which ferun-ingress serves: default `apps.<DOMAIN>`; empty, no environment is served or can be made public, and make refuses ferun-ingress's manifests (`manifests` stops there) ([`config.env.example`](config.env.example)) |
 | `APPS_ZONE_OWNERS` | the tenants that own the apps zone's plain names, ferund's `--apps-zone-owners`: each may choose a host label without `--`, `<project>.<APPS_ZONE>`; default none; FeCode's installation `fecode` ([`config.env.example`](config.env.example)) |
+| `TENANT_ZONE` | the zone of the default hosts of the tenants people make (ADR 0031), ferund's `--tenant-zone`, beside `APPS_ZONE`, where the tenants operators make keep theirs: default empty, none; with it, make renders [`ferun-ingress/tenant-zone.yaml`](ferun-ingress/tenant-zone.yaml), its wildcard certificate, which the instances mount and serve ([The ingress](#the-ingress)); neither zone may be or lie under the other ([`config.env.example`](config.env.example)) |
 | `NODE_CIDR` | the workers' network (`spec.networking.nodes`), the only source let through to ferun-ingress's health port and mesh, and the only network its mesh may send to: default `10.250.0.0/16` |
 | `DENY_PREFIXES` | what the pods may not reach, feosd's `--deny-prefix`, and, beside its built-in set, what ferund's preflights, bindings and image resolver may not (its `--deny-prefix`): every network of the shoot, its nodes', pods' and services' (the ConfigMap `kube-system/shoot-info` states them), and the private ranges; no default, since a network left out is open to the microVMs, and `apply-feos` stops on one ([`config.env.example`](config.env.example)) |
 | `FECHAT_MODEL` | FeChat's model at the LLM gateway |
@@ -286,8 +287,23 @@ of the repository.
        kubectl -n ferun-ingress wait certificate/apps-wildcard --for=condition=Ready --timeout=15m
        kubectl -n ferun-ingress rollout status statefulset/ferun-ingress --timeout=10m
 
+   With `TENANT_ZONE` (ADR 0031) the manifests hold a second
+   certificate, `tenant-wildcard`, `*.<TENANT_ZONE>` into
+   `tenant-wildcard-tls`, which the instances mount (optionally, so
+   that a platform without a tenant zone needs none) and read as
+   `--tenant-zone-tls-cert` and `--tenant-zone-tls-key`; an instance
+   refuses to start while the files are missing, and restarts until
+   cert-manager has issued them:
+
+       kubectl -n ferun-ingress wait certificate/tenant-wildcard --for=condition=Ready --timeout=15m
+
+   Then give ferund the zone (`apply-ferun` with the same `TENANT_ZONE`),
+   after the ingress: an ingress without the tenant zone's certificate
+   would serve its hosts with the apps zone's wildcard.
+
 4. DNS, DNS only (not proxied), at the balancer's address (`kubectl -n
    ferun-ingress get svc ferun-ingress`): `*.<APPS_ZONE>` A `<address>`,
+   with a tenant zone `*.<TENANT_ZONE>` A `<address>` too,
    and `edge.<DOMAIN>` A `<address>`, reserved for domains later.
 5. Each instance, from inside its pod:
 

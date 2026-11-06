@@ -670,6 +670,11 @@ func TestNewAndClose(t *testing.T) {
 	if _, err := New(bad, Deps{Mesh: &fakeMesh{}}); err == nil || !strings.Contains(err.Error(), "TLS key") {
 		t.Fatalf("New without the key: %v", err)
 	}
+	bad = h.cfg
+	bad.TenantZoneTLSCert, bad.TenantZoneTLSKey = h.cfg.TLSCert, filepath.Join(t.TempDir(), "missing.key")
+	if _, err := New(bad, Deps{Mesh: &fakeMesh{}}); err == nil || !strings.Contains(err.Error(), "tenant zone") {
+		t.Fatalf("New without the tenant zone's key: %v", err)
+	}
 	if _, err := New(h.cfg, Deps{}); err == nil || !strings.Contains(err.Error(), "mesh") {
 		t.Fatalf("New without a mesh: %v", err)
 	}
