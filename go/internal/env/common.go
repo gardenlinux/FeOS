@@ -17,6 +17,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -91,6 +92,21 @@ func wake(ctx context.Context, tx *store.Store, hints ...string) error {
 		}
 	}
 	return nil
+}
+
+// zones are the platform's zones of default hosts.
+func (s *Service) zones() model.Zones {
+	return model.Zones{Apps: s.d.AppsZone, AppsOwners: s.d.AppsZoneOwners, Tenant: s.d.TenantZone}
+}
+
+// hostZone is the zone of the tenant's default hosts (model.Zones.Of):
+// "" when the platform serves none of it, so that it has no default host.
+func (s *Service) hostZone(ctx context.Context, q *store.Store, tenant string) (string, error) {
+	t, err := q.GetTenant(ctx, tenant)
+	if err != nil {
+		return "", fmt.Errorf("the zone of tenant %s: %w", tenant, err)
+	}
+	return s.zones().Of(t.Zone), nil
 }
 
 // envChanged runs the EnvChanged hook in tx, when there is one.

@@ -67,11 +67,31 @@ func scanTenant(row pgx.Row) (Tenant, error) {
 	return t, nil
 }
 
-// CreateTenant inserts a tenant. It returns the new row and true, or the
-// existing row and false when the name is taken.
+// CreateTenant inserts an operator's tenant, in the apps zone. It returns
+// the new row and true, or the existing row and false when the name is
+// taken.
 func (s *Store) CreateTenant(ctx context.Context, id string) (Tenant, bool, error) {
-	t, err := scanTenant(s.q.QueryRow(ctx, `INSERT INTO tenants (id) VALUES ($1) ON CONFLICT (id) DO NOTHING
-		RETURNING `+tenantCols, id))
+	return s.MakeTenant(ctx, id, NewTenant{})
+}
+
+// NewTenant is what a tenant gets at its creation beside its name: its
+// zone (tenants.zone, model.Zones.ForNewTenant: the tenant zone for one a
+// person makes; "": the apps zone) and the person who made it (uuid.Nil:
+// an operator).
+type NewTenant struct {
+	Zone   string
+	MadeBy uuid.UUID
+}
+
+// MakeTenant inserts a tenant with n. It returns the new row and true, or
+// the existing row, unchanged, and false when the name is taken.
+func (s *Store) MakeTenant(ctx context.Context, id string, n NewTenant) (Tenant, bool, error) {
+	var madeBy *uuid.UUID
+	if n.MadeBy != uuid.Nil {
+		madeBy = &n.MadeBy
+	}
+	t, err := scanTenant(s.q.QueryRow(ctx, `INSERT INTO tenants (id, zone, made_by) VALUES ($1, $2, $3)
+		ON CONFLICT (id) DO NOTHING RETURNING `+tenantCols, id, nullString(n.Zone), madeBy))
 	if err == nil {
 		return t, true, nil
 	}

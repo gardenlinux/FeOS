@@ -70,6 +70,8 @@ type envOptions struct {
 	// domains builds the domains service on the test's database; nil: a
 	// fakeDomains.
 	domains func(d *db.DB, st *store.Store) Domains
+	// zones is Config.Zones.
+	zones model.Zones
 }
 
 // env is a test's API over a fresh database.
@@ -117,7 +119,7 @@ func newEnv(t *testing.T, o envOptions) *env {
 		InstanceID: testInstance, PreparationWaitMs: 425000, PublicURL: o.publicURL, OIDC: o.oidc,
 		SessionTTL: time.Hour, DefaultImage: "ghcr.io/maltej/debian-ai:latest", DefaultVCPUs: 2, DefaultMemoryMiB: 512,
 		NodeTTL: 20 * time.Second, LostGrace: 7 * time.Minute, DrainTimeout: 90 * time.Minute,
-		Log: log,
+		Zones: o.zones, Log: log,
 	}
 	if !o.noAdminUsers {
 		cfg.AdminUsers = map[string]string{testAdmin: testPassword}

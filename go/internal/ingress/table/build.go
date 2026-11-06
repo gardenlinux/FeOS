@@ -30,6 +30,8 @@ type EnvRows struct {
 	Tenant    string
 	Name      string
 	HostLabel string
+	// Zone is its tenant's zone (tenants.zone; "": the apps zone).
+	Zone string
 	// Deployment is the latest desired deployment, Deployed the latest
 	// deployed one (0: none).
 	Deployment, Deployed int
@@ -78,7 +80,7 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 	for _, r := range rows {
 		if len(out) == 0 || out[len(out)-1].ID != r.EnvID {
 			out = append(out, EnvRows{ID: r.EnvID, Tenant: r.Owner, Name: r.Name, HostLabel: r.HostLabel,
-				Deployment: r.Deployment, Deployed: r.Deployed, CreatedAt: r.CreatedAt})
+				Zone: r.Zone, Deployment: r.Deployment, Deployed: r.Deployed, CreatedAt: r.CreatedAt})
 		}
 		if !r.HasInstance {
 			continue
@@ -160,8 +162,9 @@ func Asleep(phase, clientState, op string) bool {
 	return Classify(phase, clientState, op) == ClassAsleep
 }
 
-// BuildEnv builds the table's entry of environment e for the apps zone
-// zone ("": no hosts, so the ingress serves nothing of it), and returns
+// BuildEnv builds the table's entry of environment e for the platform's
+// zones: its default host is in its tenant's zone (zones.Of; "": no
+// default host, so the ingress serves nothing of it but its domains), and returns
 // the sandboxes of the instances it counted, whose changes change it.
 //
 //   - Its routes are those of its routing deployment (RoutingDeployment), by
@@ -181,7 +184,7 @@ func Asleep(phase, clientState, op string) bool {
 //     fit is left out, never the environment. A name twice is taken once.
 //     Its default host, <label>.<zone>, is its host only while none of its
 //     domains is: an environment on a domain of its own is not served in
-//     the apps zone too (ADR 0021).
+//     its zone too (ADR 0021).
 //   - Its hash identifies the rest of its content, the certificates
 //     included, so that a renewed one is sent again.
 //
@@ -189,14 +192,14 @@ func Asleep(phase, clientState, op string) bool {
 // one wrapping ErrTooLarge that the entry would take more than
 // MaxEnvBytes coded: either way the environment cannot be routed. Other
 // errors are specs' read errors.
-func BuildEnv(zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, error) {
+func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID, error) {
 	number := RoutingDeployment(e.Deployment, e.Deployed)
 	sp, err := specs(number)
 	if err != nil {
 		return wire.Env{}, nil, fmt.Errorf("environment %s, routing deployment %d: %w", e.ID, number, err)
 	}
 	defaultHosts := []string{}
-	if zone != "" && e.HostLabel != "" {
+	if zone := zones.Of(e.Zone); zone != "" && e.HostLabel != "" {
 		defaultHosts = append(defaultHosts, e.HostLabel+"."+zone)
 	}
 	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: defaultHosts, Deployment: number,

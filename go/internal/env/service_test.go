@@ -1364,3 +1364,72 @@ func TestSetPublicPlainLabel(t *testing.T) {
 		t.Fatalf("the owner's other environment: %+v %v", a, err)
 	}
 }
+
+// The tenant zone (ADR 0031): a tenant there publishes under it, with its
+// natural and its chosen labels, and the status and the listing say so; a
+// zone owner moved there chooses no plain label; a tenant whose zone the
+// platform does not serve publishes nothing, and a move back gives it its
+// hosts again.
+func TestSetPublicTenantZone(t *testing.T) {
+	t.Parallel()
+	const tz = "apps.run.test"
+	h := newHarness(t, harnessOptions{appsZone: "apps.test", appsZoneOwners: []string{tenantA}, tenantZone: tz})
+	ctx := h.ctx()
+	h.create("web", nil)
+	h.exec("UPDATE tenants SET zone = $1 WHERE id = $2", tz, tenantA)
+
+	a, err := h.svc.SetPublic(ctx, tenantA, "web", true, "")
+	if err != nil || !slices.Equal(a.Hosts, []string{"web-acme." + tz}) {
+		t.Fatalf("natural label: %+v %v", a, err)
+	}
+	a, err = h.svc.SetPublic(ctx, tenantA, "web", true, "web--shop")
+	if err != nil || !slices.Equal(a.Hosts, []string{"web--shop." + tz}) {
+		t.Fatalf("chosen label: %+v %v", a, err)
+	}
+	st, err := h.svc.GetEnv(ctx, tenantA, "web")
+	if err != nil || !slices.Equal(st.Hosts, []string{"web--shop." + tz}) {
+		t.Fatalf("status %+v %v", st.Hosts, err)
+	}
+	l, err := h.svc.ListEnvs(ctx, tenantA, nil)
+	if err != nil || len(l.Environments) != 1 || !slices.Equal(l.Environments[0].Hosts, []string{"web--shop." + tz}) {
+		t.Fatalf("listing %+v %v", l, err)
+	}
+	// An owner of the apps zone, but in the tenant zone: no plain label.
+	_, err = h.svc.SetPublic(ctx, tenantA, "web", true, "kino")
+	wantStatus(t, err, http.StatusBadRequest, "a plain host label is only for the apps zone")
+	if e := h.env("web"); e.HostLabel != "web--shop" {
+		t.Fatalf("kept %+v", e)
+	}
+	// Another tenant takes the same chosen label in the apps zone.
+	if _, created, err := h.svc.CreateEnv(ctx, tenantB, CreateEnvRequest{Name: "web"}); err != nil || !created {
+		t.Fatalf("create %v %v", created, err)
+	}
+	if a, err := h.svc.SetPublic(ctx, tenantB, "web", true, "web--shop"); err != nil ||
+		!slices.Equal(a.Hosts, []string{"web--shop.apps.test"}) {
+		t.Fatalf("the same label in the apps zone: %+v %v", a, err)
+	}
+
+	// A zone the platform does not serve: no hosts, no publish.
+	h.exec("UPDATE tenants SET zone = 'old.test' WHERE id = $1", tenantA)
+	if st, err := h.svc.GetEnv(ctx, tenantA, "web"); err != nil || len(st.Hosts) != 0 {
+		t.Fatalf("status in an unserved zone %+v %v", st.Hosts, err)
+	}
+	if _, err := h.svc.SetPublic(ctx, tenantA, "web", false, ""); err != nil {
+		t.Fatalf("unpublish: %v", err)
+	}
+	_, err = h.svc.SetPublic(ctx, tenantA, "web", true, "")
+	wantStatus(t, err, http.StatusConflict, "the platform serves no zone old.test")
+
+	// An operator moves it to the apps zone (store.SetTenantZone): its
+	// label moves along, and it is the owner's plain labels' zone again.
+	if _, err := h.st.SetTenantZone(ctx, tenantA, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.env("web"); e.HostLabel == "web--shop" || e.HostLabel != "web-acme" {
+		t.Fatalf("moved: web--shop is the other tenant's in the apps zone, so the natural label: %+v", e)
+	}
+	if a, err := h.svc.SetPublic(ctx, tenantA, "web", true, "kino"); err != nil ||
+		!slices.Equal(a.Hosts, []string{"kino.apps.test"}) {
+		t.Fatalf("plain label in the apps zone: %+v %v", a, err)
+	}
+}

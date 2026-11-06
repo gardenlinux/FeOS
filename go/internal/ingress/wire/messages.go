@@ -87,14 +87,17 @@ type HelloRequest struct {
 }
 
 // HelloResponse is the ingress's place on the pods' mesh: the cluster's
-// ULA (PodNetwork), its /64 (Prefix) and its address in it, the zone of
-// environments' hosts and the ID of the ferund instance that answered.
+// ULA (PodNetwork), its /64 (Prefix) and its address in it, the zones of
+// environments' default hosts (the apps zone, and the tenant zone of the
+// tenants people make, ADR 0031; "": none) and the ID of the ferund
+// instance that answered.
 type HelloResponse struct {
 	Name       string `json:"name"`
 	PodNetwork string `json:"podNetwork"`
 	Prefix     string `json:"prefix"`
 	Address    string `json:"address"`
 	AppsZone   string `json:"appsZone"`
+	TenantZone string `json:"tenantZone,omitempty"`
 	Instance   string `json:"instance"`
 }
 
@@ -161,7 +164,8 @@ type Peer struct {
 	Prefix    string `json:"prefix"`
 }
 
-// Self is what the control plane holds of the ingress itself.
+// Self is what the control plane holds of the ingress itself, with the
+// zones of default hosts, under which the ingress makes cookies host-only.
 // AdmittedVersion is the version of the security group ferun-ingress at
 // which the ingress's address entered it: an endpoint whose node holds an
 // older version does not admit the ingress yet.
@@ -169,6 +173,7 @@ type Self struct {
 	Name            string `json:"name"`
 	Address         string `json:"address"`
 	AppsZone        string `json:"appsZone"`
+	TenantZone      string `json:"tenantZone,omitempty"`
 	AdmittedVersion uint64 `json:"admittedVersion"`
 }
 

@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/fleet"
 	"github.com/gardenlinux/feos/go/internal/leader"
@@ -653,4 +655,64 @@ func TestInstances(t *testing.T) {
 	if out.Leader == nil || (*out.Leader)["id"] != "i1" || (*out.Leader)["epoch"] != 1.0 || (*out.Leader)["since"] == "" {
 		t.Fatalf("leader %+v", out.Leader)
 	}
+}
+
+// An operator moves a tenant to the tenant zone and back (ADR 0031): the
+// answer names each environment's label and host, the listing the
+// tenant's zone; a zone the platform does not serve is a 400, an unknown
+// tenant a 404, a deleting one a 409.
+func TestSetTenantZone(t *testing.T) {
+	t.Parallel()
+	const tz = "apps.run.example.com"
+	e := newEnv(t, envOptions{zones: model.Zones{Apps: "apps.example.com", Tenant: tz}})
+	expect(t, e.do("POST", "/api/v1/admin/tenants", adminAuth(), map[string]any{"name": "beta"}), http.StatusCreated, "")
+	ctx := t.Context()
+	web, err := e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: "beta", Name: "web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.SetEnvironmentPublic(ctx, web.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	type answer struct {
+		Tenant, Zone string
+		Environments []struct{ ID, Name, HostLabel, HostLabelBefore, Host string }
+	}
+	w := e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": tz})
+	expect(t, w, http.StatusOK, "")
+	a := decode[answer](t, w)
+	if a.Tenant != "beta" || a.Zone != tz || len(a.Environments) != 1 || a.Environments[0].ID != web.ID.String() ||
+		a.Environments[0].HostLabel != "web-beta" || a.Environments[0].HostLabelBefore != "web-beta" ||
+		a.Environments[0].Host != "web-beta."+tz {
+		t.Fatalf("moved %+v", a)
+	}
+	list := decode[struct {
+		Tenants []struct{ Name, Zone string }
+	}](t, e.do("GET", "/api/v1/admin/tenants", adminAuth(), nil))
+	zones := map[string]string{}
+	for _, tn := range list.Tenants {
+		zones[tn.Name] = tn.Zone
+	}
+	if zones["beta"] != tz || zones[testTenant] != "apps.example.com" {
+		t.Fatalf("listing %+v", list)
+	}
+	if tn, err := e.st.GetTenant(ctx, "beta"); err != nil || tn.Zone != tz {
+		t.Fatalf("row %+v %v", tn, err)
+	}
+	w = e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": "apps.example.com"})
+	expect(t, w, http.StatusOK, "")
+	if a := decode[answer](t, w); a.Zone != "apps.example.com" || a.Environments[0].Host != "web-beta.apps.example.com" {
+		t.Fatalf("moved back %+v", a)
+	}
+	for _, bad := range []string{"", "other.example.com"} {
+		expect(t, e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": bad}),
+			http.StatusBadRequest, errBody(`zone must be one the platform serves, apps.example.com or `+tz+`; got "`+bad+`"`))
+	}
+	expect(t, e.do("PUT", "/api/v1/admin/tenants/nope/zone", adminAuth(), map[string]any{"zone": tz}),
+		http.StatusNotFound, errBody("unknown tenant nope"))
+	if _, err := e.st.MarkTenantDeleting(ctx, "beta"); err != nil {
+		t.Fatal(err)
+	}
+	expect(t, e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": tz}),
+		http.StatusConflict, errBody("tenant beta is being deleted"))
 }

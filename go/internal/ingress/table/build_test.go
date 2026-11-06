@@ -79,7 +79,7 @@ func ready(id, service string, deployment int, ports ...int) Instance {
 
 func build(t *testing.T, zone string, e EnvRows, specs SpecFunc) (wire.Env, []podid.ID) {
 	t.Helper()
-	got, ids, err := BuildEnv(zone, e, specs)
+	got, ids, err := BuildEnv(model.Zones{Apps: zone}, e, specs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,12 +130,12 @@ func TestBuildEnvRoutes(t *testing.T) {
 	}
 
 	// The routing deployment without a usable spec: ErrSpec.
-	if _, _, err := BuildEnv("apps.example", baseEnv(3, 0), specs); !errors.Is(err, ErrSpec) {
+	if _, _, err := BuildEnv(model.Zones{Apps: "apps.example"}, baseEnv(3, 0), specs); !errors.Is(err, ErrSpec) {
 		t.Fatalf("missing spec: %v", err)
 	}
 	// Another error passes through without ErrSpec.
 	boom := errors.New("boom")
-	if _, _, err := BuildEnv("apps.example", baseEnv(1, 0), func(int) (*spec.Spec, error) { return nil, boom }); !errors.Is(err, boom) ||
+	if _, _, err := BuildEnv(model.Zones{Apps: "apps.example"}, baseEnv(1, 0), func(int) (*spec.Spec, error) { return nil, boom }); !errors.Is(err, boom) ||
 		errors.Is(err, ErrSpec) {
 		t.Fatalf("read error: %v", err)
 	}
@@ -348,7 +348,7 @@ func routesSpec(routes, n int) *spec.Spec {
 // counted is what the wire codes.
 func TestBuildEnvTooLarge(t *testing.T) {
 	huge := routesSpec(spec.MaxRoutes, 20000)
-	_, _, err := BuildEnv("apps.example", baseEnv(1, 0), specsOf(map[int]*spec.Spec{1: huge}))
+	_, _, err := BuildEnv(model.Zones{Apps: "apps.example"}, baseEnv(1, 0), specsOf(map[int]*spec.Spec{1: huge}))
 	if !errors.Is(err, ErrTooLarge) || errors.Is(err, ErrSpec) || !unroutable(err) ||
 		!strings.Contains(err.Error(), "web of tenant acme") {
 		t.Fatalf("huge: %v", err)
@@ -423,5 +423,23 @@ func TestBuildMesh(t *testing.T) {
 	}
 	if empty := BuildMesh(mesh.Peers{}); empty.Peers == nil || len(empty.Peers) != 0 {
 		t.Fatalf("empty mesh %+v", empty)
+	}
+}
+
+// A default host is in its tenant's zone (ADR 0031): the apps zone for
+// none, the tenant zone for its name, and none for a zone the platform
+// does not serve.
+func TestBuildEnvZones(t *testing.T) {
+	specs := specsOf(map[int]*spec.Spec{1: deployment1()})
+	zones := model.Zones{Apps: "apps.example", Tenant: "apps.run.example"}
+	for zone, want := range map[string][]string{
+		"": {"web-acme.apps.example"}, "apps.run.example": {"web-acme.apps.run.example"}, "old.example": {},
+	} {
+		e := baseEnv(1, 1)
+		e.Zone = zone
+		got, _, err := BuildEnv(zones, e, specs)
+		if err != nil || !slices.Equal(got.Hosts, want) {
+			t.Errorf("zone %q: hosts %v %v, want %v", zone, got.Hosts, err, want)
+		}
 	}
 }

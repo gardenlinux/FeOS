@@ -348,7 +348,6 @@ TABLE environments
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, name)
   CREATE INDEX environments_owner ON public.environments USING btree (owner, created_at)
-  CREATE UNIQUE INDEX environments_host_label ON public.environments USING btree (host_label)
   CREATE UNIQUE INDEX environments_owner_name_key ON public.environments USING btree (owner, name)
   CREATE UNIQUE INDEX environments_pkey ON public.environments USING btree (id)
 TABLE event_gaps
@@ -387,12 +386,13 @@ TABLE host_labels
   COLUMN owner text NOT NULL
   COLUMN env_id uuid
   COLUMN assigned_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN zone text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (((label ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (substr(label, 3, 2) <> '--'::text)))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE SET NULL
-  CONSTRAINT PRIMARY KEY (label)
+  CONSTRAINT PRIMARY KEY (zone, label)
   CONSTRAINT UNIQUE (env_id)
   CREATE UNIQUE INDEX host_labels_env_id_key ON public.host_labels USING btree (env_id)
-  CREATE UNIQUE INDEX host_labels_pkey ON public.host_labels USING btree (label)
+  CREATE UNIQUE INDEX host_labels_pkey ON public.host_labels USING btree (zone, label)
 TABLE http_bindings
   COLUMN sandbox_id text COLLATE "C" NOT NULL
   COLUMN name text NOT NULL

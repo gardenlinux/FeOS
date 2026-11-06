@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -108,11 +109,175 @@ func TestSetEnvironmentHostLabel(t *testing.T) {
 	}
 	// Whose a label is: the tenant that first claimed it, held or not.
 	for label, want := range map[string]string{"web-acme": "acme", "web--shop": "acme"} {
-		if owner, err := s.HostLabelOwner(bg, label); err != nil || owner != want {
+		if owner, err := s.HostLabelOwner(bg, "", label); err != nil || owner != want {
 			t.Fatalf("owner of %s: %q %v", label, owner, err)
 		}
 	}
-	if owner, err := s.HostLabelOwner(bg, "kino"); !errors.Is(err, store.ErrNoRow) || owner != "" {
+	if owner, err := s.HostLabelOwner(bg, "", "kino"); !errors.Is(err, store.ErrNoRow) || owner != "" {
 		t.Fatalf("owner of an unclaimed label: %q %v", owner, err)
+	}
+}
+
+// tz is the tenant zone of the tests.
+const tz = "apps.run.example.com"
+
+// A label is a name in a zone (ADR 0031): a tenant of the tenant zone
+// takes labels there, which a tenant of the apps zone may hold too, and a
+// chosen label taken in one zone is free in the other. A tenant made with
+// the tenant zone has it, and its maker.
+func TestHostLabelsPerZone(t *testing.T) {
+	s, _ := newStore(t)
+	mkTenant(t, s, "fecode")
+	person := uuid.New()
+	exec(t, s, "INSERT INTO people (id, issuer, sub) VALUES ($1, 'https://id.example.com', 'p1')", person)
+	tn, created, err := s.MakeTenant(bg, "acme", store.NewTenant{Zone: tz, MadeBy: person})
+	if err != nil || !created || tn.Zone != tz || tn.MadeBy != person {
+		t.Fatalf("made %+v %v %v", tn, created, err)
+	}
+	if again, created, err := s.MakeTenant(bg, "acme", store.NewTenant{}); err != nil || created || again.Zone != tz {
+		t.Fatalf("made twice %+v %v %v", again, created, err)
+	}
+	if op, err := s.GetTenant(bg, "fecode"); err != nil || op.Zone != "" || op.MadeBy != uuid.Nil {
+		t.Fatalf("an operator's tenant %+v %v", op, err)
+	}
+
+	web := publish(t, s, mkEnv(t, s, "acme", "web").ID, true)
+	if web.HostLabel != "web-acme" {
+		t.Fatalf("published %+v", web)
+	}
+	if owner, err := s.HostLabelOwner(bg, tz, "web-acme"); err != nil || owner != "acme" {
+		t.Fatalf("owner in the tenant zone %q %v", owner, err)
+	}
+	if _, err := s.HostLabelOwner(bg, "", "web-acme"); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("the label is the apps zone's too: %v", err)
+	}
+	// The same chosen label in both zones, one tenant each.
+	shop, err := s.SetEnvironmentHostLabel(bg, web, "stage--shop")
+	if err != nil || shop.HostLabel != "stage--shop" {
+		t.Fatalf("chosen in the tenant zone %+v %v", shop, err)
+	}
+	stage := mkEnv(t, s, "fecode", "stage")
+	if e, err := s.SetEnvironmentHostLabel(bg, stage, "stage--shop"); err != nil || e.HostLabel != "stage--shop" {
+		t.Fatalf("chosen in the apps zone %+v %v", e, err)
+	}
+	// Within a zone it is still first come.
+	other := mkEnv(t, s, "acme", "other")
+	if _, err := s.SetEnvironmentHostLabel(bg, other, "stage--shop"); !errors.Is(err, store.ErrHostLabelTaken) {
+		t.Fatalf("held by web: %v", err)
+	}
+
+	// The ingress's rows carry the tenant's zone.
+	exec(t, s, "UPDATE environments SET deployment = 1 WHERE id = $1", web.ID)
+	rows, err := s.IngressRouting(bg, []uuid.UUID{web.ID})
+	if err != nil || len(rows) != 1 || rows[0].Zone != tz || rows[0].HostLabel != "stage--shop" {
+		t.Fatalf("routing %+v %v", rows, err)
+	}
+}
+
+// Moving a tenant to another zone moves its environments' labels: each
+// keeps its label where it may, a label another tenant holds in the new
+// zone gives way to the natural label, a plain label goes into no zone
+// without owners, and the labels left behind stay the tenant's there.
+// Every environment moved is notified; a move to the zone it has changes
+// nothing.
+func TestSetTenantZone(t *testing.T) {
+	s, d := newStore(t)
+	mkTenant(t, s, "fecode")
+	mkTenant(t, s, "other")
+	ch, unsubscribe := d.Subscribe(db.ChanIngress)
+	defer unsubscribe()
+
+	natural := publish(t, s, mkEnv(t, s, "fecode", "web").ID, true)
+	chosen, err := s.SetEnvironmentHostLabel(bg, publish(t, s, mkEnv(t, s, "fecode", "stage").ID, true), "stage--kino")
+	must(t, err)
+	plain, err := s.SetEnvironmentHostLabel(bg, publish(t, s, mkEnv(t, s, "fecode", "prod").ID, true), "kino")
+	must(t, err)
+	taken, err := s.SetEnvironmentHostLabel(bg, publish(t, s, mkEnv(t, s, "fecode", "demo").ID, true), "demo--kino")
+	must(t, err)
+	never := mkEnv(t, s, "fecode", "draft") // never published: no label
+	// demo--kino is another tenant's in the tenant zone.
+	exec(t, s, "INSERT INTO host_labels (zone, label, owner) VALUES ($1, 'demo--kino', 'other')", tz)
+	drain(ch)
+
+	moves, err := s.SetTenantZone(bg, "fecode", tz, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		"demo":  {"demo--kino", "demo-fecode"},
+		"prod":  {"kino", "prod-fecode"},
+		"stage": {"stage--kino", "stage--kino"},
+		"web":   {"web-fecode", "web-fecode"},
+	}
+	if len(moves) != len(want) {
+		t.Fatalf("moves %+v", moves)
+	}
+	for _, m := range moves {
+		if w := want[m.Name]; m.From != w[0] || m.To != w[1] {
+			t.Errorf("%s moved %s → %s, want %v", m.Name, m.From, m.To, w)
+		}
+		e, err := s.GetEnvironment(bg, m.EnvID)
+		if err != nil || e.HostLabel != m.To {
+			t.Errorf("%s reads %+v %v", m.Name, e, err)
+		}
+		if owner, err := s.HostLabelOwner(bg, tz, m.To); err != nil || owner != "fecode" {
+			t.Errorf("%s: owner of %s in the tenant zone %q %v", m.Name, m.To, owner, err)
+		}
+		// What it held in the apps zone stays fecode's, held by nobody.
+		var envID *uuid.UUID
+		must(t, s.Q().QueryRow(bg, "SELECT env_id FROM host_labels WHERE zone = '' AND label = $1", m.From).Scan(&envID))
+		if envID != nil {
+			t.Errorf("%s: %s is still held in the apps zone", m.Name, m.From)
+		}
+	}
+	expectPayloads(t, ch, ingressEnv(natural.ID), ingressEnv(chosen.ID), ingressEnv(plain.ID), ingressEnv(taken.ID))
+	if tn, err := s.GetTenant(bg, "fecode"); err != nil || tn.Zone != tz {
+		t.Fatalf("tenant %+v %v", tn, err)
+	}
+	if e, err := s.GetEnvironment(bg, never.ID); err != nil || e.HostLabel != "" {
+		t.Fatalf("an environment never published %+v %v", e, err)
+	}
+	// A first publish there claims in the tenant zone.
+	if e := publish(t, s, never.ID, true); e.HostLabel != "draft-fecode" {
+		t.Fatalf("published in the tenant zone %+v", e)
+	}
+	if owner, err := s.HostLabelOwner(bg, tz, "draft-fecode"); err != nil || owner != "fecode" {
+		t.Fatalf("draft's label %q %v", owner, err)
+	}
+	drain(ch)
+
+	// The same zone again: nothing.
+	if moves, err := s.SetTenantZone(bg, "fecode", tz, false); err != nil || len(moves) != 0 {
+		t.Fatalf("again %+v %v", moves, err)
+	}
+	expectNoPayload(t, ch, ingressEnv(natural.ID))
+
+	// Back to the apps zone, an owner's (plainOK): its labels of the
+	// tenant zone move; the plain label it gave up is free for it there.
+	moves, err = s.SetTenantZone(bg, "fecode", "", true)
+	if err != nil || len(moves) != 5 {
+		t.Fatalf("back %+v %v", moves, err)
+	}
+	if tn, err := s.GetTenant(bg, "fecode"); err != nil || tn.Zone != "" {
+		t.Fatalf("tenant %+v %v", tn, err)
+	}
+	p, err := s.GetEnvironment(bg, plain.ID)
+	must(t, err)
+	if p, err = s.SetEnvironmentHostLabel(bg, p, "kino"); err != nil || p.HostLabel != "kino" {
+		t.Fatalf("the plain label again %+v %v", p, err)
+	}
+	if _, err := s.SetTenantZone(bg, "nope", tz, false); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("unknown tenant: %v", err)
+	}
+}
+
+// drain empties a subscription's channel.
+func drain(ch <-chan string) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
 	}
 }

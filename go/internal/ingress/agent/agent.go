@@ -746,6 +746,7 @@ type Status struct {
 	Prefix          string     `json:"prefix,omitempty"`
 	Address         string     `json:"address,omitempty"`
 	AppsZone        string     `json:"appsZone,omitempty"`
+	TenantZone      string     `json:"tenantZone,omitempty"`
 	AdmittedVersion uint64     `json:"admittedVersion"`
 	Connected       bool       `json:"connected"`
 	ControlPlane    string     `json:"controlPlane,omitempty"` // the address of the current connection
@@ -822,7 +823,7 @@ func (a *Agent) Status() Status {
 	if a.cur != nil {
 		st.ControlPlane = a.cur.addr
 		st.Instance = a.cur.hello.Instance
-		st.AppsZone = a.cur.hello.AppsZone
+		st.AppsZone, st.TenantZone = a.cur.hello.AppsZone, a.cur.hello.TenantZone
 	}
 	if a.state != nil {
 		st.TableSeq = a.state.Seq
@@ -830,7 +831,7 @@ func (a *Agent) Status() Status {
 		st.MeshVersion = a.state.Mesh.Version
 		st.AdmittedVersion = a.state.Self.AdmittedVersion
 		if st.AppsZone == "" {
-			st.AppsZone = a.state.Self.AppsZone
+			st.AppsZone, st.TenantZone = a.state.Self.AppsZone, a.state.Self.TenantZone
 		}
 	}
 	if a.id != nil {

@@ -16,8 +16,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// textNoAppsZone refuses a publish on a platform without an apps zone.
-const textNoAppsZone = "the platform serves no apps zone (--apps-zone); an environment cannot be public"
+// textNoAppsZone refuses a publish on a platform without an apps zone;
+// textZoneOff one of a tenant whose zone the platform does not serve.
+const (
+	textNoAppsZone = "the platform serves no apps zone (--apps-zone); an environment cannot be public"
+	textZoneOff    = "the platform serves no zone %s, tenant %s's; an environment cannot be public until an operator moves the tenant"
+)
 
 // The refusals of a chosen host label.
 const (
@@ -27,6 +31,9 @@ const (
 	// textBadOwnedHostLabel refuses a label of a tenant that owns the apps
 	// zone, which may leave out the "--".
 	textBadOwnedHostLabel = "hostLabel %q: a chosen host label is a DNS label of at most 63 lowercase letters, digits and hyphens, not with \"--\" at its third and fourth characters, and not ending in a hyphen and 16 hex characters"
+	// textPlainLabelZone refuses a plain label of a zone owner whose
+	// hosts are in the tenant zone, which has no owners (ADR 0031).
+	textPlainLabelZone = "hostLabel %q: a plain host label is only for the apps zone; tenant %s has its hosts in %s, where a chosen host label has \"--\" in it"
 	// textHostLabelNatural refuses a plain label that is the natural label
 	// of an existing tenant's environment.
 	textHostLabelNatural = "host label %s is the natural label of environment %s of tenant %s"
@@ -38,15 +45,17 @@ const (
 // environment its host label and its ingress group, so that its image
 // services roll once (Rolling); unpublishing keeps both, and publishing
 // again rolls nothing. hostLabel, only with public, is a label the tenant
-// chose (model.ChosenHostLabel, or, for a tenant of Deps.AppsZoneOwners,
-// also model.PlainHostLabel; else 400): the environment gets it in place
+// chose (model.ChosenHostLabel, or, for a tenant of Deps.AppsZoneOwners
+// whose hosts are in the apps zone, also model.PlainHostLabel; else 400)
+// in its tenant's zone (ADR 0031): the environment gets it in place
 // of the label it had or would get, which stays the tenant's; one another
 // tenant or environment holds is a 409, and so is a plain label that is
 // the natural label of an existing tenant's environment, unless the
 // tenant holds it already (checkPlainLabel). Publishing is refused with
-// 409 while the platform has no apps zone, and either is while the
-// environment or its tenant is being deleted. A call that changes nothing
-// writes nothing and answers the same.
+// 409 while the platform has no apps zone or does not serve the tenant's
+// zone, and either is while the environment or its tenant is being
+// deleted. A call that changes nothing writes nothing and answers the
+// same.
 func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool, hostLabel string) (PublicAnswer, error) {
 	if public && s.d.AppsZone == "" {
 		return PublicAnswer{}, apierr.New(http.StatusConflict, textNoAppsZone)
@@ -65,6 +74,9 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool
 	var before, after store.Environment
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
 		if err := lockTenant(ctx, tx, tenant); err != nil {
+			return err
+		}
+		if err := s.checkZone(ctx, tx, tenant, public, plain, hostLabel); err != nil {
 			return err
 		}
 		var err error
@@ -116,9 +128,28 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool
 	return ans, nil
 }
 
-// checkPlainLabel refuses with 409 host_label_taken a plain label that is
-// the natural label of an existing tenant's environment: split at its
-// first hyphen (model.NaturalPair), the rest names a tenant, the zone's
+// checkZone refuses a publish of a tenant whose zone the platform does not
+// serve (409), and a plain label of a tenant whose hosts are not in the
+// apps zone (400): the tenant zone has no owners. tx holds the tenant's
+// row.
+func (s *Service) checkZone(ctx context.Context, tx *store.Store, tenant string, public, plain bool, label string) error {
+	t, err := tx.GetTenant(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("tenant %s: %w", tenant, err)
+	}
+	z := s.zones()
+	switch {
+	case public && z.Of(t.Zone) == "":
+		return apierr.New(http.StatusConflict, textZoneOff, t.Zone, tenant)
+	case plain && !z.PlainLabels(tenant, t.Zone):
+		return apierr.New(http.StatusBadRequest, textPlainLabelZone, label, tenant, z.Of(t.Zone))
+	}
+	return nil
+}
+
+// checkPlainLabel refuses with 409 host_label_taken a plain label, in the
+// apps zone, that is the natural label of an existing tenant's
+// environment: split at its first hyphen (model.NaturalPair), the rest names a tenant, the zone's
 // owner itself included. So a zone owner never takes the host that
 // reads as an existing tenant's; a tenant made later, whose natural label
 // the owner holds, gets its fallback (store.ClaimHostLabel). A label the
@@ -129,7 +160,7 @@ func checkPlainLabel(ctx context.Context, tx *store.Store, tenant, label string)
 	if !ok {
 		return nil
 	}
-	owner, err := tx.HostLabelOwner(ctx, label)
+	owner, err := tx.HostLabelOwner(ctx, "", label)
 	if err == nil && owner == tenant {
 		return nil
 	}
