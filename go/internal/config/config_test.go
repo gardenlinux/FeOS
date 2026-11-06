@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -454,6 +455,45 @@ func TestACME(t *testing.T) {
 	if !strings.Contains(b.String(), "--acme-directory (FERUN_ACME_DIRECTORY)") ||
 		!strings.Contains(b.String(), "--acme-email (FERUN_ACME_EMAIL)") {
 		t.Fatalf("serve help lacks the ACME flags:\n%s", b.String())
+	}
+}
+
+// --tenant-zone: empty by default; otherwise a DNS name beside the apps
+// zone, which it needs, neither under the other (ADR 0031).
+func TestTenantZone(t *testing.T) {
+	t.Parallel()
+	if EnvName("tenant-zone") != "FERUN_TENANT_ZONE" {
+		t.Fatal(EnvName("tenant-zone"))
+	}
+	base := []string{"--database-url", testURL}
+	c, err := Parse(base, env(nil))
+	if err != nil || c.TenantZone != "" || c.Zones().Tenant != "" {
+		t.Fatalf("default %q, %v", c.TenantZone, err)
+	}
+	c, err = Parse(base, env(map[string]string{"FERUN_APPS_ZONE": "apps.example.com",
+		"FERUN_TENANT_ZONE": "apps.run.example.com", "FERUN_APPS_ZONE_OWNERS": "fecode"}))
+	if err != nil || c.TenantZone != "apps.run.example.com" {
+		t.Fatalf("from the variable %q, %v", c.TenantZone, err)
+	}
+	if z := c.Zones(); z.Apps != "apps.example.com" || z.Tenant != "apps.run.example.com" ||
+		len(z.AppsOwners) != 1 || z.AppsOwners[0] != "fecode" {
+		t.Fatalf("zones %+v", z)
+	}
+	for _, tc := range []struct{ apps, tenant, want string }{
+		{"", "apps.run.example.com", "needs --apps-zone"},
+		{"apps.example.com", "apps.example.com", "neither"},
+		{"apps.example.com", "x.apps.example.com", "neither"},
+		{"run.apps.example.com", "apps.example.com", "neither"},
+		{"apps.example.com", "Bad_Zone", "--tenant-zone"},
+		{"apps.example.com", "*.apps.run.example.com", "--tenant-zone"},
+	} {
+		args := append(slices.Clone(base), "--tenant-zone", tc.tenant)
+		if tc.apps != "" {
+			args = append(args, "--apps-zone", tc.apps)
+		}
+		if _, err := Parse(args, env(nil)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("apps %q tenant %q: %v", tc.apps, tc.tenant, err)
+		}
 	}
 }
 
