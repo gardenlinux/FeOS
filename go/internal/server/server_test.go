@@ -649,3 +649,18 @@ func mustRequest(t *testing.T, method, url, token string) *http.Request {
 	req.Header.Set("Authorization", "Bearer "+token)
 	return req
 }
+
+// The log keeps no invitation's secret.
+func TestLoggedPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/api/v1/invitations/s3cret":        "/api/v1/invitations/…",
+		"/api/v1/invitations/s3cret/accept": "/api/v1/invitations/…/accept",
+		"/invite/s3cret":                    "/invite/…",
+		"/api/v1/tenant/invitations/abc":    "/api/v1/tenant/invitations/abc",
+		"/api/v1/invitations/":              "/api/v1/invitations/",
+	} {
+		if got := loggedPath(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+}

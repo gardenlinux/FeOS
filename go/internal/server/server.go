@@ -49,6 +49,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -382,7 +383,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		PublicURL: cfg.PublicURL, OIDC: oidc, SessionTTL: cfg.SessionTTL, DefaultImage: cfg.DefaultImage,
 		DefaultVCPUs: cfg.DefaultVCPUs, DefaultMemoryMiB: cfg.DefaultMemoryMiB, JoinTokenTTL: config.JoinTokenTTL,
 		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
-		DrainTimeout: cfg.DrainTimeout, Log: i.log,
+		DrainTimeout: cfg.DrainTimeout, TenantCreation: cfg.TenantCreation, TenantsPerPerson: cfg.TenantsPerPerson,
+		ReservedTenantNames: reservedTenantNames(cfg), Log: i.log,
 	}, deps)
 
 	// The front doors' listener, last.
@@ -854,8 +856,27 @@ func accessLog(next http.Handler, log *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Debug("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start).Round(time.Millisecond))
+		log.Debug("request", "method", r.Method, "path", loggedPath(r.URL.Path),
+			"duration", time.Since(start).Round(time.Millisecond))
 	})
+}
+
+// loggedPath is a request's path as the log keeps it: the secret of an
+// invitation (ADR 0031), which its routes and the UI's page carry in
+// the path, is left out.
+func loggedPath(path string) string {
+	for _, prefix := range []string{"/api/v1/invitations/", "/invite/"} {
+		rest, ok := strings.CutPrefix(path, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		_, tail, _ := strings.Cut(rest, "/")
+		if tail != "" {
+			tail = "/" + tail
+		}
+		return prefix + "…" + tail
+	}
+	return path
 }
 
 // defaultInstanceID is <short hostname>-<8 random hex>, new at every
@@ -912,4 +933,22 @@ func sealerOf(sl *seal.Sealer) api.Sealer {
 		return nil
 	}
 	return sl
+}
+
+// reservedTenantNames are the names no tenant a person makes may have
+// beside the fixed ones (ADR 0031): the apps zone's owners' and the
+// platform's host labels, the first label of the public URL's host, of
+// --edge-name and of --apps-zone.
+func reservedTenantNames(cfg config.Config) []string {
+	out := slices.Clone(cfg.AppsZoneOwners)
+	hosts := []string{cfg.EdgeName, cfg.AppsZone}
+	if u, err := url.Parse(cfg.PublicURL); err == nil {
+		hosts = append(hosts, u.Hostname())
+	}
+	for _, h := range hosts {
+		if label, _, _ := strings.Cut(h, "."); label != "" {
+			out = append(out, strings.ToLower(label))
+		}
+	}
+	return out
 }

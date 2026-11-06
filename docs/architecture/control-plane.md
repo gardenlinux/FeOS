@@ -85,6 +85,8 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--oidc-scopes` | `openid profile email` | space-separated, with `openid` |
 | `--oidc-admin-group` | `admins` | a person is an admin when the `groups` claim holds it |
 | `--session-ttl` | `12h` | the absolute lifetime of a UI session |
+| `--tenant-creation` | `people` | who makes tenants with `POST /api/v1/tenants` ([Members, invitations and tokens](#members-invitations-and-tokens)): `people` (every signed-in person) or `operators` |
+| `--tenants-per-person` | `3` | the most tenants one person may make that are not being deleted; `0`: no bound; operators are never bound |
 | `--bootstrap-token` | none | becomes a token of the tenant `operator` while no tenant exists |
 | `--mcp-allowed-origins` | none | the Origins `/mcp` accepts; empty refuses every request with an Origin |
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
@@ -1246,7 +1248,8 @@ The routes, bodies, status codes and texts are the sandbox system's;
 | Class | Routes | Credential |
 |---|---|---|
 | admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users` |
-| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/tenant` | a tenant's token, or a person's session naming its tenant in `FeRun-Tenant`, with the role and scope each route states ([People and grants](#people-and-grants)) |
+| person | `POST /api/v1/tenants`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no tenant; else 401 "sign-in required" |
+| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/tenant[/…]` (leave, members, invitations, tokens) | a tenant's token, or a person's session naming its tenant in `FeRun-Tenant`, with the role and scope each route states ([People and grants](#people-and-grants)) |
 | sandbox | `/api/v1/sandboxes/{id}/…`: exec, files, dirs, search, fetch, processes, calls, watches, bindings | the sandbox's own token |
 | mcp | `/mcp` | the sandbox's token, with the door's own answers |
 | forward | `/fwd/…`, `/api/v1/sandboxes/{id}/ports/…` | the sandbox's token in `Authorization` alone ([ports](#ports)) |
@@ -1384,12 +1387,13 @@ list:
 
 | Need | Routes |
 |---|---|
-| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/tenant` |
+| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/tenant`, `GET /api/v1/tenant/members` (the grants on environments it reads), `GET /api/v1/tenant/invitations` (those of the scopes it is admin of), `POST /api/v1/tenant/leave` |
 | read on the tenant | `GET /api/v1/tools`, the sandboxes' reads (list, get, tokens, access), `POST /api/v1/environments/plan`, the tenants' jobs' reads |
 | write on the tenant | a sandbox's create, delete, pause, resume, image credentials and tokens, the preflights, `POST /api/v1/environments`, `…/{env}/clone`, a tenant job's create, cancel and delete |
-| admin on the tenant | a domain's claim, check and deletion |
+| admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`) |
 | read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic |
 | write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
+| admin of the scope the request names (the tenant, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/tenant/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/tenant/invitations`, `DELETE …/{id}`) |
 | admin on the environment | its route tokens, `public` and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
 | admin on the environment, or write on the tenant | `DELETE …/{env}` |
 
@@ -1410,6 +1414,80 @@ default, the environment by ID or name), and lists them with `role`,
 sandbox token is its sandbox's, and the door's answers are as before.
 The sink's reads on a session's behalf (logs, traffic, access logs) have
 no token to pass on yet (D7).
+
+### Members, invitations and tokens
+
+**A person makes a tenant**: `POST /api/v1/tenants {name}` (class
+person) makes it under today's name rule, with `made_by` the person, and
+gives them `admin` on it; the answer is `{name, createdAt, role}`, no
+token (the session acts). `--tenant-creation operators` keeps it to
+operators (403 "on this platform only operators make tenants");
+`--tenants-per-person` bounds the tenants a person made that are not
+being deleted, under a lock of the person's row so that concurrent
+creates do not pass it (422 `quota_exceeded`, `resource` `tenants`);
+operators are not bound. Names the platform keeps are 422
+`reserved_name`: `operator`, `admin`, `api`, `www`, the
+`--apps-zone-owners`, and the first label of the public URL's host, of
+`--edge-name` and of `--apps-zone`. A taken name is 409. Tenants an
+operator makes with the admin API are as before (no maker, a token).
+
+**Members.** `GET /api/v1/tenant/members` answers `{members: [{person,
+name, email, disabled?, role, environments: [{id, name, role}]}]}`:
+every person with a grant in the tenant, which only its members see,
+`role` their tenant grant ("" for none), and of their environments'
+grants those the caller reads. An admin of the scope sets a member's
+role with `PUT /api/v1/tenant/members/{person}/grants {role,
+environment?}` (the environment by ID or name; none: the tenant) and
+removes it with `DELETE …/grants[?environment=…]`; the handler checks
+the scope (403 `role_required`, an environment the caller does not see
+404). Only a member (a person with a grant in the tenant) is given one:
+a person joins by an invitation (404 "no such member"). `POST
+/api/v1/tenant/leave` gives up every grant of the calling person (a
+token is 400: it is revoked instead).
+
+**A tenant keeps an admin**: removing, lowering or leaving that would
+leave a tenant that had an admin without one is 409 `last_admin`. Its
+admins are the people with `admin` on the tenant itself who are not
+disabled and its tokens with `admin` on the tenant (their own grant or a
+grants row); the changes of admin grants and the tokens' revocation run
+with the tenant's row `FOR NO KEY UPDATE`, so two concurrent ones cannot
+both pass. The admin API's revocation of a token is an operator's and
+not checked.
+
+**Invitations** are single-use links: `POST /api/v1/tenant/invitations
+{role, environment?}`, by an admin of the scope (checked by the
+handler), answers `{id, role, environment?, environmentName?, madeBy,
+createdAt, expiresAt, token, url}` once; `id` is the SHA-256 of the
+secret `token`, which alone is stored, and `url` the UI's page
+`<public URL>/invite/<token>`. They are valid 7 days by the database's
+clock. FeRun sends no mail. `GET /api/v1/tenant/invitations` lists the
+tenant's invitations (open, used with `usedAt`, `usedBy` and
+`usedByName`, expired) of the scopes the caller is admin of; `DELETE
+/api/v1/tenant/invitations/{id}` revokes one (admin of its scope; one on
+an environment the caller does not see is 404). Class person: `GET
+/api/v1/invitations/{token}` previews one, `{tenant, role,
+environment?, environmentName?, expiresAt}`, while it is open or the
+caller's (else 404); `POST /api/v1/invitations/{token}/accept` marks it
+used by the person in one `UPDATE`, so only the first taker gets it, and
+gives them its role on its scope, or keeps the higher role they hold
+there: `{tenant, role, environment?, environmentName?}`. The taker
+asking again gets the same answer; anyone else 410 "this invitation was
+used", after 7 days 410 "this invitation expired", a revoked or unknown
+one 404 "no such invitation". The grant's `made_by` is the inviter. The
+secret is in those paths and the UI's: `ferund`'s request log writes
+`/api/v1/invitations/…` and `/invite/…` without it.
+
+**Tokens**: an admin of the tenant lists (`GET /api/v1/tenant/tokens`,
+as the admin API does), mints (`POST /api/v1/tenant/tokens {label?,
+role, environment?}`, the role required, never above the minter's role
+on the token's scope; the answer has the token once) and revokes
+(`DELETE /api/v1/tenant/tokens/{hash}`) the tenant's tokens.
+
+**People**: an operator lists them (`GET /api/v1/admin/people`, the last
+seen first) and disables or enables one (`POST
+/api/v1/admin/people/{person}/disable`, `…/enable`): a disabled person's
+sessions end at once and they sign in no more; their grants stay, so
+enabling restores them.
 
 ### Tools and MCP
 

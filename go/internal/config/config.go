@@ -186,6 +186,11 @@ type Config struct {
 	// label without "--", as FeCode does for a project's production
 	// (<project>.<apps zone>); nil: no tenant may.
 	AppsZoneOwners []string
+	// TenantCreation says who makes tenants with POST /api/v1/tenants
+	// (ADR 0031): "people" (every signed-in person) or "operators".
+	TenantCreation string
+	// TenantsPerPerson bounds the tenants one person makes; 0: no bound.
+	TenantsPerPerson int
 	// EdgeName is the name tenants' domains point at with a CNAME (ADR
 	// 0021), such as edge.fecode.dev, which the operator publishes with the
 	// balancer's addresses; empty: domains are off.
@@ -312,6 +317,8 @@ func Default() Config {
 		ACMEProfile:            DefaultACMEProfile,
 		DomainGrace:            72 * time.Hour,
 		DomainUnverifiedMax:    50,
+		TenantCreation:         "people",
+		TenantsPerPerson:       3,
 		LogLevel:               slog.LevelInfo,
 		ReadinessDelay:         ReadinessDelay,
 		ReadyWindow:            ReadyWindow,
@@ -397,6 +404,10 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"the DNS zone of public environments' default hosts, served by ferun-ingress (ADR 0021); empty: no hosts, and no environment can be public")
 	fs.Var((*listValue)(&c.AppsZoneOwners), "apps-zone-owners",
 		"tenants that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without \"--\", <label>.<apps zone> (ADR 0021); empty: none may")
+	fs.StringVar(&c.TenantCreation, "tenant-creation", c.TenantCreation,
+		"who makes tenants with POST /api/v1/tenants (ADR 0031): people (every signed-in person) or operators")
+	fs.IntVar(&c.TenantsPerPerson, "tenants-per-person", c.TenantsPerPerson,
+		"the most tenants one person may make that are not being deleted; 0: no bound (operators are never bound)")
 	fs.StringVar(&c.EdgeName, "edge-name", c.EdgeName,
 		"the name tenants' domains point at with a CNAME (ADR 0021), e.g. edge.fecode.dev; empty: domains are off")
 	fs.Var((*addrList)(&c.EdgeAddresses), "edge-address",
@@ -539,6 +550,12 @@ func (c *Config) Validate() error {
 		if !store.TenantNamePattern.MatchString(tn) {
 			bad("--apps-zone-owners: %q is not a tenant name (%s)", tn, store.TenantNamePattern)
 		}
+	}
+	if c.TenantCreation != "people" && c.TenantCreation != "operators" {
+		bad("--tenant-creation must be people or operators, got %q", c.TenantCreation)
+	}
+	if c.TenantsPerPerson < 0 {
+		bad("--tenants-per-person must not be negative")
 	}
 	if c.EdgeName != "" {
 		if err := pki.ValidateDomain(c.EdgeName); err != nil {
