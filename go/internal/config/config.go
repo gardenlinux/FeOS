@@ -191,6 +191,10 @@ type Config struct {
 	TenantCreation string
 	// TenantsPerPerson bounds the tenants one person makes; 0: no bound.
 	TenantsPerPerson int
+	// The limits of the tenants people make (ADR 0031, "Quotas per
+	// tenant"); negative: none.
+	TenantDefaultSandboxes, TenantDefaultEnvironments, TenantDefaultRunningJobs, TenantDefaultVCPUs int
+	TenantDefaultMemoryMiB                                                                          int64
 	// EdgeName is the name tenants' domains point at with a CNAME (ADR
 	// 0021), such as edge.fecode.dev, which the operator publishes with the
 	// balancer's addresses; empty: domains are off.
@@ -282,48 +286,53 @@ type Config struct {
 // no database URL.
 func Default() Config {
 	return Config{
-		Listen:                 ":8100",
-		NodeListen:             ":7443",
-		TrustDomain:            "feos.local",
-		CADir:                  "/etc/ferun/ca",
-		OIDCClientID:           "ferun",
-		OIDCScopes:             []string{"openid", "profile", "email"},
-		OIDCAdminGroup:         "admins",
-		SessionTTL:             12 * time.Hour,
-		DefaultImage:           "ghcr.io/maltej/debian-ai:latest",
-		ImageBakes:             true,
-		DefaultVCPUs:           2,
-		DefaultMemoryMiB:       512,
-		Placement:              PlacementBinpack,
-		DiskBudget:             4 << 30,
-		IdlePause:              10 * time.Second,
-		HibernateAfter:         0,
-		NodeTTL:                15 * time.Second,
-		LostGrace:              10 * time.Minute,
-		NodeWait:               5 * time.Second,
-		RolloutGrace:           30 * time.Second,
-		DrainTimeout:           2 * time.Minute,
-		PendingRepairAfter:     10 * time.Minute,
-		UnreachableRepairAfter: 2 * time.Minute,
-		NodeCertTTL:            168 * time.Hour,
-		PodCertTTL:             time.Hour,
-		NodeMaxStreams:         1024,
-		ConnDrainTimeout:       20 * time.Minute,
-		HibernateTimeout:       time.Hour,
-		ShutdownGrace:          11 * time.Minute,
-		ActivityRetention:      720 * time.Hour,
-		TrafficRetention:       168 * time.Hour,
-		DomainChallengeLabel:   "_ferun-challenge",
-		ACMEProfile:            DefaultACMEProfile,
-		DomainGrace:            72 * time.Hour,
-		DomainUnverifiedMax:    50,
-		TenantCreation:         "people",
-		TenantsPerPerson:       3,
-		LogLevel:               slog.LevelInfo,
-		ReadinessDelay:         ReadinessDelay,
-		ReadyWindow:            ReadyWindow,
-		CallLease:              CallLease,
-		CallRetention:          CallRetention,
+		Listen:                    ":8100",
+		NodeListen:                ":7443",
+		TrustDomain:               "feos.local",
+		CADir:                     "/etc/ferun/ca",
+		OIDCClientID:              "ferun",
+		OIDCScopes:                []string{"openid", "profile", "email"},
+		OIDCAdminGroup:            "admins",
+		SessionTTL:                12 * time.Hour,
+		DefaultImage:              "ghcr.io/maltej/debian-ai:latest",
+		ImageBakes:                true,
+		DefaultVCPUs:              2,
+		DefaultMemoryMiB:          512,
+		Placement:                 PlacementBinpack,
+		DiskBudget:                4 << 30,
+		IdlePause:                 10 * time.Second,
+		HibernateAfter:            0,
+		NodeTTL:                   15 * time.Second,
+		LostGrace:                 10 * time.Minute,
+		NodeWait:                  5 * time.Second,
+		RolloutGrace:              30 * time.Second,
+		DrainTimeout:              2 * time.Minute,
+		PendingRepairAfter:        10 * time.Minute,
+		UnreachableRepairAfter:    2 * time.Minute,
+		NodeCertTTL:               168 * time.Hour,
+		PodCertTTL:                time.Hour,
+		NodeMaxStreams:            1024,
+		ConnDrainTimeout:          20 * time.Minute,
+		HibernateTimeout:          time.Hour,
+		ShutdownGrace:             11 * time.Minute,
+		ActivityRetention:         720 * time.Hour,
+		TrafficRetention:          168 * time.Hour,
+		DomainChallengeLabel:      "_ferun-challenge",
+		ACMEProfile:               DefaultACMEProfile,
+		DomainGrace:               72 * time.Hour,
+		DomainUnverifiedMax:       50,
+		TenantCreation:            "people",
+		TenantsPerPerson:          3,
+		TenantDefaultSandboxes:    5,
+		TenantDefaultEnvironments: 5,
+		TenantDefaultRunningJobs:  3,
+		TenantDefaultVCPUs:        8,
+		TenantDefaultMemoryMiB:    16384,
+		LogLevel:                  slog.LevelInfo,
+		ReadinessDelay:            ReadinessDelay,
+		ReadyWindow:               ReadyWindow,
+		CallLease:                 CallLease,
+		CallRetention:             CallRetention,
 	}
 }
 
@@ -408,6 +417,16 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"who makes tenants with POST /api/v1/tenants (ADR 0031): people (every signed-in person) or operators")
 	fs.IntVar(&c.TenantsPerPerson, "tenants-per-person", c.TenantsPerPerson,
 		"the most tenants one person may make that are not being deleted; 0: no bound (operators are never bound)")
+	fs.IntVar(&c.TenantDefaultSandboxes, "tenant-default-sandboxes", c.TenantDefaultSandboxes,
+		"the limit of sandboxes of a tenant a person makes; negative: none")
+	fs.IntVar(&c.TenantDefaultEnvironments, "tenant-default-environments", c.TenantDefaultEnvironments,
+		"the limit of environments of a tenant a person makes; negative: none")
+	fs.IntVar(&c.TenantDefaultRunningJobs, "tenant-default-running-jobs", c.TenantDefaultRunningJobs,
+		"the limit of running tenants' jobs of a tenant a person makes; negative: none")
+	fs.IntVar(&c.TenantDefaultVCPUs, "tenant-default-vcpus", c.TenantDefaultVCPUs,
+		"the limit of vCPUs over the sandboxes, services, addons and running jobs of a tenant a person makes; negative: none")
+	fs.Int64Var(&c.TenantDefaultMemoryMiB, "tenant-default-memory-mib", c.TenantDefaultMemoryMiB,
+		"the limit of memory (MiB) over the sandboxes, services, addons and running jobs of a tenant a person makes; negative: none")
 	fs.StringVar(&c.EdgeName, "edge-name", c.EdgeName,
 		"the name tenants' domains point at with a CNAME (ADR 0021), e.g. edge.fecode.dev; empty: domains are off")
 	fs.Var((*addrList)(&c.EdgeAddresses), "edge-address",

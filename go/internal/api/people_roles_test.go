@@ -88,6 +88,7 @@ var routeNeeds = map[string]string{
 	"GET /api/v1/jobs/{id}/logs":                                "read tenant",
 	"POST /api/v1/jobs/{id}/cancel":                             "write tenant",
 
+	"GET /api/v1/tenant/quota":                      "member",
 	"GET /api/v1/tenant/members":                    "member",
 	"PUT /api/v1/tenant/members/{person}/grants":    "admin checked by the handler",
 	"DELETE /api/v1/tenant/members/{person}/grants": "admin checked by the handler",

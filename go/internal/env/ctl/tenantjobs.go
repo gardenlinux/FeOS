@@ -17,6 +17,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -126,7 +127,8 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 	idle := 0
 	var job store.TenantJob
 	err = c.st.InTx(ctx, func(tx *store.Store) error {
-		t, err := tx.LockTenant(ctx, owner, store.ForShare)
+		t, err := quota.LockAndCheck(ctx, tx, owner, quota.Use{RunningJobs: 1, VCPUs: int64(rs.VCPUs),
+			MemoryMiB: int64(rs.MemoryMiB)})
 		if err != nil {
 			return err
 		}

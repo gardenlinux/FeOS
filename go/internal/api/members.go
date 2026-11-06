@@ -117,7 +117,8 @@ func (s *server) reservedTenantName(name string) bool {
 // makes a tenant and holds admin on it (ADR 0031). --tenant-creation
 // operators keeps it to operators; --tenants-per-person bounds the
 // tenants a person made that are not being deleted (operators are not
-// bound). No token: the session acts.
+// bound). The tenant gets the default limits (--tenant-default-*). No
+// token: the session acts.
 func (s *server) createPersonTenant(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	var req struct {
@@ -153,7 +154,8 @@ func (s *server) createPersonTenant(w http.ResponseWriter, r *http.Request) erro
 		}
 		var created bool
 		var err error
-		t, created, err = tx.InsertTenant(r.Context(), store.Tenant{ID: req.Name, MadeBy: sess.PersonID})
+		t, created, err = tx.InsertTenant(r.Context(), store.Tenant{ID: req.Name, MadeBy: sess.PersonID,
+			Limits: s.cfg.TenantDefaults})
 		if err != nil {
 			return err
 		}
@@ -174,10 +176,11 @@ func (s *server) createPersonTenant(w http.ResponseWriter, r *http.Request) erro
 	s.record(r.Context(), store.ActivityRow{TenantID: t.ID, Kind: "tenant_created", Category: "lifecycle",
 		Name: "tenant " + t.ID + " created by " + by, Detail: detail(map[string]any{"tenant": t.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
-		Name      string `json:"name"`
-		CreatedAt string `json:"createdAt"`
-		Role      string `json:"role"`
-	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String()})
+		Name      string     `json:"name"`
+		CreatedAt string     `json:"createdAt"`
+		Role      string     `json:"role"`
+		Limits    limitsView `json:"limits"`
+	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits)})
 }
 
 // ---------------------------------------------------------------- members --
@@ -190,7 +193,8 @@ type grantView struct {
 	EnvironmentName string `json:"environmentName,omitempty"`
 }
 
-func envString(id uuid.UUID) string {
+// idOrEmpty is an ID as answers write it, "" for uuid.Nil.
+func idOrEmpty(id uuid.UUID) string {
 	if id == uuid.Nil {
 		return ""
 	}
@@ -353,7 +357,7 @@ func (s *server) putMemberGrant(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, struct {
 		Person string `json:"person"`
 		grantView
-	}{g.PersonID.String(), grantView{Role: g.Role, Environment: envString(g.EnvironmentID)}})
+	}{g.PersonID.String(), grantView{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID)}})
 }
 
 // deleteMemberGrant is DELETE /api/v1/tenant/members/{person}/grants
@@ -425,7 +429,7 @@ type invitationView struct {
 }
 
 func invitationOf(i store.Invitation) invitationView {
-	v := invitationView{ID: i.Hash, grantView: grantView{Role: i.Role, Environment: envString(i.EnvironmentID),
+	v := invitationView{ID: i.Hash, grantView: grantView{Role: i.Role, Environment: idOrEmpty(i.EnvironmentID),
 		EnvironmentName: i.EnvironmentName}, MadeBy: i.MadeBy, CreatedAt: rfc3339(i.CreatedAt),
 		ExpiresAt: rfc3339(i.ExpiresAt), UsedAt: rfc3339(i.UsedAt), UsedByName: i.UsedByName}
 	if i.UsedBy != uuid.Nil {
@@ -574,7 +578,7 @@ func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error
 		Tenant string `json:"tenant"`
 		grantView
 		ExpiresAt string `json:"expiresAt"`
-	}{inv.TenantID, grantView{Role: inv.Role, Environment: envString(inv.EnvironmentID),
+	}{inv.TenantID, grantView{Role: inv.Role, Environment: idOrEmpty(inv.EnvironmentID),
 		EnvironmentName: inv.EnvironmentName}, rfc3339(inv.ExpiresAt)})
 }
 
@@ -642,11 +646,11 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 		return passOr(err, "accept invitation")
 	}
 	s.log.Info("invitation accepted", "tenant", inv.TenantID, "person", sess.PersonID, "role", g.Role,
-		"environment", envString(g.EnvironmentID))
+		"environment", idOrEmpty(g.EnvironmentID))
 	return writeJSON(w, http.StatusOK, struct {
 		Tenant string `json:"tenant"`
 		grantView
-	}{inv.TenantID, grantView{Role: g.Role, Environment: envString(g.EnvironmentID),
+	}{inv.TenantID, grantView{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID),
 		EnvironmentName: inv.EnvironmentName}})
 }
 

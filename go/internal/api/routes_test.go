@@ -44,6 +44,8 @@ var routeClasses = map[string]class{
 	"GET /api/v1/admin/people":                      classAdmin,
 	"POST /api/v1/admin/people/{person}/disable":    classAdmin,
 	"POST /api/v1/admin/people/{person}/enable":     classAdmin,
+	"PUT /api/v1/admin/tenants/{tenant}/limits":     classAdmin,
+	"GET /api/v1/tenant/quota":                      classTenant,
 	"POST /api/v1/tenants":                          classPerson,
 	"GET /api/v1/invitations/{token}":               classPerson,
 	"POST /api/v1/invitations/{token}/accept":       classPerson,

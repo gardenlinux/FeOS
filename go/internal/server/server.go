@@ -384,7 +384,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		DefaultVCPUs: cfg.DefaultVCPUs, DefaultMemoryMiB: cfg.DefaultMemoryMiB, JoinTokenTTL: config.JoinTokenTTL,
 		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
 		DrainTimeout: cfg.DrainTimeout, TenantCreation: cfg.TenantCreation, TenantsPerPerson: cfg.TenantsPerPerson,
-		ReservedTenantNames: reservedTenantNames(cfg), Log: i.log,
+		ReservedTenantNames: reservedTenantNames(cfg), TenantDefaults: tenantDefaults(cfg), Log: i.log,
 	}, deps)
 
 	// The front doors' listener, last.
@@ -951,4 +951,22 @@ func reservedTenantNames(cfg config.Config) []string {
 		}
 	}
 	return out
+}
+
+// tenantDefaults are the limits of the tenants people make, from
+// --tenant-default-*: a negative flag is no limit.
+func tenantDefaults(cfg config.Config) store.TenantLimits {
+	limit := func(v int) *int {
+		if v < 0 {
+			return nil
+		}
+		return &v
+	}
+	var l store.TenantLimits
+	l.Sandboxes, l.Environments = limit(cfg.TenantDefaultSandboxes), limit(cfg.TenantDefaultEnvironments)
+	l.RunningJobs, l.VCPUs = limit(cfg.TenantDefaultRunningJobs), limit(cfg.TenantDefaultVCPUs)
+	if m := cfg.TenantDefaultMemoryMiB; m >= 0 {
+		l.MemoryMiB = &m
+	}
+	return l
 }

@@ -196,6 +196,9 @@ type Config struct {
 	// operator, admin, api and www: the zone owners' and the platform's
 	// host labels.
 	ReservedTenantNames []string
+	// TenantDefaults are the limits of the tenants people make
+	// (--tenant-default-*, ADR 0031); nil: none.
+	TenantDefaults store.TenantLimits
 
 	// The fleet's timings, which the nodes view shows (its "defaults"):
 	// the interval nodes report telemetry at (zero:
@@ -523,6 +526,7 @@ func (s *server) routes() []route {
 	// People (ADR 0031): the tenants they make, the members, their
 	// grants, invitations and tokens; the operators' switch of a person.
 	s.memberRoutes(operator, person, tenant)
+	s.quotaRoutes(operator, tenant)
 
 	// The doors with classes of their own: their answers are plain text
 	// (forward) or the MCP door's, not this API's JSON.

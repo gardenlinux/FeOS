@@ -87,6 +87,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--session-ttl` | `12h` | the absolute lifetime of a UI session |
 | `--tenant-creation` | `people` | who makes tenants with `POST /api/v1/tenants` ([Members, invitations and tokens](#members-invitations-and-tokens)): `people` (every signed-in person) or `operators` |
 | `--tenants-per-person` | `3` | the most tenants one person may make that are not being deleted; `0`: no bound; operators are never bound |
+| `--tenant-default-sandboxes`, `--tenant-default-environments`, `--tenant-default-running-jobs`, `--tenant-default-vcpus`, `--tenant-default-memory-mib` | `5`, `5`, `3`, `8`, `16384` | the limits of a tenant a person makes ([Quotas](#quotas)); negative: none |
 | `--bootstrap-token` | none | becomes a token of the tenant `operator` while no tenant exists |
 | `--mcp-allowed-origins` | none | the Origins `/mcp` accepts; empty refuses every request with an Origin |
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
@@ -1488,6 +1489,40 @@ seen first) and disables or enables one (`POST
 /api/v1/admin/people/{person}/disable`, `…/enable`): a disabled person's
 sessions end at once and they sign in no more; their grants stay, so
 enabling restores them.
+
+### Quotas
+
+A tenant has **limits** (`tenants.limit_*`, NULL: none) on what it asks
+for (ADR 0031, `go/internal/quota`): `sandboxes` (its own, not an
+environment's instances or a job's), `environments` (not being
+deleted), `runningJobs` (tenants' jobs queued or running), and the sums
+`vcpus` and `memoryMib` over its sandboxes, the replicas of its
+environments' services of runtime `image` by their current
+deployments' resources, its addons' plans and its running jobs (an
+attached service runs in a sandbox, which counts already; environments'
+own jobs are not counted). A tenant a person makes gets the
+`--tenant-default-*` limits; a tenant an operator makes has none; an
+operator replaces any tenant's with `PUT
+/api/v1/admin/tenants/{tenant}/limits {sandboxes, environments,
+runningJobs, vcpus, memoryMib}` (each at least 0, null or left out for
+none), and the admin list shows them with `madeBy`. A member reads `GET
+/api/v1/tenant/quota`: `{limits, use}`, each `{sandboxes, environments,
+runningJobs, vcpus, memoryMib}`, a limit left out being none.
+
+They are checked when asked. A sandbox's create, an environment's
+create and clone and a tenant job's create that would pass a limit are
+422 `{"error", "code": "quota_exceeded", "resource", "limit", "use"}`
+(`use` before the request). A plan, and so an apply, revert or object
+change, whose deployment brings `vcpus` or `memoryMib` past a limit and
+asks for more than the current deployment has an error finding (path
+""); a deployment that asks for no more passes, so lowering what an
+environment asks for works under a lowered limit. What runs stays when
+a limit goes down. Concurrent creates cannot pass a limit together: a
+create of a tenant with limits takes the tenant's row `FOR NO KEY
+UPDATE` (a tenant without limits `FOR SHARE`, as before) and counts and
+inserts under it, and an apply rechecks its finding under it; the
+creates of one tenant with limits run one after the other. The sink's
+daily quotas for logs and traces are apart.
 
 ### Tools and MCP
 

@@ -21,6 +21,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -56,11 +57,23 @@ func (s *Service) CreateEnv(ctx context.Context, tenant string, req CreateEnvReq
 	var row store.Environment
 	var created bool
 	err = s.inTxRetry(ctx, func(tx *store.Store) error {
-		if err := lockTenant(ctx, tx, tenant); err != nil {
+		t, err := lockQuota(ctx, tx, tenant)
+		if err != nil {
 			return err
 		}
+		var use quota.Use
+		if t.Limits.Any() {
+			if use, err = quota.Of(ctx, tx, tenant, uuid.Nil); err != nil {
+				return err
+			}
+		}
 		row, created, err = insertEnv(ctx, tx, tenant, id, req.Name, req.Labels, true)
-		return err
+		if err != nil || !created {
+			return err
+		}
+		// Counted before the insert: an environment that exists already
+		// asks for nothing.
+		return quota.Check(t.Limits, use, quota.Use{Environments: 1})
 	})
 	if err != nil {
 		return EnvStatus{}, false, err

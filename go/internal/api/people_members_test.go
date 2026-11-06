@@ -48,7 +48,7 @@ func TestPersonTenants(t *testing.T) {
 	}
 	resp := create(p, "shop")
 	expect(t, resp, http.StatusCreated, "")
-	if got := decode[map[string]string](t, resp); got["name"] != "shop" || got["role"] != "admin" {
+	if got := decode[struct{ Name, Role string }](t, resp); got.Name != "shop" || got.Role != "admin" {
 		t.Fatalf("created %v", got)
 	}
 	tn, err := e.st.GetTenant(context.Background(), "shop")

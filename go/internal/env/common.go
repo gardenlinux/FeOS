@@ -17,6 +17,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
+	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -75,6 +76,52 @@ func lockTenant(ctx context.Context, tx *store.Store, tenant string) error {
 	}
 	if t.Deleting() {
 		return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+	}
+	return nil
+}
+
+// lockQuota is lockTenant for what counts against the tenant's limits
+// (ADR 0031): the row FOR NO KEY UPDATE when it has any (quota.Lock), so
+// that two creates do not pass a limit together. It returns the tenant.
+func lockQuota(ctx context.Context, tx *store.Store, tenant string) (store.Tenant, error) {
+	t, err := quota.Lock(ctx, tx, tenant)
+	if errors.Is(err, store.ErrNoRow) {
+		return store.Tenant{}, apierr.New(http.StatusUnauthorized, "unknown tenant token")
+	}
+	if err != nil {
+		return store.Tenant{}, fmt.Errorf("tenant %s: %w", tenant, err)
+	}
+	if t.Deleting() {
+		return store.Tenant{}, apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+	}
+	return t, nil
+}
+
+// checkQuota refuses in tx what ask asks of a tenant with limits beyond
+// them (422 quota_exceeded), and a deployment of next in place of the
+// environment exclude's current (nil: none, a new environment) whose sums
+// would pass them (an InvalidSpecError). The caller holds lockQuota.
+func checkQuota(ctx context.Context, tx *store.Store, t store.Tenant, ask quota.Use, exclude uuid.UUID,
+	current, next *spec.Spec) error {
+	if !t.Limits.Any() {
+		return nil
+	}
+	use, err := quota.Of(ctx, tx, t.ID, uuid.Nil)
+	if err != nil {
+		return err
+	}
+	if err := quota.Check(t.Limits, use, ask); err != nil {
+		return err
+	}
+	if next == nil {
+		return nil
+	}
+	others, err := quota.Of(ctx, tx, t.ID, exclude)
+	if err != nil {
+		return err
+	}
+	if fs := quota.SpecFindings(t.Limits, others, current, next); len(fs) > 0 {
+		return &InvalidSpecError{Findings: fs}
 	}
 	return nil
 }
