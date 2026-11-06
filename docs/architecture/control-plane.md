@@ -2144,7 +2144,14 @@ jobs) for its upstream or mode, which their own entries show as well.
 - **Plan** parses, validates, resolves the images (one that does not
   resolve is a warning), normalises and diffs against `base` or the
   current deployment; it writes nothing. `POST /api/v1/environments/plan`
-  validates without an environment.
+  validates without an environment. Both answer `images`, the pins they
+  resolved (ADR 0032): each image of an image service or a job that is
+  not a digest reference, as written, to its digest reference; one that
+  did not resolve is no key, a digest reference never one. A client that
+  writes them into its spec (`image` the pin, `imageAsWritten` the key)
+  applies what the plan showed: apply resolves the images again, and a
+  digest reference stays with its `imageAsWritten`, while an image that
+  is not one drops a stale `imageAsWritten`.
 - **Apply** plans and refuses any error (422 with every finding), pins
   the images outside the transaction (one that does not resolve is now
   an error), then in one transaction locks the tenant FOR SHARE and the
@@ -2695,7 +2702,13 @@ as a URL's userinfo escapes them ([Logs](#probes-exits-and-restarts)).
 ### Addons
 
 `env/addons` registers a blueprint per type: its versions, its plans and
-default plan (`small` for all three), its validation of an addon against
+default plan (`small` for all three), the fields a reference may name
+besides its keys, its options' declarations (name, kind `string`,
+`list` of strings, `boolean` or `oneOf` its `values`, `required`,
+`default`, `description`, and a `pattern`, `reserved` names and
+`reservedPrefixes` for a string or a list's elements, `unique` for a
+list), which its validation reads (an option it does not declare is an
+error) and the catalog answers, its validation of an addon against
 the previous one, the keys of its credentials, its pod (image, command,
 env with credential parts, port, mount, probe), its outputs, and its
 provisioning steps, idempotent. A version is required. A plan change
@@ -2726,6 +2739,16 @@ percent-encoded.
 - **valkey**: option `maxmemoryPolicy`, `noeviction` by default, one of
   the eight policies. A downgrade is an error, an upgrade an info.
 - **nats**: JetStream turned off is a warning; its volume stays, unused.
+
+`GET /api/v1/addons` (tenant class, the same for every tenant) is the
+catalog: `{addons: [{type, versions, defaultVersion, plans: [{name,
+vcpus, memoryMib, volumeMib}], defaultPlan, outputKeys, outputFields,
+options: [{name, kind, required, default, description, values, pattern,
+reserved, reservedPrefixes, unique}]}]}`, the types this ferund runs by
+name, versions oldest first (`defaultVersion` the newest, what a new
+addon is offered with: a spec still names its version), plans smallest
+first, every list `[]` when empty. `TestOptionsMatchValidation` holds
+each declaration to its validation.
 
 `FERUN_ADDON_DOCKER=1 go test -run Docker ./internal/env/addons/` runs
 each blueprint against its image in docker, as FeOS would start it.
@@ -2768,8 +2791,9 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest deployment's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
 | `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a tenant of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds, or a plain label that is the natural label of an existing tenant's environment; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
-| `POST /api/v1/environments/plan` `{spec}` | `{valid, findings}` |
-| `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current}` |
+| `POST /api/v1/environments/plan` `{spec}` | `{valid, findings, images}` |
+| `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current, images}`, `images` `{"<as written>": "<registry>/<repository>@sha256:…"}` ([Plan](#plan-apply-revert-clone)) |
+| `GET /api/v1/addons` | the addon types' catalog ([Addons](#addons)) |
 | `POST …/{env}/deployments` `{spec, base, author?, message?, annotations?}` | 201 the deployment; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
 | `GET …/{env}/deployments?limit=50`, `…/deployments/{n}` | newest first, with their tags; one with its spec and its diff against n-1 |
 | `POST …/deployments/{n}/revert` `{base, author?, message?}` | as a deployment |

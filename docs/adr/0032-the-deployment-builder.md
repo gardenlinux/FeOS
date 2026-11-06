@@ -96,8 +96,12 @@ resolved again, a secret's new version rolled in unasked).
   {"<as written>": "<registry>/<repository>@sha256:…"}`, and the
   builder writes them into the draft, with `imageAsWritten`, before it
   applies: what was shown is what runs. An image that does not resolve
-  is a plan's warning and an apply's error; the builder does not apply
-  while one is unresolved.
+  is a plan's warning and an apply's error, and no key of `images`; a
+  digest reference is never one (it stays, with its `imageAsWritten`).
+  The builder does not apply while an image that is not a digest
+  reference has no pin. A plan without an environment (`POST
+  /api/v1/environments/plan`, a new environment's) answers `images` as
+  well.
 - **Secrets.** A stored spec pins every referenced secret to a version
   (`secrets: {name: {version}}`), and the draft keeps the pins. A
   secret whose latest version is newer than its pin says so on its node
@@ -185,7 +189,12 @@ resolved again, a secret's new version rolled in unasked).
   blueprints, each with its type, versions, plans (vCPUs, memory,
   volume), default plan, the output keys and fields a reference may
   name, and the option fields the blueprint declares (a name, a kind:
-  string, list, boolean or one of values, and a default). The UI copies
+  string, list, boolean or one of values, and a default, with whether
+  it is required, a description and the constraints the validation
+  applies: a pattern, reserved names and prefixes, uniqueness). The
+  validation reads the same declarations. A version has no default (one
+  would change under a running addon); `defaultVersion`, the newest, is
+  what a new addon is offered with. The UI copies
   none of it: a new blueprint appears without a UI release, and options
   a blueprint does not declare get a JSON field.
 - **A first deployment is a minute's work**: an empty environment offers
