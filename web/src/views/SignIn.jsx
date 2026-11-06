@@ -41,7 +41,13 @@ export function SignIn({ config, next, notice, onSignedIn }) {
   return (
     <div className="login">
       <div className="login-card">
-        <div className="login-brand"><Icon name="box" size={22} /> FeRun</div>
+        <div className="login-brand">
+          <div className="login-mark"><Icon name="box" size={26} /></div>
+          <div>
+            <div className="login-name">FeRun</div>
+            <div className="login-tag">Containers and agent sandboxes on microVMs</div>
+          </div>
+        </div>
         {notice && <p className="notice small">{notice}</p>}
         {oidc && (
           <form action="/auth/login" method="get" onSubmit={(e) => {
@@ -50,11 +56,12 @@ export function SignIn({ config, next, notice, onSignedIn }) {
             rememberEmail(email.trim());
             window.location.assign(loginURL(next, email));
           }}>
-            <input type="email" name="login_hint" value={email} autoFocus required aria-label="E-mail address"
-              autoComplete="username email" inputMode="email" placeholder="E-mail address"
+            <label htmlFor="signin-email">E-mail address</label>
+            <input id="signin-email" type="email" name="login_hint" value={email} autoFocus required
+              autoComplete="username email" inputMode="email" placeholder="you@company.com"
               onChange={(e) => { setEmail(e.target.value); setErr(''); }} />
             <input type="hidden" name="next" value={next || '/'} />
-            <button type="submit" className="primary">Sign in</button>
+            <button type="submit" className="primary">Sign in <Icon name="login" size={17} /></button>
           </form>
         )}
         {basic && (
@@ -87,6 +94,7 @@ export function SignIn({ config, next, notice, onSignedIn }) {
         )}
         {err && <p className="error">{err}</p>}
       </div>
+      <div className="login-foot"><a href="/docs/">How FeRun works</a></div>
     </div>
   );
 }
