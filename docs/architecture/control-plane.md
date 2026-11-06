@@ -1298,7 +1298,7 @@ rolling deploy sends no requests to an instance no node has dialled yet.
 
 ### Human sign-in
 
-People sign in to the UI and the API with OIDC (`--oidc-issuer`):
+The sign-in screen asks for the person's e-mail address first and sends it on: `/auth/login?login_hint=<address>` passes it, trimmed and lowercased (nothing for what is not an address), to the provider as OpenID Connect's `login_hint`, which picks the company's sign-in or the password; the browser remembers the address (`ferun-email`). People sign in to the UI and the API with OIDC (`--oidc-issuer`):
 FeCode, FeRun and FeChat share one provider, and whom it lets in, and to
 which products, is its decision (FeCode's ADR 0020). ferund is a confidential
 client (`client_secret_basic`), with the authorization code flow, PKCE,
