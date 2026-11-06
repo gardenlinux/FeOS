@@ -55,15 +55,26 @@ func (valkey) Plans() map[string]Plan {
 	}
 }
 
+// valkeyMaxmemoryPolicy is valkey's option, which policy reads.
+var valkeyMaxmemoryPolicy = Option{Name: "maxmemoryPolicy", Kind: OptionOneOf, Default: valkeyDefaultPolicy,
+	Values: valkeyPolicies,
+	Description: "What valkey does at its memory limit (70% of the plan's memory): noeviction refuses writes, " +
+		"the others evict keys (allkeys-*: any key, volatile-*: keys with a TTL)."}
+
 func (valkey) OutputKeys() []string { return []string{"host", "port", "user", "password", "url"} }
 
+func (valkey) OutputFields() []string { return nil }
+
+func (valkey) Options() []Option { return []Option{valkeyMaxmemoryPolicy} }
+
 func (v valkey) policy(a Addon) (string, []spec.Finding) {
-	fs := unknownOptions(v.Type(), a.Options, "maxmemoryPolicy")
-	policy, pfs := stringOption(a.Options, "maxmemoryPolicy", valkeyDefaultPolicy)
+	opt := valkeyMaxmemoryPolicy
+	fs := unknownOptions(v, a.Options)
+	policy, pfs := stringOption(a.Options, opt.Name, valkeyDefaultPolicy)
 	fs = append(fs, pfs...)
-	if len(pfs) == 0 && !slices.Contains(valkeyPolicies, policy) {
-		fs = append(fs, errorf("options.maxmemoryPolicy", fmt.Sprintf("valkey has no maxmemory policy %q", policy),
-			"use one of "+strings.Join(valkeyPolicies, ", ")))
+	if len(pfs) == 0 && !slices.Contains(opt.Values, policy) {
+		fs = append(fs, errorf("options."+opt.Name, fmt.Sprintf("valkey has no maxmemory policy %q", policy),
+			"use one of "+strings.Join(opt.Values, ", ")))
 	}
 	return policy, fs
 }
@@ -129,7 +140,7 @@ func (v valkey) Render(a Addon, _ Context) (Instance, error) {
 // Outputs: host, port, user ("default"), password and url
 // redis://default:<password>@[addr]:6379/0. No fields.
 func (v valkey) Outputs(_ Addon, c Context, ref Ref) ([]model.TemplatePart, error) {
-	if err := checkRef(v.Type(), ref, v.OutputKeys()); err != nil {
+	if err := checkRef(v.Type(), ref, v.OutputKeys(), v.OutputFields()...); err != nil {
 		return nil, err
 	}
 	switch ref.Key {

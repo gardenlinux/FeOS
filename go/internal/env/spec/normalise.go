@@ -113,7 +113,10 @@ func normDuration(s, def string) string {
 	return d.String()
 }
 
-// pin returns the image pinned and the image as written.
+// pin returns the image pinned and the image as written. A digest
+// reference keeps its as written (a client that wrote a plan's pins, ADR
+// 0032); an image that is not one is the image as written, so an
+// imageAsWritten beside it is stale and dropped.
 func pin(image, asWritten string, p Pins) (string, string) {
 	if image == "" || IsDigestRef(image) {
 		return image, asWritten
@@ -121,7 +124,7 @@ func pin(image, asWritten string, p Pins) (string, string) {
 	if pinned, ok := p.Images[image]; ok && pinned != "" {
 		return pinned, image
 	}
-	return image, asWritten
+	return image, ""
 }
 
 func normResources(r *Resources) *Resources {

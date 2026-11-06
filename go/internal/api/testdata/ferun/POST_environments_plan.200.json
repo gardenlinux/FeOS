@@ -164,7 +164,11 @@
         "problem": "image ghcr.io/acme/expensa-web:1.4 could not be resolved: ghcr.io/acme/expensa-web: manifest unknown",
         "remedy": "push the image or fix its name; an apply refuses an image it cannot resolve"
       }
-    ]
+    ],
+    "images": {
+      "ghcr.io/acme/approval:1.2": "ghcr.io/acme/approval@sha256:11cdf88d1c2c3802016199fb7e7e2a5377ed51b81855411f3f5840fe9d703e93",
+      "ghcr.io/acme/expense:1.4": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a"
+    }
   },
   "note": "env-less: validation only, no diff, no secret checks"
 }

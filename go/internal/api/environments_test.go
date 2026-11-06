@@ -101,6 +101,10 @@ func (f *fakeEnvs) PlanSpec(_ context.Context, tenant string, req envs.PlanSpecR
 	var out envs.PlanSpecAnswer
 	return out, f.do(envCall{"PlanSpec", tenant, "", []any{req}}, &out)
 }
+func (f *fakeEnvs) Addons(_ context.Context, tenant string) (envs.AddonCatalog, error) {
+	var out envs.AddonCatalog
+	return out, f.do(envCall{"Addons", tenant, "", nil}, &out)
+}
 func (f *fakeEnvs) Plan(_ context.Context, tenant, env string, req envs.PlanRequest) (envs.PlanAnswer, error) {
 	var out envs.PlanAnswer
 	return out, f.do(envCall{"Plan", tenant, env, []any{req}}, &out)
@@ -274,6 +278,7 @@ var fixtureMethods = map[string]string{
 	"POST_environments_env_route-tokens":          "CreateRouteToken",
 	"DELETE_environments_env_route-tokens":        "RevokeRouteTokens",
 	"PUT_environments_env_public":                 "SetPublic",
+	"GET_addons":                                  "Addons",
 }
 
 func loadFixtures(t *testing.T) map[string]fixture {
@@ -469,6 +474,7 @@ func TestEnvironmentArguments(t *testing.T) {
 			envCall{"Clone", testTenant, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
 		{"POST", "/api/v1/environments/plan", map[string]any{"spec": map[string]any{}},
 			envCall{"PlanSpec", testTenant, "", []any{envs.PlanSpecRequest{Spec: json.RawMessage(`{}`)}}}, 200},
+		{"GET", "/api/v1/addons", nil, envCall{"Addons", testTenant, "", nil}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true},
 			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": false},

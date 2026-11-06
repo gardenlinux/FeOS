@@ -511,6 +511,8 @@ func (fakeBP) DefaultPlan() string                                 { return "sma
 func (fakeBP) Validate(*addons.Addon, addons.Addon) []spec.Finding { return nil }
 func (fakeBP) Credentials(addons.Addon) []string                   { return []string{"password"} }
 func (fakeBP) OutputKeys() []string                                { return []string{"url"} }
+func (fakeBP) OutputFields() []string                              { return nil }
+func (fakeBP) Options() []addons.Option                            { return nil }
 func (fakeBP) Render(a addons.Addon, _ addons.Context) (addons.Instance, error) {
 	return addons.Instance{Image: "fake:" + a.Version, Command: []string{"serve", a.Plan},
 		Env: map[string]model.TemplateValue{"PW": model.CredentialValue("password")}, Port: 1, Mount: "/data",

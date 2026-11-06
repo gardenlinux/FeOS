@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/db"
+	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -278,6 +281,137 @@ func TestPlanApply(t *testing.T) {
 	// Another tenant's environment is absent.
 	_, err = h.svc.Plan(ctx, tenantB, "stage", PlanRequest{Spec: json.RawMessage(changed)})
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
+}
+
+// A plan answers the pins it resolved (ADR 0032); a client that writes
+// them into its spec applies what the plan showed, though the tag moved
+// in between.
+func TestPlanImages(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, harnessOptions{})
+	ctx := h.ctx()
+	h.create("stage", nil)
+	const tag, other = "ghcr.io/acme/api:1", "ghcr.io/acme/tool:3"
+	pinnedDigest := "docker.io/library/nginx@sha256:" + strings.Repeat("c", 64)
+	h.eng.mu.Lock()
+	h.eng.bad["ghcr.io/acme/broken:1"] = "manifest unknown"
+	h.eng.mu.Unlock()
+	raw := `{"services": {"api": {"image": "` + tag + `"}, "web": {"image": "` + pinnedDigest + `",
+		"imageAsWritten": "nginx:1.27"}, "broken": {"image": "ghcr.io/acme/broken:1"}},
+		"jobs": {"migrate": {"image": "` + tag + `"}, "tool": {"image": "` + other + `"}}}`
+	p, err := h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(raw)})
+	want := map[string]string{tag: digestOf(tag), other: digestOf(other)}
+	if err != nil || !p.Valid || !reflect.DeepEqual(p.Images, want) ||
+		!hasFinding(p.Findings, spec.SeverityWarning, "services.broken.image", "manifest unknown") {
+		t.Fatalf("plan %+v %v", p, err)
+	}
+	b, _ := json.Marshal(p)
+	if !strings.Contains(string(b), `"images":{"ghcr.io/acme/api:1":"ghcr.io/acme/api@sha256:`) {
+		t.Fatalf("answer %s", b)
+	}
+	// The spec without parse errors only has images; one that does not
+	// parse answers {}.
+	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(`{"services": 1}`)})
+	if p.Images == nil || len(p.Images) != 0 {
+		t.Fatalf("unparsed %+v", p.Images)
+	}
+	ps, err := h.svc.PlanSpec(ctx, tenantA, PlanSpecRequest{Spec: json.RawMessage(raw)})
+	if err != nil || !reflect.DeepEqual(ps.Images, want) {
+		t.Fatalf("plan spec %+v %v", ps, err)
+	}
+
+	// The client writes the pins in; then the tag moves.
+	draft := `{"services": {"api": {"image": "` + want[tag] + `", "imageAsWritten": "` + tag + `"}}}`
+	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(draft)})
+	if !p.Valid || len(p.Images) != 0 {
+		t.Fatalf("plan of the pinned draft %+v", p)
+	}
+	h.eng.mu.Lock()
+	h.eng.moved = map[string]string{tag: "ghcr.io/acme/api@sha256:" + strings.Repeat("d", 64)}
+	h.eng.mu.Unlock()
+	a := h.apply("stage", draft, 0)
+	e := h.env("stage")
+	stored, err := h.st.GetDeployment(ctx, e.ID, a.Number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := parseStored(stored.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api := sp.Services["api"]; api.Image != want[tag] || api.ImageAsWritten != tag {
+		t.Fatalf("stored %s", stored.Spec)
+	}
+	// The tag as written resolves where it moved: an update.
+	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(`{"services": {"api": {"image": "` +
+		tag + `"}}}`)})
+	if p.Images[tag] != h.eng.moved[tag] || len(p.Diff) != 1 || p.Diff[0].Name != "api" {
+		t.Fatalf("checked %+v", p)
+	}
+}
+
+// The catalog answers the registered blueprints as they declare
+// themselves; a type Deps.Blueprint does not run is left out.
+func TestAddonCatalog(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, harnessOptions{})
+	c, err := h.svc.Addons(h.ctx(), tenantA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var types []string
+	for _, a := range c.Addons {
+		types = append(types, a.Type)
+	}
+	if !slices.Equal(types, []string{"nats", "postgres", "valkey"}) {
+		t.Fatalf("types %v", types)
+	}
+	pg := c.Addons[1]
+	if !slices.Equal(pg.Versions, []string{"16", "17"}) || pg.DefaultVersion != "17" || pg.DefaultPlan != "small" ||
+		len(pg.Plans) != 4 || pg.Plans[0] != (AddonPlan{Name: "dev", VCPUs: 1, MemoryMib: 256, VolumeMib: 1024}) ||
+		pg.Plans[3].Name != "large" || !slices.Equal(pg.OutputFields, []string{"role", "database"}) ||
+		len(pg.Options) != 2 || pg.Options[1].Name != "roles" || !slices.Equal(pg.Options[1].ReservedPrefixes, []string{"pg_"}) {
+		t.Fatalf("postgres %+v", pg)
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The API's fixture, which the UI's tests read, is the catalog.
+	raw, err := os.ReadFile("../api/testdata/ferun/GET_addons.200.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx struct {
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatal(err)
+	}
+	var want, got any
+	_ = json.Unmarshal(fx.Response, &want)
+	_ = json.Unmarshal(b, &got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("the fixture GET_addons.200.json is not the catalog:\n%s", b)
+	}
+	// Every field is there, lists as [] when empty.
+	for _, s := range []string{`"type":"nats"`, `"outputFields":[]`, `"options":[{"name":"jetstream","kind":"boolean",` +
+		`"required":false,"default":true,`, `"values":[],"pattern":"","reserved":[],"reservedPrefixes":[],"unique":false}`,
+		`"kind":"oneOf","required":false,"default":"noeviction"`, `"default":[]`} {
+		if !strings.Contains(string(b), s) {
+			t.Fatalf("catalog lacks %s:\n%s", s, b)
+		}
+	}
+	// A ferund that does not run a type does not offer it.
+	without := &Service{d: Deps{Blueprint: func(typ string) (addons.Blueprint, bool) {
+		if typ == "nats" {
+			return nil, false
+		}
+		return addons.Get(typ)
+	}}}
+	if c, _ := without.Addons(h.ctx(), tenantA); len(c.Addons) != 2 || c.Addons[0].Type != "postgres" {
+		t.Fatalf("without nats %+v", c)
+	}
 }
 
 func TestPlanSpec(t *testing.T) {

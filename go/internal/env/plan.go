@@ -398,13 +398,23 @@ type planned struct {
 	// its spec (nil without one).
 	base, current int
 	currentSpec   *spec.Spec
+	// images are the pins of the spec's images (spec.Pins.Images).
+	images map[string]string
 }
 
 func (p planned) valid() bool { return p.parsed && !spec.HasErrors(p.findings) }
 
 func (p planned) answer() PlanAnswer {
 	return PlanAnswer{Valid: p.valid(), Findings: nonNilFindings(p.findings), Diff: nonNilDiff(p.diff), Base: p.base,
-		Current: p.current}
+		Current: p.current, Images: nonNilImages(p.images)}
+}
+
+// nonNilImages is images, {} for none.
+func nonNilImages(images map[string]string) map[string]string {
+	if images == nil {
+		return map[string]string{}
+	}
+	return images
 }
 
 // plan parses, validates and normalises raw for the environment env and
@@ -455,7 +465,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 			}
 		}
 	}
-	p.parsed, p.norm = true, norm
+	p.parsed, p.norm, p.images = true, norm, pins.Images
 	p.diff = spec.DiffWith(baseSpec, &norm, s.addonEffect)
 	if p.currentSpec != nil && spec.EqualNormalised(norm, *p.currentSpec) {
 		fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "",

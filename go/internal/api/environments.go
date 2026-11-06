@@ -37,6 +37,7 @@ func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	env(onTenant(write), "POST /api/v1/environments", s.createEnv)
 	env(member, "GET /api/v1/environments", s.listEnvs)
 	env(onTenant(read), "POST /api/v1/environments/plan", s.planSpec)
+	env(member, "GET /api/v1/addons", s.addonCatalog)
 	env(onEnv(read), "GET /api/v1/environments/{env}", s.getEnv)
 	env(need{role: admin, scope: scopeEnv, orTenant: write}, "DELETE /api/v1/environments/{env}", s.deleteEnv)
 	env(onEnv(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
@@ -166,6 +167,16 @@ func (s *server) planSpec(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, a)
+}
+
+// addonCatalog is GET /api/v1/addons: the addon types' blueprints (ADR
+// 0032), the same for every tenant.
+func (s *server) addonCatalog(w http.ResponseWriter, r *http.Request) error {
+	c, err := s.deps.Environments.Addons(r.Context(), tenantOf(r))
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, c)
 }
 
 func (s *server) getEnv(w http.ResponseWriter, r *http.Request) error {

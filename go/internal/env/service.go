@@ -17,6 +17,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -146,6 +147,7 @@ func (s *Service) DeleteEnv(ctx context.Context, tenant, env string) error {
 // the tenant's sandboxes and the images.
 func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecRequest) (PlanSpecAnswer, error) {
 	sp, fs := spec.Parse(req.Spec)
+	var images map[string]string
 	if !spec.HasErrors(fs) {
 		vc, pins, err := s.loadContext(ctx, tenant, nil, sp, spec.ModeSpec, map[string]spec.SecretInfo{})
 		if err != nil {
@@ -154,9 +156,54 @@ func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecReque
 		fs = append(fs, spec.Validate(vc, sp, nil)...)
 		_, nfs := spec.Normalise(sp, pins)
 		fs = append(fs, nfs...)
+		images = pins.Images
 	}
 	fs = spec.SortFindings(fs)
-	return PlanSpecAnswer{Valid: !spec.HasErrors(fs), Findings: nonNilFindings(fs)}, nil
+	return PlanSpecAnswer{Valid: !spec.HasErrors(fs), Findings: nonNilFindings(fs), Images: nonNilImages(images)}, nil
+}
+
+// Addons is GET /api/v1/addons: the catalog of the addon types this
+// service validates and runs (Deps.Blueprint), sorted by type; the same
+// for every tenant.
+func (s *Service) Addons(_ context.Context, _ string) (AddonCatalog, error) {
+	out := AddonCatalog{Addons: []AddonType{}}
+	for _, typ := range addons.Types() {
+		b, ok := s.d.Blueprint(typ)
+		if !ok {
+			continue
+		}
+		out.Addons = append(out.Addons, addonType(b))
+	}
+	return out, nil
+}
+
+// addonType is b as the catalog answers it: every list non-nil.
+func addonType(b addons.Blueprint) AddonType {
+	t := AddonType{Type: b.Type(), Versions: nonNilStrings(b.Versions()), DefaultPlan: b.DefaultPlan(),
+		Plans: []AddonPlan{}, OutputKeys: nonNilStrings(b.OutputKeys()), OutputFields: nonNilStrings(b.OutputFields()),
+		Options: []addons.Option{}}
+	if n := len(t.Versions); n > 0 {
+		t.DefaultVersion = t.Versions[n-1]
+	}
+	plans := b.Plans()
+	for _, name := range addons.SortedPlans(b) {
+		p := plans[name]
+		t.Plans = append(t.Plans, AddonPlan{Name: name, VCPUs: p.VCPUs, MemoryMib: p.MemoryMib, VolumeMib: p.VolumeMib})
+	}
+	for _, o := range b.Options() {
+		o.Values, o.Reserved = nonNilStrings(slices.Clone(o.Values)), nonNilStrings(slices.Clone(o.Reserved))
+		o.ReservedPrefixes = nonNilStrings(slices.Clone(o.ReservedPrefixes))
+		t.Options = append(t.Options, o)
+	}
+	return t
+}
+
+// nonNilStrings is ss, [] for none.
+func nonNilStrings(ss []string) []string {
+	if ss == nil {
+		return []string{}
+	}
+	return ss
 }
 
 // Plan is POST /api/v1/environments/{env}/plan: parse, validate, resolve
