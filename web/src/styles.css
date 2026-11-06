@@ -775,6 +775,8 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
   padding: 0 4px 4px; background: var(--bg1); border: 1px solid var(--border-soft); border-radius: 7px;
 }
 .lg-view:focus { outline: none; border-color: var(--border); }
+/* in the light theme the lines stand on white, like the panel around them */
+[data-theme="light"] .lg-view { background: var(--panel); }
 .lg-edge { margin: 8px 0 4px; text-align: center; font-size: 12px; color: var(--muted); }
 .lg-lines { list-style: none; margin: 0; padding: 0; }
 .lg-lines > li + li { border-top: 1px solid rgba(128,128,128,.09); }
