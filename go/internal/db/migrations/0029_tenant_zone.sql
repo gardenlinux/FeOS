@@ -21,7 +21,7 @@
 -- match from here on ("there is no unique or exclusion constraint
 -- matching the ON CONFLICT specification"), so its first publishes of an
 -- environment (PUT …/public true on one that never had a label) and its
--- chosen labels (PUT …/host-label) answer 500 until the rolling deploy
+-- chosen labels (PUT …/public with hostLabel) answer 500 until the rolling deploy
 -- has replaced it; a retry on a new instance succeeds. Its reads are
 -- unchanged. No index keeps it working: ON CONFLICT (label) infers only a
 -- unique index on label alone without a predicate (a partial one WHERE

@@ -3868,7 +3868,7 @@ that dial the instances.
   (ADR 0031, the tenant zone). An instance of the previous version beside
   it claims labels with `ON CONFLICT (label)`, which no constraint
   matches any more: its first publishes (`PUT …/public` of an environment
-  without a label) and chosen labels fail with 500 until the rolling
+  without a label) and chosen labels (`hostLabel`) fail with 500 until the rolling
   deploy replaces it, and a retry on a new instance succeeds; everything
   else it does, reads of labels included, goes on. No index avoids this
   window (a partial unique index on `label` serves no `ON CONFLICT
