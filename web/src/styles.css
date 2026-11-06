@@ -212,6 +212,7 @@ input:focus { outline: none; border-color: var(--accent); }
 .tbl tr.sel td { background: rgba(91,157,248,.09); }
 .col-state { width: 20px; text-align: center; }
 .col-num { text-align: right; width: 80px; }
+.tbl th.col-num { text-align: right; }
 .col-when { white-space: nowrap; width: 1%; }
 .col-time { white-space: nowrap; width: 1%; font-size: 12px; color: var(--muted); }
 .col-src { white-space: nowrap; width: 1%; font-size: 11.5px; }
@@ -675,21 +676,26 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .envobj-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin-top: 6px; font-size: 12.5px; }
 .envobj-line .k { color: var(--muted); font-size: 11.5px; margin-right: 6px; }
 .envobj-detail { margin-top: 5px; font-size: 12.5px; color: var(--warn); overflow-wrap: anywhere; }
-/* the instance tables of all objects line up: fixed columns, the detail
-   takes the rest; they fit a 1280 px window, a narrower one scrolls them */
-.inst-tbl { table-layout: fixed; min-width: 940px; }
+/* the instance tables of all objects line up: fixed columns, the node
+   takes the rest; one line per pod, a pod's detail a line of its own under
+   it. They fit a 1280 px window, a narrower one scrolls them. A node's name
+   and an address are cut at their start, where the cluster's nodes and
+   pods all look alike, their whole in the title */
+.inst-tbl { table-layout: fixed; min-width: 980px; }
 .inst-tbl th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.inst-tbl td { padding: 4px 8px; }
-.inst-tbl th:nth-child(1), .inst-tbl th:nth-child(6) { width: 70px; }
-.inst-tbl th:nth-child(2) { width: 88px; }
-.inst-tbl th:nth-child(3) { width: 92px; }
-.inst-tbl th:nth-child(4) { width: 60px; }
-.inst-tbl th:nth-child(5) { width: 150px; }
-.inst-tbl th:nth-child(7) { width: 78px; }
-.inst-tbl th:nth-child(8) { width: 84px; }
+.inst-tbl td { padding: 4px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inst-tbl th:nth-child(1) { width: 72px; }
+.inst-tbl th:nth-child(2) { width: 84px; }
+.inst-tbl th:nth-child(3) { width: 100px; }
+.inst-tbl th:nth-child(5) { width: 200px; }
+.inst-tbl th:nth-child(6) { width: 100px; }
+.inst-tbl th:nth-child(7) { width: 84px; }
+.inst-tbl th:nth-child(8) { width: 80px; }
 .inst-tbl th:nth-child(9) { width: 100px; }
-.inst-tbl th:nth-child(11) { width: 42px; }
-.inst-tbl td:nth-child(5) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inst-tbl th:nth-child(10) { width: 44px; }
+.inst-tbl td.cut-start { direction: rtl; text-align: left; }
+.inst-tbl tr.has-detail td { border-bottom: none; padding-bottom: 1px; }
+.inst-tbl tr.inst-detail td { white-space: normal; padding-top: 0; padding-left: 16px; }
 .inst-tbl .state-label { font-size: 12px; }
 .detailcell { overflow-wrap: anywhere; color: var(--warn); }
 .msgcell { min-width: 200px; max-width: 420px; overflow-wrap: anywhere; }

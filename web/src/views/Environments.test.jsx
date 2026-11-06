@@ -95,19 +95,21 @@ describe('EnvOverview', () => {
     expect(count(out, 'class="envobj"')).toBe(6);
   });
 
-  it("lists an image service's instances: replica, phase, state, node, address, deployment, restarts, last exit, detail", () => {
+  it("lists an image service's instances: replica, phase, state, node, address, deployment, restarts, last exit, and its detail under it", () => {
     const out = overview(STAGE);
     const all = text(<EnvOverview st={STAGE} tenant={T} navigate={nav} />);
     expect(all).toContain('expense-service image · 1 / 2 ready');
     // Five pods of three image services, two of addons.
     expect(count(out, 'title="instance ')).toBe(7);
     expect(out).toContain('title="instance 0193d5e6-0000-7000-8000-000000000004"');
-    expect(out).toContain('<td class="small detailcell">exited with code 1; restarting in 4s</td>');
+    // The detail is a line of its own under its pod.
+    expect(out).toContain('<tr class="inst-detail"><td colSpan="10" class="small detailcell">exited with code 1; restarting in 4s</td></tr>');
+    expect(count(out, 'class="inst-detail')).toBe(1);
     expect(out).toContain('<td class="col-num mono warntext">3</td>');
     expect(out).toContain('<td class="col-num mono bad">1</td>');
     expect(out).toContain('class="state-label failed"');
     expect(out).toContain('>exited</span>');
-    expect(out).toContain('<td class="mono small">fd6b:a01:3::15</td>');
+    expect(out).toContain('<td class="mono small cut-start" title="fd6b:a01:3::15">fd6b:a01:3::15</td>');
     expect(out).toContain('href="/nodes/n2"');
     // Replica 1 of deployment 6 still serves: muted as an older deployment's.
     expect(out).toContain('class="col-num mono muted" title="an older deployment&#x27;s instance">6</td>');

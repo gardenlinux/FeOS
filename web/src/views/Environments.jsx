@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LOG_LINES, api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, ErrBox, KV, LiveBadge, StateLabel, useNow, usePoll } from '../components.jsx';
@@ -460,7 +460,8 @@ function JobLine({ run }) {
 }
 
 // InstanceTable lists an object's pods; one of an older deployment than the
-// latest is muted, a stopping one dimmed.
+// latest is muted, a stopping one dimmed. A pod's detail, when it has one,
+// takes a line of its own under the pod.
 export function InstanceTable({ instances, latest, navigate, logsTo }) {
   const list = instances || [];
   if (list.length === 0) return <div className="envobj-line muted">No instances yet.</div>;
@@ -478,35 +479,41 @@ export function InstanceTable({ instances, latest, navigate, logsTo }) {
             <th className="col-num">restarts</th>
             <th className="col-num">last exit</th>
             <th className="col-when">ready since</th>
-            <th>detail</th>
             <th className="col-quick" />
           </tr>
         </thead>
         <tbody>
           {list.map((i) => {
             const old = latest > 0 && i.deployment < latest;
+            const dim = i.phase === 'stopping' ? 'dim' : '';
             return (
-              <tr key={i.id} className={i.phase === 'stopping' ? 'dim' : ''} title={`instance ${i.id}`}>
-                <td className="col-num mono">{i.replica}</td>
-                <td><ToneLabel tone={phaseTone(i.phase)}>{i.phase}</ToneLabel></td>
-                <td><StateLabel state={i.state} /></td>
-                <td className="mono">
-                  {i.node
-                    ? <Link to={`/nodes/${encodeURIComponent(i.node)}`} navigate={navigate}>{i.node}</Link>
-                    : <span className="muted">—</span>}
-                </td>
-                <td className="mono small">{i.address || <span className="muted">—</span>}</td>
-                <td className={'col-num mono' + (old ? ' muted' : '')} title={old ? "an older deployment's instance" : ''}>{i.deployment}</td>
-                <td className={'col-num mono' + (i.restarts > 0 ? ' warntext' : '')}>{i.restarts}</td>
-                <td className={'col-num mono' + (i.lastExit ? ' bad' : '')}>
-                  {i.lastExit === null || i.lastExit === undefined ? '—' : i.lastExit}
-                </td>
-                <td className="col-when">{i.readySince ? <Ago iso={i.readySince} /> : <span className="muted">—</span>}</td>
-                <td className="small detailcell">{i.detail}</td>
-                <td className="col-quick">
-                  <Link to={logsTo(i.replica)} navigate={navigate} className="small">logs</Link>
-                </td>
-              </tr>
+              <Fragment key={i.id}>
+                <tr className={[dim, i.detail ? 'has-detail' : ''].filter(Boolean).join(' ')} title={`instance ${i.id}`}>
+                  <td className="col-num mono">{i.replica}</td>
+                  <td><ToneLabel tone={phaseTone(i.phase)}>{i.phase}</ToneLabel></td>
+                  <td><StateLabel state={i.state} /></td>
+                  <td className="mono cut-start" title={i.node || undefined}>
+                    {i.node
+                      ? <Link to={`/nodes/${encodeURIComponent(i.node)}`} navigate={navigate}>{i.node}</Link>
+                      : <span className="muted">—</span>}
+                  </td>
+                  <td className="mono small cut-start" title={i.address || undefined}>{i.address || <span className="muted">—</span>}</td>
+                  <td className={'col-num mono' + (old ? ' muted' : '')} title={old ? "an older deployment's instance" : ''}>{i.deployment}</td>
+                  <td className={'col-num mono' + (i.restarts > 0 ? ' warntext' : '')}>{i.restarts}</td>
+                  <td className={'col-num mono' + (i.lastExit ? ' bad' : '')}>
+                    {i.lastExit === null || i.lastExit === undefined ? '—' : i.lastExit}
+                  </td>
+                  <td className="col-when">{i.readySince ? <Ago iso={i.readySince} /> : <span className="muted">—</span>}</td>
+                  <td className="col-quick">
+                    <Link to={logsTo(i.replica)} navigate={navigate} className="small">logs</Link>
+                  </td>
+                </tr>
+                {i.detail && (
+                  <tr className={['inst-detail', dim].filter(Boolean).join(' ')}>
+                    <td colSpan={10} className="small detailcell">{i.detail}</td>
+                  </tr>
+                )}
+              </Fragment>
             );
           })}
         </tbody>
