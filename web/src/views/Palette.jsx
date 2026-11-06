@@ -60,7 +60,7 @@ export function Palette({ all, tenant, environments, onClose, navigate }) {
               className={'palette-item' + (i === at ? ' on' : '')}
               onMouseEnter={() => setAt(i)} onClick={() => go(r)}>
               <Icon name={r.icon || 'arrowRight'} size={14} />
-              <span className={r.kind === 'sandbox' || r.kind === 'job' || r.kind === 'domain' ? 'mono' : ''}>{r.label}</span>
+              <span className={r.kind === 'sandbox' || r.kind === 'job' || r.kind === 'domain' || r.kind === 'credential' ? 'mono' : ''}>{r.label}</span>
               {r.hint && <span className="palette-hint">{r.hint}</span>}
               <span className="palette-kind">{r.kind}</span>
             </button>

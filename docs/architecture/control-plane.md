@@ -2279,8 +2279,14 @@ shows the quota's use against each limit and where vCPUs and memory are
 booked; Settings the tenant, the role and leaving it. A sandbox's page
 says its state in words with what it costs, and its Connect tab mints a
 token (shown once) beside the MCP address, ready snippets and the
-tools' reference; a new sandbox takes `attachable` and image
-credentials. The platform's pages add the ingresses, every person
+tools' reference; a new sandbox takes `attachable`, image credentials
+and the tenant's credentials. The tenant's credentials
+(`/tenants/<t>/credentials[/<name>]`, ADR 0033) list each with its uses;
+a credential's form runs the preflight before it saves, its page checks
+the stored version, adds it to sandboxes, and moves an environment whose
+latest deployment pins an older version to the latest (a plan and an
+apply of that deployment's spec with the pin moved, write on the
+environment). The platform's pages add the ingresses, every person
 (disable, enable), a tenant's limits and zone, and join tokens of kind
 `ingress`.
 

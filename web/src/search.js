@@ -36,6 +36,10 @@ export function entries({ tenant, nav = [], platform = [], tenants = [], summary
   for (const d of summary.domains || []) {
     out.push({ key: 'dom/' + (d.id || d.name), kind: 'domain', label: d.name, hint: d.state || '', to: `/tenants/${t}/domains/${enc(d.id || d.name)}`, icon: 'globe' });
   }
+  for (const c of summary.credentials || []) {
+    out.push({ key: 'cred/' + c.name, kind: 'credential', label: c.name, hint: c.upstream || '',
+      to: `/tenants/${t}/credentials/${enc(c.name)}`, icon: 'plug' });
+  }
   for (const j of summary.jobs || []) {
     out.push({ key: 'job/' + j.id, kind: 'job', label: j.id, hint: [j.image, j.phase].filter(Boolean).join(' · '), to: `/tenants/${t}/jobs/${enc(j.id)}`, icon: 'jobs' });
   }

@@ -9,6 +9,7 @@ const summary = {
   environments: [{ id: 'e1', name: 'prod', hosts: ['kino.example.com'] }, { id: 'e2', name: 'preview-42', hosts: [] }],
   sandboxes: [{ sandboxId: 'h3k9v2m7qpx', owner: 'review-bot', image: 'agent-base:2.4' }],
   domains: [{ id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns' }],
+  credentials: [{ name: 'github', upstream: 'https://api.github.com' }],
 };
 const all = entries({ tenant: 'kino', nav: TENANT_NAV, tenants: [{ tenant: 'kino' }, { tenant: 'acme' }], summary });
 
@@ -36,5 +37,6 @@ describe('search', () => {
     expect(search(all, 'pr').map((e) => e.label).slice(0, 2)).toEqual(['prod', 'preview-42']);
     expect(search(all, 'example')[0]).toMatchObject({ label: 'prod' });
     expect(search(all, 'shop')[0]).toMatchObject({ kind: 'domain', to: '/tenants/kino/domains/d-2' });
+    expect(search(all, 'git')[0]).toMatchObject({ kind: 'credential', to: '/tenants/kino/credentials/github' });
   });
 });
