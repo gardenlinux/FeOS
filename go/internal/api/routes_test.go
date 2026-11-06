@@ -39,7 +39,27 @@ var routeClasses = map[string]class{
 	"GET /api/v1/admin/service-tokens":                    classAdmin,
 	"DELETE /api/v1/admin/service-tokens/{id}":            classAdmin,
 	"GET /api/v1/tenant":                                  classTenant,
-	"POST /api/v1/service-certificates":                   classService,
+
+	// People (ADR 0031).
+	"GET /api/v1/admin/people":                      classAdmin,
+	"POST /api/v1/admin/people/{person}/disable":    classAdmin,
+	"POST /api/v1/admin/people/{person}/enable":     classAdmin,
+	"PUT /api/v1/admin/tenants/{tenant}/limits":     classAdmin,
+	"GET /api/v1/tenant/quota":                      classTenant,
+	"POST /api/v1/tenants":                          classPerson,
+	"GET /api/v1/invitations/{token}":               classPerson,
+	"POST /api/v1/invitations/{token}/accept":       classPerson,
+	"GET /api/v1/tenant/members":                    classTenant,
+	"PUT /api/v1/tenant/members/{person}/grants":    classTenant,
+	"DELETE /api/v1/tenant/members/{person}/grants": classTenant,
+	"POST /api/v1/tenant/leave":                     classTenant,
+	"GET /api/v1/tenant/invitations":                classTenant,
+	"POST /api/v1/tenant/invitations":               classTenant,
+	"DELETE /api/v1/tenant/invitations/{id}":        classTenant,
+	"GET /api/v1/tenant/tokens":                     classTenant,
+	"POST /api/v1/tenant/tokens":                    classTenant,
+	"DELETE /api/v1/tenant/tokens/{hash}":           classTenant,
+	"POST /api/v1/service-certificates":             classService,
 
 	"GET /api/v1/tools":                           classTenant,
 	"POST /api/v1/sandboxes":                      classTenant,
@@ -172,7 +192,8 @@ func concrete(pattern string, id string) (string, string) {
 	}
 	r := strings.NewReplacer("{id}", id, "{tenant}", testTenant, "{node}", "n1", "{hash}", "abcdef0123",
 		"{pid}", "p1", "{wid}", "w1", "{name}", "k1", "{port}", "3000", "{path...}", "etc/hosts", "{rest...}", "x/y",
-		"{env}", "stage", "{n}", "7", "{kind}", "service", "{tag}", "v1", "{key}", "c1")
+		"{env}", "stage", "{n}", "7", "{kind}", "service", "{tag}", "v1", "{key}", "c1",
+		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n")
 	return method, r.Replace(path)
 }
 
@@ -193,6 +214,8 @@ func classAnswer(t *testing.T, e *env, pattern string, c class) {
 		if got := w.Header().Get("WWW-Authenticate"); got != `Bearer realm="ferun"` {
 			t.Fatalf("%s: WWW-Authenticate %q", pattern, got)
 		}
+	case classPerson:
+		expect(t, w, http.StatusUnauthorized, errBody("sign-in required"))
 	case classSandbox:
 		expect(t, w, http.StatusUnauthorized, errBody("sandbox token required"))
 		if got := w.Header().Get("WWW-Authenticate"); got != "" {

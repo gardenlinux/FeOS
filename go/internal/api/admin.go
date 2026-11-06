@@ -101,6 +101,9 @@ type tenantInfo struct {
 	Tokens           []tenantTokenInfo `json:"tokens"`
 	// Deleting is set while a deletion is under way.
 	Deleting bool `json:"deleting,omitempty"`
+	// MadeBy is the person who made it (ADR 0031); "": an operator.
+	MadeBy string     `json:"madeBy,omitempty"`
+	Limits limitsView `json:"limits"`
 }
 
 // listTenants is GET /api/v1/admin/tenants, ordered by name.
@@ -114,7 +117,8 @@ func (s *server) listTenants(w http.ResponseWriter, r *http.Request) error {
 	}{Tenants: make([]tenantInfo, 0, len(ts))}
 	for _, t := range ts {
 		ti := tenantInfo{Name: t.ID, CreatedAt: rfc3339(t.CreatedAt), SandboxCount: t.SandboxCount,
-			EnvironmentCount: t.EnvironmentCount, Tokens: make([]tenantTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting()}
+			EnvironmentCount: t.EnvironmentCount, Tokens: make([]tenantTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting(),
+			MadeBy: idOrEmpty(t.MadeBy), Limits: limitsOf(t.Limits)}
 		for _, tk := range t.Tokens {
 			ti.Tokens = append(ti.Tokens, tenantTokenOf(tk))
 		}

@@ -87,7 +87,23 @@ var routeNeeds = map[string]string{
 	"DELETE /api/v1/jobs/{id}":                                  "write tenant",
 	"GET /api/v1/jobs/{id}/logs":                                "read tenant",
 	"POST /api/v1/jobs/{id}/cancel":                             "write tenant",
+
+	"GET /api/v1/tenant/quota":                      "member",
+	"GET /api/v1/tenant/members":                    "member",
+	"PUT /api/v1/tenant/members/{person}/grants":    "admin checked by the handler",
+	"DELETE /api/v1/tenant/members/{person}/grants": "admin checked by the handler",
+	"POST /api/v1/tenant/leave":                     "member",
+	"GET /api/v1/tenant/invitations":                "member",
+	"POST /api/v1/tenant/invitations":               "admin checked by the handler",
+	"DELETE /api/v1/tenant/invitations/{id}":        "admin checked by the handler",
+	"GET /api/v1/tenant/tokens":                     "admin tenant",
+	"POST /api/v1/tenant/tokens":                    "admin tenant",
+	"DELETE /api/v1/tenant/tokens/{hash}":           "admin tenant",
 }
+
+// roleSkips are the routes TestRoles does not call: their effect would
+// change the principals it goes on with (TestMembers covers them).
+var roleSkips = map[string]bool{"POST /api/v1/tenant/leave": true}
 
 // Every tenant-class route states its need in the table, as this test
 // does; no other class has one.
@@ -285,7 +301,7 @@ func TestRoles(t *testing.T) {
 	var bad []string
 	for _, p := range w.principals(t) {
 		for pattern, want := range routeNeeds {
-			if strings.HasSuffix(want, "checked by the handler") {
+			if strings.HasSuffix(want, "checked by the handler") || roleSkips[pattern] {
 				continue
 			}
 			method, path := concrete(pattern, podid.Mint().String())

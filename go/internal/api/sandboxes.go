@@ -18,6 +18,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -190,7 +191,8 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	}
 	var row store.Sandbox
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
-		t, err := tx.LockTenant(r.Context(), tenant, store.ForShare)
+		t, err := quota.LockAndCheck(r.Context(), tx, tenant, quota.Use{Sandboxes: 1, VCPUs: int64(vcpus),
+			MemoryMiB: int64(memoryMiB)})
 		if isNoRow(err) {
 			return apierr.New(http.StatusUnauthorized, "unknown tenant token")
 		}

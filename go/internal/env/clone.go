@@ -20,6 +20,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -341,7 +342,15 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	}
 	var row store.Environment
 	err = s.inTxRetry(ctx, func(tx *store.Store) error {
-		if err := lockTenant(ctx, tx, tenant); err != nil {
+		t, err := lockQuota(ctx, tx, tenant)
+		if err != nil {
+			return err
+		}
+		var next *spec.Spec
+		if raw != nil {
+			next = &norm
+		}
+		if err := checkQuota(ctx, tx, t, quota.Use{Environments: 1}, id, nil, next); err != nil {
 			return err
 		}
 		e, _, err := insertEnv(ctx, tx, tenant, id, req.Name, req.Labels, false)

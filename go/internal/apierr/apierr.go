@@ -30,6 +30,15 @@ type Error struct {
 	// Role and Scope are a role_required answer's (ADR 0031): the role
 	// the principal lacks, and on what ("tenant" or "environment").
 	Role, Scope string
+	// Quota is a quota_exceeded answer's (ADR 0031): the resource, its
+	// limit and the use before the request.
+	Quota *Quota
+}
+
+// Quota is what a quota_exceeded answer names.
+type Quota struct {
+	Resource   string
+	Limit, Use int64
 }
 
 func (e *Error) Error() string { return e.Msg }
@@ -80,11 +89,27 @@ func RoleRequired(role, scope string) *Error {
 		Msg: fmt.Sprintf("this needs the role %s on the %s", role, scope)}
 }
 
+// CodeQuotaExceeded is the code of a 422 for a create that would pass
+// one of its tenant's limits (ADR 0031, "Quotas per tenant").
+const CodeQuotaExceeded = "quota_exceeded"
+
+// QuotaExceeded is 422 {"code": "quota_exceeded", "resource", "limit",
+// "use"}: asking for ask more of resource passes the limit, use being in
+// use already.
+func QuotaExceeded(resource string, limit, use, ask int64) *Error {
+	return &Error{Status: http.StatusUnprocessableEntity, Code: CodeQuotaExceeded,
+		Quota: &Quota{Resource: resource, Limit: limit, Use: use},
+		Msg:   fmt.Sprintf("the tenant's limit of %s is %d, %d are in use and this asks for %d more", resource, limit, use, ask)}
+}
+
 type body struct {
-	Error string `json:"error"`
-	Code  string `json:"code,omitempty"`
-	Role  string `json:"role,omitempty"`
-	Scope string `json:"scope,omitempty"`
+	Error    string `json:"error"`
+	Code     string `json:"code,omitempty"`
+	Role     string `json:"role,omitempty"`
+	Scope    string `json:"scope,omitempty"`
+	Resource string `json:"resource,omitempty"`
+	Limit    *int64 `json:"limit,omitempty"`
+	Use      *int64 `json:"use,omitempty"`
 }
 
 // Write answers err: an *Error with its status and body, anything else with
@@ -99,7 +124,11 @@ func Write(w http.ResponseWriter, err error) {
 			w.Header().Add(k, v)
 		}
 	}
-	WriteJSON(w, e.Status, body{Error: e.Msg, Code: e.Code, Role: e.Role, Scope: e.Scope})
+	b := body{Error: e.Msg, Code: e.Code, Role: e.Role, Scope: e.Scope}
+	if q := e.Quota; q != nil {
+		b.Resource, b.Limit, b.Use = q.Resource, &q.Limit, &q.Use
+	}
+	WriteJSON(w, e.Status, b)
 }
 
 // WriteJSON answers v as JSON with status.

@@ -7,6 +7,8 @@
 // class of every route, stated at the route and nowhere else:
 //
 //	admin     /api/v1/admin/…            an operator's UI session, or Basic (--admin-users)
+//	person    /api/v1/tenants, /api/v1/invitations/{token}[/accept]
+//	                                     a signed-in person's session, no tenant (ADR 0031)
 //	tenant    /api/v1/sandboxes[/{id}]   a tenant's token, or a person's session that
 //	                                     names its tenant (FeRun-Tenant), with
 //	                                     the role and scope each route states
@@ -16,6 +18,8 @@
 //	          /api/v1/domains[/…]        the domains (ADR 0021)
 //	          /api/v1/jobs[/…]           the tenants' jobs (ADR 0018)
 //	          /api/v1/tenant             the token's tenant (the sink asks, ADR 0026)
+//	          /api/v1/tenant/…           leaving it, its members and their grants,
+//	                                     invitations, tokens (ADR 0031)
 //	sandbox   /api/v1/sandboxes/{id}/…   the sandbox's own token: everything that
 //	                                     acts inside the sandbox
 //	mcp       /mcp                       the MCP door's own class (internal/mcpsrv)
@@ -179,6 +183,22 @@ type Config struct {
 	DefaultVCPUs, DefaultMemoryMiB int
 	// JoinTokenTTL is a join token's lifetime when the request names none.
 	JoinTokenTTL time.Duration
+
+	// TenantCreation says who makes tenants with POST /api/v1/tenants
+	// (--tenant-creation, ADR 0031): TenantCreationPeople (also "") or
+	// TenantCreationOperators.
+	TenantCreation string
+	// TenantsPerPerson bounds the tenants one person makes there that are
+	// not being deleted (--tenants-per-person); 0: no bound. Operators are
+	// not bound.
+	TenantsPerPerson int
+	// ReservedTenantNames are names no tenant made there may have, beside
+	// operator, admin, api and www: the zone owners' and the platform's
+	// host labels.
+	ReservedTenantNames []string
+	// TenantDefaults are the limits of the tenants people make
+	// (--tenant-default-*, ADR 0031); nil: none.
+	TenantDefaults store.TenantLimits
 
 	// The fleet's timings, which the nodes view shows (its "defaults"):
 	// the interval nodes report telemetry at (zero:
@@ -346,8 +366,11 @@ func Loops(deps Deps) []leader.Loop {
 type class string
 
 const (
-	classPublic  class = "public"
-	classAdmin   class = "admin"
+	classPublic class = "public"
+	classAdmin  class = "admin"
+	// classPerson is a signed-in person's session without a tenant (ADR
+	// 0031): making a tenant, taking an invitation.
+	classPerson  class = "person"
 	classTenant  class = "tenant"
 	classSandbox class = "sandbox"
 	classMCP     class = "mcp"
@@ -393,6 +416,7 @@ func (s *server) routes() []route {
 		add(classSandbox, pattern, s.sandbox(serve(h)))
 	}
 	public := func(pattern string, h http.Handler) { add(classPublic, pattern, h) }
+	person := func(pattern string, h apiHandler) { add(classPerson, pattern, s.person(h)) }
 	service := func(pattern string, h apiHandler) { add(classService, pattern, s.service(h)) }
 
 	// Operators: tenants, the node fleet, join tokens, the ingress's
@@ -498,6 +522,11 @@ func (s *server) routes() []route {
 	// The sink (ADR 0026): a token's tenant, its instances' certificates
 	// and their service tokens.
 	s.sinkRoutes(operator, service, tenant)
+
+	// People (ADR 0031): the tenants they make, the members, their
+	// grants, invitations and tokens; the operators' switch of a person.
+	s.memberRoutes(operator, person, tenant)
+	s.quotaRoutes(operator, tenant)
 
 	// The doors with classes of their own: their answers are plain text
 	// (forward) or the MCP door's, not this API's JSON.

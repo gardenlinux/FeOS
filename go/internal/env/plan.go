@@ -24,6 +24,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -436,6 +437,11 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 	if secrets == nil && vc.bindingsOn && !spec.HasErrors(fs) {
 		fs = append(fs, s.bindingValueFindings(ctx, env.ID, norm)...)
 	}
+	qfs, err := s.quotaFindings(ctx, tenant, env.ID, p.currentSpec, &norm)
+	if err != nil {
+		return planned{}, err
+	}
+	fs = append(fs, qfs...)
 	baseSpec := p.currentSpec
 	if p.base != p.current {
 		baseSpec = nil
@@ -555,7 +561,8 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 	}
 	var ans ApplyAnswer
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		if err := lockTenant(ctx, tx, tenant); err != nil {
+		t, err := lockQuota(ctx, tx, tenant)
+		if err != nil {
 			return err
 		}
 		e, err := tx.LockEnvironment(ctx, env.ID, store.ForUpdate)
@@ -577,6 +584,10 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		// The plan read the secrets before the lock: a DeleteSecret, which
 		// takes the same lock, may have deleted a version it pins since.
 		if err := checkPins(ctx, tx, e.ID, p.norm.Secrets); err != nil {
+			return err
+		}
+		// The plan's quota finding counted before the lock too.
+		if err := checkQuota(ctx, tx, t, quota.Use{}, e.ID, p.currentSpec, &p.norm); err != nil {
 			return err
 		}
 		if e.Deployment > 0 && spec.EqualNormalised(p.norm, *p.currentSpec) {
@@ -738,4 +749,23 @@ func withObject(current []byte, kind, name string, object json.RawMessage) ([]by
 		return nil, false, err
 	}
 	return b, had, nil
+}
+
+// quotaFindings are a plan's findings of the tenant's limits (ADR 0031):
+// an error when the deployment of next in place of the environment's
+// current one would bring its vCPUs or memory past them.
+func (s *Service) quotaFindings(ctx context.Context, tenant string, env uuid.UUID, current, next *spec.Spec) (
+	[]spec.Finding, error) {
+	t, err := s.st.GetTenant(ctx, tenant)
+	if errors.Is(err, store.ErrNoRow) || (err == nil && t.Limits.VCPUs == nil && t.Limits.MemoryMiB == nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("tenant %s: %w", tenant, err)
+	}
+	others, err := quota.Of(ctx, s.st, tenant, env)
+	if err != nil {
+		return nil, err
+	}
+	return quota.SpecFindings(t.Limits, others, current, next), nil
 }
