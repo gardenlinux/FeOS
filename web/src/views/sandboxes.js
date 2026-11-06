@@ -139,9 +139,11 @@ export function activeTab(tab, can) {
 }
 
 // createRequest turns the create form's fields into createSandbox's
-// arguments: [image, vcpus, memoryMib, {attachable, imageCredentials}].
-// An empty image or size is the platform's default (0); credentials take
-// a username and a password, or neither. It throws on a bad value.
+// arguments: [image, vcpus, memoryMib, {attachable, imageCredentials,
+// credentials?}]; credentials are the tenant's its pod gets (ADR 0033).
+// An empty image or size is the platform's default (0); the registry
+// login takes a username and a password, or neither. It throws on a bad
+// value.
 export function createRequest(form) {
   const num = (label, s) => {
     const v = String(s || '').trim();
@@ -153,7 +155,9 @@ export function createRequest(form) {
   const vcpus = num('vCPUs', form.vcpus);
   const memoryMib = num('memory', form.memoryMib);
   const creds = credentialsOf(form.username, form.password, true);
-  return [image, vcpus, memoryMib, { attachable: !!form.attachable, imageCredentials: creds }];
+  const opts = { attachable: !!form.attachable, imageCredentials: creds };
+  if (form.credentials && form.credentials.length) opts.credentials = [...form.credentials].sort();
+  return [image, vcpus, memoryMib, opts];
 }
 
 // credentialsOf is {username, password}, null when both are empty

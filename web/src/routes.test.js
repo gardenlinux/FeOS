@@ -23,6 +23,11 @@ describe('parsePath', () => {
     expect(parsePath('/invite/abc_DEF-1')).toEqual({ view: 'invite', token: 'abc_DEF-1' });
     expect(parsePath('/tenants/acme/members')).toEqual({ view: 'members', tenant: 'acme' });
     expect(parsePath('/tenants/acme/tokens')).toEqual({ view: 'tokens', tenant: 'acme' });
+    expect(parsePath('/tenants/acme/credentials')).toEqual({ view: 'credentials', tenant: 'acme', sel: '', tab: '' });
+    expect(parsePath('/tenants/acme/credentials/github')).toEqual({ view: 'credentials', tenant: 'acme', sel: 'github', tab: '' });
+    expect(parsePath('/tenants/acme/credentials/github/edit'))
+      .toEqual({ view: 'credentials', tenant: 'acme', sel: 'github', tab: 'edit' });
+    expect(parsePath('/tenants/acme/new-credential')).toEqual({ view: 'newCredential', tenant: 'acme' });
     expect(parsePath('/no/such/page')).toEqual({ view: 'tenants' });
   });
 

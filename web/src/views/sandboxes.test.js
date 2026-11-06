@@ -109,6 +109,12 @@ describe('createRequest', () => {
       .toEqual(['ghcr.io/x/y:1', 2, 4096, { attachable: true, imageCredentials: { username: 'bot', password: 's3cret ' } }]);
   });
 
+  it('names the tenant\'s credentials its pod gets, when any', () => {
+    expect(createRequest({ ...empty, credentials: ['openai', 'github'] }))
+      .toEqual(['', 0, 0, { attachable: false, imageCredentials: null, credentials: ['github', 'openai'] }]);
+    expect(createRequest({ ...empty, credentials: [] })[3]).toEqual({ attachable: false, imageCredentials: null });
+  });
+
   it('refuses a bad size and half a login', () => {
     expect(() => createRequest({ ...empty, vcpus: '1.5' })).toThrow('vCPUs must be a whole number');
     expect(() => createRequest({ ...empty, memoryMib: '0' })).toThrow('memory must be');

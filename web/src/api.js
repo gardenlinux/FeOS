@@ -314,11 +314,13 @@ export const api = {
   // attachable lets an environment's attached service run in it;
   // imageCredentials ({username, password}) pull a private image (ADR
   // 0025), sealed, never answered.
-  createSandbox: (image, vcpus = 0, memoryMib = 0, { attachable = false, imageCredentials = null } = {}) =>
+  // credentials name the tenant's credentials its pod gets (ADR 0033).
+  createSandbox: (image, vcpus = 0, memoryMib = 0, { attachable = false, imageCredentials = null, credentials = [] } = {}) =>
     tenantCall('POST', '/sandboxes', {
       image, vcpus, memoryMib,
       ...(attachable ? { attachable: true } : {}),
       ...(imageCredentials ? { imageCredentials } : {}),
+      ...(credentials && credentials.length ? { credentials } : {}),
     }),
   putImageCredentials: (sandboxId, creds) => tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
   deleteImageCredentials: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
@@ -500,6 +502,22 @@ export const api = {
   mintTenantToken: (name, { label = '', role = '', environment = '' } = {}) =>
     adminCall('POST', `/tenants/${enc(name)}/tokens`,
       { label, ...(role ? { role } : {}), ...(environment ? { environment } : {}) }),
+
+  // credentials (ADR 0033): the tenant's HTTP bindings stated once,
+  // versioned. A read answers every secret field {"set": true}; a put
+  // sends the whole definition, a secret field {"set": true} keeping the
+  // latest version's value (201 a new version, 200 unchanged); a delete
+  // of one in use is 409 credential_in_use; a check is the preflight of
+  // the stored latest version.
+  listCredentials: () => tenantCall('GET', '/credentials'),
+  getCredential: (name) => tenantCall('GET', `/credentials/${enc(name)}`),
+  putCredential: (name, binding) => tenantCall('PUT', `/credentials/${enc(name)}`, binding),
+  deleteCredential: (name) => tenantCall('DELETE', `/credentials/${enc(name)}`),
+  checkCredential: (name, probe) => tenantCall('POST', `/credentials/${enc(name)}/check`, probe ? { probe } : {}),
+  // The credentials a sandbox names, the whole list on a put.
+  getSandboxCredentials: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/credentials`),
+  putSandboxCredentials: (sandboxId, names) =>
+    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/credentials`, { credentials: names }),
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

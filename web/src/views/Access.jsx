@@ -12,8 +12,9 @@ import { credentialsOf } from './sandboxes.js';
 // and SSH servers bound to it, each with what the audit log says it was
 // used for, and the newest refusals. Read with the session; the sets are
 // changed with the sandbox's token, by the client that owns them, not
-// here, and the HTTP bindings (ADR 0028) are read with that token only.
-// No credential reaches this view: fingerprints and public keys only.
+// here. The HTTP APIs it gets are the tenant's credentials it names (ADR
+// 0033, SandboxCredentials); its own HTTP set is read with its token
+// only. No credential reaches this view: fingerprints and public keys only.
 // Where ferund runs without bindings, kube and ssh are null.
 
 export function Access({ sandboxId }) {
@@ -111,12 +112,6 @@ export function Access({ sandboxId }) {
           </tbody>
         </table></div>
       )}
-
-      <h3 className="sect"><Icon name="globe" size={13} /> HTTP APIs</h3>
-      <p className="muted small">
-        HTTP bindings are set and read with the sandbox's own token (<code className="mono">PUT /api/v1/sandboxes/&lt;id&gt;/http</code>),
-        by the agent or the client that owns the sandbox; they don't show here yet.
-      </p>
 
       <h3 className="sect"><Icon name="x" size={13} /> Refusals</h3>
       {denies.length === 0 && <p className="empty">Nothing refused.</p>}

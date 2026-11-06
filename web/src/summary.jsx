@@ -19,7 +19,7 @@ const INCIDENT_ENVS = 8;
 
 const empty = {
   tenant: '', sandboxes: null, environments: null, incidents: {}, domains: null, invitations: null, quota: null,
-  jobs: null, at: 0,
+  jobs: null, credentials: null, at: 0,
 };
 
 const SummaryContext = createContext({ ...empty, items: [], counts: {}, refresh: () => {} });
@@ -45,20 +45,21 @@ export function SummaryProvider({ tenant, can, children }) {
       setData(empty);
       return;
     }
-    const [sandboxes, environments, domains, invitations, quota, jobs] = await Promise.all([
+    const [sandboxes, environments, domains, invitations, quota, jobs, credentials] = await Promise.all([
       can.readTenant ? optional(api.listSandboxes, (r) => r.sandboxes || []) : null,
       can.environments ? optional(api.listEnvironments, (r) => r.environments || []) : null,
       can.members ? optional(() => api.listDomains(), (r) => r.domains || []) : null,
       can.members ? optional(api.listInvitations, (r) => r.invitations || []) : null,
       can.members ? optional(api.getQuota, (r) => r) : null,
       can.readTenant ? optional(() => api.listJobs(), (r) => r.jobs || []) : null,
+      can.readTenant ? optional(api.listCredentials, (r) => r.credentials || []) : null,
     ]);
     const troubled = (environments || []).filter((e) => Number(e.openIncidents) > 0).slice(0, INCIDENT_ENVS);
     const lists = await Promise.all(troubled.map((e) => optional(
       () => api.listIncidents(e.name, { open: true }), (r) => (r.incidents || []).filter((i) => !i.closedAt))));
     const incidents = {};
     troubled.forEach((e, i) => { if (lists[i]) incidents[e.name] = lists[i]; });
-    setData({ tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, at: Date.now() });
+    setData({ tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, credentials, at: Date.now() });
   }, [tenant, can.readTenant, can.environments, can.members]);
 
   usePoll(refresh, SUMMARY_MS);
@@ -73,6 +74,8 @@ export function SummaryProvider({ tenant, can, children }) {
       domains: d.domains ? d.domains.length : null,
       jobs: running,
     });
+    // The credentials (ADR 0033) by their count.
+    if (d.credentials) counts.credentials = { n: d.credentials.length };
     return { ...d, items, counts, refresh };
   }, [data, tenant, refresh]);
 

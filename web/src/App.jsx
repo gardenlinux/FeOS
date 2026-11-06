@@ -24,6 +24,7 @@ import { JoinTokens } from './views/JoinTokens.jsx';
 import { Instances } from './views/Instances.jsx';
 import { Jobs } from './views/Jobs.jsx';
 import { Domains } from './views/Domains.jsx';
+import { Credentials } from './views/Credentials.jsx';
 import { TenantSettings, Usage } from './views/TenantPages.jsx';
 import { Ingresses, PlatformPeople } from './views/Platform.jsx';
 import { Palette, usePaletteKey } from './views/Palette.jsx';
@@ -167,6 +168,9 @@ export default function App() {
       {!needsGate && route.view === 'tools' && <Tools key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'jobs' && <Jobs key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
       {!needsGate && route.view === 'domains' && <Domains key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
+      {!needsGate && (route.view === 'credentials' || route.view === 'newCredential') && (
+        <Credentials key={route.tenant} tenant={route.tenant} sel={route.view === 'newCredential' ? '' : route.sel}
+          isNew={route.view === 'newCredential'} edit={route.tab === 'edit'} navigate={navigate} />)}
       {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
       {!needsGate && route.view === 'usage' && <Usage key={route.tenant} tenant={route.tenant} navigate={navigate} />}
@@ -427,7 +431,7 @@ function NavItem({ item, active, count, to, navigate }) {
 // CRUMB_NAMES name the tenant's pages in the trail.
 const CRUMB_NAMES = {
   sandboxes: 'sandboxes', tools: 'tools', jobs: 'jobs', domains: 'domains', members: 'people', tokens: 'tokens',
-  usage: 'usage', settings: 'settings',
+  usage: 'usage', settings: 'settings', credentials: 'credentials',
 };
 
 function Topbar({ route, navigate }) {
@@ -450,6 +454,8 @@ function Topbar({ route, navigate }) {
         {route.view === 'sandboxes' && route.sel && route.sel !== 'new' && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
         {route.view === 'jobs' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
+        {route.view === 'credentials' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
+        {route.view === 'newCredential' && <>{sep}{crumb('credentials', `/tenants/${enc(t)}/credentials`)}{sep}<span className="crumb">new</span></>}
         {route.view === 'invite' && <span className="crumb">invitation</span>}
         {(route.view === 'environments' || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
