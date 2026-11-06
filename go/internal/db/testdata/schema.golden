@@ -762,6 +762,12 @@ TABLE pod_tombstones
   CONSTRAINT PRIMARY KEY (pod_id, node, incarnation)
   CREATE INDEX pod_tombstones_node ON public.pod_tombstones USING btree (node, not_before)
   CREATE UNIQUE INDEX pod_tombstones_pkey ON public.pod_tombstones USING btree (pod_id, node, incarnation)
+TABLE sandbox_credentials
+  COLUMN sandbox_id text COLLATE "C" NOT NULL
+  COLUMN name text NOT NULL
+  CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (sandbox_id, name)
+  CREATE UNIQUE INDEX sandbox_credentials_pkey ON public.sandbox_credentials USING btree (sandbox_id, name)
 TABLE sandbox_holds
   COLUMN sandbox_id text COLLATE "C" NOT NULL
   COLUMN holder text NOT NULL
@@ -899,6 +905,30 @@ TABLE ssh_bindings
   CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (sandbox_id, name)
   CREATE UNIQUE INDEX ssh_bindings_pkey ON public.ssh_bindings USING btree (sandbox_id, name)
+TABLE tenant_credentials
+  COLUMN tenant text NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN version integer NOT NULL
+  COLUMN upstream text NOT NULL
+  COLUMN mode text NOT NULL
+  COLUMN ca_pem text NOT NULL DEFAULT ''::text
+  COLUMN path_prefixes text[] NOT NULL DEFAULT '{}'::text[]
+  COLUMN forwarded_host boolean NOT NULL DEFAULT false
+  COLUMN rate_per_second integer NOT NULL DEFAULT 0
+  COLUMN rate_burst integer NOT NULL DEFAULT 0
+  COLUMN credential_kind text NOT NULL
+  COLUMN sealed bytea NOT NULL
+  COLUMN created_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((credential_kind = ANY (ARRAY['headers'::text, 'basic'::text, 'oauth2'::text, 'clientCertificate'::text])))
+  CONSTRAINT CHECK ((mode = ANY (ARRAY['name'::text, 'intercept'::text])))
+  CONSTRAINT CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
+  CONSTRAINT CHECK ((rate_burst >= 0))
+  CONSTRAINT CHECK ((rate_per_second >= 0))
+  CONSTRAINT CHECK ((version >= 1))
+  CONSTRAINT FOREIGN KEY (tenant) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (tenant, name, version)
+  CREATE UNIQUE INDEX tenant_credentials_pkey ON public.tenant_credentials USING btree (tenant, name, version)
 TABLE tenant_tokens
   COLUMN hash text NOT NULL
   COLUMN tenant_id text NOT NULL

@@ -30,6 +30,10 @@ type fakeHTTPBindings struct {
 	last *fleetv1.HttpBinding
 }
 
+func (f *fakeHTTPBindings) OpenCredential(context.Context, string, string, int, string) (*fleetv1.HttpBinding, error) {
+	return nil, errors.New("no credentials here")
+}
+
 func (f *fakeHTTPBindings) Enabled() bool { return true }
 func (f *fakeHTTPBindings) CheckDestination(_ context.Context, host string) error {
 	if strings.HasSuffix(host, ".internal.example") {

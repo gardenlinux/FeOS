@@ -451,6 +451,29 @@ func (b *fakeBindings) Access(w http.ResponseWriter, _ *http.Request) {
 	b.answer(w, "Access")
 }
 
+func (b *fakeBindings) ListCredentials(w http.ResponseWriter, _ *http.Request) {
+	b.answer(w, "ListCredentials")
+}
+func (b *fakeBindings) GetCredential(w http.ResponseWriter, _ *http.Request) {
+	b.answer(w, "GetCredential")
+}
+func (b *fakeBindings) PutCredential(w http.ResponseWriter, _ *http.Request) {
+	b.answer(w, "PutCredential")
+}
+func (b *fakeBindings) DeleteCredential(w http.ResponseWriter, _ *http.Request) {
+	b.answer(w, "DeleteCredential")
+}
+func (b *fakeBindings) CheckCredential(w http.ResponseWriter, _ *http.Request) {
+	b.answer(w, "CheckCredential")
+}
+func (b *fakeBindings) SandboxCredentialNames(context.Context, podid.ID) ([]string, error) {
+	return []string{}, nil
+}
+func (b *fakeBindings) CheckSandboxCredentials(context.Context, string, []string) error { return nil }
+func (b *fakeBindings) SetSandboxCredentials(context.Context, string, podid.ID, []string) error {
+	return nil
+}
+
 // fakeWatches answers each handler's name.
 type fakeWatches struct{}
 

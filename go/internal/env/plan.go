@@ -59,6 +59,8 @@ type validateCtx struct {
 	// asked before it is validated.
 	bindingsOn   bool
 	destinations map[string]error
+	// credentials are the tenant's credentials (ADR 0033), by name.
+	credentials map[string]spec.CredentialInfo
 }
 
 type imageAnswer struct {
@@ -67,6 +69,12 @@ type imageAnswer struct {
 }
 
 func (v *validateCtx) Mode() spec.Mode { return v.mode }
+
+// TenantCredential is spec.CredentialContext.
+func (v *validateCtx) TenantCredential(name string) (spec.CredentialInfo, bool) {
+	c, ok := v.credentials[name]
+	return c, ok
+}
 
 func (v *validateCtx) Sandbox(id string) (spec.SandboxInfo, bool) {
 	sb, ok := v.sandboxes[id]
@@ -268,6 +276,13 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		}
 	}
 	pins := spec.Pins{Images: map[string]string{}, Secrets: map[string]int{}, Plans: map[string]string{}}
+	if vc.bindingsOn && namesCredentials(sp) {
+		creds, err := s.tenantCredentials(ctx, s.st, tenant)
+		if err != nil {
+			return nil, pins, err
+		}
+		vc.credentials, pins.Credentials = creds, creds
+	}
 
 	vc.images = s.resolveImages(ctx, env, imagesOf(sp))
 	for img, a := range vc.images {
@@ -782,4 +797,35 @@ func (s *Service) quotaFindings(ctx context.Context, tenant string, env uuid.UUI
 		return nil, err
 	}
 	return quota.SpecFindings(t.Limits, others, current, next), nil
+}
+
+// namesCredentials reports whether a spec's bindings name a credential of
+// the tenant.
+func namesCredentials(sp spec.Spec) bool {
+	for _, b := range sp.Bindings {
+		if b.TenantCredential != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// tenantCredentials are the tenant's credentials as a spec's bindings
+// see them (ADR 0033).
+func (s *Service) tenantCredentials(ctx context.Context, st *store.Store, tenant string) (
+	map[string]spec.CredentialInfo, error) {
+	versions, err := st.TenantCredentialVersions(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("credentials: %w", err)
+	}
+	out := make(map[string]spec.CredentialInfo, len(versions))
+	for name, vs := range versions {
+		info := spec.CredentialInfo{Versions: map[int]spec.CredentialTemplate{}}
+		for _, v := range vs {
+			info.Versions[v.Version] = spec.CredentialTemplate{Upstream: v.Upstream, Mode: v.Mode}
+			info.Latest = max(info.Latest, v.Version)
+		}
+		out[name] = info
+	}
+	return out, nil
 }

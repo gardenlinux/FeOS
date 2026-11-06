@@ -444,6 +444,7 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 	if i.Bindings != nil {
 		// An environment's pods get the bindings their objects name.
 		i.Bindings.SetEnvSource(s)
+		i.Bindings.SetCredentialUsers(s)
 	}
 	i.Engine.SetSecretResolver(s.RowSecret)
 	i.Engine.SetPrepareHook(s.PrepareHook)

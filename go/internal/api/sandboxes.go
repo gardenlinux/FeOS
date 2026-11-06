@@ -83,6 +83,9 @@ type createSandboxRequest struct {
 	// ImageCredentials are the login for the image's registry (ADR 0025),
 	// sealed and never returned; nil: anonymous.
 	ImageCredentials *model.RegistryCredentials `json:"imageCredentials"`
+	// Credentials are the tenant's credentials its pod gets, at their
+	// latest versions (ADR 0033).
+	Credentials []string `json:"credentials"`
 }
 
 // sandboxView is a sandbox as the sandbox routes show it: its status and
@@ -180,6 +183,15 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err := s.checkCredentials(req.ImageCredentials); err != nil {
 		return err
 	}
+	if len(req.Credentials) > 0 {
+		b := s.deps.Bindings
+		if b == nil || !b.Enabled() {
+			return apierr.New(http.StatusUnprocessableEntity, "credentials: HTTP bindings are not enabled on this platform")
+		}
+		if err := b.CheckSandboxCredentials(r.Context(), tenantOf(r), req.Credentials); err != nil {
+			return err
+		}
+	}
 	image := req.Image
 	if image == "" {
 		image = s.cfg.DefaultImage
@@ -222,7 +234,56 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return passOr(err, "create")
 	}
+	if len(req.Credentials) > 0 {
+		if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenant, row.ID, req.Credentials); err != nil {
+			return passOr(err, "create: its credentials")
+		}
+	}
 	return writeJSON(w, http.StatusCreated, createSandboxResponse{Status: viewOf(row), Token: token, Created: true})
+}
+
+// sandboxCredentials is the answer of the credentials a sandbox names.
+type sandboxCredentials struct {
+	Credentials []string `json:"credentials"`
+}
+
+// getSandboxCredentials is GET /api/v1/sandboxes/{id}/credentials: the
+// tenant's credentials the sandbox names (ADR 0033).
+func (s *server) getSandboxCredentials(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	names, err := s.deps.Bindings.SandboxCredentialNames(r.Context(), sb.ID)
+	if err != nil {
+		return passOr(err, "credentials")
+	}
+	return writeJSON(w, http.StatusOK, sandboxCredentials{Credentials: names})
+}
+
+// putSandboxCredentials is PUT /api/v1/sandboxes/{id}/credentials
+// {credentials}: the whole list of the tenant's credentials its pod gets;
+// a running pod gets them at once.
+func (s *server) putSandboxCredentials(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	var req sandboxCredentials
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Credentials == nil {
+		req.Credentials = []string{}
+	}
+	if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenantOf(r), sb.ID, req.Credentials); err != nil {
+		return passOr(err, "credentials")
+	}
+	names, err := s.deps.Bindings.SandboxCredentialNames(r.Context(), sb.ID)
+	if err != nil {
+		return passOr(err, "credentials")
+	}
+	return writeJSON(w, http.StatusOK, sandboxCredentials{Credentials: names})
 }
 
 // listSandboxes is GET /api/v1/sandboxes: the tenant's, oldest first,

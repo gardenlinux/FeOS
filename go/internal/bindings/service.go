@@ -72,9 +72,10 @@ type Service struct {
 	afterApply func()
 
 	// The hooks set after New (SetEnvSource, SetPusher).
-	hooks  sync.Mutex
-	envSrc EnvSource
-	pusher Pusher
+	hooks     sync.Mutex
+	envSrc    EnvSource
+	pusher    Pusher
+	credUsers CredentialUsers
 
 	// preflights are the HTTP preflights and environment binding checks
 	// in flight on this instance, by tenant (maxTenantPreflights).
@@ -152,6 +153,15 @@ func (s *Service) PodBindings(ctx context.Context, podID podid.ID) (*fleetv1.Pod
 	if err != nil {
 		return nil, "", err
 	}
+	creds := make([]httpBinding, 0, len(snap.creds))
+	for _, c := range snap.creds {
+		b, err := s.openCredential(c)
+		if err != nil {
+			return nil, "", err
+		}
+		creds = append(creds, b)
+	}
+	http = s.mergeCreds(podID, http, creds)
 	if len(kube) == 0 && len(ssh) == 0 && len(http) == 0 {
 		return nil, "", nil
 	}
@@ -169,7 +179,7 @@ func (s *Service) PodBindings(ctx context.Context, podID podid.ID) (*fleetv1.Pod
 	if out.InterceptCas, err = s.openCAs(podID, cas); err != nil {
 		return nil, "", err
 	}
-	return out, podVersionHTTP(podVersion(snap.kubeVersion, snap.sshVersion, ssh), snap.httpVersion, cas), nil
+	return out, podVersionHTTP(podVersion(snap.kubeVersion, snap.sshVersion, ssh), snap.httpVersionAll(), cas), nil
 }
 
 // KubePorts returns the loopback ports of a sandbox's Kubernetes bindings,
@@ -215,7 +225,14 @@ type podSnapshot struct {
 	ssh                                  []store.SSHBinding
 	http                                 []store.HTTPBinding
 	cas                                  []store.InterceptCA
+	// creds are the latest versions of the tenant's credentials the
+	// sandbox names (ADR 0033).
+	creds []store.TenantCredential
 }
+
+// httpVersionAll is the version of the sandbox's HTTP bindings: its own
+// set's and its credentials'.
+func (p podSnapshot) httpVersionAll() string { return credsVersion(p.httpVersion, p.creds) }
 
 // snapshot reads the sets and CAs of a sandbox in one REPEATABLE READ,
 // read-only transaction; errNoSandbox when the sandbox does not exist.
@@ -240,6 +257,9 @@ func (s *Service) snapshot(ctx context.Context, id podid.ID) (podSnapshot, error
 	}
 	if err == nil {
 		snap.httpVersion, snap.http, err = st.HTTPBindings(ctx, id)
+	}
+	if err == nil {
+		snap.creds, err = st.SandboxTenantCredentials(ctx, id)
 	}
 	if err == nil {
 		snap.cas, err = st.InterceptCAs(ctx, id)

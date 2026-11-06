@@ -4,6 +4,7 @@
 package spec
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -108,6 +109,9 @@ func (v *validator) destination(path, host string) {
 // upstream when it is none).
 func (v *validator) binding(name string, b Binding) (httpcheck.Upstream, string) {
 	p := "bindings." + name
+	if b.TenantCredential != nil {
+		return v.tenantCredential(p, b)
+	}
 	up, err := httpcheck.ParseUpstream("upstream", b.Upstream)
 	if err != nil {
 		v.fail(p+".upstream", err)
@@ -130,6 +134,62 @@ func (v *validator) binding(name string, b Binding) (httpcheck.Upstream, string)
 	}
 	v.credential(p+".credential", b.Credential)
 	return up, mode
+}
+
+// tenantCredential checks a binding that names a credential of the
+// tenant (ADR 0033): nothing of its own beyond the upstream and mode a
+// normalised spec carries, which must be the version's; a credential the
+// tenant has, at a version it has. It returns the version's upstream and
+// mode.
+func (v *validator) tenantCredential(p string, b Binding) (httpcheck.Upstream, string) {
+	ref := b.TenantCredential
+	cp := p + ".tenantCredential"
+	own := map[string]bool{"credential": b.Credential != nil, "caPem": b.CaPem != "",
+		"pathPrefixes": len(b.PathPrefixes) > 0, "forwardedHost": b.ForwardedHost, "rateLimit": b.RateLimit != nil}
+	for _, f := range slices.Sorted(maps.Keys(own)) {
+		if own[f] {
+			v.errorf(p+"."+f, "remove it, or state the binding without tenantCredential",
+				"a binding that names a tenant credential takes its %s from the credential", f)
+		}
+	}
+	if !IsName(ref.Name) {
+		v.errorf(cp+".name", "name a credential of the tenant", "%q is no credential's name", ref.Name)
+		return httpcheck.Upstream{}, ""
+	}
+	cc, ok := v.vc.(CredentialContext)
+	if !ok {
+		v.errorf(cp, "state the binding's upstream and credential", "the tenant's credentials are not available here")
+		return httpcheck.Upstream{}, ""
+	}
+	info, ok := cc.TenantCredential(ref.Name)
+	if !ok {
+		v.errorf(cp+".name", "make the credential under the tenant's credentials first",
+			"the tenant has no credential %s", ref.Name)
+		return httpcheck.Upstream{}, ""
+	}
+	version := ref.Version
+	if version == 0 {
+		version = info.Latest
+	}
+	t, ok := info.Versions[version]
+	if !ok {
+		v.errorf(cp+".version", fmt.Sprintf("use a version it has, the latest is %d", info.Latest),
+			"credential %s has no version %d", ref.Name, version)
+		return httpcheck.Upstream{}, ""
+	}
+	up, err := httpcheck.ParseUpstream("upstream", t.Upstream)
+	if err != nil {
+		v.fail(cp, err)
+		return httpcheck.Upstream{}, ""
+	}
+	if b.Upstream != "" || b.Mode != "" {
+		if wu, wm := BindingTemplate(b); wu != up.Origin() || wm != t.Mode {
+			v.errorf(p+".upstream", "remove upstream and mode: they are the credential's",
+				"credential %s version %d calls %s in the %s mode", ref.Name, version, up.Origin(), t.Mode)
+		}
+	}
+	v.destination(cp, up.Host)
+	return up, t.Mode
 }
 
 // credential checks a binding's credential: its kind's fields, and no

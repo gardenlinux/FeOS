@@ -177,8 +177,8 @@ func TestMigrationSchema(t *testing.T) {
 		"environments", "event_gaps", "grants", "host_labels", "http_bindings", "http_egress", "http_egress_records", "image_bakes",
 		"ingress_certs", "ingresses",
 		"instances", "invitations", "issued_certs", "jobs", "join_tokens", "kube_bindings", "leases", "node_certs", "node_starts",
-		"node_telemetry", "nodes", "people", "pod_intercept_cas", "pod_network", "pod_tombstones", "sandbox_holds", "sandbox_image_credentials", "sandbox_tokens", "sandboxes",
-		"schema_migrations", "service_tokens", "ssh_bindings", "tenant_tokens", "tenants", "tool_calls", "traffic_records",
+		"node_telemetry", "nodes", "people", "pod_intercept_cas", "pod_network", "pod_tombstones", "sandbox_credentials", "sandbox_holds", "sandbox_image_credentials", "sandbox_tokens", "sandboxes",
+		"schema_migrations", "service_tokens", "ssh_bindings", "tenant_credentials", "tenant_tokens", "tenants", "tool_calls", "traffic_records",
 		"ui_sessions", "watches"}
 	if strings.Join(tables, ",") != strings.Join(wantTables, ",") {
 		t.Fatalf("tables %v, want %v", tables, wantTables)

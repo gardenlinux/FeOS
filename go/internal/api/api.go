@@ -110,6 +110,15 @@ type Bindings interface {
 	DeleteHTTP(http.ResponseWriter, *http.Request)
 	HTTPPreflight(http.ResponseWriter, *http.Request)
 	Access(http.ResponseWriter, *http.Request)
+	// The tenant's credentials (ADR 0033).
+	ListCredentials(http.ResponseWriter, *http.Request)
+	GetCredential(http.ResponseWriter, *http.Request)
+	PutCredential(http.ResponseWriter, *http.Request)
+	DeleteCredential(http.ResponseWriter, *http.Request)
+	CheckCredential(http.ResponseWriter, *http.Request)
+	SandboxCredentialNames(ctx context.Context, id podid.ID) ([]string, error)
+	CheckSandboxCredentials(ctx context.Context, tenant string, names []string) error
+	SetSandboxCredentials(ctx context.Context, tenant string, id podid.ID, names []string) error
 }
 
 // Environments is the environments service (*env.Service, ADR 0018):
@@ -513,6 +522,15 @@ func (s *server) routes() []route {
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/http", b.GetHTTP)
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/http", b.DeleteHTTP)
 		tenant(onTenant(write), "POST /api/v1/http/preflight", serve(b.HTTPPreflight))
+
+		// The tenant's credentials (ADR 0033), and the ones a sandbox names.
+		tenant(onTenant(read), "GET /api/v1/credentials", serve(b.ListCredentials))
+		tenant(onTenant(read), "GET /api/v1/credentials/{name}", serve(b.GetCredential))
+		tenant(onTenant(write), "PUT /api/v1/credentials/{name}", serve(b.PutCredential))
+		tenant(onTenant(write), "DELETE /api/v1/credentials/{name}", serve(b.DeleteCredential))
+		tenant(onTenant(write), "POST /api/v1/credentials/{name}/check", serve(b.CheckCredential))
+		tenant(onTenant(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
+		tenant(onTenant(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
 	}
 
 	// The environments (ADR 0018): the tenant's, and their route door.

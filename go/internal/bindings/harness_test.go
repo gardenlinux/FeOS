@@ -185,6 +185,11 @@ func (r *rig) mux() http.Handler {
 		mux.HandleFunc("GET /api/v1/sandboxes/{id}/http", sandbox(s.GetHTTP))
 		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}/http", sandbox(s.DeleteHTTP))
 		mux.HandleFunc("POST /api/v1/http/preflight", tenant(s.HTTPPreflight))
+		mux.HandleFunc("GET /api/v1/credentials", tenant(s.ListCredentials))
+		mux.HandleFunc("GET /api/v1/credentials/{name}", tenant(s.GetCredential))
+		mux.HandleFunc("PUT /api/v1/credentials/{name}", tenant(s.PutCredential))
+		mux.HandleFunc("DELETE /api/v1/credentials/{name}", tenant(s.DeleteCredential))
+		mux.HandleFunc("POST /api/v1/credentials/{name}/check", tenant(s.CheckCredential))
 	}
 	mux.HandleFunc("GET /api/v1/sandboxes/{id}/access", tenant(s.Access))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, req *http.Request) {

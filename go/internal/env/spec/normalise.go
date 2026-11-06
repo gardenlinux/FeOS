@@ -22,6 +22,10 @@ type Pins struct {
 	// Secrets maps a secret's name to the version a reference without a
 	// version is pinned to: its latest.
 	Secrets map[string]int
+	// Credentials are the tenant's credentials (ADR 0033): a binding that
+	// names one without a version is pinned to its latest, and carries
+	// the version's upstream and mode.
+	Credentials map[string]CredentialInfo
 	// Plans maps an addon type to its blueprint's default plan
 	// (addons.Blueprint.DefaultPlan), which an addon without a plan gets:
 	// a later default never changes a running addon.
@@ -73,7 +77,7 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 	if len(s.Bindings) > 0 {
 		out.Bindings = make(map[string]Binding, len(s.Bindings))
 		for name, b := range s.Bindings {
-			out.Bindings[name] = normBinding(b)
+			out.Bindings[name] = normBinding(b, p)
 		}
 	}
 	referenced := Referenced(s)
@@ -156,9 +160,20 @@ func normReadiness(r *Readiness) *Readiness {
 // normBinding writes a binding's upstream as its origin, its mode and its
 // rate limit's burst explicit; one that is none stays as written
 // (Validate refused it).
-func normBinding(b Binding) Binding {
+func normBinding(b Binding, p Pins) Binding {
 	out := b
-	out.Upstream, out.Mode = BindingTemplate(b)
+	if ref := b.TenantCredential; ref != nil {
+		r := *ref
+		info := p.Credentials[r.Name]
+		if r.Version == 0 {
+			r.Version = info.Latest
+		}
+		out.TenantCredential = &r
+		if t, ok := info.Versions[r.Version]; ok {
+			out.Upstream, out.Mode = t.Upstream, t.Mode
+		}
+	}
+	out.Upstream, out.Mode = BindingTemplate(out)
 	if b.RateLimit != nil {
 		rl := *b.RateLimit
 		if rl.PerSecond > 0 && rl.Burst == 0 {

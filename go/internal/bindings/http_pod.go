@@ -194,9 +194,9 @@ func (s *Service) PodHTTP(ctx context.Context, row store.Sandbox) (*podv1.PodHtt
 	if err != nil {
 		return nil, err
 	}
-	bs := httpPlain(snap.http)
+	bs := s.mergeCreds(row.ID, httpPlain(snap.http), credsPlain(snap.creds))
 	cas := givenCAs(bs, snap.cas)
-	version := podVersionHTTP(podVersion(snap.kubeVersion, snap.sshVersion, snapSSH(snap)), snap.httpVersion, cas)
+	version := podVersionHTTP(podVersion(snap.kubeVersion, snap.sshVersion, snapSSH(snap)), snap.httpVersionAll(), cas)
 	return clearPart(bs, cas, version), nil
 }
 
