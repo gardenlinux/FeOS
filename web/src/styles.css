@@ -543,6 +543,14 @@ tr:hover .iconbtn { opacity: 1; }
 }
 .login-card button.primary:hover { filter: brightness(1.08); background: var(--accent); }
 .login-card .error, .login-card .notice { margin-top: 14px; }
+.login-card button.primary:disabled { opacity: .85; cursor: progress; filter: none; }
+.spinner {
+  width: 16px; height: 16px; border-radius: 50%; flex: none;
+  border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff;
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
 @media (max-width: 480px) { .login-card { padding: 30px 22px 24px; } .login-name { font-size: 24px; } }
 .gate { max-width: 560px; }
 .gate h2 { font-size: 14px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }

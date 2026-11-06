@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { auth, loginURL } from '../api.js';
 import { Icon } from '../Icon.jsx';
 
@@ -33,6 +33,15 @@ export function SignIn({ config, next, notice, onSignedIn }) {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState(storedEmail);
+  // going: the browser is on its way to the provider. The button says so and
+  // takes no second click; a page the browser brings back from its cache
+  // (the back button) starts over.
+  const [going, setGoing] = useState(false);
+  useEffect(() => {
+    const back = (e) => { if (e.persisted) setGoing(false); };
+    window.addEventListener('pageshow', back);
+    return () => window.removeEventListener('pageshow', back);
+  }, []);
   const oidc = !!(config && config.oidc);
   // Basic is the screen's way in only where there is no provider (a
   // machine of one's own); with a provider, Basic stays for scripts.
@@ -52,16 +61,20 @@ export function SignIn({ config, next, notice, onSignedIn }) {
         {oidc && (
           <form action="/auth/login" method="get" onSubmit={(e) => {
             e.preventDefault();
+            if (going) return;
             if (!looksLikeEmail(email)) { setErr('Enter your e-mail address.'); return; }
             rememberEmail(email.trim());
+            setGoing(true);
             window.location.assign(loginURL(next, email));
           }}>
             <label htmlFor="signin-email">E-mail address</label>
-            <input id="signin-email" type="email" name="login_hint" value={email} autoFocus required
+            <input id="signin-email" type="email" name="login_hint" value={email} autoFocus required readOnly={going}
               autoComplete="username email" inputMode="email" placeholder="you@company.com"
               onChange={(e) => { setEmail(e.target.value); setErr(''); }} />
             <input type="hidden" name="next" value={next || '/'} />
-            <button type="submit" className="primary">Sign in</button>
+            <button type="submit" className="primary" disabled={going} aria-busy={going}>
+              {going ? <><span className="spinner" aria-hidden="true" /> Signing in…</> : 'Sign in'}
+            </button>
           </form>
         )}
         {basic && (
