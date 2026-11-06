@@ -676,3 +676,36 @@ func TestAuthCleanupLoop(t *testing.T) {
 		t.Fatalf("logins %s sessions %s", logins, sessions)
 	}
 }
+
+// A sign-in begun with the address typed on the sign-in screen passes it on
+// as login_hint, normalised; anything that is not an address is dropped.
+func TestLoginHint(t *testing.T) {
+	t.Parallel()
+	p := newTestProvider(t, algRS256)
+	e, _ := oidcEnvs(t, p, false)
+	for _, c := range []struct{ in, want string }{
+		{" Ann@Example.COM ", "ann@example.com"},
+		{"ann@example.com", "ann@example.com"},
+		{"", ""},
+		{"ann", ""},
+		{"@example.com", ""},
+		{"ann@", ""},
+		{"a@b@c", ""},
+		{"ann @example.com", ""},
+		{"ann@example.com\n", "ann@example.com"},
+	} {
+		w := e.serve(request{method: "GET", path: "/auth/login?next=%2F&login_hint=" + url.QueryEscape(c.in)})
+		expect(t, w, http.StatusFound, "")
+		u, err := url.Parse(w.Header().Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ok := u.Query()["login_hint"]
+		switch {
+		case c.want == "" && ok:
+			t.Errorf("%q: login_hint %q, want none", c.in, got)
+		case c.want != "" && (!ok || got[0] != c.want):
+			t.Errorf("%q: login_hint %q, want %q", c.in, got, c.want)
+		}
+	}
+}

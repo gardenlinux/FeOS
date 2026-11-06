@@ -202,6 +202,7 @@ func (s *server) setSessionCookie(w http.ResponseWriter, value string, maxAge in
 // browser sent to the provider.
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	next := localPath(r.URL.Query().Get("next"))
+	hint := loginHint(r.URL.Query().Get("login_hint"))
 	d, err := s.oidc.discovery(r.Context())
 	if err != nil {
 		s.log.Warn("sign-in: the provider's discovery failed", "err", err)
@@ -239,9 +240,31 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	q.Set("nonce", nonce)
 	q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(challenge[:]))
 	q.Set("code_challenge_method", "S256")
+	if hint != "" {
+		q.Set("login_hint", hint)
+	}
 	u.RawQuery = q.Encode()
 	http.SetCookie(w, s.cookie(cookieLogin, state, "/auth/", loginCookieAge))
 	http.Redirect(w, r, u.String(), http.StatusFound)
+}
+
+// loginHint is the address a person typed on the sign-in screen, passed on
+// to the provider as OpenID Connect's login_hint so that it asks for the
+// password or sends the person to their company without asking again: the
+// address trimmed and lowercased, or "" for anything that is not one (at
+// most 254 bytes, one "@" with something on both sides, no space or control
+// character). The provider checks it again; FeRun keeps nothing of it.
+func loginHint(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if len(v) > 254 || strings.Count(v, "@") != 1 || strings.HasPrefix(v, "@") || strings.HasSuffix(v, "@") {
+		return ""
+	}
+	for _, c := range v {
+		if c <= ' ' || c == 0x7f {
+			return ""
+		}
+	}
+	return v
 }
 
 // callback is GET /auth/callback: the provider's answer. The state must be

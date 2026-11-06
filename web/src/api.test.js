@@ -72,6 +72,7 @@ describe('sign-in', () => {
   it('loginURL carries the path to return to', () => {
     expect(loginURL('/tenants/acme/sandboxes?x=1')).toBe('/auth/login?next=%2Ftenants%2Facme%2Fsandboxes%3Fx%3D1');
     expect(loginURL('')).toBe('/auth/login?next=%2F');
+    expect(loginURL('/', ' Ann@Example.com ')).toBe('/auth/login?next=%2F&login_hint=Ann%40Example.com');
   });
 
   it('me is null when signed out', async () => {

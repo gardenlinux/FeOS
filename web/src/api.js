@@ -132,9 +132,12 @@ function signedOut() {
 }
 
 // loginURL is where an OIDC sign-in begins; ferund sends the browser back
-// to next (a local path) once it is done.
-export function loginURL(next) {
-  return '/auth/login?next=' + encodeURIComponent(next || '/');
+// to next (a local path) once it is done. An address goes on to the
+// provider as its login_hint, which picks the company or the password.
+export function loginURL(next, email) {
+  const u = '/auth/login?next=' + encodeURIComponent(next || '/');
+  const e = (email || '').trim();
+  return e ? u + '&login_hint=' + encodeURIComponent(e) : u;
 }
 
 export const auth = {

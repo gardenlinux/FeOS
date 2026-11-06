@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SignIn } from './SignIn.jsx';
+import { SignIn, looksLikeEmail } from './SignIn.jsx';
 
 // The sign-in screen offers what /auth/config says ferund offers.
 
@@ -13,22 +13,34 @@ const render = (config) => renderToStaticMarkup(
 );
 
 describe('SignIn', () => {
-  it('with OIDC: "Sign in" goes to /auth/login with the path to return to', () => {
+  it('with OIDC: an address first, then /auth/login with it and the path to return to', () => {
     const out = render({ oidc: true, basic: false });
-    expect(out).toContain('href="/auth/login?next=%2Ftenants%2Facme%2Fsandboxes"');
-    expect(out).toContain('Sign in');
+    expect(out).toContain('type="email"');
+    expect(out).toContain('action="/auth/login"');
+    expect(out).toContain('name="login_hint"');
+    expect(out).toContain('value="/tenants/acme/sandboxes"');
+    expect(out).toContain('Continue');
     expect(out).not.toContain('type="password"');
+  });
+
+  it('checks the address before it goes on', () => {
+    expect(looksLikeEmail('ann@example.com')).toBe(true);
+    expect(looksLikeEmail(' ann@example.com ')).toBe(true);
+    expect(looksLikeEmail('ann')).toBe(false);
+    expect(looksLikeEmail('ann@')).toBe(false);
+    expect(looksLikeEmail('a b@example.com')).toBe(false);
   });
 
   it('with Basic only: the user and password form, no OIDC link', () => {
     const out = render({ oidc: false, basic: true });
     expect(out).toContain('type="password"');
     expect(out).not.toContain('/auth/login');
+    expect(out).not.toContain('type="email"');
   });
 
   it('with both: both', () => {
     const out = render({ oidc: true, basic: true });
-    expect(out).toContain('/auth/login?next=');
+    expect(out).toContain('action="/auth/login"');
     expect(out).toContain('type="password"');
   });
 

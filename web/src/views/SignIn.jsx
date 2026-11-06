@@ -5,16 +5,34 @@ import React, { useState } from 'react';
 import { auth, loginURL } from '../api.js';
 import { Icon } from '../Icon.jsx';
 
-// The sign-in screen. With OIDC, "Sign in" goes to the provider through
-// /auth/login, which brings the browser back to next; with Basic
-// (--admin-users), a user and password, kept for this tab only. ferund's
-// /auth/config says which of them it offers.
+// The sign-in screen. With OIDC, the person types their address and goes
+// to the provider through /auth/login with it as login_hint: the provider
+// asks for the password, or sends them to their company's sign-in. The
+// browser remembers the address for next time. With Basic (--admin-users),
+// a user and password, kept for this tab only. ferund's /auth/config says
+// which of them it offers.
+
+const EMAIL_KEY = 'ferun-email';
+
+function storedEmail() {
+  try { return localStorage.getItem(EMAIL_KEY) || ''; } catch { return ''; }
+}
+
+function rememberEmail(v) {
+  try { localStorage.setItem(EMAIL_KEY, v); } catch { /* private window: forget it */ }
+}
+
+// looksLikeEmail is the screen's own check; ferund and the provider check again.
+export function looksLikeEmail(v) {
+  return /^[^\s@]+@[^\s@]+$/.test((v || '').trim());
+}
 
 export function SignIn({ config, next, notice, onSignedIn }) {
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [email, setEmail] = useState(storedEmail);
   const oidc = !!(config && config.oidc);
   const basic = !!(config && config.basic);
 
@@ -25,9 +43,22 @@ export function SignIn({ config, next, notice, onSignedIn }) {
         <p className="muted">The control plane of FeOS: sandboxes, tenants and nodes.</p>
         {notice && <p className="notice small">{notice}</p>}
         {oidc && (
-          <a className="button primary block" href={loginURL(next)}>
-            <Icon name="login" size={15} /> Sign in
-          </a>
+          <form action="/auth/login" method="get" onSubmit={(e) => {
+            e.preventDefault();
+            if (!looksLikeEmail(email)) return;
+            rememberEmail(email.trim());
+            window.location.assign(loginURL(next, email));
+          }}>
+            <label className="small muted" htmlFor="signin-email">Your e-mail address</label>
+            <input id="signin-email" type="email" name="login_hint" value={email} autoFocus
+              autoComplete="username email" inputMode="email" placeholder="you@company.com"
+              onChange={(e) => setEmail(e.target.value)} />
+            <input type="hidden" name="next" value={next || '/'} />
+            <button type="submit" className="primary" disabled={!looksLikeEmail(email)}>
+              <Icon name="login" size={15} /> Continue
+            </button>
+            <p className="small muted">Your company's sign-in or your password comes next.</p>
+          </form>
         )}
         {oidc && basic && <div className="or muted small">or with an operator's password</div>}
         {basic && (
