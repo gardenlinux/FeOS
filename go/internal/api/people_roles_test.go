@@ -305,6 +305,11 @@ func TestRoles(t *testing.T) {
 				continue
 			}
 			method, path := concrete(pattern, podid.Mint().String())
+			if pattern == "GET /api/v1/tenant" {
+				// The sink's ask, which says it filters by environment
+				// (TestTenantAnswersWhatIsRead).
+				path += "?filter=environments"
+			}
 			got := outcome(w.e.serve(p.request(method, path, nil)))
 			if exp := expected(p, want); got != exp {
 				bad = append(bad, p.name+": "+pattern+": "+got+", want "+exp)
@@ -343,7 +348,7 @@ func TestTenantPrincipal(t *testing.T) {
 		return request{method: "GET", path: "/api/v1/tenant", header: http.Header{"Authorization": {bearerOf(e.tenantToken)},
 			tenantHeader: {tenant}}}
 	}
-	expect(t, e.serve(tok(testTenant)), http.StatusOK, `{"tenant":"acme"}`+"\n")
+	expect(t, e.serve(tok(testTenant)), http.StatusOK, `{"tenant":"acme","role":"admin","environments":[]}`+"\n")
 	expect(t, e.serve(tok("other")), http.StatusNotFound, errBody("no such tenant"))
 	// Another tenant's token never reaches this one's environments.
 	other := e.mintTenantToken("other")
@@ -363,7 +368,7 @@ func TestTenantPrincipal(t *testing.T) {
 		return e.serve(request{method: method, path: path, header: h,
 			cookies: []*http.Cookie{{Name: cookieSession, Value: member}}})
 	}
-	expect(t, sess("GET", "/api/v1/tenant", testTenant, nil), http.StatusOK, `{"tenant":"acme"}`+"\n")
+	expect(t, sess("GET", "/api/v1/tenant", testTenant, nil), http.StatusOK, `{"tenant":"acme","role":"write","environments":[]}`+"\n")
 	expect(t, sess("GET", "/api/v1/tenant", "", nil), http.StatusBadRequest,
 		errBody("a session names its tenant in the FeRun-Tenant header"))
 	expect(t, sess("GET", "/api/v1/tenant", "other", nil), http.StatusNotFound, errBody("no such tenant"))
@@ -379,7 +384,7 @@ func TestTenantPrincipal(t *testing.T) {
 	op := w.person(t, "op", true)
 	w2 := e.serve(request{method: "GET", path: "/api/v1/tenant", header: http.Header{tenantHeader: {"other"}},
 		cookies: []*http.Cookie{{Name: cookieSession, Value: op}}})
-	expect(t, w2, http.StatusOK, `{"tenant":"other"}`+"\n")
+	expect(t, w2, http.StatusOK, `{"tenant":"other","role":"admin","environments":[]}`+"\n")
 	// A session of the version before people (no person) is no
 	// principal; nor is an unknown cookie.
 	if _, err := e.st.InsertUISession(context.Background(), store.UISession{IDHash: store.HashToken("old"), Admin: true},
@@ -396,6 +401,53 @@ func TestTenantPrincipal(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect(t, sess("GET", "/api/v1/tenant", testTenant, nil), http.StatusUnauthorized, errBody("tenant bearer required"))
+}
+
+// GET /api/v1/tenant, which the sink asks (ADR 0026, 0031), answers every
+// principal with its role on the tenant and the environments it holds a
+// grant on: a person's session as a token, a token of an environment's
+// scope as such a person.
+func TestTenantAnswersWhatIsRead(t *testing.T) {
+	t.Parallel()
+	w := newPeopleWorld(t, envOptions{})
+	e := w.e
+	stage, prod := w.stage.String(), w.prod.String()
+	both := `["` + min(stage, prod) + `","` + max(stage, prod) + `"]`
+	const path = "/api/v1/tenant?filter=environments"
+	asSession := func(cookie string) request {
+		return request{method: "GET", path: path, header: http.Header{tenantHeader: {testTenant}},
+			cookies: []*http.Cookie{{Name: cookieSession, Value: cookie}}}
+	}
+	asToken := func(tok string) request {
+		return request{method: "GET", path: path, header: http.Header{"Authorization": {bearerOf(tok)}}}
+	}
+	for _, c := range []struct {
+		name string
+		req  request
+		want string
+	}{
+		{"tenant read and stage admin", asSession(w.person(t, "r", false, store.Grant{Role: "read"},
+			store.Grant{Role: "admin", EnvironmentID: w.stage})), `{"tenant":"acme","role":"read","environments":["` + stage + `"]}`},
+		{"stage read", asSession(w.person(t, "sr", false, store.Grant{Role: "read", EnvironmentID: w.stage})),
+			`{"tenant":"acme","role":"","environments":["` + stage + `"]}`},
+		{"stage and prod", asSession(w.person(t, "sp", false, store.Grant{Role: "read", EnvironmentID: w.stage},
+			store.Grant{Role: "write", EnvironmentID: w.prod})), `{"tenant":"acme","role":"","environments":` + both + `}`},
+		{"a token of prod", asToken(w.token(t, "write", w.prod)), `{"tenant":"acme","role":"","environments":["` + prod + `"]}`},
+		{"a token of the tenant", asToken(w.token(t, "read", uuid.Nil)), `{"tenant":"acme","role":"read","environments":[]}`},
+	} {
+		if got := e.serve(c.req); got.Code != http.StatusOK || got.Body.String() != c.want+"\n" {
+			t.Errorf("%s: %d %s, want %s", c.name, got.Code, got.Body.String(), c.want)
+		}
+		// A sink of before people does not filter: it would read the
+		// answer as the whole tenant's, and gets none of environments.
+		c.req.path = "/api/v1/tenant"
+		got := e.serve(c.req)
+		if strings.Contains(c.want, `"role":""`) {
+			expect(t, got, http.StatusForbidden, `{"error":"this needs the role read on the tenant","code":"role_required","role":"read","scope":"tenant"}`+"\n")
+		} else if got.Code != http.StatusOK {
+			t.Errorf("%s without the filter: %d %s", c.name, got.Code, got.Body.String())
+		}
+	}
 }
 
 // boundDomains is a domains service with one domain bound to *env and

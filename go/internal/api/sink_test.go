@@ -19,12 +19,13 @@ import (
 	"github.com/gardenlinux/feos/go/internal/pki"
 )
 
-// GET /api/v1/tenant answers a tenant's token with its tenant, anything
-// else 401.
+// GET /api/v1/tenant answers a tenant's token with its tenant and role,
+// anything else 401.
 func TestGetTenant(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	expect(t, e.do("GET", "/api/v1/tenant", bearerOf(e.tenantToken), nil), http.StatusOK, `{"tenant":"acme"}`+"\n")
+	expect(t, e.do("GET", "/api/v1/tenant", bearerOf(e.tenantToken), nil), http.StatusOK,
+		`{"tenant":"acme","role":"admin","environments":[]}`+"\n")
 	expect(t, e.do("GET", "/api/v1/tenant", bearerOf("nope"), nil), http.StatusUnauthorized, errBody("unknown tenant token"))
 	expect(t, e.do("GET", "/api/v1/tenant", "", nil), http.StatusUnauthorized, errBody("tenant bearer required"))
 }

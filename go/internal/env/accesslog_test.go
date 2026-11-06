@@ -33,6 +33,16 @@ type fakeAccessSink struct {
 	asked int
 }
 
+// passedOn reports whether a request to the sink brings the caller's
+// credentials: the token "tok", or the session "sess" with its tenant.
+func passedOn(r *http.Request) bool {
+	if a := r.Header.Get("Authorization"); a != "" {
+		return a == "Bearer tok" && r.Header.Get(auth.TenantHeader) == ""
+	}
+	c, err := r.Cookie(auth.SessionCookie)
+	return err == nil && c.Value == "sess" && r.Header.Get(auth.TenantHeader) == tenantA
+}
+
 func (f *fakeAccessSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -42,7 +52,7 @@ func (f *fakeAccessSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"down"}`, http.StatusServiceUnavailable)
 		return
 	}
-	if r.URL.Path != "/api/v1/logs" || r.Header.Get("Authorization") != "Bearer tok" || q.Get("environment") != f.env ||
+	if r.URL.Path != "/api/v1/logs" || !passedOn(r) || q.Get("environment") != f.env ||
 		q.Get("source") != "ingress" || q.Get("direction") != "backward" || q.Get("since") != "0" {
 		f.t.Errorf("the sink was asked %s %v", r.URL, r.Header)
 		http.Error(w, "no", http.StatusBadRequest)
@@ -152,6 +162,12 @@ func TestAccessLogsFromSink(t *testing.T) {
 		if got := paths(ctx, c.q); !slices.Equal(got, c.want) {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
+	}
+
+	// A person's session is passed on as the token is (ADR 0031).
+	sess := auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantA, Session: "sess"})
+	if got := paths(sess, AccessLogQuery{Limit: 2}); !slices.Equal(got, []string{"/new3", "/new4"}) {
+		t.Errorf("a session: %v", got)
 	}
 
 	// A record from the sink is the one the ingress recorded.

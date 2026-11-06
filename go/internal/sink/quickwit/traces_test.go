@@ -18,6 +18,9 @@ func TestSpanQueryString(t *testing.T) {
 			`tenant:"acme" AND environment:"e" AND source:"ingress" AND trace_id:"ab" AND service_name:"api" AND span_name:"GET \"/\""`},
 		{SpanQuery{SinceNs: 1, MinDurationNs: 5}, `ts:[1970-01-01T00:00:00.000000001Z TO *] AND duration_ns:[5 TO *]`},
 		{SpanQuery{MaxDurationNs: 7}, `duration_ns:[* TO 7]`},
+		{SpanQuery{Tenant: "acme", Environments: []string{"e1", "e2"}},
+			`tenant:"acme" AND (environment:"e1" OR environment:"e2")`},
+		{SpanQuery{Environments: []string{}}, `(NOT *)`},
 		{SpanQuery{Tags: map[string]string{"b": "2", "http.method": "GET", "a b:c": `x"y`}},
 			`(span_attributes.a\ b\:c:"x\"y" OR resource_attributes.a\ b\:c:"x\"y") AND ` +
 				`(span_attributes.b:"2" OR resource_attributes.b:"2") AND ` +
@@ -51,6 +54,9 @@ func TestSpanQueryMatch(t *testing.T) {
 		{SpanQuery{Tags: map[string]string{"code": "500", "f": "2", "ok": "true", "ferun.object": "web"}}, true},
 		{SpanQuery{Tags: map[string]string{"code": "501"}}, false},
 		{SpanQuery{Tags: map[string]string{"nope": "x"}}, false},
+		{SpanQuery{Environments: []string{"x", "e"}}, true},
+		{SpanQuery{Environments: []string{"x"}}, false},
+		{SpanQuery{Environments: []string{}}, false},
 	} {
 		if got := c.q.Match(&d); got != c.want {
 			t.Errorf("%+v: %v", c.q, got)

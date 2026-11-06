@@ -25,10 +25,13 @@ const (
 
 // Selector selects streams by their labels; one of Environment, Job,
 // Instance and Stream is set. Source is SourceIngress, SourceEgress,
-// SourceContainer or "" for all.
+// SourceContainer or "" for all. Within is not the request's but its
+// reader's (Access.within): when not nil, only the streams of the
+// environments it names are selected, none of no environment.
 type Selector struct {
 	Environment, Kind, Object, Instance, Container, Job, Stream, Source string
 	Replica, Attempt                                                    *int
+	Within                                                              []string
 }
 
 // Query is a read of /api/v1/logs: the selector, the time range in Unix

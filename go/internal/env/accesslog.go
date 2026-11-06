@@ -78,7 +78,8 @@ type AccessLogRecord struct {
 // (503), which clients (FeCode) match.
 const (
 	// CodeNoLogStore: ferund has no --sink-url (or the request no token
-	// to read the sink with), and the access log is kept nowhere else.
+	// or session to read the sink with), and the access log is kept
+	// nowhere else.
 	CodeNoLogStore = "no_log_store"
 	// CodeLogStoreUnavailable: the sink failed; Retry-After.
 	CodeLogStoreUnavailable = "log_store_unavailable"
@@ -86,8 +87,9 @@ const (
 
 // AccessLogs is GET /api/v1/environments/{env}/access-logs: the
 // ingress's lines of the environment in the sink (ADR 0026 §8), read with
-// the caller's token. Without --sink-url or a token it answers 503
-// no_log_store, and when the sink fails 503 log_store_unavailable.
+// the caller's token or session (auth.Tenant.PassOn). Without --sink-url
+// or either it answers 503 no_log_store, and when the sink fails 503
+// log_store_unavailable.
 func (s *Service) AccessLogs(ctx context.Context, tenant, env string, q AccessLogQuery) (AccessLogList, error) {
 	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
 	if err != nil {
@@ -102,11 +104,11 @@ func (s *Service) AccessLogs(ctx context.Context, tenant, env string, q AccessLo
 	case s.d.SinkURL == "":
 		return AccessLogList{}, apierr.WithCode(http.StatusServiceUnavailable, CodeNoLogStore,
 			"the access log is kept in the sink, and this ferund has no --sink-url")
-	case t.Token == "":
+	case !t.Passable():
 		return AccessLogList{}, apierr.WithCode(http.StatusServiceUnavailable, CodeNoLogStore,
-			"the access log is read from the sink with the caller's token, and the request has none")
+			"the access log is read from the sink with the caller's token or session, and the request has neither")
 	}
-	recs, err := s.sinkAccessLogs(ctx, t.Token, e.ID.String(), q)
+	recs, err := s.sinkAccessLogs(ctx, t, e.ID.String(), q)
 	if err != nil {
 		s.log.Warn("cannot read the access log from the sink", "env", e.ID, "err", err)
 		return AccessLogList{}, apierr.WithCode(http.StatusServiceUnavailable, CodeLogStoreUnavailable,
@@ -120,9 +122,9 @@ func (s *Service) AccessLogs(ctx context.Context, tenant, env string, q AccessLo
 const sinkAccessPages = 8
 
 // sinkAccessLogs reads the newest q.Limit records of the environment
-// envID before q.BeforeTsNs (of q.TraceID) from the sink with token: its
+// envID before q.BeforeTsNs (of q.TraceID) from the sink as t: its
 // streams of source ingress, as many as it has, oldest first.
-func (s *Service) sinkAccessLogs(ctx context.Context, token, envID string, q AccessLogQuery) ([]AccessLogRecord, error) {
+func (s *Service) sinkAccessLogs(ctx context.Context, t auth.Tenant, envID string, q AccessLogQuery) ([]AccessLogRecord, error) {
 	v := url.Values{"environment": {envID}, "source": {"ingress"}, "direction": {"backward"}, "since": {"0"}}
 	if q.BeforeTsNs > 0 {
 		v.Set("until", strconv.FormatInt(q.BeforeTsNs-1, 10))
@@ -134,7 +136,7 @@ func (s *Service) sinkAccessLogs(ctx context.Context, token, envID string, q Acc
 	n := 0
 	for range sinkAccessPages {
 		v.Set("limit", strconv.Itoa(q.Limit-n))
-		page, cursor, err := s.sinkAccessPage(ctx, token, v)
+		page, cursor, err := s.sinkAccessPage(ctx, t, v)
 		if err != nil {
 			return nil, err
 		}
@@ -155,12 +157,12 @@ func (s *Service) sinkAccessLogs(ctx context.Context, token, envID string, q Acc
 // sinkAccessPage asks the sink for one page: its records, oldest first,
 // and the cursor to the older page ("": none). A line that is not a
 // record is left out.
-func (s *Service) sinkAccessPage(ctx context.Context, token string, v url.Values) ([]AccessLogRecord, string, error) {
+func (s *Service) sinkAccessPage(ctx context.Context, t auth.Tenant, v url.Values) ([]AccessLogRecord, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(s.d.SinkURL, "/")+"/api/v1/logs?"+v.Encode(), nil)
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	t.PassOn(req.Header)
 	resp, err := s.d.SinkClient.Do(req)
 	if err != nil {
 		return nil, "", err

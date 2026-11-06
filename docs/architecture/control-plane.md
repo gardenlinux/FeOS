@@ -3550,8 +3550,10 @@ nor waits for. `ferund`'s part:
   ask the sink first: `GET <sink-url>/api/v1/logs?instance=<sandbox ID>`
   (`job=<ID>` for a tenant's job) `&container=main&direction=backward&since=<the row's creation, the run's
   start>&limit=500`, paged by its `cursor` up to `lines` and the answer's
-  budget (8 KiB a line, 4 MiB), with the caller's own bearer, so that the
-  sink answers the tenant's streams only. A sink that fails or has no
+  budget (8 KiB a line, 4 MiB), with the caller's own credentials
+  (`auth.Tenant.PassOn`: its bearer, or a session's cookie
+  `ferun_session` and `FeRun-Tenant`), so that the sink answers what the
+  caller may read only (ADR 0031). A sink that fails or has no
   line leaves the read to the node, as before; a paused instance whose
   lines the sink has is answered, not 409 "paused". A tenant's job's log
   is the sink's also once it has ended (its node redacted the lines),
@@ -3560,10 +3562,10 @@ nor waits for. `ferund`'s part:
   the node's.
 - **The access log.** `…/access-logs` reads the ingress's lines of the
   environment from the sink alone (ADR 0026 §8), with the caller's
-  bearer: `GET <sink-url>/api/v1/logs?environment=<ID>&source=ingress&direction=backward&since=0&until=<beforeTsNs − 1>&trace=<traceId>&limit=<the rest>`,
+  credentials as the logs calls: `GET <sink-url>/api/v1/logs?environment=<ID>&source=ingress&direction=backward&since=0&until=<beforeTsNs − 1>&trace=<traceId>&limit=<the rest>`,
   paged by its `cursor` (at most 8 pages) until `limit` records, each
-  line's JSON an `AccessLogRecord`. Without `--sink-url` (or a bearer)
-  it answers 503 `no_log_store`; when the sink fails, 503
+  line's JSON an `AccessLogRecord`. Without `--sink-url` (or a bearer or
+  session: a caller within the process) it answers 503 `no_log_store`; when the sink fails, 503
   `log_store_unavailable` with `Retry-After: 5`, and the error is
   logged. `ferund` keeps no copy: its table `access_logs` (`0016`) was
   dropped on 2026-10-31 by `0020`, its records not moved, by Malte's
@@ -3573,7 +3575,7 @@ nor waits for. `ferund`'s part:
 - **The traffic.** `…/traffic` (FeCode ADR 0009 §4) is aggregated by
   the sink from the ingress's spans
   ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
-  caller's bearer: `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s`
+  caller's credentials as the logs calls: `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s`
   for the services that the routes of the desired and deployed deployments
   send the ingress to (an attached service's routes only the route door
   serves). Without such a service the sink is not asked and `services`
@@ -3582,8 +3584,24 @@ nor waits for. `ferund`'s part:
   to a tenth. The 503s are those of `…/access-logs`; a sink without the
   route (older than `ferund`) answers 404, which is a 503
   `log_store_unavailable` too.
-- **`GET /api/v1/tenant`** (tenant class): `{"tenant": "<name>"}`, the
-  token's tenant, which the sink asks for its readers; 401 otherwise.
+- **`GET /api/v1/tenant`** (tenant class, member), which the sink asks
+  for its readers: `{"tenant": "<name>", "role": "read"|"write"|"admin"|"",
+  "environments": ["<ID>", …]}` for any principal, a token or a session
+  with `FeRun-Tenant`: its role on the tenant (`""`: none, an operator's
+  `admin`) and the IDs of the environments it holds a grant on, sorted.
+  A principal of environments only (`role` `""`) is answered only with
+  `?filter=environments`, which a sink that filters by environment
+  sends; without it 403 `role_required` (read on the tenant), since a
+  sink of before people reads any answer as the whole tenant's. 401 for
+  no principal, 404 for a tenant it holds nothing in.
+- **Reads for a session.** The sink trusts no one but ferund's answer:
+  `ferund`'s own reads for a person pass the session's cookie and
+  `FeRun-Tenant` on, as the browser does where the sink is served under
+  `ferund`'s host, and the sink asks `/api/v1/tenant` with them. No
+  service credential reads the sink for a tenant. A sink of before
+  people takes tokens only: there a session's `…/access-logs` and
+  `…/traffic` answer 503 `log_store_unavailable` and its logs calls read
+  the node, so the sink is deployed first.
 - **Service tokens.** `ferund service-token --kind sink --name <name>`
   prints `feos-sink-<secret>` once; `service_tokens` keeps its SHA-256,
   kind, name, creator, creation and last use, and an activity row

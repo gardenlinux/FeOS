@@ -178,7 +178,14 @@ Two things outside FeRun shape this:
   label names one of those, and a stream without an environment
   (sandboxes, tenants' jobs) for a tenant `read`. Where the sink is
   served under `ferund`'s host, the session's cookie reaches it, and it
-  passes the cookie and the header on.
+  passes the cookie and the header on. `ferund`'s own reads of the sink
+  for a person (access log, traffic, an object's log) pass the session's
+  cookie and header on the same way: no service credential reads the
+  sink for a tenant, and the sink trusts `ferund`'s answer alone. A
+  principal of environments only is answered only a sink that says it
+  filters (`?filter=environments`), since a sink of before reads any
+  answer as the whole tenant's. Deleting streams needs `write` on the
+  tenant.
 
 ### The UI is the tenants' console
 

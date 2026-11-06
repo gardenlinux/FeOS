@@ -29,7 +29,7 @@ const realm = "ferun"
 
 // The cookies of human sign-in.
 const (
-	cookieSession = "ferun_session"
+	cookieSession = auth.SessionCookie
 	cookieLogin   = "ferun_login"
 )
 
@@ -262,7 +262,7 @@ func (s *server) challengeBasic(w http.ResponseWriter, r *http.Request) {
 
 // tenantHeader names the tenant a person's session acts in (ADR 0031); a
 // token's tenant is its own.
-const tenantHeader = "FeRun-Tenant"
+const tenantHeader = auth.TenantHeader
 
 // scope is what a tenant-class route's role is checked on.
 type scope int
@@ -387,6 +387,9 @@ func (s *server) tenantPrincipal(w http.ResponseWriter, r *http.Request) (auth.T
 		return auth.Tenant{}, errNoTenant()
 	}
 	t := auth.Tenant{Name: named, Principal: auth.Principal{Person: sess.PersonID, Operator: sess.Admin}}
+	if c, err := r.Cookie(cookieSession); err == nil {
+		t.Session = c.Value
+	}
 	grantRoles(&t, roles)
 	if sess.Admin {
 		t.Role = auth.RoleAdmin

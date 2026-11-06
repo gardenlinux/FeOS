@@ -13,8 +13,8 @@ guest ──CRI lines──▶ logs/container.log
 feosd (node) ──OTLP LogsService/Export, SinkService (mTLS, node cert)──▶ ferun-sink ──▶ PostgreSQL `sink` (streams, positions, quota)
      ▲ TelemetryResponse.sink_endpoint                                       │   └──▶ Kafka topic ferun-logs-v5-<days>d ──Kafka source──▶ Quickwit index of that name
 ferund ──CreatePodRequest.log_labels──▶ feosd                                │
-     ◀── GET /api/v1/tenant (a tenant's token) ──────────────────────────────┤
-tenants (FeCode) ── GET /api/v1/logs, /api/v1/log-streams (Bearer) ──────────┘
+     ◀── GET /api/v1/tenant (token or session) ──────────────────────────────┤
+readers ── GET /api/v1/logs, /api/v1/log-streams (Bearer, or cookie) ────────┘
 ```
 
 ## The guest
@@ -302,10 +302,23 @@ URI and key and that it verifies to the bundle. The bundle verifies the
 nodes' certificates (ClientAuth, one URI `spiffe://<td>/node/<name>`)
 and the ingresses' (`spiffe://<td>/ingress/<name>`).
 
-**Tenants.** A read brings the tenant's FeRun token (`Authorization:
-Bearer …`); the sink asks `ferund` `GET /api/v1/tenant` with it (`200
-{"tenant": "<name>"}`, `401` passed on) and keeps the answer a minute,
-by the token's SHA-256.
+**Readers** (ADR 0031). A read brings a FeRun token (`Authorization:
+Bearer …`), or, where the sink is served under `ferund`'s host (the
+Gateway's `run.<domain>`), a person's session: the cookie
+`ferun_session` and the tenant in `FeRun-Tenant` (400 without it). A
+session's change (`DELETE`) needs `X-Requested-With: ferun` and a
+request of the same origin (`Sec-Fetch-Site`, or `Origin` against
+`Host`; 403 otherwise), as `ferund`'s own. The sink asks `ferund` `GET
+/api/v1/tenant?filter=environments` with the same `Authorization`, or
+the cookie and `FeRun-Tenant` (`200 {"tenant", "role", "environments"}`;
+a 4xx but 429 passed on as it came), and keeps the answer by the
+SHA-256 of the credential and the tenant, a token's a minute, a
+session's 10 s. A `role` on the tenant reads every stream and span; a
+principal without one (a person's or a token's grants on environments)
+reads those whose `environment` is one of `environments`, and none of no
+environment (a sandbox's, a tenant's job's, a build's); one that may
+read nothing is 404 "no such tenant". An answer without `role` is a
+`ferund` of before people: the whole tenant's, as its every token was.
 
 **Stages.** `log_streams` (one row per stream key: labels, first and
 last time, next offset, the last offset stored, ended; its ID `s_` and 16
@@ -399,7 +412,9 @@ that is gone.
 
 ## Reading
 
-All routes need a tenant's token and answer only its streams.
+All routes need a reader (**Readers** above) and answer only the
+streams it may read: a selector that names others finds nothing, a
+follow gives none of their lines.
 
 A read takes its streams from the database, then reads, of each log
 topic, the partitions of their keys from the index source's checkpoint
@@ -479,7 +494,7 @@ most 500.
 
 ### `DELETE /api/v1/log-streams?environment=<id>` or `?job=<id>`
 
-Deletes the streams' rows, and leaves a delete task of the environment's or job's lines in every log index (Quickwit removes them when its janitor rewrites their splits; no read finds them meanwhile). 204.
+Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows, and leaves a delete task of the environment's or job's lines in every log index (Quickwit removes them when its janitor rewrites their splits; no read finds them meanwhile). 204.
 
 ## `ferund`
 
@@ -498,7 +513,8 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
 - `--sink-endpoint` (host:port of the ingest) to the nodes, a name
   resolved every 10 s into one ready instance's address per node;
   `--sink-url` (the API, inside the cluster) for its own reads.
-- `GET /api/v1/tenant`: the token's tenant.
+- `GET /api/v1/tenant`: the principal's tenant, its role there and the
+  environments it holds a grant on (control-plane.md, The sink).
 - `ferund service-token --kind sink --name <name>` prints
   `feos-sink-<secret>` once; `GET /api/v1/admin/service-tokens` lists the
   tokens, `DELETE /api/v1/admin/service-tokens/{id}` revokes one (the
@@ -509,7 +525,7 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
 - `InstanceStatus.image`: the image the instance runs,
   `registry/repository@sha256:…` as the deployment resolved it.
 - `GET /api/v1/environments/{env}/access-logs` reads the ingress's
-  lines from the sink alone, with the caller's token
+  lines from the sink alone, with the caller's token or session
   (`environment=<ID>&source=ingress&direction=backward&since=0&until=<beforeTsNs − 1>&trace=<traceId>&limit=<the rest>`,
   paged up to 8 times), each line's JSON an `AccessLogRecord`. Without
   `--sink-url` it answers 503 `no_log_store`, and 503
@@ -517,9 +533,9 @@ Deletes the streams' rows, and leaves a delete task of the environment's or job'
 - `GET /api/v1/environments/{env}/traffic` reads the sink's
   `GET /api/v1/traffic`, the ingress's spans counted per service and
   step ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
-  caller's token, and answers 503 as `…/access-logs` does.
+  caller's token or session, and answers 503 as `…/access-logs` does.
 - The objects' logs call and a job run's log read from the sink when
-  `--sink-url` is set, with the caller's token
+  `--sink-url` is set, with the caller's token or session
   (`instance=<sandbox ID>&container=main&direction=backward&since=<its
   start>`, paged), and from the node as before when the sink has no lines
   or fails; a paused instance's lines are answered from the sink. A
