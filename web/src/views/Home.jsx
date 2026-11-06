@@ -7,7 +7,7 @@ import { Ago, StateDot, useNow } from '../components.jsx';
 import { fmtQuota, quotaRows, useAccess } from '../people.js';
 import { envPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
-import { deploymentTone } from './envs.js';
+import { deploymentText, deploymentTone } from './envs.js';
 import { ToneDot } from './Environments.jsx';
 import { RoleBadge } from './People.jsx';
 
@@ -176,13 +176,4 @@ export function Home({ tenant, navigate }) {
         </section>)}
     </div>
   );
-}
-
-// deploymentText says which deployment an environment wants and which
-// serves: "13 failed · 12 serves", "9 deploying", "3 deployed".
-export function deploymentText(e) {
-  if (!e.deployment) return e.state === 'deleting' ? 'deleting' : 'no deployment';
-  if (e.state === 'deployed') return `${e.deployment} deployed`;
-  const serves = e.deployed && e.deployed !== e.deployment ? ` · ${e.deployed} serves` : '';
-  return `${e.deployment} ${e.state}${serves}`;
 }

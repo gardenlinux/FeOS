@@ -12,14 +12,13 @@ import { focusOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { Traces } from './Traces.jsx';
 import { Builder } from './Builder.jsx';
-import { deploymentText } from './Home.jsx';
 import { atLeast, envRole, useAccess } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import {
   KIND_TITLES, changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, groupObjects,
   hasEvidence, heavyEffect, incidentObject, isAttached, jobTrigger, labelPairs, logSourceText, logsProblem,
   mayRevertTo, objectSummary, objectTone, originText, parseLabelFilter, phaseTone, deploymentTone, preflightRows,
-  revertOffer, rolloutNote, specBindings, statusState, tagPlan,
+  deploymentText, revertOffer, rolloutNote, specBindings, statusState, tagPlan,
 } from './envs.js';
 import {
   AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SecretsTab, SettingsTab, TrafficTab, useOp,

@@ -473,3 +473,12 @@ export function cloneBody({ name, deployment, copy }) {
   if (Object.keys(secrets).length > 0) body.secrets = secrets;
   return body;
 }
+
+// deploymentText says which deployment an environment wants and which
+// serves: "13 failed · 12 serves", "9 deploying", "3 deployed".
+export function deploymentText(e) {
+  if (!e.deployment) return e.state === 'deleting' ? 'deleting' : 'no deployment';
+  if (e.state === 'deployed') return `${e.deployment} deployed`;
+  const serves = e.deployed && e.deployed !== e.deployment ? ` · ${e.deployed} serves` : '';
+  return `${e.deployment} ${e.state}${serves}`;
+}
