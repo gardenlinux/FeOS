@@ -10,6 +10,7 @@ package auth
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/google/uuid"
 
@@ -97,6 +98,14 @@ func (p Principal) String() string {
 	return ""
 }
 
+// SessionCookie is the cookie of a person's session, and TenantHeader
+// the header in which a session names its tenant (ADR 0031). The sink
+// takes both too and asks ferund with them (ADR 0026).
+const (
+	SessionCookie = "ferun_session"
+	TenantHeader  = "FeRun-Tenant"
+)
+
 // Tenant is a request made in a tenant: with a tenant's token, or with a
 // person's session that names the tenant (FeRun-Tenant).
 type Tenant struct {
@@ -105,6 +114,9 @@ type Tenant struct {
 	// behalf passes it on (the sink, ADR 0026), and nothing keeps it. ""
 	// for a session.
 	Token string
+	// Session is the session cookie's value of a session's request,
+	// passed on as Token is; "" for a token.
+	Session string
 	// Principal is who acts; the zero value for a caller that is not a
 	// request (and then no role check applies).
 	Principal Principal
@@ -112,6 +124,25 @@ type Tenant struct {
 	// Envs its grants on environments, by environment ID.
 	Role Role
 	Envs map[uuid.UUID]Role
+}
+
+// Passable reports whether the request has credentials to pass on
+// (PassOn): a token, or a session; a caller within the process has none.
+func (t Tenant) Passable() bool { return t.Token != "" || (t.Session != "" && t.Name != "") }
+
+// PassOn sets on h the credentials of a request made on the tenant's
+// behalf (a read of the sink, ADR 0026): the caller's token, or its
+// session's cookie and the tenant in FeRun-Tenant, so that the one asked
+// answers what the caller may read, as ferund's GET /api/v1/tenant tells
+// it. Without credentials (Passable) it sets nothing.
+func (t Tenant) PassOn(h http.Header) {
+	switch {
+	case t.Token != "":
+		h.Set("Authorization", "Bearer "+t.Token)
+	case t.Passable():
+		h.Set("Cookie", (&http.Cookie{Name: SessionCookie, Value: t.Session}).String())
+		h.Set(TenantHeader, t.Name)
+	}
 }
 
 // EnvRole is the principal's role on an environment: the higher of its

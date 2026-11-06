@@ -25,13 +25,13 @@ const sinkPage = 500
 // sinkLog reads the last lines lines of a stream's main container from
 // the sink (ADR 0026), oldest first, within answerLog's budget: sel names
 // the stream (instance=<sandbox ID>, or job=<ID>), since its start. It
-// asks with the caller's own token (auth.Tenant.Token), so that the sink
-// answers the caller's streams only. ok is false without --sink-url or a
-// token, when the sink fails, and when it has no line: the caller reads
-// the node then.
+// asks with the caller's own token or session (auth.Tenant.PassOn), so
+// that the sink answers what the caller may read only. ok is false
+// without --sink-url or either, when the sink fails, and when it has no
+// line: the caller reads the node then.
 func (c *Controller) sinkLog(ctx context.Context, key, value string, since time.Time, lines int) ([]string, bool) {
 	t, _ := auth.TenantFrom(ctx)
-	if c.d.SinkURL == "" || t.Token == "" || lines <= 0 {
+	if c.d.SinkURL == "" || !t.Passable() || lines <= 0 {
 		return nil, false
 	}
 	q := url.Values{key: {value}, "container": {"main"}, "direction": {"backward"}}
@@ -46,7 +46,7 @@ func (c *Controller) sinkLog(ctx context.Context, key, value string, since time.
 	for ended <= lines && bytes <= answerLog.total {
 		q.Set("limit", strconv.Itoa(limit))
 		limit = sinkPage
-		page, cursor, err := c.sinkPage(ctx, t.Token, q)
+		page, cursor, err := c.sinkPage(ctx, t, q)
 		if err != nil {
 			c.rl.warn("sink-logs", "cannot read a log from the sink; reading the node", key, value, "err", err)
 			return nil, false
@@ -85,12 +85,12 @@ type sinkLine struct {
 
 // sinkPage asks the sink for one page: its lines, oldest first, and the
 // cursor to the older page ("": none).
-func (c *Controller) sinkPage(ctx context.Context, token string, q url.Values) ([]sinkLine, string, error) {
+func (c *Controller) sinkPage(ctx context.Context, t auth.Tenant, q url.Values) ([]sinkLine, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.d.SinkURL, "/")+"/api/v1/logs?"+q.Encode(), nil)
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	t.PassOn(req.Header)
 	resp, err := c.d.SinkClient.Do(req)
 	if err != nil {
 		return nil, "", err

@@ -103,8 +103,8 @@ type sinkTraffic struct {
 // of the services that the environment's desired and deployed deployments
 // route (the ingress reaches no other, and an attached service's routes
 // only the route door), read from the ingress's spans in the sink with
-// the caller's token (traces.md, Reading: the ingress's traffic). As
-// …/access-logs: without --sink-url or a token 503 no_log_store, when
+// the caller's token or session (traces.md, Reading: the ingress's
+// traffic). As …/access-logs: without --sink-url or either 503 no_log_store, when
 // the sink fails 503 log_store_unavailable.
 func (s *Service) Traffic(ctx context.Context, tenant, env, window string) (Traffic, error) {
 	w, ok := trafficWindows[window]
@@ -120,9 +120,9 @@ func (s *Service) Traffic(ctx context.Context, tenant, env, window string) (Traf
 	case s.d.SinkURL == "":
 		return Traffic{}, apierr.WithCode(http.StatusServiceUnavailable, CodeNoLogStore,
 			"the traffic is read from the sink, and this ferund has no --sink-url")
-	case t.Token == "":
+	case !t.Passable():
 		return Traffic{}, apierr.WithCode(http.StatusServiceUnavailable, CodeNoLogStore,
-			"the traffic is read from the sink with the caller's token, and the request has none")
+			"the traffic is read from the sink with the caller's token or session, and the request has neither")
 	}
 	services, err := s.routedServices(ctx, e)
 	if err != nil {
@@ -133,7 +133,7 @@ func (s *Service) Traffic(ctx context.Context, tenant, env, window string) (Traf
 	if len(services) == 0 {
 		return out, nil
 	}
-	got, err := s.readSinkTraffic(ctx, t.Token, e.ID.String(), services, since, until, w.step)
+	got, err := s.readSinkTraffic(ctx, t, e.ID.String(), services, since, until, w.step)
 	if err != nil {
 		s.log.Warn("cannot read the traffic from the sink", "env", e.ID, "err", err)
 		return Traffic{}, apierr.WithCode(http.StatusServiceUnavailable, CodeLogStoreUnavailable,
@@ -212,8 +212,8 @@ func nsToMs(ns *float64) *float64 {
 }
 
 // readSinkTraffic asks the sink for the traffic of services of the
-// environment envID in [since, until) by step, with token.
-func (s *Service) readSinkTraffic(ctx context.Context, token, envID string, services []string, since, until time.Time,
+// environment envID in [since, until) by step, as t.
+func (s *Service) readSinkTraffic(ctx context.Context, t auth.Tenant, envID string, services []string, since, until time.Time,
 	step time.Duration) ([]sinkTraffic, error) {
 	v := url.Values{"environment": {envID}, "service": services, "since": {strconv.FormatInt(since.UnixNano(), 10)},
 		"until": {strconv.FormatInt(until.UnixNano(), 10)}, "step": {strconv.FormatInt(int64(step/time.Second), 10) + "s"}}
@@ -221,7 +221,7 @@ func (s *Service) readSinkTraffic(ctx context.Context, token, envID string, serv
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	t.PassOn(req.Header)
 	resp, err := s.d.SinkClient.Do(req)
 	if err != nil {
 		return nil, err
