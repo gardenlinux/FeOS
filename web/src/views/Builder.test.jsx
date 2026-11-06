@@ -92,12 +92,18 @@ describe('the forms', () => {
   });
 
   it('offer an addon the catalog versions, plans and option fields', () => {
-    const catalog = readCatalog({ addons: [{ type: 'postgres', versions: ['16', '17'], defaultPlan: 'small',
-      plans: { small: { vcpus: 1, memoryMib: 1024, volumeMib: 10240 } }, outputs: ['url'], options: [{ name: 'databases', kind: 'list' }] }] });
+    const catalog = readCatalog({ addons: [{ type: 'postgres', versions: ['16', '17'], defaultVersion: '17', defaultPlan: 'small',
+      plans: [{ name: 'small', vcpus: 1, memoryMib: 1024, volumeMib: 10240 }], outputKeys: ['url'], outputFields: [],
+      options: [{ name: 'databases', kind: 'list', required: false, default: [], description: '', values: [], pattern: '^[a-z]+$',
+        reserved: ['postgres'], reservedPrefixes: [], unique: true }] }] });
     const out = html(<AddonForm name="postgres" obj={STORED.addons.postgres} ctx={ctx(STORED, [], { catalog })}
       onChange={nop} onRename={nop} onRemove={nop} />);
     expect(out).toContain('<option value="small" selected="">small · 1 vCPU, 1024 MiB, volume 10 GiB</option>');
     expect(out).toContain('>databases<');
+    expect(out).not.toContain('is reserved');
+    const hinted = text(<AddonForm name="postgres" obj={{ ...STORED.addons.postgres, options: { databases: ['postgres', 'x'] } }}
+      ctx={ctx(STORED, [], { catalog })} onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(hinted).toContain('postgres is reserved');
     // roles is no field of this catalog's: it is JSON.
     expect(out).toContain('other options (JSON)');
     expect(out).toContain('&quot;roles&quot;');

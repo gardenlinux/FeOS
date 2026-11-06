@@ -217,7 +217,11 @@ export function Builder({ tenant, env, st, navigate }) {
     let live = true;
     api.addonCatalog().then(
       (a) => { if (live) setCatalog(readCatalog(a) || builtinCatalog()); },
-      () => { if (live) setCatalog(builtinCatalog()); },
+      (e) => {
+        if (!live) return;
+        setCatalog(builtinCatalog());
+        setNotice(`The catalog of addons cannot be read (${e.message}): the forms use the list this UI knows.`);
+      },
     );
     return () => { live = false; };
   }, []);

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { fixture, response } from '../testing/ferun.js';
 import {
@@ -14,7 +15,7 @@ import {
 import { atField, fieldOf, groupFindings, notAt, severityCounts, splitPath, worst } from './findings.js';
 import { canonical, changesSince, rebase, resolve, units } from './rebase.js';
 import { applyPins, checkNewer, digestOf, imageView, isDigestRef, pinSecret, secretPins, setImage, unpinned } from './pins.js';
-import { builtinCatalog, newAddon, planText, readCatalog } from './catalog.js';
+import { builtinCatalog, newAddon, optionProblems, planText, readCatalog } from './catalog.js';
 import { planner } from './planner.js';
 
 // The builder's arithmetic on ferund's fixtures: deployment 7 of
@@ -265,6 +266,9 @@ describe('pins', () => {
   const pinned = STORED.services.web.image;
   it('show the image as written with its digest', () => {
     expect(isDigestRef(pinned)).toBe(true);
+    // As ferund says it: any "@sha256:" is a digest reference.
+    expect(isDigestRef('ghcr.io/acme/web@sha256:abc')).toBe(true);
+    expect(isDigestRef('ghcr.io/acme/web:1.4')).toBe(false);
     expect(digestOf(pinned)).toBe('sha256:de2feb13b0b780dd0dfd7aa32bcd02b306a4680f4958f896b3347f3ba3521a81');
     expect(imageView(STORED.services.web)).toEqual({ written: 'ghcr.io/acme/expensa-web:1.4', digest: digestOf(pinned) });
     expect(imageView({ image: 'nginx' })).toEqual({ written: 'nginx', digest: '' });
@@ -288,6 +292,10 @@ describe('pins', () => {
     expect(r.supported).toBe(true);
     expect(r.spec.services.web).toMatchObject({ image: pin, imageAsWritten: 'ghcr.io/acme/expensa-web:1.4' });
     expect(r.unresolved).toEqual(['ghcr.io/acme/seed:1']);
+    // A digest reference keeps its image and imageAsWritten, whatever
+    // the answer holds (ferund never answers one).
+    expect(r.spec.services['approval-service']).toBe(draft.services['approval-service']);
+    expect(applyPins(STORED, { [STORED.services.web.image]: pin }).spec).toBe(STORED);
     // An older ferund answers no images: nothing to write, nothing held.
     expect(applyPins(draft, undefined)).toEqual({ spec: draft, unresolved: [], supported: false });
   });
@@ -305,24 +313,39 @@ describe('pins', () => {
 });
 
 describe('catalog', () => {
-  it('reads the blueprints, plans and option fields', () => {
-    const c = readCatalog({ addons: [{
-      type: 'postgres', versions: ['16', '17'], defaultPlan: 'small',
-      plans: { small: { vcpus: 1, memoryMib: 1024, volumeMib: 10240 }, dev: { vcpus: 1, memoryMib: 256, volumeMib: 1024 } },
-      outputs: { keys: ['url', 'host'], fields: ['role'] },
-      options: [{ name: 'databases', kind: 'list' }, { name: 'mode', kind: 'oneOf', values: ['a', 'b'], default: 'a' },
-        { name: 'x', kind: 'map' }],
-    }] });
+  // GET /api/v1/addons as ferund answers it (E1's fixture, copied until
+  // it is in ferund's testdata here).
+  const ADDONS = JSON.parse(readFileSync(new URL('../testing/GET_addons.200.json', import.meta.url), 'utf8')).response;
+
+  it('reads the blueprints, plans and option fields as ferund answers them', () => {
+    const c = readCatalog(ADDONS);
     const pg = c.byType.get('postgres');
     expect(c.builtin).toBe(false);
-    expect(pg.plans.map((p) => p.name)).toEqual(['dev', 'small']);
-    expect(pg.outputs).toEqual(['url', 'host']);
-    expect(pg.fields).toEqual(['role']);
-    expect(pg.options.map((o) => o.kind)).toEqual(['list', 'enum', 'json']);
+    expect(c.types.map((t) => t.type)).toEqual(['nats', 'postgres', 'valkey']);
+    expect(pg.plans.map((p) => p.name)).toEqual(['dev', 'small', 'medium', 'large']);
+    expect(pg.outputs).toEqual(['host', 'port', 'user', 'password', 'database', 'url']);
+    expect(pg.fields).toEqual(['role', 'database']);
+    expect(pg.options.map((o) => [o.name, o.kind, o.unique])).toEqual([['databases', 'list', true], ['roles', 'list', true]]);
+    expect(c.byType.get('valkey').options[0]).toMatchObject({ kind: 'oneOf', default: 'noeviction' });
+    expect(c.byType.get('valkey').options[0].values).toContain('allkeys-lru');
+    expect(c.byType.get('nats').options[0]).toMatchObject({ kind: 'boolean', default: true, values: [] });
     expect(planText(pg.plans[1])).toBe('small · 1 vCPU, 1024 MiB, volume 10 GiB');
+    // defaultVersion is what a new addon is offered.
     expect(newAddon(pg)).toEqual({ type: 'postgres', version: '17', plan: 'small' });
+    expect(newAddon(c.byType.get('valkey'))).toEqual({ type: 'valkey', version: '8', plan: 'small' });
     expect(readCatalog({})).toBeNull();
-    expect(readCatalog([{ type: 'a', outputKeys: ['url'] }]).byType.get('a').outputs).toEqual(['url']);
+    expect(readCatalog([{ type: 'a' }])).toBeNull();
+    expect(readCatalog({ addons: [{ type: 'a', options: [{ name: 'x', kind: 'map' }] }] }).byType.get('a').options[0].kind).toBe('json');
+  });
+
+  it('hints at an option value from its declaration, without judging', () => {
+    const pg = readCatalog(ADDONS).byType.get('postgres');
+    const roles = pg.options.find((o) => o.name === 'roles');
+    expect(optionProblems(roles, ['app', 'app'])).toEqual(['app twice']);
+    expect(optionProblems(roles, ['pg_x'])).toEqual(['pg_x starts with pg_, which is reserved']);
+    expect(optionProblems(roles, ['public', 'Bad'])).toEqual(['public is reserved', 'Bad does not match ^[a-z][a-z0-9_]{0,62}$']);
+    expect(optionProblems(roles, undefined)).toEqual([]);
+    expect(optionProblems({ ...roles, kind: 'string', required: true }, '')).toEqual(['required']);
   });
 
   it('has a built-in list for a ferund without one', () => {

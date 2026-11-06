@@ -7,7 +7,7 @@ import { isDnsLabel, isObject, isSecretName, objectsOf, registryHost } from './d
 import { SERVICE_KEYS, envValueKind, makeRef, refLine, refTargets, suggestVarName } from './refs.js';
 import { atField, notAt } from './findings.js';
 import { checkNewer, imageView, setImage } from './pins.js';
-import { planText } from './catalog.js';
+import { optionProblems, planText } from './catalog.js';
 
 // The builder's forms (ADR 0032, "Forms, the catalog, a first
 // deployment"): one per kind, with the API's fields and its defaults as
@@ -38,15 +38,22 @@ export function FindingList({ list }) {
   );
 }
 
-function Field({ label, hint, findings, children, wide }) {
+function Field({ label, hint, findings, children, wide, problems }) {
   return (
     <div className={'b-field' + (wide ? ' wide' : '')}>
       <span className="b-label">{label}</span>
       <span className="b-control">{children}</span>
       {hint && <span className="b-hint muted small">{hint}</span>}
+      {problems && problems.length > 0 && <span className="b-hint warntext small">{problems.join('; ')}</span>}
       <FindingList list={findings} />
     </div>
   );
+}
+
+// hasDefault says whether a catalog's default says anything: not null,
+// not an empty list.
+function hasDefault(v) {
+  return v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0);
 }
 
 // without is o without the keys whose value is undefined.
@@ -575,14 +582,15 @@ export function AddonForm({ name, obj, ctx, onChange, onRename, onRemove }) {
         </Field>
       </div>
       {declared.map((d) => (
-        <Field key={d.name} label={d.name} findings={atField(f, `options.${d.name}`)}
-          hint={[d.description, d.default !== undefined ? `default ${JSON.stringify(d.default)}` : ''].filter(Boolean).join(' · ')}>
+        <Field key={d.name} label={d.name + (d.required ? ' *' : '')} findings={atField(f, `options.${d.name}`)}
+          hint={[d.description, hasDefault(d.default) ? `default ${JSON.stringify(d.default)}` : ''].filter(Boolean).join(' · ')}
+          problems={optionProblems(d, opts[d.name])}>
           {d.kind === 'string' && <input className="mono" value={opts[d.name] ?? ''} onChange={(e) => putOpt(d.name, e.target.value || undefined)} />}
           {d.kind === 'list' && <Lines value={opts[d.name]} onChange={(v) => putOpt(d.name, v)} placeholder="one per line" />}
           {d.kind === 'boolean' && (
             <Select value={opts[d.name] === undefined ? '' : String(opts[d.name])} options={['true', 'false']} empty="(the default)"
               onChange={(v) => putOpt(d.name, v === '' ? undefined : v === 'true')} />)}
-          {d.kind === 'enum' && (
+          {d.kind === 'oneOf' && (
             <Select value={opts[d.name] ?? ''} options={d.values} empty="(the default)" onChange={(v) => putOpt(d.name, v || undefined)} />)}
         </Field>
       ))}

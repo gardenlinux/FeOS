@@ -11,10 +11,11 @@
 
 import { isObject, objectsOf, setObject } from './draft.js';
 
-const DIGEST = /@sha256:[0-9a-f]{64}$/;
-
+// isDigestRef says whether an image is a digest reference, as ferund
+// says it (an "@sha256:" in it): the plan answers no pin for one, and
+// the builder leaves its image and imageAsWritten alone.
 export function isDigestRef(image) {
-  return DIGEST.test(String(image || ''));
+  return String(image || '').includes('@sha256:');
 }
 
 // digestOf is an image reference's "sha256:…", '' without one.
