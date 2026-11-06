@@ -735,7 +735,6 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
    the bottom; a line is its time, its object#replica (when the search
    reads more than one), its level and its text, a record's message and
    key=value, opened to every field */
-.lg { display: flex; flex-direction: column; }
 .lg-form { display: flex; flex-direction: column; }
 .lg-chips { margin: 0 0 6px; }
 .lg-searchrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 2px 0 8px; }
@@ -757,8 +756,18 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .linkbtn { background: none; border: none; padding: 0; color: var(--accent); font-size: 12px; border-radius: 0; }
 .linkbtn:hover { text-decoration: underline; }
 .lg-count { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 10px 0 6px; font-size: 12px; color: var(--muted); }
+/* The Logs tab fills the window below the top bar: its head and the
+   search stay where they are and only the lines scroll, so that the page
+   has no scroll bar of its own beside theirs. Each box from the content
+   down is a column at least as tall as what it holds and grows to the
+   window; the lines take what is left, and below 200 px of them the page
+   scrolls after all. */
+.content:has(.lg) { display: flex; flex-direction: column; padding-bottom: 16px; }
+.content:has(.lg) > .pane-detail,
+.pane-detail:has(.lg) > .tabbody,
+.lg { display: flex; flex-direction: column; flex: 1 0 auto; }
 .lg-view {
-  height: calc(100vh - 330px); min-height: 320px; overflow: auto; overscroll-behavior: contain;
+  flex: 1 1 0; min-height: 200px; overflow: auto; overscroll-behavior: contain;
   padding: 0 4px 4px; background: var(--bg1); border: 1px solid var(--border-soft); border-radius: 7px;
 }
 .lg-view:focus { outline: none; border-color: var(--border); }
