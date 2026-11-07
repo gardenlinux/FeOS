@@ -86,6 +86,20 @@ func TestSandboxImageCredentials(t *testing.T) {
 		t.Fatalf("asked with %+v, pull token %q", auth, token)
 	}
 
+	// A sandbox's template (ADR 0035: its environment's groups) has no
+	// login: its sealed credentials still count.
+	env := h.boxEnv(testTenant)
+	templated, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: testTenant,
+		Image: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env, PodTemplate: model.SandboxTemplate(env, nil)})
+	if err != nil || !created {
+		t.Fatalf("create sandbox: %v (created %v)", err, created)
+	}
+	keep(templated.ID, templated.ID)
+	h.ensure(templated.ID)
+	if auth, token := last(); auth != alice || token != "token-of-alice" {
+		t.Fatalf("templated sandbox asked with %+v, pull token %q", auth, token)
+	}
+
 	plain := h.sandbox(512)
 	h.ensure(plain.ID)
 	if auth, token := last(); !auth.Anonymous() || token != "" {
