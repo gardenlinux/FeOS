@@ -123,7 +123,8 @@ Two things outside FeRun shape this:
   - `read`: the list of environments, sandboxes, jobs and domains;
   - `write`: making, cloning and deleting environments; sandboxes, their
     tokens and their tools; tenants' jobs; services with the runtime
-    `attached`. A sandbox is the tenant's: an attachable one reaches the
+    `attached` (ADR 0035 moves these three to a grant on the sandbox's or
+    job's environment, since each then belongs to one). A sandbox is the tenant's: an attachable one reaches the
     addons and image services of the environments whose services it
     runs (ADR 0018), and an attached service runs in a sandbox, so a
     grant on one environment must not give either. A write is judged by

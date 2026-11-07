@@ -5,7 +5,9 @@ tenant's job) Proposed 2026-10-30; what keeps a sandbox awake for its
 attached services (§ An attached service idles as an image service
 does) Accepted 2026-10-30; the states' words (§ The states' words)
 Accepted 2026-11-02; the deployments' word (§ The deployments' word)
-Accepted 2026-11-02
+Accepted 2026-11-02 · Amended by [ADR 0035](0035-everything-runs-in-an-environment.md)
+(a sandbox and a tenant's job belong to an environment; `attachable` and
+`sbx-<id>` go)
 
 ## Context
 

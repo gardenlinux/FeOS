@@ -159,6 +159,9 @@ deployment, not from a timeout.
   late opens nothing. Only additions are urgent, and they are urgent
   for availability, not for security. What must reach every node fast
   for security is rules, and rules change rarely.
+- ADR 0035 removes the exception below: a sandbox belongs to one
+  environment and names its groups, an attached service is in its
+  sandbox's groups, and a sandbox's groups change by a move.
 - The exception is an attachable sandbox: it becomes a member of the
   groups of the services attached to it while it runs. Its own chains
   keep its `sbx-<id>` rules (no ingress), so that pods of the
