@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -488,6 +489,14 @@ func TestCallNotSentWhenPartitioned(t *testing.T) {
 	c, a, b, n1, proxy, sb := partitioned(t)
 	c.pause(b, sb)
 	n1.Script().SetDelay(podv1.PodService_ResumePod_FullMethodName, 20*time.Second)
+	// The resume is in flight once the node has it: before, a's op still
+	// prepares the node from the database (the sandbox's groups and names),
+	// which the cut would fail, and nothing would resume it.
+	var resumed atomic.Bool
+	n1.Script().SetHook(podv1.PodService_ResumePod_FullMethodName, func(context.Context, string, any) error {
+		resumed.Store(true)
+		return nil
+	})
 
 	const cmd = "echo once >> sent.txt # e2e-k5"
 	onA := c.keyedExecAsync(a, sb, cmd, "k5", 0)
@@ -496,7 +505,7 @@ func TestCallNotSentWhenPartitioned(t *testing.T) {
 			return false
 		}
 		row := c.row(sb.id)
-		return row.Op == "resume" && row.OpOwner == a.ID()
+		return row.Op == "resume" && row.OpOwner == a.ID() && resumed.Load()
 	})
 
 	proxy.cutOff()
