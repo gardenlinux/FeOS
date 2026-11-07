@@ -591,6 +591,9 @@ func (envEngine) State(context.Context, podid.ID) (string, string, error) {
 }
 
 func (envEngine) PushHTTPBindings(podid.ID) {}
+func (envEngine) HibernateToMove(context.Context, podid.ID) (bool, error) {
+	return false, nil
+}
 
 // envPorts forwards by saying where to.
 type envPorts struct{}

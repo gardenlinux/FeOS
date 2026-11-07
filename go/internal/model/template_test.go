@@ -6,12 +6,11 @@ package model
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
-
-	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
 // The template of the contract's §2.3, as the controller stores it.
@@ -219,11 +218,22 @@ func TestGroupIDs(t *testing.T) {
 	if g := EnvGroupID(id); g != "env-0193a000-0000-7000-8000-0000000000e1" || len(g) != 40 {
 		t.Fatalf("EnvGroupID %q", g)
 	}
-	// A sandbox made before ADR 0019 keeps its UUID, and its group.
-	if g := SandboxGroupID(podid.ID(id.String())); g != "sbx-0193a000-0000-7000-8000-0000000000e1" || len(g) != 40 {
-		t.Fatalf("SandboxGroupID %q", g)
+	g := uuid.MustParse("0193a000-0000-7000-8000-0000000000e2")
+	if got := SecurityGroupID(g); got != "sg-0193a000-0000-7000-8000-0000000000e2" || len(got) != 39 {
+		t.Fatalf("SecurityGroupID %q", got)
 	}
-	if g := SandboxGroupID("abcdefghjkm"); g != "sbx-abcdefghjkm" || len(g) != 15 || SandboxTableID("abcdefghjkm") != g {
-		t.Fatalf("SandboxGroupID %q", g)
+	if got := PodGroups(id, []uuid.UUID{g}); !slices.Equal(got, []string{EnvGroupID(id), SecurityGroupID(g)}) {
+		t.Fatalf("PodGroups %v", got)
+	}
+	// A sandbox's pod: its groups and its environment's table, never an
+	// own group or table (ADR 0035).
+	tmpl := SandboxTemplate(id, []uuid.UUID{g})
+	if !slices.Equal(tmpl.Command, SandboxCommand) || !slices.Equal(tmpl.SecurityGroups, PodGroups(id, []uuid.UUID{g})) ||
+		!slices.Equal(tmpl.NameTables, []string{EnvTableID(id)}) {
+		t.Fatalf("SandboxTemplate %+v", tmpl)
+	}
+	tmpl.Command[0] = "x"
+	if SandboxCommand[0] != "sleep" {
+		t.Fatal("SandboxTemplate shares its command")
 	}
 }

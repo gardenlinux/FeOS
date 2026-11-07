@@ -684,7 +684,7 @@ address of the mesh reaches, and the ingress answers it 404 "route
   ports, it has no rules. The routed ports are the numbers, in the pod's
   own deployment, of the ports that the routes of the deployed and the
   latest deployment give its service. It has no members; its version is a
-  hash of its content. Addons, jobs and attachable sandboxes never name
+  hash of its content. Addons, jobs and sandboxes never name
   one, and a service no route names opens nothing.
 - **`ferun-ingress`** has no rules. Its members are the mesh addresses of
   the ingress instances that are not removed. Its version is

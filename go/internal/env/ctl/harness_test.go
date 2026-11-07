@@ -340,6 +340,30 @@ func resolves(n *testnode.Node, pod podid.ID, name string, addrs ...string) bool
 	return ok == (len(addrs) > 0) && slices.Equal(got, addrs)
 }
 
+// podGroups are the groups a pod of environment envID in the groups
+// names names (default when none): env-<id> and their sg-<row>s.
+func (h *harness) podGroups(envID uuid.UUID, names ...string) []string {
+	h.t.Helper()
+	if len(names) == 0 {
+		names = []string{"default"}
+	}
+	out, err := h.st.PodGroups(bg, envID, names)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return out
+}
+
+// addressOf is a row's address as it is now.
+func (h *harness) addressOf(id podid.ID) string {
+	h.t.Helper()
+	sb, err := h.st.GetSandbox(bg, id)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return sb.Address
+}
+
 // newEnv makes an environment of the tenant.
 func (h *harness) newEnv(name string) store.Environment {
 	h.t.Helper()

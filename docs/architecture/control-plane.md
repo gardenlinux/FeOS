@@ -350,7 +350,7 @@ audit is its activity row.
 | stale instances | 60 s | deletes instance rows older than an hour |
 | activity partitions | 1 h | keeps partitions for today and the next two days; drops those past retention |
 | sign-in clean-up | 10 min | deletes stale sign-ins and expired UI sessions |
-| `env-reconcile`, `env-probe`, `env-groups`, `env-volumes`, `env-delete`, `env-bindings` | 2 s, 1 s, 10 s, 30 s, 5 s, 30 s | the environments' controller ([Environments](#the-controller)) |
+| `env-reconcile`, `env-probe`, `env-groups`, `env-groups-moves`, `env-volumes`, `env-delete`, `env-bindings` | 2 s, 1 s, 10 s, 5 s, 30 s, 5 s, 30 s | the environments' controller ([Environments](#the-controller)) |
 | `domains-check`, `domains-settle` | 5 s, 30 s | checks the domains that are due; settles the states that changed without a write of the domain's own; only while domains are on ([Domains](#domains)) |
 | `acme-orders` | 30 s | deletes expired ACME challenges; with `--acme-directory`, orders the certificates of the domains that are due, one at a time, and opens `certificate_failing` for renewals that have failed for a day ([Certificates of domains](#certificates-of-domains)); `ferun_leader` `acme` wakes it |
 
@@ -822,8 +822,8 @@ retry: feosd compares specs, labels included, so a create against a
 leftover pod of an earlier incarnation fails instead of returning it. A
 pod is **ours** when its incarnation label is the row's; ferund never
 touches a pod without `ferun.sandbox`, and never adopts the state of a pod
-that is not ours. A row with a pod template, an environment's instance or
-an attachable sandbox, builds its pod from the template instead
+that is not ours. A row with a pod template, an environment's instance, a
+sandbox or a tenant's job's pod, builds its pod from the template instead
 ([Environments](#instances-are-sandbox-rows)).
 
 ### States
@@ -2409,7 +2409,7 @@ columns:
 |---|---|
 | `environment_id` | the row's environment, not null since `0032`; fixed |
 | `instance` | (`0032`) the row is an instance of it; fixed, never with `tenant_job` |
-| `pod_template` | `model.PodTemplate`: the pod's command, env (literals, secrets by name and version, or parts of both with a URL's userinfo escaped), volumes, mounts, security groups, name tables and labels; fixed. NULL: the sandbox's own pod |
+| `pod_template` | `model.PodTemplate`: the pod's command, env (literals, secrets by name and version, or parts of both with a URL's userinfo escaped), volumes, mounts, security groups, name tables and labels; fixed, but a sandbox's, which the begin of its pod's next create or restore makes of its groups while `groups_pending` (ADR 0035). NULL: a pod without one (sleep infinity, feosd's default group) |
 | `pin_node` | a create goes to this node alone; a start or resume goes to the row's own node anyway, where its pod and volume are, and a restore anywhere, its checkpoint carrying the volume; a pinned row avoids no node |
 | `idle_after_s` | NULL: `--idle-pause`; 0: never; n: seconds |
 | `address` | the pod's IPv6 address as last observed in CreatePod, RestorePod, GetPod and ListPods, cleared when the pod is gone or hibernated; a change sends `env-groups` in its transaction: every row is in its environment's groups |
@@ -2519,14 +2519,18 @@ an environment without deployments is a valid place for them.
   refused.
 - **A change of a sandbox's groups is a move.** `PUT
   /api/v1/sandboxes/{id}/security-groups` writes the list
-  (`store.SetSandboxGroups`) and, for a sandbox whose pod may run under
-  the old list (every state but `pending`, `hibernating` and
-  `hibernated`), sets `groups_pending` and sends `ferun_leader`
-  `env-groups`. The controller moves such a sandbox, a hibernation
-  and a restore with the row's groups and a new address, and clears the
-  flag, as any create or restore that makes its pod with them does;
-  `RestorePodRequest` carries `security_groups` and `name_tables` for
-  it. A job's groups are fixed.
+  (`store.SetSandboxGroups`), sets `groups_pending` and sends
+  `ferun_leader` `env-groups`. The begin of the create or restore that
+  makes the sandbox's pod next, in its transaction with the row locked,
+  makes the template of the list (`store.ApplySandboxGroups`:
+  `env-<env>`, the `sg-<row>` of each name, the table `env-<env>`) and
+  clears the mark; the restore sends the template's groups and tables
+  (`RestorePodRequest.security_groups`, `name_tables`, which replace the
+  checkpointed spec's; every restore of a row with a template sends
+  both). A sandbox whose pod runs under the old list is moved by the
+  controller's `env-groups-moves` ([Security groups](#security-groups)):
+  hibernated, and restored when it was running. A job's groups are
+  fixed.
 - **Delete and clone.** `DELETE /api/v1/environments/{env}` with
   sandboxes or queued or running jobs is 409 `environment_in_use`
   `{error, code, sandboxes: [ids], jobs: [ids]}`: their makers delete
@@ -2542,21 +2546,27 @@ an environment without deployments is a valid place for them.
   `ferun.object` its ID; a tenant's job's carry `ferun.environment`
   beside its own, so that a reader of the environment sees them ([The
   sink](#the-sink)).
-- **Every sandbox has the template** that only an attachable one had
-  before: `sleep infinity`, its own group and name table `sbx-<id>`, so
-  that any sandbox can run its environment's attached services; an
-  attached service names a sandbox of its own environment and is in its
-  sandbox's groups. A create that sends `attachable` is 400 "attachable
-  is gone with ADR 0035: …".
+- **Every sandbox has a template** (`model.SandboxTemplate`, made at the
+  create by `store.SandboxTemplate`): `sleep infinity`, the groups
+  `env-<env>` and the `sg-<row>` of each of its groups, and the name
+  table `env-<env>`; a tenant's job's pod names the same groups and table
+  beside its own command and env. Any sandbox can run its environment's
+  attached services: an attached service names a sandbox of its own
+  environment, is in its sandbox's groups and is named in `env-<env>`'s
+  table with the sandbox's address. The group and the table `sbx-<id>`
+  are gone; `env-groups` and `env-names` delete those a node still has
+  once no pod names them. A create that sends `attachable` is 400
+  "attachable is gone with ADR 0035: …".
 - **The migration** (`0032`) moves the rows once: a sandbox that the
   latest deployment of an environment not being deleted names as an
   attached service's goes into that environment, the most recently
   created of several; every other sandbox, and every job of a tenant
   (its record and its pod), into the tenant's environment `sandboxes`,
   which it makes (empty, its group `default`; a tenant that has one keeps
-  it). All are in `[default]`. Sandboxes with a pod are marked
-  `groups_pending`, so that they are moved once; a hibernated one takes
-  its groups at its restore; a running job ends under the groups it has.
+  it). All are in `[default]`, and every sandbox is marked
+  `groups_pending`: one with a pod is moved once, a hibernated or never
+  started one gets its template at its restore or create; a running job
+  ends under the groups it has.
   Their log labels get their environment (a pod that runs keeps those of
   its create until its next restore). The version before inserts rows
   without an environment, which the not-null columns refuse: the
@@ -2567,7 +2577,7 @@ an environment without deployments is a valid place for them.
 | `POST /api/v1/sandboxes` `{environment, securityGroups?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` `[]`, more than 5, a name that is none or one named twice, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for a group the deployed deployment does not have |
 | `GET /api/v1/sandboxes[?environment=]` | `{sandboxes}`, oldest first: those the principal reads, of the one environment when it names one (by name or ID) |
 | `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}` and `securityGroups` |
-| `PUT /api/v1/sandboxes/{id}/security-groups` `{securityGroups}` | 202 the view, the move pending for a sandbox with a pod; 200 for the list it has (in any order), nothing done; 400, 422 as a create's |
+| `PUT /api/v1/sandboxes/{id}/security-groups` `{securityGroups}` | 202 the view, marked `groups_pending`: a sandbox with a pod is moved, one without takes them at its next create or restore; 200 for the list it has (in any order), nothing done; 400, 422 as a create's |
 | `POST /api/v1/jobs` `{environment, securityGroups?, …}` | as before ([Tenants' jobs](#tenants-jobs)), and as a sandbox's create for the two fields |
 | `DELETE /api/v1/environments/{env}` | 409 `environment_in_use` while sandboxes or queued or running jobs are in it |
 
@@ -2704,10 +2714,12 @@ names no deployment has any more is left to a later cleanup. Migration
 0031 wrote today's open rule into the latest and the deployed
 deployments of the environments made before (`default` in from
 `default`, any protocol), so that they stay as open as they were;
-environments made after start closed. The delta log of member changes,
-the batched push to the nodes, the ingress's check of blocks, drops in
-the sink and the propagation metric of ADR 0034 are not in this
-release: the groups reach the nodes through `env-groups`, put whole.
+environments made after start closed. How the controller renders the
+groups and their members is in [Security groups](#security-groups). The
+delta log of member changes, the batched push to the nodes
+(`UpdateSecurityGroups`), the ingress's check of blocks, drops in the
+sink and the propagation metric of ADR 0034 are not in this release:
+the groups reach the nodes through `env-groups`, put whole.
 
 ### Plan, apply, revert, clone
 
@@ -2753,15 +2765,16 @@ release: the groups reach the nodes through `env-groups`, put whole.
 
 ### The controller
 
-The leader runs seven loops of `env/ctl`, fenced, none with a node call
+The leader runs eight loops of `env/ctl`, fenced, none with a node call
 inside a transaction:
 
 | Loop | Interval | Does |
 |---|---|---|
 | `env-reconcile` | 2 s, hint `env-reconcile` | a step ([below](#a-reconcile-step)) for each environment that has a deployment and is not deleted, four at once |
 | `env-probe` | 1 s | exits, restarts and readiness of the instances whose rows run without an op on a node this instance is connected to; attached services; the tenants' jobs that have not ended, and the pods their ends left ([Tenants' jobs](#tenants-jobs)); at most 16 checks at once |
-| `env-groups` | 10 s, hint `env-groups` | per connected node, the groups its rows' templates name and the groups their rules name (`ferun-ingress` among them), put again where the node's differ, and what the node holds of the ingress's groups recorded ([Security groups](#security-groups)); the groups of environments and sandboxes that are gone deleted, once no pod names them, and an `ing-` group of a sandbox that runs elsewhere too |
-| `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments and sandboxes that are gone deleted, once no pod names them ([Names](#names)) |
+| `env-groups` | 10 s, hint `env-groups` | per connected node, the groups its rows' templates name and the groups their rules name (`ferun-ingress` among them), put again where the node's differ, and what the node holds of the ingress's groups recorded ([Security groups](#security-groups)); the groups of environments and rows that are gone deleted, once no pod names them, an `ing-` group of a sandbox that runs elsewhere and the `sbx-` groups of before ADR 0035 too |
+| `env-groups-moves` | 5 s, hint `env-groups` | the sandboxes whose groups changed and whose pod runs under the old ones, moved: hibernated, and restored when they ran ([Security groups](#security-groups)) |
+| `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments that are gone, and the `sbx-` tables of before ADR 0035, deleted once no pod names them ([Names](#names)) |
 | `env-volumes` | 30 s | volumes marked deleting, 64 a pass, deleted on their node once no pod holds them (`FAILED_PRECONDITION`: later, at the end of the queue; `NOT_FOUND`: done), then their rows; a removed node's lose their rows only; records of environments' volumes on a connected node that no pod holds and no row places there are deleted |
 | `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances deleted, its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
 | `env-bindings` | 30 s | the incidents of the environments' HTTP bindings from their pods' requests over the last five minutes ([HTTP bindings](#http-bindings)) |
@@ -2990,23 +3003,46 @@ from a running instance is not redacted.
 
 ### Security groups
 
-The controller's groups are `env-<env id>` and `sbx-<sandbox id>`, and
-the ingress's `ing-<sandbox id>` and `ferun-ingress` (below). The first
-two carry the egress table: any protocol to `0.0.0.0/0` except `0.0.0.0/8`,
-`10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`,
-`172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`,
-`192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`,
-`224.0.0.0/4` and `240.0.0.0/4`, and to `2000::/3` except `2001::/23`,
-`2001:db8::/32`, `2002::/16` and `3fff::/20`, feosd's internet sets; never
-`::/0` or a bare `0.0.0.0/0`. DNS and the metadata service need no rule.
+The controller's groups are `env-<env id>` and the tenant's `sg-<row
+id>` (ADR 0034, 0035), and the ingress's `ing-<sandbox id>` and
+`ferun-ingress` (below). The internet, wherever a rule names it, is the
+egress table: `0.0.0.0/0` except `0.0.0.0/8`, `10.0.0.0/8`,
+`100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`,
+`192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`,
+`198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4` and
+`240.0.0.0/4`, and `2000::/3` except `2001::/23`, `2001:db8::/32`,
+`2002::/16` and `3fff::/20`, feosd's internet sets; never `::/0` or a bare
+`0.0.0.0/0`. DNS, the metadata service and the node address need no rule.
 
-- **The env group** adds ingress and egress of any protocol from and to
-  itself. Its members are the IPv6 addresses of the environment's
-  instance rows, in any phase until the row goes, and of the sandboxes
-  its attached services run in, while the service may use them.
-- **The sbx group** of an attachable sandbox adds egress to each env
-  group the sandbox's attached services belong to, and no ingress: image
-  pods never reach a sandbox.
+- **Every pod of an environment** names `env-<env>` and the `sg-<row>`
+  of each of its groups, in its template: an instance those its object
+  names (`default` when it names none), a sandbox and a tenant's job's
+  pod those of `sandboxes.security_groups`
+  ([Sandboxes and jobs in an environment](#sandboxes-and-jobs-in-an-environment)).
+  The groups are part of the template hash: the first ferund with them
+  rolls every image service, restarts every job and recreates every
+  addon once. An attached service has no groups of its own: its process
+  runs in its sandbox's pod.
+- **The env group** takes nothing in; its one rule is egress of any
+  protocol to itself, the implied rule: a pod may send to every pod of
+  its environment, and the receiver's groups decide. Its members are the
+  IPv6 addresses of every row of the environment, its instances in any
+  phase until the row goes, its sandboxes and its tenants' jobs' pods.
+- **A tenant's group** has the rules its environment's spec writes:
+  those of the target's spec (the latest deployment, unless it failed:
+  then the deployed one), else of the other of the two, so that a group
+  a deployment removes keeps its rules while pods still name it; a
+  group that neither has is `default`'s as normalisation writes it
+  (nothing in, the internet out) or none. An `in` rule is an ingress
+  rule from its peer, an `out` rule an egress rule to it; a group peer
+  is the group's `sg-<row>` (the nodes then hold it too, members and
+  all), a block an address block with its exceptions, `internet` the
+  egress table's two blocks; ports are ranges, `icmp` is ICMP towards an
+  IPv4 block and ICMPv6 otherwise. Its members are the addresses of the
+  environment's rows whose template names it
+  (`store.EnvCtlGroupMembers`). Its version is a hash of its content. A
+  changed rule reaches every node that holds the group within a pass of
+  `env-groups`; the pods stay.
 - **The ing group** of an image service's pod of an environment whose
   `ingress_group` is set ([Public environments](#public-environments))
   is the pod's own: the controller adds `ing-<sandbox id>` to the row's
@@ -3015,12 +3051,12 @@ two carry the egress table: any protocol to `0.0.0.0/0` except `0.0.0.0/8`,
   numbers, in the pod's own deployment, of the ports that the routes of the
   deployed and the latest deployment give its service. Otherwise, or
   without routed ports, it has no rules; it never has members. Addons,
-  jobs and attachable sandboxes name none.
+  jobs, sandboxes and tenants' jobs' pods name none.
 - **`ferun-ingress`** has no rules; its members are the mesh addresses of
   the ingress instances that are not removed. It is never deleted.
 - **Versions.** An env group's is `environments.gen`, counted up when a
-  node holds the group at that version with other content; an sbx or ing
-  group's is a hash of its content; `ferun-ingress`'s is
+  node holds the group at that version with other content; a tenant's
+  or an ing group's is a hash of its content; `ferun-ingress`'s is
   `pod_network.ingress_group_version`, counted up under that row's lock
   in the transaction that changes the members, so that its versions
   follow commit order. Put ignores versions, so a group is put again
@@ -3035,12 +3071,35 @@ two carry the egress table: any protocol to `0.0.0.0/0` except `0.0.0.0/8`,
   puts that race (the prepare hook's and a pass's) can leave a record
   wrong for one pass; the next one records again. An `ing-` group a node
   holds that none of its rows wants is deleted when its sandbox is gone
-  or placed on another node, once no pod there names it.
+  or placed on another node, once no pod there names it; an env group or
+  a tenant's group when its environment or its row is gone; an `sbx-`
+  group of before ADR 0035 always, once no pod names it.
 
-**A sandbox's template.** Every sandbox (ADR 0035) gets the template an
-attachable sandbox had: `sleep infinity`, no env, the group and the
-name table `sbx-<id>`. A sandbox made before without one has no
-template until it is moved.
+**Moves** (`env-groups-moves`, 5 s, woken by the hint `env-groups`):
+a sandbox whose groups changed (`groups_pending`) and whose pod is
+running, paused, stopped or failed on a connected node, without an op, is
+moved in the pool, single flight per sandbox. `Engine.HibernateToMove`
+hibernates it with the trigger `move`: from any of those states (feosd
+suspends a running pod first), never abandoned by a resume (a call that
+needs the sandbox waits for it, then restores it), without hold checks,
+the mark rechecked in the begin. The restore's begin makes the template
+of its groups and clears the mark, and RestorePod sends the template's
+groups and tables, so that the pod comes back in its new groups under a
+new address (feosd never gives an address twice), its disk and memory
+as they were. The controller restores a sandbox that was running
+(Ensure) at once; a paused, stopped or failed one stays hibernated
+until its next use. A move that fails is tried again after a backoff. A
+leader that ends between the hibernation and the restore leaves the
+sandbox hibernated: its next call restores it in its groups. A sandbox
+without a pod (pending, hibernated, lost) is not moved: its next create
+or restore takes its groups. A member therefore never joins a group while
+its pod runs.
+
+**A sandbox's template.** Every sandbox (ADR 0035) has the template
+`sleep infinity`, no env, its groups (`env-<env>` and its `sg-<row>`s)
+and the name table `env-<env>`. A sandbox made before has the old one
+(or none) and is marked, so that its pod's next create or restore makes
+it.
 
 **The prepare hook** (`Engine.SetPrepareHook`) runs for a row with a
 template once its op has the node's connection and its pod spec (a
@@ -3074,19 +3133,20 @@ from the name tables the controller puts on the nodes
 (`feos.network.v1.NameService`), as it puts the groups:
 
 - **The env table**, `env-<env id>`, which the templates of the
-  environment's service and job instances name (an addon's names none:
-  it reaches nothing by name), names T's addons and image services with
-  the IPv6 addresses of their live replicas; while none is live, those
-  of the replicas whose row's state is known; only then those of unknown
-  ones, whose node is out of touch and whose address may be stale; never
-  a stopping one's. An environment without a deployment, or being deleted,
-  has an empty table.
-- **The sbx table**, `sbx-<sandbox id>`, which an attachable sandbox's
-  template names from its creation, names the attached services whose
-  rows name the sandbox and may use it, each as `127.0.0.1` and `::1`,
-  and includes the env tables of their environments, which the node
-  looks in after the sandbox's own names. A sandbox that gains or loses
-  attached services keeps its pod: only its table changes.
+  environment's service and job instances, its sandboxes and its
+  tenants' jobs' pods name (an addon's names none: it reaches nothing by
+  name), names T's addons and image services with the IPv6 addresses of
+  their live replicas; while none is live, those of the replicas whose
+  row's state is known; only then those of unknown ones, whose node is
+  out of touch and whose address may be stale; never a stopping one's.
+  It names T's attached services with the IPv6 address of the sandbox
+  each runs in, while its row names the sandbox, the service may use it
+  and it has an address. In its own sandbox an attached service's name
+  is the sandbox's own address, which the guest reaches over its
+  loopback interface: the service listens on that address (or on all),
+  as the environment's pods reach it there. An environment without a
+  deployment, or being deleted, has an empty table. The table `sbx-<id>`
+  is gone (ADR 0035); a node's is deleted once no pod names it.
 - **Versions** are a hash of a table's ID, names and includes, never 0,
   so that equal tables have equal versions on every node and a delta
   means the same wherever it applies.
@@ -3095,8 +3155,8 @@ from the name tables the controller puts on the nodes
   table the node lacks, or has with other includes, is put whole; one
   whose names differ is updated by a delta from the node's version, the
   names to put and those to remove, and put whole when the node refuses
-  it (`FAILED_PRECONDITION`); the tables of environments and sandboxes
-  that are gone are deleted once no pod names them. A replica whose
+  it (`FAILED_PRECONDITION`); the tables of environments that are gone,
+  and `sbx-` tables, are deleted once no pod names them. A replica whose
   phase moves, one that stops or goes, and an attached service
   recorded, moved, failed or dropped send `env-names`. The prepare hook
   puts a row's tables before its pod call.
@@ -3117,13 +3177,13 @@ from the name tables the controller puts on the nodes
 
 A pod's tables are in its template, and so in its template hash: the
 first ferund with names rolls every image service and gives every job a
-new template once. A sandbox made attachable before has no table, and
-resolves no names until it is created again.
+new template once.
 
 ### Attached services
 
 An attached service is a supervised process in the main container of a
-sandbox of the tenant's, named `ferun-env-<env>-<service>`. The step
+sandbox of its environment, in the sandbox's groups, named
+`ferun-env-<env>-<service>`. The step
 records it with the sandbox's incarnation, moves it when the spec names
 another sandbox, and wakes a sandbox that does not run (Acquire with an
 exec hold) to start its process, holding it up to a minute for the first

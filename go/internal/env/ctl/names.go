@@ -22,27 +22,23 @@ import (
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
-	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // The names of environments (§4.6): feosd's resolver answers a pod the
 // names of the name tables its spec names (NameService, ADR 0010), as the
 // controller puts them on the pod's node, the way it puts security
-// groups. env-<env id>, which the environment's service and job pods
-// name, holds its addons and image services with the addresses of their
-// live replicas; sbx-<sandbox id>, which an attachable sandbox names,
-// holds the sandbox's own attached services on loopback and includes the
-// env tables of their environments. A table's version is a hash of its
-// content, so that equal tables have equal versions on every node and a
-// delta between two versions is the same wherever it applies. A node
-// whose feosd predates the NameService (UNIMPLEMENTED) gets no tables:
-// its pods start without names there, and names_unserved opens for the
-// objects whose pods run there.
-
-// loopback are the addresses of an attached service's name in its own
-// sandbox.
-var loopback = []string{"127.0.0.1", "::1"}
+// groups. env-<env id>, which every pod of the environment names (its
+// service and job pods, its sandboxes and its tenants' jobs' pods, ADR
+// 0035), holds its addons and image services with the addresses of their
+// live replicas, and its attached services with their sandbox's address;
+// in its own sandbox an attached service's name is the sandbox's own
+// address, which the guest reaches over its loopback interface. A
+// table's version is a hash of its content, so that equal tables have
+// equal versions on every node and a delta between two versions is the
+// same wherever it applies. A node whose feosd predates the NameService
+// (UNIMPLEMENTED) gets no tables: its pods start without names there,
+// and names_unserved opens for the objects whose pods run there.
 
 // nameEntries are the names of the environment's addons and image
 // services with their addresses: those of the replicas live counts ready,
@@ -186,55 +182,67 @@ func tableDelta(have, want *networkv1.NameTable) ([]*networkv1.NameEntry, []stri
 	return put, remove
 }
 
-// parseTable reads a name table ID of the controller's: an env or an sbx
-// group's ID (EnvTableID, SandboxTableID); ok false for any other.
+// parseTable reads a name table ID of the controller's: an env group's
+// ID (EnvTableID); ok false for any other.
 func parseTable(id string) (groupRef, bool) {
 	ref, ok := parseGroup(id)
-	return ref, ok && (ref.kind == groupEnv || ref.kind == groupSbx)
+	return ref, ok && ref.kind == groupEnv
 }
 
 // buildTable is a name table as the database says it should be, with the
-// tables it includes. An env table of an environment that has no deployment
-// or is being deleted holds no names.
+// tables it includes (none). An env table of an environment that has no
+// deployment or is being deleted holds no names.
 func (c *Controller) buildTable(ctx context.Context, id string) (*networkv1.NameTable, []string, error) {
 	ref, ok := parseTable(id)
 	if !ok {
 		return nil, nil, fmt.Errorf("%s is not a name table of the environments", id)
 	}
-	if ref.kind == groupEnv {
-		if _, err := c.st.GetEnvironment(ctx, ref.env); errors.Is(err, store.ErrNoRow) {
-			return nil, nil, errNoGroup
-		} else if err != nil {
-			return nil, nil, err
-		}
-		v, err := c.load(ctx, ref.env)
-		if err != nil {
-			return nil, nil, err
-		}
-		names := map[string][]string{}
-		if v != nil {
-			names = nameEntries(v)
-		}
-		return newTable(id, names, nil), nil, nil
-	}
-	if _, err := c.st.GetSandbox(ctx, ref.sbx); errors.Is(err, model.ErrNotFound) {
+	if _, err := c.st.GetEnvironment(ctx, ref.env); errors.Is(err, store.ErrNoRow) {
 		return nil, nil, errNoGroup
 	} else if err != nil {
 		return nil, nil, err
 	}
-	attached, err := c.st.EnvCtlAttachedIn(ctx, ref.sbx)
+	v, err := c.load(ctx, ref.env)
 	if err != nil {
 		return nil, nil, err
 	}
 	names := map[string][]string{}
-	var includes []string
-	for _, a := range attached {
-		names[a.Service] = loopback
-		if inc := model.EnvTableID(a.EnvID); !slices.Contains(includes, inc) {
-			includes = append(includes, inc)
+	if v != nil {
+		names = nameEntries(v)
+		attached, err := c.attachedEntries(ctx, v)
+		if err != nil {
+			return nil, nil, err
+		}
+		maps.Copy(names, attached)
+	}
+	return newTable(id, names, nil), nil, nil
+}
+
+// attachedEntries are the names of the attached services of T with the
+// IPv6 address of the sandbox each runs in, where it may use it
+// (attachedUsable) and the sandbox has one (ADR 0035).
+func (c *Controller) attachedEntries(ctx context.Context, v *view) (map[string][]string, error) {
+	out := map[string][]string{}
+	for _, name := range slices.Sorted(maps.Keys(v.attached)) {
+		if svc, ok := v.target.Services[name]; !ok || runtimeOf(svc) != spec.RuntimeAttached {
+			continue
+		}
+		a := v.attached[name]
+		sb, err := c.st.GetSandbox(ctx, a.SandboxID)
+		if errors.Is(err, model.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !attachedUsable(v.env, a, sb) {
+			continue
+		}
+		if ip, err := netip.ParseAddr(sb.Address); err == nil && ip.Is6() && !ip.Is4In6() && ip.Zone() == "" {
+			out[name] = []string{ip.String()}
 		}
 	}
-	return newTable(id, names, includes), includes, nil
+	return out, nil
 }
 
 // builtTable is a table as buildTable made it, with the tables it
@@ -359,9 +367,9 @@ func (c *Controller) putNames(ctx context.Context, node string, sb store.Sandbox
 // namesLoop is env-names: per connected node, the tables that the
 // templates of its rows name (and the tables those include) are compared
 // with what the node lists and put where they differ, as deltas where
-// they can be; the tables of environments and sandboxes that no longer
-// exist are deleted (a pod that still names one keeps it:
-// FAILED_PRECONDITION). A node that answers UNIMPLEMENTED is remembered
+// they can be; the tables of environments that no longer exist, and the
+// sbx tables of before ADR 0035, are deleted (a pod that still names one
+// keeps it: FAILED_PRECONDITION). A node that answers UNIMPLEMENTED is remembered
 // as serving no names, for names_unserved.
 func (c *Controller) namesLoop(ctx context.Context) error {
 	if c.d.Conns == nil {
@@ -422,22 +430,21 @@ func (c *Controller) syncNodeNames(ctx context.Context, node string, cache map[s
 			errs = append(errs, fmt.Errorf("put %s: %w", id, err))
 		}
 	}
-	// Tables of environments and sandboxes that are gone.
+	// Tables of environments that are gone, and the sbx tables of before
+	// ADR 0035.
 	var envs []uuid.UUID
-	var sbxs []podid.ID
+	var legacy []string
 	for id := range have {
 		if _, wanted := want[id]; wanted {
 			continue
 		}
-		if ref, ok := parseTable(id); ok {
-			if ref.kind == groupEnv {
-				envs = append(envs, ref.env)
-			} else {
-				sbxs = append(sbxs, ref.sbx)
-			}
+		if strings.HasPrefix(id, legacySandboxPrefix) {
+			legacy = append(legacy, id)
+		} else if ref, ok := parseTable(id); ok {
+			envs = append(envs, ref.env)
 		}
 	}
-	envOK, sbxOK, err := c.st.EnvCtlExisting(ctx, envs, sbxs)
+	envOK, _, err := c.st.EnvCtlExisting(ctx, envs, nil)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
@@ -447,11 +454,9 @@ func (c *Controller) syncNodeNames(ctx context.Context, node string, cache map[s
 			errs = append(errs, err)
 		}
 	}
-	for _, sbx := range sbxs {
-		if !sbxOK[sbx] {
-			_, err := c.deleteTable(ctx, node, model.SandboxTableID(sbx))
-			errs = append(errs, err)
-		}
+	for _, id := range legacy {
+		_, err := c.deleteTable(ctx, node, id)
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

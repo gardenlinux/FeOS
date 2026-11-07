@@ -102,8 +102,11 @@ func (f *fakeEngine) ResolveImage(_ context.Context, image string, _ model.Regis
 func (f *fakeEngine) Acquire(_ context.Context, id podid.ID, _ model.HoldKind) (model.Lease, func(), error) {
 	return model.Lease{SandboxID: id}, func() {}, nil
 }
-func (f *fakeEngine) Touch(podid.ID)                       {}
-func (f *fakeEngine) PushHTTPBindings(podid.ID)            {}
+func (f *fakeEngine) Touch(podid.ID)            {}
+func (f *fakeEngine) PushHTTPBindings(podid.ID) {}
+func (f *fakeEngine) HibernateToMove(context.Context, podid.ID) (bool, error) {
+	return false, nil
+}
 func (f *fakeEngine) Sync(context.Context, podid.ID) error { return nil }
 func (f *fakeEngine) State(context.Context, podid.ID) (string, string, error) {
 	return model.StateRunning, "n1", nil
@@ -336,8 +339,7 @@ func (h *harness) envOf(tenant, name string) uuid.UUID {
 func (h *harness) sandboxWithID(tenant, env string, id podid.ID) podid.ID {
 	h.t.Helper()
 	n := store.NewSandbox{ID: id, Owner: tenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: h.envOf(tenant, env),
-		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
-			SecurityGroups: []string{model.SandboxGroupID(id)}}}
+		PodTemplate: model.SandboxTemplate(h.envOf(tenant, env), nil)}
 	if _, _, err := h.st.CreateSandbox(h.ctx(), n); err != nil {
 		h.t.Fatal(err)
 	}

@@ -22,70 +22,39 @@ func TestEnvCtlQueries(t *testing.T) {
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "stage")
 	other := mkEnv(t, s, "acme", "prod")
-	a := mkInstance(t, s, env)
+	web := model.SecurityGroupID(uuid.New())
+	a := mkInstance(t, s, env, func(n *store.NewSandbox) {
+		n.PodTemplate.SecurityGroups = append(n.PodTemplate.SecurityGroups, web)
+	})
 	b := mkInstance(t, s, env)
 	mkInstance(t, s, other)
 	sbx := mkSandboxIn(t, s, "acme", env.ID, podid.Mint())
+	exec(t, s, `UPDATE sandboxes SET pod_template = $2 WHERE id = $1`, sbx.ID,
+		`{"securityGroups": ["env-`+env.ID.String()+`", "`+web+`"]}`)
 	elsewhere := mkSandbox(t, s, "acme")
 	exec(t, s, `UPDATE sandboxes SET address = 'fd00::2' WHERE id = $1`, a.ID)
 	exec(t, s, `UPDATE sandboxes SET address = 'fd00::9' WHERE id = $1`, sbx.ID)
+	exec(t, s, `UPDATE sandboxes SET address = 'fd00::6' WHERE id = $1`, elsewhere.ID)
 
-	// Members: the instances' addresses and those of the attached
-	// services' sandboxes.
-	if m, err := s.EnvCtlMembers(bg, env.ID); err != nil || !slices.Equal(m, []string{"fd00::2"}) {
+	// env-<id>'s members: every row of the environment with an address,
+	// its sandboxes too (ADR 0035); not another environment's.
+	if m, err := s.EnvCtlMembers(bg, env.ID); err != nil || !slices.Equal(m, []string{"fd00::2", "fd00::9"}) {
 		t.Fatalf("members %v %v", m, err)
 	}
-	if _, err := s.InsertAttached(bg, store.EnvAttached{EnvID: env.ID, Service: "web", SandboxID: sbx.ID}); err != nil {
-		t.Fatal(err)
-	}
-	if m, err := s.EnvCtlMembers(bg, env.ID); err != nil || !slices.Equal(m, []string{"fd00::2", "fd00::9"}) {
-		t.Fatalf("members with an attached service %v %v", m, err)
-	}
-	if envs, err := s.EnvCtlWithAttached(bg, sbx.ID); err != nil || !slices.Equal(envs, []uuid.UUID{env.ID}) {
-		t.Fatalf("attached to %v %v", envs, err)
-	}
-	// A sandbox the attached service may not use is neither a member nor
-	// attached: one of another environment (ADR 0035), another tenant's,
-	// or an instance row.
-	exec(t, s, `UPDATE sandboxes SET address = 'fd00::6' WHERE id = $1`, elsewhere.ID)
-	if _, err := s.InsertAttached(bg, store.EnvAttached{EnvID: env.ID, Service: "box", SandboxID: elsewhere.ID}); err != nil {
-		t.Fatal(err)
-	}
-	if envs, err := s.EnvCtlWithAttached(bg, elsewhere.ID); err != nil || len(envs) != 0 {
-		t.Fatalf("a sandbox of another environment attached to %v %v", envs, err)
-	}
-	mkTenant(t, s, "evil")
-	foreign := mkSandbox(t, s, "evil")
-	exec(t, s, `UPDATE sandboxes SET address = 'fd00::7' WHERE id = $1`, foreign.ID)
-	if _, err := s.InsertAttached(bg, store.EnvAttached{EnvID: env.ID, Service: "api", SandboxID: foreign.ID}); err != nil {
-		t.Fatal(err)
-	}
 	exec(t, s, `UPDATE sandboxes SET address = 'fd00::8' WHERE id = $1`, b.ID)
-	if _, err := s.InsertAttached(bg, store.EnvAttached{EnvID: other.ID, Service: "inst", SandboxID: b.ID}); err != nil {
-		t.Fatal(err)
-	}
 	if m, err := s.EnvCtlMembers(bg, env.ID); err != nil || !slices.Equal(m, []string{"fd00::2", "fd00::8", "fd00::9"}) {
-		t.Fatalf("members with a foreign sandbox attached %v %v", m, err)
+		t.Fatalf("members with b %v %v", m, err)
 	}
 	if m, err := s.EnvCtlMembers(bg, other.ID); err != nil || len(m) != 0 {
-		t.Fatalf("members with an instance row attached %v %v", m, err)
+		t.Fatalf("members of another environment %v %v", m, err)
 	}
-	if envs, err := s.EnvCtlWithAttached(bg, foreign.ID); err != nil || len(envs) != 0 {
-		t.Fatalf("a foreign sandbox attached to %v %v", envs, err)
+	// A tenant's group's members: the rows whose template names it.
+	if m, err := s.EnvCtlGroupMembers(bg, env.ID, web); err != nil || !slices.Equal(m, []string{"fd00::2", "fd00::9"}) {
+		t.Fatalf("group members %v %v", m, err)
 	}
-	if envs, err := s.EnvCtlWithAttached(bg, b.ID); err != nil || len(envs) != 0 {
-		t.Fatalf("an instance row attached to %v %v", envs, err)
+	if m, err := s.EnvCtlGroupMembers(bg, other.ID, web); err != nil || len(m) != 0 {
+		t.Fatalf("group members in another environment %v %v", m, err)
 	}
-	// A new incarnation of the owner's sandbox under the same ID (the
-	// recorded one is older) is the service's still (§13.6).
-	exec(t, s, `UPDATE env_attached SET sandbox_incarnation = $2 WHERE env_id = $1 AND service = 'web'`, env.ID, uuid.New())
-	if m, err := s.EnvCtlMembers(bg, env.ID); err != nil || !slices.Equal(m, []string{"fd00::2", "fd00::8", "fd00::9"}) {
-		t.Fatalf("members with another incarnation recorded %v %v", m, err)
-	}
-	if envs, err := s.EnvCtlWithAttached(bg, sbx.ID); err != nil || !slices.Equal(envs, []uuid.UUID{env.ID}) {
-		t.Fatalf("another incarnation attached to %v %v", envs, err)
-	}
-	exec(t, s, `DELETE FROM env_attached WHERE service IN ('api', 'inst', 'box')`)
 	if rows, err := s.EnvCtlSandboxes(bg, env.ID); err != nil || len(rows) != 2 {
 		t.Fatalf("instance rows %v %v", rows, err)
 	}
@@ -271,16 +240,21 @@ func TestEnvCtlQueries(t *testing.T) {
 		t.Fatalf("touch an environment that is not there: %v", err)
 	}
 
-	// Which environments and sandboxes exist.
-	gone, goneSbx, goneLegacy := uuid.New(), podid.Mint(), legacyID()
-	envs, sbs, err := s.EnvCtlExisting(bg, []uuid.UUID{env.ID, gone}, []podid.ID{sbx.ID, goneSbx, goneLegacy})
-	if err != nil || !envs[env.ID] || envs[gone] || !sbs[sbx.ID] || sbs[goneSbx] || sbs[goneLegacy] {
-		t.Fatalf("existing %v %v %v", envs, sbs, err)
+	// Which environments and groups' rows exist.
+	gone, goneGroup := uuid.New(), uuid.New()
+	row, err := s.SecurityGroupID(bg, env.ID, "default")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if envs, sbs, err := s.EnvCtlExisting(bg, nil, nil); err != nil || len(envs) != 0 || len(sbs) != 0 {
-		t.Fatalf("existing of none %v %v %v", envs, sbs, err)
+	envs, groups, err := s.EnvCtlExisting(bg, []uuid.UUID{env.ID, gone}, []uuid.UUID{row, goneGroup})
+	if err != nil || !envs[env.ID] || envs[gone] || !groups[row] || groups[goneGroup] {
+		t.Fatalf("existing %v %v %v", envs, groups, err)
+	}
+	if envs, groups, err := s.EnvCtlExisting(bg, nil, nil); err != nil || len(envs) != 0 || len(groups) != 0 {
+		t.Fatalf("existing of none %v %v %v", envs, groups, err)
 	}
 
+	goneSbx, goneLegacy := podid.Mint(), legacyID()
 	// The inputs of ing groups: an instance's environment, kind, object
 	// and deployment; a sandbox without an instance row with none; a sandbox
 	// that is gone missing.

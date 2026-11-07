@@ -252,7 +252,28 @@ type view struct {
 	secrets map[string]int
 	// open are the environment's open incidents.
 	open []store.EnvIncident
-	now  time.Time
+	// groupIDs are the IDs of the rows of the environment's security
+	// groups, by name (ADR 0034).
+	groupIDs map[string]uuid.UUID
+	now      time.Time
+}
+
+// podGroups are the security groups a pod of an object in the groups
+// names names (model.PodGroups): env-<environment> and sg-<row> of each;
+// default when it names none, as normalisation writes it.
+func (v *view) podGroups(names []string) ([]string, error) {
+	if len(names) == 0 {
+		names = []string{spec.DefaultSecurityGroup}
+	}
+	ids := make([]uuid.UUID, 0, len(names))
+	for _, n := range names {
+		id, ok := v.groupIDs[n]
+		if !ok {
+			return nil, fmt.Errorf("security group %s has no row", n)
+		}
+		ids = append(ids, id)
+	}
+	return model.PodGroups(v.env.ID, ids), nil
 }
 
 // isOpen reports whether an incident of condition is open for object.
@@ -329,6 +350,9 @@ func (c *Controller) load(ctx context.Context, envID uuid.UUID) (*view, error) {
 		v.secrets[s.Name] = s.Version
 	}
 	if v.open, err = c.st.ListIncidents(ctx, envID, true); err != nil {
+		return nil, err
+	}
+	if v.groupIDs, err = c.st.SecurityGroupIDs(ctx, envID); err != nil {
 		return nil, err
 	}
 	if v.now, err = c.st.Now(ctx); err != nil {

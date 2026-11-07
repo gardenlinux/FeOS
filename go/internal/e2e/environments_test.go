@@ -147,11 +147,18 @@ func TestEnvironments(t *testing.T) {
 	}
 	sb := sandbox{id: podid.ID(created.Status.SandboxID), token: created.Token}
 	c.run(a, sb, "mkdir -p app")
-	if g := nodeGroup(n1, model.SandboxGroupID(sb.id)); g == nil {
-		t.Fatal("the sandbox runs without its group on the node")
+	def, err := c.st.SecurityGroupID(bg, env.ID, "default")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if nt := nodeTable(n1, model.SandboxTableID(sb.id)); nt == nil {
-		t.Fatal("the sandbox runs without its name table on the node")
+	if g := nodeGroup(n1, model.SecurityGroupID(def)); g == nil {
+		t.Fatal("the sandbox runs without its group default on the node")
+	}
+	if g := nodeGroup(n1, model.EnvGroupID(env.ID)); g == nil {
+		t.Fatal("the sandbox runs without its environment's group on the node")
+	}
+	if nt := nodeTable(n1, model.EnvTableID(env.ID)); nt == nil {
+		t.Fatal("the sandbox runs without its environment's name table on the node")
 	}
 	if err := os.MkdirAll(filepath.Join(n1.PodDir(sb.id), "app"), 0o755); err != nil {
 		t.Fatal(err)
@@ -172,13 +179,14 @@ func TestEnvironments(t *testing.T) {
 	host := c.row(sb.id)
 	eventually(t, 30*time.Second, "the groups", func() bool {
 		eg := nodeGroup(n1, model.EnvGroupID(env.ID))
-		sg := nodeGroup(n1, model.SandboxGroupID(sb.id))
-		return eg != nil && sg != nil && slices.Contains(eg.Members, api.Address) && slices.Contains(eg.Members, host.Address) &&
-			slices.ContainsFunc(sg.Rules, func(r *networkv1.Rule) bool { return r.GetGroup() == model.EnvGroupID(env.ID) })
+		dg := nodeGroup(n1, model.SecurityGroupID(def))
+		return eg != nil && dg != nil && slices.Contains(eg.Members, api.Address) && slices.Contains(eg.Members, host.Address) &&
+			slices.Contains(dg.Members, api.Address) && slices.Contains(dg.Members, host.Address)
 	})
 	eventually(t, 10*time.Second, "the names", func() bool {
-		return resolves(n1, sb.id, "api", api.Address) && resolves(n1, sb.id, "web", "127.0.0.1", "::1") &&
-			resolves(n1, api.ID, "api", api.Address) && resolves(n1, api.ID, "web")
+		addr := c.row(sb.id).Address
+		return resolves(n1, sb.id, "api", api.Address) && resolves(n1, sb.id, "web", addr) &&
+			resolves(n1, api.ID, "api", api.Address) && resolves(n1, api.ID, "web", addr)
 	})
 	var lines []string
 	eventually(t, 10*time.Second, "the process's log", func() bool {

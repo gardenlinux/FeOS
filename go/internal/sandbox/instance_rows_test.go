@@ -352,7 +352,7 @@ func TestPrepareHookFailureInRepair(t *testing.T) {
 	// processes.
 	id := podid.Mint()
 	sb := h.instance(h.boxEnv(testTenant), &model.PodTemplate{Command: []string{"/bin/sh"},
-		SecurityGroups: []string{model.SandboxGroupID(id)}}, func(n *store.NewSandbox) { n.ID, n.Instance = id, false })
+		SecurityGroups: []string{"sg-" + id.String()}}, func(n *store.NewSandbox) { n.ID, n.Instance = id, false })
 	h.ensure(sb.ID)
 	seq.take()
 	if err := h.eng().HoldProcess(bg, sb.ID, "p1", 0); err != nil {

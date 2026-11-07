@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -309,5 +310,32 @@ func TestBuildPodSpec(t *testing.T) {
 	spec, err = buildPodSpec(bg, sb, sec.resolve)
 	if err != nil || spec.GetContainers()[0].GetEnv()["B"] != "u:x" || sec.calls != 1 {
 		t.Fatalf("spec %v %v, %d calls", spec, err, sec.calls)
+	}
+}
+
+// A restore sends the row's template's security groups and name tables,
+// which replace the checkpointed spec's (ADR 0035), beside its checkpoint
+// and log labels; a row without a template sends neither.
+func TestRestoreRequest(t *testing.T) {
+	env := uuid.New()
+	row := store.Sandbox{ID: podid.Mint(), CheckpointHead: "snapshots/x/1/head.json",
+		LogLabels: map[string]string{"ferun.tenant": "acme"}, PodTemplate: model.SandboxTemplate(env, []uuid.UUID{uuid.New()})}
+	h := &OpHandle{id: row.ID, row: row}
+	req := restoreRequest(h)
+	if req.GetPodId() != row.ID.String() || req.GetHeadKey() != row.CheckpointHead ||
+		req.GetLogLabels()["ferun.tenant"] != "acme" {
+		t.Fatalf("request %v", req)
+	}
+	if !slices.Equal(req.GetSecurityGroups(), row.PodTemplate.SecurityGroups) ||
+		!slices.Equal(req.GetNameTables(), []string{model.EnvTableID(env)}) {
+		t.Fatalf("groups %v, tables %v", req.GetSecurityGroups(), req.GetNameTables())
+	}
+	req.SecurityGroups[0] = "x"
+	if row.PodTemplate.SecurityGroups[0] == "x" {
+		t.Fatal("the request shares the template's groups")
+	}
+	h.row.PodTemplate = nil
+	if req := restoreRequest(h); len(req.GetSecurityGroups()) != 0 || len(req.GetNameTables()) != 0 {
+		t.Fatalf("without a template %v", req)
 	}
 }

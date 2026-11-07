@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/gardenlinux/feos/go/internal/db"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
@@ -85,6 +86,75 @@ func (s *Store) SecurityGroupIDs(ctx context.Context, envID uuid.UUID) (map[stri
 		return nil
 	}); err != nil {
 		return nil, fmt.Errorf("security groups of environment %s: %w", envID, err)
+	}
+	return out, nil
+}
+
+// SecurityGroupRow reads the row of a tenant's group by its ID: its
+// environment and its name; ErrNoRow when there is none.
+func (s *Store) SecurityGroupRow(ctx context.Context, id uuid.UUID) (envID uuid.UUID, name string, err error) {
+	err = s.q.QueryRow(ctx, `SELECT env_id, name FROM security_groups WHERE id = $1`, id).Scan(&envID, &name)
+	if err != nil {
+		return uuid.Nil, "", noRow(err, ErrNoRow)
+	}
+	return envID, name, nil
+}
+
+// PodGroups are the security groups on the nodes that a pod of
+// environment envID in the groups names is in (model.PodGroups):
+// env-<environment>, then sg-<row> of each name in the order given, a
+// row added for a name that has none (EnsureSecurityGroup). ErrNoRow for
+// an environment that does not exist.
+func (s *Store) PodGroups(ctx context.Context, envID uuid.UUID, names []string) ([]string, error) {
+	ids := make([]uuid.UUID, 0, len(names))
+	for _, n := range names {
+		id, err := s.EnsureSecurityGroup(ctx, envID, n)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return model.PodGroups(envID, ids), nil
+}
+
+// SandboxTemplate is the pod template of a sandbox of environment envID
+// in the groups names (model.SandboxTemplate, PodGroups).
+func (s *Store) SandboxTemplate(ctx context.Context, envID uuid.UUID, names []string) (*model.PodTemplate, error) {
+	groups, err := s.PodGroups(ctx, envID, names)
+	if err != nil {
+		return nil, err
+	}
+	t := model.SandboxTemplate(envID, nil)
+	t.SecurityGroups = groups
+	return t, nil
+}
+
+// ApplySandboxGroups gives a sandbox whose groups changed (groups_pending)
+// the template of its groups (SandboxTemplate) and clears the mark: the
+// begin of the create or restore that makes its pod (ADR 0035), in its
+// transaction, with the row locked. Not a lifecycle write: its gen stays.
+// The row as written; the row as it was when it is not pending, or not a
+// sandbox of its own.
+func (s *Store) ApplySandboxGroups(ctx context.Context, row Sandbox) (Sandbox, error) {
+	if !row.GroupsPending || !row.IsOwn() {
+		return row, nil
+	}
+	t, err := s.SandboxTemplate(ctx, row.EnvironmentID, row.SecurityGroups)
+	if err != nil {
+		return Sandbox{}, fmt.Errorf("security groups of sandbox %s: %w", row.ID, err)
+	}
+	tj, err := templateJSON(t)
+	if err != nil {
+		return Sandbox{}, err
+	}
+	out, err := scanSandbox(s.q.QueryRow(ctx, `UPDATE sandboxes SET pod_template = $3, groups_pending = false
+		WHERE id = $1 AND gen = $2 AND groups_pending AND NOT instance AND NOT tenant_job RETURNING `+sandboxCols,
+		row.ID, row.Gen, tj))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Sandbox{}, ErrStale
+	}
+	if err != nil {
+		return Sandbox{}, fmt.Errorf("security groups of sandbox %s: %w", row.ID, err)
 	}
 	return out, nil
 }
@@ -173,24 +243,23 @@ func (s *Store) DeployedSecurityGroups(ctx context.Context, envID uuid.UUID) ([]
 	return names, nil
 }
 
-// SetSandboxGroups writes a sandbox's groups (ADR 0035) and whether its
-// pod must be moved to them (pending), and reports whether the row was
-// there. Not a lifecycle write: its gen stays. pending wakes the
-// environments' groups loop (ferun_leader HintEnvGroups), whose
-// controller moves the sandbox.
-func (s *Store) SetSandboxGroups(ctx context.Context, id podid.ID, groups []string, pending bool) (bool, error) {
-	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET security_groups = $2, groups_pending = $3, updated_at = now()
-		WHERE id = $1 AND NOT instance AND NOT tenant_job`, id, nonNil(groups), pending)
+// SetSandboxGroups writes a sandbox's groups (ADR 0035) and marks it
+// pending: its template is made of them at the begin of the create or
+// restore that makes its pod next (ApplySandboxGroups), and a pod that runs
+// under the old ones is moved by the controller (hibernated, then
+// restored). It reports whether the row was there. Not a lifecycle
+// write: its gen stays. It wakes the controller's moves (ferun_leader
+// HintEnvGroups).
+func (s *Store) SetSandboxGroups(ctx context.Context, id podid.ID, groups []string) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET security_groups = $2, groups_pending = true, updated_at = now()
+		WHERE id = $1 AND NOT instance AND NOT tenant_job`, id, nonNil(groups))
 	if err != nil {
 		return false, fmt.Errorf("security groups of sandbox %s: %w", id, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return false, nil
 	}
-	if pending {
-		return true, s.Notify(ctx, db.ChanLeader, HintEnvGroups)
-	}
-	return true, nil
+	return true, s.Notify(ctx, db.ChanLeader, HintEnvGroups)
 }
 
 // InUse are the sandboxes and the queued and running tenants' jobs of an

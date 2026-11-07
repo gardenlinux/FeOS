@@ -26,15 +26,20 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The security groups of environments (§4.5), and the ingress's (ADR
-// 0021):
+// The security groups of environments (§4.5, ADR 0034, 0035), and the
+// ingress's (ADR 0021):
 //
-//   - env-<env id> for the pods of an environment (its instances and the
-//     sandboxes its attached services run in): the internet (the egress
-//     table), and its members reach each other;
-//   - sbx-<sandbox id> for an attachable sandbox: the internet, and the
-//     env groups it is attached to (no ingress: image pods never reach a
-//     sandbox);
+//   - env-<env id>, the set of all the pods of an environment: its
+//     instances, its sandboxes and its tenants' jobs' pods. No in rules;
+//     its one rule is out to itself, the implied rule: a pod may send to
+//     every pod of its environment, and the receiver's groups decide;
+//   - sg-<row id>, a tenant's group (store's security_groups): its rules
+//     as the environment's spec writes them (groupSpec), peers that are
+//     groups as their sg-<row id>, blocks as address blocks, the internet
+//     as the egress table's blocks; its members the pods whose template
+//     names it, an instance's as its object names it, a sandbox's and a
+//     job's pod's as it was made in it (an attached service is in its
+//     sandbox's groups);
 //   - ing-<sandbox id>, the own group of an image service's pod of an
 //     environment that was ever public (model.PodTemplate.IngressGroup):
 //     while the environment is public, TCP in on the routed ports from
@@ -44,9 +49,12 @@ import (
 //     pod_network.ingress_group_version, which follows commit order; no
 //     rules, and never deleted.
 //
-// What a node holds of the ingress's groups is recorded as it is put or
-// listed (recordAdmission): the ingress sends to an instance only on the
-// ports and at the group version its node holds.
+// Groups are put whole (env-groups every 10 s and on a hint, and the
+// prepare hook before a pod that names them); the deltas, the batch push
+// and the propagation metric of ADR 0034 are later work. What a node
+// holds of the ingress's groups is recorded as it is put or listed
+// (recordAdmission): the ingress sends to an instance only on the ports
+// and at the group version its node holds.
 
 // internet4Except are the IPv4 prefixes the egress table leaves out of
 // 0.0.0.0/0: what is not the internet (feosd's internet4 set).
@@ -80,22 +88,10 @@ func groupRule(dir networkv1.Direction, group string) *networkv1.Rule {
 	return &networkv1.Rule{Direction: dir, Protocol: networkv1.Protocol_PROTOCOL_ANY, Peer: &networkv1.Rule_Group{Group: group}}
 }
 
-// envRules are an env group's rules: the egress table, and any traffic
-// between its members.
+// envRules are an env group's rules: out to its members, the implied rule
+// (ADR 0034). Nothing comes in through it.
 func envRules(id string) []*networkv1.Rule {
-	return append(egressTable(),
-		groupRule(networkv1.Direction_DIRECTION_INGRESS, id),
-		groupRule(networkv1.Direction_DIRECTION_EGRESS, id))
-}
-
-// sbxRules are an sbx group's rules: the egress table, and egress to each
-// env group the sandbox is attached to.
-func sbxRules(envGroups []string) []*networkv1.Rule {
-	rules := egressTable()
-	for _, g := range envGroups {
-		rules = append(rules, groupRule(networkv1.Direction_DIRECTION_EGRESS, g))
-	}
-	return rules
+	return []*networkv1.Rule{groupRule(networkv1.Direction_DIRECTION_EGRESS, id)}
 }
 
 // members are the IPv6 ones of addresses, as a sorted set in canonical
@@ -125,8 +121,8 @@ func sameContent(a, b *networkv1.SecurityGroup) bool {
 		slices.Equal(members(a.GetMembers()), members(b.GetMembers()))
 }
 
-// hashVersion is an sbx or ing group's version: from its content, so
-// that equal content has an equal version on every node.
+// hashVersion is a tenant's or an ing group's version: from its content,
+// so that equal content has an equal version on every node.
 func hashVersion(g *networkv1.SecurityGroup) uint64 {
 	c := proto.Clone(g).(*networkv1.SecurityGroup)
 	c.Version = 0
@@ -144,23 +140,24 @@ type groupKind int
 
 const (
 	groupEnv          groupKind = iota + 1 // env-<environment UUID>
-	groupSbx                               // sbx-<sandbox ID>
+	groupTenant                            // sg-<security_groups row UUID>
 	groupIng                               // ing-<sandbox ID>
 	groupIngressPeers                      // ferun-ingress
 )
 
 // groupRef is a group ID of the controller's as parseGroup read it: its
-// kind, and its environment's ID (groupEnv) or its sandbox's (groupSbx,
-// groupIng).
+// kind, and its environment's ID (groupEnv), its row's (groupTenant) or
+// its sandbox's (groupIng).
 type groupRef struct {
 	kind groupKind
 	env  uuid.UUID
+	sg   uuid.UUID
 	sbx  podid.ID
 }
 
 // parseGroup reads a group ID of the controller's: env-<environment
-// UUID>, sbx-<sandbox ID> or ing-<sandbox ID> (short or a UUID), each in
-// its canonical form, or model.IngressPeersGroup; ok false for any other
+// UUID>, sg-<row UUID> or ing-<sandbox ID> (short or a UUID), each in its
+// canonical form, or model.IngressPeersGroup; ok false for any other
 // group.
 func parseGroup(id string) (groupRef, bool) {
 	if id == model.IngressPeersGroup {
@@ -171,32 +168,37 @@ func parseGroup(id string) (groupRef, bool) {
 		return groupRef{}, false
 	}
 	switch kind {
-	case "env":
+	case "env", "sg":
 		u, err := uuid.Parse(rest)
 		if err != nil || u.String() != rest {
 			return groupRef{}, false
 		}
+		if kind == "sg" {
+			return groupRef{kind: groupTenant, sg: u}, true
+		}
 		return groupRef{kind: groupEnv, env: u}, true
-	case "sbx", "ing":
+	case "ing":
 		if !podid.Valid(rest) {
 			return groupRef{}, false
 		}
-		k := groupSbx
-		if kind == "ing" {
-			k = groupIng
-		}
-		return groupRef{kind: k, sbx: podid.ID(rest)}, true
+		return groupRef{kind: groupIng, sbx: podid.ID(rest)}, true
 	}
 	return groupRef{}, false
 }
 
-// errNoGroup: the group's environment or sandbox does not exist.
-var errNoGroup = errors.New("the group's environment or sandbox does not exist")
+// legacySandboxPrefix is the prefix of the group and the name table an
+// attachable sandbox had before ADR 0035 (sbx-<sandbox ID>): nothing makes
+// them any more, and env-groups and env-names delete them from the nodes
+// once no pod names them.
+const legacySandboxPrefix = "sbx-"
+
+// errNoGroup: the group's environment, row or sandbox does not exist.
+var errNoGroup = errors.New("the group's environment, row or sandbox does not exist")
 
 // buildGroup is a group as the database says it should be, with its
-// version (an env group's gen, an sbx or ing group's hash, ferun-ingress's
-// counter), the groups its rules name and, for an ing group, the ports
-// its rules open.
+// version (an env group's gen, a tenant's or an ing group's hash,
+// ferun-ingress's counter), the groups its rules name and, for an ing
+// group, the ports its rules open.
 func (c *Controller) buildGroup(ctx context.Context, id string, pass *groupPass) (*builtGroup, error) {
 	ref, ok := parseGroup(id)
 	if !ok {
@@ -204,12 +206,12 @@ func (c *Controller) buildGroup(ctx context.Context, id string, pass *groupPass)
 	}
 	switch ref.kind {
 	case groupEnv:
-		env, err := c.st.GetEnvironment(ctx, ref.env)
-		if errors.Is(err, store.ErrNoRow) {
-			return nil, errNoGroup
-		}
+		env, err := c.passEnvironment(ctx, pass, ref.env)
 		if err != nil {
 			return nil, err
+		}
+		if env == nil {
+			return nil, errNoGroup
 		}
 		addrs, err := c.st.EnvCtlMembers(ctx, ref.env)
 		if err != nil {
@@ -217,34 +219,197 @@ func (c *Controller) buildGroup(ctx context.Context, id string, pass *groupPass)
 		}
 		g := &networkv1.SecurityGroup{Id: id, Version: uint64(max(env.Gen, 0)), Rules: envRules(id), Members: members(addrs)}
 		return &builtGroup{g: g, kind: groupEnv, refs: []string{id}}, nil
+	case groupTenant:
+		return c.buildTenantGroup(ctx, id, ref.sg, pass)
 	case groupIng:
 		return c.buildIngGroup(ctx, id, ref.sbx, pass)
-	case groupIngressPeers:
-		addrs, version, err := c.st.IngressGroup(ctx)
-		if err != nil {
-			return nil, err
-		}
-		g := &networkv1.SecurityGroup{Id: id, Version: uint64(max(version, 0)), Members: members(addrs)}
-		return &builtGroup{g: g, kind: groupIngressPeers}, nil
 	}
-	sb, err := c.st.GetSandbox(ctx, ref.sbx)
-	if errors.Is(err, model.ErrNotFound) {
+	addrs, version, err := c.st.IngressGroup(ctx)
+	if err != nil {
+		return nil, err
+	}
+	g := &networkv1.SecurityGroup{Id: id, Version: uint64(max(version, 0)), Members: members(addrs)}
+	return &builtGroup{g: g, kind: groupIngressPeers}, nil
+}
+
+// buildTenantGroup is a tenant's group sg-<row> (id): its rules as its
+// environment's spec writes them (groupSpec, renderRules), the groups
+// they name, and its members (store.EnvCtlGroupMembers).
+func (c *Controller) buildTenantGroup(ctx context.Context, id string, row uuid.UUID, pass *groupPass) (*builtGroup, error) {
+	envID, name, err := c.st.SecurityGroupRow(ctx, row)
+	if errors.Is(err, store.ErrNoRow) {
 		return nil, errNoGroup
 	}
 	if err != nil {
 		return nil, err
 	}
-	envs, err := c.st.EnvCtlWithAttached(ctx, ref.sbx)
+	eg, err := c.envGroups(ctx, pass, envID)
 	if err != nil {
 		return nil, err
 	}
-	var refs []string
-	for _, e := range envs {
-		refs = append(refs, model.EnvGroupID(e))
+	if eg == nil {
+		return nil, errNoGroup
 	}
-	g := &networkv1.SecurityGroup{Id: id, Rules: sbxRules(refs), Members: members([]string{sb.Address})}
+	rules, refs := renderRules(eg.group(name), eg.ids)
+	addrs, err := c.st.EnvCtlGroupMembers(ctx, envID, id)
+	if err != nil {
+		return nil, err
+	}
+	g := &networkv1.SecurityGroup{Id: id, Rules: rules, Members: members(addrs)}
 	g.Version = hashVersion(g)
-	return &builtGroup{g: g, kind: groupSbx, refs: refs}, nil
+	return &builtGroup{g: g, kind: groupTenant, refs: refs}, nil
+}
+
+// envGroupSet is what the tenant's groups of one environment are rendered
+// from: the specs that may define them, the first that has a group
+// winning, and the IDs of its groups' rows by name.
+type envGroupSet struct {
+	specs []*spec.Spec
+	ids   map[string]uuid.UUID
+}
+
+// group is the group name as the first spec that has it writes it; else
+// default's as normalisation writes it (nothing in, the internet out: an
+// environment without a deployment has it), else a group with no rules.
+func (s *envGroupSet) group(name string) spec.SecurityGroup {
+	for _, sp := range s.specs {
+		if g, ok := sp.SecurityGroups[name]; ok {
+			return g
+		}
+	}
+	if name == spec.DefaultSecurityGroup {
+		return spec.SecurityGroup{}
+	}
+	return spec.SecurityGroup{Out: []spec.Rule{}}
+}
+
+// envGroups reads what the tenant's groups of an environment are rendered
+// from, once per pass; nil when the environment is gone. The specs are
+// its target's first (its latest deployment, unless that failed: then its
+// deployed one), then the other of the two: a group the target no longer
+// has keeps the rules of the deployment that had it while pods still name
+// it (a roll, a sandbox the plan let keep it).
+func (c *Controller) envGroups(ctx context.Context, pass *groupPass, envID uuid.UUID) (*envGroupSet, error) {
+	if s, ok := pass.groups[envID]; ok {
+		return s, nil
+	}
+	env, err := c.passEnvironment(ctx, pass, envID)
+	if err != nil || env == nil {
+		return nil, err
+	}
+	set := &envGroupSet{}
+	numbers := []int{env.Deployment, env.Deployed}
+	if env.Deployment > 0 {
+		latest, err := c.st.ListDeployments(ctx, envID, 1)
+		if err != nil {
+			return nil, err
+		}
+		if len(latest) == 1 && latest[0].Number == env.Deployment && latest[0].State == model.DeploymentFailed {
+			numbers = []int{env.Deployed, env.Deployment}
+		}
+	}
+	for i, n := range numbers {
+		if n <= 0 || (i == 1 && n == numbers[0]) {
+			continue
+		}
+		sp, err := c.deploymentSpec(ctx, *env, n)
+		if err != nil {
+			return nil, err
+		}
+		set.specs = append(set.specs, sp)
+	}
+	if set.ids, err = c.st.SecurityGroupIDs(ctx, envID); err != nil {
+		return nil, err
+	}
+	pass.groups[envID] = set
+	return set, nil
+}
+
+// renderRules are a tenant's group's rules on the nodes (ADR 0034), and
+// the groups they name: an in rule is an ingress rule from its peer, an
+// out rule an egress rule to it; a group peer is its sg-<row> (a name
+// without a row names nobody: the rule is left out), a block an address
+// block with its exceptions, the internet the egress table's two blocks.
+// A group's out left out (nil) is the internet. icmp is ICMP towards an
+// IPv4 block and ICMPv6 otherwise (the members of a group are IPv6).
+func renderRules(g spec.SecurityGroup, ids map[string]uuid.UUID) ([]*networkv1.Rule, []string) {
+	out := g.Out
+	if out == nil {
+		out = []spec.Rule{{Protocol: spec.ProtocolAny, To: &spec.Peer{Internet: true}}}
+	}
+	var rules []*networkv1.Rule
+	var refs []string
+	add := func(dir networkv1.Direction, r spec.Rule, p *spec.Peer) {
+		if p == nil {
+			return
+		}
+		ports := make([]*networkv1.PortRange, 0, len(r.Ports))
+		for _, pr := range r.Ports {
+			last := uint32(pr.Last)
+			if pr.Last == pr.First {
+				last = 0
+			}
+			ports = append(ports, &networkv1.PortRange{First: uint32(pr.First), Last: last})
+		}
+		rule := func(v6 bool, peer any) *networkv1.Rule {
+			nr := &networkv1.Rule{Direction: dir, Protocol: ruleProtocol(r.ProtocolOf(), v6)}
+			if len(ports) > 0 {
+				nr.Ports = ports
+			}
+			switch pv := peer.(type) {
+			case string:
+				nr.Peer = &networkv1.Rule_Group{Group: pv}
+			case *networkv1.AddressBlock:
+				nr.Peer = &networkv1.Rule_Block{Block: pv}
+			}
+			return nr
+		}
+		switch {
+		case p.Internet:
+			rules = append(rules,
+				rule(false, &networkv1.AddressBlock{Cidr: "0.0.0.0/0", Except: slices.Clone(internet4Except)}),
+				rule(true, &networkv1.AddressBlock{Cidr: "2000::/3", Except: slices.Clone(internet6Except)}))
+		case p.Group != "":
+			id, ok := ids[p.Group]
+			if !ok {
+				return
+			}
+			gid := model.SecurityGroupID(id)
+			rules = append(rules, rule(true, gid))
+			if !slices.Contains(refs, gid) {
+				refs = append(refs, gid)
+			}
+		case p.CIDR != "":
+			pf, err := netip.ParsePrefix(p.CIDR)
+			if err != nil {
+				return
+			}
+			rules = append(rules, rule(pf.Addr().Is6(), &networkv1.AddressBlock{Cidr: p.CIDR, Except: slices.Clone(p.Except)}))
+		}
+	}
+	for _, r := range g.In {
+		add(networkv1.Direction_DIRECTION_INGRESS, r, r.From)
+	}
+	for _, r := range out {
+		add(networkv1.Direction_DIRECTION_EGRESS, r, r.To)
+	}
+	return rules, refs
+}
+
+// ruleProtocol is a spec's protocol on the nodes; icmp of the family.
+func ruleProtocol(p string, v6 bool) networkv1.Protocol {
+	switch p {
+	case spec.ProtocolTCP:
+		return networkv1.Protocol_PROTOCOL_TCP
+	case spec.ProtocolUDP:
+		return networkv1.Protocol_PROTOCOL_UDP
+	case spec.ProtocolICMP:
+		if v6 {
+			return networkv1.Protocol_PROTOCOL_ICMPV6
+		}
+		return networkv1.Protocol_PROTOCOL_ICMP
+	}
+	return networkv1.Protocol_PROTOCOL_ANY
 }
 
 // buildIngGroup is the group ing-<sbx> (id): one rule, TCP in on the
@@ -336,11 +501,14 @@ type groupPass struct {
 	read   map[podid.ID]bool
 	// envs are the environments read; nil: gone.
 	envs map[uuid.UUID]*store.Environment
+	// groups are what the tenant's groups of each environment are
+	// rendered from (envGroups).
+	groups map[uuid.UUID]*envGroupSet
 }
 
 func newGroupPass() *groupPass {
 	return &groupPass{built: map[string]*builtGroup{}, inputs: map[podid.ID]store.IngressInput{},
-		read: map[podid.ID]bool{}, envs: map[uuid.UUID]*store.Environment{}}
+		read: map[podid.ID]bool{}, envs: map[uuid.UUID]*store.Environment{}, groups: map[uuid.UUID]*envGroupSet{}}
 }
 
 // readAhead reads the inputs of the ing groups that rows name and the
@@ -545,10 +713,10 @@ func (c *Controller) putGroups(ctx context.Context, node string, sb store.Sandbo
 // templates of its rows name (and their rules name) are compared with
 // what the node lists and re-put where they differ, and what the node
 // holds of the ingress's groups is recorded (recordAdmission); the
-// controller's groups of environments and sandboxes that no longer exist
-// are deleted, and the ing groups of sandboxes gone or on another node (a
-// pod that still names one keeps it: FAILED_PRECONDITION). ferun-ingress
-// is never deleted.
+// controller's groups of environments and tenant's groups' rows that no
+// longer exist are deleted, the ing groups of sandboxes gone or on another
+// node, and the sbx groups of before ADR 0035 (a pod that still names one
+// keeps it: FAILED_PRECONDITION). ferun-ingress is never deleted.
 func (c *Controller) groupsLoop(ctx context.Context) error {
 	if c.d.Conns == nil {
 		return nil
@@ -612,12 +780,18 @@ func (c *Controller) syncNodeGroups(ctx context.Context, node string, pass *grou
 			errs = append(errs, fmt.Errorf("record %s: %w", id, err))
 		}
 	}
-	// Groups of environments and sandboxes that are gone, and ing groups
-	// of sandboxes that are gone or whose pod is on another node.
-	var envs []uuid.UUID
-	var sbxs, ings []podid.ID
+	// Groups of environments and rows that are gone, ing groups of
+	// sandboxes that are gone or whose pod is on another node, and the
+	// sbx groups of before ADR 0035.
+	var envs, sgs []uuid.UUID
+	var ings []podid.ID
+	var legacy []string
 	for id := range have {
 		if _, wanted := want[id]; wanted {
+			continue
+		}
+		if strings.HasPrefix(id, legacySandboxPrefix) {
+			legacy = append(legacy, id)
 			continue
 		}
 		ref, ok := parseGroup(id)
@@ -625,13 +799,13 @@ func (c *Controller) syncNodeGroups(ctx context.Context, node string, pass *grou
 		case !ok:
 		case ref.kind == groupEnv:
 			envs = append(envs, ref.env)
-		case ref.kind == groupSbx:
-			sbxs = append(sbxs, ref.sbx)
+		case ref.kind == groupTenant:
+			sgs = append(sgs, ref.sg)
 		case ref.kind == groupIng:
 			ings = append(ings, ref.sbx)
 		}
 	}
-	envOK, sbxOK, err := c.st.EnvCtlExisting(ctx, envs, sbxs)
+	envOK, sgOK, err := c.st.EnvCtlExisting(ctx, envs, sgs)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
@@ -645,9 +819,9 @@ func (c *Controller) syncNodeGroups(ctx context.Context, node string, pass *grou
 			errs = append(errs, err)
 		}
 	}
-	for _, sbx := range sbxs {
-		if !sbxOK[sbx] {
-			_, err := c.deleteGroup(ctx, node, model.SandboxGroupID(sbx))
+	for _, u := range sgs {
+		if !sgOK[u] {
+			_, err := c.deleteGroup(ctx, node, model.SecurityGroupID(u))
 			errs = append(errs, err)
 		}
 	}
@@ -656,6 +830,10 @@ func (c *Controller) syncNodeGroups(ctx context.Context, node string, pass *grou
 			_, err := c.deleteGroup(ctx, node, model.IngressGroupID(sbx))
 			errs = append(errs, err)
 		}
+	}
+	for _, id := range legacy {
+		_, err := c.deleteGroup(ctx, node, id)
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }

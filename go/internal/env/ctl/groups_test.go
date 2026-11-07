@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	containerv1 "github.com/gardenlinux/feos/go/gen/feos/container/v1"
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
@@ -27,29 +28,32 @@ import (
 	"github.com/gardenlinux/feos/go/internal/testnode"
 )
 
-// parseGroup reads the controller's groups in their canonical form: env,
-// sbx and ing groups (of a sandbox with a short ID, or one made before ADR
-// 0019 with a UUID) and ferun-ingress; name tables are env and sbx groups'
-// IDs only.
+// parseGroup reads the controller's groups in their canonical form: env
+// and tenant's groups, ing groups (of a sandbox with a short ID, or one
+// made before ADR 0019 with a UUID) and ferun-ingress; name tables are
+// env groups' IDs only. sbx groups are gone (ADR 0035).
 func TestParseGroup(t *testing.T) {
 	envID := uuid.MustParse("0193e3a0-0000-7000-8000-000000000001")
 	if ref, ok := parseGroup(model.EnvGroupID(envID)); !ok || ref != (groupRef{kind: groupEnv, env: envID}) {
 		t.Errorf("parse env group: %+v %v", ref, ok)
 	}
+	if ref, ok := parseGroup(model.SecurityGroupID(envID)); !ok || ref != (groupRef{kind: groupTenant, sg: envID}) {
+		t.Errorf("parse a tenant's group: %+v %v", ref, ok)
+	}
+	if _, ok := parseTable(model.SecurityGroupID(envID)); ok {
+		t.Errorf("a tenant's group parsed as a name table")
+	}
 	short := podid.Mint()
 	legacy := podid.ID(uuid.NewString())
 	for _, id := range []podid.ID{short, legacy} {
-		if ref, ok := parseGroup(model.SandboxGroupID(id)); !ok || ref != (groupRef{kind: groupSbx, sbx: id}) {
-			t.Errorf("parse sbx group of %s: %+v %v", id, ref, ok)
-		}
 		if ref, ok := parseGroup(model.IngressGroupID(id)); !ok || ref != (groupRef{kind: groupIng, sbx: id}) {
 			t.Errorf("parse ing group of %s: %+v %v", id, ref, ok)
 		}
 		if _, ok := parseTable(model.IngressGroupID(id)); ok {
 			t.Errorf("an ing group parsed as a name table")
 		}
-		if ref, ok := parseTable(model.SandboxTableID(id)); !ok || ref.kind != groupSbx {
-			t.Errorf("parse sbx table of %s: %+v %v", id, ref, ok)
+		if ref, ok := parseGroup("sbx-" + id.String()); ok {
+			t.Errorf("an sbx group parsed: %+v", ref)
 		}
 	}
 	if ref, ok := parseGroup(model.IngressPeersGroup); !ok || ref != (groupRef{kind: groupIngressPeers}) {
@@ -58,8 +62,8 @@ func TestParseGroup(t *testing.T) {
 	if _, ok := parseTable(model.IngressPeersGroup); ok {
 		t.Error("ferun-ingress parsed as a name table")
 	}
-	for _, bad := range []string{"default", "env-x", "sbx-0193E3A0-0000-7000-8000-000000000001", "foo-" + uuid.NewString(),
-		"sbx-" + strings.ToUpper(short.String()), "sbx-x", "sbx-" + short.String() + "0", "sbx-", "env-" + short.String(),
+	for _, bad := range []string{"default", "env-x", "sg-x", "sg-" + strings.ToUpper(envID.String()), "sg-", "sg-" + short.String(),
+		"foo-" + uuid.NewString(), "env-" + short.String(),
 		"ing-x", "ing-", "ing-" + strings.ToUpper(short.String()), "ing-" + short.String() + "0", "ing-" + envID.String()[:35],
 		"ferun-ingressx", "ferun-ingress-", "ferun", "Ferun-ingress", "ing" + short.String(), "ingress-" + short.String()} {
 		if ref, ok := parseGroup(bad); ok {
@@ -125,7 +129,7 @@ func TestEnvGroups(t *testing.T) {
 	h.c.notify(bg, HintGroups)
 	eventually(t, 30*time.Second, "the group repaired", func() bool {
 		g := h.group("n1", id)
-		return g != nil && g.Version > g3.Version && len(g.Rules) == 4 && len(g.Members) == 1
+		return g != nil && g.Version > g3.Version && len(g.Rules) == 1 && len(g.Members) == 1
 	})
 	// A group of an environment that is gone goes from the node.
 	gone := model.EnvGroupID(uuid.New())
@@ -213,7 +217,11 @@ func TestEnvDeletion(t *testing.T) {
 	if v != nil {
 		t.Fatal("a view of an environment without a deployment")
 	}
-	vw := &view{env: e3, target: &spec.Spec{}, latestSpec: &spec.Spec{}}
+	ids, err := h.st.SecurityGroupIDs(bg, e3.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vw := &view{env: e3, target: &spec.Spec{}, latestSpec: &spec.Spec{}, groupIDs: ids}
 	p := h.c.planService(vw, "web", spec.Service{Image: testImage})
 	if _, err := h.c.insertInstance(bg, vw, insert{plan: p, deployment: 1}); !errors.Is(err, errTenantDeleting) {
 		t.Errorf("an insert for a deleting tenant: %v", err)
@@ -367,5 +375,116 @@ func TestEnvIDReused(t *testing.T) {
 	rows := h.rows(again.ID)
 	if len(rows) != 1 || rows[0].Instance.Object != "new" {
 		t.Fatalf("rows of the new environment %+v", rows)
+	}
+}
+
+// The tenant's groups (ADR 0034, 0035): each pod of the environment, its
+// instances, sandboxes and tenants' jobs' pods, names env-<id> and the
+// sg-<row> of its groups and the env table; each group is on the node with
+// its rules from the spec (peers that are groups by their sg-<row>, a group
+// that only a rule names too) and the pods that name it as members; the env
+// group takes nothing in, reaches its members and has every pod as one.
+func TestTenantGroups(t *testing.T) {
+	h := newHarness(t, options{})
+	h.addNode("n1")
+	env := h.newEnv("stage")
+	r := h.apply(env.ID, fmt.Sprintf(`{"securityGroups":{
+		"web":{"in":[{"protocol":"tcp","ports":[8080],"from":{"cidr":"203.0.113.0/24"}}]},
+		"db":{"in":[{"protocol":"tcp","ports":[5432],"from":{"group":"web"}},
+			{"protocol":"tcp","ports":[5432],"from":{"group":"tools"}},
+			{"protocol":"tcp","ports":[5432],"from":{"group":"ops"}}],"out":[]},
+		"tools":{},"ops":{}},
+		"services":{"web":{"image":%q,"securityGroups":["web"]},"store":{"image":%q,"securityGroups":["db"]}}}`,
+		testImage, testImage))
+	h.waitDeployment(env.ID, r, model.DeploymentDeployed, 60*time.Second)
+	ids, err := h.st.SecurityGroupIDs(bg, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg := func(name string) string { return model.SecurityGroupID(ids[name]) }
+	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
+	st := h.waitRows(env.ID, spec.KindService, "store", 1, 10*time.Second, "ready", ready)[0]
+	sb := h.sandboxIn(env, podid.Mint(), "tools")
+	rs := tenantJobSpecOf(time.Hour)
+	rs.EnvID, rs.SecurityGroups = env.ID, []string{"db"}
+	job := h.createTenantJob(rs)
+	h.runningPod(job.ID)
+
+	envGroup := model.EnvGroupID(env.ID)
+	for id, want := range map[podid.ID][]string{web.Sandbox.ID: {envGroup, sg("web")}, st.Sandbox.ID: {envGroup, sg("db")},
+		sb.ID: {envGroup, sg("tools")}, job.ID: {envGroup, sg("db")}} {
+		n := h.pod("n1", id).GetSpec().GetNetwork()
+		if !slices.Equal(n.GetSecurityGroups(), want) || !slices.Equal(n.GetNameTables(), []string{model.EnvTableID(env.ID)}) {
+			t.Errorf("pod %s: %v, want the groups %v", id, n, want)
+		}
+	}
+	addrs := map[podid.ID]string{}
+	for _, id := range []podid.ID{web.Sandbox.ID, st.Sandbox.ID, sb.ID, job.ID} {
+		addrs[id] = h.addressOf(id)
+	}
+	sorted := func(ids ...podid.ID) []string {
+		var out []string
+		for _, id := range ids {
+			out = append(out, addrs[id])
+		}
+		return members(out)
+	}
+	h.c.notify(bg, HintGroups)
+	eventually(t, 30*time.Second, "the groups and their members", func() bool {
+		eg, wg, dg, tg, og := h.group("n1", envGroup), h.group("n1", sg("web")), h.group("n1", sg("db")),
+			h.group("n1", sg("tools")), h.group("n1", sg("ops"))
+		return eg != nil && wg != nil && dg != nil && tg != nil && og != nil &&
+			slices.Equal(eg.Members, sorted(web.Sandbox.ID, st.Sandbox.ID, sb.ID, job.ID)) &&
+			slices.Equal(wg.Members, sorted(web.Sandbox.ID)) && slices.Equal(dg.Members, sorted(st.Sandbox.ID, job.ID)) &&
+			slices.Equal(tg.Members, sorted(sb.ID)) && len(og.Members) == 0
+	})
+	in, out := networkv1.Direction_DIRECTION_INGRESS, networkv1.Direction_DIRECTION_EGRESS
+	count := func(g *networkv1.SecurityGroup, dir networkv1.Direction) int {
+		n := 0
+		for _, r := range g.Rules {
+			if r.Direction == dir {
+				n++
+			}
+		}
+		return n
+	}
+	if g := h.group("n1", envGroup); !proto.Equal(&networkv1.SecurityGroup{Rules: g.Rules},
+		&networkv1.SecurityGroup{Rules: envRules(envGroup)}) {
+		t.Errorf("the env group's rules %v", g.Rules)
+	}
+	dg := h.group("n1", sg("db"))
+	var from []string
+	for _, r := range dg.Rules {
+		if r.Direction != in || r.Protocol != networkv1.Protocol_PROTOCOL_TCP || len(r.Ports) != 1 || r.Ports[0].First != 5432 {
+			t.Errorf("db's rule %v", r)
+		}
+		from = append(from, r.GetGroup())
+	}
+	if !slices.Equal(from, []string{sg("web"), sg("tools"), sg("ops")}) {
+		t.Errorf("db lets in %v", from)
+	}
+	if wg := h.group("n1", sg("web")); count(wg, in) != 1 || wg.Rules[0].GetBlock().GetCidr() != "203.0.113.0/24" ||
+		count(wg, out) != 2 {
+		t.Errorf("web's rules %v", wg.Rules)
+	}
+	if tg := h.group("n1", sg("tools")); count(tg, in) != 0 || count(tg, out) != 2 ||
+		tg.Rules[0].GetBlock().GetCidr() != "0.0.0.0/0" || tg.Rules[1].GetBlock().GetCidr() != "2000::/3" {
+		t.Errorf("tools' rules %v", tg.Rules)
+	}
+	// A rule changed in a new deployment reaches the node; the pods stay.
+	r2 := h.apply(env.ID, fmt.Sprintf(`{"securityGroups":{
+		"web":{"in":[{"protocol":"tcp","ports":[8080],"from":{"cidr":"203.0.113.0/24"}}]},
+		"db":{"in":[{"protocol":"tcp","ports":[5432],"from":{"group":"web"}}],"out":[]},
+		"tools":{},"ops":{}},
+		"services":{"web":{"image":%q,"securityGroups":["web"]},"store":{"image":%q,"securityGroups":["db"]}}}`,
+		testImage, testImage))
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
+	h.c.notify(bg, HintGroups)
+	eventually(t, 30*time.Second, "db's new rules", func() bool {
+		g := h.group("n1", sg("db"))
+		return g != nil && len(g.Rules) == 1 && g.Rules[0].GetGroup() == sg("web")
+	})
+	if rows := h.rowsOf(env.ID, spec.KindService, "store"); len(rows) != 1 || rows[0].Sandbox.ID != st.Sandbox.ID {
+		t.Errorf("store rolled for a rule: %v", rows)
 	}
 }

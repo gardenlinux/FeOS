@@ -146,6 +146,12 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 		if err := LockPodEnvironment(ctx, tx, owner, rs.EnvID, rs.SecurityGroups); err != nil {
 			return err
 		}
+		// Its pod is in env-<environment> and its groups, and resolves the
+		// environment's names (ADR 0035); fixed for its life.
+		if tmpl.SecurityGroups, err = tx.PodGroups(ctx, rs.EnvID, rs.SecurityGroups); err != nil {
+			return err
+		}
+		tmpl.NameTables = []string{model.EnvTableID(rs.EnvID)}
 		row, err := tx.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
 			return store.NewSandbox{ID: id, Owner: owner, Image: rs.Image, VCPUs: rs.VCPUs, MemoryMiB: rs.MemoryMiB,
 				ImageRef: ref, EnvironmentID: rs.EnvID, SecurityGroups: rs.SecurityGroups, PodTemplate: &tmpl,

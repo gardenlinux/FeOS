@@ -106,8 +106,8 @@ func TestSandboxesInEnvironmentsMigration(t *testing.T) {
 		t.Fatalf("wsa00000001 %+v", r)
 	}
 	// Named by an environment being deleted only: sandboxes; hibernated,
-	// so its restore takes its groups.
-	if r := read("wsb00000001"); r.env != boxes || !slices.Equal(r.groups, inDefault) || r.pending {
+	// pending too: its restore makes its template of its groups.
+	if r := read("wsb00000001"); r.env != boxes || !slices.Equal(r.groups, inDefault) || !r.pending {
 		t.Fatalf("wsb00000001 %+v", r)
 	}
 	if r := read("nst00000001"); r.env != dev || !r.instance || len(r.groups) != 0 || r.pending || len(r.labels) != 0 {

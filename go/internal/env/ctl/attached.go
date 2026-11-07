@@ -22,14 +22,16 @@ import (
 )
 
 // An attached service (§4.6) is a supervised process in the main
-// container of a sandbox of the tenant. The supervisor looks at it every
+// container of a sandbox of its environment (ADR 0035), in the sandbox's
+// security groups (it has none of its own). The supervisor looks at it every
 // second in env-probe while the sandbox runs (it never wakes a paused one
 // for that) and starts, restarts (with the backoff of §4.4), replaces (a
 // changed template) and checks its process; the reconcile step records it
 // and, when its process must be (re)started in a sandbox that does not
 // run, wakes the sandbox with an exec hold for the start and the first
-// readiness. Its name is in the sandbox's name table while its row names
-// the sandbox (env-names), which needs nothing of the sandbox. A service
+// readiness. Its name is in the environment's name table with the
+// sandbox's address while its row names the sandbox and the sandbox has
+// one (env-names), which needs nothing of the sandbox. A service
 // that goes (removed, moved to another sandbox, or its environment
 // deleted) has its process stopped first, in the pool with an exec hold
 // that wakes a sleeping sandbox and keeps a running one from pausing

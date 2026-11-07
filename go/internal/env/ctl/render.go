@@ -190,10 +190,15 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 	p.inst = inst
 	p.image, p.vcpus, p.memoryMB = inst.Image, plan.VCPUs, plan.MemoryMib
 	p.credentials = bp.Credentials(p.addon)
+	groups, err := v.podGroups(a.SecurityGroups)
+	if err != nil {
+		p.err = fmt.Errorf("addon %s: %w", name, err)
+		return p
+	}
 	p.template = model.PodTemplate{
 		Command:        slices.Clone(inst.Command),
 		Env:            mapEnv(name, inst.Env),
-		SecurityGroups: []string{model.EnvGroupID(v.env.ID)},
+		SecurityGroups: groups,
 	}
 	if inst.Mount != "" {
 		if vol == nil {
@@ -221,13 +226,14 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 }
 
 // planImage renders an image service or a job of the target: its pod is
-// a member of the env group and resolves the env table's names (an
-// addon's pod reaches nothing by name, and names no table). An image
+// a member of the env group and of the groups it names (ADR 0034), and
+// resolves the env table's names (an addon's pod is in its groups too,
+// reaches nothing by name, and names no table). An image
 // service's pod of an environment that was ever public also names its own
 // group ing-<sandbox id> (IngressGroup; the insert appends the group), so
 // that the first publish rolls the service once and later ones never.
 func (c *Controller) planImage(v *view, kind, name, image string, command []string, env map[string]spec.EnvValue,
-	res *spec.Resources, creds *spec.ImageCredentials, bindings []string) *podPlan {
+	res *spec.Resources, creds *spec.ImageCredentials, bindings, securityGroups []string) *podPlan {
 	p := &podPlan{kind: kind, name: name, image: image}
 	p.vcpus, p.memoryMB = resourcesOf(res)
 	vals, wait, err := c.renderEnv(v, env)
@@ -235,10 +241,15 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 		p.err, p.wait = err, wait
 		return p
 	}
+	groups, err := v.podGroups(securityGroups)
+	if err != nil {
+		p.err = fmt.Errorf("%s %s: %w", kind, name, err)
+		return p
+	}
 	p.template = model.PodTemplate{
 		Command:        slices.Clone(command),
 		Env:            vals,
-		SecurityGroups: []string{model.EnvGroupID(v.env.ID)},
+		SecurityGroups: groups,
 		NameTables:     []string{model.EnvTableID(v.env.ID)},
 		IngressGroup:   kind == spec.KindService && v.env.IngressGroup,
 	}
@@ -289,7 +300,8 @@ func templateCredentials(c *spec.ImageCredentials) *model.TemplateCredentials {
 
 // planService renders an image service of the target.
 func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan {
-	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources, s.ImageCredentials, s.Bindings)
+	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources, s.ImageCredentials, s.Bindings,
+		s.SecurityGroups)
 	p.idle = idleOf(s)
 	p.check = checkOf(s)
 	return p
@@ -297,7 +309,8 @@ func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan 
 
 // planJob renders a job of the target.
 func (c *Controller) planJob(v *view, name string, j spec.Job) *podPlan {
-	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources, j.ImageCredentials, j.Bindings)
+	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources, j.ImageCredentials, j.Bindings,
+		j.SecurityGroups)
 }
 
 // planAttached renders an attached service of the target: its process.

@@ -129,17 +129,6 @@ func errAttachable() error {
 		"its attached services; leave it out and name the sandbox's environment")
 }
 
-// sandboxTemplate is the pod template of a sandbox (ADR 0018 §2.3): the
-// command of every sandbox's pod, no env, the default labels, the
-// sandbox's own security group, which its environment's attached services
-// in it reach the environment's addons through, and its own name table,
-// which names its attached services and the addons and image services of
-// their environment.
-func sandboxTemplate(id podid.ID) *model.PodTemplate {
-	return &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(id)},
-		NameTables: []string{model.SandboxTableID(id)}}
-}
-
 type createSandboxResponse struct {
 	// Status carries the new sandbox's ID, status.sandboxId, which the
 	// client keeps.
@@ -264,9 +253,13 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, env.ID, groups)); err != nil {
 			return err
 		}
+		tmpl, err := tx.SandboxTemplate(r.Context(), env.ID, groups)
+		if err != nil {
+			return err
+		}
 		row, err = tx.CreateMintedSandbox(r.Context(), func(id podid.ID) store.NewSandbox {
 			return store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
-				EnvironmentID: env.ID, SecurityGroups: groups, PodTemplate: sandboxTemplate(id),
+				EnvironmentID: env.ID, SecurityGroups: groups, PodTemplate: tmpl,
 				LogLabels: ctl.SandboxLogLabels(tenant, id, env.ID), MadeBy: auth.MadeBy(r.Context())}
 		})
 		if err != nil {
@@ -377,11 +370,12 @@ type sandboxGroups struct {
 
 // putSandboxGroups is PUT /api/v1/sandboxes/{id}/security-groups
 // {securityGroups}: the groups of its environment the sandbox is in (ADR
-// 0035), checked as a create's. The change is a move: a sandbox with a pod
-// is hibernated and restored with them (a new address; the controller
-// does it, groups_pending), a hibernated or never started one takes them
-// at its next restore or create. 202 with the sandbox; an unchanged list
-// is 200 and does nothing.
+// 0035), checked as a create's, recorded with groups_pending. The change
+// is a move: the controller hibernates a sandbox whose pod is running,
+// paused, stopped or failed, and restores one that was running, under a
+// new address; a hibernated or never started one takes them at its next
+// restore or create. 202 with the sandbox; an unchanged list is 200 and
+// does nothing.
 func (s *server) putSandboxGroups(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathSandboxID(r)
 	if err != nil {
@@ -416,7 +410,7 @@ func (s *server) putSandboxGroups(w http.ResponseWriter, r *http.Request) error 
 		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, sb.EnvironmentID, groups)); err != nil {
 			return err
 		}
-		if _, err := tx.SetSandboxGroups(r.Context(), id, groups, hasPod(sb)); err != nil {
+		if _, err := tx.SetSandboxGroups(r.Context(), id, groups); err != nil {
 			return err
 		}
 		row, err = tx.GetSandbox(r.Context(), id)
@@ -430,18 +424,6 @@ func (s *server) putSandboxGroups(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	return writeJSON(w, status, v)
-}
-
-// hasPod reports whether a sandbox may have a pod made under its groups,
-// which a change of them must move: every state but pending (none made
-// yet) and hibernating and hibernated (none kept; the restore makes it
-// anew).
-func hasPod(sb store.Sandbox) bool {
-	switch sb.ClientState {
-	case model.StatePending, model.StateHibernating, model.StateHibernated:
-		return false
-	}
-	return true
 }
 
 // sandboxCredentials is the answer of the credentials a sandbox names.

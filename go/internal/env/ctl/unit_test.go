@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
@@ -90,29 +91,80 @@ func TestEgressTable(t *testing.T) {
 	}
 }
 
-// The env group lets its members reach each other; the sbx group reaches
-// the env groups it is attached to and takes nothing in.
+// The env group takes nothing in and lets its members send to each
+// other, the implied rule (ADR 0034); group IDs fit feosd's 64.
 func TestGroupRules(t *testing.T) {
 	env := model.EnvGroupID(uuid.MustParse("0193e3a0-0000-7000-8000-000000000001"))
 	rules := envRules(env)
-	if len(rules) != 4 || rules[2].GetGroup() != env || rules[2].Direction != networkv1.Direction_DIRECTION_INGRESS ||
-		rules[3].GetGroup() != env || rules[3].Direction != networkv1.Direction_DIRECTION_EGRESS {
+	if len(rules) != 1 || rules[0].GetGroup() != env || rules[0].Direction != networkv1.Direction_DIRECTION_EGRESS ||
+		rules[0].Protocol != networkv1.Protocol_PROTOCOL_ANY {
 		t.Fatalf("env rules %v", rules)
-	}
-	sbx := sbxRules([]string{env, "env-other"})
-	if len(sbx) != 4 {
-		t.Fatalf("sbx rules %v", sbx)
-	}
-	for _, r := range sbx {
-		if r.Direction == networkv1.Direction_DIRECTION_INGRESS {
-			t.Errorf("an sbx group lets in %v", r)
-		}
 	}
 	short := podid.Mint()
 	legacy := podid.ID(uuid.NewString())
-	if len(env) != 40 || len(model.SandboxGroupID(short)) != 15 || len(model.SandboxGroupID(legacy)) != 40 ||
+	if len(env) != 40 || len(model.SecurityGroupID(uuid.New())) != 39 ||
 		len(model.IngressGroupID(short)) != 15 || len(model.IngressGroupID(legacy)) != 40 {
-		t.Error("group IDs are not 40 characters, an sbx or ing group of a short ID not 15")
+		t.Error("group IDs are not 40 characters, a tenant's not 39, an ing group of a short ID not 15")
+	}
+}
+
+// A tenant's group's rules on the nodes (ADR 0034): in rules from
+// groups, blocks and the internet, out rules to them, ports as ranges
+// (a single port with last 0), icmp of the peer's family, the internet
+// as the egress table's two blocks; the groups named are its refs; a
+// group without a row names nobody; out left out is the internet, out []
+// is nothing.
+func TestRenderRules(t *testing.T) {
+	web, db := uuid.New(), uuid.New()
+	ids := map[string]uuid.UUID{"web": web, "db": db}
+	var g spec.SecurityGroup
+	if err := json.Unmarshal([]byte(`{
+		"in": [
+			{"protocol": "tcp", "ports": [5432, "6000-6010"], "from": {"group": "web"}},
+			{"protocol": "icmp", "from": {"cidr": "198.51.100.0/24"}},
+			{"protocol": "udp", "ports": [53], "from": {"cidr": "2001:db8::/32", "except": ["2001:db8:1::/48"]}},
+			{"protocol": "any", "from": {"group": "gone"}},
+			{"protocol": "tcp", "ports": [22], "from": {"group": "db"}}
+		],
+		"out": [{"protocol": "tcp", "ports": [443], "to": "internet"}]}`), &g); err != nil {
+		t.Fatal(err)
+	}
+	rules, refs := renderRules(g, ids)
+	in, eg := networkv1.Direction_DIRECTION_INGRESS, networkv1.Direction_DIRECTION_EGRESS
+	want := []*networkv1.Rule{
+		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_TCP,
+			Ports: []*networkv1.PortRange{{First: 5432}, {First: 6000, Last: 6010}},
+			Peer:  &networkv1.Rule_Group{Group: model.SecurityGroupID(web)}},
+		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_ICMP,
+			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "198.51.100.0/24"}}},
+		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_UDP, Ports: []*networkv1.PortRange{{First: 53}},
+			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "2001:db8::/32", Except: []string{"2001:db8:1::/48"}}}},
+		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_TCP, Ports: []*networkv1.PortRange{{First: 22}},
+			Peer: &networkv1.Rule_Group{Group: model.SecurityGroupID(db)}},
+		{Direction: eg, Protocol: networkv1.Protocol_PROTOCOL_TCP, Ports: []*networkv1.PortRange{{First: 443}},
+			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "0.0.0.0/0", Except: internet4Except}}},
+		{Direction: eg, Protocol: networkv1.Protocol_PROTOCOL_TCP, Ports: []*networkv1.PortRange{{First: 443}},
+			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "2000::/3", Except: internet6Except}}},
+	}
+	if !slices.EqualFunc(rules, want, func(a, b *networkv1.Rule) bool { return proto.Equal(a, b) }) {
+		t.Fatalf("rules\n%v\nwant\n%v", rules, want)
+	}
+	if !slices.Equal(refs, []string{model.SecurityGroupID(web), model.SecurityGroupID(db)}) {
+		t.Fatalf("refs %v", refs)
+	}
+	// default as normalisation leaves it: nothing in, the internet out of
+	// any protocol; out [] is nothing; icmp to a group is ICMPv6.
+	rules, refs = renderRules(spec.SecurityGroup{}, ids)
+	if len(rules) != 2 || len(refs) != 0 || !proto.Equal(rules[0], egressTable()[0]) || !proto.Equal(rules[1], egressTable()[1]) {
+		t.Fatalf("default %v %v", rules, refs)
+	}
+	if rules, _ := renderRules(spec.SecurityGroup{Out: []spec.Rule{}}, ids); len(rules) != 0 {
+		t.Fatalf("out none %v", rules)
+	}
+	rules, _ = renderRules(spec.SecurityGroup{Out: []spec.Rule{},
+		In: []spec.Rule{{Protocol: spec.ProtocolICMP, From: &spec.Peer{Group: "web"}}}}, ids)
+	if len(rules) != 1 || rules[0].Protocol != networkv1.Protocol_PROTOCOL_ICMPV6 {
+		t.Fatalf("icmp from a group %v", rules)
 	}
 }
 
@@ -121,16 +173,16 @@ func TestMembersAndVersions(t *testing.T) {
 	if !slices.Equal(got, []string{"fd00::3", "fd00::5"}) {
 		t.Fatalf("members %v", got)
 	}
-	a := &networkv1.SecurityGroup{Id: "sbx-x", Rules: sbxRules(nil), Members: []string{"fd00::5", "fd00::3"}}
-	b := &networkv1.SecurityGroup{Id: "sbx-x", Rules: sbxRules(nil), Members: []string{"fd00::3", "fd00::0005"}, Version: 9}
+	a := &networkv1.SecurityGroup{Id: "sg-x", Rules: egressTable(), Members: []string{"fd00::5", "fd00::3"}}
+	b := &networkv1.SecurityGroup{Id: "sg-x", Rules: egressTable(), Members: []string{"fd00::3", "fd00::0005"}, Version: 9}
 	if !sameContent(a, b) || hashVersion(a) != hashVersion(b) {
 		t.Error("equal groups differ")
 	}
-	c := &networkv1.SecurityGroup{Id: "sbx-x", Rules: sbxRules([]string{"env-y"}), Members: a.Members}
+	c := &networkv1.SecurityGroup{Id: "sg-x", Rules: envRules("env-y"), Members: a.Members}
 	if sameContent(a, c) || hashVersion(a) == hashVersion(c) {
 		t.Error("groups with other rules compare equal")
 	}
-	d := &networkv1.SecurityGroup{Id: "sbx-x", Rules: sbxRules(nil), Members: []string{"fd00::3"}}
+	d := &networkv1.SecurityGroup{Id: "sg-x", Rules: egressTable(), Members: []string{"fd00::3"}}
 	if sameContent(a, d) || hashVersion(a) == hashVersion(d) {
 		t.Error("groups with other members compare equal")
 	}
@@ -541,6 +593,7 @@ func TestRender(t *testing.T) {
 		return nil, false
 	}}}
 	envID := uuid.New()
+	defaultID, dbID := uuid.New(), uuid.New()
 	vol := &store.EnvVolume{VolumeID: uuid.New()}
 	v := &view{
 		env: store.Environment{ID: envID, Name: "stage"},
@@ -559,7 +612,8 @@ func TestRender(t *testing.T) {
 			Addons:  map[string]spec.Addon{"db": {Type: "fake", Version: "1", Options: map[string]any{"db": "app"}}},
 			Secrets: map[string]spec.SecretRef{"token": {Version: 3}},
 		},
-		secrets: map[string]int{"token": 4},
+		secrets:  map[string]int{"token": 4},
+		groupIDs: map[string]uuid.UUID{"default": defaultID, "db": dbID},
 	}
 	p := c.planService(v, "api", v.target.Services["api"])
 	if p.ok() || !strings.Contains(p.wait, "addon db") {
@@ -582,8 +636,20 @@ func TestRender(t *testing.T) {
 	}
 	if p.template.HasCredential() || p.template.Labels[model.LabelTemplate] != p.hash ||
 		p.template.Labels[model.LabelObject] != "service/api" || p.template.Labels[model.LabelEnvironment] != envID.String() ||
-		!slices.Equal(p.template.SecurityGroups, []string{model.EnvGroupID(envID)}) {
+		!slices.Equal(p.template.SecurityGroups, []string{model.EnvGroupID(envID), model.SecurityGroupID(defaultID)}) {
 		t.Errorf("template %+v", p.template)
+	}
+	// The groups an object names are in its template (ADR 0034), and in
+	// its hash: a change of them rolls it; a name without a row fails.
+	inDB := v.target.Services["api"]
+	inDB.SecurityGroups = []string{"db"}
+	if g := c.planService(v, "api", inDB); !g.ok() || g.hash == p.hash ||
+		!slices.Equal(g.template.SecurityGroups, []string{model.EnvGroupID(envID), model.SecurityGroupID(dbID)}) {
+		t.Errorf("in db %+v", g.template)
+	}
+	inDB.SecurityGroups = []string{"nowhere"}
+	if g := c.planService(v, "api", inDB); g.err == nil {
+		t.Error("a group without a row rendered")
 	}
 	if p.vcpus != 1 || p.memoryMB != 512 {
 		t.Errorf("resources %d %d", p.vcpus, p.memoryMB)

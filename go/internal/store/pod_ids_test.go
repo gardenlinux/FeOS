@@ -97,13 +97,13 @@ func TestCreateMintedSandbox(t *testing.T) {
 	for range 20 {
 		sb, err := s.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
 			return store.NewSandbox{ID: id, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 256, EnvironmentID: env,
-				PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.SandboxGroupID(id)}}}
+				PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.IngressGroupID(id)}}}
 		})
 		if err != nil || !podid.Valid(string(sb.ID)) || sb.ID.IsLegacy() || seen[sb.ID] {
 			t.Fatalf("minted %q: %v", sb.ID, err)
 		}
 		seen[sb.ID] = true
-		if sb.PodTemplate == nil || sb.PodTemplate.SecurityGroups[0] != "sbx-"+string(sb.ID) {
+		if sb.PodTemplate == nil || sb.PodTemplate.SecurityGroups[0] != "ing-"+string(sb.ID) {
 			t.Fatalf("template of %q: %+v", sb.ID, sb.PodTemplate)
 		}
 		if got := get(t, s, sb.ID); got.ID != sb.ID {

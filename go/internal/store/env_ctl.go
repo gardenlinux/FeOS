@@ -25,17 +25,31 @@ import (
 // another tenant under that ID is never used.
 const attachedUsable = `s.owner = e.owner AND s.environment_id = e.id AND NOT s.instance AND NOT s.tenant_job`
 
-// EnvCtlMembers returns the members of an environment's security group:
-// the addresses of its instance rows (any state, until the row is gone)
-// and of the sandboxes its attached services may use (attachedUsable),
-// without the empty ones, distinct and sorted. The caller keeps the IPv6
-// ones.
+// EnvCtlMembers returns the members of an environment's group env-<id>
+// (ADR 0034, 0035): the addresses of every row of the environment, its
+// instances, its sandboxes and its tenants' jobs' pods (any state, until
+// the row is gone), without the empty ones, distinct and sorted. The
+// caller keeps the IPv6 ones.
 func (s *Store) EnvCtlMembers(ctx context.Context, envID uuid.UUID) ([]string, error) {
-	rows, err := s.q.Query(ctx, `SELECT address FROM sandboxes WHERE environment_id = $1 AND instance AND address <> ''
-		UNION SELECT s.address FROM env_attached a JOIN environments e ON e.id = a.env_id
-			JOIN sandboxes s ON s.id = a.sandbox_id
-			WHERE a.env_id = $1 AND s.address <> '' AND `+attachedUsable+`
+	rows, err := s.q.Query(ctx, `SELECT DISTINCT address FROM sandboxes WHERE environment_id = $1 AND address <> ''
 		ORDER BY 1`, envID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// EnvCtlGroupMembers returns the members of a tenant's group sg-<id> of
+// environment envID (ADR 0034): the addresses of the environment's rows
+// whose pod template names group (model.SecurityGroupID), an instance's
+// as its object's, a sandbox's or a tenant's job's pod's as its own;
+// without the empty ones, distinct and sorted. An attached service is in
+// its sandbox's groups: its sandbox's row counts. The caller keeps the
+// IPv6 ones.
+func (s *Store) EnvCtlGroupMembers(ctx context.Context, envID uuid.UUID, group string) ([]string, error) {
+	rows, err := s.q.Query(ctx, `SELECT DISTINCT address FROM sandboxes WHERE environment_id = $1 AND address <> ''
+			AND pod_template->'securityGroups' ? $2
+		ORDER BY 1`, envID, group)
 	if err != nil {
 		return nil, err
 	}
@@ -197,37 +211,6 @@ func (s *Store) EnvCtlJobWaitedUntil(ctx context.Context, envID uuid.UUID, job, 
 	return timeOf(until), err
 }
 
-// EnvCtlWithAttached returns the IDs of the environments whose attached
-// services run in the sandbox and may use it (attachedUsable), sorted.
-func (s *Store) EnvCtlWithAttached(ctx context.Context, sandboxID podid.ID) ([]uuid.UUID, error) {
-	rows, err := s.q.Query(ctx, `SELECT DISTINCT a.env_id FROM env_attached a JOIN environments e ON e.id = a.env_id
-			JOIN sandboxes s ON s.id = a.sandbox_id
-		WHERE a.sandbox_id = $1 AND `+attachedUsable+` ORDER BY a.env_id`, sandboxID)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
-}
-
-// AttachedName is an attached service of an environment, by name.
-type AttachedName struct {
-	EnvID   uuid.UUID
-	Service string
-}
-
-// EnvCtlAttachedIn returns the attached services that run in the sandbox
-// and may use it (attachedUsable), by environment and name: the names of
-// its name table.
-func (s *Store) EnvCtlAttachedIn(ctx context.Context, sandboxID podid.ID) ([]AttachedName, error) {
-	rows, err := s.q.Query(ctx, `SELECT a.env_id, a.service FROM env_attached a JOIN environments e ON e.id = a.env_id
-			JOIN sandboxes s ON s.id = a.sandbox_id
-		WHERE a.sandbox_id = $1 AND `+attachedUsable+` ORDER BY a.env_id, a.service`, sandboxID)
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[AttachedName])
-}
-
 // EnvCtlTemplatedOnNode returns the rows with a pod template whose pod is
 // on node, or is being brought there by an op: instance rows, tenants'
 // jobs' pods and sandboxes, by id.
@@ -236,19 +219,31 @@ func (s *Store) EnvCtlTemplatedOnNode(ctx context.Context, node string) ([]Sandb
 		WHERE pod_template IS NOT NULL AND (node = $1 OR op_target = $1 OR lost_from = $1) ORDER BY id`, node))
 }
 
-// EnvCtlExisting returns which of the ids are environments (exists) and
-// which are sandboxes (sandboxes).
-func (s *Store) EnvCtlExisting(ctx context.Context, envs []uuid.UUID, sandboxes []podid.ID) (map[uuid.UUID]bool,
-	map[podid.ID]bool, error) {
+// EnvCtlExisting returns which of the ids are environments (envs) and
+// which are rows of security_groups (groups).
+func (s *Store) EnvCtlExisting(ctx context.Context, envs, groups []uuid.UUID) (map[uuid.UUID]bool,
+	map[uuid.UUID]bool, error) {
 	e, err := existing(ctx, s.q, "SELECT id FROM environments WHERE id = ANY($1)", envs)
 	if err != nil {
 		return nil, nil, err
 	}
-	sb, err := existing(ctx, s.q, "SELECT id FROM sandboxes WHERE id = ANY($1)", sandboxes)
+	g, err := existing(ctx, s.q, "SELECT id FROM security_groups WHERE id = ANY($1)", groups)
 	if err != nil {
 		return nil, nil, err
 	}
-	return e, sb, nil
+	return e, g, nil
+}
+
+// EnvCtlMoves returns the sandboxes whose groups changed (groups_pending,
+// ADR 0035) and whose pod is on one of nodes, without an op in flight, in a
+// state a move hibernates (running, paused, stopped, failed), at most
+// limit, oldest change first. A sandbox without a pod (pending,
+// hibernated, lost) takes its groups at its next create or restore.
+func (s *Store) EnvCtlMoves(ctx context.Context, nodes []string, limit int) ([]Sandbox, error) {
+	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
+		WHERE groups_pending AND NOT instance AND NOT tenant_job AND op = '' AND node = ANY($1)
+			AND client_state IN ('running', 'paused', 'stopped', 'failed')
+		ORDER BY updated_at, id LIMIT $2`, nodes, limit))
 }
 
 // IngressInput is what the group ing-<sandbox id> of a sandbox is built

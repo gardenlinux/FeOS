@@ -51,32 +51,39 @@ func hostProcesses(n *testnode.Node, root string) {
 	})
 }
 
-// attachable makes an attachable sandbox of the tenant (the template the
-// API gives it) and brings it up.
-func (h *harness) attachable() store.Sandbox {
+// sandbox makes a sandbox of the tenant in its environment dev, with the
+// template the API gives it (in default), and brings it up.
+func (h *harness) sandbox() store.Sandbox {
 	h.t.Helper()
-	return h.attachableAs(testTenant, podid.Mint())
+	return h.sandboxAs(testTenant, podid.Mint())
 }
 
-// attachableAs makes a sandbox of owner in its environment dev (ADR
-// 0035) with the ID id and brings it up.
-func (h *harness) attachableAs(owner string, id podid.ID) store.Sandbox {
+// sandboxAs makes a sandbox of owner in its environment dev (ADR 0035)
+// with the ID id and brings it up.
+func (h *harness) sandboxAs(owner string, id podid.ID) store.Sandbox {
 	h.t.Helper()
-	return h.attachableIn(h.envOf(owner, "dev"), id)
+	return h.sandboxIn(h.envOf(owner, "dev"), id)
 }
 
-// attachableIn makes a sandbox of env with the ID id and brings it up.
-func (h *harness) attachableIn(env store.Environment, id podid.ID) store.Sandbox {
+// sandboxIn makes a sandbox of env with the ID id in groups (default when
+// none), with the template the API gives it, and brings it up.
+func (h *harness) sandboxIn(env store.Environment, id podid.ID, groups ...string) store.Sandbox {
 	h.t.Helper()
+	if len(groups) == 0 {
+		groups = []string{spec.DefaultSecurityGroup}
+	}
+	tmpl, err := h.st.SandboxTemplate(bg, env.ID, groups)
+	if err != nil {
+		h.t.Fatal(err)
+	}
 	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: env.Owner, Image: testImage, ImageRef: testImage,
-		VCPUs: 1, MemoryMiB: 512, EnvironmentID: env.ID, PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
-			SecurityGroups: []string{model.SandboxGroupID(id)}, NameTables: []string{model.SandboxTableID(id)}}}); err != nil {
+		VCPUs: 1, MemoryMiB: 512, EnvironmentID: env.ID, SecurityGroups: groups, PodTemplate: tmpl}); err != nil {
 		h.t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
 	defer cancel()
 	if _, err := h.eng.Ensure(ctx, id); err != nil {
-		h.t.Fatalf("ensure the attachable sandbox: %v", err)
+		h.t.Fatalf("ensure the sandbox: %v", err)
 	}
 	sb, err := h.st.GetSandbox(bg, id)
 	if err != nil {
@@ -95,14 +102,14 @@ func attachedSpec(sandbox podid.ID, cwd, greeting string, withWeb bool) string {
 	return fmt.Sprintf(`{"services":{"api":{"image":%q,"ports":[{"name":"http","port":8080}]}%s}}`, testImage, web)
 }
 
-// An attached service is a supervised process in an attachable sandbox:
-// started (once its working directory exists) with its env, named in the
-// sandbox's name table on loopback beside the environment's image
-// services (which the env table names, and the image pods resolve), the
-// sandbox in the environment's group and its group reaching that group;
+// An attached service is a supervised process in a sandbox of its
+// environment (ADR 0035): started (once its working directory exists)
+// with its env, named in the environment's name table with the sandbox's
+// address beside the environment's image services, so that the image
+// pods and the sandbox resolve it; the sandbox is in its environment's
+// group and its own groups, which are put before its pod is created;
 // restarted on request and on a changed template; removed with its
-// process and its name. The attachable sandbox's own group and name table
-// are put before its pod is created, also without an environment.
+// process and its name. No group or table of the sandbox's own exists.
 func TestAttachedService(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed; the process scripts need it")
@@ -110,21 +117,29 @@ func TestAttachedService(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	hostProcesses(n1, t.TempDir())
-	sb := h.attachable()
-	// The prepare hook puts the group with its rules before the pod is
-	// created, when the pod has no address yet; env-groups adds the
-	// address as its member once the create's answer recorded it (the
-	// hint of SetSandboxAddress), which may be after Ensure returned.
-	sbx := h.group("n1", model.SandboxGroupID(sb.ID))
-	if sbx == nil || len(sbx.Rules) != 2 {
-		t.Fatalf("the sandbox's group %v", sbx)
+	sb := h.sandbox()
+	envID := sb.EnvironmentID
+	def, err := h.st.SecurityGroupID(bg, envID, spec.DefaultSecurityGroup)
+	if err != nil {
+		t.Fatal(err)
 	}
-	eventually(t, 30*time.Second, "the sandbox's address the member of its group", func() bool {
-		sbx = h.group("n1", model.SandboxGroupID(sb.ID))
-		return sbx != nil && len(sbx.Rules) == 2 && slices.Equal(sbx.Members, []string{sb.Address})
+	pod := h.pod("n1", sb.ID).GetSpec().GetNetwork()
+	if !slices.Equal(pod.GetSecurityGroups(), []string{model.EnvGroupID(envID), model.SecurityGroupID(def)}) ||
+		!slices.Equal(pod.GetNameTables(), []string{model.EnvTableID(envID)}) {
+		t.Fatalf("the sandbox's pod network %v", pod)
+	}
+	// The prepare hook puts the groups before the pod is created, when the
+	// pod has no address yet; env-groups adds the address as their member
+	// once the create's answer recorded it (the hint of
+	// SetSandboxAddress), which may be after Ensure returned.
+	eventually(t, 30*time.Second, "the sandbox's address a member of its groups", func() bool {
+		eg := h.group("n1", model.EnvGroupID(envID))
+		dg := h.group("n1", model.SecurityGroupID(def))
+		return eg != nil && dg != nil && slices.Equal(eg.Members, []string{sb.Address}) &&
+			slices.Equal(dg.Members, []string{sb.Address})
 	})
-	if tbl := h.table("n1", model.SandboxTableID(sb.ID)); tbl == nil || len(tbl.Entries) != 0 || len(tbl.Includes) != 0 {
-		t.Fatalf("the sandbox's name table %v", tbl)
+	if g := h.group("n1", "sbx-"+sb.ID.String()); g != nil {
+		t.Fatalf("a sandbox's own group %v", g)
 	}
 
 	env := h.newEnv("dev")
@@ -157,26 +172,21 @@ func TestAttachedService(t *testing.T) {
 	}
 	api := h.waitRows(env.ID, spec.KindService, "api", 1, 10*time.Second, "ready", ready)[0]
 	eventually(t, 10*time.Second, "the names", func() bool {
-		return resolves(n1, sb.ID, "web", "127.0.0.1", "::1") && resolves(n1, sb.ID, "API", api.Sandbox.Address) &&
-			resolves(n1, api.Sandbox.ID, "api", api.Sandbox.Address) && resolves(n1, api.Sandbox.ID, "web")
+		return resolves(n1, sb.ID, "web", sb.Address) && resolves(n1, sb.ID, "API", api.Sandbox.Address) &&
+			resolves(n1, api.Sandbox.ID, "api", api.Sandbox.Address) && resolves(n1, api.Sandbox.ID, "web", sb.Address)
 	})
 	if pod := h.pod("n1", api.Sandbox.ID); !slices.Equal(pod.GetSpec().GetNetwork().GetNameTables(),
 		[]string{model.EnvTableID(env.ID)}) {
 		t.Errorf("the image instance's name tables %v", pod.GetSpec().GetNetwork().GetNameTables())
 	}
-	if tbl := h.table("n1", model.SandboxTableID(sb.ID)); tbl == nil ||
-		!slices.Equal(tbl.Includes, []string{model.EnvTableID(env.ID)}) {
-		t.Errorf("the sandbox's name table %v", tbl)
-	}
-	// Groups: the sandbox is a member of the env group, and its group
-	// reaches the env group.
+	// Groups: the sandbox and the image instance are members of the env
+	// group and of default, which both name.
 	eventually(t, 30*time.Second, "the groups", func() bool {
 		eg := h.group("n1", model.EnvGroupID(env.ID))
-		sg := h.group("n1", model.SandboxGroupID(sb.ID))
-		return eg != nil && sg != nil && slices.Contains(eg.Members, sb.Address) && slices.Contains(eg.Members, api.Sandbox.Address) &&
-			slices.ContainsFunc(sg.Rules, func(r *networkv1.Rule) bool {
-				return r.GetGroup() == model.EnvGroupID(env.ID) && r.Direction == networkv1.Direction_DIRECTION_EGRESS
-			})
+		dg := h.group("n1", model.SecurityGroupID(def))
+		return eg != nil && dg != nil && slices.Contains(eg.Members, sb.Address) &&
+			slices.Contains(eg.Members, api.Sandbox.Address) && slices.Contains(dg.Members, sb.Address) &&
+			slices.Contains(dg.Members, api.Sandbox.Address)
 	})
 
 	// A restart on request starts a new process.
@@ -230,15 +240,14 @@ func TestAttachedService(t *testing.T) {
 			t.Errorf("a process still runs: %+v (last %s)", p, d.ProcessID)
 		}
 	}
-	eventually(t, 10*time.Second, "the sandbox's names after the removal", func() bool {
-		tbl := h.table("n1", model.SandboxTableID(sb.ID))
-		return tbl != nil && len(tbl.Entries) == 0 && len(tbl.Includes) == 0 && resolves(n1, sb.ID, "web") &&
-			resolves(n1, sb.ID, "api")
+	eventually(t, 10*time.Second, "the names after the removal", func() bool {
+		return resolves(n1, sb.ID, "web") && resolves(n1, api.Sandbox.ID, "web") &&
+			resolves(n1, sb.ID, "api", api.Sandbox.Address)
 	})
-	eventually(t, 30*time.Second, "the sandbox out of the env group", func() bool {
-		eg := h.group("n1", model.EnvGroupID(env.ID))
-		return eg != nil && !slices.Contains(eg.Members, sb.Address)
-	})
+	// The sandbox stays its environment's.
+	if eg := h.group("n1", model.EnvGroupID(env.ID)); eg == nil || !slices.Contains(eg.Members, sb.Address) {
+		t.Errorf("the env group after the removal %v", eg)
+	}
 }
 
 // An attached service in a paused sandbox: the controller wakes it to
@@ -250,7 +259,7 @@ func TestAttachedWakesPausedSandbox(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	hostProcesses(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	if err := h.eng.Pause(bg, sb.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +330,7 @@ func hostProcessesCounting(n *testnode.Node, root string) *startLog {
 }
 
 // An attached service's sandbox deleted and its ID taken by another
-// tenant's attachable sandbox: the service fails ("gone or not this
+// tenant's sandbox: the service fails ("gone or not this
 // tenant's"); nothing starts in the new sandbox, it is given no names of
 // the environment, it joins no group of the environment and its own group
 // reaches none; its logs and restarts answer ErrNotRunning.
@@ -332,7 +341,7 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	starts := hostProcessesCounting(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"api":{"image":%q},
 		"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, testImage, sb.ID))
@@ -351,7 +360,7 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := starts.count(sb.ID)
-	other := h.attachableAs("t2", sb.ID)
+	other := h.sandboxAs("t2", sb.ID)
 	eventually(t, 30*time.Second, "the service failed", func() bool {
 		b, err := h.st.GetAttached(bg, env.ID, "web")
 		return err == nil && b.Phase == model.PhaseFailed && b.ProcessID == "" &&
@@ -362,21 +371,17 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 		_, api := n1.Resolve(sb.ID, "api")
 		return starts.count(sb.ID) != before || named || api
 	})
-	if tbl := h.table("n1", model.SandboxTableID(sb.ID)); tbl == nil || len(tbl.Entries) != 0 || len(tbl.Includes) != 0 {
-		t.Errorf("the other tenant's sandbox's name table %v", tbl)
-	}
 	if b, _ := h.st.GetAttached(bg, env.ID, "web"); b.SandboxIncarnation != sb.Incarnation {
 		t.Errorf("the recorded incarnation changed: %+v", b)
 	}
-	// Groups: the other sandbox is no member of the environment's group,
-	// and its own group reaches no group of the environment.
+	// Groups and names: the other sandbox is of another environment, no
+	// member of this one's, and not named in its table.
 	if b, err := h.c.buildGroup(bg, model.EnvGroupID(env.ID), newGroupPass()); err != nil || slices.Contains(b.g.Members, other.Address) {
 		t.Fatalf("the env group %v %v", b, err)
 	}
-	if g := h.group("n1", model.SandboxGroupID(sb.ID)); g == nil || slices.ContainsFunc(g.Rules, func(r *networkv1.Rule) bool {
-		return r.GetGroup() == model.EnvGroupID(env.ID)
-	}) {
-		t.Fatalf("the other sandbox's group %v", g)
+	if tbl, _, err := h.c.buildTable(bg, model.EnvTableID(env.ID)); err != nil || slices.ContainsFunc(tbl.Entries,
+		func(e *networkv1.NameEntry) bool { return e.Name == "web" }) {
+		t.Fatalf("the env table %v %v", tbl, err)
 	}
 	eventually(t, 30*time.Second, "the node's env group without the other sandbox", func() bool {
 		h.c.notify(bg, HintGroups)
@@ -422,7 +427,7 @@ func TestAttachedStrayProcesses(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	hostProcesses(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, sb.ID))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
@@ -529,7 +534,7 @@ func TestAttachedRestartIsNoExit(t *testing.T) {
 		}
 		return 0, false, nil
 	})
-	sb := h.attachable()
+	sb := h.sandbox()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, sb.ID))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
@@ -575,7 +580,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	hostProcesses(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	sleep := func() {
 		t.Helper()
 		if err := h.eng.Pause(bg, sb.ID); err != nil {
@@ -602,10 +607,10 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	dev := h.newEnv("dev")
 	a := up(dev.ID, h.apply(dev.ID, `{"services":{`+web+`,`+other+`}}`))
 	eventually(t, 10*time.Second, "the names", func() bool {
-		return resolves(n1, sb.ID, "web", "127.0.0.1", "::1")
+		return resolves(n1, sb.ID, "web", h.addressOf(sb.ID))
 	})
 	sleep()
-	if !resolves(n1, sb.ID, "web", "127.0.0.1", "::1") {
+	if !resolves(n1, sb.ID, "web", h.addressOf(sb.ID)) {
 		t.Fatal("the sleeping sandbox lost its names")
 	}
 	r2 := h.apply(dev.ID, `{"services":{`+other+`}}`)
@@ -613,7 +618,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	if _, err := h.st.GetAttached(bg, dev.ID, "web"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("the removed service's row: %v", err)
 	}
-	cur := h.attachableUp(sb.ID)
+	cur := h.sandboxUp(sb.ID)
 	if got := h.runningNamed(cur, "ferun-env-dev-web"); len(got) != 0 {
 		t.Fatalf("the removed service's process %s runs on: %v", a.ProcessID, got)
 	}
@@ -626,7 +631,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	// sandboxes, ADR 0035): the service goes first, the environment once
 	// its sandbox has gone too.
 	stage := h.newEnv("stage")
-	box := h.attachableIn(stage, podid.Mint())
+	box := h.sandboxIn(stage, podid.Mint())
 	up(stage.ID, h.apply(stage.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,
 		"command":["sleep","120"]}}}`, box.ID)))
 	h.sleepUntilPaused(box.ID)
@@ -636,7 +641,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 		_, err := h.st.GetAttached(bg, stage.ID, "web")
 		return errors.Is(err, store.ErrNoRow)
 	})
-	cur = h.attachableUp(box.ID)
+	cur = h.sandboxUp(box.ID)
 	if got := h.runningNamed(cur, "ferun-env-stage-web"); len(got) != 0 {
 		t.Fatalf("the deleted environment's process runs on: %v", got)
 	}
@@ -656,9 +661,9 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	})
 }
 
-// attachableUp brings an attachable sandbox up (it may sleep) and reads
+// sandboxUp brings a sandbox up (it may sleep) and reads
 // its row.
-func (h *harness) attachableUp(id podid.ID) store.Sandbox {
+func (h *harness) sandboxUp(id podid.ID) store.Sandbox {
 	h.t.Helper()
 	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
 	defer cancel()

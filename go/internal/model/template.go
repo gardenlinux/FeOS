@@ -13,8 +13,6 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
-
-	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
 // The labels an environment's instance pods carry beside the sandbox
@@ -39,19 +37,35 @@ func EnvGroupID(envID uuid.UUID) string { return "env-" + envID.String() }
 // environment's group by its name).
 func SecurityGroupID(id uuid.UUID) string { return "sg-" + id.String() }
 
-// SandboxGroupID is the security group of an attachable sandbox:
-// "sbx-<sandbox ID>", 15 characters (40 for a sandbox with a UUID).
-func SandboxGroupID(id podid.ID) string { return "sbx-" + id.String() }
-
 // EnvTableID is the name table of an environment's pods (feosd's
-// NameService): its addons and image services. It is the ID of the
-// environment's security group.
+// NameService): its addons, image services and attached services. It is
+// the ID of the environment's security group.
 func EnvTableID(envID uuid.UUID) string { return EnvGroupID(envID) }
 
-// SandboxTableID is the name table of an attachable sandbox: its own
-// attached services, and the env tables of the environments they belong
-// to. It is the ID of the sandbox's security group.
-func SandboxTableID(id podid.ID) string { return SandboxGroupID(id) }
+// PodGroups are the security groups a pod of an environment names (ADR
+// 0034, 0035): env-<environment>, then sg-<row> of each of its groups, in
+// the order given (their names' order).
+func PodGroups(envID uuid.UUID, groups []uuid.UUID) []string {
+	out := make([]string, 0, 1+len(groups))
+	out = append(out, EnvGroupID(envID))
+	for _, g := range groups {
+		out = append(out, SecurityGroupID(g))
+	}
+	return out
+}
+
+// SandboxCommand is the command of a sandbox's pod: it waits, and runs
+// what exec, the tools and its attached services start in it.
+var SandboxCommand = []string{"sleep", "infinity"}
+
+// SandboxTemplate is the pod template of a sandbox (ADR 0035): its
+// command, the groups of its environment it is in (PodGroups) and its
+// environment's name table, where its attached services are named with
+// its address.
+func SandboxTemplate(envID uuid.UUID, groups []uuid.UUID) *PodTemplate {
+	return &PodTemplate{Command: slices.Clone(SandboxCommand), SecurityGroups: PodGroups(envID, groups),
+		NameTables: []string{EnvTableID(envID)}}
+}
 
 // The escapes of a secret in a template value.
 const (
@@ -83,10 +97,10 @@ type PodTemplate struct {
 	// Mounts are the volumes the container mounts.
 	Mounts []TemplateMount `json:"mounts,omitempty"`
 	// SecurityGroups are the pod's security groups (EnvGroupID,
-	// SandboxGroupID, IngressGroupID); none: feosd's default group.
+	// SecurityGroupID, IngressGroupID); none: feosd's default group.
 	SecurityGroups []string `json:"securityGroups,omitempty"`
 	// NameTables are the name tables whose names feosd's resolver answers
-	// the pod (EnvTableID, SandboxTableID), in order; none: no names but
+	// the pod (EnvTableID), in order; none: no names but
 	// the upstreams'.
 	NameTables []string `json:"nameTables,omitempty"`
 	// Labels are added to the sandbox labels (which win on a clash).

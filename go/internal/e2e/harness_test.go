@@ -582,9 +582,9 @@ func (c *cluster) create(in *instance) sandbox {
 // (ADR 0019): its row and a token written to the database directly, as
 // for an ID used again (a sandbox with a UUID made before, or a short ID
 // drawn again after its sandbox was deleted), in the tenant's environment
-// env. The ID must be new; attachable gives the row the template every
-// sandbox made over REST has.
-func (c *cluster) createID(id podid.ID, env string, attachable bool) sandbox {
+// env. The ID must be new; templated gives the row the template every
+// sandbox made over REST has (in default, ADR 0035), else it has none.
+func (c *cluster) createID(id podid.ID, env string, templated bool) sandbox {
 	c.t.Helper()
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -593,9 +593,12 @@ func (c *cluster) createID(id podid.ID, env string, attachable bool) sandbox {
 	token := base64.RawURLEncoding.EncodeToString(b[:])
 	n := store.NewSandbox{ID: id, Owner: tenant, Image: testImage, VCPUs: c.cfg.DefaultVCPUs, MemoryMiB: c.cfg.DefaultMemoryMiB,
 		EnvironmentID: dbtest.Environment(c.t, c.st.Q(), tenant, env)}
-	if attachable {
-		n.PodTemplate = &model.PodTemplate{Command: []string{"sleep", "infinity"},
-			SecurityGroups: []string{model.SandboxGroupID(id)}, NameTables: []string{model.SandboxTableID(id)}}
+	if templated {
+		t, err := c.st.SandboxTemplate(bg, n.EnvironmentID, []string{"default"})
+		if err != nil {
+			c.t.Fatal(err)
+		}
+		n.PodTemplate, n.SecurityGroups = t, []string{"default"}
 	}
 	err := c.st.InTx(bg, func(tx *store.Store) error {
 		_, created, err := tx.CreateSandbox(bg, n)

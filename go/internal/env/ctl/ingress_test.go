@@ -214,7 +214,7 @@ func TestIngressGroups(t *testing.T) {
 	// Never published: no flag, no ing group, the hash of the template as
 	// it is stored (as before the flag was), nothing put or recorded.
 	for _, r := range before {
-		if !namesNoIngGroup(r) || !slices.Equal(r.Sandbox.PodTemplate.SecurityGroups, []string{model.EnvGroupID(env.ID)}) {
+		if !namesNoIngGroup(r) || !slices.Equal(r.Sandbox.PodTemplate.SecurityGroups, h.podGroups(env.ID)) {
 			t.Errorf("row %s before publishing names %v", r.Sandbox.ID, r.Sandbox.PodTemplate.SecurityGroups)
 		}
 		if storedHash(r) != r.Instance.TemplateHash {
@@ -247,7 +247,7 @@ func TestIngressGroups(t *testing.T) {
 				storedHash(r))
 		}
 		if !slices.Equal(r.Sandbox.PodTemplate.SecurityGroups,
-			[]string{model.EnvGroupID(env.ID), model.IngressGroupID(r.Sandbox.ID)}) {
+			append(h.podGroups(env.ID), model.IngressGroupID(r.Sandbox.ID))) {
 			t.Errorf("row %s names %v", r.Sandbox.ID, r.Sandbox.PodTemplate.SecurityGroups)
 		}
 	}

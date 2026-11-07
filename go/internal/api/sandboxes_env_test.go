@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -230,9 +231,10 @@ func TestSandboxEnvironment(t *testing.T) {
 }
 
 // PUT /api/v1/sandboxes/{id}/security-groups records the sandbox's new
-// groups, checked as a create's, and marks a sandbox with a pod for its
-// move (202); one without a pod takes them at its next restore or create;
-// the same groups again are 200 and change nothing.
+// groups, checked as a create's, and marks the sandbox (202): one with a
+// pod is moved, one without takes them at its next restore or create; the
+// same groups again are 200 and change nothing. A new sandbox's template
+// names its environment's group and table and its groups' rows.
 func TestSandboxSecurityGroups(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
@@ -240,6 +242,12 @@ func TestSandboxSecurityGroups(t *testing.T) {
 	e.deployGroups(e.box, "web", "db")
 	id, _ := e.createSandbox()
 	path := "/api/v1/sandboxes/" + id + "/security-groups"
+	if sb, err := e.st.GetSandbox(context.Background(), podid.ID(id)); err != nil {
+		t.Fatal(err)
+	} else if def, err := e.st.SecurityGroupID(context.Background(), sb.EnvironmentID, "default"); err != nil ||
+		!reflect.DeepEqual(sb.PodTemplate, model.SandboxTemplate(sb.EnvironmentID, []uuid.UUID{def})) || sb.GroupsPending {
+		t.Fatalf("a new sandbox's template %+v %v", sb.PodTemplate, err)
+	}
 	put := func(groups any) *httptest.ResponseRecorder {
 		t.Helper()
 		return e.do("PUT", path, tok, map[string]any{"securityGroups": groups})
@@ -253,13 +261,13 @@ func TestSandboxSecurityGroups(t *testing.T) {
 		return sb
 	}
 
-	// Never started: no pod to move.
+	// Never started: its create takes them.
 	w := put([]string{"web"})
 	expect(t, w, http.StatusAccepted, "")
 	if v := decode[sandboxAnswer](t, w); !slices.Equal(v.SecurityGroups, []string{"web"}) || v.Environment.Name != "box" {
 		t.Fatalf("view %+v", v)
 	}
-	if r := row(); !slices.Equal(r.SecurityGroups, []string{"web"}) || r.GroupsPending {
+	if r := row(); !slices.Equal(r.SecurityGroups, []string{"web"}) || !r.GroupsPending {
 		t.Fatalf("pending row %+v", r)
 	}
 	// Running: the move is pending.
@@ -283,7 +291,7 @@ func TestSandboxSecurityGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect(t, put([]string{"default"}), http.StatusAccepted, "")
-	if r := row(); !slices.Equal(r.SecurityGroups, []string{"default"}) || r.GroupsPending {
+	if r := row(); !slices.Equal(r.SecurityGroups, []string{"default"}) || !r.GroupsPending {
 		t.Fatalf("hibernated row %+v", r)
 	}
 

@@ -737,7 +737,7 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	refused("gone")
 	// Another tenant's sandbox of the same ID, attachable.
 	recreate(store.NewSandbox{Owner: tenantB, EnvironmentID: h.envOf(tenantB, "preview"),
-		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
 	refused("another tenant's")
 	// An instance row of the same ID.
 	zero := 0
@@ -746,12 +746,12 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	refused("an instance row")
 	// A sandbox of another environment (ADR 0035).
 	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: h.envOf(tenantA, "other"),
-		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
 	refused("another environment's")
 	// The owner's own sandbox again, a new incarnation under the same ID
 	// (the row still records the first one): routed to.
 	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: e.ID,
-		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
 	if again, err := h.st.GetSandbox(ctx, sb); err != nil || again.Incarnation == first.Incarnation {
 		t.Fatalf("the recreated sandbox %+v %v", again, err)
 	}
@@ -763,7 +763,7 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	}
 	// Another tenant's again: refused.
 	recreate(store.NewSandbox{Owner: tenantB, EnvironmentID: h.envOf(tenantB, "preview"),
-		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
 	refused("another tenant's after the owner's")
 }
 

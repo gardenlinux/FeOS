@@ -6,6 +6,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,10 @@ const (
 	// TriggerRestart is Restart's: a repair of a running row whose
 	// container exited, with no recheck.
 	TriggerRestart OpTrigger = "restart"
+	// TriggerMove is HibernateToMove's: the pause and the hibernation of a
+	// sandbox whose security groups changed (ADR 0035), never abandoned,
+	// rechecked for the mark (groups_pending), without hold checks.
+	TriggerMove OpTrigger = "move"
 )
 
 // waits reports whether ops of the trigger wait in Before begin for a node
@@ -606,8 +611,7 @@ func (e *Engine) callOp(ctx context.Context, pc podv1.PodServiceClient, h *OpHan
 	case OpResume:
 		_, res.err = pc.ResumePod(ctx, &podv1.ResumePodRequest{PodId: id})
 	case OpRestore:
-		resp, err := pc.RestorePod(ctx, &podv1.RestorePodRequest{PodId: id, HeadKey: h.row.CheckpointHead,
-			LogLabels: h.row.LogLabels, LogRedact: h.logRedact})
+		resp, err := pc.RestorePod(ctx, restoreRequest(h))
 		res.err = err
 		if err == nil {
 			res.restored, res.memoryRestored, res.reason = true, resp.GetMemoryRestored(), resp.GetReason()
@@ -629,6 +633,21 @@ func (e *Engine) callOp(ctx context.Context, pc podv1.PodServiceClient, h *OpHan
 		res = e.callRepair(ctx, pc, h)
 	}
 	return res
+}
+
+// restoreRequest is the RestorePod of the op's row: its checkpoint, its
+// log labels, and its template's security groups and name tables, which
+// replace those of the checkpointed spec (ADR 0035): a sandbox whose
+// groups changed comes back in its new ones, and every restore of a row
+// with a template sends both, as the row has them now.
+func restoreRequest(h *OpHandle) *podv1.RestorePodRequest {
+	req := &podv1.RestorePodRequest{PodId: h.id.String(), HeadKey: h.row.CheckpointHead, LogLabels: h.row.LogLabels,
+		LogRedact: h.logRedact}
+	if t := h.row.PodTemplate; t != nil {
+		req.SecurityGroups = slices.Clone(t.SecurityGroups)
+		req.NameTables = slices.Clone(t.NameTables)
+	}
+	return req
 }
 
 // callRepair repairs a pod stuck PENDING or whose guest stays
@@ -685,8 +704,7 @@ func (e *Engine) callRepair(ctx context.Context, pc podv1.PodServiceClient, h *O
 		if _, err := pc.DeletePod(ctx, &podv1.DeletePodRequest{PodId: id}); err != nil && grpcCode(err) != codes.NotFound {
 			res.err = err
 		}
-		resp, err := pc.RestorePod(ctx, &podv1.RestorePodRequest{PodId: id, HeadKey: h.row.CheckpointHead,
-			LogLabels: h.row.LogLabels, LogRedact: h.logRedact})
+		resp, err := pc.RestorePod(ctx, restoreRequest(h))
 		if err != nil {
 			res.err = err
 		} else {

@@ -80,7 +80,8 @@ type Sandbox struct {
 
 	// EnvironmentID is the environment the row belongs to (ADR 0035):
 	// an instance's, a sandbox's, a tenant's job's. Fixed at the insert,
-	// as are Instance and PodTemplate (nil: NULL, the sandbox's own pod).
+	// as are Instance and PodTemplate (nil: NULL, a pod without one), but
+	// a sandbox's template, which ApplySandboxGroups makes of its groups.
 	EnvironmentID uuid.UUID
 	// Instance makes the row an instance of its environment (ADR 0018),
 	// its pod built from a deployment's template; fixed at the insert.
@@ -558,9 +559,10 @@ func nullableColumn(name string, lifecycle bool, get func(*Sandbox) string) sand
 // the checkpoint columns. id, owner, image, vcpus, memory_mib,
 // environment_id, instance, pod_template, tenant_job, log_labels and
 // created_at are never written; gen and updated_at are UpdateSandbox's;
-// http_version, http_pushed, security_groups and groups_pending are
-// written by queries of their own (SetHTTPBindings, SetHTTPPushed,
-// SetSandboxGroups) and left as they are.
+// http_version, http_pushed, security_groups, groups_pending and a
+// sandbox's pod_template are written by queries of their own
+// (SetHTTPBindings, SetHTTPPushed, SetSandboxGroups, ApplySandboxGroups)
+// and left as they are.
 var sandboxWritable = []sandboxColumn{
 	plainColumn("incarnation", true, func(s *Sandbox) uuid.UUID { return s.Incarnation }),
 	plainColumn("image_ref", false, func(s *Sandbox) string { return s.ImageRef }),

@@ -5,6 +5,7 @@ package store_test
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -89,10 +90,10 @@ func TestOwnSandbox(t *testing.T) {
 	}
 
 	// Its groups, written; a move pending.
-	if ok, err := s.SetSandboxGroups(bg, sb.ID, []string{"db", "web"}, true); err != nil || !ok {
+	if ok, err := s.SetSandboxGroups(bg, sb.ID, []string{"db", "web"}); err != nil || !ok {
 		t.Fatalf("set %v %v", ok, err)
 	}
-	if ok, err := s.SetSandboxGroups(bg, inst.ID, []string{"web"}, true); err != nil || ok {
+	if ok, err := s.SetSandboxGroups(bg, inst.ID, []string{"web"}); err != nil || ok {
 		t.Fatalf("an instance's groups set %v %v", ok, err)
 	}
 	if row := get(t, s, sb.ID); !slices.Equal(row.SecurityGroups, []string{"db", "web"}) || !row.GroupsPending {
@@ -100,6 +101,29 @@ func TestOwnSandbox(t *testing.T) {
 	}
 	if got, err := s.GetOwnSandbox(bg, "acme", sb.ID); err != nil || !slices.Equal(got.SecurityGroups, []string{"db", "web"}) {
 		t.Fatalf("with groups %+v %v", got, err)
+	}
+	// The begin of its next create or restore makes its template of them
+	// (rows added for names that have none) and clears the mark; a row
+	// without the mark, or an instance, stays as it is.
+	pending := get(t, s, sb.ID)
+	applied, err := s.ApplySandboxGroups(bg, pending)
+	if err != nil || applied.GroupsPending || applied.Gen != pending.Gen {
+		t.Fatalf("applied %+v %v", applied, err)
+	}
+	db, _ := s.SecurityGroupID(bg, dev.ID, "db")
+	web, _ := s.SecurityGroupID(bg, dev.ID, "web")
+	if want := model.SandboxTemplate(dev.ID, []uuid.UUID{db, web}); db == uuid.Nil || web == uuid.Nil ||
+		!reflect.DeepEqual(applied.PodTemplate, want) {
+		t.Fatalf("template %+v, want %+v", applied.PodTemplate, want)
+	}
+	if again, err := s.ApplySandboxGroups(bg, applied); err != nil || !reflect.DeepEqual(again, applied) {
+		t.Fatalf("applied again %+v %v", again, err)
+	}
+	if _, err := s.ApplySandboxGroups(bg, pending); !errors.Is(err, store.ErrStale) {
+		t.Fatalf("a stale read applied: %v", err)
+	}
+	if out, err := s.ApplySandboxGroups(bg, inst); err != nil || !reflect.DeepEqual(out, inst) {
+		t.Fatalf("an instance applied %+v %v", out, err)
 	}
 
 	// A job of dev that runs counts, one that ended does not.

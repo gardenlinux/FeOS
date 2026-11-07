@@ -88,7 +88,7 @@ func TestAttachedNewIncarnation(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	hostProcessesPerPod(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"api":{"image":%q,"ports":[{"name":"http","port":8080}]},
 		"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}}}`, testImage, sb.ID))
@@ -113,7 +113,7 @@ func TestAttachedNewIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, 30*time.Second, "the sandbox's pod gone", func() bool { return h.pod("n1", sb.ID) == nil })
-	again := h.attachableAs(testTenant, sb.ID)
+	again := h.sandboxAs(testTenant, sb.ID)
 	if again.Incarnation == sb.Incarnation {
 		t.Fatal("the same incarnation")
 	}
@@ -130,7 +130,8 @@ func TestAttachedNewIncarnation(t *testing.T) {
 		t.Errorf("running %v, the row records %s", got, c.ProcessID)
 	}
 	eventually(t, 10*time.Second, "the new sandbox's names", func() bool {
-		return resolves(n1, sb.ID, "web", "127.0.0.1", "::1") && resolves(n1, sb.ID, "nope")
+		addr := h.addressOf(sb.ID)
+		return addr != "" && resolves(n1, sb.ID, "web", addr) && resolves(n1, sb.ID, "nope")
 	})
 	eventually(t, 30*time.Second, "the new sandbox in the env group", func() bool {
 		h.c.notify(bg, HintGroups)
@@ -151,7 +152,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	pp := hostProcessesPerPod(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	web := fmt.Sprintf(`"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}`, sb.ID)
 	api := `"api":{"image":"` + testImage + `","ports":[{"name":"http","port":8080}]}`
 
@@ -185,13 +186,14 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		t.Fatalf("the removed service's process runs on: %v", got)
 	}
 	eventually(t, 10*time.Second, "the removed service's name gone", func() bool {
-		return resolves(n1, sb.ID, "web") && resolves(n1, sb.ID, "api")
+		_, api := n1.Resolve(sb.ID, "api")
+		return resolves(n1, sb.ID, "web") && api
 	})
 
 	// Its environment deleted (as a tenant's deletion does; the API
 	// refuses it while the environment has sandboxes, ADR 0035).
 	stage := h.newEnv("stage")
-	sb = h.attachableIn(stage, podid.Mint())
+	sb = h.sandboxIn(stage, podid.Mint())
 	web = fmt.Sprintf(`"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}`, sb.ID)
 	h.waitDeployment(stage.ID, h.apply(stage.ID, `{"services":{`+web+`}}`), model.DeploymentDeployed, 60*time.Second)
 	b, err := h.st.GetAttached(bg, stage.ID, "web")
@@ -233,9 +235,9 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 
 // An attached service moved away from a sandbox that sleeps: the old
 // sandbox is woken, the process stopped there, and only then does the row
-// move, its name with it from the old sandbox's table (which keeps the
-// services that stay) to the new one's; the service then runs in the new
-// sandbox.
+// move, its name in the environment's table with it from the old
+// sandbox's address to the new one's (the services that stay keep the
+// old); the service then runs in the new sandbox.
 func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed; the process scripts need it")
@@ -243,7 +245,7 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	hostProcessesPerPod(n1, t.TempDir())
-	s1, s2 := h.attachable(), h.attachable()
+	s1, s2 := h.sandbox(), h.sandbox()
 	attached := func(name string, sb podid.ID) string {
 		return fmt.Sprintf(`%q:{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}`, name, sb)
 	}
@@ -255,7 +257,9 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 		t.Fatalf("attached %+v %v", a, err)
 	}
 	eventually(t, 10*time.Second, "the first sandbox's names", func() bool {
-		return resolves(n1, s1.ID, "web", "127.0.0.1", "::1") && resolves(n1, s1.ID, "worker", "127.0.0.1", "::1")
+		a1 := h.addressOf(s1.ID)
+		return a1 != "" && resolves(n1, s1.ID, "web", a1) && resolves(n1, s1.ID, "worker", a1) &&
+			resolves(n1, s2.ID, "web", a1)
 	})
 	h.sleepUntilPaused(s1.ID)
 
@@ -265,7 +269,7 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 	if err != nil || b.SandboxID != s2.ID || b.ProcessID == "" || b.Phase != model.PhaseReady {
 		t.Fatalf("moved %+v %v", b, err)
 	}
-	cur := h.attachableUp(s1.ID)
+	cur := h.sandboxUp(s1.ID)
 	if got := h.runningNamed(cur, "ferun-env-dev-web"); len(got) != 0 {
 		t.Fatalf("the moved service's process %s runs on in the old sandbox: %v", a.ProcessID, got)
 	}
@@ -273,10 +277,11 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 		t.Fatalf("the service that stays: %v", got)
 	}
 	eventually(t, 30*time.Second, "the moved service's name in the new sandbox alone", func() bool {
-		return resolves(n1, s1.ID, "web") && resolves(n1, s1.ID, "worker", "127.0.0.1", "::1") &&
-			resolves(n1, s2.ID, "web", "127.0.0.1", "::1") && resolves(n1, s2.ID, "worker")
+		a1, a2 := h.addressOf(s1.ID), h.addressOf(s2.ID)
+		return resolves(n1, s1.ID, "web", a2) && resolves(n1, s1.ID, "worker", a1) &&
+			resolves(n1, s2.ID, "web", a2) && resolves(n1, s2.ID, "worker", a1)
 	})
-	if got := h.runningNamed(h.attachableUp(s2.ID), "ferun-env-dev-web"); !slices.Equal(got, []string{b.ProcessID}) {
+	if got := h.runningNamed(h.sandboxUp(s2.ID), "ferun-env-dev-web"); !slices.Equal(got, []string{b.ProcessID}) {
 		t.Fatalf("the new sandbox runs %v, the row records %s", got, b.ProcessID)
 	}
 }
@@ -292,7 +297,7 @@ func TestAttachedCleanLeavesNewIncarnation(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	pp := hostProcessesPerPod(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	h.sleepUntilPaused(sb.ID)
 	env := h.newEnv("dev")
 	v := &view{env: env, target: emptySpec(), latestSpec: emptySpec()}
@@ -360,7 +365,7 @@ func TestAttachedSupervisedPastManyRecords(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	pp := hostProcessesPerPod(n1, t.TempDir())
-	sb := h.attachable()
+	sb := h.sandbox()
 	env := h.newEnv("dev")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}}}`, sb.ID))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)

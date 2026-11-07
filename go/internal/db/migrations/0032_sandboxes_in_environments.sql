@@ -16,9 +16,10 @@
 -- security_groups are the names of the groups of its environment (ADR
 -- 0034) a sandbox's or a job's pod is in, 1 to 5; an instance's are its
 -- template's and the column is empty. groups_pending marks a sandbox
--- whose pod runs under other groups than security_groups: the controller
--- moves it (hibernate, restore with the row's groups, ADR 0035) and
--- clears it, as any restore or create that makes its pod does. A job
+-- whose template is not yet made of security_groups: the create or
+-- restore that makes its pod next makes it and clears the mark, and the
+-- controller moves a pod that runs under other groups (hibernates it, and
+-- restores one that ran, ADR 0035). A job
 -- names its groups in jobs.security_groups, copied to its pod's row; a
 -- job's groups are fixed.
 --
@@ -30,9 +31,10 @@
 --     pod) goes into the tenant's environment "sandboxes", made here,
 --     empty, with its group default; a tenant that has one already keeps
 --     it and gets its sandboxes and jobs there;
---   - all are in [default]; sandboxes with a pod are marked pending, so
---     that they are moved once; a hibernated one takes its groups at its
---     restore; a running job ends under the groups it has;
+--   - all are in [default] and every sandbox is marked pending: one with
+--     a pod is moved once, a hibernated or never started one takes its
+--     groups at its restore or create; a running job ends under the
+--     groups it has;
 --   - log_labels carry the environment: a sandbox gets those of a
 --     sandbox (tenant, instance, environment, kind sandbox, object its
 --     ID), a job's pod its environment beside its own; a pod that runs
@@ -87,8 +89,7 @@ UPDATE sandboxes SET log_labels = jsonb_build_object('ferun.tenant', owner, 'fer
   WHERE NOT instance AND NOT tenant_job;
 UPDATE sandboxes SET log_labels = log_labels || jsonb_build_object('ferun.environment', environment_id::text)
   WHERE tenant_job;
-UPDATE sandboxes SET groups_pending = true
-  WHERE NOT instance AND NOT tenant_job AND client_state NOT IN ('pending', 'hibernating', 'hibernated');
+UPDATE sandboxes SET groups_pending = true WHERE NOT instance AND NOT tenant_job;
 
 DROP INDEX sandboxes_environment;
 CREATE INDEX sandboxes_environment ON sandboxes(environment_id);
