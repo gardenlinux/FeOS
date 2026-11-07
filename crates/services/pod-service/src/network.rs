@@ -881,6 +881,7 @@ impl Network {
                 Ok(upstreams) => {
                     parts.resolver.set_client(
                         address.into(),
+                        pod.ipv6_address.parse().ok(),
                         &pod.pod_id,
                         upstreams,
                         network.name_tables,
@@ -956,9 +957,13 @@ impl Network {
         devices::tap(&handle, &tap, &link)
             .await
             .map_err(|e| Status::internal(format!("attach {tap}: {e}")))?;
-        parts
-            .resolver
-            .set_client(ipv4.into(), pod_id, upstreams, network.name_tables);
+        parts.resolver.set_client(
+            ipv4.into(),
+            Some(ipv6),
+            pod_id,
+            upstreams,
+            network.name_tables,
+        );
         parts
             .resolver
             .set_http(ipv4.into(), pod_id, &http_names(info));

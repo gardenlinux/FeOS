@@ -32,8 +32,9 @@ import (
 // service and job pods, its sandboxes and its tenants' jobs' pods, ADR
 // 0035), holds its addons and image services with the addresses of their
 // live replicas, and its attached services with their sandbox's address;
-// in its own sandbox an attached service's name is the sandbox's own
-// address, which the guest reaches over its loopback interface. A
+// feosd answers a pod a name whose addresses include its own with
+// loopback, so that in its own sandbox an attached service is reached
+// at 127.0.0.1 and ::1, as the table sbx-<id> gave. A
 // table's version is a hash of its content, so that equal tables have
 // equal versions on every node and a delta between two versions is the
 // same wherever it applies. A node whose feosd predates the NameService

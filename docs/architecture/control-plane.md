@@ -3162,9 +3162,10 @@ from the name tables the controller puts on the nodes
   It names T's attached services with the IPv6 address of the sandbox
   each runs in, while its row names the sandbox, the service may use it
   and it has an address. In its own sandbox an attached service's name
-  is the sandbox's own address, which the guest reaches over its
-  loopback interface: the service listens on that address (or on all),
-  as the environment's pods reach it there. An environment without a
+  is answered with `127.0.0.1` and `::1`: `feosd`'s resolver answers a
+  pod a name whose addresses include the pod's own with loopback
+  (ADR 0035), so that a service on loopback alone is reached by its
+  name beside it. An environment without a
   deployment, or being deleted, has an empty table. The table `sbx-<id>`
   is gone (ADR 0035); a node's is deleted once no pod names it.
 - **Versions** are a hash of a table's ID, names and includes, never 0,

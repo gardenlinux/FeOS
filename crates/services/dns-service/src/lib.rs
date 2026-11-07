@@ -10,7 +10,11 @@
 //! one label, in any case, that the pod's name tables hold (ADR 0018) is
 //! answered from them: its IPv6 addresses to AAAA, its IPv4 addresses to
 //! A, nothing to the other types, with a TTL of a few seconds, and never
-//! asked upstream. It forwards any other query to the pod's upstreams in
+//! asked upstream. A name whose addresses include the pod's own is the
+//! pod itself (an attached service in its own sandbox, ADR 0035): it is
+//! answered with the loopback addresses, `127.0.0.1` to A and `::1` to
+//! AAAA, so that a process that listens on loopback alone is reached by
+//! its name inside its pod. It forwards any other query to the pod's upstreams in
 //! order, to the next when one does not answer, and answers SERVFAIL when
 //! none does. Answers pass as the upstream gave them, but HTTPS and SVCB
 //! records lose `ech`, so that clients send the server name in the clear
@@ -38,7 +42,7 @@ use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use log::{debug, warn};
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -144,6 +148,8 @@ struct Client {
     upstreams: Vec<SocketAddr>,
     /// The name tables it names, in order.
     tables: Vec<String>,
+    /// Its own addresses: a name that holds one is answered with loopback.
+    own: Vec<IpAddr>,
     /// Its HTTP bindings' names, in lower case without the final dot.
     http: HashSet<String>,
     queries: Arc<Semaphore>,
@@ -175,15 +181,21 @@ impl Resolver {
     /// Serves the pod `pod_id` at `address`, which its queries come from:
     /// its IPv4 address. Answers the names of its name tables `tables`,
     /// and asks `upstreams`, or the default upstreams when there are none,
-    /// the rest. Replaces what the resolver knew of `address`.
+    /// the rest. `ipv6` is the pod's IPv6 address, if it has one: with
+    /// `address`, what its names answer with loopback. Replaces what the
+    /// resolver knew of `address`.
     pub fn set_client(
         &self,
         address: IpAddr,
+        ipv6: Option<Ipv6Addr>,
         pod_id: &str,
         upstreams: Vec<SocketAddr>,
         tables: Vec<String>,
     ) {
         let address = address.to_canonical();
+        let own = std::iter::once(address)
+            .chain(ipv6.map(IpAddr::V6))
+            .collect();
         let mut clients = self.clients.write().unwrap_or_else(PoisonError::into_inner);
         // A pod that is set again keeps its limits.
         let (queries, connections) = match clients.get(&address) {
@@ -203,6 +215,7 @@ impl Resolver {
             pod_id: pod_id.to_string(),
             upstreams,
             tables,
+            own,
             http,
             queries,
             connections,
@@ -223,6 +236,7 @@ impl Resolver {
             pod_id: client.pod_id.clone(),
             upstreams: client.upstreams.clone(),
             tables: client.tables.clone(),
+            own: client.own.clone(),
             http: http.lookup(),
             queries: client.queries.clone(),
             connections: client.connections.clone(),
@@ -510,7 +524,13 @@ impl Resolver {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()?;
-        let addresses = names(&client.tables, label)?;
+        let mut addresses = names(&client.tables, label)?;
+        if addresses
+            .iter()
+            .any(|a| client.own.contains(&a.to_canonical()))
+        {
+            addresses = vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()];
+        }
         let mut answer = Message::new(0, MessageType::Query, OpCode::Query);
         for address in addresses {
             let data = match (address, question.query_type()) {

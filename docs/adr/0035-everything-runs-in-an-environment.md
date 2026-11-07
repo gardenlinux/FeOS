@@ -130,14 +130,10 @@ the same rules for network, names and access.
   sandbox's groups.
 - Its name is in `env-<id>`'s table with the sandbox's address, so that
   pods of the environment reach it where a rule lets them. Inside the
-  sandbox the name is that address too: the guest reaches its own
-  address over its loopback interface, but no longer as `127.0.0.1` or
-  `::1`, which `sbx-<id>` gave. **This changes what a service must
-  listen on**: its sandbox's IPv6 address, or all interfaces (`::`); a
-  service bound to `127.0.0.1` or to IPv4's `0.0.0.0` alone is no longer
-  reached by its name, also by the attached services beside it. A
-  service with a routed port listens there already, since the ingress
-  and the environment's pods reach it at that address.
+  sandbox it is reached over the guest's loopback, as now: `feosd`'s
+  resolver answers a pod a name whose addresses include the pod's own
+  with `127.0.0.1` and `::1`, so that the attached services of one
+  sandbox reach each other by name without the table `sbx-<id>`.
 - The blocks of `in` rules on a routed port of an attached service
   (ADR 0034, the ingress checks the client) are those of its sandbox's
   groups.
@@ -239,10 +235,7 @@ the same rules for network, names and access.
     project (builds need only the internet, which `default` gives);
   - a lost workspace sandbox is replaced in the same environment, and
     the dev environment's deployment names the new one, as now;
-  - it stops sending `attachable`;
-  - its agent's instructions and its templates have an attached
-    service listen on `::` (or its sandbox's address), not on
-    `127.0.0.1`, since its name no longer resolves to loopback.
+  - it stops sending `attachable`.
 
 ## Open questions
 

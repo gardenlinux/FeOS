@@ -641,9 +641,12 @@ loopback, link-local or multicast address, in a denied prefix, a pod's
 A name of one label, in any case, that the pod's name tables hold
 (`PodNetwork.name_tables`, [Name tables](#name-tables)) the resolver
 answers itself, with authority and never asking upstream: AAAA with the
-name's IPv6 addresses, A with its IPv4 addresses (the loopback of a
-sandbox's own attached services), each with a TTL of 5 s, and no record
-of another type. Every other name goes upstream.
+name's IPv6 addresses, A with its IPv4 addresses, each with a TTL of
+5 s, and no record of another type. A name whose addresses include the
+pod's own (an attached service in its own sandbox, ADR 0035) is the pod
+itself: AAAA `::1` and A `127.0.0.1`, so that a process on loopback
+alone is reached by its name inside its pod. Every other name goes
+upstream.
 
 Before the name tables, the names of a pod's HTTP bindings
 (`PodSpec.http_bindings`, ADR 0028): each of `names`, a DNS label, and

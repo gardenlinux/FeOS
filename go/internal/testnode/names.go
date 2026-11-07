@@ -292,7 +292,10 @@ func (n *Node) NameTables() []*networkv1.NameTable { return n.names.list() }
 // Resolve answers name, one label, for the pod as feosd's resolver does
 // from the name tables the pod's spec names: the name's addresses of both
 // families, and whether the tables hold it (false: feosd would ask
-// upstream). A node without the NameService answers nothing.
+// upstream). feosd answers a name whose addresses include the pod's own
+// with loopback (ADR 0035); this gives the table's addresses, which is
+// what ferund puts there. A node without the NameService answers
+// nothing.
 func (n *Node) Resolve(pod podid.ID, name string) ([]string, bool) {
 	info, err := n.pods.get(pod.String())
 	if err != nil || n.cfg.NoNameService {
