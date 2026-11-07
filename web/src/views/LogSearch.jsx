@@ -200,7 +200,7 @@ function Chips({ label, value, options, onChange, mono }) {
 
 // What picks the object, its replica and the source; the object picked
 // links its page (pageOf).
-function What({ objects, focus, set, pageOf, navigate }) {
+function What({ objects, focus, set, pageOf, navigate, scoped }) {
   const o = focus.object ? objects.find((x) => `${x.kind}/${x.name}` === focus.object) : null;
   const replicas = o ? logReplicas(o) : [];
   const kind = o ? o.kind : focus.object ? focus.object.split('/')[0] : '';
@@ -212,7 +212,7 @@ function What({ objects, focus, set, pageOf, navigate }) {
   const listed = !focus.object || o;
   return (
     <>
-      <div className="chiprow lg-chips">
+      {!scoped && <div className="chiprow lg-chips">
         <span className="k">object</span>
         <button type="button" className={'chipbtn' + (!focus.object ? ' on' : '')} onClick={() => set({ object: undefined, replica: undefined })}>
           every object
@@ -231,7 +231,7 @@ function What({ objects, focus, set, pageOf, navigate }) {
           <a className="small lg-objpage" href={pageOf(focus.object)} title="its definition, instances and changes"
             onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(pageOf(focus.object)); } }}>
             {focus.object}’s page →</a>)}
-      </div>
+      </div>}
       {(replicas.length > 1 || focus.replica != null) && (
         <Chips label="replica" mono value={focus.replica == null ? 'all' : String(focus.replica)}
           options={[['all', 'every'], ...replicas.map((r) => [String(r), String(r)])]}
@@ -444,11 +444,13 @@ function Lines({ search, onAtEnd, many, trace, onTrace, q, onWord, utc, allKept 
 }
 
 // LogSearch is the Logs tab of environment env (its name; st its status)
-// for a search: focus (logs.js, focusOf). tail is the node's last lines
+// for a search: focus (logs.js, focusOf). On an object's page (scoped) the
+// object is the page's, so there is no picking another; the environment's
+// Logs picks one and stays where it is. tail is the node's last lines
 // of one object: what stands in for the store while it does not answer,
 // and all there is of an attached service (tailOnly), whose process
 // writes into its sandbox, not the store.
-export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly }) {
+export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly, scoped = false }) {
   const objects = (st && st.objects) || [];
   const [live, setLive] = useState(true);
   const [tz, setTz] = useTimeZone();
@@ -460,7 +462,9 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly }) 
   const set = (patch) => {
     const next = { ...focus, ...patch };
     for (const k of Object.keys(next)) if (next[k] == null || next[k] === '') delete next[k];
-    navigate(envPath(tenant, env, 'logs', next.object || '', next.object && next.replica != null ? next.replica : null, queryOf(next)));
+    navigate(scoped
+      ? envPath(tenant, env, 'logs', next.object, next.replica != null ? next.replica : null, queryOf(next))
+      : envPath(tenant, env, 'logs', '', null, queryOf(next, true)));
   };
   // A trace link opens the trace's spans in the Traces tab, which lead
   // back to every line of it here.
@@ -486,7 +490,7 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly }) 
             <button type="button" className="linkbtn" onClick={() => set({ trace: undefined })}>leave the trace</button>
           </div>
         )}
-        <What objects={objects} focus={focus} set={set} navigate={navigate}
+        <What objects={objects} focus={focus} set={set} navigate={navigate} scoped={scoped}
           pageOf={(item) => envPath(tenant, env, 'objects', item)} />
         {!tailOnly && <>
         <div className="lg-searchrow">

@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveTenant } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
-  BindingCard, DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceTable, LogsBody, DeploymentTable,
+  BindingCard, DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceTable, LogsBody, LogsTab, DeploymentTable,
   DeploymentView, TagsBox, envCan,
 } from './Environments.jsx';
 import { AboutBox, EnvOverview } from './EnvOverview.jsx';
@@ -498,6 +498,19 @@ describe('the logs', () => {
     expect(tr).toContain('leave the trace');
   });
 
+  it("on an object's page offer no other object, only its replicas and sources", () => {
+    const out = html(<LogSearch tenant={T} env="expensa-stage" st={STAGE} focus={focusOf('service/expense-service', null, '')}
+      navigate={nav} tail={null} scoped />);
+    expect(out).not.toContain('every object');
+    expect(out).not.toContain('objchip');
+    expect(out).toContain('aria-pressed="true">every</button>');
+    expect(out).toContain('aria-pressed="false">requests</button>');
+    // The environment's Logs reads the object picked from the query.
+    const env = html(<LogsTab tenant={T} env="expensa-stage" st={STAGE} item="" replica={null}
+      search="?object=service%2Fexpense-service" navigate={nav} />);
+    expect(env).toContain('class="chipbtn mono objchip on"><span class="muted">service/</span>expense-service</button>');
+  });
+
   it("show an attached service's process output alone, from its node", () => {
     const out = html(<LogSearch tenant={T} env="expensa-preview" st={PREVIEW} focus={focusOf('service/web', null, '')}
       navigate={nav} tail={<p className="tail">the tail</p>} tailOnly />);
@@ -515,7 +528,7 @@ describe('the routes it calls', () => {
       .map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
-      'accessLogs', 'addonCatalog', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag', 'findTraces',
+      'accessLogs', 'addonCatalog', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
       'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments', 'listEnvironments',
       'listIncidents', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',

@@ -57,8 +57,9 @@ export const ENV_TABS = [
 // ENV_LENSES are the views of an environment, its tab bar: the sidebar
 // picks the thing (the environment or one of its objects), the tab bar
 // how to look at it. Activity holds the deployments and the incidents,
-// Settings the secrets and the domains and access (LENS_PAGES).
-export const ENV_LENSES = ['overview', 'activity', 'logs', 'traces', 'traffic', 'settings'];
+// Settings the secrets and the domains and access (LENS_PAGES). A trace
+// has no view of its own: it opens from a log line, in Logs (lensOf).
+export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'settings'];
 
 // LENS_PAGES are the pages of a view that has more than one, in its own
 // tab bar.
@@ -71,25 +72,25 @@ export const LENS_PAGES = {
 // page and the builder belong to none ('').
 export function lensOf(tab) {
   if (ENV_LENSES.includes(tab)) return tab;
+  if (tab === 'traces') return 'logs';
   for (const [lens, pages] of Object.entries(LENS_PAGES)) if (pages.includes(tab)) return lens;
   return '';
 }
 
 // OBJECT_TABS are the views of an object's page: the same as an
 // environment's where it has them (OBJECT_LENSES), with its definition
-// as config. A service has every one, an addon and a job no traces and
-// no traffic.
-export const OBJECT_TABS = ['overview', 'logs', 'traces', 'traffic', 'config'];
+// as config. A service has every one, an addon and a job no traffic.
+export const OBJECT_TABS = ['overview', 'logs', 'traffic', 'config'];
 
 // objectTabs are the views of an object of kind.
 export function objectTabs(kind) {
-  return kind === 'service' ? OBJECT_TABS : OBJECT_TABS.filter((t) => t !== 'traces' && t !== 'traffic');
+  return kind === 'service' ? OBJECT_TABS : OBJECT_TABS.filter((t) => t !== 'traffic');
 }
 
 // OBJECT_LENS maps an environment's view to an object's, and back: the
 // view stays when one picks another thing in the sidebar.
-const TO_OBJECT = { overview: 'overview', activity: 'overview', logs: 'logs', traces: 'traces', traffic: 'traffic', settings: 'config' };
-const TO_ENV = { overview: 'overview', logs: 'logs', traces: 'traces', traffic: 'traffic', config: 'settings' };
+const TO_OBJECT = { overview: 'overview', activity: 'overview', logs: 'logs', traffic: 'traffic', settings: 'config' };
+const TO_ENV = { overview: 'overview', logs: 'logs', traffic: 'traffic', config: 'settings' };
 
 // ENV_TAB_LABELS name them.
 export const ENV_TAB_LABELS = {
@@ -114,18 +115,18 @@ export const PAGE_LABELS = {
 };
 
 // OBJECT_TAB_LABELS name the views of an object's page.
-export const OBJECT_TAB_LABELS = { overview: 'Overview', logs: 'Logs', traces: 'Traces', traffic: 'Traffic', config: 'Config' };
+export const OBJECT_TAB_LABELS = { overview: 'Overview', logs: 'Logs', traffic: 'Traffic', config: 'Config' };
 
 // SEARCH_TABS are the tabs whose search is in the address's query; an
-// object's logs and traces have theirs too.
-const SEARCH_TABS = new Set(['logs', 'traces']);
+// object's logs have theirs too.
+const SEARCH_TABS = new Set(['logs']);
 
 // envRoute reads the segments after /tenants/:t/environments: the
 // environment, its tab (an unknown one is the overview), and the tab's
 // item: a deployment's number, an incident's ID, a trace's ID, or the
 // "<kind>/<name>" of the object whose logs show, with the replica (null
-// unless given: every replica); and the logs' or traces' search, the
-// address's query (logs.js, traces.js); on the objects tab the
+// unless given: every replica); and the logs' search, the address's
+// query (logs.js); on the objects tab the
 // "<kind>/<name>" of the object whose page it is, on the builder's the
 // object whose form is open.
 function envRoute(tenant, seg, search) {
@@ -145,8 +146,7 @@ function envRoute(tenant, seg, search) {
 }
 
 // envPath is the path of an environment's page: the list without env,
-// the tab's list without item; the search ("?…") only on a logs or
-// traces path. The logs of an object (item "<kind>/<name>") are its
+// the tab's list without item; the search ("?…") only on a logs path. The logs of an object (item "<kind>/<name>") are its
 // page's Logs, with the replica when it is given.
 export function envPath(tenant, env = '', tab = 'overview', item = '', replica = null, search = '') {
   const enc = encodeURIComponent;
@@ -162,8 +162,7 @@ export function envPath(tenant, env = '', tab = 'overview', item = '', replica =
 }
 
 // objectPath is the path of an object's page (item "<kind>/<name>") in
-// view otab: the replica only on its logs, the search only on its logs
-// and traces.
+// view otab: the replica and the search only on its logs.
 export function objectPath(tenant, env, item, otab = 'overview', replica = null, search = '') {
   let p = envPath(tenant, env, 'objects', item);
   if (!otab || otab === 'overview' || !OBJECT_TABS.includes(otab)) return p;
@@ -302,6 +301,7 @@ export function chosenEnv(route, envs, last = '') {
 export function switchEnvPath(route, tenant, env) {
   const inEnv = route.view === 'environments' && route.env && route.tenant === tenant;
   if (inEnv && route.tab === 'objects') return pickEnvPath(route, tenant, env);
-  const tab = inEnv ? route.tab : 'overview';
+  // A trace is of one environment only: the other one's logs.
+  const tab = !inEnv ? 'overview' : route.tab === 'traces' ? 'logs' : route.tab;
   return envPath(tenant, env, tab);
 }

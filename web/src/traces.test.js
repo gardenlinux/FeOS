@@ -5,8 +5,7 @@ import { it as test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   attrValue, barOf, bindingOf, criticalByService, criticalPath, firstFolds, foldLevel, fromJaeger, isCall, offsetText, selfUs,
-  serviceHues, shownRows, spanRows, spanTitle, summaryOf, summaryText, traceFocusOf, traceQueryOf, traceRangeOf,
-  traceSearchParams, waitParts, whereOf,
+  serviceHues, shownRows, spanRows, spanTitle, waitParts, whereOf,
 } from './traces.js'
 
 const T = 1793361600000000
@@ -165,30 +164,15 @@ test('where a span ran: object#replica, the ingress by its service', () => {
   assert.equal(whereOf({ service: 'worker', resource: [] }), 'worker')
 })
 
-test('values, offsets and a trace in a few words', () => {
+test('values, offsets and a span in a few words', () => {
   assert.equal(attrValue({ value: 'x' }), 'x')
   assert.equal(attrValue({ value: 503 }), '503')
   assert.equal(attrValue({ value: true }), 'true')
   assert.equal(offsetText(T + 2000, T), '+2 ms')
   assert.equal(offsetText(T + 1400000, T), '+1.4 s')
-  assert.equal(summaryText({ name: 'POST', path: '/expenses', statusCode: 503 }), 'POST /expenses → 503')
-  assert.equal(summaryText({ name: 'publish', path: '', statusCode: 0 }), 'publish')
   assert.equal(spanTitle({ name: 'POST', attributes: [{ key: 'url.path', value: '/expenses' }] }), 'POST /expenses')
   assert.equal(spanTitle({ name: 'POST /expenses', attributes: [{ key: 'url.path', value: '/expenses' }] }), 'POST /expenses')
   assert.equal(spanTitle({ name: 'INSERT expenses', attributes: [] }), 'INSERT expenses')
-})
-
-test('the recent traces: the range and service in the address, start and end in the store\'s query', () => {
-  assert.equal(traceRangeOf({}), '1h')
-  assert.equal(traceRangeOf({ since: '2026-10-30T12:00:00Z' }), '1h')
-  assert.deepEqual(traceFocusOf('?service=api&since=1d&x=1'), { service: 'api', since: '1d' })
-  assert.deepEqual(traceFocusOf('?since=nonsense'), {})
-  assert.equal(traceQueryOf({ service: 'api', since: '1h' }), '?service=api')
-  const now = Date.parse('2026-11-06T15:00:00Z')
-  assert.equal(
-    traceSearchParams({ since: '1d', service: 'api' }, 'env-1', now).toString(),
-    'environment=env-1&service=api&start=1793890800000000&end=1793977200000000&limit=50',
-  )
 })
 
 test('a trace of Jaeger\'s shape reads as spans: parent, links, kind, status, events, resource', () => {
@@ -213,25 +197,6 @@ test('a trace of Jaeger\'s shape reads as spans: parent, links, kind, status, ev
   assert.deepEqual(db.attributes.map((a) => a.key), ['db.system'])
   assert.deepEqual(db.events, [{ timeUs: 1200, name: 'exception', attributes: [{ key: 'exception.message', type: 'string', value: 'boom' }] }])
   assert.deepEqual(t.spans[0].resource.map((a) => a.key), ['ferun.object'])
-  const sm = summaryOf({ traceID: 'aa', spans: [], processes: {} })
-  assert.deepEqual([sm.spans, sm.name], [0, ''])
-})
-
-test('a trace of a search in a few facts: its root, path, status, services, failures', () => {
-  const sm = summaryOf({
-    traceID: 'aa',
-    spans: [
-      { traceID: 'aa', spanID: 'b', operationName: 'charge', references: [{ refType: 'CHILD_OF', traceID: 'aa', spanID: 'a' }], startTime: 2, duration: 1,
-        tags: [{ key: 'error', type: 'bool', value: true }], processID: 'q' },
-      { traceID: 'aa', spanID: 'a', operationName: 'POST', references: [], startTime: 1, duration: 9,
-        tags: [{ key: 'url.path', type: 'string', value: '/orders' }, { key: 'http.response.status_code', type: 'int64', value: 201 }], processID: 'p' },
-    ],
-    processes: { p: { serviceName: 'ferun-ingress' }, q: { serviceName: 'payment' } },
-  })
-  assert.deepEqual(sm, { traceId: 'aa', startUs: 1, durationUs: 9, service: 'ferun-ingress', name: 'POST', path: '/orders', statusCode: 201,
-    services: ['ferun-ingress', 'payment'], spans: 2, errors: 1 })
-  assert.equal(summaryText(sm), 'POST /orders → 201')
-  assert.equal(summaryText({ name: 'GET /orders', path: '/orders', statusCode: 0 }), 'GET /orders')
 })
 
 test('a request out through an HTTP secret is a client span that names it', () => {

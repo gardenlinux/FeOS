@@ -6,10 +6,11 @@
 // with no React or browser imports, so that the tests load it as it is.
 //
 // A search is its focus: what it reads (object "<kind>/<name>" and its
-// replica, from the path; source), the words or /an expression/ (q), the
-// levels, the time (since, until; a span back from now or from and to) and
-// a trace. Everything but the object and the replica is in the address's
-// query, so that a search is a link.
+// replica; source), the words or /an expression/ (q), the levels, the time
+// (since, until; a span back from now or from and to) and a trace. All of
+// it is in the address, so that a search is a link: on an object's page
+// its object and replica in the path, in the environment's Logs in the
+// query beside the rest.
 
 // LEVELS are the store's levels, the chips of the search.
 export const LEVELS = ['error', 'warn', 'info', 'debug', 'unknown'];
@@ -55,10 +56,14 @@ export function rangeOf(focus) {
 const QUERY_KEYS = ['source', 'q', 'level', 'since', 'until', 'trace'];
 
 // focusOf reads a search from the route's object and replica and the
-// address's query.
+// address's query; without an object in the route, the query's.
 export function focusOf(item, replica, search) {
   const p = new URLSearchParams(search || '');
   const f = {};
+  if (!item && /^(service|addon|job)\/[^/]+$/.test(p.get('object') || '')) {
+    item = p.get('object');
+    replica = /^\d+$/.test(p.get('replica') || '') ? Number(p.get('replica')) : null;
+  }
   if (item) f.object = item;
   if (item && replica != null) f.replica = replica;
   for (const k of QUERY_KEYS) {
@@ -70,10 +75,15 @@ export function focusOf(item, replica, search) {
   return f;
 }
 
-// queryOf is the address's query of a search: its parts but the object
-// and the replica, '' or "?…".
-export function queryOf(focus) {
+// queryOf is the address's query of a search, '' or "?…": its parts but
+// the object and the replica, those too when withObject (the
+// environment's Logs).
+export function queryOf(focus, withObject = false) {
   const p = new URLSearchParams();
+  if (withObject && focus && focus.object) {
+    p.set('object', focus.object);
+    if (focus.replica != null) p.set('replica', String(focus.replica));
+  }
   for (const k of QUERY_KEYS) if (focus && focus[k]) p.set(k, focus[k]);
   const s = p.toString();
   return s ? '?' + s : '';

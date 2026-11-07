@@ -8,23 +8,23 @@ import { ErrBox } from '../components.jsx';
 import { envPath } from '../routes.js';
 import { queryOf } from '../logs.js';
 import {
-  TRACE_RANGES, attrValue, barOf, bindingOf, clockOfUs, criticalByService, criticalPath, firstFolds, foldLevel, fromJaeger,
-  isCall, offsetText, selfUs, serviceHues, shownRows, spanRows, spanTitle, summaryOf, summaryText, traceFocusOf,
-  traceQueryOf, traceRangeOf, traceSearchParams, usText, waitParts, whereOf,
+  attrValue, barOf, bindingOf, clockOfUs, criticalByService, criticalPath, firstFolds, foldLevel, fromJaeger, isCall,
+  offsetText, selfUs, serviceHues, shownRows, spanRows, spanTitle, usText, waitParts, whereOf,
 } from '../traces.js';
 import { useTimeZone } from './LogSearch.jsx';
 
-// The Traces tab of an environment (ADR 0026 §10): a trace's spans as a
-// waterfall, each span a row, its service and name above a bar placed by
+// A trace of an environment (ADR 0026 §10), opened from a log line: its
+// spans as a waterfall, each span a row, its service and name above a bar placed by
 // its start and duration in the trace, the bars sharing one track so that
 // they line up however deep a span sits, the tree's lines in a gutter
 // beside it; spans fold, each service has its colour, a bar is solid where
 // its span works and hatched where it waits, and the critical path is
 // summed up by service above them. A
 // row opened shows the span's attributes, events, links and resource. A
-// trace link in the Logs tab opens it here, and the trace leads to its
-// lines there. Without a trace the tab lists the recent traces of the
-// environment. What a span carries is the application's own: text, never
+// trace link in the Logs tab opens it here, and the trace leads back to
+// its lines there. There is no list of traces: searching them made the
+// store scan for seconds, and a trace is wanted from a line anyway. What
+// a span carries is the application's own: text, never
 // markup.
 
 // useRead reads what fn answers once per key, and again on reload.
@@ -329,7 +329,7 @@ function CriticalPath({ rows, path, hues }) {
 // their colours from trace to trace.
 const envServices = (st) => ((st && st.objects) || []).filter((o) => o.kind === 'service').map((o) => o.name);
 
-function TraceView({ st, trace, utc, onTrace, onLines, onList }) {
+function TraceView({ st, trace, utc, onTrace, onLines }) {
   const { data: raw, error } = useRead(st ? `${st.id}/${trace}` : '', () => api.getTrace(st.id, trace));
   const data = useMemo(() => {
     const t = raw && raw.data && raw.data[0];
@@ -357,7 +357,6 @@ function TraceView({ st, trace, utc, onTrace, onLines, onList }) {
         )}
         <span className="spacer" />
         <button type="button" className="linkbtn" onClick={onLines}><Icon name="file" size={12} /> its lines in the logs</button>
-        <button type="button" className="linkbtn" onClick={onList}>recent traces</button>
       </div>
       {(error || none) && <Problem error={error || { status: 404 }} />}
       {!error && !raw && <p className="muted small">Reading the trace …</p>}
@@ -368,82 +367,13 @@ function TraceView({ st, trace, utc, onTrace, onLines, onList }) {
   );
 }
 
-function RecentTraces({ st, focus, utc, set, onTrace, fixed = false }) {
-  const key = st ? `${st.id} ${JSON.stringify(focus)}` : '';
-  const { data, error, reload } = useRead(key, () => api.findTraces(traceSearchParams(focus, st.id).toString()));
-  const services = envServices(st);
-  if (focus.service && focus.service !== 'ferun-ingress' && !services.includes(focus.service)) services.push(focus.service);
-  const traces = useMemo(() => ((data && data.data) || []).filter((t) => t.spans && t.spans.length).map(summaryOf)
-    .sort((a, b) => b.startUs - a.startUs), [data]);
-  return (
-    <div className="tr">
-      {!fixed && <div className="chiprow lg-chips">
-        <span className="k">through</span>
-        {[['', 'every service'], ['ferun-ingress', 'the ingress'], ...services.map((s) => [s, s])].map(([v, text]) => (
-          <button key={v} type="button" className={'chipbtn' + (v && v !== 'ferun-ingress' ? ' mono' : '') + ((focus.service || '') === v ? ' on' : '')}
-            onClick={() => set({ service: v || undefined })}>{text}</button>
-        ))}
-      </div>}
-      <div className="chiprow lg-chips">
-        <span className="k">time</span>
-        {TRACE_RANGES.map(([v, text]) => (
-          <button key={v} type="button" className={'chipbtn' + (traceRangeOf(focus) === v ? ' on' : '')} onClick={() => set({ since: v })}>{text}</button>
-        ))}
-      </div>
-      {error && <Problem error={error} />}
-      {!error && (
-        <p className="lg-count">
-          {!data ? 'Searching …' : traces.length ? `The newest ${traces.length} traces` : 'No traces in this time.'}
-          {data && <button type="button" className="linkbtn" onClick={reload}>again</button>}
-        </p>
-      )}
-      {traces.length > 0 && (
-        <div className="tblwrap">
-          <table className="tbl tr-tbl">
-            <thead>
-              <tr><th>trace</th><th className="col-when">at</th><th className="col-num">takes</th><th className="col-num">spans</th><th>services</th></tr>
-            </thead>
-            <tbody>
-              {traces.map((t) => (
-                <tr key={t.traceId} className={'clickable' + (t.errors ? ' bad' : '')} onClick={() => onTrace(t.traceId)} title={`trace ${t.traceId}`}>
-                  <td className="mono">
-                    {t.errors > 0 && <Icon name="alert" size={12} />} <span className="muted">{t.service}</span> {summaryText(t)}
-                  </td>
-                  <td className="col-when mono small">{clockOfUs(t.startUs, utc)}</td>
-                  <td className="col-num mono">{usText(t.durationUs)}</td>
-                  <td className="col-num mono">{t.spans}{t.errors > 0 && <span className="bad"> · {t.errors} failed</span>}</td>
-                  <td className="small muted">{t.services.join(' · ')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Traces is the tab: a trace (item, its ID) or the recent traces (search,
-// the address's query). On a service's page (service, its name) the
-// recent traces are those through it, and listPath(query) the path of
-// its traces' search; a trace opens in the environment's Traces.
-export function Traces({ tenant, env, st, item, search, navigate, service = '', listPath = null }) {
+// Traces is a trace (item, its ID) of the environment.
+export function Traces({ tenant, env, st, item, navigate }) {
   const [tz] = useTimeZone();
-  const focus = useMemo(() => (service ? { ...traceFocusOf(search), service } : traceFocusOf(search)), [search, service]);
   const onTrace = (trace) => navigate(envPath(tenant, env, 'traces', trace));
-  const set = (patch) => {
-    const next = { ...focus, ...patch };
-    for (const k of Object.keys(next)) if (next[k] == null || next[k] === '') delete next[k];
-    if (service) delete next.service;
-    navigate(listPath ? listPath(traceQueryOf(next)) : envPath(tenant, env, 'traces', '', null, traceQueryOf(next)));
-  };
   if (!st) return <p className="empty">Loading…</p>;
-  if (item) {
-    return (
-      <TraceView st={st} trace={item} utc={tz === 'utc'} onTrace={onTrace}
-        onLines={() => navigate(envPath(tenant, env, 'logs', '', null, queryOf({ trace: item })))}
-        onList={() => navigate(envPath(tenant, env, 'traces'))} />
-    );
-  }
-  return <RecentTraces st={st} focus={focus} utc={tz === 'utc'} set={set} onTrace={onTrace} fixed={!!service} />;
+  return (
+    <TraceView st={st} trace={item} utc={tz === 'utc'} onTrace={onTrace}
+      onLines={() => navigate(envPath(tenant, env, 'logs', '', null, queryOf({ trace: item })))} />
+  );
 }

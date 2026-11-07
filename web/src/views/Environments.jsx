@@ -9,7 +9,7 @@ import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
 import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, envPath, lensOf, newEnvPath } from '../routes.js';
 import { useEnvStatus } from '../envstatus.jsx';
-import { focusOf } from '../logs.js';
+import { focusOf, queryOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { Traces } from './Traces.jsx';
 import { Builder } from './Builder.jsx';
@@ -259,7 +259,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
 
 // LENS_ICONS are the icons of the views in the tab bar.
 const LENS_ICONS = {
-  overview: 'gauge', activity: 'history', logs: 'file', traces: 'activity', traffic: 'chart', settings: 'settings',
+  overview: 'gauge', activity: 'history', logs: 'file', traffic: 'chart', settings: 'settings',
 };
 
 // EnvDetail is an environment's page: its head, the tab bar of its views
@@ -273,8 +273,10 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const access = useAccess(tenant);
   const sum = useSummary();
   const list = envPath(tenant);
-  // The objects tab without an object is the overview, which lists them.
-  const activeTab = ENV_TABS.includes(tab) && !(tab === 'objects' && !item) ? tab : 'overview';
+  // The objects tab without an object is the overview, which lists them;
+  // traces without a trace are the logs, where traces open from.
+  const activeTab = tab === 'traces' && !item ? 'logs'
+    : ENV_TABS.includes(tab) && !(tab === 'objects' && !item) ? tab : 'overview';
   const lens = lensOf(activeTab);
 
   useNow(1000);
@@ -284,8 +286,11 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const ec = envCan(access, (st && st.id) || env);
 
   // Escape goes up: from an item to its tab's list, from there to the
-  // environments; from the builder and an object's page to the overview.
-  const up = activeTab === 'builder' || activeTab === 'objects' ? envPath(tenant, env) : item ? envPath(tenant, env, activeTab) : list;
+  // environments; from the builder and an object's page to the overview;
+  // from a trace to its lines.
+  const up = activeTab === 'builder' || activeTab === 'objects' ? envPath(tenant, env)
+    : activeTab === 'traces' ? envPath(tenant, env, 'logs', '', null, queryOf({ trace: item }))
+      : item ? envPath(tenant, env, activeTab) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -359,7 +364,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
           ? <IncidentPane key={item} tenant={tenant} env={env} id={item} navigate={navigate} />
           : <IncidentsList tenant={tenant} env={env} navigate={navigate} />)}
         {activeTab === 'logs' && <LogsTab tenant={tenant} env={env} st={st} item="" replica={null} search={search} navigate={navigate} />}
-        {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} search={search} navigate={navigate} />}
+        {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
         {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}
         {activeTab === 'secrets' && (
           <>
@@ -1183,11 +1188,19 @@ export function IncidentView({ inc, tenant, env, navigate }) {
 
 export function LogsTab({ tenant, env, st, item, replica, search, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
-  const o = findObject(st.objects || [], item);
+  // On an object's page (item) the object is the page's; in the
+  // environment's Logs the one picked, from the query.
   const focus = focusOf(item, replica, search);
-  const page = o ? envPath(tenant, env, 'objects', item) : '';
-  const tail = item ? <LogsPane key={`${item}/${replica}`} env={env} item={item} replica={replica || 0} o={o} page={page} navigate={navigate} /> : null;
-  return <LogSearch tenant={tenant} env={env} st={st} focus={focus} navigate={navigate} tail={tail} tailOnly={!!(o && isAttached(o))} />;
+  const obj = focus.object || '';
+  const o = findObject(st.objects || [], obj);
+  const page = o ? envPath(tenant, env, 'objects', obj) : '';
+  const tail = obj
+    ? <LogsPane key={`${obj}/${focus.replica}`} env={env} item={obj} replica={focus.replica || 0} o={o} page={page} navigate={navigate} />
+    : null;
+  return (
+    <LogSearch tenant={tenant} env={env} st={st} focus={focus} navigate={navigate} tail={tail} tailOnly={!!(o && isAttached(o))}
+      scoped={!!item} />
+  );
 }
 
 function LogsPane({ env, item, replica, o, page, navigate }) {

@@ -385,10 +385,9 @@ export const api = {
   // first; followLogs reads new lines as they come.
   searchLogs: (params) => tenantCall('GET', `/logs?${params}`),
   // Its traces, in the shape of Jaeger's HTTP query API (ADR 0026 §10):
-  // a trace by its ID within an environment (its ID), and a search
-  // (traces.js, traceSearchParams).
+  // a trace by its ID within an environment (its ID). The console opens a
+  // trace from a log line and lists none: a search costs the store a scan.
   getTrace: (env, trace) => tenantCall('GET', `/jaeger/api/traces/${enc(trace)}${query({ environment: env })}`),
-  findTraces: (params) => tenantCall('GET', `/jaeger/api/traces?${params}`),
   followLogs: (params, signal) => tenantStream(`/logs?${params}&follow=1`, signal),
 
   // People (ADR 0031): a person's tenants, their members, invitations,

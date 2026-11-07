@@ -35,6 +35,15 @@ describe('a search', () => {
     expect(queryOf({})).toBe('');
   });
 
+  it("in the environment's Logs has the object and the replica in the query", () => {
+    const f = focusOf('', null, '?object=service%2Fapi&replica=1&q=timeout');
+    expect(f).toEqual({ object: 'service/api', replica: 1, q: 'timeout' });
+    expect(queryOf(f, true)).toBe('?object=service%2Fapi&replica=1&q=timeout');
+    expect(focusOf('', null, '?object=nonsense&replica=1')).toEqual({});
+    expect(focusOf('', null, '?object=job%2Fmigrate&replica=x')).toEqual({ object: 'job/migrate' });
+    expect(focusOf('service/web', null, '?object=service%2Fapi')).toEqual({ object: 'service/web' });
+  });
+
   it("is the store's query: the environment always, a span read back from now", () => {
     expect(sinkParams({}, ENV, { now: NOW, limit: 300 }).toString())
       .toBe(`environment=${ENV}&since=2026-11-06T14%3A00%3A00.000Z&limit=300`);

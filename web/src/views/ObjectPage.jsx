@@ -16,7 +16,6 @@ import { builtinCatalog, planText, readCatalog } from './catalog.js';
 import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
 import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
 import { StateCard, WideSpark } from './EnvOverview.jsx';
-import { Traces } from './Traces.jsx';
 import '../styles/environments.css';
 
 // An object's page (/tenants/:t/environments/:env/objects/:kind/:name
@@ -25,7 +24,7 @@ import '../styles/environments.css';
 // now, and Edit; its views are the environment's where it has them
 // (objectTabs): the overview (what is wrong and why, with the end of the
 // log; its instances; the deployments that changed it; its traffic and
-// incidents), its logs, traces and traffic, and its config: its
+// incidents), its logs and traffic, and its config: its
 // definition as the latest deployment's normalised spec has it (the
 // image as written and its pin, the environment with its references as
 // links, a secret at its pinned version, never its value), the bindings
@@ -34,7 +33,7 @@ import '../styles/environments.css';
 
 const Link = EnvLink;
 
-const TAB_ICONS = { overview: 'gauge', logs: 'file', traces: 'activity', traffic: 'chart', config: 'settings' };
+const TAB_ICONS = { overview: 'gauge', logs: 'file', traffic: 'chart', config: 'settings' };
 
 export function ObjectPage({ tenant, st, item, otab = 'overview', replica = null, search = '', ec, lastOk = 0, changed = () => {}, navigate }) {
   const spec = useLatestSpec(st);
@@ -130,9 +129,6 @@ export function ObjectView({
           <ObjectOverview tenant={tenant} st={st} o={o} kind={kind} name={name} ec={ec} navigate={navigate} />)}
         {view === 'logs' && (
           <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />)}
-        {view === 'traces' && (
-          <Traces tenant={tenant} env={env} st={st} item="" search={search} navigate={navigate} service={name}
-            listPath={(q) => objectPath(tenant, env, item, 'traces', null, q)} />)}
         {view === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} service={name} />}
         {view === 'config' && (
           <section className="pane objpage">

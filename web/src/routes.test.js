@@ -93,14 +93,14 @@ describe('the environments routes', () => {
   it("maps an object's page and its views", () => {
     const obj = (rest) => env({ env: 'e', tab: 'objects', item: 'service/api', otab: 'overview', ...rest });
     expect(parsePath('/tenants/fecode/environments/e/objects/service/api')).toEqual(obj({}));
-    for (const otab of ['logs', 'traces', 'traffic', 'config']) {
+    for (const otab of ['logs', 'traffic', 'config']) {
       expect(parsePath(`/tenants/fecode/environments/e/objects/service/api/${otab}`)).toEqual(obj({ otab }));
       expect(objectPath('fecode', 'e', 'service/api', otab)).toBe(`/tenants/fecode/environments/e/objects/service/api/${otab}`);
     }
     expect(parsePath('/tenants/fecode/environments/e/objects/service/api/logs/2?q=x'))
       .toEqual(obj({ otab: 'logs', replica: 2, search: '?q=x' }));
-    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/traces?since=1d'))
-      .toEqual(obj({ otab: 'traces', search: '?since=1d' }));
+    // Traces are no view of an object's page any more: its overview.
+    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/traces?since=1d')).toEqual(obj({}));
     // A search on a view without one is dropped, an unknown view is the overview.
     expect(parsePath('/tenants/fecode/environments/e/objects/service/api/config?q=x')).toEqual(obj({ otab: 'config' }));
     expect(parsePath('/tenants/fecode/environments/e/objects/service/api/nope')).toEqual(obj({}));
@@ -108,14 +108,16 @@ describe('the environments routes', () => {
     expect(objectPath('fecode', 'e', 'service/api', 'logs', 0, '?level=error'))
       .toBe('/tenants/fecode/environments/e/objects/service/api/logs/0?level=error');
     expect(objectPath('fecode', 'e', 'service/api', 'config', 3, '?q=x')).toBe('/tenants/fecode/environments/e/objects/service/api/config');
-    expect(objectTabs('service')).toEqual(['overview', 'logs', 'traces', 'traffic', 'config']);
+    expect(objectTabs('service')).toEqual(['overview', 'logs', 'traffic', 'config']);
     expect(objectTabs('addon')).toEqual(['overview', 'logs', 'config']);
     expect(objectTabs('job')).toEqual(['overview', 'logs', 'config']);
     for (const t of OBJECT_TABS) expect(OBJECT_TAB_LABELS[t]).toBeTruthy();
   });
 
   it('groups the tabs into views: Activity and Settings have pages of their own', () => {
-    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traces', 'traffic', 'settings']);
+    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'settings']);
+    // A trace opens from a log line and belongs to Logs.
+    expect(lensOf('traces')).toBe('logs');
     expect(lensOf('deployments')).toBe('activity');
     expect(lensOf('incidents')).toBe('activity');
     expect(lensOf('secrets')).toBe('settings');
@@ -191,9 +193,8 @@ describe('the environments routes', () => {
     expect(parsePath('/tenants/fecode/new-environment')).toEqual({ view: 'newEnvironment', tenant: 'fecode' });
     expect(parsePath('/tenants/fecode/environments/e/traces/4bf92f3577b34da6a3ce929d0e0e4736'))
       .toEqual(env({ env: 'e', tab: 'traces', item: '4bf92f3577b34da6a3ce929d0e0e4736' }));
-    expect(parsePath('/tenants/fecode/environments/e/traces?service=api&since=1d'))
-      .toEqual(env({ env: 'e', tab: 'traces', search: '?service=api&since=1d' }));
-    expect(envPath('fecode', 'e', 'traces', '', null, '?service=api')).toBe('/tenants/fecode/environments/e/traces?service=api');
+    expect(parsePath('/tenants/fecode/environments/e/traces?service=api&since=1d')).toEqual(env({ env: 'e', tab: 'traces' }));
+    expect(envPath('fecode', 'e', 'traces', 'abc')).toBe('/tenants/fecode/environments/e/traces/abc');
   });
 });
 
@@ -258,8 +259,9 @@ describe('switchEnvPath', () => {
     expect(switchEnvPath(r, 'kino', 'stage')).toBe('/tenants/kino/environments/stage/logs');
     expect(switchEnvPath({ ...r, tab: 'objects' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
     // From an object's view the other environment's same view.
-    expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'traces' }, 'kino', 'stage'))
-      .toBe('/tenants/kino/environments/stage/traces');
+    expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'traffic' }, 'kino', 'stage'))
+      .toBe('/tenants/kino/environments/stage/traffic');
+    expect(switchEnvPath({ ...r, tab: 'traces', item: 'abc' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage/logs');
     expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'config' }, 'kino', 'stage'))
       .toBe('/tenants/kino/environments/stage/settings');
   });
@@ -280,8 +282,10 @@ describe('the sidebar keeps the view', () => {
     expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db');
     expect(pickObjectPath(r({ tab: 'secrets' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db/config');
     expect(pickObjectPath(r({ tab: 'deployments' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
-    expect(pickObjectPath(r({ tab: 'objects', item: 'service/api', otab: 'traces' }), 'kino', 'prod', db))
+    expect(pickObjectPath(r({ tab: 'objects', item: 'service/api', otab: 'traffic' }), 'kino', 'prod', db))
       .toBe('/tenants/kino/environments/prod/objects/addon/db');
+    expect(pickObjectPath(r({ tab: 'traces', item: 'abc' }), 'kino', 'prod', api))
+      .toBe('/tenants/kino/environments/prod/objects/service/api/logs');
     expect(pickObjectPath(r({ tab: 'objects', item: 'addon/db', otab: 'logs' }), 'kino', 'prod', api))
       .toBe('/tenants/kino/environments/prod/objects/service/api/logs');
     expect(pickObjectPath({ view: 'domains', tenant: 'kino' }, 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');

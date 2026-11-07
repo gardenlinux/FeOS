@@ -986,6 +986,7 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
    scrolls after all. */
 .content:has(.lg) { display: flex; flex-direction: column; padding-bottom: 16px; }
 .content:has(.lg) > .pane-detail,
+.content:has(.lg) > .tabbody,
 .pane-detail:has(.lg) > .tabbody,
 .lg { display: flex; flex-direction: column; flex: 1 0 auto; }
 .lg-view {

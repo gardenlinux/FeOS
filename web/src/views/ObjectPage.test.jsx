@@ -39,9 +39,10 @@ describe("a service's page", () => {
     expect(html(page('service', 'expense-service', { ec: { ...W, write: false } }))).toContain('disabled="" title="needs write on this environment"');
   });
 
-  it("has the environment's views it has: overview, logs, traces, traffic and config, each its own path", () => {
+  it("has the environment's views it has: overview, logs, traffic and config, each its own path; no traces", () => {
     const out = html(page('service', 'expense-service'));
-    for (const t of ['logs', 'traces', 'traffic', 'config']) {
+    expect(out).not.toContain('Traces');
+    for (const t of ['logs', 'traffic', 'config']) {
       expect(out).toContain(`href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service/${t}"`);
     }
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service" class="tab on" aria-current="page"');

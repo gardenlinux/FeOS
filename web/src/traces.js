@@ -1,62 +1,15 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The Traces tab's arithmetic (ADR 0026 §10, docs/architecture/traces.md):
-// the log store answers a tenant's traces in the shape of Jaeger's HTTP
-// query API under /api/v1/jaeger; fromJaeger reads a trace of it into
+// A trace's arithmetic (ADR 0026 §10, docs/architecture/traces.md): the
+// log store answers a tenant's traces in the shape of Jaeger's HTTP query
+// API under /api/v1/jaeger; fromJaeger reads a trace of it into
 // spans with their service, name, kind, times in µs, error, attributes,
 // resource, events and links, and the rest lays them out as a waterfall.
 // Pure, with no React or browser imports, so that the tests load it as it
 // is.
 
 import { clockOf, durationText } from './logs.js';
-
-// TRACE_RANGES are the search's times, a span back from now.
-export const TRACE_RANGES = [
-  ['15m', '15 min'],
-  ['1h', '1 h'],
-  ['1d', '1 day'],
-  ['7d', '7 days'],
-];
-const SPANS_US = { '15m': 15 * 60e6, '1h': 3600e6, '1d': 86400e6, '7d': 7 * 86400e6 };
-export const DEFAULT_TRACE_RANGE = '1h';
-export const TRACE_LIMIT = 50;
-
-// traceRangeOf is the range a search's since names.
-export const traceRangeOf = (focus) => (focus && SPANS_US[focus.since] ? focus.since : DEFAULT_TRACE_RANGE);
-
-// traceFocusOf reads a search of the recent traces from the address's
-// query: the service the traces went through, and the time.
-export function traceFocusOf(search) {
-  const p = new URLSearchParams(search || '');
-  const f = {};
-  const svc = (p.get('service') || '').trim();
-  if (svc) f.service = svc;
-  if (SPANS_US[p.get('since')]) f.since = p.get('since');
-  return f;
-}
-
-// traceQueryOf is the address's query of such a search, '' or "?…".
-export function traceQueryOf(focus) {
-  const p = new URLSearchParams();
-  if (focus && focus.service) p.set('service', focus.service);
-  if (focus && focus.since && focus.since !== DEFAULT_TRACE_RANGE) p.set('since', focus.since);
-  const s = p.toString();
-  return s ? '?' + s : '';
-}
-
-// traceSearchParams is the store's query of an environment's (its ID)
-// recent traces: Jaeger's start and end in µs.
-export function traceSearchParams(focus, env, now = Date.now()) {
-  const p = new URLSearchParams();
-  p.set('environment', env);
-  if (focus && focus.service) p.set('service', focus.service);
-  const end = Math.floor(now * 1000);
-  p.set('start', String(end - SPANS_US[traceRangeOf(focus)]));
-  p.set('end', String(end));
-  p.set('limit', String(TRACE_LIMIT));
-  return p;
-}
 
 // LIFTED are the tags a span's own fields carry.
 const LIFTED = new Set(['span.kind', 'otel.status_code', 'otel.status_description', 'error']);
@@ -108,38 +61,6 @@ export function fromJaeger(t) {
   out.spans.sort((a, b) => a.startUs - b.startUs || (a.spanId < b.spanId ? -1 : 1));
   if (out.spans.length) out.durationUs = end - out.startUs;
   return out;
-}
-
-// summaryOf is a trace of a search in a few facts: its root's service
-// and name, the request's path and status, its services, spans and
-// failures.
-export function summaryOf(t) {
-  const v = fromJaeger(t);
-  const ids = new Set(v.spans.map((s) => s.spanId));
-  const sm = { traceId: v.traceId, startUs: v.startUs, durationUs: v.durationUs, service: '', name: '', path: '', statusCode: 0,
-    services: [], spans: v.spans.length, errors: 0 };
-  let root = null;
-  for (const s of v.spans) {
-    if (s.error) sm.errors++;
-    if (!sm.services.includes(s.service)) sm.services.push(s.service);
-    if (!root && (!s.parentId || !ids.has(s.parentId))) root = s;
-  }
-  if (root) {
-    sm.service = root.service;
-    sm.name = root.name;
-    for (const kv of root.attributes) {
-      if (['url.path', 'http.route', 'http.target'].includes(kv.key) && !sm.path) sm.path = tagText(kv);
-      if (['http.response.status_code', 'http.status_code'].includes(kv.key)) sm.statusCode = Number(tagText(kv)) || 0;
-    }
-  }
-  return sm;
-}
-
-// summaryText is a trace of a search in a few words: its root's name, the
-// request's path and status.
-export function summaryText(t) {
-  const ask = [t.name, t.path && !String(t.name).includes(t.path) ? t.path : ''].filter(Boolean).join(' ');
-  return t.statusCode ? `${ask} → ${t.statusCode}` : ask;
 }
 
 // usText is a span of µs as people read it.
