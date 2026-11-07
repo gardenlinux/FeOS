@@ -110,7 +110,8 @@ describe('me → navigation', () => {
       'tokens', 'usage', 'settings']);
     expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'jobs', 'sandboxes', 'members',
       'usage', 'settings']);
-    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'members', 'usage', 'settings']);
+    // Grants on environments alone: their sandboxes and jobs too (ADR 0035).
+    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'jobs', 'sandboxes', 'members', 'usage', 'settings']);
     expect(views(ANNA, 'nope')).toEqual([]);
     expect(views(BASIC, 'acme')).toEqual([]);
   });
@@ -132,7 +133,8 @@ describe('me → navigation', () => {
     expect(viewGate(ANNA, parsePath('/tenants/acme/tokens'))).toBe('');
     expect(viewGate(ANNA, parsePath('/tenants/zeta/tokens'))).toBe('role');
     expect(viewGate(ANNA, parsePath('/tenants/zeta/sandboxes/abc'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/sandboxes'))).toBe('role');
+    expect(viewGate(ANNA, parsePath('/tenants/shop/sandboxes'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/shop/tools'))).toBe('role');
     expect(viewGate(ANNA, parsePath('/tenants/shop/environments/shop-prod/logs'))).toBe('');
     expect(viewGate(ANNA, parsePath('/tenants/shop'))).toBe('');
     expect(viewGate(ANNA, parsePath('/tenants/other'))).toBe('member');

@@ -317,22 +317,29 @@ export const api = {
   listActivity: (sandboxId, { beforeTsNs, source } = {}) =>
     adminCall('GET', `/sandboxes/${enc(sandboxId)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
 
-  // In the tenant.
-  listSandboxes: () => tenantCall('GET', '/sandboxes'),
+  // In the tenant. A sandbox is of an environment (ADR 0035): the list
+  // of one (its name or ID), or without it every sandbox the session may
+  // read.
+  listSandboxes: (environment = '') => tenantCall('GET', '/sandboxes' + query({ environment })),
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
   // status.sandboxId.
-  // attachable lets an environment's attached service run in it;
+  // environment (its name or ID) is required and fixed; securityGroups
+  // name one to five groups of it (ADR 0034), left out: default;
   // imageCredentials ({username, password}) pull a private image (ADR
   // 0025), sealed, never answered.
   // credentials name the tenant's credentials its pod gets (ADR 0033).
-  createSandbox: (image, vcpus = 0, memoryMib = 0, { attachable = false, imageCredentials = null, credentials = [] } = {}) =>
+  createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, securityGroups = null, imageCredentials = null, credentials = [] } = {}) =>
     tenantCall('POST', '/sandboxes', {
-      image, vcpus, memoryMib,
-      ...(attachable ? { attachable: true } : {}),
+      image, vcpus, memoryMib, environment,
+      ...(securityGroups && securityGroups.length ? { securityGroups } : {}),
       ...(imageCredentials ? { imageCredentials } : {}),
       ...(credentials && credentials.length ? { credentials } : {}),
     }),
+  // A sandbox's groups, the whole list: a move (hibernated and restored
+  // in them, under a new address), 202; the same list 200.
+  putSandboxSecurityGroups: (sandboxId, securityGroups) =>
+    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/security-groups`, { securityGroups }),
   putImageCredentials: (sandboxId, creds) => tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
   deleteImageCredentials: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
   // An HTTP binding's preflight (ADR 0028): {binding, probe{method,path}}
@@ -482,8 +489,19 @@ export const api = {
   bindDomain: (id, environment) => tenantCall('PUT', `/domains/${enc(id)}/environment`, { environment }),
   unbindDomain: (id) => tenantCall('DELETE', `/domains/${enc(id)}/environment`),
 
-  // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion.
-  listJobs: (labels = []) => tenantCall('GET', '/jobs' + labelQuery(labels)),
+  // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion,
+  // each in an environment (ADR 0035). The list of one environment (its
+  // name or ID) is filtered here too, since a ferund may list them all.
+  listJobs: async (labels = [], environment = '') => {
+    const q = labelQuery(labels);
+    const res = await tenantCall('GET', '/jobs' + q + (environment ? `${q ? '&' : '?'}environment=${enc(environment)}` : ''));
+    if (!environment) return res;
+    const jobs = (res.jobs || []).filter((j) => {
+      const e = j && j.environment;
+      return !!e && (e.id === environment || e.name === environment);
+    });
+    return { ...res, jobs };
+  },
   getJob: (id) => tenantCall('GET', `/jobs/${enc(id)}`),
   createJob: (body) => tenantCall('POST', '/jobs', body),
   jobLogs: (id) => tenantCall('GET', `/jobs/${enc(id)}/logs`),

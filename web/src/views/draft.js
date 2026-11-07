@@ -18,6 +18,7 @@ export const SPEC_KINDS = [
   { key: 'routes', kind: 'route', title: 'routes', one: 'route' },
   { key: 'secrets', kind: 'secret', title: 'secrets', one: 'secret' },
   { key: 'bindings', kind: 'binding', title: 'bindings', one: 'binding' },
+  { key: 'securityGroups', kind: 'securityGroup', title: 'security groups', one: 'security group' },
 ];
 
 const KIND_BY_KEY = new Map(SPEC_KINDS.map((k) => [k.key, k]));
@@ -35,12 +36,13 @@ export function keyOfKind(kind) {
 // text keeps the order the API answers with; a key the list lacks goes
 // last, where it was.
 const ORDER = {
-  spec: ['services', 'jobs', 'addons', 'routes', 'secrets', 'bindings', 'volumes'],
+  spec: ['services', 'jobs', 'addons', 'routes', 'secrets', 'bindings', 'securityGroups', 'volumes'],
   services: ['runtime', 'image', 'imageAsWritten', 'imageCredentials', 'sandbox', 'command', 'cwd', 'env', 'ports',
-    'replicas', 'resources', 'readiness', 'idle', 'rollout', 'mounts', 'bindings'],
+    'replicas', 'resources', 'readiness', 'idle', 'rollout', 'mounts', 'bindings', 'securityGroups'],
   jobs: ['image', 'imageAsWritten', 'command', 'env', 'resources', 'imageCredentials', 'on', 'timeout', 'retries',
-    'bindings'],
-  addons: ['type', 'version', 'plan', 'options'],
+    'bindings', 'securityGroups'],
+  addons: ['type', 'version', 'plan', 'options', 'securityGroups'],
+  securityGroups: ['in', 'out'],
   routes: ['path', 'service', 'port', 'strip', 'host'],
   secrets: ['version'],
   bindings: ['upstream', 'mode', 'caPem', 'pathPrefixes', 'forwardedHost', 'rateLimit', 'credential'],
@@ -173,7 +175,9 @@ export function mapEnvValues(spec, fn) {
 
 // renameObject renames key/from to to and the references to it: a
 // service's in the routes and the variables, an addon's and a secret's in
-// the variables, a binding's in the services' and jobs' lists.
+// the variables, a binding's in the services' and jobs' lists, a security
+// group's in the services', jobs' and addons' lists and in the groups'
+// rules.
 export function renameObject(spec, key, from, to) {
   if (from === to || !isObject(spec[key]) || !(from in spec[key])) return spec;
   let out = { ...spec, [key]: renameKey(spec[key], from, to) };
@@ -197,6 +201,41 @@ export function renameObject(spec, key, from, to) {
         }
       }
     }
+  }
+  if (key === 'securityGroups') {
+    for (const k of ['services', 'jobs', 'addons']) {
+      for (const [n, o] of objectsOf(out, k)) {
+        if (isObject(o) && Array.isArray(o.securityGroups) && o.securityGroups.includes(from)) {
+          out = setObject(out, k, n, { ...o, securityGroups: o.securityGroups.map((g) => (g === from ? to : g)) });
+        }
+      }
+    }
+    for (const [n, g] of objectsOf(out, 'securityGroups')) {
+      const next = mapRulePeers(g, (p) => (isObject(p) && p.group === from ? { ...p, group: to } : p));
+      if (next !== g) out = setObject(out, 'securityGroups', n, next);
+    }
+  }
+  return out;
+}
+
+// mapRulePeers applies fn to every peer of a security group's rules (in:
+// from, out: to) and returns the group, the same object when fn changed
+// nothing; fn returns the peer, or null to drop its rule.
+export function mapRulePeers(g, fn) {
+  if (!isObject(g)) return g;
+  let out = g;
+  for (const [dir, at] of [['in', 'from'], ['out', 'to']]) {
+    if (!Array.isArray(g[dir])) continue;
+    let changed = false;
+    const rules = [];
+    for (const r of g[dir]) {
+      if (!isObject(r)) { rules.push(r); continue; }
+      const p = fn(r[at]);
+      if (p === null) { changed = true; continue; }
+      if (p !== r[at]) changed = true;
+      rules.push(p !== r[at] ? { ...r, [at]: p } : r);
+    }
+    if (changed) out = { ...out, [dir]: rules };
   }
   return out;
 }

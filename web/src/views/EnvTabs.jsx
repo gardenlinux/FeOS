@@ -6,7 +6,8 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, Secret, useArm, usePoll } from '../components.jsx';
 import { fmtDate, fmtDurNs, fmtNs } from '../format.js';
-import { envPath } from '../routes.js';
+import { envPath, jobPath, sandboxPath } from '../routes.js';
+import { inUse } from './groups.js';
 import {
   actionProblem, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, newestFirst, olderCursor, publishNote,
   routeCurl, sparkPoints, statusTone,
@@ -622,16 +623,37 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
   );
 }
 
+// InUse says why a delete was refused (409 environment_in_use, ADR
+// 0035): the sandboxes and the jobs on their way that keep the
+// environment, each a link; nothing for any other error.
+export function InUse({ error, tenant, navigate }) {
+  const u = inUse(error);
+  if (!u) return null;
+  const links = (ids, path) => ids.map((id, i) => (
+    <React.Fragment key={id}>{i > 0 && ', '}<EnvLink to={path(tenant, id)} navigate={navigate} className="mono">{id}</EnvLink></React.Fragment>));
+  return (
+    <div className="message"><Icon name="alert" size={14} />
+      <span>
+        It is not deleted while something runs in it, so that nobody loses a workspace&apos;s disk with it.
+        {u.sandboxes.length > 0 && <> Its sandboxes: {links(u.sandboxes, sandboxPath)}.</>}
+        {u.jobs.length > 0 && <> Its jobs queued or running: {links(u.jobs, jobPath)}.</>}
+        {' '}Delete the sandboxes and cancel the jobs first; ended jobs&apos; records go with the environment.
+      </span>
+    </div>
+  );
+}
+
 export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
   const [armed, arm, disarm] = useArm();
   const [op, run] = useOp();
+  const blocked = op && op.tone === 'bad' ? inUse(op.error) : null;
   return (
     <div className="envsect envbox envbox-danger">
       <div className="sect">delete</div>
       <p className="panel-note">
         Deleting {st.name} stops and removes its instances and their volumes, with its addons' data, then the environment
-        with its deployments, tags, secrets and route tokens. Its default host goes; its domains stay the tenant's. It
-        cannot be undone.
+        with its deployments, tags, secrets and route tokens, and its ended jobs&apos; records. Its default host goes; its
+        domains stay the tenant&apos;s. While it has sandboxes or jobs queued or running it is not deleted. It cannot be undone.
       </p>
       <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} className="mini" icon="trash"
         disabled={!ec.del || st.deleting || !!(op && op.busy)} title={ec.del ? '' : NEEDS.del}
@@ -642,7 +664,9 @@ export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
         }}>
         {st.deleting ? 'Being deleted' : 'Delete environment'}
       </ArmButton>
-      {op && op.tone === 'bad' && <ErrBox error={op.text} />}
+      {op && op.tone === 'bad' && (blocked
+        ? <InUse error={op.error} tenant={tenant} navigate={navigate} />
+        : <ErrBox error={op.text} />)}
       {st.deleting && <p className="muted small">The deletion is under way: ferund removes what runs first.</p>}
     </div>
   );

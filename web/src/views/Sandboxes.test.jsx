@@ -18,8 +18,9 @@ const DEFAULTS = {
   minVcpus: 1, maxVcpus: 16, minMemoryMib: 512, maxMemoryMib: 32768,
 };
 
-const form = (defaults, disabled = false) => renderToStaticMarkup(
-  <CreateForm busy="" defaults={defaults} disabled={disabled} onSubmit={() => {}} onCancel={() => {}} />,
+const ENVS = [{ id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' }, { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d2', name: 'kino-stage' }];
+const form = (defaults, disabled = false, envs = ENVS, env = '') => renderToStaticMarkup(
+  <CreateForm busy="" defaults={defaults} disabled={disabled} envs={envs} env={env} onSubmit={() => {}} onCancel={() => {}} />,
 );
 
 describe('CreateForm', () => {
@@ -42,19 +43,40 @@ describe('CreateForm', () => {
     expect(out).not.toContain('min="');
   });
 
-  it('explains attachable and the sealed login, and says why it is disabled', () => {
-    const out = form(null, true);
-    expect(out).toContain('attachable');
-    expect(out).toContain('an environment&#x27;s attached service may run in it');
+  it('asks for the environment and its groups, and has no attachable any more', () => {
+    const out = form(null);
+    expect(out).toContain('<option value="" selected="">(an environment)</option>');
+    expect(out).toContain('<option value="kino-dev">kino-dev</option>');
+    expect(out).toContain('Choose the environment first.');
+    expect(out).toContain('<b>default</b>: nothing in, internet out');
+    expect(out).not.toContain('attachable');
+    // Without an environment there is nothing to create.
+    expect(out).toMatch(/<button type="submit" class="primary" disabled="" title="choose its environment">/);
+  });
+
+  it('takes the one environment there is, or the one the address names, with default ticked', () => {
+    for (const out of [form(null, false, [ENVS[0]]), form(null, false, ENVS, 'kino-dev')]) {
+      expect(out).toContain('<option value="kino-dev" selected="">kino-dev</option>');
+      expect(out).toContain('reading the environment&#x27;s groups…');
+      expect(out).not.toContain('Choose the environment first.');
+    }
+    // One the person may not write is no choice.
+    expect(form(null, false, ENVS, 'prod')).toContain('Choose the environment first.');
+  });
+
+  it('explains the sealed login, and says why it is disabled', () => {
+    const out = form(null, true, []);
     expect(out).toContain('never shown again');
-    expect(out).toContain('title="needs write on this tenant"');
+    expect(out).toContain('no environment you may write');
+    expect(out).toContain('title="needs write on an environment"');
   });
 });
 
 const SB = {
   sandboxId: 'h3k9v2m7qpx', clientState: 'paused', image: 'ghcr.io/kino/agent-base:2.4', node: 'n3', owner: 'kino',
   createdAt: '2026-11-03T10:00:00Z', updatedAt: '2026-11-06T09:00:00Z', statusDescription: '', checkpointEpoch: '0',
-  vcpus: 2, memoryMib: 4096, attachable: true,
+  vcpus: 2, memoryMib: 4096, environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' },
+  securityGroups: ['default', 'db-admin'],
 };
 const head = (sb, write) => renderToStaticMarkup(
   <SandboxHead sb={sb} tenant="kino" busy="" act={() => {}} write={write} onConnect={() => {}} />,
@@ -69,14 +91,17 @@ describe('SandboxHead', () => {
     expect(out).toContain('Resume');
     expect(out).not.toContain('Pause<');
     expect(out).toContain('Connect an agent');
-    expect(out).toContain('<b>attachable</b>');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev"');
+    expect(out).toContain('<span class="sg-chip mono" title="default: nothing in, internet out">default</span>');
+    expect(out).toContain('<span class="sg-chip mono">db-admin</span>');
+    expect(out).not.toContain('attachable');
     // The owner is the tenant: it says nothing here.
     expect(out).not.toContain('>kino<');
   });
 
   it('disables resume for a role without write, with the reason', () => {
     const out = head(SB, false);
-    expect(out).toMatch(/<button disabled="" title="needs write on this tenant">.*Resume/);
+    expect(out).toMatch(/<button disabled="" title="needs write on its environment">.*Resume/);
   });
 
   it('shows the description and the checkpoint of a hibernated sandbox', () => {

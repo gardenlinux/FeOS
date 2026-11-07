@@ -25,6 +25,7 @@ import {
   AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SecretsTab, SettingsTab, TrafficTab, useOp,
 } from './EnvTabs.jsx';
 import { ObjectPage } from './ObjectPage.jsx';
+import { EnvPods } from './EnvPods.jsx';
 import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
@@ -33,7 +34,7 @@ import '../styles/environments.css';
 // and Edit, the builder (Builder.jsx, ADR 0032); then its pages: the
 // overview (the rollout, the objects of its target deployment as rows
 // with their actions and folded instances, its bindings with their check,
-// the routes), an object's page (ObjectPage.jsx), its
+// the routes, its sandboxes and jobs: EnvPods.jsx), an object's page (ObjectPage.jsx), its
 // deployments (revert, tags; a deployment's diff and normalised spec),
 // its incidents (with their evidence), the logs and traces, and
 // (EnvTabs.jsx) its traffic, secrets, domains and access, and settings.
@@ -453,7 +454,12 @@ function OverviewTab({ st, tenant, ec, changed, navigate }) {
     try { setTraffic(await api.traffic(env, '1h')); } catch { setTraffic(null); }
   }, [env]);
   usePoll(readTraffic, 60000);
-  return <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed} />;
+  return (
+    <>
+      <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed} />
+      <EnvPods tenant={tenant} env={st.name} write={ec.write} navigate={navigate} />
+    </>
+  );
 }
 
 // useLatestSpec is the spec of the status's latest deployment, read once

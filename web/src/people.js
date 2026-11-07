@@ -85,6 +85,13 @@ export function envRole(access, env) {
   return higher((access && access.role) || '', g ? g.role : '');
 }
 
+// envsWithRole are the environments of envs (the tenant's list, each
+// {id, name}) on which access has at least role: those a sandbox or a
+// tenant's job may be made in (write, ADR 0035).
+export function envsWithRole(access, envs, role) {
+  return (envs || []).filter((e) => atLeast(higher(envRole(access, e.id), envRole(access, e.name)), role));
+}
+
 // mayBuild tells whether the deployment builder may change env (its ID
 // or name; '' for a new environment, ADR 0032): a new one needs write on
 // the tenant, a deployment or a secret's value write on the environment
@@ -100,10 +107,11 @@ export function can(access) {
   const role = (access && access.role) || '';
   const member = !!(access && access.member);
   return {
-    // A tenant grant read: sandboxes, tools, jobs, the whole list of
-    // environments.
+    // A tenant grant read: tools, credentials, the whole list of
+    // environments. Sandboxes and tenants' jobs are their environment's
+    // (ADR 0035): a member lists those it may read.
     readTenant: atLeast(role, 'read'),
-    // write: sandboxes and their tokens, environments made or deleted.
+    // write: environments made or deleted, credentials.
     writeTenant: atLeast(role, 'write'),
     // admin: members' grants, invitations, tokens, the domains' claims.
     adminTenant: atLeast(role, 'admin'),
@@ -123,16 +131,16 @@ export function can(access) {
 // section of their own: each one with its pages (ENV_NAV), the one open
 // unfolded, since the UI is used in an environment; the tenant's other
 // things below, the sandboxes last of them (agents use them through the
-// API, people rarely through the UI). Home and the environments for every
-// member, the sandboxes and jobs with a tenant grant, the tokens for its
-// admin.
+// API, people rarely through the UI). Home, the environments, the
+// sandboxes and the jobs for every member (each sees those of the
+// environments it may read, ADR 0035), the tokens for its admin.
 export const TENANT_NAV = [
   { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '' },
   { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env', views: ['environments', 'newEnvironment'] },
   { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant' },
   { view: 'credentials', label: 'Credentials', icon: 'plug', path: '/credentials', needs: 'readTenant', group: 'tenant', views: ['credentials', 'newCredential'] },
-  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'tenant' },
-  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'tenant',
+  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'members', group: 'tenant' },
+  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'members', group: 'tenant',
     views: ['sandboxes', 'tools'] },
   { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage' },
   { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage' },

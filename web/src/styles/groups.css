@@ -1,0 +1,40 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Security groups (ADR 0034, ADR 0035): the choice of a pod's groups,
+   its groups as chips, and the rules of the builder's form. */
+
+.sg-pick { display: flex; flex-direction: column; gap: 4px; }
+.sg-choice {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; cursor: pointer;
+  padding: 4px 8px; border: 1px solid var(--border-soft); border-radius: 4px;
+}
+.sg-choice.on { border-color: var(--accent); }
+.sg-choice.bad { color: var(--danger); border-color: var(--danger); }
+.sg-choice input { margin: 0; align-self: center; accent-color: var(--accent); }
+.sg-name { font-weight: 600; }
+.sg-words { min-width: 0; overflow-wrap: anywhere; }
+
+.sg-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.sg-chip {
+  font-size: 12px; padding: 0 6px; border: 1px solid var(--border); border-radius: 3px; line-height: 18px;
+}
+
+.sg-move { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.sg-move .sg-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* the builder's rules */
+.sg-rules { display: flex; flex-direction: column; gap: 6px; }
+.sg-rule {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px;
+  border: 1px solid var(--border-soft); border-radius: 4px;
+}
+.sg-rule.bad { border-color: var(--danger); }
+.sg-rule select { max-width: 160px; }
+.sg-rule .sg-ports { width: 150px; }
+.sg-rule .sg-cidr { width: 190px; }
+.sg-rule .sg-except { flex: 1 1 200px; min-width: 0; }
+.sg-rule .sg-spacer { flex: 1 1 auto; }
+.sg-note { font-size: 12px; color: var(--muted); }

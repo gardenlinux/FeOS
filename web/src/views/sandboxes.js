@@ -5,6 +5,11 @@
 // costs, the counts by state, the list's filter, the tabs, the create
 // form's request and the snippets that connect an agent. Pure, with no
 // browser or API imports, so that the tests load them as they are.
+//
+// A sandbox is of an environment and in its security groups (ADR 0035):
+// its view names environment {id, name} and securityGroups.
+
+import { DEFAULT_GROUP, checkGroups, envRef, inEnv } from './groups.js';
 
 // fmtMem renders a sandbox's memory: whole GiB as "4 GiB", the rest in
 // MiB ("1536 MiB").
@@ -91,14 +96,27 @@ export function canResume(sb) {
   return !!sb && (sb.clientState === 'paused' || sb.clientState === 'hibernated');
 }
 
-// filterSandboxes keeps the sandboxes whose ID, owner, image, node or
-// state (the API's word or the list's) has q in it.
-export function filterSandboxes(sandboxes, q) {
+// filterSandboxes keeps the sandboxes of env (its name or ID; '' for
+// every one) whose ID, owner, image, node, environment, groups or state
+// (the API's word or the list's) has q in it.
+export function filterSandboxes(sandboxes, q, env = '') {
   const n = (q || '').trim().toLowerCase();
-  const list = sandboxes || [];
+  const list = (sandboxes || []).filter((s) => !env || inEnv(s, env));
   if (!n) return list;
-  return list.filter((s) => [s.sandboxId, s.owner, s.image, s.node, s.clientState, stateWords(s).short]
+  return list.filter((s) => [s.sandboxId, s.owner, s.image, s.node, s.clientState, stateWords(s).short,
+    (envRef(s) || {}).name, ...(s.securityGroups || [])]
     .some((v) => (v || '').toLowerCase().includes(n)));
+}
+
+// sandboxEnvs are the environments the sandboxes are in, by name: the
+// list's filter.
+export function sandboxEnvs(sandboxes) {
+  const by = new Map();
+  for (const s of sandboxes || []) {
+    const e = envRef(s);
+    if (e && !by.has(e.name)) by.set(e.name, e);
+  }
+  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ownerShown is the owner a sandbox page names beside the ID: ferund's
@@ -135,13 +153,25 @@ export function activeTab(tab, can) {
   return sandboxTabs(can).some((x) => x.key === t) ? t : 'overview';
 }
 
+// newSandboxForm is the create form's start: in env, in default.
+export function newSandboxForm(env = '') {
+  return { environment: env, securityGroups: [DEFAULT_GROUP], image: '', vcpus: '', memoryMib: '', username: '',
+    password: '', credentials: [] };
+}
+
 // createRequest turns the create form's fields into createSandbox's
-// arguments: [image, vcpus, memoryMib, {attachable, imageCredentials,
-// credentials?}]; credentials are the tenant's its pod gets (ADR 0033).
-// An empty image or size is the platform's default (0); the registry
-// login takes a username and a password, or neither. It throws on a bad
-// value.
+// arguments: [image, vcpus, memoryMib, {environment, securityGroups,
+// imageCredentials, credentials?}]; the environment is required (ADR
+// 0035), the groups one to five of it; credentials are the tenant's its
+// pod gets (ADR 0033). An empty image or size is the platform's default
+// (0); the registry login takes a username and a password, or neither.
+// It throws on a bad value.
 export function createRequest(form) {
+  const environment = String(form.environment || '').trim();
+  if (!environment) throw new Error('choose the environment the sandbox is in');
+  const securityGroups = Array.isArray(form.securityGroups) ? form.securityGroups : [DEFAULT_GROUP];
+  const bad = checkGroups(securityGroups);
+  if (bad.length) throw new Error(bad.join('; '));
   const num = (label, s) => {
     const v = String(s || '').trim();
     if (!v) return 0;
@@ -152,7 +182,7 @@ export function createRequest(form) {
   const vcpus = num('vCPUs', form.vcpus);
   const memoryMib = num('memory', form.memoryMib);
   const creds = credentialsOf(form.username, form.password, true);
-  const opts = { attachable: !!form.attachable, imageCredentials: creds };
+  const opts = { environment, securityGroups: [...securityGroups], imageCredentials: creds };
   if (form.credentials && form.credentials.length) opts.credentials = [...form.credentials].sort();
   return [image, vcpus, memoryMib, opts];
 }

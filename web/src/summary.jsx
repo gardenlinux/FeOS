@@ -46,12 +46,12 @@ export function SummaryProvider({ tenant, can, children }) {
       return;
     }
     const [sandboxes, environments, domains, invitations, quota, jobs, credentials] = await Promise.all([
-      can.readTenant ? optional(api.listSandboxes, (r) => r.sandboxes || []) : null,
+      can.members ? optional(() => api.listSandboxes(), (r) => r.sandboxes || []) : null,
       can.environments ? optional(api.listEnvironments, (r) => r.environments || []) : null,
       can.members ? optional(() => api.listDomains(), (r) => r.domains || []) : null,
       can.members ? optional(api.listInvitations, (r) => r.invitations || []) : null,
       can.members ? optional(api.getQuota, (r) => r) : null,
-      can.readTenant ? optional(() => api.listJobs(), (r) => r.jobs || []) : null,
+      can.members ? optional(() => api.listJobs(), (r) => r.jobs || []) : null,
       can.readTenant ? optional(api.listCredentials, (r) => r.credentials || []) : null,
     ]);
     const troubled = (environments || []).filter((e) => Number(e.openIncidents) > 0).slice(0, INCIDENT_ENVS);

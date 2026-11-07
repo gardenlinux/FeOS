@@ -13,6 +13,7 @@ import { envValueKind, secretNames } from './refs.js';
 import { changesSince } from './rebase.js';
 import { unitKey } from './findings.js';
 import { imageView } from './pins.js';
+import { DEFAULT_GROUP, groupWords } from './groups.js';
 
 // ---------------------------------------------------------------- list --
 
@@ -51,6 +52,7 @@ export const GROUPS = [
   { key: 'jobs', title: 'Jobs', one: 'job', kind: 'job' },
   { key: 'addons', title: 'Addons', one: 'addon', kind: 'addon' },
   { key: 'routes', title: 'Routes', one: 'route', kind: 'route' },
+  { key: 'securityGroups', title: 'Security groups', one: 'security group', kind: 'securityGroup' },
   { key: 'bindings', title: 'Bindings', one: 'binding', kind: 'binding' },
   { key: 'secrets', title: 'Secrets', one: 'secret', kind: 'secret' },
 ];
@@ -67,10 +69,12 @@ export function changeMarks(base, spec) {
 // listGroups are the list's groups with their rows: {key, title, one,
 // rows: [{unit, key, name, mark, removed}]}; a row for every object of
 // the draft (a secret it pins or references) and for every object of the
-// base the draft removes, by name.
+// base the draft removes, by name; the security group "default" always,
+// since every environment has it.
 export function listGroups(spec, base, marks = changeMarks(base, spec)) {
   return GROUPS.map((g) => {
     const names = new Set(g.key === 'secrets' ? secretNames(spec) : objectsOf(spec, g.key).map(([n]) => n));
+    if (g.key === 'securityGroups') names.add(DEFAULT_GROUP);
     const gone = new Set();
     for (const [n] of objectsOf(base, g.key)) {
       if (!names.has(n) && marks.get(unitKey(g.key, n)) === 'remove') { names.add(n); gone.add(n); }
@@ -96,8 +100,10 @@ export function shortImage(o) {
 
 // summaryOf is a row's line under its name: a service's image tag, a
 // job's and when it runs, an addon's type, version and plan, a route's
-// path → service, a binding's credential or upstream, a secret's pin.
+// path → service, a binding's credential or upstream, a security group's
+// rules in words, a secret's pin.
 export function summaryOf(key, o, pin) {
+  if (key === 'securityGroups') return groupWords(o);
   if (key === 'secrets') {
     if (!pin) return '';
     if (pin.missing) return 'no value yet';
