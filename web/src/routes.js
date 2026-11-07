@@ -181,3 +181,22 @@ export const TENANT_VIEWS = new Set([
 export function newEnvPath(tenant) {
   return `/tenants/${encodeURIComponent(tenant)}/new-environment`;
 }
+
+// chosenEnv is the environment the sidebar's pages are of: the route's,
+// else the one last open in this tenant (last), else the tenant's first;
+// null when the tenant has none.
+export function chosenEnv(route, envs, last = '') {
+  const list = envs || [];
+  const by = (n) => (n ? list.find((e) => e.name === n || e.id === n) : undefined);
+  if (route.view === 'environments' && route.env) return by(route.env) || { id: route.env, name: route.env };
+  return by(last) || list[0] || null;
+}
+
+// switchEnvPath is where choosing env of tenant leads: the same page of
+// the other environment while one is open (an object or a deployment of
+// one is not in the other, so its list), else its overview.
+export function switchEnvPath(route, tenant, env) {
+  const inEnv = route.view === 'environments' && route.env && route.tenant === tenant;
+  const tab = inEnv && route.tab !== 'objects' ? route.tab : 'overview';
+  return envPath(tenant, env, tab);
+}

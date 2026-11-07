@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { ENV_TABS, ENV_TAB_LABELS, TENANT_VIEWS, canonicalPath, envPath, parsePath } from './routes.js';
+import { ENV_TABS, ENV_TAB_LABELS, TENANT_VIEWS, canonicalPath, chosenEnv, envPath, parsePath, switchEnvPath } from './routes.js';
 import { fmtAgo, fmtDurNs, fmtMsTime, fmtNs, fmtSeconds, prettyJson } from './format.js';
 import { ADMIN_KEY, readItem, writeItem } from './storage.js';
 
@@ -188,5 +188,31 @@ describe('storage', () => {
     expect(readItem('sessionStorage', ADMIN_KEY)).toBe('ops:pw');
     writeItem('sessionStorage', ADMIN_KEY, '');
     expect(readItem('sessionStorage', ADMIN_KEY)).toBe('');
+  });
+});
+
+describe('chosenEnv', () => {
+  const envs = [{ id: 'e1', name: 'prod' }, { id: 'e2', name: 'stage' }];
+  it('is the route\'s environment', () => {
+    expect(chosenEnv({ view: 'environments', env: 'stage' }, envs, 'prod').name).toBe('stage');
+    expect(chosenEnv({ view: 'environments', env: 'new-one' }, envs).name).toBe('new-one');
+  });
+  it('is the last open one elsewhere, else the first', () => {
+    expect(chosenEnv({ view: 'domains' }, envs, 'stage').name).toBe('stage');
+    expect(chosenEnv({ view: 'domains' }, envs, 'gone').name).toBe('prod');
+    expect(chosenEnv({ view: 'domains' }, [], 'stage')).toBe(null);
+  });
+});
+
+describe('switchEnvPath', () => {
+  it('keeps the page of the open environment', () => {
+    const r = { view: 'environments', tenant: 'kino', env: 'prod', tab: 'logs', item: 'api' };
+    expect(switchEnvPath(r, 'kino', 'stage')).toBe('/tenants/kino/environments/stage/logs');
+    expect(switchEnvPath({ ...r, tab: 'objects' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
+  });
+  it('opens the overview from elsewhere or in another tenant', () => {
+    expect(switchEnvPath({ view: 'domains', tenant: 'kino' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
+    expect(switchEnvPath({ view: 'environments', tenant: 'kino', env: 'prod', tab: 'logs' }, 'acme', 'web'))
+      .toBe('/tenants/acme/environments/web');
   });
 });

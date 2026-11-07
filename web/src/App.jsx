@@ -3,11 +3,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  auth, forgetTenantTokens, onSignedOut, setActiveTenant, setBasic,
+  api, auth, forgetTenantTokens, onSignedOut, setActiveTenant, setBasic,
 } from './api.js';
+import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
-import { Avatar, BrandMark, ThemeToggle } from './components.jsx';
-import { ENV_TABS, canonicalPath, envPath, parsePath } from './routes.js';
+import { Avatar, BrandMark, useTheme } from './components.jsx';
+import { ENV_TABS, canonicalPath, chosenEnv, envPath, parsePath, switchEnvPath } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
@@ -33,7 +34,7 @@ import { entries } from './search.js';
 import { deploymentTone } from './views/envs.js';
 import { ToneDot } from './views/Environments.jsx';
 import {
-  ENV_NAV, MeContext, NAV_GROUPS, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants, roleLabel,
+  ENV_NAV, MeContext, NAV_GROUPS, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants, roleLabel,
   tenantAccess, tenantHome, tenantNav, viewGate,
 } from './people.js';
 
@@ -171,6 +172,7 @@ export default function App() {
       {!needsGate && (route.view === 'credentials' || route.view === 'newCredential') && (
         <Credentials key={route.tenant} tenant={route.tenant} sel={route.view === 'newCredential' ? '' : route.sel}
           isNew={route.view === 'newCredential'} edit={route.tab === 'edit'} navigate={navigate} />)}
+      {!needsGate && SETTINGS_VIEWS.has(route.view) && <SettingsTabs route={route} me={me} navigate={navigate} />}
       {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
       {!needsGate && route.view === 'usage' && <Usage key={route.tenant} tenant={route.tenant} navigate={navigate} />}
@@ -199,6 +201,10 @@ function platformSpace(route, operator) {
   return OPERATOR_VIEWS.has(route.view) || (operator && route.view === 'tenants');
 }
 
+// lastEnvKey stores the environment last open in a tenant: the sidebar
+// keeps its pages while one is on the tenant's other pages.
+const lastEnvKey = (tenant) => `ferun-env/${tenant}`;
+
 // Shell is the sidebar, the topbar and the page, and the search above
 // them.
 function Shell({ route, navigate, me, onSignOut, children }) {
@@ -207,6 +213,10 @@ function Shell({ route, navigate, me, onSignOut, children }) {
   usePaletteKey(open);
   const summary = useSummary();
   const operator = isOperator(me);
+  useEffect(() => {
+    if (route.tenant && route.view === 'environments' && route.env) writeItem('localStorage', lastEnvKey(route.tenant), route.env);
+  }, [route.tenant, route.view, route.env]);
+  const env = route.tenant ? chosenEnv(route, summary.environments, readItem('localStorage', lastEnvKey(route.tenant))) : null;
   const all = useMemo(() => entries({
     tenant: route.tenant || '',
     nav: route.tenant ? tenantNav(tenantAccess(me, route.tenant)) : [],
@@ -216,9 +226,9 @@ function Shell({ route, navigate, me, onSignOut, children }) {
   }), [route.tenant, me, operator, summary]);
   return (
     <div className="app">
-      <Sidebar route={route} navigate={navigate} me={me} onSearch={open} onSignOut={onSignOut} />
+      <Sidebar route={route} navigate={navigate} me={me} env={env} />
       <div className="main">
-        <Topbar route={route} navigate={navigate} />
+        <Topbar route={route} navigate={navigate} me={me} onSearch={open} onSignOut={onSignOut} />
         <main className="content">{children}</main>
       </div>
       {searching && (
@@ -228,7 +238,7 @@ function Shell({ route, navigate, me, onSignOut, children }) {
   );
 }
 
-function Sidebar({ route, navigate, me, onSearch, onSignOut }) {
+function Sidebar({ route, navigate, me, env }) {
   const operator = isOperator(me);
   const platform = platformSpace(route, operator);
   const t = route.tenant;
@@ -247,17 +257,19 @@ function Sidebar({ route, navigate, me, onSearch, onSignOut }) {
         <span className="brand-name">FeRun</span>
       </a>
 
-      <Switcher route={route} navigate={navigate} me={me} platform={platform} />
-
-      <button className="sidesearch" onClick={onSearch}>
-        <Icon name="search" size={14} /> <span>Search or jump to…</span> <kbd>⌘K</kbd>
-      </button>
-
       {!platform && t && nav.length > 0 && NAV_GROUPS.map((g) => {
         const items = nav.filter((n) => n.group === g.key);
         if (items.length === 0) return null;
         if (g.key === 'env') {
-          return <EnvSection key="env" route={route} navigate={navigate} canCreate={can(access).writeTenant} />;
+          return <EnvPages key="env" route={route} navigate={navigate} env={env} canCreate={can(access).writeTenant} />;
+        }
+        if (g.key === 'manage') {
+          const item = { ...SETTINGS_NAV, views: items.map((n) => n.view) };
+          return (
+            <nav key="manage" className="snav">
+              <NavItem item={item} active={on(item)} to={toOf(items[0])} navigate={navigate} />
+            </nav>
+          );
         }
         return (
           <nav key={g.key || 'top'} className="snav">
@@ -279,141 +291,172 @@ function Sidebar({ route, navigate, me, onSearch, onSignOut }) {
       ))}
 
       {!platform && !t && (
-        <p className="sidehint muted small">Choose a tenant above, or make one.</p>)}
+        <p className="sidehint muted small">Choose a tenant at the top, or make one.</p>)}
 
-      <div className="sidebar-foot">
-        <span className="userbox" title={me.email || me.username || ''}>
-          <Avatar src={me.picture} name={displayName(me)} />
-          <span className="username">{displayName(me)}</span>
-        </span>
-        <span className="spacer" />
-        <a className="iconbtn" href="/docs/" title="the architecture of FeRun and FeOS"><Icon name="book" size={14} /></a>
-        <ThemeToggle />
-        <button className="iconbtn" onClick={onSignOut} title="sign out"><Icon name="logout" size={14} /></button>
-      </div>
     </aside>
   );
 }
 
-// Switcher is where one works: one of the person's tenants with the role
-// in it, or, for operators, the platform.
-function Switcher({ route, navigate, me, platform }) {
+// useMenu is a dropdown's open state: closed by a click outside it or by
+// Escape.
+function useMenu() {
   const [open, setOpen] = useState(false);
   const box = useRef(null);
-  const operator = isOperator(me);
-  const tenants = myTenants(me);
-  const t = route.tenant;
   useEffect(() => {
     if (!open) return undefined;
     const close = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false); };
-    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    // Escape closes the menu alone, not also the page below it.
+    const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
     document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+    window.addEventListener('keydown', esc, true);
+    return () => { document.removeEventListener('mousedown', close); window.removeEventListener('keydown', esc, true); };
   }, [open]);
+  return [open, setOpen, box];
+}
+
+// Switcher is where one works, at the head of the topbar's trail: a
+// tenant and one of its environments, in two columns (choosing a tenant
+// on the left lists its environments on the right), or, for operators,
+// the platform.
+function Switcher({ route, navigate, me, platform }) {
+  const [open, setOpen, box] = useMenu();
+  const [picked, setPicked] = useState('');
+  const [others, setOthers] = useState({});
+  const { environments } = useSummary();
+  const operator = isOperator(me);
+  const tenants = myTenants(me);
+  const t = route.tenant;
+  const envName = route.view === 'environments' ? route.env : '';
+
+  const toggle = () => {
+    if (!open) {
+      setPicked(platform ? '' : t || (tenants[0] || {}).tenant || '');
+      setOthers({});
+    }
+    setOpen(!open);
+  };
+  // Another tenant's environments are read when it is chosen.
+  useEffect(() => {
+    if (!open || !picked || picked === t || others[picked] !== undefined) return;
+    setOthers((o) => ({ ...o, [picked]: null }));
+    api.listEnvironmentsOf(picked).then(
+      (r) => setOthers((o) => ({ ...o, [picked]: r.environments || [] })),
+      () => setOthers((o) => ({ ...o, [picked]: 'error' })));
+  }, [open, picked, t, others]);
+
   const go = (to) => { setOpen(false); navigate(to); };
-  const current = platform ? 'Platform' : t || 'Choose a tenant';
+  const envs = picked === t ? environments : others[picked];
+  const pickedAccess = tenantAccess(me, picked);
   const role = !platform && t ? roleLabel(tenants.find((x) => x.tenant === t)) || (operator ? 'operator' : '') : '';
+  const enc = encodeURIComponent;
 
   return (
     <div className="switcher" ref={box}>
-      <button className={'switch' + (open ? ' on' : '')} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button className={'switch' + (open ? ' on' : '')} onClick={toggle} aria-expanded={open}>
         <Icon name={platform ? 'server' : 'building'} size={14} />
-        <span className="switch-name">{current}</span>
+        <span className="switch-name">{platform ? 'Platform' : t || 'Choose a tenant'}</span>
+        {!platform && t && envName && <><span className="switch-slash">/</span><span className="switch-name">{envName}</span></>}
         {role && <span className="switch-role">{role}</span>}
         <Icon name="chevronDown" size={13} />
       </button>
       {open && (
         <div className="switch-menu" role="menu">
-          <div className="switch-label">{operator ? 'tenants you are a member of' : 'your tenants'}</div>
-          {tenants.map((tn) => (
-            <button key={tn.tenant} role="menuitem" className={'switch-item' + (tn.tenant === t && !platform ? ' on' : '')}
-              onClick={() => go(tenantHome(tenantAccess(me, tn.tenant)))}>
-              <span className="mono">{tn.tenant}</span>
-              <span className="switch-role">{roleLabel(tn)}</span>
+          <div className="switch-col">
+            <div className="switch-label">{operator ? 'tenants you are a member of' : 'tenants'}</div>
+            {tenants.map((tn) => (
+              <button key={tn.tenant} role="menuitem" className={'switch-item' + (tn.tenant === picked ? ' on' : '')}
+                onClick={() => setPicked(tn.tenant)} aria-haspopup="true">
+                <span className="mono">{tn.tenant}</span>
+                <span className="switch-role">{roleLabel(tn)}</span>
+                <Icon name="chevronRight" size={12} />
+              </button>
+            ))}
+            {tenants.length === 0 && <div className="switch-empty muted small">none yet</div>}
+            <div className="switch-sep" />
+            <button role="menuitem" className="switch-item" onClick={() => go('/tenants')}>
+              <Icon name="plus" size={13} /> {operator ? 'every tenant' : 'all yours, or a new one'}
             </button>
-          ))}
-          {tenants.length === 0 && <div className="switch-empty muted small">none yet</div>}
-          <button role="menuitem" className="switch-item" onClick={() => go('/tenants')}>
-            <Icon name="plus" size={13} /> {operator ? 'every tenant' : 'all yours, or a new one'}
-          </button>
-          {operator && (
-            <>
-              <div className="switch-sep" />
+            {operator && (
               <button role="menuitem" className={'switch-item' + (platform ? ' on' : '')} onClick={() => go('/nodes')}>
                 <Icon name="server" size={13} /> Platform <span className="switch-role">operator</span>
+              </button>)}
+          </div>
+          {picked && (
+            <div className="switch-col">
+              <div className="switch-label">environments of <span className="mono">{picked}</span></div>
+              {(envs === null || envs === undefined) && <div className="switch-empty muted small">…</div>}
+              {envs === 'error' && <div className="switch-empty muted small">could not be read</div>}
+              {Array.isArray(envs) && envs.length === 0 && <div className="switch-empty muted small">none yet</div>}
+              {Array.isArray(envs) && envs.map((e) => (
+                <button key={e.id} role="menuitem"
+                  className={'switch-item' + (picked === t && (envName === e.name || envName === e.id) ? ' on' : '')}
+                  onClick={() => go(switchEnvPath(route, picked, e.name))}>
+                  <ToneDot tone={deploymentTone(e.state)} title={e.state} />
+                  <span className="mono">{e.name}</span>
+                  {Number(e.openIncidents) > 0 && <span className="snav-count bad" title="open incidents">{e.openIncidents}</span>}
+                </button>
+              ))}
+              <div className="switch-sep" />
+              <button role="menuitem" className="switch-item" onClick={() => go(tenantHome(pickedAccess))}>
+                <Icon name="home" size={13} /> Tenant home
               </button>
-            </>)}
+              <button role="menuitem" className="switch-item" onClick={() => go(envPath(picked))}>
+                <Icon name="layers" size={13} /> All environments
+              </button>
+              {can(pickedAccess).writeTenant && (
+                <button role="menuitem" className="switch-item" onClick={() => go(`/tenants/${enc(picked)}/new-environment`)}>
+                  <Icon name="plus" size={13} /> New environment
+                </button>)}
+            </div>)}
         </div>)}
     </div>
   );
 }
 
-// ENV_SHOWN bounds the environments the section lists; the rest are a
-// click away in the list.
-const ENV_SHOWN = 12;
-
-// EnvSection is the sidebar's environments: each with its state and its
-// open incidents, the one the route is in unfolded into its pages; the
-// list and a new one from the section's head.
-function EnvSection({ route, navigate, canCreate }) {
-  const { environments, counts } = useSummary();
+// EnvPages are the pages of one environment in the sidebar: the open
+// one, else the one last open, else the tenant's first (chosenEnv); the
+// topbar's switcher chooses another.
+function EnvPages({ route, navigate, env, canCreate }) {
+  const { environments } = useSummary();
   const t = route.tenant;
-  const envs = environments || [];
-  const here = route.view === 'environments' ? route.env : '';
-  const open = envs.find((e) => e.name === here || e.id === here);
-  const shown = envs.slice(0, ENV_SHOWN);
-  if (open && !shown.includes(open)) shown.push(open);
-  const tabs = ENV_NAV.filter((n) => ENV_TABS.includes(n.tab));
   const go = (to) => (e) => { e.preventDefault(); navigate(to); };
-  const listOn = (route.view === 'environments' && !route.env) || route.view === 'newEnvironment';
+  const known = (environments || []).find((e) => env && e.id === env.id) || env;
+  const here = env && route.view === 'environments' && (route.env === env.name || route.env === env.id);
+  const newTo = `/tenants/${encodeURIComponent(t)}/new-environment`;
+  if (!env) {
+    return (
+      <nav className="snav envnav">
+        <div className="snav-label">Environment</div>
+        {environments === null
+          ? <div className="sidehint muted small">…</div>
+          : <div className="sidehint muted small">None yet.</div>}
+        {environments && canCreate && (
+          <a className={'snav-item' + (route.view === 'newEnvironment' ? ' on' : '')} href={newTo} onClick={go(newTo)}>
+            <Icon name="plus" size={15} /> <span>New environment</span></a>)}
+      </nav>
+    );
+  }
+  const incidents = Number(known.openIncidents) || 0;
   return (
     <nav className="snav envnav">
       <div className="snav-label snav-label-row">
-        <a href={envPath(t)} onClick={go(envPath(t))} className={listOn ? 'on' : ''}>Environments</a>
-        {counts.environments && counts.environments.tone && (
-          <span className="snav-count bad" title="open incidents">{counts.environments.n}</span>)}
-        {canCreate && (
-          <a className="snav-add" href={`/tenants/${encodeURIComponent(t)}/new-environment`}
-            onClick={go(`/tenants/${encodeURIComponent(t)}/new-environment`)} title="new environment">
-            <Icon name="plus" size={13} /></a>)}
+        <span>Environment</span>
+        <span className="envlabel">
+          {known.state && <ToneDot tone={deploymentTone(known.state)} title={known.state} />}
+          <span className="envname">{known.name}</span>
+        </span>
       </div>
-      {environments === null && <div className="sidehint muted small">…</div>}
-      {environments && envs.length === 0 && (
-        <div className="sidehint muted small">None yet.{canCreate ? ' + makes the first.' : ''}</div>)}
-      {shown.map((e) => {
-        const isOpen = open === e;
+      {ENV_NAV.filter((n) => ENV_TABS.includes(n.tab)).map((n) => {
+        const to = envPath(t, known.name, n.tab);
+        const on = here && (route.tab === n.tab || (n.tab === 'overview' && route.tab === 'objects'));
         return (
-          <div key={e.id} className={'envnode' + (isOpen ? ' open' : '')}>
-            <a className={'snav-item envitem' + (isOpen && route.tab === 'overview' ? ' on' : '') + (isOpen ? ' here' : '')}
-              href={envPath(t, e.name)} onClick={go(envPath(t, e.name))} aria-expanded={isOpen}>
-              <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={12} />
-              <ToneDot tone={deploymentTone(e.state)} title={e.state} />
-              <span className="envname">{e.name}</span>
-              {Number(e.openIncidents) > 0 && <span className="snav-count bad" title="open incidents">{e.openIncidents}</span>}
-            </a>
-            {isOpen && (
-              <div className="envtabs">
-                {tabs.map((n) => {
-                  const to = envPath(t, e.name, n.tab);
-                  const on = route.tab === n.tab && n.tab !== 'overview';
-                  if (n.tab === 'overview') return null;
-                  return (
-                    <a key={n.tab} className={'snav-item envtab' + (on ? ' on' : '')} href={to} onClick={go(to)}
-                      aria-current={on ? 'page' : undefined}>
-                      <Icon name={n.icon} size={13} /> <span>{n.label}</span>
-                      {n.tab === 'incidents' && Number(e.openIncidents) > 0 && (
-                        <span className="snav-count bad">{e.openIncidents}</span>)}
-                    </a>
-                  );
-                })}
-              </div>)}
-          </div>
+          <a key={n.tab} className={'snav-item' + (on ? ' on' : '')} href={to} onClick={go(to)}
+            aria-current={on ? 'page' : undefined}>
+            <Icon name={n.icon} size={15} /> <span>{n.label}</span>
+            {n.tab === 'incidents' && incidents > 0 && <span className="snav-count bad">{incidents}</span>}
+          </a>
         );
       })}
-      {envs.length > shown.length && (
-        <a className="snav-item envmore" href={envPath(t)} onClick={go(envPath(t))}>
-          <span>{envs.length - shown.length} more…</span></a>)}
     </nav>
   );
 }
@@ -428,14 +471,65 @@ function NavItem({ item, active, count, to, navigate }) {
   );
 }
 
+// SettingsTabs are the tenant's settings, one page each: the tabs over
+// them (the sidebar's "Tenant settings").
+const SETTINGS_VIEWS = new Set(['members', 'tokens', 'usage', 'settings']);
+function SettingsTabs({ route, me, navigate }) {
+  const t = encodeURIComponent(route.tenant);
+  const pages = tenantNav(tenantAccess(me, route.tenant)).filter((n) => n.group === 'manage');
+  return (
+    <div className="tabbar settings-tabs">
+      {pages.map((n) => (
+        <a key={n.view} href={`/tenants/${t}${n.path}`} className={'tab' + (route.view === n.view ? ' on' : '')}
+          onClick={(e) => { e.preventDefault(); navigate(`/tenants/${t}${n.path}`); }}>
+          <Icon name={n.icon} size={13} /> {n.label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+// UserMenu is the signed-in person at the topbar's right end: who, the
+// architecture page, the theme and signing out.
+function UserMenu({ me, onSignOut }) {
+  const [open, setOpen, box] = useMenu();
+  const [theme, toggleTheme] = useTheme();
+  const name = displayName(me);
+  return (
+    <div className="usermenu" ref={box}>
+      <button className={'userbtn' + (open ? ' on' : '')} onClick={() => setOpen(!open)} aria-expanded={open}
+        title={me.email || me.username || ''}>
+        <Avatar src={me.picture} name={name} />
+        <span className="username">{name}</span>
+        <Icon name="chevronDown" size={13} />
+      </button>
+      {open && (
+        <div className="user-menu" role="menu">
+          <div className="user-who">
+            <strong>{name}</strong>
+            {me.email && me.email !== name && <span className="muted small">{me.email}</span>}
+          </div>
+          <div className="switch-sep" />
+          <a role="menuitem" className="switch-item" href="/docs/"><Icon name="book" size={13} /> Architecture of FeRun</a>
+          <button role="menuitem" className="switch-item" onClick={toggleTheme}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={13} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
+          <div className="switch-sep" />
+          <button role="menuitem" className="switch-item" onClick={onSignOut}><Icon name="logout" size={13} /> Sign out</button>
+        </div>)}
+    </div>
+  );
+}
+
 // CRUMB_NAMES name the tenant's pages in the trail.
 const CRUMB_NAMES = {
   sandboxes: 'sandboxes', tools: 'tools', jobs: 'jobs', domains: 'domains', members: 'people', tokens: 'tokens',
-  usage: 'usage', settings: 'settings', credentials: 'credentials',
+  usage: 'usage', settings: 'general', credentials: 'credentials',
 };
 
-function Topbar({ route, navigate }) {
+function Topbar({ route, navigate, me, onSearch, onSignOut }) {
   const t = route.tenant;
+  const platform = platformSpace(route, isOperator(me));
   const enc = encodeURIComponent;
   const crumb = (label, to, strong) => (
     <button className={'crumb' + (strong ? ' strong' : '')} onClick={() => navigate(to)}>{label}</button>
@@ -447,8 +541,9 @@ function Topbar({ route, navigate }) {
   const domainName = (sel) => ((domains || []).find((d) => d.id === sel) || {}).name || sel;
   return (
     <header className="topbar">
+      <Switcher route={route} navigate={navigate} me={me} platform={platform} />
       <nav className="crumbs">
-        {t && crumb(t, `/tenants/${enc(t)}`, true)}
+        {t && SETTINGS_VIEWS.has(route.view) && <>{sep}<span className="crumb">tenant settings</span></>}
         {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
         {route.view === 'sandboxes' && route.sel === 'new' && <>{sep}<span className="crumb">new</span></>}
         {route.view === 'sandboxes' && route.sel && route.sel !== 'new' && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
@@ -456,22 +551,25 @@ function Topbar({ route, navigate }) {
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
         {route.view === 'credentials' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'newCredential' && <>{sep}{crumb('credentials', `/tenants/${enc(t)}/credentials`)}{sep}<span className="crumb">new</span></>}
-        {route.view === 'invite' && <span className="crumb">invitation</span>}
-        {(route.view === 'environments' || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
+        {route.view === 'invite' && <>{sep}<span className="crumb">invitation</span></>}
+        {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
-        {route.view === 'environments' && route.env && <>{sep}{crumb(route.env, envPath(t, route.env))}</>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && (
           <>{sep}{crumb(route.tab, envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
           <>{sep}<span className="crumb mono">{route.item}{route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
-        {route.view === 'tenants' && <span className="crumb strong">tenants</span>}
-        {(route.view === 'nodes' || route.view === 'node') && crumb('nodes', '/nodes', route.view === 'nodes')}
+        {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
+        {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}
-        {route.view === 'joinTokens' && <span className="crumb strong">join tokens</span>}
-        {route.view === 'instances' && <span className="crumb strong">control plane</span>}
-        {route.view === 'ingresses' && <span className="crumb strong">ingresses</span>}
-        {route.view === 'people' && <span className="crumb strong">people</span>}
+        {route.view === 'joinTokens' && <>{sep}<span className="crumb strong">join tokens</span></>}
+        {route.view === 'instances' && <>{sep}<span className="crumb strong">control plane</span></>}
+        {route.view === 'ingresses' && <>{sep}<span className="crumb strong">ingresses</span></>}
+        {route.view === 'people' && <>{sep}<span className="crumb strong">people</span></>}
       </nav>
+      <button className="topsearch" onClick={onSearch} title="search (⌘K)">
+        <Icon name="search" size={14} /> <span>Search or jump to…</span> <kbd>⌘K</kbd>
+      </button>
+      <UserMenu me={me} onSignOut={onSignOut} />
     </header>
   );
 }

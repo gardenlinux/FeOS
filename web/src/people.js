@@ -137,7 +137,7 @@ export const TENANT_NAV = [
   { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage' },
   { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage' },
   { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'manage' },
-  { view: 'settings', label: 'Settings', icon: 'settings', path: '/settings', needs: 'members', group: 'manage' },
+  { view: 'settings', label: 'General', icon: 'settings', path: '/settings', needs: 'members', group: 'manage' },
 ];
 
 // NAV_GROUPS name the sidebar's groups, in order; env is the
@@ -146,8 +146,12 @@ export const NAV_GROUPS = [
   { key: '', label: '' },
   { key: 'env', label: 'Environments' },
   { key: 'tenant', label: 'Tenant' },
-  { key: 'manage', label: 'Manage' },
+  { key: 'manage', label: '' },
 ];
+
+// SETTINGS_NAV is the sidebar's one entry for the tenant's settings
+// (the group manage): its pages are tabs of one another.
+export const SETTINGS_NAV = { view: 'tenantSettings', label: 'Tenant settings', icon: 'settings' };
 
 // ENV_NAV are an environment's pages in its subtree, by the tabs of its
 // route (routes.js ENV_TABS; a tab ferund's UI does not have is left

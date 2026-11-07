@@ -17,7 +17,9 @@ export function entries({ tenant, nav = [], platform = [], tenants = [], summary
   const t = enc(tenant || '');
   for (const n of nav) {
     const to = n.view === 'environments' ? envPath(tenant) : `/tenants/${t}${n.path}`;
-    out.push({ key: 'nav/' + n.view, kind: 'page', label: n.label, hint: tenant, to, icon: n.icon });
+    // The settings' pages are tabs of Tenant settings and found by that.
+    const label = n.group === 'manage' ? `Tenant settings · ${n.label}` : n.label;
+    out.push({ key: 'nav/' + n.view, kind: 'page', label, hint: tenant, to, icon: n.icon });
   }
   for (const n of platform) {
     out.push({ key: 'platform/' + n.view, kind: 'page', label: n.label, hint: 'platform', to: n.path, icon: n.icon });

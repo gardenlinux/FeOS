@@ -48,16 +48,6 @@ export function BrandMark({ size = 30 }) {
   );
 }
 
-export function ThemeToggle() {
-  const [theme, toggle] = useTheme();
-  return (
-    <button className="iconbtn" onClick={toggle}
-      title={theme === 'dark' ? 'light mode' : 'dark mode'}>
-      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} />
-    </button>
-  );
-}
-
 // ------------------------------------------------------------------ hooks --
 
 // useNow re-renders every intervalMs, for relative labels ("12s ago").

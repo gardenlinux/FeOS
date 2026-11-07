@@ -232,6 +232,17 @@ async function tenantCall(method, path, body) {
   }
 }
 
+// otherTenantCall is a call in a tenant the route is not in: the
+// switcher's list of another tenant's environments.
+async function otherTenantCall(tenant, method, path) {
+  try {
+    return await request(method, V1 + path, { tenant });
+  } catch (e) {
+    if (e.status === 401) signedOut();
+    throw e;
+  }
+}
+
 // tenantStream opens a tenant's streaming answer and returns its body's
 // reader: the log store's follow (NDJSON), read for as long as signal
 // lets it.
@@ -345,6 +356,7 @@ export const api = {
   // 0032); it reads no secret's value, and a route token only as its
   // mint answers it, once.
   listEnvironments: (labels = []) => tenantCall('GET', '/environments' + labelQuery(labels)),
+  listEnvironmentsOf: (tenant) => otherTenantCall(tenant, 'GET', '/environments'),
   getEnvironment: (env) => tenantCall('GET', `/environments/${enc(env)}`),
   listDeployments: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
   // A deployment with its normalised spec and its diff against the one

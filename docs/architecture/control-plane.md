@@ -2188,22 +2188,27 @@ else gets their tenants with their roles ("Your tenants", a new one with
 admin route for them. The browser keeps no tenant token: every tenant
 page calls with the session and names its tenant in `FeRun-Tenant`; the
 tokens an earlier UI kept in `localStorage` (`ferun-tenants`) are removed
-at sign-in. The sidebar has two spaces, which a switcher at its top
-picks: a tenant, from the person's tenants with their roles, and for
-operators the platform (fleet: nodes, ingresses, control plane, join
-tokens; accounts: tenants, people). In a tenant it shows the pages of
-the role (`TENANT_NAV` in `web/src/people.js`): Home; the environments,
-each with its state and open incidents, the one open unfolded into its
-pages (`ENV_NAV`: deployments, incidents, logs, traces, … and Edit, the
-builder), since people use the UI in an environment; then the tenant's
-domains, jobs and sandboxes (last: agents use sandboxes through the API
-and FeCode, people rarely through the UI); then people, tokens, usage
-and settings. Home and the environments, domains, people, usage and
-settings go to every member; sandboxes, jobs and the tools' reference
-with a tenant grant; tokens to its admin. Each entry's icon has its
-layer's colour, as on the architecture page (FeOS ochre for what runs as
-a pod, FeRun indigo, teal for the network), and a count: what needs
-someone on Home, open incidents on the environments, domains in trouble.
+at sign-in. The topbar holds where one works, the search (⌘K) and the
+person's menu (the architecture page, light or dark, sign-out). Where
+one works is a switcher at the head of the topbar's trail, in two
+columns: a tenant, from the person's tenants with their roles, and one
+of its environments (the right column lists the environments of the
+tenant chosen on the left); for operators also the platform (fleet:
+nodes, ingresses, control plane, join tokens; accounts: tenants,
+people). Choosing another environment keeps the page open (prod's logs
+lead to stage's logs). The sidebar shows the pages of the role
+(`TENANT_NAV` in `web/src/people.js`): Home; then the pages of one
+environment (`ENV_NAV`: overview, deployments, incidents, logs, traces,
+traffic, … and New deployment, the builder), the open one, else the one
+last open in this browser, else the tenant's first, since people use the
+UI in an environment; then the tenant's domains, credentials, jobs and
+sandboxes (last: agents use sandboxes through the API and FeCode, people
+rarely through the UI); then Tenant settings, one entry whose pages
+(people, tokens, usage, general) are tabs. Home and the environments,
+domains, people, usage and settings go to every member; sandboxes, jobs
+and the tools' reference with a tenant grant; tokens to its admin. The
+icons are grey; colour is kept for a count that needs someone: on Home,
+open incidents, domains in trouble.
 Home lists first what needs someone, each item with the page that fixes
 it (`web/src/attention.js`): the environments' open incidents, a failed
 deployment without one, sandboxes `failed`, `lost` or `unknown`, domains
