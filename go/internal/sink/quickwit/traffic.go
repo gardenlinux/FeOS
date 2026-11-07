@@ -43,6 +43,45 @@ func statusTerms(lo, hi int) string {
 var failedClause = "(span_attributes." + attrStatus + ":IN [" + statusTerms(500, 999) + "] OR (span_attributes." +
 	attrOutcome + `:"2xx" AND NOT span_attributes.` + attrStatus + ":IN [" + statusTerms(200, 299) + "]))"
 
+// The attributes of an application's server span that tell its request
+// (OpenTelemetry's semantic conventions for HTTP, the stable ones and
+// those before 1.21, which many libraries still write): its status
+// written, and its path.
+const (
+	attrStatusOld = "http.status_code"
+	attrPath      = "url.path"
+	attrTarget    = "http.target"
+)
+
+// SpanKindServer is OTLP's number of a server's span.
+const SpanKindServer = 2
+
+// statusError is OTLP's span status of an error.
+const statusError = 2
+
+// serverFailedClause is SpanQuery.ServerFailed in the query language.
+var serverFailedClause = "(status_code:" + strconv.Itoa(statusError) + " OR span_attributes." + attrStatus + ":IN [" +
+	statusTerms(500, 599) + "] OR span_attributes." + attrStatusOld + ":IN [" + statusTerms(500, 599) + "])"
+
+// ServerFailed reports whether an application's server span is the span
+// of a failed request, as FeRun counts the errors of a service's traffic
+// from its own spans: its status is an error, which the conventions set
+// on a server's span for a status of 500 or more and for the gRPC codes
+// of a server's failure, or it wrote a status of 500 to 599 under either
+// attribute's name (a library that sets no span status). It matches what
+// serverFailedClause finds.
+func ServerFailed(d *SpanDoc) bool {
+	if d.StatusCode == statusError {
+		return true
+	}
+	for _, a := range []string{attrStatus, attrStatusOld} {
+		if code, ok := intValue(d.SpanAttributes[a]); ok && code >= 500 && code <= 599 {
+			return true
+		}
+	}
+	return false
+}
+
 // Failed reports whether a span of the ingress's is the span of a failed
 // request, as FeRun counts the errors of its traffic: a status of 500 or
 // more, or none written unless the client went away (outcome aborted).

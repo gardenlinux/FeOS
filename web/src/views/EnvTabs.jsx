@@ -116,8 +116,8 @@ export function Spark({ series, w = 140, h = 26 }) {
   );
 }
 
-export function TrafficTable({ traffic }) {
-  const list = (traffic && traffic.services) || [];
+export function TrafficTable({ traffic, service = '' }) {
+  const list = ((traffic && traffic.services) || []).filter((s) => !service || s.service === service);
   return (
     <>
       <div className="tblwrap">
@@ -130,6 +130,7 @@ export function TrafficTable({ traffic }) {
               <th className="col-num">p50</th>
               <th className="col-num">p95</th>
               <th>over the window</th>
+              <th>counted from</th>
             </tr>
           </thead>
           <tbody>
@@ -142,17 +143,21 @@ export function TrafficTable({ traffic }) {
                 <td className="col-num mono">{fmtLatency(s.p50Ms)}</td>
                 <td className="col-num mono">{fmtLatency(s.p95Ms)}</td>
                 <td><Spark series={s.series} /></td>
+                <td className="small muted">{s.source === 'ingress' ? 'the ingress' : 'its spans'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {traffic && list.length === 0 && <p className="empty">No requests through the ingress in this window.</p>}
+      {traffic && list.length === 0 && <p className="empty">No requests in this window.</p>}
     </>
   );
 }
 
-export function TrafficTab({ tenant, env, navigate }) {
+// TrafficTab is an environment's traffic, or on a service's page
+// (service, its name) the service's: its line of the table and the
+// access log's records of it.
+export function TrafficTab({ tenant, env, navigate, service = '' }) {
   const [win, setWin] = useState('1h');
   const [traffic, setTraffic] = useState(null);
   const [err, setErr] = useState('');
@@ -168,7 +173,7 @@ export function TrafficTab({ tenant, env, navigate }) {
   return (
     <>
       <div className="pane-toolbar">
-        <h2><Icon name="chart" size={14} /> Requests per service</h2>
+        <h2><Icon name="chart" size={14} /> {service ? 'Requests' : 'Requests per service'}</h2>
         <span className="b-seg">
           {WINDOWS.map((w) => (
             <button key={w} className={'chipbtn' + (win === w ? ' on' : '')} onClick={() => { setWin(w); setTraffic(null); }}>{w}</button>))}
@@ -177,11 +182,13 @@ export function TrafficTab({ tenant, env, navigate }) {
           <span className="muted small">{fmtDate(traffic.since)} – {fmtDate(traffic.until)}, steps of {traffic.step}</span>)}
       </div>
       <ErrBox error={err} />
-      <TrafficTable traffic={traffic} />
+      <TrafficTable traffic={traffic} service={service} />
       {!traffic && !err && <p className="empty">Loading…</p>}
-      <p className="panel-note">What the ingress answered at the public hosts; the route door's requests are not counted.
-        Errors are answers of 500 or more, or none.</p>
-      <AccessLog tenant={tenant} env={env} navigate={navigate} />
+      <p className="panel-note">Counted from each service's OpenTelemetry server spans, wherever a request came from, without
+        its readiness check; errors are spans with an error status or a status of 500 to 599. A routed service that sends no
+        spans shows what the ingress answered at the public hosts (errors: 500 or more, or none); the route door's requests
+        are not counted.</p>
+      <AccessLog tenant={tenant} env={env} navigate={navigate} service={service} />
     </>
   );
 }
@@ -190,7 +197,7 @@ const ACCESS_PAGE = 100;
 
 // AccessLog is the ingress's access log of the environment, newest
 // first: the newest page polled, older pages read on demand.
-function AccessLog({ tenant, env, navigate }) {
+function AccessLog({ tenant, env, navigate, service = '' }) {
   const [newest, setNewest] = useState(null);
   const [older, setOlder] = useState([]);
   const [err, setErr] = useState('');
@@ -219,7 +226,8 @@ function AccessLog({ tenant, env, navigate }) {
       setBusy(false);
     }
   };
-  const records = newest ? newestFirst(newest, ...older) : null;
+  const all = newest ? newestFirst(newest, ...older) : null;
+  const records = all && service ? all.filter((r) => r.service === service) : all;
   return (
     <div className="envsect">
       <div className="pane-toolbar">

@@ -535,8 +535,9 @@ Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows,
   `--sink-url` it answers 503 `no_log_store`, and 503
   `log_store_unavailable` (`Retry-After: 5`) when the sink fails.
 - `GET /api/v1/environments/{env}/traffic` reads the sink's
-  `GET /api/v1/traffic`, the ingress's spans counted per service and
-  step ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
+  `GET /api/v1/traffic`, the services' own server spans counted per
+  service and step, and for a routed service without them the
+  ingress's ([traces.md](traces.md#reading-the-traffic)), with the
   caller's token or session, and answers 503 as `…/access-logs` does.
 - The objects' logs call and a job run's log read from the sink when
   `--sink-url` is set, with the caller's token or session

@@ -309,17 +309,28 @@ among them). A span is `{"traceID", "spanID", "operationName",
 `logs` are the events, `{"timestamp" (µs), "fields": [tags…, {"key":
 "event", "type": "string", "value": name}]}`.
 
-### Reading: the ingress's traffic
+### Reading: the traffic
 
-`GET /api/v1/traffic?environment=<ID>&service=<name>[&service=…]&since=&until=&step=`,
+`GET /api/v1/traffic?environment=<ID>&service=<name>[&service=…]&since=&until=&step=[&source=ingress|app][&skip=<service>:<path>…]`,
 with a reader as above (404 "no such environment" for an environment
-it may not read): the requests the ingress answered for
-each service of the tenant's environment, counted from its server spans
-(source `ingress`, the service as `object`). `ferund`'s
-`…/environments/{env}/traffic` reads it (control-plane.md). `since` and
-`until` are RFC 3339 or Unix ns, the range `[since, until)`, both
+it may not read): the requests of each service of the tenant's
+environment, counted from server spans. `source` `ingress` (the default)
+counts the ingress's (source `ingress`, the service as `object`): what
+it answered at the public hosts. `source` `app` counts the services' own
+(source `container`, `span_kind` 2, the server's, the service as
+`object`, which the node stamps): every request a service answered,
+whether it came through the ingress or from another service, without
+those to a `skip` path of it (its readiness check), by `url.path` or the
+older `http.target`; at most 8 per service, of `app` only. `ferund`'s
+`…/environments/{env}/traffic` reads both (control-plane.md). `since`
+and `until` are RFC 3339 or Unix ns, the range `[since, until)`, both
 multiples of `step`, a Go duration of whole seconds (`60s`, `15m`); 1 to
 128 services, at most 1,440 steps; else 400.
+
+The services' own spans are the application's word, as its metrics
+would be: what an operator reads of it, not a security record. A
+service that sends none has no traffic of its own; a library that
+samples counts its sample.
 
 ```json
 {"services": [
@@ -330,15 +341,21 @@ multiples of `step`, a Go duration of whole seconds (`60s`, `15m`); 1 to
 
 A service per one asked, in that order; `steps` holds only the steps
 with requests, oldest first; the percentiles are of `duration_ns`,
-`null` without requests. A request failed (`errors`) when its status
-was 500 or more, or none was written and the client did not go away.
-The span's status does not say this (an aborted request is
-`STATUS_CODE_ERROR` too), so the sink reads it from the attributes:
+`null` without requests. Of the ingress's spans a request failed
+(`errors`) when its status was 500 or more, or none was written and the
+client did not go away. The span's status does not say this (an aborted
+request is `STATUS_CODE_ERROR` too), so the sink reads it from the
+attributes:
 `http.response.status_code` in 500 to 999, or `ferun.outcome` `2xx`
 without a code of 200 to 299 (the ingress's class of a request that
 wrote no status and was neither aborted nor upgraded). An attribute is
 not a fast field and takes no range, so the codes are a set of terms
-(`IN [500 501 …]`).
+(`IN [500 501 …]`). Of a service's own spans a request failed when the
+span's status is `STATUS_CODE_ERROR`, which OpenTelemetry's conventions
+set on a server's span for a status of 500 or more and for the gRPC
+codes of a server's failure, or when it wrote a status of 500 to 599 as
+`http.response.status_code` or as the older `http.status_code` (a
+library that sets no status); a 4xx is the client's.
 
 `object` is not a fast field either, so the spans cannot be grouped
 by service in one search: each service takes two searches of the index,

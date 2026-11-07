@@ -368,7 +368,7 @@ function TraceView({ st, trace, utc, onTrace, onLines, onList }) {
   );
 }
 
-function RecentTraces({ st, focus, utc, set, onTrace }) {
+function RecentTraces({ st, focus, utc, set, onTrace, fixed = false }) {
   const key = st ? `${st.id} ${JSON.stringify(focus)}` : '';
   const { data, error, reload } = useRead(key, () => api.findTraces(traceSearchParams(focus, st.id).toString()));
   const services = envServices(st);
@@ -377,13 +377,13 @@ function RecentTraces({ st, focus, utc, set, onTrace }) {
     .sort((a, b) => b.startUs - a.startUs), [data]);
   return (
     <div className="tr">
-      <div className="chiprow lg-chips">
+      {!fixed && <div className="chiprow lg-chips">
         <span className="k">through</span>
         {[['', 'every service'], ['ferun-ingress', 'the ingress'], ...services.map((s) => [s, s])].map(([v, text]) => (
           <button key={v} type="button" className={'chipbtn' + (v && v !== 'ferun-ingress' ? ' mono' : '') + ((focus.service || '') === v ? ' on' : '')}
             onClick={() => set({ service: v || undefined })}>{text}</button>
         ))}
-      </div>
+      </div>}
       <div className="chiprow lg-chips">
         <span className="k">time</span>
         {TRACE_RANGES.map(([v, text]) => (
@@ -424,15 +424,18 @@ function RecentTraces({ st, focus, utc, set, onTrace }) {
 }
 
 // Traces is the tab: a trace (item, its ID) or the recent traces (search,
-// the address's query).
-export function Traces({ tenant, env, st, item, search, navigate }) {
+// the address's query). On a service's page (service, its name) the
+// recent traces are those through it, and listPath(query) the path of
+// its traces' search; a trace opens in the environment's Traces.
+export function Traces({ tenant, env, st, item, search, navigate, service = '', listPath = null }) {
   const [tz] = useTimeZone();
-  const focus = useMemo(() => traceFocusOf(search), [search]);
+  const focus = useMemo(() => (service ? { ...traceFocusOf(search), service } : traceFocusOf(search)), [search, service]);
   const onTrace = (trace) => navigate(envPath(tenant, env, 'traces', trace));
   const set = (patch) => {
     const next = { ...focus, ...patch };
     for (const k of Object.keys(next)) if (next[k] == null || next[k] === '') delete next[k];
-    navigate(envPath(tenant, env, 'traces', '', null, traceQueryOf(next)));
+    if (service) delete next.service;
+    navigate(listPath ? listPath(traceQueryOf(next)) : envPath(tenant, env, 'traces', '', null, traceQueryOf(next)));
   };
   if (!st) return <p className="empty">Loading…</p>;
   if (item) {
@@ -442,5 +445,5 @@ export function Traces({ tenant, env, st, item, search, navigate }) {
         onList={() => navigate(envPath(tenant, env, 'traces'))} />
     );
   }
-  return <RecentTraces st={st} focus={focus} utc={tz === 'utc'} set={set} onTrace={onTrace} />;
+  return <RecentTraces st={st} focus={focus} utc={tz === 'utc'} set={set} onTrace={onTrace} fixed={!!service} />;
 }

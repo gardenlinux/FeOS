@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -17,27 +18,41 @@ import (
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
 )
 
-// The bounds of a read of the ingress's traffic (traces.md, Reading: the
-// ingress's traffic): the services of a read (an environment's routes,
-// at most 128), its steps, and the services searched at once.
+// The bounds of a read of the traffic (traces.md, Reading: the traffic):
+// the services of a read (at most 128), its steps, the paths left out per
+// service, and the services searched at once.
 const (
 	maxTrafficServices = 128
 	maxTrafficSteps    = 1440
+	maxTrafficSkips    = 8
 	trafficLoads       = 4
 )
 
-// TrafficQuery is a read of the ingress's traffic: a tenant's environment
-// and its services by name, the range [SinceNs, UntilNs) in Unix ns, and
-// the step, whole seconds, of which both ends are multiples.
+// The sources of a read of the traffic: the ingress's server spans, or
+// the services' own (TrafficQuery.Source).
+const (
+	TrafficIngress = "ingress"
+	TrafficApp     = "app"
+)
+
+// TrafficQuery is a read of the traffic: a tenant's environment and its
+// services by name, the range [SinceNs, UntilNs) in Unix ns, the step,
+// whole seconds, of which both ends are multiples, and the source:
+// TrafficIngress (also when empty), what the ingress answered for each
+// service, or TrafficApp, the requests each service's own server spans
+// count, without those to its Skip paths (its readiness check).
 type TrafficQuery struct {
 	Tenant, Environment string
 	Services            []string
 	SinceNs, UntilNs    int64
 	Step                time.Duration
+	Source              string
+	Skip                map[string][]string
 }
 
-// ServiceTraffic is a service's requests through the ingress in a read's
-// range: how many, how many failed (quickwit.Failed), the 50th and 95th
+// ServiceTraffic is a service's requests in a read's range: how many, how
+// many failed (quickwit.Failed of the ingress's spans, quickwit.
+// ServerFailed of a service's own), the 50th and 95th
 // percentiles of their durations in ns (null without requests), and the
 // steps that had requests, the oldest first.
 type ServiceTraffic struct {
@@ -59,12 +74,13 @@ type TrafficStep struct {
 	P95Ns    *float64 `json:"p95Ns"`
 }
 
-// Traffic answers the ingress's traffic of q's services, in q's order,
-// from its server spans in the index (source ingress, the service as
-// object): per service two searches, those of failed requests first, so
-// that as the index grows they never outnumber the requests counted
-// after them. The index alone is read; a span is in it at most a commit
-// (5 s) after it came.
+// Traffic answers the traffic of q's services, in q's order, from server
+// spans in the index: the ingress's (source ingress, the service as
+// object), or with TrafficApp the services' own (source container, kind
+// server, the service as object, which the node stamps). Per service two
+// searches, those of failed requests first, so that as the index grows
+// they never outnumber the requests counted after them. The index alone
+// is read; a span is in it at most a commit (5 s) after it came.
 func (t *Traces) Traffic(ctx context.Context, q TrafficQuery) ([]ServiceTraffic, error) {
 	out := make([]ServiceTraffic, len(q.Services))
 	g, gctx := errgroup.WithContext(ctx)
@@ -85,11 +101,16 @@ func (t *Traces) Traffic(ctx context.Context, q TrafficQuery) ([]ServiceTraffic,
 func (t *Traces) serviceTraffic(ctx context.Context, q TrafficQuery, service string) (ServiceTraffic, error) {
 	sel := quickwit.SpanQuery{Tenant: q.Tenant, Environment: q.Environment, Object: service, Source: SourceIngress,
 		SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1, Failed: true}
+	if q.Source == TrafficApp {
+		sel = quickwit.SpanQuery{Tenant: q.Tenant, Environment: q.Environment, Object: service, Source: SourceContainer,
+			Kind: quickwit.SpanKindServer, NotPaths: q.Skip[service], SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1,
+			ServerFailed: true}
+	}
 	failed, err := t.index.SpanHistogram(ctx, t.pattern(), sel, q.Step, false)
 	if err != nil {
 		return ServiceTraffic{}, fmt.Errorf("index: the failed requests of %s: %w", service, err)
 	}
-	sel.Failed = false
+	sel.Failed, sel.ServerFailed = false, false
 	all, err := t.index.SpanHistogram(ctx, t.pattern(), sel, q.Step, true)
 	if err != nil {
 		return ServiceTraffic{}, fmt.Errorf("index: the requests of %s: %w", service, err)
@@ -109,11 +130,37 @@ func (t *Traces) serviceTraffic(ctx context.Context, q TrafficQuery, service str
 
 // parseTrafficQuery reads the parameters of /api/v1/traffic: environment,
 // service (repeated), since and until (RFC 3339 or Unix ns, multiples of
-// step), step (a Go duration of whole seconds).
+// step), step (a Go duration of whole seconds), source (ingress, the
+// default, or app) and skip (repeated, "<service>:<path>", app only).
 func parseTrafficQuery(v url.Values, tenant string) (TrafficQuery, error) {
-	q := TrafficQuery{Tenant: tenant, Environment: v.Get("environment")}
+	q := TrafficQuery{Tenant: tenant, Environment: v.Get("environment"), Source: v.Get("source")}
 	if q.Environment == "" {
 		return q, fmt.Errorf("environment is required")
+	}
+	switch q.Source {
+	case "":
+		q.Source = TrafficIngress
+	case TrafficIngress, TrafficApp:
+	default:
+		return q, fmt.Errorf("source must be ingress or app")
+	}
+	for _, s := range v["skip"] {
+		svc, path, ok := strings.Cut(s, ":")
+		if !ok || svc == "" || !strings.HasPrefix(path, "/") {
+			return q, fmt.Errorf("a skip must be <service>:<path>, the path starting with /")
+		}
+		if q.Source != TrafficApp {
+			return q, fmt.Errorf("skip is of the source app only")
+		}
+		if q.Skip == nil {
+			q.Skip = map[string][]string{}
+		}
+		if len(q.Skip[svc]) >= maxTrafficSkips {
+			return q, fmt.Errorf("at most %d skips per service", maxTrafficSkips)
+		}
+		if !slices.Contains(q.Skip[svc], path) {
+			q.Skip[svc] = append(q.Skip[svc], path)
+		}
 	}
 	for _, s := range v["service"] {
 		if s == "" {

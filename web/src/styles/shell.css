@@ -1,0 +1,64 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The sidebar picks the thing, the tab bar how to look at it: the
+   environment one works in as a card (its name, its state, its host),
+   its objects by kind below it with their states, the tenant at the foot
+   (its pages while none of an environment is open). */
+
+.side-env { display: flex; flex-direction: column; gap: 2px; }
+.envcard {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  padding: 13px 15px; border-radius: var(--radius); color: var(--text);
+  border: 1px solid var(--border-soft); background: var(--panel);
+}
+.envcard:hover { text-decoration: none; border-color: var(--border); color: var(--text); }
+.envcard.on { border-color: rgba(var(--accent-rgb), .55); background: var(--accent-dim); }
+.envcard-name { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.35; }
+.envname-suffix { color: var(--faint); font-weight: 400; }
+.envcard-state { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
+.envcard-state.running { color: var(--ok); }
+.envcard-state.failed { color: var(--danger); }
+.envcard-state.moving { color: var(--accent); }
+.envcard-host { font-size: 13px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.objitem {
+  display: flex; align-items: center; gap: 11px; min-width: 0;
+  padding: 6px 10px; border-radius: var(--radius-sm); color: var(--text); font-size: 15px; font-weight: 500;
+}
+.objitem:hover { background: var(--panel2); color: var(--text); text-decoration: none; }
+.objitem.on { background: var(--accent-dim); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .45); }
+.objitem-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objitem-meta { margin-left: auto; flex: none; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
+.objitem-meta.failed { color: var(--danger); }
+.objitem-meta.moving { color: var(--accent); }
+/* a failed object's dot carries a halo, so that it reads without colour */
+.objitem .sdot.failed, .envcard .sdot.failed { box-shadow: 0 0 0 3px rgba(242, 119, 107, .22); }
+
+.side-foot { margin-top: auto; padding-top: 18px; display: flex; flex-direction: column; gap: 6px; }
+.tenantrow {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+  border-radius: var(--radius); border: 1px solid var(--border-soft); color: var(--text);
+}
+.tenantrow:hover { background: var(--panel); color: var(--text); text-decoration: none; }
+.tenantrow > .icon { color: var(--muted); flex: none; }
+.tenantrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tenantrow-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tenantrow-pages { font-size: 12.5px; line-height: 1.4; color: var(--faint); }
+.tenantnav { margin-top: 10px; }
+
+@media (max-width: 820px) {
+  /* narrow: the sidebar is a bar at the top; the card and the tenant
+     stay, the objects are a tap away on the environment's overview */
+  .sidebar .objnav, .sidebar .tenantnav .snav-label, .sidebar .tenantrow-pages, .sidebar .side-env > .snav-label,
+  .sidebar .envcard-host, .sidebar .envcard-state > span:not(.sdot) { display: none; }
+  .sidebar .side-env { flex-direction: row; flex: none; }
+  .sidebar .envcard { padding: 6px 12px; flex-direction: row; align-items: center; gap: 8px; white-space: nowrap; }
+  .sidebar .envcard-name { font-size: 14px; }
+  .sidebar .side-foot { margin: 0; padding: 0; flex-direction: row; flex: none; }
+  .sidebar .tenantrow { padding: 6px 12px; white-space: nowrap; }
+  .sidebar .tenantnav { flex-direction: row; margin: 0; flex: none; }
+  .sidebar .tenantnav .snav-item { white-space: nowrap; }
+}

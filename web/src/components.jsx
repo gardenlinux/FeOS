@@ -7,6 +7,7 @@ import { fmtAgo, fmtDateTime, fmtTime } from './format.js';
 import { mcpURL } from './api.js';
 import { poller } from './poll.js';
 import { THEME_KEY, writeItem } from './storage.js';
+import { splitEnvName } from './views/envs.js';
 
 // The theme: html[data-theme], remembered; index.html applies it before
 // the first paint.
@@ -37,6 +38,13 @@ export function PageHead({ kind, title, mono = false, state, actions, facts }) {
       {facts && <div className="facts">{facts}</div>}
     </header>
   );
+}
+
+// EnvName is an environment's name, the 8 hex digits of a suffix that
+// FeCode adds dimmed.
+export function EnvName({ name, className = 'envcard-name' }) {
+  const { base, suffix } = splitEnvName(name);
+  return <span className={className}>{base}{suffix && <span className="envname-suffix">{suffix}</span>}</span>;
 }
 
 // BrandMark is FeRun's mark: the box of the sign-in screen.

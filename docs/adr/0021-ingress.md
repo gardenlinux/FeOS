@@ -747,7 +747,7 @@ changed these points:
   numbers are best effort: the ingress sends a batch of spans once and
   drops what the sink does not take, where it sends its lines again, and
   the newest five seconds are not yet in the index
-  ([architecture/traces.md](../architecture/traces.md#reading-the-ingresss-traffic)).
+  ([architecture/traces.md](../architecture/traces.md#reading-the-traffic)).
 
 ## Alternatives considered
 

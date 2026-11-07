@@ -2203,26 +2203,55 @@ of its environments (the right column lists the environments of the
 tenant chosen on the left); for operators also the platform (fleet:
 nodes, ingresses, control plane, join tokens; accounts: tenants,
 people). Choosing another environment keeps the page open (prod's logs
-lead to stage's logs). The sidebar shows the pages of the role
-(`TENANT_NAV` in `web/src/people.js`): Home; then the pages of one
-environment (`ENV_NAV`: overview, deployments, incidents, logs, traces,
-traffic, … and New deployment, the builder), the open one, else the one
-last open in this browser, else the tenant's first, since people use the
-UI in an environment. An environment's Secrets & credentials page holds
-its secrets and its credential offloading: the HTTP bindings of the
-latest deployment, each with where its credential comes from (a
-credential of the tenant at its pinned version, or the environment's
-secrets), the services that use it and Check; Add binding and Edit open
-the binding's form in New deployment (`…/builder/new/binding`,
-`…/builder/binding/<name>`), since a binding is part of a deployment.
-Then the tenant's domains, credentials, jobs and
-sandboxes (last: agents use sandboxes through the API and FeCode, people
-rarely through the UI); then Tenant settings, one entry whose pages
-(people, tokens, usage, general) are tabs. Home and the environments,
-domains, people, usage and settings go to every member; sandboxes, jobs
-and the tools' reference with a tenant grant; tokens to its admin. The
-icons are grey; colour is kept for a count that needs someone: on Home,
-open incidents, domains in trouble.
+lead to stage's logs). The sidebar picks the thing, the tab bar how to
+look at it. In an environment the sidebar shows the environment as a
+card (its name, a suffix of 8 hex digits that FeCode adds dimmed; its
+state; its host) and below it its objects by kind, each with the dot of
+its state and, only while something is wrong, what (`1/2`, `failed`);
+the tenant is one entry at its foot. The environment is the open one,
+else the one last open in this browser, else the tenant's first, since
+people use the UI in an environment; its status is read once for the
+sidebar and the page (`web/src/envstatus.jsx`, every 3 s while one of
+its pages is open). An environment's views are its tab bar
+(`ENV_LENSES` in `web/src/routes.js`): overview, activity, logs,
+traces, traffic and settings; Activity has the deployments and the
+incidents as pages of its own, besides everything in one list, and
+Settings the general page (the environment's name, ID, labels; clone
+and delete), the secrets and credentials, and the domains and access.
+An object's page (`…/objects/<kind>/<name>[/<view>]`) has the views the
+object has: overview, logs, traces and traffic (a service), and config
+(its definition, the routes to it, who uses it). Picking another thing
+in the sidebar keeps the view where the thing has it: from prod's logs
+to api's logs and back; an object's logs under the environment's Logs
+(`…/logs/<kind>/<name>`) redirect to its page's. The overview says
+first what needs someone, in a sentence with its evidence and the next
+step: each open incident with the end of its log and the way to its
+object, a failed or running rollout with its reason, else that every
+object matches the deployment; then the traffic of the last hour and
+where the environment is reached, the objects as cards, the bindings
+and the recent activity. A state is said once. An object's overview
+says first what is wrong with it (its open incident, else its first
+instance that exited with the end of that replica's log), then its
+instances, its traffic and the deployments that changed it. New
+deployment opens the builder. While none of an environment's pages is
+open the sidebar shows the tenant's pages (`TENANT_NAV` in
+`web/src/people.js`): Home, the environments, the tenant's domains,
+credentials, jobs and sandboxes (last: agents use sandboxes through the
+API and FeCode, people rarely through the UI), then Tenant settings, one
+entry whose pages (people, tokens, usage, general) are tabs. An
+environment's Secrets & credentials page holds its secrets and its
+credential offloading: the HTTP bindings of the latest deployment, each
+with where its credential comes from (a credential of the tenant at its
+pinned version, or the environment's secrets), the services that use it
+and Check; Add binding and Edit open the binding's form in New
+deployment (`…/builder/new/binding`, `…/builder/binding/<name>`), since
+a binding is part of a deployment. Home and the environments, domains,
+people, usage and settings go to every member; sandboxes, jobs and the
+tools' reference with a tenant grant; tokens to its admin. The UI is set
+in FeCode's face and forms (IBM Plex Sans at 15 px, cards with 12 px
+corners); names are in the text's colour, icons grey, and colour is kept
+for states and for a count that needs someone: on Home, open incidents,
+domains in trouble.
 Home lists first what needs someone, each item with the page that fixes
 it (`web/src/attention.js`): the environments' open incidents, a failed
 deployment without one, sandboxes `failed`, `lost` or `unknown`, domains
@@ -3453,7 +3482,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET …/{env}/secrets`, `PUT`, `DELETE …/secrets/{name}` | the names with their latest versions; `{name, version}`; 204, 409 while pinned |
 | `GET …/{env}/incidents[?open=1]`, `…/incidents/{id}` | newest first; one |
 | `GET …/{env}/access-logs[?limit=200&beforeTsNs=&traceId=]` | `{records}`: the newest page of the ingress's access log before `beforeTsNs` (a record's `tsNs`, a string), at most 1000, ascending, of the trace `traceId` (32 lower case hex digits; else 400) when given, read from the sink ([The sink](#the-sink)); 503 `no_log_store` without `--sink-url`, 503 `log_store_unavailable` when the sink fails; each `{tsNs, time, durationNs, ingress, service, instance, host, method, path, proto, status, outcome, attempts, heldNs, bytesIn, bytesOut, clientIp, userAgent, traceId, spanId, parentSpanId}` ([ingress.md](ingress.md#access-log)) |
-| `GET …/{env}/traffic[?window=1h]` | the requests the ingress answered for each routed service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every service of the desired and deployed deployments' routes to an image service with a request in the window, by name, each with every bucket, oldest first; `errors` the requests of a status ≥ 500 or none written, but not aborted; the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-ingresss-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
+| `GET …/{env}/traffic[?window=1h]` | the requests of each image service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, source, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every image service of the desired and deployed deployments with a request in the window, by name, each with every bucket, oldest first; `source` `app`, counted from its own OpenTelemetry server spans without its readiness check (`errors`: an error status, or a status of 500 to 599), or `ingress` for a routed service that sends none, what the ingress answered (`errors`: a status ≥ 500 or none written, but not aborted); the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
 | `GET …/{env}/objects/{kind}/{name}/logs?lines=200&replica=0` | `{lines, source}`, the source `container` or `process`; with `--sink-url` a container's log is the sink's first ([The sink](#the-sink)); 501; 409 "paused" (unless the sink has the instance's lines), `not_running` (also for a replica without an instance yet, or none at all); 404 for a replica beyond the object's ([Logs](#probes-exits-and-restarts)) |
 | `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes, or an attached service's process |
 | `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
@@ -4036,15 +4065,20 @@ nor waits for. `ferund`'s part:
   in a rolling deploy fails its partitions' run, its `PublishAccessLogs`
   and the table part of its `…/access-logs` until it is replaced.
 - **The traffic.** `…/traffic` (FeCode ADR 0009 §4) is aggregated by
-  the sink from the ingress's spans
-  ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
-  caller's credentials as the logs calls: `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s`
-  for the services that the routes of the desired and deployed deployments
-  send the ingress to (an attached service's routes only the route door
-  serves). Without such a service the sink is not asked and `services`
-  is empty. `ferund` fills the steps the sink leaves out with zeros and
-  `null`, leaves out the services without requests and turns ns into ms
-  to a tenth. The 503s are those of `…/access-logs`; a sink without the
+  the sink from server spans ([traces.md](traces.md#reading-the-traffic)),
+  with the caller's credentials as the logs calls, in two reads:
+  `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s&source=app&skip=<service>:<path>…`
+  for the image services of the desired and deployed deployments, their
+  own spans without those of an HTTP readiness check's path, and the
+  same with `source=ingress` for the services that their routes send
+  the ingress to (an attached service's routes only the route door
+  serves). A service's own count is its traffic, wherever its requests
+  came from; a routed service that sends no spans gets the ingress's
+  (`source` says which). Without an image service the sink is not asked
+  and `services` is empty. `ferund` fills the steps the sink leaves out
+  with zeros and `null`, leaves out the services without requests and
+  turns ns into ms to a tenth. A sink older than `source` answers the
+  ingress's count to both reads, so it is rolled out first. The 503s are those of `…/access-logs`; a sink without the
   route (older than `ferund`) answers 404, which is a 503
   `log_store_unavailable` too.
 - **`GET /api/v1/tenant`** (tenant class, member), which the sink asks

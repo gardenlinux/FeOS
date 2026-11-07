@@ -5,14 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api.js';
 import { response } from '../testing/ferun.js';
 import {
-  changeTone, conditionText, envCounts, exitText, findObject, fmtValue, groupObjects, hasEvidence, heavyEffect,
-  incidentObject, logReplicas, logSourceText, logsProblem, objectSummary, objectTone, originText, parseLabelFilter,
-  phaseTone, deploymentTone, rolloutNote, statusState,
-  actionProblem, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, jobTrigger, mayRevertTo, newestFirst,
-  olderCursor, preflightRows, publishNote, revertOffer, routeCurl, sparkPoints, specBindings, statusTone, tagPlan,
-  CHANGES_READ, KIND_NAMES, changesTo, definitionRows, envRows, envValueRef, fmtCount, instanceDeployments, objectImage,
-  objectIncidents, objectStateText, readinessText, readyText, resourcesText, restartsOf, routesTo, shortImage, specObject,
-  splitItem, trafficOf, usedBy,
+  actionProblem, activityItems, CHANGES_READ, changesTo, changeTone, cloneBody, conditionText, defaultHost,
+  definitionRows, deploymentTone, envCounts, envDomains, envRows, envValueRef, errorShare, exitText, findObject,
+  fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments,
+  jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
+  objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
+  phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
+  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specBindings, specObject, splitEnvName, splitItem,
+  statusState, statusTone, tagPlan, trafficOf, trafficTotals, usedBy,
 } from './envs.js';
 
 // The environments view's arithmetic, on ferund's fixtures: stage rolls
@@ -334,9 +334,9 @@ describe('the traffic', () => {
 
 describe('domains and access', () => {
   const domains = [
-    { id: 'd-1', name: 'kino.example.com', state: 'served', environment: { id: STAGE.id, name: STAGE.name } },
-    { id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns', environment: { id: STAGE.id, name: STAGE.name } },
-    { id: 'd-3', name: 'other.example.org', state: 'served', environment: { id: 'x', name: 'other' } },
+    { id: 'd-1', name: 'kino.example.com', state: 'served', environment: STAGE.id },
+    { id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns', environment: STAGE.id },
+    { id: 'd-3', name: 'other.example.org', state: 'served', environment: 'x' },
     { id: 'd-4', name: 'free.example.org', state: 'unverified', environment: null },
   ];
 
@@ -493,5 +493,54 @@ describe("an object's page", () => {
     const inc = response('GET_environments_env_incidents.200').incidents;
     expect(objectIncidents(inc, 'service', 'expense-service').map((i) => i.id)).toEqual(['12']);
     expect(KIND_NAMES.service).toBe('Service');
+  });
+});
+
+describe('the sidebar and the overview in words', () => {
+  const svc = (rest) => ({ kind: 'service', name: 'api', desired: 2, ready: 2, instances: [], ...rest });
+  it("says beside an object only what is wrong", () => {
+    expect(sideMeta(svc({}))).toBe('');
+    expect(sideMeta(svc({ ready: 1 }))).toBe('1/2');
+    expect(sideMeta(svc({ ready: 1, instances: [{ phase: 'exited' }] }))).toBe('1/2');
+    expect(sideMeta({ kind: 'service', name: 'web', runtime: 'attached', phase: 'starting' })).toBe('starting');
+    expect(sideMeta({ kind: 'addon', name: 'db', phase: 'starting', instances: [] })).toBe('starting');
+    expect(sideMeta({ kind: 'job', name: 'migrate', lastRun: { phase: 'failed' } })).toBe('failed');
+    expect(sideMeta({ kind: 'job', name: 'migrate', lastRun: { phase: 'succeeded' } })).toBe('');
+  });
+
+  it("dims the suffix FeCode gives an environment's name", () => {
+    expect(splitEnvName('kino-prod-9101dfcb')).toEqual({ base: 'kino-prod', suffix: '-9101dfcb' });
+    expect(splitEnvName('expensa-stage')).toEqual({ base: 'expensa-stage', suffix: '' });
+    expect(splitEnvName('-9101dfcb')).toEqual({ base: '-9101dfcb', suffix: '' });
+    expect(splitEnvName('kino-prod-9101DFCB')).toEqual({ base: 'kino-prod-9101DFCB', suffix: '' });
+  });
+
+  it('counts the objects by kind in words', () => {
+    expect(objectsText([])).toBe('');
+    expect(objectsText([{ kind: 'job' }])).toBe('1 job');
+    expect(objectsText([{ kind: 'service' }, { kind: 'service' }, { kind: 'addon' }])).toBe('2 services and 1 addon');
+    expect(objectsText([{ kind: 'job' }, { kind: 'addon' }, { kind: 'service' }])).toBe('1 service, 1 addon and 1 job');
+  });
+
+  it('sums the traffic up', () => {
+    expect(trafficTotals(null)).toBe(null);
+    expect(trafficTotals({ services: [] })).toEqual({ requests: 0, errors: 0, p95Ms: 0 });
+    expect(trafficTotals({ services: [{ requests: 10, errors: 1, p95Ms: 40 }, { requests: 5, errors: 0, p95Ms: 90 }] }))
+      .toEqual({ requests: 15, errors: 1, p95Ms: 90 });
+  });
+
+  it('merges the deployments and the incidents into one activity, newest first', () => {
+    const list = activityItems(
+      [{ number: 2, state: 'failed', message: 'bump', reason: 'exited', createdAt: '2026-10-18T14:00:00Z' },
+        { number: 1, state: 'replaced', origin: 'apply', createdAt: '2026-10-01T09:00:00Z' }],
+      [{ id: '5', object: 'service/api', condition: 'crash_loop', summary: 'api exited', openedAt: '2026-10-18T14:05:00Z', closedAt: '' },
+        { id: '4', object: 'addon/db', condition: 'addon_unhealthy', openedAt: '2026-10-02T09:00:00Z', closedAt: '2026-10-02T10:00:00Z' }]);
+    expect(list.map((a) => a.title)).toEqual([
+      'Incident 5: api crash loop', 'Deployment 2 failed', 'Incident 4: db addon unhealthy, closed', 'Deployment 1 replaced',
+    ]);
+    expect(list[0]).toMatchObject({ kind: 'incident', id: '5', open: true, tone: 'failed', detail: 'api exited' });
+    expect(list[1]).toMatchObject({ kind: 'deployment', number: 2, tone: 'failed', detail: 'bump', reason: 'exited' });
+    expect(list[2]).toMatchObject({ open: false, tone: 'absent' });
+    expect(list[3].detail).toBe('apply');
   });
 });

@@ -67,3 +67,11 @@ path = ["web/src/fonts/ShareTechMono-Regular.woff2"]
 precedence = "override"
 SPDX-FileCopyrightText = "2012 Carrois Type Design, Ralph du Carrois, with Reserved Font Name 'Share'"
 SPDX-License-Identifier = "OFL-1.1"
+
+# IBM Plex Sans, the UI's face as FeCode's, Google Fonts' latin webfont
+# (v23, one variable file for every weight).
+[[annotations]]
+path = ["web/src/fonts/IBMPlexSans-Latin.woff2"]
+precedence = "override"
+SPDX-FileCopyrightText = "2017 IBM Corp. with Reserved Font Name 'Plex'"
+SPDX-License-Identifier = "OFL-1.1"

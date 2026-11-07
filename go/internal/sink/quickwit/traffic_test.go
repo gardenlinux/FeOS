@@ -57,6 +57,59 @@ func TestFailed(t *testing.T) {
 	}
 }
 
+// ServerFailed tells a failed request from an application's server span:
+// its status an error, or a status of 500 to 599 written under the
+// stable attribute or the one before it; a client's error (4xx) is not.
+func TestServerFailed(t *testing.T) {
+	for _, c := range []struct {
+		status uint64
+		attrs  map[string]string
+		want   bool
+	}{
+		{0, nil, false},
+		{1, map[string]string{"http.response.status_code": "200"}, false},
+		{2, nil, true},
+		{0, map[string]string{"http.response.status_code": "503"}, true},
+		{0, map[string]string{"http.status_code": "500"}, true},
+		{0, map[string]string{"http.response.status_code": "404"}, false},
+		{0, map[string]string{"http.status_code": "600"}, false},
+	} {
+		d := SpanDoc{StatusCode: c.status, SpanAttributes: map[string]json.RawMessage{}}
+		for k, v := range c.attrs {
+			d.SpanAttributes[k] = json.RawMessage(v)
+		}
+		if got := ServerFailed(&d); got != c.want {
+			t.Errorf("status %d %v: %v", c.status, c.attrs, got)
+		}
+		if (&SpanQuery{ServerFailed: true}).Match(&d) != c.want {
+			t.Errorf("status %d %v: Match disagrees", c.status, c.attrs)
+		}
+	}
+	got := SpanQuery{Object: "web", Kind: SpanKindServer, ServerFailed: true, NotPaths: []string{"/readyz"}}.String()
+	for _, part := range []string{`object:"web" AND span_kind:2 AND (status_code:2 OR span_attributes.http.response.status_code:IN [500 501 `,
+		` 598 599] OR span_attributes.http.status_code:IN [500 `,
+		` 599]) AND NOT span_attributes.url.path:"/readyz" AND NOT span_attributes.http.target:"/readyz"`} {
+		if !strings.Contains(got, part) {
+			t.Errorf("query %s\nlacks %s", got, part)
+		}
+	}
+	// A span to a path left out, by either attribute, is not counted; of another kind neither.
+	for _, c := range []struct {
+		d    SpanDoc
+		want bool
+	}{
+		{SpanDoc{SpanKind: 2, SpanAttributes: map[string]json.RawMessage{"url.path": json.RawMessage(`"/readyz"`)}}, false},
+		{SpanDoc{SpanKind: 2, SpanAttributes: map[string]json.RawMessage{"http.target": json.RawMessage(`"/readyz"`)}}, false},
+		{SpanDoc{SpanKind: 2, SpanAttributes: map[string]json.RawMessage{"url.path": json.RawMessage(`"/shows"`)}}, true},
+		{SpanDoc{SpanKind: 3}, false},
+	} {
+		q := SpanQuery{Kind: SpanKindServer, NotPaths: []string{"/readyz"}}
+		if got := q.Match(&c.d); got != c.want {
+			t.Errorf("%+v: %v", c.d, got)
+		}
+	}
+}
+
 // SpanHistogram asks for a date histogram of ts in the step, and with
 // durations for the percentiles overall and per step; it reads Quickwit
 // 0.9's answer, of the steps those with spans.

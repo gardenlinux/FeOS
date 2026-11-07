@@ -118,14 +118,14 @@ export function can(access) {
   };
 }
 
-// TENANT_NAV are a tenant's pages in the sidebar, in its groups, each
-// with what it needs of can(). The environments are a
-// section of their own: each one with its pages (ENV_NAV), the one open
-// unfolded, since the UI is used in an environment; the tenant's other
-// things below, the sandboxes last of them (agents use them through the
-// API, people rarely through the UI). Home and the environments for every
-// member, the sandboxes and jobs with a tenant grant, the tokens for its
-// admin.
+// TENANT_NAV are a tenant's pages, in their groups, each with what it
+// needs of can(). The sidebar shows them while none of an environment's
+// pages is open (env: the environments, tenant: the tenant's own things,
+// the sandboxes last of them since agents use them through the API;
+// manage: one entry, Tenant settings); in an environment it shows the
+// environment and its objects, and the tenant as one entry. Home and the
+// environments for every member, the sandboxes and jobs with a tenant
+// grant, the tokens for its admin.
 export const TENANT_NAV = [
   { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '' },
   { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env', views: ['environments', 'newEnvironment'] },
@@ -140,34 +140,9 @@ export const TENANT_NAV = [
   { view: 'settings', label: 'General', icon: 'settings', path: '/settings', needs: 'members', group: 'manage' },
 ];
 
-// NAV_GROUPS name the sidebar's groups, in order; env is the
-// environments' section.
-export const NAV_GROUPS = [
-  { key: '', label: '' },
-  { key: 'env', label: 'Environments' },
-  { key: 'tenant', label: 'Tenant' },
-  { key: 'manage', label: '' },
-];
-
 // SETTINGS_NAV is the sidebar's one entry for the tenant's settings
 // (the group manage): its pages are tabs of one another.
 export const SETTINGS_NAV = { view: 'tenantSettings', label: 'Tenant settings', icon: 'settings' };
-
-// ENV_NAV are an environment's pages in its subtree, by the tabs of its
-// route (routes.js ENV_TABS; a tab ferund's UI does not have is left
-// out), with their icons; builder is the builder, "New deployment".
-export const ENV_NAV = [
-  { tab: 'overview', label: 'Overview', icon: 'dashboard' },
-  { tab: 'deployments', label: 'Deployments', icon: 'history' },
-  { tab: 'incidents', label: 'Incidents', icon: 'alert' },
-  { tab: 'logs', label: 'Logs', icon: 'file' },
-  { tab: 'traces', label: 'Traces', icon: 'activity' },
-  { tab: 'traffic', label: 'Traffic', icon: 'chart' },
-  { tab: 'secrets', label: 'Secrets & credentials', icon: 'lock' },
-  { tab: 'access', label: 'Domains & access', icon: 'globe' },
-  { tab: 'settings', label: 'Settings', icon: 'settings' },
-  { tab: 'builder', label: 'New deployment', icon: 'plus' },
-];
 
 // PLATFORM_NAV are the operators' pages, the platform's space.
 export const PLATFORM_NAV = [
