@@ -130,7 +130,7 @@ func (s *Store) ListTenants(ctx context.Context) ([]TenantInfo, error) {
 	rows, err := s.q.Query(ctx, `SELECT `+prefixed("t", []string{"id", "created_at", "deleting_at"})+`,
 			coalesce(t.zone, ''), t.made_by, t.limit_sandboxes, t.limit_environments, t.limit_running_jobs,
 			t.limit_vcpus, t.limit_memory_mib,
-			(SELECT count(*) FROM sandboxes s WHERE s.owner = t.id AND s.environment_id IS NULL AND NOT s.tenant_job),
+			(SELECT count(*) FROM sandboxes s WHERE s.owner = t.id AND NOT s.instance AND NOT s.tenant_job),
 			(SELECT count(*) FROM environments e WHERE e.owner = t.id AND NOT e.deleting)
 		FROM tenants t ORDER BY t.id`)
 	if err != nil {

@@ -50,7 +50,11 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 	app := newGuestApp(t)
 	n1.Script().SetPortAddr(5173, app.srv.Listener.Addr().String())
 
-	r := c.call(a, "POST", "/api/v1/sandboxes", tenantAuth, `{"attachable":true}`)
+	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: "preview"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c.call(a, "POST", "/api/v1/sandboxes", tenantAuth, `{"environment":"preview"}`)
 	if r.code != http.StatusCreated {
 		t.Fatalf("create the workspace sandbox: %d %s", r.code, r.body)
 	}
@@ -65,10 +69,6 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 	id, err := podid.Parse(created.Status.SandboxID)
 	if err != nil || id.IsLegacy() {
 		t.Fatalf("the workspace sandbox's ID %q: %v", created.Status.SandboxID, err)
-	}
-	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: "preview"})
-	if err != nil {
-		t.Fatal(err)
 	}
 	r1 := c.applyDeployment(env.ID, fmt.Sprintf(`{"services":{
 		"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"],"ports":[{"name":"http","port":5173}]}},
@@ -111,7 +111,7 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 	if r := c.call(a, "DELETE", "/api/v1/sandboxes/"+id.String(), tenantAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
-	c.createID(id, true)
+	c.createID(id, "preview", true)
 	again := c.row(id)
 	if again.Incarnation == first.SandboxIncarnation {
 		t.Fatal("the same incarnation")

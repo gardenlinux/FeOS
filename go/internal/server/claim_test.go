@@ -41,7 +41,8 @@ func TestFixedInstanceIDRestart(t *testing.T) {
 	if _, err := st.InsertNode(ctx, "n1"); err != nil {
 		t.Fatal(err)
 	}
-	sb, _, err := st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: "acme", Image: "alpine", VCPUs: 2, MemoryMiB: 512})
+	sb, _, err := st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: "acme", Image: "alpine", VCPUs: 2, MemoryMiB: 512,
+		EnvironmentID: dbtest.Environment(t, st.Q(), "acme", "box")})
 	if err != nil {
 		t.Fatal(err)
 	}

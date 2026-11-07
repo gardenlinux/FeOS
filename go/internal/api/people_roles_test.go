@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -18,6 +19,8 @@ import (
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/domains"
+	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -27,18 +30,19 @@ import (
 // here, or with another need in the table, fails TestRouteNeeds.
 var routeNeeds = map[string]string{
 	"GET /api/v1/tools":                                         "read tenant",
-	"POST /api/v1/sandboxes":                                    "write tenant",
-	"GET /api/v1/sandboxes":                                     "read tenant",
-	"GET /api/v1/sandboxes/{id}":                                "read tenant",
-	"DELETE /api/v1/sandboxes/{id}":                             "write tenant",
-	"POST /api/v1/sandboxes/{id}/pause":                         "write tenant",
-	"POST /api/v1/sandboxes/{id}/resume":                        "write tenant",
-	"PUT /api/v1/sandboxes/{id}/image-credentials":              "write tenant",
-	"DELETE /api/v1/sandboxes/{id}/image-credentials":           "write tenant",
-	"GET /api/v1/sandboxes/{id}/tokens":                         "read tenant",
-	"POST /api/v1/sandboxes/{id}/tokens":                        "write tenant",
-	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}":               "write tenant",
-	"GET /api/v1/sandboxes/{id}/access":                         "read tenant",
+	"POST /api/v1/sandboxes":                                    "write checked by the handler",
+	"GET /api/v1/sandboxes":                                     "member",
+	"GET /api/v1/sandboxes/{id}":                                "read sandbox's environment",
+	"DELETE /api/v1/sandboxes/{id}":                             "write sandbox's environment",
+	"POST /api/v1/sandboxes/{id}/pause":                         "write sandbox's environment",
+	"POST /api/v1/sandboxes/{id}/resume":                        "write sandbox's environment",
+	"PUT /api/v1/sandboxes/{id}/security-groups":                "write sandbox's environment",
+	"PUT /api/v1/sandboxes/{id}/image-credentials":              "write sandbox's environment",
+	"DELETE /api/v1/sandboxes/{id}/image-credentials":           "write sandbox's environment",
+	"GET /api/v1/sandboxes/{id}/tokens":                         "read sandbox's environment",
+	"POST /api/v1/sandboxes/{id}/tokens":                        "write sandbox's environment",
+	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}":               "write sandbox's environment",
+	"GET /api/v1/sandboxes/{id}/access":                         "read sandbox's environment",
 	"POST /api/v1/kube/preflight":                               "write tenant",
 	"POST /api/v1/ssh/preflight":                                "write tenant",
 	"POST /api/v1/http/preflight":                               "write tenant",
@@ -47,8 +51,8 @@ var routeNeeds = map[string]string{
 	"PUT /api/v1/credentials/{name}":                            "write tenant",
 	"DELETE /api/v1/credentials/{name}":                         "write tenant",
 	"POST /api/v1/credentials/{name}/check":                     "write tenant",
-	"GET /api/v1/sandboxes/{id}/credentials":                    "read tenant",
-	"PUT /api/v1/sandboxes/{id}/credentials":                    "write tenant",
+	"GET /api/v1/sandboxes/{id}/credentials":                    "read sandbox's environment",
+	"PUT /api/v1/sandboxes/{id}/credentials":                    "write sandbox's environment",
 	"GET /api/v1/tenant":                                        "member",
 	"POST /api/v1/environments":                                 "write tenant",
 	"GET /api/v1/environments":                                  "member",
@@ -89,12 +93,12 @@ var routeNeeds = map[string]string{
 	"PUT /api/v1/domains/{id}/environment":                      "admin checked by the handler",
 	"DELETE /api/v1/domains/{id}/environment":                   "admin checked by the handler",
 	"POST /api/v1/domains/{id}/check":                           "admin tenant",
-	"POST /api/v1/jobs":                                         "write tenant",
-	"GET /api/v1/jobs":                                          "read tenant",
-	"GET /api/v1/jobs/{id}":                                     "read tenant",
-	"DELETE /api/v1/jobs/{id}":                                  "write tenant",
-	"GET /api/v1/jobs/{id}/logs":                                "read tenant",
-	"POST /api/v1/jobs/{id}/cancel":                             "write tenant",
+	"POST /api/v1/jobs":                                         "write checked by the handler",
+	"GET /api/v1/jobs":                                          "member",
+	"GET /api/v1/jobs/{id}":                                     "read job's environment",
+	"DELETE /api/v1/jobs/{id}":                                  "write job's environment",
+	"GET /api/v1/jobs/{id}/logs":                                "read job's environment",
+	"POST /api/v1/jobs/{id}/cancel":                             "write job's environment",
 
 	"GET /api/v1/tenant/quota":                      "member",
 	"GET /api/v1/tenant/members":                    "member",
@@ -284,17 +288,63 @@ func expected(p principal, want string) string {
 }
 
 // outcome reads an answer as the role check's: refused 403 with
-// role_required, 404 for an environment or tenant not seen, else pass.
+// role_required, 404 for an environment, tenant, sandbox or job not seen,
+// else pass.
 func outcome(w *httptest.ResponseRecorder) string {
 	var b struct{ Error, Code, Role, Scope string }
 	_ = json.Unmarshal(w.Body.Bytes(), &b)
 	switch {
 	case w.Code == http.StatusForbidden && b.Code == "role_required":
 		return "403"
-	case w.Code == http.StatusNotFound && (b.Error == "no such environment" || b.Error == "no such tenant"):
+	case w.Code == http.StatusNotFound && (b.Error == "no such environment" || b.Error == "no such tenant" ||
+		strings.HasPrefix(b.Error, "unknown sandbox ") || b.Error == "no such job"):
 		return "404"
 	}
 	return "pass"
+}
+
+// podIn is the {id} of a request to pattern: a new sandbox, or a new
+// tenant's job (in the store and in the fake jobs), of environment env
+// for the routes of one; a new ID for the others.
+func (w *peopleWorld) podIn(t *testing.T, pattern string, env uuid.UUID) string {
+	t.Helper()
+	ctx := context.Background()
+	_, path, _ := strings.Cut(pattern, " ")
+	switch {
+	case strings.HasPrefix(path, "/api/v1/sandboxes/{id}"):
+		sb, err := w.e.st.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
+			return store.NewSandbox{ID: id, Owner: testTenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: env}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sb.ID.String()
+	case strings.HasPrefix(path, "/api/v1/jobs/{id}"):
+		var job store.TenantJob
+		if err := w.e.st.InTx(ctx, func(tx *store.Store) error {
+			row, err := tx.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
+				return store.NewSandbox{ID: id, Owner: testTenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
+					PodTemplate: &model.PodTemplate{}, TenantJob: true}
+			})
+			if err != nil {
+				return err
+			}
+			job, err = tx.InsertTenantJob(ctx, store.TenantJob{ID: row.ID, Owner: testTenant, EnvID: env, RequestHash: "h",
+				Image: "img", ImageRef: "img"}, nil, time.Hour)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		f := w.e.tenantJobs
+		f.mu.Lock()
+		if f.jobs == nil {
+			f.jobs, f.keys = map[string]envs.TenantJobStatus{}, map[string]string{}
+		}
+		f.jobs[job.ID.String()] = envs.TenantJobStatus{ID: job.ID.String()}
+		f.mu.Unlock()
+		return job.ID.String()
+	}
+	return podid.Mint().String()
 }
 
 // Every tenant route answers each principal as the role model says: the
@@ -312,7 +362,7 @@ func TestRoles(t *testing.T) {
 			if strings.HasSuffix(want, "checked by the handler") || roleSkips[pattern] {
 				continue
 			}
-			method, path := concrete(pattern, podid.Mint().String())
+			method, path := concrete(pattern, w.podIn(t, pattern, w.stage))
 			if pattern == "GET /api/v1/tenant" {
 				// The sink's ask, which says it filters by environment
 				// (TestTenantAnswersWhatIsRead).
@@ -333,9 +383,40 @@ func TestRoles(t *testing.T) {
 	resp := w.e.serve(sr.request("PUT", "/api/v1/environments/stage/tags/v1", nil))
 	expect(t, resp, http.StatusForbidden, `{"error":"this needs the role write on the environment",`+
 		`"code":"role_required","role":"write","scope":"environment"}`+"\n")
-	resp = w.e.serve(sr.request("GET", "/api/v1/sandboxes", nil))
-	expect(t, resp, http.StatusForbidden, `{"error":"this needs the role read on the tenant",`+
-		`"code":"role_required","role":"read","scope":"tenant"}`+"\n")
+	// What runs in an environment lists for its readers only.
+	inProd := w.podIn(t, "GET /api/v1/sandboxes/{id}", w.prod)
+	inStage := w.podIn(t, "GET /api/v1/sandboxes/{id}", w.stage)
+	listed := func(p principal, q string) []string {
+		t.Helper()
+		resp := w.e.serve(p.request("GET", "/api/v1/sandboxes"+q, nil))
+		expect(t, resp, http.StatusOK, "")
+		var ids []string
+		for _, sb := range decode[struct{ Sandboxes []sandboxAnswer }](t, resp).Sandboxes {
+			ids = append(ids, sb.SandboxID)
+		}
+		return ids
+	}
+	if ids := listed(sr, ""); slices.Contains(ids, inProd) || !slices.Contains(ids, inStage) {
+		t.Fatalf("stage read lists %v", ids)
+	}
+	if ids := listed(w.principals(t)[1], ""); !slices.Contains(ids, inProd) || !slices.Contains(ids, inStage) {
+		t.Fatalf("tenant read lists %v", ids)
+	}
+	resp = w.e.serve(sr.request("GET", "/api/v1/sandboxes?environment=prod", nil))
+	expect(t, resp, http.StatusNotFound, errBody("no such environment"))
+	resp = w.e.serve(sr.request("GET", "/api/v1/sandboxes/"+inProd, nil))
+	expect(t, resp, http.StatusNotFound, errBody("unknown sandbox "+inProd))
+	// A create needs write on the environment it names.
+	resp = w.e.serve(sr.request("POST", "/api/v1/sandboxes", map[string]any{"environment": "stage"}))
+	expect(t, resp, http.StatusForbidden, `{"error":"this needs the role write on the environment",`+
+		`"code":"role_required","role":"write","scope":"environment"}`+"\n")
+	pw := w.principals(t)[9]
+	resp = w.e.serve(pw.request("POST", "/api/v1/sandboxes", map[string]any{"environment": "stage"}))
+	expect(t, resp, http.StatusNotFound, errBody("no such environment"))
+	resp = w.e.serve(pw.request("POST", "/api/v1/sandboxes", map[string]any{"environment": "prod"}))
+	expect(t, resp, http.StatusCreated, "")
+	resp = w.e.serve(pw.request("POST", "/api/v1/jobs", map[string]any{"environment": "stage", "image": "b"}))
+	expect(t, resp, http.StatusNotFound, errBody("no such environment"))
 	// The environment by its ID is the same environment.
 	resp = w.e.serve(sr.request("GET", "/api/v1/environments/"+w.stage.String(), nil))
 	if outcome(resp) != "pass" {
@@ -576,7 +657,7 @@ func TestMadeBy(t *testing.T) {
 		{ps[4], "person:" + w.persons["op"].String()},
 		{ps[2], "token:" + store.HashToken(ps[2].token)},
 	} {
-		resp := e.serve(c.p.request("POST", "/api/v1/sandboxes", map[string]any{}))
+		resp := e.serve(c.p.request("POST", "/api/v1/sandboxes", map[string]any{"environment": "stage"}))
 		expect(t, resp, http.StatusCreated, "")
 		id := decode[createSandboxResponse](t, resp).Status.SandboxID
 		if got := madeBy(id); got != c.want+"|"+c.want {

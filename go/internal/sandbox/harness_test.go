@@ -434,10 +434,24 @@ func (h *harness) sandbox(memoryMiB int) store.Sandbox {
 // 0019, which keeps it.
 func legacyID() podid.ID { return podid.ID(uuid.NewString()) }
 
+// boxEnv is owner's environment "box", made when it has none: where the
+// tests' sandboxes are (ADR 0035).
+func (h *harness) boxEnv(owner string) uuid.UUID {
+	h.t.Helper()
+	var id uuid.UUID
+	if err := h.st.Q().QueryRow(bg, `WITH ins AS (INSERT INTO environments (id, owner, name)
+			VALUES (gen_random_uuid(), $1, 'box') ON CONFLICT (owner, name) DO NOTHING RETURNING id)
+		SELECT id FROM ins UNION ALL SELECT id FROM environments WHERE owner = $1 AND name = 'box' LIMIT 1`, owner).
+		Scan(&id); err != nil {
+		h.t.Fatal(err)
+	}
+	return id
+}
+
 func (h *harness) sandboxWithID(id podid.ID, memoryMiB int) store.Sandbox {
 	h.t.Helper()
 	sb, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: testTenant, Image: testImage, VCPUs: 1,
-		MemoryMiB: memoryMiB})
+		MemoryMiB: memoryMiB, EnvironmentID: h.boxEnv(testTenant)})
 	if err != nil || !created {
 		h.t.Fatalf("create sandbox: %v (created %v)", err, created)
 	}

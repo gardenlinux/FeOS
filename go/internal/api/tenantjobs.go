@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	envs "github.com/gardenlinux/feos/go/internal/env"
 	"github.com/gardenlinux/feos/go/internal/tools"
@@ -18,7 +20,8 @@ import (
 // registered.
 type TenantJobs interface {
 	CreateTenantJob(ctx context.Context, tenant, key string, req envs.CreateTenantJobRequest) (envs.TenantJobStatus, bool, error)
-	ListTenantJobs(ctx context.Context, tenant string, labels map[string]string) (envs.TenantJobList, error)
+	ListTenantJobs(ctx context.Context, tenant string, labels map[string]string, envIDs []uuid.UUID) (envs.TenantJobList,
+		error)
 	GetTenantJob(ctx context.Context, tenant, id string) (envs.TenantJobStatus, error)
 	TenantJobLogs(ctx context.Context, tenant, id string, lines int) (envs.TenantJobLogsAnswer, error)
 	CancelTenantJob(ctx context.Context, tenant, id string) (envs.TenantJobStatus, error)
@@ -27,23 +30,24 @@ type TenantJobs interface {
 
 // tenantJobRoutes registers the jobs' routes, tenant class, each a thin adapter
 // of a request to one method of Deps.TenantJobs; none without the service.
-// A tenant's job is the tenant's (ADR 0031): its routes need a tenant
-// grant.
+// A tenant's job runs in an environment (ADR 0035): its routes need the
+// role on it, an environment's grant or the tenant's; the list shows what
+// the principal reads.
 func (s *server) tenantJobRoutes(tenant func(n need, pattern string, h apiHandler)) {
 	if s.deps.TenantJobs == nil {
 		return
 	}
-	tenant(onTenant(write), "POST /api/v1/jobs", s.createTenantJob)
-	tenant(onTenant(read), "GET /api/v1/jobs", s.listTenantJobs)
-	tenant(onTenant(read), "GET /api/v1/jobs/{id}", s.getTenantJob)
-	tenant(onTenant(write), "DELETE /api/v1/jobs/{id}", s.deleteTenantJob)
-	tenant(onTenant(read), "GET /api/v1/jobs/{id}/logs", s.tenantJobLogs)
-	tenant(onTenant(write), "POST /api/v1/jobs/{id}/cancel", s.cancelTenantJob)
+	tenant(byHandler(write), "POST /api/v1/jobs", s.createTenantJob)
+	tenant(member, "GET /api/v1/jobs", s.listTenantJobs)
+	tenant(onJob(read), "GET /api/v1/jobs/{id}", s.getTenantJob)
+	tenant(onJob(write), "DELETE /api/v1/jobs/{id}", s.deleteTenantJob)
+	tenant(onJob(read), "GET /api/v1/jobs/{id}/logs", s.tenantJobLogs)
+	tenant(onJob(write), "POST /api/v1/jobs/{id}/cancel", s.cancelTenantJob)
 }
 
 // createTenantJob is POST /api/v1/jobs, with an Idempotency-Key as the tool
 // calls take one: 201 for a new job, 200 with the job a create of the
-// same request and key made.
+// same request and key made. It needs write on the job's environment.
 func (s *server) createTenantJob(w http.ResponseWriter, r *http.Request) error {
 	key, err := tools.IdempotencyKey(r)
 	if err != nil {
@@ -52,6 +56,11 @@ func (s *server) createTenantJob(w http.ResponseWriter, r *http.Request) error {
 	var req envs.CreateTenantJobRequest
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
+	}
+	if strings.TrimSpace(req.Environment) != "" {
+		if _, err := s.writableEnv(r, req.Environment); err != nil {
+			return err
+		}
 	}
 	job, created, err := s.deps.TenantJobs.CreateTenantJob(r.Context(), tenantOf(r), key, req)
 	if err != nil {
@@ -64,8 +73,13 @@ func (s *server) createTenantJob(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, status, job)
 }
 
-// listTenantJobs is GET /api/v1/jobs?label=k=v…: every label must match.
+// listTenantJobs is GET /api/v1/jobs?label=k=v…[&environment=]: every
+// label must match; the jobs of the environments the principal reads.
 func (s *server) listTenantJobs(w http.ResponseWriter, r *http.Request) error {
+	envIDs, err := s.readableEnvs(r)
+	if err != nil {
+		return err
+	}
 	labels := map[string]string{}
 	for _, l := range r.URL.Query()["label"] {
 		k, v, ok := strings.Cut(l, "=")
@@ -74,7 +88,7 @@ func (s *server) listTenantJobs(w http.ResponseWriter, r *http.Request) error {
 		}
 		labels[k] = v
 	}
-	list, err := s.deps.TenantJobs.ListTenantJobs(r.Context(), tenantOf(r), labels)
+	list, err := s.deps.TenantJobs.ListTenantJobs(r.Context(), tenantOf(r), labels, envIDs)
 	if err != nil {
 		return err
 	}

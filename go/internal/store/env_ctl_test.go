@@ -25,7 +25,8 @@ func TestEnvCtlQueries(t *testing.T) {
 	a := mkInstance(t, s, env)
 	b := mkInstance(t, s, env)
 	mkInstance(t, s, other)
-	sbx := mkSandbox(t, s, "acme")
+	sbx := mkSandboxIn(t, s, "acme", env.ID, podid.Mint())
+	elsewhere := mkSandbox(t, s, "acme")
 	exec(t, s, `UPDATE sandboxes SET address = 'fd00::2' WHERE id = $1`, a.ID)
 	exec(t, s, `UPDATE sandboxes SET address = 'fd00::9' WHERE id = $1`, sbx.ID)
 
@@ -44,7 +45,15 @@ func TestEnvCtlQueries(t *testing.T) {
 		t.Fatalf("attached to %v %v", envs, err)
 	}
 	// A sandbox the attached service may not use is neither a member nor
-	// attached: another tenant's, or an instance row.
+	// attached: one of another environment (ADR 0035), another tenant's,
+	// or an instance row.
+	exec(t, s, `UPDATE sandboxes SET address = 'fd00::6' WHERE id = $1`, elsewhere.ID)
+	if _, err := s.InsertAttached(bg, store.EnvAttached{EnvID: env.ID, Service: "box", SandboxID: elsewhere.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if envs, err := s.EnvCtlWithAttached(bg, elsewhere.ID); err != nil || len(envs) != 0 {
+		t.Fatalf("a sandbox of another environment attached to %v %v", envs, err)
+	}
 	mkTenant(t, s, "evil")
 	foreign := mkSandbox(t, s, "evil")
 	exec(t, s, `UPDATE sandboxes SET address = 'fd00::7' WHERE id = $1`, foreign.ID)
@@ -76,7 +85,7 @@ func TestEnvCtlQueries(t *testing.T) {
 	if envs, err := s.EnvCtlWithAttached(bg, sbx.ID); err != nil || !slices.Equal(envs, []uuid.UUID{env.ID}) {
 		t.Fatalf("another incarnation attached to %v %v", envs, err)
 	}
-	exec(t, s, `DELETE FROM env_attached WHERE service IN ('api', 'inst')`)
+	exec(t, s, `DELETE FROM env_attached WHERE service IN ('api', 'inst', 'box')`)
 	if rows, err := s.EnvCtlSandboxes(bg, env.ID); err != nil || len(rows) != 2 {
 		t.Fatalf("instance rows %v %v", rows, err)
 	}

@@ -69,6 +69,7 @@ var routeClasses = map[string]class{
 	"DELETE /api/v1/sandboxes/{id}":               classTenant,
 	"POST /api/v1/sandboxes/{id}/pause":           classTenant,
 	"POST /api/v1/sandboxes/{id}/resume":          classTenant,
+	"PUT /api/v1/sandboxes/{id}/security-groups":  classTenant,
 	"GET /api/v1/sandboxes/{id}/tokens":           classTenant,
 	"POST /api/v1/sandboxes/{id}/tokens":          classTenant,
 	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}": classTenant,

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -61,60 +63,110 @@ func TestSecurityGroupRows(t *testing.T) {
 	}
 }
 
-// An own sandbox's environment and groups; a sandbox made before ADR
-// 0035 is in the environment that names it, the most recent of several.
+// An own sandbox's environment and groups; the groups an environment's
+// sandboxes and its queued and running jobs name.
 func TestOwnSandbox(t *testing.T) {
 	s, _ := newStore(t)
 	mkTenant(t, s, "acme")
 	mkTenant(t, s, "other")
 	dev := mkEnv(t, s, "acme", "dev")
 	preview := mkEnv(t, s, "acme", "preview")
-	sb := mkSandbox(t, s, "acme")
+	sb := mkSandboxIn(t, s, "acme", dev.ID, podid.Mint())
 
 	got, err := s.GetOwnSandbox(bg, "acme", sb.ID)
-	if err != nil || got.ID != sb.ID || got.EnvID != uuid.Nil || !slices.Equal(got.SecurityGroups, []string{"default"}) {
-		t.Fatalf("unnamed %+v %v", got, err)
+	if err != nil || got.ID != sb.ID || got.EnvID != dev.ID || got.EnvName != "dev" ||
+		!slices.Equal(got.SecurityGroups, []string{"default"}) {
+		t.Fatalf("in dev %+v %v", got, err)
 	}
 	if _, err := s.GetOwnSandbox(bg, "other", sb.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("another tenant's %v", err)
 	}
-	attached := `{"services": {"vite": {"runtime": "attached", "sandbox": "` + sb.ID.String() + `", "command": ["vite"]}}}`
-	for i, e := range []store.Environment{dev, preview} {
-		if _, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Origin: model.OriginApply,
-			Spec: []byte(attached)}); err != nil {
-			t.Fatal(err)
-		}
-		exec(t, s, "UPDATE environments SET deployment = 1, created_at = now() + $2::int * interval '1 second' WHERE id = $1",
-			e.ID, i)
-	}
-	if got, err := s.GetOwnSandbox(bg, "acme", sb.ID); err != nil || got.EnvID != preview.ID || got.EnvName != "preview" {
-		t.Fatalf("named twice %+v %v", got, err)
-	}
 
 	// An instance row is not a sandbox of the tenant's.
 	inst := mkInstance(t, s, dev)
-	exec(t, s, `INSERT INTO env_instances (sandbox_id, env_id, kind, object, template_hash, deployment)
-		VALUES ($1, $2, 'service', 'x', 'h', 1)`, inst.ID, dev.ID)
 	if _, err := s.GetOwnSandbox(bg, "acme", inst.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("instance %v", err)
 	}
 
-	// A sandbox of an environment (ADR 0035) names its groups by their IDs.
-	web, err := s.EnsureSecurityGroup(bg, dev.ID, "web")
-	must(t, err)
-	own := mkSandbox(t, s, "acme")
-	exec(t, s, `UPDATE sandboxes SET environment_id = $2, pod_template = $3 WHERE id = $1`, own.ID, dev.ID,
-		`{"securityGroups": ["`+model.EnvGroupID(dev.ID)+`", "`+model.SecurityGroupID(web)+`"]}`)
-	if got, err := s.GetOwnSandbox(bg, "acme", own.ID); err != nil || got.EnvID != dev.ID ||
-		!slices.Equal(got.SecurityGroups, []string{"web"}) {
-		t.Fatalf("in dev %+v %v", got, err)
+	// Its groups, written; a move pending.
+	if ok, err := s.SetSandboxGroups(bg, sb.ID, []string{"db", "web"}, true); err != nil || !ok {
+		t.Fatalf("set %v %v", ok, err)
 	}
+	if ok, err := s.SetSandboxGroups(bg, inst.ID, []string{"web"}, true); err != nil || ok {
+		t.Fatalf("an instance's groups set %v %v", ok, err)
+	}
+	if row := get(t, s, sb.ID); !slices.Equal(row.SecurityGroups, []string{"db", "web"}) || !row.GroupsPending {
+		t.Fatalf("row %+v", row)
+	}
+	if got, err := s.GetOwnSandbox(bg, "acme", sb.ID); err != nil || !slices.Equal(got.SecurityGroups, []string{"db", "web"}) {
+		t.Fatalf("with groups %+v %v", got, err)
+	}
+
+	// A job of dev that runs counts, one that ended does not.
+	job := func(phase string) podid.ID {
+		t.Helper()
+		var id podid.ID
+		must(t, s.InTx(bg, func(tx *store.Store) error {
+			idle := 0
+			row, err := tx.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
+				return store.NewSandbox{ID: id, Owner: "acme", Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: dev.ID,
+					SecurityGroups: []string{"migrate"}, PodTemplate: &model.PodTemplate{}, IdleAfterS: &idle, TenantJob: true}
+			})
+			if err != nil {
+				return err
+			}
+			_, err = tx.InsertTenantJob(bg, store.TenantJob{ID: row.ID, Owner: "acme", EnvID: dev.ID,
+				SecurityGroups: []string{"migrate"}, RequestHash: "h", Image: "img", ImageRef: "img"}, nil, time.Minute)
+			id = row.ID
+			return err
+		}))
+		if phase != model.JobQueued {
+			exec(t, s, "UPDATE jobs SET phase = $2, finished_at = now() WHERE id = $1", id, phase)
+		}
+		return id
+	}
+	running := job(model.JobQueued)
+	job(model.JobSucceeded)
 	users, err := s.SecurityGroupUsers(bg, dev.ID)
-	if err != nil || len(users) != 1 || users[0].ID != own.ID || users[0].Kind != store.GroupUserSandbox ||
-		!slices.Equal(users[0].SecurityGroups, []string{"web"}) {
+	if err != nil || len(users) != 2 || users[0].Kind != store.GroupUserJob || users[0].ID != running ||
+		!slices.Equal(users[0].SecurityGroups, []string{"migrate"}) || users[1].Kind != store.GroupUserSandbox ||
+		users[1].ID != sb.ID || !slices.Equal(users[1].SecurityGroups, []string{"db", "web"}) {
 		t.Fatalf("users %+v %v", users, err)
 	}
 	if users, err := s.SecurityGroupUsers(bg, preview.ID); err != nil || len(users) != 0 {
 		t.Fatalf("preview's users %+v %v", users, err)
+	}
+	if u, err := s.EnvironmentInUse(bg, dev.ID); err != nil || !slices.Equal(u.Sandboxes, []podid.ID{sb.ID}) ||
+		!slices.Equal(u.Jobs, []podid.ID{running}) || u.Empty() {
+		t.Fatalf("in use %+v %v", u, err)
+	}
+	if u, err := s.EnvironmentInUse(bg, preview.ID); err != nil || !u.Empty() {
+		t.Fatalf("preview in use %+v %v", u, err)
+	}
+
+	// The groups a sandbox may name: the deployed deployment's, and
+	// default always.
+	if names, err := s.DeployedSecurityGroups(bg, preview.ID); err != nil || !slices.Equal(names, []string{"default"}) {
+		t.Fatalf("no deployment %v %v", names, err)
+	}
+	if _, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: preview.ID, Number: 1, Origin: model.OriginApply,
+		Spec: []byte(`{"securityGroups": {"web": {}, "db": {}}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, s, "UPDATE environments SET deployment = 1 WHERE id = $1", preview.ID)
+	if names, err := s.DeployedSecurityGroups(bg, preview.ID); err != nil || !slices.Equal(names, []string{"default"}) {
+		t.Fatalf("not deployed yet %v %v", names, err)
+	}
+	exec(t, s, "UPDATE environments SET deployed = 1 WHERE id = $1", preview.ID)
+	if names, err := s.DeployedSecurityGroups(bg, preview.ID); err != nil ||
+		!slices.Equal(names, []string{"db", "default", "web"}) {
+		t.Fatalf("deployed %v %v", names, err)
+	}
+	if _, err := s.DeployedSecurityGroups(bg, uuid.New()); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("no environment %v", err)
+	}
+	if names, err := s.EnvironmentNames(bg, []uuid.UUID{dev.ID, preview.ID, uuid.New()}); err != nil || len(names) != 2 ||
+		names[dev.ID] != "dev" {
+		t.Fatalf("names %v %v", names, err)
 	}
 }

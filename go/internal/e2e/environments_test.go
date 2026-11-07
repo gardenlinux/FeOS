@@ -98,8 +98,8 @@ func nodeGroup(n *node, id string) *networkv1.SecurityGroup {
 }
 
 // The environment controller in a running ferund, on a node that checks
-// security groups and name tables: an attachable sandbox made over REST
-// gets its group and its name table before its pod; an environment's image
+// security groups and name tables: a sandbox made over REST in the
+// environment gets its group and its name table before its pod; an environment's image
 // service and an attached service in that sandbox come up and the deployment
 // is deployed; the env group has both as members and the sandbox's group
 // reaches it; the node's resolver answers each pod the names it should;
@@ -128,36 +128,35 @@ func TestEnvironments(t *testing.T) {
 		return 0, false, nil
 	})
 
-	r := c.call(a, "POST", "/api/v1/sandboxes", tenantAuth, `{"attachable":true}`)
+	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c.call(a, "POST", "/api/v1/sandboxes", tenantAuth, `{"environment":"dev"}`)
 	if r.code != http.StatusCreated {
-		t.Fatalf("create an attachable sandbox: %d %s", r.code, r.body)
+		t.Fatalf("create a sandbox: %d %s", r.code, r.body)
 	}
 	var created struct {
 		Token  string `json:"token"`
 		Status struct {
-			SandboxID  string `json:"sandboxId"`
-			Attachable bool   `json:"attachable"`
+			SandboxID string `json:"sandboxId"`
 		} `json:"status"`
 	}
-	if err := json.Unmarshal([]byte(r.body), &created); err != nil || !created.Status.Attachable {
+	if err := json.Unmarshal([]byte(r.body), &created); err != nil {
 		t.Fatalf("create: %s (%v)", r.body, err)
 	}
 	sb := sandbox{id: podid.ID(created.Status.SandboxID), token: created.Token}
 	c.run(a, sb, "mkdir -p app")
 	if g := nodeGroup(n1, model.SandboxGroupID(sb.id)); g == nil {
-		t.Fatal("the attachable sandbox runs without its group on the node")
+		t.Fatal("the sandbox runs without its group on the node")
 	}
 	if nt := nodeTable(n1, model.SandboxTableID(sb.id)); nt == nil {
-		t.Fatal("the attachable sandbox runs without its name table on the node")
+		t.Fatal("the sandbox runs without its name table on the node")
 	}
 	if err := os.MkdirAll(filepath.Join(n1.PodDir(sb.id), "app"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: "dev"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	r1 := c.applyDeployment(env.ID, fmt.Sprintf(`{"services":{
 		"api":{"runtime":"image","image":%q,"ports":[{"name":"http","port":8080}]},
 		"web":{"runtime":"attached","sandbox":%q,"command":["sh","-c","echo up $API; exec sleep 60"],"cwd":"/app",
@@ -193,27 +192,38 @@ func TestEnvironments(t *testing.T) {
 		t.Errorf("logs of an unknown object: %v", err)
 	}
 
-	// Deleted, the environment takes its instance, process, names, group
-	// and name table along, and leaves the sandbox running.
+	// The API refuses to delete the environment while its sandbox is in it
+	// (ADR 0035).
+	if r := c.call(a, "DELETE", "/api/v1/environments/dev", tenantAuth, ""); r.code != http.StatusConflict ||
+		!strings.Contains(r.body, `"code":"environment_in_use"`) || !strings.Contains(r.body, sb.id.String()) {
+		t.Fatalf("delete with a sandbox: %d %s", r.code, r.body)
+	}
+	// Deleting (as a tenant's deletion does), the environment takes its
+	// instance, process and names along and leaves the sandbox running;
+	// it goes, with its group and name table, once the sandbox has.
 	c.sql(`UPDATE environments SET deleting = true WHERE id = $1`, env.ID)
 	c.wake(ctl.LoopDelete)
+	eventually(t, 60*time.Second, "the attached service gone", func() bool {
+		c.wake(ctl.LoopDelete)
+		_, err := c.st.GetAttached(bg, env.ID, "web")
+		_, pod := n1.pod(api.ID)
+		return errors.Is(err, store.ErrNoRow) && !pod
+	})
+	eventually(t, 30*time.Second, "the names gone", func() bool {
+		return !resolves(n1, sb.id, "api", api.Address) && !resolves(n1, sb.id, "web", "127.0.0.1", "::1")
+	})
+	if out := c.run(a, sb, "echo alive"); strings.TrimSpace(out) != "alive" {
+		t.Errorf("the sandbox in the deleted environment: %q", out)
+	}
+	if r := c.call(a, "DELETE", sb.path(""), tenantAuth, ""); r.code != http.StatusOK {
+		t.Fatalf("delete the sandbox: %d %s", r.code, r.body)
+	}
 	eventually(t, 60*time.Second, "the environment gone", func() bool {
+		c.wake(ctl.LoopDelete)
 		_, err := c.st.GetEnvironment(bg, env.ID)
 		return errors.Is(err, store.ErrNoRow)
 	})
-	if p, ok := n1.pod(api.ID); ok {
-		t.Errorf("the instance's pod stays: %v", p.State)
-	}
-	if nodeGroup(n1, model.EnvGroupID(env.ID)) != nil {
-		t.Error("the env group stays")
-	}
-	if nodeTable(n1, model.EnvTableID(env.ID)) != nil {
-		t.Error("the env table stays")
-	}
-	if resolves(n1, sb.id, "api", api.Address) || resolves(n1, sb.id, "web", "127.0.0.1", "::1") {
-		t.Error("the sandbox resolves the deleted environment's names")
-	}
-	if out := c.run(a, sb, "echo alive"); strings.TrimSpace(out) != "alive" {
-		t.Errorf("the sandbox after the deletion: %q", out)
-	}
+	eventually(t, 30*time.Second, "the env group and table gone", func() bool {
+		return nodeGroup(n1, model.EnvGroupID(env.ID)) == nil && nodeTable(n1, model.EnvTableID(env.ID)) == nil
+	})
 }

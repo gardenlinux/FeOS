@@ -23,12 +23,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
-	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // The pods of an environment's job run and instance, and of a tenant's
-// job, are created with their log labels (ADR 0026), kept on their rows;
-// a tenant's job's retention becomes ferun.retention_days.
+// job, are created with their log labels (ADR 0026), kept on their rows,
+// each with its environment (ADR 0035); a tenant's job's retention
+// becomes ferun.retention_days.
 func TestLogLabels(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
@@ -57,6 +57,7 @@ func TestLogLabels(t *testing.T) {
 	}
 
 	rs := tenantJobSpecOf(time.Minute)
+	rs.EnvID = env.ID
 	rs.LogRetentionDays = 30
 	job := h.createTenantJob(rs)
 	if job.LogRetentionDays != 30 {
@@ -64,16 +65,17 @@ func TestLogLabels(t *testing.T) {
 	}
 	h.runningPod(job.ID)
 	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: job.ID.String(),
-		model.LogJob: job.ID.String(), model.LogAttempt: "1", model.LogRetentionDays: "30"}
+		model.LogEnvironment: env.ID.String(), model.LogJob: job.ID.String(), model.LogAttempt: "1",
+		model.LogRetentionDays: "30"}
 	if got := n1.LogLabels(job.ID); !maps.Equal(got, want) {
 		t.Fatalf("the job's create: %v, want %v", got, want)
 	}
-	// A sandbox of the tenant's own has none.
-	sb, err := h.st.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
-		return store.NewSandbox{ID: id, Owner: testTenant, Image: testImage, VCPUs: 1, MemoryMiB: 512}
-	})
-	if err != nil || len(sb.LogLabels) != 0 || sb.LogLabels == nil {
-		t.Fatalf("a tenant's sandbox: %v %v", sb.LogLabels, err)
+	// A sandbox's are its environment's, of the kind sandbox.
+	sbx := podid.Mint()
+	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: sbx.String(),
+		model.LogEnvironment: env.ID.String(), model.LogKind: model.LogKindSandbox, model.LogObject: sbx.String()}
+	if got := SandboxLogLabels(testTenant, sbx, env.ID); !maps.Equal(got, want) {
+		t.Fatalf("a sandbox's: %v, want %v", got, want)
 	}
 }
 

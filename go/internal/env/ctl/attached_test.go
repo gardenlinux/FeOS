@@ -58,12 +58,18 @@ func (h *harness) attachable() store.Sandbox {
 	return h.attachableAs(testTenant, podid.Mint())
 }
 
-// attachableAs makes an attachable sandbox of owner with the ID id and
-// brings it up.
+// attachableAs makes a sandbox of owner in its environment dev (ADR
+// 0035) with the ID id and brings it up.
 func (h *harness) attachableAs(owner string, id podid.ID) store.Sandbox {
 	h.t.Helper()
-	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: owner, Image: testImage, ImageRef: testImage,
-		VCPUs: 1, MemoryMiB: 512, PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
+	return h.attachableIn(h.envOf(owner, "dev"), id)
+}
+
+// attachableIn makes a sandbox of env with the ID id and brings it up.
+func (h *harness) attachableIn(env store.Environment, id podid.ID) store.Sandbox {
+	h.t.Helper()
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: env.Owner, Image: testImage, ImageRef: testImage,
+		VCPUs: 1, MemoryMiB: 512, EnvironmentID: env.ID, PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
 			SecurityGroups: []string{model.SandboxGroupID(id)}, NameTables: []string{model.SandboxTableID(id)}}}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -615,21 +621,38 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 		return resolves(n1, sb.ID, "web")
 	})
 
-	// Its environment deleted while the sandbox is paused.
+	// Its environment deleted while its sandbox is paused (as a tenant's
+	// deletion does; the API refuses it while the environment has
+	// sandboxes, ADR 0035): the service goes first, the environment once
+	// its sandbox has gone too.
 	stage := h.newEnv("stage")
-	up(stage.ID, h.apply(stage.ID, `{"services":{`+web+`}}`))
-	sleep()
+	box := h.attachableIn(stage, podid.Mint())
+	up(stage.ID, h.apply(stage.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,
+		"command":["sleep","120"]}}}`, box.ID)))
+	h.sleepUntilPaused(box.ID)
 	h.exec(`UPDATE environments SET deleting = true WHERE id = $1`, stage.ID)
-	eventually(t, 60*time.Second, "the environment deleted", func() bool {
-		_, err := h.st.GetEnvironment(bg, stage.ID)
+	eventually(t, 60*time.Second, "the attached service gone", func() bool {
+		h.c.notify(bg, LoopDelete)
+		_, err := h.st.GetAttached(bg, stage.ID, "web")
 		return errors.Is(err, store.ErrNoRow)
 	})
-	cur = h.attachableUp(sb.ID)
+	cur = h.attachableUp(box.ID)
 	if got := h.runningNamed(cur, "ferun-env-stage-web"); len(got) != 0 {
 		t.Fatalf("the deleted environment's process runs on: %v", got)
 	}
 	eventually(t, 10*time.Second, "the deleted environment's names gone", func() bool {
-		return resolves(n1, sb.ID, "web")
+		return resolves(n1, box.ID, "web")
+	})
+	if _, err := h.st.GetEnvironment(bg, stage.ID); err != nil {
+		t.Fatalf("the environment went before its sandbox: %v", err)
+	}
+	if _, _, err := h.eng.Delete(bg, testTenant, box.ID); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 60*time.Second, "the environment deleted", func() bool {
+		h.c.notify(bg, LoopDelete)
+		_, err := h.st.GetEnvironment(bg, stage.ID)
+		return errors.Is(err, store.ErrNoRow)
 	})
 }
 

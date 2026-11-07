@@ -181,7 +181,7 @@ func (s *Store) EgressStats(ctx context.Context, envID uuid.UUID, window time.Du
 	rows, err := s.q.Query(ctx, `SELECT e.binding, sum(e.requests)::bigint, sum(e.refused)::bigint,
 			sum(e.failing)::bigint, sum(e.token_failed)::bigint
 		FROM http_egress e JOIN sandboxes s ON s.id = e.sandbox_id
-		WHERE s.environment_id = $1 AND e.minute >= date_trunc('minute', now()) - $2::interval
+		WHERE s.environment_id = $1 AND s.instance AND e.minute >= date_trunc('minute', now()) - $2::interval
 		GROUP BY e.binding ORDER BY e.binding`, envID, interval(window))
 	if err != nil {
 		return nil, err
@@ -200,7 +200,7 @@ func (s *Store) EgressRecords(ctx context.Context, envID uuid.UUID, binding stri
 	[]json.RawMessage, error) {
 	rows, err := s.q.Query(ctx, `SELECT r.detail || jsonb_build_object('sandbox', r.sandbox_id)
 		FROM http_egress_records r JOIN sandboxes s ON s.id = r.sandbox_id
-		WHERE s.environment_id = $1 AND r.binding = $2 AND r.arrived_at >= now() - $3::interval
+		WHERE s.environment_id = $1 AND s.instance AND r.binding = $2 AND r.arrived_at >= now() - $3::interval
 		ORDER BY r.id DESC LIMIT $4`, envID, binding, interval(window), limit)
 	if err != nil {
 		return nil, err

@@ -70,7 +70,7 @@ func (h *harness) podOf(envID uuid.UUID, object string, deployment int, tb ...mo
 	h.t.Helper()
 	id := podid.Mint()
 	row, _, err := h.st.CreateSandbox(h.ctx(), store.NewSandbox{ID: id, Owner: tenantA, Image: "img", VCPUs: 1,
-		MemoryMiB: 512, EnvironmentID: envID, PodTemplate: &model.PodTemplate{HTTPBindings: tb}})
+		MemoryMiB: 512, EnvironmentID: envID, Instance: true, PodTemplate: &model.PodTemplate{HTTPBindings: tb}})
 	if err != nil {
 		h.t.Fatal(err)
 	}

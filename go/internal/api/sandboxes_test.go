@@ -23,10 +23,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// statusFields are the 16 fields of a sandbox's status, in order.
+// statusFields are the 17 fields of a sandbox's status, in order.
 var statusFields = []string{"sandboxId", "state", "image", "node", "owner", "createdAt", "updatedAt", "desiredState",
 	"clientState", "statusDescription", "checkpointEpoch", "checkpointHead", "checkpointAt", "vcpus", "memoryMib",
-	"attachable"}
+	"environment", "securityGroups"}
 
 // keysInOrder returns the keys of a JSON object in their order.
 func keysInOrder(t *testing.T, raw []byte) []string {
@@ -59,7 +59,7 @@ func TestCreateSandbox(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
-		map[string]any{"image": "img:1", "vcpus": 4, "memoryMib": 1024})
+		map[string]any{"environment": "box", "image": "img:1", "vcpus": 4, "memoryMib": 1024})
 	expect(t, w, http.StatusCreated, "")
 	var created struct {
 		Status  json.RawMessage `json:"status"`
@@ -111,10 +111,12 @@ func TestCreateSandbox(t *testing.T) {
 		t.Fatalf("tokens %+v %v", toks, err)
 	}
 
-	// Another create, without a body: a new sandbox with a new ID and
-	// token; the defaults fill in. A sandboxId of null or "" names none.
+	// Another create, with its environment only: a new sandbox with a new
+	// ID and token; the defaults fill in. A sandboxId of null or "" names
+	// none.
 	seen := map[string]bool{id: true}
-	for _, body := range []any{"", map[string]any{"sandboxId": nil}, map[string]any{"sandboxId": ""}} {
+	for _, body := range []any{map[string]any{"environment": "box"}, map[string]any{"environment": "box", "sandboxId": nil},
+		map[string]any{"environment": "box", "sandboxId": ""}} {
 		w = e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken), body)
 		expect(t, w, http.StatusCreated, "")
 		minted := decode[struct {
@@ -156,10 +158,10 @@ func TestCreateSandboxRefusals(t *testing.T) {
 		{map[string]any{"sandboxId": "abcdefghjkm", "image": "img"}, 400, clientIDMsg},
 		{map[string]any{"sandboxId": 7}, 400, clientIDMsg},
 		{map[string]any{"sandboxId": existing}, 400, clientIDMsg},
-		{map[string]any{"vcpus": 33}, 400, "vcpus must be between 1 and 32 (0 = default 2)"},
-		{map[string]any{"vcpus": -1}, 400, "vcpus must be between 1 and 32 (0 = default 2)"},
-		{map[string]any{"memoryMib": 128}, 400, "memoryMib must be between 256 and 65536 (0 = default 512)"},
-		{map[string]any{"memoryMib": 70000}, 400, "memoryMib must be between 256 and 65536 (0 = default 512)"},
+		{map[string]any{"environment": "box", "vcpus": 33}, 400, "vcpus must be between 1 and 32 (0 = default 2)"},
+		{map[string]any{"environment": "box", "vcpus": -1}, 400, "vcpus must be between 1 and 32 (0 = default 2)"},
+		{map[string]any{"environment": "box", "memoryMib": 128}, 400, "memoryMib must be between 256 and 65536 (0 = default 512)"},
+		{map[string]any{"environment": "box", "memoryMib": 70000}, 400, "memoryMib must be between 256 and 65536 (0 = default 512)"},
 		{`[1]`, 400, "request body must be a JSON object: json: cannot unmarshal array into Go value of type map[string]json.RawMessage"},
 		{`{"vcpus":"two"}`, 400, "invalid request body: json: cannot unmarshal string into Go struct field createSandboxRequest.vcpus of type int"},
 	} {
@@ -503,7 +505,7 @@ func TestLegacySandboxID(t *testing.T) {
 	ctx := context.Background()
 	legacy := podid.ID("0199f0a2-7b1c-7d3e-8f00-1234567890ab")
 	if _, created, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: legacy, Owner: testTenant, Image: "img",
-		VCPUs: 1, MemoryMiB: 512}); err != nil || !created {
+		VCPUs: 1, MemoryMiB: 512, EnvironmentID: e.box}); err != nil || !created {
 		t.Fatalf("legacy row: %v %v", created, err)
 	}
 	tok, hash, err := mintSandboxToken()

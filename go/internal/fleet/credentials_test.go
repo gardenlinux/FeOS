@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	fleetv1 "github.com/gardenlinux/feos/go/gen/feos/fleet/v1"
+	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -39,7 +40,8 @@ func newCredsFixture(t *testing.T) *credsFixture {
 		t.Fatal(err)
 	}
 	f.pod = podid.Mint()
-	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: f.pod, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512}); err != nil {
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: f.pod, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512,
+		EnvironmentID: dbtest.Environment(t, h.st.Q(), "acme", "box")}); err != nil {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE sandboxes SET node = 'n1', client_state = 'running' WHERE id = $1", f.pod)

@@ -33,8 +33,8 @@ func TestClone(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
-	sb := h.sandbox(tenantA, true)
 	src := h.create("preview", nil)
+	sb := h.sandbox(tenantA, "preview")
 	srcID := uuid.MustParse(src.ID)
 	h.putSecret("preview", "token", "v1")
 	h.putSecret("preview", "token", "v2")
@@ -168,8 +168,8 @@ func TestStatus(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
-	sb := h.sandbox(tenantA, true)
 	st := h.create("stage", map[string]string{"k": "v"})
+	sb := h.sandbox(tenantA, "stage")
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", previewSpec(sb), 0)
@@ -392,8 +392,8 @@ func TestRouteDoor(t *testing.T) {
 	mux := doorMux(h.svc)
 	// A sandbox made before ADR 0019, with a UUID: its attached service
 	// is routed to as a short ID's is.
-	sb := h.legacySandbox(tenantA, true)
 	st := h.create("stage", nil)
+	sb := h.legacySandbox(tenantA, "stage")
 	e := h.env("stage")
 	h.create("prod", nil)
 	tok, err := h.svc.CreateRouteToken(ctx, tenantA, "stage")
@@ -685,8 +685,8 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
 	mux := doorMux(h.svc)
-	sb := h.sandbox(tenantA, true)
 	h.create("preview", nil)
+	sb := h.sandbox(tenantA, "preview")
 	e := h.env("preview")
 	tok, err := h.svc.CreateRouteToken(ctx, tenantA, "preview")
 	if err != nil {
@@ -736,18 +736,22 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	recreate(store.NewSandbox{})
 	refused("gone")
 	// Another tenant's sandbox of the same ID, attachable.
-	recreate(store.NewSandbox{Owner: tenantB, PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
-		SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+	recreate(store.NewSandbox{Owner: tenantB, EnvironmentID: h.envOf(tenantB, "preview"),
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
 	refused("another tenant's")
 	// An instance row of the same ID.
 	zero := 0
-	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: e.ID, IdleAfterS: &zero,
+	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: e.ID, Instance: true, IdleAfterS: &zero,
 		PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(e.ID)}}})
 	refused("an instance row")
+	// A sandbox of another environment (ADR 0035).
+	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: h.envOf(tenantA, "other"),
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+	refused("another environment's")
 	// The owner's own sandbox again, a new incarnation under the same ID
 	// (the row still records the first one): routed to.
-	recreate(store.NewSandbox{Owner: tenantA, PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
-		SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: e.ID,
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
 	if again, err := h.st.GetSandbox(ctx, sb); err != nil || again.Incarnation == first.Incarnation {
 		t.Fatalf("the recreated sandbox %+v %v", again, err)
 	}
@@ -758,8 +762,8 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 		t.Fatalf("recreated own sandbox: %d %s", w.Code, w.Body)
 	}
 	// Another tenant's again: refused.
-	recreate(store.NewSandbox{Owner: tenantB, PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
-		SecurityGroups: []string{model.SandboxGroupID(sb)}}})
+	recreate(store.NewSandbox{Owner: tenantB, EnvironmentID: h.envOf(tenantB, "preview"),
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(sb)}}})
 	refused("another tenant's after the owner's")
 }
 

@@ -1267,8 +1267,10 @@ answer of an absent thing, 404. Every unknown route under `/api/` is 404
 path is a short ID or a UUID, either case ([Sandbox IDs](#sandbox-ids));
 anything else is 400 "sandboxId must be a sandbox ID: 11 characters of
 lowercase Crockford base32, the first a letter, or a UUID". `POST
-/api/v1/sandboxes` takes `image`, `vcpus`, `memoryMib`, `attachable` and
-`imageCredentials` ([Images](#images))
+/api/v1/sandboxes` takes `environment` (required), `securityGroups`,
+`image`, `vcpus`, `memoryMib`, `imageCredentials` ([Images](#images)) and
+`credentials` ([Sandboxes and jobs in an
+environment](#sandboxes-and-jobs-in-an-environment)),
 and no `sandboxId`: one that is neither absent, null nor `""` is 400
 "sandboxId is not accepted: ferund mints a sandbox's ID; leave it out
 and keep status.sandboxId of the answer". Every create makes a new
@@ -1401,9 +1403,14 @@ list:
 
 | Need | Routes |
 |---|---|
-| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/tenant`, `GET /api/v1/tenant/members` (the grants on environments it reads), `GET /api/v1/tenant/invitations` (those of the scopes it is admin of), `POST /api/v1/tenant/leave` |
-| read on the tenant | `GET /api/v1/tools`, the sandboxes' reads (list, get, tokens, access), `POST /api/v1/environments/plan`, the tenants' jobs' reads |
-| write on the tenant | a sandbox's create, delete, pause, resume, image credentials and tokens, the preflights, `POST /api/v1/environments`, `…/{env}/clone`, a tenant job's create, cancel and delete |
+| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/tenant`, `GET /api/v1/tenant/members` (the grants on environments it reads), `GET /api/v1/tenant/invitations` (those of the scopes it is admin of), `POST /api/v1/tenant/leave` |
+| read on the tenant | `GET /api/v1/tools`, `POST /api/v1/environments/plan` |
+| write on the tenant | the preflights, `POST /api/v1/environments`, `…/{env}/clone` |
+| read on the sandbox's environment (ADR 0035) | a sandbox's get, tokens, access, credentials |
+| write on the sandbox's environment | a sandbox's delete, pause, resume, security groups, image credentials, tokens, credentials |
+| write on the environment the body names, which the handler checks | a sandbox's create, a tenant job's create |
+| read on the job's environment | a tenant job's get and logs |
+| write on the job's environment | a tenant job's cancel and delete |
 | admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`) |
 | read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic |
 | write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
@@ -1416,12 +1423,12 @@ grant there counts; an environment it holds no role on is 404 "no such
 environment", as an absent one. A principal that sees what it names but
 lacks the role is 403 `{"error": "this needs the role <role> on the
 <tenant|environment>", "code": "role_required", "role", "scope"}`. A
-deployment (apply, revert, an object's change) is judged by what it
-changes: one whose services of runtime `attached` differ from the
-current deployment's needs write on the tenant (they run in its
-sandboxes), else 403 `role_required` with the scope `tenant`; one that
-keeps them passes for a writer of the environment alone. Callers inside
-ferund carry no principal and are not checked. The admin API mints
+sandbox or a tenant's job in an environment the principal may not read
+is absent as an unknown one (404 "unknown sandbox <id>", "no such job").
+Services of runtime `attached` need write on the environment alone: they
+run in a sandbox of the environment (ADR 0035), which ADR 0031's tenant
+grant no longer guards. Callers inside ferund carry no principal and are
+not checked. The admin API mints
 tenant tokens with `{label, role, environment}` (role `admin` by
 default, the environment by ID or name), and lists them with `role`,
 `environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
@@ -2285,14 +2292,15 @@ set with what DNS answers now (`found`), the check, the binding (admin
 on the environments), the certificate and the delete; the claim needs
 admin on the tenant. The tenant's jobs (`/tenants/<t>/jobs[/<id>]`)
 list the runs to completion with their phases, run a new one (write on
-the tenant; the command one argument per line, secrets never shown
+its environment; the command one argument per line, secrets never shown
 again), and show a run's log tail, result, cancel and delete. Usage
 shows the quota's use against each limit and where vCPUs and memory are
 booked; Settings the tenant, the role and leaving it. A sandbox's page
 says its state in words with what it costs, and its Connect tab mints a
 token (shown once) beside the MCP address, ready snippets and the
-tools' reference; a new sandbox takes `attachable`, image credentials
-and the tenant's credentials. The tenant's credentials
+tools' reference; a new sandbox takes its environment, its groups
+(`default`: nothing in, internet out; ADR 0035), image credentials and
+the tenant's credentials. The tenant's credentials
 (`/tenants/<t>/credentials[/<name>]`, ADR 0033) list each with its uses;
 a credential's form runs the preflight before it saves, its page checks
 the stored version, adds it to sandboxes, and moves an environment whose
@@ -2387,17 +2395,24 @@ the sealer, secrets and addons.
 ### Instances are sandbox rows
 
 Every pod of an environment, a service's replica, an addon, a job's run,
-is a row of `sandboxes` with `environment_id` set: the engine places,
+is a row of `sandboxes` with `instance` set (`0032`; before it,
+`environment_id` alone marked an instance): the engine places,
 creates, syncs, moves, pauses, hibernates and deletes it as any sandbox,
-with its ops, bookings, tombstones and holds. `0006` adds five columns:
+with its ops, bookings, tombstones and holds. Every other row is in an
+environment too, a sandbox or a tenant's job's pod ([Sandboxes and jobs
+in an environment](#sandboxes-and-jobs-in-an-environment)), so a query
+of an environment's instances asks `environment_id` and `instance`;
+`store.Sandbox.IsOwn` tells a tenant's own sandbox. `0006` adds five
+columns:
 
 | Column | What it is |
 |---|---|
-| `environment_id` | the instance's environment; fixed |
+| `environment_id` | the row's environment, not null since `0032`; fixed |
+| `instance` | (`0032`) the row is an instance of it; fixed, never with `tenant_job` |
 | `pod_template` | `model.PodTemplate`: the pod's command, env (literals, secrets by name and version, or parts of both with a URL's userinfo escaped), volumes, mounts, security groups, name tables and labels; fixed. NULL: the sandbox's own pod |
 | `pin_node` | a create goes to this node alone; a start or resume goes to the row's own node anyway, where its pod and volume are, and a restore anywhere, its checkpoint carrying the volume; a pinned row avoids no node |
 | `idle_after_s` | NULL: `--idle-pause`; 0: never; n: seconds |
-| `address` | the pod's IPv6 address as last observed in CreatePod, RestorePod, GetPod and ListPods, cleared when the pod is gone or hibernated; a change on an instance row, or on a row whose pod has groups of its own, sends `env-groups` in its transaction |
+| `address` | the pod's IPv6 address as last observed in CreatePod, RestorePod, GetPod and ListPods, cleared when the pod is gone or hibernated; a change sends `env-groups` in its transaction: every row is in its environment's groups |
 | `log_labels` | (`0019`) the labels of the pod's container logs, sent beside the spec with its create ([The sink](#the-sink)); fixed |
 
 A row with a template builds its pod from it: the container `main` with
@@ -2479,6 +2494,82 @@ the ingress's table shows (publishing, an environment's deployment,
 deployed deployment and deletion, a tenant's deletion, a service
 instance's insert, delete, phase, deployment and admitted ports) send
 `ferun_ingress` `env:<id>` themselves.
+
+### Sandboxes and jobs in an environment
+
+ADR 0035 puts every sandbox and every tenant's job into an environment,
+outside its deployments: a call makes one, a deployment never does, and
+an environment without deployments is a valid place for them.
+
+- **Rows.** A sandbox's row and a tenant's job's pod name the
+  environment (`environment_id`, required at the insert, fixed) and the
+  names of the groups of it their pod is in (`sandboxes.security_groups`,
+  1 to 5, `{default}` when the create names none; an instance has none,
+  its template names its groups). A job's record keeps them too
+  (`jobs.environment_id`, `jobs.security_groups`, fixed); its record
+  goes with the environment (`ON DELETE CASCADE`).
+- **Groups are names of the deployed deployment's** (ADR 0034): a create,
+  and a sandbox's `PUT …/security-groups`, lock the environment FOR SHARE
+  (an environment being deleted is 409) and check every name against the
+  groups of its deployed deployment, `default` always among them, also
+  without a deployment (`store.DeployedSecurityGroups`); another is 422
+  with the names it has. The plan counts them as users
+  (`store.SecurityGroupUsers`: the sandboxes, and the jobs that are
+  queued or running): a deployment that removes a group one names is
+  refused.
+- **A change of a sandbox's groups is a move.** `PUT
+  /api/v1/sandboxes/{id}/security-groups` writes the list
+  (`store.SetSandboxGroups`) and, for a sandbox whose pod may run under
+  the old list (every state but `pending`, `hibernating` and
+  `hibernated`), sets `groups_pending` and sends `ferun_leader`
+  `env-groups`. The controller moves such a sandbox, a hibernation
+  and a restore with the row's groups and a new address, and clears the
+  flag, as any create or restore that makes its pod with them does;
+  `RestorePodRequest` carries `security_groups` and `name_tables` for
+  it. A job's groups are fixed.
+- **Delete and clone.** `DELETE /api/v1/environments/{env}` with
+  sandboxes or queued or running jobs is 409 `environment_in_use`
+  `{error, code, sandboxes: [ids], jobs: [ids]}`: their makers delete
+  them first. A create holds the environment FOR SHARE, so it cannot slip
+  in after the check. `env-delete` waits for every row of an environment
+  (`CountEnvironmentRows`) before it deletes it, which matters for a
+  tenant's deletion, where the engine deletes the sandboxes. A clone
+  copies neither.
+- **Grants** follow the environment ([People and
+  grants](#people-and-grants)).
+- **Logs.** A sandbox's `log_labels` are `ferun.tenant`,
+  `ferun.instance`, `ferun.environment`, `ferun.kind` `sandbox` and
+  `ferun.object` its ID; a tenant's job's carry `ferun.environment`
+  beside its own, so that a reader of the environment sees them ([The
+  sink](#the-sink)).
+- **Every sandbox has the template** that only an attachable one had
+  before: `sleep infinity`, its own group and name table `sbx-<id>`, so
+  that any sandbox can run its environment's attached services; an
+  attached service names a sandbox of its own environment and is in its
+  sandbox's groups. A create that sends `attachable` is 400 "attachable
+  is gone with ADR 0035: …".
+- **The migration** (`0032`) moves the rows once: a sandbox that the
+  latest deployment of an environment not being deleted names as an
+  attached service's goes into that environment, the most recently
+  created of several; every other sandbox, and every job of a tenant
+  (its record and its pod), into the tenant's environment `sandboxes`,
+  which it makes (empty, its group `default`; a tenant that has one keeps
+  it). All are in `[default]`. Sandboxes with a pod are marked
+  `groups_pending`, so that they are moved once; a hibernated one takes
+  its groups at its restore; a running job ends under the groups it has.
+  Their log labels get their environment (a pod that runs keeps those of
+  its create until its next restore). The version before inserts rows
+  without an environment, which the not-null columns refuse: the
+  migration is not additive.
+
+| Method and path | Answers |
+|---|---|
+| `POST /api/v1/sandboxes` `{environment, securityGroups?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` `[]`, more than 5, a name that is none or one named twice, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for a group the deployed deployment does not have |
+| `GET /api/v1/sandboxes[?environment=]` | `{sandboxes}`, oldest first: those the principal reads, of the one environment when it names one (by name or ID) |
+| `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}` and `securityGroups` |
+| `PUT /api/v1/sandboxes/{id}/security-groups` `{securityGroups}` | 202 the view, the move pending for a sandbox with a pod; 200 for the list it has (in any order), nothing done; 400, 422 as a create's |
+| `POST /api/v1/jobs` `{environment, securityGroups?, …}` | as before ([Tenants' jobs](#tenants-jobs)), and as a sandbox's create for the two fields |
+| `DELETE /api/v1/environments/{env}` | 409 `environment_in_use` while sandboxes or queued or running jobs are in it |
 
 ### The deployment spec
 
@@ -2946,11 +3037,10 @@ two carry the egress table: any protocol to `0.0.0.0/0` except `0.0.0.0/8`,
   holds that none of its rows wants is deleted when its sandbox is gone
   or placed on another node, once no pod there names it.
 
-**Attachable sandboxes.** `POST /api/v1/sandboxes` with `"attachable":
-true` gives the sandbox a template: `sleep infinity`, no env, the group
-and the name table `sbx-<id>`; its status says `attachable`. Only such a
-sandbox reaches an environment's addons and image services, and
-resolves their names.
+**A sandbox's template.** Every sandbox (ADR 0035) gets the template an
+attachable sandbox had: `sleep infinity`, no env, the group and the
+name table `sbx-<id>`. A sandbox made before without one has no
+template until it is moved.
 
 **The prepare hook** (`Engine.SetPrepareHook`) runs for a row with a
 template once its op has the node's connection and its pod spec (a
@@ -3313,19 +3403,21 @@ backups and minor upgrades, a CLI.
 
 ### Tenants' jobs
 
-A tenant's job (ADR 0018, "A tenant's job") is a job without an
-environment: one pod run to its end exactly once, its input in the
-create, and never retried. It has one run, so the job carries its
+A tenant's job (ADR 0018, "A tenant's job") is a job outside its
+environment's spec (ADR 0035): one pod run to its end exactly once, its
+input in the create, and never retried. It has one run, so the job carries its
 status, exit code, result and log under its one ID, where an
 environment's job has runs (`env_job_runs`). Its pod is a row of
 `sandboxes` under the job's ID with `tenant_job` set (`0017`), a
 template (the job's command, its `env` as literals, its secrets as
 secrets of version 0, its image credentials as the secrets
 `imageCredentials.username` and `imageCredentials.password`),
-`idle_after_s` 0, no groups (`feosd`'s default group: out to the
-internet, nothing in) and no name tables. It is an instance row to every
-query that tells a tenant's sandbox from one: absent from the tenant's
-sandboxes, no tokens, 404 on the sandbox routes. The engine's secret
+`idle_after_s` 0, its environment and the names of its groups
+([Sandboxes and jobs in an
+environment](#sandboxes-and-jobs-in-an-environment)) and no name tables
+in its template yet. It is no sandbox to every query that tells a
+tenant's sandbox from the rest (`store.Sandbox.IsOwn`): absent from the
+tenant's sandboxes, no tokens, 404 on the sandbox routes. The engine's secret
 resolver (`RowSecret`) unseals a tenant job's secrets and image
 credentials from `jobs.sealed` (AAD `jobs|<id>`), an environment's from
 `env_secrets`; the image is pinned to its digest at the create, asked
@@ -3336,6 +3428,7 @@ create (ADR 0025).
 |---|---|
 | `id` | its pod's sandbox ID, a short one |
 | `owner`, `idempotency_key`, `request_hash` | the tenant; the create's `Idempotency-Key`, unique per tenant; the body's SHA-256 without the values of its secrets and image credentials, which a caller mints anew for a repeat |
+| `environment_id`, `security_groups` | (`0032`) its environment, by its ID, and the names of its pod's groups, fixed; the record goes with the environment |
 | `image`, `image_ref`, `vcpus`, `memory_mib`, `result_path`, `labels` | as created, the image pinned |
 | `sealed` | the secrets and image credentials, sealed; NULL once the job has ended |
 | `phase`, `reason`, `detail`, `exit_code` | `queued`, `running`, `succeeded`, `failed` (`exit`, `image`, `node_lost`, `no_exit_status`), `deadline_exceeded`, `cancelled` |
@@ -3367,9 +3460,9 @@ any row, and its deadline counts on.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/jobs` `{image, command?, env?, secrets?, imageCredentials?, vcpus?, memoryMib?, deadline?, resultPath?, labels?, logRetentionDays?}` | 201 the job; with an `Idempotency-Key` a create made with the same body 200 with that job, another body 422 `job_key_conflict`; 422 for an image that does not resolve; 400 for what the body gets wrong (an env or secret name that is no variable's, one in both, a size out of range, a deadline above 2h, a `resultPath` that is not absolute and clean or lies under `/dev`, a `logRetentionDays` outside 1 to 400); 503 "secrets need --secret-key-file" for secrets or image credentials without it; 409 while the tenant is being deleted |
-| `GET /api/v1/jobs?label=k=v` | `{jobs}`, newest first, the labels ANDed |
-| `GET /api/v1/jobs/{id}` | `{id, image, imageRef, phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib, labels, createdAt, startedAt, finishedAt, deadlineAt, logRetentionDays?}` (`logRetentionDays` only when the create asked) |
+| `POST /api/v1/jobs` `{environment, securityGroups?, image, command?, env?, secrets?, imageCredentials?, vcpus?, memoryMib?, deadline?, resultPath?, labels?, logRetentionDays?}` | 201 the job; 400 without `environment` or for `securityGroups` as a sandbox's create; 404 "no such environment"; 409 while it is being deleted; 422 for a group its deployed deployment does not have; with an `Idempotency-Key` a create made with the same body 200 with that job, another body 422 `job_key_conflict`; 422 for an image that does not resolve; 400 for what the body gets wrong (an env or secret name that is no variable's, one in both, a size out of range, a deadline above 2h, a `resultPath` that is not absolute and clean or lies under `/dev`, a `logRetentionDays` outside 1 to 400); 503 "secrets need --secret-key-file" for secrets or image credentials without it; 409 while the tenant is being deleted |
+| `GET /api/v1/jobs?label=k=v&environment=` | `{jobs}`, newest first, the labels ANDed, those of the environments the principal reads (of the one it names) |
+| `GET /api/v1/jobs/{id}` | `{id, environment {id, name}, securityGroups, image, imageRef, phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib, labels, createdAt, startedAt, finishedAt, deadlineAt, logRetentionDays?}` (`logRetentionDays` only when the create asked) |
 | `GET /api/v1/jobs/{id}/logs?lines=200` | `{lines}`: the sink's (with `--sink-url`), else from the pod while it runs, redacted of the job's secrets; none while it is queued; the kept tail once it has ended and the sink has no line |
 | `POST /api/v1/jobs/{id}/cancel` | the job, `cancelled` unless it had ended |
 | `DELETE /api/v1/jobs/{id}` | 204 |
@@ -3801,21 +3894,22 @@ first looks whether the record is right again.
 [sink.md](sink.md)): a program of its own, which `ferund` neither carries
 nor waits for. `ferund`'s part:
 
-- **Labels.** The insert of an environment's instance or job run and of a
-  tenant's job's pod writes `sandboxes.log_labels` (`model.Log*`):
-  `ferun.tenant`, `ferun.instance` (the row's ID); an environment's
-  `ferun.environment`, `ferun.kind`, `ferun.object`, `ferun.replica`,
+- **Labels.** The insert of an environment's instance or job run, of a
+  tenant's job's pod and of a sandbox writes `sandboxes.log_labels`
+  (`model.Log*`): `ferun.tenant`, `ferun.instance` (the row's ID),
+  `ferun.environment` (every row's since `0032`, ADR 0035); an
+  instance's `ferun.kind`, `ferun.object`, `ferun.replica`,
   `ferun.deployment` (the deployment the instance was inserted for: a
   kept instance's later deployment does not change it; a pod made before
   `0025`'s version may carry it under its earlier word `ferun.release`,
   which the sink reads too), a job run's
   `ferun.attempt`; a tenant's job's `ferun.job` (its ID), `ferun.attempt`
-  `1` and, when it asked, `ferun.retention_days`. The engine sends them
+  `1` and, when it asked, `ferun.retention_days`; a sandbox's
+  `ferun.kind` `sandbox` and `ferun.object` its ID. The engine sends them
   as `CreatePodRequest.log_labels`, beside the spec: a create delivered
   again finds its pod whatever the labels, and a restore sends none
-  (`feosd` keeps the pod's record). A sandbox a tenant made itself, an
-  attached service's workspace included, has none, and its logs are not
-  shipped. A row an instance of the previous version inserted has `{}`.
+  (`feosd` keeps the pod's record). A sandbox made before `0032` got its
+  labels from the migration, which its pod takes at its next restore.
   A create with labels also names `log_redact`, the values its node
   replaces with `[redacted]` in the lines it ships: asked of the
   controller at each create (`LogRedact`, the engine's `LogRedactor`)

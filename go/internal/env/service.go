@@ -22,6 +22,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -123,12 +124,23 @@ func (s *Service) GetEnv(ctx context.Context, tenant, env string) (EnvStatus, er
 
 // DeleteEnv is DELETE /api/v1/environments/{env}: marks it deleting
 // (202); the controller deletes its instances, volumes and groups, then
-// the environment. Deleting one that is being deleted is no error.
+// the environment, and its ended jobs' records go with it. Deleting one
+// that is being deleted is no error. One with sandboxes or queued or
+// running jobs is 409 environment_in_use, which names them.
 func (s *Service) DeleteEnv(ctx context.Context, tenant, env string) error {
 	return s.st.InTx(ctx, func(tx *store.Store) error {
 		e, err := resolveEnv(ctx, tx, tenant, env, store.ForUpdate)
 		if err != nil || e.Deleting {
 			return err
+		}
+		// Its sandboxes and running jobs keep it (ADR 0035): their makers
+		// delete them first. A create of one holds the row FOR SHARE.
+		inUse, err := tx.EnvironmentInUse(ctx, e.ID)
+		if err != nil {
+			return err
+		}
+		if !inUse.Empty() {
+			return apierr.EnvironmentInUse(e.Name, idStrings(inUse.Sandboxes), idStrings(inUse.Jobs))
 		}
 		after := e
 		after.Deleting = true
@@ -797,4 +809,13 @@ func (s *Service) RevokeRouteTokens(ctx context.Context, tenant, env string) err
 	}
 	_, err = s.st.DeleteRouteTokens(ctx, e.ID)
 	return err
+}
+
+// idStrings are pod IDs as text.
+func idStrings(ids []podid.ID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
 }

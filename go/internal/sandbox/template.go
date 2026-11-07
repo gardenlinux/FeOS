@@ -15,7 +15,7 @@ import (
 )
 
 // The pods of rows with a pod template (ADR 0018 §2.3): an environment's
-// instances and the attachable sandboxes. Their spec is built from the
+// instances, the tenants' jobs' pods and the sandboxes. Their spec is built from the
 // template at the create, with the template's secrets unsealed by the
 // SecretResolver; the database holds no secret value.
 
@@ -154,7 +154,7 @@ func (r *envResolver) secret(name string, version int, escape string) (string, e
 		if r.resolve == nil {
 			return "", fmt.Errorf("secret %s version %d: %w", name, version, errNoResolver)
 		}
-		if !r.row.IsInstance() {
+		if r.row.IsOwn() {
 			return "", fmt.Errorf("secret %s version %d: the sandbox is no environment's or tenant job's", name, version)
 		}
 		var err error

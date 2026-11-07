@@ -206,7 +206,8 @@ func TestPodIDMigration(t *testing.T) {
 	// A short ID fits beside them, its dependents too; anything else is
 	// refused.
 	short := podid.Mint()
-	if _, err := d.Pool.Exec(ctx, "INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib) VALUES ($1, 'acme', 'img', 1, 512)",
+	if _, err := d.Pool.Exec(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id)
+		VALUES ($1, 'acme', 'img', 1, 512, '11111111-1111-4111-8111-111111111111')`,
 		string(short)); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,8 @@ func TestPodIDMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, bad := range []string{"nope", strings.ToUpper(a), strings.ToUpper(string(short)), ""} {
-		if _, err := d.Pool.Exec(ctx, "INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib) VALUES ($1, 'acme', 'img', 1, 512)",
+		if _, err := d.Pool.Exec(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id)
+		VALUES ($1, 'acme', 'img', 1, 512, '11111111-1111-4111-8111-111111111111')`,
 			bad); err == nil {
 			t.Fatalf("the ID %q was accepted", bad)
 		}

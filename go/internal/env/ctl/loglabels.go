@@ -34,16 +34,26 @@ func instanceLogLabels(owner string, id podid.ID, envID uuid.UUID, kind, object 
 	return l
 }
 
-// tenantJobLogLabels are those of a tenant's job's pod, its one attempt;
-// days > 0 is the retention the job asked.
-func tenantJobLogLabels(owner string, id podid.ID, days int) map[string]string {
+// tenantJobLogLabels are those of a tenant's job's pod in envID, its one
+// attempt; days > 0 is the retention the job asked.
+func tenantJobLogLabels(owner string, id podid.ID, envID uuid.UUID, days int) map[string]string {
 	l := map[string]string{
-		model.LogTenant: owner, model.LogInstance: id.String(), model.LogJob: id.String(), model.LogAttempt: "1",
+		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
+		model.LogJob: id.String(), model.LogAttempt: "1",
 	}
 	if days > 0 {
 		l[model.LogRetentionDays] = strconv.Itoa(days)
 	}
 	return l
+}
+
+// SandboxLogLabels are those of a sandbox of envID (ADR 0035): its
+// environment's, of the kind sandbox, the object its ID.
+func SandboxLogLabels(owner string, id podid.ID, envID uuid.UUID) map[string]string {
+	return map[string]string{
+		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
+		model.LogKind: model.LogKindSandbox, model.LogObject: id.String(),
+	}
 }
 
 // LogRedact is the engine's log redactor (sandbox.LogRedactor): the
@@ -70,7 +80,7 @@ func (c *Controller) LogRedact(ctx context.Context, row store.Sandbox) ([]string
 			}
 			vals = slices.Collect(maps.Values(secrets))
 		}
-	case row.EnvironmentID != uuid.Nil:
+	case row.Instance:
 		v, err := c.load(ctx, row.EnvironmentID)
 		if err != nil {
 			return nil, fmt.Errorf("environment %s: %w", row.EnvironmentID, err)

@@ -6,8 +6,10 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -23,6 +25,12 @@ type TenantJob struct {
 	MadeBy string
 	ID     podid.ID
 	Owner  string
+	// EnvID is the environment the job runs in (ADR 0035), EnvName its
+	// name (read back, not written); SecurityGroups the names of the
+	// groups of it its pod is in, sorted. Fixed at the insert.
+	EnvID          uuid.UUID
+	EnvName        string
+	SecurityGroups []string
 	// Key is the create's Idempotency-Key; "": none.
 	Key string
 	// RequestHash is the create's body's hash.
@@ -51,18 +59,20 @@ func (r *TenantJob) Ended() bool { return !r.FinishedAt.IsZero() }
 
 const tenantJobCols = `id, owner, coalesce(idempotency_key, ''), request_hash, image, image_ref, vcpus, memory_mib,
 	result_path, labels, phase, reason, detail, exit_code, result, log_tail, created_at, started_at, finished_at,
-	deadline_at, coalesce(log_retention_days, 0)`
+	deadline_at, coalesce(log_retention_days, 0), environment_id,
+	coalesce((SELECT e.name FROM environments e WHERE e.id = environment_id), ''), security_groups`
 
 func scanTenantJob(row pgx.Row) (TenantJob, error) {
 	var r TenantJob
 	var started, finished *time.Time
 	if err := row.Scan(&r.ID, &r.Owner, &r.Key, &r.RequestHash, &r.Image, &r.ImageRef, &r.VCPUs, &r.MemoryMiB,
 		&r.ResultPath, &r.Labels, &r.Phase, &r.Reason, &r.Detail, &r.ExitCode, &r.Result, &r.LogTail, &r.CreatedAt,
-		&started, &finished, &r.DeadlineAt, &r.LogRetentionDays); err != nil {
+		&started, &finished, &r.DeadlineAt, &r.LogRetentionDays, &r.EnvID, &r.EnvName, &r.SecurityGroups); err != nil {
 		return TenantJob{}, err
 	}
 	r.StartedAt, r.FinishedAt = timeOf(started), timeOf(finished)
-	r.Labels, r.LogTail = stringMap(r.Labels), nonNil(r.LogTail)
+	r.Labels, r.LogTail, r.SecurityGroups = stringMap(r.Labels), nonNil(r.LogTail), nonNil(r.SecurityGroups)
+	slices.Sort(r.SecurityGroups)
 	return r, nil
 }
 
@@ -81,12 +91,17 @@ func (s *Store) InsertTenantJob(ctx context.Context, r TenantJob, sealed []byte,
 	if err != nil {
 		return TenantJob{}, err
 	}
+	groups := nonNil(r.SecurityGroups)
+	if len(groups) == 0 {
+		groups = []string{defaultGroup}
+	}
 	out, err := scanTenantJob(s.q.QueryRow(ctx, `INSERT INTO jobs (id, owner, idempotency_key, request_hash, image, image_ref,
-			vcpus, memory_mib, result_path, labels, sealed, deadline_at, log_retention_days, made_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13, $14)
+			vcpus, memory_mib, result_path, labels, sealed, deadline_at, log_retention_days, made_by, environment_id,
+			security_groups)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13, $14, $15, $16)
 		RETURNING `+tenantJobCols,
 		r.ID, r.Owner, nullString(r.Key), r.RequestHash, r.Image, r.ImageRef, r.VCPUs, r.MemoryMiB, r.ResultPath, labels,
-		sealed, interval(deadline), nullPositive(r.LogRetentionDays), r.MadeBy))
+		sealed, interval(deadline), nullPositive(r.LogRetentionDays), r.MadeBy, r.EnvID, groups))
 	if err != nil {
 		return TenantJob{}, insertError("insert job "+r.ID.String(), err)
 	}
@@ -110,14 +125,16 @@ func (s *Store) TenantJobByKey(ctx context.Context, owner, key string) (TenantJo
 }
 
 // ListTenantJobs returns the jobs of owner that carry every label of labels,
-// newest first.
-func (s *Store) ListTenantJobs(ctx context.Context, owner string, labels map[string]string) ([]TenantJob, error) {
+// newest first; envs, when not nil, keeps those of these environments.
+func (s *Store) ListTenantJobs(ctx context.Context, owner string, labels map[string]string, envs []uuid.UUID) (
+	[]TenantJob, error) {
 	want, err := jsonText(stringMap(labels))
 	if err != nil {
 		return nil, err
 	}
 	return collectTenantJobs(s.q.Query(ctx, "SELECT "+tenantJobCols+` FROM jobs WHERE owner = $1 AND labels @> $2::jsonb
-		ORDER BY created_at DESC, id DESC`, owner, want))
+			AND ($3::uuid[] IS NULL OR environment_id = ANY($3))
+		ORDER BY created_at DESC, id DESC`, owner, want, envs))
 }
 
 // OpenTenantJobs returns every job that has not ended, oldest first.

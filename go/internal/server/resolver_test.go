@@ -53,7 +53,7 @@ func TestDenyPrefixesReachTheResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	sb, _, err := i.Store.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: "acme",
-		Image: ln.Addr().String() + "/x/y:z", VCPUs: 2, MemoryMiB: 512})
+		Image: ln.Addr().String() + "/x/y:z", VCPUs: 2, MemoryMiB: 512, EnvironmentID: dbtest.Environment(t, i.Store.Q(), "acme", "box")})
 	if err != nil {
 		t.Fatal(err)
 	}

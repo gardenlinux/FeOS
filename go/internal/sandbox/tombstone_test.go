@@ -268,6 +268,15 @@ func TestDeleteTenant(t *testing.T) {
 			t.Fatalf("sandbox %s stayed: %v", id, err)
 		}
 	}
+	// The tenant stays while it has environments, which the
+	// environments' controller deletes; the next pass then deletes it.
+	if tn, err := h.st.GetTenant(bg, testTenant); err != nil || !tn.Deleting() {
+		t.Fatalf("tenant %+v %v", tn, err)
+	}
+	h.exec("DELETE FROM environments WHERE owner = $1", testTenant)
+	if err := e.tenantDeletion(bg); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := h.st.GetTenant(bg, testTenant); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("tenant stayed: %v", err)
 	}
@@ -281,7 +290,8 @@ func TestDeleteTenant(t *testing.T) {
 	if _, _, err := h.st.CreateTenant(bg, "t2"); err != nil {
 		t.Fatal(err)
 	}
-	c, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: "t2", Image: testImage, VCPUs: 1, MemoryMiB: 512})
+	c, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: "t2", Image: testImage, VCPUs: 1, MemoryMiB: 512,
+		EnvironmentID: h.boxEnv("t2")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +301,10 @@ func TestDeleteTenant(t *testing.T) {
 	}
 	if _, err := h.st.GetSandbox(bg, c.ID); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("the loop left a sandbox: %v", err)
+	}
+	h.exec("DELETE FROM environments WHERE owner = 't2'")
+	if err := e.tenantDeletion(bg); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := h.st.GetTenant(bg, "t2"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("the loop left the tenant: %v", err)

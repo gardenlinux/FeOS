@@ -12,8 +12,8 @@
 //	tenant    /api/v1/sandboxes[/{id}]   a tenant's token, or a person's session that
 //	                                     names its tenant (FeRun-Tenant), with
 //	                                     the role and scope each route states
-//	                                     (ADR 0031): create, list, delete,
-//	          /api/v1/tools              pause, resume, tokens, access; the
+//	                                     (ADR 0031, 0035): create, list, delete,
+//	          /api/v1/tools              pause, resume, groups, tokens, access; the
 //	          /api/v1/environments[/…]   environments (ADR 0018) but their door;
 //	          /api/v1/domains[/…]        the domains (ADR 0021)
 //	          /api/v1/jobs[/…]           the tenants' jobs (ADR 0018)
@@ -461,21 +461,23 @@ func (s *server) routes() []route {
 
 	// Tenants: the sandbox as a thing one owns, and the tokens that reach
 	// into it. A foreign sandbox is indistinguishable from an absent one.
-	// A sandbox is the tenant's, never an environment's (ADR 0031): its
-	// routes need a tenant grant.
+	// A sandbox is in an environment (ADR 0035): its routes need the role
+	// on it, an environment's grant or the tenant's; the list shows what
+	// the principal reads.
 	tenant(onTenant(read), "GET /api/v1/tools", s.listTools)
-	tenant(onTenant(write), "POST /api/v1/sandboxes", s.createSandbox)
-	tenant(onTenant(read), "GET /api/v1/sandboxes", s.listSandboxes)
-	tenant(onTenant(read), "GET /api/v1/sandboxes/{id}", s.getSandbox)
-	tenant(onTenant(write), "DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
-	tenant(onTenant(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
-	tenant(onTenant(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
-	tenant(onTenant(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
-	tenant(onTenant(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
-	tenant(onTenant(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
-	tenant(onTenant(write), "POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
-	tenant(onTenant(write), "DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
-	tenant(onTenant(read), "GET /api/v1/sandboxes/{id}/access", s.access)
+	tenant(byHandler(write), "POST /api/v1/sandboxes", s.createSandbox)
+	tenant(member, "GET /api/v1/sandboxes", s.listSandboxes)
+	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}", s.getSandbox)
+	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
+	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
+	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
+	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/security-groups", s.putSandboxGroups)
+	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
+	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
+	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
+	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
+	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
+	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/access", s.access)
 
 	// The sandbox's own token: the tool baseline over REST. Each route
 	// makes the same tools.Runner call that MCP makes, with the call's id
@@ -529,8 +531,8 @@ func (s *server) routes() []route {
 		tenant(onTenant(write), "PUT /api/v1/credentials/{name}", serve(b.PutCredential))
 		tenant(onTenant(write), "DELETE /api/v1/credentials/{name}", serve(b.DeleteCredential))
 		tenant(onTenant(write), "POST /api/v1/credentials/{name}/check", serve(b.CheckCredential))
-		tenant(onTenant(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
-		tenant(onTenant(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
+		tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
+		tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
 	}
 
 	// The environments (ADR 0018): the tenant's, and their route door.

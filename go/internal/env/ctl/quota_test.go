@@ -31,22 +31,22 @@ func TestTenantJobQuota(t *testing.T) {
 	big := tenantJobSpecOf(time.Minute)
 	big.VCPUs = 3
 	first := h.createTenantJob(big)
-	_, _, err := h.c.CreateTenantJob(bg, testTenant, tenantJobSpecOf(time.Minute))
+	_, _, err := h.c.CreateTenantJob(bg, testTenant, h.jobSpecOf(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = h.c.CreateTenantJob(bg, testTenant, tenantJobSpecOf(time.Minute))
+	_, _, err = h.c.CreateTenantJob(bg, testTenant, h.jobSpecOf(time.Minute))
 	quotaErr(err, "runningJobs")
 	if _, err := h.st.SetTenantLimits(bg, testTenant, store.TenantLimits{VCPUs: &four}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = h.c.CreateTenantJob(bg, testTenant, tenantJobSpecOf(time.Minute))
+	_, _, err = h.c.CreateTenantJob(bg, testTenant, h.jobSpecOf(time.Minute))
 	quotaErr(err, "vcpus")
 	if _, err := h.st.Q().Exec(bg, `UPDATE jobs SET phase = 'cancelled', finished_at = now() WHERE id = $1`,
 		first.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.c.CreateTenantJob(bg, testTenant, tenantJobSpecOf(time.Minute)); err != nil {
+	if _, _, err := h.c.CreateTenantJob(bg, testTenant, h.jobSpecOf(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 }

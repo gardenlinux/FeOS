@@ -145,7 +145,7 @@ func TestTrafficFromSink(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "v1")
-	sb := h.sandbox(tenantA, true)
+	sb := h.sandbox(tenantA, "stage")
 	// Deployment 1 routes / to web, /api to api and /dev to the attached
 	// dev, which the route door alone serves; deployment 2 drops /api.
 	withDev := strings.Replace(previewSpec(sb), `"root": {"path": "/", "service": "web", "port": "http"}`,

@@ -453,7 +453,8 @@ func TestShutdown(t *testing.T) {
 	}
 
 	// A sandbox runs, then is paused.
-	code, body := call(t, i, "POST", "/api/v1/sandboxes", bearer(bootstrapToken), "{}")
+	dbtest.Environment(t, i.Store.Q(), "operator", "box")
+	code, body := call(t, i, "POST", "/api/v1/sandboxes", bearer(bootstrapToken), `{"environment":"box"}`)
 	if code != 201 {
 		t.Fatalf("create %d %s", code, body)
 	}

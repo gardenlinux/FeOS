@@ -107,7 +107,8 @@ func newRigWith(t *testing.T, enabled bool) *rig {
 		}
 	}
 	for _, id := range []podid.ID{r.sb1, r.sb2, r.sb3} {
-		if _, _, err := st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "acme", Image: "img", VCPUs: 2, MemoryMiB: 512}); err != nil {
+		if _, _, err := st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "acme", Image: "img", VCPUs: 2, MemoryMiB: 512,
+			EnvironmentID: dbtest.Environment(t, st.Q(), "acme", "box")}); err != nil {
 			t.Fatal(err)
 		}
 	}

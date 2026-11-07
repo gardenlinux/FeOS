@@ -313,7 +313,14 @@ func (c *Controller) deleteEnvironment(ctx context.Context, e store.Environment)
 			return false, err
 		}
 	}
-	if len(left) > 0 || len(vols) > 0 || !groupsGone || cleaning {
+	// A sandbox or a job's pod of it (ADR 0035) keeps it too: the API
+	// refuses the delete of an environment that has one, but a tenant's
+	// deletion goes on while the engine deletes its sandboxes.
+	others, err := c.st.CountEnvironmentRows(ctx, e.ID)
+	if err != nil {
+		return false, err
+	}
+	if len(left) > 0 || others > 0 || len(vols) > 0 || !groupsGone || cleaning {
 		return false, nil
 	}
 	deleted := false

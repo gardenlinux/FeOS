@@ -126,15 +126,15 @@ func goneDetail(id podid.ID) string {
 }
 
 // attachedUsable reports whether an attached service of env may use the
-// sandbox row sb, the one it names (§13.6): a sandbox of env's owner and
-// not an instance row. A sandbox of another tenant under a reused ID is
-// never the service's: it is never started, checked, named or made a
-// member there. The owner's sandbox deleted and created again under the
+// sandbox row sb, the one it names (§13.6): a sandbox of env (ADR 0035),
+// not an instance row or a tenant's job's pod. A sandbox of another
+// tenant under a reused ID is never the service's: it is never started,
+// checked, named or made a member there. The owner's sandbox deleted and created again under the
 // same ID (FeCode replaces a lost workspace sandbox so) is a new
 // incarnation, in which the service starts anew (newIncarnation).
 // store.EnvCtlMembers and EnvCtlWithAttached apply the same condition.
 func attachedUsable(env store.Environment, a store.EnvAttached, sb store.Sandbox) bool {
-	return sb.ID == a.SandboxID && sb.Owner == env.Owner && !sb.IsInstance()
+	return sb.ID == a.SandboxID && sb.Owner == env.Owner && sb.EnvironmentID == env.ID && sb.IsOwn()
 }
 
 // newIncarnation reports whether sb, the sandbox a names, is another

@@ -78,7 +78,7 @@ const (
 func (s *Service) RowHTTPBindings(ctx context.Context, row store.Sandbox, open bool) ([]*fleetv1.HttpBinding, string,
 	error) {
 	t := row.PodTemplate
-	if row.EnvironmentID == uuid.Nil || t == nil || len(t.HTTPBindings) == 0 {
+	if !row.Instance || t == nil || len(t.HTTPBindings) == 0 {
 		return nil, "", nil
 	}
 	num, err := s.st.EnvInstanceDeployment(ctx, row.ID)

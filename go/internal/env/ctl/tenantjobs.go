@@ -13,16 +13,19 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// A tenant's job (ADR 0018, "A tenant's job") is a job without an
-// environment, run exactly once: its pod is a row of sandboxes under the
+// A tenant's job (ADR 0018, "A tenant's job") is a job outside its
+// environment's spec (ADR 0035), run exactly once: its pod is a row of sandboxes under the
 // job's ID (tenant_job), whose template the create renders, its secrets
 // and image credentials sealed in the job's row (jobs.sealed) and
 // resolved by RowSecret. env-probe ends the jobs that have not ended as
@@ -60,6 +63,11 @@ var ErrJobImage = errors.New("the image does not resolve")
 
 // TenantJobSpec is a job's create, validated by the caller.
 type TenantJobSpec struct {
+	// EnvID is the environment it runs in (ADR 0035), SecurityGroups the
+	// names of its groups (spec.PodGroups), which its deployed deployment
+	// must have.
+	EnvID            uuid.UUID
+	SecurityGroups   []string
 	Image            string
 	Command          []string
 	Env, Secrets     map[string]string
@@ -135,10 +143,13 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 		if t.Deleting() {
 			return errTenantDeleting
 		}
+		if err := LockPodEnvironment(ctx, tx, owner, rs.EnvID, rs.SecurityGroups); err != nil {
+			return err
+		}
 		row, err := tx.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
 			return store.NewSandbox{ID: id, Owner: owner, Image: rs.Image, VCPUs: rs.VCPUs, MemoryMiB: rs.MemoryMiB,
-				ImageRef: ref, PodTemplate: &tmpl, IdleAfterS: &idle, TenantJob: true,
-				LogLabels: tenantJobLogLabels(owner, id, rs.LogRetentionDays)}
+				ImageRef: ref, EnvironmentID: rs.EnvID, SecurityGroups: rs.SecurityGroups, PodTemplate: &tmpl,
+				IdleAfterS: &idle, TenantJob: true, LogLabels: tenantJobLogLabels(owner, id, rs.EnvID, rs.LogRetentionDays)}
 		})
 		if err != nil {
 			return err
@@ -153,7 +164,8 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 				return fmt.Errorf("seal the job's secrets: %w", err)
 			}
 		}
-		job, err = tx.InsertTenantJob(ctx, store.TenantJob{ID: row.ID, Owner: owner, Key: rs.Key, RequestHash: rs.Hash,
+		job, err = tx.InsertTenantJob(ctx, store.TenantJob{ID: row.ID, Owner: owner, EnvID: rs.EnvID,
+			SecurityGroups: rs.SecurityGroups, Key: rs.Key, RequestHash: rs.Hash,
 			Image: rs.Image, ImageRef: ref, VCPUs: rs.VCPUs, MemoryMiB: rs.MemoryMiB, ResultPath: rs.ResultPath,
 			Labels: rs.Labels, LogRetentionDays: rs.LogRetentionDays, MadeBy: madeBy}, sealed, rs.Deadline)
 		return err
@@ -169,6 +181,43 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 	}
 	c.log.Info("tenant job created", "tenant", owner, "job", job.ID, "image", ref)
 	return job, true, nil
+}
+
+// ErrEnvironmentDeleting: the environment a sandbox or a tenant's job is
+// made in is being deleted (409).
+var ErrEnvironmentDeleting = errors.New("the environment is being deleted")
+
+// ErrNoEnvironment: the environment a sandbox or a tenant's job is made
+// in is none of the tenant's (404).
+var ErrNoEnvironment = errors.New("no such environment")
+
+// ErrUnknownGroups: a sandbox or a tenant's job names a group its
+// environment's deployed deployment does not have (422).
+var ErrUnknownGroups = errors.New("an unknown security group")
+
+// LockPodEnvironment locks environment envID of owner FOR SHARE, so that
+// its delete waits for the insert of a pod of it, and checks that groups
+// are groups of its deployed deployment (ADR 0035): ErrNoEnvironment for
+// none of owner's, ErrEnvironmentDeleting, ErrUnknownGroups.
+func LockPodEnvironment(ctx context.Context, tx *store.Store, owner string, envID uuid.UUID, groups []string) error {
+	e, err := tx.LockEnvironment(ctx, envID, store.ForShare)
+	if errors.Is(err, store.ErrNoRow) || (err == nil && e.Owner != owner) {
+		return ErrNoEnvironment
+	}
+	if err != nil {
+		return err
+	}
+	if e.Deleting {
+		return &stateError{msg: fmt.Sprintf("environment %s is being deleted", e.Name), kind: ErrEnvironmentDeleting}
+	}
+	have, err := tx.DeployedSecurityGroups(ctx, envID)
+	if err != nil {
+		return err
+	}
+	if msg := spec.UnknownPodGroups(groups, have); msg != "" {
+		return &stateError{msg: msg, kind: ErrUnknownGroups}
+	}
+	return nil
 }
 
 // tenantJobOfKey is the job of owner a create with rs's key made: ok when there

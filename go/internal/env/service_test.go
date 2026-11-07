@@ -418,8 +418,8 @@ func TestPlanSpec(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
-	sb := h.sandbox(tenantA, true)
-	foreign := h.sandbox(tenantB, true)
+	sb := h.sandbox(tenantA, "box")
+	foreign := h.sandbox(tenantB, "box")
 	raw := `{"services": {"web": {"runtime": "attached", "sandbox": "` + sb.String() + `", "command": ["npm", "run", "dev"],
 		"env": {"T": {"secret": "absent"}}, "ports": [{"name": "http", "port": 5173}]},
 		"api": {"image": "ghcr.io/acme/api:9"}}}`
@@ -445,10 +445,10 @@ func TestAttachedValidation(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
-	sb := h.sandbox(tenantA, true)
-	plain := h.sandbox(tenantA, false)
 	h.create("one", nil)
 	h.create("two", nil)
+	sb := h.sandbox(tenantA, "one")
+	plain := h.sandbox(tenantA, "two")
 	attachedAs := func(sandbox podid.ID, name, port string) string {
 		return `{"services": {"` + name + `": {"runtime": "attached", "sandbox": "` + sandbox.String() + `", "command": ["vite"],
 			"ports": [{"name": "http", "port": ` + port + `}]}}, "routes": {"root": {"path": "/", "service": "` + name +
@@ -456,9 +456,8 @@ func TestAttachedValidation(t *testing.T) {
 	}
 	attached := func(sandbox podid.ID, port string) string { return attachedAs(sandbox, "vite", port) }
 	h.apply("one", attached(sb, "5173"), 0)
-	// The sandbox is environment one's (ADR 0035: the environment whose
-	// attached service names a sandbox made before it takes it): another
-	// environment's attached service cannot run in it.
+	// The sandbox is environment one's (ADR 0035): another environment's
+	// attached service cannot run in it.
 	p, err := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(sb, "web", "5174"))})
 	if err != nil || p.Valid || !hasFinding(p.Findings, spec.SeverityError, "services.web.sandbox",
 		"sandbox "+sb.String()+" is in environment one: an attached service runs in a sandbox of its own environment") {
@@ -468,13 +467,13 @@ func TestAttachedValidation(t *testing.T) {
 	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(attached(sb, "5174"))}); !p.Valid {
 		t.Fatalf("own %+v", p)
 	}
-	// Another sandbox is environment two's to take.
+	// Environment two's sandbox is its own.
 	if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(plain, "web", "5173"))}); !p.Valid {
 		t.Fatalf("separate sandboxes %+v", p)
 	}
 	// A sandbox with a UUID, made before ADR 0019, is a sandbox as a short
 	// ID's is, in either case; a value that is neither is refused.
-	legacy := h.legacySandbox(tenantA, true)
+	legacy := h.legacySandbox(tenantA, "two")
 	for _, id := range []podid.ID{legacy, podid.ID(strings.ToUpper(legacy.String()))} {
 		if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(id, "web", "5176"))}); !p.Valid {
 			t.Fatalf("legacy sandbox %s: %+v", id, p)
@@ -1050,7 +1049,7 @@ func TestControllerRefusals(t *testing.T) {
 	h.create("stage", nil)
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
-	sb := h.sandbox(tenantA, true)
+	sb := h.sandbox(tenantA, "stage")
 	h.apply("stage", previewSpec(sb), 0)
 	code := func(err error) string {
 		var ae *apierr.Error
@@ -1135,7 +1134,7 @@ func TestSetPublic(t *testing.T) {
 	ctx := h.ctx()
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "x")
-	sb := h.sandbox(tenantA, true)
+	sb := h.sandbox(tenantA, "stage")
 	withDev := strings.Replace(previewSpec(sb), `"root": {"path": "/", "service": "web", "port": "http"}`,
 		`"root": {"path": "/", "service": "web", "port": "http"}, "dev": {"path": "/dev/", "service": "dev", "port": "http"}`, 1)
 	h.apply("stage", withDev, 0)
@@ -1309,6 +1308,15 @@ func TestSetPublic(t *testing.T) {
 		_, err = h.svc.SetPublic(ctx, tenantA, "demo", public, "")
 		wantStatus(t, err, http.StatusConflict, "environment demo is being deleted")
 	}
+	// An environment with a sandbox is not deleted (ADR 0035).
+	err = h.svc.DeleteEnv(ctx, tenantA, "stage")
+	wantStatus(t, err, http.StatusConflict, "environment stage has 1 sandboxes and 0 running jobs: delete them first")
+	var ae *apierr.Error
+	if !errors.As(err, &ae) || ae.Code != apierr.CodeEnvironmentInUse || ae.InUse == nil ||
+		!slices.Equal(ae.InUse.Sandboxes, []string{sb.String()}) || len(ae.InUse.Jobs) != 0 {
+		t.Fatalf("in use %+v", ae)
+	}
+	h.exec("DELETE FROM sandboxes WHERE id = $1", sb)
 	// A public environment being deleted keeps its flag, but the ingress
 	// no longer serves it: no host, the route door alone.
 	if err := h.svc.DeleteEnv(ctx, tenantA, "stage"); err != nil {

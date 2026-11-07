@@ -72,7 +72,7 @@ func (h *harness) environment() uuid.UUID {
 func (h *harness) instance(env uuid.UUID, t *model.PodTemplate, mod ...func(*store.NewSandbox)) store.Sandbox {
 	h.t.Helper()
 	n := store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: testImage, VCPUs: 1, MemoryMiB: 512,
-		EnvironmentID: env, PodTemplate: t}
+		EnvironmentID: env, Instance: true, PodTemplate: t}
 	for _, m := range mod {
 		m(&n)
 	}
@@ -168,7 +168,7 @@ func TestTemplateCreateSendsItsSpec(t *testing.T) {
 	sb := h.instance(env, webTemplate(env))
 	h.ensure(sb.ID)
 	row := h.waitState(sb.ID, model.StateRunning, 10*time.Second)
-	if row.PodTemplate == nil || row.EnvironmentID != env || !row.IsInstance() || !row.HasGroups() {
+	if row.PodTemplate == nil || row.EnvironmentID != env || !row.Instance || row.IsOwn() {
 		t.Fatalf("row %+v", row)
 	}
 	reqs := creates.createRequests()
@@ -250,7 +250,7 @@ func TestEscapeUserinfo(t *testing.T) {
 func TestBuildPodSpec(t *testing.T) {
 	env := uuid.New()
 	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 2,
-		MemoryMiB: 1024, EnvironmentID: env}
+		MemoryMiB: 1024, EnvironmentID: env, Instance: true}
 
 	// No template: the sandbox's own pod.
 	spec, err := buildPodSpec(bg, sb, nil)
@@ -292,14 +292,14 @@ func TestBuildPodSpec(t *testing.T) {
 	if _, err := buildPodSpec(bg, sb, sec.resolve); err == nil || !strings.Contains(err.Error(), "unmapped credential") {
 		t.Fatalf("credential: %v", err)
 	}
-	sb.EnvironmentID = uuid.Nil
+	sb.Instance = false
 	sb.PodTemplate = &model.PodTemplate{Env: map[string]model.TemplateValue{"P": model.SecretValue("pw", 1, "")}}
 	if _, err := buildPodSpec(bg, sb, (&secrets{}).resolve); err == nil || !strings.Contains(err.Error(), "no environment's") {
 		t.Fatalf("no environment: %v", err)
 	}
 
 	// A secret named twice is resolved once.
-	sb.EnvironmentID = env
+	sb.Instance = true
 	sec = &secrets{}
 	sec.set(env, "pw", 1, "x")
 	sb.PodTemplate = &model.PodTemplate{Env: map[string]model.TemplateValue{

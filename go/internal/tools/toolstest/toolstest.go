@@ -205,6 +205,7 @@ func (e *Env) NewSandbox() auth.Sandbox {
 	id := podid.Mint()
 	if _, _, err := e.Store.CreateSandbox(context.Background(), store.NewSandbox{
 		ID: id, Owner: Tenant, Image: "test", VCPUs: 1, MemoryMiB: 512,
+		EnvironmentID: dbtest.Environment(e.t, e.Store.Q(), Tenant, "box"),
 	}); err != nil {
 		e.t.Fatal(err)
 	}

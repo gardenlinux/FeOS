@@ -75,13 +75,14 @@ func (s *Store) ensure(ctx context.Context, id string, days int) (int32, error) 
 }
 
 // streamKey is a stream's key in the topics: its tenant, environment
-// and object (an environment's service, addon or job, by kind and name),
-// or, for a stream of no environment (a tenant's job), its tenant and job.
-// A read selects by these labels: an object's streams, its replicas' and
-// its ingress's, lie in one partition, an environment's in those of its
-// objects.
+// and object (an environment's service, addon or job, or a sandbox, by
+// kind and name), or, for a stream of no object (a tenant's job, which
+// names its environment since ADR 0035, or none when shipped before),
+// its tenant and job. A read selects by these labels: an object's
+// streams, its replicas' and its ingress's, lie in one partition, an
+// environment's in those of its objects.
 func streamKey(tenant, environment, kind, object, job string) string {
-	if environment != "" {
+	if environment != "" && kind != "" {
 		return tenant + "/" + environment + "/" + kind + "/" + object
 	}
 	return tenant + "//" + job

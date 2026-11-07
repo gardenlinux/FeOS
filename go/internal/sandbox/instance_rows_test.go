@@ -348,11 +348,11 @@ func TestPrepareHookFailureInRepair(t *testing.T) {
 	seq := &sequence{}
 	h.eng().SetPrepareHook(seq.hook)
 	h.recordCalls("n1", seq)
-	// An attachable sandbox: a tenant's row with a template, held by its
-	// background processes.
+	// A sandbox: a tenant's row with a template, held by its background
+	// processes.
 	id := podid.Mint()
-	sb := h.instance(uuid.Nil, &model.PodTemplate{Command: []string{"/bin/sh"},
-		SecurityGroups: []string{model.SandboxGroupID(id)}}, func(n *store.NewSandbox) { n.ID = id })
+	sb := h.instance(h.boxEnv(testTenant), &model.PodTemplate{Command: []string{"/bin/sh"},
+		SecurityGroups: []string{model.SandboxGroupID(id)}}, func(n *store.NewSandbox) { n.ID, n.Instance = id, false })
 	h.ensure(sb.ID)
 	seq.take()
 	if err := h.eng().HoldProcess(bg, sb.ID, "p1", 0); err != nil {
@@ -634,13 +634,14 @@ func TestAddressAndGroupsHint(t *testing.T) {
 	}
 	expectHint(t, hints, store.HintEnvGroups)
 
-	// An ordinary sandbox: the address, no hint.
+	// A sandbox: the address, and the hint, as every pod is in its
+	// environment's groups (ADR 0035).
 	drain(hints)
 	plain := h.running(512)
 	if h.row(plain.ID).Address == "" {
-		t.Fatal("an ordinary sandbox has no address")
+		t.Fatal("a sandbox has no address")
 	}
-	noHint(t, hints, store.HintEnvGroups)
+	expectHint(t, hints, store.HintEnvGroups)
 }
 
 func expectHint(t *testing.T, ch <-chan string, want string) {
@@ -655,22 +656,6 @@ func expectHint(t *testing.T, ch <-chan string, want string) {
 			}
 		case <-timer.C:
 			t.Fatalf("no hint %q", want)
-		}
-	}
-}
-
-func noHint(t *testing.T, ch <-chan string, want string) {
-	t.Helper()
-	timer := time.NewTimer(500 * time.Millisecond)
-	defer timer.Stop()
-	for {
-		select {
-		case p := <-ch:
-			if p == want {
-				t.Fatalf("hint %q", want)
-			}
-		case <-timer.C:
-			return
 		}
 	}
 }

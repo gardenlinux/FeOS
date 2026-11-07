@@ -116,6 +116,7 @@ func TestTenantsAndTokens(t *testing.T) {
 		t.Fatalf("deleted with sandboxes: %v %v", ok, err)
 	}
 	exec(t, s, "DELETE FROM sandboxes WHERE owner = 'acme'")
+	exec(t, s, "DELETE FROM environments WHERE owner = 'acme'")
 	if ok, err := s.DeleteTenantIfEmpty(bg, "acme"); err != nil || !ok {
 		t.Fatalf("delete empty: %v %v", ok, err)
 	}

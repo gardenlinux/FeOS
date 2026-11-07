@@ -332,7 +332,7 @@ func (s *Service) attachedSandbox(ctx context.Context, e store.Environment, serv
 	if err != nil && !errors.Is(err, model.ErrNotFound) {
 		return "", "", fmt.Errorf("sandbox %s: %w", a.SandboxID, err)
 	}
-	if err != nil || sb.Owner != e.Owner || sb.IsInstance() {
+	if err != nil || sb.Owner != e.Owner || sb.EnvironmentID != e.ID || !sb.IsOwn() {
 		return "", fmt.Sprintf("sandbox %s of service %s is gone or not this tenant's", a.SandboxID, service), nil
 	}
 	return sb.ID, "", nil

@@ -32,7 +32,7 @@ func mkEnv(t *testing.T, s *store.Store, owner, name string) store.Environment {
 func mkInstance(t *testing.T, s *store.Store, env store.Environment, mod ...func(*store.NewSandbox)) store.Sandbox {
 	t.Helper()
 	n := store.NewSandbox{ID: podid.Mint(), Owner: env.Owner, Image: "alpine", VCPUs: 1, MemoryMiB: 256, EnvironmentID: env.ID,
-		PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(env.ID)}}}
+		Instance: true, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(env.ID)}}}
 	for _, m := range mod {
 		m(&n)
 	}
@@ -67,18 +67,19 @@ func TestSandboxInstanceColumns(t *testing.T) {
 	tj, _ := json.Marshal(tpl)
 	gj, _ := json.Marshal(got.PodTemplate)
 	if got.EnvironmentID != env.ID || string(tj) != string(gj) || got.PinNode != "n1" || got.IdleAfterS == nil ||
-		*got.IdleAfterS != 90 || got.Address != "" || got.ImageRef != "alpine@sha256:abc" || !got.IsInstance() ||
-		!got.HasGroups() {
+		*got.IdleAfterS != 90 || got.Address != "" || got.ImageRef != "alpine@sha256:abc" || !got.Instance ||
+		got.IsOwn() || len(got.SecurityGroups) != 0 {
 		t.Fatalf("instance row %+v (template %s)", got, gj)
 	}
 	plain := mkSandbox(t, s, "acme")
-	if plain.IsInstance() || plain.HasGroups() || plain.PodTemplate != nil || plain.IdleAfterS != nil || plain.PinNode != "" {
+	if !plain.IsOwn() || plain.Instance || plain.PodTemplate != nil || plain.IdleAfterS != nil || plain.PinNode != "" ||
+		len(plain.SecurityGroups) != 1 || plain.SecurityGroups[0] != "default" || plain.GroupsPending {
 		t.Fatalf("plain row %+v", plain)
 	}
-	if l, err := s.ListSandboxes(bg, "acme"); err != nil || len(l) != 1 || l[0].ID != plain.ID {
+	if l, err := s.ListSandboxes(bg, "acme", nil); err != nil || len(l) != 1 || l[0].ID != plain.ID {
 		t.Fatalf("the tenant's listing: %v %v", l, err)
 	}
-	if l, err := s.ListSandboxes(bg, ""); err != nil || len(l) != 2 {
+	if l, err := s.ListSandboxes(bg, "", nil); err != nil || len(l) != 2 {
 		t.Fatalf("every row: %v %v", l, err)
 	}
 
@@ -132,7 +133,8 @@ func TestSandboxInstanceColumns(t *testing.T) {
 }
 
 // SetSandboxAddress writes an op's answer once, for the row's incarnation,
-// with the env-groups hint for a group member only.
+// with the env-groups hint: every row is in its environment's groups (ADR
+// 0035).
 func TestSetSandboxAddress(t *testing.T) {
 	s, d := newStore(t)
 	mkTenant(t, s, "acme")
@@ -172,7 +174,7 @@ func TestSetSandboxAddress(t *testing.T) {
 	if !set(plain, plain.Incarnation, "fd00::4") {
 		t.Fatal("not written")
 	}
-	expectNoPayload(t, hints, store.HintEnvGroups)
+	expectPayload(t, hints, store.HintEnvGroups)
 	if g := get(t, s, inst.ID).Gen; g != inst.Gen {
 		t.Fatalf("gen %d", g)
 	}
@@ -787,7 +789,8 @@ func TestTenantCountLeavesInstancesOut(t *testing.T) {
 	}
 	mkEnv(t, s, "acme", "prod")
 	list, err := s.ListTenants(bg)
-	if err != nil || len(list) != 1 || list[0].SandboxCount != 1 || list[0].EnvironmentCount != 2 {
+	// The sandbox's environment box, stage and prod.
+	if err != nil || len(list) != 1 || list[0].SandboxCount != 1 || list[0].EnvironmentCount != 3 {
 		t.Fatalf("tenants %+v %v", list, err)
 	}
 }

@@ -119,8 +119,8 @@ One `ResourceLogs` per stream. Its resource attributes are the pod's
 | `ferun.node` | the node's name | node |
 | `ferun.tenant` | the tenant | `ferund` |
 | `ferun.instance` | the sandbox's ID (`InstanceStatus.id`) | `ferund` |
-| `ferun.environment` | the environment's ID | `ferund`, an environment's pods |
-| `ferun.kind`, `ferun.object` | `service`, `addon` or `job`, and its name | `ferund`, an environment's pods |
+| `ferun.environment` | the environment's ID | `ferund`, every pod (a sandbox's and a tenant's job's too, ADR 0035) |
+| `ferun.kind`, `ferun.object` | `service`, `addon` or `job`, and its name; `sandbox` and the sandbox's ID | `ferund`, an environment's instances and its sandboxes |
 | `ferun.replica`, `ferun.deployment` | numbers, as text; `ferun.release` is `ferun.deployment`'s earlier word, read where it is not set | `ferund`, an environment's pods |
 | `ferun.job`, `ferun.attempt` | a tenant's job's ID, the attempt | `ferund`, a tenant's job |
 | `ferun.retention_days` | days, as text | `ferund`, when a job asked |
@@ -316,8 +316,9 @@ a 4xx but 429 passed on as it came), and keeps the answer by the
 SHA-256 of the credential and the tenant, a token's a minute, a
 session's 10 s. A `role` on the tenant reads every stream and span; a
 principal without one (a person's or a token's grants on environments)
-reads those whose `environment` is one of `environments`, and none of no
-environment (a sandbox's, a tenant's job's, a build's); one that may
+reads those whose `environment` is one of `environments`, a sandbox's and
+a tenant's job's among them (ADR 0035), and none of no environment (a
+stream shipped before); one that may
 read nothing is 404 "no such tenant". An answer without `role` is a
 `ferund` of before people: the whole tenant's, as its every token was.
 
@@ -345,8 +346,9 @@ the new name with the next mapping version), `instance`, `container`, `job`, `at
 `iostream`, `level` (the bit), `trace_id`, `off`, `partial`, `cont`, and
 `text` (Quickwit's `default` tokenizer, with positions). Its key is
 its stream's object, `<tenant>/<environment>/<kind>/<object>` (an
-environment's job run: kind `job`, its job's name), or `<tenant>//<job>`
-for a stream of no environment (a tenant's job), its partition the key's
+environment's job run: kind `job`, its job's name; a sandbox: kind
+`sandbox`, its ID), or `<tenant>//<job>` for a stream of no object (a
+tenant's job, which names its environment since ADR 0035), its partition the key's
 FNV-1a hash modulo the topic's partitions, chosen by the sink: a
 stream's lines are in order in one partition, and an object's streams
 (its replicas, deployments and runs) share theirs. An environment's objects
@@ -499,9 +501,10 @@ Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows,
 
 ## `ferund`
 
-- **Labels**: an environment's instance and job run, and a tenant's job,
-  get `log_labels` on their pod's create (the table above), kept on their
-  sandbox row (`sandboxes.log_labels`, migration `0019`).
+- **Labels**: an environment's instance and job run, a tenant's job and a
+  sandbox get `log_labels` on their pod's create (the table above), kept
+  on their sandbox row (`sandboxes.log_labels`, migration `0019`), each
+  with its environment (`0032`, ADR 0035).
   `ferun.deployment` is the deployment the instance was made for; a pod
   keeps the labels of its create, so the sink reads its earlier word
   `ferun.release` where it is not set, which `ferund` wrote, beside

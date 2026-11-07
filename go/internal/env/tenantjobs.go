@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -30,6 +32,12 @@ const CodeJobKeyConflict = "job_key_conflict"
 
 // CreateTenantJobRequest is POST /api/v1/jobs (ADR 0018, "A tenant's job").
 type CreateTenantJobRequest struct {
+	// Environment names the environment the job runs in (ADR 0035), by
+	// name or ID; required.
+	Environment string `json:"environment"`
+	// SecurityGroups are the groups of the environment its pod is in, 1
+	// to 5 of its deployed deployment's; nil (left out): [default].
+	SecurityGroups *[]string `json:"securityGroups,omitempty"`
 	// Image is pinned to its digest at the create, asked with
 	// ImageCredentials.
 	Image string `json:"image"`
@@ -61,6 +69,10 @@ type CreateTenantJobRequest struct {
 // TenantJobStatus is a job as the answers show it.
 type TenantJobStatus struct {
 	ID string `json:"id"`
+	// Environment is the environment it runs in, SecurityGroups its
+	// pod's groups of it (ADR 0035).
+	Environment    EnvRef   `json:"environment"`
+	SecurityGroups []string `json:"securityGroups"`
 	// Image is as asked, ImageRef pinned.
 	Image    string `json:"image"`
 	ImageRef string `json:"imageRef"`
@@ -85,6 +97,12 @@ type TenantJobStatus struct {
 	LogRetentionDays int `json:"logRetentionDays,omitempty"`
 }
 
+// EnvRef names an environment in a view of what runs in it.
+type EnvRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // TenantJobList is GET /api/v1/jobs.
 type TenantJobList struct {
 	TenantJobs []TenantJobStatus `json:"jobs"`
@@ -96,7 +114,8 @@ type TenantJobLogsAnswer struct {
 }
 
 func tenantJobStatus(r store.TenantJob) TenantJobStatus {
-	return TenantJobStatus{ID: r.ID.String(), Image: r.Image, ImageRef: r.ImageRef, Phase: r.Phase, Reason: r.Reason,
+	return TenantJobStatus{ID: r.ID.String(), Environment: EnvRef{ID: r.EnvID.String(), Name: r.EnvName},
+		SecurityGroups: r.SecurityGroups, Image: r.Image, ImageRef: r.ImageRef, Phase: r.Phase, Reason: r.Reason,
 		Detail: r.Detail, ExitCode: r.ExitCode, Result: r.Result, ResultPath: r.ResultPath, Vcpus: r.VCPUs,
 		MemoryMib: r.MemoryMiB, Labels: r.Labels, CreatedAt: rfc3339(r.CreatedAt), StartedAt: rfc3339(r.StartedAt),
 		FinishedAt: rfc3339(r.FinishedAt), DeadlineAt: rfc3339(r.DeadlineAt), LogRetentionDays: r.LogRetentionDays}
@@ -106,12 +125,18 @@ func tenantJobStatus(r store.TenantJob) TenantJobStatus {
 // for a key a create with the same request made, the job that create
 // made (false). A key that names a job of another request is 422
 // job_key_conflict; the secrets and image credentials need
-// --secret-key-file (503).
+// --secret-key-file (503). Its environment must exist and not be being
+// deleted (404, 409), its groups be its deployed deployment's (422).
 func (s *Service) CreateTenantJob(ctx context.Context, tenant, key string, req CreateTenantJobRequest) (TenantJobStatus, bool, error) {
 	rs, err := tenantJobSpec(req)
 	if err != nil {
 		return TenantJobStatus{}, false, err
 	}
+	e, err := resolveEnv(ctx, s.st, tenant, req.Environment, store.NoLock)
+	if err != nil {
+		return TenantJobStatus{}, false, err
+	}
+	rs.EnvID = e.ID
 	rs.Key, rs.Hash = key, requestHash(req)
 	r, created, err := s.ctl.CreateTenantJob(ctx, tenant, rs)
 	if err != nil {
@@ -144,6 +169,17 @@ func tenantJobSpec(req CreateTenantJobRequest) (ctl.TenantJobSpec, error) {
 		ImageCredentials: req.ImageCredentials, ResultPath: req.ResultPath, Labels: req.Labels}
 	if rs.Image == "" {
 		return rs, errBadRequest("image is required")
+	}
+	if strings.TrimSpace(req.Environment) == "" {
+		return rs, errBadRequest("environment is required: the name or ID of the environment the job runs in (ADR 0035)")
+	}
+	var groups []string
+	if req.SecurityGroups != nil {
+		groups = *req.SecurityGroups
+	}
+	var err error
+	if rs.SecurityGroups, err = spec.PodGroups(groups, req.SecurityGroups != nil); err != nil {
+		return rs, errBadRequest("%s", err.Error())
 	}
 	for _, m := range []map[string]string{req.Env, req.Secrets} {
 		for k := range m {
@@ -210,11 +246,17 @@ func tenantJobError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, ctl.ErrNoEnvironment):
+		return errNoEnvironment()
 	case errors.Is(err, ctl.ErrNoObject), errors.Is(err, store.ErrNoRow):
 		return errNoTenantJob()
 	case errors.Is(err, ctl.ErrJobKeyConflict):
 		return apierr.WithCode(http.StatusUnprocessableEntity, CodeJobKeyConflict, "%s", err.Error())
 	case errors.Is(err, ctl.ErrJobImage):
+		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
+	case errors.Is(err, ctl.ErrEnvironmentDeleting):
+		return apierr.New(http.StatusConflict, "%s", err.Error())
+	case errors.Is(err, ctl.ErrUnknownGroups):
 		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
 	case errors.Is(err, ctl.ErrNoContainerLogs):
 		return apierr.New(http.StatusNotImplemented, "%s", err.Error())
@@ -251,9 +293,11 @@ func (s *Service) GetTenantJob(ctx context.Context, tenant, id string) (TenantJo
 }
 
 // ListTenantJobs is GET /api/v1/jobs?label=k=v…: the tenant's kept jobs that
-// carry every label, newest first.
-func (s *Service) ListTenantJobs(ctx context.Context, tenant string, labels map[string]string) (TenantJobList, error) {
-	rows, err := s.st.ListTenantJobs(ctx, tenant, labels)
+// carry every label, newest first; envs, when not nil, keeps those of
+// these environments.
+func (s *Service) ListTenantJobs(ctx context.Context, tenant string, labels map[string]string, envs []uuid.UUID) (
+	TenantJobList, error) {
+	rows, err := s.st.ListTenantJobs(ctx, tenant, labels, envs)
 	if err != nil {
 		return TenantJobList{}, err
 	}

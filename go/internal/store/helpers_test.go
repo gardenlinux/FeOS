@@ -5,6 +5,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -67,9 +68,30 @@ func mkSandbox(t *testing.T, s *store.Store, owner string) store.Sandbox {
 // 0019: a UUID in lowercase.
 func legacyID() podid.ID { return podid.ID(uuid.NewString()) }
 
+// boxEnv is the environment "box" of owner, made when it has none: where
+// the tests' sandboxes are (ADR 0035).
+func boxEnv(t *testing.T, s *store.Store, owner string) uuid.UUID {
+	t.Helper()
+	e, err := s.LockEnvironmentByName(bg, owner, "box", store.NoLock)
+	if errors.Is(err, store.ErrNoRow) {
+		e, err = s.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: owner, Name: "box"})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.ID
+}
+
 func mkSandboxID(t *testing.T, s *store.Store, owner string, id podid.ID) store.Sandbox {
 	t.Helper()
-	sb, created, err := s.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: owner, Image: "alpine", VCPUs: 2, MemoryMiB: 512})
+	return mkSandboxIn(t, s, owner, boxEnv(t, s, owner), id)
+}
+
+// mkSandboxIn makes a sandbox of owner in environment env.
+func mkSandboxIn(t *testing.T, s *store.Store, owner string, env uuid.UUID, id podid.ID) store.Sandbox {
+	t.Helper()
+	sb, created, err := s.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: owner, Image: "alpine", VCPUs: 2, MemoryMiB: 512,
+		EnvironmentID: env})
 	if err != nil || !created {
 		t.Fatalf("create sandbox: %v (created %v)", err, created)
 	}

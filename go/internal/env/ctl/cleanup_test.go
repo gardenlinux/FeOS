@@ -188,8 +188,11 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		return resolves(n1, sb.ID, "web") && resolves(n1, sb.ID, "api")
 	})
 
-	// Its environment deleted.
+	// Its environment deleted (as a tenant's deletion does; the API
+	// refuses it while the environment has sandboxes, ADR 0035).
 	stage := h.newEnv("stage")
+	sb = h.attachableIn(stage, podid.Mint())
+	web = fmt.Sprintf(`"web":{"runtime":"attached","sandbox":%q,"command":["sleep","120"]}`, sb.ID)
 	h.waitDeployment(stage.ID, h.apply(stage.ID, `{"services":{`+web+`}}`), model.DeploymentDeployed, 60*time.Second)
 	b, err := h.st.GetAttached(bg, stage.ID, "web")
 	if err != nil || b.ProcessID == "" {
@@ -209,14 +212,23 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		t.Fatalf("running %v", got)
 	}
 	pp.failStops.Store(false)
-	eventually(t, 60*time.Second, "the environment deleted", func() bool {
+	eventually(t, 60*time.Second, "the attached service gone", func() bool {
 		h.c.notify(bg, LoopDelete)
-		_, err := h.st.GetEnvironment(bg, stage.ID)
+		_, err := h.st.GetAttached(bg, stage.ID, "web")
 		return errors.Is(err, store.ErrNoRow)
 	})
 	if got := h.runningNamed(sb, "ferun-env-stage-web"); len(got) != 0 {
 		t.Fatalf("the deleted environment's process runs on: %v", got)
 	}
+	// The environment goes once its sandbox has.
+	if _, _, err := h.eng.Delete(bg, testTenant, sb.ID); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 60*time.Second, "the environment deleted", func() bool {
+		h.c.notify(bg, LoopDelete)
+		_, err := h.st.GetEnvironment(bg, stage.ID)
+		return errors.Is(err, store.ErrNoRow)
+	})
 }
 
 // An attached service moved away from a sandbox that sleeps: the old
@@ -310,11 +322,11 @@ func TestAttachedCleanLeavesNewIncarnation(t *testing.T) {
 	}
 	eventually(t, 30*time.Second, "cleaned in the woken sandbox", func() bool { return done.Load() == 1 && pp.stops.Load() == 1 })
 	if !leftNothing(env, store.EnvAttached{SandboxID: sb.ID}, store.Sandbox{ID: sb.ID, Owner: env.Owner,
-		ClientState: model.StateStopped}) {
+		EnvironmentID: env.ID, ClientState: model.StateStopped}) {
 		t.Error("a stopped sandbox holds something")
 	}
 	if leftNothing(env, store.EnvAttached{SandboxID: sb.ID}, store.Sandbox{ID: sb.ID, Owner: env.Owner,
-		ClientState: model.StatePaused}) {
+		EnvironmentID: env.ID, ClientState: model.StatePaused}) {
 		t.Error("a paused sandbox holds nothing")
 	}
 }

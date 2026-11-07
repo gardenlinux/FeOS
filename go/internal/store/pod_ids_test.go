@@ -30,7 +30,7 @@ func TestLegacySandboxBesideShortIDs(t *testing.T) {
 	if got := get(t, s, legacy.ID); got.ID != legacy.ID || got.Incarnation != legacy.Incarnation {
 		t.Fatalf("get %+v", got)
 	}
-	l, err := s.ListSandboxes(bg, "acme")
+	l, err := s.ListSandboxes(bg, "acme", nil)
 	if err != nil || len(l) != 2 || !slices.ContainsFunc(l, func(sb store.Sandbox) bool { return sb.ID == legacy.ID }) {
 		t.Fatalf("list %+v %v", l, err)
 	}
@@ -93,9 +93,10 @@ func TestCreateMintedSandbox(t *testing.T) {
 	s, _ := newStore(t)
 	mkTenant(t, s, "acme")
 	seen := map[podid.ID]bool{}
+	env := boxEnv(t, s, "acme")
 	for range 20 {
 		sb, err := s.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
-			return store.NewSandbox{ID: id, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 256,
+			return store.NewSandbox{ID: id, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 256, EnvironmentID: env,
 				PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.SandboxGroupID(id)}}}
 		})
 		if err != nil || !podid.Valid(string(sb.ID)) || sb.ID.IsLegacy() || seen[sb.ID] {
@@ -111,7 +112,7 @@ func TestCreateMintedSandbox(t *testing.T) {
 	}
 	// A row whose ID is not the one drawn is refused.
 	_, err := s.CreateMintedSandbox(bg, func(podid.ID) store.NewSandbox {
-		return store.NewSandbox{ID: podid.Mint(), Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 256}
+		return store.NewSandbox{ID: podid.Mint(), Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 256, EnvironmentID: env}
 	})
 	if err == nil {
 		t.Fatal("a row with another ID was inserted")
@@ -125,15 +126,18 @@ func TestCreateMintedSandbox(t *testing.T) {
 func TestSandboxIDCheck(t *testing.T) {
 	s, _ := newStore(t)
 	mkTenant(t, s, "acme")
+	env := boxEnv(t, s, "acme")
 	for _, id := range []string{"NOT-AN-ID", "0190A7C4-1E2F-7A3B-9C4D-5E6F708192A3", "Abcdefghjkm", "0bcdefghjkm",
 		"abcdefghjkl", "abcdefghjk", ""} {
-		_, err := s.Q().Exec(bg, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib) VALUES ($1, 'acme', 'x', 1, 256)`, id)
+		_, err := s.Q().Exec(bg, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id)
+			VALUES ($1, 'acme', 'x', 1, 256, $2)`, id, env)
 		if err == nil || !strings.Contains(err.Error(), "sandboxes_id_format") {
 			t.Errorf("insert of %q: %v", id, err)
 		}
 	}
 	for _, id := range []string{"abcdefghjkm", "0190a7c4-1e2f-7a3b-9c4d-5e6f708192a3"} {
-		exec(t, s, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib) VALUES ($1, 'acme', 'x', 1, 256)`, id)
+		exec(t, s, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id)
+			VALUES ($1, 'acme', 'x', 1, 256, $2)`, id, env)
 	}
 	// The columns without a foreign key have the check of their own.
 	mkNode(t, s, "n1")

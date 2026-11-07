@@ -11,11 +11,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/config"
+	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/env/ctl"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/quota"
@@ -44,21 +50,24 @@ func tenantOf(r *http.Request) string {
 }
 
 // errUnknownSandbox is the answer to a sandbox the tenant does not own,
-// the same whether it is foreign, absent or an environment's instance
-// (ADR 0018: the environments' API shows those).
+// the same whether it is foreign, absent, an environment's instance (ADR
+// 0018: the environments' API shows those), or in an environment the
+// principal may not read (ADR 0035).
 func errUnknownSandbox(id string) error {
 	return apierr.New(http.StatusNotFound, "unknown sandbox %s", id)
 }
 
 // owned reads the sandbox of the path's {id} that the request's tenant
-// owns; an environment's instance row is none.
+// owns; an environment's instance row and a tenant's job's pod are none.
+// The route's need (onSandbox) checked the principal's role on its
+// environment.
 func (s *server) owned(r *http.Request) (store.Sandbox, error) {
 	id, err := pathSandboxID(r)
 	if err != nil {
 		return store.Sandbox{}, err
 	}
 	sb, err := s.st.GetSandbox(r.Context(), id)
-	if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenantOf(r) || sb.IsInstance())) {
+	if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenantOf(r) || !sb.IsOwn())) {
 		return store.Sandbox{}, errUnknownSandbox(id.String())
 	}
 	if err != nil {
@@ -76,10 +85,12 @@ type createSandboxRequest struct {
 	// The size, fixed for the sandbox's life; 0: the default.
 	Vcpus     int `json:"vcpus"`
 	MemoryMib int `json:"memoryMib"`
-	// Attachable gives the sandbox's pod a security group of its own,
-	// sbx-<id>, which an environment's attached services in it reach the
-	// environment's addons through (ADR 0018). Fixed for its life.
-	Attachable bool `json:"attachable"`
+	// Environment names the environment the sandbox is in (ADR 0035), by
+	// name or ID; required, fixed for its life.
+	Environment string `json:"environment"`
+	// SecurityGroups are the groups of the environment its pod is in, 1
+	// to 5 of its deployed deployment's; nil (left out): [default].
+	SecurityGroups *[]string `json:"securityGroups"`
 	// ImageCredentials are the login for the image's registry (ADR 0025),
 	// sealed and never returned; nil: anonymous.
 	ImageCredentials *model.RegistryCredentials `json:"imageCredentials"`
@@ -88,25 +99,43 @@ type createSandboxRequest struct {
 	Credentials []string `json:"credentials"`
 }
 
-// sandboxView is a sandbox as the sandbox routes show it: its status and
-// whether it is attachable.
+// sandboxView is a sandbox as the sandbox routes show it: its status, its
+// environment and its groups there (ADR 0035).
 type sandboxView struct {
 	sandboxStatus
-	Attachable bool `json:"attachable"`
+	Environment    envs.EnvRef `json:"environment"`
+	SecurityGroups []string    `json:"securityGroups"`
 }
 
-// viewOf renders a row for the sandbox routes.
-func viewOf(sb store.Sandbox) sandboxView {
-	return sandboxView{sandboxStatus: statusOf(sb), Attachable: sb.PodTemplate != nil && !sb.IsInstance()}
+// viewOf renders a row for the sandbox routes, envName its environment's
+// name.
+func viewOf(sb store.Sandbox, envName string) sandboxView {
+	return sandboxView{sandboxStatus: statusOf(sb), Environment: envs.EnvRef{ID: sb.EnvironmentID.String(), Name: envName},
+		SecurityGroups: sb.SecurityGroups}
 }
 
-// attachableTemplate is the pod template of an attachable sandbox (ADR
-// 0018 §2.3): the command of every sandbox's pod, no env, the default
-// labels, the sandbox's own security group, which the environments it
-// serves let reach their addons, and its own name table, which names its
-// attached services and the addons and image services of their
-// environments.
-func attachableTemplate(id podid.ID) *model.PodTemplate {
+// view renders a row with its environment's name read.
+func (s *server) view(ctx context.Context, sb store.Sandbox) (sandboxView, error) {
+	e, err := s.st.GetEnvironment(ctx, sb.EnvironmentID)
+	if err != nil {
+		return sandboxView{}, fmt.Errorf("environment of %s: %w", sb.ID, err)
+	}
+	return viewOf(sb, e.Name), nil
+}
+
+// errAttachable is the answer to a create that sends attachable.
+func errAttachable() error {
+	return apierr.New(http.StatusBadRequest, "attachable is gone with ADR 0035: every sandbox of an environment can run "+
+		"its attached services; leave it out and name the sandbox's environment")
+}
+
+// sandboxTemplate is the pod template of a sandbox (ADR 0018 §2.3): the
+// command of every sandbox's pod, no env, the default labels, the
+// sandbox's own security group, which its environment's attached services
+// in it reach the environment's addons through, and its own name table,
+// which names its attached services and the addons and image services of
+// their environment.
+func sandboxTemplate(id podid.ID) *model.PodTemplate {
 	return &model.PodTemplate{Command: []string{"sleep", "infinity"}, SecurityGroups: []string{model.SandboxGroupID(id)},
 		NameTables: []string{model.SandboxTableID(id)}}
 }
@@ -162,11 +191,14 @@ func (s *server) size(req createSandboxRequest) (vcpus, memoryMiB int, err error
 }
 
 // createSandbox is POST /api/v1/sandboxes: in one transaction, the tenant
-// (refused while it is being deleted), a new row under an ID ferund mints
-// (ADR 0019), and the first token. Nothing reaches a node: the sandbox
-// materialises at its first tool call. The answer, a 201, carries the
-// sandbox's ID (status.sandboxId) and its token. A create is not
-// idempotent: a request that names an ID is a 400 (errClientID).
+// (refused while it is being deleted), its environment (FOR SHARE,
+// refused while it is being deleted, the groups checked against its
+// deployed deployment's), a new row under an ID ferund mints (ADR 0019),
+// and the first token. Nothing reaches a node: the sandbox materialises at
+// its first tool call. The answer, a 201, carries the sandbox's ID
+// (status.sandboxId) and its token. A create is not idempotent: a request
+// that names an ID is a 400 (errClientID). It needs write on the
+// environment.
 func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	var req createSandboxRequest
 	sent, err := decodeJSON(r, &req)
@@ -175,6 +207,21 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	}
 	if namesID(sent) {
 		return errClientID()
+	}
+	if _, ok := sent["attachable"]; ok {
+		return errAttachable()
+	}
+	if strings.TrimSpace(req.Environment) == "" {
+		return apierr.New(http.StatusBadRequest,
+			"environment is required: the name or ID of the environment the sandbox is in (ADR 0035)")
+	}
+	groups, err := podGroups(req.SecurityGroups)
+	if err != nil {
+		return err
+	}
+	env, err := s.writableEnv(r, req.Environment)
+	if err != nil {
+		return err
 	}
 	vcpus, memoryMiB, err := s.size(req)
 	if err != nil {
@@ -214,13 +261,13 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		if t.Deleting() {
 			return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
 		}
+		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, env.ID, groups)); err != nil {
+			return err
+		}
 		row, err = tx.CreateMintedSandbox(r.Context(), func(id podid.ID) store.NewSandbox {
-			n := store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
-				MadeBy: auth.MadeBy(r.Context())}
-			if req.Attachable {
-				n.PodTemplate = attachableTemplate(id)
-			}
-			return n
+			return store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
+				EnvironmentID: env.ID, SecurityGroups: groups, PodTemplate: sandboxTemplate(id),
+				LogLabels: ctl.SandboxLogLabels(tenant, id, env.ID), MadeBy: auth.MadeBy(r.Context())}
 		})
 		if err != nil {
 			return err
@@ -239,7 +286,162 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 			return passOr(err, "create: its credentials")
 		}
 	}
-	return writeJSON(w, http.StatusCreated, createSandboxResponse{Status: viewOf(row), Token: token, Created: true})
+	return writeJSON(w, http.StatusCreated, createSandboxResponse{Status: viewOf(row, env.Name), Token: token, Created: true})
+}
+
+// podGroups checks the securityGroups of a sandbox's create or PUT (400).
+func podGroups(sent *[]string) ([]string, error) {
+	var names []string
+	if sent != nil {
+		names = *sent
+	}
+	groups, err := spec.PodGroups(names, sent != nil)
+	if err != nil {
+		return nil, apierr.New(http.StatusBadRequest, "%s", err.Error())
+	}
+	return groups, nil
+}
+
+// podEnvError is the answer of ctl.LockPodEnvironment's errors.
+func podEnvError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ctl.ErrNoEnvironment):
+		return errNoEnvironment()
+	case errors.Is(err, ctl.ErrEnvironmentDeleting):
+		return apierr.New(http.StatusConflict, "%s", err.Error())
+	case errors.Is(err, ctl.ErrUnknownGroups):
+		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
+	}
+	return err
+}
+
+// writableEnv is the environment of the request's tenant that ref names
+// (its name or ID), on which the principal holds write: none it may see
+// is 404, too low a role 403.
+func (s *server) writableEnv(r *http.Request, ref string) (store.Environment, error) {
+	t, _ := auth.TenantFrom(r.Context())
+	id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
+	if isNoRow(err) {
+		return store.Environment{}, errNoEnvironment()
+	}
+	if err != nil {
+		return store.Environment{}, fmt.Errorf("environment %s: %w", ref, err)
+	}
+	if err := allowEnvID(t, id, write); err != nil {
+		return store.Environment{}, err
+	}
+	e, err := s.st.GetEnvironment(r.Context(), id)
+	if isNoRow(err) {
+		return store.Environment{}, errNoEnvironment()
+	}
+	return e, err
+}
+
+// readableEnvs is the filter of a list of what runs in environments
+// (sandboxes, jobs): ?environment= names one the principal may read (404
+// when it may not see it); without it nil (every one) for a reader of the
+// tenant, else the environments the principal reads.
+func (s *server) readableEnvs(r *http.Request) ([]uuid.UUID, error) {
+	t, _ := auth.TenantFrom(r.Context())
+	if ref := r.URL.Query().Get("environment"); ref != "" {
+		id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
+		if isNoRow(err) {
+			return nil, errNoEnvironment()
+		}
+		if err != nil {
+			return nil, fmt.Errorf("environment %s: %w", ref, err)
+		}
+		if t.EnvRole(id) < read {
+			return nil, errNoEnvironment()
+		}
+		return []uuid.UUID{id}, nil
+	}
+	if t.MayOnTenant(read) {
+		return nil, nil
+	}
+	out := []uuid.UUID{}
+	for id, role := range t.Envs {
+		if role >= read {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// sandboxGroups is the body of PUT /api/v1/sandboxes/{id}/security-groups.
+type sandboxGroups struct {
+	SecurityGroups *[]string `json:"securityGroups"`
+}
+
+// putSandboxGroups is PUT /api/v1/sandboxes/{id}/security-groups
+// {securityGroups}: the groups of its environment the sandbox is in (ADR
+// 0035), checked as a create's. The change is a move: a sandbox with a pod
+// is hibernated and restored with them (a new address; the controller
+// does it, groups_pending), a hibernated or never started one takes them
+// at its next restore or create. 202 with the sandbox; an unchanged list
+// is 200 and does nothing.
+func (s *server) putSandboxGroups(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathSandboxID(r)
+	if err != nil {
+		return err
+	}
+	var req sandboxGroups
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.SecurityGroups == nil {
+		return apierr.New(http.StatusBadRequest, "securityGroups is required")
+	}
+	groups, err := podGroups(req.SecurityGroups)
+	if err != nil {
+		return err
+	}
+	tenant := tenantOf(r)
+	status := http.StatusAccepted
+	var row store.Sandbox
+	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
+		sb, err := tx.LockSandbox(r.Context(), id, store.ForUpdate)
+		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenant || !sb.IsOwn())) {
+			return errUnknownSandbox(id.String())
+		}
+		if err != nil {
+			return err
+		}
+		if slices.Equal(sb.SecurityGroups, groups) {
+			status, row = http.StatusOK, sb
+			return nil
+		}
+		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, sb.EnvironmentID, groups)); err != nil {
+			return err
+		}
+		if _, err := tx.SetSandboxGroups(r.Context(), id, groups, hasPod(sb)); err != nil {
+			return err
+		}
+		row, err = tx.GetSandbox(r.Context(), id)
+		return err
+	})
+	if err != nil {
+		return passOr(err, "security groups")
+	}
+	v, err := s.view(r.Context(), row)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, status, v)
+}
+
+// hasPod reports whether a sandbox may have a pod made under its groups,
+// which a change of them must move: every state but pending (none made
+// yet) and hibernating and hibernated (none kept; the restore makes it
+// anew).
+func hasPod(sb store.Sandbox) bool {
+	switch sb.ClientState {
+	case model.StatePending, model.StateHibernating, model.StateHibernated:
+		return false
+	}
+	return true
 }
 
 // sandboxCredentials is the answer of the credentials a sandbox names.
@@ -286,10 +488,23 @@ func (s *server) putSandboxCredentials(w http.ResponseWriter, r *http.Request) e
 	return writeJSON(w, http.StatusOK, sandboxCredentials{Credentials: names})
 }
 
-// listSandboxes is GET /api/v1/sandboxes: the tenant's, oldest first,
-// without its environments' instances.
+// listSandboxes is GET /api/v1/sandboxes[?environment=]: the tenant's
+// that the principal may read (readableEnvs), oldest first, without its
+// environments' instances.
 func (s *server) listSandboxes(w http.ResponseWriter, r *http.Request) error {
-	rows, err := s.st.ListSandboxes(r.Context(), tenantOf(r))
+	envIDs, err := s.readableEnvs(r)
+	if err != nil {
+		return err
+	}
+	rows, err := s.st.ListSandboxes(r.Context(), tenantOf(r), envIDs)
+	if err != nil {
+		return fmt.Errorf("list: %w", err)
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, sb := range rows {
+		ids = append(ids, sb.EnvironmentID)
+	}
+	names, err := s.st.EnvironmentNames(r.Context(), ids)
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
@@ -297,7 +512,7 @@ func (s *server) listSandboxes(w http.ResponseWriter, r *http.Request) error {
 		Sandboxes []sandboxView `json:"sandboxes"`
 	}{Sandboxes: make([]sandboxView, 0, len(rows))}
 	for _, sb := range rows {
-		out.Sandboxes = append(out.Sandboxes, viewOf(sb))
+		out.Sandboxes = append(out.Sandboxes, viewOf(sb, names[sb.EnvironmentID]))
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
@@ -308,7 +523,11 @@ func (s *server) getSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, viewOf(sb))
+	v, err := s.view(r.Context(), sb)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, v)
 }
 
 // deleteSandbox is DELETE /api/v1/sandboxes/{id}: the row goes in one
@@ -329,7 +548,10 @@ func (s *server) deleteSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return internalf("delete: %v", err)
 	}
-	st := viewOf(row)
+	st, err := s.view(r.Context(), row)
+	if err != nil {
+		return err
+	}
 	st.DesiredState = desiredDeleted
 	if tombstoned {
 		st.ClientState, st.State = stateAbsent, stateAbsent
@@ -355,7 +577,16 @@ func (s *server) pauseSandbox(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return internalf("pause: %v", err)
 	}
-	return writeJSON(w, http.StatusOK, viewOf(sb))
+	return s.writeView(w, r, sb)
+}
+
+// writeView answers a sandbox's view, 200.
+func (s *server) writeView(w http.ResponseWriter, r *http.Request, sb store.Sandbox) error {
+	v, err := s.view(r.Context(), sb)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, v)
 }
 
 // resumeSandbox is POST /api/v1/sandboxes/{id}/resume: Ensure (within the
@@ -374,7 +605,7 @@ func (s *server) resumeSandbox(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return internalf("resume: %v", err)
 	}
-	return writeJSON(w, http.StatusOK, viewOf(sb))
+	return s.writeView(w, r, sb)
 }
 
 // tokenInfo is a sandbox token as listed: its hash, never the token.
@@ -438,7 +669,7 @@ func (s *server) createSandboxToken(w http.ResponseWriter, r *http.Request) erro
 	var tok store.SandboxToken
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
 		sb, err := tx.LockSandbox(r.Context(), id, store.ForShare)
-		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenantOf(r) || sb.IsInstance())) {
+		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenantOf(r) || !sb.IsOwn())) {
 			return errUnknownSandbox(id.String())
 		}
 		if err != nil {

@@ -21,6 +21,7 @@ import (
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 	"github.com/gardenlinux/feos/go/internal/db"
+	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -337,7 +338,8 @@ func TestPublishEventsAttribution(t *testing.T) {
 	}
 	// Short IDs and, made before ADR 0019, UUIDs.
 	mkWith := func(id podid.ID) podid.ID {
-		if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512}); err != nil {
+		if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512,
+			EnvironmentID: dbtest.Environment(t, h.st.Q(), "acme", "box")}); err != nil {
 			t.Fatal(err)
 		}
 		return id
@@ -427,7 +429,8 @@ func TestPublishEventsReconcileOnlyForRowsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	onNode := podid.Mint()
-	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: onNode, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512}); err != nil {
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: onNode, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512,
+		EnvironmentID: dbtest.Environment(t, h.st.Q(), "acme", "box")}); err != nil {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE sandboxes SET node = 'n1' WHERE id = $1", onNode)
@@ -472,7 +475,8 @@ func TestPublishEventsAckLost(t *testing.T) {
 		t.Fatal(err)
 	}
 	pod := podid.Mint()
-	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: pod, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512}); err != nil {
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: pod, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512,
+		EnvironmentID: dbtest.Environment(t, h.st.Q(), "acme", "box")}); err != nil {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE sandboxes SET node = 'n2', client_state = 'running' WHERE id = $1", pod)
@@ -589,7 +593,7 @@ func TestPublishEventsEgress(t *testing.T) {
 	}
 	pod := podid.Mint()
 	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: pod, Owner: "acme", Image: "alpine", VCPUs: 1,
-		MemoryMiB: 512}); err != nil {
+		MemoryMiB: 512, EnvironmentID: dbtest.Environment(t, h.st.Q(), "acme", "box")}); err != nil {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE sandboxes SET node = 'n1', client_state = 'running' WHERE id = $1", pod)

@@ -172,7 +172,7 @@ func (s *Store) ResolveSandboxToken(ctx context.Context, hash string) (podid.ID,
 	var owner string
 	err := s.q.QueryRow(ctx, `SELECT t.sandbox_id, s.owner FROM sandbox_tokens t
 		JOIN sandboxes s ON s.id = t.sandbox_id JOIN tenants n ON n.id = s.owner
-		WHERE t.hash = $1 AND n.deleting_at IS NULL AND s.environment_id IS NULL AND NOT s.tenant_job`, hash).Scan(&id, &owner)
+		WHERE t.hash = $1 AND n.deleting_at IS NULL AND NOT s.instance AND NOT s.tenant_job`, hash).Scan(&id, &owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", model.ErrUnknownToken
 	}

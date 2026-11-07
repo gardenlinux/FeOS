@@ -83,7 +83,7 @@ func (h *harness) publish(id uuid.UUID, public bool) {
 func (h *harness) mkInstance(env store.Environment, service, phase, state string, ports ...int) podid.ID {
 	h.t.Helper()
 	sb, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: "acme", Image: service, VCPUs: 1,
-		MemoryMiB: 256, EnvironmentID: env.ID, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(env.ID)}}})
+		MemoryMiB: 256, EnvironmentID: env.ID, Instance: true, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(env.ID)}}})
 	if err != nil || !created {
 		h.t.Fatalf("create sandbox: %v %v", err, created)
 	}

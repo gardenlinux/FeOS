@@ -562,13 +562,18 @@ TABLE jobs
   COLUMN deadline_at timestamp with time zone NOT NULL
   COLUMN log_retention_days integer
   COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN environment_id uuid NOT NULL
+  COLUMN security_groups text[] NOT NULL DEFAULT '{default}'::text[]
+  CONSTRAINT CHECK (((cardinality(security_groups) >= 1) AND (cardinality(security_groups) <= 5)))
   CONSTRAINT CHECK (((finished_at IS NULL) = (phase = ANY (ARRAY['queued'::text, 'running'::text]))))
   CONSTRAINT CHECK (((log_retention_days >= 1) AND (log_retention_days <= 400)))
   CONSTRAINT CHECK ((id ~ '^[a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}$'::text))
   CONSTRAINT CHECK ((phase = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'deadline_exceeded'::text, 'cancelled'::text])))
+  CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, idempotency_key)
+  CREATE INDEX jobs_environment ON public.jobs USING btree (environment_id, created_at)
   CREATE INDEX jobs_finished ON public.jobs USING btree (finished_at) WHERE (finished_at IS NOT NULL)
   CREATE INDEX jobs_open ON public.jobs USING btree (created_at) WHERE (finished_at IS NULL)
   CREATE INDEX jobs_owner ON public.jobs USING btree (owner, created_at)
@@ -835,7 +840,7 @@ TABLE sandboxes
   COLUMN policy_failed text NOT NULL DEFAULT ''::text
   COLUMN policy_failures integer NOT NULL DEFAULT 0
   COLUMN policy_not_before timestamp with time zone
-  COLUMN environment_id uuid
+  COLUMN environment_id uuid NOT NULL
   COLUMN pod_template jsonb
   COLUMN pin_node text NOT NULL DEFAULT ''::text
   COLUMN idle_after_s integer
@@ -845,9 +850,14 @@ TABLE sandboxes
   COLUMN http_version text NOT NULL DEFAULT ''::text
   COLUMN http_pushed text NOT NULL DEFAULT ''::text
   COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN instance boolean NOT NULL DEFAULT false
+  COLUMN security_groups text[] NOT NULL DEFAULT '{default}'::text[]
+  COLUMN groups_pending boolean NOT NULL DEFAULT false
+  CONSTRAINT CHECK (((instance AND (cardinality(security_groups) = 0) AND (NOT groups_pending)) OR ((NOT instance) AND ((cardinality(security_groups) >= 1) AND (cardinality(security_groups) <= 5)))))
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((vcpus >= 1) AND (vcpus <= 32)))
+  CONSTRAINT CHECK ((NOT (instance AND tenant_job)))
   CONSTRAINT CHECK ((client_state = ANY (ARRAY['pending'::text, 'creating'::text, 'running'::text, 'pausing'::text, 'paused'::text, 'resuming'::text, 'hibernating'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'unknown'::text, 'lost'::text])))
   CONSTRAINT CHECK ((id ~ '^([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'::text))
   CONSTRAINT CHECK ((idle_after_s >= 0))
@@ -858,7 +868,8 @@ TABLE sandboxes
   CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id)
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX sandboxes_attention ON public.sandboxes USING btree (client_state) WHERE ((client_state = ANY (ARRAY['unknown'::text, 'creating'::text, 'pending'::text])) OR (unreachable_since IS NOT NULL))
-  CREATE INDEX sandboxes_environment ON public.sandboxes USING btree (environment_id) WHERE (environment_id IS NOT NULL)
+  CREATE INDEX sandboxes_environment ON public.sandboxes USING btree (environment_id)
+  CREATE INDEX sandboxes_groups_pending ON public.sandboxes USING btree (id) WHERE groups_pending
   CREATE INDEX sandboxes_idle ON public.sandboxes USING btree (last_active_at) WHERE ((client_state = 'running'::text) AND (op = ''::text))
   CREATE INDEX sandboxes_lost_from ON public.sandboxes USING btree (lost_from) WHERE (lost_from IS NOT NULL)
   CREATE INDEX sandboxes_node ON public.sandboxes USING btree (node) WHERE (node IS NOT NULL)

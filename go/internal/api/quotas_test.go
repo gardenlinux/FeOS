@@ -33,7 +33,7 @@ func TestQuotas(t *testing.T) {
 			`"runningJobs":0,"vcpus":0,"memoryMib":0}}`+"\n")
 	// Tenants operators make have none.
 	expect(t, e.serve(byToken(e.tenantToken, "GET", "/api/v1/tenant/quota", nil)), http.StatusOK,
-		`{"limits":{},"use":{"sandboxes":0,"environments":2,"runningJobs":0,"vcpus":0,"memoryMib":0}}`+"\n")
+		`{"limits":{},"use":{"sandboxes":0,"environments":3,"runningJobs":0,"vcpus":0,"memoryMib":0}}`+"\n")
 
 	// An operator sets a tenant's limits; null and absent are none.
 	expect(t, e.do("PUT", "/api/v1/admin/tenants/shop/limits", adminAuth(), map[string]any{"sandboxes": 3,
@@ -45,7 +45,9 @@ func TestQuotas(t *testing.T) {
 	expect(t, e.serve(as(p, "", "PUT", "/api/v1/admin/tenants/shop/limits", map[string]any{})), http.StatusForbidden,
 		errBody("operators only"))
 
+	mkEnvRow(t, e, "shop", "box")
 	create := func(body map[string]any) *httptest.ResponseRecorder {
+		body["environment"] = "box"
 		return e.serve(as(p, "shop", "POST", "/api/v1/sandboxes", body))
 	}
 	expect(t, create(map[string]any{"vcpus": 2}), http.StatusCreated, "")

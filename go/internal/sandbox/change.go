@@ -88,7 +88,7 @@ func (c *change) commit(ctx context.Context) error {
 		return err
 	}
 	c.written = written
-	if written.Address != c.before.Address && (written.IsInstance() || written.HasGroups()) {
+	if written.Address != c.before.Address {
 		if err := c.tx.Notify(ctx, db.ChanLeader, store.HintEnvGroups); err != nil {
 			return err
 		}

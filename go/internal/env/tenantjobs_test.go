@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 	"time"
 
@@ -18,36 +19,46 @@ import (
 
 // A job's create gets its defaults, and a 400 for what it gets wrong.
 func TestTenantJobSpec(t *testing.T) {
-	rs, err := tenantJobSpec(CreateTenantJobRequest{Image: "builder:1", ResultPath: "/run/out/digest"})
+	rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "builder:1", ResultPath: "/run/out/digest"})
 	if err != nil || rs.VCPUs != spec.DefaultVCPUs || rs.MemoryMiB != spec.DefaultMemoryMib ||
-		rs.Deadline != 10*time.Minute || rs.ResultPath != "/run/out/digest" {
+		rs.Deadline != 10*time.Minute || rs.ResultPath != "/run/out/digest" || !slices.Equal(rs.SecurityGroups, []string{"default"}) {
 		t.Fatalf("defaults %+v %v", rs, err)
 	}
-	if rs, err := tenantJobSpec(CreateTenantJobRequest{Image: "b", Vcpus: 2, MemoryMib: 2048, Deadline: "20m"}); err != nil ||
+	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", Vcpus: 2, MemoryMib: 2048, Deadline: "20m"}); err != nil ||
 		rs.VCPUs != 2 || rs.MemoryMiB != 2048 || rs.Deadline != 20*time.Minute {
 		t.Fatalf("sized %+v %v", rs, err)
 	}
 	for _, d := range []int{0, 1, 400} {
-		if rs, err := tenantJobSpec(CreateTenantJobRequest{Image: "b", LogRetentionDays: d}); err != nil || rs.LogRetentionDays != d {
+		if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", LogRetentionDays: d}); err != nil || rs.LogRetentionDays != d {
 			t.Fatalf("logRetentionDays %d: %+v %v", d, rs, err)
 		}
 	}
+	groups := func(names ...string) *[]string { return &names }
+	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b",
+		SecurityGroups: groups("web", "db")}); err != nil || !slices.Equal(rs.SecurityGroups, []string{"db", "web"}) {
+		t.Fatalf("groups %+v %v", rs, err)
+	}
 	for _, bad := range []CreateTenantJobRequest{
 		{},
-		{Image: "b", Env: map[string]string{"A-B": "x"}},
-		{Image: "b", Secrets: map[string]string{"imageCredentials.username": "x"}},
-		{Image: "b", Env: map[string]string{"T": "x"}, Secrets: map[string]string{"T": "y"}},
-		{Image: "b", ImageCredentials: &model.RegistryCredentials{Username: "u"}},
-		{Image: "b", Vcpus: 99},
-		{Image: "b", MemoryMib: 1},
-		{Image: "b", Deadline: "3h"},
-		{Image: "b", Deadline: "soon"},
-		{Image: "b", ResultPath: "out"},
-		{Image: "b", ResultPath: "/dev/termination-log"},
-		{Image: "b", ResultPath: "/run/../etc/x"},
-		{Image: "b", Labels: map[string]string{"": "x"}},
-		{Image: "b", LogRetentionDays: -1},
-		{Image: "b", LogRetentionDays: 401},
+		{Image: "b"},
+		{Environment: "e", Image: "b", SecurityGroups: groups()},
+		{Environment: "e", Image: "b", SecurityGroups: groups("a", "b", "c", "d", "e", "f")},
+		{Environment: "e", Image: "b", SecurityGroups: groups("Web")},
+		{Environment: "e", Image: "b", SecurityGroups: groups("web", "web")},
+		{Environment: "e", Image: "b", Env: map[string]string{"A-B": "x"}},
+		{Environment: "e", Image: "b", Secrets: map[string]string{"imageCredentials.username": "x"}},
+		{Environment: "e", Image: "b", Env: map[string]string{"T": "x"}, Secrets: map[string]string{"T": "y"}},
+		{Environment: "e", Image: "b", ImageCredentials: &model.RegistryCredentials{Username: "u"}},
+		{Environment: "e", Image: "b", Vcpus: 99},
+		{Environment: "e", Image: "b", MemoryMib: 1},
+		{Environment: "e", Image: "b", Deadline: "3h"},
+		{Environment: "e", Image: "b", Deadline: "soon"},
+		{Environment: "e", Image: "b", ResultPath: "out"},
+		{Environment: "e", Image: "b", ResultPath: "/dev/termination-log"},
+		{Environment: "e", Image: "b", ResultPath: "/run/../etc/x"},
+		{Environment: "e", Image: "b", Labels: map[string]string{"": "x"}},
+		{Environment: "e", Image: "b", LogRetentionDays: -1},
+		{Environment: "e", Image: "b", LogRetentionDays: 401},
 	} {
 		_, err := tenantJobSpec(bad)
 		var ae *apierr.Error

@@ -30,7 +30,7 @@ func TestSandboxImageCredentials(t *testing.T) {
 	e := newEnv(t, envOptions{sealer: sl})
 	alice := model.RegistryCredentials{Username: "alice", Password: "s3cret"}
 	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
-		map[string]any{"image": "ghcr.io/acme/app:1", "imageCredentials": alice})
+		map[string]any{"environment": "box", "image": "ghcr.io/acme/app:1", "imageCredentials": alice})
 	expect(t, w, http.StatusCreated, "")
 	if bytes.Contains(w.Body.Bytes(), []byte("s3cret")) || bytes.Contains(w.Body.Bytes(), []byte("imageCredentials")) {
 		t.Fatalf("the answer shows the credentials: %s", w.Body)
@@ -92,13 +92,14 @@ func TestSandboxImageCredentials(t *testing.T) {
 		t.Fatalf("after the DELETE: %+v", got)
 	}
 	expect(t, e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
-		map[string]any{"imageCredentials": map[string]string{"password": "x"}}), http.StatusBadRequest, errBody("imageCredentials: image credentials need a username and a password"))
+		map[string]any{"environment": "box", "imageCredentials": map[string]string{"password": "x"}}), http.StatusBadRequest, errBody("imageCredentials: image credentials need a username and a password"))
 
 	// Without a key, credentials are refused, and a create without them
 	// works as before.
 	plain := newEnv(t, envOptions{})
 	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.tenantToken),
-		map[string]any{"imageCredentials": alice}), http.StatusServiceUnavailable,
+		map[string]any{"environment": "box", "imageCredentials": alice}), http.StatusServiceUnavailable,
 		errBody("image credentials need --secret-key-file on the control plane"))
-	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.tenantToken), map[string]any{}), http.StatusCreated, "")
+	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.tenantToken), map[string]any{"environment": "box"}),
+		http.StatusCreated, "")
 }

@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/google/uuid"
-
 	fleetv1 "github.com/gardenlinux/feos/go/gen/feos/fleet/v1"
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 	"github.com/gardenlinux/feos/go/internal/bindings/httpcheck"
@@ -84,9 +82,9 @@ func (s *Service) push(id podid.ID) {
 }
 
 // isEnvPod reports whether the row's HTTP bindings are its environment's:
-// an environment's pod whose template names bindings.
+// an environment's instance whose template names bindings.
 func isEnvPod(row store.Sandbox) bool {
-	return row.EnvironmentID != uuid.Nil && row.PodTemplate != nil && len(row.PodTemplate.HTTPBindings) > 0
+	return row.Instance && row.PodTemplate != nil && len(row.PodTemplate.HTTPBindings) > 0
 }
 
 // podVersionHTTP is a pod's version with its HTTP set and the CAs it is
@@ -184,7 +182,7 @@ func (s *Service) PodHTTP(ctx context.Context, row store.Sandbox) (*podv1.PodHtt
 		}
 		return clearPart(bs, givenCAs(bs, cas), version), nil
 	}
-	if row.IsInstance() {
+	if !row.IsOwn() {
 		return nil, nil
 	}
 	snap, err := s.snapshot(ctx, row.ID)

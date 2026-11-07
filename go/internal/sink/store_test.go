@@ -1048,6 +1048,8 @@ func TestFollowKey(t *testing.T) {
 		{Selector{Environment: "e", Kind: "service", Object: "api"}, "acme/e/service/api"},
 		{Selector{Environment: "e", Kind: "service", Object: "api", Replica: new(int)}, "acme/e/service/api"},
 		{Selector{Job: "j"}, "acme//j"},
+		// A tenant's job names its environment (ADR 0035).
+		{Selector{Environment: "e", Job: "j"}, "acme//j"},
 		{Selector{Instance: inst}, "acme/e/service/api"},
 		{Selector{Environment: "e"}, ""},
 		{Selector{Environment: "e", Object: "api"}, ""},

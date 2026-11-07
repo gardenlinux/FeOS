@@ -273,7 +273,7 @@ func TestLostDeleteRecreate(t *testing.T) {
 	}
 
 	n1.Partition(false)
-	again := c.createID(sb.id, false)
+	again := c.createID(sb.id, "box", false)
 	if out := c.retryRun(again, "cat marker 2>/dev/null || echo none", 90*time.Second); out != "none\n" {
 		t.Fatalf("the new sandbox sees %q", out)
 	}
@@ -293,7 +293,7 @@ func TestDeleteRecreateSingleNode(t *testing.T) {
 	if r := c.call(nil, "DELETE", sb.path(""), tenantAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
-	again := c.createID(sb.id, false)
+	again := c.createID(sb.id, "box", false)
 	if out := c.run(nil, again, "cat marker 2>/dev/null || echo none"); out != "none\n" {
 		t.Fatalf("the new sandbox sees %q", out)
 	}
@@ -309,8 +309,8 @@ func TestLegacyUUIDSandboxes(t *testing.T) {
 	c := newCluster(t, nil)
 	c.start("a")
 	n1 := c.join("n1")
-	legacy := c.createID(podid.ID("abcdef12-0000-4000-8000-"+uuid.NewString()[24:]), false)
-	short := c.createID("abcdef12xyz", false)
+	legacy := c.createID(podid.ID("abcdef12-0000-4000-8000-"+uuid.NewString()[24:]), "box", false)
+	short := c.createID("abcdef12xyz", "box", false)
 	minted := c.create(nil)
 	for _, sb := range []sandbox{legacy, short, minted} {
 		if out := c.run(nil, sb, "echo hi"); out != "hi\n" {
@@ -328,7 +328,7 @@ func TestLegacyUUIDSandboxes(t *testing.T) {
 	if r := c.call(nil, "GET", "/api/v1/sandboxes/"+strings.ToUpper(legacy.id.String()), tenantAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("GET of the uppercase UUID: %d %s", r.code, r.body)
 	}
-	twin := c.createID(podid.ID("abcdef12-1111-4000-8000-"+uuid.NewString()[24:]), false)
+	twin := c.createID(podid.ID("abcdef12-1111-4000-8000-"+uuid.NewString()[24:]), "box", false)
 	ctx, cancel := context.WithTimeout(bg, time.Minute)
 	defer cancel()
 	r, err := c.execErr(ctx, nil, twin, "true")

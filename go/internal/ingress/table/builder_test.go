@@ -128,7 +128,7 @@ func (f *fixture) mkEnv(t *testing.T, name, spec string) store.Environment {
 func (f *fixture) mkInstance(t *testing.T, env store.Environment, address string, ports ...int) podid.ID {
 	t.Helper()
 	sb, created, err := f.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: "acme", Image: "web", VCPUs: 1,
-		MemoryMiB: 256, EnvironmentID: env.ID, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(env.ID)}}})
+		MemoryMiB: 256, EnvironmentID: env.ID, Instance: true, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(env.ID)}}})
 	if err != nil || !created {
 		t.Fatalf("create sandbox: %v %v", err, created)
 	}

@@ -19,11 +19,11 @@ import (
 
 // attachedUsable is the condition under which an attached service a of
 // environment e may use the sandbox s it names (§13.6): s is a sandbox of
-// e's owner and not an instance row. A sandbox of the owner deleted and
+// e (ADR 0035), not an instance row or a tenant's job's pod. A sandbox of the owner deleted and
 // created again under the same ID (FeCode replaces a lost workspace
 // sandbox so) is a new incarnation the service starts in anew; one of
 // another tenant under that ID is never used.
-const attachedUsable = `s.owner = e.owner AND s.environment_id IS NULL AND NOT s.tenant_job`
+const attachedUsable = `s.owner = e.owner AND s.environment_id = e.id AND NOT s.instance AND NOT s.tenant_job`
 
 // EnvCtlMembers returns the members of an environment's security group:
 // the addresses of its instance rows (any state, until the row is gone)
@@ -31,7 +31,7 @@ const attachedUsable = `s.owner = e.owner AND s.environment_id IS NULL AND NOT s
 // without the empty ones, distinct and sorted. The caller keeps the IPv6
 // ones.
 func (s *Store) EnvCtlMembers(ctx context.Context, envID uuid.UUID) ([]string, error) {
-	rows, err := s.q.Query(ctx, `SELECT address FROM sandboxes WHERE environment_id = $1 AND address <> ''
+	rows, err := s.q.Query(ctx, `SELECT address FROM sandboxes WHERE environment_id = $1 AND instance AND address <> ''
 		UNION SELECT s.address FROM env_attached a JOIN environments e ON e.id = a.env_id
 			JOIN sandboxes s ON s.id = a.sandbox_id
 			WHERE a.env_id = $1 AND s.address <> '' AND `+attachedUsable+`
@@ -43,10 +43,18 @@ func (s *Store) EnvCtlMembers(ctx context.Context, envID uuid.UUID) ([]string, e
 }
 
 // EnvCtlSandboxes returns the instance rows of an environment (rows of
-// sandboxes with its environment_id), also those without an
+// sandboxes with its environment_id and instance), also those without an
 // env_instances row, by id.
 func (s *Store) EnvCtlSandboxes(ctx context.Context, envID uuid.UUID) ([]Sandbox, error) {
-	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+" FROM sandboxes WHERE environment_id = $1 ORDER BY id", envID))
+	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+" FROM sandboxes WHERE environment_id = $1 AND instance ORDER BY id", envID))
+}
+
+// CountEnvironmentRows counts the rows of sandboxes of an environment:
+// its instances, its sandboxes and its tenants' jobs' pods.
+func (s *Store) CountEnvironmentRows(ctx context.Context, envID uuid.UUID) (int64, error) {
+	var n int64
+	err := s.q.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE environment_id = $1", envID).Scan(&n)
+	return n, err
 }
 
 // EnvCtlCloseIncidents closes the environment's open incidents of one of
@@ -147,7 +155,7 @@ func (s *Store) EnvCtlTouchEnvironment(ctx context.Context, id uuid.UUID) error 
 // descriptions.
 func (s *Store) EnvCtlStarved(ctx context.Context, envID uuid.UUID, after time.Duration) (map[podid.ID]string, error) {
 	rows, err := s.q.Query(ctx, `SELECT id, status_description FROM sandboxes
-		WHERE environment_id = $1 AND client_state = 'pending' AND op = '' AND status_description LIKE 'no capacity%'
+		WHERE environment_id = $1 AND instance AND client_state = 'pending' AND op = '' AND status_description LIKE 'no capacity%'
 			AND coalesce(pending_since, created_at) <= now() - make_interval(secs => $2)`, envID, after.Seconds())
 	if err != nil {
 		return nil, err
@@ -221,8 +229,8 @@ func (s *Store) EnvCtlAttachedIn(ctx context.Context, sandboxID podid.ID) ([]Att
 }
 
 // EnvCtlTemplatedOnNode returns the rows with a pod template whose pod is
-// on node, or is being brought there by an op: instance rows and
-// attachable sandboxes, by id.
+// on node, or is being brought there by an op: instance rows, tenants'
+// jobs' pods and sandboxes, by id.
 func (s *Store) EnvCtlTemplatedOnNode(ctx context.Context, node string) ([]Sandbox, error) {
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
 		WHERE pod_template IS NOT NULL AND (node = $1 OR op_target = $1 OR lost_from = $1) ORDER BY id`, node))

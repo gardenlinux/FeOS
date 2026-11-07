@@ -274,8 +274,16 @@ const (
 	// grant and its grant on that environment.
 	scopeEnv
 	// scopeHandler: the handler checks, on what the request names (a
-	// domain's binding: the environments it leaves and joins).
+	// domain's binding: the environments it leaves and joins; a sandbox's
+	// or a job's create: the environment of its body).
 	scopeHandler
+	// scopeSandbox: the environment of the path's sandbox {id} (ADR
+	// 0035), as scopeEnv; a sandbox in one the principal may not read is
+	// absent (404).
+	scopeSandbox
+	// scopeJob: the environment of the path's tenant's job {id}, as
+	// scopeSandbox.
+	scopeJob
 )
 
 // need is the role and scope a tenant-class route needs of its principal,
@@ -290,8 +298,11 @@ type need struct {
 	orTenant auth.Role
 }
 
-func onTenant(r auth.Role) need { return need{role: r} }
-func onEnv(r auth.Role) need    { return need{role: r, scope: scopeEnv} }
+func onTenant(r auth.Role) need  { return need{role: r} }
+func onEnv(r auth.Role) need     { return need{role: r, scope: scopeEnv} }
+func onSandbox(r auth.Role) need { return need{role: r, scope: scopeSandbox} }
+func onJob(r auth.Role) need     { return need{role: r, scope: scopeJob} }
+func byHandler(r auth.Role) need { return need{role: r, scope: scopeHandler} }
 
 // member is the need of the routes every principal of the tenant may
 // call, whose answers are filtered to what it may read.
@@ -302,6 +313,10 @@ func (n need) String() string {
 	switch {
 	case n.scope == scopeHandler:
 		return n.role.String() + " checked by the handler"
+	case n.scope == scopeSandbox:
+		return n.role.String() + " sandbox's environment"
+	case n.scope == scopeJob:
+		return n.role.String() + " job's environment"
 	case n.scope == scopeEnv && n.orTenant != auth.RoleNone:
 		return n.role.String() + " environment or " + n.orTenant.String() + " tenant"
 	case n.scope == scopeEnv:
@@ -433,9 +448,63 @@ func (s *server) allow(r *http.Request, t auth.Tenant, n need) error {
 			return errNoEnvironment()
 		}
 		return s.allowEnv(r, t, r.PathValue("env"), n.role)
+	case scopeSandbox, scopeJob:
+		if t.Role >= n.role {
+			return nil
+		}
+		return s.allowPodEnv(r, t, n)
 	}
 	return nil
 }
+
+// allowPodEnv checks n's role on the environment of the path's sandbox
+// (scopeSandbox) or tenant's job (scopeJob) of t's tenant: one that is
+// none of the tenant's, or in an environment the principal may not read,
+// is absent (404); too low a role is 403.
+func (s *server) allowPodEnv(r *http.Request, t auth.Tenant, n need) error {
+	absent := func() error { return errUnknownSandbox(r.PathValue("id")) }
+	if n.scope == scopeJob {
+		absent = errNoTenantJob
+	}
+	if t.Role == auth.RoleNone && len(t.Envs) == 0 {
+		return absent()
+	}
+	id, err := podid.Parse(r.PathValue("id"))
+	if err != nil {
+		return absent()
+	}
+	var envID uuid.UUID
+	if n.scope == scopeSandbox {
+		sb, err := s.st.GetOwnSandbox(r.Context(), t.Name, id)
+		if isNoRow(err) {
+			return absent()
+		}
+		if err != nil {
+			return fmt.Errorf("sandbox %s: %w", id, err)
+		}
+		envID = sb.EnvID
+	} else {
+		j, err := s.st.GetTenantJob(r.Context(), t.Name, id)
+		if isNoRow(err) {
+			return absent()
+		}
+		if err != nil {
+			return fmt.Errorf("job %s: %w", id, err)
+		}
+		envID = j.EnvID
+	}
+	switch have := t.EnvRole(envID); {
+	case have < auth.RoleRead:
+		return absent()
+	case have < n.role:
+		return apierr.RoleRequired(n.role.String(), "environment")
+	}
+	return nil
+}
+
+// errNoTenantJob is the jobs' answer for a job the principal may not see
+// (env.errNoTenantJob's text).
+func errNoTenantJob() error { return apierr.New(http.StatusNotFound, "no such job") }
 
 // allowEnv checks role on the environment of t's tenant that ref names
 // (its ID or its name).

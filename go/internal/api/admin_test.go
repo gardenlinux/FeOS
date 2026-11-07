@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/fleet"
 	"github.com/gardenlinux/feos/go/internal/leader"
@@ -106,7 +108,7 @@ func TestTenants(t *testing.T) {
 	}](t, w)
 	if len(list.Tenants) != 2 || list.Tenants[0].Name != testTenant || list.Tenants[1].Name != "beta" ||
 		list.Tenants[0].SandboxCount != 1 || len(list.Tenants[1].Tokens) != 1 ||
-		list.Tenants[0].EnvironmentCount == nil || *list.Tenants[0].EnvironmentCount != 0 {
+		list.Tenants[0].EnvironmentCount == nil || *list.Tenants[0].EnvironmentCount != 1 {
 		t.Fatalf("tenants %+v", list.Tenants)
 	}
 	if strings.Contains(w.Body.String(), created.Token) {
@@ -157,7 +159,7 @@ func TestTenants(t *testing.T) {
 	if _, err := e.st.Q().Exec(context.Background(), "UPDATE tenants SET deleting_at = now() WHERE id = $1", testTenant); err != nil {
 		t.Fatal(err)
 	}
-	req := map[string]any{}
+	req := map[string]any{"environment": "box"}
 	w = e.serve(request{method: "POST", path: "/api/v1/sandboxes", body: req,
 		header: http.Header{"Authorization": {bearerOf(e.tenantToken)}}})
 	expect(t, w, http.StatusUnauthorized, errBody("unknown tenant token"))
@@ -181,6 +183,8 @@ func TestCreateWhileTenantDeleting(t *testing.T) {
 	// with the tenant in the context).
 	s := e.srv
 	r := newTenantRequest(t, "POST", "/api/v1/sandboxes", testTenant)
+	r = r.WithContext(auth.WithTenant(r.Context(), auth.Tenant{Name: testTenant, Role: auth.RoleAdmin}))
+	r.Body = io.NopCloser(strings.NewReader(`{"environment": "box"}`))
 	w := recorder()
 	if err := s.createSandbox(w, r); err != nil {
 		writeError(w, err)
@@ -192,13 +196,14 @@ func TestCreateWhileTenantDeleting(t *testing.T) {
 }
 
 // A tenant's deletion on an instance that does not lead: its tokens go at
-// once, its sandboxes in batches of 256, then the tenant.
+// once, its sandboxes in batches of 256, then the tenant, once its
+// environments have gone too (the environments' controller deletes them).
 func TestDeleteTenantInBatches(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{realEngine: true})
 	ctx := context.Background()
 	for range 300 {
-		if _, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img",
+		if _, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box,
 			VCPUs: 1, MemoryMiB: 256}); err != nil {
 			t.Fatal(err)
 		}
@@ -208,6 +213,14 @@ func TestDeleteTenantInBatches(t *testing.T) {
 	if n, err := e.st.CountSandboxesOfOwner(ctx, testTenant); err != nil || n != 0 {
 		t.Fatalf("left %d %v", n, err)
 	}
+	if tn, err := e.st.GetTenant(ctx, testTenant); err != nil || !tn.Deleting() {
+		t.Fatalf("tenant with its environment: %+v %v", tn, err)
+	}
+	if _, err := e.st.Q().Exec(ctx, "DELETE FROM environments WHERE owner = $1", testTenant); err != nil {
+		t.Fatal(err)
+	}
+	w = e.do("DELETE", "/api/v1/admin/tenants/"+testTenant, adminAuth(), nil)
+	expect(t, w, http.StatusOK, `{"deleted":true}`+"\n")
 	if _, err := e.st.GetTenant(ctx, testTenant); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("tenant: %v", err)
 	}
@@ -253,7 +266,7 @@ func TestNodes(t *testing.T) {
 	if _, err := e.st.MarkNodeReady(ctx, "n1"); err != nil {
 		t.Fatal(err)
 	}
-	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", VCPUs: 2, MemoryMiB: 512})
+	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box, VCPUs: 2, MemoryMiB: 512})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +408,7 @@ func TestNodeChanges(t *testing.T) {
 	expect(t, e.do("GET", "/api/v1/admin/nodes/nope/certs", adminAuth(), nil), http.StatusNotFound, errBody("unknown node nope"))
 
 	// Removal: refused while sandboxes are on it, unless forced.
-	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", VCPUs: 1, MemoryMiB: 256})
+	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box, VCPUs: 1, MemoryMiB: 256})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -36,7 +36,7 @@ func (s *Store) FollowKey(ctx context.Context, tenant string, sel Selector) (str
 	switch {
 	case sel.Environment != "" && sel.Kind != "" && sel.Object != "":
 		return streamKey(tenant, sel.Environment, sel.Kind, sel.Object, ""), nil
-	case sel.Environment == "" && sel.Job != "":
+	case sel.Kind == "" && sel.Job != "":
 		return streamKey(tenant, "", "", "", sel.Job), nil
 	case sel.Instance != "" || sel.Stream != "":
 		sts, err := selectStreams(ctx, s.db.Pool, tenant, streamFilter{sel: sel, limit: maxStreamsRead})

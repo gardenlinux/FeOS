@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -17,16 +19,17 @@ import (
 func insertTenantJob(t *testing.T, s *store.Store, key string, labels map[string]string) store.TenantJob {
 	t.Helper()
 	var job store.TenantJob
+	env := boxEnv(t, s, "t1")
 	err := s.InTx(bg, func(tx *store.Store) error {
 		idle := 0
 		sb, err := tx.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
 			return store.NewSandbox{ID: id, Owner: "t1", Image: "img", VCPUs: 1, MemoryMiB: 512, ImageRef: "img@sha256:00",
-				PodTemplate: &model.PodTemplate{}, IdleAfterS: &idle, TenantJob: true}
+				EnvironmentID: env, PodTemplate: &model.PodTemplate{}, IdleAfterS: &idle, TenantJob: true}
 		})
 		if err != nil {
 			return err
 		}
-		job, err = tx.InsertTenantJob(bg, store.TenantJob{ID: sb.ID, Owner: "t1", Key: key, RequestHash: "h", Image: "img",
+		job, err = tx.InsertTenantJob(bg, store.TenantJob{ID: sb.ID, Owner: "t1", EnvID: env, Key: key, RequestHash: "h", Image: "img",
 			ImageRef: "img@sha256:00", VCPUs: 1, MemoryMiB: 512, Labels: labels}, []byte("sealed"), time.Minute)
 		return err
 	})
@@ -47,11 +50,11 @@ func TestTenantJobs(t *testing.T) {
 	if a.Phase != model.JobQueued || a.Key != "k1" || a.DeadlineAt.Sub(a.CreatedAt) != time.Minute || a.Ended() {
 		t.Fatalf("inserted %+v", a)
 	}
-	if list, err := s.ListSandboxes(bg, "t1"); err != nil || len(list) != 0 {
+	if list, err := s.ListSandboxes(bg, "t1", nil); err != nil || len(list) != 0 {
 		t.Fatalf("the tenant's sandboxes %d %v", len(list), err)
 	}
 	if err := s.InTx(bg, func(tx *store.Store) error {
-		_, err := tx.InsertTenantJob(bg, store.TenantJob{ID: podid.Mint(), Owner: "t1", Key: "k1", RequestHash: "h2", Image: "i",
+		_, err := tx.InsertTenantJob(bg, store.TenantJob{ID: podid.Mint(), Owner: "t1", EnvID: a.EnvID, Key: "k1", RequestHash: "h2", Image: "i",
 			ImageRef: "i"}, nil, time.Minute)
 		return err
 	}); !errors.Is(err, store.ErrExists) {
@@ -60,9 +63,18 @@ func TestTenantJobs(t *testing.T) {
 	if r, err := s.TenantJobByKey(bg, "t1", "k1"); err != nil || r.ID != a.ID {
 		t.Fatalf("by key %+v %v", r, err)
 	}
-	if list, err := s.ListTenantJobs(bg, "t1", map[string]string{"project": "p1"}); err != nil || len(list) != 1 ||
+	if list, err := s.ListTenantJobs(bg, "t1", map[string]string{"project": "p1"}, nil); err != nil || len(list) != 1 ||
 		list[0].ID != a.ID {
 		t.Fatalf("by label %+v %v", list, err)
+	}
+	if a.EnvName != "box" || len(a.SecurityGroups) != 1 || a.SecurityGroups[0] != "default" {
+		t.Fatalf("environment and groups %+v", a)
+	}
+	if list, err := s.ListTenantJobs(bg, "t1", nil, []uuid.UUID{}); err != nil || len(list) != 0 {
+		t.Fatalf("of no environment %+v %v", list, err)
+	}
+	if list, err := s.ListTenantJobs(bg, "t1", nil, []uuid.UUID{a.EnvID}); err != nil || len(list) != 2 {
+		t.Fatalf("of its environment %+v %v", list, err)
 	}
 	if ok, err := s.StartTenantJob(bg, a.ID); err != nil || !ok {
 		t.Fatalf("start %v %v", ok, err)

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -342,7 +343,17 @@ func resolves(n *testnode.Node, pod podid.ID, name string, addrs ...string) bool
 // newEnv makes an environment of the tenant.
 func (h *harness) newEnv(name string) store.Environment {
 	h.t.Helper()
-	e, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.Must(uuid.NewV7()), Owner: testTenant, Name: name})
+	return h.envOf(testTenant, name)
+}
+
+// envOf is owner's environment name, made when it has none (a sandbox
+// made before it, ADR 0035, made it).
+func (h *harness) envOf(owner, name string) store.Environment {
+	h.t.Helper()
+	e, err := h.st.LockEnvironmentByName(bg, owner, name, store.NoLock)
+	if errors.Is(err, store.ErrNoRow) {
+		e, err = h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.Must(uuid.NewV7()), Owner: owner, Name: name})
+	}
 	if err != nil {
 		h.t.Fatal(err)
 	}

@@ -35,15 +35,16 @@ func TestSandboxCreateAndDelete(t *testing.T) {
 	}
 
 	// The same ID again, by anyone: the existing row, not created.
-	again, created, err := s.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "other", Image: "x", VCPUs: 1, MemoryMiB: 256})
+	again, created, err := s.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "other", Image: "x", VCPUs: 1, MemoryMiB: 256,
+		EnvironmentID: boxEnv(t, s, "other")})
 	if err != nil || created || again.Owner != "acme" || again.Incarnation != sb.Incarnation {
 		t.Fatalf("second create: %+v %v %v", again, created, err)
 	}
 	mkSandbox(t, s, "other")
-	if l, err := s.ListSandboxes(bg, "acme"); err != nil || len(l) != 1 || l[0].ID != id {
+	if l, err := s.ListSandboxes(bg, "acme", nil); err != nil || len(l) != 1 || l[0].ID != id {
 		t.Fatalf("list acme: %v %v", l, err)
 	}
-	if l, err := s.ListSandboxes(bg, ""); err != nil || len(l) != 2 {
+	if l, err := s.ListSandboxes(bg, "", nil); err != nil || len(l) != 2 {
 		t.Fatalf("list all: %v %v", l, err)
 	}
 	if n, err := s.CountSandboxesOfOwner(bg, "other"); err != nil || n != 1 {

@@ -33,6 +33,32 @@ type Error struct {
 	// Quota is a quota_exceeded answer's (ADR 0031): the resource, its
 	// limit and the use before the request.
 	Quota *Quota
+	// InUse is an environment_in_use answer's (ADR 0035): the sandboxes
+	// and running jobs that keep an environment.
+	InUse *InUse
+}
+
+// InUse is what an environment_in_use answer names, by ID.
+type InUse struct {
+	Sandboxes, Jobs []string
+}
+
+// CodeEnvironmentInUse is the code of the 409 of an environment's delete
+// while sandboxes or queued or running jobs are in it (ADR 0035).
+const CodeEnvironmentInUse = "environment_in_use"
+
+// EnvironmentInUse is the 409 environment_in_use for the environment
+// name, naming what is in it.
+func EnvironmentInUse(name string, sandboxes, jobs []string) *Error {
+	if sandboxes == nil {
+		sandboxes = []string{}
+	}
+	if jobs == nil {
+		jobs = []string{}
+	}
+	return &Error{Status: http.StatusConflict, Code: CodeEnvironmentInUse, InUse: &InUse{Sandboxes: sandboxes, Jobs: jobs},
+		Msg: fmt.Sprintf("environment %s has %d sandboxes and %d running jobs: delete them first", name,
+			len(sandboxes), len(jobs))}
 }
 
 // Quota is what a quota_exceeded answer names.
@@ -110,6 +136,9 @@ type body struct {
 	Resource string `json:"resource,omitempty"`
 	Limit    *int64 `json:"limit,omitempty"`
 	Use      *int64 `json:"use,omitempty"`
+	// Sandboxes and Jobs are an environment_in_use answer's.
+	Sandboxes *[]string `json:"sandboxes,omitempty"`
+	Jobs      *[]string `json:"jobs,omitempty"`
 }
 
 // Write answers err: an *Error with its status and body, anything else with
@@ -127,6 +156,9 @@ func Write(w http.ResponseWriter, err error) {
 	b := body{Error: e.Msg, Code: e.Code, Role: e.Role, Scope: e.Scope}
 	if q := e.Quota; q != nil {
 		b.Resource, b.Limit, b.Use = q.Resource, &q.Limit, &q.Use
+	}
+	if u := e.InUse; u != nil {
+		b.Sandboxes, b.Jobs = &u.Sandboxes, &u.Jobs
 	}
 	WriteJSON(w, e.Status, b)
 }

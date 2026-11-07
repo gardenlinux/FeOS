@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -20,12 +22,24 @@ import (
 
 // tenantJobSpecOf is a job of the test image with a deadline of d.
 func tenantJobSpecOf(d time.Duration) TenantJobSpec {
-	return TenantJobSpec{Image: testImage, Command: []string{"/build"}, VCPUs: 1, MemoryMiB: 512, Deadline: d, Hash: "h"}
+	return TenantJobSpec{Image: testImage, Command: []string{"/build"}, VCPUs: 1, MemoryMiB: 512, Deadline: d, Hash: "h",
+		SecurityGroups: []string{"default"}}
 }
 
-// createTenantJob creates a job of the tenant and returns it.
+// jobSpecOf is tenantJobSpecOf in the tenant's environment builds.
+func (h *harness) jobSpecOf(d time.Duration) TenantJobSpec {
+	rs := tenantJobSpecOf(d)
+	rs.EnvID = h.newEnv("builds").ID
+	return rs
+}
+
+// createTenantJob creates a job of the tenant in its environment builds
+// (one without an environment: there) and returns it.
 func (h *harness) createTenantJob(rs TenantJobSpec) store.TenantJob {
 	h.t.Helper()
+	if rs.EnvID == uuid.Nil {
+		rs.EnvID = h.newEnv("builds").ID
+	}
 	r, created, err := h.c.CreateTenantJob(bg, testTenant, rs)
 	if err != nil || !created {
 		h.t.Fatalf("create a tenant job: %v (created %v)", err, created)
@@ -97,13 +111,14 @@ func TestTenantJobSucceeds(t *testing.T) {
 	if _, _, err := h.c.CreateTenantJob(bg, testTenant, other); !errors.Is(err, ErrJobKeyConflict) {
 		t.Fatalf("another body under the key: %v", err)
 	}
-	if list, err := h.st.ListSandboxes(bg, testTenant); err != nil || len(list) != 0 {
+	if list, err := h.st.ListSandboxes(bg, testTenant, nil); err != nil || len(list) != 0 {
 		t.Fatalf("the tenant sees %d sandboxes (%v)", len(list), err)
 	}
 
 	h.runningPod(job.ID)
 	sb, _ := h.st.GetSandbox(bg, job.ID)
-	if !sb.TenantJob || !sb.IsInstance() || sb.IdleAfterS == nil || *sb.IdleAfterS != 0 {
+	if !sb.TenantJob || sb.IsOwn() || sb.Instance || sb.EnvironmentID != job.EnvID || sb.IdleAfterS == nil ||
+		*sb.IdleAfterS != 0 || !slices.Equal(sb.SecurityGroups, []string{"default"}) {
 		t.Fatalf("the pod's row %+v", sb)
 	}
 	spec := h.pod("n1", job.ID).GetSpec().GetContainers()[0]

@@ -4,7 +4,6 @@
 package env
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,7 +17,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
@@ -328,9 +326,8 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 			return nil, pins, fmt.Errorf("sandbox %s: %w", id, err)
 		}
 		info := spec.SandboxInfo{ID: id.String(), SecurityGroups: sb.SecurityGroups}
-		// A sandbox of no environment yet is one made before ADR 0035
-		// that no environment names: the one that names it takes it.
-		if env != nil && sb.EnvID != uuid.Nil && sb.EnvID != env.ID {
+		// A spec planned without an environment cannot tell.
+		if env != nil && sb.EnvID != env.ID {
 			info.OtherEnvironment = sb.EnvName
 		}
 		if info.HTTPNames, err = s.sandboxHTTPNames(ctx, id); err != nil {
@@ -519,47 +516,6 @@ func (s *Service) apply(ctx context.Context, tenant, ref string, a applyArgs) (A
 	return ApplyAnswer{}, errors.New("the environment keeps getting new deployments; try again")
 }
 
-// checkAttached refuses a deployment that changes the environment's
-// attached services to a principal without write on the tenant (ADR
-// 0031): an attached service runs in a sandbox, which is the tenant's, so
-// a grant on one environment does not give it. A write is judged by what
-// it changes: attached services as the current deployment has them pass.
-func checkAttached(ctx context.Context, current, next *spec.Spec) error {
-	t, ok := auth.TenantFrom(ctx)
-	if !ok || t.MayOnTenant(auth.RoleWrite) {
-		return nil
-	}
-	a, err := json.Marshal(attachedServices(current))
-	if err != nil {
-		return fmt.Errorf("attached services: %w", err)
-	}
-	b, err := json.Marshal(attachedServices(next))
-	if err != nil {
-		return fmt.Errorf("attached services: %w", err)
-	}
-	if !bytes.Equal(a, b) {
-		e := apierr.RoleRequired(auth.RoleWrite.String(), "tenant")
-		e.Msg = "changing attached services needs the role write on the tenant: they run in its sandboxes"
-		return e
-	}
-	return nil
-}
-
-// attachedServices are a spec's services of runtime attached (none for
-// nil).
-func attachedServices(sp *spec.Spec) map[string]spec.Service {
-	out := map[string]spec.Service{}
-	if sp == nil {
-		return out
-	}
-	for name, svc := range sp.Services {
-		if svc.Runtime == spec.RuntimeAttached {
-			out[name] = svc
-		}
-	}
-	return out
-}
-
 func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs) (ApplyAnswer, error) {
 	env, err := resolveEnv(ctx, s.st, tenant, ref, store.NoLock)
 	if err != nil {
@@ -574,9 +530,6 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 	}
 	if !p.valid() {
 		return ApplyAnswer{}, &InvalidSpecError{Findings: p.findings}
-	}
-	if err := checkAttached(ctx, p.currentSpec, &p.norm); err != nil {
-		return ApplyAnswer{}, err
 	}
 	specJSON, err := json.Marshal(p.norm)
 	if err != nil {

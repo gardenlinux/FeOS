@@ -17,8 +17,7 @@ import (
 )
 
 // What the environments (ADR 0018) hook into the engine. An instance row
-// of an environment (sandboxes.environment_id set) is a sandbox to the
-// engine; its pod is built from its pod_template, whose secrets the
+// of an environment (sandboxes.instance) is a sandbox to the engine; its pod is built from its pod_template, whose secrets the
 // SecretResolver unseals, and the PrepareHook puts on the node what the
 // pod needs before the pod call (its security groups, its volume).
 

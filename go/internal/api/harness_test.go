@@ -89,6 +89,9 @@ type env struct {
 	tenantJobs *fakeTenantJobs
 	// tenantToken is a token of testTenant.
 	tenantToken string
+	// box is testTenant's environment "box", where createSandbox makes
+	// its sandboxes (ADR 0035).
+	box uuid.UUID
 }
 
 func newEnv(t *testing.T, o envOptions) *env {
@@ -152,10 +155,25 @@ func newEnv(t *testing.T, o envOptions) *env {
 	if _, _, err := st.CreateTenant(context.Background(), testTenant); err != nil {
 		t.Fatal(err)
 	}
+	e.box = e.mkEnv(testTenant, "box")
 	if o.db == nil {
 		e.tenantToken = e.mintTenantToken(testTenant)
 	}
 	return e
+}
+
+// mkEnv is tenant's environment name, inserted when it has none.
+func (e *env) mkEnv(tenant, name string) uuid.UUID {
+	e.t.Helper()
+	ctx := context.Background()
+	row, err := e.st.LockEnvironmentByName(ctx, tenant, name, store.NoLock)
+	if errors.Is(err, store.ErrNoRow) {
+		row, err = e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return row.ID
 }
 
 // mintTenantToken stores a new token of tenant and returns it.
@@ -257,11 +275,11 @@ func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 	return v
 }
 
-// createSandbox creates a sandbox of the env's tenant over REST and returns
-// the ID ferund minted and the token.
+// createSandbox creates a sandbox of the env's tenant in its environment
+// box over REST and returns the ID ferund minted and the token.
 func (e *env) createSandbox() (string, string) {
 	e.t.Helper()
-	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken), map[string]any{})
+	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken), map[string]any{"environment": "box"})
 	expect(e.t, w, http.StatusCreated, "")
 	out := decode[struct {
 		Status struct {

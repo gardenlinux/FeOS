@@ -48,7 +48,7 @@ func (s *Store) TenantUse(ctx context.Context, tenant string, exclude uuid.UUID)
 	var u TenantUseRows
 	err := s.q.QueryRow(ctx, `SELECT s.n, s.v, s.m, e.n, j.n, j.v, j.m FROM
 		(SELECT count(*) n, coalesce(sum(vcpus), 0) v, coalesce(sum(memory_mib), 0) m FROM sandboxes
-			WHERE owner = $1 AND environment_id IS NULL AND NOT tenant_job) s,
+			WHERE owner = $1 AND NOT instance AND NOT tenant_job) s,
 		(SELECT count(*) n FROM environments WHERE owner = $1 AND NOT deleting) e,
 		(SELECT count(*) n, coalesce(sum(vcpus), 0) v, coalesce(sum(memory_mib), 0) m FROM jobs
 			WHERE owner = $1 AND finished_at IS NULL) j`, tenant).Scan(&u.Sandboxes, &u.SandboxVCPUs,

@@ -289,7 +289,7 @@ func (h *harness) instance(envID uuid.UUID, kind, object string, replica, deploy
 	id := podid.Mint()
 	zero := 0
 	if _, _, err := h.st.CreateSandbox(h.ctx(), store.NewSandbox{ID: id, Owner: tenantA, Image: "img", VCPUs: 1, MemoryMiB: 512,
-		ImageRef: "registry.test/img@sha256:" + strings.Repeat("0", 64), EnvironmentID: envID, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(envID)}},
+		ImageRef: "registry.test/img@sha256:" + strings.Repeat("0", 64), EnvironmentID: envID, Instance: true, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(envID)}},
 		IdleAfterS: &zero}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -305,27 +305,39 @@ func (h *harness) instance(envID uuid.UUID, kind, object string, replica, deploy
 	return id
 }
 
-// sandbox inserts an ordinary sandbox of tenant, attachable or not, under
-// a short ID.
-func (h *harness) sandbox(tenant string, attachable bool) podid.ID {
+// sandbox inserts a sandbox of tenant in its environment env (made when
+// it has none, ADR 0035) under a short ID; every sandbox can run its
+// environment's attached services.
+func (h *harness) sandbox(tenant, env string) podid.ID {
 	h.t.Helper()
-	return h.sandboxWithID(tenant, attachable, podid.Mint())
+	return h.sandboxWithID(tenant, env, podid.Mint())
 }
 
 // legacySandbox inserts a sandbox as sandbox does under a UUID: one made
 // before ADR 0019.
-func (h *harness) legacySandbox(tenant string, attachable bool) podid.ID {
+func (h *harness) legacySandbox(tenant, env string) podid.ID {
 	h.t.Helper()
-	return h.sandboxWithID(tenant, attachable, podid.ID(uuid.NewString()))
+	return h.sandboxWithID(tenant, env, podid.ID(uuid.NewString()))
 }
 
-func (h *harness) sandboxWithID(tenant string, attachable bool, id podid.ID) podid.ID {
+// envOf is tenant's environment name, inserted when it has none.
+func (h *harness) envOf(tenant, name string) uuid.UUID {
 	h.t.Helper()
-	n := store.NewSandbox{ID: id, Owner: tenant, Image: "img", VCPUs: 1, MemoryMiB: 512}
-	if attachable {
-		n.PodTemplate = &model.PodTemplate{Command: []string{"sleep", "infinity"},
-			SecurityGroups: []string{model.SandboxGroupID(id)}}
+	e, err := h.st.LockEnvironmentByName(h.ctx(), tenant, name, store.NoLock)
+	if errors.Is(err, store.ErrNoRow) {
+		e, err = h.st.InsertEnvironment(h.ctx(), store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
 	}
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return e.ID
+}
+
+func (h *harness) sandboxWithID(tenant, env string, id podid.ID) podid.ID {
+	h.t.Helper()
+	n := store.NewSandbox{ID: id, Owner: tenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: h.envOf(tenant, env),
+		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"},
+			SecurityGroups: []string{model.SandboxGroupID(id)}}}
 	if _, _, err := h.st.CreateSandbox(h.ctx(), n); err != nil {
 		h.t.Fatal(err)
 	}

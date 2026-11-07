@@ -424,7 +424,7 @@ func TestRestartWaitsForALiveReplica(t *testing.T) {
 	id := podid.ID(uuid.NewString())
 	idle := 0
 	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: testTenant, Image: testImage, VCPUs: 1,
-		MemoryMiB: 512, EnvironmentID: env.ID, PodTemplate: &model.PodTemplate{
+		MemoryMiB: 512, EnvironmentID: env.ID, Instance: true, PodTemplate: &model.PodTemplate{
 			SecurityGroups: []string{model.EnvGroupID(env.ID)}}, IdleAfterS: &idle}); err != nil {
 		t.Fatal(err)
 	}

@@ -5,9 +5,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	envs "github.com/gardenlinux/feos/go/internal/env"
@@ -42,14 +46,16 @@ func (f *fakeTenantJobs) CreateTenantJob(_ context.Context, tenant, key string, 
 	if id, ok := f.keys[key]; ok && key != "" {
 		return f.jobs[id], false, nil
 	}
-	r := envs.TenantJobStatus{ID: "a0000000001", Image: req.Image, Phase: "queued", Labels: req.Labels}
+	r := envs.TenantJobStatus{ID: "a0000000001", Environment: envs.EnvRef{Name: req.Environment}, Image: req.Image,
+		Phase: "queued", Labels: req.Labels}
 	f.jobs[r.ID], f.keys[key] = r, r.ID
 	f.calls = append(f.calls, "CreateTenantJob "+tenant+" "+key)
 	return r, true, nil
 }
 
-func (f *fakeTenantJobs) ListTenantJobs(_ context.Context, tenant string, labels map[string]string) (envs.TenantJobList, error) {
-	f.call("ListTenantJobs " + tenant + " " + labels["project"])
+func (f *fakeTenantJobs) ListTenantJobs(_ context.Context, tenant string, labels map[string]string, envIDs []uuid.UUID) (
+	envs.TenantJobList, error) {
+	f.call(fmt.Sprintf("ListTenantJobs %s %s %v", tenant, labels["project"], envIDs))
 	return envs.TenantJobList{TenantJobs: []envs.TenantJobStatus{}}, nil
 }
 
@@ -100,7 +106,7 @@ func TestTenantJobRoutes(t *testing.T) {
 			h.Set("Idempotency-Key", key)
 		}
 		w := e.serve(request{method: "POST", path: "/api/v1/jobs", header: h,
-			body: map[string]any{"image": "builder:1", "labels": map[string]string{"project": "p1"}}})
+			body: map[string]any{"environment": "box", "image": "builder:1", "labels": map[string]string{"project": "p1"}}})
 		return &requestResult{code: w.Code, body: w.Body.String()}
 	}
 	first := create("build-1")
@@ -120,8 +126,18 @@ func TestTenantJobRoutes(t *testing.T) {
 		t.Errorf("logs asked for %d lines", e.tenantJobs.lines)
 	}
 	expect(t, e.do("GET", "/api/v1/jobs?label=project=p1", tok, nil), http.StatusOK, `{"jobs":[]}`+"\n")
+	expect(t, e.do("GET", "/api/v1/jobs?environment=box", tok, nil), http.StatusOK, `{"jobs":[]}`+"\n")
+	expect(t, e.do("GET", "/api/v1/jobs?environment=nope", tok, nil), http.StatusNotFound, errBody("no such environment"))
+	// A job in an environment of none of the tenant's is none.
+	w := e.serve(request{method: "POST", path: "/api/v1/jobs", header: http.Header{"Authorization": {tok}},
+		body: map[string]any{"environment": "nope", "image": "builder:1"}})
+	expect(t, w, http.StatusNotFound, errBody("no such environment"))
+	if calls := e.tenantJobs.calls; !slices.Contains(calls, "ListTenantJobs "+testTenant+" p1 []") ||
+		!slices.Contains(calls, fmt.Sprintf("ListTenantJobs %s  [%s]", testTenant, e.box)) {
+		t.Fatalf("calls %v", calls)
+	}
 	expect(t, e.do("GET", "/api/v1/jobs?label=nokey", tok, nil), http.StatusBadRequest, "")
-	w := e.do("POST", "/api/v1/jobs/a0000000001/cancel", tok, nil)
+	w = e.do("POST", "/api/v1/jobs/a0000000001/cancel", tok, nil)
 	expect(t, w, http.StatusOK, "")
 	expect(t, e.do("DELETE", "/api/v1/jobs/a0000000001", tok, nil), http.StatusNoContent, "")
 	expect(t, e.do("GET", "/api/v1/jobs", "", nil), http.StatusUnauthorized, "")

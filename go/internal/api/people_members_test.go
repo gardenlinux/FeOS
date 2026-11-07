@@ -301,7 +301,8 @@ func TestInvitations(t *testing.T) {
 	expect(t, accept(x, tenantInv.Token), http.StatusGone, errBody("this invitation was used"))
 	expect(t, preview(x, tenantInv.Token), http.StatusNotFound, errBody("no such invitation"))
 	expect(t, accept(x, "nope"), http.StatusNotFound, errBody("no such invitation"))
-	expect(t, e.serve(as(n, testTenant, "POST", "/api/v1/sandboxes", map[string]any{})), http.StatusCreated, "")
+	expect(t, e.serve(as(n, testTenant, "POST", "/api/v1/sandboxes", map[string]any{"environment": "box"})),
+		http.StatusCreated, "")
 	if got := states(ta); got != "write@:n,read@stage:" {
 		t.Fatalf("after use %q", got)
 	}
