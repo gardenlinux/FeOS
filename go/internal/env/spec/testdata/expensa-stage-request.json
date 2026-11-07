@@ -146,5 +146,17 @@
       "service": "web",
       "port": "http"
     }
+  },
+  "securityGroups": {
+    "default": {
+      "in": [
+        {
+          "protocol": "any",
+          "from": {
+            "group": "default"
+          }
+        }
+      ]
+    }
   }
 }

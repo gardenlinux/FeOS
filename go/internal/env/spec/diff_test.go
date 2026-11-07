@@ -125,11 +125,14 @@ func TestDiffEffects(t *testing.T) {
 			s.Addons["nats"] = a
 		}, `[{"kind":"addon","name":"nats","change":"update","fields":[{"path":"plan","from":"small","to":"dev"}],"effect":"recreates (downtime)"}]`},
 		{"addon options", func(s *Spec) {
-			s.Addons["postgres"] = Addon{Type: "postgres", Version: "17", Plan: "small",
+			s.Addons["postgres"] = Addon{Type: "postgres", Version: "17", Plan: "small", SecurityGroups: []string{"default"},
 				Options: map[string]any{"databases": []any{"expensa", "audit"}, "roles": []any{"expense_svc", "approval_svc"}}}
 		}, `[{"kind":"addon","name":"postgres","change":"update","fields":[{"path":"options.databases","from":["expensa"],` +
 			`"to":["expensa","audit"]}],"effect":"recreates (downtime)"}]`},
-		{"addon type", func(s *Spec) { s.Addons["nats"] = Addon{Type: "valkey", Version: "8", Plan: "small"} },
+		{"addon type", func(s *Spec) {
+			s.Addons["nats"] = Addon{Type: "valkey", Version: "8", Plan: "small",
+				SecurityGroups: []string{"default"}}
+		},
 			`[{"kind":"addon","name":"nats","change":"update","fields":[{"path":"options.jetstream","from":true,"to":null},` +
 				`{"path":"type","from":"nats","to":"valkey"},{"path":"version","from":"2","to":"8"}],"effect":"deletes data"}]`},
 		{"adds and removes", func(s *Spec) {
@@ -179,7 +182,7 @@ func TestDiffAttachedAndAddonEffect(t *testing.T) {
 
 	// The blueprint tells an options change apart.
 	prev, next := deployment7(t), deployment7(t)
-	next.Addons["postgres"] = Addon{Type: "postgres", Version: "17", Plan: "small",
+	next.Addons["postgres"] = Addon{Type: "postgres", Version: "17", Plan: "small", SecurityGroups: []string{"default"},
 		Options: map[string]any{"databases": []any{"expensa"}, "roles": []any{"expense_svc"}}}
 	var asked string
 	d := DiffWith(&prev, &next, func(name string, p, n Addon) string {
@@ -198,7 +201,7 @@ func TestDiffAttachedAndAddonEffect(t *testing.T) {
 	// one a remove.
 	r7 := deployment7(t)
 	adds := Diff(nil, &r7)
-	if len(adds) != 3+1+2+3+1 {
+	if len(adds) != 3+1+2+3+1+1 {
 		t.Fatalf("%s", diffJSON(t, adds))
 	}
 	for _, e := range adds {

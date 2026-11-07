@@ -2483,7 +2483,7 @@ instance's insert, delete, phase, deployment and admitted ports) send
 ### The deployment spec
 
 JSON, its objects in maps keyed by name (`services`, `jobs`, `addons`,
-`routes`, `secrets`), parsed strictly: an unknown field, a wrong type, a
+`routes`, `secrets`, `bindings`, `securityGroups`), parsed strictly: an unknown field, a wrong type, a
 duplicate key or trailing data is a finding at its path, and null is
 absent for lists, maps and objects. Every problem is a finding
 `{severity, path, problem, remedy}`; an error refuses the spec. Beyond the
@@ -2494,26 +2494,20 @@ shapes:
   tcp or exec with an initial delay (0s), a period of at least 1 s (2s)
   and a failure threshold (3), `idle` of at least 1m only on a route's
   target ("nothing would wake it"), `rollout.timeout` (10m). Or they run
-  `attached`: a sandbox of the tenant, a command, an absolute `cwd`,
-  `idle` of at least 1m or `never` (no route needed: the sandbox's own
-  activity wakes it), and none of image, replicas, resources and
-  rollout. Port names are
-  required DNS labels; two attached services in one sandbox, in any
-  environment, do not share a port number. A service and an addon do not
-  share a name: both are names of the env table. Two environments with
-  attached services in one sandbox do not give it the same name either
-  (their addons, their image services, their attached services in that
-  sandbox): the sandbox's table includes both environments' tables, the
-  first that holds a name answers it, and a process there could reach
-  the other environment's.
-  Against other environments both are errors, warnings in a plan without
-  an environment.
+  `attached`: a sandbox of the environment ([ADR
+  0035](../adr/0035-everything-runs-in-an-environment.md); one of another
+  environment is an error), a command, an absolute `cwd`, `idle` of at
+  least 1m or `never` (no route needed: the sandbox's own activity wakes
+  it), and none of image, replicas, resources, rollout and
+  `securityGroups` (it is in its sandbox's groups, which the error
+  names). Port names are required DNS labels; two attached services in
+  one sandbox do not share a port number. A service and an addon do not
+  share a name: both are names of the env table.
 - **Env values**: a string, `{value}`, `{secret}`, `{addon, key, …}` with
   the blueprint's fields, `{service, port, key}` with key `url`, `host` or
-  `port`. Every reference resolves; none from an image service or a job
-  names an attached service, since image pods cannot reach a sandbox, and
-  an attached service names only the attached services of its own
-  sandbox, the only ones its sandbox's table names.
+  `port`. Every reference resolves. An attached service is a name of the
+  env table with its sandbox's address, reached as any pod of the
+  environment is, where a rule lets the caller in.
 - **Jobs**: an image, `on` `deploy` (the default, a deploy job; its
   earlier word `release` is the same, accepted for good) or `manual`, retries 0
   to 5, a timeout of 10m by default and 2h at most.
@@ -2553,14 +2547,46 @@ shapes:
   names a sandbox's own HTTP bindings resolve are no names of an
   environment's attached services there. Bindings while they are off
   are an error.
+- **Security groups** (`securityGroups`, [ADR
+  0034](../adr/0034-tenant-security-groups.md)): names of 1 to 32 of
+  `[a-z0-9-]`, beginning with a letter or a digit; `default` always
+  exists. A group has rules `in` and `out`, at most 60 together, each a
+  protocol (`tcp` when left out, `udp`, `icmp`, `any`), ports and ranges
+  (`8080`, `"9000-9010"`; none: every port; none allowed for `icmp` and
+  `any`) and exactly one peer, `from` in an in rule and `to` in an out
+  rule: `{"group": g}` (a group of the spec), `{"cidr": p, "except":
+  [p…]}` (a prefix without host bits, IPv4 not written as IPv6, its
+  exceptions of its family and inside it) or `"internet"`. A block
+  inside a prefix of `--deny-prefix` is an error (no rule opens it:
+  the deployment gives ferund the set it gives feosd, beside the
+  built-in one); one that contains such a prefix is an info finding that
+  it stays closed there. A block in an in rule is an info finding too:
+  clients through the ingress arrive from the ingress's addresses, and
+  this release's ingress does not check blocks (ADR 0034, "The ingress
+  checks the client", is to come). Out to a group is implied (the
+  receiver's in rules decide), an info finding. Image services, jobs and
+  addons name 1 to 5 groups in `securityGroups` (left out: `default`;
+  `[]`, a group named twice or one the spec does not have is an error).
+  A spec without a group that a sandbox or a queued or running tenant's
+  job of the environment names is an error that lists them (ADR 0035).
+  An object that uses another, an addon's output or a service's
+  reference in its env or the host of a URL in a string value
+  (`http://api:9000`, its scheme's port when it has none), while no in
+  rule of the target's groups admits one of the object's groups on that
+  port over TCP, is a warning whose remedy is the rule to write.
 - `volumes` and a service's `mounts` are errors: not available yet.
 - At most 1 MiB, 64 services, 32 jobs, 16 addons, 128 routes, 32
-  bindings.
+  bindings, 50 security groups.
 
 Normalisation fills the defaults, writes durations as Go does, pins
 every image to `<registry>/<repository>@sha256:…` (keeping
 `imageAsWritten`; a digest reference stays) and every referenced secret
-to its latest version, and drops the secrets nothing references. The
+to its latest version, and drops the secrets nothing references. It adds
+the group `default` without rules when the spec has none, writes a
+group's missing `out` as `[{"protocol": "any", "to": "internet"}]` (`[]`
+stays none), every rule's protocol, its ports sorted and its blocks in
+netip's form, and the groups of image services, jobs and addons sorted,
+`["default"]` for those that name none. The
 normalised spec is what a deployment stores and what plans diff. A diff
 entry is `{kind, name, change, fields: [{path, from, to}], effect}`, the
 effect `in place`, `restarts` (a job's template), `replaces N pods` (an
@@ -2572,6 +2598,25 @@ its version, an image as written with its digest. A binding's entry
 secret's new version among them (sealed to the running pods again), and
 `replaces N pods` of the image services that name it (or `restarts` its
 jobs) for its upstream or mode, which their own entries show as well.
+A security group's entry (kind `securityGroup`) is `in place`: its rules
+are put whole on the nodes that hold it. The groups an object names are
+part of its pods' template: a changed list replaces an image service's
+pods, restarts a job and recreates an addon.
+
+**Groups' rows.** `security_groups` has a row per group name of an
+environment, its UUID the group's ID on the nodes (`sg-<uuid>`,
+`model.SecurityGroupID`): `default`'s from the environment's insert, the
+others' from the first deployment whose spec has them
+(`store.InsertDeployment`), `store.EnsureSecurityGroup` for a name
+wanted before. A row lasts as long as its environment; removing the
+names no deployment has any more is left to a later cleanup. Migration
+0031 wrote today's open rule into the latest and the deployed
+deployments of the environments made before (`default` in from
+`default`, any protocol), so that they stay as open as they were;
+environments made after start closed. The delta log of member changes,
+the batched push to the nodes, the ingress's check of blocks, drops in
+the sink and the propagation metric of ADR 0034 are not in this
+release: the groups reach the nodes through `env-groups`, put whole.
 
 ### Plan, apply, revert, clone
 
@@ -3231,7 +3276,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `POST …/{env}/deployments` `{spec, base, author?, message?, annotations?}` | 201 the deployment; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
 | `GET …/{env}/deployments?limit=50`, `…/deployments/{n}` | newest first, with their tags; one with its spec and its diff against n-1 |
 | `POST …/deployments/{n}/revert` `{base, author?, message?}` | as a deployment |
-| `PUT`, `DELETE …/{env}/objects/{kind}/{name}` | as a deployment; with `dryRun` a plan |
+| `PUT`, `DELETE …/{env}/objects/{kind}/{name}` | as a deployment; with `dryRun` a plan; `{kind}` is `service`, `job`, `addon`, `route`, `secret` or `securityGroup` |
 | `GET`, `PUT`, `DELETE …/{env}/tags[/{tag}]` | the tags, a tag (`PUT {deployment, author?}`), 204 |
 | `POST …/{env}/clone` `{name, id?, deployment?, spec?, labels?, secrets?, author?, data?}` | 201 the new environment's status; 409 `id_taken` before the spec is planned, `name_taken`; 422 findings |
 | `GET …/{env}/secrets`, `PUT`, `DELETE …/secrets/{name}` | the names with their latest versions; `{name, version}`; 204, 409 while pinned |

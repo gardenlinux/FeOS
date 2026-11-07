@@ -34,6 +34,11 @@ const (
 // "env-<environment UUID>", 40 characters.
 func EnvGroupID(envID uuid.UUID) string { return "env-" + envID.String() }
 
+// SecurityGroupID is a tenant's security group (ADR 0034) on the nodes:
+// "sg-<UUID of its row>", 39 characters (store.SecurityGroupID resolves an
+// environment's group by its name).
+func SecurityGroupID(id uuid.UUID) string { return "sg-" + id.String() }
+
 // SandboxGroupID is the security group of an attachable sandbox:
 // "sbx-<sandbox ID>", 15 characters (40 for a sandbox with a UUID).
 func SandboxGroupID(id podid.ID) string { return "sbx-" + id.String() }

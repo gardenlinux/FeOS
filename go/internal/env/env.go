@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
@@ -81,6 +83,12 @@ type Deps struct {
 	SinkURL string
 	// SinkClient asks the sink; nil: a client with a 10 s timeout.
 	SinkClient *http.Client
+	// DenyPrefixes are the prefixes no pod of the cluster reaches
+	// (--deny-prefix: the deployment gives ferund the set it gives feosd,
+	// beside the built-in one), which no rule of a security group opens
+	// (ADR 0034): a plan refuses a block inside one. nil: the built-in
+	// set (config.DefaultDenyPrefixes).
+	DenyPrefixes []netip.Prefix
 	// Bindings are the HTTP bindings (ADR 0028), for the plans' checks of
 	// an environment's bindings and their check route; nil: off, and a
 	// spec with bindings is refused.
@@ -122,6 +130,9 @@ func New(deps Deps) (*Service, error) {
 	}
 	if deps.Blueprint == nil {
 		deps.Blueprint = addons.Get
+	}
+	if deps.DenyPrefixes == nil {
+		deps.DenyPrefixes = config.DefaultDenyPrefixes()
 	}
 	if deps.SinkClient == nil {
 		deps.SinkClient = &http.Client{Timeout: 10 * time.Second}
@@ -233,6 +244,16 @@ func (a specBlueprint) Validate(name string, prev *spec.Addon, next spec.Addon) 
 func (a specBlueprint) Ref(name string, ad spec.Addon, key string, fields map[string]string) error {
 	_, err := a.b.Outputs(toAddon(name, ad), addons.Context{Name: name}, addons.Ref{Key: key, Fields: fields})
 	return err
+}
+
+// Port is the port the addon's pod serves on (its rendering's); 0 when it
+// does not render.
+func (a specBlueprint) Port(name string, ad spec.Addon) int {
+	inst, err := a.b.Render(toAddon(name, ad), addons.Context{Name: name})
+	if err != nil {
+		return 0
+	}
+	return inst.Port
 }
 
 var _ spec.Blueprint = specBlueprint{}

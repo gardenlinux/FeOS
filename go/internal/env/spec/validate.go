@@ -60,6 +60,17 @@ const (
 // destination rule's word on the host of a binding's upstream or token
 // endpoint, which the caller asked before it validates (nil: a
 // destination); an error is a finding. Without it, no host is judged.
+//
+// It may also implement interface{ DenyPrefixes() []netip.Prefix }: the
+// prefixes no pod of the cluster reaches (--deny-prefix, ADR 0010), which
+// no rule of a security group opens: a block inside one is an error.
+// Without it, no block is judged.
+//
+// It may also implement interface{ GroupUsers() map[string][]string }:
+// the environment's pods outside its spec that name its security groups
+// (ADR 0035), by group: "sandbox <id>" for its sandboxes, "job <id>" for
+// its tenants' jobs that are queued or running. A spec without one of
+// those groups is an error. Without it (and in ModeSpec), none.
 type ValidateContext interface {
 	// Mode is what the validation is for.
 	Mode() Mode
@@ -89,41 +100,24 @@ type ValidateContext interface {
 	Image(image string) (pinned string, err error)
 }
 
-// SandboxInfo is a sandbox an attached service may run in.
+// SandboxInfo is a sandbox an attached service may run in: one of the
+// environment's own (ADR 0035).
 type SandboxInfo struct {
 	// ID is the sandbox's ID in its canonical form (podid).
 	ID string
-	// Attachable: the sandbox was created attachable (its pod has the
-	// sbx- security group). One that is not cannot reach the
-	// environment's image pods.
-	Attachable bool
-	// AttachedPorts are the ports the attached services of other
-	// environments use in it: two attached services in one sandbox must
-	// not share a port number.
-	AttachedPorts []AttachedPort
-	// Names are the names other environments with attached services in
-	// it give it (SandboxNames of their specs): two environments in one
-	// sandbox must not share one, or a process there reaches whichever
-	// environment's comes first.
-	Names []SandboxName
+	// OtherEnvironment is the name of the environment the sandbox is in
+	// when that is not the environment validated; "": it is in this one
+	// (or, in ModeSpec, wherever it is: there is no environment to
+	// compare with).
+	OtherEnvironment string
+	// SecurityGroups are the groups of the environment the sandbox names
+	// (ADR 0035), which its attached services are in; none:
+	// [DefaultSecurityGroup].
+	SecurityGroups []string
 	// HTTPNames are the names the sandbox's own HTTP bindings (ADR 0028)
 	// make its resolver answer, which no name of an environment there may
 	// be.
 	HTTPNames []string
-}
-
-// SandboxName is a name an environment gives a sandbox its attached
-// services run in.
-type SandboxName struct {
-	// Env is the environment's name, Name the addon's or service's.
-	Env, Name string
-}
-
-// AttachedPort is a port an attached service uses in a sandbox.
-type AttachedPort struct {
-	// Env is the environment's name, Service the service's.
-	Env, Service string
-	Port         int
 }
 
 // AddonData is what an addon's volume holds: data of addon type Type,
@@ -180,6 +174,9 @@ type Blueprint interface {
 	// addon a: nil when it resolves, else why not ("no key x; the keys
 	// are url, host, …").
 	Ref(name string, a Addon, key string, fields map[string]string) error
+	// Port is the port addon name of this type serves on; 0: unknown. The
+	// security groups' reach check (ADR 0034) asks it.
+	Port(name string, a Addon) int
 }
 
 // The rules of names.
@@ -248,6 +245,9 @@ func Validate(vc ValidateContext, s Spec, prev *Spec) []Finding {
 	v.secrets()
 	v.attachedPorts()
 	v.sandboxNames()
+	v.securityGroups()
+	v.groupUsers()
+	v.reach()
 	return SortFindings(v.out)
 }
 
@@ -284,7 +284,7 @@ func (v *validator) limits() {
 	}{
 		{"services", len(v.s.Services), MaxServices}, {"jobs", len(v.s.Jobs), MaxJobs},
 		{"addons", len(v.s.Addons), MaxAddons}, {"routes", len(v.s.Routes), MaxRoutes},
-		{"bindings", len(v.s.Bindings), MaxBindings},
+		{"bindings", len(v.s.Bindings), MaxBindings}, {"securityGroups", len(GroupNames(v.s)), MaxSecurityGroups},
 	} {
 		if l.n > l.max {
 			v.errorf(l.kind, "split the environment", "%d %s; at most %d are allowed", l.n, l.kind, l.max)
@@ -355,6 +355,7 @@ func (v *validator) service(name string, svc Service) {
 		}
 		v.resources(p+".resources", svc.Resources)
 		v.imageCredentials(p+".imageCredentials", svc.ImageCredentials)
+		v.groupRefs(p+".securityGroups", svc.SecurityGroups)
 		if svc.Idle != "" {
 			d, ok := v.duration(p+".idle", svc.Idle)
 			switch {
@@ -380,6 +381,11 @@ func (v *validator) service(name string, svc Service) {
 				"an attached service pulls no image")
 		}
 		v.sandbox(p+".sandbox", svc.Sandbox)
+		if svc.SecurityGroups != nil {
+			v.errorf(p+".securityGroups", "remove securityGroups; change the sandbox's groups (PUT /api/v1/sandboxes/"+
+				"{id}/security-groups) instead", "an attached service is in its sandbox's groups (%s)",
+				strings.Join(v.sandboxGroups(svc.Sandbox), ", "))
+		}
 		if len(svc.Command) == 0 {
 			v.errorf(p+".command", "set command to the process to run in the sandbox", "an attached service needs a command")
 		}
@@ -412,11 +418,7 @@ func (v *validator) service(name string, svc Service) {
 		v.errorf(p+".mounts", "keep the data in an addon (postgres, valkey, nats), which has a volume of its own",
 			"volumes for services are not available yet")
 	}
-	sandbox := ""
-	if runtime == RuntimeAttached {
-		sandbox = svc.Sandbox
-	}
-	v.env(p+".env", svc.Env, runtime == RuntimeImage, sandbox)
+	v.env(p+".env", svc.Env)
 	if runtime == RuntimeAttached && len(svc.Bindings) > 0 {
 		v.errorf(p+".bindings", "remove bindings: set the sandbox's HTTP bindings (PUT /api/v1/sandboxes/{id}/http), or "+
 			"run the service as an image", "attached services use their sandbox's bindings")
@@ -425,41 +427,29 @@ func (v *validator) service(name string, svc Service) {
 	}
 }
 
-// sandbox checks an attached service's sandbox.
+// sandbox checks an attached service's sandbox: one of the environment's
+// own (ADR 0035).
 func (v *validator) sandbox(path, id string) {
 	if id == "" {
-		v.errorf(path, "set sandbox to the ID of one of your sandboxes", "an attached service needs a sandbox")
+		v.errorf(path, "set sandbox to the ID of a sandbox of the environment", "an attached service needs a sandbox")
 		return
 	}
 	sid, err := podid.Parse(id)
 	if err != nil {
-		v.errorf(path, "set sandbox to the ID of one of your sandboxes", "sandbox %q is not a sandbox ID", id)
+		v.errorf(path, "set sandbox to the ID of a sandbox of the environment", "sandbox %q is not a sandbox ID", id)
 		return
 	}
 	info, ok := v.vc.Sandbox(sid.String())
 	if !ok {
-		v.errorf(path, "create the sandbox first (POST /api/v1/sandboxes with attachable: true), or name one of yours",
-			"no sandbox %s of yours", id)
+		v.errorf(path, "create the sandbox in this environment first (POST /api/v1/sandboxes with its environment), "+
+			"or name one of its sandboxes", "no sandbox %s of yours", id)
 		return
 	}
-	if !info.Attachable && v.reachesPods() {
-		v.warnf(path, "create the sandbox with attachable: true", "sandbox %s is not attachable: its attached services "+
-			"cannot reach the environment's addons and image services", id)
+	if info.OtherEnvironment != "" {
+		v.errorf(path, "name a sandbox of this environment, or create one in it (POST /api/v1/sandboxes with its "+
+			"environment)", "sandbox %s is in environment %s: an attached service runs in a sandbox of its own "+
+			"environment", id, info.OtherEnvironment)
 	}
-}
-
-// reachesPods reports whether the spec has pods an attached service may
-// want to reach: addons or image services.
-func (v *validator) reachesPods() bool {
-	if len(v.s.Addons) > 0 {
-		return true
-	}
-	for _, svc := range v.s.Services {
-		if svc.Runtime != RuntimeAttached {
-			return true
-		}
-	}
-	return false
 }
 
 func (v *validator) resources(path string, r *Resources) {
@@ -585,11 +575,11 @@ func (v *validator) readiness(path string, r *Readiness, ports []Port) {
 	}
 }
 
-// env checks environment variables; fromImage: they are an image pod's
-// (an image service's or a job's), which cannot reach an attached
-// service; sandbox: they are an attached service's in that sandbox,
-// which reaches only the attached services there.
-func (v *validator) env(path string, env map[string]EnvValue, fromImage bool, sandbox string) {
+// env checks environment variables. An attached service is reached like
+// any other pod of the environment (ADR 0035: its name is in the
+// environment's name table with its sandbox's address), where a rule of
+// its sandbox's groups lets the caller in (reach).
+func (v *validator) env(path string, env map[string]EnvValue) {
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		val := env[key]
 		kp := path + "." + key
@@ -627,16 +617,6 @@ func (v *validator) env(path string, env map[string]EnvValue, fromImage bool, sa
 				}
 			default:
 				v.errorf(kp, "use key url, host or port", "a service reference's key is url, host or port, not %q", val.Key)
-			}
-			switch {
-			case target.Runtime != RuntimeAttached:
-			case fromImage:
-				v.errorf(kp, "run both attached or both as images", "%s is an attached service: image pods cannot reach a "+
-					"sandbox", val.Service)
-			case sandbox != "" && target.Sandbox != "" && !strings.EqualFold(sandbox, target.Sandbox):
-				v.errorf(kp, "run both in one sandbox, or run "+val.Service+" as an image",
-					"%s is an attached service in another sandbox: a sandbox reaches only its own attached services",
-					val.Service)
 			}
 		}
 	}
@@ -744,7 +724,8 @@ func (v *validator) job(name string, j Job) {
 	}
 	v.resources(p+".resources", j.Resources)
 	v.imageCredentials(p+".imageCredentials", j.ImageCredentials)
-	v.env(p+".env", j.Env, true, "")
+	v.env(p+".env", j.Env)
+	v.groupRefs(p+".securityGroups", j.SecurityGroups)
 	v.bindingRefs(p+".bindings", j.Bindings)
 }
 
@@ -754,6 +735,7 @@ func (v *validator) addon(name string, a Addon) {
 		v.errorf(p+".type", v.typesRemedy(), "an addon needs a type")
 		return
 	}
+	v.groupRefs(p+".securityGroups", a.SecurityGroups)
 	b, ok := v.vc.Blueprint(a.Type)
 	if !ok {
 		v.errorf(p+".type", v.typesRemedy(), "no addon type %q", a.Type)
@@ -925,8 +907,8 @@ func (v *validator) routePaths() {
 }
 
 // attachedPorts refuses two attached services in one sandbox on one port
-// number: of this spec, or one of this spec and one of another
-// environment (a warning in ModeSpec, which replaces none).
+// number. A sandbox is in one environment (ADR 0035), so this spec's are
+// all there are.
 func (v *validator) attachedPorts() {
 	bySandbox := map[string]map[int]string{}
 	for _, name := range slices.Sorted(maps.Keys(v.s.Services)) {
@@ -940,7 +922,6 @@ func (v *validator) attachedPorts() {
 			used = map[int]string{}
 			bySandbox[sb] = used
 		}
-		info, known := v.vc.Sandbox(sb)
 		for i, pt := range svc.Ports {
 			pp := index("services."+name+".ports", i) + ".port"
 			if other, ok := used[pt.Port]; ok && other != name {
@@ -948,30 +929,13 @@ func (v *validator) attachedPorts() {
 				continue
 			}
 			used[pt.Port] = name
-			if !known {
-				continue
-			}
-			for _, ap := range info.AttachedPorts {
-				if ap.Port != pt.Port {
-					continue
-				}
-				sev := SeverityError
-				if v.mode == ModeSpec {
-					sev = SeverityWarning
-				}
-				v.add(sev, pp, "change one's port", "port %d is used in sandbox %s by service %s of environment %s",
-					pt.Port, svc.Sandbox, ap.Service, ap.Env)
-			}
 		}
 	}
 }
 
-// sandboxNames refuses a name of a sandbox this spec's attached services
-// run in that another environment with attached services there gives it
-// too: the sandbox's name table includes both environments' tables, and
-// the resolver answers from the first, so a process there could reach the
-// other environment's addon or service (a warning in ModeSpec, which
-// replaces none).
+// sandboxNames refuses a name the environment gives a sandbox its
+// attached services run in that one of the sandbox's own HTTP bindings
+// has: its resolver would answer the binding (a warning in ModeSpec).
 func (v *validator) sandboxNames() {
 	sandboxes := map[string]bool{}
 	for _, svc := range v.s.Services {
@@ -998,26 +962,6 @@ func (v *validator) sandboxNames() {
 			}
 			v.add(sev, p, "rename it, or rename the sandbox's HTTP binding",
 				"%s is the name of an HTTP binding of sandbox %s: its resolver would answer the binding", name, sb)
-		}
-		if len(info.Names) == 0 {
-			continue
-		}
-		others := map[string][]string{}
-		for _, hn := range info.Names {
-			if !slices.Contains(others[hn.Name], hn.Env) {
-				others[hn.Name] = append(others[hn.Name], hn.Env)
-			}
-		}
-		for _, name := range SandboxNames(v.s, sb) {
-			p := "services." + name
-			if _, ok := v.s.Addons[name]; ok {
-				p = "addons." + name
-			}
-			for _, env := range slices.Sorted(slices.Values(others[name])) {
-				v.add(sev, p, "rename one, or run the two environments' attached services in separate sandboxes",
-					"%s is a name in sandbox %s of environment %s's too: a process there could reach either", name,
-					sb, env)
-			}
 		}
 	}
 }

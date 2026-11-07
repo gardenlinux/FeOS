@@ -139,7 +139,7 @@ func TestPlanApply(t *testing.T) {
 
 	// No secret yet: an error finding, the diff all adds.
 	p, err := h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(stageSpec)})
-	if err != nil || p.Valid || p.Base != 0 || p.Current != 0 || len(p.Diff) != 7 ||
+	if err != nil || p.Valid || p.Base != 0 || p.Current != 0 || len(p.Diff) != 8 ||
 		!hasFinding(p.Findings, spec.SeverityError, "services.api.env.TOKEN", "no secret token") {
 		t.Fatalf("plan %+v %v", p, err)
 	}
@@ -162,7 +162,7 @@ func TestPlanApply(t *testing.T) {
 	a := h.apply("stage", stageSpec, 0)
 	waitHint(t, ch, ctl.HintReconcile)
 	if a.Number != 1 || a.State != model.DeploymentWaiting || a.Origin != model.OriginApply || a.Base != 0 ||
-		a.Unchanged || a.StatusCode() != http.StatusCreated || len(a.Diff) != 8 || a.Author != "tester" {
+		a.Unchanged || a.StatusCode() != http.StatusCreated || len(a.Diff) != 9 || a.Author != "tester" {
 		t.Fatalf("apply %+v", a)
 	}
 	e := h.env("stage")
@@ -205,7 +205,7 @@ func TestPlanApply(t *testing.T) {
 	}
 	zero, far := 0, 9
 	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed), Base: &zero})
-	if p.Base != 0 || p.Current != 1 || len(p.Diff) != 8 {
+	if p.Base != 0 || p.Current != 1 || len(p.Diff) != 9 {
 		t.Fatalf("plan on base 0 %+v", p)
 	}
 	_, err = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed), Base: &far})
@@ -456,66 +456,44 @@ func TestAttachedValidation(t *testing.T) {
 	}
 	attached := func(sandbox podid.ID, port string) string { return attachedAs(sandbox, "vite", port) }
 	h.apply("one", attached(sb, "5173"), 0)
-	// Another environment's attached service holds the port in the
-	// sandbox.
-	p, err := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(sb, "web", "5173"))})
-	if err != nil || p.Valid || !hasFinding(p.Findings, spec.SeverityError, "services.web.ports[0].port",
-		"port 5173 is used in sandbox "+sb.String()+" by service vite of environment one") {
-		t.Fatalf("clash %+v %v", p, err)
+	// The sandbox is environment one's (ADR 0035: the environment whose
+	// attached service names a sandbox made before it takes it): another
+	// environment's attached service cannot run in it.
+	p, err := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(sb, "web", "5174"))})
+	if err != nil || p.Valid || !hasFinding(p.Findings, spec.SeverityError, "services.web.sandbox",
+		"sandbox "+sb.String()+" is in environment one: an attached service runs in a sandbox of its own environment") {
+		t.Fatalf("other environment %+v %v", p, err)
 	}
-	// The environment's own deployment does not clash with itself.
-	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(attached(sb, "5173"))}); !p.Valid {
+	// Its own environment's deployments do.
+	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(attached(sb, "5174"))}); !p.Valid {
 		t.Fatalf("own %+v", p)
 	}
-	if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(sb, "web", "5174"))}); !p.Valid {
-		t.Fatalf("other port %+v", p)
-	}
-	// Nor may a name be the sandbox's as both environments':
-	// their attached services', image services' or addons'.
-	if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attached(sb, "5174"))}); p.Valid ||
-		!hasFinding(p.Findings, spec.SeverityError, "services.vite",
-			"vite is a name in sandbox "+sb.String()+" of environment one's too") {
-		t.Fatalf("attached name %+v", p)
-	}
-	withAPI := func(sandbox podid.ID, name, port string) string {
-		return strings.Replace(attachedAs(sandbox, name, port), `"services": {`,
-			`"services": {"api": {"image": "ghcr.io/acme/api:1", "ports": [{"name": "http", "port": 8080}]}, `, 1)
-	}
-	h.create("three", nil)
-	h.create("four", nil)
-	h.apply("three", withAPI(sb, "web3", "5175"), 0)
-	_, err = h.svc.Apply(ctx, tenantA, "four", ApplyRequest{Spec: json.RawMessage(withAPI(sb, "web4", "5176"))})
-	var ise *InvalidSpecError
-	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "services.api",
-		"api is a name in sandbox "+sb.String()+" of environment three's too") {
-		t.Fatalf("image service name: %s", describe(err))
-	}
-	// In separate sandboxes the names are their own.
-	other := h.sandbox(tenantA, true)
-	if p, _ := h.svc.Plan(ctx, tenantA, "four", PlanRequest{Spec: json.RawMessage(withAPI(other, "web4", "5176"))}); !p.Valid {
+	// Another sandbox is environment two's to take.
+	if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(plain, "web", "5173"))}); !p.Valid {
 		t.Fatalf("separate sandboxes %+v", p)
 	}
 	// A sandbox with a UUID, made before ADR 0019, is a sandbox as a short
 	// ID's is, in either case; a value that is neither is refused.
 	legacy := h.legacySandbox(tenantA, true)
 	for _, id := range []podid.ID{legacy, podid.ID(strings.ToUpper(legacy.String()))} {
-		if p, _ := h.svc.Plan(ctx, tenantA, "four", PlanRequest{Spec: json.RawMessage(withAPI(id, "web4", "5176"))}); !p.Valid {
+		if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(id, "web", "5176"))}); !p.Valid {
 			t.Fatalf("legacy sandbox %s: %+v", id, p)
 		}
 	}
-	for _, bad := range []podid.ID{"nope", podid.ID(strings.ToUpper(other.String()))} {
-		if p, _ := h.svc.Plan(ctx, tenantA, "four", PlanRequest{Spec: json.RawMessage(attachedAs(bad, "web4", "5176"))}); p.Valid ||
-			!hasFinding(p.Findings, spec.SeverityError, "services.web4.sandbox", "is not a sandbox ID") {
+	for _, bad := range []podid.ID{"nope", podid.ID(strings.ToUpper(plain.String()))} {
+		if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attachedAs(bad, "web", "5176"))}); p.Valid ||
+			!hasFinding(p.Findings, spec.SeverityError, "services.web.sandbox", "is not a sandbox ID") {
 			t.Fatalf("sandbox %q: %+v", bad, p)
 		}
 	}
-	// A sandbox that is not attachable warns when there is something to
-	// reach; an instance row is no sandbox.
-	withAddon := strings.Replace(attached(plain, "5173"), `"routes"`, `"addons": {"q": {"type": "nats", "version": "2"}}, "routes"`, 1)
-	if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(withAddon)}); !p.Valid ||
-		!hasFinding(p.Findings, spec.SeverityWarning, "services.vite.sandbox", "not attachable") {
-		t.Fatalf("not attachable %+v", p)
+	// An attached service is in its sandbox's groups, none of its own.
+	withGroups := strings.Replace(attached(sb, "5173"), `"command": ["vite"],`, `"command": ["vite"], "securityGroups": ["default"],`, 1)
+	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(withGroups)}); p.Valid ||
+		!hasFinding(p.Findings, spec.SeverityError, "services.vite.securityGroups",
+			"an attached service is in its sandbox's groups (default)") {
+		t.Fatalf("groups %+v", p)
 	}
+	// An instance row is no sandbox.
 	inst := h.instance(h.env("one").ID, spec.KindService, "x", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd00::1")
 	if p, _ := h.svc.Plan(ctx, tenantA, "two", PlanRequest{Spec: json.RawMessage(attached(inst, "5173"))}); p.Valid {
 		t.Fatalf("an instance row as sandbox %+v", p)
@@ -556,7 +534,7 @@ func TestDeploymentsAndRevert(t *testing.T) {
 	if err := json.Unmarshal(d.Spec, &sp); err != nil || sp.Services["web"].ImageAsWritten != "ghcr.io/acme/web:2" {
 		t.Fatalf("spec %s %v", d.Spec, err)
 	}
-	if d, _ := h.svc.Deployment(ctx, tenantA, "stage", 1); len(d.Diff) != 8 {
+	if d, _ := h.svc.Deployment(ctx, tenantA, "stage", 1); len(d.Diff) != 9 {
 		t.Fatalf("deployment 1 diff %+v", d.Diff)
 	}
 	_, err = h.svc.Deployment(ctx, tenantA, "stage", 3)
@@ -924,7 +902,7 @@ func TestReusedEnvID(t *testing.T) {
 	if !removed {
 		t.Fatalf("diff %+v", p.Diff)
 	}
-	if d, err := h.svc.Deployment(ctx, tenantB, "solo", 1); err != nil || len(d.Diff) != 2 {
+	if d, err := h.svc.Deployment(ctx, tenantB, "solo", 1); err != nil || len(d.Diff) != 3 {
 		t.Fatalf("deployment 1 %+v %v", d, err)
 	}
 }

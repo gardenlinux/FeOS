@@ -37,7 +37,8 @@ const (
 
 // stageSpec is a spec the real blueprints accept: two image services
 // (one idle behind the root route), a deploy job, postgres and nats, a
-// secret.
+// secret, and the group default open to its members (ADR 0034, as the
+// migration writes it for an environment made before).
 const stageSpec = `{
   "services": {
     "api": {"image": "ghcr.io/acme/api:1", "command": ["/api"],
@@ -52,7 +53,8 @@ const stageSpec = `{
   "addons": {"pg": {"type": "postgres", "version": "17", "options": {"databases": ["app"], "roles": ["api_svc"]}},
     "q": {"type": "nats", "version": "2"}},
   "routes": {"api": {"path": "/api", "service": "api", "port": "http", "strip": true},
-    "root": {"path": "/", "service": "web", "port": "http"}}
+    "root": {"path": "/", "service": "web", "port": "http"}},
+  "securityGroups": {"default": {"in": [{"protocol": "any", "from": {"group": "default"}}]}}
 }`
 
 // fakeEngine is the sandbox engine of the service's tests: it resolves

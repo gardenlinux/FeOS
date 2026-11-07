@@ -27,6 +27,7 @@ type fakeBlueprint struct {
 	versions []string
 	keys     []string
 	fields   []string
+	port     int
 }
 
 func (b fakeBlueprint) Validate(name string, prev *Addon, next Addon) []Finding {
@@ -47,6 +48,8 @@ func (b fakeBlueprint) Validate(name string, prev *Addon, next Addon) []Finding 
 	}
 	return fs
 }
+
+func (b fakeBlueprint) Port(string, Addon) int { return b.port }
 
 func (b fakeBlueprint) Ref(name string, a Addon, key string, fields map[string]string) error {
 	if !slices.Contains(b.keys, key) {
@@ -89,9 +92,9 @@ func (f fakeVC) Blueprint(typ string) (Blueprint, bool) {
 	switch typ {
 	case "postgres":
 		return fakeBlueprint{versions: []string{"16", "17"}, keys: []string{"url", "host", "port", "password"},
-			fields: []string{"role", "database"}}, true
+			fields: []string{"role", "database"}, port: 5432}, true
 	case "nats":
-		return fakeBlueprint{versions: []string{"2"}, keys: []string{"url", "host"}}, true
+		return fakeBlueprint{versions: []string{"2"}, keys: []string{"url", "host"}, port: 4222}, true
 	}
 	return nil, false
 }
@@ -118,8 +121,8 @@ func pinnedOf(image string) string {
 
 func defaultVC(mode Mode) fakeVC {
 	return fakeVC{mode: mode,
-		sandboxes: map[string]SandboxInfo{webSandbox: {ID: webSandbox, Attachable: true},
-			otherSandbox: {ID: otherSandbox, Attachable: true}, shortSandbox: {ID: shortSandbox, Attachable: true}},
+		sandboxes: map[string]SandboxInfo{webSandbox: {ID: webSandbox},
+			otherSandbox: {ID: otherSandbox}, shortSandbox: {ID: shortSandbox}},
 		secrets: map[string]SecretInfo{"internal-token": {Latest: 3, Versions: []int{2, 3}, Deleted: []int{1}}},
 	}
 }
@@ -387,8 +390,7 @@ func TestValidateRules(t *testing.T) {
 			e("services.expense-service.env.NO_ADDON", "no addon mysql"),
 			e("services.expense-service.env.SVC_KEY", `not "ip"`),
 			e("services.expense-service.env.SVC_NOPORT", "a port is needed"),
-			e("services.expense-service.env.SVC_PORT", "approval-service has no port grpc"),
-			e("services.expense-service.env.TO_ATTACHED", "web is an attached service: image pods cannot reach a sandbox")}},
+			e("services.expense-service.env.SVC_PORT", "approval-service has no port grpc")}},
 		{"attached may reference attached and image", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Services["api"] = Service{Runtime: RuntimeAttached, Sandbox: webSandbox, Command: []string{"x"},
@@ -398,6 +400,8 @@ func TestValidateRules(t *testing.T) {
 					"APPROVAL": {Kind: EnvService, Service: "approval-service", Port: PortRef{Name: "http"}, Key: "url"}}
 			})
 		}, nil},
+		// ADR 0035: an attached service is a name of the environment with
+		// its sandbox's address, reached where its sandbox's groups let in.
 		{"attached references attached in another sandbox", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Services["api"] = Service{Runtime: RuntimeAttached, Sandbox: otherSandbox, Command: []string{"x"},
@@ -405,7 +409,7 @@ func TestValidateRules(t *testing.T) {
 			svc(s, "web", func(v *Service) {
 				v.Env = map[string]EnvValue{"API": {Kind: EnvService, Service: "api", Port: PortRef{Name: "http"}, Key: "url"}}
 			})
-		}, []expect{e("services.web.env.API", "api is an attached service in another sandbox")}},
+		}, nil},
 		{"attached references attached in its sandbox written in capitals", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Services["api"] = Service{Runtime: RuntimeAttached, Sandbox: strings.ToUpper(webSandbox), Command: []string{"x"},
@@ -417,7 +421,7 @@ func TestValidateRules(t *testing.T) {
 		{"job references attached", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Jobs["migrate"] = Job{Image: "img", Env: map[string]EnvValue{"W": {Kind: EnvService, Service: "web", Key: "host"}}}
-		}, []expect{e("jobs.migrate.env.W", "image pods cannot reach a sandbox")}},
+		}, nil},
 		{"job needs an image", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Jobs["seed"] = Job{On: JobOnManual}
@@ -612,44 +616,22 @@ func TestValidateContextDependent(t *testing.T) {
 	approval := func(s *Spec) {
 		s.Services["approval-service"] = Service{Image: "ghcr.io/acme/approval:1.2", Ports: []Port{{Name: "http", Port: 8080}}}
 	}
-	// A port of another environment's attached service in the sandbox:
-	// an error, a warning without an environment.
+	// A sandbox of another environment: an error (ADR 0035); without an
+	// environment there is none to compare with.
 	vc := defaultVC(ModePlan)
-	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox, Attachable: true,
-		AttachedPorts: []AttachedPort{{Env: "other", Service: "vite", Port: 5173}, {Env: "other", Service: "api", Port: 8081}}}
-	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{e("services.web.ports[0].port",
-		"port 5173 is used in sandbox "+webSandbox+" by service vite of environment other")})
-	vc.mode = ModeSpec
-	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{w("services.web.ports[0].port", "service vite")})
+	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox, OtherEnvironment: "dev"}
+	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{e("services.web.sandbox",
+		"sandbox "+webSandbox+" is in environment dev: an attached service runs in a sandbox of its own environment")})
 
-	// A name another environment with attached services in the sandbox
-	// gives it too: an error, a warning without an
-	// environment; names it does not share, and its names in a sandbox
-	// this spec has no attached service in, are fine.
+	// An attached service has its sandbox's groups, none of its own.
 	vc = defaultVC(ModePlan)
-	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox, Attachable: true, Names: []SandboxName{
-		{Env: "other", Name: "approval-service"}, {Env: "other", Name: "postgres"}, {Env: "other", Name: "web"},
-		{Env: "third", Name: "web"}, {Env: "other", Name: "vite"}}}
-	vc.sandboxes[otherSandbox] = SandboxInfo{ID: otherSandbox, Attachable: true,
-		Names: []SandboxName{{Env: "other", Name: "nats"}}}
-	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{
-		e("addons.postgres", "postgres is a name in sandbox "+webSandbox+" of environment other's too"),
-		e("services.approval-service", "environment other's"),
-		e("services.web", "environment other's"), e("services.web", "environment third's")})
-	vc.mode = ModeSpec
-	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{w("addons.postgres", "other's"),
-		w("services.approval-service", "other's"), w("services.web", "other's"), w("services.web", "third's")})
-	vc = defaultVC(ModePlan)
-	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox, Attachable: true,
-		Names: []SandboxName{{Env: "other", Name: "vite"}, {Env: "other", Name: "db"}}}
-	checkFindings(t, validateMutated(t, vc, nil, approval), nil)
-
-	// A sandbox that is not attachable cannot reach the pods.
-	vc = defaultVC(ModePlan)
-	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox}
-	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{w("services.web.sandbox", "not attachable")})
-	attachedOnly := `{"services": {"web": {"runtime": "attached", "sandbox": "` + webSandbox + `", "command": ["x"]}}}`
-	checkFindings(t, Validate(vc, mustParse(t, attachedOnly), nil), nil)
+	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox, SecurityGroups: []string{"default", "dev"}}
+	checkFindings(t, validateMutated(t, vc, nil, func(s *Spec) {
+		approval(s)
+		web := s.Services["web"]
+		web.SecurityGroups = []string{"default"}
+		s.Services["web"] = web
+	}), []expect{e("services.web.securityGroups", "an attached service is in its sandbox's groups (default, dev)")})
 
 	// An addon against its previous self; a changed type deletes data.
 	prev := mustParse(t, expensa)

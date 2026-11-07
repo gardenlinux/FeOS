@@ -873,6 +873,17 @@ TABLE schema_migrations
   COLUMN applied_at timestamp with time zone NOT NULL DEFAULT now()
   CONSTRAINT PRIMARY KEY (version)
   CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (version)
+TABLE security_groups
+  COLUMN id uuid NOT NULL DEFAULT gen_random_uuid()
+  COLUMN env_id uuid NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((name ~ '^[a-z0-9][a-z0-9-]{0,31}$'::text))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CONSTRAINT UNIQUE (env_id, name)
+  CREATE UNIQUE INDEX security_groups_env_id_name_key ON public.security_groups USING btree (env_id, name)
+  CREATE UNIQUE INDEX security_groups_pkey ON public.security_groups USING btree (id)
 TABLE service_tokens
   COLUMN hash text NOT NULL
   COLUMN id uuid NOT NULL DEFAULT gen_random_uuid()

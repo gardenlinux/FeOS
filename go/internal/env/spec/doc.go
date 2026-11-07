@@ -20,6 +20,11 @@
 //     spec, versions do.
 //   - MergePatch applies an RFC 7396 merge patch to a spec document.
 //
+// The security groups of ADR 0034 are objects of the spec (groups.go):
+// Normalise writes their defaults, Validate checks their rules, the
+// groups objects name, the groups the environment's sandboxes and jobs
+// name, and warns of an object that uses another its rules do not admit.
+//
 // A spec is JSON with object maps keyed by DNS-label names. Numbers are
 // JSON numbers. Every problem is a Finding {severity, path, problem,
 // remedy}, the shape FeCode shows its users and agents too.

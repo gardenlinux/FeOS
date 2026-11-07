@@ -339,7 +339,8 @@ func (s *Service) currentRaw(ctx context.Context, e store.Environment) ([]byte, 
 // PutObject is PUT /api/v1/environments/{env}/objects/{kind}/{name}: the
 // current deployment's spec with the object set, applied (origin object,
 // originRef "<kind>/<name>") or, with DryRun, planned against req.Base.
-// kind is spec.KindService, KindJob, KindAddon, KindRoute or KindSecret.
+// kind is spec.KindService, KindJob, KindAddon, KindRoute, KindSecret or
+// KindSecurityGroup.
 func (s *Service) PutObject(ctx context.Context, tenant, env, kind, name string, req PutObjectRequest) (ObjectAnswer, error) {
 	if len(req.Object) == 0 {
 		return ObjectAnswer{}, errBadRequest("object is required: the object as a spec has it under its kind")

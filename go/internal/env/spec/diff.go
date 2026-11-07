@@ -20,7 +20,7 @@ type AddonEffect func(name string, prev, next Addon) string
 
 // Diff lists the changes from prev to next, both normalised, one entry
 // per changed object, ordered by kind (services, jobs, addons, routes,
-// secrets, bindings) and name; nil prev is an environment without a deployment (every
+// secrets, bindings, security groups) and name; nil prev is an environment without a deployment (every
 // object an add), nil next one whose objects all go. An update lists its
 // changed fields and the effect on the running pods: "in place" (adds
 // and removes but an addon's, routes, secrets, replicas, ports,
@@ -38,7 +38,11 @@ type AddonEffect func(name string, prev, next Addon) string
 // them, is sealed to the running pods again: "in place"; one whose
 // upstream or mode changes replaces the pods of the image services that
 // name it and restarts the jobs, as their own entries show (a binding
-// named, its upstream and its mode are part of their template).
+// named, its upstream and its mode are part of their template). A
+// security group (ADR 0034) whose rules change is put whole on the nodes
+// that hold it: "in place"; the groups an object names are part of its
+// pods' template, so a changed list replaces an image service's pods,
+// restarts a job and recreates an addon.
 func Diff(prev, next *Spec) []DiffEntry { return DiffWith(prev, next, nil) }
 
 // DiffWith is Diff with the effects of addons' option updates told by
@@ -84,6 +88,13 @@ func DiffWith(prev, next *Spec, addonEffect AddonEffect) []DiffEntry {
 		a, inA := prev.Bindings[name]
 		b, inB := next.Bindings[name]
 		d.object(KindBinding, name, inA, inB, func() ([]FieldChange, string) { return d.binding(name, a, b) })
+	}
+	for _, name := range unionKeys(prev.SecurityGroups, next.SecurityGroups) {
+		a, inA := prev.SecurityGroups[name]
+		b, inB := next.SecurityGroups[name]
+		d.object(KindSecurityGroup, name, inA, inB, func() ([]FieldChange, string) {
+			return changes(view(a), view(b)), EffectInPlace
+		})
 	}
 	if d.out == nil {
 		return []DiffEntry{}
@@ -169,10 +180,10 @@ func (d *differ) job(a, b Job) ([]FieldChange, string) {
 	}
 	ta := map[string]any{"image": a.Image, "command": a.Command, "env": envView(a.Env, d.prev, true),
 		"resources": view(a.Resources), "imageCredentials": toAny(a.ImageCredentials),
-		"bindings": bindingsTemplate(a.Bindings, d.prev)}
+		"bindings": bindingsTemplate(a.Bindings, d.prev), "securityGroups": toAny(a.SecurityGroups)}
 	tb := map[string]any{"image": b.Image, "command": b.Command, "env": envView(b.Env, d.next, true),
 		"resources": view(b.Resources), "imageCredentials": toAny(b.ImageCredentials),
-		"bindings": bindingsTemplate(b.Bindings, d.next)}
+		"bindings": bindingsTemplate(b.Bindings, d.next), "securityGroups": toAny(b.SecurityGroups)}
 	if reflect.DeepEqual(ta, tb) {
 		return fields, EffectInPlace
 	}
@@ -189,7 +200,7 @@ func (d *differ) addon(name string, a, b Addon) ([]FieldChange, string) {
 		return nil, EffectInPlace
 	case a.Type != b.Type:
 		return fields, EffectDeletes
-	case a.Version != b.Version || a.Plan != b.Plan:
+	case a.Version != b.Version || a.Plan != b.Plan || !slices.Equal(a.SecurityGroups, b.SecurityGroups):
 		return fields, EffectRecreates
 	}
 	if d.addonEffect != nil {
@@ -227,7 +238,7 @@ func (d *differ) template(s Service, sp *Spec) map[string]any {
 	}
 	return map[string]any{"image": s.Image, "command": s.Command, "env": envView(s.Env, sp, true),
 		"resources": view(s.Resources), "imageCredentials": toAny(s.ImageCredentials),
-		"bindings": bindingsTemplate(s.Bindings, sp)}
+		"bindings": bindingsTemplate(s.Bindings, sp), "securityGroups": toAny(s.SecurityGroups)}
 }
 
 // bindingsTemplate is what of an object's bindings its template holds:

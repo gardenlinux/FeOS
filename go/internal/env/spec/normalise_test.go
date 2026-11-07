@@ -153,7 +153,9 @@ func TestNormaliseRules(t *testing.T) {
 	if got.Services["x"].Idle != "soon" || got.Jobs["j"].Timeout != "never" {
 		t.Fatalf("%+v", got)
 	}
-	if empty, fs := Normalise(Spec{}, Pins{}); fs != nil || marshalSpec(t, empty) != "{}" {
+	// An empty spec has the group default, which reaches the internet.
+	if empty, fs := Normalise(Spec{}, Pins{}); fs != nil ||
+		marshalSpec(t, empty) != `{"securityGroups":{"default":{"out":[{"protocol":"any","to":"internet"}]}}}` {
 		t.Fatalf("empty %+v %v", empty, fs)
 	}
 }

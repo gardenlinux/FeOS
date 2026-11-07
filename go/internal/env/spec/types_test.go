@@ -55,7 +55,8 @@ const expensa = `{
     "api-expense": {"path": "/api/expense", "service": "expense-service", "port": "http", "strip": false},
     "root": {"path": "/", "service": "web", "port": "http"}
   },
-  "secrets": {"internal-token": {"version": 3}}
+  "secrets": {"internal-token": {"version": 3}},
+  "securityGroups": {"default": {"in": [{"protocol": "any", "from": {"group": "default"}}]}}
 }`
 
 func strictUnmarshal(t *testing.T, b []byte, v any) {

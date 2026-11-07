@@ -28,6 +28,12 @@ type Spec struct {
 	// (ADR 0028), whose credentials the platform adds; a service or a job
 	// gets those it names, and no other.
 	Bindings map[string]Binding `json:"bindings,omitempty"`
+	// SecurityGroups are the environment's security groups (ADR 0034), by
+	// name: rules in and out, which the groups its services, jobs and
+	// addons name allow. The group DefaultSecurityGroup always exists:
+	// Normalise adds it, without rules, when the spec has none of that
+	// name.
+	SecurityGroups map[string]SecurityGroup `json:"securityGroups,omitempty"`
 	// Volumes is a kind that is not available yet: its presence is an
 	// error finding "volumes for services are not available yet" (addons
 	// have volumes of their own). It is a field so that the finding can
@@ -90,6 +96,11 @@ type Service struct {
 	// name (ADR 0028). Image runtime only: an attached service has its
 	// sandbox's.
 	Bindings []string `json:"bindings,omitempty"`
+	// SecurityGroups are the environment's groups its pods are in (ADR
+	// 0034), 1 to MaxObjectGroups; nil: [DefaultSecurityGroup], which
+	// Normalise writes (sorted). Image runtime only: an attached service is
+	// in its sandbox's groups.
+	SecurityGroups []string `json:"securityGroups,omitempty"`
 }
 
 // Port is a named port of a service.
@@ -165,6 +176,9 @@ type Job struct {
 	// Bindings are the environment's bindings the job's pods get, by name
 	// (ADR 0028).
 	Bindings []string `json:"bindings,omitempty"`
+	// SecurityGroups are the environment's groups its pods are in, as a
+	// service's are.
+	SecurityGroups []string `json:"securityGroups,omitempty"`
 }
 
 // Binding is an HTTP API an environment's pods call by a name (ADR 0028):
@@ -273,6 +287,9 @@ type Addon struct {
 	Version string         `json:"version,omitempty"`
 	Plan    string         `json:"plan,omitempty"`
 	Options map[string]any `json:"options,omitempty"`
+	// SecurityGroups are the environment's groups its pod is in, as a
+	// service's are.
+	SecurityGroups []string `json:"securityGroups,omitempty"`
 }
 
 // Route sends HTTP requests whose path starts with Path (segment-aware) to
@@ -567,6 +584,9 @@ const (
 	KindRoute   = "route"
 	KindSecret  = "secret"
 	KindBinding = "binding"
+	// KindSecurityGroup is a group of the spec's securityGroups (ADR
+	// 0034).
+	KindSecurityGroup = "securityGroup"
 )
 
 // The defaults and limits of the contract's §3.
@@ -577,6 +597,12 @@ const (
 	MaxAddons    = 16
 	MaxRoutes    = 128
 	MaxBindings  = 32
+	// MaxSecurityGroups bounds an environment's groups, DefaultSecurityGroup
+	// among them; MaxObjectGroups the groups one object names;
+	// MaxGroupRules a group's rules, in and out together (ADR 0034).
+	MaxSecurityGroups = 50
+	MaxObjectGroups   = 5
+	MaxGroupRules     = 60
 	// MaxRoutePathBytes bounds a route's path, which every instance of
 	// ferun-ingress holds for every public environment.
 	MaxRoutePathBytes = 1024
@@ -665,8 +691,8 @@ func EffectReplaces(n int) string {
 
 // DiffEntry is the change of one object between two deployments.
 type DiffEntry struct {
-	// Kind is KindService, KindJob, KindAddon, KindRoute, KindSecret or
-	// KindBinding.
+	// Kind is KindService, KindJob, KindAddon, KindRoute, KindSecret,
+	// KindBinding or KindSecurityGroup.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	// Change is ChangeAdd, ChangeRemove or ChangeUpdate.

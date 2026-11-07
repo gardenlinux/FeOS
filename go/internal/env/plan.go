@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -61,6 +62,11 @@ type validateCtx struct {
 	destinations map[string]error
 	// credentials are the tenant's credentials (ADR 0033), by name.
 	credentials map[string]spec.CredentialInfo
+	// deny are the prefixes no pod reaches (Deps.DenyPrefixes); users the
+	// environment's sandboxes and running tenants' jobs by the groups they
+	// name (ADR 0035).
+	deny  []netip.Prefix
+	users map[string][]string
 }
 
 type imageAnswer struct {
@@ -127,6 +133,14 @@ func (v *validateCtx) Destination(host string) error {
 	}
 	return nil
 }
+
+// DenyPrefixes are the prefixes no pod of the cluster reaches, which no
+// rule of a security group opens.
+func (v *validateCtx) DenyPrefixes() []netip.Prefix { return v.deny }
+
+// GroupUsers are the environment's pods outside its spec by the groups
+// they name.
+func (v *validateCtx) GroupUsers() map[string][]string { return v.users }
 
 // BlueprintTypes are the registered addon types.
 func (v *validateCtx) BlueprintTypes() []string {
@@ -241,8 +255,9 @@ func (s *Service) resolveImages(ctx context.Context, env *store.Environment, ask
 
 // loadContext reads what a spec names for its validation, and the pins
 // of its normalisation: the tenant's sandboxes its attached services run
-// in (with the ports other environments' attached services use there,
-// and the names those environments give them),
+// in (the environment each is in and its groups, ADR 0035), the
+// environment's sandboxes and running tenants' jobs by the groups they
+// name, the prefixes no pod reaches,
 // the environment's secrets (secrets, when not nil, stands in for them:
 // a clone's), what its addon volumes hold, the addon types, the images,
 // and its default host under the apps zone. env is nil for a spec without
@@ -251,7 +266,8 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	secrets map[string]spec.SecretInfo) (*validateCtx, spec.Pins, error) {
 	vc := &validateCtx{mode: mode, sandboxes: map[string]spec.SandboxInfo{}, secrets: secrets,
 		volumes: map[string]spec.AddonData{}, blueprint: s.d.Blueprint, zone: s.d.AppsZone,
-		bindingsOn: s.d.Bindings != nil && s.d.Bindings.Enabled(), destinations: map[string]error{}}
+		bindingsOn: s.d.Bindings != nil && s.d.Bindings.Enabled(), destinations: map[string]error{},
+		deny: s.d.DenyPrefixes}
 	if vc.bindingsOn {
 		for _, host := range bindingHosts(sp) {
 			vc.destinations[host] = s.d.Bindings.CheckDestination(ctx, host)
@@ -296,7 +312,6 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		}
 	}
 
-	var ids []string
 	for _, svc := range sp.Services {
 		if svc.Runtime != spec.RuntimeAttached {
 			continue
@@ -305,55 +320,30 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil || vc.sandboxes[id.String()].ID != "" {
 			continue
 		}
-		sb, err := s.st.GetSandbox(ctx, id)
-		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenant || sb.IsInstance())) {
+		sb, err := s.st.GetOwnSandbox(ctx, tenant, id)
+		if errors.Is(err, store.ErrNoRow) {
 			continue
 		}
 		if err != nil {
 			return nil, pins, fmt.Errorf("sandbox %s: %w", id, err)
 		}
-		info := spec.SandboxInfo{ID: id.String(), Attachable: attachable(sb)}
+		info := spec.SandboxInfo{ID: id.String(), SecurityGroups: sb.SecurityGroups}
+		// A sandbox of no environment yet is one made before ADR 0035
+		// that no environment names: the one that names it takes it.
+		if env != nil && sb.EnvID != uuid.Nil && sb.EnvID != env.ID {
+			info.OtherEnvironment = sb.EnvName
+		}
 		if info.HTTPNames, err = s.sandboxHTTPNames(ctx, id); err != nil {
 			return nil, pins, err
 		}
 		vc.sandboxes[id.String()] = info
-		ids = append(ids, id.String())
 	}
-	if len(ids) > 0 {
-		exclude := uuid.Nil
-		if env != nil {
-			exclude = env.ID
-		}
-		others, err := s.st.AttachedSpecs(ctx, tenant, exclude, ids)
+	if env != nil && mode != spec.ModeSpec {
+		users, err := s.st.SecurityGroupUsers(ctx, env.ID)
 		if err != nil {
 			return nil, pins, err
 		}
-		for _, o := range others {
-			other, err := parseStored(o.Spec)
-			if err != nil {
-				s.log.Warn("a stored spec does not parse", "env", o.EnvID, "err", err)
-				continue
-			}
-			named := map[string]bool{}
-			for _, name := range slices.Sorted(maps.Keys(other.Services)) {
-				svc := other.Services[name]
-				sb := strings.ToLower(svc.Sandbox)
-				info, ok := vc.sandboxes[sb]
-				if svc.Runtime != spec.RuntimeAttached || !ok {
-					continue
-				}
-				for _, p := range svc.Ports {
-					info.AttachedPorts = append(info.AttachedPorts, spec.AttachedPort{Env: o.EnvName, Service: name, Port: p.Port})
-				}
-				if !named[sb] {
-					named[sb] = true
-					for _, hn := range spec.SandboxNames(*other, sb) {
-						info.Names = append(info.Names, spec.SandboxName{Env: o.EnvName, Name: hn})
-					}
-				}
-				vc.sandboxes[sb] = info
-			}
-		}
+		vc.users = groupUsers(users)
 	}
 
 	// An environment without a deployment has no addon volumes. A clone
@@ -395,10 +385,17 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	return vc, pins, nil
 }
 
-// attachable reports whether a sandbox was created attachable: its pod
-// has its own sbx- group.
-func attachable(sb store.Sandbox) bool {
-	return sb.PodTemplate != nil && slices.Contains(sb.PodTemplate.SecurityGroups, model.SandboxGroupID(sb.ID))
+// groupUsers are the environment's group users (store.SecurityGroupUsers)
+// by the groups they name, as the plan names them: "sandbox <id>", "job
+// <id>".
+func groupUsers(users []store.GroupUser) map[string][]string {
+	out := map[string][]string{}
+	for _, u := range users {
+		for _, g := range u.SecurityGroups {
+			out[g] = append(out[g], u.Kind+" "+u.ID.String())
+		}
+	}
+	return out
 }
 
 // planned is a plan of a spec for an environment.
@@ -735,7 +732,7 @@ func cloneAnnotations(a map[string]string) map[string]string {
 // objectMaps are the spec's maps by object kind.
 var objectMaps = map[string]string{
 	spec.KindService: "services", spec.KindJob: "jobs", spec.KindAddon: "addons", spec.KindRoute: "routes",
-	spec.KindSecret: "secrets",
+	spec.KindSecret: "secrets", spec.KindSecurityGroup: "securityGroups",
 }
 
 // withObject is the current deployment's spec (raw JSON, "" for none) with
@@ -744,7 +741,7 @@ var objectMaps = map[string]string{
 func withObject(current []byte, kind, name string, object json.RawMessage) ([]byte, bool, error) {
 	key, ok := objectMaps[kind]
 	if !ok {
-		return nil, false, errBadRequest("kind must be service, job, addon, route or secret, not %q", kind)
+		return nil, false, errBadRequest("kind must be service, job, addon, route, secret or securityGroup, not %q", kind)
 	}
 	top := map[string]json.RawMessage{}
 	if len(current) > 0 {
