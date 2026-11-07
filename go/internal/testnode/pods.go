@@ -265,25 +265,8 @@ func normalize(in *podv1.PodSpec) (*podv1.PodSpec, error) {
 		}
 		volumes[v.Name], ids[v.VolumeId] = true, true
 	}
-	groups := map[string]bool{}
-	for _, g := range spec.GetNetwork().GetSecurityGroups() {
-		if !validGroupID(g) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid security group ID %q: 1 to 64 letters, digits, \"-\", \"_\" and \".\"", g)
-		}
-		if groups[g] {
-			return nil, status.Errorf(codes.InvalidArgument, "security group %s is named twice", g)
-		}
-		groups[g] = true
-	}
-	tables := map[string]bool{}
-	for _, t := range spec.GetNetwork().GetNameTables() {
-		if !validGroupID(t) {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid name table ID %q: 1 to 64 letters, digits, \"-\", \"_\" and \".\"", t)
-		}
-		if tables[t] {
-			return nil, status.Errorf(codes.InvalidArgument, "name table %s is named twice", t)
-		}
-		tables[t] = true
+	if err := checkNetwork(spec); err != nil {
+		return nil, err
 	}
 	for _, c := range spec.Containers {
 		paths := map[string]bool{}
@@ -298,6 +281,63 @@ func normalize(in *podv1.PodSpec) (*podv1.PodSpec, error) {
 		}
 	}
 	return spec, nil
+}
+
+// checkNetwork checks the security group and name table IDs of a spec:
+// valid, and each named once.
+func checkNetwork(spec *podv1.PodSpec) error {
+	groups := map[string]bool{}
+	for _, g := range spec.GetNetwork().GetSecurityGroups() {
+		if !validGroupID(g) {
+			return status.Errorf(codes.InvalidArgument, "invalid security group ID %q: 1 to 64 letters, digits, \"-\", \"_\" and \".\"", g)
+		}
+		if groups[g] {
+			return status.Errorf(codes.InvalidArgument, "security group %s is named twice", g)
+		}
+		groups[g] = true
+	}
+	tables := map[string]bool{}
+	for _, t := range spec.GetNetwork().GetNameTables() {
+		if !validGroupID(t) {
+			return status.Errorf(codes.InvalidArgument, "invalid name table ID %q: 1 to 64 letters, digits, \"-\", \"_\" and \".\"", t)
+		}
+		if tables[t] {
+			return status.Errorf(codes.InvalidArgument, "name table %s is named twice", t)
+		}
+		tables[t] = true
+	}
+	return nil
+}
+
+// applyNetwork puts the security groups and name tables a restore brings
+// (ADR 0035) into a copy of spec, each that is not empty, as feosd's
+// NetworkSettings::apply does: refused for a pod without a network, and
+// checked. The spec to keep, and whether it changed; spec itself stays.
+func applyNetwork(spec *podv1.PodSpec, groups, tables []string) (*podv1.PodSpec, bool, error) {
+	if len(groups) == 0 && len(tables) == 0 {
+		return spec, false, nil
+	}
+	if !hasNetwork(spec) {
+		return nil, false, status.Error(codes.InvalidArgument, "the pod has no network: it takes no security groups or name tables")
+	}
+	out := cloneSpec(spec)
+	if out.Network == nil {
+		out.Network = &podv1.PodNetwork{}
+	}
+	changed := false
+	if len(groups) > 0 && !slices.Equal(groups, out.Network.SecurityGroups) {
+		out.Network.SecurityGroups, changed = slices.Clone(groups), true
+	}
+	if len(tables) > 0 && !slices.Equal(tables, out.Network.NameTables) {
+		out.Network.NameTables, changed = slices.Clone(tables), true
+	}
+	if !changed {
+		return spec, false, nil
+	}
+	if err := checkNetwork(out); err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }
 
 // hasNetwork reports whether a pod has a network: unless its spec says
@@ -950,7 +990,7 @@ func (p *podService) resume(ctx context.Context, id string) error {
 	}
 	if info, err := p.get(id); err == nil && info.State == podv1.PodState_POD_STATE_HIBERNATED {
 		unlock()
-		_, err := p.restore(ctx, id, "", false, nil, nil)
+		_, err := p.restore(ctx, id, "", false, nil, nil, nil, nil)
 		return err
 	}
 	defer unlock()
@@ -1256,18 +1296,22 @@ func (p *podService) hibernate(ctx context.Context, req *podv1.HibernatePodReque
 
 func (p *podService) RestorePod(ctx context.Context, req *podv1.RestorePodRequest) (*podv1.RestorePodResponse, error) {
 	return mutate(p, ctx, func(ctx context.Context) (*podv1.RestorePodResponse, error) {
-		return p.restore(ctx, req.GetPodId(), req.GetHeadKey(), req.GetCold(), req.GetLogLabels(), req.GetLogRedact())
+		return p.restore(ctx, req.GetPodId(), req.GetHeadKey(), req.GetCold(), req.GetLogLabels(), req.GetLogRedact(),
+			req.GetSecurityGroups(), req.GetNameTables())
 	})
 }
 
+// restore brings a hibernated pod back. groups and tables, each unless
+// empty, replace its spec's security groups and name tables before it is
+// placed (ADR 0035), as on feosd.
 func (p *podService) restore(ctx context.Context, id, headKey string, cold bool, logLabels map[string]string,
-	logRedact []string) (*podv1.RestorePodResponse, error) {
+	logRedact, groups, tables []string) (*podv1.RestorePodResponse, error) {
 	if err := checkID(id); err != nil {
 		return nil, err
 	}
 	_, err := p.get(id)
 	if err != nil {
-		if err := p.adopt(id, headKey); err != nil {
+		if err := p.adopt(id, headKey, groups, tables); err != nil {
 			return nil, err
 		}
 	}
@@ -1309,6 +1353,16 @@ func (p *podService) restore(ctx context.Context, id, headKey string, cold bool,
 		fallthrough
 	default:
 		return nil, status.Errorf(codes.FailedPrecondition, "pod %s is %s, not hibernated", id, info.State)
+	}
+	// Its groups and name tables, before it is placed: the rules and the
+	// resolver take them from its spec, as a created pod's.
+	spec, changed, err := applyNetwork(info.GetSpec(), groups, tables)
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		p.change(id, func(pd *pod) { pd.info.Spec = spec })
+		info.Spec = spec
 	}
 	if key == "" {
 		return nil, status.Errorf(codes.FailedPrecondition, "pod %s has no checkpoint", id)
@@ -1393,8 +1447,9 @@ func (p *podService) restore(ctx context.Context, id, headKey string, cold bool,
 // adopt records a pod the node does not have, hibernated, from its
 // checkpoint, which holds its spec, once its volumes are restorable here
 // (feosd's adopt_checkpoint checks them first: a restore that cannot take
-// its volumes leaves nothing on the node).
-func (p *podService) adopt(id, headKey string) error {
+// its volumes leaves nothing on the node). groups and tables, each unless
+// empty, replace the checkpoint's security groups and name tables.
+func (p *podService) adopt(id, headKey string, groups, tables []string) error {
 	if headKey == "" {
 		return status.Errorf(codes.NotFound, "no pod %s: name its checkpoint's head to restore it here", id)
 	}
@@ -1407,6 +1462,9 @@ func (p *podService) adopt(id, headKey string) error {
 	}
 	spec, err := normalize(c.spec)
 	if err != nil {
+		return err
+	}
+	if spec, _, err = applyNetwork(spec, groups, tables); err != nil {
 		return err
 	}
 	uid, _ := podid.Parse(id)
