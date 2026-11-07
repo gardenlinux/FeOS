@@ -119,8 +119,7 @@ export function can(access) {
 }
 
 // TENANT_NAV are a tenant's pages in the sidebar, in its groups, each
-// with what it needs of can() and its layer's colour (os: what runs as a
-// pod, run: what FeRun keeps, net: the network). The environments are a
+// with what it needs of can(). The environments are a
 // section of their own: each one with its pages (ENV_NAV), the one open
 // unfolded, since the UI is used in an environment; the tenant's other
 // things below, the sandboxes last of them (agents use them through the
@@ -128,19 +127,17 @@ export function can(access) {
 // member, the sandboxes and jobs with a tenant grant, the tokens for its
 // admin.
 export const TENANT_NAV = [
-  { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '', layer: 'run' },
-  { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env',
-    layer: 'run', views: ['environments', 'newEnvironment'] },
-  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant', layer: 'net' },
-  { view: 'credentials', label: 'Credentials', icon: 'plug', path: '/credentials', needs: 'readTenant', group: 'tenant',
-    layer: 'net', views: ['credentials', 'newCredential'] },
-  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'tenant', layer: 'os' },
-  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'tenant', layer: 'os',
+  { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '' },
+  { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env', views: ['environments', 'newEnvironment'] },
+  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant' },
+  { view: 'credentials', label: 'Credentials', icon: 'plug', path: '/credentials', needs: 'readTenant', group: 'tenant', views: ['credentials', 'newCredential'] },
+  { view: 'jobs', label: 'Jobs', icon: 'jobs', path: '/jobs', needs: 'readTenant', group: 'tenant' },
+  { view: 'sandboxes', label: 'Sandboxes', icon: 'box', path: '/sandboxes', needs: 'readTenant', group: 'tenant',
     views: ['sandboxes', 'tools'] },
-  { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage', layer: '' },
-  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage', layer: '' },
-  { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'manage', layer: '' },
-  { view: 'settings', label: 'Settings', icon: 'settings', path: '/settings', needs: 'members', group: 'manage', layer: '' },
+  { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage' },
+  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage' },
+  { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'manage' },
+  { view: 'settings', label: 'Settings', icon: 'settings', path: '/settings', needs: 'members', group: 'manage' },
 ];
 
 // NAV_GROUPS name the sidebar's groups, in order; env is the
@@ -170,12 +167,12 @@ export const ENV_NAV = [
 
 // PLATFORM_NAV are the operators' pages, the platform's space.
 export const PLATFORM_NAV = [
-  { view: 'nodes', label: 'Nodes', icon: 'server', path: '/nodes', group: 'fleet', layer: 'os', views: ['nodes', 'node'] },
-  { view: 'ingresses', label: 'Ingresses', icon: 'route', path: '/ingresses', group: 'fleet', layer: 'net' },
-  { view: 'instances', label: 'Control plane', icon: 'network', path: '/instances', group: 'fleet', layer: 'run' },
-  { view: 'joinTokens', label: 'Join tokens', icon: 'ticket', path: '/join-tokens', group: 'fleet', layer: '' },
-  { view: 'tenants', label: 'Tenants', icon: 'building', path: '/tenants', group: 'accounts', layer: 'run' },
-  { view: 'people', label: 'People', icon: 'users', path: '/people', group: 'accounts', layer: '' },
+  { view: 'nodes', label: 'Nodes', icon: 'server', path: '/nodes', group: 'fleet', views: ['nodes', 'node'] },
+  { view: 'ingresses', label: 'Ingresses', icon: 'route', path: '/ingresses', group: 'fleet' },
+  { view: 'instances', label: 'Control plane', icon: 'network', path: '/instances', group: 'fleet' },
+  { view: 'joinTokens', label: 'Join tokens', icon: 'ticket', path: '/join-tokens', group: 'fleet' },
+  { view: 'tenants', label: 'Tenants', icon: 'building', path: '/tenants', group: 'accounts' },
+  { view: 'people', label: 'People', icon: 'users', path: '/people', group: 'accounts' },
 ];
 
 export const PLATFORM_GROUPS = [

@@ -420,7 +420,7 @@ function EnvSection({ route, navigate, canCreate }) {
 
 function NavItem({ item, active, count, to, navigate }) {
   return (
-    <a className={'snav-item' + (active ? ' on' : '') + (item.layer ? ' l-' + item.layer : '')} href={to}
+    <a className={'snav-item' + (active ? ' on' : '')} href={to}
       onClick={(e) => { e.preventDefault(); navigate(to); }} aria-current={active ? 'page' : undefined}>
       <Icon name={item.icon} size={15} /> <span>{item.label}</span>
       {count && <span className={'snav-count' + (count.tone ? ' ' + count.tone : '')}>{count.n}</span>}
