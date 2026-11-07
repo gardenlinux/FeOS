@@ -14,6 +14,7 @@ import {
 } from './envs.js';
 import { builtinCatalog, planText, readCatalog } from './catalog.js';
 import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
+import { ObjectGroups } from './EnvGroups.jsx';
 import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
 import { StateCard, WideSpark } from './EnvOverview.jsx';
 import '../styles/environments.css';
@@ -294,6 +295,8 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
               </span>)}
           </KV>))}
       </div>
+
+      <ObjectGroups tenant={tenant} env={env} spec={spec} kind={kind} so={so} navigate={navigate} />
 
       {vars.length > 0 && (
         <>

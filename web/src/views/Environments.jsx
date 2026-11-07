@@ -26,6 +26,7 @@ import {
 } from './EnvTabs.jsx';
 import { ObjectPage } from './ObjectPage.jsx';
 import { AboutBox, ActivityTab, EnvOverview, useActivity } from './EnvOverview.jsx';
+import { EnvGroups } from './EnvGroups.jsx';
 import { EnvPods } from './EnvPods.jsx';
 import '../styles/environments.css';
 
@@ -259,7 +260,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
 
 // LENS_ICONS are the icons of the views in the tab bar.
 const LENS_ICONS = {
-  overview: 'gauge', activity: 'history', logs: 'file', traffic: 'chart', settings: 'settings',
+  overview: 'gauge', activity: 'history', logs: 'file', traffic: 'chart', groups: 'shield', settings: 'settings',
 };
 
 // EnvDetail is an environment's page: its head, the tab bar of its views
@@ -366,6 +367,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         {activeTab === 'logs' && <LogsTab tenant={tenant} env={env} st={st} item="" replica={null} search={search} navigate={navigate} />}
         {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
         {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}
+        {activeTab === 'groups' && body(<EnvGroups tenant={tenant} st={st} ec={ec} navigate={navigate} />)}
         {activeTab === 'secrets' && (
           <>
             <SecretsTab env={env} st={st} ec={ec} changed={changed} />

@@ -50,8 +50,8 @@ function decode(s) {
 // reached by New deployment; objects holds an object's page, reached
 // from the sidebar and the overview.
 export const ENV_TABS = [
-  'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'settings', 'secrets', 'access',
-  'objects',
+  'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'groups', 'settings', 'secrets',
+  'access', 'objects',
 ];
 
 // ENV_LENSES are the views of an environment, its tab bar: the sidebar
@@ -59,7 +59,7 @@ export const ENV_TABS = [
 // how to look at it. Activity holds the deployments and the incidents,
 // Settings the secrets and the domains and access (LENS_PAGES). A trace
 // has no view of its own: it opens from a log line, in Logs (lensOf).
-export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'settings'];
+export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'groups', 'settings'];
 
 // LENS_PAGES are the pages of a view that has more than one, in its own
 // tab bar.
@@ -89,7 +89,7 @@ export function objectTabs(kind) {
 
 // OBJECT_LENS maps an environment's view to an object's, and back: the
 // view stays when one picks another thing in the sidebar.
-const TO_OBJECT = { overview: 'overview', activity: 'overview', logs: 'logs', traffic: 'traffic', settings: 'config' };
+const TO_OBJECT = { overview: 'overview', activity: 'overview', logs: 'logs', traffic: 'traffic', groups: 'config', settings: 'config' };
 const TO_ENV = { overview: 'overview', logs: 'logs', traffic: 'traffic', config: 'settings' };
 
 // ENV_TAB_LABELS name them.
@@ -102,6 +102,7 @@ export const ENV_TAB_LABELS = {
   logs: 'Logs',
   traces: 'Traces',
   traffic: 'Traffic',
+  groups: 'Security groups',
   secrets: 'Secrets & credentials',
   access: 'Domains & access',
   settings: 'Settings',

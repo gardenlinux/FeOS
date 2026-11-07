@@ -39,3 +39,18 @@
 .sg-rule .sg-spacer { flex: 1 1 auto; }
 .sg-note { font-size: 12px; color: var(--muted); }
 .sg-noenv { margin: 0 0 10px; }
+
+/* an environment's Security groups view and an object's groups */
+.sg-page { max-width: 1100px; }
+.sg-intro { margin: 0 0 6px; max-width: 760px; }
+.sg-from { margin: 0 0 12px; }
+.sg-cardhead { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; text-transform: none; letter-spacing: 0; }
+.sg-cardhead .sg-name { font-size: 14px; color: var(--text); }
+.sg-cardwords { font-size: 12px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.sg-edit { margin-left: auto; }
+.sg-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 18px; margin: 8px 0; }
+.sg-col .k, .sg-members .k { color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+.sg-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.sg-members { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px; }
+.sg-members .k { margin: 0 4px 0 0; }
+.sg-objhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }

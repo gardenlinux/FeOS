@@ -269,3 +269,97 @@ export function inUse(e) {
   const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
   return { sandboxes: ids(b.sandboxes), jobs: ids(b.jobs) };
 }
+
+// ------------------------------------------------------------- who is in --
+
+const MEMBER_KEYS = [['services', 'service'], ['jobs', 'job'], ['addons', 'addon']];
+
+// attachedTo is the sandbox an attached service runs in, or '' for any
+// other object: an attached service has no groups of its own, it is in
+// its sandbox's (ADR 0035).
+export function attachedTo(kind, o) {
+  return kind === 'service' && isObject(o) && o.runtime === 'attached' ? String(o.sandbox || '?') : '';
+}
+
+// groupMembers are the objects spec puts into group name: [{kind, name}],
+// the services, jobs and addons that name it, or name none when it is
+// "default"; attached services are left out (their sandbox is the pod).
+export function groupMembers(spec, name) {
+  const out = [];
+  for (const [key, kind] of MEMBER_KEYS) {
+    for (const [n, o] of objectsOf(spec, key)) {
+      if (!attachedTo(kind, o) && objectGroups(o).includes(name)) out.push({ kind, name: n });
+    }
+  }
+  return out;
+}
+
+// podGroups are a sandbox's or a job's groups, "default" when it names
+// none.
+export function podGroups(p) {
+  return p && Array.isArray(p.securityGroups) && p.securityGroups.length ? p.securityGroups : [DEFAULT_GROUP];
+}
+
+// inRules are group name's in rules: what may reach its members.
+export function inRules(spec, name) {
+  const g = groupOf(spec, name);
+  return isObject(g) && Array.isArray(g.in) ? g.in : [];
+}
+
+// reaches are the groups whose in rules let group name's members in:
+// [{group, rule}], by the target's name.
+export function reaches(spec, name) {
+  const out = [];
+  for (const g of groupNames(spec)) {
+    for (const rule of inRules(spec, g)) {
+      if (isObject(rule) && peerType(rule.from) === 'group' && rule.from.group === name) out.push({ group: g, rule });
+    }
+  }
+  return out;
+}
+
+// reachWords say what a rule of target's in lets a member reach: "tcp
+// 5432 of group db", "any of group web".
+export function reachWords(rule, target) {
+  const p = (isObject(rule) && rule.protocol) || 'tcp';
+  const ports = takesPorts(p) && isObject(rule) && Array.isArray(rule.ports) && rule.ports.length ? ` ${portsText(rule.ports)}` : '';
+  return `${p}${ports} of group ${target}`;
+}
+
+// outsideWords say what group g's members reach outside the
+// environment: ["any to the internet"] when it writes no out, [] for
+// out: [], else its rules.
+export function outsideWords(g) {
+  const mode = outMode(g);
+  if (mode === 'default') return ['any to the internet'];
+  if (mode === 'none') return [];
+  return g.out.map((r) => ruleWords(r, 'out'));
+}
+
+// objectReach is what a pod in groups may reach and be reached from, as
+// spec's rules say: {inbound: [{via, words}], inside: [{group, words}],
+// outside: [{via, words}]}; via is the pod's group whose rule it is.
+// Each list without repeats, in the order of groups.
+export function objectReach(spec, groups) {
+  const inbound = [];
+  const inside = [];
+  const outside = [];
+  const seen = new Set();
+  const once = (list, k, v) => { if (!seen.has(k)) { seen.add(k); list.push(v); } };
+  for (const g of groups || []) {
+    for (const r of inRules(spec, g)) once(inbound, `in ${ruleWords(r, 'in')}`, { via: g, words: ruleWords(r, 'in') });
+    for (const { group, rule } of reaches(spec, g)) {
+      const words = reachWords(rule, group);
+      once(inside, `inside ${words}`, { group, via: g, words });
+    }
+    for (const w of outsideWords(groupOf(spec, g) || {})) once(outside, `out ${w}`, { via: g, words: w });
+  }
+  return { inbound, inside, outside };
+}
+
+// RULES_WORDS say how groups work, for the pages that show them.
+export const RULES_WORDS = 'A pod is in the groups it names, default when it names none. Rules only allow, and the answers to an '
+  + 'allowed connection come back by themselves. Nothing reaches a pod unless an in rule of one of its groups lets it in. '
+  + 'A pod may send to every pod of the environment, whose in rules decide, and outside the environment where an out rule of '
+  + 'one of its groups lets it (a group without out rules reaches the internet). Routes from the ingress, exec and the '
+  + 'sandbox port door need no rule.';

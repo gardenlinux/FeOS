@@ -115,7 +115,7 @@ describe('the environments routes', () => {
   });
 
   it('groups the tabs into views: Activity and Settings have pages of their own', () => {
-    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'settings']);
+    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'groups', 'settings']);
     // A trace opens from a log line and belongs to Logs.
     expect(lensOf('traces')).toBe('logs');
     expect(lensOf('deployments')).toBe('activity');
@@ -165,8 +165,8 @@ describe('the environments routes', () => {
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab: 'objects', item, otab: 'logs', replica, search });
     }
     expect(ENV_TABS).toEqual([
-      'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'settings', 'secrets', 'access',
-      'objects',
+      'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'groups', 'settings', 'secrets',
+      'access', 'objects',
     ]);
     // An object's page: its kind and name, its view.
     expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/tenants/fecode/environments/e/objects/service/web%20api');
