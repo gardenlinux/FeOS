@@ -254,7 +254,7 @@ function AttachedForm({ name, o, ctx, onChange, onRemove }) {
             <span className="k">sandbox</span><span className="v mono">{o.sandbox || '—'}</span>
             <span className="k">command</span><span className="v mono">{(o.command || []).join(' ') || '—'}</span>
             {o.cwd && <><span className="k">directory</span><span className="v mono">{o.cwd}</span></>}
-            <span className="k">idle</span><span className="v">{o.idle === 'never' ? 'stays awake' : o.idle ? `awake ${o.idle} after its last activity` : "the sandbox's own"}</span>
+            <span className="k">idle</span><span className="v">{o.idle === 'never' ? 'keeps running' : o.idle ? `pauses ${o.idle} after its last activity` : "the sandbox's own"}</span>
             <span className="k">variables</span><span className="v">{Object.keys(isObject(o.env) ? o.env : {}).join(', ') || 'none'}</span>
             <span className="k">bindings</span><span className="v">{(o.bindings || []).join(', ') || 'none'}</span>
           </div>
@@ -277,7 +277,7 @@ function AttachedForm({ name, o, ctx, onChange, onRemove }) {
           <input className="mono" placeholder="/workspace" value={o.cwd || ''} onChange={(e) => onChange(set(o, 'cwd', e.target.value))} />
         </Field>
         <PortsField o={o} onChange={onChange} findings={atField(f, 'ports')} />
-        <Field label="Idle" hint={'"never": the sandbox stays awake while it runs; a duration: awake that long after its last activity; empty: the sandbox\'s own'}
+        <Field label="Idle" hint={'"never": the sandbox keeps running; a duration: it pauses that long after its last activity; empty: the sandbox\'s own'}
           findings={atField(f, 'idle')}>
           <input className="mono short" placeholder="(the sandbox's)" value={o.idle || ''} onChange={(e) => onChange(set(o, 'idle', e.target.value))} />
         </Field>

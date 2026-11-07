@@ -194,6 +194,7 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
                   <td>
                     <span className="cell-state" title={sb.statusDescription || sb.clientState}>
                       <StateDot state={sb.clientState} /> {stateWords(sb).short}
+                      {stateWords(sb).where && <span className="muted small mono">{stateWords(sb).where}</span>}
                     </span>
                   </td>
                   <td className="mono small muted">{sizeWords(sb) || '—'}</td>
@@ -303,7 +304,7 @@ export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCance
           <input className="num" type="number" min={hints.memory.min} max={hints.memory.max} step="256"
             placeholder={hints.memory.placeholder} value={f.memoryMib} onChange={set('memoryMib')} title={hints.memory.title} />
         </label>
-        <span className="sbx-hint sbx-row-hint">Empty: the default size. Fixed for the sandbox's life; it is booked on a node only while awake.</span>
+        <span className="sbx-hint sbx-row-hint">Empty: the default size. Fixed for the sandbox's life; it is booked on a node only while running.</span>
       </div>
       <label className="sbx-check">
         <input type="checkbox" checked={f.attachable} onChange={set('attachable')} />
@@ -429,7 +430,7 @@ export function Overview({ sb, tenant, can: c, navigate }) {
     <div className="sbx-overview">
       <div className="kv-grid sbx-kv">
         <span className="k">state</span>
-        <span className="v"><span className="mono">{sb.clientState}</span> · {stateWords(sb).long}</span>
+        <span className="v">{stateWords(sb).long}</span>
         {sb.statusDescription && <><span className="k">status</span><span className="v small">{sb.statusDescription}</span></>}
         <span className="k">sandbox ID</span><span className="v mono">{sb.sandboxId} <CopyBtn text={sb.sandboxId} mini /></span>
         <span className="k">owner</span><span className="v">{ownerShown(sb, tenant) || <span className="muted">the tenant {tenant}</span>}</span>
@@ -468,13 +469,13 @@ export function IdleRules() {
             10 s unless set otherwise). Paused, it stays on its node and books no room there.</span></li>
         <li><span className="sbx-li-dot"><StateDot state="hibernated" /></span>
           <span><b>It hibernates</b> after it has been paused for a while, where the platform sets one
-            (<code className="mono">--hibernate-after</code>, off unless set): its disk and memory go to the object store,
-            and it comes back on any node of that store.</span></li>
+            (<code className="mono">--hibernate-after</code>, off unless set): its disk and memory go to S3,
+            and it resumes on any node.</span></li>
         <li><span className="sbx-li-dot"><StateDot state="running" /></span>
-          <span><b>A call wakes it</b>: a tool call, a port forward or Resume brings it back, and the call waits until it runs.
-            While a call or a forward runs, it stays awake.</span></li>
+          <span><b>A call resumes it</b>: a tool call, a port forward or Resume brings it back, and the call waits until it runs.
+            While a call or a forward runs, it keeps running.</span></li>
         <li><span className="sbx-li-dot"><StateDot state="running" /></span>
-          <span><b>A process holds it awake</b>: one started with <code className="mono">process_start</code> until it ends or
+          <span><b>A process keeps it running</b>: one started with <code className="mono">process_start</code> until it ends or
             its timeout passes (timeout 0: until it is stopped), and an environment's attached service while it runs.</span></li>
       </ul>
     </div>

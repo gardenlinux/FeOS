@@ -27,8 +27,8 @@ describe('booked', () => {
   it('splits the use by sandbox state, jobs and the environments', () => {
     const parts = booked(QUOTA, SANDBOXES, JOBS);
     expect(parts.map((p) => [p.key, p.count, p.vcpus, p.memoryMib])).toEqual([
-      ['awake', 1, 2, 4096],
-      ['asleep', 1, 2, 4096],
+      ['running', 1, 2, 4096],
+      ['paused', 1, 2, 4096],
       ['hibernated', 1, 1, 2048],
       ['other', 1, 2, 4096],
       ['jobs', 1, 1, 512],

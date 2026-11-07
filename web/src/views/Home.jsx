@@ -8,6 +8,7 @@ import { fmtQuota, quotaRows, useAccess } from '../people.js';
 import { envPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import { deploymentText, deploymentTone } from './envs.js';
+import { stateWords } from './sandboxes.js';
 import { ToneDot } from './Environments.jsx';
 import { RoleBadge } from './People.jsx';
 
@@ -20,19 +21,6 @@ import { RoleBadge } from './People.jsx';
 // SANDBOXES_SHOWN is how many of the most recently active sandboxes show.
 const SANDBOXES_SHOWN = 6;
 
-// sleepWords says where a sandbox is and what it costs, in words.
-export function sleepWords(state) {
-  switch (state) {
-    case 'running': return 'awake';
-    case 'paused': return 'asleep on its node';
-    case 'hibernated': return 'in the object store';
-    case 'pausing': return 'falling asleep';
-    case 'resuming': return 'waking';
-    case 'hibernating': return 'hibernating';
-    case 'creating': case 'pending': return 'starting';
-    default: return state || 'unknown';
-  }
-}
 
 // mostRecent orders sandboxes by their last activity, newest first.
 export function mostRecent(sandboxes) {
@@ -71,7 +59,7 @@ export function Home({ tenant, navigate }) {
         </div>
         <div className="facts">
           {sum.environments && <span><b>{envs.length}</b> environment{envs.length === 1 ? '' : 's'}</span>}
-          {sum.sandboxes && <span><b>{sandboxes.length}</b> sandbox{sandboxes.length === 1 ? '' : 'es'}, {awake} awake</span>}
+          {sum.sandboxes && <span><b>{sandboxes.length}</b> sandbox{sandboxes.length === 1 ? '' : 'es'}, {awake} running</span>}
           {sum.domains && <span><b>{sum.domains.length}</b> domain{sum.domains.length === 1 ? '' : 's'}</span>}
         </div>
       </header>
@@ -145,7 +133,8 @@ export function Home({ tenant, navigate }) {
                   {mostRecent(sandboxes).slice(0, SANDBOXES_SHOWN).map((s) => (
                     <tr key={s.sandboxId} className="clickable" onClick={() => navigate(`${base}/sandboxes/${enc(s.sandboxId)}`)}>
                       <td className="mono">{s.sandboxId}{s.owner && <div className="muted small">{s.owner}</div>}</td>
-                      <td><span className="cell-state"><StateDot state={s.clientState} /> {sleepWords(s.clientState)}</span></td>
+                      <td><span className="cell-state"><StateDot state={s.clientState} /> {s.clientState || 'unknown'}
+                        {stateWords(s).where && <span className="muted small mono">{stateWords(s).where}</span>}</span></td>
                       <td className="muted small"><Ago iso={s.updatedAt} /></td>
                     </tr>
                   ))}

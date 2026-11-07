@@ -23,12 +23,12 @@ export function sizeWords(sb) {
 }
 
 // STATE_BUCKETS are the list's counts, in order: each a set of
-// clientStates, the dot's state, and its words.
+// clientStates, the dot's state, and its words (the API's).
 export const STATE_BUCKETS = [
-  { key: 'awake', label: 'awake', dot: 'running', states: ['running'] },
-  { key: 'asleep', label: 'asleep', dot: 'paused', states: ['paused'] },
+  { key: 'running', label: 'running', dot: 'running', states: ['running'] },
+  { key: 'paused', label: 'paused', dot: 'paused', states: ['paused'] },
   { key: 'hibernated', label: 'hibernated', dot: 'hibernated', states: ['hibernated'] },
-  { key: 'moving', label: 'on its way', dot: 'resuming', states: ['pending', 'creating', 'pausing', 'resuming', 'hibernating'] },
+  { key: 'changing', label: 'changing', dot: 'resuming', states: ['pending', 'creating', 'pausing', 'resuming', 'hibernating'] },
   { key: 'failed', label: 'failed', dot: 'failed', states: ['failed', 'lost'] },
   { key: 'other', label: 'stopped or unknown', dot: 'unknown', states: ['stopped', 'unknown'] },
 ];
@@ -46,10 +46,10 @@ export function stateCounts(sandboxes) {
   return c;
 }
 
-// stateWords says where a sandbox is and what it costs, in the concept's
-// sentences (§6): {short, long}. short is the list's; long the head's,
-// with the node and the booking, beside the API's word (so a failure's
-// long sentence says what now, not the word again).
+// stateWords says a sandbox's state and where it is: {short, where,
+// long}. short is the API's word; where the node it is on, or S3 when
+// hibernated (a paused sandbox resumes on its node, a hibernated one on
+// any); long the head's sentence with what it costs and what comes next.
 export function stateWords(sb) {
   const st = (sb && sb.clientState) || 'unknown';
   const node = (sb && sb.node) || '';
@@ -58,31 +58,29 @@ export function stateWords(sb) {
   const desc = (sb && sb.statusDescription) || '';
   switch (st) {
     case 'running':
-      return { short: 'awake', long: `awake${size ? ` · ${size} booked${on}` : on}` };
+      return { short: st, where: node, long: `running${on}${size ? ` · ${size} booked` : ''}` };
     case 'paused':
-      return { short: 'asleep on its node', long: `asleep${on} · costs no memory · wakes on the next call` };
+      return { short: st, where: node, long: `paused${on} · its memory on the node's disk, no RAM · resumes on the next call` };
     case 'hibernated':
-      return { short: 'in the object store', long: 'in the object store · nothing on a node · restores on any node' };
+      return { short: st, where: 'S3', long: 'hibernated in S3 · nothing on a node · resumes on any node' };
     case 'pending':
-      return { short: 'not created yet', long: 'no pod yet · the next call creates it' };
+      return { short: st, where: '', long: 'not created yet · the next call creates it' };
     case 'creating':
-      return { short: 'starting', long: `starting${on}` };
     case 'pausing':
-      return { short: 'falling asleep', long: `falling asleep${on}` };
     case 'resuming':
-      return { short: 'waking', long: `waking${on}` };
+      return { short: st, where: node, long: `${st}${on}` };
     case 'hibernating':
-      return { short: 'hibernating', long: `going to the object store${node ? ` from ${node}` : ''}` };
+      return { short: st, where: node ? `${node} → S3` : 'S3', long: `going to S3${node ? ` from ${node}` : ''}` };
     case 'stopped':
-      return { short: 'stopped', long: 'the next call starts it again' };
+      return { short: st, where: '', long: 'the next call starts it again' };
     case 'failed':
-      return { short: 'failed', long: 'the next call tries to start it again, or delete it' };
+      return { short: st, where: node, long: 'the next call tries to start it again, or delete it' };
     case 'lost':
-      return { short: 'lost', long: 'no checkpoint · delete it or create anew' };
+      return { short: st, where: '', long: 'no checkpoint · delete it or create anew' };
     case 'unknown':
-      return { short: 'unknown', long: `not known now${node ? ` · node ${node} not reachable` : ''} · a sync resolves it` };
+      return { short: st, where: node, long: `not known now${node ? ` · node ${node} not reachable` : ''} · a sync resolves it` };
     default:
-      return { short: st, long: desc || st };
+      return { short: st, where: node, long: desc || st };
   }
 }
 

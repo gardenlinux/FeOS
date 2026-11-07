@@ -92,7 +92,7 @@ export function Connect({ sandboxId, write, fresh = '', onFreshSeen = () => {} }
         <h4 className="sbx-snip-h">REST: run a command</h4>
         <div className="snippet"><pre>{snip.curl}</pre><CopyBtn text={snip.curl} /></div>
         <p className="muted small">
-          A call wakes the sandbox when it sleeps and holds it awake while it runs. <code className="mono">timeout</code> is
+          A call resumes the sandbox when it is paused or hibernated and keeps it running while it runs. <code className="mono">timeout</code> is
           in seconds (120 by default).
         </p>
       </section>

@@ -65,7 +65,7 @@ describe('SandboxHead', () => {
     const out = head(SB, true);
     expect(out).toContain('<span class="kind">Sandbox</span>');
     expect(out).toContain('<h1 class="mono">h3k9v2m7qpx</h1>');
-    expect(out).toContain('asleep on n3 · costs no memory · wakes on the next call');
+    expect(out).toContain('paused on n3 · its memory on the node&#x27;s disk, no RAM · resumes on the next call');
     expect(out).toContain('Resume');
     expect(out).not.toContain('Pause<');
     expect(out).toContain('Connect an agent');
@@ -82,7 +82,7 @@ describe('SandboxHead', () => {
   it('shows the description and the checkpoint of a hibernated sandbox', () => {
     const out = head({ ...SB, clientState: 'hibernated', node: '', checkpointEpoch: '3', checkpointAt: '2026-11-04T10:00:00Z',
       statusDescription: 'hibernated after 1h paused' }, true);
-    expect(out).toContain('in the object store · nothing on a node · restores on any node');
+    expect(out).toContain('hibernated in S3 · nothing on a node · resumes on any node');
     expect(out).toContain('hibernated after 1h paused');
     expect(out).toContain('epoch 3');
   });
@@ -90,10 +90,10 @@ describe('SandboxHead', () => {
 
 describe('the list and the rules', () => {
   it('counts by state with dots', () => {
-    const out = renderToStaticMarkup(<StateCounts counts={{ awake: 2, asleep: 0, hibernated: 1, moving: 0, failed: 1, other: 0 }} />);
-    expect(out).toContain('<b>2</b> awake');
+    const out = renderToStaticMarkup(<StateCounts counts={{ running: 2, paused: 0, hibernated: 1, changing: 0, failed: 1, other: 0 }} />);
+    expect(out).toContain('<b>2</b> running');
     expect(out).toContain('sbx-count zero');
-    expect(out).toContain('<b>0</b> on its way');
+    expect(out).toContain('<b>0</b> changing');
     expect(out).not.toContain('stopped or unknown');
   });
 

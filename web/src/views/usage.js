@@ -8,7 +8,7 @@
 
 // COUNTS say what counts towards each limit, by QUOTA_ITEMS' key.
 export const COUNTS = {
-  sandboxes: 'The tenant\'s own sandboxes in every state, awake, asleep or hibernated. Not an environment\'s instances, not a job\'s pod.',
+  sandboxes: 'The tenant\'s own sandboxes in every state, running, paused or hibernated. Not an environment\'s instances, not a job\'s pod.',
   environments: 'Environments not being deleted.',
   runningJobs: 'The tenant\'s jobs that have not ended: queued or running. Environments\' own jobs do not count.',
   vcpus: 'Booked by every sandbox in every state, the replicas of the environments\' image services by their current deployments, their addons\' plans, and the jobs that have not ended. An attached service runs in a sandbox, which counts already; environments\' own jobs do not count.',
@@ -26,9 +26,9 @@ export const AT_LIMIT = {
 
 // SANDBOX_STATES group a sandbox's clientState for the breakdown.
 const SANDBOX_STATES = [
-  { key: 'awake', label: 'awake or waking sandboxes', states: ['running', 'resuming', 'creating', 'pending'] },
-  { key: 'asleep', label: 'asleep on their node', states: ['paused', 'pausing'] },
-  { key: 'hibernated', label: 'hibernated, in the object store', states: ['hibernated', 'hibernating'] },
+  { key: 'running', label: 'running or starting sandboxes', states: ['running', 'resuming', 'creating', 'pending'] },
+  { key: 'paused', label: 'paused sandboxes, on their node', states: ['paused', 'pausing'] },
+  { key: 'hibernated', label: 'hibernated sandboxes, in S3', states: ['hibernated', 'hibernating'] },
 ];
 
 // booked splits the quota's vCPU and memory use into the sandboxes by

@@ -30,15 +30,15 @@ describe('sizes', () => {
 });
 
 describe('stateWords', () => {
-  it('says where it is and what it costs, as the concept does', () => {
-    expect(stateWords(SB)).toEqual({ short: 'awake', long: 'awake · 2 vCPU, 4 GiB booked on n3' });
-    expect(stateWords(as('paused')).long).toBe('asleep on n3 · costs no memory · wakes on the next call');
-    expect(stateWords(as('paused')).short).toBe('asleep on its node');
-    expect(stateWords(as('hibernated', { node: '' })).long).toBe('in the object store · nothing on a node · restores on any node');
+  it('says the API\'s word, where it is and what it costs', () => {
+    expect(stateWords(SB)).toEqual({ short: 'running', where: 'n3', long: 'running on n3 · 2 vCPU, 4 GiB booked' });
+    expect(stateWords(as('paused')).long).toBe('paused on n3 · its memory on the node\'s disk, no RAM · resumes on the next call');
+    expect(stateWords(as('paused'))).toMatchObject({ short: 'paused', where: 'n3' });
+    expect(stateWords(as('hibernated', { node: '' }))).toEqual({ short: 'hibernated', where: 'S3', long: 'hibernated in S3 · nothing on a node · resumes on any node' });
     expect(stateWords(as('lost')).long).toBe('no checkpoint · delete it or create anew');
     expect(stateWords(as('failed')).long).toBe('the next call tries to start it again, or delete it');
     expect(stateWords(as('unknown')).long).toBe('not known now · node n3 not reachable · a sync resolves it');
-    expect(stateWords(as('resuming')).long).toBe('waking on n3');
+    expect(stateWords(as('resuming')).long).toBe('resuming on n3');
   });
 
   it('keeps an unnamed state as it is', () => {
@@ -50,13 +50,13 @@ describe('stateWords', () => {
 describe('counts', () => {
   it('buckets the states as the list shows them', () => {
     expect(['running', 'paused', 'hibernated', 'resuming', 'pending', 'lost', 'stopped', 'odd'].map(bucketOf))
-      .toEqual(['awake', 'asleep', 'hibernated', 'moving', 'moving', 'failed', 'other', 'other']);
+      .toEqual(['running', 'paused', 'hibernated', 'changing', 'changing', 'failed', 'other', 'other']);
     expect(stateCounts([SB, SB, as('paused'), as('failed'), as('hibernating')]))
-      .toEqual({ awake: 2, asleep: 1, hibernated: 0, moving: 1, failed: 1, other: 0 });
-    expect(stateCounts(null).awake).toBe(0);
+      .toEqual({ running: 2, paused: 1, hibernated: 0, changing: 1, failed: 1, other: 0 });
+    expect(stateCounts(null).running).toBe(0);
   });
 
-  it('offers pause for an awake sandbox and resume for a sleeping one', () => {
+  it('offers pause for a running sandbox and resume for a paused or hibernated one', () => {
     expect([canPause(SB), canResume(SB)]).toEqual([true, false]);
     expect([canPause(as('paused')), canResume(as('paused'))]).toEqual([false, true]);
     expect(canResume(as('hibernated'))).toBe(true);
@@ -70,8 +70,8 @@ describe('the list', () => {
     expect(filterSandboxes(list, '').length).toBe(2);
     expect(filterSandboxes(list, 'q8w1').map((s) => s.sandboxId)).toEqual(['q8w1z4c0dnr']);
     expect(filterSandboxes(list, 'MIGRATE').length).toBe(1);
-    expect(filterSandboxes(list, 'asleep').length).toBe(1);
-    expect(filterSandboxes(list, 'awake').length).toBe(1);
+    expect(filterSandboxes(list, 'paused').length).toBe(1);
+    expect(filterSandboxes(list, 'running').length).toBe(1);
     expect(filterSandboxes(null, 'x')).toEqual([]);
   });
 

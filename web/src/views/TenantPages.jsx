@@ -94,7 +94,7 @@ export function Usage({ tenant, navigate }) {
             </table>
           </div>
           <p className="hint">
-            A sandbox books its vCPUs and memory in every state: asleep or hibernated it still counts, until it is
+            A sandbox books its vCPUs and memory in every state: paused or hibernated it still counts, until it is
             deleted. The environments' share is the rest of the tenant's use, by their current deployments. The lists
             are read apart from the use, so a share can lag a few seconds.
           </p>
