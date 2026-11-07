@@ -13,7 +13,7 @@ import { envValueKind, secretNames } from './refs.js';
 import { changesSince } from './rebase.js';
 import { unitKey } from './findings.js';
 import { imageView } from './pins.js';
-import { DEFAULT_GROUP, groupWords } from './groups.js';
+import { DEFAULT_GROUP, groupSummary } from './groups.js';
 
 // ---------------------------------------------------------------- list --
 
@@ -103,7 +103,7 @@ export function shortImage(o) {
 // path → service, a binding's credential or upstream, a security group's
 // rules in words, a secret's pin.
 export function summaryOf(key, o, pin) {
-  if (key === 'securityGroups') return groupWords(o);
+  if (key === 'securityGroups') return groupSummary(o);
   if (key === 'secrets') {
     if (!pin) return '';
     if (pin.missing) return 'no value yet';

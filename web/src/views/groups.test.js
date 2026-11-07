@@ -3,9 +3,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_WORDS, checkGroups, envRef, groupChoices, groupNames, groupOf, groupWords, inEnv, inUse, isGroupName, newRule,
-  objectGroups, outMode, parsePorts, peerType, peerWords, portsText, retypePeer, ruleWords, sameGroups, takesPorts,
-  toggleGroup, withProtocol,
+  DEFAULT_WORDS, checkGroups, envRef, groupChoices, groupNames, groupOf, groupSummary, inEnv, inUse, isGroupName, newRule,
+  objectGroups, outMode, parsePorts, peerType, portsText, sameGroups, takesPorts, toggleGroup, withProtocol,
 } from './groups.js';
 import { orderSpec, renameObject, specText } from './draft.js';
 import { referencesTo, refLine, removeWithRefs } from './refs.js';
@@ -48,16 +47,19 @@ describe('names and choices', () => {
     expect(groupOf({}, 'web')).toBeUndefined();
   });
 
-  it('offers a sandbox the deployed deployment\'s groups, in words', () => {
+  it('offers a sandbox the deployed deployment\'s groups, each in a line', () => {
     expect(groupChoices({})).toEqual([{ name: 'default', words: DEFAULT_WORDS }]);
     const c = groupChoices(SPEC);
     expect(c.map((x) => x.name)).toEqual(['default', 'api', 'db', 'migrate', 'web']);
-    expect(c[0].words).toBe('nothing in, internet out');
-    expect(c[1].words).toBe('in: tcp 9000 from group web · out: tcp to the internet');
-    expect(c[2].words).toBe('in: tcp 5432 from group api; tcp 5432 from group migrate · nothing out');
-    expect(c[4].words).toBe('in: tcp 8080 from 203.0.113.0/24 · internet out');
+    expect(c[0].words).toBe('nothing in · internet out');
+    expect(c[1].words).toBe('in from web · out to internet');
+    expect(c[2].words).toBe('in from api, migrate · nothing out');
+    expect(c[3].words).toBe('nothing in · internet out');
+    expect(c[4].words).toBe('in from 203.0.113.0/24 · internet out');
     // The migrated default of an existing environment: open as it was.
-    expect(groupWords({ in: [{ protocol: 'any', from: { group: 'default' } }] })).toBe('in: any from group default · internet out');
+    expect(groupSummary({ in: [{ protocol: 'any', from: { group: 'default' } }] })).toBe('in from default · internet out');
+    const many = { in: ['a', 'b', 'c', 'd', 'a'].map((g) => ({ from: { group: g } })), out: [{ to: { cidr: '10.0.0.0/8' } }] };
+    expect(groupSummary(many)).toBe('in from a, b, c +1 · out to 10.0.0.0/8');
   });
 
   it('checks a choice as ferund does', () => {
@@ -98,19 +100,11 @@ describe('rules', () => {
     expect(withProtocol({ ports: [80], from: 'internet' }, 'udp')).toEqual({ protocol: 'udp', ports: [80], from: 'internet' });
   });
 
-  it('tells and retypes a peer', () => {
+  it('tells a peer', () => {
     expect([peerType('internet'), peerType({ group: 'a' }), peerType({ cidr: '' }), peerType(7)]).toEqual(['internet', 'group', 'cidr', 'other']);
-    expect(retypePeer('internet', 'group', ['api'])).toEqual({ group: 'api' });
-    expect(retypePeer({ group: 'a' }, 'cidr')).toEqual({ cidr: '' });
-    expect(retypePeer({ cidr: '10.0.0.0/8' }, 'internet')).toBe('internet');
-    const p = { group: 'a' };
-    expect(retypePeer(p, 'group')).toBe(p);
-    expect(peerWords({ cidr: '203.0.113.0/24', except: ['203.0.113.8/29'] })).toBe('203.0.113.0/24 except 203.0.113.8/29');
   });
 
-  it('says a rule and a group\'s out', () => {
-    expect(ruleWords({ protocol: 'any', ports: [1], to: 'internet' }, 'out')).toBe('any to the internet');
-    expect(ruleWords({ from: { group: 'web' } }, 'in')).toBe('tcp from group web');
+  it('makes a rule and tells a group\'s out', () => {
     expect(newRule('in')).toEqual({ protocol: 'tcp', ports: [8080], from: { group: 'default' } });
     expect(newRule('out')).toEqual({ protocol: 'tcp', ports: [443], to: 'internet' });
     expect([outMode({}), outMode({ out: [] }), outMode(SPEC.securityGroups.api)]).toEqual(['default', 'none', 'rules']);

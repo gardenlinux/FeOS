@@ -46,7 +46,7 @@ describe('RunForm', () => {
     const one = renderToStaticMarkup(<RunForm envs={ENVS} env="kino-dev" onRun={() => {}} onCancel={() => {}} />);
     expect(one).toContain('<option value="kino-dev" selected="">kino-dev</option>');
     expect(one).toContain('reading the environment&#x27;s groups…');
-    expect(one).toContain('default: nothing in, internet out');
+    expect(one).toContain('default: nothing in · internet out');
   });
 });
 

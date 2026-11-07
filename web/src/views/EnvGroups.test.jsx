@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ObjectGroups } from './EnvGroups.jsx';
-import { groupMembers, objectReach, outsideWords, podGroups, reaches } from './groups.js';
+import { accessWords, flowsOf, groupMembers, ingressRow, ingressWords, podGroups, reaches } from './groups.js';
 
 // What an environment's groups say about who reaches whom (ADR 0034):
 // members, reach, and an object's section on its Config view.
@@ -25,7 +25,11 @@ const SPEC = {
   },
   addons: { pg: { type: 'postgres', securityGroups: ['db'] } },
   jobs: { migrate: { image: 'm', securityGroups: ['api'] } },
+  routes: { root: { path: '/', service: 'front', port: 'http' }, api: { path: '/api', service: 'back', port: 'http' } },
 };
+
+// row says a flow row as "peer-type:name access".
+const row = (r) => `${r.peer.type}:${r.peer.name} ${r.paths ? ingressWords(r.paths) : accessWords(r.access)}`;
 
 const text = (el) => renderToStaticMarkup(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ');
 
@@ -43,16 +47,52 @@ describe('members and reach', () => {
     expect(reaches(SPEC, 'api').map((r) => r.group)).toEqual(['db']);
     expect(reaches(SPEC, 'web').map((r) => r.group)).toEqual(['api']);
     expect(reaches(SPEC, 'default').map((r) => r.group)).toEqual(['default']);
-    expect(outsideWords({})).toEqual(['any to the internet']);
-    expect(outsideWords({ out: [] })).toEqual([]);
+  });
+});
+
+describe('the picture of a group', () => {
+  it('puts who may connect on the left and what its members reach on the right', () => {
+    const api = flowsOf(SPEC, ['api'], ['api']);
+    expect(api.ins.map(row)).toEqual(['group:web tcp 8080']);
+    expect(api.outs.map(row)).toEqual(['group:db tcp 5432', 'cidr:203.0.113.0/24 tcp 443']);
+    expect(flowsOf(SPEC, ['web'], ['web']).outs.map(row)).toEqual(['group:api tcp 8080', 'internet:Internet all traffic']);
+    const db = flowsOf(SPEC, ['db'], ['db']);
+    expect(db.ins.map(row)).toEqual(['group:api tcp 5432']);
+    expect(db.outs).toEqual([]);
   });
 
-  it('joins the reach of an object\'s groups without repeats', () => {
-    const r = objectReach(SPEC, ['api', 'web']);
-    expect(r.inbound.map((x) => x.words)).toEqual(['tcp 8080 from group web', 'tcp 8080 from the internet']);
-    expect(r.inside.map((x) => x.words)).toEqual(['tcp 5432 of group db', 'tcp 8080 of group api']);
-    expect(r.outside.map((x) => x.words)).toEqual(['tcp 443 to 203.0.113.0/24', 'any to the internet']);
-    expect(objectReach(SPEC, ['db']).outside).toEqual([]);
+  it('says a group\'s own members as each other, and the internet when it has no out', () => {
+    const d = flowsOf(SPEC, ['default'], ['default']);
+    expect(d.ins.map(row)).toEqual(['self:default all traffic']);
+    expect(d.outs.map(row)).toEqual(['internet:Internet all traffic']);
+    expect(d.outs[0].byDefault).toBe(true);
+  });
+
+  it('merges the rules to one peer into a row, a protocol once', () => {
+    const spec = { securityGroups: { g: { in: [
+      { ports: [5432], from: { group: 'a' } }, { ports: [4222, 5432], from: { group: 'a' } }, { protocol: 'udp', ports: [53], from: { group: 'a' } },
+      { protocol: 'icmp', from: { group: 'b' } }, { protocol: 'any', from: { group: 'b' } },
+      { from: { group: 'c' } }, { ports: [80], from: { group: 'c' } },
+      { ports: [22], from: { cidr: '203.0.113.0/24', except: ['203.0.113.8/29'] } }, { ports: [443], from: 'internet' },
+    ], out: [] } } };
+    const { ins } = flowsOf(spec, ['g'], ['g']);
+    expect(ins.map(row)).toEqual([
+      'internet:Internet tcp 443', 'cidr:203.0.113.0/24 tcp 22', 'group:a tcp 5432, 4222 · udp 53', 'group:b all traffic', 'group:c tcp all ports']);
+    expect(ins[1].peer.except).toEqual(['203.0.113.8/29']);
+  });
+
+  it('shows the routes to its services as the ingress, by HTTP', () => {
+    expect(row(ingressRow(SPEC, ['back', 'front']))).toBe('ingress:Ingress HTTP /, /api');
+    expect(ingressRow(SPEC, ['plain'])).toBeNull();
+    expect(ingressWords(['/a', '/b', '/c', '/d', '/e'])).toBe('HTTP /a, /b, /c +2');
+  });
+
+  it('joins the rows of an object\'s groups, each with the groups it comes by', () => {
+    const r = flowsOf(SPEC, ['api', 'web']);
+    expect(r.ins.map(row)).toEqual(['internet:Internet tcp 8080', 'group:web tcp 8080']);
+    expect(r.ins[1].via).toEqual(['api']);
+    expect(r.outs.map(row)).toEqual(['group:api tcp 8080', 'group:db tcp 5432', 'internet:Internet all traffic', 'cidr:203.0.113.0/24 tcp 443']);
+    expect(r.outs[2].via).toEqual(['web']);
   });
 });
 
@@ -60,24 +100,26 @@ describe("an object's groups on its Config", () => {
   const el = (kind, name, so) => (
     <ObjectGroups tenant="t" env="stage" spec={SPEC} kind={kind} name={name} so={so} navigate={() => {}} />);
 
-  it('shows its groups, what reaches it and what it reaches', () => {
+  it('shows its groups and its picture: the ingress and who may connect, what it reaches', () => {
     const all = text(el('service', 'back', SPEC.services.back));
-    expect(all).toContain('security groups');
-    expect(all).toContain('api');
-    expect(all).toContain('tcp 8080 from group web · api');
-    expect(all).toContain('tcp 5432 of group db · api');
+    expect(all).toContain('Security groups api web All groups');
+    expect(all).toContain('Allowed in');
+    expect(all).toContain('Ingress HTTP /api');
+    expect(all).toContain('web tcp 8080');
+    expect(all).toContain('back');
+    expect(all).toContain('tcp 5432 db');
     expect(renderToStaticMarkup(el('service', 'back', SPEC.services.back))).toContain('href="/tenants/t/environments/stage/groups"');
   });
 
-  it('says default and nothing when an object names no group of a closed environment', () => {
-    const all = text(<ObjectGroups tenant="t" env="e" spec={{}} kind="service" so={{ image: 'x' }} navigate={() => {}} />);
+  it('says default and nothing gets in when an object names no group of a closed environment', () => {
+    const all = text(<ObjectGroups tenant="t" env="e" spec={{}} kind="service" name="x" so={{ image: 'x' }} navigate={() => {}} />);
     expect(all).toContain('default');
-    expect(all).toContain('nothing: no pod reaches it');
-    expect(all).toContain('any to the internet');
+    expect(all).toContain('Nothing gets in');
+    expect(all).toContain('all traffic Internet');
   });
 
   it('sends an attached service to its sandbox', () => {
     const all = text(el('service', 'preview', SPEC.services.preview));
-    expect(all).toContain('An attached service is in the groups of its sandbox sbx1');
+    expect(all).toContain('Runs in sandbox sbx1 , in its groups.');
   });
 });

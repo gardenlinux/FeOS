@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // An environment's security groups (ADR 0034) and what names them (ADR
-// 0035): the spec's securityGroups, a group's rules in words, the rule
-// rows of the builder's form, the groups a service, job or addon names,
+// 0035): the spec's securityGroups, a group in a line, its flow picture
+// (who may connect, what its members reach), the rule rows of the
+// builder's form, the groups a service, job or addon names,
 // and the choice of groups of a sandbox or a tenant's job from the
 // environment's deployed deployment. Pure: no React, no browser.
 //
@@ -32,7 +33,7 @@ export const GROUP_LIMITS = { groups: 50, perObject: 5, rules: 60 };
 export const PROTOCOLS = ['tcp', 'udp', 'icmp', 'any'];
 
 // DEFAULT_WORDS say what a group without rules does.
-export const DEFAULT_WORDS = 'nothing in, internet out';
+export const DEFAULT_WORDS = 'nothing in · internet out';
 
 const GROUP_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -110,13 +111,6 @@ export function takesPorts(protocol) {
 
 // ---------------------------------------------------------------- peers --
 
-// PEER_TYPES are a peer's kinds in the form.
-export const PEER_TYPES = [
-  { key: 'group', label: 'Group' },
-  { key: 'cidr', label: 'Address block' },
-  { key: 'internet', label: 'Internet' },
-];
-
 // peerKey is where a rule's peer is: from in an in rule, to in an out
 // rule.
 export function peerKey(dir) {
@@ -129,28 +123,6 @@ export function peerType(peer) {
   if (isObject(peer) && typeof peer.group === 'string') return 'group';
   if (isObject(peer) && typeof peer.cidr === 'string') return 'cidr';
   return 'other';
-}
-
-// retypePeer is a new peer of type t, keeping what it can.
-export function retypePeer(peer, t, groups = []) {
-  if (t === peerType(peer)) return peer;
-  if (t === 'internet') return 'internet';
-  if (t === 'group') return { group: groups[0] || DEFAULT_GROUP };
-  return { cidr: '' };
-}
-
-// peerWords say a peer: "group web", "203.0.113.0/24 except
-// 203.0.113.8/29", "the internet".
-export function peerWords(peer) {
-  switch (peerType(peer)) {
-    case 'internet': return 'the internet';
-    case 'group': return `group ${peer.group || '?'}`;
-    case 'cidr': {
-      const ex = Array.isArray(peer.except) && peer.except.length ? ` except ${peer.except.join(', ')}` : '';
-      return `${peer.cidr || '?'}${ex}`;
-    }
-    default: return JSON.stringify(peer);
-  }
 }
 
 // ---------------------------------------------------------------- rules --
@@ -170,21 +142,6 @@ export function withProtocol(rule, p) {
   return out;
 }
 
-// ruleWords say a rule: "tcp 8080, 9000-9010 from group web", "any to
-// the internet", "tcp from 10.0.0.0/8" (every port).
-export function ruleWords(rule, dir) {
-  if (!isObject(rule)) return JSON.stringify(rule);
-  const p = rule.protocol || 'tcp';
-  const ports = takesPorts(p) && Array.isArray(rule.ports) && rule.ports.length ? ` ${portsText(rule.ports)}` : '';
-  return `${p}${ports} ${dir === 'out' ? 'to' : 'from'} ${peerWords(rule[peerKey(dir)])}`;
-}
-
-// isInternetOut tells the default out: any to the internet, alone.
-function isInternetOut(out) {
-  return Array.isArray(out) && out.length === 1 && isObject(out[0]) && out[0].protocol === 'any' && out[0].to === 'internet'
-    && !(Array.isArray(out[0].ports) && out[0].ports.length);
-}
-
 // outMode says a group's out: default (left out, the internet), none
 // (out: []) or rules.
 export function outMode(g) {
@@ -192,19 +149,35 @@ export function outMode(g) {
   return g.out.length === 0 ? 'none' : 'rules';
 }
 
-// groupWords say a group in a line: "nothing in, internet out" for one
-// without rules; "in: tcp 5432 from group api · internet out";
-// "3 rules in · nothing out".
-export function groupWords(g) {
+// peerShort names a peer in a few letters: the group's name, "internet",
+// the address block.
+function peerShort(peer) {
+  switch (peerType(peer)) {
+    case 'internet': return 'internet';
+    case 'group': return peer.group || '?';
+    case 'cidr': return peer.cidr || '?';
+    default: return '?';
+  }
+}
+
+// shortList is a list in a line: at most three, then "+n".
+function shortList(list) {
+  const u = [...new Set(list)];
+  return u.length <= 3 ? u.join(', ') : `${u.slice(0, 3).join(', ')} +${u.length - 3}`;
+}
+
+// groupSummary says a group in a line, without ports: "nothing in ·
+// internet out", "in from web, api · nothing out", "in from
+// 203.0.113.0/24 · out to internet, 10.0.0.0/8".
+export function groupSummary(g) {
   const o = isObject(g) ? g : {};
-  const ins = Array.isArray(o.in) ? o.in : [];
-  const inWords = ins.length === 0 ? 'nothing in'
-    : ins.length <= 2 ? `in: ${ins.map((r) => ruleWords(r, 'in')).join('; ')}` : `${ins.length} rules in`;
+  const ins = (Array.isArray(o.in) ? o.in : []).filter(isObject);
+  const inWords = ins.length ? `in from ${shortList(ins.map((r) => peerShort(r.from)))}` : 'nothing in';
   const mode = outMode(o);
-  const outWords = mode === 'default' || isInternetOut(o.out) ? 'internet out'
-    : mode === 'none' ? 'nothing out'
-      : o.out.length <= 2 ? `out: ${o.out.map((r) => ruleWords(r, 'out')).join('; ')}` : `${o.out.length} rules out`;
-  if (ins.length === 0 && outWords === 'internet out') return DEFAULT_WORDS;
+  const outs = mode === 'rules' ? o.out.filter(isObject) : [];
+  const open = outs.length === 1 && outs[0].protocol === 'any' && outs[0].to === 'internet';
+  const outWords = mode === 'default' || open ? 'internet out' : mode === 'none' ? 'nothing out'
+    : `out to ${shortList(outs.map((r) => peerShort(r.to)))}`;
   return `${inWords} · ${outWords}`;
 }
 
@@ -214,7 +187,7 @@ export function groupWords(g) {
 // environment: those of its deployed deployment's spec, "default" first
 // (it exists without a deployment), each with its words.
 export function groupChoices(spec) {
-  return groupNames(spec).map((name) => ({ name, words: groupWords(groupOf(spec, name)) }));
+  return groupNames(spec).map((name) => ({ name, words: groupSummary(groupOf(spec, name)) }));
 }
 
 // checkGroups are the problems of a choice of groups, as ferund refuses
@@ -318,48 +291,112 @@ export function reaches(spec, name) {
   return out;
 }
 
-// reachWords say what a rule of target's in lets a member reach: "tcp
-// 5432 of group db", "any of group web".
-export function reachWords(rule, target) {
+// ---------------------------------------------------------------- flows --
+
+// A flow picture says who may connect to a set of pods and what they may
+// reach: the rows on its left (in) and on its right (out), one per peer,
+// the rules of every group of the set merged.
+//
+//   Row: {key, peer: {type, name, except}, access: [{protocol, ports}],
+//         via: [group], byDefault, paths}
+//
+// type is group, self (the set's own group: its members reach each other),
+// internet, cidr, ingress (routes, which need no rule) or other. access
+// lists each protocol once with its ports ([] = every port); "any" stands
+// alone.
+
+// The order of a side's rows: from outside first on the left, the
+// environment's groups first on the right.
+const IN_ORDER = { ingress: 0, internet: 1, cidr: 2, other: 3, group: 4, self: 5 };
+const OUT_ORDER = { group: 0, internet: 1, cidr: 2, other: 3 };
+
+function rowPeer(peer, self) {
+  const t = peerType(peer);
+  if (t === 'group') return { type: self.includes(peer.group) ? 'self' : 'group', name: peer.group || '?' };
+  if (t === 'cidr') return { type: 'cidr', name: peer.cidr || '?', except: Array.isArray(peer.except) ? peer.except : [] };
+  if (t === 'internet') return { type: 'internet', name: 'Internet' };
+  return { type: 'other', name: JSON.stringify(peer) };
+}
+
+// addAccess merges a rule's protocol and ports into a row's access.
+function addAccess(access, rule) {
   const p = (isObject(rule) && rule.protocol) || 'tcp';
-  const ports = takesPorts(p) && isObject(rule) && Array.isArray(rule.ports) && rule.ports.length ? ` ${portsText(rule.ports)}` : '';
-  return `${p}${ports} of group ${target}`;
+  const ports = takesPorts(p) && isObject(rule) && Array.isArray(rule.ports) ? rule.ports : [];
+  if (access.some((a) => a.protocol === 'any')) return access;
+  if (p === 'any') return [{ protocol: 'any', ports: [] }];
+  const cur = access.find((a) => a.protocol === p);
+  if (!cur) return [...access, { protocol: p, ports: [...ports] }];
+  if (cur.ports.length === 0 || ports.length === 0) return access.map((a) => (a === cur ? { ...a, ports: [] } : a));
+  const merged = [...cur.ports, ...ports.filter((x) => !cur.ports.some((y) => String(y) === String(x)))];
+  return access.map((a) => (a === cur ? { ...a, ports: merged } : a));
 }
 
-// outsideWords say what group g's members reach outside the
-// environment: ["any to the internet"] when it writes no out, [] for
-// out: [], else its rules.
-export function outsideWords(g) {
-  const mode = outMode(g);
-  if (mode === 'default') return ['any to the internet'];
-  if (mode === 'none') return [];
-  return g.out.map((r) => ruleWords(r, 'out'));
+// Rows collects rows by peer, merging what a second rule to the same peer
+// allows; order ranks the peers' types.
+function rows(order) {
+  const m = new Map();
+  return {
+    add(peer, rule, via, extra = {}) {
+      const key = `${peer.type}:${peer.name}:${(peer.except || []).join(',')}`;
+      const cur = m.get(key) || { key, peer, access: [], via: [], ...extra };
+      cur.access = addAccess(cur.access, rule);
+      if (via && !cur.via.includes(via)) cur.via.push(via);
+      m.set(key, cur);
+    },
+    list() {
+      return [...m.values()].sort((a, b) => (order[a.peer.type] - order[b.peer.type]) || a.peer.name.localeCompare(b.peer.name));
+    },
+  };
 }
 
-// objectReach is what a pod in groups may reach and be reached from, as
-// spec's rules say: {inbound: [{via, words}], inside: [{group, words}],
-// outside: [{via, words}]}; via is the pod's group whose rule it is.
-// Each list without repeats, in the order of groups.
-export function objectReach(spec, groups) {
-  const inbound = [];
-  const inside = [];
-  const outside = [];
-  const seen = new Set();
-  const once = (list, k, v) => { if (!seen.has(k)) { seen.add(k); list.push(v); } };
+// flowsOf is the flow picture of pods in groups, by spec's rules: {ins,
+// outs}. self are the groups whose members count as the pods themselves
+// (a group's own picture: [its name]); a rule from one of them is "each
+// other", and the pods' reach into one of them is left out of outs.
+export function flowsOf(spec, groups, self = []) {
+  const ins = rows(IN_ORDER);
+  const outs = rows(OUT_ORDER);
   for (const g of groups || []) {
-    for (const r of inRules(spec, g)) once(inbound, `in ${ruleWords(r, 'in')}`, { via: g, words: ruleWords(r, 'in') });
+    for (const r of inRules(spec, g)) if (isObject(r)) ins.add(rowPeer(r.from, self), r, g);
     for (const { group, rule } of reaches(spec, g)) {
-      const words = reachWords(rule, group);
-      once(inside, `inside ${words}`, { group, via: g, words });
+      if (!self.includes(group)) outs.add({ type: 'group', name: group }, rule, g);
     }
-    for (const w of outsideWords(groupOf(spec, g) || {})) once(outside, `out ${w}`, { via: g, words: w });
+    const o = groupOf(spec, g) || {};
+    const mode = outMode(o);
+    if (mode === 'default') outs.add({ type: 'internet', name: 'Internet' }, { protocol: 'any' }, g, { byDefault: true });
+    if (mode === 'rules') for (const r of o.out) if (isObject(r)) outs.add(rowPeer(r.to, []), r, g);
   }
-  return { inbound, inside, outside };
+  return { ins: ins.list(), outs: outs.list() };
 }
 
-// RULES_WORDS say how groups work, for the pages that show them.
-export const RULES_WORDS = 'A pod is in the groups it names, default when it names none. Rules only allow, and the answers to an '
-  + 'allowed connection come back by themselves. Nothing reaches a pod unless an in rule of one of its groups lets it in. '
-  + 'A pod may send to every pod of the environment, whose in rules decide, and outside the environment where an out rule of '
-  + 'one of its groups lets it (a group without out rules reaches the internet). Routes from the ingress, exec and the '
-  + 'sandbox port door need no rule.';
+// ingressRow is the row of the routes to services: the ingress reaches
+// them without a rule (paths, by path); null when no route leads to one
+// of them.
+export function ingressRow(spec, services) {
+  const paths = objectsOf(spec, 'routes')
+    .filter(([, r]) => isObject(r) && services.includes(r.service))
+    .map(([, r]) => String(r.path || '/'))
+    .sort();
+  if (!paths.length) return null;
+  return { key: 'ingress', peer: { type: 'ingress', name: 'Ingress' }, access: [], via: [], paths: [...new Set(paths)] };
+}
+
+// ingressWords say what the ingress reaches: "HTTP /", "HTTP /api/a,
+// /api/b, /c +2".
+export function ingressWords(paths) {
+  const list = Array.isArray(paths) ? paths : [];
+  return `HTTP ${list.slice(0, 3).join(', ')}${list.length > 3 ? ` +${list.length - 3}` : ''}`;
+}
+
+// accessWords say a row's access: "all traffic", "tcp 5432, 4222",
+// "tcp 443 · udp 53", "tcp all ports", "icmp".
+export function accessWords(access) {
+  const list = Array.isArray(access) ? access : [];
+  if (list.some((a) => a.protocol === 'any')) return 'all traffic';
+  return list.map((a) => (takesPorts(a.protocol) ? `${a.protocol} ${a.ports.length ? portsText(a.ports) : 'all ports'}` : a.protocol))
+    .join(' · ');
+}
+
+// RULES_WORDS say how groups work, in a line.
+export const RULES_WORDS = 'Closed by default: only what a rule lets in gets in. Replies come back by themselves, '
+  + 'and routes from the ingress need no rule.';

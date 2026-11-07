@@ -48,7 +48,7 @@ describe('CreateForm', () => {
     expect(out).toContain('<option value="" selected="">(an environment)</option>');
     expect(out).toContain('<option value="kino-dev">kino-dev</option>');
     expect(out).toContain('Choose the environment first.');
-    expect(out).toContain('<b>default</b>: nothing in, internet out');
+    expect(out).toContain('<b>default</b>: nothing in · internet out');
     expect(out).not.toContain('attachable');
     // Without an environment there is nothing to create.
     expect(out).toMatch(/<button type="submit" class="primary" disabled="" title="choose its environment">/);
@@ -92,7 +92,7 @@ describe('SandboxHead', () => {
     expect(out).not.toContain('Pause<');
     expect(out).toContain('Connect an agent');
     expect(out).toContain('href="/tenants/kino/environments/kino-dev"');
-    expect(out).toContain('<span class="sg-chip mono" title="default: nothing in, internet out">default</span>');
+    expect(out).toContain('<span class="sg-chip mono" title="default: nothing in · internet out">default</span>');
     expect(out).toContain('<span class="sg-chip mono">db-admin</span>');
     expect(out).not.toContain('attachable');
     // The owner is the tenant: it says nothing here.

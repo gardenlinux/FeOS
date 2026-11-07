@@ -261,7 +261,7 @@ export function RunForm({ envs = null, env = '', none = false, notice = null, on
           {chosen
             ? <GroupPicker choices={groups.choices} value={form.securityGroups} onChange={(securityGroups) => setForm((f) => ({ ...f, securityGroups }))} />
             : <span className="muted small">Choose the environment first.</span>}
-          <span className="jf-hint muted">One to five groups of its deployed deployment, fixed for the run. default: nothing in, internet out,
+          <span className="jf-hint muted">One to five groups of its deployed deployment, fixed for the run. default: nothing in · internet out,
             unless the environment writes its rules.</span>
         </div>
         <Field label="image" wide hint="Pinned to its digest when the job is made; a registry that refuses it refuses the job.">

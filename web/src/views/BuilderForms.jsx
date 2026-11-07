@@ -10,9 +10,10 @@ import { checkNewer, imageView, pinSecret, setImage } from './pins.js';
 import { optionProblems, planText } from './catalog.js';
 import { credentialPath } from './credentials.js';
 import {
-  DEFAULT_GROUP, DEFAULT_WORDS, GROUP_LIMITS, PEER_TYPES, PROTOCOLS, groupNames, groupOf, groupWords, isGroupName, newRule,
-  objectGroups, outMode, parsePorts, peerKey, peerType, portsText, retypePeer, takesPorts, toggleGroup, withProtocol,
+  DEFAULT_GROUP, GROUP_LIMITS, PROTOCOLS, flowsOf, groupMembers, groupNames, groupOf, groupSummary, ingressRow, isGroupName,
+  newRule, objectGroups, outMode, parsePorts, peerKey, peerType, podGroups, portsText, takesPorts, toggleGroup, withProtocol,
 } from './groups.js';
+import { GroupFlow, MemberList } from './SecurityGroups.jsx';
 import '../styles/groups.css';
 import {
   CREDENTIAL_FIELDS, HEALTH_KINDS, SERVICE_KEYS, VALUE_TYPES, addonValue, bindingSummary, credentialBinding, freeName,
@@ -350,7 +351,7 @@ function GroupsSection({ o, ctx, onChange, findings }) {
             return (
               <label key={g} className="b-check">
                 <input type="checkbox" checked={on} disabled={(on && list.length === 1) || (!on && full)} onChange={(e) => put(g, e.target.checked)} />
-                <span className="mono">{g}</span><span className="muted small">{groupWords(groupOf(ctx.spec, g))}</span>
+                <span className="mono">{g}</span><span className="muted small">{groupSummary(groupOf(ctx.spec, g))}</span>
               </label>);
           })}
           {missing.map((g) => (
@@ -984,86 +985,78 @@ export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
 
 // ------------------------------------------------------ security groups --
 
-// SecurityGroupForm is a security group (ADR 0034): its rules in (who may
-// reach its members) and out (what they may reach outside the
-// environment), and its members. "default" is never renamed or removed:
+// SecurityGroupForm is a security group (ADR 0034): the picture of the
+// draft's group first (who may connect, its members, what they reach),
+// then its rules in and its out. "default" is never renamed or removed:
 // every environment has it.
 export function SecurityGroupForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   const o = isObject(obj) ? obj : {};
   const f = ctx.findings;
   const isDefault = name === DEFAULT_GROUP;
   const groups = groupNames(ctx.spec);
-  const members = referencesTo(ctx.spec, 'securityGroups', name).filter((r) => r.via === 'securityGroups');
-  const named = referencesTo(ctx.spec, 'securityGroups', name).filter((r) => r.via === 'rule' && r.from.name !== name);
-  const implicit = isDefault ? ['services', 'jobs', 'addons'].flatMap((k) => objectsOf(ctx.spec, k)
-    .filter(([, x]) => isObject(x) && !Array.isArray(x.securityGroups) && x.runtime !== 'attached')
-    .map(([n]) => ({ key: k, name: n }))) : [];
   const mode = outMode(o);
   const total = (Array.isArray(o.in) ? o.in.length : 0) + (Array.isArray(o.out) ? o.out.length : 0);
+  const members = [
+    ...groupMembers(ctx.spec, name).map((m) => ({ key: `${m.kind}/${m.name}`, ...m })),
+    ...(ctx.sandboxes || []).filter((p) => podGroups(p).includes(name)).map((p) => ({ key: p.sandboxId, kind: 'sandbox', name: p.sandboxId })),
+  ];
+  const spec = { ...ctx.spec, securityGroups: { ...(ctx.spec.securityGroups || {}), [name]: o } };
+  const { ins, outs } = flowsOf(spec, [name], [name]);
+  const ing = ingressRow(spec, members.filter((m) => m.kind === 'service').map((m) => m.name));
   return (
     <div className="b-form">
       <FormHead kind="Security group" name={name} onRename={isDefault ? null : onRename} findings={f} fields={['in', 'out']}
         nameCheck={{ check: isGroupName, what: '1 to 32 of a-z, 0-9 and -' }}
-        extra={<span className="muted small">{groupWords(o)}</span>} />
-      {isDefault && (
-        <p className="panel-note">Every environment has <span className="mono">default</span>: an object that names no group is in it.
-          Without rules of its own: {DEFAULT_WORDS}.</p>)}
-      <Section title="In" hint="who may reach its members; nothing when there is no rule" findings={atField(f, 'in')}>
+        extra={<span className="muted small">{isDefault ? 'every pod that names no group' : groupSummary(o)}</span>} />
+      <div className="sg-preview">
+        <GroupFlow ins={ing ? [ing, ...ins] : ins} outs={outs}>
+          <MemberList members={members} />
+        </GroupFlow>
+      </div>
+      <Section title="Allowed in" hint="who may connect to its members; routes from the ingress need no rule" findings={atField(f, 'in')}>
         <Rules dir="in" rules={o.in} groups={groups} findings={atField(f, 'in')}
           onChange={(rules) => onChange(set(o, 'in', rules && rules.length ? rules : undefined))} />
-        <p className="sg-note">A pod of the environment may send to every other; these rules decide what arrives. A routed port
-          is reached by the ingress without a rule.</p>
       </Section>
-      <Section title="Out" hint="what its members may reach outside the environment" findings={atField(f, 'out')}>
-        {mode === 'default' && (
-          <p className="small">No out rules: its members <b>reach the internet</b> (the default), and nothing else outside the
-            environment.</p>)}
-        {mode === 'none' && <p className="small">None: its members reach nothing outside the environment.</p>}
+      <Section title="Allowed out" hint="what its members may reach outside the environment" findings={atField(f, 'out')}>
+        <div className="sg-seg" role="group" aria-label="out">
+          {[['default', 'The internet'], ['rules', 'Only these'], ['none', 'Nothing']].map(([m, label]) => (
+            <button key={m} className={mode === m ? 'on' : ''} aria-pressed={mode === m}
+              onClick={() => {
+                if (m === mode) return;
+                if (m === 'default') onChange(set(o, 'out', undefined));
+                else if (m === 'none') onChange({ ...o, out: [] });
+                else onChange({ ...o, out: [newRule('out')] });
+              }}>{label}</button>))}
+        </div>
+        {mode === 'default' && <p className="sg-note">Its members reach every address on the internet. That is the default.</p>}
+        {mode === 'none' && <p className="sg-note">Its members reach nothing outside the environment.</p>}
         {mode === 'rules' && (
           <Rules dir="out" rules={o.out} groups={groups} findings={atField(f, 'out')}
             onChange={(rules) => onChange({ ...o, out: rules || [] })} />)}
-        <div className="b-row wrap">
-          {mode !== 'rules' && (
-            <button className="ghost mini" onClick={() => onChange({ ...o, out: [newRule('out')] })}>
-              <Icon name="plus" size={12} /> Add a rule</button>)}
-          {mode !== 'none' && (
-            <button className="ghost mini" onClick={() => onChange({ ...o, out: [] })} title="its members reach nothing outside the environment">
-              out: none</button>)}
-          {mode !== 'default' && (
-            <button className="ghost mini" onClick={() => onChange(set(o, 'out', undefined))} title="no out rules: the internet">
-              Back to the default (internet)</button>)}
-        </div>
-        <p className="sg-note">Out to the environment&apos;s own pods needs no rule. Private ranges the cluster denies stay closed.</p>
+        <p className="sg-note">Inside the environment, the receivers&apos; groups decide; no out rule is needed.</p>
       </Section>
       {total > GROUP_LIMITS.rules && <p className="bad small">{total} rules: a group has at most {GROUP_LIMITS.rules}.</p>}
-      <Section title="Members">
-        {members.length === 0 && implicit.length === 0
-          ? <p className="muted small">No service, job or addon names it yet. Sandboxes and jobs of the environment may name it too.</p>
-          : (
-            <ul className="b-uses">
-              {members.map((r, i) => <li key={i} className="mono small">{r.from.key.slice(0, -1)} {r.from.name}</li>)}
-              {implicit.map((x) => <li key={`${x.key}/${x.name}`} className="mono small">{x.key.slice(0, -1)} {x.name} <span className="muted">(names no group)</span></li>)}
-            </ul>)}
-        {named.length > 0 && (
-          <p className="muted small">Named in the rules of {[...new Set(named.map((r) => r.from.name))].join(', ')}.</p>)}
-      </Section>
       {!isDefault && <FormFoot onRemove={onRemove} what={`security group ${name}`} />}
     </div>
   );
 }
 
-// Rules edits a group's in or out rules, a row each: protocol, ports,
-// the peer (a group of the draft, an address block with exceptions, the
-// internet).
+// Rules edits a group's in or out rules, a row each: the peer (a group of
+// the draft, the internet, an address block with exceptions), the
+// protocol and the ports.
 function Rules({ dir, rules, groups, findings, onChange }) {
   const list = Array.isArray(rules) ? rules : [];
   const put = (i, r) => onChange(list.map((x, j) => (j === i ? r : x)));
   return (
     <div className="sg-rules">
+      {list.length > 0 && (
+        <div className="sg-rule sg-rulehead" aria-hidden="true">
+          <span>{dir === 'out' ? 'To' : 'From'}</span><span>Protocol</span><span>Ports</span><span />
+        </div>)}
       {list.map((r, i) => (
         <RuleRow key={i} dir={dir} rule={r} groups={groups} findings={atField(findings, `${dir}[${i}]`)}
           onChange={(nr) => put(i, nr)} onRemove={() => onChange(list.filter((_, j) => j !== i))} />))}
-      {list.length === 0 && dir === 'in' && <p className="muted small">No rules: nothing reaches its members.</p>}
+      {list.length === 0 && dir === 'in' && <p className="sg-note"><Icon name="lock" size={12} /> No rule: nothing gets in.</p>}
       <span><button className="ghost mini" onClick={() => onChange([...list, newRule(dir)])}>
         <Icon name="plus" size={12} /> Add a rule</button></span>
     </div>
@@ -1075,24 +1068,46 @@ function RuleRow({ dir, rule, groups, findings, onChange, onRemove }) {
   const at = peerKey(dir);
   const p = r.protocol || 'tcp';
   const peer = r[at];
-  const t = peerType(peer);
   const bad = findings.some((x) => x.severity === 'error');
   return (
     <div className={'sg-rule' + (bad ? ' bad' : '')}>
+      <PeerSelect dir={dir} peer={peer} groups={groups} onChange={(np) => onChange({ ...r, [at]: np })} />
       <Select value={p} options={PROTOCOLS} title="protocol" onChange={(v) => onChange(withProtocol(r, v))} />
       <PortsInput ports={r.ports} disabled={!takesPorts(p)} onChange={(ports) => onChange(set(r, 'ports', ports))} />
-      <span className="muted small">{dir === 'out' ? 'to' : 'from'}</span>
-      <Select value={t === 'other' ? '' : t} options={PEER_TYPES.map((x) => ({ value: x.key, label: x.label }))}
-        empty={t === 'other' ? 'Other (JSON)' : undefined} title="the peer"
-        onChange={(v) => v && onChange({ ...r, [at]: retypePeer(peer, v, groups) })} />
-      {t === 'group' && (
-        <Select value={peer.group} options={groups} title="a group of this environment" onChange={(v) => onChange({ ...r, [at]: { group: v } })} />)}
-      {t === 'cidr' && <CidrInput peer={peer} onChange={(np) => onChange({ ...r, [at]: np })} />}
-      {t === 'other' && <span className="mono small muted" title="edit it in the JSON view">{JSON.stringify(peer)}</span>}
-      <span className="sg-spacer" />
       <button className="iconbtn" title="remove the rule" onClick={onRemove}><Icon name="x" size={13} /></button>
+      {peerType(peer) === 'cidr' && (
+        <div className="sg-cidrrow"><CidrInput peer={peer} onChange={(np) => onChange({ ...r, [at]: np })} /></div>)}
+      {peerType(peer) === 'other' && (
+        <div className="sg-cidrrow mono small muted" title="edit it in the JSON view">{JSON.stringify(peer)}</div>)}
       <FindingList list={findings} />
     </div>
+  );
+}
+
+// PeerSelect picks a rule's peer in one list: a group of the draft, the
+// internet, or an address block (typed beside it).
+function PeerSelect({ dir, peer, groups, onChange }) {
+  const t = peerType(peer);
+  const value = t === 'group' ? `group:${peer.group}` : t === 'other' ? '' : t;
+  const missing = t === 'group' && !groups.includes(peer.group);
+  return (
+    <select value={value} aria-label={dir === 'out' ? 'to' : 'from'} title={dir === 'out' ? 'where its members may connect' : 'who may connect'}
+      onChange={(e) => {
+        const v = e.target.value;
+        if (v.startsWith('group:')) onChange({ group: v.slice(6) });
+        else if (v === 'internet') onChange('internet');
+        else if (v === 'cidr' && t !== 'cidr') onChange({ cidr: '' });
+      }}>
+      {t === 'other' && <option value="">Other (JSON)</option>}
+      <optgroup label="Groups of this environment">
+        {groups.map((g) => <option key={g} value={`group:${g}`}>{g}</option>)}
+        {missing && <option value={value}>{peer.group} (not a group)</option>}
+      </optgroup>
+      <optgroup label="Outside the environment">
+        <option value="internet">Internet</option>
+        <option value="cidr">Address block…</option>
+      </optgroup>
+    </select>
   );
 }
 
@@ -1105,7 +1120,7 @@ function PortsInput({ ports, disabled, onChange }) {
   useEffect(() => { if (!bad.length) setText(text0); }, [text0]); // eslint-disable-line react-hooks/exhaustive-deps
   if (disabled) return <input className="mono sg-ports" disabled value="" placeholder="every port" aria-label="ports" title="icmp and any have no ports" />;
   return (
-    <>
+    <span className="sg-portscell">
       <input className={'mono sg-ports' + (bad.length ? ' bad-input' : '')} placeholder="every port" aria-label="ports" value={text}
         title="ports and ranges, comma separated: 8080, 9000-9010"
         onChange={(e) => {
@@ -1115,7 +1130,7 @@ function PortsInput({ ports, disabled, onChange }) {
           if (!r.bad.length) onChange(r.ports.length ? r.ports : undefined);
         }} />
       {bad.length > 0 && <span className="bad small">not a port: {bad.join(', ')}</span>}
-    </>
+    </span>
   );
 }
 
@@ -1130,7 +1145,8 @@ function CidrInput({ peer, onChange }) {
     <>
       <input className="mono sg-cidr" placeholder="203.0.113.0/24" aria-label="address block" value={peer.cidr || ''}
         onChange={(e) => onChange({ ...peer, cidr: e.target.value.trim() })} />
-      <input className="mono sg-except" placeholder="except (optional): 203.0.113.8/29, …" aria-label="except" value={text}
+      <span className="muted small">except</span>
+      <input className="mono sg-except" placeholder="(optional) 203.0.113.8/29, …" aria-label="except" value={text}
         onChange={(e) => {
           setText(e.target.value);
           const list = e.target.value.split(/[,\s]+/).filter(Boolean);

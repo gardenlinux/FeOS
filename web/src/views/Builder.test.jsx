@@ -47,7 +47,7 @@ describe('ObjectNav', () => {
     expect(t).toContain('Routes 3');
     expect(t).toContain('Bindings 0');
     expect(t).toContain('Security groups 1');
-    expect(t).toContain('default nothing in, internet out');
+    expect(t).toContain('default nothing in · internet out');
     expect(t).toContain('Secrets 1');
     expect(t).toContain('expense-service expense:1.4 · 2 replicas');
     expect(t).toContain('postgres postgres · 17 · small');

@@ -47,27 +47,30 @@ const form = (name, extra) => (
   <SecurityGroupForm name={name} obj={SPEC.securityGroups[name] || {}} ctx={ctx(extra)} onChange={nop} onRename={nop} onRemove={nop} />);
 
 describe('SecurityGroupForm', () => {
-  it('shows a group\'s rules in and out, a row each', () => {
+  it('shows the group\'s picture, then its rules in and out, a row each: from or to, protocol, ports', () => {
     const out = html(form('api'));
     expect(out).toContain('<span class="kind">Security group</span>');
+    const t = text(form('api'));
+    expect(t).toContain('Allowed in Allowed out web tcp 9000 1 member api tcp 5432 db tcp 443 Internet');
+    expect(t).toContain('From Protocol Ports');
     expect(out).toMatch(/<select title="protocol"><option value="tcp" selected="">tcp<\/option><option value="udp">udp<\/option><option value="icmp">icmp<\/option><option value="any">any<\/option><\/select>/);
     expect(out).toContain('value="9000"');
-    expect(out).toMatch(/<select title="a group of this environment"><option value="default">default<\/option><option value="api">api<\/option><option value="db">db<\/option><option value="web" selected="">web<\/option>/);
+    expect(out).toMatch(/<select aria-label="from" title="who may connect"><optgroup label="Groups of this environment"><option value="group:default">default<\/option><option value="group:api">api<\/option><option value="group:db">db<\/option><option value="group:web" selected="">web<\/option><\/optgroup><optgroup label="Outside the environment"><option value="internet">Internet<\/option><option value="cidr">Address block…<\/option>/);
     expect(out).toContain('value="443"');
-    expect(out).toContain('Back to the default (internet)');
-    expect(out).toContain('out: none');
-    expect(text(form('api'))).toContain('Members service api');
+    expect(out).toMatch(/<button class="on" aria-pressed="true">Only these<\/button>/);
     expect(out).toContain('Remove security group api');
   });
 
-  it('says that a group without out reaches the internet, and offers none', () => {
+  it('says that a group without out reaches the internet; out: [] reaches nothing', () => {
     const t = text(form('web'));
-    expect(t).toContain('No out rules: its members reach the internet (the default)');
-    expect(t).toContain('out: none');
-    expect(t).not.toContain('Back to the default');
+    expect(html(form('web'))).toMatch(/<button class="on" aria-pressed="true">The internet<\/button>/);
+    expect(t).toContain('Its members reach every address on the internet. That is the default.');
     expect(html(form('web'))).toContain('value="203.0.113.0/24"');
     expect(html(form('web'))).toContain('value="203.0.113.8/29"');
-    expect(text(form('db'))).toContain('None: its members reach nothing outside the environment.');
+    expect(t).toContain('203.0.113.0/24 except 203.0.113.8/29 tcp 8080');
+    expect(html(form('db'))).toMatch(/<button class="on" aria-pressed="true">Nothing<\/button>/);
+    expect(text(form('db'))).toContain('Its members reach nothing outside the environment.');
+    expect(text(form('db'))).toContain('Reaches nothing');
   });
 
   it('keeps default: no rename, no remove, its members those that name none', () => {
@@ -75,11 +78,16 @@ describe('SecurityGroupForm', () => {
     expect(out).toContain('<h2 class="mono">default</h2>');
     expect(out).not.toContain('Remove security group');
     const t = text(form('default'));
-    expect(t).toContain('Without rules of its own: nothing in, internet out.');
-    expect(t).toContain('No rules: nothing reaches its members.');
-    expect(t).toContain('job migrate (names no group)');
-    expect(t).toContain('service worker (names no group)');
-    expect(t).not.toContain('service dev');
+    expect(t).toContain('every pod that names no group');
+    expect(t).toContain('Nothing gets in');
+    expect(t).toContain('No rule: nothing gets in.');
+    expect(t).toContain('2 members worker migrate');
+    expect(t).not.toContain(' dev ');
+  });
+
+  it('counts the environment\'s sandboxes among the members', () => {
+    const sandboxes = [{ sandboxId: 'h3k9v2m7qpx', clientState: 'running', securityGroups: ['web'] }];
+    expect(text(form('web', { sandboxes }))).toContain('2 members web h3k9v2m7qpx');
   });
 
   it('disables the ports of icmp and any', () => {
@@ -95,11 +103,11 @@ describe('the groups of services, jobs and addons', () => {
     const web = html(<ServiceForm name="web" obj={SPEC.services.web} ctx={ctx()} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(web).toContain('Security groups');
     expect(web).toMatch(/<input type="checkbox" (?:checked="" disabled=""|disabled="" checked="")\/><span class="mono">web<\/span>/);
-    expect(web).toMatch(/<input type="checkbox"\/><span class="mono">default<\/span><span class="muted small">nothing in, internet out/);
+    expect(web).toMatch(/<input type="checkbox"\/><span class="mono">default<\/span><span class="muted small">nothing in · internet out/);
     const job = html(<JobForm name="migrate" obj={SPEC.jobs.migrate} ctx={ctx()} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(job).toMatch(/<input type="checkbox" (?:checked="" disabled=""|disabled="" checked="")\/><span class="mono">default<\/span>/);
     const db = html(<AddonForm name="db" obj={SPEC.addons.db} ctx={ctx()} onChange={nop} onRename={nop} onRemove={nop} />);
-    expect(db).toMatch(/(?:checked="" disabled=""|disabled="" checked="")\/><span class="mono">db<\/span><span class="muted small">in: tcp 5432 from group api · nothing out/);
+    expect(db).toMatch(/(?:checked="" disabled=""|disabled="" checked="")\/><span class="mono">db<\/span><span class="muted small">in from api · nothing out/);
   });
 
   it('marks a group the draft lacks', () => {
@@ -123,7 +131,7 @@ describe('the groups of services, jobs and addons', () => {
 describe('a sandbox\'s groups', () => {
   it('ticks one to five of the environment\'s choices', () => {
     const out = html(<GroupPicker choices={groupChoices(SPEC)} value={['default']} onChange={nop} />);
-    expect(out).toMatch(/<input type="checkbox" (?:checked="" disabled=""|disabled="" checked="")\/><span class="mono sg-name">default<\/span><span class="muted small sg-words">nothing in, internet out/);
+    expect(out).toMatch(/<input type="checkbox" (?:checked="" disabled=""|disabled="" checked="")\/><span class="mono sg-name">default<\/span><span class="muted small sg-words">nothing in · internet out/);
     expect(out).toMatch(/<input type="checkbox"\/><span class="mono sg-name">db<\/span>/);
     const odd = html(<GroupPicker choices={groupChoices({})} value={['default', 'gone']} onChange={nop} />);
     expect(odd).toContain('class="sg-choice on bad"');

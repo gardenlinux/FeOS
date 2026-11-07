@@ -15,8 +15,8 @@ import {
   STATE_BUCKETS, activeTab, canPause, canResume, createRequest, filterSandboxes, newSandboxForm, ownerShown, sandboxEnvs,
   sandboxTabs, sizeWords, stateCounts, stateWords,
 } from './sandboxes.js';
-import { DEFAULT_GROUP, DEFAULT_WORDS, MOVE_WORDS, checkGroups, envRef, sameGroups } from './groups.js';
-import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
+import { DEFAULT_GROUP, DEFAULT_WORDS, MOVE_WORDS, checkGroups, envRef, flowsOf, sameGroups } from './groups.js';
+import { EnvLinkName, EnvPicker, GroupChips, GroupFlow, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
 import { ConfirmButton } from './EnvTabs.jsx';
 import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
@@ -526,26 +526,28 @@ export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '
   );
 }
 
-// GroupsBox changes a sandbox's security groups: a move (ADR 0035), said
-// before it is confirmed.
+// GroupsBox shows a sandbox's security groups as a picture (who may
+// connect, what it reaches) and changes them: a move (ADR 0035), said
+// before it is confirmed. While groups are picked, the picture shows the
+// picked ones.
 export function GroupsBox({ sb, write, busy, act, open = false }) {
   const cur = Array.isArray(sb.securityGroups) && sb.securityGroups.length ? sb.securityGroups : [DEFAULT_GROUP];
   const [editing, setEditing] = useState(open);
   const [pick, setPick] = useState(cur);
   const env = envRef(sb);
-  const groups = useEnvGroups(editing && env ? env.id || env.name : '');
+  const groups = useEnvGroups(env ? env.id || env.name : '');
   const problems = checkGroups(pick, groups.choices);
   const same = sameGroups(pick, cur);
+  const shown = editing ? pick : cur;
+  const flows = groups.spec ? flowsOf(groups.spec, shown) : null;
   return (
-    <div className="sbx-idle">
-      <h3 className="sect"><Icon name="shield" size={13} /> Security groups</h3>
-      <p className="small">
-        In <GroupChips groups={cur} /> of its environment. What it may reach, and what may reach it, the groups&apos; rules
-        say; exec, its tools and its port door need none.
-      </p>
-      {!editing && (
-        <button disabled={!write || !!busy} title={write ? 'choose other groups: a move' : WRITE_REASON}
-          onClick={() => { setPick(cur); setEditing(true); }}><Icon name="shield" size={13} /> Change groups</button>)}
+    <div className="sbx-idle sg-sbx">
+      <h3 className="sect sg-objsect">
+        <Icon name="shield" size={13} /> Security groups <GroupChips groups={cur} />
+        {!editing && (
+          <button className="mini sg-all" disabled={!write || !!busy} title={write ? 'choose other groups: a move' : WRITE_REASON}
+            onClick={() => { setPick(cur); setEditing(true); }}>Change groups</button>)}
+      </h3>
       {editing && (
         <div className="sg-move">
           <GroupPicker choices={groups.choices} value={pick} onChange={setPick} disabled={!write} />
@@ -562,6 +564,12 @@ export function GroupsBox({ sb, write, busy, act, open = false }) {
             <button className="ghost" onClick={() => setEditing(false)}>Cancel</button>
           </div>
         </div>)}
+      {flows && (
+        <GroupFlow ins={flows.ins} outs={flows.outs}>
+          <div className="sgf-self"><Icon name="terminal" size={14} /><span className="mono">{sb.sandboxId}</span></div>
+          {editing && !same && <div className="sgf-boxhead">with the picked groups</div>}
+        </GroupFlow>)}
+      {!flows && env && <p className="muted small">Reading the environment&apos;s groups…</p>}
     </div>
   );
 }

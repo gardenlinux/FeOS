@@ -296,7 +296,7 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
           </KV>))}
       </div>
 
-      <ObjectGroups tenant={tenant} env={env} spec={spec} kind={kind} so={so} navigate={navigate} />
+      <ObjectGroups tenant={tenant} env={env} spec={spec} kind={kind} name={name} so={so} navigate={navigate} />
 
       {vars.length > 0 && (
         <>
