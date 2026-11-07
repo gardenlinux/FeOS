@@ -737,7 +737,8 @@ describe('the settings tab', () => {
   it('clones, saying data is not copied and attached services are dropped, write on the tenant', () => {
     const all = text(<CloneBox tenant={T} env="e" st={STAGE} ec={ALL} changed={nav} navigate={nav} />);
     expect(all).toContain('Its data is not copied');
-    expect(all).toContain('Attached services are dropped');
+    expect(all).toContain('attached services are dropped');
+    expect(all).toContain('Its sandboxes and jobs stay here');
     expect(html(<CloneBox tenant={T} env="e" st={STAGE} ec={NONE} changed={nav} navigate={nav} />))
       .toContain('title="needs write on the tenant"');
   });

@@ -8,13 +8,16 @@ import {
   Ago, ArmButton, CopyBtn, ErrBox, LiveBadge, StateDot, TokenOnce, useArm, useNow, usePoll,
 } from '../components.jsx';
 import { fmtDate } from '../format.js';
-import { useAccess } from '../people.js';
+import { atLeast, envRole, envsWithRole, higher, useAccess } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import { createHints, fleetDefaults } from './fleet.js';
 import {
-  STATE_BUCKETS, activeTab, canPause, canResume, createRequest, filterSandboxes, ownerShown, sandboxTabs, sizeWords,
-  stateCounts, stateWords,
+  STATE_BUCKETS, activeTab, canPause, canResume, createRequest, filterSandboxes, newSandboxForm, ownerShown, sandboxEnvs,
+  sandboxTabs, sizeWords, stateCounts, stateWords,
 } from './sandboxes.js';
+import { DEFAULT_GROUP, DEFAULT_WORDS, MOVE_WORDS, checkGroups, envRef, sameGroups } from './groups.js';
+import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
+import { ConfirmButton } from './EnvTabs.jsx';
 import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
 import { Access, ImageCredentials } from './Access.jsx';
@@ -25,16 +28,37 @@ import '../styles/sandboxes.css';
 // A tenant's sandboxes: the list, the create form and a sandbox's page
 // with its tabs (overview, connect, credentials, network, activity,
 // settings). The selection and the tab are the route's:
-// /tenants/:t/sandboxes[/new | /:id[/:tab]] ("new" is no sandbox ID).
-// The changes need a tenant grant write; the activity and the network
-// are the operators' (the activity log carries tool params and
-// outputs), as is a node.
+// /tenants/:t/sandboxes[/new[?environment=…] | /:id[/:tab]] ("new" is
+// no sandbox ID). A sandbox is of an environment and in its security
+// groups (ADR 0035): the list shows and filters by it, the create names
+// it, and a change of groups is a move. The changes need write on the
+// sandbox's environment (its grant or the tenant's, the higher); the
+// activity and the network are the operators' (the activity log carries
+// tool params and outputs), as is a node.
 
 // NEW is the create form's place in the route.
 const NEW = 'new';
 
 // WRITE_REASON is the title of what a role without write may not do.
-const WRITE_REASON = 'needs write on this tenant';
+const WRITE_REASON = 'needs write on its environment';
+const CREATE_REASON = 'needs write on an environment';
+
+// mayWrite tells whether access may change a sandbox: write on its
+// environment.
+export function mayWrite(access, sb) {
+  const e = envRef(sb);
+  return !!e && atLeast(higher(envRole(access, e.id), envRole(access, e.name)), 'write');
+}
+
+// wantedEnv is the environment the address asks a new sandbox to be in
+// (?environment=…), '' for none.
+function wantedEnv() {
+  try {
+    return new URLSearchParams(globalThis.location ? globalThis.location.search : '').get('environment') || '';
+  } catch {
+    return '';
+  }
+}
 
 export function Sandboxes({ tenant, sel, tab, navigate }) {
   const [sandboxes, setSandboxes] = useState(null);
@@ -44,8 +68,13 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
   // once, on the new sandbox's Connect tab.
   const [created, setCreated] = useState(null);
   const base = `/tenants/${encodeURIComponent(tenant)}/sandboxes`;
-  const { can: c } = useAccess(tenant);
+  const access = useAccess(tenant);
+  const c = access.can;
   const summary = useSummary();
+  // The environments a sandbox may be made in: those the person writes.
+  const writable = summary.environments ? envsWithRole(access, summary.environments, 'write') : null;
+  // None at all is another lack than none the role writes.
+  const noEnvs = !!summary.environments && summary.environments.length === 0;
 
   const refresh = useCallback(async () => {
     try {
@@ -87,7 +116,7 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
 
   if (sel === NEW) {
     return (
-      <NewSandbox base={base} navigate={navigate} can={c} busy={busy} err={err}
+      <NewSandbox tenant={tenant} base={base} navigate={navigate} can={c} busy={busy} err={err} envs={writable} none={noEnvs}
         onCreate={(args) => act('create', async () => {
           const res = await api.createSandbox(...args);
           const id = res.status && res.status.sandboxId;
@@ -105,14 +134,14 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
     // and no answer for the previous sandbox lands in them.
     return (
       <SandboxPage key={selSb.sandboxId} tenant={tenant} sb={selSb} tab={tab} busy={busy} act={act} err={err}
-        navigate={navigate} base={base} can={c}
+        navigate={navigate} base={base} can={c} write={mayWrite(access, selSb)}
         fresh={created && created.sandboxId === selSb.sandboxId ? created.token : ''} onFreshSeen={forgetCreated} />
     );
   }
 
   return (
     <SandboxList tenant={tenant} sandboxes={sandboxes} err={err} busy={busy} act={act} navigate={navigate} base={base}
-      can={c} lastOk={lastOk} missing={sel && sandboxes ? sel : ''}
+      create={c.writeTenant || !!(writable && writable.length)} mayWrite={(sb) => mayWrite(access, sb)} lastOk={lastOk} missing={sel && sandboxes ? sel : ''}
       created={created && created.sandboxId === sel ? created : null} onCreatedSeen={forgetCreated} />
   );
 }
@@ -130,12 +159,15 @@ export function StateCounts({ counts }) {
   );
 }
 
-export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base, can: c, lastOk, missing, created, onCreatedSeen }) {
+export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base, create = false, mayWrite: may = () => false,
+  lastOk, missing, created, onCreatedSeen }) {
   const [q, setQ] = useState('');
-  const list = useMemo(() => filterSandboxes(sandboxes, q), [sandboxes, q]);
+  const [env, setEnv] = useState('');
+  const list = useMemo(() => filterSandboxes(sandboxes, q, env), [sandboxes, q, env]);
   const counts = useMemo(() => stateCounts(sandboxes), [sandboxes]);
+  const envs = useMemo(() => sandboxEnvs(sandboxes), [sandboxes]);
   const showOwner = (sandboxes || []).some((s) => ownerShown(s, tenant));
-  const newPath = `${base}/${NEW}`;
+  const newPath = `${base}/${NEW}${env ? `?environment=${encodeURIComponent(env)}` : ''}`;
 
   return (
     <div className="sbx-page">
@@ -144,10 +176,10 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
           <h1>Sandboxes</h1>
           <span className="pagehead-actions">
             <LiveBadge lastOk={lastOk} />
-            {c.writeTenant
+            {create
               ? <a className="button primary" href={newPath} onClick={(e) => { e.preventDefault(); navigate(newPath); }}>
                 <Icon name="plus" size={14} /> New sandbox</a>
-              : <button className="primary" disabled title={WRITE_REASON}><Icon name="plus" size={14} /> New sandbox</button>}
+              : <button className="primary" disabled title={CREATE_REASON}><Icon name="plus" size={14} /> New sandbox</button>}
           </span>
         </div>
         <div className="facts">
@@ -164,10 +196,14 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
         <div className="filterbar slim">
           <span className="searchwrap grow">
             <Icon name="search" size={13} />
-            <input className="searchbare" placeholder="ID, owner, image, node, state…" value={q}
+            <input className="searchbare" placeholder="ID, owner, image, node, group, state…" value={q}
               onChange={(e) => setQ(e.target.value)} />
             {q && <button className="ghost mini icon-only" onClick={() => setQ('')}><Icon name="x" size={12} /></button>}
           </span>
+          <select value={env} onChange={(e) => setEnv(e.target.value)} aria-label="environment" title="the sandboxes of one environment">
+            <option value="">every environment</option>
+            {envs.map((e) => <option key={e.name} value={e.name}>{e.name}</option>)}
+          </select>
         </div>
 
         <div className="tblwrap">
@@ -175,6 +211,7 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
             <thead>
               <tr>
                 <th>sandbox</th>
+                <th>environment</th>
                 {showOwner && <th>owner</th>}
                 <th>image</th>
                 <th>state</th>
@@ -189,6 +226,10 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
                   <td className="mono" title={sb.sandboxId}>
                     <span className="sbx-id">{sb.sandboxId}<CopyBtn text={sb.sandboxId} mini title="copy the sandbox ID" /></span>
                   </td>
+                  <td className="small">
+                    <EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} />
+                    {' '}<GroupChips groups={sb.securityGroups} />
+                  </td>
                   {showOwner && <td className="small">{ownerShown(sb, tenant) || <span className="muted">—</span>}</td>}
                   <td className="mono small muted trunc" title={sb.image}>{sb.image || 'the default'}</td>
                   <td>
@@ -199,14 +240,14 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
                   <td className="mono small muted">{sizeWords(sb) || '—'}</td>
                   <td className="col-when"><Ago iso={sb.updatedAt} /></td>
                   <td className="col-quick" onClick={(e) => e.stopPropagation()}>
-                    <QuickAction sb={sb} busy={busy} act={act} write={c.writeTenant} />
+                    <QuickAction sb={sb} busy={busy} act={act} write={may(sb)} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {sandboxes && sandboxes.length === 0 && (
-            <p className="empty">No sandboxes yet. {c.writeTenant && (
+            <p className="empty">No sandboxes yet. {create && (
               <a href={newPath} onClick={(e) => { e.preventDefault(); navigate(newPath); }}>Create one and connect an agent →</a>)}</p>)}
           {sandboxes && sandboxes.length > 0 && list.length === 0 && <p className="empty">No sandbox matches this filter.</p>}
           {!sandboxes && !err && <p className="empty">Loading…</p>}
@@ -233,8 +274,10 @@ function QuickAction({ sb, busy, act, write }) {
   return null;
 }
 
-// NewSandbox is the create form's page.
-function NewSandbox({ base, navigate, can: c, busy, err, onCreate }) {
+// NewSandbox is the create form's page; envs are the environments the
+// person may write (null while unread), none tells that the tenant has
+// none at all.
+function NewSandbox({ tenant, base, navigate, can: c, busy, err, envs, none, onCreate }) {
   const [defaults, setDefaults] = useState(null);
   // The platform's defaults and bounds are in the nodes view's answer
   // (GET /api/v1/admin/nodes), an operator's; others see "the default".
@@ -255,32 +298,42 @@ function NewSandbox({ base, navigate, can: c, busy, err, onCreate }) {
               <Icon name="arrowLeft" size={14} /> Sandboxes</a>
           </span>
         </div>
-        <div className="facts"><span>a microVM for an agent to work in · it sleeps when idle and costs nothing then</span></div>
+        <div className="facts"><span>a microVM for an agent to work in, in an environment · it sleeps when idle and costs nothing then</span></div>
       </header>
       <section className="pane">
         <ErrBox error={err} />
-        {!c.writeTenant && <p className="error">Your role does not allow this: it needs write on this tenant.</p>}
-        <CreateForm defaults={defaults} busy={busy} disabled={!c.writeTenant} onSubmit={onCreate}
-          onCancel={() => navigate(base)} />
+        {envs && envs.length === 0 && <NoEnvironment tenant={tenant} navigate={navigate} none={none} make={c.writeTenant} what="sandbox" />}
+        <CreateForm defaults={defaults} busy={busy} disabled={!!envs && envs.length === 0} envs={envs} none={none} env={wantedEnv()}
+          onSubmit={onCreate} onCancel={() => navigate(base)} />
       </section>
     </div>
   );
 }
 
-// CreateForm is the create form. An empty image or size takes the
-// platform's default, which the fields name from defaults (the nodes
-// view's), as they name the bounds ferund accepts. onSubmit gets
-// createSandbox's arguments.
-export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCancel }) {
+// CreateForm is the create form. The environment is required: one of
+// envs (those the person writes; env preselects one, as does a single
+// one), and the groups are its deployed deployment's, default ticked
+// (ADR 0035). An empty image or size takes the platform's default, which
+// the fields name from defaults (the nodes view's), as they name the
+// bounds ferund accepts. none tells that the tenant has no environment
+// at all. onSubmit gets createSandbox's arguments.
+export function CreateForm({ defaults, busy, disabled = false, envs = null, none = false, env = '', onSubmit, onCancel }) {
   const hints = createHints(fleetDefaults(defaults));
-  const [f, setF] = useState({ image: '', vcpus: '', memoryMib: '', attachable: false, username: '', password: '', credentials: [] });
+  const [f, setF] = useState(() => newSandboxForm(env));
   const [bad, setBad] = useState('');
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  // One environment to choose from is the choice; one the address named
+  // but the person may not write is none.
+  const names = (envs || []).map((e) => e.name);
+  const chosen = envs && !names.includes(f.environment) ? (names.length === 1 ? names[0] : '') : f.environment;
+  const groups = useEnvGroups(chosen);
   return (
     <form className="sbx-form" onSubmit={(e) => {
       e.preventDefault();
       try {
-        const args = createRequest(f);
+        const args = createRequest({ ...f, environment: chosen });
+        const unknown = checkGroups(f.securityGroups, groups.choices);
+        if (groups.choices && unknown.length) throw new Error(unknown.join('; '));
         setBad('');
         onSubmit(args);
       } catch (e2) {
@@ -288,8 +341,25 @@ export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCance
       }
     }}>
       <label className="sbx-field">
+        <span className="sbx-label">environment</span>
+        <EnvPicker envs={envs} value={chosen} disabled={disabled} none={none}
+          onChange={(v) => setF({ ...f, environment: v, securityGroups: [DEFAULT_GROUP] })} />
+        <span className="sbx-hint">Required and fixed for its life: it reaches that environment&apos;s pods where their groups let it in, its
+          attached services run in it, and the environment&apos;s grants decide who may use it.</span>
+      </label>
+      <div className="sbx-field">
+        <span className="sbx-label">security groups</span>
+        {chosen
+          ? <GroupPicker choices={groups.choices} value={f.securityGroups} disabled={disabled}
+            onChange={(securityGroups) => setF({ ...f, securityGroups })} />
+          : <span className="sbx-hint">Choose the environment first.</span>}
+        <span className="sbx-hint">One to five groups of the environment&apos;s deployed deployment.
+          {' '}<b>{DEFAULT_GROUP}</b>: {DEFAULT_WORDS}, unless the environment writes its rules.
+          {groups.err && <span className="warntext"> The groups cannot be read ({groups.err}): only {DEFAULT_GROUP}.</span>}</span>
+      </div>
+      <label className="sbx-field">
         <span className="sbx-label">image</span>
-        <input className="mono" placeholder={hints.image} title={hints.image} value={f.image} onChange={set('image')} autoFocus />
+        <input className="mono" placeholder={hints.image} title={hints.image} value={f.image} onChange={set('image')} />
         <span className="sbx-hint">An OCI image reference; empty: the platform's default image. It is pinned to its digest at the first create.</span>
       </label>
       <div className="sbx-row">
@@ -305,10 +375,6 @@ export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCance
         </label>
         <span className="sbx-hint sbx-row-hint">Empty: the default size. Fixed for the sandbox's life; it is booked on a node only while running.</span>
       </div>
-      <label className="sbx-check">
-        <input type="checkbox" checked={f.attachable} onChange={set('attachable')} />
-        <span><b>attachable</b> <span className="muted">— an environment's attached service may run in it, and reaches that environment's addons. Fixed for its life.</span></span>
-      </label>
       <fieldset className="sbx-fieldset">
         <legend>private image <span className="muted">· optional</span></legend>
         <div className="sbx-row">
@@ -326,7 +392,8 @@ export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCance
       <CredentialPicker value={f.credentials} disabled={disabled} onChange={(credentials) => setF({ ...f, credentials })} />
       {bad && <p className="error">{bad}</p>}
       <div className="sbx-formactions">
-        <button type="submit" className="primary" disabled={disabled || !!busy} title={disabled ? WRITE_REASON : undefined}>
+        <button type="submit" className="primary" disabled={disabled || !!busy || !chosen}
+          title={disabled ? CREATE_REASON : !chosen ? 'choose its environment' : undefined}>
           <Icon name="plus" size={14} /> {busy === 'create' ? 'Creating…' : 'Create sandbox'}</button>
         <button type="button" className="ghost" onClick={onCancel}>Cancel</button>
         <span className="muted small">You get its first token once, on its Connect tab.</span>
@@ -336,8 +403,9 @@ export function CreateForm({ defaults, busy, disabled = false, onSubmit, onCance
 }
 
 // SandboxHead is a sandbox page's head: the kind, the ID, the owner, the
-// state in words with what it costs, the main actions, the facts.
-export function SandboxHead({ sb, tenant, busy, act, write, onConnect }) {
+// state in words with what it costs, the main actions, the facts (its
+// environment and groups among them).
+export function SandboxHead({ sb, tenant, busy, act, write, onConnect, navigate = () => {} }) {
   const words = stateWords(sb);
   const owner = ownerShown(sb, tenant);
   const hibernated = sb.clientState === 'hibernated';
@@ -369,9 +437,10 @@ export function SandboxHead({ sb, tenant, busy, act, write, onConnect }) {
       </div>
       {sb.statusDescription && <p className="sbx-desc">{sb.statusDescription}</p>}
       <div className="facts">
+        <span>environment <b><EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} /></b></span>
+        <span>groups <GroupChips groups={sb.securityGroups} /></span>
         <span>image <b className="mono">{sb.image || 'the default'}</b></span>
         {sizeWords(sb) && <span>size <b>{sizeWords(sb)}</b></span>}
-        {sb.attachable && <span><b>attachable</b></span>}
         <span>created <b><Ago iso={sb.createdAt} /></b></span>
         <span>last activity <b><Ago iso={sb.updatedAt} /></b></span>
         {Number(sb.checkpointEpoch) > 0 && (
@@ -381,7 +450,7 @@ export function SandboxHead({ sb, tenant, busy, act, write, onConnect }) {
   );
 }
 
-function SandboxPage({ tenant, sb, tab, busy, act, err, navigate, base, can: c, fresh, onFreshSeen }) {
+function SandboxPage({ tenant, sb, tab, busy, act, err, navigate, base, can: c, write, fresh, onFreshSeen }) {
   const here = `${base}/${sb.sandboxId}`;
   const tabs = sandboxTabs(c);
   const cur = activeTab(tab, c);
@@ -390,7 +459,7 @@ function SandboxPage({ tenant, sb, tab, busy, act, err, navigate, base, can: c, 
 
   return (
     <div className="sbx-page">
-      <SandboxHead sb={sb} tenant={tenant} busy={busy} act={act} write={c.writeTenant} onConnect={() => go('connect')} />
+      <SandboxHead sb={sb} tenant={tenant} busy={busy} act={act} write={write} onConnect={() => go('connect')} navigate={navigate} />
       <section className="pane pane-detail">
         <div className="tabbar">
           {tabs.map((t) => (
@@ -401,27 +470,28 @@ function SandboxPage({ tenant, sb, tab, busy, act, err, navigate, base, can: c, 
         </div>
         <div className="tabbody">
           <ErrBox error={err} />
-          {cur === 'overview' && <Overview sb={sb} tenant={tenant} can={c} navigate={navigate} />}
-          {cur === 'connect' && <Connect sandboxId={sb.sandboxId} write={c.writeTenant} fresh={fresh} onFreshSeen={onFreshSeen} />}
+          {cur === 'overview' && <Overview sb={sb} tenant={tenant} can={c} navigate={navigate} write={write} busy={busy} act={act} />}
+          {cur === 'connect' && <Connect sandboxId={sb.sandboxId} write={write} fresh={fresh} onFreshSeen={onFreshSeen} />}
           {cur === 'credentials' && (
             <>
               <h3 className="sect sect-first"><Icon name="plug" size={13} /> HTTP APIs</h3>
-              <SandboxCredentials tenant={tenant} sandboxId={sb.sandboxId} write={c.writeTenant} navigate={navigate} />
+              <SandboxCredentials tenant={tenant} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
               <Access sandboxId={sb.sandboxId} />
               <h3 className="sect"><Icon name="key" size={13} /> Image credentials</h3>
-              <ImageCredentials sandboxId={sb.sandboxId} write={c.writeTenant} />
+              <ImageCredentials sandboxId={sb.sandboxId} write={write} />
             </>)}
           {cur === 'network' && <Network sandboxId={sb.sandboxId} />}
           {cur === 'activity' && <Activity load={load} />}
-          {cur === 'settings' && <Settings sb={sb} busy={busy} act={act} write={c.writeTenant} navigate={navigate} base={base} />}
+          {cur === 'settings' && <Settings sb={sb} busy={busy} act={act} write={write} navigate={navigate} base={base} />}
         </div>
       </section>
     </div>
   );
 }
 
-// Overview is the facts and what the sandbox does when idle.
-export function Overview({ sb, tenant, can: c, navigate }) {
+// Overview is the facts, its security groups with their change, and what
+// the sandbox does when idle.
+export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '', act = async () => {} }) {
   const node = sb.node && c.operator
     ? <a href={`/nodes/${encodeURIComponent(sb.node)}`} onClick={(e) => { e.preventDefault(); navigate(`/nodes/${encodeURIComponent(sb.node)}`); }}>{sb.node}</a>
     : sb.node || '—';
@@ -436,10 +506,10 @@ export function Overview({ sb, tenant, can: c, navigate }) {
         <span className="k">image</span><span className="v mono">{sb.image || 'the default image'}</span>
         <span className="k">node</span><span className="v mono">{node}</span>
         <span className="k">size</span><span className="v">{sizeWords(sb) || 'the default'}</span>
-        <span className="k">attachable</span>
-        <span className="v">{sb.attachable
-          ? 'yes · an environment\'s attached service may run in it'
-          : <span className="muted">no · fixed at its create</span>}</span>
+        <span className="k">environment</span>
+        <span className="v"><EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} />
+          <span className="muted"> · fixed at its create; its attached services run in this sandbox</span></span>
+        <span className="k">groups</span><span className="v"><GroupChips groups={sb.securityGroups} /></span>
         <span className="k">created</span><span className="v">{fmtDate(sb.createdAt)} <Ago iso={sb.createdAt} /></span>
         <span className="k">last activity</span><span className="v">{fmtDate(sb.updatedAt)} <Ago iso={sb.updatedAt} /></span>
         {Number(sb.checkpointEpoch) > 0 && (
@@ -450,7 +520,48 @@ export function Overview({ sb, tenant, can: c, navigate }) {
             </span>
           </>)}
       </div>
+      <GroupsBox sb={sb} write={write} busy={busy} act={act} />
       <IdleRules />
+    </div>
+  );
+}
+
+// GroupsBox changes a sandbox's security groups: a move (ADR 0035), said
+// before it is confirmed.
+export function GroupsBox({ sb, write, busy, act, open = false }) {
+  const cur = Array.isArray(sb.securityGroups) && sb.securityGroups.length ? sb.securityGroups : [DEFAULT_GROUP];
+  const [editing, setEditing] = useState(open);
+  const [pick, setPick] = useState(cur);
+  const env = envRef(sb);
+  const groups = useEnvGroups(editing && env ? env.id || env.name : '');
+  const problems = checkGroups(pick, groups.choices);
+  const same = sameGroups(pick, cur);
+  return (
+    <div className="sbx-idle">
+      <h3 className="sect"><Icon name="shield" size={13} /> Security groups</h3>
+      <p className="small">
+        In <GroupChips groups={cur} /> of its environment. What it may reach, and what may reach it, the groups&apos; rules
+        say; exec, its tools and its port door need none.
+      </p>
+      {!editing && (
+        <button disabled={!write || !!busy} title={write ? 'choose other groups: a move' : WRITE_REASON}
+          onClick={() => { setPick(cur); setEditing(true); }}><Icon name="shield" size={13} /> Change groups</button>)}
+      {editing && (
+        <div className="sg-move">
+          <GroupPicker choices={groups.choices} value={pick} onChange={setPick} disabled={!write} />
+          <p className="notice small">{MOVE_WORDS}</p>
+          {!same && problems.length > 0 && <p className="bad small">{problems.join('; ')}</p>}
+          <div className="sg-actions">
+            <ConfirmButton label="Move into these groups" confirmLabel="Move it: new address, connections break" icon="refresh"
+              className="primary" disabled={!write || !!busy || same || problems.length > 0}
+              title={same ? 'the groups it is in' : undefined}
+              onConfirm={() => act('groups', async () => {
+                await api.putSandboxSecurityGroups(sb.sandboxId, pick);
+                setEditing(false);
+              })} />
+            <button className="ghost" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </div>)}
     </div>
   );
 }

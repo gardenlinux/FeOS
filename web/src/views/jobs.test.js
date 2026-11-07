@@ -98,18 +98,19 @@ describe('the form', () => {
   });
 
   it('sends only what is given, the defaults left to ferund', () => {
-    expect(jobRequest({ ...EMPTY_FORM, image: ' alpine:3 ' })).toEqual({ body: { image: 'alpine:3' }, errors: [] });
+    expect(jobRequest({ ...EMPTY_FORM, environment: 'kino-dev', image: ' alpine:3 ' }))
+      .toEqual({ body: { environment: 'kino-dev', securityGroups: ['default'], image: 'alpine:3' }, errors: [] });
   });
 
   it('builds the whole body', () => {
     const { body, errors } = jobRequest({
-      image: 'ghcr.io/acme/report:3', command: 'report\n--month\n2026-10', env: 'MONTH=2026-10', secrets: 'TOKEN=s3cr3t',
+      environment: 'kino-dev', securityGroups: ['default', 'reports'], image: 'ghcr.io/acme/report:3', command: 'report\n--month\n2026-10', env: 'MONTH=2026-10', secrets: 'TOKEN=s3cr3t',
       vcpus: '2', memoryMib: '1024', deadline: '15m', resultPath: '/tmp/result.json', labels: 'kind=report',
       username: 'bot', password: 'pw',
     });
     expect(errors).toEqual([]);
     expect(body).toEqual({
-      image: 'ghcr.io/acme/report:3', command: ['report', '--month', '2026-10'], env: { MONTH: '2026-10' },
+      environment: 'kino-dev', securityGroups: ['default', 'reports'], image: 'ghcr.io/acme/report:3', command: ['report', '--month', '2026-10'], env: { MONTH: '2026-10' },
       secrets: { TOKEN: 's3cr3t' }, vcpus: 2, memoryMib: 1024, deadline: '15m', resultPath: '/tmp/result.json',
       labels: { kind: 'report' }, imageCredentials: { username: 'bot', password: 'pw' },
     });
@@ -121,6 +122,7 @@ describe('the form', () => {
       resultPath: '/dev/out', username: 'bot',
     });
     expect(errors).toEqual([
+      'an environment is required',
       'an image is required',
       'env: 1BAD is no environment variable\'s name',
       'SAME is in env and in secrets',
@@ -131,8 +133,10 @@ describe('the form', () => {
       'the image\'s credentials need a username and a password',
     ]);
     for (const p of ['tmp/r', '/tmp/../r', '/tmp/', '/a//b', '/']) {
-      expect(jobRequest({ ...EMPTY_FORM, image: 'x', resultPath: p }).errors).toHaveLength(1);
+      expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', resultPath: p }).errors).toHaveLength(1);
     }
-    expect(jobRequest({ ...EMPTY_FORM, image: 'x', deadline: '2h' }).errors).toEqual([]);
+    expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', deadline: '2h' }).errors).toEqual([]);
+    expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', securityGroups: [] }).errors)
+      .toEqual(['name at least one security group']);
   });
 });

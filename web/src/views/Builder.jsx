@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { ErrBox } from '../components.jsx';
 import { readItem, writeItem } from '../storage.js';
 import { envPath } from '../routes.js';
-import { can, mayBuild, useAccess } from '../people.js';
+import { mayBuild, useAccess } from '../people.js';
 import { fmtValue, heavyEffect, statusState } from './envs.js';
 import {
   addService, decodeDraft, deployBlock, draftKey, draftWords, encodeDraft, getObject, isDnsLabel, isObject, isSecretName,
@@ -20,8 +20,9 @@ import { applyPins, pinSecret, secretPins } from './pins.js';
 import { builtinCatalog, newAddon, readCatalog } from './catalog.js';
 import { planner } from './planner.js';
 import {
-  AddonForm, BindingForm, FindingList, JobForm, NewBinding, NewSecret, RouteForm, SecretForm, ServiceForm,
+  AddonForm, BindingForm, FindingList, JobForm, NewBinding, NewSecret, RouteForm, SecretForm, SecurityGroupForm, ServiceForm,
 } from './BuilderForms.jsx';
+import { DEFAULT_GROUP } from './groups.js';
 import { GROUPS, MARK, itemOfUnit, listGroups, shortImage, summaryOf, unitOfItem } from './fields.js';
 import '../styles/builder.css';
 
@@ -115,15 +116,15 @@ function AddAddonButton({ catalog, onAdd }) {
 
 export function Builder({ tenant, env, st, navigate, item = '' }) {
   const isNew = !env;
-  // What the role allows (ADR 0031): a new environment needs write on the
-  // tenant, a deployment and a secret's value write on the environment
-  // (the tenant grant or the environment's, the higher), an attached
-  // service write on the tenant. Below that the builder shows the latest
+  // What the role allows (ADR 0031, ADR 0035): a new environment needs
+  // write on the tenant, a deployment, a secret's value and an attached
+  // service write on the environment (the tenant grant or the
+  // environment's, the higher). Below that the builder shows the latest
   // deployment's spec and changes nothing: no plan (it needs write), no
   // apply, no secret written, no draft stored.
   const access = useAccess(tenant);
   const readOnly = !mayBuild(access, isNew ? '' : (st && st.id) || env);
-  const editAttached = can(access).writeTenant;
+  const editAttached = !readOnly;
   const key = draftKey(tenant, env);
   const [draft, setDraftState] = useState(null);
   const draftRef = useRef(null);
@@ -146,6 +147,8 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
   const pending = useRef(new Map());
   const [, bumpPending] = useState(0);
   const [catalog, setCatalog] = useState(null);
+  // The environment's sandboxes: where its attached services may run.
+  const [sandboxes, setSandboxes] = useState(null);
   const [conflicts, setConflicts] = useState(null);
   const [notice, setNotice] = useState('');
   const [applied, setApplied] = useState(null);
@@ -250,6 +253,12 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     }
   }, [env, isNew]);
   useEffect(() => { refreshSecrets(); }, [refreshSecrets]);
+  useEffect(() => {
+    if (isNew) { setSandboxes([]); return undefined; }
+    let live = true;
+    api.listSandboxes(env).then((r) => { if (live) setSandboxes(r.sandboxes || []); }, () => { if (live) setSandboxes(null); });
+    return () => { live = false; };
+  }, [env, isNew]);
   useEffect(() => {
     let live = true;
     api.listCredentials().then(
@@ -364,6 +373,10 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
       if (port !== undefined) r.port = port;
       edit(setObject(s, 'routes', n, r));
       setOpen(unitKey('routes', n));
+    } else if (k === 'securityGroups') {
+      const n = uniqueName(s, 'securityGroups', 'group');
+      edit(setObject(s, 'securityGroups', n, {}));
+      setOpen(unitKey('securityGroups', n));
     } else if (k === 'bindings' || k === 'secrets') {
       setOpen(`${k}/`);
     }
@@ -390,6 +403,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
   const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const ctx = {
     spec, catalog, setSecret, isNew, knownSecrets, pins, credentials, credentialsErr, editSpec, editAttached, tenant, navigate,
+    sandboxes,
   };
   const review = !readOnly && (
     <ReviewPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} findings={findings}
@@ -637,12 +651,13 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
   const onRename = (to) => {
     const s = latest();
     const taken = objectsOf(s, key).some(([n]) => n === to)
-      || ((key === 'services' || key === 'addons') && objectsOf(s, key === 'services' ? 'addons' : 'services').some(([n]) => n === to));
+      || ((key === 'services' || key === 'addons') && objectsOf(s, key === 'services' ? 'addons' : 'services').some(([n]) => n === to))
+      || (key === 'securityGroups' && to === DEFAULT_GROUP);
     if (taken) return;
     edit(renameObject(s, key, name, to));
     setOpen(unitKey(key, to));
   };
-  const onRemove = readOnly ? null : () => {
+  const onRemove = readOnly || (key === 'securityGroups' && name === DEFAULT_GROUP) ? null : () => {
     const refs = referencesTo(latest(), key, name).filter((r) => !(r.from.key === key && r.from.name === name));
     if (refs.length === 0) { edit(removeObject(latest(), key, name)); setOpen(''); return; }
     setConfirm(refs);
@@ -668,7 +683,8 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
         {confirmBox}
       </>);
   }
-  const obj = getObject(spec, key, name);
+  // "default" exists without being written: its form writes it.
+  const obj = key === 'securityGroups' && name === DEFAULT_GROUP ? getObject(spec, key, name) || {} : getObject(spec, key, name);
   if (obj === undefined) {
     return <Removed unit={unit} kind={GROUPS.find((g) => g.key === key)?.one || key} name={name} base={base} edit={edit} latest={latest} />;
   }
@@ -680,6 +696,7 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
       {key === 'addons' && <AddonForm {...props} added={marks.get(unit) === 'add'} />}
       {key === 'routes' && <RouteForm {...props} />}
       {key === 'bindings' && <BindingForm {...props} />}
+      {key === 'securityGroups' && <SecurityGroupForm {...props} />}
       {confirmBox}
     </>
   );

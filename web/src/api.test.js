@@ -160,11 +160,41 @@ describe('the tenant, with the session', () => {
   it('a create names no sandbox ID: ferund mints it', async () => {
     setActiveTenant('acme');
     answer(201, { status: { sandboxId: 'abcdefghjkm' }, token: 't', created: true });
-    const res = await api.createSandbox('img:1', 2, 512);
+    const res = await api.createSandbox('img:1', 2, 512, { environment: 'kino-dev' });
     expect(calls[0].path).toBe('/api/v1/sandboxes');
     expect(calls[0].init.method).toBe('POST');
-    expect(JSON.parse(calls[0].init.body)).toEqual({ image: 'img:1', vcpus: 2, memoryMib: 512 });
+    expect(JSON.parse(calls[0].init.body)).toEqual({ image: 'img:1', vcpus: 2, memoryMib: 512, environment: 'kino-dev' });
     expect(res.status.sandboxId).toBe('abcdefghjkm');
+  });
+
+  it('a sandbox is made in an environment and its groups, never attachable (ADR 0035)', async () => {
+    setActiveTenant('acme');
+    answer(201, { status: { sandboxId: 'abcdefghjkm' } });
+    await api.createSandbox('', 0, 0, { environment: 'kino-dev', securityGroups: ['default', 'db-admin'], attachable: true });
+    expect(JSON.parse(calls[0].init.body)).toEqual({ image: '', vcpus: 0, memoryMib: 0, environment: 'kino-dev',
+      securityGroups: ['default', 'db-admin'] });
+    answer(202, { sandboxId: 'abcdefghjkm', securityGroups: ['db-admin'] });
+    await api.putSandboxSecurityGroups('abcdefghjkm', ['db-admin']);
+    expect(calls[1].path).toBe('/api/v1/sandboxes/abcdefghjkm/security-groups');
+    expect(calls[1].init.method).toBe('PUT');
+    expect(JSON.parse(calls[1].init.body)).toEqual({ securityGroups: ['db-admin'] });
+    answer(200, { sandboxes: [] });
+    await api.listSandboxes('kino dev');
+    expect(calls[2].path).toBe('/api/v1/sandboxes?environment=kino+dev');
+  });
+
+  it("lists an environment's jobs, filtered here too", async () => {
+    setActiveTenant('acme');
+    const jobs = [{ id: 'a', environment: { id: 'e1', name: 'kino-dev' } }, { id: 'b', environment: { id: 'e2', name: 'stage' } }];
+    answer(200, { jobs });
+    expect((await api.listJobs(['kind=report'], 'kino-dev')).jobs.map((j) => j.id)).toEqual(['a']);
+    expect(calls[0].path).toBe('/api/v1/jobs?label=kind%3Dreport&environment=kino-dev');
+    answer(200, { jobs });
+    expect((await api.listJobs([], 'e2')).jobs.map((j) => j.id)).toEqual(['b']);
+    expect(calls[1].path).toBe('/api/v1/jobs?environment=e2');
+    answer(200, { jobs });
+    expect((await api.listJobs()).jobs).toHaveLength(2);
+    expect(calls[2].path).toBe('/api/v1/jobs');
   });
 
   it('a 401 ends the sign-in', async () => {

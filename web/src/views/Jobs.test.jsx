@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MeContext } from '../people.js';
-import { Jobs, PhaseLabel } from './Jobs.jsx';
+import { Jobs, PhaseLabel, RunForm } from './Jobs.jsx';
 import { TenantSettings, Usage } from './TenantPages.jsx';
 
 // The pages' first paint: their heads, and what a role may not do shown
@@ -27,13 +27,26 @@ describe('Jobs', () => {
     expect(write).toContain('<span class="kind">Tenant</span><h1>Jobs</h1>');
     expect(write).toMatch(/<button class="primary" title="run a container to its end">/);
     const read = render(ME('read'), <Jobs tenant="kino" sel="" navigate={() => {}} />);
-    expect(read).toMatch(/<button class="primary" disabled="" title="needs write on this tenant">/);
+    expect(read).toMatch(/<button class="primary" disabled="" title="needs write on an environment">/);
     expect(read).toContain('kept 7 days after it ends');
   });
 
   it("heads a job's page with its kind and ID", () => {
     const out = render(ME('read'), <Jobs tenant="kino" sel="k2m7qpxh3v9" navigate={() => {}} />);
     expect(out).toContain('<span class="kind">Job</span><h1 class="mono">k2m7qpxh3v9</h1>');
+  });
+});
+
+describe('RunForm', () => {
+  const ENVS = [{ id: 'e1', name: 'kino-dev' }, { id: 'e2', name: 'kino-stage' }];
+  it('asks for the environment first, then its groups with default ticked', () => {
+    const none = renderToStaticMarkup(<RunForm envs={ENVS} onRun={() => {}} onCancel={() => {}} />);
+    expect(none).toContain('<option value="kino-stage">kino-stage</option>');
+    expect(none).toContain('Choose the environment first.');
+    const one = renderToStaticMarkup(<RunForm envs={ENVS} env="kino-dev" onRun={() => {}} onCancel={() => {}} />);
+    expect(one).toContain('<option value="kino-dev" selected="">kino-dev</option>');
+    expect(one).toContain('reading the environment&#x27;s groups…');
+    expect(one).toContain('default: nothing in, internet out');
   });
 });
 

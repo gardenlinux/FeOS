@@ -46,13 +46,15 @@ describe('ObjectNav', () => {
     expect(t).toContain('Addons 2');
     expect(t).toContain('Routes 3');
     expect(t).toContain('Bindings 0');
+    expect(t).toContain('Security groups 1');
+    expect(t).toContain('default nothing in, internet out');
     expect(t).toContain('Secrets 1');
     expect(t).toContain('expense-service expense:1.4 · 2 replicas');
     expect(t).toContain('postgres postgres · 17 · small');
     expect(t).toContain('api-expense /api/expense → expense-service:http');
     expect(t).toContain('internal-token v3 of 3');
     expect(nav({ open: 'services/web' })).toContain('class="b-row-obj on"');
-    expect((nav({}).match(/class="ghost mini b-add"/g) || []).length).toBe(6);
+    expect((nav({}).match(/class="ghost mini b-add"/g) || []).length).toBe(7);
     expect(nav({ onAdd: null })).not.toContain('ghost mini b-add');
   });
 
@@ -150,10 +152,11 @@ describe('the forms', () => {
     expect(none).toMatch(/aria-expanded="false"><svg[^]*?<\/svg> Credentials &amp; bindings/);
   });
 
-  it('show an attached service read-only, or as a form for those who write the tenant', () => {
+  it('show an attached service read-only, or as a form for those who write the environment', () => {
     const o = { runtime: 'attached', sandbox: 'abc', command: ['npm', 'run', 'dev'] };
     const ro = text(<ServiceForm name="web" obj={o} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />);
-    expect(ro).toContain('It runs in sandbox abc of the tenant. Changing it needs write on the tenant');
+    expect(ro).toContain('It runs in sandbox abc of this environment. Changing it needs write on the environment');
+    expect(ro).toContain('in its sandbox\'s groups');
     expect(ro).toContain('npm run dev');
     expect(html(<ServiceForm name="web" obj={o} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />)).not.toContain('<input');
     const rw = html(<ServiceForm name="web" obj={o} ctx={ctx({}, [], { editAttached: true })} onChange={nop} onRename={nop} onRemove={nop} />);

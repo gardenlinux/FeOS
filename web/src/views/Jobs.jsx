@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, CopyBtn, ErrBox, KV, LiveBadge, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDateTime, shortId } from '../format.js';
-import { useAccess } from '../people.js';
+import { atLeast, envRole, envsWithRole, higher, useAccess } from '../people.js';
 import { newest } from '../poll.js';
 import { useSummary } from '../summary.jsx';
 import { parseLabelFilter } from './envs.js';
@@ -15,14 +15,26 @@ import {
   EMPTY_FORM, JOB_LIMITS, ended, fmtSpan, jobCounts, jobDurationMs, jobRequest, jobTone, jobWords, keptUntil,
   onItsWay, phaseWord, resultView,
 } from './jobs.js';
+import { envRef } from './groups.js';
+import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
 import '../styles/tenant.css';
 
 // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion,
-// one pod each, never retried. The list with a label filter and the form
-// of a new one; a job with its log's tail, its result, a cancel while it
-// has not ended and the delete of its record. /tenants/:t/jobs[/:id].
+// one pod each, never retried, in an environment and its security groups
+// (ADR 0035). The list with a label and an environment filter and the
+// form of a new one; a job with its log's tail, its result, a cancel
+// while it has not ended and the delete of its record.
+// /tenants/:t/jobs[/:id]. A change needs write on the job's environment.
 
-const NEEDS_WRITE = 'needs write on this tenant';
+const NEEDS_WRITE = 'needs write on its environment';
+const NEEDS_ENV = 'needs write on an environment';
+
+// mayWriteJob tells whether access may cancel or delete a job: write on
+// its environment.
+function mayWriteJob(access, job) {
+  const e = envRef(job);
+  return !!e && atLeast(higher(envRole(access, e.id), envRole(access, e.name)), 'write');
+}
 
 export function Jobs({ tenant, sel, navigate }) {
   if (sel) return <JobDetail key={sel} tenant={tenant} id={sel} navigate={navigate} />;
@@ -44,8 +56,11 @@ export function PhaseLabel({ phase }) {
 
 function JobList({ tenant, navigate }) {
   const access = useAccess(tenant);
-  const write = access.can.writeTenant;
   const sum = useSummary();
+  const writable = sum.environments ? envsWithRole(access, sum.environments, 'write') : null;
+  const write = access.can.writeTenant || !!(writable && writable.length);
+  const none = !!sum.environments && sum.environments.length === 0;
+  const [env, setEnv] = useState('');
   const [jobs, setJobs] = useState(null);
   const [err, setErr] = useState('');
   const [labels, setLabels] = useState([]);
@@ -58,14 +73,14 @@ function JobList({ tenant, navigate }) {
   const refresh = useCallback(async () => {
     const current = request();
     try {
-      const res = await api.listJobs(key ? key.split('\n') : []);
+      const res = await api.listJobs(key ? key.split('\n') : [], env);
       if (!current()) return;
       setJobs(res.jobs || []);
       setErr('');
     } catch (e) {
       if (current()) setErr(e.message);
     }
-  }, [key, request]);
+  }, [key, env, request]);
   const lastOk = usePoll(refresh, 4000);
   const now = useNow(1000);
 
@@ -79,7 +94,7 @@ function JobList({ tenant, navigate }) {
           <span className="kind">Tenant</span>
           <h1>Jobs</h1>
           <span className="pagehead-actions">
-            <button className="primary" disabled={!write} title={write ? 'run a container to its end' : NEEDS_WRITE}
+            <button className="primary" disabled={!write} title={write ? 'run a container to its end' : NEEDS_ENV}
               onClick={() => setOpen((o) => !o)}>
               <Icon name={open ? 'x' : 'play'} size={14} /> {open ? 'Close' : 'Run a job'}</button>
           </span>
@@ -94,7 +109,9 @@ function JobList({ tenant, navigate }) {
       </header>
 
       {open && write && (
-        <RunForm onCancel={() => setOpen(false)} onRun={async (job) => {
+        <RunForm envs={writable} env={env} none={none} notice={writable && writable.length === 0
+          ? <NoEnvironment tenant={tenant} navigate={navigate} none={none} make={access.can.writeTenant} what="job" /> : null}
+          onCancel={() => setOpen(false)} onRun={async (job) => {
           sum.refresh();
           navigate(jobPath(tenant, job.id));
         }} />)}
@@ -124,6 +141,10 @@ function JobList({ tenant, navigate }) {
               {l} <Icon name="x" size={11} />
             </button>
           ))}
+          <select value={env} onChange={(e) => setEnv(e.target.value)} aria-label="environment" title="the jobs of one environment">
+            <option value="">every environment</option>
+            {(sum.environments || []).map((e) => <option key={e.id || e.name} value={e.name}>{e.name}</option>)}
+          </select>
         </form>
         {bad.length > 0 && <p className="notice small">A label filter is key=value: {bad.join(', ')}</p>}
 
@@ -134,6 +155,7 @@ function JobList({ tenant, navigate }) {
                 <tr>
                   <th>phase</th>
                   <th>job</th>
+                  <th>environment</th>
                   <th>image</th>
                   <th>labels</th>
                   <th className="col-when">created</th>
@@ -151,6 +173,9 @@ function JobList({ tenant, navigate }) {
                         e.preventDefault(); e.stopPropagation(); navigate(jobPath(tenant, j.id));
                       }}>{shortId(j.id)}</a>
                     </td>
+                    <td className="small nowrap">
+                      <EnvLinkName tenant={tenant} env={envRef(j)} navigate={navigate} /> <GroupChips groups={j.securityGroups} />
+                    </td>
                     <td className="mono small trunc" title={j.imageRef || j.image}>{j.image}</td>
                     <td><Labels labels={j.labels} onLabel={(k, v) => addLabels([`${k}=${v}`])} /></td>
                     <td className="col-when"><Ago iso={j.createdAt} /></td>
@@ -163,14 +188,15 @@ function JobList({ tenant, navigate }) {
           </div>)}
         {jobs && jobs.length === 0 && (
           <p className="empty">
-            {labels.length ? 'No job has these labels.' : 'No jobs kept in this tenant.'}
-            {!labels.length && write && <> <button className="linkbtn" onClick={() => setOpen(true)}>Run one →</button></>}
+            {labels.length || env ? 'No job matches these filters.' : 'No jobs kept in this tenant.'}
+            {!labels.length && !env && write && <> <button className="linkbtn" onClick={() => setOpen(true)}>Run one →</button></>}
           </p>)}
         {!jobs && !err && <p className="empty">Loading…</p>}
         <p className="footnote muted small">
           A job is one container run to its end exactly once, with a deadline; it is never retried. Its record, with
           the exit code, the result and the log's tail, is kept {JOB_LIMITS.keptDays} days after it ends, then it
-          goes. Jobs queued or running count towards the tenant's limits.
+          goes. It runs in an environment, in groups of it fixed at its create; its record goes with the environment.
+          Jobs queued or running count towards the tenant's limits.
         </p>
       </section>
     </div>
@@ -190,12 +216,19 @@ function Field({ label, hint, wide, children }) {
   );
 }
 
-function RunForm({ onRun, onCancel }) {
-  const [form, setForm] = useState(EMPTY_FORM);
+// RunForm is a new job: in one of envs (those the person writes; env
+// preselects one, as does a single one), in groups of its deployed
+// deployment. none tells that the tenant has no environment at all;
+// notice says what is lacking when envs is empty.
+export function RunForm({ envs = null, env = '', none = false, notice = null, onRun, onCancel }) {
+  const [form, setForm] = useState(() => ({ ...EMPTY_FORM, environment: env }));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const { body, errors } = jobRequest(form);
+  const names = (envs || []).map((e) => e.name);
+  const chosen = envs && !names.includes(form.environment) ? (names.length === 1 ? names[0] : '') : form.environment;
+  const groups = useEnvGroups(chosen);
+  const { body, errors } = jobRequest({ ...form, environment: chosen });
   const L = JOB_LIMITS;
 
   const submit = async (e) => {
@@ -217,9 +250,22 @@ function RunForm({ onRun, onCancel }) {
   return (
     <section className="pane">
       <div className="pane-toolbar"><h2><Icon name="play" size={14} /> Run a job</h2></div>
+      {notice}
       <form className="jobform" onSubmit={submit}>
+        <Field label="environment" hint="Required: it runs beside the environment's pods, reaches them where their groups let it in, and goes with it.">
+          <EnvPicker envs={envs} value={chosen} none={none}
+            onChange={(v) => setForm((f) => ({ ...f, environment: v, securityGroups: EMPTY_FORM.securityGroups }))} />
+        </Field>
+        <div className="jf-field">
+          <span className="jf-label">security groups</span>
+          {chosen
+            ? <GroupPicker choices={groups.choices} value={form.securityGroups} onChange={(securityGroups) => setForm((f) => ({ ...f, securityGroups }))} />
+            : <span className="muted small">Choose the environment first.</span>}
+          <span className="jf-hint muted">One to five groups of its deployed deployment, fixed for the run. default: nothing in, internet out,
+            unless the environment writes its rules.</span>
+        </div>
         <Field label="image" wide hint="Pinned to its digest when the job is made; a registry that refuses it refuses the job.">
-          <input className="mono" value={form.image} onChange={set('image')} placeholder="ghcr.io/acme/report:3" autoFocus />
+          <input className="mono" value={form.image} onChange={set('image')} placeholder="ghcr.io/acme/report:3" />
         </Field>
         <Field label="command" wide hint="One argument per line, as typed (a space belongs to its argument). Replaces the image's entrypoint and command; empty: they run.">
           <textarea className="mono" rows={3} value={form.command} onChange={set('command')} placeholder={'sh\n-c\necho done > /tmp/result.json'} />
@@ -254,7 +300,7 @@ function RunForm({ onRun, onCancel }) {
             <input type="password" value={form.password} onChange={set('password')} placeholder="password or token" autoComplete="new-password" />
           </div>
         </Field>
-        {form.image.trim() && errors.length > 0 && (
+        {(form.image.trim() || chosen) && errors.length > 0 && (
           <ul className="jf-errors">{errors.map((x) => <li key={x}>{x}</li>)}</ul>)}
         <ErrBox error={err} />
         <div className="jf-actions wide">
@@ -272,7 +318,6 @@ function RunForm({ onRun, onCancel }) {
 
 function JobDetail({ tenant, id, navigate }) {
   const access = useAccess(tenant);
-  const write = access.can.writeTenant;
   const sum = useSummary();
   const [job, setJob] = useState(null);
   const [err, setErr] = useState('');
@@ -313,8 +358,8 @@ function JobDetail({ tenant, id, navigate }) {
           <div className="pagehead-title"><span className="kind">Job</span><h1 className="mono">{id}</h1></div>
         </header>
         <section className="pane">
-          <p className="empty">No such job in this tenant. A job's record goes {JOB_LIMITS.keptDays} days after it
-            ended, or when someone deleted it.</p>
+          <p className="empty">No such job in this tenant, or none of an environment you may read. A job&apos;s record
+            goes {JOB_LIMITS.keptDays} days after it ended, when someone deleted it, or with its environment.</p>
           <p>{back}</p>
         </section>
       </div>
@@ -323,6 +368,7 @@ function JobDetail({ tenant, id, navigate }) {
 
   const done = job && ended(job.phase);
   const kept = job && keptUntil(job);
+  const write = !!job && mayWriteJob(access, job);
   return (
     <div className="tenantpage">
       <header className="pagehead">
@@ -340,6 +386,8 @@ function JobDetail({ tenant, id, navigate }) {
         </div>
         {job && (
           <div className="facts">
+            <span>environment <b><EnvLinkName tenant={tenant} env={envRef(job)} navigate={navigate} /></b></span>
+            <span>groups <GroupChips groups={job.securityGroups} /></span>
             <span className="mono" title={job.imageRef}>{job.image}</span>
             <span>created <b><Ago iso={job.createdAt} /></b></span>
             <span>ran <b>{fmtSpan(jobDurationMs(job, now))}</b></span>
@@ -368,6 +416,8 @@ function JobDetail({ tenant, id, navigate }) {
             <section className="pane">
               <div className="pane-toolbar"><h2><Icon name="jobs" size={14} /> The job</h2></div>
               <div className="kv-grid">
+                <KV k="environment"><EnvLinkName tenant={tenant} env={envRef(job)} navigate={navigate} /></KV>
+                <KV k="groups"><GroupChips groups={job.securityGroups} /> <span className="muted small">fixed for its run</span></KV>
                 <KV k="image" className="mono">{job.image}</KV>
                 <KV k="pinned" className="mono small">
                   {job.imageRef || <span className="muted">—</span>}

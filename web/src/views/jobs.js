@@ -5,7 +5,10 @@
 // that the tests load it as it is. A job's shape is ferund's
 // TenantJobStatus (go/internal/env/tenantjobs.go): id, image, imageRef,
 // phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib,
-// labels, createdAt, startedAt, finishedAt, deadlineAt.
+// labels, createdAt, startedAt, finishedAt, deadlineAt, and (ADR 0035)
+// environment {id, name} and securityGroups, fixed at its create.
+
+import { DEFAULT_GROUP, checkGroups } from './groups.js';
 
 // The bounds of a create, as ferund checks them (go/internal/env/spec).
 export const JOB_LIMITS = {
@@ -162,8 +165,9 @@ export function parseDuration(text) {
 
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-// EMPTY_FORM is the form of a new job.
+// EMPTY_FORM is the form of a new job: no environment yet, in default.
 export const EMPTY_FORM = {
+  environment: '', securityGroups: [DEFAULT_GROUP],
   image: '', command: '', env: '', secrets: '', vcpus: '', memoryMib: '', deadline: '', resultPath: '',
   labels: '', username: '', password: '',
 };
@@ -185,6 +189,12 @@ export function jobRequest(form) {
   const f = { ...EMPTY_FORM, ...form };
   const errors = [];
   const body = {};
+  const environment = String(f.environment || '').trim();
+  if (!environment) errors.push('an environment is required');
+  else body.environment = environment;
+  const groups = Array.isArray(f.securityGroups) ? f.securityGroups : [DEFAULT_GROUP];
+  errors.push(...checkGroups(groups));
+  if (groups.length) body.securityGroups = [...groups];
   const image = f.image.trim();
   if (!image) errors.push('an image is required');
   body.image = image;

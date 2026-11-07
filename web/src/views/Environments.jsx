@@ -26,6 +26,7 @@ import {
 } from './EnvTabs.jsx';
 import { ObjectPage } from './ObjectPage.jsx';
 import { AboutBox, ActivityTab, EnvOverview, useActivity } from './EnvOverview.jsx';
+import { EnvPods } from './EnvPods.jsx';
 import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
@@ -34,7 +35,8 @@ import '../styles/environments.css';
 // serves) and New deployment, the builder (Builder.jsx, ADR 0032); then
 // its views, one tab each (ENV_LENSES): the overview (EnvOverview.jsx:
 // what needs someone, traffic and reach, the objects as cards, the
-// bindings, recent activity), the activity (everything, the deployments
+// bindings, recent activity, its sandboxes and jobs: EnvPods.jsx, ADR
+// 0035), the activity (everything, the deployments
 // with revert and tags, the incidents with their evidence), the logs and
 // traces, the traffic, and the settings (general, secrets and
 // credentials, domains and access; EnvTabs.jsx). The sidebar picks the
@@ -444,7 +446,8 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
 // deployment's spec once per deployment (the images as written, when a
 // job runs, the bindings), the services' traffic of the last hour once a
 // minute (none while the log store does not answer), the open incidents
-// while there are, and the newest deployments and incidents.
+// while there are, and the newest deployments and incidents; below,
+// what runs beside the deployments: its sandboxes and jobs (ADR 0035).
 function OverviewTab({ st, tenant, ec, changed, navigate }) {
   const spec = useLatestSpec(st);
   const [traffic, setTraffic] = useState(null);
@@ -462,8 +465,11 @@ function OverviewTab({ st, tenant, ec, changed, navigate }) {
   usePoll(readIncidents, 10000);
   const [activity] = useActivity(env, 5);
   return (
-    <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed}
-      incidents={incidents} activity={activity} />
+    <>
+      <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed}
+        incidents={incidents} activity={activity} />
+      <EnvPods tenant={tenant} env={st.name} write={ec.write} navigate={navigate} />
+    </>
   );
 }
 

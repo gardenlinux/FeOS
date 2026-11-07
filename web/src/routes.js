@@ -193,6 +193,16 @@ export function pickEnvPath(route, tenant, env) {
   return envPath(tenant, env, tab);
 }
 
+// sandboxPath and jobPath are a tenant's sandboxes and jobs, or one of
+// them; an environment's page links them.
+export function sandboxPath(tenant, id = '') {
+  return `/tenants/${encodeURIComponent(tenant)}/sandboxes${id ? '/' + encodeURIComponent(id) : ''}`;
+}
+
+export function jobPath(tenant, id = '') {
+  return `/tenants/${encodeURIComponent(tenant)}/jobs${id ? '/' + encodeURIComponent(id) : ''}`;
+}
+
 // EARLIER_TABS maps an environment tab's earlier or other name to its
 // name: the deployments were the releases (ADR 0018, "The deployments'
 // word"); the builder is what Edit opens.

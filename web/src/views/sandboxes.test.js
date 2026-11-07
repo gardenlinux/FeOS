@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeTab, bucketOf, canPause, canResume, connectSnippets, createRequest, credentialsOf, filterSandboxes, fmtMem,
-  ownerShown, sandboxTabs, sizeWords, stateCounts, stateWords, toolSummary,
+  newSandboxForm, ownerShown, sandboxEnvs, sandboxTabs, sizeWords, stateCounts, stateWords, toolSummary,
 } from './sandboxes.js';
 
 // The sandbox pages' derivations, from sandboxes as GET /api/v1/sandboxes
@@ -14,7 +14,7 @@ const SB = {
   sandboxId: 'h3k9v2m7qpx', state: 'running', clientState: 'running', image: 'ghcr.io/kino/agent-base:2.4', node: 'n3',
   owner: 'kino', createdAt: '2026-11-03T10:00:00Z', updatedAt: '2026-11-06T09:00:00Z', desiredState: 'active',
   statusDescription: '', checkpointEpoch: '0', checkpointHead: '', checkpointAt: '', vcpus: 2, memoryMib: 4096,
-  attachable: false,
+  environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' }, securityGroups: ['default'],
 };
 const as = (clientState, more = {}) => ({ ...SB, clientState, ...more });
 
@@ -65,7 +65,17 @@ describe('counts', () => {
 });
 
 describe('the list', () => {
-  const list = [SB, as('paused', { sandboxId: 'q8w1z4c0dnr', node: 'n1', image: 'ghcr.io/kino/migrate:1' })];
+  const list = [SB, as('paused', { sandboxId: 'q8w1z4c0dnr', node: 'n1', image: 'ghcr.io/kino/migrate:1',
+    environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d2', name: 'kino-stage' }, securityGroups: ['db-admin'] })];
+  it('filters by environment, by its name or ID', () => {
+    expect(filterSandboxes(list, '', 'kino-stage').map((s) => s.sandboxId)).toEqual(['q8w1z4c0dnr']);
+    expect(filterSandboxes(list, '', '0199f0b7-1c2d-7e3f-8a00-0000000000d1').map((s) => s.sandboxId)).toEqual(['h3k9v2m7qpx']);
+    expect(filterSandboxes(list, 'kino-dev').length).toBe(1);
+    expect(filterSandboxes(list, 'db-admin').map((s) => s.sandboxId)).toEqual(['q8w1z4c0dnr']);
+    expect(filterSandboxes(list, 'q8w1', 'kino-dev')).toEqual([]);
+    expect(sandboxEnvs([...list, SB]).map((e) => e.name)).toEqual(['kino-dev', 'kino-stage']);
+  });
+
   it('filters by ID, image, node, the state and its words', () => {
     expect(filterSandboxes(list, '').length).toBe(2);
     expect(filterSandboxes(list, 'q8w1').map((s) => s.sandboxId)).toEqual(['q8w1z4c0dnr']);
@@ -98,21 +108,30 @@ describe('tabs', () => {
 });
 
 describe('createRequest', () => {
-  const empty = { image: '', vcpus: '', memoryMib: '', attachable: false, username: '', password: '' };
-  it('leaves empty fields to the defaults', () => {
-    expect(createRequest(empty)).toEqual(['', 0, 0, { attachable: false, imageCredentials: null }]);
+  const empty = newSandboxForm('kino-dev');
+  const opts = { environment: 'kino-dev', securityGroups: ['default'], imageCredentials: null };
+  it('leaves empty fields to the defaults, in default', () => {
+    expect(createRequest(empty)).toEqual(['', 0, 0, opts]);
   });
 
-  it('takes a size, attachable and a registry login', () => {
-    expect(createRequest({ ...empty, image: ' ghcr.io/x/y:1 ', vcpus: '2', memoryMib: '4096', attachable: true,
-      username: ' bot ', password: 's3cret ' }))
-      .toEqual(['ghcr.io/x/y:1', 2, 4096, { attachable: true, imageCredentials: { username: 'bot', password: 's3cret ' } }]);
+  it('takes a size, groups and a registry login, and never attachable', () => {
+    const args = createRequest({ ...empty, image: ' ghcr.io/x/y:1 ', vcpus: '2', memoryMib: '4096',
+      securityGroups: ['default', 'db-admin'], username: ' bot ', password: 's3cret ' });
+    expect(args).toEqual(['ghcr.io/x/y:1', 2, 4096,
+      { ...opts, securityGroups: ['default', 'db-admin'], imageCredentials: { username: 'bot', password: 's3cret ' } }]);
+    expect('attachable' in args[3]).toBe(false);
   });
 
   it('names the tenant\'s credentials its pod gets, when any', () => {
     expect(createRequest({ ...empty, credentials: ['openai', 'github'] }))
-      .toEqual(['', 0, 0, { attachable: false, imageCredentials: null, credentials: ['github', 'openai'] }]);
-    expect(createRequest({ ...empty, credentials: [] })[3]).toEqual({ attachable: false, imageCredentials: null });
+      .toEqual(['', 0, 0, { ...opts, credentials: ['github', 'openai'] }]);
+    expect(createRequest({ ...empty, credentials: [] })[3]).toEqual(opts);
+  });
+
+  it('needs an environment and one to five groups', () => {
+    expect(() => createRequest({ ...empty, environment: ' ' })).toThrow('choose the environment');
+    expect(() => createRequest({ ...empty, securityGroups: [] })).toThrow('at least one security group');
+    expect(() => createRequest({ ...empty, securityGroups: ['a', 'b', 'c', 'd', 'e', 'f'] })).toThrow('at most 5');
   });
 
   it('refuses a bad size and half a login', () => {
