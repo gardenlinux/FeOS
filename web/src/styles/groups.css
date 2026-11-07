@@ -38,3 +38,4 @@
 .sg-rule .sg-except { flex: 1 1 200px; min-width: 0; }
 .sg-rule .sg-spacer { flex: 1 1 auto; }
 .sg-note { font-size: 12px; color: var(--muted); }
+.sg-noenv { margin: 0 0 10px; }

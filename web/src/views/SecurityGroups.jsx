@@ -81,13 +81,31 @@ export function EnvLinkName({ tenant, env, navigate }) {
   return <EnvLink to={envPath(tenant, env.name || env.id)} navigate={navigate} className="mono">{env.name || env.id}</EnvLink>;
 }
 
-// EnvPicker chooses one of envs (those the person may write), by name.
-export function EnvPicker({ envs, value, onChange, disabled = false }) {
+// EnvPicker chooses one of envs (those the person may write), by name;
+// none says whether the tenant has no environment at all.
+export function EnvPicker({ envs, value, onChange, disabled = false, none = false }) {
   const list = envs || [];
+  const empty = none ? 'no environment yet' : 'no environment you may write';
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || list.length === 0} aria-label="environment">
-      <option value="">{envs === null ? 'reading the environments…' : list.length ? '(an environment)' : 'no environment you may write'}</option>
+      <option value="">{envs === null ? 'reading the environments…' : list.length ? '(an environment)' : empty}</option>
       {list.map((e) => <option key={e.id || e.name} value={e.name}>{e.name}</option>)}
     </select>
+  );
+}
+
+// NoEnvironment says why there is no environment to make a sandbox or a
+// job in (what): the tenant has none yet (none), which a tenant writer
+// (make) makes first, or the person writes none of those there are.
+export function NoEnvironment({ tenant, navigate, none, make, what }) {
+  if (!none) return <p className="error">Your role does not allow this: it needs write on an environment.</p>;
+  const to = `/tenants/${encodeURIComponent(tenant)}/new-environment`;
+  return (
+    <p className="sg-noenv">
+      This tenant has no environment yet, and a {what} runs in one.{' '}
+      {make
+        ? <EnvLink to={to} navigate={navigate}>Make an environment first.</EnvLink>
+        : 'Someone with write on the tenant makes one first.'}
+    </p>
   );
 }

@@ -5,10 +5,11 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AddonForm, JobForm, SecurityGroupForm, ServiceForm } from './BuilderForms.jsx';
-import { GroupChips, GroupPicker } from './SecurityGroups.jsx';
+import { EnvPicker, GroupChips, GroupPicker, NoEnvironment } from './SecurityGroups.jsx';
 import { PodTables } from './EnvPods.jsx';
 import { InUse } from './EnvTabs.jsx';
-import { GroupsBox } from './Sandboxes.jsx';
+import { CreateForm, GroupsBox } from './Sandboxes.jsx';
+import { RunForm } from './Jobs.jsx';
 import { builtinCatalog } from './catalog.js';
 import { groupChoices } from './groups.js';
 import { ApiError } from '../api.js';
@@ -167,5 +168,31 @@ describe('an environment\'s sandboxes and jobs', () => {
     expect(out).toContain('href="/tenants/kino/jobs/k2m7qpxh3v9"');
     expect(text(<InUse error={e} tenant="kino" navigate={nop} />)).toContain('Delete the sandboxes and cancel the jobs first');
     expect(html(<InUse error={new ApiError('x', 409, { code: 'busy' })} tenant="kino" navigate={nop} />)).toBe('');
+  });
+
+  it('tells a tenant without environments from a role that writes none', () => {
+    // No environment at all: a tenant writer is sent to make one.
+    const make = html(<NoEnvironment tenant="kino" navigate={nop} none make what="sandbox" />);
+    expect(make).toContain('This tenant has no environment yet, and a sandbox runs in one.');
+    expect(make).toContain('href="/tenants/kino/new-environment"');
+    expect(make).not.toContain('Your role');
+    const member = html(<NoEnvironment tenant="kino" navigate={nop} none make={false} what="job" />);
+    expect(member).toContain('a job runs in one');
+    expect(member).toContain('Someone with write on the tenant makes one first.');
+    expect(member).not.toContain('href=');
+    // Environments there are, none of them writable: the role.
+    const role = html(<NoEnvironment tenant="kino" navigate={nop} none={false} make what="sandbox" />);
+    expect(role).toContain('Your role does not allow this: it needs write on an environment.');
+    expect(role).not.toContain('new-environment');
+    // The pickers say the same.
+    expect(html(<EnvPicker envs={[]} value="" onChange={nop} none />)).toContain('no environment yet');
+    expect(html(<EnvPicker envs={[]} value="" onChange={nop} />)).toContain('no environment you may write');
+    const sbx = html(<CreateForm busy="" defaults={null} disabled envs={[]} none onSubmit={nop} onCancel={nop} />);
+    expect(sbx).toContain('no environment yet');
+    expect(sbx).not.toContain('no environment you may write');
+    const job = html(<RunForm envs={[]} none notice={<NoEnvironment tenant="kino" navigate={nop} none make what="job" />}
+      onRun={nop} onCancel={nop} />);
+    expect(job).toContain('no environment yet');
+    expect(job).toContain('href="/tenants/kino/new-environment"');
   });
 });

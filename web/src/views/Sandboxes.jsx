@@ -16,7 +16,7 @@ import {
   sandboxTabs, sizeWords, stateCounts, stateWords,
 } from './sandboxes.js';
 import { DEFAULT_GROUP, DEFAULT_WORDS, MOVE_WORDS, checkGroups, envRef, sameGroups } from './groups.js';
-import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, useEnvGroups } from './SecurityGroups.jsx';
+import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
 import { ConfirmButton } from './EnvTabs.jsx';
 import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
@@ -73,6 +73,8 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
   const summary = useSummary();
   // The environments a sandbox may be made in: those the person writes.
   const writable = summary.environments ? envsWithRole(access, summary.environments, 'write') : null;
+  // None at all is another lack than none the role writes.
+  const noEnvs = !!summary.environments && summary.environments.length === 0;
 
   const refresh = useCallback(async () => {
     try {
@@ -114,7 +116,7 @@ export function Sandboxes({ tenant, sel, tab, navigate }) {
 
   if (sel === NEW) {
     return (
-      <NewSandbox base={base} navigate={navigate} can={c} busy={busy} err={err} envs={writable}
+      <NewSandbox tenant={tenant} base={base} navigate={navigate} can={c} busy={busy} err={err} envs={writable} none={noEnvs}
         onCreate={(args) => act('create', async () => {
           const res = await api.createSandbox(...args);
           const id = res.status && res.status.sandboxId;
@@ -273,8 +275,9 @@ function QuickAction({ sb, busy, act, write }) {
 }
 
 // NewSandbox is the create form's page; envs are the environments the
-// person may write (null while unread).
-function NewSandbox({ base, navigate, can: c, busy, err, envs, onCreate }) {
+// person may write (null while unread), none tells that the tenant has
+// none at all.
+function NewSandbox({ tenant, base, navigate, can: c, busy, err, envs, none, onCreate }) {
   const [defaults, setDefaults] = useState(null);
   // The platform's defaults and bounds are in the nodes view's answer
   // (GET /api/v1/admin/nodes), an operator's; others see "the default".
@@ -299,8 +302,8 @@ function NewSandbox({ base, navigate, can: c, busy, err, envs, onCreate }) {
       </header>
       <section className="pane">
         <ErrBox error={err} />
-        {envs && envs.length === 0 && <p className="error">Your role does not allow this: it needs write on an environment.</p>}
-        <CreateForm defaults={defaults} busy={busy} disabled={!!envs && envs.length === 0} envs={envs} env={wantedEnv()}
+        {envs && envs.length === 0 && <NoEnvironment tenant={tenant} navigate={navigate} none={none} make={c.writeTenant} what="sandbox" />}
+        <CreateForm defaults={defaults} busy={busy} disabled={!!envs && envs.length === 0} envs={envs} none={none} env={wantedEnv()}
           onSubmit={onCreate} onCancel={() => navigate(base)} />
       </section>
     </div>
@@ -312,8 +315,9 @@ function NewSandbox({ base, navigate, can: c, busy, err, envs, onCreate }) {
 // one), and the groups are its deployed deployment's, default ticked
 // (ADR 0035). An empty image or size takes the platform's default, which
 // the fields name from defaults (the nodes view's), as they name the
-// bounds ferund accepts. onSubmit gets createSandbox's arguments.
-export function CreateForm({ defaults, busy, disabled = false, envs = null, env = '', onSubmit, onCancel }) {
+// bounds ferund accepts. none tells that the tenant has no environment
+// at all. onSubmit gets createSandbox's arguments.
+export function CreateForm({ defaults, busy, disabled = false, envs = null, none = false, env = '', onSubmit, onCancel }) {
   const hints = createHints(fleetDefaults(defaults));
   const [f, setF] = useState(() => newSandboxForm(env));
   const [bad, setBad] = useState('');
@@ -338,7 +342,7 @@ export function CreateForm({ defaults, busy, disabled = false, envs = null, env 
     }}>
       <label className="sbx-field">
         <span className="sbx-label">environment</span>
-        <EnvPicker envs={envs} value={chosen} disabled={disabled}
+        <EnvPicker envs={envs} value={chosen} disabled={disabled} none={none}
           onChange={(v) => setF({ ...f, environment: v, securityGroups: [DEFAULT_GROUP] })} />
         <span className="sbx-hint">Required and fixed for its life: it reaches that environment&apos;s pods where their groups let it in, its
           attached services run in it, and the environment&apos;s grants decide who may use it.</span>

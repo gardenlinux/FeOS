@@ -16,7 +16,7 @@ import {
   onItsWay, phaseWord, resultView,
 } from './jobs.js';
 import { envRef } from './groups.js';
-import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, useEnvGroups } from './SecurityGroups.jsx';
+import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
 import '../styles/tenant.css';
 
 // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion,
@@ -59,6 +59,7 @@ function JobList({ tenant, navigate }) {
   const sum = useSummary();
   const writable = sum.environments ? envsWithRole(access, sum.environments, 'write') : null;
   const write = access.can.writeTenant || !!(writable && writable.length);
+  const none = !!sum.environments && sum.environments.length === 0;
   const [env, setEnv] = useState('');
   const [jobs, setJobs] = useState(null);
   const [err, setErr] = useState('');
@@ -108,7 +109,9 @@ function JobList({ tenant, navigate }) {
       </header>
 
       {open && write && (
-        <RunForm envs={writable} env={env} onCancel={() => setOpen(false)} onRun={async (job) => {
+        <RunForm envs={writable} env={env} none={none} notice={writable && writable.length === 0
+          ? <NoEnvironment tenant={tenant} navigate={navigate} none={none} make={access.can.writeTenant} what="job" /> : null}
+          onCancel={() => setOpen(false)} onRun={async (job) => {
           sum.refresh();
           navigate(jobPath(tenant, job.id));
         }} />)}
@@ -215,8 +218,9 @@ function Field({ label, hint, wide, children }) {
 
 // RunForm is a new job: in one of envs (those the person writes; env
 // preselects one, as does a single one), in groups of its deployed
-// deployment.
-export function RunForm({ envs = null, env = '', onRun, onCancel }) {
+// deployment. none tells that the tenant has no environment at all;
+// notice says what is lacking when envs is empty.
+export function RunForm({ envs = null, env = '', none = false, notice = null, onRun, onCancel }) {
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, environment: env }));
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -246,9 +250,10 @@ export function RunForm({ envs = null, env = '', onRun, onCancel }) {
   return (
     <section className="pane">
       <div className="pane-toolbar"><h2><Icon name="play" size={14} /> Run a job</h2></div>
+      {notice}
       <form className="jobform" onSubmit={submit}>
         <Field label="environment" hint="Required: it runs beside the environment's pods, reaches them where their groups let it in, and goes with it.">
-          <EnvPicker envs={envs} value={chosen}
+          <EnvPicker envs={envs} value={chosen} none={none}
             onChange={(v) => setForm((f) => ({ ...f, environment: v, securityGroups: EMPTY_FORM.securityGroups }))} />
         </Field>
         <div className="jf-field">
