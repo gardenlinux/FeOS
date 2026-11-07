@@ -236,6 +236,10 @@ impl PodService for Pods {
                     labels: request.log_labels,
                     redact: request.log_redact,
                 },
+                pods::NetworkSettings {
+                    security_groups: request.security_groups,
+                    name_tables: request.name_tables,
+                },
             )
             .await?,
         ))

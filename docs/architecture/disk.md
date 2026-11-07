@@ -235,7 +235,10 @@ its new checkpoint.
 pod is `RestorePod` with its own checkpoint:
 
 1. a node that does not have the pod reads the head (`GetHead`) and the
-   spec (`GetObject`) and records the pod, hibernated;
+   spec (`GetObject`) and records the pod, hibernated; the request's
+   `security_groups` and `name_tables`, each when not empty, replace the
+   spec's, here as on a node that has the pod (ADR 0035: a sandbox comes
+   back in its groups of the moment, which the node must have);
 2. each volume's head and record are read; the restore fails before
    anything changes if one is missing, or if the node has the volume
    attached to another pod, or available, with data of its own;

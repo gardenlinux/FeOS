@@ -497,6 +497,14 @@ message RestorePodRequest {
   // both with every restore.
   map<string, string> log_labels = 4;
   repeated string log_redact = 5;
+  // The pod's security groups and name tables (PodNetwork's), each in
+  // place of the record's when not empty, on a node that has the pod as
+  // on one that takes it from the checkpoint: the pod comes back in these
+  // groups, with new addresses, and its resolver answers from these
+  // tables. A pod without a network takes none. The control plane sends
+  // both with every restore of a sandbox (ADR 0035).
+  repeated string security_groups = 6;
+  repeated string name_tables = 7;
 }
 
 message RestorePodResponse {

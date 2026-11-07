@@ -69,7 +69,8 @@ use feos_proto::microvm::{
 use feos_proto::pod_service::{
     BakedLayer, Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
     Hibernation as HibernationInfo, HibernationPhase, ImageLayers, MicroVm, PodConsoleInput,
-    PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodSpec, PodState, RestorePodResponse,
+    PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodNetwork, PodSpec, PodState,
+    RestorePodResponse,
 };
 use feos_proto::volume_service::{Volume, VolumeCheckpoint, VolumeState};
 use feos_utils::vsock::{self, API_PORT};
@@ -135,6 +136,41 @@ pub struct LogSettings {
     pub labels: HashMap<String, String>,
     /// Secrets: kept in the pod's record, never in an answer.
     pub redact: Vec<String>,
+}
+
+/// A pod's security groups and name tables as a restore brings them
+/// (ADR 0035): each, when not empty, in place of the record's.
+#[derive(Clone, Debug, Default)]
+pub struct NetworkSettings {
+    pub security_groups: Vec<String>,
+    pub name_tables: Vec<String>,
+}
+
+impl NetworkSettings {
+    /// Puts them into `spec`, each that is not empty; refused for a pod
+    /// without a network. Whether the spec changed.
+    fn apply(&self, spec: &mut PodSpec) -> Result<bool, Status> {
+        if self.security_groups.is_empty() && self.name_tables.is_empty() {
+            return Ok(false);
+        }
+        if !spec::has_network(spec) {
+            return Err(Status::invalid_argument(
+                "the pod has no network: it takes no security groups or name tables",
+            ));
+        }
+        let network = spec.network.get_or_insert_with(PodNetwork::default);
+        let mut changed = false;
+        for (wanted, current) in [
+            (&self.security_groups, &mut network.security_groups),
+            (&self.name_tables, &mut network.name_tables),
+        ] {
+            if !wanted.is_empty() && wanted != current {
+                current.clone_from(wanted);
+                changed = true;
+            }
+        }
+        Ok(changed)
+    }
 }
 
 /// What a create brings beside the pod's spec, which is not compared with
@@ -830,7 +866,8 @@ impl Pods {
         let lock = self.lock_for_resume(pod_id).await?;
         if self.info(pod_id)?.state() == PodState::Hibernated {
             drop(lock);
-            self.restore_detached(pod_id, "", false, LogSettings::default())
+            let (logs, network) = (LogSettings::default(), NetworkSettings::default());
+            self.restore_detached(pod_id, "", false, logs, network)
                 .await?;
             return Ok(());
         }
@@ -1298,16 +1335,21 @@ impl Pods {
     /// (`detached`). `logs` are its log labels and redactions (ADR 0026):
     /// a pod the node takes from its checkpoint gets them, and one it has
     /// gets them in place of its own unless their labels are empty.
+    /// `network` are its security groups and name tables (ADR 0035), each
+    /// in place of the spec's unless empty: the pod comes back in them, on
+    /// the new addresses `place` gives it.
     pub async fn restore(
         &self,
         pod_id: &str,
         head_key: &str,
         cold: bool,
         logs: LogSettings,
+        network: NetworkSettings,
     ) -> Result<RestorePodResponse, Status> {
         let (pod_id, head_key) = (pod_id.to_string(), head_key.to_string());
         self.detached(move |pods| async move {
-            pods.restore_detached(&pod_id, &head_key, cold, logs).await
+            pods.restore_detached(&pod_id, &head_key, cold, logs, network)
+                .await
         })
         .await
         .map(|mut response| {
@@ -1322,10 +1364,12 @@ impl Pods {
         head_key: &str,
         cold: bool,
         logs: LogSettings,
+        network: NetworkSettings,
     ) -> Result<RestorePodResponse, Status> {
         spec::check_id(pod_id)?;
         if self.info(pod_id).is_err() {
-            self.adopt_checkpoint(pod_id, head_key, &logs).await?;
+            self.adopt_checkpoint(pod_id, head_key, &logs, &network)
+                .await?;
         }
         let lock = self.end_bring_up_and_lock(pod_id).await?;
         if !logs.labels.is_empty() {
@@ -1360,6 +1404,14 @@ impl Pods {
                 )));
             }
         }
+        // Its groups and name tables, before it is placed: the rules and
+        // the resolver take them from its spec, as a created pod's.
+        let mut spec = info.spec.clone().unwrap_or_default();
+        if network.apply(&mut spec)? {
+            self.inner.network.check(&spec)?;
+            self.update(pod_id, |info| info.spec = Some(spec)).await;
+        }
+        let info = self.info(pod_id)?;
         if key.is_empty() {
             return Err(Status::failed_precondition(format!(
                 "pod {pod_id} has no checkpoint"
@@ -1451,6 +1503,7 @@ impl Pods {
         pod_id: &str,
         head_key: &str,
         logs: &LogSettings,
+        network: &NetworkSettings,
     ) -> Result<(), Status> {
         if head_key.is_empty() {
             return Err(Status::not_found(format!(
@@ -1473,7 +1526,8 @@ impl Pods {
         let _ = std::fs::remove_file(&path);
         let spec = PodSpec::decode(read?.as_slice())
             .map_err(|e| Status::invalid_argument(format!("{key}: {e}")))?;
-        let spec = spec::normalize(spec)?;
+        let mut spec = spec::normalize(spec)?;
+        network.apply(&mut spec)?;
         self.inner.network.check(&spec)?;
         // Before the pod is recorded: a restore that cannot take its
         // volumes leaves nothing on the node.
@@ -4398,7 +4452,10 @@ mod tests {
         // Without diskd the restore fails after it took them.
         let restore = |logs: LogSettings| {
             let pods = pods.clone();
-            async move { pods.restore(POD, "", false, logs).await }
+            async move {
+                pods.restore(POD, "", false, logs, NetworkSettings::default())
+                    .await
+            }
         };
         assert!(restore(LogSettings {
             labels: labels("new"),
@@ -4423,6 +4480,109 @@ mod tests {
         assert_eq!(info.log_labels, labels("new"));
         assert_eq!(info.log_redact, ["new-secret"]);
         assert!(pods.list()[0].log_redact.is_empty());
+    }
+
+    /// A restore brings the security groups and name tables of a pod the
+    /// node has in place of its spec's, each unless it is empty, and keeps
+    /// them before the pod is placed; an invalid one changes nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_restore_replaces_a_pods_groups_and_name_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let pods = bare_pods(dir.path());
+        let strings = |values: &[&str]| -> Vec<String> {
+            values.iter().map(|value| value.to_string()).collect()
+        };
+        let info = PodInfo {
+            pod_id: POD.to_string(),
+            state: PodState::Hibernated as i32,
+            spec: Some(PodSpec {
+                network: Some(PodNetwork {
+                    security_groups: strings(&["sbx-1"]),
+                    name_tables: strings(&["sbx-1"]),
+                    dns_upstreams: strings(&["9.9.9.9"]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            checkpoint: Some(Checkpoint {
+                head_key: "snapshots/p/1/head.json".to_string(),
+                epoch: 1,
+                memory: false,
+            }),
+            ..Default::default()
+        };
+        pods.inner.store.save(&info).await.unwrap();
+        pods.pods().insert(POD.to_string(), Pod::new(info));
+        // Without diskd the restore fails after it took them.
+        let restore = |security_groups: &[&str], name_tables: &[&str]| {
+            let pods = pods.clone();
+            let network = NetworkSettings {
+                security_groups: strings(security_groups),
+                name_tables: strings(name_tables),
+            };
+            async move {
+                pods.restore(POD, "", false, LogSettings::default(), network)
+                    .await
+            }
+        };
+        let network = |info: &PodInfo| info.spec.clone().unwrap().network.unwrap();
+        let kept = || {
+            Store::open(dir.path().join("pods"))
+                .unwrap()
+                .load()
+                .unwrap()
+                .remove(0)
+        };
+
+        assert!(restore(&["env-e", "sg-1"], &["env-e"]).await.is_err());
+        let changed = network(&kept());
+        assert_eq!(changed.security_groups, ["env-e", "sg-1"]);
+        assert_eq!(changed.name_tables, ["env-e"]);
+        assert_eq!(changed.dns_upstreams, ["9.9.9.9"], "the rest stays");
+        assert_eq!(network(&pods.info(POD).unwrap()), changed);
+
+        // Empty: the pod keeps its own, each on its own.
+        assert!(restore(&[], &[]).await.is_err());
+        assert_eq!(network(&kept()), changed);
+        assert!(restore(&["sg-2"], &[]).await.is_err());
+        let groups_only = network(&kept());
+        assert_eq!(groups_only.security_groups, ["sg-2"]);
+        assert_eq!(groups_only.name_tables, ["env-e"]);
+
+        // A table named twice is refused, and nothing changes.
+        let refused = restore(&["sg-3"], &["env-e", "env-e"]).await.unwrap_err();
+        assert_eq!(refused.code(), Code::InvalidArgument);
+        assert_eq!(network(&kept()), groups_only);
+    }
+
+    #[test]
+    fn network_settings_replace_what_is_not_empty() {
+        let settings = NetworkSettings {
+            security_groups: vec!["env-e".to_string(), "sg-1".to_string()],
+            name_tables: Vec::new(),
+        };
+        // A pod with no network message has one, with the groups.
+        let mut spec = PodSpec::default();
+        assert!(settings.apply(&mut spec).unwrap());
+        let network = spec.network.clone().unwrap();
+        assert_eq!(network.security_groups, ["env-e", "sg-1"]);
+        assert!(network.name_tables.is_empty());
+        // The same again: no change.
+        assert!(!settings.apply(&mut spec).unwrap());
+        // None at all: no change, even for a pod without a network.
+        let mut none = PodSpec {
+            network: Some(PodNetwork {
+                none: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(!NetworkSettings::default().apply(&mut none).unwrap());
+        assert_eq!(
+            settings.apply(&mut none).unwrap_err().code(),
+            Code::InvalidArgument
+        );
+        assert!(none.network.unwrap().security_groups.is_empty());
     }
 
     /// A stop or a delete of a running pod drains its logs while the pod

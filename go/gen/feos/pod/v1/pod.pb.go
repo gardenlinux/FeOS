@@ -2290,10 +2290,18 @@ type RestorePodRequest struct {
 	// the pod's record takes them from here; one that has it replaces its
 	// own with them when log_labels is not empty. The control plane sends
 	// both with every restore.
-	LogLabels     map[string]string `protobuf:"bytes,4,rep,name=log_labels,json=logLabels,proto3" json:"log_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	LogRedact     []string          `protobuf:"bytes,5,rep,name=log_redact,json=logRedact,proto3" json:"log_redact,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LogLabels map[string]string `protobuf:"bytes,4,rep,name=log_labels,json=logLabels,proto3" json:"log_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	LogRedact []string          `protobuf:"bytes,5,rep,name=log_redact,json=logRedact,proto3" json:"log_redact,omitempty"`
+	// The pod's security groups and name tables (PodNetwork's), each in
+	// place of the record's when not empty, on a node that has the pod as
+	// on one that takes it from the checkpoint: the pod comes back in these
+	// groups, with new addresses, and its resolver answers from these
+	// tables. A pod without a network takes none. The control plane sends
+	// both with every restore of a sandbox (ADR 0035).
+	SecurityGroups []string `protobuf:"bytes,6,rep,name=security_groups,json=securityGroups,proto3" json:"security_groups,omitempty"`
+	NameTables     []string `protobuf:"bytes,7,rep,name=name_tables,json=nameTables,proto3" json:"name_tables,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RestorePodRequest) Reset() {
@@ -2357,6 +2365,20 @@ func (x *RestorePodRequest) GetLogLabels() map[string]string {
 func (x *RestorePodRequest) GetLogRedact() []string {
 	if x != nil {
 		return x.LogRedact
+	}
+	return nil
+}
+
+func (x *RestorePodRequest) GetSecurityGroups() []string {
+	if x != nil {
+		return x.SecurityGroups
+	}
+	return nil
+}
+
+func (x *RestorePodRequest) GetNameTables() []string {
+	if x != nil {
+		return x.NameTables
 	}
 	return nil
 }
@@ -2774,7 +2796,7 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"checkpoint\x12!\n" +
 	"\fmemory_bytes\x18\x02 \x01(\x04R\vmemoryBytes\x12\x1d\n" +
 	"\n" +
-	"disk_bytes\x18\x03 \x01(\x04R\tdiskBytes\"\x84\x02\n" +
+	"disk_bytes\x18\x03 \x01(\x04R\tdiskBytes\"\xce\x02\n" +
 	"\x11RestorePodRequest\x12\x15\n" +
 	"\x06pod_id\x18\x01 \x01(\tR\x05podId\x12\x19\n" +
 	"\bhead_key\x18\x02 \x01(\tR\aheadKey\x12\x12\n" +
@@ -2782,7 +2804,10 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\n" +
 	"log_labels\x18\x04 \x03(\v2-.feos.pod.v1.RestorePodRequest.LogLabelsEntryR\tlogLabels\x12\x1d\n" +
 	"\n" +
-	"log_redact\x18\x05 \x03(\tR\tlogRedact\x1a<\n" +
+	"log_redact\x18\x05 \x03(\tR\tlogRedact\x12'\n" +
+	"\x0fsecurity_groups\x18\x06 \x03(\tR\x0esecurityGroups\x12\x1f\n" +
+	"\vname_tables\x18\a \x03(\tR\n" +
+	"nameTables\x1a<\n" +
 	"\x0eLogLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"}\n" +
