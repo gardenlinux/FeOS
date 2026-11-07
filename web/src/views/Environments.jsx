@@ -363,7 +363,11 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
         {activeTab === 'traffic' && (
           <div className="tabbody"><TrafficTab tenant={tenant} env={env} navigate={navigate} /></div>)}
         {activeTab === 'secrets' && (
-          <div className="tabbody"><SecretsTab env={env} st={st} ec={ec} changed={changed} /></div>)}
+          <div className="tabbody">
+            <div className="sect">secrets</div>
+            <SecretsTab env={env} st={st} ec={ec} changed={changed} />
+            <Offloading env={env} st={st} tenant={tenant} ec={ec} navigate={navigate} />
+          </div>)}
         {activeTab === 'access' && (
           <div className="tabbody">
             <AccessTab tenant={tenant} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />
@@ -503,7 +507,7 @@ export function EnvOverview({ st, tenant, navigate, spec = null, traffic = null,
       {bindings.length > 0 && (
         <div className="envsect">
           <div className="sect">bindings <span className="count">· {bindings.length}</span></div>
-          {bindings.map((b) => <BindingCard key={b.name} b={b} env={st.name} ec={ec} />)}
+          {bindings.map((b) => <BindingCard key={b.name} b={b} env={st.name} ec={ec} tenant={tenant} navigate={navigate} />)}
         </div>)}
 
       <RoutesTable routes={st.routes} env={st.name} tenant={tenant} navigate={navigate} />
@@ -763,10 +767,66 @@ function TrafficCell({ s }) {
   );
 }
 
+// Offloading is the environment's credential offloading (ADR 0028, 0033)
+// on its Secrets & credentials page: the HTTP bindings of the latest
+// deployment, each with where its credential comes from, who uses it and
+// Check. A binding is part of a deployment, so it is added and changed in
+// New deployment; the tenant's credentials are a link away.
+export function Offloading({ env, st, tenant, ec, navigate }) {
+  const spec = useLatestSpec(st);
+  const bindings = specBindings(spec);
+  const n = (st && st.deployment) || 0;
+  const enc = encodeURIComponent;
+  const add = envPath(tenant, env, 'builder', 'new/binding');
+  const loading = !st || (n > 0 && spec === null);
+  return (
+    <div className="envsect offloading">
+      <div className="sect sect-row">
+        credential offloading <span className="count">· {loading ? '…' : bindings.length}</span>
+        <span className="spacer" />
+        <Link to={`/tenants/${enc(tenant)}/credentials`} navigate={navigate} className="small">Credentials of the tenant</Link>
+        {ec && ec.write && (
+          <button className="mini" onClick={() => navigate(add)}><Icon name="plus" size={12} /> Add binding</button>)}
+      </div>
+      <p className="panel-note envsecrets-note">
+        A binding sends a service's calls to an upstream through the platform, which adds the credential to each
+        request: the key never enters the pod. The credential is one of the tenant's (versioned; each deployment pins
+        its version) or made of this environment's secrets. A binding is part of the deployment: adding or changing one
+        makes the next deployment.
+      </p>
+      {loading && <p className="empty">Loading…</p>}
+      {!loading && bindings.length === 0 && (
+        <p className="empty">No bindings{n ? ` in deployment ${n}` : ''}: no service's calls carry a credential of the platform.</p>)}
+      {bindings.map((b) => <BindingCard key={b.name} b={b} env={env} ec={ec} tenant={tenant} navigate={navigate} />)}
+    </div>
+  );
+}
+
+// BindingSource says where a binding's credential comes from: a
+// credential of the tenant at its pinned version, or the environment's
+// secrets.
+function BindingSource({ b, tenant, navigate }) {
+  const enc = encodeURIComponent;
+  const tc = b.tenantCredential;
+  if (tc && tc.name) {
+    return (
+      <>credential{' '}
+        {tenant && navigate
+          ? <Link to={`/tenants/${enc(tenant)}/credentials/${enc(tc.name)}`} navigate={navigate} className="mono">{tc.name}</Link>
+          : <span className="mono">{tc.name}</span>}
+        {tc.version ? ` · version ${tc.version}` : ''} of the tenant</>);
+  }
+  if (b.secrets && b.secrets.length) {
+    return <>secret{b.secrets.length === 1 ? '' : 's'} <span className="mono">{b.secrets.join(', ')}</span> of this environment</>;
+  }
+  return null;
+}
+
 // BindingCard is an HTTP binding of the latest deployment (ADR 0028):
-// its upstream, mode, credential's kind and users; Check runs its
-// preflight with the secrets' latest versions.
-export function BindingCard({ b, env, ec, result = null }) {
+// its upstream, mode, credential's kind and users, where its credential
+// comes from and a link to its form; Check runs its preflight with the
+// secrets' latest versions.
+export function BindingCard({ b, env, ec, result = null, tenant = '', navigate = null }) {
   const [op, run] = useOp();
   const res = result || (op && op.result) || null;
   const busy = !!(op && op.busy);
@@ -783,6 +843,13 @@ export function BindingCard({ b, env, ec, result = null }) {
             onClick={() => run(() => api.checkBinding(env, b.name), '')}>
             <Icon name="check" size={12} /> {busy ? 'Checking…' : 'Check'}</button>)}
       </div>
+      {(b.tenantCredential || (b.secrets && b.secrets.length > 0) || (tenant && navigate)) && (
+        <div className="envbinding-src small muted">
+          <BindingSource b={b} tenant={tenant} navigate={navigate} />
+          {tenant && navigate && ec && ec.write && (
+            <Link to={envPath(tenant, env, 'builder', `binding/${b.name}`)} navigate={navigate} className="envbinding-edit">
+              Edit in New deployment</Link>)}
+        </div>)}
       {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
       {res && <PreflightResult res={res} />}
     </div>

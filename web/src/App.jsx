@@ -8,7 +8,7 @@ import {
 import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
 import { Avatar, BrandMark, useTheme } from './components.jsx';
-import { ENV_TABS, canonicalPath, chosenEnv, envPath, parsePath, switchEnvPath } from './routes.js';
+import { ENV_TABS, ENV_TAB_LABELS, canonicalPath, chosenEnv, envPath, parsePath, switchEnvPath } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
@@ -574,9 +574,9 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && (
-          <>{sep}{crumb(route.tab, envPath(t, route.env, route.tab))}</>)}
+          <>{sep}{crumb((ENV_TAB_LABELS[route.tab] || route.tab).toLowerCase(), envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
-          <>{sep}<span className="crumb mono">{route.item}{route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
+          <>{sep}<span className="crumb mono">{String(route.item).replace(/^new\//, 'new ')}{route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
         {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
         {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}

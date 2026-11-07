@@ -64,6 +64,13 @@ button.confirm.armed { border-color: var(--accent); background: rgba(var(--accen
 .access-tbl .host { margin-right: 1px; }
 .envsect > .pane-toolbar { margin-top: 18px; }
 
+/* credential offloading, below the secrets */
+.sect-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sect-row .small, .sect-row button { text-transform: none; letter-spacing: 0; }
+.offloading { margin-top: 26px; }
+.envbinding-src { display: flex; align-items: center; gap: 10px; padding: 2px 0 0 18px; flex-wrap: wrap; }
+.envbinding-edit { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+
 /* secrets */
 .envsecrets-note { margin: 0 0 10px; max-width: 90ch; }
 .secret-edit td { background: var(--panel2); }

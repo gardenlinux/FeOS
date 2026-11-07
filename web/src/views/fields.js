@@ -21,6 +21,11 @@ import { imageView } from './pins.js';
 // '' for none or a kind the spec lacks. itemOfUnit is the way back.
 export function unitOfItem(item) {
   const s = String(item || '');
+  // new/<kind>: the form for a new one (secrets and bindings have one).
+  if (s.startsWith('new/')) {
+    const g = GROUPS.find((x) => x.kind === s.slice(4));
+    return g ? `${g.key}/` : '';
+  }
   const i = s.indexOf('/');
   if (i <= 0 || i === s.length - 1) return '';
   const g = GROUPS.find((x) => x.kind === s.slice(0, i));
@@ -30,6 +35,10 @@ export function unitOfItem(item) {
 export function itemOfUnit(unit) {
   const s = String(unit || '');
   const i = s.indexOf('/');
+  if (i > 0 && i === s.length - 1) {
+    const g = GROUPS.find((x) => x.key === s.slice(0, i));
+    return g ? `new/${g.kind}` : '';
+  }
   if (i <= 0 || i === s.length - 1) return '';
   const g = GROUPS.find((x) => x.key === s.slice(0, i));
   return g ? `${g.kind}/${s.slice(i + 1)}` : '';

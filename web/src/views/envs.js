@@ -306,7 +306,21 @@ export function specBindings(spec) {
     mode: (b && b.mode) || 'name',
     credential: (b && b.credential && b.credential.kind) || '',
     users: users(name),
+    // Where the credential comes from: a credential of the tenant at the
+    // version the deployment pinned (ADR 0033), or the environment's
+    // secrets its fields name.
+    tenantCredential: (b && b.tenantCredential) || null,
+    secrets: credentialSecrets(b && b.credential),
   }));
+}
+
+// credentialSecrets are the environment's secrets a binding's credential
+// names, sorted.
+function credentialSecrets(c) {
+  if (!c) return [];
+  const vals = [...Object.values(c.headers || {}),
+    ...['user', 'password', 'tokenUrl', 'clientId', 'clientSecret', 'scope', 'audience', 'certPem', 'keyPem'].map((k) => c[k])];
+  return [...new Set(vals.filter((v) => v && typeof v === 'object' && v.secret).map((v) => v.secret))].sort();
 }
 
 // jobTrigger is when a job of the spec runs: on each deploy that changes

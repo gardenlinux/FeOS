@@ -248,13 +248,15 @@ describe('the operations', () => {
       services: { api: { bindings: ['github'] }, web: {} },
       jobs: { sync: { bindings: ['github', 'erp'], on: 'manual' }, migrate: {} },
       bindings: {
-        github: { upstream: 'https://api.github.com', credential: { kind: 'headers' } },
-        erp: { upstream: 'https://erp.example', mode: 'intercept', credential: { kind: 'oauth2' } },
+        github: { upstream: 'https://api.github.com', credential: { kind: 'headers', headers: { Authorization: { secret: 'gh-token' } } } },
+        erp: { upstream: 'https://erp.example', mode: 'intercept', credential: { kind: 'oauth2' }, tenantCredential: { name: 'erp', version: 3 } },
       },
     };
     expect(specBindings(spec)).toEqual([
-      { name: 'erp', upstream: 'https://erp.example', mode: 'intercept', credential: 'oauth2', users: ['job/sync'] },
-      { name: 'github', upstream: 'https://api.github.com', mode: 'name', credential: 'headers', users: ['service/api', 'job/sync'] },
+      { name: 'erp', upstream: 'https://erp.example', mode: 'intercept', credential: 'oauth2', users: ['job/sync'],
+        tenantCredential: { name: 'erp', version: 3 }, secrets: [] },
+      { name: 'github', upstream: 'https://api.github.com', mode: 'name', credential: 'headers', users: ['service/api', 'job/sync'],
+        tenantCredential: null, secrets: ['gh-token'] },
     ]);
     expect(specBindings(null)).toEqual([]);
     expect(jobTrigger(spec, 'sync')).toBe('manual');

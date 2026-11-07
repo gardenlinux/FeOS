@@ -60,7 +60,7 @@ export const ENV_TAB_LABELS = {
   logs: 'Logs',
   traces: 'Traces',
   traffic: 'Traffic',
-  secrets: 'Secrets',
+  secrets: 'Secrets & credentials',
   access: 'Domains & access',
   settings: 'Settings',
   objects: 'Objects',

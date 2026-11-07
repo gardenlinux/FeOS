@@ -2201,7 +2201,14 @@ lead to stage's logs). The sidebar shows the pages of the role
 environment (`ENV_NAV`: overview, deployments, incidents, logs, traces,
 traffic, … and New deployment, the builder), the open one, else the one
 last open in this browser, else the tenant's first, since people use the
-UI in an environment; then the tenant's domains, credentials, jobs and
+UI in an environment. An environment's Secrets & credentials page holds
+its secrets and its credential offloading: the HTTP bindings of the
+latest deployment, each with where its credential comes from (a
+credential of the tenant at its pinned version, or the environment's
+secrets), the services that use it and Check; Add binding and Edit open
+the binding's form in New deployment (`…/builder/new/binding`,
+`…/builder/binding/<name>`), since a binding is part of a deployment.
+Then the tenant's domains, credentials, jobs and
 sandboxes (last: agents use sandboxes through the API and FeCode, people
 rarely through the UI); then Tenant settings, one entry whose pages
 (people, tokens, usage, general) are tabs. Home and the environments,

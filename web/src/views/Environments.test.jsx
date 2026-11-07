@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import { specBindings } from './envs.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import React from 'react';
@@ -574,6 +575,20 @@ describe('the actions on objects', () => {
     expect(out).toContain('https://erp.example');
     expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />)).toContain('name · basic · used by service/expense-service');
     expect(out).toContain('Check');
+  });
+
+  it('lists the bindings on Secrets & credentials, each with where its credential comes from', () => {
+    const spec = {
+      services: { api: { bindings: ['erp', 'gh'] } },
+      bindings: {
+        erp: { upstream: 'https://erp.example', credential: { kind: 'oauth2' }, tenantCredential: { name: 'erp', version: 3 } },
+        gh: { upstream: 'https://api.github.com', credential: { kind: 'headers', headers: { Authorization: { secret: 'gh-token' } } } },
+      },
+    };
+    const cards = specBindings(spec).map((b) => text(<BindingCard key={b.name} b={b} env="stage" ec={ALL} tenant={T} navigate={nav} />));
+    expect(cards[0]).toContain('credential erp · version 3 of the tenant');
+    expect(cards[0]).toContain('Edit in New deployment');
+    expect(cards[1]).toContain('secret gh-token of this environment');
   });
 
   it("shows a binding check's result", () => {

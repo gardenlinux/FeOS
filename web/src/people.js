@@ -163,7 +163,7 @@ export const ENV_NAV = [
   { tab: 'logs', label: 'Logs', icon: 'file' },
   { tab: 'traces', label: 'Traces', icon: 'activity' },
   { tab: 'traffic', label: 'Traffic', icon: 'chart' },
-  { tab: 'secrets', label: 'Secrets', icon: 'lock' },
+  { tab: 'secrets', label: 'Secrets & credentials', icon: 'lock' },
   { tab: 'access', label: 'Domains & access', icon: 'globe' },
   { tab: 'settings', label: 'Settings', icon: 'settings' },
   { tab: 'builder', label: 'New deployment', icon: 'plus' },

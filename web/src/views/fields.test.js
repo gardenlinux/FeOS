@@ -67,10 +67,12 @@ describe('the list', () => {
     expect(unitOfItem('service/api')).toBe('services/api');
     expect(unitOfItem('secret/registry-ghcr.io')).toBe('secrets/registry-ghcr.io');
     expect(unitOfItem('volume/x')).toBe('');
+    expect(unitOfItem('new/binding')).toBe('bindings/');
+    expect(itemOfUnit('bindings/')).toBe('new/binding');
     expect(unitOfItem('service/')).toBe('');
     expect(unitOfItem('')).toBe('');
     expect(itemOfUnit('addons/db')).toBe('addon/db');
-    expect(itemOfUnit('bindings/')).toBe('');
+    expect(itemOfUnit('bindings/')).toBe('new/binding');
     expect(itemOfUnit('')).toBe('');
     for (const u of ['services/web', 'jobs/migrate', 'addons/db', 'routes/root', 'bindings/stripe', 'secrets/a.b']) {
       expect(unitOfItem(itemOfUnit(u))).toBe(u);
