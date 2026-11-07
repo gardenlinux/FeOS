@@ -54,7 +54,7 @@ export function SignIn({ config, next, notice, onSignedIn }) {
         <div className="login-brand">
           <BrandMark size={48} />
           <div>
-            <div className="login-name">FeRun</div>
+            <div className="login-name">Fe<b>Run</b></div>
             <div className="login-tag">Containers and agent sandboxes on microVMs</div>
           </div>
         </div>

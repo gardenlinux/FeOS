@@ -59,3 +59,11 @@ path = ["web/src/fonts/JetBrainsMono-*.woff2"]
 precedence = "override"
 SPDX-FileCopyrightText = "2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)"
 SPDX-License-Identifier = "OFL-1.1"
+
+# Share Tech Mono, the face of FeRun's name as of FeCode's, Google Fonts'
+# latin webfont (v16).
+[[annotations]]
+path = ["web/src/fonts/ShareTechMono-Regular.woff2"]
+precedence = "override"
+SPDX-FileCopyrightText = "2012 Carrois Type Design, Ralph du Carrois, with Reserved Font Name 'Share'"
+SPDX-License-Identifier = "OFL-1.1"

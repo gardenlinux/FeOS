@@ -125,7 +125,7 @@ export default function App() {
     return (
       <div className="login">
         <div className="login-card">
-          <div className="login-brand"><BrandMark size={36} /> <span className="login-name">FeRun</span></div>
+          <div className="login-brand"><BrandMark size={36} /> <span className="login-name">Fe<b>Run</b></span></div>
           <p className="error">ferund cannot be reached: {session.error}</p>
           <button className="primary" onClick={check}><Icon name="refresh" size={14} /> Try again</button>
         </div>
@@ -254,7 +254,7 @@ function Sidebar({ route, navigate, me, env }) {
       <a className="brand" href={t ? `/tenants/${enc(t)}` : '/tenants'}
         onClick={(e) => { e.preventDefault(); navigate(t ? `/tenants/${enc(t)}` : '/tenants'); }}>
         <BrandMark size={30} />
-        <span className="brand-name">FeRun</span>
+        <span className="brand-name">Fe<b>Run</b></span>
       </a>
 
       {!platform && t && nav.length > 0 && NAV_GROUPS.map((g) => {

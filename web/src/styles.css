@@ -9,10 +9,13 @@
    connects to the network), form is the state, hairlines and small corners. */
 @font-face { font-family: "JetBrains Mono"; font-weight: 400; font-style: normal; font-display: swap; src: url("./fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 600; font-style: normal; font-display: swap; src: url("./fonts/JetBrainsMono-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Share Tech Mono"; font-weight: 400; font-style: normal; font-display: swap; src: url("./fonts/ShareTechMono-Regular.woff2") format("woff2"); }
 @font-face { font-family: "JetBrains Mono"; font-weight: 700; font-style: normal; font-display: swap; src: url("./fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
 :root {
   color-scheme: dark;
   --headh: 56px;
+  /* FeRun's name, in FeCode's face: Fe in the text's colour, Run in the accent */
+  --brand: "Share Tech Mono", var(--mono);
   --bg0: #0b0e12;
   --bg1: #0e1115;
   --panel: #151a21;
@@ -96,7 +99,9 @@ a:hover { text-decoration: underline; }
   background: var(--accent-dim); color: var(--accent);
   border: 1px solid rgba(var(--accent-rgb), .35);
 }
-.brand-name { font-weight: 700; font-size: 15px; letter-spacing: -.01em; }
+.brand-name, .login-name { font-family: var(--brand); font-weight: 400; letter-spacing: .08em; }
+.brand-name { font-size: 19px; }
+.brand-name b, .login-name b { font-weight: 400; color: var(--accent); }
 
 /* the tenant switcher, at the head of the topbar's trail */
 .switcher { position: relative; flex: none; }
@@ -665,7 +670,7 @@ tr:hover .iconbtn { opacity: 1; }
   width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; flex: none;
   background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(var(--accent-rgb), .35);
 }
-.login-name { font-size: 26px; font-weight: 700; letter-spacing: -.01em; line-height: 1.1; }
+.login-name { font-size: 28px; line-height: 1.1; }
 .login-tag { color: var(--muted); font-size: 14px; margin-top: 3px; }
 .login-card form { display: flex; flex-direction: column; gap: 12px; margin-top: 30px; }
 .login-card label { font-size: 13px; font-weight: 600; color: var(--muted); }
