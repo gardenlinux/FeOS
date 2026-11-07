@@ -1,14 +1,15 @@
-# ADR 0032: The deployment builder: the UI edits an environment's spec as a graph, forms and JSON of one draft, kept in the browser, planned on every change and applied as the next deployment
+# ADR 0032: The deployment builder: the UI edits an environment's spec in forms and as JSON, one draft kept in the browser, planned on every change and applied as the next deployment
 
 **Status:** Proposed · **Date:** 2026-11-06
 
 **Touches:** ADR 0018 (a plan answers the images it pinned; a catalog
 of the addons' blueprints; the management UI writes deployments), ADR
-0021 (an environment's hosts are the graph's entry), ADR 0025 (the
-builder writes a registry's password only as a secret), ADR 0028
-(bindings are objects of the graph), ADR 0031 (its grants decide what
-the builder offers), and the draft of security groups of a tenant's own
-(an object the graph shows once it exists).
+0021 (an environment's hosts are the draft's entry), ADR 0025 (the
+builder writes a registry's password only as a secret), ADR 0028 and
+ADR 0033 (bindings are objects of the draft, a tenant's credential a
+binding's choice), ADR 0031 (its grants decide what the builder
+offers), and the draft of security groups of a tenant's own (an object
+the list shows once it exists).
 
 ## Context
 
@@ -21,15 +22,15 @@ problem, the remedy). The management UI reads environments and "writes
 nothing". The only way to state an environment is to write its spec as
 JSON and send it, which an agent does and most people will not.
 
-The spec is a graph already. An environment holds services, jobs,
-addons, routes, secrets and bindings, each with a name, and they
-reference each other by name: a service's variable takes an addon's
-output (`{addon: db, key: url}`), another service's address
-(`{service: api, port: http, key: url}`) or a secret; a route names a
-service and its port; a service names its bindings, a binding its
-secrets. A dangling reference is a finding of the write, not a pod that
-fails. A person draws the same thing: the internet reaches the web at
-`/`, the web calls the API, the API has its Postgres.
+An environment holds services, jobs, addons, routes, secrets and
+bindings, each with a name, and they reference each other by name: a
+service's variable takes an addon's output (`{addon: db, key: url}`),
+another service's address (`{service: api, port: http, key: url}`) or
+a secret; a route names a service and its port; a service names its
+bindings, a binding its secrets or a credential of the tenant. A
+dangling reference is a finding of the write, not a pod that fails.
+Every one of these references is a field of one object: the variable
+of a service, the service of a route.
 
 What constrains a builder:
 
@@ -42,7 +43,7 @@ What constrains a builder:
   create's credentials (ADR 0025); FeRun stores no source.
 - **People have roles** (ADR 0031): some only read, some write one
   environment, some a tenant.
-- **Narrow screens** have no room for a canvas.
+- **Narrow screens** have room for one column.
 
 What a builder must not become: a second truth (a format of its own
 beside the deployments, templates that live on, positions that need a
@@ -58,15 +59,14 @@ resolved again, a secret's new version rolled in unasked).
   deployment's stored spec (whatever its state: the desired one), from
   an empty spec, from a deployment of another environment (a clone, a
   new environment) or from an imported file.
-- The graph, the forms and the text are three views of the one draft.
-  An edit in any of them is an edit of the JSON; the builder holds
-  nothing beyond it but the base, an undo history and which object is
-  open.
+- The forms and the text are two views of the one draft. An edit in
+  either is an edit of the JSON; the builder holds nothing beyond it
+  but the base, an undo history and which object is open.
 - **Plan on every change**: 500 ms after the last edit, one plan in
   flight, the answer to an older draft dropped. Each finding is shown at
   the object and field its path names (`services.web.ports[1].port` is
-  the node `web`, its field `ports`); one without a path above the
-  graph. The diff against the base is the deployments tab's, with each
+  the object `web`, its field `ports`); one without a path above the
+  forms. The diff against the base is the deployments tab's, with each
   change's effect; `deletes data` and `recreates (downtime)` are asked
   again at apply.
 - **Apply** sends the draft, its base and a message, which the builder
@@ -104,15 +104,16 @@ resolved again, a secret's new version rolled in unasked).
   well.
 - **Secrets.** A stored spec pins every referenced secret to a version
   (`secrets: {name: {version}}`), and the draft keeps the pins. A
-  secret whose latest version is newer than its pin says so on its node
-  ("version 4, pinned 3", "Use version 4").
+  secret whose latest version is newer than its pin says so in the list
+  and at every variable that names it ("v3 pinned, v4 newer", "use
+  v4").
 - **Defaults** that normalisation filled in stay in the draft: they
   change nothing, and they show what runs.
 
 ### A secret's value goes through the secrets API
 
 - No value is in the draft, the browser's storage, the undo history or
-  an export. A secret's node shows its name, its pinned and latest
+  an export. A secret's form shows its name, its pinned and latest
   versions and what references it.
 - A value entered, for a new secret or a new version, is a `PUT
   …/secrets/{name}` at once, and the draft pins the version it made. A
@@ -123,78 +124,68 @@ resolved again, a secret's new version rolled in unasked).
   in that order; a step that fails leaves what the earlier ones made,
   which the builder shows and continues from.
 - A reference to a secret that does not exist is the plan's error, and
-  the node is drawn as missing with "Set a value".
-- **Registry logins** (`imageCredentials`): the form asks for a user and
-  a password and always stores the password as a secret (it proposes
-  `registry-<host>`), never as a literal, which would stand in the clear
-  in the spec, its plans and its deployments, as ADR 0028 rules out for
-  bindings. Such a secret is read at its latest version whenever a pod
-  is created, not at the pin (ADR 0025), and its node says so.
+  the secret is marked missing, with "Set a value" in its form and at
+  the variable.
+- **Registry logins** (`imageCredentials`): the form picks a secret and
+  a user, or asks for a user and a password and always stores the
+  password as a secret (it proposes `registry-<host>`), never as a
+  literal, which would stand in the clear in the spec, its plans and
+  its deployments, as ADR 0028 rules out for bindings. Such a secret is
+  read at its latest version whenever a pod is created, not at the pin
+  (ADR 0025), and its form says so.
 
-### The graph
+### Forms: a list of the objects and the selected one's form
 
-The graph shows the environment's architecture, not each of its
-variables: a person reads from it who reaches whom.
+People know their architecture and change fields: an image, a variable,
+a replica count. Every cloud console edits a service in forms (Cloud
+Run's "Edit & deploy new revision", Render's service settings), and a
+reference is a typed field of the object that holds it. The builder
+draws no graph.
 
-- **What is edited is said first.** A band above the graph names the
-  draft: "Draft of deployment N+1, starts from deployment N", the number
-  of changes against the base, the plan's verdict, and that nothing
+- **What is edited is said first.** A band above names the draft:
+  "Draft of deployment N+1, starts from deployment N", the number of
+  changes against the base, the plan's verdict, and that nothing
   changes in the environment until it is deployed; its main action is
   "Review & deploy". The environment's page names it "New deployment".
-- **Nodes**: services, jobs, addons and bindings, and one **entry**: the
-  environment's hosts as `ferund` reports them, or, for an environment
-  that is not public, the route door with its route tokens. An attached
-  service's sandbox is a node outside the environment's frame.
-- **Edges**: one per pair of objects, drawn from the object that holds
-  the references: variables `{addon, …}` and `{service, …}`, a service's
-  or job's `bindings`, an attached service to its sandbox, and a
-  **route** from the entry to a service, labelled with its path. Several
-  references between one pair fold into one edge, labelled with the
-  first and a count, all of them on hover and in the object's form; a
-  job's edges are dashed.
-- **Secrets are no edges.** A node shows how many secrets it names and
-  a key for a registry login; the secrets stand in a list below the
-  graph, each with its pinned and latest version and its users, where a
-  value is set.
-- Kinds to come slot in without changing the rest: volumes and mounts
-  (ADR 0016, when services get them) as nodes with an edge from their
-  service; security groups of a tenant's own as frames around their
-  members. The graph does not wait for them.
-- **The layout is automatic and the same for everyone**: columns by
-  dependency, the entry first, then what the routes reach, then what
-  those call, the addons and bindings last, so that every edge runs left
-  to right (a cycle is cut where it closes); what no route reaches (a
-  job, a load generator) stands in a lane below, left of what it calls.
-  In each column an order that keeps edges short (by the mean position
-  of a node's neighbours, ties by name). No positions are stored: not in
-  the spec, since a position changes nothing of the environment, not in
-  a deployment's annotations, which are the caller's and 4 KiB, and not
-  in a table of their own, where they would be stale for every object an
-  agent or a CI adds.
-- **Live state.** Drawn for a deployment, each node carries its
-  object's tone from the environment's status (ready, starting, failed)
-  and its open incidents.
-
-### Drawing a reference
-
-- A service's or job's node has a handle. Dropped on an addon, it offers
-  the addon's outputs from the catalog and a variable name
-  (`DATABASE_URL` for Postgres's `url`); on a service, that service's
-  ports and the keys `url`, `host` and `port`; on a secret, a variable
-  named after it; on a binding, the binding. The choice writes the
-  reference into the object's `env` or `bindings`.
-- Dragged from the entry onto a service's port, the handle makes a
-  route: `/` for the first, a path asked for the others.
-- Every edge is a line of its object's form too (the variables, the
-  bindings, the routes): the graph is never the only way, for the
-  keyboard and for narrow screens.
-- Removing a node that others reference leaves dangling references,
-  which the plan names; the builder offers to remove them with it.
+- **The list**: the spec's objects by kind, services, jobs, addons,
+  routes, bindings and secrets, each a row with its name, one line (a
+  service's image tag, an addon's type and plan, a route's path →
+  service, a binding's credential, a secret's pin), its change against
+  the base (`+` added, `~` changed, `−` removed, the removed ones kept as
+  rows with "Restore") and its findings' count; "Add" per kind (an addon
+  from the catalog). Nothing selected, the other side shows the draft's
+  overview: what the environment runs, its entry (the hosts as `ferund`
+  reports them, or the route door) and the routes.
+- **The form** of the selected object, titled with its kind and name,
+  in sections: a service's container (the image with its pin, the
+  command one argument per line, the ports, the registry login), its
+  variables (a table of names and values, each value a typed choice:
+  text, a secret with its pin and "set a value", an addon's output from
+  the catalog's keys and fields, a service's address with its port and
+  `url`, `host` or `port`), scaling and resources within the spec's
+  bounds and the idle (never, or after N minutes), the health check
+  (none, HTTP, TCP or a command, with its timing), credentials and
+  bindings (the spec's bindings to tick; a binding of a tenant's
+  credential, ADR 0033, added and ticked at once) and the rollout; its
+  remove at the bottom, which offers to take the references to it along.
+  A binding is a tenant's credential, or, folded as advanced, ADR 0028's
+  fields with the environment's secrets.
+- **The address names the object**: `…/builder/<kind>/<name>` opens its
+  form, so an object's page links its Edit there.
+- Kinds to come slot in as groups of the list and forms: volumes and
+  mounts (ADR 0016), security groups of a tenant's own.
+- **Narrow screens**: the list is the first screen; a tap opens the form
+  at full width with a way back. The band, the review and the text are
+  the same.
+- The draft's operations (references of a spec, the list's lines and
+  marks, the typed values to the spec's forms and back, findings by
+  path, rebase) are pure functions beside `envs.js`, tested with Vitest
+  against the fixtures of `ferund`'s API tests; the components render.
 
 ### Forms, the catalog, a first deployment
 
 - One form per kind, with the API's fields and its defaults as
-  placeholders.
+  placeholders; its own checks only make a field enterable.
 - **A catalog in `ferund`**: `GET /api/v1/addons` answers the registered
   blueprints, each with its type, versions, plans (vCPUs, memory,
   volume), default plan, the output keys and fields a reference may
@@ -208,8 +199,8 @@ variables: a person reads from it who reaches whom.
   none of it: a new blueprint appears without a UI release, and options
   a blueprint does not declare get a JSON field.
 - **A first deployment is a minute's work**: an empty environment offers
-  "Add a service", an image and a port named `http`, and the builder
-  adds the route `/` to it; plan, apply. Making it public is the
+  "Add a service", an image and a port, which the builder names `http`
+  and gives the route `/`; plan, apply. Making it public is the
   environment admin's switch beside the entry (ADR 0021, ADR 0031).
 - **Templates** ("web and Postgres", "web, API and Valkey") come in step
   2, as fragments of a spec that add objects to the draft and are
@@ -223,7 +214,7 @@ variables: a person reads from it who reaches whom.
 
 - The text view is the draft as JSON, indented, its keys in the order
   the API answers them. An edit is parsed on each change; text that
-  does not parse is marked, and the graph and the plan keep the last
+  does not parse is marked, and the forms and the plan keep the last
   draft that did.
 - JSON, because it is the API's format, parsed strictly by `ferund`
   (an unknown field or a duplicate key is a finding at its path), and
@@ -256,7 +247,7 @@ variables: a person reads from it who reaches whom.
 
 ### Who may do what
 
-- ADR 0031's grants decide: `read` sees the graph, the deployments'
+- ADR 0031's grants decide: `read` sees the forms, the deployments'
   specs and the text, and exports; `write` on the environment edits,
   plans, sets secrets' values and applies; `write` on the tenant creates
   and clones environments from the builder and edits attached services;
@@ -268,54 +259,41 @@ variables: a person reads from it who reaches whom.
 - The author of a deployment is the principal `ferund` authenticated
   (ADR 0031); the builder sends the message only.
 
-### Narrow screens
-
-- Below 900 px there is no canvas. The same draft is a list of objects
-  by kind, each a card with its references as lines ("DATABASE_URL →
-  db · url") that opens its form at full width, and a reference is made
-  with "Add reference", which asks for the target and the key as the
-  drop does. Plan, diff, apply and the text are the same.
-
-### Drawn by hand
-
-- Nodes are HTML boxes placed by the layout over an SVG layer of edges;
-  a handle is dragged with pointer events; the canvas scrolls, and a
-  focus mode dims what is not next to the open node. No zoom in step 1.
-- By hand, because the layout is automatic: what a graph library brings
-  (moving nodes, zoom, a minimap) is what this decision leaves out, and
-  the UI's dependencies are fixed. React Flow (`@xyflow/react`, MIT) is
-  the candidate if moving nodes or zoom are wanted after step 1, with
-  the maintainer's approval as for any package.
-- The draft's operations (references of a spec, edges, layout, findings
-  by path, rebase) are pure functions beside `envs.js`, tested with
-  Vitest against the fixtures of `ferund`'s API tests; the components
-  render.
-
 ### Steps
 
 1. In `ferund`: the plan's `images` and `GET /api/v1/addons` with the
    blueprints' option fields. In the UI: an environment's tab
-   **Builder** and "New environment"; drafts from the latest
-   deployment, empty or imported; the forms of image services, jobs,
-   addons, routes and secrets; the graph with drawn variables and
-   routes; the JSON text; plan on every change with findings and diff;
-   apply with base and rebase; secrets' values and registry logins;
-   export; the list for narrow screens.
-2. The bindings' forms; templates; clone into a new environment; the
-   overview's object cards become the graph of the deployed deployment
-   with its live state.
-3. Attached services for those who write the tenant; security groups of
-   a tenant's own and volumes as they arrive; what step 1 taught about
-   large environments (zoom, React Flow).
+   **New deployment** and "New environment"; drafts from the latest
+   deployment, empty or imported; the list and the forms of image
+   services, jobs, addons, routes, bindings (a tenant's credential or
+   stated here) and secrets, with typed variables; the JSON text; plan
+   on every change with findings and diff; the review and apply with
+   base and rebase; secrets' values and registry logins; export; the
+   address of an object's form.
+2. Templates; clone into a new environment; attached services for those
+   who write the tenant.
+3. Security groups of a tenant's own and volumes as they arrive; what
+   step 1 taught about large environments (a search in the list,
+   grouping by label).
 
 The overview, deployments, incidents, logs and traces tabs stay as they
 are until step 2.
 
 ## Alternatives considered
 
-- **Forms without a graph**, a wizard. Simpler, and the references, the
-  part that makes an environment, stay invisible. It stays as the list
-  for narrow screens.
+- **A graph of the references** (the first draft of this ADR, built
+  and dropped): services, jobs, addons and bindings as nodes, the
+  references and routes as edges, laid out by dependency, a reference
+  drawn by dragging a handle onto its target. People did not understand
+  it and saw no value over forms: they know their architecture and come
+  to change a field, and a graph is harder to read and to change than a
+  typed field (which edge is which variable, where its key is chosen),
+  needs a layout and a canvas that narrow screens lack, and no cloud
+  console edits a service that way. The references stay visible as the
+  typed values and each object's "used by".
+- **A wizard**: one path through the kinds. Fine for a first service,
+  which the empty draft's first step is; a hindrance for the change of
+  one field, which is most of the work.
 - **A format of the builder's own** (a compose-like file, a graph
   document with positions) translated into the spec: a second truth with
   versions of its own and a translation that drifts from `ferund`'s
@@ -330,8 +308,7 @@ are until step 2.
   rolls twice, the first time with a dangling reference.
 - **The draft as written, without pins**, so that every apply resolves
   tags: it changes what the person did not touch.
-- **Drafts in `ferund`**, **stored positions**, **YAML** and **React
-  Flow now**: above.
+- **Drafts in `ferund`** and **YAML**: above.
 
 ## Consequences
 
@@ -356,8 +333,8 @@ are until step 2.
   config, so that the first port is proposed rather than typed.
 - Whether the proposed variable names (`DATABASE_URL`) belong to the
   catalog, as each blueprint's suggestion, or to the UI.
-- Whether columns carry an environment at the spec's limits (64
-  services, 32 jobs, 128 routes), or zoom and grouping by label are
-  needed.
+- Whether the list carries an environment at the spec's limits (64
+  services, 32 jobs, 128 routes), or needs a search and grouping by
+  label.
 - A review of a draft before it is applied, if deployments get
   approvals; today that is a policy of the caller.

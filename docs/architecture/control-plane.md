@@ -2290,14 +2290,22 @@ environment). The platform's pages add the ingresses, every person
 (disable, enable), a tenant's limits and zone, and join tokens of kind
 `ingress`.
 
-The Edit action (the route's tab `builder`) and `/tenants/<t>/new-environment` are
-the deployment builder (ADR 0032), the main part that writes: a draft,
-a spec and its base, from the latest deployment, empty or an imported
-file, kept in the browser's local storage per tenant and environment
-(`ferun-draft:<tenant>/<env>`, `ferun-draft:<tenant>/` for a new one;
-in memory where storage refuses), edited in forms of image services,
-jobs, addons (from `GET /api/v1/addons`, a built-in list where ferund
-answers none), routes and secrets, or as JSON text. It plans 500 ms
+The Edit action (the route's tab `builder`, `…/builder/<kind>/<name>`
+for one object's form, which an object page's Edit opens) and
+`/tenants/<t>/new-environment` are the deployment builder (ADR 0032), the
+main part that writes: a draft, a spec and its base, from the latest
+deployment, empty or an imported file, kept in the browser's local
+storage per tenant and environment (`ferun-draft:<tenant>/<env>`,
+`ferun-draft:<tenant>/` for a new one; in memory where storage
+refuses). It is edited in forms, as cloud consoles edit a service: a
+list of the spec's objects by kind (services, jobs, addons, routes,
+bindings, secrets), each with a one-line summary and its change against
+the base, and beside it the selected object's form in sections (a
+service's container, variables, scaling and resources, health check,
+credentials and bindings, rollout), a variable's value a typed choice
+(text, a secret, an addon's output from `GET /api/v1/addons` or a
+built-in list where ferund answers none, a service's address); or as
+JSON text. No graph. It plans 500 ms
 after every change, one plan in flight, shows each finding at the
 object and field its path names and the diff against the base, and
 applies with the base and a message it proposes from the diff, after
@@ -2308,15 +2316,18 @@ the current deployment, with the conflicts to decide. A secret's value
 goes to `PUT …/secrets/{name}` at once and the draft pins the version it
 made; a new environment's values stay in the page until its first apply,
 which creates the environment (with an ID the draft keeps, so that a
-repeat is the same create), writes them, and applies deployment 1. The
-draft's operations are pure modules beside `views/envs.js` (`draft.js`,
-`refs.js`, `findings.js`, `rebase.js`, `pins.js`, `catalog.js`,
-`planner.js`). Below 900 px the objects are cards that open their form
-at full width. The role decides what it offers (`people.js`, `mayBuild`):
-"New environment" needs `write` on the tenant, a change of an
-environment `write` on it (the tenant grant or the environment's); below
-that the builder shows the latest deployment's spec read-only, plans
-nothing (a plan needs `write`), applies nothing, writes no secret and
+repeat is the same create), writes them, and applies deployment 1. A
+binding of a tenant credential (ADR 0033) is added from the service's
+form and ticked on it. The draft's operations are pure modules beside
+`views/envs.js` (`draft.js`, `refs.js`, `fields.js`, `findings.js`,
+`rebase.js`, `pins.js`, `catalog.js`, `planner.js`). Below 900 px the
+list is the first screen and an object's form opens at full width. The
+role decides what it offers (`people.js`, `mayBuild`): "New
+environment" needs `write` on the tenant, a change of an environment
+`write` on it (the tenant grant or the environment's), an attached
+service `write` on the tenant; below that the builder shows the latest
+deployment's spec read-only, plans nothing (a plan needs `write`),
+applies nothing, writes no secret and
 stores no draft. The
 instance tables fit a 1280 px wide window. Its tests read the fixtures
 of ferund's API tests (`go/internal/api/testdata/ferun`).

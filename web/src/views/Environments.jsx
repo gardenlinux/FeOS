@@ -341,7 +341,7 @@ function EnvDetail({ tenant, env, tab, item, replica, search, navigate }) {
         {activeTab === 'overview' && (
           <div className="tabbody">{body(<OverviewTab st={st} tenant={tenant} ec={ec} changed={changed} navigate={navigate} />)}</div>)}
         {activeTab === 'builder' && (
-          <div className="tabbody">{body(<Builder key={st && st.id} tenant={tenant} env={st && st.name} st={st} navigate={navigate} />)}</div>)}
+          <div className="tabbody">{body(<Builder key={st && st.id} tenant={tenant} env={st && st.name} st={st} item={item} navigate={navigate} />)}</div>)}
         {activeTab === 'deployments' && (
           <div className="tabbody">
             <DeploymentsTab tenant={tenant} env={env} st={st} item={item} ec={ec} changed={changed} navigate={navigate} />

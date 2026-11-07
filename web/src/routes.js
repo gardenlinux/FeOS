@@ -21,7 +21,8 @@
 //   /tenants/:t/new-environment         the builder of a new environment
 //   /tenants/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments; tab:
-//                                       overview, builder (New deployment),
+//                                       overview, builder[/:kind/:name]
+//                                       (New deployment, an object's form),
 //                                       deployments[/:n], incidents[/:id],
 //                                       logs[/:kind/:name[/:replica]][?search],
 //                                       traces[/:trace][?search], traffic,
@@ -74,14 +75,15 @@ const SEARCH_TABS = new Set(['logs', 'traces']);
 // "<kind>/<name>" of the object whose logs show, with the replica (null
 // unless given: every replica); and the logs' or traces' search, the
 // address's query (logs.js, traces.js); on the objects tab the
-// "<kind>/<name>" of the object whose page it is.
+// "<kind>/<name>" of the object whose page it is, on the builder's the
+// object whose form is open.
 function envRoute(tenant, seg, search) {
   const env = seg[0] || '';
   const tab = env && ENV_TABS.includes(seg[1]) ? seg[1] : 'overview';
   let item = '';
   let replica = null;
   if (tab === 'deployments' || tab === 'incidents' || tab === 'traces') item = seg[2] || '';
-  if (tab === 'objects' && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
+  if ((tab === 'objects' || tab === 'builder') && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
   if (tab === 'logs' && seg[2] && seg[3]) {
     item = `${seg[2]}/${seg[3]}`;
     if (/^\d+$/.test(seg[4] || '')) replica = Number(seg[4]);

@@ -134,6 +134,12 @@ describe('the environments routes', () => {
     expect(parsePath('/tenants/fecode/environments/e/secrets/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
     expect(parsePath('/tenants/fecode/environments/e/builder')).toEqual(env({ env: 'e', tab: 'builder' }));
     expect(envPath('fecode', 'e', 'builder')).toBe('/tenants/fecode/environments/e/builder');
+    // The builder opens an object's form: …/builder/<kind>/<name>, and the edit link of old.
+    expect(parsePath('/tenants/fecode/environments/e/builder/service/api')).toEqual(env({ env: 'e', tab: 'builder', item: 'service/api' }));
+    expect(parsePath('/tenants/fecode/environments/e/edit/addon/db')).toEqual(env({ env: 'e', tab: 'builder', item: 'addon/db' }));
+    expect(parsePath('/tenants/fecode/environments/e/builder/service')).toEqual(env({ env: 'e', tab: 'builder' }));
+    expect(envPath('fecode', 'e', 'builder', 'secret/registry-ghcr.io')).toBe('/tenants/fecode/environments/e/builder/secret/registry-ghcr.io');
+    expect(envPath('fecode', 'e', 'builder', 'route/a b')).toBe('/tenants/fecode/environments/e/builder/route/a%20b');
     expect(parsePath('/tenants/fecode/new-environment')).toEqual({ view: 'newEnvironment', tenant: 'fecode' });
     expect(parsePath('/tenants/fecode/environments/e/traces/4bf92f3577b34da6a3ce929d0e0e4736'))
       .toEqual(env({ env: 'e', tab: 'traces', item: '4bf92f3577b34da6a3ce929d0e0e4736' }));

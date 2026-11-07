@@ -32,7 +32,7 @@ describe("a service's page", () => {
     expect(all).toContain('1 of 2 ready');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/logs/service/expense-service"');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/traces?service=expense-service"');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/builder"');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/builder/service/expense-service"');
     expect(all).toContain('Restart');
     expect(all).toContain('image expense:1.4');
     expect(all).toContain('deployment 6 · 7 (rolling)');

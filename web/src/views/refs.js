@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The references of a spec (ADR 0032, "The graph"): who names whom. A
-// variable names an addon's output, another service's port or a secret;
-// a registry login names a secret; a service or job names its bindings, a
-// binding's credential its secrets; a route names a service's port. The
-// forms make and show them as lines, the graph (step E4) draws them as
-// edges. Pure.
+// The references of a spec (ADR 0032): who names whom. A variable names
+// an addon's output, another service's port or a secret; a registry login
+// names a secret; a service or job names its bindings, a binding's
+// credential its secrets; a route names a service's port. The forms make
+// them as typed fields and show them as lines ("used by"); a remove
+// offers to take them along. Pure.
 
-import { getObject, isObject, mapEnvValues, objectsOf, removeObject, setObject } from './draft.js';
+import { isObject, mapEnvValues, objectsOf, removeObject, setObject } from './draft.js';
 
 // envValueKind names an env value's form: string (a plain string), value
 // ({value}), secret, addon, service, or invalid.
@@ -164,8 +164,8 @@ export function removeWithRefs(spec, key, name) {
 // SERVICE_KEYS are the keys of a reference to a service.
 export const SERVICE_KEYS = ['url', 'host', 'port'];
 
-// refTargets are what a variable may reference, for the forms' and the
-// list's "Add reference": the addons with their output keys and fields
+// refTargets are what a variable may reference, for the forms' typed
+// values: the addons with their output keys and fields
 // (from the catalog), the image services with their ports (not self), and
 // the secrets (the draft's and the environment's).
 export function refTargets(spec, catalog, { self, knownSecrets = [] } = {}) {
@@ -190,27 +190,4 @@ export function suggestVarName(target, { type = '', key = '', suggestion = '' } 
   if (target.key === 'secrets') return up(target.name);
   if (target.key === 'addons' && type === 'postgres' && key === 'url') return 'DATABASE_URL';
   return [up(target.name), up(key)].filter(Boolean).join('_');
-}
-
-// makeRef is the env value of a reference: {addon, key, …fields},
-// {service, port, key} or {secret}.
-export function makeRef(target, { key = '', port = '', fields = {} } = {}) {
-  if (target.key === 'secrets') return { secret: target.name };
-  if (target.key === 'services') {
-    const v = { service: target.name };
-    if (port !== '' && port !== undefined) v.port = port;
-    if (key) v.key = key;
-    return v;
-  }
-  const v = { addon: target.name };
-  if (key) v.key = key;
-  for (const [k, f] of Object.entries(fields)) if (f) v[k] = f;
-  return v;
-}
-
-// addVariable is spec with variable name of key/obj set to value.
-export function addVariable(spec, key, obj, name, value) {
-  const o = getObject(spec, key, obj);
-  if (!isObject(o)) return spec;
-  return setObject(spec, key, obj, { ...o, env: { ...(isObject(o.env) ? o.env : {}), [name]: value } });
 }

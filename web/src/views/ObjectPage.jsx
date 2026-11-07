@@ -50,7 +50,7 @@ export function ObjectView({ tenant, st, kind, name, spec, ec, lastOk = 0, chang
   const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
   const logs = envPath(tenant, env, 'logs', `${kind}/${name}`);
   const traces = envPath(tenant, env, 'traces', '', null, traceQueryOf({ service: name }));
-  const builder = envPath(tenant, env, 'builder');
+  const builder = envPath(tenant, env, 'builder', `${kind}/${name}`);
   const manual = kind === 'job' && jobTrigger(spec, name) === 'manual';
   const tone = o ? objectTone(o) : 'absent';
   const image = objectImage(o || { kind, name }, spec);
@@ -75,7 +75,7 @@ export function ObjectView({ tenant, st, kind, name, spec, ec, lastOk = 0, chang
             .then((r) => { if (r) changed(); })}>
           <Icon name="play" size={14} /> Run now</button>)}
       <a className="button" href={builder} onClick={go(builder)}
-        title={ec && ec.write ? 'change the environment in the builder: a draft, planned, applied as the next deployment' : 'read-only: needs write on this environment'}>
+        title={ec && ec.write ? `change ${name} in the builder: a draft, planned, applied as the next deployment` : 'read-only: needs write on this environment'}>
         <Icon name="blocks" size={14} /> Edit</a>
     </>
   );

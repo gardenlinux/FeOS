@@ -9,7 +9,7 @@ import {
   orderSpec, parseSpecText, proposeMessage, registryHost, removeObject, renameObject, setObject, specText, uniqueName,
 } from './draft.js';
 import {
-  addVariable, envValueKind, makeRef, refLine, refTargets, referencedSecrets, referencesOf, referencesTo, refsFrom,
+  envValueKind, refLine, refTargets, referencedSecrets, referencesOf, referencesTo, refsFrom,
   removeWithRefs, secretNames, suggestVarName,
 } from './refs.js';
 import { atField, fieldOf, groupFindings, notAt, severityCounts, splitPath, worst } from './findings.js';
@@ -174,12 +174,6 @@ describe('references', () => {
     expect(suggestVarName({ key: 'services', name: 'api-v2' }, { key: 'url' })).toBe('API_V2_URL');
     expect(suggestVarName({ key: 'secrets', name: 'internal-token' })).toBe('INTERNAL_TOKEN');
     expect(suggestVarName({ key: 'addons', name: 'db' }, { suggestion: 'PG_URL' })).toBe('PG_URL');
-    expect(makeRef({ key: 'addons', name: 'db' }, { key: 'url', fields: { role: 'r', database: '' } }))
-      .toEqual({ addon: 'db', key: 'url', role: 'r' });
-    expect(makeRef({ key: 'services', name: 'api' }, { key: 'url', port: 'http' })).toEqual({ service: 'api', port: 'http', key: 'url' });
-    expect(makeRef({ key: 'secrets', name: 's' })).toEqual({ secret: 's' });
-    const v = addVariable(STORED, 'services', 'web', 'DATABASE_URL', { addon: 'postgres', key: 'url' });
-    expect(v.services.web.env).toEqual({ DATABASE_URL: { addon: 'postgres', key: 'url' } });
   });
 });
 
