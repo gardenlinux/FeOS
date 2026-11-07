@@ -611,11 +611,20 @@ func (e *Engine) callOp(ctx context.Context, pc podv1.PodServiceClient, h *OpHan
 	case OpResume:
 		_, res.err = pc.ResumePod(ctx, &podv1.ResumePodRequest{PodId: id})
 	case OpRestore:
-		resp, err := pc.RestorePod(ctx, restoreRequest(h))
+		req := restoreRequest(h)
+		resp, err := pc.RestorePod(ctx, req)
 		res.err = err
 		if err == nil {
 			res.restored, res.memoryRestored, res.reason = true, resp.GetMemoryRestored(), resp.GetReason()
 			res.pod = resp.GetPod()
+			// A feosd before ADR 0035 ignores the request's groups: the
+			// nodes are upgraded before ferund (migration 0032).
+			if n := res.pod.GetSpec().GetNetwork(); n != nil && len(req.SecurityGroups) > 0 &&
+				!slices.Equal(n.GetSecurityGroups(), req.SecurityGroups) {
+				e.rl.warn("restore-groups/"+h.target, "a node restored a pod in other security groups than asked: "+
+					"its feosd predates ADR 0035 and must be upgraded", "sandbox", h.id, "node", h.target,
+					"asked", req.SecurityGroups, "got", n.GetSecurityGroups())
+			}
 		}
 	case OpPause:
 		_, res.err = pc.SuspendPod(ctx, &podv1.SuspendPodRequest{PodId: id})

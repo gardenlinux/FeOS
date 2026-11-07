@@ -496,7 +496,8 @@ type applyArgs struct {
 
 // errReplan is an apply whose plan is stale: the environment got a new
 // deployment between the plan and the transaction, which the request's base
-// already names, or a secret version the plan pins was deleted.
+// already names, a secret version the plan pins was deleted, or a sandbox
+// or a job names a group the spec removes.
 var errReplan = errors.New("the current deployment changed since the plan")
 
 // apply plans raw (ModeApply: an image that cannot be resolved is an
@@ -569,6 +570,12 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		if err := checkQuota(ctx, tx, t, quota.Use{}, e.ID, p.currentSpec, &p.norm); err != nil {
 			return err
 		}
+		// The plan read the groups' users before the lock too: a sandbox's
+		// create or groups' change, which holds the lock FOR SHARE, may
+		// name a group the spec removes since.
+		if err := checkGroupUsers(ctx, tx, e.ID, p.norm.SecurityGroups); err != nil {
+			return err
+		}
 		if e.Deployment > 0 && spec.EqualNormalised(p.norm, *p.currentSpec) {
 			cur, err := tx.GetDeployment(ctx, e.ID, e.Deployment)
 			if err != nil {
@@ -634,6 +641,24 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	for name, ref := range pins {
 		if !slices.Contains(versions[name].Versions, ref.Version) {
 			return errReplan
+		}
+	}
+	return nil
+}
+
+// checkGroupUsers answers errReplan when a sandbox or a queued or running
+// tenant's job of the environment names a group that the normalised
+// spec's groups lack: the plan again finds it.
+func checkGroupUsers(ctx context.Context, tx *store.Store, envID uuid.UUID, groups map[string]spec.SecurityGroup) error {
+	users, err := tx.SecurityGroupUsers(ctx, envID)
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		for _, g := range u.SecurityGroups {
+			if _, ok := groups[g]; !ok {
+				return errReplan
+			}
 		}
 	}
 	return nil

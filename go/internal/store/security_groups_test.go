@@ -168,8 +168,8 @@ func TestOwnSandbox(t *testing.T) {
 		t.Fatalf("preview in use %+v %v", u, err)
 	}
 
-	// The groups a sandbox may name: the deployed deployment's, and
-	// default always.
+	// The groups a sandbox may name: the deployed deployment's that the
+	// latest keeps, and default always.
 	if names, err := s.DeployedSecurityGroups(bg, preview.ID); err != nil || !slices.Equal(names, []string{"default"}) {
 		t.Fatalf("no deployment %v %v", names, err)
 	}
@@ -185,6 +185,17 @@ func TestOwnSandbox(t *testing.T) {
 	if names, err := s.DeployedSecurityGroups(bg, preview.ID); err != nil ||
 		!slices.Equal(names, []string{"db", "default", "web"}) {
 		t.Fatalf("deployed %v %v", names, err)
+	}
+	// One on its way that removes web: web no longer, and the group it
+	// adds not yet.
+	if _, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: preview.ID, Number: 2, Origin: model.OriginApply,
+		Spec: []byte(`{"securityGroups": {"db": {}, "tools": {}}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, s, "UPDATE environments SET deployment = 2 WHERE id = $1", preview.ID)
+	if names, err := s.DeployedSecurityGroups(bg, preview.ID); err != nil ||
+		!slices.Equal(names, []string{"db", "default"}) {
+		t.Fatalf("on its way %v %v", names, err)
 	}
 	if _, err := s.DeployedSecurityGroups(bg, uuid.New()); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("no environment %v", err)

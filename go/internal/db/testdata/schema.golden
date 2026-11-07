@@ -853,6 +853,7 @@ TABLE sandboxes
   COLUMN instance boolean NOT NULL DEFAULT false
   COLUMN security_groups text[] NOT NULL DEFAULT '{default}'::text[]
   COLUMN groups_pending boolean NOT NULL DEFAULT false
+  COLUMN move_restore boolean NOT NULL DEFAULT false
   CONSTRAINT CHECK (((instance AND (cardinality(security_groups) = 0) AND (NOT groups_pending)) OR ((NOT instance) AND ((cardinality(security_groups) >= 1) AND (cardinality(security_groups) <= 5)))))
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))

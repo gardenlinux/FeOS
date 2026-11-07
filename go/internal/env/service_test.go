@@ -1039,6 +1039,34 @@ func TestApplyRacesDeleteSecret(t *testing.T) {
 	}
 }
 
+// A sandbox that names a group between an apply's plan and its
+// transaction keeps the group: the apply plans again and refuses to
+// remove it.
+func TestApplyRacesSandboxGroups(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, harnessOptions{})
+	ctx := h.ctx()
+	h.create("stage", nil)
+	h.apply("stage", `{"securityGroups": {"tools": {}}}`, 0)
+	sb := h.sandbox(tenantA, "stage")
+	var once sync.Once
+	h.svc.afterPlan = func() {
+		once.Do(func() {
+			if ok, err := h.st.SetSandboxGroups(ctx, sb, []string{"tools"}); err != nil || !ok {
+				t.Errorf("set the sandbox's groups: %v %v", ok, err)
+			}
+		})
+	}
+	_, err := h.svc.Apply(ctx, tenantA, "stage", ApplyRequest{Base: 1, Spec: json.RawMessage(`{}`)})
+	var ise *InvalidSpecError
+	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "securityGroups.tools", "security group tools is named by") {
+		t.Fatalf("apply: %v", describe(err))
+	}
+	if e := h.env("stage"); e.Deployment != 1 {
+		t.Fatalf("deployment %d was made", e.Deployment)
+	}
+}
+
 // The controller's refusals of expected states answer 409 with a code,
 // never 500: a restart while an op is in flight (Retry-After), a job that
 // cannot run yet, the log of an instance that does not run.

@@ -2511,12 +2511,14 @@ an environment without deployments is a valid place for them.
 - **Groups are names of the deployed deployment's** (ADR 0034): a create,
   and a sandbox's `PUT …/security-groups`, lock the environment FOR SHARE
   (an environment being deleted is 409) and check every name against the
-  groups of its deployed deployment, `default` always among them, also
-  without a deployment (`store.DeployedSecurityGroups`); another is 422
-  with the names it has. The plan counts them as users
+  groups of its deployed deployment that its latest deployment keeps (a
+  rollout that removes one is on its way), `default` always among them,
+  also without a deployment (`store.DeployedSecurityGroups`); another is
+  422 with the names it has. The plan counts them as users
   (`store.SecurityGroupUsers`: the sandboxes, and the jobs that are
   queued or running): a deployment that removes a group one names is
-  refused.
+  refused. The apply reads them again in its transaction, after its lock
+  FOR UPDATE, and plans again when one names a group the spec lacks.
 - **A change of a sandbox's groups is a move.** `PUT
   /api/v1/sandboxes/{id}/security-groups` writes the list
   (`store.SetSandboxGroups`), sets `groups_pending` and sends
@@ -2529,7 +2531,11 @@ an environment without deployments is a valid place for them.
   checkpointed spec's; every restore of a row with a template sends
   both). A sandbox whose pod runs under the old list is moved by the
   controller's `env-groups-moves` ([Security groups](#security-groups)):
-  hibernated, and restored when it was running. A job's groups are
+  hibernated, and restored when it was running. A running one is marked
+  `move_restore` before its hibernation; the loop restores a marked one
+  that is hibernated, with the backoff of a failed move, until it runs
+  (also after a leader change), and drops the mark of one that runs
+  again by another op or is in any other state. A job's groups are
   fixed.
 - **Delete and clone.** `DELETE /api/v1/environments/{env}` with
   sandboxes or queued or running jobs is 409 `environment_in_use`
@@ -2570,11 +2576,20 @@ an environment without deployments is a valid place for them.
   Their log labels get their environment (a pod that runs keeps those of
   its create until its next restore). The version before inserts rows
   without an environment, which the not-null columns refuse: the
-  migration is not additive.
+  migration is not additive. A tenant with a limit of environments gets
+  one more for the environment `sandboxes` made for it. **Nodes
+  first**: every node runs a feosd that takes a restore's
+  `security_groups` and `name_tables` before this ferund starts; an
+  older one ignores them, and a move would restore a sandbox in its old
+  groups yet clear its mark (the engine warns when a restored pod's
+  groups are not those it asked for). A sandbox not moved yet resumes
+  and starts under its old group and table `sbx-<id>`, which the
+  controller no longer builds and leaves on the node while the pod names
+  them.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/sandboxes` `{environment, securityGroups?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` `[]`, more than 5, a name that is none or one named twice, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for a group the deployed deployment does not have |
+| `POST /api/v1/sandboxes` `{environment, securityGroups?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` `[]`, more than 5, a name that is none or one named twice, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for a group the deployed deployment does not have, or the latest removes |
 | `GET /api/v1/sandboxes[?environment=]` | `{sandboxes}`, oldest first: those the principal reads, of the one environment when it names one (by name or ID) |
 | `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}` and `securityGroups` |
 | `PUT /api/v1/sandboxes/{id}/security-groups` `{securityGroups}` | 202 the view, marked `groups_pending`: a sandbox with a pod is moved, one without takes them at its next create or restore; 200 for the list it has (in any order), nothing done; 400, 422 as a create's |
@@ -3088,9 +3103,14 @@ groups and tables, so that the pod comes back in its new groups under a
 new address (feosd never gives an address twice), its disk and memory
 as they were. The controller restores a sandbox that was running
 (Ensure) at once; a paused, stopped or failed one stays hibernated
-until its next use. A move that fails is tried again after a backoff. A
-leader that ends between the hibernation and the restore leaves the
-sandbox hibernated: its next call restores it in its groups. A sandbox
+until its next use. A move that fails is tried again after a backoff.
+A running sandbox is marked `move_restore` before its hibernation
+(`store.EnvCtlMarkMoveRestore`): a restore that fails, or a leader that
+ends between the hibernation and the restore, leaves the mark, and the
+loop restores each marked sandbox that is hibernated and has no op
+(`store.EnvCtlMoveRestores`), with the same backoff, until it runs; a
+marked one that runs again by another op, or is in any other state,
+loses its mark. A sandbox
 without a pod (pending, hibernated, lost) is not moved: its next create
 or restore takes its groups. A member therefore never joins a group while
 its pod runs.

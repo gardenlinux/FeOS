@@ -253,7 +253,9 @@ type builtTable struct {
 }
 
 // tablesOf are the tables a row's pod names and those they include, each
-// once, in order; cache keeps the tables built in a pass.
+// once, in order; cache keeps the tables built in a pass. A legacy
+// sbx-<id> table of a sandbox not moved yet (ADR 0035) is left out, as in
+// groupsOf.
 func (c *Controller) tablesOf(ctx context.Context, sb store.Sandbox, cache map[string]*builtTable) (map[string]*networkv1.NameTable, []string, error) {
 	built := map[string]*networkv1.NameTable{}
 	var order []string
@@ -278,6 +280,9 @@ func (c *Controller) tablesOf(ctx context.Context, sb store.Sandbox, cache map[s
 		return built, order, nil
 	}
 	for _, id := range sb.PodTemplate.NameTables {
+		if strings.HasPrefix(id, legacySandboxPrefix) {
+			continue
+		}
 		includes, err := visit(id)
 		if err != nil {
 			return nil, nil, err

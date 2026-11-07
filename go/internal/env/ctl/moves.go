@@ -30,9 +30,11 @@ import (
 //
 // The loop reads the database only; each move runs in the pool (single
 // flight per sandbox), its hibernation on the engine's context. A move
-// that fails is tried again after a backoff; a leader that ends between
-// the hibernation and the restore leaves the sandbox hibernated, and its
-// next call restores it in its new groups.
+// that fails is tried again after a backoff. A running sandbox is marked
+// before its hibernation (move_restore): the restore it is owed is tried
+// again, with the same backoff, until it runs, also by the next leader
+// when one ends in between. A sandbox that runs again by another op (a
+// call restored it) or is gone loses its mark.
 
 // LoopMoves is the loop of the moves. Its name contains HintGroups, which
 // store.SetSandboxGroups sends: a change wakes it.
@@ -69,6 +71,17 @@ func (c *Controller) movesLoop(ctx context.Context) error {
 		}
 		c.pool.run(ctx, key, func(ctx context.Context) { c.move(ctx, sb) })
 	}
+	owed, err := c.st.EnvCtlMoveRestores(ctx, movesBatch)
+	if err != nil {
+		return fmt.Errorf("restores after moves: %w", err)
+	}
+	for _, sb := range owed {
+		key := moveKey(sb.ID)
+		if !c.cleanDue(key) {
+			continue
+		}
+		c.pool.run(ctx, key, func(ctx context.Context) { c.restoreMoved(ctx, sb) })
+	}
 	return nil
 }
 
@@ -76,6 +89,21 @@ func (c *Controller) movesLoop(ctx context.Context) error {
 // was running.
 func (c *Controller) move(ctx context.Context, sb store.Sandbox) {
 	key := moveKey(sb.ID)
+	if sb.ClientState == model.StateRunning {
+		marked, err := c.st.EnvCtlMarkMoveRestore(ctx, sb.ID)
+		if err != nil {
+			if ctx.Err() == nil {
+				c.cleanFailed(key)
+				c.rl.warn("move/"+sb.ID.String(), "a sandbox's move to its new security groups failed; it is tried again",
+					"sandbox", sb.ID, "err", err)
+			}
+			return
+		}
+		if !marked {
+			// It runs no longer: the next pass looks again.
+			return
+		}
+	}
 	hibernated, err := c.d.Engine.HibernateToMove(ctx, sb.ID)
 	switch {
 	case err != nil && (errors.Is(err, model.ErrBusy) || errors.Is(err, model.ErrPrecondition) ||
@@ -98,13 +126,45 @@ func (c *Controller) move(ctx context.Context, sb store.Sandbox) {
 	if sb.ClientState != model.StateRunning {
 		return
 	}
-	l, err := c.d.Engine.Ensure(ctx, sb.ID)
-	if err != nil {
+	c.restore(ctx, sb.ID)
+}
+
+// restoreMoved is the restore a sandbox marked move_restore is owed, read
+// as sb: made when it is hibernated; its mark dropped when it runs, or is
+// in any other state (another op came, the mark set before a hibernation
+// that did not happen).
+func (c *Controller) restoreMoved(ctx context.Context, sb store.Sandbox) {
+	if sb.ClientState == model.StateHibernated {
+		c.restore(ctx, sb.ID)
+		return
+	}
+	if err := c.st.EnvCtlClearMoveRestore(ctx, sb.ID); err != nil && ctx.Err() == nil {
+		c.rl.warn("move/"+sb.ID.String(), "a sandbox's restore after its move: drop its mark", "sandbox", sb.ID,
+			"err", err)
+	}
+}
+
+// restore restores a sandbox hibernated for its move that was running,
+// and drops its mark once it runs; a failure is tried again after the
+// backoff.
+func (c *Controller) restore(ctx context.Context, id podid.ID) {
+	key := moveKey(id)
+	l, err := c.d.Engine.Ensure(ctx, id)
+	if err == nil {
+		err = c.st.EnvCtlClearMoveRestore(ctx, id)
+	}
+	switch {
+	case errors.Is(err, model.ErrNotFound):
+		c.cleanOK(key)
+		return
+	case err != nil:
 		if ctx.Err() == nil {
-			c.rl.warn("move/"+sb.ID.String(), "a moved sandbox stays hibernated until it is used", "sandbox", sb.ID,
+			c.cleanFailed(key)
+			c.rl.warn("move/"+id.String(), "a moved sandbox's restore failed; it is tried again", "sandbox", id,
 				"err", err)
 		}
 		return
 	}
-	c.log.Info("sandbox moved to its new security groups", "sandbox", sb.ID, "node", l.Node)
+	c.cleanOK(key)
+	c.log.Info("sandbox moved to its new security groups", "sandbox", id, "node", l.Node)
 }

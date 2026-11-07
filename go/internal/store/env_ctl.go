@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -244,6 +245,36 @@ func (s *Store) EnvCtlMoves(ctx context.Context, nodes []string, limit int) ([]S
 		WHERE groups_pending AND NOT instance AND NOT tenant_job AND op = '' AND node = ANY($1)
 			AND client_state IN ('running', 'paused', 'stopped', 'failed')
 		ORDER BY updated_at, id LIMIT $2`, nodes, limit))
+}
+
+// EnvCtlMarkMoveRestore marks sandbox id, while it runs, as one the
+// controller restores after the hibernation of its move (move_restore,
+// ADR 0035), before that hibernation: a restore that fails, or a leader
+// that ends in between, leaves the mark for the next pass. It reports
+// whether the sandbox runs and is marked.
+func (s *Store) EnvCtlMarkMoveRestore(ctx context.Context, id podid.ID) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET move_restore = true
+		WHERE id = $1 AND NOT instance AND NOT tenant_job AND client_state = 'running'`, id)
+	if err != nil {
+		return false, fmt.Errorf("mark sandbox %s for its restore after a move: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// EnvCtlMoveRestores returns the sandboxes marked move_restore without an
+// op in flight, at most limit: the controller restores each that is
+// hibernated and drops the mark of the others (EnvCtlClearMoveRestore).
+func (s *Store) EnvCtlMoveRestores(ctx context.Context, limit int) ([]Sandbox, error) {
+	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
+		WHERE move_restore AND op = '' ORDER BY updated_at, id LIMIT $1`, limit))
+}
+
+// EnvCtlClearMoveRestore drops sandbox id's move_restore mark.
+func (s *Store) EnvCtlClearMoveRestore(ctx context.Context, id podid.ID) error {
+	if _, err := s.q.Exec(ctx, `UPDATE sandboxes SET move_restore = false WHERE id = $1 AND move_restore`, id); err != nil {
+		return fmt.Errorf("clear sandbox %s's restore after a move: %w", id, err)
+	}
+	return nil
 }
 
 // IngressInput is what the group ing-<sandbox id> of a sandbox is built

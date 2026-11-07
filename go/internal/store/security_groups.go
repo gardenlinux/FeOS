@@ -225,16 +225,20 @@ func (s *Store) GetOwnSandbox(ctx context.Context, owner string, id podid.ID) (O
 }
 
 // DeployedSecurityGroups are the names of the groups of environment
-// envID's deployed deployment, sorted, default always among them (an
-// environment without a deployment has it alone): the groups a sandbox
-// or a tenant's job of it may name. ErrNoRow when there is no such
+// envID's deployed deployment that its latest deployment keeps, sorted,
+// default always among them (an environment without a deployment has it
+// alone): the groups a sandbox or a tenant's job of it may name. A group
+// a deployment on its way removes is not among them, so that no sandbox
+// names it once that one is deployed. ErrNoRow when there is no such
 // environment.
 func (s *Store) DeployedSecurityGroups(ctx context.Context, envID uuid.UUID) ([]string, error) {
 	var names []string
-	err := s.q.QueryRow(ctx, `SELECT ARRAY(SELECT g FROM (
-			SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(d.spec->'securityGroups') = 'object'
+	err := s.q.QueryRow(ctx, `WITH keys AS (
+			SELECT d.number, jsonb_object_keys(CASE WHEN jsonb_typeof(d.spec->'securityGroups') = 'object'
 				THEN d.spec->'securityGroups' ELSE '{}'::jsonb END) AS g
-			FROM env_deployments d WHERE d.env_id = e.id AND d.number = e.deployed
+			FROM env_deployments d WHERE d.env_id = $1)
+		SELECT ARRAY(SELECT g FROM (
+			(SELECT g FROM keys WHERE number = e.deployed INTERSECT SELECT g FROM keys WHERE number = e.deployment)
 			UNION SELECT '`+defaultGroup+`') n ORDER BY g)
 		FROM environments e WHERE e.id = $1`, envID).Scan(&names)
 	if err != nil {

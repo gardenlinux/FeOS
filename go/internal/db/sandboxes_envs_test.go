@@ -16,7 +16,8 @@ import (
 // sandbox that an environment's attached service names into the most
 // recent such environment, every other one and every job into the
 // tenant's environment "sandboxes", made with its group default (a tenant
-// that has one keeps it); instances are marked so; all are in default,
+// that has one keeps it, and a limit of environments grows by the one
+// made); instances are marked so; all are in default,
 // with log labels of their environment, and a sandbox with a pod is to be
 // moved once.
 func TestSandboxesInEnvironmentsMigration(t *testing.T) {
@@ -37,7 +38,7 @@ func TestSandboxesInEnvironmentsMigration(t *testing.T) {
 		gone    = "00000000-0000-4000-8000-000000000003"
 		own     = "00000000-0000-4000-8000-000000000009" // beta's own environment "sandboxes"
 	)
-	exec("INSERT INTO tenants (id) VALUES ('acme'), ('beta'), ('idle')")
+	exec("INSERT INTO tenants (id, limit_environments) VALUES ('acme', 3), ('beta', 2), ('idle', 1), ('free', NULL)")
 	exec(`INSERT INTO environments (id, owner, name, deployment, created_at) VALUES
 		('` + dev + `', 'acme', 'dev', 1, now() - interval '2 hours'),
 		('` + preview + `', 'acme', 'preview', 1, now() - interval '1 hour'),
@@ -126,6 +127,27 @@ func TestSandboxesInEnvironmentsMigration(t *testing.T) {
 	if err := d.Pool.QueryRow(ctx, "SELECT environment_id::text, security_groups FROM jobs WHERE id = 'jb000000001'").
 		Scan(&jobEnv, &jobGroups); err != nil || jobEnv != boxes || !slices.Equal(jobGroups, inDefault) {
 		t.Fatalf("the job %s %v %v", jobEnv, jobGroups, err)
+	}
+	// The environment made for acme is not counted against its limit;
+	// beta's was its own.
+	limits := map[string]*int{}
+	rows, err := d.Pool.Query(ctx, "SELECT id, limit_environments FROM tenants")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		var limit *int
+		if err := rows.Scan(&id, &limit); err != nil {
+			t.Fatal(err)
+		}
+		limits[id] = limit
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+	if *limits["acme"] != 4 || *limits["beta"] != 2 || *limits["idle"] != 1 || limits["free"] != nil {
+		t.Fatalf("limits acme %d beta %d idle %d free %v", *limits["acme"], *limits["beta"], *limits["idle"], limits["free"])
 	}
 	// A tenant with neither sandboxes nor jobs gets no environment.
 	var idle int

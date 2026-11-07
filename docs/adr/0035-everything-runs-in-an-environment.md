@@ -80,7 +80,8 @@ the same rules for network, names and access.
   environment (ADR 0034), at most five. **Left out, the pod is in
   `default`**, as a service that names none is. An empty list is 400,
   so that every pod has a group. A name that the environment's
-  deployed deployment does not have is 422 with the names it has.
+  deployed deployment does not have, or that a deployment on its way
+  removes, is 422 with the names it has.
 - `default` lets nothing in and reaches the internet (ADR 0034). A
   sandbox made without groups is therefore what a sandbox is today:
   usable by its token, invisible on the network. What it may reach in
@@ -129,7 +130,14 @@ the same rules for network, names and access.
   sandbox's groups.
 - Its name is in `env-<id>`'s table with the sandbox's address, so that
   pods of the environment reach it where a rule lets them. Inside the
-  sandbox it is reached over the guest's loopback, as now.
+  sandbox the name is that address too: the guest reaches its own
+  address over its loopback interface, but no longer as `127.0.0.1` or
+  `::1`, which `sbx-<id>` gave. **This changes what a service must
+  listen on**: its sandbox's IPv6 address, or all interfaces (`::`); a
+  service bound to `127.0.0.1` or to IPv4's `0.0.0.0` alone is no longer
+  reached by its name, also by the attached services beside it. A
+  service with a routed port listens there already, since the ingress
+  and the environment's pods reach it at that address.
 - The blocks of `in` rules on a routed port of an attached service
   (ADR 0034, the ingress checks the client) are those of its sandbox's
   groups.
@@ -231,7 +239,10 @@ the same rules for network, names and access.
     project (builds need only the internet, which `default` gives);
   - a lost workspace sandbox is replaced in the same environment, and
     the dev environment's deployment names the new one, as now;
-  - it stops sending `attachable`.
+  - it stops sending `attachable`;
+  - its agent's instructions and its templates have an attached
+    service listen on `::` (or its sandbox's address), not on
+    `127.0.0.1`, since its name no longer resolves to loopback.
 
 ## Open questions
 

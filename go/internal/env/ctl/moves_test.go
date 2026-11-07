@@ -7,10 +7,16 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
+	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
@@ -106,4 +112,142 @@ func TestSandboxMove(t *testing.T) {
 		s, err := h.st.GetSandbox(bg, sb.ID)
 		return err != nil || s.Gen != before.Gen && s.ClientState != model.StateRunning
 	})
+}
+
+// legacyBox is a sandbox as migration 0032 leaves it: its pod made before
+// ADR 0035, with no template (a plain sandbox) or an attachable one's,
+// which names its group and table sbx-<id> (put on the node here, as the
+// version before put them); in [default], not yet pending.
+func (h *harness) legacyBox(env store.Environment, attachable bool) store.Sandbox {
+	h.t.Helper()
+	id := podid.Mint()
+	var tmpl *model.PodTemplate
+	if attachable {
+		legacy := legacySandboxPrefix + id.String()
+		tmpl = &model.PodTemplate{Command: slices.Clone(model.SandboxCommand), SecurityGroups: []string{legacy},
+			NameTables: []string{legacy}}
+		cc := h.conn("n1")
+		if _, err := networkv1.NewSecurityGroupServiceClient(cc).PutSecurityGroup(bg, &networkv1.PutSecurityGroupRequest{
+			Group: &networkv1.SecurityGroup{Id: legacy, Version: 1}}); err != nil {
+			h.t.Fatal(err)
+		}
+		if _, err := networkv1.NewNameServiceClient(cc).PutNameTable(bg, &networkv1.PutNameTableRequest{
+			Table: &networkv1.NameTable{Id: legacy, Version: 1}}); err != nil {
+			h.t.Fatal(err)
+		}
+	}
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: env.Owner, Image: testImage, ImageRef: testImage,
+		VCPUs: 1, MemoryMiB: 512, EnvironmentID: env.ID, SecurityGroups: []string{"default"}, PodTemplate: tmpl}); err != nil {
+		h.t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
+	defer cancel()
+	if _, err := h.eng.Ensure(ctx, id); err != nil {
+		h.t.Fatalf("ensure the legacy sandbox: %v", err)
+	}
+	sb, err := h.st.GetSandbox(bg, id)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return sb
+}
+
+// The move of the rollout (ADR 0035): the sandboxes migration 0032 marks,
+// whose pods run under no groups or under their old sbx-<id> group and
+// table. A paused attachable one resumes under its old group before its
+// move (nothing builds sbx- groups any more; the node keeps it while the
+// pod names it). Once marked, a running one is hibernated and restored in
+// env-<id> and sg-default with the environment's table, also when its
+// first restore fails (it is owed it and tried again); the paused one is
+// hibernated and takes its groups at its restore; the sbx group and table
+// leave the node once no pod names them.
+func TestSandboxMoveAfterMigration(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	env := h.newEnv("sandboxes")
+	plain := h.legacyBox(env, false)
+	attachable := h.legacyBox(env, true)
+	legacy := legacySandboxPrefix + attachable.ID.String()
+	if g := h.pod("n1", attachable.ID).GetSpec().GetNetwork().GetSecurityGroups(); !slices.Equal(g, []string{legacy}) {
+		t.Fatalf("the legacy pod's groups %v", g)
+	}
+
+	// Paused before its move, it resumes in its old group.
+	if err := h.eng.Pause(bg, attachable.ID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
+	defer cancel()
+	if _, err := h.eng.Ensure(ctx, attachable.ID); err != nil {
+		t.Fatalf("resume the legacy sandbox: %v", err)
+	}
+	if err := h.eng.Pause(bg, attachable.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The first restore of a move fails: the sandbox is owed it.
+	var mu sync.Mutex
+	failed := 0
+	n1.Script().SetHook(podv1.PodService_RestorePod_FullMethodName, func(context.Context, string, any) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if failed == 0 {
+			failed++
+			return status.Error(codes.Unavailable, "the node has no time for a restore")
+		}
+		return nil
+	})
+	h.exec(`UPDATE sandboxes SET groups_pending = true WHERE id = ANY($1)`, []podid.ID{plain.ID, attachable.ID})
+	h.c.notify(bg, HintGroups)
+
+	eventually(t, 60*time.Second, "the running sandbox moved", func() bool {
+		s, err := h.st.GetSandbox(bg, plain.ID)
+		return err == nil && !s.GroupsPending && s.ClientState == model.StateRunning && s.Op == "" && s.Address != ""
+	})
+	mu.Lock()
+	if failed != 1 {
+		t.Errorf("%d failed restores", failed)
+	}
+	mu.Unlock()
+	eventually(t, 10*time.Second, "the restore no longer owed", func() bool {
+		var marked bool
+		err := h.d.Pool.QueryRow(bg, `SELECT move_restore FROM sandboxes WHERE id = $1`, plain.ID).Scan(&marked)
+		return err == nil && !marked
+	})
+	moved, err := h.st.GetSandbox(bg, plain.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := h.pod("n1", plain.ID).GetSpec().GetNetwork()
+	if !slices.Equal(n.GetSecurityGroups(), h.podGroups(env.ID, "default")) ||
+		!slices.Equal(n.GetNameTables(), []string{model.EnvTableID(env.ID)}) {
+		t.Errorf("the moved pod's network %v", n)
+	}
+	eventually(t, 60*time.Second, "the paused sandbox hibernated", func() bool {
+		s, err := h.st.GetSandbox(bg, attachable.ID)
+		return err == nil && s.ClientState == model.StateHibernated && s.Op == "" && s.GroupsPending
+	})
+	if _, err := h.eng.Ensure(ctx, attachable.ID); err != nil {
+		t.Fatalf("restore the hibernated sandbox: %v", err)
+	}
+	if n := h.pod("n1", attachable.ID).GetSpec().GetNetwork(); !slices.Equal(n.GetSecurityGroups(), h.podGroups(env.ID, "default")) ||
+		!slices.Equal(n.GetNameTables(), []string{model.EnvTableID(env.ID)}) {
+		t.Errorf("the restored pod's network %v", n)
+	}
+	restored, err := h.st.GetSandbox(bg, attachable.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := h.podGroups(env.ID, "default")[1]
+	eventually(t, 30*time.Second, "both in default, the sbx group and table gone", func() bool {
+		h.c.notify(bg, HintGroups)
+		g := h.group("n1", def)
+		return g != nil && slices.Equal(g.Members, sortedOf(moved.Address, restored.Address)) &&
+			h.group("n1", legacy) == nil && h.table("n1", legacy) == nil
+	})
+}
+
+func sortedOf(s ...string) []string {
+	slices.Sort(s)
+	return s
 }

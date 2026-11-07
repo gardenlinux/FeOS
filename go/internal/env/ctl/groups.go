@@ -597,7 +597,10 @@ func (c *Controller) recordAdmission(ctx context.Context, node string, b *builtG
 }
 
 // groupsOf are the groups a row's pod names and the groups their rules
-// name, each once, in order; pass keeps the groups built in a pass.
+// name, each once, in order; pass keeps the groups built in a pass. A
+// legacy sbx-<id> group of a sandbox not moved yet (ADR 0035) is left
+// out: nothing builds it any more, its node keeps it while the pod names
+// it, and a resume or start goes on under it until the move.
 func (c *Controller) groupsOf(ctx context.Context, sb store.Sandbox, pass *groupPass) (map[string]*networkv1.SecurityGroup, []string, error) {
 	built := map[string]*networkv1.SecurityGroup{}
 	var order []string
@@ -625,6 +628,9 @@ func (c *Controller) groupsOf(ctx context.Context, sb store.Sandbox, pass *group
 	}
 	if sb.PodTemplate != nil {
 		for _, id := range sb.PodTemplate.SecurityGroups {
+			if strings.HasPrefix(id, legacySandboxPrefix) {
+				continue
+			}
 			if err := visit(id); err != nil {
 				return nil, nil, err
 			}

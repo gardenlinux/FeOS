@@ -19,7 +19,10 @@
 -- whose template is not yet made of security_groups: the create or
 -- restore that makes its pod next makes it and clears the mark, and the
 -- controller moves a pod that runs under other groups (hibernates it, and
--- restores one that ran, ADR 0035). A job
+-- restores one that ran, ADR 0035). move_restore marks a sandbox the
+-- controller hibernates for its move while it runs: the restore it owes
+-- it, tried again until it runs (or another op made it run, or it is
+-- gone). A job
 -- names its groups in jobs.security_groups, copied to its pod's row; a
 -- job's groups are fixed.
 --
@@ -31,6 +34,8 @@
 --     pod) goes into the tenant's environment "sandboxes", made here,
 --     empty, with its group default; a tenant that has one already keeps
 --     it and gets its sandboxes and jobs there;
+--   - a tenant with a limit of environments gets one more for its
+--     environment "sandboxes" made here;
 --   - all are in [default] and every sandbox is marked pending: one with
 --     a pod is moved once, a hibernated or never started one takes its
 --     groups at its restore or create; a running job ends under the
@@ -42,12 +47,18 @@
 --
 -- Not additive: the version before inserts sandboxes and jobs without an
 -- environment, which the not-null columns refuse. Stop it before.
+--
+-- Nodes first: every node's feosd must take a restore's security groups
+-- and name tables (RestorePodRequest fields 6 and 7, feosd of this
+-- release) before this ferund starts. An older feosd ignores them: the
+-- move would restore a sandbox in its old groups and clear its mark.
 
 ALTER TABLE sandboxes ADD COLUMN instance boolean NOT NULL DEFAULT false;    -- an environment's instance; fixed
 UPDATE sandboxes SET instance = true WHERE environment_id IS NOT NULL;
 ALTER TABLE sandboxes ADD CONSTRAINT sandboxes_kind CHECK (NOT (instance AND tenant_job));
 ALTER TABLE sandboxes ADD COLUMN security_groups text[] NOT NULL DEFAULT '{default}';
 ALTER TABLE sandboxes ADD COLUMN groups_pending boolean NOT NULL DEFAULT false;
+ALTER TABLE sandboxes ADD COLUMN move_restore boolean NOT NULL DEFAULT false;
 UPDATE sandboxes SET security_groups = '{}' WHERE instance;
 ALTER TABLE sandboxes ADD CONSTRAINT sandboxes_security_groups CHECK (
   (instance AND cardinality(security_groups) = 0 AND NOT groups_pending)
@@ -67,12 +78,18 @@ UPDATE sandboxes s SET environment_id = (SELECT e.id FROM environments e
     ORDER BY e.created_at DESC, e.id LIMIT 1)
   WHERE NOT s.instance AND NOT s.tenant_job;
 
--- The tenants' environments "sandboxes", for the rest.
-INSERT INTO environments (id, owner, name)
-  SELECT gen_random_uuid(), t.owner, 'sandboxes' FROM (
-    SELECT owner FROM sandboxes WHERE environment_id IS NULL
-    UNION SELECT owner FROM jobs) t
-  ON CONFLICT (owner, name) DO NOTHING;
+-- The tenants' environments "sandboxes", for the rest; a tenant with a
+-- limit of environments gets one more for the one made here, which it
+-- did not ask for.
+WITH made AS (
+  INSERT INTO environments (id, owner, name)
+    SELECT gen_random_uuid(), t.owner, 'sandboxes' FROM (
+      SELECT owner FROM sandboxes WHERE environment_id IS NULL
+      UNION SELECT owner FROM jobs) t
+    ON CONFLICT (owner, name) DO NOTHING
+    RETURNING owner)
+UPDATE tenants SET limit_environments = limit_environments + 1
+  WHERE id IN (SELECT owner FROM made) AND limit_environments IS NOT NULL;
 INSERT INTO security_groups (env_id, name)
   SELECT id, 'default' FROM environments WHERE name = 'sandboxes'
   ON CONFLICT (env_id, name) DO NOTHING;
