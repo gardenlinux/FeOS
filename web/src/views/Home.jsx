@@ -8,7 +8,6 @@ import { fmtQuota, quotaRows, useAccess } from '../people.js';
 import { envPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import { deploymentText, deploymentTone } from './envs.js';
-import { stateWords } from './sandboxes.js';
 import { ToneDot } from './Environments.jsx';
 import { RoleBadge } from './People.jsx';
 
@@ -133,8 +132,7 @@ export function Home({ tenant, navigate }) {
                   {mostRecent(sandboxes).slice(0, SANDBOXES_SHOWN).map((s) => (
                     <tr key={s.sandboxId} className="clickable" onClick={() => navigate(`${base}/sandboxes/${enc(s.sandboxId)}`)}>
                       <td className="mono">{s.sandboxId}{s.owner && <div className="muted small">{s.owner}</div>}</td>
-                      <td><span className="cell-state"><StateDot state={s.clientState} /> {s.clientState || 'unknown'}
-                        {stateWords(s).where && <span className="muted small mono">{stateWords(s).where}</span>}</span></td>
+                      <td><span className="cell-state"><StateDot state={s.clientState} /> {s.clientState || 'unknown'}</span></td>
                       <td className="muted small"><Ago iso={s.updatedAt} /></td>
                     </tr>
                   ))}

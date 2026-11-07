@@ -194,7 +194,6 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
                   <td>
                     <span className="cell-state" title={sb.statusDescription || sb.clientState}>
                       <StateDot state={sb.clientState} /> {stateWords(sb).short}
-                      {stateWords(sb).where && <span className="muted small mono">{stateWords(sb).where}</span>}
                     </span>
                   </td>
                   <td className="mono small muted">{sizeWords(sb) || '—'}</td>

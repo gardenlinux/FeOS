@@ -46,10 +46,9 @@ export function stateCounts(sandboxes) {
   return c;
 }
 
-// stateWords says a sandbox's state and where it is: {short, where,
-// long}. short is the API's word; where the node it is on, or S3 when
-// hibernated (a paused sandbox resumes on its node, a hibernated one on
-// any); long the head's sentence with what it costs and what comes next.
+// stateWords says a sandbox's state: {short, long}. short is the API's
+// word; long the head's sentence with where it is, what it costs and
+// what comes next.
 export function stateWords(sb) {
   const st = (sb && sb.clientState) || 'unknown';
   const node = (sb && sb.node) || '';
@@ -58,29 +57,29 @@ export function stateWords(sb) {
   const desc = (sb && sb.statusDescription) || '';
   switch (st) {
     case 'running':
-      return { short: st, where: node, long: `running${on}${size ? ` · ${size} booked` : ''}` };
+      return { short: st, long: `running${on}${size ? ` · ${size} booked` : ''}` };
     case 'paused':
-      return { short: st, where: node, long: `paused${on} · its memory on the node's disk, no RAM · resumes on the next call` };
+      return { short: st, long: `paused${on} · its memory on the node's disk, no RAM · resumes on the next call` };
     case 'hibernated':
-      return { short: st, where: 'S3', long: 'hibernated in S3 · nothing on a node · resumes on any node' };
+      return { short: st, long: 'hibernated in S3 · nothing on a node · resumes on any node' };
     case 'pending':
-      return { short: st, where: '', long: 'not created yet · the next call creates it' };
+      return { short: st, long: 'not created yet · the next call creates it' };
     case 'creating':
     case 'pausing':
     case 'resuming':
-      return { short: st, where: node, long: `${st}${on}` };
+      return { short: st, long: `${st}${on}` };
     case 'hibernating':
-      return { short: st, where: node ? `${node} → S3` : 'S3', long: `going to S3${node ? ` from ${node}` : ''}` };
+      return { short: st, long: `going to S3${node ? ` from ${node}` : ''}` };
     case 'stopped':
-      return { short: st, where: '', long: 'the next call starts it again' };
+      return { short: st, long: 'the next call starts it again' };
     case 'failed':
-      return { short: st, where: node, long: 'the next call tries to start it again, or delete it' };
+      return { short: st, long: 'the next call tries to start it again, or delete it' };
     case 'lost':
-      return { short: st, where: '', long: 'no checkpoint · delete it or create anew' };
+      return { short: st, long: 'no checkpoint · delete it or create anew' };
     case 'unknown':
-      return { short: st, where: node, long: `not known now${node ? ` · node ${node} not reachable` : ''} · a sync resolves it` };
+      return { short: st, long: `not known now${node ? ` · node ${node} not reachable` : ''} · a sync resolves it` };
     default:
-      return { short: st, where: node, long: desc || st };
+      return { short: st, long: desc || st };
   }
 }
 

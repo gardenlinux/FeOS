@@ -30,11 +30,11 @@ describe('sizes', () => {
 });
 
 describe('stateWords', () => {
-  it('says the API\'s word, where it is and what it costs', () => {
-    expect(stateWords(SB)).toEqual({ short: 'running', where: 'n3', long: 'running on n3 · 2 vCPU, 4 GiB booked' });
+  it('says the API\'s word, and where it is and what it costs', () => {
+    expect(stateWords(SB)).toEqual({ short: 'running', long: 'running on n3 · 2 vCPU, 4 GiB booked' });
     expect(stateWords(as('paused')).long).toBe('paused on n3 · its memory on the node\'s disk, no RAM · resumes on the next call');
-    expect(stateWords(as('paused'))).toMatchObject({ short: 'paused', where: 'n3' });
-    expect(stateWords(as('hibernated', { node: '' }))).toEqual({ short: 'hibernated', where: 'S3', long: 'hibernated in S3 · nothing on a node · resumes on any node' });
+    expect(stateWords(as('paused')).short).toBe('paused');
+    expect(stateWords(as('hibernated', { node: '' }))).toEqual({ short: 'hibernated', long: 'hibernated in S3 · nothing on a node · resumes on any node' });
     expect(stateWords(as('lost')).long).toBe('no checkpoint · delete it or create anew');
     expect(stateWords(as('failed')).long).toBe('the next call tries to start it again, or delete it');
     expect(stateWords(as('unknown')).long).toBe('not known now · node n3 not reachable · a sync resolves it');
