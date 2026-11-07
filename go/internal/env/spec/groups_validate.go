@@ -85,7 +85,13 @@ func (v *validator) securityGroups() {
 			v.errorf(p, "use 1 to 32 lowercase letters, digits and '-', beginning with a letter or a digit",
 				"%q is not a security group's name", name)
 		}
-		if n := len(g.In) + len(g.Out); n > MaxGroupRules {
+		// Counted as normalisation stores the group: an absent out is its
+		// one rule to the internet.
+		n := len(g.In) + len(g.Out)
+		if g.Out == nil {
+			n += len(internetOut())
+		}
+		if n > MaxGroupRules {
 			v.errorf(p, fmt.Sprintf("use at most %d rules, in and out together: a rule takes several ports, or split "+
 				"the group", MaxGroupRules), "%d rules; at most %d are allowed", n, MaxGroupRules)
 		}

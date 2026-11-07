@@ -184,11 +184,16 @@ func TestGroupsValidateRules(t *testing.T) {
 			s.SecurityGroups["Web_1"] = SecurityGroup{}
 			s.SecurityGroups["-x"] = SecurityGroup{}
 			s.SecurityGroups[strings.Repeat("a", 33)] = SecurityGroup{}
-			many := SecurityGroup{}
-			for range MaxGroupRules + 1 {
+			// Without out, a group has its one implied rule to the
+			// internet (normalised, it is stored): 60 in rules are one
+			// too many, but not with out [].
+			many, full := SecurityGroup{}, SecurityGroup{Out: []Rule{}}
+			for range MaxGroupRules {
 				many.In = append(many.In, Rule{From: &Peer{Group: "web"}})
+				full.In = append(full.In, Rule{From: &Peer{Group: "web"}})
 			}
 			s.SecurityGroups["many"] = many
+			s.SecurityGroups["full"] = full
 		}, []expect{e("securityGroups.-x", "not a security group's name"),
 			e("securityGroups.Web_1", "not a security group's name"),
 			e("securityGroups."+strings.Repeat("a", 33), "not a security group's name"),
