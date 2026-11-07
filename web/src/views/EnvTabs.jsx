@@ -583,8 +583,9 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
     <div className="envsect envbox">
       <div className="sect">clone</div>
       <p className="panel-note">
-        A new environment with a deployment's spec. Its data is not copied: its addons start empty. Attached services are
-        dropped (they run in a sandbox of this one), and it is not public until its tenant publishes it.
+        A new environment with a deployment's spec, its security groups new ones of its own. Its data is not copied: its
+        addons start empty. Its sandboxes and jobs stay here, and attached services are dropped (they run in a sandbox of
+        this one). It is not public until its tenant publishes it.
       </p>
       <form className="envclone" onSubmit={submit} title={ec.clone ? '' : NEEDS.clone}>
         <fieldset disabled={!ec.clone || busy}>

@@ -445,7 +445,8 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
 // OverviewTab reads the latest deployment's spec once per deployment,
 // for what the status does not say: the images as written, when a job
 // runs, the bindings; and the services' traffic of the last hour once a
-// minute (none while the log store does not answer).
+// minute (none while the log store does not answer); below, what runs
+// beside the deployments: its sandboxes and jobs (ADR 0035).
 function OverviewTab({ st, tenant, ec, changed, navigate }) {
   const spec = useLatestSpec(st);
   const [traffic, setTraffic] = useState(null);
