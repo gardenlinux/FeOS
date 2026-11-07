@@ -4,63 +4,67 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, CopyBtn, ErrBox, KV, LiveBadge, PageHead, usePoll } from '../components.jsx';
+import { Ago, CopyBtn, EnvName, ErrBox, KV, LiveBadge, usePoll } from '../components.jsx';
 import { shortId } from '../format.js';
-import { envPath } from '../routes.js';
-import { traceQueryOf } from '../traces.js';
+import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs } from '../routes.js';
 import {
-  CHANGES_READ, KIND_NAMES, changeTone, changesTo, conditionText, definitionRows, envRows, fmtValue, heavyEffect,
-  instanceDeployments, isAttached, jobTrigger, objectImage, objectIncidents, objectStateText, objectTone, phaseTone,
-  deploymentTone, restartsOf, routesTo, specObject, splitItem, usedBy,
+  CHANGES_READ, KIND_NAMES, changeTone, changesTo, conditionText, definitionRows, envRows, errorShare, fmtCount, fmtLatency,
+  fmtValue, heavyEffect, instanceDeployments, isAttached, jobTrigger, objectImage, objectIncidents, objectStateText, objectTone,
+  phaseTone, deploymentTone, restartsOf, routesTo, specObject, splitItem, trafficOf, usedBy,
 } from './envs.js';
 import { builtinCatalog, planText, readCatalog } from './catalog.js';
-import { EnvLink, NEEDS, OpNote, useOp } from './EnvTabs.jsx';
-import { ImageShort, InstanceTable, JobLine, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
+import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
+import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
+import { StateCard, WideSpark } from './EnvOverview.jsx';
+import { Traces } from './Traces.jsx';
 import '../styles/environments.css';
 
-// An object's page (/tenants/:t/environments/:env/objects/:kind/:name):
-// a service, an addon or a job of the environment's latest deployment.
-// Its head says what it is and how it is, with Logs, Traces, Restart or
-// Run now, and Edit; then its definition as the latest deployment's
-// normalised spec has it (the image as written and its pin, the
-// environment with its references as links, a secret at its pinned
-// version, never its value), the bindings it names, the routes to it,
-// who uses it, its instances, its incidents, and the deployments of the
-// last CHANGES_READ whose diff changed it. st is the environment's
-// status, polled by the environment's page.
+// An object's page (/tenants/:t/environments/:env/objects/:kind/:name
+// [/:otab]): a service, an addon or a job of the environment's latest
+// deployment. Its head says what it is and how it is, with Restart or Run
+// now, and Edit; its views are the environment's where it has them
+// (objectTabs): the overview (what is wrong and why, with the end of the
+// log; its instances; the deployments that changed it; its traffic and
+// incidents), its logs, traces and traffic, and its config: its
+// definition as the latest deployment's normalised spec has it (the
+// image as written and its pin, the environment with its references as
+// links, a secret at its pinned version, never its value), the bindings
+// it names, the routes to it, who uses it. st is the environment's
+// status, read by the shell (envstatus.jsx).
 
 const Link = EnvLink;
 
-export function ObjectPage({ tenant, st, item, ec, lastOk = 0, changed = () => {}, navigate }) {
+const TAB_ICONS = { overview: 'gauge', logs: 'file', traces: 'activity', traffic: 'chart', config: 'settings' };
+
+export function ObjectPage({ tenant, st, item, otab = 'overview', replica = null, search = '', ec, lastOk = 0, changed = () => {}, navigate }) {
   const spec = useLatestSpec(st);
   const id = splitItem(item);
   if (!id) return <p className="error">No object {item}.</p>;
   return <ObjectView tenant={tenant} st={st} kind={id.kind} name={id.name} spec={spec} ec={ec} lastOk={lastOk}
-    changed={changed} navigate={navigate} />;
+    otab={otab} replica={replica} search={search} changed={changed} navigate={navigate} />;
 }
 
-// ObjectView is the page of kind/name, the status and spec given (spec
-// null while it loads); the incidents and changes it reads itself.
-export function ObjectView({ tenant, st, kind, name, spec, ec, lastOk = 0, changed = () => {}, navigate }) {
+// ObjectView is the page of kind/name in view otab, the status and spec
+// given (spec null while it loads).
+export function ObjectView({
+  tenant, st, kind, name, spec, ec, lastOk = 0, otab = 'overview', replica = null, search = '', changed = () => {}, navigate,
+}) {
   const env = st.name;
+  const item = `${kind}/${name}`;
   const o = (st.objects || []).find((x) => x.kind === kind && x.name === name) || null;
   const so = specObject(spec, kind, name);
   const [op, run, clear] = useOp();
   const busy = !!(op && op.busy);
   const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
-  const logs = envPath(tenant, env, 'logs', `${kind}/${name}`);
-  const traces = envPath(tenant, env, 'traces', '', null, traceQueryOf({ service: name }));
-  const builder = envPath(tenant, env, 'builder', `${kind}/${name}`);
+  const builder = envPath(tenant, env, 'builder', item);
   const manual = kind === 'job' && jobTrigger(spec, name) === 'manual';
   const tone = o ? objectTone(o) : 'absent';
   const image = objectImage(o || { kind, name }, spec);
+  const tabs = objectTabs(kind);
+  const view = tabs.includes(otab) ? otab : 'overview';
 
   const actions = (
     <>
-      <a className="button primary" href={logs} onClick={go(logs)}><Icon name="file" size={14} /> Logs</a>
-      {kind === 'service' && (
-        <a className="button" href={traces} onClick={go(traces)} title="the recent traces through this service">
-          <Icon name="activity" size={14} /> Traces</a>)}
       {kind === 'service' && o && (
         <button disabled={!ec || !ec.write || busy}
           title={ec && ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : NEEDS.write}
@@ -81,30 +85,39 @@ export function ObjectView({ tenant, st, kind, name, spec, ec, lastOk = 0, chang
   );
 
   const deps = o ? instanceDeployments(o) : [];
-  const facts = (
-    <>
-      <span>in <Link to={envPath(tenant, env)} navigate={navigate} className="mono">{env}</Link></span>
-      {o && isAttached(o) && (
-        <span>attached in sandbox <Link to={`/tenants/${encodeURIComponent(tenant)}/sandboxes/${o.sandbox}`} navigate={navigate}
-          className="mono" title={o.sandbox}>{shortId(o.sandbox)}</Link></span>)}
-      {image.written && kind !== 'addon' && <span>image <ImageShort image={image} /></span>}
-      {o && kind === 'addon' && <span><b className="mono">{o.type} {o.version}</b> · plan <b>{o.plan}</b> · {o.provisioned ? 'provisioned' : 'not provisioned yet'}</span>}
-      {kind === 'job' && <span>runs <b>{manual ? 'when asked' : 'with each deployment that changes it'}</b></span>}
-      {deps.length > 0 && <span>deployment <b className="mono">{deps.join(' · ')}</b>{deps.length > 1 ? ' (rolling)' : ''}</span>}
-      {o && kind !== 'job' && <span>restarts <b className={'mono' + (restartsOf(o) > 0 ? ' warntext' : '')}>{restartsOf(o)}</b></span>}
-    </>
-  );
-
   return (
     <>
-      <PageHead kind={KIND_NAMES[kind] || kind} title={name} mono
-        state={<>
-          <ToneLabel tone={tone}>{objectStateText(o)}</ToneLabel>
+      <header className="pagehead objhead">
+        <p className="pagehead-kind">{KIND_NAMES[kind] || kind} in{' '}
+          <Link to={envPath(tenant, env)} navigate={navigate}><EnvName name={env} className="" /></Link></p>
+        <div className="pagehead-title">
+          <h1>{name}</h1>
+          <span className={'statepill ' + tone}><ToneDot tone={tone} title={tone} />{objectStateText(o)}</span>
           {lastOk > 0 && <LiveBadge lastOk={lastOk} />}
-        </>}
-        actions={actions} facts={facts} />
-      {op && op.tone === 'bad' ? <ErrBox error={op.text} /> : <OpNote op={op} onDismiss={clear} />}
-      <section className="pane objpage">
+          <span className="pagehead-actions">{actions}</span>
+        </div>
+        <p className="pagehead-sub">
+          {o && isAttached(o) && (
+            <>attached in sandbox <Link to={`/tenants/${encodeURIComponent(tenant)}/sandboxes/${o.sandbox}`} navigate={navigate}
+              className="mono" title={o.sandbox}>{shortId(o.sandbox)}</Link></>)}
+          {image.written && kind !== 'addon' && !(o && isAttached(o)) && <>image <ImageShort image={image} /></>}
+          {o && kind === 'addon' && <><b>{o.type} {o.version}</b> · plan <b>{o.plan}</b> · {o.provisioned ? 'provisioned' : 'not provisioned yet'}</>}
+          {kind === 'job' && <> · runs <b>{manual ? 'when asked' : 'with each deployment that changes it'}</b></>}
+          {deps.length > 0 && <> · deployment <b>{deps.join(' and ')}</b>{deps.length > 1 ? ' (rolling)' : ''}</>}
+          {o && kind !== 'job' && restartsOf(o) > 0 && <> · <span className="warntext">{restartsOf(o)} restarts</span></>}
+        </p>
+        {op && op.tone === 'bad' ? <ErrBox error={op.text} /> : <OpNote op={op} onDismiss={clear} />}
+      </header>
+      <nav className="tabbar obj-tabs" aria-label="views">
+        {tabs.map((t) => {
+          const to = objectPath(tenant, env, item, t);
+          return (
+            <a key={t} href={to} className={'tab' + (view === t ? ' on' : '')} aria-current={view === t ? 'page' : undefined} onClick={go(to)}>
+              <Icon name={TAB_ICONS[t]} size={15} /> {OBJECT_TAB_LABELS[t]}
+            </a>);
+        })}
+      </nav>
+      <div className="tabbody">
         {!o && (
           <div className="message">
             <Icon name="alert" size={14} />
@@ -113,15 +126,141 @@ export function ObjectView({ tenant, st, kind, name, spec, ec, lastOk = 0, chang
               <span className="muted"> What changed it is below; the deployments keep its earlier definitions.</span>
             </span>
           </div>)}
-        <Definition tenant={tenant} st={st} kind={kind} name={name} so={so} spec={spec} navigate={navigate} />
-        {kind === 'service' && <RoutesTo tenant={tenant} st={st} spec={spec} name={name} navigate={navigate} />}
-        {kind === 'addon' && <AddonOutputs tenant={tenant} st={st} so={so} spec={spec} name={name} navigate={navigate} />}
-        {kind === 'service' && <UsedBy tenant={tenant} env={env} spec={spec} kind={kind} name={name} navigate={navigate} />}
-        {o && <Instances tenant={tenant} st={st} o={o} ec={ec} navigate={navigate} />}
-        <ObjectIncidents tenant={tenant} env={env} kind={kind} name={name} navigate={navigate} />
+        {view === 'overview' && (
+          <ObjectOverview tenant={tenant} st={st} o={o} kind={kind} name={name} ec={ec} navigate={navigate} />)}
+        {view === 'logs' && (
+          <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />)}
+        {view === 'traces' && (
+          <Traces tenant={tenant} env={env} st={st} item="" search={search} navigate={navigate} service={name}
+            listPath={(q) => objectPath(tenant, env, item, 'traces', null, q)} />)}
+        {view === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} service={name} />}
+        {view === 'config' && (
+          <section className="pane objpage">
+            <Definition tenant={tenant} st={st} kind={kind} name={name} so={so} spec={spec} navigate={navigate} />
+            {kind === 'service' && <RoutesTo tenant={tenant} st={st} spec={spec} name={name} navigate={navigate} />}
+            {kind === 'addon' && <AddonOutputs tenant={tenant} st={st} so={so} spec={spec} name={name} navigate={navigate} />}
+            {kind === 'service' && <UsedBy tenant={tenant} env={env} spec={spec} kind={kind} name={name} navigate={navigate} />}
+          </section>)}
+      </div>
+    </>
+  );
+}
+
+// ObjectOverview is how the object is: what is wrong while something is
+// (ObjectProblem), its instances, the deployments that changed it, a
+// service's traffic, its incidents.
+function ObjectOverview({ tenant, st, o, kind, name, ec, navigate }) {
+  const env = st.name;
+  const [incidents, setIncidents] = useState(null);
+  const readIncidents = useCallback(async () => {
+    try {
+      const r = await api.listIncidents(env);
+      setIncidents(objectIncidents(r.incidents || [], kind, name));
+    } catch {
+      setIncidents([]);
+    }
+  }, [env, kind, name]);
+  usePoll(readIncidents, 10000);
+  return (
+    <div className="ov">
+      {o && <ObjectProblem tenant={tenant} st={st} o={o} incidents={incidents} navigate={navigate} />}
+      {o && (
+        <section className="card">
+          <Instances tenant={tenant} st={st} o={o} ec={ec} navigate={navigate} />
+        </section>)}
+      {kind === 'service' && o && !isAttached(o) && <ServiceTraffic tenant={tenant} env={env} name={name} navigate={navigate} />}
+      <section className="card">
         <ChangedIn tenant={tenant} env={env} latest={st.deployment} kind={kind} name={name} navigate={navigate} />
       </section>
+      {incidents && incidents.length > 0 && (
+        <section className="card">
+          <ObjectIncidents tenant={tenant} env={env} list={incidents} navigate={navigate} />
+        </section>)}
+    </div>
+  );
+}
+
+// ObjectProblem says what is wrong with an object while something is:
+// its open incident (its summary and the end of the log it kept), else
+// its first instance that exited or failed (its detail and the end of its
+// log, read from its node), else what is not ready yet; with the way to
+// the logs and to its config.
+function ObjectProblem({ tenant, st, o, incidents, navigate }) {
+  const env = st.name;
+  const item = `${o.kind}/${o.name}`;
+  const tone = objectTone(o);
+  const inc = (incidents || []).find((i) => !i.closedAt) || null;
+  const bad = (o.instances || []).find((i) => i.phase === 'exited' || i.phase === 'failed') || null;
+  const [tail, setTail] = useState(null);
+  const replica = bad ? bad.replica : null;
+  useEffect(() => {
+    let live = true;
+    setTail(null);
+    if (inc || replica == null || o.kind === 'job') return undefined;
+    api.objectLogs(env, o.kind, o.name, { replica }).then(
+      (r) => { if (live) setTail((r.lines || []).slice(-4)); }, () => { if (live) setTail([]); });
+    return () => { live = false; };
+  }, [env, o.kind, o.name, replica, inc && inc.id]);
+  if (tone === 'running' || tone === 'absent') return null;
+  const logs = objectPath(tenant, env, item, 'logs', replica);
+  const config = objectPath(tenant, env, item, 'config');
+  const actions = (
+    <>
+      <Link to={logs} navigate={navigate} className="button">{replica != null ? `All logs of replica ${replica}` : 'Logs'}</Link>
+      <Link to={config} navigate={navigate} className="button">Config</Link>
+      {inc && <Link to={envPath(tenant, env, 'incidents', inc.id)} navigate={navigate} className="button">Incident {inc.id}</Link>}
     </>
+  );
+  if (inc) {
+    const lines = ((inc.evidence && inc.evidence.logTail) || []).slice(-4);
+    return (
+      <StateCard tone="failed" icon="alert" title={<>{o.name} <span className="statecard-cond">{conditionText(inc.condition)}</span></>}
+        when={<>since <Ago iso={inc.openedAt} /></>} text={inc.summary} actions={actions}>
+        {lines.length > 0 && <><p className="statecard-cap">The end of its log</p><pre className="statecard-log">{lines.join('\n')}</pre></>}
+      </StateCard>
+    );
+  }
+  if (bad) {
+    return (
+      <StateCard tone="failed" icon="alert" title={`Replica ${bad.replica} ${bad.phase}`}
+        when={bad.restarts > 0 && `${bad.restarts} restart${bad.restarts === 1 ? '' : 's'}`}
+        text={<>{bad.detail || `last exit ${bad.lastExit == null ? 'without a status' : bad.lastExit}`}{bad.deployment ? ` · deployment ${bad.deployment}` : ''}</>}
+        actions={actions}>
+        {tail && tail.length > 0 && <><p className="statecard-cap">The end of its log</p><pre className="statecard-log">{tail.join('\n')}</pre></>}
+      </StateCard>
+    );
+  }
+  if (o.kind === 'job' && o.lastRun && o.lastRun.phase === 'failed') {
+    return <StateCard tone="failed" icon="alert" title="Its last run failed" text={o.lastRun.detail || ''} actions={actions} />;
+  }
+  return <StateCard tone="moving" icon="refresh" title={objectStateText(o)} text={o.detail || ''} actions={actions} />;
+}
+
+// ServiceTraffic is a service's requests of the last hour through the
+// ingress.
+function ServiceTraffic({ tenant, env, name, navigate }) {
+  const [traffic, setTraffic] = useState(undefined);
+  const read = useCallback(async () => {
+    try { setTraffic(await api.traffic(env, '1h')); } catch { setTraffic(null); }
+  }, [env]);
+  usePoll(read, 60000);
+  const t = trafficOf(traffic, name);
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Traffic</h2><span className="muted">last hour</span>
+        <Link to={objectPath(tenant, env, `service/${name}`, 'traffic')} navigate={navigate} className="card-more">Traffic</Link>
+      </div>
+      {traffic === undefined && <p className="muted">Loading…</p>}
+      {traffic === null && <p className="muted">No numbers: the log store does not answer.</p>}
+      {traffic && !t && <p className="muted">No requests through the ingress in the last hour.</p>}
+      {t && (
+        <>
+          <p className="ov-big">{fmtCount(t.requests)} request{t.requests === 1 ? '' : 's'}
+            {t.requests > 0 && <span> · {errorShare(t)} errors · p95 {fmtLatency(t.p95Ms)}</span>}</p>
+          <WideSpark series={t.series} h={40} />
+        </>)}
+    </section>
   );
 }
 
@@ -350,18 +489,8 @@ function Instances({ tenant, st, o, ec, navigate }) {
 }
 
 // ObjectIncidents are the environment's incidents of this object, newest
-// first.
-function ObjectIncidents({ tenant, env, kind, name, navigate }) {
-  const [list, setList] = useState(null);
-  const refresh = useCallback(async () => {
-    try {
-      const r = await api.listIncidents(env);
-      setList(objectIncidents(r.incidents || [], kind, name));
-    } catch {
-      setList([]);
-    }
-  }, [env, kind, name]);
-  usePoll(refresh, 10000);
+// first (objectIncidents).
+function ObjectIncidents({ tenant, env, list, navigate }) {
   if (!list || list.length === 0) return null;
   return (
     <>

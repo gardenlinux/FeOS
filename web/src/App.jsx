@@ -7,8 +7,11 @@ import {
 } from './api.js';
 import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
-import { Avatar, BrandMark, useTheme } from './components.jsx';
-import { ENV_TABS, ENV_TAB_LABELS, canonicalPath, chosenEnv, envPath, parsePath, switchEnvPath } from './routes.js';
+import { Avatar, BrandMark, EnvName, useTheme } from './components.jsx';
+import {
+  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, envPath, newEnvPath, parsePath, pickEnvPath, pickObjectPath,
+  switchEnvPath,
+} from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
 import { TenantGate } from './views/TenantGate.jsx';
@@ -31,10 +34,14 @@ import { Ingresses, PlatformPeople } from './views/Platform.jsx';
 import { Palette, usePaletteKey } from './views/Palette.jsx';
 import { SummaryProvider, useSummary } from './summary.jsx';
 import { entries } from './search.js';
-import { deploymentTone } from './views/envs.js';
+import {
+  KIND_TITLES, deploymentText, deploymentTone, groupObjects, objectStateText, objectTone, sideMeta, statusState,
+} from './views/envs.js';
+import { EnvStatusProvider, useEnvStatus } from './envstatus.jsx';
+import './styles/shell.css';
 import { ToneDot } from './views/Environments.jsx';
 import {
-  ENV_NAV, MeContext, NAV_GROUPS, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants,
+  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants,
   tenantAccess, tenantHome, tenantNav, viewGate,
 } from './people.js';
 
@@ -181,7 +188,7 @@ export default function App() {
       {!needsGate && route.view === 'settings' && <TenantSettings key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'environments' && (
         <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
-          replica={route.replica} search={route.search} navigate={navigate} />)}
+          otab={route.otab} replica={route.replica} search={route.search} navigate={navigate} />)}
       {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'nodes' && <Nodes navigate={navigate} />}
       {!needsGate && route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
@@ -226,7 +233,12 @@ function Shell({ route, navigate, me, onSignOut, children }) {
     tenants: myTenants(me),
     summary,
   }), [route.tenant, me, operator, summary]);
+  // The status the sidebar and the environment's pages read: of the
+  // route's environment as the route names it, else of the chosen one.
+  const inEnv = route.view === 'environments' && !!route.env;
+  const statusOf = inEnv ? route.env : env ? env.name : '';
   return (
+    <EnvStatusProvider env={statusOf} open={inEnv}>
     <div className="app">
       <Sidebar route={route} navigate={navigate} me={me} env={env} />
       <div className="main">
@@ -237,6 +249,7 @@ function Shell({ route, navigate, me, onSignOut, children }) {
         <Palette all={all} tenant={route.tenant || ''} environments={summary.environments || []}
           onClose={() => setSearching(false)} navigate={navigate} />)}
     </div>
+    </EnvStatusProvider>
   );
 }
 
@@ -246,48 +259,26 @@ function Sidebar({ route, navigate, me, env }) {
   const t = route.tenant;
   const access = tenantAccess(me, t);
   const nav = t ? tenantNav(access) : [];
-  const { counts } = useSummary();
-  const enc = encodeURIComponent;
-  const toOf = (n) => (n.view === 'environments' ? envPath(t) : `/tenants/${enc(t)}${n.path}`);
-  const on = (n) => (n.views || [n.view]).includes(route.view);
+  const inEnv = route.view === 'environments' && !!route.env;
+  const home = t ? tenantHome(access) : '/tenants';
 
   return (
     <aside className="sidebar">
-      <a className="brand" href={t ? `/tenants/${enc(t)}` : '/tenants'}
-        onClick={(e) => { e.preventDefault(); navigate(t ? `/tenants/${enc(t)}` : '/tenants'); }}>
+      <a className="brand" href={home} onClick={(e) => { e.preventDefault(); navigate(home); }}>
         <BrandMark size={30} />
         <span className="brand-name">Fe<b>Run</b></span>
       </a>
 
-      {!platform && t && nav.length > 0 && NAV_GROUPS.map((g) => {
-        const items = nav.filter((n) => n.group === g.key);
-        if (items.length === 0) return null;
-        if (g.key === 'env') {
-          return <EnvPages key="env" route={route} navigate={navigate} env={env} canCreate={can(access).writeTenant} />;
-        }
-        if (g.key === 'manage') {
-          const item = { ...SETTINGS_NAV, views: items.map((n) => n.view) };
-          return (
-            <nav key="manage" className="snav">
-              <NavItem item={item} active={on(item)} to={toOf(items[0])} navigate={navigate} />
-            </nav>
-          );
-        }
-        return (
-          <nav key={g.key || 'top'} className="snav">
-            {g.label && <div className="snav-label">{g.label}</div>}
-            {items.map((n) => (
-              <NavItem key={n.view} item={n} active={on(n)} count={counts[n.view]} to={toOf(n)} navigate={navigate} />
-            ))}
-          </nav>
-        );
-      })}
+      {!platform && t && nav.some((n) => n.group === 'env') && (
+        <EnvSide route={route} navigate={navigate} env={env} canCreate={can(access).writeTenant} objects={inEnv} />)}
+
+      {!platform && t && !inEnv && <TenantPages route={route} navigate={navigate} nav={nav} tenant={t} />}
 
       {platform && PLATFORM_GROUPS.map((g) => (
         <nav key={g.key} className="snav">
           <div className="snav-label">{g.label}</div>
           {PLATFORM_NAV.filter((n) => n.group === g.key).map((n) => (
-            <NavItem key={n.view} item={n} active={on(n)} to={n.path} navigate={navigate} />
+            <NavItem key={n.view} item={n} active={(n.views || [n.view]).includes(route.view)} to={n.path} navigate={navigate} />
           ))}
         </nav>
       ))}
@@ -295,13 +286,145 @@ function Sidebar({ route, navigate, me, env }) {
       {!platform && !t && (
         <p className="sidehint muted small">Choose a tenant at the top, or make one.</p>)}
 
-      {operator && (
-        <nav className="snav snav-admin">
-          <NavItem item={{ view: 'administration', label: 'Administration', icon: 'server' }} active={platform}
-            to="/nodes" navigate={navigate} />
-        </nav>)}
-
+      <div className="side-foot">
+        {!platform && t && inEnv && <TenantRow tenant={t} nav={nav} to={home} navigate={navigate} />}
+        {operator && (
+          <nav className="snav snav-admin">
+            <NavItem item={{ view: 'administration', label: 'Administration', icon: 'server' }} active={platform}
+              to="/nodes" navigate={navigate} />
+          </nav>)}
+      </div>
     </aside>
+  );
+}
+
+// plainClick tells a click the router takes from one that opens a new
+// tab or window.
+const plainClick = (e) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+
+// EnvSide is the environment one works in, in the sidebar: a card with
+// its name, its state and its host, which leads to it (in the same view
+// from one of its objects' pages); while one of its pages is open
+// (objects), below it its objects by kind, each with its state, which
+// lead to their pages (in the view open now). The topbar's switcher
+// chooses another environment.
+function EnvSide({ route, navigate, env, canCreate, objects }) {
+  const { environments } = useSummary();
+  const { st, env: statusEnv } = useEnvStatus();
+  const t = route.tenant;
+  const go = (to) => (e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } };
+  if (!env) {
+    const newTo = newEnvPath(t);
+    return (
+      <div className="side-env">
+        <div className="snav-label">Environment</div>
+        {environments === null
+          ? <div className="sidehint muted small">…</div>
+          : <div className="sidehint muted small">None yet.</div>}
+        {environments && canCreate && (
+          <a className={'snav-item' + (route.view === 'newEnvironment' ? ' on' : '')} href={newTo} onClick={go(newTo)}>
+            <Icon name="plus" size={16} /> <span>New environment</span></a>)}
+      </div>
+    );
+  }
+  const known = (environments || []).find((e) => e.id === env.id || e.name === env.name) || env;
+  // The status is of this environment when it was read by its name or ID.
+  const status = st && [known.name, known.id].includes(statusEnv) ? st : null;
+  const here = route.view === 'environments' && (route.env === known.name || route.env === known.id);
+  const cardOn = here && route.tab !== 'objects';
+  const state = status ? statusState(status) : known.state || '';
+  const incidents = Number(status ? status.openIncidents : known.openIncidents) || 0;
+  const tone = incidents > 0 ? 'failed' : deploymentTone(state);
+  const facts = status || known;
+  const host = status && status.public ? (status.hosts || [])[0] : '';
+  const to = pickEnvPath(route, t, known.name);
+  return (
+    <div className="side-env">
+      <a className={'envcard' + (cardOn ? ' on' : '')} href={to} onClick={go(to)} aria-current={cardOn ? 'page' : undefined}
+        title="the environment: its overview, or the view open now">
+        <EnvName name={known.name} />
+        {state && (
+          <span className={'envcard-state ' + tone}>
+            <ToneDot tone={tone} title={state} />
+            <span>
+              {incidents > 0 && `${incidents} open incident${incidents === 1 ? '' : 's'} · `}
+              {facts.deleting || state === 'deleting' ? 'deleting'
+                : `deployment ${deploymentText({ deployment: facts.deployment, deployed: facts.deployed, state })}`}
+            </span>
+          </span>)}
+        {host && <span className="envcard-host">{host}</span>}
+      </a>
+      {objects && (status
+        ? <ObjectList route={route} navigate={navigate} st={status} tenant={t} />
+        : <div className="sidehint muted small">…</div>)}
+    </div>
+  );
+}
+
+// ObjectList are an environment's objects in the sidebar, by kind: each
+// with its state's dot, its name, and what is wrong while something is.
+function ObjectList({ route, navigate, st, tenant }) {
+  const groups = groupObjects(st.objects);
+  const sel = route.view === 'environments' && route.tab === 'objects' ? route.item : '';
+  if (groups.length === 0) return <p className="sidehint muted small">No objects: no deployment yet.</p>;
+  return groups.map(({ kind, objects }) => (
+    <nav key={kind} className="snav objnav" aria-label={KIND_TITLES[kind]}>
+      <div className="snav-label">{KIND_TITLES[kind]} <span className="snav-labelcount">{objects.length}</span></div>
+      {objects.map((o) => {
+        const id = `${o.kind}/${o.name}`;
+        const tone = objectTone(o);
+        const to = pickObjectPath(route, tenant, st.name, o);
+        const on = sel === id;
+        const meta = sideMeta(o);
+        return (
+          <a key={id} className={'objitem' + (on ? ' on' : '')} href={to} aria-current={on ? 'page' : undefined}
+            onClick={(e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } }}>
+            <ToneDot tone={tone} title={objectStateText(o)} />
+            <span className="objitem-name">{o.name}</span>
+            {meta && <span className={'objitem-meta ' + tone}>{meta}</span>}
+          </a>
+        );
+      })}
+    </nav>
+  ));
+}
+
+// TenantRow is the tenant at the sidebar's foot while an environment is
+// open: one entry for its home, which lists its pages.
+function TenantRow({ tenant, nav, to, navigate }) {
+  const pages = nav.filter((n) => n.group === 'tenant').map((n) => n.label.toLowerCase());
+  return (
+    <a className="tenantrow" href={to} onClick={(e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } }}
+      title="the tenant's home and its pages">
+      <Icon name="building" size={16} />
+      <span className="tenantrow-text">
+        <span className="tenantrow-name">{tenant}</span>
+        <span className="tenantrow-pages">Tenant{pages.length > 0 ? `: ${pages.join(', ')}` : ''}</span>
+      </span>
+      <Icon name="chevronRight" size={14} />
+    </a>
+  );
+}
+
+// TenantPages are the tenant's pages while none of an environment is
+// open: its home, the environments, the tenant's own pages, and one entry
+// for its settings.
+function TenantPages({ route, navigate, nav, tenant }) {
+  const { counts } = useSummary();
+  const enc = encodeURIComponent;
+  const toOf = (n) => (n.view === 'environments' ? envPath(tenant) : `/tenants/${enc(tenant)}${n.path}`);
+  const on = (n) => (n.views || [n.view]).includes(route.view);
+  const manage = nav.filter((n) => n.group === 'manage');
+  return (
+    <nav className="snav tenantnav">
+      <div className="snav-label">Tenant <span className="snav-labelcount">{tenant}</span></div>
+      {nav.filter((n) => n.group !== 'manage').map((n) => (
+        <NavItem key={n.view} item={n} active={on(n)} count={counts[n.view]} to={toOf(n)} navigate={navigate} />
+      ))}
+      {manage.length > 0 && (
+        <NavItem item={{ ...SETTINGS_NAV, views: manage.map((n) => n.view) }}
+          active={manage.some((n) => n.view === route.view)} to={toOf(manage[0])} navigate={navigate} />)}
+    </nav>
   );
 }
 
@@ -432,59 +555,11 @@ function Switcher({ route, navigate, me, platform }) {
   );
 }
 
-// EnvPages are the pages of one environment in the sidebar: the open
-// one, else the one last open, else the tenant's first (chosenEnv); the
-// topbar's switcher chooses another.
-function EnvPages({ route, navigate, env, canCreate }) {
-  const { environments } = useSummary();
-  const t = route.tenant;
-  const go = (to) => (e) => { e.preventDefault(); navigate(to); };
-  const known = (environments || []).find((e) => env && e.id === env.id) || env;
-  const here = env && route.view === 'environments' && (route.env === env.name || route.env === env.id);
-  const newTo = `/tenants/${encodeURIComponent(t)}/new-environment`;
-  if (!env) {
-    return (
-      <nav className="snav envnav">
-        <div className="snav-label">Environment</div>
-        {environments === null
-          ? <div className="sidehint muted small">…</div>
-          : <div className="sidehint muted small">None yet.</div>}
-        {environments && canCreate && (
-          <a className={'snav-item' + (route.view === 'newEnvironment' ? ' on' : '')} href={newTo} onClick={go(newTo)}>
-            <Icon name="plus" size={15} /> <span>New environment</span></a>)}
-      </nav>
-    );
-  }
-  const incidents = Number(known.openIncidents) || 0;
-  return (
-    <nav className="snav envnav">
-      <div className="snav-label snav-label-row">
-        <span>Environment</span>
-        <span className="envlabel">
-          {known.state && <ToneDot tone={deploymentTone(known.state)} title={known.state} />}
-          <span className="envname">{known.name}</span>
-        </span>
-      </div>
-      {ENV_NAV.filter((n) => ENV_TABS.includes(n.tab)).map((n) => {
-        const to = envPath(t, known.name, n.tab);
-        const on = here && (route.tab === n.tab || (n.tab === 'overview' && route.tab === 'objects'));
-        return (
-          <a key={n.tab} className={'snav-item' + (on ? ' on' : '')} href={to} onClick={go(to)}
-            aria-current={on ? 'page' : undefined}>
-            <Icon name={n.icon} size={15} /> <span>{n.label}</span>
-            {n.tab === 'incidents' && incidents > 0 && <span className="snav-count bad">{incidents}</span>}
-          </a>
-        );
-      })}
-    </nav>
-  );
-}
-
 function NavItem({ item, active, count, to, navigate }) {
   return (
     <a className={'snav-item' + (active ? ' on' : '')} href={to}
       onClick={(e) => { e.preventDefault(); navigate(to); }} aria-current={active ? 'page' : undefined}>
-      <Icon name={item.icon} size={15} /> <span>{item.label}</span>
+      <Icon name={item.icon} size={16} /> <span>{item.label}</span>
       {count && <span className={'snav-count' + (count.tone ? ' ' + count.tone : '')}>{count.n}</span>}
     </a>
   );
@@ -573,10 +648,13 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {route.view === 'invite' && <>{sep}<span className="crumb">invitation</span></>}
         {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
-        {route.view === 'environments' && route.env && route.tab !== 'overview' && (
+        {route.view === 'environments' && route.env && route.tab !== 'overview' && route.tab !== 'objects' && (
           <>{sep}{crumb((ENV_TAB_LABELS[route.tab] || route.tab).toLowerCase(), envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
-          <>{sep}<span className="crumb mono">{String(route.item).replace(/^new\//, 'new ')}{route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
+          <>{sep}<span className="crumb mono">{String(route.item).replace(/^new\//, 'new ')}</span></>)}
+        {route.view === 'environments' && route.tab === 'objects' && route.otab && route.otab !== 'overview' && (
+          <>{sep}<span className="crumb">{(OBJECT_TAB_LABELS[route.otab] || route.otab).toLowerCase()}
+            {route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
         {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
         {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}

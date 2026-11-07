@@ -598,6 +598,70 @@ export function objectStateText(o) {
   }
 }
 
+// sideMeta is what the sidebar says beside an object while it is not
+// fine: an image service's or an addon's ready count, an attached
+// service's or an addon's phase, a job's last run; '' while it is.
+export function sideMeta(o) {
+  const tone = objectTone(o);
+  if (tone === 'running' || !o) return '';
+  if (o.kind === 'job') return o.lastRun ? o.lastRun.phase : '';
+  if (o.kind === 'service' && isAttached(o)) return o.phase || 'starting';
+  if (o.kind === 'addon' && o.phase && o.phase !== 'ready') return o.phase;
+  return readyText(o);
+}
+
+// splitEnvName splits the suffix of 8 hex digits that FeCode gives the
+// environments it makes ("kino-prod-9101dfcb") off a name, for showing it
+// dimmed; suffix '' when there is none.
+export function splitEnvName(name) {
+  const s = String(name || '');
+  const m = /^(.+?)(-[0-9a-f]{8})$/.exec(s);
+  return m ? { base: m[1], suffix: m[2] } : { base: s, suffix: '' };
+}
+
+// activityItems are an environment's deployments and incidents in one
+// list, newest first (by when a deployment was made, an incident opened).
+export function activityItems(deployments, incidents) {
+  const list = [];
+  for (const d of deployments || []) {
+    list.push({
+      key: `deployment/${d.number}`, kind: 'deployment', number: d.number, tone: deploymentTone(d.state),
+      title: `Deployment ${d.number} ${d.state}`, detail: d.message || originText(d), reason: d.reason || '', at: d.createdAt,
+    });
+  }
+  for (const i of incidents || []) {
+    const open = !i.closedAt;
+    list.push({
+      key: `incident/${i.id}`, kind: 'incident', id: i.id, open, tone: open ? 'failed' : 'absent',
+      title: `Incident ${i.id}: ${incidentObject(i.object).name} ${conditionText(i.condition)}${open ? '' : ', closed'}`,
+      detail: i.summary || '', reason: '', at: i.openedAt,
+    });
+  }
+  return list.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+}
+
+// objectsText counts objects by kind in words: "3 services, 2 addons and
+// 1 job"; '' for none.
+export function objectsText(objects) {
+  const n = { service: 0, addon: 0, job: 0 };
+  for (const o of objects || []) if (n[o.kind] !== undefined) n[o.kind]++;
+  const parts = KINDS.filter((k) => n[k] > 0).map((k) => `${n[k]} ${k}${n[k] === 1 ? '' : 's'}`);
+  if (parts.length < 2) return parts.join('');
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+// trafficTotals sums a traffic answer up: its requests, its errors and
+// the slowest service's p95; null without one.
+export function trafficTotals(traffic) {
+  const list = (traffic && traffic.services) || [];
+  if (!traffic) return null;
+  return {
+    requests: list.reduce((n, s) => n + (Number(s.requests) || 0), 0),
+    errors: list.reduce((n, s) => n + (Number(s.errors) || 0), 0),
+    p95Ms: list.reduce((m, s) => Math.max(m, Number(s.p95Ms) || 0), 0),
+  };
+}
+
 // fmtCount renders a count short: 980, 1.2k, 34k, 1.2M.
 export function fmtCount(n) {
   const v = Number(n) || 0;

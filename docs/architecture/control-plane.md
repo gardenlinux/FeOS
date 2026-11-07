@@ -2196,26 +2196,55 @@ of its environments (the right column lists the environments of the
 tenant chosen on the left); for operators also the platform (fleet:
 nodes, ingresses, control plane, join tokens; accounts: tenants,
 people). Choosing another environment keeps the page open (prod's logs
-lead to stage's logs). The sidebar shows the pages of the role
-(`TENANT_NAV` in `web/src/people.js`): Home; then the pages of one
-environment (`ENV_NAV`: overview, deployments, incidents, logs, traces,
-traffic, … and New deployment, the builder), the open one, else the one
-last open in this browser, else the tenant's first, since people use the
-UI in an environment. An environment's Secrets & credentials page holds
-its secrets and its credential offloading: the HTTP bindings of the
-latest deployment, each with where its credential comes from (a
-credential of the tenant at its pinned version, or the environment's
-secrets), the services that use it and Check; Add binding and Edit open
-the binding's form in New deployment (`…/builder/new/binding`,
-`…/builder/binding/<name>`), since a binding is part of a deployment.
-Then the tenant's domains, credentials, jobs and
-sandboxes (last: agents use sandboxes through the API and FeCode, people
-rarely through the UI); then Tenant settings, one entry whose pages
-(people, tokens, usage, general) are tabs. Home and the environments,
-domains, people, usage and settings go to every member; sandboxes, jobs
-and the tools' reference with a tenant grant; tokens to its admin. The
-icons are grey; colour is kept for a count that needs someone: on Home,
-open incidents, domains in trouble.
+lead to stage's logs). The sidebar picks the thing, the tab bar how to
+look at it. In an environment the sidebar shows the environment as a
+card (its name, a suffix of 8 hex digits that FeCode adds dimmed; its
+state; its host) and below it its objects by kind, each with the dot of
+its state and, only while something is wrong, what (`1/2`, `failed`);
+the tenant is one entry at its foot. The environment is the open one,
+else the one last open in this browser, else the tenant's first, since
+people use the UI in an environment; its status is read once for the
+sidebar and the page (`web/src/envstatus.jsx`, every 3 s while one of
+its pages is open). An environment's views are its tab bar
+(`ENV_LENSES` in `web/src/routes.js`): overview, activity, logs,
+traces, traffic and settings; Activity has the deployments and the
+incidents as pages of its own, besides everything in one list, and
+Settings the general page (the environment's name, ID, labels; clone
+and delete), the secrets and credentials, and the domains and access.
+An object's page (`…/objects/<kind>/<name>[/<view>]`) has the views the
+object has: overview, logs, traces and traffic (a service), and config
+(its definition, the routes to it, who uses it). Picking another thing
+in the sidebar keeps the view where the thing has it: from prod's logs
+to api's logs and back; an object's logs under the environment's Logs
+(`…/logs/<kind>/<name>`) redirect to its page's. The overview says
+first what needs someone, in a sentence with its evidence and the next
+step: each open incident with the end of its log and the way to its
+object, a failed or running rollout with its reason, else that every
+object matches the deployment; then the traffic of the last hour and
+where the environment is reached, the objects as cards, the bindings
+and the recent activity. A state is said once. An object's overview
+says first what is wrong with it (its open incident, else its first
+instance that exited with the end of that replica's log), then its
+instances, its traffic and the deployments that changed it. New
+deployment opens the builder. While none of an environment's pages is
+open the sidebar shows the tenant's pages (`TENANT_NAV` in
+`web/src/people.js`): Home, the environments, the tenant's domains,
+credentials, jobs and sandboxes (last: agents use sandboxes through the
+API and FeCode, people rarely through the UI), then Tenant settings, one
+entry whose pages (people, tokens, usage, general) are tabs. An
+environment's Secrets & credentials page holds its secrets and its
+credential offloading: the HTTP bindings of the latest deployment, each
+with where its credential comes from (a credential of the tenant at its
+pinned version, or the environment's secrets), the services that use it
+and Check; Add binding and Edit open the binding's form in New
+deployment (`…/builder/new/binding`, `…/builder/binding/<name>`), since
+a binding is part of a deployment. Home and the environments, domains,
+people, usage and settings go to every member; sandboxes, jobs and the
+tools' reference with a tenant grant; tokens to its admin. The UI is set
+in FeCode's face and forms (IBM Plex Sans at 15 px, cards with 12 px
+corners); names are in the text's colour, icons grey, and colour is kept
+for states and for a count that needs someone: on Home, open incidents,
+domains in trouble.
 Home lists first what needs someone, each item with the page that fixes
 it (`web/src/attention.js`): the environments' open incidents, a failed
 deployment without one, sandboxes `failed`, `lost` or `unknown`, domains

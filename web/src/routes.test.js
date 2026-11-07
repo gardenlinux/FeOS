@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { ENV_TABS, ENV_TAB_LABELS, TENANT_VIEWS, canonicalPath, chosenEnv, envPath, parsePath, switchEnvPath } from './routes.js';
+import {
+  ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, OBJECT_TABS, OBJECT_TAB_LABELS, PAGE_LABELS, TENANT_VIEWS, canonicalPath,
+  chosenEnv, envPath, lensOf, objectPath, objectTabs, parsePath, pickEnvPath, pickObjectPath, switchEnvPath,
+} from './routes.js';
 import { fmtAgo, fmtDurNs, fmtMsTime, fmtNs, fmtSeconds, prettyJson } from './format.js';
 import { ADMIN_KEY, readItem, writeItem } from './storage.js';
 
@@ -78,10 +81,50 @@ describe('the environments routes', () => {
     expect(canonicalPath('/tenants/releases/environments')).toBe('/tenants/releases/environments');
     expect(parsePath('/tenants/fecode/environments/expensa-stage/incidents/12'))
       .toEqual(env({ env: 'expensa-stage', tab: 'incidents', item: '12' }));
+    // An object's logs under the environment's Logs, of old, are its page's.
+    expect(canonicalPath('/tenants/fecode/environments/expensa-stage/logs/service/expense-service'))
+      .toBe('/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs');
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service/expense-service'))
-      .toEqual(env({ env: 'expensa-stage', tab: 'logs', item: 'service/expense-service' }));
+      .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'service/expense-service', otab: 'logs' }));
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service/expense-service/1'))
-      .toEqual(env({ env: 'expensa-stage', tab: 'logs', item: 'service/expense-service', replica: 1 }));
+      .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'service/expense-service', otab: 'logs', replica: 1 }));
+  });
+
+  it("maps an object's page and its views", () => {
+    const obj = (rest) => env({ env: 'e', tab: 'objects', item: 'service/api', otab: 'overview', ...rest });
+    expect(parsePath('/tenants/fecode/environments/e/objects/service/api')).toEqual(obj({}));
+    for (const otab of ['logs', 'traces', 'traffic', 'config']) {
+      expect(parsePath(`/tenants/fecode/environments/e/objects/service/api/${otab}`)).toEqual(obj({ otab }));
+      expect(objectPath('fecode', 'e', 'service/api', otab)).toBe(`/tenants/fecode/environments/e/objects/service/api/${otab}`);
+    }
+    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/logs/2?q=x'))
+      .toEqual(obj({ otab: 'logs', replica: 2, search: '?q=x' }));
+    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/traces?since=1d'))
+      .toEqual(obj({ otab: 'traces', search: '?since=1d' }));
+    // A search on a view without one is dropped, an unknown view is the overview.
+    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/config?q=x')).toEqual(obj({ otab: 'config' }));
+    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/nope')).toEqual(obj({}));
+    expect(objectPath('fecode', 'e', 'service/api')).toBe('/tenants/fecode/environments/e/objects/service/api');
+    expect(objectPath('fecode', 'e', 'service/api', 'logs', 0, '?level=error'))
+      .toBe('/tenants/fecode/environments/e/objects/service/api/logs/0?level=error');
+    expect(objectPath('fecode', 'e', 'service/api', 'config', 3, '?q=x')).toBe('/tenants/fecode/environments/e/objects/service/api/config');
+    expect(objectTabs('service')).toEqual(['overview', 'logs', 'traces', 'traffic', 'config']);
+    expect(objectTabs('addon')).toEqual(['overview', 'logs', 'config']);
+    expect(objectTabs('job')).toEqual(['overview', 'logs', 'config']);
+    for (const t of OBJECT_TABS) expect(OBJECT_TAB_LABELS[t]).toBeTruthy();
+  });
+
+  it('groups the tabs into views: Activity and Settings have pages of their own', () => {
+    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traces', 'traffic', 'settings']);
+    expect(lensOf('deployments')).toBe('activity');
+    expect(lensOf('incidents')).toBe('activity');
+    expect(lensOf('secrets')).toBe('settings');
+    expect(lensOf('access')).toBe('settings');
+    expect(lensOf('logs')).toBe('logs');
+    expect(lensOf('builder')).toBe('');
+    expect(lensOf('objects')).toBe('');
+    for (const pages of Object.values(LENS_PAGES)) for (const p of pages) expect(PAGE_LABELS[p]).toBeTruthy();
+    expect(parsePath('/tenants/fecode/environments/e/activity')).toEqual(env({ env: 'e', tab: 'activity' }));
   });
 
   it('reads an unknown tab as the overview, half an object as none, a bad replica as none', () => {
@@ -89,7 +132,7 @@ describe('the environments routes', () => {
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service'))
       .toEqual(env({ env: 'expensa-stage', tab: 'logs' }));
     expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/addon/postgres/x'))
-      .toEqual(env({ env: 'expensa-stage', tab: 'logs', item: 'addon/postgres' }));
+      .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'addon/postgres', otab: 'logs' }));
   });
 
   it('envPath builds what parsePath reads', () => {
@@ -97,31 +140,36 @@ describe('the environments routes', () => {
     expect(envPath('fecode', 'expensa-stage')).toBe('/tenants/fecode/environments/expensa-stage');
     expect(envPath('fecode', 'expensa-stage', 'overview', 'x')).toBe('/tenants/fecode/environments/expensa-stage');
     expect(envPath('fecode', 'expensa-stage', 'deployments', 7)).toBe('/tenants/fecode/environments/expensa-stage/deployments/7');
+    // An object's logs are its page's Logs.
     expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service'))
-      .toBe('/tenants/fecode/environments/expensa-stage/logs/service/expense-service');
+      .toBe('/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs');
     expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service', 0))
-      .toBe('/tenants/fecode/environments/expensa-stage/logs/service/expense-service/0');
+      .toBe('/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs/0');
     expect(envPath('fecode', 'e', 'logs', '', null, '?q=timeout&level=error'))
       .toBe('/tenants/fecode/environments/e/logs?q=timeout&level=error');
     expect(envPath('fecode', 'e', 'logs', 'service/web', 1, '?source=ingress'))
-      .toBe('/tenants/fecode/environments/e/logs/service/web/1?source=ingress');
+      .toBe('/tenants/fecode/environments/e/objects/service/web/logs/1?source=ingress');
     expect(envPath('fecode', 'e', 'overview', '', null, '?q=x')).toBe('/tenants/fecode/environments/e');
-    expect(envPath('a b', 'e', 'logs', 'service/web', 2)).toBe('/tenants/a%20b/environments/e/logs/service/web/2');
+    expect(envPath('a b', 'e', 'logs', 'service/web', 2)).toBe('/tenants/a%20b/environments/e/objects/service/web/logs/2');
     expect(envPath('fecode', 'e', 'deployments', '', 3)).toBe('/tenants/fecode/environments/e/deployments');
     for (const [tab, item, replica, search] of [['overview', '', null, ''], ['deployments', '', null, ''],
-      ['deployments', '6', null, ''], ['incidents', '12', null, ''], ['logs', '', null, ''], ['logs', 'job/migrate', null, ''],
-      ['logs', 'service/web', 0, ''], ['logs', 'service/web', 3, '?q=a+b'], ['logs', '', null, '?trace=x'],
-      ['objects', 'service/web', null, ''], ['objects', 'addon/postgres', null, ''], ['objects', '', null, '']]) {
+      ['deployments', '6', null, ''], ['incidents', '12', null, ''], ['logs', '', null, ''], ['logs', '', null, '?trace=x'],
+      ['activity', '', null, '']]) {
       expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
+    for (const [item, replica, search] of [['job/migrate', null, ''], ['service/web', 0, ''], ['service/web', 3, '?q=a+b']]) {
+      expect(parsePath(envPath('a/b', 'expensa-stage', 'logs', item, replica, search)))
+        .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab: 'objects', item, otab: 'logs', replica, search });
+    }
     expect(ENV_TABS).toEqual([
-      'overview', 'builder', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'secrets', 'access', 'settings', 'objects',
+      'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'settings', 'secrets', 'access',
+      'objects',
     ]);
-    // An object's page: its kind and name; a replica or a search is not its.
+    // An object's page: its kind and name, its view.
     expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/tenants/fecode/environments/e/objects/service/web%20api');
     expect(parsePath('/tenants/fecode/environments/e/objects/job/migrate/2?q=x'))
-      .toEqual(env({ env: 'e', tab: 'objects', item: 'job/migrate' }));
+      .toEqual(env({ env: 'e', tab: 'objects', item: 'job/migrate', otab: 'overview' }));
     expect(parsePath('/tenants/fecode/environments/e/objects/job')).toEqual(env({ env: 'e', tab: 'objects' }));
     for (const tab of ENV_TABS) expect(ENV_TAB_LABELS[tab]).toBeTruthy();
     expect(ENV_TAB_LABELS.builder).toBe('New deployment');
@@ -209,10 +257,38 @@ describe('switchEnvPath', () => {
     const r = { view: 'environments', tenant: 'kino', env: 'prod', tab: 'logs', item: 'api' };
     expect(switchEnvPath(r, 'kino', 'stage')).toBe('/tenants/kino/environments/stage/logs');
     expect(switchEnvPath({ ...r, tab: 'objects' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
+    // From an object's view the other environment's same view.
+    expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'traces' }, 'kino', 'stage'))
+      .toBe('/tenants/kino/environments/stage/traces');
+    expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'config' }, 'kino', 'stage'))
+      .toBe('/tenants/kino/environments/stage/settings');
   });
   it('opens the overview from elsewhere or in another tenant', () => {
     expect(switchEnvPath({ view: 'domains', tenant: 'kino' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
     expect(switchEnvPath({ view: 'environments', tenant: 'kino', env: 'prod', tab: 'logs' }, 'acme', 'web'))
       .toBe('/tenants/acme/environments/web');
+  });
+});
+
+describe('the sidebar keeps the view', () => {
+  const r = (rest) => ({ view: 'environments', tenant: 'kino', env: 'prod', tab: 'overview', item: '', ...rest });
+  const api = { kind: 'service', name: 'api' };
+  const db = { kind: 'addon', name: 'db' };
+  it("picks an object in the view open now, where it has that view", () => {
+    expect(pickObjectPath(r({ tab: 'logs' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api/logs');
+    expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api/traffic');
+    expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db');
+    expect(pickObjectPath(r({ tab: 'secrets' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db/config');
+    expect(pickObjectPath(r({ tab: 'deployments' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
+    expect(pickObjectPath(r({ tab: 'objects', item: 'service/api', otab: 'traces' }), 'kino', 'prod', db))
+      .toBe('/tenants/kino/environments/prod/objects/addon/db');
+    expect(pickObjectPath(r({ tab: 'objects', item: 'addon/db', otab: 'logs' }), 'kino', 'prod', api))
+      .toBe('/tenants/kino/environments/prod/objects/service/api/logs');
+    expect(pickObjectPath({ view: 'domains', tenant: 'kino' }, 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
+  });
+  it('picks the environment in the same view from an object, else its overview', () => {
+    expect(pickEnvPath(r({ tab: 'objects', item: 'service/api', otab: 'logs' }), 'kino', 'prod')).toBe('/tenants/kino/environments/prod/logs');
+    expect(pickEnvPath(r({ tab: 'logs' }), 'kino', 'prod')).toBe('/tenants/kino/environments/prod');
+    expect(pickEnvPath({ view: 'domains', tenant: 'kino' }, 'kino', 'prod')).toBe('/tenants/kino/environments/prod');
   });
 });

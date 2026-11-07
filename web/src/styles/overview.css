@@ -1,0 +1,140 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* An environment's overview and an object's page: cards in FeCode's
+   forms (12 px corners, a soft shadow), what needs someone first. */
+
+.ov { display: flex; flex-direction: column; gap: 28px; max-width: 1160px; }
+.ov-status { display: flex; flex-direction: column; gap: 14px; }
+.ov-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.ov-sect { display: flex; flex-direction: column; gap: 12px; }
+.ov-h { margin: 0; font-size: 17px; font-weight: 600; }
+.ov-h .count { font-size: 15px; margin-left: 4px; }
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.ov-more { margin: 0; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--radius);
+  padding: 18px 22px; box-shadow: var(--shadow); min-width: 0;
+}
+.card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+.card-head h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.card-more { margin-left: auto; font-size: 14px; }
+
+/* what needs someone: a sentence, its evidence, the next step */
+.statecard {
+  display: flex; gap: 16px; align-items: flex-start;
+  background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--radius);
+  padding: 20px 22px; box-shadow: var(--shadow);
+}
+.statecard-icon {
+  display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; flex: none;
+  background: var(--panel2); color: var(--muted);
+}
+.statecard-body { flex: 1; min-width: 0; }
+.statecard-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.statecard-head h2 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.35; }
+.statecard-cond { font-weight: 400; color: var(--muted); }
+.statecard-when { margin-left: auto; color: var(--muted); font-size: 14px; white-space: nowrap; }
+.statecard-text { margin: 4px 0 0; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.statecard-cap { margin: 14px 0 6px; font-size: 13px; color: var(--faint); }
+.statecard-log {
+  margin: 0; font-family: var(--mono); font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--bg0); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px 14px;
+}
+.statecard-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.statecard.running .statecard-icon { background: rgba(95, 207, 142, .14); color: var(--ok); }
+.statecard.moving .statecard-icon { background: var(--accent-dim); color: var(--accent); }
+.statecard.failed { background: rgba(242, 119, 107, .07); border-color: rgba(242, 119, 107, .38); }
+.statecard.failed .statecard-icon { background: rgba(242, 119, 107, .16); color: var(--danger); }
+.statecard.failed .statecard-head h2 { color: var(--text); }
+.ov-reason { color: var(--text); }
+[data-theme="light"] .statecard.running .statecard-icon { background: rgba(27, 138, 76, .12); }
+[data-theme="light"] .statecard.failed { background: rgba(192, 53, 42, .05); border-color: rgba(192, 53, 42, .30); }
+[data-theme="light"] .statecard.failed .statecard-icon { background: rgba(192, 53, 42, .12); }
+
+/* traffic and reach */
+.ov-big { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 10px; }
+.ov-big span { font-size: 16px; font-weight: 400; color: var(--muted); }
+.ov-trow { display: grid; grid-template-columns: minmax(64px, 120px) minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 6px 0; }
+.ov-trow-nums { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ov-trow .strong, .ov-route .strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wspark { width: 100%; height: 30px; display: block; overflow: visible; }
+.wspark polyline { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.wspark .spark-req { stroke: var(--accent); }
+.wspark .spark-err { stroke: var(--danger); }
+.ov-hosts { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; font-size: 17px; font-weight: 600; }
+.ov-route { display: grid; grid-template-columns: minmax(48px, auto) 18px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border-soft); }
+.ov-route .icon { color: var(--faint); }
+
+/* an object */
+.ocard {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 15px 17px;
+}
+.ocard:hover { border-color: var(--border); }
+.ocard.failed { border-color: rgba(242, 119, 107, .45); background: rgba(242, 119, 107, .06); }
+.ocard-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ocard-name { font-size: 16px; font-weight: 600; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ocard-name:hover { color: var(--text); }
+.ocard-ready { margin-left: auto; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ocard-ready.failed { color: var(--danger); font-weight: 600; }
+.ocard-ready.moving { color: var(--accent); font-weight: 600; }
+.ocard-top button { margin-left: auto; }
+.ocard-ready + button { margin-left: 8px; }
+.ocard-what { font-size: 13.5px; color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ocard-what .mono { font-size: 12.5px; }
+.ocard-line { font-size: 14px; color: var(--muted); }
+.ocard-line.failed { color: var(--danger); }
+.ocard .sdot.failed { box-shadow: 0 0 0 3px rgba(242, 119, 107, .22); }
+[data-theme="light"] .ocard.failed { background: rgba(192, 53, 42, .04); border-color: rgba(192, 53, 42, .35); }
+
+/* the activity: deployments and incidents in one list */
+.actlist { display: flex; flex-direction: column; }
+.act { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-top: 1px solid var(--border-soft); }
+.act:first-child { border-top: 0; padding-top: 2px; }
+.act > .sdot { margin-top: 8px; }
+.act-what { flex: 1; min-width: 0; }
+.act-title { font-weight: 600; color: var(--text); }
+.act-title:hover { color: var(--accent); }
+.act-detail { color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.act-detail.bad { color: var(--danger); }
+.act-when { color: var(--faint); font-size: 14px; white-space: nowrap; }
+.act.dim .act-title { color: var(--muted); font-weight: 500; }
+
+.about { margin-bottom: 18px; }
+
+/* a view's own pages (Activity, Settings), under the tab bar */
+.subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 18px; }
+.subtab {
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border-soft);
+  color: var(--muted); font-size: 14px; font-weight: 500;
+}
+.subtab:hover { color: var(--text); border-color: var(--border); text-decoration: none; }
+.subtab.on { color: var(--text); background: var(--accent-dim); border-color: rgba(var(--accent-rgb), .5); }
+
+/* a page's head: its name, its state, one line, its actions */
+.statepill {
+  display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px;
+  font-size: 14px; font-weight: 600; background: var(--panel2); color: var(--muted);
+}
+.statepill.running { background: rgba(95, 207, 142, .13); color: var(--ok); }
+.statepill.moving { background: var(--accent-dim); color: var(--accent); }
+.statepill.failed { background: rgba(242, 119, 107, .13); color: var(--danger); }
+[data-theme="light"] .statepill.running { background: rgba(27, 138, 76, .10); }
+[data-theme="light"] .statepill.failed { background: rgba(192, 53, 42, .09); }
+.pagehead-sub { margin: 8px 0 0; color: var(--muted); }
+.pagehead-sub b { color: var(--text); font-weight: 600; }
+.pagehead-kind { margin: 0 0 4px; font-size: 14px; color: var(--faint); }
+
+/* the sections of a card start at its top */
+.card > .sect:first-child { margin-top: 0; }
+.card > .panel-note:last-child { margin-bottom: 0; }
+.objhead .pagehead-sub:empty { display: none; }
+.subtab .tabcount, .tab .tabcount { margin-left: 6px; }
+@media (max-width: 600px) {
+  .statecard { padding: 16px; }
+  .statecard-icon { display: none; }
+}
