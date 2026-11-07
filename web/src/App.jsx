@@ -160,7 +160,9 @@ export default function App() {
     <MeContext.Provider value={meCtx}>
     <SummaryProvider tenant={needsGate ? '' : route.tenant || ''} can={tenantCan}>
     <Shell route={route} navigate={navigate} me={me} onSignOut={signOut}>
-      {route.view === 'tenants' && (operator ? <Tenants navigate={navigate} /> : <MyTenants navigate={navigate} />)}
+      {route.view === 'tenants' && (operator
+        ? <Tenants key={location.search} navigate={navigate} />
+        : <MyTenants key={location.search} navigate={navigate} />)}
       {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
       {needsGate && <TenantGate key={route.tenant} reason={gate} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'overview' && <Home key={route.tenant} tenant={route.tenant} navigate={navigate} />}
@@ -293,6 +295,12 @@ function Sidebar({ route, navigate, me, env }) {
       {!platform && !t && (
         <p className="sidehint muted small">Choose a tenant at the top, or make one.</p>)}
 
+      {operator && (
+        <nav className="snav snav-admin">
+          <NavItem item={{ view: 'administration', label: 'Administration', icon: 'server' }} active={platform}
+            to="/nodes" navigate={navigate} />
+        </nav>)}
+
     </aside>
   );
 }
@@ -314,14 +322,20 @@ function useMenu() {
   return [open, setOpen, box];
 }
 
+// TENANT_FILTER is the number of tenants from which the switcher offers
+// a filter; NEW_TENANT is where a tenant is made.
+const TENANT_FILTER = 8;
+const NEW_TENANT = '/tenants?new';
+
 // Switcher is where one works, at the head of the topbar's trail: a
 // tenant and one of its environments, in two columns (choosing a tenant
-// on the left lists its environments on the right), or, for operators,
-// the platform.
+// on the left lists its environments on the right). The platform's
+// administration is the sidebar's last entry, for operators.
 function Switcher({ route, navigate, me, platform }) {
   const [open, setOpen, box] = useMenu();
   const [picked, setPicked] = useState('');
   const [others, setOthers] = useState({});
+  const [filter, setFilter] = useState('');
   const { environments } = useSummary();
   const operator = isOperator(me);
   const tenants = myTenants(me);
@@ -332,6 +346,7 @@ function Switcher({ route, navigate, me, platform }) {
     if (!open) {
       setPicked(platform ? '' : t || (tenants[0] || {}).tenant || '');
       setOthers({});
+      setFilter('');
     }
     setOpen(!open);
   };
@@ -346,6 +361,8 @@ function Switcher({ route, navigate, me, platform }) {
 
   const go = (to) => { setOpen(false); navigate(to); };
   const envs = picked === t ? environments : others[picked];
+  const f = filter.trim().toLowerCase();
+  const shownTenants = f ? tenants.filter((tn) => tn.tenant.toLowerCase().includes(f)) : tenants;
   const pickedAccess = tenantAccess(me, picked);
   const role = !platform && t ? roleLabel(tenants.find((x) => x.tenant === t)) || (operator ? 'operator' : '') : '';
   const enc = encodeURIComponent;
@@ -354,7 +371,7 @@ function Switcher({ route, navigate, me, platform }) {
     <div className="switcher" ref={box}>
       <button className={'switch' + (open ? ' on' : '')} onClick={toggle} aria-expanded={open}>
         <Icon name={platform ? 'server' : 'building'} size={14} />
-        <span className="switch-name">{platform ? 'Platform' : t || 'Choose a tenant'}</span>
+        <span className="switch-name">{platform ? 'Administration' : t || 'Choose a tenant'}</span>
         {!platform && t && envName && <><span className="switch-slash">/</span><span className="switch-name">{envName}</span></>}
         {role && <span className="switch-role">{role}</span>}
         <Icon name="chevronDown" size={13} />
@@ -363,7 +380,11 @@ function Switcher({ route, navigate, me, platform }) {
         <div className="switch-menu" role="menu">
           <div className="switch-col">
             <div className="switch-label">{operator ? 'tenants you are a member of' : 'tenants'}</div>
-            {tenants.map((tn) => (
+            {tenants.length > TENANT_FILTER && (
+              <input className="switch-filter" placeholder="filter" value={filter} autoFocus
+                aria-label="filter the tenants" onChange={(e) => setFilter(e.target.value)} />)}
+            <div className="switch-list">
+            {shownTenants.map((tn) => (
               <button key={tn.tenant} role="menuitem" className={'switch-item' + (tn.tenant === picked ? ' on' : '')}
                 onClick={() => setPicked(tn.tenant)} aria-haspopup="true">
                 <span className="mono">{tn.tenant}</span>
@@ -372,18 +393,17 @@ function Switcher({ route, navigate, me, platform }) {
               </button>
             ))}
             {tenants.length === 0 && <div className="switch-empty muted small">none yet</div>}
-            <div className="switch-sep" />
-            <button role="menuitem" className="switch-item" onClick={() => go('/tenants')}>
-              <Icon name="plus" size={13} /> {operator ? 'every tenant' : 'all yours, or a new one'}
-            </button>
-            {operator && (
-              <button role="menuitem" className={'switch-item' + (platform ? ' on' : '')} onClick={() => go('/nodes')}>
-                <Icon name="server" size={13} /> Platform <span className="switch-role">operator</span>
-              </button>)}
+            </div>
+            <div className="switch-foot">
+              <button role="menuitem" className="switch-item" onClick={() => go(NEW_TENANT)}>
+                <Icon name="plus" size={13} /> New tenant
+              </button>
+            </div>
           </div>
           {picked && (
             <div className="switch-col">
               <div className="switch-label">environments of <span className="mono">{picked}</span></div>
+              <div className="switch-list">
               {(envs === null || envs === undefined) && <div className="switch-empty muted small">…</div>}
               {envs === 'error' && <div className="switch-empty muted small">could not be read</div>}
               {Array.isArray(envs) && envs.length === 0 && <div className="switch-empty muted small">none yet</div>}
@@ -396,7 +416,8 @@ function Switcher({ route, navigate, me, platform }) {
                   {Number(e.openIncidents) > 0 && <span className="snav-count bad" title="open incidents">{e.openIncidents}</span>}
                 </button>
               ))}
-              <div className="switch-sep" />
+              </div>
+              <div className="switch-foot">
               <button role="menuitem" className="switch-item" onClick={() => go(tenantHome(pickedAccess))}>
                 <Icon name="home" size={13} /> Tenant home
               </button>
@@ -407,6 +428,7 @@ function Switcher({ route, navigate, me, platform }) {
                 <button role="menuitem" className="switch-item" onClick={() => go(`/tenants/${enc(picked)}/new-environment`)}>
                   <Icon name="plus" size={13} /> New environment
                 </button>)}
+              </div>
             </div>)}
         </div>)}
     </div>

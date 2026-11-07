@@ -24,7 +24,8 @@ export function Tenants({ navigate }) {
   const [people, setPeople] = useState(null);
   const [err, setErr] = useState('');
   const [name, setName] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
+  // /tenants?new opens the form (the switcher's New tenant).
+  const [showCreate, setShowCreate] = useState(() => new URLSearchParams(location.search).has('new'));
   const [created, setCreated] = useState(null); // {name, token}
   const [open, setOpen] = useState(null); // {name, tab}
   const [armed, arm, disarm] = useArm();

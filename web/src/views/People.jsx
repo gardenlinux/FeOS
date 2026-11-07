@@ -33,7 +33,8 @@ export function NotAvailable({ what }) {
 export function MyTenants({ navigate }) {
   const { me, reload } = useMe();
   const tenants = myTenants(me);
-  const [showCreate, setShowCreate] = useState(tenants.length === 0);
+  // /tenants?new opens the form (the switcher's New tenant).
+  const [showCreate, setShowCreate] = useState(tenants.length === 0 || new URLSearchParams(location.search).has('new'));
   const [name, setName] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);

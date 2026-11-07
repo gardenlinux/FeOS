@@ -117,13 +117,18 @@ a:hover { text-decoration: underline; }
 .switch .icon:last-child { color: var(--muted); flex: none; }
 .switch-menu {
   position: absolute; z-index: 30; left: 0; top: calc(100% + 4px);
-  display: grid; grid-template-columns: 230px 250px; gap: 4px;
+  /* one size, whatever the tenant holds: the lists scroll, never sideways */
+  display: grid; grid-template-columns: 2fr 3fr; width: 640px; height: 360px; max-height: calc(100vh - 80px);
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-  padding: 4px; box-shadow: 0 12px 32px rgba(0, 0, 0, .35); max-height: 60vh; overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .35); overflow: hidden;
 }
-/* the environments of the tenant chosen on the left */
-.switch-col + .switch-col { border-left: 1px solid var(--border-soft); padding-left: 4px; }
-.switch-col { min-width: 0; }
+/* tenants on the left (40 %), the chosen one's environments on the right */
+.switch-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 4px; }
+.switch-col + .switch-col { border-left: 1px solid var(--border-soft); }
+.switch-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.switch-foot { border-top: 1px solid var(--border-soft); padding-top: 4px; margin-top: 4px; }
+.switch-filter { margin: 0 4px 4px; width: auto; font-size: 12.5px; padding: 5px 8px; }
+.switch-item .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .switch-item .icon:last-child:not(:first-child) { margin-left: auto; color: var(--muted); }
 .switch-item .switch-role + .icon { margin-left: 4px; }
 .switch-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 6px 8px 4px; }
@@ -748,11 +753,13 @@ tr:hover .iconbtn { opacity: 1; }
   .sidebar { flex-direction: row; align-items: center; overflow-x: auto; padding: 8px; gap: 6px; border-right: 0; border-bottom: 1px solid var(--border-soft); }
   .brand { padding: 0 4px 0 0; height: auto; margin: 0; border: 0; }
   .brand-name, .snav-label, .sidehint { display: none; }
-  .switch { max-width: 180px; }
+  .switch { max-width: calc(100vw - 130px); }
+  .switch .switch-role { display: none; }
   .topsearch { width: auto; }
   .topbar { padding: 0 12px; }
-  .switch-menu { grid-template-columns: minmax(0, 1fr); width: calc(100vw - 24px); }
-  .switch-col + .switch-col { border-left: 0; padding-left: 0; border-top: 1px solid var(--border-soft); padding-top: 4px; }
+  .switch-menu { grid-template-columns: minmax(0, 1fr); grid-template-rows: 2fr 3fr; width: calc(100vw - 24px); height: 70vh; }
+  .switch-col + .switch-col { border-left: 0; border-top: 1px solid var(--border-soft); }
+  .snav-admin { margin: 0; padding: 0; border: 0; }
   .topsearch span, .topsearch kbd { display: none; }
   .snav { display: flex; align-items: center; margin: 0; gap: 2px; }
   .snav-item { white-space: nowrap; margin: 0; }
@@ -1290,6 +1297,8 @@ a.button.mini { padding: 3px 8px; font-size: 12px; border-radius: 4px; margin: 6
 .pagehead h1.mono { font-size: 18px; }
 
 /* the sidebar's environment: its name beside the section's label */
+/* the operators' administration, at the sidebar's foot */
+.snav-admin { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border-soft); }
 .snav-label-row { display: flex; align-items: center; gap: 8px; }
 .envlabel {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
