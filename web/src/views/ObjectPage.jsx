@@ -253,12 +253,16 @@ function ServiceTraffic({ tenant, env, name, navigate }) {
       </div>
       {traffic === undefined && <p className="muted">Loading…</p>}
       {traffic === null && <p className="muted">No numbers: the log store does not answer.</p>}
-      {traffic && !t && <p className="muted">No requests through the ingress in the last hour.</p>}
+      {traffic && !t && <p className="muted">No traced requests in the last hour. A service counts its requests in its
+        OpenTelemetry server spans.</p>}
       {t && (
         <>
           <p className="ov-big">{fmtCount(t.requests)} request{t.requests === 1 ? '' : 's'}
             {t.requests > 0 && <span> · {errorShare(t)} errors · p95 {fmtLatency(t.p95Ms)}</span>}</p>
           <WideSpark series={t.series} h={40} />
+          <p className="ov-note">{t.source === 'ingress'
+            ? 'It sends no server spans: what the ingress answered for it.'
+            : 'From its OpenTelemetry server spans, without its readiness check.'}</p>
         </>)}
     </section>
   );

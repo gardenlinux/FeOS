@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -61,15 +62,17 @@ func TestTrafficOf(t *testing.T) {
 	    {"tsNs": "1793581440000000000", "requests": 1, "errors": 0, "p95Ns": 40000}]}]`), &got); err != nil {
 		t.Fatal(err)
 	}
+	// The source is the read's, which ferund sets.
+	got[0].Source, got[2].Source = TrafficApp, TrafficIngress
 	out := trafficOf(got, since, until, time.Minute)
 	b, _ := json.Marshal(out)
-	want := `[{"service":"api","requests":1,"errors":0,"p50Ms":0,"p95Ms":0,"series":[` +
+	want := `[{"service":"api","source":"ingress","requests":1,"errors":0,"p50Ms":0,"p95Ms":0,"series":[` +
 		`{"t":"2026-11-02T01:00:00Z","requests":0,"errors":0,"p95Ms":null},` +
 		`{"t":"2026-11-02T01:01:00Z","requests":0,"errors":0,"p95Ms":null},` +
 		`{"t":"2026-11-02T01:02:00Z","requests":0,"errors":0,"p95Ms":null},` +
 		`{"t":"2026-11-02T01:03:00Z","requests":0,"errors":0,"p95Ms":null},` +
 		`{"t":"2026-11-02T01:04:00Z","requests":1,"errors":0,"p95Ms":0}]},` +
-		`{"service":"web","requests":9,"errors":3,"p50Ms":12.3,"p95Ms":87,"series":[` +
+		`{"service":"web","source":"app","requests":9,"errors":3,"p50Ms":12.3,"p95Ms":87,"series":[` +
 		`{"t":"2026-11-02T01:00:00Z","requests":7,"errors":3,"p95Ms":90.1},` +
 		`{"t":"2026-11-02T01:01:00Z","requests":0,"errors":0,"p95Ms":null},` +
 		`{"t":"2026-11-02T01:02:00Z","requests":2,"errors":0,"p95Ms":14.6},` +
@@ -125,8 +128,10 @@ func (f *fakeTrafficSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		Services []svc `json:"services"`
 	}{}
+	// The services' own spans count api's requests, the ingress's web's.
+	has := map[string]string{"app": "api", "ingress": "web"}[q.Get("source")]
 	for _, s := range q["service"] {
-		if s == "web" {
+		if s == has {
 			out.Services = append(out.Services, svc{Service: s, Requests: 4, Errors: 1, P50Ns: &p, P95Ns: &p,
 				Steps: []step{{TsNs: q.Get("since"), Requests: 4, Errors: 1, P95Ns: &p}}})
 		} else {
@@ -173,7 +178,10 @@ func TestTrafficFromSink(t *testing.T) {
 		http.StatusNotFound, "")
 	refused("another window", ctx, tenantA, "7d", http.StatusBadRequest, "")
 
-	// The desired deployment routes web alone: the deployed one adds api.
+	// Every image service's own spans are asked for, without api's
+	// readiness check (the attached dev is none); the ingress for the
+	// services that the routes send it to: the desired deployment routes
+	// web alone, the deployed one adds api.
 	read := func(window string) Traffic {
 		t.Helper()
 		tr, err := h.svc.Traffic(ctx, tenantA, "stage", window)
@@ -182,33 +190,45 @@ func TestTrafficFromSink(t *testing.T) {
 		}
 		return tr
 	}
-	read("1h")
-	if len(sink.asked) != 1 || !strings.Contains(sink.asked[0], "service=web&") || strings.Contains(sink.asked[0], "service=api") {
-		t.Errorf("asked %v", sink.asked)
+	tr := read("1h")
+	query := func(source, services, skip string, tr Traffic, step string) string {
+		return "/api/v1/traffic?environment=" + e.ID.String() + services + "&since=" + itoa(tr.Since.UnixNano()) + skip +
+			"&source=" + source + "&step=" + step + "&until=" + itoa(tr.Until.UnixNano()) + " Bearer tok"
+	}
+	want := []string{
+		query("app", "&service=api&service=web", "&skip=api%3A%2Freadyz", tr, "60s"),
+		query("ingress", "&service=web", "", tr, "60s"),
+	}
+	if !slices.Equal(sink.asked, want) {
+		t.Errorf("asked\n%v\nwant\n%v", sink.asked, want)
 	}
 	h.exec(`UPDATE environments SET deployed = 1 WHERE id = $1`, e.ID)
-	tr := read("24h")
-	want := "/api/v1/traffic?environment=" + e.ID.String() + "&service=api&service=web&since=" +
-		itoa(tr.Since.UnixNano()) + "&step=900s&until=" + itoa(tr.Until.UnixNano()) + " Bearer tok"
-	if len(sink.asked) != 2 || sink.asked[1] != want {
-		t.Errorf("asked %v, want %s", sink.asked, want)
+	tr = read("24h")
+	want = append(want, query("app", "&service=api&service=web", "&skip=api%3A%2Freadyz", tr, "900s"),
+		query("ingress", "&service=api&service=web", "", tr, "900s"))
+	if !slices.Equal(sink.asked, want) {
+		t.Errorf("asked\n%v\nwant\n%v", sink.asked, want)
 	}
-	if tr.Window != "24h" || tr.Step != "15m" || tr.Until.Sub(tr.Since) != 24*time.Hour || len(tr.Services) != 1 {
+	if tr.Window != "24h" || tr.Step != "15m" || tr.Until.Sub(tr.Since) != 24*time.Hour || len(tr.Services) != 2 {
 		t.Fatalf("traffic %+v", tr)
 	}
-	web := tr.Services[0]
-	if web.Service != "web" || web.Requests != 4 || web.Errors != 1 || *web.P50Ms != 25 || *web.P95Ms != 25 ||
-		len(web.Series) != 96 || !web.Series[0].T.Equal(tr.Since) || web.Series[0].Requests != 4 ||
+	// api's from its own spans; web sends none, so the ingress's.
+	api, web := tr.Services[0], tr.Services[1]
+	if api.Service != "api" || api.Source != TrafficApp || api.Requests != 4 {
+		t.Errorf("api %+v", api)
+	}
+	if web.Service != "web" || web.Source != TrafficIngress || web.Requests != 4 || web.Errors != 1 || *web.P50Ms != 25 ||
+		*web.P95Ms != 25 || len(web.Series) != 96 || !web.Series[0].T.Equal(tr.Since) || web.Series[0].Requests != 4 ||
 		*web.Series[0].P95Ms != 25 || web.Series[95].Requests != 0 || web.Series[95].P95Ms != nil ||
 		!web.Series[95].T.Equal(tr.Until.Add(-15*time.Minute)) {
 		t.Errorf("web %+v", web)
 	}
 
-	// An environment that routes nothing has no traffic, and the sink is
+	// An environment without a deployment has no traffic, and the sink is
 	// not asked.
 	h.create("empty", nil)
 	if tr, err := h.svc.Traffic(ctx, tenantA, "empty", "1h"); err != nil || len(tr.Services) != 0 || tr.Services == nil ||
-		len(sink.asked) != 2 {
+		len(sink.asked) != 4 {
 		t.Errorf("empty: %+v %v %v", tr, err, sink.asked)
 	}
 

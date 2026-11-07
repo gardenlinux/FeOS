@@ -138,3 +138,5 @@
   .statecard { padding: 16px; }
   .statecard-icon { display: none; }
 }
+.ov-src { color: var(--faint); }
+.ov-note { margin: 10px 0 0; font-size: 13px; color: var(--faint); }

@@ -155,7 +155,12 @@ describe('EnvOverview', () => {
     // Without numbers a card says nothing of requests.
     expect(words(STAGE)).not.toContain('no requests in the last hour');
     expect(words(STAGE)).toContain('reached by a route');
-    expect(words(STAGE, { traffic: { services: [] } })).toContain('No requests through the ingress in the last hour.');
+    expect(words(STAGE, { traffic: { services: [] } })).toContain('No requests in the last hour.');
+    expect(words(STAGE, { traffic: { services: [] } })).toContain('no traced requests in the last hour');
+    // A service counted at the ingress, since it sends no spans, says so.
+    const viaIngress = { services: [{ ...traffic.services[0], source: 'ingress' }] };
+    expect(words(STAGE, { traffic: viaIngress })).toContain('13k req · p95 41.0 ms · ingress');
+    expect(words(STAGE, { traffic: viaIngress })).toContain('13k requests last hour · p95 41.0 ms · ingress');
   });
 
   it('shows an addon with type, version, plan and provisioning', () => {
@@ -655,7 +660,7 @@ describe('reverts and tags', () => {
 });
 
 describe('the traffic tab', () => {
-  it('lists each service: requests, errors, p50, p95 and a sparkline', () => {
+  it('lists each service: requests, errors, p50, p95, a sparkline and where it is counted', () => {
     const t = response('GET_environments_env_traffic.200');
     const out = html(<TrafficTable traffic={t} />);
     expect(out).toContain('<td class="mono strong">api</td>');
@@ -663,7 +668,9 @@ describe('the traffic tab', () => {
     expect(out).toContain('3.4 ms');
     expect(out).toContain('<svg class="spark"');
     expect(out).toContain('<polyline class="spark-req"');
-    expect(html(<TrafficTable traffic={{ services: [] }} />)).toContain('No requests through the ingress in this window.');
+    // api from its own spans, web (which sends none) from the ingress.
+    expect(text(<TrafficTable traffic={t} />)).toMatch(/api 3 .* its spans web .* the ingress/);
+    expect(html(<TrafficTable traffic={{ services: [] }} />)).toContain('No requests in this window.');
   });
 
   it("shows the ingress's access log, a trace linked to the Traces tab", () => {

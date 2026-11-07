@@ -3266,7 +3266,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET …/{env}/secrets`, `PUT`, `DELETE …/secrets/{name}` | the names with their latest versions; `{name, version}`; 204, 409 while pinned |
 | `GET …/{env}/incidents[?open=1]`, `…/incidents/{id}` | newest first; one |
 | `GET …/{env}/access-logs[?limit=200&beforeTsNs=&traceId=]` | `{records}`: the newest page of the ingress's access log before `beforeTsNs` (a record's `tsNs`, a string), at most 1000, ascending, of the trace `traceId` (32 lower case hex digits; else 400) when given, read from the sink ([The sink](#the-sink)); 503 `no_log_store` without `--sink-url`, 503 `log_store_unavailable` when the sink fails; each `{tsNs, time, durationNs, ingress, service, instance, host, method, path, proto, status, outcome, attempts, heldNs, bytesIn, bytesOut, clientIp, userAgent, traceId, spanId, parentSpanId}` ([ingress.md](ingress.md#access-log)) |
-| `GET …/{env}/traffic[?window=1h]` | the requests the ingress answered for each routed service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every service of the desired and deployed deployments' routes to an image service with a request in the window, by name, each with every bucket, oldest first; `errors` the requests of a status ≥ 500 or none written, but not aborted; the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-ingresss-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
+| `GET …/{env}/traffic[?window=1h]` | the requests of each image service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, source, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every image service of the desired and deployed deployments with a request in the window, by name, each with every bucket, oldest first; `source` `app`, counted from its own OpenTelemetry server spans without its readiness check (`errors`: an error status, or a status of 500 to 599), or `ingress` for a routed service that sends none, what the ingress answered (`errors`: a status ≥ 500 or none written, but not aborted); the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
 | `GET …/{env}/objects/{kind}/{name}/logs?lines=200&replica=0` | `{lines, source}`, the source `container` or `process`; with `--sink-url` a container's log is the sink's first ([The sink](#the-sink)); 501; 409 "paused" (unless the sink has the instance's lines), `not_running` (also for a replica without an instance yet, or none at all); 404 for a replica beyond the object's ([Logs](#probes-exits-and-restarts)) |
 | `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes, or an attached service's process |
 | `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
@@ -3845,15 +3845,20 @@ nor waits for. `ferund`'s part:
   in a rolling deploy fails its partitions' run, its `PublishAccessLogs`
   and the table part of its `…/access-logs` until it is replaced.
 - **The traffic.** `…/traffic` (FeCode ADR 0009 §4) is aggregated by
-  the sink from the ingress's spans
-  ([traces.md](traces.md#reading-the-ingresss-traffic)), with the
-  caller's credentials as the logs calls: `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s`
-  for the services that the routes of the desired and deployed deployments
-  send the ingress to (an attached service's routes only the route door
-  serves). Without such a service the sink is not asked and `services`
-  is empty. `ferund` fills the steps the sink leaves out with zeros and
-  `null`, leaves out the services without requests and turns ns into ms
-  to a tenth. The 503s are those of `…/access-logs`; a sink without the
+  the sink from server spans ([traces.md](traces.md#reading-the-traffic)),
+  with the caller's credentials as the logs calls, in two reads:
+  `GET <sink-url>/api/v1/traffic?environment=<ID>&service=<name>…&since=<ns>&until=<ns>&step=60s|900s&source=app&skip=<service>:<path>…`
+  for the image services of the desired and deployed deployments, their
+  own spans without those of an HTTP readiness check's path, and the
+  same with `source=ingress` for the services that their routes send
+  the ingress to (an attached service's routes only the route door
+  serves). A service's own count is its traffic, wherever its requests
+  came from; a routed service that sends no spans gets the ingress's
+  (`source` says which). Without an image service the sink is not asked
+  and `services` is empty. `ferund` fills the steps the sink leaves out
+  with zeros and `null`, leaves out the services without requests and
+  turns ns into ms to a tenth. A sink older than `source` answers the
+  ingress's count to both reads, so it is rolled out first. The 503s are those of `…/access-logs`; a sink without the
   route (older than `ferund`) answers 404, which is a 503
   `log_store_unavailable` too.
 - **`GET /api/v1/tenant`** (tenant class, member), which the sink asks

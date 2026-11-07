@@ -175,8 +175,9 @@ export function IncidentCard({ inc, st, tenant, navigate }) {
   );
 }
 
-// TrafficCard is what the ingress answered in the last hour: the sum, and
-// a line per service with requests.
+// TrafficCard is the requests of the last hour: the sum, and a line per
+// service with requests, counted from its own spans, or for a routed
+// service that sends none, what the ingress answered for it (so marked).
 function TrafficCard({ st, traffic, tenant, navigate }) {
   const env = st.name;
   const totals = trafficTotals(traffic);
@@ -198,9 +199,11 @@ function TrafficCard({ st, traffic, tenant, navigate }) {
         <div key={s.service} className="ov-trow">
           <Link to={envPath(tenant, env, 'objects', `service/${s.service}`, null)} navigate={navigate} className="strong">{s.service}</Link>
           <WideSpark series={s.series} />
-          <span className="ov-trow-nums">{fmtCount(s.requests)} req · p95 {fmtLatency(s.p95Ms)}</span>
+          <span className="ov-trow-nums">{fmtCount(s.requests)} req · p95 {fmtLatency(s.p95Ms)}
+            {s.source === 'ingress' && <span className="ov-src" title="it sends no server spans: what the ingress answered for it"> · ingress</span>}</span>
         </div>))}
-      {traffic && list.length === 0 && <p className="muted">No requests through the ingress in the last hour.</p>}
+      {traffic && list.length === 0 && <p className="muted">No requests in the last hour.</p>}
+      {traffic && <p className="ov-note">From the services' OpenTelemetry server spans; for a routed service that sends none, what the ingress answered.</p>}
     </section>
   );
 }
@@ -305,9 +308,11 @@ function cardLine(o, t, routed, manual, counted) {
     return `${restarts} restart${restarts === 1 ? '' : 's'}${exit != null ? ` · last exit ${exit}` : ''}`;
   }
   if (tone === 'moving') return `${o.ready || 0} of ${o.desired || 0} ready`;
-  if (t && t.requests > 0) return `${fmtCount(t.requests)} requests last hour · p95 ${fmtLatency(t.p95Ms)}`;
-  if (!routed) return 'internal · no route to it';
-  return counted ? 'no requests in the last hour' : 'reached by a route';
+  if (t && t.requests > 0) {
+    return `${fmtCount(t.requests)} requests last hour · p95 ${fmtLatency(t.p95Ms)}${t.source === 'ingress' ? ' · ingress' : ''}`;
+  }
+  if (counted) return 'no traced requests in the last hour';
+  return routed ? 'reached by a route' : 'internal · no route to it';
 }
 
 // ActivityList is the activity's entries: each with its tone, what, its

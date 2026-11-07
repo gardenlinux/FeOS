@@ -130,6 +130,7 @@ export function TrafficTable({ traffic, service = '' }) {
               <th className="col-num">p50</th>
               <th className="col-num">p95</th>
               <th>over the window</th>
+              <th>counted from</th>
             </tr>
           </thead>
           <tbody>
@@ -142,12 +143,13 @@ export function TrafficTable({ traffic, service = '' }) {
                 <td className="col-num mono">{fmtLatency(s.p50Ms)}</td>
                 <td className="col-num mono">{fmtLatency(s.p95Ms)}</td>
                 <td><Spark series={s.series} /></td>
+                <td className="small muted">{s.source === 'ingress' ? 'the ingress' : 'its spans'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {traffic && list.length === 0 && <p className="empty">No requests through the ingress in this window.</p>}
+      {traffic && list.length === 0 && <p className="empty">No requests in this window.</p>}
     </>
   );
 }
@@ -182,8 +184,10 @@ export function TrafficTab({ tenant, env, navigate, service = '' }) {
       <ErrBox error={err} />
       <TrafficTable traffic={traffic} service={service} />
       {!traffic && !err && <p className="empty">Loading…</p>}
-      <p className="panel-note">What the ingress answered at the public hosts; the route door's requests are not counted.
-        Errors are answers of 500 or more, or none.</p>
+      <p className="panel-note">Counted from each service's OpenTelemetry server spans, wherever a request came from, without
+        its readiness check; errors are spans with an error status or a status of 500 to 599. A routed service that sends no
+        spans shows what the ingress answered at the public hosts (errors: 500 or more, or none); the route door's requests
+        are not counted.</p>
       <AccessLog tenant={tenant} env={env} navigate={navigate} service={service} />
     </>
   );

@@ -71,7 +71,11 @@ type SpanLink struct {
 // any), a time range of ts in Unix ns (both ends included; 0: open), a
 // range of durations (0: open), and attributes each with its value in
 // the span's or the resource's attributes; with Failed only the
-// ingress's spans of failed requests (Failed); at most Max hits.
+// ingress's spans of failed requests (Failed); with Kind only spans of
+// that kind (OTLP's number; 0: any); with ServerFailed only the spans of
+// failed requests as a server's span says it (ServerFailed); without the
+// spans of a request to one of NotPaths (a service's readiness check, by
+// url.path or the older http.target); at most Max hits.
 // Environments, when not nil, bounds the spans to those of the
 // environments it names (a reader's grants on environments, ADR 0031):
 // a span of no environment is none of them, and an empty list selects
@@ -85,6 +89,9 @@ type SpanQuery struct {
 	SinceNs, UntilNs                           int64
 	MinDurationNs, MaxDurationNs               int64
 	Failed                                     bool
+	Kind                                       uint64
+	ServerFailed                               bool
+	NotPaths                                   []string
 	Max                                        int
 }
 
@@ -147,6 +154,16 @@ func (q SpanQuery) String() string {
 	if q.Failed {
 		c = append(c, failedClause)
 	}
+	if q.Kind > 0 {
+		c = append(c, "span_kind:"+strconv.FormatUint(q.Kind, 10))
+	}
+	if q.ServerFailed {
+		c = append(c, serverFailedClause)
+	}
+	for _, p := range q.NotPaths {
+		v := quote(p)
+		c = append(c, "NOT span_attributes."+fieldPath(attrPath)+":"+v, "NOT span_attributes."+fieldPath(attrTarget)+":"+v)
+	}
 	if len(c) == 0 {
 		return "*"
 	}
@@ -195,6 +212,17 @@ func (q *SpanQuery) Match(d *SpanDoc) bool {
 	}
 	for k, v := range q.Tags {
 		if !valueIs(d.SpanAttributes[k], v) && !valueIs(d.ResourceAttributes[k], v) {
+			return false
+		}
+	}
+	if q.Kind > 0 && d.SpanKind != q.Kind {
+		return false
+	}
+	if q.ServerFailed && !ServerFailed(d) {
+		return false
+	}
+	for _, p := range q.NotPaths {
+		if valueIs(d.SpanAttributes[attrPath], p) || valueIs(d.SpanAttributes[attrTarget], p) {
 			return false
 		}
 	}
