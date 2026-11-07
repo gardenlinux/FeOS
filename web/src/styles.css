@@ -660,7 +660,7 @@ tr:hover .iconbtn { opacity: 1; }
 
 /* ------------------------------------------------------------- login -- */
 .login {
-  min-height: 100vh; display: grid; place-items: center; align-content: center; padding: 24px 16px;
+  min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; align-content: center; padding: 24px 16px;
   background:
     radial-gradient(900px 520px at 50% -8%, var(--accent-dim), transparent 70%),
     var(--bg0);
@@ -695,6 +695,9 @@ tr:hover .iconbtn { opacity: 1; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+/* a phone: the card in the upper third, where the eye and the thumb are,
+   not in the middle of a tall screen */
+@media (max-width: 600px) { .login { align-content: start; padding-top: max(40px, 12dvh); } }
 @media (max-width: 480px) { .login-card { padding: 30px 22px 24px; } .login-name { font-size: 24px; } }
 .gate { max-width: 560px; }
 .gate h2 { font-size: 14px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; }
