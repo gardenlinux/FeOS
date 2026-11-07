@@ -34,7 +34,7 @@ import { entries } from './search.js';
 import { deploymentTone } from './views/envs.js';
 import { ToneDot } from './views/Environments.jsx';
 import {
-  ENV_NAV, MeContext, NAV_GROUPS, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants, roleLabel,
+  ENV_NAV, MeContext, NAV_GROUPS, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants,
   tenantAccess, tenantHome, tenantNav, viewGate,
 } from './people.js';
 
@@ -364,7 +364,6 @@ function Switcher({ route, navigate, me, platform }) {
   const f = filter.trim().toLowerCase();
   const shownTenants = f ? tenants.filter((tn) => tn.tenant.toLowerCase().includes(f)) : tenants;
   const pickedAccess = tenantAccess(me, picked);
-  const role = !platform && t ? roleLabel(tenants.find((x) => x.tenant === t)) || (operator ? 'operator' : '') : '';
   const enc = encodeURIComponent;
 
   return (
@@ -373,7 +372,6 @@ function Switcher({ route, navigate, me, platform }) {
         <Icon name={platform ? 'server' : 'building'} size={14} />
         <span className="switch-name">{platform ? 'Administration' : t || 'Choose a tenant'}</span>
         {!platform && t && envName && <><span className="switch-slash">/</span><span className="switch-name">{envName}</span></>}
-        {role && <span className="switch-role">{role}</span>}
         <Icon name="chevronDown" size={13} />
       </button>
       {open && (
@@ -388,7 +386,6 @@ function Switcher({ route, navigate, me, platform }) {
               <button key={tn.tenant} role="menuitem" className={'switch-item' + (tn.tenant === picked ? ' on' : '')}
                 onClick={() => setPicked(tn.tenant)} aria-haspopup="true">
                 <span className="mono">{tn.tenant}</span>
-                <span className="switch-role">{roleLabel(tn)}</span>
                 <Icon name="chevronRight" size={12} />
               </button>
             ))}

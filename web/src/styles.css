@@ -113,7 +113,6 @@ a:hover { text-decoration: underline; }
 .switch:hover, .switch.on { border-color: rgba(var(--accent-rgb), .55); }
 .switch-slash { color: var(--muted); }
 .switch-name { font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.switch-role { margin-left: auto; padding-left: 6px; font-size: 11px; color: var(--muted); font-weight: 400; }
 .switch .icon:last-child { color: var(--muted); flex: none; }
 .switch-menu {
   position: absolute; z-index: 30; left: 0; top: calc(100% + 4px);
@@ -130,7 +129,6 @@ a:hover { text-decoration: underline; }
 .switch-filter { margin: 0 4px 4px; width: auto; font-size: 12.5px; padding: 5px 8px; }
 .switch-item .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .switch-item .icon:last-child:not(:first-child) { margin-left: auto; color: var(--muted); }
-.switch-item .switch-role + .icon { margin-left: 4px; }
 .switch-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 6px 8px 4px; }
 .switch-item {
   width: 100%; justify-content: flex-start; gap: 8px; background: none; border: 1px solid transparent;
@@ -757,7 +755,6 @@ tr:hover .iconbtn { opacity: 1; }
   .brand { padding: 0 4px 0 0; height: auto; margin: 0; border: 0; }
   .brand-name, .snav-label, .sidehint { display: none; }
   .switch { max-width: calc(100vw - 130px); }
-  .switch .switch-role { display: none; }
   .topsearch { width: auto; }
   .topbar { padding: 0 12px; }
   .switch-menu { grid-template-columns: minmax(0, 1fr); grid-template-rows: 2fr 3fr; width: calc(100vw - 24px); height: 70vh; }
