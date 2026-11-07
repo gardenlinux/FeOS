@@ -140,10 +140,11 @@ a:hover { text-decoration: underline; }
 }
 .snav-item:hover { background: var(--panel2); color: var(--text); text-decoration: none; }
 .snav-item .icon { flex: none; color: var(--muted); }
-/* the icon carries the page's layer, as the architecture page's colours */
-.snav-item.l-os .icon { color: var(--os); }
+/* the icon carries the page's layer, as the architecture page's colours;
+   the OS layer's ochre reads as a warning next to the counts, so its
+   pages take the net layer's green here */
 .snav-item.l-run .icon { color: var(--run); }
-.snav-item.l-net .icon { color: var(--net); }
+.snav-item.l-net .icon, .snav-item.l-os .icon { color: var(--net); }
 .snav-item.on { background: var(--accent-dim); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .snav-count { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .snav-count.bad { color: var(--danger); font-weight: 700; }
