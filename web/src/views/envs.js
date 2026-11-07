@@ -438,10 +438,12 @@ export function newestFirst(...pages) {
 // that the environment's default host answers 404 (ADR 0021).
 const SERVED_STATES = new Set(['served', 'dns-moved']);
 
-// envDomains are the tenant's domains bound to an environment.
+// envDomains are the tenant's domains bound to an environment: a
+// domain names the one it is bound to by its ID (GET /api/v1/domains,
+// "environment"), null while unbound.
 export function envDomains(domains, st) {
   if (!st) return [];
-  return (domains || []).filter((d) => d.environment && (d.environment.id === st.id || d.environment.name === st.name));
+  return (domains || []).filter((d) => d.environment && d.environment === st.id);
 }
 
 // defaultHost is an environment's default host: {host, label, serving};

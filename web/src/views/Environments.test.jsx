@@ -574,7 +574,7 @@ describe('EnvHead', () => {
 
   it('shows Done while the builder is open, and the default host that answers 404 while a domain is served', () => {
     const st = { ...STAGE, hosts: ['kino.example.com'], hostLabel: 'stage--kino' };
-    const domains = [{ id: 'd', name: 'kino.example.com', state: 'served', environment: { id: st.id, name: st.name } }];
+    const domains = [{ id: 'd', name: 'kino.example.com', state: 'served', environment: st.id }];
     const out = html(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing lastOk={0} changed={nav} navigate={nav} domains={domains} />);
     expect(out).toContain('Done');
     expect(out).not.toContain('New deployment');
@@ -708,8 +708,8 @@ describe('the domains & access tab', () => {
   });
 
   it('lists the domains bound to it, linked to their pages', () => {
-    const domains = [{ id: 'd-1', name: 'kino.example.com', state: 'served', verification: 'verified', environment: { id: STAGE.id, name: STAGE.name } },
-      { id: 'd-2', name: 'x.example.org', state: 'served', environment: { id: 'o', name: 'o' } }];
+    const domains = [{ id: 'd-1', name: 'kino.example.com', state: 'served', verification: 'verified', environment: STAGE.id },
+      { id: 'd-2', name: 'x.example.org', state: 'served', environment: 'o' }];
     const out = html(<DomainsBox tenant={T} st={STAGE} domains={domains} navigate={nav} />);
     expect(out).toContain('href="/tenants/fecode/domains/d-1"');
     expect(out).not.toContain('x.example.org');

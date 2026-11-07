@@ -334,9 +334,9 @@ describe('the traffic', () => {
 
 describe('domains and access', () => {
   const domains = [
-    { id: 'd-1', name: 'kino.example.com', state: 'served', environment: { id: STAGE.id, name: STAGE.name } },
-    { id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns', environment: { id: STAGE.id, name: STAGE.name } },
-    { id: 'd-3', name: 'other.example.org', state: 'served', environment: { id: 'x', name: 'other' } },
+    { id: 'd-1', name: 'kino.example.com', state: 'served', environment: STAGE.id },
+    { id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns', environment: STAGE.id },
+    { id: 'd-3', name: 'other.example.org', state: 'served', environment: 'x' },
     { id: 'd-4', name: 'free.example.org', state: 'unverified', environment: null },
   ];
 
