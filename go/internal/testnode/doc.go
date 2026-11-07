@@ -34,7 +34,9 @@
 // SecurityGroupService and NameService over records in memory with
 // feosd's rules (a pod claims its volumes at its create; with
 // Config.CheckSecurityGroups and Config.CheckNameTables a pod whose groups
-// or name tables the node lacks fails at its bring-up; Node.Resolve
+// or name tables the node lacks fails at its bring-up; a RestorePod that
+// brings security groups or name tables puts them into the pod's spec,
+// each unless empty, before it is placed (ADR 0035); Node.Resolve
 // answers a pod's name as feosd's resolver would; Config.NoNameService
 // plays a feosd from before the name tables), reports a
 // container's exit with its code (Script.ExitContainer) and serves a

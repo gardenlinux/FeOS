@@ -29,6 +29,12 @@ use feos_proto::disk_service::{
     disk_service_client::DiskServiceClient, evict_request, EvictRequest, GetHeadRequest,
     OpenDiskRequest, StatsRequest, StopDiskRequest,
 };
+use feos_proto::network_service::{
+    name_service_client::NameServiceClient,
+    security_group_service_client::SecurityGroupServiceClient, DeleteNameTableRequest,
+    DeleteSecurityGroupRequest, NameTable, PutNameTableRequest, PutSecurityGroupRequest,
+    SecurityGroup,
+};
 use feos_proto::pod_service::{
     pod_service_client::PodServiceClient, CreatePodRequest, DeletePodRequest, HibernatePodRequest,
     HibernatePodResponse, Hibernation, HibernationPhase, PodInfo, PodNetwork, PodSpec, PodState,
@@ -395,6 +401,36 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
 
     let head_key = hibernate(&mut pods, &pod_id).await?;
 
+    // A restore brings the pod's security groups and name tables (ADR
+    // 0035), which the node must have.
+    let mut groups = SecurityGroupServiceClient::connect(PUBLIC_SERVER_ADDRESS).await?;
+    let mut names = NameServiceClient::connect(PUBLIC_SERVER_ADDRESS).await?;
+    let (first, second, table) = (
+        format!("restore-a-{pod_id}"),
+        format!("restore-b-{pod_id}"),
+        format!("restore-{pod_id}"),
+    );
+    for id in [&first, &second] {
+        groups
+            .put_security_group(PutSecurityGroupRequest {
+                group: Some(SecurityGroup {
+                    id: id.clone(),
+                    version: 1,
+                    ..Default::default()
+                }),
+            })
+            .await?;
+    }
+    names
+        .put_name_table(PutNameTableRequest {
+            table: Some(NameTable {
+                id: table.clone(),
+                version: 1,
+                ..Default::default()
+            }),
+        })
+        .await?;
+
     // Another node: one that has neither the pod nor anything of it in
     // its cache.
     info!("Forgetting pod {pod_id} and what diskd has of it");
@@ -429,6 +465,8 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
             pod_id: pod_id.clone(),
             head_key: head_key.clone(),
             cold: false,
+            security_groups: vec![first.clone()],
+            name_tables: vec![table.clone()],
             ..Default::default()
         })
         .await?
@@ -440,11 +478,17 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
     );
     let pod = get_pod(&mut pods, &pod_id).await?;
     assert_eq!(pod.state(), PodState::Running);
-    assert_eq!(
-        pod.spec,
-        Some(networked),
-        "the spec comes with the checkpoint"
-    );
+    // The spec comes with the checkpoint, in the restore's groups and
+    // name tables.
+    let regrouped = PodSpec {
+        network: Some(PodNetwork {
+            security_groups: vec![first.clone()],
+            name_tables: vec![table.clone()],
+            ..Default::default()
+        }),
+        ..networked
+    };
+    assert_eq!(pod.spec, Some(regrouped));
     guard.set_pid(pid(&pod)?);
     // No address is handed out twice: the restored pod has a new one, and
     // the metadata that went in after the snapshot's load says so.
@@ -479,12 +523,14 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
 
     // Without its memory: a new boot on the checkpoint's disk.
     info!("Hibernating pod {pod_id}, and restoring it without its memory");
-    let second = hibernate(&mut pods, &pod_id).await?;
+    let placed = pod.ipv6_address.clone();
+    let checkpoint = hibernate(&mut pods, &pod_id).await?;
     let restored = pods
         .restore_pod(RestorePodRequest {
             pod_id: pod_id.clone(),
             head_key: String::new(),
             cold: true,
+            security_groups: vec![second.clone()],
             ..Default::default()
         })
         .await?
@@ -492,6 +538,13 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
     assert!(!restored.memory_restored);
     let pod = wait_until_up(&mut pods, &pod_id).await?;
     guard.set_pid(pid(&pod)?);
+    // On the same node, too: the new group, the name tables it had, and a
+    // new address.
+    let network = pod.spec.clone().and_then(|spec| spec.network);
+    let network = network.context("the pod has its network")?;
+    assert_eq!(network.security_groups, std::slice::from_ref(&second));
+    assert_eq!(network.name_tables, std::slice::from_ref(&table));
+    assert_ne!(pod.ipv6_address, placed, "the same node hands out anew");
     assert_ne!(
         guest_ping(&pod_id).await?.boot_id,
         before.boot_id,
@@ -500,7 +553,7 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
     assert_eq!(records(&pod_id).await?, marked(&["keep"], &marker));
     // Hibernation after hibernation, the chain keeps its shape.
     let head = disks
-        .get_head(GetHeadRequest { key: second })
+        .get_head(GetHeadRequest { key: checkpoint })
         .await?
         .into_inner();
     assert_eq!(head.chain.len(), 2, "the chain grew: {:?}", head.chain);
@@ -512,6 +565,14 @@ async fn test_pod_hibernate_and_restore() -> Result<()> {
     verify_microvm_cleanup(&pod_id);
     assert!(!disk_dir(&pod_id).exists());
     guard.disable_cleanup();
+    for id in [first, second] {
+        groups
+            .delete_security_group(DeleteSecurityGroupRequest { id })
+            .await?;
+    }
+    names
+        .delete_name_table(DeleteNameTableRequest { id: table })
+        .await?;
     Ok(())
 }
 

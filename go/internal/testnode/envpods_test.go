@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	containerv1 "github.com/gardenlinux/feos/go/gen/feos/container/v1"
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
@@ -470,5 +471,148 @@ func TestEnvPodExecAndPorts(t *testing.T) {
 	// expected to listen.
 	if got, err := open(plain); err == nil && got == "hello" {
 		t.Error("another pod's port reached the first's address")
+	}
+}
+
+// A restore that brings security groups and name tables puts them into the
+// pod's spec, each unless empty, before the pod is placed (ADR 0035): on
+// the node that has the pod as on one that adopts it from its checkpoint.
+// With the checks on, the restore needs the new ones, not the old; an
+// invalid list or a pod without a network changes nothing.
+func TestRestoreBringsGroupsAndNameTables(t *testing.T) {
+	e := newEnv(t)
+	in := e.instance("i1", caIss)
+	objs := NewObjectStore("moves")
+	checks := func(c *Config) { c.ObjectStore, c.CheckSecurityGroups, c.CheckNameTables = objs, true, true }
+	n1 := e.start("n1", in, checks)
+	n2 := e.start("n2", in, checks)
+	pc1, pc2 := pods(t, in, "n1"), pods(t, in, "n2")
+	const (
+		old    = "sbx-0193e3a0-0000-7000-8000-000000000002"
+		env    = "env-0193e3a0-0000-7000-8000-000000000001"
+		group  = "sg-0193e3a0-0000-7000-8000-000000000003"
+		group2 = "sg-0193e3a0-0000-7000-8000-000000000004"
+	)
+	for _, node := range []string{"n1", "n2"} {
+		gc := networkv1.NewSecurityGroupServiceClient(conn(t, in, node))
+		nc := networkv1.NewNameServiceClient(conn(t, in, node))
+		for _, id := range []string{env, group, group2} {
+			if _, err := gc.PutSecurityGroup(bgctx, &networkv1.PutSecurityGroupRequest{Group: &networkv1.SecurityGroup{Id: id, Version: 1}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := nc.PutNameTable(bgctx, &networkv1.PutNameTableRequest{Table: &networkv1.NameTable{Id: env, Version: 1,
+			Entries: []*networkv1.NameEntry{{Name: "api", Addresses: []string{"fd00::7"}}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gc1 := networkv1.NewSecurityGroupServiceClient(conn(t, in, "n1"))
+	nc1 := networkv1.NewNameServiceClient(conn(t, in, "n1"))
+	if _, err := gc1.PutSecurityGroup(bgctx, &networkv1.PutSecurityGroupRequest{Group: &networkv1.SecurityGroup{Id: old, Version: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nc1.PutNameTable(bgctx, &networkv1.PutNameTableRequest{Table: &networkv1.NameTable{Id: old, Version: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	network := func(pc podv1.PodServiceClient, id string) *podv1.PodNetwork {
+		t.Helper()
+		info, err := pc.GetPod(bgctx, &podv1.GetPodRequest{PodId: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.GetSpec().GetNetwork()
+	}
+	wantNetwork := func(got *podv1.PodNetwork, groups, tables []string) {
+		t.Helper()
+		if !slices.Equal(got.GetSecurityGroups(), groups) || !slices.Equal(got.GetNameTables(), tables) {
+			t.Fatalf("groups %v and tables %v, want %v and %v", got.GetSecurityGroups(), got.GetNameTables(), groups, tables)
+		}
+	}
+
+	p := podid.Mint()
+	spec := envSpec(p, "", old)
+	spec.Network.NameTables = []string{old}
+	spec.Network.DnsUpstreams = []string{"9.9.9.9"}
+	if _, err := create(t, pc1, p.String(), spec); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, pc1, p.String(), podv1.PodState_POD_STATE_RUNNING)
+	if _, ok := n1.Resolve(p, "api"); ok {
+		t.Fatal("the old table answers api")
+	}
+	if _, err := pc1.HibernatePod(bgctx, &podv1.HibernatePodRequest{PodId: p.String()}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Invalid lists are refused and change nothing.
+	_, err := pc1.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: p.String(), SecurityGroups: []string{group}, NameTables: []string{env, env}})
+	wantCode(t, err, codes.InvalidArgument, "name table "+env+" is named twice")
+	_, err = pc1.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: p.String(), SecurityGroups: []string{"no spaces"}})
+	wantPrefix(t, err, codes.InvalidArgument, "invalid security group ID")
+	wantNetwork(network(pc1, p.String()), []string{old}, []string{old})
+
+	// The node that has it: the new ones, and the old are free to go.
+	r, err := pc1.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: p.String(), SecurityGroups: []string{env, group}, NameTables: []string{env}})
+	if err != nil || r.Pod.State != podv1.PodState_POD_STATE_RUNNING {
+		t.Fatalf("restore: %v, %v", r, err)
+	}
+	wantNetwork(r.Pod.GetSpec().GetNetwork(), []string{env, group}, []string{env})
+	if r.Pod.GetSpec().GetNetwork().GetDnsUpstreams()[0] != "9.9.9.9" {
+		t.Fatalf("the rest of the network changed: %v", r.Pod.GetSpec().GetNetwork())
+	}
+	if addrs, ok := n1.Resolve(p, "api"); !ok || !slices.Equal(addrs, []string{"fd00::7"}) {
+		t.Fatalf("api resolves to %v, %v", addrs, ok)
+	}
+	if _, err := gc1.DeleteSecurityGroup(bgctx, &networkv1.DeleteSecurityGroupRequest{Id: old}); err != nil {
+		t.Fatalf("the old group: %v", err)
+	}
+	if _, err := nc1.DeleteNameTable(bgctx, &networkv1.DeleteNameTableRequest{Id: old}); err != nil {
+		t.Fatalf("the old table: %v", err)
+	}
+
+	// Empty lists keep the spec's.
+	if _, err := pc1.HibernatePod(bgctx, &podv1.HibernatePodRequest{PodId: p.String()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pc1.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: p.String()}); err != nil {
+		t.Fatal(err)
+	}
+	wantNetwork(network(pc1, p.String()), []string{env, group}, []string{env})
+
+	// A node that adopts it from its checkpoint: the checkpoint has the
+	// groups it ran in, the restore brings others; its tables stay.
+	h2, err := pc1.HibernatePod(bgctx, &podv1.HibernatePodRequest{PodId: p.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = pc2.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: p.String(), HeadKey: h2.Checkpoint.HeadKey, NameTables: []string{env, env}})
+	wantCode(t, err, codes.InvalidArgument, "name table "+env+" is named twice")
+	if _, err := pc2.GetPod(bgctx, &podv1.GetPodRequest{PodId: p.String()}); status.Code(err) != codes.NotFound {
+		t.Fatalf("a refused adopt left the pod: %v", err)
+	}
+	r, err = pc2.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: p.String(), HeadKey: h2.Checkpoint.HeadKey, SecurityGroups: []string{env, group2}})
+	if err != nil || r.Pod.State != podv1.PodState_POD_STATE_RUNNING {
+		t.Fatalf("restore on n2: %v, %v", r, err)
+	}
+	wantNetwork(network(pc2, p.String()), []string{env, group2}, []string{env})
+	if _, ok := n2.Resolve(p, "api"); !ok {
+		t.Fatal("api does not resolve on n2")
+	}
+
+	// A pod without a network takes none.
+	q := podid.Mint()
+	none := sandboxSpec(q, "inc-1")
+	none.Network = &podv1.PodNetwork{None: true}
+	if _, err := create(t, pc1, q.String(), none); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, pc1, q.String(), podv1.PodState_POD_STATE_RUNNING)
+	if _, err := pc1.HibernatePod(bgctx, &podv1.HibernatePodRequest{PodId: q.String()}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = pc1.RestorePod(bgctx, &podv1.RestorePodRequest{PodId: q.String(), SecurityGroups: []string{env}})
+	wantCode(t, err, codes.InvalidArgument, "the pod has no network: it takes no security groups or name tables")
+	if info := waitState(t, pc1, q.String(), podv1.PodState_POD_STATE_HIBERNATED); !info.GetSpec().GetNetwork().GetNone() {
+		t.Fatalf("network %v", info.GetSpec().GetNetwork())
 	}
 }

@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GuestService_MountVolumes_FullMethodName = "/feos.guest.v1.GuestService/MountVolumes"
+	GuestService_MountVolumes_FullMethodName    = "/feos.guest.v1.GuestService/MountVolumes"
+	GuestService_SetInterceptCas_FullMethodName = "/feos.guest.v1.GuestService/SetInterceptCas"
 )
 
 // GuestServiceClient is the client API for GuestService service.
@@ -39,6 +40,16 @@ type GuestServiceClient interface {
 	// it is, unless it is to be formatted. Every volume gets an answer of
 	// its own; one that fails leaves the others.
 	MountVolumes(ctx context.Context, in *MountVolumesRequest, opts ...grpc.CallOption) (*MountVolumesResponse, error)
+	// Sets the pod's interception CAs (ADR 0028 §5), which feosd pushes
+	// before it creates the containers and whenever SetPodHttpBindings
+	// changes them. The guest writes them to intercept-ca.pem in the share
+	// directory, which every container sees at /run/feos/intercept-ca.pem,
+	// and every container created after it gets a bundle of its image's
+	// system bundle and the CAs mounted over the image's bundles, and the
+	// variables naming them. A container that has a bundle has it rewritten
+	// in place, never by a rename, so that its mounts see the new CAs. No
+	// CAs empty the file; containers created then get nothing.
+	SetInterceptCas(ctx context.Context, in *SetInterceptCasRequest, opts ...grpc.CallOption) (*SetInterceptCasResponse, error)
 }
 
 type guestServiceClient struct {
@@ -53,6 +64,16 @@ func (c *guestServiceClient) MountVolumes(ctx context.Context, in *MountVolumesR
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MountVolumesResponse)
 	err := c.cc.Invoke(ctx, GuestService_MountVolumes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *guestServiceClient) SetInterceptCas(ctx context.Context, in *SetInterceptCasRequest, opts ...grpc.CallOption) (*SetInterceptCasResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetInterceptCasResponse)
+	err := c.cc.Invoke(ctx, GuestService_SetInterceptCas_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +97,16 @@ type GuestServiceServer interface {
 	// it is, unless it is to be formatted. Every volume gets an answer of
 	// its own; one that fails leaves the others.
 	MountVolumes(context.Context, *MountVolumesRequest) (*MountVolumesResponse, error)
+	// Sets the pod's interception CAs (ADR 0028 §5), which feosd pushes
+	// before it creates the containers and whenever SetPodHttpBindings
+	// changes them. The guest writes them to intercept-ca.pem in the share
+	// directory, which every container sees at /run/feos/intercept-ca.pem,
+	// and every container created after it gets a bundle of its image's
+	// system bundle and the CAs mounted over the image's bundles, and the
+	// variables naming them. A container that has a bundle has it rewritten
+	// in place, never by a rename, so that its mounts see the new CAs. No
+	// CAs empty the file; containers created then get nothing.
+	SetInterceptCas(context.Context, *SetInterceptCasRequest) (*SetInterceptCasResponse, error)
 	mustEmbedUnimplementedGuestServiceServer()
 }
 
@@ -88,6 +119,9 @@ type UnimplementedGuestServiceServer struct{}
 
 func (UnimplementedGuestServiceServer) MountVolumes(context.Context, *MountVolumesRequest) (*MountVolumesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MountVolumes not implemented")
+}
+func (UnimplementedGuestServiceServer) SetInterceptCas(context.Context, *SetInterceptCasRequest) (*SetInterceptCasResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetInterceptCas not implemented")
 }
 func (UnimplementedGuestServiceServer) mustEmbedUnimplementedGuestServiceServer() {}
 func (UnimplementedGuestServiceServer) testEmbeddedByValue()                      {}
@@ -128,6 +162,24 @@ func _GuestService_MountVolumes_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GuestService_SetInterceptCas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetInterceptCasRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServiceServer).SetInterceptCas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GuestService_SetInterceptCas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServiceServer).SetInterceptCas(ctx, req.(*SetInterceptCasRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GuestService_ServiceDesc is the grpc.ServiceDesc for GuestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -138,6 +190,10 @@ var GuestService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MountVolumes",
 			Handler:    _GuestService_MountVolumes_Handler,
+		},
+		{
+			MethodName: "SetInterceptCas",
+			Handler:    _GuestService_SetInterceptCas_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

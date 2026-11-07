@@ -21,6 +21,149 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SetInterceptCasRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PEM certificates, oldest first.
+	CaPems        []string `protobuf:"bytes,1,rep,name=ca_pems,json=caPems,proto3" json:"ca_pems,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetInterceptCasRequest) Reset() {
+	*x = SetInterceptCasRequest{}
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetInterceptCasRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetInterceptCasRequest) ProtoMessage() {}
+
+func (x *SetInterceptCasRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetInterceptCasRequest.ProtoReflect.Descriptor instead.
+func (*SetInterceptCasRequest) Descriptor() ([]byte, []int) {
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SetInterceptCasRequest) GetCaPems() []string {
+	if x != nil {
+		return x.CaPems
+	}
+	return nil
+}
+
+type SetInterceptCasResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The containers whose bundle could not be rewritten, and why: they
+	// keep the CAs they had.
+	Failed        []*InterceptFailure `protobuf:"bytes,1,rep,name=failed,proto3" json:"failed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetInterceptCasResponse) Reset() {
+	*x = SetInterceptCasResponse{}
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetInterceptCasResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetInterceptCasResponse) ProtoMessage() {}
+
+func (x *SetInterceptCasResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetInterceptCasResponse.ProtoReflect.Descriptor instead.
+func (*SetInterceptCasResponse) Descriptor() ([]byte, []int) {
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SetInterceptCasResponse) GetFailed() []*InterceptFailure {
+	if x != nil {
+		return x.Failed
+	}
+	return nil
+}
+
+type InterceptFailure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ContainerId   string                 `protobuf:"bytes,1,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterceptFailure) Reset() {
+	*x = InterceptFailure{}
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterceptFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterceptFailure) ProtoMessage() {}
+
+func (x *InterceptFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterceptFailure.ProtoReflect.Descriptor instead.
+func (*InterceptFailure) Descriptor() ([]byte, []int) {
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *InterceptFailure) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
+}
+
+func (x *InterceptFailure) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type MountVolumesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Volumes       []*Volume              `protobuf:"bytes,1,rep,name=volumes,proto3" json:"volumes,omitempty"`
@@ -30,7 +173,7 @@ type MountVolumesRequest struct {
 
 func (x *MountVolumesRequest) Reset() {
 	*x = MountVolumesRequest{}
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[0]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -42,7 +185,7 @@ func (x *MountVolumesRequest) String() string {
 func (*MountVolumesRequest) ProtoMessage() {}
 
 func (x *MountVolumesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[0]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -55,7 +198,7 @@ func (x *MountVolumesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MountVolumesRequest.ProtoReflect.Descriptor instead.
 func (*MountVolumesRequest) Descriptor() ([]byte, []int) {
-	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{0}
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MountVolumesRequest) GetVolumes() []*Volume {
@@ -85,7 +228,7 @@ type Volume struct {
 
 func (x *Volume) Reset() {
 	*x = Volume{}
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[1]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -97,7 +240,7 @@ func (x *Volume) String() string {
 func (*Volume) ProtoMessage() {}
 
 func (x *Volume) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[1]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -110,7 +253,7 @@ func (x *Volume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Volume.ProtoReflect.Descriptor instead.
 func (*Volume) Descriptor() ([]byte, []int) {
-	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{1}
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Volume) GetName() string {
@@ -158,7 +301,7 @@ type MountVolumesResponse struct {
 
 func (x *MountVolumesResponse) Reset() {
 	*x = MountVolumesResponse{}
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[2]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -170,7 +313,7 @@ func (x *MountVolumesResponse) String() string {
 func (*MountVolumesResponse) ProtoMessage() {}
 
 func (x *MountVolumesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[2]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -183,7 +326,7 @@ func (x *MountVolumesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MountVolumesResponse.ProtoReflect.Descriptor instead.
 func (*MountVolumesResponse) Descriptor() ([]byte, []int) {
-	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{2}
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MountVolumesResponse) GetVolumes() []*MountedVolume {
@@ -209,7 +352,7 @@ type MountedVolume struct {
 
 func (x *MountedVolume) Reset() {
 	*x = MountedVolume{}
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[3]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -221,7 +364,7 @@ func (x *MountedVolume) String() string {
 func (*MountedVolume) ProtoMessage() {}
 
 func (x *MountedVolume) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_guest_v1_guest_proto_msgTypes[3]
+	mi := &file_feos_guest_v1_guest_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -234,7 +377,7 @@ func (x *MountedVolume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MountedVolume.ProtoReflect.Descriptor instead.
 func (*MountedVolume) Descriptor() ([]byte, []int) {
-	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{3}
+	return file_feos_guest_v1_guest_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MountedVolume) GetName() string {
@@ -269,7 +412,14 @@ var File_feos_guest_v1_guest_proto protoreflect.FileDescriptor
 
 const file_feos_guest_v1_guest_proto_rawDesc = "" +
 	"\n" +
-	"\x19feos/guest/v1/guest.proto\x12\rfeos.guest.v1\"F\n" +
+	"\x19feos/guest/v1/guest.proto\x12\rfeos.guest.v1\"1\n" +
+	"\x16SetInterceptCasRequest\x12\x17\n" +
+	"\aca_pems\x18\x01 \x03(\tR\x06caPems\"R\n" +
+	"\x17SetInterceptCasResponse\x127\n" +
+	"\x06failed\x18\x01 \x03(\v2\x1f.feos.guest.v1.InterceptFailureR\x06failed\"M\n" +
+	"\x10InterceptFailure\x12!\n" +
+	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"F\n" +
 	"\x13MountVolumesRequest\x12/\n" +
 	"\avolumes\x18\x01 \x03(\v2\x15.feos.guest.v1.VolumeR\avolumes\"\x86\x01\n" +
 	"\x06Volume\x12\x12\n" +
@@ -285,9 +435,10 @@ const file_feos_guest_v1_guest_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06device\x18\x02 \x01(\tR\x06device\x12\x1c\n" +
 	"\tformatted\x18\x03 \x01(\bR\tformatted\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error2g\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error2\xc9\x01\n" +
 	"\fGuestService\x12W\n" +
-	"\fMountVolumes\x12\".feos.guest.v1.MountVolumesRequest\x1a#.feos.guest.v1.MountVolumesResponseb\x06proto3"
+	"\fMountVolumes\x12\".feos.guest.v1.MountVolumesRequest\x1a#.feos.guest.v1.MountVolumesResponse\x12`\n" +
+	"\x0fSetInterceptCas\x12%.feos.guest.v1.SetInterceptCasRequest\x1a&.feos.guest.v1.SetInterceptCasResponseb\x06proto3"
 
 var (
 	file_feos_guest_v1_guest_proto_rawDescOnce sync.Once
@@ -301,23 +452,29 @@ func file_feos_guest_v1_guest_proto_rawDescGZIP() []byte {
 	return file_feos_guest_v1_guest_proto_rawDescData
 }
 
-var file_feos_guest_v1_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_feos_guest_v1_guest_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_feos_guest_v1_guest_proto_goTypes = []any{
-	(*MountVolumesRequest)(nil),  // 0: feos.guest.v1.MountVolumesRequest
-	(*Volume)(nil),               // 1: feos.guest.v1.Volume
-	(*MountVolumesResponse)(nil), // 2: feos.guest.v1.MountVolumesResponse
-	(*MountedVolume)(nil),        // 3: feos.guest.v1.MountedVolume
+	(*SetInterceptCasRequest)(nil),  // 0: feos.guest.v1.SetInterceptCasRequest
+	(*SetInterceptCasResponse)(nil), // 1: feos.guest.v1.SetInterceptCasResponse
+	(*InterceptFailure)(nil),        // 2: feos.guest.v1.InterceptFailure
+	(*MountVolumesRequest)(nil),     // 3: feos.guest.v1.MountVolumesRequest
+	(*Volume)(nil),                  // 4: feos.guest.v1.Volume
+	(*MountVolumesResponse)(nil),    // 5: feos.guest.v1.MountVolumesResponse
+	(*MountedVolume)(nil),           // 6: feos.guest.v1.MountedVolume
 }
 var file_feos_guest_v1_guest_proto_depIdxs = []int32{
-	1, // 0: feos.guest.v1.MountVolumesRequest.volumes:type_name -> feos.guest.v1.Volume
-	3, // 1: feos.guest.v1.MountVolumesResponse.volumes:type_name -> feos.guest.v1.MountedVolume
-	0, // 2: feos.guest.v1.GuestService.MountVolumes:input_type -> feos.guest.v1.MountVolumesRequest
-	2, // 3: feos.guest.v1.GuestService.MountVolumes:output_type -> feos.guest.v1.MountVolumesResponse
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	2, // 0: feos.guest.v1.SetInterceptCasResponse.failed:type_name -> feos.guest.v1.InterceptFailure
+	4, // 1: feos.guest.v1.MountVolumesRequest.volumes:type_name -> feos.guest.v1.Volume
+	6, // 2: feos.guest.v1.MountVolumesResponse.volumes:type_name -> feos.guest.v1.MountedVolume
+	3, // 3: feos.guest.v1.GuestService.MountVolumes:input_type -> feos.guest.v1.MountVolumesRequest
+	0, // 4: feos.guest.v1.GuestService.SetInterceptCas:input_type -> feos.guest.v1.SetInterceptCasRequest
+	5, // 5: feos.guest.v1.GuestService.MountVolumes:output_type -> feos.guest.v1.MountVolumesResponse
+	1, // 6: feos.guest.v1.GuestService.SetInterceptCas:output_type -> feos.guest.v1.SetInterceptCasResponse
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_feos_guest_v1_guest_proto_init() }
@@ -331,7 +488,7 @@ func file_feos_guest_v1_guest_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_feos_guest_v1_guest_proto_rawDesc), len(file_feos_guest_v1_guest_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
