@@ -8,12 +8,15 @@
 //! A [`Table`] is replaced whole: the batch adds it (a no-op if it
 //! exists), deletes it with everything in it, and adds it again with its
 //! chains, sets and rules. [`update`] adds and deletes elements of its
-//! sets and leaves everything else as it is.
+//! sets and leaves everything else as it is. A timed set's elements carry
+//! a timeout, after which the kernel removes them; adding one that is
+//! there sets its timeout anew.
 
 use std::collections::HashMap;
 use std::io;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::time::Duration;
 
 const NETLINK_NETFILTER: libc::c_int = 12;
 const NETLINK_CAP_ACK: libc::c_int = 10;
@@ -67,6 +70,8 @@ const NFTA_SET_ELEM_LIST_SET_ID: u16 = 4;
 const NFTA_SET_ELEM_KEY: u16 = 1;
 const NFTA_SET_ELEM_DATA: u16 = 2;
 const NFTA_SET_ELEM_FLAGS: u16 = 3;
+const NFTA_SET_ELEM_TIMEOUT: u16 = 4;
+const NFTA_SET_ELEM_EXPIRATION: u16 = 5;
 const NFTA_SET_ELEM_USERDATA: u16 = 6;
 const NFTA_LIST_ELEM: u16 = 1;
 const NFTA_EXPR_NAME: u16 = 1;
@@ -78,6 +83,7 @@ const NFTA_VERDICT_CHAIN: u16 = 2;
 
 const NFT_SET_INTERVAL: u32 = 0x4;
 const NFT_SET_MAP: u32 = 0x8;
+const NFT_SET_TIMEOUT: u32 = 0x10;
 const NFT_SET_ELEM_INTERVAL_END: u32 = 0x1;
 const NFT_DATA_VERDICT: u32 = 0xffff_ff00;
 /// nft's user data, which `nft list` reads: the byte order of a set's
@@ -184,13 +190,15 @@ impl Chain {
 }
 
 /// A named set of keys or, with `interval`, of ranges of keys; with
-/// `map`, a verdict map: each element has a verdict.
+/// `map`, a verdict map: each element has a verdict; with `timeout`, a
+/// set of keys that each have a timeout.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Set {
     pub name: String,
     pub key: KeyType,
     pub interval: bool,
     pub map: bool,
+    pub timeout: bool,
     pub elements: Vec<Element>,
 }
 
@@ -201,6 +209,7 @@ impl Set {
             key,
             interval: false,
             map: false,
+            timeout: false,
             elements,
         }
     }
@@ -215,6 +224,15 @@ impl Set {
     pub fn verdict_map(name: &str, key: KeyType, elements: Vec<Element>) -> Self {
         Self {
             map: true,
+            ..Self::keys(name, key, elements)
+        }
+    }
+
+    /// A set of keys whose elements each have a timeout
+    /// ([`Element::with_timeout`]).
+    pub fn timed(name: &str, key: KeyType, elements: Vec<Element>) -> Self {
+        Self {
+            timeout: true,
             ..Self::keys(name, key, elements)
         }
     }
@@ -261,12 +279,14 @@ impl KeyType {
 }
 
 /// An element of a set: a key, or in an interval set the keys from `key`
-/// to `last`; in a verdict map, with its verdict.
+/// to `last`; in a verdict map, with its verdict; in a timed set, with
+/// the time it stays.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Element {
     pub key: Vec<u8>,
     pub last: Option<Vec<u8>>,
     pub verdict: Option<Verdict>,
+    pub timeout: Option<Duration>,
 }
 
 impl Element {
@@ -275,6 +295,7 @@ impl Element {
             key,
             last: None,
             verdict: None,
+            timeout: None,
         }
     }
 
@@ -339,6 +360,15 @@ impl Element {
             ..self
         }
     }
+
+    /// The element for `timeout` from now, for a timed set: at least a
+    /// millisecond, the kernel's unit.
+    pub fn with_timeout(self, timeout: Duration) -> Self {
+        Self {
+            timeout: Some(timeout),
+            ..self
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -364,6 +394,10 @@ pub enum ElementOp {
     Delete {
         set: String,
         elements: Vec<Element>,
+    },
+    /// Every element of the set.
+    Flush {
+        set: String,
     },
 }
 
@@ -1243,6 +1277,9 @@ fn replace_batch(table: &Table, seq: u32) -> io::Result<Batch> {
                 if set.map {
                     flags |= NFT_SET_MAP;
                 }
+                if set.timeout {
+                    flags |= NFT_SET_TIMEOUT;
+                }
                 m.u32(NFTA_SET_FLAGS, flags);
                 m.u32(NFTA_SET_KEY_TYPE, set.key.id());
                 m.u32(NFTA_SET_KEY_LEN, set.key.len() as u32);
@@ -1295,6 +1332,7 @@ fn update_batch(table: &Table, ops: &[ElementOp], seq: u32) -> io::Result<Batch>
         let (set, elements, delete) = match op {
             ElementOp::Add { set, elements } => (set, elements, false),
             ElementOp::Delete { set, elements } => (set, elements, true),
+            ElementOp::Flush { set } => (set, &Vec::new(), true),
         };
         let set = table.sets.iter().find(|s| s.name == *set).ok_or_else(|| {
             io::Error::new(
@@ -1302,6 +1340,20 @@ fn update_batch(table: &Table, ops: &[ElementOp], seq: u32) -> io::Result<Batch>
                 format!("table {} has no set {set}", table.name),
             )
         })?;
+        if let ElementOp::Flush { .. } = op {
+            // A delete without elements flushes the set.
+            batch.message(
+                format!("flush set {}", set.name),
+                NFT_MSG_DELSETELEM,
+                0,
+                table.family,
+                |m| {
+                    m.str(NFTA_SET_ELEM_LIST_TABLE, &table.name);
+                    m.str(NFTA_SET_ELEM_LIST_SET, &set.name);
+                },
+            );
+            continue;
+        }
         let mode = if delete {
             Elements::Delete
         } else {
@@ -1358,6 +1410,12 @@ fn set_elements(set: &Set, elements: &[Element], mode: Elements) -> io::Result<V
                 "a verdict, but no map"
             }));
         }
+        if element.timeout.is_some() && !set.timeout {
+            return Err(invalid("a timeout, but no timeouts"));
+        }
+    }
+    if set.timeout && set.interval {
+        return Err(invalid("timeouts of intervals"));
     }
     let verdict = |element: &Element| match mode {
         Elements::Delete => None,
@@ -1366,7 +1424,10 @@ fn set_elements(set: &Set, elements: &[Element], mode: Elements) -> io::Result<V
     if !set.interval {
         return Ok(elements
             .iter()
-            .map(|e| element(&e.key, false, verdict(e).as_ref(), false))
+            .map(|e| {
+                let timeout = e.timeout.filter(|_| mode != Elements::Delete);
+                timed_element(&e.key, verdict(e).as_ref(), timeout)
+            })
             .collect());
     }
     let mut ranges: Vec<_> = elements
@@ -1415,6 +1476,21 @@ fn next(key: &[u8]) -> Option<Vec<u8>> {
 /// An element: an interval's end, or a key with its verdict; `open` if
 /// its range runs to the last key.
 fn element(key: &[u8], end: bool, verdict: Option<&Verdict>, open: bool) -> Vec<u8> {
+    encode_element(key, end, verdict, open, None)
+}
+
+/// A key of a set that is no interval set, with its verdict and timeout.
+fn timed_element(key: &[u8], verdict: Option<&Verdict>, timeout: Option<Duration>) -> Vec<u8> {
+    encode_element(key, false, verdict, false, timeout)
+}
+
+fn encode_element(
+    key: &[u8],
+    end: bool,
+    verdict: Option<&Verdict>,
+    open: bool,
+    timeout: Option<Duration>,
+) -> Vec<u8> {
     let mut buf = Vec::new();
     Attrs { buf: &mut buf }.nested(NFTA_LIST_ELEM, |m| {
         m.nested(NFTA_SET_ELEM_KEY, |m| m.bytes(NFTA_DATA_VALUE, key));
@@ -1423,6 +1499,16 @@ fn element(key: &[u8], end: bool, verdict: Option<&Verdict>, open: bool) -> Vec<
         }
         if let Some(verdict) = verdict {
             m.nested(NFTA_SET_ELEM_DATA, |m| verdict_data(m, verdict));
+        }
+        if let Some(timeout) = timeout {
+            // The expiration too: an element that is there and has this
+            // timeout already keeps its old expiry without one (Linux
+            // 6.12, nft_add_set_elem).
+            let millis = u64::try_from(timeout.as_millis())
+                .unwrap_or(u64::MAX)
+                .max(1);
+            m.u64(NFTA_SET_ELEM_TIMEOUT, millis);
+            m.u64(NFTA_SET_ELEM_EXPIRATION, millis);
         }
         if open {
             let flags = udata(UDATA_SET_ELEM_FLAGS, SET_ELEM_F_INTERVAL_OPEN);
@@ -2350,6 +2436,72 @@ mod tests {
     }
 
     #[test]
+    fn timed_sets_carry_timeouts_and_flush() {
+        let address = || Element::ipv4(Ipv4Addr::new(192, 0, 2, 7));
+        let mut table = table();
+        table.sets.push(Set::timed(
+            "named4",
+            KeyType::Ipv4Addr,
+            vec![address().with_timeout(Duration::from_secs(300))],
+        ));
+        // The set has the timeout flag, and its element its timeout and
+        // expiration, in milliseconds, big endian.
+        let batch = replace_batch(&table, 1).unwrap();
+        let sent = messages(&batch.buf);
+        let set = sent.iter().find(|m| m.0 == NFT_MSG_NEWSET).expect("a set");
+        assert_eq!(
+            attr(set.2, NFTA_SET_FLAGS),
+            Some(&NFT_SET_TIMEOUT.to_be_bytes()[..])
+        );
+        let elements = sent
+            .iter()
+            .find(|m| m.0 == NFT_MSG_NEWSETELEM)
+            .expect("its elements");
+        let list = attr(elements.2, NFTA_SET_ELEM_LIST_ELEMENTS).unwrap();
+        let element = attrs(list)[0].1;
+        let millis = 300_000u64.to_be_bytes();
+        assert_eq!(attr(element, NFTA_SET_ELEM_TIMEOUT), Some(&millis[..]));
+        assert_eq!(attr(element, NFTA_SET_ELEM_EXPIRATION), Some(&millis[..]));
+        assert_eq!(keys(elements.2), [(vec![192, 0, 2, 7], false)]);
+
+        // Added again, with a timeout less than a millisecond: one.
+        let ops = [
+            ElementOp::Add {
+                set: "named4".to_string(),
+                elements: vec![address().with_timeout(Duration::from_micros(10))],
+            },
+            ElementOp::Flush {
+                set: "named4".to_string(),
+            },
+        ];
+        let batch = update_batch(&table, &ops, 1).unwrap();
+        let sent = messages(&batch.buf);
+        assert_eq!(sent.len(), 4);
+        let list = attr(sent[1].2, NFTA_SET_ELEM_LIST_ELEMENTS).unwrap();
+        assert_eq!(
+            attr(attrs(list)[0].1, NFTA_SET_ELEM_TIMEOUT),
+            Some(&1u64.to_be_bytes()[..])
+        );
+        // A flush is a delete without elements.
+        assert_eq!(sent[2].0, NFT_MSG_DELSETELEM);
+        assert_eq!(attr(sent[2].2, NFTA_SET_ELEM_LIST_ELEMENTS), None);
+        assert_eq!(batch.what[1], "flush set named4");
+
+        // A timeout where there are none, and timed intervals, are refused.
+        let plain = Set::keys(
+            "plain",
+            KeyType::Ipv4Addr,
+            vec![address().with_timeout(Duration::from_secs(1))],
+        );
+        assert!(set_elements(&plain, &plain.elements, Elements::Whole).is_err());
+        let intervals = Set {
+            interval: true,
+            ..Set::timed("intervals", KeyType::Ipv4Addr, vec![address()])
+        };
+        assert!(set_elements(&intervals, &intervals.elements, Elements::Whole).is_err());
+    }
+
+    #[test]
     fn large_sets_take_several_messages() {
         let elements = (0..5000u128)
             .map(|i| Element::ipv6(Ipv6Addr::from((0xfd00 << 112) | (i * 2))))
@@ -2743,6 +2895,74 @@ table inet NAME {
         assert!(chains(Family::Inet, "feos-test").unwrap().is_empty());
         assert!(sets(Family::Inet, "feos-test").unwrap().is_empty());
         assert!(rules(Family::Inet, "feos-test").unwrap().is_empty());
+    }
+
+    /// A timed set in the kernel: its elements go after their timeout,
+    /// one added again stays for its timeout from then, even the same
+    /// timeout, and a flush empties the set. Deleting an element that is
+    /// not there fails, which tells whether it is. Needs CAP_NET_ADMIN.
+    #[test]
+    #[ignore]
+    fn the_kernel_times_elements_out() {
+        use std::thread::sleep;
+        let name = "feos-test-timed";
+        let address = || Element::ipv4(Ipv4Addr::new(192, 0, 2, 7));
+        let timed = Set::timed("t4", KeyType::Ipv4Addr, Vec::new());
+        let mut table = table();
+        table.name = name.to_string();
+        table.sets.push(timed);
+        table.chains.push(Chain::regular(
+            "out",
+            vec![[
+                ct_original_ipv4_daddr_in("t4"),
+                vec![Expr::Verdict(Verdict::Return)],
+            ]
+            .concat()],
+        ));
+        replace(&table).unwrap();
+        let add = |timeout: Duration| {
+            update(
+                &table,
+                &[ElementOp::Add {
+                    set: "t4".to_string(),
+                    elements: vec![address().with_timeout(timeout)],
+                }],
+            )
+        };
+        let delete_it = || {
+            update(
+                &table,
+                &[ElementOp::Delete {
+                    set: "t4".to_string(),
+                    elements: vec![address()],
+                }],
+            )
+        };
+        let two = Duration::from_secs(2);
+        add(two).unwrap();
+        sleep(Duration::from_millis(1200));
+        add(two).unwrap();
+        sleep(Duration::from_millis(1200));
+        delete_it().expect("added again, it stays its timeout from then");
+        add(Duration::from_millis(500)).unwrap();
+        sleep(Duration::from_millis(1000));
+        let gone = delete_it().unwrap_err();
+        assert_eq!(gone.kind(), io::ErrorKind::NotFound, "{gone}");
+        add(two).unwrap();
+        update(
+            &table,
+            &[ElementOp::Flush {
+                set: "t4".to_string(),
+            }],
+        )
+        .unwrap();
+        assert!(delete_it().is_err(), "flushed");
+        // A whole table takes elements with their timeouts.
+        let mut whole = table.clone();
+        whole.sets[0].elements = vec![address().with_timeout(two)];
+        replace(&whole).unwrap();
+        delete_it().unwrap();
+        delete(Family::Inet, name).unwrap();
     }
 
     /// Writes the pod network and changes its sets, as feosd and as nft
