@@ -179,9 +179,9 @@ func TestTemplateCreateSendsItsSpec(t *testing.T) {
 	wantWebSpec(t, reqs[0].GetSpec(), row)
 	info := h.podState("n1", sb.ID, podv1.PodState_POD_STATE_RUNNING)
 	wantWebSpec(t, info.GetSpec(), row)
-	// The same spec on every build: a retry or takeover creates the pod it
-	// made.
-	again, err := buildPodSpec(bg, row, sec.resolve, nil)
+	// The same spec on every build, its identity's too: a retry or
+	// takeover creates the pod it made.
+	again, err := h.eng().podSpec(bg, row)
 	if err != nil || !proto.Equal(again, reqs[0].GetSpec()) {
 		t.Fatalf("a second build differs: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestTemplateTakeoverSendsTheSameSpec(t *testing.T) {
 		gen = gen + 1 WHERE id = $1`, sb.ID, testImage)
 	h.exec("INSERT INTO bookings (pod_id, node, vcpus, memory_mib, gated) VALUES ($1, 'n1', 1, 512, true)", sb.ID)
 	row := h.row(sb.ID)
-	first, err := buildPodSpec(bg, row, sec.resolve, nil)
+	first, err := h.eng().podSpec(bg, row)
 	if err != nil {
 		t.Fatal(err)
 	}
