@@ -102,69 +102,105 @@ func TestGroupRules(t *testing.T) {
 	}
 	short := podid.Mint()
 	legacy := podid.ID(uuid.NewString())
-	if len(env) != 40 || len(model.SecurityGroupID(uuid.New())) != 39 ||
+	if len(env) != 40 || len(model.WorkloadGroupID(uuid.New(), "service", strings.Repeat("a", 63))) != 35 ||
+		len(model.SandboxWorkloadGroupID(legacy.String())) > 64 ||
 		len(model.IngressGroupID(short)) != 15 || len(model.IngressGroupID(legacy)) != 40 {
-		t.Error("group IDs are not 40 characters, a tenant's not 39, an ing group of a short ID not 15")
+		t.Error("group IDs are not 40 characters, a workload's not 35, an ing group of a short ID not 15")
 	}
 }
 
-// A tenant's group's rules on the nodes (ADR 0034): in rules from
-// groups, blocks and the internet, out rules to them, ports as ranges
-// (a single port with last 0), icmp of the peer's family, the internet
-// as the egress table's two blocks; the groups named are its refs; a
-// group without a row names nobody; out left out is the internet, out []
-// is nothing.
-func TestRenderRules(t *testing.T) {
-	web, db := uuid.New(), uuid.New()
-	ids := map[string]uuid.UUID{"web": web, "db": db}
-	var g spec.SecurityGroup
-	if err := json.Unmarshal([]byte(`{
-		"in": [
-			{"protocol": "tcp", "ports": [5432, "6000-6010"], "from": {"group": "web"}},
-			{"protocol": "icmp", "from": {"cidr": "198.51.100.0/24"}},
-			{"protocol": "udp", "ports": [53], "from": {"cidr": "2001:db8::/32", "except": ["2001:db8:1::/48"]}},
-			{"protocol": "any", "from": {"group": "gone"}},
-			{"protocol": "tcp", "ports": [22], "from": {"group": "db"}}
-		],
-		"out": [{"protocol": "tcp", "ports": [443], "to": "internet"}]}`), &g); err != nil {
-		t.Fatal(err)
+// A workload's rules (ADR 0034 revised, 0035 revised): from the specs'
+// edges (env references by port name, URL hosts, uses; the ingress's go
+// through ing-), an attached service as its sandbox's pod on either end,
+// the deployed spec's edges beside the target's while it rolls, the
+// sandboxes' and jobs' reaches (entries by port, "all" as any protocol on
+// every workload); out the egress: the internet table, none, the blocks.
+func TestWorkloadRules(t *testing.T) {
+	envID := uuid.MustParse("0193e3a0-0000-7000-8000-000000000001")
+	box := podid.Mint()
+	sbx, all, job := podid.Mint(), podid.Mint(), podid.Mint()
+	target := &spec.Spec{
+		Services: map[string]spec.Service{
+			"api": {Image: "img", Ports: []spec.Port{{Name: "http", Port: 8080}, {Name: "grpc", Port: 9090}},
+				Env: map[string]spec.EnvValue{
+					"CATALOG": {Kind: spec.EnvService, Service: "catalog", Port: spec.PortRef{Name: "http"}, Key: "url"},
+					"DB":      {Kind: spec.EnvAddon, Addon: "db", Key: "url"},
+					"VITE":    {Value: "http://vite:5173"},
+				},
+				Egress: &spec.Egress{Domains: []string{"api.stripe.com"}, Blocks: []spec.Block{{CIDR: "203.0.113.0/24"}}}},
+			"catalog": {Image: "img", Ports: []spec.Port{{Name: "http", Port: 8081}}, Egress: &spec.Egress{Mode: spec.EgressNone}},
+			"vite": {Runtime: spec.RuntimeAttached, Sandbox: box.String(), Ports: []spec.Port{{Name: "http", Port: 5173}},
+				Env: map[string]spec.EnvValue{"API": {Kind: spec.EnvService, Service: "api", Port: spec.PortRef{Name: "grpc"},
+					Key: "url"}}},
+		},
+		Jobs:   map[string]spec.Job{"migrate": {Image: "img", Uses: []spec.Use{{Addon: "db"}}}},
+		Addons: map[string]spec.Addon{"db": {Type: "postgres"}},
+		Routes: map[string]spec.Route{"web": {Path: "/", Service: "api", Port: spec.PortRef{Name: "http"}}},
 	}
-	rules, refs := renderRules(g, ids)
-	in, eg := networkv1.Direction_DIRECTION_INGRESS, networkv1.Direction_DIRECTION_EGRESS
-	want := []*networkv1.Rule{
-		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_TCP,
-			Ports: []*networkv1.PortRange{{First: 5432}, {First: 6000, Last: 6010}},
-			Peer:  &networkv1.Rule_Group{Group: model.SecurityGroupID(web)}},
-		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_ICMP,
-			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "198.51.100.0/24"}}},
-		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_UDP, Ports: []*networkv1.PortRange{{First: 53}},
-			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "2001:db8::/32", Except: []string{"2001:db8:1::/48"}}}},
-		{Direction: in, Protocol: networkv1.Protocol_PROTOCOL_TCP, Ports: []*networkv1.PortRange{{First: 22}},
-			Peer: &networkv1.Rule_Group{Group: model.SecurityGroupID(db)}},
-		{Direction: eg, Protocol: networkv1.Protocol_PROTOCOL_TCP, Ports: []*networkv1.PortRange{{First: 443}},
-			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "0.0.0.0/0", Except: internet4Except}}},
-		{Direction: eg, Protocol: networkv1.Protocol_PROTOCOL_TCP, Ports: []*networkv1.PortRange{{First: 443}},
-			Peer: &networkv1.Rule_Block{Block: &networkv1.AddressBlock{Cidr: "2000::/3", Except: internet6Except}}},
+	// The deployed spec: catalog on another port, an edge the target drops.
+	deployed := &spec.Spec{Services: map[string]spec.Service{
+		"api":     {Image: "img", Env: map[string]spec.EnvValue{"OLD": {Value: "http://catalog:7000"}}},
+		"catalog": {Image: "img", Ports: []spec.Port{{Name: "http", Port: 7000}}},
+	}}
+	reachers := []store.Reacher{
+		{ID: sbx, Reaches: spec.Reaches{Entries: []spec.Use{{Service: "catalog", Port: spec.PortRef{Name: "http"}},
+			{Addon: "db"}, {Service: "gone", Port: spec.PortRef{Name: "x"}}}}},
+		{ID: all, Reaches: spec.Reaches{All: true}, Egress: &spec.Egress{Mode: spec.EgressNone}},
+		{ID: job, TenantJob: true},
+		{ID: box},
 	}
-	if !slices.EqualFunc(rules, want, func(a, b *networkv1.Rule) bool { return proto.Equal(a, b) }) {
-		t.Fatalf("rules\n%v\nwant\n%v", rules, want)
+	port := func(string, spec.Addon) int { return 5432 }
+	r := deriveEnvReach(envID, []*spec.Spec{target, deployed}, reachers, port)
+	wl := func(kind, name string) string { return model.WorkloadGroupID(envID, kind, name) }
+	api, catalog, db, migrate := wl("service", "api"), wl("service", "catalog"), wl("addon", "db"), wl("job", "migrate")
+	sbxG, allG, jobG := model.SandboxWorkloadGroupID(sbx.String()), model.SandboxWorkloadGroupID(all.String()),
+		model.JobWorkloadGroupID(job.String())
+	boxG := model.SandboxWorkloadGroupID(box.String())
+	g := func(id string) *networkv1.SecurityGroup {
+		rules, _ := r.rules(id)
+		return &networkv1.SecurityGroup{Id: id, Rules: rules}
 	}
-	if !slices.Equal(refs, []string{model.SecurityGroupID(web), model.SecurityGroupID(db)}) {
-		t.Fatalf("refs %v", refs)
+	tcp, anyP := networkv1.Protocol_PROTOCOL_TCP.String(), networkv1.Protocol_PROTOCOL_ANY.String()
+	for id, want := range map[string][]string{
+		// vite (in the sandbox box) calls api's grpc; all reaches anything.
+		api: {allG + " " + anyP, boxG + " " + tcp + " 9090"},
+		// api's reference to catalog:http by name; the deployed spec's
+		// URL on 7000 while it rolls; the sandbox's reaches.
+		catalog: {allG + " " + anyP, api + " " + tcp + " 7000 8081", sbxG + " " + tcp + " 8081"},
+		db:      {allG + " " + anyP, api + " " + tcp + " 5432", migrate + " " + tcp + " 5432", sbxG + " " + tcp + " 5432"},
+		// api's plain URL names the attached vite: the sandbox's pod.
+		boxG: {allG + " " + anyP, api + " " + tcp + " 5173"},
+		sbxG: {allG + " " + anyP},
+		jobG: {allG + " " + anyP},
+		allG: nil,
+		// An object no spec knows: reached by "all" alone.
+		wl("service", "gone"): {allG + " " + anyP},
+	} {
+		slices.Sort(want)
+		if got := inRules(g(id)); !slices.Equal(got, want) {
+			t.Errorf("%s in %v, want %v", id, got, want)
+		}
 	}
-	// default as normalisation leaves it: nothing in, the internet out of
-	// any protocol; out [] is nothing; icmp to a group is ICMPv6.
-	rules, refs = renderRules(spec.SecurityGroup{}, ids)
-	if len(rules) != 2 || len(refs) != 0 || !proto.Equal(rules[0], egressTable()[0]) || !proto.Equal(rules[1], egressTable()[1]) {
-		t.Fatalf("default %v %v", rules, refs)
+	for id, want := range map[string][]string{
+		api: {"203.0.113.0/24"}, catalog: nil, db: nil, migrate: {"0.0.0.0/0", "2000::/3"}, sbxG: {"0.0.0.0/0", "2000::/3"},
+		allG: nil, jobG: {"0.0.0.0/0", "2000::/3"}, wl("service", "gone"): {"0.0.0.0/0", "2000::/3"},
+	} {
+		if got := outBlocks(g(id)); !slices.Equal(got, want) {
+			t.Errorf("%s out %v, want %v", id, got, want)
+		}
 	}
-	if rules, _ := renderRules(spec.SecurityGroup{Out: []spec.Rule{}}, ids); len(rules) != 0 {
-		t.Fatalf("out none %v", rules)
+	// The refs are the peers, sorted; an out rule of the internet table
+	// carries its exceptions.
+	if _, refs := r.rules(catalog); len(refs) != 3 || !slices.IsSorted(refs) {
+		t.Errorf("refs %v", refs)
 	}
-	rules, _ = renderRules(spec.SecurityGroup{Out: []spec.Rule{},
-		In: []spec.Rule{{Protocol: spec.ProtocolICMP, From: &spec.Peer{Group: "web"}}}}, ids)
-	if len(rules) != 1 || rules[0].Protocol != networkv1.Protocol_PROTOCOL_ICMPV6 {
-		t.Fatalf("icmp from a group %v", rules)
+	if rules, _ := r.rules(sbxG); !proto.Equal(rules[len(rules)-1], egressTable()[1]) {
+		t.Errorf("the internet table %v", rules)
+	}
+	// No spec at all: the sandboxes' rules alone.
+	empty := deriveEnvReach(envID, nil, reachers[1:2], port)
+	if rules, refs := empty.rules(allG); len(refs) != 0 || len(rules) != 0 {
+		t.Errorf("all alone %v %v", rules, refs)
 	}
 }
 
@@ -593,7 +629,6 @@ func TestRender(t *testing.T) {
 		return nil, false
 	}}}
 	envID := uuid.New()
-	defaultID, dbID := uuid.New(), uuid.New()
 	vol := &store.EnvVolume{VolumeID: uuid.New()}
 	v := &view{
 		env: store.Environment{ID: envID, Name: "stage"},
@@ -612,8 +647,7 @@ func TestRender(t *testing.T) {
 			Addons:  map[string]spec.Addon{"db": {Type: "fake", Version: "1", Options: map[string]any{"db": "app"}}},
 			Secrets: map[string]spec.SecretRef{"token": {Version: 3}},
 		},
-		secrets:  map[string]int{"token": 4},
-		groupIDs: map[string]uuid.UUID{"default": defaultID, "db": dbID},
+		secrets: map[string]int{"token": 4},
 	}
 	p := c.planService(v, "api", v.target.Services["api"])
 	if p.ok() || !strings.Contains(p.wait, "addon db") {
@@ -636,20 +670,22 @@ func TestRender(t *testing.T) {
 	}
 	if p.template.HasCredential() || p.template.Labels[model.LabelTemplate] != p.hash ||
 		p.template.Labels[model.LabelObject] != "service/api" || p.template.Labels[model.LabelEnvironment] != envID.String() ||
-		!slices.Equal(p.template.SecurityGroups, []string{model.EnvGroupID(envID), model.SecurityGroupID(defaultID)}) {
+		!slices.Equal(p.template.SecurityGroups, []string{model.EnvGroupID(envID),
+			model.WorkloadGroupID(envID, spec.KindService, "api")}) || p.template.RestrictEgressNames {
 		t.Errorf("template %+v", p.template)
 	}
-	// The groups an object names are in its template (ADR 0034), and in
-	// its hash: a change of them rolls it; a name without a row fails.
-	inDB := v.target.Services["api"]
-	inDB.SecurityGroups = []string{"db"}
-	if g := c.planService(v, "api", inDB); !g.ok() || g.hash == p.hash ||
-		!slices.Equal(g.template.SecurityGroups, []string{model.EnvGroupID(envID), model.SecurityGroupID(dbID)}) {
-		t.Errorf("in db %+v", g.template)
+	// Its egress's names are in its template (ADR 0034, revised), and in
+	// its hash: a change of them rolls it; its blocks are rules.
+	limited := v.target.Services["api"]
+	limited.Egress = &spec.Egress{Domains: []string{"b.example.com", "a.example.com"}}
+	g := c.planService(v, "api", limited)
+	if !g.ok() || g.hash == p.hash || !g.template.RestrictEgressNames ||
+		!slices.Equal(g.template.EgressDomains, []string{"a.example.com", "b.example.com"}) {
+		t.Errorf("limited %+v", g.template)
 	}
-	inDB.SecurityGroups = []string{"nowhere"}
-	if g := c.planService(v, "api", inDB); g.err == nil {
-		t.Error("a group without a row rendered")
+	limited.Egress = &spec.Egress{Mode: spec.EgressInternet}
+	if g := c.planService(v, "api", limited); g.hash != p.hash {
+		t.Error("egress internet written out changed the template")
 	}
 	if p.vcpus != 1 || p.memoryMB != 512 {
 		t.Errorf("resources %d %d", p.vcpus, p.memoryMB)

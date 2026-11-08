@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	containerv1 "github.com/gardenlinux/feos/go/gen/feos/container/v1"
 	networkv1 "github.com/gardenlinux/feos/go/gen/feos/network/v1"
@@ -29,21 +28,31 @@ import (
 )
 
 // parseGroup reads the controller's groups in their canonical form: env
-// and tenant's groups, ing groups (of a sandbox with a short ID, or one
-// made before ADR 0019 with a UUID) and ferun-ingress; name tables are
-// env groups' IDs only. sbx groups are gone (ADR 0035).
+// groups, workloads' groups, the first version's sg- groups, ing groups
+// (of a sandbox with a short ID, or one made before ADR 0019 with a UUID)
+// and ferun-ingress; name tables are env groups' IDs only. sbx groups are
+// gone (ADR 0035).
 func TestParseGroup(t *testing.T) {
 	envID := uuid.MustParse("0193e3a0-0000-7000-8000-000000000001")
 	if ref, ok := parseGroup(model.EnvGroupID(envID)); !ok || ref != (groupRef{kind: groupEnv, env: envID}) {
 		t.Errorf("parse env group: %+v %v", ref, ok)
 	}
-	if ref, ok := parseGroup(model.SecurityGroupID(envID)); !ok || ref != (groupRef{kind: groupTenant, sg: envID}) {
-		t.Errorf("parse a tenant's group: %+v %v", ref, ok)
+	if ref, ok := parseGroup("sg-" + envID.String()); !ok || ref != (groupRef{kind: groupLegacy}) {
+		t.Errorf("parse a legacy group: %+v %v", ref, ok)
 	}
-	if _, ok := parseTable(model.SecurityGroupID(envID)); ok {
-		t.Errorf("a tenant's group parsed as a name table")
+	if _, ok := parseTable("sg-" + envID.String()); ok {
+		t.Errorf("a legacy group parsed as a name table")
 	}
 	short := podid.Mint()
+	for _, wl := range []string{model.WorkloadGroupID(envID, spec.KindService, "web"),
+		model.SandboxWorkloadGroupID(short.String()), model.JobWorkloadGroupID(short.String())} {
+		if ref, ok := parseGroup(wl); !ok || ref != (groupRef{kind: groupWorkload}) {
+			t.Errorf("parse %s: %+v %v", wl, ref, ok)
+		}
+		if _, ok := parseTable(wl); ok {
+			t.Errorf("a workload's group %s parsed as a name table", wl)
+		}
+	}
 	legacy := podid.ID(uuid.NewString())
 	for _, id := range []podid.ID{short, legacy} {
 		if ref, ok := parseGroup(model.IngressGroupID(id)); !ok || ref != (groupRef{kind: groupIng, sbx: id}) {
@@ -65,7 +74,9 @@ func TestParseGroup(t *testing.T) {
 	for _, bad := range []string{"default", "env-x", "sg-x", "sg-" + strings.ToUpper(envID.String()), "sg-", "sg-" + short.String(),
 		"foo-" + uuid.NewString(), "env-" + short.String(),
 		"ing-x", "ing-", "ing-" + strings.ToUpper(short.String()), "ing-" + short.String() + "0", "ing-" + envID.String()[:35],
-		"ferun-ingressx", "ferun-ingress-", "ferun", "Ferun-ingress", "ing" + short.String(), "ingress-" + short.String()} {
+		"ferun-ingressx", "ferun-ingress-", "ferun", "Ferun-ingress", "ing" + short.String(), "ingress-" + short.String(),
+		"wl-", "wl-x", "wl-s-", "wl-s-x", "wl-j-", "wl-" + strings.Repeat("A", 32), "wl-" + strings.Repeat("0", 31),
+		"wl-" + strings.Repeat("0", 33)} {
 		if ref, ok := parseGroup(bad); ok {
 			t.Errorf("%s parsed: %+v", bad, ref)
 		}
@@ -217,11 +228,7 @@ func TestEnvDeletion(t *testing.T) {
 	if v != nil {
 		t.Fatal("a view of an environment without a deployment")
 	}
-	ids, err := h.st.SecurityGroupIDs(bg, e3.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	vw := &view{env: e3, target: &spec.Spec{}, latestSpec: &spec.Spec{}, groupIDs: ids}
+	vw := &view{env: e3, target: &spec.Spec{}, latestSpec: &spec.Spec{}}
 	p := h.c.planService(vw, "web", spec.Service{Image: testImage})
 	if _, err := h.c.insertInstance(bg, vw, insert{plan: p, deployment: 1}); !errors.Is(err, errTenantDeleting) {
 		t.Errorf("an insert for a deleting tenant: %v", err)
@@ -378,113 +385,206 @@ func TestEnvIDReused(t *testing.T) {
 	}
 }
 
-// The tenant's groups (ADR 0034, 0035): each pod of the environment, its
-// instances, sandboxes and tenants' jobs' pods, names env-<id> and the
-// sg-<row> of its groups and the env table; each group is on the node with
-// its rules from the spec (peers that are groups by their sg-<row>, a group
-// that only a rule names too) and the pods that name it as members; the env
-// group takes nothing in, reaches its members and has every pod as one.
-func TestTenantGroups(t *testing.T) {
+// admitsTCP reports whether one of g's in rules lets group peer reach
+// port over TCP (or any protocol).
+func admitsTCP(g *networkv1.SecurityGroup, peer string, port int) bool {
+	for _, r := range g.GetRules() {
+		if r.Direction != networkv1.Direction_DIRECTION_INGRESS || r.GetGroup() != peer {
+			continue
+		}
+		if r.Protocol == networkv1.Protocol_PROTOCOL_ANY {
+			return true
+		}
+		for _, p := range r.Ports {
+			if r.Protocol == networkv1.Protocol_PROTOCOL_TCP && int(p.First) == port {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// inRules are the in rules of g as "<peer> <protocol> <ports>", sorted.
+func inRules(g *networkv1.SecurityGroup) []string {
+	var out []string
+	for _, r := range g.GetRules() {
+		if r.Direction != networkv1.Direction_DIRECTION_INGRESS {
+			continue
+		}
+		s := r.GetGroup() + " " + r.Protocol.String()
+		for _, p := range r.Ports {
+			s += fmt.Sprintf(" %d", p.First)
+		}
+		out = append(out, s)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// outBlocks are the blocks of g's out rules.
+func outBlocks(g *networkv1.SecurityGroup) []string {
+	var out []string
+	for _, r := range g.GetRules() {
+		if r.Direction == networkv1.Direction_DIRECTION_EGRESS {
+			out = append(out, r.GetBlock().GetCidr())
+		}
+	}
+	return out
+}
+
+// The workloads' groups (ADR 0034 revised, ADR 0035 revised): each pod of
+// the environment, its instances, sandboxes and tenants' jobs' pods,
+// names env-<id> and its workload's group and the env table; each
+// workload's group is on the node with the rules its environment derives
+// (a reference's port from the caller's group, a sandbox's or job's
+// reaches, "all" as any protocol) and its egress as out rules, the pods
+// that name it as members; image pods carry their egress's names. A
+// sandbox's changed reaches changes the rules in place; the pods stay.
+func TestWorkloadGroups(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
 	env := h.newEnv("stage")
-	r := h.apply(env.ID, fmt.Sprintf(`{"securityGroups":{
-		"web":{"in":[{"protocol":"tcp","ports":[8080],"from":{"cidr":"203.0.113.0/24"}}]},
-		"db":{"in":[{"protocol":"tcp","ports":[5432],"from":{"group":"web"}},
-			{"protocol":"tcp","ports":[5432],"from":{"group":"tools"}},
-			{"protocol":"tcp","ports":[5432],"from":{"group":"ops"}}],"out":[]},
-		"tools":{},"ops":{}},
-		"services":{"web":{"image":%q,"securityGroups":["web"]},"store":{"image":%q,"securityGroups":["db"]}}}`,
-		testImage, testImage))
-	h.waitDeployment(env.ID, r, model.DeploymentDeployed, 60*time.Second)
-	ids, err := h.st.SecurityGroupIDs(bg, env.ID)
-	if err != nil {
-		t.Fatal(err)
+	specOf := func(extra string) string {
+		return fmt.Sprintf(`{"services":{
+			"web":{"image":%q,"ports":[{"name":"http","port":8080}],
+				"env":{"STORE":"postgres://u@store:5432/x"%s},
+				"egress":{"domains":["api.stripe.com","*.example.com"],"blocks":[{"cidr":"203.0.113.0/24"}]}},
+			"store":{"image":%q,"ports":[{"name":"db","port":5432},{"name":"admin","port":9000}],"egress":"none"}},
+			"jobs":{"migrate":{"image":%q,"on":"manual","uses":[{"service":"store","port":"admin"}]}}}`,
+			testImage, extra, testImage, testImage)
 	}
-	sg := func(name string) string { return model.SecurityGroupID(ids[name]) }
+	r := h.apply(env.ID, specOf(""))
+	h.waitDeployment(env.ID, r, model.DeploymentDeployed, 60*time.Second)
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	st := h.waitRows(env.ID, spec.KindService, "store", 1, 10*time.Second, "ready", ready)[0]
-	sb := h.sandboxIn(env, podid.Mint(), "tools")
+	narrow := h.sandboxIn(env, podid.Mint(), spec.Reaches{Entries: []spec.Use{{Service: "store",
+		Port: spec.PortRef{Name: "db"}}}})
+	wide := h.sandboxIn(env, podid.Mint(), spec.Reaches{All: true})
 	rs := tenantJobSpecOf(time.Hour)
-	rs.EnvID, rs.SecurityGroups = env.ID, []string{"db"}
+	rs.EnvID, rs.Egress = env.ID, &spec.Egress{Mode: spec.EgressNone}
 	job := h.createTenantJob(rs)
 	h.runningPod(job.ID)
 
 	envGroup := model.EnvGroupID(env.ID)
-	for id, want := range map[podid.ID][]string{web.Sandbox.ID: {envGroup, sg("web")}, st.Sandbox.ID: {envGroup, sg("db")},
-		sb.ID: {envGroup, sg("tools")}, job.ID: {envGroup, sg("db")}} {
+	wl := func(kind, name string) string { return model.WorkloadGroupID(env.ID, kind, name) }
+	webG, storeG, migrateG := wl(spec.KindService, "web"), wl(spec.KindService, "store"), wl(spec.KindJob, "migrate")
+	narrowG, wideG := model.SandboxWorkloadGroupID(narrow.ID.String()), model.SandboxWorkloadGroupID(wide.ID.String())
+	jobG := model.JobWorkloadGroupID(job.ID.String())
+	for id, want := range map[podid.ID][]string{web.Sandbox.ID: {envGroup, webG}, st.Sandbox.ID: {envGroup, storeG},
+		narrow.ID: {envGroup, narrowG}, wide.ID: {envGroup, wideG}, job.ID: {envGroup, jobG}} {
 		n := h.pod("n1", id).GetSpec().GetNetwork()
 		if !slices.Equal(n.GetSecurityGroups(), want) || !slices.Equal(n.GetNameTables(), []string{model.EnvTableID(env.ID)}) {
 			t.Errorf("pod %s: %v, want the groups %v", id, n, want)
 		}
 	}
-	addrs := map[podid.ID]string{}
-	for _, id := range []podid.ID{web.Sandbox.ID, st.Sandbox.ID, sb.ID, job.ID} {
-		addrs[id] = h.addressOf(id)
+	if n := h.pod("n1", web.Sandbox.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() ||
+		!slices.Equal(n.GetEgressDomains(), []string{"*.example.com", "api.stripe.com"}) {
+		t.Errorf("web's egress by name %v", n)
 	}
-	sorted := func(ids ...podid.ID) []string {
-		var out []string
-		for _, id := range ids {
-			out = append(out, addrs[id])
-		}
-		return members(out)
+	if n := h.pod("n1", st.Sandbox.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() || len(n.GetEgressDomains()) != 0 {
+		t.Errorf("store's egress by name %v", n)
 	}
+	if n := h.pod("n1", job.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() {
+		t.Errorf("the job's egress by name %v", n)
+	}
+	if n := h.pod("n1", narrow.ID).GetSpec().GetNetwork(); n.GetRestrictEgressNames() {
+		t.Errorf("a sandbox with the internet restricted %v", n)
+	}
+
 	h.c.notify(bg, HintGroups)
+	var sg *networkv1.SecurityGroup
 	eventually(t, 30*time.Second, "the groups and their members", func() bool {
-		eg, wg, dg, tg, og := h.group("n1", envGroup), h.group("n1", sg("web")), h.group("n1", sg("db")),
-			h.group("n1", sg("tools")), h.group("n1", sg("ops"))
-		return eg != nil && wg != nil && dg != nil && tg != nil && og != nil &&
-			slices.Equal(eg.Members, sorted(web.Sandbox.ID, st.Sandbox.ID, sb.ID, job.ID)) &&
-			slices.Equal(wg.Members, sorted(web.Sandbox.ID)) && slices.Equal(dg.Members, sorted(st.Sandbox.ID, job.ID)) &&
-			slices.Equal(tg.Members, sorted(sb.ID)) && len(og.Members) == 0
+		eg, wg, ng := h.group("n1", envGroup), h.group("n1", webG), h.group("n1", narrowG)
+		sg = h.group("n1", storeG)
+		return eg != nil && wg != nil && sg != nil && ng != nil && len(eg.Members) == 5 &&
+			slices.Equal(wg.Members, members([]string{h.addressOf(web.Sandbox.ID)})) &&
+			slices.Equal(sg.Members, members([]string{h.addressOf(st.Sandbox.ID)})) &&
+			slices.Equal(ng.Members, members([]string{h.addressOf(narrow.ID)}))
 	})
-	in, out := networkv1.Direction_DIRECTION_INGRESS, networkv1.Direction_DIRECTION_EGRESS
-	count := func(g *networkv1.SecurityGroup, dir networkv1.Direction) int {
-		n := 0
-		for _, r := range g.Rules {
-			if r.Direction == dir {
-				n++
-			}
-		}
-		return n
+	// store: web's URL on db, migrate's uses on admin, the narrow
+	// sandbox's reaches on db, the wide one anything; nothing out.
+	tcp, anyProto := networkv1.Protocol_PROTOCOL_TCP.String(), networkv1.Protocol_PROTOCOL_ANY.String()
+	want := []string{migrateG + " " + tcp + " 9000", narrowG + " " + tcp + " 5432", webG + " " + tcp + " 5432",
+		wideG + " " + anyProto}
+	slices.Sort(want)
+	if got := inRules(sg); !slices.Equal(got, want) || len(outBlocks(sg)) != 0 {
+		t.Errorf("store's rules %v, want in %v and nothing out", sg.Rules, want)
 	}
-	if g := h.group("n1", envGroup); !proto.Equal(&networkv1.SecurityGroup{Rules: g.Rules},
-		&networkv1.SecurityGroup{Rules: envRules(envGroup)}) {
-		t.Errorf("the env group's rules %v", g.Rules)
-	}
-	dg := h.group("n1", sg("db"))
-	var from []string
-	for _, r := range dg.Rules {
-		if r.Direction != in || r.Protocol != networkv1.Protocol_PROTOCOL_TCP || len(r.Ports) != 1 || r.Ports[0].First != 5432 {
-			t.Errorf("db's rule %v", r)
-		}
-		from = append(from, r.GetGroup())
-	}
-	if !slices.Equal(from, []string{sg("web"), sg("tools"), sg("ops")}) {
-		t.Errorf("db lets in %v", from)
-	}
-	if wg := h.group("n1", sg("web")); count(wg, in) != 1 || wg.Rules[0].GetBlock().GetCidr() != "203.0.113.0/24" ||
-		count(wg, out) != 2 {
+	// web: reached by nothing but the wide sandbox (the ingress goes
+	// through ing-), out its block alone.
+	if wg := h.group("n1", webG); !slices.Equal(inRules(wg), []string{wideG + " " + anyProto}) ||
+		!slices.Equal(outBlocks(wg), []string{"203.0.113.0/24"}) {
 		t.Errorf("web's rules %v", wg.Rules)
 	}
-	if tg := h.group("n1", sg("tools")); count(tg, in) != 0 || count(tg, out) != 2 ||
-		tg.Rules[0].GetBlock().GetCidr() != "0.0.0.0/0" || tg.Rules[1].GetBlock().GetCidr() != "2000::/3" {
-		t.Errorf("tools' rules %v", tg.Rules)
+	// The sandboxes reach the internet, the job nothing; the wide sandbox
+	// reaches the narrow one too.
+	if ng := h.group("n1", narrowG); !slices.Equal(inRules(ng), []string{wideG + " " + anyProto}) ||
+		!slices.Equal(outBlocks(ng), []string{"0.0.0.0/0", "2000::/3"}) {
+		t.Errorf("the narrow sandbox's rules %v", ng.Rules)
 	}
-	// A rule changed in a new deployment reaches the node; the pods stay.
-	r2 := h.apply(env.ID, fmt.Sprintf(`{"securityGroups":{
-		"web":{"in":[{"protocol":"tcp","ports":[8080],"from":{"cidr":"203.0.113.0/24"}}]},
-		"db":{"in":[{"protocol":"tcp","ports":[5432],"from":{"group":"web"}}],"out":[]},
-		"tools":{},"ops":{}},
-		"services":{"web":{"image":%q,"securityGroups":["web"]},"store":{"image":%q,"securityGroups":["db"]}}}`,
-		testImage, testImage))
+	if jg := h.group("n1", jobG); jg == nil || len(outBlocks(jg)) != 0 {
+		t.Errorf("the job's rules %v", jg)
+	}
+
+	// A sandbox's reaches changed: the target's rules, in place, the
+	// sandbox's pod untouched.
+	if ok, err := h.st.SetSandboxReaches(bg, narrow.ID, spec.Reaches{Entries: []spec.Use{{Service: "store",
+		Port: spec.PortRef{Name: "admin"}}}}); err != nil || !ok {
+		t.Fatalf("set reaches %v %v", ok, err)
+	}
+	h.c.notify(bg, HintGroups)
+	eventually(t, 30*time.Second, "store's new rules", func() bool {
+		g := h.group("n1", storeG)
+		return g != nil && admitsTCP(g, narrowG, 9000) && !admitsTCP(g, narrowG, 5432)
+	})
+	if sb, _ := h.st.GetSandbox(bg, narrow.ID); sb.Address != narrow.Address || sb.ClientState != model.StateRunning ||
+		sb.Incarnation != narrow.Incarnation {
+		t.Errorf("the sandbox moved: %+v", sb)
+	}
+
+	// A reference dropped by a deployment drops its rule; the pods of
+	// store stay, web's roll for its changed env.
+	r2 := h.apply(env.ID, fmt.Sprintf(`{"services":{
+		"web":{"image":%q,"ports":[{"name":"http","port":8080}],
+			"egress":{"domains":["api.stripe.com","*.example.com"],"blocks":[{"cidr":"203.0.113.0/24"}]}},
+		"store":{"image":%q,"ports":[{"name":"db","port":5432},{"name":"admin","port":9000}],"egress":"none"}},
+		"jobs":{"migrate":{"image":%q,"on":"manual","uses":[{"service":"store","port":"admin"}]}}}`,
+		testImage, testImage, testImage))
 	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
 	h.c.notify(bg, HintGroups)
-	eventually(t, 30*time.Second, "db's new rules", func() bool {
-		g := h.group("n1", sg("db"))
-		return g != nil && len(g.Rules) == 1 && g.Rules[0].GetGroup() == sg("web")
+	eventually(t, 30*time.Second, "web's rule on store gone", func() bool {
+		g := h.group("n1", storeG)
+		return g != nil && !admitsTCP(g, webG, 5432) && admitsTCP(g, migrateG, 9000)
 	})
 	if rows := h.rowsOf(env.ID, spec.KindService, "store"); len(rows) != 1 || rows[0].Sandbox.ID != st.Sandbox.ID {
 		t.Errorf("store rolled for a rule: %v", rows)
 	}
+}
+
+// A pod made before ADR 0034's revision still names its group sg-<UUID>:
+// it is put as a transition, in from every pod of its environment and
+// out to the internet, until no template names it.
+func TestLegacyGroups(t *testing.T) {
+	h := newHarness(t, options{})
+	h.addNode("n1")
+	env := h.newEnv("stage")
+	legacy := "sg-" + uuid.NewString()
+	sb := h.sandboxIn(env, podid.Mint())
+	h.exec(`UPDATE sandboxes SET pod_template = jsonb_set(pod_template, '{securityGroups}',
+		pod_template->'securityGroups' || to_jsonb($2::text)) WHERE id = $1`, sb.ID, legacy)
+	h.c.notify(bg, HintGroups)
+	var g *networkv1.SecurityGroup
+	eventually(t, 30*time.Second, "the legacy group put", func() bool {
+		g = h.group("n1", legacy)
+		return g != nil
+	})
+	if !slices.Equal(inRules(g), []string{model.EnvGroupID(env.ID) + " " + networkv1.Protocol_PROTOCOL_ANY.String()}) ||
+		!slices.Equal(outBlocks(g), []string{"0.0.0.0/0", "2000::/3"}) || len(g.Members) != 0 {
+		t.Errorf("the legacy group %v", g)
+	}
+	// No template names it any more: it goes from the node.
+	h.exec(`UPDATE sandboxes SET pod_template = jsonb_set(pod_template, '{securityGroups}',
+		(pod_template->'securityGroups') - $2::text) WHERE id = $1`, sb.ID, legacy)
+	h.c.notify(bg, HintGroups)
+	eventually(t, 30*time.Second, "the legacy group gone", func() bool { return h.group("n1", legacy) == nil })
 }

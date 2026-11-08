@@ -119,7 +119,8 @@ func TestAddonLifecycle(t *testing.T) {
 		t.Fatalf("the node's volumes %v", nv)
 	}
 	pod := h.pod("n1", first.Sandbox.ID)
-	if pod == nil || !slices.Equal(pod.Spec.GetNetwork().GetSecurityGroups(), h.podGroups(env.ID)) {
+	if pod == nil || !slices.Equal(pod.Spec.GetNetwork().GetSecurityGroups(), h.podGroups(env.ID, spec.KindAddon, "postgres")) ||
+		!pod.Spec.GetNetwork().GetRestrictEgressNames() {
 		t.Fatalf("pod %v", pod)
 	}
 	if pod.Spec.Containers[0].Env["POSTGRES_PASSWORD"] != creds[0] {

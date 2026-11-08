@@ -65,19 +65,18 @@ func (h *harness) sandboxAs(owner string, id podid.ID) store.Sandbox {
 	return h.sandboxIn(h.envOf(owner, "dev"), id)
 }
 
-// sandboxIn makes a sandbox of env with the ID id in groups (default when
-// none), with the template the API gives it, and brings it up.
-func (h *harness) sandboxIn(env store.Environment, id podid.ID, groups ...string) store.Sandbox {
+// sandboxIn makes a sandbox of env with the ID id reaching reaches
+// (nothing when none), with the template the API gives it, and brings it
+// up.
+func (h *harness) sandboxIn(env store.Environment, id podid.ID, reaches ...spec.Reaches) store.Sandbox {
 	h.t.Helper()
-	if len(groups) == 0 {
-		groups = []string{spec.DefaultSecurityGroup}
+	var r spec.Reaches
+	if len(reaches) > 0 {
+		r = reaches[0]
 	}
-	tmpl, err := h.st.SandboxTemplate(bg, env.ID, groups)
-	if err != nil {
-		h.t.Fatal(err)
-	}
+	tmpl := model.SandboxTemplate(env.ID, id.String(), false, nil)
 	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: env.Owner, Image: testImage, ImageRef: testImage,
-		VCPUs: 1, MemoryMiB: 512, EnvironmentID: env.ID, SecurityGroups: groups, PodTemplate: tmpl}); err != nil {
+		VCPUs: 1, MemoryMiB: 512, EnvironmentID: env.ID, Reaches: r, PodTemplate: tmpl}); err != nil {
 		h.t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(bg, 60*time.Second)
@@ -119,12 +118,9 @@ func TestAttachedService(t *testing.T) {
 	hostProcesses(n1, t.TempDir())
 	sb := h.sandbox()
 	envID := sb.EnvironmentID
-	def, err := h.st.SecurityGroupID(bg, envID, spec.DefaultSecurityGroup)
-	if err != nil {
-		t.Fatal(err)
-	}
+	own := model.SandboxWorkloadGroupID(sb.ID.String())
 	pod := h.pod("n1", sb.ID).GetSpec().GetNetwork()
-	if !slices.Equal(pod.GetSecurityGroups(), []string{model.EnvGroupID(envID), model.SecurityGroupID(def)}) ||
+	if !slices.Equal(pod.GetSecurityGroups(), []string{model.EnvGroupID(envID), own}) || pod.GetRestrictEgressNames() ||
 		!slices.Equal(pod.GetNameTables(), []string{model.EnvTableID(envID)}) {
 		t.Fatalf("the sandbox's pod network %v", pod)
 	}
@@ -134,7 +130,7 @@ func TestAttachedService(t *testing.T) {
 	// SetSandboxAddress), which may be after Ensure returned.
 	eventually(t, 30*time.Second, "the sandbox's address a member of its groups", func() bool {
 		eg := h.group("n1", model.EnvGroupID(envID))
-		dg := h.group("n1", model.SecurityGroupID(def))
+		dg := h.group("n1", own)
 		return eg != nil && dg != nil && slices.Equal(eg.Members, []string{sb.Address}) &&
 			slices.Equal(dg.Members, []string{sb.Address})
 	})
@@ -180,13 +176,16 @@ func TestAttachedService(t *testing.T) {
 		t.Errorf("the image instance's name tables %v", pod.GetSpec().GetNetwork().GetNameTables())
 	}
 	// Groups: the sandbox and the image instance are members of the env
-	// group and of default, which both name.
+	// group, each of its workload's; web's reference to api's port opens
+	// it to the sandbox's pod, which web runs in (ADR 0034, revised).
+	apiGroup := model.WorkloadGroupID(env.ID, spec.KindService, "api")
 	eventually(t, 30*time.Second, "the groups", func() bool {
 		eg := h.group("n1", model.EnvGroupID(env.ID))
-		dg := h.group("n1", model.SecurityGroupID(def))
-		return eg != nil && dg != nil && slices.Contains(eg.Members, sb.Address) &&
-			slices.Contains(eg.Members, api.Sandbox.Address) && slices.Contains(dg.Members, sb.Address) &&
-			slices.Contains(dg.Members, api.Sandbox.Address)
+		dg := h.group("n1", own)
+		ag := h.group("n1", apiGroup)
+		return eg != nil && dg != nil && ag != nil && slices.Contains(eg.Members, sb.Address) &&
+			slices.Contains(eg.Members, api.Sandbox.Address) && slices.Equal(dg.Members, []string{sb.Address}) &&
+			slices.Equal(ag.Members, []string{api.Sandbox.Address}) && admitsTCP(ag, own, 8080)
 	})
 
 	// A restart on request starts a new process.
@@ -376,7 +375,7 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 	}
 	// Groups and names: the other sandbox is of another environment, no
 	// member of this one's, and not named in its table.
-	if b, err := h.c.buildGroup(bg, model.EnvGroupID(env.ID), newGroupPass()); err != nil || slices.Contains(b.g.Members, other.Address) {
+	if b, err := h.c.buildGroup(bg, model.EnvGroupID(env.ID), env.ID, newGroupPass()); err != nil || slices.Contains(b.g.Members, other.Address) {
 		t.Fatalf("the env group %v %v", b, err)
 	}
 	if tbl, _, err := h.c.buildTable(bg, model.EnvTableID(env.ID)); err != nil || slices.ContainsFunc(tbl.Entries,

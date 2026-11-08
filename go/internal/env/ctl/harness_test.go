@@ -340,18 +340,10 @@ func resolves(n *testnode.Node, pod podid.ID, name string, addrs ...string) bool
 	return ok == (len(addrs) > 0) && slices.Equal(got, addrs)
 }
 
-// podGroups are the groups a pod of environment envID in the groups
-// names names (default when none): env-<id> and their sg-<row>s.
-func (h *harness) podGroups(envID uuid.UUID, names ...string) []string {
-	h.t.Helper()
-	if len(names) == 0 {
-		names = []string{"default"}
-	}
-	out, err := h.st.PodGroups(bg, envID, names)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return out
+// podGroups are the groups a pod of object kind/name of environment
+// envID names: env-<id> and its workload's (ADR 0034, revised).
+func (h *harness) podGroups(envID uuid.UUID, kind, name string) []string {
+	return model.PodGroups(envID, model.WorkloadGroupID(envID, kind, name))
 }
 
 // addressOf is a row's address as it is now.

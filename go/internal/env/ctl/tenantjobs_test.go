@@ -22,8 +22,7 @@ import (
 
 // tenantJobSpecOf is a job of the test image with a deadline of d.
 func tenantJobSpecOf(d time.Duration) TenantJobSpec {
-	return TenantJobSpec{Image: testImage, Command: []string{"/build"}, VCPUs: 1, MemoryMiB: 512, Deadline: d, Hash: "h",
-		SecurityGroups: []string{"default"}}
+	return TenantJobSpec{Image: testImage, Command: []string{"/build"}, VCPUs: 1, MemoryMiB: 512, Deadline: d, Hash: "h"}
 }
 
 // jobSpecOf is tenantJobSpecOf in the tenant's environment builds.
@@ -118,7 +117,9 @@ func TestTenantJobSucceeds(t *testing.T) {
 	h.runningPod(job.ID)
 	sb, _ := h.st.GetSandbox(bg, job.ID)
 	if !sb.TenantJob || sb.IsOwn() || sb.Instance || sb.EnvironmentID != job.EnvID || sb.IdleAfterS == nil ||
-		*sb.IdleAfterS != 0 || !slices.Equal(sb.SecurityGroups, []string{"default"}) {
+		*sb.IdleAfterS != 0 || sb.Reaches.All || len(sb.Reaches.Entries) != 0 || sb.Egress != nil ||
+		!slices.Equal(sb.PodTemplate.SecurityGroups, []string{model.EnvGroupID(job.EnvID),
+			model.JobWorkloadGroupID(job.ID.String())}) {
 		t.Fatalf("the pod's row %+v", sb)
 	}
 	spec := h.pod("n1", job.ID).GetSpec().GetContainers()[0]
