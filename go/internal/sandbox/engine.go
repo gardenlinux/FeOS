@@ -50,6 +50,9 @@ type Config struct {
 	// ImageBakes lets a create have its node bake the pod's image into a
 	// layer that later creates start on (--image-bakes, ADR 0025).
 	ImageBakes bool
+	// RegistryEgress is --registry-egress: per registry host, the further
+	// names its pulls talk to.
+	RegistryEgress map[string][]string
 	// DenyPrefixes are the destinations the image resolver may not reach,
 	// as bindings and preflights may not (--deny-prefix); nil:
 	// bindings.DefaultDenyPrefixes.

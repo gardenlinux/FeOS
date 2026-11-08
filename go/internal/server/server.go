@@ -312,7 +312,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		IdlePause: cfg.IdlePause, HibernateAfter: cfg.HibernateAfter, LostGrace: cfg.LostGrace, NodeWait: cfg.NodeWait,
 		DrainTimeout: cfg.DrainTimeout, PendingRepairAfter: cfg.PendingRepairAfter,
 		UnreachableRepairAfter: cfg.UnreachableRepairAfter, HibernateTimeout: cfg.HibernateTimeout,
-		DenyPrefixes: cfg.DenyPrefixes, ImageBakes: cfg.ImageBakes, Log: i.log,
+		DenyPrefixes: cfg.DenyPrefixes, ImageBakes: cfg.ImageBakes, RegistryEgress: cfg.RegistryEgress, Log: i.log,
 	}, sandbox.Deps{DB: i.DB, Store: i.Store, Conns: i.Links, Elector: i.Elector, Activity: i.Activity,
 		Sealer: openerOf(sealer)}); err != nil {
 		return nil, fmt.Errorf("the sandbox engine: %w", err)

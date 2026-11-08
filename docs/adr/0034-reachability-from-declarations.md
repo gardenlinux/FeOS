@@ -187,7 +187,9 @@ nobody else; the ingress reaches `api` on `http`.
   a pod's image over the pod's network until the node pulls (ADR 0022,
   ADR 0025), so a pod whose egress restricts names may also resolve and
   reach its image's registry: the registry's host, and for Docker Hub
-  and GitHub's registry the hosts their tokens and blobs come from.
+  and GitHub's registry the hosts their tokens and blobs come from, and
+  for any registry the names its operator gives (`--registry-egress`),
+  such as the storage a registry redirects its blobs to.
 - **A binding's upstream is egress the binding declares.** Once a
   binding dials from the pod's address (ADR 0014's second address, not
   built), its upstream's host is in the pod's egress by the binding

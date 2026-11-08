@@ -415,7 +415,7 @@ func (h *harness) pods(node string) podv1.PodServiceClient {
 // podSpec is the spec the engine builds for a row without a secret
 // resolver (an ordinary sandbox's, or a template's without secrets).
 func podSpec(sb store.Sandbox) *podv1.PodSpec {
-	spec, err := buildPodSpec(bg, sb, nil)
+	spec, err := buildPodSpec(bg, sb, nil, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -665,3 +665,16 @@ func TestSinkFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryEgressFlag(t *testing.T) {
+	var r registryEgress
+	if err := r.Set("oci.example=*.objects.example, cdn.example ; ghcr.io=x.example"); err != nil {
+		t.Fatal(err)
+	}
+	if r.String() != "ghcr.io=x.example;oci.example=*.objects.example,cdn.example" {
+		t.Fatalf("%q", r.String())
+	}
+	if err := r.Set("=x"); err == nil {
+		t.Fatal("an entry without a host is refused")
+	}
+}

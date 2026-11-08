@@ -31,11 +31,11 @@ var errNoResolver = errors.New("no secret resolver: the environments are not set
 // create idempotent. A secret that does not resolve fails it: the create
 // sends nothing then.
 func (e *Engine) podSpec(ctx context.Context, sb store.Sandbox) (*podv1.PodSpec, error) {
-	return buildPodSpec(ctx, sb, e.secretResolver())
+	return buildPodSpec(ctx, sb, e.secretResolver(), e.cfg.RegistryEgress)
 }
 
 // buildPodSpec is podSpec with the resolver given.
-func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver) (*podv1.PodSpec, error) {
+func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver, registryEgress map[string][]string) (*podv1.PodSpec, error) {
 	labels := map[string]string{
 		LabelSandbox:     sb.ID.String(),
 		LabelTenant:      sb.Owner,
@@ -78,7 +78,7 @@ func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver)
 	// these upstream names.
 	if t.RestrictEgressNames {
 		spec.Network.RestrictEgressNames = true
-		spec.Network.EgressDomains = egressDomains(t.EgressDomains, sb.ImageRef)
+		spec.Network.EgressDomains = egressDomains(t.EgressDomains, sb.ImageRef, registryEgress)
 	}
 	// The sandbox labels win: a template cannot make its pod another
 	// sandbox's, tenant's or incarnation's.
@@ -225,9 +225,10 @@ func userinfoKeeps(c byte) bool {
 // declares (ADR 0034, revised), and the guest pulls over the pod's
 // network until the node pulls (ADR 0022, ADR 0025). Sorted, without
 // repeats.
-func egressDomains(domains []string, imageRef string) []string {
+func egressDomains(domains []string, imageRef string, registryEgress map[string][]string) []string {
 	out := append([]string(nil), domains...)
 	out = append(out, registryHosts(imageRef)...)
+	out = append(out, registryEgress[registryHost(imageRef)]...)
 	slices.Sort(out)
 	return slices.Compact(out)
 }
@@ -236,6 +237,23 @@ func egressDomains(domains []string, imageRef string) []string {
 // for the two public registries the hosts their blobs and tokens come
 // from. An image without a registry host is Docker Hub's.
 func registryHosts(ref string) []string {
+	host := registryHost(ref)
+	switch host {
+	case "docker.io", "index.docker.io", "registry-1.docker.io":
+		// Its blobs come from CDNs that change: docker.com's and
+		// Cloudflare R2's.
+		return []string{"*.docker.com", "*.docker.io", "*.r2.cloudflarestorage.com", "docker.io"}
+	case "ghcr.io":
+		return []string{"*.githubusercontent.com", "ghcr.io"}
+	case "", "localhost":
+		return nil
+	}
+	return []string{host}
+}
+
+// registryHost is the host of ref's registry, without a port; Docker
+// Hub's for an image without one.
+func registryHost(ref string) string {
 	host := "docker.io"
 	if i := strings.IndexByte(ref, '/'); i > 0 {
 		if first := ref[:i]; strings.ContainsAny(first, ".:") || first == "localhost" {
@@ -245,13 +263,5 @@ func registryHosts(ref string) []string {
 	if h, _, ok := strings.Cut(host, ":"); ok {
 		host = h
 	}
-	switch host {
-	case "docker.io", "index.docker.io", "registry-1.docker.io":
-		return []string{"auth.docker.io", "index.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"}
-	case "ghcr.io":
-		return []string{"ghcr.io", "pkg-containers.githubusercontent.com"}
-	case "", "localhost":
-		return nil
-	}
-	return []string{host}
+	return strings.ToLower(host)
 }

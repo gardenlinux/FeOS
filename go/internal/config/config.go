@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/mail"
 	"net/netip"
 	"net/url"
@@ -150,6 +151,11 @@ type Config struct {
 	// object store, which later creates of the image start on once its
 	// registry said yes to them (ADR 0025).
 	ImageBakes bool
+	// RegistryEgress names, per registry host, the further names a pull
+	// from it talks to (its blob storage, which it redirects to): a pod
+	// whose egress restricts names may reach them with its image's
+	// registry (ADR 0034, revised; --registry-egress).
+	RegistryEgress map[string][]string
 	// AdminUsers are the operators' Basic credentials (user → password),
 	// the fallback beside OIDC sign-in.
 	AdminUsers map[string]string
@@ -407,6 +413,8 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"the certificate profile the orders ask for, one the directory lists (Let's Encrypt: shortlived, six days; classic, 90); empty: the CA's default")
 	fs.Var((*prefixList)(&c.DenyPrefixes), "deny-prefix",
 		"a destination prefix preflights, bindings and the image resolver may not reach, comma-separated or repeated; \"default\" is the built-in set (default: the built-in set)")
+	fs.Var((*registryEgress)(&c.RegistryEgress), "registry-egress",
+		"per registry host, the further names its pulls talk to, as host=name,name;host=name (e.g. oci.example=*.objects.example): a pod whose egress restricts names may reach them with its image's registry")
 	fs.BoolVar(&c.ImageBakes, "image-bakes", c.ImageBakes,
 		"have a pod's node bake its image once into a layer in the object store, which later creates of the image start on once its registry said yes")
 	fs.StringVar(&t.adminUsers, "admin-users", "", "user:password,user:password for the admin API: the Basic fallback beside OIDC")
@@ -991,4 +999,41 @@ func isProfileName(p string) bool {
 		}
 	}
 	return p != ""
+}
+
+// registryEgress is --registry-egress: host=name,name;host=name.
+type registryEgress map[string][]string
+
+func (r *registryEgress) String() string {
+	if r == nil || *r == nil {
+		return ""
+	}
+	var parts []string
+	for _, h := range slices.Sorted(maps.Keys(*r)) {
+		parts = append(parts, h+"="+strings.Join((*r)[h], ","))
+	}
+	return strings.Join(parts, ";")
+}
+
+func (r *registryEgress) Set(v string) error {
+	if *r == nil {
+		*r = map[string][]string{}
+	}
+	for _, entry := range strings.Split(v, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		host, names, ok := strings.Cut(entry, "=")
+		host = strings.ToLower(strings.TrimSpace(host))
+		if !ok || host == "" {
+			return fmt.Errorf("registry egress %q: want host=name,name", entry)
+		}
+		for _, n := range strings.Split(names, ",") {
+			if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+				(*r)[host] = append((*r)[host], n)
+			}
+		}
+	}
+	return nil
 }

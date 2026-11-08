@@ -181,7 +181,7 @@ func TestTemplateCreateSendsItsSpec(t *testing.T) {
 	wantWebSpec(t, info.GetSpec(), row)
 	// The same spec on every build: a retry or takeover creates the pod it
 	// made.
-	again, err := buildPodSpec(bg, row, sec.resolve)
+	again, err := buildPodSpec(bg, row, sec.resolve, nil)
 	if err != nil || !proto.Equal(again, reqs[0].GetSpec()) {
 		t.Fatalf("a second build differs: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestTemplateTakeoverSendsTheSameSpec(t *testing.T) {
 		gen = gen + 1 WHERE id = $1`, sb.ID, testImage)
 	h.exec("INSERT INTO bookings (pod_id, node, vcpus, memory_mib, gated) VALUES ($1, 'n1', 1, 512, true)", sb.ID)
 	row := h.row(sb.ID)
-	first, err := buildPodSpec(bg, row, sec.resolve)
+	first, err := buildPodSpec(bg, row, sec.resolve, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestBuildPodSpec(t *testing.T) {
 		MemoryMiB: 1024, EnvironmentID: env, Instance: true}
 
 	// No template: the sandbox's own pod.
-	spec, err := buildPodSpec(bg, sb, nil)
+	spec, err := buildPodSpec(bg, sb, nil, nil)
 	if err != nil || strings.Join(spec.GetContainers()[0].GetCommand(), " ") != "sleep infinity" ||
 		len(spec.GetNetwork().GetSecurityGroups()) != 0 || len(spec.GetLabels()) != 3 {
 		t.Fatalf("plain spec %v %v", spec, err)
@@ -267,7 +267,7 @@ func TestBuildPodSpec(t *testing.T) {
 		Volumes: []model.TemplateVolume{{Name: "data", VolumeID: vol}},
 		Mounts:  []model.TemplateMount{{Volume: "data", Path: "/var/lib/postgresql/data", ReadOnly: true}},
 	}
-	spec, err = buildPodSpec(bg, sb, nil)
+	spec, err = buildPodSpec(bg, sb, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,21 +281,21 @@ func TestBuildPodSpec(t *testing.T) {
 	// A secret without a resolver, a resolver's failure, an unmapped
 	// credential and a secret of a row without an environment fail.
 	sb.PodTemplate = &model.PodTemplate{Env: map[string]model.TemplateValue{"P": model.SecretValue("pw", 1, "")}}
-	if _, err := buildPodSpec(bg, sb, nil); !errors.Is(err, errNoResolver) {
+	if _, err := buildPodSpec(bg, sb, nil, nil); !errors.Is(err, errNoResolver) {
 		t.Fatalf("no resolver: %v", err)
 	}
 	boom := errors.New("boom")
 	sec := &secrets{fail: boom}
-	if _, err := buildPodSpec(bg, sb, sec.resolve); !errors.Is(err, boom) || !strings.Contains(err.Error(), "env P: secret pw version 1") {
+	if _, err := buildPodSpec(bg, sb, sec.resolve, nil); !errors.Is(err, boom) || !strings.Contains(err.Error(), "env P: secret pw version 1") {
 		t.Fatalf("resolver failure: %v", err)
 	}
 	sb.PodTemplate = &model.PodTemplate{Env: map[string]model.TemplateValue{"P": model.CredentialValue("password")}}
-	if _, err := buildPodSpec(bg, sb, sec.resolve); err == nil || !strings.Contains(err.Error(), "unmapped credential") {
+	if _, err := buildPodSpec(bg, sb, sec.resolve, nil); err == nil || !strings.Contains(err.Error(), "unmapped credential") {
 		t.Fatalf("credential: %v", err)
 	}
 	sb.Instance = false
 	sb.PodTemplate = &model.PodTemplate{Env: map[string]model.TemplateValue{"P": model.SecretValue("pw", 1, "")}}
-	if _, err := buildPodSpec(bg, sb, (&secrets{}).resolve); err == nil || !strings.Contains(err.Error(), "no environment's") {
+	if _, err := buildPodSpec(bg, sb, (&secrets{}).resolve, nil); err == nil || !strings.Contains(err.Error(), "no environment's") {
 		t.Fatalf("no environment: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func TestBuildPodSpec(t *testing.T) {
 		"A": model.SecretValue("pw", 1, ""),
 		"B": {Parts: []model.TemplatePart{{Value: "u:"}, {Secret: "pw", Version: 1, Escape: model.EscapeURL}}},
 	}}
-	spec, err = buildPodSpec(bg, sb, sec.resolve)
+	spec, err = buildPodSpec(bg, sb, sec.resolve, nil)
 	if err != nil || spec.GetContainers()[0].GetEnv()["B"] != "u:x" || sec.calls != 1 {
 		t.Fatalf("spec %v %v, %d calls", spec, err, sec.calls)
 	}
@@ -348,17 +348,17 @@ func TestPodSpecEgressNames(t *testing.T) {
 	id := podid.Mint()
 	sb := store.Sandbox{ID: id, Owner: testTenant, ImageRef: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
 		PodTemplate: model.SandboxTemplate(env, id.String(), true, []string{"api.stripe.com", "*.example.com"})}
-	spec, err := buildPodSpec(bg, sb, nil)
+	spec, err := buildPodSpec(bg, sb, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	n := spec.GetNetwork()
-	if !n.GetRestrictEgressNames() || !slices.Equal(n.GetEgressDomains(), egressDomains([]string{"api.stripe.com", "*.example.com"}, testImage)) ||
+	if !n.GetRestrictEgressNames() || !slices.Equal(n.GetEgressDomains(), egressDomains([]string{"api.stripe.com", "*.example.com"}, testImage, nil)) ||
 		!slices.Equal(n.GetSecurityGroups(), []string{model.EnvGroupID(env), model.SandboxWorkloadGroupID(id.String())}) {
 		t.Fatalf("network %v", n)
 	}
 	sb.PodTemplate = model.SandboxTemplate(env, id.String(), false, nil)
-	if spec, err = buildPodSpec(bg, sb, nil); err != nil || spec.GetNetwork().GetRestrictEgressNames() ||
+	if spec, err = buildPodSpec(bg, sb, nil, nil); err != nil || spec.GetNetwork().GetRestrictEgressNames() ||
 		len(spec.GetNetwork().GetEgressDomains()) != 0 {
 		t.Fatalf("internet %v %v", spec.GetNetwork(), err)
 	}
@@ -368,9 +368,9 @@ func TestPodSpecEgressNames(t *testing.T) {
 // guest pulls over the pod's network.
 func TestRegistryHosts(t *testing.T) {
 	for ref, want := range map[string][]string{
-		"docker.io/library/postgres@sha256:aa": {"auth.docker.io", "index.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
-		"postgres:17":                          {"auth.docker.io", "index.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
-		"ghcr.io/kino/api:1.4":                 {"ghcr.io", "pkg-containers.githubusercontent.com"},
+		"docker.io/library/postgres@sha256:aa": {"*.docker.com", "*.docker.io", "*.r2.cloudflarestorage.com", "docker.io"},
+		"postgres:17":                          {"*.docker.com", "*.docker.io", "*.r2.cloudflarestorage.com", "docker.io"},
+		"ghcr.io/kino/api:1.4":                 {"*.githubusercontent.com", "ghcr.io"},
 		"oci.fecode.dev/kino/api@sha256:bb":    {"oci.fecode.dev"},
 		"registry.example:5000/x/y:1":          {"registry.example"},
 		"localhost:5000/x":                     nil,
@@ -379,9 +379,16 @@ func TestRegistryHosts(t *testing.T) {
 			t.Errorf("%s: %v, want %v", ref, got, want)
 		}
 	}
-	got := egressDomains([]string{"api.stripe.com", "ghcr.io"}, "ghcr.io/a/b:1")
-	if !slices.Equal(got, []string{"api.stripe.com", "ghcr.io", "pkg-containers.githubusercontent.com"}) {
+	got := egressDomains([]string{"api.stripe.com", "ghcr.io"}, "ghcr.io/a/b:1", nil)
+	if !slices.Equal(got, []string{"*.githubusercontent.com", "api.stripe.com", "ghcr.io"}) {
 		t.Fatalf("egressDomains %v", got)
 	}
 }
 
+// --registry-egress adds the names a registry's pulls talk to.
+func TestRegistryEgress(t *testing.T) {
+	got := egressDomains(nil, "oci.fecode.dev/kino/api@sha256:aa", map[string][]string{"oci.fecode.dev": {"*.your-objectstorage.com"}})
+	if !slices.Equal(got, []string{"*.your-objectstorage.com", "oci.fecode.dev"}) {
+		t.Fatalf("%v", got)
+	}
+}
