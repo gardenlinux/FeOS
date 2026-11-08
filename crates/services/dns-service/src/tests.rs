@@ -175,11 +175,10 @@ fn zone(query: &Query, tcp: bool) -> Option<Message> {
         }
         // Below v4.test, with a long TTL to A and a short one to AAAA.
         ("deep.v4.test.", RecordType::A) => {
-            response.add_answer(Record::from_rdata(
-                owner.clone(),
-                3600,
-                RData::A(A([9, 9, 9, 9].into())),
-            ));
+            response.add_answers([
+                Record::from_rdata(owner.clone(), 3600, RData::A(A([9, 9, 9, 9].into()))),
+                Record::from_rdata(owner.clone(), u32::MAX, RData::A(A([9, 9, 9, 7].into()))),
+            ]);
         }
         ("deep.v4.test.", RecordType::AAAA) => {
             response.add_answers([
@@ -1169,14 +1168,18 @@ async fn a_restricted_pod_is_answered_its_egress_names_alone() {
     // A name below a wildcard: a longer TTL counts, a shorter one is five
     // minutes; an IPv4-mapped address is admitted as IPv4.
     let answer = ask_udp(server, &query("deep.v4.test.", RecordType::A)).await;
-    assert_eq!(addresses(&answer), ips(&["9.9.9.9"]));
+    assert_eq!(addresses(&answer), ips(&["9.9.9.9", "9.9.9.7"]));
+    // A TTL beyond a day: a day.
     assert_eq!(
         admitted(&admits),
-        [(
-            POD.to_string(),
-            ips(&["9.9.9.9"])[0],
-            Duration::from_secs(3600)
-        )]
+        [
+            (
+                POD.to_string(),
+                ips(&["9.9.9.9"])[0],
+                Duration::from_secs(3600)
+            ),
+            (POD.to_string(), ips(&["9.9.9.7"])[0], MAX_ADMIT)
+        ]
     );
     ask_udp(server, &query("deep.v4.test.", RecordType::AAAA)).await;
     let timeouts: Vec<_> = admitted(&admits)

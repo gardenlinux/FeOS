@@ -32,8 +32,9 @@
 //! egress: an exact name, or one strictly below a `*.` suffix. Every other
 //! name it asks upstream is answered REFUSED and recorded so. The
 //! addresses of an allowed answer, A and AAAA, are handed to the
-//! resolver's [`Admit`] before the pod has the answer, each for its TTL
-//! and at least [`MIN_ADMIT`]: what fills the pod's egress set. The names
+//! resolver's [`Admit`] before the pod has the answer, each for its TTL,
+//! at least [`MIN_ADMIT`] and at most [`MAX_ADMIT`]: what fills the pod's
+//! egress set. The names
 //! of its name tables and of its HTTP bindings are answered as before.
 //!
 //! feosd binds the sockets and hands them over, so that they can come from
@@ -92,6 +93,9 @@ pub const HTTP_TTL: u32 = 5;
 /// How long an address of an allowed name is admitted at least: programs
 /// keep addresses longer than their TTL (ADR 0034, revised).
 pub const MIN_ADMIT: Duration = Duration::from_secs(300);
+/// How long it is admitted at most, whatever TTL an upstream gives: a
+/// day.
+pub const MAX_ADMIT: Duration = Duration::from_secs(86_400);
 
 /// The addresses of a name, one label in any case, in the first of the
 /// name tables of a pod that holds it; None when none does.
@@ -738,7 +742,8 @@ impl Resolver {
 }
 
 /// The addresses of an answer's A and AAAA records, an IPv4-mapped one as
-/// IPv4, each once, for its longest TTL and at least [`MIN_ADMIT`].
+/// IPv4, each once, for its longest TTL, at least [`MIN_ADMIT`] and at
+/// most [`MAX_ADMIT`].
 fn admitted(response: &Message) -> Vec<(IpAddr, Duration)> {
     let mut addresses: Vec<(IpAddr, Duration)> = Vec::new();
     for record in &response.answers {
@@ -747,7 +752,7 @@ fn admitted(response: &Message) -> Vec<(IpAddr, Duration)> {
             RData::AAAA(AAAA(address)) => IpAddr::V6(*address).to_canonical(),
             _ => continue,
         };
-        let timeout = Duration::from_secs(record.ttl.into()).max(MIN_ADMIT);
+        let timeout = Duration::from_secs(record.ttl.into()).clamp(MIN_ADMIT, MAX_ADMIT);
         match addresses.iter_mut().find(|(a, _)| *a == address) {
             Some((_, longest)) => *longest = (*longest).max(timeout),
             None => addresses.push((address, timeout)),

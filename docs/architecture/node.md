@@ -665,10 +665,10 @@ recorded with that code. The names of its name tables and HTTP bindings
 are answered as before. For an allowed name, the resolver puts the A and
 AAAA addresses of the answer into the pod's timed sets
 ([The table](#the-table)) before the pod has the answer, each for its
-TTL and at least 300 s; an address answered again is written again once
-its time grows by 10 s, and a pod has at most 4096. A create refuses an
-egress name that is not a DNS name or one after `*.`. Without the flag,
-nothing of this applies.
+TTL, at least 300 s and at most a day; an address answered again is
+written again once its time grows by 10 s, and a pod has at most 4096. A
+create refuses an egress name that is not a DNS name or one after `*.`.
+Without the flag, nothing of this applies.
 
 Answers pass as the upstream gave them: pods have IPv4, so nothing is
 synthesized. The resolver takes `ech` out of HTTPS records, and records
