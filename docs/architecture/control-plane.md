@@ -102,6 +102,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--domain-reserved` | none | a zone no domain may be or be under (the platform's own domain, where `run`, `id` and `edge` are), beside the apps zone, the tenant zone and `--edge-name`; repeatable |
 | `--dns-resolver` | the system's resolvers (`/etc/resolv.conf`) | the DNS resolver, `host:port`, the domains' checks ask |
 | `--default-image` | `ghcr.io/maltej/debian-ai:latest` | the image of a sandbox created without one |
+| `--registry-egress` | none | per registry host, the further names its pulls talk to, `host=name,name;host=name` (`oci.example=*.objects.example` for a registry that redirects its blobs to object storage): a pod whose egress restricts names may resolve and reach them with its image's registry ([Security groups](#security-groups)) |
 | `--image-bakes` | true | a create names the baked layers of its image and lets its node bake it ([Images](#images), ADR 0025); false: neither |
 | `--default-vcpus`, `--default-memory-mib` | 2, 512 | the size of a sandbox created without one |
 | `--placement` | `binpack` | or `spread` |
@@ -2717,7 +2718,7 @@ shapes:
     declaration opens it: the deployment gives ferund the set it gives
     feosd, beside the built-in one); one that contains such a prefix is
     an info finding that it stays closed there. An addon's egress is its
-    type's, none.
+    type's, the internet: its guest pulls its image.
 
   The plan derives the edges (`spec.Derive`): an env reference `{service,
   port}` of any key opens that port (one without a port, `key: host`,
@@ -3076,9 +3077,14 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
   `restrictEgressNames` in its template, and a restricted one's domains
   in `egressDomains` (sorted), which the pod spec sends as
   `PodNetwork.restrict_egress_names` and `egress_domains`: feosd's
-  resolver answers it only those upstream names ([api.md](api.md)). An
-  addon's pod always has it, without domains. They are part of the
-  template hash.
+  resolver answers it only those upstream names ([api.md](api.md)),
+  and the names of its image's registry, since its guest pulls over the
+  pod's network until the node pulls (ADR 0022): the registry's host,
+  for Docker Hub `*.docker.com`, `*.docker.io`,
+  `*.r2.cloudflarestorage.com` and `docker.io`, for `ghcr.io`
+  `*.githubusercontent.com`, and the names `--registry-egress` gives the
+  host. An addon's pod has neither. They are part of the template
+  hash.
 - **The env group** takes nothing in; its one rule is egress of any
   protocol to itself, the implied rule: a pod may send to every pod of
   its environment, and the receiver's rules decide. Its members are the
@@ -3102,7 +3108,7 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
     one), the row's for a sandbox or a job: `internet` the egress
     table's two blocks, `none` nothing, restricted its blocks with their
     exceptions, any protocol; its domains are the pod's (above). An
-    addon's is none; a workload neither spec knows (an object whose pods
+    addon's is the internet; a workload neither spec knows (an object whose pods
     are going) is reached by the `"all"` pods alone and reaches the
     internet.
 

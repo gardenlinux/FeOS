@@ -222,14 +222,14 @@ footer code { font-size: 12px; }
 <header class="top">
   <div class="tile" aria-hidden="true"><span class="z">26</span><span class="sym">Fe</span><span class="nm">Iron</span><span class="am">55.845</span></div>
   <div class="head-text">
-    <p class="eyebrow"><a href="/">FeRun</a> · Architecture · as of 6 November 2026</p>
+    <p class="eyebrow"><a href="/">FeRun</a> · Architecture · as of 8 November 2026</p>
     <h1><span class="run">FeRun</span> and <span class="os">FeOS</span></h1>
     <p class="lede">Two products on one technology: <b>agent sandboxes</b>, workspaces in which an LLM agent runs commands and tools for its user, often for days, and an <b>isolated container runtime</b>, a container as a service (CaaS) for customers' own images. Both run on the same unit, the pod: a Firecracker microVM with containers in it, which costs no memory while idle and is back in under a second.</p>
     <div class="layers">
       <div class="layer run"><p class="lname">FeRun <span>the cluster component</span></p><p><code>ferund</code> in replicas over one PostgreSQL. It knows the tenants, places pods on nodes and decides when they sleep. Only FeRun knows whether a pod is a sandbox or a service.</p></div>
       <div class="layer os"><p class="lname">FeOS <span>on the node</span></p><p><code>feosd</code>, <code>diskd</code> and the guest. They run the pods: the microVMs, their disks, their network and their snapshots.</p></div>
     </div>
-    <p class="src">A picture of <code>docs/overview.md</code>, <code>docs/architecture/</code> and <code>docs/adr/</code> in the FeOS repository at <code>f4dd725</code>. It is a snapshot: where it and those pages differ, the pages are right.</p>
+    <p class="src">A picture of <code>docs/overview.md</code>, <code>docs/architecture/</code> and <code>docs/adr/</code> in the FeOS repository at <code>8861ceb</code>. It is a snapshot: where it and those pages differ, the pages are right.</p>
   </div>
   <button class="theme" id="theme-toggle" type="button">Light mode</button>
 </header>
@@ -242,6 +242,7 @@ footer code { font-size: 12px; }
   <a href="#request">A request's path</a>
   <a href="#pod-life">A pod's life</a>
   <a href="#caas">CaaS</a>
+  <a href="#network">Who reaches whom</a>
   <a href="#ferund">Inside ferund</a>
   <a href="#principles">Principles</a>
   <a href="#open">Not built yet</a>
@@ -634,7 +635,8 @@ footer code { font-size: 12px; }
   <ul class="facts">
     <li>An <b>IPv6 address</b> from the node's prefix: one the network routes to the node (<code>--pod-prefix</code>), or a /96 that ferund draws from the cluster's ULA /64 (<code>--pod-network mesh</code>). Plus an <b>IPv4 /32</b> from <code>169.254.16.0/20</code>, only for leaving the node through masquerade.</li>
     <li>A <b>routed TAP device</b> per pod, pinned to its addresses and named by the pod's 11-character ID. Proxy ARP answers for the IPv4 gateway <code>169.254.0.1</code>.</li>
-    <li><b>Security groups</b> as nftables chains per pod and direction in the table <code>inet feos</code>. Rules only allow, without order; ferund sends them with a version per group.</li>
+    <li><b>Security groups</b> as nftables chains per pod and direction in the table <code>inet feos</code>. Rules only allow, without order; ferund derives them from the deployments and sends them with a version per group (<a href="#network">Who reaches whom</a>).</li>
+    <li><b>Egress by name</b> for a pod that restricts it: the resolver answers only its allowed names and puts their addresses into timed sets that its out chain admits.</li>
     <li><b>DNS</b> at <code>169.254.0.53</code> from feosd, with the environments' name tables. <b>Metadata</b> through Firecracker's MMDS v2.</li>
     <li><b>Traffic records</b>: flows from connection tracking, drops, DNS queries and server names, without eBPF and with nothing in the data path.</li>
   </ul>
@@ -706,7 +708,7 @@ footer code { font-size: 12px; }
   <text class="lb" x="788" y="247" text-anchor="middle">ResumePod on the node connection</text>
 </svg>
     </div>
-    <figcaption><span class="fig-no">Fig. 3</span><b>No byte of the application passes through ferund.</b> Every ingress instance keeps the table in its cache and goes on routing while ferund is down. An endpoint is usable when its port is admitted, the node's group version is at least the admitted one, and the node's WireGuard handshake is younger than 180 s. When the service sleeps, the ingress holds the request and calls <code>Wake</code>. ferund wakes the pod over the node connection, and holds every 10 s keep it awake while requests come in. ferund gets certificates for tenants' domains over ACME (HTTP-01 through the ingress; by default Let's Encrypt's six-day <code>shortlived</code> profile).</figcaption>
+    <figcaption><span class="fig-no">Fig. 3</span><b>No byte of the application passes through ferund.</b> Every ingress instance keeps the table in its cache and goes on routing while ferund is down. An endpoint is usable when its port is admitted, the node's group version is at least the admitted one, and the node's WireGuard handshake is younger than 180 s. A route with <code>from</code> admits only clients from its blocks and answers others 403. When the service sleeps, the ingress holds the request and calls <code>Wake</code>. ferund wakes the pod over the node connection, and holds every 10 s keep it awake while requests come in. ferund gets certificates for tenants' domains over ACME (HTTP-01 through the ingress; by default Let's Encrypt's six-day <code>shortlived</code> profile).</figcaption>
   </figure>
 </section>
 
@@ -851,6 +853,140 @@ footer code { font-size: 12px; }
   </figure>
 </section>
 
+<!-- ============ Network ============ -->
+<section id="network">
+  <h2>Who reaches whom</h2>
+  <p class="prose">A tenant writes no firewall rule. What a deployment references, it may reach, and nothing else is open, not even within its own environment (ADR 0034). ferund derives the rules from the references, and every node enforces them by address in nftables. Within a cluster the address is the workload: a pod sends from its own address only, a node's /96 arrives only from the node that holds its WireGuard key, and traffic between nodes is encrypted.</p>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1200 350" role="img" aria-label="Declared, derived, enforced. A deployment's references (api's variables to catalog and the database, api's egress domain, a route with client blocks) and a sandbox's reaches go to ferund's plan, which derives edges and from them workload groups and the ingress's table. On the node, api reaches catalog and the database, the sandbox reaches api, catalog's call to the database is dropped; the resolver answers api only its domain; the ingress admits the route's clients only from their block.">
+  <defs>
+    <marker id="m6" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+    <marker id="m6n" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mkn"/></marker>
+  </defs>
+  <text class="rt" x="16" y="24">DECLARED</text>
+  <text class="rt run" x="420" y="24">DERIVED · FERUND</text>
+  <text class="rt os" x="824" y="24">ENFORCED · NODE AND INGRESS</text>
+
+  <rect class="b-cli" x="16" y="40" width="340" height="290" rx="4"/>
+  <text class="t" x="32" y="64">A deployment</text>
+  <text x="140" y="64">fecode.yaml or the builder</text>
+  <text class="lb" x="32" y="92">services:</text>
+  <text class="lb" x="44" y="109">api:</text>
+  <text class="lb" x="56" y="126">env:</text>
+  <text class="lb" x="68" y="143">CATALOG: {service: catalog, port: http}</text>
+  <text class="lb" x="68" y="160">DB: {addon: db, key: url}</text>
+  <text class="lb" x="56" y="177">egress: {domains: [api.stripe.com]}</text>
+  <text class="lb" x="44" y="194">catalog: {ports: [{name: http, port: 8080}]}</text>
+  <text class="lb" x="32" y="211">addons: {db: {type: postgres}}</text>
+  <text class="lb" x="32" y="228">routes:</text>
+  <text class="lb" x="44" y="245">api: {service: api, port: http,</text>
+  <text class="lb" x="68" y="262">from: [203.0.113.0/24]}</text>
+  <text x="32" y="294">and a sandbox's create:</text>
+  <text class="lb" x="32" y="312">reaches: [{service: api, port: http}]</text>
+
+  <path class="ln" d="M356 120H420" marker-end="url(#m6)"/>
+  <text class="lb" x="388" y="112" text-anchor="middle">plan</text>
+
+  <rect class="b-run" x="420" y="40" width="340" height="150" rx="4"/>
+  <text class="tm" x="436" y="64">reachability</text>
+  <text x="560" y="64">edges, by port name</text>
+  <text class="lb" x="436" y="92">ingress → api:8080</text>
+  <text x="604" y="92">route api</text>
+  <text class="lb" x="436" y="112">api → catalog:8080</text>
+  <text x="604" y="112">env CATALOG</text>
+  <text class="lb" x="436" y="132">api → db:5432</text>
+  <text x="604" y="132">env DB</text>
+  <text class="lb" x="436" y="152">sandbox → api:8080</text>
+  <text x="604" y="152">reaches</text>
+  <text class="lb" x="436" y="172">api egress</text>
+  <text x="604" y="172">restricted, 1 domain</text>
+
+  <path class="ln" d="M590 190V220" marker-end="url(#m6)"/>
+  <text class="lb" x="598" y="210">rules</text>
+
+  <rect class="b-run" x="420" y="220" width="340" height="110" rx="4"/>
+  <text class="tm" x="436" y="243">groups and the table</text>
+  <text class="lb" x="436" y="265">wl-&lt;catalog&gt;</text>
+  <text x="560" y="265">in tcp 8080 from wl-&lt;api&gt;</text>
+  <text class="lb" x="436" y="282">wl-&lt;db&gt;</text>
+  <text x="560" y="282">in tcp 5432 from wl-&lt;api&gt;</text>
+  <text class="lb" x="436" y="299">wl-&lt;api&gt;</text>
+  <text x="560" y="299">in from wl-s-&lt;sbx&gt;; out: names</text>
+  <text class="lb" x="436" y="316">route api</text>
+  <text x="560" y="316">clients from 203.0.113.0/24</text>
+
+  <path class="ln" d="M760 240H824" marker-end="url(#m6)"/>
+  <text class="lb" x="792" y="232" text-anchor="middle">groups</text>
+  <path class="ln" d="M760 308H824" marker-end="url(#m6)"/>
+  <text class="lb" x="792" y="300" text-anchor="middle">table</text>
+
+  <rect class="b-node" x="824" y="40" width="360" height="210" rx="4"/>
+  <text class="t" x="1168" y="62" text-anchor="end">Node · feosd</text>
+  <rect class="b-os" x="856" y="84" width="100" height="34" rx="3"/>
+  <text class="tm2" x="906" y="105" text-anchor="middle">api</text>
+  <rect class="b-os" x="1060" y="84" width="100" height="34" rx="3"/>
+  <text class="tm2" x="1110" y="105" text-anchor="middle">catalog</text>
+  <rect class="b-os" x="1060" y="172" width="100" height="34" rx="3"/>
+  <text class="tm2" x="1110" y="193" text-anchor="middle">db</text>
+  <rect class="b-vm" x="856" y="172" width="100" height="34" rx="3"/>
+  <text class="tm2" x="906" y="193" text-anchor="middle">sandbox</text>
+
+  <path class="ln-net" d="M956 101H1060" marker-end="url(#m6n)"/>
+  <text class="lbn" x="1008" y="94" text-anchor="middle">:8080</text>
+  <path class="ln-net" d="M956 114L1060 182" marker-end="url(#m6n)"/>
+  <text class="lbn" x="1000" y="162" text-anchor="end">:5432</text>
+  <path class="ln-net" d="M906 172V118" marker-end="url(#m6n)"/>
+  <text class="lbn" x="914" y="150">:8080</text>
+  <path class="ln" d="M1110 118V136M1110 160V172" stroke-dasharray="4 3"/>
+  <text class="t" x="1110" y="154" text-anchor="middle" style="fill: var(--os); font-size: 18px">×</text>
+  <text class="lb" x="1122" y="150">no-rule</text>
+  <path class="ln-net" d="M840 270V101H856" marker-end="url(#m6n)"/>
+
+  <text class="lb" x="856" y="228">nftables: an in- and out- chain per TAP</text>
+  <text class="lb" x="856" y="242">resolver: api gets api.stripe.com alone</text>
+
+  <rect class="b-run" x="824" y="270" width="360" height="60" rx="4"/>
+  <text class="tm" x="856" y="293">ferun-ingress</text>
+  <text x="856" y="313">route api: a client outside 203.0.113.0/24 gets 403</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 6</span><b>The reference is the rule.</b> Nobody writes it, and nobody can forget it: a deployment that drops the variable drops the rule. Every pod names its environment's group <code>env-&lt;env&gt;</code>, which lets it send to its own environment, and its workload's <code>wl-…</code>, whose rules admit the callers the references name; the receiver decides. A call nobody declared, such as catalog's to the database, is dropped and recorded as <code>no-rule</code>. A change of references changes rules in place; no pod restarts for it.</figcaption>
+  </figure>
+
+  <h3>What opens what</h3>
+  <ul class="facts">
+    <li><b>A reference opens the port it names</b>: a variable from a service's port or an addon's output, a URL whose host is a service or an addon, a route (for the ingress), or <code>uses</code> for a call without a variable. By port name, so a changed number changes the rule with it. A workload's replicas reach each other on its ports.</li>
+    <li><b>Egress</b> is a service's or a job's own: <code>internet</code> by default (global unicast, without private and special-purpose ranges), <code>none</code>, or <code>{domains, blocks}</code> with exceptions per block. feosd's resolver answers a restricted pod only its domains and puts their addresses into the pod's timed sets for their TTL, at least 5 minutes and at most a day; any other name gets REFUSED. While the guest still pulls images itself, a restricted pod may also reach its image's registry. Addons reach the internet.</li>
+    <li><b>A route's <code>from</code></b> lists the client blocks the ingress admits; other clients get 403. Without it, the route is open to everyone while its environment is public.</li>
+    <li><b>A sandbox or a tenant's job</b> names at its create what of its environment it <code>reaches</code>: a list, <code>all</code>, or nothing, the default. <code>PUT …/reaches</code> changes a sandbox's in place, since the rules are its targets'; nothing moves. Nothing of the environment reaches a sandbox but through an attached service's port.</li>
+    <li><b>What the platform carries needs no rule</b>: DNS, the metadata service, the node address <code>169.254.169.1</code> (traces, logs, HTTP bindings) and readiness checks over the port forward.</li>
+  </ul>
+
+  <h3>Layers</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Layer</th><th>Enforced by</th><th>Keeps out</th></tr></thead>
+      <tbody>
+        <tr><td class="nw">Tenant</td><td>A Firecracker microVM per pod, in the jailer</td><td>one tenant's code from another's memory and kernel</td></tr>
+        <tr><td class="nw">Address</td><td>The TAP, pinned to the pod's addresses; <code>prerouting</code> drops a source that is not routed back out its TAP, logged as <code>spoofed</code></td><td>a pod sending as another</td></tr>
+        <tr><td class="nw">Between nodes</td><td><span class="pill net">mesh</span> WireGuard <code>feos-mesh</code>: a peer's packets count only with its key and a source in its /96</td><td>reading the underlay; a node sending another node's pods' addresses</td></tr>
+        <tr><td class="nw">Between workloads</td><td>nftables chains <code>in-&lt;TAP&gt;</code> and <code>out-&lt;TAP&gt;</code> per pod, from the groups <code>env-</code>, <code>wl-</code> and <code>ing-</code>; drops logged as <code>no-rule</code></td><td>every call no reference declares, within the environment too</td></tr>
+        <tr><td class="nw">Egress</td><td>The internet sets, <code>--deny-prefix</code>, the node's own and link-local addresses denied; the resolver and the pod's timed sets</td><td>the cluster's networks, the cloud's metadata service, names a service did not declare</td></tr>
+        <tr><td class="nw">From outside</td><td>ferun-ingress alone, on routed ports (<code>ing-</code>), with TLS and a route's <code>from</code></td><td>everything else: no rule admits the internet into a pod</td></tr>
+        <tr><td class="nw">Evidence</td><td>feosd records flows, drops, DNS queries with refusals, and server names (ADR 0013)</td><td>nothing by itself: it shows what was refused and why, on the node for now</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Identity and limits</h3>
+  <ul class="facts">
+    <li><b>No mTLS between services.</b> The address already names the workload, and the node admits by it. A workload's certificate (ADR 0014) is for credentials without a password and for calls that leave the cluster, not for who reaches what.</li>
+    <li><b>A shared address.</b> A CDN serves many names from one address: a pod allowed <code>a.cdn.example</code> reaches that address and may ask it for another name. The server name is recorded, not checked.</li>
+    <li><b>A routed cluster</b> (every node with a prefix of the network's, no mesh) has no WireGuard, and no check that a source from another node's prefix came from that node: there, the network must filter (<code>docs/security.md</code>).</li>
+  </ul>
+</section>
+
 <!-- ============ ferund ============ -->
 <section id="ferund">
   <h2>Inside ferund</h2>
@@ -878,6 +1014,7 @@ footer code { font-size: 12px; }
     <li><b>PID 1 stays small.</b><span>feos-host-init and feos-guest must not die; work that can fail runs in processes that can be restarted.</span></li>
     <li><b>Static musl, syscalls first.</b><span>No shared libraries, no shelling out to userspace tools. The one exception: <code>mke2fs</code> for new volumes in the guest.</span></li>
     <li><b>The database's clock decides.</b><span>Every lease, TTL and deadline in ferund uses PostgreSQL's <code>now()</code>. No node call inside a transaction.</span></li>
+    <li><b>What is not declared is closed.</b><span>A deployment's references open the ports they name; nothing else reaches a pod, not even from its own environment.</span></li>
     <li><b>FeOS knows pods.</b><span>Whether a pod is an agent's sandbox or a customer's service, only FeRun knows.</span></li>
   </ul>
 </section>
@@ -889,7 +1026,8 @@ footer code { font-size: 12px; }
   <ul class="facts">
     <li><b>Images through the node</b> (ADR 0022): the guest still pulls with the registry's token; feosd is to pull the layers and bake them into a sealed layer of diskd's.</li>
     <li><b>Pod identity</b> (ADR 0014): only feos-authn's HTTP side is built. The SPIFFE identity, FeID and the TLS, Kubernetes and SSH bindings are missing; the jail has no network namespace of its own yet.</li>
-    <li><b>Traffic records</b> (ADR 0013) are made on the node but do not reach the control plane yet.</li>
+    <li><b>Traffic records</b> (ADR 0013) are made on the node but do not reach the control plane yet, so a drop does not yet name the missing reference in the console.</li>
+    <li><b>Network rules</b> (ADR 0034): groups go to the nodes whole every 10 s rather than as acknowledged deltas; no environment-wide egress default; TCP only between workloads; no references across environments. The mesh's WireGuard keys do not rotate yet (ADR 0017).</li>
     <li><b>Environments</b>: no volumes for services, no MCP tools and no CLI, no addon backups, no data on a clone.</li>
     <li><b>Ingress</b>: no DNS-01 wildcard, no L4, no h2c.</li>
     <li><b>diskd</b>: no sweep of old layers yet, no disk size per pod.</li>
