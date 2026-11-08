@@ -39,14 +39,15 @@ describe('Jobs', () => {
 
 describe('RunForm', () => {
   const ENVS = [{ id: 'e1', name: 'kino-dev' }, { id: 'e2', name: 'kino-stage' }];
-  it('asks for the environment first, then its groups with default ticked', () => {
+  it('asks for the environment first, then what it reaches of it (nothing) and its egress (the internet)', () => {
     const none = renderToStaticMarkup(<RunForm envs={ENVS} onRun={() => {}} onCancel={() => {}} />);
     expect(none).toContain('<option value="kino-stage">kino-stage</option>');
     expect(none).toContain('Choose the environment first.');
     const one = renderToStaticMarkup(<RunForm envs={ENVS} env="kino-dev" onRun={() => {}} onCancel={() => {}} />);
     expect(one).toContain('<option value="kino-dev" selected="">kino-dev</option>');
-    expect(one).toContain('reading the environment&#x27;s groups…');
-    expect(one).toContain('default: nothing in · internet out');
+    expect(one).toContain('<div class="sg-seg" role="group" aria-label="reaches"><button type="button" class="on" aria-pressed="true">Nothing</button>');
+    expect(one).toContain('The job reaches every address on the internet.');
+    expect(one).not.toContain('security group');
   });
 });
 

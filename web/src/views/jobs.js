@@ -6,9 +6,9 @@
 // TenantJobStatus (go/internal/env/tenantjobs.go): id, image, imageRef,
 // phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib,
 // labels, createdAt, startedAt, finishedAt, deadlineAt, and (ADR 0035)
-// environment {id, name} and securityGroups, fixed at its create.
+// environment {id, name}, reaches and egress, fixed at its create.
 
-import { DEFAULT_GROUP, checkGroups } from './groups.js';
+import { egressProblems, reachesValue } from './reach.js';
 
 // The bounds of a create, as ferund checks them (go/internal/env/spec).
 export const JOB_LIMITS = {
@@ -165,9 +165,10 @@ export function parseDuration(text) {
 
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-// EMPTY_FORM is the form of a new job: no environment yet, in default.
+// EMPTY_FORM is the form of a new job: no environment yet, reaching
+// nothing of it, out to the internet.
 export const EMPTY_FORM = {
-  environment: '', securityGroups: [DEFAULT_GROUP],
+  environment: '', reachMode: 'none', reaches: [], egress: undefined,
   image: '', command: '', env: '', secrets: '', vcpus: '', memoryMib: '', deadline: '', resultPath: '',
   labels: '', username: '', password: '',
 };
@@ -192,9 +193,10 @@ export function jobRequest(form) {
   const environment = String(f.environment || '').trim();
   if (!environment) errors.push('an environment is required');
   else body.environment = environment;
-  const groups = Array.isArray(f.securityGroups) ? f.securityGroups : [DEFAULT_GROUP];
-  errors.push(...checkGroups(groups));
-  if (groups.length) body.securityGroups = [...groups];
+  const reaches = reachesValue(f.reachMode, f.reaches);
+  if (reaches !== undefined) body.reaches = reaches;
+  errors.push(...egressProblems(f.egress));
+  if (f.egress !== undefined && f.egress !== 'internet') body.egress = f.egress;
   const image = f.image.trim();
   if (!image) errors.push('an image is required');
   body.image = image;

@@ -15,13 +15,13 @@ import {
   EMPTY_FORM, JOB_LIMITS, ended, fmtSpan, jobCounts, jobDurationMs, jobRequest, jobTone, jobWords, keptUntil,
   onItsWay, phaseWord, resultView,
 } from './jobs.js';
-import { envRef } from './groups.js';
-import { EnvLinkName, EnvPicker, GroupChips, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
+import { envRef, reachesOf } from './reach.js';
+import { EgressEditor, EnvLinkName, EnvPicker, NoEnvironment, ReachesPicker, ReachesSummary, ReachesWords, useDeployed } from './Reach.jsx';
 import '../styles/tenant.css';
 
 // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion,
-// one pod each, never retried, in an environment and its security groups
-// (ADR 0035). The list with a label and an environment filter and the
+// one pod each, never retried, in an environment, reaching what it is
+// told of it (ADR 0035, ADR 0034 revised). The list with a label and an environment filter and the
 // form of a new one; a job with its log's tail, its result, a cancel
 // while it has not ended and the delete of its record.
 // /tenants/:t/jobs[/:id]. A change needs write on the job's environment.
@@ -174,7 +174,8 @@ function JobList({ tenant, navigate }) {
                       }}>{shortId(j.id)}</a>
                     </td>
                     <td className="small nowrap">
-                      <EnvLinkName tenant={tenant} env={envRef(j)} navigate={navigate} /> <GroupChips groups={j.securityGroups} />
+                      <EnvLinkName tenant={tenant} env={envRef(j)} navigate={navigate} />
+                      <div className="rc-listreach"><ReachesWords reaches={reachesOf(j)} /></div>
                     </td>
                     <td className="mono small trunc" title={j.imageRef || j.image}>{j.image}</td>
                     <td><Labels labels={j.labels} onLabel={(k, v) => addLabels([`${k}=${v}`])} /></td>
@@ -195,7 +196,7 @@ function JobList({ tenant, navigate }) {
         <p className="footnote muted small">
           A job is one container run to its end exactly once, with a deadline; it is never retried. Its record, with
           the exit code, the result and the log's tail, is kept {JOB_LIMITS.keptDays} days after it ends, then it
-          goes. It runs in an environment, in groups of it fixed at its create; its record goes with the environment.
+          goes. It runs in an environment, reaching what its create says of it; its record goes with the environment.
           Jobs queued or running count towards the tenant's limits.
         </p>
       </section>
@@ -217,8 +218,8 @@ function Field({ label, hint, wide, children }) {
 }
 
 // RunForm is a new job: in one of envs (those the person writes; env
-// preselects one, as does a single one), in groups of its deployed
-// deployment. none tells that the tenant has no environment at all;
+// preselects one, as does a single one), reaching nothing, all, or
+// entries of its deployed deployment, with an egress. none tells that the tenant has no environment at all;
 // notice says what is lacking when envs is empty.
 export function RunForm({ envs = null, env = '', none = false, notice = null, onRun, onCancel }) {
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, environment: env }));
@@ -227,7 +228,7 @@ export function RunForm({ envs = null, env = '', none = false, notice = null, on
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const names = (envs || []).map((e) => e.name);
   const chosen = envs && !names.includes(form.environment) ? (names.length === 1 ? names[0] : '') : form.environment;
-  const groups = useEnvGroups(chosen);
+  const dep = useDeployed(chosen);
   const { body, errors } = jobRequest({ ...form, environment: chosen });
   const L = JOB_LIMITS;
 
@@ -252,17 +253,21 @@ export function RunForm({ envs = null, env = '', none = false, notice = null, on
       <div className="pane-toolbar"><h2><Icon name="play" size={14} /> Run a job</h2></div>
       {notice}
       <form className="jobform" onSubmit={submit}>
-        <Field label="environment" hint="Required: it runs beside the environment's pods, reaches them where their groups let it in, and goes with it.">
+        <Field label="environment" hint="Required: it runs beside the environment's pods and goes with it.">
           <EnvPicker envs={envs} value={chosen} none={none}
-            onChange={(v) => setForm((f) => ({ ...f, environment: v, securityGroups: EMPTY_FORM.securityGroups }))} />
+            onChange={(v) => setForm((f) => ({ ...f, environment: v, reachMode: 'none', reaches: [] }))} />
         </Field>
         <div className="jf-field">
-          <span className="jf-label">security groups</span>
+          <span className="jf-label">reaches</span>
           {chosen
-            ? <GroupPicker choices={groups.choices} value={form.securityGroups} onChange={(securityGroups) => setForm((f) => ({ ...f, securityGroups }))} />
+            ? <ReachesPicker spec={dep.spec} mode={form.reachMode} list={form.reaches} err={dep.err}
+              onChange={(reachMode, reaches) => setForm((f) => ({ ...f, reachMode, reaches }))} />
             : <span className="muted small">Choose the environment first.</span>}
-          <span className="jf-hint muted">One to five groups of its deployed deployment, fixed for the run. default: nothing in · internet out,
-            unless the environment writes its rules.</span>
+          <span className="jf-hint muted">What of the environment its pod may reach, fixed for the run.</span>
+        </div>
+        <div className="jf-field">
+          <span className="jf-label">egress</span>
+          <EgressEditor value={form.egress} who="the job" onChange={(egress) => setForm((f) => ({ ...f, egress }))} />
         </div>
         <Field label="image" wide hint="Pinned to its digest when the job is made; a registry that refuses it refuses the job.">
           <input className="mono" value={form.image} onChange={set('image')} placeholder="ghcr.io/acme/report:3" />
@@ -387,7 +392,7 @@ function JobDetail({ tenant, id, navigate }) {
         {job && (
           <div className="facts">
             <span>environment <b><EnvLinkName tenant={tenant} env={envRef(job)} navigate={navigate} /></b></span>
-            <span>groups <GroupChips groups={job.securityGroups} /></span>
+            <span>reaches <b><ReachesWords reaches={reachesOf(job)} /></b></span>
             <span className="mono" title={job.imageRef}>{job.image}</span>
             <span>created <b><Ago iso={job.createdAt} /></b></span>
             <span>ran <b>{fmtSpan(jobDurationMs(job, now))}</b></span>
@@ -417,7 +422,7 @@ function JobDetail({ tenant, id, navigate }) {
               <div className="pane-toolbar"><h2><Icon name="jobs" size={14} /> The job</h2></div>
               <div className="kv-grid">
                 <KV k="environment"><EnvLinkName tenant={tenant} env={envRef(job)} navigate={navigate} /></KV>
-                <KV k="groups"><GroupChips groups={job.securityGroups} /> <span className="muted small">fixed for its run</span></KV>
+                <KV k="reaches"><ReachesSummary pod={{ reaches: reachesOf(job), egress: job.egress }} /> <span className="muted small">fixed for its run</span></KV>
                 <KV k="image" className="mono">{job.image}</KV>
                 <KV k="pinned" className="mono small">
                   {job.imageRef || <span className="muted">—</span>}

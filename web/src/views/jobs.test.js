@@ -99,18 +99,18 @@ describe('the form', () => {
 
   it('sends only what is given, the defaults left to ferund', () => {
     expect(jobRequest({ ...EMPTY_FORM, environment: 'kino-dev', image: ' alpine:3 ' }))
-      .toEqual({ body: { environment: 'kino-dev', securityGroups: ['default'], image: 'alpine:3' }, errors: [] });
+      .toEqual({ body: { environment: 'kino-dev', image: 'alpine:3' }, errors: [] });
   });
 
   it('builds the whole body', () => {
     const { body, errors } = jobRequest({
-      environment: 'kino-dev', securityGroups: ['default', 'reports'], image: 'ghcr.io/acme/report:3', command: 'report\n--month\n2026-10', env: 'MONTH=2026-10', secrets: 'TOKEN=s3cr3t',
+      environment: 'kino-dev', reachMode: 'some', reaches: [{ addon: 'db' }], egress: 'none', image: 'ghcr.io/acme/report:3', command: 'report\n--month\n2026-10', env: 'MONTH=2026-10', secrets: 'TOKEN=s3cr3t',
       vcpus: '2', memoryMib: '1024', deadline: '15m', resultPath: '/tmp/result.json', labels: 'kind=report',
       username: 'bot', password: 'pw',
     });
     expect(errors).toEqual([]);
     expect(body).toEqual({
-      environment: 'kino-dev', securityGroups: ['default', 'reports'], image: 'ghcr.io/acme/report:3', command: ['report', '--month', '2026-10'], env: { MONTH: '2026-10' },
+      environment: 'kino-dev', reaches: [{ addon: 'db' }], egress: 'none', image: 'ghcr.io/acme/report:3', command: ['report', '--month', '2026-10'], env: { MONTH: '2026-10' },
       secrets: { TOKEN: 's3cr3t' }, vcpus: 2, memoryMib: 1024, deadline: '15m', resultPath: '/tmp/result.json',
       labels: { kind: 'report' }, imageCredentials: { username: 'bot', password: 'pw' },
     });
@@ -136,7 +136,9 @@ describe('the form', () => {
       expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', resultPath: p }).errors).toHaveLength(1);
     }
     expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', deadline: '2h' }).errors).toEqual([]);
-    expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', securityGroups: [] }).errors)
-      .toEqual(['name at least one security group']);
+    expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', egress: { domains: ['*.ok.example', 'a.*.b'] } }).errors)
+      .toEqual(['not a domain: a.*.b (lower case; a wildcard only as "*." in front)']);
+    expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', reachMode: 'all' }).body.reaches).toBe('all');
+    expect('securityGroups' in jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', securityGroups: ['default'] }).body).toBe(false);
   });
 });

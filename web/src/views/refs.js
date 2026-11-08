@@ -6,9 +6,10 @@
 // names a secret; a service or job names its bindings, a binding's
 // credential its secrets; a route names a service's port. The forms make
 // them as typed fields and show them as lines ("used by"); a remove
-// offers to take them along. Pure.
+// offers to take them along. A service's or a job's uses names a
+// service's port or an addon without a variable (ADR 0034). Pure.
 
-import { isObject, mapEnvValues, mapRulePeers, objectsOf, removeObject, setObject } from './draft.js';
+import { isObject, mapEnvValues, mapUses, objectsOf, removeObject, setObject } from './draft.js';
 
 // envValueKind names an env value's form: string (a plain string), value
 // ({value}), secret, addon, service, or invalid.
@@ -40,8 +41,7 @@ function valueRef(v) {
 
 // referencesOf lists every reference of spec: {from: {key, name}, field,
 // to: {key, name}, via, port?, refKey?, fields?, dashed?}. via says what
-// holds it: env, imageCredentials, bindings, credential, route,
-// securityGroups (an object's list) or rule (a group's peer).
+// holds it: env, imageCredentials, bindings, credential, route or uses.
 export function referencesOf(spec) {
   const out = [];
   for (const key of ['services', 'jobs']) {
@@ -62,6 +62,13 @@ export function referencesOf(spec) {
       }
       (Array.isArray(o.bindings) ? o.bindings : []).forEach((b, i) => {
         out.push({ from: { key, name }, field: `bindings[${i}]`, via: 'bindings', to: { key: 'bindings', name: b } });
+      });
+      (Array.isArray(o.uses) ? o.uses : []).forEach((u, i) => {
+        if (isObject(u) && typeof u.service === 'string') {
+          out.push({ from: { key, name }, field: `uses[${i}]`, via: 'uses', to: { key: 'services', name: u.service }, port: u.port ?? '' });
+        } else if (isObject(u) && typeof u.addon === 'string') {
+          out.push({ from: { key, name }, field: `uses[${i}]`, via: 'uses', to: { key: 'addons', name: u.addon } });
+        }
       });
     }
   }
@@ -84,26 +91,6 @@ export function referencesOf(spec) {
     if (isObject(r) && r.service) {
       out.push({ from: { key: 'routes', name }, field: 'service', via: 'route', to: { key: 'services', name: r.service },
         port: r.port ?? '', path: r.path || '' });
-    }
-  }
-  for (const key of ['services', 'jobs', 'addons']) {
-    for (const [name, o] of objectsOf(spec, key)) {
-      if (!isObject(o) || !Array.isArray(o.securityGroups)) continue;
-      o.securityGroups.forEach((g, i) => {
-        out.push({ from: { key, name }, field: `securityGroups[${i}]`, via: 'securityGroups', to: { key: 'securityGroups', name: g } });
-      });
-    }
-  }
-  for (const [name, g] of objectsOf(spec, 'securityGroups')) {
-    if (!isObject(g)) continue;
-    for (const [dir, at] of [['in', 'from'], ['out', 'to']]) {
-      (Array.isArray(g[dir]) ? g[dir] : []).forEach((r, i) => {
-        const p = isObject(r) ? r[at] : null;
-        if (isObject(p) && typeof p.group === 'string') {
-          out.push({ from: { key: 'securityGroups', name }, field: `${dir}[${i}].${at}`, via: 'rule', dir,
-            to: { key: 'securityGroups', name: p.group } });
-        }
-      });
     }
   }
   return out;
@@ -134,8 +121,7 @@ export function refLine(r) {
     case 'bindings': return `binding ${r.to.name}`;
     case 'credential': return `${r.field} → secret ${r.to.name}`;
     case 'route': return `${r.path || '?'} → ${r.to.name}${port}`;
-    case 'securityGroups': return `in group ${r.to.name}`;
-    case 'rule': return `a rule ${r.dir === 'out' ? 'out to' : 'in from'} group ${r.to.name}`;
+    case 'uses': return `uses → ${r.to.key === 'services' ? `${r.to.name}${port}` : r.to.name}`;
     default: return `${r.field} → ${r.to.name}`;
   }
 }
@@ -157,9 +143,9 @@ export function secretNames(spec) {
 
 // removeWithRefs removes key/name and what references it: the variables
 // that name it, the routes to a service, a binding's entries in the
-// lists, a registry login on a removed secret, a security group's entries
-// in the lists (a list left empty goes: the object is in "default") and
-// the rules that name it. A secret's pin goes with the secret.
+// lists, a registry login on a removed secret, a service's or an addon's
+// entries in the uses lists (a list left empty goes). A secret's pin goes
+// with the secret.
 export function removeWithRefs(spec, key, name) {
   let out = removeObject(spec, key, name);
   const hits = (v) => {
@@ -182,22 +168,8 @@ export function removeWithRefs(spec, key, name) {
       }
     }
   }
-  if (key === 'securityGroups') {
-    for (const k of ['services', 'jobs', 'addons']) {
-      for (const [n, o] of objectsOf(out, k)) {
-        if (isObject(o) && Array.isArray(o.securityGroups) && o.securityGroups.includes(name)) {
-          const rest = o.securityGroups.filter((g) => g !== name);
-          const next = { ...o, securityGroups: rest };
-          if (rest.length === 0) delete next.securityGroups;
-          out = setObject(out, k, n, next);
-        }
-      }
-    }
-    for (const [n, g] of objectsOf(out, 'securityGroups')) {
-      const next = mapRulePeers(g, (p) => (isObject(p) && p.group === name ? null : p));
-      if (next !== g) out = setObject(out, 'securityGroups', n, next);
-    }
-  }
+  if (key === 'services') out = mapUses(out, (u) => (isObject(u) && u.service === name ? null : u));
+  if (key === 'addons') out = mapUses(out, (u) => (isObject(u) && u.addon === name ? null : u));
   return out;
 }
 
