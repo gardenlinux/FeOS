@@ -29,6 +29,7 @@ type metrics struct {
 	retries        atomic.Uint64
 	lastResort     atomic.Uint64
 	tooLarge       atomic.Uint64
+	refusedClient  atomic.Uint64
 	tooManyFields  atomic.Uint64
 	trailers       atomic.Uint64
 
@@ -151,6 +152,8 @@ func (p *Proxy) Metrics(w io.Writer) {
 			"Picks of an endpoint on a node without a fresh handshake.", m.lastResort.Load()),
 		counter("ferun_ingress_too_large_total",
 			"Requests answered 413 because their body was too large.", m.tooLarge.Load()),
+		counter("ferun_ingress_client_refused_total",
+			"Requests answered 403 because their route does not admit the client's address.", m.refusedClient.Load()),
 		counter("ferun_ingress_held_total",
 			"Requests held while no endpoint of their service was usable.", m.heldTotal.Load()),
 		counter("ferun_ingress_hold_timeouts_total",

@@ -226,7 +226,10 @@ is not kept, and the agent counts its records as dropped.
   `AccessLogRecord` (`tsNs` as a string, `time`, `durationNs`,
   `ingress`, `service`, `instance`, `host`, `method`, `path`, `proto`,
   `status`, `outcome`, `attempts`, `heldNs`, `bytesIn`, `bytesOut`,
-  `clientIp`, `userAgent`, `traceId`, `spanId`, `parentSpanId`), and
+  `clientIp`, `userAgent`, `traceId`, `spanId`, `parentSpanId`),
+  `reason` when the ingress refused the request itself
+  (`route-refused-client`: the route's `from` does not hold the client,
+  ADR 0034), and
   `level`: `error` for a 5xx or `aborted`, `warn` for a 4xx, else
   `info`. The LogRecord's time is the request's start.
 - **TLS**: the ingress presents its certificate

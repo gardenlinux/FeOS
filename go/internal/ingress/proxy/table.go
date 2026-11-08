@@ -15,6 +15,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -38,6 +39,7 @@ const (
 	textDraining   = "the ingress is shutting down, try again"
 	textConnect    = "CONNECT is not supported"
 	textTrailers   = "request trailers are not supported"
+	textRefused    = "this route does not admit your address"
 )
 
 // textTooManyFields answers a request with more than maxHeaderFields
@@ -101,14 +103,50 @@ func envService(env, service string) string {
 }
 
 // envRoutes is one environment's routes: sorted by the number of their
-// path's segments, longest first, then by name, with prefixes in the
-// same order.
+// path's segments, longest first, then by name, with prefixes and
+// clients in the same order.
 type envRoutes struct {
 	id       string
 	tenant   string
 	routes   []wire.Route
 	prefixes []string
+	clients  []clients
 	services map[string]*service
+}
+
+// clients are the clients a route admits (wire.Route.From), parsed once
+// with the table: every one when the route has no blocks, else those
+// whose address is in one of blocks. A block that does not parse admits
+// no one.
+type clients struct {
+	limited bool
+	blocks  []netip.Prefix
+}
+
+func parseClients(from []string) clients {
+	c := clients{limited: len(from) > 0}
+	for _, f := range from {
+		if p, err := netip.ParsePrefix(f); err == nil {
+			c.blocks = append(c.blocks, p.Masked())
+		}
+	}
+	return c
+}
+
+// admits reports whether the route admits a client by its address
+// (clientAddr): an IPv4-mapped IPv6 address counts as IPv4, and an
+// address that is not valid only on a route without blocks.
+func (c clients) admits(addr netip.Addr) bool {
+	if !c.limited {
+		return true
+	}
+	addr = addr.Unmap().WithZone("")
+	for _, p := range c.blocks {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 // service is one routed service: its endpoints in the table's order, the
@@ -289,6 +327,7 @@ func buildEnv(e wire.Env) *envRoutes {
 	})
 	for _, r := range er.routes {
 		er.prefixes = append(er.prefixes, r.Path)
+		er.clients = append(er.clients, parseClients(r.From))
 	}
 	for _, s := range e.Services {
 		svc := &service{name: s.Name, idle: s.Idle, asleep: s.Asleep, waking: s.Waking, pending: s.Pending}
@@ -320,9 +359,12 @@ type target struct {
 	rawPath string
 }
 
-// resolve routes a request by its canonical host and its escaped path,
-// or returns the answer when the routing does not send it anywhere.
-func (t *table) resolve(host, raw string) (target, *reply) {
+// resolve routes a request by its canonical host and its escaped path
+// from a client's address (clientAddr), or returns the answer when the
+// routing does not send it anywhere. When the route matched does not
+// admit the client, the answer is 403 and the target has the
+// environment and the route (no service): the route refused the client.
+func (t *table) resolve(host, raw string, client netip.Addr) (target, *reply) {
 	if t == nil {
 		return target{}, &reply{http.StatusServiceUnavailable, textNoTable, 5}
 	}
@@ -347,6 +389,9 @@ func (t *table) resolve(host, raw string) (target, *reply) {
 	r := &e.routes[i]
 	if r.Door {
 		return target{}, &reply{http.StatusNotFound, "route " + r.Path + " is served by the route door", 0}
+	}
+	if !e.clients[i].admits(client) {
+		return target{env: e, route: r}, &reply{http.StatusForbidden, textRefused, 0}
 	}
 	svc := e.services[r.Service]
 	if svc == nil {

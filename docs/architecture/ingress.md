@@ -308,8 +308,10 @@ The table is what the ingress routes, one entry per public environment
   environment;
 - the routes of its routing deployment, the deployed one, else the latest
   while none is deployed: name, path prefix, service, port name,
-  `strip`, and `door` for a route to an attached service, which the
-  route door alone serves;
+  `strip`, `door` for a route to an attached service, which the
+  route door alone serves, and `from`, the route's clients' address
+  blocks, canonical prefixes of either family (ADR 0034); left out, the
+  route admits every client;
 - per image service that a route sends to, its idle policy, its
   **endpoints**, the instances that are ready, run without an op and have
   an address and a node, with the ports their node admits under the
@@ -752,15 +754,22 @@ version, within one `env-groups` pass.
    ties go to the route whose name sorts first. None is 404 "no route for
    <path>"; a route to an attached service is 404 "route <path> is served
    by the route door".
-4. **The body**: one larger than `--max-request-body`, by its
+4. **The client**: a route with `from` admits a client only when its
+   address is in one of the blocks, else it answers 403 "this route does
+   not admit your address", before any instance is held or woken. The
+   address is the connection's peer, as the balancer keeps it
+   (`externalTrafficPolicy: Local`), never what a header claims; an
+   IPv4-mapped IPv6 address counts as IPv4. A held request is checked
+   again when the table changes.
+5. **The body**: one larger than `--max-request-body`, by its
    `Content-Length` or as it is read, is 413.
-5. **The endpoint**: round robin over the usable endpoints of the route's
+6. **The endpoint**: round robin over the usable endpoints of the route's
    service ([Admission](#admission)), else over the last resort; an
    endpoint whose dial failed cools down for 5 s. For a service with an
    idle policy the instance is held first
    ([Holds](#holds-and-the-idle-fence)); an instance whose hold is
    refused is skipped until the table changes.
-6. **None usable**: the request is held ([below](#held-requests-and-wake)).
+7. **None usable**: the request is held ([below](#held-requests-and-wake)).
 
 ### Port 80
 
@@ -849,7 +858,9 @@ tracing SDK:
   record: its start and duration, the environment and its tenant, the service, the
   instance of the last attempt, host, method, the escaped path without
   the query, protocol, status (101 for an upgrade, 0 when none was
-  written), outcome (the status class, `upgraded`, `aborted`), bytes in
+  written), outcome (the status class, `upgraded`, `aborted`), reason
+  (`route-refused-client` when its route refused the client, else left
+  out), bytes in
   and out, attempts, how long it was held, client address, user agent,
   and the span's IDs. The path is cut to 1 KiB, the user agent to 256
   bytes, other text to 256 bytes. Requests that reach no environment
@@ -1045,6 +1056,7 @@ larger than the one it sits in has no effect.
 | 400 | "request trailers are not supported" | a request that announces trailers ([Limits](#limits)) |
 | 404 | "no such host" | a host the table does not know, on either listener |
 | 404 | "no route for <path>", "route <path> is served by the route door" | |
+| 403 | "this route does not admit your address" | the route's `from` does not hold the client's address ([Routing](#routing)) |
 | 405 | "CONNECT is not supported" | |
 | 413 | "the request body is larger than <n> bytes" | |
 | 431 | "the request has more than 100 header fields" | headers beyond 32 KiB get Go's own 431 |
@@ -1244,7 +1256,7 @@ expiry.
 | `ferun_ingress_requests_total{class}` | requests answered, by status class, `upgraded` or `aborted` |
 | `ferun_ingress_upstream_errors_total{kind}` | failed attempts: `dial`, `response`, or `wait` (no connection came free in time) |
 | `ferun_ingress_rejected_total{limit}`, `ferun_ingress_inflight` | requests answered 503 because a limit was taken: `inflight_env`, `inflight_tenant`, `inflight`, `held_env`, `held_tenant` or `held`; requests forwarded now |
-| `ferun_ingress_upstream_refused_total`, `…_retries_total`, `…_last_resort_total`, `…_too_large_total` | refused connections, retries, picks of a last-resort endpoint, 413s |
+| `ferun_ingress_upstream_refused_total`, `…_retries_total`, `…_last_resort_total`, `…_too_large_total`, `…_client_refused_total` | refused connections, retries, picks of a last-resort endpoint, 413s, 403s of a route's `from` |
 | `ferun_ingress_headers_rejected_total{reason}` | requests rejected for their headers: `fields` (431), `trailers` (400) |
 | `ferun_ingress_held_total`, `…_hold_timeouts_total`, `…_wakes_total`, `ferun_ingress_held` | held requests, those that hit their bound, wakes asked for; held now |
 | `ferun_ingress_idle_hold_calls_total`, `…_admit_failures_total`, `…_refusals_total`, `…_renew_failures_total`, `ferun_ingress_idle_holds` | Hold calls and their failures; instances held now |

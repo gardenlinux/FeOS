@@ -106,6 +106,7 @@ func span(e wire.AccessLogEntry) *tracev1.Span {
 		kv("ferun.attempts", num(int64(e.Attempts))),
 		kv("ferun.held_ns", num(e.HeldNs)),
 	)
+	a = appendStr(a, "ferun.reason", e.Reason)
 	sp.Attributes = appendStr(a, "ferun.upstream_instance", e.Instance)
 	return sp
 }

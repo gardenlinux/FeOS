@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/http/httputil"
+	"net/netip"
 	"reflect"
 	"slices"
 	"strconv"
@@ -598,7 +599,8 @@ type request struct {
 	// trace is its server span (W3C Trace Context); env, its tenant and
 	// service are where it was routed, "" before; instance is the last attempt's,
 	// attempts counts them, held is how long it waited for an instance.
-	// They make its access log record.
+	// reason says why the proxy answered it itself, "" when it did not
+	// (wire.AccessLogEntry.Reason). They make its access log record.
 	trace    trace
 	env      string
 	tenant   string
@@ -606,6 +608,9 @@ type request struct {
 	instance string
 	attempts int
 	held     time.Duration
+	reason   string
+	// client is the client's address, the connection's peer (clientAddr).
+	client netip.Addr
 }
 
 // serve routes a request, holds it while no endpoint is usable, and
@@ -633,13 +638,19 @@ func (p *Proxy) serve(w *recorder, r *http.Request) {
 	defer p.leave(&q.wait)
 	defer p.inflight.leave(&q.inflight)
 	v := p.cur.Load()
-	tg, rep := v.t.resolve(q.host, q.raw)
-	if rep != nil {
+	q.client = clientAddr(r)
+	tg, rep := v.t.resolve(q.host, q.raw, q.client)
+	if rep != nil && tg.env == nil {
 		rep.write(w)
 		return
 	}
-	q.env, q.tenant, q.service, q.trace = tg.env.id, tg.env.tenant, tg.svc.name, newTrace(r.Header)
+	q.trace = newTrace(r.Header)
 	defer q.record()
+	if rep != nil {
+		q.refused(tg, rep)
+		return
+	}
+	q.env, q.tenant, q.service = tg.env.id, tg.env.tenant, tg.svc.name
 	if r.ContentLength != 0 && r.Body != nil && r.Body != http.NoBody {
 		if p.cfg.MaxBody > 0 && r.ContentLength > p.cfg.MaxBody {
 			q.tooLarge()
@@ -659,6 +670,15 @@ func headerFields(h http.Header) int {
 		n += len(vv)
 	}
 	return n
+}
+
+// refused answers a request whose route does not admit its client (rep,
+// 403, from resolve), before any instance is woken or held, and notes
+// that in its access log record.
+func (q *request) refused(tg target, rep *reply) {
+	q.p.m.refusedClient.Add(1)
+	q.env, q.tenant, q.service, q.reason = tg.env.id, tg.env.tenant, tg.route.Service, wire.ReasonRouteRefusedClient
+	rep.write(q.w)
 }
 
 func (q *request) tooLarge() {
@@ -706,7 +726,11 @@ func (q *request) run(v *view, tg target) {
 		}
 		v = p.cur.Load()
 		var rep *reply
-		if tg, rep = v.t.resolve(q.host, q.raw); rep != nil {
+		if tg, rep = v.t.resolve(q.host, q.raw, q.client); rep != nil {
+			if tg.env != nil {
+				q.refused(tg, rep)
+				return
+			}
 			rep.write(q.w)
 			return
 		}

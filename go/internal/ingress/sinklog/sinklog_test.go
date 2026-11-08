@@ -140,3 +140,18 @@ func TestBatchBounds(t *testing.T) {
 		t.Errorf("an oversized record: taken %d", taken)
 	}
 }
+
+// A record's reason goes into its line, and a record without one keeps
+// the line as before.
+func TestLineReason(t *testing.T) {
+	e := wire.AccessLogEntry{Env: "e1", Service: "web", Status: 403, Outcome: "4xx",
+		Reason: wire.ReasonRouteRefusedClient}
+	b, err := json.Marshal(NewLine("in-0", e))
+	if err != nil || !strings.Contains(string(b), `"reason":"route-refused-client"`) {
+		t.Fatalf("line %s, %v", b, err)
+	}
+	e.Reason = ""
+	if b, err = json.Marshal(NewLine("in-0", e)); err != nil || strings.Contains(string(b), `"reason"`) {
+		t.Fatalf("line without a reason %s, %v", b, err)
+	}
+}

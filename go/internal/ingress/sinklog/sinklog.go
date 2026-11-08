@@ -43,7 +43,8 @@ const (
 )
 
 // Line is a request's line in the sink: the fields and names of
-// ferund's AccessLogRecord (internal/env), and its level.
+// ferund's AccessLogRecord (internal/env), and its level. Reason is the
+// record's (wire.AccessLogEntry.Reason).
 type Line struct {
 	TsNs         int64     `json:"tsNs,string"`
 	Time         time.Time `json:"time"`
@@ -57,6 +58,7 @@ type Line struct {
 	Proto        string    `json:"proto"`
 	Status       int       `json:"status"`
 	Outcome      string    `json:"outcome"`
+	Reason       string    `json:"reason,omitempty"`
 	Attempts     int       `json:"attempts"`
 	HeldNs       int64     `json:"heldNs"`
 	BytesIn      int64     `json:"bytesIn"`
@@ -87,7 +89,7 @@ func NewLine(name string, e wire.AccessLogEntry) Line {
 	return Line{
 		TsNs: t.UnixNano(), Time: t, DurationNs: e.DurationNs, Ingress: name, Service: e.Service,
 		Instance: e.Instance, Host: e.Host, Method: e.Method, Path: e.Path, Proto: e.Proto, Status: e.Status,
-		Outcome: e.Outcome, Attempts: e.Attempts, HeldNs: e.HeldNs, BytesIn: e.BytesIn, BytesOut: e.BytesOut,
+		Outcome: e.Outcome, Reason: e.Reason, Attempts: e.Attempts, HeldNs: e.HeldNs, BytesIn: e.BytesIn, BytesOut: e.BytesOut,
 		ClientIP: e.ClientIP, UserAgent: e.UserAgent, TraceID: e.TraceID, SpanID: e.SpanID,
 		ParentSpanID: e.ParentSpanID, Level: Level(e.Status, e.Outcome),
 	}

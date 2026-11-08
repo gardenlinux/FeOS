@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -53,6 +54,17 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
+// clientAddr is the address of the request's client, the connection's
+// peer: never what a header claims. The zero Addr when RemoteAddr has
+// none, which a route with blocks does not admit.
+func clientAddr(r *http.Request) netip.Addr {
+	ap, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr()
+}
+
 // record hands the request's record to the access log, when the request
 // was routed to an environment.
 func (q *request) record() {
@@ -84,6 +96,7 @@ func (q *request) record() {
 		Proto:        cutField(r.Proto, wire.MaxAccessLogText),
 		Status:       status,
 		Outcome:      q.w.class(),
+		Reason:       q.reason,
 		BytesIn:      in,
 		BytesOut:     q.w.written,
 		ClientIP:     clientIP(r),

@@ -171,8 +171,9 @@ request, else unset. Attributes: `http.request.method`, `url.path`
 (`1.1`, `2`), `http.response.status_code`, `client.address`,
 `user_agent.original`, `http.request.body.size`,
 `http.response.body.size`, `ferun.outcome`, `ferun.attempts`,
-`ferun.held_ns` (the time the request waited for an instance, int), and
-`ferun.upstream_instance` (the instance that answered); a string
+`ferun.held_ns` (the time the request waited for an instance, int),
+`ferun.reason` (why the ingress refused the request itself:
+`route-refused-client`), and `ferun.upstream_instance` (the instance that answered); a string
 attribute that is empty, and a status code of 0 (none written), are left
 out. A batch of spans goes once, after the sink took or refused the
 lines of the same records: a batch the sink refused or failed to take,
