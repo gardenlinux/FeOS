@@ -36,19 +36,17 @@ type Pins struct {
 // hashes and diffs: defaults filled (replicas, resources, readiness
 // timing, rollout and job timeouts, job on, an addon's plan, a binding's
 // mode and burst, its upstream as its origin; the binding names of
-// services and jobs sorted; the security groups of ADR 0034: the group
-// DefaultSecurityGroup when the spec has none of that name, a group's
-// missing out as the internet, each rule's protocol, its ports sorted and
-// its blocks canonical, and the groups of image services, jobs and addons
-// sorted, [DefaultSecurityGroup] for those that name none), Runtime
+// services and jobs sorted), Runtime
 // explicit on every service, durations as Go's time.Duration.String
 // writes them ("15m0s"), Image pinned (and ImageAsWritten kept) for every
 // image found in p.Images, a digest reference kept as written, every
 // referenced secret in Secrets with a version (p.Secrets for those
 // without), unreferenced Secrets entries dropped (an info finding each).
 // Fields that do not apply are cleared (an attached service has no
-// replicas, and no groups: it is in its sandbox's), and the kinds that
-// are not available yet (volumes, mounts) are dropped. s should have passed Validate without errors; a spec that
+// replicas, and no uses or egress: it is its sandbox's pod), the
+// securityGroups that are gone (ADR 0034, revised) and the kinds that are
+// not available yet (volumes, mounts) are dropped. Uses, egress and a
+// route's from stay as written: nothing is added. s should have passed Validate without errors; a spec that
 // did not is normalised as far as it goes (for a plan's diff), never
 // with a panic.
 func Normalise(s Spec, p Pins) (Spec, []Finding) {
@@ -72,14 +70,13 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 			if a.Plan == "" {
 				a.Plan = p.Plans[a.Type]
 			}
-			a.SecurityGroups = normGroupNames(a.SecurityGroups)
+			a.SecurityGroups = nil
 			out.Addons[name] = a
 		}
 	}
 	if len(s.Routes) > 0 {
 		out.Routes = maps.Clone(s.Routes)
 	}
-	out.SecurityGroups = normGroups(s.SecurityGroups)
 	if len(s.Bindings) > 0 {
 		out.Bindings = make(map[string]Binding, len(s.Bindings))
 		for name, b := range s.Bindings {
@@ -216,8 +213,9 @@ func normService(svc Service, p Pins) Service {
 	if out.Runtime == "" {
 		out.Runtime = RuntimeImage
 	}
+	out.SecurityGroups = nil
 	if out.Runtime == RuntimeAttached {
-		out.SecurityGroups = nil
+		out.Uses, out.Egress = nil, nil
 		out.Image, out.ImageAsWritten, out.ImageCredentials = "", "", nil
 		out.Replicas, out.Resources, out.Rollout = nil, nil, nil
 		if svc.Idle != "" && svc.Idle != IdleNever {
@@ -226,7 +224,6 @@ func normService(svc Service, p Pins) Service {
 		return out
 	}
 	out.Image, out.ImageAsWritten = pin(svc.Image, svc.ImageAsWritten, p)
-	out.SecurityGroups = normGroupNames(svc.SecurityGroups)
 	replicas := DefaultReplicas
 	if svc.Replicas != nil {
 		replicas = *svc.Replicas
@@ -248,7 +245,7 @@ func normJob(j Job, p Pins) Job {
 	out := j
 	out.Env = maps.Clone(j.Env)
 	out.Bindings = normBindingNames(j.Bindings)
-	out.SecurityGroups = normGroupNames(j.SecurityGroups)
+	out.SecurityGroups = nil
 	out.Image, out.ImageAsWritten = pin(j.Image, j.ImageAsWritten, p)
 	if IsJobOnDeploy(out.On) {
 		out.On = JobOnStored

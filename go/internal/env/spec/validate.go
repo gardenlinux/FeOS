@@ -63,14 +63,8 @@ const (
 //
 // It may also implement interface{ DenyPrefixes() []netip.Prefix }: the
 // prefixes no pod of the cluster reaches (--deny-prefix, ADR 0010), which
-// no rule of a security group opens: a block inside one is an error.
-// Without it, no block is judged.
-//
-// It may also implement interface{ GroupUsers() map[string][]string }:
-// the environment's pods outside its spec that name its security groups
-// (ADR 0035), by group: "sandbox <id>" for its sandboxes, "job <id>" for
-// its tenants' jobs that are queued or running. A spec without one of
-// those groups is an error. Without it (and in ModeSpec), none.
+// no egress opens: a block inside one is an error. Without it, no block
+// is judged.
 type ValidateContext interface {
 	// Mode is what the validation is for.
 	Mode() Mode
@@ -110,10 +104,6 @@ type SandboxInfo struct {
 	// (or, in ModeSpec, wherever it is: there is no environment to
 	// compare with).
 	OtherEnvironment string
-	// SecurityGroups are the groups of the environment the sandbox names
-	// (ADR 0035), which its attached services are in; none:
-	// [DefaultSecurityGroup].
-	SecurityGroups []string
 	// HTTPNames are the names the sandbox's own HTTP bindings (ADR 0028)
 	// make its resolver answer, which no name of an environment there may
 	// be.
@@ -175,7 +165,7 @@ type Blueprint interface {
 	// are url, host, …").
 	Ref(name string, a Addon, key string, fields map[string]string) error
 	// Port is the port addon name of this type serves on; 0: unknown. The
-	// security groups' reach check (ADR 0034) asks it.
+	// derivation of what a reference opens (ADR 0034, Derive) asks it.
 	Port(name string, a Addon) int
 }
 
@@ -245,9 +235,7 @@ func Validate(vc ValidateContext, s Spec, prev *Spec) []Finding {
 	v.secrets()
 	v.attachedPorts()
 	v.sandboxNames()
-	v.securityGroups()
-	v.groupUsers()
-	v.reach()
+	v.reachability()
 	return SortFindings(v.out)
 }
 
@@ -284,12 +272,13 @@ func (v *validator) limits() {
 	}{
 		{"services", len(v.s.Services), MaxServices}, {"jobs", len(v.s.Jobs), MaxJobs},
 		{"addons", len(v.s.Addons), MaxAddons}, {"routes", len(v.s.Routes), MaxRoutes},
-		{"bindings", len(v.s.Bindings), MaxBindings}, {"securityGroups", len(GroupNames(v.s)), MaxSecurityGroups},
+		{"bindings", len(v.s.Bindings), MaxBindings},
 	} {
 		if l.n > l.max {
 			v.errorf(l.kind, "split the environment", "%d %s; at most %d are allowed", l.n, l.kind, l.max)
 		}
 	}
+	v.gone("securityGroups", v.s.SecurityGroups)
 	if v.s.Volumes != nil {
 		v.errorf("volumes", "keep the data in an addon (postgres, valkey, nats), which has a volume of its own",
 			"volumes for services are not available yet")
@@ -332,6 +321,7 @@ func (v *validator) image(path, image string) {
 
 func (v *validator) service(name string, svc Service) {
 	p := "services." + name
+	v.gone(p+".securityGroups", svc.SecurityGroups)
 	runtime := svc.Runtime
 	if runtime == "" {
 		runtime = RuntimeImage
@@ -355,7 +345,8 @@ func (v *validator) service(name string, svc Service) {
 		}
 		v.resources(p+".resources", svc.Resources)
 		v.imageCredentials(p+".imageCredentials", svc.ImageCredentials)
-		v.groupRefs(p+".securityGroups", svc.SecurityGroups)
+		v.usesOf(p+".uses", svc.Uses)
+		v.egressOf(p+".egress", svc.Egress)
 		if svc.Idle != "" {
 			d, ok := v.duration(p+".idle", svc.Idle)
 			switch {
@@ -381,11 +372,7 @@ func (v *validator) service(name string, svc Service) {
 				"an attached service pulls no image")
 		}
 		v.sandbox(p+".sandbox", svc.Sandbox)
-		if svc.SecurityGroups != nil {
-			v.errorf(p+".securityGroups", "remove securityGroups; change the sandbox's groups (PUT /api/v1/sandboxes/"+
-				"{id}/security-groups) instead", "an attached service is in its sandbox's groups (%s)",
-				strings.Join(v.sandboxGroups(svc.Sandbox), ", "))
-		}
+		v.attachedReach(p, svc)
 		if len(svc.Command) == 0 {
 			v.errorf(p+".command", "set command to the process to run in the sandbox", "an attached service needs a command")
 		}
@@ -577,8 +564,8 @@ func (v *validator) readiness(path string, r *Readiness, ports []Port) {
 
 // env checks environment variables. An attached service is reached like
 // any other pod of the environment (ADR 0035: its name is in the
-// environment's name table with its sandbox's address), where a rule of
-// its sandbox's groups lets the caller in (reach).
+// environment's name table with its sandbox's address), where a
+// reference of the caller opens its port (Derive).
 func (v *validator) env(path string, env map[string]EnvValue) {
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		val := env[key]
@@ -725,7 +712,9 @@ func (v *validator) job(name string, j Job) {
 	v.resources(p+".resources", j.Resources)
 	v.imageCredentials(p+".imageCredentials", j.ImageCredentials)
 	v.env(p+".env", j.Env)
-	v.groupRefs(p+".securityGroups", j.SecurityGroups)
+	v.gone(p+".securityGroups", j.SecurityGroups)
+	v.usesOf(p+".uses", j.Uses)
+	v.egressOf(p+".egress", j.Egress)
 	v.bindingRefs(p+".bindings", j.Bindings)
 }
 
@@ -735,7 +724,7 @@ func (v *validator) addon(name string, a Addon) {
 		v.errorf(p+".type", v.typesRemedy(), "an addon needs a type")
 		return
 	}
-	v.groupRefs(p+".securityGroups", a.SecurityGroups)
+	v.gone(p+".securityGroups", a.SecurityGroups)
 	b, ok := v.vc.Blueprint(a.Type)
 	if !ok {
 		v.errorf(p+".type", v.typesRemedy(), "no addon type %q", a.Type)
@@ -835,6 +824,7 @@ func (v *validator) route(name string, r Route) {
 			v.doors(p, r, target)
 		}
 	}
+	v.routeFrom(p+".from", r.From)
 	if r.Host != "" {
 		v.add(SeverityInfo, p+".host", "", "host is stored, not used yet: the ingress and the route door "+
 			"serve the route on every host of the environment")

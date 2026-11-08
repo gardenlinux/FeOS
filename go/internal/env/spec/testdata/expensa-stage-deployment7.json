@@ -41,10 +41,7 @@
       },
       "rollout": {
         "timeout": "10m0s"
-      },
-      "securityGroups": [
-        "default"
-      ]
+      }
     },
     "expense-service": {
       "runtime": "image",
@@ -96,10 +93,7 @@
       },
       "rollout": {
         "timeout": "10m0s"
-      },
-      "securityGroups": [
-        "default"
-      ]
+      }
     },
     "web": {
       "runtime": "image",
@@ -127,10 +121,7 @@
       },
       "rollout": {
         "timeout": "10m0s"
-      },
-      "securityGroups": [
-        "default"
-      ]
+      }
     }
   },
   "jobs": {
@@ -155,10 +146,7 @@
       },
       "on": "deploy",
       "timeout": "10m0s",
-      "retries": 1,
-      "securityGroups": [
-        "default"
-      ]
+      "retries": 1
     }
   },
   "addons": {
@@ -168,10 +156,7 @@
       "plan": "small",
       "options": {
         "jetstream": true
-      },
-      "securityGroups": [
-        "default"
-      ]
+      }
     },
     "postgres": {
       "type": "postgres",
@@ -185,10 +170,7 @@
           "expense_svc",
           "approval_svc"
         ]
-      },
-      "securityGroups": [
-        "default"
-      ]
+      }
     }
   },
   "routes": {
@@ -211,24 +193,6 @@
   "secrets": {
     "internal-token": {
       "version": 3
-    }
-  },
-  "securityGroups": {
-    "default": {
-      "in": [
-        {
-          "protocol": "any",
-          "from": {
-            "group": "default"
-          }
-        }
-      ],
-      "out": [
-        {
-          "protocol": "any",
-          "to": "internet"
-        }
-      ]
     }
   }
 }

@@ -89,13 +89,6 @@ func DiffWith(prev, next *Spec, addonEffect AddonEffect) []DiffEntry {
 		b, inB := next.Bindings[name]
 		d.object(KindBinding, name, inA, inB, func() ([]FieldChange, string) { return d.binding(name, a, b) })
 	}
-	for _, name := range unionKeys(prev.SecurityGroups, next.SecurityGroups) {
-		a, inA := prev.SecurityGroups[name]
-		b, inB := next.SecurityGroups[name]
-		d.object(KindSecurityGroup, name, inA, inB, func() ([]FieldChange, string) {
-			return changes(view(a), view(b)), EffectInPlace
-		})
-	}
 	if d.out == nil {
 		return []DiffEntry{}
 	}
@@ -180,10 +173,10 @@ func (d *differ) job(a, b Job) ([]FieldChange, string) {
 	}
 	ta := map[string]any{"image": a.Image, "command": a.Command, "env": envView(a.Env, d.prev, true),
 		"resources": view(a.Resources), "imageCredentials": toAny(a.ImageCredentials),
-		"bindings": bindingsTemplate(a.Bindings, d.prev), "securityGroups": toAny(a.SecurityGroups)}
+		"bindings": bindingsTemplate(a.Bindings, d.prev), "egress": egressTemplate(a.Egress)}
 	tb := map[string]any{"image": b.Image, "command": b.Command, "env": envView(b.Env, d.next, true),
 		"resources": view(b.Resources), "imageCredentials": toAny(b.ImageCredentials),
-		"bindings": bindingsTemplate(b.Bindings, d.next), "securityGroups": toAny(b.SecurityGroups)}
+		"bindings": bindingsTemplate(b.Bindings, d.next), "egress": egressTemplate(b.Egress)}
 	if reflect.DeepEqual(ta, tb) {
 		return fields, EffectInPlace
 	}
@@ -200,7 +193,7 @@ func (d *differ) addon(name string, a, b Addon) ([]FieldChange, string) {
 		return nil, EffectInPlace
 	case a.Type != b.Type:
 		return fields, EffectDeletes
-	case a.Version != b.Version || a.Plan != b.Plan || !slices.Equal(a.SecurityGroups, b.SecurityGroups):
+	case a.Version != b.Version || a.Plan != b.Plan:
 		return fields, EffectRecreates
 	}
 	if d.addonEffect != nil {
@@ -238,7 +231,17 @@ func (d *differ) template(s Service, sp *Spec) map[string]any {
 	}
 	return map[string]any{"image": s.Image, "command": s.Command, "env": envView(s.Env, sp, true),
 		"resources": view(s.Resources), "imageCredentials": toAny(s.ImageCredentials),
-		"bindings": bindingsTemplate(s.Bindings, sp), "securityGroups": toAny(s.SecurityGroups)}
+		"bindings": bindingsTemplate(s.Bindings, sp), "egress": egressTemplate(s.Egress)}
+}
+
+// egressTemplate is what of an egress a pod's template holds (ADR 0034,
+// revised): whether its resolver restricts names, and the names; nil for
+// the internet. Its blocks are rules, changed in place.
+func egressTemplate(e *Egress) any {
+	if !e.RestrictsNames() {
+		return nil
+	}
+	return map[string]any{"restrictNames": true, "domains": toAny(e.NameDomains())}
 }
 
 // bindingsTemplate is what of an object's bindings its template holds:

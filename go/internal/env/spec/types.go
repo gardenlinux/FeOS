@@ -28,12 +28,10 @@ type Spec struct {
 	// (ADR 0028), whose credentials the platform adds; a service or a job
 	// gets those it names, and no other.
 	Bindings map[string]Binding `json:"bindings,omitempty"`
-	// SecurityGroups are the environment's security groups (ADR 0034), by
-	// name: rules in and out, which the groups its services, jobs and
-	// addons name allow. The group DefaultSecurityGroup always exists:
-	// Normalise adds it, without rules, when the spec has none of that
-	// name.
-	SecurityGroups map[string]SecurityGroup `json:"securityGroups,omitempty"`
+	// SecurityGroups is gone (ADR 0034, revised): its presence is an
+	// error finding (ErrSecurityGroupsGone). It is a field so that the
+	// finding can say so instead of "unknown field".
+	SecurityGroups json.RawMessage `json:"securityGroups,omitempty"`
 	// Volumes is a kind that is not available yet: its presence is an
 	// error finding "volumes for services are not available yet" (addons
 	// have volumes of their own). It is a field so that the finding can
@@ -96,11 +94,15 @@ type Service struct {
 	// name (ADR 0028). Image runtime only: an attached service has its
 	// sandbox's.
 	Bindings []string `json:"bindings,omitempty"`
-	// SecurityGroups are the environment's groups its pods are in (ADR
-	// 0034), 1 to MaxObjectGroups; nil: [DefaultSecurityGroup], which
-	// Normalise writes (sorted). Image runtime only: an attached service is
-	// in its sandbox's groups.
-	SecurityGroups []string `json:"securityGroups,omitempty"`
+	// Uses are references without a variable (ADR 0034, revised): each
+	// opens the port it names to the service's pods, as an env reference
+	// does. Image runtime only: an attached service is its sandbox's pod.
+	Uses []Use `json:"uses,omitempty"`
+	// Egress is what the service's pods reach outside the environment;
+	// nil: the internet. Image runtime only.
+	Egress *Egress `json:"egress,omitempty"`
+	// SecurityGroups is gone (ADR 0034, revised): an error finding.
+	SecurityGroups json.RawMessage `json:"securityGroups,omitempty"`
 }
 
 // Port is a named port of a service.
@@ -176,9 +178,11 @@ type Job struct {
 	// Bindings are the environment's bindings the job's pods get, by name
 	// (ADR 0028).
 	Bindings []string `json:"bindings,omitempty"`
-	// SecurityGroups are the environment's groups its pods are in, as a
-	// service's are.
-	SecurityGroups []string `json:"securityGroups,omitempty"`
+	// Uses and Egress are a service's (ADR 0034, revised).
+	Uses   []Use   `json:"uses,omitempty"`
+	Egress *Egress `json:"egress,omitempty"`
+	// SecurityGroups is gone (ADR 0034, revised): an error finding.
+	SecurityGroups json.RawMessage `json:"securityGroups,omitempty"`
 }
 
 // Binding is an HTTP API an environment's pods call by a name (ADR 0028):
@@ -287,9 +291,8 @@ type Addon struct {
 	Version string         `json:"version,omitempty"`
 	Plan    string         `json:"plan,omitempty"`
 	Options map[string]any `json:"options,omitempty"`
-	// SecurityGroups are the environment's groups its pod is in, as a
-	// service's are.
-	SecurityGroups []string `json:"securityGroups,omitempty"`
+	// SecurityGroups is gone (ADR 0034, revised): an error finding.
+	SecurityGroups json.RawMessage `json:"securityGroups,omitempty"`
 }
 
 // Route sends HTTP requests whose path starts with Path (segment-aware) to
@@ -303,6 +306,10 @@ type Route struct {
 	Strip bool `json:"strip,omitempty"`
 	// Host is accepted and stored, not used yet (an info finding).
 	Host string `json:"host,omitempty"`
+	// From are the clients' address blocks (ADR 0034, revised), prefixes
+	// of either family: the ingress answers a client outside them 403.
+	// None: every client.
+	From []string `json:"from,omitempty"`
 }
 
 // SecretRef pins a tenant secret of the environment to a version; 0: the
@@ -584,9 +591,6 @@ const (
 	KindRoute   = "route"
 	KindSecret  = "secret"
 	KindBinding = "binding"
-	// KindSecurityGroup is a group of the spec's securityGroups (ADR
-	// 0034).
-	KindSecurityGroup = "securityGroup"
 )
 
 // The defaults and limits of the contract's §3.
@@ -597,12 +601,13 @@ const (
 	MaxAddons    = 16
 	MaxRoutes    = 128
 	MaxBindings  = 32
-	// MaxSecurityGroups bounds an environment's groups, DefaultSecurityGroup
-	// among them; MaxObjectGroups the groups one object names;
-	// MaxGroupRules a group's rules, in and out together (ADR 0034).
-	MaxSecurityGroups = 50
-	MaxObjectGroups   = 5
-	MaxGroupRules     = 60
+	// MaxUses bounds an object's uses and a sandbox's reaches,
+	// MaxEgressDomains and MaxEgressBlocks an egress's lists, MaxRouteFrom
+	// a route's blocks (ADR 0034, revised).
+	MaxUses          = 64
+	MaxEgressDomains = 64
+	MaxEgressBlocks  = 32
+	MaxRouteFrom     = 32
 	// MaxRoutePathBytes bounds a route's path, which every instance of
 	// ferun-ingress holds for every public environment.
 	MaxRoutePathBytes = 1024
@@ -691,8 +696,8 @@ func EffectReplaces(n int) string {
 
 // DiffEntry is the change of one object between two deployments.
 type DiffEntry struct {
-	// Kind is KindService, KindJob, KindAddon, KindRoute, KindSecret,
-	// KindBinding or KindSecurityGroup.
+	// Kind is KindService, KindJob, KindAddon, KindRoute, KindSecret or
+	// KindBinding.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	// Change is ChangeAdd, ChangeRemove or ChangeUpdate.

@@ -623,15 +623,18 @@ func TestValidateContextDependent(t *testing.T) {
 	checkFindings(t, validateMutated(t, vc, nil, approval), []expect{e("services.web.sandbox",
 		"sandbox "+webSandbox+" is in environment dev: an attached service runs in a sandbox of its own environment")})
 
-	// An attached service has its sandbox's groups, none of its own.
+	// An attached service is its sandbox's pod: no uses, no egress.
 	vc = defaultVC(ModePlan)
-	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox, SecurityGroups: []string{"default", "dev"}}
+	vc.sandboxes[webSandbox] = SandboxInfo{ID: webSandbox}
 	checkFindings(t, validateMutated(t, vc, nil, func(s *Spec) {
 		approval(s)
 		web := s.Services["web"]
-		web.SecurityGroups = []string{"default"}
+		web.Uses = []Use{{Service: "approval-service", Port: PortRef{Name: "http"}}}
+		web.Egress = &Egress{Mode: EgressNone}
 		s.Services["web"] = web
-	}), []expect{e("services.web.securityGroups", "an attached service is in its sandbox's groups (default, dev)")})
+	}), []expect{e("services.web.egress", "an attached service runs in sandbox "+webSandbox+"'s pod and has its egress"),
+		e("services.web.uses", "an attached service runs in sandbox "+webSandbox+"'s pod, which reaches what the "+
+			"sandbox's reaches names")})
 
 	// An addon against its previous self; a changed type deletes data.
 	prev := mustParse(t, expensa)
