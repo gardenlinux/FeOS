@@ -7,7 +7,7 @@ import { response } from '../testing/ferun.js';
 import {
   actionProblem, activityItems, CHANGES_READ, changesTo, changeTone, cloneBody, conditionText, defaultHost,
   definitionRows, deploymentTone, envCounts, envDomains, envRows, envValueRef, errorShare, exitText, findObject,
-  fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments,
+  fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments, instanceNote,
   jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
   objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
   phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
@@ -59,6 +59,31 @@ describe('tones', () => {
     expect(objectTone({ kind: 'job', name: 'seed', lastRun: null })).toBe('absent');
     expect(objectTone(obj(PREVIEW, 'service', 'web'))).toBe('moving');
     expect(objectTone(obj(PREVIEW, 'service', 'expense-service'))).toBe('running');
+  });
+});
+
+describe('instanceNote', () => {
+  const run = { state: 'running' };
+  it('reads a detail by the phase and the sandbox, never at all without one', () => {
+    expect(instanceNote({ ...run, phase: 'ready', detail: '' })).toBe(null);
+    expect(instanceNote({ ...run, phase: 'starting', detail: 'starting' })).toBe(null);
+    expect(instanceNote({ phase: 'starting', state: 'creating', detail: 'restarting' }))
+      .toMatchObject({ tone: 'moving', icon: 'refresh', spin: true, label: 'Restarting', text: '' });
+    expect(instanceNote({ ...run, phase: 'exited', detail: 'exited with code 1; restarting in 4s' }))
+      .toMatchObject({ tone: 'failed', label: '', text: 'exited with code 1; restarting in 4s' });
+    expect(instanceNote({ phase: 'starting', state: 'creating', detail: 'pulling the image' }))
+      .toMatchObject({ tone: 'moving', icon: 'server', text: 'pulling the image' });
+    expect(instanceNote({ ...run, phase: 'ready', detail: 'provision: psql exited 2' }))
+      .toMatchObject({ tone: 'warn', label: '', text: 'provision: psql exited 2' });
+  });
+  it("splits a readiness check's request from its reason; a starting instance's failing check is calm", () => {
+    const why = 'nothing answered on port 8080 in this sandbox';
+    expect(instanceNote({ ...run, phase: 'starting', detail: `GET /readyz: ${why}` }))
+      .toMatchObject({ tone: 'moving', label: 'Readiness check', request: 'GET /readyz', text: why });
+    expect(instanceNote({ ...run, phase: 'unready', detail: 'GET /healthz?full=1: answered 503 on port 8080' }))
+      .toMatchObject({ tone: 'warn', label: 'Readiness check', request: 'GET /healthz?full=1', text: 'answered 503 on port 8080' });
+    expect(instanceNote({ ...run, phase: 'unready', detail: `tcp: ${why}` }))
+      .toMatchObject({ tone: 'warn', label: 'Readiness check', request: 'tcp', text: why });
   });
 });
 

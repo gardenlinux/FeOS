@@ -58,7 +58,7 @@ func (h *Handler) DialPod(ctx context.Context, lease model.Lease, port int) (net
 	}
 	c, err := h.openStream(ctx, tkey{lease.SandboxID, port}, lease.Node, release)
 	if err != nil && ctx.Err() != nil {
-		return nil, fmt.Errorf("port %d did not answer within %s: %w", port, h.t.probeTimeout, err)
+		return nil, &slowError{port: port, after: h.t.probeTimeout, err: err}
 	}
 	return c, err
 }
@@ -96,9 +96,9 @@ func (h *Handler) Probe(ctx context.Context, lease model.Lease, port int, path s
 	defer stop()
 	fail := func(err error) (int, error) {
 		if ctx.Err() != nil {
-			return 0, fmt.Errorf("GET %s on port %d did not answer within %s", path, port, h.t.probeTimeout)
+			return 0, &slowError{port: port, after: h.t.probeTimeout}
 		}
-		return 0, fmt.Errorf("GET %s on port %d: %w", path, port, err)
+		return 0, fmt.Errorf("port %d: %w", port, err)
 	}
 	if err := req.Write(conn); err != nil {
 		return fail(err)

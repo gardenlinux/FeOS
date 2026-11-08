@@ -318,7 +318,7 @@ func TestReadinessPhases(t *testing.T) {
 	n1.Script().SetPodPortAddr(tcpRow.Sandbox.ID, 8080, "127.0.0.1:1")
 	eventually(t, 30*time.Second, "the tcp check failing", func() bool {
 		inst, _ := h.st.GetEnvInstance(bg, tcpRow.Sandbox.ID)
-		return strings.Contains(inst.Detail, "tcp port 8080")
+		return strings.Contains(inst.Detail, "tcp: ")
 	})
 	n1.Script().SetPodPortAddr(tcpRow.Sandbox.ID, 8080, strings.TrimPrefix(srv.URL, "http://"))
 	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)

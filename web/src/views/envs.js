@@ -31,6 +31,25 @@ export function phaseTone(phase) {
   }
 }
 
+// instanceNote is an instance's detail as the note under its row, or
+// null: its tone, icon and label, and for a readiness check its request
+// ("GET /readyz", "tcp") apart from the reason. The phase and the
+// sandbox's state choose the tone; ferund's bare "restarting" is the
+// label alone, and "starting" (the steady wait of a service without a
+// check) says nothing the phase does not.
+export function instanceNote(i) {
+  const d = (i && i.detail) || '';
+  if (!d || d === 'starting') return null;
+  if (d === 'restarting') return { tone: 'moving', icon: 'refresh', spin: true, label: 'Restarting', request: '', text: '' };
+  if (i.phase === 'exited' || i.phase === 'failed') return { tone: 'failed', icon: 'x', label: '', request: '', text: d };
+  if (i.state && i.state !== 'running') return { tone: 'moving', icon: 'server', label: '', request: '', text: d };
+  const m = /^(GET \S+|tcp): ([\s\S]+)$/.exec(d);
+  if (m) {
+    return { tone: i.phase === 'unready' ? 'warn' : 'moving', icon: 'activity', label: 'Readiness check', request: m[1], text: m[2] };
+  }
+  return { tone: 'warn', icon: 'alert', label: '', request: '', text: d };
+}
+
 // isAttached tells an attached service (a process in a sandbox) from an
 // image service.
 export function isAttached(o) {

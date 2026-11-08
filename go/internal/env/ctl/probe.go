@@ -125,7 +125,7 @@ func (c *Controller) runCheck(ctx context.Context, l model.Lease, chk check, see
 			case errors.Is(err, ports.ErrProbeBusy):
 				return false, errNoVerdict.Error()
 			case err != nil:
-				return false, fmt.Sprintf("tcp port %d: %v", chk.port, err)
+				return false, "tcp: " + ports.Explain(err, chk.port)
 			}
 			conn.Close()
 			return true, ""
@@ -135,9 +135,9 @@ func (c *Controller) runCheck(ctx context.Context, l model.Lease, chk check, see
 		case errors.Is(err, ports.ErrProbeBusy):
 			return false, errNoVerdict.Error()
 		case err != nil:
-			return false, fmt.Sprintf("GET %s on port %d: %v", chk.path, chk.port, err)
+			return false, fmt.Sprintf("GET %s: %s", chk.path, ports.Explain(err, chk.port))
 		case code < 200 || code > 399:
-			return false, fmt.Sprintf("GET %s on port %d answered %d", chk.path, chk.port, code)
+			return false, fmt.Sprintf("GET %s: answered %d on port %d", chk.path, code, chk.port)
 		}
 		return true, ""
 	case "exec":

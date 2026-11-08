@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveTenant } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
-  BindingCard, DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceTable, LogsBody, LogsTab, DeploymentTable,
+  BindingCard, DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceNote, InstanceTable, LogsBody, LogsTab, DeploymentTable,
   DeploymentView, TagsBox, envCan,
 } from './Environments.jsx';
 import { AboutBox, EnvOverview } from './EnvOverview.jsx';
@@ -222,6 +222,16 @@ describe('EnvOverview', () => {
   });
 });
 
+describe('InstanceNote', () => {
+  it("shows a readiness check's label, request and reason; a restart its label alone", () => {
+    const check = html(<InstanceNote note={{ tone: 'moving', icon: 'activity', label: 'Readiness check', request: 'GET /readyz', text: 'nothing answered on port 8080 in this sandbox' }} title="t" />);
+    expect(check).toContain('<span class="inst-note-label">Readiness check</span><code class="inst-note-req">GET /readyz</code><span class="inst-note-text">nothing answered on port 8080 in this sandbox</span>');
+    const restart = html(<InstanceNote note={{ tone: 'moving', icon: 'refresh', spin: true, label: 'Restarting', request: '', text: '' }} title="restarting" />);
+    expect(restart).toContain('icon inst-note-spin');
+    expect(restart).not.toContain('inst-note-text');
+  });
+});
+
 describe('InstanceTable', () => {
   it("lists an object's instances: replica, phase, state, address, deployment, restarts, last exit, logs, the node last", () => {
     const svc = STAGE.objects.find((o) => o.name === 'expense-service');
@@ -229,7 +239,8 @@ describe('InstanceTable', () => {
     const table = (operator) => html(<InstanceTable instances={svc.instances} latest={7} navigate={nav} logsTo={logsTo} operator={operator} />);
     const out = table(false);
     expect(count(out, 'title="instance ')).toBe(3);
-    expect(out).toContain('<tr class="inst-detail"><td colSpan="10" class="small detailcell">exited with code 1; restarting in 4s</td></tr>');
+    expect(out).toContain('<tr class="inst-detail"><td colSpan="10"><div class="inst-note failed" title="exited with code 1; restarting in 4s">');
+    expect(out).toContain('<span class="inst-note-text">exited with code 1; restarting in 4s</span></div></td></tr>');
     expect(out).toContain('<td class="col-num mono warntext">3</td>');
     expect(out).toContain('<td class="col-num mono bad">1</td>');
     expect(out).toContain('class="col-num mono muted" title="an older deployment&#x27;s instance">6</td>');

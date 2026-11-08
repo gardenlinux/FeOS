@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,6 +73,47 @@ func classifyStatus(err error, node string, port int) verdict {
 	}
 	return verdict{reply: reply{http.StatusBadGateway, fmt.Sprintf("node %s did not carry the forward", node), 0}, log: true}
 }
+
+// Explain is a failed DialPod's or Probe's reason in the door's words,
+// for a readiness check a person reads: "nothing answered on port 8080 in
+// this sandbox" rather than the node's gRPC status, whose whole stays in
+// the error.
+func Explain(err error, port int) string {
+	var se *slowError
+	var de *dialError
+	switch {
+	case errors.As(err, &se):
+		return fmt.Sprintf("port %d did not answer within %s", se.port, se.after)
+	case errors.Is(err, errCapFull), errors.As(err, &de):
+		return strings.TrimSuffix(classify(err, nodeOf(de), port).msg, ", try again")
+	}
+	return err.Error()
+}
+
+func nodeOf(de *dialError) string {
+	if de == nil {
+		return ""
+	}
+	return de.node
+}
+
+// slowError is a dial or a probe that did not finish within the probe's
+// timeout; err, when the dial failed, is why.
+type slowError struct {
+	port  int
+	after time.Duration
+	err   error
+}
+
+func (e *slowError) Error() string {
+	s := fmt.Sprintf("port %d did not answer within %s", e.port, e.after)
+	if e.err != nil {
+		s += ": " + e.err.Error()
+	}
+	return s
+}
+
+func (e *slowError) Unwrap() error { return e.err }
 
 func nothingAnswered(port int) string {
 	return fmt.Sprintf("nothing answered on port %d in this sandbox", port)

@@ -17,7 +17,7 @@ import { atLeast, envRole, useAccess } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import {
   changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, hasEvidence, heavyEffect,
-  incidentObject, isAttached, labelPairs, logSourceText, logsProblem, mayRevertTo, originText, parseLabelFilter,
+  incidentObject, instanceNote, isAttached, labelPairs, logSourceText, logsProblem, mayRevertTo, originText, parseLabelFilter,
   phaseTone, deploymentTone, preflightRows, deploymentText, revertOffer, rolloutNote, specBindings, statusState,
   tagPlan,
 } from './envs.js';
@@ -622,9 +622,23 @@ export function JobLine({ run }) {
   );
 }
 
+// InstanceNote is an instance's detail as a note: an icon and a label in
+// its tone, a readiness check's request as code, the reason in the text's
+// colour, its whole in the title.
+export function InstanceNote({ note, title }) {
+  return (
+    <div className={'inst-note ' + note.tone} title={title}>
+      <Icon name={note.icon} size={13} className={note.spin ? 'inst-note-spin' : ''} />
+      {note.label && <span className="inst-note-label">{note.label}</span>}
+      {note.request && <code className="inst-note-req">{note.request}</code>}
+      {note.text && <span className="inst-note-text">{note.text}</span>}
+    </div>
+  );
+}
+
 // InstanceTable lists an object's pods; one of an older deployment than the
 // latest is muted, a stopping one dimmed. A pod's detail, when it has one,
-// takes a line of its own under the pod. Its node comes last, small: a
+// takes a line of its own under the pod, as an InstanceNote. Its node comes last, small: a
 // link for an operator (the nodes are theirs), text for everyone else.
 export function InstanceTable({ instances, latest, navigate, logsTo, operator = false }) {
   const list = instances || [];
@@ -650,9 +664,10 @@ export function InstanceTable({ instances, latest, navigate, logsTo, operator = 
           {list.map((i) => {
             const old = latest > 0 && i.deployment < latest;
             const dim = i.phase === 'stopping' ? 'dim' : '';
+            const note = instanceNote(i);
             return (
               <Fragment key={i.id}>
-                <tr className={[dim, i.detail ? 'has-detail' : ''].filter(Boolean).join(' ')} title={`instance ${i.id}`}>
+                <tr className={[dim, note ? 'has-detail' : ''].filter(Boolean).join(' ')} title={`instance ${i.id}`}>
                   <td className="col-num mono">{i.replica}</td>
                   <td><ToneLabel tone={phaseTone(i.phase)}>{i.phase}</ToneLabel></td>
                   <td><StateLabel state={i.state} /></td>
@@ -672,9 +687,9 @@ export function InstanceTable({ instances, latest, navigate, logsTo, operator = 
                       : (i.node || '—')}
                   </td>
                 </tr>
-                {i.detail && (
+                {note && (
                   <tr className={['inst-detail', dim].filter(Boolean).join(' ')}>
-                    <td colSpan={10} className="small detailcell">{i.detail}</td>
+                    <td colSpan={10}><InstanceNote note={note} title={i.detail} /></td>
                   </tr>
                 )}
               </Fragment>

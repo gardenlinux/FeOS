@@ -917,9 +917,33 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 .inst-tbl th:nth-child(10) { width: 44px; }
 .inst-tbl td.cut-start { direction: rtl; text-align: left; }
 .inst-tbl tr.has-detail td { border-bottom: none; padding-bottom: 1px; }
-.inst-tbl tr.inst-detail td { white-space: normal; padding-top: 0; padding-left: 16px; }
+.inst-tbl tr.inst-detail td { white-space: normal; padding: 0 8px 7px 80px; }
+/* an instance's note sits under its phase: a tinted strip in its tone,
+   icon and label in the tone, the reason in the text's colour, at most two
+   lines (its whole in the title) */
+.inst-note {
+  --tone: var(--muted);
+  display: flex; align-items: baseline; gap: 8px; width: fit-content; max-width: 100%;
+  padding: 3px 10px 4px 8px; border-radius: 6px; font-size: 12.5px; line-height: 1.45;
+  background: color-mix(in srgb, var(--tone) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 22%, transparent);
+}
+.inst-note.moving { --tone: var(--accent); }
+.inst-note.warn { --tone: var(--warn); }
+.inst-note.failed { --tone: var(--danger); }
+.inst-note > .icon { flex: none; align-self: flex-start; margin-top: 2px; color: var(--tone); }
+.inst-note-spin { animation: spin 2.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .inst-note-spin { animation: none; } }
+.inst-note-label { color: var(--tone); font-weight: 600; white-space: nowrap; }
+.inst-note-req {
+  font-size: 11.5px; padding: 0 5px; border-radius: 4px; white-space: nowrap;
+  background: color-mix(in srgb, var(--tone) 12%, transparent); color: var(--text);
+}
+.inst-note-text {
+  color: var(--text); opacity: .86; overflow-wrap: anywhere; min-width: 0; flex: 0 1 auto;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .inst-tbl .state-label { font-size: 12px; }
-.detailcell { overflow-wrap: anywhere; color: var(--warn); }
 .msgcell { min-width: 200px; max-width: 420px; overflow-wrap: anywhere; }
 .deployment-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 10px; }
 .deployment-head .badge { margin-left: 0; }
