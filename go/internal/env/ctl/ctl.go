@@ -19,9 +19,6 @@
 //	env-groups     10 s, hint "env-groups": the security groups each connected
 //	               node should have, re-put where they differ; what a node holds
 //	               of the ingress's groups recorded; stale groups deleted
-//	env-groups-moves 5 s, hint "env-groups": sandboxes whose groups changed
-//	               (groups_pending) and whose pod runs under the old ones:
-//	               hibernated, and restored when they ran (ADR 0035)
 //	env-names      2 s, hint "env-names": the name tables each connected node
 //	               should have, updated or re-put where they differ
 //	env-volumes    30 s: the volumes marked deleting, deleted on their nodes
@@ -293,9 +290,8 @@ type Controller struct {
 	// still exited is the same run, whose restart did not happen (a leader
 	// change forgets it: at most one exit too many).
 	exitRun map[podid.ID]int64
-	// cleanWaits is the backoff of the attached services' cleanups and of
-	// the sandboxes' moves that failed, by pool key (made when first
-	// needed).
+	// cleanWaits is the backoff of the attached services' cleanups that
+	// failed, by pool key (made when first needed).
 	cleanWaits map[string]cleanWait
 	// unserved are the nodes whose feosd serves no names, as env-names
 	// and the prepare hook last found (made when first needed).
@@ -346,7 +342,6 @@ func (c *Controller) Loops() []model.Loop {
 		{Name: LoopReconcile, Interval: reconcileEvery, Run: c.reconcile},
 		{Name: LoopProbe, Interval: probeEvery, Run: c.probe},
 		{Name: LoopGroups, Interval: groupsEvery, Run: c.groupsLoop},
-		{Name: LoopMoves, Interval: movesEvery, Run: c.movesLoop},
 		{Name: LoopNames, Interval: namesEvery, Run: c.namesLoop},
 		{Name: LoopVolumes, Interval: volumesEvery, Run: c.volumesLoop},
 		{Name: LoopDelete, Interval: deleteEvery, Run: c.deleteLoop},

@@ -269,6 +269,10 @@ type PlanAnswer struct {
 	// key (the plan warned at its path); a digest reference is never one
 	// (it stays as written). {} when the spec did not parse.
 	Images map[string]string `json:"images"`
+	// Reachability is what the normalised spec admits (ADR 0034,
+	// revised): its edges, each object's egress, each route's clients;
+	// empty lists when the spec did not parse.
+	Reachability spec.Reachability `json:"reachability"`
 }
 
 // AddonCatalog is GET /api/v1/addons: the addon types this ferund runs,
@@ -354,11 +358,13 @@ type DeploymentInfo struct {
 }
 
 // DeploymentDetail is GET /api/v1/environments/{env}/deployments/{n}: the
-// deployment, its normalised spec and its diff against deployment n-1.
+// deployment, its normalised spec, its diff against deployment n-1 and
+// what its spec admits (ADR 0034, revised).
 type DeploymentDetail struct {
 	DeploymentInfo
-	Spec json.RawMessage  `json:"spec"`
-	Diff []spec.DiffEntry `json:"diff"`
+	Spec         json.RawMessage   `json:"spec"`
+	Diff         []spec.DiffEntry  `json:"diff"`
+	Reachability spec.Reachability `json:"reachability"`
 }
 
 // ApplyAnswer is the answer of an apply, a revert and an object put or

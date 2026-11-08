@@ -190,15 +190,13 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 	p.inst = inst
 	p.image, p.vcpus, p.memoryMB = inst.Image, plan.VCPUs, plan.MemoryMib
 	p.credentials = bp.Credentials(p.addon)
-	groups, err := v.podGroups(a.SecurityGroups)
-	if err != nil {
-		p.err = fmt.Errorf("addon %s: %w", name, err)
-		return p
-	}
+	// An addon's egress is its type's (ADR 0034, revised): none, names
+	// refused.
 	p.template = model.PodTemplate{
-		Command:        slices.Clone(inst.Command),
-		Env:            mapEnv(name, inst.Env),
-		SecurityGroups: groups,
+		Command:             slices.Clone(inst.Command),
+		Env:                 mapEnv(name, inst.Env),
+		SecurityGroups:      v.podGroups(spec.KindAddon, name),
+		RestrictEgressNames: true,
 	}
 	if inst.Mount != "" {
 		if vol == nil {
@@ -226,14 +224,15 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 }
 
 // planImage renders an image service or a job of the target: its pod is
-// a member of the env group and of the groups it names (ADR 0034), and
-// resolves the env table's names (an addon's pod is in its groups too,
-// reaches nothing by name, and names no table). An image
+// a member of the env group and of its workload's (ADR 0034, revised),
+// resolves the env table's names and, with an egress other than the
+// internet, only its egress's upstream names (an addon's pod is in its
+// groups too, reaches nothing by name, and names no table). An image
 // service's pod of an environment that was ever public also names its own
 // group ing-<sandbox id> (IngressGroup; the insert appends the group), so
 // that the first publish rolls the service once and later ones never.
 func (c *Controller) planImage(v *view, kind, name, image string, command []string, env map[string]spec.EnvValue,
-	res *spec.Resources, creds *spec.ImageCredentials, bindings, securityGroups []string) *podPlan {
+	res *spec.Resources, creds *spec.ImageCredentials, bindings []string, egress *spec.Egress) *podPlan {
 	p := &podPlan{kind: kind, name: name, image: image}
 	p.vcpus, p.memoryMB = resourcesOf(res)
 	vals, wait, err := c.renderEnv(v, env)
@@ -241,17 +240,14 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 		p.err, p.wait = err, wait
 		return p
 	}
-	groups, err := v.podGroups(securityGroups)
-	if err != nil {
-		p.err = fmt.Errorf("%s %s: %w", kind, name, err)
-		return p
-	}
 	p.template = model.PodTemplate{
-		Command:        slices.Clone(command),
-		Env:            vals,
-		SecurityGroups: groups,
-		NameTables:     []string{model.EnvTableID(v.env.ID)},
-		IngressGroup:   kind == spec.KindService && v.env.IngressGroup,
+		Command:             slices.Clone(command),
+		Env:                 vals,
+		SecurityGroups:      v.podGroups(kind, name),
+		NameTables:          []string{model.EnvTableID(v.env.ID)},
+		IngressGroup:        kind == spec.KindService && v.env.IngressGroup,
+		RestrictEgressNames: egress.RestrictsNames(),
+		EgressDomains:       egress.NameDomains(),
 	}
 	p.template.ImageCredentials = templateCredentials(creds)
 	if p.template.HTTPBindings, err = templateBindings(v.target, bindings); err != nil {
@@ -301,7 +297,7 @@ func templateCredentials(c *spec.ImageCredentials) *model.TemplateCredentials {
 // planService renders an image service of the target.
 func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan {
 	p := c.planImage(v, spec.KindService, name, s.Image, s.Command, s.Env, s.Resources, s.ImageCredentials, s.Bindings,
-		s.SecurityGroups)
+		s.Egress)
 	p.idle = idleOf(s)
 	p.check = checkOf(s)
 	return p
@@ -310,7 +306,7 @@ func (c *Controller) planService(v *view, name string, s spec.Service) *podPlan 
 // planJob renders a job of the target.
 func (c *Controller) planJob(v *view, name string, j spec.Job) *podPlan {
 	return c.planImage(v, spec.KindJob, name, j.Image, j.Command, j.Env, j.Resources, j.ImageCredentials, j.Bindings,
-		j.SecurityGroups)
+		j.Egress)
 }
 
 // planAttached renders an attached service of the target: its process.

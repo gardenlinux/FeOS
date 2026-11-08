@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strconv"
@@ -605,6 +606,26 @@ func CheckReaches(r Reaches) string {
 			}
 		default:
 			return fmt.Sprintf(`reaches[%d] names nothing: write {"service": name, "port": port} or {"addon": name}`, i)
+		}
+	}
+	return ""
+}
+
+// CheckPod checks what a sandbox's or a tenant's job's create says of its
+// network (ADR 0035, revised): securityGroups is gone (sent: its raw
+// value, nil when left out), reaches has its form (CheckReaches), and the
+// egress its domains and blocks, none inside deny (EgressFindings). The
+// text of a 400, or "".
+func CheckPod(securityGroups []byte, r Reaches, e *Egress, deny []netip.Prefix) string {
+	if securityGroups != nil {
+		return "securityGroups is gone (ADR 0034, revised); use reaches"
+	}
+	if msg := CheckReaches(r); msg != "" {
+		return msg
+	}
+	for _, f := range EgressFindings("egress", e, deny) {
+		if f.Severity == SeverityError {
+			return f.Path + ": " + f.Problem
 		}
 	}
 	return ""

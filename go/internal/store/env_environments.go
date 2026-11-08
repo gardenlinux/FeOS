@@ -216,10 +216,8 @@ func (s *Store) InsertEnvironment(ctx context.Context, n NewEnvironment) (Enviro
 	if err != nil {
 		return Environment{}, fmt.Errorf("insert environment %s: %w", n.Name, err)
 	}
-	// Its group default (ADR 0034) gets its row in the same statement.
 	e, err := scanEnvironment(s.q.QueryRow(ctx, `WITH e AS (INSERT INTO environments (id, owner, name, labels)
-			VALUES ($1, $2, $3, $4::jsonb) RETURNING *),
-		g AS (INSERT INTO security_groups (env_id, name) SELECT id, '`+defaultGroup+`' FROM e)
+			VALUES ($1, $2, $3, $4::jsonb) RETURNING *)
 		SELECT `+environmentCols+` FROM e`, n.ID, n.Owner, n.Name, labels))
 	if err != nil {
 		return Environment{}, insertError("insert environment "+n.Name, err)

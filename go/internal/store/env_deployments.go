@@ -78,9 +78,7 @@ func (s *Store) InsertDeployment(ctx context.Context, r EnvDeployment) (EnvDeplo
 	if err != nil {
 		return EnvDeployment{}, fmt.Errorf("insert deployment %d: %w", r.Number, err)
 	}
-	// The groups of its spec get their rows (ADR 0034) in the same
-	// statement.
-	out, err := scanDeployment(s.q.QueryRow(ctx, `WITH `+ensureSpecGroups+` INSERT INTO env_deployments (env_id, number, spec, base, author, message,
+	out, err := scanDeployment(s.q.QueryRow(ctx, `INSERT INTO env_deployments (env_id, number, spec, base, author, message,
 			annotations, origin, origin_ref, state, reason, started_at, finished_at, made_by)
 		VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14) RETURNING `+deploymentCols,
 		r.EnvID, r.Number, string(r.Spec), r.Base, r.Author, r.Message, ann, r.Origin, r.OriginRef, r.State, r.Reason,

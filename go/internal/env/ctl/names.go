@@ -450,7 +450,7 @@ func (c *Controller) syncNodeNames(ctx context.Context, node string, cache map[s
 			envs = append(envs, ref.env)
 		}
 	}
-	envOK, _, err := c.st.EnvCtlExisting(ctx, envs, nil)
+	envOK, err := c.st.EnvCtlExisting(ctx, envs)
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}

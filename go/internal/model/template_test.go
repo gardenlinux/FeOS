@@ -4,6 +4,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -218,18 +220,32 @@ func TestGroupIDs(t *testing.T) {
 	if g := EnvGroupID(id); g != "env-0193a000-0000-7000-8000-0000000000e1" || len(g) != 40 {
 		t.Fatalf("EnvGroupID %q", g)
 	}
-	g := uuid.MustParse("0193a000-0000-7000-8000-0000000000e2")
-	if got := SecurityGroupID(g); got != "sg-0193a000-0000-7000-8000-0000000000e2" || len(got) != 39 {
-		t.Fatalf("SecurityGroupID %q", got)
+	// The workload groups (ADR 0034, revised): the migration 0033 computes
+	// the same in SQL.
+	wl := WorkloadGroupID(id, "service", "api")
+	sum := sha256.Sum256([]byte("0193a000-0000-7000-8000-0000000000e1/service/api"))
+	if wl != "wl-"+hex.EncodeToString(sum[:])[:32] || len(wl) != 35 {
+		t.Fatalf("WorkloadGroupID %q", wl)
 	}
-	if got := PodGroups(id, []uuid.UUID{g}); !slices.Equal(got, []string{EnvGroupID(id), SecurityGroupID(g)}) {
+	if wl == WorkloadGroupID(id, "job", "api") || wl != WorkloadGroupID(id, "service", "api") {
+		t.Fatal("WorkloadGroupID is not one per object")
+	}
+	if got := SandboxWorkloadGroupID("k3m9q7a2b4c"); got != "wl-s-k3m9q7a2b4c" {
+		t.Fatalf("SandboxWorkloadGroupID %q", got)
+	}
+	if got := JobWorkloadGroupID("k3m9q7a2b4c"); got != "wl-j-k3m9q7a2b4c" {
+		t.Fatalf("JobWorkloadGroupID %q", got)
+	}
+	if got := PodGroups(id, wl); !slices.Equal(got, []string{EnvGroupID(id), wl}) {
 		t.Fatalf("PodGroups %v", got)
 	}
 	// A sandbox's pod: its groups and its environment's table, never an
-	// own group or table (ADR 0035).
-	tmpl := SandboxTemplate(id, []uuid.UUID{g})
-	if !slices.Equal(tmpl.Command, SandboxCommand) || !slices.Equal(tmpl.SecurityGroups, PodGroups(id, []uuid.UUID{g})) ||
-		!slices.Equal(tmpl.NameTables, []string{EnvTableID(id)}) {
+	// own table (ADR 0035), its egress's names.
+	tmpl := SandboxTemplate(id, "k3m9q7a2b4c", true, []string{"api.stripe.com"})
+	if !slices.Equal(tmpl.Command, SandboxCommand) ||
+		!slices.Equal(tmpl.SecurityGroups, PodGroups(id, "wl-s-k3m9q7a2b4c")) ||
+		!slices.Equal(tmpl.NameTables, []string{EnvTableID(id)}) || !tmpl.RestrictEgressNames ||
+		!slices.Equal(tmpl.EgressDomains, []string{"api.stripe.com"}) {
 		t.Fatalf("SandboxTemplate %+v", tmpl)
 	}
 	tmpl.Command[0] = "x"

@@ -32,10 +32,27 @@ const (
 // "env-<environment UUID>", 40 characters.
 func EnvGroupID(envID uuid.UUID) string { return "env-" + envID.String() }
 
-// SecurityGroupID is a tenant's security group (ADR 0034) on the nodes:
-// "sg-<UUID of its row>", 39 characters (store.SecurityGroupID resolves an
-// environment's group by its name).
-func SecurityGroupID(id uuid.UUID) string { return "sg-" + id.String() }
+// LegacyGroupPrefix begins the groups of the first version of ADR 0034
+// ("sg-<UUID of a row>"): nothing makes them any more; a pod made before
+// the revision names one until it is replaced or restored.
+const LegacyGroupPrefix = "sg-"
+
+// WorkloadGroupID is the membership of an object's pods (ADR 0034,
+// revised): "wl-" and the first 32 hex digits of the SHA-256 of
+// "<environment UUID>/<kind>/<name>", 35 characters. Its in rules are
+// what references the object, its out rules its egress.
+func WorkloadGroupID(envID uuid.UUID, kind, name string) string {
+	sum := sha256.Sum256([]byte(envID.String() + "/" + kind + "/" + name))
+	return "wl-" + hex.EncodeToString(sum[:16])
+}
+
+// SandboxWorkloadGroupID is the membership of a sandbox's pod:
+// "wl-s-<sandbox ID>".
+func SandboxWorkloadGroupID(id string) string { return "wl-s-" + id }
+
+// JobWorkloadGroupID is the membership of a tenant's job's pod:
+// "wl-j-<job ID>".
+func JobWorkloadGroupID(id string) string { return "wl-j-" + id }
 
 // EnvTableID is the name table of an environment's pods (feosd's
 // NameService): its addons, image services and attached services. It is
@@ -43,28 +60,23 @@ func SecurityGroupID(id uuid.UUID) string { return "sg-" + id.String() }
 func EnvTableID(envID uuid.UUID) string { return EnvGroupID(envID) }
 
 // PodGroups are the security groups a pod of an environment names (ADR
-// 0034, 0035): env-<environment>, then sg-<row> of each of its groups, in
-// the order given (their names' order).
-func PodGroups(envID uuid.UUID, groups []uuid.UUID) []string {
-	out := make([]string, 0, 1+len(groups))
-	out = append(out, EnvGroupID(envID))
-	for _, g := range groups {
-		out = append(out, SecurityGroupID(g))
-	}
-	return out
+// 0034 revised, 0035): env-<environment> and its workload's.
+func PodGroups(envID uuid.UUID, workload string) []string {
+	return []string{EnvGroupID(envID), workload}
 }
 
 // SandboxCommand is the command of a sandbox's pod: it waits, and runs
 // what exec, the tools and its attached services start in it.
 var SandboxCommand = []string{"sleep", "infinity"}
 
-// SandboxTemplate is the pod template of a sandbox (ADR 0035): its
-// command, the groups of its environment it is in (PodGroups) and its
+// SandboxTemplate is the pod template of sandbox id (ADR 0035): its
+// command, its groups (PodGroups with SandboxWorkloadGroupID) and its
 // environment's name table, where its attached services are named with
-// its address.
-func SandboxTemplate(envID uuid.UUID, groups []uuid.UUID) *PodTemplate {
-	return &PodTemplate{Command: slices.Clone(SandboxCommand), SecurityGroups: PodGroups(envID, groups),
-		NameTables: []string{EnvTableID(envID)}}
+// its address; its egress's names as Egress gives them.
+func SandboxTemplate(envID uuid.UUID, id string, restrictNames bool, domains []string) *PodTemplate {
+	return &PodTemplate{Command: slices.Clone(SandboxCommand),
+		SecurityGroups: PodGroups(envID, SandboxWorkloadGroupID(id)), NameTables: []string{EnvTableID(envID)},
+		RestrictEgressNames: restrictNames, EgressDomains: slices.Clone(domains)}
 }
 
 // The escapes of a secret in a template value.
@@ -96,13 +108,18 @@ type PodTemplate struct {
 	Volumes []TemplateVolume `json:"volumes,omitempty"`
 	// Mounts are the volumes the container mounts.
 	Mounts []TemplateMount `json:"mounts,omitempty"`
-	// SecurityGroups are the pod's security groups (EnvGroupID,
-	// SecurityGroupID, IngressGroupID); none: feosd's default group.
+	// SecurityGroups are the pod's security groups (EnvGroupID, a
+	// workload's, IngressGroupID); none: feosd's default group.
 	SecurityGroups []string `json:"securityGroups,omitempty"`
 	// NameTables are the name tables whose names feosd's resolver answers
 	// the pod (EnvTableID), in order; none: no names but
 	// the upstreams'.
 	NameTables []string `json:"nameTables,omitempty"`
+	// RestrictEgressNames: the pod's resolver answers upstream names only
+	// when they are in EgressDomains (ADR 0034, revised: egress none or
+	// restricted); PodNetwork's restrict_egress_names and egress_domains.
+	RestrictEgressNames bool     `json:"restrictEgressNames,omitempty"`
+	EgressDomains       []string `json:"egressDomains,omitempty"`
 	// Labels are added to the sandbox labels (which win on a clash).
 	// Hash leaves them out.
 	Labels map[string]string `json:"labels,omitempty"`
@@ -269,11 +286,15 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		ImageCredentials *TemplateCredentials `json:"imageCredentials,omitempty"`
 		// Without HTTP bindings, a template hashes as before them.
 		HTTPBindings []TemplateHTTPBinding `json:"httpBindings,omitempty"`
+		// With the internet's egress, a template hashes as before it.
+		RestrictEgressNames bool     `json:"restrictEgressNames,omitempty"`
+		EgressDomains       []string `json:"egressDomains,omitempty"`
 	}{
 		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 		Command: nonNil(t.Command), Env: t.Env, Volumes: nonNil(t.Volumes), Mounts: nonNil(t.Mounts),
 		SecurityGroups: nonNil(groups), NameTables: t.NameTables, IngressGroup: t.IngressGroup,
 		ImageCredentials: t.ImageCredentials, HTTPBindings: t.HTTPBindings,
+		RestrictEgressNames: t.RestrictEgressNames, EgressDomains: t.EgressDomains,
 	}
 	if h.Env == nil {
 		h.Env = map[string]TemplateValue{}

@@ -379,7 +379,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	i.Elector.Register(i.ACME.Loops()...)
 	i.Elector.Register(i.Runner.Loops()...)
 	i.handler = api.New(api.Config{
-		AdminUsers: cfg.AdminUsers, InstanceID: i.id, PreparationWaitMs: config.PreparationBudget.Milliseconds(),
+		AdminUsers: cfg.AdminUsers, DenyPrefixes: cfg.DenyPrefixes, InstanceID: i.id, PreparationWaitMs: config.PreparationBudget.Milliseconds(),
 		PublicURL: cfg.PublicURL, OIDC: oidc, SessionTTL: cfg.SessionTTL, DefaultImage: cfg.DefaultImage,
 		DefaultVCPUs: cfg.DefaultVCPUs, DefaultMemoryMiB: cfg.DefaultMemoryMiB, JoinTokenTTL: config.JoinTokenTTL,
 		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,

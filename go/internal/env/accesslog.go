@@ -72,6 +72,9 @@ type AccessLogRecord struct {
 	TraceID      string    `json:"traceId"`
 	SpanID       string    `json:"spanId"`
 	ParentSpanID string    `json:"parentSpanId"`
+	// Reason says why the ingress answered itself, "route-refused-client"
+	// for a client outside a route's from (ADR 0034, revised); "": none.
+	Reason string `json:"reason,omitempty"`
 }
 
 // The codes of the access log's answers when the sink cannot be read

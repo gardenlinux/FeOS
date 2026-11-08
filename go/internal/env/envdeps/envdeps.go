@@ -55,11 +55,6 @@ type Engine interface {
 	// bindings (ADR 0028) in the background, when it changed: a new
 	// secret version of a binding, sealed to the running pod again.
 	PushHTTPBindings(id podid.ID)
-	// HibernateToMove hibernates a sandbox whose security groups changed
-	// and whose pod runs under the old ones (ADR 0035), and reports
-	// whether it is hibernated now; its next restore brings it back in
-	// the new ones.
-	HibernateToMove(ctx context.Context, id podid.ID) (bool, error)
 }
 
 // Runner is what the environments run in a pod's main container

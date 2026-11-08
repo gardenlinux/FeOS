@@ -147,10 +147,10 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 			}
 		}
 		if in.Kind == OpCreate || in.Kind == OpRestore {
-			// A sandbox whose groups changed gets the template of them
-			// before its pod is made (ADR 0035): the prepare hook puts its
-			// groups, and the create or restore sends them.
-			if row, err = tx.ApplySandboxGroups(ctx, row); err != nil {
+			// A pod made before ADR 0034's revision comes back without
+			// the first version's groups (sg-…): its template names its
+			// workload's already (migration 0033).
+			if row, err = tx.DropLegacyGroups(ctx, row); err != nil {
 				return err
 			}
 		}
@@ -393,7 +393,7 @@ func preemptEnded(id podid.ID) error {
 // begun because the node had no room for a resume), and an explicit one.
 // A hibernate-after's is abandoned by the next resume.
 func (r *runner) noAbandon(ctx context.Context, tx *store.Store, trigger OpTrigger, target string) (bool, error) {
-	if trigger == TriggerExplicit || trigger == TriggerMove {
+	if trigger == TriggerExplicit {
 		return true, nil
 	}
 	return r.drainHibernate(ctx, tx, trigger, target)
@@ -424,7 +424,7 @@ func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbo
 	case OpPause:
 		ok = st == model.StateRunning
 	case OpHibernate:
-		ok = st == model.StatePaused || (in.Trigger == TriggerMove && movable(st))
+		ok = st == model.StatePaused
 		if !ok && (st == model.StateStopped || st == model.StateFailed || st == model.StateRunning) {
 			drain, err := r.drainHibernate(ctx, tx, in.Trigger, target)
 			if err != nil {
@@ -458,12 +458,6 @@ func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbo
 	if in.Kind != OpPause && in.Kind != OpHibernate {
 		return nil
 	}
-	if in.Trigger == TriggerMove {
-		if !row.GroupsPending {
-			return recheckFailed(row.ID, "its groups are its pod's", nil)
-		}
-		return nil
-	}
 	var pass bool
 	var err error
 	switch in.Trigger {
@@ -494,17 +488,6 @@ func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbo
 		}
 	}
 	return nil
-}
-
-// movable reports whether a sandbox in state st has a pod that a move
-// hibernates (TriggerMove): running (feosd suspends it first), paused,
-// stopped or failed.
-func movable(st string) bool {
-	switch st {
-	case model.StateRunning, model.StatePaused, model.StateStopped, model.StateFailed:
-		return true
-	}
-	return false
 }
 
 // drainHibernate reports whether a hibernate of a stopped, failed or

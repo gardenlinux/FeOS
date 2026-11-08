@@ -63,11 +63,12 @@ var ErrJobImage = errors.New("the image does not resolve")
 
 // TenantJobSpec is a job's create, validated by the caller.
 type TenantJobSpec struct {
-	// EnvID is the environment it runs in (ADR 0035), SecurityGroups the
-	// names of its groups (spec.PodGroups), which its deployed deployment
-	// must have.
+	// EnvID is the environment it runs in (ADR 0035); Reaches what of it
+	// its pod reaches, whose entries its deployed deployment must have,
+	// and Egress its egress (nil: the internet), ADR 0035 revised.
 	EnvID            uuid.UUID
-	SecurityGroups   []string
+	Reaches          spec.Reaches
+	Egress           *spec.Egress
 	Image            string
 	Command          []string
 	Env, Secrets     map[string]string
@@ -143,18 +144,19 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 		if t.Deleting() {
 			return errTenantDeleting
 		}
-		if err := LockPodEnvironment(ctx, tx, owner, rs.EnvID, rs.SecurityGroups); err != nil {
+		if err := LockPodEnvironment(ctx, tx, owner, rs.EnvID, rs.Reaches); err != nil {
 			return err
 		}
-		// Its pod is in env-<environment> and its groups, and resolves the
-		// environment's names (ADR 0035); fixed for its life.
-		if tmpl.SecurityGroups, err = tx.PodGroups(ctx, rs.EnvID, rs.SecurityGroups); err != nil {
-			return err
-		}
+		// Its pod is in env-<environment> and its own workload's group,
+		// resolves the environment's names, and its egress's names (ADR
+		// 0035, revised); fixed for its life.
 		tmpl.NameTables = []string{model.EnvTableID(rs.EnvID)}
+		tmpl.RestrictEgressNames, tmpl.EgressDomains = rs.Egress.RestrictsNames(), rs.Egress.NameDomains()
 		row, err := tx.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
+			t := tmpl
+			t.SecurityGroups = model.PodGroups(rs.EnvID, model.JobWorkloadGroupID(id.String()))
 			return store.NewSandbox{ID: id, Owner: owner, Image: rs.Image, VCPUs: rs.VCPUs, MemoryMiB: rs.MemoryMiB,
-				ImageRef: ref, EnvironmentID: rs.EnvID, SecurityGroups: rs.SecurityGroups, PodTemplate: &tmpl,
+				ImageRef: ref, EnvironmentID: rs.EnvID, Reaches: rs.Reaches, Egress: rs.Egress, PodTemplate: &t,
 				IdleAfterS: &idle, TenantJob: true, LogLabels: tenantJobLogLabels(owner, id, rs.EnvID, rs.LogRetentionDays)}
 		})
 		if err != nil {
@@ -171,7 +173,7 @@ func (c *Controller) CreateTenantJob(ctx context.Context, owner string, rs Tenan
 			}
 		}
 		job, err = tx.InsertTenantJob(ctx, store.TenantJob{ID: row.ID, Owner: owner, EnvID: rs.EnvID,
-			SecurityGroups: rs.SecurityGroups, Key: rs.Key, RequestHash: rs.Hash,
+			Reaches: rs.Reaches, Egress: rs.Egress, Key: rs.Key, RequestHash: rs.Hash,
 			Image: rs.Image, ImageRef: ref, VCPUs: rs.VCPUs, MemoryMiB: rs.MemoryMiB, ResultPath: rs.ResultPath,
 			Labels: rs.Labels, LogRetentionDays: rs.LogRetentionDays, MadeBy: madeBy}, sealed, rs.Deadline)
 		return err
@@ -197,15 +199,17 @@ var ErrEnvironmentDeleting = errors.New("the environment is being deleted")
 // in is none of the tenant's (404).
 var ErrNoEnvironment = errors.New("no such environment")
 
-// ErrUnknownGroups: a sandbox or a tenant's job names a group its
-// environment's deployed deployment does not have (422).
-var ErrUnknownGroups = errors.New("an unknown security group")
+// ErrUnknownReaches: a sandbox's or a tenant's job's reaches names an
+// object or a port its environment's deployed deployment does not have
+// (422).
+var ErrUnknownReaches = errors.New("reaches names what the environment lacks")
 
 // LockPodEnvironment locks environment envID of owner FOR SHARE, so that
-// its delete waits for the insert of a pod of it, and checks that groups
-// are groups of its deployed deployment (ADR 0035): ErrNoEnvironment for
-// none of owner's, ErrEnvironmentDeleting, ErrUnknownGroups.
-func LockPodEnvironment(ctx context.Context, tx *store.Store, owner string, envID uuid.UUID, groups []string) error {
+// its delete waits for the insert of a pod of it, and checks that the
+// entries of reaches are objects and ports of its deployed deployment
+// (ADR 0035, revised): ErrNoEnvironment for none of owner's,
+// ErrEnvironmentDeleting, ErrUnknownReaches.
+func LockPodEnvironment(ctx context.Context, tx *store.Store, owner string, envID uuid.UUID, reaches spec.Reaches) error {
 	e, err := tx.LockEnvironment(ctx, envID, store.ForShare)
 	if errors.Is(err, store.ErrNoRow) || (err == nil && e.Owner != owner) {
 		return ErrNoEnvironment
@@ -216,12 +220,28 @@ func LockPodEnvironment(ctx context.Context, tx *store.Store, owner string, envI
 	if e.Deleting {
 		return &stateError{msg: fmt.Sprintf("environment %s is being deleted", e.Name), kind: ErrEnvironmentDeleting}
 	}
-	have, err := tx.DeployedSecurityGroups(ctx, envID)
+	return CheckReaches(ctx, tx, envID, reaches)
+}
+
+// CheckReaches checks the entries of reaches against environment envID's
+// deployed deployment: ErrUnknownReaches naming what it has.
+func CheckReaches(ctx context.Context, tx *store.Store, envID uuid.UUID, reaches spec.Reaches) error {
+	if reaches.All || len(reaches.Entries) == 0 {
+		return nil
+	}
+	raw, err := tx.DeployedSpec(ctx, envID)
 	if err != nil {
 		return err
 	}
-	if msg := spec.UnknownPodGroups(groups, have); msg != "" {
-		return &stateError{msg: msg, kind: ErrUnknownGroups}
+	var deployed *spec.Spec
+	if raw != nil {
+		deployed = &spec.Spec{}
+		if err := json.Unmarshal(raw, deployed); err != nil {
+			return fmt.Errorf("the deployed deployment's spec: %w", err)
+		}
+	}
+	if msg := spec.UnknownReaches(reaches, deployed); msg != "" {
+		return &stateError{msg: msg, kind: ErrUnknownReaches}
 	}
 	return nil
 }

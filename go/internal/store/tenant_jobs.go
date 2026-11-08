@@ -6,12 +6,12 @@ package store
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
@@ -26,11 +26,13 @@ type TenantJob struct {
 	ID     podid.ID
 	Owner  string
 	// EnvID is the environment the job runs in (ADR 0035), EnvName its
-	// name (read back, not written); SecurityGroups the names of the
-	// groups of it its pod is in, sorted. Fixed at the insert.
-	EnvID          uuid.UUID
-	EnvName        string
-	SecurityGroups []string
+	// name (read back, not written); Reaches what of it its pod reaches
+	// and Egress its egress (nil: the internet), ADR 0035 revised. Fixed
+	// at the insert.
+	EnvID   uuid.UUID
+	EnvName string
+	Reaches spec.Reaches
+	Egress  *spec.Egress
 	// Key is the create's Idempotency-Key; "": none.
 	Key string
 	// RequestHash is the create's body's hash.
@@ -60,19 +62,23 @@ func (r *TenantJob) Ended() bool { return !r.FinishedAt.IsZero() }
 const tenantJobCols = `id, owner, coalesce(idempotency_key, ''), request_hash, image, image_ref, vcpus, memory_mib,
 	result_path, labels, phase, reason, detail, exit_code, result, log_tail, created_at, started_at, finished_at,
 	deadline_at, coalesce(log_retention_days, 0), environment_id,
-	coalesce((SELECT e.name FROM environments e WHERE e.id = environment_id), ''), security_groups`
+	coalesce((SELECT e.name FROM environments e WHERE e.id = environment_id), ''), reaches, egress`
 
 func scanTenantJob(row pgx.Row) (TenantJob, error) {
 	var r TenantJob
 	var started, finished *time.Time
+	var reaches, egress []byte
 	if err := row.Scan(&r.ID, &r.Owner, &r.Key, &r.RequestHash, &r.Image, &r.ImageRef, &r.VCPUs, &r.MemoryMiB,
 		&r.ResultPath, &r.Labels, &r.Phase, &r.Reason, &r.Detail, &r.ExitCode, &r.Result, &r.LogTail, &r.CreatedAt,
-		&started, &finished, &r.DeadlineAt, &r.LogRetentionDays, &r.EnvID, &r.EnvName, &r.SecurityGroups); err != nil {
+		&started, &finished, &r.DeadlineAt, &r.LogRetentionDays, &r.EnvID, &r.EnvName, &reaches, &egress); err != nil {
 		return TenantJob{}, err
 	}
 	r.StartedAt, r.FinishedAt = timeOf(started), timeOf(finished)
-	r.Labels, r.LogTail, r.SecurityGroups = stringMap(r.Labels), nonNil(r.LogTail), nonNil(r.SecurityGroups)
-	slices.Sort(r.SecurityGroups)
+	r.Labels, r.LogTail = stringMap(r.Labels), nonNil(r.LogTail)
+	var err error
+	if r.Reaches, r.Egress, err = scanReach(reaches, egress); err != nil {
+		return TenantJob{}, fmt.Errorf("job %s: %w", r.ID, err)
+	}
 	return r, nil
 }
 
@@ -91,17 +97,18 @@ func (s *Store) InsertTenantJob(ctx context.Context, r TenantJob, sealed []byte,
 	if err != nil {
 		return TenantJob{}, err
 	}
-	groups := nonNil(r.SecurityGroups)
-	if len(groups) == 0 {
-		groups = []string{defaultGroup}
+	reaches, egress, err := reachJSON(r.Reaches, r.Egress)
+	if err != nil {
+		return TenantJob{}, fmt.Errorf("insert job %s: %w", r.ID, err)
 	}
 	out, err := scanTenantJob(s.q.QueryRow(ctx, `INSERT INTO jobs (id, owner, idempotency_key, request_hash, image, image_ref,
 			vcpus, memory_mib, result_path, labels, sealed, deadline_at, log_retention_days, made_by, environment_id,
-			security_groups)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13, $14, $15, $16)
+			reaches, egress)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13, $14, $15, $16::jsonb,
+			$17::jsonb)
 		RETURNING `+tenantJobCols,
 		r.ID, r.Owner, nullString(r.Key), r.RequestHash, r.Image, r.ImageRef, r.VCPUs, r.MemoryMiB, r.ResultPath, labels,
-		sealed, interval(deadline), nullPositive(r.LogRetentionDays), r.MadeBy, r.EnvID, groups))
+		sealed, interval(deadline), nullPositive(r.LogRetentionDays), r.MadeBy, r.EnvID, reaches, egress))
 	if err != nil {
 		return TenantJob{}, insertError("insert job "+r.ID.String(), err)
 	}

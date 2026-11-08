@@ -48,10 +48,6 @@ const (
 	// TriggerRestart is Restart's: a repair of a running row whose
 	// container exited, with no recheck.
 	TriggerRestart OpTrigger = "restart"
-	// TriggerMove is HibernateToMove's: the pause and the hibernation of a
-	// sandbox whose security groups changed (ADR 0035), never abandoned,
-	// rechecked for the mark (groups_pending), without hold checks.
-	TriggerMove OpTrigger = "move"
 )
 
 // waits reports whether ops of the trigger wait in Before begin for a node

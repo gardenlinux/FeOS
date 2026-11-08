@@ -68,12 +68,12 @@ func TestSandboxInstanceColumns(t *testing.T) {
 	gj, _ := json.Marshal(got.PodTemplate)
 	if got.EnvironmentID != env.ID || string(tj) != string(gj) || got.PinNode != "n1" || got.IdleAfterS == nil ||
 		*got.IdleAfterS != 90 || got.Address != "" || got.ImageRef != "alpine@sha256:abc" || !got.Instance ||
-		got.IsOwn() || len(got.SecurityGroups) != 0 {
+		got.IsOwn() || got.Reaches.All || len(got.Reaches.Entries) != 0 {
 		t.Fatalf("instance row %+v (template %s)", got, gj)
 	}
 	plain := mkSandbox(t, s, "acme")
 	if !plain.IsOwn() || plain.Instance || plain.PodTemplate != nil || plain.IdleAfterS != nil || plain.PinNode != "" ||
-		len(plain.SecurityGroups) != 1 || plain.SecurityGroups[0] != "default" || plain.GroupsPending {
+		plain.Reaches.All || len(plain.Reaches.Entries) != 0 || plain.Egress != nil {
 		t.Fatalf("plain row %+v", plain)
 	}
 	if l, err := s.ListSandboxes(bg, "acme", nil); err != nil || len(l) != 1 || l[0].ID != plain.ID {

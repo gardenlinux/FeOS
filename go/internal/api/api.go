@@ -52,6 +52,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -175,6 +176,10 @@ type Config struct {
 	// AdminUsers are the Basic credentials of the admin class (user →
 	// password); none: Basic is off.
 	AdminUsers map[string]string
+	// DenyPrefixes are the prefixes no pod of the cluster reaches
+	// (--deny-prefix): no sandbox's egress block may lie inside one.
+	DenyPrefixes []netip.Prefix
+
 	InstanceID string
 	// PreparationWaitMs is what GET /api/v1/tools advertises: the longest
 	// a tool call waits for its sandbox before the tool starts.
@@ -471,7 +476,7 @@ func (s *server) routes() []route {
 	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
 	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
 	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
-	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/security-groups", s.putSandboxGroups)
+	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/reaches", s.putSandboxReaches)
 	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
 	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
 	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)

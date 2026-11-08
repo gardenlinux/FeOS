@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/gardenlinux/feos/go/internal/db"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
@@ -81,19 +82,18 @@ type Sandbox struct {
 	// EnvironmentID is the environment the row belongs to (ADR 0035):
 	// an instance's, a sandbox's, a tenant's job's. Fixed at the insert,
 	// as are Instance and PodTemplate (nil: NULL, a pod without one), but
-	// a sandbox's template, which ApplySandboxGroups makes of its groups.
+	// a template's legacy groups, which DropLegacyGroups drops.
 	EnvironmentID uuid.UUID
 	// Instance makes the row an instance of its environment (ADR 0018),
 	// its pod built from a deployment's template; fixed at the insert.
 	Instance    bool
 	PodTemplate *model.PodTemplate
-	// SecurityGroups are the names of the groups of its environment that
-	// a sandbox's or a tenant's job's pod is in (ADR 0034, 0035); none for
-	// an instance, whose template names its groups. GroupsPending marks a
-	// sandbox whose pod runs under other groups: it is moved (hibernated,
-	// restored with these) once. Written by SetSandboxGroups.
-	SecurityGroups []string
-	GroupsPending  bool
+	// Reaches is what of its environment a sandbox's or a tenant's job's
+	// pod reaches (ADR 0035, revised); nothing for an instance, whose
+	// references are its deployment's. Written by SetSandboxReaches.
+	// Egress is its egress (nil: the internet), fixed at the insert.
+	Reaches spec.Reaches
+	Egress  *spec.Egress
 	// PinNode is the only node a create may go to ("": any).
 	PinNode string
 	// IdleAfterS is the idle pause's interval in seconds: nil (NULL) the
@@ -134,7 +134,7 @@ func sandboxColumns(p string) string {
 		"pending_since", "unreachable_since", "run_id", "kube_version", "ssh_version",
 		"created_at", "updated_at", "last_active_at", "paused_at", "policy_failed", "policy_failures",
 		"policy_not_before", "environment_id", "instance", "pod_template", "pin_node", "idle_after_s", "address",
-		"tenant_job", "log_labels", "http_version", "http_pushed", "security_groups", "groups_pending"}
+		"tenant_job", "log_labels", "http_version", "http_pushed", "reaches", "egress"}
 	if p != "" {
 		for i, c := range cols {
 			cols[i] = p + "." + c
@@ -150,7 +150,7 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 	var node, lostFrom *string
 	var opID *uuid.UUID
 	var opDeadline, cpAt, pendingSince, unreachableSince, pausedAt, policyNotBefore *time.Time
-	var template []byte
+	var template, reaches, egress []byte
 	err := row.Scan(&s.ID, &s.Incarnation, &s.Owner, &s.Image, &s.ImageRef, &s.VCPUs, &s.MemoryMiB,
 		&s.ClientState, &s.StatusDescription, &node, &s.Materialised, &lostFrom, &s.AvoidNodes,
 		&s.Op, &opID, &s.OpOwner, &opDeadline, &s.OpTarget, &s.OpFromState, &s.Gen,
@@ -158,14 +158,17 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 		&pendingSince, &unreachableSince, &s.RunID, &s.KubeVersion, &s.SSHVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastActiveAt, &pausedAt, &s.PolicyFailed, &s.PolicyFailures,
 		&policyNotBefore, &s.EnvironmentID, &s.Instance, &template, &s.PinNode, &s.IdleAfterS, &s.Address,
-		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &s.SecurityGroups, &s.GroupsPending)
+		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress)
 	if err != nil {
 		return Sandbox{}, err
 	}
 	s.Node, s.LostFrom, s.OpID = stringOf(node), stringOf(lostFrom), uuidOf(opID)
 	s.OpDeadline, s.CheckpointAt, s.PendingSince = timeOf(opDeadline), timeOf(cpAt), timeOf(pendingSince)
 	s.UnreachableSince, s.PausedAt, s.PolicyNotBefore = timeOf(unreachableSince), timeOf(pausedAt), timeOf(policyNotBefore)
-	s.AvoidNodes, s.LogLabels, s.SecurityGroups = nonNil(s.AvoidNodes), stringMap(s.LogLabels), nonNil(s.SecurityGroups)
+	s.AvoidNodes, s.LogLabels = nonNil(s.AvoidNodes), stringMap(s.LogLabels)
+	if s.Reaches, s.Egress, err = scanReach(reaches, egress); err != nil {
+		return Sandbox{}, fmt.Errorf("sandbox %s: %w", s.ID, err)
+	}
 	if template != nil {
 		var t model.PodTemplate
 		if err := json.Unmarshal(template, &t); err != nil {
@@ -258,9 +261,10 @@ type NewSandbox struct {
 	EnvironmentID uuid.UUID
 	// Instance makes the row an instance of the environment.
 	Instance bool
-	// SecurityGroups are a sandbox's or a tenant's job's groups by name
-	// (validated by the caller); nil: [default]. An instance has none.
-	SecurityGroups []string
+	// Reaches and Egress are a sandbox's or a tenant's job's (validated
+	// by the caller); an instance has neither.
+	Reaches spec.Reaches
+	Egress  *spec.Egress
 	// PodTemplate is what the pod is built from; nil: the sandbox's own
 	// pod.
 	PodTemplate *model.PodTemplate
@@ -292,18 +296,18 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 	if n.EnvironmentID == uuid.Nil {
 		return Sandbox{}, false, fmt.Errorf("create sandbox %s: no environment", n.ID)
 	}
-	groups := nonNil(n.SecurityGroups)
-	if !n.Instance && len(groups) == 0 {
-		groups = []string{defaultGroup}
+	reaches, egress, err := reachJSON(n.Reaches, n.Egress)
+	if err != nil {
+		return Sandbox{}, false, fmt.Errorf("create sandbox %s: %w", n.ID, err)
 	}
 	for range 3 {
 		sb, err := scanSandbox(s.q.QueryRow(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, image_ref,
 				environment_id, instance, pod_template, pin_node, idle_after_s, tenant_job, log_labels, made_by,
-				security_groups)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15)
+				reaches, egress)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb)
 			ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
 			n.ID, n.Owner, n.Image, n.VCPUs, n.MemoryMiB, n.ImageRef, n.EnvironmentID, n.Instance, template, n.PinNode,
-			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, groups))
+			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, reaches, egress))
 		if err == nil {
 			return sb, true, s.Notify(ctx, chanSandbox, sb.ID.String())
 		}
@@ -559,10 +563,9 @@ func nullableColumn(name string, lifecycle bool, get func(*Sandbox) string) sand
 // the checkpoint columns. id, owner, image, vcpus, memory_mib,
 // environment_id, instance, pod_template, tenant_job, log_labels and
 // created_at are never written; gen and updated_at are UpdateSandbox's;
-// http_version, http_pushed, security_groups, groups_pending and a
-// sandbox's pod_template are written by queries of their own
-// (SetHTTPBindings, SetHTTPPushed, SetSandboxGroups, ApplySandboxGroups)
-// and left as they are.
+// http_version, http_pushed, reaches and a template's legacy groups are
+// written by queries of their own (SetHTTPBindings, SetHTTPPushed,
+// SetSandboxReaches, DropLegacyGroups) and left as they are.
 var sandboxWritable = []sandboxColumn{
 	plainColumn("incarnation", true, func(s *Sandbox) uuid.UUID { return s.Incarnation }),
 	plainColumn("image_ref", false, func(s *Sandbox) string { return s.ImageRef }),

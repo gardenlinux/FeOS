@@ -35,9 +35,14 @@ type CreateTenantJobRequest struct {
 	// Environment names the environment the job runs in (ADR 0035), by
 	// name or ID; required.
 	Environment string `json:"environment"`
-	// SecurityGroups are the groups of the environment its pod is in, 1
-	// to 5 of its deployed deployment's; nil (left out): [default].
-	SecurityGroups *[]string `json:"securityGroups,omitempty"`
+	// Reaches is what of the environment its pod reaches (ADR 0035,
+	// revised): "all" or entries of its deployed deployment; left out:
+	// nothing. Egress is its egress as a service's; left out: the
+	// internet.
+	Reaches spec.Reaches `json:"reaches,omitzero"`
+	Egress  *spec.Egress `json:"egress,omitempty"`
+	// SecurityGroups is gone (ADR 0034, revised): sent, it is 400.
+	SecurityGroups json.RawMessage `json:"securityGroups,omitempty"`
 	// Image is pinned to its digest at the create, asked with
 	// ImageCredentials.
 	Image string `json:"image"`
@@ -69,10 +74,12 @@ type CreateTenantJobRequest struct {
 // TenantJobStatus is a job as the answers show it.
 type TenantJobStatus struct {
 	ID string `json:"id"`
-	// Environment is the environment it runs in, SecurityGroups its
-	// pod's groups of it (ADR 0035).
-	Environment    EnvRef   `json:"environment"`
-	SecurityGroups []string `json:"securityGroups"`
+	// Environment is the environment it runs in; Reaches what of it its
+	// pod reaches ("all", or the entries, [] for nothing) and Egress its
+	// egress ("internet" when the create left it out), ADR 0035 revised.
+	Environment EnvRef       `json:"environment"`
+	Reaches     spec.Reaches `json:"reaches"`
+	Egress      spec.Egress  `json:"egress"`
 	// Image is as asked, ImageRef pinned.
 	Image    string `json:"image"`
 	ImageRef string `json:"imageRef"`
@@ -115,7 +122,7 @@ type TenantJobLogsAnswer struct {
 
 func tenantJobStatus(r store.TenantJob) TenantJobStatus {
 	return TenantJobStatus{ID: r.ID.String(), Environment: EnvRef{ID: r.EnvID.String(), Name: r.EnvName},
-		SecurityGroups: r.SecurityGroups, Image: r.Image, ImageRef: r.ImageRef, Phase: r.Phase, Reason: r.Reason,
+		Reaches: r.Reaches, Egress: egressView(r.Egress), Image: r.Image, ImageRef: r.ImageRef, Phase: r.Phase, Reason: r.Reason,
 		Detail: r.Detail, ExitCode: r.ExitCode, Result: r.Result, ResultPath: r.ResultPath, Vcpus: r.VCPUs,
 		MemoryMib: r.MemoryMiB, Labels: r.Labels, CreatedAt: rfc3339(r.CreatedAt), StartedAt: rfc3339(r.StartedAt),
 		FinishedAt: rfc3339(r.FinishedAt), DeadlineAt: rfc3339(r.DeadlineAt), LogRetentionDays: r.LogRetentionDays}
@@ -126,11 +133,15 @@ func tenantJobStatus(r store.TenantJob) TenantJobStatus {
 // made (false). A key that names a job of another request is 422
 // job_key_conflict; the secrets and image credentials need
 // --secret-key-file (503). Its environment must exist and not be being
-// deleted (404, 409), its groups be its deployed deployment's (422).
+// deleted (404, 409), the entries of its reaches its deployed
+// deployment's (422), its egress's blocks outside --deny-prefix (400).
 func (s *Service) CreateTenantJob(ctx context.Context, tenant, key string, req CreateTenantJobRequest) (TenantJobStatus, bool, error) {
 	rs, err := tenantJobSpec(req)
 	if err != nil {
 		return TenantJobStatus{}, false, err
+	}
+	if msg := spec.CheckPod(nil, rs.Reaches, rs.Egress, s.d.DenyPrefixes); msg != "" {
+		return TenantJobStatus{}, false, errBadRequest("%s", msg)
 	}
 	e, err := resolveEnv(ctx, s.st, tenant, req.Environment, store.NoLock)
 	if err != nil {
@@ -173,14 +184,10 @@ func tenantJobSpec(req CreateTenantJobRequest) (ctl.TenantJobSpec, error) {
 	if strings.TrimSpace(req.Environment) == "" {
 		return rs, errBadRequest("environment is required: the name or ID of the environment the job runs in (ADR 0035)")
 	}
-	var groups []string
-	if req.SecurityGroups != nil {
-		groups = *req.SecurityGroups
+	if msg := spec.CheckPod(req.SecurityGroups, req.Reaches, req.Egress, nil); msg != "" {
+		return rs, errBadRequest("%s", msg)
 	}
-	var err error
-	if rs.SecurityGroups, err = spec.PodGroups(groups, req.SecurityGroups != nil); err != nil {
-		return rs, errBadRequest("%s", err.Error())
-	}
+	rs.Reaches, rs.Egress = req.Reaches, req.Egress
 	for _, m := range []map[string]string{req.Env, req.Secrets} {
 		for k := range m {
 			if !spec.ValidEnvName(k) {
@@ -256,7 +263,7 @@ func tenantJobError(err error) error {
 		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
 	case errors.Is(err, ctl.ErrEnvironmentDeleting):
 		return apierr.New(http.StatusConflict, "%s", err.Error())
-	case errors.Is(err, ctl.ErrUnknownGroups):
+	case errors.Is(err, ctl.ErrUnknownReaches):
 		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
 	case errors.Is(err, ctl.ErrNoContainerLogs):
 		return apierr.New(http.StatusNotImplemented, "%s", err.Error())
@@ -351,4 +358,13 @@ func (s *Service) DeleteTenantJob(ctx context.Context, tenant, id string) error 
 		return err
 	}
 	return tenantJobError(s.ctl.DeleteTenantJob(ctx, tenant, rid))
+}
+
+// egressView is an egress as the views show it: "internet" for none
+// given.
+func egressView(e *spec.Egress) spec.Egress {
+	if e == nil {
+		return spec.Egress{Mode: spec.EgressInternet}
+	}
+	return *e
 }

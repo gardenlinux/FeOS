@@ -67,8 +67,8 @@ func TestTenantJobs(t *testing.T) {
 		list[0].ID != a.ID {
 		t.Fatalf("by label %+v %v", list, err)
 	}
-	if a.EnvName != "box" || len(a.SecurityGroups) != 1 || a.SecurityGroups[0] != "default" {
-		t.Fatalf("environment and groups %+v", a)
+	if a.EnvName != "box" || a.Reaches.All || len(a.Reaches.Entries) != 0 || a.Egress != nil {
+		t.Fatalf("environment and reaches %+v", a)
 	}
 	if list, err := s.ListTenantJobs(bg, "t1", nil, []uuid.UUID{}); err != nil || len(list) != 0 {
 		t.Fatalf("of no environment %+v %v", list, err)

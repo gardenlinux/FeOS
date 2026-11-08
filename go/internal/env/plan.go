@@ -60,11 +60,8 @@ type validateCtx struct {
 	destinations map[string]error
 	// credentials are the tenant's credentials (ADR 0033), by name.
 	credentials map[string]spec.CredentialInfo
-	// deny are the prefixes no pod reaches (Deps.DenyPrefixes); users the
-	// environment's sandboxes and running tenants' jobs by the groups they
-	// name (ADR 0035).
-	deny  []netip.Prefix
-	users map[string][]string
+	// deny are the prefixes no pod reaches (Deps.DenyPrefixes).
+	deny []netip.Prefix
 }
 
 type imageAnswer struct {
@@ -133,23 +130,8 @@ func (v *validateCtx) Destination(host string) error {
 }
 
 // DenyPrefixes are the prefixes no pod of the cluster reaches, which no
-// rule of a security group opens.
+// egress opens.
 func (v *validateCtx) DenyPrefixes() []netip.Prefix { return v.deny }
-
-// GroupUsers are the environment's pods outside its spec by the groups
-// they name.
-func (v *validateCtx) GroupUsers() map[string][]string { return v.users }
-
-// BlueprintTypes are the registered addon types.
-func (v *validateCtx) BlueprintTypes() []string {
-	var out []string
-	for _, t := range addons.Types() {
-		if _, ok := v.blueprint(t); ok {
-			out = append(out, t)
-		}
-	}
-	return out
-}
 
 var _ spec.ValidateContext = (*validateCtx)(nil)
 
@@ -253,9 +235,7 @@ func (s *Service) resolveImages(ctx context.Context, env *store.Environment, ask
 
 // loadContext reads what a spec names for its validation, and the pins
 // of its normalisation: the tenant's sandboxes its attached services run
-// in (the environment each is in and its groups, ADR 0035), the
-// environment's sandboxes and running tenants' jobs by the groups they
-// name, the prefixes no pod reaches,
+// in (the environment each is in, ADR 0035), the prefixes no pod reaches,
 // the environment's secrets (secrets, when not nil, stands in for them:
 // a clone's), what its addon volumes hold, the addon types, the images,
 // and its default host under the apps zone. env is nil for a spec without
@@ -325,7 +305,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil {
 			return nil, pins, fmt.Errorf("sandbox %s: %w", id, err)
 		}
-		info := spec.SandboxInfo{ID: id.String(), SecurityGroups: sb.SecurityGroups}
+		info := spec.SandboxInfo{ID: id.String()}
 		// A spec planned without an environment cannot tell.
 		if env != nil && sb.EnvID != env.ID {
 			info.OtherEnvironment = sb.EnvName
@@ -334,13 +314,6 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 			return nil, pins, err
 		}
 		vc.sandboxes[id.String()] = info
-	}
-	if env != nil && mode != spec.ModeSpec {
-		users, err := s.st.SecurityGroupUsers(ctx, env.ID)
-		if err != nil {
-			return nil, pins, err
-		}
-		vc.users = groupUsers(users)
 	}
 
 	// An environment without a deployment has no addon volumes. A clone
@@ -382,19 +355,6 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	return vc, pins, nil
 }
 
-// groupUsers are the environment's group users (store.SecurityGroupUsers)
-// by the groups they name, as the plan names them: "sandbox <id>", "job
-// <id>".
-func groupUsers(users []store.GroupUser) map[string][]string {
-	out := map[string][]string{}
-	for _, u := range users {
-		for _, g := range u.SecurityGroups {
-			out[g] = append(out[g], u.Kind+" "+u.ID.String())
-		}
-	}
-	return out
-}
-
 // planned is a plan of a spec for an environment.
 type planned struct {
 	findings []spec.Finding
@@ -409,13 +369,32 @@ type planned struct {
 	currentSpec   *spec.Spec
 	// images are the pins of the spec's images (spec.Pins.Images).
 	images map[string]string
+	// reach is what the normalised spec admits.
+	reach spec.Reachability
 }
 
 func (p planned) valid() bool { return p.parsed && !spec.HasErrors(p.findings) }
 
 func (p planned) answer() PlanAnswer {
+	reach := p.reach
+	if reach.Edges == nil {
+		reach = spec.Reachability{Edges: []spec.Edge{}, Egress: []spec.ObjectEgress{}, Routes: []spec.RouteClients{}}
+	}
 	return PlanAnswer{Valid: p.valid(), Findings: nonNilFindings(p.findings), Diff: nonNilDiff(p.diff), Base: p.base,
-		Current: p.current, Images: nonNilImages(p.images)}
+		Current: p.current, Images: nonNilImages(p.images), Reachability: reach}
+}
+
+// reachability is what spec sp admits (spec.Derive), addons' ports by
+// their blueprints.
+func (s *Service) reachability(sp spec.Spec) spec.Reachability {
+	r, _ := spec.Derive(sp, func(name string, a spec.Addon) int {
+		b, ok := s.d.Blueprint(a.Type)
+		if !ok {
+			return 0
+		}
+		return specBlueprint{b}.Port(name, a)
+	})
+	return r
 }
 
 // nonNilImages is images, {} for none.
@@ -475,6 +454,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 		}
 	}
 	p.parsed, p.norm, p.images = true, norm, pins.Images
+	p.reach = s.reachability(norm)
 	p.diff = spec.DiffWith(baseSpec, &norm, s.addonEffect)
 	if p.currentSpec != nil && spec.EqualNormalised(norm, *p.currentSpec) {
 		fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "",
@@ -496,8 +476,7 @@ type applyArgs struct {
 
 // errReplan is an apply whose plan is stale: the environment got a new
 // deployment between the plan and the transaction, which the request's base
-// already names, a secret version the plan pins was deleted, or a sandbox
-// or a job names a group the spec removes.
+// already names, or a secret version the plan pins was deleted.
 var errReplan = errors.New("the current deployment changed since the plan")
 
 // apply plans raw (ModeApply: an image that cannot be resolved is an
@@ -570,12 +549,6 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		if err := checkQuota(ctx, tx, t, quota.Use{}, e.ID, p.currentSpec, &p.norm); err != nil {
 			return err
 		}
-		// The plan read the groups' users before the lock too: a sandbox's
-		// create or groups' change, which holds the lock FOR SHARE, may
-		// name a group the spec removes since.
-		if err := checkGroupUsers(ctx, tx, e.ID, p.norm.SecurityGroups); err != nil {
-			return err
-		}
 		if e.Deployment > 0 && spec.EqualNormalised(p.norm, *p.currentSpec) {
 			cur, err := tx.GetDeployment(ctx, e.ID, e.Deployment)
 			if err != nil {
@@ -646,24 +619,6 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	return nil
 }
 
-// checkGroupUsers answers errReplan when a sandbox or a queued or running
-// tenant's job of the environment names a group that the normalised
-// spec's groups lack: the plan again finds it.
-func checkGroupUsers(ctx context.Context, tx *store.Store, envID uuid.UUID, groups map[string]spec.SecurityGroup) error {
-	users, err := tx.SecurityGroupUsers(ctx, envID)
-	if err != nil {
-		return err
-	}
-	for _, u := range users {
-		for _, g := range u.SecurityGroups {
-			if _, ok := groups[g]; !ok {
-				return errReplan
-			}
-		}
-	}
-	return nil
-}
-
 // checkDeploymentMeta refuses an author, a message or annotations that a
 // deployment cannot carry.
 func checkDeploymentMeta(author, message string, annotations map[string]string) error {
@@ -710,7 +665,7 @@ func cloneAnnotations(a map[string]string) map[string]string {
 // objectMaps are the spec's maps by object kind.
 var objectMaps = map[string]string{
 	spec.KindService: "services", spec.KindJob: "jobs", spec.KindAddon: "addons", spec.KindRoute: "routes",
-	spec.KindSecret: "secrets", spec.KindSecurityGroup: "securityGroups",
+	spec.KindSecret: "secrets",
 }
 
 // withObject is the current deployment's spec (raw JSON, "" for none) with
@@ -719,7 +674,7 @@ var objectMaps = map[string]string{
 func withObject(current []byte, kind, name string, object json.RawMessage) ([]byte, bool, error) {
 	key, ok := objectMaps[kind]
 	if !ok {
-		return nil, false, errBadRequest("kind must be service, job, addon, route, secret or securityGroup, not %q", kind)
+		return nil, false, errBadRequest("kind must be service, job, addon, route or secret, not %q", kind)
 	}
 	top := map[string]json.RawMessage{}
 	if len(current) > 0 {

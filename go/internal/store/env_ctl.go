@@ -5,7 +5,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,13 +39,12 @@ func (s *Store) EnvCtlMembers(ctx context.Context, envID uuid.UUID) ([]string, e
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-// EnvCtlGroupMembers returns the members of a tenant's group sg-<id> of
-// environment envID (ADR 0034): the addresses of the environment's rows
-// whose pod template names group (model.SecurityGroupID), an instance's
-// as its object's, a sandbox's or a tenant's job's pod's as its own;
-// without the empty ones, distinct and sorted. An attached service is in
-// its sandbox's groups: its sandbox's row counts. The caller keeps the
-// IPv6 ones.
+// EnvCtlGroupMembers returns the members of a workload's group wl-…
+// of environment envID (ADR 0034, revised): the addresses of the
+// environment's rows whose pod template names group, an instance's as its
+// object's, a sandbox's or a tenant's job's pod's as its own; without the
+// empty ones, distinct and sorted. An attached service is its sandbox's
+// pod: its sandbox's row counts. The caller keeps the IPv6 ones.
 func (s *Store) EnvCtlGroupMembers(ctx context.Context, envID uuid.UUID, group string) ([]string, error) {
 	rows, err := s.q.Query(ctx, `SELECT DISTINCT address FROM sandboxes WHERE environment_id = $1 AND address <> ''
 			AND pod_template->'securityGroups' ? $2
@@ -220,61 +218,19 @@ func (s *Store) EnvCtlTemplatedOnNode(ctx context.Context, node string) ([]Sandb
 		WHERE pod_template IS NOT NULL AND (node = $1 OR op_target = $1 OR lost_from = $1) ORDER BY id`, node))
 }
 
-// EnvCtlExisting returns which of the ids are environments (envs) and
-// which are rows of security_groups (groups).
-func (s *Store) EnvCtlExisting(ctx context.Context, envs, groups []uuid.UUID) (map[uuid.UUID]bool,
-	map[uuid.UUID]bool, error) {
-	e, err := existing(ctx, s.q, "SELECT id FROM environments WHERE id = ANY($1)", envs)
-	if err != nil {
-		return nil, nil, err
-	}
-	g, err := existing(ctx, s.q, "SELECT id FROM security_groups WHERE id = ANY($1)", groups)
-	if err != nil {
-		return nil, nil, err
-	}
-	return e, g, nil
+// EnvCtlExisting returns which of the ids are environments.
+func (s *Store) EnvCtlExisting(ctx context.Context, envs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	return existing(ctx, s.q, "SELECT id FROM environments WHERE id = ANY($1)", envs)
 }
 
-// EnvCtlMoves returns the sandboxes whose groups changed (groups_pending,
-// ADR 0035) and whose pod is on one of nodes, without an op in flight, in a
-// state a move hibernates (running, paused, stopped, failed), at most
-// limit, oldest change first. A sandbox without a pod (pending,
-// hibernated, lost) takes its groups at its next create or restore.
-func (s *Store) EnvCtlMoves(ctx context.Context, nodes []string, limit int) ([]Sandbox, error) {
-	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
-		WHERE groups_pending AND NOT instance AND NOT tenant_job AND op = '' AND node = ANY($1)
-			AND client_state IN ('running', 'paused', 'stopped', 'failed')
-		ORDER BY updated_at, id LIMIT $2`, nodes, limit))
-}
-
-// EnvCtlMarkMoveRestore marks sandbox id, while it runs, as one the
-// controller restores after the hibernation of its move (move_restore,
-// ADR 0035), before that hibernation: a restore that fails, or a leader
-// that ends in between, leaves the mark for the next pass. It reports
-// whether the sandbox runs and is marked.
-func (s *Store) EnvCtlMarkMoveRestore(ctx context.Context, id podid.ID) (bool, error) {
-	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET move_restore = true
-		WHERE id = $1 AND NOT instance AND NOT tenant_job AND client_state = 'running'`, id)
-	if err != nil {
-		return false, fmt.Errorf("mark sandbox %s for its restore after a move: %w", id, err)
-	}
-	return tag.RowsAffected() > 0, nil
-}
-
-// EnvCtlMoveRestores returns the sandboxes marked move_restore without an
-// op in flight, at most limit: the controller restores each that is
-// hibernated and drops the mark of the others (EnvCtlClearMoveRestore).
-func (s *Store) EnvCtlMoveRestores(ctx context.Context, limit int) ([]Sandbox, error) {
-	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
-		WHERE move_restore AND op = '' ORDER BY updated_at, id LIMIT $1`, limit))
-}
-
-// EnvCtlClearMoveRestore drops sandbox id's move_restore mark.
-func (s *Store) EnvCtlClearMoveRestore(ctx context.Context, id podid.ID) error {
-	if _, err := s.q.Exec(ctx, `UPDATE sandboxes SET move_restore = false WHERE id = $1 AND move_restore`, id); err != nil {
-		return fmt.Errorf("clear sandbox %s's restore after a move: %w", id, err)
-	}
-	return nil
+// EnvCtlNamedGroups returns which of the groups ids the pod template of a
+// row names: a workload's group (ADR 0034, revised) that no row names is
+// left to be deleted from the nodes.
+func (s *Store) EnvCtlNamedGroups(ctx context.Context, ids []string) (map[string]bool, error) {
+	return existing(ctx, s.q, `SELECT DISTINCT g FROM sandboxes,
+		jsonb_array_elements_text(CASE WHEN jsonb_typeof(pod_template->'securityGroups') = 'array'
+			THEN pod_template->'securityGroups' ELSE '[]'::jsonb END) AS g
+		WHERE pod_template IS NOT NULL AND g = ANY($1)`, ids)
 }
 
 // IngressInput is what the group ing-<sandbox id> of a sandbox is built

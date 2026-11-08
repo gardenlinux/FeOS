@@ -73,6 +73,12 @@ func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver)
 	if len(t.NameTables) > 0 {
 		spec.Network.NameTables = append([]string(nil), t.NameTables...)
 	}
+	// Its egress by name (ADR 0034, revised): the resolver answers only
+	// these upstream names.
+	if t.RestrictEgressNames {
+		spec.Network.RestrictEgressNames = true
+		spec.Network.EgressDomains = append([]string(nil), t.EgressDomains...)
+	}
 	// The sandbox labels win: a template cannot make its pod another
 	// sandbox's, tenant's or incarnation's.
 	for k, v := range t.Labels {

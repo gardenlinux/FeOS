@@ -303,7 +303,7 @@ func (s *Service) Deployment(ctx context.Context, tenant, env string, number int
 		return DeploymentDetail{}, err
 	}
 	return DeploymentDetail{DeploymentInfo: deploymentInfo(r, tags[number]), Spec: r.Spec,
-		Diff: spec.DiffWith(prev, sp, s.addonEffect)}, nil
+		Diff: spec.DiffWith(prev, sp, s.addonEffect), Reachability: s.reachability(*sp)}, nil
 }
 
 // isNotFound reports an answer 404.

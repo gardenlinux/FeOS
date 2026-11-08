@@ -22,7 +22,7 @@ func TestEnvCtlQueries(t *testing.T) {
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "stage")
 	other := mkEnv(t, s, "acme", "prod")
-	web := model.SecurityGroupID(uuid.New())
+	web := model.WorkloadGroupID(env.ID, "service", "web")
 	a := mkInstance(t, s, env, func(n *store.NewSandbox) {
 		n.PodTemplate.SecurityGroups = append(n.PodTemplate.SecurityGroups, web)
 	})
@@ -48,7 +48,7 @@ func TestEnvCtlQueries(t *testing.T) {
 	if m, err := s.EnvCtlMembers(bg, other.ID); err != nil || len(m) != 0 {
 		t.Fatalf("members of another environment %v %v", m, err)
 	}
-	// A tenant's group's members: the rows whose template names it.
+	// A workload's members: the rows whose template names it.
 	if m, err := s.EnvCtlGroupMembers(bg, env.ID, web); err != nil || !slices.Equal(m, []string{"fd00::2", "fd00::9"}) {
 		t.Fatalf("group members %v %v", m, err)
 	}
@@ -240,18 +240,19 @@ func TestEnvCtlQueries(t *testing.T) {
 		t.Fatalf("touch an environment that is not there: %v", err)
 	}
 
-	// Which environments and groups' rows exist.
-	gone, goneGroup := uuid.New(), uuid.New()
-	row, err := s.SecurityGroupID(bg, env.ID, "default")
-	if err != nil {
-		t.Fatal(err)
+	// Which environments exist, and which groups a row's template names.
+	gone := uuid.New()
+	envs, err := s.EnvCtlExisting(bg, []uuid.UUID{env.ID, gone})
+	if err != nil || !envs[env.ID] || envs[gone] {
+		t.Fatalf("existing %v %v", envs, err)
 	}
-	envs, groups, err := s.EnvCtlExisting(bg, []uuid.UUID{env.ID, gone}, []uuid.UUID{row, goneGroup})
-	if err != nil || !envs[env.ID] || envs[gone] || !groups[row] || groups[goneGroup] {
-		t.Fatalf("existing %v %v %v", envs, groups, err)
+	if envs, err := s.EnvCtlExisting(bg, nil); err != nil || len(envs) != 0 {
+		t.Fatalf("existing of none %v %v", envs, err)
 	}
-	if envs, groups, err := s.EnvCtlExisting(bg, nil, nil); err != nil || len(envs) != 0 || len(groups) != 0 {
-		t.Fatalf("existing of none %v %v %v", envs, groups, err)
+	unnamed := model.WorkloadGroupID(env.ID, "service", "gone")
+	named, err := s.EnvCtlNamedGroups(bg, []string{web, unnamed, model.EnvGroupID(env.ID)})
+	if err != nil || !named[web] || named[unnamed] || !named[model.EnvGroupID(env.ID)] {
+		t.Fatalf("named %v %v", named, err)
 	}
 
 	goneSbx, goneLegacy := podid.Mint(), legacyID()

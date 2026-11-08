@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -88,9 +87,13 @@ type createSandboxRequest struct {
 	// Environment names the environment the sandbox is in (ADR 0035), by
 	// name or ID; required, fixed for its life.
 	Environment string `json:"environment"`
-	// SecurityGroups are the groups of the environment its pod is in, 1
-	// to 5 of its deployed deployment's; nil (left out): [default].
-	SecurityGroups *[]string `json:"securityGroups"`
+	// Reaches is what of the environment its pod reaches (ADR 0035,
+	// revised): "all", or entries of its deployed deployment; left out:
+	// nothing. Egress is its egress as a service's; left out: the
+	// internet. Both are fixed at the create but Reaches, which PUT
+	// …/reaches changes. securityGroups is gone: sent, it is 400.
+	Reaches spec.Reaches `json:"reaches"`
+	Egress  *spec.Egress `json:"egress"`
 	// ImageCredentials are the login for the image's registry (ADR 0025),
 	// sealed and never returned; nil: anonymous.
 	ImageCredentials *model.RegistryCredentials `json:"imageCredentials"`
@@ -100,18 +103,25 @@ type createSandboxRequest struct {
 }
 
 // sandboxView is a sandbox as the sandbox routes show it: its status, its
-// environment and its groups there (ADR 0035).
+// environment, what of it it reaches ("all", or the entries, [] for
+// nothing) and its egress ("internet" when the create left it out), ADR
+// 0035 revised.
 type sandboxView struct {
 	sandboxStatus
-	Environment    envs.EnvRef `json:"environment"`
-	SecurityGroups []string    `json:"securityGroups"`
+	Environment envs.EnvRef  `json:"environment"`
+	Reaches     spec.Reaches `json:"reaches"`
+	Egress      spec.Egress  `json:"egress"`
 }
 
 // viewOf renders a row for the sandbox routes, envName its environment's
 // name.
 func viewOf(sb store.Sandbox, envName string) sandboxView {
+	egress := spec.Egress{Mode: spec.EgressInternet}
+	if sb.Egress != nil {
+		egress = *sb.Egress
+	}
 	return sandboxView{sandboxStatus: statusOf(sb), Environment: envs.EnvRef{ID: sb.EnvironmentID.String(), Name: envName},
-		SecurityGroups: sb.SecurityGroups}
+		Reaches: sb.Reaches, Egress: egress}
 }
 
 // view renders a row with its environment's name read.
@@ -181,8 +191,8 @@ func (s *server) size(req createSandboxRequest) (vcpus, memoryMiB int, err error
 
 // createSandbox is POST /api/v1/sandboxes: in one transaction, the tenant
 // (refused while it is being deleted), its environment (FOR SHARE,
-// refused while it is being deleted, the groups checked against its
-// deployed deployment's), a new row under an ID ferund mints (ADR 0019),
+// refused while it is being deleted, the entries of reaches checked
+// against its deployed deployment, 422), a new row under an ID ferund mints (ADR 0019),
 // and the first token. Nothing reaches a node: the sandbox materialises at
 // its first tool call. The answer, a 201, carries the sandbox's ID
 // (status.sandboxId) and its token. A create is not idempotent: a request
@@ -204,9 +214,8 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		return apierr.New(http.StatusBadRequest,
 			"environment is required: the name or ID of the environment the sandbox is in (ADR 0035)")
 	}
-	groups, err := podGroups(req.SecurityGroups)
-	if err != nil {
-		return err
+	if msg := spec.CheckPod(sent["securityGroups"], req.Reaches, req.Egress, s.cfg.DenyPrefixes); msg != "" {
+		return apierr.New(http.StatusBadRequest, "%s", msg)
 	}
 	env, err := s.writableEnv(r, req.Environment)
 	if err != nil {
@@ -250,16 +259,16 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		if t.Deleting() {
 			return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
 		}
-		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, env.ID, groups)); err != nil {
-			return err
-		}
-		tmpl, err := tx.SandboxTemplate(r.Context(), env.ID, groups)
-		if err != nil {
+		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, env.ID, req.Reaches)); err != nil {
 			return err
 		}
 		row, err = tx.CreateMintedSandbox(r.Context(), func(id podid.ID) store.NewSandbox {
+			// Its pod is in env-<environment> and its own workload's
+			// group, and resolves its egress's names (ADR 0034, 0035
+			// revised).
+			tmpl := model.SandboxTemplate(env.ID, id.String(), req.Egress.RestrictsNames(), req.Egress.NameDomains())
 			return store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
-				EnvironmentID: env.ID, SecurityGroups: groups, PodTemplate: tmpl,
+				EnvironmentID: env.ID, Reaches: req.Reaches, Egress: req.Egress, PodTemplate: tmpl,
 				LogLabels: ctl.SandboxLogLabels(tenant, id, env.ID), MadeBy: auth.MadeBy(r.Context())}
 		})
 		if err != nil {
@@ -282,19 +291,6 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusCreated, createSandboxResponse{Status: viewOf(row, env.Name), Token: token, Created: true})
 }
 
-// podGroups checks the securityGroups of a sandbox's create or PUT (400).
-func podGroups(sent *[]string) ([]string, error) {
-	var names []string
-	if sent != nil {
-		names = *sent
-	}
-	groups, err := spec.PodGroups(names, sent != nil)
-	if err != nil {
-		return nil, apierr.New(http.StatusBadRequest, "%s", err.Error())
-	}
-	return groups, nil
-}
-
 // podEnvError is the answer of ctl.LockPodEnvironment's errors.
 func podEnvError(err error) error {
 	switch {
@@ -304,7 +300,7 @@ func podEnvError(err error) error {
 		return errNoEnvironment()
 	case errors.Is(err, ctl.ErrEnvironmentDeleting):
 		return apierr.New(http.StatusConflict, "%s", err.Error())
-	case errors.Is(err, ctl.ErrUnknownGroups):
+	case errors.Is(err, ctl.ErrUnknownReaches):
 		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
 	}
 	return err
@@ -363,37 +359,34 @@ func (s *server) readableEnvs(r *http.Request) ([]uuid.UUID, error) {
 	return out, nil
 }
 
-// sandboxGroups is the body of PUT /api/v1/sandboxes/{id}/security-groups.
-type sandboxGroups struct {
-	SecurityGroups *[]string `json:"securityGroups"`
+// sandboxReaches is the body of PUT /api/v1/sandboxes/{id}/reaches.
+type sandboxReaches struct {
+	Reaches *spec.Reaches `json:"reaches"`
 }
 
-// putSandboxGroups is PUT /api/v1/sandboxes/{id}/security-groups
-// {securityGroups}: the groups of its environment the sandbox is in (ADR
-// 0035), checked as a create's, recorded with groups_pending. The change
-// is a move: the controller hibernates a sandbox whose pod is running,
-// paused, stopped or failed, and restores one that was running, under a
-// new address; a hibernated or never started one takes them at its next
-// restore or create. 202 with the sandbox; an unchanged list is 200 and
-// does nothing.
-func (s *server) putSandboxGroups(w http.ResponseWriter, r *http.Request) error {
+// putSandboxReaches is PUT /api/v1/sandboxes/{id}/reaches {reaches}: what
+// of its environment the sandbox reaches (ADR 0035, revised), checked as
+// a create's. The change is a change of its targets' rules, which
+// env-groups puts on the nodes in place: no move, no new address, no
+// hibernation. 200 with the sandbox.
+func (s *server) putSandboxReaches(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathSandboxID(r)
 	if err != nil {
 		return err
 	}
-	var req sandboxGroups
-	if _, err := decodeJSON(r, &req); err != nil {
-		return err
-	}
-	if req.SecurityGroups == nil {
-		return apierr.New(http.StatusBadRequest, "securityGroups is required")
-	}
-	groups, err := podGroups(req.SecurityGroups)
+	var req sandboxReaches
+	sent, err := decodeJSON(r, &req)
 	if err != nil {
 		return err
 	}
+	if req.Reaches == nil {
+		return apierr.New(http.StatusBadRequest, `reaches is required: "all" or a list of {"service": name, "port": `+
+			`port} and {"addon": name}`)
+	}
+	if msg := spec.CheckPod(sent["securityGroups"], *req.Reaches, nil, nil); msg != "" {
+		return apierr.New(http.StatusBadRequest, "%s", msg)
+	}
 	tenant := tenantOf(r)
-	status := http.StatusAccepted
 	var row store.Sandbox
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
 		sb, err := tx.LockSandbox(r.Context(), id, store.ForUpdate)
@@ -403,27 +396,23 @@ func (s *server) putSandboxGroups(w http.ResponseWriter, r *http.Request) error 
 		if err != nil {
 			return err
 		}
-		if slices.Equal(sb.SecurityGroups, groups) {
-			status, row = http.StatusOK, sb
-			return nil
-		}
-		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, sb.EnvironmentID, groups)); err != nil {
+		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, sb.EnvironmentID, *req.Reaches)); err != nil {
 			return err
 		}
-		if _, err := tx.SetSandboxGroups(r.Context(), id, groups); err != nil {
+		if _, err := tx.SetSandboxReaches(r.Context(), id, *req.Reaches); err != nil {
 			return err
 		}
 		row, err = tx.GetSandbox(r.Context(), id)
 		return err
 	})
 	if err != nil {
-		return passOr(err, "security groups")
+		return passOr(err, "reaches")
 	}
 	v, err := s.view(r.Context(), row)
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, status, v)
+	return writeJSON(w, http.StatusOK, v)
 }
 
 // sandboxCredentials is the answer of the credentials a sandbox names.
