@@ -46,15 +46,14 @@ describe('ObjectNav', () => {
     expect(t).toContain('Addons 2');
     expect(t).toContain('Routes 3');
     expect(t).toContain('Bindings 0');
-    expect(t).toContain('Security groups 1');
-    expect(t).toContain('default nothing in · internet out');
+    expect(t).not.toContain('Security groups');
     expect(t).toContain('Secrets 1');
     expect(t).toContain('expense-service expense:1.4 · 2 replicas');
     expect(t).toContain('postgres postgres · 17 · small');
     expect(t).toContain('api-expense /api/expense → expense-service:http');
     expect(t).toContain('internal-token v3 of 3');
     expect(nav({ open: 'services/web' })).toContain('class="b-row-obj on"');
-    expect((nav({}).match(/class="ghost mini b-add"/g) || []).length).toBe(7);
+    expect((nav({}).match(/class="ghost mini b-add"/g) || []).length).toBe(6);
     expect(nav({ onAdd: null })).not.toContain('ghost mini b-add');
   });
 
@@ -156,12 +155,18 @@ describe('the forms', () => {
     const o = { runtime: 'attached', sandbox: 'abc', command: ['npm', 'run', 'dev'] };
     const ro = text(<ServiceForm name="web" obj={o} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(ro).toContain('It runs in sandbox abc of this environment. Changing it needs write on the environment');
-    expect(ro).toContain('in its sandbox\'s groups');
     expect(ro).toContain('npm run dev');
     expect(html(<ServiceForm name="web" obj={o} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />)).not.toContain('<input');
     const rw = html(<ServiceForm name="web" obj={o} ctx={ctx({}, [], { editAttached: true })} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(rw).toContain('value="abc"');
     expect(rw).toContain('Remove service web');
+    // Its reachability is its sandbox's pod's: no uses, no egress of its own.
+    expect(text(<ServiceForm name="web" obj={o} ctx={ctx({}, [], { editAttached: true })} onChange={nop} onRename={nop} onRemove={nop} />))
+      .toContain('What else the pod reaches, and its egress, are the sandbox');
+    expect(rw).not.toContain('aria-label="egress"');
+    const own = text(<ServiceForm name="web" obj={{ ...o, uses: [{ addon: 'db' }] }} ctx={ctx({}, [], { editAttached: true })}
+      onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(own).toContain('It names uses, which an attached service may not');
   });
 
   it('offer an addon the catalog versions, plans and option fields; its type fixed once deployed', () => {

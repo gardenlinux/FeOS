@@ -4,17 +4,14 @@
 import React, { useEffect, useState } from 'react';
 import { Icon } from '../Icon.jsx';
 import { isDnsLabel, isObject, isSecretName, objectsOf, registryHost } from './draft.js';
-import { envValueKind, refLine, refTargets, referencesTo, suggestVarName } from './refs.js';
+import { envValueKind, refLine, refTargets, referencesTo, refsFrom, suggestVarName } from './refs.js';
 import { atField, notAt } from './findings.js';
 import { checkNewer, imageView, pinSecret, setImage } from './pins.js';
 import { optionProblems, planText } from './catalog.js';
 import { credentialPath } from './credentials.js';
-import {
-  DEFAULT_GROUP, GROUP_LIMITS, PROTOCOLS, flowsOf, groupMembers, groupNames, groupOf, groupSummary, ingressRow, isGroupName,
-  newRule, objectGroups, outMode, parsePorts, peerKey, peerType, podGroups, portsText, takesPorts, toggleGroup, withProtocol,
-} from './groups.js';
-import { GroupFlow, MemberList } from './SecurityGroups.jsx';
-import '../styles/groups.css';
+import { fromProblems, fromWords, usesTargets, useWords } from './reach.js';
+import { EgressEditor, ListText, Segmented } from './Reach.jsx';
+import '../styles/reach.css';
 import {
   CREDENTIAL_FIELDS, HEALTH_KINDS, SERVICE_KEYS, VALUE_TYPES, addonValue, bindingSummary, credentialBinding, freeName,
   healthOf, idleOf, idleValue, portValue, readinessOf, renameVar, retypeHealth, retypeValue, routed, serviceValue,
@@ -199,7 +196,7 @@ function FormFoot({ onRemove, what }) {
 // ------------------------------------------------------------ services --
 
 const SERVICE_FIELDS = ['image', 'imageAsWritten', 'imageCredentials', 'command', 'env', 'ports', 'replicas', 'resources',
-  'readiness', 'idle', 'rollout', 'bindings', 'runtime', 'sandbox', 'cwd', 'mounts', 'securityGroups'];
+  'readiness', 'idle', 'rollout', 'bindings', 'runtime', 'sandbox', 'cwd', 'mounts', 'uses', 'egress'];
 
 export function ServiceForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   const o = isObject(obj) ? obj : {};
@@ -232,7 +229,7 @@ export function ServiceForm({ name, obj, ctx, onChange, onRename, onRemove }) {
       <Section title="Health check" hint="when a replica gets traffic" findings={atField(f, 'readiness')}>
         <HealthField o={o} onChange={onChange} findings={atField(f, 'readiness')} />
       </Section>
-      <GroupsSection o={o} ctx={ctx} onChange={onChange} findings={atField(f, 'securityGroups')} />
+      <ReachSection self={self} o={o} ctx={ctx} onChange={onChange} findings={f} />
       <BindingsSection self={self} o={o} ctx={ctx} findings={atField(f, 'bindings')} />
       <Section title="Rollout" fold={!o.rollout} findings={atField(f, 'rollout')}>
         <Field label="Timeout" hint="a rollout that takes longer fails; empty: 10m" findings={atField(f, 'rollout')}>
@@ -247,10 +244,9 @@ export function ServiceForm({ name, obj, ctx, onChange, onRename, onRemove }) {
 
 // AttachedForm is a service that runs in a sandbox of the environment
 // (ADR 0035): a form for those who write the environment, a summary
-// otherwise. It has no groups of its own: it is in its sandbox's.
+// otherwise. It reaches nothing of its own: it is its sandbox's pod.
 function AttachedForm({ name, o, ctx, onChange, onRemove }) {
   const f = ctx.findings;
-  const sbx = (ctx.sandboxes || []).find((x) => x.sandboxId === o.sandbox);
   if (!ctx.editAttached) {
     return (
       <div className="b-form">
@@ -261,7 +257,6 @@ function AttachedForm({ name, o, ctx, onChange, onRemove }) {
         <Section title="What it runs">
           <div className="kv-grid">
             <span className="k">sandbox</span><span className="v mono">{o.sandbox || '—'}</span>
-            <span className="k">groups</span><span className="v"><SandboxGroups o={o} sbx={sbx} /></span>
             <span className="k">command</span><span className="v mono">{(o.command || []).join(' ') || '—'}</span>
             {o.cwd && <><span className="k">directory</span><span className="v mono">{o.cwd}</span></>}
             <span className="k">idle</span><span className="v">{o.idle === 'never' ? 'keeps running' : o.idle ? `pauses ${o.idle} after its last activity` : "the sandbox's own"}</span>
@@ -301,66 +296,102 @@ function AttachedForm({ name, o, ctx, onChange, onRemove }) {
       <Section title="Variables" findings={atField(f, 'env')}>
         <EnvTable self={self} obj={o} ctx={ctx} onChange={onChange} findings={f} />
       </Section>
-      <Section title="Security groups" hint="who may reach it, and what it may reach" findings={atField(f, 'securityGroups')}>
-        <Field label="Groups" findings={atField(f, 'securityGroups')}
-          hint="its process runs in the sandbox's pod; a change of the sandbox's groups is a move of the sandbox">
-          <SandboxGroups o={o} sbx={sbx} />
-          {Array.isArray(o.securityGroups) && (
-            <button className="ghost mini" onClick={() => onChange(set(o, 'securityGroups', undefined))}>
-              <Icon name="x" size={12} /> Drop its own groups</button>)}
-        </Field>
-      </Section>
+      <AttachedReach o={o} onChange={onChange} findings={[...atField(f, 'uses'), ...atField(f, 'egress')]} />
       <BindingsSection self={self} o={o} ctx={ctx} findings={atField(f, 'bindings')} />
       <FormFoot onRemove={onRemove} what={`service ${name}`} />
     </div>
   );
 }
 
-// SandboxGroups says an attached service's groups: its sandbox's (sbx,
-// from the environment's list, when known). Groups of its own are an
-// error of the plan.
-function SandboxGroups({ o, sbx }) {
+// ReachSection is what an image service or a job reaches (ADR 0034,
+// revised): the references of its variables, read only, its uses (a
+// reference without a variable) and its egress. What it references, it
+// reaches; nothing else gets in.
+function ReachSection({ self, o, ctx, onChange, findings }) {
+  const fu = atField(findings, 'uses');
+  const fe = atField(findings, 'egress');
+  const fromVars = refsFrom(ctx.spec, self.key, self.name)
+    .filter((r) => r.via === 'env' && (r.to.key === 'services' || r.to.key === 'addons'));
+  const who = self.key === 'jobs' ? 'each run' : 'each pod';
   return (
-    <span className="small">
-      in its sandbox&apos;s groups{sbx && Array.isArray(sbx.securityGroups) ? <>: <span className="mono">{sbx.securityGroups.join(', ')}</span></> : ''}
-      {Array.isArray(o.securityGroups) && (
-        <span className="bad"> · it names groups of its own ({o.securityGroups.join(', ')}), which an attached service may not</span>)}
-    </span>
+    <Section title="Reachability" hint="what it references, it reaches; nothing else gets in" findings={[...fu, ...fe]}>
+      <Field label="From its variables" hint="each reference to a service's port or an addon opens that port for it">
+        {fromVars.length
+          ? <ul className="b-uses">{fromVars.map((r) => <li key={r.field} className="mono small">{refLine(r)}</li>)}</ul>
+          : <span className="muted small">No variable references a service or an addon.</span>}
+      </Field>
+      <Field label="Uses" findings={fu}
+        hint="a reference without a variable, for a program that knows its peer by name; it opens what it names and nothing more">
+        <UsesList self={self} list={o.uses} spec={ctx.spec} onChange={(l) => onChange(set(o, 'uses', l && l.length ? l : undefined))} />
+      </Field>
+      <Field label="Egress" findings={fe} hint="what it reaches outside the environment; a change rolls it">
+        <EgressEditor value={o.egress} who={who} onChange={(v) => onChange(set(o, 'egress', v))} />
+      </Field>
+    </Section>
   );
 }
 
-// GroupsSection ticks the security groups an image service, a job or an
-// addon is in (ADR 0034): one to five of the draft's, default when it
-// names none. A changed list is a new template: the object rolls.
-function GroupsSection({ o, ctx, onChange, findings }) {
-  const choices = groupNames(ctx.spec);
-  const list = objectGroups(o);
-  const missing = list.filter((g) => !choices.includes(g));
-  const full = list.length >= GROUP_LIMITS.perObject;
-  const put = (g, on) => {
-    const next = toggleGroup(list, g, on, choices);
-    if (next !== list) onChange({ ...o, securityGroups: next });
-  };
+// UsesList edits a uses list, a row each: a service of the draft and its
+// port, or an addon.
+function UsesList({ self, list, spec, onChange }) {
+  const l = Array.isArray(list) ? list : [];
+  const t = usesTargets(spec, self.key === 'services' ? self.name : '');
+  const put = (i, u) => onChange(l.map((x, j) => (j === i ? u : x)));
+  const first = t.services.find((s) => s.ports.length) || null;
+  const fresh = first ? { service: first.name, port: first.ports[0] } : t.addons[0] ? { addon: t.addons[0].name } : null;
   return (
-    <Section title="Security groups" hint="who may reach it, and what it may reach" findings={findings}>
-      <Field label="Groups" findings={findings}
-        hint={`one to ${GROUP_LIMITS.perObject}; a change rolls it. Its pods reach every pod of the environment whose groups let them in.`}>
-        <div className="b-checks">
-          {choices.map((g) => {
-            const on = list.includes(g);
-            return (
-              <label key={g} className="b-check">
-                <input type="checkbox" checked={on} disabled={(on && list.length === 1) || (!on && full)} onChange={(e) => put(g, e.target.checked)} />
-                <span className="mono">{g}</span><span className="muted small">{groupSummary(groupOf(ctx.spec, g))}</span>
-              </label>);
-          })}
-          {missing.map((g) => (
-            <label key={g} className="b-check bad">
-              <input type="checkbox" checked disabled={list.length === 1} onChange={() => put(g, false)} />
-              <span className="mono">{g}</span><span className="small">not in the draft</span>
-            </label>))}
-        </div>
-      </Field>
+    <div className="sg-rules">
+      {l.map((u, i) => {
+        const svc = isObject(u) && typeof u.service === 'string' ? u.service : '';
+        const target = svc ? `service:${svc}` : isObject(u) && typeof u.addon === 'string' ? `addon:${u.addon}` : '';
+        const s = t.services.find((x) => x.name === svc);
+        const known = svc ? !!s : t.addons.some((a) => `addon:${a.name}` === target);
+        return (
+          <div key={i} className="sg-rule rc-use">
+            <select aria-label="what it uses" value={target} onChange={(e) => {
+              const v = e.target.value;
+              if (v.startsWith('service:')) {
+                const ns = t.services.find((x) => x.name === v.slice(8));
+                put(i, without({ service: v.slice(8), port: ns && ns.ports[0] !== undefined ? ns.ports[0] : undefined }));
+              } else if (v.startsWith('addon:')) put(i, { addon: v.slice(6) });
+            }}>
+              {!target && <option value="">(other: the JSON view)</option>}
+              {!known && target && <option value={target}>{useWords(u)} (not in the draft)</option>}
+              <optgroup label="Services">
+                {t.services.map((x) => <option key={x.name} value={`service:${x.name}`}>{x.name}{x.attached ? ' (attached)' : ''}</option>)}
+              </optgroup>
+              <optgroup label="Addons">
+                {t.addons.map((x) => <option key={x.name} value={`addon:${x.name}`}>{x.name}{x.type ? ` (${x.type})` : ''}</option>)}
+              </optgroup>
+            </select>
+            {svc
+              ? <Select value={u.port === undefined ? '' : String(u.port)} options={(s ? s.ports : []).map(String)} empty="(a port)" title="its port"
+                onChange={(v) => put(i, set(u, 'port', portValue(v)))} />
+              : <span className="muted small">{target ? 'the port of its type' : ''}</span>}
+            <span />
+            <button type="button" className="iconbtn" title="remove" onClick={() => onChange(l.filter((_, j) => j !== i))}><Icon name="x" size={13} /></button>
+          </div>);
+      })}
+      <span><button type="button" className="ghost mini" disabled={!fresh} title={fresh ? undefined : 'the draft has no other service with a port and no addon'}
+        onClick={() => onChange([...l, fresh])}><Icon name="plus" size={12} /> Add</button></span>
+    </div>
+  );
+}
+
+// AttachedReach says why an attached service has no reachability of its
+// own: its process is its sandbox's pod, whose reaches and egress the
+// sandbox's create said. uses or egress on it are errors of the plan.
+function AttachedReach({ o, onChange, findings }) {
+  const own = o.uses !== undefined || o.egress !== undefined;
+  return (
+    <Section title="Reachability" hint="its sandbox's pod" findings={findings}>
+      <p className="small">Its variables&apos; references open what they name for the sandbox&apos;s pod. What else the pod reaches, and
+        its egress, are the sandbox&apos;s, on the sandbox&apos;s page.</p>
+      {own && (
+        <p className="bad small">It names {[o.uses !== undefined ? 'uses' : '', o.egress !== undefined ? 'egress' : ''].filter(Boolean).join(' and ')},
+          which an attached service may not.{' '}
+          {onChange && <button className="ghost mini" onClick={() => onChange(set(set(o, 'uses', undefined), 'egress', undefined))}>
+            <Icon name="x" size={12} /> Drop them</button>}</p>)}
     </Section>
   );
 }
@@ -794,7 +825,7 @@ function BindingsSection({ self, o, ctx, findings }) {
 // ---------------------------------------------------------------- jobs --
 
 const JOB_FIELDS = ['image', 'imageAsWritten', 'command', 'env', 'resources', 'imageCredentials', 'on', 'timeout', 'retries', 'bindings',
-  'securityGroups'];
+  'uses', 'egress'];
 
 export function JobForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   const o = isObject(obj) ? obj : {};
@@ -831,7 +862,7 @@ export function JobForm({ name, obj, ctx, onChange, onRename, onRemove }) {
       <Section title="Resources" findings={atField(f, 'resources')}>
         <div className="b-grid3"><ResourcesFields o={o} onChange={onChange} findings={f} /></div>
       </Section>
-      <GroupsSection o={o} ctx={ctx} onChange={onChange} findings={atField(f, 'securityGroups')} />
+      <ReachSection self={self} o={o} ctx={ctx} onChange={onChange} findings={f} />
       <BindingsSection self={self} o={o} ctx={ctx} findings={atField(f, 'bindings')} />
       <FormFoot onRemove={onRemove} what={`job ${name}`} />
     </div>
@@ -857,7 +888,7 @@ export function AddonForm({ name, obj, ctx, onChange, onRename, onRemove, added 
   const refs = referencesTo(ctx.spec, 'addons', name);
   return (
     <div className="b-form">
-      <FormHead kind="Addon" name={name} onRename={onRename} findings={f} fields={['type', 'version', 'plan', 'options', 'securityGroups']} />
+      <FormHead kind="Addon" name={name} onRename={onRename} findings={f} fields={['type', 'version', 'plan', 'options']} />
       <Section title="Addon" findings={[...atField(f, 'type'), ...atField(f, 'version'), ...atField(f, 'plan')]}>
         <div className="b-grid3">
           <Field label="Type" findings={atField(f, 'type')} hint={added ? 'until it is deployed' : 'fixed: another type is another addon'}>
@@ -904,13 +935,11 @@ export function AddonForm({ name, obj, ctx, onChange, onRename, onRemove, added 
         {ctx.catalog && ctx.catalog.builtin && (
           <p className="panel-note">This ferund answers no catalog of addons; the forms use the list this UI knows.</p>)}
       </Section>
-      <GroupsSection o={o} ctx={ctx} onChange={onChange} findings={atField(f, 'securityGroups')} />
       <Section title="Used by">
-        {refs.length === 0 ? <p className="muted small">Nothing references it yet: give a variable its output.</p>
+        {refs.length === 0 ? <p className="muted small">Nothing references it yet, so nothing reaches it: give a variable its output.</p>
           : <ul className="b-uses">{refs.map((r, i) => <li key={i} className="mono small">{r.from.name} · {refLine(r)}</li>)}</ul>}
         {refs.length > 0 && (
-          <p className="muted small">A user reaches it only where a rule of its groups lets the user&apos;s group in; the plan warns
-            where none does.</p>)}
+          <p className="muted small">Exactly these reach it, on the port of its type: a reference opens it, nothing else gets in.</p>)}
       </Section>
       <FormFoot onRemove={onRemove} what={`addon ${name}`} />
     </div>
@@ -946,6 +975,28 @@ function OtherOptions({ rest, onChange, findings, declared }) {
 
 // --------------------------------------------------------------- routes --
 
+// RouteClients are a route's clients (ADR 0034, revised): every client
+// (from left out), or only those from its address blocks, which the
+// ingress checks; anything else gets 403.
+function RouteClients({ o, onChange, findings }) {
+  const from = Array.isArray(o.from) ? o.from : null;
+  const mode = from ? 'only' : 'every';
+  const problems = fromProblems(from);
+  return (
+    <Section title="Clients" hint={fromWords(from)} findings={findings}>
+      <Segmented label="clients" value={mode} options={[['every', 'Every client'], ['only', 'Only these blocks']]}
+        onChange={(m) => onChange(set(o, 'from', m === 'every' ? undefined : []))} />
+      {mode === 'every' && <p className="sg-note">Every client reaches it while the environment is public.</p>}
+      {mode === 'only' && (
+        <Field label="Address blocks" findings={findings} problems={problems}
+          hint="one per line, of either family; the ingress answers a client outside them with 403">
+          <ListText value={from} aria="from" placeholder={'203.0.113.0/24\n2001:db8::/32'} onChange={(l) => onChange({ ...o, from: l })} />
+        </Field>)}
+      {mode === 'only' && from.length === 0 && <p className="sg-note"><Icon name="lock" size={12} /> No block yet: until one is written, every client reaches it.</p>}
+    </Section>
+  );
+}
+
 export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   const o = isObject(obj) ? obj : {};
   const f = ctx.findings;
@@ -954,7 +1005,7 @@ export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   const ports = svc ? portsOf(svc[1]).map(String) : [];
   return (
     <div className="b-form">
-      <FormHead kind="Route" name={name} onRename={onRename} findings={f} fields={['path', 'service', 'port', 'strip', 'host']} />
+      <FormHead kind="Route" name={name} onRename={onRename} findings={f} fields={['path', 'service', 'port', 'strip', 'host', 'from']} />
       <Section title="Route" findings={f}>
         <Field label="Path" hint="requests whose path starts with it, by segments: /api takes /api and /api/…, not /apis" findings={atField(f, 'path')}>
           <input className="mono" placeholder="/" value={o.path || ''} onChange={(e) => onChange({ ...o, path: e.target.value })} />
@@ -978,183 +1029,9 @@ export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
         </label>
         <FindingList list={atField(f, 'strip')} />
       </Section>
+      <RouteClients o={o} onChange={onChange} findings={atField(f, 'from')} />
       <FormFoot onRemove={onRemove} what={`route ${o.path || name}`} />
     </div>
-  );
-}
-
-// ------------------------------------------------------ security groups --
-
-// SecurityGroupForm is a security group (ADR 0034): the picture of the
-// draft's group first (who may connect, its members, what they reach),
-// then its rules in and its out. "default" is never renamed or removed:
-// every environment has it.
-export function SecurityGroupForm({ name, obj, ctx, onChange, onRename, onRemove }) {
-  const o = isObject(obj) ? obj : {};
-  const f = ctx.findings;
-  const isDefault = name === DEFAULT_GROUP;
-  const groups = groupNames(ctx.spec);
-  const mode = outMode(o);
-  const total = (Array.isArray(o.in) ? o.in.length : 0) + (Array.isArray(o.out) ? o.out.length : 0);
-  const members = [
-    ...groupMembers(ctx.spec, name).map((m) => ({ key: `${m.kind}/${m.name}`, ...m })),
-    ...(ctx.sandboxes || []).filter((p) => podGroups(p).includes(name)).map((p) => ({ key: p.sandboxId, kind: 'sandbox', name: p.sandboxId })),
-  ];
-  const spec = { ...ctx.spec, securityGroups: { ...(ctx.spec.securityGroups || {}), [name]: o } };
-  const { ins, outs } = flowsOf(spec, [name], [name]);
-  const ing = ingressRow(spec, members.filter((m) => m.kind === 'service').map((m) => m.name));
-  return (
-    <div className="b-form">
-      <FormHead kind="Security group" name={name} onRename={isDefault ? null : onRename} findings={f} fields={['in', 'out']}
-        nameCheck={{ check: isGroupName, what: '1 to 32 of a-z, 0-9 and -' }}
-        extra={<span className="muted small">{isDefault ? 'every pod that names no group' : groupSummary(o)}</span>} />
-      <div className="sg-preview">
-        <GroupFlow ins={ing ? [ing, ...ins] : ins} outs={outs}>
-          <MemberList members={members} />
-        </GroupFlow>
-      </div>
-      <Section title="Allowed in" hint="who may connect to its members; routes from the ingress need no rule" findings={atField(f, 'in')}>
-        <Rules dir="in" rules={o.in} groups={groups} findings={atField(f, 'in')}
-          onChange={(rules) => onChange(set(o, 'in', rules && rules.length ? rules : undefined))} />
-      </Section>
-      <Section title="Allowed out" hint="what its members may reach outside the environment" findings={atField(f, 'out')}>
-        <div className="sg-seg" role="group" aria-label="out">
-          {[['default', 'The internet'], ['rules', 'Only these'], ['none', 'Nothing']].map(([m, label]) => (
-            <button key={m} className={mode === m ? 'on' : ''} aria-pressed={mode === m}
-              onClick={() => {
-                if (m === mode) return;
-                if (m === 'default') onChange(set(o, 'out', undefined));
-                else if (m === 'none') onChange({ ...o, out: [] });
-                else onChange({ ...o, out: [newRule('out')] });
-              }}>{label}</button>))}
-        </div>
-        {mode === 'default' && <p className="sg-note">Its members reach every address on the internet. That is the default.</p>}
-        {mode === 'none' && <p className="sg-note">Its members reach nothing outside the environment.</p>}
-        {mode === 'rules' && (
-          <Rules dir="out" rules={o.out} groups={groups} findings={atField(f, 'out')}
-            onChange={(rules) => onChange({ ...o, out: rules || [] })} />)}
-        <p className="sg-note">Inside the environment, the receivers&apos; groups decide; no out rule is needed.</p>
-      </Section>
-      {total > GROUP_LIMITS.rules && <p className="bad small">{total} rules: a group has at most {GROUP_LIMITS.rules}.</p>}
-      {!isDefault && <FormFoot onRemove={onRemove} what={`security group ${name}`} />}
-    </div>
-  );
-}
-
-// Rules edits a group's in or out rules, a row each: the peer (a group of
-// the draft, the internet, an address block with exceptions), the
-// protocol and the ports.
-function Rules({ dir, rules, groups, findings, onChange }) {
-  const list = Array.isArray(rules) ? rules : [];
-  const put = (i, r) => onChange(list.map((x, j) => (j === i ? r : x)));
-  return (
-    <div className="sg-rules">
-      {list.length > 0 && (
-        <div className="sg-rule sg-rulehead" aria-hidden="true">
-          <span>{dir === 'out' ? 'To' : 'From'}</span><span>Protocol</span><span>Ports</span><span />
-        </div>)}
-      {list.map((r, i) => (
-        <RuleRow key={i} dir={dir} rule={r} groups={groups} findings={atField(findings, `${dir}[${i}]`)}
-          onChange={(nr) => put(i, nr)} onRemove={() => onChange(list.filter((_, j) => j !== i))} />))}
-      {list.length === 0 && dir === 'in' && <p className="sg-note"><Icon name="lock" size={12} /> No rule: nothing gets in.</p>}
-      <span><button className="ghost mini" onClick={() => onChange([...list, newRule(dir)])}>
-        <Icon name="plus" size={12} /> Add a rule</button></span>
-    </div>
-  );
-}
-
-function RuleRow({ dir, rule, groups, findings, onChange, onRemove }) {
-  const r = isObject(rule) ? rule : {};
-  const at = peerKey(dir);
-  const p = r.protocol || 'tcp';
-  const peer = r[at];
-  const bad = findings.some((x) => x.severity === 'error');
-  return (
-    <div className={'sg-rule' + (bad ? ' bad' : '')}>
-      <PeerSelect dir={dir} peer={peer} groups={groups} onChange={(np) => onChange({ ...r, [at]: np })} />
-      <Select value={p} options={PROTOCOLS} title="protocol" onChange={(v) => onChange(withProtocol(r, v))} />
-      <PortsInput ports={r.ports} disabled={!takesPorts(p)} onChange={(ports) => onChange(set(r, 'ports', ports))} />
-      <button className="iconbtn" title="remove the rule" onClick={onRemove}><Icon name="x" size={13} /></button>
-      {peerType(peer) === 'cidr' && (
-        <div className="sg-cidrrow"><CidrInput peer={peer} onChange={(np) => onChange({ ...r, [at]: np })} /></div>)}
-      {peerType(peer) === 'other' && (
-        <div className="sg-cidrrow mono small muted" title="edit it in the JSON view">{JSON.stringify(peer)}</div>)}
-      <FindingList list={findings} />
-    </div>
-  );
-}
-
-// PeerSelect picks a rule's peer in one list: a group of the draft, the
-// internet, or an address block (typed beside it).
-function PeerSelect({ dir, peer, groups, onChange }) {
-  const t = peerType(peer);
-  const value = t === 'group' ? `group:${peer.group}` : t === 'other' ? '' : t;
-  const missing = t === 'group' && !groups.includes(peer.group);
-  return (
-    <select value={value} aria-label={dir === 'out' ? 'to' : 'from'} title={dir === 'out' ? 'where its members may connect' : 'who may connect'}
-      onChange={(e) => {
-        const v = e.target.value;
-        if (v.startsWith('group:')) onChange({ group: v.slice(6) });
-        else if (v === 'internet') onChange('internet');
-        else if (v === 'cidr' && t !== 'cidr') onChange({ cidr: '' });
-      }}>
-      {t === 'other' && <option value="">Other (JSON)</option>}
-      <optgroup label="Groups of this environment">
-        {groups.map((g) => <option key={g} value={`group:${g}`}>{g}</option>)}
-        {missing && <option value={value}>{peer.group} (not a group)</option>}
-      </optgroup>
-      <optgroup label="Outside the environment">
-        <option value="internet">Internet</option>
-        <option value="cidr">Address block…</option>
-      </optgroup>
-    </select>
-  );
-}
-
-// PortsInput edits a rule's ports as text, "8080, 9000-9010"; text that
-// does not read is marked and not written. Empty: every port.
-function PortsInput({ ports, disabled, onChange }) {
-  const text0 = portsText(ports);
-  const [text, setText] = useState(text0);
-  const [bad, setBad] = useState([]);
-  useEffect(() => { if (!bad.length) setText(text0); }, [text0]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (disabled) return <input className="mono sg-ports" disabled value="" placeholder="every port" aria-label="ports" title="icmp and any have no ports" />;
-  return (
-    <span className="sg-portscell">
-      <input className={'mono sg-ports' + (bad.length ? ' bad-input' : '')} placeholder="every port" aria-label="ports" value={text}
-        title="ports and ranges, comma separated: 8080, 9000-9010"
-        onChange={(e) => {
-          setText(e.target.value);
-          const r = parsePorts(e.target.value);
-          setBad(r.bad);
-          if (!r.bad.length) onChange(r.ports.length ? r.ports : undefined);
-        }} />
-      {bad.length > 0 && <span className="bad small">not a port: {bad.join(', ')}</span>}
-    </span>
-  );
-}
-
-// CidrInput edits an address block and its exceptions (comma separated).
-function CidrInput({ peer, onChange }) {
-  const except = Array.isArray(peer.except) ? peer.except : [];
-  const [text, setText] = useState(except.join(', '));
-  useEffect(() => {
-    if (except.join(', ') !== text.split(/[,\s]+/).filter(Boolean).join(', ')) setText(except.join(', '));
-  }, [except.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <>
-      <input className="mono sg-cidr" placeholder="203.0.113.0/24" aria-label="address block" value={peer.cidr || ''}
-        onChange={(e) => onChange({ ...peer, cidr: e.target.value.trim() })} />
-      <span className="muted small">except</span>
-      <input className="mono sg-except" placeholder="(optional) 203.0.113.8/29, …" aria-label="except" value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          const list = e.target.value.split(/[,\s]+/).filter(Boolean);
-          const next = { ...peer };
-          if (list.length) next.except = list; else delete next.except;
-          onChange(next);
-        }} />
-    </>
   );
 }
 

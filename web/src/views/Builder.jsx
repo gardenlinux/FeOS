@@ -20,9 +20,9 @@ import { applyPins, pinSecret, secretPins } from './pins.js';
 import { builtinCatalog, newAddon, readCatalog } from './catalog.js';
 import { planner } from './planner.js';
 import {
-  AddonForm, BindingForm, FindingList, JobForm, NewBinding, NewSecret, RouteForm, SecretForm, SecurityGroupForm, ServiceForm,
+  AddonForm, BindingForm, FindingList, JobForm, NewBinding, NewSecret, RouteForm, SecretForm, ServiceForm,
 } from './BuilderForms.jsx';
-import { DEFAULT_GROUP } from './groups.js';
+import { edgesByCaller, egressOfAnswer, egressWords, fromWords, portWords, refOf } from './reach.js';
 import { GROUPS, MARK, itemOfUnit, listGroups, shortImage, summaryOf, unitOfItem } from './fields.js';
 import '../styles/builder.css';
 
@@ -373,10 +373,6 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
       if (port !== undefined) r.port = port;
       edit(setObject(s, 'routes', n, r));
       setOpen(unitKey('routes', n));
-    } else if (k === 'securityGroups') {
-      const n = uniqueName(s, 'securityGroups', 'group');
-      edit(setObject(s, 'securityGroups', n, {}));
-      setOpen(unitKey('securityGroups', n));
     } else if (k === 'bindings' || k === 'secrets') {
       setOpen(`${k}/`);
     }
@@ -651,13 +647,12 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
   const onRename = (to) => {
     const s = latest();
     const taken = objectsOf(s, key).some(([n]) => n === to)
-      || ((key === 'services' || key === 'addons') && objectsOf(s, key === 'services' ? 'addons' : 'services').some(([n]) => n === to))
-      || (key === 'securityGroups' && to === DEFAULT_GROUP);
+      || ((key === 'services' || key === 'addons') && objectsOf(s, key === 'services' ? 'addons' : 'services').some(([n]) => n === to));
     if (taken) return;
     edit(renameObject(s, key, name, to));
     setOpen(unitKey(key, to));
   };
-  const onRemove = readOnly || (key === 'securityGroups' && name === DEFAULT_GROUP) ? null : () => {
+  const onRemove = readOnly ? null : () => {
     const refs = referencesTo(latest(), key, name).filter((r) => !(r.from.key === key && r.from.name === name));
     if (refs.length === 0) { edit(removeObject(latest(), key, name)); setOpen(''); return; }
     setConfirm(refs);
@@ -683,8 +678,7 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
         {confirmBox}
       </>);
   }
-  // "default" exists without being written: its form writes it.
-  const obj = key === 'securityGroups' && name === DEFAULT_GROUP ? getObject(spec, key, name) || {} : getObject(spec, key, name);
+  const obj = getObject(spec, key, name);
   if (obj === undefined) {
     return <Removed unit={unit} kind={GROUPS.find((g) => g.key === key)?.one || key} name={name} base={base} edit={edit} latest={latest} />;
   }
@@ -696,7 +690,6 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
       {key === 'addons' && <AddonForm {...props} added={marks.get(unit) === 'add'} />}
       {key === 'routes' && <RouteForm {...props} />}
       {key === 'bindings' && <BindingForm {...props} />}
-      {key === 'securityGroups' && <SecurityGroupForm {...props} />}
       {confirmBox}
     </>
   );
@@ -945,6 +938,7 @@ export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [
               : <ul className="b-changes">{diff.map((d) => <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={open} />)}</ul>}
         </div>
       </section>
+      {answer && answer.reachability && <PlanReach reach={answer.reachability} onOpen={open} />}
       <section className="b-sect b-apply">
         <div className="b-sectbody">
           {heavy.length > 0 && (
@@ -966,6 +960,48 @@ export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [
         </div>
       </section>
     </div>
+  );
+}
+
+// PlanReach is the plan's reachability in the review (ADR 0034,
+// revised): every edge its references open, by caller, with where each
+// comes from; the routes' clients; the egress that is not the internet.
+export function PlanReach({ reach, onOpen = () => {} }) {
+  const callers = edgesByCaller(reach);
+  const routes = (Array.isArray(reach.routes) ? reach.routes : []).filter((r) => r && Array.isArray(r.from) && r.from.length);
+  const egress = (Array.isArray(reach.egress) ? reach.egress : []).filter((x) => x && x.mode && x.mode !== 'internet');
+  const n = callers.reduce((a, c) => a + c.edges.length, 0);
+  const name = (ref) => {
+    const r = refOf(ref);
+    return r.kind === 'ingress' ? <span className="muted">the ingress</span>
+      : <button className="b-link" onClick={() => onOpen(r.kind, r.name)}>{r.kind} <span className="mono">{r.name}</span></button>;
+  };
+  return (
+    <section className="b-sect">
+      <header className="b-secthead"><h3 className="b-sectitle">Reachability</h3>
+        <span className="muted small">{n} edge{n === 1 ? '' : 's'}: what each object references, it reaches; nothing else gets in</span></header>
+      <div className="b-sectbody">
+        {n === 0 && <p className="empty small">No object references another: nothing reaches anything.</p>}
+        <ul className="b-changes rc-plan">
+          {callers.map((c) => (
+            <li key={c.from} className="b-change">
+              <div className="b-changehead">{name(c.from)}<span className="muted small">reaches</span></div>
+              <div className="b-fields">
+                {c.edges.map((e) => (
+                  <div key={`${e.to}:${e.number}`} className="b-fieldchange small rc-edge">
+                    <span className="mono">{refOf(e.to).name}</span>
+                    <span className="mono muted">{portWords(e.port, e.number)}</span>
+                    <span className="muted">{e.via}</span>
+                  </div>))}
+              </div>
+            </li>))}
+        </ul>
+        {routes.length > 0 && (
+          <p className="small">Routes for some clients only: {routes.map((r) => `${r.route} (${fromWords(r.from)})`).join('; ')}.</p>)}
+        {egress.length > 0 && (
+          <p className="small">Egress not the internet: {egress.map((x) => `${refOf(x.object).name} ${egressWords(egressOfAnswer(x))}`).join('; ')}.</p>)}
+      </div>
+    </section>
   );
 }
 

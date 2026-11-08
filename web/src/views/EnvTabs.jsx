@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, Secret, useArm, usePoll } from '../components.jsx';
 import { fmtDate, fmtDurNs, fmtNs } from '../format.js';
 import { envPath, jobPath, sandboxPath } from '../routes.js';
-import { inUse } from './groups.js';
+import { inUse } from './reach.js';
 import {
   actionProblem, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, newestFirst, olderCursor, publishNote,
   routeCurl, sparkPoints, statusTone,
@@ -591,7 +591,7 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
     <div className="envsect envbox">
       <div className="sect">clone</div>
       <p className="panel-note">
-        A new environment with a deployment's spec, its security groups new ones of its own. Its data is not copied: its
+        A new environment with a deployment's spec, its references reaching its own objects. Its data is not copied: its
         addons start empty. Its sandboxes and jobs stay here, and attached services are dropped (they run in a sandbox of
         this one). It is not public until its tenant publishes it.
       </p>

@@ -24,9 +24,9 @@ describe('the list', () => {
   it('groups the objects by kind, each with its line', () => {
     const groups = listGroups(STORED, STORED);
     expect(groups.map((g) => [g.title, g.rows.length])).toEqual([
-      ['Services', 3], ['Jobs', 1], ['Addons', 2], ['Routes', 3], ['Security groups', 1], ['Bindings', 0], ['Secrets', 1]]);
-    // default is always there, written or not.
-    expect(groups[4].rows).toEqual([{ unit: 'securityGroups/default', key: 'securityGroups', name: 'default', mark: '', removed: false }]);
+      ['Services', 3], ['Jobs', 1], ['Addons', 2], ['Routes', 3], ['Bindings', 0], ['Secrets', 1]]);
+    // Security groups are gone (ADR 0034, revised): references open the ports.
+    expect(groups.some((g) => g.key === 'securityGroups')).toBe(false);
     expect(groups[0].rows.map((r) => r.name)).toEqual(['approval-service', 'expense-service', 'web']);
     expect(groups.flatMap((g) => g.rows).every((r) => r.mark === '' && !r.removed)).toBe(true);
     expect(summaryOf('services', STORED.services['expense-service'])).toBe('expense:1.4 · 2 replicas');

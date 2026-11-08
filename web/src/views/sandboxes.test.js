@@ -14,7 +14,7 @@ const SB = {
   sandboxId: 'h3k9v2m7qpx', state: 'running', clientState: 'running', image: 'ghcr.io/kino/agent-base:2.4', node: 'n3',
   owner: 'kino', createdAt: '2026-11-03T10:00:00Z', updatedAt: '2026-11-06T09:00:00Z', desiredState: 'active',
   statusDescription: '', checkpointEpoch: '0', checkpointHead: '', checkpointAt: '', vcpus: 2, memoryMib: 4096,
-  environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' }, securityGroups: ['default'],
+  environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' }, reaches: 'all', egress: 'internet',
 };
 const as = (clientState, more = {}) => ({ ...SB, clientState, ...more });
 
@@ -66,7 +66,7 @@ describe('counts', () => {
 
 describe('the list', () => {
   const list = [SB, as('paused', { sandboxId: 'q8w1z4c0dnr', node: 'n1', image: 'ghcr.io/kino/migrate:1',
-    environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d2', name: 'kino-stage' }, securityGroups: ['db-admin'] })];
+    environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d2', name: 'kino-stage' }, reaches: [{ addon: 'db-admin' }] })];
   it('filters by environment, by its name or ID', () => {
     expect(filterSandboxes(list, '', 'kino-stage').map((s) => s.sandboxId)).toEqual(['q8w1z4c0dnr']);
     expect(filterSandboxes(list, '', '0199f0b7-1c2d-7e3f-8a00-0000000000d1').map((s) => s.sandboxId)).toEqual(['h3k9v2m7qpx']);
@@ -109,17 +109,31 @@ describe('tabs', () => {
 
 describe('createRequest', () => {
   const empty = newSandboxForm('kino-dev');
-  const opts = { environment: 'kino-dev', securityGroups: ['default'], imageCredentials: null };
-  it('leaves empty fields to the defaults, in default', () => {
+  const opts = { environment: 'kino-dev', imageCredentials: null };
+  it('leaves empty fields to the defaults: nothing of the environment, the internet', () => {
+    expect(empty).toMatchObject({ reachMode: 'none', reaches: [], egress: undefined });
     expect(createRequest(empty)).toEqual(['', 0, 0, opts]);
   });
 
-  it('takes a size, groups and a registry login, and never attachable', () => {
+  it('takes a size, what it reaches, its egress and a registry login, and never attachable or groups', () => {
     const args = createRequest({ ...empty, image: ' ghcr.io/x/y:1 ', vcpus: '2', memoryMib: '4096',
-      securityGroups: ['default', 'db-admin'], username: ' bot ', password: 's3cret ' });
-    expect(args).toEqual(['ghcr.io/x/y:1', 2, 4096,
-      { ...opts, securityGroups: ['default', 'db-admin'], imageCredentials: { username: 'bot', password: 's3cret ' } }]);
+      reachMode: 'some', reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }],
+      egress: { domains: ['api.stripe.com'], blocks: [{ cidr: '203.0.113.0/24', except: ['203.0.113.8/29'] }] },
+      username: ' bot ', password: 's3cret ' });
+    expect(args).toEqual(['ghcr.io/x/y:1', 2, 4096, {
+      ...opts, reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }],
+      egress: { domains: ['api.stripe.com'], blocks: [{ cidr: '203.0.113.0/24', except: ['203.0.113.8/29'] }] },
+      imageCredentials: { username: 'bot', password: 's3cret ' } }]);
     expect('attachable' in args[3]).toBe(false);
+    expect('securityGroups' in args[3]).toBe(false);
+  });
+
+  it('sends reaches "all" for all, nothing for none or an empty list, and none as an egress word', () => {
+    expect(createRequest({ ...empty, reachMode: 'all', reaches: [{ addon: 'db' }] })[3].reaches).toBe('all');
+    expect('reaches' in createRequest({ ...empty, reachMode: 'none', reaches: [{ addon: 'db' }] })[3]).toBe(false);
+    expect('reaches' in createRequest({ ...empty, reachMode: 'some', reaches: [] })[3]).toBe(false);
+    expect(createRequest({ ...empty, egress: 'none' })[3].egress).toBe('none');
+    expect('egress' in createRequest({ ...empty, egress: 'internet' })[3]).toBe(false);
   });
 
   it('names the tenant\'s credentials its pod gets, when any', () => {
@@ -128,10 +142,10 @@ describe('createRequest', () => {
     expect(createRequest({ ...empty, credentials: [] })[3]).toEqual(opts);
   });
 
-  it('needs an environment and one to five groups', () => {
+  it('needs an environment and an egress the plan would take', () => {
     expect(() => createRequest({ ...empty, environment: ' ' })).toThrow('choose the environment');
-    expect(() => createRequest({ ...empty, securityGroups: [] })).toThrow('at least one security group');
-    expect(() => createRequest({ ...empty, securityGroups: ['a', 'b', 'c', 'd', 'e', 'f'] })).toThrow('at most 5');
+    expect(() => createRequest({ ...empty, egress: { domains: ['API.example.com'] } })).toThrow('not a domain: API.example.com');
+    expect(() => createRequest({ ...empty, egress: { blocks: [{ cidr: '10.0.0.0' }] } })).toThrow('not an address block: 10.0.0.0');
   });
 
   it('refuses a bad size and half a login', () => {

@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* Security groups (ADR 0034, ADR 0035): the choice of a pod's groups,
-   its groups as chips, and the rules of the builder's form. */
+/* Reachability (ADR 0034 revised, ADR 0035): the picture of who
+   reaches a pod and what it reaches, the choice of what a sandbox or a
+   job reaches, an egress's switch and lists, a route's clients. */
 
 .sg-pick { display: flex; flex-direction: column; gap: 4px; }
 .sg-choice {
@@ -17,17 +18,21 @@
 .sg-name { font-weight: 600; }
 .sg-words { min-width: 0; overflow-wrap: anywhere; }
 
-.sg-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
-.sg-chip {
-  font-size: 12px; padding: 0 6px; border: 1px solid var(--border); border-radius: 3px; line-height: 18px;
-}
+.sg-choice > svg { color: var(--muted); align-self: center; flex: none; }
+.rc-pick { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rc-pick .sg-seg + .sg-note, .rc-pick .sg-seg + .sg-pick { margin-top: 0; }
+.rc-reaches { display: inline-flex; align-items: center; gap: 4px; }
+.rc-reaches svg { color: var(--muted); flex: none; }
+.rc-reaches.rc-all svg { color: var(--accent); }
+.rc-listreach { font-size: 12px; margin-top: 2px; }
+.rc-summary { display: inline; }
 
 .sg-move { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
 .sg-move .sg-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sg-sbx .sgf { margin-top: 14px; }
 
-/* the builder's group: its picture, then its rules, a grid row each:
-   from or to | protocol | ports | remove; an address block below */
-.sg-preview { margin: 4px 0 18px; padding: 14px 16px; border: 1px solid var(--border-soft); border-radius: 10px; }
+/* the builder's rows (uses, egress blocks), a grid row each:
+   target | port | – | remove; an address block across */
 .sg-rules { display: flex; flex-direction: column; gap: 6px; }
 .sg-rule {
   display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(80px, 100px) minmax(120px, 1fr) 28px;
@@ -36,8 +41,6 @@
 .sg-rule > * { min-width: 0; }
 .sg-rule select, .sg-rule input { width: 100%; }
 .sg-rule.bad { border-color: var(--danger); }
-.sg-rulehead { border: 0; padding: 0 9px; font-size: 12px; color: var(--muted); }
-.sg-portscell { display: flex; flex-direction: column; gap: 2px; }
 .sg-cidrrow { grid-column: 1 / 4; display: flex; gap: 8px; align-items: center; }
 .sg-cidrrow .sg-cidr { flex: 0 1 220px; }
 .sg-cidrrow .sg-except { flex: 1 1 200px; }
@@ -49,6 +52,19 @@
 .sg-seg button + button { border-left: 1px solid var(--border); }
 .sg-seg button.on { background: var(--accent-dim); color: var(--text); }
 .sg-seg + .sg-rules, .sg-seg + .sg-note { margin-top: 10px; }
+.sg-seg button:disabled { opacity: .6; }
+
+/* an egress: its switch, then for "only these" the domains and blocks */
+.rc-egress { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rc-egress .sg-note { margin: 0; }
+.rc-only { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 8px; }
+.rc-sub { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rc-sub textarea { width: 100%; }
+.rc-block .sg-cidrrow { grid-column: 1 / 4; }
+
+/* the review's reachability: an edge a row, target | port | via */
+.rc-plan .rc-edge { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(90px, auto) minmax(0, 1.4fr); gap: 8px; }
+.rc-podhead { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; }
 
 /* an environment's Security groups view: a card per group */
 .sg-page { max-width: 1160px; display: flex; flex-direction: column; gap: 16px; }
@@ -110,10 +126,12 @@
 .sgf-link { display: contents; }
 .sgf-link .sgf-pill { cursor: pointer; }
 .sgf-link:hover .sgf-pill { border-color: var(--accent); }
-.sgf-pill.sgf-internet, .sgf-pill.sgf-cidr { border-color: rgba(var(--accent-rgb), .45); }
-.sgf-pill.sgf-internet svg, .sgf-pill.sgf-cidr svg { color: var(--accent); }
-.sgf-pill.sgf-self { font-family: var(--sans); color: var(--muted); }
+.sgf-pill.sgf-internet, .sgf-pill.sgf-cidr, .sgf-pill.sgf-domain { border-color: rgba(var(--accent-rgb), .45); }
+.sgf-pill.sgf-internet svg, .sgf-pill.sgf-cidr svg, .sgf-pill.sgf-domain svg { color: var(--accent); }
+.sgf-pill.sgf-env { font-family: var(--sans); }
+.sgf-pill.sgf-sandbox, .sgf-pill.sgf-jobrun { border-style: dotted; }
 .sgf-pill.sgf-ingress { border-style: dashed; font-family: var(--sans); color: var(--muted); }
+.sgf-pill.sgf-missing { border-color: var(--danger); color: var(--danger); text-decoration: line-through; }
 
 /* the wire: a line with an arrowhead toward the traffic's direction,
    what it allows on it */
@@ -133,9 +151,11 @@
 .sgf-closed { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 4px 12px; }
 .sgf-out .sgf-closed { align-self: flex-end; }
 
-/* an object's groups on its Config */
+/* an object's reachability on its Config, a sandbox's on its page */
 .sg-objsect { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.sg-objsect .sg-chips, .sg-objsect .sg-all { font-weight: 400; }
+.sg-objsect .rc-reaches, .sg-objsect .sg-all { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.sgf-box a.mono { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sgf-box a.mono:hover { color: var(--accent); }
 .sg-all { margin-left: auto; }
 
 @media (max-width: 760px) {
@@ -143,12 +163,14 @@
   .sgf-noheads { grid-template-areas: "in" "box" "out"; }
   .sgf-legend { display: none; }
   .sgf-noheads .sgf-in::before, .sgf-noheads .sgf-out::before {
-    content: 'Allowed in'; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+    content: 'Reached by'; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
   }
-  .sgf-noheads .sgf-out::before { content: 'Allowed out'; }
+  .sgf-noheads .sgf-out::before { content: 'Reaches'; }
   .sg-rule { grid-template-columns: minmax(0, 1fr) 90px 28px; }
-  .sg-rule .sg-portscell { grid-column: 1 / 3; grid-row: 2; }
-  .sg-rulehead { display: none; }
+  .sg-rule > span:empty { display: none; }
+  .rc-block .sg-cidrrow { grid-column: 1 / 3; flex-wrap: wrap; }
+  .rc-plan .rc-edge { grid-template-columns: minmax(0, 1fr) auto; }
+  .rc-plan .rc-edge > :last-child { grid-column: 1 / -1; }
   .sgf-hout { justify-content: flex-start; padding-top: 6px; }
   .sgf-out .sgf-closed { align-self: flex-start; }
   .sg-top { flex-direction: column; }

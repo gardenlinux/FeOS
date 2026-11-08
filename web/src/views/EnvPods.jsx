@@ -8,13 +8,14 @@ import { Ago, ErrBox, StateDot, usePoll } from '../components.jsx';
 import { shortId } from '../format.js';
 import { jobPath, sandboxPath } from '../routes.js';
 import { EnvLink } from './EnvTabs.jsx';
-import { GroupChips } from './SecurityGroups.jsx';
+import { ReachesWords } from './Reach.jsx';
+import { reachesOf } from './reach.js';
 import { stateWords } from './sandboxes.js';
 import { jobTone, onItsWay, phaseWord } from './jobs.js';
 
 // What an environment runs beside its deployments (ADR 0035): its
 // sandboxes and its tenant's jobs, made by a call, never by a
-// deployment, each in groups of the environment.
+// deployment, each reaching what it was told of the environment.
 
 const enc = encodeURIComponent;
 
@@ -50,18 +51,18 @@ export function PodTables({ tenant, env, sandboxes, jobs, err = '', write = fals
         </div>
         <ErrBox error={err} />
         {sandboxes && sandboxes.length === 0 && (
-          <p className="empty small">No sandbox in this environment. One made in it reaches its pods where their groups let it in,
+          <p className="empty small">No sandbox in this environment. One made in it reaches what its create names of it,
             and runs its attached services.</p>)}
         {sandboxes && sandboxes.length > 0 && (
           <div className="tblwrap">
             <table className="tbl">
-              <thead><tr><th>sandbox</th><th>state</th><th>groups</th><th>image</th><th className="col-when">last activity</th></tr></thead>
+              <thead><tr><th>sandbox</th><th>state</th><th>reaches</th><th>image</th><th className="col-when">last activity</th></tr></thead>
               <tbody>
                 {sandboxes.map((sb) => (
                   <tr key={sb.sandboxId}>
                     <td className="mono"><EnvLink to={sandboxPath(tenant, sb.sandboxId)} navigate={navigate}>{sb.sandboxId}</EnvLink></td>
                     <td className="nowrap"><StateDot state={sb.clientState} /> {stateWords(sb).short}</td>
-                    <td><GroupChips groups={sb.securityGroups} /></td>
+                    <td className="small"><ReachesWords reaches={reachesOf(sb)} /></td>
                     <td className="mono small muted trunc" title={sb.image}>{sb.image || 'the default'}</td>
                     <td className="col-when"><Ago iso={sb.updatedAt} /></td>
                   </tr>))}
@@ -77,14 +78,14 @@ export function PodTables({ tenant, env, sandboxes, jobs, err = '', write = fals
         {jobs && jobs.length > 0 && (
           <div className="tblwrap">
             <table className="tbl">
-              <thead><tr><th>phase</th><th>job</th><th>groups</th><th>image</th><th className="col-when">created</th></tr></thead>
+              <thead><tr><th>phase</th><th>job</th><th>reaches</th><th>image</th><th className="col-when">created</th></tr></thead>
               <tbody>
                 {jobs.map((j) => (
                   <tr key={j.id}>
                     <td className="nowrap"><span className={'state-label ' + jobTone(j.phase)}>
                       <span className={'sdot ' + jobTone(j.phase)} title={j.phase} />{phaseWord(j.phase)}</span></td>
                     <td className="mono"><EnvLink to={jobPath(tenant, j.id)} navigate={navigate}>{shortId(j.id)}</EnvLink></td>
-                    <td><GroupChips groups={j.securityGroups} /></td>
+                    <td className="small"><ReachesWords reaches={reachesOf(j)} /></td>
                     <td className="mono small trunc" title={j.imageRef || j.image}>{j.image}</td>
                     <td className="col-when"><Ago iso={j.createdAt} /></td>
                   </tr>))}

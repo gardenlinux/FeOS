@@ -15,9 +15,10 @@ import {
   STATE_BUCKETS, activeTab, canPause, canResume, createRequest, filterSandboxes, newSandboxForm, ownerShown, sandboxEnvs,
   sandboxTabs, sizeWords, stateCounts, stateWords,
 } from './sandboxes.js';
-import { DEFAULT_GROUP, DEFAULT_WORDS, MOVE_WORDS, checkGroups, envRef, flowsOf, sameGroups } from './groups.js';
-import { EnvLinkName, EnvPicker, GroupChips, GroupFlow, GroupPicker, NoEnvironment, useEnvGroups } from './SecurityGroups.jsx';
-import { ConfirmButton } from './EnvTabs.jsx';
+import { envRef, missingReaches, reachChoices, reachModel, reachesMode, reachesOf, sameReaches } from './reach.js';
+import {
+  EgressEditor, EgressWords, EnvLinkName, EnvPicker, NoEnvironment, ReachFlow, ReachesPicker, ReachesSummary, ReachesWords, useDeployed,
+} from './Reach.jsx';
 import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
 import { Access, ImageCredentials } from './Access.jsx';
@@ -29,9 +30,10 @@ import '../styles/sandboxes.css';
 // with its tabs (overview, connect, credentials, network, activity,
 // settings). The selection and the tab are the route's:
 // /tenants/:t/sandboxes[/new[?environment=…] | /:id[/:tab]] ("new" is
-// no sandbox ID). A sandbox is of an environment and in its security
-// groups (ADR 0035): the list shows and filters by it, the create names
-// it, and a change of groups is a move. The changes need write on the
+// no sandbox ID). A sandbox is of an environment and reaches what it is
+// told of it (ADR 0035, ADR 0034 revised): the list shows and filters by
+// it, the create names it, and what it reaches changes in place. The
+// changes need write on the
 // sandbox's environment (its grant or the tenant's, the higher); the
 // activity and the network are the operators' (the activity log carries
 // tool params and outputs), as is a node.
@@ -196,7 +198,7 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
         <div className="filterbar slim">
           <span className="searchwrap grow">
             <Icon name="search" size={13} />
-            <input className="searchbare" placeholder="ID, owner, image, node, group, state…" value={q}
+            <input className="searchbare" placeholder="ID, owner, image, node, reaches, state…" value={q}
               onChange={(e) => setQ(e.target.value)} />
             {q && <button className="ghost mini icon-only" onClick={() => setQ('')}><Icon name="x" size={12} /></button>}
           </span>
@@ -228,7 +230,7 @@ export function SandboxList({ tenant, sandboxes, err, busy, act, navigate, base,
                   </td>
                   <td className="small">
                     <EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} />
-                    {' '}<GroupChips groups={sb.securityGroups} />
+                    <div className="rc-listreach"><ReachesWords reaches={reachesOf(sb)} /></div>
                   </td>
                   {showOwner && <td className="small">{ownerShown(sb, tenant) || <span className="muted">—</span>}</td>}
                   <td className="mono small muted trunc" title={sb.image}>{sb.image || 'the default'}</td>
@@ -312,11 +314,12 @@ function NewSandbox({ tenant, base, navigate, can: c, busy, err, envs, none, onC
 
 // CreateForm is the create form. The environment is required: one of
 // envs (those the person writes; env preselects one, as does a single
-// one), and the groups are its deployed deployment's, default ticked
-// (ADR 0035). An empty image or size takes the platform's default, which
-// the fields name from defaults (the nodes view's), as they name the
-// bounds ferund accepts. none tells that the tenant has no environment
-// at all. onSubmit gets createSandbox's arguments.
+// one); what it reaches of it is nothing, all, or entries of its deployed
+// deployment, and its egress the internet unless chosen (ADR 0035). An
+// empty image or size takes the platform's default, which the fields
+// name from defaults (the nodes view's), as they name the bounds ferund
+// accepts. none tells that the tenant has no environment at all.
+// onSubmit gets createSandbox's arguments.
 export function CreateForm({ defaults, busy, disabled = false, envs = null, none = false, env = '', onSubmit, onCancel }) {
   const hints = createHints(fleetDefaults(defaults));
   const [f, setF] = useState(() => newSandboxForm(env));
@@ -326,14 +329,14 @@ export function CreateForm({ defaults, busy, disabled = false, envs = null, none
   // but the person may not write is none.
   const names = (envs || []).map((e) => e.name);
   const chosen = envs && !names.includes(f.environment) ? (names.length === 1 ? names[0] : '') : f.environment;
-  const groups = useEnvGroups(chosen);
+  const dep = useDeployed(chosen);
   return (
     <form className="sbx-form" onSubmit={(e) => {
       e.preventDefault();
       try {
         const args = createRequest({ ...f, environment: chosen });
-        const unknown = checkGroups(f.securityGroups, groups.choices);
-        if (groups.choices && unknown.length) throw new Error(unknown.join('; '));
+        const unknown = f.reachMode === 'some' && dep.spec ? missingReaches(f.reaches, reachChoices(dep.spec)) : [];
+        if (unknown.length) throw new Error(`the deployed deployment has no ${unknown.map((x) => x.service ? `${x.service}:${x.port}` : x.addon).join(', ')}`);
         setBad('');
         onSubmit(args);
       } catch (e2) {
@@ -343,19 +346,22 @@ export function CreateForm({ defaults, busy, disabled = false, envs = null, none
       <label className="sbx-field">
         <span className="sbx-label">environment</span>
         <EnvPicker envs={envs} value={chosen} disabled={disabled} none={none}
-          onChange={(v) => setF({ ...f, environment: v, securityGroups: [DEFAULT_GROUP] })} />
-        <span className="sbx-hint">Required and fixed for its life: it reaches that environment&apos;s pods where their groups let it in, its
-          attached services run in it, and the environment&apos;s grants decide who may use it.</span>
+          onChange={(v) => setF({ ...f, environment: v, reachMode: 'none', reaches: [] })} />
+        <span className="sbx-hint">Required and fixed for its life: its attached services run in it, and the environment&apos;s grants
+          decide who may use it.</span>
       </label>
       <div className="sbx-field">
-        <span className="sbx-label">security groups</span>
+        <span className="sbx-label">reaches</span>
         {chosen
-          ? <GroupPicker choices={groups.choices} value={f.securityGroups} disabled={disabled}
-            onChange={(securityGroups) => setF({ ...f, securityGroups })} />
+          ? <ReachesPicker spec={dep.spec} mode={f.reachMode} list={f.reaches} disabled={disabled} err={dep.err}
+            onChange={(reachMode, reaches) => setF({ ...f, reachMode, reaches })} />
           : <span className="sbx-hint">Choose the environment first.</span>}
-        <span className="sbx-hint">One to five groups of the environment&apos;s deployed deployment.
-          {' '}<b>{DEFAULT_GROUP}</b>: {DEFAULT_WORDS}, unless the environment writes its rules.
-          {groups.err && <span className="warntext"> The groups cannot be read ({groups.err}): only {DEFAULT_GROUP}.</span>}</span>
+        <span className="sbx-hint">What of the environment its pod may reach; nothing of it reaches the sandbox. Changed later in
+          place, on its page.</span>
+      </div>
+      <div className="sbx-field">
+        <span className="sbx-label">egress</span>
+        <EgressEditor value={f.egress} disabled={disabled} who="the sandbox" onChange={(egress) => setF({ ...f, egress })} />
       </div>
       <label className="sbx-field">
         <span className="sbx-label">image</span>
@@ -404,7 +410,7 @@ export function CreateForm({ defaults, busy, disabled = false, envs = null, none
 
 // SandboxHead is a sandbox page's head: the kind, the ID, the owner, the
 // state in words with what it costs, the main actions, the facts (its
-// environment and groups among them).
+// environment and what it reaches among them).
 export function SandboxHead({ sb, tenant, busy, act, write, onConnect, navigate = () => {} }) {
   const words = stateWords(sb);
   const owner = ownerShown(sb, tenant);
@@ -438,7 +444,7 @@ export function SandboxHead({ sb, tenant, busy, act, write, onConnect, navigate 
       {sb.statusDescription && <p className="sbx-desc">{sb.statusDescription}</p>}
       <div className="facts">
         <span>environment <b><EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} /></b></span>
-        <span>groups <GroupChips groups={sb.securityGroups} /></span>
+        <span>reaches <b><ReachesWords reaches={reachesOf(sb)} /></b></span>
         <span>image <b className="mono">{sb.image || 'the default'}</b></span>
         {sizeWords(sb) && <span>size <b>{sizeWords(sb)}</b></span>}
         <span>created <b><Ago iso={sb.createdAt} /></b></span>
@@ -489,7 +495,7 @@ function SandboxPage({ tenant, sb, tab, busy, act, err, navigate, base, can: c, 
   );
 }
 
-// Overview is the facts, its security groups with their change, and what
+// Overview is the facts, what it reaches with its change, and what
 // the sandbox does when idle.
 export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '', act = async () => {} }) {
   const node = sb.node && c.operator
@@ -509,7 +515,7 @@ export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '
         <span className="k">environment</span>
         <span className="v"><EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} />
           <span className="muted"> · fixed at its create; its attached services run in this sandbox</span></span>
-        <span className="k">groups</span><span className="v"><GroupChips groups={sb.securityGroups} /></span>
+        <span className="k">reaches</span><span className="v"><ReachesSummary pod={{ reaches: reachesOf(sb), egress: sb.egress }} /></span>
         <span className="k">created</span><span className="v">{fmtDate(sb.createdAt)} <Ago iso={sb.createdAt} /></span>
         <span className="k">last activity</span><span className="v">{fmtDate(sb.updatedAt)} <Ago iso={sb.updatedAt} /></span>
         {Number(sb.checkpointEpoch) > 0 && (
@@ -520,56 +526,64 @@ export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '
             </span>
           </>)}
       </div>
-      <GroupsBox sb={sb} write={write} busy={busy} act={act} />
+      <ReachBox sb={sb} write={write} busy={busy} act={act} />
       <IdleRules />
     </div>
   );
 }
 
-// GroupsBox shows a sandbox's security groups as a picture (who may
-// connect, what it reaches) and changes them: a move (ADR 0035), said
-// before it is confirmed. While groups are picked, the picture shows the
-// picked ones.
-export function GroupsBox({ sb, write, busy, act, open = false }) {
-  const cur = Array.isArray(sb.securityGroups) && sb.securityGroups.length ? sb.securityGroups : [DEFAULT_GROUP];
+// ReachBox shows what a sandbox reaches as a picture (who reaches it
+// through its attached services, what it reaches, its egress) and
+// changes what it reaches: in place, no move, no new address (ADR 0035,
+// revised). While entries are picked, the picture shows the picked ones.
+export function ReachBox({ sb, write, busy, act, open = false }) {
+  const cur = reachesOf(sb);
   const [editing, setEditing] = useState(open);
-  const [pick, setPick] = useState(cur);
+  const [mode, setMode] = useState(reachesMode(cur));
+  const [list, setList] = useState(Array.isArray(cur) ? cur : []);
   const env = envRef(sb);
-  const groups = useEnvGroups(env ? env.id || env.name : '');
-  const problems = checkGroups(pick, groups.choices);
-  const same = sameGroups(pick, cur);
+  const dep = useDeployed(env ? env.id || env.name : '');
+  const pick = mode === 'all' ? 'all' : mode === 'some' ? list : [];
+  const same = sameReaches(pick, cur);
+  const missing = dep.spec && Array.isArray(pick) ? missingReaches(pick, reachChoices(dep.spec)) : [];
   const shown = editing ? pick : cur;
-  const flows = groups.spec ? flowsOf(groups.spec, shown) : null;
+  const egress = sb.egress === undefined ? 'internet' : sb.egress;
+  const model = dep.spec ? reachModel(dep.spec, dep.reach, [{ kind: 'sandbox', id: sb.sandboxId, reaches: shown, egress }]) : null;
+  const pod = model ? model.pods[0] : null;
+  const start = () => { setMode(reachesMode(cur)); setList(Array.isArray(cur) ? cur : []); setEditing(true); };
   return (
     <div className="sbx-idle sg-sbx">
       <h3 className="sect sg-objsect">
-        <Icon name="shield" size={13} /> Security groups <GroupChips groups={cur} />
+        <Icon name="shield" size={13} /> Reaches <ReachesWords reaches={cur} />
+        <span className="muted small">· out: <EgressWords egress={egress} /></span>
         {!editing && (
-          <button className="mini sg-all" disabled={!write || !!busy} title={write ? 'choose other groups: a move' : WRITE_REASON}
-            onClick={() => { setPick(cur); setEditing(true); }}>Change groups</button>)}
+          <button className="mini sg-all" disabled={!write || !!busy} title={write ? 'choose what it reaches: in place' : WRITE_REASON}
+            onClick={start}>Change</button>)}
       </h3>
       {editing && (
         <div className="sg-move">
-          <GroupPicker choices={groups.choices} value={pick} onChange={setPick} disabled={!write} />
-          <p className="notice small">{MOVE_WORDS}</p>
-          {!same && problems.length > 0 && <p className="bad small">{problems.join('; ')}</p>}
+          <ReachesPicker spec={dep.spec} mode={mode} list={list} disabled={!write} err={dep.err}
+            onChange={(m, l) => { setMode(m); setList(l); }} />
+          <p className="muted small">Changed in place: the rules of what it reaches change on their nodes. It keeps its address and
+            its connections; one to what it no longer reaches ends.</p>
+          {missing.length > 0 && <p className="bad small">The deployed deployment lacks some of them: they admit nothing.</p>}
           <div className="sg-actions">
-            <ConfirmButton label="Move into these groups" confirmLabel="Move it: new address, connections break" icon="refresh"
-              className="primary" disabled={!write || !!busy || same || problems.length > 0}
-              title={same ? 'the groups it is in' : undefined}
-              onConfirm={() => act('groups', async () => {
-                await api.putSandboxSecurityGroups(sb.sandboxId, pick);
+            <button className="primary" disabled={!write || !!busy || same}
+              title={same ? 'what it reaches now' : undefined}
+              onClick={() => act('reaches', async () => {
+                await api.putSandboxReaches(sb.sandboxId, pick);
                 setEditing(false);
-              })} />
+              })}><Icon name="check" size={13} /> {busy === 'reaches' ? 'Saving…' : 'Save'}</button>
             <button className="ghost" onClick={() => setEditing(false)}>Cancel</button>
           </div>
         </div>)}
-      {flows && (
-        <GroupFlow ins={flows.ins} outs={flows.outs}>
+      {pod && (
+        <ReachFlow ins={pod.ins} outs={pod.outs} egress={egress}>
           <div className="sgf-self"><Icon name="terminal" size={14} /><span className="mono">{sb.sandboxId}</span></div>
-          {editing && !same && <div className="sgf-boxhead">with the picked groups</div>}
-        </GroupFlow>)}
-      {!flows && env && <p className="muted small">Reading the environment&apos;s groups…</p>}
+          {editing && !same && <div className="sgf-boxhead">with what is picked</div>}
+        </ReachFlow>)}
+      {!pod && env && !dep.err && <p className="muted small">Reading the environment&apos;s deployment…</p>}
+      <p className="muted small">Its egress was said at its create.</p>
     </div>
   );
 }

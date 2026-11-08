@@ -115,7 +115,7 @@ describe('the environments routes', () => {
   });
 
   it('groups the tabs into views: Activity and Settings have pages of their own', () => {
-    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'groups', 'settings']);
+    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'reachability', 'settings']);
     // A trace opens from a log line and belongs to Logs.
     expect(lensOf('traces')).toBe('logs');
     expect(lensOf('deployments')).toBe('activity');
@@ -127,6 +127,9 @@ describe('the environments routes', () => {
     expect(lensOf('objects')).toBe('');
     for (const pages of Object.values(LENS_PAGES)) for (const p of pages) expect(PAGE_LABELS[p]).toBeTruthy();
     expect(parsePath('/tenants/fecode/environments/e/activity')).toEqual(env({ env: 'e', tab: 'activity' }));
+    // The security groups' view became Reachability (ADR 0034, revised); an old link lands there.
+    expect(canonicalPath('/tenants/fecode/environments/e/groups')).toBe('/tenants/fecode/environments/e/reachability');
+    expect(envPath('fecode', 'e', 'reachability')).toBe('/tenants/fecode/environments/e/reachability');
   });
 
   it('reads an unknown tab as the overview, half an object as none, a bad replica as none', () => {
@@ -165,7 +168,7 @@ describe('the environments routes', () => {
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab: 'objects', item, otab: 'logs', replica, search });
     }
     expect(ENV_TABS).toEqual([
-      'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'groups', 'settings', 'secrets',
+      'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'reachability', 'settings', 'secrets',
       'access', 'objects',
     ]);
     // An object's page: its kind and name, its view.

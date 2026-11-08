@@ -324,22 +324,26 @@ export const api = {
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
   // status.sandboxId.
-  // environment (its name or ID) is required and fixed; securityGroups
-  // name one to five groups of it (ADR 0034), left out: default;
+  // environment (its name or ID) is required and fixed; reaches is what
+  // of it the pod reaches, "all" or [{service, port}, {addon}], left out:
+  // nothing; egress as a service's, left out: the internet (ADR 0034,
+  // revised);
   // imageCredentials ({username, password}) pull a private image (ADR
   // 0025), sealed, never answered.
   // credentials name the tenant's credentials its pod gets (ADR 0033).
-  createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, securityGroups = null, imageCredentials = null, credentials = [] } = {}) =>
+  createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, reaches, egress, imageCredentials = null, credentials = [] } = {}) =>
     tenantCall('POST', '/sandboxes', {
       image, vcpus, memoryMib, environment,
-      ...(securityGroups && securityGroups.length ? { securityGroups } : {}),
+      ...(reaches !== undefined && reaches !== null ? { reaches } : {}),
+      ...(egress !== undefined && egress !== null ? { egress } : {}),
       ...(imageCredentials ? { imageCredentials } : {}),
       ...(credentials && credentials.length ? { credentials } : {}),
     }),
-  // A sandbox's groups, the whole list: a move (hibernated and restored
-  // in them, under a new address), 202; the same list 200.
-  putSandboxSecurityGroups: (sandboxId, securityGroups) =>
-    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/security-groups`, { securityGroups }),
+  // What a sandbox reaches of its environment, the whole of it: "all" or
+  // the list ([] for nothing); in place, no move (ADR 0035, revised).
+  // Answers the sandbox's view.
+  putSandboxReaches: (sandboxId, reaches) =>
+    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/reaches`, { reaches }),
   putImageCredentials: (sandboxId, creds) => tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
   deleteImageCredentials: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
   // An HTTP binding's preflight (ADR 0028): {binding, probe{method,path}}

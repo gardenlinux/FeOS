@@ -43,21 +43,23 @@ describe('CreateForm', () => {
     expect(out).not.toContain('min="');
   });
 
-  it('asks for the environment and its groups, and has no attachable any more', () => {
+  it('asks for the environment, what it reaches and its egress, and has no attachable or groups any more', () => {
     const out = form(null);
     expect(out).toContain('<option value="" selected="">(an environment)</option>');
     expect(out).toContain('<option value="kino-dev">kino-dev</option>');
     expect(out).toContain('Choose the environment first.');
-    expect(out).toContain('<b>default</b>: nothing in · internet out');
+    expect(out).toContain('<div class="sg-seg" role="group" aria-label="egress"><button type="button" class="on" aria-pressed="true">The internet</button>');
     expect(out).not.toContain('attachable');
+    expect(out).not.toContain('security group');
     // Without an environment there is nothing to create.
     expect(out).toMatch(/<button type="submit" class="primary" disabled="" title="choose its environment">/);
   });
 
-  it('takes the one environment there is, or the one the address names, with default ticked', () => {
+  it('takes the one environment there is, or the one the address names, reaching nothing of it', () => {
     for (const out of [form(null, false, [ENVS[0]]), form(null, false, ENVS, 'kino-dev')]) {
       expect(out).toContain('<option value="kino-dev" selected="">kino-dev</option>');
-      expect(out).toContain('reading the environment&#x27;s groups…');
+      expect(out).toContain('<div class="sg-seg" role="group" aria-label="reaches"><button type="button" class="on" aria-pressed="true">Nothing</button>');
+      expect(out).toContain('Alone on the network');
       expect(out).not.toContain('Choose the environment first.');
     }
     // One the person may not write is no choice.
@@ -76,7 +78,7 @@ const SB = {
   sandboxId: 'h3k9v2m7qpx', clientState: 'paused', image: 'ghcr.io/kino/agent-base:2.4', node: 'n3', owner: 'kino',
   createdAt: '2026-11-03T10:00:00Z', updatedAt: '2026-11-06T09:00:00Z', statusDescription: '', checkpointEpoch: '0',
   vcpus: 2, memoryMib: 4096, environment: { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' },
-  securityGroups: ['default', 'db-admin'],
+  reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }], egress: 'none',
 };
 const head = (sb, write) => renderToStaticMarkup(
   <SandboxHead sb={sb} tenant="kino" busy="" act={() => {}} write={write} onConnect={() => {}} />,
@@ -92,8 +94,10 @@ describe('SandboxHead', () => {
     expect(out).not.toContain('Pause<');
     expect(out).toContain('Connect an agent');
     expect(out).toContain('href="/tenants/kino/environments/kino-dev"');
-    expect(out).toContain('<span class="sg-chip mono" title="default: nothing in · internet out">default</span>');
-    expect(out).toContain('<span class="sg-chip mono">db-admin</span>');
+    expect(out).toContain('reaches <b><span class="rc-reaches">');
+    expect(out).toContain(' api:http, db</span>');
+    expect(head({ ...SB, reaches: 'all' }, true)).toContain('all of the environment');
+    expect(head({ ...SB, reaches: [] }, true)).toContain('nothing of the environment');
     expect(out).not.toContain('attachable');
     // The owner is the tenant: it says nothing here.
     expect(out).not.toContain('>kino<');

@@ -167,17 +167,19 @@ describe('the tenant, with the session', () => {
     expect(res.status.sandboxId).toBe('abcdefghjkm');
   });
 
-  it('a sandbox is made in an environment and its groups, never attachable (ADR 0035)', async () => {
+  it('a sandbox is made in an environment with what it reaches and its egress, never attachable (ADR 0035)', async () => {
     setActiveTenant('acme');
     answer(201, { status: { sandboxId: 'abcdefghjkm' } });
-    await api.createSandbox('', 0, 0, { environment: 'kino-dev', securityGroups: ['default', 'db-admin'], attachable: true });
+    await api.createSandbox('', 0, 0, { environment: 'kino-dev', reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }],
+      egress: 'none', attachable: true, securityGroups: ['default'] });
     expect(JSON.parse(calls[0].init.body)).toEqual({ image: '', vcpus: 0, memoryMib: 0, environment: 'kino-dev',
-      securityGroups: ['default', 'db-admin'] });
-    answer(202, { sandboxId: 'abcdefghjkm', securityGroups: ['db-admin'] });
-    await api.putSandboxSecurityGroups('abcdefghjkm', ['db-admin']);
-    expect(calls[1].path).toBe('/api/v1/sandboxes/abcdefghjkm/security-groups');
+      reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }], egress: 'none' });
+    answer(200, { sandboxId: 'abcdefghjkm', reaches: 'all' });
+    await api.putSandboxReaches('abcdefghjkm', 'all');
+    expect(calls[1].path).toBe('/api/v1/sandboxes/abcdefghjkm/reaches');
     expect(calls[1].init.method).toBe('PUT');
-    expect(JSON.parse(calls[1].init.body)).toEqual({ securityGroups: ['db-admin'] });
+    expect(JSON.parse(calls[1].init.body)).toEqual({ reaches: 'all' });
+    expect(api.putSandboxSecurityGroups).toBeUndefined();
     answer(200, { sandboxes: [] });
     await api.listSandboxes('kino dev');
     expect(calls[2].path).toBe('/api/v1/sandboxes?environment=kino+dev');
