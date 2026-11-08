@@ -272,6 +272,14 @@ func TestReachForms(t *testing.T) {
 			t.Errorf("%s read as %+v", bad, r)
 		}
 	}
+	var body struct {
+		Reaches Reaches `json:"reaches"`
+		Egress  *Egress `json:"egress"`
+	}
+	if err := json.Unmarshal([]byte(`{"reaches": null, "egress": null}`), &body); err != nil || body.Reaches.All ||
+		body.Egress != nil {
+		t.Errorf("null %+v %v", body, err)
+	}
 	if b, _ := json.Marshal(Reaches{}); string(b) != `[]` {
 		t.Errorf("nothing %s", b)
 	}

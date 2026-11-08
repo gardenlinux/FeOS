@@ -107,9 +107,12 @@ func (e Egress) MarshalJSON() ([]byte, error) {
 const egressForms = `want "internet", "none" or {"domains": [name, …], "blocks": [{"cidr": prefix, "except": [prefix, …]}, …]}`
 
 // UnmarshalJSON reads one of the forms strictly: another string, an
-// unknown key and a value of the wrong type are errors.
+// unknown key and a value of the wrong type are errors; null is left out.
 func (e *Egress) UnmarshalJSON(b []byte) error {
 	b = bytes.TrimSpace(b)
+	if string(b) == "null" {
+		return nil
+	}
 	if len(b) > 0 && b[0] == '"' {
 		var s string
 		if err := json.Unmarshal(b, &s); err != nil {
@@ -176,9 +179,13 @@ func (r Reaches) MarshalJSON() ([]byte, error) {
 	return json.Marshal(r.Entries)
 }
 
-// UnmarshalJSON reads "all" or a list of entries, strictly.
+// UnmarshalJSON reads "all" or a list of entries, strictly; null is
+// left out (nothing).
 func (r *Reaches) UnmarshalJSON(b []byte) error {
 	b = bytes.TrimSpace(b)
+	if string(b) == "null" {
+		return nil
+	}
 	if len(b) > 0 && b[0] == '"' {
 		var s string
 		if err := json.Unmarshal(b, &s); err != nil {
