@@ -172,7 +172,7 @@ type ZoneMove struct {
 // publish. A label may move when it is free in zone or the tenant's
 // there, and is not a plain label unless plainOK (the tenant owns the new
 // zone's plain names, model.Zones.PlainLabels); its natural label and its
-// fallback are never plain ones. The labels in the old zone stay the
+// fallback, also of a name it had before a rename, are never plain ones. The labels in the old zone stay the
 // tenant's, free for it alone, as a changed label's do. It locks the
 // tenant FOR UPDATE, runs in a transaction (the caller's, when in one),
 // sends ferun_ingress for every environment it moved and returns the
@@ -207,8 +207,9 @@ func (s *Store) SetTenantZone(ctx context.Context, tenant, zone string, plainOK 
 				return fmt.Errorf("release the host label of environment %s: %w", e.ID, err)
 			}
 			label := e.HostLabel
-			natural, naturalOK, fallback := model.HostLabels(e.Name, e.Owner, e.ID)
-			own := label == fallback || (naturalOK && label == natural)
+			// Its own is one its name gave it, the one it has or one it
+			// had before a rename.
+			own := model.GivenHostLabel(label, e.Owner, e.ID)
 			ok := false
 			if own || model.ChosenHostLabel(label) || (plainOK && model.PlainHostLabel(label)) {
 				if ok, err = tx.takeHostLabel(ctx, zone, label, e); err != nil {

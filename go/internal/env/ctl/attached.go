@@ -642,7 +642,10 @@ func (c *Controller) superviseAttached(ctx context.Context, v *view, p *attached
 		after.NextRestartAt = time.Time{}
 	}
 	if after.ProcessID != "" {
-		ps, err := c.d.Runner.ProcessesDetached(ctx, l, processName(v.env.Name, p.name))
+		// The recorded process by its ID too: one started under the
+		// environment's name, by a ferund before processName took its ID,
+		// is the service's process still.
+		ps, err := c.d.Runner.ProcessesDetached(ctx, l, processName(v.env.ID, p.name), after.ProcessID)
 		if err != nil {
 			after.Detail = "list the processes: " + err.Error()
 			c.writeAttached(ctx, a, after, l)
@@ -699,26 +702,38 @@ func keepAwake(after *store.EnvAttached, before store.EnvAttached, p *attachedPl
 	}
 }
 
-// processName is the name of an attached service's process (§13.4).
-func processName(env, service string) string { return "ferun-env-" + env + "-" + service }
+// processName is the name of an attached service's process (§13.4):
+// of its environment's ID, which a rename leaves (ADR 0037), so that the
+// supervisor finds the process under the same name after one.
+func processName(env uuid.UUID, service string) string {
+	return "ferun-env-" + env.String() + "-" + service
+}
+
+// legacyProcessName is the name a ferund before ADR 0037 gave the process,
+// of the environment's name. stopStrays looks for it too, until no such
+// process is left; one of a name the environment had before a rename is
+// found only while its row records it (superviseAttached lists it by ID).
+func legacyProcessName(env, service string) string { return "ferun-env-" + env + "-" + service }
 
 // stopStrays stops the processes of an attached service that its row does
 // not record, before a new one starts (§13.5): running processes in the
-// sandbox with its name, but those another attached service of the
-// sandbox records (an environment and service whose names join to the
-// same name). Such a process was started by a look whose write was lost
-// (a leader change, a row moved or restarted meanwhile), or survived a
-// restart of a paused sandbox; it would hold the port and the secrets.
+// sandbox with its name (or its legacy name), but those another attached
+// service of the sandbox records (an environment and service whose legacy
+// names join to the same name). Such a process was started by a look
+// whose write was lost (a leader change, a row moved or restarted
+// meanwhile), or survived a restart of a paused sandbox; it would hold
+// the port and the secrets.
 func (c *Controller) stopStrays(ctx context.Context, v *view, service string, sb store.Sandbox, l model.Lease) error {
-	name := processName(v.env.Name, service)
-	ps, err := c.d.Runner.ProcessesDetached(ctx, l, name)
-	if err != nil {
-		return err
-	}
 	var strays []string
-	for _, pr := range ps {
-		if pr.Running && pr.Name == name {
-			strays = append(strays, pr.ID)
+	for _, name := range []string{processName(v.env.ID, service), legacyProcessName(v.env.Name, service)} {
+		ps, err := c.d.Runner.ProcessesDetached(ctx, l, name)
+		if err != nil {
+			return err
+		}
+		for _, pr := range ps {
+			if pr.Running && pr.Name == name {
+				strays = append(strays, pr.ID)
+			}
 		}
 	}
 	if len(strays) == 0 {
@@ -752,7 +767,7 @@ func (c *Controller) startAttached(ctx context.Context, v *view, p *attachedPlan
 		return
 	}
 	id, err := c.d.Runner.StartProcessDetached(ctx, l, tools.ProcessStart{Argv: p.argv, Cwd: p.cwd, Env: env.vars,
-		Name: processName(v.env.Name, p.name)})
+		Name: processName(v.env.ID, p.name)})
 	switch {
 	case errors.Is(err, tools.ErrNoCwd):
 		after.Phase, after.Detail = model.PhaseStarting, fmt.Sprintf("cwd %s does not exist yet", p.cwd)

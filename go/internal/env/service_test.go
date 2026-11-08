@@ -28,6 +28,77 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
+// A rename (ADR 0037): the same environment under a new name, checked as
+// a create's; its published host stays, the old name is free; the name it
+// has changes nothing, another's is 409, a deleting one's 409.
+func TestRenameEnv(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, harnessOptions{appsZone: "apps.test"})
+	ctx := h.ctx()
+	stage := h.create("stage", map[string]string{"fecode.class": "stage"})
+	h.create("prod", nil)
+	if _, err := h.svc.SetPublic(ctx, tenantA, "stage", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	hosts := []string{"stage-acme.apps.test"}
+
+	ch, unsubscribe := h.d.Subscribe(db.ChanIngress)
+	defer unsubscribe()
+	st, err := h.svc.RenameEnv(ctx, tenantA, "stage", RenameEnvRequest{Name: "shop--stage"})
+	if err != nil || st.ID != stage.ID || st.Name != "shop--stage" || !st.Public || !slices.Equal(st.Hosts, hosts) ||
+		st.Labels["fecode.class"] != "stage" {
+		t.Fatalf("rename: %+v %v", st, err)
+	}
+	waitHint(t, ch, store.IngressEnvPayload(uuid.MustParse(stage.ID)))
+	if e := h.env("shop--stage"); e.HostLabel != "stage-acme" {
+		t.Fatalf("row %+v", e)
+	}
+	for _, ref := range []string{"shop--stage", stage.ID} {
+		if got, err := h.svc.GetEnv(ctx, tenantA, ref); err != nil || got.ID != stage.ID || !slices.Equal(got.Hosts, hosts) {
+			t.Fatalf("get %s: %+v %v", ref, got, err)
+		}
+	}
+	_, err = h.svc.GetEnv(ctx, tenantA, "stage")
+	wantStatus(t, err, http.StatusNotFound, "no such environment")
+
+	// Its own name again changes nothing; by its ID as well.
+	if again, err := h.svc.RenameEnv(ctx, tenantA, stage.ID, RenameEnvRequest{Name: "shop--stage"}); err != nil ||
+		again.ID != stage.ID || again.Name != "shop--stage" {
+		t.Fatalf("again: %+v %v", again, err)
+	}
+	// Another's name is taken; another tenant's environment is absent.
+	var ae *apierr.Error
+	_, err = h.svc.RenameEnv(ctx, tenantA, "shop--stage", RenameEnvRequest{Name: "prod"})
+	if !errors.As(err, &ae) || ae.Status != http.StatusConflict || ae.Code != CodeNameTaken ||
+		ae.Msg != "an environment named prod exists" {
+		t.Fatalf("name taken: %v", err)
+	}
+	_, err = h.svc.RenameEnv(ctx, tenantB, stage.ID, RenameEnvRequest{Name: "mine"})
+	wantStatus(t, err, http.StatusNotFound, "no such environment")
+	for _, name := range []string{"Stage", "", uuid.NewString(), "a.b", strings.Repeat("a", 64)} {
+		_, err := h.svc.RenameEnv(ctx, tenantA, "shop--stage", RenameEnvRequest{Name: name})
+		wantStatus(t, err, http.StatusBadRequest, "must be a DNS label")
+	}
+	// The old name is free.
+	h.create("stage", nil)
+
+	// One never published gets its host from the name it has then.
+	if _, err := h.svc.RenameEnv(ctx, tenantA, "prod", RenameEnvRequest{Name: "live"}); err != nil {
+		t.Fatal(err)
+	}
+	a, err := h.svc.SetPublic(ctx, tenantA, "live", true, "")
+	if err != nil || !slices.Equal(a.Hosts, []string{"live-acme.apps.test"}) {
+		t.Fatalf("publish: %+v %v", a, err)
+	}
+
+	// Being deleted, it keeps its name.
+	if err := h.svc.DeleteEnv(ctx, tenantA, "live"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.svc.RenameEnv(ctx, tenantA, "live", RenameEnvRequest{Name: "gone"})
+	wantStatus(t, err, http.StatusConflict, "environment live is being deleted")
+}
+
 func TestCreateListGetDelete(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})

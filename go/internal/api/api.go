@@ -129,6 +129,7 @@ type Environments interface {
 	CreateEnv(ctx context.Context, tenant string, req envs.CreateEnvRequest) (envs.EnvStatus, bool, error)
 	ListEnvs(ctx context.Context, tenant string, labels map[string]string) (envs.EnvList, error)
 	GetEnv(ctx context.Context, tenant, envRef string) (envs.EnvStatus, error)
+	RenameEnv(ctx context.Context, tenant, envRef string, req envs.RenameEnvRequest) (envs.EnvStatus, error)
 	DeleteEnv(ctx context.Context, tenant, envRef string) error
 	PlanSpec(ctx context.Context, tenant string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error)
 	Addons(ctx context.Context, tenant string) (envs.AddonCatalog, error)

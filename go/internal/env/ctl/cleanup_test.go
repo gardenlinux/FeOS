@@ -126,7 +126,7 @@ func TestAttachedNewIncarnation(t *testing.T) {
 	if c.Restarts != 0 || c.ProbeFailures != 0 || !c.NextRestartAt.IsZero() || c.Detail != "" {
 		t.Errorf("not reset: %+v", c)
 	}
-	if got := h.runningNamed(again, "ferun-env-dev-web"); !slices.Equal(got, []string{c.ProcessID}) {
+	if got := h.runningNamed(again, processName(env.ID, "web")); !slices.Equal(got, []string{c.ProcessID}) {
 		t.Errorf("running %v, the row records %s", got, c.ProcessID)
 	}
 	eventually(t, 10*time.Second, "the new sandbox's names", func() bool {
@@ -171,7 +171,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		_, err := h.st.GetAttached(bg, dev.ID, "web")
 		return err != nil
 	})
-	if got := h.runningNamed(sb, "ferun-env-dev-web"); !slices.Equal(got, []string{a.ProcessID}) {
+	if got := h.runningNamed(sb, processName(dev.ID, "web")); !slices.Equal(got, []string{a.ProcessID}) {
 		t.Fatalf("running %v", got)
 	}
 	if r := h.deployment(dev.ID, r2); r.State == model.DeploymentDeployed {
@@ -182,7 +182,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 	if _, err := h.st.GetAttached(bg, dev.ID, "web"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("the removed service's row: %v", err)
 	}
-	if got := h.runningNamed(sb, "ferun-env-dev-web"); len(got) != 0 {
+	if got := h.runningNamed(sb, processName(dev.ID, "web")); len(got) != 0 {
 		t.Fatalf("the removed service's process runs on: %v", got)
 	}
 	eventually(t, 10*time.Second, "the removed service's name gone", func() bool {
@@ -210,7 +210,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		_, eerr := h.st.GetEnvironment(bg, stage.ID)
 		return err != nil || eerr != nil
 	})
-	if got := h.runningNamed(sb, "ferun-env-stage-web"); !slices.Equal(got, []string{b.ProcessID}) {
+	if got := h.runningNamed(sb, processName(stage.ID, "web")); !slices.Equal(got, []string{b.ProcessID}) {
 		t.Fatalf("running %v", got)
 	}
 	pp.failStops.Store(false)
@@ -219,7 +219,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		_, err := h.st.GetAttached(bg, stage.ID, "web")
 		return errors.Is(err, store.ErrNoRow)
 	})
-	if got := h.runningNamed(sb, "ferun-env-stage-web"); len(got) != 0 {
+	if got := h.runningNamed(sb, processName(stage.ID, "web")); len(got) != 0 {
 		t.Fatalf("the deleted environment's process runs on: %v", got)
 	}
 	// The environment goes once its sandbox has.
@@ -270,10 +270,10 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 		t.Fatalf("moved %+v %v", b, err)
 	}
 	cur := h.sandboxUp(s1.ID)
-	if got := h.runningNamed(cur, "ferun-env-dev-web"); len(got) != 0 {
+	if got := h.runningNamed(cur, processName(env.ID, "web")); len(got) != 0 {
 		t.Fatalf("the moved service's process %s runs on in the old sandbox: %v", a.ProcessID, got)
 	}
-	if got := h.runningNamed(cur, "ferun-env-dev-worker"); len(got) != 1 {
+	if got := h.runningNamed(cur, processName(env.ID, "worker")); len(got) != 1 {
 		t.Fatalf("the service that stays: %v", got)
 	}
 	eventually(t, 30*time.Second, "the moved service's name in the new sandbox alone", func() bool {
@@ -281,7 +281,7 @@ func TestAttachedMovesFromSleepingSandbox(t *testing.T) {
 		return resolves(n1, s1.ID, "web", a2) && resolves(n1, s1.ID, "worker", a1) &&
 			resolves(n1, s2.ID, "web", a2) && resolves(n1, s2.ID, "worker", a1)
 	})
-	if got := h.runningNamed(h.sandboxUp(s2.ID), "ferun-env-dev-web"); !slices.Equal(got, []string{b.ProcessID}) {
+	if got := h.runningNamed(h.sandboxUp(s2.ID), processName(env.ID, "web")); !slices.Equal(got, []string{b.ProcessID}) {
 		t.Fatalf("the new sandbox runs %v, the row records %s", got, b.ProcessID)
 	}
 }
@@ -374,7 +374,7 @@ func TestAttachedSupervisedPastManyRecords(t *testing.T) {
 		t.Fatalf("attached %+v %v", a, err)
 	}
 	seedRecords(t, pp.dir(sb.ID), "000000-agent", "", 300)
-	seedRecords(t, pp.dir(sb.ID), "000000-web", "ferun-env-dev-web", 10)
+	seedRecords(t, pp.dir(sb.ID), "000000-web", processName(env.ID, "web"), 10)
 
 	if err := h.runner.StopProcessDetached(bg, lease(sb), a.ProcessID); err != nil {
 		t.Fatal(err)
@@ -384,7 +384,7 @@ func TestAttachedSupervisedPastManyRecords(t *testing.T) {
 		b, err = h.st.GetAttached(bg, env.ID, "web")
 		return err == nil && b.Restarts == 1 && b.ProcessID != "" && b.ProcessID != a.ProcessID && b.Phase == model.PhaseReady
 	})
-	ps, err := h.runner.ProcessesDetached(bg, lease(sb), "ferun-env-dev-web")
+	ps, err := h.runner.ProcessesDetached(bg, lease(sb), processName(env.ID, "web"))
 	if err != nil {
 		t.Fatal(err)
 	}

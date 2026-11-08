@@ -3243,7 +3243,13 @@ new template once.
 
 An attached service is a supervised process in the main container of a
 sandbox of its environment, in the sandbox's groups, named
-`ferun-env-<env>-<service>`. The step
+`ferun-env-<env id>-<service>`, of the environment's ID, which a rename
+leaves; a ferund before ADR 0037 named it by the environment's name. The
+supervisor lists the processes of the service's name and the process
+its row records by its ID whatever its name, so that a process of
+before runs on under its old name, also after a rename, until it is
+replaced; the stop of strays looks for both names, the ID's and the
+environment's name of now. The step
 records it with the sandbox's incarnation, moves it when the spec names
 another sandbox, and wakes a sandbox that does not run (Acquire with an
 exec hold) to start its process, holding it up to a minute for the first
@@ -3479,6 +3485,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `POST /api/v1/environments` `{name, id?, labels?}` | 201 its status; the same ID and name again 200; 409 `name_taken`, `id_taken` |
 | `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest deployment's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
+| `PATCH /api/v1/environments/{env}` `{name}` | 200 its status under the new name ([Renaming](#renaming-an-environment)); the name it has again 200, changing nothing; 400 for a name a create refuses; 409 `name_taken` "an environment named X exists"; 409 while it is being deleted |
 | `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a tenant of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds, or a plain label that is the natural label of an existing tenant's environment; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings, images}` |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current, images}`, `images` `{"<as written>": "<registry>/<repository>@sha256:…"}` ([Plan](#plan-apply-revert-clone)) |
@@ -3520,6 +3527,30 @@ author has at most 1 KiB, a message 64 KiB, annotations 4 KiB, labels 64
 of at most 253 bytes. Not built: MCP tools and grants for environments,
 an admin listing, volumes for services, a copy of data on a clone, addon
 backups and minor upgrades, a CLI.
+
+#### Renaming an environment
+
+An environment's identity is its ID ([ADR
+0037](../adr/0037-environments-can-be-renamed.md)); its name, a DNS label
+unique per tenant, is a handle. `PATCH …/{env} {"name"}` (an
+environment admin's or a tenant writer's, as a deletion) checks the name
+as a create does, locks the row FOR UPDATE, refuses a name another
+environment of the tenant has (`UNIQUE (owner, name)` catches a race),
+writes `environments.name` alone (`store.RenameEnvironment`) and sends
+`ferun_ingress` `env:<id>`, so that the ingress's table carries the new
+name. It wakes no controller loop: nothing the controller makes is
+named by it. What stays: the ID, labels, deployments, tags, secrets,
+grants and tokens, route tokens, domains, the host label (claimed from
+the name at the first publish; one never published gets its label from
+the name it has then; a zone move keeps a label given under a former
+name, `model.GivenHostLabel`), pods, templates, security groups and name
+tables (by ID: nothing rolls), attached services' processes (named by
+the ID, [Attached services](#attached-services)), and logs, traces,
+access logs and the traffic, which the sink keys by the ID. What
+changes: the name in every answer, the `{env}` of a path by name, the
+route door's too (the old name is 404 and free at once), the console's
+URLs, which name it, and the names in messages from then on. It is not recorded in activity,
+as no other change of an environment is.
 
 ### Tenants' jobs
 

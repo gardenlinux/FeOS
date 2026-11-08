@@ -27,6 +27,12 @@ type CreateEnvRequest struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
+// RenameEnvRequest is PATCH /api/v1/environments/{env} (ADR 0037).
+type RenameEnvRequest struct {
+	// Name is the environment's new name, as a create's.
+	Name string `json:"name"`
+}
+
 // EnvList is GET /api/v1/environments[?label=k=v…].
 type EnvList struct {
 	Environments []EnvSummary `json:"environments"`

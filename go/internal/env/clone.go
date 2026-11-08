@@ -31,12 +31,21 @@ const (
 	maxSecretBytes = 64 << 10
 )
 
+// checkEnvName validates an environment's name, a create's or a
+// rename's: a DNS label, never a UUID.
+func checkEnvName(name string) error {
+	if _, isUUID := parseUUID(name); !spec.IsName(name) || isUUID {
+		return errBadRequest("name %q must be a DNS label (lowercase letters, digits and '-', at most 63) "+
+			"and not a UUID", name)
+	}
+	return nil
+}
+
 // checkNewEnv validates a new environment's name, ID ("" mints one) and
 // labels and returns its ID.
 func checkNewEnv(name, id string, labels map[string]string) (uuid.UUID, error) {
-	if _, isUUID := parseUUID(name); !spec.IsName(name) || isUUID {
-		return uuid.Nil, errBadRequest("name %q must be a DNS label (lowercase letters, digits and '-', at most 63) "+
-			"and not a UUID", name)
+	if err := checkEnvName(name); err != nil {
+		return uuid.Nil, err
 	}
 	if len(labels) > maxLabels {
 		return uuid.Nil, errBadRequest("%d labels; at most %d are allowed", len(labels), maxLabels)

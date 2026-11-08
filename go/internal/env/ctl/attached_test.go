@@ -154,7 +154,7 @@ func TestAttachedService(t *testing.T) {
 		t.Fatalf("attached %+v %v", a, err)
 	}
 	ps, err := h.runner.ProcessesDetached(bg, lease(sb), "")
-	if err != nil || len(ps) != 1 || ps[0].ID != a.ProcessID || ps[0].Name != "ferun-env-dev-web" || !ps[0].Running {
+	if err != nil || len(ps) != 1 || ps[0].ID != a.ProcessID || ps[0].Name != processName(env.ID, "web") || !ps[0].Running {
 		t.Fatalf("processes %+v %v", ps, err)
 	}
 	var lines []string
@@ -442,7 +442,7 @@ func TestAttachedStrayProcesses(t *testing.T) {
 		b, err = h.st.GetAttached(bg, env.ID, "web")
 		return err == nil && b.ProcessID != "" && b.ProcessID != a.ProcessID && b.Phase == model.PhaseReady
 	})
-	if got := h.runningNamed(sb, "ferun-env-dev-web"); !slices.Equal(got, []string{b.ProcessID}) {
+	if got := h.runningNamed(sb, processName(env.ID, "web")); !slices.Equal(got, []string{b.ProcessID}) {
 		t.Fatalf("running %v, the row records %s", got, b.ProcessID)
 	}
 
@@ -484,7 +484,7 @@ func TestAttachedStrayProcesses(t *testing.T) {
 	if _, err := h.eng.Ensure(ctx, sb.ID); err != nil {
 		t.Fatal(err)
 	}
-	if got := h.runningNamed(sb, "ferun-env-dev-web"); !slices.Equal(got, []string{b.ProcessID}) {
+	if got := h.runningNamed(sb, processName(env.ID, "web")); !slices.Equal(got, []string{b.ProcessID}) {
 		t.Fatalf("after the resume: running %v, the row records %s", got, b.ProcessID)
 	}
 	// Running again, the restart goes through: one new process.
@@ -494,8 +494,70 @@ func TestAttachedStrayProcesses(t *testing.T) {
 	eventually(t, 30*time.Second, "the restarted process", func() bool {
 		c, err := h.st.GetAttached(bg, env.ID, "web")
 		return err == nil && c.ProcessID != "" && c.ProcessID != b.ProcessID &&
-			slices.Equal(h.runningNamed(sb, "ferun-env-dev-web"), []string{c.ProcessID})
+			slices.Equal(h.runningNamed(sb, processName(env.ID, "web")), []string{c.ProcessID})
 	})
+}
+
+// A rename leaves an attached service's process alone (ADR 0037): the
+// process is named by the environment's ID, and one a ferund before named
+// by the environment's name is found by the ID its row records, before and
+// after a rename; no second process starts beside it.
+func TestAttachedSurvivesRename(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is not installed; the process scripts need it")
+	}
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	hostProcesses(n1, t.TempDir())
+	sb := h.sandbox()
+	env := h.newEnv("dev")
+	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"runtime":"attached","sandbox":%q,"command":["sleep","60"]}}}`, sb.ID))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
+	a, err := h.st.GetAttached(bg, env.ID, "web")
+	if err != nil || a.ProcessID == "" || a.Phase != model.PhaseReady {
+		t.Fatalf("attached %+v %v", a, err)
+	}
+	web := processName(env.ID, "web")
+	if got := h.runningNamed(sb, web); !slices.Equal(got, []string{a.ProcessID}) {
+		t.Fatalf("running %v, the row records %s", got, a.ProcessID)
+	}
+	kept := func(id string) {
+		t.Helper()
+		never(t, 3*time.Second, "the supervisor replaced the process "+id, func() bool {
+			c, err := h.st.GetAttached(bg, env.ID, "web")
+			return err != nil || c.ProcessID != id || c.Restarts != 0
+		})
+	}
+	if _, err := h.st.RenameEnvironment(bg, env.ID, "dev--renamed"); err != nil {
+		t.Fatal(err)
+	}
+	kept(a.ProcessID)
+	if got := h.runningNamed(sb, web); !slices.Equal(got, []string{a.ProcessID}) {
+		t.Fatalf("after the rename: running %v, the row records %s", got, a.ProcessID)
+	}
+
+	// A process of before, named by the environment's name, which a
+	// rename then changes: the row records it, so it stays the service's.
+	legacy := legacyProcessName("dev--renamed", "web")
+	old, err := h.runner.StartProcessDetached(bg, lease(sb), tools.ProcessStart{Argv: []string{"sleep", "60"}, Name: legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.exec(`UPDATE env_attached SET process_id = $2 WHERE env_id = $1 AND service = 'web'`, env.ID, old)
+	if err := h.runner.StopProcessDetached(bg, lease(sb), a.ProcessID); err != nil {
+		t.Fatal(err)
+	}
+	kept(old)
+	if _, err := h.st.RenameEnvironment(bg, env.ID, "dev--again"); err != nil {
+		t.Fatal(err)
+	}
+	kept(old)
+	if got := h.runningNamed(sb, legacy); !slices.Equal(got, []string{old}) {
+		t.Fatalf("the process of before: running %v, want %s", got, old)
+	}
+	if got := h.runningNamed(sb, web); len(got) != 0 {
+		t.Fatalf("a second process beside the one of before: %v", got)
+	}
 }
 
 // A restart on request is no exit: a look of the supervisor that read the
@@ -513,11 +575,12 @@ func TestAttachedRestartIsNoExit(t *testing.T) {
 	// release: the look that lists is then between reading its row and
 	// learning what runs.
 	var armed atomic.Bool
+	var web string // the service's process name, set before armed
 	listing, release := make(chan struct{}), make(chan struct{})
 	n1.Script().SetExec(func(ctx context.Context, pod podid.ID, req *containerv1.ExecRequest, _ testnode.ExecOutput) (int32, bool, error) {
 		argv := req.Command
 		if len(argv) > 2 && argv[0] == "python3" {
-			if len(argv) == 4 && strings.HasPrefix(argv[2], "import json,") && argv[3] == "ferun-env-dev-web" &&
+			if armed.Load() && len(argv) >= 4 && strings.HasPrefix(argv[2], "import json,") && argv[3] == web &&
 				armed.CompareAndSwap(true, false) {
 				close(listing)
 				select {
@@ -542,6 +605,7 @@ func TestAttachedRestartIsNoExit(t *testing.T) {
 		t.Fatalf("attached %+v %v", a, err)
 	}
 
+	web = processName(env.ID, "web")
 	armed.Store(true)
 	select {
 	case <-listing:
@@ -561,7 +625,7 @@ func TestAttachedRestartIsNoExit(t *testing.T) {
 	if b.Restarts != 0 || b.LastExit != nil {
 		t.Errorf("the restart counted as an exit: %+v", b)
 	}
-	if got := h.runningNamed(sb, "ferun-env-dev-web"); !slices.Equal(got, []string{b.ProcessID}) {
+	if got := h.runningNamed(sb, processName(env.ID, "web")); !slices.Equal(got, []string{b.ProcessID}) {
 		t.Errorf("running %v, the row records %s", got, b.ProcessID)
 	}
 }
@@ -618,7 +682,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 		t.Fatalf("the removed service's row: %v", err)
 	}
 	cur := h.sandboxUp(sb.ID)
-	if got := h.runningNamed(cur, "ferun-env-dev-web"); len(got) != 0 {
+	if got := h.runningNamed(cur, processName(dev.ID, "web")); len(got) != 0 {
 		t.Fatalf("the removed service's process %s runs on: %v", a.ProcessID, got)
 	}
 	eventually(t, 10*time.Second, "the removed service's name gone", func() bool {
@@ -641,7 +705,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 		return errors.Is(err, store.ErrNoRow)
 	})
 	cur = h.sandboxUp(box.ID)
-	if got := h.runningNamed(cur, "ferun-env-stage-web"); len(got) != 0 {
+	if got := h.runningNamed(cur, processName(stage.ID, "web")); len(got) != 0 {
 		t.Fatalf("the deleted environment's process runs on: %v", got)
 	}
 	eventually(t, 10*time.Second, "the deleted environment's names gone", func() bool {

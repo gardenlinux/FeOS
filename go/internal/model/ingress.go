@@ -84,6 +84,24 @@ func HostLabels(name, tenant string, id uuid.UUID) (natural string, naturalOK bo
 	return natural, naturalOK, fallback
 }
 
+// GivenHostLabel reports whether label is one HostLabels gives the
+// environment id of tenant under some name, the one it has or one it had
+// before a rename (ADR 0037): a fallback with id's hash, or the usable
+// natural label of a name and tenant. A zone move keeps such a label as
+// the environment's own.
+func GivenHostLabel(label, tenant string, id uuid.UUID) bool {
+	sum := sha256.Sum256([]byte(id.String()))
+	if strings.HasSuffix(label, "-"+hex.EncodeToString(sum[:])[:hashLen]) && isHostLabel(label) {
+		return true
+	}
+	name, t, ok := NaturalPair(label)
+	if !ok || t != tenant {
+		return false
+	}
+	natural, naturalOK, _ := HostLabels(name, tenant, id)
+	return naturalOK && natural == label
+}
+
 // ChosenHostLabel reports whether s may be a default host label its
 // tenant chose (PUT …/public with a hostLabel): a DNS label as
 // isHostLabel has it, with "--" in it and not ending as a fallback does.

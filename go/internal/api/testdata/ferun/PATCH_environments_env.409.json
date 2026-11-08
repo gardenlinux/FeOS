@@ -1,0 +1,14 @@
+{
+  "method": "PATCH",
+  "path": "/api/v1/environments/0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b04",
+  "query": {},
+  "status": 409,
+  "request": {
+    "name": "expensa-stage"
+  },
+  "response": {
+    "error": "an environment named expensa-stage exists",
+    "code": "name_taken"
+  },
+  "note": "another environment of the tenant has the name; 400 for a name that is no DNS label or a UUID, 404 for an environment the tenant does not have, 409 while it is being deleted"
+}

@@ -59,6 +59,7 @@ var routeNeeds = map[string]string{
 	"POST /api/v1/environments/plan":                            "read tenant",
 	"GET /api/v1/addons":                                        "member",
 	"GET /api/v1/environments/{env}":                            "read environment",
+	"PATCH /api/v1/environments/{env}":                          "admin environment or write tenant",
 	"DELETE /api/v1/environments/{env}":                         "admin environment or write tenant",
 	"POST /api/v1/environments/{env}/plan":                      "write environment",
 	"POST /api/v1/environments/{env}/deployments":               "write environment",

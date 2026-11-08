@@ -5,6 +5,7 @@ package store_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -268,6 +269,48 @@ func TestSetTenantZone(t *testing.T) {
 	}
 	if _, err := s.SetTenantZone(bg, "nope", tz, false); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("unknown tenant: %v", err)
+	}
+}
+
+// A rename writes the name alone (ADR 0037): the host label claimed from
+// the name before stays, and a zone move keeps it as the environment's
+// own, a natural label as a fallback. A name another environment of the
+// owner has is ErrExists, an unknown ID ErrNoRow.
+func TestRenameEnvironment(t *testing.T) {
+	s, d := newStore(t)
+	mkTenant(t, s, "fecode")
+	ch, unsubscribe := d.Subscribe(db.ChanIngress)
+	defer unsubscribe()
+	natural := publish(t, s, mkEnv(t, s, "fecode", "web").ID, true)
+	fallback := publish(t, s, mkEnv(t, s, "fecode", "kino-prod-9101dfcb").ID, true)
+	if !strings.HasPrefix(fallback.HostLabel, "kino-prod-9101dfcb-") {
+		t.Fatalf("fallback %+v", fallback)
+	}
+	drain(ch)
+
+	e, err := s.RenameEnvironment(bg, natural.ID, "web--prod")
+	if err != nil || e.Name != "web--prod" || e.HostLabel != "web-fecode" || !e.Public {
+		t.Fatalf("rename %+v %v", e, err)
+	}
+	expectPayloads(t, ch, ingressEnv(natural.ID))
+	if e, err := s.RenameEnvironment(bg, fallback.ID, "kino--prod"); err != nil || e.HostLabel != fallback.HostLabel {
+		t.Fatalf("rename %+v %v", e, err)
+	}
+	if _, err := s.RenameEnvironment(bg, fallback.ID, "web--prod"); !errors.Is(err, store.ErrExists) {
+		t.Fatalf("a name taken: %v", err)
+	}
+	if _, err := s.RenameEnvironment(bg, uuid.New(), "x"); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("no environment: %v", err)
+	}
+
+	moves, err := s.SetTenantZone(bg, "fecode", tz, false)
+	if err != nil || len(moves) != 2 {
+		t.Fatalf("moves %+v %v", moves, err)
+	}
+	for _, m := range moves {
+		if m.From != m.To {
+			t.Errorf("%s moved %s → %s, want its label kept", m.Name, m.From, m.To)
+		}
 	}
 }
 

@@ -8,7 +8,9 @@ Accepted 2026-11-02; the deployments' word (§ The deployments' word)
 Accepted 2026-11-02 · Amended by [ADR 0035](0035-everything-runs-in-an-environment.md)
 (a sandbox and a tenant's job belong to an environment; `attachable` and
 `sbx-<id>` go) · Amended by [ADR 0034](0034-reachability-from-declarations.md) (revised 2026-11-08: a
-reference opens the port it names; the tenant writes no group)
+reference opens the port it names; the tenant writes no group) · Amended
+by [ADR 0037](0037-environments-can-be-renamed.md) (an environment can be
+renamed; its ID is its identity)
 
 ## Context
 

@@ -122,6 +122,55 @@ func (s *Service) GetEnv(ctx context.Context, tenant, env string) (EnvStatus, er
 	return s.status(ctx, e)
 }
 
+// RenameEnv is PATCH /api/v1/environments/{env} {"name"} (ADR 0037): the
+// environment gets the new name under the same ID and answers its status
+// as GetEnv does. The name is checked as a create's (400); one another
+// environment of the tenant has is 409 CodeNameTaken; the name it has
+// already changes nothing; one being deleted is 409. Its hosts, its
+// grants, its logs and everything else keyed by its ID stay.
+func (s *Service) RenameEnv(ctx context.Context, tenant, env string, req RenameEnvRequest) (EnvStatus, error) {
+	if err := checkEnvName(req.Name); err != nil {
+		return EnvStatus{}, err
+	}
+	var before, row store.Environment
+	err := s.st.InTx(ctx, func(tx *store.Store) error {
+		var err error
+		if before, err = resolveEnv(ctx, tx, tenant, env, store.ForUpdate); err != nil {
+			return err
+		}
+		row = before
+		if before.Name == req.Name {
+			return nil
+		}
+		if before.Deleting {
+			return errDeleting(before.Name)
+		}
+		if _, err := tx.LockEnvironmentByName(ctx, tenant, req.Name, store.NoLock); err == nil {
+			return errNameTaken(req.Name)
+		} else if !errors.Is(err, store.ErrNoRow) {
+			return err
+		}
+		row, err = tx.RenameEnvironment(ctx, before.ID, req.Name)
+		if errors.Is(err, store.ErrExists) {
+			return errNameTaken(req.Name)
+		}
+		return err
+	})
+	if err != nil {
+		return EnvStatus{}, err
+	}
+	if before.Name != row.Name {
+		s.log.Info("environment renamed", "tenant", tenant, "id", row.ID, "from", before.Name, "to", row.Name)
+	}
+	return s.status(ctx, row)
+}
+
+// errNameTaken refuses a rename to a name another environment of the
+// tenant has.
+func errNameTaken(name string) error {
+	return apierr.WithCode(http.StatusConflict, CodeNameTaken, "an environment named %s exists", name)
+}
+
 // DeleteEnv is DELETE /api/v1/environments/{env}: marks it deleting
 // (202); the controller deletes its instances, volumes and groups, then
 // the environment, and its ended jobs' records go with it. Deleting one

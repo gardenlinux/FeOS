@@ -25,8 +25,8 @@ import (
 // Each states its role and scope (ADR 0031): what reaches beyond one
 // environment (the list, a create, a clone, a spec without an
 // environment) the tenant's grant, the rest the environment's, where the
-// higher of the tenant's and the environment's grant counts. A deletion is
-// the environment's admin's or the tenant's writer's.
+// higher of the tenant's and the environment's grant counts. A rename and
+// a deletion are the environment's admin's or the tenant's writer's.
 func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	add func(c class, pattern string, h http.Handler)) {
 	e := s.deps.Environments
@@ -39,6 +39,7 @@ func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	env(onTenant(read), "POST /api/v1/environments/plan", s.planSpec)
 	env(member, "GET /api/v1/addons", s.addonCatalog)
 	env(onEnv(read), "GET /api/v1/environments/{env}", s.getEnv)
+	env(need{role: admin, scope: scopeEnv, orTenant: write}, "PATCH /api/v1/environments/{env}", s.renameEnv)
 	env(need{role: admin, scope: scopeEnv, orTenant: write}, "DELETE /api/v1/environments/{env}", s.deleteEnv)
 	env(onEnv(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
 	env(onEnv(write), "POST /api/v1/environments/{env}/deployments", s.applyDeployment)
@@ -181,6 +182,19 @@ func (s *server) addonCatalog(w http.ResponseWriter, r *http.Request) error {
 
 func (s *server) getEnv(w http.ResponseWriter, r *http.Request) error {
 	st, err := s.deps.Environments.GetEnv(r.Context(), tenantOf(r), r.PathValue("env"))
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, st)
+}
+
+// renameEnv is PATCH /api/v1/environments/{env} {"name"} (ADR 0037).
+func (s *server) renameEnv(w http.ResponseWriter, r *http.Request) error {
+	var req envs.RenameEnvRequest
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	st, err := s.deps.Environments.RenameEnv(r.Context(), tenantOf(r), r.PathValue("env"), req)
 	if err != nil {
 		return err
 	}

@@ -74,8 +74,9 @@ type Runner interface {
 	// its name that are over go but the newest few (tools.keptExited).
 	StartProcessDetached(ctx context.Context, lease model.Lease, p tools.ProcessStart) (id string, err error)
 	// ProcessesDetached lists the background processes of the container
-	// named name (every one for ""), running or not.
-	ProcessesDetached(ctx context.Context, lease model.Lease, name string) ([]tools.ProcessStatus, error)
+	// named name (every one for ""), and those of ids whatever their
+	// names, running or not.
+	ProcessesDetached(ctx context.Context, lease model.Lease, name string, ids ...string) ([]tools.ProcessStatus, error)
 	// ProcessLogsDetached returns the last lines lines of a process's
 	// output; an error wrapping tools.ErrNoProcess for an unknown id.
 	ProcessLogsDetached(ctx context.Context, lease model.Lease, id string, lines int) ([]string, error)

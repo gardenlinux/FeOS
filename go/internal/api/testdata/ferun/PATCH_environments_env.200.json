@@ -1,0 +1,29 @@
+{
+  "method": "PATCH",
+  "path": "/api/v1/environments/0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b04",
+  "query": {},
+  "status": 200,
+  "request": {
+    "name": "expensa--demo"
+  },
+  "response": {
+    "id": "0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b04",
+    "name": "expensa--demo",
+    "labels": {
+      "fecode.class": "demo",
+      "fecode.env": "0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b04",
+      "fecode.project": "0193a1b2-7c3d-7e4f-8a5b-6c7d8e9f0a01"
+    },
+    "deployment": 0,
+    "deployed": 0,
+    "deleting": false,
+    "public": false,
+    "hosts": [],
+    "rollout": null,
+    "objects": [],
+    "routes": [],
+    "openIncidents": 0,
+    "createdAt": "2026-10-18T14:09:30Z"
+  },
+  "note": "the same environment under its new name, its status as GET answers it; its ID, hosts, grants and logs stay (ADR 0037); its own name again is 200 and changes nothing"
+}

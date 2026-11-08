@@ -94,6 +94,10 @@ func (f *fakeEnvs) GetEnv(_ context.Context, tenant, env string) (envs.EnvStatus
 	var out envs.EnvStatus
 	return out, f.do(envCall{"GetEnv", tenant, env, nil}, &out)
 }
+func (f *fakeEnvs) RenameEnv(_ context.Context, tenant, env string, req envs.RenameEnvRequest) (envs.EnvStatus, error) {
+	var out envs.EnvStatus
+	return out, f.do(envCall{"RenameEnv", tenant, env, []any{req}}, &out)
+}
 func (f *fakeEnvs) DeleteEnv(_ context.Context, tenant, env string) error {
 	return f.do(envCall{"DeleteEnv", tenant, env, nil}, nil)
 }
@@ -251,6 +255,7 @@ var fixtureMethods = map[string]string{
 	"POST_environments":                           "CreateEnv",
 	"GET_environments":                            "ListEnvs",
 	"GET_environments_env":                        "GetEnv",
+	"PATCH_environments_env":                      "RenameEnv",
 	"DELETE_environments_env":                     "DeleteEnv",
 	"POST_environments_plan":                      "PlanSpec",
 	"POST_environments_env_plan":                  "Plan",

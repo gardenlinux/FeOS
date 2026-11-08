@@ -274,10 +274,11 @@ func (s *Store) DeletingEnvironments(ctx context.Context, limit int) ([]Environm
 // the row as the caller read it (normally locked FOR UPDATE in the same
 // transaction): labels, deployment, deployed, deleting and gen; updated_at =
 // now(). id, owner, name, created_at, public, ingress_group and host_label
-// are never written (SetEnvironmentPublic writes the last three). A row
-// whose gen is no longer before's is not written (ErrRowChanged); when
-// nothing differs, before is returned unwritten. A write of deployment,
-// deployed or deleting sends ferun_ingress "env:<id>".
+// are never written (RenameEnvironment writes the name,
+// SetEnvironmentPublic the last three). A row whose gen is no longer
+// before's is not written (ErrRowChanged); when nothing differs, before is
+// returned unwritten. A write of deployment, deployed or deleting sends
+// ferun_ingress "env:<id>".
 func (s *Store) UpdateEnvironment(ctx context.Context, before, after Environment) (Environment, error) {
 	what := "environment " + before.ID.String()
 	if err := fixed(what, map[string]bool{"id": before.ID != after.ID, "owner": before.Owner != after.Owner,
@@ -309,6 +310,29 @@ func (s *Store) UpdateEnvironment(ctx context.Context, before, after Environment
 		if err := s.notifyIngressEnvs(ctx, []uuid.UUID{e.ID}); err != nil {
 			return Environment{}, fmt.Errorf("update %s: %w", what, err)
 		}
+	}
+	return e, nil
+}
+
+// RenameEnvironment gives the environment the name name and returns its
+// row (ADR 0037): the caller holds the row FOR UPDATE and checked the
+// name. A name another environment of its owner holds is ErrExists, an
+// unknown ID ErrNoRow. Nothing else of the row changes: its host label,
+// claimed from the name it had at its first publish, stays. It sends
+// ferun_ingress "env:<id>", so that the ingress's table names it anew.
+func (s *Store) RenameEnvironment(ctx context.Context, id uuid.UUID, name string) (Environment, error) {
+	e, err := scanEnvironment(s.q.QueryRow(ctx, `UPDATE environments SET name = $2, updated_at = now()
+		WHERE id = $1 RETURNING `+environmentCols, id, name))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Environment{}, fmt.Errorf("rename environment %s: %w", id, ErrNoRow)
+	case isUniqueViolation(err):
+		return Environment{}, fmt.Errorf("rename environment %s to %s: %w", id, name, ErrExists)
+	case err != nil:
+		return Environment{}, fmt.Errorf("rename environment %s: %w", id, err)
+	}
+	if err := s.notifyIngressEnvs(ctx, []uuid.UUID{id}); err != nil {
+		return Environment{}, fmt.Errorf("rename environment %s: %w", id, err)
 	}
 	return e, nil
 }

@@ -76,13 +76,16 @@ if sys.argv[3] and len(sys.argv) > 5:
 ` + processStartScript
 
 // detachedListScript prints the records of the processes named argv[1]
-// (every one for "") as one compact JSON array: id, name, running and the
-// exit code once there is one. The supervisor of attached services lists
-// only its own name, so that neither the history of other processes nor
-// the agent's own make the answer longer than a tool's output may be.
+// (every one for ""), and of the ids argv[2:] whatever their names, as one
+// compact JSON array: id, name, running and the exit code once there is
+// one. The supervisor of attached services lists only its own name and
+// the process its row records, so that neither the history of other
+// processes nor the agent's own make the answer longer than a tool's
+// output may be.
 const detachedListScript = `import json,os,sys
 root = "` + processRoot + `"
 name = sys.argv[1]
+ids = set(sys.argv[2:])
 def read(d,k,default=""):
     try: return open(os.path.join(d,k)).read().strip()
     except OSError: return default
@@ -98,7 +101,7 @@ out = []
 for tid in sorted(os.listdir(root)) if os.path.isdir(root) else []:
     d = os.path.join(root,tid)
     n = read(d,"name")
-    if name and n != name: continue
+    if name and n != name and tid not in ids: continue
     exit_code = read(d,"exit")
     try: pgid = int(read(d,"pgid","0") or 0)
     except ValueError: pgid = 0
@@ -256,10 +259,11 @@ type detachedRow struct {
 }
 
 // ProcessesDetached lists the background processes of the lease's main
-// container named name (every one for ""), running or not, by id.
-func (r *Runner) ProcessesDetached(ctx context.Context, lease model.Lease, name string) ([]ProcessStatus, error) {
-	code, stdout, stderr, err := r.ExecDetached(ctx, lease, []string{"python3", "-c", detachedListScript, name}, nil, "/",
-		r.defaultTimeout)
+// container named name (every one for ""), and those of ids whatever
+// their names, running or not, by id.
+func (r *Runner) ProcessesDetached(ctx context.Context, lease model.Lease, name string, ids ...string) ([]ProcessStatus, error) {
+	argv := append([]string{"python3", "-c", detachedListScript, name}, ids...)
+	code, stdout, stderr, err := r.ExecDetached(ctx, lease, argv, nil, "/", r.defaultTimeout)
 	if err != nil {
 		return nil, err
 	}

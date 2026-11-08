@@ -201,6 +201,36 @@ func TestHostLabels(t *testing.T) {
 }
 
 // Any input, however malformed, yields an answer without a panic.
+// A label HostLabels gave an environment under any name, the one it has
+// or one it had before a rename, is its own; another's, a chosen one or
+// another tenant's natural label is not.
+func TestGivenHostLabel(t *testing.T) {
+	t.Parallel()
+	id := uuid.MustParse("0b8f4c1e-7a2d-4e6f-9c3b-5d1a2e7f8a90")
+	other := uuid.MustParse("0b8f4c1e-7a2d-4e6f-9c3b-5d1a2e7f8a91")
+	_, _, fallback := HostLabels("kino-prod-9101dfcb", "fecode", id)
+	_, _, renamed := HostLabels("kino--prod", "fecode", id)
+	_, _, others := HostLabels("kino-prod-9101dfcb", "fecode", other)
+	for _, c := range []struct {
+		label, tenant string
+		want          bool
+	}{
+		{fallback, "fecode", true},
+		{renamed, "fecode", true},
+		{others, "fecode", false},
+		{"web-fecode", "fecode", true},
+		{"web-fecode", "acme", false},
+		{"web-prod-fecode", "fecode", false},
+		{"kino--prod", "fecode", false},
+		{"kino", "fecode", false},
+		{"", "fecode", false},
+	} {
+		if got := GivenHostLabel(c.label, c.tenant, id); got != c.want {
+			t.Errorf("GivenHostLabel(%q, %q) = %v, want %v", c.label, c.tenant, got, c.want)
+		}
+	}
+}
+
 func TestHostLabelsNeverPanics(t *testing.T) {
 	t.Parallel()
 	for _, in := range [][2]string{
