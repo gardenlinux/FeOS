@@ -1,6 +1,6 @@
 # ADR 0034: Reachability from declarations: a deployment's references open the ports they name, a service chooses its egress by domains and blocks, a route names its clients' blocks, a sandbox says what it reaches, and every change reaches every node before the pod's name
 
-**Status:** Merged into [ADR 0012](0012-security-groups.md) · **Date:** 2026-11-06
+**Status:** Merged into [ADR 0012](0012-reachability-from-declarations.md) · **Date:** 2026-11-06
 
 This ADR decided that a deployment's references, `uses`, routes and a
 sandbox's `reaches` are the rules a pod gets, that a service and a job

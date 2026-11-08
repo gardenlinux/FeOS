@@ -8,7 +8,7 @@ What runs on a node and how. The decisions behind it:
 restore), [ADR 0009](../adr/0009-node-os-and-packages.md) (operating system
 and packages), [ADR 0010](../adr/0010-pod-network.md) (the pods' network),
 [ADR 0011](../adr/0011-disk-daemon.md) (the disk daemon),
-[ADR 0012](../adr/0012-security-groups.md) (security groups),
+[ADR 0012](../adr/0012-reachability-from-declarations.md) (security groups),
 [ADR 0013](../adr/0013-traffic-records.md) (traffic records),
 [ADR 0016](../adr/0016-volumes.md) (volumes).
 
@@ -443,7 +443,7 @@ containers, whose `ContainerSpec.volume_mounts` (a volume's name, a path,
 Every pod has a network unless its spec says `none`. A pod has an IPv6
 address, its address on the network, and an IPv4 address for leaving the
 node ([ADR 0010](../adr/0010-pod-network.md)); its security groups decide
-what it reaches ([ADR 0012](../adr/0012-security-groups.md)), and its
+what it reaches ([ADR 0012](../adr/0012-reachability-from-declarations.md)), and its
 traffic is recorded ([ADR 0013](../adr/0013-traffic-records.md)). The code
 is `crates/services/pod-service/src/network*`, on top of
 `network-service` (the groups and their compiler), `dns-service` (the

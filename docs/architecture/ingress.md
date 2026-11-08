@@ -6,7 +6,7 @@ How public environments' HTTP traffic reaches their pods:
 `ferund` that serve it. The decisions behind it:
 [ADR 0021](../adr/0021-ingress.md) (the ingress, and what changed while
 it was built), [ADR 0017](../adr/0017-pod-mesh.md) (the pods' mesh, which
-the ingress joins), [ADR 0018](../adr/0018-environments-and-releases.md)
+the ingress joins), [ADR 0018](../adr/0018-environments-and-deployments.md)
 (environments, routes and the route door). The rest of `ferund` is in
 [control-plane.md](control-plane.md); the deployment on Gardener is in
 [deploy/gardener/README.md](../../deploy/gardener/README.md#the-ingress).

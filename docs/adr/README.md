@@ -22,13 +22,13 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0009](0009-node-os-and-packages.md) | One feosd under systemd or feos-host-init, from signed packages per version | Accepted |
 | [0010](0010-pod-network.md) | The pod network: IPv6 per pod, routed or meshed, IPv4 for leaving | Accepted |
 | [0011](0011-disk-daemon.md) | Disks are chains of sealed layers, served by one disk daemon per node | Accepted |
-| [0012](0012-security-groups.md) | Reachability from declarations, enforced by security groups on the node | Accepted |
+| [0012](0012-reachability-from-declarations.md) | Reachability from declarations, enforced by security groups on the node | Accepted |
 | [0013](0013-traffic-records.md) | feosd records the pods' traffic | Accepted |
 | [0014](0014-identity-and-credentials.md) | A workload's identity and credentials stay on the host | Accepted |
 | [0015](0015-control-plane.md) | FeRun, one replicated control plane that nodes connect to over mTLS | Accepted |
 | [0016](0016-volumes.md) | A volume is the node's resource of fixed size, held by one pod | Accepted |
 | [0017](0017-pod-mesh.md) | A WireGuard mesh carries pods' IPv6 between nodes | Merged into [ADR 0010](0010-pod-network.md) |
-| [0018](0018-environments-and-releases.md) | An environment changes only by deployments: planned, numbered and immutable | Accepted |
+| [0018](0018-environments-and-deployments.md) | An environment changes only by deployments: planned, numbered and immutable | Accepted |
 | [0019](0019-pod-ids.md) | Pods have short IDs that the control plane mints | Accepted |
 | [0020](0020-feos-on-kubernetes.md) | FeOS on Kubernetes: a pod per node whose microVMs end with it | Accepted |
 | [0021](0021-ingress.md) | The ingress: a program of its own and a peer of the pod mesh | Accepted |
@@ -39,15 +39,17 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0026](0026-the-sink.md) | The sink keeps what the platform and its pods say | Accepted |
 | [0027](0027-the-guests-clock.md) | A guest's clock follows its node's, slewed from measurements over vsock | Accepted |
 | [0028](0028-http-bindings.md) | HTTP bindings: APIs by a name, the credential added on the node | Accepted |
+| [0029](0029-static-sites.md) | Static sites: immutable bundles, served from the object store, switched blue-green | Proposed |
+| [0030](0030-cdns.md) | CDNs in front of the ingress, declared on a tenant's domain | Proposed |
 | [0031](0031-people-in-ferun.md) | People in FeRun: tenants with members, grants, and the tenants' console | Accepted |
 | [0032](0032-the-deployment-builder.md) | The deployment builder: one draft, forms and JSON, planned on every change | Accepted |
 | [0033](0033-credentials-of-a-tenant.md) | Credentials of a tenant: a binding stated once, versioned, used by name | Accepted |
-| [0034](0034-reachability-from-declarations.md) | Reachability from declarations | Merged into [ADR 0012](0012-security-groups.md) |
+| [0034](0034-reachability-from-declarations.md) | Reachability from declarations | Merged into [ADR 0012](0012-reachability-from-declarations.md) |
 | [0035](0035-everything-runs-in-an-environment.md) | Everything runs in an environment: sandboxes and tenants' jobs belong to one | Accepted |
 | [0036](0036-a-workloads-identity.md) | A workload's identity: one ID per service, job, addon and sandbox | Merged into [ADR 0014](0014-identity-and-credentials.md) |
-| [0037](0037-environments-can-be-renamed.md) | An environment can be renamed | Merged into [ADR 0018](0018-environments-and-releases.md) |
-| [0038](0038-postgres-admits-a-workload-by-its-certificate.md) | Addons admit a workload by its certificate and by nothing else | Accepted |
-| [0039](0039-valkey-admits-a-workload-by-its-certificate.md) | Valkey admits a workload by its certificate and by nothing else | Merged into [ADR 0038](0038-postgres-admits-a-workload-by-its-certificate.md) |
+| [0037](0037-environments-can-be-renamed.md) | An environment can be renamed | Merged into [ADR 0018](0018-environments-and-deployments.md) |
+| [0038](0038-addons-admit-a-workload-by-its-certificate.md) | Addons admit a workload by its certificate and by nothing else | Accepted |
+| [0039](0039-valkey-admits-a-workload-by-its-certificate.md) | Valkey admits a workload by its certificate and by nothing else | Merged into [ADR 0038](0038-addons-admit-a-workload-by-its-certificate.md) |
 | [0040](0040-addons.md) | Addons: managed backing services from blueprints, on volumes of their own | Accepted |
 | [0041](0041-jobs.md) | Jobs of an environment, and a tenant's job that runs exactly once | Accepted |
 | [0042](0042-attached-services.md) | Attached services: a service as a supervised process in a sandbox | Accepted |

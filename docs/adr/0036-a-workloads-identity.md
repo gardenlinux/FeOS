@@ -11,6 +11,6 @@ server checks its callers' certificates there, that a reference to an
 addon's role is its grant through the addon's map, and that outbound TLS
 bindings are terminated in the guest while bindings that add a secret
 stay on the host. All of it lives in ADR 0014, the addons' maps in
-[ADR 0038](0038-postgres-admits-a-workload-by-its-certificate.md), and
+[ADR 0038](0038-addons-admit-a-workload-by-its-certificate.md), and
 what it parked (servers that read their callers' IDs, a certificate of
 the network's own, flows named by IDs) is in the backlog.

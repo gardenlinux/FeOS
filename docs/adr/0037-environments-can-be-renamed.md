@@ -1,6 +1,6 @@
 # ADR 0037: An environment can be renamed; its ID is its identity
 
-**Status:** Merged into [ADR 0018](0018-environments-and-releases.md) · **Date:** 2026-11-08
+**Status:** Merged into [ADR 0018](0018-environments-and-deployments.md) · **Date:** 2026-11-08
 
 It decided that an environment's ID is its identity and its name a
 handle that one call changes: everything FeRun keeps or makes for an

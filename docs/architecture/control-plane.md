@@ -8,7 +8,7 @@ replication, and how nodes connect),
 [ADR 0014](../adr/0014-identity-and-credentials.md) (identity and
 credentials), [ADR 0013](../adr/0013-traffic-records.md) (traffic records),
 [ADR 0017](../adr/0017-pod-mesh.md) (the pods' mesh),
-[ADR 0018](../adr/0018-environments-and-releases.md) (environments and
+[ADR 0018](../adr/0018-environments-and-deployments.md) (environments and
 deployments), [ADR 0021](../adr/0021-ingress.md) (the ingress),
 [ADR 0023](../adr/0023-calls-outlive-their-caller.md) (calls that outlive
 their caller), [ADR 0009](../adr/0009-node-os-and-packages.md) (packages).
@@ -2409,7 +2409,7 @@ names no file gets the UI's `index.html`.
 
 ## Environments
 
-An environment ([ADR 0018](../adr/0018-environments-and-releases.md)) is
+An environment ([ADR 0018](../adr/0018-environments-and-deployments.md)) is
 a tenant's set of typed objects that run together: services, jobs,
 addons, routes and secrets, each with a DNS label for its name. It
 changes only by deployments, numbered from 1 per environment and never

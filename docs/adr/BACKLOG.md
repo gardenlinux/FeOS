@@ -145,6 +145,26 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0028: Kubernetes and TLS bindings at the node address and by names, as HTTP bindings are, instead of loopback ports in the guest (ADR 0014).
 - ADR 0028: quotas per tenant across pods, beyond the rate limit per binding and pod.
 
+## ADR 0029
+
+- ADR 0029: skew after a switch: serving blue's files that green lacks for a while (Vercel's skew protection), opt-in per site and for how long; it would also serve a file a version removed on purpose.
+- ADR 0029: the rules on a laptop: a small command around the ingress's site package (`ferun-ingress serve-site ./dist`) to try a `_ferun.json` before the upload; the manual switch tries it on the real ingress, but only after.
+- ADR 0029: an upload by hashes, as Cloudflare's protocol: the manifest first, then only the blobs the tenant lacks, so that a large site from a CI sends what changed.
+- ADR 0029: brotli variants at the ingest, which need a dependency; precompressed siblings alone until then.
+- ADR 0029: canary and sticky splits between blue and green; a share of requests per version mixes versions within one page's load unless the split is sticky.
+- ADR 0029: redirects by host (`www` to the apex), a domain's matter (ADR 0045) rather than a site's.
+- ADR 0029: sites in environments that are not public, served by the route door (ADR 0043), for FeCode's previews of a built site.
+- ADR 0029: Early Hints (103) from a document's `<link rel="preload">`.
+- ADR 0029: files larger than a bundle's file limit (videos), read by ranges from the store without the cache.
+- ADR 0029: traffic as a cost: the store's reads and the ingress's bytes per tenant, and whether a tenant gets a quota on them.
+
+## ADR 0030
+
+- ADR 0030: a CDN of the operator's in front of the whole edge: the same secret per installation, and the default hosts behind it.
+- ADR 0030: a rate limit per client address behind a CDN, which the CDN's header makes possible there (the limit itself is ADR 0021's line).
+- ADR 0030: more providers (Fastly, Akamai, Bunny): presets, recipes and purges.
+- ADR 0030: a second proof beside the secret: authenticated origin pulls with the tenant's own certificate, where its CDN offers them.
+
 ## ADR 0031
 
 - ADR 0031: a general MCP door for a person's agents (`/mcp/tenants`: an OAuth 2.1 resource server taking the shared provider's audience-bound access tokens and tenant tokens, one tool per operation of the tenant class, tokens, secrets' values and image credentials left out, a `secret_generate` tool), once the provider's login app grants audiences (FeCode's ADR 0020).
@@ -219,7 +239,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 - ADR 0045: zones of a tenant's own, and a zone a tenant verified with one record that lets it claim every name below it and wildcard domains, which need DNS-01.
 - ADR 0045: `ferund` as a DNS-01 client for the zones' wildcards, with a DNS credential per provider; the operator's issuer provides them.
-- ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: DNS-01 through a CNAME of `_acme-challenge.<name>` into a zone of the platform's.
+- ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: ADR 0030 proposes DNS-01 through a CNAME of `_acme-challenge.<name>` into a zone of the platform's.
 - ADR 0045: certificates a tenant brings, for a domain whose CA is not Let's Encrypt.
 - ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a tenant wants a cap on its certificates.
 - ADR 0045: a Public Suffix List entry for the apps zone, an operator's action, so that a page's script cannot set a cookie for the zone.
