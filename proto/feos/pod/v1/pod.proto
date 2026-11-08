@@ -202,6 +202,19 @@ message PodNetwork {
   // resolver answers the pod, in this order, before it asks upstream; feosd
   // must have them before the pod starts.
   repeated string name_tables = 9;
+  // Whether feosd's resolver answers the pod upstream names only when they
+  // are in egress_domains (ADR 0034, revised). False: every name, as
+  // before. True with egress_domains empty: no upstream name at all
+  // (egress none). The names of the pod's name tables and of its HTTP
+  // bindings are answered either way.
+  bool restrict_egress_names = 10;
+  // The names the pod may reach outside its environment: exact names, or
+  // "*.example.com" for every name below example.com (not the name
+  // itself). For an allowed name, the resolver puts the answer's addresses
+  // into the pod's egress set for their TTL, at least five minutes, and
+  // the pod may send to them; it refuses every other upstream name and
+  // records the refusal.
+  repeated string egress_domains = 11;
 }
 
 enum PodState {
