@@ -59,7 +59,7 @@ Kubernetes and SSH connections to vsock ports 10002 and 10003.
 
 A call to `feosd` that carries the metadata `feos-pod-id` goes unchanged
 to that pod's guest, on vsock port 10000, if it is for the guest's
-Container, Image, Tool or Watch service and the pod is pending or running
+Container, Image, Tool, Watch or PortForward service and the pod is pending or running
 ([ADR 0004](../adr/0004-pods.md)); for any other service it fails with
 `UNIMPLEMENTED`. `feosctl` sends it with `--pod <id>`.
 

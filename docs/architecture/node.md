@@ -584,7 +584,9 @@ without `--pod-prefix`, is on its cluster's mesh
   private key is made once, 32 random bytes from `getrandom`, and kept in
   `<node dir>/mesh/key` (0600); the kernel derives the public key from it.
   It listens on `--mesh-port`. `feosd` sets it up over WireGuard's generic
-  netlink family (`feos_utils::wireguard`), without `wg`.
+  netlink family (`feos_utils::wireguard`), without `wg`. The kernel needs
+  WireGuard (`CONFIG_WIREGUARD`): Debian's has it as a module, FeOS's
+  kernel builds it in (`hack/kernel/config`).
 - **The node's /96.** The fleet client calls `JoinMesh` with the public
   key and the endpoint, `--mesh-address` or the address from which the
   node reaches the control plane, at `--mesh-port`. The answer, the
@@ -1189,11 +1191,14 @@ container. What the pod needs:
   `feosd/` too. When the container ends, the microVMs end with it.
 - **Host**: `hostNetwork` (TAP devices, nftables, the mesh's WireGuard
   device, the resolver's address, which `feosd` binds itself, without
-  `feosd.socket`), the host's `/dev` (KVM, TUN, ublk), `hostPath`
+  `feosd.socket`), the host's `/dev` (KVM, TUN, ublk; an init container
+  loads `ublk_drv` from the host's modules), `hostPath`
   `/var/lib/feos` (a directory on disk, never shared with a `feosd` or
   `diskd` of the host's: their locks keep a second one waiting) and
   `/usr/lib/feos` with every Firecracker and guest version the pods'
-  snapshots pin; `/run/feos` may be the pod's own. `$NOTIFY_SOCKET` is not
+  snapshots pin: the init container adds the image's versions to the
+  node's store under `/var/lib/feos`, where those of earlier images
+  stay; `/run/feos` may be the pod's own. `$NOTIFY_SOCKET` is not
   set, and nothing waits for it.
 - **diskd stops after `feosd`**: the pods' disks and the memory of pods
   restored from a checkpoint are `diskd`'s, and a suspend writes through

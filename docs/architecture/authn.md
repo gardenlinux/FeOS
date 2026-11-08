@@ -9,8 +9,10 @@ bindings, reached at the node address `169.254.169.1`, by a name on port
 feos-authn adds the credential. Its second is FeID's signer: the pod's
 identity for its own TLS, whose key stays here, served over vsock port
 10002 with [feid/1](../../feid/docs/protocol.md) ([below](#feids-signer)).
-The TLS, Kubernetes and SSH bindings are not built yet: their sets are
-opened and kept with the HTTP bindings, and nothing serves them.
+The Kubernetes and SSH bindings ([ADR 0053](../adr/0053-kubernetes-and-ssh-bindings.md))
+are not built yet: their sets are opened and kept with the HTTP bindings,
+and nothing serves them. Outbound TLS bindings are the guest's
+([guest.md](guest.md#containers)), with this process only signing.
 
 The code is `crates/feos-authn`; the binary ships in the `feosd` package
 as `/usr/sbin/feos-authn`, beside `feosd`.
@@ -19,7 +21,7 @@ as `/usr/sbin/feos-authn`, beside `feosd`.
 pod ──TCP 169.254.169.1:80 / :443──▶ feosd (accepts; knows the pod by the source address)
                                        │ SCM_RIGHTS over <pod dir>/authn.sock
                                        ▼
-                                 feos-authn (one per pod, jailed) ──TLS, from the pod's second address──▶ upstream
+                                 feos-authn (one per pod, jailed) ──TLS, from the node's address──▶ upstream
                                        │                          └─(OAuth)──▶ token endpoint
                                        └──▶ <pod dir>/authn-audit.ndjson ──▶ feosd ──▶ events, sink
 ```
@@ -63,10 +65,13 @@ What `feosd` sets up at spawn (the node agent's side):
   `/etc/resolv.conf` (and `/etc/hosts`) there: the root needs a
   `resolv.conf` naming a resolver that the process's network namespace
   reaches, or no upstream name resolves;
-- the network namespace of the node's proxies: a veth to the node,
-  blackhole routes for every `--deny-prefix` and the node's own
-  networks, and the pods' second addresses, from which a binding's
-  connections leave.
+- no network namespace of its own yet: the process shares the node's,
+  dials upstreams from the node's address and checks every address it
+  dials against `--deny-prefix` and the node's networks itself. The
+  namespace of the node's proxies (a veth to the node, blackhole routes
+  for the denied prefixes, the pods' second addresses from which a
+  binding's connections would leave) is decided (ADR 0014) and not
+  built; the backlog has it.
 
 What feos-authn does to itself before it serves (`crates/feos-jail`, which
 the guest's TLS bindings use too):

@@ -581,8 +581,11 @@ secrets.
   (`service`, `job` or `addon` with the object's name, `sandbox` or
   `tenant-job` with the pod's ID; a row outside an environment
   `spiffe://<td>/tenant/<tenant>/sandbox/<id>`), the subject
-  `CN=<td>/<pod ID>,OU=<workload's set ID>` (`wl-…`, as the nodes' sets),
-  Ed25519, `--pod-cert-ttl`. Each says when its holder renews it
+  `CN=<td>/<pod ID>,OU=<workload's set ID>` (`wl-…`, as the nodes' sets;
+  a CN of at most 64 bytes, every value of letters, digits, `.`, `/` and
+  `-` alone, none of which RFC 2253 escapes, so that a map anchored on
+  the printed subject holds), no DNS names, Ed25519, `--pod-cert-ttl`.
+  Each says when its holder renews it
   (`renew_after`): a node's and an ingress instance's at half its
   lifetime, so that one switched off at any time keeps at least half of
   it; a pod's at three quarters.
@@ -1439,8 +1442,10 @@ tenant tokens with `{label, role, environment}` (role `admin` by
 default, the environment by ID or name), and lists them with `role`,
 `environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
 sandbox token is its sandbox's, and the door's answers are as before.
-The sink's reads on a session's behalf (logs, traffic, access logs) have
-no token to pass on yet (D7).
+ferund's own reads of the sink on a session's behalf (logs, traffic,
+access logs) pass the session's cookie and `FeRun-Tenant` on
+(`auth.Tenant.PassOn`), as they pass a token: no service credential
+reads the sink for a tenant.
 
 ### Members, invitations and tokens
 
@@ -1455,7 +1460,8 @@ creates do not pass it (422 `quota_exceeded`, `resource` `tenants`);
 operators are not bound. Names the platform keeps are 422
 `reserved_name`: `operator`, `admin`, `api`, `www`, the
 `--apps-zone-owners`, and the first label of the public URL's host, of
-`--edge-name` and of `--apps-zone`. A taken name is 409. Tenants an
+`--edge-name`, of `--apps-zone` and of `--tenant-zone`. A taken name is
+409. Tenants an
 operator makes with the admin API are as before (no maker, a token).
 
 **Members.** `GET /api/v1/tenant/members` answers `{members: [{person,
@@ -2256,8 +2262,10 @@ pinned version, or the environment's secrets), the services that use it
 and Check; Add binding and Edit open the binding's form in New
 deployment (`…/builder/new/binding`, `…/builder/binding/<name>`), since
 a binding is part of a deployment. Home and the environments, domains,
-people, usage and settings go to every member; sandboxes, jobs and the
-tools' reference with a tenant grant; tokens to its admin. The UI is set
+people, usage and settings go to every member; the tenant's sandboxes
+and jobs pages and the tools' reference with a tenant grant, an
+environment's sandboxes and jobs with a grant on it (ADR 0035); tokens to
+its admin. The UI is set
 in FeCode's face and forms (IBM Plex Sans at 15 px, cards with 12 px
 corners); names are in the text's colour, icons grey, and colour is kept
 for states and for a count that needs someone: on Home, open incidents,
@@ -3449,9 +3457,12 @@ percent-encoded.
   else) and `pg_ident.conf` (per reference with a role, its workload's
   `OU` anchored, `"/^CN=[^,]+,OU=<wl-…>$"  <role>`), checked by the
   server's parser before a reload, and the end of every session over the
-  network without TLS. Nothing is dropped: a database or role no longer
-  listed stays (a warning). Every reference names a listed role, and a
-  role's output one of the listed databases.
+  network without TLS. PostgreSQL logs every refused connection itself;
+  `log_connections` stays off. Nothing is dropped: a database or role no
+  longer listed stays (a warning). Every reference names a listed role,
+  and a role's output one of the listed databases. A former password
+  credential (`addon.<a>.role.<r>.password`, `addon.<a>.password`) is
+  deleted by the controller once no instance's template names it.
 - **valkey**: option `maxmemoryPolicy`, `noeviction` by default, one of
   the eight policies. A retired version (7.2, 8) runs 9 on its volume
   and is a warning; a downgrade is an error, an upgrade an info. It
@@ -3907,6 +3918,10 @@ their claims, checks and states, are the domains core's; ACME owns
   certificate's `not_after` ahead) as one more host of its environment
   with its chain and key, and every pending challenge to every
   instance ([ingress.md](ingress.md#what-it-holds)).
+- **Tests** run against Pebble, Let's Encrypt's test CA, in docker
+  (`hack/go/with-pebble`), not a CA of the tests' own. Pebble accepts a
+  challenge without fetching it, so the tests check that every instance's
+  port 80 answers the challenge before it is accepted.
 
 ### The ingress's admin API
 

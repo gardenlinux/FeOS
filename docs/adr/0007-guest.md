@@ -2,122 +2,135 @@
 
 **Status:** Accepted · **Date:** 2026-10-13
 
+`feos-guest` is PID 1 of a pod's microVM. It serves its API on vsock and a
+Unix socket, never on TCP, dials the host once its listeners are up and
+holds that call open as its readiness, and is configured by the host: the
+wall time and the network are pushed to it after every boot and every
+resume, and it runs no DHCP and no NTP. Its API is FeOS's own packages,
+internal between `feosd` and `feos-guest`, and it changes only by
+addition. Containers run with libcontainer in a process of its own, their
+records are files, and the pod's credentials never enter the guest.
+
 ## Context
 
-The sandbox system's guest was a Rust PID 1 in a Firecracker microVM that
-ran an agent's containers. Its host pushed the configuration over vsock,
-and the manager used a gRPC API of eleven services. FeOS's own PID 1 took
-its configuration from the network (DHCPv6, NTP) and served its API on
-TCP. The pods of ADR 0004 run `feos-guest` (ADR 0003); this ADR records
-what it does and which API carries what.
+A guest in a Firecracker microVM has no console a person reads and no
+network until something configures it. A PID 1 that discovers its
+configuration from the network (DHCP, NTP) is wrong after a restore until
+its next lease or sync, and needs a network to be configured at all. A
+PID 1 that runs the container runtime in its own process dies with a
+runtime failure.
+
+A suspended pod keeps the `feos-guest` it was suspended with in its
+memory, for as long as it is suspended: a newer `feosd` talks to older
+guests.
 
 ## Decision
 
 ### Transport and configuration
 
-- The API listens on vsock port 10000 and on `/run/feos/api.sock`, never
+- The API listens on a vsock port and on a Unix socket in the guest, never
   on TCP.
-- Once its listeners are up, `feos-guest` dials the host (vsock CID 2,
-  port 10001) and holds `feos.lifecycle.v1.LifecycleService.Attach` open:
-  readiness and liveness. The socket a call comes in on names the VM to
+- Once its listeners are up, `feos-guest` dials the host over vsock and
+  holds `feos.lifecycle.v1.LifecycleService.Attach` open: readiness and
+  liveness in one call. The socket a call comes in on names the VM to
   `feosd`; the guest never names itself.
 - **Configuration is pushed, not discovered.** When a guest attaches,
   after a boot or when its call was lost, and after every resume, `feosd`
   pushes the wall time and the pod's network. The guest runs no DHCP and
-  no NTP.
-- The data volume, the virtio disk that is not the root, is mounted at
-  `/var/lib/feos`.
-- The pod's identity and its Kubernetes and SSH credentials stay on the
-  host. The guest pipes their connections to vsock port 10002, with a
-  preamble that says what each is for (ADR 0014).
+  no NTP. Its clock follows the node's from then on (ADR 0027).
+- The data volume, the virtio disk that is not the root, is the pod's disk
+  (ADR 0011), mounted at `/var/lib/feos`: images, containers and logs live
+  there.
+- The pod's identity and credentials stay on the host, with the pod's
+  `feos-authn`. The guest pipes the connections that need them to the
+  host over vsock, with a preamble that says what each is for (ADR 0014).
 
 ### API
 
-The sandbox system's services map onto FeOS's APIs. Where FeOS had a
-service for the same subject, it grows; what is new gets a package of its
-own, and so does what only a guest does: the host pushing its
-configuration into it, `feos.guest.v1`.
-
-| Sandbox system | FeOS |
-|---|---|
-| `AgentService.Ping` | `feos.host.v1.HostService.Ping` (tick, uptime, boot id) |
-| `AgentService.GetAgentInfo` | `HostService.GetVersionInfo` and `Ping` |
-| `AgentService.GetMemoryInfo` | `HostService.GetMemoryBreakdown` |
-| `AgentService.PreparePause` | `feos.guest.v1.GuestService.PreparePause` |
-| `FsService.Freeze`, `Thaw` | `GuestService.FreezeFilesystem`, `ThawFilesystem` |
-| `TimeService.SetTime`, `GetTime` | `GuestService.SetTime`, `GetTime` |
-| `NetworkService.SetNetworkConfig`, `GetNetworkConfig` | `GuestService.SetNetworkConfig`, `GetNetworkConfig` |
-| `ImageService.Pull`, `ListImages` | `feos.image.v1.ImageService.PullImage` + `WatchImageStatus`, `ListImages` |
-| `ContainerService.*`, `Exec` | `feos.container.v1.ContainerService.*`, `Exec` |
-| `ToolService`, `WatchService` | `feos.tool.v1`, `feos.watch.v1` |
-| `PortForwardService`, `KubeService`, `SshService` | `feos.portforward.v1`, `feos.kube.v1`, `feos.ssh.v1` |
-| `LifecycleService` | `feos.lifecycle.v1` |
-
-`HostService` is the same in `feosd` and `feos-guest`: what the machine is
-and its power. In `feos-guest`, shutting down reboots, which ends the VM;
-powering off would halt the guest and leave Firecracker running.
-
-### The guest's API is internal and only grows
-
-The guest's API is a contract between `feosd` and `feos-guest` (ADR 0004).
-A suspended pod keeps the `feos-guest` it was suspended with, so a newer
-`feosd` talks to older guests: the guest's APIs, `feos.lifecycle.v1`
-included, change only by addition within v1. No field is renumbered or
-removed, and no RPC changes its meaning.
+- The guest's API is FeOS's own packages: containers, images, tools,
+  watches, port forwards, the credential listeners, and `feos.host.v1`,
+  which is the same service in `feosd` and `feos-guest`: what the machine
+  is and its power. In `feos-guest`, shutting down reboots, which ends the
+  VM; powering off would halt the guest and leave Firecracker running.
+- What only a guest does for its host gets a package of its own,
+  `feos.guest.v1`, which only `feos-guest` serves.
+- The guest's API is a contract between `feosd` and `feos-guest`
+  (ADR 0004), and it only grows: a suspended pod keeps the `feos-guest` it
+  was suspended with, so a newer `feosd` talks to older guests. The
+  guest's APIs, `feos.lifecycle.v1` included, change only by addition
+  within v1. No field is renumbered or removed, and no RPC changes its
+  meaning.
 
 ### Runtime
 
 - **libcontainer in a process of its own.** Containers run with youki's
-  libcontainer, linked in, not with the youki binary, in the task service
-  (`feos-guest --task-service`), which PID 1 supervises. A runtime failure
-  does not take down PID 1.
-- **Container records are files**, a `container.json` in the container's
-  directory, not rows in sqlite. A record lives and dies with its
-  container's directory and survives a reboot with the writable layer that
-  adoption takes over. The guest has no SQLite.
-- **One HTTP client.** Image pulls use oci-client on reqwest, with rustls
-  and ring; so do webfetch and the binary upgrade. oci-client checks the
-  digest of every blob it pulls.
-- `feos-guest` takes Ctrl-Alt-Del over: the kernel sends it a SIGINT
-  instead of rebooting at once, and it syncs and reboots.
+  libcontainer, linked in, not with the youki binary, in the task service,
+  a process PID 1 supervises and starts again when it exits. A runtime
+  failure does not take down PID 1. The task service is the subreaper of
+  the containers' processes.
+- **Container records are files**, one in each container's directory, not
+  rows in a database. A record lives and dies with its container's
+  directory and survives a reboot with the writable layer that adoption
+  takes over. The guest has no SQLite.
+- **One HTTP client.** Image pulls, the web tool and the binary upgrade
+  share one client, on rustls. The registry client checks the digest of
+  every blob it pulls.
+- `feos-guest` takes Ctrl-Alt-Del over: the kernel sends it a signal
+  instead of rebooting at once, and it syncs and reboots (ADR 0005).
 
-### What the port of the manager has to change
+### Containers and images
 
-Against the sandbox system's API, besides the package names:
-
-- **Pulls are asynchronous**: `PullImage` returns an image UUID, and
-  `WatchImageStatus` reports when it is ready. Images are immutable and
-  shared; a request marked `exclusive` gets an image of its own, which a VM
-  needs because it writes to its image's disk.
-- **`CreateContainer` returns once the container is created**, or fails
-  with the reason. It pulls the image if needed. `adopt` works as before.
+- **Pulls are asynchronous**: a pull returns an image ID, and a watch
+  reports when it is ready. Images are immutable and shared; a request
+  marked `exclusive` gets an image of its own.
+- **Creating a container returns once the container is created**, or
+  fails with the reason. It pulls the image if needed. A create may adopt
+  a container of the same ID from before a reboot, with its writable layer
+  and logs.
 - **Container IDs** are names of 1 to 64 letters, digits, `-`, `_` and
-  `.`, which is what the sandbox system called the container name. FeOS
-  generates a UUID when a client gives none.
-- `DeleteContainer` kills a running container. Container state is an enum
-  (`CREATED`, `RUNNING`, `STOPPED`), not a string.
-- A container's hostname is its ID, not "sandbox".
+  `.`; the guest generates a UUID when a client gives none. A container's
+  hostname is its ID.
+- Deleting a container kills it if it runs. Container state is an
+  enumeration, not a string.
+- Exec runs a command in a running container without a terminal and
+  without stdin; its output streams, and its exit code is the last frame.
 
 ## Alternatives considered
 
-- **Keeping the sandbox system's API as it is**, under the FeOS name.
-  FeOS would carry two APIs for containers and images.
+- **Keeping the sandbox system's API as it was**, under the FeOS name.
+  FeOS would carry two APIs for containers and images; the port mapped its
+  eleven services onto FeOS's packages instead.
 - **The guest-only RPCs in `HostService`.** `feosd` would serve them, too:
-  `FreezeFilesystem` on a node would freeze the host's root,
-  `SetNetworkConfig` rewrite its network.
-- **DHCP and NTP in the guest**, as FeOS's PID 1 did. A restored guest's
-  clock and network are wrong until the next lease or sync; a push after
-  every resume fixes them at once, and the guest needs no network to be
-  configured.
-- **libcontainer in PID 1**, as the sandbox system ran it. Simpler, but a
-  runtime failure, or a fork from a multithreaded process gone wrong,
-  would hit PID 1.
+  freezing a filesystem on a node would freeze the host's root, setting
+  the network configuration would rewrite its network.
+- **DHCP and NTP in the guest**, as FeOS's PID 1 did before pods. A
+  restored guest's clock and network are wrong until the next lease or
+  sync; a push after every resume fixes them at once, and the guest needs
+  no network to be configured.
+- **libcontainer in PID 1.** Simpler, but a runtime failure, or a fork
+  from a multithreaded process gone wrong, would hit PID 1.
 - **sqlite for container records.** It would cost the guest 18 crates and
   SQLite's C code, and a database that has to stay consistent with the
   containers' directories across freezes, snapshots and reboots.
+- **The API on TCP**, as FeOS's PID 1 served it before pods. vsock needs
+  no network to be configured and is reachable from the host alone.
 
 ## Consequences
 
-- `feosd` is the only client of the guest's API.
-- Not ported: the `webfetch` command-line mode. Exec still has neither a
-  terminal nor stdin.
+- `feosd` is the only client of the guest's API, and the guest has no
+  network of its own to be configured over: a pod without a network boots
+  and serves all the same.
+- An older guest in a suspended pod answers a newer `feosd`'s calls it
+  does not know with `UNIMPLEMENTED`, which `feosd` handles (ADR 0027).
+- Exec has neither a terminal nor stdin: an interactive shell in a sandbox
+  needs a stream the API does not have yet.
+
+## History
+
+Decided on 2026-10-13, when the sandbox system's guest was ported onto
+FeOS's PID 1 and its eleven services onto FeOS's packages. The pod's
+credentials moved from the guest's own listeners to `feos-authn` on
+2026-10-15 (4c7f609, ADR 0014). `feos.guest.v1` began with the volumes'
+mounting on 2026-10-16 (446fd90, ADR 0016); the time, network, freeze and
+`PreparePause` calls that `HostService` carried before it are still there,
+listed in the backlog.

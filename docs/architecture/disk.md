@@ -64,6 +64,12 @@ top      a sparse file: what the pod wrote since
   cache, fetched from the object store into it when missing, or zero.
   Writes go to the top. Discards and write-zeroes write zeroes into the
   top.
+- Layers are cut into 64 KiB chunks (memory layers into 256 KiB ones),
+  content-addressed with blake3 and stored once. A layer's manifest is a
+  binary table with, per chunk, data, zero or absent (read the layer
+  below); the layer's ID is the blake3 of the manifest. A seal finds the
+  top's changes with `SEEK_DATA` and `SEEK_HOLE` and compares hashes,
+  which is why a discard writes zeroes and never punches a hole.
 - `ImportBase(path)` seals a raw image into an L0; an image whose name
   ends in `.zst` is unpacked first, sparse, into `staging/`.
 - `StopDisk` stops the device and keeps the top. `OpenDisk(pod)` starts it
@@ -328,3 +334,9 @@ With S3 in the environment, or in
 `~/.config/feos/diskd/s3.env` (`FEOS_S3_ENV`), it hibernates under a key
 prefix of its own and sweeps it at the end; without, the hibernation tests
 skip.
+
+`crates/diskd/clippy.toml` and `crates/disk-store/clippy.toml` deny
+`Mutex` and `RwLock`: diskd's request path is shared-nothing, and threads
+talk to the budget, seal and control actors through channels (ADR 0011).
+A use outside the request path needs an `#[allow]` and a comment saying
+why.
