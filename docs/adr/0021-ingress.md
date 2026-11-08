@@ -1,6 +1,6 @@
 # ADR 0021: The ingress: a program of its own, a peer of the pod mesh, serves environments' hosts over IPv6 with certificates ferund obtains
 
-**Status:** Proposed · **Date:** 2026-10-27
+**Status:** Proposed · **Date:** 2026-10-27 · Amended by [ADR 0034](0034-reachability-from-declarations.md) (revised 2026-11-08): the blocks the ingress checks come from a route's `from`, not from a group's rule; `ing-<id>` and `ferun-ingress` stay
 
 ## Context
 

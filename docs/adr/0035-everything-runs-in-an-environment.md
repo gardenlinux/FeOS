@@ -1,14 +1,18 @@
-# ADR 0035: Everything runs in an environment — a sandbox and a tenant's job are made in one, in its security groups, outside its deployments
+# ADR 0035: Everything runs in an environment — a sandbox and a tenant's job are made in one, reaching what they are told, outside its deployments
 
-**Status:** Proposed · **Date:** 2026-11-07
+**Status:** Proposed · **Date:** 2026-11-07 · **Revised 2026-11-08** with
+[ADR 0034](0034-reachability-from-declarations.md)'s revision: a sandbox
+and a tenant's job say what of their environment they reach (`reaches`)
+instead of naming security groups, and a change of it is a change of
+rules, in place, no move.
 
 **Touches:** ADR 0018 (a sandbox and a tenant's job belong to an
 environment; `attachable` and the group and name table `sbx-<id>` go; an
 attached service runs in a sandbox of its own environment), ADR 0031
 (sandboxes, their tokens and tools, tenants' jobs and attached services
-become an environment grant's), ADR 0034 (sandboxes and jobs name
-groups of their environment; the attachable sandbox's exception goes; a
-sandbox's groups change by a move), ADR 0033 (unchanged: a sandbox
+become an environment grant's), ADR 0034 (a sandbox and a job say what
+of their environment they reach; the attachable sandbox's exception
+goes; a change of it is a change of the targets' rules, in place), ADR 0033 (unchanged: a sandbox
 still names the tenant's credentials).
 
 ## Context
@@ -74,47 +78,39 @@ the same rules for network, names and access.
   pause and hibernation are unchanged. `/mcp` on a sandbox's token is
   FeCode's contract (ADR 0031) and stays exactly as it is.
 
-### Their pods are in the environment's security groups
+### They say what of the environment they reach
 
-- The create takes **`securityGroups`**: names of groups of the
-  environment (ADR 0034), at most five. **Left out, the pod is in
-  `default`**, as a service that names none is. An empty list is 400,
-  so that every pod has a group. A name that the environment's
-  deployed deployment does not have, or that a deployment on its way
-  removes, is 422 with the names it has.
-- `default` lets nothing in and reaches the internet (ADR 0034). A
-  sandbox made without groups is therefore what a sandbox is today:
-  usable by its token, invisible on the network. What it may reach in
-  its environment, and what may reach it, the tenant says in rules.
+- The create takes **`reaches`**: what of the environment the pod may
+  reach, a list of the deployed deployment's objects with a port
+  (`{service: api, port: http}`, `{addon: db}`) or `all`, every port of
+  every pod of the environment (ADR 0034). **Left out, nothing of the
+  environment**: the pod is usable by its token and alone on the
+  network. An entry naming an object the deployed deployment does not
+  have is 422 with the names it has; one that a later deployment removes
+  admits nothing and is shown on the sandbox. The create takes `egress`
+  as a service's does.
 - Exec, the tools, the port door and the ingress's routes to an
   attached service do not go over the pod network, or come from the
-  ingress's own group (ADR 0021, ADR 0034): they need no rule.
+  ingress (ADR 0021, ADR 0034): they need no declaration.
 - Like every pod of the environment, a sandbox and a job's pod are
-  members of `env-<id>`, may send to every pod of the environment (the
-  receiver's `in` decides), and resolve the environment's names from
-  `env-<id>`'s table.
-- **A plan counts them as users.** A deployment that removes a group a
-  sandbox or a running job names is refused at the plan, with the
-  pods that name it, as it is for an object that names it.
+  members of `env-<id>` and of a membership of their own, and resolve
+  the environment's names from `env-<id>`'s table. Nothing references a
+  sandbox, so nothing of the environment reaches it, except through an
+  attached service's port (below).
 
-### Changing a sandbox's groups is a move
+### A change of what a sandbox reaches is a change of rules
 
 - A sandbox lives long and holds state; it cannot roll as a service
-  does. Its groups change by `PUT /api/v1/sandboxes/{id}/security-groups`.
-- The change is a **move**: `ferund` hibernates the sandbox and
-  restores it (ADR 0008) with the new groups. A hibernated pod gives up
-  its addresses and a restored one gets new ones, on any node, its own
-  included, so the sandbox comes back under a **new address**, its disk
-  and memory as they were. Processes go on where they were; open
-  connections break, as they do when a sandbox resumes on another node
-  (ADR 0010). It takes as long as a hibernation and a restore.
-- So ADR 0034's rule holds for every pod: a member leaves a group only
-  when its pod ends or moves, and since addresses are never given twice,
-  a removal that arrives late opens nothing. There is no change of
-  membership in place.
-- A hibernated sandbox takes its new groups at its restore, which
-  already is a move; a paused one is hibernated for it.
-- A tenant's job's groups are fixed: it runs once.
+  does. What it reaches changes by `PUT /api/v1/sandboxes/{id}/reaches`.
+- The change is a change of its targets' rules, in from the sandbox's
+  pod, which `ferund` puts whole on the nodes that hold them and
+  acknowledges per node (ADR 0034). The sandbox's memberships, its
+  environment and itself, never change, so nothing moves: no new
+  address, no broken connection. A removal counts as gone when the
+  nodes that hold the rule have acknowledged it, as any rule's does.
+- A hibernated sandbox takes a new `reaches` at its restore, as it
+  takes everything.
+- A tenant's job's `reaches` is fixed: it runs once.
 
 ### An attached service runs in a sandbox of its environment
 
@@ -124,19 +120,18 @@ the same rules for network, names and access.
   it gave (a group, a name table, from the creation on) every sandbox
   now has from its environment. A create that sends `attachable` is
   400 with this ADR's name, so that a caller notices.
-- An attached service has **no groups of its own**: its process runs in
-  the sandbox's pod, so it is in the sandbox's groups. `securityGroups`
-  on an attached service is an error of the plan that names the
-  sandbox's groups.
+- An attached service has **nothing of its own on the network**: its
+  process runs in the sandbox's pod. Its references open what they name
+  for the sandbox's pod (ADR 0034); `reaches` and `egress` on an
+  attached service are errors of the plan that name the sandbox.
 - Its name is in `env-<id>`'s table with the sandbox's address, so that
   pods of the environment reach it where a rule lets them. Inside the
   sandbox it is reached over the guest's loopback, as now: `feosd`'s
   resolver answers a pod a name whose addresses include the pod's own
   with `127.0.0.1` and `::1`, so that the attached services of one
   sandbox reach each other by name without the table `sbx-<id>`.
-- The blocks of `in` rules on a routed port of an attached service
-  (ADR 0034, the ingress checks the client) are those of its sandbox's
-  groups.
+- A route to an attached service's port names its clients' blocks as
+  any route does (ADR 0034, `from`).
 - The group and the name table `sbx-<id>` go, and with them the case of
   two environments' names and ports in one sandbox.
 
@@ -146,7 +141,7 @@ the same rules for network, names and access.
   - `read`: also its sandboxes and tenants' jobs, their status, their
     logs and traces;
   - `write`: also making, pausing, resuming, deleting its sandboxes,
-    their tokens, their tools and their groups; making and cancelling
+    their tokens, their tools and what they reach; making and cancelling
     its tenants' jobs; services with the runtime `attached`.
 - A tenant grant's `read` still lists them all; what only a tenant
   grant gives no longer includes sandboxes, jobs or attached services.
@@ -181,17 +176,16 @@ the same rules for network, names and access.
 - **A default environment per tenant** for sandboxes made without one:
   the same two kinds under one name, and a place where every sandbox
   without a better home reaches every other.
-- **`securityGroups` required on the create**: `default` is closed
-  inbound already, and a service may leave its groups out too. A rule
-  for sandboxes alone would be a second rule for the same thing.
-- **A sandbox in its environment's groups automatically**, all of
-  them, or a fixed `sandbox` group open to the environment: a sandbox
+- **`reaches` required on the create**: nothing of the environment is
+  the safe default, and a sandbox that needs only its token needs no
+  list.
+- **A sandbox reaching all of its environment by default**: a sandbox
   runs agents' code, and what it reaches is the tenant's decision, made
-  per sandbox.
-- **Groups changed in place, without a move**: ADR 0034 rejected it,
-  since every removal would then need every node's acknowledgement
-  before access counts as gone. A move costs a sandbox a hibernation
-  and a restore, and keeps removals harmless.
+  per sandbox; `all` is one word away.
+- **A move for a changed `reaches`**, a hibernation and a restore under
+  a new address, as the first version of this ADR had it for a change of
+  groups: a change of membership needed it; a change of rules is put in
+  place and acknowledged per node (ADR 0034).
 - **A sandbox serving several environments**, as `attachable` allows:
   nobody uses it (FeCode's workspace sandbox serves one dev
   environment), and it is what made names, ports and groups
@@ -200,39 +194,38 @@ the same rules for network, names and access.
 ## Consequences
 
 - `POST /api/v1/sandboxes` and `POST /api/v1/jobs` gain `environment`
-  (required) and `securityGroups`; the sandbox gains `PUT
-  …/security-groups`; lists take `?environment=`; `attachable` is
-  refused. The rows of sandboxes and jobs get `environment_id` not
-  null, a sandbox's groups its pod template.
+  (required), `reaches` and `egress`; the sandbox gains `PUT
+  …/reaches`; lists take `?environment=`; `attachable` is refused. The
+  rows of sandboxes and jobs get `environment_id` not null, a sandbox's
+  `reaches` its row.
 - `ferund` drops the group and name table `sbx-<id>`; the controller
-  puts every sandbox and job pod into `env-<id>`, its named groups and
-  `env-<id>`'s table, and names attached services in that table.
-- A group change is hibernation and restore, which already give the
-  pod new addresses. The restore takes the groups and name tables from
-  the pod's checkpointed spec, so `RestorePodRequest` gains
-  `security_groups` and `name_tables`, which replace the record's when
-  set, as `log_labels` do. A move that skips the checkpoint's upload
-  when the sandbox stays on its node is an optimisation for later.
-- The plan checks groups that sandboxes and running jobs name, and an
-  attached service's sandbox and its lack of groups.
+  puts every sandbox and job pod into `env-<id>` and a membership of its
+  own, writes its `reaches` as its targets' rules, gives it `env-<id>`'s
+  table, and names attached services in that table.
+- A restore carries the pod's memberships and name tables
+  (`RestorePodRequest`'s `security_groups` and `name_tables`, which
+  replace the record's when set, as `log_labels` do); since ADR 0034's
+  revision they no longer change between a pod's runs.
+- The plan shows a `reaches` entry whose object a deployment removes,
+  and checks an attached service's sandbox.
 - ADR 0031's grants move as above; the console's sandbox and job forms
-  get an environment and a choice of groups, showing what `default`
-  means ("nothing in, internet out"), and an environment's page lists
-  its sandboxes and jobs.
-- **Existing sandboxes and jobs move once, at the release, with no
-  second mode.** A migration puts each sandbox that an environment's
+  get an environment, `reaches` (`all` or a list) and `egress`, and an
+  environment's page lists its sandboxes and jobs.
+- **Existing sandboxes and jobs moved once, at the release of
+  2026-11-07, with no second mode.** A migration puts each sandbox that an environment's
   attached service names into that environment, and every other
   sandbox and every job of a tenant into an environment `sandboxes`
   that it makes for the tenant, empty. All are in `default`. Running
   and paused sandboxes are moved once by `ferund` after the release,
   hibernated ones take their groups at their restore; running jobs
-  finish under their old groups.
+  finish under their old groups. ADR 0034's revision turns a sandbox's
+  groups into `reaches`: `all` for FeCode's `workspace`, nothing for
+  `default`.
 - **FeCode changes in the same release** (a FeCode ADR of its own):
   - a workspace's dev environment is made with its sandbox, before it,
-    and the sandbox in it, in a group that the dev environment's
-    addons let in;
+    and the sandbox in it, reaching all of it;
   - a project's own sandbox and its build jobs get environments of the
-    project (builds need only the internet, which `default` gives);
+    project (builds need only the internet, which `egress` gives);
   - a lost workspace sandbox is replaced in the same environment, and
     the dev environment's deployment names the new one, as now;
   - it stops sending `attachable`.

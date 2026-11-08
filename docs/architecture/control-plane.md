@@ -2693,7 +2693,7 @@ shapes:
   environment's attached services there. Bindings while they are off
   are an error.
 - **Security groups** (`securityGroups`, [ADR
-  0034](../adr/0034-tenant-security-groups.md)): names of 1 to 32 of
+  0034](../adr/0034-reachability-from-declarations.md)): names of 1 to 32 of
   `[a-z0-9-]`, beginning with a letter or a digit; `default` always
   exists. A group has rules `in` and `out`, at most 60 together, each a
   protocol (`tcp` when left out, `udp`, `icmp`, `any`), ports and ranges

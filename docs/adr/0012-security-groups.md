@@ -1,6 +1,6 @@
 # ADR 0012: Security groups decide what pods reach
 
-**Status:** Proposed · **Date:** 2026-10-15
+**Status:** Proposed · **Date:** 2026-10-15 · Amended by [ADR 0034](0034-reachability-from-declarations.md) (revised 2026-11-08): egress by name, the open question, is decided — the resolver puts the addresses of a pod's allowed names into a timed set and refuses the rest; the control plane's groups are the memberships it derives (`env-`, `wl-`, `ing-`), never a tenant's
 
 ## Context
 

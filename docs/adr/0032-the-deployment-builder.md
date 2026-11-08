@@ -1,6 +1,6 @@
 # ADR 0032: The deployment builder: the UI edits an environment's spec in forms and as JSON, one draft kept in the browser, planned on every change and applied as the next deployment
 
-**Status:** Proposed · **Date:** 2026-11-06
+**Status:** Proposed · **Date:** 2026-11-06 · Amended by [ADR 0034](0034-reachability-from-declarations.md) (revised 2026-11-08): no form for security groups; a service's `egress` and `uses`, a route's `from`, and the picture of the plan's reachability instead
 
 **Touches:** ADR 0018 (a plan answers the images it pinned; a catalog
 of the addons' blueprints; the management UI writes deployments), ADR

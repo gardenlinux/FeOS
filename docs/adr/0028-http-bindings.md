@@ -1,6 +1,6 @@
 # ADR 0028: HTTP bindings at the node's address — a pod calls an API by a name, the host adds the credential, and the API keeps its own name where it must
 
-**Status:** Proposed · **Date:** 2026-11-05
+**Status:** Proposed · **Date:** 2026-11-05 · Amended by [ADR 0034](0034-reachability-from-declarations.md) (revised 2026-11-08): a binding's upstream is egress the binding declares, once bindings dial from the pod's address
 
 **Touches:** ADR 0014 (amended: HTTP APIs are bindings of `feos-authn`,
 which answers its open question on tokens for HTTP APIs; an HTTP binding
