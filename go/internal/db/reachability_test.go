@@ -112,6 +112,8 @@ func TestReachabilityMigration(t *testing.T) {
 		('wsa00000001', 'acme', 'img', 1, 512, $2, false, false, '{workspace,default}', false, $5),
 		('wsb00000001', 'acme', 'img', 1, 512, $3, false, false, '{default}', true, NULL),
 		('wsc00000001', 'acme', 'img', 1, 512, $3, false, false, '{default}', false, '{"image": "x"}'),
+		('wsd00000001', 'acme', 'img', 1, 512, $3, false, false, '{default}', true,
+			'{"securityGroups": ["sbx-wsd00000001"], "nameTables": ["sbx-wsd00000001"]}'),
 		('jb000000001', 'acme', 'img', 1, 512, $3, false, true, '{workspace}', false, $6)`,
 		stage, dev, boxes, tmpl(stage, `"ing-web"`), tmpl(dev), tmpl(boxes))
 	exec(`UPDATE sandboxes SET move_restore = true WHERE id = 'wsa00000001'`)
@@ -182,7 +184,7 @@ func TestReachabilityMigration(t *testing.T) {
 		return m.SecurityGroups
 	}
 	for id, want := range map[string]string{"nst00000001": `[]`, "wsa00000001": `"all"`, "wsb00000001": `[]`,
-		"wsc00000001": `[]`, "jb000000001": `[]`} {
+		"wsc00000001": `[]`, "wsd00000001": `[]`, "jb000000001": `"all"`} {
 		if p := read(id); p.reaches != want || p.egress != nil {
 			t.Fatalf("%s reaches %s egress %v, want %s", id, p.reaches, p.egress, want)
 		}
@@ -218,16 +220,28 @@ func TestReachabilityMigration(t *testing.T) {
 	groupsAre("nst00000002", "env-"+stage, "sg-"+sg, "ing-web") // no env_instances row
 	groupsAre("nst00000003")                                    // no template
 	groupsAre("wsa00000001", "env-"+dev, "sg-"+sg, "wl-s-wsa00000001")
-	groupsAre("wsb00000001")
-	groupsAre("wsc00000001", "env-"+boxes, "wl-s-wsc00000001")
+	// Sandboxes whose 0032 move never ran: NULL, an attachable one's
+	// sbx-<id>, one without env-<env>, all get the template a sandbox is
+	// made with.
+	for _, id := range []string{"wsb00000001", "wsc00000001", "wsd00000001"} {
+		var m struct {
+			Command        []string `json:"command"`
+			SecurityGroups []string `json:"securityGroups"`
+			NameTables     []string `json:"nameTables"`
+		}
+		p := read(id)
+		if p.template == nil || json.Unmarshal([]byte(*p.template), &m) != nil ||
+			!slices.Equal(m.Command, []string{"sleep", "infinity"}) ||
+			!slices.Equal(m.SecurityGroups, []string{"env-" + boxes, "wl-s-" + id}) ||
+			!slices.Equal(m.NameTables, []string{"env-" + boxes}) {
+			t.Fatalf("%s's template %v", id, p.template)
+		}
+	}
 	groupsAre("jb000000001", "env-"+boxes, "sg-"+sg, "wl-j-jb000000001")
 	var rest bool
 	if err := d.Pool.QueryRow(ctx, `SELECT pod_template - 'securityGroups' = $1::jsonb - 'securityGroups'
 		FROM sandboxes WHERE id = 'nst00000001'`, tmpl(stage)).Scan(&rest); err != nil || !rest {
 		t.Fatalf("the rest of the template changed (%v)", err)
-	}
-	if p := read("wsb00000001"); p.template != nil {
-		t.Fatalf("a sandbox without a pod got a template: %s", *p.template)
 	}
 
 	// What the first version added is gone.

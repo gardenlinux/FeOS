@@ -26,8 +26,11 @@
 --     without its row is left as it is), a sandbox's wl-s-<id>, a
 --     tenant's job's pod's wl-j-<id> (the job's ID). The sg- entries stay:
 --     ferund builds them as a transition group until the pod is
---     replaced. A sandbox's or a job's template without a list gets
---     [env-<environment>, its wl];
+--     replaced. A job's pod's template without a list gets
+--     [env-<environment>, its wl]; a sandbox's own that is not of ADR
+--     0035 yet (0032's moves that never ran: NULL, sbx-<id>, no
+--     env-<environment>) gets the whole template a sandbox is made with;
+--     a tenant's job's pod gets its job's reaches;
 --   - the table security_groups, the columns security_groups,
 --     groups_pending and move_restore and what goes with them are
 --     dropped.
@@ -85,7 +88,32 @@ BEGIN
 END
 $$;
 
+-- A tenant's job's pod reaches what its job does.
+UPDATE sandboxes s SET reaches = j.reaches FROM jobs j
+  WHERE s.id = j.id AND s.tenant_job AND s.reaches <> j.reaches;
+
 -- 4. Every pod template in its workload's group.
+--
+-- A sandbox of its own whose template is not one of ADR 0035 yet (the
+-- moves of 0032 that never ran, groups_pending): NULL, or the attachable
+-- one's {"securityGroups": ["sbx-<id>"], "nameTables": ["sbx-<id>"]},
+-- or any other without env-<env> or with an sbx- group. Nothing makes it
+-- again after this migration (the moves are gone), so it gets the
+-- template a sandbox is made with (model.SandboxTemplate): sleep
+-- infinity, env-<env> and wl-s-<id>, the table env-<env>. Its pod, where
+-- it runs, keeps what its node gave it until its next restore.
+UPDATE sandboxes SET pod_template = CASE WHEN jsonb_typeof(pod_template) = 'object' THEN pod_template
+      ELSE '{}'::jsonb END
+    || jsonb_build_object('command', jsonb_build_array('sleep', 'infinity'),
+      'securityGroups', jsonb_build_array('env-' || environment_id::text, 'wl-s-' || id),
+      'nameTables', jsonb_build_array('env-' || environment_id::text))
+  WHERE NOT instance AND NOT tenant_job AND (
+    jsonb_typeof(pod_template) IS DISTINCT FROM 'object'
+    OR jsonb_typeof(pod_template->'securityGroups') IS DISTINCT FROM 'array'
+    OR NOT (pod_template->'securityGroups') ? ('env-' || environment_id::text)
+    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(pod_template->'securityGroups') g WHERE g LIKE 'sbx-%')
+    OR jsonb_typeof(pod_template->'nameTables') IS DISTINCT FROM 'array'
+    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(pod_template->'nameTables') t WHERE t LIKE 'sbx-%'));
 UPDATE sandboxes s SET pod_template = jsonb_set(s.pod_template, '{securityGroups}',
     (s.pod_template->'securityGroups') || jsonb_build_array(w.wl))
   FROM (SELECT ei.sandbox_id, 'wl-' || left(encode(sha256(convert_to(
