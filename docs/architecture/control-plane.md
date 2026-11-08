@@ -2214,13 +2214,17 @@ people use the UI in an environment; its status is read once for the
 sidebar and the page (`web/src/envstatus.jsx`, every 3 s while one of
 its pages is open). An environment's views are its tab bar
 (`ENV_LENSES` in `web/src/routes.js`): overview, activity, logs,
-traces, traffic and settings; Activity has the deployments and the
+traces, traffic, reachability (the deployed deployment's
+`reachability`, ADR 0034: per object who reaches it and by which
+reference, what it reaches, its egress; the sandboxes and running jobs
+with their `reaches`) and settings; Activity has the deployments and the
 incidents as pages of its own, besides everything in one list, and
 Settings the general page (the environment's name, ID, labels; clone
 and delete), the secrets and credentials, and the domains and access.
 An object's page (`…/objects/<kind>/<name>[/<view>]`) has the views the
 object has: overview, logs, traces and traffic (a service), and config
-(its definition, the routes to it, who uses it). Picking another thing
+(its definition, its row of the reachability, the routes to it, who
+uses it). Picking another thing
 in the sidebar keeps the view where the thing has it: from prod's logs
 to api's logs and back; an object's logs under the environment's Logs
 (`…/logs/<kind>/<name>`) redirect to its page's. The overview says
