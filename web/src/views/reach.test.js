@@ -72,8 +72,9 @@ describe('the picture of an environment', () => {
       'domain:api.stripe.com by name · egress', 'cidr:203.0.113.0/24 (except 203.0.113.8/29) all traffic · egress']);
     const db = of(m, 'addon/db');
     expect(db.ins.map(row)).toEqual(['service:api postgres 5432 · env DATABASE_URL', 'job:migrate postgres 5432 · uses']);
-    expect(db.outs).toEqual([]);
-    expect(db.egress).toBe('none');
+    // An addon reaches the internet: the guest pulls its image (ADR 0034).
+    expect(db.outs.map(row)).toEqual(['internet:Internet all traffic · egress']);
+    expect(db.egress).toBe('internet');
   });
 
   it('shows a route without from as every client, and the egress as answered', () => {

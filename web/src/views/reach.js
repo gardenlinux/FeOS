@@ -475,7 +475,7 @@ export function reachModel(spec, reach, pods = []) {
     }
     let eg;
     if (egress.has(o.ref)) eg = egressOfAnswer(egress.get(o.ref));
-    else if (o.kind === 'addon') eg = 'none';
+    else if (o.kind === 'addon') eg = 'internet';
     else if (o.attached) eg = undefined;
     else eg = isObject(o.spec) ? (o.spec.egress === undefined ? 'internet' : o.spec.egress) : undefined;
     return { ref: o.ref, kind: o.kind, name: o.name, attached: o.attached, egress: eg, ins: ins.list(), outs: [...outs.list(), ...(eg === undefined ? [] : egressRows(eg))] };

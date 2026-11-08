@@ -51,7 +51,7 @@ describe("an object's reachability on its Config", () => {
     expect(t).toContain('Nothing outside the environment');
     const db = text(pic('addon', 'db'));
     expect(db).toContain('api postgres 5432');
-    expect(db).toContain('Nothing outside the environment');
+    expect(db).toContain('Internet');
   });
 
   it('sends an attached service to its sandbox, and says what is not there yet', () => {
