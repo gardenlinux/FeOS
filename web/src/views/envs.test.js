@@ -7,7 +7,7 @@ import { response } from '../testing/ferun.js';
 import {
   actionProblem, activityItems, CHANGES_READ, changesTo, changeTone, cloneBody, conditionText, defaultHost,
   definitionRows, deploymentTone, envCounts, envDomains, envRows, envValueRef, errorShare, exitText, findObject,
-  fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments, instanceNote,
+  fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments, instanceNote, instancePhase,
   jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
   objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
   phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
@@ -67,8 +67,10 @@ describe('instanceNote', () => {
   it('reads a detail by the phase and the sandbox, never at all without one', () => {
     expect(instanceNote({ ...run, phase: 'ready', detail: '' })).toBe(null);
     expect(instanceNote({ ...run, phase: 'starting', detail: 'starting' })).toBe(null);
-    expect(instanceNote({ phase: 'starting', state: 'creating', detail: 'restarting' }))
-      .toMatchObject({ tone: 'moving', icon: 'refresh', spin: true, label: 'Restarting', text: '' });
+    expect(instanceNote({ phase: 'starting', state: 'creating', detail: 'restarting' })).toBe(null);
+    expect(instancePhase({ phase: 'starting', detail: 'restarting' })).toBe('restarting');
+    expect(instancePhase({ phase: 'starting', detail: 'GET /: x' })).toBe('starting');
+    expect(phaseTone('restarting')).toBe('moving');
     expect(instanceNote({ ...run, phase: 'exited', detail: 'exited with code 1; restarting in 4s' }))
       .toMatchObject({ tone: 'failed', label: '', text: 'exited with code 1; restarting in 4s' });
     expect(instanceNote({ phase: 'starting', state: 'creating', detail: 'pulling the image' }))

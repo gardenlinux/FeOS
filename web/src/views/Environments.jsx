@@ -17,7 +17,7 @@ import { atLeast, envRole, useAccess } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import {
   changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, hasEvidence, heavyEffect,
-  incidentObject, instanceNote, isAttached, labelPairs, logSourceText, logsProblem, mayRevertTo, originText, parseLabelFilter,
+  incidentObject, instanceNote, instancePhase, isAttached, labelPairs, logSourceText, logsProblem, mayRevertTo, originText, parseLabelFilter,
   phaseTone, deploymentTone, preflightRows, deploymentText, revertOffer, rolloutNote, specBindings, statusState,
   tagPlan,
 } from './envs.js';
@@ -622,16 +622,16 @@ export function JobLine({ run }) {
   );
 }
 
-// InstanceNote is an instance's detail as a note: an icon and a label in
-// its tone, a readiness check's request as code, the reason in the text's
-// colour, its whole in the title.
+// InstanceNote is an instance's detail as a quiet line: an icon and a
+// label in its tone, a readiness check's request in mono, the reason
+// muted, its whole in the title.
 export function InstanceNote({ note, title }) {
   return (
     <div className={'inst-note ' + note.tone} title={title}>
-      <Icon name={note.icon} size={13} className={note.spin ? 'inst-note-spin' : ''} />
+      <Icon name={note.icon} size={12} />
       {note.label && <span className="inst-note-label">{note.label}</span>}
-      {note.request && <code className="inst-note-req">{note.request}</code>}
-      {note.text && <span className="inst-note-text">{note.text}</span>}
+      {note.request && <span className="inst-note-req mono">{note.request}</span>}
+      <span className="inst-note-text">{note.text}</span>
     </div>
   );
 }
@@ -669,7 +669,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo, operator = 
               <Fragment key={i.id}>
                 <tr className={[dim, note ? 'has-detail' : ''].filter(Boolean).join(' ')} title={`instance ${i.id}`}>
                   <td className="col-num mono">{i.replica}</td>
-                  <td><ToneLabel tone={phaseTone(i.phase)}>{i.phase}</ToneLabel></td>
+                  <td><ToneLabel tone={phaseTone(instancePhase(i))}>{instancePhase(i)}</ToneLabel></td>
                   <td><StateLabel state={i.state} /></td>
                   <td className="mono small muted cut-start" title={i.address || undefined}>{i.address || '—'}</td>
                   <td className={'col-num mono' + (old ? ' muted' : '')} title={old ? "an older deployment's instance" : ''}>{i.deployment}</td>

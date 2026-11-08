@@ -223,12 +223,9 @@ describe('EnvOverview', () => {
 });
 
 describe('InstanceNote', () => {
-  it("shows a readiness check's label, request and reason; a restart its label alone", () => {
+  it("shows a readiness check's label, request and reason", () => {
     const check = html(<InstanceNote note={{ tone: 'moving', icon: 'activity', label: 'Readiness check', request: 'GET /readyz', text: 'nothing answered on port 8080 in this sandbox' }} title="t" />);
-    expect(check).toContain('<span class="inst-note-label">Readiness check</span><code class="inst-note-req">GET /readyz</code><span class="inst-note-text">nothing answered on port 8080 in this sandbox</span>');
-    const restart = html(<InstanceNote note={{ tone: 'moving', icon: 'refresh', spin: true, label: 'Restarting', request: '', text: '' }} title="restarting" />);
-    expect(restart).toContain('icon inst-note-spin');
-    expect(restart).not.toContain('inst-note-text');
+    expect(check).toContain('<span class="inst-note-label">Readiness check</span><span class="inst-note-req mono">GET /readyz</span><span class="inst-note-text">nothing answered on port 8080 in this sandbox</span>');
   });
 });
 

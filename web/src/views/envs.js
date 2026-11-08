@@ -25,22 +25,27 @@ export function deploymentTone(state) {
 export function phaseTone(phase) {
   switch (phase) {
     case 'ready': case 'succeeded': return 'running';
-    case 'starting': case 'unready': case 'running': return 'moving';
+    case 'starting': case 'restarting': case 'unready': case 'running': return 'moving';
     case 'exited': case 'failed': return 'failed';
     default: return 'absent';
   }
 }
 
-// instanceNote is an instance's detail as the note under its row, or
+// instancePhase is the phase an instance's row shows: ferund's bare
+// "restarting" detail on a starting instance is a phase of its own.
+export function instancePhase(i) {
+  return i.phase === 'starting' && i.detail === 'restarting' ? 'restarting' : i.phase;
+}
+
+// instanceNote is an instance's detail as the line under its row, or
 // null: its tone, icon and label, and for a readiness check its request
 // ("GET /readyz", "tcp") apart from the reason. The phase and the
-// sandbox's state choose the tone; ferund's bare "restarting" is the
-// label alone, and "starting" (the steady wait of a service without a
-// check) says nothing the phase does not.
+// sandbox's state choose the tone; "restarting" is the phase
+// (instancePhase), and "starting" (the steady wait of a service without
+// a check) says nothing the phase does not.
 export function instanceNote(i) {
   const d = (i && i.detail) || '';
-  if (!d || d === 'starting') return null;
-  if (d === 'restarting') return { tone: 'moving', icon: 'refresh', spin: true, label: 'Restarting', request: '', text: '' };
+  if (!d || d === 'starting' || d === 'restarting') return null;
   if (i.phase === 'exited' || i.phase === 'failed') return { tone: 'failed', icon: 'x', label: '', request: '', text: d };
   if (i.state && i.state !== 'running') return { tone: 'moving', icon: 'server', label: '', request: '', text: d };
   const m = /^(GET \S+|tcp): ([\s\S]+)$/.exec(d);
