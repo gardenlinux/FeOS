@@ -39,7 +39,8 @@ func TestCodecRoundTrip(t *testing.T) {
 		Whole: true,
 		Envs: []Env{{
 			ID: "e1", Tenant: "acme", Name: "prod", Hosts: []string{"a.apps.test"}, Deployment: 3, Hash: "h",
-			Routes: []Route{{Name: "web", Path: "/", Service: "web", Port: "http", Strip: true}},
+			Routes: []Route{{Name: "web", Path: "/", Service: "web", Port: "http", Strip: true},
+				{Name: "admin", Path: "/admin", Service: "web", Port: "http", From: []string{"192.0.2.0/24", "2001:db8::/32"}}},
 			Services: []Service{{
 				Name: "web", Idle: true, Asleep: 1, Waking: 2, Pending: 3,
 				Endpoints: []Endpoint{{
@@ -471,5 +472,30 @@ func TestMessageCompatibility(t *testing.T) {
 	}
 	if b, _ := json.Marshal(in); !strings.Contains(string(b), `"capabilities"`) {
 		t.Errorf("the newer request lacks its field: %s", b)
+	}
+}
+
+// A route without clients' blocks codes as before the field (so an
+// unchanged environment keeps its hash), and an older ingress, which
+// does not know the field, reads a route with them.
+func TestRouteFromCompatible(t *testing.T) {
+	c := Codec{}
+	b, err := c.Marshal(&Route{Name: "web", Path: "/", Service: "web", Port: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"name":"web","path":"/","service":"web","port":"http","strip":false,"door":false}`; string(b) != want {
+		t.Errorf("without from: %s, want %s", b, want)
+	}
+	b, err = c.Marshal(&Route{Name: "web", Path: "/", From: []string{"::/0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	if err := c.Unmarshal(b, &old); err != nil || old.Name != "web" || old.Path != "/" {
+		t.Errorf("an older reader: %+v, %v", old, err)
 	}
 }

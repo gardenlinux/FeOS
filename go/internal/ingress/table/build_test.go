@@ -120,8 +120,8 @@ func TestBuildEnvRoutes(t *testing.T) {
 
 	// Before a first rollout ends: the latest deployment, with api.
 	got, _ = build(t, "apps.example", baseEnv(2, 0), specs)
-	if got.Deployment != 2 || len(got.Routes) != 4 || got.Routes[0].Name != "admin" || got.Routes[1] !=
-		(wire.Route{Name: "api", Path: "/api", Service: "api", Port: "grpc"}) {
+	if got.Deployment != 2 || len(got.Routes) != 4 || got.Routes[0].Name != "admin" || !reflect.DeepEqual(got.Routes[1],
+		wire.Route{Name: "api", Path: "/api", Service: "api", Port: "grpc"}) {
 		t.Fatalf("latest: deployment %d, routes %+v", got.Deployment, got.Routes)
 	}
 	if names := []string{got.Services[0].Name, got.Services[1].Name}; len(got.Services) != 2 ||
@@ -326,6 +326,36 @@ func TestBuildEnvHostsAndHash(t *testing.T) {
 	}
 }
 
+// A route's clients' blocks go into its entry canonical, in their order;
+// one that does not parse goes as written (the ingress admits no one by
+// it), and a route without them has none. A change of them changes the
+// hash, so the ingress gets it.
+func TestBuildEnvRouteFrom(t *testing.T) {
+	sp := deployment1()
+	root := sp.Routes["root"]
+	root.From = []string{"192.0.2.77/24", "2001:DB8::1/32", "::ffff:198.51.100.0/120", "bogus"}
+	sp.Routes["root"] = root
+	got, _ := build(t, "apps.example", baseEnv(1, 1), specsOf(map[int]*spec.Spec{1: sp}))
+	want := []string{"192.0.2.0/24", "2001:db8::/32", "::ffff:198.51.100.0/120", "bogus"}
+	if r := got.Routes[2]; r.Name != "root" || !slices.Equal(r.From, want) {
+		t.Fatalf("root: %+v", r)
+	}
+	if r := got.Routes[0]; r.Name != "admin" || r.From != nil {
+		t.Fatalf("admin: %+v", r)
+	}
+
+	root.From = []string{"192.0.2.0/25"}
+	sp.Routes["root"] = root
+	changed, _ := build(t, "apps.example", baseEnv(1, 1), specsOf(map[int]*spec.Spec{1: sp}))
+	if changed.Hash == got.Hash {
+		t.Fatal("a change of from kept the hash")
+	}
+	if puts, _ := Diff(map[string]string{got.ID: got.Hash}, &Snapshot{Envs: map[string]wire.Env{changed.ID: changed}}); len(puts) != 1 ||
+		!slices.Equal(puts[0].Routes[2].From, []string{"192.0.2.0/25"}) {
+		t.Fatalf("diff: %+v", puts)
+	}
+}
+
 // routesSpec is an image service web behind routes routes, each with a
 // path of n characters of '&' and its number.
 func routesSpec(routes, n int) *spec.Spec {
@@ -362,6 +392,12 @@ func TestBuildEnvTooLarge(t *testing.T) {
 		instances = append(instances, ready(fmt.Sprintf("a%010d", i), "web", 1, 8080))
 	}
 	largest := routesSpec(spec.MaxRoutes, spec.MaxRoutePathBytes-4)
+	for name, r := range largest.Routes {
+		for i := range spec.MaxRouteFrom {
+			r.From = append(r.From, fmt.Sprintf("2001:db8:ffff:ffff:ffff:ffff:ffff:%x/128", 0xff00+i))
+		}
+		largest.Routes[name] = r
+	}
 	got, _ := build(t, "apps.example", baseEnv(1, 0, instances...), specsOf(map[int]*spec.Spec{1: largest}))
 	n, err := wire.Size(got)
 	if err != nil {
@@ -373,7 +409,7 @@ func TestBuildEnvTooLarge(t *testing.T) {
 	if n > MaxEnvBytes/4 {
 		t.Fatalf("the largest valid environment takes %d bytes", n)
 	}
-	t.Logf("128 routes of %d bytes, %d endpoints: %d bytes", spec.MaxRoutePathBytes, len(instances), n)
+	t.Logf("128 routes of %d bytes with 32 blocks each, %d endpoints: %d bytes", spec.MaxRoutePathBytes, len(instances), n)
 }
 
 // Group turns the store's rows into environments, those without an

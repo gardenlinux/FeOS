@@ -166,6 +166,9 @@ func (m Mesh) clone() Mesh {
 func (e Env) clone() Env {
 	e.Hosts = slices.Clone(e.Hosts)
 	e.Routes = slices.Clone(e.Routes)
+	for i := range e.Routes {
+		e.Routes[i].From = slices.Clone(e.Routes[i].From)
+	}
 	if e.Domains != nil {
 		ds := make([]Domain, len(e.Domains))
 		for i, d := range e.Domains {

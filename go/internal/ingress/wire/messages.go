@@ -214,14 +214,19 @@ type Domain struct {
 // list under Port (Endpoint.Ports). Strip removes Path from the request's
 // path. Door marks a route that the route
 // door of ferund serves alone (an attached service, which runs in a
-// sandbox): the ingress does not serve it.
+// sandbox): the ingress does not serve it. From are the route's clients'
+// address blocks, canonical prefixes of either family (ADR 0034,
+// revised): the ingress answers a client whose address is in none of
+// them 403. None: every client. An ingress older than the field ignores
+// it.
 type Route struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Service string `json:"service"`
-	Port    string `json:"port"`
-	Strip   bool   `json:"strip"`
-	Door    bool   `json:"door"`
+	Name    string   `json:"name"`
+	Path    string   `json:"path"`
+	Service string   `json:"service"`
+	Port    string   `json:"port"`
+	Strip   bool     `json:"strip"`
+	Door    bool     `json:"door"`
+	From    []string `json:"from,omitempty"`
 }
 
 // Service is one routed service: the instances that answer, and the

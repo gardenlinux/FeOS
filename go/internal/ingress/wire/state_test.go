@@ -177,6 +177,7 @@ func TestStateClone(t *testing.T) {
 	s := NewState()
 	withDomain := env("a", "1")
 	withDomain.Domains = []Domain{{Name: "a.example", Chain: [][]byte{{1, 2}, {3}}, Key: []byte{4, 5}}}
+	withDomain.Routes[0].From = []string{"192.0.2.0/24"}
 	mustApply(t, s, &Table{Seq: 1, Whole: true, Envs: []Env{withDomain, env("b", "1")},
 		Mesh:       &Mesh{Version: 2, Peers: []Peer{{Name: "n1", PublicKey: []byte{1, 2}}}},
 		Self:       &Self{Name: "ingress-0"},
@@ -194,6 +195,7 @@ func TestStateClone(t *testing.T) {
 	a := c.Envs["a"]
 	a.Hosts[0] = "changed"
 	a.Routes[0].Path = "/changed"
+	a.Routes[0].From[0] = "0.0.0.0/0"
 	a.Services[0].Name = "changed"
 	a.Services[0].Endpoints[0].Address = "changed"
 	a.Services[0].Endpoints[0].Ports["http"] = 1

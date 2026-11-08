@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
@@ -170,7 +171,8 @@ func Asleep(phase, clientState, op string) bool {
 //   - Its routes are those of its routing deployment (RoutingDeployment), by
 //     name; a route's Path is its prefix as the route door matches it
 //     (spec.RoutePrefix). A route to an attached service is the route
-//     door's alone (Door).
+//     door's alone (Door). Its From are the spec route's clients' blocks,
+//     canonical (routeFrom).
 //   - Each image service that a route sends to is a Service.
 //     An instance of it is an endpoint when it is ready, running,
 //     without an operation, with an address and a node, and its node
@@ -207,7 +209,7 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 	byService := map[string][]spec.RouteView{}
 	for _, r := range spec.IngressRoutes(sp) {
 		out.Routes = append(out.Routes, wire.Route{Name: r.Name, Path: r.Prefix, Service: r.Service, Port: r.Port.String(),
-			Strip: r.Strip, Door: r.Door})
+			Strip: r.Strip, Door: r.Door, From: routeFrom(sp.Routes[r.Name].From)})
 		if target, ok := sp.Services[r.Service]; ok && !r.Door && !spec.IsAttached(target) {
 			byService[r.Service] = append(byService[r.Service], r)
 		}
@@ -326,6 +328,22 @@ func withDomains(e wire.Env, ds []wire.Domain, size int) (wire.Env, bool, error)
 	}
 	e.Hosts, e.Domains = hosts, domains
 	return e, true, nil
+}
+
+// routeFrom returns a route's clients' blocks canonical (masked), in
+// their order; nil when it has none. The plan refuses a block that does
+// not parse, so only a spec stored without the plan has one: it goes as
+// written, and the ingress, which cannot parse it either, admits no
+// client by it. Dropping it would open a route whose blocks all are such.
+func routeFrom(from []string) []string {
+	var out []string
+	for _, f := range from {
+		if p, err := netip.ParsePrefix(f); err == nil {
+			f = p.Masked().String()
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // admittedPorts returns the ports of an instance of service that its node
