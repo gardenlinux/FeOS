@@ -7,11 +7,22 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
+feid = { workspace = true }
 feos-proto = { workspace = true }
 feos-utils = { workspace = true }
 log = { workspace = true }
 nix = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-vsock = { workspace = true }
 tonic = { workspace = true }
+
+[dev-dependencies]
+feid-proto = { workspace = true }
+rcgen = { workspace = true, features = ["x509-parser"] }
+tempfile = { workspace = true }
+time = "0.3"
+tokio-rustls = { workspace = true }

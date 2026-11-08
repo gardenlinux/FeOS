@@ -223,6 +223,9 @@ func TestPostgresOutputs(t *testing.T) {
 	v6 := Context{Env: "stage", Name: "db", Address: "fd6b:59f2:b4a2:3::5"}
 	none := Context{Env: "stage", Name: "db"}
 	lit := func(s string) []model.TemplatePart { return []model.TemplatePart{{Value: s}} }
+	// The address of the referencing pod's binding to the addon, as the
+	// controller numbers them; without one (a validation), the first.
+	lb := "127.64.0.1"
 	role := func(r string, more ...string) map[string]string {
 		f := map[string]string{"role": r}
 		if len(more) > 0 {
@@ -238,22 +241,27 @@ func TestPostgresOutputs(t *testing.T) {
 		fields map[string]string
 		want   []model.TemplatePart
 	}{
-		{"host", full, v6, "host", role("expense_svc"), lit("fd6b:59f2:b4a2:3::5")},
-		{"host without address", full, none, "host", role("expense_svc"), lit("db")},
+		{"host", full, v6, "host", role("expense_svc"), lit(lb)},
+		{"host without address", full, none, "host", role("expense_svc"), lit(lb)},
 		{"port", full, v6, "port", role("expense_svc"), lit("5432")},
 		{"user", full, v6, "user", role("expense_svc"), lit("expense_svc")},
 		{"database is the first", full, v6, "database", role("expense_svc"), lit("expensa")},
 		{"database field", full, v6, "database", role("expense_svc", "reports"), lit("reports")},
-		// No password, since there is none; TLS asked for, which the
-		// workload's certificate completes (ADR 0038).
+		// No password, since there is none: the pod's TLS binding on its
+		// loopback address presents the workload's certificate (ADR 0036,
+		// 0038), and the driver asks for no TLS of its own.
 		{"url", full, v6, "url", role("expense_svc", "reports"),
-			lit("postgres://expense_svc@[fd6b:59f2:b4a2:3::5]:5432/reports?sslmode=require")},
+			lit("postgres://expense_svc@" + lb + ":5432/reports?sslmode=disable")},
 		{"url without address", full, none, "url", role("approval_svc"),
-			lit("postgres://approval_svc@db:5432/expensa?sslmode=require")},
+			lit("postgres://approval_svc@" + lb + ":5432/expensa?sslmode=disable")},
 		{"options with problems", addon(t, "db", `{"type":"postgres","version":"17","options":{"databases":["d"],"roles":["svc","pg_x"]}}`),
 			v6, "user", role("pg_x"), lit("pg_x")},
 		{"url with an IPv4 address", full, Context{Name: "db", Address: "10.0.0.5"}, "url", role("approval_svc"),
-			lit("postgres://approval_svc@10.0.0.5:5432/expensa?sslmode=require")},
+			lit("postgres://approval_svc@" + lb + ":5432/expensa?sslmode=disable")},
+		{"url on the pod's second binding", full, Context{Name: "db", Address: "fd6b::5", Loopback: "127.64.0.2"}, "url",
+			role("approval_svc"), lit("postgres://approval_svc@127.64.0.2:5432/expensa?sslmode=disable")},
+		{"host on the pod's second binding", full, Context{Name: "db", Loopback: "127.64.0.2"}, "host",
+			role("approval_svc"), lit("127.64.0.2")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -319,8 +327,8 @@ func TestPostgresURLParses(t *testing.T) {
 		t.Fatalf("%s: %v", raw, err)
 	}
 	_, hasPassword := u.User.Password()
-	if u.Scheme != "postgres" || u.User.Username() != "svc" || hasPassword || u.Hostname() != "fd6b::5" ||
-		u.Port() != "5432" || u.Path != "/expensa" || u.Query().Get("sslmode") != "require" {
+	if u.Scheme != "postgres" || u.User.Username() != "svc" || hasPassword || u.Hostname() != "127.64.0.1" ||
+		u.Port() != "5432" || u.Path != "/expensa" || u.Query().Get("sslmode") != "disable" {
 		t.Fatalf("%s parses to %#v", raw, u)
 	}
 }
@@ -553,5 +561,23 @@ func TestPostgresScriptQuotes(t *testing.T) {
 	want := `exec psql -X -q -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -v d0='a b' -v d1='it'\''s' <<'SQL'` + "\n"
 	if !strings.HasPrefix(got, want) {
 		t.Fatalf("script %q, want it to start with %q", got, want)
+	}
+}
+
+// Every reference to a role reaches the addon through the pod's TLS
+// binding on the addon's port, with ALPN postgresql; a pod's bindings are
+// numbered from 127.64.0.1 (ADR 0036).
+func TestPostgresTLSBinding(t *testing.T) {
+	port, alpn, ok := postgres{}.TLSBinding(Ref{Key: "url", Fields: map[string]string{"role": "app"}})
+	if !ok || port != 5432 || alpn != "postgresql" {
+		t.Fatalf("TLSBinding = %d %q %v", port, alpn, ok)
+	}
+	if _, _, ok := (postgres{}).TLSBinding(Ref{Key: "url"}); ok {
+		t.Fatal("a reference without a role got a binding")
+	}
+	for n, want := range map[int]string{1: "127.64.0.1", 2: "127.64.0.2", 255: "127.64.0.255", 256: "127.64.1.0"} {
+		if got := Loopback(n); got != want {
+			t.Errorf("Loopback(%d) = %s, want %s", n, got, want)
+		}
 	}
 }

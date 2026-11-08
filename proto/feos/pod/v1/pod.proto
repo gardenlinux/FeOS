@@ -126,6 +126,30 @@ message PodSpec {
   // guest gives every container FeID's socket at /run/feos/feid.sock.
   // feosd chooses no identity, and the pod names none of its own.
   string identity = 8;
+  // The pod's outbound TLS bindings (ADR 0036), only with an identity:
+  // for clients without FeID, as an application's PostgreSQL driver, the
+  // guest listens on a loopback address of the pod and dials the
+  // binding's upstream with TLS 1.3, the pod's certificate and its
+  // CertificateVerify signed by feos-authn, the upstream pinned to its
+  // SPIFFE ID under the platform's root. The plaintext stays in the pod.
+  repeated TlsBinding tls_bindings = 9;
+}
+
+// One outbound TLS binding of a pod (ADR 0036).
+message TlsBinding {
+  // The address and port the guest listens on, an IPv4 loopback address
+  // ("127.18.3.4:5432"); one binding's per address and port.
+  string listen = 1;
+  // The upstream: a name the pod's resolver answers, or an address, and
+  // its port. The guest dials it from the pod's own address.
+  string host = 2;
+  uint32 port = 3;
+  // The ALPN protocol the guest offers ("postgresql"): the connection is
+  // TLS from its first byte.
+  string alpn = 4;
+  // The SPIFFE ID the upstream's certificate must carry, under the
+  // platform's root alone.
+  string server_id = 5;
 }
 
 // The clear part of a pod's HTTP bindings (ADR 0028). A change states it

@@ -51,7 +51,7 @@ use feos_proto::container_service::{
 use feos_proto::disk_service::{Head, MemoryRef};
 use feos_proto::guest_service::{
     guest_service_client::GuestServiceClient, MountVolumesRequest, SetFeidRequest,
-    SetInterceptCasRequest, Volume as GuestVolume,
+    SetInterceptCasRequest, TlsBinding as GuestTlsBinding, Volume as GuestVolume,
 };
 use feos_proto::host_service::{
     host_service_client::HostServiceClient, FreezeFilesystemRequest, ThawFilesystemRequest,
@@ -1026,6 +1026,17 @@ impl Pods {
         let request = SetFeidRequest {
             enabled: true,
             reset_connections: reset,
+            tls_bindings: spec
+                .tls_bindings
+                .iter()
+                .map(|b| GuestTlsBinding {
+                    listen: b.listen.clone(),
+                    host: b.host.clone(),
+                    port: b.port,
+                    alpn: b.alpn.clone(),
+                    server_id: b.server_id.clone(),
+                })
+                .collect(),
         };
         match timeout(CA_PUSH_TIMEOUT, guest.set_feid(request)).await {
             Err(_) => Err(Status::deadline_exceeded(format!(

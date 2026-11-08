@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -145,4 +146,47 @@ func certOf(t *testing.T, chain string) *x509.Certificate {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// A service that references postgres addons' roles reaches each through
+// its pod's TLS binding (ADR 0036): its template binds one loopback
+// address per addon, numbered in the order of their names from
+// 127.64.0.1, however many references and roles name one, to the addon by
+// its name with ALPN postgresql; its env names the same address with the
+// role and no password.
+func TestAReferenceToARoleBindsTheAddon(t *testing.T) {
+	h := newHarness(t, options{})
+	h.addNode("n1")
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, fmt.Sprintf(`{"addons":{
+		"postgres":{"type":"postgres","version":"17","plan":"dev","options":{"databases":["app"],"roles":["svc","ops"]}},
+		"archive":{"type":"postgres","version":"17","plan":"dev","options":{"databases":["old"],"roles":["svc"]}}},
+		"services":{"web":{"image":%q,"command":["/app"],"ports":[{"name":"http","port":8080}],"env":{
+			"DB":{"addon":"postgres","key":"url","role":"svc"},
+			"OPS":{"addon":"postgres","key":"url","role":"ops"},
+			"HOST":{"addon":"postgres","key":"host","role":"svc"},
+			"ARCHIVE":{"addon":"archive","key":"url","role":"svc"}}}}}`, testImage))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
+	row := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
+	tmpl := row.Sandbox.PodTemplate
+	if tmpl == nil {
+		t.Fatal("no template")
+	}
+	want := []model.TemplateTLSBinding{
+		{Listen: "127.64.0.1:5432", Host: "archive", Port: 5432, ALPN: "postgresql", Addon: "archive"},
+		{Listen: "127.64.0.2:5432", Host: "postgres", Port: 5432, ALPN: "postgresql", Addon: "postgres"},
+	}
+	if !slices.Equal(tmpl.TLSBindings, want) {
+		t.Fatalf("TLS bindings %+v, want %+v", tmpl.TLSBindings, want)
+	}
+	for k, v := range map[string]string{
+		"ARCHIVE": "postgres://svc@127.64.0.1:5432/old?sslmode=disable",
+		"DB":      "postgres://svc@127.64.0.2:5432/app?sslmode=disable",
+		"OPS":     "postgres://ops@127.64.0.2:5432/app?sslmode=disable",
+		"HOST":    "127.64.0.2",
+	} {
+		if got := tmpl.Env[k]; len(got.Parts) != 1 || got.Parts[0].Value != v {
+			t.Errorf("%s = %+v, want %s", k, got, v)
+		}
+	}
 }

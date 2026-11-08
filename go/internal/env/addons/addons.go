@@ -129,6 +129,11 @@ type Context struct {
 	Env, Name string
 	// Address is the instance's IPv6 address ("" before it has one).
 	Address string
+	// Loopback is the address of the referencing pod's TLS binding to the
+	// addon (TLSBinder, Loopback), which a TLSBinder's values name; ""
+	// outside a render (a reference's validation), whose values nobody
+	// reads.
+	Loopback string
 	// TLS is the server certificate and the grants an addon of a
 	// CertificateServer is provisioned with (ADR 0038); nil before the
 	// controller has them, which renders no TLS step.

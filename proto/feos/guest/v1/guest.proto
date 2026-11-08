@@ -41,11 +41,28 @@ message SetFeidRequest {
   // stream before is gone, and an idle stream held across a snapshot
   // never wakes its reader, so the guest closes them all first.
   bool reset_connections = 2;
+  // The pod's outbound TLS bindings (ADR 0036), whole: for clients
+  // without FeID, the guest listens on each one's loopback address and
+  // dials its upstream with TLS 1.3 and the pod's identity. A set that
+  // changes them, or resets the connections, ends those of the bindings
+  // before.
+  repeated TlsBinding tls_bindings = 3;
+}
+
+// One outbound TLS binding, as feos.pod.v1.TlsBinding states it.
+message TlsBinding {
+  string listen = 1;
+  string host = 2;
+  uint32 port = 3;
+  string alpn = 4;
+  string server_id = 5;
 }
 
 message SetFeidResponse {
   // Whether the socket is there after the call.
   bool listening = 1;
+  // How many TLS bindings the guest serves after the call.
+  uint32 tls_bindings = 2;
 }
 
 message SetInterceptCasRequest {

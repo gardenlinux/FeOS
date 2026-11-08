@@ -99,8 +99,73 @@ pub fn normalize(mut spec: PodSpec) -> Result<PodSpec, Status> {
     if let Some(bindings) = &spec.http_bindings {
         check_http_bindings(&spec, bindings)?;
     }
+    check_tls_bindings(&spec)?;
 
     Ok(spec)
+}
+
+/// The most outbound TLS bindings a pod has.
+const MAX_TLS_BINDINGS: usize = 32;
+
+/// Checks a pod's outbound TLS bindings (ADR 0036): only with an identity,
+/// whose certificate they present; each on its own IPv4 loopback address
+/// and port; an upstream, an ALPN protocol and a SPIFFE ID to pin. The
+/// guest checks them again.
+pub fn check_tls_bindings(spec: &PodSpec) -> Result<(), Status> {
+    if spec.tls_bindings.is_empty() {
+        return Ok(());
+    }
+    if !has_identity(spec) {
+        return Err(Status::invalid_argument(
+            "TLS bindings need the pod's identity, which it has none of",
+        ));
+    }
+    if spec.tls_bindings.len() > MAX_TLS_BINDINGS {
+        return Err(Status::invalid_argument(format!(
+            "{} TLS bindings, more than {MAX_TLS_BINDINGS}",
+            spec.tls_bindings.len()
+        )));
+    }
+    let mut listens = HashSet::new();
+    for b in &spec.tls_bindings {
+        let listen: std::net::SocketAddrV4 = b.listen.parse().map_err(|_| {
+            Status::invalid_argument(format!(
+                "TLS binding listen {:?} is no IPv4 address and port",
+                b.listen
+            ))
+        })?;
+        if !listen.ip().is_loopback() || listen.port() == 0 {
+            return Err(Status::invalid_argument(format!(
+                "TLS binding listen {} is not a port of a loopback address",
+                b.listen
+            )));
+        }
+        if !listens.insert(listen) {
+            return Err(Status::invalid_argument(format!(
+                "two TLS bindings listen on {}",
+                b.listen
+            )));
+        }
+        if b.host.is_empty() || b.host.len() > 253 || b.port == 0 || b.port > u16::MAX as u32 {
+            return Err(Status::invalid_argument(format!(
+                "TLS binding upstream {}:{} is not one",
+                b.host, b.port
+            )));
+        }
+        if b.alpn.is_empty() || b.alpn.len() > 255 {
+            return Err(Status::invalid_argument(format!(
+                "TLS binding ALPN {:?} is not one",
+                b.alpn
+            )));
+        }
+        if !b.server_id.starts_with("spiffe://") {
+            return Err(Status::invalid_argument(format!(
+                "TLS binding server ID {:?} is no SPIFFE ID",
+                b.server_id
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// The clear part of a pod's HTTP bindings as its record keeps it: none

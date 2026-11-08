@@ -157,6 +157,19 @@ reaps.
   FeID's socket (`/run/feos/feid.sock`, `SetFeid`): each connection to
   it is piped to the host's vsock port 10002 after the preamble `feid`,
   where the pod's feos-authn signs (ADR 0014).
+- **The pod's outbound TLS bindings** (ADR 0036, `PodSpec.tls_bindings`,
+  pushed with `SetFeid`): for clients without FeID, the guest listens on
+  each binding's IPv4 loopback address (`127.x.y.z:port`, which the
+  containers share, having no network namespace of their own) and, for
+  every connection, dials the upstream by its name through the pod's
+  resolver, from the pod's own address, with TLS 1.3 from the first
+  byte: the pod's certificate, its CertificateVerify signed through
+  FeID's socket, the binding's ALPN, the upstream pinned to its SPIFFE
+  ID under the platform's root alone. Then it pipes both ways; the
+  plaintext never leaves the pod. The bindings run in a process of
+  their own, `feos-guest --tls-bindings /run/feos/tls-bindings.json`,
+  which PID 1 starts again when it ends and replaces when a set changes
+  the bindings or resets them after a resume.
 - A container's volume mounts (`ContainerConfig.volume_mounts`) are bind
   mounts of `/run/feos/volumes/<name>`, read-write or read-only,
   `nosuid` and `nodev`, after FeOS's own. A create, and an adoption,

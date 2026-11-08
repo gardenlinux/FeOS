@@ -277,9 +277,18 @@ func (p postgres) Outputs(a Addon, c Context, ref Ref) ([]model.TemplatePart, er
 		}
 		db = d
 	}
+	// The workload reaches the addon through its pod's TLS binding (ADR
+	// 0036, TLSBinding): plaintext on the binding's loopback address, which
+	// the guest carries in TLS 1.3 with the pod's certificate. The URL
+	// says sslmode=disable, so that a driver sends no SSLRequest, which
+	// the server would get inside the TLS the guest made already.
+	loopback := c.Loopback
+	if loopback == "" {
+		loopback = Loopback(1)
+	}
 	switch ref.Key {
 	case "host":
-		return literal(host(c)), nil
+		return literal(loopback), nil
 	case "port":
 		return literal(strconv.Itoa(postgresPort)), nil
 	case "user":
@@ -287,8 +296,18 @@ func (p postgres) Outputs(a Addon, c Context, ref Ref) ([]model.TemplatePart, er
 	case "database":
 		return literal(db), nil
 	}
-	return literal("postgres://" + escapeUserinfo(user) + "@" + urlHost(c) + ":" + strconv.Itoa(postgresPort) + "/" +
-		url.PathEscape(db) + "?sslmode=require"), nil
+	return literal("postgres://" + escapeUserinfo(user) + "@" + loopback + ":" + strconv.Itoa(postgresPort) + "/" +
+		url.PathEscape(db) + "?sslmode=disable"), nil
+}
+
+// TLSBinding: every reference names a role (Outputs) and reaches the addon
+// through the pod's binding, TLS from the first byte with ALPN postgresql
+// (PostgreSQL 17's direct TLS, ADR 0038).
+func (postgres) TLSBinding(ref Ref) (int, string, bool) {
+	if _, ok := ref.Fields["role"]; !ok {
+		return 0, "", false
+	}
+	return postgresPort, "postgresql", true
 }
 
 // postgresProbe is the readiness check: the server accepts connections

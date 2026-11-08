@@ -10,7 +10,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
+
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
+	envspec "github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -42,6 +45,15 @@ func (e *Engine) podSpec(ctx context.Context, sb store.Sandbox) (*podv1.PodSpec,
 	if e.cfg.TrustDomain != "" {
 		kind, name, _ := sb.Workload()
 		spec.Identity, _ = pki.PodIdentity(e.cfg.TrustDomain, sb.Owner, sb.EnvironmentID, sb.ID, kind, name, "")
+		// Its TLS bindings to its environment's addons (ADR 0036), each
+		// pinned to the addon's ID.
+		if t := sb.PodTemplate; t != nil && sb.EnvironmentID != uuid.Nil {
+			for _, b := range t.TLSBindings {
+				spec.TlsBindings = append(spec.TlsBindings, &podv1.TlsBinding{Listen: b.Listen, Host: b.Host,
+					Port: uint32(b.Port), Alpn: b.ALPN,
+					ServerId: pki.WorkloadID(e.cfg.TrustDomain, sb.Owner, sb.EnvironmentID, envspec.KindAddon, b.Addon)})
+			}
+		}
 	}
 	return spec, nil
 }

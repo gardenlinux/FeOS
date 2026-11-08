@@ -18,8 +18,10 @@ mod feid;
 mod kube;
 mod portforward;
 mod ssh;
+pub mod tls;
 
 pub use feid::{FeidSocket, FEID_PREAMBLE};
 pub use kube::{KubeApiHandler, KUBE_VSOCK_PORT};
 pub use portforward::PortForwardApiHandler;
 pub use ssh::{SshApiHandler, SSH_VSOCK_PORT};
+pub use tls::TlsBindings;

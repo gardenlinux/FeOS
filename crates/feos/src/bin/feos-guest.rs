@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use feos_utils::filesystem::{get_root_fstype, move_root};
-use main_server::{run_server, run_task_service, ServerOptions};
+use main_server::{run_server, run_task_service, run_tls_bindings, ServerOptions};
 use nix::sys::prctl;
 use nix::unistd::{execv, pause};
 use std::env;
@@ -22,16 +22,22 @@ struct ServerArgs {
     /// container runtime.
     task_service: bool,
 
+    /// Run the pod's outbound TLS bindings of this file, the process the
+    /// guest's SetFeid starts (ADR 0036).
+    tls_bindings: Option<String>,
+
     version: bool,
 }
 
 impl ServerArgs {
     fn parse(args: impl IntoIterator<Item = String>) -> Self {
         let mut parsed = Self::default();
-        for arg in args {
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--restarted-after-upgrade" => parsed.restarted_after_upgrade = true,
                 "--task-service" => parsed.task_service = true,
+                forward_service::tls::FLAG => parsed.tls_bindings = args.next(),
                 "--version" => parsed.version = true,
                 _ => {}
             }
@@ -69,6 +75,11 @@ async fn run() -> Result<()> {
 
     if args.task_service {
         return run_task_service().await;
+    }
+    if let Some(config) = &args.tls_bindings {
+        if std::process::id() != 1 {
+            return run_tls_bindings(config).await;
+        }
     }
 
     if std::process::id() == 1 {
@@ -121,5 +132,11 @@ mod tests {
         assert!(args.task_service && args.restarted_after_upgrade && !args.version);
         let args = ServerArgs::parse(["--help"].map(String::from));
         assert!(!args.task_service && !args.restarted_after_upgrade);
+        let args =
+            ServerArgs::parse(["--tls-bindings", "/run/feos/tls-bindings.json"].map(String::from));
+        assert_eq!(
+            args.tls_bindings.as_deref(),
+            Some("/run/feos/tls-bindings.json")
+        );
     }
 }

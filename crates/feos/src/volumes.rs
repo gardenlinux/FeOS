@@ -7,7 +7,8 @@
 //! panic: this runs in PID 1. And the pod's interception CAs (ADR 0028),
 //! `SetInterceptCas`, which feosd pushes before it creates the containers
 //! too (`container_service::runtime::intercept`), and FeID's socket (ADR
-//! 0014), `SetFeid` (`forward_service::FeidSocket`).
+//! 0014), `SetFeid` (`forward_service::FeidSocket`), with the pod's outbound
+//! TLS bindings (ADR 0036, `forward_service::TlsBindings`).
 
 use container_service::runtime::intercept;
 use feos_proto::guest_service::guest_service_server::GuestService;
@@ -19,7 +20,7 @@ use feos_utils::filesystem::disks::{virtio_disks, Disk};
 use feos_utils::filesystem::volume::{self, Plan};
 use feos_utils::filesystem::CONTAINERS_DIR;
 use feos_utils::share::SHARE_DIR;
-use forward_service::FeidSocket;
+use forward_service::{tls, FeidSocket, TlsBindings};
 use log::{info, warn};
 use std::path::Path;
 use std::time::Duration;
@@ -36,6 +37,7 @@ pub(crate) struct GuestApi {
     /// One call at a time: two would format one disk twice.
     mounting: Mutex<()>,
     feid: FeidSocket,
+    tls: TlsBindings,
 }
 
 #[tonic::async_trait]
@@ -123,13 +125,36 @@ impl GuestService for GuestApi {
         let SetFeidRequest {
             enabled,
             reset_connections,
+            tls_bindings,
         } = request.into_inner();
         let listening = self
             .feid
             .set(enabled, reset_connections)
             .await
             .map_err(Status::internal)?;
-        Ok(Response::new(SetFeidResponse { listening }))
+        // The bindings sign through FeID's socket: without it, none.
+        let bindings = match listening {
+            true => tls_bindings
+                .into_iter()
+                .map(|b| tls::Binding {
+                    listen: b.listen,
+                    host: b.host,
+                    port: u16::try_from(b.port).unwrap_or(0),
+                    alpn: b.alpn,
+                    server_id: b.server_id,
+                })
+                .collect(),
+            false => Vec::new(),
+        };
+        let served = self
+            .tls
+            .set(bindings, reset_connections)
+            .await
+            .map_err(Status::invalid_argument)?;
+        Ok(Response::new(SetFeidResponse {
+            listening,
+            tls_bindings: u32::try_from(served).unwrap_or(u32::MAX),
+        }))
     }
 }
 

@@ -429,3 +429,29 @@ func TestRegistryEgress(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// A template's TLS bindings reach the pod's spec, each pinned to its
+// addon's ID in the pod's tenant and environment (ADR 0036).
+func TestPodSpecPinsTLSBindingsToTheirAddons(t *testing.T) {
+	env := uuid.MustParse("3f2c0000-0000-4000-8000-000000000001")
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+		MemoryMiB: 256, EnvironmentID: env, Instance: true,
+		LogLabels: map[string]string{model.LogKind: "service", model.LogObject: "api"},
+		PodTemplate: &model.PodTemplate{TLSBindings: []model.TemplateTLSBinding{
+			{Listen: "127.88.1.2:5432", Host: "db", Port: 5432, ALPN: "postgresql", Addon: "db"}}}}
+	on := &Engine{cfg: Config{TrustDomain: "run.example"}}
+	spec, err := on.podSpec(bg, sb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := spec.GetTlsBindings()
+	want := "spiffe://run.example/tenant/" + testTenant + "/env/" + env.String() + "/addon/db"
+	if len(b) != 1 || b[0].GetListen() != "127.88.1.2:5432" || b[0].GetHost() != "db" || b[0].GetPort() != 5432 ||
+		b[0].GetAlpn() != "postgresql" || b[0].GetServerId() != want {
+		t.Fatalf("TLS bindings %v, want one to %s", b, want)
+	}
+	off := &Engine{cfg: Config{}}
+	if spec, err = off.podSpec(bg, sb); err != nil || len(spec.GetTlsBindings()) != 0 {
+		t.Fatalf("without a trust domain, no identity and no bindings: %v %v", spec.GetTlsBindings(), err)
+	}
+}

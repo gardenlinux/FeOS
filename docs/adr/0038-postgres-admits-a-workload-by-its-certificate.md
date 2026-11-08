@@ -196,9 +196,16 @@ no password method.
   `kino` in its three environments included, and the addon's log shows
   why.
 - **Step 2, the guest's binding** (ADR 0036, built by the FeID work):
-  every reference to a role resolves to `host` 127.0.0.1, a loopback
-  port per addon in the pod, the role, no password, and `url`
-  `postgres://<role>@127.0.0.1:<port>/<database>`. The controller puts
+  every reference to a role resolves to `host`, a loopback address of
+  the addon's own in the pod, numbered per pod: the addons a pod binds,
+  in the order of their names, get 127.64.0.1, 127.64.0.2 and on, one
+  per addon however many references name it (an address is local to one
+  microVM; a reference added or removed moves them and rolls the pod
+  anyway), `port` 5432, the role, no password, and `url`
+  `postgres://<role>@<loopback>:5432/<database>?sslmode=disable`: the
+  driver asks for no TLS of its own, since libpq's and pgx's default
+  `prefer` would send an `SSLRequest` that the server, already in the
+  guest's TLS, refuses as an unknown protocol. The controller puts
   one outbound TLS binding per referenced addon into the pod: it dials
   the addon by its name from the pod's own address, TLS from the first
   byte with ALPN `postgresql`, verifies the server by the addon's ID,

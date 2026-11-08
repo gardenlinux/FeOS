@@ -242,7 +242,7 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 	res *spec.Resources, creds *spec.ImageCredentials, bindings []string, egress *spec.Egress) *podPlan {
 	p := &podPlan{kind: kind, name: name, image: image}
 	p.vcpus, p.memoryMB = resourcesOf(res)
-	vals, wait, err := c.renderEnv(v, env)
+	vals, tls, wait, err := c.renderEnv(v, env)
 	if err != nil || wait != "" {
 		p.err, p.wait = err, wait
 		return p
@@ -255,6 +255,7 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 		IngressGroup:        kind == spec.KindService && v.env.IngressGroup,
 		RestrictEgressNames: egress.RestrictsNames(),
 		EgressDomains:       egress.NameDomains(),
+		TLSBindings:         tls,
 	}
 	p.template.ImageCredentials = templateCredentials(creds)
 	if p.template.HTTPBindings, err = templateBindings(v.target, bindings); err != nil {
@@ -329,7 +330,9 @@ func (c *Controller) planAttached(v *view, name string, s spec.Service) *attache
 		p.err = fmt.Errorf("service %s has no command", name)
 		return p
 	}
-	if p.env, p.wait, p.err = c.renderEnv(v, s.Env); p.err != nil || p.wait != "" {
+	// An attached service runs in its sandbox's pod, whose bindings its
+	// create fixed: a reference that needs one is not served yet.
+	if p.env, _, p.wait, p.err = c.renderEnv(v, s.Env); p.err != nil || p.wait != "" {
 		return p
 	}
 	p.hash = hashJSON(struct {
@@ -353,12 +356,17 @@ func nonNilMap[V any](m map[string]V) map[string]V {
 // version (the latest when the spec pins none); an addon's output against
 // its current instance's address (wait while it has none), its
 // credentials mapped to system secrets; a service as its name, its port
-// number and http://<name>:<port>.
-func (c *Controller) renderEnv(v *view, env map[string]spec.EnvValue) (map[string]model.TemplateValue, string, error) {
+// number and http://<name>:<port>. A reference that reaches its addon
+// through the pod's TLS binding (addons.TLSBinder, ADR 0036) adds the
+// binding, one per addon, sorted by addon.
+func (c *Controller) renderEnv(v *view, env map[string]spec.EnvValue) (map[string]model.TemplateValue,
+	[]model.TemplateTLSBinding, string, error) {
 	if len(env) == 0 {
-		return nil, "", nil
+		return nil, nil, "", nil
 	}
 	out := make(map[string]model.TemplateValue, len(env))
+	loopback := c.bindingLoopbacks(v, env)
+	bindings := map[string]model.TemplateTLSBinding{}
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		e := env[k]
 		switch e.Kind {
@@ -370,33 +378,39 @@ func (c *Controller) renderEnv(v *view, env map[string]spec.EnvValue) (map[strin
 				version = v.secrets[e.Secret]
 			}
 			if version == 0 {
-				return nil, "", fmt.Errorf("env %s: no secret %s", k, e.Secret)
+				return nil, nil, "", fmt.Errorf("env %s: no secret %s", k, e.Secret)
 			}
 			out[k] = model.SecretValue(e.Secret, version, model.EscapeNone)
 		case spec.EnvAddon:
 			a, ok := v.target.Addons[e.Addon]
 			if !ok {
-				return nil, "", fmt.Errorf("env %s: no addon %s", k, e.Addon)
+				return nil, nil, "", fmt.Errorf("env %s: no addon %s", k, e.Addon)
 			}
 			bp, ok := c.d.Blueprint(a.Type)
 			if !ok {
-				return nil, "", fmt.Errorf("env %s: no addon type %q", k, a.Type)
+				return nil, nil, "", fmt.Errorf("env %s: no addon type %q", k, a.Type)
 			}
 			row, ok := v.addonRow(e.Addon)
 			if !ok || row.Sandbox.Address == "" {
-				return nil, fmt.Sprintf("waits for the address of addon %s", e.Addon), nil
+				return nil, nil, fmt.Sprintf("waits for the address of addon %s", e.Addon), nil
 			}
 			parts, err := bp.Outputs(specAddon(bp, e.Addon, a),
-				addons.Context{Env: v.env.Name, Name: e.Addon, Address: row.Sandbox.Address},
+				addons.Context{Env: v.env.Name, Name: e.Addon, Address: row.Sandbox.Address, Loopback: loopback[e.Addon]},
 				addons.Ref{Key: e.Key, Fields: e.Fields})
 			if err != nil {
-				return nil, "", fmt.Errorf("env %s: %w", k, err)
+				return nil, nil, "", fmt.Errorf("env %s: %w", k, err)
 			}
 			out[k] = model.TemplateValue{Parts: mapCredentials(e.Addon, parts)}
+			if tb, ok := bp.(addons.TLSBinder); ok {
+				if port, alpn, need := tb.TLSBinding(addons.Ref{Key: e.Key, Fields: e.Fields}); need {
+					bindings[e.Addon] = model.TemplateTLSBinding{Listen: loopback[e.Addon] + ":" + strconv.Itoa(port),
+						Host: e.Addon, Port: port, ALPN: alpn, Addon: e.Addon}
+				}
+			}
 		case spec.EnvService:
 			s, ok := v.target.Services[e.Service]
 			if !ok {
-				return nil, "", fmt.Errorf("env %s: no service %s", k, e.Service)
+				return nil, nil, "", fmt.Errorf("env %s: no service %s", k, e.Service)
 			}
 			port := portOf(s, e.Port)
 			switch e.Key {
@@ -408,8 +422,45 @@ func (c *Controller) renderEnv(v *view, env map[string]spec.EnvValue) (map[strin
 				out[k] = model.Literal("http://" + e.Service + ":" + strconv.Itoa(port))
 			}
 		default:
-			return nil, "", fmt.Errorf("env %s: a value of unknown kind %q", k, e.Kind)
+			return nil, nil, "", fmt.Errorf("env %s: a value of unknown kind %q", k, e.Kind)
 		}
 	}
-	return out, "", nil
+	var tls []model.TemplateTLSBinding
+	for _, name := range slices.Sorted(maps.Keys(bindings)) {
+		tls = append(tls, bindings[name])
+	}
+	return out, tls, "", nil
+}
+
+// bindingLoopbacks numbers the addons that env's references reach through
+// the pod's TLS binding (addons.TLSBinder, ADR 0036), in the order of
+// their names, from addons.Loopback(1): one address per addon, however
+// many references and roles name it. The same references give the same
+// addresses; a reference added or removed moves them, and changes the
+// pod's env anyway.
+func (c *Controller) bindingLoopbacks(v *view, env map[string]spec.EnvValue) map[string]string {
+	bound := map[string]bool{}
+	for _, e := range env {
+		if e.Kind != spec.EnvAddon {
+			continue
+		}
+		a, ok := v.target.Addons[e.Addon]
+		if !ok {
+			continue
+		}
+		bp, ok := c.d.Blueprint(a.Type)
+		if !ok {
+			continue
+		}
+		if tb, ok := bp.(addons.TLSBinder); ok {
+			if _, _, need := tb.TLSBinding(addons.Ref{Key: e.Key, Fields: e.Fields}); need {
+				bound[e.Addon] = true
+			}
+		}
+	}
+	loopback := make(map[string]string, len(bound))
+	for i, name := range slices.Sorted(maps.Keys(bound)) {
+		loopback[name] = addons.Loopback(i + 1)
+	}
+	return loopback
 }

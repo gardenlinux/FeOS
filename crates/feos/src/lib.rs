@@ -554,6 +554,22 @@ fn notify_ready() {
     }
 }
 
+/// The process of the pod's outbound TLS bindings, `feos-guest
+/// --tls-bindings <file>` (ADR 0036), which the guest's `SetFeid` starts:
+/// it signs through FeID's socket in the share directory.
+#[cfg(feature = "guest")]
+pub async fn run_tls_bindings(config: &str) -> Result<()> {
+    feos_utils::feos_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .max_history(150)
+        .init()
+        .context("logger")?;
+    let socket = Path::new(feos_utils::share::SHARE_DIR).join("feid.sock");
+    forward_service::tls::serve(Path::new(config), &socket)
+        .await
+        .map_err(|e| anyhow::anyhow!("TLS bindings: {e}"))
+}
+
 /// The task service process, `feosd --task-service` or `feos-guest
 /// --task-service`, which run_server starts.
 pub async fn run_task_service() -> Result<()> {

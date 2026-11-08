@@ -487,8 +487,13 @@ func TestPostgresDocker(t *testing.T) {
 				t.Fatalf("approval_svc read expense_svc's schema: exit %d: %s", code, out)
 			}
 			for _, refused := range []struct{ name, target, says string }{
-				{"the reference's url, no certificate", outputURL(t, b, a, c, map[string]string{"role": "expense_svc"}, creds),
+				// The lab has no guest: TLS straight to the addon, without the
+				// pod's certificate the binding would present.
+				{"TLS without a certificate", "postgres://expense_svc@[" + c.Address + "]:5432/expensa?sslmode=require",
 					"connection requires a valid client certificate"},
+				// The reference's url without its binding: the addon takes no
+				// connection without TLS.
+				{"no encryption", "postgres://expense_svc@[" + c.Address + "]:5432/expensa?sslmode=disable", "no encryption"},
 				{"another role than granted", conninfo("approval_svc", "expensa", "expense"), "certificate authentication failed"},
 				{"the superuser by a certificate", conninfo("postgres", "postgres", "expense"), "certificate authentication failed"},
 				{"another workload", conninfo("expense_svc", "expensa", "else"), "certificate authentication failed"},

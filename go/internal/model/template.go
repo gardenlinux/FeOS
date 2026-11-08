@@ -144,6 +144,24 @@ type PodTemplate struct {
 	// asks for its bindings, so that a new secret version is sealed to the
 	// running pod again and replaces none. Hash takes them.
 	HTTPBindings []TemplateHTTPBinding `json:"httpBindings,omitempty"`
+	// TLSBindings are the pod's outbound TLS bindings (ADR 0036): one for
+	// every addon whose role a reference of the pod's object names, on a
+	// loopback address of the pod, which the reference's values name.
+	// Hash takes them.
+	TLSBindings []TemplateTLSBinding `json:"tlsBindings,omitempty"`
+}
+
+// TemplateTLSBinding is an outbound TLS binding of a pod to an addon of
+// its environment (feos.pod.v1.TlsBinding): the guest listens on Listen
+// and dials Host and Port with TLS 1.3 and the pod's identity, offering
+// ALPN, the upstream pinned to Addon's workload ID, which the pod's spec
+// names in full (its tenant's and environment's, ADR 0036).
+type TemplateTLSBinding struct {
+	Listen string `json:"listen"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	ALPN   string `json:"alpn"`
+	Addon  string `json:"addon"`
 }
 
 // TemplateHTTPBinding is an HTTP binding a pod's object names: its name,
@@ -286,6 +304,8 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		ImageCredentials *TemplateCredentials `json:"imageCredentials,omitempty"`
 		// Without HTTP bindings, a template hashes as before them.
 		HTTPBindings []TemplateHTTPBinding `json:"httpBindings,omitempty"`
+		// Without TLS bindings, likewise.
+		TLSBindings []TemplateTLSBinding `json:"tlsBindings,omitempty"`
 		// With the internet's egress, a template hashes as before it.
 		RestrictEgressNames bool     `json:"restrictEgressNames,omitempty"`
 		EgressDomains       []string `json:"egressDomains,omitempty"`
@@ -293,7 +313,7 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 		Command: nonNil(t.Command), Env: t.Env, Volumes: nonNil(t.Volumes), Mounts: nonNil(t.Mounts),
 		SecurityGroups: nonNil(groups), NameTables: t.NameTables, IngressGroup: t.IngressGroup,
-		ImageCredentials: t.ImageCredentials, HTTPBindings: t.HTTPBindings,
+		ImageCredentials: t.ImageCredentials, HTTPBindings: t.HTTPBindings, TLSBindings: t.TLSBindings,
 		RestrictEgressNames: t.RestrictEgressNames, EgressDomains: t.EgressDomains,
 	}
 	if h.Env == nil {
