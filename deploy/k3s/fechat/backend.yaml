@@ -45,6 +45,9 @@ spec:
               value: /etc/fechat/system-prompt.txt
             - name: FERUN_URL
               value: http://ferund.ferun.svc.cluster.local:8100
+            # The tenant's environment the sandboxes are in (fechat/README.md).
+            - name: FERUN_ENVIRONMENT
+              value: sandboxes
             # Sign-in at the OpenID Connect provider (backend/auth.go).
             - name: OIDC_ISSUER
               value: ${OIDC_ISSUER}

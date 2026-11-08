@@ -37,7 +37,7 @@ func TestToolCallWaitsForTheAnnouncedPreparation(t *testing.T) {
 	const announced = 425_000 // a 7 min preparation budget + 5 s reply budget
 	api := toolsAPI(t, `{"tools":[{"name":"bash","description":"run","inputSchema":{"type":"object"}}],`+
 		`"preparationWaitMs":425000}`)
-	c, err := newSandboxClient(api.URL, "tok", testRefKey)
+	c, err := newSandboxClient(api.URL, "tok", "sandboxes", testRefKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestToolCallWaitsForTheAnnouncedPreparation(t *testing.T) {
 // refused, which the chat request reports as its error.
 func TestToolsWithoutPreparationWaitAreRefused(t *testing.T) {
 	api := toolsAPI(t, `{"tools":[{"name":"bash","description":"run","inputSchema":{"type":"object"}}]}`)
-	c, err := newSandboxClient(api.URL, "tok", testRefKey)
+	c, err := newSandboxClient(api.URL, "tok", "sandboxes", testRefKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestToolsWithoutPreparationWaitAreRefused(t *testing.T) {
 func TestChatFailsWhileFeRunIsDown(t *testing.T) {
 	down := httptest.NewServer(http.NotFoundHandler())
 	down.Close()
-	c, err := newSandboxClient(down.URL, "tok", testRefKey)
+	c, err := newSandboxClient(down.URL, "tok", "sandboxes", testRefKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestToolListLoadsOnceTheAPIIsUp(t *testing.T) {
 		_, _ = w.Write([]byte(`{"tools":[{"name":"bash","description":"run","inputSchema":{"type":"object"}}],"preparationWaitMs":1000}`))
 	}))
 	t.Cleanup(api.Close)
-	c, err := newSandboxClient(api.URL, "tok", testRefKey)
+	c, err := newSandboxClient(api.URL, "tok", "sandboxes", testRefKey)
 	if err != nil {
 		t.Fatal(err)
 	}

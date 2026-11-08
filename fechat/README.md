@@ -84,6 +84,7 @@ The backend reads its environment:
 | `OPENAI_BASE_URL`    | Secret `fechat-backend`       | the gateway's OpenAI-compatible base URL, ending in `/v1` |
 | `FERUN_TOKEN`        | Secret `fechat-backend`       | a FeRun tenant token, for provisioning |
 | `FERUN_URL`          | the deployment                | ferund's base URL, default `http://ferund.ferun.svc.cluster.local:8100` |
+| `FERUN_ENVIRONMENT`  | the deployment                | the tenant's environment the conversations' sandboxes are in (FeRun ADR 0035), by name or ID; required: `sandboxes` |
 | `OIDC_ISSUER`        | the deployment                | the IdP, `https://id.fecode.dev/`; unset, the chat is open to everybody (development only) |
 | `OIDC_CLIENT_ID`     | Secret `oidc-client-fechat`   | FeChat's client there |
 | `OIDC_CLIENT_SECRET` | Secret `oidc-client-fechat`   | |
@@ -120,6 +121,13 @@ SESSION_SECRET=<32 random bytes or more, e.g. openssl rand -hex 32>
 
 With the deployments of `deploy/`, the tenant token is ferund's bootstrap
 token (`FERUN_BOOTSTRAP_TOKEN`, see [`deploy/k3s/README.md`](../deploy/k3s/README.md)).
+Every sandbox is in an environment of the tenant (FeRun ADR 0035); make
+FeChat's once, with that token:
+
+```sh
+curl -H "Authorization: Bearer $FERUN_TOKEN" -H 'Content-Type: application/json' -d '{"name":"sandboxes"}' \
+  https://run.<DOMAIN>/api/v1/environments
+```
 Create the secret from the file:
 
 ```sh

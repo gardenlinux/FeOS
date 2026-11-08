@@ -87,6 +87,7 @@ func (rt bearerRT) RoundTrip(req *http.Request) (*http.Response, error) {
 type sandboxClient struct {
 	base      string // e.g. http://ferund.ferun.svc.cluster.local:8100
 	ctrlToken string
+	env       string // the environment its sandboxes are in (ADR 0035)
 	refKey    []byte // signs the sandbox references (sandboxref.go)
 	http      *http.Client
 	// mu serializes provisioning, so that two requests of a conversation
@@ -146,13 +147,14 @@ func (b *chatSandbox) tell(ref string) {
 	b.onRef(ref)
 }
 
-func newSandboxClient(base, ctrlToken string, refKey []byte) (*sandboxClient, error) {
+func newSandboxClient(base, ctrlToken, env string, refKey []byte) (*sandboxClient, error) {
 	if len(refKey) == 0 {
 		return nil, errors.New("no key for sandbox references")
 	}
 	return &sandboxClient{
 		base:      strings.TrimRight(base, "/"),
 		ctrlToken: ctrlToken,
+		env:       env,
 		refKey:    refKey,
 		http: &http.Client{
 			Transport: bearerRT{ctrlToken},
@@ -291,8 +293,9 @@ func (s *sandboxClient) adoptID(ctx context.Context, b *chatSandbox, id, via str
 // create makes a sandbox; ferund mints its ID.
 func (s *sandboxClient) create(ctx context.Context, image string) (id, token string, err error) {
 	body, err := json.Marshal(struct {
-		Image string `json:"image"`
-	}{image})
+		Image       string `json:"image"`
+		Environment string `json:"environment"`
+	}{image, s.env})
 	if err != nil {
 		return "", "", err
 	}

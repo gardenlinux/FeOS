@@ -15,6 +15,8 @@
 //	SYSTEM_PROMPT_FILE (ConfigMap volume) path of the system prompt
 //	FERUN_URL          ferund's base URL, default http://ferund.ferun.svc.cluster.local:8100
 //	FERUN_TOKEN        (Secret)    a FeRun tenant token, for provisioning
+//	FERUN_ENVIRONMENT  the tenant's environment the sandboxes are in (FeRun
+//	                   ADR 0035), by name or ID; required with FERUN_URL
 //	OIDC_ISSUER        the IdP, https://id.fecode.dev/ (auth.go); unset, the
 //	                   chat is open to everybody: for development only
 //	OIDC_CLIENT_ID     (Secret)    FeChat's client there
@@ -47,6 +49,7 @@ type config struct {
 	Port             string
 	FeRunURL         string // ferund's base URL; empty disables the sandbox tools
 	FeRunToken       string // FeRun tenant token, for provisioning
+	FeRunEnvironment string // the environment the sandboxes are in
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string
@@ -63,6 +66,7 @@ func loadConfig() config {
 		Port:             getenv("PORT", "8080"),
 		FeRunURL:         getenv("FERUN_URL", "http://ferund.ferun.svc.cluster.local:8100"),
 		FeRunToken:       os.Getenv("FERUN_TOKEN"),
+		FeRunEnvironment: os.Getenv("FERUN_ENVIRONMENT"),
 		OIDCIssuer:       os.Getenv("OIDC_ISSUER"),
 		OIDCClientID:     os.Getenv("OIDC_CLIENT_ID"),
 		OIDCClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
@@ -420,7 +424,10 @@ func main() {
 		log.Fatal("MODEL is not set")
 	}
 	if cfg.FeRunURL != "" {
-		c, err := newSandboxClient(cfg.FeRunURL, cfg.FeRunToken, newRefKey(cfg.SessionSecret))
+		if cfg.FeRunEnvironment == "" {
+			log.Fatal("FERUN_ENVIRONMENT is not set: the environment the sandboxes are in")
+		}
+		c, err := newSandboxClient(cfg.FeRunURL, cfg.FeRunToken, cfg.FeRunEnvironment, newRefKey(cfg.SessionSecret))
 		if err != nil {
 			log.Fatalf("ferund: %v", err)
 		}

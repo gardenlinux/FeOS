@@ -104,6 +104,11 @@ func newFakeFeRun(t *testing.T) *fakeFeRun {
 			http.Error(w, `{"error":"sandboxId is minted by ferund"}`, http.StatusBadRequest)
 			return
 		}
+		// Like ferund since ADR 0035: a sandbox is in an environment.
+		if req["environment"] != "sandboxes" {
+			http.Error(w, `{"error":"environment is required"}`, http.StatusBadRequest)
+			return
+		}
 		f.mu.Lock()
 		f.creates++
 		f.n++
@@ -174,7 +179,7 @@ func (f *fakeFeRun) counts() (creates int, mints []string) {
 // backend is a fresh backend process's sandbox client: no sessions yet.
 func (f *fakeFeRun) backend(t *testing.T) *sandboxClient {
 	t.Helper()
-	c, err := newSandboxClient(f.srv.URL, "tok", testRefKey)
+	c, err := newSandboxClient(f.srv.URL, "tok", "sandboxes", testRefKey)
 	if err != nil {
 		t.Fatal(err)
 	}
