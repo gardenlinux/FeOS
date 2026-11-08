@@ -23,6 +23,10 @@
 //!   rather than `accept`, which would end the base chain: a packet
 //!   between two pods passes both. The maps go to them, so their `return`
 //!   leads back to `forward`.
+//! - A pod whose egress is restricted by name (ADR 0034, revised) has two
+//!   timed sets, `named4-<TAP>` and `named6-<TAP>`, of the addresses its
+//!   resolver admitted, and its out chain returns what goes to them, after
+//!   the denied prefixes, as it does for a rule of its groups.
 //! - `postrouting` masquerades the pods' IPv4 where it leaves the node.
 //!
 //! Base chains accept by default: the node's other traffic is not
@@ -38,6 +42,7 @@ use network_service::{
 };
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
 use traffic_service::{prefix, COPY_GROUP, COPY_SNAPLEN, DROP_GROUP};
 
 /// feosd's table, in the inet family.
@@ -94,7 +99,70 @@ pub fn out_chain(tap: &str) -> String {
     format!("out-{tap}")
 }
 
-pub fn table(policy: &Policy, options: &Options) -> Table {
+/// The addresses the resolver admitted to pods restricted by name (ADR
+/// 0034, revised), by the pod's TAP, each with the time it has left. A pod
+/// in it has its timed sets and their rules, even with no address.
+pub type Named = BTreeMap<String, Vec<(IpAddr, Duration)>>;
+
+/// A pod's timed set of `family`.
+pub fn named_set(tap: &str, family: AddressFamily) -> String {
+    match family {
+        AddressFamily::V4 => format!("named4-{tap}"),
+        AddressFamily::V6 => format!("named6-{tap}"),
+    }
+}
+
+/// A pod's timed sets, with `addresses`.
+fn named_sets(tap: &str, addresses: &[(IpAddr, Duration)]) -> [Set; 2] {
+    let mut v4 = Vec::new();
+    let mut v6 = Vec::new();
+    for &(address, timeout) in addresses {
+        match address {
+            IpAddr::V4(address) => v4.push(Element::ipv4(address).with_timeout(timeout)),
+            IpAddr::V6(address) => v6.push(Element::ipv6(address).with_timeout(timeout)),
+        }
+    }
+    [
+        Set::timed(&named_set(tap, AddressFamily::V4), KeyType::Ipv4Addr, v4),
+        Set::timed(&named_set(tap, AddressFamily::V6), KeyType::Ipv6Addr, v6),
+    ]
+}
+
+/// The table as far as the updates of a pod's timed sets need it: those
+/// sets, without elements.
+pub fn named_table(tap: &str) -> Table {
+    Table {
+        family: Family::Inet,
+        name: TABLE.to_string(),
+        sets: named_sets(tap, &[]).into(),
+        chains: Vec::new(),
+    }
+}
+
+/// Adds `addresses` to a pod's timed sets, or gives those there their
+/// new timeout.
+pub fn named_ops(tap: &str, addresses: &[(IpAddr, Duration)]) -> Vec<ElementOp> {
+    named_sets(tap, addresses)
+        .into_iter()
+        .filter(|set| !set.elements.is_empty())
+        .map(|set| ElementOp::Add {
+            set: set.name,
+            elements: set.elements,
+        })
+        .collect()
+}
+
+/// Empties a pod's timed sets.
+pub fn named_flush(tap: &str) -> Vec<ElementOp> {
+    [AddressFamily::V4, AddressFamily::V6]
+        .into_iter()
+        .map(|family| ElementOp::Flush {
+            set: named_set(tap, family),
+        })
+        .collect()
+}
+
+pub fn table(policy: &Policy, options: &Options, named: &Named) -> Table {
     let mut sets: Vec<Set> = policy
         .sets
         .iter()
@@ -124,12 +192,18 @@ pub fn table(policy: &Policy, options: &Options) -> Table {
             &pod.ingress,
             End::Source,
             &[AddressFamily::V6],
+            None,
         ));
+        let by_name = named.get(&pod.tap);
+        if let Some(addresses) = by_name {
+            sets.extend(named_sets(&pod.tap, addresses));
+        }
         chains.push(pod_chain(
             &out_chain(&pod.tap),
             &pod.egress,
             End::Destination,
             &[AddressFamily::V6, AddressFamily::V4],
+            by_name.map(|_| pod.tap.as_str()),
         ));
     }
     chains.push(lookup_chain(FROM_PODS, iifname_vmap(POD_OUT)));
@@ -253,8 +327,15 @@ fn deny_set(family: AddressFamily) -> &'static str {
 }
 
 /// A pod's chain for one direction: its peers are at `end`, and only
-/// packets of `families` may pass.
-fn pod_chain(name: &str, allows: &[Allow], end: End, families: &[AddressFamily]) -> Chain {
+/// packets of `families` may pass; with `named`, the TAP of a pod
+/// restricted by name, also those to its timed sets.
+fn pod_chain(
+    name: &str,
+    allows: &[Allow],
+    end: End,
+    families: &[AddressFamily],
+    named: Option<&str>,
+) -> Chain {
     let mut rules: Vec<Rule> = Vec::new();
     for &family in families {
         let denied = peer(family, end, deny_set(family));
@@ -285,6 +366,12 @@ fn pod_chain(name: &str, allows: &[Allow], end: End, families: &[AddressFamily])
                 ]
                 .concat(),
             );
+        }
+    }
+    if let Some(tap) = named {
+        for &family in families {
+            let peers = peer(family, end, &named_set(tap, family));
+            rules.push([peers, verdict(Verdict::Return)].concat());
         }
     }
     rules.push(log(prefix::NO_RULE));
@@ -566,7 +653,7 @@ mod tests {
 
     #[test]
     fn every_pod_has_its_chains_and_map_entries() {
-        let table = table(&policy(), &options());
+        let table = table(&policy(), &options(), &Named::new());
         assert_eq!((table.family, table.name.as_str()), (Family::Inet, "feos"));
         let names: Vec<&str> = table.sets.iter().map(|set| set.name.as_str()).collect();
         assert_eq!(
@@ -626,7 +713,7 @@ mod tests {
 
     #[test]
     fn a_pod_sends_both_families_and_receives_ipv6() {
-        let table = table(&policy(), &options());
+        let table = table(&policy(), &options(), &Named::new());
         let egress = &chain(&table, "out-pod-11111111").rules;
         // Denied prefixes first, of both families, logged, then dropped.
         for (rules, denied) in [
@@ -698,8 +785,113 @@ mod tests {
     }
 
     #[test]
+    fn a_pod_restricted_by_name_sends_to_its_timed_sets() {
+        let five = Duration::from_secs(300);
+        let named = Named::from([(
+            "pod-22222222".to_string(),
+            vec![
+                (IpAddr::V4(v4("192.0.2.7")), five),
+                (IpAddr::V6(a("2001:db8::7")), Duration::from_secs(3600)),
+            ],
+        )]);
+        let table = table(&policy(), &options(), &named);
+        // Its two timed sets, with the addresses and their timeouts; the
+        // other pod has none.
+        let timed: Vec<&Set> = table.sets.iter().filter(|set| set.timeout).collect();
+        assert_eq!(timed.len(), 2);
+        assert_eq!(
+            (timed[0].name.as_str(), timed[0].key, timed[0].interval),
+            ("named4-pod-22222222", KeyType::Ipv4Addr, false)
+        );
+        assert_eq!(
+            timed[0].elements,
+            [Element::ipv4(v4("192.0.2.7")).with_timeout(five)]
+        );
+        assert_eq!(
+            (timed[1].name.as_str(), timed[1].key),
+            ("named6-pod-22222222", KeyType::Ipv6Addr)
+        );
+        assert_eq!(
+            timed[1].elements,
+            [Element::ipv6(a("2001:db8::7")).with_timeout(Duration::from_secs(3600))]
+        );
+        // Its out chain: the denied prefixes first, then the timed sets by
+        // the connection's original destination, of both families, then
+        // the drop.
+        let out = &chain(&table, "out-pod-22222222").rules;
+        assert_eq!(out.len(), 8);
+        assert!(has(&out[1], &ct_original_ipv6_daddr_in(DENY6)));
+        assert!(has(&out[3], &ct_original_ipv4_daddr_in(DENY4)));
+        assert_eq!(
+            out[4..6],
+            [
+                [
+                    ct_original_ipv6_daddr_in("named6-pod-22222222"),
+                    verdict(Verdict::Return)
+                ]
+                .concat(),
+                [
+                    ct_original_ipv4_daddr_in("named4-pod-22222222"),
+                    verdict(Verdict::Return)
+                ]
+                .concat(),
+            ]
+        );
+        assert!(logs(&out[6], DROP_GROUP, "no-rule"));
+        assert_eq!(out[7], verdict(Verdict::Drop));
+        // Its in chain and the other pod's chains are as without.
+        let without = super::table(&policy(), &options(), &Named::new());
+        for name in ["in-pod-22222222", "out-pod-11111111", "in-pod-11111111"] {
+            assert_eq!(chain(&table, name), chain(&without, name), "{name}");
+        }
+        assert!(!without.sets.iter().any(|set| set.timeout));
+        // Restricted with no address yet: the sets, empty, and the rules.
+        let empty = Named::from([("pod-22222222".to_string(), Vec::new())]);
+        let table = super::table(&policy(), &options(), &empty);
+        assert_eq!(table.sets.iter().filter(|set| set.timeout).count(), 2);
+        assert_eq!(chain(&table, "out-pod-22222222").rules.len(), 8);
+
+        // The updates of the sets: additions per family, and flushes.
+        let ops = named_ops("pod-22222222", &named["pod-22222222"]);
+        assert_eq!(
+            ops,
+            [
+                ElementOp::Add {
+                    set: "named4-pod-22222222".to_string(),
+                    elements: vec![Element::ipv4(v4("192.0.2.7")).with_timeout(five)],
+                },
+                ElementOp::Add {
+                    set: "named6-pod-22222222".to_string(),
+                    elements: vec![
+                        Element::ipv6(a("2001:db8::7")).with_timeout(Duration::from_secs(3600))
+                    ],
+                },
+            ]
+        );
+        let v6_only = [(IpAddr::V6(a("2001:db8::8")), five)];
+        assert_eq!(named_ops("pod-22222222", &v6_only).len(), 1);
+        assert_eq!(
+            named_flush("pod-22222222"),
+            [
+                ElementOp::Flush {
+                    set: "named4-pod-22222222".to_string()
+                },
+                ElementOp::Flush {
+                    set: "named6-pod-22222222".to_string()
+                },
+            ]
+        );
+        let sets = named_table("pod-22222222");
+        assert_eq!(sets.name, TABLE);
+        assert!(sets
+            .sets
+            .iter()
+            .all(|set| set.timeout && set.elements.is_empty()));
+    }
+
+    #[test]
     fn forward_copies_first_and_goes_through_the_maps() {
-        let table = table(&policy(), &options());
+        let table = table(&policy(), &options(), &Named::new());
         let forward = chain(&table, "forward");
         let base = forward.base.as_ref().unwrap();
         assert_eq!(
@@ -756,7 +948,7 @@ mod tests {
 
     #[test]
     fn prerouting_pins_pods_to_their_addresses() {
-        let table = table(&policy(), &options());
+        let table = table(&policy(), &options(), &Named::new());
         let prerouting = chain(&table, "prerouting");
         assert_eq!(prerouting.base.as_ref().unwrap().priority, -150);
         let rules = &prerouting.rules;
@@ -783,7 +975,7 @@ mod tests {
             mesh: Some((a("fd5e:1b2c:93a0::"), 48)),
             ..options()
         };
-        let table = super::table(&policy(), &mesh);
+        let table = super::table(&policy(), &mesh, &Named::new());
         let rules = &chain(&table, "prerouting").rules;
         assert_eq!(rules.len(), 7);
         let cluster = ipv6_prefix(IPV6_SADDR, CmpOp::Eq, a("fd5e:1b2c:93a0::"), 48);
@@ -796,7 +988,7 @@ mod tests {
 
     #[test]
     fn input_takes_neighbor_discovery_dns_otlp_and_http_bindings_from_pods() {
-        let table = table(&policy(), &options());
+        let table = table(&policy(), &options(), &Named::new());
         let rules = &chain(&table, "input").rules;
         assert_eq!(
             rules[..2],
@@ -863,7 +1055,7 @@ mod tests {
             dns: IpAddr::V6(a("fd00::53")),
             ..options()
         };
-        let table = super::table(&policy(), &ipv6);
+        let table = super::table(&policy(), &ipv6, &Named::new());
         assert!(has(
             &chain(&table, "input").rules[2],
             &ipv6_daddr(CmpOp::Eq, a("fd00::53"))
@@ -872,7 +1064,7 @@ mod tests {
 
     #[test]
     fn the_pods_ipv4_is_masqueraded() {
-        let table = table(&policy(), &options());
+        let table = table(&policy(), &options(), &Named::new());
         let postrouting = chain(&table, "postrouting");
         let base = postrouting.base.as_ref().unwrap();
         assert_eq!(
@@ -893,7 +1085,7 @@ mod tests {
             ipv4_range: (v4("10.77.0.0"), 16),
             ..options()
         };
-        let table = super::table(&policy(), &other);
+        let table = super::table(&policy(), &other, &Named::new());
         assert!(has(
             &chain(&table, "postrouting").rules[0],
             &ipv4_prefix(IPV4_SADDR, CmpOp::Eq, v4("10.77.0.0"), 16)
@@ -1084,13 +1276,29 @@ mod tests {
         };
         let lb = ["fd00:fe05:2::5", "fd00:fe05:2::6"];
 
-        // Written twice: the second replaces the first.
+        // Written twice: the second replaces the first. The second pod is
+        // restricted by name, with an address admitted.
         let nat = compile(&groups(&lb), &pods, &denied("192.0.2.7/32"));
-        let mut table = table(&nat, &options());
+        let five = std::time::Duration::from_secs(300);
+        let named = Named::from([(
+            "pod-22222222".to_string(),
+            vec![(IpAddr::V4(v4("198.51.100.7")), five)],
+        )]);
+        let mut table = table(&nat, &options(), &named);
         table.name = name.to_string();
         nft::replace(&table).unwrap();
         nft::replace(&table).unwrap();
         assert_written(&table);
+        // Its resolver admits more, and an address again; then a resume
+        // empties the sets.
+        let mut sets = named_table("pod-22222222");
+        sets.name = name.to_string();
+        let admitted = [
+            (IpAddr::V4(v4("198.51.100.7")), five),
+            (IpAddr::V6(a("2001:db8::7")), five),
+        ];
+        nft::update(&sets, &named_ops("pod-22222222", &admitted)).unwrap();
+        nft::update(&sets, &named_flush("pod-22222222")).unwrap();
         if let Some(listed) = nft_says(&["list", "table", "inet", name]) {
             println!("{listed}");
             let words = listed.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1098,6 +1306,8 @@ mod tests {
                 "ip6 daddr @deny6 drop",
                 "ip daddr @deny4 drop",
                 "ip daddr @internet4 return",
+                "ip daddr @named4-pod-22222222 return",
+                "ip6 daddr @named6-pod-22222222 return",
                 "ip6 daddr @internet6 return",
                 "ip6 saddr @deny6 drop",
                 "tcp dport 443 ip6 saddr @g-lb return",
@@ -1144,7 +1354,7 @@ mod tests {
         // A pod goes: the table is replaced, and its chains go with it.
         let one = compile(&groups(&lb), &pods[1..], &denied("192.0.2.7/32"));
         assert_eq!(delta(&nat, &one), Delta::Replace);
-        let mut table = super::table(&one, &options());
+        let mut table = super::table(&one, &options(), &Named::new());
         table.name = name.to_string();
         nft::replace(&table).unwrap();
         assert_written(&table);
