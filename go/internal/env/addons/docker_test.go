@@ -34,13 +34,20 @@ package addons
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -293,6 +300,82 @@ func outputURL(t *testing.T, b Blueprint, a Addon, c Context, fields map[string]
 	return u
 }
 
+// testPKI is a root and leaves under it, as the platform's issuer makes
+// them (ADR 0036, 0038): Ed25519 keys, a workload's subject CN=<td>/<pod>,
+// OU=<workload>, its SPIFFE ID as the one URI name.
+type testPKI struct {
+	t    *testing.T
+	root *x509.Certificate
+	key  ed25519.PrivateKey
+}
+
+func newTestPKI(t *testing.T) *testPKI {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test root"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true,
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testPKI{t: t, root: root, key: key}
+}
+
+// leaf issues a certificate for usage to subject pod and workload with
+// the URI id: its PEM and its key's PKCS#8 PEM.
+func (p *testPKI) leaf(pod, workload, id string, usage x509.ExtKeyUsage) (certPEM, keyPEM string) {
+	p.t.Helper()
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	u, err := url.Parse(id)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 64))
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: serial,
+		Subject: pkix.Name{CommonName: "run.test/" + pod, OrganizationalUnit: []string{workload}},
+		URIs:    []*url.URL{u}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}, p.root, pub, p.key)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	k, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: k}))
+}
+
+func (p *testPKI) rootPEM() string {
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.root.Raw}))
+}
+
+// clientWith is client with dir mounted read-only at /c.
+func (l *dockerLab) clientWith(dir, entrypoint, image string, args ...string) (string, int) {
+	all := []string{"run", "--rm", "--label", dockerLabel, "--network", l.network, "-v", dir + ":/c:ro",
+		"--entrypoint", entrypoint, image}
+	out, errOut, code := l.docker(2*time.Minute, append(all, args...)...)
+	return out + errOut, code
+}
+
+// TestPostgresDocker runs the blueprint as ADR 0038 has it, from the
+// state an addon of before has: a running password session, then the
+// steps; after them only a workload's certificate gets in, as the role
+// its grant names, and nothing takes a password.
 func TestPostgresDocker(t *testing.T) {
 	lab := newDockerLab(t, 1)
 	b, _ := Get("postgres")
@@ -303,11 +386,19 @@ func TestPostgresDocker(t *testing.T) {
 			if fs := b.Validate(nil, a); len(fs) != 0 {
 				t.Fatalf("findings:\n%s", findingText(fs))
 			}
+			ca := newTestPKI(t)
 			creds := credentials(t, b, a)
-			// One password that needs every escape: the url's userinfo
-			// must carry it to libpq intact. (Generated ones are hex.)
-			creds["role.approval_svc.password"] = `p@ss:w/rd%?#&=+ "'$x\;` + randomHex(t, 4)
-			c := Context{Env: "test", Name: a.Name}
+			serverCert, serverKey := ca.leaf("pgpod", "wl-00000000000000000000000000000000",
+				"spiffe://run.test/tenant/t/env/e/addon/postgres", x509.ExtKeyUsageServerAuth)
+			creds[TLSKey] = serverKey
+			const (
+				expenseWL  = "wl-0123456789abcdef0123456789abcdef"
+				approvalWL = "wl-s-xmxfgckmkt6"
+			)
+			c := Context{Env: "test", Name: a.Name, TLS: &TLS{CertPEM: serverCert, CAPEM: ca.rootPEM(), Grants: []Grant{
+				{Workload: expenseWL, ID: "spiffe://run.test/tenant/t/env/e/service/expense", Role: "expense_svc"},
+				{Workload: approvalWL, ID: "spiffe://run.test/tenant/t/env/e/sandbox/xmxfgckmkt6", Role: "approval_svc"},
+			}}}
 			inst, err := b.Render(a, c)
 			if err != nil {
 				t.Fatal(err)
@@ -316,69 +407,150 @@ func TestPostgresDocker(t *testing.T) {
 			pod := lab.start(t, "pg"+version, inst, resolveEnv(t, inst.Env, creds), b.Plans()[a.Plan].MemoryMib,
 				lab.volume(t, inst.Image))
 			t.Logf("ready after %s", lab.waitReady(t, pod, inst.Probe).Round(time.Millisecond))
+			c.Address = lab.address(t, pod)
+
+			// Before: the image's rules take the superuser's password over
+			// the network. A session of that kind runs while the steps do.
+			pw := url.QueryEscape(creds["password"])
+			before := lab.network + "-before"
+			lab.must(t, time.Minute, "run", "-d", "--name", before, "--label", dockerLabel, "--network", lab.network,
+				"--entrypoint", "psql", inst.Image, "postgres://postgres:"+pw+"@["+c.Address+"]:5432/postgres?sslmode=disable",
+				"-X", "-q", "-c", "SELECT pg_sleep(120)")
+			t.Cleanup(func() { lab.docker(time.Minute, "rm", "-f", before) })
+			waitSession(t, lab, pod)
+
 			steps := b.Provision(a, c)
+			if len(steps) != 2 {
+				t.Fatalf("steps %v", steps)
+			}
 			lab.provision(t, pod, steps, creds)
 			lab.provision(t, pod, steps, creds) // idempotent, silent
+			out, _, _ := lab.docker(2*time.Minute, "wait", before)
+			logs, logErr, _ := lab.docker(time.Minute, "logs", before)
+			if strings.TrimSpace(out) == "0" || !strings.Contains(logs+logErr, "terminating connection due to administrator command") {
+				t.Fatalf("the password session outlived the rules: exit %s: %s%s", strings.TrimSpace(out), logs, logErr)
+			}
 
-			c.Address = lab.address(t, pod)
-			psql := func(url, sql string) (string, int) {
-				out, code := lab.client("psql", inst.Image, url, "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-c", sql)
+			dir := t.TempDir()
+			write := func(name, content string) {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("root.crt", ca.rootPEM())
+			expCert, expKey := ca.leaf("pod1", expenseWL, "spiffe://run.test/tenant/t/env/e/service/expense", x509.ExtKeyUsageClientAuth)
+			write("expense.crt", expCert)
+			write("expense.key", expKey)
+			appCert, appKey := ca.leaf("xmxfgckmkt6", approvalWL, "spiffe://run.test/tenant/t/env/e/sandbox/xmxfgckmkt6", x509.ExtKeyUsageClientAuth)
+			write("approval.crt", appCert)
+			write("approval.key", appKey)
+			// The same workload's ID under another root.
+			other := newTestPKI(t)
+			strCert, strKey := other.leaf("pod1", expenseWL, "spiffe://run.test/tenant/t/env/e/service/expense", x509.ExtKeyUsageClientAuth)
+			write("stranger.crt", strCert)
+			write("stranger.key", strKey)
+			// Another workload: the same name in another environment has
+			// another OU.
+			elseCert, elseKey := ca.leaf("pod2", "wl-ffffffffffffffffffffffffffffffff",
+				"spiffe://run.test/tenant/u/env/f/service/expense", x509.ExtKeyUsageClientAuth)
+			write("else.crt", elseCert)
+			write("else.key", elseKey)
+
+			conninfo := func(user, db, who string) string {
+				s := "host=" + c.Address + " port=5432 dbname=" + db + " user=" + user +
+					" sslmode=verify-ca sslrootcert=/c/root.crt"
+				if who != "" {
+					s += " sslcert=/c/" + who + ".crt sslkey=/c/" + who + ".key"
+				}
+				if version != "16" {
+					s += " sslnegotiation=direct" // ALPN postgresql, as the guest's binding (ADR 0036)
+				}
+				return s
+			}
+			psql := func(target, sql string) (string, int) {
+				out, code := lab.clientWith(dir, "psql", inst.Image, target, "-X", "-q", "-At", "-v", "ON_ERROR_STOP=1", "-c", sql)
 				return strings.TrimSpace(redact(out, creds)), code
 			}
-			expense := outputURL(t, b, a, c, map[string]string{"role": "expense_svc"}, creds)
-			if out, code := psql(expense, "CREATE TABLE expenses (id int); INSERT INTO expenses VALUES (1); "+
-				"SELECT current_user, current_database(), current_schema(), inet_server_addr()"); code != 0 ||
-				out != "expense_svc|expensa|expense_svc|"+c.Address {
-				t.Fatalf("expense_svc: exit %d: %s", code, out)
+			if out, code := psql(conninfo("expense_svc", "expensa", "expense"),
+				"CREATE TABLE expenses (id int); INSERT INTO expenses VALUES (1); "+
+					"SELECT current_user, current_database(), current_schema(), s.ssl, s.version "+
+					"FROM pg_stat_ssl s WHERE s.pid = pg_backend_pid()"); code != 0 ||
+				out != "expense_svc|expensa|expense_svc|t|TLSv1.3" {
+				t.Fatalf("expense_svc by its certificate: exit %d: %s", code, out)
 			}
-			approval := outputURL(t, b, a, c, map[string]string{"role": "approval_svc", "database": "reports"}, creds)
-			if out, code := psql(approval, "SELECT current_user, current_database()"); code != 0 ||
+			if out, code := psql(conninfo("approval_svc", "reports", "approval"), "SELECT current_user, current_database()"); code != 0 ||
 				out != "approval_svc|reports" {
-				t.Fatalf("approval_svc: exit %d: %s", code, out)
+				t.Fatalf("approval_svc by its sandbox's certificate: exit %d: %s", code, out)
 			}
-			approvalExpensa := outputURL(t, b, a, c, map[string]string{"role": "approval_svc"}, creds)
-			if out, code := psql(approvalExpensa, "SELECT * FROM expense_svc.expenses"); code == 0 ||
+			if out, code := psql(conninfo("approval_svc", "expensa", "approval"), "SELECT * FROM expense_svc.expenses"); code == 0 ||
 				!strings.Contains(out, "permission denied for schema expense_svc") {
 				t.Fatalf("approval_svc read expense_svc's schema: exit %d: %s", code, out)
 			}
-			super := outputURL(t, b, a, c, nil, creds)
-			if out, code := psql(super, "SELECT current_user, current_database(), current_setting('shared_buffers')"); code != 0 ||
-				out != "postgres|expensa|64MB" {
-				t.Fatalf("superuser: exit %d: %s", code, out)
+			for _, refused := range []struct{ name, target, says string }{
+				{"the reference's url, no certificate", outputURL(t, b, a, c, map[string]string{"role": "expense_svc"}, creds),
+					"connection requires a valid client certificate"},
+				{"another role than granted", conninfo("approval_svc", "expensa", "expense"), "certificate authentication failed"},
+				{"the superuser by a certificate", conninfo("postgres", "postgres", "expense"), "certificate authentication failed"},
+				{"another workload", conninfo("expense_svc", "expensa", "else"), "certificate authentication failed"},
+				{"another root", conninfo("expense_svc", "expensa", "stranger"), ""},
+				{"the password of before", "postgres://postgres:" + pw + "@[" + c.Address + "]:5432/postgres?sslmode=disable",
+					"no encryption"},
+				{"a password over TLS", "postgres://postgres:" + pw + "@[" + c.Address + "]:5432/postgres?sslmode=require",
+					"connection requires a valid client certificate"},
+			} {
+				out, code := psql(refused.target, "SELECT 1")
+				if code == 0 || !strings.Contains(out, refused.says) {
+					t.Fatalf("%s: exit %d: %s", refused.name, code, out)
+				}
+				t.Logf("%s: exit %d: %s", refused.name, code, out)
 			}
-			t.Logf("url %s", redact(approval, creds))
-			wrong := outputURL(t, b, a, c, nil, map[string]string{"password": "wrong"})
-			if out, code := psql(wrong, "SELECT 1"); code == 0 || !strings.Contains(out, "password authentication failed") {
-				t.Fatalf("a wrong password: exit %d: %s", code, out)
-			} else {
-				t.Logf("a wrong password: exit %d: %s", code, out)
+			// Loopback TCP takes no password either (a port-forward dials
+			// 127.0.0.1 in the pod).
+			if out, code := lab.exec(pod, map[string]string{"PGPASSWORD": creds["password"]},
+				"psql", "-X", "-h", "127.0.0.1", "-U", "postgres", "-c", "SELECT 1"); code == 0 ||
+				!strings.Contains(out, "no encryption") {
+				t.Fatalf("loopback with the password: exit %d: %s", code, out)
 			}
-			// Loopback TCP asks for the password too (a port-forward
-			// dials 127.0.0.1 in the pod).
-			if out, code := lab.exec(pod, nil, "psql", "-X", "-h", "127.0.0.1", "-U", "postgres", "-c", "SELECT 1"); code == 0 ||
-				!strings.Contains(out, "no password supplied") {
-				t.Fatalf("loopback without a password: exit %d: %s", code, out)
-			} else {
-				t.Logf("loopback without a password: exit %d: %s", code, strings.TrimSpace(out))
+			// The role has none any more: not even the socket takes it as
+			// another user.
+			if out, code := lab.exec(pod, nil, "psql", "-X", "-At", "-h", "/var/run/postgresql", "-U", "postgres",
+				"-c", "SELECT count(*) FROM pg_authid WHERE rolpassword IS NOT NULL"); code != 0 || strings.TrimSpace(out) != "0" {
+				t.Fatalf("passwords left: exit %d: %s", code, out)
 			}
 
-			// A node-side stop is a kill: crash recovery, then the same
-			// data, and provisioning still converges silently.
+			// A node-side stop is a kill: crash recovery, then TLS from the
+			// volume, the same data, and provisioning still silent.
 			lab.must(t, time.Minute, "kill", pod)
+			restarted := time.Now().UTC().Format(time.RFC3339Nano)
 			lab.must(t, time.Minute, "start", pod)
 			lab.waitReady(t, pod, inst.Probe)
-			lab.provision(t, pod, steps, creds)
 			c.Address = lab.address(t, pod)
-			expense = outputURL(t, b, a, c, map[string]string{"role": "expense_svc"}, creds)
-			if out, code := psql(expense, "SELECT count(*) FROM expenses"); code != 0 || out != "1" {
+			lab.provision(t, pod, steps, creds)
+			if out, code := psql(conninfo("expense_svc", "expensa", "expense"), "SELECT count(*) FROM expenses"); code != 0 || out != "1" {
 				t.Fatalf("after a restart: exit %d: %s", code, out)
+			}
+			// Neither the probe, which ran all along, nor the steps, nor a
+			// workload's session leave a complaint in the log.
+			for range 3 {
+				lab.waitReady(t, pod, inst.Probe)
+			}
+			logs, logErr, _ = lab.docker(time.Minute, "logs", "--since", restarted, pod)
+			for _, line := range strings.Split(logs+logErr, "\n") {
+				// The probe meets crash recovery first, as it always did.
+				if strings.Contains(line, "not yet accepting connections") || strings.Contains(line, "Consistent recovery state") {
+					continue
+				}
+				if strings.Contains(line, "FATAL") || strings.Contains(line, "ERROR") || strings.Contains(line, "could not") ||
+					strings.Contains(line, "contains errors") {
+					t.Fatalf("a complaint in the log after the restart: %s\n%s%s", line, logs, logErr)
+				}
 			}
 
 			// A role added later whose schema another role made first, open
 			// to everyone: provisioning fails naming the schema rather than
-			// adopt it (expense_svc would own what late_svc's unqualified
-			// names resolve to).
-			if out, code := psql(expense, "CREATE SCHEMA late_svc; GRANT USAGE, CREATE ON SCHEMA late_svc TO PUBLIC"); code != 0 {
+			// adopt it.
+			if out, code := psql(conninfo("expense_svc", "expensa", "expense"),
+				"CREATE SCHEMA late_svc; GRANT USAGE, CREATE ON SCHEMA late_svc TO PUBLIC"); code != 0 {
 				t.Fatalf("expense_svc makes late_svc's schema: exit %d: %s", code, out)
 			}
 			later := addon(t, "postgres", `{"type":"postgres","version":"`+version+`","plan":"dev",
@@ -386,21 +558,27 @@ func TestPostgresDocker(t *testing.T) {
 			if fs := b.Validate(&a, later); len(fs) != 0 {
 				t.Fatalf("findings:\n%s", findingText(fs))
 			}
-			creds["role.late_svc.password"] = randomHex(t, 16)
-			for _, st := range b.Provision(later, c) {
-				out, code := lab.exec(pod, resolveEnv(t, st.Env, creds), st.Argv...)
-				out = redact(out, creds)
-				if code == 0 || !strings.Contains(out, "schema late_svc in database expensa belongs to role expense_svc, not to role late_svc") {
-					t.Fatalf("step %s past a squatted schema: exit %d\n%s", st.Name, code, out)
-				}
-				t.Logf("step %s past a squatted schema: exit %d: %s", st.Name, code, strings.TrimSpace(out))
-			}
-			if out, code := psql(super, "SELECT nspowner::regrole FROM pg_namespace WHERE nspname = 'late_svc'"); code != 0 ||
-				out != "expense_svc" {
-				t.Fatalf("late_svc's schema after the failed step: exit %d: %s", code, out)
+			st := b.Provision(later, c)[0]
+			out, code := lab.exec(pod, resolveEnv(t, st.Env, creds), st.Argv...)
+			if code == 0 || !strings.Contains(out, "schema late_svc in database expensa belongs to role expense_svc, not to role late_svc") {
+				t.Fatalf("step %s past a squatted schema: exit %d\n%s", st.Name, code, out)
 			}
 		})
 	}
+}
+
+// waitSession waits until pod's server has a client session over the
+// network.
+func waitSession(t *testing.T, lab *dockerLab, pod string) {
+	t.Helper()
+	for begin := time.Now(); time.Since(begin) < 30*time.Second; time.Sleep(200 * time.Millisecond) {
+		out, _ := lab.exec(pod, nil, "psql", "-X", "-At", "-h", "/var/run/postgresql", "-U", "postgres", "-c",
+			"SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND client_addr IS NOT NULL")
+		if strings.TrimSpace(out) == "1" {
+			return
+		}
+	}
+	t.Fatal("no session over the network")
 }
 
 func TestValkeyDocker(t *testing.T) {

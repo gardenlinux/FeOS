@@ -437,7 +437,7 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 		InstanceID: i.id, DB: i.DB, Store: i.Store, Elector: i.Elector, Conns: i.Links, Engine: i.Engine,
 		Runner: runner, Ports: fwd, Sealer: sealer, AppsZone: i.cfg.AppsZone, EnvChanged: i.Domains.EnvChanged,
 		AppsZoneOwners: i.cfg.AppsZoneOwners, TenantZone: i.cfg.TenantZone, SinkURL: i.cfg.SinkURL, Bindings: hb,
-		DenyPrefixes: i.cfg.DenyPrefixes, Log: i.log,
+		DenyPrefixes: i.cfg.DenyPrefixes, Issuer: i.Issuer, Log: i.log,
 	})
 	if err != nil {
 		return nil, err

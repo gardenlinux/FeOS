@@ -634,14 +634,14 @@ func TestDeploymentDeadline(t *testing.T) {
 	n1 := h.addNode("n1")
 	var code atomic.Int32
 	code.Store(1)
-	failingProvisioning(n1, &code)
 	env := h.newEnv("stage")
+	failingProvisioning(n1, &code, leakPassword(h, env.ID))
 	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	old := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
 	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"postgres":{"type":"postgres","version":"17","plan":"dev",
-		"options":{"databases":["app"]}}},"services":{"web":{"image":%q,"command":["/app"],
-		"env":{"DB":{"addon":"postgres","key":"url"}},"ports":[{"name":"http","port":8080}],"rollout":{"timeout":"5s"}}}}`,
+		"options":{"databases":["app"],"roles":["web"]}}},"services":{"web":{"image":%q,"command":["/app"],
+		"env":{"DB":{"addon":"postgres","key":"url","role":"web"}},"ports":[{"name":"http","port":8080}],"rollout":{"timeout":"5s"}}}}`,
 		testImage))
 	rel := h.waitDeployment(env.ID, r2, model.DeploymentFailed, 60*time.Second)
 	if !strings.HasPrefix(rel.Reason, "deployment 2 did not roll out within 10s: addon postgres") {

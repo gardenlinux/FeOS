@@ -212,14 +212,22 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 	}
 	p.finish(v.env.ID)
 	ctx.Address = address
-	for _, s := range bp.Provision(p.addon, ctx) {
-		p.steps = append(p.steps, addons.Step{Name: s.Name, Argv: slices.Clone(s.Argv), Env: mapEnv(name, s.Env)})
+	p.renderSteps(ctx)
+	return p
+}
+
+// renderSteps renders the addon's provisioning steps against ctx (its
+// address; with ctx.TLS, its server certificate and grants, ADR 0038),
+// their env mapped to system secrets, and their hash.
+func (p *addonPlan) renderSteps(ctx addons.Context) {
+	p.steps = nil
+	for _, s := range p.bp.Provision(p.addon, ctx) {
+		p.steps = append(p.steps, addons.Step{Name: s.Name, Argv: slices.Clone(s.Argv), Env: mapEnv(p.name, s.Env)})
 	}
 	p.stepsHash = hashJSON(struct {
 		Scheme int           `json:"scheme"`
 		Steps  []addons.Step `json:"steps"`
 	}{1, p.steps})
-	return p
 }
 
 // planImage renders an image service or a job of the target: its pod is

@@ -45,6 +45,38 @@ func (l *execLog) fn(_ context.Context, pod podid.ID, req *containerv1.ExecReque
 	return 0, false, nil
 }
 
+// stepOf names what an Exec in a postgres addon's container is: "probe",
+// "provision" or "tls" (each "sh -c <script>"), else its first word.
+func stepOf(req *containerv1.ExecRequest) string {
+	if len(req.Command) == 3 && req.Command[0] == "sh" {
+		switch script := req.Command[2]; {
+		case strings.Contains(script, "pg_isready"):
+			return "probe"
+		case strings.Contains(script, "$FERUN_TLS_KEY"):
+			return "tls"
+		case strings.Contains(script, "psql"):
+			return "provision"
+		}
+	}
+	if len(req.Command) == 0 {
+		return ""
+	}
+	return req.Command[0]
+}
+
+// step returns the recorded Execs that stepOf names name.
+func (l *execLog) step(name string) []*containerv1.ExecRequest {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []*containerv1.ExecRequest
+	for _, c := range l.calls {
+		if stepOf(c) == name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // find returns the recorded Execs whose command's first word is argv0.
 func (l *execLog) find(argv0 string) []*containerv1.ExecRequest {
 	l.mu.Lock()
@@ -75,9 +107,10 @@ func TestAddonLifecycle(t *testing.T) {
 	r1 := h.apply(env.ID, postgresSpec)
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 
-	// Credentials: 32 hex characters, version 1, system.
+	// Credentials: 32 hex characters, version 1, system; the superuser's
+	// alone (initdb's): roles have none (ADR 0038).
 	var creds []string
-	for _, name := range []string{"addon.postgres.password", "addon.postgres.role.svc.password"} {
+	for _, name := range []string{"addon.postgres.password"} {
 		sec, err := h.st.GetSecret(bg, env.ID, name, 1)
 		if err != nil || !sec.System {
 			t.Fatalf("secret %s: %+v %v", name, sec, err)
@@ -133,20 +166,28 @@ func TestAddonLifecycle(t *testing.T) {
 	}
 	// The probe ran; the provisioning ran with the credentials in its env,
 	// not in its argv.
-	if len(execs.find("pg_isready")) == 0 {
+	if len(execs.step("probe")) == 0 {
 		t.Error("the probe never ran")
 	}
-	prov := execs.find("sh")
-	if len(prov) == 0 {
-		t.Fatal("the provisioning never ran")
+	prov, tls := execs.step("provision"), execs.step("tls")
+	if len(prov) == 0 || len(tls) == 0 {
+		t.Fatalf("the provisioning never ran: %d provision, %d tls", len(prov), len(tls))
 	}
-	p := prov[0]
-	if p.Env["PGPASSWORD"] != creds[0] || p.Env["FERUN_ROLE_PASSWORD_svc"] != creds[1] {
-		t.Errorf("provisioning env %v", p.Env)
+	if p := prov[0]; len(p.Env) != 1 || p.Env["PGOPTIONS"] == "" {
+		t.Errorf("provisioning env %v: no credential", p.Env)
 	}
-	for _, a := range p.Command {
-		if strings.Contains(a, creds[0]) || strings.Contains(a, creds[1]) {
-			t.Error("a credential is in the provisioning's argv")
+	key, err := h.c.ResolveSecret(bg, env.ID, "addon.postgres.tls.key", 1)
+	if err != nil || !strings.HasPrefix(key, "-----BEGIN PRIVATE KEY-----") {
+		t.Fatalf("the key credential %v", err)
+	}
+	if tls[0].Env["FERUN_TLS_KEY"] != key {
+		t.Error("the tls step has not the key")
+	}
+	for _, req := range append(prov, tls...) {
+		for _, a := range req.Command {
+			if strings.Contains(a, creds[0]) || strings.Contains(a, key) {
+				t.Error("a credential is in a step's argv")
+			}
 		}
 	}
 
@@ -174,10 +215,13 @@ func TestAddonLifecycle(t *testing.T) {
 		t.Fatalf("the node's volumes after the recreate %v", nv)
 	}
 	// The credentials stayed.
-	for i, name := range []string{"addon.postgres.password", "addon.postgres.role.svc.password"} {
+	for i, name := range []string{"addon.postgres.password"} {
 		if v, err := h.c.ResolveSecret(bg, env.ID, name, 1); err != nil || v != creds[i] {
 			t.Errorf("credential %s changed: %v", name, err)
 		}
+	}
+	if v, err := h.c.ResolveSecret(bg, env.ID, "addon.postgres.tls.key", 1); err != nil || v != key {
+		t.Errorf("the key credential changed: %v", err)
 	}
 	// A role option alone reprovisions it, without a recreate.
 	r3 := h.apply(env.ID, strings.Replace(strings.Replace(postgresSpec, `"dev"`, `"small"`, 1), `["svc"]`, `["svc","ops"]`, 1))
@@ -186,8 +230,8 @@ func TestAddonLifecycle(t *testing.T) {
 	if len(rows) != 1 || rows[0].Sandbox.ID != second.Sandbox.ID || rows[0].Instance.ProvisionedHash == second.Instance.ProvisionedHash {
 		t.Fatalf("after a role was added %+v", rows)
 	}
-	if _, err := h.st.GetSecret(bg, env.ID, "addon.postgres.role.ops.password", 1); err != nil {
-		t.Errorf("the new role's credential: %v", err)
+	if _, err := h.st.GetSecret(bg, env.ID, "addon.postgres.role.ops.password", 1); err == nil {
+		t.Error("the new role has a credential")
 	}
 	if rel := h.deployment(env.ID, r1); rel.State != model.DeploymentReplaced {
 		t.Errorf("deployment %d is %s", r1, rel.State)
@@ -839,10 +883,10 @@ func TestAddonRefusedOnItsData(t *testing.T) {
 // with code's value, echoing the step's credential (and its URL escaping)
 // on stderr as a failed psql statement may; 0 hands them to the node (exit
 // 0). It returns how many provisioning steps ran.
-func failingProvisioning(n *testnode.Node, code *atomic.Int32) *atomic.Int32 {
+func failingProvisioning(n *testnode.Node, code *atomic.Int32, leak func() string) *atomic.Int32 {
 	var runs atomic.Int32
 	n.Script().SetExec(func(_ context.Context, _ podid.ID, req *containerv1.ExecRequest, out testnode.ExecOutput) (int32, bool, error) {
-		if len(req.Command) == 0 || req.Command[0] != "sh" {
+		if stepOf(req) != "provision" {
 			return 0, false, nil
 		}
 		runs.Add(1)
@@ -850,11 +894,21 @@ func failingProvisioning(n *testnode.Node, code *atomic.Int32) *atomic.Int32 {
 		if c == 0 {
 			return 0, false, nil
 		}
-		pw := req.Env["PGPASSWORD"]
+		pw := leak()
 		_ = out.Stderr([]byte(fmt.Sprintf("psql: error: password authentication failed for %s (%s)\n", pw, escapeUserinfo(pw))))
 		return c, true, nil
 	})
 	return &runs
+}
+
+// leakPassword is the superuser's credential of env's addon postgres,
+// which a failing step's output holds (its credentials are redacted
+// from it, whether its env has them or not).
+func leakPassword(h *harness, env uuid.UUID) func() string {
+	return func() string {
+		pw, _ := h.c.ResolveSecret(bg, env, "addon.postgres.password", 1)
+		return pw
+	}
 }
 
 // A provisioning step that fails keeps the addon unprovisioned and the
@@ -866,8 +920,8 @@ func TestAddonProvisioningFails(t *testing.T) {
 	n1 := h.addNode("n1")
 	var code atomic.Int32
 	code.Store(1)
-	runs := failingProvisioning(n1, &code)
 	env := h.newEnv("stage")
+	runs := failingProvisioning(n1, &code, leakPassword(h, env.ID))
 	r1 := h.apply(env.ID, postgresSpec)
 	row := h.waitRows(env.ID, spec.KindAddon, "postgres", 1, 60*time.Second, "failing its provisioning", func(r store.EnvInstanceRow) bool {
 		return strings.Contains(r.Instance.Detail, "provisioning step provision exited 1")

@@ -288,6 +288,53 @@ func (i *Issuer) IssuePod(csrDER []byte, spiffeID string, subject pkix.Name, dns
 	return i.certificateProto(spiffeID, leaf, leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore)/4*3)), leaf, nil
 }
 
+// IssueAddonServer issues an addon's server certificate (ADR 0038) for
+// the public key pub, which the addon's own credential holds: the one URI
+// spiffeID (validated as a pod's), no DNS or IP name, the subject of a pod
+// certificate (PodSubject: pod and workload), ServerAuth only, valid for
+// ttl. The chain is leaf and issuer, PEM; the leaf is returned too, for
+// its lifetime.
+func (i *Issuer) IssueAddonServer(pub crypto.PublicKey, spiffeID, pod, workload string, ttl time.Duration) ([]byte, *x509.Certificate, error) {
+	if err := validatePodID(i.td, spiffeID); err != nil {
+		return nil, nil, err
+	}
+	if pod == "" || workload == "" || strings.Contains(pod, "/") {
+		return nil, nil, fmt.Errorf("addon certificate: pod %q and workload %q must be plain IDs", pod, workload)
+	}
+	subject := PodSubject(i.td, pod, workload)
+	if err := validatePodSubject(subject); err != nil {
+		return nil, nil, fmt.Errorf("addon certificate: %w", err)
+	}
+	u, err := url.Parse(spiffeID)
+	if err != nil {
+		return nil, nil, err
+	}
+	leaf, err := i.sign(&x509.Certificate{
+		Subject:     subject,
+		URIs:        []*url.URL{u},
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}, pub, ttl)
+	if err != nil {
+		return nil, nil, err
+	}
+	var chain []byte
+	for _, der := range [][]byte{leaf.Raw, i.cert.Raw} {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	return chain, leaf, nil
+}
+
+// TrustPEM is what a server that verifies the platform's workloads trusts
+// (an addon's ssl_ca_file, ADR 0038): the bundle's roots and the issuer's
+// certificate, PEM.
+func (i *Issuer) TrustPEM() []byte {
+	var out []byte
+	for _, der := range append(i.BundleDER(), i.cert.Raw) {
+		out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	return out
+}
+
 // IssueServer issues an instance's certificate for the nodes' port with a
 // new ECDSA P-256 key: ServerAuth, the DNS names given (each equal to or
 // under the control-plane domain, never an IP address or a wildcard) and

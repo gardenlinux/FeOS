@@ -142,6 +142,16 @@ func (c *Controller) stepAddon(ctx context.Context, s *stepState, name string, a
 	if vol != nil && vol.DataVersion != p.addon.Version {
 		c.setDataVersion(ctx, v, *vol, p.addon.Version)
 	}
+	if cs, ok := p.bp.(addons.CertificateServer); ok && c.d.Issuer != nil {
+		// Its server certificate and the grants (ADR 0038), into the
+		// steps, whose hash then moves with either.
+		tlsIn, err := c.addonTLS(ctx, v, name, cs, cur)
+		if err != nil {
+			s.wait(obj, "addon %s: its server certificate: %v", name, err)
+			return false
+		}
+		p.renderSteps(addons.Context{Env: v.env.Name, Name: name, Address: cur.Sandbox.Address, TLS: tlsIn})
+	}
 	if cur.Instance.ProvisionedHash != p.stepsHash {
 		c.provision(ctx, v, p, cur)
 		s.wait(obj, "addon %s is being provisioned", name)

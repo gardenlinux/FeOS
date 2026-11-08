@@ -778,23 +778,29 @@ func hasObject(s *spec.Spec, object string) bool {
 }
 
 // purgeCredentials deletes the system secrets of addons that neither T
-// nor R has.
+// nor R has, and those of an addon that its type no longer has in T or
+// R (the roles' passwords that ADR 0038 removed).
 func (c *Controller) purgeCredentials(ctx context.Context, v *view) {
 	secrets, err := c.st.ListSecrets(ctx, v.env.ID, true)
 	if err != nil {
 		return
 	}
 	gone := map[string]bool{}
+	var stale []string
 	for _, sec := range secrets {
 		rest, ok := strings.CutPrefix(sec.Name, "addon.")
 		if !ok {
 			continue
 		}
-		name, _, _ := strings.Cut(rest, ".")
-		_, inT := v.target.Addons[name]
-		_, inR := v.latestSpec.Addons[name]
+		name, key, _ := strings.Cut(rest, ".")
+		ta, inT := v.target.Addons[name]
+		ra, inR := v.latestSpec.Addons[name]
 		if !inT && !inR {
 			gone[name] = true
+			continue
+		}
+		if !c.hasCredential(name, ta, inT, key) && !c.hasCredential(name, ra, inR, key) {
+			stale = append(stale, sec.Name)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(gone)) {
@@ -806,6 +812,32 @@ func (c *Controller) purgeCredentials(ctx context.Context, v *view) {
 			c.rl.warn("remove", "cannot delete a removed addon's credentials", "environment", v.env.ID, "addon", name, "err", err)
 		}
 	}
+	for _, secret := range slices.Compact(slices.Sorted(slices.Values(stale))) {
+		// No credential's name is the prefix of another's: the prefix is
+		// the one secret.
+		err := c.fenced(ctx, func(tx *store.Store) error {
+			_, err := tx.PurgeSecrets(ctx, v.env.ID, secret)
+			return err
+		})
+		if err != nil && ctx.Err() == nil {
+			c.rl.warn("remove", "cannot delete an addon's former credential", "environment", v.env.ID, "secret", secret, "err", err)
+			continue
+		}
+		c.log.Info("addon credential removed", "environment", v.env.ID, "secret", secret)
+	}
+}
+
+// hasCredential reports whether addon a (of a spec that has it, in) has
+// the credential key; an addon whose type is unknown keeps all of them.
+func (c *Controller) hasCredential(name string, a spec.Addon, in bool, key string) bool {
+	if !in {
+		return false
+	}
+	bp, ok := c.d.Blueprint(a.Type)
+	if !ok {
+		return true
+	}
+	return slices.Contains(bp.Credentials(specAddon(bp, name, a)), key)
 }
 
 // stepStarved opens no_capacity for instances pending without capacity

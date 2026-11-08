@@ -80,12 +80,14 @@ func newCredential() (string, error) {
 // Sealer it answers errNoSealer.
 func (c *Controller) ensureCredentials(ctx context.Context, envID uuid.UUID, addon string, keys []string) error {
 	var missing []string
+	isKey := map[string]bool{}
 	for _, k := range keys {
 		name := addons.CredentialSecret(addon, k)
 		_, err := c.st.GetSecret(ctx, envID, name, 1)
 		switch {
 		case errors.Is(err, store.ErrNoRow):
 			missing = append(missing, name)
+			isKey[name] = k == addons.TLSKey
 		case err != nil:
 			return err
 		}
@@ -103,6 +105,10 @@ func (c *Controller) ensureCredentials(ctx context.Context, envID uuid.UUID, add
 	var blobs []sealed
 	for _, name := range missing {
 		value, err := newCredential()
+		if isKey[name] {
+			// A private key (ADR 0038), not a random string.
+			value, err = newKeyCredential()
+		}
 		if err != nil {
 			return err
 		}

@@ -182,6 +182,10 @@ type Deps struct {
 	Sealer     envdeps.Sealer
 	// Blueprint looks up an addon type.
 	Blueprint func(typ string) (addons.Blueprint, bool)
+	// Issuer issues the server certificates of addons that admit
+	// workloads by their certificates (ADR 0038); nil: those addons are
+	// provisioned without TLS, and no client gets in over the network.
+	Issuer AddonIssuer
 	// SinkURL is the sink's API inside the cluster (--sink-url, ADR 0026),
 	// which the logs calls ask first; "": they read the nodes only.
 	SinkURL string
@@ -228,6 +232,9 @@ type timings struct {
 	// deploymentDeadline is the least time a deployment may roll before it fails
 	// (§13.5: longer when its services' budgets or jobs need more).
 	deploymentDeadline time.Duration
+	// addonCertTTL is the lifetime of an addon's server certificate (ADR
+	// 0038), renewed at three quarters of it.
+	addonCertTTL time.Duration
 }
 
 func defaultTimings() timings {
@@ -246,6 +253,7 @@ func defaultTimings() timings {
 		attachedReady:      time.Minute,
 		restartReady:       5 * time.Minute,
 		deploymentDeadline: 10 * time.Minute,
+		addonCertTTL:       24 * time.Hour,
 	}
 }
 
@@ -296,6 +304,8 @@ type Controller struct {
 	// unserved are the nodes whose feosd serves no names, as env-names
 	// and the prepare hook last found (made when first needed).
 	unserved map[string]bool
+	// addonCerts are the addon instances' server certificates (ADR 0038).
+	addonCerts map[podid.ID]addonCert
 }
 
 // New returns the controller of an instance.
@@ -319,7 +329,8 @@ func New(deps Deps) (*Controller, error) {
 	log := deps.Log.With("component", "env-ctl")
 	c := &Controller{d: deps, st: st, log: log, rl: newRateLog(log), t: defaultTimings(),
 		specs: newSpecCache(), seen: map[string]*seenState{}, locks: map[string]*sync.Mutex{},
-		provisionFailed: map[podid.ID]time.Time{}, lastPending: map[string]string{}, exitRun: map[podid.ID]int64{}}
+		provisionFailed: map[podid.ID]time.Time{}, lastPending: map[string]string{}, exitRun: map[podid.ID]int64{},
+		addonCerts: map[podid.ID]addonCert{}}
 	c.pool = newPool(poolWorkers, log)
 	c.bg, c.cancelBg = context.WithCancel(context.Background())
 	return c, nil

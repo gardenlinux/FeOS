@@ -14,11 +14,16 @@ import (
 
 // The shipped blueprints and an addon of each with every option, for the
 // checks that hold for all.
-var shipped = []struct{ name, raw string }{
+// fields are those a reference needs (postgres: a role, ADR 0038).
+var shipped = []struct {
+	name, raw string
+	fields    map[string]string
+}{
 	{"postgres", `{"type":"postgres","version":"17","plan":"dev",
-		"options":{"databases":["expensa","reports"],"roles":["expense_svc","approval_svc"]}}`},
-	{"valkey", `{"type":"valkey","version":"8","plan":"dev","options":{"maxmemoryPolicy":"allkeys-lfu"}}`},
-	{"nats", `{"type":"nats","version":"2","plan":"dev","options":{"jetstream":true}}`},
+		"options":{"databases":["expensa","reports"],"roles":["expense_svc","approval_svc"]}}`,
+		map[string]string{"role": "expense_svc"}},
+	{"valkey", `{"type":"valkey","version":"8","plan":"dev","options":{"maxmemoryPolicy":"allkeys-lfu"}}`, nil},
+	{"nats", `{"type":"nats","version":"2","plan":"dev","options":{"jetstream":true}}`, nil},
 }
 
 func TestShippedTypes(t *testing.T) {
@@ -83,7 +88,7 @@ func TestShippedContracts(t *testing.T) {
 			}
 			for _, key := range b.OutputKeys() {
 				for _, ctx := range []Context{c, {Env: "stage", Name: s.name}} {
-					out, err := b.Outputs(a, ctx, Ref{Key: key})
+					out, err := b.Outputs(a, ctx, Ref{Key: key, Fields: s.fields})
 					if err != nil {
 						t.Fatalf("output %s: %v", key, err)
 					}
@@ -195,7 +200,7 @@ func TestOptionForms(t *testing.T) {
 	if fs := (postgres{}).Validate(nil, a); len(fs) != 0 {
 		t.Fatalf("findings:\n%s", findingText(fs))
 	}
-	if got := (postgres{}).Credentials(a); !slices.Equal(got, []string{"password", "role.r.password"}) {
+	if got := (postgres{}).Credentials(a); !slices.Equal(got, []string{"password", TLSKey}) {
 		t.Fatal(got)
 	}
 	for _, v := range []any{nil, true, 1.5, "s", []any{}, map[string]any{}} {

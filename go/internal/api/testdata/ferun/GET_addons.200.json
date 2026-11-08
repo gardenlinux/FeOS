@@ -89,7 +89,6 @@
           "host",
           "port",
           "user",
-          "password",
           "database",
           "url"
         ],
@@ -119,7 +118,7 @@
             "kind": "list",
             "required": false,
             "default": [],
-            "description": "Login roles, each with a generated password, CONNECT and CREATE on every listed database and a schema of its own name in each. They need a database; a reference names one with the field role. A role no longer listed is not dropped.",
+            "description": "Login roles, each with CONNECT and CREATE on every listed database and a schema of its own name in each, and no password: a reference that names a role (the field role) lets the workload that holds it in as that role by its certificate (ADR 0038). They need a database. A role no longer listed is not dropped.",
             "values": [],
             "pattern": "^[a-z][a-z0-9_]{0,62}$",
             "reserved": [

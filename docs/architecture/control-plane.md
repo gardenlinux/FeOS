@@ -3424,7 +3424,7 @@ percent-encoded.
 
 | Type | Versions | Plans: vCPUs, memory, volume | Pod | Outputs |
 |---|---|---|---|---|
-| `postgres` | 16, 17 | `dev` 1, 256 MiB, 1 GiB; `small` 1, 1 GiB, 10 GiB; `medium` 2, 4 GiB, 50 GiB; `large` 4, 16 GiB, 200 GiB | `postgres:<v>-alpine`, `docker-entrypoint.sh postgres -c shared_buffers=<memory/4>MB`, `PGDATA=/var/lib/postgresql/data/pgdata`, `POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256` (loopback asks for a password too), the volume at `/var/lib/postgresql/data`; probe `pg_isready -U postgres -h 127.0.0.1` | `host`, `port` (5432), `user`, `password`, `database`, `url` `postgres://<user>:<password>@[<address>]:5432/<database>?sslmode=disable`; fields `role` and `database` |
+| `postgres` | 16, 17 | `dev` 1, 256 MiB, 1 GiB; `small` 1, 1 GiB, 10 GiB; `medium` 2, 4 GiB, 50 GiB; `large` 4, 16 GiB, 200 GiB | `postgres:<v>-alpine`, `docker-entrypoint.sh postgres -c shared_buffers=<memory/4>MB`, `PGDATA=/var/lib/postgresql/data/pgdata`, `POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256`, `POSTGRES_PASSWORD` for initdb alone (provisioning removes it from the role), the volume at `/var/lib/postgresql/data`; probe `pg_isready` over the socket and `nc -z` on 5432 | `host`, `port` (5432), `user`, `database`, `url` `postgres://<role>@[<address>]:5432/<database>?sslmode=require`, no password (ADR 0038); field `role` required, `database` |
 | `valkey` | 7.2, 8 | `dev` 1, 128 MiB, 256 MiB; `small` 1, 512 MiB, 2 GiB; `medium` 1, 2 GiB, 8 GiB; `large` 2, 8 GiB, 32 GiB | `valkey/valkey:<v>-alpine` with its own command and `VALKEY_EXTRA_FLAGS` `--appendonly yes --requirepass <password> --maxmemory <70 % of memory>mb --maxmemory-policy <policy>`, the volume at `/data`; probe `valkey-cli ping` with `REDISCLI_AUTH` | `host`, `port` (6379), `user` (`default`), `password`, `url` `redis://default:<password>@[<address>]:6379/0` |
 | `nats` | 2 | `dev` 1, 128 MiB, 1 GiB; `small` 1, 512 MiB, 10 GiB | `nats:2-alpine`, `sh -c` writing a config that binds the monitor to loopback, then `nats-server -a :: -p 4222 --user nats --pass "$NATS_PASSWORD"`, with `-js -sd /data` and the volume at `/data` while option `jetstream` (default true) holds; probe `wget -qO- http://127.0.0.1:8222/healthz` | `host`, `port` (4222), `user` (`nats`), `password`, `url` `nats://nats:<password>@[<address>]:4222` |
 
@@ -3433,15 +3433,25 @@ percent-encoded.
   `current_user`, `current_role`, `session_user`, `information_schema` or
   `pg_*`, no database `template0`, `template1` or `postgres`; roles need a
   listed database. A major version change either way is an error.
-  Provisioning is one step, `sh -c` with a heredoc into `psql` (`\gexec`,
-  `ON_ERROR_STOP`), the superuser's password in `PGPASSWORD` and each
-  role's in `FERUN_ROLE_PASSWORD_<role>`: the databases and roles that are
-  missing are created, every role's password is set, and each role gets
-  CONNECT and CREATE on every listed database and a schema of its name,
-  its own, in each; such a schema that another role owns fails the step.
-  Nothing is dropped: a database or role no longer listed stays (a
-  warning). A role's output needs one of the listed databases;
-  `database: postgres` is the superuser's alone.
+  It takes no password from anyone (ADR 0038). Provisioning is two
+  steps, each `sh -c` with a heredoc into `psql` over the Unix socket
+  (peer-authenticated: root in the container is the superuser), with
+  `\gexec` and `ON_ERROR_STOP`. `provision`: the superuser's password
+  removed, the databases and roles that are missing created, every
+  role `PASSWORD NULL`, and each role gets CONNECT and CREATE on every
+  listed database and a schema of its name, its own, in each; such a
+  schema that another role owns fails the step. `tls`: the server's key
+  (the credential `tls.key`, Ed25519), its certificate for the addon's
+  workload ID (no DNS or IP name, 24 h, renewed at three quarters) and
+  the platform's roots and issuer under `/var/lib/postgresql/data/tls`;
+  TLS 1.3 on and a reload; then `pg_hba.conf` (`local all postgres peer
+  map=ferun`, `hostssl all all all cert clientname=DN map=feid`, nothing
+  else) and `pg_ident.conf` (per reference with a role, its workload's
+  `OU` anchored, `"/^CN=[^,]+,OU=<wl-…>$"  <role>`), checked by the
+  server's parser before a reload, and the end of every session over the
+  network without TLS. Nothing is dropped: a database or role no longer
+  listed stays (a warning). Every reference names a listed role, and a
+  role's output one of the listed databases.
 - **valkey**: option `maxmemoryPolicy`, `noeviction` by default, one of
   the eight policies. A downgrade is an error, an upgrade an info.
 - **nats**: JetStream turned off is a warning; its volume stays, unused.

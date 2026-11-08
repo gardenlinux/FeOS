@@ -149,7 +149,7 @@ func TestJobLogTailRedacted(t *testing.T) {
 			"DATABASE_URL":{"addon":"postgres","key":"url","role":"svc","database":"app"},"TOKEN":{"secret":"token"}}}}}`,
 		testImage))
 	id := runningJob(t, h, env.ID)
-	pw, err := h.c.ResolveSecret(bg, env.ID, "addon.postgres.role.svc.password", 1)
+	pw, err := h.c.ResolveSecret(bg, env.ID, "addon.postgres.password", 1)
 	if err != nil || pw == "" {
 		t.Fatalf("credential %q %v", pw, err)
 	}

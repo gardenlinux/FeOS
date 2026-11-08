@@ -129,6 +129,51 @@ type Context struct {
 	Env, Name string
 	// Address is the instance's IPv6 address ("" before it has one).
 	Address string
+	// TLS is the server certificate and the grants an addon of a
+	// CertificateServer is provisioned with (ADR 0038); nil before the
+	// controller has them, which renders no TLS step.
+	TLS *TLS
+}
+
+// TLSKey is the credential that holds the private key of an addon that
+// serves TLS (ADR 0038): Ed25519, PKCS#8 PEM, generated once by the
+// controller, never on the network.
+const TLSKey = "tls.key"
+
+// TLS is what an addon that admits workloads by their certificates is
+// provisioned with (ADR 0038).
+type TLS struct {
+	// CertPEM is its server certificate's chain (leaf, issuer), which the
+	// controller issues for the addon's ID; CAPEM is what it trusts of its
+	// clients (the platform's roots and the issuer).
+	CertPEM, CAPEM string
+	// Grants are the deployment's references to the addon's roles: one
+	// per workload and role, sorted by workload, then role.
+	Grants []Grant
+}
+
+// Grant is a workload's reference to a role of an addon: the role its
+// certificate may become (ADR 0038).
+type Grant struct {
+	// Workload is the workload's ID as its certificate's OU carries it
+	// (ADR 0036): wl-<32 hex> for a service or a job, wl-s-<id> for the
+	// sandbox an attached service runs in.
+	Workload string `json:"workload"`
+	// ID is the workload's SPIFFE ID, which the map names in a comment.
+	ID string `json:"id"`
+	// Role is the role the reference names.
+	Role string `json:"role"`
+}
+
+// CertificateServer is a blueprint whose addon terminates TLS with a
+// server certificate the controller issues, and admits a client by its
+// certificate, mapped to the role its references grant (ADR 0038). Its
+// Credentials include TLSKey.
+type CertificateServer interface {
+	Blueprint
+	// GrantedRole is the role a reference to the addon grants the
+	// workload that holds it ("": none).
+	GrantedRole(ref Ref) string
 }
 
 // Instance is an addon's pod as its blueprint renders it.

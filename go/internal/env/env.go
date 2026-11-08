@@ -65,6 +65,9 @@ type Deps struct {
 	Sealer     Sealer
 	// Blueprint looks up an addon type.
 	Blueprint func(typ string) (addons.Blueprint, bool)
+	// Issuer issues the server certificates of addons that admit
+	// workloads by their certificates (ADR 0038); nil: none.
+	Issuer ctl.AddonIssuer
 	// AppsZone is the DNS zone of public environments' default hosts
 	// (--apps-zone, ADR 0021); "": no hosts, and no environment can be
 	// made public.
@@ -147,7 +150,7 @@ func New(deps Deps) (*Service, error) {
 	c, err := ctl.New(ctl.Deps{
 		InstanceID: deps.InstanceID, DB: deps.DB, Store: st, Elector: deps.Elector, Conns: deps.Conns,
 		Engine: deps.Engine, Runner: deps.Runner, Ports: deps.Ports, Sealer: deps.Sealer,
-		Blueprint: deps.Blueprint, SinkURL: deps.SinkURL, SinkClient: deps.SinkClient, Log: deps.Log,
+		Blueprint: deps.Blueprint, Issuer: deps.Issuer, SinkURL: deps.SinkURL, SinkClient: deps.SinkClient, Log: deps.Log,
 	})
 	if err != nil {
 		return nil, err

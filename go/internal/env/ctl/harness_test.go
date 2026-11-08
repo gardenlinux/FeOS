@@ -195,7 +195,7 @@ func newHarness(t *testing.T, o options) *harness {
 		door = o.ports(h.door)
 	}
 	h.c, err = New(Deps{InstanceID: id, DB: d, Elector: h.el, Conns: h.srv, Engine: testEngine{h.eng}, Runner: h.runner,
-		Ports: door, Sealer: h.sealer, Log: log})
+		Ports: door, Sealer: h.sealer, Issuer: h.iss, Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}
