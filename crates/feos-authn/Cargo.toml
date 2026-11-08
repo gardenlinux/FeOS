@@ -44,6 +44,9 @@ base64 = "0.22"
 # The search for a binding's credential in what goes back to the pod; in
 # the tree already, through regex.
 memchr = "2"
+# A gzip answer unpacked so it can be searched; in the tree already,
+# through fleet-client.
+flate2 = "1"
 # rcgen's dates.
 time = "0.3"
 # The WebPKI's roots, built in: the jail has no system store.

@@ -979,9 +979,26 @@ async fn answers_never_carry_the_credential() {
     }
     assert_eq!(up1.last().version, http::Version::HTTP_11);
 
+    // gzip, sent although identity was asked for, is unpacked and
+    // searched: the pod gets it plain, without the key, also when it
+    // asked for gzip itself.
+    for ask in [None, Some("gzip, br")] {
+        let mut req = Request::get("/gzip").header("host", "erp");
+        if let Some(a) = ask {
+            req = req.header("accept-encoding", a);
+        }
+        let (parts, body) = answer(&mut s, req.body(Full::new(Bytes::new())).unwrap()).await;
+        assert_eq!(parts.status, StatusCode::OK);
+        assert!(!parts.headers.contains_key("content-encoding"));
+        assert!(!parts.headers.contains_key("content-length"));
+        assert_eq!(parts.headers["etag"], r#"W/"v1""#);
+        assert_eq!(std::str::from_utf8(&body).unwrap(), gzip_body(MASK));
+        assert_eq!(header(&up.last(), "accept-encoding"), vec!["identity"]);
+    }
+
     // An answer that cannot be searched is refused; one without a body is
     // not.
-    for path in ["/gzip", "/partial"] {
+    for path in ["/br", "/partial"] {
         let (parts, body) = answer(&mut s, get("erp", path)).await;
         assert_eq!(parts.status, StatusCode::BAD_GATEWAY, "{path}");
         assert_eq!(refusal_code(&parts.headers, &body), "unredactable");

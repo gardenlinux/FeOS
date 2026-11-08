@@ -154,10 +154,11 @@ ADR 0014's sealing, jail, audit file or start order changes.
   split across chunks is found and nothing is buffered whole. So that
   every body can be searched, such a request asks for its answer
   unencoded and whole (`Accept-Encoding: identity`, no `Range`, no
-  WebSocket extensions); an answer that comes encoded or partial anyway
-  is refused (502). Shorter values are left alone: they would mask
-  ordinary text. A value the upstream transforms (escapes, encodes
-  otherwise, splits itself) is not recognised.
+  WebSocket extensions). An answer that comes gzip anyway is unpacked
+  as it streams, a bounded step at a time, and passes unpacked; one in
+  another coding, or partial, is refused (502). Shorter values are left
+  alone: they would mask ordinary text. A value the upstream transforms
+  (escapes, encodes otherwise, splits itself) is not recognised.
 - `feos-authn`'s own refusals carry `FeOS-Binding-Error` and a small
   JSON body with the reason: 403 for a denied destination or path, 502
   for an unreachable upstream or a failed TLS check, 503 when the
@@ -342,8 +343,13 @@ Moving them to the node address and to names is an open question.
   intercept mode solves the problem at its root.
 - **Decompressing answers to redact them**, instead of asking for them
   unencoded: a decompressor for every coding, and its bombs, in the
-  jailed process, and the answer's length lost. Servers send identity
-  when asked for it.
+  jailed process, and the answer's length lost. Most servers send
+  identity when asked for it. Amended 2026-11-06: some do not (an ERP
+  vendor's API sandbox sends gzip whatever it is asked, which made every
+  answer of its binding a 502), so gzip that comes anyway is unpacked,
+  in steps of at most 32 KiB of output, so that a bomb holds no more
+  than that in the proxy; asking for identity stays the rule, and other
+  codings are still refused.
 - **A fixed marker in place of a value**, of its own length: every
   `Content-Length` and WebSocket frame around it would have to be
   rewritten too.
@@ -399,9 +405,8 @@ Moving them to the node address and to names is an open question.
 - The intercept mode on ports other than 443; HTTP/2 without TLS (h2c)
   in the name mode, for gRPC clients.
 - Java's keystore, and other runtimes with stores of their own.
-- Upstreams that encode answers whatever they are asked (objects stored
-  with `Content-Encoding: gzip`): decompressing gzip in `feos-authn`
-  after all, or a binding option that trusts such an upstream.
+- Upstreams that answer br or zstd whatever they are asked: unpacked
+  too, or a binding option that trusts such an upstream.
 - A bundle mounted over a system bundle's path cannot be replaced: a
   rename onto a mount fails (`EBUSY`), so `update-ca-certificates`, and
   a package manager that installs or updates `ca-certificates`, fails

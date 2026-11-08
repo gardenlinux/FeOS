@@ -241,9 +241,10 @@ upstream's host and port alone, whatever a URL names. Then:
 7. The answer loses its hop-by-hop headers and `Alt-Svc`. In the name
    mode a `Location` or `Content-Location` on the upstream's origin
    (absolute or scheme-relative) becomes `http://<name>…`. Then its
-   reason and header values are redacted, and an answer with a body that
-   cannot be searched is 502 `unredactable` (below). Bodies pass as they
-   stream, never buffered whole, redacted on their way.
+   reason and header values are redacted, a gzip answer is unpacked, and
+   an answer with a body that cannot be searched is 502 `unredactable`
+   (below). Bodies pass as they stream, never buffered whole, redacted on
+   their way.
 
 CONNECT is 405 `method_not_allowed`. A binding the set holds but that
 cannot be served (no credential, a header value that is no header, a CA
@@ -317,13 +318,19 @@ value to redact asks for it unencoded and whole: `Accept-Encoding:
 identity` (the pod's own wish for gzip is answered unencoded, as a
 server may), no `Range` or `If-Range` (so that a pod cannot put a value
 together from parts that each hold less of it), no WebSocket extensions
-(permessage-deflate). An answer with a body that comes with a content or
-transfer coding anyway, or a 206, is refused with 502 `unredactable`; one
-without a body (HEAD, 204, 304, an empty one) passes. An upstream's
-WebSocket frame with RSV bits (compressed) or a mask ends the tunnel
-(`http_end` error `unredactable`). Decompressing instead would put a
-decompressor for every coding, and its bombs, into the jailed process,
-and lose the answer's length; servers send identity when asked for it.
+(permessage-deflate). Some servers send gzip anyway (an ERP vendor's API
+sandbox does, whatever it is asked). Such an answer is unpacked as it
+streams and goes to the pod unpacked: without `Content-Encoding` and
+`Content-Length`, its `ETag` made weak (`W/"…"`). A chunk is unpacked a
+step at a time, each step at most 32 KiB of output, so that a gzip bomb
+holds no more than that in the proxy and comes out at the pod's pace; a
+gzip stream that is cut or broken ends the body with an error
+(`upstream_body`). An answer with a body that comes with another content
+or transfer coding (br, zstd, gzip after another one), or a 206, is
+refused with 502 `unredactable`; one without a body (HEAD, 204, 304, an
+empty one) passes as it came. An upstream's WebSocket frame with RSV
+bits (compressed) or a mask ends the tunnel (`http_end` error
+`unredactable`).
 
 The proxy's refusals are redacted too: their message may hold what a
 token endpoint said. So are the records and the log of a token fetch.
@@ -347,7 +354,7 @@ The proxy's own answers carry `FeOS-Binding-Error: <code>` and
 | 429 | `rate_limited` | the binding's rate limit, or its requests in flight |
 | 502 | `unreachable` | no address, none answered, or an upgrade that cannot be carried |
 | 502 | `tls` | the TLS handshake or the server's certificate failed |
-| 502 | `unredactable` | the answer has a body that cannot be searched for the credential: encoded, or a range |
+| 502 | `unredactable` | the answer has a body that cannot be searched for the credential: encoded otherwise than gzip, or a range |
 | 503 | `credential_unavailable` | no OAuth token can be had |
 | 503 | `not_ready` | the pod's bindings have not arrived |
 | 503 | `binding_invalid` | the binding cannot be served |

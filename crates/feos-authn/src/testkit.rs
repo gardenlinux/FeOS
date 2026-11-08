@@ -144,8 +144,10 @@ pub struct Seen {
 /// ([`echoed`]), `/fault` in a 500's JSON body cut in two chunks in the
 /// middle of the credential, a header and a trailer, `/echo-header` in a
 /// 401's `WWW-Authenticate`, another header and (HTTP/1.1) its reason;
-/// `/gzip` answers gzip whatever was asked, `/partial` 206; everything
-/// else 200 with "ok".
+/// `/gzip` answers whatever was asked a gzip body that repeats the
+/// credential ([`gzip_body`]), cut in small frames, with a length and an
+/// `ETag`; `/br` answers br, `/partial` 206; everything else 200 with
+/// "ok".
 pub struct Upstream {
     pub addr: SocketAddr,
     pub seen: Arc<Mutex<Vec<Seen>>>,
@@ -240,16 +242,40 @@ impl http_body::Body for Paced {
 }
 
 fn paced(frames: Vec<Frame<Bytes>>) -> TestBody {
+    paced_by(frames, Duration::from_millis(30))
+}
+
+/// Frames that come one at a time, each in a write of its own.
+fn paced_fast(frames: Vec<Frame<Bytes>>) -> TestBody {
+    paced_by(frames, Duration::from_millis(1))
+}
+
+fn paced_by(frames: Vec<Frame<Bytes>>, pause: Duration) -> TestBody {
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     tokio::spawn(async move {
         for f in frames {
             if tx.send(f).await.is_err() {
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(30)).await;
+            tokio::time::sleep(pause).await;
         }
     });
     Paced(rx).boxed()
+}
+
+/// What `/gzip` packs: a JSON body that repeats `credential` a few times.
+pub fn gzip_body(credential: &str) -> String {
+    let rows: Vec<String> = (0..20)
+        .map(|i| format!(r#"{{"PurchaseOrder":"45000001{i:02}","Note":"key {credential}"}}"#))
+        .collect();
+    format!(r#"{{"value":[{}]}}"#, rows.join(","))
+}
+
+fn gzip(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    e.write_all(data).unwrap();
+    e.finish().unwrap()
 }
 
 /// The credential a request carried, in every form an upstream may repeat
@@ -431,9 +457,22 @@ async fn upstream_handler(
                 .insert(hyper::ext::ReasonPhrase::try_from(format!("Refused {first}")).unwrap());
         }
         "/gzip" => {
+            let first = credential.first().cloned().unwrap_or_default();
+            let z = Bytes::from(gzip(gzip_body(&first).as_bytes()));
+            let h = resp.headers_mut();
+            h.insert(http::header::CONTENT_ENCODING, "gzip".parse().unwrap());
+            h.insert(http::header::CONTENT_LENGTH, z.len().into());
+            h.insert(http::header::ETAG, "\"v1\"".parse().unwrap());
+            let frames = (0..z.len())
+                .step_by(16)
+                .map(|i| Frame::data(z.slice(i..(i + 16).min(z.len()))))
+                .collect();
+            *resp.body_mut() = paced_fast(frames);
+        }
+        "/br" => {
             resp.headers_mut()
-                .insert(http::header::CONTENT_ENCODING, "gzip".parse().unwrap());
-            *resp.body_mut() = full(vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3]);
+                .insert(http::header::CONTENT_ENCODING, "br".parse().unwrap());
+            *resp.body_mut() = full(vec![0x0b, 0x01, 0x80, 0x6f, 0x6b, 0x03]);
         }
         "/partial" => {
             *resp.status_mut() = StatusCode::PARTIAL_CONTENT;

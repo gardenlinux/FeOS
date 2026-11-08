@@ -1279,6 +1279,7 @@ dependencies = [
  "clap",
  "env_logger",
  "feos-proto",
+ "flate2",
  "form_urlencoded",
  "http",
  "http-body",

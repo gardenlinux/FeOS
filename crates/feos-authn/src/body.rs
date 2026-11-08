@@ -6,7 +6,8 @@
 //! writes the `http_end` record when the body is done or dropped, and holds
 //! the binding's concurrency permit until then. An upstream's answer is
 //! redacted of the binding's credential as it streams ([`crate::redact`]):
-//! its data, which keeps its length, and its trailers.
+//! its data, which keeps its length, and its trailers. A gzip answer is
+//! unpacked first ([`crate::gunzip`]).
 
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,6 +21,7 @@ use hyper::body::Incoming;
 use tokio::sync::OwnedSemaphorePermit;
 
 use crate::audit::{self, Audit, ErrorRec, HttpEndRecord};
+use crate::gunzip::Gunzip;
 use crate::redact::Scanner;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -38,10 +40,11 @@ pub struct ProxyBody {
     redact: Option<Box<Redacting>>,
 }
 
-/// A body's redaction: its search, and trailers that wait for what the
-/// search held back.
+/// A body's redaction: its search, the unpacking of a gzip answer before
+/// it, and trailers that wait for what the search held back.
 struct Redacting {
     scanner: Scanner,
+    gunzip: Option<Gunzip>,
     trailers: Option<http::HeaderMap>,
     ended: bool,
 }
@@ -59,10 +62,27 @@ impl Redacting {
             if self.ended {
                 return Poll::Ready(None);
             }
+            // A chunk being unpacked goes on before the next is read.
+            if let Some(g) = self.gunzip.as_mut().filter(|g| g.busy()) {
+                let rest = match g.step() {
+                    Ok(b) => self.scanner.push(b),
+                    Err(e) => return Poll::Ready(Some(Err(gzip_error(e)))),
+                };
+                if !rest.is_empty() {
+                    return Poll::Ready(Some(Ok(Frame::data(rest))));
+                }
+                continue;
+            }
             let rest = match ready!(Pin::new(&mut *inner).poll_frame(cx)) {
                 Some(Err(e)) => return Poll::Ready(Some(Err(BoxError::from(e)))),
                 Some(Ok(frame)) => match frame.into_data() {
-                    Ok(data) => self.scanner.push(data),
+                    Ok(data) => match self.gunzip.as_mut() {
+                        Some(g) => {
+                            g.feed(data);
+                            continue;
+                        }
+                        None => self.scanner.push(data),
+                    },
                     Err(frame) => {
                         let Ok(mut t) = frame.into_trailers() else {
                             continue;
@@ -70,12 +90,18 @@ impl Redacting {
                         let n = self.scanner.redactor().redact_headers(&mut t);
                         self.scanner.count(n);
                         self.trailers = Some(t);
-                        self.scanner.finish()
+                        match self.end() {
+                            Ok(b) => b,
+                            Err(e) => return Poll::Ready(Some(Err(e))),
+                        }
                     }
                 },
                 None => {
                     self.ended = true;
-                    self.scanner.finish()
+                    match self.end() {
+                        Ok(b) => b,
+                        Err(e) => return Poll::Ready(Some(Err(e))),
+                    }
                 }
             };
             if !rest.is_empty() {
@@ -83,6 +109,26 @@ impl Redacting {
             }
         }
     }
+
+    /// The data's end: the rest of the unpacking, searched, and what the
+    /// search held back.
+    fn end(&mut self) -> Result<Bytes, BoxError> {
+        let Some(g) = self.gunzip.as_mut() else {
+            return Ok(self.scanner.finish());
+        };
+        let last = g.finish().map_err(gzip_error)?;
+        let a = self.scanner.push(last);
+        let b = self.scanner.finish();
+        Ok(match (a.is_empty(), b.is_empty()) {
+            (_, true) => a,
+            (true, false) => b,
+            (false, false) => [a, b].concat().into(),
+        })
+    }
+}
+
+fn gzip_error(e: std::io::Error) -> BoxError {
+    format!("the upstream's gzip answer cannot be unpacked: {e}").into()
 }
 
 impl ProxyBody {
@@ -111,10 +157,11 @@ impl ProxyBody {
     }
 
     /// A body passed on redacted by `scanner`, which counts what it
-    /// replaced.
-    pub fn redacted(mut self, scanner: Scanner) -> ProxyBody {
+    /// replaced; unpacked first if it is `gzip`.
+    pub fn redacted(mut self, scanner: Scanner, gzip: bool) -> ProxyBody {
         self.redact = Some(Box::new(Redacting {
             scanner,
+            gunzip: gzip.then(Gunzip::default),
             trailers: None,
             ended: false,
         }));
@@ -187,7 +234,9 @@ impl Body for ProxyBody {
             (Kind::Full(b), _) => b.is_none(),
             (Kind::Incoming(i), None) => i.is_end_stream(),
             (Kind::Incoming(i), Some(r)) => {
-                r.trailers.is_none() && (r.ended || (i.is_end_stream() && r.scanner.held() == 0))
+                r.trailers.is_none()
+                    && (r.ended
+                        || (i.is_end_stream() && r.scanner.held() == 0 && r.gunzip.is_none()))
             }
         }
     }
@@ -195,6 +244,10 @@ impl Body for ProxyBody {
     fn size_hint(&self) -> SizeHint {
         match &self.kind {
             Kind::Full(b) => SizeHint::with_exact(b.as_ref().map_or(0, |b| b.len() as u64)),
+            // Unpacked, its length is not known before its end.
+            Kind::Incoming(_) if self.redact.as_ref().is_some_and(|r| r.gunzip.is_some()) => {
+                SizeHint::new()
+            }
             Kind::Incoming(i) => {
                 let inner = i.size_hint();
                 // What the search holds back is still to come; the mask

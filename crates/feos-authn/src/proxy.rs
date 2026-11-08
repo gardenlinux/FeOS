@@ -29,8 +29,8 @@ use std::time::{Duration, Instant};
 
 use http::header::{
     HeaderName, HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, CACHE_CONTROL, CONNECTION,
-    CONTENT_ENCODING, CONTENT_LOCATION, CONTENT_TYPE, HOST, IF_RANGE, LOCATION, RANGE, RETRY_AFTER,
-    SEC_WEBSOCKET_EXTENSIONS, TRANSFER_ENCODING, UPGRADE,
+    CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_LOCATION, CONTENT_TYPE, ETAG, HOST, IF_RANGE,
+    LOCATION, RANGE, RETRY_AFTER, SEC_WEBSOCKET_EXTENSIONS, TRANSFER_ENCODING, UPGRADE,
 };
 use http::uri::{Authority, PathAndQuery, Scheme};
 use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
@@ -702,12 +702,14 @@ async fn forward(
     } else {
         None
     };
+    let mut gzip = false;
     if !redactor.is_empty() {
         let bodiless = parts.method == Method::HEAD
             || status.is_informational()
             || status == StatusCode::NO_CONTENT
             || status == StatusCode::NOT_MODIFIED
             || rbody.is_end_stream();
+        gzip = !bodiless && status != StatusCode::PARTIAL_CONTENT && unpacked(&mut rparts.headers);
         if let Some(why) = unredactable(&rparts.headers, status).filter(|_| !bodiless) {
             return Err(Refusal::new(StatusCode::BAD_GATEWAY, "unredactable", why));
         }
@@ -738,7 +740,7 @@ async fn forward(
     let counter = guard.bytes_out.clone();
     let mut body = ProxyBody::counted(rbody, counter);
     if let Some(s) = scanner {
-        body = body.redacted(s);
+        body = body.redacted(s, gzip);
     }
     Ok(Response::from_parts(rparts, body.with_guard(guard)))
 }
@@ -755,9 +757,41 @@ fn checkable(h: &mut HeaderMap) {
     h.remove(SEC_WEBSOCKET_EXTENSIONS);
 }
 
+/// Whether an answer comes gzip although its request asked for identity
+/// ([`checkable`]), as some servers do: then its head is the unpacked
+/// answer's (no `Content-Encoding`, no `Content-Length`, a weak `ETag`) and
+/// the body is unpacked as it streams ([`crate::gunzip`]). Any other
+/// coding, or gzip after another, stays as it is, for [`unredactable`].
+fn unpacked(h: &mut HeaderMap) -> bool {
+    let codings: Vec<String> = h
+        .get_all(CONTENT_ENCODING)
+        .iter()
+        .flat_map(|v| v.as_bytes().split(|b| *b == b','))
+        .map(|c| String::from_utf8_lossy(c.trim_ascii()).to_ascii_lowercase())
+        .filter(|c| !c.is_empty() && c != "identity")
+        .collect();
+    if !matches!(codings.as_slice(), [c] if c == "gzip" || c == "x-gzip") {
+        return false;
+    }
+    h.remove(CONTENT_ENCODING);
+    h.remove(CONTENT_LENGTH);
+    // The tag is the packed answer's; the unpacked one is the same
+    // resource, but not the same bytes.
+    if let Some(weak) = h
+        .get(ETAG)
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with('"'))
+        .and_then(|v| HeaderValue::try_from(format!("W/{v}")).ok())
+    {
+        h.insert(ETAG, weak);
+    }
+    true
+}
+
 /// Why an answer with a body cannot be searched for the credential,
-/// although its request asked for one that can ([`checkable`]): a content
-/// or transfer coding (gzip, br, …), or a range.
+/// although its request asked for one that can ([`checkable`]) and a gzip
+/// one is unpacked ([`unpacked`]): another content or transfer coding (br,
+/// zstd, …), or a range.
 pub fn unredactable(h: &HeaderMap, status: StatusCode) -> Option<String> {
     let codings = |name| {
         h.get_all(name)

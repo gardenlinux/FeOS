@@ -17,6 +17,7 @@ pub mod bindings;
 pub mod body;
 pub mod control;
 pub mod dest;
+pub mod gunzip;
 pub mod hpke;
 pub mod intercept;
 pub mod jail;
