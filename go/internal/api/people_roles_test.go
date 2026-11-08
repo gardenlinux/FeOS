@@ -36,7 +36,7 @@ var routeNeeds = map[string]string{
 	"DELETE /api/v1/sandboxes/{id}":                             "write sandbox's environment",
 	"POST /api/v1/sandboxes/{id}/pause":                         "write sandbox's environment",
 	"POST /api/v1/sandboxes/{id}/resume":                        "write sandbox's environment",
-	"PUT /api/v1/sandboxes/{id}/security-groups":                "write sandbox's environment",
+	"PUT /api/v1/sandboxes/{id}/reaches":                        "write sandbox's environment",
 	"PUT /api/v1/sandboxes/{id}/image-credentials":              "write sandbox's environment",
 	"DELETE /api/v1/sandboxes/{id}/image-credentials":           "write sandbox's environment",
 	"GET /api/v1/sandboxes/{id}/tokens":                         "read sandbox's environment",

@@ -180,6 +180,112 @@
       "ghcr.io/acme/approval:1.2": "ghcr.io/acme/approval@sha256:11cdf88d1c2c3802016199fb7e7e2a5377ed51b81855411f3f5840fe9d703e93",
       "ghcr.io/acme/expense:1.4": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a",
       "ghcr.io/acme/expensa-web:1.4": "ghcr.io/acme/expensa-web@sha256:de2feb13b0b780dd0dfd7aa32bcd02b306a4680f4958f896b3347f3ba3521a81"
+    },
+    "reachability": {
+      "edges": [
+        {
+          "from": "ingress",
+          "to": "service/approval-service",
+          "port": "http",
+          "number": 8080,
+          "via": "route api-approval"
+        },
+        {
+          "from": "ingress",
+          "to": "service/expense-service",
+          "port": "http",
+          "number": 8080,
+          "via": "route api-expense"
+        },
+        {
+          "from": "ingress",
+          "to": "service/web",
+          "port": "http",
+          "number": 8080,
+          "via": "route root"
+        },
+        {
+          "from": "job/migrate",
+          "to": "addon/postgres",
+          "port": "postgres",
+          "number": 5432,
+          "via": "env EXPENSA_DATABASE_URL"
+        },
+        {
+          "from": "service/approval-service",
+          "to": "addon/postgres",
+          "port": "postgres",
+          "number": 5432,
+          "via": "env APPROVAL_DATABASE_URL"
+        },
+        {
+          "from": "service/expense-service",
+          "to": "addon/nats",
+          "port": "nats",
+          "number": 4222,
+          "via": "env EXPENSA_NATS_URL"
+        },
+        {
+          "from": "service/expense-service",
+          "to": "addon/postgres",
+          "port": "postgres",
+          "number": 5432,
+          "via": "env EXPENSA_DATABASE_URL"
+        },
+        {
+          "from": "service/expense-service",
+          "to": "service/approval-service",
+          "port": "http",
+          "number": 8080,
+          "via": "env EXPENSA_APPROVAL_URL"
+        }
+      ],
+      "egress": [
+        {
+          "object": "service/approval-service",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        },
+        {
+          "object": "service/expense-service",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        },
+        {
+          "object": "service/web",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        },
+        {
+          "object": "job/migrate",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        }
+      ],
+      "routes": [
+        {
+          "route": "api-approval",
+          "service": "approval-service",
+          "port": "http",
+          "from": []
+        },
+        {
+          "route": "api-expense",
+          "service": "expense-service",
+          "port": "http",
+          "from": []
+        },
+        {
+          "route": "root",
+          "service": "web",
+          "port": "http",
+          "from": []
+        }
+      ]
     }
   }
 }

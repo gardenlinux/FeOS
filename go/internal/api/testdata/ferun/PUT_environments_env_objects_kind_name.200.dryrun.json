@@ -69,6 +69,11 @@
     "current": 7,
     "images": {
       "ghcr.io/acme/expense:1.4": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a"
+    },
+    "reachability": {
+      "edges": [],
+      "egress": [],
+      "routes": []
     }
   },
   "note": "dryRun: a plan's answer"

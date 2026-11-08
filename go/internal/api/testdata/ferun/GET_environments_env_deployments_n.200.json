@@ -260,7 +260,113 @@
         ],
         "effect": "restarts"
       }
-    ]
+    ],
+    "reachability": {
+      "edges": [
+        {
+          "from": "ingress",
+          "to": "service/approval-service",
+          "port": "http",
+          "number": 8080,
+          "via": "route api-approval"
+        },
+        {
+          "from": "ingress",
+          "to": "service/expense-service",
+          "port": "http",
+          "number": 8080,
+          "via": "route api-expense"
+        },
+        {
+          "from": "ingress",
+          "to": "service/web",
+          "port": "http",
+          "number": 8080,
+          "via": "route root"
+        },
+        {
+          "from": "job/migrate",
+          "to": "addon/postgres",
+          "port": "postgres",
+          "number": 5432,
+          "via": "env EXPENSA_DATABASE_URL"
+        },
+        {
+          "from": "service/approval-service",
+          "to": "addon/postgres",
+          "port": "postgres",
+          "number": 5432,
+          "via": "env APPROVAL_DATABASE_URL"
+        },
+        {
+          "from": "service/expense-service",
+          "to": "addon/nats",
+          "port": "nats",
+          "number": 4222,
+          "via": "env EXPENSA_NATS_URL"
+        },
+        {
+          "from": "service/expense-service",
+          "to": "addon/postgres",
+          "port": "postgres",
+          "number": 5432,
+          "via": "env EXPENSA_DATABASE_URL"
+        },
+        {
+          "from": "service/expense-service",
+          "to": "service/approval-service",
+          "port": "http",
+          "number": 8080,
+          "via": "env EXPENSA_APPROVAL_URL"
+        }
+      ],
+      "egress": [
+        {
+          "object": "service/approval-service",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        },
+        {
+          "object": "service/expense-service",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        },
+        {
+          "object": "service/web",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        },
+        {
+          "object": "job/migrate",
+          "mode": "internet",
+          "domains": [],
+          "blocks": []
+        }
+      ],
+      "routes": [
+        {
+          "route": "api-approval",
+          "service": "approval-service",
+          "port": "http",
+          "from": []
+        },
+        {
+          "route": "api-expense",
+          "service": "expense-service",
+          "port": "http",
+          "from": []
+        },
+        {
+          "route": "root",
+          "service": "web",
+          "port": "http",
+          "from": []
+        }
+      ]
+    }
   },
   "note": "the normalised spec, and the diff against deployment 6"
 }

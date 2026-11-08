@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -107,23 +108,17 @@ type sandboxAnswer struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"environment"`
-	SecurityGroups []string `json:"securityGroups"`
-	Attachable     *bool    `json:"attachable"`
+	Reaches     json.RawMessage `json:"reaches"`
+	Egress      json.RawMessage `json:"egress"`
+	Attachable  *bool           `json:"attachable"`
+	SecurityGrp *[]string       `json:"securityGroups"`
 }
 
-// deployGroups gives environment id a deployed deployment with the
-// groups names (ADR 0034).
-func (e *env) deployGroups(id uuid.UUID, names ...string) {
+// deploySpec gives environment id a deployed deployment of spec raw: what
+// a sandbox's reaches may name (ADR 0035, revised).
+func (e *env) deploySpec(id uuid.UUID, raw []byte) {
 	e.t.Helper()
 	ctx := context.Background()
-	groups := map[string]any{}
-	for _, n := range names {
-		groups[n] = map[string]any{}
-	}
-	raw, err := json.Marshal(map[string]any{"securityGroups": groups})
-	if err != nil {
-		e.t.Fatal(err)
-	}
 	var n int
 	if err := e.st.Q().QueryRow(ctx, "SELECT deployment + 1 FROM environments WHERE id = $1", id).Scan(&n); err != nil {
 		e.t.Fatal(err)
@@ -138,9 +133,10 @@ func (e *env) deployGroups(id uuid.UUID, names ...string) {
 }
 
 // A sandbox is made in an environment (ADR 0035), required, by name or
-// ID, in [default] unless the create names groups of its deployed
-// deployment; attachable is refused; the views name the environment and
-// the groups; the row has the template every sandbox's pod is made from
+// ID, reaching nothing of it unless the create names entries of its
+// deployed deployment (or "all"), its egress the internet unless it names
+// one; attachable and securityGroups are refused; the views name the
+// environment, the reaches and the egress; the row has the template every sandbox's pod is made from
 // and log labels of its environment; the list filters by environment.
 func TestSandboxEnvironment(t *testing.T) {
 	t.Parallel()
@@ -158,21 +154,23 @@ func TestSandboxEnvironment(t *testing.T) {
 		expect(t, create(map[string]any{"environment": "box", "attachable": v}), http.StatusBadRequest, gone)
 	}
 	expect(t, create(map[string]any{"environment": "nope"}), http.StatusNotFound, errBody("no such environment"))
-	expect(t, create(map[string]any{"environment": "box", "securityGroups": []string{}}), http.StatusBadRequest,
-		errBody("securityGroups is empty: name at least one group (leave it out for default)"))
-	expect(t, create(map[string]any{"environment": "box", "securityGroups": []string{"a", "b", "c", "d", "e", "f"}}),
-		http.StatusBadRequest, errBody("securityGroups names 6 groups; at most 5 are allowed"))
-	expect(t, create(map[string]any{"environment": "box", "securityGroups": []string{"web"}}),
+	expect(t, create(map[string]any{"environment": "box", "securityGroups": []string{"default"}}), http.StatusBadRequest,
+		errBody("securityGroups is gone (ADR 0034, revised); use reaches"))
+	expect(t, create(map[string]any{"environment": "box", "reaches": []any{map[string]any{"service": "web"}}}),
+		http.StatusBadRequest, errBody("reaches[0]: name the service's port"))
+	expect(t, create(map[string]any{"environment": "box", "egress": map[string]any{"domains": []string{"Bad Name"}}}),
+		http.StatusBadRequest, errBody(`egress.domains[0]: "Bad Name" is not a domain`))
+	expect(t, create(map[string]any{"environment": "box", "reaches": []any{map[string]any{"addon": "db"}}}),
 		http.StatusUnprocessableEntity,
-		errBody("securityGroups: the environment's deployed deployment has no group web; it has default"))
+		errBody(spec.UnknownReaches(spec.Reaches{Entries: []spec.Use{{Addon: "db"}}}, nil)))
 
 	w := create(map[string]any{"environment": "box"})
 	expect(t, w, http.StatusCreated, "")
 	a := decode[struct {
 		Status sandboxAnswer `json:"status"`
 	}](t, w).Status
-	if a.Environment.ID != e.box.String() || a.Environment.Name != "box" || !slices.Equal(a.SecurityGroups, []string{"default"}) ||
-		a.Attachable != nil {
+	if a.Environment.ID != e.box.String() || a.Environment.Name != "box" || string(a.Reaches) != `[]` ||
+		string(a.Egress) != `"internet"` || a.Attachable != nil || a.SecurityGrp != nil {
 		t.Fatalf("status %+v", a)
 	}
 	id := podid.ID(a.SandboxID)
@@ -183,26 +181,38 @@ func TestSandboxEnvironment(t *testing.T) {
 	tpl := row.PodTemplate
 	if row.EnvironmentID != e.box || !row.IsOwn() || tpl == nil || !slices.Equal(tpl.Command, []string{"sleep", "infinity"}) ||
 		row.LogLabels[model.LogEnvironment] != e.box.String() || row.LogLabels[model.LogKind] != model.LogKindSandbox ||
-		row.LogLabels[model.LogObject] != a.SandboxID || row.GroupsPending {
+		row.LogLabels[model.LogObject] != a.SandboxID ||
+		!slices.Equal(tpl.SecurityGroups, []string{model.EnvGroupID(e.box), model.SandboxWorkloadGroupID(a.SandboxID)}) ||
+		tpl.RestrictEgressNames {
 		t.Fatalf("row %+v template %+v", row, tpl)
 	}
 
-	// Another environment, by its ID, with groups of its deployed
-	// deployment, sorted.
+	// Another environment, by its ID, reaching what its deployed
+	// deployment has, with an egress of its own.
 	dev := e.mkEnv(testTenant, "dev")
-	e.deployGroups(dev, "web", "db")
-	w = create(map[string]any{"environment": dev.String(), "securityGroups": []string{"web", "db", "default"}})
+	e.deploySpec(dev, []byte(devSpec))
+	w = create(map[string]any{"environment": dev.String(),
+		"reaches": []any{map[string]any{"service": "web", "port": "http"}, map[string]any{"addon": "db"}},
+		"egress":  map[string]any{"domains": []string{"api.stripe.com"}}})
 	expect(t, w, http.StatusCreated, "")
 	b := decode[struct {
 		Status sandboxAnswer `json:"status"`
 	}](t, w).Status
-	if b.Environment.Name != "dev" || !slices.Equal(b.SecurityGroups, []string{"db", "default", "web"}) {
-		t.Fatalf("in dev %+v", b)
+	if b.Environment.Name != "dev" || string(b.Reaches) != `[{"service":"web","port":"http"},{"addon":"db"}]` ||
+		string(b.Egress) != `{"domains":["api.stripe.com"]}` {
+		t.Fatalf("in dev %+v (%s, %s)", b, b.Reaches, b.Egress)
 	}
 	get := decode[sandboxAnswer](t, e.do("GET", "/api/v1/sandboxes/"+b.SandboxID, tok, nil))
-	if get.Environment.ID != dev.String() || !slices.Equal(get.SecurityGroups, b.SecurityGroups) {
+	if get.Environment.ID != dev.String() || string(get.Reaches) != string(b.Reaches) {
 		t.Fatalf("get %+v", get)
 	}
+	if row, err := e.st.GetSandbox(context.Background(), podid.ID(b.SandboxID)); err != nil ||
+		!row.PodTemplate.RestrictEgressNames || !slices.Equal(row.PodTemplate.EgressDomains, []string{"api.stripe.com"}) {
+		t.Fatalf("dev's template %+v %v", row.PodTemplate, err)
+	}
+	expect(t, create(map[string]any{"environment": "dev", "reaches": []any{map[string]any{"service": "web", "port": 9}}}),
+		http.StatusUnprocessableEntity, errBody(spec.UnknownReaches(spec.Reaches{Entries: []spec.Use{{Service: "web",
+			Port: spec.PortRef{Number: 9}}}}, mustSpec(t, devSpec))))
 
 	list := func(q string) []sandboxAnswer {
 		t.Helper()
@@ -230,28 +240,30 @@ func TestSandboxEnvironment(t *testing.T) {
 	expect(t, create(map[string]any{"environment": "dev"}), http.StatusConflict, errBody("environment dev is being deleted"))
 }
 
-// PUT /api/v1/sandboxes/{id}/security-groups records the sandbox's new
-// groups, checked as a create's, and marks the sandbox (202): one with a
-// pod is moved, one without takes them at its next restore or create; the
-// same groups again are 200 and change nothing. A new sandbox's template
-// names its environment's group and table and its groups' rows.
-func TestSandboxSecurityGroups(t *testing.T) {
+// devSpec is a deployed deployment's spec a sandbox's reaches may name.
+const devSpec = `{"services": {"web": {"image": "img", "ports": [{"name": "http", "port": 8080}]}},
+	"addons": {"db": {"type": "postgres"}}}`
+
+// mustSpec reads a spec.
+func mustSpec(t *testing.T, raw string) *spec.Spec {
+	t.Helper()
+	var sp spec.Spec
+	if err := json.Unmarshal([]byte(raw), &sp); err != nil {
+		t.Fatal(err)
+	}
+	return &sp
+}
+
+// PUT /api/v1/sandboxes/{id}/reaches changes what the sandbox reaches in
+// place (ADR 0035, revised): 200 with the view, no move, whatever state
+// it is in; checked as a create's. The old route is gone.
+func TestSandboxReaches(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	tok := bearerOf(e.tenantToken)
-	e.deployGroups(e.box, "web", "db")
+	e.deploySpec(e.box, []byte(devSpec))
 	id, _ := e.createSandbox()
-	path := "/api/v1/sandboxes/" + id + "/security-groups"
-	if sb, err := e.st.GetSandbox(context.Background(), podid.ID(id)); err != nil {
-		t.Fatal(err)
-	} else if def, err := e.st.SecurityGroupID(context.Background(), sb.EnvironmentID, "default"); err != nil ||
-		!reflect.DeepEqual(sb.PodTemplate, model.SandboxTemplate(sb.EnvironmentID, []uuid.UUID{def})) || sb.GroupsPending {
-		t.Fatalf("a new sandbox's template %+v %v", sb.PodTemplate, err)
-	}
-	put := func(groups any) *httptest.ResponseRecorder {
-		t.Helper()
-		return e.do("PUT", path, tok, map[string]any{"securityGroups": groups})
-	}
+	path := "/api/v1/sandboxes/" + id + "/reaches"
 	row := func() store.Sandbox {
 		t.Helper()
 		sb, err := e.st.GetSandbox(context.Background(), podid.ID(id))
@@ -260,46 +272,47 @@ func TestSandboxSecurityGroups(t *testing.T) {
 		}
 		return sb
 	}
+	before := row()
+	if !reflect.DeepEqual(before.PodTemplate, model.SandboxTemplate(before.EnvironmentID, id, false, nil)) {
+		t.Fatalf("a new sandbox's template %+v", before.PodTemplate)
+	}
+	put := func(reaches any) *httptest.ResponseRecorder {
+		t.Helper()
+		return e.do("PUT", path, tok, map[string]any{"reaches": reaches})
+	}
 
-	// Never started: its create takes them.
-	w := put([]string{"web"})
-	expect(t, w, http.StatusAccepted, "")
-	if v := decode[sandboxAnswer](t, w); !slices.Equal(v.SecurityGroups, []string{"web"}) || v.Environment.Name != "box" {
+	w := put([]any{map[string]any{"addon": "db"}})
+	expect(t, w, http.StatusOK, "")
+	if v := decode[sandboxAnswer](t, w); string(v.Reaches) != `[{"addon":"db"}]` || v.Environment.Name != "box" {
 		t.Fatalf("view %+v", v)
 	}
-	if r := row(); !slices.Equal(r.SecurityGroups, []string{"web"}) || !r.GroupsPending {
-		t.Fatalf("pending row %+v", r)
-	}
-	// Running: the move is pending.
 	if _, err := e.st.Q().Exec(context.Background(), "UPDATE sandboxes SET client_state = 'running' WHERE id = $1", id); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, put([]string{"db", "web"}), http.StatusAccepted, "")
-	if r := row(); !slices.Equal(r.SecurityGroups, []string{"db", "web"}) || !r.GroupsPending {
+	w = put("all")
+	expect(t, w, http.StatusOK, "")
+	if v := decode[sandboxAnswer](t, w); string(v.Reaches) != `"all"` {
+		t.Fatalf("all %+v", v)
+	}
+	// In place: the row's state, template and gen stay.
+	if r := row(); !r.Reaches.All || r.ClientState != model.StateRunning || r.Gen != before.Gen ||
+		!reflect.DeepEqual(r.PodTemplate, before.PodTemplate) {
 		t.Fatalf("running row %+v", r)
 	}
-	// The same list in another order: nothing to do.
-	if _, err := e.st.Q().Exec(context.Background(), "UPDATE sandboxes SET groups_pending = false WHERE id = $1", id); err != nil {
-		t.Fatal(err)
-	}
-	expect(t, put([]string{"web", "db"}), http.StatusOK, "")
-	if r := row(); r.GroupsPending {
-		t.Fatalf("unchanged row %+v", r)
-	}
-	// Hibernated: its restore takes them.
-	if _, err := e.st.Q().Exec(context.Background(), "UPDATE sandboxes SET client_state = 'hibernated' WHERE id = $1", id); err != nil {
-		t.Fatal(err)
-	}
-	expect(t, put([]string{"default"}), http.StatusAccepted, "")
-	if r := row(); !slices.Equal(r.SecurityGroups, []string{"default"}) || !r.GroupsPending {
-		t.Fatalf("hibernated row %+v", r)
+	expect(t, put([]any{}), http.StatusOK, "")
+	if r := row(); r.Reaches.All || len(r.Reaches.Entries) != 0 {
+		t.Fatalf("nothing %+v", r.Reaches)
 	}
 
-	expect(t, put([]string{}), http.StatusBadRequest, errBody("securityGroups is empty: name at least one group (leave it out for default)"))
-	expect(t, e.do("PUT", path, tok, map[string]any{}), http.StatusBadRequest, errBody("securityGroups is required"))
-	expect(t, put([]string{"cache"}), http.StatusUnprocessableEntity,
-		errBody("securityGroups: the environment's deployed deployment has no group cache; it has db, default, web"))
-	expect(t, e.do("PUT", "/api/v1/sandboxes/"+podid.Mint().String()+"/security-groups", tok,
+	expect(t, e.do("PUT", path, tok, map[string]any{}), http.StatusBadRequest,
+		errBody(`reaches is required: "all" or a list of {"service": name, "port": port} and {"addon": name}`))
+	expect(t, put("some"), http.StatusBadRequest, "")
+	expect(t, put([]any{map[string]any{"service": "web", "port": "grpc"}}), http.StatusUnprocessableEntity,
+		errBody(spec.UnknownReaches(spec.Reaches{Entries: []spec.Use{{Service: "web", Port: spec.PortRef{Name: "grpc"}}}},
+			mustSpec(t, devSpec))))
+	expect(t, e.do("PUT", "/api/v1/sandboxes/"+podid.Mint().String()+"/reaches", tok,
+		map[string]any{"reaches": "all"}), http.StatusNotFound, "")
+	expect(t, e.do("PUT", "/api/v1/sandboxes/"+id+"/security-groups", tok,
 		map[string]any{"securityGroups": []string{"web"}}), http.StatusNotFound, "")
 }
 

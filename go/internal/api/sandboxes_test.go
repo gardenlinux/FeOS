@@ -23,10 +23,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// statusFields are the 17 fields of a sandbox's status, in order.
+// statusFields are the 18 fields of a sandbox's status, in order.
 var statusFields = []string{"sandboxId", "state", "image", "node", "owner", "createdAt", "updatedAt", "desiredState",
 	"clientState", "statusDescription", "checkpointEpoch", "checkpointHead", "checkpointAt", "vcpus", "memoryMib",
-	"environment", "securityGroups"}
+	"environment", "reaches", "egress"}
 
 // keysInOrder returns the keys of a JSON object in their order.
 func keysInOrder(t *testing.T, raw []byte) []string {

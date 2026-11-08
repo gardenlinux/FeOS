@@ -649,8 +649,10 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 		"env": map[string]any{"T": map[string]any{"secret": "token"}}, "ports": []any{map[string]any{"name": "http", "port": 8080}}}},
 		"routes": map[string]any{"api": map[string]any{"path": "/api", "service": "api", "port": "http", "strip": true}}}
 	w = do("POST", "/api/v1/environments/stage/plan", map[string]any{"spec": spec})
-	// Three objects and the group default (ADR 0034).
-	if p := decode[envs.PlanAnswer](t, w); w.Code != 200 || !p.Valid || len(p.Diff) != 4 {
+	// Three objects, and what the spec admits: the ingress to api's port
+	// (ADR 0034, revised).
+	if p := decode[envs.PlanAnswer](t, w); w.Code != 200 || !p.Valid || len(p.Diff) != 3 ||
+		len(p.Reachability.Edges) != 1 || p.Reachability.Edges[0].From != "ingress" {
 		t.Fatalf("plan %d %s", w.Code, w.Body)
 	}
 	w = do("POST", "/api/v1/environments/"+st.ID+"/deployments", map[string]any{"spec": spec, "base": 0})
@@ -676,7 +678,8 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 		t.Fatalf("status %d %s", w.Code, w.Body)
 	}
 	w = do("GET", "/api/v1/environments/stage/deployments/1", nil)
-	if d := decode[envs.DeploymentDetail](t, w); w.Code != 200 || len(d.Spec) == 0 || len(d.Diff) != 4 {
+	if d := decode[envs.DeploymentDetail](t, w); w.Code != 200 || len(d.Spec) == 0 || len(d.Diff) != 3 ||
+		len(d.Reachability.Edges) != 1 {
 		t.Fatalf("deployment %d %s", w.Code, w.Body)
 	}
 	expect(t, do("GET", "/api/v1/environments/stage/deployments/9", nil), http.StatusNotFound, errBody("no such deployment"))

@@ -32,6 +32,11 @@
     ],
     "base": 7,
     "current": 7,
-    "images": {}
+    "images": {},
+    "reachability": {
+      "edges": [],
+      "egress": [],
+      "routes": []
+    }
   }
 }
