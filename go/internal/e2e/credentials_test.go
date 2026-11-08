@@ -60,8 +60,14 @@ func TestCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if uris := creds.Leaf.URIs; len(uris) != 1 || uris[0].String() != pki.SandboxID(trustDomain, tenant, sb.id) {
-		t.Errorf("the pod's identity %v", uris)
+	row := c.row(sb.id)
+	kind, name, set := row.Workload()
+	wantID, wantSubject := pki.PodIdentity(trustDomain, tenant, row.EnvironmentID, sb.id, kind, name, set)
+	if uris := creds.Leaf.URIs; len(uris) != 1 || uris[0].String() != wantID || kind != pki.WorkloadSandbox {
+		t.Errorf("the pod's identity %v, want %s (%s)", uris, wantID, kind)
+	}
+	if got := creds.Leaf.Subject.String(); got != wantSubject.String() || got != "CN="+trustDomain+"/"+sb.id.String()+",OU=wl-s-"+sb.id.String() {
+		t.Errorf("the pod's subject %q", got)
 	}
 	kube := creds.Bindings.GetKube()
 	if len(kube) != 1 || kube[0].GetName() != "prod" || kube[0].GetPort() != 6443 || kube[0].GetToken() != "e2e-kube-token" {

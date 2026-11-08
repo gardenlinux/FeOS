@@ -313,6 +313,43 @@ func TestBuildPodSpec(t *testing.T) {
 	}
 }
 
+// Every pod's spec names the SPIFFE ID its credentials certify, its
+// workload's (ADR 0014, 0036); a ferund without a trust domain names none.
+func TestPodSpecNamesTheIdentity(t *testing.T) {
+	env := uuid.MustParse("3f2c0000-0000-4000-8000-000000000001")
+	id := podid.Mint()
+	sb := store.Sandbox{ID: id, Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+		MemoryMiB: 256, EnvironmentID: env}
+	off := &Engine{cfg: Config{}}
+	spec, err := off.podSpec(bg, sb)
+	if err != nil || spec.GetIdentity() != "" {
+		t.Fatalf("without a trust domain: %q %v", spec.GetIdentity(), err)
+	}
+	on := &Engine{cfg: Config{TrustDomain: "run.example"}}
+	envPath := "spiffe://run.example/tenant/" + testTenant + "/env/" + env.String()
+	for _, c := range []struct {
+		name string
+		row  store.Sandbox
+		want string
+	}{
+		{"a sandbox", sb, envPath + "/sandbox/" + id.String()},
+		{"a tenant's job", func() store.Sandbox { r := sb; r.TenantJob = true; return r }(), envPath + "/tenant-job/" + id.String()},
+		{"a service's instance", func() store.Sandbox {
+			r := sb
+			r.Instance = true
+			r.LogLabels = map[string]string{model.LogKind: "service", model.LogObject: "api"}
+			return r
+		}(), envPath + "/service/api"},
+		{"outside an environment", func() store.Sandbox { r := sb; r.EnvironmentID = uuid.Nil; return r }(),
+			"spiffe://run.example/tenant/" + testTenant + "/sandbox/" + id.String()},
+	} {
+		spec, err = on.podSpec(bg, c.row)
+		if err != nil || spec.GetIdentity() != c.want {
+			t.Errorf("%s: identity %q, want %q: %v", c.name, spec.GetIdentity(), c.want, err)
+		}
+	}
+}
+
 // A restore sends the row's template's security groups and name tables,
 // which replace the checkpointed spec's (ADR 0035), beside its checkpoint
 // and log labels; a row without a template sends neither.

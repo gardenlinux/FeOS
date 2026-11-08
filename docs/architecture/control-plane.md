@@ -575,9 +575,14 @@ secrets.
   ignored. Nodes: client auth, `spiffe://<td>/node/<name>`, Ed25519 or
   ECDSA P-256, `--node-cert-ttl`. Instances of `ferun-ingress`: client
   auth, `spiffe://<td>/ingress/<name>`, the name as CN, Ed25519 or ECDSA
-  P-256, `--node-cert-ttl`. Pods: client and server auth, the sandbox's
-  SPIFFE ID `spiffe://<td>/tenant/<tenant>/sandbox/<id>`, Ed25519,
-  `--pod-cert-ttl`. Each says when its holder renews it
+  P-256, `--node-cert-ttl`. Pods: client and server auth, their
+  workload's SPIFFE ID (ADR 0036)
+  `spiffe://<td>/tenant/<tenant>/env/<environment ID>/<kind>/<name>`
+  (`service`, `job` or `addon` with the object's name, `sandbox` or
+  `tenant-job` with the pod's ID; a row outside an environment
+  `spiffe://<td>/tenant/<tenant>/sandbox/<id>`), the subject
+  `CN=<td>/<pod ID>,OU=<workload's set ID>` (`wl-…`, as the nodes' sets),
+  Ed25519, `--pod-cert-ttl`. Each says when its holder renews it
   (`renew_after`): a node's and an ingress instance's at half its
   lifetime, so that one switched off at any time keeps at least half of
   it; a pod's at three quarters.

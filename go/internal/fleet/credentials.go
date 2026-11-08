@@ -103,8 +103,9 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 		if n >= credentialsPerWindow {
 			return status.Errorf(codes.ResourceExhausted, "too many credential requests for pod %s", podID)
 		}
-		spiffeID := pki.SandboxID(s.iss.TrustDomain(), sb.Owner, sb.ID)
-		c, leaf, err := s.iss.IssuePod(req.GetCsr(), spiffeID, nil, s.cfg.PodCertTTL)
+		kind, name, set := sb.Workload()
+		spiffeID, subject := pki.PodIdentity(s.iss.TrustDomain(), sb.Owner, sb.EnvironmentID, sb.ID, kind, name, set)
+		c, leaf, err := s.iss.IssuePod(req.GetCsr(), spiffeID, subject, nil, s.cfg.PodCertTTL)
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "issue the pod's certificate: %v", err)
 		}

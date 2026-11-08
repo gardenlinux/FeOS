@@ -12,6 +12,7 @@ import (
 
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -31,7 +32,18 @@ var errNoResolver = errors.New("no secret resolver: the environments are not set
 // create idempotent. A secret that does not resolve fails it: the create
 // sends nothing then.
 func (e *Engine) podSpec(ctx context.Context, sb store.Sandbox) (*podv1.PodSpec, error) {
-	return buildPodSpec(ctx, sb, e.secretResolver(), e.cfg.RegistryEgress)
+	spec, err := buildPodSpec(ctx, sb, e.secretResolver(), e.cfg.RegistryEgress)
+	if err != nil {
+		return nil, err
+	}
+	// Every pod has an identity: the ID IssuePodCredentials certifies
+	// (ADR 0014, 0036), its workload's. With it the node runs the pod's
+	// feos-authn, which serves FeID's signer.
+	if e.cfg.TrustDomain != "" {
+		kind, name, _ := sb.Workload()
+		spec.Identity, _ = pki.PodIdentity(e.cfg.TrustDomain, sb.Owner, sb.EnvironmentID, sb.ID, kind, name, "")
+	}
+	return spec, nil
 }
 
 // buildPodSpec is podSpec with the resolver given.

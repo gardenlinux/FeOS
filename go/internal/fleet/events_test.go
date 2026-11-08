@@ -295,7 +295,7 @@ func TestPublishEventsContent(t *testing.T) {
 	if r.detail != `{"raw": "[1,2]"}` {
 		t.Fatalf("a detail that is no object: %s", r.detail)
 	}
-	r = check(6, "authn", "tls_signature", "credential", "tls_signature")
+	r = check(6, "authn", "tls_signature", "credential", "tls signature")
 	if r.detail != `{"raw": "{\"a\":\"b\\u0000c\"}"}` {
 		t.Fatalf("a detail with \\u0000: %s", r.detail)
 	}
@@ -663,5 +663,22 @@ func TestPublishEventsEgress(t *testing.T) {
 	}
 	if n := h.count("SELECT (SELECT count(*) FROM http_egress) + (SELECT count(*) FROM http_egress_records)"); n != 0 {
 		t.Fatalf("%d rows after the sweep", n)
+	}
+}
+
+// FeID's signer's records (ADR 0014) are named by what they say.
+func TestAuditNameOfTheSigner(t *testing.T) {
+	for _, c := range []struct{ kind, detail, want string }{
+		{"tls_signature", `{"identity":"spiffe://t/x","role":"client","conn":1,"error":null}`, "tls signature client"},
+		{"tls_signature", `{"role":null,"error":{"code":"refused.not_certificate_verify","message":"no"}}`,
+			"tls signature refused: refused.not_certificate_verify"},
+		{"handshake_report", `{"conn":2,"report":{"direction":"outbound","peer_spiffe":"spiffe://t/db"}}`,
+			"tls handshake outbound spiffe://t/db"},
+		{"handshake_report", `{"conn":2}`, "tls handshake"},
+	} {
+		_, fields := auditDetail(c.detail)
+		if got := auditName(c.kind, fields); got != c.want {
+			t.Errorf("%s %s: %q, want %q", c.kind, c.detail, got, c.want)
+		}
 	}
 }

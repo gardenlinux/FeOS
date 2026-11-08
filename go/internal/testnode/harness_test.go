@@ -375,7 +375,7 @@ func (u *uplinkStub) IssuePodCredentials(ctx context.Context, req *fleetv1.Issue
 	if err := gate(ctx, f, &f.credsGate, &f.credsEntered); err != nil {
 		return nil, err
 	}
-	cert, _, err := f.iss.IssuePod(req.Csr, pki.SandboxID(testTD, "t1", pod), nil, time.Hour)
+	cert, _, err := f.iss.IssuePod(req.Csr, pki.SandboxID(testTD, "t1", pod), pki.PodSubject(testTD, pod.String(), ""), nil, time.Hour)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}

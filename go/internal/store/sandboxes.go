@@ -115,6 +115,35 @@ type Sandbox struct {
 // job's pod, which the sandbox doors treat as absent.
 func (s *Sandbox) IsOwn() bool { return !s.Instance && !s.TenantJob }
 
+// Workload is the workload the row's pod is part of (ADR 0036): an
+// instance's object, by the kind and the object its log labels name
+// (fixed at the insert), with the ID its pods' set carries on the nodes
+// (model.WorkloadGroupID, ADR 0034); a tenant's job or a sandbox by the
+// row's ID. kind is "" for a row outside an environment, or an instance
+// whose labels name no object.
+func (s *Sandbox) Workload() (kind, name, set string) {
+	if s.EnvironmentID == uuid.Nil {
+		return "", "", ""
+	}
+	switch {
+	case s.Instance:
+		kind, name = s.LogLabels[model.LogKind], s.LogLabels[model.LogObject]
+		switch kind {
+		case spec.KindService, spec.KindJob, spec.KindAddon:
+		default:
+			return "", "", ""
+		}
+		if name == "" {
+			return "", "", ""
+		}
+		return kind, name, model.WorkloadGroupID(s.EnvironmentID, kind, name)
+	case s.TenantJob:
+		return "tenant-job", s.ID.String(), model.JobWorkloadGroupID(s.ID.String())
+	default:
+		return "sandbox", s.ID.String(), model.SandboxWorkloadGroupID(s.ID.String())
+	}
+}
+
 // The policies that back off after a failed op (Sandbox.PolicyFailed).
 const (
 	PolicyIdle           = "idle"

@@ -904,7 +904,7 @@ func TestNodeAndIngressIdentities(t *testing.T) {
 	if _, err := ParseIngressID("other.test", ing); err == nil {
 		t.Error("ParseIngressID accepted another trust domain")
 	}
-	_, pod, err := iss.IssuePod(csr, SandboxID(testTD, "acme", podid.Mint()), nil, time.Hour)
+	_, pod, err := iss.IssuePod(csr, SandboxID(testTD, "acme", podid.Mint()), PodSubject(testTD, "pod", ""), nil, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -963,13 +963,17 @@ func checkBackdated(t *testing.T, leaf *x509.Certificate, before time.Time, ttl 
 
 func TestIssuePod(t *testing.T) {
 	iss, _ := newCA(t)
-	id := SandboxID(testTD, "acme", podid.ID("3f2c0000-0000-4000-8000-000000000001"))
-	if id != "spiffe://"+testTD+"/tenant/acme/sandbox/3f2c0000-0000-4000-8000-000000000001" {
-		t.Errorf("SandboxID = %s", id)
+	envID := uuid.MustParse("3f2c0000-0000-4000-8000-000000000001")
+	id := WorkloadID(testTD, "acme", envID, "service", "api")
+	if id != "spiffe://"+testTD+"/tenant/acme/env/3f2c0000-0000-4000-8000-000000000001/service/api" {
+		t.Errorf("WorkloadID = %s", id)
 	}
+	pod := podid.ID("xmxfgckmkt6")
+	workload := "wl-0123456789abcdef0123456789abcdef"
+	subject := PodSubject(testTD, pod.String(), workload)
 	csr, _ := ed25519CSR(t, &x509.CertificateRequest{DNSNames: []string{"ferun." + testDomain}})
 	before := time.Now()
-	pc, leaf, err := iss.IssuePod(csr, id, []string{"svc.acme." + testDomain}, time.Hour)
+	pc, leaf, err := iss.IssuePod(csr, id, subject, []string{"svc.acme." + testDomain}, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -982,14 +986,20 @@ func TestIssuePod(t *testing.T) {
 	if len(leaf.ExtKeyUsage) != 2 {
 		t.Errorf("EKU %v", leaf.ExtKeyUsage)
 	}
-	// 66 bytes: truncated to 47, "-" and 16 hex digits of the ID's hash.
-	sum := sha256.Sum256([]byte(id))
-	if want := (testTD + "/tenant/acme/sandbox/3f2c0000-0000-4000-8000-000000000001")[:47] + "-" + hex.EncodeToString(sum[:8]); leaf.Subject.CommonName != want {
-		t.Errorf("CN %q, want %q", leaf.Subject.CommonName, want)
+	// The subject as PostgreSQL prints it (XN_FLAG_RFC2253, ADR 0038's
+	// map): the CN first, then the OU, and nothing else. Go's String
+	// follows RFC 2253's order, the last RDN first; the RDNs as encoded
+	// are the OU and then the CN.
+	if got, want := leaf.Subject.String(), "CN="+testTD+"/xmxfgckmkt6,OU="+workload; got != want {
+		t.Errorf("subject %q, want %q", got, want)
 	}
-	short := SandboxID(testTD, "a", podid.ID("3f2c0000-0000-4000-8000-000000000001"))
-	if cn := podCommonName(short); cn != testTD+"/tenant/a/sandbox/3f2c0000-0000-4000-8000-000000000001" {
-		t.Errorf("short CN %q", cn)
+	var rdns pkix.RDNSequence
+	if _, err := asn1.Unmarshal(leaf.RawSubject, &rdns); err != nil {
+		t.Fatal(err)
+	}
+	if len(rdns) != 2 || len(rdns[0]) != 1 || len(rdns[1]) != 1 ||
+		!rdns[0][0].Type.Equal(asn1.ObjectIdentifier{2, 5, 4, 11}) || !rdns[1][0].Type.Equal(asn1.ObjectIdentifier{2, 5, 4, 3}) {
+		t.Errorf("RDNs %v, want the OU and then the CN", rdns)
 	}
 	checkBackdated(t, leaf, before, time.Hour)
 	if life := leaf.NotAfter.Sub(leaf.NotBefore); !pc.RenewAfter.AsTime().Equal(leaf.NotBefore.Add(life / 4 * 3)) {
@@ -1006,51 +1016,48 @@ func TestIssuePod(t *testing.T) {
 	}
 
 	refused := []struct {
-		name  string
-		id    string
-		names []string
+		name    string
+		id      string
+		subject pkix.Name
+		names   []string
 	}{
-		{"control-plane ID", ControlPlaneID(testTD), nil},
-		{"under the control-plane ID", ControlPlaneID(testTD) + "/x", nil},
-		{"node ID", NodeID(testTD, "node-1"), nil},
-		{"ingress ID", IngressID(testTD, "x"), nil},
-		{"under an ingress ID", IngressID(testTD, "x") + "/y", nil},
-		{"ingress namespace", "spiffe://" + testTD + "/ingress", nil},
-		{"sink ID", SinkID(testTD, "x"), nil},
-		{"sink namespace", "spiffe://" + testTD + "/sink", nil},
-		{"other trust domain", "spiffe://other.test/tenant/a/sandbox/b", nil},
-		{"no path", "spiffe://" + testTD, nil},
-		{"dot segment", "spiffe://" + testTD + "/a/../ferun", nil},
-		{"query", "spiffe://" + testTD + "/a?b", nil},
-		{"not spiffe", "https://" + testTD + "/a", nil},
-		{"control-plane domain", id, []string{"ferun." + testDomain}},
-		{"under the control-plane domain", id, []string{"x.ferun." + testDomain}},
-		{"wildcard", id, []string{"*." + testDomain}},
-		{"wildcard elsewhere", id, []string{"*.acme." + testDomain}},
-		{"IP", id, []string{"10.0.0.1"}},
-		{"outside the platform", id, []string{"svc.example.com"}},
+		{"control-plane ID", ControlPlaneID(testTD), subject, nil},
+		{"under the control-plane ID", ControlPlaneID(testTD) + "/x", subject, nil},
+		{"node ID", NodeID(testTD, "node-1"), subject, nil},
+		{"ingress ID", IngressID(testTD, "x"), subject, nil},
+		{"under an ingress ID", IngressID(testTD, "x") + "/y", subject, nil},
+		{"ingress namespace", "spiffe://" + testTD + "/ingress", subject, nil},
+		{"sink ID", SinkID(testTD, "x"), subject, nil},
+		{"sink namespace", "spiffe://" + testTD + "/sink", subject, nil},
+		{"other trust domain", "spiffe://other.test/tenant/a/sandbox/b", subject, nil},
+		{"no path", "spiffe://" + testTD, subject, nil},
+		{"dot segment", "spiffe://" + testTD + "/a/../ferun", subject, nil},
+		{"query", "spiffe://" + testTD + "/a?b", subject, nil},
+		{"not spiffe", "https://" + testTD + "/a", subject, nil},
+		{"control-plane domain", id, subject, []string{"ferun." + testDomain}},
+		{"under the control-plane domain", id, subject, []string{"x.ferun." + testDomain}},
+		{"wildcard", id, subject, []string{"*." + testDomain}},
+		{"wildcard elsewhere", id, subject, []string{"*.acme." + testDomain}},
+		{"IP", id, subject, []string{"10.0.0.1"}},
+		{"outside the platform", id, subject, []string{"svc.example.com"}},
+		{"no CN", id, pkix.Name{OrganizationalUnit: []string{workload}}, nil},
+		{"CN over 64 bytes", id, PodSubject(strings.Repeat("d", 53), pod.String(), workload), nil},
+		{"comma in the OU", id, PodSubject(testTD, pod.String(), "wl-a,OU=other"), nil},
+		{"two OUs", id, pkix.Name{CommonName: subject.CommonName, OrganizationalUnit: []string{workload, "wl-x"}}, nil},
 	}
 	for _, c := range refused {
-		if _, _, err := iss.IssuePod(csr, c.id, c.names, time.Hour); err == nil {
+		if _, _, err := iss.IssuePod(csr, c.id, c.subject, c.names, time.Hour); err == nil {
 			t.Errorf("%s: issued", c.name)
 		}
 	}
 	// Pods get Ed25519 keys only.
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if _, _, err := iss.IssuePod(csrFor(t, p256), id, nil, time.Hour); err == nil {
+	if _, _, err := iss.IssuePod(csrFor(t, p256), id, subject, nil, time.Hour); err == nil {
 		t.Error("ECDSA pod key accepted")
 	}
-
-	long := SandboxID(testTD, strings.Repeat("t", 60), podid.ID(uuid.NewString()))
-	_, leaf, err = iss.IssuePod(csr, long, nil, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cn := leaf.Subject.CommonName; len(cn) != 64 || !strings.HasPrefix(cn, testTD+"/tenant/") {
-		t.Errorf("long CN %q (%d)", cn, len(cn))
-	}
-	if podCommonName(long) == podCommonName(long+"x") {
-		t.Error("truncated CNs collide")
+	// A trust domain of 52 bytes still fits RFC 5280's 64 with a pod ID.
+	if err := validatePodSubject(PodSubject(strings.Repeat("d", 52), pod.String(), workload)); err != nil {
+		t.Errorf("52-byte trust domain: %v", err)
 	}
 }
 
@@ -1091,7 +1098,7 @@ func TestIssueServer(t *testing.T) {
 	// Only IssueServer writes the control plane's URI.
 	csr, _ := ed25519CSR(t, nil)
 	_, n, _ := iss.IssueNode(csr, "ferun", time.Hour)
-	_, p, _ := iss.IssuePod(csr, SandboxID(testTD, "ferun", podid.Mint()), nil, time.Hour)
+	_, p, _ := iss.IssuePod(csr, SandboxID(testTD, "ferun", podid.Mint()), PodSubject(testTD, "pod", ""), nil, time.Hour)
 	for _, c := range []*x509.Certificate{n, p} {
 		for _, u := range c.URIs {
 			if u.String() == ControlPlaneID(testTD) {
@@ -1180,7 +1187,7 @@ func TestVerifyServer(t *testing.T) {
 	// control plane.
 	csr, _ := ed25519CSR(t, nil)
 	podName := "svc." + testDomain
-	_, podLeaf, err := iss.IssuePod(csr, SandboxID(testTD, "acme", podid.Mint()), []string{podName}, time.Hour)
+	_, podLeaf, err := iss.IssuePod(csr, SandboxID(testTD, "acme", podid.Mint()), PodSubject(testTD, "pod", ""), []string{podName}, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

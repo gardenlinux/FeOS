@@ -28,6 +28,7 @@ type credsFixture struct {
 	*harness
 	serial string
 	pod    podid.ID
+	env    uuid.UUID
 	priv   hpke.PrivateKey
 	pub    []byte
 }
@@ -40,8 +41,9 @@ func newCredsFixture(t *testing.T) *credsFixture {
 		t.Fatal(err)
 	}
 	f.pod = podid.Mint()
+	f.env = dbtest.Environment(t, h.st.Q(), "acme", "box")
 	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: f.pod, Owner: "acme", Image: "alpine", VCPUs: 1, MemoryMiB: 512,
-		EnvironmentID: dbtest.Environment(t, h.st.Q(), "acme", "box")}); err != nil {
+		EnvironmentID: f.env}); err != nil {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE sandboxes SET node = 'n1', client_state = 'running' WHERE id = $1", f.pod)
@@ -69,7 +71,8 @@ func TestIssuePodCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "spiffe://feos.test/tenant/acme/sandbox/" + f.pod.String()
+	// The sandbox's workload ID, its environment by its ID (ADR 0036, 0037).
+	want := "spiffe://feos.test/tenant/acme/env/" + f.env.String() + "/sandbox/" + f.pod.String()
 	if resp.GetCertificate().GetSpiffeId() != want {
 		t.Fatalf("SPIFFE ID %q; want %q", resp.GetCertificate().GetSpiffeId(), want)
 	}
@@ -79,6 +82,9 @@ func TestIssuePodCredentials(t *testing.T) {
 	}
 	if len(leaf.URIs) != 1 || leaf.URIs[0].String() != want || len(leaf.DNSNames) != 0 {
 		t.Fatalf("leaf names %v %v", leaf.URIs, leaf.DNSNames)
+	}
+	if got, want := leaf.Subject.String(), "CN=feos.test/"+f.pod.String()+",OU=wl-s-"+f.pod.String(); got != want {
+		t.Fatalf("subject %q, want %q", got, want)
 	}
 	if got := leaf.NotAfter.Sub(leaf.NotBefore); got < 69*time.Minute || got > 71*time.Minute {
 		t.Fatalf("pod certificate lifetime %v (backdated 10 minutes, then the default hour)", got)

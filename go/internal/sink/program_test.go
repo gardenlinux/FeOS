@@ -121,7 +121,7 @@ func nodeTLS(t *testing.T, iss *pki.Issuer, name string, pod bool) *tls.Config {
 	}
 	var chain [][]byte
 	if pod {
-		c, _, err := iss.IssuePod(csr, pki.SandboxID(testTD, "acme", podid.ID("abcdefghjkm")), nil, time.Hour)
+		c, _, err := iss.IssuePod(csr, pki.SandboxID(testTD, "acme", podid.ID("abcdefghjkm")), pki.PodSubject(testTD, "abcdefghjkm", ""), nil, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}

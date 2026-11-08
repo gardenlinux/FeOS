@@ -4,14 +4,15 @@
 package pki
 
 import (
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
@@ -20,8 +21,8 @@ import (
 // spiffe://<td>/node/<name>, an instance of ferun-ingress is
 // spiffe://<td>/ingress/<name>, an instance of ferun-sink is
 // spiffe://<td>/sink/<name>, the control plane's instances share
-// spiffe://<td>/ferun, a sandbox's pod is
-// spiffe://<td>/tenant/<tenant>/sandbox/<id>.
+// spiffe://<td>/ferun; a pod has its workload's ID (WorkloadID, ADR
+// 0036), a pod outside an environment spiffe://<td>/tenant/<tenant>/sandbox/<id>.
 const (
 	spiffeScheme    = "spiffe://"
 	nodePath        = "/node/"
@@ -46,9 +47,45 @@ func SinkID(td, name string) string {
 	return spiffeScheme + td + sinkPath + name
 }
 
-// SandboxID is the SPIFFE ID of a sandbox's pod.
+// SandboxID is the SPIFFE ID of a sandbox's pod outside an environment,
+// which only rows from before ADR 0035 are.
 func SandboxID(td, tenant string, id podid.ID) string {
 	return spiffeScheme + td + "/tenant/" + tenant + "/sandbox/" + id.String()
+}
+
+// validatePodSubject checks what IssuePod puts in a subject: a CN of at
+// most 64 bytes (RFC 5280's bound), and a CN and an OU of DNS-name and
+// pod-ID characters and "/", none of which RFC 2253 escapes, so that a
+// map anchored on the printed subject holds.
+func validatePodSubject(n pkix.Name) error {
+	if len(n.CommonName) == 0 || len(n.CommonName) > maxCNBytes {
+		return fmt.Errorf("subject CN %q is empty or longer than %d bytes", n.CommonName, maxCNBytes)
+	}
+	vals := append([]string{n.CommonName}, n.OrganizationalUnit...)
+	for _, v := range vals {
+		for i := 0; i < len(v); i++ {
+			c := v[i]
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '/') {
+				return fmt.Errorf("subject value %q has a character outside [A-Za-z0-9./-]", v)
+			}
+		}
+	}
+	if len(n.OrganizationalUnit) > 1 {
+		return fmt.Errorf("subject has %d OUs; a pod's has at most one", len(n.OrganizationalUnit))
+	}
+	return nil
+}
+
+// PodIdentity is what a pod's certificate names (ADR 0036): the SPIFFE
+// ID of its workload, kind and name as store.Sandbox.Workload gives them,
+// and the subject with the pod in the CN and the workload's set ID in the
+// OU. A pod outside an environment (kind "") keeps SandboxID and a
+// subject without an OU.
+func PodIdentity(td, tenant string, envID uuid.UUID, pod podid.ID, kind, name, set string) (string, pkix.Name) {
+	if kind == "" {
+		return SandboxID(td, tenant, pod), PodSubject(td, pod.String(), "")
+	}
+	return WorkloadID(td, tenant, envID, kind, name), PodSubject(td, pod.String(), set)
 }
 
 // ControlPlaneID is the SPIFFE ID that every instance's certificate on the
@@ -224,17 +261,4 @@ func validatePodID(td, id string) error {
 		return fmt.Errorf("SPIFFE ID %q names a sink; a pod never gets it", id)
 	}
 	return nil
-}
-
-// podCommonName derives a pod certificate's subject CN from its SPIFFE ID
-// (ADR 0014): the trust domain and the path; when that is longer than a CN
-// may be (64 bytes), its first 47 bytes, "-" and 16 hex digits of the
-// ID's SHA-256, so that distinct IDs keep distinct CNs.
-func podCommonName(id string) string {
-	cn := strings.TrimPrefix(id, spiffeScheme)
-	if len(cn) <= maxCNBytes {
-		return cn
-	}
-	sum := sha256.Sum256([]byte(id))
-	return cn[:maxCNBytes-17] + "-" + hex.EncodeToString(sum[:])[:16]
 }

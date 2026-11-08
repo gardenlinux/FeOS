@@ -74,7 +74,7 @@ func TestALPNRouting(t *testing.T) {
 	t.Run("node connection with a pod certificate", func(t *testing.T) {
 		_, key, _ := ed25519.GenerateKey(rand.Reader)
 		csr, _ := pki.CreateCSR(key, "pod")
-		pc, leaf, err := e.iss.IssuePod(csr, pki.SandboxID(testTD, "acme", podid.Mint()), nil, time.Hour)
+		pc, leaf, err := e.iss.IssuePod(csr, pki.SandboxID(testTD, "acme", podid.Mint()), pki.PodSubject(testTD, "pod", ""), nil, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}

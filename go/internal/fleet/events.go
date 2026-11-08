@@ -582,6 +582,16 @@ func auditName(kind string, f map[string]any) string {
 		return "ssh signature (" + field("binding") + ")"
 	case "kube_deny", "ssh_deny":
 		return "denied: " + field("reason")
+	case "tls_signature":
+		if e, ok := f["error"].(map[string]any); ok {
+			return "tls signature refused: " + activity.Clean(fmt.Sprint(e["code"]))
+		}
+		return strings.TrimSpace("tls signature " + field("role"))
+	case "handshake_report":
+		r, _ := f["report"].(map[string]any)
+		peer, _ := r["peer_spiffe"].(string)
+		direction, _ := r["direction"].(string)
+		return strings.Join(strings.Fields("tls handshake "+activity.Clean(direction)+" "+activity.Clean(peer)), " ")
 	}
 	return kind
 }

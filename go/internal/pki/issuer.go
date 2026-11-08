@@ -238,16 +238,20 @@ func (i *Issuer) IssueIngress(csrDER []byte, name string, ttl time.Duration) (*f
 }
 
 // IssuePod issues a pod's certificate (ADR 0014) for the Ed25519 key of
-// csrDER: ClientAuth and ServerAuth, the URI spiffeID and the DNS names
-// given, subject CN derived from the ID, valid for ttl. It refuses the
+// csrDER: ClientAuth and ServerAuth, the URI spiffeID (its workload's,
+// WorkloadID) and the DNS names given, the subject given (PodSubject: the
+// pod in the CN, its workload in the OU, ADR 0036), valid for ttl. It refuses the
 // control plane's SPIFFE ID and every ID in the node and ingress
 // namespaces, any wildcard name, any name equal to or under the
 // control-plane domain and any name outside the issuer's permitted DNS
 // domains. The CSR's own
 // subject and names are ignored. It is renewed at three quarters of its
 // lifetime.
-func (i *Issuer) IssuePod(csrDER []byte, spiffeID string, dnsNames []string, ttl time.Duration) (*fleetv1.Certificate, *x509.Certificate, error) {
+func (i *Issuer) IssuePod(csrDER []byte, spiffeID string, subject pkix.Name, dnsNames []string, ttl time.Duration) (*fleetv1.Certificate, *x509.Certificate, error) {
 	if err := validatePodID(i.td, spiffeID); err != nil {
+		return nil, nil, err
+	}
+	if err := validatePodSubject(subject); err != nil {
 		return nil, nil, err
 	}
 	for _, n := range dnsNames {
@@ -273,7 +277,7 @@ func (i *Issuer) IssuePod(csrDER []byte, spiffeID string, dnsNames []string, ttl
 		return nil, nil, err
 	}
 	leaf, err := i.sign(&x509.Certificate{
-		Subject:     pkix.Name{CommonName: podCommonName(spiffeID)},
+		Subject:     subject,
 		URIs:        []*url.URL{u},
 		DNSNames:    append([]string(nil), dnsNames...),
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
