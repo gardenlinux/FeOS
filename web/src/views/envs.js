@@ -636,15 +636,6 @@ export function sideMeta(o) {
   return readyText(o);
 }
 
-// splitEnvName splits the suffix of 8 hex digits that FeCode gives the
-// environments it makes ("kino-prod-9101dfcb") off a name, for showing it
-// dimmed; suffix '' when there is none.
-export function splitEnvName(name) {
-  const s = String(name || '');
-  const m = /^(.+?)(-[0-9a-f]{8})$/.exec(s);
-  return m ? { base: m[1], suffix: m[2] } : { base: s, suffix: '' };
-}
-
 // activityItems are an environment's deployments and incidents in one
 // list, newest first (by when a deployment was made, an incident opened).
 export function activityItems(deployments, incidents) {

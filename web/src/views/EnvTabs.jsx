@@ -555,9 +555,41 @@ export function SettingsTab({ tenant, env, st, ec, changed, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
   return (
     <>
+      <RenameBox tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
       <CloneBox tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
       <DeleteBox tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
     </>
+  );
+}
+
+// RenameBox renames the environment (ADR 0037): the same environment
+// under a new name, its hosts, grants and logs kept.
+export function RenameBox({ tenant, env, st, ec, changed, navigate }) {
+  const [name, setName] = useState('');
+  const [op, run, clear] = useOp();
+  const busy = !!(op && op.busy);
+  const next = name.trim();
+  const submit = async (e) => {
+    e.preventDefault();
+    const r = await run(() => api.renameEnvironment(env, next), (res) => `Renamed to ${res.name}.`);
+    if (r) { setName(''); changed(); navigate(envPath(tenant, r.name, 'settings')); }
+  };
+  return (
+    <div className="envsect envbox">
+      <div className="sect">rename</div>
+      <p className="panel-note">
+        The same environment under a new name: its ID, hosts, grants, logs and everything that runs stay. Links and
+        scripts that name it by its old name do not follow it; by its ID they do.
+      </p>
+      <form className="envclone" onSubmit={submit} title={ec.del ? '' : NEEDS.del}>
+        <fieldset disabled={!ec.del || st.deleting || busy}>
+          <label className="envfield"><span className="k">name</span>
+            <input className="mono" value={name} placeholder={st.name} onChange={(e) => setName(e.target.value)} /></label>
+          <div><button className="mini" type="submit" disabled={!next || next === st.name}>Rename</button></div>
+        </fieldset>
+      </form>
+      {op && op.tone === 'bad' ? <ErrBox error={op.text} /> : <OpNote op={op} onDismiss={clear} />}
+    </div>
   );
 }
 

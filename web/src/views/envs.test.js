@@ -11,7 +11,7 @@ import {
   jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
   objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
   phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
-  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specBindings, specObject, splitEnvName, splitItem,
+  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specBindings, specObject, splitItem,
   statusState, statusTone, tagPlan, trafficOf, trafficTotals, usedBy,
 } from './envs.js';
 
@@ -533,13 +533,6 @@ describe('the sidebar and the overview in words', () => {
     expect(sideMeta({ kind: 'addon', name: 'db', phase: 'starting', instances: [] })).toBe('starting');
     expect(sideMeta({ kind: 'job', name: 'migrate', lastRun: { phase: 'failed' } })).toBe('failed');
     expect(sideMeta({ kind: 'job', name: 'migrate', lastRun: { phase: 'succeeded' } })).toBe('');
-  });
-
-  it("dims the suffix FeCode gives an environment's name", () => {
-    expect(splitEnvName('kino-prod-9101dfcb')).toEqual({ base: 'kino-prod', suffix: '-9101dfcb' });
-    expect(splitEnvName('expensa-stage')).toEqual({ base: 'expensa-stage', suffix: '' });
-    expect(splitEnvName('-9101dfcb')).toEqual({ base: '-9101dfcb', suffix: '' });
-    expect(splitEnvName('kino-prod-9101DFCB')).toEqual({ base: 'kino-prod-9101DFCB', suffix: '' });
   });
 
   it('counts the objects by kind in words', () => {

@@ -17,7 +17,6 @@
 .envcard:hover { text-decoration: none; border-color: var(--border); color: var(--text); }
 .envcard.on { border-color: rgba(var(--accent-rgb), .55); background: var(--accent-dim); }
 .envcard-name { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; line-height: 1.35; }
-.envname-suffix { color: var(--faint); font-weight: 400; }
 .envcard-state { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
 .envcard-state.running { color: var(--ok); }
 .envcard-state.failed { color: var(--danger); }

@@ -538,7 +538,7 @@ describe('the routes it calls', () => {
     expect(used).toEqual([
       'accessLogs', 'addonCatalog', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
       'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments', 'listEnvironments',
-      'listIncidents', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'restartService',
+      'listIncidents', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
     ]);
   });
@@ -583,8 +583,9 @@ describe('EnvHead', () => {
     expect(out).not.toContain('fecode.class=');
   });
 
-  it('dims the suffix FeCode gives a name', () => {
-    expect(head({ ...STAGE, name: 'kino-prod-9101dfcb' })).toContain('<h1><span class="">kino-prod<span class="envname-suffix">-9101dfcb</span></span></h1>');
+  it('shows the name whole, whatever its form', () => {
+    expect(head({ ...STAGE, name: 'kino-prod-9101dfcb' })).toContain('<h1><span class="">kino-prod-9101dfcb</span></h1>');
+    expect(head({ ...STAGE, name: 'kino--ws--login-fix' })).toContain('<h1><span class="">kino--ws--login-fix</span></h1>');
   });
 
   it('offers no revert while the latest serves, New deployment the one primary action, and disables it without write', () => {

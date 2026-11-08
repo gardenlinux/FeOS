@@ -454,6 +454,7 @@ export const api = {
   putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
   // An environment's operations beside the builder (ADR 0018).
   deleteEnvironment: (env) => tenantCall('DELETE', `/environments/${enc(env)}`),
+  renameEnvironment: (env, name) => tenantCall('PATCH', `/environments/${enc(env)}`, { name }),
   // A revert makes a new deployment with deployment n's spec, against
   // base, the latest deployment's number.
   revertDeployment: (env, n, { base, message } = {}) =>
