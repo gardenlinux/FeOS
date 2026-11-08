@@ -178,7 +178,7 @@ func TestMigrationSchema(t *testing.T) {
 		"ingress_certs", "ingresses",
 		"instances", "invitations", "issued_certs", "jobs", "join_tokens", "kube_bindings", "leases", "node_certs", "node_starts",
 		"node_telemetry", "nodes", "people", "pod_intercept_cas", "pod_network", "pod_tombstones", "sandbox_credentials", "sandbox_holds", "sandbox_image_credentials", "sandbox_tokens", "sandboxes",
-		"schema_migrations", "security_groups", "service_tokens", "ssh_bindings", "tenant_credentials", "tenant_tokens", "tenants", "tool_calls", "traffic_records",
+		"schema_migrations", "service_tokens", "ssh_bindings", "tenant_credentials", "tenant_tokens", "tenants", "tool_calls", "traffic_records",
 		"ui_sessions", "watches"}
 	if strings.Join(tables, ",") != strings.Join(wantTables, ",") {
 		t.Fatalf("tables %v, want %v", tables, wantTables)

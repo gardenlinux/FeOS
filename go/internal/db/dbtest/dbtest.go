@@ -171,16 +171,15 @@ func (w *testWriter) close() {
 
 var _ io.Writer = (*testWriter)(nil)
 
-// Environment is the ID of owner's environment name, inserted with its
-// group default when it has none: the place of a test's sandboxes and
-// tenants' jobs, which every one is in (ADR 0035). q is a pool or a
-// transaction of a migrated database where owner exists.
+// Environment is the ID of owner's environment name, inserted when it
+// has none: the place of a test's sandboxes and tenants' jobs, which
+// every one is in (ADR 0035). q is a pool or a transaction of a migrated
+// database where owner exists.
 func Environment(t testing.TB, q db.Querier, owner, name string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	if err := q.QueryRow(context.Background(), `WITH e AS (INSERT INTO environments (id, owner, name)
-			VALUES (gen_random_uuid(), $1, $2) ON CONFLICT (owner, name) DO NOTHING RETURNING id),
-		g AS (INSERT INTO security_groups (env_id, name) SELECT id, 'default' FROM e)
+			VALUES (gen_random_uuid(), $1, $2) ON CONFLICT (owner, name) DO NOTHING RETURNING id)
 		SELECT id FROM e UNION ALL SELECT id FROM environments WHERE owner = $1 AND name = $2 LIMIT 1`,
 		owner, name).Scan(&id); err != nil {
 		t.Fatalf("environment %s of %s: %v", name, owner, err)
