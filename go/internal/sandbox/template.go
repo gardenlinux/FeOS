@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
@@ -77,7 +78,7 @@ func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver)
 	// these upstream names.
 	if t.RestrictEgressNames {
 		spec.Network.RestrictEgressNames = true
-		spec.Network.EgressDomains = append([]string(nil), t.EgressDomains...)
+		spec.Network.EgressDomains = egressDomains(t.EgressDomains, sb.ImageRef)
 	}
 	// The sandbox labels win: a template cannot make its pod another
 	// sandbox's, tenant's or incarnation's.
@@ -217,4 +218,40 @@ func userinfoKeeps(c byte) bool {
 		return true
 	}
 	return strings.IndexByte("-._~!$&'()*+,;=", c) >= 0
+}
+
+// egressDomains are a pod's allowed names and the hosts its image is
+// pulled from: the image is declared, so its registry is egress it
+// declares (ADR 0034, revised), and the guest pulls over the pod's
+// network until the node pulls (ADR 0022, ADR 0025). Sorted, without
+// repeats.
+func egressDomains(domains []string, imageRef string) []string {
+	out := append([]string(nil), domains...)
+	out = append(out, registryHosts(imageRef)...)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// registryHosts are the names a pull of ref talks to: the registry, and
+// for the two public registries the hosts their blobs and tokens come
+// from. An image without a registry host is Docker Hub's.
+func registryHosts(ref string) []string {
+	host := "docker.io"
+	if i := strings.IndexByte(ref, '/'); i > 0 {
+		if first := ref[:i]; strings.ContainsAny(first, ".:") || first == "localhost" {
+			host = first
+		}
+	}
+	if h, _, ok := strings.Cut(host, ":"); ok {
+		host = h
+	}
+	switch host {
+	case "docker.io", "index.docker.io", "registry-1.docker.io":
+		return []string{"auth.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"}
+	case "ghcr.io":
+		return []string{"ghcr.io", "pkg-containers.githubusercontent.com"}
+	case "", "localhost":
+		return nil
+	}
+	return []string{host}
 }

@@ -43,7 +43,7 @@ import (
 // that failed: then its deployed one) and its deployed deployment: while
 // a deployment rolls, the calls of both run, and an edge either declares
 // is admitted. An object's egress is the target's (the deployed one's for
-// an object the target lacks); an addon's is none.
+// an object the target lacks); an addon's is the internet (its image's pull needs it while the guest pulls).
 
 // isWorkloadGroup reports whether rest (an ID after "wl-") is a
 // workload's: 32 lowercase hex digits, s-<sandbox ID> or j-<job ID>.
@@ -217,7 +217,6 @@ func (c *Controller) envReachOf(ctx context.Context, pass *groupPass, envID uuid
 // its specs (the target first) and its sandboxes' and tenants' jobs' pods.
 func deriveEnvReach(envID uuid.UUID, specs []*spec.Spec, reachers []store.Reacher, addonPort spec.AddonPort) *envReach {
 	r := &envReach{in: map[string]map[string]*peerPorts{}, egress: map[string]*spec.Egress{}}
-	none := &spec.Egress{Mode: spec.EgressNone}
 	var known []string
 	setEgress := func(wl string, e *spec.Egress) {
 		if _, ok := r.egress[wl]; ok || wl == "" {
@@ -242,7 +241,7 @@ func deriveEnvReach(envID uuid.UUID, specs []*spec.Spec, reachers []store.Reache
 		}
 		for _, name := range slices.Sorted(maps.Keys(sp.Addons)) {
 			wl := workloadOf(envID, sp, spec.KindAddon, name)
-			setEgress(wl, none)
+			setEgress(wl, nil)
 			if addonPort != nil {
 				r.self(wl, addonPort(name, sp.Addons[name]))
 			}

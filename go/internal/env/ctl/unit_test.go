@@ -187,7 +187,7 @@ func TestWorkloadRules(t *testing.T) {
 		}
 	}
 	for id, want := range map[string][]string{
-		api: {"203.0.113.0/24"}, catalog: nil, db: nil, migrate: {"0.0.0.0/0", "2000::/3"}, sbxG: {"0.0.0.0/0", "2000::/3"},
+		api: {"203.0.113.0/24"}, catalog: nil, db: {"0.0.0.0/0", "2000::/3"}, migrate: {"0.0.0.0/0", "2000::/3"}, sbxG: {"0.0.0.0/0", "2000::/3"},
 		allG: nil, jobG: {"0.0.0.0/0", "2000::/3"}, wl("service", "gone"): {"0.0.0.0/0", "2000::/3"},
 	} {
 		if got := outBlocks(g(id)); !slices.Equal(got, want) {

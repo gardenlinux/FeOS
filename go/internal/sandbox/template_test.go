@@ -353,7 +353,7 @@ func TestPodSpecEgressNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	n := spec.GetNetwork()
-	if !n.GetRestrictEgressNames() || !slices.Equal(n.GetEgressDomains(), []string{"api.stripe.com", "*.example.com"}) ||
+	if !n.GetRestrictEgressNames() || !slices.Equal(n.GetEgressDomains(), egressDomains([]string{"api.stripe.com", "*.example.com"}, testImage)) ||
 		!slices.Equal(n.GetSecurityGroups(), []string{model.EnvGroupID(env), model.SandboxWorkloadGroupID(id.String())}) {
 		t.Fatalf("network %v", n)
 	}
@@ -363,3 +363,25 @@ func TestPodSpecEgressNames(t *testing.T) {
 		t.Fatalf("internet %v %v", spec.GetNetwork(), err)
 	}
 }
+
+// A restricted pod may reach the hosts its image is pulled from: the
+// guest pulls over the pod's network.
+func TestRegistryHosts(t *testing.T) {
+	for ref, want := range map[string][]string{
+		"docker.io/library/postgres@sha256:aa": {"auth.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
+		"postgres:17":                          {"auth.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
+		"ghcr.io/kino/api:1.4":                 {"ghcr.io", "pkg-containers.githubusercontent.com"},
+		"oci.fecode.dev/kino/api@sha256:bb":    {"oci.fecode.dev"},
+		"registry.example:5000/x/y:1":          {"registry.example"},
+		"localhost:5000/x":                     nil,
+	} {
+		if got := registryHosts(ref); !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", ref, got, want)
+		}
+	}
+	got := egressDomains([]string{"api.stripe.com", "ghcr.io"}, "ghcr.io/a/b:1")
+	if !slices.Equal(got, []string{"api.stripe.com", "ghcr.io", "pkg-containers.githubusercontent.com"}) {
+		t.Fatalf("egressDomains %v", got)
+	}
+}
+

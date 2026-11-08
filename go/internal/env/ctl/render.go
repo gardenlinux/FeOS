@@ -190,13 +190,12 @@ func (c *Controller) planAddon(v *view, name string, a spec.Addon, vol *store.En
 	p.inst = inst
 	p.image, p.vcpus, p.memoryMB = inst.Image, plan.VCPUs, plan.MemoryMib
 	p.credentials = bp.Credentials(p.addon)
-	// An addon's egress is its type's (ADR 0034, revised): none, names
-	// refused.
+	// An addon's egress is its type's (ADR 0034, revised): the internet,
+	// which its image's pull needs while the guest pulls.
 	p.template = model.PodTemplate{
-		Command:             slices.Clone(inst.Command),
-		Env:                 mapEnv(name, inst.Env),
-		SecurityGroups:      v.podGroups(spec.KindAddon, name),
-		RestrictEgressNames: true,
+		Command:        slices.Clone(inst.Command),
+		Env:            mapEnv(name, inst.Env),
+		SecurityGroups: v.podGroups(spec.KindAddon, name),
 	}
 	if inst.Mount != "" {
 		if vol == nil {

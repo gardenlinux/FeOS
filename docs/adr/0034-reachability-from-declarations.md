@@ -181,8 +181,13 @@ nobody else; the ingress reaches `api` on `http`.
 - **Egress is about what is not the environment.** `none` keeps the
   implied send to the environment's own pods; it takes away the
   internet.
-- An **addon's** egress is its type's, none today; the tenant does not
-  set it.
+- An **addon's** egress is its type's, the internet today; the tenant
+  does not set it.
+- **An image's registry is egress the image declares.** The guest pulls
+  a pod's image over the pod's network until the node pulls (ADR 0022,
+  ADR 0025), so a pod whose egress restricts names may also resolve and
+  reach its image's registry: the registry's host, and for Docker Hub
+  and GitHub's registry the hosts their tokens and blobs come from.
 - **A binding's upstream is egress the binding declares.** Once a
   binding dials from the pod's address (ADR 0014's second address, not
   built), its upstream's host is in the pod's egress by the binding
