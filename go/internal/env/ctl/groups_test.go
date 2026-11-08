@@ -478,10 +478,12 @@ func TestWorkloadGroups(t *testing.T) {
 		}
 	}
 	if n := h.pod("n1", web.Sandbox.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() ||
-		!slices.Equal(n.GetEgressDomains(), []string{"*.example.com", "api.stripe.com"}) {
+		!slices.Equal(n.GetEgressDomains(), []string{"*.example.com", "api.stripe.com", "example.test"}) {
 		t.Errorf("web's egress by name %v", n)
 	}
-	if n := h.pod("n1", st.Sandbox.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() || len(n.GetEgressDomains()) != 0 {
+	// Egress none still names its image's registry: its guest pulls.
+	if n := h.pod("n1", st.Sandbox.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() ||
+		!slices.Equal(n.GetEgressDomains(), []string{"example.test"}) {
 		t.Errorf("store's egress by name %v", n)
 	}
 	if n := h.pod("n1", job.ID).GetSpec().GetNetwork(); !n.GetRestrictEgressNames() {
