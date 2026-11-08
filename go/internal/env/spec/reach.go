@@ -573,13 +573,20 @@ func UnknownReaches(r Reaches, s *Spec) string {
 		for _, p := range s.Services[name].Ports {
 			ports = append(ports, p.Name)
 		}
-		have = append(have, "service "+name+" ("+orNone(ports)+")")
+		desc := "no ports"
+		if len(ports) > 0 {
+			desc = strings.Join(ports, ", ")
+		}
+		have = append(have, "service "+name+" ("+desc+")")
 	}
 	for _, name := range slices.Sorted(maps.Keys(s.Addons)) {
 		have = append(have, "addon "+name)
 	}
-	return fmt.Sprintf("reaches: the environment's deployed deployment has no %s; it has %s",
-		strings.Join(unknown, ", "), orNone(have))
+	has := "it has nothing"
+	if len(have) > 0 {
+		has = "it has " + strings.Join(have, ", ")
+	}
+	return fmt.Sprintf("reaches: the environment's deployed deployment has no %s; %s", strings.Join(unknown, ", "), has)
 }
 
 // CheckReaches checks the form of a sandbox's or a tenant's job's
