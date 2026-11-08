@@ -247,7 +247,7 @@ func registryHosts(ref string) []string {
 	}
 	switch host {
 	case "docker.io", "index.docker.io", "registry-1.docker.io":
-		return []string{"auth.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"}
+		return []string{"auth.docker.io", "index.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"}
 	case "ghcr.io":
 		return []string{"ghcr.io", "pkg-containers.githubusercontent.com"}
 	case "", "localhost":

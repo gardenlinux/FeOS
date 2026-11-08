@@ -368,8 +368,8 @@ func TestPodSpecEgressNames(t *testing.T) {
 // guest pulls over the pod's network.
 func TestRegistryHosts(t *testing.T) {
 	for ref, want := range map[string][]string{
-		"docker.io/library/postgres@sha256:aa": {"auth.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
-		"postgres:17":                          {"auth.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
+		"docker.io/library/postgres@sha256:aa": {"auth.docker.io", "index.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
+		"postgres:17":                          {"auth.docker.io", "index.docker.io", "production.cloudflare.docker.com", "registry-1.docker.io"},
 		"ghcr.io/kino/api:1.4":                 {"ghcr.io", "pkg-containers.githubusercontent.com"},
 		"oci.fecode.dev/kino/api@sha256:bb":    {"oci.fecode.dev"},
 		"registry.example:5000/x/y:1":          {"registry.example"},
