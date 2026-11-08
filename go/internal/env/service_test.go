@@ -518,6 +518,33 @@ func TestPlanSpec(t *testing.T) {
 	}
 }
 
+// A plan of valkey (ADR 0039): a retired version deploys with the warning
+// that it runs 9; a reference to a password or a user, which valkey no
+// longer has, is an error that says why.
+func TestPlanValkey(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, harnessOptions{})
+	ctx := h.ctx()
+	ref := func(version, key string) string {
+		return `{"addons": {"cache": {"type": "valkey", "version": "` + version + `"}},
+			"services": {"web": {"image": "ghcr.io/acme/web:1", "env": {"CACHE": {"addon": "cache", "key": "` + key + `"}}}}}`
+	}
+	a, err := h.svc.PlanSpec(ctx, tenantA, PlanSpecRequest{Spec: json.RawMessage(ref("8", "url"))})
+	if err != nil || !a.Valid || !hasFinding(a.Findings, spec.SeverityWarning, "addons.cache.version", "valkey 8 is retired") {
+		t.Fatalf("valkey 8 %+v %v", a, err)
+	}
+	if a, err := h.svc.PlanSpec(ctx, tenantA, PlanSpecRequest{Spec: json.RawMessage(ref("9", "url"))}); err != nil || !a.Valid ||
+		len(a.Findings) != 0 {
+		t.Fatalf("valkey 9 %+v %v", a, err)
+	}
+	for _, key := range []string{"password", "user"} {
+		a, err := h.svc.PlanSpec(ctx, tenantA, PlanSpecRequest{Spec: json.RawMessage(ref("9", key))})
+		if err != nil || a.Valid || !hasFinding(a.Findings, spec.SeverityError, "services.web.env.CACHE", "by its certificate") {
+			t.Fatalf("a reference to valkey's %s %+v %v", key, a, err)
+		}
+	}
+}
+
 func TestAttachedValidation(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
@@ -1077,26 +1104,21 @@ func TestAddonAgainstVolume(t *testing.T) {
 		t.Fatalf("postgres 17 over valkey's volume %+v", a)
 	}
 
-	// The version that ran ready on the volume decides a downgrade, not
-	// the latest deployment: an upgrade to 8 that never ran may go back.
+	// The version that ran ready on the volume decides, not the latest
+	// deployment: valkey 8 is retired into 9 (ADR 0039), so a revert to 8
+	// over the data 9 wrote is no downgrade, only the warning that 8 runs 9.
 	h.exec("DELETE FROM env_volumes WHERE env_id = $1", e.ID)
-	h.apply("stage", addon("valkey", "7.2"), 7)
-	vk72 := volume("valkey", "7.2")
-	h.apply("stage", addon("valkey", "8"), 8)
-	if _, err := h.svc.Revert(ctx, tenantA, "stage", 8, RevertRequest{Base: 9}); err != nil {
-		t.Fatalf("revert of an upgrade that never ran: %v", describe(err))
-	}
-	// Once 8 ran ready on it, the data is 8's.
-	h.apply("stage", addon("valkey", "8"), 10)
-	after := vk72
-	after.DataVersion = "8"
-	if _, err := h.st.UpdateEnvVolume(ctx, vk72, after); err != nil {
+	h.apply("stage", addon("valkey", "8"), 7)
+	vk := volume("valkey", "8")
+	h.apply("stage", addon("valkey", "9"), 8)
+	after := vk
+	after.DataVersion = "9"
+	if _, err := h.st.UpdateEnvVolume(ctx, vk, after); err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.svc.Revert(ctx, tenantA, "stage", 8, RevertRequest{Base: 11})
-	var ise *InvalidSpecError
-	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "addons.db.version", "cannot go back from 8 to 7.2") {
-		t.Fatalf("revert over 8's data: %v", describe(err))
+	rev, err := h.svc.Revert(ctx, tenantA, "stage", 8, RevertRequest{Base: 9})
+	if err != nil || !hasFinding(rev.Findings, spec.SeverityWarning, "addons.db.version", "valkey 8 is retired") {
+		t.Fatalf("revert to 8 over 9's data: %+v %v", rev, describe(err))
 	}
 }
 

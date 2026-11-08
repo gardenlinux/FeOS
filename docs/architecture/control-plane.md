@@ -2868,7 +2868,7 @@ crash loop closes. Then:
 
 1. **Addons**, each by its blueprint ([Addons](#addons)):
    - Credentials: system secrets `addon.<addon>.<key>`, 32 hex
-     characters (valkey's flags are split at words), version 1,
+     characters (`tls.key`: an Ed25519 key, PKCS#8 PEM), version 1,
      generated once and never changed. Without a sealer the deployment
      stays deploying with the reason "secrets need --secret-key-file", and
      no incident.
@@ -3425,7 +3425,7 @@ percent-encoded.
 | Type | Versions | Plans: vCPUs, memory, volume | Pod | Outputs |
 |---|---|---|---|---|
 | `postgres` | 16, 17 | `dev` 1, 256 MiB, 1 GiB; `small` 1, 1 GiB, 10 GiB; `medium` 2, 4 GiB, 50 GiB; `large` 4, 16 GiB, 200 GiB | `postgres:<v>-alpine`, `docker-entrypoint.sh postgres -c shared_buffers=<memory/4>MB`, `PGDATA=/var/lib/postgresql/data/pgdata`, `POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256`, `POSTGRES_PASSWORD` for initdb alone (provisioning removes it from the role), the volume at `/var/lib/postgresql/data`; probe `pg_isready` over the socket and `nc -z` on 5432 | `host`, `port` (5432), `user`, `database`, `url` `postgres://<role>@<loopback>:5432/<database>?sslmode=disable`, no password: `host` is the addon's loopback address in the referencing pod, numbered per pod (the addons it binds, by name, get 127.64.0.1, 127.64.0.2, …), where the pod's TLS binding carries the connection to the addon in TLS 1.3 with the pod's certificate (ADR 0036, 0038); field `role` required, `database` |
-| `valkey` | 7.2, 8 | `dev` 1, 128 MiB, 256 MiB; `small` 1, 512 MiB, 2 GiB; `medium` 1, 2 GiB, 8 GiB; `large` 2, 8 GiB, 32 GiB | `valkey/valkey:<v>-alpine` with its own command and `VALKEY_EXTRA_FLAGS` `--appendonly yes --requirepass <password> --maxmemory <70 % of memory>mb --maxmemory-policy <policy>`, the volume at `/data`; probe `valkey-cli ping` with `REDISCLI_AUTH` | `host`, `port` (6379), `user` (`default`), `password`, `url` `redis://default:<password>@[<address>]:6379/0` |
+| `valkey` | 9 (7.2 and 8 retired: they run 9, a warning) | `dev` 1, 128 MiB, 256 MiB; `small` 1, 512 MiB, 2 GiB; `medium` 1, 2 GiB, 8 GiB; `large` 2, 8 GiB, 32 GiB | `valkey/valkey:9-alpine`, `tini -- sh -c` a start that execs `docker-entrypoint.sh valkey-server --port 0 --protected-mode yes --unixsocket /run/valkey/valkey.sock --unixsocketperm 700 --aclfile /data/ferun/users.acl --appendonly yes --maxmemory <70 % of memory>mb --maxmemory-policy <policy>`, with `--tls-port 6379`, the key, chain and trust in `/data/ferun`, `--tls-auth-clients yes --tls-auth-clients-user URI --tls-protocols TLSv1.3` once a step wrote them (else the socket alone and the bootstrap's default user), no env, the volume at `/data`; probe `valkey-cli -s <socket> ping`, `PONG` or `NOAUTH` | `host`, `port` (6379), `url` `redis://<loopback>:6379/0`, no user and no password: the addon's loopback address in the referencing pod, numbered as postgres's, where the pod's TLS binding carries the connection to the addon in TLS 1.3 with no ALPN and the pod's certificate, which the addon takes as the user of the workload's SPIFFE ID (ADR 0039) |
 | `nats` | 2 | `dev` 1, 128 MiB, 1 GiB; `small` 1, 512 MiB, 10 GiB | `nats:2-alpine`, `sh -c` writing a config that binds the monitor to loopback, then `nats-server -a :: -p 4222 --user nats --pass "$NATS_PASSWORD"`, with `-js -sd /data` and the volume at `/data` while option `jetstream` (default true) holds; probe `wget -qO- http://127.0.0.1:8222/healthz` | `host`, `port` (4222), `user` (`nats`), `password`, `url` `nats://nats:<password>@[<address>]:4222` |
 
 - **postgres** options: `databases` and `roles`, names
@@ -3453,7 +3453,24 @@ percent-encoded.
   listed stays (a warning). Every reference names a listed role, and a
   role's output one of the listed databases.
 - **valkey**: option `maxmemoryPolicy`, `noeviction` by default, one of
-  the eight policies. A downgrade is an error, an upgrade an info.
+  the eight policies. A retired version (7.2, 8) runs 9 on its volume
+  and is a warning; a downgrade is an error, an upgrade an info. It
+  takes no password from anyone (ADR 0039): the credential is `tls.key`
+  alone, and the server's certificate, for the addon's workload ID, has
+  ClientAuth besides ServerAuth. Provisioning is one step, `tls`
+  (`sh -c`): the key, the chain, the platform's roots and issuer and the
+  users under `/data/ferun`, each written beside its place and moved over
+  it, the users' file of before kept until the step succeeds. The users:
+  `default` off, without a password, keys, channels or commands; the
+  addon's own ID with everything (`~* &* +@all`); one per reference's
+  workload (a service's or job's ID, an attached service's sandbox's),
+  `on resetpass ~* &* +@all -@admin -migrate`. While the socket answers
+  `PONG` (the bootstrap) the step sets TLS's files and settings, the
+  port and `ACL LOAD` over the socket; after, over `127.0.0.1:6379` as
+  the addon's own ID (its server certificate as the client's, the server
+  unverified), the settings again (a reload) and `ACL LOAD`, which closes
+  the sessions of users it drops. Then `ACL WHOAMI` over TLS must be the
+  addon's ID.
 - **nats**: JetStream turned off is a warning; its volume stays, unused.
 
 `GET /api/v1/addons` (tenant class, the same for every tenant) is the

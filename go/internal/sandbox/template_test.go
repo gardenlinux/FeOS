@@ -438,7 +438,9 @@ func TestPodSpecPinsTLSBindingsToTheirAddons(t *testing.T) {
 		MemoryMiB: 256, EnvironmentID: env, Instance: true,
 		LogLabels: map[string]string{model.LogKind: "service", model.LogObject: "api"},
 		PodTemplate: &model.PodTemplate{TLSBindings: []model.TemplateTLSBinding{
-			{Listen: "127.88.1.2:5432", Host: "db", Port: 5432, ALPN: "postgresql", Addon: "db"}}}}
+			{Listen: "127.88.1.2:5432", Host: "db", Port: 5432, ALPN: "postgresql", Addon: "db"},
+			// Valkey has no ALPN protocol: the binding offers none (ADR 0039).
+			{Listen: "127.88.1.3:6379", Host: "cache", Port: 6379, Addon: "cache"}}}}
 	on := &Engine{cfg: Config{TrustDomain: "run.example"}}
 	spec, err := on.podSpec(bg, sb)
 	if err != nil {
@@ -446,9 +448,13 @@ func TestPodSpecPinsTLSBindingsToTheirAddons(t *testing.T) {
 	}
 	b := spec.GetTlsBindings()
 	want := "spiffe://run.example/tenant/" + testTenant + "/env/" + env.String() + "/addon/db"
-	if len(b) != 1 || b[0].GetListen() != "127.88.1.2:5432" || b[0].GetHost() != "db" || b[0].GetPort() != 5432 ||
+	if len(b) != 2 || b[0].GetListen() != "127.88.1.2:5432" || b[0].GetHost() != "db" || b[0].GetPort() != 5432 ||
 		b[0].GetAlpn() != "postgresql" || b[0].GetServerId() != want {
 		t.Fatalf("TLS bindings %v, want one to %s", b, want)
+	}
+	if b[1].GetListen() != "127.88.1.3:6379" || b[1].GetHost() != "cache" || b[1].GetPort() != 6379 || b[1].GetAlpn() != "" ||
+		b[1].GetServerId() != "spiffe://run.example/tenant/"+testTenant+"/env/"+env.String()+"/addon/cache" {
+		t.Fatalf("valkey's binding %v", b[1])
 	}
 	off := &Engine{cfg: Config{}}
 	if spec, err = off.podSpec(bg, sb); err != nil || len(spec.GetTlsBindings()) != 0 {

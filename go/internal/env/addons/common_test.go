@@ -22,7 +22,7 @@ var shipped = []struct {
 	{"postgres", `{"type":"postgres","version":"17","plan":"dev",
 		"options":{"databases":["expensa","reports"],"roles":["expense_svc","approval_svc"]}}`,
 		map[string]string{"role": "expense_svc"}},
-	{"valkey", `{"type":"valkey","version":"8","plan":"dev","options":{"maxmemoryPolicy":"allkeys-lfu"}}`, nil},
+	{"valkey", `{"type":"valkey","version":"9","plan":"dev","options":{"maxmemoryPolicy":"allkeys-lfu"}}`, nil},
 	{"nats", `{"type":"nats","version":"2","plan":"dev","options":{"jetstream":true}}`, nil},
 }
 

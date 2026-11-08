@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	containerv1 "github.com/gardenlinux/feos/go/gen/feos/container/v1"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -189,4 +190,160 @@ func TestAReferenceToARoleBindsTheAddon(t *testing.T) {
 			t.Errorf("%s = %+v, want %s", k, got, v)
 		}
 	}
+}
+
+// kinoSpec is kino's shape (ADR 0039): a postgres and a valkey addon,
+// services that reference both, and a job that references valkey;
+// withJob false leaves the job out.
+func kinoSpec(withJob bool) string {
+	job := ""
+	if withJob {
+		job = fmt.Sprintf(`,"jobs":{"warm":{"image":%q,"command":["/app","warm"],"on":"manual","env":{
+			"CACHE":{"addon":"valkey","key":"host"}}}}`, testImage)
+	}
+	return fmt.Sprintf(`{"addons":{
+		"postgres":{"type":"postgres","version":"17","plan":"dev","options":{"databases":["kino"],"roles":["catalog"]}},
+		"valkey":{"type":"valkey","version":"8","plan":"dev"}},
+		"services":{
+			"catalog":{"image":%q,"command":["/app"],"ports":[{"name":"http","port":8080}],"env":{
+				"DATABASE_URL":{"addon":"postgres","key":"url","role":"catalog","database":"kino"},
+				"VALKEY_URL":{"addon":"valkey","key":"url"},
+				"VALKEY_HOST":{"addon":"valkey","key":"host"},
+				"VALKEY_PORT":{"addon":"valkey","key":"port"}}},
+			"notify":{"image":%q,"command":["/app"],"env":{"VALKEY_URL":{"addon":"valkey","key":"url"}}}}%s}`,
+		testImage, testImage, job)
+}
+
+// A service that references valkey reaches it through its pod's TLS
+// binding (ADR 0039), as postgres: one loopback address per addon,
+// numbered by name, valkey's with no ALPN; its values name the loopback
+// address, no user and no password.
+func TestAReferenceToValkeyBindsTheAddon(t *testing.T) {
+	h := newHarness(t, options{})
+	h.addNode("n1")
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, kinoSpec(false))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
+	for svc, want := range map[string][]model.TemplateTLSBinding{
+		"catalog": {
+			{Listen: "127.64.0.1:5432", Host: "postgres", Port: 5432, ALPN: "postgresql", Addon: "postgres"},
+			{Listen: "127.64.0.2:6379", Host: "valkey", Port: 6379, Addon: "valkey"},
+		},
+		// Alone in its pod, valkey has the first address.
+		"notify": {{Listen: "127.64.0.1:6379", Host: "valkey", Port: 6379, Addon: "valkey"}},
+	} {
+		row := h.waitRows(env.ID, spec.KindService, svc, 1, 10*time.Second, "ready", ready)[0]
+		tmpl := row.Sandbox.PodTemplate
+		if tmpl == nil || !slices.Equal(tmpl.TLSBindings, want) {
+			t.Fatalf("%s's TLS bindings %+v, want %+v", svc, tmpl, want)
+		}
+	}
+	tmpl := h.waitRows(env.ID, spec.KindService, "catalog", 1, 10*time.Second, "ready", ready)[0].Sandbox.PodTemplate
+	for k, v := range map[string]string{
+		"DATABASE_URL": "postgres://catalog@127.64.0.1:5432/kino?sslmode=disable",
+		"VALKEY_URL":   "redis://127.64.0.2:6379/0",
+		"VALKEY_HOST":  "127.64.0.2",
+		"VALKEY_PORT":  "6379",
+	} {
+		if got := tmpl.Env[k]; len(got.Parts) != 1 || got.Parts[0].Value != v {
+			t.Errorf("%s = %+v, want %s", k, got, v)
+		}
+	}
+}
+
+// Valkey admits workloads by their certificates (ADR 0039): its tls step
+// gets a certificate of the addon's ID that is a client's too, the
+// addon's ID as its administrator, and a user per referencing workload,
+// named by its SPIFFE ID; a removed reference takes its user along; the
+// password of before is deleted once no instance names it.
+func TestValkeyCertificateAndUsers(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	execs := &execLog{}
+	n1.Script().SetExec(execs.fn)
+	env := h.newEnv("stage")
+	// What a valkey of before has: the default user's password.
+	old := "addon.valkey.password"
+	sealed, err := h.sealer.Seal([]byte("0123456789abcdef0123456789abcdef"), envdeps.SecretAAD(env.ID, old, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.InsertSecret(bg, store.EnvSecret{EnvID: env.ID, Name: old, Version: 1, Sealed: sealed,
+		System: true, CreatedBy: "ferund"}); err != nil {
+		t.Fatal(err)
+	}
+	r1 := h.apply(env.ID, kinoSpec(true))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
+	row := h.waitRows(env.ID, spec.KindAddon, "valkey", 1, 10*time.Second, "ready", ready)[0]
+	if row.Sandbox.Image != "valkey/valkey:9-alpine" || len(row.Sandbox.PodTemplate.Env) != 0 {
+		t.Fatalf("the addon runs %s with env %v", row.Sandbox.Image, row.Sandbox.PodTemplate.Env)
+	}
+
+	tlsSteps := func() []*containerv1.ExecRequest {
+		var out []*containerv1.ExecRequest
+		for _, s := range execs.step("tls") {
+			if s.Env["FERUN_VALKEY_ID"] != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	var st *containerv1.ExecRequest
+	eventually(t, 10*time.Second, "valkey's tls step", func() bool {
+		s := tlsSteps()
+		if len(s) == 0 {
+			return false
+		}
+		st = s[len(s)-1]
+		return true
+	})
+	self := pki.WorkloadID(testTD, env.Owner, env.ID, spec.KindAddon, "valkey")
+	if st.Env["FERUN_VALKEY_ID"] != self {
+		t.Errorf("the step's ID %q, want %s", st.Env["FERUN_VALKEY_ID"], self)
+	}
+	leaf := certOf(t, st.Env["FERUN_TLS_CERT"])
+	if len(leaf.URIs) != 1 || leaf.URIs[0].String() != self || len(leaf.DNSNames) != 0 || len(leaf.IPAddresses) != 0 {
+		t.Errorf("names: URIs %v, DNS %v, IP %v; want %s alone", leaf.URIs, leaf.DNSNames, leaf.IPAddresses, self)
+	}
+	inter := x509.NewCertPool()
+	inter.AddCert(h.iss.Certificate())
+	for _, usage := range []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth} {
+		if _, err := leaf.Verify(x509.VerifyOptions{Roots: h.iss.Bundle(), Intermediates: inter,
+			KeyUsages: []x509.ExtKeyUsage{usage}}); err != nil {
+			t.Errorf("verify for %v: %v", usage, err)
+		}
+	}
+	key, err := h.c.ResolveSecret(bg, env.ID, "addon.valkey.tls.key", 1)
+	if err != nil || st.Env["FERUN_TLS_KEY"] != key {
+		t.Fatalf("the step's key is not the credential: %v", err)
+	}
+	if st.Env["FERUN_TLS_CA"] != string(h.iss.TrustPEM()) {
+		t.Error("the step trusts something else than the platform's roots and issuer")
+	}
+	catalog := pki.WorkloadID(testTD, env.Owner, env.ID, spec.KindService, "catalog")
+	notify := pki.WorkloadID(testTD, env.Owner, env.ID, spec.KindService, "notify")
+	warm := pki.WorkloadID(testTD, env.Owner, env.ID, spec.KindJob, "warm")
+	acl := st.Env["FERUN_VALKEY_ACL"]
+	head := "user default off resetpass resetkeys resetchannels -@all\nuser " + self + " on resetpass ~* &* +@all\n"
+	if !strings.HasPrefix(acl, head) || strings.Count(acl, "\n") != 5 || strings.Contains(acl, "nopass") {
+		t.Errorf("users:\n%s", acl)
+	}
+	for _, u := range []string{catalog, notify, warm} {
+		if !strings.Contains(acl, "\nuser "+u+" on resetpass ~* &* +@all -@admin -migrate\n") {
+			t.Errorf("no user %s:\n%s", u, acl)
+		}
+	}
+	eventually(t, 10*time.Second, "the password of before deleted", func() bool {
+		_, err := h.st.GetSecret(bg, env.ID, old, 1)
+		return err != nil
+	})
+
+	// A removed reference takes its user along.
+	r2 := h.apply(env.ID, kinoSpec(false))
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
+	eventually(t, 10*time.Second, "the job's user gone", func() bool {
+		s := tlsSteps()
+		acl := s[len(s)-1].Env["FERUN_VALKEY_ACL"]
+		return !strings.Contains(acl, warm) && strings.Contains(acl, catalog) && strings.Contains(acl, notify)
+	})
 }

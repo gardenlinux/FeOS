@@ -152,6 +152,10 @@ type TLS struct {
 	// controller issues for the addon's ID; CAPEM is what it trusts of its
 	// clients (the platform's roots and the issuer).
 	CertPEM, CAPEM string
+	// ID is the addon's own SPIFFE ID, which its certificate carries: the
+	// administrator of an addon whose steps reach it as itself
+	// (CertificateServer.ProvisionsAsItself, ADR 0039).
+	ID string
 	// Grants are the deployment's references to the addon's roles: one
 	// per workload and role, sorted by workload, then role.
 	Grants []Grant
@@ -164,7 +168,8 @@ type Grant struct {
 	// (ADR 0036): wl-<32 hex> for a service or a job, wl-s-<id> for the
 	// sandbox an attached service runs in.
 	Workload string `json:"workload"`
-	// ID is the workload's SPIFFE ID, which the map names in a comment.
+	// ID is the workload's SPIFFE ID: the map names it in a comment
+	// (postgres), the user it becomes is named by it (valkey, ADR 0039).
 	ID string `json:"id"`
 	// Role is the role the reference names.
 	Role string `json:"role"`
@@ -179,6 +184,12 @@ type CertificateServer interface {
 	// GrantedRole is the role a reference to the addon grants the
 	// workload that holds it ("": none).
 	GrantedRole(ref Ref) string
+	// ProvisionsAsItself reports whether the addon's steps reach its
+	// server over TLS as the addon's own ID (TLS.ID), presenting the
+	// server certificate as a client's, which the controller then issues
+	// for ClientAuth too (valkey, which has no way in but a certificate,
+	// ADR 0039); false: they reach it otherwise (postgres: its socket).
+	ProvisionsAsItself() bool
 }
 
 // Instance is an addon's pod as its blueprint renders it.

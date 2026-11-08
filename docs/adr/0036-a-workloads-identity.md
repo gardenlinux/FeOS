@@ -176,9 +176,10 @@ ingress).
   either way, only signatures cross the vsock, and the plaintext stays
   where it is produced. One rule, not one per type.
 - The guest speaks no upstream's protocol: the connection is TLS from
-  its first byte, and the guest sends the upstream's ALPN. PostgreSQL
-  from 17 takes that with ALPN `postgresql`, Valkey takes TLS directly,
-  NATS with `handshake_first`. An upstream that negotiates TLS inside
+  its first byte, and the guest sends the upstream's ALPN, or none for
+  an upstream that has none. PostgreSQL from 17 takes that with ALPN
+  `postgresql`, Valkey takes TLS directly with none (ADR 0039), NATS
+  with `handshake_first`. An upstream that negotiates TLS inside
   its protocol, as PostgreSQL before 17 did with `SSLRequest`, is not
   reached through a binding (open question).
 - **The guest is FeID's first client.** Its bindings are the Rust

@@ -291,10 +291,12 @@ func (i *Issuer) IssuePod(csrDER []byte, spiffeID string, subject pkix.Name, dns
 // IssueAddonServer issues an addon's server certificate (ADR 0038) for
 // the public key pub, which the addon's own credential holds: the one URI
 // spiffeID (validated as a pod's), no DNS or IP name, the subject of a pod
-// certificate (PodSubject: pod and workload), ServerAuth only, valid for
-// ttl. The chain is leaf and issuer, PEM; the leaf is returned too, for
-// its lifetime.
-func (i *Issuer) IssueAddonServer(pub crypto.PublicKey, spiffeID, pod, workload string, ttl time.Duration) ([]byte, *x509.Certificate, error) {
+// certificate (PodSubject: pod and workload), ServerAuth, valid for ttl;
+// with self also ClientAuth, for an addon whose provisioning reaches it
+// as its own ID over TLS (valkey, ADR 0039). The chain is leaf and
+// issuer, PEM; the leaf is returned too, for its lifetime.
+func (i *Issuer) IssueAddonServer(pub crypto.PublicKey, spiffeID, pod, workload string, ttl time.Duration,
+	self bool) ([]byte, *x509.Certificate, error) {
 	if err := validatePodID(i.td, spiffeID); err != nil {
 		return nil, nil, err
 	}
@@ -309,10 +311,14 @@ func (i *Issuer) IssueAddonServer(pub crypto.PublicKey, spiffeID, pod, workload 
 	if err != nil {
 		return nil, nil, err
 	}
+	usage := []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	if self {
+		usage = append(usage, x509.ExtKeyUsageClientAuth)
+	}
 	leaf, err := i.sign(&x509.Certificate{
 		Subject:     subject,
 		URIs:        []*url.URL{u},
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		ExtKeyUsage: usage,
 	}, pub, ttl)
 	if err != nil {
 		return nil, nil, err

@@ -35,7 +35,8 @@ import (
 // issuer (*pki.Issuer).
 type AddonIssuer interface {
 	TrustDomain() string
-	IssueAddonServer(pub crypto.PublicKey, spiffeID, pod, workload string, ttl time.Duration) ([]byte, *x509.Certificate, error)
+	IssueAddonServer(pub crypto.PublicKey, spiffeID, pod, workload string, ttl time.Duration,
+		self bool) ([]byte, *x509.Certificate, error)
 	TrustPEM() []byte
 }
 
@@ -82,7 +83,8 @@ func publicOf(keyPEM string) (crypto.PublicKey, error) {
 
 // addonTLS is what instance cur of addon name is provisioned with: its
 // server certificate, issued when it has none, when its key differs or
-// when it is due, and the grants of the target's references.
+// when it is due (for ClientAuth too when its steps reach it as itself,
+// ADR 0039), its ID, and the grants of the target's references.
 func (c *Controller) addonTLS(ctx context.Context, v *view, name string, cs addons.CertificateServer,
 	cur store.EnvInstanceRow) (*addons.TLS, error) {
 	key, err := c.ResolveSecret(ctx, v.env.ID, addons.CredentialSecret(name, addons.TLSKey), 1)
@@ -90,6 +92,8 @@ func (c *Controller) addonTLS(ctx context.Context, v *view, name string, cs addo
 		return nil, err
 	}
 	pod := cur.Sandbox.ID
+	iss := c.d.Issuer
+	id := pki.WorkloadID(iss.TrustDomain(), v.env.Owner, v.env.ID, spec.KindAddon, name)
 	c.mu.Lock()
 	got, ok := c.addonCerts[pod]
 	c.mu.Unlock()
@@ -98,10 +102,8 @@ func (c *Controller) addonTLS(ctx context.Context, v *view, name string, cs addo
 		if err != nil {
 			return nil, err
 		}
-		iss := c.d.Issuer
-		id := pki.WorkloadID(iss.TrustDomain(), v.env.Owner, v.env.ID, spec.KindAddon, name)
 		chain, _, err := iss.IssueAddonServer(pub, id, pod.String(), model.WorkloadGroupID(v.env.ID, spec.KindAddon, name),
-			c.t.addonCertTTL)
+			c.t.addonCertTTL, cs.ProvisionsAsItself())
 		if err != nil {
 			return nil, err
 		}
@@ -116,8 +118,8 @@ func (c *Controller) addonTLS(ctx context.Context, v *view, name string, cs addo
 		c.mu.Unlock()
 		c.log.Info("addon certificate issued", "environment", v.env.ID, "addon", name, "sandbox", pod)
 	}
-	return &addons.TLS{CertPEM: got.chain, CAPEM: string(c.d.Issuer.TrustPEM()),
-		Grants: grantsOf(c.d.Issuer.TrustDomain(), v, name, cs)}, nil
+	return &addons.TLS{CertPEM: got.chain, CAPEM: string(iss.TrustPEM()), ID: id,
+		Grants: grantsOf(iss.TrustDomain(), v, name, cs)}, nil
 }
 
 // grantsOf are the grants of the target's references to addon name: per

@@ -116,8 +116,8 @@ const BUILTIN = [
   { type: 'postgres', versions: ['16', '17'], defaultVersion: '17', defaultPlan: 'small', plans: ['dev', 'small', 'medium', 'large'],
     outputKeys: ['host', 'port', 'user', 'password', 'database', 'url'], outputFields: ['role', 'database'],
     options: [opt('databases', 'list'), opt('roles', 'list')] },
-  { type: 'valkey', versions: ['7.2', '8'], defaultVersion: '8', defaultPlan: 'small', plans: ['dev', 'small', 'medium', 'large'],
-    outputKeys: ['host', 'port', 'user', 'password', 'url'], outputFields: [], options: [opt('maxmemoryPolicy', 'string')] },
+  { type: 'valkey', versions: ['9'], defaultVersion: '9', defaultPlan: 'small', plans: ['dev', 'small', 'medium', 'large'],
+    outputKeys: ['host', 'port', 'url'], outputFields: [], options: [opt('maxmemoryPolicy', 'string')] },
   { type: 'nats', versions: ['2'], defaultVersion: '2', defaultPlan: 'small', plans: ['dev', 'small'],
     outputKeys: ['host', 'port', 'user', 'password', 'url'], outputFields: [], options: [opt('jetstream', 'boolean', { default: true })] },
 ];

@@ -159,7 +159,7 @@ func TestEnvDeletion(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
-	r1 := h.apply(env.ID, `{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
+	r1 := h.apply(env.ID, `{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev"}},
 		"services":{"api":{"image":"`+testImage+`","replicas":2}}}`)
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 	var pods []podid.ID

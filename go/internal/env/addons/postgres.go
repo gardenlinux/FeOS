@@ -211,6 +211,10 @@ func (postgres) Credentials(Addon) []string { return []string{passwordKey, TLSKe
 // none, since the superuser is never mapped.
 func (postgres) GrantedRole(ref Ref) string { return ref.Fields["role"] }
 
+// ProvisionsAsItself: no, over its socket, peer-authenticated as root
+// (ADR 0038).
+func (postgres) ProvisionsAsItself() bool { return false }
+
 func (p postgres) Render(a Addon, _ Context) (Instance, error) {
 	if !slices.Contains(p.Versions(), a.Version) {
 		return Instance{}, fmt.Errorf("postgres: no version %q", a.Version)

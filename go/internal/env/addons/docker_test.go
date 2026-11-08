@@ -34,6 +34,7 @@ package addons
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -54,6 +55,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 )
 
@@ -331,12 +333,22 @@ func newTestPKI(t *testing.T) *testPKI {
 
 // leaf issues a certificate for usage to subject pod and workload with
 // the URI id: its PEM and its key's PKCS#8 PEM.
-func (p *testPKI) leaf(pod, workload, id string, usage x509.ExtKeyUsage) (certPEM, keyPEM string) {
+func (p *testPKI) leaf(pod, workload, id string, usage ...x509.ExtKeyUsage) (certPEM, keyPEM string) {
 	p.t.Helper()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		p.t.Fatal(err)
 	}
+	k, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	return p.issue(pub, pod, workload, id, usage), string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: k}))
+}
+
+// issue is a certificate's PEM for pub (leaf).
+func (p *testPKI) issue(pub crypto.PublicKey, pod, workload, id string, usage []x509.ExtKeyUsage) string {
+	p.t.Helper()
 	u, err := url.Parse(id)
 	if err != nil {
 		p.t.Fatal(err)
@@ -348,16 +360,26 @@ func (p *testPKI) leaf(pod, workload, id string, usage x509.ExtKeyUsage) (certPE
 	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: serial,
 		Subject: pkix.Name{CommonName: "run.test/" + pod, OrganizationalUnit: []string{workload}},
 		URIs:    []*url.URL{u}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}, p.root, pub, p.key)
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: usage}, p.root, pub, p.key)
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	k, err := x509.MarshalPKCS8PrivateKey(key)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+// leafFor is leaf for the key of keyPEM (a renewal): the certificate's
+// PEM and keyPEM.
+func (p *testPKI) leafFor(keyPEM, pod, workload, id string, usage ...x509.ExtKeyUsage) (certPEM, samePEM string) {
+	p.t.Helper()
+	b, _ := pem.Decode([]byte(keyPEM))
+	if b == nil {
+		p.t.Fatal("no key PEM")
+	}
+	k, err := x509.ParsePKCS8PrivateKey(b.Bytes)
 	if err != nil {
 		p.t.Fatal(err)
 	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
-		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: k}))
+	return p.issue(k.(ed25519.PrivateKey).Public(), pod, workload, id, usage), keyPEM
 }
 
 func (p *testPKI) rootPEM() string {
@@ -586,72 +608,297 @@ func waitSession(t *testing.T, lab *dockerLab, pod string) {
 	t.Fatal("no session over the network")
 }
 
+// TestValkeyDocker runs the blueprint as ADR 0039 has it, from the state
+// an addon of before has: valkey 8 with a password and data on the
+// volume. The addon, which still names 8, runs 9 on that volume, on its
+// socket alone until the step; after it, TLS 1.3 alone, and only a
+// workload's certificate gets in, as the user of its ID with the data
+// commands; nothing takes a password, and a removed grant's session ends.
 func TestValkeyDocker(t *testing.T) {
 	lab := newDockerLab(t, 2)
 	b, _ := Get("valkey")
-	for _, version := range b.Versions() {
-		t.Run(version, func(t *testing.T) {
-			a := addon(t, "cache", `{"type":"valkey","version":"`+version+`","plan":"dev",
-				"options":{"maxmemoryPolicy":"allkeys-lru"}}`)
-			if fs := b.Validate(nil, a); len(fs) != 0 {
-				t.Fatalf("findings:\n%s", findingText(fs))
-			}
-			creds := credentials(t, b, a)
-			c := Context{Env: "test", Name: a.Name}
-			inst, err := b.Render(a, c)
-			if err != nil {
-				t.Fatal(err)
-			}
-			lab.ensureImage(t, inst.Image)
-			pod := lab.start(t, "valkey"+version, inst, resolveEnv(t, inst.Env, creds), b.Plans()[a.Plan].MemoryMib,
-				lab.volume(t, inst.Image))
-			t.Logf("ready after %s", lab.waitReady(t, pod, inst.Probe).Round(time.Millisecond))
-			// The probe fails on a wrong password: valkey-cli exits 0 on
-			// NOAUTH, the grep does not.
-			if out, code := lab.exec(pod, map[string]string{"VALKEY_PASSWORD": "wrong"}, inst.Probe...); code == 0 {
-				t.Fatalf("the probe passed with a wrong password: %s", out)
-			} else {
-				t.Logf("the probe with a wrong password: exit %d: %s", code, strings.TrimSpace(out))
-			}
-			lab.provision(t, pod, b.Provision(a, c), creds)
-			lab.provision(t, pod, b.Provision(a, c), creds)
+	a := addon(t, "cache", `{"type":"valkey","version":"8","plan":"dev","options":{"maxmemoryPolicy":"allkeys-lru"}}`)
+	if fs := b.Validate(nil, a); len(fs) != 1 || fs[0].Severity != spec.SeverityWarning {
+		t.Fatalf("findings:\n%s", findingText(fs))
+	}
+	inst, err := b.Render(a, Context{Env: "test", Name: a.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lab.ensureImage(t, inst.Image)
+	dir := lab.volume(t, inst.Image)
 
-			c.Address = lab.address(t, pod)
-			cli := func(url string, args ...string) (string, int) {
-				out, code := lab.client("valkey-cli", inst.Image, append([]string{"--no-auth-warning", "-u", url}, args...)...)
-				return strings.TrimSpace(redact(out, creds)), code
-			}
-			u := outputURL(t, b, a, c, nil, creds)
-			t.Logf("url %s", redact(u, creds))
-			for _, check := range []struct {
-				args []string
-				want string
-			}{
-				{[]string{"ping"}, "PONG"},
-				{[]string{"set", "persisted", "yes"}, "OK"},
-				{[]string{"get", "persisted"}, "yes"},
-				{[]string{"config", "get", "maxmemory"}, "maxmemory\n" + strconv.Itoa(89<<20)},
-				{[]string{"config", "get", "maxmemory-policy"}, "maxmemory-policy\nallkeys-lru"},
-				{[]string{"config", "get", "appendonly"}, "appendonly\nyes"},
-				{[]string{"config", "get", "dir"}, "dir\n/data"},
-				{[]string{"acl", "whoami"}, "default"},
-			} {
-				if out, code := cli(u, check.args...); code != 0 || out != check.want {
-					t.Fatalf("%v: exit %d: %q, want %q", check.args, code, out, check.want)
-				}
-			}
-			if out, _ := cli(outputURL(t, b, a, c, nil, map[string]string{"password": "wrong"}), "ping"); out == "PONG" ||
-				!strings.Contains(out, "WRONGPASS") {
-				t.Fatalf("a wrong password: %s", out)
-			} else {
-				t.Logf("a wrong password: %s", strings.ReplaceAll(out, "\n", " / "))
-			}
-			// The entrypoint dropped to valkey and handed /data to it.
-			if out, code := lab.exec(pod, nil, "stat", "-c", "%U", "/data/appendonlydir"); code != 0 ||
-				strings.TrimSpace(out) != "valkey" {
-				t.Fatalf("appendonlydir: exit %d: %s", code, out)
-			}
-		})
+	// Before: valkey 8 as the blueprint ran it until ADR 0039, its
+	// password the default user's, with data.
+	const before = "valkey/valkey:8-alpine"
+	lab.ensureImage(t, before)
+	password := randomHex(t, 16)
+	old := lab.start(t, "valkey8", Instance{Image: before, Mount: "/data"}, map[string]string{
+		"VALKEY_EXTRA_FLAGS": "--appendonly yes --requirepass " + password + " --maxmemory 89mb --maxmemory-policy allkeys-lru",
+		"REDISCLI_AUTH":      password,
+	}, 128, dir)
+	lab.waitReady(t, old, []string{"sh", "-c", "valkey-cli ping | grep -qx PONG"})
+	if out, code := lab.exec(old, nil, "valkey-cli", "set", "persisted", "yes"); code != 0 || strings.TrimSpace(out) != "OK" {
+		t.Fatalf("set before: exit %d: %s", code, out)
+	}
+	lab.must(t, time.Minute, "stop", old)
+
+	creds := credentials(t, b, a)
+	pod := lab.start(t, "valkey", inst, resolveEnv(t, inst.Env, creds), b.Plans()[a.Plan].MemoryMib, dir)
+	t.Logf("ready after %s", lab.waitReady(t, pod, inst.Probe).Round(time.Millisecond))
+	addr := lab.address(t, pod)
+	if out, code := lab.exec(pod, nil, "valkey-server", "--version"); code != 0 || !strings.Contains(out, "v=9.") {
+		t.Fatalf("version: %s", out)
+	}
+	// Until the step, nothing listens but the socket.
+	if out, code := lab.client("valkey-cli", inst.Image, "-h", addr, "-p", "6379", "ping"); code == 0 ||
+		!strings.Contains(out, "Connection refused") {
+		t.Fatalf("before the step, from the network: exit %d: %s", code, out)
+	}
+
+	ca := newTestPKI(t)
+	const (
+		addonID   = "spiffe://run.test/tenant/t/env/e/addon/cache"
+		catalogID = "spiffe://run.test/tenant/t/env/e/service/catalog"
+		sandboxID = "spiffe://run.test/tenant/t/env/e/sandbox/xmxfgckmkt6"
+		catalogWL = "wl-0123456789abcdef0123456789abcdef"
+		sandboxWL = "wl-s-xmxfgckmkt6"
+	)
+	serverCert, serverKey := ca.leaf("vkpod", "wl-00000000000000000000000000000000", addonID,
+		x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth)
+	creds[TLSKey] = serverKey
+	grants := []Grant{
+		{Workload: catalogWL, ID: catalogID, Role: "data"},
+		{Workload: sandboxWL, ID: sandboxID, Role: "data"},
+	}
+	c := Context{Env: "test", Name: a.Name, Address: addr,
+		TLS: &TLS{CertPEM: serverCert, CAPEM: ca.rootPEM(), ID: addonID, Grants: grants}}
+	steps := b.Provision(a, c)
+	if len(steps) != 1 {
+		t.Fatalf("steps %v", steps)
+	}
+	lab.provision(t, pod, steps, creds)
+	lab.provision(t, pod, steps, creds) // idempotent, silent
+	lab.waitReady(t, pod, inst.Probe)
+
+	certs := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(certs, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("root.crt", ca.rootPEM())
+	for _, w := range []struct{ name, pod, workload, id string }{
+		{"catalog", "pod1", catalogWL, catalogID},
+		{"sandbox", "xmxfgckmkt6", sandboxWL, sandboxID},
+		// Another workload: the same name in another environment.
+		{"else", "pod2", "wl-ffffffffffffffffffffffffffffffff", "spiffe://run.test/tenant/u/env/f/service/catalog"},
+		// The addon's own ID, by a pod of elsewhere: only a certificate
+		// with ClientAuth.
+		{"self", "pod3", "wl-00000000000000000000000000000000", addonID},
+	} {
+		crt, key := ca.leaf(w.pod, w.workload, w.id, x509.ExtKeyUsageClientAuth)
+		write(w.name+".crt", crt)
+		write(w.name+".key", key)
+	}
+	// The catalog's ID under another root.
+	other := newTestPKI(t)
+	strCert, strKey := other.leaf("pod1", catalogWL, catalogID, x509.ExtKeyUsageClientAuth)
+	write("stranger.crt", strCert)
+	write("stranger.key", strKey)
+	// What a workload's certificate cannot be: the server's, ServerAuth
+	// alone.
+	srvCert, srvKey := ca.leaf("vkpod", "wl-00000000000000000000000000000000", catalogID, x509.ExtKeyUsageServerAuth)
+	write("server-only.crt", srvCert)
+	write("server-only.key", srvKey)
+
+	// TLS from the first byte, no ALPN: what the guest's binding does.
+	tls := func(who string, args ...string) (string, int) {
+		all := []string{"--tls", "--cacert", "/c/root.crt", "-h", addr, "-p", "6379"}
+		if who != "" {
+			all = append(all, "--cert", "/c/"+who+".crt", "--key", "/c/"+who+".key")
+		}
+		out, code := lab.clientWith(certs, "valkey-cli", inst.Image, append(all, args...)...)
+		return strings.TrimSpace(redact(out, creds)), code
+	}
+	for _, check := range []struct {
+		who  string
+		args []string
+		want string
+	}{
+		{"catalog", []string{"acl", "whoami"}, catalogID},
+		{"catalog", []string{"get", "persisted"}, "yes"}, // 8's data, in 9
+		{"catalog", []string{"set", "k", "v"}, "OK"},
+		{"catalog", []string{"eval", "return redis.call('incr', KEYS[1])", "1", "n"}, "1"},
+		{"catalog", []string{"client", "setname", "catalog"}, "OK"},
+		{"sandbox", []string{"acl", "whoami"}, sandboxID},
+		{"sandbox", []string{"get", "k"}, "v"},
+	} {
+		if out, code := tls(check.who, check.args...); code != 0 || out != check.want {
+			t.Fatalf("%s %v: exit %d: %q, want %q", check.who, check.args, code, out, check.want)
+		}
+	}
+	// The data commands, not the administrative ones.
+	for _, args := range [][]string{
+		{"config", "get", "dir"}, {"config", "set", "tls-auth-clients", "no"}, {"acl", "setuser", "default", "on", "nopass"},
+		{"acl", "list"}, {"acl", "load"}, {"client", "list"}, {"monitor"}, {"shutdown"}, {"debug", "sleep", "0"},
+		{"bgsave"}, {"replicaof", "fd00::1", "6379"}, {"module", "list"},
+		{"migrate", "fd00::1", "6379", "k", "0", "1000"},
+	} {
+		// DEBUG and MODULE are off for everyone (enable-*-command no), before
+		// any user's rights.
+		if out, _ := tls("catalog", args...); !strings.Contains(out, "NOPERM") && !strings.Contains(out, "command not allowed") {
+			t.Fatalf("catalog %v: %s", args, out)
+		}
+	}
+	for _, refused := range []struct {
+		name string
+		who  string
+		args []string
+		says string
+	}{
+		{"another workload", "else", []string{"get", "k"}, "NOAUTH"},
+		{"AUTH as the default user", "else", []string{"--user", "default", "--pass", password, "get", "k"},
+			"WRONGPASS"},
+		{"the password of before", "else", []string{"--pass", password, "get", "k"}, "WRONGPASS"},
+		{"a granted user by a password", "else", []string{"--user", catalogID, "--pass", "x", "get", "k"}, "WRONGPASS"},
+		// The handshake fails: the connection is closed or reset.
+		{"no certificate", "", []string{"ping"}, "Error: "},
+		{"another root", "stranger", []string{"ping"}, "Error: "},
+		{"a server's certificate", "server-only", []string{"ping"}, "Error: "},
+	} {
+		out, _ := tls(refused.who, refused.args...)
+		if !strings.Contains(out, refused.says) || strings.Contains(out, "\nv\n") || out == "v" || out == "PONG" {
+			t.Fatalf("%s: %s", refused.name, out)
+		}
+		t.Logf("%s: %s", refused.name, strings.ReplaceAll(out, "\n", " / "))
+	}
+	// The addon's own ID is its administrator's, whoever holds a
+	// certificate of it; the network reaches the port from no other pod
+	// than the references' (ADR 0034), and no other pod has the ID.
+	if out, code := tls("self", "acl", "whoami"); code != 0 || out != addonID {
+		t.Fatalf("the addon's own ID: exit %d: %s", code, out)
+	}
+	// Plaintext to the TLS port, the reference's url without its binding,
+	// and the url of before.
+	for _, u := range []string{"redis://[" + addr + "]:6379/0", "redis://default:" + password + "@[" + addr + "]:6379/0"} {
+		out, _ := lab.client("valkey-cli", inst.Image, "--no-auth-warning", "-u", u, "get", "k")
+		if strings.Contains(out, "\nv") || strings.TrimSpace(out) == "v" {
+			t.Fatalf("plaintext %s: %s", redact(u, creds), out)
+		}
+		t.Logf("plaintext: %s", strings.ReplaceAll(strings.TrimSpace(redact(out, map[string]string{"p": password})), "\n", " / "))
+	}
+	// TLS 1.2 is refused; an ALPN offer is ignored (Valkey has none), and
+	// the guest makes none.
+	sclient := func(args ...string) string {
+		out, _ := lab.clientWith(certs, "sh", inst.Image, "-c", `printf 'PING\r\n' | timeout 5 openssl s_client -connect "[`+
+			addr+`]:6379" -CAfile /c/root.crt -cert /c/catalog.crt -key /c/catalog.key `+strings.Join(args, " ")+` 2>&1`)
+		return out
+	}
+	if out := sclient("-tls1_2"); !strings.Contains(out, "alert protocol version") {
+		t.Fatalf("TLS 1.2: %s", out)
+	}
+	if out := sclient("-tls1_3", "-alpn", "redis"); !strings.Contains(out, "Protocol: TLSv1.3") ||
+		!strings.Contains(out, "No ALPN negotiated") || !strings.Contains(out, "Verification: OK") {
+		t.Fatalf("an ALPN offer: %s", out)
+	}
+	admin := func(args ...string) (string, int) {
+		out, code := lab.exec(pod, nil, append([]string{"valkey-cli", "--tls", "--insecure", "--cert", valkeyDir + "/server.crt",
+			"--key", valkeyDir + "/server.key", "-h", "127.0.0.1", "-p", "6379"}, args...)...)
+		return strings.TrimSpace(out), code
+	}
+	for _, check := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"config", "get", "maxmemory"}, "maxmemory\n" + strconv.Itoa(89<<20)},
+		{[]string{"config", "get", "maxmemory-policy"}, "maxmemory-policy\nallkeys-lru"},
+		{[]string{"config", "get", "appendonly"}, "appendonly\nyes"},
+		{[]string{"config", "get", "port"}, "port\n0"},
+		{[]string{"config", "get", "tls-port"}, "tls-port\n6379"},
+		{[]string{"config", "get", "protected-mode"}, "protected-mode\nyes"},
+		{[]string{"acl", "users"}, "default\n" + addonID + "\n" + sandboxID + "\n" + catalogID}, // sorted
+	} {
+		if out, code := admin(check.args...); code != 0 || out != check.want {
+			t.Fatalf("%v: exit %d: %q, want %q", check.args, code, out, check.want)
+		}
+	}
+	// The socket takes no one either, now.
+	if out, _ := lab.exec(pod, nil, "valkey-cli", "-s", valkeySocket, "get", "k"); !strings.Contains(out, "NOAUTH") {
+		t.Fatalf("the socket: %s", out)
+	}
+
+	// A removed grant: its session ends with the step, and it gets in no
+	// more; the others' stay.
+	session := lab.network + "-session"
+	lab.must(t, time.Minute, "run", "-d", "--name", session, "--label", dockerLabel, "--network", lab.network,
+		"-v", certs+":/c:ro", "--entrypoint", "valkey-cli", inst.Image, "--tls", "--cacert", "/c/root.crt",
+		"--cert", "/c/sandbox.crt", "--key", "/c/sandbox.key", "-h", addr, "-p", "6379", "blpop", "never", "120")
+	t.Cleanup(func() { lab.docker(time.Minute, "rm", "-f", session) })
+	for begin := time.Now(); ; time.Sleep(200 * time.Millisecond) {
+		if out, _ := admin("client", "list"); strings.Contains(out, "user="+sandboxID) {
+			break
+		}
+		if time.Since(begin) > 30*time.Second {
+			t.Fatal("no session of the sandbox")
+		}
+	}
+	c.TLS.Grants = grants[:1]
+	lab.provision(t, pod, b.Provision(a, c), creds)
+	if out, _, _ := lab.docker(time.Minute, "wait", session); strings.TrimSpace(out) == "0" {
+		logs, _, _ := lab.docker(time.Minute, "logs", session)
+		t.Fatalf("the removed grant's session outlived it: %s", logs)
+	}
+	if out, _ := tls("sandbox", "get", "k"); !strings.Contains(out, "NOAUTH") {
+		t.Fatalf("the removed grant: %s", out)
+	}
+	if out, code := tls("catalog", "get", "k"); code != 0 || out != "v" {
+		t.Fatalf("the kept grant: exit %d: %s", code, out)
+	}
+
+	// A renewed certificate is in effect at once, without a restart.
+	serial := func() string {
+		out, _ := lab.clientWith(certs, "sh", inst.Image, "-c", `printf '' | timeout 5 openssl s_client -connect "[`+addr+
+			`]:6379" -cert /c/catalog.crt -key /c/catalog.key 2>/dev/null | openssl x509 -noout -serial`)
+		return strings.TrimSpace(out)
+	}
+	was := serial()
+	renewed, _ := ca.leafFor(serverKey, "vkpod", "wl-00000000000000000000000000000000", addonID,
+		x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth)
+	c.TLS.CertPEM = renewed
+	lab.provision(t, pod, b.Provision(a, c), creds)
+	if now := serial(); now == was || !strings.HasPrefix(now, "serial=") {
+		t.Fatalf("the server's certificate after the renewal: %s, before %s", now, was)
+	}
+
+	// A node-side stop is a kill: TLS and the users from the volume, the
+	// same data, and the steps still silent.
+	lab.must(t, time.Minute, "kill", pod)
+	restarted := time.Now().UTC().Format(time.RFC3339Nano)
+	lab.must(t, time.Minute, "start", pod)
+	lab.waitReady(t, pod, inst.Probe)
+	addr = lab.address(t, pod)
+	c.Address = addr
+	if out, code := tls("catalog", "get", "k"); code != 0 || out != "v" {
+		t.Fatalf("after a restart: exit %d: %s", code, out)
+	}
+	lab.provision(t, pod, b.Provision(a, c), creds)
+	for range 3 {
+		lab.waitReady(t, pod, inst.Probe)
+	}
+	// Neither the probe, which ran all along, nor the steps, nor a
+	// workload's session leave a complaint in the log.
+	logs, logErr, _ := lab.docker(time.Minute, "logs", "--since", restarted, pod)
+	for _, line := range strings.Split(logs+logErr, "\n") {
+		if strings.Contains(line, "Error") || strings.Contains(line, "ACL") || strings.Contains(line, "Unable") {
+			t.Fatalf("a complaint in the log after the restart: %s\n%s%s", line, logs, logErr)
+		}
+	}
+	// The entrypoint dropped to valkey and handed /data to it.
+	if out, code := lab.exec(pod, nil, "stat", "-c", "%U %a", "/data/appendonlydir", valkeyDir, valkeyDir+"/server.key",
+		valkeyDir+"/users.acl"); code != 0 || strings.Fields(out)[0] != "valkey" ||
+		strings.Join(strings.Fields(out), " ") != "valkey 700 valkey 700 valkey 600 valkey 600" {
+		t.Fatalf("owners and modes: exit %d: %s", code, out)
 	}
 }
 

@@ -62,7 +62,7 @@ func (c *Controller) ResolveSecret(ctx context.Context, envID uuid.UUID, name st
 }
 
 // credentialBytes is how many random bytes a credential has: 32 hex
-// characters, which survive word splitting (valkey's flags).
+// characters, which survive word splitting and need no quoting.
 const credentialBytes = 16
 
 // newCredential is a fresh credential value.

@@ -735,19 +735,21 @@ func TestProbeBusyIsInconclusive(t *testing.T) {
 }
 
 // An addon whose address changes (restored on another node) gives its
-// dependents a new template: they roll as for a change of T, surge 1,
+// dependents a new template where a value names the address (nats; a
+// reference through a TLS binding names the loopback address and the
+// addon's name, ADR 0039): they roll as for a change of T, surge 1,
 // without a new deployment.
 func TestAddonAddressRollsDependents(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
 	env := h.newEnv("stage")
-	r1 := h.apply(env.ID, valkeySpec)
+	r1 := h.apply(env.ID, `{"addons":{"cache":{"type":"nats","version":"2","plan":"dev"}}}`)
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 	addon := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	// n1 takes no other pod: the service goes to n2.
 	h.exec(`UPDATE nodes SET slots = 1 WHERE name = 'n1'`)
 	h.addNode("n2")
-	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
+	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"nats","version":"2","plan":"dev"}},
 		"services":{"web":{"image":%q,"env":{"CACHE":{"addon":"cache","key":"url"}}}}}`, testImage))
 	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
@@ -862,7 +864,7 @@ func TestRunJobNotReady(t *testing.T) {
 	h := newHarness(t, options{noSealer: true})
 	h.addNode("n1")
 	env := h.newEnv("stage")
-	h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
+	h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev"}},
 		"jobs":{"once":{"image":%q,"on":"manual","env":{"CACHE":{"addon":"cache","key":"url"}}}}}`, testImage))
 	err := h.c.RunJob(bg, env.ID, "once")
 	if !errors.Is(err, ErrNotReady) || err.Error() != "job once cannot run yet: waits for the address of addon cache" {

@@ -274,7 +274,7 @@ func TestAddonWithoutSealer(t *testing.T) {
 	}
 }
 
-const valkeySpec = `{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}}}`
+const valkeySpec = `{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev"}}}`
 
 // An addon whose row goes is inserted again on its volume's node once the
 // old pod let go of the volume; a node without the volume fails the
@@ -326,14 +326,15 @@ func TestAddonVolumeUnavailable(t *testing.T) {
 
 // cacheWebSpec is a valkey addon and a service web that renders its URL.
 func cacheWebSpec() string {
-	return fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
+	return fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev"}},
 		"services":{"web":{"image":%q,"env":{"CACHE":{"addon":"cache","key":"url"}}}}}`, testImage)
 }
 
 // An addon whose pod a node that is up no longer has (its row lost with
 // lost_from empty) is replaced on that node once the node reports the
 // volume free (§13.7): the new row is pinned there and holds the same
-// volume, and its new address rolls the dependents.
+// volume. Its new address rolls no dependent that reaches it through a
+// TLS binding, which dials it by name (ADR 0039).
 func TestAddonLostOnLiveNode(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
@@ -379,14 +380,14 @@ func TestAddonLostOnLiveNode(t *testing.T) {
 	if nv := n1.Volumes(); len(nv) != 1 || nv[0].VolumeId != vol.VolumeID.String() || nv[0].PodId != second.Sandbox.ID.String() {
 		t.Errorf("the node's volumes %v", nv)
 	}
-	eventually(t, 60*time.Second, "web rolled to the new address", func() bool {
+	never(t, 5*time.Second, "web rolled for the new address", func() bool {
 		rows := h.rowsOf(env.ID, spec.KindService, "web")
-		if len(rows) != 1 || rows[0].Sandbox.ID == web.Sandbox.ID || !ready(rows[0]) {
-			return false
-		}
-		p := h.pod("n1", rows[0].Sandbox.ID)
-		return p != nil && strings.Contains(p.Spec.Containers[0].Env["CACHE"], "["+second.Sandbox.Address+"]")
+		return len(rows) != 1 || rows[0].Sandbox.ID != web.Sandbox.ID
 	})
+	if p := h.pod("n1", web.Sandbox.ID); p == nil || p.Spec.Containers[0].Env["CACHE"] != "redis://127.64.0.1:6379/0" ||
+		len(p.Spec.TlsBindings) != 1 || p.Spec.TlsBindings[0].Host != "cache" {
+		t.Errorf("web's pod %+v", p)
+	}
 	for _, i := range h.incidents(env.ID, false) {
 		if i.Condition == model.ConditionVolumeUnavailable {
 			t.Errorf("incident %+v", i)
@@ -420,7 +421,7 @@ func TestAddonLostOnLiveNodeRecreated(t *testing.T) {
 	if sb, _ := h.st.GetSandbox(bg, first.Sandbox.ID); sb.ClientState != model.StateLost {
 		t.Fatalf("the addon is %s after the sync", sb.ClientState)
 	}
-	r2 := h.apply(env.ID, `{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev",
+	r2 := h.apply(env.ID, `{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev",
 		"options":{"maxmemoryPolicy":"allkeys-lru"}}}}`)
 	h.exec(`UPDATE nodes SET draining = false, drain_started_at = NULL WHERE name = 'n1'`)
 	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
@@ -537,7 +538,7 @@ func TestAddonReadyOnlyWhileLive(t *testing.T) {
 		return nil
 	})
 	h.exec(`UPDATE sandboxes SET client_state = 'unknown', status_description = 'out of touch' WHERE id = $1`, addon.Sandbox.ID)
-	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
+	r2 := h.apply(env.ID, fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev"}},
 		"jobs":{"migrate":{"image":%q,"command":["/app","migrate"]}}}`, testImage))
 	never(t, 4*time.Second, "the deploy job started while its addon is unknown", func() bool {
 		return len(h.rowsOf(env.ID, spec.KindJob, "migrate")) > 0
@@ -702,41 +703,37 @@ func TestVolumeOfRemovedNode(t *testing.T) {
 	}
 }
 
-// cacheServiceSpec is a valkey addon of version and a service web of
-// version (which a new template rolls).
-func cacheServiceSpec(valkey, web string) string {
-	return fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":%q,"plan":"dev"}},
-		"services":{"web":{"image":%q,"command":["/app"],"env":{"VERSION":%q}}}}`, valkey, testImage, web)
+// cacheServiceSpec is a valkey addon with the maxmemory policy policy
+// and a service web of version (which a new template rolls).
+func cacheServiceSpec(policy, web string) string {
+	return fmt.Sprintf(`{"addons":{"cache":{"type":"valkey","version":"9","plan":"dev","options":{"maxmemoryPolicy":%q}}},
+		"services":{"web":{"image":%q,"command":["/app"],"env":{"VERSION":%q}}}}`, policy, testImage, web)
 }
 
-// A deployment that upgraded an addon and then failed (a service's new
-// instance crashed) keeps the addon as it recreated it: T falls back to
-// the deployed deployment, whose older version is never started again on
-// the data the newer one wrote, and the addon is not recreated a second
-// time; the volume records the version that ran on it.
+// A deployment that changed an addon's pod and then failed (a service's
+// new instance crashed) keeps the addon as it recreated it: T falls back
+// to the deployed deployment, and the addon is not recreated a second
+// time, for a second downtime (or, for a version, an older one on the
+// data the newer one wrote).
 func TestFailedDeploymentKeepsAddon(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	env := h.newEnv("stage")
-	r1 := h.apply(env.ID, cacheServiceSpec("7.2", "1"))
+	r1 := h.apply(env.ID, cacheServiceSpec("noeviction", "1"))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
 	old := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 10*time.Second, "ready", ready)[0]
 	web := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0]
-	if vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache"); err != nil || vol.AddonType != "valkey" || vol.DataVersion != "7.2" {
+	if vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache"); err != nil || vol.AddonType != "valkey" || vol.DataVersion != "9" {
 		t.Fatalf("volume %+v %v", vol, err)
 	}
 
-	r2 := h.apply(env.ID, cacheServiceSpec("8", "2"))
-	upgraded := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 60*time.Second, "upgraded", func(r store.EnvInstanceRow) bool {
+	r2 := h.apply(env.ID, cacheServiceSpec("allkeys-lru", "2"))
+	upgraded := h.waitRows(env.ID, spec.KindAddon, "cache", 1, 60*time.Second, "recreated", func(r store.EnvInstanceRow) bool {
 		return r.Sandbox.ID != old.Sandbox.ID && ready(r)
 	})[0]
-	if upgraded.Sandbox.Image != "valkey/valkey:8-alpine" {
-		t.Fatalf("the upgraded addon's image %s", upgraded.Sandbox.Image)
+	if c := upgraded.Sandbox.PodTemplate.Command; len(c) == 0 || !strings.Contains(c[len(c)-1], "--maxmemory-policy allkeys-lru") {
+		t.Fatalf("the recreated addon's command %q", c)
 	}
-	eventually(t, 30*time.Second, "the volume's data version 8", func() bool {
-		vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache")
-		return err == nil && vol.DataVersion == "8"
-	})
 	// The new web instance crashes: R fails.
 	for i := 1; i <= 3; i++ {
 		var id podid.ID
@@ -768,7 +765,7 @@ func TestFailedDeploymentKeepsAddon(t *testing.T) {
 			rows[0].Instance.TemplateHash != upgraded.Instance.TemplateHash
 	})
 	vol, err := h.st.GetEnvVolume(bg, env.ID, "addon/cache")
-	if err != nil || vol.Holder != upgraded.Sandbox.ID || vol.DataVersion != "8" {
+	if err != nil || vol.Holder != upgraded.Sandbox.ID || vol.DataVersion != "9" {
 		t.Fatalf("volume %+v %v", vol, err)
 	}
 	for _, i := range h.incidents(env.ID, true) {
@@ -803,9 +800,10 @@ func TestAddonTypeChange(t *testing.T) {
 		})
 		return vol
 	}
-	password := func() string {
+	// The credential both types have: the server's key (ADR 0038, 0039).
+	key := func() string {
 		t.Helper()
-		v, err := h.c.ResolveSecret(bg, env.ID, "addon.db.password", 1)
+		v, err := h.c.ResolveSecret(bg, env.ID, "addon.db.tls.key", 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -813,13 +811,13 @@ func TestAddonTypeChange(t *testing.T) {
 	}
 	r1 := h.apply(env.ID, pg("16"))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 60*time.Second)
-	v1, p1 := volume("postgres", "16"), password()
+	v1, k1 := volume("postgres", "16"), key()
 
-	r2 := h.apply(env.ID, `{"addons":{"db":{"type":"valkey","version":"8","plan":"dev"}}}`)
+	r2 := h.apply(env.ID, `{"addons":{"db":{"type":"valkey","version":"9","plan":"dev"}}}`)
 	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
-	v2, p2 := volume("valkey", "8"), password()
-	if v2.VolumeID == v1.VolumeID || p2 == p1 {
-		t.Fatalf("valkey has postgres's volume or password: %+v", v2)
+	v2, k2 := volume("valkey", "9"), key()
+	if v2.VolumeID == v1.VolumeID || k2 == k1 {
+		t.Fatalf("valkey has postgres's volume or key: %+v", v2)
 	}
 	row := h.waitRows(env.ID, spec.KindAddon, "db", 1, 10*time.Second, "ready", ready)[0]
 	if row.Sandbox.PodTemplate.Volumes[0].VolumeID != v2.VolumeID {

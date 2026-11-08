@@ -28,7 +28,7 @@ func TestIssueAddonServer(t *testing.T) {
 	}
 	const workload = "wl-0123456789abcdef0123456789abcdef"
 	before := time.Now()
-	chain, leaf, err := iss.IssueAddonServer(pub, id, "xmxfgckmkt6", workload, 24*time.Hour)
+	chain, leaf, err := iss.IssueAddonServer(pub, id, "xmxfgckmkt6", workload, 24*time.Hour, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +78,37 @@ func TestIssueAddonServer(t *testing.T) {
 		{id, "p,OU=wl-x", workload},
 		{id, "p", "wl-x,CN=y"},
 	} {
-		if _, _, err := iss.IssueAddonServer(pub, bad.id, bad.pod, bad.workload, time.Hour); err == nil {
+		if _, _, err := iss.IssueAddonServer(pub, bad.id, bad.pod, bad.workload, time.Hour, false); err == nil {
 			t.Errorf("IssueAddonServer(%s, %q, %q) issued", bad.id, bad.pod, bad.workload)
 		}
+	}
+}
+
+// An addon that its steps reach as itself (valkey, ADR 0039) gets a
+// certificate that is a client's too, and nothing else changes.
+func TestIssueAddonServerForItself(t *testing.T) {
+	iss, _ := newCA(t)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := WorkloadID(testTD, "acme", uuid.MustParse("01a196e9-4ac8-71a8-94d7-f6aa5688b1fc"), "addon", "cache")
+	const workload = "wl-0123456789abcdef0123456789abcdef"
+	_, leaf, err := iss.IssueAddonServer(pub, id, "xmxfgckmkt6", workload, time.Hour, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leaf.ExtKeyUsage) != 2 || leaf.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth ||
+		leaf.ExtKeyUsage[1] != x509.ExtKeyUsageClientAuth {
+		t.Errorf("EKU %v, want ServerAuth and ClientAuth", leaf.ExtKeyUsage)
+	}
+	for _, usage := range []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth} {
+		if err := verifyLeaf(iss, leaf, usage); err != nil {
+			t.Errorf("verify for %v: %v", usage, err)
+		}
+	}
+	if len(leaf.URIs) != 1 || leaf.URIs[0].String() != id || len(leaf.DNSNames) != 0 || len(leaf.IPAddresses) != 0 ||
+		leaf.Subject.String() != "CN="+testTD+"/xmxfgckmkt6,OU="+workload {
+		t.Errorf("names %v %v %v, subject %q", leaf.URIs, leaf.DNSNames, leaf.IPAddresses, leaf.Subject)
 	}
 }

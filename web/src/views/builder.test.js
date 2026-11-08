@@ -317,7 +317,7 @@ describe('catalog', () => {
     expect(c.builtin).toBe(false);
     expect(c.types.map((t) => t.type)).toEqual(['nats', 'postgres', 'valkey']);
     expect(pg.plans.map((p) => p.name)).toEqual(['dev', 'small', 'medium', 'large']);
-    expect(pg.outputs).toEqual(['host', 'port', 'user', 'password', 'database', 'url']);
+    expect(pg.outputs).toEqual(['host', 'port', 'user', 'database', 'url']);
     expect(pg.fields).toEqual(['role', 'database']);
     expect(pg.options.map((o) => [o.name, o.kind, o.unique])).toEqual([['databases', 'list', true], ['roles', 'list', true]]);
     expect(c.byType.get('valkey').options[0]).toMatchObject({ kind: 'oneOf', default: 'noeviction' });
@@ -326,7 +326,7 @@ describe('catalog', () => {
     expect(planText(pg.plans[1])).toBe('small · 1 vCPU, 1024 MiB, volume 10 GiB');
     // defaultVersion is what a new addon is offered.
     expect(newAddon(pg)).toEqual({ type: 'postgres', version: '17', plan: 'small' });
-    expect(newAddon(c.byType.get('valkey'))).toEqual({ type: 'valkey', version: '8', plan: 'small' });
+    expect(newAddon(c.byType.get('valkey'))).toEqual({ type: 'valkey', version: '9', plan: 'small' });
     expect(readCatalog({})).toBeNull();
     expect(readCatalog([{ type: 'a' }])).toBeNull();
     expect(readCatalog({ addons: [{ type: 'a', options: [{ name: 'x', kind: 'map' }] }] }).byType.get('a').options[0].kind).toBe('json');

@@ -140,10 +140,9 @@
       {
         "type": "valkey",
         "versions": [
-          "7.2",
-          "8"
+          "9"
         ],
-        "defaultVersion": "8",
+        "defaultVersion": "9",
         "plans": [
           {
             "name": "dev",
@@ -174,8 +173,6 @@
         "outputKeys": [
           "host",
           "port",
-          "user",
-          "password",
           "url"
         ],
         "outputFields": [],

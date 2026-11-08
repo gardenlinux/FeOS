@@ -40,7 +40,7 @@ const (
 func ingressSpec(replicas int, routes ...string) string {
 	return fmt.Sprintf(`{"services":{"web":{"image":%q,"command":["/app"],"replicas":%d,
 		"ports":[{"name":"http","port":8080},{"name":"admin","port":9090}]}},
-		"addons":{"cache":{"type":"valkey","version":"8","plan":"dev"}},
+		"addons":{"cache":{"type":"valkey","version":"9","plan":"dev"}},
 		"jobs":{"once":{"image":%q,"on":"manual"}},
 		"routes":{%s}}`, testImage, replicas, testImage, strings.Join(routes, ","))
 }
