@@ -61,6 +61,10 @@ pub fn audit_kind(kind: &str) -> Option<&'static str> {
         HTTP_TYPE => Some("http_request"),
         "token" => Some("token"),
         "bindings" => Some("bindings"),
+        // FeID's signer (ADR 0014): a signature or its refusal, and a
+        // library's report of a handshake.
+        "tls_signature" => Some("tls_signature"),
+        "handshake_report" => Some("handshake_report"),
         _ => None,
     }
 }
@@ -548,6 +552,8 @@ mod tests {
             line(END),
             br#"{"type":"token","binding":"pay","reason":"first_use"}"#.to_vec(),
             br#"{"type":"bindings","version":"3","http":["erp"],"invalid":[]}"#.to_vec(),
+            br#"{"type":"tls_signature","identity":"spiffe://t/x","role":"client","conn":1,"error":null}"#.to_vec(),
+            br#"{"type":"handshake_report","conn":1,"report":{"direction":"outbound"}}"#.to_vec(),
         ] {
             assert!(is_followed(&published));
         }

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! The share directory: what FeOS hands every container, read-only. It holds
-//! the pushed resolvers and, while the host offers one, the SSH agent
-//! socket.
+//! the pushed resolvers and, while the host offers them, the SSH agent
+//! socket and FeID's.
 
 use std::path::Path;
 
@@ -14,6 +14,9 @@ pub const SHARE_DIR: &str = "/run/feos/share";
 pub const SHARE_DEST: &str = "/run/feos";
 /// The SSH agent socket as a container sees it.
 pub const SSH_AGENT_SOCK: &str = "/run/feos/ssh-agent.sock";
+/// FeID's socket as a container sees it (ADR 0014): where FeID's
+/// libraries find the pod's signer.
+pub const FEID_SOCK: &str = "/run/feos/feid.sock";
 
 /// Creates the share directory if it is missing. 0755: a container process
 /// of any user has to read it, and only FeOS writes there.

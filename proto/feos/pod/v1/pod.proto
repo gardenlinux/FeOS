@@ -120,6 +120,12 @@ message PodSpec {
   // upstreams and credentials are never here: they reach the pod's
   // feos-authn sealed (feos.fleet.v1.PodBindings).
   PodHttpBindings http_bindings = 7;
+  // The SPIFFE ID the control plane chose for the pod (ADR 0014): set,
+  // the pod runs with an identity. Its feos-authn makes the key, gets the
+  // certificate, and serves FeID's signer on vsock port 10002, and the
+  // guest gives every container FeID's socket at /run/feos/feid.sock.
+  // feosd chooses no identity, and the pod names none of its own.
+  string identity = 8;
 }
 
 // The clear part of a pod's HTTP bindings (ADR 0028). A change states it

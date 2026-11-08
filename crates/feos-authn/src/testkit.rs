@@ -102,6 +102,69 @@ impl Pki {
     }
 }
 
+/// The platform's CA for the pods' identities, which issues a pod's
+/// certificate from its run's signing request, as the control plane does.
+pub struct IdentityPki {
+    issuer: rcgen::Issuer<'static, rcgen::KeyPair>,
+    pub ca_der: Vec<u8>,
+}
+
+impl IdentityPki {
+    pub fn new() -> IdentityPki {
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519).unwrap();
+        let mut p = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+        p.distinguished_name
+            .push(rcgen::DnType::CommonName, "test platform CA");
+        p.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        p.key_usages = vec![
+            rcgen::KeyUsagePurpose::KeyCertSign,
+            rcgen::KeyUsagePurpose::CrlSign,
+        ];
+        let cert = p.self_signed(&key).unwrap();
+        IdentityPki {
+            ca_der: cert.der().to_vec(),
+            issuer: rcgen::Issuer::new(p, key),
+        }
+    }
+
+    /// The certificate for `csr` with `spiffe` as its URI name, valid from
+    /// a minute ago for an hour and renewed `renew_in` seconds from now,
+    /// as `feosd` relays it.
+    pub fn issue(&self, csr: &[u8], spiffe: &str, renew_in: i64) -> Value {
+        self.issue_named(csr, spiffe, &[], renew_in)
+    }
+
+    /// As [`IdentityPki::issue`], with the DNS names of the pod's service.
+    pub fn issue_named(&self, csr: &[u8], spiffe: &str, dns: &[&str], renew_in: i64) -> Value {
+        let mut req =
+            rcgen::CertificateSigningRequestParams::from_der(&csr.to_vec().into()).unwrap();
+        req.params.subject_alt_names = vec![rcgen::SanType::URI(spiffe.try_into().unwrap())];
+        for name in dns {
+            req.params
+                .subject_alt_names
+                .push(rcgen::SanType::DnsName((*name).try_into().unwrap()));
+        }
+        let now = time::OffsetDateTime::now_utc();
+        req.params.not_before = now - time::Duration::minutes(1);
+        req.params.not_after = now + time::Duration::hours(1);
+        req.params.extended_key_usages = vec![
+            rcgen::ExtendedKeyUsagePurpose::ClientAuth,
+            rcgen::ExtendedKeyUsagePurpose::ServerAuth,
+        ];
+        let cert = req.signed_by(&self.issuer).unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let unix = now.unix_timestamp();
+        json!({
+            "spiffeId": spiffe,
+            "chain": [b64.encode(cert.der())],
+            "trustBundle": [b64.encode(&self.ca_der)],
+            "notBefore": unix - 60,
+            "notAfter": unix + 3600,
+            "renewAfter": unix + renew_in,
+        })
+    }
+}
+
 /// An interception CA, ECDSA P-256, name-constrained to `names`: cert and
 /// key PEM.
 pub fn intercept_ca(names: &[&str]) -> (String, String) {
@@ -735,6 +798,33 @@ impl Feosd {
             &json!({"v": 1, "op": "credentials", "certificate": null,
                 "bindings": {"enc": b64.encode(enc), "ciphertext": b64.encode(ct),
                     "version": version}}),
+            &[],
+        );
+        req
+    }
+
+    /// Answers a credentials request with a certificate that `pki` issued
+    /// for its signing request, and no bindings; returns the request.
+    pub fn answer_identity(&self, pki: &IdentityPki, spiffe: &str, renew_in: i64) -> Value {
+        self.answer_named(pki, spiffe, &[], renew_in)
+    }
+
+    /// As [`Feosd::answer_identity`], with the DNS names of the service.
+    pub fn answer_named(
+        &self,
+        pki: &IdentityPki,
+        spiffe: &str,
+        dns: &[&str],
+        renew_in: i64,
+    ) -> Value {
+        let req = self.recv();
+        assert_eq!(req["op"], "credentials", "{req}");
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(req["csr"].as_str().unwrap())
+            .unwrap();
+        self.send(
+            &json!({"v": 1, "op": "credentials",
+                "certificate": pki.issue_named(&csr, spiffe, dns, renew_in), "bindings": null}),
             &[],
         );
         req

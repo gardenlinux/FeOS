@@ -304,6 +304,7 @@ async fn test_pod_lifecycle() -> Result<()> {
         volumes: vec![],
         metadata: [("role".to_string(), "test".to_string())].into(),
         http_bindings: None,
+        identity: String::new(),
     };
     let create = CreatePodRequest {
         pod_id: pod_id.clone(),

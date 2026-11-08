@@ -225,6 +225,12 @@ pub fn has_http_bindings(spec: &PodSpec) -> bool {
         .is_some_and(|b| !b.names.is_empty() || !b.intercept_hosts.is_empty())
 }
 
+/// Whether the pod runs with an identity (ADR 0014): the control plane
+/// named one.
+pub fn has_identity(spec: &PodSpec) -> bool {
+    !spec.identity.is_empty()
+}
+
 /// The pod's interception CAs, PEM, oldest first; none without.
 pub fn intercept_cas(spec: &PodSpec) -> Vec<String> {
     spec.http_bindings

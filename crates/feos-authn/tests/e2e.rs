@@ -33,6 +33,11 @@ impl Drop for Process {
 }
 
 fn spawn(dir: &Path) -> (Process, Feosd) {
+    spawn_with(dir, None)
+}
+
+/// As [`spawn`], with the vsock listener of FeID's signer as fd 5.
+fn spawn_with(dir: &Path, vsock: Option<std::os::unix::net::UnixListener>) -> (Process, Feosd) {
     let sock = dir.join("authn.sock");
     let listener = seqpacket_listener(&sock);
     let audit = OpenOptions::new()
@@ -41,11 +46,15 @@ fn spawn(dir: &Path) -> (Process, Feosd) {
         .open(dir.join("authn-audit.ndjson"))
         .unwrap();
     let (afd, lfd) = (audit.as_raw_fd(), listener.as_raw_fd());
+    let vfd = vsock.as_ref().map(|v| v.as_raw_fd());
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_feos-authn"));
     // The test's upstreams are on the loopback address.
     cmd.args(["--pod-id", POD_ID, "--audit-fd", "3", "--control-fd", "4"])
         .arg("--allow-loopback")
         .env("RUST_LOG", "debug");
+    if vfd.is_some() {
+        cmd.args(["--vsock-fd", "5"]);
+    }
     // SAFETY: only async-signal-safe calls between fork and exec.
     unsafe {
         cmd.pre_exec(move || {
@@ -55,11 +64,17 @@ fn spawn(dir: &Path) -> (Process, Feosd) {
             if a < 0 || l < 0 || libc::dup2(a, 3) < 0 || libc::dup2(l, 4) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
+            if let Some(v) = vfd {
+                let v = libc::fcntl(v, libc::F_DUPFD, 100);
+                if v < 0 || libc::dup2(v, 5) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
             Ok(())
         });
     }
     let child = cmd.spawn().unwrap();
-    drop((audit, listener));
+    drop((audit, listener, vsock));
     (Process(child), Feosd::connect(&sock))
 }
 
@@ -194,4 +209,57 @@ async fn the_jailed_binary_serves_both_modes() {
     await_record(&audit, |r| r["type"] == "http_end" && r["binding"] == "erp").await;
     assert!(!std::fs::read_to_string(&audit).unwrap().contains("s3cret"));
     assert!(proc.0.id() == pid);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_jailed_binary_signs_for_the_pod_over_vsock() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let vsock_path = dir.path().join("v.sock_10002");
+    let vsock = std::os::unix::net::UnixListener::bind(&vsock_path).unwrap();
+    let (proc, feosd) = spawn_with(dir.path(), Some(vsock));
+    let pid = proc.0.id();
+    feosd.hello(&[], None);
+    let pki = IdentityPki::new();
+    let spiffe = "spiffe://run.example/tenant/acme/env/prod/service/api";
+    feosd.answer_identity(&pki, spiffe, 2700);
+    feosd.ready("");
+    assert_eq!(status_field(pid, "Seccomp"), "2");
+
+    let (chain, message, signature) = tokio::task::spawn_blocking(move || {
+        let mut s = std::os::unix::net::UnixStream::connect(&vsock_path).unwrap();
+        s.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        s.write_all(b"feid\n").unwrap();
+        let mut c = feid_proto::Client::connect(s, "e2e").unwrap();
+        let chain = c.certificate().unwrap();
+        let mut message = vec![0x20u8; 64];
+        message.extend_from_slice(b"TLS 1.3, server CertificateVerify\0");
+        message.extend_from_slice(&[5; 32]);
+        let signature = c.sign(&message).unwrap();
+        (chain, message, signature)
+    })
+    .await
+    .unwrap();
+    // The signature is by the key of the certificate the pod got.
+    let der = rustls::pki_types::pem::PemObject::from_pem_slice(chain.as_bytes())
+        .map(|c: rustls::pki_types::CertificateDer<'static>| c.to_vec())
+        .unwrap();
+    let (_, cert) = <x509_parser::certificate::X509Certificate as x509_parser::prelude::FromDer<
+        _,
+    >>::from_der(&der)
+    .unwrap();
+    ring::signature::UnparsedPublicKey::new(
+        &ring::signature::ED25519,
+        cert.public_key().subject_public_key.data.as_ref(),
+    )
+    .verify(&message, &signature)
+    .unwrap();
+    let signed = await_record(&dir.path().join("authn-audit.ndjson"), |r| {
+        r["type"] == "tls_signature"
+    })
+    .await;
+    assert_eq!(signed["identity"], spiffe);
+    assert_eq!(signed["role"], "server");
+    assert!(signed["error"].is_null());
 }

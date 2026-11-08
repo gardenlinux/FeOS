@@ -20,6 +20,14 @@
 //! and says hello again; a process that is gone, or whose pod does not
 //! want it, is not adopted. The protocol is in [`control`], the jail in
 //! [`jail`].
+//!
+//! FeID's signer in the process serves the pod's microVM on vsock port
+//! 10002 (ADR 0014): `feosd` binds the socket Firecracker connects that
+//! port to, `<vm dir>/v.sock_10002`, once the microVM's jail is there, and
+//! hands it over (`vsock`); the process accepts on it, so that a `feosd`
+//! that restarts stalls no handshake. It binds it again when the socket
+//! is gone, as when the microVM is made anew, and not when the process
+//! says it holds the one in place.
 
 pub mod audit;
 pub mod control;
@@ -38,9 +46,11 @@ use nix::sys::socket::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 use tokio::io::unix::AsyncFd;
@@ -74,6 +84,8 @@ const ISSUE_TIMEOUT: Duration = Duration::from_secs(30);
 pub const HANDING_PER_POD: usize = 64;
 /// How long a hand-over waits for the process to take the connection.
 const HAND_OVER_TIMEOUT: Duration = Duration::from_secs(1);
+/// How often the vsock socket in a microVM's jail is looked at.
+const VSOCK_POLL: Duration = Duration::from_secs(1);
 
 /// Asks the control plane for a pod's credentials (fleet.proto
 /// `IssuePodCredentials`), over feosd's uplink.
@@ -87,6 +99,17 @@ pub type Issuer = Arc<
 
 /// Starts a process, as [`jail::spawn`] does: a test starts a fake.
 pub type Launcher = Arc<dyn Fn(&jail::Start<'_>) -> io::Result<i32> + Send + Sync>;
+
+/// Where a pod's microVM connects its vsock port 10002 to.
+pub type VsockPath = Arc<dyn Fn(&str) -> PathBuf + Send + Sync>;
+
+/// `<vm dir>/v.sock_10002`, as Firecracker names a guest's connections to
+/// the host's port.
+pub fn authn_vsock_path(pod_id: &str) -> PathBuf {
+    let mut path = microvm_service::vsock_path(pod_id).into_os_string();
+    path.push(format!("_{}", feos_utils::vsock::AUTHN_PORT));
+    path.into()
+}
 
 /// How the processes are started.
 #[derive(Clone, Debug, PartialEq)]
@@ -147,6 +170,7 @@ struct Inner {
     adopted: Mutex<HashMap<String, Arc<Run>>>,
     /// The users the processes run as.
     uids: Mutex<HashSet<u32>>,
+    vsock_path: RwLock<VsockPath>,
 }
 
 /// A pod, as its processes follow it.
@@ -210,10 +234,20 @@ impl Authn {
                 pods: Mutex::new(HashMap::new()),
                 adopted: Mutex::new(HashMap::new()),
                 uids: Mutex::new(HashSet::new()),
+                vsock_path: RwLock::new(Arc::new(authn_vsock_path)),
             }),
         };
         authn.adopt();
         authn
+    }
+
+    /// Binds the pods' vsock sockets at `path` instead, for tests.
+    pub fn set_vsock_path(&self, path: VsockPath) {
+        *self
+            .inner
+            .vsock_path
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = path;
     }
 
     /// Asks `issuer` for the pods' credentials from now on; until then,
@@ -798,6 +832,13 @@ async fn read(
         return;
     }
     run.set_control(Some(control.clone()));
+    let held = Arc::new(AtomicU64::new(0));
+    tokio::spawn(hand_vsock(
+        inner.clone(),
+        run.clone(),
+        control.clone(),
+        held.clone(),
+    ));
     let mut deny_open = true;
     let mut refetch_backoff = REFETCH_BACKOFF.0;
     loop {
@@ -870,6 +911,13 @@ async fn read(
                     lock(&error).clear();
                 }
             }
+            Ok(FromAuthn::Vsock { inode }) => {
+                debug!(
+                    "Authn: Pod {}'s feos-authn serves on the vsock socket {inode}",
+                    run.pod_id
+                );
+                held.store(inode, Ordering::Relaxed);
+            }
             Ok(FromAuthn::Error { message }) => {
                 warn!(
                     "Authn: Pod {}'s feos-authn cannot use its credentials: {message}",
@@ -886,6 +934,73 @@ async fn read(
         }
     }
     run.set_control(None);
+}
+
+/// Hands the run's process the vsock socket of the pod's microVM once its
+/// jail is there, and again when the socket in place is not the one the
+/// process said it holds: none yet, or another, as after the microVM was
+/// made anew. Ends once the control connection is not the run's any more.
+async fn hand_vsock(inner: Arc<Inner>, run: Arc<Run>, control: Arc<Control>, held: Arc<AtomicU64>) {
+    let path = {
+        let f = inner
+            .vsock_path
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        f(&run.pod_id)
+    };
+    // The hello's answer says what the process holds already.
+    sleep(Duration::from_millis(200)).await;
+    loop {
+        if !run.control().is_some_and(|c| Arc::ptr_eq(&c, &control)) {
+            return;
+        }
+        let jail_there = path.parent().is_some_and(Path::is_dir);
+        let in_place = std::fs::symlink_metadata(&path).ok().map(|m| m.ino());
+        let holds = held.load(Ordering::Relaxed);
+        if jail_there && (holds == 0 || in_place != Some(holds)) {
+            match bind_vsock(&path) {
+                Ok((listener, inode)) => match control
+                    .send(&ToAuthn::Vsock { inode }, Some(listener.as_fd()))
+                    .await
+                {
+                    Ok(()) => {
+                        info!(
+                            "Authn: Pod {}'s feos-authn serves FeID at {}",
+                            run.pod_id,
+                            path.display()
+                        );
+                        // Until the process says so itself.
+                        held.store(inode, Ordering::Relaxed);
+                    }
+                    Err(e) => warn!(
+                        "Authn: Pod {}'s feos-authn did not take its vsock socket: {e}",
+                        run.pod_id
+                    ),
+                },
+                Err(e) => warn!(
+                    "Authn: Pod {}'s vsock socket {}: {e}",
+                    run.pod_id,
+                    path.display()
+                ),
+            }
+        }
+        sleep(VSOCK_POLL).await;
+    }
+}
+
+/// A listening socket at `path`, in place of any there, that the
+/// microVM's Firecracker may connect to: it runs as the microVM's user,
+/// whose jail's directory is its alone. Its inode.
+fn bind_vsock(path: &Path) -> io::Result<(OwnedFd, u64)> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    let listener = std::os::unix::net::UnixListener::bind(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666))?;
+    let inode = std::fs::symlink_metadata(path)?.ino();
+    Ok((OwnedFd::from(listener), inode))
 }
 
 /// Has the run's process ask for its credentials again.
@@ -1027,6 +1142,9 @@ pub(crate) mod fake {
         pub messages: Vec<Value>,
         /// The pids it ran as, in order.
         pub pids: Vec<i32>,
+        /// The vsock listeners it got: the inode said, and how many
+        /// descriptors came with it.
+        pub vsock: Vec<(u64, usize)>,
     }
 
     pub type Shared = Arc<Mutex<Seen>>;
@@ -1107,6 +1225,10 @@ pub(crate) mod fake {
                         let got = message["bindings"]["version"].as_str().unwrap_or_default();
                         version = Some(got.to_string());
                         say(&conn, json!({"v": 1, "op": "ready", "version": got}));
+                    }
+                    Some("vsock") => {
+                        let inode = message["inode"].as_u64().unwrap_or_default();
+                        lock(&seen).vsock.push((inode, fds.len()));
                     }
                     Some("conn") => {
                         for fd in fds {
@@ -1193,6 +1315,44 @@ mod tests {
                 .rsplit_once(')')
                 .is_some_and(|(_, rest)| rest.trim_start().starts_with('Z'))
         })
+    }
+
+    #[tokio::test]
+    async fn the_vsock_socket_is_bound_once_the_jail_is_there_and_again_when_it_is_gone() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let seen = fake::Shared::default();
+        let authn = authn(dir.path(), &seen);
+        authn.set_issuer(issuer(Arc::new(Mutex::new("v1".to_string()))));
+        let jail = dir.path().join("jail");
+        let path = jail.join("v.sock_10002");
+        let at = path.clone();
+        authn.set_vsock_path(Arc::new(move |_| at.clone()));
+        authn.want(POD, true, "v1");
+        authn
+            .wait_ready(POD, Duration::from_secs(10))
+            .await
+            .unwrap();
+        // No jail, no socket.
+        sleep(Duration::from_millis(1500)).await;
+        assert!(lock(&seen).vsock.is_empty());
+
+        std::fs::create_dir(&jail).unwrap();
+        within("the socket", || lock(&seen).vsock.len() == 1).await;
+        let inode = std::fs::metadata(&path).unwrap().ino();
+        assert_eq!(lock(&seen).vsock[0], (inode, 1));
+        let mode = std::fs::metadata(&path).unwrap().mode() & 0o777;
+        assert_eq!(mode, 0o666);
+        // The one in place stays.
+        sleep(Duration::from_millis(1500)).await;
+        assert_eq!(lock(&seen).vsock.len(), 1);
+
+        // Gone, as when the microVM is made anew: bound again.
+        std::fs::remove_file(&path).unwrap();
+        within("the socket again", || lock(&seen).vsock.len() == 2).await;
+        let again = std::fs::metadata(&path).unwrap().ino();
+        assert_eq!(lock(&seen).vsock[1], (again, 1));
+        authn.remove(POD).await;
     }
 
     #[tokio::test]

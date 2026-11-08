@@ -53,6 +53,11 @@ crates/
     tool-service/       guest: agent file and web tools on a container's files
     watch-service/      guest: inotify subscriptions on a container's files
     forward-service/    guest: port forwarding, kube and SSH credential offloading
+feid/                   FeID, versioned on its own (ADR 0014): feid/1's
+                        specification (docs/protocol.md), feid-proto (its
+                        client, its server and the CertificateVerify check)
+                        and feid (the Rust library on rustls); members of
+                        the workspace, without dependencies on FeOS's crates
 proto/feos/<api>/v1/    the gRPC APIs, package feos.<api>.v1
 go/                     the Go module github.com/gardenlinux/feos/go: ferund,
                         ferun-ingress, ferun-testnode and feos-k8s (cmd/),

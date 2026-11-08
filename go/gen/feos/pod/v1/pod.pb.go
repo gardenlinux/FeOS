@@ -248,7 +248,13 @@ type PodSpec struct {
 	// CAs' certificates the guest puts into every container. The bindings'
 	// upstreams and credentials are never here: they reach the pod's
 	// feos-authn sealed (feos.fleet.v1.PodBindings).
-	HttpBindings  *PodHttpBindings `protobuf:"bytes,7,opt,name=http_bindings,json=httpBindings,proto3" json:"http_bindings,omitempty"`
+	HttpBindings *PodHttpBindings `protobuf:"bytes,7,opt,name=http_bindings,json=httpBindings,proto3" json:"http_bindings,omitempty"`
+	// The SPIFFE ID the control plane chose for the pod (ADR 0014): set,
+	// the pod runs with an identity. Its feos-authn makes the key, gets the
+	// certificate, and serves FeID's signer on vsock port 10002, and the
+	// guest gives every container FeID's socket at /run/feos/feid.sock.
+	// feosd chooses no identity, and the pod names none of its own.
+	Identity      string `protobuf:"bytes,8,opt,name=identity,proto3" json:"identity,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -330,6 +336,13 @@ func (x *PodSpec) GetHttpBindings() *PodHttpBindings {
 		return x.HttpBindings
 	}
 	return nil
+}
+
+func (x *PodSpec) GetIdentity() string {
+	if x != nil {
+		return x.Identity
+	}
+	return ""
 }
 
 // The clear part of a pod's HTTP bindings (ADR 0028). A change states it
@@ -2660,7 +2673,7 @@ var File_feos_pod_v1_pod_proto protoreflect.FileDescriptor
 
 const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\n" +
-	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\x95\x04\n" +
+	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\xb1\x04\n" +
 	"\aPodSpec\x124\n" +
 	"\tresources\x18\x01 \x01(\v2\x16.feos.pod.v1.ResourcesR\tresources\x12:\n" +
 	"\n" +
@@ -2670,7 +2683,8 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\x06labels\x18\x04 \x03(\v2 .feos.pod.v1.PodSpec.LabelsEntryR\x06labels\x120\n" +
 	"\avolumes\x18\x05 \x03(\v2\x16.feos.pod.v1.PodVolumeR\avolumes\x12>\n" +
 	"\bmetadata\x18\x06 \x03(\v2\".feos.pod.v1.PodSpec.MetadataEntryR\bmetadata\x12A\n" +
-	"\rhttp_bindings\x18\a \x01(\v2\x1c.feos.pod.v1.PodHttpBindingsR\fhttpBindings\x1a9\n" +
+	"\rhttp_bindings\x18\a \x01(\v2\x1c.feos.pod.v1.PodHttpBindingsR\fhttpBindings\x12\x1a\n" +
+	"\bidentity\x18\b \x01(\tR\bidentity\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +

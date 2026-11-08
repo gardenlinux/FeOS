@@ -25,6 +25,27 @@ service GuestService {
   // in place, never by a rename, so that its mounts see the new CAs. No
   // CAs empty the file; containers created then get nothing.
   rpc SetInterceptCas(SetInterceptCasRequest) returns (SetInterceptCasResponse);
+  // Gives the pod's containers FeID's socket (ADR 0014), or takes it away:
+  // feid.sock in the share directory, which every container sees at
+  // /run/feos/feid.sock. Every connection to it is piped to the host's
+  // vsock port 10002 after the preamble "feid", where the pod's
+  // feos-authn holds its key. feosd sets it after every boot and resume
+  // of a pod with an identity. Idempotent: a socket in place is kept;
+  // disabled, the file goes and connections accepted finish.
+  rpc SetFeid(SetFeidRequest) returns (SetFeidResponse);
+}
+
+message SetFeidRequest {
+  bool enabled = 1;
+  // Set by feosd only after a boot or resume: the host side of every
+  // stream before is gone, and an idle stream held across a snapshot
+  // never wakes its reader, so the guest closes them all first.
+  bool reset_connections = 2;
+}
+
+message SetFeidResponse {
+  // Whether the socket is there after the call.
+  bool listening = 1;
 }
 
 message SetInterceptCasRequest {

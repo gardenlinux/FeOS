@@ -2,7 +2,7 @@
 name = "feos-authn"
 version.workspace = true
 edition.workspace = true
-description = "A pod's credentials on its node (ADR 0014): its HTTP bindings (ADR 0028)"
+description = "A pod's credentials on its node (ADR 0014): its HTTP bindings (ADR 0028) and FeID's signer"
 
 [lints]
 workspace = true
@@ -17,6 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 feos-proto = { workspace = true }
+# FeID's signer: feid/1's server and its CertificateVerify check.
+feid-proto = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true }
 hyper = { workspace = true, features = ["client", "server", "http1", "http2"] }
@@ -49,6 +51,9 @@ memchr = "2"
 flate2 = "1"
 # rcgen's dates.
 time = "0.3"
+# The pod's certificate, checked against the run's key; in the tree
+# already, through rcgen.
+x509-parser = { workspace = true }
 # The WebPKI's roots, built in: the jail has no system store.
 webpki-roots = "1"
 # HPKE's HKDF and ChaCha20-Poly1305, and randomness: rustls's provider.
@@ -59,4 +64,6 @@ x25519-dalek = { version = "3", features = ["static_secrets"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# FeID's library, against this signer.
+feid = { workspace = true }
 x509-parser = { workspace = true, features = ["verify"] }

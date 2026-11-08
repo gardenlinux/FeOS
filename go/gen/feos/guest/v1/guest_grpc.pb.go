@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	GuestService_MountVolumes_FullMethodName    = "/feos.guest.v1.GuestService/MountVolumes"
 	GuestService_SetInterceptCas_FullMethodName = "/feos.guest.v1.GuestService/SetInterceptCas"
+	GuestService_SetFeid_FullMethodName         = "/feos.guest.v1.GuestService/SetFeid"
 )
 
 // GuestServiceClient is the client API for GuestService service.
@@ -50,6 +51,14 @@ type GuestServiceClient interface {
 	// in place, never by a rename, so that its mounts see the new CAs. No
 	// CAs empty the file; containers created then get nothing.
 	SetInterceptCas(ctx context.Context, in *SetInterceptCasRequest, opts ...grpc.CallOption) (*SetInterceptCasResponse, error)
+	// Gives the pod's containers FeID's socket (ADR 0014), or takes it away:
+	// feid.sock in the share directory, which every container sees at
+	// /run/feos/feid.sock. Every connection to it is piped to the host's
+	// vsock port 10002 after the preamble "feid", where the pod's
+	// feos-authn holds its key. feosd sets it after every boot and resume
+	// of a pod with an identity. Idempotent: a socket in place is kept;
+	// disabled, the file goes and connections accepted finish.
+	SetFeid(ctx context.Context, in *SetFeidRequest, opts ...grpc.CallOption) (*SetFeidResponse, error)
 }
 
 type guestServiceClient struct {
@@ -74,6 +83,16 @@ func (c *guestServiceClient) SetInterceptCas(ctx context.Context, in *SetInterce
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetInterceptCasResponse)
 	err := c.cc.Invoke(ctx, GuestService_SetInterceptCas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *guestServiceClient) SetFeid(ctx context.Context, in *SetFeidRequest, opts ...grpc.CallOption) (*SetFeidResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetFeidResponse)
+	err := c.cc.Invoke(ctx, GuestService_SetFeid_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +126,14 @@ type GuestServiceServer interface {
 	// in place, never by a rename, so that its mounts see the new CAs. No
 	// CAs empty the file; containers created then get nothing.
 	SetInterceptCas(context.Context, *SetInterceptCasRequest) (*SetInterceptCasResponse, error)
+	// Gives the pod's containers FeID's socket (ADR 0014), or takes it away:
+	// feid.sock in the share directory, which every container sees at
+	// /run/feos/feid.sock. Every connection to it is piped to the host's
+	// vsock port 10002 after the preamble "feid", where the pod's
+	// feos-authn holds its key. feosd sets it after every boot and resume
+	// of a pod with an identity. Idempotent: a socket in place is kept;
+	// disabled, the file goes and connections accepted finish.
+	SetFeid(context.Context, *SetFeidRequest) (*SetFeidResponse, error)
 	mustEmbedUnimplementedGuestServiceServer()
 }
 
@@ -122,6 +149,9 @@ func (UnimplementedGuestServiceServer) MountVolumes(context.Context, *MountVolum
 }
 func (UnimplementedGuestServiceServer) SetInterceptCas(context.Context, *SetInterceptCasRequest) (*SetInterceptCasResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetInterceptCas not implemented")
+}
+func (UnimplementedGuestServiceServer) SetFeid(context.Context, *SetFeidRequest) (*SetFeidResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetFeid not implemented")
 }
 func (UnimplementedGuestServiceServer) mustEmbedUnimplementedGuestServiceServer() {}
 func (UnimplementedGuestServiceServer) testEmbeddedByValue()                      {}
@@ -180,6 +210,24 @@ func _GuestService_SetInterceptCas_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GuestService_SetFeid_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetFeidRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GuestServiceServer).SetFeid(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GuestService_SetFeid_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GuestServiceServer).SetFeid(ctx, req.(*SetFeidRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GuestService_ServiceDesc is the grpc.ServiceDesc for GuestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -194,6 +242,10 @@ var GuestService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetInterceptCas",
 			Handler:    _GuestService_SetInterceptCas_Handler,
+		},
+		{
+			MethodName: "SetFeid",
+			Handler:    _GuestService_SetFeid_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

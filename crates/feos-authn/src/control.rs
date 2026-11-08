@@ -17,10 +17,16 @@
 //!   "sourceV6":…|null}`, first on every connection.
 //! - `{"v":1,"op":"credentials","certificate":{…}|null,"bindings":{"enc":
 //!   b64,"ciphertext":b64,"version":…}|null}`: the answer to a credentials
-//!   request, or `{"v":1,"op":"error","message":…}`.
+//!   request, or `{"v":1,"op":"error","message":…}`. The certificate is
+//!   FeID's identity ([`crate::feid`]); its `renewAfter` makes the next
+//!   request due.
 //! - `{"v":1,"op":"refetch"}`: the pod's bindings changed.
 //! - `{"v":1,"op":"conn","port":80|443,"peer":"ip:port"}` with one fd: a
 //!   connection of the pod's to 169.254.169.1.
+//! - `{"v":1,"op":"vsock","inode":…}` with one fd: the listening socket of
+//!   the pod's microVM's vsock port 10002, on which FeID's signer serves,
+//!   and the inode of its path, which only `feosd` sees; it replaces the
+//!   one before.
 //!
 //! feos-authn → `feosd`:
 //!
@@ -30,6 +36,9 @@
 //!   again after every `hello`, so that a new `feosd` knows.
 //! - `{"v":1,"op":"error","message":…}`: an answer that could not be
 //!   used (a box that does not open); feos-authn asks again later.
+//! - `{"v":1,"op":"vsock","inode":…}`: the inode `feosd` gave the vsock
+//!   listener it serves on; after it took one, and after every `hello`
+//!   once it has one.
 
 use std::io::{self, IoSlice, IoSliceMut};
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -48,6 +57,7 @@ use tokio::time::Instant;
 use crate::audit::{self, Audit, BindingsRecord, InvalidBinding};
 use crate::bindings::{self, Snapshot};
 use crate::dest::{NetConfig, Prefix};
+use crate::feid::{Identity, Signer};
 use crate::keys::Keys;
 use crate::proxy::{self, Ctx};
 use crate::{intercept, Net};
@@ -100,6 +110,12 @@ struct Credentials {
 struct ErrorMsg {
     #[serde(default)]
     message: String,
+}
+
+#[derive(Deserialize)]
+struct Vsock {
+    #[serde(default)]
+    inode: u64,
 }
 
 #[derive(Deserialize)]
@@ -219,6 +235,8 @@ struct Fetch {
     again: bool,
     retry_at: Option<Instant>,
     backoff: Duration,
+    /// When the certificate in place is to be renewed.
+    renew_at: Option<Instant>,
 }
 
 impl Fetch {
@@ -233,12 +251,17 @@ impl Fetch {
 /// One pod's feos-authn.
 pub struct Authn {
     pub pod_id: String,
-    pub keys: Keys,
+    pub keys: Arc<Keys>,
     pub audit: Arc<Audit>,
     pub net: Arc<Net>,
     ready_tx: watch::Sender<Option<Arc<Snapshot>>>,
+    identity_tx: watch::Sender<Option<Arc<Identity>>>,
     ctx: Arc<Ctx>,
     conns: Arc<Semaphore>,
+    /// FeID's signer, and the vsock listener it serves on: its inode and
+    /// its accept loop.
+    signer: Arc<Signer>,
+    vsock: std::sync::Mutex<Option<(u64, tokio::task::AbortHandle)>>,
 }
 
 impl Authn {
@@ -249,19 +272,73 @@ impl Authn {
             net: net.clone(),
             ready,
         });
+        let keys = Arc::new(keys);
+        let identity_tx = watch::channel(None).0;
+        let signer = Arc::new(Signer::new(
+            keys.clone(),
+            audit.clone(),
+            identity_tx.subscribe(),
+        ));
         Authn {
             pod_id: pod_id.to_ascii_lowercase(),
             keys,
             audit,
             net,
             ready_tx,
+            identity_tx,
             ctx,
             conns: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
+            signer,
+            vsock: std::sync::Mutex::new(None),
         }
     }
 
     fn snapshot(&self) -> Option<Arc<Snapshot>> {
         self.ready_tx.borrow().clone()
+    }
+
+    /// FeID's signer for the pod, which serves the identity in place.
+    pub fn signer(&self) -> Signer {
+        Signer::new(
+            self.keys.clone(),
+            self.audit.clone(),
+            self.identity_tx.subscribe(),
+        )
+    }
+
+    /// Serves FeID's signer on `listener` from now on, in place of the
+    /// listener before; streams it accepted go on. `inode` is its path's,
+    /// as `feosd` bound it, which is said back; 0 when none was given.
+    pub fn serve_vsock(&self, listener: OwnedFd, inode: u64) {
+        let signer = self.signer.clone();
+        let task = tokio::spawn(async move {
+            if let Err(e) = signer.serve(listener).await {
+                log::error!("vsock: the listener: {e}");
+            }
+        });
+        let old = self
+            .vsock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace((inode, task.abort_handle()));
+        if let Some((_, old)) = old {
+            old.abort();
+        }
+        log::info!("vsock: FeID's signer serves on a new listener");
+    }
+
+    fn vsock_inode(&self) -> Option<u64> {
+        self.vsock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|(inode, _)| *inode)
+            .filter(|&inode| inode != 0)
+    }
+
+    /// The pod's identity in place, if any.
+    pub fn identity(&self) -> Option<Arc<Identity>> {
+        self.identity_tx.borrow().clone()
     }
 
     /// Serves the control socket, the listening fd `feosd` handed over,
@@ -275,12 +352,14 @@ impl Authn {
             again: false,
             retry_at: None,
             backoff: BACKOFF_FIRST,
+            renew_at: None,
         };
         let mut buf = vec![0u8; MAX_MESSAGE];
         enum Event {
             Accepted(io::Result<OwnedFd>),
             Message(io::Result<Option<(usize, Vec<OwnedFd>)>>),
             Retry,
+            Renew,
         }
         loop {
             let ev = {
@@ -296,10 +375,17 @@ impl Authn {
                         None => std::future::pending().await,
                     }
                 };
+                let renew = async {
+                    match fetch.renew_at {
+                        Some(at) => tokio::time::sleep_until(at).await,
+                        None => std::future::pending().await,
+                    }
+                };
                 tokio::select! {
                     r = listener.accept() => Event::Accepted(r),
                     r = recv => Event::Message(r),
                     _ = retry => Event::Retry,
+                    _ = renew => Event::Renew,
                 }
             };
             match ev {
@@ -355,6 +441,15 @@ impl Authn {
                     }
                 }
                 Event::Retry => fetch.retry_at = None,
+                Event::Renew => {
+                    log::info!("control: the pod's certificate is due for renewal");
+                    fetch.renew_at = None;
+                    if fetch.inflight {
+                        fetch.again = true;
+                    } else {
+                        fetch.want = true;
+                    }
+                }
             }
             if let Some((s, true)) = &session
                 && fetch.want
@@ -412,7 +507,7 @@ impl Authn {
             log::warn!("control: a message of version {}; ignored", env.v);
             return true;
         }
-        if env.op != "conn" && !fds.is_empty() {
+        if env.op != "conn" && env.op != "vsock" && !fds.is_empty() {
             log::warn!("control: descriptors with {:?}; closed", env.op);
         }
         if !*hello && env.op != "hello" {
@@ -448,6 +543,9 @@ impl Authn {
                 if let Some(snap) = self.snapshot() {
                     Self::send(s, json!({"v": 1, "op": "ready", "version": snap.version})).await;
                 }
+                if let Some(inode) = self.vsock_inode() {
+                    Self::send(s, json!({"v": 1, "op": "vsock", "inode": inode})).await;
+                }
                 true
             }
             "credentials" => {
@@ -465,6 +563,7 @@ impl Authn {
                         fetch.backoff = BACKOFF_FIRST;
                         fetch.want = fetch.again;
                         fetch.again = false;
+                        fetch.renew_at = self.identity().map(|id| renew_at(&id));
                         Self::send(s, json!({"v": 1, "op": "ready", "version": version})).await;
                     }
                     Err(e) => {
@@ -509,10 +608,47 @@ impl Authn {
                 }
                 true
             }
+            "vsock" => {
+                let inode = serde_json::from_slice::<Vsock>(raw)
+                    .map(|v| v.inode)
+                    .unwrap_or_default();
+                let mut fds = fds.into_iter();
+                match (fds.next(), fds.next()) {
+                    (Some(fd), None) => {
+                        self.serve_vsock(fd, inode);
+                        if inode != 0 {
+                            Self::send(s, json!({"v": 1, "op": "vsock", "inode": inode})).await;
+                        }
+                    }
+                    _ => log::warn!("control: a vsock without exactly one descriptor; closed"),
+                }
+                true
+            }
             other => {
                 log::debug!("control: unknown op {other:?}; ignored");
                 true
             }
+        }
+    }
+
+    /// Puts an answer's certificate in place, when it is one for this
+    /// run's key; one that is not leaves the one in place, which serves
+    /// until it expires.
+    fn load_identity(&self, certificate: Option<&Value>) {
+        let Some(certificate) = certificate else {
+            return;
+        };
+        match Identity::from_relayed(certificate, &self.keys) {
+            Ok(id) => {
+                log::info!(
+                    "identity: {} until {}, renewed after {}",
+                    id.spiffe_id,
+                    id.not_after,
+                    id.renew_after
+                );
+                self.identity_tx.send_replace(Some(Arc::new(id)));
+            }
+            Err(e) => log::error!("identity: the certificate is not taken: {e}"),
         }
     }
 
@@ -531,6 +667,7 @@ impl Authn {
             ),
             None => (Default::default(), String::new()),
         };
+        self.load_identity(c.certificate.as_ref());
         let snap = bindings::snapshot(set, version.clone(), c.certificate, &self.net, &self.audit);
         for (name, why) in &snap.invalid {
             log::error!("bindings {version}: {name}: {why}");
@@ -597,6 +734,19 @@ impl Authn {
             }
         });
     }
+}
+
+/// When to renew `id`: at its `renewAfter`, or at three quarters of its
+/// lifetime when that is missing; at once when the time has passed.
+fn renew_at(id: &Identity) -> Instant {
+    let after = match id.renew_after {
+        0 => id.not_before + (id.not_after - id.not_before) * 3 / 4,
+        at => at,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    Instant::now() + Duration::from_secs(after.saturating_sub(now).max(0) as u64)
 }
 
 fn net_config(h: &Hello) -> Result<NetConfig, String> {

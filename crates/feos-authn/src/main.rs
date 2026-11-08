@@ -4,10 +4,13 @@
 //! feos-authn: one pod's credentials on its node (ADR 0014, ADR 0028),
 //! started by `feosd` with the pod's microVM:
 //!
-//!     feos-authn --pod-id <id> --audit-fd 3 --control-fd 4
+//!     feos-authn --pod-id <id> --audit-fd 3 --control-fd 4 [--vsock-fd 5]
 //!
 //! fd 3 is the pod's audit file, open for appending; fd 4 the listening
-//! `SOCK_SEQPACKET` control socket. It logs to stderr.
+//! `SOCK_SEQPACKET` control socket; fd 5, when given, the listening
+//! stream socket that the microVM's vsock port 10002 connects to, on which
+//! FeID's signer serves. `feosd` hands that socket over the control
+//! socket instead, once the microVM's jail is there. It logs to stderr.
 
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::process::ExitCode;
@@ -36,6 +39,10 @@ struct Args {
     /// The listening SOCK_SEQPACKET control socket.
     #[arg(long, default_value_t = 4)]
     control_fd: i32,
+    /// The listening stream socket of the microVM's vsock port 10002, on
+    /// which FeID's signer serves. Without, the pod has no signer.
+    #[arg(long)]
+    vsock_fd: Option<i32>,
     /// Skip the seccomp filter, rlimits and the dropping of capabilities:
     /// for debugging only.
     #[arg(long, hide = true)]
@@ -52,29 +59,37 @@ fn main() -> ExitCode {
         .write_style(env_logger::WriteStyle::Never)
         .format_target(false)
         .init();
-    if args.audit_fd < 3 || args.control_fd < 3 || args.audit_fd == args.control_fd {
-        log::error!("--audit-fd and --control-fd must be two descriptors above stderr");
+    let mut fds = vec![args.audit_fd, args.control_fd];
+    fds.extend(args.vsock_fd);
+    let mut distinct = fds.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if fds.iter().any(|&fd| fd < 3) || distinct.len() != fds.len() {
+        log::error!(
+            "--audit-fd, --control-fd and --vsock-fd must be distinct descriptors above stderr"
+        );
         return ExitCode::FAILURE;
     }
     // Before anything else may open a descriptor of the same number.
-    let fds_ok = [args.audit_fd, args.control_fd]
+    // SAFETY: F_GETFD only asks whether the number is open.
+    if let Some(fd) = fds
         .iter()
-        // SAFETY: F_GETFD only asks whether the number is open.
-        .all(|&fd| unsafe { libc::fcntl(fd, libc::F_GETFD) } >= 0);
-    if !fds_ok {
-        log::error!("fd {} or {} is not open", args.audit_fd, args.control_fd);
+        .find(|&&fd| unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0)
+    {
+        log::error!("fd {fd} is not open");
         return ExitCode::FAILURE;
     }
-    if let Err(e) = jail::close_other_fds(&[args.audit_fd, args.control_fd]) {
+    if let Err(e) = jail::close_other_fds(&fds) {
         log::error!("close inherited descriptors: {e}");
         return ExitCode::FAILURE;
     }
     // SAFETY: feosd handed these descriptors to this process, which owns
     // them from here on; they were checked to be open.
-    let (audit, control) = unsafe {
+    let (audit, control, vsock) = unsafe {
         (
             OwnedFd::from_raw_fd(args.audit_fd),
             OwnedFd::from_raw_fd(args.control_fd),
+            args.vsock_fd.map(|fd| OwnedFd::from_raw_fd(fd)),
         )
     };
     let keys = match Keys::generate() {
@@ -112,6 +127,9 @@ fn main() -> ExitCode {
             false => Net::new(Arc::new(SystemResolver)),
         });
         let authn = Arc::new(Authn::new(pod_id, keys, Arc::new(Audit::new(audit)), net));
+        if let Some(vsock) = vsock {
+            authn.serve_vsock(vsock, 0);
+        }
         match authn.run(control).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {

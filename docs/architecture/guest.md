@@ -153,7 +153,10 @@ reaps.
 - Every container gets the toolbox read-only at `/feos-tools` and the
   share directory read-only at `/run/feos`: the pushed resolvers
   (`/run/feos/resolv.conf`) and, while SSH bindings exist, the SSH agent
-  socket (`/run/feos/ssh-agent.sock`).
+  socket (`/run/feos/ssh-agent.sock`), and, in a pod with an identity,
+  FeID's socket (`/run/feos/feid.sock`, `SetFeid`): each connection to
+  it is piped to the host's vsock port 10002 after the preamble `feid`,
+  where the pod's feos-authn signs (ADR 0014).
 - A container's volume mounts (`ContainerConfig.volume_mounts`) are bind
   mounts of `/run/feos/volumes/<name>`, read-write or read-only,
   `nosuid` and `nodev`, after FeOS's own. A create, and an adoption,

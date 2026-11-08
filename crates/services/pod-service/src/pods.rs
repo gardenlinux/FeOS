@@ -50,8 +50,8 @@ use feos_proto::container_service::{
 };
 use feos_proto::disk_service::{Head, MemoryRef};
 use feos_proto::guest_service::{
-    guest_service_client::GuestServiceClient, MountVolumesRequest, SetInterceptCasRequest,
-    Volume as GuestVolume,
+    guest_service_client::GuestServiceClient, MountVolumesRequest, SetFeidRequest,
+    SetInterceptCasRequest, Volume as GuestVolume,
 };
 use feos_proto::host_service::{
     host_service_client::HostServiceClient, FreezeFilesystemRequest, ThawFilesystemRequest,
@@ -885,6 +885,7 @@ impl Pods {
         self.check_microvm_network(pod_id, attachment.as_ref())
             .await;
         self.repush_intercept_cas(pod_id).await;
+        self.repush_feid(pod_id).await;
         Ok(())
     }
 
@@ -1010,6 +1011,48 @@ impl Pods {
             );
         }
         Ok(())
+    }
+
+    /// Gives a pod with an identity FeID's socket in its guest (ADR 0014),
+    /// whose streams reach its feos-authn; `reset` after a boot or resume,
+    /// when the host side of the guest's streams before is gone. A guest
+    /// too old to have the socket is said, and the pod runs without it.
+    async fn push_feid(&self, pod_id: &str, reset: bool) -> Result<(), Status> {
+        let spec = self.info(pod_id)?.spec.unwrap_or_default();
+        if !spec::has_identity(&spec) {
+            return Ok(());
+        }
+        let mut guest = GuestServiceClient::new(self.guest_channel(pod_id).await?);
+        let request = SetFeidRequest {
+            enabled: true,
+            reset_connections: reset,
+        };
+        match timeout(CA_PUSH_TIMEOUT, guest.set_feid(request)).await {
+            Err(_) => Err(Status::deadline_exceeded(format!(
+                "the guest did not make FeID's socket within {}s",
+                CA_PUSH_TIMEOUT.as_secs()
+            ))),
+            Ok(Err(e)) if e.code() == Code::Unimplemented => {
+                warn!("Pods: {pod_id}'s guest is older than FeID: its containers have no socket");
+                Ok(())
+            }
+            Ok(Err(e)) => Err(Status::new(
+                e.code(),
+                format!("the guest's FeID socket: {}", e.message()),
+            )),
+            Ok(Ok(_)) => {
+                info!("Pods: {pod_id}'s containers have FeID's socket");
+                Ok(())
+            }
+        }
+    }
+
+    /// [`Pods::push_feid`] after a resume or a restore; a failure is
+    /// logged, and the containers reach no signer until the next.
+    async fn repush_feid(&self, pod_id: &str) {
+        if let Err(e) = self.push_feid(pod_id, true).await {
+            warn!("Pods: {pod_id}'s FeID socket: {}", e.message());
+        }
     }
 
     /// [`Pods::push_intercept_cas`] for a pod whose containers run: after a
@@ -1461,6 +1504,7 @@ impl Pods {
                     self.set_state(pod_id, PodState::Running, "").await;
                     info!("Pods: {pod_id} is restored from {key}, with its memory");
                     self.repush_intercept_cas(pod_id).await;
+                    self.repush_feid(pod_id).await;
                     return Ok(RestorePodResponse {
                         pod: Some(self.info(pod_id)?),
                         memory_restored: true,
@@ -2507,13 +2551,13 @@ impl Pods {
     }
 
     /// Has the pod's feos-authn follow its record: a process while the pod
-    /// is coming up or runs with HTTP bindings, a new one for each run,
-    /// with the bindings of its record's version.
+    /// is coming up or runs with HTTP bindings or an identity, a new one for
+    /// each run, with the bindings of its record's version.
     fn want_authn(&self, info: &PodInfo) {
         let spec = info.spec.clone().unwrap_or_default();
         let run = matches!(info.state(), PodState::Pending | PodState::Running)
-            && spec::has_network(&spec)
-            && spec::has_http_bindings(&spec);
+            && ((spec::has_network(&spec) && spec::has_http_bindings(&spec))
+                || spec::has_identity(&spec));
         let version = spec
             .http_bindings
             .as_ref()
@@ -2623,6 +2667,7 @@ impl Pods {
         self.mount_volumes(pod_id, spec).await?;
         // Before any container is created: each gets them (ADR 0028 §5).
         self.push_intercept_cas(pod_id, false).await?;
+        self.push_feid(pod_id, true).await?;
         // Nothing in the pod runs before it has what it was promised.
         self.inner
             .authn
@@ -3546,12 +3591,18 @@ fn shown(mut info: PodInfo) -> PodInfo {
 
 /// Whether a create of `spec` is the create of `existing`: their specs
 /// compare without the HTTP bindings' clear part, which
-/// SetPodHttpBindings changes after the create (ADR 0028).
+/// SetPodHttpBindings changes after the create (ADR 0028). A pod created
+/// without an identity is the same create with one, as a control plane
+/// that names identities since sends it again: the pod keeps its spec,
+/// and its next create has the identity (ADR 0014).
 fn same_spec(existing: PodInfo, spec: &PodSpec) -> Result<PodInfo, Status> {
-    let same = existing
-        .spec
-        .as_ref()
-        .is_some_and(|own| spec::without_http_bindings(own) == spec::without_http_bindings(spec));
+    let same = existing.spec.as_ref().is_some_and(|own| {
+        let mut asked = spec::without_http_bindings(spec);
+        if own.identity.is_empty() {
+            asked.identity.clear();
+        }
+        spec::without_http_bindings(own) == asked
+    });
     if same {
         Ok(shown(existing))
     } else {
@@ -3736,6 +3787,26 @@ mod tests {
             cpu_model: here.cpu_model,
             kernel_release: here.kernel_release,
         }
+    }
+
+    #[test]
+    fn a_pod_made_without_an_identity_is_the_same_create_with_one() {
+        let pod = |identity: &str| PodInfo {
+            pod_id: "p".into(),
+            spec: Some(PodSpec {
+                identity: identity.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let asked = |identity: &str| PodSpec {
+            identity: identity.into(),
+            ..Default::default()
+        };
+        assert!(same_spec(pod(""), &asked("spiffe://t/a")).is_ok());
+        assert!(same_spec(pod("spiffe://t/a"), &asked("spiffe://t/a")).is_ok());
+        assert!(same_spec(pod("spiffe://t/a"), &asked("spiffe://t/b")).is_err());
+        assert!(same_spec(pod("spiffe://t/a"), &asked("")).is_err());
     }
 
     #[test]

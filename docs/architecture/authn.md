@@ -6,9 +6,11 @@ A pod's credentials on its node, in a process of its own per running pod
 the HTTP side ([ADR 0028](../adr/0028-http-bindings.md)): the pod's HTTP
 bindings, reached at the node address `169.254.169.1`, by a name on port
 80 or under the upstream's own name with TLS on port 443, to which
-feos-authn adds the credential. The pod's identity, FeID and the TLS,
-Kubernetes and SSH bindings are not built yet: their sets are opened and
-kept with the HTTP bindings, and nothing serves them.
+feos-authn adds the credential. Its second is FeID's signer: the pod's
+identity for its own TLS, whose key stays here, served over vsock port
+10002 with [feid/1](../../feid/docs/protocol.md) ([below](#feids-signer)).
+The TLS, Kubernetes and SSH bindings are not built yet: their sets are
+opened and kept with the HTTP bindings, and nothing serves them.
 
 The code is `crates/feos-authn`; the binary ships in the `feosd` package
 as `/usr/sbin/feos-authn`, beside `feosd`.
@@ -25,9 +27,10 @@ pod ──TCP 169.254.169.1:80 / :443──▶ feosd (accepts; knows the pod by 
 ## The process
 
 `feosd` starts it with the pod's microVM, on create, resume and restore,
-and stops it when the run ends:
+for a pod with HTTP bindings or an identity (`PodSpec.identity`), and
+stops it when the run ends:
 
-    feos-authn --pod-id <pod ID> --audit-fd 3 --control-fd 4
+    feos-authn --pod-id <pod ID> --audit-fd 3 --control-fd 4 [--vsock-fd 5]
 
 - `--pod-id`: the pod's ID as the control plane writes it, a short ID or
   a UUID in lowercase hyphenated form. It is part of the sealed box's
@@ -36,6 +39,9 @@ and stops it when the run ends:
   `feosd` for appending.
 - fd 4: a listening `SOCK_SEQPACKET` Unix socket that `feosd` bound at
   `<pod dir>/authn.sock`.
+- fd 5, with `--vsock-fd`: a listening stream socket on which FeID's
+  signer serves, for a run without `feosd`. `feosd` hands that socket
+  over the control socket instead (`vsock`).
 - stderr: its log (`RUST_LOG`, `info` by default). Never a credential.
 
 It survives a restart of `feosd`: a new `feosd` connects to the control
@@ -101,6 +107,7 @@ send buffer (about 208 KiB by default) needs a larger `SO_SNDBUF` there.
 | `error` | `message` | the request failed (e.g. `RESOURCE_EXHAUSTED`): asked again after 2 s, doubling up to 60 s. |
 | `refetch` | | the pod's bindings changed: ask again with the same keys; the new set replaces the old whole. |
 | `conn` | `port` (80 or 443), `peer` (`"ip:port"`, for the log) and exactly one fd | an accepted TCP connection of the pod's to `169.254.169.1:<port>`. Without exactly one fd it is closed. |
+| `vsock` | `inode` and exactly one fd | the listening socket `<vm dir>/v.sock_10002`, which Firecracker connects the guest's streams to vsock port 10002 to, and its path's inode. FeID's signer serves on it from now on; the one before closes, its accepted streams go on. |
 
 Before `hello`, everything but `hello` is ignored.
 
@@ -111,6 +118,7 @@ feos-authn → `feosd`:
 | `credentials` | `hpkePublicKey` (b64, 32 bytes), `csr` (b64 DER PKCS#10, Ed25519) | ask the control plane (`IssuePodCredentials`); relay the answer as `credentials` or `error`. At start, after `refetch`, after an error, and again on a new connection when an answer was pending. |
 | `ready` | `version` | a set is opened and serves. Sent after every set, and after every `hello` once there is one, so that a new `feosd` knows. |
 | `error` | `message` | an answer that cannot be used (a box that does not open); it asks again later, and the set in place keeps serving. |
+| `vsock` | `inode` | the inode it was given with the vsock listener it serves on; after it took one, and after every `hello` once it has one, so that a new `feosd` does not bind it again. |
 
 The sealed box is `feos.fleet.v1.PodBindings`, HPKE (RFC 9180) base mode,
 DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, ChaCha20-Poly1305, info `feos
@@ -366,3 +374,59 @@ The proxy's own answers carry `FeOS-Binding-Error: <code>` and
 flight per binding, 30 s to read a request's head, 5 s to resolve, 10 s
 to connect, 10 s for TLS, 15 s for a token. A body's search holds back
 fewer bytes than the binding's longest value.
+
+## FeID's signer
+
+The pod's TLS stack fetches its certificate chain and the trust bundle
+and has its TLS 1.3 CertificateVerify signed with the pod's Ed25519 key,
+which this process made and never gives out
+([feid/1](../../feid/docs/protocol.md), the crate `feid-proto`; the
+libraries are in `feid/`).
+
+```
+container ──/run/feos/feid.sock──▶ feos-guest ──vsock 2:10002, "feid\n"──▶ Firecracker
+    ──<vm dir>/v.sock_10002──▶ feos-authn (accepts on the listener feosd handed it)
+```
+
+- **The socket.** `feosd` binds `<vm dir>/v.sock_10002`, mode 0666 in
+  the microVM's jail, once the jail is there, and hands it over
+  (`vsock`); again when the file is gone or is not the one the process
+  said it holds, as when the microVM is made anew. The process accepts
+  on it itself, so that a `feosd` that restarts stalls no handshake.
+- **The preamble.** A stream's first line, at most 64 bytes, within 5 s,
+  says what it is for: `feid` is feid/1. Anything else is closed. It
+  carries no authority: the socket is the pod's.
+- **The identity** is the certificate of `credentials`, taken when its
+  first certificate is for the run's key and carries its `spiffeId` as
+  its URI name; one that is not is logged and the one in place serves
+  on. It is renewed at `renewAfter` with the same keys.
+- **Waiting.** `get_certificate`, `get_ca` and `sign` wait up to 5 s for
+  a certificate valid now, then are refused with `unavailable.identity`,
+  retriable: a pod just resumed, an issuer late. An expired certificate
+  is logged once, loudly.
+- **The check** of every input to `sign` is feid-proto's: `hash` must be
+  `none` and the message a TLS 1.3 CertificateVerify input, client or
+  server, with a hash of 32 or 48 bytes.
+- **Limits.** 256 of the pod's streams at once (more are closed), one
+  request at a time on each, a frame of 1 MiB, 10 s for the hello.
+
+Its audit records, written before the answer:
+
+```json
+{"ts":"…","type":"tls_signature","identity":"spiffe://…/sandbox/k2v8d0h3q9x","role":"client","conn":3,"error":null}
+{"ts":"…","type":"tls_signature","identity":"spiffe://…","role":null,"conn":3,
+ "error":{"code":"refused.not_certificate_verify","message":"…"}}
+{"ts":"…","type":"handshake_report","identity":"spiffe://…","conn":3,
+ "report":{"direction":"outbound","tuple":"…","version":"TLS 1.3","cipher_suite":"…","sni":"db","peer_spiffe":"…"}}
+```
+
+- `tls_signature`: a signature given (`error` null) or refused, with the
+  role whose CertificateVerify it was, null when the input was no
+  CertificateVerify at all. A signature whose record cannot be written
+  is not made: `unavailable.audit_log`.
+- `handshake_report`: what a library reported of a handshake, its
+  fields cut to 512 characters and its lists to 64 entries.
+- `conn` numbers the run's feid/1 connections. FeID's libraries send
+  their reports over a connection of their own, so a signature and the
+  report of its handshake share the identity and the moment, not the
+  number. `feosd` publishes both as the pod's audit events.

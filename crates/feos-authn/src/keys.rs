@@ -6,15 +6,14 @@
 //! request goes to the control plane, and the X25519 key to which the
 //! control plane seals the pod's bindings.
 
+use rcgen::{PublicKeyData, SigningKey};
 use ring::rand::{SecureRandom, SystemRandom};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::hpke;
 
 pub struct Keys {
-    /// The pod's identity key. Only its signing request is used for now;
-    /// FeID's signer will sign with it.
-    #[allow(dead_code)]
+    /// The pod's identity key, with which FeID's signer signs.
     identity: rcgen::KeyPair,
     csr_der: Vec<u8>,
     hpke: StaticSecret,
@@ -68,6 +67,19 @@ impl Keys {
         self.hpke_public
     }
 
+    /// The identity key's public half, the 32 bytes of Ed25519.
+    pub fn identity_public(&self) -> &[u8] {
+        self.identity.der_bytes()
+    }
+
+    /// Signs with the identity key. Only FeID's signer calls it, with an
+    /// input that passed feid-proto's check.
+    pub fn sign_identity(&self, message: &[u8]) -> Result<Vec<u8>, String> {
+        self.identity
+            .sign(message)
+            .map_err(|e| format!("sign with the identity key: {e}"))
+    }
+
     /// Opens a SealedBindings of this run for the pod.
     pub fn open_bindings(
         &self,
@@ -109,5 +121,16 @@ mod tests {
         // Every run has keys of its own.
         let other = Keys::generate().unwrap();
         assert_ne!(k.hpke_public(), other.hpke_public());
+        assert_ne!(k.identity_public(), other.identity_public());
+    }
+
+    #[test]
+    fn the_identity_key_signs_ed25519() {
+        let k = Keys::generate().unwrap();
+        assert_eq!(k.identity_public().len(), 32);
+        let sig = k.sign_identity(b"message").unwrap();
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, k.identity_public())
+            .verify(b"message", &sig)
+            .unwrap();
     }
 }

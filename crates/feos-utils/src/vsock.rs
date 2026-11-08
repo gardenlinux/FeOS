@@ -35,6 +35,10 @@ use tower::service_fn;
 pub const API_PORT: u32 = 10000;
 /// Host port the guest's lifecycle uplink dials (LifecycleService).
 pub const UPLINK_PORT: u32 = 10001;
+/// Host port of the pod's `feos-authn` (ADR 0014): one port for what it
+/// serves the guest, a one-line preamble first that says what a stream is
+/// for (`feid` for FeID's signer).
+pub const AUTHN_PORT: u32 = 10002;
 
 /// The longest reply the handshake accepts: "OK " and a 32-bit port.
 const MAX_REPLY: usize = 32;

@@ -70,10 +70,6 @@ pub const SSH_VSOCK_PORT: u32 = 10003;
 /// The socket's name in the share directory.
 const SOCK_NAME: &str = "ssh-agent.sock";
 
-/// The socket as a container sees it: [`SOCK_NAME`] under
-/// `container::SHARE_DEST`.
-pub const AGENT_SOCK: &str = container::SSH_AGENT_SOCK;
-
 /// The name the socket is bound under before it is moved into place, so
 /// that it appears at [`SOCK_NAME`] only once it has its final mode.
 const SOCK_TMP_NAME: &str = ".ssh-agent.sock.new";
@@ -123,9 +119,26 @@ impl Conns {
 
 pub struct SshApiHandler(Arc<Socket>);
 
-struct Socket {
+/// What a socket of the share directory is called: its file, the file it
+/// is bound as before it is moved into place, and what logs call it. The
+/// SSH agent's, and FeID's (`crate::feid`), which pipes the same way.
+#[derive(Clone, Copy)]
+pub(crate) struct Names {
+    pub file: &'static str,
+    pub tmp: &'static str,
+    pub what: &'static str,
+}
+
+const SSH_NAMES: Names = Names {
+    file: SOCK_NAME,
+    tmp: SOCK_TMP_NAME,
+    what: "ssh agent socket",
+};
+
+pub(crate) struct Socket {
     /// The share directory the socket is made in.
     dir: PathBuf,
+    names: Names,
     /// The accept loop while the socket exists; the loop owns the
     /// listener. The async mutex also serializes calls, and a call holds
     /// it while it waits for a stopped loop to be gone.
@@ -146,25 +159,31 @@ impl SshApiHandler {
     /// Tests put the socket in a directory of their own and dial a Unix
     /// socket instead of vsock.
     pub fn with_parts(dir: PathBuf, dialer: Arc<dyn HostDialer>) -> Self {
-        SshApiHandler(Arc::new(Socket {
+        SshApiHandler(Arc::new(Socket::new(dir, SSH_NAMES, dialer)))
+    }
+}
+
+impl Socket {
+    pub(crate) fn new(dir: PathBuf, names: Names, dialer: Arc<dyn HostDialer>) -> Socket {
+        Socket {
             dir,
+            names,
             live: tokio::sync::Mutex::new(None),
             conns: Arc::new(Conns {
                 dialer,
                 open: Mutex::new(JoinSet::new()),
             }),
-        }))
+        }
     }
-}
 
-impl Socket {
     fn path(&self) -> PathBuf {
-        self.dir.join(SOCK_NAME)
+        self.dir.join(self.names.file)
     }
 
     /// Converge on `enabled`, after ending every open connection if
     /// `reset` says the host side of them is gone.
-    async fn apply(&self, enabled: bool, reset: bool) -> SetAgentResponse {
+    pub(crate) async fn apply(&self, enabled: bool, reset: bool) -> SetAgentResponse {
+        let what = self.names.what;
         let mut live = self.live.lock().await;
 
         // Before the socket: a connection accepted from here on is one to
@@ -172,7 +191,7 @@ impl Socket {
         if reset {
             let n = self.conns.reset().await;
             if n > 0 {
-                log::info!("ssh: reset {n} agent connection(s)");
+                log::info!("{what}: reset {n} connection(s)");
             }
         }
 
@@ -194,8 +213,8 @@ impl Socket {
                 None => false,
             };
             match removed {
-                Err(e) => log::warn!("ssh agent socket: remove {}: {e}", self.path().display()),
-                Ok(()) if had => log::info!("ssh agent socket: removed"),
+                Err(e) => log::warn!("{what}: remove {}: {e}", self.path().display()),
+                Ok(()) if had => log::info!("{what}: removed"),
                 Ok(()) => {}
             }
             return SetAgentResponse {
@@ -210,17 +229,22 @@ impl Socket {
                 error: String::new(),
             };
         }
-        match listen(&self.dir) {
+        match listen(&self.dir, self.names) {
             Ok(listener) => {
-                *live = Some(tokio::spawn(accept_loop(listener, self.conns.clone())));
-                log::info!("ssh agent socket: listening ({AGENT_SOCK})");
+                *live = Some(tokio::spawn(accept_loop(
+                    listener,
+                    self.conns.clone(),
+                    what,
+                )));
+                let seen = Path::new(container::SHARE_DEST).join(self.names.file);
+                log::info!("{what}: listening ({})", seen.display());
                 SetAgentResponse {
                     listening: true,
                     error: String::new(),
                 }
             }
             Err(e) => {
-                let error = format!("ssh agent socket {}: {e}", self.path().display());
+                let error = format!("{what} {}: {e}", self.path().display());
                 log::warn!("{error}");
                 SetAgentResponse {
                     listening: false,
@@ -257,13 +281,13 @@ impl SshService for SshApiHandler {
 /// then rename it into place. A container process sees either no socket
 /// or one it may connect to, never one still carrying the umask's mode.
 /// The rename also replaces whatever an earlier life left at the path.
-fn listen(dir: &Path) -> io::Result<UnixListener> {
+fn listen(dir: &Path, names: Names) -> io::Result<UnixListener> {
     container::make_share_dir(dir)?;
-    let tmp = dir.join(SOCK_TMP_NAME);
+    let tmp = dir.join(names.tmp);
     remove_if_present(&tmp)?;
     let listener = UnixListener::bind(&tmp)?;
     let placed = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(SOCK_MODE))
-        .and_then(|()| std::fs::rename(&tmp, dir.join(SOCK_NAME)));
+        .and_then(|()| std::fs::rename(&tmp, dir.join(names.file)));
     if let Err(e) = placed {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
@@ -286,14 +310,14 @@ async fn close(task: JoinHandle<()>) {
     let _ = task.await;
 }
 
-async fn accept_loop(listener: UnixListener, conns: Arc<Conns>) {
+async fn accept_loop(listener: UnixListener, conns: Arc<Conns>, what: &'static str) {
     loop {
         match listener.accept().await {
             Ok((conn, _peer)) => conns.spawn(conn),
             Err(e) => {
                 // Out of fds, or a connection aborted before it was
                 // accepted. Neither ends the listener.
-                log::info!("ssh agent socket: accept: {e}");
+                log::info!("{what}: accept: {e}");
                 tokio::time::sleep(ACCEPT_BACKOFF).await;
             }
         }
@@ -436,9 +460,9 @@ mod tests {
     fn the_socket_path_is_the_contracts() {
         assert_eq!(
             Path::new(container::SHARE_DEST).join(SOCK_NAME),
-            Path::new(AGENT_SOCK)
+            Path::new(container::SSH_AGENT_SOCK)
         );
-        assert_eq!(AGENT_SOCK, "/run/feos/ssh-agent.sock");
+        assert_eq!(container::SSH_AGENT_SOCK, "/run/feos/ssh-agent.sock");
         assert_eq!(SSH_VSOCK_PORT, 10003);
     }
 

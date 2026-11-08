@@ -6,18 +6,20 @@
 //! creates the containers. A volume that fails is an answer, never a
 //! panic: this runs in PID 1. And the pod's interception CAs (ADR 0028),
 //! `SetInterceptCas`, which feosd pushes before it creates the containers
-//! too (`container_service::runtime::intercept`).
+//! too (`container_service::runtime::intercept`), and FeID's socket (ADR
+//! 0014), `SetFeid` (`forward_service::FeidSocket`).
 
 use container_service::runtime::intercept;
 use feos_proto::guest_service::guest_service_server::GuestService;
 use feos_proto::guest_service::{
-    InterceptFailure, MountVolumesRequest, MountVolumesResponse, MountedVolume,
-    SetInterceptCasRequest, SetInterceptCasResponse, Volume,
+    InterceptFailure, MountVolumesRequest, MountVolumesResponse, MountedVolume, SetFeidRequest,
+    SetFeidResponse, SetInterceptCasRequest, SetInterceptCasResponse, Volume,
 };
 use feos_utils::filesystem::disks::{virtio_disks, Disk};
 use feos_utils::filesystem::volume::{self, Plan};
 use feos_utils::filesystem::CONTAINERS_DIR;
 use feos_utils::share::SHARE_DIR;
+use forward_service::FeidSocket;
 use log::{info, warn};
 use std::path::Path;
 use std::time::Duration;
@@ -33,6 +35,7 @@ const DISK_WAIT: Duration = Duration::from_secs(5);
 pub(crate) struct GuestApi {
     /// One call at a time: two would format one disk twice.
     mounting: Mutex<()>,
+    feid: FeidSocket,
 }
 
 #[tonic::async_trait]
@@ -111,6 +114,22 @@ impl GuestService for GuestApi {
                 })
                 .collect(),
         }))
+    }
+
+    async fn set_feid(
+        &self,
+        request: Request<SetFeidRequest>,
+    ) -> Result<Response<SetFeidResponse>, Status> {
+        let SetFeidRequest {
+            enabled,
+            reset_connections,
+        } = request.into_inner();
+        let listening = self
+            .feid
+            .set(enabled, reset_connections)
+            .await
+            .map_err(Status::internal)?;
+        Ok(Response::new(SetFeidResponse { listening }))
     }
 }
 

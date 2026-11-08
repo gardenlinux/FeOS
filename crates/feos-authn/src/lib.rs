@@ -5,9 +5,10 @@
 //! of its own that `feosd` starts with the pod's microVM. Its first part is
 //! the HTTP side (ADR 0028): the pod's HTTP bindings, reached at
 //! 169.254.169.1 by a name (port 80) or under the upstream's own name with
-//! TLS (port 443), to which it adds the credential. The pod's identity,
-//! FeID and the TLS, Kubernetes and SSH bindings follow; their sets are
-//! opened and kept already.
+//! TLS (port 443), to which it adds the credential. Its second is FeID's
+//! signer ([`feid`]): the pod's identity for its own TLS, over vsock. The
+//! TLS, Kubernetes and SSH bindings follow; their sets are opened and kept
+//! already.
 //!
 //! See `docs/architecture/authn.md` for the control protocol and the audit
 //! records.
@@ -17,6 +18,7 @@ pub mod bindings;
 pub mod body;
 pub mod control;
 pub mod dest;
+pub mod feid;
 pub mod gunzip;
 pub mod hpke;
 pub mod intercept;

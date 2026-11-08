@@ -9,7 +9,7 @@
 //! One JSON object per message, at most [`MAX_MESSAGE`] bytes, each with
 //! `"v": 1` and its `"op"`; fields it does not know a reader ignores, and
 //! an `op` it does not know it skips. File descriptors travel only with
-//! `conn`, as `SCM_RIGHTS`.
+//! `conn` and `vsock`, as `SCM_RIGHTS`.
 //!
 //! `feosd` to `feos-authn`:
 //!
@@ -25,6 +25,10 @@
 //!   `feos-authn` asks for its credentials again.
 //! - `{"v":1,"op":"conn","port":80|443,"peer":"<ip:port>"}` with one fd: a
 //!   connection the pod opened to an HTTP binding, accepted, not read.
+//! - `{"v":1,"op":"vsock","inode":…}` with one fd: the listening socket
+//!   that the pod's microVM's vsock port 10002 connects to, bound in its
+//!   jail, on which FeID's signer serves (ADR 0014), and its path's inode;
+//!   it replaces the one before.
 //!
 //! `feos-authn` to `feosd`:
 //!
@@ -33,6 +37,9 @@
 //!   version; after every set, and after every `hello` once it has one.
 //! - `{"v":1,"op":"error","message":…}`: an answer it cannot use, such as
 //!   a box that does not open; it asks again later itself.
+//! - `{"v":1,"op":"vsock","inode":…}`: the inode it was given with the
+//!   vsock listener it serves on; after it took one, and after every
+//!   `hello` once it has one, so that a new `feosd` does not bind it again.
 //!
 //! A `hello` whose `podId` is not the process's closes the connection
 //! (docs/architecture/authn.md).
@@ -79,6 +86,10 @@ pub enum ToAuthn {
         port: u16,
         peer: String,
     },
+    /// With the listener as its descriptor; the inode of its path.
+    Vsock {
+        inode: u64,
+    },
 }
 
 /// The pod's certificate (feos.fleet.v1.Certificate).
@@ -121,6 +132,9 @@ pub enum FromAuthn {
     Error {
         #[serde(default)]
         message: String,
+    },
+    Vsock {
+        inode: u64,
     },
     /// One this version does not know: skipped.
     #[serde(other)]
@@ -348,6 +362,13 @@ mod tests {
         );
         let value: serde_json::Value = serde_json::from_slice(&encode(&ToAuthn::Refetch)).unwrap();
         assert_eq!(value, json!({"v": 1, "op": "refetch"}));
+        let value: serde_json::Value =
+            serde_json::from_slice(&encode(&ToAuthn::Vsock { inode: 7 })).unwrap();
+        assert_eq!(value, json!({"v": 1, "op": "vsock", "inode": 7}));
+        assert_eq!(
+            decode(br#"{"v":1,"op":"vsock","inode":42}"#),
+            Ok(FromAuthn::Vsock { inode: 42 })
+        );
         let conn = ToAuthn::Conn {
             port: 443,
             peer: "169.254.16.5:40000".into(),

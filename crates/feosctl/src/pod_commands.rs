@@ -409,6 +409,8 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             volumes: opts.volumes,
             metadata: opts.metadata.into_iter().collect(),
             http_bindings: None,
+            // A pod's identity is the control plane's to name (ADR 0014).
+            identity: String::new(),
         }),
         image_layers: None,
         pull_token: String::new(),
