@@ -4,9 +4,10 @@
 # exec, resolvers, toolbox, exit codes, logs. Then check the network: both
 # families, the same push again, other addresses as after a resume on
 # another node, each family alone, and the network of this version over
-# one of an earlier one. Run Postgres and Valkey on volumes of their own,
-# as FeRun's addons do. Then reboot and adopt the containers, and check
-# that the writable layer and the volumes' data survived.
+# one of an earlier one. Serve the pod's outbound TLS bindings from their
+# jail. Run Postgres and Valkey on volumes of their own, as FeRun's addons
+# do. Then reboot and adopt the containers, and check that the writable
+# layer and the volumes' data survived.
 #
 #   hack/guest/test-container [image]
 #
@@ -81,11 +82,13 @@ fail() { log "FAIL: $*"; tail -40 "${SERIAL_LOG:-/dev/null}" >&2 || true; exit 1
 for f in "${FC}" "${KERNEL}" "${INITRD}"; do
   [ -e "$f" ] || { log "missing $f"; exit 1; }
 done
-log "building feosctl"
+log "building feosctl and the TLS bindings' peer"
 cargo build --manifest-path "${REPO_ROOT}/Cargo.toml" -p feosctl
+cargo build --manifest-path "${REPO_ROOT}/Cargo.toml" -p forward-service --example tls-binding-peer
+PEER="${REPO_ROOT}/target/debug/examples/tls-binding-peer"
 
 mkdir -p "${RUN_DIR}"
-rm -f "${DATA_IMG}" "${PG_IMG}" "${KV_IMG}"
+rm -f "${DATA_IMG}" "${PG_IMG}" "${KV_IMG}" "${VSOCK}_10002"
 truncate -s 2G "${DATA_IMG}"
 mkfs.ext4 -q -F "${DATA_IMG}"
 truncate -s "${VOLUME_SIZE}" "${PG_IMG}" "${KV_IMG}"
@@ -116,7 +119,14 @@ stop_vm() {
   wait "${FC_PID}" 2>/dev/null || true
   FC_PID=""
 }
-trap 'stop_vm; cleanup_net' EXIT
+PEER_PID=""
+stop_peer() {
+  [ -n "${PEER_PID}" ] || return 0
+  sudo kill "${PEER_PID}" 2>/dev/null || true
+  wait "${PEER_PID}" 2>/dev/null || true
+  PEER_PID=""
+}
+trap 'stop_peer; stop_vm; cleanup_net' EXIT
 
 cleanup_net
 log "node namespace ${NS}: ${TAP}, NAT via ${UPLINK} and ${EGRESS}"
@@ -459,6 +469,72 @@ grep -q "SSH_AUTH_SOCK=/run/feos/ssh-agent.sock" <<<"$(cexec env)" || fail "SSH_
 ctl ssh set-agent >/dev/null
 cexec test -S /run/feos/ssh-agent.sock && fail "ssh agent socket not removed"
 log "the ssh agent socket comes and goes in the container"
+
+# The pod's outbound TLS bindings (ADR 0036), as feosd pushes them with
+# SetFeid: FeID's socket in the share directory, piped to vsock port 10002,
+# where this run's peer signs for the pod as feos-authn does, and the
+# peer's upstream in the node's namespace, pinned to its ID. A client in a
+# container speaks plaintext to the binding's loopback address, and the
+# upstream sees the pod's certificate. The bindings' process serves from
+# its jail, and says so with what the kernel reports of it: its own user,
+# no capabilities, no_new_privs, a seccomp filter. From there a name
+# still resolves through the pod's resolver: one that does not exist is
+# answered as such, not refused. A reset replaces the process, which
+# binds the same ports again.
+POD_ID=spiffe://feos.test/tenant/t/env/e/service/app
+DB_ID=spiffe://feos.test/tenant/t/env/e/addon/db
+PEER_LOG="${RUN_DIR}/peer.log"
+rm -f "${VSOCK}_10002"
+# Not through node(): PEER_PID has to be sudo's, which passes the kill on.
+sudo ip netns exec "${NS}" "${PEER}" "${VSOCK}_10002" "[${NODE_IP6}]:15432" "${POD_ID}" "${DB_ID}" \
+  >"${PEER_LOG}" 2>&1 &
+PEER_PID=$!
+for _ in $(seq 100); do grep -q '^ready' "${PEER_LOG}" && break; sleep 0.1; done
+grep -q '^ready' "${PEER_LOG}" || fail "the peer: $(cat "${PEER_LOG}")"
+started() { grep -c "Started the TLS bindings' process" "${SERIAL_LOG}" || true; }
+jailed() { grep -c "TlsBindings: jailed: " "${SERIAL_LOG}" || true; }
+wait_jailed() {
+  local _
+  for _ in $(seq 100); do [ "$(jailed)" -ge "$1" ] && return 0; sleep 0.1; done
+  fail "no jailed TLS bindings' process: $(grep TlsBindings "${SERIAL_LOG}" | tail -5)"
+}
+set_bindings() {
+  ctl guest set-feid "$@" --tls-binding "127.64.0.1:5432,${NODE_IP6},15432,postgresql,${DB_ID}" \
+    --tls-binding "127.64.0.2:5432,tls-bindings.invalid,5432,postgresql,${DB_ID}"
+}
+through_binding() {
+  local out
+  out="$(cexec sh -c 'printf ping | timeout 10 nc 127.64.0.1 5432' 2>&1 || true)"
+  [ "${out}" = "pod:ping" ] || fail "through the binding: ${out}; $(tail -3 "${PEER_LOG}")"
+}
+out="$(set_bindings)"
+[ "${out}" = "FeID's socket: listening; TLS bindings: 2" ] || fail "set-feid: ${out}"
+wait_jailed 1
+line="$(grep "TlsBindings: jailed: " "${SERIAL_LOG}" | tail -1)"
+for want in "Uid 2000000000," "Gid 2000000000," "no groups" "CapInh CapPrm CapEff CapBnd CapAmb 0" \
+  "NoNewPrivs 1" "Seccomp 2"; do
+  grep -qF "${want}" <<<"${line}" || fail "the bindings' jail lacks ${want}: ${line}"
+done
+through_binding
+grep -q "ALPN Some(\"postgresql\"), the pod's certificate: true" "${PEER_LOG}" \
+  || fail "the upstream did not see the pod: $(tail -3 "${PEER_LOG}")"
+grep -q "^signer: a CertificateVerify" "${PEER_LOG}" || fail "the peer signed nothing"
+cexec sh -c 'printf ping | timeout 20 nc 127.64.0.2 5432' >/dev/null 2>&1 || true
+# Firecracker's own lines may land in the middle of the guest's.
+for _ in $(seq 100); do grep -q "Name does not resolve" "${SERIAL_LOG}" && break; sleep 0.1; done
+grep -q "Name does not resolve" "${SERIAL_LOG}" \
+  || fail "a name from the jail: $(grep -A1 "tls-bindings.invalid" "${SERIAL_LOG}" | tail -4)"
+out="$(set_bindings --reset)"
+[ "${out}" = "FeID's socket: listening; TLS bindings: 2" ] || fail "set-feid --reset: ${out}"
+wait_jailed 2
+through_binding
+[ "$(started)" = 2 ] && [ "$(jailed)" = 2 ] \
+  || fail "the bindings' process started $(started) times, jailed $(jailed): $(grep TlsBindings "${SERIAL_LOG}" | tail -5)"
+out="$(ctl guest set-feid --disable)"
+[ "${out}" = "FeID's socket: none; TLS bindings: 0" ] || fail "set-feid --disable: ${out}"
+cexec sh -c 'printf ping | timeout 5 nc 127.64.0.1 5432' 2>/dev/null | grep -q pod && fail "a binding outlived its set"
+stop_peer
+log "TLS bindings serve from their jail: a user of their own, no capabilities, seccomp, the pod's identity"
 
 # A pod's network, as feosd pushes it: the guest answers the node on its
 # IPv4 /32 and its IPv6 /128, through routes via the node's addresses on

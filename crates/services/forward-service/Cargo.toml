@@ -10,8 +10,12 @@ workspace = true
 feid = { workspace = true }
 feos-proto = { workspace = true }
 feos-utils = { workspace = true }
+# The TLS bindings' seccomp allowlist and the rest of their jail.
+feos-jail = { workspace = true }
+libc = { workspace = true }
 log = { workspace = true }
-nix = { workspace = true }
+# unshare, for the TLS bindings' jail.
+nix = { workspace = true, features = ["sched"] }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

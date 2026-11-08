@@ -5,7 +5,8 @@ use crate::forward_commands::GuestAddress;
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 use feos_proto::guest_service::{
-    guest_service_client::GuestServiceClient, MountVolumesRequest, SetInterceptCasRequest, Volume,
+    guest_service_client::GuestServiceClient, MountVolumesRequest, SetFeidRequest,
+    SetInterceptCasRequest, TlsBinding, Volume,
 };
 
 /// What feosd calls in a pod's guest, for development and the guest's
@@ -42,6 +43,39 @@ pub enum GuestCommand {
         )]
         ca_files: Vec<std::path::PathBuf>,
     },
+    /// Set FeID's socket and the pod's outbound TLS bindings in the guest
+    /// (ADR 0036), as feosd does for a pod with an identity: without
+    /// --disable, the socket, and the bindings given, none without
+    SetFeid {
+        #[arg(long, help = "Remove the socket, and so the bindings")]
+        disable: bool,
+        #[arg(long, help = "End every connection first, as after a resume")]
+        reset: bool,
+        #[arg(
+            long = "tls-binding",
+            value_name = "LISTEN,HOST,PORT,ALPN,SERVER_ID",
+            help = "A binding, e.g. 127.64.0.1:5432,postgres,5432,postgresql,spiffe://… (repeatable)",
+            value_parser = parse_tls_binding
+        )]
+        tls_bindings: Vec<TlsBinding>,
+    },
+}
+
+fn parse_tls_binding(s: &str) -> Result<TlsBinding, String> {
+    let &[listen, host, port, alpn, server_id] = &s.split(',').collect::<Vec<_>>()[..] else {
+        return Err(format!(
+            "invalid TLS binding {s}: LISTEN,HOST,PORT,ALPN,SERVER_ID"
+        ));
+    };
+    Ok(TlsBinding {
+        listen: listen.to_string(),
+        host: host.to_string(),
+        port: port
+            .parse()
+            .map_err(|e| format!("invalid port {port}: {e}"))?,
+        alpn: alpn.to_string(),
+        server_id: server_id.to_string(),
+    })
 }
 
 fn parse_volume(s: &str) -> Result<Volume, String> {
@@ -111,6 +145,29 @@ pub async fn handle_guest_command(args: GuestArgs) -> Result<()> {
             }
             println!("The guest has {count} interception CAs");
         }
+        GuestCommand::SetFeid {
+            disable,
+            reset,
+            tls_bindings,
+        } => {
+            let answer = client
+                .set_feid(SetFeidRequest {
+                    enabled: !disable,
+                    reset_connections: reset,
+                    tls_bindings,
+                })
+                .await?
+                .into_inner();
+            let socket = if answer.listening {
+                "listening"
+            } else {
+                "none"
+            };
+            println!(
+                "FeID's socket: {socket}; TLS bindings: {}",
+                answer.tls_bindings
+            );
+        }
     }
     Ok(())
 }
@@ -130,6 +187,19 @@ mod tests {
         assert!(!parse_volume("a:b:2:3").unwrap().format);
         for bad in ["a:b:c", "a:b:x:3", "a:b:1:3:other", "a:b:1:3:format:x"] {
             assert!(parse_volume(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn tls_bindings_parse() {
+        let b = parse_tls_binding("127.64.0.1:5432,fd00::1,15432,postgresql,spiffe://t/x").unwrap();
+        assert_eq!(b.listen, "127.64.0.1:5432");
+        assert_eq!(b.host, "fd00::1");
+        assert_eq!(b.port, 15432);
+        assert_eq!(b.alpn, "postgresql");
+        assert_eq!(b.server_id, "spiffe://t/x");
+        for bad in ["a,b,1,c", "a,b,x,c,d", "a,b,1,c,d,e"] {
+            assert!(parse_tls_binding(bad).is_err(), "{bad}");
         }
     }
 }

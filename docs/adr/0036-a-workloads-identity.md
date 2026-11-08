@@ -293,8 +293,15 @@ ingress).
 - `feos-guest` gains outbound TLS bindings: a TLS 1.3 client whose
   signatures come from `feos-authn` over feid/1. They run in a process
   of their own, as libcontainer does (ADR 0007), so that a fault in it
-  never takes PID 1 down. `feos-authn` keeps its signer, its Kubernetes,
-  SSH and HTTP bindings, and loses its TLS bindings.
+  never takes PID 1 down. It reads the plaintext of the pod's clients
+  and the TLS of upstreams, so it is jailed as `feos-authn` is (ADR
+  0014), once its file is read and its listeners bound: a user of its
+  own, no capabilities, a root that holds the share directory alone,
+  `no_new_privs` and `feos-authn`'s seccomp allowlist with Unix sockets
+  for FeID's. A fault in it gets what a container of the pod has, not the
+  guest; it serves nothing outside its jail. `feos-authn` keeps its
+  signer, its Kubernetes, SSH and HTTP bindings, and loses its TLS
+  bindings.
 - The order of the work follows from the guest being FeID's first
   client: the signer side of feid/1 in `feos-authn`, the Rust crate, the
   guest's bindings on it, the addons' maps (PostgreSQL first) and the

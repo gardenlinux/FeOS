@@ -169,7 +169,23 @@ reaps.
   plaintext never leaves the pod. The bindings run in a process of
   their own, `feos-guest --tls-bindings /run/feos/tls-bindings.json`,
   which PID 1 starts again when it ends and replaces when a set changes
-  the bindings or resets them after a resume.
+  the bindings or resets them after a resume. It starts as root, closes
+  every descriptor but 0, 1 and 2, reads the file (root's, 0600) and
+  binds the listeners, then enters its jail while it has one thread
+  (`forward_service::tls::jail`): a mount namespace whose root is a
+  read-only tmpfs holding the share directory at `/run/feos` and
+  `/etc/resolv.conf` linked into it, as a container sees them, and
+  nothing else of the guest; rlimits (no core file, no locked memory, no
+  message queues, 4096 descriptors); user and group 2000000000, which no
+  container has, without supplementary groups; no capability in any set,
+  the bounding set included; not dumpable; `no_new_privs`. Its runtime's
+  threads inherit all of it, and then feos-authn's seccomp allowlist
+  (`crates/feos-jail`), with Unix sockets for FeID's, covers every
+  thread. It checks `/proc/self/status` last and logs `TlsBindings:
+  jailed: …` with what the kernel reports; a step that fails ends it
+  before it serves, and PID 1 tries again a second later. The key is on
+  the host either way: a fault in the process hands a peer what a
+  container of the pod has, not the guest.
 - A container's volume mounts (`ContainerConfig.volume_mounts`) are bind
   mounts of `/run/feos/volumes/<name>`, read-write or read-only,
   `nosuid` and `nodev`, after FeOS's own. A create, and an adoption,

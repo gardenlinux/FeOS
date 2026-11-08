@@ -46,8 +46,19 @@ impl ServerArgs {
     }
 }
 
+fn main() -> Result<()> {
+    // The TLS bindings' process enters its jail before it has a second
+    // thread, so it starts its runtime itself. PID 1 never parses here.
+    if std::process::id() != 1
+        && let Some(config) = ServerArgs::parse(env::args().skip(1)).tls_bindings
+    {
+        return run_tls_bindings(&config);
+    }
+    serve()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn serve() -> Result<()> {
     let result = run().await;
 
     if std::process::id() == 1 {
@@ -75,11 +86,6 @@ async fn run() -> Result<()> {
 
     if args.task_service {
         return run_task_service().await;
-    }
-    if let Some(config) = &args.tls_bindings {
-        if std::process::id() != 1 {
-            return run_tls_bindings(config).await;
-        }
     }
 
     if std::process::id() == 1 {

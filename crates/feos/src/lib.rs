@@ -555,19 +555,36 @@ fn notify_ready() {
 }
 
 /// The process of the pod's outbound TLS bindings, `feos-guest
-/// --tls-bindings <file>` (ADR 0036), which the guest's `SetFeid` starts:
-/// it signs through FeID's socket in the share directory.
+/// --tls-bindings <file>` (ADR 0036), which the guest's `SetFeid` starts.
+/// It reads the file and binds the listeners as root, then enters its
+/// jail while it has one thread, since a thread's capabilities are its
+/// own; the runtime's threads inherit the jail. The seccomp filter comes
+/// once the runtime's threads and descriptors exist, and covers them all.
+/// It signs through FeID's socket, which it finds in the share directory
+/// as a container does. Whatever fails ends the process before it serves.
 #[cfg(feature = "guest")]
-pub async fn run_tls_bindings(config: &str) -> Result<()> {
-    feos_utils::feos_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
-        .max_history(150)
-        .init()
-        .context("logger")?;
-    let socket = Path::new(feos_utils::share::SHARE_DIR).join("feid.sock");
-    forward_service::tls::serve(Path::new(config), &socket)
-        .await
-        .map_err(|e| anyhow::anyhow!("TLS bindings: {e}"))
+pub fn run_tls_bindings(config: &str) -> Result<()> {
+    use forward_service::tls::{self, jail};
+    let fail = |e: String| anyhow::anyhow!("TLS bindings: {e}");
+    jail::close_inherited().map_err(fail)?;
+    let listeners = tls::listen(Path::new(config)).map_err(fail)?;
+    let jail = jail::enter().map_err(fail)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("TLS bindings: the runtime")?;
+    let jailed = jail.seal().map_err(fail)?;
+    runtime.block_on(async move {
+        feos_utils::feos_logger::Builder::new()
+            .filter_level(log::LevelFilter::Info)
+            .max_history(150)
+            .init()
+            .context("logger")?;
+        info!("TlsBindings: {jailed}");
+        tls::serve(listeners, Path::new(jail::FEID_SOCKET))
+            .await
+            .map_err(fail)
+    })
 }
 
 /// The task service process, `feosd --task-service` or `feos-guest

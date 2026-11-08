@@ -16,9 +16,14 @@
 //! for the container runtime). PID 1 writes the file, starts the process,
 //! and starts it again when it ends; a set that changes the bindings, or
 //! resets them after a resume, ends the process before and starts another.
+//! The process reads the file and binds its listeners as root, then puts
+//! itself in its [`jail`] before it serves: a user of its own, no
+//! capabilities, a root that holds the share directory alone, a seccomp
+//! allowlist. A process that cannot serves nothing.
 
 use std::io;
 use std::net::SocketAddr;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -26,6 +31,8 @@ use std::time::Duration;
 
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+
+pub mod jail;
 
 /// The flag that makes `feos-guest` the bindings' process.
 pub const FLAG: &str = "--tls-bindings";
@@ -316,14 +323,56 @@ fn zombie(pid: i32) -> bool {
         .unwrap_or(true)
 }
 
-/// The bindings' process: serves the bindings of `config` until one of
-/// them cannot serve any more, which ends the process (PID 1 starts it
-/// again).
-pub async fn serve(config: &Path, feid_socket: &Path) -> Result<(), String> {
+/// The bindings of a file, each with its listener.
+pub struct Listeners(Vec<(Binding, std::net::TcpListener)>);
+
+/// How many connections wait to be accepted, as tokio's own listeners.
+const BACKLOG: i32 = 1024;
+
+/// The bindings' process, before its jail: reads `config`, which only root
+/// reads, and binds each binding's listener, on whatever port it names.
+pub fn listen(config: &Path) -> Result<Listeners, String> {
     let bindings: Vec<Binding> = serde_json::from_slice(
         &std::fs::read(config).map_err(|e| format!("{}: {e}", config.display()))?,
     )
     .map_err(|e| format!("{}: {e}", config.display()))?;
+    let mut listeners = Vec::with_capacity(bindings.len());
+    for b in bindings {
+        b.check()?;
+        let listener = bind(&b.listen).map_err(|e| format!("listen on {}: {e}", b.listen))?;
+        listeners.push((b, listener));
+    }
+    Ok(Listeners(listeners))
+}
+
+/// A non-blocking listener on an IPv4 address and port, which
+/// [`Binding::check`] passed.
+fn bind(address: &str) -> io::Result<std::net::TcpListener> {
+    use nix::sys::socket::{
+        bind, setsockopt, socket, sockopt, AddressFamily, SockFlag, SockType, SockaddrIn,
+    };
+    let address: std::net::SocketAddrV4 = address.parse().map_err(io::Error::other)?;
+    let fd = socket(
+        AddressFamily::Inet,
+        SockType::Stream,
+        SockFlag::SOCK_CLOEXEC | SockFlag::SOCK_NONBLOCK,
+        None,
+    )?;
+    setsockopt(&fd, sockopt::ReuseAddr, &true)?;
+    bind(fd.as_raw_fd(), &SockaddrIn::from(address))?;
+    // Not nix's listen: its Backlog stops at the libc's SOMAXCONN, 128 in
+    // musl; the kernel's net.core.somaxconn caps it.
+    // SAFETY: listen(2) on a socket this function owns.
+    if unsafe { libc::listen(fd.as_raw_fd(), BACKLOG) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(std::net::TcpListener::from(fd))
+}
+
+/// The bindings' process, in its jail: serves `listeners` until one of
+/// them cannot serve any more, which ends the process (PID 1 starts it
+/// again).
+pub async fn serve(listeners: Listeners, feid_socket: &Path) -> Result<(), String> {
     let socket = feid_socket.to_path_buf();
     let feid = tokio::task::spawn_blocking(move || feid::Feid::with_socket(socket))
         .await
@@ -331,8 +380,7 @@ pub async fn serve(config: &Path, feid_socket: &Path) -> Result<(), String> {
         .map_err(|e| format!("FeID's socket {}: {e}", feid_socket.display()))?;
     let feid = Arc::new(feid);
     let mut tasks = tokio::task::JoinSet::new();
-    for b in bindings {
-        b.check()?;
+    for (b, listener) in listeners.0 {
         let id = feid::SpiffeId::parse(&b.server_id)
             .ok_or_else(|| format!("server ID {:?} is no SPIFFE ID", b.server_id))?;
         // The configuration asks the signer for the bundle: blocking.
@@ -343,8 +391,7 @@ pub async fn serve(config: &Path, feid_socket: &Path) -> Result<(), String> {
             .map_err(|e| format!("FeID's client configuration: {e}"))?)
         .clone();
         config.alpn_protocols = vec![b.alpn.clone().into_bytes()];
-        let listener = tokio::net::TcpListener::bind(&b.listen)
-            .await
+        let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|e| format!("listen on {}: {e}", b.listen))?;
         info!(
             "TlsBindings: {} → {}:{} as {} ({})",
@@ -640,7 +687,8 @@ mod tests {
         let config = dir.join(CONFIG);
         std::fs::write(&config, serde_json::to_vec(bindings).unwrap()).unwrap();
         let socket = socket.to_path_buf();
-        tokio::spawn(async move { serve(&config, &socket).await });
+        let listeners = listen(&config).unwrap();
+        tokio::spawn(async move { serve(listeners, &socket).await });
         for b in bindings {
             for _ in 0..200 {
                 if tokio::net::TcpStream::connect(&b.listen).await.is_ok() {
