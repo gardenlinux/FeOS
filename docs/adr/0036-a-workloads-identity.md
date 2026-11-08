@@ -294,7 +294,11 @@ ingress).
 - `feos-guest` gains outbound TLS bindings: a TLS 1.3 client whose
   signatures come from `feos-authn` over feid/1. They run in a process
   of their own, as libcontainer does (ADR 0007), so that a fault in it
-  never takes PID 1 down. It reads the plaintext of the pod's clients
+  never takes PID 1 down. PID 1 binds its listeners, before it answers
+  the host's set, and the process inherits them, so a container never
+  finds a binding's port closed: a connection waits in the backlog
+  while the process starts, restarts or waits for the pod's signer. It
+  reads the plaintext of the pod's clients
   and the TLS of upstreams, so it is jailed as `feos-authn` is (ADR
   0014), once its file is read and its listeners bound: a user of its
   own, no capabilities, a root that holds the share directory alone,

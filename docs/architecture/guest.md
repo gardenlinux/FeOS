@@ -169,9 +169,16 @@ reaps.
   the plaintext never leaves the pod. The bindings run in a process of
   their own, `feos-guest --tls-bindings /run/feos/tls-bindings.json`,
   which PID 1 starts again when it ends and replaces when a set changes
-  the bindings or resets them after a resume. It starts as root, closes
-  every descriptor but 0, 1 and 2, reads the file (root's, 0600) and
-  binds the listeners, then enters its jail while it has one thread
+  the bindings or resets them after a resume. PID 1 binds the listeners
+  itself, before it answers the set, keeps the listener of an address
+  that stays, and the process inherits them: a container, which feosd
+  starts after the set, never finds a binding's port closed; a
+  connection that comes while the process starts or restarts waits in
+  the listener's backlog. The process starts as root, reads the file
+  (root's, 0600), which names each listener's descriptor, closes every
+  other descriptor but 0, 1 and 2, takes each listener only if it is
+  one on its binding's address, then enters its jail while it has one
+  thread
   (`forward_service::tls::jail`): a mount namespace whose root is a
   read-only tmpfs holding the share directory at `/run/feos` and
   `/etc/resolv.conf` linked into it, as a container sees them, and
@@ -183,7 +190,11 @@ reaps.
   (`crates/feos-jail`), with Unix sockets for FeID's, covers every
   thread. It checks `/proc/self/status` last and logs `TlsBindings:
   jailed: …` with what the kernel reports; a step that fails ends it
-  before it serves, and PID 1 tries again a second later. The key is on
+  before it serves, and PID 1 tries again a second later. It accepts
+  once FeID's socket has given it the pod's certificate, asking again
+  until then (`TlsBindings: Waiting for the pod's signer`), while the
+  pod's feos-authn starts; then it logs `TlsBindings: The pod is …`.
+  The key is on
   the host either way: a fault in the process hands a peer what a
   container of the pod has, not the guest.
 - A container's volume mounts (`ContainerConfig.volume_mounts`) are bind

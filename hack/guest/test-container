@@ -480,18 +480,23 @@ log "the ssh agent socket comes and goes in the container"
 # no capabilities, no_new_privs, a seccomp filter. From there a name
 # still resolves through the pod's resolver: one that does not exist is
 # answered as such, not refused. A binding without an ALPN protocol
-# offers none (Valkey's, ADR 0039). A reset replaces the process, which
-# binds the same ports again.
+# offers none (Valkey's, ADR 0039). The guest listens when the set
+# returns, before the signer answers, as a pod's bindings are set while
+# its feos-authn starts: a client that connects at once is not refused,
+# and is served once the signer answers. A reset replaces the process,
+# which takes the same listeners again.
 POD_ID=spiffe://feos.test/tenant/t/env/e/service/app
 DB_ID=spiffe://feos.test/tenant/t/env/e/addon/db
 PEER_LOG="${RUN_DIR}/peer.log"
 rm -f "${VSOCK}_10002"
-# Not through node(): PEER_PID has to be sudo's, which passes the kill on.
-sudo ip netns exec "${NS}" "${PEER}" "${VSOCK}_10002" "[${NODE_IP6}]:15432" "${POD_ID}" "${DB_ID}" \
-  >"${PEER_LOG}" 2>&1 &
-PEER_PID=$!
-for _ in $(seq 100); do grep -q '^ready' "${PEER_LOG}" && break; sleep 0.1; done
-grep -q '^ready' "${PEER_LOG}" || fail "the peer: $(cat "${PEER_LOG}")"
+start_peer() {
+  # Not through node(): PEER_PID has to be sudo's, which passes the kill on.
+  sudo ip netns exec "${NS}" "${PEER}" "${VSOCK}_10002" "[${NODE_IP6}]:15432" "${POD_ID}" "${DB_ID}" \
+    >"${PEER_LOG}" 2>&1 &
+  PEER_PID=$!
+  for _ in $(seq 100); do grep -q '^ready' "${PEER_LOG}" && break; sleep 0.1; done
+  grep -q '^ready' "${PEER_LOG}" || fail "the peer: $(cat "${PEER_LOG}")"
+}
 started() { grep -c "Started the TLS bindings' process" "${SERIAL_LOG}" || true; }
 jailed() { grep -c "TlsBindings: jailed: " "${SERIAL_LOG}" || true; }
 wait_jailed() {
@@ -511,7 +516,19 @@ through_binding() {
 }
 out="$(set_bindings)"
 [ "${out}" = "FeID's socket: listening; TLS bindings: 3" ] || fail "set-feid: ${out}"
+EARLY_OUT="${RUN_DIR}/early.out"
+cexec sh -c 'printf ping | timeout 30 nc 127.64.0.1 5432' >"${EARLY_OUT}" 2>&1 &
+EARLY_PID=$!
 wait_jailed 1
+for _ in $(seq 100); do grep -q "Waiting for the pod's signer" "${SERIAL_LOG}" && break; sleep 0.1; done
+grep -q "Waiting for the pod's signer" "${SERIAL_LOG}" \
+  || fail "the bindings did not wait for the signer: $(grep TlsBindings "${SERIAL_LOG}" | tail -5)"
+start_peer
+wait "${EARLY_PID}" || true
+[ "$(cat "${EARLY_OUT}")" = "pod:ping" ] \
+  || fail "a client before the signer: $(cat "${EARLY_OUT}"); $(grep TlsBindings "${SERIAL_LOG}" | tail -5)"
+grep -q "TlsBindings: The pod is ${POD_ID}" "${SERIAL_LOG}" \
+  || fail "the bindings did not say the pod's ID: $(grep TlsBindings "${SERIAL_LOG}" | tail -5)"
 line="$(grep "TlsBindings: jailed: " "${SERIAL_LOG}" | tail -1)"
 for want in "Uid 2000000000," "Gid 2000000000," "no groups" "CapInh CapPrm CapEff CapBnd CapAmb 0" \
   "NoNewPrivs 1" "Seccomp 2"; do

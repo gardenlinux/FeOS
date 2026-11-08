@@ -13,17 +13,25 @@
 //!
 //! The bindings run in a process of their own, `feos-guest --tls-bindings
 //! <file>`, so that a fault in TLS never takes PID 1 down (ADR 0007's rule
-//! for the container runtime). PID 1 writes the file, starts the process,
-//! and starts it again when it ends; a set that changes the bindings, or
-//! resets them after a resume, ends the process before and starts another.
-//! The process reads the file and binds its listeners as root, then puts
-//! itself in its [`jail`] before it serves: a user of its own, no
-//! capabilities, a root that holds the share directory alone, a seccomp
-//! allowlist. A process that cannot serves nothing.
+//! for the container runtime). PID 1 binds the bindings' listeners itself,
+//! before it answers the set, writes the file, which names each binding's
+//! listener by its descriptor, and starts the process, which inherits
+//! them; it starts the process again when it ends. A set that changes the
+//! bindings, or resets them after a resume, ends the process before and
+//! starts another, and keeps the listener of every address that stays.
+//! So a container, which the host starts after the set, never finds a
+//! binding's port closed: a connection that comes while the process
+//! starts, restarts or waits for the pod's signer waits in its listener's
+//! backlog. The process reads the file and takes its listeners as root,
+//! then puts itself in its [`jail`] before it serves: a user of its own,
+//! no capabilities, a root that holds the share directory alone, a seccomp
+//! allowlist. It accepts once the signer has given it the pod's
+//! certificate. A process that cannot serves nothing.
 
 use std::io;
-use std::net::SocketAddr;
-use std::os::fd::AsRawFd;
+use std::net::{SocketAddr, SocketAddrV4};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -49,6 +57,10 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long the upstream's handshake may take.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How often the process asks FeID's socket again while the pod's signer
+/// does not answer yet: from the first delay, doubling, to the last.
+const SIGNER_RETRY_FIRST: Duration = Duration::from_millis(50);
+const SIGNER_RETRY_LAST: Duration = Duration::from_secs(1);
 
 /// One binding, as the host pushes it (`SetFeid`'s `tls_bindings`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,17 +103,30 @@ impl Binding {
     }
 }
 
-/// PID 1's side: the bindings the host pushed, and their process.
+/// A binding in the process's file: the descriptor of its listener, which
+/// the process inherits from PID 1.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Inherited {
+    pub binding: Binding,
+    pub fd: i32,
+}
+
+/// PID 1's side: the bindings the host pushed, their listeners, and their
+/// process.
 pub struct TlsBindings {
     dir: PathBuf,
     /// The binary to run; `None`: this one.
     binary: Option<PathBuf>,
     state: Arc<Mutex<State>>,
+    /// One set at a time: a set waits for the process before to end.
+    sets: tokio::sync::Mutex<()>,
 }
 
 #[derive(Default)]
 struct State {
     bindings: Vec<Binding>,
+    /// Each binding's listener, by its address, in the bindings' order.
+    listeners: Vec<(String, Arc<std::net::TcpListener>)>,
     /// Counts the sets that changed the process: a supervisor of an older
     /// one stops.
     generation: u64,
@@ -122,17 +147,20 @@ impl TlsBindings {
             dir,
             binary,
             state: Arc::new(Mutex::new(State::default())),
+            sets: tokio::sync::Mutex::new(()),
         }
     }
 
-    /// Serves `bindings` from now on, none for an empty list. A set of the
-    /// bindings that are served already changes nothing, unless `reset`,
-    /// after a boot or a resume, which ends their connections too. Returns
-    /// how many are served.
+    /// Serves `bindings` from now on, none for an empty list: when it
+    /// returns, each binding's address listens. A set of the bindings that
+    /// are served already changes nothing, unless `reset`, after a boot or
+    /// a resume, which ends their connections too. Returns how many are
+    /// served.
     pub async fn set(&self, bindings: Vec<Binding>, reset: bool) -> Result<usize, String> {
         for b in &bindings {
             b.check()?;
         }
+        let _set = self.sets.lock().await;
         let previous = {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let running = st.pid.is_some_and(alive);
@@ -150,17 +178,23 @@ impl TlsBindings {
             stop(pid).await;
         }
         if bindings.is_empty() {
+            self.lock().listeners.clear();
             let _ = std::fs::remove_file(self.dir.join(CONFIG));
             let _ = std::fs::remove_file(self.dir.join(PID_FILE));
             info!("TlsBindings: The pod has no TLS bindings");
             return Ok(0);
         }
-        write_config(&self.dir, &bindings).map_err(|e| format!("TLS bindings' file: {e}"))?;
-        let generation = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .generation;
+        let listeners = self.listen(&bindings)?;
+        let inherited: Vec<Inherited> = bindings
+            .iter()
+            .zip(&listeners)
+            .map(|(b, l)| Inherited {
+                binding: b.clone(),
+                fd: l.as_raw_fd(),
+            })
+            .collect();
+        write_config(&self.dir, &inherited).map_err(|e| format!("TLS bindings' file: {e}"))?;
+        let generation = self.lock().generation;
         let supervisor = Supervisor {
             dir: self.dir.clone(),
             binary: self.binary.clone(),
@@ -178,6 +212,35 @@ impl TlsBindings {
                 .join(", ")
         );
         Ok(bindings.len())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The listeners of `bindings`, in their order: an address keeps the
+    /// listener it had, so that its waiting connections stay, and a new
+    /// one is bound; the listeners of addresses no binding names any more
+    /// close. When one cannot be bound, none listens.
+    fn listen(&self, bindings: &[Binding]) -> Result<Vec<Arc<std::net::TcpListener>>, String> {
+        let mut st = self.lock();
+        let mut before = std::mem::take(&mut st.listeners);
+        let mut now = Vec::with_capacity(bindings.len());
+        for b in bindings {
+            let listener = match before.iter().position(|(a, _)| *a == b.listen) {
+                Some(i) => before.swap_remove(i).1,
+                None => match bind(&b.listen) {
+                    Ok(l) => Arc::new(l),
+                    Err(e) => {
+                        st.bindings.clear();
+                        return Err(format!("listen on {}: {e}", b.listen));
+                    }
+                },
+            };
+            now.push((b.listen.clone(), listener));
+        }
+        st.listeners = now.clone();
+        Ok(now.into_iter().map(|(_, l)| l).collect())
     }
 }
 
@@ -219,47 +282,62 @@ impl Supervisor {
         let config = self.dir.join(CONFIG);
         let mut command = std::process::Command::new(&binary);
         command.arg(FLAG).arg(&config).stdin(Stdio::null());
-        if feos_utils::reaper::is_running() {
-            // The reaper owns waitpid in PID 1: ask it for the exit code.
-            let child = command.spawn()?;
-            let pid = child.id() as i32;
-            if !self.started(pid) {
+        let reaped = feos_utils::reaper::is_running();
+        // The process starts under the state's lock, with the listeners
+        // its file names, and is recorded before the lock goes: a set
+        // that replaces them either comes first, and this generation
+        // starts nothing, or finds the process and ends it.
+        let (pid, child) = {
+            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if st.generation != self.generation {
                 return Ok(());
             }
-            let code = feos_utils::reaper::wait_for_exit(pid).await;
-            warn!("TlsBindings: The TLS bindings' process (pid {pid}) exited with code {code}");
-        } else {
-            let mut child = tokio::process::Command::from(command).spawn()?;
-            let pid = child.id().unwrap_or_default() as i32;
-            if !self.started(pid) {
-                return Ok(());
+            // The process inherits the listeners, which are close-on-exec
+            // in PID 1: the flag goes in the child alone, between fork and
+            // exec.
+            let fds: Vec<i32> = st.listeners.iter().map(|(_, l)| l.as_raw_fd()).collect();
+            // SAFETY: fcntl(2) is async-signal-safe, and the closure
+            // allocates nothing; the descriptors are open: the state holds
+            // them, under the lock.
+            unsafe {
+                command.pre_exec(move || {
+                    for &fd in &fds {
+                        if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                            return Err(io::Error::last_os_error());
+                        }
+                    }
+                    Ok(())
+                });
             }
-            let status = child.wait().await?;
-            warn!("TlsBindings: The TLS bindings' process (pid {pid}) exited: {status}");
-        }
-        Ok(())
-    }
-
-    /// Records a started process as the current one; a process that a set
-    /// made stale while it started is ended at once.
-    fn started(&self, pid: i32) -> bool {
-        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if st.generation != self.generation {
-            drop(st);
-            signal(pid, nix::sys::signal::Signal::SIGKILL);
-            return false;
-        }
-        st.pid = Some(pid);
-        drop(st);
+            let (pid, child) = if reaped {
+                // The reaper owns waitpid in PID 1: it gives the exit code.
+                (command.spawn()?.id() as i32, None)
+            } else {
+                let child = tokio::process::Command::from(command).spawn()?;
+                (child.id().unwrap_or_default() as i32, Some(child))
+            };
+            st.pid = Some(pid);
+            (pid, child)
+        };
         if let Err(e) = std::fs::write(self.dir.join(PID_FILE), pid.to_string()) {
             warn!("TlsBindings: Failed to write the pid file: {e}");
         }
         info!("TlsBindings: Started the TLS bindings' process (pid {pid})");
-        true
+        match child {
+            None => {
+                let code = feos_utils::reaper::wait_for_exit(pid).await;
+                warn!("TlsBindings: The TLS bindings' process (pid {pid}) exited with code {code}");
+            }
+            Some(mut child) => {
+                let status = child.wait().await?;
+                warn!("TlsBindings: The TLS bindings' process (pid {pid}) exited: {status}");
+            }
+        }
+        Ok(())
     }
 }
 
-fn write_config(dir: &Path, bindings: &[Binding]) -> io::Result<()> {
+fn write_config(dir: &Path, bindings: &[Inherited]) -> io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     std::fs::create_dir_all(dir)?;
     let tmp = dir.join(format!(".{CONFIG}.new"));
@@ -330,29 +408,65 @@ pub struct Listeners(Vec<(Binding, std::net::TcpListener)>);
 /// How many connections wait to be accepted, as tokio's own listeners.
 const BACKLOG: i32 = 1024;
 
-/// The bindings' process, before its jail: reads `config`, which only root
-/// reads, and binds each binding's listener, on whatever port it names.
-pub fn listen(config: &Path) -> Result<Listeners, String> {
-    let bindings: Vec<Binding> = serde_json::from_slice(
+/// The bindings' process, first: reads `config`, which only root reads:
+/// the bindings, each with the descriptor of the listener PID 1 bound.
+pub fn read_config(config: &Path) -> Result<Vec<Inherited>, String> {
+    serde_json::from_slice(
         &std::fs::read(config).map_err(|e| format!("{}: {e}", config.display()))?,
     )
-    .map_err(|e| format!("{}: {e}", config.display()))?;
-    let mut listeners = Vec::with_capacity(bindings.len());
-    for b in bindings {
-        b.check()?;
-        let listener = bind(&b.listen).map_err(|e| format!("listen on {}: {e}", b.listen))?;
-        listeners.push((b, listener));
+    .map_err(|e| format!("{}: {e}", config.display()))
+}
+
+/// The bindings' process, once it closed every other descriptor: takes
+/// each binding's listener, which must be an open, listening TCP socket on
+/// the binding's address.
+pub fn adopt(inherited: Vec<Inherited>) -> Result<Listeners, String> {
+    let mut listeners = Vec::with_capacity(inherited.len());
+    for Inherited { binding, fd } in inherited {
+        binding.check()?;
+        // Only an open descriptor becomes one this process owns.
+        // SAFETY: fcntl(2) on a number, which changes nothing.
+        if fd < 3 || unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
+            return Err(format!("{}: descriptor {fd} is not open", binding.listen));
+        }
+        // SAFETY: an open descriptor that PID 1 passed for this binding
+        // alone: from here this process owns it, and nothing else does.
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let listener = adopted(fd, &binding.listen)
+            .map_err(|e| format!("{}: the inherited listener: {e}", binding.listen))?;
+        listeners.push((binding, listener));
     }
     Ok(Listeners(listeners))
 }
 
-/// A non-blocking listener on an IPv4 address and port, which
-/// [`Binding::check`] passed.
+/// `fd` as the listener of `listen`, if it is one.
+fn adopted(fd: OwnedFd, listen: &str) -> io::Result<std::net::TcpListener> {
+    use nix::sys::socket::{getsockname, getsockopt, sockopt, SockaddrIn};
+    if !getsockopt(&fd, sockopt::AcceptConn)? {
+        return Err(io::Error::other("it does not listen"));
+    }
+    let local = SocketAddrV4::from(getsockname::<SockaddrIn>(fd.as_raw_fd())?);
+    let want: SocketAddrV4 = listen.parse().map_err(io::Error::other)?;
+    if local != want {
+        return Err(io::Error::other(format!("it listens on {local}")));
+    }
+    let listener = std::net::TcpListener::from(fd);
+    // Nothing this process might start gets it.
+    // SAFETY: fcntl(2) on a descriptor the listener owns.
+    if unsafe { libc::fcntl(listener.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    listener.set_nonblocking(true)?;
+    Ok(listener)
+}
+
+/// A non-blocking, close-on-exec listener on an IPv4 address and port,
+/// which [`Binding::check`] passed: PID 1's.
 fn bind(address: &str) -> io::Result<std::net::TcpListener> {
     use nix::sys::socket::{
         bind, setsockopt, socket, sockopt, AddressFamily, SockFlag, SockType, SockaddrIn,
     };
-    let address: std::net::SocketAddrV4 = address.parse().map_err(io::Error::other)?;
+    let address: SocketAddrV4 = address.parse().map_err(io::Error::other)?;
     let fd = socket(
         AddressFamily::Inet,
         SockType::Stream,
@@ -372,31 +486,14 @@ fn bind(address: &str) -> io::Result<std::net::TcpListener> {
 
 /// The bindings' process, in its jail: serves `listeners` until one of
 /// them cannot serve any more, which ends the process (PID 1 starts it
-/// again).
+/// again). It accepts once the pod's signer answers through FeID's socket
+/// with the pod's certificate; until then, while the pod's feos-authn
+/// starts, connections wait in the listeners' backlogs.
 pub async fn serve(listeners: Listeners, feid_socket: &Path) -> Result<(), String> {
-    let socket = feid_socket.to_path_buf();
-    let feid = tokio::task::spawn_blocking(move || feid::Feid::with_socket(socket))
-        .await
-        .map_err(|e| format!("FeID: {e}"))?
-        .map_err(|e| format!("FeID's socket {}: {e}", feid_socket.display()))?;
-    let feid = Arc::new(feid);
+    let bindings: Vec<&Binding> = listeners.0.iter().map(|(b, _)| b).collect();
+    let (feid, configs) = signed(&bindings, feid_socket).await;
     let mut tasks = tokio::task::JoinSet::new();
-    for (b, listener) in listeners.0 {
-        let id = feid::SpiffeId::parse(&b.server_id)
-            .ok_or_else(|| format!("server ID {:?} is no SPIFFE ID", b.server_id))?;
-        // The configuration asks the signer for the bundle: blocking.
-        let f = feid.clone();
-        let mut config = (*tokio::task::spawn_blocking(move || f.client_config_for(&id))
-            .await
-            .map_err(|e| format!("FeID: {e}"))?
-            .map_err(|e| format!("FeID's client configuration: {e}"))?)
-        .clone();
-        // An empty ALPN offers none: rustls then sends no extension.
-        config.alpn_protocols = if b.alpn.is_empty() {
-            Vec::new()
-        } else {
-            vec![b.alpn.clone().into_bytes()]
-        };
+    for ((b, listener), config) in listeners.0.into_iter().zip(configs) {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|e| format!("listen on {}: {e}", b.listen))?;
         let alpn = if b.alpn.is_empty() {
@@ -420,6 +517,75 @@ pub async fn serve(listeners: Listeners, feid_socket: &Path) -> Result<(), Strin
         Some(Err(e)) => Err(format!("a binding's task: {e}")),
         None => Ok(()),
     }
+}
+
+/// FeID's client and each binding's configuration, once the pod's signer
+/// gives the pod's certificate and the platform's bundle: asked again,
+/// with a growing delay, until it does.
+async fn signed(
+    bindings: &[&Binding],
+    socket: &Path,
+) -> (Arc<feid::Feid>, Vec<rustls::ClientConfig>) {
+    let since = tokio::time::Instant::now();
+    let mut delay = SIGNER_RETRY_FIRST;
+    let mut last = String::new();
+    loop {
+        match configs(bindings, socket).await {
+            Ok((feid, id, configs)) => {
+                info!(
+                    "TlsBindings: The pod is {id}, after {} ms",
+                    since.elapsed().as_millis()
+                );
+                return (feid, configs);
+            }
+            // Said once, and again when it says something else.
+            Err(e) if e != last => {
+                warn!("TlsBindings: Waiting for the pod's signer: {e}");
+                last = e;
+            }
+            Err(_) => {}
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(SIGNER_RETRY_LAST);
+    }
+}
+
+/// One attempt of [`signed`]: the client, the pod's ID and the
+/// configurations. FeID's calls block.
+async fn configs(
+    bindings: &[&Binding],
+    socket: &Path,
+) -> Result<(Arc<feid::Feid>, feid::SpiffeId, Vec<rustls::ClientConfig>), String> {
+    let path = socket.to_path_buf();
+    let feid = tokio::task::spawn_blocking(move || feid::Feid::with_socket(path))
+        .await
+        .map_err(|e| format!("FeID: {e}"))?
+        .map_err(|e| format!("FeID's socket {}: {e}", socket.display()))?;
+    let feid = Arc::new(feid);
+    let f = feid.clone();
+    let id = tokio::task::spawn_blocking(move || f.id())
+        .await
+        .map_err(|e| format!("FeID: {e}"))?
+        .map_err(|e| format!("the pod's certificate: {e}"))?;
+    let mut configs = Vec::with_capacity(bindings.len());
+    for b in bindings {
+        let server = feid::SpiffeId::parse(&b.server_id)
+            .ok_or_else(|| format!("server ID {:?} is no SPIFFE ID", b.server_id))?;
+        let f = feid.clone();
+        let mut config = (*tokio::task::spawn_blocking(move || f.client_config_for(&server))
+            .await
+            .map_err(|e| format!("FeID: {e}"))?
+            .map_err(|e| format!("FeID's client configuration: {e}"))?)
+        .clone();
+        // An empty ALPN offers none: rustls then sends no extension.
+        config.alpn_protocols = if b.alpn.is_empty() {
+            Vec::new()
+        } else {
+            vec![b.alpn.clone().into_bytes()]
+        };
+        configs.push(config);
+    }
+    Ok((feid, id, configs))
 }
 
 async fn accept(
@@ -632,15 +798,26 @@ mod tests {
             bundle: ca.pem.clone(),
         });
         let socket = dir.join("feid.sock");
-        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
-        tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let signer = signer.clone();
-                tokio::spawn(async move {
-                    let options = feid_proto::ServeOptions::named("test-signer");
-                    feid_proto::serve(stream, signer.as_ref(), &options).await;
-                });
-            }
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        // A runtime of its own, as feos-authn is a process of its own: FeID
+        // asks it for the pod's certificate in a handshake, blocking the
+        // worker that runs the handshake.
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async move {
+                let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+                while let Ok((stream, _)) = listener.accept().await {
+                    let signer = signer.clone();
+                    tokio::spawn(async move {
+                        let options = feid_proto::ServeOptions::named("test-signer");
+                        feid_proto::serve(stream, signer.as_ref(), &options).await;
+                    });
+                }
+            });
         });
         socket
     }
@@ -707,20 +884,105 @@ mod tests {
         l.local_addr().unwrap().to_string()
     }
 
-    async fn serving(dir: &Path, socket: &Path, bindings: &[Binding]) {
-        let config = dir.join(CONFIG);
-        std::fs::write(&config, serde_json::to_vec(bindings).unwrap()).unwrap();
+    /// The bindings served as the process serves them, with listeners
+    /// bound as PID 1 binds them: they listen when this returns.
+    fn serving(socket: &Path, bindings: &[Binding]) {
+        let listeners = bindings
+            .iter()
+            .map(|b| (b.clone(), bind(&b.listen).unwrap()))
+            .collect();
         let socket = socket.to_path_buf();
-        let listeners = listen(&config).unwrap();
-        tokio::spawn(async move { serve(listeners, &socket).await });
-        for b in bindings {
-            for _ in 0..200 {
-                if tokio::net::TcpStream::connect(&b.listen).await.is_ok() {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
+        tokio::spawn(async move { serve(Listeners(listeners), &socket).await });
+    }
+
+    fn connect_refused(listen: &str) -> bool {
+        std::net::TcpStream::connect(listen)
+            .is_err_and(|e| e.kind() == io::ErrorKind::ConnectionRefused)
+    }
+
+    // PID 1 listens on a binding's address when its set returns, before
+    // the process runs; a set that changes the upstream keeps the
+    // address's listener; a set of none closes it. The file names each
+    // listener's descriptor, and the process takes only a listener on its
+    // binding's address.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pid_1_listens_before_its_set_returns() {
+        let dir = tempfile::tempdir().unwrap();
+        // A process that serves nothing: only PID 1 listens.
+        let tls = TlsBindings::with_parts(dir.path().into(), Some("true".into()));
+        let b = binding(&free_loopback());
+        assert_eq!(tls.set(vec![b.clone()], false).await.unwrap(), 1);
+        let waiting = std::net::TcpStream::connect(&b.listen).unwrap();
+        let fd = |dir: &Path| read_config(&dir.join(CONFIG)).unwrap()[0].fd;
+        let first = fd(dir.path());
+
+        let moved = Binding {
+            port: 6432,
+            ..b.clone()
+        };
+        assert_eq!(tls.set(vec![moved.clone()], false).await.unwrap(), 1);
+        assert_eq!(fd(dir.path()), first, "the address got another listener");
+        std::net::TcpStream::connect(&b.listen).unwrap();
+
+        // The process's side: a duplicate, as it inherits one.
+        let inherited = read_config(&dir.path().join(CONFIG)).unwrap();
+        // SAFETY: dup(2) of a descriptor the set holds.
+        let dup = |fd: i32| unsafe { libc::dup(fd) };
+        let mut taken = adopt(
+            inherited
+                .into_iter()
+                .map(|i| Inherited { fd: dup(i.fd), ..i })
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(
+            taken.0.remove(0).1.local_addr().unwrap().to_string(),
+            b.listen
+        );
+        let elsewhere = Inherited {
+            binding: binding(&free_loopback()),
+            fd: dup(first),
+        };
+        let e = adopt(vec![elsewhere]).err().unwrap();
+        assert!(e.contains("it listens on"), "{e}");
+        let unbound = std::net::TcpStream::connect(&b.listen).unwrap();
+        let e = adopt(vec![Inherited {
+            binding: b.clone(),
+            fd: dup(unbound.as_raw_fd()),
+        }])
+        .err()
+        .unwrap();
+        assert!(e.contains("does not listen"), "{e}");
+
+        assert_eq!(tls.set(Vec::new(), false).await.unwrap(), 0);
+        assert!(connect_refused(&b.listen), "a binding outlived its set");
+        drop(waiting);
+    }
+
+    // A client that connects while the pod's signer does not answer yet,
+    // as a container that starts while feos-authn does, waits and is
+    // served once it answers: not refused.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_client_before_the_signer_waits_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = Ca::new();
+        let up = upstream(&ca, ADDON).await;
+        let b = Binding {
+            host: "::1".into(),
+            port: up.port(),
+            ..binding(&free_loopback())
+        };
+        serving(&dir.path().join("feid.sock"), std::slice::from_ref(&b));
+        let mut c = tokio::net::TcpStream::connect(&b.listen).await.unwrap();
+        c.write_all(b"ping").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        signer(dir.path(), &ca);
+        let mut answer = [0u8; 8];
+        tokio::time::timeout(Duration::from_secs(10), c.read_exact(&mut answer))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&answer, b"pod:ping");
     }
 
     // A plaintext client on loopback reaches the upstream over TLS with
@@ -743,7 +1005,7 @@ mod tests {
             port: other.port(),
             ..binding(&free_loopback())
         };
-        serving(dir.path(), &socket, &[ok.clone(), pinned.clone()]).await;
+        serving(&socket, &[ok.clone(), pinned.clone()]);
 
         let mut c = tokio::net::TcpStream::connect(&ok.listen).await.unwrap();
         c.write_all(b"ping").await.unwrap();
@@ -777,7 +1039,7 @@ mod tests {
             alpn: String::new(),
             ..binding(&free_loopback())
         };
-        serving(dir.path(), &socket, std::slice::from_ref(&b)).await;
+        serving(&socket, std::slice::from_ref(&b));
         let mut c = tokio::net::TcpStream::connect(&b.listen).await.unwrap();
         c.write_all(b"PING").await.unwrap();
         let mut answer = [0u8; 8];

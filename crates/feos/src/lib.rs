@@ -566,8 +566,10 @@ fn notify_ready() {
 pub fn run_tls_bindings(config: &str) -> Result<()> {
     use forward_service::tls::{self, jail};
     let fail = |e: String| anyhow::anyhow!("TLS bindings: {e}");
-    jail::close_inherited().map_err(fail)?;
-    let listeners = tls::listen(Path::new(config)).map_err(fail)?;
+    let inherited = tls::read_config(Path::new(config)).map_err(fail)?;
+    let fds: Vec<i32> = inherited.iter().map(|b| b.fd).collect();
+    jail::close_inherited(&fds).map_err(fail)?;
+    let listeners = tls::adopt(inherited).map_err(fail)?;
     let jail = jail::enter().map_err(fail)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

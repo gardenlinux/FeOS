@@ -7,10 +7,13 @@
 //! a peer the guest. The pod's key is never in it: feos-authn signs on
 //! the host. In the order it runs, while the process has one thread:
 //!
-//! - [`close_inherited`]: every descriptor but stdin, stdout and stderr
-//!   closes, before the process opens its own;
-//! - the bindings' file is read and their listeners bound ([`super::listen`]),
-//!   as root: the file is root's alone, and a port may be below 1024;
+//! - the bindings' file is read ([`super::read_config`]), as root: it is
+//!   root's alone; it names the descriptors of the listeners PID 1 bound,
+//!   on whatever port, and the process inherited;
+//! - [`close_inherited`]: every descriptor but stdin, stdout, stderr and
+//!   the listeners closes, before the process opens its own, and each
+//!   listener is checked to be one on its binding's address
+//!   ([`super::adopt`]);
 //! - [`enter`]: a mount namespace of its own whose root is a read-only
 //!   tmpfs that holds the share directory at `/run/feos` and
 //!   `/etc/resolv.conf` linked to `/run/feos/resolv.conf`, as a container
@@ -54,9 +57,10 @@ const ROOT_OPTIONS: &str = "mode=0755,size=16k,nr_inodes=16";
 /// FeID's socket in the jail: where a container finds it too.
 pub const FEID_SOCKET: &str = FEID_SOCK;
 
-/// Closes every descriptor PID 1 left open but stdin, stdout and stderr.
-pub fn close_inherited() -> Result<(), String> {
-    feos_jail::close_other_fds(&[]).map_err(|e| format!("close inherited descriptors: {e}"))
+/// Closes every descriptor PID 1 left open but stdin, stdout, stderr and
+/// `keep`, the listeners.
+pub fn close_inherited(keep: &[i32]) -> Result<(), String> {
+    feos_jail::close_other_fds(keep).map_err(|e| format!("close inherited descriptors: {e}"))
 }
 
 /// The jail, all but its seccomp filter.
