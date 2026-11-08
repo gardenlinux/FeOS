@@ -1,34 +1,47 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-//! What feos-authn does to itself before it serves (ADR 0014, "The jail").
-//! `feosd` starts it as the pod's own user, in a mount namespace with an
-//! empty root and in the network namespace of the node's proxies; this
-//! process then:
+//! What a FeOS process that serves untrusted peers does to itself: the
+//! pod's `feos-authn` on the node (ADR 0014, "The jail") and the guest's
+//! TLS bindings (ADR 0036). Both are a tokio proxy with rustls and the libc
+//! resolver. `feosd` starts feos-authn as the pod's own user, in a mount
+//! namespace with an empty root and in the network namespace of the node's
+//! proxies; the guest's TLS bindings start as root and set up their user
+//! and root themselves (`forward_service::tls::jail`). The process then:
 //!
 //! - first, [`close_other_fds`]: closes every descriptor but stdin,
-//!   stdout, stderr, the audit file and the control socket;
-//! - once its runtime's threads and descriptors exist, [`enter`]: is no
-//!   longer dumpable (no core dump, no ptrace by its own user) and
+//!   stdout, stderr and the ones it was handed;
+//! - is no longer dumpable (no core dump, no ptrace by its own user) and
 //!   gets rlimits: no core file, no locked memory, no message queues, at
 //!   most [`NOFILE`] descriptors;
 //! - drops every capability: the ambient set, the bounding set where it
-//!   may, and the permitted, effective and inheritable sets;
-//! - sets `no_new_privs` and installs a seccomp allowlist for all its
-//!   threads: what a tokio proxy with rustls and the libc resolver calls,
-//!   with `socket` limited to IPv4 and IPv6, `clone` to threads without new
-//!   namespaces, `open`/`openat` to reading, `mmap`/`mprotect` to memory
-//!   that is not executable, `ioctl` to FIONBIO and FIOCLEX, `prctl` to
-//!   thread names, `prlimit64` to reading. `clone3` fails with ENOSYS, so
-//!   that the libc falls back to `clone`, whose flags the filter sees.
-//!   Every other call fails with EPERM: the code that made it returns an
-//!   error, and the process keeps serving. The filter covers every thread
-//!   (TSYNC), those of the runtime that exist and those it starts later.
+//!   may, and the permitted, effective and inheritable sets. A thread's
+//!   capabilities are its own: a process that has any confines itself
+//!   before it starts a second thread;
+//! - sets `no_new_privs` and, once its runtime's threads and descriptors
+//!   exist, installs a seccomp allowlist for all its threads: what a tokio
+//!   proxy with rustls and the libc resolver calls, with `socket` limited to
+//!   the families it is given, `clone` to threads without new namespaces,
+//!   `open`/`openat` to reading, `mmap`/`mprotect` to memory that is not
+//!   executable, `ioctl` to FIONBIO and FIOCLEX, `prctl` to thread names,
+//!   `prlimit64` to reading. `clone3` fails with ENOSYS, so that the libc
+//!   falls back to `clone`, whose flags the filter sees. Every other call
+//!   fails with EPERM: the code that made it returns an error, and the
+//!   process keeps serving. The filter covers every thread (TSYNC), those
+//!   of the runtime that exist and those it starts later.
+//!
+//! [`enter`] is feos-authn's whole sequence, once its runtime exists.
 
 use std::io;
 
 /// The descriptors a run may hold.
 pub const NOFILE: u64 = 4096;
+
+/// The socket families of a process that dials IPv4 and IPv6 alone.
+pub const INET: &[libc::c_int] = &[libc::AF_INET, libc::AF_INET6];
+/// And Unix sockets, for one that dials FeID's socket, as the guest's TLS
+/// bindings do.
+pub const INET_AND_UNIX: &[libc::c_int] = &[libc::AF_INET, libc::AF_INET6, libc::AF_UNIX];
 
 const AUDIT_ARCH_X86_64: u32 = 0xc000_003e;
 const X32_SYSCALL_BIT: u32 = 0x4000_0000;
@@ -48,20 +61,36 @@ const RET_EPERM: u32 = libc::SECCOMP_RET_ERRNO | libc::EPERM as u32;
 const RET_ENOSYS: u32 = libc::SECCOMP_RET_ERRNO | libc::ENOSYS as u32;
 const RET_KILL: u32 = libc::SECCOMP_RET_KILL_PROCESS;
 
-/// Everything but the closing of descriptors; the first step that fails
-/// stops the start.
+/// feos-authn's jail, everything but the closing of descriptors, for a
+/// process that dials IPv4 and IPv6 alone; the first step that fails stops
+/// the start.
 pub fn enter() -> io::Result<()> {
+    not_dumpable()?;
+    limits()?;
+    drop_bounding_set()?;
+    clear_capabilities()?;
+    no_new_privs()?;
+    seccomp(INET)
+}
+
+/// No core dump, and no ptrace by the process's own user. A change of
+/// the user resets it: it comes after one.
+pub fn not_dumpable() -> io::Result<()> {
     // SAFETY: prctl with integer arguments only.
     if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    limits()?;
-    drop_capabilities()?;
+    Ok(())
+}
+
+/// No privileges through an exec, of setuid binaries or file capabilities,
+/// for this thread and the threads it starts.
+pub fn no_new_privs() -> io::Result<()> {
     // SAFETY: prctl with integer arguments only.
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    seccomp()
+    Ok(())
 }
 
 /// Closes every descriptor but 0, 1, 2 and `keep`.
@@ -119,9 +148,11 @@ fn prlimit(resource: u32, new: Option<(u64, u64)>) -> io::Result<libc::rlimit64>
     Ok(old)
 }
 
+/// No core file, no locked memory, no message queues, at most [`NOFILE`]
+/// descriptors: as many, when the process may raise its hard limit.
 // The resources are u32 to glibc and c_int to musl.
 #[allow(clippy::unnecessary_cast)]
-fn limits() -> io::Result<()> {
+pub fn limits() -> io::Result<()> {
     prlimit(libc::RLIMIT_CORE as u32, Some((0, 0)))?;
     prlimit(libc::RLIMIT_MEMLOCK as u32, Some((0, 0)))?;
     prlimit(libc::RLIMIT_MSGQUEUE as u32, Some((0, 0)))?;
@@ -147,19 +178,10 @@ struct CapData {
 
 const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 
-fn drop_capabilities() -> io::Result<()> {
-    // SAFETY: prctl with integer arguments only.
-    unsafe {
-        libc::prctl(
-            libc::PR_CAP_AMBIENT,
-            libc::PR_CAP_AMBIENT_CLEAR_ALL,
-            0,
-            0,
-            0,
-        )
-    };
-    // The bounding set needs CAP_SETPCAP to shrink; without it there is
-    // nothing in the other sets to keep anyway.
+/// Empties this thread's bounding set, which needs CAP_SETPCAP: a process
+/// that changes its user does it before. Without CAP_SETPCAP it leaves the
+/// set, since there is nothing in the other sets to keep anyway.
+pub fn drop_bounding_set() -> io::Result<()> {
     for cap in 0..64 {
         // SAFETY: prctl with integer arguments only.
         let r = unsafe { libc::prctl(libc::PR_CAPBSET_DROP, cap, 0, 0, 0) };
@@ -172,6 +194,22 @@ fn drop_capabilities() -> io::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Empties this thread's ambient, permitted, effective and inheritable
+/// sets.
+pub fn clear_capabilities() -> io::Result<()> {
+    // SAFETY: prctl with integer arguments only.
+    unsafe {
+        libc::prctl(
+            libc::PR_CAP_AMBIENT,
+            libc::PR_CAP_AMBIENT_CLEAR_ALL,
+            0,
+            0,
+            0,
+        )
+    };
     let mut header = CapHeader {
         version: LINUX_CAPABILITY_VERSION_3,
         pid: 0,
@@ -323,8 +361,9 @@ fn allow_if_none(nr: libc::c_long, arg: u32, mask: u32) -> Vec<libc::sock_filter
     ]
 }
 
-/// The allowlist as a classic BPF program.
-pub fn filter() -> Vec<libc::sock_filter> {
+/// The allowlist as a classic BPF program, `socket` limited to `families`.
+pub fn filter(families: &[libc::c_int]) -> Vec<libc::sock_filter> {
+    let families: Vec<u32> = families.iter().map(|&f| f as u32).collect();
     let mut f = vec![
         stmt(LD_W_ABS, OFF_ARCH),
         jump(JEQ_K, AUDIT_ARCH_X86_64, 1, 0),
@@ -346,11 +385,7 @@ pub fn filter() -> Vec<libc::sock_filter> {
     // Every block below starts with nr in the accumulator and ends in a
     // return; a call it is not about jumps over it with nr still loaded.
     let blocks: Vec<Vec<libc::sock_filter>> = vec![
-        allow_if_in(
-            libc::SYS_socket,
-            0,
-            &[libc::AF_INET as u32, libc::AF_INET6 as u32],
-        ),
+        allow_if_in(libc::SYS_socket, 0, &families),
         allow_if_in(
             libc::SYS_ioctl,
             1,
@@ -420,8 +455,10 @@ pub fn filter() -> Vec<libc::sock_filter> {
     f
 }
 
-fn seccomp() -> io::Result<()> {
-    let prog = filter();
+/// Installs the allowlist, `socket` limited to `families`, on every thread
+/// of the process (TSYNC). It needs `no_new_privs`, or CAP_SYS_ADMIN.
+pub fn seccomp(families: &[libc::c_int]) -> io::Result<()> {
+    let prog = filter(families);
     let fprog = libc::sock_fprog {
         len: prog.len() as u16,
         filter: prog.as_ptr() as *mut libc::sock_filter,
@@ -484,7 +521,7 @@ mod tests {
 
     #[test]
     fn the_filter_allows_and_refuses() {
-        let p = filter();
+        let p = filter(INET);
         assert!(p.len() < 4096);
         let z = [0u64; 6];
         assert_eq!(run(&p, libc::SYS_read, z), RET_ALLOW);
@@ -581,9 +618,39 @@ mod tests {
         assert_eq!(run(&p, libc::SYS_prlimit64, a(0x1000, 2)), RET_EPERM);
     }
 
+    // The TLS bindings' filter is feos-authn's, with Unix sockets too:
+    // FeID's socket. The rest stays refused.
+    #[test]
+    fn unix_sockets_are_allowed_only_when_named() {
+        let p = filter(INET_AND_UNIX);
+        let family = |f: libc::c_int| [f as u64, 0, 0, 0, 0, 0];
+        for f in [libc::AF_INET, libc::AF_INET6, libc::AF_UNIX] {
+            assert_eq!(run(&p, libc::SYS_socket, family(f)), RET_ALLOW, "{f}");
+        }
+        for f in [libc::AF_NETLINK, libc::AF_PACKET, libc::AF_VSOCK] {
+            assert_eq!(run(&p, libc::SYS_socket, family(f)), RET_EPERM, "{f}");
+        }
+        let z = [0u64; 6];
+        for nr in [
+            libc::SYS_execve,
+            libc::SYS_ptrace,
+            libc::SYS_kill,
+            libc::SYS_mount,
+            libc::SYS_setuid,
+            libc::SYS_listen,
+            libc::SYS_socketpair,
+        ] {
+            assert_eq!(run(&p, nr, z), RET_EPERM, "{nr}");
+        }
+        // Everything else is the same program: one more value in the
+        // socket block shifts nothing before it.
+        let inet = filter(INET);
+        assert_eq!(p.len(), inet.len() + 1);
+    }
+
     #[test]
     fn another_architecture_is_killed() {
-        let p = filter();
+        let p = filter(INET);
         let ins = p[1];
         assert_eq!(ins.k, AUDIT_ARCH_X86_64);
         assert_eq!(p[2].k, RET_KILL);

@@ -1,0 +1,11 @@
+[package]
+name = "feos-jail"
+version.workspace = true
+edition.workspace = true
+description = "What a FeOS process that serves untrusted peers does to itself: rlimits, no capabilities, no_new_privs, a seccomp allowlist"
+
+[lints]
+workspace = true
+
+[dependencies]
+libc = { workspace = true }

@@ -68,7 +68,8 @@ What `feosd` sets up at spawn (the node agent's side):
   networks, and the pods' second addresses, from which a binding's
   connections leave.
 
-What feos-authn does to itself before it serves (`src/jail.rs`):
+What feos-authn does to itself before it serves (`crates/feos-jail`, which
+the guest's TLS bindings use too):
 
 - closes every descriptor but 0, 1, 2, the audit file and the control
   socket;

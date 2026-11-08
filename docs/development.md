@@ -24,6 +24,9 @@ crates/
                         pod: its HTTP bindings (ADR 0014, ADR 0028)
   feos-host-init/       PID 1 of a node whose operating system is FeOS:
                         machine setup (network, NTP, SR-IOV)
+  feos-jail/            what feos-authn and the guest's TLS bindings do to
+                        themselves: rlimits, no capabilities, no_new_privs,
+                        a seccomp allowlist
   feos-proto/           generated gRPC code for proto/
   feos-utils/           shared building blocks: logger, mounts, reaper, vsock,
                         resolvers, confined container file access, dispatch

@@ -22,7 +22,7 @@ pub mod feid;
 pub mod gunzip;
 pub mod hpke;
 pub mod intercept;
-pub mod jail;
+pub use feos_jail as jail;
 pub mod keys;
 pub mod oauth;
 pub mod proxy;

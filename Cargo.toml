@@ -6,6 +6,7 @@ members = [
     "crates/feos",
     "crates/feos-authn",
     "crates/feos-host-init",
+    "crates/feos-jail",
     "crates/feos-proto",
     "crates/feos-utils",
     "crates/feosctl",
@@ -105,6 +106,7 @@ base64 = "0.22.1"
 feid = { path = "feid/feid" }
 feid-proto = { path = "feid/feid-proto" }
 disk-store = { path = "crates/disk-store" }
+feos-jail = { path = "crates/feos-jail" }
 feos-proto = { path = "crates/feos-proto" }
 feos-utils = { path = "crates/feos-utils" }
 fleet-client = { path = "crates/fleet-client" }

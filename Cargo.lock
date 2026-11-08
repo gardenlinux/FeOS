@@ -1308,6 +1308,7 @@ dependencies = [
  "env_logger",
  "feid",
  "feid-proto",
+ "feos-jail",
  "feos-proto",
  "flate2",
  "form_urlencoded",
@@ -1353,6 +1354,13 @@ dependencies = [
  "sntpc",
  "socket2 0.6.5",
  "tokio",
+]
+
+[[package]]
+name = "feos-jail"
+version = "0.6.1"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

@@ -17,6 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 feos-proto = { workspace = true }
+# The seccomp allowlist and the rest of what the process does to itself.
+feos-jail = { workspace = true }
 # FeID's signer: feid/1's server and its CertificateVerify check.
 feid-proto = { workspace = true }
 prost = { workspace = true }
