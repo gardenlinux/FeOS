@@ -89,8 +89,10 @@ func TestSandboxImageCredentials(t *testing.T) {
 	// A sandbox's template (ADR 0035: its environment's groups) has no
 	// login: its sealed credentials still count.
 	env := h.boxEnv(testTenant)
-	templated, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: testTenant,
-		Image: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env, PodTemplate: model.SandboxTemplate(env, nil)})
+	tid := podid.Mint()
+	templated, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: tid, Owner: testTenant,
+		Image: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
+		PodTemplate: model.SandboxTemplate(env, tid.String(), false, nil)})
 	if err != nil || !created {
 		t.Fatalf("create sandbox: %v (created %v)", err, created)
 	}

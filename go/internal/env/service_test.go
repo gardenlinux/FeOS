@@ -139,9 +139,15 @@ func TestPlanApply(t *testing.T) {
 
 	// No secret yet: an error finding, the diff all adds.
 	p, err := h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(stageSpec)})
-	if err != nil || p.Valid || p.Base != 0 || p.Current != 0 || len(p.Diff) != 8 ||
+	if err != nil || p.Valid || p.Base != 0 || p.Current != 0 || len(p.Diff) != 7 ||
 		!hasFinding(p.Findings, spec.SeverityError, "services.api.env.TOKEN", "no secret token") {
 		t.Fatalf("plan %+v %v", p, err)
+	}
+	// The plan says what the spec admits (ADR 0034, revised).
+	if r := p.Reachability; len(r.Edges) != 6 || r.Edges[0] != (spec.Edge{From: "ingress", To: "service/api",
+		Port: "http", Number: 8080, Via: "route api"}) || len(r.Egress) != 3 || r.Egress[0].Mode != spec.EgressInternet ||
+		len(r.Routes) != 2 {
+		t.Fatalf("reachability %+v", r)
 	}
 	_, err = h.svc.Apply(ctx, tenantA, "stage", ApplyRequest{Spec: json.RawMessage(stageSpec)})
 	var ise *InvalidSpecError
@@ -162,7 +168,7 @@ func TestPlanApply(t *testing.T) {
 	a := h.apply("stage", stageSpec, 0)
 	waitHint(t, ch, ctl.HintReconcile)
 	if a.Number != 1 || a.State != model.DeploymentWaiting || a.Origin != model.OriginApply || a.Base != 0 ||
-		a.Unchanged || a.StatusCode() != http.StatusCreated || len(a.Diff) != 9 || a.Author != "tester" {
+		a.Unchanged || a.StatusCode() != http.StatusCreated || len(a.Diff) != 8 || a.Author != "tester" {
 		t.Fatalf("apply %+v", a)
 	}
 	e := h.env("stage")
@@ -205,7 +211,7 @@ func TestPlanApply(t *testing.T) {
 	}
 	zero, far := 0, 9
 	p, _ = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed), Base: &zero})
-	if p.Base != 0 || p.Current != 1 || len(p.Diff) != 9 {
+	if p.Base != 0 || p.Current != 1 || len(p.Diff) != 8 {
 		t.Fatalf("plan on base 0 %+v", p)
 	}
 	_, err = h.svc.Plan(ctx, tenantA, "stage", PlanRequest{Spec: json.RawMessage(changed), Base: &far})
@@ -485,11 +491,16 @@ func TestAttachedValidation(t *testing.T) {
 			t.Fatalf("sandbox %q: %+v", bad, p)
 		}
 	}
-	// An attached service is in its sandbox's groups, none of its own.
+	// An attached service is its sandbox's pod: no egress of its own, and
+	// securityGroups is gone.
+	withEgress := strings.Replace(attached(sb, "5173"), `"command": ["vite"],`, `"command": ["vite"], "egress": "none",`, 1)
+	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(withEgress)}); p.Valid ||
+		!hasFinding(p.Findings, spec.SeverityError, "services.vite.egress", "and has its egress") {
+		t.Fatalf("egress %+v", p)
+	}
 	withGroups := strings.Replace(attached(sb, "5173"), `"command": ["vite"],`, `"command": ["vite"], "securityGroups": ["default"],`, 1)
 	if p, _ := h.svc.Plan(ctx, tenantA, "one", PlanRequest{Spec: json.RawMessage(withGroups)}); p.Valid ||
-		!hasFinding(p.Findings, spec.SeverityError, "services.vite.securityGroups",
-			"an attached service is in its sandbox's groups (default)") {
+		!hasFinding(p.Findings, spec.SeverityError, "services.vite.securityGroups", "securityGroups is gone") {
 		t.Fatalf("groups %+v", p)
 	}
 	// An instance row is no sandbox.
@@ -533,8 +544,15 @@ func TestDeploymentsAndRevert(t *testing.T) {
 	if err := json.Unmarshal(d.Spec, &sp); err != nil || sp.Services["web"].ImageAsWritten != "ghcr.io/acme/web:2" {
 		t.Fatalf("spec %s %v", d.Spec, err)
 	}
-	if d, _ := h.svc.Deployment(ctx, tenantA, "stage", 1); len(d.Diff) != 9 {
+	if d, _ := h.svc.Deployment(ctx, tenantA, "stage", 1); len(d.Diff) != 8 {
 		t.Fatalf("deployment 1 diff %+v", d.Diff)
+	}
+	// What its spec admits (ADR 0034, revised): web → api, api and migrate
+	// → pg, api → q, and the ingress to both routes.
+	if d, _ := h.svc.Deployment(ctx, tenantA, "stage", 1); len(d.Reachability.Edges) != 6 ||
+		d.Reachability.Edges[5] != (spec.Edge{From: "service/web", To: "service/api", Port: "http", Number: 8080,
+			Via: "env API"}) || len(d.Reachability.Routes) != 2 || len(d.Reachability.Egress) != 3 {
+		t.Fatalf("deployment 1 reachability %+v", d.Reachability)
 	}
 	_, err = h.svc.Deployment(ctx, tenantA, "stage", 3)
 	wantStatus(t, err, http.StatusNotFound, "no such deployment")
@@ -901,7 +919,7 @@ func TestReusedEnvID(t *testing.T) {
 	if !removed {
 		t.Fatalf("diff %+v", p.Diff)
 	}
-	if d, err := h.svc.Deployment(ctx, tenantB, "solo", 1); err != nil || len(d.Diff) != 3 {
+	if d, err := h.svc.Deployment(ctx, tenantB, "solo", 1); err != nil || len(d.Diff) != 2 {
 		t.Fatalf("deployment 1 %+v %v", d, err)
 	}
 }
@@ -1032,34 +1050,6 @@ func TestApplyRacesDeleteSecret(t *testing.T) {
 		Spec: json.RawMessage(`{"services": {"web": {"image": "ghcr.io/acme/web:1", "env": {"X": {"secret": "x"}}}}}`)})
 	var ise *InvalidSpecError
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "services.web.env.X", "secret x was deleted") {
-		t.Fatalf("apply: %v", describe(err))
-	}
-	if e := h.env("stage"); e.Deployment != 1 {
-		t.Fatalf("deployment %d was made", e.Deployment)
-	}
-}
-
-// A sandbox that names a group between an apply's plan and its
-// transaction keeps the group: the apply plans again and refuses to
-// remove it.
-func TestApplyRacesSandboxGroups(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, harnessOptions{})
-	ctx := h.ctx()
-	h.create("stage", nil)
-	h.apply("stage", `{"securityGroups": {"tools": {}}}`, 0)
-	sb := h.sandbox(tenantA, "stage")
-	var once sync.Once
-	h.svc.afterPlan = func() {
-		once.Do(func() {
-			if ok, err := h.st.SetSandboxGroups(ctx, sb, []string{"tools"}); err != nil || !ok {
-				t.Errorf("set the sandbox's groups: %v %v", ok, err)
-			}
-		})
-	}
-	_, err := h.svc.Apply(ctx, tenantA, "stage", ApplyRequest{Base: 1, Spec: json.RawMessage(`{}`)})
-	var ise *InvalidSpecError
-	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "securityGroups.tools", "security group tools is named by") {
 		t.Fatalf("apply: %v", describe(err))
 	}
 	if e := h.env("stage"); e.Deployment != 1 {

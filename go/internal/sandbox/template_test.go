@@ -318,8 +318,9 @@ func TestBuildPodSpec(t *testing.T) {
 // and log labels; a row without a template sends neither.
 func TestRestoreRequest(t *testing.T) {
 	env := uuid.New()
-	row := store.Sandbox{ID: podid.Mint(), CheckpointHead: "snapshots/x/1/head.json",
-		LogLabels: map[string]string{"ferun.tenant": "acme"}, PodTemplate: model.SandboxTemplate(env, []uuid.UUID{uuid.New()})}
+	id := podid.Mint()
+	row := store.Sandbox{ID: id, CheckpointHead: "snapshots/x/1/head.json",
+		LogLabels: map[string]string{"ferun.tenant": "acme"}, PodTemplate: model.SandboxTemplate(env, id.String(), false, nil)}
 	h := &OpHandle{id: row.ID, row: row}
 	req := restoreRequest(h)
 	if req.GetPodId() != row.ID.String() || req.GetHeadKey() != row.CheckpointHead ||
@@ -337,5 +338,28 @@ func TestRestoreRequest(t *testing.T) {
 	h.row.PodTemplate = nil
 	if req := restoreRequest(h); len(req.GetSecurityGroups()) != 0 || len(req.GetNameTables()) != 0 {
 		t.Fatalf("without a template %v", req)
+	}
+}
+
+// A template's egress by name reaches the pod's network (ADR 0034,
+// revised); without it, the network restricts nothing.
+func TestPodSpecEgressNames(t *testing.T) {
+	env := uuid.New()
+	id := podid.Mint()
+	sb := store.Sandbox{ID: id, Owner: testTenant, ImageRef: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
+		PodTemplate: model.SandboxTemplate(env, id.String(), true, []string{"api.stripe.com", "*.example.com"})}
+	spec, err := buildPodSpec(bg, sb, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := spec.GetNetwork()
+	if !n.GetRestrictEgressNames() || !slices.Equal(n.GetEgressDomains(), []string{"api.stripe.com", "*.example.com"}) ||
+		!slices.Equal(n.GetSecurityGroups(), []string{model.EnvGroupID(env), model.SandboxWorkloadGroupID(id.String())}) {
+		t.Fatalf("network %v", n)
+	}
+	sb.PodTemplate = model.SandboxTemplate(env, id.String(), false, nil)
+	if spec, err = buildPodSpec(bg, sb, nil); err != nil || spec.GetNetwork().GetRestrictEgressNames() ||
+		len(spec.GetNetwork().GetEgressDomains()) != 0 {
+		t.Fatalf("internet %v %v", spec.GetNetwork(), err)
 	}
 }

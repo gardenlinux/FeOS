@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"testing"
 	"time"
 
@@ -21,7 +20,7 @@ import (
 func TestTenantJobSpec(t *testing.T) {
 	rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "builder:1", ResultPath: "/run/out/digest"})
 	if err != nil || rs.VCPUs != spec.DefaultVCPUs || rs.MemoryMiB != spec.DefaultMemoryMib ||
-		rs.Deadline != 10*time.Minute || rs.ResultPath != "/run/out/digest" || !slices.Equal(rs.SecurityGroups, []string{"default"}) {
+		rs.Deadline != 10*time.Minute || rs.ResultPath != "/run/out/digest" || rs.Reaches.All || len(rs.Reaches.Entries) != 0 || rs.Egress != nil {
 		t.Fatalf("defaults %+v %v", rs, err)
 	}
 	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", Vcpus: 2, MemoryMib: 2048, Deadline: "20m"}); err != nil ||
@@ -33,18 +32,31 @@ func TestTenantJobSpec(t *testing.T) {
 			t.Fatalf("logRetentionDays %d: %+v %v", d, rs, err)
 		}
 	}
-	groups := func(names ...string) *[]string { return &names }
+	// What of its environment it reaches and its egress (ADR 0035,
+	// revised), as asked.
+	reaches := spec.Reaches{Entries: []spec.Use{{Service: "api", Port: spec.PortRef{Name: "http"}}, {Addon: "db"}}}
+	egress := &spec.Egress{Domains: []string{"ghcr.io"}}
+	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", Reaches: reaches,
+		Egress: egress}); err != nil || len(rs.Reaches.Entries) != 2 || rs.Egress != egress {
+		t.Fatalf("reaches %+v %v", rs, err)
+	}
 	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b",
-		SecurityGroups: groups("web", "db")}); err != nil || !slices.Equal(rs.SecurityGroups, []string{"db", "web"}) {
-		t.Fatalf("groups %+v %v", rs, err)
+		Reaches: spec.Reaches{All: true}}); err != nil || !rs.Reaches.All {
+		t.Fatalf("reaches all %+v %v", rs, err)
+	}
+	_, err = tenantJobSpec(CreateTenantJobRequest{Environment: "e", Image: "b", SecurityGroups: []byte(`["default"]`)})
+	if _, msg := statusOf(err); msg != "securityGroups is gone (ADR 0034, revised); use reaches" {
+		t.Fatalf("securityGroups: %v", err)
 	}
 	for _, bad := range []CreateTenantJobRequest{
 		{},
 		{Image: "b"},
-		{Environment: "e", Image: "b", SecurityGroups: groups()},
-		{Environment: "e", Image: "b", SecurityGroups: groups("a", "b", "c", "d", "e", "f")},
-		{Environment: "e", Image: "b", SecurityGroups: groups("Web")},
-		{Environment: "e", Image: "b", SecurityGroups: groups("web", "web")},
+		{Environment: "e", Image: "b", SecurityGroups: []byte(`[]`)},
+		{Environment: "e", Image: "b", Reaches: spec.Reaches{Entries: []spec.Use{{Service: "api"}}}},
+		{Environment: "e", Image: "b", Reaches: spec.Reaches{Entries: []spec.Use{{}}}},
+		{Environment: "e", Image: "b", Reaches: spec.Reaches{Entries: []spec.Use{{Service: "api", Addon: "db"}}}},
+		{Environment: "e", Image: "b", Egress: &spec.Egress{Domains: []string{"Not A Name"}}},
+		{Environment: "e", Image: "b", Egress: &spec.Egress{Blocks: []spec.Block{{CIDR: "203.0.113.1/24"}}}},
 		{Environment: "e", Image: "b", Env: map[string]string{"A-B": "x"}},
 		{Environment: "e", Image: "b", Secrets: map[string]string{"imageCredentials.username": "x"}},
 		{Environment: "e", Image: "b", Env: map[string]string{"T": "x"}, Secrets: map[string]string{"T": "y"}},

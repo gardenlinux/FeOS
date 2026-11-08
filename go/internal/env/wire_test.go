@@ -121,8 +121,10 @@ func TestAnswersJSON(t *testing.T) {
 	}
 
 	plan := ObjectAnswer{DryRun: true, Plan: PlanAnswer{Valid: true, Findings: []spec.Finding{}, Diff: []spec.DiffEntry{},
-		Base: 7, Current: 7, Images: map[string]string{}}}
-	if got := marshal(t, plan); got != `{"valid":true,"findings":[],"diff":[],"base":7,"current":7,"images":{}}` ||
+		Base: 7, Current: 7, Images: map[string]string{}, Reachability: spec.Reachability{Edges: []spec.Edge{},
+			Egress: []spec.ObjectEgress{}, Routes: []spec.RouteClients{}}}}
+	if got := marshal(t, plan); got != `{"valid":true,"findings":[],"diff":[],"base":7,"current":7,"images":{},`+
+		`"reachability":{"edges":[],"egress":[],"routes":[]}}` ||
 		plan.StatusCode() != http.StatusOK {
 		t.Fatalf("dry run answer %s, %d", got, plan.StatusCode())
 	}

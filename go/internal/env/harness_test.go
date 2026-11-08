@@ -53,8 +53,7 @@ const stageSpec = `{
   "addons": {"pg": {"type": "postgres", "version": "17", "options": {"databases": ["app"], "roles": ["api_svc"]}},
     "q": {"type": "nats", "version": "2"}},
   "routes": {"api": {"path": "/api", "service": "api", "port": "http", "strip": true},
-    "root": {"path": "/", "service": "web", "port": "http"}},
-  "securityGroups": {"default": {"in": [{"protocol": "any", "from": {"group": "default"}}]}}
+    "root": {"path": "/", "service": "web", "port": "http"}}
 }`
 
 // fakeEngine is the sandbox engine of the service's tests: it resolves
@@ -339,7 +338,7 @@ func (h *harness) envOf(tenant, name string) uuid.UUID {
 func (h *harness) sandboxWithID(tenant, env string, id podid.ID) podid.ID {
 	h.t.Helper()
 	n := store.NewSandbox{ID: id, Owner: tenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: h.envOf(tenant, env),
-		PodTemplate: model.SandboxTemplate(h.envOf(tenant, env), nil)}
+		PodTemplate: model.SandboxTemplate(h.envOf(tenant, env), id.String(), false, nil)}
 	if _, _, err := h.st.CreateSandbox(h.ctx(), n); err != nil {
 		h.t.Fatal(err)
 	}
