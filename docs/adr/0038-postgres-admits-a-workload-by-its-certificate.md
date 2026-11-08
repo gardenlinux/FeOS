@@ -69,7 +69,9 @@ IDs).
   socket. An operator who must be the superuser execs into the addon's
   pod and does the same.
 - The roles' former passwords, system secrets `addon.<a>.role.<r>.password`,
-  are deleted by the controller once no addon of T or R has them.
+  are deleted by the controller once no addon of T or R has them and no
+  instance's template names them, so that a pod of before still
+  restarts with what it was made with, and then fails at the server.
 
 ### 2. PostgreSQL terminates TLS itself, with a certificate of the addon's ID
 

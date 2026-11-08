@@ -787,6 +787,7 @@ func (c *Controller) purgeCredentials(ctx context.Context, v *view) {
 	}
 	gone := map[string]bool{}
 	var stale []string
+	used := templateSecrets(v)
 	for _, sec := range secrets {
 		rest, ok := strings.CutPrefix(sec.Name, "addon.")
 		if !ok {
@@ -799,7 +800,9 @@ func (c *Controller) purgeCredentials(ctx context.Context, v *view) {
 			gone[name] = true
 			continue
 		}
-		if !c.hasCredential(name, ta, inT, key) && !c.hasCredential(name, ra, inR, key) {
+		// A former credential goes once no instance's template names it
+		// any more: a pod of before restarts with what it was made with.
+		if !c.hasCredential(name, ta, inT, key) && !c.hasCredential(name, ra, inR, key) && !used[sec.Name] {
 			stale = append(stale, sec.Name)
 		}
 	}
@@ -825,6 +828,28 @@ func (c *Controller) purgeCredentials(ctx context.Context, v *view) {
 		}
 		c.log.Info("addon credential removed", "environment", v.env.ID, "secret", secret)
 	}
+}
+
+// templateSecrets are the secrets the environment's instances' templates
+// name, as values or as parts.
+func templateSecrets(v *view) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range v.rows {
+		if r.Sandbox.PodTemplate == nil {
+			continue
+		}
+		for _, val := range r.Sandbox.PodTemplate.Env {
+			if val.Secret != "" {
+				out[val.Secret] = true
+			}
+			for _, p := range val.Parts {
+				if p.Secret != "" {
+					out[p.Secret] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 // hasCredential reports whether addon a (of a spec that has it, in) has
