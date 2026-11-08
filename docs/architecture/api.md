@@ -79,7 +79,16 @@ A pod's network ([ADR 0010](../adr/0010-pod-network.md),
   default group when empty; `dns_upstreams`, the IP addresses of the
   resolvers that `feosd`'s resolver asks for the pod, the node's when
   empty; `name_tables`, the IDs of the name tables whose names the
-  resolver answers the pod itself, in order. A create with an invalid
+  resolver answers the pod itself, in order; `restrict_egress_names`
+  and `egress_domains` (ADR 0034, revised), the pod's egress by name:
+  with the flag the resolver answers upstream names only when they are
+  exact names of `egress_domains` or lie strictly below a `*.` suffix of
+  it, others REFUSED (and recorded with that rcode), and puts every
+  A/AAAA address of an allowed answer into the pod's egress set for
+  max(TTL, 300 s), which its out chain admits; the flag without domains
+  is no upstream name at all (egress `none`). Names of its tables and its
+  HTTP bindings are answered either way; without the flag nothing
+  changes. A create with an invalid
   group or table ID, a table named twice, or an upstream the pod may not
   use fails with `INVALID_ARGUMENT`; one with a network on a node without
   `--pod-prefix`, or whose network is not set up, fails with
