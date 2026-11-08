@@ -505,14 +505,15 @@ func TestWorkloadGroups(t *testing.T) {
 	// sandbox's reaches on db, the wide one anything; nothing out.
 	tcp, anyProto := networkv1.Protocol_PROTOCOL_TCP.String(), networkv1.Protocol_PROTOCOL_ANY.String()
 	want := []string{migrateG + " " + tcp + " 9000", narrowG + " " + tcp + " 5432", webG + " " + tcp + " 5432",
-		wideG + " " + anyProto}
+		wideG + " " + anyProto, storeG + " " + tcp + " 5432 9000"}
 	slices.Sort(want)
 	if got := inRules(sg); !slices.Equal(got, want) || len(outBlocks(sg)) != 0 {
 		t.Errorf("store's rules %v, want in %v and nothing out", sg.Rules, want)
 	}
-	// web: reached by nothing but the wide sandbox (the ingress goes
-	// through ing-), out its block alone.
-	if wg := h.group("n1", webG); !slices.Equal(inRules(wg), []string{wideG + " " + anyProto}) ||
+	// web: reached by nothing but the wide sandbox and its own replicas
+	// (the ingress goes through ing-), out its block alone.
+	if wg := h.group("n1", webG); !slices.Equal(inRules(wg), []string{webG + " " + tcp + " 8080",
+		wideG + " " + anyProto}) ||
 		!slices.Equal(outBlocks(wg), []string{"203.0.113.0/24"}) {
 		t.Errorf("web's rules %v", wg.Rules)
 	}

@@ -368,6 +368,8 @@ func TestValidateReach(t *testing.T) {
 		e("addons.nats.securityGroups", "securityGroups is gone"),
 		e("jobs.migrate.securityGroups", "securityGroups is gone"),
 		e("routes.api-expense.from", "from is empty"),
+		// root routes to web, which is attached.
+		e("routes.root.from", "from is checked by the ingress, which does not serve attached services"),
 		e("routes.root.from[2]", "block 203.0.113.0/24 is named twice"),
 		e("routes.root.from[3]", `"10.0.0.1" has no prefix length`),
 		e("routes.root.from[4]", `"nope" is not a prefix`),

@@ -26,7 +26,10 @@ import (
 // that run in it), model.JobWorkloadGroupID for a tenant's job's. The
 // group's rules are derived, never written:
 //
-//   - in: for every edge caller → it on port n that its environment's
+//   - in: from its own group on the ports it declares (a service's
+//     ports, an addon's port; a job declares none): a workload's replicas
+//     reach each other on its ports;
+//     for every edge caller → it on port n that its environment's
 //     specs declare (spec.Derive; the ingress's go through ing-<id>), TCP
 //     on n from the caller's group; for every sandbox and tenant's job of
 //     the environment whose reaches names it, TCP on the port named from
@@ -86,6 +89,18 @@ func (r *envReach) admit(target, peer string, port int) {
 		return
 	}
 	pp := r.peer(target, peer)
+	if pp.ports == nil {
+		pp.ports = map[int]bool{}
+	}
+	pp.ports[port] = true
+}
+
+// self admits a workload's own pods, its replicas, on one of its ports.
+func (r *envReach) self(wl string, port int) {
+	if wl == "" || port <= 0 {
+		return
+	}
+	pp := r.peer(wl, wl)
 	if pp.ports == nil {
 		pp.ports = map[int]bool{}
 	}
@@ -215,14 +230,22 @@ func deriveEnvReach(envID uuid.UUID, specs []*spec.Spec, reachers []store.Reache
 		for _, name := range slices.Sorted(maps.Keys(sp.Services)) {
 			svc := sp.Services[name]
 			if svc.Runtime != spec.RuntimeAttached {
-				setEgress(workloadOf(envID, sp, spec.KindService, name), svc.Egress)
+				wl := workloadOf(envID, sp, spec.KindService, name)
+				setEgress(wl, svc.Egress)
+				for _, p := range svc.Ports {
+					r.self(wl, p.Port)
+				}
 			}
 		}
 		for _, name := range slices.Sorted(maps.Keys(sp.Jobs)) {
 			setEgress(workloadOf(envID, sp, spec.KindJob, name), sp.Jobs[name].Egress)
 		}
 		for _, name := range slices.Sorted(maps.Keys(sp.Addons)) {
-			setEgress(workloadOf(envID, sp, spec.KindAddon, name), none)
+			wl := workloadOf(envID, sp, spec.KindAddon, name)
+			setEgress(wl, none)
+			if addonPort != nil {
+				r.self(wl, addonPort(name, sp.Addons[name]))
+			}
 		}
 		reach, _ := spec.Derive(*sp, addonPort)
 		for _, e := range reach.Edges {

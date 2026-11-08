@@ -3088,6 +3088,8 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
   and environment). The specs are the target (the latest deployment,
   unless it failed: then the deployed one) and the deployed deployment:
   while a deployment rolls, an edge either declares is admitted.
+  - In: from its own group, TCP on its declared ports (a service's
+    ports, an addon's port): a workload's replicas reach each other.
   - In: for every edge caller → it on port n (`spec.Derive`; the
     ingress's go through `ing-`), TCP on n from the caller's group (an
     attached caller's sandbox's); for every sandbox and tenant's job of

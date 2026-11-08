@@ -162,18 +162,23 @@ func TestWorkloadRules(t *testing.T) {
 	}
 	tcp, anyP := networkv1.Protocol_PROTOCOL_TCP.String(), networkv1.Protocol_PROTOCOL_ANY.String()
 	for id, want := range map[string][]string{
-		// vite (in the sandbox box) calls api's grpc; all reaches anything.
-		api: {allG + " " + anyP, boxG + " " + tcp + " 9090"},
+		// vite (in the sandbox box) calls api's grpc; all reaches anything;
+		// api's replicas reach each other on its ports.
+		api: {allG + " " + anyP, boxG + " " + tcp + " 9090", api + " " + tcp + " 8080 9090"},
 		// api's reference to catalog:http by name; the deployed spec's
 		// URL on 7000 while it rolls; the sandbox's reaches.
-		catalog: {allG + " " + anyP, api + " " + tcp + " 7000 8081", sbxG + " " + tcp + " 8081"},
-		db:      {allG + " " + anyP, api + " " + tcp + " 5432", migrate + " " + tcp + " 5432", sbxG + " " + tcp + " 5432"},
+		catalog: {allG + " " + anyP, api + " " + tcp + " 7000 8081", sbxG + " " + tcp + " 8081",
+			catalog + " " + tcp + " 7000 8081"},
+		db: {allG + " " + anyP, api + " " + tcp + " 5432", migrate + " " + tcp + " 5432", sbxG + " " + tcp + " 5432",
+			db + " " + tcp + " 5432"},
 		// api's plain URL names the attached vite: the sandbox's pod.
 		boxG: {allG + " " + anyP, api + " " + tcp + " 5173"},
 		sbxG: {allG + " " + anyP},
 		jobG: {allG + " " + anyP},
 		allG: nil,
-		// An object no spec knows: reached by "all" alone.
+		// A job declares no ports: nothing of its own; an object no spec
+		// knows: reached by "all" alone.
+		migrate:               {allG + " " + anyP},
 		wl("service", "gone"): {allG + " " + anyP},
 	} {
 		slices.Sort(want)
@@ -191,7 +196,7 @@ func TestWorkloadRules(t *testing.T) {
 	}
 	// The refs are the peers, sorted; an out rule of the internet table
 	// carries its exceptions.
-	if _, refs := r.rules(catalog); len(refs) != 3 || !slices.IsSorted(refs) {
+	if _, refs := r.rules(catalog); len(refs) != 4 || !slices.IsSorted(refs) {
 		t.Errorf("refs %v", refs)
 	}
 	if rules, _ := r.rules(sbxG); !proto.Equal(rules[len(rules)-1], egressTable()[1]) {

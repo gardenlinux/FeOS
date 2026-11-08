@@ -825,6 +825,10 @@ func (v *validator) route(name string, r Route) {
 		}
 	}
 	v.routeFrom(p+".from", r.From)
+	if r.From != nil && ok && target.Runtime == RuntimeAttached {
+		v.errorf(p+".from", "remove from, or route to an image service", "from is checked by the ingress, which does "+
+			"not serve attached services")
+	}
 	if r.Host != "" {
 		v.add(SeverityInfo, p+".host", "", "host is stored, not used yet: the ingress and the route door "+
 			"serve the route on every host of the environment")

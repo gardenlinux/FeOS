@@ -108,6 +108,8 @@ as slow as the loop.
   pod of its environment, and the receiver's declared references decide:
   a rule between two workloads exists once, read from the caller's
   declaration, and `env-<id>` carries the implied send.
+- **A workload's replicas reach each other on its ports** (a service's
+  declared ports, an addon's port), without a reference.
 - **Nothing else derives.** A secret's value is sealed and names nothing
   the plan sees. A binding is reached at the node's address (ADR 0028).
   Readiness goes over the forward. An attached service runs in its
