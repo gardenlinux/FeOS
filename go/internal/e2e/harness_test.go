@@ -583,7 +583,7 @@ func (c *cluster) create(in *instance) sandbox {
 // for an ID used again (a sandbox with a UUID made before, or a short ID
 // drawn again after its sandbox was deleted), in the tenant's environment
 // env. The ID must be new; templated gives the row the template every
-// sandbox made over REST has (in default, ADR 0035), else it has none.
+// sandbox made over REST has (ADR 0035, revised), else it has none.
 func (c *cluster) createID(id podid.ID, env string, templated bool) sandbox {
 	c.t.Helper()
 	var b [32]byte
@@ -594,11 +594,7 @@ func (c *cluster) createID(id podid.ID, env string, templated bool) sandbox {
 	n := store.NewSandbox{ID: id, Owner: tenant, Image: testImage, VCPUs: c.cfg.DefaultVCPUs, MemoryMiB: c.cfg.DefaultMemoryMiB,
 		EnvironmentID: dbtest.Environment(c.t, c.st.Q(), tenant, env)}
 	if templated {
-		t, err := c.st.SandboxTemplate(bg, n.EnvironmentID, []string{"default"})
-		if err != nil {
-			c.t.Fatal(err)
-		}
-		n.PodTemplate, n.SecurityGroups = t, []string{"default"}
+		n.PodTemplate = model.SandboxTemplate(n.EnvironmentID, id.String(), false, nil)
 	}
 	err := c.st.InTx(bg, func(tx *store.Store) error {
 		_, created, err := tx.CreateSandbox(bg, n)

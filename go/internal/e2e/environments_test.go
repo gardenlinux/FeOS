@@ -147,12 +147,9 @@ func TestEnvironments(t *testing.T) {
 	}
 	sb := sandbox{id: podid.ID(created.Status.SandboxID), token: created.Token}
 	c.run(a, sb, "mkdir -p app")
-	def, err := c.st.SecurityGroupID(bg, env.ID, "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if g := nodeGroup(n1, model.SecurityGroupID(def)); g == nil {
-		t.Fatal("the sandbox runs without its group default on the node")
+	wls := model.SandboxWorkloadGroupID(sb.id.String())
+	if g := nodeGroup(n1, wls); g == nil {
+		t.Fatal("the sandbox runs without its workload's group on the node")
 	}
 	if g := nodeGroup(n1, model.EnvGroupID(env.ID)); g == nil {
 		t.Fatal("the sandbox runs without its environment's group on the node")
@@ -177,11 +174,22 @@ func TestEnvironments(t *testing.T) {
 	}
 	api := rows[0].Sandbox
 	host := c.row(sb.id)
+	// The attached service web references api: api's workload admits the
+	// sandbox's pod on 8080 (ADR 0034, revised).
+	wla := model.WorkloadGroupID(env.ID, "service", "api")
 	eventually(t, 30*time.Second, "the groups", func() bool {
-		eg := nodeGroup(n1, model.EnvGroupID(env.ID))
-		dg := nodeGroup(n1, model.SecurityGroupID(def))
-		return eg != nil && dg != nil && slices.Contains(eg.Members, api.Address) && slices.Contains(eg.Members, host.Address) &&
-			slices.Contains(dg.Members, api.Address) && slices.Contains(dg.Members, host.Address)
+		eg, sg, ag := nodeGroup(n1, model.EnvGroupID(env.ID)), nodeGroup(n1, wls), nodeGroup(n1, wla)
+		if eg == nil || sg == nil || ag == nil || !slices.Contains(eg.Members, api.Address) ||
+			!slices.Contains(eg.Members, host.Address) || !slices.Contains(sg.Members, host.Address) ||
+			!slices.Contains(ag.Members, api.Address) {
+			return false
+		}
+		for _, r := range ag.Rules {
+			if r.GetGroup() == wls && len(r.Ports) == 1 && r.Ports[0].GetFirst() == 8080 {
+				return true
+			}
+		}
+		return false
 	})
 	eventually(t, 10*time.Second, "the names", func() bool {
 		addr := c.row(sb.id).Address
