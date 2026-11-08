@@ -1,0 +1,36 @@
+[package]
+name = "feid"
+# Versioned on its own, not with FeOS (ADR 0014).
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+repository = "https://github.com/gardenlinux/FeOS"
+description = "mTLS with a workload's identity whose key the application never holds: rustls with its CertificateVerify signed over feid/1"
+
+[lints]
+workspace = true
+
+[features]
+default = ["tokio"]
+# connect and accept over tokio-rustls, which send the handshake's report.
+tokio = ["dep:tokio", "dep:tokio-rustls"]
+
+[dependencies]
+feid-proto = { workspace = true }
+rustls = { workspace = true, features = ["ring", "std", "logging"] }
+# The WebPKI's roots, beside the platform's: a client checks servers on
+# the internet and on the platform with one configuration.
+webpki-roots = "1"
+# The peer's SPIFFE ID and the report's certificate fields.
+x509-parser = { workspace = true }
+# A certificate's fingerprint; rustls's provider.
+ring = "0.17"
+log = { workspace = true }
+tokio = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+rcgen = { workspace = true, features = ["x509-parser"] }
+time = "0.3"
+tempfile = { workspace = true }

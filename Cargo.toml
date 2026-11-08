@@ -22,6 +22,8 @@ members = [
     "crates/services/traffic-service",
     "crates/services/watch-service",
     "crates/services/microvm-service",
+    "feid/feid",
+    "feid/feid-proto",
 ]
 resolver = "3"
 
@@ -100,6 +102,8 @@ pem = "4.0.0"
 base64 = "0.22.1"
 
 # Workspace crates
+feid = { path = "feid/feid" }
+feid-proto = { path = "feid/feid-proto" }
 disk-store = { path = "crates/disk-store" }
 feos-proto = { path = "crates/feos-proto" }
 feos-utils = { path = "crates/feos-utils" }

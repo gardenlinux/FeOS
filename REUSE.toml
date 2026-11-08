@@ -38,6 +38,7 @@ SPDX-License-Identifier = "Apache-2.0"
 path = [
     "hack/**",
     "docs/**",
+    "feid/docs/**",
     "**/README.md",
 ]
 precedence = "aggregate"
