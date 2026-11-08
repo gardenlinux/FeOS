@@ -479,7 +479,8 @@ log "the ssh agent socket comes and goes in the container"
 # its jail, and says so with what the kernel reports of it: its own user,
 # no capabilities, no_new_privs, a seccomp filter. From there a name
 # still resolves through the pod's resolver: one that does not exist is
-# answered as such, not refused. A reset replaces the process, which
+# answered as such, not refused. A binding without an ALPN protocol
+# offers none (Valkey's, ADR 0039). A reset replaces the process, which
 # binds the same ports again.
 POD_ID=spiffe://feos.test/tenant/t/env/e/service/app
 DB_ID=spiffe://feos.test/tenant/t/env/e/addon/db
@@ -500,7 +501,8 @@ wait_jailed() {
 }
 set_bindings() {
   ctl guest set-feid "$@" --tls-binding "127.64.0.1:5432,${NODE_IP6},15432,postgresql,${DB_ID}" \
-    --tls-binding "127.64.0.2:5432,tls-bindings.invalid,5432,postgresql,${DB_ID}"
+    --tls-binding "127.64.0.2:5432,tls-bindings.invalid,5432,postgresql,${DB_ID}" \
+    --tls-binding "127.64.0.3:6379,${NODE_IP6},15432,,${DB_ID}"
 }
 through_binding() {
   local out
@@ -508,7 +510,7 @@ through_binding() {
   [ "${out}" = "pod:ping" ] || fail "through the binding: ${out}; $(tail -3 "${PEER_LOG}")"
 }
 out="$(set_bindings)"
-[ "${out}" = "FeID's socket: listening; TLS bindings: 2" ] || fail "set-feid: ${out}"
+[ "${out}" = "FeID's socket: listening; TLS bindings: 3" ] || fail "set-feid: ${out}"
 wait_jailed 1
 line="$(grep "TlsBindings: jailed: " "${SERIAL_LOG}" | tail -1)"
 for want in "Uid 2000000000," "Gid 2000000000," "no groups" "CapInh CapPrm CapEff CapBnd CapAmb 0" \
@@ -519,13 +521,17 @@ through_binding
 grep -q "ALPN Some(\"postgresql\"), the pod's certificate: true" "${PEER_LOG}" \
   || fail "the upstream did not see the pod: $(tail -3 "${PEER_LOG}")"
 grep -q "^signer: a CertificateVerify" "${PEER_LOG}" || fail "the peer signed nothing"
+out="$(cexec sh -c 'printf ping | timeout 10 nc 127.64.0.3 6379' 2>&1 || true)"
+[ "${out}" = "pod:ping" ] || fail "through the binding without ALPN: ${out}; $(tail -3 "${PEER_LOG}")"
+grep -q "ALPN None, the pod's certificate: true" "${PEER_LOG}" \
+  || fail "the binding without ALPN offered one: $(tail -3 "${PEER_LOG}")"
 cexec sh -c 'printf ping | timeout 20 nc 127.64.0.2 5432' >/dev/null 2>&1 || true
 # Firecracker's own lines may land in the middle of the guest's.
 for _ in $(seq 100); do grep -q "Name does not resolve" "${SERIAL_LOG}" && break; sleep 0.1; done
 grep -q "Name does not resolve" "${SERIAL_LOG}" \
   || fail "a name from the jail: $(grep -A1 "tls-bindings.invalid" "${SERIAL_LOG}" | tail -4)"
 out="$(set_bindings --reset)"
-[ "${out}" = "FeID's socket: listening; TLS bindings: 2" ] || fail "set-feid --reset: ${out}"
+[ "${out}" = "FeID's socket: listening; TLS bindings: 3" ] || fail "set-feid --reset: ${out}"
 wait_jailed 2
 through_binding
 [ "$(started)" = 2 ] && [ "$(jailed)" = 2 ] \

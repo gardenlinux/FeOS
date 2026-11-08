@@ -58,7 +58,8 @@ pub struct Binding {
     /// The upstream: a name the pod's resolver answers, or an address.
     pub host: String,
     pub port: u16,
-    /// The ALPN protocol the guest offers, `postgresql`.
+    /// The ALPN protocol the guest offers, `postgresql`; empty: none, for
+    /// an upstream that has no protocol ID (Valkey, ADR 0039).
     pub alpn: String,
     /// The SPIFFE ID the upstream's certificate must carry.
     pub server_id: String,
@@ -80,8 +81,8 @@ impl Binding {
         if self.host.is_empty() || self.host.len() > 253 || self.port == 0 {
             return Err(format!("upstream {}:{} is not one", self.host, self.port));
         }
-        if self.alpn.is_empty() || self.alpn.len() > 255 {
-            return Err(format!("ALPN {:?} is not one", self.alpn));
+        if self.alpn.len() > 255 {
+            return Err(format!("ALPN {:?} is longer than 255 bytes", self.alpn));
         }
         if feid::SpiffeId::parse(&self.server_id).is_none() {
             return Err(format!("server ID {:?} is no SPIFFE ID", self.server_id));
@@ -390,12 +391,22 @@ pub async fn serve(listeners: Listeners, feid_socket: &Path) -> Result<(), Strin
             .map_err(|e| format!("FeID: {e}"))?
             .map_err(|e| format!("FeID's client configuration: {e}"))?)
         .clone();
-        config.alpn_protocols = vec![b.alpn.clone().into_bytes()];
+        // An empty ALPN offers none: rustls then sends no extension.
+        config.alpn_protocols = if b.alpn.is_empty() {
+            Vec::new()
+        } else {
+            vec![b.alpn.clone().into_bytes()]
+        };
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|e| format!("listen on {}: {e}", b.listen))?;
+        let alpn = if b.alpn.is_empty() {
+            "no ALPN"
+        } else {
+            &b.alpn
+        };
         info!(
-            "TlsBindings: {} → {}:{} as {} ({})",
-            b.listen, b.host, b.port, b.server_id, b.alpn
+            "TlsBindings: {} → {}:{} as {} ({alpn})",
+            b.listen, b.host, b.port, b.server_id
         );
         tasks.spawn(accept(
             feid.clone(),
@@ -503,6 +514,13 @@ mod tests {
     #[test]
     fn a_binding_listens_on_loopback_and_pins_a_spiffe_id() {
         binding("127.18.3.4:5432").check().unwrap();
+        // An upstream without an ALPN protocol (Valkey): none offered.
+        Binding {
+            alpn: String::new(),
+            ..binding("127.18.3.4:6379")
+        }
+        .check()
+        .unwrap();
         for bad in [
             Binding {
                 listen: "10.0.0.1:5432".into(),
@@ -529,7 +547,7 @@ mod tests {
                 ..binding("127.0.0.1:1")
             },
             Binding {
-                alpn: String::new(),
+                alpn: "x".repeat(256),
                 ..binding("127.0.0.1:1")
             },
             Binding {
@@ -631,6 +649,12 @@ mod tests {
     /// certificate under the root, takes ALPN postgresql, and answers
     /// each line with the client's URI and the line.
     async fn upstream(ca: &Ca, spiffe: &str) -> SocketAddr {
+        upstream_with(ca, spiffe, Some(b"postgresql")).await
+    }
+
+    /// The upstream with alpn its one ALPN protocol, or none (as Valkey:
+    /// it then asserts that the client offered none).
+    async fn upstream_with(ca: &Ca, spiffe: &str, alpn: Option<&'static [u8]>) -> SocketAddr {
         use rustls::pki_types::pem::PemObject;
         use rustls::pki_types::{CertificateDer, PrivateKeyDer};
         let (key, pem) = ca.workload(spiffe);
@@ -648,7 +672,7 @@ mod tests {
                 .with_client_cert_verifier(verifier)
                 .with_single_cert(chain, key)
                 .unwrap();
-        config.alpn_protocols = vec![b"postgresql".to_vec()];
+        config.alpn_protocols = alpn.iter().map(|a| a.to_vec()).collect();
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -660,7 +684,7 @@ mod tests {
                         return;
                     };
                     let conn = tls.get_ref().1;
-                    assert_eq!(conn.alpn_protocol(), Some(&b"postgresql"[..]));
+                    assert_eq!(conn.alpn_protocol(), alpn);
                     let peer = conn.peer_certificates().unwrap()[0].clone();
                     let uri = if peer.windows(POD.len()).any(|w| w == POD.as_bytes()) {
                         "pod"
@@ -737,5 +761,27 @@ mod tests {
             .unwrap()
             .unwrap_or(0);
         assert_eq!(n, 0, "the upstream with another ID got the client: {buf:?}");
+    }
+
+    // A binding without an ALPN protocol offers none and reaches an
+    // upstream that has none, as Valkey (ADR 0039).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_binding_without_alpn_offers_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let ca = Ca::new();
+        let socket = signer(dir.path(), &ca);
+        let up = upstream_with(&ca, ADDON, None).await;
+        let b = Binding {
+            host: "::1".into(),
+            port: up.port(),
+            alpn: String::new(),
+            ..binding(&free_loopback())
+        };
+        serving(dir.path(), &socket, std::slice::from_ref(&b)).await;
+        let mut c = tokio::net::TcpStream::connect(&b.listen).await.unwrap();
+        c.write_all(b"PING").await.unwrap();
+        let mut answer = [0u8; 8];
+        c.read_exact(&mut answer).await.unwrap();
+        assert_eq!(&answer, b"pod:PING");
     }
 }

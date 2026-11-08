@@ -109,8 +109,9 @@ const MAX_TLS_BINDINGS: usize = 32;
 
 /// Checks a pod's outbound TLS bindings (ADR 0036): only with an identity,
 /// whose certificate they present; each on its own IPv4 loopback address
-/// and port; an upstream, an ALPN protocol and a SPIFFE ID to pin. The
-/// guest checks them again.
+/// and port; an upstream, an ALPN protocol or none (empty, for an upstream
+/// that has none: Valkey, ADR 0039) and a SPIFFE ID to pin. The guest
+/// checks them again.
 pub fn check_tls_bindings(spec: &PodSpec) -> Result<(), Status> {
     if spec.tls_bindings.is_empty() {
         return Ok(());
@@ -152,9 +153,9 @@ pub fn check_tls_bindings(spec: &PodSpec) -> Result<(), Status> {
                 b.host, b.port
             )));
         }
-        if b.alpn.is_empty() || b.alpn.len() > 255 {
+        if b.alpn.len() > 255 {
             return Err(Status::invalid_argument(format!(
-                "TLS binding ALPN {:?} is not one",
+                "TLS binding ALPN {:?} is longer than 255 bytes",
                 b.alpn
             )));
         }
@@ -553,7 +554,7 @@ fn metadata_json(pod_id: &str, spec: &PodSpec, attachment: &Attachment) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use feos_proto::pod_service::{ContainerSpec, PodNetwork, PodVolume, VolumeMount};
+    use feos_proto::pod_service::{ContainerSpec, PodNetwork, PodVolume, TlsBinding, VolumeMount};
 
     fn container(name: &str) -> ContainerSpec {
         ContainerSpec {
@@ -931,5 +932,28 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(otel_env(&own, &none, &service, otlp), own);
+    }
+
+    // A binding offers its upstream's ALPN protocol, or none for one that
+    // has none (Valkey, ADR 0039); only with the pod's identity.
+    #[test]
+    fn tls_bindings_take_an_alpn_protocol_or_none() {
+        let with = |alpn: &str| PodSpec {
+            identity: "spiffe://run.example/tenant/t/env/e/service/api".into(),
+            tls_bindings: vec![TlsBinding {
+                listen: "127.64.0.2:6379".into(),
+                host: "cache".into(),
+                port: 6379,
+                alpn: alpn.into(),
+                server_id: "spiffe://run.example/tenant/t/env/e/addon/cache".into(),
+            }],
+            ..spec(vec![])
+        };
+        check_tls_bindings(&with("postgresql")).unwrap();
+        check_tls_bindings(&with("")).unwrap();
+        assert!(check_tls_bindings(&with(&"x".repeat(256))).is_err());
+        let mut none = with("");
+        none.identity.clear();
+        assert!(check_tls_bindings(&none).is_err());
     }
 }

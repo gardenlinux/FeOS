@@ -164,9 +164,9 @@ reaps.
   every connection, dials the upstream by its name through the pod's
   resolver, from the pod's own address, with TLS 1.3 from the first
   byte: the pod's certificate, its CertificateVerify signed through
-  FeID's socket, the binding's ALPN, the upstream pinned to its SPIFFE
-  ID under the platform's root alone. Then it pipes both ways; the
-  plaintext never leaves the pod. The bindings run in a process of
+  FeID's socket, the binding's ALPN or none, the upstream pinned to its
+  SPIFFE ID under the platform's root alone. Then it pipes both ways;
+  the plaintext never leaves the pod. The bindings run in a process of
   their own, `feos-guest --tls-bindings /run/feos/tls-bindings.json`,
   which PID 1 starts again when it ends and replaces when a set changes
   the bindings or resets them after a resume. It starts as root, closes

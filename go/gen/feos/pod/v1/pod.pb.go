@@ -369,8 +369,8 @@ type TlsBinding struct {
 	// its port. The guest dials it from the pod's own address.
 	Host string `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
 	Port uint32 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
-	// The ALPN protocol the guest offers ("postgresql"): the connection is
-	// TLS from its first byte.
+	// The ALPN protocol the guest offers ("postgresql"), none when empty
+	// (valkey): the connection is TLS from its first byte.
 	Alpn string `protobuf:"bytes,4,opt,name=alpn,proto3" json:"alpn,omitempty"`
 	// The SPIFFE ID the upstream's certificate must carry, under the
 	// platform's root alone.

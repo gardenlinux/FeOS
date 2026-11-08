@@ -144,8 +144,8 @@ message TlsBinding {
   // its port. The guest dials it from the pod's own address.
   string host = 2;
   uint32 port = 3;
-  // The ALPN protocol the guest offers ("postgresql"): the connection is
-  // TLS from its first byte.
+  // The ALPN protocol the guest offers ("postgresql"), none when empty
+  // (valkey): the connection is TLS from its first byte.
   string alpn = 4;
   // The SPIFFE ID the upstream's certificate must carry, under the
   // platform's root alone.
