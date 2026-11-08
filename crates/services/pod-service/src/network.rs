@@ -8,10 +8,12 @@
 //! pod, on which the node is `fe80::1` and answers ARP for `169.254.0.1`
 //! by proxy. Names go through feosd's resolver, which answers those of the
 //! pods' name tables itself; the pods' security groups become nftables
-//! rules; and their traffic becomes records. Where the
-//! network routes the node no prefix, the node's prefix is a /96 of the
-//! cluster's mesh (ADR 0017), which the control plane gives it, maybe after
-//! feosd started: the network comes up then.
+//! rules; a pod whose egress is restricted by name (ADR 0034, revised)
+//! sends to the addresses its resolver admitted, in timed sets that live
+//! in memory and the kernel alone; and their traffic becomes records.
+//! Where the network routes the node no prefix, the node's prefix is a
+//! /96 of the cluster's mesh (ADR 0017), which the control plane gives it,
+//! maybe after feosd started: the network comes up then.
 
 mod addresses;
 mod devices;
@@ -24,18 +26,18 @@ pub use rules::{HTTP_PORTS, OTLP_PORTS, TABLE};
 
 use addresses::{Ipv4Addresses, Ipv6Addresses};
 use devices::PodLink;
-use dns_service::{HttpNames, Resolver};
+use dns_service::{Egress, HttpNames, Resolver};
 use feos_proto::network_service::{
     traffic_record, Mesh as MeshInfo, PutMeshPeersRequest, TrafficRecord, UpdateMeshPeersRequest,
 };
 use feos_proto::pod_service::{PodInfo, PodNetwork, PodSpec};
 use feos_utils::listen_fds;
 use feos_utils::nft::{self, Family, Table};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use mesh::Mesh;
 use network_service::{compile, delta, Delta, NameTables, Policy, Prefix, SecurityGroups};
 use rtnetlink::Handle;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::fd::{AsFd, OwnedFd};
@@ -86,6 +88,12 @@ const OLD_NAT64_COUNTER: &str = "next-address";
 const SET_UP_ATTEMPTS: u32 = 3;
 const SET_UP_PAUSE: Duration = Duration::from_secs(1);
 const DNS_PORT: u16 = 53;
+/// An address the resolver admits again is written again once its time
+/// grows by this much: an application that asks every second costs a
+/// write every few seconds, not two a second.
+const ADMIT_AGAIN: Duration = Duration::from_secs(10);
+/// The addresses a pod restricted by name has admitted at most.
+const MAX_ADMITTED: usize = 4096;
 
 /// How the node builds the pods' network: feosd's flags.
 #[derive(Clone, Debug, PartialEq)]
@@ -286,6 +294,121 @@ fn pod_network(info: &PodInfo) -> PodNetwork {
         .unwrap_or_default()
 }
 
+/// The upstream names the pod's resolver answers (ADR 0034, revised).
+fn egress(network: &PodNetwork) -> Egress {
+    match network.restrict_egress_names {
+        true => Egress::Names(network.egress_domains.clone()),
+        false => Egress::Any,
+    }
+}
+
+/// The addresses the resolver admitted to pods restricted by name (ADR
+/// 0034, revised), by TAP, each until when: what their timed sets hold.
+/// They live in memory alone: a restart of feosd starts with empty sets,
+/// which the next answers fill. The table is written whole with what has
+/// time left.
+#[derive(Debug, Default)]
+struct Admitted {
+    pods: HashMap<String, HashMap<IpAddr, Instant>>,
+    /// The pods that reached [`MAX_ADMITTED`], logged once.
+    full: HashSet<String>,
+}
+
+impl Admitted {
+    /// Takes `addresses` for the pod at `tap`, each for its timeout from
+    /// `now`. Returns those to write: new ones, and those whose time grows
+    /// by [`ADMIT_AGAIN`] or more.
+    fn admit(
+        &mut self,
+        tap: &str,
+        addresses: &[(IpAddr, Duration)],
+        now: Instant,
+    ) -> Vec<(IpAddr, Duration)> {
+        let pod = self.pods.entry(tap.to_string()).or_default();
+        pod.retain(|_, until| *until > now);
+        let mut fresh = Vec::new();
+        for &(address, timeout) in addresses {
+            let until = now + timeout;
+            match pod.get(&address) {
+                Some(old) if *old + ADMIT_AGAIN > until => continue,
+                Some(_) => {}
+                None if pod.len() >= MAX_ADMITTED => {
+                    if self.full.insert(tap.to_string()) {
+                        warn!(
+                            "Network: The pod at {tap} has {MAX_ADMITTED} addresses of its \
+                             egress names, and is admitted no more until they time out"
+                        );
+                    }
+                    continue;
+                }
+                None => {}
+            }
+            pod.insert(address, until);
+            fresh.push((address, timeout));
+        }
+        fresh
+    }
+
+    /// Forgets what was admitted to the pod at `tap`.
+    fn forget(&mut self, tap: &str) {
+        self.pods.remove(tap);
+        self.full.remove(tap);
+    }
+
+    /// Keeps the pods `restricted` alone, and what has time left at `now`;
+    /// returns that, as the rules take it, with every pod restricted.
+    fn named(&mut self, restricted: &BTreeSet<String>, now: Instant) -> rules::Named {
+        self.pods.retain(|tap, _| restricted.contains(tap));
+        self.full.retain(|tap| restricted.contains(tap));
+        restricted
+            .iter()
+            .map(|tap| {
+                let mut addresses: Vec<(IpAddr, Duration)> = self
+                    .pods
+                    .get_mut(tap)
+                    .map(|pod| {
+                        pod.retain(|_, until| *until > now);
+                        pod.iter()
+                            .map(|(address, until)| (*address, *until - now))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                addresses.sort();
+                (tap.clone(), addresses)
+            })
+            .collect()
+    }
+}
+
+/// Admits the addresses the resolver answered the pod `pod_id` for an
+/// allowed name: into memory, and into its timed sets in the kernel,
+/// before the pod has the answer. Under the lock, so that a table written
+/// meanwhile has them.
+fn admit(admitted: &Mutex<Admitted>, pod_id: &str, addresses: &[(IpAddr, Duration)]) {
+    let tap = tap_name(pod_id);
+    let mut admitted = lock(admitted);
+    let fresh = admitted.admit(&tap, addresses, Instant::now());
+    if fresh.is_empty() {
+        return;
+    }
+    match nft::update(&rules::named_table(&tap), &rules::named_ops(&tap, &fresh)) {
+        Ok(()) => {}
+        // Its sets are not written yet: the table has them when it is.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            debug!("Network: Pod {pod_id}'s egress sets are not there yet: {e}");
+        }
+        Err(e) => {
+            warn!("Network: Pod {pod_id}'s egress sets do not take its resolver's addresses: {e}");
+            // The next answer tries again.
+            if let Some(pod) = admitted.pods.get_mut(&tap) {
+                for (address, _) in &fresh {
+                    pod.remove(address);
+                }
+            }
+        }
+    }
+}
+
 /// The pods' network on this node.
 pub struct Network {
     config: Config,
@@ -314,8 +437,11 @@ pub struct Network {
     /// Set when the rules could not be written at the start.
     broken: Mutex<Option<String>>,
     directory: Arc<Directory>,
-    /// The policy and the table in the kernel.
-    applied: tokio::sync::Mutex<Option<(Policy, Table)>>,
+    /// The policy, the TAPs of the pods restricted by name, and the table
+    /// in the kernel.
+    applied: tokio::sync::Mutex<Option<(Policy, BTreeSet<String>, Table)>>,
+    /// What the resolver admitted to the pods restricted by name.
+    admitted: Arc<Mutex<Admitted>>,
     /// The node's addresses, as last read; None before they were.
     node_addresses: Mutex<Option<Vec<IpAddr>>>,
     collector: Mutex<Option<Collector>>,
@@ -382,9 +508,20 @@ impl Network {
             }
         }
         let parts = OnceLock::new();
+        let admitted = Arc::default();
         match prefix {
             Some(prefix) => {
-                match set_up_again(&config, prefix, dir, &names, &records, &mut handed).await {
+                let set_up = set_up_again(
+                    &config,
+                    prefix,
+                    dir,
+                    &names,
+                    &records,
+                    &admitted,
+                    &mut handed,
+                )
+                .await;
+                match set_up {
                     Ok(set_up) => {
                         log_set_up(&config, prefix);
                         let _ = parts.set(set_up);
@@ -426,6 +563,7 @@ impl Network {
             broken: Mutex::new(None),
             directory: Arc::default(),
             applied: tokio::sync::Mutex::new(None),
+            admitted,
             node_addresses: Mutex::new(None),
             collector: Mutex::new(None),
         }
@@ -452,6 +590,7 @@ impl Network {
             broken: Mutex::new(None),
             directory: Arc::default(),
             applied: tokio::sync::Mutex::new(None),
+            admitted: Arc::default(),
             node_addresses: Mutex::new(None),
             collector: Mutex::new(None),
         }
@@ -603,6 +742,7 @@ impl Network {
                     &self.dir,
                     &self.names,
                     &self.records,
+                    &self.admitted,
                     &mut handed,
                 )
                 .await
@@ -678,6 +818,9 @@ impl Network {
             }
         }
         self.upstreams(network)?;
+        for name in &network.egress_domains {
+            dns_service::check_egress_name(name).map_err(Status::invalid_argument)?;
+        }
         Ok(())
     }
 
@@ -884,7 +1027,8 @@ impl Network {
                         pod.ipv6_address.parse().ok(),
                         &pod.pod_id,
                         upstreams,
-                        network.name_tables,
+                        network.name_tables.clone(),
+                        &egress(&network),
                     );
                     parts
                         .resolver
@@ -957,12 +1101,16 @@ impl Network {
         devices::tap(&handle, &tap, &link)
             .await
             .map_err(|e| Status::internal(format!("attach {tap}: {e}")))?;
+        if network.restrict_egress_names {
+            self.forget_admitted(&tap, true);
+        }
         parts.resolver.set_client(
             ipv4.into(),
             Some(ipv6),
             pod_id,
             upstreams,
-            network.name_tables,
+            network.name_tables.clone(),
+            &egress(&network),
         );
         parts
             .resolver
@@ -975,6 +1123,23 @@ impl Network {
             dns: self.config.dns_address,
             routes: routes(ipv6, self.mesh.as_ref().map_or(0, |_| MESH_MTU)),
         }))
+    }
+
+    /// Forgets what the resolver admitted to the pod at `tap`, and with
+    /// `flush`, empties its timed sets in the kernel: at a boot or a
+    /// resume, whose pod starts from its record (ADR 0034, revised).
+    fn forget_admitted(&self, tap: &str, flush: bool) {
+        let mut admitted = lock(&self.admitted);
+        admitted.forget(tap);
+        if !flush {
+            return;
+        }
+        match nft::update(&rules::named_table(tap), &rules::named_flush(tap)) {
+            Ok(()) => {}
+            // Not written yet: they come empty.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => warn!("Network: The egress sets of {tap} are not emptied: {e}"),
+        }
     }
 
     /// Takes a deleted pod off the network: its resolver, its TAP device
@@ -998,6 +1163,7 @@ impl Network {
             _ => None,
         };
         let tap = tap_name(&info.pod_id);
+        self.forget_admitted(&tap, false);
         microvm_service::vmm::jail::tap::delete(&tap)
             .map_err(|e| io::Error::new(e.kind(), format!("delete {tap}: {e}")))?;
         let addresses = ipv4.map(IpAddr::V4).into_iter().chain(ipv6.map(IpAddr::V6));
@@ -1065,12 +1231,24 @@ impl Network {
                 })
             })
             .collect();
+        let restricted: BTreeSet<String> = pods
+            .iter()
+            .filter(|pod| pod_network(pod).restrict_egress_names)
+            .map(|pod| tap_name(&pod.pod_id))
+            .collect();
         let policy = compile(&self.groups.snapshot(), &members, &self.denied(&node));
-        let table = rules::table(&policy, &self.rules());
-        match applied
-            .as_ref()
-            .map(|(old, table)| (delta(old, &policy), table))
-        {
+        // With what the resolver admitted, which waits meanwhile: an
+        // address admitted between the two would be lost.
+        let mut admitted = lock(&self.admitted);
+        let named = admitted.named(&restricted, Instant::now());
+        let table = rules::table(&policy, &self.rules(), &named);
+        match applied.as_ref().map(|(old, before, table)| {
+            let delta = match *before == restricted {
+                true => delta(old, &policy),
+                false => Delta::Replace,
+            };
+            (delta, table)
+        }) {
             Some((Delta::Elements(changes), _)) if changes.is_empty() => {}
             Some((Delta::Elements(changes), old)) => {
                 if let Err(e) = nft::update(old, &rules::element_ops(&changes)) {
@@ -1080,7 +1258,8 @@ impl Network {
             }
             _ => nft::replace(&table)?,
         }
-        *applied = Some((policy, table));
+        drop(admitted);
+        *applied = Some((policy, restricted, table));
         Ok(())
     }
 
@@ -1150,6 +1329,7 @@ async fn set_up(
     dir: &Path,
     names: &NameTables,
     records: &broadcast::Sender<TrafficRecord>,
+    admitted: &Arc<Mutex<Admitted>>,
     handed: &mut Handed,
 ) -> io::Result<Parts> {
     config.check().map_err(io::Error::other)?;
@@ -1175,6 +1355,8 @@ async fn set_up(
     });
     let tables = names.clone();
     resolver.set_names(move |ids, name| tables.lookup(ids, name));
+    let admitting = admitted.clone();
+    resolver.set_admit(move |pod_id, addresses| admit(&admitting, pod_id, addresses));
     let address = SocketAddr::new(config.dns_address.into(), DNS_PORT);
     let udp = match handed.0.take() {
         Some(socket) => {
@@ -1234,11 +1416,12 @@ async fn set_up_again(
     dir: &Path,
     names: &NameTables,
     records: &broadcast::Sender<TrafficRecord>,
+    admitted: &Arc<Mutex<Admitted>>,
     handed: &mut Handed,
 ) -> io::Result<Parts> {
     let mut attempt = 1;
     loop {
-        match set_up(config, prefix, dir, names, records, handed).await {
+        match set_up(config, prefix, dir, names, records, admitted, handed).await {
             Err(e) if attempt < SET_UP_ATTEMPTS => {
                 warn!("Network: Setting the pods' network up failed, trying again: {e}");
                 attempt += 1;
@@ -1482,6 +1665,7 @@ mod tests {
             broken: Mutex::new(None),
             directory: Arc::default(),
             applied: tokio::sync::Mutex::new(None),
+            admitted: Arc::default(),
             node_addresses: Mutex::new(Some(vec!["192.0.2.7".parse().unwrap()])),
             collector: Mutex::new(None),
         }
@@ -1904,6 +2088,119 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(network.attach(&none).await.unwrap(), None);
+    }
+
+    #[test]
+    fn a_pods_egress_names_come_from_its_record_and_are_checked() {
+        let restricted = PodNetwork {
+            restrict_egress_names: true,
+            egress_domains: vec!["api.stripe.com".to_string(), "*.example.com".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            egress(&restricted),
+            Egress::Names(vec![
+                "api.stripe.com".to_string(),
+                "*.example.com".to_string()
+            ])
+        );
+        let none = PodNetwork {
+            restrict_egress_names: true,
+            ..Default::default()
+        };
+        assert_eq!(egress(&none), Egress::Names(Vec::new()));
+        // Not restricted: every name, whatever it lists.
+        let open = PodNetwork {
+            egress_domains: vec!["api.stripe.com".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(egress(&open), Egress::Any);
+
+        let network = network(lab());
+        let spec = |network: PodNetwork| PodSpec {
+            network: Some(network),
+            ..Default::default()
+        };
+        network.check(&spec(restricted)).unwrap();
+        for bad in ["a.*.example.com", "https://api.example.com", ""] {
+            let network_spec = spec(PodNetwork {
+                restrict_egress_names: true,
+                egress_domains: vec![bad.to_string()],
+                ..Default::default()
+            });
+            let error = network.check(&network_spec).unwrap_err();
+            assert_eq!(error.code(), tonic::Code::InvalidArgument, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn admitted_addresses_are_kept_until_their_time_is_up() {
+        let now = Instant::now();
+        let five = Duration::from_secs(300);
+        let v4: IpAddr = "192.0.2.7".parse().unwrap();
+        let v6: IpAddr = "2001:db8::7".parse().unwrap();
+        let mut admitted = Admitted::default();
+        // New addresses are written.
+        assert_eq!(
+            admitted.admit("pod-a", &[(v4, five), (v6, five)], now),
+            [(v4, five), (v6, five)]
+        );
+        // Answered again soon: nothing to write; once the time grows by
+        // ADMIT_AGAIN, again; a longer TTL at once.
+        let soon = now + Duration::from_secs(3);
+        assert!(admitted.admit("pod-a", &[(v4, five)], soon).is_empty());
+        let later = now + ADMIT_AGAIN;
+        assert_eq!(admitted.admit("pod-a", &[(v4, five)], later), [(v4, five)]);
+        let hour = Duration::from_secs(3600);
+        assert_eq!(admitted.admit("pod-a", &[(v6, hour)], soon), [(v6, hour)]);
+
+        // The table takes what has time left, of the pods restricted
+        // alone; one restricted with nothing yet has its sets all the same.
+        let restricted = BTreeSet::from(["pod-a".to_string(), "pod-b".to_string()]);
+        let at = now + Duration::from_secs(100);
+        let named = admitted.named(&restricted, at);
+        assert_eq!(
+            named,
+            rules::Named::from([
+                (
+                    "pod-a".to_string(),
+                    vec![
+                        (v4, five + ADMIT_AGAIN - Duration::from_secs(100)),
+                        (v6, hour + Duration::from_secs(3) - Duration::from_secs(100)),
+                    ]
+                ),
+                ("pod-b".to_string(), Vec::new()),
+            ])
+        );
+        // Timed out, an address is gone; a pod no longer restricted, or
+        // forgotten, has nothing.
+        let named = admitted.named(&restricted, now + Duration::from_secs(400));
+        assert_eq!(named["pod-a"].len(), 1);
+        admitted.admit("pod-c", &[(v4, five)], now);
+        assert!(!admitted.named(&restricted, now).contains_key("pod-c"));
+        assert!(admitted.admit("pod-c", &[(v4, five)], now).len() == 1);
+        admitted.forget("pod-a");
+        assert!(admitted.named(&restricted, now)["pod-a"].is_empty());
+    }
+
+    #[test]
+    fn a_pod_is_admitted_so_many_addresses_at_most() {
+        let now = Instant::now();
+        let five = Duration::from_secs(300);
+        let many: Vec<(IpAddr, Duration)> = (0..MAX_ADMITTED as u32 + 2)
+            .map(|i| (IpAddr::V4(Ipv4Addr::from(0xc633_0000 + i)), five))
+            .collect();
+        let mut admitted = Admitted::default();
+        assert_eq!(admitted.admit("pod-a", &many, now).len(), MAX_ADMITTED);
+        // Those it has are refreshed still; once they time out, there is
+        // room again.
+        let later = now + ADMIT_AGAIN;
+        assert_eq!(admitted.admit("pod-a", &many[..1], later).len(), 1);
+        let after = now + five + Duration::from_secs(1);
+        assert_eq!(
+            admitted.admit("pod-a", &many[MAX_ADMITTED..], after).len(),
+            2
+        );
     }
 
     #[test]

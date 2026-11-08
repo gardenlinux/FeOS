@@ -27,6 +27,16 @@
 //! them (`Config::http_address`), A alone, and an empty answer for every
 //! other type, with a short TTL. Every other pod resolves them as before.
 //!
+//! A pod whose egress is restricted by name (ADR 0034, revised;
+//! [`Egress::Names`]) is answered upstream names only when they are in its
+//! egress: an exact name, or one strictly below a `*.` suffix. Every other
+//! name it asks upstream is answered REFUSED and recorded so. The
+//! addresses of an allowed answer, A and AAAA, are handed to the
+//! resolver's [`Admit`] before the pod has the answer, each for its TTL,
+//! at least [`MIN_ADMIT`] and at most [`MAX_ADMIT`]: what fills the pod's
+//! egress set. The names
+//! of its name tables and of its HTTP bindings are answered as before.
+//!
 //! feosd binds the sockets and hands them over, so that they can come from
 //! socket activation and outlive feosd.
 
@@ -80,10 +90,106 @@ const RECORDS: usize = 1024;
 pub const NAME_TTL: u32 = 5;
 /// How long the answers for HTTP bindings' names may be kept.
 pub const HTTP_TTL: u32 = 5;
+/// How long an address of an allowed name is admitted at least: programs
+/// keep addresses longer than their TTL (ADR 0034, revised).
+pub const MIN_ADMIT: Duration = Duration::from_secs(300);
+/// How long it is admitted at most, whatever TTL an upstream gives: a
+/// day.
+pub const MAX_ADMIT: Duration = Duration::from_secs(86_400);
 
 /// The addresses of a name, one label in any case, in the first of the
 /// name tables of a pod that holds it; None when none does.
 pub type Names = Arc<dyn Fn(&[String], &str) -> Option<Vec<IpAddr>> + Send + Sync>;
+
+/// Takes the addresses an allowed name of a pod, by its ID, was answered
+/// with, each with how long it is admitted. It runs on a blocking thread,
+/// and the pod has its answer once it returns.
+pub type Admit = Arc<dyn Fn(&str, &[(IpAddr, Duration)]) + Send + Sync>;
+
+/// Which upstream names a pod is answered (ADR 0034, revised).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Egress {
+    /// Every name, as before.
+    #[default]
+    Any,
+    /// These alone: exact names, or `*.example.com` for every name below
+    /// `example.com`, not the name itself. In any case, with or without
+    /// the final dot. None: no upstream name at all.
+    Names(Vec<String>),
+}
+
+/// A pod's egress names, as they are looked up.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+enum Allowed {
+    #[default]
+    Any,
+    Names {
+        exact: HashSet<String>,
+        /// The suffixes of wildcards, with their leading dot.
+        below: Vec<String>,
+    },
+}
+
+impl Allowed {
+    fn new(egress: &Egress) -> Self {
+        let Egress::Names(names) = egress else {
+            return Self::Any;
+        };
+        let (mut exact, mut below) = (HashSet::new(), Vec::new());
+        for name in names {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            match name.strip_prefix('*') {
+                Some(suffix) if suffix.starts_with('.') && suffix.len() > 1 => {
+                    below.push(suffix.to_string());
+                }
+                Some(_) => {}
+                None if !name.is_empty() => {
+                    exact.insert(name);
+                }
+                None => {}
+            }
+        }
+        Self::Names { exact, below }
+    }
+
+    fn restricted(&self) -> bool {
+        matches!(self, Self::Names { .. })
+    }
+
+    /// Whether `name`, as records have it, may be asked upstream.
+    fn allows(&self, name: &str) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Names { exact, below } => {
+                exact.contains(name)
+                    || below
+                        .iter()
+                        .any(|suffix| name.len() > suffix.len() && name.ends_with(suffix.as_str()))
+            }
+        }
+    }
+}
+
+/// Checks a name of a pod's egress: a DNS name, or one after `*.`; in any
+/// case, with or without the final dot.
+pub fn check_egress_name(name: &str) -> Result<(), String> {
+    let bare = name.strip_suffix('.').unwrap_or(name);
+    let bare = bare.strip_prefix("*.").unwrap_or(bare);
+    let label = |label: &str| {
+        (1..=63).contains(&label.len())
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
+    if bare.is_empty() || bare.len() > 253 || !bare.split('.').all(label) {
+        return Err(format!(
+            "egress name {name:?} is not a DNS name, or one after \"*.\""
+        ));
+    }
+    Ok(())
+}
 
 /// What the resolver does for all pods.
 #[derive(Clone, Debug)]
@@ -136,6 +242,8 @@ pub struct Resolver {
     clients: RwLock<HashMap<IpAddr, Arc<Client>>>,
     /// Where the names of the pods' tables are looked up.
     names: RwLock<Option<Names>>,
+    /// What takes the addresses of the allowed names of restricted pods.
+    admit: RwLock<Option<Admit>>,
     records: broadcast::Sender<TrafficRecord>,
     queries: Arc<Semaphore>,
     connections: Arc<Semaphore>,
@@ -152,6 +260,8 @@ struct Client {
     own: Vec<IpAddr>,
     /// Its HTTP bindings' names, in lower case without the final dot.
     http: HashSet<String>,
+    /// The upstream names it is answered.
+    egress: Allowed,
     queries: Arc<Semaphore>,
     connections: Arc<Semaphore>,
 }
@@ -172,6 +282,7 @@ impl Resolver {
             config,
             clients: RwLock::default(),
             names: RwLock::default(),
+            admit: RwLock::default(),
             records,
             queries: Arc::new(Semaphore::new(MAX_QUERIES)),
             connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
@@ -181,9 +292,9 @@ impl Resolver {
     /// Serves the pod `pod_id` at `address`, which its queries come from:
     /// its IPv4 address. Answers the names of its name tables `tables`,
     /// and asks `upstreams`, or the default upstreams when there are none,
-    /// the rest. `ipv6` is the pod's IPv6 address, if it has one: with
-    /// `address`, what its names answer with loopback. Replaces what the
-    /// resolver knew of `address`.
+    /// the rest, as far as `egress` allows. `ipv6` is the pod's IPv6
+    /// address, if it has one: with `address`, what its names answer with
+    /// loopback. Replaces what the resolver knew of `address`.
     pub fn set_client(
         &self,
         address: IpAddr,
@@ -191,6 +302,7 @@ impl Resolver {
         pod_id: &str,
         upstreams: Vec<SocketAddr>,
         tables: Vec<String>,
+        egress: &Egress,
     ) {
         let address = address.to_canonical();
         let own = std::iter::once(address)
@@ -217,6 +329,7 @@ impl Resolver {
             tables,
             own,
             http,
+            egress: Allowed::new(egress),
             queries,
             connections,
         };
@@ -238,6 +351,7 @@ impl Resolver {
             tables: client.tables.clone(),
             own: client.own.clone(),
             http: http.lookup(),
+            egress: client.egress.clone(),
             queries: client.queries.clone(),
             connections: client.connections.clone(),
         };
@@ -251,6 +365,12 @@ impl Resolver {
         names: impl Fn(&[String], &str) -> Option<Vec<IpAddr>> + Send + Sync + 'static,
     ) {
         *self.names.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(names));
+    }
+
+    /// Hands the addresses of the allowed names of restricted pods to
+    /// `admit` from now on; until then, they go nowhere.
+    pub fn set_admit(&self, admit: impl Fn(&str, &[(IpAddr, Duration)]) + Send + Sync + 'static) {
+        *self.admit.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(admit));
     }
 
     /// Stops serving the pod at `address`: its queries are refused from
@@ -460,6 +580,13 @@ impl Resolver {
                 response.metadata.authoritative = true;
                 response
             }
+            None if !request
+                .queries
+                .first()
+                .is_some_and(|question| client.egress.allows(&record_name(question.name()))) =>
+            {
+                respond(&request, Err(ResponseCode::Refused))
+            }
             None => match self.ask(&request, client, transport).await {
                 Some(mut response) => {
                     let answers = svcb::strip(&mut response.answers);
@@ -468,6 +595,7 @@ impl Resolver {
                     if answers || additionals {
                         response.metadata.authentic_data = false;
                     }
+                    self.admit(client, &response).await;
                     respond(&request, Ok(response))
                 }
                 None => respond(&request, Err(ResponseCode::ServFail)),
@@ -561,6 +689,31 @@ impl Resolver {
         upstream::ask(upstreams, &query, tcp, self.config.upstream_timeout).await
     }
 
+    /// Hands the addresses of an upstream's answer to a restricted client
+    /// to the resolver's [`Admit`], and waits for it.
+    async fn admit(&self, client: &Client, response: &Message) {
+        if !client.egress.restricted() {
+            return;
+        }
+        let Some(admit) = self
+            .admit
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+        else {
+            return;
+        };
+        let addresses = admitted(response);
+        if addresses.is_empty() {
+            return;
+        }
+        let pod_id = client.pod_id.clone();
+        let admitting = tokio::task::spawn_blocking(move || admit(&pod_id, &addresses));
+        if let Err(e) = admitting.await {
+            warn!("dns: admitting the addresses of pod {}: {e}", client.pod_id);
+        }
+    }
+
     /// Publishes the record of an answered query.
     fn record(&self, client: &Client, question: &Query, response: &Message) {
         let addresses = response
@@ -586,6 +739,26 @@ impl Resolver {
         // Nobody may be listening.
         let _ = self.records.send(record);
     }
+}
+
+/// The addresses of an answer's A and AAAA records, an IPv4-mapped one as
+/// IPv4, each once, for its longest TTL, at least [`MIN_ADMIT`] and at
+/// most [`MAX_ADMIT`].
+fn admitted(response: &Message) -> Vec<(IpAddr, Duration)> {
+    let mut addresses: Vec<(IpAddr, Duration)> = Vec::new();
+    for record in &response.answers {
+        let address = match &record.data {
+            RData::A(A(address)) => IpAddr::V4(*address),
+            RData::AAAA(AAAA(address)) => IpAddr::V6(*address).to_canonical(),
+            _ => continue,
+        };
+        let timeout = Duration::from_secs(record.ttl.into()).clamp(MIN_ADMIT, MAX_ADMIT);
+        match addresses.iter_mut().find(|(a, _)| *a == address) {
+            Some((_, longest)) => *longest = (*longest).max(timeout),
+            None => addresses.push((address, timeout)),
+        }
+    }
+    addresses
 }
 
 /// The error a request gets before it is resolved, if any.

@@ -173,6 +173,27 @@ fn zone(query: &Query, tcp: bool) -> Option<Message> {
                 response.add_answer(a([1, 2, 3, 10]));
             }
         }
+        // Below v4.test, with a long TTL to A and a short one to AAAA.
+        ("deep.v4.test.", RecordType::A) => {
+            response.add_answers([
+                Record::from_rdata(owner.clone(), 3600, RData::A(A([9, 9, 9, 9].into()))),
+                Record::from_rdata(owner.clone(), u32::MAX, RData::A(A([9, 9, 9, 7].into()))),
+            ]);
+        }
+        ("deep.v4.test.", RecordType::AAAA) => {
+            response.add_answers([
+                Record::from_rdata(
+                    owner.clone(),
+                    30,
+                    RData::AAAA(AAAA("2001:db8::9".parse().unwrap())),
+                ),
+                Record::from_rdata(
+                    owner.clone(),
+                    30,
+                    RData::AAAA(AAAA("::ffff:9.9.9.8".parse().unwrap())),
+                ),
+            ]);
+        }
         ("many.test.", RecordType::A) => {
             response.add_answers((1..=60).map(|last| a([1, 2, 3, last])));
         }
@@ -258,7 +279,7 @@ async fn resolver_at(
         ..config
     };
     let resolver = Resolver::new(config);
-    resolver.set_client(address.ip(), None, POD, upstreams, Vec::new());
+    resolver.set_client(address.ip(), None, POD, upstreams, Vec::new(), &Egress::Any);
     tokio::spawn(resolver.clone().serve(udp, tcp));
     (resolver, address)
 }
@@ -542,7 +563,14 @@ async fn fails_over_and_fails() {
     assert_eq!(failing.asked(), [asked("v6.test.", RecordType::A, false)]);
 
     // No upstream that answers: SERVFAIL.
-    resolver.set_client(LOOPBACK.into(), None, POD, vec![silent.address], Vec::new());
+    resolver.set_client(
+        LOOPBACK.into(),
+        None,
+        POD,
+        vec![silent.address],
+        Vec::new(),
+        &Egress::Any,
+    );
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
     // Only failures: the last stands.
@@ -552,11 +580,19 @@ async fn fails_over_and_fails() {
         POD,
         vec![silent.address, failing.address],
         Vec::new(),
+        &Egress::Any,
     );
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
     // No upstream at all.
-    resolver.set_client(LOOPBACK.into(), None, POD, Vec::new(), Vec::new());
+    resolver.set_client(
+        LOOPBACK.into(),
+        None,
+        POD,
+        Vec::new(),
+        Vec::new(),
+        &Egress::Any,
+    );
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::ServFail);
 }
@@ -738,7 +774,14 @@ async fn tells_pods_apart_by_their_ipv4_address() {
     let failing = Upstream::start(IpAddr::V4(LOOPBACK), failure).await;
     let (resolver, server) = resolver(Config::default(), vec![upstream.address]).await;
     let other = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
-    resolver.set_client(other, None, OTHER_POD, vec![failing.address], Vec::new());
+    resolver.set_client(
+        other,
+        None,
+        OTHER_POD,
+        vec![failing.address],
+        Vec::new(),
+        &Egress::Any,
+    );
     let mut records = resolver.subscribe();
 
     // Each pod's queries go to its own upstreams, over UDP and TCP.
@@ -787,7 +830,14 @@ async fn knows_ipv4_clients_by_their_ipv4_address() {
     let (resolver, server) = resolver(Config::default(), vec![upstream.address]).await;
     resolver.remove_client(LOOPBACK.into());
     let mapped = IpAddr::V6(LOOPBACK.to_ipv6_mapped());
-    resolver.set_client(mapped, None, POD, vec![upstream.address], Vec::new());
+    resolver.set_client(
+        mapped,
+        None,
+        POD,
+        vec![upstream.address],
+        Vec::new(),
+        &Egress::Any,
+    );
     let answer = ask_udp(server, &query("v6.test.", RecordType::A)).await;
     assert_eq!(addresses(&answer), ips(&["1.2.3.6"]));
     resolver.remove_client(mapped);
@@ -833,7 +883,14 @@ async fn answers_the_names_of_the_pods_tables() {
     let (resolver, server) = resolver(Config::default(), vec![upstream.address]).await;
     resolver.set_names(names);
     let tables = vec!["sbx-1".to_string(), "env-1".to_string()];
-    resolver.set_client(LOOPBACK.into(), None, POD, vec![upstream.address], tables);
+    resolver.set_client(
+        LOOPBACK.into(),
+        None,
+        POD,
+        vec![upstream.address],
+        tables,
+        &Egress::Any,
+    );
     let mut records = resolver.subscribe();
 
     // Every address of a name, in any case, over UDP and TCP, with a short
@@ -881,6 +938,7 @@ async fn answers_the_names_of_the_pods_tables() {
         POD,
         vec![upstream.address],
         vec!["env-1".to_string()],
+        &Egress::Any,
     );
     let answer = ask_udp(server, &query("vite.", RecordType::A)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
@@ -900,6 +958,7 @@ async fn answers_the_names_of_the_pods_tables() {
         POD,
         vec![upstream.address],
         Vec::new(),
+        &Egress::Any,
     );
     let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
@@ -919,6 +978,7 @@ async fn a_name_of_the_pod_itself_is_loopback() {
         POD,
         vec![upstream.address],
         tables,
+        &Egress::Any,
     );
     let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
     assert_eq!(addresses(&answer), ips(&["::1"]));
@@ -940,6 +1000,7 @@ async fn without_a_lookup_no_pod_has_names() {
         POD,
         vec![upstream.address],
         vec!["env-1".to_string()],
+        &Egress::Any,
     );
     let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
@@ -962,6 +1023,7 @@ async fn answers_the_names_of_the_pods_http_bindings_with_the_nodes_address() {
         POD,
         vec![upstream.address],
         vec!["env-1".to_string()],
+        &Egress::Any,
     );
     let http = HttpNames {
         names: vec!["erp".to_string(), "web".to_string()],
@@ -1025,6 +1087,7 @@ async fn answers_the_names_of_the_pods_http_bindings_with_the_nodes_address() {
         POD,
         vec![upstream.address],
         vec!["env-1".to_string()],
+        &Egress::Any,
     );
     let answer = ask_udp(server, &query("erp.", RecordType::A)).await;
     assert_eq!(addresses(&answer), ips(&["169.254.169.1"]), "kept");
@@ -1046,4 +1109,275 @@ async fn without_the_nodes_address_no_binding_is_answered() {
     resolver.set_http(LOOPBACK.into(), POD, &http);
     let answer = ask_udp(server, &query("erp.", RecordType::A)).await;
     assert_eq!(answer.metadata.response_code, ResponseCode::NXDomain);
+}
+
+/// What a resolver's [`Admit`] was handed: pod, address, timeout.
+type Admitted = Arc<std::sync::Mutex<Vec<(String, IpAddr, Duration)>>>;
+
+/// A resolver with `127.0.0.1` as a client of `upstreams` whose egress is
+/// `egress`, and what it admits.
+async fn restricted(
+    upstreams: Vec<SocketAddr>,
+    egress: &[&str],
+) -> (Arc<Resolver>, SocketAddr, Admitted) {
+    let (resolver, server) = resolver(Config::default(), upstreams.clone()).await;
+    let egress = Egress::Names(egress.iter().map(|name| name.to_string()).collect());
+    resolver.set_client(LOOPBACK.into(), None, POD, upstreams, Vec::new(), &egress);
+    let admitted = Admitted::default();
+    let log = admitted.clone();
+    resolver.set_admit(move |pod, addresses| {
+        let mut log = log.lock().unwrap();
+        for &(address, timeout) in addresses {
+            log.push((pod.to_string(), address, timeout));
+        }
+    });
+    (resolver, server, admitted)
+}
+
+fn admitted(admitted: &Admitted) -> Vec<(String, IpAddr, Duration)> {
+    std::mem::take(&mut *admitted.lock().unwrap())
+}
+
+fn dns_record(record: TrafficRecord) -> DnsQuery {
+    match record.record {
+        Some(traffic_record::Record::Dns(dns)) => dns,
+        other => panic!("not a DNS record: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_restricted_pod_is_answered_its_egress_names_alone() {
+    let upstream = upstream().await;
+    let (resolver, server, admits) =
+        restricted(vec![upstream.address], &["V6.Test.", "*.v4.test"]).await;
+    let mut records = resolver.subscribe();
+
+    // An exact name, in any case and with the final dot, over UDP and TCP;
+    // its addresses are admitted before the answer, for their TTL of 300s.
+    let answer = ask_udp(server, &query("v6.test.", RecordType::AAAA)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert_eq!(addresses(&answer), ips(&["2001:db8::6"]));
+    assert_eq!(
+        admitted(&admits),
+        [(POD.to_string(), ips(&["2001:db8::6"])[0], MIN_ADMIT)]
+    );
+    let answer = ask_tcp(server, &query("V6.test.", RecordType::A)).await;
+    assert_eq!(addresses(&answer), ips(&["1.2.3.6"]));
+    assert_eq!(admitted(&admits).len(), 1);
+
+    // A name below a wildcard: a longer TTL counts, a shorter one is five
+    // minutes; an IPv4-mapped address is admitted as IPv4.
+    let answer = ask_udp(server, &query("deep.v4.test.", RecordType::A)).await;
+    assert_eq!(addresses(&answer), ips(&["9.9.9.9", "9.9.9.7"]));
+    // A TTL beyond a day: a day.
+    assert_eq!(
+        admitted(&admits),
+        [
+            (
+                POD.to_string(),
+                ips(&["9.9.9.9"])[0],
+                Duration::from_secs(3600)
+            ),
+            (POD.to_string(), ips(&["9.9.9.7"])[0], MAX_ADMIT)
+        ]
+    );
+    ask_udp(server, &query("deep.v4.test.", RecordType::AAAA)).await;
+    let timeouts: Vec<_> = admitted(&admits)
+        .into_iter()
+        .map(|(_, address, timeout)| (address, timeout))
+        .collect();
+    assert_eq!(
+        timeouts,
+        [
+            (ips(&["2001:db8::9"])[0], MIN_ADMIT),
+            (ips(&["9.9.9.8"])[0], MIN_ADMIT)
+        ]
+    );
+    // An answer without addresses admits nothing.
+    let answer = ask_udp(server, &query("none.v4.test.", RecordType::A)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::NoError);
+    assert!(admitted(&admits).is_empty());
+
+    // The wildcard's own name and every other name: REFUSED, never asked
+    // upstream, nothing admitted, and recorded.
+    for refused in ["v4.test.", "evil.test.", "test.", "xv4.test."] {
+        let answer = ask_udp(server, &query(refused, RecordType::A)).await;
+        assert_eq!(
+            answer.metadata.response_code,
+            ResponseCode::Refused,
+            "{refused}"
+        );
+        assert!(answer.answers.is_empty());
+    }
+    assert!(admitted(&admits).is_empty());
+    assert_eq!(
+        upstream.asked(),
+        [
+            asked("v6.test.", RecordType::AAAA, false),
+            asked("v6.test.", RecordType::A, true),
+            asked("deep.v4.test.", RecordType::A, false),
+            asked("deep.v4.test.", RecordType::AAAA, false),
+            asked("none.v4.test.", RecordType::A, false),
+        ]
+    );
+    let dns: Vec<DnsQuery> = std::iter::from_fn(|| records.try_recv().ok())
+        .map(dns_record)
+        .collect();
+    assert_eq!(dns.len(), 9);
+    assert_eq!(
+        dns[5],
+        DnsQuery {
+            name: "v4.test".into(),
+            r#type: 1,
+            rcode: u16::from(ResponseCode::Refused).into(),
+            addresses: Vec::new(),
+        }
+    );
+    assert_eq!(dns[6].name, "evil.test");
+    assert_eq!(dns[0].rcode, 0);
+}
+
+#[tokio::test]
+async fn a_pod_without_egress_names_is_refused_every_upstream_name() {
+    let upstream = upstream().await;
+    let (resolver, server, admits) = restricted(vec![upstream.address], &[]).await;
+    resolver.set_names(names);
+    let tables = vec!["env-1".to_string()];
+    let none = Egress::Names(Vec::new());
+    resolver.set_client(
+        LOOPBACK.into(),
+        None,
+        POD,
+        vec![upstream.address],
+        tables,
+        &none,
+    );
+    let answer = ask_udp(server, &query("v6.test.", RecordType::AAAA)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
+    // The names of its tables are answered as before, and admit nothing:
+    // they are of its environment.
+    let answer = ask_udp(server, &query("web.", RecordType::AAAA)).await;
+    assert_eq!(addresses(&answer), ips(&["fd00::a", "fd00::b"]));
+    // A name of more labels is no table's: refused.
+    let answer = ask_udp(server, &query("web.test.", RecordType::AAAA)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
+    assert!(upstream.asked().is_empty());
+    assert!(admitted(&admits).is_empty());
+}
+
+#[tokio::test]
+async fn a_restricted_pod_keeps_its_http_bindings_and_names() {
+    let node = Ipv4Addr::new(169, 254, 169, 1);
+    let upstream = upstream().await;
+    let config = Config {
+        http_address: Some(node),
+        ..Default::default()
+    };
+    let (resolver, server) = resolver(config, vec![upstream.address]).await;
+    resolver.set_names(names);
+    let http = HttpNames {
+        names: vec!["erp".to_string()],
+        hosts: vec!["api.erp.example".to_string()],
+    };
+    resolver.set_http(LOOPBACK.into(), POD, &http);
+    let egress = Egress::Names(vec!["v6.test".to_string()]);
+    resolver.set_client(
+        LOOPBACK.into(),
+        None,
+        POD,
+        vec![upstream.address],
+        vec!["env-1".to_string()],
+        &egress,
+    );
+    for (owner, record_type, expected) in [
+        ("erp.", RecordType::A, "169.254.169.1"),
+        ("api.erp.example.", RecordType::A, "169.254.169.1"),
+        ("db.", RecordType::AAAA, "fd00::d"),
+        ("v6.test.", RecordType::AAAA, "2001:db8::6"),
+    ] {
+        let answer = ask_udp(server, &query(owner, record_type)).await;
+        assert_eq!(addresses(&answer), ips(&[expected]), "{owner}");
+    }
+    // set_http keeps the egress.
+    resolver.set_http(LOOPBACK.into(), POD, &HttpNames::default());
+    let answer = ask_udp(server, &query("api.erp.example.", RecordType::A)).await;
+    assert_eq!(answer.metadata.response_code, ResponseCode::Refused);
+    assert_eq!(
+        upstream.asked(),
+        [asked("v6.test.", RecordType::AAAA, false)]
+    );
+}
+
+#[tokio::test]
+async fn an_unrestricted_pod_admits_nothing() {
+    let upstream = upstream().await;
+    let (resolver, server) = resolver(Config::default(), vec![upstream.address]).await;
+    let admitted = Admitted::default();
+    let log = admitted.clone();
+    resolver.set_admit(move |pod, _| {
+        log.lock().unwrap().push((
+            pod.to_string(),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            Duration::ZERO,
+        ))
+    });
+    for owner in ["v4.test.", "deep.v4.test.", "evil.test."] {
+        let answer = ask_udp(server, &query(owner, RecordType::A)).await;
+        assert_ne!(answer.metadata.response_code, ResponseCode::Refused);
+    }
+    assert_eq!(upstream.asked().len(), 3);
+    assert!(admitted.lock().unwrap().is_empty());
+}
+
+#[test]
+fn egress_names_match_exactly_or_strictly_below() {
+    let allowed = Allowed::new(&Egress::Names(vec![
+        "API.Stripe.com.".to_string(),
+        "*.githubusercontent.com".to_string(),
+        // Not names this matches: a bare wildcard, one inside a label.
+        "*".to_string(),
+        "*.".to_string(),
+        "*foo.example".to_string(),
+    ]));
+    for (name, allows) in [
+        ("api.stripe.com", true),
+        ("stripe.com", false),
+        ("x.api.stripe.com", false),
+        ("raw.githubusercontent.com", true),
+        ("a.b.githubusercontent.com", true),
+        ("githubusercontent.com", false),
+        ("evilgithubusercontent.com", false),
+        ("foo.example", false),
+        ("xfoo.example", false),
+        (".", false),
+    ] {
+        assert_eq!(allowed.allows(name), allows, "{name}");
+    }
+    assert!(Allowed::new(&Egress::Any).allows("anything.example"));
+    assert!(!Allowed::new(&Egress::Names(Vec::new())).allows("example.com"));
+
+    for good in [
+        "api.stripe.com",
+        "*.githubusercontent.com",
+        "Example.COM.",
+        "a_b.example",
+        "localhost",
+    ] {
+        assert!(check_egress_name(good).is_ok(), "{good}");
+    }
+    for bad in [
+        "",
+        ".",
+        "*",
+        "*.",
+        "a.*.example",
+        "*foo.example",
+        "a..b",
+        "-a.example",
+        "a b.example",
+        "https://x.example",
+        &"a".repeat(64),
+    ] {
+        assert!(check_egress_name(bad).is_err(), "{bad:?}");
+    }
 }

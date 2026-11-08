@@ -656,6 +656,20 @@ nothing to AAAA and every other type, TTL 5 s; for that pod alone, every
 other pod resolves them as before. `SetPodHttpBindings` changes them at
 once.
 
+A pod whose egress is restricted by name (`PodNetwork.restrict_egress_names`,
+ADR 0034, revised) is answered upstream names only when they are in
+`PodNetwork.egress_domains`: an exact name, or `*.example.com` for every
+name strictly below `example.com`, in any case, with or without the final
+dot; none for egress `none`. Every other upstream name gets REFUSED and is
+recorded with that code. The names of its name tables and HTTP bindings
+are answered as before. For an allowed name, the resolver puts the A and
+AAAA addresses of the answer into the pod's timed sets
+([The table](#the-table)) before the pod has the answer, each for its
+TTL, at least 300 s and at most a day; an address answered again is
+written again once its time grows by 10 s, and a pod has at most 4096. A
+create refuses an egress name that is not a DNS name or one after `*.`.
+Without the flag, nothing of this applies.
+
 Answers pass as the upstream gave them: pods have IPv4, so nothing is
 synthesized. The resolver takes `ech` out of HTTPS records, and records
 every query it answers, its own answers too.
@@ -729,7 +743,7 @@ traffic is not theirs:
 | `input` | from pods takes neighbor solicitations and advertisements, DNS to the resolver's address over UDP and TCP, OTLP to OTLP's address, TCP ports 4317 and 4318 ([traces.md](traces.md)), and the HTTP bindings there, TCP ports 80 and 443 (ADR 0028), and drops the rest |
 | `forward` | copies the first 4 packets of the TCP connections pods open to nflog group 3 (`ct direction original`, `ct original packets < 5`), of both families, before anything else; accepts what belongs to a connection; drops invalid packets from and to pods; then jumps to `from-pods` what comes from a TAP and to `to-pods` what goes to one |
 | `from-pods`, `to-pods` | go through the verdict maps `pod-out` (by input interface) and `pod-in` (by output interface) to the pod's chains, and drop and log (`no-rule`) what a TAP the maps do not have sends or receives, such as one whose rules failed to be written |
-| `out-<TAP>`, `in-<TAP>` | a pod's chains: drop and log (`deny`) what goes to or comes from a denied address, `return` what a rule of the pod's groups allows, drop and log (`no-rule`) the rest; `out-` of both families, `in-` of IPv6 alone, since nothing new comes in over IPv4 |
+| `out-<TAP>`, `in-<TAP>` | a pod's chains: drop and log (`deny`) what goes to or comes from a denied address, `return` what a rule of the pod's groups allows, and, for a pod restricted by name, what goes to its timed sets; drop and log (`no-rule`) the rest; `out-` of both families, `in-` of IPv6 alone, since nothing new comes in over IPv4 |
 | `postrouting` (nat, 100) | masquerades the pods' IPv4 range where it leaves the node (`ip saddr 169.254.16.0/20 oifname != "pod-*" masquerade`) |
 
 ARP is not IP: the table does not see it, and the kernel answers a pod
@@ -748,8 +762,15 @@ the pods' IPv4 range,
 link-local, loopback, multicast and unspecified addresses: pods reach
 each other over IPv6 alone), `internet4` and `internet6` (the default
 group's), `g-<group>` (a group's members, of IPv6) and `b-<hash>` (an
-address block without its exceptions, of its family). An IPv4 block
-counts in rules out; rules in ignore it. ICMP rules are of IPv4, ICMPv6
+address block without its exceptions, of its family). A pod restricted
+by name has two more, `named4-<TAP>` and `named6-<TAP>`, sets with
+timeouts (`flags timeout`) of the addresses its resolver admitted
+([DNS](#dns)), matched by the connection's original destination as the
+other out rules are. They live in the kernel and in `feosd`'s memory
+alone: a replaced table gets what has time left, a restart of `feosd`
+starts them empty, a boot or resume of the pod empties them, and the
+next answers fill them. An IPv4 block counts in rules out; rules in
+ignore it. ICMP rules are of IPv4, ICMPv6
 rules of IPv6. Drops are logged to nflog group 2, at most 10 a second per
 pod and reason.
 
