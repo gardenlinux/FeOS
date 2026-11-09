@@ -12,7 +12,8 @@
 //	OPENAI_API_KEY     (Secret)    API key of the LLM gateway
 //	OPENAI_BASE_URL    (Secret)    the gateway's OpenAI-compatible base URL, ending in /v1
 //	MODEL              (ConfigMap) e.g. kimi-k3-sovereign
-//	SYSTEM_PROMPT_FILE (ConfigMap volume) path of the system prompt
+//	SYSTEM_PROMPT_FILE (ConfigMap volume) path of the system prompt; without
+//	                   the file, defaultSystemPrompt
 //	FERUN_URL          ferund's base URL, default http://ferund.ferun.svc.cluster.local:8100
 //	FERUN_TOKEN        (Secret)    a FeRun tenant token, for provisioning
 //	FERUN_ENVIRONMENT  the tenant's environment the sandboxes are in (FeRun
@@ -40,6 +41,16 @@ import (
 	"strings"
 	"sync"
 )
+
+// defaultSystemPrompt is the system prompt where SYSTEM_PROMPT_FILE names
+// no file, as on a platform that mounts none.
+const defaultSystemPrompt = `You are FeChat, a helpful chat assistant - you have access to tools for a per-conversation Linux sandbox.
+
+Whenever the user asks about files, directories, code, commands or anything else that lives in the sandbox, USE THE TOOLS. Never describe, quote or invent command output or file content you have not actually retrieved with a tool call in this conversation. If information is missing, call a tool - do not guess.
+
+Tools: bash (run any shell command), read / write / edit (file contents), ls (list directories), rg (search file contents), fd (find files by name), webfetch (fetch a URL and get its main readable content - use it for documentation, articles and research).
+
+The sandbox image is provided by the customer, so check what's available before relying on specific tooling. Working directory is /workspace. Answer concisely, English by default.`
 
 type config struct {
 	APIKey           string
@@ -283,7 +294,7 @@ func handleChat(cfg config) http.HandlerFunc {
 		promptBytes, err := os.ReadFile(cfg.SystemPromptFile)
 		prompt := strings.TrimSpace(string(promptBytes))
 		if err != nil || prompt == "" {
-			prompt = "You are FeChat, a helpful assistant. Answer concisely, in English by default."
+			prompt = defaultSystemPrompt
 		}
 
 		messages := append([]Message{{Role: "system", Content: prompt}}, req.Messages...)

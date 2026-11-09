@@ -91,7 +91,7 @@ The backend reads its environment:
 | `PUBLIC_URL`         | the deployment                | `https://chat.fecode.dev`: the callback is `PUBLIC_URL/api/v1/auth/callback` |
 | `SESSION_SECRET`     | Secret `fechat-backend`       | at least 32 bytes; signs the session cookies (24 h) and the sandbox references; a new one gives open conversations new sandboxes |
 | `MODEL`              | ConfigMap, key `model`        | the model, the deployment's `FECHAT_MODEL` |
-| `SYSTEM_PROMPT_FILE` | ConfigMap, mounted at `/etc/fechat` | default `/etc/fechat/system-prompt.txt` |
+| `SYSTEM_PROMPT_FILE` | ConfigMap, mounted at `/etc/fechat` | default `/etc/fechat/system-prompt.txt`; without the file, the backend's built-in prompt (`defaultSystemPrompt` in `backend/main.go`) |
 | `PORT`               |                               | listen port, default 8080 |
 
 ## Secrets
