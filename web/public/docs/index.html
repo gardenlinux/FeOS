@@ -75,16 +75,7 @@ a:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; border-rad
 code, .mono { font-family: var(--mono); font-size: 0.9em; }
 
 /* header */
-header.top { display: flex; gap: 28px; align-items: flex-start; padding-block: 56px 28px; flex-wrap: wrap; }
-.tile {
-  flex: none; width: 96px; height: 104px; border: 1.5px solid var(--os); border-radius: 4px;
-  background: var(--os-soft); color: var(--fg); display: grid; grid-template-rows: auto 1fr auto auto;
-  padding: 6px 8px; font-family: var(--mono); line-height: 1.1;
-}
-.tile .z { font-size: 12px; color: var(--muted); }
-.tile .sym { font-family: var(--sans); font-weight: 750; font-size: 40px; color: var(--os); align-self: center; }
-.tile .nm { font-size: 11px; }
-.tile .am { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+header.top { display: flex; gap: 28px; align-items: flex-start; padding-block: 56px 28px; flex-wrap: wrap; position: relative; }
 .head-text { flex: 1 1 420px; min-width: 0; }
 .eyebrow { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
 .eyebrow a { color: inherit; }
@@ -106,11 +97,54 @@ h1 .os { color: var(--os); }
 .layer .lname span { font-weight: 500; font-size: 13px; color: var(--muted); margin-left: 6px; }
 .src { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
 .theme {
-  margin-left: auto; font: inherit; font-size: 13px; color: var(--fg2); background: var(--surface);
+  position: absolute; top: 20px; right: 0; font: inherit; font-size: 13px; color: var(--fg2); background: var(--surface);
   border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer;
 }
 .theme:hover { color: var(--fg); border-color: var(--muted); }
 .theme:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+/* FeRun's mark (the UI's BrandMark, web/src/components.jsx), large and
+   lit: the lid FeRun, the body FeOS, as on this page. Neon in the dark
+   theme (a blurred copy under each line, a bright core on it), a faint
+   glow in the light one; an isometric floor fades out beneath. The lid
+   lifts a little and the light breathes, unless motion is reduced. */
+.hero-mark { flex: none; width: 300px; align-self: center; position: relative; margin: 8px 8px 0 auto; }
+.hero-mark svg { display: block; width: 100%; height: auto; overflow: visible; position: relative; }
+.hero-mark::before {
+  content: ""; position: absolute; inset: -22% -26% -14%; pointer-events: none;
+  /* no wider than the room to the window's edge: the page never scrolls sideways */
+  inset-inline: max(-26%, calc(-12px - max(0px, (100vw - 1250px) / 2)));
+  background:
+    radial-gradient(closest-side at 50% 32%, rgb(155 167 255 / .26), transparent),
+    radial-gradient(closest-side at 50% 76%, rgb(240 166 79 / .20), transparent);
+  animation: breathe 7s ease-in-out infinite;
+}
+.hero-mark .lines { filter: url(#mark-glow); }
+.hero-mark .run { stroke: var(--run); }
+.hero-mark .os { stroke: var(--os); }
+.hero-mark .core { stroke-width: .55; opacity: .9; }
+.hero-mark .core .run { stroke: #e8eaff; }
+.hero-mark .core .os { stroke: #ffe6c7; }
+.hero-mark .lid { animation: lift 7s ease-in-out infinite; }
+.hero-mark .floor line { stroke: var(--run); stroke-width: .25; }
+.hero-mark .pool-run { stop-color: var(--run); }
+.hero-mark .pool-os { stop-color: var(--os); }
+@keyframes lift { 50% { transform: translateY(-1.6px); } }
+@keyframes breathe { 50% { opacity: .72; } }
+:root[data-theme="light"] .hero-mark::before {
+  background:
+    radial-gradient(closest-side at 50% 32%, rgb(52 69 180 / .13), transparent),
+    radial-gradient(closest-side at 50% 76%, rgb(164 84 11 / .11), transparent);
+}
+:root[data-theme="light"] .hero-mark .lines { filter: url(#mark-glow-soft); }
+:root[data-theme="light"] .hero-mark .core { display: none; }
+@media (max-width: 1060px) { .hero-mark { width: 220px; } }
+/* narrow: the mark small above the heading, the button after the text */
+@media (max-width: 860px) {
+  .hero-mark { order: -1; width: 120px; margin: 0; align-self: flex-start; }
+  .hero-mark::before { inset-inline: -26%; }
+  .theme { position: static; order: 3; margin-left: auto; }
+}
 
 nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-block: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; margin-bottom: 8px; }
 nav.toc a { color: var(--fg2); text-decoration: none; }
@@ -208,19 +242,16 @@ footer code { font-size: 12px; }
 
 @media (max-width: 560px) {
   header.top { padding-block: 32px 20px; gap: 18px; }
-  .tile { width: 76px; height: 86px; }
-  .tile .sym { font-size: 30px; }
   .lede { font-size: 16.5px; }
   h2 { font-size: 1.5rem; }
 }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .hero-mark .lid, .hero-mark::before { animation: none; } }
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header class="top">
-  <div class="tile" aria-hidden="true"><span class="z">26</span><span class="sym">Fe</span><span class="nm">Iron</span><span class="am">55.845</span></div>
   <div class="head-text">
     <p class="eyebrow"><a href="/">FeRun</a> · Architecture · as of 8 November 2026</p>
     <h1><span class="run">FeRun</span> and <span class="os">FeOS</span></h1>
@@ -230,6 +261,57 @@ footer code { font-size: 12px; }
       <div class="layer os"><p class="lname">FeOS <span>on the node</span></p><p><code>feosd</code>, <code>diskd</code> and the guest. They run the pods: the microVMs, their disks, their network and their snapshots.</p></div>
     </div>
     <p class="src">A picture of <code>docs/overview.md</code>, <code>docs/architecture/</code> and <code>docs/adr/</code> in the FeOS repository at <code>8861ceb</code>. It is a snapshot: where it and those pages differ, the pages are right.</p>
+  </div>
+  <div class="hero-mark" aria-hidden="true">
+    <svg viewBox="-10 -12 120 132">
+      <defs>
+        <filter id="mark-glow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="near"/>
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="far"/>
+          <feMerge><feMergeNode in="far"/><feMergeNode in="far"/><feMergeNode in="near"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="mark-glow-soft" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="far"/>
+          <feComponentTransfer in="far" result="faint"><feFuncA type="linear" slope=".45"/></feComponentTransfer>
+          <feMerge><feMergeNode in="faint"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <radialGradient id="mark-pool">
+          <stop offset="0" class="pool-os" stop-opacity=".38"/>
+          <stop offset=".55" class="pool-run" stop-opacity=".10"/>
+          <stop offset="1" class="pool-run" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="mark-fade">
+          <stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        </radialGradient>
+        <mask id="mark-floor"><ellipse cx="50" cy="100" rx="58" ry="22" fill="url(#mark-fade)"/></mask>
+      </defs>
+      <g class="floor" mask="url(#mark-floor)" opacity=".5">
+        <line x1="-92" y1="72.9" x2="48" y2="153.7"/><line x1="48" y1="72.9" x2="-92" y2="153.7"/>
+        <line x1="-80" y1="72.9" x2="60" y2="153.7"/><line x1="60" y1="72.9" x2="-80" y2="153.7"/>
+        <line x1="-68" y1="72.9" x2="72" y2="153.7"/><line x1="72" y1="72.9" x2="-68" y2="153.7"/>
+        <line x1="-56" y1="72.9" x2="84" y2="153.7"/><line x1="84" y1="72.9" x2="-56" y2="153.7"/>
+        <line x1="-44" y1="72.9" x2="96" y2="153.7"/><line x1="96" y1="72.9" x2="-44" y2="153.7"/>
+        <line x1="-32" y1="72.9" x2="108" y2="153.7"/><line x1="108" y1="72.9" x2="-32" y2="153.7"/>
+        <line x1="-20" y1="72.9" x2="120" y2="153.7"/><line x1="120" y1="72.9" x2="-20" y2="153.7"/>
+        <line x1="-8" y1="72.9" x2="132" y2="153.7"/><line x1="132" y1="72.9" x2="-8" y2="153.7"/>
+        <line x1="4" y1="72.9" x2="144" y2="153.7"/><line x1="144" y1="72.9" x2="4" y2="153.7"/>
+        <line x1="16" y1="72.9" x2="156" y2="153.7"/><line x1="156" y1="72.9" x2="16" y2="153.7"/>
+        <line x1="28" y1="72.9" x2="168" y2="153.7"/><line x1="168" y1="72.9" x2="28" y2="153.7"/>
+        <line x1="40" y1="72.9" x2="180" y2="153.7"/><line x1="180" y1="72.9" x2="40" y2="153.7"/>
+        <line x1="52" y1="72.9" x2="192" y2="153.7"/><line x1="192" y1="72.9" x2="52" y2="153.7"/>
+      </g>
+      <ellipse cx="50" cy="99" rx="44" ry="13" fill="url(#mark-pool)"/>
+      <g class="lines" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <polyline class="run lid" points="10,46 10,27 50,4 90,27 50,50 10,27"/>
+        <polyline class="os" points="90,54 90,73 50,96 10,73"/>
+        <polyline class="os" points="50,64 50,96"/>
+      </g>
+      <g class="core" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polyline class="run lid" points="10,46 10,27 50,4 90,27 50,50 10,27"/>
+        <polyline class="os" points="90,54 90,73 50,96 10,73"/>
+        <polyline class="os" points="50,64 50,96"/>
+      </g>
+    </svg>
   </div>
   <button class="theme" id="theme-toggle" type="button">Light mode</button>
 </header>
