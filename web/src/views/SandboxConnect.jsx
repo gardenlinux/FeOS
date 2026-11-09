@@ -22,7 +22,7 @@ export function Connect({ sandboxId, write, fresh = '', onFreshSeen = () => {} }
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [armed, arm, disarm] = useArm();
-  const why = write ? undefined : 'needs write on this tenant';
+  const why = write ? undefined : 'needs write on its environment';
 
   const refresh = useCallback(async () => {
     try {

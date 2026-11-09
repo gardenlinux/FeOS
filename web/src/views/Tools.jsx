@@ -13,8 +13,7 @@ import '../styles/sandboxes.css';
 // with its description and input schema, folded. A sandbox's Connect tab
 // shows the same reference; /tenants/:t/tools is it on a page of its own.
 
-export function Tools({ tenant, navigate }) {
-  const base = tenant ? `/tenants/${encodeURIComponent(tenant)}/sandboxes` : '';
+export function Tools() {
   return (
     <div className="sbx-page">
       <header className="pagehead">
@@ -24,8 +23,7 @@ export function Tools({ tenant, navigate }) {
         </div>
         <div className="facts">
           <span>what an agent can call in a sandbox, over MCP and REST alike</span>
-          {base && navigate && (
-            <span>connect one at a sandbox's <a href={base} onClick={(e) => { e.preventDefault(); navigate(base); }}>Connect</a> tab</span>)}
+          <span>connect one on a sandbox&apos;s Connect tab, in its environment</span>
         </div>
       </header>
       <section className="pane"><ToolReference /></section>

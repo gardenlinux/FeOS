@@ -7,7 +7,7 @@ import {
   parseArgs, parseDuration, parsePairs, phaseWord, resultView,
 } from './jobs.js';
 
-// The tenant's jobs' arithmetic, on jobs in the shape of ferund's
+// The arithmetic of the jobs made by a call, on jobs in the shape of ferund's
 // TenantJobStatus (go/internal/env/tenantjobs.go).
 
 const job = (over) => ({

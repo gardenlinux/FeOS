@@ -4,7 +4,7 @@
 // Reachability from declarations (ADR 0034, revised; ADR 0035): what a
 // deployment's references open, as the plan and a deployment answer it
 // (`reachability`); a service's and a job's egress; a route's clients
-// (from); a service's or a job's uses; what a sandbox or a tenant's job
+// (from); a service's or a job's uses; what a sandbox or a job made by a call
 // reaches of its environment (reaches); and the environment a sandbox or
 // a job is in. Pure: no React, no browser.
 //
@@ -320,7 +320,7 @@ export function attachedTo(kind, o) {
 //   Row: {key, peer: {type, name, sub?, missing?}, what, via: [string]}
 //
 // type is service, job, addon (objects of the environment), ingress (the
-// routes, sub their clients), sandbox, jobrun (a tenant's job), env
+// routes, sub their clients), sandbox, jobrun (a job made by a call), env
 // (every pod of the environment: reaches "all"), internet, domain or
 // cidr (egress). what says the ports: "http 8080", "postgres 5432, 5433";
 // via where the edge comes from: "env CATALOG_URL", "uses", "route api",

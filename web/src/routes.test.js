@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, OBJECT_TABS, OBJECT_TAB_LABELS, PAGE_LABELS, TENANT_VIEWS, canonicalPath,
-  chosenEnv, envPath, lensOf, objectPath, objectTabs, parsePath, pickEnvPath, pickObjectPath, switchEnvPath,
+  chosenEnv, envPath, jobPath, lensOf, newSandboxPath, objectPath, objectTabs, parsePath, pickEnvPath, pickObjectPath, sandboxPath,
+  switchEnvPath,
 } from './routes.js';
 import { fmtAgo, fmtDurNs, fmtMsTime, fmtNs, fmtSeconds, prettyJson } from './format.js';
 import { ADMIN_KEY, readItem, writeItem } from './storage.js';
@@ -15,9 +16,13 @@ describe('parsePath', () => {
     expect(parsePath('/tenants')).toEqual({ view: 'tenants' });
     expect(parsePath('/tenants/acme')).toEqual({ view: 'overview', tenant: 'acme' });
     expect(parsePath('/tenants/acme/tools')).toEqual({ view: 'tools', tenant: 'acme' });
-    expect(parsePath('/tenants/acme/sandboxes')).toEqual({ view: 'sandboxes', tenant: 'acme', sel: '', tab: 'overview' });
-    expect(parsePath('/tenants/acme/sandboxes/0199f0b7-1c2d-7e3f-8a00-00000000e2e0/network'))
-      .toEqual({ view: 'sandboxes', tenant: 'acme', sel: '0199f0b7-1c2d-7e3f-8a00-00000000e2e0', tab: 'network' });
+    // A sandbox's and a job's old places lead to their environment.
+    expect(parsePath('/tenants/acme/sandboxes')).toEqual({ view: 'moved', tenant: 'acme', what: 'sandbox', sel: '', tab: '', env: '' });
+    expect(parsePath('/tenants/acme/sandboxes/h3k9v2m7qpx/network'))
+      .toEqual({ view: 'moved', tenant: 'acme', what: 'sandbox', sel: 'h3k9v2m7qpx', tab: 'network', env: '' });
+    expect(parsePath('/tenants/acme/sandboxes/new?environment=kino--dev'))
+      .toEqual({ view: 'moved', tenant: 'acme', what: 'sandbox', sel: 'new', tab: '', env: 'kino--dev' });
+    expect(parsePath('/tenants/acme/jobs/a3ze6kkjvfx')).toEqual({ view: 'moved', tenant: 'acme', what: 'job', sel: 'a3ze6kkjvfx', tab: '', env: '' });
     expect(parsePath('/nodes')).toEqual({ view: 'nodes' });
     expect(parsePath('/nodes/node-a')).toEqual({ view: 'node', node: 'node-a', tab: 'overview' });
     expect(parsePath('/nodes/node-a/certs')).toEqual({ view: 'node', node: 'node-a', tab: 'certs' });
@@ -43,9 +48,9 @@ describe('parsePath', () => {
     expect([...TENANT_VIEWS].sort()).toEqual([
       'environments',
       'members',
+      'moved',
       'newEnvironment',
       'overview',
-      'sandboxes',
       'tokens',
       'tools',
     ]);
@@ -140,6 +145,34 @@ describe('the environments routes', () => {
       .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'addon/postgres', otab: 'logs' }));
   });
 
+  it("a sandbox's and a job's pages are their environment's (ADR 0035)", () => {
+    expect(sandboxPath('fecode', 'kino--tools')).toBe('/tenants/fecode/environments/kino--tools/sandboxes');
+    expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx')).toBe('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx');
+    expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx', 'connect'))
+      .toBe('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect');
+    expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx', 'overview'))
+      .toBe('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx');
+    expect(newSandboxPath('fecode', 'kino--tools')).toBe('/tenants/fecode/environments/kino--tools/sandboxes/new');
+    expect(jobPath('fecode', 'kino--tools')).toBe('/tenants/fecode/environments/kino--tools/jobs');
+    expect(jobPath('fecode', 'kino--tools', 'a3ze6kkjvfx')).toBe('/tenants/fecode/environments/kino--tools/jobs/a3ze6kkjvfx');
+    expect(parsePath('/tenants/fecode/environments/kino--tools/sandboxes'))
+      .toEqual(env({ env: 'kino--tools', tab: 'sandboxes', otab: 'overview' }));
+    expect(parsePath('/tenants/fecode/environments/kino--tools/sandboxes/new'))
+      .toEqual(env({ env: 'kino--tools', tab: 'sandboxes', item: 'new', otab: 'overview' }));
+    expect(parsePath('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect'))
+      .toEqual(env({ env: 'kino--tools', tab: 'sandboxes', item: 'h3k9v2m7qpx', otab: 'connect' }));
+    expect(parsePath('/tenants/fecode/environments/kino--tools/jobs/a3ze6kkjvfx'))
+      .toEqual(env({ env: 'kino--tools', tab: 'jobs', item: 'a3ze6kkjvfx' }));
+    // The jobs are a page of Activity; a sandbox's page belongs to no view.
+    expect(lensOf('jobs')).toBe('activity');
+    expect(lensOf('sandboxes')).toBe('');
+    // Another environment: its sandboxes' list, its jobs.
+    const sbx = parsePath('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect');
+    expect(switchEnvPath(sbx, 'fecode', 'kino--dev')).toBe('/tenants/fecode/environments/kino--dev/sandboxes');
+    const job = parsePath('/tenants/fecode/environments/kino--tools/jobs/a3ze6kkjvfx');
+    expect(switchEnvPath(job, 'fecode', 'kino--dev')).toBe('/tenants/fecode/environments/kino--dev/jobs');
+  });
+
   it('envPath builds what parsePath reads', () => {
     expect(envPath('fecode')).toBe('/tenants/fecode/environments');
     expect(envPath('fecode', 'expensa-stage')).toBe('/tenants/fecode/environments/expensa-stage');
@@ -168,8 +201,8 @@ describe('the environments routes', () => {
         .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab: 'objects', item, otab: 'logs', replica, search });
     }
     expect(ENV_TABS).toEqual([
-      'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'reachability', 'settings', 'secrets',
-      'access', 'objects',
+      'overview', 'builder', 'activity', 'deployments', 'incidents', 'jobs', 'logs', 'traces', 'traffic', 'reachability', 'settings',
+      'secrets', 'access', 'objects', 'sandboxes',
     ]);
     // An object's page: its kind and name, its view.
     expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/tenants/fecode/environments/e/objects/service/web%20api');

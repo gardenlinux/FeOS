@@ -7,10 +7,10 @@ import {
 } from './api.js';
 import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
-import { Avatar, BrandMark, EnvName, useTheme } from './components.jsx';
+import { Avatar, BrandMark, EnvName, StateDot, useTheme } from './components.jsx';
 import {
-  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, envPath, newEnvPath, parsePath, pickEnvPath, pickObjectPath,
-  switchEnvPath,
+  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, envPath, jobPath, newEnvPath, newSandboxPath, parsePath, pickEnvPath,
+  pickObjectPath, sandboxPath, switchEnvPath,
 } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
@@ -18,7 +18,6 @@ import { TenantGate } from './views/TenantGate.jsx';
 import { InviteAccept, Members, MyTenants, RoleBadge, Tokens } from './views/People.jsx';
 import { Home } from './views/Home.jsx';
 import { Tenants } from './views/Tenants.jsx';
-import { Sandboxes } from './views/Sandboxes.jsx';
 import { Tools } from './views/Tools.jsx';
 import { Environments } from './views/Environments.jsx';
 import { NewEnvironment } from './views/NewEnvironment.jsx';
@@ -26,7 +25,7 @@ import { Nodes } from './views/Nodes.jsx';
 import { NodeDetail } from './views/NodeDetail.jsx';
 import { JoinTokens } from './views/JoinTokens.jsx';
 import { Instances } from './views/Instances.jsx';
-import { Jobs } from './views/Jobs.jsx';
+import { Moved } from './views/Moved.jsx';
 import { Domains } from './views/Domains.jsx';
 import { Credentials } from './views/Credentials.jsx';
 import { TenantSettings, Usage } from './views/TenantPages.jsx';
@@ -37,11 +36,13 @@ import { entries } from './search.js';
 import {
   KIND_TITLES, deploymentText, deploymentTone, groupObjects, objectStateText, objectTone, sideMeta, statusState,
 } from './views/envs.js';
+import { sandboxMeta, sideSandboxes } from './views/sandboxes.js';
+import { jobTone, onItsWay } from './views/jobs.js';
 import { EnvStatusProvider, useEnvStatus } from './envstatus.jsx';
 import './styles/shell.css';
 import { ToneDot } from './views/Environments.jsx';
 import {
-  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, can, isOperator, myTenants,
+  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, atLeast, can, envRole, higher, isOperator, myTenants,
   tenantAccess, tenantHome, tenantNav, viewGate,
 } from './people.js';
 
@@ -59,6 +60,8 @@ const ME_POLL_MS = 60000;
 // useRoute follows the location, its path and query; a path under an
 // earlier name is replaced by its canonical one (canonicalPath). A new
 // path scrolls to the top, a new query alone (a search) does not.
+// navigate(to, {replace: true}) replaces the history's entry instead of
+// adding one, as a redirect does.
 function useRoute() {
   const [path, setPath] = useState(() => canonical());
   useEffect(() => {
@@ -66,10 +69,11 @@ function useRoute() {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
-  const navigate = useCallback((to) => {
+  const navigate = useCallback((to, { replace = false } = {}) => {
     if (to !== location.pathname + location.search) {
       const samePath = to.split('?')[0] === location.pathname;
-      history.pushState(null, '', to);
+      if (replace) history.replaceState(null, '', to);
+      else history.pushState(null, '', to);
       setPath(to);
       if (!samePath) window.scrollTo(0, 0);
     }
@@ -173,10 +177,8 @@ export default function App() {
       {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
       {needsGate && <TenantGate key={route.tenant} reason={gate} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'overview' && <Home key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-      {!needsGate && route.view === 'sandboxes' && (
-        <Sandboxes key={route.tenant} tenant={route.tenant} sel={route.sel} tab={route.tab} navigate={navigate} />)}
-      {!needsGate && route.view === 'tools' && <Tools key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-      {!needsGate && route.view === 'jobs' && <Jobs key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
+      {!needsGate && route.view === 'moved' && <Moved route={route} navigate={navigate} />}
+      {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
       {!needsGate && route.view === 'domains' && <Domains key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
       {!needsGate && (route.view === 'credentials' || route.view === 'newCredential') && (
         <Credentials key={route.tenant} tenant={route.tenant} sel={route.view === 'newCredential' ? '' : route.sel}
@@ -270,7 +272,7 @@ function Sidebar({ route, navigate, me, env }) {
       </a>
 
       {!platform && t && nav.some((n) => n.group === 'env') && (
-        <EnvSide route={route} navigate={navigate} env={env} canCreate={can(access).writeTenant} objects={inEnv} />)}
+        <EnvSide route={route} navigate={navigate} env={env} access={access} objects={inEnv} />)}
 
       {!platform && t && !inEnv && <TenantPages route={route} navigate={navigate} nav={nav} tenant={t} />}
 
@@ -305,10 +307,12 @@ const plainClick = (e) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shift
 // EnvSide is the environment one works in, in the sidebar: a card with
 // its name, its state and its host, which leads to it (in the same view
 // from one of its objects' pages); while one of its pages is open
-// (objects), below it its objects by kind, each with its state, which
-// lead to their pages (in the view open now). The topbar's switcher
-// chooses another environment.
-function EnvSide({ route, navigate, env, canCreate, objects }) {
+// (objects), below it what runs in it: its objects by kind, each with
+// its state, which lead to their pages (in the view open now), its jobs
+// made by a call that are on their way, and its sandboxes (ADR 0035).
+// The topbar's switcher chooses another environment.
+function EnvSide({ route, navigate, env, access, objects }) {
+  const canCreate = can(access).writeTenant;
   const { environments } = useSummary();
   const { st, env: statusEnv } = useEnvStatus();
   const t = route.tenant;
@@ -355,38 +359,105 @@ function EnvSide({ route, navigate, env, canCreate, objects }) {
         {host && <span className="envcard-host">{host}</span>}
       </a>
       {objects && (status
-        ? <ObjectList route={route} navigate={navigate} st={status} tenant={t} />
+        ? <ObjectList route={route} navigate={navigate} st={status} tenant={t}
+          write={atLeast(higher(envRole(access, status.id), envRole(access, status.name)), 'write')} />
         : <div className="sidehint muted small">…</div>)}
     </div>
   );
 }
 
-// ObjectList are an environment's objects in the sidebar, by kind: each
-// with its state's dot, its name, and what is wrong while something is.
-function ObjectList({ route, navigate, st, tenant }) {
+// ObjectList are what runs in an environment, in the sidebar: its
+// objects by kind, each with its state's dot, its name, and what is wrong
+// while something is; under its jobs those made by a call that are on
+// their way, and the link to all of them (Activity's Jobs); then its
+// sandboxes, the hibernated folded when there are many (sideSandboxes),
+// with New sandbox where write allows.
+function ObjectList({ route, navigate, st, tenant, write }) {
+  const { sandboxes, jobs } = useEnvStatus();
+  const [openAll, setOpenAll] = useState(false);
+  const env = st.name;
+  const inEnv = route.view === 'environments';
+  const sel = inEnv && route.tab === 'objects' ? route.item : '';
+  const selSandbox = inEnv && route.tab === 'sandboxes' ? route.item : '';
+  const selJob = inEnv && route.tab === 'jobs' ? route.item : '';
+  // Another sandbox opens in the view open now.
+  const sbView = selSandbox && selSandbox !== 'new' ? route.otab : '';
   const groups = groupObjects(st.objects);
-  const sel = route.view === 'environments' && route.tab === 'objects' ? route.item : '';
-  if (groups.length === 0) return <p className="sidehint muted small">No objects: no deployment yet.</p>;
-  return groups.map(({ kind, objects }) => (
-    <nav key={kind} className="snav objnav" aria-label={KIND_TITLES[kind]}>
-      <div className="snav-label">{KIND_TITLES[kind]} <span className="snav-labelcount">{objects.length}</span></div>
-      {objects.map((o) => {
-        const id = `${o.kind}/${o.name}`;
-        const tone = objectTone(o);
-        const to = pickObjectPath(route, tenant, st.name, o);
-        const on = sel === id;
-        const meta = sideMeta(o);
-        return (
-          <a key={id} className={'objitem' + (on ? ' on' : '')} href={to} aria-current={on ? 'page' : undefined}
-            onClick={(e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } }}>
-            <ToneDot tone={tone} title={objectStateText(o)} />
-            <span className="objitem-name">{o.name}</span>
-            {meta && <span className={'objitem-meta ' + tone}>{meta}</span>}
-          </a>
-        );
-      })}
-    </nav>
-  ));
+  const live = [...(jobs || [])].filter((j) => onItsWay(j.phase)).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const kept = (jobs || []).length;
+  if (kept > 0 && !groups.some((g) => g.kind === 'job')) groups.push({ kind: 'job', objects: [] });
+  const side = sideSandboxes(sandboxes, { open: openAll, selected: selSandbox });
+  const go = (to) => (e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } };
+  const empty = groups.length === 0 && sandboxes !== null && jobs !== null && sandboxes.length === 0;
+
+  return (
+    <>
+      {empty && <p className="sidehint muted small">Nothing runs here: no deployment, no sandbox yet.</p>}
+      {groups.map(({ kind, objects }) => (
+        <nav key={kind} className="snav objnav" aria-label={KIND_TITLES[kind]}>
+          <div className="snav-label">{KIND_TITLES[kind]} <span className="snav-labelcount">{objects.length + (kind === 'job' ? kept : 0)}</span></div>
+          {objects.map((o) => {
+            const id = `${o.kind}/${o.name}`;
+            const tone = objectTone(o);
+            const to = pickObjectPath(route, tenant, env, o);
+            const on = sel === id;
+            const meta = sideMeta(o);
+            return (
+              <a key={id} className={'objitem' + (on ? ' on' : '')} href={to} aria-current={on ? 'page' : undefined} onClick={go(to)}>
+                <ToneDot tone={tone} title={objectStateText(o)} />
+                <span className="objitem-name">{o.name}</span>
+                {meta && <span className={'objitem-meta ' + tone}>{meta}</span>}
+              </a>
+            );
+          })}
+          {kind === 'job' && live.map((j) => {
+            const to = jobPath(tenant, env, j.id);
+            const on = selJob === j.id;
+            const tone = jobTone(j.phase);
+            return (
+              <a key={j.id} className={'objitem' + (on ? ' on' : '')} href={to} aria-current={on ? 'page' : undefined} onClick={go(to)}
+                title={`made by a call · ${j.image}`}>
+                <ToneDot tone={tone} title={j.phase} />
+                <span className="objitem-name mono">{shortId(j.id)}</span>
+                <span className={'objitem-meta ' + tone}>{j.phase}</span>
+              </a>
+            );
+          })}
+          {kind === 'job' && kept > 0 && (
+            <a className="objitem objitem-more" href={jobPath(tenant, env)} onClick={go(jobPath(tenant, env))}
+              aria-current={inEnv && route.tab === 'jobs' && !selJob ? 'page' : undefined}>
+              <span className="objitem-name">{kept} made by a call</span>
+            </a>)}
+        </nav>
+      ))}
+      {sandboxes && sandboxes.length > 0 && (
+        <nav className="snav objnav" aria-label="sandboxes">
+          <div className="snav-label">sandboxes <span className="snav-labelcount">{sandboxes.length}</span>
+            {write && (
+              <a className="snav-labeladd" href={newSandboxPath(tenant, env)} onClick={go(newSandboxPath(tenant, env))}
+                title={`new sandbox in ${env}`} aria-label="new sandbox"><Icon name="plus" size={13} /></a>)}
+          </div>
+          {side.shown.map((sb) => {
+            const to = sandboxPath(tenant, env, sb.sandboxId, sbView);
+            const on = selSandbox === sb.sandboxId;
+            const meta = sandboxMeta(sb);
+            return (
+              <a key={sb.sandboxId} className={'objitem' + (on ? ' on' : '')} href={to} aria-current={on ? 'page' : undefined}
+                onClick={go(to)}>
+                <StateDot state={sb.clientState} />
+                <span className="objitem-name mono">{sb.sandboxId}</span>
+                {meta && <span className="objitem-meta failed">{meta}</span>}
+              </a>
+            );
+          })}
+          {side.folded > 0 && (
+            <button type="button" className="objitem objitem-more" onClick={() => setOpenAll(true)}>
+              <StateDot state="hibernated" />
+              <span className="objitem-name">{side.folded} hibernated</span>
+            </button>)}
+        </nav>)}
+    </>
+  );
 }
 
 // TenantRow is the tenant at the sidebar's foot while an environment is
@@ -617,8 +688,7 @@ function UserMenu({ me, onSignOut }) {
 
 // CRUMB_NAMES name the tenant's pages in the trail.
 const CRUMB_NAMES = {
-  sandboxes: 'sandboxes', tools: 'tools', jobs: 'jobs', domains: 'domains', members: 'people', tokens: 'tokens',
-  usage: 'usage', settings: 'general', credentials: 'credentials',
+  tools: 'tools', domains: 'domains', members: 'people', tokens: 'tokens', usage: 'usage', settings: 'general', credentials: 'credentials',
 };
 
 function Topbar({ route, navigate, me, onSearch, onSignOut }) {
@@ -639,9 +709,6 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
       <nav className="crumbs">
         {t && SETTINGS_VIEWS.has(route.view) && <>{sep}<span className="crumb">tenant settings</span></>}
         {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
-        {route.view === 'sandboxes' && route.sel === 'new' && <>{sep}<span className="crumb">new</span></>}
-        {route.view === 'sandboxes' && route.sel && route.sel !== 'new' && <>{sep}<span className="crumb mono">{shortId(route.sel)}</span></>}
-        {route.view === 'jobs' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
         {route.view === 'credentials' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'newCredential' && <>{sep}{crumb('credentials', `/tenants/${enc(t)}/credentials`)}{sep}<span className="crumb">new</span></>}
@@ -655,6 +722,8 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {route.view === 'environments' && route.tab === 'objects' && route.otab && route.otab !== 'overview' && (
           <>{sep}<span className="crumb">{(OBJECT_TAB_LABELS[route.otab] || route.otab).toLowerCase()}
             {route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
+        {route.view === 'environments' && route.tab === 'sandboxes' && route.item && route.item !== 'new' && route.otab
+          && route.otab !== 'overview' && <>{sep}<span className="crumb">{route.otab}</span></>}
         {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
         {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}

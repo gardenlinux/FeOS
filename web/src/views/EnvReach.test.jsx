@@ -56,7 +56,7 @@ describe("an object's reachability on its Config", () => {
 
   it('sends an attached service to its sandbox, and says what is not there yet', () => {
     expect(text(pic('service', 'preview'))).toContain('Runs in sandbox sbx1 : its calls are the sandbox\'s pod\'s');
-    expect(html(pic('service', 'preview'))).toContain('href="/tenants/t/sandboxes/sbx1"');
+    expect(html(pic('service', 'preview'))).toContain('href="/tenants/t/environments/stage/sandboxes/sbx1"');
     expect(text(pic('service', 'gone'))).toContain('Not in the deployed deployment.');
     expect(text(pic('service', 'api', { reach: null }))).toContain('answers no reachability');
     expect(text(pic('service', 'api', { n: 0 }))).toContain('Not deployed yet.');

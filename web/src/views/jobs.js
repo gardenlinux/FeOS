@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The tenant's jobs' arithmetic (ADR 0018, "A tenant's job"): pure, so
+// The arithmetic of the jobs made by a call (ADR 0041): pure, so
 // that the tests load it as it is. A job's shape is ferund's
 // TenantJobStatus (go/internal/env/tenantjobs.go): id, image, imageRef,
 // phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib,

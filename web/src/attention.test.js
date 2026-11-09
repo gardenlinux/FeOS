@@ -14,7 +14,8 @@ describe('attention', () => {
       tenant: 'kino',
       environments: [{ name: 'prod', openIncidents: 1, state: 'failed', deployment: 13, deployed: 12 }],
       incidents: { prod: [{ id: '12', object: 'service/api', condition: 'crash_loop', summary: 'exited 3 times', openedAt: iso(H) }] },
-      sandboxes: [{ sandboxId: 'f1g6n3w9yzp', clientState: 'failed', statusDescription: 'the registry refused it', updatedAt: iso(2 * H) },
+      sandboxes: [{ sandboxId: 'f1g6n3w9yzp', clientState: 'failed', statusDescription: 'the registry refused it', updatedAt: iso(2 * H),
+        environment: { id: 'e9', name: 'kino--tools' } },
         { sandboxId: 'h3k9v2m7qpx', clientState: 'paused' }],
       domains: [{ id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns', reason: 'the CNAME points elsewhere',
         warnings: { recordMissingSince: iso(2 * H), deactivatesAt: new Date(NOW + 70 * H).toISOString() } },
@@ -25,7 +26,7 @@ describe('attention', () => {
     }, NOW);
     expect(items.map((i) => [i.severity, i.title, i.to])).toEqual([
       ['bad', 'crash_loop', '/tenants/kino/environments/prod/incidents/12'],
-      ['bad', 'sandbox failed', '/tenants/kino/sandboxes/f1g6n3w9yzp'],
+      ['bad', 'sandbox failed', '/tenants/kino/environments/kino--tools/sandboxes/f1g6n3w9yzp'],
       ['warn', 'waiting-for-dns', '/tenants/kino/domains/d-2'],
       ['warn', 'sandboxes: 90 % of the limit', '/tenants/kino/usage'],
       ['info', 'invitation expires in 20 h', '/tenants/kino/members'],

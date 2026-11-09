@@ -107,7 +107,11 @@ export function attention(input, now = Date.now()) {
       object: sb.sandboxId,
       detail: sb.statusDescription || '',
       since: sb.updatedAt || '',
-      to: `/tenants/${t}/sandboxes/${enc(sb.sandboxId)}`,
+      // Its page is its environment's (ADR 0035); one without is found by
+      // its ID.
+      to: sb.environment && (sb.environment.name || sb.environment.id)
+        ? `/tenants/${t}/environments/${enc(sb.environment.name || sb.environment.id)}/sandboxes/${enc(sb.sandboxId)}`
+        : `/tenants/${t}/sandboxes/${enc(sb.sandboxId)}`,
       action: 'Open sandbox',
     });
   }

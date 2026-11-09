@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AddonForm, JobForm, RouteForm, ServiceForm } from './BuilderForms.jsx';
-import { EgressEditor, EnvPicker, NoEnvironment, ReachFlow, ReachesPicker } from './Reach.jsx';
+import { EgressEditor, ReachFlow, ReachesPicker } from './Reach.jsx';
 import { PlanReach } from './Builder.jsx';
 import { PodTables } from './EnvPods.jsx';
 import { InUse } from './EnvTabs.jsx';
@@ -160,53 +160,48 @@ describe('an environment\'s sandboxes and jobs', () => {
       updatedAt: '2026-11-06T09:00:00Z' }];
     const jobs = [{ id: 'k2m7qpxh3v9aaaa', phase: 'running', image: 'report:3', reaches: 'all', createdAt: '2026-11-06T09:00:00Z' }];
     const out = html(<PodTables tenant="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />);
-    expect(out).toContain('href="/tenants/kino/sandboxes/h3k9v2m7qpx"');
-    expect(out).toContain('href="/tenants/kino/sandboxes/new?environment=kino-dev"');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes/h3k9v2m7qpx"');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes/new"');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes"');
     expect(out).toContain('<th>reaches</th>');
     expect(text(<PodTables tenant="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />))
       .toContain('db-admin');
     expect(out).toContain('all of the environment');
     expect(out).not.toContain('groups');
     expect(out).toContain('1, 1 on their way');
-    expect(out).toContain('href="/tenants/kino/jobs/k2m7qpxh3v9aaaa"');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/jobs/k2m7qpxh3v9aaaa"');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/jobs"');
+    expect(text(<PodTables tenant="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />))
+      .toContain('jobs made by a call');
+    expect(out).not.toContain('of the tenant');
     const empty = text(<PodTables tenant="kino" env="kino-dev" sandboxes={[]} jobs={[]} navigate={nop} />);
     expect(empty).toContain('No sandbox in this environment.');
-    expect(empty).not.toContain('new sandbox in');
+    expect(empty).not.toContain('new sandbox');
+    // The overview shows the newest jobs; the rest are in Activity's Jobs.
+    const many = Array.from({ length: 8 }, (_, i) => ({ id: `job${i}`, phase: 'succeeded', image: 'b:1', reaches: [],
+      createdAt: `2026-11-06T09:0${i}:00Z` }));
+    const shown = html(<PodTables tenant="kino" env="kino-dev" sandboxes={[]} jobs={many} navigate={nop} />);
+    expect(shown).toContain('/jobs/job7"');
+    expect(shown).toContain('/jobs/job3"');
+    expect(shown).not.toContain('/jobs/job2"');
   });
 
   it('says which sandboxes and jobs keep a delete from happening', () => {
     const e = new ApiError('environment kino-dev is in use', 409,
       { code: 'environment_in_use', sandboxes: ['h3k9v2m7qpx', 'q8w1z4c0dnr'], jobs: ['k2m7qpxh3v9'] });
-    const out = html(<InUse error={e} tenant="kino" navigate={nop} />);
-    expect(out).toContain('href="/tenants/kino/sandboxes/q8w1z4c0dnr"');
-    expect(out).toContain('href="/tenants/kino/jobs/k2m7qpxh3v9"');
-    expect(text(<InUse error={e} tenant="kino" navigate={nop} />)).toContain('Delete the sandboxes and cancel the jobs first');
-    expect(html(<InUse error={new ApiError('x', 409, { code: 'busy' })} tenant="kino" navigate={nop} />)).toBe('');
+    const out = html(<InUse error={e} tenant="kino" env="kino-dev" navigate={nop} />);
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes/q8w1z4c0dnr"');
+    expect(out).toContain('href="/tenants/kino/environments/kino-dev/jobs/k2m7qpxh3v9"');
+    expect(text(<InUse error={e} tenant="kino" env="kino-dev" navigate={nop} />)).toContain('Delete the sandboxes and cancel the jobs first');
+    expect(html(<InUse error={new ApiError('x', 409, { code: 'busy' })} tenant="kino" env="kino-dev" navigate={nop} />)).toBe('');
   });
 
-  it('tells a tenant without environments from a role that writes none', () => {
-    // No environment at all: a tenant writer is sent to make one.
-    const make = html(<NoEnvironment tenant="kino" navigate={nop} none make what="sandbox" />);
-    expect(make).toContain('This tenant has no environment yet, and a sandbox runs in one.');
-    expect(make).toContain('href="/tenants/kino/new-environment"');
-    expect(make).not.toContain('Your role');
-    const member = html(<NoEnvironment tenant="kino" navigate={nop} none make={false} what="job" />);
-    expect(member).toContain('a job runs in one');
-    expect(member).toContain('Someone with write on the tenant makes one first.');
-    expect(member).not.toContain('href=');
-    // Environments there are, none of them writable: the role.
-    const role = html(<NoEnvironment tenant="kino" navigate={nop} none={false} make what="sandbox" />);
-    expect(role).toContain('Your role does not allow this: it needs write on an environment.');
-    expect(role).not.toContain('new-environment');
-    // The pickers say the same.
-    expect(html(<EnvPicker envs={[]} value="" onChange={nop} none />)).toContain('no environment yet');
-    expect(html(<EnvPicker envs={[]} value="" onChange={nop} />)).toContain('no environment you may write');
-    const sbx = html(<CreateForm busy="" defaults={null} disabled envs={[]} none onSubmit={nop} onCancel={nop} />);
-    expect(sbx).toContain('no environment yet');
-    expect(sbx).not.toContain('no environment you may write');
-    const job = html(<RunForm envs={[]} none notice={<NoEnvironment tenant="kino" navigate={nop} none make what="job" />}
-      onRun={nop} onCancel={nop} />);
-    expect(job).toContain('no environment yet');
-    expect(job).toContain('href="/tenants/kino/new-environment"');
+  it('makes a sandbox and runs a job in the environment open, which is no choice', () => {
+    const sbx = html(<CreateForm busy="" defaults={null} env="kino-dev" onSubmit={nop} onCancel={nop} />);
+    expect(sbx).toContain('<span class="mono">kino-dev</span>');
+    expect(sbx).not.toContain('aria-label="environment"');
+    const job = html(<RunForm env="kino-dev" onRun={nop} onCancel={nop} />);
+    expect(job).toContain('Run a job in <span class="mono">kino-dev</span>');
+    expect(job).not.toContain('aria-label="environment"');
   });
 });

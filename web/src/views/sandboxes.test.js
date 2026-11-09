@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeTab, bucketOf, canPause, canResume, connectSnippets, createRequest, credentialsOf, filterSandboxes, fmtMem,
-  newSandboxForm, ownerShown, sandboxEnvs, sandboxTabs, sizeWords, stateCounts, stateWords, toolSummary,
+  newSandboxForm, ownerShown, sandboxMeta, sandboxTabs, sideSandboxes, byActivity, SIDE_FOLD, sizeWords, stateCounts, stateWords, toolSummary,
 } from './sandboxes.js';
 
 // The sandbox pages' derivations, from sandboxes as GET /api/v1/sandboxes
@@ -73,7 +73,6 @@ describe('the list', () => {
     expect(filterSandboxes(list, 'kino-dev').length).toBe(1);
     expect(filterSandboxes(list, 'db-admin').map((s) => s.sandboxId)).toEqual(['q8w1z4c0dnr']);
     expect(filterSandboxes(list, 'q8w1', 'kino-dev')).toEqual([]);
-    expect(sandboxEnvs([...list, SB]).map((e) => e.name)).toEqual(['kino-dev', 'kino-stage']);
   });
 
   it('filters by ID, image, node, the state and its words', () => {
@@ -181,5 +180,34 @@ describe('toolSummary', () => {
   it('lists the parameters, the required ones starred', () => {
     expect(toolSummary({ properties: { command: {}, timeout: {} }, required: ['command'] })).toBe('command*, timeout');
     expect(toolSummary(null)).toBe('');
+  });
+});
+
+describe('the sidebar\'s sandboxes', () => {
+  const sb = (id, clientState, updatedAt) => ({ sandboxId: id, clientState, updatedAt });
+  const ids = (list) => list.map((s) => s.sandboxId);
+
+  it('orders by the last activity, the newest first', () => {
+    expect(ids(byActivity([sb('a', 'running', '2026-11-01'), sb('b', 'running', '2026-11-03'), sb('c', 'paused', '')])))
+      .toEqual(['b', 'a', 'c']);
+  });
+
+  it('shows the ones awake first, and folds many hibernated, but the one open', () => {
+    const few = [sb('h1', 'hibernated', '2026-11-05'), sb('r1', 'running', '2026-11-01'), sb('p1', 'paused', '2026-11-04')];
+    expect(sideSandboxes(few)).toEqual({ shown: [few[2], few[1], few[0]], folded: 0 });
+    const many = [sb('r1', 'running', '2026-11-01'), ...Array.from({ length: SIDE_FOLD }, (_, i) => sb(`h${i}`, 'hibernated', `2026-11-0${i + 2}`))];
+    expect(ids(sideSandboxes(many).shown)).toEqual(['r1']);
+    expect(sideSandboxes(many).folded).toBe(SIDE_FOLD);
+    expect(ids(sideSandboxes(many, { selected: 'h1' }).shown)).toEqual(['r1', 'h1']);
+    expect(sideSandboxes(many, { selected: 'h1' }).folded).toBe(SIDE_FOLD - 1);
+    expect(sideSandboxes(many, { open: true }).folded).toBe(0);
+    expect(sideSandboxes(null)).toEqual({ shown: [], folded: 0 });
+  });
+
+  it('says a state beside one only while it is not fine', () => {
+    expect(sandboxMeta({ clientState: 'failed' })).toBe('failed');
+    expect(sandboxMeta({ clientState: 'lost' })).toBe('lost');
+    expect(sandboxMeta({ clientState: 'hibernated' })).toBe('');
+    expect(sandboxMeta({ clientState: 'running' })).toBe('');
   });
 });

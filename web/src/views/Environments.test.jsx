@@ -528,7 +528,8 @@ describe('the logs', () => {
 });
 
 // The view calls the environments' routes of the client and no other:
-// its reads, and its operations (ADR 0018), each behind its role.
+// its reads (with what runs in it beside its deployments, ADR 0035), and
+// its operations (ADR 0018), each behind its role.
 describe('the routes it calls', () => {
   it('are the reads and the operations of an environment', () => {
     const src = ['./Environments.jsx', './EnvOverview.jsx', './ObjectPage.jsx', './EnvTabs.jsx', './LogSearch.jsx', './Traces.jsx',
@@ -538,7 +539,7 @@ describe('the routes it calls', () => {
     expect(used).toEqual([
       'accessLogs', 'addonCatalog', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
       'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments', 'listEnvironments',
-      'listIncidents', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
+      'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
     ]);
   });

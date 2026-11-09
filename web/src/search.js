@@ -6,7 +6,7 @@
 // from its summary (summary.jsx). "prod#13" or "prod 13" opens a
 // deployment. Pure, so that it is tested without a browser.
 
-import { envPath } from './routes.js';
+import { envPath, jobPath, sandboxPath } from './routes.js';
 
 const enc = encodeURIComponent;
 
@@ -31,9 +31,12 @@ export function entries({ tenant, nav = [], platform = [], tenants = [], summary
   for (const e of summary.environments || []) {
     out.push({ key: 'env/' + e.id, kind: 'environment', label: e.name, hint: (e.hosts || [])[0] || e.id, to: envPath(tenant, e.name), icon: 'layers' });
   }
+  // A sandbox and a job are of an environment (ADR 0035), and their
+  // pages its; one without (an older ferund) is found by its ID.
   for (const s of summary.sandboxes || []) {
-    out.push({ key: 'sbx/' + s.sandboxId, kind: 'sandbox', label: s.sandboxId, hint: [s.owner, s.image].filter(Boolean).join(' · '),
-      to: `/tenants/${t}/sandboxes/${enc(s.sandboxId)}`, icon: 'box' });
+    const e = envName(s);
+    out.push({ key: 'sbx/' + s.sandboxId, kind: 'sandbox', label: s.sandboxId, hint: [e, s.owner, s.image].filter(Boolean).join(' · '),
+      to: e ? sandboxPath(tenant, e, s.sandboxId) : `/tenants/${t}/sandboxes/${enc(s.sandboxId)}`, icon: 'box' });
   }
   for (const d of summary.domains || []) {
     out.push({ key: 'dom/' + (d.id || d.name), kind: 'domain', label: d.name, hint: d.state || '', to: `/tenants/${t}/domains/${enc(d.id || d.name)}`, icon: 'globe' });
@@ -43,9 +46,18 @@ export function entries({ tenant, nav = [], platform = [], tenants = [], summary
       to: `/tenants/${t}/credentials/${enc(c.name)}`, icon: 'plug' });
   }
   for (const j of summary.jobs || []) {
-    out.push({ key: 'job/' + j.id, kind: 'job', label: j.id, hint: [j.image, j.phase].filter(Boolean).join(' · '), to: `/tenants/${t}/jobs/${enc(j.id)}`, icon: 'jobs' });
+    const e = envName(j);
+    out.push({ key: 'job/' + j.id, kind: 'job', label: j.id, hint: [e, j.image, j.phase].filter(Boolean).join(' · '),
+      to: e ? jobPath(tenant, e, j.id) : `/tenants/${t}/jobs/${enc(j.id)}`, icon: 'jobs' });
   }
   return out.map((e) => ({ ...e, words: `${e.label} ${e.hint || ''} ${e.kind}`.toLowerCase() }));
+}
+
+// envName is the name of the environment a sandbox or a job is of, ''
+// without one.
+function envName(x) {
+  const e = x && x.environment;
+  return (e && (e.name || e.id)) || '';
 }
 
 // DEPLOYMENT matches "prod#13" and "prod 13".

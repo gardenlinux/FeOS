@@ -667,11 +667,11 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
 // InUse says why a delete was refused (409 environment_in_use, ADR
 // 0035): the sandboxes and the jobs on their way that keep the
 // environment, each a link; nothing for any other error.
-export function InUse({ error, tenant, navigate }) {
+export function InUse({ error, tenant, env, navigate }) {
   const u = inUse(error);
   if (!u) return null;
   const links = (ids, path) => ids.map((id, i) => (
-    <React.Fragment key={id}>{i > 0 && ', '}<EnvLink to={path(tenant, id)} navigate={navigate} className="mono">{id}</EnvLink></React.Fragment>));
+    <React.Fragment key={id}>{i > 0 && ', '}<EnvLink to={path(tenant, env, id)} navigate={navigate} className="mono">{id}</EnvLink></React.Fragment>));
   return (
     <div className="message"><Icon name="alert" size={14} />
       <span>
@@ -706,7 +706,7 @@ export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
         {st.deleting ? 'Being deleted' : 'Delete environment'}
       </ArmButton>
       {op && op.tone === 'bad' && (blocked
-        ? <InUse error={op.error} tenant={tenant} navigate={navigate} />
+        ? <InUse error={op.error} tenant={tenant} env={st.name} navigate={navigate} />
         : <ErrBox error={op.text} />)}
       {st.deleting && <p className="muted small">The deletion is under way: ferund removes what runs first.</p>}
     </div>

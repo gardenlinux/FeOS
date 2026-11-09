@@ -33,6 +33,19 @@
 .objitem-meta { margin-left: auto; flex: none; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--muted); }
 .objitem-meta.failed { color: var(--danger); }
 .objitem-meta.moving { color: var(--accent); }
+/* the entry that leads to more of a group (the jobs made by a call, the
+   hibernated sandboxes folded): quieter than a thing */
+.objitem-more { color: var(--muted); font-weight: 400; font-size: 14px; }
+button.objitem {
+  width: 100%; border: 0; background: none; font-family: inherit; text-align: left; cursor: pointer;
+}
+.objitem .objitem-name.mono { font-size: 13.5px; }
+/* New sandbox, at the end of the sandboxes' label */
+.objnav .snav-label { display: flex; align-items: center; }
+.snav-labeladd {
+  margin-left: auto; display: inline-flex; padding: 2px; border-radius: 4px; color: var(--muted);
+}
+.snav-labeladd:hover { color: var(--text); background: var(--panel2); }
 /* a failed object's dot carries a halo, so that it reads without colour */
 .objitem .sdot.failed, .envcard .sdot.failed { box-shadow: 0 0 0 3px rgba(242, 119, 107, .22); }
 

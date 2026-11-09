@@ -97,6 +97,35 @@ export function canResume(sb) {
   return !!sb && (sb.clientState === 'paused' || sb.clientState === 'hibernated');
 }
 
+// byActivity orders sandboxes by their last activity, the newest first.
+export function byActivity(sandboxes) {
+  return [...(sandboxes || [])].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+}
+
+// SIDE_FOLD is the number of hibernated sandboxes from which the sidebar
+// folds them into one entry.
+export const SIDE_FOLD = 4;
+
+// sideSandboxes are an environment's sandboxes in the sidebar: those not
+// hibernated first, then the hibernated, each by its last activity; from
+// SIDE_FOLD hibernated ones on, those are folded unless open, all but
+// the selected one: {shown, folded} with folded their number.
+export function sideSandboxes(sandboxes, { open = false, selected = '' } = {}) {
+  const list = byActivity(sandboxes);
+  const awake = list.filter((s) => s.clientState !== 'hibernated');
+  const asleep = list.filter((s) => s.clientState === 'hibernated');
+  if (open || asleep.length < SIDE_FOLD) return { shown: [...awake, ...asleep], folded: 0 };
+  const sel = asleep.filter((s) => s.sandboxId === selected);
+  return { shown: [...awake, ...sel], folded: asleep.length - sel.length };
+}
+
+// sandboxMeta is what the sidebar says beside a sandbox while it is not
+// fine (failed, lost, not known); '' while it is: its dot says the rest.
+export function sandboxMeta(sb) {
+  const st = (sb && sb.clientState) || '';
+  return st === 'failed' || st === 'lost' || st === 'unknown' ? st : '';
+}
+
 // filterSandboxes keeps the sandboxes of env (its name or ID; '' for
 // every one) whose ID, owner, image, node, environment, reaches or state
 // (the API's word or the list's) has q in it.
@@ -107,17 +136,6 @@ export function filterSandboxes(sandboxes, q, env = '') {
   return list.filter((s) => [s.sandboxId, s.owner, s.image, s.node, s.clientState, stateWords(s).short,
     (envRef(s) || {}).name, reachesWords(s.reaches), ...(Array.isArray(s.reaches) ? s.reaches.map(useWords) : [])]
     .some((v) => (v || '').toLowerCase().includes(n)));
-}
-
-// sandboxEnvs are the environments the sandboxes are in, by name: the
-// list's filter.
-export function sandboxEnvs(sandboxes) {
-  const by = new Map();
-  for (const s of sandboxes || []) {
-    const e = envRef(s);
-    if (e && !by.has(e.name)) by.set(e.name, e);
-  }
-  return [...by.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ownerShown is the owner a sandbox page names beside the ID: ferund's

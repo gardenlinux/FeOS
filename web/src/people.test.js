@@ -106,12 +106,11 @@ describe('me → navigation', () => {
 
   it('a tenant\'s pages by role', () => {
     const views = (me, t) => tenantNav(tenantAccess(me, t)).map((n) => n.view);
-    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'credentials', 'jobs', 'sandboxes', 'members',
-      'tokens', 'usage', 'settings']);
-    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'jobs', 'sandboxes', 'members',
-      'usage', 'settings']);
-    // Grants on environments alone: their sandboxes and jobs too (ADR 0035).
-    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'jobs', 'sandboxes', 'members', 'usage', 'settings']);
+    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'credentials', 'members', 'tokens', 'usage', 'settings']);
+    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'members', 'usage', 'settings']);
+    // Grants on environments alone: their sandboxes and jobs are in them
+    // (ADR 0035), no page of the tenant's.
+    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'members', 'usage', 'settings']);
     expect(views(ANNA, 'nope')).toEqual([]);
     expect(views(BASIC, 'acme')).toEqual([]);
   });

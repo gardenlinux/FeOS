@@ -6,10 +6,12 @@
 //
 //   /, /tenants                         the tenants
 //   /tenants/:t                         a tenant's overview
-//   /tenants/:t/sandboxes[/:id[/:tab]]  its sandboxes; tab: overview, activity,
-//                                       tokens, access, network
 //   /tenants/:t/tools                   the tools of its sandboxes
-//   /tenants/:t/jobs[/:id]              its jobs (runs to completion)
+//   /tenants/:t/sandboxes[/:id[/:tab]], /tenants/:t/jobs[/:id]
+//                                       where a sandbox and a job were
+//                                       before they moved into their
+//                                       environment (ADR 0035): they lead
+//                                       there (view moved)
 //   /tenants/:t/domains[/:id]           its domains
 //   /tenants/:t/credentials[/:name[/edit]]
 //                                       its credentials (ADR 0033)
@@ -30,7 +32,13 @@
 //                                       objects/:kind/:name[/:otab] (an
 //                                       object's page; otab: overview,
 //                                       logs[/:replica][?search],
-//                                       traces[?search], traffic, config)
+//                                       traces[?search], traffic, config),
+//                                       sandboxes[/new | /:id[/:otab]] (its
+//                                       sandboxes, a new one, one's page;
+//                                       otab: overview, connect,
+//                                       credentials, network, activity,
+//                                       settings), jobs[/:id] (the jobs
+//                                       made by a call, in Activity)
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
 //   /join-tokens                        join tokens
 //   /instances                          the control plane's instances
@@ -47,11 +55,12 @@ function decode(s) {
 }
 
 // ENV_TABS are the pages of an environment; builder is its editor,
-// reached by New deployment; objects holds an object's page, reached
-// from the sidebar and the overview.
+// reached by New deployment; objects holds an object's page, sandboxes
+// its sandboxes and a sandbox's page (ADR 0035), both reached from the
+// sidebar and the overview.
 export const ENV_TABS = [
-  'overview', 'builder', 'activity', 'deployments', 'incidents', 'logs', 'traces', 'traffic', 'reachability', 'settings', 'secrets',
-  'access', 'objects',
+  'overview', 'builder', 'activity', 'deployments', 'incidents', 'jobs', 'logs', 'traces', 'traffic', 'reachability', 'settings',
+  'secrets', 'access', 'objects', 'sandboxes',
 ];
 
 // ENV_LENSES are the views of an environment, its tab bar: the sidebar
@@ -64,12 +73,12 @@ export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'reachabil
 // LENS_PAGES are the pages of a view that has more than one, in its own
 // tab bar.
 export const LENS_PAGES = {
-  activity: ['activity', 'deployments', 'incidents'],
+  activity: ['activity', 'deployments', 'incidents', 'jobs'],
   settings: ['settings', 'secrets', 'access'],
 };
 
 // lensOf is the view a tab of an environment belongs to; an object's
-// page and the builder belong to none ('').
+// page, a sandbox's and the builder belong to none ('').
 export function lensOf(tab) {
   if (ENV_LENSES.includes(tab)) return tab;
   if (tab === 'traces') return 'logs';
@@ -99,6 +108,7 @@ export const ENV_TAB_LABELS = {
   activity: 'Activity',
   deployments: 'Deployments',
   incidents: 'Incidents',
+  jobs: 'Jobs',
   logs: 'Logs',
   traces: 'Traces',
   traffic: 'Traffic',
@@ -107,11 +117,12 @@ export const ENV_TAB_LABELS = {
   access: 'Domains & access',
   settings: 'Settings',
   objects: 'Objects',
+  sandboxes: 'Sandboxes',
 };
 
 // PAGE_LABELS name the pages of a view in its own tab bar (LENS_PAGES).
 export const PAGE_LABELS = {
-  activity: 'Everything', deployments: 'Deployments', incidents: 'Incidents',
+  activity: 'Everything', deployments: 'Deployments', incidents: 'Incidents', jobs: 'Jobs',
   settings: 'General', secrets: 'Secrets & credentials', access: 'Domains & access',
 };
 
@@ -124,7 +135,9 @@ const SEARCH_TABS = new Set(['logs']);
 
 // envRoute reads the segments after /tenants/:t/environments: the
 // environment, its tab (an unknown one is the overview), and the tab's
-// item: a deployment's number, an incident's ID, a trace's ID, or the
+// item: a deployment's number, an incident's ID, a job's ID, a trace's
+// ID, a sandbox's ID ("new": the create form, with otab its page's
+// view), or the
 // "<kind>/<name>" of the object whose logs show, with the replica (null
 // unless given: every replica); and the logs' search, the address's
 // query (logs.js); on the objects tab the
@@ -135,7 +148,12 @@ function envRoute(tenant, seg, search) {
   const tab = env && ENV_TABS.includes(seg[1]) ? seg[1] : 'overview';
   let item = '';
   let replica = null;
-  if (tab === 'deployments' || tab === 'incidents' || tab === 'traces') item = seg[2] || '';
+  if (tab === 'deployments' || tab === 'incidents' || tab === 'jobs' || tab === 'traces') item = seg[2] || '';
+  if (tab === 'sandboxes') {
+    item = seg[2] || '';
+    const otab = item && item !== 'new' ? seg[3] || 'overview' : 'overview';
+    return { view: 'environments', tenant, env, tab, item, otab, replica: null, search: '' };
+  }
   if (tab === 'builder' && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
   if (tab === 'objects' && seg[2] && seg[3]) {
     item = `${seg[2]}/${seg[3]}`;
@@ -193,14 +211,22 @@ export function pickEnvPath(route, tenant, env) {
   return envPath(tenant, env, tab);
 }
 
-// sandboxPath and jobPath are a tenant's sandboxes and jobs, or one of
-// them; an environment's page links them.
-export function sandboxPath(tenant, id = '') {
-  return `/tenants/${encodeURIComponent(tenant)}/sandboxes${id ? '/' + encodeURIComponent(id) : ''}`;
+// sandboxPath is an environment's sandboxes, or one of them (id; "new"
+// is the create form) in its page's view tab; jobPath its jobs made by a
+// call, in Activity, or one of them. A sandbox and a job are of one
+// environment (ADR 0035), whose name env is.
+export function sandboxPath(tenant, env, id = '', tab = '') {
+  const p = envPath(tenant, env, 'sandboxes', id);
+  return id && id !== 'new' && tab && tab !== 'overview' ? `${p}/${encodeURIComponent(tab)}` : p;
 }
 
-export function jobPath(tenant, id = '') {
-  return `/tenants/${encodeURIComponent(tenant)}/jobs${id ? '/' + encodeURIComponent(id) : ''}`;
+export function jobPath(tenant, env, id = '') {
+  return envPath(tenant, env, 'jobs', id);
+}
+
+// newSandboxPath is the create form of a sandbox in env.
+export function newSandboxPath(tenant, env) {
+  return sandboxPath(tenant, env, 'new');
 }
 
 // EARLIER_TABS maps an environment tab's earlier or other name to its
@@ -227,7 +253,10 @@ export function canonicalPath(pathname) {
 }
 
 // parsePath maps a path to {view, tenant?, sel?, tab?, node?}, and for
-// the environments to {view, tenant, env, tab, item, replica}.
+// the environments to {view, tenant, env, tab, item, replica}. A path
+// of a sandbox or a job from before they moved into their environment is
+// {view: 'moved', tenant, what: 'sandbox' | 'job', sel, tab, env} (env:
+// the ?environment= of a new sandbox's form), which leads to where it is.
 export function parsePath(pathname) {
   const [path, query] = String(pathname || '/').split('?');
   const search = query ? '?' + query : '';
@@ -255,7 +284,7 @@ export function parsePath(pathname) {
   if (seg[2] === 'tools') return { view: 'tools', tenant };
   if (seg[2] === 'members') return { view: 'members', tenant };
   if (seg[2] === 'tokens') return { view: 'tokens', tenant };
-  if (seg[2] === 'jobs') return { view: 'jobs', tenant, sel: seg[3] || '' };
+  if (seg[2] === 'jobs') return { view: 'moved', tenant, what: 'job', sel: seg[3] || '', tab: '', env: '' };
   if (seg[2] === 'domains') return { view: 'domains', tenant, sel: seg[3] || '' };
   if (seg[2] === 'credentials') {
     return { view: 'credentials', tenant, sel: seg[3] || '', tab: seg[3] && seg[4] === 'edit' ? 'edit' : '' };
@@ -265,14 +294,25 @@ export function parsePath(pathname) {
   if (seg[2] === 'settings') return { view: 'settings', tenant };
   if (seg[2] === 'new-environment') return { view: 'newEnvironment', tenant };
   if (seg[2] === 'environments') return envRoute(tenant, seg.slice(3), search);
-  if (seg[2] === 'sandboxes') return { view: 'sandboxes', tenant, sel: seg[3] || '', tab: seg[4] || 'overview' };
+  if (seg[2] === 'sandboxes') {
+    return { view: 'moved', tenant, what: 'sandbox', sel: seg[3] || '', tab: seg[4] || '', env: queryParam(search, 'environment') };
+  }
   return { view: 'overview', tenant };
+}
+
+// queryParam is the value of name in search ("?…"), '' without one.
+function queryParam(search, name) {
+  try {
+    return new URLSearchParams(search || '').get(name) || '';
+  } catch {
+    return '';
+  }
 }
 
 // TENANT_VIEWS are the views that act in a tenant, with the session.
 export const TENANT_VIEWS = new Set([
   'overview',
-  'sandboxes',
+  'moved',
   'tools',
   'environments',
   'newEnvironment',

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* The tenant's Jobs, Usage and Settings pages. */
+/* An environment's jobs made by a call, the tenant's Usage and Settings pages. */
 .tenantpage { display: flex; flex-direction: column; gap: 14px; max-width: 1280px; }
 .tenantpage > .pagehead { margin-bottom: 0; }
 .facts b.bad { color: var(--danger); }
@@ -43,6 +43,13 @@
 .jobwhy.failed .jobwhy-word { color: var(--danger); }
 .jobwhy-detail { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .job-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 14px; align-items: start; }
+/* in an environment's Activity: the list's head in one line, a job's
+   head, its facts and why it is in its phase, apart */
+.jobs-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.jobs-head .facts { margin-top: 0; }
+.job-head { display: flex; align-items: center; gap: 10px; }
+.job-head + .facts { margin: 6px 0 12px; }
+.jobwhy + .job-grid { margin-top: 14px; }
 .jobresult { max-height: 40vh; }
 .joblog { max-height: 55vh; }
 

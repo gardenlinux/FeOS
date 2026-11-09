@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, EnvName, ErrBox, KV, LiveBadge, usePoll } from '../components.jsx';
 import { shortId } from '../format.js';
-import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs } from '../routes.js';
+import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs, sandboxPath } from '../routes.js';
 import {
   CHANGES_READ, KIND_NAMES, changeTone, changesTo, conditionText, definitionRows, envRows, errorShare, fmtCount, fmtLatency,
   fmtValue, heavyEffect, instanceDeployments, isAttached, jobTrigger, objectImage, objectIncidents, objectStateText, objectTone,
@@ -98,7 +98,7 @@ export function ObjectView({
         </div>
         <p className="pagehead-sub">
           {o && isAttached(o) && (
-            <>attached in sandbox <Link to={`/tenants/${encodeURIComponent(tenant)}/sandboxes/${o.sandbox}`} navigate={navigate}
+            <>attached in sandbox <Link to={sandboxPath(tenant, env, o.sandbox)} navigate={navigate}
               className="mono" title={o.sandbox}>{shortId(o.sandbox)}</Link></>)}
           {image.written && kind !== 'addon' && !(o && isAttached(o)) && <>image <ImageShort image={image} /></>}
           {o && kind === 'addon' && <><b>{o.type} {o.version}</b> · plan <b>{o.plan}</b> · {o.provisioned ? 'provisioned' : 'not provisioned yet'}</>}
@@ -280,7 +280,7 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
   const rows = definitionRows(so, kind);
   const vars = envRows(so, spec);
   const bindings = Array.isArray(so.bindings) ? so.bindings : [];
-  const sandbox = (id) => `/tenants/${encodeURIComponent(tenant)}/sandboxes/${id}`;
+  const sandbox = (id) => sandboxPath(tenant, st.name, id);
   return (
     <>
       {head}
@@ -469,7 +469,7 @@ function Instances({ tenant, st, o, ec, navigate }) {
         <div className="sect">process</div>
         <div className="kv-grid">
           <KV k="sandbox">
-            <Link to={`/tenants/${encodeURIComponent(tenant)}/sandboxes/${o.sandbox}`} navigate={navigate} className="mono">{o.sandbox}</Link>
+            <Link to={sandboxPath(tenant, st.name, o.sandbox)} navigate={navigate} className="mono">{o.sandbox}</Link>
           </KV>
           <KV k="phase"><ToneLabel tone={phaseTone(o.phase)}>{o.phase || 'starting'}</ToneLabel></KV>
           <KV k="restarts" className={'mono' + (o.restarts > 0 ? ' warntext' : '')}>{o.restarts || 0}</KV>

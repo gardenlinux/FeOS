@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MeContext } from '../people.js';
-import { Jobs, PhaseLabel, RunForm } from './Jobs.jsx';
+import { Jobs, PhaseLabel, RunForm, withLabels } from './Jobs.jsx';
 import { TenantSettings, Usage } from './TenantPages.jsx';
 
 // The pages' first paint: their heads, and what a role may not do shown
@@ -22,29 +22,39 @@ describe('Jobs', () => {
     expect(renderToStaticMarkup(<PhaseLabel phase="deadline_exceeded" />)).toContain('deadline exceeded');
   });
 
-  it('offers "Run a job" to write, disables it below', () => {
-    const write = render(ME('write'), <Jobs tenant="kino" sel="" navigate={() => {}} />);
-    expect(write).toContain('<span class="kind">Tenant</span><h1>Jobs</h1>');
+  it('offers "Run a job" to write on the environment, disables it below', () => {
+    const write = render(ME('write'), <Jobs tenant="kino" env="kino-dev" sel="" write navigate={() => {}} />);
     expect(write).toMatch(/<button class="primary" title="run a container to its end">/);
-    const read = render(ME('read'), <Jobs tenant="kino" sel="" navigate={() => {}} />);
-    expect(read).toMatch(/<button class="primary" disabled="" title="needs write on an environment">/);
+    expect(write).toContain('A job made by a call');
+    expect(write).not.toContain('tenant&#x27;s job');
+    const read = render(ME('read'), <Jobs tenant="kino" env="kino-dev" sel="" navigate={() => {}} />);
+    expect(read).toMatch(/<button class="primary" disabled="" title="needs write on this environment">/);
     expect(read).toContain('kept 7 days after it ends');
   });
 
-  it("heads a job's page with its kind and ID", () => {
-    const out = render(ME('read'), <Jobs tenant="kino" sel="k2m7qpxh3v9" navigate={() => {}} />);
-    expect(out).toContain('<span class="kind">Job</span><h1 class="mono">k2m7qpxh3v9</h1>');
+  it("heads a job's page with its ID, back to the environment's jobs", () => {
+    const out = render(ME('read'), <Jobs tenant="kino" env="kino-dev" sel="k2m7qpxh3v9" navigate={() => {}} />);
+    expect(out).toContain('<span class="mono strong">job k2m7qpxh3v9</span>');
+    expect(out).toContain('> jobs</button>');
+  });
+});
+
+describe('the label filter', () => {
+  it('keeps the jobs with every label', () => {
+    const jobs = [{ id: 'a', labels: { kind: 'build', project: 'kino' } }, { id: 'b', labels: { kind: 'build' } }, { id: 'c' }];
+    expect(withLabels(jobs, ['kind=build']).map((j) => j.id)).toEqual(['a', 'b']);
+    expect(withLabels(jobs, ['kind=build', 'project=kino']).map((j) => j.id)).toEqual(['a']);
+    expect(withLabels(jobs, ['url=a=b'])).toEqual([]);
+    expect(withLabels(jobs, [])).toBe(jobs);
+    expect(withLabels(null, ['kind=build'])).toBe(null);
   });
 });
 
 describe('RunForm', () => {
-  const ENVS = [{ id: 'e1', name: 'kino-dev' }, { id: 'e2', name: 'kino-stage' }];
-  it('asks for the environment first, then what it reaches of it (nothing) and its egress (the internet)', () => {
-    const none = renderToStaticMarkup(<RunForm envs={ENVS} onRun={() => {}} onCancel={() => {}} />);
-    expect(none).toContain('<option value="kino-stage">kino-stage</option>');
-    expect(none).toContain('Choose the environment first.');
-    const one = renderToStaticMarkup(<RunForm envs={ENVS} env="kino-dev" onRun={() => {}} onCancel={() => {}} />);
-    expect(one).toContain('<option value="kino-dev" selected="">kino-dev</option>');
+  it('runs in the environment given, reaching nothing of it and out to the internet', () => {
+    const one = renderToStaticMarkup(<RunForm env="kino-dev" onRun={() => {}} onCancel={() => {}} />);
+    expect(one).toContain('Run a job in <span class="mono">kino-dev</span>');
+    expect(one).not.toContain('aria-label="environment"');
     expect(one).toContain('<div class="sg-seg" role="group" aria-label="reaches"><button type="button" class="on" aria-pressed="true">Nothing</button>');
     expect(one).toContain('The job reaches every address on the internet.');
     expect(one).not.toContain('security group');

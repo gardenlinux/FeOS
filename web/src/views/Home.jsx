@@ -5,26 +5,22 @@ import React from 'react';
 import { Icon } from '../Icon.jsx';
 import { Ago, StateDot, useNow } from '../components.jsx';
 import { fmtQuota, quotaRows, useAccess } from '../people.js';
-import { envPath } from '../routes.js';
+import { envPath, sandboxPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import { deploymentText, deploymentTone } from './envs.js';
+import { byActivity } from './sandboxes.js';
 import { ToneDot } from './Environments.jsx';
 import { RoleBadge } from './People.jsx';
 
 // A tenant's Home: first what needs someone (attention.js), each item
 // with the place that fixes it; then what runs, its environments and its
-// most recently active sandboxes; then the use against the limits. All
-// of it from the tenant's summary (summary.jsx), which the sidebar's
-// counts read too.
+// most recently active sandboxes, each on its environment's page (ADR
+// 0035); then the use against the limits. All of it from the tenant's
+// summary (summary.jsx), which the sidebar's counts read too.
 
 // SANDBOXES_SHOWN is how many of the most recently active sandboxes show.
 const SANDBOXES_SHOWN = 6;
 
-
-// mostRecent orders sandboxes by their last activity, newest first.
-export function mostRecent(sandboxes) {
-  return [...(sandboxes || [])].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-}
 
 export function Home({ tenant, navigate }) {
   const access = useAccess(tenant);
@@ -49,9 +45,6 @@ export function Home({ tenant, navigate }) {
           <h1>{tenant}</h1>
           {access.role && <RoleBadge role={access.role} />}
           <span className="spacer" />
-          {c.writeTenant && (
-            <a className="button" href={`${base}/sandboxes`} onClick={link(`${base}/sandboxes`)}>
-              <Icon name="box" size={14} /> Sandboxes</a>)}
           {c.writeTenant && (
             <a className="button primary" href={`${base}/new-environment`} onClick={link(`${base}/new-environment`)}>
               <Icon name="plus" size={14} /> New environment</a>)}
@@ -120,22 +113,26 @@ export function Home({ tenant, navigate }) {
             <div className="pane-toolbar">
               <h2><Icon name="box" size={14} /> Sandboxes</h2>
               <span className="spacer" />
-              <a className="small" href={`${base}/sandboxes`} onClick={link(`${base}/sandboxes`)}>all <Icon name="arrowRight" size={12} /></a>
+              <span className="muted small">the most recently active</span>
             </div>
             {sandboxes.length === 0 && (
-              <p className="empty">None yet. {c.writeTenant && (
-                <a href={`${base}/sandboxes`} onClick={link(`${base}/sandboxes`)}>Create one and connect an agent →</a>)}</p>)}
+              <p className="empty">None yet. A sandbox is made in an environment: New sandbox on its overview.</p>)}
             {sandboxes.length > 0 && (
               <div className="tblwrap"><table className="tbl">
-                <thead><tr><th>sandbox</th><th>state</th><th>last activity</th></tr></thead>
+                <thead><tr><th>sandbox</th><th>environment</th><th>state</th><th>last activity</th></tr></thead>
                 <tbody>
-                  {mostRecent(sandboxes).slice(0, SANDBOXES_SHOWN).map((s) => (
-                    <tr key={s.sandboxId} className="clickable" onClick={() => navigate(`${base}/sandboxes/${enc(s.sandboxId)}`)}>
-                      <td className="mono">{s.sandboxId}{s.owner && <div className="muted small">{s.owner}</div>}</td>
-                      <td><span className="cell-state"><StateDot state={s.clientState} /> {s.clientState || 'unknown'}</span></td>
-                      <td className="muted small"><Ago iso={s.updatedAt} /></td>
-                    </tr>
-                  ))}
+                  {byActivity(sandboxes).slice(0, SANDBOXES_SHOWN).map((s) => {
+                    const env = s.environment ? s.environment.name || s.environment.id : '';
+                    const to = env ? sandboxPath(tenant, env, s.sandboxId) : `${base}/sandboxes/${enc(s.sandboxId)}`;
+                    return (
+                      <tr key={s.sandboxId} className="clickable" onClick={() => navigate(to)}>
+                        <td className="mono">{s.sandboxId}{s.owner && s.owner !== tenant && <div className="muted small">{s.owner}</div>}</td>
+                        <td className="mono small">{env || <span className="muted">—</span>}</td>
+                        <td><span className="cell-state"><StateDot state={s.clientState} /> {s.clientState || 'unknown'}</span></td>
+                        <td className="muted small"><Ago iso={s.updatedAt} /></td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table></div>)}
           </section>)}

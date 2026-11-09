@@ -321,6 +321,8 @@ export const api = {
   // of one (its name or ID), or without it every sandbox the session may
   // read.
   listSandboxes: (environment = '') => tenantCall('GET', '/sandboxes' + query({ environment })),
+  // One sandbox, with its environment {id, name}.
+  getSandbox: (id) => tenantCall('GET', `/sandboxes/${enc(id)}`),
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
   // status.sandboxId.
@@ -493,9 +495,10 @@ export const api = {
   bindDomain: (id, environment) => tenantCall('PUT', `/domains/${enc(id)}/environment`, { environment }),
   unbindDomain: (id) => tenantCall('DELETE', `/domains/${enc(id)}/environment`),
 
-  // The tenant's jobs (ADR 0018, "A tenant's job"): runs to completion,
-  // each in an environment (ADR 0035). The list of one environment (its
-  // name or ID) is filtered here too, since a ferund may list them all.
+  // The jobs made by a call (POST /api/v1/jobs, ADR 0041): runs to
+  // completion, each in an environment (ADR 0035). The list of one
+  // environment (its name or ID) is filtered here too, since a ferund may
+  // list them all.
   listJobs: async (labels = [], environment = '') => {
     const q = labelQuery(labels);
     const res = await tenantCall('GET', '/jobs' + q + (environment ? `${q ? '&' : '?'}environment=${enc(environment)}` : ''));

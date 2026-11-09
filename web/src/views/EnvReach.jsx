@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useState } from 'react';
-import { api } from '../api.js';
+import React, { useMemo } from 'react';
 import { Icon } from '../Icon.jsx';
-import { ErrBox, usePoll } from '../components.jsx';
+import { ErrBox } from '../components.jsx';
 import { shortId } from '../format.js';
 import { envPath, jobPath, objectPath, sandboxPath } from '../routes.js';
+import { useEnvStatus } from '../envstatus.jsx';
 import { EnvLink } from './EnvTabs.jsx';
 import { HOW_WORDS, reachModel } from './reach.js';
 import { onItsWay } from './jobs.js';
@@ -21,20 +21,12 @@ import '../styles/reach.css';
 // view. Drawn from the deployed deployment's reachability; references
 // change in New deployment, a sandbox's reaches on its page.
 
-// useEnvPods reads env's sandboxes and running jobs every 10 s:
-// {sandboxes, jobs, pods, err}; pods are reachModel's.
-function useEnvPods(env) {
-  const [state, setState] = useState({ sandboxes: null, jobs: null, err: '' });
-  const refresh = useCallback(async () => {
-    try {
-      const [s, j] = await Promise.all([api.listSandboxes(env), api.listJobs([], env)]);
-      setState({ sandboxes: s.sandboxes || [], jobs: (j.jobs || []).filter((x) => onItsWay(x.phase)), err: '' });
-    } catch (e) {
-      setState((p) => ({ ...p, err: e.message }));
-    }
-  }, [env]);
-  usePoll(refresh, 10000);
-  return state;
+// useEnvPods is the environment's sandboxes and running jobs, as its
+// status reads them (envstatus.jsx): {sandboxes, jobs, err}.
+function useEnvPods() {
+  const { sandboxes, jobs, podsErr } = useEnvStatus();
+  const running = useMemo(() => (jobs ? jobs.filter((x) => onItsWay(x.phase)) : null), [jobs]);
+  return { sandboxes, jobs: running, err: podsErr };
 }
 
 // podsOf are the sandboxes and jobs as reachModel takes them.
@@ -50,8 +42,8 @@ function peerLink(tenant, env, navigate) {
   return (p, pill) => {
     let to = '';
     if ((p.type === 'service' || p.type === 'job' || p.type === 'addon') && !p.missing) to = objectPath(tenant, env, `${p.type}/${p.name}`, 'config');
-    if (p.type === 'sandbox') to = sandboxPath(tenant, p.name);
-    if (p.type === 'jobrun') to = jobPath(tenant, p.name);
+    if (p.type === 'sandbox') to = sandboxPath(tenant, env, p.name);
+    if (p.type === 'jobrun') to = jobPath(tenant, env, p.name);
     return to ? <EnvLink to={to} navigate={navigate} className="sgf-link">{pill}</EnvLink> : null;
   };
 }
@@ -60,7 +52,7 @@ function peerLink(tenant, env, navigate) {
 export function EnvReach({ tenant, st, navigate }) {
   const env = st.name;
   const { n, spec, reach, err } = useDeployed(env);
-  const pods = useEnvPods(env);
+  const pods = useEnvPods();
   const latest = Number(st.deployment) || 0;
   const model = spec ? reachModel(spec, reach, podsOf(pods.sandboxes, pods.jobs)) : null;
   const link = peerLink(tenant, env, navigate);
@@ -103,7 +95,7 @@ export function EnvReach({ tenant, st, navigate }) {
                 inWords="Nothing gets in">
                 <div className="sgf-self">
                   <Icon name={kindIcon(p.kind)} size={14} />
-                  <EnvLink to={p.kind === 'sandbox' ? sandboxPath(tenant, p.name) : jobPath(tenant, p.name)} navigate={navigate} className="mono">
+                  <EnvLink to={p.kind === 'sandbox' ? sandboxPath(tenant, env, p.name) : jobPath(tenant, env, p.name)} navigate={navigate} className="mono">
                     {p.kind === 'sandbox' ? p.name : shortId(p.name)}</EnvLink>
                 </div>
                 <div className="sgf-boxhead">{p.kind === 'sandbox' ? 'sandbox' : 'job run'}
@@ -158,7 +150,7 @@ export function ObjectReachPicture({ tenant, env, spec, reach, kind, name, n = 1
     <>
       {o.attached && (
         <p className="small">Runs in sandbox{' '}
-          <EnvLink to={sandboxPath(tenant, o.attached)} navigate={navigate} className="mono">{o.attached}</EnvLink>: its calls are the
+          <EnvLink to={sandboxPath(tenant, env, o.attached)} navigate={navigate} className="mono">{o.attached}</EnvLink>: its calls are the
           sandbox&apos;s pod&apos;s, and so is its egress.</p>)}
       <ReachFlow ins={o.ins} outs={o.outs} egress={o.egress} link={peerLink(tenant, env, navigate)}>
         <div className="sgf-self">

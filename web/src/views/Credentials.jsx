@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, CopyBtn, ErrBox, PageHead, StateDot, useArm, usePoll } from '../components.jsx';
 import { fmtDateTime, shortId } from '../format.js';
 import { atLeast, envRole, useAccess } from '../people.js';
-import { envPath } from '../routes.js';
+import { envPath, sandboxPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import {
   KINDS, REDACTED, behind, bindingOf, credentialPath, curlOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel,
@@ -347,7 +347,6 @@ function UsedBy({ tenant, cred, access, navigate, onChanged }) {
   const [results, setResults] = useState({});
   const [envPick, setEnvPick] = useState('');
   const why = c.writeTenant ? undefined : WRITE_REASON;
-  const sbBase = `/tenants/${encodeURIComponent(tenant)}/sandboxes`;
 
   // setSandbox adds the credential to a sandbox's list, or takes it out.
   const setSandbox = async (id, on) => {
@@ -398,7 +397,11 @@ function UsedBy({ tenant, cred, access, navigate, onChanged }) {
           <tbody>
             {sbs.map((id) => {
               const sb = sbOf(id);
-              const to = `${sbBase}/${encodeURIComponent(id)}/credentials`;
+              // A sandbox the summary does not know yet is found by its
+              // ID (the moved view leads to its environment).
+              const to = sb && sb.environment
+                ? sandboxPath(tenant, sb.environment.name || sb.environment.id, id, 'credentials')
+                : `/tenants/${encodeURIComponent(tenant)}/sandboxes/${encodeURIComponent(id)}/credentials`;
               return (
                 <tr key={id}>
                   <td><a className="mono" href={to} onClick={go(navigate, to)}>{id}</a></td>

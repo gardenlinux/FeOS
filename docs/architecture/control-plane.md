@@ -2304,12 +2304,14 @@ invitation is shown once as a link, `/invite/<token>` (or the answer's
 `url`); opened signed out, the sign-in returns to it, and the signed-in
 person accepts it with a click.
 
-In a tenant the UI shows its sandboxes and its environments
-(`/tenants/<t>/environments[/<env>[/<tab>]]`): the
-list, with label filters; an environment's overview (its rollout, its
+In a tenant the UI shows its environments
+(`/tenants/<t>/environments[/<env>[/<tab>]]`), and in each what runs in
+it (ADR 0035): the list, with label filters; an environment's overview
+(its rollout, its
 objects by kind, a row each with its image, ready replicas, last hour's
 traffic, restarts and the deployments it runs, the instances folded
-under it, its routes, its open incidents); an object's page
+under it, its routes, its open incidents, its sandboxes and its newest
+jobs made by a call); an object's page
 (`…/objects/<kind>/<name>`: its definition as the latest deployment's
 normalised spec has it, a secret at its pinned version and references
 as links, the routes to it, who uses it, its instances with the node a
@@ -2318,6 +2320,11 @@ ten whose diff changed it, one read each);
 its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;
+its jobs made by a call (`…/jobs[/<id>]`, in Activity: the runs to
+completion with their phases, a new one with the command one argument
+per line and secrets never shown again, a run's log tail, result,
+cancel and delete); its sandboxes (`…/sandboxes[/new | /<id>[/<tab>]]`:
+the list, a new one, a sandbox's page);
 and an object's logs, where the 501 of a node that serves none and the
 409 of a paused instance are messages, not errors; its traffic per
 service (`…/traffic`, 1 h or 24 h) and the ingress's records
@@ -2328,26 +2335,31 @@ revoked at once); and its settings (a clone, the delete). The writes
 beside the builder follow the role on the environment: a revert (to
 the deployed deployment from the head when the latest failed, or to any
 earlier one), tags, a service's restart, a job's run and a binding's
-check with `write`; public, the host label and route tokens with
-`admin`. It polls (the list every 4 s, an environment every 3 s, the
-rest every 5 s) and reads no secret's value.
+check with `write`, as are a sandbox's changes and a job's run, cancel
+and delete; public, the host label and route tokens with
+`admin`. The sidebar lists, under the environment, its objects, the
+jobs made by a call that are on their way, and its sandboxes (many
+hibernated ones folded into one entry). The tenant's former pages of
+sandboxes and jobs (`/tenants/<t>/sandboxes[/<id>[/<tab>]]`,
+`/tenants/<t>/jobs[/<id>]`) lead to their environment, which `GET
+/api/v1/sandboxes/{id}` and `GET /api/v1/jobs/{id}` name. It polls (the
+list every 4 s, an environment every 3 s, its sandboxes and jobs every
+4 s while one of its pages is open, the rest every 5 s) and reads no
+secret's value.
 
 The tenant's domains (`/tenants/<t>/domains[/<id>]`) show each claim
 with its state in words and its way (claimed, verified, bound, routed,
 certificate, served, from `domains.Derive`'s states), the records to
 set with what DNS answers now (`found`), the check, the binding (admin
 on the environments), the certificate and the delete; the claim needs
-admin on the tenant. The tenant's jobs (`/tenants/<t>/jobs[/<id>]`)
-list the runs to completion with their phases, run a new one (write on
-its environment; the command one argument per line, secrets never shown
-again), and show a run's log tail, result, cancel and delete. Usage
+admin on the tenant. Usage
 shows the quota's use against each limit and where vCPUs and memory are
 booked; Settings the tenant, the role and leaving it. A sandbox's page
 says its state in words with what it costs, and its Connect tab mints a
 token (shown once) beside the MCP address, ready snippets and the
-tools' reference; a new sandbox takes its environment, its groups
-(`default`: nothing in, internet out; ADR 0035), image credentials and
-the tenant's credentials. The tenant's credentials
+tools' reference; a new sandbox is made in the environment open, and
+takes what it reaches of it, its egress, image credentials and the
+tenant's credentials. The tenant's credentials
 (`/tenants/<t>/credentials[/<name>]`, ADR 0033) list each with its uses;
 a credential's form runs the preflight before it saves, its page checks
 the stored version, adds it to sandboxes, and moves an environment whose

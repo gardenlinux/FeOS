@@ -28,6 +28,8 @@ import { ObjectPage } from './ObjectPage.jsx';
 import { AboutBox, ActivityTab, EnvOverview, useActivity } from './EnvOverview.jsx';
 import { EnvReach } from './EnvReach.jsx';
 import { EnvPods } from './EnvPods.jsx';
+import { Sandboxes } from './Sandboxes.jsx';
+import { Jobs } from './Jobs.jsx';
 import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
@@ -38,11 +40,13 @@ import '../styles/environments.css';
 // what needs someone, traffic and reach, the objects as cards, the
 // bindings, recent activity, its sandboxes and jobs: EnvPods.jsx, ADR
 // 0035), the activity (everything, the deployments
-// with revert and tags, the incidents with their evidence), the logs and
+// with revert and tags, the incidents with their evidence, the jobs made
+// by a call: Jobs.jsx), the logs and
 // traces, the traffic, and the settings (general, secrets and
 // credentials, domains and access; EnvTabs.jsx). The sidebar picks the
-// environment or one of its objects, whose page (ObjectPage.jsx) has the
-// same views where it has them. No secret's value is ever read; a route
+// environment, one of its objects, whose page (ObjectPage.jsx) has the
+// same views where it has them, or one of its sandboxes, whose page
+// (Sandboxes.jsx) has its own. No secret's value is ever read; a route
 // token shows once, at its mint. The environment, the tab and its item
 // are the route's: /tenants/:t/environments/:env/:tab/:item.
 
@@ -275,7 +279,8 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const sum = useSummary();
   const list = envPath(tenant);
   // The objects tab without an object is the overview, which lists them;
-  // traces without a trace are the logs, where traces open from.
+  // traces without a trace are the logs, where traces open from. The
+  // sandboxes without one are their list.
   const activeTab = tab === 'traces' && !item ? 'logs'
     : ENV_TABS.includes(tab) && !(tab === 'objects' && !item) ? tab : 'overview';
   const lens = lensOf(activeTab);
@@ -287,9 +292,9 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const ec = envCan(access, (st && st.id) || env);
 
   // Escape goes up: from an item to its tab's list, from there to the
-  // environments; from the builder and an object's page to the overview;
-  // from a trace to its lines.
-  const up = activeTab === 'builder' || activeTab === 'objects' ? envPath(tenant, env)
+  // environments; from the builder, an object's page and the sandboxes'
+  // list to the overview; from a trace to its lines.
+  const up = activeTab === 'builder' || activeTab === 'objects' || (activeTab === 'sandboxes' && !item) ? envPath(tenant, env)
     : activeTab === 'traces' ? envPath(tenant, env, 'logs', '', null, queryOf({ trace: item }))
       : item ? envPath(tenant, env, activeTab) : list;
   useEffect(() => {
@@ -318,6 +323,17 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         <ErrBox error={err} />
         {body(<ObjectPage key={item} tenant={tenant} st={st} item={item} otab={otab} replica={replica} search={search}
           ec={ec} lastOk={lastOk} changed={changed} navigate={navigate} />)}
+      </>
+    );
+  }
+
+  // The sandboxes and a sandbox's page have their own heads and views,
+  // inside the environment; the sandbox's name is the environment's.
+  if (activeTab === 'sandboxes') {
+    return (
+      <>
+        <ErrBox error={err} />
+        <Sandboxes tenant={tenant} env={st ? st.name : env} sel={item} tab={otab} write={ec.write} navigate={navigate} />
       </>
     );
   }
@@ -364,6 +380,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         {activeTab === 'incidents' && (item
           ? <IncidentPane key={item} tenant={tenant} env={env} id={item} navigate={navigate} />
           : <IncidentsList tenant={tenant} env={env} navigate={navigate} />)}
+        {activeTab === 'jobs' && <Jobs tenant={tenant} env={st ? st.name : env} sel={item} write={ec.write} navigate={navigate} />}
         {activeTab === 'logs' && <LogsTab tenant={tenant} env={env} st={st} item="" replica={null} search={search} navigate={navigate} />}
         {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
         {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}

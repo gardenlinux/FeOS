@@ -7,7 +7,9 @@ import { TENANT_NAV } from './people.js';
 
 const summary = {
   environments: [{ id: 'e1', name: 'prod', hosts: ['kino.example.com'] }, { id: 'e2', name: 'preview-42', hosts: [] }],
-  sandboxes: [{ sandboxId: 'h3k9v2m7qpx', owner: 'review-bot', image: 'agent-base:2.4' }],
+  sandboxes: [{ sandboxId: 'h3k9v2m7qpx', owner: 'review-bot', image: 'agent-base:2.4', environment: { id: 'e2', name: 'preview-42' } },
+    { sandboxId: 'q8w1z4c0dnr', image: 'agent-base:2.4' }],
+  jobs: [{ id: 'a3ze6kkjvfx', image: 'builder:1', phase: 'succeeded', environment: { id: 'e1', name: 'prod' } }],
   domains: [{ id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns' }],
   credentials: [{ name: 'github', upstream: 'https://api.github.com' }],
 };
@@ -21,9 +23,15 @@ describe('search', () => {
     expect(r.some((e) => e.kind === 'tenant' && e.label === 'kino')).toBe(false);
   });
 
-  it('finds a sandbox by a prefix of its ID and by its owner', () => {
-    expect(search(all, 'h3k9')[0]).toMatchObject({ kind: 'sandbox', to: '/tenants/kino/sandboxes/h3k9v2m7qpx' });
+  it('finds a sandbox by a prefix of its ID and by its owner, on its environment\'s page', () => {
+    expect(search(all, 'h3k9')[0]).toMatchObject({ kind: 'sandbox', to: '/tenants/kino/environments/preview-42/sandboxes/h3k9v2m7qpx' });
     expect(search(all, 'review-bot')[0]).toMatchObject({ kind: 'sandbox' });
+    // One without its environment (an older ferund) is found by its ID.
+    expect(search(all, 'q8w1')[0]).toMatchObject({ kind: 'sandbox', to: '/tenants/kino/sandboxes/q8w1z4c0dnr' });
+  });
+
+  it('finds a job by its ID, in its environment\'s Activity', () => {
+    expect(search(all, 'a3ze')[0]).toMatchObject({ kind: 'job', to: '/tenants/kino/environments/prod/jobs/a3ze6kkjvfx' });
   });
 
   it('opens a deployment as prod#13 or prod 13', () => {

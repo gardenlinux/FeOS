@@ -18,9 +18,8 @@ const DEFAULTS = {
   minVcpus: 1, maxVcpus: 16, minMemoryMib: 512, maxMemoryMib: 32768,
 };
 
-const ENVS = [{ id: '0199f0b7-1c2d-7e3f-8a00-0000000000d1', name: 'kino-dev' }, { id: '0199f0b7-1c2d-7e3f-8a00-0000000000d2', name: 'kino-stage' }];
-const form = (defaults, disabled = false, envs = ENVS, env = '') => renderToStaticMarkup(
-  <CreateForm busy="" defaults={defaults} disabled={disabled} envs={envs} env={env} onSubmit={() => {}} onCancel={() => {}} />,
+const form = (defaults, disabled = false) => renderToStaticMarkup(
+  <CreateForm busy="" defaults={defaults} disabled={disabled} env="kino-dev" onSubmit={() => {}} onCancel={() => {}} />,
 );
 
 describe('CreateForm', () => {
@@ -43,34 +42,22 @@ describe('CreateForm', () => {
     expect(out).not.toContain('min="');
   });
 
-  it('asks for the environment, what it reaches and its egress, and has no attachable or groups any more', () => {
+  it('names its environment, fixed, and asks what it reaches of it (nothing) and its egress (the internet)', () => {
     const out = form(null);
-    expect(out).toContain('<option value="" selected="">(an environment)</option>');
-    expect(out).toContain('<option value="kino-dev">kino-dev</option>');
-    expect(out).toContain('Choose the environment first.');
+    expect(out).toContain('<span class="sbx-label">environment</span><span class="mono">kino-dev</span>');
+    expect(out).not.toContain('aria-label="environment"');
+    expect(out).toContain('<div class="sg-seg" role="group" aria-label="reaches"><button type="button" class="on" aria-pressed="true">Nothing</button>');
+    expect(out).toContain('Alone on the network');
     expect(out).toContain('<div class="sg-seg" role="group" aria-label="egress"><button type="button" class="on" aria-pressed="true">The internet</button>');
     expect(out).not.toContain('attachable');
     expect(out).not.toContain('security group');
-    // Without an environment there is nothing to create.
-    expect(out).toMatch(/<button type="submit" class="primary" disabled="" title="choose its environment">/);
-  });
-
-  it('takes the one environment there is, or the one the address names, reaching nothing of it', () => {
-    for (const out of [form(null, false, [ENVS[0]]), form(null, false, ENVS, 'kino-dev')]) {
-      expect(out).toContain('<option value="kino-dev" selected="">kino-dev</option>');
-      expect(out).toContain('<div class="sg-seg" role="group" aria-label="reaches"><button type="button" class="on" aria-pressed="true">Nothing</button>');
-      expect(out).toContain('Alone on the network');
-      expect(out).not.toContain('Choose the environment first.');
-    }
-    // One the person may not write is no choice.
-    expect(form(null, false, ENVS, 'prod')).toContain('Choose the environment first.');
+    expect(out).toMatch(/<button type="submit" class="primary">/);
   });
 
   it('explains the sealed login, and says why it is disabled', () => {
-    const out = form(null, true, []);
+    const out = form(null, true);
     expect(out).toContain('never shown again');
-    expect(out).toContain('no environment you may write');
-    expect(out).toContain('title="needs write on an environment"');
+    expect(out).toContain('title="needs write on this environment"');
   });
 });
 
@@ -87,7 +74,7 @@ const head = (sb, write) => renderToStaticMarkup(
 describe('SandboxHead', () => {
   it('says the state with its cost, and offers resume and connect', () => {
     const out = head(SB, true);
-    expect(out).toContain('<span class="kind">Sandbox</span>');
+    expect(out).toContain('<p class="pagehead-kind">Sandbox in <a href="/tenants/kino/environments/kino-dev"');
     expect(out).toContain('<h1 class="mono">h3k9v2m7qpx</h1>');
     expect(out).toContain('paused on n3 · its memory on the node&#x27;s disk, no RAM · resumes on the next call');
     expect(out).toContain('Resume');
