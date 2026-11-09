@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../Icon.jsx';
 import { deriveRows, eventDescription, keyOf, lanesOf } from '../events.jsx';
 import { fmtMsTime, fmtNs } from '../format.js';
@@ -91,6 +91,9 @@ export function Timeline({ events, selected, onSelect }) {
   const [follow, setFollow] = useState(false);
   const [followMs, setFollowMs] = useState(120e3);
   const bodyRef = useRef(null);
+  // The axis's track: as wide as the lanes' tracks, right of their labels;
+  // the pointer's place in time is measured on it.
+  const trackRef = useRef(null);
   const drag = useRef(null);
   const lastMoved = useRef(false);
 
@@ -123,8 +126,8 @@ export function Timeline({ events, selected, onSelect }) {
     const onWheel = (e) => {
       e.preventDefault();
       hideTip();
-      const rect = el.getBoundingClientRect();
-      zoomAt((e.clientX - rect.left) / rect.width, e.deltaY > 0 ? 1.25 : 0.8);
+      const rect = (trackRef.current || el).getBoundingClientRect();
+      zoomAt(Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)), e.deltaY > 0 ? 1.25 : 0.8);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -140,7 +143,7 @@ export function Timeline({ events, selected, onSelect }) {
     if (!drag.current) return;
     const dx = e.clientX - drag.current.x;
     if (Math.abs(dx) > 3) drag.current.moved = true;
-    const pxPerMs = bodyRef.current.clientWidth / dur;
+    const pxPerMs = (trackRef.current || bodyRef.current).clientWidth / dur;
     const shift = -dx / pxPerMs;
     setFollow(false);
     setWin([drag.current.win[0] + shift, drag.current.win[1] + shift]);
@@ -191,9 +194,12 @@ export function Timeline({ events, selected, onSelect }) {
         onPointerDown={onPointerDown} onPointerMove={onPointerMove}
         onPointerUp={onPointerUp} onClick={onClickEmpty}>
         <div className="tl-axis">
-          {ticks.map((tk) => (
-            <span key={tk.t} className="tl-tick" style={{ left: tk.pct + '%' }}>{tk.label}</span>
-          ))}
+          <div className="tl-axis-label" />
+          <div className="tl-axis-track" ref={trackRef}>
+            {ticks.map((tk) => (
+              <span key={tk.t} className="tl-tick" style={{ left: tk.pct + '%' }}>{tk.label}</span>
+            ))}
+          </div>
         </div>
         <div className="tl-lanes">
           {laneDefs.map((lane) => {
@@ -279,9 +285,44 @@ export function Timeline({ events, selected, onSelect }) {
         </div>
       </div>
       <div className="tl-hint muted">scroll = zoom · drag = pan · click = inspect</div>
-      {tip && <div className="tl-tip" style={{ left: tip.x + 14, top: tip.y + 16 }}>{tip.node}</div>}
+      {tip && <TipCard x={tip.x} y={tip.y}>{tip.node}</TipCard>}
     </div>
   );
+}
+
+// TIP_GAP is the hover card's distance from the pointer, TIP_EDGE the
+// least room it keeps to the window's edge.
+const TIP_GAP = { x: 14, y: 16 };
+const TIP_EDGE = 8;
+
+// tipPlace is where a hover card of w×h goes for the pointer at (x, y)
+// in a window of vw×vh: right of and below the pointer, left of it where
+// it would leave the window on the right, above it where it would leave
+// it at the bottom, and never past an edge.
+export function tipPlace(x, y, w, h, vw, vh) {
+  let left = x + TIP_GAP.x;
+  if (left + w > vw - TIP_EDGE) left = x - TIP_GAP.x - w;
+  let top = y + TIP_GAP.y;
+  if (top + h > vh - TIP_EDGE) top = y - TIP_GAP.y - h;
+  return {
+    left: Math.max(TIP_EDGE, Math.min(left, vw - TIP_EDGE - w)),
+    top: Math.max(TIP_EDGE, Math.min(top, vh - TIP_EDGE - h)),
+  };
+}
+
+// TipCard is the hover card at the pointer (x, y), measured before it is
+// painted and placed by tipPlace.
+function TipCard({ x, y, children }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({ left: x + TIP_GAP.x, top: y + TIP_GAP.y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const p = tipPlace(x, y, r.width, r.height, window.innerWidth, window.innerHeight);
+    setPos((cur) => (cur.left === p.left && cur.top === p.top ? cur : p));
+  }, [x, y, children]);
+  return <div ref={ref} className="tl-tip" style={pos}>{children}</div>;
 }
 
 function fmtMs(ms) {

@@ -534,14 +534,21 @@ tr:hover .iconbtn { opacity: 1; }
 .minus { font-size: 14px; line-height: 1; }
 .tl-body { user-select: none; cursor: grab; touch-action: none; }
 .tl-body:active { cursor: grabbing; }
-.tl-axis { position: relative; height: 26px; border-bottom: 1px solid var(--border-soft); }
+/* The axis has the lanes' columns, so that a tick and the lanes'
+   gridline of its time are one line: the labels' column, then the track. */
+.tl-body { --tl-label-w: 104px; }
+.tl-axis {
+  display: grid; grid-template-columns: var(--tl-label-w) 1fr; height: 26px; border-bottom: 1px solid var(--border-soft);
+}
+.tl-axis-label { border-right: 1px solid var(--border-soft); background: var(--panel); }
+.tl-axis-track { position: relative; overflow: hidden; }
 .tl-tick {
-  position: absolute; top: 5px; transform: translateX(4px);
+  position: absolute; top: 5px;
   font-size: 10px; font-family: var(--mono); color: var(--muted);
   border-left: 1px solid var(--border); padding-left: 4px; height: 16px;
   white-space: nowrap; pointer-events: none;
 }
-.tl-lane { display: grid; grid-template-columns: 74px 1fr; border-bottom: 1px solid var(--border-soft); }
+.tl-lane { display: grid; grid-template-columns: var(--tl-label-w) 1fr; border-bottom: 1px solid var(--border-soft); }
 .tl-lane:last-child { border-bottom: none; }
 .tl-lane-label {
   font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
@@ -615,7 +622,10 @@ tr:hover .iconbtn { opacity: 1; }
 /* hover tooltip for spans/markers — fixed positioned (escapes lane
    overflow), non-interactive, slight fade so pans/zooms don't flash */
 .tl-tip {
-  position: fixed; z-index: 60; max-width: 440px;
+  /* its width its content's, not what is left of the window right of
+     the pointer, so that it can be placed beside the pointer either way
+     (Timeline.jsx, tipPlace) */
+  position: fixed; z-index: 60; width: max-content; max-width: min(440px, calc(100vw - 16px));
   background: var(--panel); border: 1px solid var(--border-soft);
   border-radius: 6px; padding: 6px 10px; font-size: 11.5px; line-height: 1.5;
   box-shadow: 0 8px 24px rgba(0,0,0,.5);

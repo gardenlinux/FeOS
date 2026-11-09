@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { deriveRows } from '../events.jsx';
-import { packLane } from './Timeline.jsx';
+import { packLane, tipPlace } from './Timeline.jsx';
 
 // The render reads packLane for both the bars and their nested spans, so
 // its packing is what lands on screen: no two entries share a sub-row
@@ -109,5 +109,22 @@ describe('packLane with the span tree', () => {
     const life = rows.filter((r) => r.lane === 'lifecycle');
     const pl = packLane(life);
     expect(pl.n).toBe(2);
+  });
+});
+
+describe('the hover card', () => {
+  // A card of 300×120 in a window of 1440×900.
+  it('sits right of and below the pointer while it fits', () => {
+    expect(tipPlace(400, 300, 300, 120, 1440, 900)).toEqual({ left: 414, top: 316 });
+  });
+
+  it('goes left of the pointer at the right edge, above it at the bottom', () => {
+    expect(tipPlace(1300, 300, 300, 120, 1440, 900)).toEqual({ left: 986, top: 316 });
+    expect(tipPlace(400, 850, 300, 120, 1440, 900)).toEqual({ left: 414, top: 714 });
+  });
+
+  it('never leaves the window, even when wider than the room on either side', () => {
+    expect(tipPlace(200, 300, 300, 120, 400, 900)).toEqual({ left: 8, top: 316 });
+    expect(tipPlace(5, 5, 300, 120, 1440, 900).left).toBe(19);
   });
 });
