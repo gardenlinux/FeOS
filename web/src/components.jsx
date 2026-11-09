@@ -44,12 +44,17 @@ export function EnvName({ name, className = 'envcard-name' }) {
   return <span className={className}>{String(name || '')}</span>;
 }
 
-// BrandMark is FeRun's mark: the box of the sign-in screen.
-export function BrandMark({ size = 30 }) {
+// BrandMark is FeRun's mark, drawn in FeCode's thin open lines: a box
+// (a container), its lid in FeRun's indigo on a body in FeOS's ochre,
+// the two apart where the walls meet the lid. web/public/icon.svg is the
+// same mark as the tab's icon.
+export function BrandMark({ size = 26 }) {
   return (
-    <span className="brand-mark" style={{ width: size, height: size, borderRadius: Math.round(size / 4) }} aria-hidden="true">
-      <Icon name="box" size={Math.round(size * 0.55)} />
-    </span>
+    <svg className="brand-mark" viewBox="0 0 100 100" width={size} height={size} aria-hidden="true">
+      <polyline className="brand-run" points="10,46 10,27 50,4 90,27 50,50 10,27" />
+      <polyline className="brand-os" points="90,54 90,73 50,96 10,73" />
+      <polyline className="brand-os" points="50,64 50,96" />
+    </svg>
   );
 }
 

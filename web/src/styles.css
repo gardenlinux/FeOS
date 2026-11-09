@@ -102,12 +102,10 @@ a:hover { text-decoration: underline; }
   height: var(--headh); margin: 0 -14px 14px; padding: 0 20px; border-bottom: 1px solid var(--border-soft);
 }
 .brand:hover { text-decoration: none; }
-/* the box of the sign-in screen */
-.brand-mark {
-  display: grid; place-items: center; flex: none;
-  background: var(--accent-dim); color: var(--accent);
-  border: 1px solid rgba(var(--accent-rgb), .35);
-}
+/* the mark (components.jsx, BrandMark): FeCode's thin lines, no tile */
+.brand-mark { flex: none; fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.brand-mark .brand-run { stroke: var(--run); }
+.brand-mark .brand-os { stroke: var(--os); }
 .brand-name, .login-name { font-family: var(--brand); font-weight: 400; letter-spacing: .08em; }
 .brand-name { font-size: 21px; }
 .brand-name b, .login-name b { font-weight: 400; color: var(--accent); }
@@ -683,10 +681,6 @@ tr:hover .iconbtn { opacity: 1; }
   box-shadow: 0 24px 64px rgba(0, 0, 0, .45);
 }
 .login-brand { display: flex; align-items: center; gap: 14px; }
-.login-mark {
-  width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; flex: none;
-  background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(var(--accent-rgb), .35);
-}
 .login-name { font-size: 28px; line-height: 1.1; }
 .login-tag { color: var(--muted); font-size: 14px; margin-top: 3px; }
 .login-card form { display: flex; flex-direction: column; gap: 12px; margin-top: 30px; }
@@ -749,7 +743,6 @@ tr:hover .iconbtn { opacity: 1; }
 
 [data-theme="light"] .login-card { box-shadow: 0 20px 56px rgba(20, 40, 80, .12); }
 [data-theme="light"] .login-card button.primary { color: #fff; }
-[data-theme="light"] .login-mark { border-color: rgba(var(--accent-rgb), .30); }
 [data-theme="light"] .error { color: #8f2018; }
 [data-theme="light"] .evdesc .tool-name { color: #16304a; }
 [data-theme="light"] .tl-span { background: rgba(var(--accent-rgb), .16); border-color: rgba(var(--accent-rgb), .5); color: var(--text); }

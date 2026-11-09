@@ -265,7 +265,7 @@ function Sidebar({ route, navigate, me, env }) {
   return (
     <aside className="sidebar">
       <a className="brand" href={home} onClick={(e) => { e.preventDefault(); navigate(home); }}>
-        <BrandMark size={30} />
+        <BrandMark />
         <span className="brand-name">Fe<b>Run</b></span>
       </a>
 

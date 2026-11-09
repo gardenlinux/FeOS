@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 10 80 80" width="80" height="80">
+  <!-- SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors -->
+  <!-- SPDX-License-Identifier: Apache-2.0 -->
+  <!-- The tab's icon: FeRun's mark (components.jsx, BrandMark), a little
+       bolder, without a background, so that its colours follow the
+       browser's scheme. -->
+  <style>
+    .run { stroke: #3445b4 }
+    .os { stroke: #a4540b }
+    @media (prefers-color-scheme: dark) {
+      .run { stroke: #9ba7ff }
+      .os { stroke: #f0a64f }
+    }
+  </style>
+  <g fill="none" stroke-width="5.76" stroke-linecap="round" stroke-linejoin="round">
+    <polyline class="run" points="18,46.8 18,31.6 50,13.2 82,31.6 50,50 18,31.6"/>
+    <polyline class="os" points="82,53.2 82,68.4 50,86.8 18,68.4"/>
+    <polyline class="os" points="50,61.2 50,86.8"/>
+  </g>
+</svg>
