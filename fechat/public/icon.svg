@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors -->
+  <!-- SPDX-License-Identifier: Apache-2.0 -->
+  <!-- The tab's icon: the bolt of the header (App.jsx, Bolt), cyan on its
+       magenta glitch, without the gradient so it stays bright when small. -->
+  <path d="M13 2 3 14h7l-1 8L19 10h-7z" fill="#ea00d9" opacity="0.85" transform="translate(1.1 0.9)"/>
+  <path d="M13 2 3 14h7l-1 8L19 10h-7z" fill="#0abdc6"/>
+</svg>
