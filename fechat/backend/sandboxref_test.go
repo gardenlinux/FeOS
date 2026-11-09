@@ -206,7 +206,7 @@ func chat(t *testing.T, c *sandboxClient, subject, conv, ref string, calls int) 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			outs[i] = c.executeSandboxTool(testTools, b, "whoami", "{}")
+			outs[i] = c.executeSandboxTool(context.Background(), testTools, b, "whoami", "{}")
 		}()
 	}
 	wg.Wait()

@@ -31,6 +31,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,8 +39,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // defaultSystemPrompt is the system prompt where SYSTEM_PROMPT_FILE names
@@ -126,11 +134,33 @@ const maxChatBody = 32 << 20 // request limit of /api/v1/chat
 // sb is the client of ferund (nil when the sandbox tools are disabled).
 var sb *sandboxClient
 
-func executeTool(ts *toolset, b *chatSandbox, name, argsJSON string) string {
+func executeTool(ctx context.Context, ts *toolset, b *chatSandbox, callID, name, argsJSON string) string {
+	ctx, span := tracer.Start(ctx, "execute_tool "+name, trace.WithAttributes(
+		attribute.String("gen_ai.operation.name", "execute_tool"),
+		attribute.String("gen_ai.tool.name", name),
+		attribute.String("gen_ai.tool.call.id", callID),
+		attribute.String("fechat.conversation.id", b.key.conv)))
+	defer span.End()
+	out := `{"error":"unknown tool"}`
 	if ts.has(name) {
-		return sb.executeSandboxTool(ts, b, name, argsJSON)
+		out = sb.executeSandboxTool(ctx, ts, b, name, argsJSON)
 	}
-	return `{"error":"unknown tool"}`
+	if strings.HasPrefix(out, "error: ") || out == `{"error":"unknown tool"}` {
+		span.SetStatus(codes.Error, firstLine(out))
+	}
+	return out
+}
+
+// firstLine is s up to its first line break, at most 200 bytes: a span's
+// status, not the whole output.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	return s
 }
 
 // --- The LLM's chat stream ---
@@ -143,24 +173,47 @@ type streamResult struct {
 	Err         error
 }
 
+// llmClient calls the LLM gateway: a client span per request, and the
+// trace goes along.
+var llmClient = &http.Client{Transport: tracedTransport(http.DefaultTransport)}
+
 // callLLM starts a streamed chat completion. Content deltas go out on the
 // channel, tool calls are accumulated.
-func callLLM(cfg config, messages []Message, tools []Tool) *streamResult {
+//
+// Each call is a span in the GenAI conventions (gen_ai.*): the model,
+// the reason the answer ended and the tokens, which the gateway reports in
+// the stream's last chunk (stream_options.include_usage).
+func callLLM(ctx context.Context, cfg config, messages []Message, tools []Tool) *streamResult {
 	res := &streamResult{Deltas: make(chan string, 64)}
+	ctx, span := tracer.Start(ctx, "chat "+cfg.Model, trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			attribute.String("gen_ai.operation.name", "chat"),
+			attribute.String("gen_ai.provider.name", "openai"),
+			attribute.String("gen_ai.request.model", cfg.Model),
+			attribute.Int("fechat.messages", len(messages)),
+			attribute.Int("fechat.tools", len(tools))))
 
 	go func() {
 		defer close(res.Deltas)
+		defer func() {
+			if res.Err != nil {
+				span.RecordError(res.Err)
+				span.SetStatus(codes.Error, firstLine(res.Err.Error()))
+			}
+			span.End()
+		}()
 
 		body := map[string]any{
-			"model":       cfg.Model,
-			"messages":    messages,
-			"tools":       tools,
-			"tool_choice": "auto",
-			"stream":      true,
+			"model":          cfg.Model,
+			"messages":       messages,
+			"tools":          tools,
+			"tool_choice":    "auto",
+			"stream":         true,
+			"stream_options": map[string]bool{"include_usage": true},
 		}
 		payload, _ := json.Marshal(body)
 
-		req, err := http.NewRequest("POST", cfg.BaseURL+"/chat/completions", bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, "POST", cfg.BaseURL+"/chat/completions", bytes.NewReader(payload))
 		if err != nil {
 			res.Err = err
 			return
@@ -169,7 +222,7 @@ func callLLM(cfg config, messages []Message, tools []Tool) *streamResult {
 		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 		req.Header.Set("Accept", "text/event-stream")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := llmClient.Do(req)
 		if err != nil {
 			res.Err = err
 			return
@@ -203,6 +256,11 @@ func callLLM(cfg config, messages []Message, tools []Tool) *streamResult {
 				break
 			}
 			var chunk struct {
+				Model string `json:"model"`
+				Usage *struct {
+					Prompt     int `json:"prompt_tokens"`
+					Completion int `json:"completion_tokens"`
+				} `json:"usage"`
 				Choices []struct {
 					Delta struct {
 						Content   string    `json:"content"`
@@ -213,6 +271,14 @@ func callLLM(cfg config, messages []Message, tools []Tool) *streamResult {
 			}
 			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 				continue
+			}
+			if chunk.Model != "" {
+				span.SetAttributes(attribute.String("gen_ai.response.model", chunk.Model))
+			}
+			if chunk.Usage != nil {
+				span.SetAttributes(
+					attribute.Int("gen_ai.usage.input_tokens", chunk.Usage.Prompt),
+					attribute.Int("gen_ai.usage.output_tokens", chunk.Usage.Completion))
 			}
 			if len(chunk.Choices) == 0 {
 				continue
@@ -246,6 +312,9 @@ func callLLM(cfg config, messages []Message, tools []Tool) *streamResult {
 		}
 		res.Content = content.String()
 		res.ToolCalls = tcs
+		span.SetAttributes(
+			attribute.StringSlice("gen_ai.response.finish_reasons", []string{finish}),
+			attribute.Int("fechat.tool_calls", len(tcs)))
 		res.FinishTools = finish == "tool_calls"
 	}()
 	return res
@@ -306,6 +375,9 @@ func handleChat(cfg config) http.HandlerFunc {
 			log.Printf("no conversation_id -> anonymous conversation %s", req.ConversationID)
 		}
 		log.Printf("chat request conversation=%s messages=%d", req.ConversationID, len(req.Messages))
+		trace.SpanFromContext(r.Context()).SetAttributes(
+			attribute.String("fechat.conversation.id", req.ConversationID),
+			attribute.Int("fechat.messages", len(req.Messages)))
 		// sseMu writes SSE frames to the stream one at a time, while tool
 		// calls run in parallel.
 		var sseMu sync.Mutex
@@ -348,7 +420,7 @@ func handleChat(cfg config) http.HandlerFunc {
 		// ... again in every round.
 		seq := 0
 		for round := 0; round < 8; round++ {
-			res := callLLM(cfg, messages, defs)
+			res := callLLM(r.Context(), cfg, messages, defs)
 			for d := range res.Deltas {
 				sseEvent(w, map[string]string{"type": "delta", "content": d})
 			}
@@ -391,7 +463,7 @@ func handleChat(cfg config) http.HandlerFunc {
 				wg.Add(1)
 				go func(i int, tc ToolCall) {
 					defer wg.Done()
-					output := executeTool(ts, box, tc.Function.Name, tc.Function.Arguments)
+					output := executeTool(r.Context(), ts, box, tc.ID, tc.Function.Name, tc.Function.Arguments)
 					outputs[i] = output
 					sseMu.Lock()
 					sseEvent(w, map[string]any{
@@ -425,6 +497,9 @@ func handleChat(cfg config) http.HandlerFunc {
 
 func main() {
 	cfg := loadConfig()
+	// SIGTERM ends the server gracefully, and the last spans go out.
+	stop, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	flush := setupTracing(stop)
 	if cfg.APIKey == "" {
 		log.Fatal("OPENAI_API_KEY is not set")
 	}
@@ -462,5 +537,15 @@ func main() {
 	mux.HandleFunc("/api/v1/chat", chat)
 	mux.HandleFunc("/api/v1/image-check", imageCheck)
 	log.Printf("fechat-backend listening on :%s (model=%s, llm=%s, ferun=%q)", cfg.Port, cfg.Model, cfg.BaseURL, cfg.FeRunURL)
-	log.Fatal(http.ListenAndServe(":"+cfg.Port, mux))
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: tracedServer(mux)}
+	go func() {
+		<-stop.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+	flush()
 }

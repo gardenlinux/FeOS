@@ -191,6 +191,18 @@ the same ConfigMap needs `kubectl -n fechat rollout restart
 deploy/fechat-backend`. The prompt lists the tools ferund offers (bash,
 read, write, edit, ls, rg, fd, webfetch); keep it in step with them.
 
+## Traces
+
+The backend sends OpenTelemetry traces (`backend/telemetry.go`) where
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT`)
+names an OTLP/HTTP receiver, as FeRun's nodes set it in every pod; without
+one it sends none. A chat request is one trace: its server span, a span
+per round with the LLM (`chat <model>`, with `gen_ai.*` attributes: model,
+finish reason, input and output tokens), a span per tool call
+(`execute_tool <name>`), and client spans for the calls to the LLM gateway
+and to ferund, which get the trace as `traceparent`. The health check
+makes no span.
+
 ## Building and testing
 
 ```sh

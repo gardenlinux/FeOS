@@ -157,7 +157,7 @@ func newSandboxClient(base, ctrlToken, env string, refKey []byte) (*sandboxClien
 		env:       env,
 		refKey:    refKey,
 		http: &http.Client{
-			Transport: bearerRT{ctrlToken},
+			Transport: tracedTransport(bearerRT{ctrlToken}),
 			Timeout:   30 * time.Second,
 		},
 		sessions: map[convKey]*convSession{},
@@ -345,7 +345,7 @@ func (s *sandboxClient) connectSession(ctx context.Context, cs *convSession) err
 		Endpoint: s.base + "/mcp",
 		// no standalone SSE GET: ferund answers it with 405
 		DisableStandaloneSSE: true,
-		HTTPClient:           &http.Client{Transport: bearerRT{cs.token}},
+		HTTPClient:           &http.Client{Transport: tracedTransport(bearerRT{cs.token})},
 	}, nil)
 	if err != nil {
 		return err
@@ -364,8 +364,11 @@ func isSessionError(err error) bool {
 
 // executeSandboxTool runs one tool over MCP in the conversation's sandbox
 // and returns the collected output as a string.
-func (s *sandboxClient) executeSandboxTool(ts *toolset, b *chatSandbox, tool, argsJSON string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), ts.callTimeout())
+//
+// The call outlives the request it belongs to (a browser that goes away
+// does not cut a command off), but stays in its trace.
+func (s *sandboxClient) executeSandboxTool(ctx context.Context, ts *toolset, b *chatSandbox, tool, argsJSON string) string {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ts.callTimeout())
 	defer cancel()
 
 	cs, err := s.sessionFor(ctx, b)
