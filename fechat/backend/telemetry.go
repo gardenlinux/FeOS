@@ -84,8 +84,11 @@ func tracedServer(h http.Handler) http.Handler {
 		}))
 }
 
-// tracedTransport makes a client span of every request through rt and
-// sends the trace along.
+// tracedTransport makes a client span of every request through rt, named
+// by its method and path ("POST /api/v1/sandboxes"), and sends the trace
+// along.
 func tracedTransport(rt http.RoundTripper) http.RoundTripper {
-	return otelhttp.NewTransport(rt)
+	return otelhttp.NewTransport(rt, otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+		return r.Method + " " + r.URL.Path
+	}))
 }
