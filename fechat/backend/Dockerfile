@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 # SPDX-License-Identifier: Apache-2.0
 
-FROM golang:1.25.14-alpine AS build
+FROM golang:1.26.10-alpine AS build
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
