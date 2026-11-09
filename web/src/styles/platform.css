@@ -59,7 +59,7 @@
 
 /* join tokens and ingresses: the kind */
 .kindtag { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; white-space: nowrap; }
-.kindtag.node { color: var(--os); border-color: rgba(240, 166, 79, .45); }
+.kindtag.node { color: var(--os-ink); border-color: color-mix(in srgb, var(--os) 45%, transparent); }
 .kindtag.ingress { color: var(--net); border-color: rgba(70, 201, 179, .45); }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
 .seg button { border: 0; border-radius: 0; background: none; color: var(--muted); padding: 5px 11px; }

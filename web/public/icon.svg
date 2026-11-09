@@ -6,10 +6,10 @@
        browser's scheme. -->
   <style>
     .run { stroke: #3445b4 }
-    .os { stroke: #a4540b }
+    .os { stroke: #c97a00 }
     @media (prefers-color-scheme: dark) {
       .run { stroke: #9ba7ff }
-      .os { stroke: #f0a64f }
+      .os { stroke: #ffb21e }
     }
   </style>
   <g fill="none" stroke-width="5.76" stroke-linecap="round" stroke-linejoin="round">

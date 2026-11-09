@@ -37,9 +37,10 @@ A snapshot of docs/: where the two differ, docs/ is right.
   --run: #9ba7ff;
   --run-soft: #1f2547;
   --run-wash: #131830;
-  --os: #f0a64f;
-  --os-soft: #35250f;
-  --os-wash: #1d1810;
+  --os: #ffb21e;
+  --os-ink: #ffb21e;
+  --os-soft: #382a0a;
+  --os-wash: #1d190e;
   --ext: #a8b0bd;
   --ext-soft: #1f252d;
   --net: #46c9b3;
@@ -50,7 +51,7 @@ A snapshot of docs/: where the two differ, docs/ is right.
 :root[data-theme="light"] {
   --bg: #f3f4f7; --surface: #ffffff; --fg: #14171c; --fg2: #3a414d; --muted: #5f6878; --line: #d5d9e1;
   --run: #3445b4; --run-soft: #e6e9fb; --run-wash: #f3f4fd;
-  --os: #a4540b; --os-soft: #fbecd8; --os-wash: #fdf7ef;
+  --os: #c97a00; --os-ink: #8a5a00; --os-soft: #fdf0d6; --os-wash: #fef9ee;
   --ext: #5a6373; --ext-soft: #eceef2;
   --net: #0a7a69;
   color-scheme: light;
@@ -85,7 +86,7 @@ h1 {
   font-size: clamp(2.3rem, 5.2vw, 3.6rem); line-height: 1.04; margin: 0 0 16px; text-wrap: balance;
 }
 h1 .run { color: var(--run); }
-h1 .os { color: var(--os); }
+h1 .os { color: var(--os-ink); }
 .lede { font-size: 18px; line-height: 1.55; color: var(--fg2); margin: 0 0 14px; max-width: 66ch; }
 .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 28px; max-width: 760px; margin: 0 0 16px; }
 .layer { border-left: 3px solid; padding: 2px 0 2px 12px; min-width: 0; }
@@ -94,7 +95,7 @@ h1 .os { color: var(--os); }
 .layer p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--fg2); }
 .layer .lname { font-family: var(--sans); font-weight: 700; font-size: 17px; margin: 0 0 2px; }
 .layer.run .lname { color: var(--run); }
-.layer.os .lname { color: var(--os); }
+.layer.os .lname { color: var(--os-ink); }
 .layer .lname span { font-weight: 500; font-size: 13px; color: var(--muted); margin-left: 6px; }
 .src { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
 .theme {
@@ -125,7 +126,7 @@ h1 .os { color: var(--os); }
 .hero-mark .os { stroke: var(--os); }
 .hero-mark .core { stroke-width: .55; opacity: .9; }
 .hero-mark .core .run { stroke: #e8eaff; }
-.hero-mark .core .os { stroke: #ffe6c7; }
+.hero-mark .core .os { stroke: #fff0c4; }
 .hero-mark .lid { animation: lift 7s ease-in-out infinite; }
 .hero-mark .floor line { stroke: var(--run); stroke-width: .25; }
 .hero-mark .pool-run { stop-color: var(--run); }
@@ -215,7 +216,7 @@ td.prog { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
 td.nw { white-space: nowrap; }
 .pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
 .pill.run { color: var(--run); border-color: var(--run); background: var(--run-soft); }
-.pill.os { color: var(--os); border-color: var(--os); background: var(--os-soft); }
+.pill.os { color: var(--os-ink); border-color: var(--os); background: var(--os-soft); }
 .pill.ext { color: var(--ext); border-color: var(--ext); background: var(--ext-soft); }
 .pill.net { color: var(--net); border-color: var(--net); background: var(--surface); }
 
@@ -1022,7 +1023,7 @@ footer code { font-size: 12px; }
   <path class="ln-net" d="M906 172V118" marker-end="url(#m6n)"/>
   <text class="lbn" x="914" y="150">:8080</text>
   <path class="ln" d="M1110 118V136M1110 160V172" stroke-dasharray="4 3"/>
-  <text class="t" x="1110" y="154" text-anchor="middle" style="fill: var(--os); font-size: 18px">×</text>
+  <text class="t" x="1110" y="154" text-anchor="middle" style="fill: var(--os-ink); font-size: 18px">×</text>
   <text class="lb" x="1122" y="150">no-rule</text>
   <path class="ln-net" d="M840 270V101H856" marker-end="url(#m6n)"/>
 

@@ -37,8 +37,9 @@
   --accent-hover: #c3caff;
   --run: #9ba7ff;
   --run-soft: #1f2547;
-  --os: #f0a64f;
-  --os-soft: #35250f;
+  --os: #ffb21e;
+  --os-ink: #ffb21e;
+  --os-soft: #382a0a;
   --net: #46c9b3;
   --net-soft: #0f2c28;
   --ok: #5fcf8e;
@@ -739,8 +740,9 @@ tr:hover .iconbtn { opacity: 1; }
   --accent-ink: #ffffff;
   --run: #3445b4;
   --run-soft: #e6e9fb;
-  --os: #a4540b;
-  --os-soft: #fbecd8;
+  --os: #c97a00;
+  --os-ink: #8a5a00;
+  --os-soft: #fdf0d6;
   --net: #0a7a69;
   --net-soft: #dff3ef;
   --ok: #1b8a4c;
