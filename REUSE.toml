@@ -28,7 +28,8 @@ path = [
     "go/gen/**",
     "go/internal/ui/dist/.keep",
     "fechat/backend/go.mod",
-    "fechat/backend/go.sum"
+    "fechat/backend/go.sum",
+    "web/public/demo/shots/*.webp"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "SAP SE or an SAP affiliate company and IronCore contributors"

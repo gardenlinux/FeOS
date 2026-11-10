@@ -1,0 +1,569 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+SPDX-License-Identifier: Apache-2.0
+-->
+<!--
+A demo of FeRun with FeChat, one conversation in screenshots, served by
+ferund at /demo/ beside the architecture page (Vite copies web/public
+into the build). Its style and mark are the architecture page's
+(web/public/docs/index.html); the screenshots are in shots/.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>FeChat on FeRun</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<script>
+  // The UI's theme before the first paint: ferun-theme in localStorage
+  // (the same origin as the UI, so the UI's toggle holds here too), dark
+  // by default, as in the UI.
+  (function () {
+    var theme = 'dark';
+    try { theme = localStorage.getItem('ferun-theme') || 'dark'; } catch (e) { /* default */ }
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+<style>
+/* Layout: one reading column for prose, full-width figure plates for the diagrams; colour = layer (FeRun indigo, FeOS iron ochre, infra grey, mesh teal). Dark first, as the UI; light on [data-theme="light"]. */
+:root {
+  --bg: #0e1115;
+  --surface: #151a21;
+  --fg: #e7eaf0;
+  --fg2: #c2c8d2;
+  --muted: #939cab;
+  --line: #2a303a;
+  --run: #9ba7ff;
+  --run-soft: #1f2547;
+  --run-wash: #131830;
+  --os: #ffb21e;
+  --os-ink: #ffb21e;
+  --os-soft: #382a0a;
+  --os-wash: #1d190e;
+  --ext: #a8b0bd;
+  --ext-soft: #1f252d;
+  --net: #46c9b3;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f3f4f7; --surface: #ffffff; --fg: #14171c; --fg2: #3a414d; --muted: #5f6878; --line: #d5d9e1;
+  --run: #3445b4; --run-soft: #e6e9fb; --run-wash: #f3f4fd;
+  --os: #c97a00; --os-ink: #8a5a00; --os-soft: #fdf0d6; --os-wash: #fef9ee;
+  --ext: #5a6373; --ext-soft: #eceef2;
+  --net: #0a7a69;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: env(safe-area-inset-top, 0px) calc(64px + env(safe-area-inset-bottom, 0px));
+}
+.wrap { max-width: 1200px; margin: 0 auto; }
+.prose { max-width: 70ch; }
+a { color: var(--run); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; border-radius: 2px; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+
+/* header */
+header.top { display: flex; gap: 28px; align-items: flex-start; padding-block: 56px 28px; flex-wrap: wrap; position: relative; }
+.head-text { flex: 1 1 420px; min-width: 0; }
+.eyebrow { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+.eyebrow a { color: inherit; }
+h1 {
+  font-family: var(--sans); font-weight: 760; letter-spacing: -0.015em;
+  font-size: clamp(2.3rem, 5.2vw, 3.6rem); line-height: 1.04; margin: 0 0 16px; text-wrap: balance;
+}
+h1 .run { color: var(--run); }
+h1 .os { color: var(--os-ink); }
+.lede { font-size: 18px; line-height: 1.55; color: var(--fg2); margin: 0 0 14px; max-width: 66ch; }
+.layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 28px; max-width: 760px; margin: 0 0 16px; }
+.layer { border-left: 3px solid; padding: 2px 0 2px 12px; min-width: 0; }
+.layer.run { border-color: var(--run); }
+.layer.os { border-color: var(--os); }
+.layer p { margin: 0; font-size: 15px; line-height: 1.5; color: var(--fg2); }
+.layer .lname { font-family: var(--sans); font-weight: 700; font-size: 17px; margin: 0 0 2px; }
+.layer.run .lname { color: var(--run); }
+.layer.os .lname { color: var(--os-ink); }
+.layer .lname span { font-weight: 500; font-size: 13px; color: var(--muted); margin-left: 6px; }
+.src { font-size: 13px; color: var(--muted); margin: 0; max-width: 80ch; }
+.theme {
+  position: absolute; top: 20px; right: 0; font: inherit; font-size: 13px; color: var(--fg2); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; cursor: pointer;
+}
+.theme:hover { color: var(--fg); border-color: var(--muted); }
+.theme:focus-visible { outline: 2px solid var(--run); outline-offset: 2px; }
+
+/* FeRun's mark (the UI's BrandMark, web/src/components.jsx), large and
+   lit: the lid FeRun, the body FeOS, as on this page. Neon in the dark
+   theme (a blurred copy under each line, a bright core on it), a faint
+   glow in the light one; an isometric floor fades out beneath. The lid
+   lifts a little and the light breathes, unless motion is reduced. */
+.hero-mark { flex: none; width: 300px; align-self: center; position: relative; margin: 8px 8px 0 auto; }
+.hero-mark svg { display: block; width: 100%; height: auto; overflow: visible; position: relative; }
+.hero-mark::before {
+  content: ""; position: absolute; inset: -22% -26% -14%; pointer-events: none;
+  /* no wider than the room to the window's edge: the page never scrolls sideways */
+  inset-inline: max(-26%, calc(-12px - max(0px, (100vw - 1250px) / 2)));
+  background:
+    radial-gradient(closest-side at 50% 32%, rgb(155 167 255 / .26), transparent),
+    radial-gradient(closest-side at 50% 76%, rgb(240 166 79 / .20), transparent);
+  animation: breathe 7s ease-in-out infinite;
+}
+.hero-mark .lines { filter: url(#mark-glow); }
+.hero-mark .run { stroke: var(--run); }
+.hero-mark .os { stroke: var(--os); }
+.hero-mark .core { stroke-width: .55; opacity: .9; }
+.hero-mark .core .run { stroke: #e8eaff; }
+.hero-mark .core .os { stroke: #fff0c4; }
+.hero-mark .lid { animation: lift 7s ease-in-out infinite; }
+.hero-mark .floor line { stroke: var(--run); stroke-width: .25; }
+.hero-mark .pool-run { stop-color: var(--run); }
+.hero-mark .pool-os { stop-color: var(--os); }
+@keyframes lift { 50% { transform: translateY(-1.6px); } }
+@keyframes breathe { 50% { opacity: .72; } }
+:root[data-theme="light"] .hero-mark::before {
+  background:
+    radial-gradient(closest-side at 50% 32%, rgb(52 69 180 / .13), transparent),
+    radial-gradient(closest-side at 50% 76%, rgb(164 84 11 / .11), transparent);
+}
+:root[data-theme="light"] .hero-mark .lines { filter: url(#mark-glow-soft); }
+:root[data-theme="light"] .hero-mark .core { display: none; }
+@media (max-width: 1060px) { .hero-mark { width: 220px; } }
+/* narrow: the mark small above the heading, the button after the text */
+@media (max-width: 860px) {
+  .hero-mark { order: -1; width: 120px; margin: 0; align-self: flex-start; }
+  .hero-mark::before { inset-inline: -26%; }
+  .theme { position: static; order: 3; margin-left: auto; }
+}
+
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; padding-block: 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; margin-bottom: 8px; }
+nav.toc a { color: var(--fg2); text-decoration: none; }
+nav.toc a:hover { color: var(--run); text-decoration: underline; }
+
+section { padding-block: 40px 8px; }
+h2 { font-family: var(--sans); font-weight: 700; font-size: 1.75rem; line-height: 1.15; margin: 0 0 12px; text-wrap: balance; letter-spacing: -0.01em; }
+h3 { font-family: var(--sans); font-weight: 600; font-size: 1.05rem; margin: 24px 0 8px; }
+p { margin: 0 0 14px; }
+
+/* legend */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--fg2); margin: 4px 0 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid; display: inline-block; }
+.sw.run { background: var(--run-soft); border-color: var(--run); }
+.sw.os { background: var(--os-soft); border-color: var(--os); }
+.sw.ext { background: var(--ext-soft); border-color: var(--ext); }
+.sw.cli { background: var(--surface); border-color: var(--muted); border-style: dashed; }
+.sw.net { width: 22px; height: 0; border: 0; border-top: 2.5px solid var(--net); border-radius: 0; }
+
+/* figures */
+figure { margin: 8px 0 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 14px 12px; }
+.fig-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.fig-scroll svg { display: block; width: 100%; height: auto; min-width: 1000px; }
+figcaption { font-size: 14px; color: var(--fg2); margin-top: 10px; max-width: 92ch; line-height: 1.55; }
+figcaption b { font-weight: 600; color: var(--fg); }
+.fig-no { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 6px; }
+
+/* svg */
+.dg text { font-family: var(--sans); font-size: 11.5px; fill: var(--muted); }
+.dg .t { font-family: var(--sans); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.dg .tm { font-family: var(--mono); font-size: 13px; font-weight: 600; fill: var(--fg); }
+.dg .tm2 { font-family: var(--mono); font-size: 12px; font-weight: 600; fill: var(--fg); }
+.dg .lb { font-family: var(--mono); font-size: 11px; fill: var(--fg2); }
+.dg .lbn { font-family: var(--mono); font-size: 11px; fill: var(--net); font-weight: 500; }
+.dg .rt { font-family: var(--sans); font-size: 12px; font-weight: 600; letter-spacing: 0.09em; }
+.dg .rt.run { fill: var(--run); }
+.dg .rt.os { fill: var(--os); }
+.dg .reg-run { fill: var(--run-wash); stroke: var(--run); stroke-opacity: 0.4; stroke-width: 1.2; }
+.dg .reg-os { fill: var(--os-wash); stroke: var(--os); stroke-opacity: 0.45; stroke-width: 1.2; }
+.dg .b-run { fill: var(--run-soft); stroke: var(--run); stroke-width: 1.2; }
+.dg .b-runl { fill: var(--surface); stroke: var(--run); stroke-width: 1.2; }
+.dg .b-os { fill: var(--os-soft); stroke: var(--os); stroke-width: 1.2; }
+.dg .b-node { fill: var(--surface); stroke: var(--os); stroke-width: 1.2; }
+.dg .b-vm { fill: var(--os-wash); stroke: var(--os); stroke-width: 1; stroke-dasharray: 5 3; }
+.dg .b-ext { fill: var(--ext-soft); stroke: var(--ext); stroke-width: 1.2; }
+.dg .b-cli { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.dg .b-plain { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.dg .b-plain2 { fill: var(--surface); stroke: var(--os); stroke-opacity: 0.55; stroke-width: 1; }
+.dg .b-net { fill: var(--surface); stroke: var(--net); stroke-width: 1.4; }
+.dg .b-frame { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 6 4; }
+.dg .b-cont { fill: none; stroke: var(--os); stroke-opacity: 0.6; stroke-width: 1.2; stroke-dasharray: 6 4; }
+.dg .b-envf { fill: var(--run-wash); stroke: var(--run); stroke-opacity: 0.5; stroke-width: 1.2; }
+.dg .ln { stroke: var(--fg2); stroke-width: 1.4; fill: none; }
+.dg .ln-net { stroke: var(--net); stroke-width: 2.2; fill: none; }
+.dg .mk { fill: var(--fg2); }
+.dg .mkn { fill: var(--net); }
+.dg .dot { fill: var(--fg2); }
+
+/* tables */
+.tbl { overflow-x: auto; margin: 8px 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.5; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em; padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.prog { font-family: var(--mono); font-weight: 600; white-space: nowrap; }
+td.nw { white-space: nowrap; }
+.pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.pill.run { color: var(--run); border-color: var(--run); background: var(--run-soft); }
+.pill.os { color: var(--os-ink); border-color: var(--os); background: var(--os-soft); }
+.pill.ext { color: var(--ext); border-color: var(--ext); background: var(--ext-soft); }
+.pill.net { color: var(--net); border-color: var(--net); background: var(--surface); }
+
+/* package groups */
+.groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; min-width: 0; }
+.group h3 { margin: 0 0 4px; font-size: 15px; }
+.group .pk { font-family: var(--mono); font-size: 12px; color: var(--run); margin: 0 0 8px; overflow-wrap: anywhere; }
+.group p { font-size: 14px; color: var(--fg2); margin: 0; }
+
+/* lists */
+ul.facts { padding-left: 20px; margin: 0 0 14px; max-width: 80ch; }
+ul.facts li { margin-bottom: 6px; }
+.times { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.time { border-left: 3px solid var(--os); padding: 4px 0 4px 12px; min-width: 0; }
+.time .v { font-family: var(--mono); font-weight: 600; font-size: 18px; font-variant-numeric: tabular-nums; }
+.time .k { font-size: 13.5px; color: var(--fg2); }
+.time code { white-space: nowrap; }
+.principles { list-style: none; padding: 0; margin: 8px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px 24px; }
+.principles li { padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.principles b { display: block; font-weight: 600; }
+.principles span { color: var(--fg2); font-size: 14.5px; }
+footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+footer code { font-size: 12px; }
+
+@media (max-width: 560px) {
+  header.top { padding-block: 32px 20px; gap: 18px; }
+  .lede { font-size: 16.5px; }
+  h2 { font-size: 1.5rem; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .hero-mark .lid, .hero-mark::before { animation: none; } }
+
+/* The demo's additions: FeChat's colour, screenshots as plates. */
+:root { --chat: #3fd0e0; }
+:root[data-theme="light"] { --chat: #0a7f8c; }
+h1 .chat { color: var(--chat); }
+.layer.app { border-color: var(--chat); }
+.layer.app .lname { color: var(--chat); }
+figure.shot { max-width: 1054px; padding: 14px; }
+figure.shot a { display: block; line-height: 0; }
+figure.shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; background: #0e1115; }
+figure.shot figcaption { max-width: none; }
+figure.plate { max-width: 1054px; }
+.fig-scroll svg.tl { min-width: 900px; }
+#sleep .times { max-width: 1054px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+#map .tbl { max-width: 1054px; }
+
+/* Numbered marks over a screenshot, and the same numbers in its caption. */
+:root { --mark: #ffcf3f; }
+figure.shot .frame { position: relative; }
+.hl { position: absolute; border: 2px solid var(--mark); border-radius: 6px; pointer-events: none;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / .55), 0 0 14px rgb(255 207 63 / .35); }
+.hl b { position: absolute; left: -12px; top: -12px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--mark); color: #14171c; font: 700 12px/22px var(--sans); text-align: center;
+  box-shadow: 0 0 0 2px #0e1115; }
+.pin { display: inline-block; min-width: 18px; height: 18px; border-radius: 9px; background: var(--mark); color: #14171c;
+  font: 700 11px/18px var(--sans); text-align: center; vertical-align: 1px; margin-right: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="head-text">
+    <p class="eyebrow"><a href="/">FeRun</a> · Demo · 10 November 2026</p>
+    <h1><span class="chat">FeChat</span> on <span class="run">FeRun</span></h1>
+    <p class="lede">FeChat is a chat with an agent that runs commands. Every conversation gets a <b>sandbox</b> of its own from FeRun, a Firecracker microVM, and FeChat itself runs on FeRun as an <b>ordinary app</b>. So one tenant shows both halves of FeRun. This page follows one conversation from the chat window down to the trace.</p>
+    <div class="layers">
+      <div class="layer run"><p class="lname">sandboxes <span>an environment of tenant chat</span></p><p>One sandbox per conversation, made by FeChat's backend through FeRun's public API. It pauses when nobody calls it and hibernates later.</p></div>
+      <div class="layer app"><p class="lname">prod <span>another environment of tenant chat</span></p><p>FeChat's two services, <code>web</code> and <code>api</code>, deployed like any app, at <code>chat.fecore.dev</code>.</p></div>
+    </div>
+    <p class="src">Screenshots of <code>chat.fecore.dev</code> and <code>run.fecore.dev</code>, one FeRun installation, taken at 1024×768 on 10 November 2026. Numbered boxes mark what the caption below explains. Times in the console are Central European. How it works inside: <a href="/docs/">the architecture page</a>.</p>
+  </div>
+  <div class="hero-mark" aria-hidden="true">
+    <svg viewBox="-10 -12 120 132">
+      <defs>
+        <filter id="mark-glow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="near"/>
+          <feGaussianBlur in="SourceGraphic" stdDeviation="3.2" result="far"/>
+          <feMerge><feMergeNode in="far"/><feMergeNode in="far"/><feMergeNode in="near"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="mark-glow-soft" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="far"/>
+          <feComponentTransfer in="far" result="faint"><feFuncA type="linear" slope=".45"/></feComponentTransfer>
+          <feMerge><feMergeNode in="faint"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <radialGradient id="mark-pool">
+          <stop offset="0" class="pool-os" stop-opacity=".38"/>
+          <stop offset=".55" class="pool-run" stop-opacity=".10"/>
+          <stop offset="1" class="pool-run" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="mark-fade">
+          <stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+        </radialGradient>
+        <mask id="mark-floor"><ellipse cx="50" cy="100" rx="58" ry="22" fill="url(#mark-fade)"/></mask>
+      </defs>
+      <g class="floor" mask="url(#mark-floor)" opacity=".5">
+        <line x1="-92" y1="72.9" x2="48" y2="153.7"/><line x1="48" y1="72.9" x2="-92" y2="153.7"/>
+        <line x1="-80" y1="72.9" x2="60" y2="153.7"/><line x1="60" y1="72.9" x2="-80" y2="153.7"/>
+        <line x1="-68" y1="72.9" x2="72" y2="153.7"/><line x1="72" y1="72.9" x2="-68" y2="153.7"/>
+        <line x1="-56" y1="72.9" x2="84" y2="153.7"/><line x1="84" y1="72.9" x2="-56" y2="153.7"/>
+        <line x1="-44" y1="72.9" x2="96" y2="153.7"/><line x1="96" y1="72.9" x2="-44" y2="153.7"/>
+        <line x1="-32" y1="72.9" x2="108" y2="153.7"/><line x1="108" y1="72.9" x2="-32" y2="153.7"/>
+        <line x1="-20" y1="72.9" x2="120" y2="153.7"/><line x1="120" y1="72.9" x2="-20" y2="153.7"/>
+        <line x1="-8" y1="72.9" x2="132" y2="153.7"/><line x1="132" y1="72.9" x2="-8" y2="153.7"/>
+        <line x1="4" y1="72.9" x2="144" y2="153.7"/><line x1="144" y1="72.9" x2="4" y2="153.7"/>
+        <line x1="16" y1="72.9" x2="156" y2="153.7"/><line x1="156" y1="72.9" x2="16" y2="153.7"/>
+        <line x1="28" y1="72.9" x2="168" y2="153.7"/><line x1="168" y1="72.9" x2="28" y2="153.7"/>
+        <line x1="40" y1="72.9" x2="180" y2="153.7"/><line x1="180" y1="72.9" x2="40" y2="153.7"/>
+        <line x1="52" y1="72.9" x2="192" y2="153.7"/><line x1="192" y1="72.9" x2="52" y2="153.7"/>
+      </g>
+      <ellipse cx="50" cy="99" rx="44" ry="13" fill="url(#mark-pool)"/>
+      <g class="lines" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <polyline class="run lid" points="10,46 10,27 50,4 90,27 50,50 10,27"/>
+        <polyline class="os" points="90,54 90,73 50,96 10,73"/>
+        <polyline class="os" points="50,64 50,96"/>
+      </g>
+      <g class="core" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polyline class="run lid" points="10,46 10,27 50,4 90,27 50,50 10,27"/>
+        <polyline class="os" points="90,54 90,73 50,96 10,73"/>
+        <polyline class="os" points="50,64 50,96"/>
+      </g>
+    </svg>
+  </div>
+  <button class="theme" id="theme-toggle" type="button">Light mode</button>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <a href="#chat">A conversation</a>
+  <a href="#sandbox">The sandbox behind it</a>
+  <a href="#sleep">Sleep and wake</a>
+  <a href="#app">FeChat as an app</a>
+  <a href="#request">One request</a>
+  <a href="#deploy">A new deployment</a>
+  <a href="#map">What you saw</a>
+</nav>
+
+<!-- ============ A conversation ============ -->
+<section id="chat">
+  <h2>A conversation</h2>
+  <p class="prose">A new conversation in FeChat. The field at the top right names the sandbox's image, here <code>ghcr.io/maltej/debian-ai</code>, a Debian with the usual tools. The first question needs a look at the machine.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/01-chat-machine.webp"><img src="shots/01-chat-machine.webp" width="1024" height="768" alt="FeChat: the question 'What kind of machine are you? Take a look around.', three bash tool calls, and the answer: a small Linux VM, Debian 13, kernel 7.2.6, 2 cores, 483 MiB RAM, 7.8 GB disk."></a></div>
+    <figcaption><span class="fig-no">Fig. 1</span><b>The agent looks before it answers.</b> Each chip is one tool call: <code>bash</code> with <code>uname</code>, <code>nproc</code>, <code>free</code>, <code>which</code>. The first call made the sandbox: FeChat's backend asked FeRun for one, with the conversation's image, and got its ID and a token for it. Every tool call goes to FeRun's MCP door with that token, and the command runs in the sandbox: 2 vCPU and 512 MiB, of which the guest's kernel sees 483 MiB.</figcaption>
+  </figure>
+  <p class="prose">Then something that leaves the machine.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/02-chat-ping.webp"><img src="shots/02-chat-ping.webp" width="1024" height="768" alt="FeChat: 'ping google.com', the tool call opened with its command and output: four replies at about 9 ms, no loss."></a></div>
+    <figcaption><span class="fig-no">Fig. 2</span><b>A real network, from inside a microVM.</b> Opened, a chip shows the command and its output as the sandbox gave them: four replies in about 9 ms.</figcaption>
+  </figure>
+  <p class="prose">FeChat's backend keeps no state. The browser holds the conversation and a signed reference to its sandbox, and sends both back with every message. So any replica of the backend can answer, and a restarted one finds the sandbox again.</p>
+</section>
+
+<!-- ============ The sandbox behind it ============ -->
+<section id="sandbox">
+  <h2>The sandbox behind it</h2>
+  <p class="prose">In FeRun's console, tenant <code>chat</code>, environment <code>sandboxes</code>: what a sandbox costs while nobody talks to it, and what it may reach.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/03-sandboxes.webp"><img src="shots/03-sandboxes.webp" width="1024" height="768" alt="FeRun console: Sandboxes in environment sandboxes: 0 running, 1 paused, 12 hibernated. c9rpysphhkn is paused; the others are hibernated."></a><span class="hl" style="left:30.47%;top:20.05%;width:49.90%;height:4.04%"><b>1</b></span><span class="hl" style="left:30.47%;top:39.06%;width:66.41%;height:6.38%"><b>2</b></span></div>
+    <figcaption><span class="fig-no">Fig. 3</span><b>Thirteen conversations, and not one of them holds memory.</b> <span class="pin">1</span> 0 running, 1 paused, 12 hibernated. Only a running sandbox books RAM and CPU on a node; the others cost disk or object storage, nothing more. <span class="pin">2</span> Ours, <code>c9rpysphhkn</code>, ten seconds after the ping: FeRun paused it because no call came. It reaches <i>nothing of the environment</i>: not FeChat's own services, not the other conversations' sandboxes.</figcaption>
+  </figure>
+  <figure class="shot">
+    <div class="frame"><a href="shots/04-sandbox.webp"><img src="shots/04-sandbox.webp" width="1024" height="768" alt="FeRun console: sandbox c9rpysphhkn, paused on its node, its memory on the node's disk, no RAM, resumes on the next call. Image, node, size 2 vCPU 512 MiB, environment sandboxes, reaches nothing of the environment, out: the internet."></a><span class="hl" style="left:30.47%;top:18.49%;width:66.41%;height:6.64%"><b>1</b></span><span class="hl" style="left:30.47%;top:31.25%;width:23.44%;height:3.78%"><b>2</b></span><span class="hl" style="left:80.18%;top:25.78%;width:16.70%;height:5.73%"><b>3</b></span></div>
+    <figcaption><span class="fig-no">Fig. 4</span><b>Paused: the memory lies on the node's disk, not in its RAM.</b> <span class="pin">1</span> The console says where the sandbox is and what wakes it: the next call. The pause took 3.6 s; a resume in place takes under a second, with every process as it was. <span class="pin">2</span> Its reach: nothing of its environment, but out to the internet. That is why the ping worked. <span class="pin">3</span> <b>Connect an agent</b> hands out a token for the same MCP door FeChat's backend uses; FeChat is one client of FeRun's public API, not a special one.</figcaption>
+  </figure>
+  <p class="prose">What did the agent do in there? FeRun knows, because every tool call passes its MCP door.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/05-agent-record.webp"><img src="shots/05-agent-record.webp" width="1024" height="768" alt="FeRun console: the sandbox's Activity, filtered to tool calls: a timeline with calls at 19:50 and 20:21; the list of calls, the latest opened with its output: up 0 min, Tue Nov 10 19:21:57 UTC 2026."></a><span class="hl" style="left:30.57%;top:13.93%;width:66.21%;height:12.76%"><b>1</b></span><span class="hl" style="left:30.57%;top:63.93%;width:66.21%;height:4.82%"><b>2</b></span><span class="hl" style="left:31.93%;top:43.62%;width:64.84%;height:8.20%"><b>3</b></span></div>
+    <figcaption><span class="fig-no">Fig. 5</span><b>Every command the agent ran is on record, outside the sandbox.</b> <span class="pin">1</span> The tool calls on a timeline: four at 19:50, one at 20:21. <span class="pin">2</span> Each with its command, here <code>uptime &amp;&amp; date</code>, and <span class="pin">3</span> what it printed. ferund writes the record as the calls pass, so nothing inside the sandbox can change it afterwards.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ Sleep and wake ============ -->
+<section id="sleep">
+  <h2>Sleep and wake</h2>
+  <p class="prose">After thirty minutes paused, FeRun hibernated the sandbox: the node wrote the snapshot to the object store and dropped it from its disk.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/06-sandbox-hibernated.webp"><img src="shots/06-sandbox-hibernated.webp" width="1024" height="768" alt="FeRun console: sandbox c9rpysphhkn, hibernated in S3, nothing on a node, resumes on any node; its checkpoint in the object store."></a><span class="hl" style="left:46.88%;top:13.80%;width:44.82%;height:4.17%"><b>1</b></span><span class="hl" style="left:30.47%;top:85.03%;width:44.92%;height:4.17%"><b>2</b></span></div>
+    <figcaption><span class="fig-no">Fig. 6</span><b>Hibernated: on no node at all.</b> <span class="pin">1</span> The sandbox is in the object store alone, and the next call can bring it back on any node that reads the same store, not only on the one it left. <span class="pin">2</span> The checkpoint, its memory and disk, by epoch. Hibernating took 9.4 s. (Taken after its second hibernation, hence "created 1h ago".)</figcaption>
+  </figure>
+  <p class="prose">A minute after the first hibernation, the conversation went on.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/07-chat-wake.webp"><img src="shots/07-chat-wake.webp" width="1024" height="768" alt="FeChat: 'Still there? Show me uptime and date.' The tool call bash 'uptime &amp;&amp; date' with its output: up 0 min, load 0.00, Tue Nov 10 19:21:57 UTC 2026; the answer notes that the sandbox seems to have just been woken up."></a></div>
+    <figcaption><span class="fig-no">Fig. 7</span><b>Back, with the same memory.</b> The message woke the sandbox: FeRun restored it from its checkpoint in 2.7 s, then the command ran. <code>uptime</code> says 0 min, because the guest counts only the time it ran, under a minute in all: for 31 minutes it was frozen, not shut down. Its clock is right all the same. The guest has no NTP; FeOS sets its clock after every resume and keeps it on the node's.</figcaption>
+  </figure>
+  <figure class="shot">
+    <div class="frame"><a href="shots/08-sandbox-states.webp"><img src="shots/08-sandbox-states.webp" width="1024" height="768" alt="FeRun console: the sandbox's Activity filtered by the arrow: five state changes: 19:50:01 creating to running, 19:50:28 pausing to paused, 20:20:39 hibernating to hibernated, 20:21:57 creating to running, 20:22:14 pausing to paused."></a><span class="hl" style="left:30.57%;top:51.82%;width:66.21%;height:9.90%"><b>1</b></span><span class="hl" style="left:30.57%;top:73.83%;width:66.21%;height:7.81%"><b>2</b></span></div>
+    <figcaption><span class="fig-no">Fig. 8</span><b>When it paused, when it hibernated, when it came back.</b> Filtered by <code>→</code>, the Activity keeps the state changes alone. <span class="pin">1</span> On the timeline they form two clusters, half an hour apart. <span class="pin">2</span> At 20:20:39 hibernated, 30 minutes after the pause at 19:50:28; at 20:21:57 running again, after a restore from the store of 2.7 s.</figcaption>
+  </figure>
+  <figure class="plate">
+    <div class="fig-scroll">
+<svg class="dg tl" viewBox="0 0 1060 130" role="img" aria-label="The sandbox's states one after another: creating 4.0 s, running 24 s, pausing 3.6 s, paused 30 min, hibernating 9.3 s, hibernated 75 s, creating 2.7 s, running 11 s, pausing 5.8 s, paused.">
+  <defs><marker id="mt" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0L10,5L0,10z" class="mk"/></marker></defs>
+  <rect class="b-os" x="4.0" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="51.2" y="62" text-anchor="middle">creating</text>
+  <text x="51.2" y="80" text-anchor="middle">4.0 s</text>
+  <text class="lb" x="51.2" y="118" text-anchor="middle">from the image</text>
+  <text class="lb" x="4.0" y="28">19:49:57</text>
+  <path class="ln" d="M98.4 68H110.4" marker-end="url(#mt)"/>
+  <rect class="b-os" x="110.4" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="157.6" y="62" text-anchor="middle">running</text>
+  <text x="157.6" y="80" text-anchor="middle">24 s</text>
+  <text class="lb" x="157.6" y="118" text-anchor="middle">questions 1, 2</text>
+  <text class="lb" x="110.4" y="28">19:50:01</text>
+  <path class="ln" d="M204.8 68H216.8" marker-end="url(#mt)"/>
+  <rect class="b-os" x="216.8" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="264.0" y="62" text-anchor="middle">pausing</text>
+  <text x="264.0" y="80" text-anchor="middle">3.6 s</text>
+  <text class="lb" x="264.0" y="118" text-anchor="middle">snapshot</text>
+  <text class="lb" x="216.8" y="28">19:50:25</text>
+  <path class="ln" d="M311.2 68H323.2" marker-end="url(#mt)"/>
+  <rect class="b-plain" x="323.2" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="370.4" y="62" text-anchor="middle">paused</text>
+  <text x="370.4" y="80" text-anchor="middle">30 min</text>
+  <text class="lb" x="370.4" y="118" text-anchor="middle">on the node</text>
+  <text class="lb" x="323.2" y="28">19:50:28</text>
+  <path class="ln" d="M417.6 68H429.6" marker-end="url(#mt)"/>
+  <rect class="b-plain" x="429.6" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="476.8" y="62" text-anchor="middle">hibernating</text>
+  <text x="476.8" y="80" text-anchor="middle">9.3 s</text>
+  <text class="lb" x="476.8" y="118" text-anchor="middle">to the store</text>
+  <text class="lb" x="429.6" y="28">20:20:30</text>
+  <path class="ln" d="M524.0 68H536.0" marker-end="url(#mt)"/>
+  <rect class="b-plain" x="536.0" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="583.2" y="62" text-anchor="middle">hibernated</text>
+  <text x="583.2" y="80" text-anchor="middle">75 s</text>
+  <text class="lb" x="583.2" y="118" text-anchor="middle">in the store</text>
+  <text class="lb" x="536.0" y="28">20:20:39</text>
+  <path class="ln" d="M630.4 68H642.4" marker-end="url(#mt)"/>
+  <rect class="b-os" x="642.4" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="689.6" y="62" text-anchor="middle">creating</text>
+  <text x="689.6" y="80" text-anchor="middle">2.7 s</text>
+  <text class="lb" x="689.6" y="118" text-anchor="middle">from the store</text>
+  <text class="lb" x="642.4" y="28">20:21:54</text>
+  <path class="ln" d="M736.8 68H748.8" marker-end="url(#mt)"/>
+  <rect class="b-os" x="748.8" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="796.0" y="62" text-anchor="middle">running</text>
+  <text x="796.0" y="80" text-anchor="middle">11 s</text>
+  <text class="lb" x="796.0" y="118" text-anchor="middle">question 3</text>
+  <text class="lb" x="748.8" y="28">20:21:57</text>
+  <path class="ln" d="M843.2 68H855.2" marker-end="url(#mt)"/>
+  <rect class="b-os" x="855.2" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="902.4" y="62" text-anchor="middle">pausing</text>
+  <text x="902.4" y="80" text-anchor="middle">5.8 s</text>
+  <text class="lb" x="902.4" y="118" text-anchor="middle">snapshot</text>
+  <text class="lb" x="855.2" y="28">20:22:08</text>
+  <path class="ln" d="M949.6 68H961.6" marker-end="url(#mt)"/>
+  <rect class="b-plain" x="961.6" y="40" width="94.4" height="56" rx="4"/>
+  <text class="tm2" x="1008.8" y="62" text-anchor="middle">paused</text>
+  <text x="1008.8" y="80" text-anchor="middle">until the next call</text>
+  <text class="lb" x="1008.8" y="118" text-anchor="middle">on the node</text>
+  <text class="lb" x="961.6" y="28">20:22:14</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 9</span><b>Filled states book RAM and CPU on the node, empty ones do not.</b> Of its 32 minutes the sandbox held memory for 52 seconds. The boxes are not to scale; the times above them are the console's, Central European. A restore is a <code>creating</code> from the checkpoint instead of the image.</figcaption>
+  </figure>
+  <div class="times">
+    <div class="time"><div class="v">4.0 s</div><div class="k">the create, from the image to the first tool call</div></div>
+    <div class="time"><div class="v">10 s</div><div class="k">without a call, then a pause (FeRun's default)</div></div>
+    <div class="time"><div class="v">3.6 s</div><div class="k">the pause: the snapshot written on the node</div></div>
+    <div class="time"><div class="v">30 min</div><div class="k">paused, then hibernated (this installation's <code>--hibernate-after</code>)</div></div>
+    <div class="time"><div class="v">9.4 s</div><div class="k">the hibernation: the snapshot into the object store</div></div>
+    <div class="time"><div class="v">2.7 s</div><div class="k">the restore from the object store, before the tool call ran</div></div>
+  </div>
+</section>
+
+<!-- ============ FeChat as an app ============ -->
+<section id="app">
+  <h2>FeChat as an app</h2>
+  <p class="prose">The other environment of the tenant, <code>prod</code>, holds FeChat itself: <code>web</code>, an nginx with the single-page app, and <code>api</code>, the Go backend. Nothing here knows that the app is FeRun's own chat.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/09-prod.webp"><img src="shots/09-prod.webp" width="1024" height="768" alt="FeRun console: environment prod, deployment 5 deployed, every object matches it, public at chat.fecore.dev. Traffic of the last hour per service, and the routes /api to api and / to web."></a><span class="hl" style="left:30.57%;top:34.64%;width:66.21%;height:13.02%"><b>1</b></span><span class="hl" style="left:30.57%;top:50.52%;width:32.52%;height:36.46%"><b>2</b></span><span class="hl" style="left:64.16%;top:50.39%;width:32.71%;height:33.98%"><b>3</b></span></div>
+    <figcaption><span class="fig-no">Fig. 10</span><b>Running as deployed, getting traffic, reachable: one screen answers all three.</b> <span class="pin">1</span> Every object matches deployment 5: FeRun brought the environment to its latest deployment and keeps it there. When something is wrong, an incident takes this place, with the log lines that explain it. <span class="pin">2</span> Requests per service from the services' own OpenTelemetry spans, with no sidecar and no mesh; for <code>web</code>, which sends none, from the ingress. <code>api</code>'s p95 of 14 s is the chat: an answer streams until the model is done. <span class="pin">3</span> The routes at <code>chat.fecore.dev</code>, a domain of the tenant's own, proven by a TXT record, its certificate fetched by FeRun.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ One request ============ -->
+<section id="request">
+  <h2>One request</h2>
+  <p class="prose">The third message, the one that woke the sandbox, seen from FeChat's backend.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/10-logs.webp"><img src="shots/10-logs.webp" width="1024" height="768" alt="FeRun console: service api, Logs: the backend's lines that the conversation's sandbox c9rpysphhkn was created and an MCP session established; request lines POST /api/v1/chat with a trace link, the last one 10.5 s."></a><span class="hl" style="left:30.57%;top:53.78%;width:66.21%;height:8.85%"><b>1</b></span><span class="hl" style="left:30.57%;top:83.07%;width:66.21%;height:6.51%"><b>2</b></span></div>
+    <figcaption><span class="fig-no">Fig. 11</span><b>The app's log names the sandbox from Fig. 3.</b> <span class="pin">1</span> FeChat's backend writes which sandbox it made for the conversation, <code>c9rpysphhkn</code>: here the two halves of the tenant meet in one line. <span class="pin">2</span> Request lines (⇄) stand between the app's own lines, each with a link to its trace. This one took 10.5 s: the third message.</figcaption>
+  </figure>
+  <figure class="shot">
+    <div class="frame"><a href="shots/11-trace.webp"><img src="shots/11-trace.webp" width="1024" height="768" alt="FeRun console: the trace of the third message, 10.5 s, 8 spans: ferun-ingress POST /api/v1/chat; api /api/v1/chat; chat kimi-k3-sovereign 1.0 s; execute_tool bash 3.9 s with POST /mcp; chat kimi-k3-sovereign 5.5 s."></a><span class="hl" style="left:30.47%;top:69.79%;width:66.41%;height:6.25%"><b>1</b></span><span class="hl" style="left:30.47%;top:80.99%;width:66.41%;height:6.25%"><b>2</b></span><span class="hl" style="left:30.47%;top:92.32%;width:66.41%;height:6.25%"><b>3</b></span></div>
+    <figcaption><span class="fig-no">Fig. 12</span><b>Where the 10.5 seconds went.</b> <span class="pin">1</span> The model picks its tool: 1.0 s. <span class="pin">2</span> The tool call: 3.9 s, of which 2.7 s are FeRun bringing the sandbox back from the object store; the command itself ran in under a second. <span class="pin">3</span> The model writes its answer: 5.5 s. Waking a sandbox that slept in the store cost this request a quarter of its time.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ A new deployment ============ -->
+<section id="deploy">
+  <h2>A new deployment</h2>
+  <p class="prose">An environment changes only by deployments. Each is numbered and immutable and holds the whole spec; FeChat has had five.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/12-deployment-5.webp"><img src="shots/12-deployment-5.webp" width="1024" height="768" alt="FeRun console: deployment 5: base deployment 4, message, times; changes against deployment 4: service web's image from one digest to another, replaces 1 pod; the normalised spec folded."></a><span class="hl" style="left:31.54%;top:56.90%;width:64.26%;height:12.37%"><b>1</b></span><span class="hl" style="left:30.47%;top:70.57%;width:66.41%;height:4.04%"><b>2</b></span></div>
+    <figcaption><span class="fig-no">Fig. 13</span><b>A deployment names exactly what it changed.</b> <span class="pin">1</span> Against its base, deployment 4: <code>web</code>'s image, from one digest to another, which replaced one pod; <code>api</code> was not touched. Images are pinned to digests when a deployment is made, so a tag that moves later changes nothing that runs. <span class="pin">2</span> Folded below, the whole spec as applied, with defaults and secret versions filled in: any deployment can be read back, and an earlier one deployed again.</figcaption>
+  </figure>
+  <p class="prose">The next one starts as a draft.</p>
+  <figure class="shot">
+    <div class="frame"><a href="shots/13-builder.webp"><img src="shots/13-builder.webp" width="1024" height="768" alt="FeRun console: New deployment: draft of deployment 6, starts from deployment 5; the objects on the left, the form of service api on the right with its image pinned to a digest."></a><span class="hl" style="left:31.93%;top:35.68%;width:63.67%;height:11.59%"><b>1</b></span><span class="hl" style="left:58.50%;top:79.17%;width:37.11%;height:13.02%"><b>2</b></span></div>
+    <figcaption><span class="fig-no">Fig. 14</span><b>A draft of deployment 6, a form per object.</b> <span class="pin">1</span> The draft starts from deployment 5 and lives in the browser; nothing in the environment changes until it is deployed. <span class="pin">2</span> The image as written is pinned to the digest it has now, so an edit elsewhere in the draft does not pull a tag that moved in the meantime.</figcaption>
+  </figure>
+  <figure class="shot">
+    <div class="frame"><a href="shots/14-review.webp"><img src="shots/14-review.webp" width="1024" height="768" alt="FeRun console: Review of deployment 6 against deployment 5: the plan accepts it; changes: service api replicas 1 to 2, in place; reachability: the ingress reaches api and web on http 8080; egress of api only to three hosts; the message field."></a><span class="hl" style="left:58.50%;top:43.49%;width:37.11%;height:9.38%"><b>1</b></span><span class="hl" style="left:58.50%;top:67.19%;width:37.11%;height:11.46%"><b>2</b></span><span class="hl" style="left:58.50%;top:79.69%;width:37.11%;height:8.85%"><b>3</b></span></div>
+    <figcaption><span class="fig-no">Fig. 15</span><b>The review says what a deployment would do, before it does it.</b> <span class="pin">1</span> One change: <code>api</code> from one replica to two, in place, no other pod replaced. <span class="pin">2</span> Who would reach whom, derived from the spec: the ingress reaches <code>api</code> and <code>web</code> through their routes, and nothing else gets in. <span class="pin">3</span> Where each service may go out: <code>api</code> only to FeRun, the sign-in and the model, as its spec declares; <code>web</code> nowhere. Not deployed here; the draft was discarded.</figcaption>
+  </figure>
+</section>
+
+<!-- ============ What you saw ============ -->
+<section id="map">
+  <h2>What you saw</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Figure</th><th>What it shows</th><th>Where to read on</th></tr></thead>
+    <tbody>
+      <tr><td class="nw">1, 2</td><td>An agent's tool calls, run in a sandbox through FeRun's MCP door</td><td><a href="/docs/#overview">Overview</a>, <a href="/docs/#components">Components</a></td></tr>
+      <tr><td class="nw">3–5</td><td>Sandboxes in an environment, what they reach, the record of their tool calls</td><td><a href="/docs/#caas">CaaS on the sandbox engine</a>, <a href="/docs/#network">Who reaches whom</a></td></tr>
+      <tr><td class="nw">6–9</td><td>Pause, hibernation, restore; the guest's clock</td><td><a href="/docs/#pod-life">A pod's life</a>, <a href="/docs/#node">Inside a node</a></td></tr>
+      <tr><td class="nw">10</td><td>An environment with services, routes and a domain</td><td><a href="/docs/#caas">CaaS</a>, <a href="/docs/#request">A request's path</a></td></tr>
+      <tr><td class="nw">11, 12</td><td>Logs and traces from the services' OpenTelemetry</td><td><a href="/docs/#components">Components</a></td></tr>
+      <tr><td class="nw">13–15</td><td>Deployments, the builder and its plan, reachability from declarations</td><td><a href="/docs/#caas">CaaS</a>, <a href="/docs/#network">Who reaches whom</a></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>
+  Screenshots taken with Playwright from the live installation, at 1024×768 with twice the pixels. The page is <code>web/public/demo/index.html</code>; ferund serves it at <code>/demo/</code>, beside <a href="/docs/">the architecture page</a>.
+</footer>
+
+</div>
+<script>
+  // The toggle writes the key the UI's toggle writes.
+  (function () {
+    var root = document.documentElement;
+    var button = document.getElementById('theme-toggle');
+    function label() {
+      button.textContent = root.dataset.theme === 'light' ? 'Dark mode' : 'Light mode';
+    }
+    label();
+    button.addEventListener('click', function () {
+      var next = root.dataset.theme === 'light' ? 'dark' : 'light';
+      root.dataset.theme = next;
+      try { localStorage.setItem('ferun-theme', next); } catch (e) { /* this page only */ }
+      label();
+    });
+  })();
+</script>
+</body>
+</html>
