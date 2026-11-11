@@ -182,11 +182,13 @@ func scanActivity(row pgx.Row) (ActivityRow, error) {
 }
 
 // ActivityQuery selects a page of activity: the newest Limit rows older
-// than BeforeTsNs (0: no bound) of Source ("": any).
+// than BeforeTsNs (0: no bound) of Source ("": any), none of SkipKinds.
+// Traffic records take Limit and BeforeTsNs alone.
 type ActivityQuery struct {
 	Limit      int
 	BeforeTsNs int64
 	Source     string
+	SkipKinds  []string
 }
 
 // listActivity returns the page of rows matching where (with its first
@@ -200,6 +202,10 @@ func (s *Store) listActivity(ctx context.Context, where string, arg any, q Activ
 	if q.Source != "" {
 		args = append(args, q.Source)
 		where += fmt.Sprintf(" AND source = $%d", len(args))
+	}
+	if len(q.SkipKinds) > 0 {
+		args = append(args, q.SkipKinds)
+		where += fmt.Sprintf(" AND kind <> ALL($%d)", len(args))
 	}
 	args = append(args, q.Limit)
 	rows, err := s.q.Query(ctx, "SELECT "+activityCols+" FROM activity WHERE "+where+

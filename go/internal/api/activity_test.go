@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/activity"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -222,4 +223,96 @@ func TestNodeActivity(t *testing.T) {
 	if evs[0]["eventId"] != fmt.Sprintf("n1:%s:start", start) || evs[1]["podId"] != pod.String() {
 		t.Fatalf("events %+v", evs)
 	}
+}
+
+// A tenant reads its sandbox's activity on its own route (ADR 0031): a
+// reader of the sandbox's environment, and FeCode's admin token, get its
+// rows and traffic without the fleet's part (a placement without the
+// other nodes' verdicts, no overbooking); an operator gets them whole;
+// another tenant's sandbox is absent to a tenant-wide grant, a sandbox of
+// another environment to an environment's reader.
+func TestTenantSandboxActivity(t *testing.T) {
+	t.Parallel()
+	w := newPeopleWorld(t, envOptions{})
+	ctx := context.Background()
+	id := w.podIn(t, "GET /api/v1/sandboxes/{id}", w.stage)
+	sb, err := podid.Parse(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := w.e.st.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
+		return store.NewSandbox{ID: id, Owner: "other", Image: "img", VCPUs: 1, MemoryMiB: 512,
+			EnvironmentID: mkEnvRow(t, w.e, "other", "dev")}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inProd := w.podIn(t, "GET /api/v1/sandboxes/{id}", w.prod)
+	base := time.Now().Add(-time.Minute).UnixNano()
+	ferundRow := func(ts int64, of podid.ID, kind, name, detail string) store.ActivityRow {
+		return store.ActivityRow{TsNs: base + ts, SandboxID: of, TenantID: testTenant, InstanceID: "i1", Node: "n1",
+			Source: store.SourceFerund, Kind: kind, Category: "lifecycle", Name: name, Detail: json.RawMessage(detail)}
+	}
+	tool := ferundRow(3, sb, "tool_start", "", `{}`)
+	tool.Category, tool.Tool, tool.Params = "tool", "bash", json.RawMessage(`{"command":"ls"}`)
+	if err := w.e.st.InsertActivity(ctx,
+		ferundRow(1, sb, activity.KindPlacement, "placed on n1 (create)", `{"node":"n1","op":"create","trigger":"api",`+
+			`"candidates":[{"node":"n1","feasible":true},{"node":"n2","feasible":false,"reason":"memory: 3900 of 4096 MiB booked"}]}`),
+		ferundRow(2, sb, activity.KindOverbooked, "node n1 overbooked by sandbox "+id+": memory", `{"node":"n1","gate":"memory"}`),
+		tool,
+		ferundRow(4, foreign.ID, "tool_start", "the other tenant's", `{}`),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.e.st.InsertTraffic(ctx, store.TrafficRow{TsNs: base + 5, Node: "n1", StartID: uuid.New(), Seq: 1, PodID: sb,
+		SandboxID: sb, TenantID: testTenant, Kind: "flow", Detail: json.RawMessage(`{"flow":{"bytes_sent":"10"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/v1/sandboxes/" + id + "/activity"
+	read := func(p principal, path string) []map[string]any {
+		t.Helper()
+		resp := w.e.serve(p.request("GET", path, nil))
+		expect(t, resp, http.StatusOK, "")
+		return decode[eventsAnswer](t, resp).Events
+	}
+	placement := func(evs []map[string]any) map[string]any {
+		t.Helper()
+		var d map[string]any
+		if err := json.Unmarshal([]byte(fmt.Sprint(evs[0]["detailJson"])), &d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	ps := w.principals(t)
+	admin, operator, stageRead := ps[0], ps[4], ps[8]
+	for _, p := range []principal{stageRead, admin} {
+		evs := read(p, path)
+		if got := strings.Join(fieldOf(evs, "kind"), ","); got != "placement,tool_start,flow" {
+			t.Fatalf("%s: kinds %s", p.name, got)
+		}
+		if d := placement(evs); d["node"] != "n1" || d["op"] != "create" || d["candidates"] != nil {
+			t.Fatalf("%s: placement %v", p.name, d)
+		}
+		if evs[1]["paramsJson"] == "" || evs[1]["tool"] != "bash" {
+			t.Fatalf("%s: tool %+v", p.name, evs[1])
+		}
+		if got := strings.Join(fieldOf(read(p, path+"?source=traffic"), "kind"), ","); got != "flow" {
+			t.Fatalf("%s: traffic %s", p.name, got)
+		}
+	}
+	evs := read(operator, path)
+	if got := strings.Join(fieldOf(evs, "kind"), ","); got != "placement,overbooked,tool_start,flow" {
+		t.Fatalf("operator: kinds %s", got)
+	}
+	if c, _ := placement(evs)["candidates"].([]any); len(c) != 2 {
+		t.Fatalf("operator: placement %v", placement(evs))
+	}
+
+	expect(t, w.e.serve(admin.request("GET", "/api/v1/sandboxes/"+foreign.ID.String()+"/activity", nil)),
+		http.StatusNotFound, errBody("unknown sandbox "+foreign.ID.String()))
+	expect(t, w.e.serve(stageRead.request("GET", "/api/v1/sandboxes/"+inProd+"/activity", nil)),
+		http.StatusNotFound, errBody("unknown sandbox "+inProd))
+	expect(t, w.e.serve(stageRead.request("GET", path+"?source=manager", nil)), http.StatusBadRequest,
+		errBody(`source must be ferund, feosd, authn or traffic, got "manager"`))
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/activity"
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -96,7 +97,8 @@ func activityQuery(r *http.Request) (store.ActivityQuery, error) {
 
 // sandboxActivity is GET /api/v1/admin/sandboxes/{id}/activity: a
 // sandbox's attributed activity, ascending by time, the newest page before
-// beforeTsNs. No existence check: a deleted sandbox's log stays readable.
+// beforeTsNs, whole. No existence check: a deleted sandbox's log stays
+// readable.
 func (s *server) sandboxActivity(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathSandboxID(r)
 	if err != nil {
@@ -113,6 +115,68 @@ func (s *server) sandboxActivity(w http.ResponseWriter, r *http.Request) error {
 		func(ctx context.Context, q store.ActivityQuery) ([]store.TrafficRow, error) {
 			return s.st.ListSandboxTraffic(ctx, id, q)
 		})
+}
+
+// tenantSandboxActivity is GET /api/v1/sandboxes/{id}/activity: the
+// activity of one of the tenant's sandboxes for the readers of its
+// environment (ADR 0031), with the admin route's parameters and answer
+// but without what is the fleet's: a placement names the node it chose
+// and no other node's verdict, and a node's overbooking is left out. An
+// operator reads it whole. A deleted sandbox's log is the admin route's.
+func (s *server) tenantSandboxActivity(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	q, err := activityQuery(r)
+	if err != nil {
+		return err
+	}
+	t, _ := auth.TenantFrom(r.Context())
+	whole := t.Principal.Operator
+	if !whole {
+		q.SkipKinds = fleetKinds
+	}
+	return s.activityPage(w, r, q,
+		func(ctx context.Context, q store.ActivityQuery) ([]store.ActivityRow, error) {
+			rows, err := s.st.ListSandboxActivity(ctx, sb.ID, q)
+			if err != nil || whole {
+				return rows, err
+			}
+			for i := range rows {
+				rows[i] = withoutFleet(rows[i])
+			}
+			return rows, nil
+		},
+		func(ctx context.Context, q store.ActivityQuery) ([]store.TrafficRow, error) {
+			return s.st.ListSandboxTraffic(ctx, sb.ID, q)
+		})
+}
+
+// fleetKinds are the kinds of a sandbox's rows that tell of the fleet,
+// not of the sandbox: a node's overbooking, with its booked capacity.
+var fleetKinds = []string{activity.KindOverbooked}
+
+// withoutFleet is a row as a tenant reads it: a placement without its
+// candidates, every node's verdict on the pod with that node's room. A
+// detail that does not parse is left out whole.
+func withoutFleet(a store.ActivityRow) store.ActivityRow {
+	if a.Kind != activity.KindPlacement || len(a.Detail) == 0 {
+		return a
+	}
+	var d map[string]json.RawMessage
+	if err := json.Unmarshal(a.Detail, &d); err != nil {
+		a.Detail = nil
+		return a
+	}
+	delete(d, "candidates")
+	b, err := json.Marshal(d)
+	if err != nil {
+		a.Detail = nil
+		return a
+	}
+	a.Detail = b
+	return a
 }
 
 // nodeActivity is GET /api/v1/admin/nodes/{node}/activity: a node's own

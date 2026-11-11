@@ -157,6 +157,13 @@ describe('the tenant, with the session', () => {
     expect(calls[0].init.credentials).toBe('same-origin');
   });
 
+  it("reads a sandbox's activity in the tenant, with a source and a page bound (ADR 0031)", async () => {
+    setActiveTenant('acme');
+    await api.listActivity('0199f0b7-1c2d-7e3f-8a00-00000000e2e0', { source: 'traffic', beforeTsNs: '123' });
+    expect(calls[0].path).toBe('/api/v1/sandboxes/0199f0b7-1c2d-7e3f-8a00-00000000e2e0/activity?limit=300&beforeTsNs=123&source=traffic');
+    expect(calls[0].init.headers['FeRun-Tenant']).toBe('acme');
+  });
+
   it('a create names no sandbox ID: ferund mints it', async () => {
     setActiveTenant('acme');
     answer(201, { status: { sandboxId: 'abcdefghjkm' }, token: 't', created: true });
@@ -291,11 +298,9 @@ describe('the tenant, with the session', () => {
 });
 
 describe('the admin routes', () => {
-  it('reads activity with a source and a page bound', async () => {
-    await api.listActivity('0199f0b7-1c2d-7e3f-8a00-00000000e2e0', { source: 'traffic' });
-    await api.nodeActivity('node-a', { beforeTsNs: '123' });
-    expect(calls[0].path).toBe('/api/v1/admin/sandboxes/0199f0b7-1c2d-7e3f-8a00-00000000e2e0/activity?limit=300&source=traffic');
-    expect(calls[1].path).toBe('/api/v1/admin/nodes/node-a/activity?limit=300&beforeTsNs=123');
+  it("reads a node's activity with a source and a page bound", async () => {
+    await api.nodeActivity('node-a', { beforeTsNs: '123', source: 'feosd' });
+    expect(calls[0].path).toBe('/api/v1/admin/nodes/node-a/activity?limit=300&beforeTsNs=123&source=feosd');
   });
 
   it('patches, removes and drains nodes', async () => {

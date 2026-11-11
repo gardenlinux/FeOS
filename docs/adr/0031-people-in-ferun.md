@@ -193,8 +193,17 @@ Two things outside FeRun shape the decision:
   and shows the MCP address); tenants' jobs (create, cancel, the log's
   tail); logs and traces; members, invitations, tokens, and the use
   against the limits.
+- A sandbox's activity is its environment's: whoever reads the
+  environment sees the sandbox's Activity and Network, the commands its
+  agents ran with their output, its state changes (paused, hibernated,
+  restored) and its traffic, as they read its services' logs, on the
+  tenant's route `GET /api/v1/sandboxes/{id}/activity`. What tells of
+  the fleet stays out of it: a placement names the node it chose, not
+  every node's verdict with that node's room, and a node's overbooking
+  is not shown. An operator reads it whole, a deleted sandbox's too, on
+  the admin route.
 - The operators' pages (nodes, join tokens, instances, every tenant,
-  people, activity) are for operators only.
+  people) are for operators only.
 - The browser keeps no tenant token: the session acts. What a role
   cannot do is not offered; the API decides.
 
@@ -274,6 +283,15 @@ Two things outside FeRun shape the decision:
   migration beside it.
 - **A tenant per person**, no members: sharing would mean sharing a
   token, and nobody would know who changed what.
+- **A sandbox's activity for operators only**, the rule until
+  2026-11-11, because it holds the tool calls' parameters and output.
+  Those are the tenant's own, written by its agents in its sandboxes,
+  and a reader of the environment reads its logs, which hold as much;
+  kept from the tenant, nobody but an operator could see what an agent
+  ran or when a sandbox paused and hibernated.
+- **The activity whole for its readers**: a placement's verdicts name
+  every node and its booked room, which is the fleet's, the same for
+  every tenant, and no tenant's to read.
 - **An authorization engine** (OpenFGA, SpiceDB): another system to run
   and keep consistent with ferund's rows, for three roles on two scopes.
 - **Labels of their own in the apps zone** (a prefix per tenant made by
@@ -340,4 +358,6 @@ recorded what the implementation chose, and 62c12da made the session's
 cookie host-only. ADR 0035 (fea6fcb, 2026-11-07) moved sandboxes,
 tenants' jobs and attached services from the tenant grant to the
 environment's. The general MCP door for a person's agents, planned as a
-later step, was not built and is in the backlog.
+later step, was not built and is in the backlog. On 2026-11-11 a
+sandbox's Activity and Network went from the operators to the readers
+of its environment, without the fleet's part.

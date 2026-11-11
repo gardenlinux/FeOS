@@ -9,8 +9,8 @@
 //            in (OIDC through the provider, or Basic with --admin-users).
 //   admin    /api/v1/admin/…: an operator's session cookie, or the Basic
 //            credentials of this tab (sessionStorage). Tenants, nodes,
-//            join tokens, instances and the activity log. The UI calls
-//            them for operators only.
+//            join tokens, instances and the nodes' activity. The UI
+//            calls them for operators only.
 //   tenant   /api/v1/sandboxes, /api/v1/tools, /api/v1/environments,
 //            /api/v1/tenant/…: the person's session, the tenant named in
 //            the header FeRun-Tenant (ADR 0031). The browser keeps no
@@ -312,17 +312,17 @@ export const api = {
   revokeJoinToken: (id) => adminCall('DELETE', `/join-tokens/${enc(id)}`),
   listInstances: () => adminCall('GET', '/instances'),
 
-  // Admin: a sandbox's activity, ascending; source is '', ferund, feosd,
-  // authn or traffic.
-  listActivity: (sandboxId, { beforeTsNs, source } = {}) =>
-    adminCall('GET', `/sandboxes/${enc(sandboxId)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
-
   // In the tenant. A sandbox is of an environment (ADR 0035): the list
   // of one (its name or ID), or without it every sandbox the session may
   // read.
   listSandboxes: (environment = '') => tenantCall('GET', '/sandboxes' + query({ environment })),
   // One sandbox, with its environment {id, name}.
   getSandbox: (id) => tenantCall('GET', `/sandboxes/${enc(id)}`),
+  // A sandbox's activity, ascending; source is '', ferund, feosd, authn
+  // or traffic. An operator gets it whole, everyone else without the
+  // fleet's part (ADR 0031).
+  listActivity: (sandboxId, { beforeTsNs, source } = {}) =>
+    tenantCall('GET', `/sandboxes/${enc(sandboxId)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
   // status.sandboxId.

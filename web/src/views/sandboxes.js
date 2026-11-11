@@ -146,30 +146,26 @@ export function ownerShown(sb, tenant) {
   return o && o !== tenant ? o : '';
 }
 
-// SANDBOX_TABS are a sandbox's tabs; operator: an operator's only (they
-// read admin routes).
+// SANDBOX_TABS are a sandbox's tabs, every reader of its environment's
+// (ADR 0031): Network and Activity read its activity, which the API
+// gives an operator whole and everyone else without the fleet's part.
 export const SANDBOX_TABS = [
   { key: 'overview', label: 'Overview', icon: 'gauge' },
   { key: 'connect', label: 'Connect', icon: 'plug' },
   { key: 'credentials', label: 'Credentials', icon: 'lock' },
-  { key: 'network', label: 'Network', icon: 'globe', operator: true },
-  { key: 'activity', label: 'Activity', icon: 'activity', operator: true },
+  { key: 'network', label: 'Network', icon: 'globe' },
+  { key: 'activity', label: 'Activity', icon: 'activity' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
 // EARLIER_TABS map a tab's earlier name to its name.
 const EARLIER_TABS = { tokens: 'connect', access: 'credentials' };
 
-// sandboxTabs are the tabs can offers.
-export function sandboxTabs(can) {
-  return SANDBOX_TABS.filter((t) => !t.operator || (can && can.operator));
-}
-
-// activeTab is the tab a route's tab names among those can offers: an
-// earlier name is its new one, anything else the overview.
-export function activeTab(tab, can) {
+// activeTab is the tab a route's tab names: an earlier name is its new
+// one, anything else the overview.
+export function activeTab(tab) {
   const t = EARLIER_TABS[tab] || tab;
-  return sandboxTabs(can).some((x) => x.key === t) ? t : 'overview';
+  return SANDBOX_TABS.some((x) => x.key === t) ? t : 'overview';
 }
 
 // newSandboxForm is the create form's start: in env, reaching nothing

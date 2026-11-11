@@ -114,7 +114,8 @@ export function can(access) {
     // A person leaves a tenant they hold grants in; an operator is no
     // member to leave.
     leave: member && !(access && access.operator),
-    // The activity log and the nodes are the operators' (admin routes).
+    // The nodes and the platform's pages are the operators' (admin
+    // routes).
     operator: !!(access && access.operator),
   };
 }

@@ -43,6 +43,7 @@ var routeNeeds = map[string]string{
 	"POST /api/v1/sandboxes/{id}/tokens":                        "write sandbox's environment",
 	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}":               "write sandbox's environment",
 	"GET /api/v1/sandboxes/{id}/access":                         "read sandbox's environment",
+	"GET /api/v1/sandboxes/{id}/activity":                       "read sandbox's environment",
 	"POST /api/v1/kube/preflight":                               "write tenant",
 	"POST /api/v1/ssh/preflight":                                "write tenant",
 	"POST /api/v1/http/preflight":                               "write tenant",

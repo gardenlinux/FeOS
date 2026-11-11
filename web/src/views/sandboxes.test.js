@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeTab, bucketOf, canPause, canResume, connectSnippets, createRequest, credentialsOf, filterSandboxes, fmtMem,
-  newSandboxForm, ownerShown, sandboxMeta, sandboxTabs, sideSandboxes, byActivity, SIDE_FOLD, sizeWords, stateCounts, stateWords, toolSummary,
+  newSandboxForm, ownerShown, sandboxMeta, SANDBOX_TABS, sideSandboxes, byActivity, SIDE_FOLD, sizeWords, stateCounts, stateWords, toolSummary,
 } from './sandboxes.js';
 
 // The sandbox pages' derivations, from sandboxes as GET /api/v1/sandboxes
@@ -91,18 +91,16 @@ describe('the list', () => {
 });
 
 describe('tabs', () => {
-  it("leaves the operators' tabs out for others", () => {
-    expect(sandboxTabs({ operator: false }).map((t) => t.key)).toEqual(['overview', 'connect', 'credentials', 'settings']);
-    expect(sandboxTabs({ operator: true }).map((t) => t.key))
-      .toEqual(['overview', 'connect', 'credentials', 'network', 'activity', 'settings']);
+  it("offers every tab to its environment's readers", () => {
+    expect(SANDBOX_TABS.map((t) => t.key)).toEqual(['overview', 'connect', 'credentials', 'network', 'activity', 'settings']);
   });
 
-  it('maps earlier names and refuses what the role lacks', () => {
-    expect(activeTab('tokens', {})).toBe('connect');
-    expect(activeTab('access', {})).toBe('credentials');
-    expect(activeTab('activity', { operator: false })).toBe('overview');
-    expect(activeTab('activity', { operator: true })).toBe('activity');
-    expect(activeTab('nope', {})).toBe('overview');
+  it('maps earlier names and anything else to the overview', () => {
+    expect(activeTab('tokens')).toBe('connect');
+    expect(activeTab('access')).toBe('credentials');
+    expect(activeTab('activity')).toBe('activity');
+    expect(activeTab('network')).toBe('network');
+    expect(activeTab('nope')).toBe('overview');
   });
 });
 

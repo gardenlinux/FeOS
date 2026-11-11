@@ -1290,7 +1290,13 @@ sandboxes, without its environments' instances), `environmentCount` (its
 environments not being deleted) and its tokens (hashed, shown once),
 nodes (with their connections to the serving instance, certificates,
 drain, removal and capacity settings), join tokens, service tokens (list and revoke, [The sink](#the-sink)), instances and the leader, and the
-activity of a sandbox or a node, with gaps and traffic records. `GET
+activity of a sandbox or a node, with gaps and traffic records, whole
+and a deleted sandbox's too. A tenant reads its own sandbox's on `GET
+/api/v1/sandboxes/{id}/activity` (read on its environment, [ADR
+0031](../adr/0031-people-in-ferun.md)), with the same parameters and
+answer but without the fleet's part: a `placement` row's detail has no
+`candidates`, and `overbooked` rows are left out; an operator's session
+gets it whole there too. `GET
 /api/v1/admin/nodes` answers the nodes and `defaults`, the serving
 instance's settings that the UI explains the fleet with:
 `telemetryIntervalSeconds`, `nodeTtlSeconds`, `lostGraceSeconds` and
@@ -2200,8 +2206,8 @@ say which, on the database clock.
 
 The UI is the tenants' console ([ADR 0031](../adr/0031-people-in-ferun.md)).
 `/auth/me` decides what it offers (`web/src/people.js`): an operator gets
-the operators' pages (tenants, nodes, join tokens, instances, a sandbox's
-activity and network) and acts in every tenant as its admin; everyone
+the operators' pages (tenants, nodes, join tokens, instances) and acts
+in every tenant as its admin; everyone
 else gets their tenants with their roles ("Your tenants", a new one with
 `POST /api/v1/tenants`), never an operator's page, and the UI calls no
 admin route for them. The browser keeps no tenant token: every tenant

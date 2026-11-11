@@ -74,6 +74,7 @@ var routeClasses = map[string]class{
 	"POST /api/v1/sandboxes/{id}/tokens":          classTenant,
 	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}": classTenant,
 	"GET /api/v1/sandboxes/{id}/access":           classTenant,
+	"GET /api/v1/sandboxes/{id}/activity":         classTenant,
 
 	"POST /api/v1/sandboxes/{id}/exec":                classSandbox,
 	"GET /api/v1/sandboxes/{id}/files/{path...}":      classSandbox,

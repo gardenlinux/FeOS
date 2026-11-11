@@ -15,7 +15,7 @@ import { useSummary } from '../summary.jsx';
 import { createHints, fleetDefaults } from './fleet.js';
 import {
   STATE_BUCKETS, activeTab, byActivity, canPause, canResume, createRequest, filterSandboxes, newSandboxForm, ownerShown,
-  sandboxTabs, sizeWords, stateCounts, stateWords,
+  SANDBOX_TABS, sizeWords, stateCounts, stateWords,
 } from './sandboxes.js';
 import { envRef, missingReaches, reachChoices, reachModel, reachesMode, reachesOf, sameReaches } from './reach.js';
 import {
@@ -420,8 +420,8 @@ export function SandboxHead({ sb, tenant, busy, act, write, onConnect, lastOk = 
 // SandboxPage is a sandbox's page in its environment: the head, the tab
 // bar of its views (links, as an object's), the view.
 function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, write, lastOk, fresh, onFreshSeen }) {
-  const tabs = sandboxTabs(c);
-  const cur = activeTab(tab, c);
+  const tabs = SANDBOX_TABS;
+  const cur = activeTab(tab);
   const pathOf = (t) => sandboxPath(tenant, env, sb.sandboxId, t);
   const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
   const load = useCallback((source) => api.listActivity(sb.sandboxId, { source }), [sb.sandboxId]);

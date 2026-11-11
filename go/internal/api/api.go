@@ -440,9 +440,11 @@ func (s *server) routes() []route {
 	service := func(pattern string, h apiHandler) { add(classService, pattern, s.service(h)) }
 
 	// Operators: tenants, the node fleet, join tokens, the ingress's
-	// instances, the instances and the activity log. Nobody's tenant: the
-	// activity log carries full tool params and outputs, and a drain takes
-	// capacity from everyone.
+	// instances, the instances and the activity log of every node and
+	// sandbox, whole and a deleted one's too. Nobody's tenant: a node's
+	// activity and a placement's verdicts tell of the whole fleet, and a
+	// drain takes capacity from everyone. A tenant reads its own
+	// sandboxes' activity on its route, without the fleet's part.
 	operator("GET /api/v1/admin/tenants", s.listTenants)
 	operator("POST /api/v1/admin/tenants", s.createTenant)
 	operator("DELETE /api/v1/admin/tenants/{tenant}", s.deleteTenant)
@@ -484,6 +486,7 @@ func (s *server) routes() []route {
 	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
 	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
 	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/access", s.access)
+	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/activity", s.tenantSandboxActivity)
 
 	// The sandbox's own token: the tool baseline over REST. Each route
 	// makes the same tools.Runner call that MCP makes, with the call's id
