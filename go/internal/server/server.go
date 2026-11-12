@@ -84,6 +84,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 	"github.com/gardenlinux/feos/go/internal/tools"
 	"github.com/gardenlinux/feos/go/internal/ui"
+	"github.com/gardenlinux/feos/go/internal/visits"
 )
 
 // Streams is what the streams hook builds for an instance: the port door
@@ -160,6 +161,7 @@ type Instance struct {
 	Runner    *tools.Runner
 	Env       *env.Service
 	Domains   *domains.Service // ADR 0021
+	Visits    *visits.Service  // ADR 0054; nil without --secret-key-file
 	ACME      *acme.Issuer
 	mcp       *mcpsrv.Server
 	Bindings  *bindings.Service
@@ -283,6 +285,17 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 
 	// The parts.
 	i.Elector = leader.NewElector(i.DB, i.id, i.log)
+	// Visits (ADR 0054) run only with --secret-key-file (S1): without it
+	// there is no visits service, and every part below that takes one
+	// gets none (never a nil *visits.Service in an interface).
+	if sealer != nil {
+		if i.Visits, err = visits.New(visits.Config{AuthURL: cfg.VisitorAuthURL, Issuer: cfg.OIDCIssuer, Zones: cfg.Zones(),
+			Deny: cfg.DenyPrefixes, Log: i.log.With("component", "visits")}, visits.Deps{Store: i.Store, Sealer: sealer}); err != nil {
+			return nil, fmt.Errorf("visits: %w", err)
+		}
+	} else {
+		i.log.Info("visits are off: no --secret-key-file, so no environment admits only visitors")
+	}
 	i.Activity = activity.NewRecorder(i.Store, i.id, i.log)
 	var fl *fleet.Service
 	var ing *ingresssvc.Service
@@ -334,11 +347,17 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	if sealer != nil {
 		tbl.Sealer = sealer
 	}
+	ingDeps := ingresssvc.Deps{DB: i.DB, Store: i.Store, Issuer: i.Issuer, Links: i.Links, Engine: i.Engine,
+		Builder: tbl}
+	if i.Visits != nil {
+		tbl.AuthURL = cfg.VisitorAuthURL
+		tbl.VisitKeys = i.Visits.Keys
+		ingDeps.Visits = i.Visits
+	}
 	ing = ingresssvc.New(ingresssvc.Config{
 		InstanceID: i.id, TrustDomain: cfg.TrustDomain, AppsZone: cfg.AppsZone, TenantZone: cfg.TenantZone,
 		CertTTL: cfg.NodeCertTTL, SupersedeGrace: ingressSupersedeGrace, PodNetwork: i.podNetwork, Log: i.log,
-	}, ingresssvc.Deps{DB: i.DB, Store: i.Store, Issuer: i.Issuer, Links: i.Links, Engine: i.Engine,
-		Builder: tbl})
+	}, ingDeps)
 	i.Ingress = ing
 	ing.Register()
 	i.Runner = tools.NewRunner(i.Engine, i.Links, i.Activity, i.DB, i.id, i.log)
@@ -364,6 +383,10 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		Tools: tools.NewREST(i.Runner), Specs: tools.Specs, MCP: i.mcp, Ports: i.streams.Ports,
 		Watches: i.streams.Watches, Bindings: i.Bindings, Environments: i.Env, Ingress: ing, Domains: i.Domains, TenantJobs: i.Env,
 		Ready: i.ready, Sealer: sealerOf(sealer), Issuer: i.Issuer,
+	}
+	if i.Visits != nil {
+		deps.Visitors = i.Visits
+		i.Elector.Register(i.Visits.Loops()...)
 	}
 	if ui.Built() {
 		deps.UI = ui.FS()
@@ -433,12 +456,18 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 	if i.Bindings != nil {
 		hb = i.Bindings
 	}
-	s, err := env.New(env.Deps{
+	deps := env.Deps{
 		InstanceID: i.id, DB: i.DB, Store: i.Store, Elector: i.Elector, Conns: i.Links, Engine: i.Engine,
 		Runner: runner, Ports: fwd, Sealer: sealer, AppsZone: i.cfg.AppsZone, EnvChanged: i.Domains.EnvChanged,
 		AppsZoneOwners: i.cfg.AppsZoneOwners, TenantZone: i.cfg.TenantZone, SinkURL: i.cfg.SinkURL, Bindings: hb,
 		DenyPrefixes: i.cfg.DenyPrefixes, Issuer: i.Issuer, Log: i.log,
-	})
+	}
+	// The kinds of providers a publish may name (ADR 0054); nil without
+	// the visits service, which makes every publish to visitors 409.
+	if i.Visits != nil {
+		deps.VisitKinds = i.Visits.Kinds()
+	}
+	s, err := env.New(deps)
 	if err != nil {
 		return nil, err
 	}
@@ -455,12 +484,16 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 
 // newDomains builds the domains' core (ADR 0021): its checks ask
 // --dns-resolver, or the system's resolvers without it; the apps zone,
-// the tenant zone (ADR 0031), the edge's name and every --domain-reserved
-// zone cannot be claimed.
+// the tenant zone (ADR 0031), the edge's name, ferun-auth's host
+// (--visitor-auth-url, ADR 0054) and every --domain-reserved zone cannot
+// be claimed.
 func (i *Instance) newDomains() (*domains.Service, error) {
 	cfg := i.cfg
 	reserved := slices.Clone(cfg.DomainReserved)
 	reserved = append(reserved, cfg.Zones().Names()...)
+	if h := visitorAuthHost(cfg); h != "" {
+		reserved = append(reserved, h)
+	}
 	s, err := domains.New(domains.Config{
 		EdgeName: cfg.EdgeName, EdgeAddresses: cfg.EdgeAddresses, ChallengeLabel: cfg.DomainChallengeLabel,
 		Grace: cfg.DomainGrace, UnverifiedMax: cfg.DomainUnverifiedMax, Reserved: reserved, Log: i.log,
@@ -940,10 +973,11 @@ func sealerOf(sl *seal.Sealer) api.Sealer {
 // reservedTenantNames are the names no tenant a person makes may have
 // beside the fixed ones (ADR 0031): the apps zone's owners' and the
 // platform's host labels, the first label of the public URL's host, of
-// --edge-name and of --apps-zone.
+// --edge-name, of --apps-zone, of the tenant zone and of ferun-auth's
+// host (--visitor-auth-url, ADR 0054).
 func reservedTenantNames(cfg config.Config) []string {
 	out := slices.Clone(cfg.AppsZoneOwners)
-	hosts := []string{cfg.EdgeName, cfg.AppsZone, cfg.TenantZone}
+	hosts := []string{cfg.EdgeName, cfg.AppsZone, cfg.TenantZone, visitorAuthHost(cfg)}
 	if u, err := url.Parse(cfg.PublicURL); err == nil {
 		hosts = append(hosts, u.Hostname())
 	}
@@ -953,6 +987,19 @@ func reservedTenantNames(cfg config.Config) []string {
 		}
 	}
 	return out
+}
+
+// visitorAuthHost is the host of --visitor-auth-url, lower case; "" when
+// it is not set.
+func visitorAuthHost(cfg config.Config) string {
+	if cfg.VisitorAuthURL == "" {
+		return ""
+	}
+	u, err := url.Parse(cfg.VisitorAuthURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }
 
 // tenantDefaults are the limits of the tenants people make, from
