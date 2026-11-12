@@ -159,7 +159,9 @@ func (t httpsOnly) RoundTrip(req *http.Request) (*http.Response, error) {
 // request whose URL scheme is not https, the first one included, with a
 // *DeniedError. With redirects false it follows none
 // (http.ErrUseLastResponse); with true it follows up to 10, and only when
-// the first request (via[0]) was a GET, so a POST follows none.
+// the first request (via[0]) was a GET, so a POST follows none. Each
+// client holds its own pool of idle connections: make one per rule and
+// reuse it, never one per request.
 func Client(judge func(netip.Addr) error, timeout time.Duration, redirects bool, roots *x509.CertPool) *http.Client {
 	d := Dialer(judge, 5*time.Second)
 	protocols := new(http.Protocols)
