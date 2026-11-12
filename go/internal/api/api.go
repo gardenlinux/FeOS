@@ -160,7 +160,7 @@ type Environments interface {
 		*bindings.HTTPPreflightResult, error)
 	CreateRouteToken(ctx context.Context, tenant, envRef string) (envs.RouteToken, error)
 	RevokeRouteTokens(ctx context.Context, tenant, envRef string) error
-	SetPublic(ctx context.Context, tenant, envRef string, public bool, hostLabel string) (envs.PublicAnswer, error)
+	SetPublic(ctx context.Context, tenant, envRef string, req envs.PublicRequest) (envs.PublicAnswer, error)
 	ServeRoute(w http.ResponseWriter, r *http.Request)
 }
 

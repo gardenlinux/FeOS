@@ -1,0 +1,20 @@
+{
+  "method": "PUT",
+  "path": "/api/v1/environments/expensa-stage/public",
+  "query": {},
+  "status": 200,
+  "request": {
+    "public": true,
+    "access": "anyone"
+  },
+  "response": {
+    "public": true,
+    "hosts": [
+      "expensa-stage-fecode.apps.fecode.dev"
+    ],
+    "rolling": false,
+    "access": "anyone",
+    "provider": ""
+  },
+  "note": "access anyone opens the environment to everyone (ADR 0054); without access a publish of an environment that is not public admits visitors of ferun, and a public one keeps its access"
+}

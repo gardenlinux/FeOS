@@ -48,10 +48,13 @@ type EnvSummary struct {
 	// State is the latest deployment's state (model.Deployment…),
 	// model.EnvNone without a deployment, model.EnvDeleting.
 	State string `json:"state"`
-	// Public, Hosts and HostLabel are as EnvStatus has them.
+	// Public, Hosts, HostLabel, Access and Provider are as EnvStatus has
+	// them.
 	Public        bool     `json:"public"`
 	Hosts         []string `json:"hosts"`
 	HostLabel     string   `json:"hostLabel,omitempty"`
+	Access        string   `json:"access"`
+	Provider      string   `json:"provider"`
 	OpenIncidents int      `json:"openIncidents"`
 	CreatedAt     string   `json:"createdAt"`
 }
@@ -77,6 +80,13 @@ type EnvStatus struct {
 	// publish or chosen by its tenant; empty before. It stays while a
 	// domain is its host.
 	HostLabel string `json:"hostLabel,omitempty"`
+	// Access is who the ingress admits while it is public (ADR 0054):
+	// model.AccessAnyone or model.AccessVisitors, as stored, public or
+	// not (a never published one reads anyone); Provider, with visitors,
+	// the provider's name (model.ProviderFerun for the builtin), "" with
+	// anyone.
+	Access   string `json:"access"`
+	Provider string `json:"provider"`
 	// Rollout is the latest deployment's; null without a deployment.
 	Rollout       *RolloutStatus `json:"rollout"`
 	Objects       []ObjectStatus `json:"objects"`
@@ -579,10 +589,17 @@ type LogsAnswer struct {
 // chooses (model.ChosenHostLabel: a DNS label with "--" in it; for a
 // tenant that owns the apps zone also model.PlainHostLabel, one without);
 // without it the environment keeps its label, or gets one at its first
-// publish.
+// publish. Access and Provider, only with public true, say who the
+// ingress admits (ADR 0054; Service.SetPublic).
 type PublicRequest struct {
 	Public    bool   `json:"public"`
 	HostLabel string `json:"hostLabel,omitempty"`
+	// Access is who the ingress admits (ADR 0054): model.AccessAnyone or
+	// model.AccessVisitors; "" says nothing (see below).
+	Access string `json:"access,omitempty"`
+	// Provider, with access visitors, is one of the tenant's providers, or
+	// model.ProviderFerun; "": ferun.
+	Provider string `json:"provider,omitempty"`
 }
 
 // PublicAnswer is its answer.
@@ -594,6 +611,9 @@ type PublicAnswer struct {
 	// Rolling: this call published the environment for the first time, so
 	// its image services roll once, to name their ingress groups.
 	Rolling bool `json:"rolling"`
+	// Access and Provider are as EnvStatus has them, after the call.
+	Access   string `json:"access"`   // model.AccessAnyone | model.AccessVisitors, always
+	Provider string `json:"provider"` // with visitors its name ("ferun" for the builtin); "" with anyone
 }
 
 // RouteToken is POST /api/v1/environments/{env}/route-tokens's answer:

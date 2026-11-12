@@ -37,7 +37,7 @@ func TestRenameEnv(t *testing.T) {
 	ctx := h.ctx()
 	stage := h.create("stage", map[string]string{"fecode.class": "stage"})
 	h.create("prod", nil)
-	if _, err := h.svc.SetPublic(ctx, tenantA, "stage", true, ""); err != nil {
+	if _, err := h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true}); err != nil {
 		t.Fatal(err)
 	}
 	hosts := []string{"stage-acme.apps.test"}
@@ -86,7 +86,7 @@ func TestRenameEnv(t *testing.T) {
 	if _, err := h.svc.RenameEnv(ctx, tenantA, "prod", RenameEnvRequest{Name: "live"}); err != nil {
 		t.Fatal(err)
 	}
-	a, err := h.svc.SetPublic(ctx, tenantA, "live", true, "")
+	a, err := h.svc.SetPublic(ctx, tenantA, "live", PublicRequest{Public: true})
 	if err != nil || !slices.Equal(a.Hosts, []string{"live-acme.apps.test"}) {
 		t.Fatalf("publish: %+v %v", a, err)
 	}
@@ -1263,7 +1263,7 @@ func TestSetPublic(t *testing.T) {
 	hosts := []string{"stage-acme.apps.test"}
 	ch, unsubscribe := h.d.Subscribe(db.ChanLeader)
 	defer unsubscribe()
-	a, err := h.svc.SetPublic(ctx, tenantA, "stage", true, "")
+	a, err := h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true})
 	if err != nil || !a.Public || !slices.Equal(a.Hosts, hosts) || !a.Rolling {
 		t.Fatalf("publish: %+v %v", a, err)
 	}
@@ -1273,7 +1273,7 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("row %+v", e)
 	}
 	// Again, by its ID: the same answer, and nothing rolls.
-	a, err = h.svc.SetPublic(ctx, tenantA, st.ID, true, "")
+	a, err = h.svc.SetPublic(ctx, tenantA, st.ID, PublicRequest{Public: true})
 	if err != nil || !a.Public || !slices.Equal(a.Hosts, hosts) || a.Rolling {
 		t.Fatalf("again: %+v %v", a, err)
 	}
@@ -1325,7 +1325,7 @@ func TestSetPublic(t *testing.T) {
 
 	// Unpublished: no host, the route door alone; the label and the group
 	// stay, so publishing again names the same host and rolls nothing.
-	a, err = h.svc.SetPublic(ctx, tenantA, "stage", false, "")
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{})
 	if err != nil || a.Public || a.Hosts == nil || len(a.Hosts) != 0 || a.Rolling {
 		t.Fatalf("unpublish: %+v %v", a, err)
 	}
@@ -1341,7 +1341,7 @@ func TestSetPublic(t *testing.T) {
 	if e := h.env("stage"); e.Public || !e.IngressGroup || e.HostLabel != "stage-acme" {
 		t.Fatalf("unpublished row %+v", e)
 	}
-	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "")
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true})
 	if err != nil || !slices.Equal(a.Hosts, hosts) || a.Rolling {
 		t.Fatalf("republish: %+v %v", a, err)
 	}
@@ -1349,7 +1349,7 @@ func TestSetPublic(t *testing.T) {
 	// A label the tenant chose: the host moves and nothing rolls; a label
 	// not of the chosen form, one without public and one another tenant
 	// holds are refused, and the environment keeps its host.
-	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "stage--shop")
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true, HostLabel: "stage--shop"})
 	if err != nil || !slices.Equal(a.Hosts, []string{"stage--shop.apps.test"}) || a.Rolling {
 		t.Fatalf("chosen label: %+v %v", a, err)
 	}
@@ -1357,13 +1357,13 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("chosen row %+v", e)
 	}
 	for _, bad := range []string{"stage-shop", "ab--shop", "Stage--shop", "x--0123456789abcdef", "stage--shop-"} {
-		_, err = h.svc.SetPublic(ctx, tenantA, "stage", true, bad)
+		_, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true, HostLabel: bad})
 		wantStatus(t, err, http.StatusBadRequest, "a chosen host label is a DNS label")
 	}
-	_, err = h.svc.SetPublic(ctx, tenantA, "stage", false, "stage--shop")
+	_, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{HostLabel: "stage--shop"})
 	wantStatus(t, err, http.StatusBadRequest, textHostLabelNotPublic)
 	h.exec("INSERT INTO host_labels (label, owner) VALUES ('taken--x', $1)", tenantB)
-	_, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "taken--x")
+	_, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true, HostLabel: "taken--x"})
 	wantStatus(t, err, http.StatusConflict, "host label taken--x is another tenant's")
 	if e := h.env("stage"); !e.Public || e.HostLabel != "stage--shop" {
 		t.Fatalf("kept %+v", e)
@@ -1388,7 +1388,7 @@ func TestSetPublic(t *testing.T) {
 		}
 	}
 	shop := []string{"shop.example"}
-	a, err = h.svc.SetPublic(ctx, tenantA, "stage", true, "")
+	a, err = h.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true})
 	if err != nil || !slices.Equal(a.Hosts, shop) {
 		t.Fatalf("with a domain: %+v %v", a, err)
 	}
@@ -1408,15 +1408,15 @@ func TestSetPublic(t *testing.T) {
 
 	// Refused: another tenant's environment or none, a deleting
 	// environment, a deleting tenant.
-	_, err = h.svc.SetPublic(ctx, tenantB, "stage", true, "")
+	_, err = h.svc.SetPublic(ctx, tenantB, "stage", PublicRequest{Public: true})
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
-	_, err = h.svc.SetPublic(ctx, tenantA, "nope", true, "")
+	_, err = h.svc.SetPublic(ctx, tenantA, "nope", PublicRequest{Public: true})
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
 	if err := h.svc.DeleteEnv(ctx, tenantA, "demo"); err != nil {
 		t.Fatal(err)
 	}
 	for _, public := range []bool{true, false} {
-		_, err = h.svc.SetPublic(ctx, tenantA, "demo", public, "")
+		_, err = h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: public})
 		wantStatus(t, err, http.StatusConflict, "environment demo is being deleted")
 	}
 	// An environment with a sandbox is not deleted (ADR 0035).
@@ -1445,7 +1445,7 @@ func TestSetPublic(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.exec("UPDATE tenants SET deleting_at = now() WHERE id = $1", tenantB)
-	_, err = h.svc.SetPublic(ctx, tenantB, "x", true, "")
+	_, err = h.svc.SetPublic(ctx, tenantB, "x", PublicRequest{Public: true})
 	wantStatus(t, err, http.StatusConflict, "tenant other is being deleted")
 
 	// Without a zone (the kill switch): publishing is refused; a public
@@ -1455,7 +1455,7 @@ func TestSetPublic(t *testing.T) {
 	h2.create("stage", nil)
 	h2.putSecret("stage", "token", "x")
 	h2.apply("stage", stageSpec, 0)
-	_, err = h2.svc.SetPublic(ctx, tenantA, "stage", true, "")
+	_, err = h2.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{Public: true})
 	wantStatus(t, err, http.StatusConflict, "the platform serves no apps zone (--apps-zone); an environment cannot be public")
 	if _, err := h2.st.SetEnvironmentPublic(ctx, h2.env("stage").ID, true); err != nil {
 		t.Fatal(err)
@@ -1468,7 +1468,7 @@ func TestSetPublic(t *testing.T) {
 		len(p.Findings) != 1 || p.Findings[0].Problem != "nothing changes: the spec equals deployment 1's" {
 		t.Fatalf("plan without a zone %+v %v", p, err)
 	}
-	a, err = h2.svc.SetPublic(ctx, tenantA, "stage", false, "")
+	a, err = h2.svc.SetPublic(ctx, tenantA, "stage", PublicRequest{})
 	if err != nil || a.Public || len(a.Hosts) != 0 || a.Rolling {
 		t.Fatalf("unpublish without a zone: %+v %v", a, err)
 	}
@@ -1501,29 +1501,29 @@ func TestSetPublicPlainLabel(t *testing.T) {
 
 	// The zone's owner: a plain label at its first publish, again without
 	// a change, and a label with "--" as before.
-	a, err := h.svc.SetPublic(ctx, tenantA, "prod", true, "kino")
+	a, err := h.svc.SetPublic(ctx, tenantA, "prod", PublicRequest{Public: true, HostLabel: "kino"})
 	if err != nil || !slices.Equal(a.Hosts, []string{"kino.apps.test"}) || !a.Rolling {
 		t.Fatalf("plain label: %+v %v", a, err)
 	}
 	if e := h.env("prod"); !e.Public || e.HostLabel != "kino" {
 		t.Fatalf("row %+v", e)
 	}
-	a, err = h.svc.SetPublic(ctx, tenantA, "prod", true, "kino")
+	a, err = h.svc.SetPublic(ctx, tenantA, "prod", PublicRequest{Public: true, HostLabel: "kino"})
 	if err != nil || !slices.Equal(a.Hosts, []string{"kino.apps.test"}) || a.Rolling {
 		t.Fatalf("again: %+v %v", a, err)
 	}
-	a, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "demo--kino")
+	a, err = h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "demo--kino"})
 	if err != nil || !slices.Equal(a.Hosts, []string{"demo--kino.apps.test"}) {
 		t.Fatalf("chosen label of the owner: %+v %v", a, err)
 	}
-	a, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "ironcore-dashboard")
+	a, err = h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "ironcore-dashboard"})
 	if err != nil || !slices.Equal(a.Hosts, []string{"ironcore-dashboard.apps.test"}) {
 		t.Fatalf("a hyphenated plain label no tenant's: %+v %v", a, err)
 	}
 
 	// Not of the form: a fallback's end, R-LDH, upper case, too long.
 	for _, bad := range []string{"kino-0123456789abcdef", "xn--kino", "Kino", "kino-", strings.Repeat("k", 64)} {
-		_, err = h.svc.SetPublic(ctx, tenantA, "prod", true, bad)
+		_, err = h.svc.SetPublic(ctx, tenantA, "prod", PublicRequest{Public: true, HostLabel: bad})
 		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadOwnedHostLabel, bad))
 	}
 
@@ -1531,19 +1531,19 @@ func TestSetPublicPlainLabel(t *testing.T) {
 	// owns it, it is the natural label of an existing tenant's
 	// environment (the owner's own included). The environment keeps its
 	// label.
-	_, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "kino")
+	_, err = h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "kino"})
 	wantStatus(t, err, http.StatusConflict, "host label kino is another tenant's or another environment's")
 	if code(err) != CodeHostLabelTaken {
 		t.Fatalf("code %q", code(err))
 	}
 	h.exec("INSERT INTO host_labels (label, owner) VALUES ('shop', $1)", tenantB)
-	_, err = h.svc.SetPublic(ctx, tenantA, "demo", true, "shop")
+	_, err = h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "shop"})
 	wantStatus(t, err, http.StatusConflict, "host label shop is another tenant's or another environment's")
 	for label, msg := range map[string]string{
 		"web-other": "host label web-other is the natural label of environment web of tenant other",
 		"web-acme":  "host label web-acme is the natural label of environment web of tenant acme",
 	} {
-		_, err = h.svc.SetPublic(ctx, tenantA, "demo", true, label)
+		_, err = h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: label})
 		wantStatus(t, err, http.StatusConflict, msg)
 		if code(err) != CodeHostLabelTaken {
 			t.Fatalf("%s: code %q", label, code(err))
@@ -1556,10 +1556,10 @@ func TestSetPublicPlainLabel(t *testing.T) {
 	// Another tenant: a plain label is the 400 of before, a label with
 	// "--" is chosen.
 	for _, bad := range []string{"kino2", "web-acme"} {
-		_, err = h.svc.SetPublic(ctx, tenantB, "prod", true, bad)
+		_, err = h.svc.SetPublic(ctx, tenantB, "prod", PublicRequest{Public: true, HostLabel: bad})
 		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadHostLabel, bad))
 	}
-	if a, err := h.svc.SetPublic(ctx, tenantB, "prod", true, "prod--x"); err != nil ||
+	if a, err := h.svc.SetPublic(ctx, tenantB, "prod", PublicRequest{Public: true, HostLabel: "prod--x"}); err != nil ||
 		!slices.Equal(a.Hosts, []string{"prod--x.apps.test"}) {
 		t.Fatalf("chosen label of another tenant: %+v %v", a, err)
 	}
@@ -1567,7 +1567,7 @@ func TestSetPublicPlainLabel(t *testing.T) {
 	// A tenant made later whose natural label the owner holds: its
 	// environment gets its fallback, and the owner keeps the label, also
 	// when it chooses it again.
-	if _, err := h.svc.SetPublic(ctx, tenantA, "demo", true, "shop-later"); err != nil {
+	if _, err := h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "shop-later"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := h.st.CreateTenant(ctx, "later"); err != nil {
@@ -1578,19 +1578,19 @@ func TestSetPublicPlainLabel(t *testing.T) {
 		t.Fatalf("create %v %v", created, err)
 	}
 	_, _, fallback := model.HostLabels("shop", "later", uuid.MustParse(shop.ID))
-	if a, err := h.svc.SetPublic(ctx, "later", "shop", true, ""); err != nil ||
+	if a, err := h.svc.SetPublic(ctx, "later", "shop", PublicRequest{Public: true}); err != nil ||
 		!slices.Equal(a.Hosts, []string{fallback + ".apps.test"}) {
 		t.Fatalf("later tenant: %+v %v (fallback %s)", a, err, fallback)
 	}
-	if a, err := h.svc.SetPublic(ctx, tenantA, "demo", true, "shop-later"); err != nil ||
+	if a, err := h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "shop-later"}); err != nil ||
 		!slices.Equal(a.Hosts, []string{"shop-later.apps.test"}) {
 		t.Fatalf("the owner again: %+v %v", a, err)
 	}
 	// Its other environment may take it once the first gives it up.
-	if _, err := h.svc.SetPublic(ctx, tenantA, "demo", true, "demo--kino"); err != nil {
+	if _, err := h.svc.SetPublic(ctx, tenantA, "demo", PublicRequest{Public: true, HostLabel: "demo--kino"}); err != nil {
 		t.Fatal(err)
 	}
-	if a, err := h.svc.SetPublic(ctx, tenantA, "prod", true, "shop-later"); err != nil ||
+	if a, err := h.svc.SetPublic(ctx, tenantA, "prod", PublicRequest{Public: true, HostLabel: "shop-later"}); err != nil ||
 		!slices.Equal(a.Hosts, []string{"shop-later.apps.test"}) {
 		t.Fatalf("the owner's other environment: %+v %v", a, err)
 	}
@@ -1609,11 +1609,11 @@ func TestSetPublicTenantZone(t *testing.T) {
 	h.create("web", nil)
 	h.exec("UPDATE tenants SET zone = $1 WHERE id = $2", tz, tenantA)
 
-	a, err := h.svc.SetPublic(ctx, tenantA, "web", true, "")
+	a, err := h.svc.SetPublic(ctx, tenantA, "web", PublicRequest{Public: true})
 	if err != nil || !slices.Equal(a.Hosts, []string{"web-acme." + tz}) {
 		t.Fatalf("natural label: %+v %v", a, err)
 	}
-	a, err = h.svc.SetPublic(ctx, tenantA, "web", true, "web--shop")
+	a, err = h.svc.SetPublic(ctx, tenantA, "web", PublicRequest{Public: true, HostLabel: "web--shop"})
 	if err != nil || !slices.Equal(a.Hosts, []string{"web--shop." + tz}) {
 		t.Fatalf("chosen label: %+v %v", a, err)
 	}
@@ -1626,7 +1626,7 @@ func TestSetPublicTenantZone(t *testing.T) {
 		t.Fatalf("listing %+v %v", l, err)
 	}
 	// An owner of the apps zone, but in the tenant zone: no plain label.
-	_, err = h.svc.SetPublic(ctx, tenantA, "web", true, "kino")
+	_, err = h.svc.SetPublic(ctx, tenantA, "web", PublicRequest{Public: true, HostLabel: "kino"})
 	wantStatus(t, err, http.StatusBadRequest, "a plain host label is only for the apps zone")
 	if e := h.env("web"); e.HostLabel != "web--shop" {
 		t.Fatalf("kept %+v", e)
@@ -1635,7 +1635,7 @@ func TestSetPublicTenantZone(t *testing.T) {
 	if _, created, err := h.svc.CreateEnv(ctx, tenantB, CreateEnvRequest{Name: "web"}); err != nil || !created {
 		t.Fatalf("create %v %v", created, err)
 	}
-	if a, err := h.svc.SetPublic(ctx, tenantB, "web", true, "web--shop"); err != nil ||
+	if a, err := h.svc.SetPublic(ctx, tenantB, "web", PublicRequest{Public: true, HostLabel: "web--shop"}); err != nil ||
 		!slices.Equal(a.Hosts, []string{"web--shop.apps.test"}) {
 		t.Fatalf("the same label in the apps zone: %+v %v", a, err)
 	}
@@ -1645,10 +1645,10 @@ func TestSetPublicTenantZone(t *testing.T) {
 	if st, err := h.svc.GetEnv(ctx, tenantA, "web"); err != nil || len(st.Hosts) != 0 {
 		t.Fatalf("status in an unserved zone %+v %v", st.Hosts, err)
 	}
-	if _, err := h.svc.SetPublic(ctx, tenantA, "web", false, ""); err != nil {
+	if _, err := h.svc.SetPublic(ctx, tenantA, "web", PublicRequest{}); err != nil {
 		t.Fatalf("unpublish: %v", err)
 	}
-	_, err = h.svc.SetPublic(ctx, tenantA, "web", true, "")
+	_, err = h.svc.SetPublic(ctx, tenantA, "web", PublicRequest{Public: true})
 	wantStatus(t, err, http.StatusConflict, "the platform serves no zone old.test")
 
 	// An operator moves it to the apps zone (store.SetTenantZone): its
@@ -1659,7 +1659,7 @@ func TestSetPublicTenantZone(t *testing.T) {
 	if e := h.env("web"); e.HostLabel == "web--shop" || e.HostLabel != "web-acme" {
 		t.Fatalf("moved: web--shop is the other tenant's in the apps zone, so the natural label: %+v", e)
 	}
-	if a, err := h.svc.SetPublic(ctx, tenantA, "web", true, "kino"); err != nil ||
+	if a, err := h.svc.SetPublic(ctx, tenantA, "web", PublicRequest{Public: true, HostLabel: "kino"}); err != nil ||
 		!slices.Equal(a.Hosts, []string{"kino.apps.test"}) {
 		t.Fatalf("plain label in the apps zone: %+v %v", a, err)
 	}

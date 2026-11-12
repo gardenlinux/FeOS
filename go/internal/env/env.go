@@ -97,6 +97,12 @@ type Deps struct {
 	// spec with bindings is refused.
 	Bindings HTTPBindings
 	Log      *slog.Logger
+	// VisitKinds are the kinds of access providers this installation
+	// serves (ADR 0054; visits.Service.Kinds: model.ProviderKindTenant,
+	// …Ferun, …OIDC), which a publish with access visitors needs; nil:
+	// no visits service runs (ferund without --secret-key-file), and every
+	// such publish is refused.
+	VisitKinds []string
 	// EnvChanged runs in the transaction that changed an environment's
 	// publicity or marked it deleting, with its row locked: the domains
 	// bound to it derive their states again (internal/domains). nil:

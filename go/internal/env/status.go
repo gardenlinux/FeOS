@@ -31,9 +31,10 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 	if err != nil {
 		return EnvStatus{}, fmt.Errorf("hosts: %w", err)
 	}
+	access, provider := accessOf(e)
 	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Deployment: e.Deployment, Deployed: e.Deployed,
-		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Objects: []ObjectStatus{}, Routes: []RouteStatus{},
-		CreatedAt: rfc3339(e.CreatedAt)}
+		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Access: access, Provider: provider,
+		Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
 		st.Labels = map[string]string{}
 	}
@@ -205,20 +206,43 @@ func hostsOf(e store.Environment, zone string, domains []string) []string {
 	return []string{e.HostLabel + "." + zone}
 }
 
-// hosts are e's hosts (hostsOf), its served domains read.
+// hosts are e's hosts (Hosts).
 func (s *Service) hosts(ctx context.Context, e store.Environment) ([]string, error) {
+	return Hosts(ctx, s.st, s.zones(), e)
+}
+
+// Hosts are the hosts the ingress serves environment e at, as
+// EnvStatus.Hosts has them: its served domains in the order they were
+// bound, else its default host under its tenant's zone of zones; none
+// while it is not public or is being deleted. It reads the domains and
+// the tenant on q. The visits service checks a challenge's host with it
+// (ADR 0054).
+func Hosts(ctx context.Context, q *store.Store, zones model.Zones, e store.Environment) ([]string, error) {
 	if !e.Public || e.Deleting {
 		return []string{}, nil
 	}
-	ds, err := s.st.ServedDomainNames(ctx, []uuid.UUID{e.ID})
+	ds, err := q.ServedDomainNames(ctx, []uuid.UUID{e.ID})
 	if err != nil {
 		return nil, err
 	}
-	zone, err := s.hostZone(ctx, s.st, e.Owner)
+	t, err := q.GetTenant(ctx, e.Owner)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("the zone of tenant %s: %w", e.Owner, err)
 	}
-	return hostsOf(e, zone, ds[e.ID]), nil
+	return hostsOf(e, zones.Of(t.Zone), ds[e.ID]), nil
+}
+
+// accessOf is an environment's stored access as the answers show it: the
+// access, and with visitors its provider's name (model.ProviderFerun for
+// the builtin); "" with anyone.
+func accessOf(e store.Environment) (access, provider string) {
+	switch {
+	case e.Access != model.AccessVisitors:
+		return model.AccessAnyone, ""
+	case e.AccessProvider == "":
+		return model.AccessVisitors, model.ProviderFerun
+	}
+	return model.AccessVisitors, e.AccessProvider
 }
 
 // summaryOf is an environment as its tenant's listing shows it, with its
@@ -235,9 +259,10 @@ func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary 
 	if labels == nil {
 		labels = map[string]string{}
 	}
+	access, provider := accessOf(r.Environment)
 	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Deployment: r.Deployment, Deployed: r.Deployed,
-		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel, OpenIncidents: int(r.OpenIncidents),
-		CreatedAt: rfc3339(r.CreatedAt)}
+		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel,
+		Access: access, Provider: provider, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
 }
 
 // incidentOf is an incident as the answers show it.

@@ -222,9 +222,9 @@ func (f *fakeEnvs) CreateRouteToken(_ context.Context, tenant, env string) (envs
 func (f *fakeEnvs) RevokeRouteTokens(_ context.Context, tenant, env string) error {
 	return f.do(envCall{"RevokeRouteTokens", tenant, env, nil}, nil)
 }
-func (f *fakeEnvs) SetPublic(_ context.Context, tenant, env string, public bool, hostLabel string) (envs.PublicAnswer, error) {
+func (f *fakeEnvs) SetPublic(_ context.Context, tenant, env string, req envs.PublicRequest) (envs.PublicAnswer, error) {
 	var out envs.PublicAnswer
-	return out, f.do(envCall{"SetPublic", tenant, env, []any{envs.PublicRequest{Public: public, HostLabel: hostLabel}}}, &out)
+	return out, f.do(envCall{"SetPublic", tenant, env, []any{req}}, &out)
 }
 func (f *fakeEnvs) ServeRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Door", "route")
@@ -488,6 +488,12 @@ func TestEnvironmentArguments(t *testing.T) {
 			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino"}}}, 200},
 		{"PUT", "/api/v1/environments/prod/public", map[string]any{"public": true, "hostLabel": "kino"},
 			envCall{"SetPublic", testTenant, "prod", []any{envs.PublicRequest{Public: true, HostLabel: "kino"}}}, 200},
+		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "access": "visitors",
+			"provider": "fecode", "hostLabel": "stage--kino"},
+			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino",
+				Access: "visitors", Provider: "fecode"}}}, 200},
+		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "access": "anyone"},
+			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, Access: "anyone"}}}, 200},
 	}
 	for _, c := range cases {
 		fe := &fakeEnvs{}
@@ -697,7 +703,7 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 	expect(t, do("PUT", "/api/v1/environments/stage/public", map[string]any{"public": true}), http.StatusConflict,
 		errBody("the platform serves no apps zone (--apps-zone); an environment cannot be public"))
 	expect(t, do("PUT", "/api/v1/environments/stage/public", map[string]any{"public": false}), http.StatusOK,
-		`{"public":false,"hosts":[],"rolling":false}`+"\n")
+		`{"public":false,"hosts":[],"rolling":false,"access":"anyone","provider":""}`+"\n")
 
 	// The route door through the API's mux, with its own token.
 	w = do("POST", "/api/v1/environments/stage/route-tokens", nil)

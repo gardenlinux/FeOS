@@ -474,6 +474,31 @@ func TestRouteDoor(t *testing.T) {
 	if w := withHeader(tok.Token, ""); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
+	// The visitor headers (ADR 0054) never reach the pod, in any
+	// spelling; the others do.
+	{
+		r := httptest.NewRequest("GET", "/api/v1/environments/stage/http/api/me", nil)
+		r.Header.Set(RouteTokenHeader, tok.Token)
+		r.Header["FeRun-Visitor"] = []string{"admin"}
+		r.Header["ferun_visitor"] = []string{"admin"}
+		r.Header["FeRun-Visit-Token"] = []string{"x.y.z"}
+		r.Header["Ferun-Visitor-Email"] = []string{"a@example.com"}
+		r.Header.Set("X-Other", "kept")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("%d %s", w.Code, w.Body)
+		}
+		f := h.ports.last(t)
+		for name := range f.header {
+			if strings.HasPrefix(strings.ToLower(strings.ReplaceAll(name, "_", "-")), "ferun-visit") {
+				t.Fatalf("the door forwarded %s: %v", name, f.header)
+			}
+		}
+		if f.header.Get("X-Other") != "kept" {
+			t.Fatalf("the door dropped another header: %v", f.header)
+		}
+	}
 	wantPlain(t, withHeader(tenantTok, ""), 401, "route token required\n")
 	wantPlain(t, withHeader(tenantTok, "Bearer "+tok.Token), 401, "route token required\n")
 	wantPlain(t, withHeader("not-a-token", "Bearer "+tok.Token), 401, "route token required\n")

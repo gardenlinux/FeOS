@@ -122,6 +122,8 @@ type forward struct {
 	authz, host   string
 	// credentials are the headers the door was told to strip.
 	credentials []string
+	// header is the request's header as the door forwarded it.
+	header http.Header
 }
 
 // fakePorts is the port door: ForwardTo answers 200 with what it was
@@ -141,7 +143,7 @@ func (f *fakePorts) ForwardTo(w http.ResponseWriter, r *http.Request, id podid.I
 	credentials []string) {
 	f.mu.Lock()
 	f.calls = append(f.calls, forward{id, port, path, rawPath, r.URL.RawQuery, r.Header.Get("Authorization"), r.Host,
-		credentials})
+		credentials, r.Header.Clone()})
 	f.mu.Unlock()
 	_, _ = fmt.Fprintf(w, "%s %d %s", id, port, path)
 }
@@ -180,6 +182,9 @@ type harnessOptions struct {
 	tenantZone string
 	// bindings is Deps.Bindings.
 	bindings HTTPBindings
+	// visitKinds is Deps.VisitKinds; nil: every kind; noVisits: nil.
+	visitKinds []string
+	noVisits   bool
 }
 
 func newHarness(t *testing.T, o harnessOptions) *harness {
@@ -188,7 +193,11 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	st := store.New(d)
 	h := &harness{t: t, d: d, st: st, eng: &fakeEngine{bad: map[string]string{}}, ports: &fakePorts{}}
 	deps := Deps{InstanceID: "i1", DB: d, Store: st, Engine: h.eng, AppsZone: o.appsZone,
-		AppsZoneOwners: o.appsZoneOwners, TenantZone: o.tenantZone, Bindings: o.bindings, Log: dbtest.Logger(t)}
+		AppsZoneOwners: o.appsZoneOwners, TenantZone: o.tenantZone, Bindings: o.bindings, Log: dbtest.Logger(t),
+		VisitKinds: o.visitKinds}
+	if deps.VisitKinds == nil && !o.noVisits {
+		deps.VisitKinds = []string{model.ProviderKindTenant, model.ProviderKindFerun, model.ProviderKindOIDC}
+	}
 	if !o.noSealer {
 		sl, err := seal.New(make([]byte, 32))
 		if err != nil {

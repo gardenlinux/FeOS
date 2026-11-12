@@ -25,6 +25,8 @@
         "hosts": [
           "expensa-stage-fecode.apps.fecode.dev"
         ],
+        "access": "visitors",
+        "provider": "fecode",
         "openIncidents": 1,
         "createdAt": "2026-10-01T09:12:44Z"
       },
@@ -41,6 +43,8 @@
         "state": "deployed",
         "public": false,
         "hosts": [],
+        "access": "anyone",
+        "provider": "",
         "openIncidents": 0,
         "createdAt": "2026-10-01T09:14:02Z"
       },
@@ -57,6 +61,8 @@
         "state": "deployed",
         "public": false,
         "hosts": [],
+        "access": "anyone",
+        "provider": "",
         "openIncidents": 0,
         "createdAt": "2026-10-18T10:41:07Z"
       }

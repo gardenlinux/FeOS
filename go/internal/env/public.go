@@ -39,9 +39,28 @@ const (
 	textHostLabelNatural = "host label %s is the natural label of environment %s of tenant %s"
 )
 
+// The refusals of an access (ADR 0054).
+const (
+	textBadAccess          = "access is anyone or visitors"
+	textProviderNoVisitors = "a provider goes with access visitors"
+	textAccessNotPublic    = "access goes with public true"
+	textVisitsNeedKey      = "this installation guards no environments: ferund runs without --secret-key-file"
+	textUnknownProvider    = "no provider %s in this tenant"
+	textNeedsFerunAuth     = "visitors of %s need ferun-auth, which this installation does not run"
+)
+
+// The codes of the refusals of an access (ADR 0054).
+const (
+	CodeInvalidAccess       = "invalid_access"
+	CodeVisitsNeedSecretKey = "visits_need_secret_key"
+	CodeUnknownProvider     = "unknown_provider"
+	CodeFerunAuthRequired   = "ferun_auth_required"
+)
+
 // SetPublic is PUT /api/v1/environments/{env}/public: the tenant's
 // decision whether the ingress serves the environment at its default host
-// without a route token (ADR 0021). The first publish gives the
+// without a route token (ADR 0021), and whom it admits there (ADR 0054).
+// The first publish gives the
 // environment its host label and its ingress group, so that its image
 // services roll once (Rolling); unpublishing keeps both, and publishing
 // again rolls nothing. hostLabel, only with public, is a label the tenant
@@ -54,9 +73,30 @@ const (
 // tenant holds it already (checkPlainLabel). Publishing is refused with
 // 409 while the platform has no apps zone or does not serve the tenant's
 // zone, and either is while the environment or its tenant is being
-// deleted. A call that changes nothing writes nothing and answers the
-// same.
-func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool, hostLabel string) (PublicAnswer, error) {
+// deleted.
+//
+// The access, only with public true (400 invalid_access otherwise, and for
+// an access other than anyone or visitors, or a provider without
+// visitors), is anyone, or visitors of one of the tenant's providers or of
+// the builtin ferun. Without access a publish of an environment that is
+// not public admits visitors of ferun, and one of a public environment
+// keeps its access; visitors without a provider are of ferun. Visitors are
+// refused while no visits service runs (409 visits_need_secret_key,
+// Deps.VisitKinds nil), of a provider the tenant does not have (422
+// unknown_provider), and of a provider whose kind the installation does
+// not serve (409 ferun_auth_required). Unpublishing ends the
+// environment's visits, and so does a change of its access or provider.
+// A call that changes nothing writes nothing and answers the same.
+func (s *Service) SetPublic(ctx context.Context, tenant, env string, req PublicRequest) (PublicAnswer, error) {
+	public, hostLabel := req.Public, req.HostLabel
+	switch {
+	case req.Access != "" && req.Access != model.AccessAnyone && req.Access != model.AccessVisitors:
+		return PublicAnswer{}, apierr.WithCode(http.StatusBadRequest, CodeInvalidAccess, textBadAccess)
+	case req.Provider != "" && req.Access != model.AccessVisitors:
+		return PublicAnswer{}, apierr.WithCode(http.StatusBadRequest, CodeInvalidAccess, textProviderNoVisitors)
+	case !public && (req.Access != "" || req.Provider != ""):
+		return PublicAnswer{}, apierr.WithCode(http.StatusBadRequest, CodeInvalidAccess, textAccessNotPublic)
+	}
 	if public && s.d.AppsZone == "" {
 		return PublicAnswer{}, apierr.New(http.StatusConflict, textNoAppsZone)
 	}
@@ -86,6 +126,13 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool
 		if before.Deleting {
 			return errDeleting(before.Name)
 		}
+		access, provider := before.Access, before.AccessProvider
+		if public {
+			access, provider = accessAfter(before, req)
+			if err := s.checkAccess(ctx, tx, tenant, access, provider); err != nil {
+				return err
+			}
+		}
 		cur := before
 		if plain {
 			if err := checkPlainLabel(ctx, tx, tenant, hostLabel); err != nil {
@@ -105,8 +152,16 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool
 		if errors.Is(err, store.ErrNoRow) {
 			return errNoEnvironment()
 		}
-		if err != nil || (before.Public == public && before.HostLabel == after.HostLabel) {
+		if err != nil {
 			return err
+		}
+		if public {
+			if after, _, err = tx.SetEnvironmentAccess(ctx, cur.ID, access, provider); err != nil {
+				return err
+			}
+		}
+		if before.Public == public && before.HostLabel == after.HostLabel {
+			return nil
 		}
 		if err := s.envChanged(ctx, tx, before.ID); err != nil {
 			return err
@@ -121,11 +176,64 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, public bool
 		return PublicAnswer{}, fmt.Errorf("hosts: %w", err)
 	}
 	ans := PublicAnswer{Public: after.Public, Hosts: hosts, Rolling: public && !before.IngressGroup}
-	if before.Public != public || before.HostLabel != after.HostLabel {
+	ans.Access, ans.Provider = accessOf(after)
+	if before.Public != public || before.HostLabel != after.HostLabel || before.Access != after.Access ||
+		before.AccessProvider != after.AccessProvider {
 		s.log.Info("environment public", "tenant", tenant, "env", after.Name, "id", after.ID, "public", public,
-			"hosts", ans.Hosts, "rolling", ans.Rolling, "label_before", before.HostLabel)
+			"hosts", ans.Hosts, "rolling", ans.Rolling, "label_before", before.HostLabel, "access", ans.Access,
+			"provider", ans.Provider)
 	}
 	return ans, nil
+}
+
+// accessAfter is the access a publish (public true) gives environment e
+// (stored, as e has it: provider "" for ferun): what req says; without
+// access, visitors of ferun for an environment that is not public, and
+// its own access for one that is; visitors without a provider (or of
+// "ferun") are of ferun.
+func accessAfter(e store.Environment, req PublicRequest) (access, provider string) {
+	switch req.Access {
+	case model.AccessAnyone:
+		return model.AccessAnyone, ""
+	case model.AccessVisitors:
+		if req.Provider == model.ProviderFerun {
+			return model.AccessVisitors, ""
+		}
+		return model.AccessVisitors, req.Provider
+	}
+	if e.Public {
+		return e.Access, e.AccessProvider
+	}
+	return model.AccessVisitors, ""
+}
+
+// checkAccess refuses an access of visitors this installation cannot
+// guard: without a visits service (409 visits_need_secret_key), of a
+// provider tenant does not have (422 unknown_provider), and of one whose
+// kind it does not serve (409 ferun_auth_required). provider is "" for
+// ferun. tx holds the tenant's row.
+func (s *Service) checkAccess(ctx context.Context, tx *store.Store, tenant, access, provider string) error {
+	if access != model.AccessVisitors {
+		return nil
+	}
+	if s.d.VisitKinds == nil {
+		return apierr.WithCode(http.StatusConflict, CodeVisitsNeedSecretKey, textVisitsNeedKey)
+	}
+	name, kind := model.ProviderFerun, model.ProviderKindFerun
+	if provider != "" {
+		p, err := tx.GetAccessProvider(ctx, tenant, provider)
+		if errors.Is(err, store.ErrNoRow) {
+			return apierr.WithCode(http.StatusUnprocessableEntity, CodeUnknownProvider, textUnknownProvider, provider)
+		}
+		if err != nil {
+			return fmt.Errorf("provider %s: %w", provider, err)
+		}
+		name, kind = p.Name, p.Kind
+	}
+	if !slices.Contains(s.d.VisitKinds, kind) {
+		return apierr.WithCode(http.StatusConflict, CodeFerunAuthRequired, textNeedsFerunAuth, name)
+	}
+	return nil
 }
 
 // checkZone refuses a publish of a tenant whose zone the platform does not
