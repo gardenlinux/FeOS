@@ -150,3 +150,74 @@ func TestIngressRouting(t *testing.T) {
 		t.Fatalf("without a label: %v", got)
 	}
 }
+
+// ingProvider makes a provider of tenant by raw SQL (the store's own
+// functions for providers are another package's): kind tenant at url, or
+// kind oidc with a sealed secret when url is "".
+func ingProvider(t *testing.T, s *store.Store, tenant, name, url string) {
+	t.Helper()
+	if url != "" {
+		exec(t, s, "INSERT INTO access_providers (tenant, name, kind, url) VALUES ($1, $2, 'tenant', $3)", tenant, name, url)
+		return
+	}
+	exec(t, s, `INSERT INTO access_providers (tenant, name, kind, issuer, client_id, client_secret_sealed, rule)
+		VALUES ($1, $2, 'oidc', 'https://login.example.com/', 'abc', '\x01'::bytea, '{"anyone":true}')`, tenant, name)
+}
+
+// ingAccess sets who an environment admits by raw SQL: provider "" with
+// visitors is ferun's.
+func ingAccess(t *testing.T, s *store.Store, env uuid.UUID, access, provider string) {
+	t.Helper()
+	exec(t, s, "UPDATE environments SET access = $2, access_provider = nullif($3, '') WHERE id = $1", env, access, provider)
+}
+
+// IngressRouting reads who each environment admits (ADR 0054): anyone,
+// visitors of ferun (no provider row), of a provider of kind tenant with
+// its URL, and of one of kind oidc; a provider name without a row reads
+// no kind and no URL.
+func TestIngressRoutingAccess(t *testing.T) {
+	s, _ := newStore(t)
+	mkTenant(t, s, "acme")
+	ingProvider(t, s, "acme", "fecode", "https://fecode.example/api/v1/visit")
+	ingProvider(t, s, "acme", "sso", "")
+	open := routedEnv(t, s, "acme", "open")
+	ferun := routedEnv(t, s, "acme", "ferun")
+	ingAccess(t, s, ferun.ID, model.AccessVisitors, "")
+	tenant := routedEnv(t, s, "acme", "tenant")
+	ingAccess(t, s, tenant.ID, model.AccessVisitors, "fecode")
+	oidc := routedEnv(t, s, "acme", "oidc")
+	ingAccess(t, s, oidc.ID, model.AccessVisitors, "sso")
+
+	type access struct{ access, provider, kind, url string }
+	read := func() map[uuid.UUID]access {
+		t.Helper()
+		rows, err := s.IngressRouting(bg, nil)
+		must(t, err)
+		out := map[uuid.UUID]access{}
+		for _, r := range rows {
+			out[r.EnvID] = access{r.Access, r.AccessProvider, r.ProviderKind, r.ProviderURL}
+		}
+		return out
+	}
+	got := read()
+	want := map[uuid.UUID]access{
+		open.ID:   {model.AccessAnyone, "", "", ""},
+		ferun.ID:  {model.AccessVisitors, "", "", ""},
+		tenant.ID: {model.AccessVisitors, "fecode", model.ProviderKindTenant, "https://fecode.example/api/v1/visit"},
+		oidc.ID:   {model.AccessVisitors, "sso", model.ProviderKindOIDC, ""},
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("environment %s: %+v, want %+v", id, got[id], w)
+		}
+	}
+
+	// The foreign key keeps a named provider; without it, a name whose
+	// row is gone reads no kind and no URL (the table then signs no one
+	// in), and the environment stays guarded.
+	exec(t, s, "ALTER TABLE environments DROP CONSTRAINT environments_access_provider_fkey")
+	exec(t, s, "DELETE FROM access_providers WHERE tenant = 'acme' AND name = 'fecode'")
+	if a := read()[tenant.ID]; a != (access{model.AccessVisitors, "fecode", "", ""}) {
+		t.Fatalf("a missing provider row: %+v", a)
+	}
+}

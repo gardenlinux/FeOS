@@ -350,7 +350,7 @@ func TestBuildEnvRouteFrom(t *testing.T) {
 	if changed.Hash == got.Hash {
 		t.Fatal("a change of from kept the hash")
 	}
-	if puts, _ := Diff(map[string]string{got.ID: got.Hash}, &Snapshot{Envs: map[string]wire.Env{changed.ID: changed}}); len(puts) != 1 ||
+	if puts, _ := Diff(map[string]string{got.ID: got.Hash}, &Snapshot{Envs: map[string]wire.Env{changed.ID: changed}}, true); len(puts) != 1 ||
 		!slices.Equal(puts[0].Routes[2].From, []string{"192.0.2.0/25"}) {
 		t.Fatalf("diff: %+v", puts)
 	}

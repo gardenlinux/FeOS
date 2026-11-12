@@ -37,7 +37,17 @@ type EnvRows struct {
 	// deployed one (0: none).
 	Deployment, Deployed int
 	CreatedAt            time.Time
-	Instances            []Instance
+	// Access is who the ingress admits (environments.access, ADR 0054):
+	// model.AccessAnyone ("" reads the same) or model.AccessVisitors.
+	Access string
+	// Provider is the provider whose visitors it admits: "" with
+	// AccessVisitors is model.ProviderFerun. ProviderKind and
+	// ProviderURL are that provider's row ("": none, as ferun has none).
+	Provider, ProviderKind, ProviderURL string
+	// SignIn is where the ingress sends a navigation without a visit
+	// (wire.Env.SignIn); the Builder sets it (SignIn) before BuildEnv.
+	SignIn    string
+	Instances []Instance
 	// Domains are the environment's domains the ingress serves, with
 	// their certificates and keys opened (store.IngressDomains), in the
 	// order their entry takes them.
@@ -81,7 +91,8 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 	for _, r := range rows {
 		if len(out) == 0 || out[len(out)-1].ID != r.EnvID {
 			out = append(out, EnvRows{ID: r.EnvID, Tenant: r.Owner, Name: r.Name, HostLabel: r.HostLabel,
-				Zone: r.Zone, Deployment: r.Deployment, Deployed: r.Deployed, CreatedAt: r.CreatedAt})
+				Zone: r.Zone, Deployment: r.Deployment, Deployed: r.Deployed, CreatedAt: r.CreatedAt,
+				Access: r.Access, Provider: r.AccessProvider, ProviderKind: r.ProviderKind, ProviderURL: r.ProviderURL})
 		}
 		if !r.HasInstance {
 			continue
@@ -93,6 +104,32 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 			Idle: r.IdleAfterS == nil || *r.IdleAfterS > 0})
 	}
 	return out
+}
+
+// SignIn returns where the ingress sends a navigation of e without a
+// visit (ADR 0054), with authURL ferun-auth's base URL (--visitor-auth-url;
+// "": none): for visitors of a provider of kind tenant its URL; of ferun
+// or of a provider of kind oidc, authURL's /visit when there is one; ""
+// otherwise, also for a provider whose row is missing, so that the
+// ingress signs no one in (it fails closed). "" for an environment open
+// to anyone.
+func SignIn(e EnvRows, authURL string) string {
+	if e.Access != model.AccessVisitors {
+		return ""
+	}
+	kind := e.ProviderKind
+	if e.Provider == "" || e.Provider == model.ProviderFerun {
+		kind = model.ProviderKindFerun
+	}
+	switch kind {
+	case model.ProviderKindTenant:
+		return e.ProviderURL
+	case model.ProviderKindFerun, model.ProviderKindOIDC:
+		if authURL != "" {
+			return authURL + "/visit"
+		}
+	}
+	return ""
 }
 
 // RoutingDeployment is the deployment whose routes the ingress serves: the
@@ -187,6 +224,12 @@ func Asleep(phase, clientState, op string) bool {
 //     Its default host, <label>.<zone>, is its host only while none of its
 //     domains is: an environment on a domain of its own is not served in
 //     its zone too (ADR 0021).
+//   - Who it admits (ADR 0054): open to anyone (e.Access anyone or ""), it
+//     carries none of Access, Provider and SignIn, so its entry and hash
+//     are those of before. Otherwise its Access is e.Access, Provider the
+//     provider's name (model.ProviderFerun for ""), and SignIn e.SignIn,
+//     which may be "": an environment that is not open never goes without
+//     Access, whatever else is missing, so the ingress fails closed.
 //   - Its hash identifies the rest of its content, the certificates
 //     included, so that a renewed one is sent again.
 //
@@ -206,6 +249,16 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 	}
 	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: defaultHosts, Deployment: number,
 		Routes: []wire.Route{}, Services: []wire.Service{}}
+	if e.Access != "" && e.Access != model.AccessAnyone {
+		// Any other value than visitors goes as it is: it admits nobody.
+		out.Access, out.Provider, out.SignIn = e.Access, e.Provider, e.SignIn
+		if e.Access == model.AccessVisitors {
+			out.Access = wire.AccessVisitors
+		}
+		if out.Provider == "" {
+			out.Provider = model.ProviderFerun
+		}
+	}
 	byService := map[string][]spec.RouteView{}
 	for _, r := range spec.IngressRoutes(sp) {
 		out.Routes = append(out.Routes, wire.Route{Name: r.Name, Path: r.Prefix, Service: r.Service, Port: r.Port.String(),
