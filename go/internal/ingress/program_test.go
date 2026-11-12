@@ -36,6 +36,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/ingress/proxy"
 	"github.com/gardenlinux/feos/go/internal/ingress/wg"
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
+	"github.com/gardenlinux/feos/go/internal/visit"
 )
 
 func TestReadiness(t *testing.T) {
@@ -767,5 +768,140 @@ func TestSetMemoryLimit(t *testing.T) {
 	// A limit set already, as GOMEMLIMIT sets it, stays.
 	if got := setMemoryLimit(1 << 30); got != want || debug.SetMemoryLimit(-1) != want {
 		t.Errorf("a second limit: %d, runtime %d, want %d", got, debug.SetMemoryLimit(-1), want)
+	}
+}
+
+// visitProg is a program whose environment admits the visitors of the
+// provider fecode, signing in at progSignIn, with the fake's keys, and
+// whose instance answers the visitor headers and cookies it got.
+const progSignIn = "https://fecode.test/api/v1/visit"
+
+func visitProg(t *testing.T) (*progHarness, *visit.Keys) {
+	t.Helper()
+	h := newProgHarness(t)
+	seed, key := make([]byte, 32), make([]byte, 32)
+	_, _ = rand.Read(seed)
+	_, _ = rand.Read(key)
+	k, err := visit.NewKeys(seed, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.fake.SetVisits(k)
+	h.fake.SetVisitor("u-1", "a@example.com")
+	h.fake.PutEnv(wire.Env{
+		ID: progEnv, Tenant: "acme", Name: "app", Hosts: []string{progHost}, Deployment: 1, Hash: "h2",
+		Access: wire.AccessVisitors, Provider: "fecode", SignIn: progSignIn,
+		Routes: []wire.Route{{Name: "root", Path: "/", Service: "web", Port: "http"}},
+		Services: []wire.Service{{Name: "web", Endpoints: []wire.Endpoint{{
+			Instance: "inst-1", Address: progPod, Node: progNode, Ports: map[string]int{"http": 8080}, GroupVersion: 3,
+		}}}},
+	})
+	h.upstream(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "visitor=%s email=%s token=%s cookie=%s", r.Header.Get(visit.HeaderSubject),
+			r.Header.Get(visit.HeaderEmail), r.Header.Get(visit.HeaderToken), r.Header.Get("Cookie"))
+	}))
+	return h, k
+}
+
+// browse sends a navigation (or, nav false, a script's request) with the
+// cookies and answers without following redirects.
+func browse(t *testing.T, c *http.Client, path string, nav bool, cookies ...*http.Cookie) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest("GET", "https://"+progHost+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nav {
+		req.Header.Set("Sec-Fetch-Mode", "navigate")
+		req.Header.Set("Accept", "text/html")
+	} else {
+		req.Header.Set("Sec-Fetch-Mode", "cors")
+	}
+	for _, ck := range cookies {
+		req.AddCookie(ck)
+	}
+	cc := *c
+	cc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := cc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, string(b)
+}
+
+// cookieOf is the cookie name an answer sets.
+func cookieOf(resp *http.Response, name string) *http.Cookie {
+	for _, ck := range resp.Cookies() {
+		if ck.Name == name {
+			return ck
+		}
+	}
+	return nil
+}
+
+// signIn goes the whole way of a visitor: the navigation sent to the
+// provider with a challenge, the provider's accepted code (signed here
+// as ferund would) brought back to /.ferun/auth, the visit cookie.
+func signIn(t *testing.T, h *progHarness, k *visit.Keys, path string) *http.Cookie {
+	t.Helper()
+	c := h.client()
+	resp, _ := browse(t, c, path, true)
+	sealed, ok := strings.CutPrefix(resp.Header.Get("Location"), progSignIn+"?challenge=")
+	if resp.StatusCode != http.StatusSeeOther || !ok {
+		t.Fatalf("navigation: %d %v", resp.StatusCode, resp.Header)
+	}
+	ch, err := k.OpenChallenge(sealed)
+	if err != nil || ch.Env != progEnv || ch.Host != progHost || ch.Path != path {
+		t.Fatalf("challenge %+v %v", ch, err)
+	}
+	chCookie := cookieOf(resp, visit.CookieChallenge)
+	if chCookie == nil || visit.BindingHash(chCookie.Value) != ch.Binding {
+		t.Fatalf("challenge cookie %v", resp.Header.Values("Set-Cookie"))
+	}
+	now := time.Now()
+	code, err := k.SignCode(visit.Code{Challenge: ch.ID, Env: ch.Env, Host: ch.Host, Path: ch.Path, Binding: ch.Binding,
+		Outcome: visit.OutcomeAccepted, Visit: "5f2b7c9e-4f1d-4c0e-9d7a-5b6c7d8e9f01", IssuedAt: now.Unix(),
+		Expires: now.Add(visit.CodeLifetime).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body := browse(t, c, "/.ferun/auth?code="+code, true, chCookie)
+	vc := cookieOf(resp, visit.CookieVisit)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "https://"+progHost+path || vc == nil {
+		t.Fatalf("auth: %d %v %q", resp.StatusCode, resp.Header, body)
+	}
+	return vc
+}
+
+// The whole sign-in through a program: a navigation without a visit
+// goes to the provider, the provider's code redeems at the control plane
+// for the visit cookie, and the visit's requests reach the instance with
+// the visitor's headers and without the ingress's cookies.
+func TestProgramVisitSignIn(t *testing.T) {
+	t.Parallel()
+	h, k := visitProg(t)
+	h.start()
+	h.waitReady()
+	c := h.client()
+	if resp, _ := browse(t, c, "/hello", false); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a script without a visit: %d", resp.StatusCode)
+	}
+	vc := signIn(t, h, k, "/hello?x=1")
+	resp, body := browse(t, c, "/hello?x=1", false, vc, &http.Cookie{Name: "app", Value: "1"})
+	tok, _, _ := visit.ParseVisitCookie(vc.Value)
+	if resp.StatusCode != http.StatusOK || body != "visitor=u-1 email=a@example.com token="+tok+" cookie=app=1" {
+		t.Fatalf("the visit: %d %q", resp.StatusCode, body)
+	}
+	if n := len(h.fake.Redeems()); n != 1 {
+		t.Fatalf("%d redeems", n)
+	}
+	resp, body = browse(t, c, "/.ferun/keys", false)
+	if resp.StatusCode != http.StatusOK || body != string(k.JWKS()) {
+		t.Fatalf("keys: %d %q", resp.StatusCode, body)
+	}
+	if _, m := h.health("/metrics"); !strings.Contains(m, "ferun_ingress_visit_redeemed_total 1\n") {
+		t.Errorf("metrics:\n%s", m)
 	}
 }

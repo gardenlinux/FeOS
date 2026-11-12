@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
 	"github.com/gardenlinux/feos/go/internal/routing"
+	"github.com/gardenlinux/feos/go/internal/visit"
 )
 
 // The proxy's plain answers.
@@ -81,6 +83,12 @@ type table struct {
 	certs map[string]*domainCert
 	// challenges are the pending ACME HTTP-01 answers by token.
 	challenges map[string]wire.Challenge
+	// keys are the visits' keys (ADR 0054), which verify tokens and codes
+	// and seal challenges, and jwks the token key as /.ferun/keys
+	// answers it; nil when the table has none or they do not load: a
+	// guarded environment then signs nobody in.
+	keys *visit.Keys
+	jwks []byte
 }
 
 // domainCert is a domain's certificate, parsed, with what it was parsed
@@ -112,6 +120,20 @@ type envRoutes struct {
 	prefixes []string
 	clients  []clients
 	services map[string]*service
+	// access is who the environment admits (wire.Env.Access): "" anyone,
+	// wire.AccessVisitors those with a visit of provider; any other value
+	// admits nobody. signIn is where a navigation without a visit is
+	// sent, "" when the table names no absolute https URL: nobody can
+	// sign in then.
+	access   string
+	provider string
+	signIn   string
+}
+
+// guarded reports whether the environment admits anyone but anyone: only
+// a request with a visit passes then.
+func (e *envRoutes) guarded() bool {
+	return e.access != ""
 }
 
 // clients are the clients a route admits (wire.Route.From), parsed once
@@ -200,6 +222,7 @@ func buildTable(s *wire.State, log *slog.Logger, old *table) *table {
 			t.challenges[c.Token] = c
 		}
 	}
+	t.keys, t.jwks = visitKeys(s.VisitKeys, old, log)
 	for _, id := range slices.Sorted(maps.Keys(s.Envs)) {
 		e := s.Envs[id]
 		er := buildEnv(e)
@@ -237,6 +260,35 @@ func buildTable(s *wire.State, log *slog.Logger, old *table) *table {
 		}
 	}
 	return t
+}
+
+// visitKeys loads the visits' keys of a table, or takes old's when they
+// did not change. Keys that do not load give none, and a warning.
+func visitKeys(k *wire.VisitKeys, old *table, log *slog.Logger) (*visit.Keys, []byte) {
+	if k == nil {
+		return nil, nil
+	}
+	if old != nil && old.keys != nil && old.src.VisitKeys != nil && reflect.DeepEqual(*old.src.VisitKeys, *k) {
+		return old.keys, old.jwks
+	}
+	keys, err := visit.PublicKeys(k.TokenKID, k.TokenKey, k.ChallengeKID, k.ChallengeKey)
+	if err != nil {
+		log.Warn("the table's visit keys do not load; guarded environments sign nobody in", "err", err)
+		return nil, nil
+	}
+	return keys, keys.JWKS()
+}
+
+// signInURL is s when it is an absolute https URL with a host and
+// without userinfo or fragment, where the ingress may send a browser to
+// sign in; "" otherwise.
+func signInURL(s string) string {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" ||
+		strings.Contains(s, "#") || u.Opaque != "" {
+		return ""
+	}
+	return s
 }
 
 // parseDomain parses a domain's certificate for host, or takes prev when
@@ -314,7 +366,8 @@ func (t *table) add(er *envRoutes) {
 }
 
 func buildEnv(e wire.Env) *envRoutes {
-	er := &envRoutes{id: e.ID, tenant: e.Tenant, routes: slices.Clone(e.Routes), services: map[string]*service{}}
+	er := &envRoutes{id: e.ID, tenant: e.Tenant, routes: slices.Clone(e.Routes), services: map[string]*service{},
+		access: e.Access, provider: e.Provider, signIn: signInURL(e.SignIn)}
 	segments := func(r wire.Route) int {
 		p := strings.Trim(r.Path, "/")
 		if p == "" {
@@ -350,21 +403,26 @@ func buildEnv(e wire.Env) *envRoutes {
 
 // target is where the routing sends a request: the environment, the
 // route, its service and the path the upstream gets (unescaped, and
-// escaped when that is not the default escaping).
+// escaped when that is not the default escaping). n is the number of the
+// path's segments the route matched.
 type target struct {
 	env     *envRoutes
 	route   *wire.Route
 	svc     *service
 	path    string
 	rawPath string
+	n       int
 }
 
-// resolve routes a request by its canonical host and its escaped path
-// from a client's address (clientAddr), or returns the answer when the
-// routing does not send it anywhere. When the route matched does not
-// admit the client, the answer is 403 and the target has the
-// environment and the route (no service): the route refused the client.
-func (t *table) resolve(host, raw string, client netip.Addr) (target, *reply) {
+// route routes a request by its canonical host and its escaped path from
+// a client's address (clientAddr) to an environment and a route, or
+// returns the answer when the routing does not send it anywhere. When
+// the route matched does not admit the client, the answer is 403 and the
+// target has the environment and the route: the route refused the
+// client. The visit is checked after it (the client's address first),
+// the service only after that (bind), so that a client without a visit
+// learns nothing of the services.
+func (t *table) route(host, raw string, client netip.Addr) (target, *reply) {
 	if t == nil {
 		return target{}, &reply{http.StatusServiceUnavailable, textNoTable, 5}
 	}
@@ -393,17 +451,35 @@ func (t *table) resolve(host, raw string, client netip.Addr) (target, *reply) {
 	if !e.clients[i].admits(client) {
 		return target{env: e, route: r}, &reply{http.StatusForbidden, textRefused, 0}
 	}
-	svc := e.services[r.Service]
+	return target{env: e, route: r, path: path, rawPath: routing.RawOf(path, raw), n: n}, nil
+}
+
+// bind finds the service of a target route routed for the escaped path
+// raw, and the path the upstream gets, or returns the answer when there
+// is no such service.
+func (t *table) bind(tg target, raw string) (target, *reply) {
+	r := tg.route
+	svc := tg.env.services[r.Service]
 	if svc == nil {
 		return target{}, &reply{http.StatusServiceUnavailable, "no ready instance of " + r.Service, 5}
 	}
-	tg := target{env: e, route: r, svc: svc, path: path, rawPath: routing.RawOf(path, raw)}
+	tg.svc = svc
 	if r.Strip {
-		if tg.path, tg.rawPath, err = routing.StripSegments(raw, n); err != nil {
+		var err error
+		if tg.path, tg.rawPath, err = routing.StripSegments(raw, tg.n); err != nil {
 			return target{}, &reply{http.StatusBadRequest, textBadEscape, 0}
 		}
 	}
 	return tg, nil
+}
+
+// env returns the environment that serves a canonical host; nil when
+// none does or there is no table.
+func (t *table) env(host string) *envRoutes {
+	if t == nil {
+		return nil
+	}
+	return t.hosts[host]
 }
 
 // zonesOf are the zones of default hosts that s names, canonical.

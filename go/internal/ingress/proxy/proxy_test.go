@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
+	"github.com/gardenlinux/feos/go/internal/visit"
 )
 
 const (
@@ -103,6 +104,14 @@ func upstream(t *testing.T, fn *fakeNet, name, addr string) *httptest.Server {
 		for _, h := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded",
 			"X-Real-Ip", "True-Client-Ip", "Traceparent", "Tracestate"} {
 			e.Headers[h] = strings.Join(r.Header.Values(h), ",")
+		}
+		// The cookies and every header that is or could be read as a
+		// visitor header, by the name it arrived with.
+		e.Headers["Cookie"] = strings.Join(r.Header.Values("Cookie"), "|")
+		for k, vv := range r.Header {
+			if visit.IsVisitorHeader(k) {
+				e.Headers[k] = strings.Join(vv, ",")
+			}
 		}
 		_ = json.NewEncoder(w).Encode(e)
 	}))

@@ -55,6 +55,15 @@ type metrics struct {
 	rejectedHeldTenant     atomic.Uint64
 	rejectedHeld           atomic.Uint64
 	connsCut               atomic.Uint64
+
+	visitSignIns     atomic.Uint64
+	visitRequired    atomic.Uint64
+	visitRejected    atomic.Uint64
+	visitRedeemed    atomic.Uint64
+	visitRenewed     atomic.Uint64
+	visitEnded       atomic.Uint64
+	visitFailed      atomic.Uint64
+	visitUnavailable atomic.Uint64
 }
 
 func (m *metrics) request(class string) {
@@ -174,6 +183,25 @@ func (p *Proxy) Metrics(w io.Writer) {
 		counter("ferun_ingress_upstream_connections_cut_total",
 			"Open connections to instances closed because the table no longer routes to them.",
 			m.connsCut.Load()),
+		counter("ferun_ingress_visit_sign_ins_total",
+			"Navigations of guarded environments without a visit sent to their provider to sign in.",
+			m.visitSignIns.Load()),
+		counter("ferun_ingress_visit_required_total",
+			"Requests of guarded environments without a visit answered 401 (not navigations).",
+			m.visitRequired.Load()),
+		counter("ferun_ingress_visit_rejected_total",
+			"Sign-ins whose provider did not admit the visitor (403 at /.ferun/auth).", m.visitRejected.Load()),
+		counter("ferun_ingress_visit_redeemed_total",
+			"Accepted codes redeemed for a visit at the control plane.", m.visitRedeemed.Load()),
+		counter("ferun_ingress_visit_renewed_total",
+			"Visits' tokens renewed at the control plane.", m.visitRenewed.Load()),
+		counter("ferun_ingress_visit_ended_total",
+			"Visits seen ending: at a renewal, or signed out on this instance.", m.visitEnded.Load()),
+		counter("ferun_ingress_visit_failed_total",
+			"Redeems and renewals that got no answer of the control plane.", m.visitFailed.Load()),
+		counter("ferun_ingress_visit_unavailable_total",
+			"Requests of guarded environments that cannot sign anyone in (no keys, no sign-in address, "+
+				"an unknown access or no visit calls): never forwarded.", m.visitUnavailable.Load()),
 	} {
 		f(bw)
 	}
