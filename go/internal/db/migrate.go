@@ -51,13 +51,16 @@ func migrations() ([]migration, error) {
 }
 
 // readMigrations reads the files NNNN_name.sql at the root of fsys, in
-// the order of their numbers.
+// the order of their numbers. Two files of one number are refused:
+// Migrate keys schema_migrations by the number alone, so a database that
+// has one of them would skip the other without a word.
 func readMigrations(fsys fs.FS) ([]migration, error) {
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return nil, err
 	}
 	var ms []migration
+	seen := map[int]string{}
 	for _, e := range entries {
 		num, _, ok := strings.Cut(e.Name(), "_")
 		if !ok || !strings.HasSuffix(e.Name(), ".sql") {
@@ -67,6 +70,10 @@ func readMigrations(fsys fs.FS) ([]migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("migration %s: %w", e.Name(), err)
 		}
+		if other, ok := seen[v]; ok {
+			return nil, fmt.Errorf("migrations %s and %s: one number for two migrations", other, e.Name())
+		}
+		seen[v] = e.Name()
 		b, err := fs.ReadFile(fsys, e.Name())
 		if err != nil {
 			return nil, err
