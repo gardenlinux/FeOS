@@ -31,7 +31,7 @@ func (a *Agent) hello(ctx context.Context, s *session) error {
 	a.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, a.tune.callTimeout)
 	defer cancel()
-	resp, err := s.client.Hello(cctx, &wire.HelloRequest{PublicKey: pub[:], Endpoint: ep, Version: a.cfg.Version})
+	resp, err := s.client.Hello(cctx, a.helloRequest(pub[:], ep))
 	if err != nil {
 		return err
 	}
@@ -64,6 +64,15 @@ func (a *Agent) hello(ctx context.Context, s *session) error {
 	}
 	a.wantMesh(mc)
 	return nil
+}
+
+// helloRequest is the Hello this instance sends, on a new session and to
+// announce a new endpoint alike: its mesh key, its endpoint, its version
+// and its capabilities. It checks visits (ADR 0054), so the control plane
+// gives it the environments that admit visitors.
+func (a *Agent) helloRequest(pub []byte, endpoint string) *wire.HelloRequest {
+	return &wire.HelloRequest{PublicKey: pub, Endpoint: endpoint, Version: a.cfg.Version,
+		Capabilities: []string{wire.CapabilityVisits}}
 }
 
 // meshConfigFor is the device's configuration for a place on the mesh:
@@ -206,7 +215,7 @@ func (a *Agent) syncStream(ctx context.Context, s *session) error {
 // the last, which changes nothing yet. A message that changed anything
 // goes to OnState as a copy and to the cache; a new mesh version sets the
 // device's peers. A heartbeat, which confirms the table, goes to the
-// cache when it was written cacheRefresh ago or longer: table.json's
+// cache when it was written cacheRefresh ago or longer: table-v2.json's
 // savedAt then tells a restarted instance how old its table is, also in a
 // cluster where nothing changes.
 func (a *Agent) apply(part *wire.Table) (*wire.Table, error) {
@@ -221,7 +230,8 @@ func (a *Agent) apply(part *wire.Table) (*wire.Table, error) {
 	}
 	now := time.Now()
 	a.tableAt = now
-	changed := t.Whole || len(t.Envs) > 0 || len(t.Removed) > 0 || t.Mesh != nil || t.Self != nil || t.Challenges != nil
+	changed := t.Whole || len(t.Envs) > 0 || len(t.Removed) > 0 || t.Mesh != nil || t.Self != nil || t.Challenges != nil ||
+		t.VisitKeys != nil
 	var clone *wire.State
 	if changed {
 		clone = a.state.Clone()
@@ -253,7 +263,7 @@ func (a *Agent) kickCache() {
 	}
 }
 
-// cacheLoop writes the table to table.json cacheDelay after a change, and
+// cacheLoop writes the table to table-v2.json cacheDelay after a change, and
 // once more when ctx ends if a write is pending.
 func (a *Agent) cacheLoop(ctx context.Context) {
 	var (

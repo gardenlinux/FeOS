@@ -45,7 +45,9 @@ import (
 // hands out places on the mesh; Sync streams a whole table, then a delta
 // for every change made with PutEnv, RemoveEnv, SetMesh and
 // SetAdmittedVersion, and a heartbeat every 10 s, each table in parts
-// past wire.PartBytes (SetPartBytes); Wake and Hold are recorded.
+// past wire.PartBytes (SetPartBytes); Wake and Hold are recorded. With
+// SetVisits it streams visits' keys and answers RedeemVisit, RenewVisit
+// and EndVisit as ferund would, recording them (fakevisits.go).
 // Refusals, stream ends, broken connections and sequence gaps can be
 // injected.
 type FakeControlPlane struct {
@@ -88,6 +90,7 @@ type FakeControlPlane struct {
 	renewals   []FakeRenewal
 	wakes      []wire.WakeRequest
 	holds      []FakeHold
+	visits     fakeVisits
 }
 
 // FakeConfig configures a FakeControlPlane; every field has a default.
@@ -665,7 +668,8 @@ func (f *FakeControlPlane) wholeLocked(name string) *wire.Table {
 	slices.SortFunc(envs, func(x, y wire.Env) int { return strings.Compare(x.ID, y.ID) })
 	m := f.mesh
 	self := f.selfLocked(name)
-	return &wire.Table{Seq: 1, Whole: true, Envs: envs, Mesh: &m, Self: &self, SentAt: time.Now()}
+	return &wire.Table{Seq: 1, Whole: true, Envs: envs, Mesh: &m, Self: &self, VisitKeys: f.visits.tableKeys(),
+		SentAt: time.Now()}
 }
 
 // broadcastLocked sends every stream the message build makes for it (nil:
@@ -899,6 +903,7 @@ func (s *fakeService) Hold(ctx context.Context, req *wire.HoldRequest) (*wire.Ho
 
 func cloneHello(r wire.HelloRequest) wire.HelloRequest {
 	r.PublicKey = slices.Clone(r.PublicKey)
+	r.Capabilities = slices.Clone(r.Capabilities)
 	return r
 }
 

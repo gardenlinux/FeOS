@@ -4,7 +4,7 @@
 // Package agent is the control side of ferun-ingress (ADR 0021): the
 // instance's identity and state directory, its one connection to the
 // control plane, the table it serves, its place on the pods' mesh and the
-// Wake and Hold calls of the data path. It speaks the protocol of package
+// Wake, Hold and visit calls of the data path. It speaks the protocol of package
 // wire and imports nothing of ferund's.
 //
 // # State directory
@@ -20,9 +20,13 @@
 //	removed                the refusal that said the ingress was removed, until the next join
 //	wg.key                 the WireGuard private key, 32 raw bytes
 //	mesh.json              the place on the mesh: {podNetwork, prefix, address}
-//	table.json             the table cache: {savedAt, state}, written 1 s after a change,
+//	table-v2.json          the table cache: {savedAt, state}, written 1 s after a change,
 //	                       and at least once a minute while heartbeats confirm it; it holds
-//	                       the domains' certificates and keys and the ACME challenges
+//	                       the domains' certificates and keys, the ACME challenges and the
+//	                       visits' keys (ADR 0054)
+//	table.json             the cache of the releases before visits: never read, and deleted
+//	                       by the first write of table-v2.json, so an older binary started
+//	                       on the volume serves nothing until it is connected
 //
 // The certificate is renewed for the same key. A new key is made only
 // when the identity is declared lost, so tls.key and cert.json never
@@ -61,7 +65,18 @@
 // for 45 s, makes the agent connect again, and the new stream starts
 // whole. The certificate is renewed at its renew time on the current
 // connection; the agent then connects with the new certificate and drops
-// the old connection only once the new one said Hello.
+// the old connection only once the new one said Hello. Every Hello names
+// the capability visits (ADR 0054), so the control plane also streams the
+// environments that admit visitors, with the visits' keys.
+//
+// # Visits
+//
+// RedeemVisit, RenewVisit and EndVisit are the data path's calls for
+// visits, on the current connection like Hold, ErrNotConnected without
+// one. At most 8 renewals, and separately 8 redeems and ends, are in
+// flight; a call beyond fails at once with ErrBusy, which status.Code
+// reads as ResourceExhausted and ErrNotConnected as Unavailable, so the
+// data path tells a busy instance from a control plane that is away.
 //
 // # Refusals
 //

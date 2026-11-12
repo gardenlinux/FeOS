@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/gardenlinux/feos/go/internal/ingress/sinklog"
 	"github.com/gardenlinux/feos/go/internal/ingress/wg"
@@ -33,9 +34,22 @@ const (
 	DefaultMeshPort   = 51820
 )
 
-// ErrNotConnected is the error of Hold while the agent has no connection
-// to the control plane.
-var ErrNotConnected = errors.New("ingress agent: not connected to the control plane")
+// ErrNotConnected is the error of Hold and the visit calls while the
+// agent has no connection to the control plane. To status.Code it reads
+// as codes.Unavailable: the control plane is away.
+var ErrNotConnected error = &callError{code: codes.Unavailable, text: "ingress agent: not connected to the control plane"}
+
+// callError is an error of the agent's own about a call it did not send,
+// with the gRPC code that says what it means to the caller.
+type callError struct {
+	code codes.Code
+	text string
+}
+
+func (e *callError) Error() string { return e.text }
+
+// GRPCStatus lets status.Code read the error's code.
+func (e *callError) GRPCStatus() *status.Status { return status.New(e.code, e.text) }
 
 // Config is what the agent is given (the flags of ferun-ingress).
 type Config struct {
@@ -200,7 +214,7 @@ type Agent struct {
 	repairs     uint64
 	state       *wire.State
 	tableAt     time.Time
-	cachedAt    time.Time // the savedAt of table.json, as written or loaded
+	cachedAt    time.Time // the savedAt of table-v2.json, as written or loaded
 	tableWarnAt time.Time
 	// reachFailed: an attempt to reach the control plane (a join, a
 	// connection, a session) failed since Run started.
@@ -211,6 +225,9 @@ type Agent struct {
 	// sink is the client of the sink's ingest; nil without
 	// Config.SinkEndpoint. Run closes it.
 	sink *sinklog.Client
+	// renewSlots and redeemSlots bound the visit calls in flight:
+	// renewals, and redeems and ends (visit.go).
+	renewSlots, redeemSlots chan struct{}
 }
 
 // New checks cfg and makes an agent; Run starts it.
@@ -282,6 +299,9 @@ func New(cfg Config, deps Deps) (*Agent, error) {
 		meshKick:  make(chan struct{}, 1),
 		meshPort:  cfg.MeshPort,
 		meshSince: map[wg.Key]time.Time{},
+
+		renewSlots:  make(chan struct{}, maxVisitCalls),
+		redeemSlots: make(chan struct{}, maxVisitCalls),
 	}
 	if cfg.MeshRepairEvery > 0 {
 		a.tune.meshRepairEvery = cfg.MeshRepairEvery
