@@ -1,0 +1,14 @@
+{
+  "method": "PUT",
+  "path": "/api/v1/environments/expensa-stage/public",
+  "query": {},
+  "status": 409,
+  "request": {
+    "public": true
+  },
+  "response": {
+    "error": "visitors of ferun need ferun-auth, which this installation does not run",
+    "code": "ferun_auth_required"
+  },
+  "note": "a publish without access of an environment that is not public admits visitors of ferun, which needs ferun-auth (--visitor-auth-url); so does a provider of kind oidc. 409 visits_need_secret_key without --secret-key-file, 422 unknown_provider for a provider the tenant does not have, 400 invalid_access for a bad access"
+}

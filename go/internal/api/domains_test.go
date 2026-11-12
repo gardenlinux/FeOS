@@ -193,7 +193,8 @@ func TestDomainsEndToEnd(t *testing.T) {
 	if len(list.Domains) != 1 || list.Domains[0].ID != d.ID {
 		t.Fatalf("by environment %+v", list)
 	}
-	expect(t, do("PUT", "/api/v1/environments/prod/public", map[string]any{"public": true}), http.StatusOK, "")
+	expect(t, do("PUT", "/api/v1/environments/prod/public", map[string]any{"public": true, "access": "anyone"}),
+		http.StatusOK, "")
 
 	// The records in DNS, a check now: verified and routed; it waits for
 	// its certificate.

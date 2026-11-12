@@ -11,7 +11,9 @@
     "hosts": [
       "expensa-stage-fecode.apps.fecode.dev"
     ],
-    "rolling": true
+    "rolling": true,
+    "access": "visitors",
+    "provider": "ferun"
   },
-  "note": "the tenant's decision whether the ingress serves the environment without a route token; the first publish gives it its host and rolls its image services once (rolling); {\"public\": false} unpublishes, hosts then []; public is required (400)"
+  "note": "the tenant's decision whether the ingress serves the environment without a route token; the first publish gives it its host and rolls its image services once (rolling); {\"public\": false} unpublishes, hosts then []; public is required (400); without access a first publish admits visitors of ferun, the builtin provider (ADR 0054), and a publish again keeps the access"
 }

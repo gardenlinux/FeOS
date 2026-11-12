@@ -23,6 +23,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
+	"github.com/gardenlinux/feos/go/internal/visit"
 )
 
 // The route door's plain answers.
@@ -165,10 +166,14 @@ func rawOf(path, raw string) string {
 // go to its sandbox, only while that is the environment owner's and no
 // instance row (else 503; §13.6). The path is
 // stripped of the route's path when the route says so; the query is
-// kept. Its answers are plain text; a failure inside ferund is logged
-// and answered 500 "the route door failed", without its cause.
+// kept. The visitor headers (ADR 0054: visit.IsVisitorHeader, in any
+// spelling) are dropped from every request, as the ingress drops them:
+// the door serves no visit, and an upstream must not take a client's for
+// the ingress's. Its answers are plain text; a failure inside ferund is
+// logged and answered 500 "the route door failed", without its cause.
 func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	visit.DropVisitorHeaders(r.Header)
 	tok, creds, header := routeToken(r)
 	if tok == "" {
 		http.Error(w, textRouteToken, http.StatusUnauthorized)

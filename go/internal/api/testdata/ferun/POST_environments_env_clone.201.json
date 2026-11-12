@@ -182,6 +182,8 @@
     "deleting": false,
     "public": false,
     "hosts": [],
+    "access": "anyone",
+    "provider": "",
     "rollout": {
       "deployment": 1,
       "state": "waiting",

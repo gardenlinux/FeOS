@@ -99,7 +99,7 @@ TABLE cluster_secrets
   COLUMN name text NOT NULL
   COLUMN value bytea NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
-  CONSTRAINT CHECK ((length(value) = 32))
+  CONSTRAINT CHECK (((length(value) = 32) OR ((name = 'visit-token'::text) AND (length(value) = 61))))
   CONSTRAINT PRIMARY KEY (name)
   CREATE UNIQUE INDEX cluster_secrets_pkey ON public.cluster_secrets USING btree (name)
 TABLE domain_certs

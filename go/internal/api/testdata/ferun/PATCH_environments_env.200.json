@@ -19,6 +19,8 @@
     "deleting": false,
     "public": false,
     "hosts": [],
+    "access": "anyone",
+    "provider": "",
     "rollout": null,
     "objects": [],
     "routes": [],

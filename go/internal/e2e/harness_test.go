@@ -1037,13 +1037,16 @@ func (c *cluster) ingressToken(name string) string {
 	return out.Token
 }
 
-// setPublic makes an environment public, or not, with the tenant's token
-// through the balancer (PUT …/public), and returns the answer. (publish
-// is the events' already.)
+// setPublic makes an environment public, open to anyone (ADR 0054), or
+// not, with the tenant's token through the balancer (PUT …/public), and
+// returns the answer. (publish is the events' already.)
 func (c *cluster) setPublic(envID uuid.UUID, public bool) env.PublicAnswer {
 	c.t.Helper()
-	r := c.call(nil, "PUT", "/api/v1/environments/"+envID.String()+"/public", tenantAuth,
-		fmt.Sprintf(`{"public":%t}`, public))
+	body := `{"public":false}`
+	if public {
+		body = `{"public":true,"access":"anyone"}`
+	}
+	r := c.call(nil, "PUT", "/api/v1/environments/"+envID.String()+"/public", tenantAuth, body)
 	if r.code != http.StatusOK {
 		c.t.Fatalf("public %t: %d %s", public, r.code, r.body)
 	}

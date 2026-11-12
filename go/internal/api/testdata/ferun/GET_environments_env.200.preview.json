@@ -17,6 +17,8 @@
     "deleting": false,
     "public": false,
     "hosts": [],
+    "access": "anyone",
+    "provider": "",
     "rollout": {
       "deployment": 3,
       "state": "deployed",

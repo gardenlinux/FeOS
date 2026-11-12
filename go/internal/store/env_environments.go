@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/gardenlinux/feos/go/internal/db"
+	"github.com/gardenlinux/feos/go/internal/model"
 )
 
 // This file and the other env_*.go files hold the typed access to the
@@ -27,7 +28,7 @@ import (
 // queries of their own domain in files of their own. No writer here sends
 // a notification, except ferun_ingress, which the writes that the
 // ingress's table follows send themselves (ADR 0021): an environment's
-// publicity, deployments and deletion, and its service instances. The callers
+// publicity, access, deployments and deletion, and its service instances. The callers
 // send ferun_leader "env-reconcile" or "env-groups" in their transaction
 // when the controller is to act.
 
@@ -159,6 +160,12 @@ type Environment struct {
 	// tenant chooses one (SetEnvironmentHostLabel); "": never published.
 	Public, IngressGroup bool
 	HostLabel            string
+	// Access is who the ingress admits while it is public (ADR 0054):
+	// model.AccessAnyone or model.AccessVisitors; AccessProvider, with
+	// visitors, the name of its tenant's provider, "" for the provider
+	// model.ProviderFerun (a NULL access_provider). Both are written only
+	// by SetEnvironmentAccess.
+	Access, AccessProvider string
 }
 
 // environmentColumns are the columns of an Environment, each prefixed with
@@ -169,7 +176,7 @@ func environmentColumns(p string) string {
 	if p != "" {
 		p += "."
 	}
-	return cols + ", coalesce(" + p + "host_label, '')"
+	return cols + ", coalesce(" + p + "host_label, ''), " + p + "access, coalesce(" + p + "access_provider, '')"
 }
 
 var environmentCols = environmentColumns("")
@@ -178,7 +185,7 @@ var environmentCols = environmentColumns("")
 // the function that finishes the scan.
 func environmentTargets(e *Environment) ([]any, func()) {
 	return []any{&e.ID, &e.Owner, &e.Name, &e.Labels, &e.Deployment, &e.Deployed, &e.Deleting, &e.Gen,
-			&e.CreatedAt, &e.UpdatedAt, &e.Public, &e.IngressGroup, &e.HostLabel}, func() {
+			&e.CreatedAt, &e.UpdatedAt, &e.Public, &e.IngressGroup, &e.HostLabel, &e.Access, &e.AccessProvider}, func() {
 			e.Labels = stringMap(e.Labels)
 		}
 }
@@ -273,9 +280,10 @@ func (s *Store) DeletingEnvironments(ctx context.Context, limit int) ([]Environm
 // UpdateEnvironment writes the columns in which after differs from before,
 // the row as the caller read it (normally locked FOR UPDATE in the same
 // transaction): labels, deployment, deployed, deleting and gen; updated_at =
-// now(). id, owner, name, created_at, public, ingress_group and host_label
-// are never written (RenameEnvironment writes the name,
-// SetEnvironmentPublic the last three). A row whose gen is no longer
+// now(). id, owner, name, created_at, public, ingress_group, host_label,
+// access and access_provider are never written (RenameEnvironment writes
+// the name, SetEnvironmentPublic public, ingress_group and host_label,
+// SetEnvironmentAccess the last two). A row whose gen is no longer
 // before's is not written (ErrRowChanged); when nothing differs, before is
 // returned unwritten. A write of deployment, deployed or deleting sends
 // ferun_ingress "env:<id>".
@@ -284,7 +292,8 @@ func (s *Store) UpdateEnvironment(ctx context.Context, before, after Environment
 	if err := fixed(what, map[string]bool{"id": before.ID != after.ID, "owner": before.Owner != after.Owner,
 		"name": before.Name != after.Name, "created_at": !before.CreatedAt.Equal(after.CreatedAt),
 		"public": before.Public != after.Public, "ingress_group": before.IngressGroup != after.IngressGroup,
-		"host_label": before.HostLabel != after.HostLabel}); err != nil {
+		"host_label": before.HostLabel != after.HostLabel, "access": before.Access != after.Access,
+		"access_provider": before.AccessProvider != after.AccessProvider}); err != nil {
 		return Environment{}, err
 	}
 	u := newUpdates(before.ID, before.Gen)
@@ -342,8 +351,10 @@ func (s *Store) RenameEnvironment(ctx context.Context, id uuid.UUID, name string
 // (in one of its own on a Store outside one), with the row locked FOR
 // UPDATE. The first publish also claims the environment's default host
 // label (ClaimHostLabel) and sets ingress_group; unpublishing keeps both,
-// so that publishing again names the same host and rolls no pod. A write
-// sends ferun_ingress "env:<id>"; a call that changes nothing writes
+// so that publishing again names the same host and rolls no pod; it ends
+// the environment's open visits (ADR 0054) with model.VisitUnpublished, and
+// keeps the access, which a publish again sets (SetEnvironmentAccess). A
+// write sends ferun_ingress "env:<id>"; a call that changes nothing writes
 // nothing. The caller refuses a deleting environment or tenant and sends
 // the controller's hints.
 func (s *Store) SetEnvironmentPublic(ctx context.Context, id uuid.UUID, public bool) (Environment, error) {
@@ -368,12 +379,60 @@ func (s *Store) SetEnvironmentPublic(ctx context.Context, id uuid.UUID, public b
 			WHERE id = $1 RETURNING `+environmentCols, id, public, nullString(label))); err != nil {
 			return err
 		}
+		if !public {
+			if _, err := tx.EndEnvironmentVisits(ctx, id, model.VisitUnpublished); err != nil {
+				return err
+			}
+		}
 		return tx.notifyIngressEnvs(ctx, []uuid.UUID{id})
 	})
 	if err != nil {
 		return Environment{}, fmt.Errorf("set environment %s public %v: %w", id, public, err)
 	}
 	return out, nil
+}
+
+// SetEnvironmentAccess sets who the ingress admits to the environment
+// (ADR 0054): model.AccessAnyone with provider "", or
+// model.AccessVisitors with the name of one of its owner's providers, ""
+// for model.ProviderFerun. It runs in the caller's transaction (in one of
+// its own on a Store outside one), with the row locked FOR UPDATE, and
+// returns the row and whether it changed. A change ends the
+// environment's open visits with model.VisitProviderChanged and sends
+// ferun_ingress "env:<id>"; a call that changes nothing writes nothing.
+// A provider the owner does not have is ErrNoRow (the foreign key), as is
+// an unknown environment.
+func (s *Store) SetEnvironmentAccess(ctx context.Context, id uuid.UUID, access, provider string) (Environment, bool, error) {
+	var out Environment
+	changed := false
+	err := s.InTx(ctx, func(tx *Store) error {
+		e, err := tx.LockEnvironment(ctx, id, ForUpdate)
+		if err != nil {
+			return err
+		}
+		out = e
+		if e.Access == access && e.AccessProvider == provider {
+			return nil
+		}
+		out, err = scanEnvironment(tx.q.QueryRow(ctx, `UPDATE environments SET access = $2, access_provider = $3,
+				updated_at = now()
+			WHERE id = $1 RETURNING `+environmentCols, id, access, nullString(provider)))
+		if isForeignKeyViolation(err) {
+			return fmt.Errorf("provider %s: %w", provider, ErrNoRow)
+		}
+		if err != nil {
+			return err
+		}
+		changed = true
+		if _, err := tx.EndEnvironmentVisits(ctx, id, model.VisitProviderChanged); err != nil {
+			return err
+		}
+		return tx.notifyIngressEnvs(ctx, []uuid.UUID{id})
+	})
+	if err != nil {
+		return Environment{}, false, fmt.Errorf("set environment %s access %s %q: %w", id, access, provider, err)
+	}
+	return out, changed, nil
 }
 
 // BumpEnvironmentGen increments the version of the environment's security

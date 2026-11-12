@@ -19,6 +19,8 @@
     "hosts": [
       "expensa-stage-fecode.apps.fecode.dev"
     ],
+    "access": "visitors",
+    "provider": "fecode",
     "rollout": {
       "deployment": 7,
       "state": "deploying",
