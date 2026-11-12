@@ -27,12 +27,22 @@
 --
 -- service_tokens.kind gains 'auth', ferun-auth's token.
 --
+-- cluster_secrets takes the sealed seed of the visits' token key: the
+-- cluster secret 'visit-token' is 0x01 || nonce(12) || AES-256-GCM(32-byte
+-- seed), 61 bytes, sealed with --secret-key-file; every other one stays 32
+-- bytes in plaintext.
+--
 -- Additive: the release before neither reads nor writes the new columns and
 -- tables, lists a token of kind auth as it lists any, and refuses one at the
--- sink's certificate route by its prefix.
+-- sink's certificate route by its prefix; it reads no cluster secret but
+-- 'mcp-session'.
 
 ALTER TABLE service_tokens DROP CONSTRAINT service_tokens_kind_check;
 ALTER TABLE service_tokens ADD CONSTRAINT service_tokens_kind_check CHECK (kind IN ('sink', 'auth'));
+
+ALTER TABLE cluster_secrets DROP CONSTRAINT cluster_secrets_value_check;
+ALTER TABLE cluster_secrets ADD CONSTRAINT cluster_secrets_value_check
+  CHECK (length(value) = 32 OR (name = 'visit-token' AND length(value) = 61));
 
 CREATE TABLE access_providers (
   tenant text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
