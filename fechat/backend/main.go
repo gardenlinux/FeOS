@@ -60,6 +60,20 @@ Tools: bash (run any shell command), read / write / edit (file contents), ls (li
 
 The sandbox image is provided by the customer, so check what's available before relying on specific tooling. Working directory is /workspace. Answer concisely, English by default.`
 
+// vicePromptNote joins the system prompt while the SPA shows its Vice City
+// theme (the bolt in the logo switches it): flavour only, never at the cost
+// of the answer.
+const vicePromptNote = `The user has switched FeChat to its Vice City theme, after Grand Theft Auto VI (state of Leonida, Vice City, out 19 November 2026). Keep every answer exactly as correct, complete and concise as without it, but you may give it a light Vice City touch: talk about a task like a crew planning a job, a wink at neon, sunsets, palm trees, Florida-Man headlines or the game's satire - one short phrase, not more. Code, commands, file contents and facts stay untouched. Never encourage real crime.`
+
+// systemPrompt is the conversation's system prompt: the base, and the
+// note of the theme the SPA shows, if it has one.
+func systemPrompt(base, theme string) string {
+	if theme == "gta" {
+		return base + "\n\n" + vicePromptNote
+	}
+	return base
+}
+
 type config struct {
 	APIKey           string
 	BaseURL          string
@@ -347,6 +361,9 @@ func handleChat(cfg config) http.HandlerFunc {
 			// The conversation's sandbox reference, as the last "sandbox"
 			// event handed it out; empty for a new conversation.
 			SandboxRef string `json:"sandbox_ref"`
+			// The SPA's theme: "gta" adds vicePromptNote, anything else
+			// nothing.
+			Theme string `json:"theme"`
 		}
 		// The history carries the tool outputs (each up to maxToolOutput),
 		// so it is much larger than the text of the conversation.
@@ -365,6 +382,7 @@ func handleChat(cfg config) http.HandlerFunc {
 		if err != nil || prompt == "" {
 			prompt = defaultSystemPrompt
 		}
+		prompt = systemPrompt(prompt, req.Theme)
 
 		messages := append([]Message{{Role: "system", Content: prompt}}, req.Messages...)
 		if req.ConversationID == "" {

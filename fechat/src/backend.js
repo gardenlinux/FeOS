@@ -25,7 +25,7 @@ function signedOut(resp) {
 // sandbox item handed it out; empty for a new conversation.
 export async function* streamReply(
   messages,
-  { signal, conversationId, sandboxRef, image } = {},
+  { signal, conversationId, sandboxRef, image, theme } = {},
 ) {
   const resp = await fetch('/api/v1/chat', {
     method: 'POST',
@@ -38,6 +38,8 @@ export async function* streamReply(
       conversation_id: conversationId,
       sandbox_ref: sandboxRef,
       image,
+      // the backend gives the Vice City theme a note in the system prompt
+      theme,
     }),
     signal,
   })

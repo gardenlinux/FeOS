@@ -8,50 +8,41 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import { streamReply, checkImageAvailable, DEFAULT_IMAGE } from './backend.js'
 import { signOut } from './auth.js'
+import { THEME_TEXT, currentTheme, nextTheme, setTheme } from './theme.js'
 
 marked.setOptions({ breaks: true })
 
 function AvatarShape({ user }) {
+  const who = user ? 'user' : 'assistant'
   return (
-    <svg viewBox="0 0 100 100" className="avatar-shape" aria-hidden="true">
+    <svg viewBox="0 0 100 100" className={`avatar-shape ${who}`} aria-hidden="true">
       {/* Fill: the closed silhouette (the cuts as diagonal edges) */}
-      <polygon
-        points="50,2 100,50 84,66 50,98 0,50 16,34"
-        fill={user ? 'rgba(234,0,217,0.12)' : 'rgba(10,189,198,0.10)'}
-      />
+      <polygon className="avatar-fill" points="50,2 100,50 84,66 50,98 0,50 16,34" />
       {/* Outline: two open segments, with gaps at the cuts (top left
           and bottom right); the corners top right and bottom left are
-          drawn through. */}
-      <polyline
-        points="16,34 50,2 100,50"
-        fill="none"
-        stroke={user ? '#ea00d9' : '#0abdc6'}
-        strokeWidth="3"
-        strokeLinejoin="miter"
-      />
-      <polyline
-        points="84,66 50,98 0,50"
-        fill="none"
-        stroke={user ? '#ea00d9' : '#0abdc6'}
-        strokeWidth="3"
-        strokeLinejoin="miter"
-      />
+          drawn through. Colours from the theme (styles.css). */}
+      <polyline className="avatar-line" points="16,34 50,2 100,50" />
+      <polyline className="avatar-line" points="84,66 50,98 0,50" />
     </svg>
   )
 }
 
+// The bolt's colours come from the theme (styles.css): the gradient's five
+// stops, the glitch copy behind it and an outline.
 function Bolt() {
   return (
     <svg viewBox="0 0 24 24" className="bolt" aria-hidden="true">
       <defs>
         <linearGradient id="boltgrad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#0abdc6" />
-          <stop offset="100%" stopColor="#0abdc6" stopOpacity="0.55" />
+          <stop offset="0%" className="bolt-stop-1" />
+          <stop offset="25%" className="bolt-stop-2" />
+          <stop offset="50%" className="bolt-stop-3" />
+          <stop offset="75%" className="bolt-stop-4" />
+          <stop offset="100%" className="bolt-stop-5" />
         </linearGradient>
       </defs>
-      {/* glitch offset behind it */}
-      <path d="M13 2 3 14h7l-1 8L19 10h-7z" fill="#ea00d9" opacity="0.75" transform="translate(0.9 0.7)" />
-      <path d="M13 2 3 14h7l-1 8L19 10h-7z" fill="url(#boltgrad)" />
+      <path className="bolt-glitch" d="M13 2 3 14h7l-1 8L19 10h-7z" transform="translate(0.9 0.7)" />
+      <path className="bolt-main" d="M13 2 3 14h7l-1 8L19 10h-7z" fill="url(#boltgrad)" />
     </svg>
   )
 }
@@ -168,8 +159,6 @@ function ToolCallChip({ call }) {
   )
 }
 
-const EMPTY_LINES = ['How can I help?']
-
 function useTyped(lines, speed = 50, resetKey = 0) {
   const total = lines.join('').length
   const [n, setN] = useState(0)
@@ -266,6 +255,7 @@ export default function App({ user }) {
   // The conversation's sandbox image: editable until the first message
   // (messages.length === 0), immutable after it.
   const [image, setImage] = useState(loadStoredImage)
+  const [theme, setThemeState] = useState(currentTheme)
   // imageCheck: { state: 'idle'|'checking'|'ok'|'error', message }
   const [imageCheck, setImageCheck] = useState({ state: 'idle', message: '' })
   const lastCheckedImageRef = useRef('')
@@ -318,7 +308,9 @@ export default function App({ user }) {
       window.removeEventListener('touchmove', onTouch)
     }
   }, [])
-  const { typed, activeLine } = useTyped(EMPTY_LINES, 50, chatEpoch)
+  const words = THEME_TEXT[theme]
+  // a new chat or another theme types the greeting anew
+  const { typed, activeLine } = useTyped([words.greeting], 50, `${chatEpoch}/${theme}`)
 
   useEffect(() => {
     if (atBottomRef.current) {
@@ -474,6 +466,7 @@ export default function App({ user }) {
         conversationId,
         sandboxRef: sandboxRefRef.current,
         image: image.trim(),
+        theme,
       })) {
         if (item.type === 'sandbox') {
           // only for the conversation still open (not after "new chat")
@@ -572,6 +565,14 @@ export default function App({ user }) {
     abortRef.current?.abort()
   }
 
+  // The bolt in the logo switches the theme; the name beside it starts a
+  // new chat.
+  function switchTheme() {
+    const next = nextTheme(theme)
+    setTheme(next)
+    setThemeState(next)
+  }
+
   function newChat() {
     // abort the running answer so it does not flow into the new chat
     abortRef.current?.abort()
@@ -586,10 +587,19 @@ export default function App({ user }) {
   return (
     <div className="app">
       <header className="topbar">
-        <button className="logo" onClick={newChat} title="New chat">
-          <Bolt />
-          FECHAT
-        </button>
+        <div className="logo">
+          <button
+            className="logo-bolt"
+            onClick={switchTheme}
+            title={nextTheme(theme) === 'gta' ? 'Vice City' : 'Back to cyber'}
+            aria-label="Switch theme"
+          >
+            <Bolt />
+          </button>
+          <button className="logo-name" onClick={newChat} title="New chat">
+            {words.name}
+          </button>
+        </div>
         <div className="topbar-right">
           <div className="image-box">
             <input
@@ -688,7 +698,7 @@ export default function App({ user }) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Type a message …"
+          placeholder={words.placeholder}
           rows={1}
         />
         {streaming ? (
