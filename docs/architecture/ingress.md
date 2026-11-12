@@ -132,7 +132,7 @@ of the directory, so that a crash leaves the old content or the new.
 | `removed` | the refusal that said the ingress was removed, until the next join |
 | `wg.key` | the WireGuard private key, 32 raw bytes |
 | `mesh.json` | the place on the mesh: `{podNetwork, prefix, address}` |
-| `table.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys and the ACME challenges |
+| `table-v2.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges and the visits' keys. The first save deletes a `table.json` of an older binary ([Visitors](#the-tables-part)) |
 
 The certificate is renewed for the same key; a new key is made only
 when the identity is declared lost. A new `wg.key` is made after every
@@ -245,7 +245,8 @@ certificate expires or its superseded certificate's revocation time
 comes.
 
 On a connection the agent says `Hello` first: its WireGuard public key,
-its endpoint and its version. Hello takes the instance's place on the
+its endpoint, its version and its capabilities (`visits`: it checks
+visits, [Visitors](#the-tables-part)). Hello takes the instance's place on the
 mesh and answers the cluster's ULA, its /96 and address, the apps zone,
 the tenant zone and the answering instance; the agent keeps `mesh.json` and configures
 the device ([The mesh](#the-mesh)). `Sync` then streams the table. A
@@ -325,10 +326,12 @@ The table is what the ingress routes, one entry per public environment
     without an admitted port;
   - stopped, failed, unknown and lost instances are not counted; the
     controller heals them;
+- who it admits: `access`, `provider` and `signIn` ([Visitors](#the-tables-part));
 - a hash of the rest, by which a stream tells a change.
 
 Beside the environments the table holds the mesh, the nodes with their
-keys, endpoints and /96s at the peers' version, `Self`: the
+keys, endpoints and /96s at the peers' version, the visits' keys
+(`visitKeys`, [Visitors](#the-tables-part)), `Self`: the
 instance's name, mesh address, the apps zone, the tenant zone and its admitted version
 ([Admission](#admission)), and the **challenges**: every pending ACME
 HTTP-01 answer (`acme_challenges` whose `expires_at` is ahead, at most
@@ -425,15 +428,15 @@ nothing expires it.
 
 ### The cache
 
-At its start the agent loads `table.json`, `mesh.json` and `wg.key`,
+At its start the agent loads `table-v2.json`, `mesh.json` and `wg.key`,
 configures the mesh device and hands the cached table to the proxy before
 it contacts `ferund`: an instance that restarts while `ferund` is away
 serves at once what was routable, with the domains' certificates, and
 nothing new becomes routable until `ferund` is back. The cache holds the
 domains' private keys, like the state directory's other keys readable
 by the instance's user alone (0600 in a 0700 directory). A whole table
-replaces the challenges; one without them (an older `ferund`) leaves
-none.
+replaces the challenges and the visits' keys; one without them (an older
+`ferund`) leaves none.
 
 ## The mesh
 
@@ -549,11 +552,13 @@ and nothing reaches through it.
 
 The ingress serves an environment only once its tenant made it public:
 
-    PUT /api/v1/environments/{env}/public    {"public": true}
+    PUT /api/v1/environments/{env}/public    {"public": true, "access": "visitors", "provider": "ferun"}
 
 `{env}` is the environment's name or UUID; the body's `public` is
-required (400 when it is missing, null or not a boolean). The answer is
-`{public, hosts, rolling}`. The route door keeps requiring route tokens
+required (400 when it is missing, null or not a boolean); `access` and
+`provider` say who it admits, a first publish that says nothing visitors
+of `ferun` ([control-plane.md](control-plane.md#visitors)). The answer is
+`{public, hosts, rolling, access, provider}`. The route door keeps requiring route tokens
 for every environment; publishing is what lets the ingress serve one
 without them.
 
@@ -671,6 +676,167 @@ ingress serves the routes to image services of public environments only;
 a route to an attached service runs in a sandbox, whose loopback no
 address of the mesh reaches, and the ingress answers it 404 "route
 <path> is served by the route door". FeCode keeps using the route door.
+The route door asks for no visit: a route token reaches an environment
+whoever its hosts admit.
+
+## Visitors
+
+[ADR 0054](../adr/0054-visitors-of-an-environment.md): a public
+environment admits `anyone`, as before, or `visitors` of one of its
+tenant's providers ([control-plane.md](control-plane.md#visitors)). The
+ingress checks a visit by itself, with keys from its table, and asks
+`ferund` only to redeem a code, renew a token and end a visit, over its
+connection; it holds no list and no rule.
+
+### The table's part
+
+- An environment's entry carries `access` (`""` anyone; `visitors`),
+  `provider` (the name a token's `prv` must equal) and `signIn`, where a
+  navigation without a visit is sent: the tenant's service, or
+  `ferun-auth`'s `/visit`. Beside the environments the table carries
+  `visitKeys`: the token key's public half and the challenge key, each
+  with its ID (16 characters of base64url of a SHA-256), the same for
+  every instance.
+- An ingress says in its Hello that it checks visits (the capability
+  `visits`). `ferund` gives an environment with `access` set only to an
+  ingress that said so: an older one does not know its hosts, and answers
+  them 404.
+- Fail closed: an `access` other than `visitors`, no `visitKeys`, a
+  `signIn` that is empty or not an absolute `https` URL, or an ingress
+  without the visits' calls, admits nobody there: a navigation gets 503
+  "Signing in is not available for this site." with `Retry-After: 30`
+  (reason `visit-unavailable`), anything else 401. A guarded environment
+  never loses its `access` on an error path of the builder; a provider
+  without a row gives `signIn` "".
+- The cache is `table-v2.json`, and the agent's first save deletes
+  `table.json`: an older binary started on the same volume finds no cache
+  and serves nothing until `ferund` gives it a table without the guarded
+  environments, instead of serving them open from a new cache. The new
+  binary does not read `table.json`.
+
+### The order
+
+A request on a host goes through the route, the route's `from` (403),
+the visit, and only then the service. A request without a valid visit
+wakes nothing, holds nothing and is not counted in flight. A held request
+is checked again whenever the table changes: one whose environment became
+guarded, or names another provider, needs a visit then.
+
+### `/.ferun/`
+
+The path `/.ferun/` is the ingress's on every known host, before any
+route, whatever the environment's access, on port 443 (port 80 is
+unchanged: ACME first, then 308). A path that is `/.ferun` or starts with
+`/.ferun/`, raw or unescaped, with runs of `/` collapsed, is answered by
+the ingress, never routed, woken or counted:
+
+| Path | Method | Answer |
+|---|---|---|
+| `/.ferun/auth?code=<code>` | GET | a provider's answer: the code is checked and redeemed (below) |
+| `/.ferun/sign-out` | GET | a page with one button, a POST form to `/.ferun/sign-out` |
+| `/.ferun/sign-out` | POST | ends the visit: an `Origin` that is present must be `https://<host>` and a `Sec-Fetch-Site` that is present `same-origin`, else 403 "cross-site sign-out refused"; then `EndVisit` (2 s, an error ignored), the visit's live connections on this instance closed, the visit remembered as ended until its end, the cookie cleared, 200 "You are signed out of <host>." |
+| `/.ferun/keys` | GET | the token key as a JWKS, `Cache-Control: public, max-age=300`; 404 without keys |
+| anything else | any | 404 "no such path" |
+
+Every answer there but the keys carries `Cache-Control: no-store` and
+`Referrer-Policy: no-referrer`; its pages are fixed templates with
+`Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';
+form-action 'self'; base-uri 'none'; frame-ancestors 'none'`.
+
+`GET /.ferun/auth`: a code that is missing, longer than 4096, does not
+verify, or names another environment or host is 400 "This sign-in link
+is not valid."; on an environment that is not guarded it is 303 to its
+path, with no call; past its end and a minute is 400 "This sign-in took
+too long." with a "Try again" link; a rejected code is 403 "Your sign-in
+was not admitted to this site." (reason `visit-rejected`), with no call.
+Without the challenge cookie it is 400 "Signing in needs cookies for this
+site." (no link: a browser without cookies would loop), with another
+browser's 400 "This sign-in was started in another browser.". Else the
+ingress makes the visit's secret and redeems the code at `ferund` (5 s,
+at most once per code on an instance, its answer kept until the code's
+end): admitted, it sets the visit cookie and sends the browser back to
+the path (303); refused, 400 "This sign-in can no longer be used."; no
+answer, 503 "Signing in is not available right now." with `Retry-After:
+5`.
+
+### The check
+
+- **A navigation** is a `GET` without `Upgrade` or a `Sec-Purpose` with
+  `prefetch`, whose `Sec-Fetch-Mode` is `navigate`, or, from a browser
+  that sends none, whose `Accept` holds `text/html`. A navigation without
+  a visit gets the sign-in; any other request without one gets 401
+  "this site needs a visit: open it in a browser" with
+  `WWW-Authenticate: FeRun-Visit realm="<host>"` (reason
+  `visit-required`). A POST is never redirected: a redirect would lose
+  its body.
+- **The sign-in.** The ingress seals a challenge by itself: its ID, the
+  environment, the host, the path and query to return to (at most 1024
+  bytes, else `/`), the hash of the challenge cookie's secret, and an end
+  10 minutes away. It answers 303 to `<signIn>?challenge=<sealed>` (`&`
+  where `signIn` has a query), with the challenge cookie (reason
+  `visit-sign-in`). A browser that is already signing in on the host
+  keeps its challenge cookie, so that its tabs do not undo each other.
+- **A visit** is a visit cookie whose token verifies with the table's key
+  and whose secret's hash is its `vbnd`, whose `aud` is the environment,
+  `hst` the host and `prv` the environment's provider, and which this
+  instance did not see end.
+- **Same-site requests.** A request that is no navigation and whose
+  `Sec-Fetch-Site` is `same-site` or `cross-site` has no visit, whatever
+  its cookie: tenant hosts under one zone are one site to the browser
+  (the zones have no Public Suffix List entry), so `SameSite=Lax` sends
+  the cookie with another tenant's `fetch`. `same-origin`, `none` and no
+  header pass.
+- **Renewal.** A token with less than 5 minutes left is renewed in line,
+  on the request that finds it (one renewal per visit at a time on an
+  instance, 2 s): renewed, the new token is used and set as the cookie on
+  the answer; ended, the cookie is cleared, the visit remembered as ended
+  and its connections closed, and the request has no visit; no answer,
+  it is served with the token it has. A token past its end and a minute
+  is renewed the same way with 5 s, and served on (until the visit's end)
+  only when `ferund` is away: no session, a timeout, `UNAVAILABLE` or
+  `UNIMPLEMENTED`. A busy ingress (8 renewals in flight on its
+  connection, and apart from them 8 redeems and ends) is not `ferund`
+  away: such a request has no visit. Every 10 s, the visits with open
+  upgraded connections or streams on the instance whose token has less
+  than 5 minutes left are renewed without a request; ended closes them.
+
+### Cookies and headers
+
+- `__Host-ferun_visit=<token>~<visit secret>` (`Max-Age` until the
+  visit's end) and `__Host-ferun_challenge=<secret>` (`Max-Age=600`),
+  both `Secure; HttpOnly; SameSite=Lax; Path=/`, no `Domain`: host-only,
+  unreadable to scripts. The token's `vbnd` is the hash of the secret
+  beside it, which `ferund` keeps: a renewal and a sign-out need it, and
+  the token alone, read from an app's headers or logs, is no cookie.
+  A renewal keeps the secret.
+- On every host, guarded or not, both cookies are taken out of the
+  request's `Cookie` headers before the application sees them, and an
+  application's `Set-Cookie` of either name (a 1xx's too) is dropped.
+  Every answer of the ingress that sets or clears one is `no-store`.
+- The headers `FeRun-Visitor` (the subject), `FeRun-Visitor-Email`
+  (where the provider gave one) and `FeRun-Visit-Token` (the token alone)
+  are dropped from every forwarded request, on every host, in every
+  spelling a server could read as one (case, and any byte outside
+  `[A-Za-z0-9]` as `-`, every name starting with `ferun-visit`); only on
+  a guarded environment, after its check passed, the ingress sets them.
+  The route door drops them too, and sets none.
+
+### For applications
+
+- An application called only through the ingress may take the headers as
+  they are. One that other workloads of its environment reach, or that
+  passes the identity on, verifies `FeRun-Visit-Token`: an EdDSA JWT
+  whose header `typ` is `ferun-visit+jwt`, `iss` `ferun`, `aud` its
+  environment's ID (from the console or the API), `exp` ahead, against
+  the key at `https://<its host>/.ferun/keys`.
+- **The visitor headers are no CSRF protection.** A browser sends the
+  visit cookie with a form another site posts; check `Origin` on every
+  request that changes something.
+- A guarded environment answers machines 401: webhooks, API clients and
+  health checkers from outside stay on an environment that admits
+  anyone, or on the route door.
+- `/.ferun/` is the ingress's on every host: an application's route
+  there is never reached.
 
 ## Groups and admission
 
@@ -761,15 +927,19 @@ version, within one `env-groups` pass.
    (`externalTrafficPolicy: Local`), never what a header claims; an
    IPv4-mapped IPv6 address counts as IPv4. A held request is checked
    again when the table changes.
-5. **The body**: one larger than `--max-request-body`, by its
+5. **The visit**: on an environment that admits visitors, a request
+   without a valid visit gets the sign-in or 401 ([Visitors](#the-check)),
+   before any instance is held or woken; `/.ferun/` is answered before
+   the route ([`/.ferun/`](#ferun)).
+6. **The body**: one larger than `--max-request-body`, by its
    `Content-Length` or as it is read, is 413.
-6. **The endpoint**: round robin over the usable endpoints of the route's
+7. **The endpoint**: round robin over the usable endpoints of the route's
    service ([Admission](#admission)), else over the last resort; an
    endpoint whose dial failed cools down for 5 s. For a service with an
    idle policy the instance is held first
    ([Holds](#holds-and-the-idle-fence)); an instance whose hold is
    refused is skipped until the table changes.
-7. **None usable**: the request is held ([below](#held-requests-and-wake)).
+8. **None usable**: the request is held ([below](#held-requests-and-wake)).
 
 ### Port 80
 
@@ -1194,6 +1364,11 @@ spelling and the headers' order are kept. Removals are counted
 per host and minute. Hosts outside the zone, the domains, are not
 rewritten: a domain is its tenant's own registrable name.
 
+The ingress's own cookies of [visits](#cookies-and-headers),
+`__Host-ferun_visit` and `__Host-ferun_challenge`, are taken out of every
+request before the application sees it, and an application's
+`Set-Cookie` of either is dropped, on every host.
+
 A proxy cannot stop cookies an app's own JavaScript sets
 (`document.cookie`). The platform's hosts guard against those with
 `__Host-` session cookies, which no other host can set or overwrite
@@ -1464,6 +1639,12 @@ open question.
 | Event | What happens | Bound |
 |---|---|---|
 | A `ferund` instance crashes | The stream breaks (a reset, or keepalive after 15 + 5 s). The agent connects to another address or instance and gets a whole table, serving from memory meanwhile. Held requests ask again for a wake every 5 s; another engine takes the op over once its owner is dead. Holds stay valid and renew through the new instance. | stale for about 20 s; no request lost |
+| `ferund` away, with visits | The visits it holds are served: a token past its end counts until its visit's end; nobody new signs in (a navigation without a visit is still sent to its provider, whose answer cannot be redeemed: 503 "Signing in is not available right now."). A renewal that `ferund` does not answer, or answers `UNIMPLEMENTED`, is "away", never "ended". | until `ferund` is back, at most each visit's end |
+| The ingress busy renewing | 8 renewals in flight on its connection, and apart from them 8 redeems and ends: a call beyond fails at once. A request whose token is past its end and a minute then has no visit (busy is not away); one whose token is still valid is served with it. | |
+| The visits' keys missing from the table | A guarded environment admits nobody: 503 for a navigation, 401 for the rest. | until the table has them |
+| An older ingress behind a `ferund` with visits | Its Hello names no capability: `ferund` gives it no guarded environment, whose hosts it answers 404. Downgraded on the same volume, it finds no `table.json` and serves nothing until it synced. | until it is rolled |
+| An older `ferund` instance during a roll | It ignores `access` and gives a guarded environment open to the ingresses on its streams: no provider is made and no environment set `visitors` until every instance runs the new release ([control-plane.md](control-plane.md#visitors)). | the roll |
+| A provider that does not answer | Its visits get their next token and are asked again at the next renewal, up to their end: only its explicit no ends a visit. | 12 hours at most |
 | `ferund` rolls | Stopping instances refuse new ingress connections and end their streams; older instances close the ALPN; the 5 s backstop covers their writes. | seconds |
 | An ingress instance restarts or crashes | Kubernetes takes it out of the endpoints by readiness; its worker's share of new connections waits until it is ready again, since the balancer sends every worker its share and `Local` keeps a worker to its own instance (the clients' SYN retries bridge it), and the other instances serve the other workers' shares. Its identity and /96 persist; its new pod address reaches the nodes through Hello and `mesh-peers`. It serves the cache at once and is ready once the nodes' handshakes are fresh. A crash leaves its holds to lapse (30 s), and without `left_at` the fence keeps public services awake for up to 15 minutes. | its worker's share waits for it, about 20 s |
 | A force-deleted ingress pod | Two processes may use one key and address, and WireGuard flaps between their endpoints. | until one dies |

@@ -71,7 +71,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--trust-domain` | `feos.local` | the SPIFFE trust domain |
 | `--ca-dir` | `/etc/ferun/ca` | the issuer: `issuer.crt`, `issuer.key`, `issuer.json`, `bundle.crt`; never `root.key` |
 | `--node-server-names` | the control-plane domain | the DNS names of the instance's certificate on the nodes' port, each under the control-plane domain |
-| `--secret-key-file` | none | 32 bytes (raw, hex or base64) that seal the bindings and the environments' secrets at rest |
+| `--secret-key-file` | none | 32 bytes (raw, hex or base64) that seal the bindings and the environments' secrets at rest, and the key that signs visits; without it no environment admits visitors ([Visitors](#visitors)) |
 | `--bindings` | off | serve the Kubernetes, SSH and HTTP bindings; only with `--secret-key-file` |
 | `--acme-directory` | none | the ACME directory, an https URL (`https://acme-v02.api.letsencrypt.org/directory`), from which the domains' certificates are obtained ([Certificates of domains](#certificates-of-domains)); its terms of service are agreed to. Empty: none is obtained, and domains stay `issuing`. Needs `--secret-key-file`, which seals the keys |
 | `--acme-email` | none | the contact of the platform's ACME account, an email address; changing it updates the account |
@@ -84,6 +84,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--oidc-client-secret-file` | none | the client's secret; required with `--oidc-issuer` |
 | `--oidc-scopes` | `openid profile email` | space-separated, with `openid` |
 | `--oidc-admin-group` | `admins` | a person is an admin when the `groups` claim holds it |
+| `--visitor-auth-url` | none | ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind tenant. An absolute `https` URL without path, query or fragment (`http` only for a loopback host), whose host is neither `--public-url`'s nor under the apps zone or the tenant zone; a trailing `/` is trimmed ([Visitors](#visitors)) |
 | `--session-ttl` | `12h` | the absolute lifetime of a UI session |
 | `--tenant-creation` | `people` | who makes tenants with `POST /api/v1/tenants` ([Members, invitations and tokens](#members-invitations-and-tokens)): `people` (every signed-in person) or `operators` |
 | `--tenants-per-person` | `3` | the most tenants one person may make that are not being deleted; `0`: no bound; operators are never bound |
@@ -169,6 +170,9 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `domains` | tenants' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
 | `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table ([Certificates of domains](#certificates-of-domains)) |
 | `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path matching, which the route door uses too |
+| `visits` | the tenants' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
+| `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
+| `oidc`, `oidc/oidctest` | the OpenID Connect relying party of human sign-in and of `ferun-auth`; a test issuer |
 | `api`, `auth`, `apierr` | the REST router, its auth classes and errors, human sign-in |
 | `ui` | the embedded build of `web/` |
 | `server` | one instance, built from its configuration, and its stop |
@@ -177,7 +181,9 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 
 `cmd/ferund` is the daemon; `cmd/ferun-testnode` runs a test node
 ([below](#the-test-node)); `cmd/ferun-ingress` is the ingress, with its
-packages under `internal/ingress` ([ingress.md](ingress.md)).
+packages under `internal/ingress` ([ingress.md](ingress.md)); `cmd/ferun-auth`
+is the access provider of the kinds `ferun` and `oidc`, with its package
+`internal/ferunauth` ([Visitors](#visitors)).
 
 ## The database
 
@@ -232,7 +238,10 @@ replicate synchronously ([Operations](#operations)).
   drops with its partitions ([The sink](#the-sink));
   `0017_tenant_jobs.sql`, the tenants' jobs and `sandboxes.tenant_job`
   ([Tenants' jobs](#tenants-jobs)); `0019_sink.sql`, `sandboxes.log_labels`,
-  `jobs.log_retention_days` and `service_tokens` ([The sink](#the-sink))) and
+  `jobs.log_retention_days` and `service_tokens` ([The sink](#the-sink));
+  `0034_visitors.sql`, `access_providers`, `visits`, `visit_answers`,
+  `environments.access` and `access_provider` and the service token kind
+  `auth` ([Visitors](#visitors))) and
   applied under an advisory lock, recorded in `schema_migrations`. The
   same locked section creates the cluster's MCP session key, reconciles
   `--pod-network` with the database's ([The pods'
@@ -255,7 +264,7 @@ replicate synchronously ([Operations](#operations)).
 | `ferun_watch` | a watch ID | a watch's paths, owner or result changed |
 | `ferun_cancel` | JSON | an exec, an MCP call or a keyed call (ADR 0023) is to be cancelled on whichever instance runs it |
 | `ferun_call` | a tool call's ID (`tool_calls.id`), or `*` for more than 256 | a keyed call left running: done, interrupted, not run |
-| `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, label, deployments, deletion (its tenant's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
+| `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, access (who it admits, its provider and the provider's changes), label, deployments, deletion (its tenant's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
 
 The tables: `instances`, `leases`, `cluster_secrets`; `tenants`,
 `tenant_tokens`; `people`, `grants`, `invitations` ([People and
@@ -283,8 +292,10 @@ that outlive their caller](#calls-that-outlive-their-caller));
 `domains` ([Domains](#domains)); `domain_certs`, `acme_accounts`,
 `acme_challenges` (the domains' certificates, [Certificates of
 domains](#certificates-of-domains)); `jobs` (the tenants' jobs,
-[Tenants' jobs](#tenants-jobs)); `service_tokens` (the sink's tokens,
-[The sink](#the-sink)).
+[Tenants' jobs](#tenants-jobs)); `service_tokens` (the sink's and
+`ferun-auth`'s tokens, [The sink](#the-sink)); `access_providers`,
+`visits`, `visit_answers` ([Visitors](#visitors)); `cluster_secrets`
+holds the visits' keys, `visit-token` (sealed) and `visit-challenge`.
 Tokens are stored as SHA-256 hashes only, and shown once, at their
 creation. The rows ferund makes for a principal carry it in `made_by`
 (ADR 0031): `person:<people.id>`, `token:<tenant token hash>` or
@@ -1260,12 +1271,14 @@ The routes, bodies, status codes and texts are the sandbox system's;
 |---|---|---|
 | admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users` |
 | person | `POST /api/v1/tenants`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no tenant; else 401 "sign-in required" |
-| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/tenant[/…]` (leave, members, invitations, tokens) | a tenant's token, or a person's session naming its tenant in `FeRun-Tenant`, with the role and scope each route states ([People and grants](#people-and-grants)) |
+| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/tenant[/…]` (leave, members, invitations, tokens) | a tenant's token, or a person's session naming its tenant in `FeRun-Tenant`, with the role and scope each route states ([People and grants](#people-and-grants)) |
+| provider | `POST /api/v1/challenges/open`, `…/accept`, `…/reject`, `GET /api/v1/visits/{visit}` ([Visitors](#visitors)) | a bearer `feos-auth-…` is a service token of kind `auth` (else 401 "unknown service token"); any other credential is a tenant principal as in the tenant class, with its CSRF rules. None: 401 `{"error": "provider credential required"}` with `WWW-Authenticate: Bearer realm="ferun"`. The visits service decides who may, after opening the challenge or reading the visit |
+| auth | `POST /api/v1/visits/end`, `GET /api/v1/oidc-providers/{tenant}/{provider}` ([Visitors](#visitors)) | `ferun-auth`'s service token of kind `auth` alone; else 401 `{"error": "ferun-auth token required"}` with `WWW-Authenticate: Bearer realm="ferun"` |
 | sandbox | `/api/v1/sandboxes/{id}/…`: exec, files, dirs, search, fetch, processes, calls, watches, bindings | the sandbox's own token |
 | mcp | `/mcp` | the sandbox's token, with the door's own answers |
 | forward | `/fwd/…`, `/api/v1/sandboxes/{id}/ports/…` | the sandbox's token in `Authorization` alone ([ports](#ports)) |
 | route | `/api/v1/environments/{env}/http/…` | a route token of the environment ([the route door](#the-route-door)) |
-| service | `POST /api/v1/service-certificates` | a service token ([The sink](#the-sink)) |
+| service | `POST /api/v1/service-certificates` | a service token of kind `sink` ([The sink](#the-sink)) |
 | public | `/healthz`, `/readyz`, `/auth/…`, the UI | none |
 
 A tenant's token is not accepted on a sandbox route, not even for its own
@@ -1418,7 +1431,7 @@ list:
 
 | Need | Routes |
 |---|---|
-| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/tenant`, `GET /api/v1/tenant/members` (the grants on environments it reads), `GET /api/v1/tenant/invitations` (those of the scopes it is admin of), `POST /api/v1/tenant/leave` |
+| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/providers`, `GET /api/v1/providers/{provider}` (an environment's admin chooses among them), `GET /api/v1/tenant`, `GET /api/v1/tenant/members` (the grants on environments it reads), `GET /api/v1/tenant/invitations` (those of the scopes it is admin of), `POST /api/v1/tenant/leave` |
 | read on the tenant | `GET /api/v1/tools`, `POST /api/v1/environments/plan` |
 | write on the tenant | the preflights, `POST /api/v1/environments`, `…/{env}/clone` |
 | read on the sandbox's environment (ADR 0035) | a sandbox's get, tokens, access, credentials |
@@ -1426,11 +1439,11 @@ list:
 | write on the environment the body names, which the handler checks | a sandbox's create, a tenant job's create |
 | read on the job's environment | a tenant job's get and logs |
 | write on the job's environment | a tenant job's cancel and delete |
-| admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`) |
+| admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`); an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
 | read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic |
 | write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
 | admin of the scope the request names (the tenant, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/tenant/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/tenant/invitations`, `DELETE …/{id}`) |
-| admin on the environment | its route tokens, `public` and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
+| admin on the environment | its route tokens, `public`, its access (who it admits) and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
 | admin on the environment, or write on the tenant | `DELETE …/{env}` |
 
 On an environment the higher of the principal's tenant grant and its
@@ -3705,7 +3718,10 @@ traffic, and any instance serves any of its instances. This section is
 
 The route door serves every environment, with its route tokens. The
 ingress serves an environment only once its tenant made it public, `PUT
-/api/v1/environments/{env}/public {"public": true}` (tenant class):
+/api/v1/environments/{env}/public {"public": true}` (tenant class), and
+at its hosts only to whom the environment admits: anyone, or visitors
+of one of its tenant's providers, which the same call sets
+([Visitors](#visitors)); the route door asks for no visit:
 
 - **The first publish**, in one transaction under the environment's row
   lock, gives the environment its host label, sets `ingress_group` and
@@ -3777,6 +3793,208 @@ ingress serves an environment only once its tenant made it public, `PUT
   tenant, 409 while it is being deleted; an activity row
   `tenant_zone_set`. `GET /api/v1/admin/tenants` shows each tenant's
   `zone`.
+
+### Visitors
+
+[ADR 0054](../adr/0054-visitors-of-an-environment.md): a public
+environment admits `anyone`, or `visitors` of one of its tenant's
+**access providers**, who vouch for them. `ferund` keeps the providers,
+the answers to the ingress's challenges and the **visits** they make
+(`internal/visits`), and answers the providers on its API and the
+ingress on its connection ([ingress.md](ingress.md#visitors)); it serves
+no visitor. `ferun-auth` (`cmd/ferun-auth`, `internal/ferunauth`) is the
+provider of the kinds `ferun` and `oidc`, a program of its own beside
+`ferund` with no database.
+
+**Preconditions.** Visits need `--secret-key-file`: the key that signs
+the visits' tokens is kept sealed with it. Without it `ferund` runs no
+visits service: every publish that admits visitors is 409
+`visits_need_secret_key` "this installation guards no environments:
+ferund runs without --secret-key-file", and the routes below answer 404
+`no such route`; the installation publishes `anyone` only.
+`--visitor-auth-url` names `ferun-auth`; the kinds served are `tenant`
+always, `ferun` with `--visitor-auth-url` and `--oidc-issuer`, `oidc`
+with `--visitor-auth-url`.
+
+**The keys** are two cluster secrets, made on first use with `INSERT …
+ON CONFLICT DO NOTHING` and read back, so every instance ends with the
+winner's: `visit-token`, the 32-byte Ed25519 seed that signs tokens and
+codes, sealed with `--secret-key-file` (AAD `cluster_secrets|visit-token`),
+so that a copy of the database signs nothing; and `visit-challenge`, the
+AES-256 key the ingress seals challenges with, in plaintext, since every
+ingress holds it. The ingress gets the token key's public half and the
+challenge key in its table (`visitKeys`); `GET /.ferun/keys` on any host
+publishes the first as a JWKS. They do not rotate yet.
+
+**The access** is `environments.access` (`anyone` | `visitors`) and
+`access_provider` (with `visitors` the tenant's provider; NULL the
+built-in `ferun`), written only by a publish. `PUT
+/api/v1/environments/{env}/public` (admin on the environment) takes
+`{"public": true, "hostLabel"?, "access"?: "anyone" | "visitors",
+"provider"?}`:
+
+- `access` other than `anyone` or `visitors` is 400 `invalid_access`
+  "access is anyone or visitors"; `provider` with an access other than
+  `visitors` is 400 `invalid_access` "a provider goes with access
+  visitors"; `{"public": false}` with either is 400 `invalid_access`
+  "access goes with public true".
+- After the call: a publish of an environment that is not public and
+  says nothing admits visitors of `ferun`; a publish of a public one
+  that says nothing keeps its access (a new host label alone, an older
+  client); `anyone` is anyone; `visitors` with `provider` "" or `ferun`
+  is visitors of `ferun`, with a name visitors of that provider.
+- Visitors while `ferund` runs no visits service: 409
+  `visits_need_secret_key`. Of a provider the tenant does not have: 422
+  `unknown_provider` "no provider %s in this tenant". Of `ferun`, or of a
+  provider of kind `oidc`, where that kind is not served: 409
+  `ferun_auth_required` "visitors of %s need ferun-auth, which this
+  installation does not run", the default of a first publish included.
+- In the publish's transaction: unpublishing ends the environment's open
+  visits with `unpublished`, a change of access or provider of a public
+  one with `provider_changed`; `ferun_ingress` `env:<id>`. A call that
+  changes nothing writes nothing.
+- The answer is `{public, hosts, rolling, access, provider}`; the status
+  (`GET …/{env}`) and the list carry `access` and `provider` too, after
+  `hostLabel`, always: the stored access, whether or not the environment
+  is public (a never-published one reads `anyone`, `""`). An answer
+  without them is an older `ferund`'s, which serves every public
+  environment to anyone.
+
+**Providers** (tenant class; `access_providers`, at most 50 per tenant):
+
+| Route | Need | Answer |
+|---|---|---|
+| `GET /api/v1/providers` | member | `{"providers": [ferun first, then by name], "kinds": [the kinds served], "redirectUri": "<--visitor-auth-url>/callback" or ""}` |
+| `GET /api/v1/providers/{provider}` | member | the provider; 404 `no such provider`; `ferun` always exists |
+| `PUT /api/v1/providers/{provider}` | admin on the tenant | 201 with the provider when made; 200 when changed or unchanged (an unchanged PUT writes nothing) |
+| `DELETE /api/v1/providers/{provider}` | admin on the tenant | 200 `{"deleted": true}`; 404 `no such provider`; 409 `reserved_name` for `ferun`; 409 `provider_in_use` "provider %s is named by %d environments" while an environment names it (the foreign key) |
+
+A provider as answered: `{name, kind, builtIn, url?, issuer?, clientId?,
+clientSecret?: {"set": true}, rule?, backchannelUri?, environments:
+[{id, name}], createdAt?, updatedAt?}`, `environments` the tenant's
+environments with access `visitors` naming it. The client secret is never
+answered here. The PUT's body:
+
+- `{"kind": "tenant", "url": "https://…"}`: the tenant's own service, an
+  absolute `https` URL with a host, no userinfo, no fragment, at most
+  2048 bytes (else 400 `invalid_provider`); its host is resolved and
+  judged with `--deny-prefix`'s rule, as a preflight's upstream: 422
+  `destination_denied` "the address of %s is not reachable from the
+  control plane" for an internal address and for a host that does not
+  resolve alike, naming no resolved address.
+- `{"kind": "oidc", "issuer", "clientId", "clientSecret", "rule"}`, only
+  where `oidc` is served (else 409 `ferun_auth_required`): the issuer an
+  absolute `https` URL of at most 2048 bytes, compared exactly; the
+  client ID 1 to 255 printable characters; the secret a string of 1 to
+  4096 bytes, sealed under the AAD `access_providers|<tenant>|<name>`,
+  or `{"set": true}`, which keeps the stored one (400 without one); the
+  rule exactly one of `{"anyone": true}`, `{"emails": […]}`,
+  `{"domains": […]}`, `{"groups": […]}` (1 to 100 values; addresses and
+  domains kept in lower case).
+- The name a DNS label of at most 63 characters (400
+  `invalid_provider`); `ferun` is 409 `reserved_name` "ferun is every
+  tenant's provider and cannot be made". An unknown field, or one of the
+  other kind, is 400 `invalid_provider` naming it; more than 50
+  providers 409 `too_many_providers`.
+- A change of `kind`, `issuer`, `clientId` or `rule` ends the provider's
+  open visits (`provider_changed`); a change of `url` or of the secret
+  alone does not. Every change sends `ferun_ingress` `env:<id>` for each
+  environment that names it (`*` past 256).
+
+**Challenges and visits** (class `provider`: a tenant principal, or
+`ferun-auth`'s service token). A sealed challenge travels in POST bodies
+only, never in a path, which is logged. A tenant principal may answer
+only for an environment of its tenant whose provider is of kind
+`tenant`, with admin on that environment; `ferun-auth` only for one whose
+provider is of kind `ferun` or `oidc`. Everything else, a forged or
+foreign challenge included, is 404 `no such challenge` (`no such
+visit`), never 403.
+
+| Route | Body | Answer |
+|---|---|---|
+| `POST /api/v1/challenges/open` | `{"challenge": "<sealed>"}` | 200 `{environment: {id, name, tenant, labels}, host, path, expiresAt, expired, answered, restart, provider: {name, kind}, oidc?}`; `oidc` (`{issuer, clientId, clientSecret, rule}`) only for `ferun-auth` and a provider of kind `oidc`. 404 `no such challenge` when it does not open, is longer than 4096, its environment is gone, being deleted, not public, not `visitors`, names another provider now, its host is not one of the environment's hosts, or the caller may not |
+| `POST /api/v1/challenges/accept` | `{"challenge", "subject", "email"?, "name"?, "session"?, "endsAt"?}` | 200 `{"redirect": "https://<host>/.ferun/auth?code=<code>", "admitted": true, "visit": "<uuid>"}`; for kind `ferun` without a grant `{"redirect", "admitted": false}`. 400 `invalid_accept`; 404 as for open; 409 `challenge_expired` "the challenge has expired: send the browser to its restart address"; 409 `challenge_answered` |
+| `POST /api/v1/challenges/reject` | `{"challenge": "<sealed>"}` | 200 `{"redirect": "https://<host>/.ferun/auth?code=<rejected code>", "admitted": false}`; the same refusals |
+| `GET /api/v1/visits/{visit}` | | 200 `{id, environment, host, provider: {name, kind}, subject, email, name, session, createdAt, endsAt, endedAt, endReason}`, an ended visit too until it is swept; 404 `no such visit` unless the caller may. The visit's binding is never answered |
+
+- **Accept.** `subject` 1 to 255 bytes, `email` at most 254, `name` at
+  most 200, `session` at most 255, none with control characters;
+  `endsAt` RFC 3339 after now. The visit ends at `least(endsAt, now() +
+  12 h)`. Kind `ferun`: the subject is the `sub` of `--oidc-issuer`'s
+  person; a person of that issuer and sub who is not disabled, with a
+  grant on the tenant or on the environment, in a tenant not being
+  deleted, is admitted, anyone else recorded rejected; no `people` row
+  is ever made here. In one transaction: the environment locked FOR
+  SHARE and checked again, `visit_answers` inserted (its primary key
+  takes each challenge once), `visits` inserted; the code is signed after
+  commit, from the database's `now()`.
+- **A code** is a JWT signed with the token key (`typ`
+  `ferun-code+jwt`) that says its outcome; it lives 2 minutes. The
+  ingress answers a rejected one by itself. An accepted one is redeemed
+  once over the ingress's connection, with the challenge cookie's
+  secret beside it; a redeem whose answer was lost may be repeated with
+  the same binding for 60 s, and the browser that got the last answer
+  holds the visit.
+- **The provider's call** (kind `tenant`, at a renewal): `POST <url>`
+  with `{"visit": "<id>"}`, `Content-Type` and `Accept`
+  `application/json`, `User-Agent: ferund-visit`, no credential, no
+  cookie; https only, IPv4, every connect judged by `--deny-prefix`'s
+  rule, no redirect followed, 3 s for everything, at most 64 KiB read,
+  never inside a transaction and on a context of its own. Only status
+  200 with `{"admitted": false}` is a no, which ends the visit
+  (`provider_no`); `{"admitted": true}` is a yes; anything else is no
+  answer, which keeps it. A visit of kind `tenant` is asked at most once
+  in 8 minutes (an autocommit claim of `asked_at` on the database's
+  clock, whichever instance renews), and its token never outlives the
+  last asking by more than 15 minutes; kind `ferun` has its grant looked
+  up at every renewal; kind `oidc` is asked nothing.
+- **A token** is a JWT of 15 minutes (`typ` `ferun-visit+jwt`, `iss`
+  `ferun`, `aud` the environment's ID, `vid`, `sub`, `hst`, `prv`,
+  `email`, `name`, `vbnd`, `vend`), at most to the visit's end. `vbnd` is
+  the hash of a secret only the browser's cookie holds (`visits.binding`,
+  set at the redeem): a renewal and a sign-out need the secret, so the
+  token an application receives renews nothing.
+- **A visit ends** at `ends_at` (`expired`), on the provider's no or a
+  lost grant (`provider_no`), at a sign-out on its host (`signed_out`),
+  when its environment is unpublished (`unpublished`) or admits another
+  provider (`provider_changed`), and at an issuer's back-channel logout
+  (`backchannel_logout`). The loop `visits-sweep` (the leader, every 10
+  minutes) ends the expired ones, deletes visits a day after their end
+  and answers an hour after their challenge's.
+
+**`ferun-auth`'s routes** (class `auth`: a service token of kind `auth`
+only, else 401 `{"error": "ferun-auth token required"}`):
+
+- `GET /api/v1/oidc-providers/{tenant}/{provider}` → `{tenant, name,
+  issuer, clientId, clientSecret, rule}`, the secret opened; 404 `no such
+  provider` unless it is of kind `oidc`.
+- `POST /api/v1/visits/end` `{"tenant", "provider", "session"}` or
+  `{"provider": "ferun", "session"}` → `{"ended": <n>}`: ends with
+  `backchannel_logout` every open visit of kind `ferun` with that session
+  (any tenant), or of that tenant's `oidc` provider with it. 400
+  `invalid_request` without a session or of another shape; a provider of
+  kind `tenant` is 404.
+
+`ferun-auth`'s token is minted with `ferund service-token --kind auth
+--name ferun-auth` (`feos-auth-<secret>`); it gets no certificate. It is
+used in the cluster only: a call with it that carries `X-Forwarded-For`
+(it came through the Gateway) is logged at warn, "ferun-auth's token
+used from outside the cluster". Whoever holds it can admit anyone to an
+environment of kind `oidc`, and any person with a grant to one of kind
+`ferun`, and reads every tenant's `oidc` client secret: it is mounted in
+a pod with no other secret.
+
+**Rolling it out** (migration `0034_visitors.sql`, additive: the release
+before neither reads nor writes the new columns and tables). An old
+`ferund` instance ignores `access` and gives a guarded environment open
+to the ingresses on its streams, and an old ingress serves it open. So
+the first release ships without `FERUN_VISITOR_AUTH_URL` (no `ferun` or
+`oidc` can be named), no provider is made and no environment set
+`visitors` until every `ferund` and every ingress instance runs the new
+release (`SELECT count(*) FROM access_providers` and `… FROM
+environments WHERE access = 'visitors'` both 0 until then), and
+`--visitor-auth-url` is set once `ferun-auth` runs, in a second roll of
+`ferund`.
 
 ### The ingress service
 
@@ -4212,7 +4430,9 @@ nor waits for. `ferund`'s part:
   `…/traffic` answer 503 `log_store_unavailable` and its logs calls read
   the node, so the sink is deployed first.
 - **Service tokens.** `ferund service-token --kind sink --name <name>`
-  prints `feos-sink-<secret>` once; `service_tokens` keeps its SHA-256,
+  prints `feos-sink-<secret>` once, `--kind auth` (`ferun-auth`'s,
+  [Visitors](#visitors)) `feos-auth-<secret>`, which gets no
+  certificate; `service_tokens` keeps its SHA-256,
   kind, name, creator, creation and last use, and an activity row
   (`service_token_created`) says who made it. `GET
   /api/v1/admin/service-tokens` lists them (never the token), `DELETE

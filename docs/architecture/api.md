@@ -165,10 +165,13 @@ content type `application/grpc+json`. Method names are
 |---|---|---|
 | `Join` | the ingress join server, without a client certificate | `{token, name, csr}` → `{name, certificate}` |
 | `RenewCertificate` | the ingress server, with the instance's certificate | `{csr}` → `{certificate}` |
-| `Hello` | the ingress server | `{publicKey, endpoint, version}` → `{name, podNetwork, prefix, address, appsZone, tenantZone?, instance}` |
+| `Hello` | the ingress server | `{publicKey, endpoint, version, capabilities?}` → `{name, podNetwork, prefix, address, appsZone, tenantZone?, instance}` |
 | `Sync` | the ingress server, streaming | `{}` → a stream of `Table` |
 | `Wake` | the ingress server | `{env, service}` → `{waking, retryAfterSeconds}` |
 | `Hold` | the ingress server | `{hold, release, leaving}` → `{held, refused: [{instance, reason}], leaseSeconds}` |
+| `RedeemVisit` | the ingress server | `{code, binding, visitBinding, host}` → `{outcome: "admitted", token}` or `{outcome: "refused", reason: "used" \| "expired" \| "ended" \| "unknown"}` |
+| `RenewVisit` | the ingress server | `{token, secret}` → `{outcome: "renewed", token}` or `{outcome: "ended", reason}` |
+| `EndVisit` | the ingress server | `{token, secret}` → `{}` |
 
 - **Encoding.** JSON names are camelCase, and nothing is HTML-escaped;
   `[]byte` is base64, a time RFC 3339 with nanoseconds. A certificate is
@@ -201,6 +204,33 @@ content type `application/grpc+json`. Method names are
   receiver keeps the state (`wire.State`, `Apply`): a delta or a part
   whose `seq` is not the next ends the stream, and the ingress connects
   again.
+- **Capabilities.** Hello's `capabilities` are what an ingress does
+  beyond what the fields' zero values say; an older one names none. With
+  `visits` it checks visits ([ingress.md](ingress.md#visitors), ADR
+  0054): `ferund` gives an environment whose `access` is set only to an
+  ingress whose Hello named it, and leaves it out of every other stream.
+- **Visits** ([control-plane.md](control-plane.md#visitors)). An `Env`
+  gains `access` (`""` anyone, `visitors`; any other value admits
+  nobody), `provider` (the name a token's `prv` must equal) and `signIn`
+  (where a navigation without a visit is sent, with `challenge=<sealed>`
+  added to its query; `""` with `visitors`: nobody can sign in); without
+  them it codes as before, its hash unchanged. `Table` and the state gain
+  `visitKeys`, `{tokenKid, tokenKey, challengeKid, challengeKey}`: the
+  Ed25519 public key of tokens and codes and the AES-256 key of
+  challenges with their IDs, the same for every instance; present, it
+  replaces the keys before, absent, a delta keeps them and a whole table
+  has none; it travels in a table's first part. `RedeemVisit` redeems an
+  accepted code a browser brought to `host` under `/.ferun/auth`, with the
+  secret of that browser's challenge cookie (`binding`) and the hash of
+  the visit secret the ingress made for its cookie (`visitBinding`, the
+  token's `vbnd`). `RenewVisit` asks for a visit's next token with the
+  visit cookie's secret; `ended` carries an end reason, or `unknown`: the
+  cookie holds no visit, though the visit may live on for another.
+  `EndVisit` ends a visit at a sign-out, with the cookie's secret; it
+  answers `{}` also when nothing ended. Every error is no answer:
+  `INVALID_ARGUMENT` for a malformed request, `UNAVAILABLE` for any
+  failure, and an older `ferund` answers `UNIMPLEMENTED`, all of which the
+  ingress takes for `ferund` being away, never for a visit's end.
 - **The access log** is not on this service: the ingress writes it into
   the sink ([sink.md](sink.md#the-ingresss-access-log)). The method
   `PublishAccessLogs`, which carried it to `ferund` before, was removed

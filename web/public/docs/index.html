@@ -538,6 +538,7 @@ footer code { font-size: 12px; }
       <tbody>
         <tr><td class="prog">ferund</td><td><span class="pill run">FeRun · Go</span></td><td>replicas over one PostgreSQL, three in production</td><td>Tenants and tokens, sandboxes with placement, pause and hibernation, environments and deployments, the fleet and its CA, ACME for domains, REST, MCP, the port door, the management UI. Any instance serves any request; a leader, by a 15 s lease, runs the background loops.</td></tr>
         <tr><td class="prog">ferun-ingress</td><td><span class="pill run">FeRun · Go</span></td><td>instances behind an L4 balancer of their own</td><td>HTTPS for public environments. A peer on the pod mesh with its own /96; routes from a table ferund streams to it, keeps idle services awake and wakes sleeping ones.</td></tr>
+        <tr><td class="prog">ferun-auth</td><td><span class="pill run">FeRun · Go</span></td><td>identical instances beside ferund, same image, a host of its own</td><td>The access provider for the kinds <code>ferun</code> and <code>oidc</code>: OpenID Connect sign-in with PKCE, the issuers' back-channel logouts, a service token of its own kind at ferund; no database, no node connection.</td></tr>
         <tr><td class="prog">ferun-sink</td><td><span class="pill run">FeRun · Go</span></td><td>a service beside ferund, with a database of its own</td><td>Takes logs and spans over OTLP from nodes and the ingress, appends them to Kafka, Quickwit indexes them. Serves <code>/api/v1/logs</code>, <code>/api/v1/log-streams</code> and the Jaeger API; a quota per tenant.</td></tr>
         <tr><td class="prog">feos-k8s</td><td><span class="pill run">FeRun · Go</span></td><td>one replica beside ferund, on Kubernetes</td><td>The bridge to Kubernetes: makes join tokens for new nodes and puts them into the secret <code>feosd-join</code>, drains replaced ones in FeRun. One pass every 5 s, no watch.</td></tr>
         <tr><td class="prog">feosd</td><td><span class="pill os">FeOS · Rust</span></td><td>under systemd or <code>feos-host-init</code>; on Kubernetes in the pod <code>feos-node</code></td><td>The node agent. Runs pods as Firecracker in its jailer, with snapshots, the balloon and volumes. Builds the pods' network (TAP, nftables, DNS, mesh) and ships their logs to the sink. Serves its API on <code>/run/feos/api.sock</code> and on the node connection.</td></tr>
@@ -563,8 +564,14 @@ footer code { font-size: 12px; }
         <tr><td class="nw">FeCode, agents, admins → <code>ferund :8100</code></td><td>HTTPS through a balancer without sticky sessions, a bearer token or an OIDC session</td><td>REST, MCP at <code>/mcp</code>, ports at <code>/fwd/</code>, sign-in at <code>/auth/</code>, the UI, this page at <code>/docs/</code></td></tr>
         <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>TLS 1.3, the node's client certificate, ALPN <code>feos-node/1</code></td><td>The node connection: the node is the HTTP/2 server, ferund the gRPC client of <code>feos.pod.v1</code>, <code>volume.v1</code>, <code>network.v1</code> and the other APIs</td></tr>
         <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>ALPN <code>h2</code>, the node's certificate (without one: join only)</td><td>The uplink, <code>feos.fleet.v1</code>: join with a one-time token, certificate renewal (168 h), telemetry every 5 s, events, <code>JoinMesh</code>, the pods' credentials</td></tr>
-        <tr><td class="nw"><code>ferun-ingress</code> → <code>ferund :7443</code></td><td>ALPN <code>ferun-ingress/1</code>, gRPC with JSON, mTLS</td><td>Join, Hello, <code>Sync</code> (the versioned routing table as a stream, heartbeat every 10 s), <code>Wake</code>, <code>Hold</code></td></tr>
+        <tr><td class="nw"><code>ferun-ingress</code> → <code>ferund :7443</code></td><td>ALPN <code>ferun-ingress/1</code>, gRPC with JSON, mTLS</td><td>Join, Hello (with the capability <code>visits</code>), <code>Sync</code> (the versioned routing table as a stream, heartbeat every 10 s, with each environment's access, its provider's sign-in address and the visits' keys), <code>Wake</code>, <code>Hold</code>, <code>RedeemVisit</code>, <code>RenewVisit</code>, <code>EndVisit</code></td></tr>
         <tr><td class="nw">Internet → <code>ferun-ingress</code></td><td>an L4 balancer, 80/443 → 8080/8443</td><td>TLS by SNI: a domain's certificate from the table, else the apps zone's wildcard. Port 80 answers ACME HTTP-01, everything else gets a 308 to HTTPS</td></tr>
+        <tr><td class="nw">Browser → <code>ferun-ingress</code> <code>/.ferun/</code></td><td>HTTPS on every host, before any route</td><td>The way back from a provider with a code, the sign-out, the token's keys; the visit cookie and the challenge cookie, host-only</td></tr>
+        <tr><td class="nw">Browser → <code>ferun-auth</code></td><td>HTTPS on a host of its own, through the platform's gateway</td><td><code>/visit</code> with a challenge, the issuer's <code>/callback</code>; issuers post their back-channel logouts there</td></tr>
+        <tr><td class="nw"><code>ferun-auth</code> → <code>ferund :8100</code></td><td>HTTP inside the cluster, a service token of kind <code>auth</code></td><td>Opens, accepts and rejects challenges of environments of kind <code>ferun</code> and <code>oidc</code>, reads those providers with their secrets, ends visits by an issuer's session</td></tr>
+        <tr><td class="nw"><code>ferun-auth</code> → issuers</td><td>HTTPS, public addresses only, judged on the address it connects to</td><td>Discovery, keys, the code's exchange, userinfo</td></tr>
+        <tr><td class="nw"><code>ferund</code> → a provider of kind <code>tenant</code></td><td>HTTPS, public addresses only, no redirect, 3 s, no credential</td><td><code>POST {"visit": "&lt;id&gt;"}</code> at a renewal, at most once in 8 minutes per visit: is the visitor still admitted?</td></tr>
+        <tr><td class="nw">FeCode → <code>ferund :8100</code></td><td>HTTPS, its tenant token</td><td>Its provider <code>fecode</code>, and the challenges and visits of its members-only environments</td></tr>
         <tr><td class="nw"><code>ferun-ingress</code> → pod</td><td><span class="pill net">mesh</span> WireGuard <code>ferun-mesh</code>, UDP 51820</td><td>HTTP/1.1 to <code>[pod IPv6]:port</code>, admitted by the group <code>ing-&lt;sandbox-id&gt;</code> on the node</td></tr>
         <tr><td class="nw">pod ↔ pod across nodes</td><td><span class="pill net">mesh</span> WireGuard <code>feos-mesh</code>, UDP 51820</td><td>IPv6 from the cluster's ULA /64, a /96 per node; ferund hands out the peers</td></tr>
         <tr><td class="nw"><code>feos-guest</code> → <code>feosd</code></td><td>vsock, port 10001</td><td><code>LifecycleService.Attach</code> held open; over it the guest API, the time (ADR 0027) and the network</td></tr>
@@ -730,7 +737,7 @@ footer code { font-size: 12px; }
 <!-- ============ Request ============ -->
 <section id="request">
   <h2>A request's path</h2>
-  <p class="prose">A visitor opens a public environment's host under the apps zone, or a domain its tenant bound to it. ferund is not in the data path. It only supplies the table and wakes pods when asked.</p>
+  <p class="prose">A visitor opens a public environment's host under the apps zone, or a domain its tenant bound to it. ferund is not in the data path. It only supplies the table and wakes pods when asked. Where the environment admits visitors, the ingress checks the visit's cookie itself, after the route's <code>from</code> and before it picks a pod (<a href="#auth">Auth</a>).</p>
   <figure>
     <div class="fig-scroll">
 <svg class="dg" viewBox="0 0 1200 310" role="img" aria-label="Request path: visitor, L4 balancer, ferun-ingress, WireGuard mesh, node with nftables, pod. Below it ferund, which streams the table with Sync, takes Wake and Hold, and wakes sleeping pods over the node connection.">
@@ -1074,11 +1081,11 @@ footer code { font-size: 12px; }
 
 <!-- ============ Auth ============ -->
 <section id="auth">
-  <h2>Auth at the ingress <span class="pill ext">proposed</span></h2>
-  <p class="prose">Proposed in ADR 0054, and none of it is built. Today a public environment's hosts are open to everyone, and a route's <code>from</code> is the only check at the ingress. Proposed is a switch on the environment: it admits <code>anyone</code>, or <code>visitors</code>, which is what a new environment does. Who a visitor is, and whether they may enter, is not FeRun's to know. An <b>access provider</b> the tenant names vouches for them, once per visit. After that the ingress decides by its own cookie, and neither ferund nor the provider is in a request's path. ferund serves no visitor at any point: it keeps the visits, for callers that authenticate. Where FeRun itself signs visitors in, a program of its own beside ferund does it.</p>
+  <h2>Auth at the ingress</h2>
+  <p class="prose">ADR 0054. A public environment admits <code>anyone</code>, or <code>visitors</code> of one of its tenant's providers, which is what a first publish that says nothing gives it. Environments that were public before stay <code>anyone</code> until their tenant closes them; a route's <code>from</code> still comes first. Who a visitor is, and whether they may enter, is not FeRun's to know. An <b>access provider</b> the tenant names vouches for them, once per visit. After that the ingress decides by its own cookie, and neither ferund nor the provider is in a request's path. ferund serves no visitor at any point: it keeps the visits, for callers that authenticate. Where FeRun itself signs visitors in, a program of its own beside ferund does it.</p>
   <figure>
     <div class="fig-scroll">
-<svg class="dg" viewBox="0 0 1200 530" role="img" aria-label="Sign-in at the ingress as a sequence between the visitor's browser, ferun-ingress, ferund and the access provider. The ingress seals a challenge itself and redirects the browser to the provider with it. The provider signs the visitor in, reads the challenge through ferund, applies its own rule and accepts with a subject and an end. The browser comes back to the host with a code, the ingress redeems it at ferund and sets the visit's cookie on that host. On every request after, the ingress checks the cookie's token itself and renews it at ferund every 15 minutes, and ferund asks the provider each time whether it still admits the visitor.">
+<svg class="dg" viewBox="0 0 1200 530" role="img" aria-label="Sign-in at the ingress as a sequence between the visitor's browser, ferun-ingress, ferund and the access provider. The ingress seals a challenge itself and redirects the browser to the provider with it. The provider signs the visitor in, reads the challenge through ferund, applies its own rule and accepts with a subject and an end. The browser comes back to the host with a code, the ingress redeems it at ferund and sets the visit's cookie on that host. On every request after, the ingress checks the cookie's token itself and renews it at ferund when it has less than 5 minutes left, and ferund asks the provider, at most once in 8 minutes, whether it still admits the visitor.">
   <defs>
     <marker id="m7" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
   </defs>
@@ -1102,24 +1109,24 @@ footer code { font-size: 12px; }
   <path class="ln" d="M110 104H410" marker-end="url(#m7)"/>
   <text class="lb" x="122" y="97">1 · GET /cart, no visit cookie</text>
   <path class="ln" d="M410 140H110" marker-end="url(#m7)"/>
-  <text class="lb" x="122" y="133">2 · 302 to the provider, challenge=c</text>
+  <text class="lb" x="122" y="133">2 · 303 to the provider, challenge=c</text>
   <text x="424" y="144">seals c itself: environment, host, path</text>
   <path class="ln" d="M110 176H1010" marker-end="url(#m7)"/>
   <text class="lb" x="122" y="169">3 · GET &lt;provider&gt;?challenge=c</text>
   <text x="1024" y="194">signs the visitor in</text>
   <path class="ln" d="M1010 212H710" marker-end="url(#m7)"/>
-  <text class="lb" x="722" y="205">4 · GET challenge c → env, host</text>
+  <text class="lb" x="722" y="205">4 · open challenge c → env, host</text>
   <text x="1024" y="230">applies its own rule</text>
   <path class="ln" d="M1010 248H710" marker-end="url(#m7)"/>
   <text class="lb" x="722" y="241">5 · accept {subject, until} → code k</text>
   <path class="ln" d="M1010 284H110" marker-end="url(#m7)"/>
-  <text class="lb" x="122" y="277">6 · 302 to &lt;host&gt;/.ferun/auth?code=k</text>
+  <text class="lb" x="122" y="277">6 · 303 to &lt;host&gt;/.ferun/auth?code=k</text>
   <path class="ln" d="M110 320H410" marker-end="url(#m7)"/>
   <text class="lb" x="122" y="313">7 · GET /.ferun/auth?code=k</text>
   <path class="ln" d="M410 356H710" marker-end="url(#m7)"/>
   <text class="lb" x="422" y="349">8 · Redeem(k) → visit, token</text>
   <path class="ln" d="M410 392H110" marker-end="url(#m7)"/>
-  <text class="lb" x="122" y="385">9 · 302 to /cart, Set-Cookie: visit</text>
+  <text class="lb" x="122" y="385">9 · 303 to /cart, Set-Cookie: visit</text>
 
   <path class="ln" d="M16 422H1184" stroke-dasharray="2 5" style="opacity: .5"/>
   <text class="rt" x="1184" y="444" text-anchor="end">EVERY REQUEST AFTER</text>
@@ -1128,12 +1135,12 @@ footer code { font-size: 12px; }
   <text class="lb" x="122" y="455">GET /cart, Cookie: visit</text>
   <text x="424" y="466">checks the token itself, routes to the pod</text>
   <path class="ln" d="M410 498H710" marker-end="url(#m7)"/>
-  <text class="lb" x="422" y="491">Renew(visit), every 15 minutes</text>
+  <text class="lb" x="422" y="491">Renew(visit), 5 minutes before its end</text>
   <path class="ln" d="M710 498H1010" marker-end="url(#m7)"/>
-  <text class="lb" x="722" y="491">still admitted? → yes or no</text>
+  <text class="lb" x="722" y="491">still admitted? (≤ once in 8 min)</text>
 </svg>
     </div>
-    <figcaption><span class="fig-no">Fig. 7</span><b>The provider vouches, the ingress remembers for 15 minutes.</b> The provider is <code>ferun-auth</code> for the kinds <code>ferun</code> and <code>oidc</code>, and the tenant's own service for <code>tenant</code>; the browser speaks to it and to the ingress, never to ferund, which only the ingress and the provider call. The ingress seals a challenge itself and sends the browser to the provider with it (2); a short-lived cookie on the host ties the challenge to this browser. The provider cannot open the challenge and need not: ferund tells it which environment and host are asked for (4), so nothing in the URL can be forged, and takes its answer, a subject and an end (5). The code that comes back (6) is worth something to the ingress alone, which redeems it over its own connection (8) and sets the visit's cookie on exactly the host the visitor opened. That host is the environment's default host or a tenant's domain, it makes no difference: the provider has one address, the way back is <code>/.ferun/auth</code> on any host, and nothing is registered per domain. After the sign-in a request passes nobody but the ingress; every 15 minutes ferund asks the provider whether the visitor may stay.</figcaption>
+    <figcaption><span class="fig-no">Fig. 7</span><b>The provider vouches, the ingress remembers for 15 minutes.</b> The provider is <code>ferun-auth</code> for the kinds <code>ferun</code> and <code>oidc</code>, and the tenant's own service for <code>tenant</code>; the browser speaks to it and to the ingress, never to ferund, which only the ingress and the provider call. The ingress seals a challenge itself and sends the browser to the provider with it (2); a short-lived cookie on the host ties the challenge to this browser. The provider cannot open the challenge and need not: ferund tells it which environment and host are asked for (4), so nothing in the URL can be forged, and takes its answer, a subject and an end (5). The code that comes back (6) is worth something to the ingress alone, which redeems it over its own connection (8) and sets the visit's cookie on exactly the host the visitor opened. That host is the environment's default host or a tenant's domain, it makes no difference: the provider has one address, the way back is <code>/.ferun/auth</code> on any host, and nothing is registered per domain. After the sign-in a request passes nobody but the ingress; at a renewal, at most once in 8 minutes, ferund asks the provider whether the visitor may stay.</figcaption>
   </figure>
 
   <h3>Three providers, one challenge</h3>
@@ -1142,14 +1149,14 @@ footer code { font-size: 12px; }
     <table>
       <thead><tr><th>Provider</th><th>Answers the challenge</th><th>Admits</th><th>For</th></tr></thead>
       <tbody>
-        <tr><td class="prog">ferun</td><td><code>ferun-auth</code>, with the installation's provider</td><td>people who hold a grant of at least <code>read</code> on the environment; ferund checks the grant itself</td><td>a tenant's own people. The default: nothing to set up</td></tr>
+        <tr><td class="prog">ferun</td><td><code>ferun-auth</code>, with the installation's provider</td><td>people who hold a grant of at least <code>read</code> on the environment; ferund checks the grant itself</td><td>a tenant's own people. The default where the installation runs ferun-auth: nothing to set up</td></tr>
         <tr><td class="prog">oidc</td><td><code>ferun-auth</code>, with any OpenID Connect issuer the tenant names: a client ID and a sealed client secret, the code flow with PKCE</td><td>everyone the issuer signs in, or those whose claims match: an <code>email</code>, its domain, a group in <code>groups</code></td><td>an app with no sign-in of its own: the general OIDC proxy</td></tr>
         <tr><td class="prog">tenant</td><td>the tenant's own service at its address, with its own session and whatever provider it uses</td><td>whoever it accepts, by a rule only it knows, checked at that moment</td><td>a platform on FeRun whose environments belong to projects of its own: FeCode admits a project's members</td></tr>
       </tbody>
     </table>
   </div>
   <ul class="facts">
-    <li><b>With <code>tenant</code>, FeRun signs nobody in.</b> The tenant's service reads and accepts challenges through the API with the tenant's token. At each renewal ferund calls the same address and names the visit, and the service reads it and answers yes or no. It needs no signing key, FeRun keeps no list of its people, and nothing has to be kept in step between the two: no call tells FeRun that someone may no longer enter.</li>
+    <li><b>With <code>tenant</code>, FeRun signs nobody in.</b> The tenant's service reads and accepts challenges through the API with the tenant's token. At a renewal, at most once in 8 minutes per visit, ferund posts the visit's ID to the same address, and the service reads the visit and answers <code>{"admitted": true}</code> or <code>false</code>. It needs no signing key, FeRun keeps no list of its people, and nothing has to be kept in step between the two: no call tells FeRun that someone may no longer enter.</li>
     <li><b>With <code>ferun</code> and <code>oidc</code>, the provider is <code>ferun-auth</code></b>, the OIDC proxy that comes with FeRun. It answers challenges through the same API as a tenant's service does.</li>
   </ul>
 
@@ -1160,27 +1167,28 @@ footer code { font-size: 12px; }
     <li><b>What it may do at ferund</b>, with a service token of its own kind: read and accept challenges of environments whose provider is <code>ferun</code> or <code>oidc</code>, read those providers' settings with their client secrets, and end visits by an issuer's <code>sid</code>. Nothing of tenants, deployments or nodes. For <code>ferun</code>, ferund looks up the grant itself, so the proxy cannot admit someone who holds none.</li>
     <li><b>Issuers on the public internet only.</b> It fetches from an issuer at global addresses alone, checked on the address it connects to: no network of the cluster, no private or link-local range. An operator names blocks as exceptions, for an issuer in a private network.</li>
     <li><b>No store.</b> A sign-in in flight lives in a sealed cookie on its host, and the long session is the issuer's. Instances need nothing from each other.</li>
-    <li><b>An installation without it</b> serves <code>tenant</code> providers alone.</li>
+    <li><b>An installation without it</b> serves <code>tenant</code> providers alone, and refuses a publish that asks for another, the first publish that says nothing included. One without its secret key guards no environment at all.</li>
   </ul>
 
   <h3>The visit</h3>
   <ul class="facts">
-    <li><b>A visit</b> is ferund's record that a provider admitted a subject to an environment until a time: the subject as the provider names it, what it said about them (an email, a name, groups), and the end the provider set, within the installation's bound.</li>
-    <li><b>The cookie</b> is the ingress's, on the host the visitor opened and on no other: <code>__Host-ferun_visit</code>, HttpOnly. It holds a token ferund signed for 15 minutes, naming the visit, the environment and the subject. The ingress checks it with ferund's public key from the table, without a call, and takes the cookie out of the request before the pod sees it.</li>
-    <li><b>Renewal.</b> When the token nears its end, the ingress asks ferund for the next over its connection, on any request, a script's too, so a page that stays open does not break. </li>
-    <li><b>Asked again every 15 minutes.</b> At each renewal ferund puts the visit to its provider: for <code>tenant</code> a call to the provider's address, for <code>ferun</code> a look at the grant. A no ends the visit, so a removed member stays for 15 minutes at most, and a tenant has no call to end a visit with. A provider that does not answer has not said no: the visit goes on and is put to it again at the next renewal. An <code>oidc</code> visit is not asked about; it lives to its end or its issuer's logout.</li>
-    <li><b>Ending.</b> A visit ends at its time, on its provider's no, when an issuer's back-channel logout names its <code>sid</code>, and at <code>/.ferun/sign-out</code> on the host, which ends the visitor's own.</li>
+    <li><b>A visit</b> is ferund's record that a provider admitted a subject to an environment until a time: the subject as the provider names it, what it said about them (an email, a name), the provider's session, and the end the provider set, within the installation's bound of 12 hours.</li>
+    <li><b>The cookie</b> is the ingress's, on the host the visitor opened and on no other: <code>__Host-ferun_visit</code>, HttpOnly. It holds a token ferund signed for 15 minutes, a JWT naming the visit, the environment as its audience, the host, the provider and the subject, and beside it a secret only the browser holds, whose hash ferund keeps. The ingress checks it with ferund's public key from the table, without a call, and takes the cookie out of the request before the pod sees it. The token alone renews nothing.</li>
+    <li><b>Renewal.</b> When the token has less than 5 minutes left, the ingress asks ferund for the next over its connection, on the request that finds it, a script's too, and serves on with the one it has when ferund does not answer at once; for upgraded connections it asks without a request. A page that stays open does not break.</li>
+    <li><b>Asked again, at most every 8 minutes.</b> At a renewal ferund puts the visit to its provider: for <code>tenant</code> a call to the provider's address, at most once in 8 minutes per visit, for <code>ferun</code> a look at the grant, every time. Only a no ends the visit, so a removed member stays for 16 minutes at most, and a tenant has no call to end a visit with. A provider that does not answer has not said no: the visit goes on and is put to it again at the next renewal. An <code>oidc</code> visit is not asked about; it lives to its end or its issuer's logout.</li>
+    <li><b>Ending.</b> A visit ends at its time, on its provider's no, when an issuer's back-channel logout names its <code>sid</code>, when its environment is unpublished or names another provider, and at <code>/.ferun/sign-out</code> on the host, which ends the visitor's own.</li>
     <li><b>At the visit's end</b> the next navigation goes through the provider again. While the visitor's session there lives, that is a round of redirects they do not see.</li>
     <li><b>While ferund is away</b> the ingress goes on serving the visits it holds: a token past its end counts until its visit's end. Nobody new signs in during that time, and an ended visit is not noticed until ferund is back.</li>
-    <li><b>Not a navigation, no redirect.</b> A script's request or an API client without a valid cookie gets 401. Only a navigation (<code>Sec-Fetch-Mode: navigate</code>, or a GET that accepts <code>text/html</code>) is sent to the provider.</li>
+    <li><b>Not a navigation, no redirect.</b> A script's request or an API client without a valid cookie gets 401. Only a navigation (<code>Sec-Fetch-Mode: navigate</code>, or a GET that accepts <code>text/html</code>) is sent to the provider. A request that is no navigation and comes from another site, or another host of the same zone (one site to the browser), has no visit, whatever its cookie.</li>
+    <li><b>The keys</b> are two, made once and shared by every ferund instance: the token key, sealed with the installation's secret key, and the challenge key. The ingress has the public half of the first and the second in its table and its cache (<code>table-v2.json</code>); an ingress whose Hello does not say <code>visits</code> gets no guarded environment.</li>
     <li><b>The challenge</b> is the ingress's own, sealed with a key from the table: the environment, the host, the path, and an end minutes away. ferund keeps nothing of it until a provider accepts, and accepts each once. The way back is the host in the seal, never one a URL names, and a code that arrives in a browser without the challenge's cookie signs nobody in.</li>
     <li><b>A visitor nobody vouched for costs ferund nothing</b>: no call and no row. Its first caller in a sign-in is a provider with a credential (4), and the ingress redeems only a code that carries ferund's signature.</li>
   </ul>
 
   <h3>What the app gets</h3>
   <ul class="facts">
-    <li><b>Who the visitor is</b>, in headers the ingress sets and takes out of every request from outside: <code>X-FeRun-Visitor</code> with the subject, <code>X-FeRun-Visitor-Email</code> where the provider gave one, and <code>X-FeRun-Visitor-Token</code>, the visit's token, a JWT of ferund's with the environment as its audience.</li>
-    <li><b>The headers are enough</b> for an app that is called through the ingress alone. One that other workloads of its environment reach by a reference (Fig. 6), or that passes the identity on, checks the token against the keys published under <code>/.ferun/</code>.</li>
+    <li><b>Who the visitor is</b>, in headers the ingress sets and takes out of every request from outside, in any spelling: <code>FeRun-Visitor</code> with the subject, <code>FeRun-Visitor-Email</code> where the provider gave one, and <code>FeRun-Visit-Token</code>, the visit's token, a JWT of ferund's (<code>typ</code> <code>ferun-visit+jwt</code>, <code>iss</code> <code>ferun</code>) with the environment's ID as its audience.</li>
+    <li><b>The headers are enough</b> for an app that is called through the ingress alone. One that other workloads of its environment reach by a reference (Fig. 6), or that passes the identity on, checks the token against the keys at <code>/.ferun/keys</code>. The headers are no CSRF protection: an app checks <code>Origin</code> on every request that changes something.</li>
     <li><b>The issuer's tokens go no further than the proxy.</b> FeRun tells the app who is there; it does not hand it an access token to act for them elsewhere.</li>
   </ul>
 
@@ -1189,7 +1197,7 @@ footer code { font-size: 12px; }
     <li><b>A route's <code>from</code> comes first</b>: a client outside its blocks gets 403 before anyone is asked to sign in.</li>
     <li><b>The path <code>/.ferun/</code></b> is the ingress's on every host; no route claims it. There the browser comes back from a provider, a visitor signs out, and the token's keys are published. ACME's HTTP-01 on port 80 is untouched.</li>
     <li><b>The route door and attached services</b> do not pass here: a route token still opens what it opened, and a workspace's previews stay behind their platform's own door.</li>
-    <li><b>The ingress still decides nothing about people.</b> It holds no list and no rule, only what the table gives it: the switch per environment, the provider's address, the key for its challenges and ferund's public key.</li>
+    <li><b>The ingress still decides nothing about people.</b> It holds no list and no rule, only what the table gives it: the switch per environment, the provider's address, the key for its challenges and ferund's public key. One that lacks them, or finds an access it does not know, admits nobody.</li>
   </ul>
 
   <h3>Where it comes from</h3>
@@ -1203,7 +1211,7 @@ footer code { font-size: 12px; }
   <h3>Left for later</h3>
   <ul class="facts">
     <li><b>Machine clients</b> of a guarded environment get 401. Admission by a route token at the ingress, or a route that stays open beside guarded ones, such as a webhook's, is not decided; until then such an environment stays <code>anyone</code> and guards itself.</li>
-    <li><b>Environments that are public</b> when this is built stay <code>anyone</code>; their tenant closes them.</li>
+    <li><b>Key rotation</b>, visits across a tenant's hosts, and a visitor field in the access log.</li>
     <li><b>OAuth 2.0 without OpenID Connect</b>, where no ID token says who signed in, is not covered.</li>
   </ul>
 </section>
@@ -1213,11 +1221,11 @@ footer code { font-size: 12px; }
   <h2>Inside ferund</h2>
   <p class="prose">One Go module (<code>github.com/gardenlinux/feos/go</code>), built static, with fixed dependencies: the standard library, pgx, gRPC, Protobuf, the MCP SDK, uuid, x/crypto, x/sync. The packages under <code>go/internal/</code>, grouped by what they do:</p>
   <div class="groups">
-    <div class="group"><h3>Front doors</h3><p class="pk">api · auth · apierr · mcpsrv · ports · watch · ui</p><p>REST with its auth classes, OIDC sign-in, MCP for agents, the port door at <code>/fwd/</code>, file watches across instances, the embedded UI and this page.</p></div>
+    <div class="group"><h3>Front doors</h3><p class="pk">api · auth · apierr · oidc · mcpsrv · ports · watch · ui · ferunauth</p><p>REST with its auth classes, OIDC sign-in (and ferun-auth's, a program of its own), MCP for agents, the port door at <code>/fwd/</code>, file watches across instances, the embedded UI and this page.</p></div>
     <div class="group"><h3>Sandbox engine</h3><p class="pk">sandbox · tools · podid</p><p>States, ops, placement (<code>binpack</code> or <code>spread</code>), sync and reconcile, tombstones, policies, images. Keyed tool calls outlive their caller (ADR 0023).</p></div>
     <div class="group"><h3>Environments</h3><p class="pk">env · env/spec · env/addons · env/ctl · env/envdeps</p><p>Deployments with plan, base, revert and tags; the controller; addons on volumes; secrets; the route door; tenants' jobs.</p></div>
     <div class="group"><h3>Fleet</h3><p class="pk">nodelink · fleet · mesh · pki · leader</p><p>The nodes' port with ALPN and stream budgets, joins, certificates, telemetry, events, each node's /96 and its peers, the CA with SPIFFE IDs, the leader lease.</p></div>
-    <div class="group"><h3>Edge</h3><p class="pk">ingress/service · ingress/table · routing · domains · acme</p><p>The API ferun-ingress calls and the table it routes from. Domains with a TXT proof and hourly checks, certificates over ACME.</p></div>
+    <div class="group"><h3>Edge</h3><p class="pk">ingress/service · ingress/table · routing · domains · acme · visits · visit · egress</p><p>The API ferun-ingress calls and the table it routes from. Domains with a TXT proof and hourly checks, certificates over ACME. Access providers, challenges and visits, with their tokens and the provider's call through the egress rule.</p></div>
     <div class="group"><h3>Secrets</h3><p class="pk">seal · bindings</p><p>AES-256-GCM under <code>--secret-key-file</code> for bindings and secrets. Kubernetes, SSH and HTTP bindings, the interception CA per pod, the HTTP preflight.</p></div>
     <div class="group"><h3>State</h3><p class="pk">db · store · model · activity · config</p><p>PostgreSQL 17, READ COMMITTED with explicit row locks and retries, the embedded schema with its migrations, the partitioned activity log.</p></div>
     <div class="group"><h3>Tests and operations</h3><p class="pk">testnode · e2e · server · kube · feosk8s</p><p>A Go implementation of the node's side for tests, end-to-end tests with several instances, the assembly of one instance, the feos-k8s controller.</p></div>
@@ -1251,7 +1259,6 @@ footer code { font-size: 12px; }
     <li><b>Network rules</b> (ADR 0034): groups go to the nodes whole every 10 s rather than as acknowledged deltas; no environment-wide egress default; TCP only between workloads; no references across environments. The mesh's WireGuard keys do not rotate yet (ADR 0017).</li>
     <li><b>Environments</b>: no volumes for services, no MCP tools and no CLI, no addon backups, no data on a clone.</li>
     <li><b>Ingress</b>: no DNS-01 wildcard, no L4, no h2c.</li>
-    <li><b>Auth at the ingress</b> (ADR 0054, proposed): <a href="#auth">visitors, access providers and ferun-auth</a>. An environment's hosts are open to everyone until then.</li>
     <li><b>diskd</b>: no sweep of old layers yet, no disk size per pod.</li>
   </ul>
 </section>
