@@ -312,9 +312,9 @@ func New(cfg Config, d Deps) *Proxy {
 // heartbeat) keeps the routing. A change forgets the instances whose
 // hold was refused and lets held requests pick again; when endpoints
 // left, the pool's idle connections are closed, and so are the open ones
-// to what is no longer routed (cutConns). The live connections of visits
-// whose environment is gone or admits another provider now are closed
-// (visitBook.retable).
+// to what is no longer routed (cutConns). The live attempts whose
+// environment is gone, admits another provider now, or turned guarded
+// while they came in without a visit are closed (visitBook.retable).
 func (p *Proxy) SetState(s *wire.State) {
 	if s == nil {
 		return
@@ -933,12 +933,12 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 	}()
 	ctx, cancel := context.WithCancelCause(q.r.Context())
 	defer cancel(nil)
-	if q.visit != nil {
-		// The visit's end closes the attempt, an upgraded connection
-		// and a streaming answer among them.
-		att := p.visits.attach(q.visit, tg.env, q.host, cancel)
-		defer p.visits.detach(att)
-	}
+	// The visit's end, or a table whose environment no longer admits
+	// the attempt (one let in open that turned guarded among them),
+	// closes it, an upgraded connection and a streaming answer among
+	// them.
+	att := p.visits.attach(q.visit, tg.env, q.host, cancel, func() *table { return p.cur.Load().t })
+	defer p.visits.detach(att)
 	cw := &connWait{bound: p.cfg.ConnWaitTimeout, cancel: cancel}
 	defer cw.stop()
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GetConn: cw.getConn, GotConn: cw.gotConn})
@@ -982,6 +982,18 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			if !responded && context.Cause(ctx) == errAccessChanged && q.r.Context().Err() == nil {
+				// A newer table no longer admits the attempt before it
+				// was answered: the instance is not at fault. When nothing
+				// of the body was read, the request routes again by that
+				// table, which answers it (or checks its visit again).
+				if q.body.untouched() {
+					again = true
+					return
+				}
+				reply{http.StatusBadGateway, textNoAnswer, 0}.write(q.w)
+				return
+			}
 			again = q.failed(v, tg, ep, port, exclude, mayRetry, responded, cw.gaveUp(), err)
 		},
 		ErrorLog: p.errLog,

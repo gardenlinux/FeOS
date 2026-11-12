@@ -4,6 +4,7 @@
 package proxy
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
@@ -34,8 +35,10 @@ const (
 	renewRetry = 5 * time.Second
 	// visitEvery is the period of the background renewal.
 	visitEvery = 10 * time.Second
-	// maxBackground is how many background renewals run at once.
-	maxBackground = 8
+	// maxBackground is how many background renewals run at once: half
+	// the agent's renewal slots, so that the ingress's own background
+	// work never fills them for the requests' renewals.
+	maxBackground = 4
 )
 
 // The bounds of what the proxy remembers of visits.
@@ -160,7 +163,7 @@ func (q *request) checkVisit(v *view, tg target) bool {
 		if nav {
 			writePage(q.w, http.StatusServiceUnavailable, page{Text: pageNotHere}, 30)
 		} else {
-			q.needVisit(false)
+			q.writeVisitRequired(false)
 		}
 		return false
 	}
@@ -182,13 +185,19 @@ func (q *request) checkVisit(v *view, tg target) bool {
 }
 
 // needVisit answers 401 a request of a guarded environment that has no
-// visit and is no navigation; clear: its visit ended, and the answer
-// clears the cookie.
+// visit and is no navigation, and counts it; clear: its visit ended, and
+// the answer clears the cookie.
 func (q *request) needVisit(clear bool) {
 	if q.reason == "" {
 		q.reason = wire.ReasonVisitRequired
 	}
 	q.p.m.visitRequired.Add(1)
+	q.writeVisitRequired(clear)
+}
+
+// writeVisitRequired writes needVisit's 401, also for an environment
+// that cannot sign anyone in, which counts as unavailable instead.
+func (q *request) writeVisitRequired(clear bool) {
 	h := q.w.Header()
 	if clear {
 		clearVisitCookie(h)
@@ -242,9 +251,6 @@ func (q *request) signIn(t *table, e *envRoutes, clear bool) {
 	sep := "?"
 	if strings.Contains(e.signIn, "?") {
 		sep = "&"
-		if strings.HasSuffix(e.signIn, "?") || strings.HasSuffix(e.signIn, "&") {
-			sep = ""
-		}
 	}
 	p.m.visitSignIns.Add(1)
 	h := q.w.Header()
@@ -331,7 +337,7 @@ func (q *request) timely(keys *visit.Keys, vr *visitReq) (*visitReq, bool) {
 		if exp.Sub(now) >= visit.RenewBefore {
 			return vr, false
 		}
-		next, ended, err := p.renew(keys, vr, renewInline)
+		next, ended, err := p.renew(context.Background(), keys, vr, renewInline)
 		switch {
 		case err != nil:
 			return vr, false
@@ -343,7 +349,7 @@ func (q *request) timely(keys *visit.Keys, vr *visitReq) (*visitReq, bool) {
 	if !now.Before(time.Unix(vr.claims.VisitEnds, 0)) {
 		return nil, false
 	}
-	next, ended, err := p.renew(keys, vr, renewExpired)
+	next, ended, err := p.renew(context.Background(), keys, vr, renewExpired)
 	switch {
 	case err == nil && ended:
 		return nil, true
@@ -399,9 +405,11 @@ func (q *request) visitCookieOn(h http.Header) {
 // renew renews a visit's token at the control plane within bound, one
 // call at a time per visit cookie on this instance (others wait for it,
 // within their bound), and after a failure not again for renewRetry,
-// unless the failure was a local busy. It returns the visit with the
-// next token, or ended, or the failure.
-func (p *Proxy) renew(keys *visit.Keys, vr *visitReq, bound time.Duration) (*visitReq, bool, error) {
+// unless the failure was a local busy. A call it makes ends with ctx: a
+// request's renewal passes one that its own cancellation does not end,
+// the background renewal its loop's. It returns the visit with the next
+// token, or ended, or the failure.
+func (p *Proxy) renew(ctx context.Context, keys *visit.Keys, vr *visitReq, bound time.Duration) (*visitReq, bool, error) {
 	b := p.visits
 	key := vr.claims.Binding
 	now := time.Now()
@@ -420,7 +428,7 @@ func (p *Proxy) renew(keys *visit.Keys, vr *visitReq, bound time.Duration) (*vis
 	}
 	b.mu.Unlock()
 	if first {
-		p.fly(e, f, keys, vr, bound)
+		p.fly(ctx, e, f, keys, vr, bound)
 	} else {
 		t := time.NewTimer(bound)
 		defer t.Stop()
@@ -440,8 +448,9 @@ func (p *Proxy) renew(keys *visit.Keys, vr *visitReq, bound time.Duration) (*vis
 }
 
 // fly makes the call of a renewal flight and records its answer.
-func (p *Proxy) fly(e *visitEntry, f *renewFlight, keys *visit.Keys, vr *visitReq, bound time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), bound)
+func (p *Proxy) fly(ctx context.Context, e *visitEntry, f *renewFlight, keys *visit.Keys, vr *visitReq,
+	bound time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, bound)
 	res, err := p.d.Visits.RenewVisit(ctx, wire.RenewVisitRequest{Token: vr.token, Secret: vr.secret})
 	cancel()
 	switch {
@@ -489,7 +498,7 @@ func (p *Proxy) fly(e *visitEntry, f *renewFlight, keys *visit.Keys, vr *visitRe
 	case f.ended:
 		p.m.visitEnded.Add(1)
 		p.log.Debug("a visit ended at its renewal", "visit", vr.claims.Visit, "env", vr.claims.Env, "reason", f.reason)
-		closeAttempts(cut)
+		closeAttempts(cut, errVisitEnded)
 	default:
 		p.m.visitRenewed.Add(1)
 	}
@@ -498,11 +507,16 @@ func (p *Proxy) fly(e *visitEntry, f *renewFlight, keys *visit.Keys, vr *visitRe
 // visitBook is what the proxy knows of visits: per visit cookie (by the
 // token's binding) the renewal in flight, the last failure, the newest
 // token this instance got and the live attempts; and the visits it saw
-// end, until their end, so that no outage revives them.
+// end, until their end, so that no outage revives them. Beside them, under
+// openMu, the live attempts without a visit, by environment, so that an
+// environment that turns guarded closes what it let in while it was open.
 type visitBook struct {
 	mu      sync.Mutex
 	entries map[string]*visitEntry
 	ended   map[string]time.Time
+
+	openMu sync.Mutex
+	open   map[string]map[*liveAttempt]struct{}
 }
 
 // visitEntry is one visit cookie's: its visit, the renewal in flight,
@@ -530,9 +544,10 @@ type renewFlight struct {
 	err    error
 }
 
-// liveAttempt is one forwarded attempt of a visit: cancel ends it (its
-// upgraded connection or streaming answer among it), with the token and
-// secret the background renewal renews with.
+// liveAttempt is one forwarded attempt: cancel ends it (its upgraded
+// connection or streaming answer among it). An attempt of a visit has the
+// token and secret the background renewal renews with; one without a
+// visit (visit empty) was let in by an environment that was open.
 type liveAttempt struct {
 	cancel   context.CancelCauseFunc
 	binding  string
@@ -545,12 +560,16 @@ type liveAttempt struct {
 	claims   visit.Token
 }
 
-// errVisitEnded is the cause an attempt of a visit that ended is
-// cancelled with.
-var errVisitEnded = errors.New("the visit ended")
+// The causes an attempt is cancelled with: its visit ended, or its
+// environment no longer admits it.
+var (
+	errVisitEnded    = errors.New("the visit ended")
+	errAccessChanged = errors.New("the environment no longer admits the request")
+)
 
 func newVisitBook() *visitBook {
-	return &visitBook{entries: map[string]*visitEntry{}, ended: map[string]time.Time{}}
+	return &visitBook{entries: map[string]*visitEntry{}, ended: map[string]time.Time{},
+		open: map[string]map[*liveAttempt]struct{}{}}
 }
 
 // entryLocked returns the entry of a visit cookie, made when missing.
@@ -641,33 +660,82 @@ func (b *visitBook) end(vid, binding, reason string, vend int64) int {
 	b.mu.Lock()
 	cut := b.endLocked(vid, binding, reason, vend, time.Now())
 	b.mu.Unlock()
-	closeAttempts(cut)
+	closeAttempts(cut, errVisitEnded)
 	return len(cut)
 }
 
-func closeAttempts(cut []*liveAttempt) {
+func closeAttempts(cut []*liveAttempt, cause error) {
 	for _, a := range cut {
-		a.cancel(errVisitEnded)
+		a.cancel(cause)
 	}
 }
 
-// attach records a forwarded attempt of a visit to the environment e on
-// host, which cancel ends.
-func (b *visitBook) attach(vr *visitReq, e *envRoutes, host string, cancel context.CancelCauseFunc) *liveAttempt {
-	a := &liveAttempt{cancel: cancel, binding: vr.claims.Binding, visit: vr.claims.Visit, env: e.id, host: host,
-		provider: e.provider, token: vr.token, secret: vr.secret, claims: vr.claims}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	en := b.entryLocked(a.binding, a.visit, true)
-	if en.live == nil {
-		en.live = map[*liveAttempt]struct{}{}
+// admits reports whether the table t admits a live attempt still: its
+// host serves its environment, which admits anyone, or, for an attempt
+// of a visit, the visitors of the same provider. An attempt without a
+// visit came in while the environment was open, so a guarded one ends
+// it.
+func admits(t *table, a *liveAttempt) bool {
+	er := t.env(a.host)
+	if er == nil || er.id != a.env {
+		return false
 	}
-	en.live[a] = struct{}{}
+	if !er.guarded() {
+		return true
+	}
+	return a.visit != "" && er.access == wire.AccessVisitors && er.provider == a.provider
+}
+
+// attach records a forwarded attempt to the environment e on host, of
+// the visit vr or without one (vr nil), which cancel ends. A table that
+// came after the request's visit check and no longer admits the attempt
+// ends it at once: retable runs under the same lock after the table is
+// stored, so it sees the attempt, or the attempt sees the table (cur).
+func (b *visitBook) attach(vr *visitReq, e *envRoutes, host string, cancel context.CancelCauseFunc,
+	cur func() *table) *liveAttempt {
+	a := &liveAttempt{cancel: cancel, env: e.id, host: host}
+	var ok bool
+	if vr == nil {
+		b.openMu.Lock()
+		set := b.open[a.env]
+		if set == nil {
+			set = map[*liveAttempt]struct{}{}
+			b.open[a.env] = set
+		}
+		set[a] = struct{}{}
+		ok = admits(cur(), a)
+		b.openMu.Unlock()
+	} else {
+		a.binding, a.visit, a.provider = vr.claims.Binding, vr.claims.Visit, e.provider
+		a.token, a.secret, a.claims = vr.token, vr.secret, vr.claims
+		b.mu.Lock()
+		en := b.entryLocked(a.binding, a.visit, true)
+		if en.live == nil {
+			en.live = map[*liveAttempt]struct{}{}
+		}
+		en.live[a] = struct{}{}
+		ok = admits(cur(), a)
+		b.mu.Unlock()
+	}
+	if !ok {
+		cancel(errAccessChanged)
+	}
 	return a
 }
 
 // detach forgets an attempt that ended.
 func (b *visitBook) detach(a *liveAttempt) {
+	if a.visit == "" {
+		b.openMu.Lock()
+		defer b.openMu.Unlock()
+		if set := b.open[a.env]; set != nil {
+			delete(set, a)
+			if len(set) == 0 {
+				delete(b.open, a.env)
+			}
+		}
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if e := b.entries[a.binding]; e != nil {
@@ -675,28 +743,33 @@ func (b *visitBook) detach(a *liveAttempt) {
 	}
 }
 
-// retable closes the live attempts of visits that the new table t no
-// longer admits: their host is gone or serves another environment, or
-// their environment admits nobody, or the visitors of another provider.
-// An environment that admits anyone now keeps them. It returns how many
-// it closed.
+// retable closes the live attempts that the new table t no longer
+// admits (admits): their host is gone or serves another environment;
+// their environment turned guarded while they came in without a visit;
+// or, of a visit, their environment admits nobody, or the visitors of
+// another provider. An environment that admits anyone now keeps them.
+// It returns how many it closed.
 func (b *visitBook) retable(t *table) int {
 	var cut []*liveAttempt
 	b.mu.Lock()
 	for _, e := range b.entries {
 		for a := range e.live {
-			er := t.env(a.host)
-			switch {
-			case er == nil || er.id != a.env:
-				cut = append(cut, a)
-			case !er.guarded():
-			case er.access != wire.AccessVisitors || er.provider != a.provider:
+			if !admits(t, a) {
 				cut = append(cut, a)
 			}
 		}
 	}
 	b.mu.Unlock()
-	closeAttempts(cut)
+	b.openMu.Lock()
+	for _, set := range b.open {
+		for a := range set {
+			if !admits(t, a) {
+				cut = append(cut, a)
+			}
+		}
+	}
+	b.openMu.Unlock()
+	closeAttempts(cut, errAccessChanged)
 	return len(cut)
 }
 
@@ -737,16 +810,21 @@ func (p *Proxy) visitLoop(ctx context.Context) {
 // renewLive is one turn of the background renewal: every visit cookie
 // with live attempts on this instance whose newest token has less than
 // visit.RenewBefore left is renewed (renewBackground, sharing the
-// request path's single flight), and an ended visit's attempts are
-// closed; those past their visit's end are closed at once. A page that
-// only holds a WebSocket open sends no request that would renew it.
+// request path's single flight), the soonest to expire first, and an
+// ended visit's attempts are closed; those past their visit's end are
+// closed at once. A renewal that fails while the token is past its end
+// and leeway closes its attempts unless the control plane is away (the
+// outage rule, as for a request). A turn starts no renewal after
+// visitEvery, so that it ends within visitEvery and renewBackground; what
+// is left waits for the next turn. A page that only holds a WebSocket
+// open sends no request that would renew it.
 func (p *Proxy) renewLive(ctx context.Context) {
-	now := time.Now()
+	start := time.Now()
 	keys := p.cur.Load().t.visitKeys()
 	var work []due
 	b := p.visits
 	b.mu.Lock()
-	b.pruneLocked(now)
+	b.pruneLocked(start)
 	for _, e := range b.entries {
 		if len(e.live) == 0 || e.flight != nil {
 			continue
@@ -761,44 +839,74 @@ func (p *Proxy) renewLive(ctx context.Context) {
 		if e.latest != "" && e.latestClaims.Expires > vr.claims.Expires {
 			vr.token, vr.claims = e.latest, e.latestClaims
 		}
-		if !now.Before(time.Unix(vr.claims.VisitEnds, 0)) {
+		if !start.Before(time.Unix(vr.claims.VisitEnds, 0)) {
 			work = append(work, due{ends: true, cut: slices.Collect(maps.Keys(e.live))})
 			continue
 		}
-		if time.Unix(vr.claims.Expires, 0).Sub(now) < visit.RenewBefore {
+		if time.Unix(vr.claims.Expires, 0).Sub(start) < visit.RenewBefore {
 			work = append(work, due{vr: vr})
 		}
 	}
 	b.mu.Unlock()
-	if keys == nil || p.d.Visits == nil {
-		for _, w := range work {
-			if w.ends {
-				closeAttempts(w.cut)
-			}
-		}
-		return
-	}
-	sem := make(chan struct{}, maxBackground)
-	var wg sync.WaitGroup
 	for _, w := range work {
 		if w.ends {
-			closeAttempts(w.cut)
-			continue
+			closeAttempts(w.cut, errVisitEnded)
 		}
+	}
+	if keys == nil || p.d.Visits == nil {
+		return
+	}
+	work = slices.DeleteFunc(work, func(w due) bool { return w.ends })
+	slices.SortFunc(work, func(a, b due) int { return cmp.Compare(a.vr.claims.Expires, b.vr.claims.Expires) })
+	sem := make(chan struct{}, maxBackground)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	for _, w := range work {
 		select {
 		case <-ctx.Done():
-			wg.Wait()
 			return
 		case sem <- struct{}{}:
+		}
+		if time.Since(start) >= visitEvery {
+			<-sem
+			return
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			_, _, _ = p.renew(keys, w.vr, renewBackground)
+			_, _, err := p.renew(ctx, keys, w.vr, renewBackground)
+			if err != nil && !away(err) && ctx.Err() == nil {
+				if n := b.cutExpired(w.vr.claims.Binding, time.Now()); n > 0 {
+					p.log.Debug("closed the connections of a visit whose token ended and could not be renewed",
+						"visit", w.vr.claims.Visit, "env", w.vr.claims.Env, "attempts", n, "err", err)
+				}
+			}
 		}()
 	}
-	wg.Wait()
+}
+
+// cutExpired closes the live attempts of a visit cookie when even its
+// newest token, of its attempts or of the book, is past its end and
+// leeway, and returns how many it closed.
+func (b *visitBook) cutExpired(binding string, now time.Time) int {
+	var cut []*liveAttempt
+	b.mu.Lock()
+	if e := b.entries[binding]; e != nil {
+		newest := int64(0)
+		if e.latest != "" {
+			newest = e.latestClaims.Expires
+		}
+		for a := range e.live {
+			newest = max(newest, a.claims.Expires)
+		}
+		if now.After(time.Unix(newest, 0).Add(visit.Leeway)) {
+			cut = slices.Collect(maps.Keys(e.live))
+		}
+	}
+	b.mu.Unlock()
+	closeAttempts(cut, errVisitEnded)
+	return len(cut)
 }
 
 // visitKeys are the table's keys of visits; nil without a table.

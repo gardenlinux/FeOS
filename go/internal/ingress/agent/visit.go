@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
 )
@@ -27,7 +28,7 @@ var ErrBusy error = &callError{code: codes.ResourceExhausted, text: "ingress age
 // when maxVisitCalls redeems and ends are in flight; the caller bounds it
 // with ctx.
 func (a *Agent) RedeemVisit(ctx context.Context, req wire.RedeemVisitRequest) (wire.RedeemVisitResponse, error) {
-	resp, err := visitCall(a, a.redeemSlots, func(s *session) (*wire.RedeemVisitResponse, error) {
+	resp, err := visitCall(ctx, a, a.redeemSlots, func(s *session) (*wire.RedeemVisitResponse, error) {
 		return s.client.RedeemVisit(ctx, &req)
 	})
 	if err != nil {
@@ -40,7 +41,7 @@ func (a *Agent) RedeemVisit(ctx context.Context, req wire.RedeemVisitRequest) (w
 // It returns ErrNotConnected without a connection and ErrBusy when
 // maxVisitCalls renewals are in flight.
 func (a *Agent) RenewVisit(ctx context.Context, req wire.RenewVisitRequest) (wire.RenewVisitResponse, error) {
-	resp, err := visitCall(a, a.renewSlots, func(s *session) (*wire.RenewVisitResponse, error) {
+	resp, err := visitCall(ctx, a, a.renewSlots, func(s *session) (*wire.RenewVisitResponse, error) {
 		return s.client.RenewVisit(ctx, &req)
 	})
 	if err != nil {
@@ -52,7 +53,7 @@ func (a *Agent) RenewVisit(ctx context.Context, req wire.RenewVisitRequest) (wir
 // EndVisit ends a visit whose visitor signed out, on the current
 // connection; it shares the bound of RedeemVisit.
 func (a *Agent) EndVisit(ctx context.Context, req wire.EndVisitRequest) (wire.EndVisitResponse, error) {
-	resp, err := visitCall(a, a.redeemSlots, func(s *session) (*wire.EndVisitResponse, error) {
+	resp, err := visitCall(ctx, a, a.redeemSlots, func(s *session) (*wire.EndVisitResponse, error) {
 		return s.client.EndVisit(ctx, &req)
 	})
 	if err != nil {
@@ -62,8 +63,10 @@ func (a *Agent) EndVisit(ctx context.Context, req wire.EndVisitRequest) (wire.En
 }
 
 // visitCall makes one call on the current session within a slot of
-// slots.
-func visitCall[R any](a *Agent, slots chan struct{}, call func(*session) (*R, error)) (*R, error) {
+// slots. A call that the closing of its connection cancelled (a
+// reconnect, a renewed certificate) while ctx still runs fails with
+// ErrNotConnected: the control plane was away for it.
+func visitCall[R any](ctx context.Context, a *Agent, slots chan struct{}, call func(*session) (*R, error)) (*R, error) {
 	s := a.current()
 	if s == nil {
 		return nil, ErrNotConnected
@@ -74,5 +77,9 @@ func visitCall[R any](a *Agent, slots chan struct{}, call func(*session) (*R, er
 		return nil, ErrBusy
 	}
 	defer func() { <-slots }()
-	return call(s)
+	resp, err := call(s)
+	if err != nil && status.Code(err) == codes.Canceled && ctx.Err() == nil {
+		return nil, ErrNotConnected
+	}
+	return resp, err
 }

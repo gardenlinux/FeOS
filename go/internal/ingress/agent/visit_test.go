@@ -231,3 +231,64 @@ func TestVisitCallsAreBounded(t *testing.T) {
 		t.Fatalf("after the calls ended: %v", err)
 	}
 }
+
+// A call in flight when the agent closes its connection (a reconnect, a
+// renewed certificate) fails as one without a connection, so that the
+// data path takes the control plane for away; a call whose own context
+// ended keeps its error.
+func TestVisitCallOnAClosingConnection(t *testing.T) {
+	h := newHarness(t)
+	h.fake.SetVisits(newVisitKeys(t))
+	ta := h.joined(nil)
+	h.fake.SetVisitDelay(time.Hour)
+	errc := make(chan error, 1)
+	go func() {
+		_, err := ta.RenewVisit(context.Background(), wire.RenewVisitRequest{Token: "x", Secret: "y"})
+		errc <- err
+	}()
+	eventually(t, "the renewal in flight", func() bool { return len(h.fake.VisitRenewals()) == 1 })
+	ta.current().close()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrNotConnected) {
+			t.Fatalf("a renewal on a closing connection: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the renewal outlived its connection")
+	}
+	// A renewal whose caller cancels it keeps its error. Until the new
+	// connection is there, a renewal may fail at once without one.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		before := len(h.fake.VisitRenewals())
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			_, err := ta.RenewVisit(ctx, wire.RenewVisitRequest{Token: "x", Secret: "y"})
+			errc <- err
+		}()
+		var early error
+		sent := false
+		for !sent && early == nil && time.Now().Before(deadline) {
+			select {
+			case early = <-errc:
+			case <-time.After(10 * time.Millisecond):
+				sent = len(h.fake.VisitRenewals()) > before
+			}
+		}
+		if !sent {
+			cancel()
+			if early == nil {
+				t.Fatal("no renewal reached the control plane")
+			}
+			if !errors.Is(early, ErrNotConnected) || time.Now().After(deadline) {
+				t.Fatalf("a renewal without its caller cancelling: %v", early)
+			}
+			continue
+		}
+		cancel()
+		if err := <-errc; status.Code(err) != codes.Canceled {
+			t.Fatalf("a renewal its caller cancelled: %v", err)
+		}
+		return
+	}
+}

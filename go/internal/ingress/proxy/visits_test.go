@@ -393,6 +393,12 @@ func TestVisitSignIn(t *testing.T) {
 	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, testSignIn+"?tenant=acme&challenge=") {
 		t.Fatalf("Location %q", loc)
 	}
+	// One that ends with "?" has a query too (§1.11, literally).
+	p.SetState(visitState(k, testSignIn+"?", svc("web", ep("w1", "fd00::1", "n1"))))
+	rec = serveCall(p, nav("/"))
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, testSignIn+"?&challenge=") {
+		t.Fatalf("Location %q", loc)
+	}
 }
 
 // What is no navigation gets 401: a script's fetch, curl's */*, a
@@ -487,6 +493,9 @@ func TestVisitFailsClosed(t *testing.T) {
 			}
 			if fn.dialed("[fd00::1]:8080") != 0 {
 				t.Error("forwarded")
+			}
+			if u, r := p.m.visitUnavailable.Load(), p.m.visitRequired.Load(); u != 2 || r != 0 {
+				t.Errorf("unavailable %d, required %d: want 2, 0", u, r)
 			}
 		})
 	}
@@ -1475,6 +1484,227 @@ func TestVisitBackgroundRenewal(t *testing.T) {
 	if _, after, _ := fv.counts(); after != before {
 		t.Error("asked for a visit past its end")
 	}
+}
+
+// A background renewal that fails while the newest token is past its end
+// and leeway closes the visit's connections, unless the control plane is
+// away (the outage rule, as for a request); one whose token still counts
+// keeps them.
+func TestVisitBackgroundRenewalFails(t *testing.T) {
+	fn := newFakeNet()
+	handlerAt(t, fn, "fd00::1", wsEcho())
+	k := newKeys(t)
+	fv := newFakeVisits(k)
+	p, srv := newTestProxy(t, Config{}, Deps{Visits: fv}, fn, "n1")
+	p.SetState(visitState(k, testSignIn, svc("web", ep("w1", "fd00::1", "n1"))))
+	setExpires := func(at time.Time) {
+		p.visits.mu.Lock()
+		for _, e := range p.visits.entries {
+			for a := range e.live {
+				a.claims.Expires = at.Unix()
+			}
+			e.retryAfter = time.Time{}
+		}
+		p.visits.mu.Unlock()
+	}
+	for i, c := range []struct {
+		err     error
+		expired bool
+		closes  bool
+	}{
+		{status.Error(codes.Internal, "boom"), false, false},
+		{status.Error(codes.Unavailable, "away"), true, false},
+		{status.Error(codes.Unimplemented, "old"), true, false},
+		{status.Error(codes.Internal, "boom"), true, true},
+		{status.Error(codes.InvalidArgument, "bad"), true, true},
+		{status.Error(codes.ResourceExhausted, "busy"), true, true},
+	} {
+		p.visits = newVisitBook()
+		fv.set(func(f *fakeVisits) { f.renewErr = c.err })
+		secret := newSecret(t)
+		ws, br := upgradeWith(t, srv, testHost, "/ws", visit.VisitCookie(mint(t, k, secret, nil), secret))
+		at := time.Now().Add(time.Minute)
+		if c.expired {
+			at = time.Now().Add(-visit.Leeway - time.Minute)
+		}
+		setExpires(at)
+		p.renewLive(context.Background())
+		if got := closed(ws, br); got != c.closes {
+			t.Errorf("%d %v expired=%v: closed %v, want %v", i, c.err, c.expired, got, c.closes)
+		}
+	}
+	// A renewal that is not the visit's closes one past its end too.
+	p.visits = newVisitBook()
+	fv.set(func(f *fakeVisits) {
+		f.renewErr = nil
+		f.renewToken = func(tk visit.Token) visit.Token { tk.Visit = "other"; return tk }
+	})
+	secret := newSecret(t)
+	ws, br := upgradeWith(t, srv, testHost, "/ws", visit.VisitCookie(mint(t, k, secret, nil), secret))
+	setExpires(time.Now().Add(-visit.Leeway - time.Minute))
+	p.renewLive(context.Background())
+	if !closed(ws, br) {
+		t.Error("a foreign renewal left a connection past its token's end open")
+	}
+}
+
+// The background renewal's calls end with its context, so that Run ends
+// at once.
+func TestVisitBackgroundRenewalEndsWithItsContext(t *testing.T) {
+	fn := newFakeNet()
+	handlerAt(t, fn, "fd00::1", wsEcho())
+	k := newKeys(t)
+	fv := newFakeVisits(k)
+	p, srv := newTestProxy(t, Config{}, Deps{Visits: fv}, fn, "n1")
+	p.SetState(visitState(k, testSignIn, svc("web", ep("w1", "fd00::1", "n1"))))
+	secret := newSecret(t)
+	upgradeWith(t, srv, testHost, "/ws", visit.VisitCookie(mint(t, k, secret, func(tk *visit.Token) {
+		tk.Expires = time.Now().Add(time.Minute).Unix()
+	}), secret))
+	gate := make(chan struct{})
+	defer close(gate)
+	fv.set(func(f *fakeVisits) { f.gate = gate })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		p.renewLive(ctx)
+		close(done)
+	}()
+	for {
+		if _, n, _ := fv.counts(); n == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	start := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(renewBackground):
+		t.Fatal("the background renewal outlived its context")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("ended %v after its context", d)
+	}
+}
+
+// An environment that turns guarded closes what it let in while it was
+// open: a WebSocket and an event stream without a visit. One that stays
+// open keeps them.
+func TestVisitGuardingClosesOpenConnections(t *testing.T) {
+	fn := newFakeNet()
+	handlerAt(t, fn, "fd00::1", wsEcho())
+	k := newKeys(t)
+	p, srv := newTestProxy(t, Config{}, Deps{Visits: newFakeVisits(k)}, fn, "n1")
+	web := svc("web", ep("w1", "fd00::1", "n1"))
+	open := testState(web)
+	open.VisitKeys = wireKeys(k)
+	p.SetState(open)
+	ws, br := upgradeWith(t, srv, testHost, "/ws", "")
+	events := stream(t, srv, "/events", "")
+	other := testState(web)
+	other.VisitKeys = wireKeys(k)
+	other.Self.Name = "ingress-1"
+	p.SetState(other)
+	if !echoes(ws, br, "still") {
+		t.Fatal("a table that keeps the environment open closed a WebSocket")
+	}
+	p.SetState(visitState(k, testSignIn, web))
+	if !closed(ws, br) {
+		t.Error("an open WebSocket outlived its environment turning guarded")
+	}
+	select {
+	case <-events:
+	case <-time.After(2 * time.Second):
+		t.Error("an open event stream outlived its environment turning guarded")
+	}
+	p.visits.openMu.Lock()
+	n := len(p.visits.open)
+	p.visits.openMu.Unlock()
+	if n != 0 {
+		t.Errorf("%d environments still hold attempts", n)
+	}
+}
+
+// A request let in open whose environment turns guarded while its dial
+// is under way routes again and gets the visit check: 401, and the
+// instance does not cool down.
+func TestVisitGuardingDuringTheDial(t *testing.T) {
+	fn := newFakeNet()
+	upstream(t, fn, "web", "fd00::1")
+	k := newKeys(t)
+	p, srv := newTestProxy(t, Config{}, Deps{Visits: newFakeVisits(k)}, fn, "n1")
+	entered := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	p.up.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-gate
+		return fn.dial(ctx, network, addr)
+	}
+	web := svc("web", ep("w1", "fd00::1", "n1"))
+	open := testState(web)
+	open.VisitKeys = wireKeys(k)
+	p.SetState(open)
+	done := make(chan result, 1)
+	go func() { done <- send(context.Background(), srv, "GET", testHost, "/", nil) }()
+	<-entered
+	p.SetState(visitState(k, testSignIn, web))
+	close(gate)
+	wantPlain(t, <-done, http.StatusUnauthorized, textVisitRequired)
+	if p.m.dialErrors.Load() != 0 || p.m.responseErrors.Load() != 0 || len(p.cooling) != 0 {
+		t.Errorf("dial errors %d, response errors %d, cooling %v", p.m.dialErrors.Load(), p.m.responseErrors.Load(),
+			p.cooling)
+	}
+}
+
+// An attempt whose visit check saw a table that a newer one replaced
+// before it was recorded is checked against the newer one: it ends at
+// once when that no longer admits it.
+func TestVisitAttachSeesTheNewerTable(t *testing.T) {
+	k := newKeys(t)
+	fn := newFakeNet()
+	p, _ := newTestProxy(t, Config{}, Deps{Visits: newFakeVisits(k)}, fn, "n1")
+	web := svc("web", ep("w1", "fd00::1", "n1"))
+	open := testState(web)
+	open.VisitKeys = wireKeys(k)
+	p.SetState(open)
+	openEnv := p.cur.Load().t.env(testHost)
+	p.SetState(visitState(k, testSignIn, web))
+	guardedEnv := p.cur.Load().t.env(testHost)
+	cur := func() *table { return p.cur.Load().t }
+	ctx, cancel := context.WithCancelCause(context.Background())
+	a := p.visits.attach(nil, openEnv, testHost, cancel, cur)
+	if context.Cause(ctx) != errAccessChanged {
+		t.Fatalf("an attempt without a visit on a guarded environment: %v", context.Cause(ctx))
+	}
+	p.visits.detach(a)
+
+	secret := newSecret(t)
+	claims, err := k.VerifyToken(mint(t, k, secret, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vr := &visitReq{token: "t", secret: secret, claims: claims}
+	ctx, cancel = context.WithCancelCause(context.Background())
+	a = p.visits.attach(vr, guardedEnv, testHost, cancel, cur)
+	if ctx.Err() != nil {
+		t.Fatal("a visit of the environment's provider ended")
+	}
+	p.visits.detach(a)
+	ferun := visitState(k, testSignIn, web)
+	e := ferun.Envs[testEnv]
+	e.Provider = "ferun"
+	ferun.Envs[testEnv] = e
+	p.SetState(ferun)
+	ctx, cancel = context.WithCancelCause(context.Background())
+	a = p.visits.attach(vr, guardedEnv, testHost, cancel, cur)
+	if context.Cause(ctx) != errAccessChanged {
+		t.Fatalf("a visit of the former provider: %v", context.Cause(ctx))
+	}
+	p.visits.detach(a)
 }
 
 // The visit metrics are written.
