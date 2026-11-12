@@ -248,3 +248,35 @@ func (s *Store) EnvironmentRef(ctx context.Context, tenant, ref string) (uuid.UU
 	err := s.q.QueryRow(ctx, q, tenant, arg).Scan(&id)
 	return id, noRow(err, ErrNoRow)
 }
+
+// personMayVisit is the condition of PersonMayVisit on the people row p:
+// not disabled, with a grant on tenant $2 itself or on environment $3,
+// and tenant $2 not being deleted.
+const personMayVisit = `p.disabled_at IS NULL AND EXISTS (SELECT 1 FROM grants g JOIN tenants t ON t.id = g.tenant_id
+	WHERE g.person_id = p.id AND g.tenant_id = $2 AND t.deleting_at IS NULL
+		AND (g.environment_id IS NULL OR g.environment_id = $3))`
+
+// PersonMayVisit reports whether the person of (issuer, sub) may visit
+// environment env of tenant with the provider ferun (ADR 0054): not
+// disabled, with a grant on the tenant or on env (every role is at least
+// read), in a tenant not being deleted; and returns the person's ID. It
+// only reads: no people row is ever made here.
+func (s *Store) PersonMayVisit(ctx context.Context, issuer, sub, tenant string, env uuid.UUID) (uuid.UUID, bool, error) {
+	var id uuid.UUID
+	err := s.q.QueryRow(ctx, `SELECT p.id FROM people p WHERE p.issuer = $1 AND p.sub = $4 AND `+personMayVisit, issuer, tenant, env, sub).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	return id, true, nil
+}
+
+// PersonMayVisitByID is PersonMayVisit for the person of a visit.
+func (s *Store) PersonMayVisitByID(ctx context.Context, person uuid.UUID, tenant string, env uuid.UUID) (bool, error) {
+	var ok bool
+	err := s.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM people p WHERE p.id = $1 AND `+personMayVisit+`)`,
+		person, tenant, env).Scan(&ok)
+	return ok, err
+}
