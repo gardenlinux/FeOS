@@ -253,7 +253,8 @@ func (sy *syncer) ended(d time.Duration) error {
 
 // empty reports whether t is a heartbeat: nothing but its seq and time.
 func empty(t *wire.Table) bool {
-	return !t.Whole && len(t.Envs) == 0 && len(t.Removed) == 0 && t.Mesh == nil && t.Self == nil && t.Challenges == nil
+	return !t.Whole && len(t.Envs) == 0 && len(t.Removed) == 0 && t.Mesh == nil && t.Self == nil && t.Challenges == nil &&
+		t.VisitKeys == nil
 }
 
 // The stream: whole first, with the ingress itself and the mesh's nodes;

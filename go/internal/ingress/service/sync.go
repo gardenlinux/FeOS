@@ -98,6 +98,14 @@ func (st *syncStream) markDirty() {
 // records the tokens of the challenges it sent whenever they change
 // (recordChallenges).
 //
+// What it sends depends on what the connection's first Hello said (ADR
+// 0054): to an ingress that did not name wire.CapabilityVisits, an
+// environment that is not open to anyone (Access set) is never sent, and
+// one it was sent open goes in Removed once it turns so (table.Diff); it
+// gets no keys of visits either. An ingress that named it gets every
+// environment, and the keys of visits in the whole table and in a delta
+// whenever they changed.
+//
 // The stream ends with UNAVAILABLE "this instance cannot read the
 // database" once the table is unhealthy (no read for 30 s, D18), with
 // UNAVAILABLE "instance stopping" at BeginStopping, with
@@ -110,7 +118,8 @@ func (s *Service) Sync(_ *wire.SyncRequest, stream wire.SyncServer) error {
 	if s.stopping.Load() {
 		return errStopping()
 	}
-	if !s.saidHello(p) {
+	info, ok := s.helloOf(p)
+	if !ok {
 		return status.Error(codes.FailedPrecondition, helloFirstText)
 	}
 	ctx, cancel := context.WithCancelCause(stream.Context())
@@ -123,12 +132,14 @@ func (s *Service) Sync(_ *wire.SyncRequest, stream wire.SyncServer) error {
 	defer s.unregister(st)
 	release := s.tbl.Use()
 	defer release()
-	return s.serveSync(ctx, p, st, stream)
+	return s.serveSync(ctx, p, info, st, stream)
 }
 
-// serveSync is Sync's stream after its checks: ctx ends with the stream,
-// with the cause the stream is ended with.
-func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, st *syncStream, stream wire.SyncServer) error {
+// serveSync is Sync's stream after its checks, for a connection whose
+// first Hello said info: ctx ends with the stream, with the cause the
+// stream is ended with.
+func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, info helloInfo, st *syncStream,
+	stream wire.SyncServer) error {
 	wctx, cancel := context.WithTimeout(ctx, tableWait)
 	snap, err := s.tbl.Wait(wctx)
 	cancel()
@@ -146,18 +157,25 @@ func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, st *syn
 	if err != nil {
 		return err
 	}
-	envs, _ := table.Diff(nil, snap)
+	envs, _ := table.Diff(nil, snap, info.visits)
 	mesh := snap.Mesh
 	first := &wire.Table{Seq: 1, Whole: true, Envs: envs, Mesh: &mesh, Self: &self,
 		Challenges: &wire.Challenges{Items: snap.Challenges}, SentAt: time.Now()}
+	if info.visits {
+		first.VisitKeys = snap.VisitKeys
+	}
 	last, err := s.send(ctx, stream, first)
 	if err != nil {
 		return err
 	}
-	sent := &syncState{seq: last, sent: table.Hashes(snap.Envs), mesh: snap.Mesh.Version, self: self,
-		challenges: snap.Challenges}
+	sent := &syncState{seq: last, sent: make(map[string]string, len(envs)), mesh: snap.Mesh.Version, self: self,
+		challenges: snap.Challenges, visits: info.visits, keys: first.VisitKeys}
+	for _, e := range envs {
+		sent.sent[e.ID] = e.Hash
+	}
 	s.recordChallenges(ctx, p.Name, sent)
-	s.log.Debug("ingress stream opened", "ingress", p.Name, "peer", p.Addr, "envs", len(envs), "parts", last)
+	s.log.Debug("ingress stream opened", "ingress", p.Name, "peer", p.Addr, "envs", len(envs), "parts", last,
+		"visits", info.visits)
 	want := self
 	tick := time.NewTicker(s.heartbeat)
 	defer tick.Stop()
@@ -200,23 +218,29 @@ func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, st *syn
 }
 
 // syncState is what a stream sent: its last seq, the environments' hashes
-// by ID, the mesh's version, Self and the challenges; and the challenges'
-// tokens last recorded as the ingress's (recordChallenges; nil: none
-// yet).
+// by ID (only of those it sent), the mesh's version, Self, the challenges
+// and the keys of visits (nil: none sent); whether its ingress checks
+// visits; and the challenges' tokens last recorded as the ingress's
+// (recordChallenges; nil: none yet).
 type syncState struct {
 	seq        uint64
 	sent       map[string]string
 	mesh       uint64
 	self       wire.Self
 	challenges []wire.Challenge
+	visits     bool
+	keys       *wire.VisitKeys
 	recorded   []string
 }
 
 // delta returns the next message, which brings the ingress from what the
 // stream sent to cur and self; nil when nothing changed.
 func (st *syncState) delta(cur *table.Snapshot, self wire.Self) *wire.Table {
-	puts, removed := table.Diff(st.sent, cur)
+	puts, removed := table.Diff(st.sent, cur, st.visits)
 	t := &wire.Table{Envs: puts, Removed: removed}
+	if st.visits && cur.VisitKeys != nil && !table.SameVisitKeys(cur.VisitKeys, st.keys) {
+		t.VisitKeys = cur.VisitKeys
+	}
 	if cur.Mesh.Version != st.mesh {
 		m := cur.Mesh
 		t.Mesh = &m
@@ -227,7 +251,7 @@ func (st *syncState) delta(cur *table.Snapshot, self wire.Self) *wire.Table {
 	if !slices.Equal(cur.Challenges, st.challenges) {
 		t.Challenges = &wire.Challenges{Items: cur.Challenges}
 	}
-	if len(puts) == 0 && len(removed) == 0 && t.Mesh == nil && t.Self == nil && t.Challenges == nil {
+	if len(puts) == 0 && len(removed) == 0 && t.Mesh == nil && t.Self == nil && t.Challenges == nil && t.VisitKeys == nil {
 		return nil
 	}
 	t.Seq = st.seq + 1
@@ -251,6 +275,9 @@ func (st *syncState) record(t *wire.Table, last uint64) {
 	}
 	if t.Challenges != nil {
 		st.challenges = t.Challenges.Items
+	}
+	if t.VisitKeys != nil {
+		st.keys = t.VisitKeys
 	}
 }
 

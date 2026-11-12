@@ -26,7 +26,20 @@
 //   - Sync, after a Hello on its connection, streams the instance's table
 //     (internal/ingress/table): whole first, then deltas, each in parts
 //     when it takes more than wire.PartBytes, and an empty table every
-//     heartbeat, which records the ingress as seen.
+//     heartbeat, which records the ingress as seen. What the connection's
+//     first Hello named decides what the streams on it get (ADR 0054): an
+//     ingress that names wire.CapabilityVisits gets every environment and
+//     the keys of visits; any other never gets an environment that is not
+//     open to anyone (one it got open is removed once it turns guarded),
+//     so that an older ingress, which would serve it open, never has it.
+//   - RedeemVisit, RenewVisit and EndVisit are the visits of ADR 0054 on
+//     the ingress's connection, answered by ferund's visits service
+//     (Deps.Visits, internal/visits): an accepted code redeemed for a
+//     visit's first token, a visit's next token, a visit ended at its
+//     sign-out. Their outcomes are answers, never PERMISSION_DENIED; a
+//     malformed request is INVALID_ARGUMENT and every failure UNAVAILABLE,
+//     which the ingress reads as ferund away (it serves on with the token
+//     it has). Without visits on the instance they answer UNAVAILABLE.
 //   - Wake wakes the asleep instances of a routed service of a public
 //     environment in the background (Engine.Sync, Engine.Ensure), once at
 //     a time each.

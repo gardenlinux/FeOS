@@ -25,6 +25,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
+	"github.com/gardenlinux/feos/go/internal/visits"
 )
 
 // Engine is what Wake needs of the sandbox engine (*sandbox.Engine).
@@ -68,6 +69,10 @@ type Deps struct {
 	// Builder keeps the ingress's table that Sync streams; Run runs it.
 	// Nil: one on DB and Store for Config's zones.
 	Builder *table.Builder
+	// Visits answers the ingress's RedeemVisit, RenewVisit and EndVisit
+	// (ADR 0054); nil (or a nil *visits.Service): visits do not run on
+	// this instance, and those calls answer UNAVAILABLE.
+	Visits Visits
 }
 
 // Defaults of Config's durations when zero.
@@ -112,6 +117,7 @@ type Service struct {
 	links  *nodelink.Server
 	engine Engine
 	tbl    *table.Builder
+	visits Visits
 	log    *slog.Logger
 	rl     *rateLog
 
@@ -146,9 +152,10 @@ type Service struct {
 	rechecks coalescer // per ingress name: one re-check pass on this instance at a time
 
 	// hellos are the connections (nodelink.IngressPeer.Conn) on which a
-	// Hello succeeded; a connection leaves when it closes.
+	// Hello succeeded, with what the first one said; a connection leaves
+	// when it closes.
 	hellosMu sync.Mutex
-	hellos   map[uint64]struct{}
+	hellos   map[uint64]helloInfo
 
 	// stopping: BeginStopping was called (or Run ended); it is set under
 	// streamsMu, so that no stream registers after it.
@@ -163,6 +170,14 @@ type Service struct {
 }
 
 var _ wire.IngressServer = (*Service)(nil)
+
+// helloInfo is what the first successful Hello on a connection said.
+type helloInfo struct {
+	// visits: the ingress checks visits (wire.CapabilityVisits), so its
+	// streams get the environments that are not open to anyone, and the
+	// keys of visits.
+	visits bool
+}
 
 // New returns the ingress service.
 func New(cfg Config, deps Deps) *Service {
@@ -180,12 +195,15 @@ func New(cfg Config, deps Deps) *Service {
 	if st == nil {
 		st = store.New(deps.DB)
 	}
+	if v, ok := deps.Visits.(*visits.Service); ok && v == nil {
+		deps.Visits = nil
+	}
 	tbl := deps.Builder
 	if tbl == nil {
 		tbl = table.NewBuilder(deps.DB, st, model.Zones{Apps: cfg.AppsZone, Tenant: cfg.TenantZone}, cfg.Log)
 	}
 	s := &Service{
-		cfg: cfg, d: deps.DB, st: st, iss: deps.Issuer, links: deps.Links, engine: deps.Engine, tbl: tbl,
+		cfg: cfg, d: deps.DB, st: st, iss: deps.Issuer, links: deps.Links, engine: deps.Engine, tbl: tbl, visits: deps.Visits,
 		log: log, rl: newRateLog(log),
 		heartbeat: defaultHeartbeat, rowTimeout: defaultRowTimeout, holdTimeout: defaultHoldTimeout,
 		partBytes:    wire.PartBytes,
@@ -193,7 +211,7 @@ func New(cfg Config, deps Deps) *Service {
 		joins:        newTokenBucket(joinRate, joinBurst),
 		joinSlots:    make(chan struct{}, joinDBSlots),
 		joinSlotWait: joinWait,
-		hellos:       map[uint64]struct{}{},
+		hellos:       map[uint64]helloInfo{},
 		streams:      map[string]map[*syncStream]struct{}{},
 		waking:       map[podid.ID]bool{},
 	}
@@ -288,12 +306,16 @@ func peerAddress(ctx context.Context) string {
 	return ""
 }
 
-// markHello records that a Hello succeeded on the connection of p, until
-// the connection closes.
-func (s *Service) markHello(p nodelink.IngressPeer) {
+// markHello records that a Hello succeeded on the connection of p, with
+// what it said, until the connection closes. The first one's info stays:
+// a later Hello on the same connection does not change it, so that what a
+// stream on it was given does not change under it.
+func (s *Service) markHello(p nodelink.IngressPeer, info helloInfo) {
 	s.hellosMu.Lock()
 	_, known := s.hellos[p.Conn]
-	s.hellos[p.Conn] = struct{}{}
+	if !known {
+		s.hellos[p.Conn] = info
+	}
 	s.hellosMu.Unlock()
 	if known || p.Done == nil {
 		return
@@ -317,10 +339,17 @@ func (s *Service) markHello(p nodelink.IngressPeer) {
 // saidHello reports whether a Hello succeeded on the connection of p:
 // what a Sync needs first.
 func (s *Service) saidHello(p nodelink.IngressPeer) bool {
+	_, ok := s.helloOf(p)
+	return ok
+}
+
+// helloOf returns what the first successful Hello on the connection of p
+// said; false when none succeeded.
+func (s *Service) helloOf(p nodelink.IngressPeer) (helloInfo, bool) {
 	s.hellosMu.Lock()
 	defer s.hellosMu.Unlock()
-	_, ok := s.hellos[p.Conn]
-	return ok
+	info, ok := s.hellos[p.Conn]
+	return info, ok
 }
 
 // rpcError is what a call answers for err: a gRPC status as it is, the

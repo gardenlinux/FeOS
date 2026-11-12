@@ -96,7 +96,8 @@ type harness struct {
 // zero); the table's builder reads with tableStore (the harness's when
 // nil), collects changes for 10 ms, and tableMod changes it before it
 // runs. renewAnytime lets RenewCertificate take a certificate long
-// before its renew time.
+// before its renew time. visits is the service's Deps.Visits (none when
+// nil).
 type harnessOpts struct {
 	noMesh       bool
 	grace        time.Duration
@@ -107,6 +108,7 @@ type harnessOpts struct {
 	tableStore   *store.Store
 	tableMod     func(b *table.Builder)
 	renewAnytime bool
+	visits       Visits
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -152,7 +154,8 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		o.tableMod(b)
 	}
 	svc = New(Config{InstanceID: "i1", TrustDomain: testTD, AppsZone: testZone, SupersedeGrace: o.grace,
-		PodNetwork: ula, Log: log}, Deps{DB: d, Issuer: iss, Links: links, Engine: o.engine, Builder: b})
+		PodNetwork: ula, Log: log}, Deps{DB: d, Issuer: iss, Links: links, Engine: o.engine, Builder: b,
+		Visits: o.visits})
 	if o.heartbeat > 0 {
 		svc.heartbeat = o.heartbeat
 	}
@@ -369,10 +372,10 @@ func (c *client) conn(t *testing.T, i int) *watchedConn {
 	return c.conns[i]
 }
 
-func (c *client) hello(key []byte, endpoint string) (*wire.HelloResponse, error) {
+func (c *client) hello(key []byte, endpoint string, capabilities ...string) (*wire.HelloResponse, error) {
 	ctx, cancel := context.WithTimeout(bg, 10*time.Second)
 	defer cancel()
-	return c.api.Hello(ctx, &wire.HelloRequest{PublicKey: key, Endpoint: endpoint, Version: "test"})
+	return c.api.Hello(ctx, &wire.HelloRequest{PublicKey: key, Endpoint: endpoint, Version: "test", Capabilities: capabilities})
 }
 
 func (c *client) renew(t *testing.T, key ed25519.PrivateKey) (*wire.RenewResponse, error) {
@@ -402,12 +405,13 @@ func (h *harness) mustJoin(pin, name string) (*identity, ed25519.PrivateKey) {
 }
 
 // connect joins a new ingress name (an unpinned token), connects with its
-// certificate and says Hello with key wg from endpoint.
-func (h *harness) connect(name string, wg byte, endpoint string) (*identity, *client, *wire.HelloResponse) {
+// certificate and says Hello with key wg from endpoint, naming
+// capabilities.
+func (h *harness) connect(name string, wg byte, endpoint string, capabilities ...string) (*identity, *client, *wire.HelloResponse) {
 	h.t.Helper()
 	id, _ := h.mustJoin("", name)
 	c := h.dial(id)
-	resp, err := c.hello(wgKey(wg), endpoint)
+	resp, err := c.hello(wgKey(wg), endpoint, capabilities...)
 	if err != nil {
 		h.t.Fatalf("hello %s: %v", name, err)
 	}
