@@ -8,7 +8,7 @@ import { Ago, CopyBtn, ErrBox, KV, usePoll } from '../components.jsx';
 import { fmtDateTime, shortId } from '../format.js';
 import { envPath } from '../routes.js';
 import {
-  KIND_TITLES, activityItems, conditionText, defaultHost, errorShare, fmtCount, fmtLatency, groupObjects, incidentObject,
+  KIND_TITLES, UNGUARDED, activityItems, admitsOf, conditionText, defaultHost, errorShare, fmtCount, fmtLatency, groupObjects, incidentObject,
   isAttached, jobTrigger, labelPairs, objectImage, objectTone, objectsText, readyText, restartsOf, rolloutNote, routesTo,
   sparkPoints, specBindings, trafficOf, trafficTotals,
 } from './envs.js';
@@ -208,8 +208,9 @@ function TrafficCard({ st, traffic, tenant, navigate }) {
   );
 }
 
-// ReachCard is where the environment is reached: its public hosts and
-// the routes to its services, or the route door while it is not public.
+// ReachCard is where the environment is reached: its public hosts, who
+// it admits there (ADR 0054), and the routes to its services, or the
+// route door while it is not public.
 function ReachCard({ st, tenant, navigate }) {
   const env = st.name;
   const { domains } = useSummary();
@@ -223,6 +224,7 @@ function ReachCard({ st, tenant, navigate }) {
       </div>
       {st.public && (st.hosts || []).length > 0 && (
         <div className="ov-hosts">{st.hosts.map((h) => <HostLink key={h} host={h} />)}</div>)}
+      {st.public && <Admits st={st} />}
       {!st.public && <p className="muted">The route door serves its routes to a route token.</p>}
       {dh && !dh.serving && st.public && (
         <p className="muted small">default host <span className="mono">{dh.label}</span> answers 404 while a domain is served</p>)}
@@ -237,6 +239,17 @@ function ReachCard({ st, tenant, navigate }) {
         </div>))}
       {routes.length === 0 && <p className="muted">No routes: its services are reached inside the environment only.</p>}
     </section>
+  );
+}
+
+// Admits says who a public environment admits, in one line.
+function Admits({ st }) {
+  const a = admitsOf(st);
+  if (!a.known) return <p className="warntext small">{UNGUARDED[0].toUpperCase() + UNGUARDED.slice(1)}.</p>;
+  if (a.access === 'anyone') return <p className="muted small">Open to anyone.</p>;
+  return (
+    <p className="small"><Icon name="lock" size={12} /> Visitors signed in by <span className="mono">{a.provider}</span>: a browser
+      without a visit signs in there first, any other request gets 401.</p>
   );
 }
 

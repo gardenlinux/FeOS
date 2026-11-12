@@ -7,7 +7,7 @@ import { Ago, StateDot, useNow } from '../components.jsx';
 import { fmtQuota, quotaRows, useAccess } from '../people.js';
 import { envPath, sandboxPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
-import { deploymentText, deploymentTone } from './envs.js';
+import { admitsShort, deploymentText, deploymentTone } from './envs.js';
 import { byActivity } from './sandboxes.js';
 import { ToneDot } from './Environments.jsx';
 import { RoleBadge } from './People.jsx';
@@ -101,7 +101,8 @@ export function Home({ tenant, navigate }) {
                     <tr key={e.id} className="clickable" onClick={() => navigate(envPath(tenant, e.name))}>
                       <td><span className="cell-state"><ToneDot tone={deploymentTone(e.state)} title={e.state} /> <span className="strong">{e.name}</span></span></td>
                       <td className="mono small">{deploymentText(e)}</td>
-                      <td className="mono small trunc">{e.public ? (e.hosts || []).join(', ') || '—' : <span className="muted">route door only</span>}</td>
+                      <td className="mono small trunc">{e.public ? (e.hosts || []).join(', ') || '—' : <span className="muted">route door only</span>}
+                        {e.public && <span className="muted"> · {admitsShort(e)}</span>}</td>
                     </tr>
                   ))}
                 </tbody>

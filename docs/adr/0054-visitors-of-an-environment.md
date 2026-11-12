@@ -57,8 +57,10 @@ tenants name.
 - A public environment has an **access**: `anyone`, or `visitors`
   together with the name of one of its tenant's providers. It is set
   where the environment is made public, by the same right. A publish
-  that does not say admits visitors of the provider `ferun`; to open an
-  environment to everyone is a statement.
+  that does not say admits visitors of the provider `ferun` when the
+  environment is not public yet, and keeps its access when it is; to
+  open an environment to everyone is a statement. Every answer and view
+  of an environment says its access and its provider.
 - Being public stays what gives an environment its hosts and opens its
   routed ports to the ingress (ADR 0021, ADR 0045); the access says who
   may open them. It holds on every host of the environment alike, and
@@ -70,7 +72,9 @@ tenants name.
 - A request without a valid visit is sent to the provider only when it
   is a navigation. Every other request, a script's or an API client's,
   gets 401: a redirect would be followed into a sign-in page nobody
-  sees.
+  sees. A navigation is a GET that the browser says is one
+  (`Sec-Fetch-Mode: navigate`), or, from a browser that says nothing of
+  it, one that accepts HTML.
 - The path `/.ferun/` is the ingress's on every host, before any route.
   There the browser comes back from a provider, a visitor signs out, and
   the keys for the visit's token are published.
@@ -79,10 +83,12 @@ tenants name.
 
 - For a navigation without a visit, the ingress makes a **challenge**
   by itself: the environment, the host, the path to return to and an end
-  minutes away, sealed with a key `ferund` gives the instances. It sends
-  the browser to the provider's address with the challenge and nothing
-  else, and sets a short-lived cookie on the host that ties the
-  challenge to this browser.
+  minutes away, sealed with a key `ferund` gives every instance in its
+  table. It sends the browser to the provider's address with the
+  challenge and nothing else, and sets a short-lived cookie on the host
+  that ties the challenge to this browser. A browser that is already
+  signing in on the host keeps its cookie, so that its tabs do not undo
+  each other.
 - The provider cannot open a challenge and need not. It shows it to
   `ferund`, which opens it and says which environment and host are asked
   for. Nothing a browser can change names them.
@@ -94,38 +100,49 @@ tenants name.
   `ferund` takes an answer only from a provider the environment names,
   and each challenge once. Its answer is where to send the browser: the
   host in the seal, under `/.ferun/`, with a code that carries `ferund`'s
-  signature.
+  signature and says whether the provider accepted; the ingress answers
+  a rejected one by itself, with no call to `ferund`.
 - The ingress redeems a code at `ferund` over its connection, only with
   the challenge's cookie beside it, and only once. A code that arrives
   in another browser signs nobody in. A rejected challenge is answered
   403 on the host. A challenge past its end still names its host, so a
   provider whose sign-in took longer sends the browser there to begin
-  again.
+  again. A code lives two minutes, and a redeem whose answer was lost
+  may be repeated for a minute from the same browser.
 - A visitor nobody vouched for costs `ferund` nothing: no call and no
   row. Its first caller in a sign-in is a provider with a credential.
 
 ### The visit: a record at ferund, a short token on the host
 
 - A **visit** is `ferund`'s record that a provider admitted a subject
-  to an environment until a time. The end is the provider's, within a
-  bound of the installation's.
+  to an environment until a time. The end is the provider's, within the
+  installation's bound of 12 hours.
 - The ingress sets the visit's cookie on the host the visitor opened and
   on no other, host-only and unreadable to scripts, and takes it out of
   the request before the application sees it. The cookie holds a token
-  `ferund` signed for 15 minutes, which the ingress checks with keys
-  from the table, without a call.
-- When a token nears its end, the ingress asks `ferund` for the next
-  over its connection, on any request, so that a page that stays open
-  does not fail.
-- **A visit is put to its provider again at every renewal.** `ferund`
+  `ferund` signed for 15 minutes, a JSON Web Token naming the visit, the
+  subject, the email and name the provider gave, the provider, the host
+  and the visit's end, with the environment as its audience, which the
+  ingress checks with keys from the table, without a call.
+- When a token has less than 5 minutes left, the ingress asks `ferund`
+  for the next over its connection, on the request that finds it, and
+  serves on with the token it has when `ferund` does not answer at once;
+  for a visit with open upgraded connections it asks without a
+  request.
+- **A visit is put to its provider again at a renewal, at most once in
+  8 minutes for each visit, which `ferund` decides on its database's
+  clock whichever instance is asked, and no token outlives the
+  provider's last asking by more than 15 minutes.** `ferund`
   gives the next token while the visit lives and its provider still
   vouches for it, and ends the visit on the provider's no. So a token's
   15 minutes are how long a visitor stays after their provider would no
   longer admit them, and there is no call by which a tenant ends a
-  visit: what the provider knows is asked, not copied.
+  visit: what the provider knows is asked, not copied. Only the
+  provider's explicit no ends a visit.
 - A provider that does not answer has not said no: the visit gets its
   next token and is put to the provider again at the following renewal,
-  up to its end.
+  up to its end. `ferund` waits 3 seconds for it, outside any
+  transaction.
 - A visit ends at its time; on its provider's no; when the visitor
   signs out on the host; when its environment is unpublished or names
   another provider. An ended visit gets no next token, and the ingress
@@ -136,6 +153,26 @@ tenants name.
 - While `ferund` is away, the ingress serves the visits it holds: a
   token past its end counts until its visit's end. What was admitted
   stays admitted while the control plane is away, and nobody new is.
+- The keys are two, shared by every `ferund` instance and made once:
+  one signs the visits' tokens and the codes, and is kept sealed with
+  the installation's secret key, so that a copy of the database signs
+  nothing; the other seals the challenges. The ingress gets the public
+  half of the first and the second in its table, apart from any
+  environment, and keeps them in its cache. They do not rotate yet.
+- The visit's cookie holds, beside the token, a secret that only the
+  browser holds and whose hash `ferund` keeps; a renewal and a sign-out
+  need it. The token the application receives is not the cookie, and
+  cannot be renewed.
+- A request that is not a navigation and comes from another site, or
+  from another host of the same site, has no visit: hosts under one zone
+  are one site to the browser.
+- An ingress says in its Hello that it checks visits. `ferund` gives a
+  guarded environment only to an ingress that said so; an older one does
+  not know its hosts and answers 404 there. An ingress that lacks the
+  keys, or finds an access or a provider it does not know, admits nobody
+  there.
+- An answer that `ferund` does not know the call, or no answer, means
+  `ferund` is away, never that a visit ended.
 
 ### A provider is the tenant's own service, or ferun-auth
 
@@ -145,9 +182,11 @@ tenants name.
 - Kind **`tenant`**: the tenant's own service at an address. It reads,
   accepts and rejects challenges with a token of the tenant that
   administers the environment. At a renewal `ferund` calls the same
-  address and names the visit; the service reads the visit as it reads
-  a challenge, with its environment, subject and session, and answers
-  yes or no. `ferund` dials that address as it dials a binding's
+  address and names the visit: a POST of `{"visit": "<id>"}`, without a
+  credential and following no redirect; the answer `{"admitted": false}`
+  is a no, every other answer, or none, is no answer; the service reads
+  the visit as it reads a challenge, with its environment, subject and
+  session, and answers yes or no. `ferund` dials that address as it dials a binding's
   upstream for a preflight (ADR 0028): never an address of the
   cluster's or the nodes' networks. FeRun signs nobody in and knows
   nothing of the service's people; nothing is kept in step between the
@@ -163,9 +202,14 @@ tenants name.
   installation's own issuer, and the rule is a grant of at least `read`
   on the environment (ADR 0031). `ferun-auth` runs the sign-in, and
   `ferund` looks the grant up itself, at the accept and before every
-  next token.
+  next token. Its name is reserved: no tenant makes a provider called
+  `ferun`. A person who is disabled has no grant.
 - An installation without `ferun-auth` serves providers of kind `tenant`
-  alone, and refuses a publish that asks for another.
+  alone, and refuses with an error of its own a publish that asks for
+  another, the publish that does not say included. `ferund` knows
+  `ferun-auth`'s address from a setting; without it the installation has
+  none. An installation without its secret key guards no environment at
+  all.
 
 ### ferun-auth: a program of its own beside ferund
 
@@ -289,9 +333,20 @@ tenants name.
   serves an API beside its pages stays `anyone` and guards itself.
 - An application gets the visitor's identity without a sign-in of its
   own, which is what makes the gate a proxy.
+- A provider that never answers keeps its visits until their end, 12
+  hours at most: only its no ends a visit. And `ferun-auth` is trusted
+  within its kinds: whoever holds its credential can admit anyone to an
+  environment of kind `oidc`, and any person with a grant to one of kind
+  `ferun`.
 
 ## History
 
 Proposed on 2026-11-12. It takes up ADR 0021's question of an
 authorization at the ingress, for environments; a workbench's previews
 stay behind its forwarder.
+
+Refined on 2026-11-12 as it was built: the default of a publish only for
+an environment that is not public yet, older ingresses closed out by a
+capability, the two keys, the token and the code, the cookie's secret,
+same-site requests, the renewal's timings and the provider's call, and a
+visit's bound of 12 hours.

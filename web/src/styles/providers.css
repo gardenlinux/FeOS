@@ -1,0 +1,23 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The tenant's access providers (views/Providers.jsx) beside the
+   credentials' page parts (credentials.css), and who an environment
+   admits in its publish box (EnvTabs.jsx, PublicBox). */
+.tbl.prov-list td { vertical-align: top; }
+.prov-list td:first-child { white-space: nowrap; }
+.prov-list .warntext { font-size: 11.5px; }
+.prov-list tr.prov-off td { opacity: .6; }
+.prov-badge { margin-left: 8px; }
+.prov-envs { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.prov-copy { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.prov-copy .mono { overflow-wrap: anywhere; }
+.prov-form textarea { width: 100%; box-sizing: border-box; }
+.cred-seg button:disabled { opacity: .5; cursor: default; }
+
+.admits-form { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.admits-form select { max-width: 100%; }
+.admits-lock { display: inline-flex; align-items: center; gap: 5px; }
+.envcard-host .admits-lock { vertical-align: -1px; margin-right: 4px; }

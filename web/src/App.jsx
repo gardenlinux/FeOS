@@ -28,6 +28,7 @@ import { Instances } from './views/Instances.jsx';
 import { Moved } from './views/Moved.jsx';
 import { Domains } from './views/Domains.jsx';
 import { Credentials } from './views/Credentials.jsx';
+import { Providers } from './views/Providers.jsx';
 import { TenantSettings, Usage } from './views/TenantPages.jsx';
 import { Ingresses, PlatformPeople } from './views/Platform.jsx';
 import { Palette, usePaletteKey } from './views/Palette.jsx';
@@ -183,6 +184,9 @@ export default function App() {
       {!needsGate && (route.view === 'credentials' || route.view === 'newCredential') && (
         <Credentials key={route.tenant} tenant={route.tenant} sel={route.view === 'newCredential' ? '' : route.sel}
           isNew={route.view === 'newCredential'} edit={route.tab === 'edit'} navigate={navigate} />)}
+      {!needsGate && (route.view === 'providers' || route.view === 'newProvider') && (
+        <Providers key={route.tenant} tenant={route.tenant} sel={route.view === 'newProvider' ? '' : route.sel}
+          isNew={route.view === 'newProvider'} edit={route.tab === 'edit'} navigate={navigate} />)}
       {!needsGate && SETTINGS_VIEWS.has(route.view) && <SettingsTabs route={route} me={me} navigate={navigate} />}
       {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
       {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
@@ -341,6 +345,8 @@ function EnvSide({ route, navigate, env, access, objects }) {
   const tone = incidents > 0 ? 'failed' : deploymentTone(state);
   const facts = status || known;
   const host = status && status.public ? (status.hosts || [])[0] : '';
+  // A host that admits visitors (ADR 0054) has a lock before it.
+  const guarded = !!(status && status.public && status.access === 'visitors');
   const to = pickEnvPath(route, t, known.name);
   return (
     <div className="side-env">
@@ -356,7 +362,9 @@ function EnvSide({ route, navigate, env, access, objects }) {
                 : `deployment ${deploymentText({ deployment: facts.deployment, deployed: facts.deployed, state })}`}
             </span>
           </span>)}
-        {host && <span className="envcard-host">{host}</span>}
+        {host && (
+          <span className="envcard-host" title={guarded ? `admits visitors of ${status.provider || 'ferun'}` : undefined}>
+            {guarded && <span className="admits-lock"><Icon name="lock" size={11} /></span>}{host}</span>)}
       </a>
       {objects && (status
         ? <ObjectList route={route} navigate={navigate} st={status} tenant={t}
@@ -689,6 +697,7 @@ function UserMenu({ me, onSignOut }) {
 // CRUMB_NAMES name the tenant's pages in the trail.
 const CRUMB_NAMES = {
   tools: 'tools', domains: 'domains', members: 'people', tokens: 'tokens', usage: 'usage', settings: 'general', credentials: 'credentials',
+  providers: 'access providers',
 };
 
 function Topbar({ route, navigate, me, onSearch, onSignOut }) {
@@ -712,6 +721,8 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
         {route.view === 'credentials' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'newCredential' && <>{sep}{crumb('credentials', `/tenants/${enc(t)}/credentials`)}{sep}<span className="crumb">new</span></>}
+        {route.view === 'providers' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
+        {route.view === 'newProvider' && <>{sep}{crumb('access providers', `/tenants/${enc(t)}/providers`)}{sep}<span className="crumb">new</span></>}
         {route.view === 'invite' && <>{sep}<span className="crumb">invitation</span></>}
         {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}

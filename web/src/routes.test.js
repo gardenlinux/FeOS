@@ -36,6 +36,12 @@ describe('parsePath', () => {
     expect(parsePath('/tenants/acme/credentials/github/edit'))
       .toEqual({ view: 'credentials', tenant: 'acme', sel: 'github', tab: 'edit' });
     expect(parsePath('/tenants/acme/new-credential')).toEqual({ view: 'newCredential', tenant: 'acme' });
+    // The access providers (ADR 0054).
+    expect(parsePath('/tenants/acme/providers')).toEqual({ view: 'providers', tenant: 'acme', sel: '', tab: '' });
+    expect(parsePath('/tenants/acme/providers/fecode')).toEqual({ view: 'providers', tenant: 'acme', sel: 'fecode', tab: '' });
+    expect(parsePath('/tenants/acme/providers/sso/edit')).toEqual({ view: 'providers', tenant: 'acme', sel: 'sso', tab: 'edit' });
+    expect(parsePath('/tenants/acme/providers/sso/other')).toEqual({ view: 'providers', tenant: 'acme', sel: 'sso', tab: '' });
+    expect(parsePath('/tenants/acme/new-provider')).toEqual({ view: 'newProvider', tenant: 'acme' });
     expect(parsePath('/no/such/page')).toEqual({ view: 'tenants' });
   });
 

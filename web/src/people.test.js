@@ -106,11 +106,12 @@ describe('me → navigation', () => {
 
   it('a tenant\'s pages by role', () => {
     const views = (me, t) => tenantNav(tenantAccess(me, t)).map((n) => n.view);
-    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'credentials', 'members', 'tokens', 'usage', 'settings']);
-    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'members', 'usage', 'settings']);
+    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'credentials', 'providers', 'members', 'tokens', 'usage', 'settings']);
+    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'providers', 'members', 'usage', 'settings']);
     // Grants on environments alone: their sandboxes and jobs are in them
-    // (ADR 0035), no page of the tenant's.
-    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'members', 'usage', 'settings']);
+    // (ADR 0035), no page of the tenant's; the access providers (ADR
+    // 0054), which an environment's admin chooses among.
+    expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'providers', 'members', 'usage', 'settings']);
     expect(views(ANNA, 'nope')).toEqual([]);
     expect(views(BASIC, 'acme')).toEqual([]);
   });
@@ -143,6 +144,13 @@ describe('me → navigation', () => {
     expect(viewGate(ANNA, parsePath('/tenants/shop/credentials'))).toBe('role');
     expect(viewGate(ANNA, parsePath('/tenants/acme/new-credential'))).toBe('');
     expect(viewGate(ANNA, parsePath('/tenants/zeta/new-credential'))).toBe('role');
+    // The access providers (ADR 0054): every member reads them; a new
+    // one is the tenant admin's.
+    expect(viewGate(ANNA, parsePath('/tenants/shop/providers'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/shop/providers/fecode/edit'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/acme/new-provider'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/zeta/new-provider'))).toBe('role');
+    expect(viewGate(ANNA, parsePath('/tenants/shop/new-provider'))).toBe('role');
   });
 
   it('a Basic sign-in has the operators\' pages but acts in no tenant', () => {

@@ -12,10 +12,10 @@
 //            join tokens, instances and the nodes' activity. The UI
 //            calls them for operators only.
 //   tenant   /api/v1/sandboxes, /api/v1/tools, /api/v1/environments,
-//            /api/v1/tenant/…: the person's session, the tenant named in
-//            the header FeRun-Tenant (ADR 0031). The browser keeps no
-//            tenant token: what the person's role allows, the session
-//            does, and ferund decides.
+//            /api/v1/providers, /api/v1/tenant/…: the person's session,
+//            the tenant named in the header FeRun-Tenant (ADR 0031).
+//            The browser keeps no tenant token: what the person's role
+//            allows, the session does, and ferund decides.
 //
 // The UI never holds a sandbox's token or a tenant's: it shows a new one
 // once and forgets it. Every request carries X-Requested-With: ferun
@@ -475,10 +475,22 @@ export const api = {
   // revokes every one.
   mintRouteToken: (env) => tenantCall('POST', `/environments/${enc(env)}/route-tokens`),
   revokeRouteTokens: (env) => tenantCall('DELETE', `/environments/${enc(env)}/route-tokens`),
-  // Publish or unpublish at the ingress, with an optional host label:
-  // {public, hosts, rolling}.
-  setPublic: (env, isPublic, hostLabel) =>
-    tenantCall('PUT', `/environments/${enc(env)}/public`, hostLabel ? { public: isPublic, hostLabel } : { public: isPublic }),
+  // Publish or unpublish at the ingress (ADR 0054): a publish with an
+  // optional host label and who the ingress admits, access "anyone" or
+  // "visitors" of a provider ("ferun" or one of the tenant's); an
+  // unpublish is {public: false} alone. The console says the access on
+  // every publish: ferund keeps a public environment's access when a
+  // publish says none, and admits visitors of ferun on the first one.
+  // Answers {public, hosts, rolling, access, provider}; an older ferund
+  // answers no access, and serves the environment to anyone.
+  setPublic: (env, isPublic, { hostLabel = '', access = '', provider = '' } = {}) => {
+    if (!isPublic) return tenantCall('PUT', `/environments/${enc(env)}/public`, { public: false });
+    const body = { public: true };
+    if (hostLabel) body.hostLabel = hostLabel;
+    if (access) body.access = access;
+    if (access === 'visitors' && provider) body.provider = provider;
+    return tenantCall('PUT', `/environments/${enc(env)}/public`, body);
+  },
   // The ingress's records of an environment, newest first, and its
   // traffic per service over window (1h or 24h).
   accessLogs: (env, { limit = 200, beforeTsNs, traceId } = {}) =>
@@ -551,6 +563,22 @@ export const api = {
   putCredential: (name, binding) => tenantCall('PUT', `/credentials/${enc(name)}`, binding),
   deleteCredential: (name) => tenantCall('DELETE', `/credentials/${enc(name)}`),
   checkCredential: (name, probe) => tenantCall('POST', `/credentials/${enc(name)}/check`, probe ? { probe } : {}),
+  // The tenant's access providers (ADR 0054), who vouch for the visitors
+  // of an environment that admits visitors: kind tenant {url}, the
+  // tenant's own service; kind oidc {issuer, clientId, clientSecret,
+  // rule}, an issuer ferun-auth signs in with; ferun, built in, every
+  // tenant's without being made. The list answers {providers (ferun
+  // first), kinds (those this installation serves), redirectUri (the one
+  // to register at an issuer, "" without ferun-auth)}. A read answers
+  // the client secret {"set": true}; a put sends the whole provider,
+  // {"set": true} keeping the stored secret (201 made, 200 changed or
+  // unchanged); a delete of one an environment names is 409
+  // provider_in_use. A ferund without them (an older one, or one without
+  // --secret-key-file) answers 404 "no such route" (notAvailable).
+  listProviders: () => tenantCall('GET', '/providers'),
+  getProvider: (name) => tenantCall('GET', `/providers/${enc(name)}`),
+  putProvider: (name, provider) => tenantCall('PUT', `/providers/${enc(name)}`, provider),
+  deleteProvider: (name) => tenantCall('DELETE', `/providers/${enc(name)}`),
   // The credentials a sandbox names, the whole list on a put.
   getSandboxCredentials: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/credentials`),
   putSandboxCredentials: (sandboxId, names) =>

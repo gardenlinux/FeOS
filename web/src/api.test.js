@@ -192,6 +192,63 @@ describe('the tenant, with the session', () => {
     expect(calls[2].path).toBe('/api/v1/sandboxes?environment=kino+dev');
   });
 
+  it("reads and writes the tenant's access providers by name, the client secret kept with {\"set\": true} (ADR 0054)", async () => {
+    setActiveTenant('acme');
+    const list = { providers: [{ name: 'ferun', kind: 'ferun', builtIn: true, environments: [] }], kinds: ['tenant'], redirectUri: '' };
+    answer(200, list);
+    expect(await api.listProviders()).toEqual(list);
+    expect(calls[0].path).toBe('/api/v1/providers');
+    expect(calls[0].init.method).toBe('GET');
+    expect(calls[0].init.headers['FeRun-Tenant']).toBe('acme');
+    await api.getProvider('sso team');
+    expect(calls[1].path).toBe('/api/v1/providers/sso%20team');
+    expect(calls[1].init.method).toBe('GET');
+    answer(201, { name: 'fecode', kind: 'tenant' });
+    await api.putProvider('fecode', { kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' });
+    expect(calls[2].path).toBe('/api/v1/providers/fecode');
+    expect(calls[2].init.method).toBe('PUT');
+    expect(JSON.parse(calls[2].init.body)).toEqual({ kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' });
+    const oidc = { kind: 'oidc', issuer: 'https://login.example.com/', clientId: 'abc', clientSecret: { set: true }, rule: { domains: ['example.com'] } };
+    await api.putProvider('sso', oidc);
+    expect(JSON.parse(calls[3].init.body)).toEqual(oidc);
+    await api.deleteProvider('sso');
+    expect(calls[4].path).toBe('/api/v1/providers/sso');
+    expect(calls[4].init.method).toBe('DELETE');
+    expect(calls[4].init.body).toBeUndefined();
+    // A ferund without them: an older one, or one without --secret-key-file.
+    answer(404, { error: 'no such route: GET /api/v1/providers' });
+    let err = null;
+    try {
+      await api.listProviders();
+    } catch (e) {
+      err = e;
+    }
+    expect(notAvailable(err)).toBe(true);
+    answer(409, { error: 'provider sso is named by 2 environments', code: 'provider_in_use' });
+    err = null;
+    try {
+      await api.deleteProvider('sso');
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toMatchObject({ status: 409, message: 'provider sso is named by 2 environments', body: { code: 'provider_in_use' } });
+    expect(notAvailable(err)).toBe(false);
+  });
+
+  it('says who a publish admits, and unpublishes with {public: false} alone (ADR 0054)', async () => {
+    setActiveTenant('acme');
+    await api.setPublic('stage', true, { hostLabel: 'stage--kino', access: 'visitors', provider: 'fecode' });
+    expect(JSON.parse(calls[0].init.body)).toEqual({ public: true, hostLabel: 'stage--kino', access: 'visitors', provider: 'fecode' });
+    expect(calls[0].path).toBe('/api/v1/environments/stage/public');
+    expect(calls[0].init.method).toBe('PUT');
+    await api.setPublic('stage', true, { access: 'anyone', provider: 'fecode' });
+    expect(JSON.parse(calls[1].init.body)).toEqual({ public: true, access: 'anyone' });
+    await api.setPublic('stage', true, { access: 'visitors', provider: 'ferun' });
+    expect(JSON.parse(calls[2].init.body)).toEqual({ public: true, access: 'visitors', provider: 'ferun' });
+    await api.setPublic('stage', false, { hostLabel: 'x', access: 'anyone' });
+    expect(JSON.parse(calls[3].init.body)).toEqual({ public: false });
+  });
+
   it("lists an environment's jobs, filtered here too", async () => {
     setActiveTenant('acme');
     const jobs = [{ id: 'a', environment: { id: 'e1', name: 'kino-dev' } }, { id: 'b', environment: { id: 'e2', name: 'stage' } }];
@@ -354,7 +411,8 @@ describe('the environments routes', () => {
     if (exactQuery) expect(got).toEqual({ method: fx.method, path: fx.path, query: fx.query });
     else expect({ method: got.method, path: got.path }).toEqual({ method: fx.method, path: fx.path });
     expect(calls[0].init.headers['FeRun-Tenant']).toBe('fecode');
-    return { fx, out, err };
+    const body = calls[0].init.body === undefined ? undefined : JSON.parse(calls[0].init.body);
+    return { fx, out, err, body };
   }
 
   it('lists the environments with label filters, every one a ?label=', async () => {
@@ -412,6 +470,19 @@ describe('the environments routes', () => {
     expect(r.err).toMatchObject({ message: 'paused', status: 409 });
     r = await ask('GET_environments_env_objects_kind_name_logs.404', () => api.objectLogs(STAGE, 'service', 'nope'), loose);
     expect(r.err).toMatchObject({ message: 'no such object: service/nope', status: 404 });
+  });
+
+  it("publishes: ferund's default for a first publish, anyone as a statement, and the refusal without ferun-auth", async () => {
+    let r = await ask('PUT_environments_env_public.200', () => api.setPublic(STAGE, true));
+    expect(r.body).toEqual(r.fx.request);
+    expect(r.out).toEqual(r.fx.response);
+    expect(r.out).toMatchObject({ public: true, access: 'visitors', provider: 'ferun' });
+    r = await ask('PUT_environments_env_public.200.anyone', () => api.setPublic(STAGE, true, { access: 'anyone' }));
+    expect(r.body).toEqual(r.fx.request);
+    expect(r.out).toMatchObject({ public: true, access: 'anyone', provider: '' });
+    r = await ask('PUT_environments_env_public.409.auth', () => api.setPublic(STAGE, true, { access: 'visitors', provider: 'ferun' }));
+    expect(r.err).toBeInstanceOf(ApiError);
+    expect(r.err).toMatchObject({ status: 409, body: { code: 'ferun_auth_required' } });
   });
 
   it('only ever reads: every environment call is a GET', async () => {

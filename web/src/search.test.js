@@ -12,6 +12,8 @@ const summary = {
   jobs: [{ id: 'a3ze6kkjvfx', image: 'builder:1', phase: 'succeeded', environment: { id: 'e1', name: 'prod' } }],
   domains: [{ id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns' }],
   credentials: [{ name: 'github', upstream: 'https://api.github.com' }],
+  providers: [{ name: 'ferun', kind: 'ferun', builtIn: true }, { name: 'fecode', kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' },
+    { name: 'sso', kind: 'oidc', issuer: 'https://login.example.com/' }],
 };
 const all = entries({ tenant: 'kino', nav: TENANT_NAV, tenants: [{ tenant: 'kino' }, { tenant: 'acme' }], summary });
 
@@ -46,5 +48,13 @@ describe('search', () => {
     expect(search(all, 'example')[0]).toMatchObject({ label: 'prod' });
     expect(search(all, 'shop')[0]).toMatchObject({ kind: 'domain', to: '/tenants/kino/domains/d-2' });
     expect(search(all, 'git')[0]).toMatchObject({ kind: 'credential', to: '/tenants/kino/credentials/github' });
+  });
+
+  it('finds an access provider by its name, its kind and where it is (ADR 0054)', () => {
+    expect(search(all, 'fecode')[0]).toMatchObject({ kind: 'provider', label: 'fecode', hint: 'tenant · https://fecode.dev/api/v1/visit',
+      to: '/tenants/kino/providers/fecode', icon: 'lock' });
+    expect(search(all, 'login.example')[0]).toMatchObject({ kind: 'provider', to: '/tenants/kino/providers/sso' });
+    expect(search(all, 'ferun')[0]).toMatchObject({ kind: 'provider', hint: 'ferun', to: '/tenants/kino/providers/ferun' });
+    expect(search(all, 'access prov')[0]).toMatchObject({ kind: 'page', label: 'Access providers', to: '/tenants/kino/providers' });
   });
 });

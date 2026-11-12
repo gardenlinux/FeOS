@@ -7,18 +7,22 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, Secret, useArm, usePoll } from '../components.jsx';
 import { fmtDate, fmtDurNs, fmtNs } from '../format.js';
 import { envPath, jobPath, sandboxPath } from '../routes.js';
+import { useSummary } from '../summary.jsx';
 import { inUse } from './reach.js';
 import {
-  actionProblem, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, newestFirst, olderCursor, publishNote,
-  routeCurl, sparkPoints, statusTone,
+  UNGUARDED, actionProblem, admitsOf, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, newestFirst, olderCursor,
+  publishNote, routeCurl, sparkPoints, statusTone,
 } from './envs.js';
+import { choices, kindLabel, providerWords, publishChoice, sameChoice } from './providers.js';
 import '../styles/environments.css';
+import '../styles/credentials.css';
+import '../styles/providers.css';
 
 // An environment's pages beside its objects and deployments: its traffic
 // (the ingress's answers per service and its access log), its secrets,
-// its domains and access (public, hosts, domains, route tokens) and its
-// settings (clone, delete), with the small widgets the environment's
-// actions share. ec is what the role may do on the environment
+// its domains and access (public, who it admits, hosts, domains, route
+// tokens) and its settings (clone, delete), with the small widgets the
+// environment's actions share. ec is what the role may do on the environment
 // (Environments.jsx, envCan); every write calls changed, which refreshes
 // the page and the tenant's summary.
 
@@ -417,14 +421,37 @@ export function AccessTab({ tenant, env, st, ec, domains, changed, navigate }) {
   );
 }
 
-export function PublicBox({ env, st, ec, domains, changed }) {
+// PublicBox publishes the environment and says who the ingress admits
+// at its hosts (ADR 0054): visitors of one of the tenant's providers, or
+// anyone. The providers and the kinds this installation serves are the
+// summary's, unless given; a publish always says the access.
+export function PublicBox({ env, st, ec, domains, changed, providers: given, kinds: givenKinds }) {
   const [label, setLabel] = useState('');
+  const [picked, setPicked] = useState(null);
   const [op, run, clear] = useOp();
+  const sum = useSummary();
+  const providers = given === undefined ? sum.providers : given;
+  const kinds = givenKinds === undefined ? sum.providerKinds : givenKinds;
   const dh = defaultHost(st, domains || []);
-  const publish = (on) => run(() => api.setPublic(env, on, on ? label.trim() : ''), publishNote).then((r) => {
-    if (r) { setLabel(''); changed(); }
+  const now = admitsOf(st);
+  // current is the access a publish keeps; choice what the box asks for.
+  const current = publishChoice(st, kinds);
+  const choice = picked || current;
+  const options = choices(providers, kinds, st.access === 'visitors' ? st.provider : '');
+  const option = options.find((o) => o.name === choice.provider);
+  const ready = choice.access === 'anyone' || (choice.access === 'visitors' && !!option && option.served);
+  const publish = (on, what = choice, hostLabel = label.trim()) => run(() => (on
+    ? api.setPublic(env, true, { hostLabel, access: what.access, provider: what.provider })
+    : api.setPublic(env, false)), publishNote).then((r) => {
+    if (r) { setLabel(''); setPicked(null); changed(); }
   });
   const busy = !!(op && op.busy);
+  const off = !ec.admin || busy;
+  const why = ec.admin ? '' : NEEDS.admin;
+  const changing = st.public && !sameChoice(choice, current);
+  const pick = (access) => setPicked(access === 'visitors'
+    ? { access, provider: choice.provider || (options[0].served ? options[0].name : '') }
+    : { access, provider: '' });
   return (
     <div className="envsect envbox">
       <div className="sect">public</div>
@@ -434,10 +461,24 @@ export function PublicBox({ env, st, ec, domains, changed }) {
           : <span className="state-label absent"><span className="sdot absent" />not public</span>}
         <span className="muted small">
           {st.public
-            ? 'The ingress serves its routes to image services at its hosts, without a token.'
+            ? 'The ingress serves its routes to image services at its hosts, without a token, to whom it admits.'
             : 'Only the route door serves it, to a route token. Publishing gives it a default host.'}
         </span>
       </div>
+      {st.public && (
+        <div className="envbox-row">
+          <span className="k">admits</span>
+          {now.access === 'visitors'
+            ? <span className="state-label running admits-lock"><Icon name="lock" size={12} />visitors · {now.provider}</span>
+            : <span className="state-label unknown">anyone</span>}
+          <span className={'small ' + (now.known ? 'muted' : 'warntext')}>
+            {!now.known ? UNGUARDED : now.access === 'visitors' ? providerWords(provider(providers, now.provider))
+              || `whom ${now.provider} vouches for` : 'every request its routes let through'}
+          </span>
+        </div>)}
+      {st.public && now.access === 'visitors' && options.some((o) => o.name === now.provider && !o.served) && (
+        <p className="warntext small">The kind of {now.provider} is not served by this installation: nobody can sign in, and
+          the ingress admits nobody here.</p>)}
       {(st.hosts || []).length > 0 && (
         <div className="envbox-row">
           <span className="k">hosts</span>
@@ -453,25 +494,65 @@ export function PublicBox({ env, st, ec, domains, changed }) {
               : 'answers 404 while one of its domains is served; it is its host again once none is'}
           </span>
         </div>)}
-      <form className="inlineform" onSubmit={(e) => { e.preventDefault(); publish(true); }}>
+      <div className="envbox-row admits-form">
+        <span className="k">{st.public ? 'admit' : 'it admits'}</span>
+        <span className="cred-seg" role="group" aria-label="who it admits">
+          <button type="button" className={choice.access === 'visitors' ? 'on' : ''} disabled={off} title={why}
+            onClick={() => pick('visitors')}>Visitors</button>
+          <button type="button" className={choice.access === 'anyone' ? 'on' : ''} disabled={off} title={why}
+            onClick={() => pick('anyone')}>Anyone</button>
+        </span>
+        {choice.access === 'visitors' && (
+          <select aria-label="provider" value={choice.provider} disabled={off} title={why}
+            onChange={(e) => setPicked({ access: 'visitors', provider: e.target.value })}>
+            {!choice.provider && <option value="">choose a provider</option>}
+            {options.map((o) => (
+              <option key={o.name} value={o.name} disabled={!o.served}>
+                {o.name}{o.kind ? ` · ${kindLabel(o.kind)}` : ''}{o.served ? '' : ' — not served by this installation'}
+              </option>))}
+          </select>)}
+        {!choice.access && <span className="muted small">Choose who it admits: this installation signs no visitors in by itself.</span>}
+        {changing && (choice.access === 'anyone'
+          ? <ConfirmButton className="mini" label="Open to anyone" confirmLabel="Open to anyone: sure?" disabled={off}
+            title={why || 'its visits end, and everyone reaches it'} onConfirm={() => publish(true, choice, '')} />
+          : <button className="primary mini" type="button" disabled={off || !ready} title={why}
+            onClick={() => publish(true, choice, '')}>Admit visitors of {choice.provider}</button>)}
+      </div>
+      <form className="inlineform" onSubmit={(e) => {
+        e.preventDefault();
+        publish(true, st.public ? current : choice);
+      }}>
         <input className="mono" placeholder={st.hostLabel ? `host label (now ${st.hostLabel})` : 'host label (optional)'}
-          value={label} disabled={!ec.admin || busy} onChange={(e) => setLabel(e.target.value)}
+          value={label} disabled={off} onChange={(e) => setLabel(e.target.value)}
           title="a label with -- in it, e.g. stage--kino; empty: the one it has, or its natural one" />
-        <button className="primary mini" type="submit" disabled={!ec.admin || busy || (st.public && !label.trim())}
-          title={ec.admin ? '' : NEEDS.admin}>
+        <button className="primary mini" type="submit" disabled={off || (st.public ? !label.trim() : !ready)}
+          title={why || (st.public || ready ? '' : 'choose who it admits first')}>
           {st.public ? 'Change host label' : 'Publish'}
         </button>
         {st.public && (
-          <ConfirmButton className="mini danger" label="Unpublish" confirmLabel="Unpublish: sure?" disabled={!ec.admin || busy}
-            title={ec.admin ? 'the ingress stops serving it; the route door still does' : NEEDS.admin}
+          <ConfirmButton className="mini danger" label="Unpublish" confirmLabel="Unpublish: sure?" disabled={off}
+            title={ec.admin ? 'the ingress stops serving it and its visits end; the route door still does' : NEEDS.admin}
             onConfirm={() => publish(false)} />)}
       </form>
+      {choice.access === 'visitors'
+        ? (
+          <p className="panel-note">A browser that opens it without a visit is sent to {choice.provider || 'the provider'} to sign
+            in; a request that is no navigation, a script&apos;s, a webhook&apos;s or an API client&apos;s, gets 401, so an environment
+            that takes webhooks or serves an API beside its pages stays open to anyone. Changing the provider or unpublishing
+            ends its visits; a person their provider no longer admits keeps their visit for up to 16 minutes.</p>)
+        : choice.access === 'anyone' && <p className="panel-note">Anyone reaches the routes to its image services at its hosts, as
+          their from blocks let them.</p>}
       {!st.public && (
-        <p className="panel-note">The first publish rolls the image services once, so that their pods join the ingress's
+        <p className="panel-note">The first publish rolls the image services once, so that their pods join the ingress&apos;s
           group; publishing again later rolls nothing.</p>)}
       {op && op.tone === 'bad' ? <ErrBox error={op.text} /> : <OpNote op={op} onDismiss={clear} />}
     </div>
   );
+}
+
+// provider is the summary's provider of a name, null unread.
+function provider(list, name) {
+  return (list || []).find((p) => p.name === name) || null;
 }
 
 // DOMAIN_TONES are the state dots of a domain's state.
@@ -522,7 +603,8 @@ export function RouteTokenBox({ env, ec }) {
       <p className="panel-note">
         The route door serves every route of the environment, the ones to attached services too, at{' '}
         <code>/api/v1/environments/{env}/http/…</code> to a request with a route token in <code>X-FeRun-Route-Token</code>.
-        ferund keeps only a token's hash: a new one shows once.
+        ferund keeps only a token's hash: a new one shows once. The route door asks for no visit: a route token reaches the
+        environment whoever its hosts admit.
       </p>
       {token && (
         <Secret value={token} title={`Route token for ${env}`} onDismiss={() => setToken('')}>

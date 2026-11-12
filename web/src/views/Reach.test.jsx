@@ -93,7 +93,7 @@ describe('the builder\'s reachability', () => {
     expect(only).toMatch(/<textarea[^>]*aria-label="from"[^>]*>203.0.113.0\/24\n2001:db8::\/32<\/textarea>/);
     const every = html(form(RouteForm, 'root', SPEC.routes.root));
     expect(every).toContain(pressed('Every client'));
-    expect(text(form(RouteForm, 'root', SPEC.routes.root))).toContain('Every client reaches it while the environment is public.');
+    expect(text(form(RouteForm, 'root', SPEC.routes.root))).toContain('Every client reaches it while the environment is public; one that admits visitors asks for a visit next.');
     expect(text(form(RouteForm, 'x', { ...SPEC.routes.root, from: ['office'] }))).toContain('not an address block: office');
   });
 

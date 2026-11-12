@@ -45,6 +45,11 @@ export function entries({ tenant, nav = [], platform = [], tenants = [], summary
     out.push({ key: 'cred/' + c.name, kind: 'credential', label: c.name, hint: c.upstream || '',
       to: `/tenants/${t}/credentials/${enc(c.name)}`, icon: 'plug' });
   }
+  // The access providers (ADR 0054), ferun among them.
+  for (const p of summary.providers || []) {
+    out.push({ key: 'prov/' + p.name, kind: 'provider', label: p.name, hint: [p.kind, p.url || p.issuer].filter(Boolean).join(' · '),
+      to: `/tenants/${t}/providers/${enc(p.name)}`, icon: 'lock' });
+  }
   for (const j of summary.jobs || []) {
     const e = envName(j);
     out.push({ key: 'job/' + j.id, kind: 'job', label: j.id, hint: [e, j.image, j.phase].filter(Boolean).join(' · '),

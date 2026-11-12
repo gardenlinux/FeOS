@@ -977,7 +977,9 @@ function OtherOptions({ rest, onChange, findings, declared }) {
 
 // RouteClients are a route's clients (ADR 0034, revised): every client
 // (from left out), or only those from its address blocks, which the
-// ingress checks; anything else gets 403.
+// ingress checks; anything else gets 403. Where the environment admits
+// visitors (ADR 0054) the ingress asks for a visit next, before the
+// service.
 function RouteClients({ o, onChange, findings }) {
   const from = Array.isArray(o.from) ? o.from : null;
   const mode = from ? 'only' : 'every';
@@ -986,7 +988,8 @@ function RouteClients({ o, onChange, findings }) {
     <Section title="Clients" hint={fromWords(from)} findings={findings}>
       <Segmented label="clients" value={mode} options={[['every', 'Every client'], ['only', 'Only these blocks']]}
         onChange={(m) => onChange(set(o, 'from', m === 'every' ? undefined : []))} />
-      {mode === 'every' && <p className="sg-note">Every client reaches it while the environment is public.</p>}
+      {mode === 'every' && <p className="sg-note">Every client reaches it while the environment is public; one that admits visitors asks
+        for a visit next.</p>}
       {mode === 'only' && (
         <Field label="Address blocks" findings={findings} problems={problems}
           hint="one per line, of either family; the ingress answers a client outside them with 403">
