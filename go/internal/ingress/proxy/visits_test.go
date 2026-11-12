@@ -1618,12 +1618,13 @@ func TestVisitGuardingClosesOpenConnections(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Error("an open event stream outlived its environment turning guarded")
 	}
-	p.visits.openMu.Lock()
-	n := len(p.visits.open)
-	p.visits.openMu.Unlock()
-	if n != 0 {
-		t.Errorf("%d environments still hold attempts", n)
-	}
+	// The attempts leave the book when their forward returns, which may
+	// be just after the client saw its connection close.
+	eventually(t, "the closed attempts to leave the book", func() bool {
+		p.visits.openMu.Lock()
+		defer p.visits.openMu.Unlock()
+		return len(p.visits.open) == 0
+	})
 }
 
 // A request let in open whose environment turns guarded while its dial

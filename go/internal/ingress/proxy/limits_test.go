@@ -826,12 +826,16 @@ func TestDialOutsideTable(t *testing.T) {
 // F3: a dial that passed the table's check before an unpublish and
 // connects after it does not join the pool: the request routes again by
 // the new table, and no tunnel to the unpublished environment opens.
+// The unpublish closes the attempt itself (visitBook.retable), so the
+// answer may come before the dial under way returns; the counts are read
+// once it has.
 func TestDialDuringUnpublish(t *testing.T) {
 	fn := newFakeNet()
 	handlerAt(t, fn, "fd00::1", wsEcho())
 	p, srv := newTestProxy(t, Config{}, Deps{}, fn, "n1")
 	entered := make(chan struct{}, 1)
 	gate := make(chan struct{})
+	var gatedDone atomic.Int64
 	p.up.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if addr == "[fd00::1]:8080" {
 			select {
@@ -839,6 +843,7 @@ func TestDialDuringUnpublish(t *testing.T) {
 			default:
 			}
 			<-gate
+			defer gatedDone.Add(1)
 		}
 		return fn.dial(ctx, network, addr)
 	}
@@ -867,6 +872,7 @@ func TestDialDuringUnpublish(t *testing.T) {
 	if res.StatusCode != http.StatusNotFound || string(b) != textNoHost+"\n" {
 		t.Errorf("after the unpublish: %d %q", res.StatusCode, b)
 	}
+	eventually(t, "the dial under way to return", func() bool { return gatedDone.Load() == 1 })
 	if fn.dialed("[fd00::1]:8080") != 1 || p.up.open() != 0 || p.m.dialErrors.Load() != 0 {
 		t.Errorf("dials %d, open upstream connections %d, dial errors %d", fn.dialed("[fd00::1]:8080"),
 			p.up.open(), p.m.dialErrors.Load())
