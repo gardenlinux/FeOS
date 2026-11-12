@@ -655,7 +655,7 @@ function SettingsTabs({ route, me, navigate }) {
 }
 
 // The theme switch says where it leads.
-const THEME_LABELS = { light: 'Light mode', dark: 'Dark mode', gta: 'GTA mode' };
+const THEME_LABELS = { light: 'Light mode', dark: 'Dark mode', gta: 'Vice mode' };
 const THEME_ICONS = { light: 'sun', dark: 'moon', gta: 'star' };
 
 // UserMenu is the signed-in person at the topbar's right end: who, the
