@@ -31,6 +31,15 @@ type IngressRoutingRow struct {
 	// latest deployed one (0: none).
 	Deployment, Deployed int
 	CreatedAt            time.Time
+	// Access is who the ingress admits to it (environments.access,
+	// ADR 0054): model.AccessAnyone or model.AccessVisitors.
+	Access string
+	// AccessProvider is the provider whose visitors it admits
+	// (environments.access_provider): "" with AccessVisitors is
+	// model.ProviderFerun. ProviderKind and ProviderURL are that
+	// provider's row (access_providers.kind, url); "" when it has none,
+	// as ferun has not.
+	AccessProvider, ProviderKind, ProviderURL string
 
 	HasInstance bool
 	SandboxID   podid.ID
@@ -58,7 +67,8 @@ type IngressRoutingRow struct {
 // IngressRouting returns what the ingress's table is built from (ADR
 // 0021): every environment that is public, not deleting, of a tenant that
 // is not deleting, with a deployment and a host label, each with its service
-// instances that are not stopping; envIDs limits it to those environments
+// instances that are not stopping, and who it admits with its provider's
+// row (ADR 0054); envIDs limits it to those environments
 // (nil: every one; empty: none). The rows are ordered by environment, then
 // service, replica and sandbox. An environment it leaves out is one the
 // ingress does not serve, whichever of the conditions it fails.
@@ -67,10 +77,12 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 		return nil, nil
 	}
 	rows, err := s.q.Query(ctx, `SELECT e.id, e.owner, e.name, e.host_label, coalesce(t.zone, ''), e.deployment, e.deployed, e.created_at,
+			e.access, coalesce(e.access_provider, ''), coalesce(p.kind, ''), coalesce(p.url, ''),
 			i.sandbox_id, i.object, i.replica, i.deployment, i.phase, i.ingress_ports,
 			s.address, s.client_state, s.op, coalesce(s.node, ''), coalesce(n.ingress_group_version, 0), s.idle_after_s
 		FROM environments e
 		JOIN tenants t ON t.id = e.owner AND t.deleting_at IS NULL
+		LEFT JOIN access_providers p ON p.tenant = e.owner AND p.name = e.access_provider
 		LEFT JOIN env_instances i ON i.env_id = e.id AND i.kind = 'service' AND i.phase <> 'stopping'
 		LEFT JOIN sandboxes s ON s.id = i.sandbox_id
 		LEFT JOIN nodes n ON n.name = s.node
@@ -85,6 +97,7 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 		var sandbox, object, phase, address, state, op *string
 		var replica, deployment *int
 		if err := r.Scan(&row.EnvID, &row.Owner, &row.Name, &row.HostLabel, &row.Zone, &row.Deployment, &row.Deployed, &row.CreatedAt,
+			&row.Access, &row.AccessProvider, &row.ProviderKind, &row.ProviderURL,
 			&sandbox, &object, &replica, &deployment, &phase, &row.IngressPorts,
 			&address, &state, &op, &row.Node, &row.NodeGroupVersion, &row.IdleAfterS); err != nil {
 			return IngressRoutingRow{}, err

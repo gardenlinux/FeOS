@@ -6,6 +6,7 @@ package table
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
+	"github.com/gardenlinux/feos/go/internal/visit"
 )
 
 // The Builder's windows unless a test sets others.
@@ -73,6 +75,9 @@ type Snapshot struct {
 	GroupVersion uint64
 	// Challenges are the pending ACME HTTP-01 answers, sorted by token.
 	Challenges []wire.Challenge
+	// VisitKeys are the installation's keys of visits (ADR 0054); nil
+	// while the Builder has none, and the ingress then signs no one in.
+	VisitKeys *wire.VisitKeys
 	// At is when the read that made the snapshot ended.
 	At time.Time
 	// Healthy: the Builder's last successful read is younger than its
@@ -135,10 +140,10 @@ func (s *Snapshot) unindex(id uuid.UUID) {
 }
 
 // sameContent reports whether s and o hold the same table: environments,
-// their sandboxes, mesh, group version and challenges.
+// their sandboxes, mesh, group version, challenges and visit keys.
 func (s *Snapshot) sameContent(o *Snapshot) bool {
 	if len(s.Envs) != len(o.Envs) || s.GroupVersion != o.GroupVersion || !sameMesh(s.Mesh, o.Mesh) ||
-		!slices.Equal(s.Challenges, o.Challenges) {
+		!slices.Equal(s.Challenges, o.Challenges) || !SameVisitKeys(s.VisitKeys, o.VisitKeys) {
 		return false
 	}
 	for id, e := range s.Envs {
@@ -147,6 +152,15 @@ func (s *Snapshot) sameContent(o *Snapshot) bool {
 		}
 	}
 	return maps.EqualFunc(s.sandboxes, o.sandboxes, slices.Equal)
+}
+
+// SameVisitKeys reports whether a and b are the same keys, or both none.
+func SameVisitKeys(a, b *wire.VisitKeys) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.TokenKID == b.TokenKID && bytes.Equal(a.TokenKey, b.TokenKey) && a.ChallengeKID == b.ChallengeKID &&
+		bytes.Equal(a.ChallengeKey, b.ChallengeKey)
 }
 
 func sameMesh(a, b wire.Mesh) bool {
@@ -163,8 +177,10 @@ func sameMesh(a, b wire.Mesh) bool {
 // whose read returns no rows has left the table: it is not public any
 // more, deleting, of a deleting tenant, or without a deployment. The
 // domains' keys are opened with Sealer; without one, no domain is
-// served. While no one uses it, it reads nothing. It is safe for
-// concurrent use; Run runs its loop.
+// served. Each environment says who it admits (ADR 0054; BuildEnv), with
+// SignIn from its provider and AuthURL, and the snapshot carries the
+// installation's VisitKeys once the Builder has them. While no one uses
+// it, it reads nothing. It is safe for concurrent use; Run runs its loop.
 type Builder struct {
 	// The windows, set before Run (the defaults when zero): changes
 	// collect for Debounce, the whole table is read every Full, and a
@@ -173,6 +189,16 @@ type Builder struct {
 	// Sealer opens the domains' keys; set before Run. Nil: the table
 	// carries no domain.
 	Sealer Opener
+	// AuthURL is ferun-auth's base URL (--visitor-auth-url, without a
+	// trailing slash), where visitors of ferun and of providers of kind
+	// oidc sign in (SignIn); set before Run. "": no ferun-auth.
+	AuthURL string
+	// VisitKeys returns the installation's keys of visits
+	// (visits.Service.Keys); set before Run. A full read calls it until
+	// it succeeded once, and the snapshots carry those keys from then on;
+	// a failure leaves them out of the snapshot (the ingress then signs
+	// no one in) and is tried again at the next full read. Nil: no keys.
+	VisitKeys func(context.Context) (*visit.Keys, error)
 
 	db    *db.DB
 	st    *store.Store
@@ -184,6 +210,10 @@ type Builder struct {
 	// warned of, domainWarned each domain left out; the loop's own.
 	warned       map[uuid.UUID]time.Time
 	domainWarned map[uuid.UUID]time.Time
+	// keys are the visit keys once VisitKeys returned them, keysWarned
+	// when a failure of it was last warned of; the loop's own.
+	keys       *wire.VisitKeys
+	keysWarned time.Time
 
 	mu    sync.Mutex
 	users int
@@ -537,7 +567,7 @@ func (b *Builder) readAll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	envs := Group(rows)
+	envs := b.group(rows)
 	if err := b.addDomains(ctx, envs, nil); err != nil {
 		return err
 	}
@@ -550,7 +580,7 @@ func (b *Builder) readAll(ctx context.Context) error {
 		return err
 	}
 	next := newSnapshot()
-	next.Mesh, next.GroupVersion, next.Challenges = m, version, challenges
+	next.Mesh, next.GroupVersion, next.Challenges, next.VisitKeys = m, version, challenges, b.visitKeys(ctx)
 	for _, e := range envs {
 		env, ids, err := b.build(ctx, e)
 		if unroutable(err) {
@@ -570,6 +600,40 @@ func (b *Builder) readAll(ctx context.Context) error {
 		b.publish(next)
 	}
 	return nil
+}
+
+// group turns rows into environments (Group), each with where its
+// visitors sign in (SignIn).
+func (b *Builder) group(rows []store.IngressRoutingRow) []EnvRows {
+	envs := Group(rows)
+	for i := range envs {
+		envs[i].SignIn = SignIn(envs[i], b.AuthURL)
+	}
+	return envs
+}
+
+// visitKeys returns the visit keys for a full read: the ones the Builder
+// has, else VisitKeys' answer, kept from then on; nil without VisitKeys
+// and while it fails, which is warned of at most every failureLogEvery.
+func (b *Builder) visitKeys(ctx context.Context) *wire.VisitKeys {
+	if b.keys != nil || b.VisitKeys == nil {
+		return b.keys
+	}
+	k, err := b.VisitKeys(ctx)
+	if err == nil && k == nil {
+		err = errors.New("no keys")
+	}
+	if err != nil {
+		if ctx.Err() == nil && time.Since(b.keysWarned) >= failureLogEvery {
+			b.keysWarned = time.Now()
+			b.log.Warn("ingress table: the keys of visits cannot be read; the ingress signs no one in until they can", "err", err)
+		}
+		return nil
+	}
+	b.keys = &wire.VisitKeys{TokenKID: k.TokenKID(), TokenKey: k.TokenKey(), ChallengeKID: k.ChallengeKID(),
+		ChallengeKey: k.ChallengeKey()}
+	b.log.Info("ingress table: carries the keys of visits", "token_kid", b.keys.TokenKID, "challenge_kid", b.keys.ChallengeKID)
+	return b.keys
 }
 
 // build builds an environment's entry (BuildEnv) and warns of the
@@ -666,7 +730,7 @@ func (b *Builder) readSome(ctx context.Context, dirty map[uuid.UUID]struct{}, me
 			ids []podid.ID
 		}
 		got := map[uuid.UUID]built{}
-		envs := Group(rows)
+		envs := b.group(rows)
 		if err := b.addDomains(ctx, envs, ids); err != nil {
 			return err
 		}
