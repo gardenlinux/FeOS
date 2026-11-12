@@ -10,6 +10,7 @@ import { envRole, atLeast, useAccess } from '../people.js';
 import { envPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import { callout, certValid, dnsNow, domainDot, domainSteps, isServed, mayBind, monoSplit, pickDomain, stateLine } from './domains.js';
+import { admitsShort, admitsWords } from './envs.js';
 import '../styles/domains.css';
 
 // The tenant's domains (ADR 0021): the list of its claims with their
@@ -436,6 +437,7 @@ export function BindingCard({ tenant, d, env, envName, access, busy, act, naviga
         {d.environment
           ? <>Bound to {env ? <a className="mono" href={envPath(tenant, env.name)} onClick={link(envPath(tenant, env.name))}>{env.name}</a>
             : <span className="mono">{envName}</span>}{env && !env.public && <span className="warn"> · not public</span>}
+            {env && env.public && <span className="muted"> · {admitsWords(env)}</span>}
             {d.boundAt && <span className="muted"> · since {fmtDate(d.boundAt)}</span>}</>
           : <span className="muted">Bound to no environment.</span>}
       </p>
@@ -453,7 +455,7 @@ export function BindingCard({ tenant, d, env, envName, access, busy, act, naviga
               {envs.filter((e) => e.id !== d.environment).map((e) => {
                 const ok = atLeast(envRole(access, e.id), 'admin');
                 return <option key={e.id} value={e.id} disabled={!ok}>
-                  {e.name}{e.public ? '' : ' (not public)'}{ok ? '' : ' — needs admin'}</option>;
+                  {e.name}{e.public ? ` (${admitsShort(e)})` : ' (not public)'}{ok ? '' : ' — needs admin'}</option>;
               })}
             </select>
             <button className="primary" type="submit" disabled={!to || !!busy || !mayBind(access, d.environment, to)}>
@@ -467,7 +469,8 @@ export function BindingCard({ tenant, d, env, envName, access, busy, act, naviga
         stays unpublished until the environment is published.</p>}
       <p className="panel-note">While <span className="mono">{d.name}</span> is served, the environment's default host answers 404: its
         hosts are its served domains. Unbound, deactivated or with an expired certificate, the environment is back at its default host at
-        once. A binding or a move has the domain checked at once.</p>
+        once. A binding or a move has the domain checked at once. The domain admits whom the environment admits, from its first
+        request: where it admits visitors, a visitor signs in on the domain as on any host of it, with a visit of its own.</p>
     </section>
   );
 }

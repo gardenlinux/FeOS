@@ -8,7 +8,7 @@ import { ErrBox } from '../components.jsx';
 import { readItem, writeItem } from '../storage.js';
 import { envPath } from '../routes.js';
 import { mayBuild, useAccess } from '../people.js';
-import { fmtValue, heavyEffect, statusState } from './envs.js';
+import { admitsWords, fmtValue, heavyEffect, statusState } from './envs.js';
 import {
   addService, decodeDraft, deployBlock, draftKey, draftWords, encodeDraft, getObject, isDnsLabel, isObject, isSecretName,
   keyOfKind, newEnvID, objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
@@ -738,7 +738,8 @@ function Overview({ spec, st, isNew, words, groups, pins, onOpen }) {
       </div>
       <section className="b-sect">
         <header className="b-secthead"><h3 className="b-sectitle">Entry</h3>
-          <span className="muted small b-secthint">{isNew ? 'public once the environment admin makes it so' : hosts.length ? 'public' : 'not public: the route door only'}</span></header>
+          <span className="muted small b-secthint">{isNew ? 'public once the environment admin makes it so, to visitors or to anyone'
+            : hosts.length ? `public · ${admitsWords(st)}` : 'not public: the route door only'}</span></header>
         <div className="b-sectbody">
           {hosts.length > 0 && <div className="b-hosts">{hosts.map((h) => <span key={h} className="mono b-host">{h}</span>)}</div>}
           {routes.length === 0 ? <p className="muted small">No routes: nothing reaches the environment from outside.</p> : (

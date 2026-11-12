@@ -4,7 +4,9 @@
 // The tenant's summary: the lists Home, the sidebar's counts and the
 // search read, asked once per tenant and every SUMMARY_MS, for every
 // page at once. Each list is null while unread and stays null when the
-// role does not offer it or this ferund lacks the route.
+// role does not offer it or this ferund lacks the route. The access
+// providers (ADR 0054) come with the kinds this installation serves
+// (providerKinds), null alike.
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { api } from './api.js';
@@ -19,7 +21,7 @@ const INCIDENT_ENVS = 8;
 
 const empty = {
   tenant: '', sandboxes: null, environments: null, incidents: {}, domains: null, invitations: null, quota: null,
-  jobs: null, credentials: null, at: 0,
+  jobs: null, credentials: null, providers: null, providerKinds: null, at: 0,
 };
 
 const SummaryContext = createContext({ ...empty, items: [], counts: {}, refresh: () => {} });
@@ -45,7 +47,7 @@ export function SummaryProvider({ tenant, can, children }) {
       setData(empty);
       return;
     }
-    const [sandboxes, environments, domains, invitations, quota, jobs, credentials] = await Promise.all([
+    const [sandboxes, environments, domains, invitations, quota, jobs, credentials, providerList] = await Promise.all([
       can.members ? optional(() => api.listSandboxes(), (r) => r.sandboxes || []) : null,
       can.environments ? optional(api.listEnvironments, (r) => r.environments || []) : null,
       can.members ? optional(() => api.listDomains(), (r) => r.domains || []) : null,
@@ -53,13 +55,18 @@ export function SummaryProvider({ tenant, can, children }) {
       can.members ? optional(api.getQuota, (r) => r) : null,
       can.members ? optional(() => api.listJobs(), (r) => r.jobs || []) : null,
       can.readTenant ? optional(api.listCredentials, (r) => r.credentials || []) : null,
+      can.members ? optional(api.listProviders, (r) => r) : null,
     ]);
+    const providers = providerList ? providerList.providers || [] : null;
+    const providerKinds = providerList ? providerList.kinds || [] : null;
     const troubled = (environments || []).filter((e) => Number(e.openIncidents) > 0).slice(0, INCIDENT_ENVS);
     const lists = await Promise.all(troubled.map((e) => optional(
       () => api.listIncidents(e.name, { open: true }), (r) => (r.incidents || []).filter((i) => !i.closedAt))));
     const incidents = {};
     troubled.forEach((e, i) => { if (lists[i]) incidents[e.name] = lists[i]; });
-    setData({ tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, credentials, at: Date.now() });
+    setData({
+      tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, credentials, providers, providerKinds, at: Date.now(),
+    });
   }, [tenant, can.readTenant, can.environments, can.members]);
 
   usePoll(refresh, SUMMARY_MS);
@@ -76,6 +83,8 @@ export function SummaryProvider({ tenant, can, children }) {
     });
     // The credentials (ADR 0033) by their count.
     if (d.credentials) counts.credentials = { n: d.credentials.length };
+    // The access providers (ADR 0054) by their count, ferun with them.
+    if (d.providers) counts.providers = { n: d.providers.length };
     return { ...d, items, counts, refresh };
   }, [data, tenant, refresh]);
 

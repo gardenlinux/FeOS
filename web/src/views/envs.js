@@ -363,6 +363,7 @@ export function actionProblem(e) {
     return `${text} — a new run starts once it ends; try again then.`;
   }
   if (e && e.status === 409 && code === 'not_ready') return `${text} — the job's deployment is not ready yet.`;
+  if (e && e.status === 422 && code === 'unknown_provider') return `${text} — make it on the tenant's Access providers first.`;
   return text;
 }
 
@@ -490,15 +491,53 @@ export function routeCurl(origin, env, token, path = '/') {
   return `curl -H 'X-FeRun-Route-Token: ${token}' ${origin}/api/v1/environments/${encodeURIComponent(env)}/http/${p}`;
 }
 
+// ---------------------------------------------------------------- access --
+
+// UNGUARDED is what the console says of an environment whose ferund
+// answers no access: one from before ADR 0054, which serves every public
+// environment to anyone, whatever a publish asked for.
+export const UNGUARDED = 'this ferund does not guard environments yet: open to anyone';
+
+// admitsOf is who an environment admits (ADR 0054), from its status, its
+// summary or a publish's answer ({access, provider}): {access: 'visitors'
+// | 'anyone', provider, known}, provider the name ('ferun' for the built
+// in one) with visitors; known false when the answer has no access (an
+// older ferund), which then admits anyone.
+export function admitsOf(x) {
+  const a = x && x.access;
+  if (a === 'visitors') return { access: 'visitors', provider: (x && x.provider) || 'ferun', known: true };
+  if (a === 'anyone') return { access: 'anyone', provider: '', known: true };
+  return { access: 'anyone', provider: '', known: false };
+}
+
+// admitsWords says who an environment admits in a sentence's words:
+// "visitors of fecode", "open to anyone".
+export function admitsWords(x) {
+  const a = admitsOf(x);
+  return a.access === 'visitors' ? `visitors of ${a.provider}` : 'open to anyone';
+}
+
+// admitsShort says it in a table's cell: "visitors · fecode", "anyone".
+export function admitsShort(x) {
+  const a = admitsOf(x);
+  return a.access === 'visitors' ? `visitors · ${a.provider}` : 'anyone';
+}
+
 // publishNote says what a publish or unpublish did ({public, hosts,
-// rolling}).
+// rolling, access, provider}), and who the ingress admits now: an answer
+// without access is an older ferund's, which serves it to anyone.
 export function publishNote(res) {
   if (!res) return '';
-  if (!res.public) return 'Unpublished: the ingress stops serving it within a moment; the route door still serves it with a route token.';
+  if (!res.public) {
+    return 'Unpublished: the ingress stops serving it within a moment and its visits end; the route door still serves it with a route token.';
+  }
   const at = (res.hosts || []).length > 0 ? ` at ${res.hosts.join(', ')}` : '';
+  const a = admitsOf(res);
+  const who = !a.known ? `. ${UNGUARDED[0].toUpperCase()}${UNGUARDED.slice(1)}.`
+    : a.access === 'visitors' ? `, admitting visitors of ${a.provider}.` : ', open to anyone.';
   return res.rolling
-    ? `Public${at}. This first publish rolls the image services once, so that their pods join the ingress's group.`
-    : `Public${at}.`;
+    ? `Public${at}${who} This first publish rolls the image services once, so that their pods join the ingress's group.`
+    : `Public${at}${who}`;
 }
 
 // ----------------------------------------------------------------- clone --

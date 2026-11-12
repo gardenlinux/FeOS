@@ -106,7 +106,8 @@ export function can(access) {
     readTenant: atLeast(role, 'read'),
     // write: environments made or deleted, credentials.
     writeTenant: atLeast(role, 'write'),
-    // admin: members' grants, invitations, tokens, the domains' claims.
+    // admin: members' grants, invitations, tokens, the domains' claims,
+    // the access providers (ADR 0054).
     adminTenant: atLeast(role, 'admin'),
     // Any member sees the environments it may read and the members.
     environments: member,
@@ -127,12 +128,15 @@ export function can(access) {
 // environment with its objects, its sandboxes and its jobs (ADR 0035:
 // everything runs in an environment), and the tenant as one entry. Home
 // and the environments for every member (each sees those it may read),
-// the tokens for its admin.
+// the tokens for its admin. The access providers (ADR 0054) for every
+// member, since an environment's admin chooses among them; making one
+// is the tenant admin's.
 export const TENANT_NAV = [
   { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '' },
   { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env', views: ['environments', 'newEnvironment'] },
   { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant' },
   { view: 'credentials', label: 'Credentials', icon: 'plug', path: '/credentials', needs: 'readTenant', group: 'tenant', views: ['credentials', 'newCredential'] },
+  { view: 'providers', label: 'Access providers', icon: 'lock', path: '/providers', needs: 'members', group: 'tenant', views: ['providers', 'newProvider'] },
   { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage' },
   { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage' },
   { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'manage' },
@@ -160,8 +164,9 @@ export const PLATFORM_GROUPS = [
 
 // VIEW_NEEDS are what the tenant's pages outside the sidebar need: a
 // new environment's builder (ADR 0032) and a new credential's form (ADR
-// 0033) a tenant grant write, the tools' reference a tenant grant.
-const VIEW_NEEDS = { newEnvironment: 'writeTenant', newCredential: 'writeTenant', tools: 'readTenant' };
+// 0033) a tenant grant write, a new access provider's form (ADR 0054)
+// admin on the tenant, the tools' reference a tenant grant.
+const VIEW_NEEDS = { newEnvironment: 'writeTenant', newCredential: 'writeTenant', newProvider: 'adminTenant', tools: 'readTenant' };
 
 // tenantNav is the tenant's pages that access offers.
 export function tenantNav(access) {

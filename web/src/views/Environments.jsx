@@ -16,7 +16,7 @@ import { Builder } from './Builder.jsx';
 import { atLeast, envRole, useAccess } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import {
-  changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, hasEvidence, heavyEffect,
+  admitsShort, admitsWords, changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, hasEvidence, heavyEffect,
   incidentObject, instanceNote, instancePhase, isAttached, labelPairs, logSourceText, logsProblem, mayRevertTo, originText, parseLabelFilter,
   phaseTone, deploymentTone, preflightRows, deploymentText, revertOffer, rolloutNote, specBindings, statusState,
   tagPlan,
@@ -62,7 +62,7 @@ export function Environments({ tenant, env, tab, item, otab = 'overview', replic
 
 // envCan is what a role may do on an environment (ADR 0031, the route
 // needs): write on it (revert, tags, secrets, restarts, runs, checks),
-// admin on it (public, route tokens), a delete (admin on it or write on
+// admin on it (public and who it admits, route tokens), a delete (admin on it or write on
 // the tenant), a clone (write on the tenant); operator: the nodes are
 // theirs to open.
 export function envCan(access, env) {
@@ -240,6 +240,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
                         ? <div className="envs-hosts">{e.hosts.map((h) => <span key={h} className="mono host">{h}</span>)}</div>
                         : <span className="muted">public, no host</span>)
                       : <span className="muted">route door only</span>}
+                    {e.public && <div className="muted small">{admitsShort(e)}</div>}
                   </td>
                   <td><Labels labels={e.labels} onLabel={onLabel} /></td>
                   <td className="col-num">
@@ -454,7 +455,8 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
             : st.deleting ? 'ferund removes it' : 'No deployment yet'}
           {' · '}
           {st.public
-            ? <>public{hosts.length > 0 && <> at {hosts.map((h, i) => <Fragment key={h}>{i > 0 && ', '}<HostLink host={h} /></Fragment>)}</>}</>
+            ? <>public{hosts.length > 0 && <> at {hosts.map((h, i) => <Fragment key={h}>{i > 0 && ', '}<HostLink host={h} /></Fragment>)}</>}
+              {' · '}{admitsWords(st)}</>
             : 'not public · route door only'}
           {dh && !dh.serving && <> · default host <span className="mono">{dh.label}</span> answers 404 while a domain is served</>}
           {dh && dh.serving && hosts.length > 1 && <> · default host <HostLink host={dh.host} /></>}

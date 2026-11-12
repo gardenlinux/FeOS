@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api.js';
 import { response } from '../testing/ferun.js';
 import {
-  actionProblem, activityItems, CHANGES_READ, changesTo, changeTone, cloneBody, conditionText, defaultHost,
+  UNGUARDED, actionProblem, activityItems, admitsOf, admitsShort, admitsWords, CHANGES_READ, changesTo, changeTone, cloneBody, conditionText, defaultHost,
   definitionRows, deploymentTone, envCounts, envDomains, envRows, envValueRef, errorShare, exitText, findObject,
   fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments, instanceNote, instancePhase,
   jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
@@ -384,10 +384,43 @@ describe('domains and access', () => {
     expect(routeCurl('https://run.example.com', 'expensa-stage', 'tok', '/api/x'))
       .toBe("curl -H 'X-FeRun-Route-Token: tok' https://run.example.com/api/v1/environments/expensa-stage/http/api/x");
     expect(routeCurl('', 'a b', 't')).toBe("curl -H 'X-FeRun-Route-Token: t' /api/v1/environments/a%20b/http/");
-    expect(publishNote(response('PUT_environments_env_public.200')))
-      .toBe('Public at expensa-stage-fecode.apps.fecode.dev. This first publish rolls the image services once, so that their pods join the ingress\'s group.');
-    expect(publishNote({ public: true, hosts: [], rolling: false })).toBe('Public.');
-    expect(publishNote({ public: false, hosts: [] })).toContain('Unpublished');
+    // A publish that says nothing admits visitors of ferun (ADR 0054).
+    expect(publishNote(response('PUT_environments_env_public.200'))).toBe('Public at expensa-stage-fecode.apps.fecode.dev, admitting '
+      + 'visitors of ferun. This first publish rolls the image services once, so that their pods join the ingress\'s group.');
+    expect(publishNote(response('PUT_environments_env_public.200.anyone')))
+      .toBe('Public at expensa-stage-fecode.apps.fecode.dev, open to anyone.');
+    expect(publishNote({ public: true, hosts: [], rolling: false, access: 'visitors', provider: 'fecode' }))
+      .toBe('Public, admitting visitors of fecode.');
+    // An older ferund answers no access, and serves it to anyone.
+    expect(publishNote({ public: true, hosts: [], rolling: false }))
+      .toBe('Public. This ferund does not guard environments yet: open to anyone.');
+    expect(publishNote({ public: false, hosts: [], access: 'visitors', provider: 'ferun' })).toBe('Unpublished: the ingress stops '
+      + 'serving it within a moment and its visits end; the route door still serves it with a route token.');
+  });
+
+  it('say who an environment admits: visitors of a provider, or anyone (ADR 0054)', () => {
+    expect(admitsOf(STAGE)).toEqual({ access: 'visitors', provider: 'fecode', known: true });
+    expect(admitsWords(STAGE)).toBe('visitors of fecode');
+    expect(admitsShort(STAGE)).toBe('visitors · fecode');
+    expect(admitsOf(PREVIEW)).toEqual({ access: 'anyone', provider: '', known: true });
+    expect(admitsWords(PREVIEW)).toBe('open to anyone');
+    expect(admitsShort(PREVIEW)).toBe('anyone');
+    // The list says it of each, the public one guarded.
+    expect(LIST.map(admitsShort)).toEqual(['visitors · fecode', 'anyone', 'anyone']);
+    // The built-in provider when a ferund names none with visitors; an
+    // answer without access is an older ferund's: anyone.
+    expect(admitsOf({ public: true, access: 'visitors' })).toEqual({ access: 'visitors', provider: 'ferun', known: true });
+    expect(admitsOf({ public: true })).toEqual({ access: 'anyone', provider: '', known: false });
+    expect(admitsOf(null).known).toBe(false);
+    expect(UNGUARDED).toBe('this ferund does not guard environments yet: open to anyone');
+  });
+
+  it('point an unknown provider to the tenant\'s providers, and keep ferund\'s sentence of a missing key', () => {
+    const e = new ApiError('no provider sso in this tenant', 422, { code: 'unknown_provider' });
+    expect(actionProblem(e)).toBe('no provider sso in this tenant — make it on the tenant\'s Access providers first.');
+    const k = new ApiError('this installation guards no environments: ferund runs without --secret-key-file', 409,
+      { code: 'visits_need_secret_key' });
+    expect(actionProblem(k)).toBe('this installation guards no environments: ferund runs without --secret-key-file');
   });
 
   it('clone with the chosen deployment and the secrets copied', () => {

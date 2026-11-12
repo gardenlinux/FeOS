@@ -60,6 +60,9 @@ describe('EnvTable', () => {
     // A public one shows its hosts, teal; the others serve at the route door only.
     expect(out).toContain('<span class="mono host">expensa-stage-fecode.apps.fecode.dev</span>');
     expect(count(out, 'route door only')).toBe(2);
+    // and whom it admits (ADR 0054); the others admit nobody at a host.
+    expect(count(out, '<div class="muted small">visitors · fecode</div>')).toBe(1);
+    expect(out).not.toContain('>anyone<');
     expect(out).toContain('<span class="badge bad">1 open</span>');
     expect(count(out, '<span class="muted">0</span>')).toBe(2);
   });
@@ -575,7 +578,7 @@ describe('EnvHead', () => {
     expect(out).toContain('<span class="statepill failed">');
     expect(words(STAGE)).toContain('1 open incident');
     expect(words(STAGE)).toContain('Deployment 7 deploying, started');
-    expect(words(STAGE)).toContain('deployment 6 serves meanwhile · public at expensa-stage-fecode.apps.fecode.dev');
+    expect(words(STAGE)).toContain('deployment 6 serves meanwhile · public at expensa-stage-fecode.apps.fecode.dev · visitors of fecode');
     expect(out).toContain('Revert to 6');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/builder"');
     // public at its host, teal and a link
@@ -612,6 +615,15 @@ describe('EnvHead', () => {
 
   it('says not public for one the route door alone serves', () => {
     expect(words({ ...PREVIEW, public: false, hosts: [] })).toContain('not public · route door only');
+  });
+
+  it('says who a public one admits: anyone, or anyone from an older ferund that answers no access', () => {
+    const open = { ...PREVIEW, public: true, hosts: ['p.apps.fecode.dev'] };
+    expect(words(open)).toContain('public at p.apps.fecode.dev · open to anyone');
+    const { access, provider, ...old } = STAGE;
+    expect(access).toBe('visitors');
+    expect(provider).toBe('fecode');
+    expect(words(old)).toContain('public at expensa-stage-fecode.apps.fecode.dev · open to anyone');
   });
 });
 
@@ -735,6 +747,71 @@ describe('the domains & access tab', () => {
     expect(on).toContain('<a class="mono host" href="https://expensa-stage-fecode.apps.fecode.dev"');
     expect(html(<PublicBox env="e" st={off} ec={{ ...ALL, admin: false }} domains={[]} changed={nav} />))
       .toContain('title="needs admin on this environment"');
+  });
+
+  // The providers as GET /api/v1/providers answers them, and the kinds an
+  // installation with ferun-auth serves.
+  const PROVIDERS = [
+    { name: 'ferun', kind: 'ferun', builtIn: true, environments: [] },
+    { name: 'sso', kind: 'oidc', builtIn: false, issuer: 'https://login.example.com/', rule: { domains: ['example.com'] }, environments: [] },
+    { name: 'fecode', kind: 'tenant', builtIn: false, url: 'https://fecode.dev/api/v1/visit', environments: [{ id: STAGE.id, name: STAGE.name }] },
+  ];
+  const KINDS = ['tenant', 'ferun', 'oidc'];
+  const box = (st, extra = {}) => <PublicBox env="e" st={st} ec={ALL} domains={[]} changed={nav} providers={PROVIDERS} kinds={KINDS} {...extra} />;
+
+  it("admits visitors of ferun by default on a first publish, where the installation serves it (ADR 0054)", () => {
+    const off = { ...STAGE, public: false, hosts: [], access: 'anyone', provider: '' };
+    const out = html(box(off));
+    expect(out).toContain('<button type="button" class="on" title="">Visitors</button>');
+    expect(out).toContain('<button type="button" class="" title="">Anyone</button>');
+    // ferun first, then the tenant's by name, each with its kind.
+    expect(out).toMatch(/<option value="ferun" selected="">ferun · FeRun sign-in<\/option><option value="fecode">fecode · your own service<\/option><option value="sso">sso · OpenID Connect<\/option>/);
+    expect(out).toContain('<button class="primary mini" type="submit" title="">Publish</button>');
+    const all = text(box(off));
+    expect(all).toContain('is sent to ferun to sign in');
+    expect(all).toContain('gets 401');
+    expect(all).toContain('stays open to anyone');
+    expect(all).toContain('Changing the provider or unpublishing ends its visits');
+    expect(all).toContain('for up to 16 minutes');
+    // Who it admits is said once it is public, not before.
+    expect(all).not.toContain('admits visitors');
+  });
+
+  it('has no default without ferun-auth: the admin chooses, and the kinds not served are disabled', () => {
+    const off = { ...STAGE, public: false, hosts: [], access: 'anyone', provider: '' };
+    const out = html(box(off, { kinds: ['tenant'] }));
+    expect(out).toContain('<button type="button" class="" title="">Visitors</button>');
+    expect(out).toContain('<button type="button" class="" title="">Anyone</button>');
+    expect(out).not.toContain('<select');
+    expect(text(box(off, { kinds: ['tenant'] }))).toContain('Choose who it admits');
+    expect(out).toContain('disabled="" title="choose who it admits first">Publish</button>');
+  });
+
+  it("shows a public one's access, with its provider in words, and keeps it on a new host label", () => {
+    const out = html(box(STAGE));
+    expect(out).toContain('visitors · fecode');
+    expect(text(box(STAGE))).toContain('admits visitors · fecode whom https://fecode.dev/api/v1/visit admits');
+    expect(out).toContain('<option value="fecode" selected="">fecode · your own service</option>');
+    // Nothing to change yet: no Open to anyone, no Admit.
+    expect(out).not.toContain('Open to anyone');
+    expect(out).not.toContain('Admit visitors of');
+    expect(out).toContain('Change host label');
+    expect(out).toContain('Unpublish');
+    const open = text(box({ ...STAGE, access: 'anyone', provider: '' }));
+    expect(open).toContain('admits anyone every request its routes let through');
+    expect(open).toContain('Anyone reaches the routes to its image services');
+  });
+
+  it('says that an older ferund guards nothing, and offers the current provider when the list is not readable', () => {
+    const { access, provider, ...old } = STAGE;
+    expect(access).toBe('visitors');
+    expect(text(box({ ...old, provider }))).toContain('admits anyone this ferund does not guard environments yet: open to anyone');
+    const unread = html(<PublicBox env="e" st={STAGE} ec={ALL} domains={[]} changed={nav} providers={null} kinds={null} />);
+    expect(unread).toContain('<option value="ferun">ferun · FeRun sign-in</option><option value="fecode" selected="">fecode</option>');
+    const noFerun = html(box({ ...STAGE, provider: 'sso' }, { kinds: ['tenant'] }));
+    expect(noFerun).toContain('<option value="ferun" disabled="">ferun · FeRun sign-in — not served by this installation</option>');
+    expect(noFerun).toContain('<option value="sso" disabled="" selected="">sso · OpenID Connect — not served by this installation</option>');
+    expect(text(box({ ...STAGE, provider: 'sso' }, { kinds: ['tenant'] }))).toContain('nobody can sign in');
   });
 
   it('lists the domains bound to it, linked to their pages', () => {
