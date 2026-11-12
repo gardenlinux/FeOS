@@ -272,11 +272,11 @@ func (c *cluster) ingressHeld(p *ingressProc, id podid.ID, instanceID string) bo
 }
 
 // cachedService is the service name of the environment as the ingress's
-// cached table (table.json) has it. The agent hands a table to the proxy
+// cached table (table-v2.json) has it. The agent hands a table to the proxy
 // before it writes the cache, so what the cache shows the proxy routes by
 // already (or by a newer table).
 func (p *ingressProc) cachedService(envID uuid.UUID, name string) (wire.Service, bool) {
-	b, err := os.ReadFile(filepath.Join(p.cfg.StateDir, "table.json"))
+	b, err := os.ReadFile(filepath.Join(p.cfg.StateDir, "table-v2.json"))
 	if err != nil {
 		return wire.Service{}, false
 	}
@@ -941,7 +941,7 @@ func TestIngressSurvivesControlPlane(t *testing.T) {
 	host := c.publishApp(envID, 1)
 	pods := p.waitServing(host, 1, 60*time.Second)
 	eventually(t, 30*time.Second, "the table cached", func() bool {
-		b, err := os.ReadFile(filepath.Join(p.cfg.StateDir, "table.json"))
+		b, err := os.ReadFile(filepath.Join(p.cfg.StateDir, "table-v2.json"))
 		return err == nil && bytes.Contains(b, []byte(host))
 	})
 
