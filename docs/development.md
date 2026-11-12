@@ -63,7 +63,8 @@ feid/                   FeID, versioned on its own (ADR 0014): feid/1's
                         the workspace, without dependencies on FeOS's crates
 proto/feos/<api>/v1/    the gRPC APIs, package feos.<api>.v1
 go/                     the Go module github.com/gardenlinux/feos/go: ferund,
-                        ferun-ingress, ferun-testnode and feos-k8s (cmd/),
+                        ferun-ingress, ferun-auth, ferun-testnode and
+                        feos-k8s (cmd/),
                         their packages (internal/), the generated code of
                         proto/ (gen/)
 web/                    ferund's management UI (React, Vite), built into
@@ -135,6 +136,13 @@ Each binary is named after where it runs ([ADR 0003](adr/0003-programs.md)):
   ([ADR 0021](adr/0021-ingress.md),
   [architecture/ingress.md](architecture/ingress.md)). It ships in
   `ferund`'s image as `/ferun-ingress`. Static, `CGO_ENABLED=0`.
+- **`ferun-auth`** (`go/cmd/ferun-auth`): the access provider of the
+  kinds `ferun` and `oidc`, an OpenID Connect relying party on a host of
+  its own that signs a guarded environment's visitors in at the
+  installation's issuer or at a tenant's and answers their challenges at
+  `ferund` ([ADR 0054](adr/0054-visitors-of-an-environment.md)). It
+  holds no state and links no database driver. It ships in `ferund`'s
+  image as `/ferun-auth`. Static, `CGO_ENABLED=0`.
 - **`ferun-testnode`** (`go/cmd/ferun-testnode`): a node in memory that
   speaks feosd's side of the wire, for developing ferund and its UI
   without microVMs.
@@ -218,8 +226,8 @@ tests.
     make go-test         # every Go test, against a throwaway PostgreSQL 17 in
                          # docker, or the one FERUN_TEST_DATABASE_URL names
     make go-test-unit    # the Go tests; those that need a database skip
-    make go-build        # static ferund, ferun-ingress, ferun-testnode and
-                         # feos-k8s: target/go/
+    make go-build        # static ferund, ferun-ingress, ferun-sink, ferun-auth,
+                         # ferun-testnode and feos-k8s: target/go/
     make go-test-netns   # ferun-ingress's WireGuard test in network
                          # namespaces of its own; needs sudo -n
     make go-gen          # go/gen from proto/, after a change of a .proto

@@ -25,6 +25,12 @@
 # on for --shutdown-delay (10 s), then waits for its requests for up to
 # --shutdown-grace (40 s) and releases its holds within 2 s: its pods set a
 # termination grace above the sum, 60 s.
+#
+# It carries ferun-auth too (ADR 0054), the access provider of the kinds
+# ferun and oidc, built static into /ferun-auth, whose pods run the image
+# with that entrypoint as its nonroot user. On SIGTERM its /readyz fails
+# for --shutdown-delay (5 s), then its requests have 10 s: Kubernetes'
+# default termination grace of 30 s covers both.
 
 # The management UI. The stage keeps the checkout's layout (/src/web beside
 # /src/go), so that the build writes go/internal/ui/dist as
@@ -50,6 +56,7 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /out/ferund ./cmd/ferund
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /out/ferun-ingress ./cmd/ferun-ingress
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /out/ferun-sink ./cmd/ferun-sink
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-X main.version=${VERSION}" -o /out/ferun-auth ./cmd/ferun-auth
 
 # ferun-sink's image: the program alone, its API and its ingest.
 FROM gcr.io/distroless/static-debian12:nonroot AS ferun-sink
@@ -62,6 +69,7 @@ CMD ["serve"]
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/ferund /ferund
 COPY --from=build /out/ferun-ingress /ferun-ingress
+COPY --from=build /out/ferun-auth /ferun-auth
 # The front doors (REST, MCP, the UI, the ports) and the nodes' port.
 EXPOSE 8100 7443
 ENTRYPOINT ["/ferund"]

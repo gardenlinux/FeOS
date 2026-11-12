@@ -42,11 +42,12 @@ go-gen: $(LOCALBIN)/protoc-gen-go $(LOCALBIN)/protoc-gen-go-grpc ## Generate go/
 		$(foreach m,$(GO_PROTO_MAP),'--go-grpc_opt=$(m)') \
 		$(GO_PROTOS)
 
-go-build: feos-k8s ## Build ferund, ferun-ingress, ferun-sink, ferun-testnode and feos-k8s, static, into target/go/.
+go-build: feos-k8s ## Build ferund, ferun-ingress, ferun-sink, ferun-auth, ferun-testnode and feos-k8s, static, into target/go/.
 	mkdir -p $(GO_OUT)
 	cd $(GO_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o ../$(GO_OUT)/ferund ./cmd/ferund
 	cd $(GO_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o ../$(GO_OUT)/ferun-ingress ./cmd/ferun-ingress
 	cd $(GO_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o ../$(GO_OUT)/ferun-sink ./cmd/ferun-sink
+	cd $(GO_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o ../$(GO_OUT)/ferun-auth ./cmd/ferun-auth
 	cd $(GO_DIR) && CGO_ENABLED=0 $(GO) build -trimpath -o ../$(GO_OUT)/ferun-testnode ./cmd/ferun-testnode
 
 feos-k8s: ## Build feos-k8s, the controller of FeOS on Kubernetes (ADR 0020), static, into target/go/.

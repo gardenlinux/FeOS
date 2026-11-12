@@ -14,6 +14,7 @@ what FeOS needs (ublk, tun, vhost-vsock, WireGuard, nftables).
 | [`feos/`](feos/) | namespace `feos`, the DaemonSet `feos-node` on every worker of the pool `WORKER_POOL`, and `feos-k8s` | diskd and feosd in a pod per worker, whose microVMs live in it (ADR 0020); feos-k8s joins new workers and drains cordoned ones in FeRun |
 | [`ferun/`](ferun/) | namespace `ferun` | ferund, three instances, one on each worker, and its PostgreSQL `ferun-db`, a CloudNativePG cluster of three instances, one on each worker ([`ferun/postgres.yaml`](ferun/postgres.yaml)); the k3s manifests of ferund ([`../k3s/ferun`](../k3s/ferun)) with the nodes' port at a shoot address; `https://run.<DOMAIN>` by the HTTPRoute [`ferun/route.yaml`](ferun/route.yaml) in place of k3s's Ingress |
 | [`ferun-sink/`](ferun-sink/) | namespace `ferun` | ferun-sink, two instances over the database `sink` of `ferun-db` and Quickwit (`quickwit/`): the nodes ship logs to its ingest's instances, tenants read at `https://run.<DOMAIN>/api/v1/logs` ([The sink](#the-sink)) |
+| [`ferun-auth/`](ferun-auth/) | namespace `ferun` | ferun-auth, two instances, the access provider of the kinds `ferun` and `oidc`: guarded environments' visitors sign in at `https://<AUTH_HOST>` ([Visitors](#visitors)) |
 | [`ferun-ingress/`](ferun-ingress/) | namespace `ferun-ingress` | ferun-ingress, an instance on every worker, behind a LoadBalancer of their own with `externalTrafficPolicy: Local`: `https://<label>.<APPS_ZONE>`, public environments' hosts, straight to their pods over the mesh ([The ingress](#the-ingress)) |
 | [`../k3s/fechat`](../k3s/fechat), [`fechat/`](fechat/) | namespace `fechat` | FeChat, unchanged but for its route: `https://chat.<DOMAIN>` by the HTTPRoute [`fechat/route.yaml`](fechat/route.yaml) in place of k3s's Ingress |
 | [`registry/`](registry/) | namespace `registry` | an image registry, `https://oci.<DOMAIN>`: distribution with its blobs in an object store |
@@ -100,6 +101,8 @@ on make's command line wins over the file.
 | `TENANT_ZONE` | the zone of the default hosts of the tenants people make (ADR 0031), ferund's `--tenant-zone`, beside `APPS_ZONE`, where the tenants operators make keep theirs: default empty, none; with it, make renders [`ferun-ingress/tenant-zone.yaml`](ferun-ingress/tenant-zone.yaml), its wildcard certificate, which the instances mount and serve ([The ingress](#the-ingress)); neither zone may be or lie under the other ([`config.env.example`](config.env.example)) |
 | `NODE_CIDR` | the workers' network (`spec.networking.nodes`), the only source let through to ferun-ingress's health port and mesh, and the only network its mesh may send to: default `10.250.0.0/16` |
 | `DENY_PREFIXES` | what the pods may not reach, feosd's `--deny-prefix`, and, beside its built-in set, what ferund's preflights, bindings and image resolver may not (its `--deny-prefix`): every network of the shoot, its nodes', pods' and services' (the ConfigMap `kube-system/shoot-info` states them), and the private ranges; no default, since a network left out is open to the microVMs, and `apply-feos` stops on one ([`config.env.example`](config.env.example)) |
+| `AUTH_HOST`, `AUTH_ALLOW_PREFIXES`, `GATEWAY_PODS_NAMESPACE` | ferun-auth (ADR 0054): its host (default `auth.<DOMAIN>`), the private blocks an issuer may be reached in despite the deny set (default none), and the namespace of the Gateway's Envoy pods (default `envoy-gateway-system`) ([Visitors](#visitors)) |
+| `VISITOR_AUTH_URL` | ferund's `--visitor-auth-url`, `https://<AUTH_HOST>` once ferun-auth runs; empty, the default, ferund serves providers of kind `tenant` alone ([Visitors](#visitors)) |
 | `FECHAT_MODEL` | FeChat's model at the LLM gateway |
 
 The manifests say `${NAME}` where a parameter goes. The Makefile's
@@ -466,6 +469,67 @@ tenant's job asks for up to 400 (`FERUN_SINK_LOG_RETENTION_MAX`,
 `ferun-logs-v5-400d`).
 The chunks the sink wrote before Quickwit all moved into the index on
 2026-10-31.
+
+## Visitors
+
+A public environment admits `anyone` or the `visitors` of one of its
+tenant's providers (ADR 0054): ferun-ingress sends a navigation without
+a visit to the provider with a challenge, the provider answers it at
+ferund, and the ingress keeps the visit in a cookie on the host. A
+provider of kind `tenant` is the tenant's own service and needs nothing
+here. The kinds `ferun` (the installation's issuer, `OIDC_ISSUER`, and a
+grant on the environment) and `oidc` (an issuer a tenant names) sign in
+at ferun-auth: the Deployment `ferun-auth` of
+[`ferun-auth/`](ferun-auth/ferun-auth.yaml), two instances in the
+namespace `ferun` that hold no state, at `https://<AUTH_HOST>`, a host
+of its own on the Gateway. Its program ships in ferund's image
+(`/ferun-auth`). It talks to ferund inside the cluster
+(`http://ferund.ferun.svc:8100`) with a service token of its own kind,
+and fetches from issuers only at public addresses: never ferund's deny
+set (`FERUN_DENY_PREFIX`) but the blocks of `AUTH_ALLOW_PREFIXES`, its
+NetworkPolicy beside. Visits need ferund's `--secret-key-file`.
+
+Setting it up, with every instance of ferund and ferun-ingress on a
+version that knows visitors, and `VISITOR_AUTH_URL` still empty:
+
+1. The host: a DNS record for `AUTH_HOST` at the Gateway's address, and
+   a listener of the Gateway for it, HTTPS, its certificate from the
+   issuer of [`cluster.yaml`](cluster.yaml), admitting the routes of the
+   namespace `ferun` (as run.<DOMAIN>'s).
+
+2. ferun-auth's service token at ferund:
+
+       kubectl -n ferun exec deploy/ferund -- /ferund service-token --kind auth --name ferun-auth
+       kubectl -n ferun create secret generic ferun-auth-token --from-literal=token=<token>
+
+3. Its client at `OIDC_ISSUER`, for kind `ferun`: the redirect URI
+   `https://<AUTH_HOST>/callback`, the back-channel logout URI
+   `https://<AUTH_HOST>/backchannel/ferun` with
+   `backchannel_logout_session_required`, the grant
+   `authorization_code`, the scopes `openid profile email`,
+   `client_secret_basic`; then the key that seals a sign-in in flight,
+   one for both instances:
+
+       kubectl -n ferun create secret generic oidc-client-ferun-auth \
+         --from-literal=client_id=<id> --from-literal=client_secret=<secret>
+       kubectl -n ferun create secret generic ferun-auth-key --from-literal=key="$(openssl rand -base64 32)"
+
+4. The manifests, the Deployment, its Service, PodDisruptionBudget,
+   NetworkPolicy and route:
+
+       make -C deploy/gardener apply-ferun-auth
+       kubectl -n ferun rollout status deployment/ferun-auth --timeout=5m
+
+5. ferund told where ferun-auth is: `VISITOR_AUTH_URL=https://<AUTH_HOST>`
+   in `config.env`, then `apply-ferun`. Once that rollout has finished,
+   `GET /api/v1/providers` answers the kinds `tenant`, `ferun` and
+   `oidc` and the redirect URI a tenant registers at its own issuer for a
+   provider of kind `oidc`, with the back-channel URI
+   `https://<AUTH_HOST>/backchannel/<tenant>/<provider>` its view names.
+
+A new image: `make -C deploy/gardener deploy-ferun-auth TAG=<tag>`
+pushes ferund's image and rolls ferun-auth. Without ferun-auth, sign-ins
+of the kinds `ferun` and `oidc` fail; visits already made live on.
 
 ## Moving the database
 

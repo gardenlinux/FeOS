@@ -46,7 +46,18 @@ TAG ?= dev
 # ferun-sink's image: a platform image, on GHCR with FeOS's others, not in
 # the projects' registry (README.md, The sink).
 SINK_IMAGE ?= $(PLATFORM_REGISTRY)/ferun-sink:$(TAG)
-export DOMAIN REGISTRY PLATFORM_REGISTRY SINK_IMAGE OIDC_ISSUER WORKER_POOL NODE_NAME_PREFIX FERUN_NODES_IP FERUN_ROLLOUT_GRACE FECHAT_MODEL APPS_ZONE APPS_ZONE_OWNERS TENANT_ZONE TENANT_ZONE_TLS_CERT TENANT_ZONE_TLS_KEY NODE_CIDR DENY_PREFIXES FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE
+# ferun-auth (ADR 0054, README.md, Visitors): its host, its image (ferund's,
+# which carries /ferun-auth), the namespace of the Gateway's Envoy pods,
+# which reach it, and the private blocks an issuer may be in
+# (config.env.example). VISITOR_AUTH_URL is ferund's --visitor-auth-url,
+# https://<AUTH_HOST> once ferun-auth runs; empty, ferund serves providers
+# of kind tenant alone.
+AUTH_HOST ?= $(if $(DOMAIN),auth.$(DOMAIN))
+AUTH_IMAGE ?= $(PLATFORM_REGISTRY)/ferund:$(TAG)
+GATEWAY_PODS_NAMESPACE ?= envoy-gateway-system
+AUTH_ALLOW_PREFIXES ?=
+VISITOR_AUTH_URL ?=
+export DOMAIN REGISTRY PLATFORM_REGISTRY SINK_IMAGE OIDC_ISSUER WORKER_POOL NODE_NAME_PREFIX FERUN_NODES_IP FERUN_ROLLOUT_GRACE FECHAT_MODEL APPS_ZONE APPS_ZONE_OWNERS TENANT_ZONE TENANT_ZONE_TLS_CERT TENANT_ZONE_TLS_KEY NODE_CIDR DENY_PREFIXES FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE AUTH_HOST AUTH_IMAGE GATEWAY_PODS_NAMESPACE AUTH_ALLOW_PREFIXES VISITOR_AUTH_URL
 DOCKER ?= docker
 PACKAGES_DIR ?= $(REPO_ROOT)/target/packages
 CONTEXT := $(REPO_ROOT)/target/gardener/feos-node
@@ -69,8 +80,8 @@ endef
 cat-yaml = awk 'FNR==1{print "---"}1' $(1)
 
 .PHONY: feos-node push-feos-node deploy-feos feos-k8s push-feos-k8s deploy-feos-k8s
-.PHONY: ferund push-ferund deploy-ferund deploy-ferun-ingress ferun-sink push-ferun-sink deploy-ferun-sink
-.PHONY: manifests apply-feos apply-ferun apply-ferun-db-import apply-ferun-ingress apply-ferun-sink apply-quickwit apply-kafka apply-fechat apply-registry FORCE
+.PHONY: ferund push-ferund deploy-ferund deploy-ferun-ingress ferun-sink push-ferun-sink deploy-ferun-sink deploy-ferun-auth
+.PHONY: manifests apply-feos apply-ferun apply-ferun-db-import apply-ferun-ingress apply-ferun-sink apply-ferun-auth apply-quickwit apply-kafka apply-fechat apply-registry FORCE
 
 # feosd, diskd, feosctl, Firecracker and the guest from the packages, for
 # the feos-node pod (ADR 0020).
@@ -120,7 +131,12 @@ deploy-ferun-sink: push-ferun-sink ## Push ferun-sink's image and roll it.
 	kubectl -n ferun set image deployment/ferun-sink ferun-sink=$(SINK_IMAGE)
 	kubectl -n ferun rollout status deployment/ferun-sink --timeout=5m
 
-manifests: $(MANIFESTS)/feos.yaml $(MANIFESTS)/feos-k8s.yaml $(MANIFESTS)/ferun.yaml $(MANIFESTS)/fechat.yaml $(MANIFESTS)/registry.yaml $(MANIFESTS)/ferun-ingress.yaml $(MANIFESTS)/ferun-sink.yaml ## Write every part's manifests, with the parameters, to target/gardener/manifests.
+# ferun-auth ships in ferund's image too (README.md, Visitors).
+deploy-ferun-auth: push-ferund ## Push ferund's image and roll ferun-auth.
+	kubectl -n ferun set image deployment/ferun-auth ferun-auth=$(AUTH_IMAGE)
+	kubectl -n ferun rollout status deployment/ferun-auth --timeout=5m
+
+manifests: $(MANIFESTS)/feos.yaml $(MANIFESTS)/feos-k8s.yaml $(MANIFESTS)/ferun.yaml $(MANIFESTS)/fechat.yaml $(MANIFESTS)/registry.yaml $(MANIFESTS)/ferun-ingress.yaml $(MANIFESTS)/ferun-sink.yaml $(MANIFESTS)/ferun-auth.yaml ## Write every part's manifests, with the parameters, to target/gardener/manifests.
 
 $(MANIFESTS)/feos.yaml: REGISTRY = $(PLATFORM_REGISTRY)
 $(MANIFESTS)/feos.yaml: FORCE
@@ -134,7 +150,7 @@ $(MANIFESTS)/feos-k8s.yaml: FORCE
 # switches ferund's hosts off.
 $(MANIFESTS)/ferun.yaml: REGISTRY = $(PLATFORM_REGISTRY)
 $(MANIFESTS)/ferun.yaml: FORCE
-	$(call render,DOMAIN REGISTRY OIDC_ISSUER FERUN_NODES_IP FERUN_ROLLOUT_GRACE FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME,kubectl kustomize --load-restrictor LoadRestrictionsNone ferun,APPS_ZONE APPS_ZONE_OWNERS TENANT_ZONE EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE)
+	$(call render,DOMAIN REGISTRY OIDC_ISSUER FERUN_NODES_IP FERUN_ROLLOUT_GRACE FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME,kubectl kustomize --load-restrictor LoadRestrictionsNone ferun,APPS_ZONE APPS_ZONE_OWNERS TENANT_ZONE EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE VISITOR_AUTH_URL)
 
 # Once, when ferund moves from the StatefulSet postgres to ferun-db
 # (README.md): ferun-db created from a copy of postgres-0's database.
@@ -159,6 +175,10 @@ $(MANIFESTS)/ferun-ingress.yaml: FORCE
 
 $(MANIFESTS)/ferun-sink.yaml: FORCE
 	$(call render,DOMAIN SINK_IMAGE GATEWAY_NAMESPACE GATEWAY_NAME,cat ferun-sink/ferun-sink.yaml)
+
+# Without DENY_PREFIXES ferun-auth denies the built-in set alone.
+$(MANIFESTS)/ferun-auth.yaml: FORCE
+	$(call render,AUTH_HOST AUTH_IMAGE OIDC_ISSUER GATEWAY_NAMESPACE GATEWAY_NAME GATEWAY_PODS_NAMESPACE NODE_CIDR,cat ferun-auth/ferun-auth.yaml,FERUN_DENY_PREFIX AUTH_ALLOW_PREFIXES)
 
 # A network of the shoot that DENY_PREFIXES leaves out is open to the
 # microVMs, which leave through the feos-node pod on the host's network:
@@ -200,6 +220,11 @@ apply-ferun-ingress: $(MANIFESTS)/ferun-ingress.yaml ## Apply ferun-ingress, its
 apply-ferun-sink: $(MANIFESTS)/ferun-sink.yaml ## Apply ferun-sink, its database, Services and route (its secrets first: README.md).
 	@for s in ferun-sink-token ferun-sink-bucket ferun-sink-db; do \
 	  kubectl -n ferun get secret $$s >/dev/null 2>&1 || { echo "the secret ferun/$$s is missing (README.md, The sink)" >&2; exit 1; }; done
+	kubectl apply -f $<
+
+apply-ferun-auth: $(MANIFESTS)/ferun-auth.yaml ## Apply ferun-auth, its Service, NetworkPolicy and route (its secrets first: README.md, Visitors).
+	@for s in ferun-auth-token ferun-auth-key oidc-client-ferun-auth; do \
+	  kubectl -n ferun get secret $$s >/dev/null 2>&1 || { echo "the secret ferun/$$s is missing (README.md, Visitors)" >&2; exit 1; }; done
 	kubectl apply -f $<
 
 apply-kafka: ## Apply Strimzi's operator and the Kafka cluster ferun-log (README.md, The sink).

@@ -1,0 +1,284 @@
+# SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# ferun-auth on the Gardener shoot (ADR 0054, deploy/gardener/README.md,
+# Visitors): the access provider of the kinds ferun and oidc, two
+# identical instances in the namespace ferun, beside ferund, at
+# https://${AUTH_HOST}, a host of its own on the cluster's Gateway. It
+# ships in ferund's image (/ferun-auth, AUTH_IMAGE), pulled with the Secret
+# ghcr-pull. The ${...} are the deployment's parameters
+# (config.env.example), which make fills in:
+#
+#   make -C deploy/gardener apply-ferun-auth
+#
+# Secrets the operator makes in the namespace ferun, before the pods
+# start:
+#   ferun-auth-token        key token: ferun-auth's service token at ferund
+#                           (ferund service-token --kind auth --name ferun-auth).
+#   ferun-auth-key          key key: 32 random bytes (raw, hex or base64)
+#                           sealing a sign-in in flight; the same for both
+#                           instances, or a browser that comes back to the
+#                           other fails.
+#   oidc-client-ferun-auth  keys client_id and client_secret: ferun-auth's
+#                           client at OIDC_ISSUER, with the redirect URI
+#                           https://${AUTH_HOST}/callback and the back-channel
+#                           logout URI https://${AUTH_HOST}/backchannel/ferun
+#                           (backchannel_logout_session_required).
+# ferund learns where ferun-auth is from VISITOR_AUTH_URL
+# (https://${AUTH_HOST}), set once these pods run.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ferun-auth
+  namespace: ferun
+spec:
+  # Instances share nothing but the key: any of them finishes any sign-in.
+  replicas: 2
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: ferun-auth
+  template:
+    metadata:
+      labels:
+        app: ferun-auth
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      # No Kubernetes API: the token stays off the pod.
+      automountServiceAccountToken: false
+      # The image runs as distroless's nonroot (65532); the group makes the
+      # secrets' files below readable to it.
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: ferun-auth
+          matchLabelKeys:
+            - pod-template-hash
+      # --shutdown-delay (5 s) with /readyz failing, then 10 s for the
+      # requests in flight.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: ferun-auth
+          image: ${AUTH_IMAGE}
+          command: ["/ferun-auth"]
+          args: ["serve"]
+          env:
+            - name: FERUN_AUTH_LISTEN
+              value: ":8080"
+            - name: FERUN_AUTH_HEALTH_LISTEN
+              value: ":9090"
+            - name: FERUN_AUTH_PUBLIC_URL
+              value: https://${AUTH_HOST}
+            # ferund in the cluster, never its public front door.
+            - name: FERUN_AUTH_FERUN_URL
+              value: http://ferund.ferun.svc:8100
+            - name: FERUN_AUTH_TOKEN_FILE
+              value: /etc/ferun-auth/token/token
+            - name: FERUN_AUTH_KEY_FILE
+              value: /etc/ferun-auth/key/key
+            # The issuer of kind ferun: exactly ferund's FERUN_OIDC_ISSUER,
+            # so that the subject it names is a person ferund knows.
+            - name: FERUN_AUTH_ISSUER
+              value: ${OIDC_ISSUER}
+            - name: FERUN_AUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oidc-client-ferun-auth
+                  key: client_id
+            - name: FERUN_AUTH_CLIENT_SECRET_FILE
+              value: /etc/ferun-auth/oidc/secret
+            # What no issuer fetch may reach: ferund's --deny-prefix, the
+            # built-in set and the shoot's networks (DENY_PREFIXES); empty,
+            # the built-in set. The blocks of AUTH_ALLOW_PREFIXES are the
+            # exception, for an issuer in a private network.
+            - name: FERUN_AUTH_DENY_PREFIX
+              value: '${FERUN_DENY_PREFIX}'
+            - name: FERUN_AUTH_ALLOW_PREFIX
+              value: '${AUTH_ALLOW_PREFIXES}'
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: health
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - name: token
+              mountPath: /etc/ferun-auth/token
+              readOnly: true
+            - name: key
+              mountPath: /etc/ferun-auth/key
+              readOnly: true
+            - name: oidc
+              mountPath: /etc/ferun-auth/oidc
+              readOnly: true
+      # 288 is 0440: the owner root and the group 65532 read.
+      volumes:
+        - name: token
+          secret:
+            secretName: ferun-auth-token
+            defaultMode: 288
+        - name: key
+          secret:
+            secretName: ferun-auth-key
+            defaultMode: 288
+        - name: oidc
+          secret:
+            secretName: oidc-client-ferun-auth
+            defaultMode: 288
+            items:
+              - key: client_secret
+                path: secret
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ferun-auth
+  namespace: ferun
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: ferun-auth
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ferun-auth
+  namespace: ferun
+spec:
+  selector:
+    app: ferun-auth
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# What reaches ferun-auth, and what it reaches. In: the Gateway's Envoy
+# pods on its port, the kubelet's probes from the workers' network. Out:
+# DNS, ferund's API, issuers on 443 outside the private ranges, and the
+# Gateway's Envoy pods, for an issuer served on the same Gateway (the
+# installation's, id.<DOMAIN>): its balancer's address is translated to
+# those pods inside the cluster, and Calico checks a connection after the
+# translation, on Envoy's port (10443 for the listeners' 443). ferun-db's
+# policy admits every pod of the namespace ferun: this list is what keeps
+# ferun-auth off the database. ferun-auth's own rule (--deny-prefix) also
+# judges every issuer address it dials.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ferun-auth
+  namespace: ferun
+spec:
+  podSelector:
+    matchLabels:
+      app: ferun-auth
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ${GATEWAY_PODS_NAMESPACE}
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - from:
+        - ipBlock:
+            cidr: ${NODE_CIDR}
+      ports:
+        - { protocol: TCP, port: 9090 }
+  egress:
+    # The cluster's DNS. Gardener's CoreDNS answers on 8053 behind the
+    # Service kube-dns's 53.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+        - { protocol: UDP, port: 8053 }
+        - { protocol: TCP, port: 8053 }
+    # ferund's API.
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ferund
+      ports:
+        - { protocol: TCP, port: 8100 }
+    # An issuer behind the cluster's own Gateway.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ${GATEWAY_PODS_NAMESPACE}
+          podSelector:
+            matchLabels:
+              gateway.envoyproxy.io/owning-gateway-name: ${GATEWAY_NAME}
+      ports:
+        - { protocol: TCP, port: 10443 }
+    # Issuers on the internet.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# https://<AUTH_HOST>: the Gateway's HTTPS listener for the host holds its
+# certificate and admits this namespace's routes (README.md, Visitors).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ferun-auth
+  namespace: ferun
+spec:
+  parentRefs:
+    - name: ${GATEWAY_NAME}
+      namespace: ${GATEWAY_NAMESPACE}
+  hostnames:
+    - ${AUTH_HOST}
+  rules:
+    - backendRefs: [{name: ferun-auth, port: 8080}]

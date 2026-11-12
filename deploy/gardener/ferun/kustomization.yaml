@@ -139,3 +139,10 @@ patches:
                     value: '${ACME_EMAIL}'
                   - name: FERUN_ACME_PROFILE
                     value: '${ACME_PROFILE}'
+                  # ferun-auth (../ferun-auth, ADR 0054), where a visitor of
+                  # a provider of kind ferun or oidc signs in:
+                  # https://<AUTH_HOST>, set once ferun-auth runs. Empty,
+                  # ferund serves providers of kind tenant alone and refuses
+                  # a publish that asks for another.
+                  - name: FERUN_VISITOR_AUTH_URL
+                    value: '${VISITOR_AUTH_URL}'
