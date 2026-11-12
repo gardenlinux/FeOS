@@ -37,6 +37,23 @@
 // the table changes, the open connections to what it no longer routes
 // to are closed, upgraded ones included (Proxy.cutConns).
 //
+// An environment may admit visitors only (ADR 0054, visits.go): the
+// proxy checks a request's visit after its route's from and before its
+// service, so that a client without one wakes, holds and learns nothing.
+// The visit is a cookie on the host, a token the control plane signed
+// beside a secret of the browser's, which the proxy verifies with the
+// table's keys and renews over the agent when it nears its end; while
+// the control plane is away a token past its end counts until its
+// visit's end. A navigation without a visit goes to the environment's
+// provider with a challenge the proxy sealed, anything else gets 401;
+// an environment that cannot sign anyone in serves nobody. The path
+// /.ferun/ is the proxy's on every host, before any route (ferunpath.go):
+// there the browser comes back with the provider's code, a visitor signs
+// out, and the keys of the tokens are published. On every host the
+// proxy drops the visitor headers a client sent and its own cookies from
+// requests, and the applications' Set-Cookie of them; a request of a
+// visit gets the visitor's subject, email and token in headers.
+//
 // On a host under the apps zone or the tenant zone (ADR 0031), the proxy
 // makes every cookie of a response host-only (cookies.go): an app can then
 // set no cookie for other apps under the zone, nor for the platform's

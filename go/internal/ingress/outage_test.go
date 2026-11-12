@@ -143,3 +143,35 @@ func TestReadinessRecoversAfterAnOutage(t *testing.T) {
 		}
 	}
 }
+
+// A visit whose token ran out is served while the control plane is
+// away, until its visit's end (ADR 0054): what was admitted stays
+// admitted, and nobody new is.
+func TestVisitsServedThroughAnOutage(t *testing.T) {
+	t.Parallel()
+	h, k := visitProg(t)
+	// Tokens that are past their end and the leeway when signed.
+	h.fake.SetVisitTokenLifetime(-2 * time.Minute)
+	h.start()
+	h.waitReady()
+	vc := signIn(t, h, k, "/")
+	c := h.client()
+	h.fake.Close()
+	deadline := time.Now().Add(20 * time.Second)
+	for h.prog.agent.Connected() {
+		if time.Now().After(deadline) {
+			t.Fatal("still connected")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	resp, body := browse(t, c, "/", false, vc)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(body, "visitor=u-1 ") {
+		t.Fatalf("a visit during the outage: %d %q", resp.StatusCode, body)
+	}
+	if resp, _ := browse(t, c, "/", false); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no visit during the outage: %d", resp.StatusCode)
+	}
+	if resp, _ := browse(t, c, "/", true); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("a navigation during the outage: %d", resp.StatusCode)
+	}
+}

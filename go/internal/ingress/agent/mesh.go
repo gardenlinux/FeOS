@@ -453,7 +453,7 @@ func (a *Agent) announce() {
 	go func() {
 		defer a.goroutines.Done()
 		cctx, cancel := context.WithTimeout(ctx, a.tune.callTimeout)
-		resp, err := s.client.Hello(cctx, &wire.HelloRequest{PublicKey: pub[:], Endpoint: ep, Version: a.cfg.Version})
+		resp, err := s.client.Hello(cctx, a.helloRequest(pub[:], ep))
 		cancel()
 		if err == nil && resp.Name != a.cfg.Name {
 			err = fmt.Errorf("the control plane answered Hello for ingress %q, not %q", resp.Name, a.cfg.Name)

@@ -166,7 +166,7 @@ func New(cfg Config, deps Deps) (*Program, error) {
 		ConnWaitTimeout:      cfg.UpstreamWaitTimeout,
 		MaxBody:              cfg.MaxRequestBody,
 		MaxConnsPerEndpoint:  cfg.MaxConnsPerEndpoint,
-	}, proxy.Deps{Waker: a, Holder: a, AccessLog: a, Dial: deps.Dial, Log: log})
+	}, proxy.Deps{Waker: a, Holder: a, Visits: a, AccessLog: a, Dial: deps.Dial, Log: log})
 
 	if err := p.listen(); err != nil {
 		return nil, err

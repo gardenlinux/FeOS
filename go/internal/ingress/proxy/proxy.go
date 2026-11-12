@@ -197,13 +197,28 @@ type Holder interface {
 	Hold(ctx context.Context, req wire.HoldRequest) (wire.HoldResponse, error)
 }
 
+// Visits are the calls about visits at the control plane (ADR 0054; the
+// agent's). An error is no answer: one whose gRPC code (status.Code) is
+// Unavailable, Unimplemented or DeadlineExceeded means the control plane
+// is away, which lets a visit's token count past its end until the
+// visit's end; any other, a local busy (ResourceExhausted) among them,
+// does not.
+type Visits interface {
+	RedeemVisit(ctx context.Context, req wire.RedeemVisitRequest) (wire.RedeemVisitResponse, error)
+	RenewVisit(ctx context.Context, req wire.RenewVisitRequest) (wire.RenewVisitResponse, error)
+	EndVisit(ctx context.Context, req wire.EndVisitRequest) (wire.EndVisitResponse, error)
+}
+
 // Deps is what the proxy uses. Without a Waker nothing is woken; without
 // a Holder no instance is held; without an AccessLog nothing is
-// recorded. Dial defaults to a net.Dialer; tests map endpoint addresses
-// with it.
+// recorded; without Visits a guarded environment serves nobody. Dial
+// defaults to a net.Dialer; tests map endpoint addresses with it.
 type Deps struct {
 	Waker  Waker
 	Holder Holder
+	// Visits redeems, renews and ends visits; nil: guarded environments
+	// serve nobody.
+	Visits Visits
 	// AccessLog takes a record of each request routed to an environment.
 	AccessLog AccessLog
 	Dial      func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -247,6 +262,11 @@ type Proxy struct {
 	inflight  *budget
 	drain     chan struct{}
 	drainOnce sync.Once
+
+	// visits are what the proxy knows of visits (visits.go), redeems
+	// the codes it redeemed (ferunpath.go).
+	visits  *visitBook
+	redeems *redeemBook
 }
 
 // view is the routing and the mesh's health as one value. changed is
@@ -281,16 +301,20 @@ func New(cfg Config, d Deps) *Proxy {
 	}
 	p.up = newUpstreams(cfg, d.Dial, p.route)
 	p.holds = newHolds(d.Holder, d.Log, &p.m)
+	p.visits = newVisitBook()
+	p.redeems = newRedeemBook()
 	p.cur.Store(&view{changed: make(chan struct{})})
 	return p
 }
 
 // SetState replaces the routing with the table of s. A state whose
-// environments and Self did not change (a heartbeat) keeps the routing.
-// A change forgets the instances whose hold was refused and lets held
-// requests pick again; when endpoints left, the pool's idle connections
-// are closed, and so are the open ones to what is no longer routed
-// (cutConns).
+// environments, Self, challenges and visits' keys did not change (a
+// heartbeat) keeps the routing. A change forgets the instances whose
+// hold was refused and lets held requests pick again; when endpoints
+// left, the pool's idle connections are closed, and so are the open ones
+// to what is no longer routed (cutConns). The live attempts whose
+// environment is gone, admits another provider now, or turned guarded
+// while they came in without a visit are closed (visitBook.retable).
 func (p *Proxy) SetState(s *wire.State) {
 	if s == nil {
 		return
@@ -299,7 +323,7 @@ func (p *Proxy) SetState(s *wire.State) {
 	p.stateAt = time.Now()
 	old := p.cur.Load()
 	if old.t != nil && old.t.src.Self == s.Self && reflect.DeepEqual(old.t.src.Envs, s.Envs) &&
-		slices.Equal(old.t.src.Challenges, s.Challenges) {
+		slices.Equal(old.t.src.Challenges, s.Challenges) && reflect.DeepEqual(old.t.src.VisitKeys, s.VisitKeys) {
 		p.mu.Unlock()
 		return
 	}
@@ -320,6 +344,9 @@ func (p *Proxy) SetState(s *wire.State) {
 	if left {
 		p.up.closeIdle()
 		p.cutConns(t, time.Now())
+	}
+	if n := p.visits.retable(t); n > 0 {
+		p.log.Info("closed the connections of visits whose environment no longer admits them", "attempts", n)
 	}
 }
 
@@ -413,8 +440,17 @@ func (p *Proxy) CloseUpstreams() {
 
 // Run renews and releases the idle holds every 10 s until ctx ends, and
 // closes the connections to instances that left the table longer ago
-// than the grace.
+// than the grace. Beside it, every 10 s, the visits with live
+// connections on this instance are renewed when their token nears its
+// end, and those that ended are closed (renewLive).
 func (p *Proxy) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.visitLoop(ctx)
+	}()
+	defer wg.Wait()
 	t := time.NewTicker(holdEvery)
 	defer t.Stop()
 	for {
@@ -611,6 +647,9 @@ type request struct {
 	reason   string
 	// client is the client's address, the connection's peer (clientAddr).
 	client netip.Addr
+	// visit is the request's visit, which passed the visit check of a
+	// guarded environment; nil on any other request (visits.go).
+	visit *visitReq
 }
 
 // serve routes a request, holds it while no endpoint is usable, and
@@ -639,7 +678,15 @@ func (p *Proxy) serve(w *recorder, r *http.Request) {
 	defer p.inflight.leave(&q.inflight)
 	v := p.cur.Load()
 	q.client = clientAddr(r)
-	tg, rep := v.t.resolve(q.host, q.raw, q.client)
+	if e := v.t.env(q.host); e != nil {
+		if sub, ok := ferunPath(q.raw); ok {
+			q.trace = newTrace(r.Header)
+			defer q.record()
+			q.ferun(v, e, sub)
+			return
+		}
+	}
+	tg, rep := v.t.route(q.host, q.raw, q.client)
 	if rep != nil && tg.env == nil {
 		rep.write(w)
 		return
@@ -648,6 +695,13 @@ func (p *Proxy) serve(w *recorder, r *http.Request) {
 	defer q.record()
 	if rep != nil {
 		q.refused(tg, rep)
+		return
+	}
+	if !q.checkVisit(v, tg) {
+		return
+	}
+	if tg, rep = v.t.bind(tg, q.raw); rep != nil {
+		rep.write(w)
 		return
 	}
 	q.env, q.tenant, q.service = tg.env.id, tg.env.tenant, tg.svc.name
@@ -726,11 +780,20 @@ func (q *request) run(v *view, tg target) {
 		}
 		v = p.cur.Load()
 		var rep *reply
-		if tg, rep = v.t.resolve(q.host, q.raw, q.client); rep != nil {
+		if tg, rep = v.t.route(q.host, q.raw, q.client); rep != nil {
 			if tg.env != nil {
 				q.refused(tg, rep)
 				return
 			}
+			rep.write(q.w)
+			return
+		}
+		// The environment may have turned guarded, or admit another
+		// provider, while the request was held.
+		if !q.checkVisit(v, tg) {
+			return
+		}
+		if tg, rep = v.t.bind(tg, q.raw); rep != nil {
 			rep.write(q.w)
 			return
 		}
@@ -870,6 +933,12 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 	}()
 	ctx, cancel := context.WithCancelCause(q.r.Context())
 	defer cancel(nil)
+	// The visit's end, or a table whose environment no longer admits
+	// the attempt (one let in open that turned guarded among them),
+	// closes it, an upgraded connection and a streaming answer among
+	// them.
+	att := p.visits.attach(q.visit, tg.env, q.host, cancel, func() *table { return p.cur.Load().t })
+	defer p.visits.detach(att)
 	cw := &connWait{bound: p.cfg.ConnWaitTimeout, cancel: cancel}
 	defer cw.stop()
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GetConn: cw.getConn, GotConn: cw.gotConn})
@@ -879,6 +948,7 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 	// request then, so it goes nowhere else.
 	responded := false
 	cookies := func(h http.Header) {
+		dropOurSetCookies(h)
 		if v.t.underZone(q.host) {
 			if n := hostOnlyCookies(h, q.host); n > 0 {
 				p.cookiesRewritten(q.host, n)
@@ -896,6 +966,11 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 			// The app sees the host the client named.
 			pr.Out.Host = pr.In.Host
 			setForwarded(pr)
+			// The ingress's cookies and the visitor headers are its own,
+			// on every host: the application sees neither a client's nor
+			// the cookie, only the visit's headers.
+			stripOurCookies(pr.Out.Header)
+			setVisitor(pr.Out.Header, q.visit)
 			q.trace.set(pr.Out.Header)
 		},
 		Transport:     p.up.tr,
@@ -903,9 +978,22 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 		ModifyResponse: func(res *http.Response) error {
 			responded = true
 			cookies(res.Header)
+			q.visitCookieOn(res.Header)
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			if !responded && context.Cause(ctx) == errAccessChanged && q.r.Context().Err() == nil {
+				// A newer table no longer admits the attempt before it
+				// was answered: the instance is not at fault. When nothing
+				// of the body was read, the request routes again by that
+				// table, which answers it (or checks its visit again).
+				if q.body.untouched() {
+					again = true
+					return
+				}
+				reply{http.StatusBadGateway, textNoAnswer, 0}.write(q.w)
+				return
+			}
 			again = q.failed(v, tg, ep, port, exclude, mayRetry, responded, cw.gaveUp(), err)
 		},
 		ErrorLog: p.errLog,
@@ -1147,11 +1235,18 @@ type recorder struct {
 	// upstream sent before its final one (ReverseProxy passes those on
 	// without ModifyResponse).
 	informational func(http.Header)
+	// final, when set, completes the header of the final response before
+	// it is written: a renewed visit's cookie on the proxy's own answers
+	// (an upgrade's 101 is written past it, from ModifyResponse's header).
+	final func(http.Header)
 }
 
 func (r *recorder) WriteHeader(code int) {
 	if code < http.StatusOK && r.informational != nil {
 		r.informational(r.ResponseWriter.Header())
+	}
+	if code >= http.StatusOK && r.status == 0 && r.final != nil {
+		r.final(r.ResponseWriter.Header())
 	}
 	if r.status == 0 && code >= http.StatusOK {
 		r.status = code
@@ -1161,6 +1256,9 @@ func (r *recorder) WriteHeader(code int) {
 
 func (r *recorder) Write(b []byte) (int, error) {
 	if r.status == 0 {
+		if r.final != nil {
+			r.final(r.ResponseWriter.Header())
+		}
 		r.status = http.StatusOK
 	}
 	n, err := r.ResponseWriter.Write(b)

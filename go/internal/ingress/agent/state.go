@@ -36,11 +36,18 @@ const (
 	removedFile = "removed"
 	wgKeyFile   = "wg.key"
 	meshFile    = "mesh.json"
-	tableFile   = "table.json"
+	tableFile   = "table-v2.json"
 	tmpPrefix   = ".tmp-"
 	dirMode     = 0o700
 	fileMode    = 0o600
 )
+
+// oldTableFile is the table cache of the releases before visits (ADR
+// 0054). It is never read, and the first save deletes it: an older binary
+// started on the same volume then finds no cache and serves nothing until
+// the control plane gives it a table it may serve, instead of serving
+// guarded environments open from a cache it does not understand.
+const oldTableFile = "table.json"
 
 // stateDir is the state directory of an instance.
 type stateDir struct {
@@ -330,13 +337,13 @@ func (d *stateDir) saveMesh(m meshPlace) error {
 	return d.write(meshFile, data)
 }
 
-// tableCache is the content of table.json.
+// tableCache is the content of table-v2.json.
 type tableCache struct {
 	SavedAt time.Time   `json:"savedAt"`
 	State   *wire.State `json:"state"`
 }
 
-// loadTable reads table.json. A missing file gives (nil, zero, nil).
+// loadTable reads table-v2.json. A missing file gives (nil, zero, nil).
 func (d *stateDir) loadTable() (*wire.State, time.Time, error) {
 	data, err := d.read(tableFile)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -363,5 +370,11 @@ func (d *stateDir) saveTable(s *wire.State, savedAt time.Time) error {
 	if err != nil {
 		return err
 	}
-	return d.write(tableFile, data)
+	if err := d.write(tableFile, data); err != nil {
+		return err
+	}
+	if err := os.Remove(d.file(oldTableFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", oldTableFile, err)
+	}
+	return nil
 }
