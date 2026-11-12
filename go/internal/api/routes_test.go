@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gardenlinux/feos/go/internal/oidc"
+	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
@@ -435,8 +437,8 @@ func mustTenant(t *testing.T, e *env, name string) string {
 // With OIDC, the sign-in routes join the table, public.
 func TestRouteTableOIDC(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
-	e := newEnv(t, envOptions{oidc: p.config(), publicURL: testPublicURL})
+	p := oidctest.New(t, oidc.AlgRS256)
+	e := newEnv(t, envOptions{oidc: oidcConfig(p), publicURL: testPublicURL})
 	got := map[string]class{}
 	for _, rt := range e.srv.routes() {
 		got[rt.pattern] = rt.class

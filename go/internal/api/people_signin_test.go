@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/oidc"
+	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -50,15 +52,15 @@ func sessionOf(t *testing.T, e *env, c *http.Cookie) store.UISession {
 // sessions and gets none.
 func TestSignInPerson(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
+	p := oidctest.New(t, oidc.AlgRS256)
 	a, b := oidcEnvs(t, p, false)
-	sc := signIn(t, a, b, p, withSID(userClaims(), "sid-bob"))
+	sc := signIn(t, a, b, p, withSID(oidctest.UserClaims(), "sid-bob"))
 	sess := sessionOf(t, a, sc)
 	if sess.Admin || sess.SID != "sid-bob" || sess.PersonID == uuid.Nil {
 		t.Fatalf("session %+v", sess)
 	}
 	person, err := a.st.GetPerson(context.Background(), sess.PersonID)
-	if err != nil || person.Issuer != p.issuer || person.Sub != "0b8c5ef1-0000-4000-8000-000000000002" ||
+	if err != nil || person.Issuer != p.Issuer || person.Sub != "0b8c5ef1-0000-4000-8000-000000000002" ||
 		person.Email != "bob@example.test" || person.Name != "Ada" {
 		t.Fatalf("person %+v %v", person, err)
 	}
@@ -74,7 +76,7 @@ func TestSignInPerson(t *testing.T) {
 		errBody("operators only"))
 
 	// A second sign-in is the same person.
-	sc2 := signIn(t, a, b, p, userClaims())
+	sc2 := signIn(t, a, b, p, oidctest.UserClaims())
 	if s2 := sessionOf(t, a, sc2); s2.PersonID != person.ID || s2.SID != "" {
 		t.Fatalf("second session %+v", s2)
 	}
@@ -104,7 +106,7 @@ func TestSignInPerson(t *testing.T) {
 			errBody("not signed in"))
 	}
 	loc, lc := login(t, a, "/")
-	w := callback(t, b, loc, p.issue(loc, userClaims()), lc)
+	w := callback(t, b, loc, p.Issue(loc, oidctest.UserClaims()), lc)
 	expect(t, w, http.StatusForbidden, "")
 	if !strings.Contains(w.Body.String(), "Your account bob@example.test is disabled in FeRun.") ||
 		cookieNamed(w, cookieSession) != nil {
@@ -114,33 +116,10 @@ func TestSignInPerson(t *testing.T) {
 	if _, err := a.st.SetPersonDisabled(context.Background(), person.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	sc = signIn(t, a, b, p, userClaims())
+	sc = signIn(t, a, b, p, oidctest.UserClaims())
 	if m := getMe(); len(m.Tenants) != 2 {
 		t.Fatalf("me after enabling %+v", m)
 	}
-}
-
-// logoutToken signs a back-channel logout token for ferund's client with
-// claims over the valid defaults (nil deletes one).
-func (p *testProvider) logoutToken(over map[string]any) string {
-	p.t.Helper()
-	c := map[string]any{"iss": p.issuer, "aud": testClientID, "iat": time.Now().Unix(), "jti": randomTestString(p.t),
-		"sid": "sid-1", "events": map[string]any{backchannelEvent: map[string]any{}}}
-	for k, v := range over {
-		if v == nil {
-			delete(c, k)
-		} else {
-			c[k] = v
-		}
-	}
-	payload, err := json.Marshal(c)
-	if err != nil {
-		p.t.Fatal(err)
-	}
-	p.mu.Lock()
-	signer := p.signer
-	p.mu.Unlock()
-	return signer.sign(p.t, map[string]any{"alg": signer.alg, "kid": signer.kid, "typ": "logout+jwt"}, payload)
 }
 
 // backchannel posts a logout token.
@@ -158,11 +137,11 @@ func backchannel(e *env, token string) *httptest.ResponseRecorder {
 // neither answer is cached.
 func TestBackchannelLogout(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
+	p := oidctest.New(t, oidc.AlgRS256)
 	a, b := oidcEnvs(t, p, false)
-	s1 := signIn(t, a, b, p, withSID(userClaims(), "sid-1"))
-	s1b := signIn(t, b, a, p, withSID(userClaims(), "sid-1"))
-	s2 := signIn(t, a, b, p, withSID(adminClaims(), "sid-2"))
+	s1 := signIn(t, a, b, p, withSID(oidctest.UserClaims(), "sid-1"))
+	s1b := signIn(t, b, a, p, withSID(oidctest.UserClaims(), "sid-1"))
+	s2 := signIn(t, a, b, p, withSID(oidctest.AdminClaims(), "sid-2"))
 
 	for _, c := range []struct {
 		name string
@@ -170,20 +149,20 @@ func TestBackchannelLogout(t *testing.T) {
 		want string
 	}{
 		{"no token", "", "logout_token is required"},
-		{"another issuer", p.logoutToken(map[string]any{"iss": "https://evil.example/"}),
+		{"another issuer", p.LogoutToken(map[string]any{"iss": "https://evil.example/"}),
 			"the token's issuer is not the configured one"},
-		{"another client", p.logoutToken(map[string]any{"aud": "fecode"}), "the token is not for this client (aud)"},
-		{"old", p.logoutToken(map[string]any{"iat": time.Now().Add(-11 * time.Minute).Unix()}),
+		{"another client", p.LogoutToken(map[string]any{"aud": "fecode"}), "the token is not for this client (aud)"},
+		{"old", p.LogoutToken(map[string]any{"iat": time.Now().Add(-11 * time.Minute).Unix()}),
 			"the token's iat is not recent"},
-		{"future", p.logoutToken(map[string]any{"iat": time.Now().Add(5 * time.Minute).Unix()}),
+		{"future", p.LogoutToken(map[string]any{"iat": time.Now().Add(5 * time.Minute).Unix()}),
 			"the token's iat is not recent"},
-		{"expired", p.logoutToken(map[string]any{"exp": time.Now().Add(-5 * time.Minute).Unix()}), "the token has expired"},
-		{"no events", p.logoutToken(map[string]any{"events": nil}), "the token has no events"},
-		{"another event", p.logoutToken(map[string]any{"events": map[string]any{"urn:x": map[string]any{}}}),
+		{"expired", p.LogoutToken(map[string]any{"exp": time.Now().Add(-5 * time.Minute).Unix()}), "the token has expired"},
+		{"no events", p.LogoutToken(map[string]any{"events": nil}), "the token has no events"},
+		{"another event", p.LogoutToken(map[string]any{"events": map[string]any{"urn:x": map[string]any{}}}),
 			"the token is not a back-channel logout"},
-		{"a nonce", p.logoutToken(map[string]any{"nonce": "n"}), "a logout token has no nonce"},
-		{"no sid", p.logoutToken(map[string]any{"sid": nil}), "the token names no session (sid)"},
-		{"bad signature", p.logoutToken(nil)[:20] + "x" + p.logoutToken(nil)[21:], ""},
+		{"a nonce", p.LogoutToken(map[string]any{"nonce": "n"}), "a logout token has no nonce"},
+		{"no sid", p.LogoutToken(map[string]any{"sid": nil}), "the token names no session (sid)"},
+		{"bad signature", p.LogoutToken(nil)[:20] + "x" + p.LogoutToken(nil)[21:], ""},
 	} {
 		w := backchannel(a, c.tok)
 		if w.Code != http.StatusBadRequest || w.Header().Get("Cache-Control") != "no-store" {
@@ -199,7 +178,7 @@ func TestBackchannelLogout(t *testing.T) {
 		expect(t, a.serve(withCookie(request{method: "GET", path: "/auth/me"}, c)), http.StatusOK, "")
 	}
 
-	w := backchannel(b, p.logoutToken(nil))
+	w := backchannel(b, p.LogoutToken(nil))
 	expect(t, w, http.StatusOK, "")
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("Cache-Control %q", w.Header().Get("Cache-Control"))
@@ -212,10 +191,10 @@ func TestBackchannelLogout(t *testing.T) {
 	}
 	expect(t, a.serve(withCookie(request{method: "GET", path: "/auth/me"}, s2)), http.StatusOK, "")
 	// A repeat is no error; a sub of another person ends nothing.
-	expect(t, backchannel(a, p.logoutToken(nil)), http.StatusOK, "")
-	expect(t, backchannel(a, p.logoutToken(map[string]any{"sid": "sid-2", "sub": "someone"})), http.StatusOK, "")
+	expect(t, backchannel(a, p.LogoutToken(nil)), http.StatusOK, "")
+	expect(t, backchannel(a, p.LogoutToken(map[string]any{"sid": "sid-2", "sub": "someone"})), http.StatusOK, "")
 	expect(t, a.serve(withCookie(request{method: "GET", path: "/auth/me"}, s2)), http.StatusOK, "")
-	expect(t, backchannel(a, p.logoutToken(map[string]any{"sid": "sid-2", "sub": adminClaims()["sub"]})),
+	expect(t, backchannel(a, p.LogoutToken(map[string]any{"sid": "sid-2", "sub": oidctest.AdminClaims()["sub"]})),
 		http.StatusOK, "")
 	expect(t, a.serve(withCookie(request{method: "GET", path: "/auth/me"}, s2)), http.StatusUnauthorized,
 		errBody("not signed in"))

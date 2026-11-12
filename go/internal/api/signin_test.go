@@ -9,19 +9,37 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/oidc"
+	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 const testPublicURL = "https://run.example.test"
 
-// oidcEnvs are two instances on one database with the same provider.
-func oidcEnvs(t *testing.T, p *testProvider, basic bool) (*env, *env) {
+// oidcConfig is ferund's client configuration for the test provider p.
+func oidcConfig(p *oidctest.Provider) *OIDCConfig {
+	return &OIDCConfig{Issuer: p.Issuer, ClientID: p.ClientID, ClientSecret: p.ClientSecret,
+		Scopes: []string{"openid", "profile", "email"}, AdminGroup: "admins", HTTPClient: p.Client}
+}
+
+func randomTestString(t *testing.T) string {
 	t.Helper()
-	o := envOptions{oidc: p.config(), publicURL: testPublicURL, noAdminUsers: !basic}
+	s, err := randomToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// oidcEnvs are two instances on one database with the same provider.
+func oidcEnvs(t *testing.T, p *oidctest.Provider, basic bool) (*env, *env) {
+	t.Helper()
+	o := envOptions{oidc: oidcConfig(p), publicURL: testPublicURL, noAdminUsers: !basic}
 	a := newEnv(t, o)
 	o.db = a.d
 	b := newEnv(t, o)
@@ -65,10 +83,10 @@ func callback(t *testing.T, e *env, authURL, code string, c *http.Cookie) *httpt
 
 // signIn signs claims in, beginning on a and completing on b, and returns
 // the session cookie.
-func signIn(t *testing.T, a, b *env, p *testProvider, claims map[string]any) *http.Cookie {
+func signIn(t *testing.T, a, b *env, p *oidctest.Provider, claims map[string]any) *http.Cookie {
 	t.Helper()
 	loc, lc := login(t, a, "/nodes")
-	w := callback(t, b, loc, p.issue(loc, claims), lc)
+	w := callback(t, b, loc, p.Issue(loc, claims), lc)
 	expect(t, w, http.StatusFound, "")
 	sc := cookieNamed(w, cookieSession)
 	if sc == nil {
@@ -96,11 +114,11 @@ func withCookie(rq request, c *http.Cookie) request {
 // a replayed callback refused, and the sign-out everywhere.
 func TestSignIn(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
+	p := oidctest.New(t, oidc.AlgRS256)
 	a, b := oidcEnvs(t, p, true)
 
 	loc, lc := login(t, a, "/nodes")
-	if !strings.HasPrefix(loc, p.srv.URL+"/oauth2/auth?") {
+	if !strings.HasPrefix(loc, p.Srv.URL+"/oauth2/auth?") {
 		t.Fatalf("location %s", loc)
 	}
 	u, _ := url.Parse(loc)
@@ -111,7 +129,7 @@ func TestSignIn(t *testing.T) {
 		lc.Value != u.Query().Get("state") {
 		t.Fatalf("login cookie %+v", lc)
 	}
-	code := p.issue(loc, adminClaims())
+	code := p.Issue(loc, oidctest.AdminClaims())
 	w := callback(t, b, loc, code, lc)
 	expect(t, w, http.StatusFound, "")
 	if w.Header().Get("Location") != "/nodes" {
@@ -197,7 +215,7 @@ func TestSignIn(t *testing.T) {
 	expect(t, w, http.StatusOK, "")
 	redirect := decode[struct{ Redirect string }](t, w).Redirect
 	ru, err := url.Parse(redirect)
-	if err != nil || !strings.HasPrefix(redirect, p.srv.URL+"/oauth2/sessions/logout?") ||
+	if err != nil || !strings.HasPrefix(redirect, p.Srv.URL+"/oauth2/sessions/logout?") ||
 		ru.Query().Get("id_token_hint") != sess.IDToken || ru.Query().Get("post_logout_redirect_uri") != testPublicURL+"/" {
 		t.Fatalf("redirect %s", redirect)
 	}
@@ -263,12 +281,12 @@ func TestBasicCrossOrigin(t *testing.T) {
 // ES256 and EdDSA keys sign in as RS256 ones do.
 func TestSignInKeyTypes(t *testing.T) {
 	t.Parallel()
-	for _, alg := range []string{algES256, algEdDSA} {
+	for _, alg := range []string{oidc.AlgES256, oidc.AlgEdDSA} {
 		t.Run(alg, func(t *testing.T) {
 			t.Parallel()
-			p := newTestProvider(t, alg)
+			p := oidctest.New(t, alg)
 			a, b := oidcEnvs(t, p, false)
-			sc := signIn(t, a, b, p, adminClaims())
+			sc := signIn(t, a, b, p, oidctest.AdminClaims())
 			expect(t, a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/nodes"}, sc)), http.StatusOK, "")
 		})
 	}
@@ -280,36 +298,36 @@ func TestSignInRefusals(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name    string
-		prepare func(p *testProvider)
+		prepare func(p *oidctest.Provider)
 		claims  map[string]any
 		status  int
 		text    string
 		// absent is a value of the token the page must not show.
 		absent string
 	}{
-		{"wrong nonce", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["nonce"] = "other" }
-		}, adminClaims(), 400, "the token&#39;s nonce is not the sign-in&#39;s", ""},
-		{"wrong audience", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["aud"] = "someone-else" }
-		}, adminClaims(), 400, "the token is not for this client (aud)", ""},
-		{"wrong azp", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["azp"] = "someone-else" }
-		}, adminClaims(), 400, "the token was issued to another party (azp)", ""},
-		{"wrong issuer", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["iss"] = strings.TrimSuffix(p.issuer, "/") }
-		}, adminClaims(), 400, "the token&#39;s issuer is not the configured one.", ""},
-		{"foreign issuer", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["iss"] = "https://issuer.evil.example/" }
-		}, adminClaims(), 400, "the token&#39;s issuer is not the configured one.", "issuer.evil.example"},
-		{"expired", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["exp"] = time.Now().Add(-2 * time.Minute).Unix() }
-		}, adminClaims(), 400, "the token has expired", ""},
-		{"issued in the future", func(p *testProvider) {
-			p.mutate = func(c, _ map[string]any) { c["iat"] = time.Now().Add(5 * time.Minute).Unix() }
-		}, adminClaims(), 400, "the token is issued in the future", ""},
-		{"bad signature", func(p *testProvider) {
-			p.corrupt = func(tok string) string {
+		{"wrong nonce", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["nonce"] = "other" }
+		}, oidctest.AdminClaims(), 400, "the token&#39;s nonce is not the sign-in&#39;s", ""},
+		{"wrong audience", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["aud"] = "someone-else" }
+		}, oidctest.AdminClaims(), 400, "the token is not for this client (aud)", ""},
+		{"wrong azp", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["azp"] = "someone-else" }
+		}, oidctest.AdminClaims(), 400, "the token was issued to another party (azp)", ""},
+		{"wrong issuer", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["iss"] = strings.TrimSuffix(p.Issuer, "/") }
+		}, oidctest.AdminClaims(), 400, "the token&#39;s issuer is not the configured one.", ""},
+		{"foreign issuer", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["iss"] = "https://issuer.evil.example/" }
+		}, oidctest.AdminClaims(), 400, "the token&#39;s issuer is not the configured one.", "issuer.evil.example"},
+		{"expired", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["exp"] = time.Now().Add(-2 * time.Minute).Unix() }
+		}, oidctest.AdminClaims(), 400, "the token has expired", ""},
+		{"issued in the future", func(p *oidctest.Provider) {
+			p.Mutate = func(c, _ map[string]any) { c["iat"] = time.Now().Add(5 * time.Minute).Unix() }
+		}, oidctest.AdminClaims(), 400, "the token is issued in the future", ""},
+		{"bad signature", func(p *oidctest.Provider) {
+			p.Corrupt = func(tok string) string {
 				i := strings.LastIndexByte(tok, '.')
 				sig := []byte(tok[i+1:])
 				if sig[3] == 'A' {
@@ -319,35 +337,35 @@ func TestSignInRefusals(t *testing.T) {
 				}
 				return tok[:i+1] + string(sig)
 			}
-		}, adminClaims(), 400, "the token&#39;s signature does not verify", ""},
-		{"alg none", func(p *testProvider) {
-			p.mutate = func(_, h map[string]any) { h["alg"] = "none" }
-			p.corrupt = func(tok string) string { return tok[:strings.LastIndexByte(tok, '.')+1] }
-		}, adminClaims(), 400, "the token is not signed (alg none)", ""},
-		{"another algorithm", func(p *testProvider) {
-			p.mutate = func(_, h map[string]any) { h["alg"] = "HS256" }
-		}, adminClaims(), 400, "the token&#39;s algorithm is not accepted (RS256, ES256 or EdDSA).", "HS256"},
-		{"critical header", func(p *testProvider) {
-			p.mutate = func(_, h map[string]any) { h["crit"] = []string{"x-secret-param"} }
-		}, adminClaims(), 400, "the token names critical header parameters.", "x-secret-param"},
-		{"unknown key", func(p *testProvider) {
-			p.signer = newTestKey(p.t, "k9", algRS256)
-		}, adminClaims(), 400, "the token&#39;s key is not in the provider&#39;s key set", ""},
-		{"userinfo of another subject", func(p *testProvider) {
-			p.userinfoSub = "someone-else"
-		}, adminClaims(), 400, "userinfo names another subject than the ID token", ""},
+		}, oidctest.AdminClaims(), 400, "the token&#39;s signature does not verify", ""},
+		{"alg none", func(p *oidctest.Provider) {
+			p.Mutate = func(_, h map[string]any) { h["alg"] = "none" }
+			p.Corrupt = func(tok string) string { return tok[:strings.LastIndexByte(tok, '.')+1] }
+		}, oidctest.AdminClaims(), 400, "the token is not signed (alg none)", ""},
+		{"another algorithm", func(p *oidctest.Provider) {
+			p.Mutate = func(_, h map[string]any) { h["alg"] = "HS256" }
+		}, oidctest.AdminClaims(), 400, "the token&#39;s algorithm is not accepted (RS256, ES256 or EdDSA).", "HS256"},
+		{"critical header", func(p *oidctest.Provider) {
+			p.Mutate = func(_, h map[string]any) { h["crit"] = []string{"x-secret-param"} }
+		}, oidctest.AdminClaims(), 400, "the token names critical header parameters.", "x-secret-param"},
+		{"unknown key", func(p *oidctest.Provider) {
+			p.Signer = oidctest.NewKey(p.T, "k9", oidc.AlgRS256)
+		}, oidctest.AdminClaims(), 400, "the token&#39;s key is not in the provider&#39;s key set", ""},
+		{"userinfo of another subject", func(p *oidctest.Provider) {
+			p.UserinfoSub = "someone-else"
+		}, oidctest.AdminClaims(), 400, "userinfo names another subject than the ID token", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			p := newTestProvider(t, algRS256)
+			p := oidctest.New(t, oidc.AlgRS256)
 			a, b := oidcEnvs(t, p, false)
 			if c.prepare != nil {
-				p.mu.Lock()
+				p.Mu.Lock()
 				c.prepare(p)
-				p.mu.Unlock()
+				p.Mu.Unlock()
 			}
 			loc, lc := login(t, a, "/")
-			w := callback(t, b, loc, p.issue(loc, c.claims), lc)
+			w := callback(t, b, loc, p.Issue(loc, c.claims), lc)
 			expect(t, w, c.status, "")
 			if !strings.Contains(w.Body.String(), c.text) {
 				t.Fatalf("page %s", w.Body.String())
@@ -380,10 +398,10 @@ type me struct {
 // expired sign-in too; the provider's own error is shown.
 func TestSignInState(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
+	p := oidctest.New(t, oidc.AlgRS256)
 	a, b := oidcEnvs(t, p, false)
 	loc, lc := login(t, a, "/x")
-	code := p.issue(loc, adminClaims())
+	code := p.Issue(loc, oidctest.AdminClaims())
 	for _, c := range []*http.Cookie{nil, {Name: cookieLogin, Value: "other"}} {
 		w := callback(t, b, loc, code, c)
 		expect(t, w, http.StatusBadRequest, "")
@@ -398,7 +416,7 @@ func TestSignInState(t *testing.T) {
 	if _, err := a.st.Q().Exec(context.Background(), "UPDATE auth_logins SET created_at = now() - interval '11 minutes'"); err != nil {
 		t.Fatal(err)
 	}
-	w := callback(t, b, loc, p.issue(loc, adminClaims()), lc)
+	w := callback(t, b, loc, p.Issue(loc, oidctest.AdminClaims()), lc)
 	expect(t, w, http.StatusBadRequest, "")
 	if !strings.Contains(w.Body.String(), "This sign-in has expired. Start again.") || !strings.Contains(w.Body.String(), `href="/auth/login"`) {
 		t.Fatalf("page %s", w.Body.String())
@@ -415,7 +433,7 @@ func TestSignInState(t *testing.T) {
 		`/./\evil.example`: "/", `/a/../\evil.example`: "/", `/x\y`: "/", "/a/../b": "/b",
 	} {
 		loc, lc := login(t, a, next)
-		w := callback(t, b, loc, p.issue(loc, adminClaims()), lc)
+		w := callback(t, b, loc, p.Issue(loc, oidctest.AdminClaims()), lc)
 		expect(t, w, http.StatusFound, "")
 		if w.Header().Get("Location") != want {
 			t.Fatalf("next %q: redirect %q", next, w.Header().Get("Location"))
@@ -427,41 +445,54 @@ func TestSignInState(t *testing.T) {
 // most once a minute.
 func TestSignInKeyRotation(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
-	a, b := oidcEnvs(t, p, false)
-	signIn(t, a, b, p, adminClaims())
-	p.mu.Lock()
-	fetches := p.jwksFetches
-	p.signer = newTestKey(t, "k2", algES256)
-	p.published = []testKey{p.signer}
-	p.mu.Unlock()
+	p := oidctest.New(t, oidc.AlgRS256)
+	// b's clock runs two minutes ahead once ahead is set.
+	var ahead atomic.Bool
+	later := oidcConfig(p)
+	later.Now = func() time.Time {
+		if ahead.Load() {
+			return time.Now().Add(2 * time.Minute)
+		}
+		return time.Now()
+	}
+	o := envOptions{oidc: oidcConfig(p), publicURL: testPublicURL, noAdminUsers: true}
+	a := newEnv(t, o)
+	o.db, o.oidc = a.d, later
+	b := newEnv(t, o)
+	b.tenantToken = a.tenantToken
+	signIn(t, a, b, p, oidctest.AdminClaims())
+	p.Mu.Lock()
+	fetches := p.JWKSFetches
+	p.Signer = oidctest.NewKey(t, "k2", oidc.AlgES256)
+	p.Published = []oidctest.Key{p.Signer}
+	p.Mu.Unlock()
 	// Within the minute of b's first fetch, the unknown kid fetches
 	// nothing and is refused.
 	loc, lc := login(t, a, "/")
-	expect(t, callback(t, b, loc, p.issue(loc, adminClaims()), lc), http.StatusBadRequest, "")
-	p.mu.Lock()
-	if p.jwksFetches != fetches {
-		t.Fatalf("fetches %d, want %d", p.jwksFetches, fetches)
+	expect(t, callback(t, b, loc, p.Issue(loc, oidctest.AdminClaims()), lc), http.StatusBadRequest, "")
+	p.Mu.Lock()
+	if p.JWKSFetches != fetches {
+		t.Fatalf("fetches %d, want %d", p.JWKSFetches, fetches)
 	}
-	p.mu.Unlock()
+	p.Mu.Unlock()
 	// A minute on, b holds the old set: the unknown kid makes it fetch
 	// the new one.
-	b.srv.oidc.now = func() time.Time { return time.Now().Add(2 * time.Minute) }
-	signIn(t, a, b, p, adminClaims())
-	p.mu.Lock()
-	if p.jwksFetches != fetches+1 {
-		t.Fatalf("fetches %d, want %d", p.jwksFetches, fetches+1)
+	ahead.Store(true)
+	signIn(t, a, b, p, oidctest.AdminClaims())
+	p.Mu.Lock()
+	if p.JWKSFetches != fetches+1 {
+		t.Fatalf("fetches %d, want %d", p.JWKSFetches, fetches+1)
 	}
-	p.signer = newTestKey(t, "k3", algRS256)
-	p.mu.Unlock()
+	p.Signer = oidctest.NewKey(t, "k3", oidc.AlgRS256)
+	p.Mu.Unlock()
 	// Another unknown kid within the minute: no fetch, refused.
 	loc, lc = login(t, a, "/")
-	w := callback(t, b, loc, p.issue(loc, adminClaims()), lc)
+	w := callback(t, b, loc, p.Issue(loc, oidctest.AdminClaims()), lc)
 	expect(t, w, http.StatusBadRequest, "")
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.jwksFetches != fetches+1 {
-		t.Fatalf("fetches %d, want %d", p.jwksFetches, fetches+1)
+	p.Mu.Lock()
+	defer p.Mu.Unlock()
+	if p.JWKSFetches != fetches+1 {
+		t.Fatalf("fetches %d, want %d", p.JWKSFetches, fetches+1)
 	}
 }
 
@@ -469,21 +500,21 @@ func TestSignInKeyRotation(t *testing.T) {
 // issuer, a token endpoint that refuses the client.
 func TestSignInProviderFailures(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
-	p.discoveryIssuer = "https://other.example/"
-	a := newEnv(t, envOptions{oidc: p.config(), publicURL: testPublicURL})
+	p := oidctest.New(t, oidc.AlgRS256)
+	p.DiscoveryIssuer = "https://other.example/"
+	a := newEnv(t, envOptions{oidc: oidcConfig(p), publicURL: testPublicURL})
 	w := a.serve(request{method: "GET", path: "/auth/login"})
 	expect(t, w, http.StatusBadGateway, "")
 	if !strings.Contains(w.Body.String(), "The sign-in provider cannot be reached") {
 		t.Fatalf("page %s", w.Body.String())
 	}
 
-	p2 := newTestProvider(t, algRS256)
-	cfg := p2.config()
+	p2 := oidctest.New(t, oidc.AlgRS256)
+	cfg := oidcConfig(p2)
 	cfg.ClientSecret = "wrong"
 	b := newEnv(t, envOptions{oidc: cfg, publicURL: testPublicURL})
 	loc, lc := login(t, b, "/")
-	w = callback(t, b, loc, p2.issue(loc, adminClaims()), lc)
+	w = callback(t, b, loc, p2.Issue(loc, oidctest.AdminClaims()), lc)
 	expect(t, w, http.StatusBadGateway, "")
 	if !strings.Contains(w.Body.String(), "The sign-in provider could not be reached or gave an answer FeRun cannot use.") {
 		t.Fatalf("page %s", w.Body.String())
@@ -494,10 +525,10 @@ func TestSignInProviderFailures(t *testing.T) {
 // sign-out without a session clears the cookie all the same.
 func TestSignOutWithoutEndSession(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
-	p.endSession = false
+	p := oidctest.New(t, oidc.AlgRS256)
+	p.EndSession = false
 	a, b := oidcEnvs(t, p, false)
-	sc := signIn(t, a, b, p, adminClaims())
+	sc := signIn(t, a, b, p, oidctest.AdminClaims())
 	w := a.serve(withCookie(request{method: "POST", path: "/auth/logout", header: http.Header{"X-Requested-With": {"ferun"}}}, sc))
 	expect(t, w, http.StatusOK, `{"redirect":"/"}`+"\n")
 	w = a.serve(request{method: "POST", path: "/auth/logout"})
@@ -531,8 +562,8 @@ func TestSignOutWithoutOIDC(t *testing.T) {
 // Basic is a way in.
 func TestSignInConfig(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
-	only := newEnv(t, envOptions{oidc: p.config(), publicURL: testPublicURL, noAdminUsers: true})
+	p := oidctest.New(t, oidc.AlgRS256)
+	only := newEnv(t, envOptions{oidc: oidcConfig(p), publicURL: testPublicURL, noAdminUsers: true})
 	expect(t, only.do("GET", "/auth/config", "", nil), http.StatusOK, `{"oidc":true,"basic":false}`+"\n")
 	w := only.do("GET", "/api/v1/admin/nodes", "", nil)
 	expect(t, w, http.StatusUnauthorized, errBody("admin sign-in required"))
@@ -543,7 +574,7 @@ func TestSignInConfig(t *testing.T) {
 	expect(t, only.do("GET", "/api/v1/admin/nodes", adminAuth(), nil), http.StatusUnauthorized, errBody("admin sign-in required"))
 	expect(t, only.do("GET", "/auth/me", adminAuth(), nil), http.StatusUnauthorized, errBody("not signed in"))
 
-	both := newEnv(t, envOptions{oidc: p.config(), publicURL: testPublicURL})
+	both := newEnv(t, envOptions{oidc: oidcConfig(p), publicURL: testPublicURL})
 	expect(t, both.do("GET", "/auth/config", "", nil), http.StatusOK, `{"oidc":true,"basic":true}`+"\n")
 	w = both.do("GET", "/api/v1/admin/nodes", "", nil)
 	if h := w.Header().Get("WWW-Authenticate"); h != `Basic realm="ferun"` {
@@ -562,8 +593,8 @@ func TestSignInConfig(t *testing.T) {
 // the header still gets it while Basic is on.
 func TestBasicChallengeNotForUI(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
-	for _, o := range []envOptions{{}, {oidc: p.config(), publicURL: testPublicURL}} {
+	p := oidctest.New(t, oidc.AlgRS256)
+	for _, o := range []envOptions{{}, {oidc: oidcConfig(p), publicURL: testPublicURL}} {
 		e := newEnv(t, o)
 		expired := &http.Cookie{Name: cookieSession, Value: "expired-or-unknown"}
 		for _, c := range []struct {
@@ -609,7 +640,7 @@ func TestBasicChallengeNotForUI(t *testing.T) {
 		expect(t, w, http.StatusOK, "")
 	}
 	// Without Basic, no request gets the challenge, the UI's or not.
-	only := newEnv(t, envOptions{oidc: p.config(), publicURL: testPublicURL, noAdminUsers: true})
+	only := newEnv(t, envOptions{oidc: oidcConfig(p), publicURL: testPublicURL, noAdminUsers: true})
 	for _, ui := range []bool{false, true} {
 		h := http.Header{}
 		if ui {
@@ -681,7 +712,7 @@ func TestAuthCleanupLoop(t *testing.T) {
 // as login_hint, normalised; anything that is not an address is dropped.
 func TestLoginHint(t *testing.T) {
 	t.Parallel()
-	p := newTestProvider(t, algRS256)
+	p := oidctest.New(t, oidc.AlgRS256)
 	e, _ := oidcEnvs(t, p, false)
 	for _, c := range []struct{ in, want string }{
 		{" Ann@Example.COM ", "ann@example.com"},

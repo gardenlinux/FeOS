@@ -68,6 +68,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/leader"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/nodelink"
+	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -232,16 +233,7 @@ type Config struct {
 }
 
 // OIDCConfig is the OIDC client of human sign-in.
-type OIDCConfig struct {
-	// Issuer is compared exactly with the discovery document's issuer and
-	// every ID token's iss.
-	Issuer, ClientID, ClientSecret string
-	Scopes                         []string
-	// AdminGroup makes a person an admin when the groups claim holds it.
-	AdminGroup string
-	// HTTPClient talks to the provider; nil: a client with a 10 s timeout.
-	HTTPClient *http.Client
-}
+type OIDCConfig = oidc.Config
 
 // Deps are the parts of the instance the API serves.
 type Deps struct {
@@ -309,7 +301,7 @@ type server struct {
 	st   *store.Store
 	log  *slog.Logger
 	// oidc is the sign-in provider; nil without OIDC.
-	oidc *provider
+	oidc *oidc.Provider
 	// secure marks cookies Secure: the public URL is https.
 	secure bool
 	// origin is the public URL's origin, which a session's requests must
@@ -354,7 +346,7 @@ func newServer(cfg Config, deps Deps) *server {
 		s.origin = strings.ToLower(u.Scheme + "://" + u.Host)
 	}
 	if cfg.OIDC != nil {
-		s.oidc = newProvider(*cfg.OIDC)
+		s.oidc = oidc.New(*cfg.OIDC)
 	}
 	for _, rt := range s.routes() {
 		s.mux.Handle(rt.pattern, rt.handler)

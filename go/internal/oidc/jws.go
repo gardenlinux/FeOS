@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-package api
+package oidc
 
 import (
 	"crypto"
@@ -23,11 +23,11 @@ import (
 // algorithms are accepted, RS256, ES256 and EdDSA; anything else, and
 // "none" above all, is refused.
 
-// The JWS algorithms ferund verifies.
+// The JWS algorithms the provider's tokens may use.
 const (
-	algRS256 = "RS256"
-	algES256 = "ES256"
-	algEdDSA = "EdDSA"
+	AlgRS256 = "RS256"
+	AlgES256 = "ES256"
+	AlgEdDSA = "EdDSA"
 )
 
 // minRSABits is the smallest RSA key accepted.
@@ -35,7 +35,7 @@ const minRSABits = 2048
 
 // errUnknownKey is a token signed with a key id the key set lacks: the
 // provider may have rotated its keys.
-var errUnknownKey = refused("the token's key is not in the provider's key set")
+var errUnknownKey = Refused("the token's key is not in the provider's key set")
 
 // jwk is one key of a JWK set, as published.
 type jwk struct {
@@ -88,7 +88,7 @@ func parseJWK(k jwk) (verifyKey, error) {
 	}
 	switch k.Kty {
 	case "RSA":
-		if k.Alg != "" && k.Alg != algRS256 {
+		if k.Alg != "" && k.Alg != AlgRS256 {
 			return verifyKey{}, fmt.Errorf("RSA key %q is for %s", k.Kid, k.Alg)
 		}
 		n, err := b64(k.N)
@@ -110,9 +110,9 @@ func parseJWK(k jwk) (verifyKey, error) {
 		if pub.N.BitLen() < minRSABits || exp < 3 {
 			return verifyKey{}, fmt.Errorf("RSA key %q is too weak", k.Kid)
 		}
-		return verifyKey{kid: k.Kid, alg: algRS256, pub: pub}, nil
+		return verifyKey{kid: k.Kid, alg: AlgRS256, pub: pub}, nil
 	case "EC":
-		if k.Crv != "P-256" || (k.Alg != "" && k.Alg != algES256) {
+		if k.Crv != "P-256" || (k.Alg != "" && k.Alg != AlgES256) {
 			return verifyKey{}, fmt.Errorf("EC key %q is not a P-256 key for ES256", k.Kid)
 		}
 		x, err := b64(k.X)
@@ -130,9 +130,9 @@ func parseJWK(k jwk) (verifyKey, error) {
 		if err != nil {
 			return verifyKey{}, fmt.Errorf("EC key %q: %w", k.Kid, err)
 		}
-		return verifyKey{kid: k.Kid, alg: algES256, pub: pub}, nil
+		return verifyKey{kid: k.Kid, alg: AlgES256, pub: pub}, nil
 	case "OKP":
-		if k.Crv != "Ed25519" || (k.Alg != "" && k.Alg != algEdDSA && k.Alg != "Ed25519") {
+		if k.Crv != "Ed25519" || (k.Alg != "" && k.Alg != AlgEdDSA && k.Alg != "Ed25519") {
 			return verifyKey{}, fmt.Errorf("OKP key %q is not an Ed25519 key for EdDSA", k.Kid)
 		}
 		x, err := b64(k.X)
@@ -142,7 +142,7 @@ func parseJWK(k jwk) (verifyKey, error) {
 		if len(x) != ed25519.PublicKeySize {
 			return verifyKey{}, fmt.Errorf("Ed25519 key %q: bad length", k.Kid)
 		}
-		return verifyKey{kid: k.Kid, alg: algEdDSA, pub: ed25519.PublicKey(x)}, nil
+		return verifyKey{kid: k.Kid, alg: AlgEdDSA, pub: ed25519.PublicKey(x)}, nil
 	}
 	return verifyKey{}, fmt.Errorf("key %q of type %q", k.Kid, k.Kty)
 }
@@ -163,20 +163,20 @@ type jwsHeader struct {
 func splitJWS(token string) (h jwsHeader, signingInput string, payload, sig []byte, err error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return h, "", nil, nil, refused("the token is not a compact JWS")
+		return h, "", nil, nil, Refused("the token is not a compact JWS")
 	}
 	hb, err := b64(parts[0])
 	if err != nil {
-		return h, "", nil, nil, refused("the token's header is not base64url")
+		return h, "", nil, nil, Refused("the token's header is not base64url")
 	}
 	if err := json.Unmarshal(hb, &h); err != nil {
-		return h, "", nil, nil, refused("the token's header is not JSON")
+		return h, "", nil, nil, Refused("the token's header is not JSON")
 	}
 	if payload, err = b64(parts[1]); err != nil {
-		return h, "", nil, nil, refused("the token's payload is not base64url")
+		return h, "", nil, nil, Refused("the token's payload is not base64url")
 	}
 	if sig, err = b64(parts[2]); err != nil {
-		return h, "", nil, nil, refused("the token's signature is not base64url")
+		return h, "", nil, nil, Refused("the token's signature is not base64url")
 	}
 	return h, parts[0] + "." + parts[1], payload, sig, nil
 }
@@ -191,9 +191,9 @@ func verifyJWS(token string, keys []verifyKey) ([]byte, error) {
 		return nil, err
 	}
 	switch h.Alg {
-	case algRS256, algES256, algEdDSA:
+	case AlgRS256, AlgES256, AlgEdDSA:
 	case "", "none":
-		return nil, refused("the token is not signed (alg none)")
+		return nil, Refused("the token is not signed (alg none)")
 	default:
 		return nil, refusedf("the token's algorithm is not accepted (RS256, ES256 or EdDSA)", "%q", h.Alg)
 	}
@@ -216,7 +216,7 @@ func verifyJWS(token string, keys []verifyKey) ([]byte, error) {
 		}
 		return nil, refusedf("no key of the provider verifies the token's algorithm", "%s", h.Alg)
 	}
-	return nil, refused("the token's signature does not verify")
+	return nil, Refused("the token's signature does not verify")
 }
 
 func hasKid(keys []verifyKey, kid string) bool {

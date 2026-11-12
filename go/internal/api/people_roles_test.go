@@ -21,6 +21,8 @@ import (
 	"github.com/gardenlinux/feos/go/internal/domains"
 	envs "github.com/gardenlinux/feos/go/internal/env"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/oidc"
+	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -191,8 +193,8 @@ type peopleWorld struct {
 // newPeopleWorld makes the world; o's OIDC and public URL are set.
 func newPeopleWorld(t *testing.T, o envOptions) *peopleWorld {
 	t.Helper()
-	p := newTestProvider(t, algRS256)
-	o.oidc, o.publicURL = p.config(), testPublicURL
+	p := oidctest.New(t, oidc.AlgRS256)
+	o.oidc, o.publicURL = oidcConfig(p), testPublicURL
 	e := newEnv(t, o)
 	w := &peopleWorld{e: e, stage: mkEnvRow(t, e, testTenant, "stage"), prod: mkEnvRow(t, e, testTenant, "prod"),
 		persons: map[string]uuid.UUID{}}

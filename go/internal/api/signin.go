@@ -20,6 +20,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -203,7 +204,7 @@ func (s *server) setSessionCookie(w http.ResponseWriter, value string, maxAge in
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	next := localPath(r.URL.Query().Get("next"))
 	hint := loginHint(r.URL.Query().Get("login_hint"))
-	d, err := s.oidc.discovery(r.Context())
+	d, err := s.oidc.Discovery(r.Context())
 	if err != nil {
 		s.log.Warn("sign-in: the provider's discovery failed", "err", err)
 		page(w, http.StatusBadGateway, "Sign-in is not available",
@@ -233,9 +234,9 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	challenge := sha256.Sum256([]byte(verifier))
 	q := u.Query()
 	q.Set("response_type", "code")
-	q.Set("client_id", s.oidc.cfg.ClientID)
+	q.Set("client_id", s.cfg.OIDC.ClientID)
 	q.Set("redirect_uri", s.redirectURI())
-	q.Set("scope", strings.Join(s.oidc.cfg.Scopes, " "))
+	q.Set("scope", strings.Join(s.cfg.OIDC.Scopes, " "))
 	q.Set("state", state)
 	q.Set("nonce", nonce)
 	q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(challenge[:]))
@@ -309,48 +310,48 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	// token's values; the log has the whole error.
 	fail := func(err error) {
 		status, msg := http.StatusBadRequest, "The sign-in did not verify."
-		var pe *errProvider
-		var re *errRefused
+		var pe *oidc.ErrProvider
+		var re *oidc.ErrRefused
 		switch {
 		case errors.As(err, &pe):
 			status, msg = http.StatusBadGateway, "The sign-in provider could not be reached or gave an answer FeRun cannot use."
 		case errors.As(err, &re):
-			msg = "The sign-in did not verify: " + re.reason + "."
+			msg = "The sign-in did not verify: " + re.Reason + "."
 		}
 		s.log.Warn("sign-in failed", "err", err)
 		page(w, status, "Sign-in failed", msg, again, "Start again")
 	}
 	if code == "" {
-		fail(refused("the provider sent no code"))
+		fail(oidc.Refused("the provider sent no code"))
 		return
 	}
-	d, err := s.oidc.discovery(r.Context())
+	d, err := s.oidc.Discovery(r.Context())
 	if err != nil {
 		fail(err)
 		return
 	}
-	toks, err := s.oidc.exchange(r.Context(), d, code, s.redirectURI(), login.Verifier)
+	toks, err := s.oidc.Exchange(r.Context(), d, code, s.redirectURI(), login.Verifier)
 	if err != nil {
 		fail(err)
 		return
 	}
-	idt, err := s.oidc.verify(r.Context(), d, toks.IDToken, login.Nonce)
+	idt, err := s.oidc.Verify(r.Context(), d, toks.IDToken, login.Nonce)
 	if err != nil {
 		fail(err)
 		return
 	}
-	info, err := s.oidc.userinfo(r.Context(), d, toks.AccessToken, idt.claims.str("sub"))
+	info, err := s.oidc.Userinfo(r.Context(), d, toks.AccessToken, idt.Claims.Str("sub"))
 	if err != nil {
 		fail(err)
 		return
 	}
-	p := personOf(idt.claims, info)
-	operator := s.oidc.cfg.AdminGroup != "" && slices.Contains(p.Groups, s.oidc.cfg.AdminGroup)
+	p := oidc.PersonOf(idt.Claims, info)
+	operator := s.cfg.OIDC.AdminGroup != "" && slices.Contains(p.Groups, s.cfg.OIDC.AdminGroup)
 	who := p.Email
 	if who == "" {
 		who = p.Username
 	}
-	pr, err := s.st.UpsertPerson(r.Context(), s.oidc.cfg.Issuer, p.Sub, p.Email, p.Name)
+	pr, err := s.st.UpsertPerson(r.Context(), s.cfg.OIDC.Issuer, p.Sub, p.Email, p.Name)
 	if err != nil {
 		s.log.Warn("sign-in: record the person", "err", err)
 		page(w, http.StatusInternalServerError, "Sign-in failed", "FeRun could not record the sign-in. Try again.", again, "Start again")
@@ -369,8 +370,8 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = s.st.InsertUISession(r.Context(), store.UISession{
 			IDHash: store.HashToken(id), Sub: p.Sub, Email: p.Email, Name: p.Name, Username: p.Username,
-			Picture: p.Picture, Groups: p.Groups, Admin: operator, IDToken: idt.raw, PersonID: pr.ID,
-			SID: idt.claims.str("sid"),
+			Picture: p.Picture, Groups: p.Groups, Admin: operator, IDToken: idt.Raw, PersonID: pr.ID,
+			SID: idt.Claims.Str("sid"),
 		}, s.cfg.SessionTTL)
 	}
 	if err != nil {
@@ -407,7 +408,7 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) error {
 			return internalf("sign out: %v", err)
 		}
 		if sess.IDToken != "" {
-			if d, err := s.oidc.discovery(r.Context()); err == nil && d.EndSessionEndpoint != "" {
+			if d, err := s.oidc.Discovery(r.Context()); err == nil && d.EndSessionEndpoint != "" {
 				if u, err := url.Parse(d.EndSessionEndpoint); err == nil {
 					q := u.Query()
 					q.Set("id_token_hint", sess.IDToken)
@@ -438,7 +439,7 @@ func (s *server) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 			Description string `json:"error_description"`
 		}{"invalid_request", desc})
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxProviderBody)
+	r.Body = http.MaxBytesReader(w, r.Body, oidc.MaxBody)
 	raw := ""
 	if err := r.ParseForm(); err == nil {
 		raw = r.PostForm.Get("logout_token")
@@ -447,18 +448,18 @@ func (s *server) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 		bad("logout_token is required")
 		return
 	}
-	d, err := s.oidc.discovery(r.Context())
+	d, err := s.oidc.Discovery(r.Context())
 	if err != nil {
 		s.log.Warn("back-channel logout: the provider's discovery failed", "err", err)
 		bad("the provider cannot be reached")
 		return
 	}
-	sid, sub, err := s.oidc.verifyLogout(r.Context(), d, raw)
+	sid, sub, err := s.oidc.VerifyLogout(r.Context(), d, raw)
 	if err != nil {
 		s.log.Info("back-channel logout refused", "err", err)
-		var re *errRefused
+		var re *oidc.ErrRefused
 		if errors.As(err, &re) {
-			bad(re.reason)
+			bad(re.Reason)
 		} else {
 			bad("the logout token did not verify")
 		}
