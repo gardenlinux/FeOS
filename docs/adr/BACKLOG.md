@@ -105,7 +105,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 - ADR 0021: L4 routes, TCP and UDP services, and TLS passed through by SNI to a service that terminates it itself.
 - ADR 0021: h2c to upstreams for gRPC services; the ingress speaks HTTP/1.1 to every service.
-- ADR 0021: authorization at the ingress for a tenant, a signed cookie or a forward-auth call, so that FeCode's previews could leave its forwarder and a stage could be closed to the public.
+- ADR 0021: a workbench's previews at the ingress, admitted as an environment's visitors are (ADR 0054), so that FeCode's previews could leave its forwarder.
 - ADR 0021: rate limits, body limits and timeouts per domain or tenant, and a cap per client address, which the client's address behind `externalTrafficPolicy: Local` makes possible.
 - ADR 0021: the proxy apart from the mesh's privileges: the agent root with `NET_ADMIN` and the proxy nonroot as two containers, or the device's calls alone behind a socket in a small privileged container.
 - ADR 0021: health checks at the balancer (`healthCheckNodePort`, ironcore#1584) and its node set honoured (cloud-provider-ironcore#618), so that fewer instances than workers suffice and no share waits while one restarts.
@@ -257,3 +257,13 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0053
 
 - ADR 0053: the guest pipes the SSH agent socket to a vsock port of its own without a preamble; ADR 0014 has one port with a preamble.
+
+## ADR 0054
+
+- ADR 0054: machine clients of a guarded environment: admission by a route token at the ingress, or a route that stays open beside guarded ones, such as a webhook's.
+- ADR 0054: OAuth 2.0 issuers without OpenID Connect, where no ID token says who signed in.
+- ADR 0054: the issuer's access token for the application, where it is to act for the visitor elsewhere.
+- ADR 0054: `ferun-auth` as a workload on FeRun, once FeRun deploys parts of itself.
+- ADR 0054: a CDN in front of a guarded host (ADR 0030): what it may cache, and who checks the visit at the edge.
+- ADR 0054: the visitor's subject in the access log (ADR 0021).
+- ADR 0054: a visit's longest time as an installation's setting; the first value is 12 hours.
