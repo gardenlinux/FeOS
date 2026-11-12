@@ -144,9 +144,11 @@ func registerJoinToken(fs *flag.FlagSet, c *JoinToken) *string {
 // ServiceToken is the configuration of `ferund service-token` (ADR 0026).
 type ServiceToken struct {
 	DatabaseURL string
-	// Kind is the service: model.ServiceSink, an instance of ferun-sink.
+	// Kind is the service: model.ServiceSink, an instance of ferun-sink,
+	// or model.ServiceAuth, ferun-auth (ADR 0054), which holds no
+	// certificate.
 	Kind string
-	// Name is the holder's name, its certificate's
+	// Name is the holder's name, a sink's certificate's
 	// spiffe://<td>/<kind>/<name>.
 	Name     string
 	LogLevel slog.Level
@@ -167,8 +169,8 @@ func ParseServiceToken(args []string, getenv func(string) string) (ServiceToken,
 	if c.DatabaseURL == "" {
 		errs = append(errs, errors.New("--database-url is required"))
 	}
-	if c.Kind != model.ServiceSink {
-		errs = append(errs, fmt.Errorf("--kind %q: %s", c.Kind, model.ServiceSink))
+	if c.Kind != model.ServiceSink && c.Kind != model.ServiceAuth {
+		errs = append(errs, fmt.Errorf("--kind %q: %s or %s", c.Kind, model.ServiceSink, model.ServiceAuth))
 	}
 	if !pki.IsNodeName(c.Name) {
 		errs = append(errs, fmt.Errorf("--name %q is not a name (a DNS label; required)", c.Name))
@@ -179,8 +181,8 @@ func ParseServiceToken(args []string, getenv func(string) string) (ServiceToken,
 func registerServiceToken(fs *flag.FlagSet, c *ServiceToken) *string {
 	level := strings.ToLower(c.LogLevel.String())
 	fs.StringVar(&c.DatabaseURL, "database-url", c.DatabaseURL, "PostgreSQL DSN (required)")
-	fs.StringVar(&c.Kind, "kind", c.Kind, "the service: sink (an instance of ferun-sink)")
-	fs.StringVar(&c.Name, "name", c.Name, "the holder's name, a DNS label: its certificate names spiffe://<trust domain>/<kind>/<name> (required)")
+	fs.StringVar(&c.Kind, "kind", c.Kind, "the service: sink (an instance of ferun-sink), or auth (ferun-auth, ADR 0054)")
+	fs.StringVar(&c.Name, "name", c.Name, "the holder's name, a DNS label: a sink's certificate names spiffe://<trust domain>/<kind>/<name> (required)")
 	fs.StringVar(&level, "log-level", level, "debug, info, warn or error")
 	return &level
 }
@@ -241,7 +243,7 @@ func Usage(w io.Writer, cmd string) {
 	case CmdServiceToken:
 		fs = newFlagSet(cmd)
 		registerServiceToken(fs, &ServiceToken{Kind: model.ServiceSink, LogLevel: slog.LevelWarn})
-		fmt.Fprintln(w, "Usage: ferund service-token --database-url URL --kind sink --name NAME\n\nIssues a long-lived service token (ADR 0026) and prints it once: feos-sink-<secret>,\nwhich an instance of ferun-sink trades for its certificates. Revoke it with\nDELETE /api/v1/admin/service-tokens/{id}.")
+		fmt.Fprintln(w, "Usage: ferund service-token --database-url URL --kind sink|auth --name NAME\n\nIssues a long-lived service token and prints it once: feos-sink-<secret>, which an\ninstance of ferun-sink trades for its certificates (ADR 0026), or feos-auth-<secret>,\nwith which ferun-auth answers the challenges of visitors (ADR 0054). Revoke it with\nDELETE /api/v1/admin/service-tokens/{id}.")
 	case CmdMigrate:
 		fs = newFlagSet(cmd)
 		registerMigrate(fs, &Migrate{LogLevel: slog.LevelInfo})
@@ -256,7 +258,7 @@ Commands:
   init-ca        make the platform CA's root and issuer
   new-issuer     make a new issuer under the platform CA's root
   join-token     issue a join token for a node or an ingress instance
-  service-token  issue a service token for an instance of ferun-sink
+  service-token  issue a service token for an instance of ferun-sink or ferun-auth
   migrate        apply the database migrations and exit
 
 Every flag has an environment variable FERUN_<NAME>, the flag's name in upper

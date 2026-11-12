@@ -46,3 +46,43 @@ func TestJoinTokenKind(t *testing.T) {
 		t.Errorf("help %s", b.String())
 	}
 }
+
+// service-token's --kind: sink by default, auth for ferun-auth (ADR
+// 0054), from the flag or its variable; anything else is refused, naming
+// both; the help names both too.
+func TestServiceTokenKind(t *testing.T) {
+	t.Parallel()
+	vars := map[string]string{"FERUN_DATABASE_URL": testURL}
+	st, err := ParseServiceToken([]string{"--name", "sink-0"}, env(vars))
+	if err != nil || st.Kind != model.ServiceSink || st.Name != "sink-0" {
+		t.Fatalf("default %+v %v", st, err)
+	}
+	st, err = ParseServiceToken([]string{"--kind", "auth", "--name", "ferun-auth"}, env(vars))
+	if err != nil || st.Kind != model.ServiceAuth || st.Name != "ferun-auth" {
+		t.Fatalf("auth %+v %v", st, err)
+	}
+	st, err = ParseServiceToken([]string{"--name", "ferun-auth"},
+		env(map[string]string{"FERUN_DATABASE_URL": testURL, "FERUN_KIND": "auth"}))
+	if err != nil || st.Kind != model.ServiceAuth {
+		t.Fatalf("from its variable %+v %v", st, err)
+	}
+	for _, kind := range []string{"other", "node", "", "Auth"} {
+		_, err := ParseServiceToken([]string{"--kind", kind, "--name", "a"}, env(vars))
+		if err == nil || !strings.Contains(err.Error(), `--kind "`+kind+`": sink or auth`) {
+			t.Errorf("--kind %q: %v", kind, err)
+		}
+	}
+	var b strings.Builder
+	Usage(&b, CmdServiceToken)
+	for _, want := range []string{"--kind sink|auth", `--kind (FERUN_KIND, default "sink")`,
+		"sink (an instance of ferun-sink), or auth (ferun-auth, ADR 0054)", "feos-auth-<secret>"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("help lacks %q:\n%s", want, b.String())
+		}
+	}
+	b.Reset()
+	Usage(&b, "")
+	if !strings.Contains(b.String(), "service-token  issue a service token for an instance of ferun-sink or ferun-auth") {
+		t.Errorf("overview %s", b.String())
+	}
+}

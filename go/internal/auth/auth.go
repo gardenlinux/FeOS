@@ -3,8 +3,8 @@
 
 // Package auth carries who a request is from through its context. The REST
 // router authenticates a request by the credential its route takes (a
-// sandbox's token, a tenant's token, or an operator's password or sign-in
-// session) and puts the result here; the handlers of the other packages
+// sandbox's token, a tenant's token, a platform service's token, or an
+// operator's password or sign-in session) and puts the result here; the handlers of the other packages
 // read it and never look at the credential themselves.
 package auth
 
@@ -220,9 +220,23 @@ const (
 	AdminOIDC  = "oidc"
 )
 
+// Service is a request made with a platform service's token
+// (service_tokens): ferun-auth's, of kind auth, on the routes of the
+// visits (ADR 0054).
+type Service struct {
+	// Kind is the token's kind (model.ServiceAuth), Name its holder's
+	// name.
+	Kind, Name string
+	// ID is the token's row ID, which logs and answered_by name.
+	ID uuid.UUID
+	// TokenHash is the SHA-256 of the token, hex.
+	TokenHash string
+}
+
 type sandboxKey struct{}
 type tenantKey struct{}
 type adminKey struct{}
+type serviceKey struct{}
 
 func WithSandbox(ctx context.Context, s Sandbox) context.Context {
 	return context.WithValue(ctx, sandboxKey{}, s)
@@ -252,4 +266,15 @@ func WithAdmin(ctx context.Context, a Admin) context.Context {
 func AdminFrom(ctx context.Context) (Admin, bool) {
 	a, ok := ctx.Value(adminKey{}).(Admin)
 	return a, ok
+}
+
+func WithService(ctx context.Context, s Service) context.Context {
+	return context.WithValue(ctx, serviceKey{}, s)
+}
+
+// ServiceFrom returns the platform service a request was made as, if it
+// was.
+func ServiceFrom(ctx context.Context) (Service, bool) {
+	s, ok := ctx.Value(serviceKey{}).(Service)
+	return s, ok
 }
