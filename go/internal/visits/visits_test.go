@@ -5,6 +5,7 @@ package visits
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -632,6 +633,40 @@ func TestRenewOneAsk(t *testing.T) {
 		if r.Outcome != wire.OutcomeRenewed || err != nil || next.Expires > asked.Add(visit.TokenLifetime).Unix() {
 			t.Fatalf("renewal %+v %v", r, err)
 		}
+	}
+}
+
+// A provider's no is recorded even when the ingress gave up on the
+// renewal while the provider was still deciding.
+func TestRenewNoAfterIngressGaveUp(t *testing.T) {
+	f := newFx(t)
+	e, host := f.env("stage", "fecode")
+	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	gate := make(chan struct{})
+	f.prov.mu.Lock()
+	f.prov.gate = gate
+	f.prov.answer = func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"admitted": false}`)) }
+	f.prov.mu.Unlock()
+	f.exec("UPDATE visits SET asked_at = now() - interval '9 minutes' WHERE id = $1", vid)
+	ctx, cancel := context.WithCancel(f.ctx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = f.s.Renew(ctx, wire.RenewVisitRequest{Token: tok, Secret: secret})
+	}()
+	select {
+	case <-f.prov.arrived:
+	case <-time.After(10 * time.Second):
+		close(gate)
+		<-done
+		t.Fatal("no ask")
+	}
+	cancel()
+	close(gate)
+	<-done
+	if v := f.row(vid); v.Open() || v.EndReason != model.VisitProviderNo {
+		t.Fatalf("the no after the ingress gave up: %+v", v)
 	}
 }
 

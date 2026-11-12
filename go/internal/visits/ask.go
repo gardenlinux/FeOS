@@ -29,7 +29,8 @@ func (s *Service) ask(ctx context.Context, provider string, visit uuid.UUID) (ve
 	body, _ := json.Marshal(map[string]string{"visit": visit.String()})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, provider, bytes.NewReader(body))
 	if err != nil {
-		return verdictNone, fmt.Errorf("the provider's URL: %w", err)
+		// The parse error repeats the URL, which may carry a key.
+		return verdictNone, errors.New("the provider's URL does not parse")
 	}
 	req.Header = http.Header{
 		"Content-Type": {"application/json"},

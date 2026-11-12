@@ -256,7 +256,7 @@ func (s *Service) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.R
 		}
 		return ended(reason)
 	}
-	no := false
+	no, endCtx := false, ctx
 	switch v.ProviderKind {
 	case model.ProviderKindTenant:
 		claimed, err := s.st.ClaimVisitAsk(ctx, v.ID, visit.AskEvery)
@@ -264,7 +264,13 @@ func (s *Service) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.R
 			return wire.RenewVisitResponse{}, fmt.Errorf("claim an ask: %w", err)
 		}
 		if claimed {
-			no = s.askTenant(ctx, v) == verdictNo
+			// The claim used up the ask for the next visit.AskEvery:
+			// from here the provider's row, the call and the end its no
+			// brings run detached from the ingress's call, so that the
+			// verdict is recorded even when the ingress gave up.
+			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), visit.AskTimeout+askGrace)
+			defer cancel()
+			no, endCtx = s.askTenant(dctx, v) == verdictNo, dctx
 		}
 	case model.ProviderKindFerun:
 		ok, err := s.st.PersonMayVisitByID(ctx, v.PersonID, v.Tenant, v.EnvID)
@@ -274,7 +280,7 @@ func (s *Service) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.R
 		no = !ok
 	}
 	if no {
-		reason, err := s.end(ctx, v, model.VisitProviderNo)
+		reason, err := s.end(endCtx, v, model.VisitProviderNo)
 		if err != nil {
 			return wire.RenewVisitResponse{}, fmt.Errorf("end a visit: %w", err)
 		}
@@ -343,9 +349,13 @@ const (
 	verdictNo
 )
 
+// askGrace is what a claimed ask may take beyond the call's own
+// visit.AskTimeout: the provider's row before it and the end after it.
+const askGrace = 2 * time.Second
+
 // askTenant asks a visit's provider of kind tenant whether it still
-// vouches for the visit (§1.9), on a context detached from the caller's,
-// so that the verdict is recorded even when the ingress gave up.
+// vouches for the visit (§1.9), the call bounded by visit.AskTimeout. Its
+// caller passes a context detached from the ingress's call.
 func (s *Service) askTenant(ctx context.Context, v store.Visit) verdict {
 	p, err := s.st.GetAccessProvider(ctx, v.Tenant, v.Provider)
 	if err != nil || p.Kind != model.ProviderKindTenant {
@@ -353,7 +363,7 @@ func (s *Service) askTenant(ctx context.Context, v store.Visit) verdict {
 			"provider", v.Provider, "err", err)
 		return verdictNone
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), visit.AskTimeout)
+	ctx, cancel := context.WithTimeout(ctx, visit.AskTimeout)
 	defer cancel()
 	start := time.Now()
 	got, err := s.ask(ctx, p.URL, v.ID)
