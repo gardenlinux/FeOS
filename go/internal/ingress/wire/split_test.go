@@ -95,6 +95,8 @@ func TestSplit(t *testing.T) {
 		challenges.Items = append(challenges.Items, Challenge{Token: fmt.Sprintf("token-%02d", i), Host: "a.example",
 			KeyAuth: strings.Repeat("k", 80)})
 	}
+	// The visit keys go with the first part too.
+	keys := testVisitKeys()
 	var removed []string
 	for i := range 1000 {
 		removed = append(removed, fmt.Sprintf("gone-%04d", i))
@@ -105,8 +107,10 @@ func TestSplit(t *testing.T) {
 		name string
 		t    *Table
 	}{
-		{"whole", &Table{Seq: 1, Whole: true, Envs: envs, Mesh: mesh, Self: self, Challenges: challenges, SentAt: t0}},
+		{"whole", &Table{Seq: 1, Whole: true, Envs: envs, Mesh: mesh, Self: self, Challenges: challenges, VisitKeys: keys,
+			SentAt: t0}},
 		{"delta", &Table{Seq: 7, Envs: envs, Removed: removed, Self: self, Challenges: challenges, SentAt: t0}},
+		{"keys", &Table{Seq: 8, Envs: envs, VisitKeys: keys, SentAt: t0}},
 		{"removals", &Table{Seq: 9, Removed: removed, SentAt: t0}},
 	} {
 		parts, err := Split(tc.t, limit)
@@ -127,6 +131,9 @@ func TestSplit(t *testing.T) {
 			}
 			if (p.Challenges == tc.t.Challenges) != (first || tc.t.Challenges == nil) || (!first && p.Challenges != nil) {
 				t.Errorf("%s part %d: challenges %v", tc.name, i, p.Challenges)
+			}
+			if (p.VisitKeys == tc.t.VisitKeys) != (first || tc.t.VisitKeys == nil) || (!first && p.VisitKeys != nil) {
+				t.Errorf("%s part %d: visit keys %v", tc.name, i, p.VisitKeys)
 			}
 			if len(p.Envs)+len(p.Removed) == 0 {
 				t.Errorf("%s part %d is empty", tc.name, i)
@@ -286,9 +293,10 @@ func TestSplitApply(t *testing.T) {
 	limit := 3 * mustSize(t, &envs[0])
 	msgs := []*Table{
 		{Seq: 1, Whole: true, Envs: envs, Mesh: &Mesh{Version: 2}, Self: &Self{Name: "ingress-0"},
-			Challenges: &Challenges{Items: []Challenge{{Token: "t1", Host: "a.example", KeyAuth: "t1.k"}}}},
+			Challenges: &Challenges{Items: []Challenge{{Token: "t1", Host: "a.example", KeyAuth: "t1.k"}}}, VisitKeys: testVisitKeys()},
 		{Seq: 2, Envs: envs[:10], Removed: []string{"e20", "e21", "e22", "e23"},
-			Challenges: &Challenges{Items: []Challenge{{Token: "t2", Host: "b.example", KeyAuth: "t2.k"}}}},
+			Challenges: &Challenges{Items: []Challenge{{Token: "t2", Host: "b.example", KeyAuth: "t2.k"}}},
+			VisitKeys:  &VisitKeys{TokenKID: "other", TokenKey: []byte{9}, ChallengeKID: "other", ChallengeKey: []byte{8}}},
 		{Seq: 3},
 		{Seq: 4, Removed: []string{"e00", "e01", "e02", "e03", "e04", "e05", "e06", "e07", "e08", "e09"}},
 	}

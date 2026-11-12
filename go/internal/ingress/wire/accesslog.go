@@ -20,6 +20,15 @@ const (
 // address is in none of them (ADR 0034, revised).
 const ReasonRouteRefusedClient = "route-refused-client"
 
+// The Reasons of the ingress's answers about visits (ADR 0054).
+const (
+	ReasonVisitSignIn      = "visit-sign-in"     // 303 to the provider
+	ReasonVisitRequired    = "visit-required"    // 401: not a navigation, no visit (S13's same-site requests included)
+	ReasonVisitRejected    = "visit-rejected"    // 403 at /.ferun/auth: the provider said no
+	ReasonVisitUnavailable = "visit-unavailable" // a guarded environment that cannot sign anyone in (fail closed)
+	ReasonFerunPath        = "ferun-path"        // any other answer under /.ferun/
+)
+
 // AccessLogEntry is one request the ingress answered for an environment,
 // which is also the request's server span (W3C Trace Context): TraceID
 // and SpanID name it, ParentSpanID the client's span when the request
@@ -27,7 +36,8 @@ const ReasonRouteRefusedClient = "route-refused-client"
 // TraceFlags the trace's flags. Path is the escaped path without the query.
 // Outcome is how it ended: the status class ("2xx" … "5xx"),
 // "upgraded", or "aborted". Reason is why the ingress refused the
-// request itself where a record says so (ReasonRouteRefusedClient),
+// request itself where a record says so (ReasonRouteRefusedClient,
+// ReasonVisit…, ReasonFerunPath),
 // else "". Instance is the instance the last attempt
 // went to, "" when none; Attempts counts the attempts, HeldNs how long
 // the request waited for an instance. Tenant is the environment's owner,

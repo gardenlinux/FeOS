@@ -25,5 +25,8 @@
 // reads a missing field as its zero value, so a new field must mean
 // "as before" at its zero value. A method is added, never changed; an
 // end that lacks one answers UNIMPLEMENTED, which the caller treats as
-// "not supported here".
+// "not supported here". Where an older receiver would act wrongly on what
+// it ignores (an environment that admits visitors only, ADR 0054), the
+// ingress names what it does in its Hello's Capabilities, and ferund
+// sends such a thing only to an ingress that named it.
 package wire

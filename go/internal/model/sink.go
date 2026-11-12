@@ -34,3 +34,8 @@ const (
 // The kinds of service tokens (service_tokens.kind): ServiceSink, an
 // instance of ferun-sink.
 const ServiceSink = "sink"
+
+// ServiceAuth is the kind of ferun-auth's token (ADR 0054), which reads
+// and answers challenges for the providers of kinds ferun and oidc; it
+// holds no certificate.
+const ServiceAuth = "auth"

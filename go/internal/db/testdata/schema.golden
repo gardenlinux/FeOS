@@ -1,3 +1,22 @@
+TABLE access_providers
+  COLUMN tenant text NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN kind text NOT NULL
+  COLUMN url text NOT NULL DEFAULT ''::text
+  COLUMN issuer text NOT NULL DEFAULT ''::text
+  COLUMN client_id text NOT NULL DEFAULT ''::text
+  COLUMN client_secret_sealed bytea
+  COLUMN rule jsonb NOT NULL DEFAULT '{}'::jsonb
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK (((kind <> 'oidc'::text) OR ((url = ''::text) AND (issuer <> ''::text) AND (client_id <> ''::text) AND (client_secret_sealed IS NOT NULL))))
+  CONSTRAINT CHECK (((kind <> 'tenant'::text) OR ((url <> ''::text) AND (issuer = ''::text) AND (client_id = ''::text) AND (client_secret_sealed IS NULL))))
+  CONSTRAINT CHECK (((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (name <> 'ferun'::text)))
+  CONSTRAINT CHECK ((kind = ANY (ARRAY['tenant'::text, 'oidc'::text])))
+  CONSTRAINT FOREIGN KEY (tenant) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (tenant, name)
+  CREATE UNIQUE INDEX access_providers_pkey ON public.access_providers USING btree (tenant, name)
 TABLE acme_accounts
   COLUMN directory text NOT NULL
   COLUMN key_sealed bytea NOT NULL
@@ -339,12 +358,17 @@ TABLE environments
   COLUMN host_label text
   COLUMN deployed integer NOT NULL DEFAULT 0
   COLUMN deployment integer NOT NULL DEFAULT 0
+  COLUMN access text NOT NULL DEFAULT 'anyone'::text
+  COLUMN access_provider text
   CONSTRAINT CHECK (((NOT public) OR (ingress_group AND (host_label IS NOT NULL))))
+  CONSTRAINT CHECK (((access = 'visitors'::text) OR (access_provider IS NULL)))
   CONSTRAINT CHECK (((host_label ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (substr(host_label, 3, 2) <> '--'::text)))
   CONSTRAINT CHECK (((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (name !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
+  CONSTRAINT CHECK ((access = ANY (ARRAY['anyone'::text, 'visitors'::text])))
   CONSTRAINT CHECK ((deployed >= 0))
   CONSTRAINT CHECK ((deployment >= 0))
   CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id)
+  CONSTRAINT FOREIGN KEY (owner, access_provider) REFERENCES access_providers(tenant, name)
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, name)
   CREATE INDEX environments_owner ON public.environments USING btree (owner, created_at)
@@ -894,7 +918,7 @@ TABLE service_tokens
   COLUMN last_used_at timestamp with time zone
   COLUMN cert_window timestamp with time zone NOT NULL DEFAULT now()
   COLUMN cert_count integer NOT NULL DEFAULT 0
-  CONSTRAINT CHECK ((kind = 'sink'::text))
+  CONSTRAINT CHECK ((kind = ANY (ARRAY['sink'::text, 'auth'::text])))
   CONSTRAINT CHECK ((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text))
   CONSTRAINT PRIMARY KEY (hash)
   CONSTRAINT UNIQUE (id)
@@ -1050,6 +1074,57 @@ TABLE ui_sessions
   CREATE INDEX ui_sessions_sid ON public.ui_sessions USING btree (sid) WHERE (sid <> ''::text)
   CREATE INDEX ui_sessions_sub ON public.ui_sessions USING btree (sub)
   CREATE UNIQUE INDEX ui_sessions_pkey ON public.ui_sessions USING btree (id_hash)
+TABLE visit_answers
+  COLUMN challenge_id text NOT NULL
+  COLUMN env_id uuid NOT NULL
+  COLUMN host text NOT NULL
+  COLUMN outcome text NOT NULL
+  COLUMN visit_id uuid
+  COLUMN binding text NOT NULL
+  COLUMN code_expires_at timestamp with time zone NOT NULL
+  COLUMN redeemed_at timestamp with time zone
+  COLUMN answered_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN expires_at timestamp with time zone NOT NULL
+  CONSTRAINT CHECK (((outcome = 'accepted'::text) = (visit_id IS NOT NULL)))
+  CONSTRAINT CHECK ((challenge_id ~ '^[A-Za-z0-9_-]{22}$'::text))
+  CONSTRAINT CHECK ((outcome = ANY (ARRAY['accepted'::text, 'rejected'::text])))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (visit_id) REFERENCES visits(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (challenge_id)
+  CREATE INDEX visit_answers_expires ON public.visit_answers USING btree (expires_at)
+  CREATE UNIQUE INDEX visit_answers_pkey ON public.visit_answers USING btree (challenge_id)
+TABLE visits
+  COLUMN id uuid NOT NULL
+  COLUMN env_id uuid NOT NULL
+  COLUMN tenant text NOT NULL
+  COLUMN provider text NOT NULL
+  COLUMN provider_kind text NOT NULL
+  COLUMN host text NOT NULL
+  COLUMN subject text NOT NULL
+  COLUMN email text NOT NULL DEFAULT ''::text
+  COLUMN name text NOT NULL DEFAULT ''::text
+  COLUMN session text NOT NULL DEFAULT ''::text
+  COLUMN person_id uuid
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN ends_at timestamp with time zone NOT NULL
+  COLUMN asked_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN binding text NOT NULL DEFAULT ''::text
+  COLUMN ended_at timestamp with time zone
+  COLUMN end_reason text NOT NULL DEFAULT ''::text
+  CONSTRAINT CHECK (((binding = ''::text) OR (binding ~ '^[A-Za-z0-9_-]{43}$'::text)))
+  CONSTRAINT CHECK (((ended_at IS NULL) = (end_reason = ''::text)))
+  CONSTRAINT CHECK (((length(subject) >= 1) AND (length(subject) <= 255)))
+  CONSTRAINT CHECK (((provider_kind = 'ferun'::text) = (person_id IS NOT NULL)))
+  CONSTRAINT CHECK ((end_reason = ANY (ARRAY[''::text, 'expired'::text, 'provider_no'::text, 'signed_out'::text, 'unpublished'::text, 'provider_changed'::text, 'backchannel_logout'::text])))
+  CONSTRAINT CHECK ((provider_kind = ANY (ARRAY['tenant'::text, 'oidc'::text, 'ferun'::text])))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX visits_ends ON public.visits USING btree (ends_at)
+  CREATE INDEX visits_env ON public.visits USING btree (env_id) WHERE (ended_at IS NULL)
+  CREATE INDEX visits_session ON public.visits USING btree (provider_kind, session) WHERE ((ended_at IS NULL) AND (session <> ''::text))
+  CREATE UNIQUE INDEX visits_pkey ON public.visits USING btree (id)
 TABLE watches
   COLUMN id uuid NOT NULL
   COLUMN sandbox_id text COLLATE "C" NOT NULL

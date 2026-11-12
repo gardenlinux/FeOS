@@ -77,13 +77,21 @@ type RenewResponse struct {
 	Certificate Certificate `json:"certificate"`
 }
 
+// CapabilityVisits is the capability of an ingress that checks visits
+// (ADR 0054): ferund gives an environment whose Access is set only to an
+// ingress whose Hello named it.
+const CapabilityVisits = "visits"
+
 // HelloRequest is the first call on a connection with a certificate: the
 // ingress's WireGuard public key (32 bytes), its WireGuard endpoint
-// (host:port) and its version.
+// (host:port), its version and its capabilities.
 type HelloRequest struct {
 	PublicKey []byte `json:"publicKey"`
 	Endpoint  string `json:"endpoint"`
 	Version   string `json:"version"`
+	// Capabilities are what this ingress does beyond what the fields' zero
+	// values say (CapabilityVisits); an older one names none.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // HelloResponse is the ingress's place on the pods' mesh: the cluster's
@@ -112,11 +120,14 @@ type SyncRequest struct{}
 //
 // Challenges, when not nil, are every pending ACME HTTP-01 answer, all
 // of them: they replace the ingress's. In a delta nil keeps them; in a
-// whole table nil means none (a control plane that sends none).
+// whole table nil means none (a control plane that sends none). VisitKeys
+// are the same: when not nil they replace the ingress's; nil keeps them
+// in a delta and means none in a whole table.
 //
 // A table larger than PartBytes goes in parts (Split): consecutive
 // messages of the stream, each with its own Seq, every one but the last
-// with More. The first part carries Whole, Mesh, Self and Challenges;
+// with More. The first part carries Whole, Mesh, Self, Challenges and
+// VisitKeys;
 // Envs, then Removed, are spread over the parts. Nothing else comes
 // between the parts, and a receiver applies them together once the last
 // one has arrived, never a part alone (State.Apply).
@@ -130,7 +141,19 @@ type Table struct {
 	Mesh       *Mesh       `json:"mesh,omitempty"`       // nil: unchanged
 	Self       *Self       `json:"self,omitempty"`       // nil: unchanged
 	Challenges *Challenges `json:"challenges,omitempty"` // nil: unchanged (in a delta)
+	VisitKeys  *VisitKeys  `json:"visitKeys,omitempty"`  // nil: unchanged (in a delta); in a whole table: none
 	SentAt     time.Time   `json:"sentAt"`
+}
+
+// VisitKeys are the installation's keys of visits (ADR 0054), the same for
+// every instance: the public key that verifies visits' tokens and codes,
+// and the key the ingress seals challenges with. Each ID is visit's key ID
+// (visit.Keys.TokenKID, ChallengeKID).
+type VisitKeys struct {
+	TokenKID     string `json:"tokenKid"`
+	TokenKey     []byte `json:"tokenKey"` // Ed25519 public key, 32 bytes
+	ChallengeKID string `json:"challengeKid"`
+	ChallengeKey []byte `json:"challengeKey"` // AES-256 key, 32 bytes
 }
 
 // Challenges are the ACME HTTP-01 answers every ingress instance gives
@@ -199,7 +222,22 @@ type Env struct {
 	Routes     []Route   `json:"routes"`
 	Services   []Service `json:"services"`
 	Domains    []Domain  `json:"domains,omitempty"`
+	// Access is who the ingress admits (ADR 0054): "" anyone, as before;
+	// AccessVisitors: only a request with a visit of Provider. Any other
+	// value admits nobody. An ingress without CapabilityVisits never gets
+	// an environment with Access set.
+	Access string `json:"access,omitempty"`
+	// Provider is the name of the provider whose visits it admits; a
+	// token's prv must equal it.
+	Provider string `json:"provider,omitempty"`
+	// SignIn is where a navigation without a visit is sent, with
+	// "challenge=<sealed>" added to its query: the tenant's service, or
+	// ferun-auth's /visit. "" with AccessVisitors: nobody can sign in.
+	SignIn string `json:"signIn,omitempty"`
 }
+
+// AccessVisitors is Env.Access of an environment that admits visitors.
+const AccessVisitors = "visitors"
 
 // Domain is a host served with a certificate of its own: its name, the
 // certificate's chain in DER, the issued certificate first, and its
@@ -302,6 +340,60 @@ type HoldResponse struct {
 	Refused      []HoldRefusal `json:"refused"`
 	LeaseSeconds int           `json:"leaseSeconds"`
 }
+
+// RedeemVisitRequest redeems an accepted code a browser brought to Host
+// under /.ferun/auth, with the secret of the challenge cookie of that
+// browser, and the hash of the visit secret the ingress made for the
+// visit cookie it will set (the token's vbnd).
+type RedeemVisitRequest struct {
+	Code         string `json:"code"`
+	Binding      string `json:"binding"`
+	VisitBinding string `json:"visitBinding"`
+	Host         string `json:"host"`
+}
+
+// RedeemVisitResponse: OutcomeAdmitted with the visit's first token, or
+// OutcomeRefused with Reason ("used", "expired", "ended", "unknown").
+type RedeemVisitResponse struct {
+	Outcome string `json:"outcome"`
+	Token   string `json:"token,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// RenewVisitRequest asks for a visit's next token, with the visit
+// cookie's secret.
+type RenewVisitRequest struct {
+	Token  string `json:"token"`
+	Secret string `json:"secret"`
+}
+
+// RenewVisitResponse: OutcomeRenewed with the next token, or OutcomeEnded
+// with Reason (a model.Visit… end reason, or "unknown": this cookie holds
+// no visit, though the visit may live on for another). Any error is no
+// answer: the ingress serves on with the token it has.
+type RenewVisitResponse struct {
+	Outcome string `json:"outcome"`
+	Token   string `json:"token,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// EndVisitRequest ends a visit, when its visitor signs out on a host, with
+// the visit cookie's secret.
+type EndVisitRequest struct {
+	Token  string `json:"token"`
+	Secret string `json:"secret"`
+}
+
+// EndVisitResponse is EndVisit's answer.
+type EndVisitResponse struct{}
+
+// The outcomes of RedeemVisit and RenewVisit.
+const (
+	OutcomeAdmitted = "admitted"
+	OutcomeRefused  = "refused"
+	OutcomeRenewed  = "renewed"
+	OutcomeEnded    = "ended"
+)
 
 func copyBytesList(in [][]byte) [][]byte {
 	if in == nil {

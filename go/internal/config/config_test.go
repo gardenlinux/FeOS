@@ -678,3 +678,54 @@ func TestRegistryEgressFlag(t *testing.T) {
 		t.Fatal("an entry without a host is refused")
 	}
 }
+
+// --visitor-auth-url (ADR 0054): empty by default; from the flag or
+// FERUN_VISITOR_AUTH_URL, without its trailing slash; an https URL of a
+// host of its own (http only on a loopback host), outside the zones of
+// tenants' hosts and not the front door's.
+func TestVisitorAuthURL(t *testing.T) {
+	t.Parallel()
+	if EnvName("visitor-auth-url") != "FERUN_VISITOR_AUTH_URL" {
+		t.Fatal(EnvName("visitor-auth-url"))
+	}
+	base := []string{"--database-url", testURL, "--apps-zone", "apps.example.com", "--tenant-zone", "apps.run.example.com",
+		"--public-url", "https://run.example.com"}
+	c, err := Parse(base, env(nil))
+	if err != nil || c.VisitorAuthURL != "" {
+		t.Fatalf("default %q, %v", c.VisitorAuthURL, err)
+	}
+	c, err = Parse(base, env(map[string]string{"FERUN_VISITOR_AUTH_URL": "https://auth.example.com/"}))
+	if err != nil || c.VisitorAuthURL != "https://auth.example.com" {
+		t.Fatalf("from the variable %q, %v", c.VisitorAuthURL, err)
+	}
+	for _, ok := range []string{"https://auth.example.com:8443", "http://127.0.0.1:8080", "http://localhost:9", "http://[::1]:80"} {
+		if c, err := Parse(append(slices.Clone(base), "--visitor-auth-url", ok), env(nil)); err != nil || c.VisitorAuthURL != ok {
+			t.Errorf("%s: %q %v", ok, c.VisitorAuthURL, err)
+		}
+	}
+	for _, tc := range []struct{ url, want string }{
+		{"auth.example.com", "is not an https URL of a host"},
+		{"ftp://auth.example.com", "is not an https URL of a host"},
+		{"http://auth.example.com", "only a loopback host may be"},
+		{"https://auth.example.com/visit", "must name only the scheme and the host"},
+		{"https://auth.example.com?x=1", "must name only the scheme and the host"},
+		{"https://auth.example.com#x", "must name only the scheme and the host"},
+		{"https://u:p@auth.example.com", "must name only the scheme and the host"},
+		{"https://run.example.com", "--public-url's"},
+		{"https://RUN.example.com:444", "--public-url's"},
+		{"https://auth.apps.example.com", "under the zone apps.example.com"},
+		{"https://apps.example.com", "under the zone apps.example.com"},
+		{"https://x.apps.run.example.com", "under the zone apps.run.example.com"},
+	} {
+		_, err := Parse(append(slices.Clone(base), "--visitor-auth-url", tc.url), env(nil))
+		if err == nil || !strings.Contains(err.Error(), "--visitor-auth-url") || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", tc.url, err, tc.want)
+		}
+	}
+	var b strings.Builder
+	Usage(&b, CmdServe)
+	if want := "ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind tenant"; !strings.Contains(b.String(), want) ||
+		!strings.Contains(b.String(), "--visitor-auth-url (FERUN_VISITOR_AUTH_URL)") {
+		t.Errorf("serve help lacks the setting")
+	}
+}

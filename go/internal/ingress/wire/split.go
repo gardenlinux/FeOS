@@ -17,18 +17,18 @@ const (
 )
 
 // partFrame is what a part takes beside its environments, removals,
-// mesh, self and challenges, generously: its braces, seq, whole, more,
+// mesh, self, challenges and visit keys, generously: its braces, seq, whole, more,
 // sentAt and the keys of its lists.
 const partFrame = 160
 
 // Split returns the messages that carry t, each taking at most limit
 // bytes coded (Size): t itself when it fits, else parts with the Seqs
 // t.Seq, t.Seq+1, …, every one but the last with More (see Table). The
-// first part carries t's Whole, Mesh, Self, Challenges and SentAt, every
-// later one SentAt; t's environments, then its removals, follow in
-// order, as many in each part as fit, and at least one. A part takes
-// more than limit only when one environment alone (in the first part:
-// with the mesh, self and the challenges) does. The parts share t's
+// first part carries t's Whole, Mesh, Self, Challenges, VisitKeys and
+// SentAt, every later one SentAt; t's environments, then its removals,
+// follow in order, as many in each part as fit, and at least one. A part
+// takes more than limit only when one environment alone (in the first
+// part: with the mesh, self, the challenges and the visit keys) does. The parts share t's
 // slices and values: t must not change while they are used.
 func Split(t *Table, limit int) ([]*Table, error) {
 	base := partFrame
@@ -52,6 +52,13 @@ func Split(t *Table, limit int) ([]*Table, error) {
 			return nil, err
 		}
 		base += n + len(`,"challenges":`)
+	}
+	if t.VisitKeys != nil {
+		n, err := Size(t.VisitKeys)
+		if err != nil {
+			return nil, err
+		}
+		base += n + len(`,"visitKeys":`)
 	}
 	// Each item with the comma before it.
 	envSizes := make([]int, len(t.Envs))
@@ -77,7 +84,8 @@ func Split(t *Table, limit int) ([]*Table, error) {
 		return []*Table{t}, nil
 	}
 
-	parts := []*Table{{Seq: t.Seq, Whole: t.Whole, Mesh: t.Mesh, Self: t.Self, Challenges: t.Challenges, SentAt: t.SentAt}}
+	parts := []*Table{{Seq: t.Seq, Whole: t.Whole, Mesh: t.Mesh, Self: t.Self, Challenges: t.Challenges, VisitKeys: t.VisitKeys,
+		SentAt: t.SentAt}}
 	used, items := base, 0
 	envFrom, idFrom := 0, 0
 	// cut gives the current part the environments before envTo and the

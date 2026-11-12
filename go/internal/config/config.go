@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gardenlinux/feos/go/internal/egress"
 	"github.com/gardenlinux/feos/go/internal/mesh"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/pki"
@@ -171,6 +172,10 @@ type Config struct {
 	// OIDCAdminGroup makes a signed-in user an admin when the groups claim
 	// holds it.
 	OIDCAdminGroup string
+	// VisitorAuthURL is ferun-auth's base URL (ADR 0054), without a
+	// trailing slash: where a visitor of a provider of kind ferun or oidc
+	// signs in. Empty: no ferun-auth, and only providers of kind tenant.
+	VisitorAuthURL string
 	// SessionTTL is the absolute lifetime of a UI session.
 	SessionTTL time.Duration
 	// BootstrapToken becomes a token of the tenant "operator" while no
@@ -425,6 +430,8 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"file of the OIDC client secret (client_secret_basic); required with --oidc-issuer")
 	fs.StringVar(&t.scopes, "oidc-scopes", t.scopes, "OIDC scopes, space-separated; must contain openid")
 	fs.StringVar(&c.OIDCAdminGroup, "oidc-admin-group", c.OIDCAdminGroup, "a signed-in user is an admin when the groups claim holds this group")
+	fs.StringVar(&c.VisitorAuthURL, "visitor-auth-url", c.VisitorAuthURL,
+		"ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind tenant")
 	fs.DurationVar(&c.SessionTTL, "session-ttl", c.SessionTTL, "lifetime of a UI session (absolute)")
 	fs.StringVar(&c.BootstrapToken, "bootstrap-token", c.BootstrapToken, "becomes a token of tenant operator when no tenant exists")
 	fs.Var((*listValue)(&c.MCPAllowedOrigins), "mcp-allowed-origins",
@@ -510,6 +517,7 @@ func (c *Config) finish(t *serveTexts) error {
 		return fmt.Errorf("--log-level: %w", err)
 	}
 	c.PublicURL = strings.TrimSuffix(c.PublicURL, "/")
+	c.VisitorAuthURL = strings.TrimSuffix(c.VisitorAuthURL, "/")
 	return nil
 }
 
@@ -574,6 +582,11 @@ func (c *Config) Validate() error {
 		}
 		if c.OIDCAdminGroup == "" {
 			bad("--oidc-admin-group must not be empty with --oidc-issuer")
+		}
+	}
+	if c.VisitorAuthURL != "" {
+		if err := c.checkVisitorAuthURL(); err != nil {
+			bad("--visitor-auth-url: %w", err)
 		}
 	}
 	if c.SessionTTL <= 0 {
@@ -726,6 +739,46 @@ func checkPublicURL(s string) error {
 	return nil
 }
 
+// checkVisitorAuthURL accepts ferun-auth's URL: an absolute https URL of
+// a host (http only for a loopback one, for tests), without a path, query
+// or fragment, whose host is neither the front door's nor under the apps
+// zone or the tenant zone, where it would be a tenant's host.
+func (c *Config) checkVisitorAuthURL() error {
+	u, err := url.Parse(c.VisitorAuthURL)
+	if err != nil {
+		return err
+	}
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case u.Host == "" || host == "":
+		return fmt.Errorf("%q is not an https URL of a host", c.VisitorAuthURL)
+	case u.Scheme == "http" && !isLoopbackHost(host):
+		return fmt.Errorf("%q is http: only a loopback host may be", c.VisitorAuthURL)
+	case u.Scheme != "https" && u.Scheme != "http":
+		return fmt.Errorf("%q is not an https URL of a host", c.VisitorAuthURL)
+	case u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil || u.Opaque != "":
+		return fmt.Errorf("%q must name only the scheme and the host", c.VisitorAuthURL)
+	}
+	if p, err := url.Parse(c.PublicURL); c.PublicURL != "" && err == nil && strings.EqualFold(p.Hostname(), host) {
+		return fmt.Errorf("its host %s is --public-url's: ferun-auth needs a host of its own", host)
+	}
+	for _, z := range []string{c.AppsZone, c.TenantZone} {
+		if z != "" && (host == z || strings.HasSuffix(host, "."+z)) {
+			return fmt.Errorf("its host %s is under the zone %s, a tenant's host", host, z)
+		}
+	}
+	return nil
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback address.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	a, err := netip.ParseAddr(host)
+	return err == nil && a.IsLoopback()
+}
+
 // ParseAdminUsers parses "user:password,user:password" (a password may
 // hold ":" but not ","; blanks around the pairs are ignored).
 func ParseAdminUsers(s string) (map[string]string, error) {
@@ -870,53 +923,16 @@ func (l *addrList) Set(v string) error {
 	return nil
 }
 
-// prefixList is a flag of IP prefixes, comma-separated, repeatable.
-type prefixList []netip.Prefix
+// prefixList is a flag of IP prefixes, comma-separated, repeatable
+// (egress.PrefixList).
+type prefixList = egress.PrefixList
 
 // DefaultDenyPrefixes is --deny-prefix's built-in set, which a set given
 // replaces: the private, shared, link-local, loopback, "this network",
 // multicast and reserved IPv4 ranges. "default" in --deny-prefix stands
 // for it, so that a deployment adds its own networks to it (a shoot's pod
-// and service networks outside these ranges).
-func DefaultDenyPrefixes() []netip.Prefix {
-	return []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.0/8"),
-		netip.MustParsePrefix("172.16.0.0/12"),
-		netip.MustParsePrefix("192.168.0.0/16"),
-		netip.MustParsePrefix("100.64.0.0/10"),
-		netip.MustParsePrefix("169.254.0.0/16"),
-		netip.MustParsePrefix("127.0.0.0/8"),
-		netip.MustParsePrefix("0.0.0.0/8"),
-		netip.MustParsePrefix("224.0.0.0/4"),
-		netip.MustParsePrefix("240.0.0.0/4"),
-	}
-}
-
-func (l *prefixList) String() string {
-	out := make([]string, len(*l))
-	for i, p := range *l {
-		out[i] = p.String()
-	}
-	return strings.Join(out, ",")
-}
-
-func (l *prefixList) Set(v string) error {
-	for _, s := range strings.Split(v, ",") {
-		if s = strings.TrimSpace(s); s == "" {
-			continue
-		}
-		if s == "default" {
-			*l = append(*l, DefaultDenyPrefixes()...)
-			continue
-		}
-		p, err := netip.ParsePrefix(s)
-		if err != nil {
-			return err
-		}
-		*l = append(*l, p.Masked())
-	}
-	return nil
-}
+// and service networks outside these ranges). It is egress.DefaultDeny.
+func DefaultDenyPrefixes() []netip.Prefix { return egress.DefaultDeny() }
 
 // byteSize is a flag of bytes: an integer with an optional KiB, MiB or GiB
 // suffix.

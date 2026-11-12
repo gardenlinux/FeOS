@@ -27,6 +27,10 @@ const (
 	MethodSync  = "/" + ServiceName + "/Sync"
 	MethodWake  = "/" + ServiceName + "/Wake"
 	MethodHold  = "/" + ServiceName + "/Hold"
+
+	MethodRedeemVisit = "/" + ServiceName + "/RedeemVisit"
+	MethodRenewVisit  = "/" + ServiceName + "/RenewVisit"
+	MethodEndVisit    = "/" + ServiceName + "/EndVisit"
 )
 
 // IngressServer is the server side of IngressService. An implementation
@@ -42,6 +46,10 @@ type IngressServer interface {
 	Sync(*SyncRequest, SyncServer) error
 	Wake(context.Context, *WakeRequest) (*WakeResponse, error)
 	Hold(context.Context, *HoldRequest) (*HoldResponse, error)
+	// RedeemVisit, RenewVisit and EndVisit are the visits of ADR 0054.
+	RedeemVisit(context.Context, *RedeemVisitRequest) (*RedeemVisitResponse, error)
+	RenewVisit(context.Context, *RenewVisitRequest) (*RenewVisitResponse, error)
+	EndVisit(context.Context, *EndVisitRequest) (*EndVisitResponse, error)
 	mustEmbedUnimplementedIngressServer()
 }
 
@@ -78,6 +86,18 @@ func (UnimplementedIngressServer) Hold(context.Context, *HoldRequest) (*HoldResp
 	return nil, status.Error(codes.Unimplemented, "method Hold not implemented")
 }
 
+func (UnimplementedIngressServer) RedeemVisit(context.Context, *RedeemVisitRequest) (*RedeemVisitResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RedeemVisit not implemented")
+}
+
+func (UnimplementedIngressServer) RenewVisit(context.Context, *RenewVisitRequest) (*RenewVisitResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenewVisit not implemented")
+}
+
+func (UnimplementedIngressServer) EndVisit(context.Context, *EndVisitRequest) (*EndVisitResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndVisit not implemented")
+}
+
 func (UnimplementedIngressServer) mustEmbedUnimplementedIngressServer() {}
 
 // RegisterIngressServer registers srv with s. The server must force
@@ -97,6 +117,9 @@ var ServiceDesc = grpc.ServiceDesc{
 		{MethodName: "Hello", Handler: unaryHandler(MethodHello, IngressServer.Hello)},
 		{MethodName: "Wake", Handler: unaryHandler(MethodWake, IngressServer.Wake)},
 		{MethodName: "Hold", Handler: unaryHandler(MethodHold, IngressServer.Hold)},
+		{MethodName: "RedeemVisit", Handler: unaryHandler(MethodRedeemVisit, IngressServer.RedeemVisit)},
+		{MethodName: "RenewVisit", Handler: unaryHandler(MethodRenewVisit, IngressServer.RenewVisit)},
+		{MethodName: "EndVisit", Handler: unaryHandler(MethodEndVisit, IngressServer.EndVisit)},
 	},
 	Streams: []grpc.StreamDesc{
 		{StreamName: "Sync", Handler: syncHandler, ServerStreams: true},

@@ -67,6 +67,21 @@ func (c *Client) Hold(ctx context.Context, in *HoldRequest, opts ...grpc.CallOpt
 	return invoke[HoldRequest, HoldResponse](ctx, c.cc, MethodHold, in, opts)
 }
 
+// RedeemVisit redeems an accepted code for a visit's first token.
+func (c *Client) RedeemVisit(ctx context.Context, in *RedeemVisitRequest, opts ...grpc.CallOption) (*RedeemVisitResponse, error) {
+	return invoke[RedeemVisitRequest, RedeemVisitResponse](ctx, c.cc, MethodRedeemVisit, in, opts)
+}
+
+// RenewVisit asks for a visit's next token.
+func (c *Client) RenewVisit(ctx context.Context, in *RenewVisitRequest, opts ...grpc.CallOption) (*RenewVisitResponse, error) {
+	return invoke[RenewVisitRequest, RenewVisitResponse](ctx, c.cc, MethodRenewVisit, in, opts)
+}
+
+// EndVisit ends a visit whose visitor signed out.
+func (c *Client) EndVisit(ctx context.Context, in *EndVisitRequest, opts ...grpc.CallOption) (*EndVisitResponse, error) {
+	return invoke[EndVisitRequest, EndVisitResponse](ctx, c.cc, MethodEndVisit, in, opts)
+}
+
 // Sync opens the Sync stream: it sends the SyncRequest and closes the
 // sending side. The stream ends with ctx.
 func (c *Client) Sync(ctx context.Context, opts ...grpc.CallOption) (SyncClient, error) {

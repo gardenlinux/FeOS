@@ -122,6 +122,8 @@ func TestJSONNames(t *testing.T) {
 		HelloRequest{}, HelloResponse{}, SyncRequest{}, Table{}, Mesh{}, Peer{}, Self{},
 		Env{}, Route{}, Service{}, Endpoint{}, WakeRequest{}, WakeResponse{},
 		HoldRequest{}, HoldRefusal{}, HoldResponse{}, State{}, Domain{}, Challenges{}, Challenge{},
+		VisitKeys{}, RedeemVisitRequest{}, RedeemVisitResponse{}, RenewVisitRequest{}, RenewVisitResponse{},
+		EndVisitRequest{}, EndVisitResponse{},
 	} {
 		typ := reflect.TypeOf(v)
 		seen := map[string]bool{}
@@ -441,6 +443,12 @@ func TestUnimplemented(t *testing.T) {
 	wantCode(t, "Wake", err, codes.Unimplemented, "")
 	_, err = c.Hold(ctx, &HoldRequest{})
 	wantCode(t, "Hold", err, codes.Unimplemented, "")
+	_, err = c.RedeemVisit(ctx, &RedeemVisitRequest{})
+	wantCode(t, "RedeemVisit", err, codes.Unimplemented, "method RedeemVisit not implemented")
+	_, err = c.RenewVisit(ctx, &RenewVisitRequest{})
+	wantCode(t, "RenewVisit", err, codes.Unimplemented, "method RenewVisit not implemented")
+	_, err = c.EndVisit(ctx, &EndVisitRequest{})
+	wantCode(t, "EndVisit", err, codes.Unimplemented, "method EndVisit not implemented")
 	stream, err := c.Sync(ctx)
 	if err != nil {
 		t.Fatal(err)
