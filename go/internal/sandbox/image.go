@@ -20,12 +20,12 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/sync/singleflight"
 
 	"github.com/gardenlinux/feos/go/internal/bindings"
+	"github.com/gardenlinux/feos/go/internal/egress"
 	"github.com/gardenlinux/feos/go/internal/model"
 )
 
@@ -197,17 +197,7 @@ type heldToken struct {
 // that resolves to an internal address, at once or a moment later, is
 // refused too.
 func newResolver(deny []netip.Prefix) *resolver {
-	allow := bindings.DenyPolicy(deny)
-	d := &net.Dialer{Timeout: resolveDialTimeout, Control: func(_, address string, _ syscall.RawConn) error {
-		ap, err := netip.ParseAddrPort(address)
-		if err != nil {
-			return &deniedError{fmt.Errorf("unparseable address %q", address)}
-		}
-		if err := allow(ap.Addr()); err != nil {
-			return &deniedError{err}
-		}
-		return nil
-	}}
+	d := egress.Dialer(bindings.DenyPolicy(deny), resolveDialTimeout)
 	t := &http.Transport{
 		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
 			return d.DialContext(ctx, "tcp4", addr)
@@ -224,9 +214,7 @@ func newResolver(deny []netip.Prefix) *resolver {
 }
 
 // deniedError is a dial the destination rule refused.
-type deniedError struct{ err error }
-
-func (e *deniedError) Error() string { return "destination denied: " + e.err.Error() }
+type deniedError = egress.DeniedError
 
 // errNotHTTPS is a redirect to a URL that is not https.
 var errNotHTTPS = errors.New("redirect to a URL that is not https")
@@ -255,7 +243,7 @@ func unreachable(ctx context.Context, what string, err error) error {
 	case ctx.Err() != nil:
 		return fmt.Errorf("%s unreachable: %w", what, ctx.Err())
 	case errors.As(err, &denied):
-		return fmt.Errorf("%s is not reachable from the control plane: %v", what, denied.err)
+		return fmt.Errorf("%s is not reachable from the control plane: %v", what, denied.Err)
 	case errors.Is(err, errNotHTTPS):
 		return fmt.Errorf("%s redirected to a URL that is not https", what)
 	case errors.As(err, &dns) && dns.IsNotFound:

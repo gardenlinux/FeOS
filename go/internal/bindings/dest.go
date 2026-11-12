@@ -5,21 +5,21 @@ package bindings
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"net/netip"
 	"syscall"
 	"time"
 
-	"github.com/gardenlinux/feos/go/internal/config"
+	"github.com/gardenlinux/feos/go/internal/egress"
 )
 
 // DefaultDenyPrefixes is the destination deny set when --deny-prefix names
-// none: config.DefaultDenyPrefixes, the private, shared, link-local,
-// loopback, "this network", multicast and reserved IPv4 ranges. A
-// binding's server is external by definition; the platform's own networks
-// are infrastructure no binding may name.
-func DefaultDenyPrefixes() []netip.Prefix { return config.DefaultDenyPrefixes() }
+// none: egress.DefaultDeny, the private, shared, link-local, loopback,
+// "this network", multicast and reserved IPv4 ranges. A binding's server
+// is external by definition; the platform's own networks are
+// infrastructure no binding may name.
+func DefaultDenyPrefixes() []netip.Prefix { return egress.DefaultDeny() }
 
 // DenyPolicy is the destination rule of bindings and preflights as a
 // function, for the control plane's other outbound clients (the image
@@ -28,21 +28,10 @@ func DefaultDenyPrefixes() []netip.Prefix { return config.DefaultDenyPrefixes() 
 func DenyPolicy(deny []netip.Prefix) func(netip.Addr) error { return denyPolicy(deny) }
 
 // denyPolicy judges one address: IPv4 outside the deny set, or an error
-// saying why not. The platform reaches servers over IPv4 only, so an IPv6
-// address is never a destination either.
+// saying why not (egress.Rule). The platform reaches servers over IPv4
+// only, so an IPv6 address is never a destination either.
 func denyPolicy(deny []netip.Prefix) func(netip.Addr) error {
-	return func(a netip.Addr) error {
-		a = a.Unmap()
-		if !a.Is4() {
-			return fmt.Errorf("%s is not an IPv4 address (the platform reaches servers over IPv4 only)", a)
-		}
-		for _, p := range deny {
-			if p.Contains(a) {
-				return fmt.Errorf("%s is an internal address (%s)", a, p)
-			}
-		}
-		return nil
-	}
+	return egress.Rule{Deny: deny}.Judge
 }
 
 // destRule is the destination rule as a value: the resolver and two
@@ -99,25 +88,23 @@ func (d *destRule) checkDestination(ctx context.Context, host string) *bindingEr
 	return nil
 }
 
-// errDialDenied marks a dial the rule refused.
+// errDialDenied marks a dial the rule refused: egress's refusal, under
+// the type the preflights look for.
 type errDialDenied struct{ err error }
 
 func (e *errDialDenied) Error() string { return "destination denied: " + e.err.Error() }
 
-// dialer applies the rule to every address it is about to connect to.
+// dialer applies the rule to every address it is about to connect to
+// (egress.Dialer).
 func (d *destRule) dialer() *net.Dialer {
-	allow := d.allowDial
-	return &net.Dialer{
-		Timeout: 5 * time.Second,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			ap, err := netip.ParseAddrPort(address)
-			if err != nil {
-				return &errDialDenied{fmt.Errorf("unparseable address %q", address)}
-			}
-			if err := allow(ap.Addr()); err != nil {
-				return &errDialDenied{err}
-			}
-			return nil
-		},
+	nd := egress.Dialer(d.allowDial, 5*time.Second)
+	control := nd.Control
+	nd.Control = func(network, address string, c syscall.RawConn) error {
+		err := control(network, address, c)
+		if denied := (*egress.DeniedError)(nil); errors.As(err, &denied) {
+			return &errDialDenied{denied.Err}
+		}
+		return err
 	}
+	return nd
 }
