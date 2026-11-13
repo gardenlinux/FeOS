@@ -16,12 +16,14 @@
 //!
 //! Every container sees the FeOS toolbox read-only at /feos-tools and the
 //! share directory read-only at /run/feos; its /etc/resolv.conf links to
-//! the resolvers in the share directory (feos_utils::resolver). The pod's
+//! the resolvers in the share directory (feos_utils::resolver), and one
+//! whose image has no /etc/hosts gets the loopback names there
+//! (feos_utils::hosts). The pod's
 //! volumes it mounts are bind mounts of where the guest mounted them.
 
 use feos_proto::container_service::VolumeMount;
 use feos_utils::filesystem::{volume, CONTAINERS_DIR};
-use feos_utils::resolver;
+use feos_utils::{hosts, resolver};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -278,6 +280,10 @@ pub fn provision(id: &str, image_dir: &Path, spec: &Value, adopt: bool) -> Resul
             }
             Err(e) => return Err(e),
         };
+        // Without it the container still runs; localhost goes to the resolver.
+        if let Err(e) = hosts::provision(&rootfs) {
+            log::warn!("Container {id}: {e}");
+        }
         let spec = serde_json::to_string_pretty(spec).map_err(|e| format!("spec: {e}"))?;
         std::fs::write(dir.join("bundle/config.json"), spec)
             .map_err(|e| format!("config.json: {e}"))?;
