@@ -132,9 +132,13 @@ func TestAskRefusals(t *testing.T) {
 	}
 	// A flipped byte, an unsigned one, an oversize one.
 	parts := strings.Split(raw, ".")
-	b := []byte(parts[2])
-	b[4] ^= 1
 	enc := base64.RawURLEncoding.EncodeToString
+	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig[4] ^= 1
+	b := []byte(enc(sig))
 	for name, c := range map[string]struct {
 		raw  string
 		want error
