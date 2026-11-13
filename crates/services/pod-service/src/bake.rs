@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Baked images (ADR 0025). A pod whose create names its one container's
-//! image starts its new disk on the newest layer baked of that image for
-//! the guest it boots and that guest's blank data volume, if the object
-//! store has one (`Disks::open`). Otherwise, when its create lets it, the
+//! image starts its new disk on the newest layer baked of that image on
+//! the blank data volume of the guest it boots, whichever guest baked it,
+//! if the object store has one (`Disks::open`). Otherwise, when its create lets it, the
 //! pod bakes the image at its bake point: after the guest pulled it and
 //! before the first container, with the guest's filesystem frozen, diskd
 //! seals the disk's top as a layer, and once the object store has it the
@@ -47,6 +47,13 @@ pub(crate) fn due(info: &PodInfo) -> Option<BakedLayer> {
         return None;
     }
     Some(disk.clone())
+}
+
+/// Whether a new disk of `image_ref` on the blank data volume `l0` may
+/// start on `layer`: a layer of that image made on that volume. The guest
+/// that baked it does not count (ADR 0022).
+pub(crate) fn fits(layer: &BakedLayer, image_ref: &str, l0: &str) -> bool {
+    layer.image_ref == image_ref && layer.l0 == l0 && !layer.layer_id.is_empty()
 }
 
 /// Whether the pod's disk was made on a baked layer, which holds its image.
@@ -112,6 +119,24 @@ mod tests {
         let mut none = pod(&[IMAGE], true, vec![]);
         none.image_layers = None;
         assert_eq!(image_of(&none), None);
+    }
+
+    #[test]
+    fn a_layer_fits_by_image_and_blank_volume_whichever_guest_baked_it() {
+        let layer = |image: &str, guest: &str, l0: &str, id: &str| BakedLayer {
+            image_ref: image.into(),
+            guest_version: guest.into(),
+            l0: l0.into(),
+            layer_id: id.into(),
+        };
+        assert!(fits(&layer(IMAGE, "older-guest", "l0", "x"), IMAGE, "l0"));
+        assert!(!fits(&layer(IMAGE, "g", "other-l0", "x"), IMAGE, "l0"));
+        assert!(!fits(
+            &layer("ghcr.io/acme/other@sha256:bbbb", "g", "l0", "x"),
+            IMAGE,
+            "l0"
+        ));
+        assert!(!fits(&layer(IMAGE, "g", "l0", ""), IMAGE, "l0"));
     }
 
     #[test]

@@ -238,7 +238,8 @@ to meanwhile. ADR 0022 decides what is baked and when; diskd only seals.
   diskd; a pod's containers come back with their writable layers.
 - Every guest version ships its blank volume; a guest whose volume
   changes starts new disks on another L0, and a layer baked on one L0
-  fits no other (ADR 0022).
+  fits no other (ADR 0022). A guest that changes what its image service
+  writes on the volume ships a new blank volume for that reason.
 - The sweep's caller is the control plane, which knows every pod, every
   head and every baked layer; `feosd` sweeps nothing.
 

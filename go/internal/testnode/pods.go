@@ -586,8 +586,8 @@ func (p *podService) bringUpPod(ctx context.Context, id string, pd *pod) {
 	p.announceLocked(pd.info, false)
 }
 
-// The guest version and blank data volume of the test node's disks: what
-// a baked layer is made for (ADR 0025).
+// The guest version and blank data volume of the test node's disks: a
+// baked layer is made on the volume, and records the guest (ADR 0022).
 const (
 	GuestVersion = "testnode-guest"
 	BlankLayer   = "testnode-l0"
@@ -595,8 +595,9 @@ const (
 
 // bakeLocked does at a pod's first bring-up what feosd's bake point does
 // (ADR 0025): a pod whose create named its one container's image starts
-// its disk on the first layer made for the node's guest and blank data
-// volume, or, if none is and the create lets it, bakes the image; the
+// its disk on the first layer made on the node's blank data volume,
+// whichever guest baked it, or, if none is and the create lets it, bakes
+// the image; the
 // bake is reported at once, as feosd reports it once the object store has
 // it. A pod with a disk already, or of a checkpoint, is left as it is.
 func bakeLocked(info *podv1.PodInfo) {
@@ -608,7 +609,7 @@ func bakeLocked(info *podv1.PodInfo) {
 	}
 	disk := &podv1.BakedLayer{ImageRef: layers.GetImageRef(), GuestVersion: GuestVersion, L0: BlankLayer}
 	for _, l := range layers.GetLayers() {
-		if l.GetImageRef() == layers.GetImageRef() && l.GetGuestVersion() == GuestVersion && l.GetL0() == BlankLayer {
+		if l.GetImageRef() == layers.GetImageRef() && l.GetL0() == BlankLayer {
 			disk.LayerId = l.GetLayerId()
 			break
 		}

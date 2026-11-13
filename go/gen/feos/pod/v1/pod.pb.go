@@ -1449,8 +1449,9 @@ type ImageLayers struct {
 	// registry/repository@sha256:… . Layers of another image are ignored.
 	ImageRef string `protobuf:"bytes,1,opt,name=image_ref,json=imageRef,proto3" json:"image_ref,omitempty"`
 	// The layers baked of it, newest first: the pod's new disk starts on the
-	// first one made for the guest it boots and that guest's blank data
-	// volume. One that the object store does not have is passed over.
+	// first one made on the blank data volume of the guest it boots,
+	// whichever guest baked it. One that the object store does not have is
+	// passed over.
 	Layers []*BakedLayer `protobuf:"bytes,2,rep,name=layers,proto3" json:"layers,omitempty"`
 	// Whether the node bakes the image when no layer fits: after the pull,
 	// before the first container, with the guest's filesystem frozen; it
@@ -1517,7 +1518,8 @@ type BakedLayer struct {
 	// The image it holds, registry/repository@sha256:… .
 	ImageRef string `protobuf:"bytes,1,opt,name=image_ref,json=imageRef,proto3" json:"image_ref,omitempty"`
 	// The installed guest's version the layer was made with: its directory
-	// under /usr/lib/feos/guest.
+	// under /usr/lib/feos/guest. A record only: a layer fits every guest
+	// with the same blank data volume (l0).
 	GuestVersion string `protobuf:"bytes,2,opt,name=guest_version,json=guestVersion,proto3" json:"guest_version,omitempty"`
 	// The layer of the guest's blank data volume, the layer's parent.
 	L0 string `protobuf:"bytes,3,opt,name=l0,proto3" json:"l0,omitempty"`

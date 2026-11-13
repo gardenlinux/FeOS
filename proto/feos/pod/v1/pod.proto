@@ -426,8 +426,9 @@ message ImageLayers {
   // registry/repository@sha256:… . Layers of another image are ignored.
   string image_ref = 1;
   // The layers baked of it, newest first: the pod's new disk starts on the
-  // first one made for the guest it boots and that guest's blank data
-  // volume. One that the object store does not have is passed over.
+  // first one made on the blank data volume of the guest it boots,
+  // whichever guest baked it. One that the object store does not have is
+  // passed over.
   repeated BakedLayer layers = 2;
   // Whether the node bakes the image when no layer fits: after the pull,
   // before the first container, with the guest's filesystem frozen; it
@@ -440,7 +441,8 @@ message BakedLayer {
   // The image it holds, registry/repository@sha256:… .
   string image_ref = 1;
   // The installed guest's version the layer was made with: its directory
-  // under /usr/lib/feos/guest.
+  // under /usr/lib/feos/guest. A record only: a layer fits every guest
+  // with the same blank data volume (l0).
   string guest_version = 2;
   // The layer of the guest's blank data volume, the layer's parent.
   string l0 = 3;

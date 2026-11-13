@@ -16,9 +16,10 @@ import (
 // before any container ran and reports it in the pod's record once the
 // store has it; the engine records it in image_bakes. A later create of
 // the same image, once the image's registry said yes to it, names the
-// layers, and its node starts the pod's disk on the newest one made for
-// the guest it boots. The image is the key, registry, repository and
-// manifest digest, never a digest alone.
+// layers, and its node starts the pod's disk on the newest one made on
+// its guest's blank data volume, whichever guest baked it. The image is
+// the key, registry, repository and manifest digest, never a digest
+// alone.
 
 // maxBakesSeen bounds the bakes this instance remembers having recorded.
 const maxBakesSeen = 4096

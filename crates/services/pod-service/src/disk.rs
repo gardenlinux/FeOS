@@ -16,6 +16,7 @@
 //! each on an empty L0 that all volumes share, one chunk of zeroes, under
 //! a disk as large as the volume.
 
+use crate::bake;
 use feos_proto::disk_service::{
     disk_service_client::DiskServiceClient, BakeRequest, CloseMemoryRequest, CreateDiskRequest,
     GetHeadRequest, GetObjectRequest, Head, ImportBaseRequest, Layer, LayerRef, MemoryRef,
@@ -234,10 +235,13 @@ impl Disks {
         Ok(device.into_inner().link_path)
     }
 
-    /// A new disk: on the newest of `image`'s baked layers that is made for
-    /// the newest guest installed and its blank data volume and that the
-    /// object store has, else on the blank data volume. Returns what the
-    /// disk was made on when the pod has an image.
+    /// A new disk: on the newest of `image`'s baked layers that is made on
+    /// the newest guest's blank data volume and that the object store has,
+    /// else on the blank data volume. Returns what the disk was made on
+    /// when the pod has an image. The guest that baked a layer does not
+    /// matter: the guest boots from its own kernel and initramfs, and the
+    /// disk holds only what its image service unpacked, so a change to
+    /// that comes with a new blank data volume (ADR 0022).
     async fn create(
         &self,
         pod_id: &str,
@@ -253,12 +257,10 @@ impl Disks {
             })
         };
         if let Some((image_ref, layers)) = image {
-            for layer in layers.iter().filter(|layer| {
-                layer.image_ref == image_ref
-                    && layer.guest_version == guest_version
-                    && layer.l0 == blank
-                    && !layer.layer_id.is_empty()
-            }) {
+            for layer in layers
+                .iter()
+                .filter(|layer| bake::fits(layer, image_ref, &blank))
+            {
                 match self.create_on_layer(pod_id, &blank, &layer.layer_id).await {
                     Ok(device) => {
                         info!(

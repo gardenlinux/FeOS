@@ -7,8 +7,8 @@ credentials the create brings may pull that image, and only a yes
 creates the pod; a sandbox's create, and an environment's service's or
 job's, brings its own registry credentials, never the tenant's. An image
 is baked once into a sealed layer of diskd's (ADR 0011), keyed by its
-source (registry, repository and manifest digest, with the guest and the
-L0 it was made for) and recorded in a catalog of `ferund`'s, and every
+source (registry, repository and manifest digest, with the L0 it was
+made on) and recorded in a catalog of `ferund`'s, and every
 later pod of that image, on any node, starts on the layer and pulls
 nothing, once the registry has said yes. FeRun is a client of every
 registry alike and issues no registry tokens; the platform's registry is
@@ -152,8 +152,12 @@ whoever may pull an image with them may run it, and no one else.
   either, and the spec's command, environment and volumes are not there
   yet. A bake that fails costs only the next pod's pull.
 - **The key is the source**: the registry, the repository and the
-  manifest digest, with the guest's version and the disk's L0 the layer
-  is made for. Never a digest alone, never the config digest. The same
+  manifest digest, with the disk's L0 the layer is made on. Never a
+  digest alone, never the config digest. Not the guest that baked it: a
+  guest boots from its own kernel and initramfs, the disk holds only
+  what its image service unpacked, and a guest that unpacks differently
+  ships a new blank data volume, so another L0 (ADR 0011). The guest's
+  version is kept beside the layer as a record. The same
   image in two repositories is two bakes, stored once, since diskd's
   chunks are content-addressed. A registry's yes speaks for its own
   repositories only, and a registry that serves a manifest has not shown
@@ -164,8 +168,8 @@ whoever may pull an image with them may run it, and no one else.
   nodes at once, or after the store lost a layer) is a row of its own.
   After the yes, a create names its image's layers to the node, beside
   the pod's spec and not in it. The node starts the pod's disk on the
-  first one made for the guest it boots that the store has (the chain
-  L0, layer), and the guest finds the image in its store and pulls
+  first one made on the L0 of the guest it boots that the store has (the
+  chain L0, layer), and the guest finds the image in its store and pulls
   nothing; with none, the pod pulls and bakes. The pod's record says
   what its disk was made on.
 - **Only what was checked is baked**: a pull whose manifest and layers
@@ -321,4 +325,7 @@ FeCode's ADR 0012, the builds API was deferred the same day by FeCode's
 ADR 0009, and builds became tenants' jobs on 2026-10-30 (ADR 0018,
 86eff10); the platform's images moved to GHCR on 2026-10-31 (518608d).
 The node's pull and the bake pod are ADR 0050, and the pod's lifecycle in
-the guest is ADR 0004's and ADR 0048's.
+the guest is ADR 0004's and ADR 0048's. On 2026-11-13 the guest's version
+left the key: every guest release had baked every image again, about
+100 s for a large one and longer than a client waited, though the twelve
+guests until then had all shipped the same L0.
