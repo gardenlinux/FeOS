@@ -262,6 +262,7 @@ type Engine struct {
 	acquireErrs  map[podid.ID][]error
 	stale        map[podid.ID]int
 	incarnations map[podid.ID]uuid.UUID
+	workdirs     map[podid.ID]string
 	holds        map[podid.ID]int
 	calls        map[string]map[podid.ID]int
 	processes    map[podid.ID]map[string]time.Duration
@@ -275,6 +276,7 @@ func newEngine(env *Env) *Engine {
 		acquireErrs:  map[podid.ID][]error{},
 		stale:        map[podid.ID]int{},
 		incarnations: map[podid.ID]uuid.UUID{},
+		workdirs:     map[podid.ID]string{},
 		holds:        map[podid.ID]int{},
 		calls:        map[string]map[podid.ID]int{},
 		processes:    map[podid.ID]map[string]time.Duration{},
@@ -348,6 +350,14 @@ func (g *Engine) Released(id podid.ID) []string {
 	return append([]string(nil), g.released[id]...)
 }
 
+// SetWorkdir makes dir the sandbox's working directory, which its leases
+// carry from now on ("": none, the root).
+func (g *Engine) SetWorkdir(id podid.ID, dir string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.workdirs[id] = dir
+}
+
 func (g *Engine) lease(id podid.ID) model.Lease {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -356,7 +366,7 @@ func (g *Engine) lease(id podid.ID) model.Lease {
 		inc = uuid.New()
 		g.incarnations[id] = inc
 	}
-	return model.Lease{SandboxID: id, Incarnation: inc, Node: NodeName}
+	return model.Lease{SandboxID: id, Incarnation: inc, Node: NodeName, Workdir: g.workdirs[id]}
 }
 
 func (g *Engine) Acquire(ctx context.Context, id podid.ID, kind model.HoldKind) (model.Lease, func(), error) {

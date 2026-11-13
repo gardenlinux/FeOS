@@ -104,7 +104,7 @@ func (e *Engine) admitHold(ctx context.Context, k holdKey, hs *holdState) (model
 				return err
 			}
 		}
-		lease = model.Lease{SandboxID: row.ID, Incarnation: row.Incarnation, Node: row.Node}
+		lease = model.Lease{SandboxID: row.ID, Incarnation: row.Incarnation, Node: row.Node, Workdir: row.Workdir}
 		ok = true
 		return nil
 	})

@@ -32,11 +32,13 @@ const (
 )
 
 // Lease names a running sandbox that a caller holds: the node its pod runs
-// on and the incarnation of that pod.
+// on and the incarnation of that pod, and the sandbox's working directory
+// ("" the root), which its tools start in.
 type Lease struct {
 	SandboxID   podid.ID
 	Incarnation uuid.UUID
 	Node        string
+	Workdir     string
 }
 
 // Loop is a job the leader runs on its interval and when woken. Run is

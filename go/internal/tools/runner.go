@@ -5,6 +5,7 @@ package tools
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -520,7 +521,7 @@ func (r *Runner) invoke(ctx context.Context, lease model.Lease, c *call, o *outp
 	}
 	actx, cancel := withLimit(ctx, lease.SandboxID, c.timeout)
 	defer cancel()
-	code, err = c.unary(actx, toolv1.NewToolServiceClient(conn), o)
+	code, err = c.unary(actx, toolv1.NewToolServiceClient(conn), lease.Workdir, o)
 	if err != nil {
 		if localRefusal(err) {
 			o.sent = prev
@@ -542,11 +543,13 @@ func (o *output) send(timeout time.Duration) (prev bool, err error) {
 	return prev, nil
 }
 
-// exec runs argv in the main container of the lease's pod, emitting its
-// output, each stream capped at MaxToolOutput with a marker. The stream is
-// read to its end, past the cap, for the exit code. Leaving it (at the
-// deadline, or when ctx ends) cancels it, and the guest kills the command's
-// process group.
+// exec runs argv in the main container of the lease's pod, in the
+// sandbox's working directory (the root when it has none, or while the
+// directory does not exist: the guest's rule), emitting its output, each
+// stream capped at MaxToolOutput with a marker. The stream is read to its
+// end, past the cap, for the exit code. Leaving it (at the deadline, or
+// when ctx ends) cancels it, and the guest kills the command's process
+// group.
 func (r *Runner) exec(ctx context.Context, lease model.Lease, argv []string, timeout time.Duration, o *output) (code int, received bool, err error) {
 	if err := r.takeExec(lease.SandboxID); err != nil {
 		return -1, false, err
@@ -563,7 +566,7 @@ func (r *Runner) exec(ctx context.Context, lease model.Lease, argv []string, tim
 	actx, cancel := withLimit(ctx, lease.SandboxID, timeout)
 	defer cancel()
 	stream, err := containerv1.NewContainerServiceClient(conn).Exec(actx, &containerv1.ExecRequest{
-		ContainerId: mainContainer, Command: argv, WorkingDir: "/",
+		ContainerId: mainContainer, Command: argv, WorkingDir: cmp.Or(lease.Workdir, "/"),
 	})
 	if err != nil {
 		if localRefusal(err) {

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 
 	"github.com/google/uuid"
@@ -100,17 +102,39 @@ type createSandboxRequest struct {
 	// Credentials are the tenant's credentials its pod gets, at their
 	// latest versions (ADR 0033).
 	Credentials []string `json:"credentials"`
+	// Workdir is the absolute directory its tools start in, fixed for its
+	// life: bash runs there, and the file tools take a relative path as
+	// relative to it. Empty: the root.
+	Workdir string `json:"workdir"`
+}
+
+// maxWorkdir is the longest working directory a sandbox takes, in bytes.
+const maxWorkdir = 1024
+
+// checkWorkdir validates a create's workdir: "" or an absolute, clean
+// path.
+func checkWorkdir(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	if len(dir) > maxWorkdir || !strings.HasPrefix(dir, "/") || path.Clean(dir) != dir || strings.ContainsRune(dir, 0) {
+		return apierr.New(http.StatusBadRequest,
+			"workdir must be an absolute, clean path of at most %d bytes, like /workspace/app; left out: the root", maxWorkdir)
+	}
+	return nil
 }
 
 // sandboxView is a sandbox as the sandbox routes show it: its status, its
 // environment, what of it it reaches ("all", or the entries, [] for
 // nothing) and its egress ("internet" when the create left it out), ADR
-// 0035 revised.
+// 0035 revised, and its working directory ("/" when the create left it
+// out).
 type sandboxView struct {
 	sandboxStatus
 	Environment envs.EnvRef  `json:"environment"`
 	Reaches     spec.Reaches `json:"reaches"`
 	Egress      spec.Egress  `json:"egress"`
+	Workdir     string       `json:"workdir"`
 }
 
 // viewOf renders a row for the sandbox routes, envName its environment's
@@ -121,7 +145,7 @@ func viewOf(sb store.Sandbox, envName string) sandboxView {
 		egress = *sb.Egress
 	}
 	return sandboxView{sandboxStatus: statusOf(sb), Environment: envs.EnvRef{ID: sb.EnvironmentID.String(), Name: envName},
-		Reaches: sb.Reaches, Egress: egress}
+		Reaches: sb.Reaches, Egress: egress, Workdir: cmp.Or(sb.Workdir, "/")}
 }
 
 // view renders a row with its environment's name read.
@@ -217,6 +241,9 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if msg := spec.CheckPod(sent["securityGroups"], req.Reaches, req.Egress, s.cfg.DenyPrefixes); msg != "" {
 		return apierr.New(http.StatusBadRequest, "%s", msg)
 	}
+	if err := checkWorkdir(req.Workdir); err != nil {
+		return err
+	}
 	env, err := s.writableEnv(r, req.Environment)
 	if err != nil {
 		return err
@@ -269,7 +296,7 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 			tmpl := model.SandboxTemplate(env.ID, id.String(), req.Egress.RestrictsNames(), req.Egress.NameDomains())
 			return store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 				EnvironmentID: env.ID, Reaches: req.Reaches, Egress: req.Egress, PodTemplate: tmpl,
-				LogLabels: ctl.SandboxLogLabels(tenant, id, env.ID), MadeBy: auth.MadeBy(r.Context())}
+				LogLabels: ctl.SandboxLogLabels(tenant, id, env.ID), MadeBy: auth.MadeBy(r.Context()), Workdir: req.Workdir}
 		})
 		if err != nil {
 			return err

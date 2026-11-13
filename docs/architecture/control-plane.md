@@ -1290,9 +1290,11 @@ path is a short ID or a UUID, either case ([Sandbox IDs](#sandbox-ids));
 anything else is 400 "sandboxId must be a sandbox ID: 11 characters of
 lowercase Crockford base32, the first a letter, or a UUID". `POST
 /api/v1/sandboxes` takes `environment` (required), `reaches`, `egress`,
-`image`, `vcpus`, `memoryMib`, `imageCredentials` ([Images](#images)) and
+`image`, `vcpus`, `memoryMib`, `imageCredentials` ([Images](#images)),
 `credentials` ([Sandboxes and jobs in an
-environment](#sandboxes-and-jobs-in-an-environment)),
+environment](#sandboxes-and-jobs-in-an-environment)) and `workdir`
+([Tools and MCP](#tools-and-mcp); 400 "workdir must be an absolute, clean
+path of at most 1024 bytes, like /workspace/app; left out: the root"),
 and no `sandboxId`: one that is neither absent, null nor `""` is 400
 "sandboxId is not accepted: ferund mints a sandbox's ID; leave it out
 and keep status.sandboxId of the answer". Every create makes a new
@@ -1583,8 +1585,31 @@ descriptions and schemas: `bash`, `read`, `write`, `edit`, `ls`, `rg`,
 `webfetch`. A call acquires the sandbox, then runs on its node over this
 instance's node connection: the file tools and `webfetch` as
 `feos.tool.v1` calls in the container `main`, `bash` as an exec of `bash
--c` in `/`, the process tools as execs of small scripts that keep their
-records in the container. Outputs are capped at 50,000 bytes with the old
+-c` in the sandbox's working directory, the process tools as execs of
+small scripts that keep their records in the container.
+
+A sandbox's **working directory** is the `workdir` of its create, an
+absolute, clean path, fixed for its life; left out, it is `/`, as every
+sandbox had it before (`sandboxes.workdir`, `''` for that). The tools
+start there, so that a client that names its working copy at the create
+can call them as one would in a shell there:
+
+- `bash`, and `process_start` without `cwd`, run in it. While the
+  directory does not exist yet, the guest runs them in `/` (its rule for
+  any working directory it cannot enter), so that a create may name the
+  directory its first command makes, for example a clone.
+- The file tools (`read`, `write`, `edit`, `ls`, `rg`, `fd`) take a
+  relative path as relative to it, `..` included, and none as it; an
+  absolute path stays as it is. ferund resolves the path before the call
+  leaves for the guest, and the answers name the path resolved: `wrote
+  /workspace/app/docs/product.md`. The REST door's `files/{path}` and
+  `dirs/{path}` are rooted, as before; `search`'s `path` is a tool's.
+- A sandbox without a working directory passes every path on as it is,
+  and the guest takes a relative one from `/`.
+
+The working directory comes with the lease (`model.Lease.Workdir`, read
+in Acquire's transaction), so that a keyed call that another instance
+finishes resolves its paths as the first did. Outputs are capped at 50,000 bytes with the old
 markers; a call has 120 s by default and then reports `timeout after Ns`.
 A call that finds the pod not running or not there syncs, acquires again
 and retries once. REST and MCP share the one entry point:
@@ -2666,9 +2691,9 @@ an environment without deployments is a valid place for them.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/sandboxes` `{environment, reaches?, egress?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` ("securityGroups is gone (ADR 0034, revised); use reaches"), a malformed `reaches` entry or `egress`, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for an entry naming an object or a port the deployed deployment does not have, with what it has |
+| `POST /api/v1/sandboxes` `{environment, reaches?, egress?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?, workdir?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` ("securityGroups is gone (ADR 0034, revised); use reaches"), a malformed `reaches` entry or `egress`, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for an entry naming an object or a port the deployed deployment does not have, with what it has |
 | `GET /api/v1/sandboxes[?environment=]` | `{sandboxes}`, oldest first: those the principal reads, of the one environment when it names one (by name or ID) |
-| `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}`, `reaches` (`"all"` or the entries, `[]` for nothing) and `egress` (`"internet"` when the create left it out, `"none"` or `{domains, blocks}`) |
+| `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}`, `reaches` (`"all"` or the entries, `[]` for nothing), `egress` (`"internet"` when the create left it out, `"none"` or `{domains, blocks}`) and `workdir` (`"/"` when the create left it out) |
 | `PUT /api/v1/sandboxes/{id}/reaches` `{reaches}` | 200 the view, the rules changed in place; 400 without `reaches` or for one malformed, 422 as a create's. `…/security-groups` is gone (404) |
 | `POST /api/v1/jobs` `{environment, reaches?, egress?, …}` | as before ([Tenants' jobs](#tenants-jobs)), and as a sandbox's create for the two fields |
 | `DELETE /api/v1/environments/{env}` | 409 `environment_in_use` while sandboxes or queued or running jobs are in it |

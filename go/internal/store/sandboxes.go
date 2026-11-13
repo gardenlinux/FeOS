@@ -108,6 +108,9 @@ type Sandbox struct {
 	// LogLabels are the labels of the pod's container logs (ADR 0026),
 	// sent with its create; fixed at the insert.
 	LogLabels map[string]string
+	// Workdir is the absolute directory the sandbox's tools start in, ""
+	// the root; fixed at the insert.
+	Workdir string
 }
 
 // IsOwn reports whether the row is a sandbox, the tenant's own (POST
@@ -163,7 +166,7 @@ func sandboxColumns(p string) string {
 		"pending_since", "unreachable_since", "run_id", "kube_version", "ssh_version",
 		"created_at", "updated_at", "last_active_at", "paused_at", "policy_failed", "policy_failures",
 		"policy_not_before", "environment_id", "instance", "pod_template", "pin_node", "idle_after_s", "address",
-		"tenant_job", "log_labels", "http_version", "http_pushed", "reaches", "egress"}
+		"tenant_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir"}
 	if p != "" {
 		for i, c := range cols {
 			cols[i] = p + "." + c
@@ -187,7 +190,7 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 		&pendingSince, &unreachableSince, &s.RunID, &s.KubeVersion, &s.SSHVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastActiveAt, &pausedAt, &s.PolicyFailed, &s.PolicyFailures,
 		&policyNotBefore, &s.EnvironmentID, &s.Instance, &template, &s.PinNode, &s.IdleAfterS, &s.Address,
-		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress)
+		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir)
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -307,6 +310,9 @@ type NewSandbox struct {
 	LogLabels map[string]string
 	// MadeBy is the principal that asked for it (ADR 0031); "": ferund.
 	MadeBy string
+	// Workdir is the absolute directory its tools start in (validated by
+	// the caller); "": the root.
+	Workdir string
 }
 
 // CreateSandbox inserts the sandbox unless its ID exists. It returns the
@@ -332,11 +338,11 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 	for range 3 {
 		sb, err := scanSandbox(s.q.QueryRow(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, image_ref,
 				environment_id, instance, pod_template, pin_node, idle_after_s, tenant_job, log_labels, made_by,
-				reaches, egress)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb)
+				reaches, egress, workdir)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17)
 			ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
 			n.ID, n.Owner, n.Image, n.VCPUs, n.MemoryMiB, n.ImageRef, n.EnvironmentID, n.Instance, template, n.PinNode,
-			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, reaches, egress))
+			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, reaches, egress, n.Workdir))
 		if err == nil {
 			return sb, true, s.Notify(ctx, chanSandbox, sb.ID.String())
 		}
@@ -590,8 +596,8 @@ func nullableColumn(name string, lifecycle bool, get func(*Sandbox) string) sand
 // sandboxWritable lists the columns UpdateSandbox writes. A lifecycle
 // write is one of client_state, node, op*, incarnation, materialised or
 // the checkpoint columns. id, owner, image, vcpus, memory_mib,
-// environment_id, instance, pod_template, tenant_job, log_labels and
-// created_at are never written; gen and updated_at are UpdateSandbox's;
+// environment_id, instance, pod_template, tenant_job, log_labels, workdir
+// and created_at are never written; gen and updated_at are UpdateSandbox's;
 // http_version, http_pushed, reaches and a template's legacy groups are
 // written by queries of their own (SetHTTPBindings, SetHTTPPushed,
 // SetSandboxReaches, DropLegacyGroups) and left as they are.
@@ -647,6 +653,7 @@ var sandboxFixed = []sandboxColumn{
 	{name: "pod_template", equal: func(a, b *Sandbox) bool { return sameTemplate(a.PodTemplate, b.PodTemplate) }},
 	{name: "tenant_job", equal: func(a, b *Sandbox) bool { return a.TenantJob == b.TenantJob }},
 	{name: "log_labels", equal: func(a, b *Sandbox) bool { return maps.Equal(a.LogLabels, b.LogLabels) }},
+	plainColumn("workdir", false, func(s *Sandbox) string { return s.Workdir }),
 }
 
 // UpdateSandbox writes the columns in which after differs from before, the

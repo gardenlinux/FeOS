@@ -386,7 +386,7 @@ func (c *Controller) notify(ctx context.Context, hint string) {
 
 // lease is the lease of a row as the row says: no Acquire.
 func lease(sb store.Sandbox) model.Lease {
-	return model.Lease{SandboxID: sb.ID, Incarnation: sb.Incarnation, Node: sb.Node}
+	return model.Lease{SandboxID: sb.ID, Incarnation: sb.Incarnation, Node: sb.Node, Workdir: sb.Workdir}
 }
 
 // steady reports whether a row runs without an op: what the probes and

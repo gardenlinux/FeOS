@@ -878,6 +878,7 @@ TABLE sandboxes
   COLUMN instance boolean NOT NULL DEFAULT false
   COLUMN reaches jsonb NOT NULL DEFAULT '[]'::jsonb
   COLUMN egress jsonb
+  COLUMN workdir text NOT NULL DEFAULT ''::text
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((reaches = '"all"'::jsonb) OR (jsonb_typeof(reaches) = 'array'::text)))

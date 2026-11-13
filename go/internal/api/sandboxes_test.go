@@ -23,10 +23,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// statusFields are the 18 fields of a sandbox's status, in order.
+// statusFields are the 19 fields of a sandbox's status, in order.
 var statusFields = []string{"sandboxId", "state", "image", "node", "owner", "createdAt", "updatedAt", "desiredState",
 	"clientState", "statusDescription", "checkpointEpoch", "checkpointHead", "checkpointAt", "vcpus", "memoryMib",
-	"environment", "reaches", "egress"}
+	"environment", "reaches", "egress", "workdir"}
 
 // keysInOrder returns the keys of a JSON object in their order.
 func keysInOrder(t *testing.T, raw []byte) []string {
@@ -59,7 +59,7 @@ func TestCreateSandbox(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
-		map[string]any{"environment": "box", "image": "img:1", "vcpus": 4, "memoryMib": 1024})
+		map[string]any{"environment": "box", "image": "img:1", "vcpus": 4, "memoryMib": 1024, "workdir": "/workspace/app"})
 	expect(t, w, http.StatusCreated, "")
 	var created struct {
 		Status  json.RawMessage `json:"status"`
@@ -87,7 +87,8 @@ func TestCreateSandbox(t *testing.T) {
 	}
 	want := map[string]any{"sandboxId": id, "state": "pending", "image": "img:1", "node": "", "owner": testTenant,
 		"desiredState": "active", "clientState": "pending", "statusDescription": "awaiting first tool call",
-		"checkpointEpoch": "0", "checkpointHead": "", "checkpointAt": "", "vcpus": 4.0, "memoryMib": 1024.0}
+		"checkpointEpoch": "0", "checkpointHead": "", "checkpointAt": "", "vcpus": 4.0, "memoryMib": 1024.0,
+		"workdir": "/workspace/app"}
 	for k, v := range want {
 		if st[k] != v {
 			t.Fatalf("%s = %#v, want %#v", k, st[k], v)
@@ -110,6 +111,9 @@ func TestCreateSandbox(t *testing.T) {
 	if err != nil || len(toks) != 1 || toks[0].Label != "default" {
 		t.Fatalf("tokens %+v %v", toks, err)
 	}
+	if row, err := e.st.GetSandbox(context.Background(), sb.ID); err != nil || row.Workdir != "/workspace/app" {
+		t.Fatalf("row's workdir %q, %v", row.Workdir, err)
+	}
 
 	// Another create, with its environment only: a new sandbox with a new
 	// ID and token; the defaults fill in. A sandboxId of null or "" names
@@ -125,13 +129,15 @@ func TestCreateSandbox(t *testing.T) {
 				Image     string `json:"image"`
 				Vcpus     int    `json:"vcpus"`
 				MemoryMib int    `json:"memoryMib"`
+				Workdir   string `json:"workdir"`
 			} `json:"status"`
 			Token   string `json:"token"`
 			Created bool   `json:"created"`
 		}](t, w)
 		pid, err := podid.Parse(minted.Status.SandboxID)
 		if err != nil || pid.IsLegacy() || seen[minted.Status.SandboxID] || !minted.Created || minted.Token == "" ||
-			minted.Status.Image != "ghcr.io/maltej/debian-ai:latest" || minted.Status.Vcpus != 2 || minted.Status.MemoryMib != 512 {
+			minted.Status.Image != "ghcr.io/maltej/debian-ai:latest" || minted.Status.Vcpus != 2 || minted.Status.MemoryMib != 512 ||
+			minted.Status.Workdir != "/" {
 			t.Fatalf("minted %+v", minted)
 		}
 		seen[minted.Status.SandboxID] = true
@@ -140,6 +146,9 @@ func TestCreateSandbox(t *testing.T) {
 
 // clientIDMsg is the refusal of a create that names an ID.
 const clientIDMsg = "sandboxId is not accepted: ferund mints a sandbox's ID; leave it out and keep status.sandboxId of the answer"
+
+// workdirMsg is the refusal of a create's workdir.
+const workdirMsg = "workdir must be an absolute, clean path of at most 1024 bytes, like /workspace/app; left out: the root"
 
 // The texts of a create's refusals.
 func TestCreateSandboxRefusals(t *testing.T) {
@@ -162,6 +171,10 @@ func TestCreateSandboxRefusals(t *testing.T) {
 		{map[string]any{"environment": "box", "vcpus": -1}, 400, "vcpus must be between 1 and 32 (0 = default 2)"},
 		{map[string]any{"environment": "box", "memoryMib": 128}, 400, "memoryMib must be between 256 and 65536 (0 = default 512)"},
 		{map[string]any{"environment": "box", "memoryMib": 70000}, 400, "memoryMib must be between 256 and 65536 (0 = default 512)"},
+		{map[string]any{"environment": "box", "workdir": "workspace/app"}, 400, workdirMsg},
+		{map[string]any{"environment": "box", "workdir": "/workspace/app/"}, 400, workdirMsg},
+		{map[string]any{"environment": "box", "workdir": "/workspace/../app"}, 400, workdirMsg},
+		{map[string]any{"environment": "box", "workdir": "/" + strings.Repeat("a", 1024)}, 400, workdirMsg},
 		{`[1]`, 400, "request body must be a JSON object: json: cannot unmarshal array into Go value of type map[string]json.RawMessage"},
 		{`{"vcpus":"two"}`, 400, "invalid request body: json: cannot unmarshal string into Go struct field createSandboxRequest.vcpus of type int"},
 	} {

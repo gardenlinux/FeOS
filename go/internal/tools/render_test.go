@@ -230,6 +230,74 @@ func TestToolServiceRequests(t *testing.T) {
 	}
 }
 
+// A sandbox with a working directory: bash runs in it, and the file
+// tools take a relative path, or none, from it; an absolute path stays
+// as it is. The outputs name the path the guest was given. A sandbox
+// without one passes paths on as they are, and bash runs in the root.
+func TestWorkdir(t *testing.T) {
+	env := toolstest.New(t, toolstest.Options{})
+	r := newRunner(env)
+	sb := env.NewSandbox()
+	env.Engine.SetWorkdir(sb.ID, "/workspace/app")
+	var got []proto.Message
+	env.Node.Script().SetTool(func(_ context.Context, _ podid.ID, _ string, req proto.Message) (proto.Message, bool, error) {
+		got = append(got, req)
+		return nil, false, nil
+	})
+	calls := []struct{ tool, args, text string }{
+		{ToolWrite, `{"path":"docs/product.md","content":"hi"}`, "wrote /workspace/app/docs/product.md\n"},
+		{ToolRead, `{"path":"docs/product.md"}`, "hi"},
+		{ToolEdit, `{"path":"../b","edits":[{"old":"x","new":"y"}]}`, ""},
+		{ToolLs, `{}`, ""},
+		{ToolRg, `{"pattern":"p","path":"."}`, ""},
+		{ToolFd, `{"pattern":"p","path":"src"}`, ""},
+		{ToolRead, `{"path":"/etc/hostname"}`, ""},
+	}
+	for _, c := range calls {
+		res, err := r.Call(bg, sb, c.tool, json.RawMessage(c.args), nil)
+		if err != nil {
+			t.Fatalf("%s: %v", c.tool, err)
+		}
+		if c.text != "" && res.Text != c.text {
+			t.Errorf("%s %s: %q, want %q", c.tool, c.args, res.Text, c.text)
+		}
+	}
+	paths := []string{"/workspace/app/docs/product.md", "/workspace/app/docs/product.md", "/workspace/b",
+		"/workspace/app", "/workspace/app", "/workspace/app/src", "/etc/hostname"}
+	if len(got) != len(paths) {
+		t.Fatalf("%d requests", len(got))
+	}
+	for i, m := range got {
+		if p := m.(interface{ GetPath() string }).GetPath(); p != paths[i] {
+			t.Errorf("request %d (%s): path %q, want %q", i, calls[i].tool, p, paths[i])
+		}
+	}
+
+	var dirs []string
+	scriptExec(env, func(req *containerv1.ExecRequest, _ testnode.ExecOutput) int32 {
+		dirs = append(dirs, req.GetWorkingDir())
+		return 0
+	})
+	if _, err := r.Call(bg, sb, ToolBash, json.RawMessage(`{"command":"pwd"}`), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	other := env.NewSandbox()
+	got = nil
+	if _, err := r.Call(bg, other, ToolWrite, json.RawMessage(`{"path":"docs/product.md","content":"hi"}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].(*toolv1.WriteRequest).GetPath() != "docs/product.md" {
+		t.Errorf("without a working directory: %v", got)
+	}
+	if _, err := r.Call(bg, other, ToolBash, json.RawMessage(`{"command":"pwd"}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(dirs, ",") != "/workspace/app,/" {
+		t.Errorf("bash ran in %v", dirs)
+	}
+}
+
 // bash: the frames as they come, each stream capped at MaxToolOutput with
 // a marker, the whole cut at MaxToolOutput; the exit code of the last
 // frame.

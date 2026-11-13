@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -25,16 +26,17 @@ const mainContainer = "main"
 // how its answer becomes output.
 //
 // An exec tool (bash and the process tools) runs argv through
-// ContainerService.Exec in the main container with "/" as working
-// directory; its stdout and stderr frames are the output, each stream
-// capped at MaxToolOutput with a marker, and its last frame is the exit
-// code. Every other tool is one unary ToolService call, and unary renders
-// its answer.
+// ContainerService.Exec in the main container with the sandbox's working
+// directory as its own; its stdout and stderr frames are the output, each
+// stream capped at MaxToolOutput with a marker, and its last frame is the
+// exit code. Every other tool is one unary ToolService call, and unary
+// renders its answer; it is given the working directory (dir), against
+// which it takes a relative path (at).
 type call struct {
 	tool    string
 	timeout time.Duration
 	argv    []string
-	unary   func(ctx context.Context, c toolv1.ToolServiceClient, o *output) (code int, err error)
+	unary   func(ctx context.Context, c toolv1.ToolServiceClient, dir string, o *output) (code int, err error)
 
 	// The background-process bookkeeping of the call (§9 Holds).
 	startTimeout time.Duration // process_start: the process's own timeout; 0: no limit
@@ -100,9 +102,10 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 		if err := notNegative("offset", p.Offset, "limit", p.Limit); err != nil {
 			return nil, err
 		}
-		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
+		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
+			file := at(dir, p.Path)
 			resp, err := tc.Read(ctx, &toolv1.ReadRequest{
-				Container: mainContainer, Path: p.Path, Offset: uint32(p.Offset), Limit: uint32(p.Limit),
+				Container: mainContainer, Path: file, Offset: uint32(p.Offset), Limit: uint32(p.Limit),
 			})
 			if err != nil {
 				return -1, err
@@ -114,7 +117,7 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 			if len(resp.Image) > 0 {
 				// The line goes where text goes (a text-only client, the
 				// activity log) and says what the picture beside it is.
-				o.emit(fmt.Sprintf("%s: %s, %dx%d px, %d KiB\n", p.Path,
+				o.emit(fmt.Sprintf("%s: %s, %dx%d px, %d KiB\n", file,
 					resp.MediaType, resp.Width, resp.Height, (len(resp.Image)+1023)/1024))
 				o.emitImage(&Image{MediaType: resp.MediaType, Data: resp.Image, Width: int(resp.Width), Height: int(resp.Height)})
 				return 0, nil
@@ -149,7 +152,8 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 		if proto.Size(req) > maxGuestRequest {
 			return nil, &TooLargeError{Tool: tool}
 		}
-		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
+		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
+			req.Path = at(dir, p.Path)
 			resp, err := tc.Edit(ctx, req)
 			if err != nil {
 				return -1, err
@@ -158,7 +162,7 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 				o.emit(resp.Error + "\n")
 				return 1, nil
 			}
-			o.emit(fmt.Sprintf("edited %s (%d replacements)\n", p.Path, resp.Replacements))
+			o.emit(fmt.Sprintf("edited %s (%d replacements)\n", req.Path, resp.Replacements))
 			return 0, nil
 		}
 
@@ -170,8 +174,8 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 		if err := notNegative("limit", p.Limit); err != nil {
 			return nil, err
 		}
-		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
-			resp, err := tc.Ls(ctx, &toolv1.LsRequest{Container: mainContainer, Path: p.Path, Limit: uint32(p.Limit)})
+		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
+			resp, err := tc.Ls(ctx, &toolv1.LsRequest{Container: mainContainer, Path: at(dir, p.Path), Limit: uint32(p.Limit)})
 			if err != nil {
 				return -1, err
 			}
@@ -199,9 +203,9 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 		if err := notNegative("context", p.Context, "limit", p.Limit); err != nil {
 			return nil, err
 		}
-		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
+		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
 			resp, err := tc.Rg(ctx, &toolv1.RgRequest{
-				Container: mainContainer, Pattern: p.Pattern, Path: p.Path, Glob: p.Glob,
+				Container: mainContainer, Pattern: p.Pattern, Path: at(dir, p.Path), Glob: p.Glob,
 				IgnoreCase: p.IgnoreCase, Literal: p.Literal, Context: uint32(p.Context), Limit: uint32(p.Limit),
 			})
 			if err != nil {
@@ -234,9 +238,9 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 		if err := notNegative("limit", p.Limit); err != nil {
 			return nil, err
 		}
-		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
+		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
 			resp, err := tc.Fd(ctx, &toolv1.FdRequest{
-				Container: mainContainer, Pattern: p.Pattern, Path: p.Path, Glob: p.Glob, Limit: uint32(p.Limit),
+				Container: mainContainer, Pattern: p.Pattern, Path: at(dir, p.Path), Glob: p.Glob, Limit: uint32(p.Limit),
 			})
 			if err != nil {
 				return -1, err
@@ -260,7 +264,7 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 		if err := json.Unmarshal(args, &p); err != nil || p.URL == "" {
 			return nil, errors.New("webfetch: bad params")
 		}
-		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
+		c.unary = func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
 			resp, err := tc.Webfetch(ctx, &toolv1.WebfetchRequest{Url: p.URL})
 			if err != nil {
 				return -1, err
@@ -295,6 +299,18 @@ func prepare(tool string, args json.RawMessage, defaultTimeout time.Duration) (*
 	return c, nil
 }
 
+// at is a file tool's path as the guest takes it, in a sandbox whose
+// working directory is dir: an absolute path as it is, a relative one
+// relative to dir, none dir itself. A sandbox without a working directory
+// ("") passes every path on as it is, and the guest takes a relative one
+// from the root.
+func at(dir, p string) string {
+	if dir == "" || strings.HasPrefix(p, "/") {
+		return p
+	}
+	return path.Join(dir, p)
+}
+
 // prepareWrite makes the write of content into path. The content is bytes
 // whatever they hold: REST's file write calls it with the request's body,
 // which a JSON string, the tool's argument, could not carry unless it is
@@ -305,7 +321,8 @@ func prepareWrite(path string, content []byte, defaultTimeout time.Duration) (*c
 		return nil, &TooLargeError{Tool: ToolWrite}
 	}
 	return &call{tool: ToolWrite, timeout: defaultTimeout,
-		unary: func(ctx context.Context, tc toolv1.ToolServiceClient, o *output) (int, error) {
+		unary: func(ctx context.Context, tc toolv1.ToolServiceClient, dir string, o *output) (int, error) {
+			req.Path = at(dir, path)
 			resp, err := tc.Write(ctx, req)
 			if err != nil {
 				return -1, err
@@ -314,7 +331,7 @@ func prepareWrite(path string, content []byte, defaultTimeout time.Duration) (*c
 				o.emit(resp.Error + "\n")
 				return 1, nil
 			}
-			o.emit(fmt.Sprintf("wrote %s\n", path))
+			o.emit(fmt.Sprintf("wrote %s\n", req.Path))
 			return 0, nil
 		}}, nil
 }

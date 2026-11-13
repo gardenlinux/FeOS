@@ -317,7 +317,7 @@ func (en *ensurer) running(ctx context.Context, row store.Sandbox) (model.Lease,
 		return model.Lease{}, en.drainingRunning(ctx, row, n)
 	}
 	if e.conns.Connected(row.Node) {
-		return model.Lease{SandboxID: row.ID, Incarnation: row.Incarnation, Node: row.Node}, nil
+		return model.Lease{SandboxID: row.ID, Incarnation: row.Incarnation, Node: row.Node, Workdir: row.Workdir}, nil
 	}
 	if err := e.conns.WaitConnected(ctx, row.Node); err != nil {
 		return model.Lease{}, errorf(model.ErrNodeUnavailable, "node %s is not connected to instance %s", row.Node, e.id)
