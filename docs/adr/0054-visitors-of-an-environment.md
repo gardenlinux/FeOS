@@ -163,9 +163,10 @@ tenants name.
   browser holds and whose hash `ferund` keeps; a renewal and a sign-out
   need it. The token the application receives is not the cookie, and
   cannot be renewed.
-- A request that is not a navigation and comes from another site, or
-  from another host of the same site, has no visit: hosts under one zone
-  are one site to the browser.
+- A request that is not the browser's top-level navigation (a fetch, or
+  a frame of the page) and comes from another site, or from another host
+  of the same site, has no visit, and a frame gets no sign-in: hosts
+  under one zone are one site to the browser.
 - An ingress says in its Hello that it checks visits. `ferund` gives a
   guarded environment only to an ingress that said so; an older one does
   not know its hosts and answers 404 there. An ingress that lacks the

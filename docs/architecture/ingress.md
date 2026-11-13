@@ -785,7 +785,10 @@ answer, 503 "Signing in is not available right now." with `Retry-After:
   its cookie: tenant hosts under one zone are one site to the browser
   (the zones have no Public Suffix List entry), so `SameSite=Lax` sends
   the cookie with another tenant's `fetch`. `same-origin`, `none` and no
-  header pass.
+  header pass. A navigation of a frame (`Sec-Fetch-Dest` present and not
+  `document`: an iframe, an embed) from such a site is no navigation
+  here: 401 and no visit, so that another tenant's page cannot frame the
+  app with its visitor's identity.
 - **Renewal.** A token with less than 5 minutes left is renewed in line,
   on the request that finds it (one renewal per visit at a time on an
   instance, 2 s): renewed, the new token is used and set as the cookie on

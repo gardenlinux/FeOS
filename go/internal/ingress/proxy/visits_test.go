@@ -582,8 +582,49 @@ func TestVisitRefusedCookies(t *testing.T) {
 		}
 		al.next(t)
 	}
-	// A navigation from another site keeps its visit.
+	// A navigation from another site keeps its visit, and so does one
+	// without Sec-Fetch-Dest.
 	echoOf(t, serveCall(p, nav("/").header2("Sec-Fetch-Site", "cross-site").with(visit.CookieVisit, cookie)))
+	al.next(t)
+	noDest := nav("/").header2("Sec-Fetch-Site", "same-site")
+	delete(noDest.header, "Sec-Fetch-Dest")
+	echoOf(t, serveCall(p, noDest.with(visit.CookieVisit, cookie)))
+	al.next(t)
+}
+
+// A frame of the guarded app in another host's page of the site (an
+// iframe, an embed) is no visit, though the browser sends the cookie: 401
+// and no visitor header, with a cookie and without (no sign-in in a
+// frame). A frame of the app's own origin keeps the visit.
+func TestVisitFramedFromAnotherHost(t *testing.T) {
+	p, k, fv, al := visitProxy(t)
+	secret := newSecret(t)
+	cookie := visit.VisitCookie(mint(t, k, secret, nil), secret)
+	for _, dest := range []string{"iframe", "frame", "embed", "object"} {
+		for _, site := range []string{"same-site", "cross-site"} {
+			framed := nav("/settings").header2("Sec-Fetch-Dest", dest).header2("Sec-Fetch-Site", site)
+			want401(t, serveCall(p, framed.with(visit.CookieVisit, cookie)))
+			if e := al.next(t); e.Reason != wire.ReasonVisitRequired {
+				t.Fatalf("%s %s: reason %q", dest, site, e.Reason)
+			}
+			want401(t, serveCall(p, framed))
+			al.next(t)
+		}
+	}
+	if n, _, _ := fv.counts(); n != 0 {
+		t.Fatalf("%d calls", n)
+	}
+	e := echoOf(t, serveCall(p, nav("/settings").header2("Sec-Fetch-Dest", "iframe").header2("Sec-Fetch-Site", "same-origin").
+		with(visit.CookieVisit, cookie)))
+	if e.Headers["Ferun-Visitor"] == "" {
+		t.Fatalf("a frame of the own origin lost its visitor: %v", e.Headers)
+	}
+	al.next(t)
+	// The top-level navigation from another host of the site keeps it.
+	e = echoOf(t, serveCall(p, nav("/settings").header2("Sec-Fetch-Site", "same-site").with(visit.CookieVisit, cookie)))
+	if e.Headers["Ferun-Visitor"] == "" {
+		t.Fatalf("a top-level navigation lost its visitor: %v", e.Headers)
+	}
 	al.next(t)
 }
 

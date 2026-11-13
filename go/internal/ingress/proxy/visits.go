@@ -90,12 +90,21 @@ func navigation(r *http.Request) bool {
 	return false
 }
 
-// fromAnotherSite reports whether a request says it comes from another
-// site or another host of the same site (Sec-Fetch-Site same-site or
-// cross-site). Hosts under one zone are one site, so a fetch of another
-// tenant's page carries the visit cookie: it counts as without a visit
-// unless it is a navigation.
-func fromAnotherSite(r *http.Request) bool {
+// fromAnotherSite reports whether a request that is no top-level
+// navigation (nav false, or a navigation of a frame: a Sec-Fetch-Dest
+// other than document) says it comes from another site or another host
+// of the same site (Sec-Fetch-Site same-site or cross-site). Hosts under
+// one zone are one site, so a fetch, or an iframe, of another tenant's
+// page carries the visit cookie: it counts as without a visit, and gets
+// no sign-in either. Only the browser's own top-level navigation from
+// elsewhere keeps its visit.
+func fromAnotherSite(r *http.Request, nav bool) bool {
+	if nav {
+		dests := r.Header.Values("Sec-Fetch-Dest")
+		if len(dests) == 0 || len(dests) == 1 && strings.EqualFold(strings.TrimSpace(dests[0]), "document") {
+			return false
+		}
+	}
 	for _, v := range r.Header.Values("Sec-Fetch-Site") {
 		switch strings.ToLower(strings.TrimSpace(v)) {
 		case "same-site", "cross-site":
@@ -153,6 +162,11 @@ func (q *request) checkVisit(v *view, tg target) bool {
 	}
 	p := q.p
 	nav := navigation(q.r)
+	// A frame of the page in another host's page is no navigation of the
+	// visitor's: neither its visit nor a sign-in.
+	if nav && fromAnotherSite(q.r, nav) {
+		nav = false
+	}
 	if e.access != wire.AccessVisitors || v.t.keys == nil || e.signIn == "" || p.d.Visits == nil {
 		q.answerAs(tg)
 		q.reason = wire.ReasonVisitUnavailable
@@ -278,10 +292,10 @@ func (q *request) signInFailed(err error) {
 // secret's hash, the environment, the host and the environment's
 // provider, of a visit this instance did not see end, and that is in its
 // time (timely). A request from another site or host that is no
-// navigation has none (fromAnotherSite). clear: a cookie held a visit
-// that ended, and the answer clears it.
+// top-level navigation has none (fromAnotherSite). clear: a cookie held a
+// visit that ended, and the answer clears it.
 func (q *request) visitOf(t *table, e *envRoutes, nav bool) (vr *visitReq, clear bool) {
-	if !nav && fromAnotherSite(q.r) {
+	if fromAnotherSite(q.r, nav) {
 		return nil, false
 	}
 	p := q.p
