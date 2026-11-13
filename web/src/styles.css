@@ -1335,3 +1335,17 @@ a.button.mini { padding: 3px 8px; font-size: 12px; border-radius: 4px; margin: 6
 
 /* the operators' administration, at the sidebar's foot */
 .snav-admin { margin: 0; }
+
+/* A new version of the UI is out (UpdateNotice.jsx): at the bottom, in
+   the middle, until the page is reloaded or the note put aside. */
+.update-note {
+  position: fixed; left: 16px; right: 16px; bottom: 24px; z-index: 60;
+  width: fit-content; margin-inline: auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 8px 8px 16px;
+  background: var(--panel2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: tlfade .25s ease-out;
+}
+.update-note button { flex: none; display: inline-flex; align-items: center; gap: 6px; }
