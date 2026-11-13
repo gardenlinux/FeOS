@@ -24,9 +24,17 @@
 //	                                     acts inside the sandbox
 //	mcp       /mcp                       the MCP door's own class (internal/mcpsrv)
 //	forward   /fwd/…, …/ports/…          the port door's own class (internal/ports)
+//	          /api/v1/providers[/…]      the tenant's access providers (ADR 0054)
 //	service   /api/v1/service-certificates
 //	                                     a service token (ADR 0026): the sink's
 //	                                     certificates
+//	provider  /api/v1/challenges/…,      a provider of visitors (ADR 0054):
+//	          /api/v1/visits/{visit}     ferun-auth's service token, or a tenant's
+//	                                     principal as in the tenant class; the
+//	                                     visits service decides which
+//	                                     environments it answers for
+//	auth      /api/v1/visits/end,        ferun-auth's service token only (ADR
+//	          /api/v1/oidc-providers/…   0054)
 //	route     /api/v1/environments/{env}/http/…
 //	                                     the route door's own class: a route token
 //	                                     of the environment (internal/env)
@@ -73,6 +81,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 	"github.com/gardenlinux/feos/go/internal/tools"
+	"github.com/gardenlinux/feos/go/internal/visits"
 )
 
 // Engine is what the API needs of the sandbox engine (*sandbox.Engine).
@@ -162,6 +171,25 @@ type Environments interface {
 	RevokeRouteTokens(ctx context.Context, tenant, envRef string) error
 	SetPublic(ctx context.Context, tenant, envRef string, req envs.PublicRequest) (envs.PublicAnswer, error)
 	ServeRoute(w http.ResponseWriter, r *http.Request)
+}
+
+// Visitors is the visits service (*visits.Service, ADR 0054): a tenant's
+// access providers, the challenges providers answer, the visits they
+// read, and ferun-auth's routes. Its answers are written as they come;
+// every refusal is an *apierr.Error of its own. nil (ferund without
+// --secret-key-file): none of its routes is registered.
+type Visitors interface {
+	Kinds() []string
+	ListProviders(ctx context.Context, tenant string) (visits.ProviderList, error)
+	GetProvider(ctx context.Context, tenant, name string) (visits.Provider, error)
+	PutProvider(ctx context.Context, tenant, name string, in visits.ProviderIn, madeBy string) (visits.Provider, bool, error)
+	DeleteProvider(ctx context.Context, tenant, name string) error
+	OpenChallenge(ctx context.Context, c visits.Caller, sealed string) (visits.Challenge, error)
+	AcceptChallenge(ctx context.Context, c visits.Caller, in visits.Accept) (visits.Answer, error)
+	RejectChallenge(ctx context.Context, c visits.Caller, sealed string) (visits.Answer, error)
+	GetVisit(ctx context.Context, c visits.Caller, id string) (visits.Visit, error)
+	EndBySession(ctx context.Context, in visits.EndSession) (int, error)
+	OIDCProvider(ctx context.Context, tenant, name string) (visits.OIDCProvider, error)
 }
 
 // Ingress is the ingress's identity service (*ingress/service.Service,
@@ -263,6 +291,9 @@ type Deps struct {
 	Domains Domains
 	// TenantJobs serves the tenants' jobs' routes; nil: none are registered.
 	TenantJobs TenantJobs
+	// Visitors serves the routes of access providers, challenges and
+	// visits (ADR 0054); nil: none are registered.
+	Visitors Visitors
 	// UI is the built management UI; nil: none.
 	UI fs.FS
 	// Ready is /readyz (§11): server's check of the database, stopping,
@@ -308,6 +339,9 @@ type server struct {
 	// come from.
 	origin  string
 	touches *throttle
+	// outside lets the warning of ferun-auth's token arriving through the
+	// Gateway through once a minute per token.
+	outside *throttle
 	mux     *http.ServeMux
 }
 
@@ -339,6 +373,7 @@ func newServer(cfg Config, deps Deps) *server {
 		cfg: cfg, deps: deps, st: st,
 		log:     cfg.Log.With("component", "api"),
 		touches: newThrottle(time.Minute),
+		outside: newThrottle(time.Minute),
 		mux:     http.NewServeMux(),
 	}
 	if u, err := url.Parse(cfg.PublicURL); err == nil && u.Host != "" {
@@ -394,6 +429,13 @@ const (
 	// classService is a platform service's (ADR 0026): a service token
 	// (service_tokens), POST /api/v1/service-certificates.
 	classService class = "service"
+	// classProvider is a provider's of visitors (ADR 0054): ferun-auth's
+	// service token (kind auth), or a tenant's principal as classTenant
+	// takes it, with no need at the route: the visits service decides
+	// what each may answer, and answers everything else 404.
+	classProvider class = "provider"
+	// classAuth is ferun-auth's own (ADR 0054): its service token only.
+	classAuth class = "auth"
 )
 
 // route is one line of the route table. need is a tenant-class route's
@@ -549,6 +591,11 @@ func (s *server) routes() []route {
 	// The sink (ADR 0026): a token's tenant, its instances' certificates
 	// and their service tokens.
 	s.sinkRoutes(operator, service, tenant)
+
+	// Visitors (ADR 0054): the tenant's access providers, the challenges
+	// and visits their providers answer and read, and ferun-auth's own
+	// routes; only with the visits service (--secret-key-file).
+	s.visitorRoutes(tenant, add)
 
 	// People (ADR 0031): the tenants they make, the members, their
 	// grants, invitations and tokens; the operators' switch of a person.

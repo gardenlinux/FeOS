@@ -20,6 +20,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -357,6 +358,12 @@ func (s *server) tenant(n need, h apiHandler) http.Handler {
 // tenantPrincipal resolves the principal of a tenant-class request and
 // its grants in the tenant.
 func (s *server) tenantPrincipal(w http.ResponseWriter, r *http.Request) (auth.Tenant, error) {
+	return s.tenantPrincipalOr(w, r, "tenant bearer required")
+}
+
+// tenantPrincipalOr is tenantPrincipal, whose 401 for a request with no
+// credential at all says missing (the class's text).
+func (s *server) tenantPrincipalOr(w http.ResponseWriter, r *http.Request, missing string) (auth.Tenant, error) {
 	ctx := r.Context()
 	named := r.Header.Get(tenantHeader)
 	if tok := bearer(r); tok != "" {
@@ -386,7 +393,7 @@ func (s *server) tenantPrincipal(w http.ResponseWriter, r *http.Request) (auth.T
 	}
 	if !ok || sess.PersonID == uuid.Nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
-		return auth.Tenant{}, apierr.New(http.StatusUnauthorized, "tenant bearer required")
+		return auth.Tenant{}, apierr.New(http.StatusUnauthorized, "%s", missing)
 	}
 	if err := s.checkCSRF(r); err != nil {
 		return auth.Tenant{}, err
@@ -427,6 +434,93 @@ func grantRoles(t *auth.Tenant, roles []store.RoleAt) {
 		}
 		t.Envs[ra.EnvironmentID] = max(t.Envs[ra.EnvironmentID], role)
 	}
+}
+
+// The texts of the provider and auth classes (ADR 0054).
+const (
+	textProviderRequired  = "provider credential required"
+	textAuthRequired      = "ferun-auth token required"
+	textUnknownService    = "unknown service token"
+	textOutsideTheCluster = "ferun-auth's token used from outside the cluster"
+)
+
+// authTokenPrefix starts every token of ferun-auth (feos-auth-…).
+var authTokenPrefix = pki.ServiceTokenPrefix(model.ServiceAuth)
+
+// provider is the provider class (ADR 0054): a bearer that starts with
+// feos-auth- is a service token, which must be ferun-auth's (kind auth;
+// else 401 unknown service token); any other credential is a tenant's
+// principal, taken exactly as the tenant class takes it (a token, or a
+// session that names its tenant, with the CSRF rules of a session). The
+// route states no need: the visits service decides, on the challenge or
+// the visit, whether the caller answers for its environment.
+func (s *server) provider(h apiHandler) http.Handler {
+	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
+		if tok := bearer(r); strings.HasPrefix(tok, authTokenPrefix) {
+			svc, ok, err := s.authService(r, tok)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return apierr.New(http.StatusUnauthorized, textUnknownService)
+			}
+			return h(w, r.WithContext(auth.WithService(r.Context(), svc)))
+		}
+		t, err := s.tenantPrincipalOr(w, r, textProviderRequired)
+		if err != nil {
+			return err
+		}
+		return h(w, r.WithContext(auth.WithTenant(r.Context(), t)))
+	})
+}
+
+// authOnly is the auth class (ADR 0054): ferun-auth's service token
+// (kind auth) and nothing else.
+func (s *server) authOnly(h apiHandler) http.Handler {
+	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
+		refuse := func() error {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
+			return apierr.New(http.StatusUnauthorized, textAuthRequired)
+		}
+		tok := bearer(r)
+		if !strings.HasPrefix(tok, authTokenPrefix) {
+			return refuse()
+		}
+		svc, ok, err := s.authService(r, tok)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return refuse()
+		}
+		return h(w, r.WithContext(auth.WithService(r.Context(), svc)))
+	})
+}
+
+// authService resolves ferun-auth's token: ok is false for a token that
+// is unknown, revoked or of another kind. Its last_used_at is touched at
+// most once a minute. ferun-auth calls ferund inside the cluster only: a
+// request with its token that carries X-Forwarded-For came through the
+// Gateway, which is warned of, once a minute per token.
+func (s *server) authService(r *http.Request, tok string) (auth.Service, bool, error) {
+	ctx := r.Context()
+	hash := store.HashToken(tok)
+	t, err := s.st.ServiceTokenOf(ctx, hash)
+	if errors.Is(err, store.ErrNoRow) || (err == nil && t.Kind != model.ServiceAuth) {
+		return auth.Service{}, false, nil
+	}
+	if err != nil {
+		return auth.Service{}, false, fmt.Errorf("service token lookup: %w", err)
+	}
+	if s.touches.due("v:" + hash) {
+		if err := s.st.TouchServiceToken(ctx, hash); err != nil {
+			s.log.Warn("touch a service token", "err", err)
+		}
+	}
+	if _, forwarded := r.Header["X-Forwarded-For"]; forwarded && s.outside.due(t.ID.String()) {
+		s.log.Warn(textOutsideTheCluster, "token", t.ID.String(), "name", t.Name)
+	}
+	return auth.Service{Kind: t.Kind, Name: t.Name, ID: t.ID, TokenHash: hash}, true, nil
 }
 
 // allow checks a route's need: on the tenant, the principal's tenant

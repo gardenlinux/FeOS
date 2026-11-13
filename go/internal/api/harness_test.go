@@ -72,6 +72,9 @@ type envOptions struct {
 	domains func(d *db.DB, st *store.Store) Domains
 	// zones is Config.Zones.
 	zones model.Zones
+	// visitors serves the routes of visitors (ADR 0054); nil: they are
+	// not registered.
+	visitors Visitors
 }
 
 // env is a test's API over a fresh database.
@@ -135,7 +138,7 @@ func newEnv(t *testing.T, o envOptions) *env {
 	deps := Deps{
 		DB: d, Store: st, Engine: eng, Conns: e.conns, Fleet: o.fleet, Tools: tools.NewREST(runner),
 		Specs: tools.Specs, MCP: o.mcp, Ports: o.ports, Watches: o.watches, Bindings: o.bindings, Ready: o.ready,
-		Ingress: o.ingress, Sealer: o.sealer, Issuer: o.issuer,
+		Ingress: o.ingress, Sealer: o.sealer, Issuer: o.issuer, Visitors: o.visitors,
 	}
 	if o.environments != nil {
 		deps.Environments = o.environments(d, st)

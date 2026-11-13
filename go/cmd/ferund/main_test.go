@@ -206,7 +206,19 @@ func TestMigrateAndJoinToken(t *testing.T) {
 		acts != 1 {
 		t.Fatalf("activity rows %d %v", acts, err)
 	}
-	for _, args := range [][]string{{"--kind", "node", "--name", "a"}, {"--name", "Bad_Name"}, {}} {
+	// --kind auth issues ferun-auth's token (ADR 0054).
+	code, out, errOut = runCmd([]string{"service-token", "--database-url", url, "--kind", "auth", "--name", "ferun-auth"}, noEnv)
+	if code != 0 || !strings.HasPrefix(errOut, "auth service token ") || !strings.Contains(errOut, "for ferun-auth") {
+		t.Fatalf("service-token --kind auth: exit %d %s", code, errOut)
+	}
+	tok = strings.TrimSpace(out)
+	sts, err = store.New(d).ListServiceTokens(ctx)
+	if !strings.HasPrefix(tok, "feos-auth-") || err != nil || len(sts) != 2 || sts[1].Hash != store.HashToken(tok) ||
+		sts[1].Name != "ferun-auth" || sts[1].Kind != "auth" {
+		t.Fatalf("token %q, rows %+v %v", tok, sts, err)
+	}
+	for _, args := range [][]string{{"--kind", "node", "--name", "a"}, {"--kind", "other", "--name", "a"},
+		{"--name", "Bad_Name"}, {}} {
 		if code, _, _ := runCmd(append([]string{"service-token", "--database-url", url}, args...), noEnv); code != 2 {
 			t.Errorf("service-token %v: exit %d", args, code)
 		}

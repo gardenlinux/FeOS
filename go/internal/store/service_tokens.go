@@ -77,3 +77,21 @@ func (s *Store) UseServiceToken(ctx context.Context, hash string, limit int, win
 	t.LastUsedAt = timeOf(used)
 	return t, count <= limit, nil
 }
+
+// ServiceTokenOf is the service token of hash, to authenticate a request
+// with it (ferun-auth's, of kind auth: ADR 0054); unlike UseServiceToken
+// it counts no certificate and writes nothing. ErrNoRow: no such token
+// (unknown or revoked).
+func (s *Store) ServiceTokenOf(ctx context.Context, hash string) (ServiceToken, error) {
+	t, err := scanServiceToken(s.q.QueryRow(ctx, "SELECT "+serviceTokenCols+" FROM service_tokens WHERE hash = $1", hash))
+	return t, noRow(err, ErrNoRow)
+}
+
+// TouchServiceToken sets the token's last_used_at to now(), unless it
+// was used within the last minute: a request's touch is a write at most
+// once a minute per token, whichever instance serves it.
+func (s *Store) TouchServiceToken(ctx context.Context, hash string) error {
+	_, err := s.q.Exec(ctx, `UPDATE service_tokens SET last_used_at = now()
+		WHERE hash = $1 AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`, hash)
+	return err
+}

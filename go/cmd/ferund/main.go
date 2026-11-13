@@ -9,7 +9,7 @@
 //	ferund init-ca --root-dir R --dir D --dns-domain X ...
 //	ferund new-issuer --root-dir R --dir D --dns-domain X ...
 //	ferund join-token --database-url URL [--kind node|ingress] [--ttl 1h] [--node NAME]
-//	ferund service-token --database-url URL --kind sink --name NAME
+//	ferund service-token --database-url URL --kind sink|auth --name NAME
 //	ferund migrate --database-url URL
 //
 // Every flag has an environment variable FERUN_<NAME> (internal/config).

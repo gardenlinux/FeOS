@@ -115,6 +115,12 @@ var routeNeeds = map[string]string{
 	"GET /api/v1/tenant/tokens":                     "admin tenant",
 	"POST /api/v1/tenant/tokens":                    "admin tenant",
 	"DELETE /api/v1/tenant/tokens/{hash}":           "admin tenant",
+
+	// Visitors (ADR 0054), with the visits service.
+	"GET /api/v1/providers":               "member",
+	"GET /api/v1/providers/{provider}":    "member",
+	"PUT /api/v1/providers/{provider}":    "admin tenant",
+	"DELETE /api/v1/providers/{provider}": "admin tenant",
 }
 
 // roleSkips are the routes TestRoles does not call: their effect would
@@ -125,7 +131,7 @@ var roleSkips = map[string]bool{"POST /api/v1/tenant/leave": true}
 // does; no other class has one.
 func TestRouteNeeds(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
+	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}, visitors: &fakeVisitors{}})
 	var diff []string
 	seen := map[string]bool{}
 	for _, rt := range e.srv.routes() {
@@ -359,7 +365,7 @@ func (w *peopleWorld) podIn(t *testing.T, pattern string, env uuid.UUID) string 
 // operator is admin everywhere, and FeCode's token reaches everything.
 func TestRoles(t *testing.T) {
 	t.Parallel()
-	w := newPeopleWorld(t, envOptions{bindings: &fakeBindings{on: true}})
+	w := newPeopleWorld(t, envOptions{bindings: &fakeBindings{on: true}, visitors: &fakeVisitors{}})
 	var bad []string
 	for _, p := range w.principals(t) {
 		for pattern, want := range routeNeeds {

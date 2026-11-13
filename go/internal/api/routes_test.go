@@ -190,6 +190,21 @@ var bindingRoutes = map[string]class{
 	"PUT /api/v1/sandboxes/{id}/credentials":       classTenant,
 }
 
+// visitorRouteClasses are the routes that exist only with the visits
+// service (ADR 0054: ferund with --secret-key-file).
+var visitorRouteClasses = map[string]class{
+	"GET /api/v1/providers":                          classTenant,
+	"GET /api/v1/providers/{provider}":               classTenant,
+	"PUT /api/v1/providers/{provider}":               classTenant,
+	"DELETE /api/v1/providers/{provider}":            classTenant,
+	"POST /api/v1/challenges/open":                   classProvider,
+	"POST /api/v1/challenges/accept":                 classProvider,
+	"POST /api/v1/challenges/reject":                 classProvider,
+	"GET /api/v1/visits/{visit}":                     classProvider,
+	"POST /api/v1/visits/end":                        classAuth,
+	"GET /api/v1/oidc-providers/{tenant}/{provider}": classAuth,
+}
+
 // oidcRoutes exist only with OIDC.
 var oidcRoutes = map[string]class{
 	"GET /auth/login":               classPublic,
@@ -207,7 +222,8 @@ func concrete(pattern string, id string) (string, string) {
 	r := strings.NewReplacer("{id}", id, "{tenant}", testTenant, "{node}", "n1", "{hash}", "abcdef0123",
 		"{pid}", "p1", "{wid}", "w1", "{name}", "k1", "{port}", "3000", "{path...}", "etc/hosts", "{rest...}", "x/y",
 		"{env}", "stage", "{n}", "7", "{kind}", "service", "{tag}", "v1", "{key}", "c1",
-		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n")
+		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n",
+		"{provider}", "fecode", "{visit}", "00000000-0000-4000-8000-0000000000a1")
 	return method, r.Replace(path)
 }
 
@@ -237,6 +253,16 @@ func classAnswer(t *testing.T, e *env, pattern string, c class) {
 		}
 	case classService:
 		expect(t, w, http.StatusUnauthorized, errBody("service token required"))
+	case classProvider:
+		expect(t, w, http.StatusUnauthorized, errBody("provider credential required"))
+		if got := w.Header().Get("WWW-Authenticate"); got != `Bearer realm="ferun"` {
+			t.Fatalf("%s: WWW-Authenticate %q", pattern, got)
+		}
+	case classAuth:
+		expect(t, w, http.StatusUnauthorized, errBody("ferun-auth token required"))
+		if got := w.Header().Get("WWW-Authenticate"); got != `Bearer realm="ferun"` {
+			t.Fatalf("%s: WWW-Authenticate %q", pattern, got)
+		}
 	case classMCP:
 		if w.Header().Get("X-Door") != "mcp" {
 			t.Fatalf("%s: not the MCP door: %d %s", pattern, w.Code, w.Body.String())
@@ -256,18 +282,26 @@ func classAnswer(t *testing.T, e *env, pattern string, c class) {
 
 // Every route of the table has the class this test states, answers a
 // request without credentials as its class does, and nothing else is
-// routed; with bindings off, their routes are unknown routes.
+// routed; with bindings off, their routes are unknown routes, and so are
+// the visitors' without the visits service.
 func TestRouteTable(t *testing.T) {
 	t.Parallel()
 	for _, on := range []bool{false, true} {
-		e := newEnv(t, envOptions{bindings: &fakeBindings{on: on}, mcp: marker("mcp"), ports: marker("ports"),
-			watches: fakeWatches{}})
+		o := envOptions{bindings: &fakeBindings{on: on}, mcp: marker("mcp"), ports: marker("ports"),
+			watches: fakeWatches{}}
+		if on {
+			o.visitors = &fakeVisitors{}
+		}
+		e := newEnv(t, o)
 		want := map[string]class{}
 		for p, c := range routeClasses {
 			want[p] = c
 		}
 		if on {
 			for p, c := range bindingRoutes {
+				want[p] = c
+			}
+			for p, c := range visitorRouteClasses {
 				want[p] = c
 			}
 		}
@@ -306,6 +340,13 @@ func TestRouteTable(t *testing.T) {
 				}
 				w := e.do(method, path, authz, nil)
 				expect(t, w, http.StatusNotFound, errBody("no such route: "+method+" "+path))
+			}
+			for p := range visitorRouteClasses {
+				method, path := concrete(p, "")
+				for _, authz := range []string{"", bearerOf(e.tenantToken), bearerOf("feos-auth-x")} {
+					w := e.do(method, path, authz, nil)
+					expect(t, w, http.StatusNotFound, errBody("no such route: "+method+" "+path))
+				}
 			}
 		}
 	}
