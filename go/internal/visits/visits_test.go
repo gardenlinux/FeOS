@@ -419,12 +419,17 @@ func TestRedeem(t *testing.T) {
 		tok.Host != host || tok.Provider != "fecode" || tok.Subject != "u-1" || tok.Email != "a@example.com" {
 		t.Fatalf("token %+v %v", tok, err)
 	}
-	if l := tok.Expires - tok.IssuedAt; l != int64(visit.TokenLifetime/time.Second) {
-		t.Fatalf("token lifetime %d", l)
-	}
 	vid := uuid.MustParse(a.Visit)
-	if v := f.row(vid); v.Binding != visit.BindingHash(vs1) || tok.VisitEnds != v.EndsAt.Unix() {
+	v := f.row(vid)
+	if v.Binding != visit.BindingHash(vs1) || tok.VisitEnds != v.EndsAt.Unix() {
 		t.Fatalf("binding %+v", v)
+	}
+	// 15 minutes, and at most 15 past the accept's asking (S14): on a slow
+	// host the redeem comes a second or more after it.
+	life := int64(visit.TokenLifetime / time.Second)
+	if want := min(tok.IssuedAt+life, v.AskedAt.Add(visit.TokenLifetime).Unix()); tok.Expires != want ||
+		tok.Expires-tok.IssuedAt > life || tok.Expires-tok.IssuedAt < life-10 {
+		t.Fatalf("token from %d to %d; want the end %d", tok.IssuedAt, tok.Expires, want)
 	}
 	// Again within the window, same binding: a token, and the visit takes
 	// the last binding.
