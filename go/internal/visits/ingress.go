@@ -259,17 +259,18 @@ func (s *Service) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.R
 	no, endCtx := false, ctx
 	switch v.ProviderKind {
 	case model.ProviderKindTenant:
-		claimed, err := s.st.ClaimVisitAsk(ctx, v.ID, visit.AskEvery)
+		// The claim uses up the ask for the next visit.AskEvery: it, the
+		// provider's row, the call and the end its no brings run detached
+		// from the ingress's call, so that an ask claimed is an ask made
+		// and its verdict recorded even when the ingress gave up (a claim
+		// cancelled in flight may have committed).
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), visit.AskTimeout+askGrace)
+		defer cancel()
+		claimed, err := s.st.ClaimVisitAsk(dctx, v.ID, visit.AskEvery)
 		if err != nil {
 			return wire.RenewVisitResponse{}, fmt.Errorf("claim an ask: %w", err)
 		}
 		if claimed {
-			// The claim used up the ask for the next visit.AskEvery:
-			// from here the provider's row, the call and the end its no
-			// brings run detached from the ingress's call, so that the
-			// verdict is recorded even when the ingress gave up.
-			dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), visit.AskTimeout+askGrace)
-			defer cancel()
 			no, endCtx = s.askTenant(dctx, v) == verdictNo, dctx
 		}
 	case model.ProviderKindFerun:
