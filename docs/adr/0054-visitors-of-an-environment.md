@@ -1,6 +1,6 @@
 # ADR 0054: Visitors: a guarded environment admits whom its tenant's access provider vouches for
 
-**Status:** Proposed · **Date:** 2026-11-12
+**Status:** Accepted · **Date:** 2026-11-12
 
 A public environment admits `anyone` or `visitors`, and one that is
 published without saying admits visitors. Who a visitor is, and whether
@@ -376,3 +376,7 @@ visit, with the key of its tokens, and publishes the key; the provider
 answers only a question `ferund` signed. A visit's ID is in its token
 and its code, so a question anyone could ask would let a removed member
 take the service's answers and keep their visit to its end.
+
+Built and live on 2026-11-13: ferund, ferun-ingress and ferun-auth from
+ae54fe77 (migration 0034), ferun-auth at `https://auth.fecore.dev`, and
+FeCode as the first provider of kind `tenant` (FeCode ADR 0035).
