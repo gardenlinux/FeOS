@@ -70,7 +70,7 @@ use feos_proto::pod_service::{
     BakedLayer, Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
     Hibernation as HibernationInfo, HibernationPhase, ImageLayers, MicroVm, PodConsoleInput,
     PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodNetwork, PodSpec, PodState,
-    RestorePodResponse,
+    RestorePodResponse, TlsBinding,
 };
 use feos_proto::volume_service::{Volume, VolumeCheckpoint, VolumeState};
 use feos_utils::vsock::{self, API_PORT};
@@ -890,18 +890,74 @@ impl Pods {
     }
 
     /// A create of a pod that is there: the same create if the specs are
-    /// the same but for their HTTP bindings' clear part, which the
-    /// create's replaces (a retry carries the newer one).
+    /// the same but for their HTTP bindings' clear part and their TLS
+    /// bindings, which the create's replace (a retry carries the newer
+    /// ones).
     async fn created_again(&self, existing: PodInfo, spec: PodSpec) -> Result<PodInfo, Status> {
         let pod_id = existing.pod_id.clone();
         let same = same_spec(existing, &spec)?;
-        let own = same.spec.as_ref().and_then(|s| s.http_bindings.clone());
-        if own == spec.http_bindings {
+        let own_http = same.spec.as_ref().and_then(|s| s.http_bindings.clone());
+        let own_tls = same
+            .spec
+            .as_ref()
+            .map(|s| s.tls_bindings.clone())
+            .unwrap_or_default();
+        if own_http == spec.http_bindings && own_tls == spec.tls_bindings {
             return Ok(same);
         }
-        self.set_http_bindings(&pod_id, spec.http_bindings.unwrap_or_default())
-            .await?;
+        if own_http != spec.http_bindings {
+            self.set_http_bindings(&pod_id, spec.http_bindings.unwrap_or_default())
+                .await?;
+        }
+        if own_tls != spec.tls_bindings {
+            self.set_tls_bindings(&pod_id, spec.tls_bindings).await?;
+        }
         Ok(shown(self.info(&pod_id)?))
+    }
+
+    /// Sets the pod's outbound TLS bindings (ADR 0036) in its record,
+    /// stated whole, and while the pod runs, in its guest, which listens on
+    /// them before this returns. A pod that does not run takes them at its
+    /// next start, resume or restore, which push its record's (push_feid).
+    pub async fn set_tls_bindings(
+        &self,
+        pod_id: &str,
+        bindings: Vec<TlsBinding>,
+    ) -> Result<(), Status> {
+        spec::check_id(pod_id)?;
+        let info = self.info(pod_id)?;
+        let mut spec = info.spec.clone().unwrap_or_default();
+        // Stated again with every start of an attached service: nothing to
+        // do when they are the same.
+        if spec.tls_bindings == bindings {
+            return Ok(());
+        }
+        spec.tls_bindings = bindings.clone();
+        spec::check_tls_bindings(&spec)?;
+        self.update(pod_id, |info| {
+            if let Some(spec) = info.spec.as_mut() {
+                spec.tls_bindings = bindings;
+            }
+        })
+        .await;
+        let info = self.info(pod_id)?;
+        let spec = info.spec.clone().unwrap_or_default();
+        info!(
+            "Pods: {pod_id} has {} TLS binding(s): {}",
+            spec.tls_bindings.len(),
+            spec.tls_bindings
+                .iter()
+                .map(|b| format!("{} → {}:{}", b.listen, b.host, b.port))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        // A pod that is coming up pushes them itself once it runs, a resume
+        // or a restore too; a running one gets them now, its connections
+        // through bindings it keeps left alone.
+        if info.state() == PodState::Running {
+            self.push_feid(pod_id, false).await?;
+        }
+        Ok(())
     }
 
     /// Sets the clear part of the pod's HTTP bindings (ADR 0028) in its
@@ -3601,18 +3657,22 @@ fn shown(mut info: PodInfo) -> PodInfo {
 }
 
 /// Whether a create of `spec` is the create of `existing`: their specs
-/// compare without the HTTP bindings' clear part, which
-/// SetPodHttpBindings changes after the create (ADR 0028). A pod created
-/// without an identity is the same create with one, as a control plane
-/// that names identities since sends it again: the pod keeps its spec,
-/// and its next create has the identity (ADR 0014).
+/// compare without the HTTP bindings' clear part and the TLS bindings,
+/// which SetPodHttpBindings and SetPodTlsBindings change after the create
+/// (ADR 0028, 0036). A pod created without an identity is the same create
+/// with one, as a control plane that names identities since sends it
+/// again: the pod keeps its spec, and its next create has the identity
+/// (ADR 0014).
 fn same_spec(existing: PodInfo, spec: &PodSpec) -> Result<PodInfo, Status> {
     let same = existing.spec.as_ref().is_some_and(|own| {
         let mut asked = spec::without_http_bindings(spec);
         if own.identity.is_empty() {
             asked.identity.clear();
         }
-        spec::without_http_bindings(own) == asked
+        asked.tls_bindings.clear();
+        let mut own = spec::without_http_bindings(own);
+        own.tls_bindings.clear();
+        own == asked
     });
     if same {
         Ok(shown(existing))
@@ -3818,6 +3878,34 @@ mod tests {
         assert!(same_spec(pod("spiffe://t/a"), &asked("spiffe://t/a")).is_ok());
         assert!(same_spec(pod("spiffe://t/a"), &asked("spiffe://t/b")).is_err());
         assert!(same_spec(pod("spiffe://t/a"), &asked("")).is_err());
+    }
+
+    #[test]
+    fn a_create_again_with_other_tls_bindings_is_the_same_create() {
+        let binding = |listen: &str| TlsBinding {
+            listen: listen.into(),
+            host: "postgres".into(),
+            port: 5432,
+            alpn: "postgresql".into(),
+            server_id: "spiffe://t/addon".into(),
+        };
+        let pod = PodInfo {
+            pod_id: "p".into(),
+            spec: Some(PodSpec {
+                identity: "spiffe://t/a".into(),
+                tls_bindings: vec![binding("127.64.0.1:5432")],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let asked = |bindings: Vec<TlsBinding>| PodSpec {
+            identity: "spiffe://t/a".into(),
+            tls_bindings: bindings,
+            ..Default::default()
+        };
+        assert!(same_spec(pod.clone(), &asked(vec![])).is_ok());
+        assert!(same_spec(pod.clone(), &asked(vec![binding("127.64.0.2:5432")])).is_ok());
+        assert!(same_spec(pod, &asked(vec![binding("127.64.0.1:5432")])).is_ok());
     }
 
     #[test]

@@ -93,8 +93,12 @@ type attachedPlan struct {
 	argv    []string
 	cwd     string
 	env     map[string]model.TemplateValue
-	check   check
-	hash    string
+	// tls are its sandbox's TLS bindings (ADR 0036): those of every
+	// attached service of the target in the sandbox, which the sandbox
+	// gets before the service's process starts (startAttached).
+	tls   []model.TemplateTLSBinding
+	check check
+	hash  string
 	// idle is the service's claim on its sandbox once it runs:
 	// idle_after_s (0: never), nil for none (attachedIdleOf).
 	idle *int
@@ -330,11 +334,17 @@ func (c *Controller) planAttached(v *view, name string, s spec.Service) *attache
 		p.err = fmt.Errorf("service %s has no command", name)
 		return p
 	}
-	// An attached service runs in its sandbox's pod, whose bindings its
-	// create fixed: a reference that needs one is not served yet.
-	if p.env, _, p.wait, p.err = c.renderEnv(v, s.Env); p.err != nil || p.wait != "" {
+	// An attached service runs in its sandbox's pod, which was made before
+	// it: the TLS bindings its references need are the sandbox's, set before
+	// its process starts, their addresses numbered over the bindings of
+	// every attached service of the target in that sandbox (one pod, one
+	// loopback).
+	envs := attachedEnvs(v.target, s.Sandbox)
+	loopback := c.bindingLoopbacks(v, envs...)
+	if p.env, _, p.wait, p.err = c.renderEnvWith(v, s.Env, loopback); p.err != nil || p.wait != "" {
 		return p
 	}
+	p.tls = c.tlsBindings(v, loopback, envs...)
 	p.hash = hashJSON(struct {
 		Scheme  int                            `json:"scheme"`
 		Sandbox podid.ID                       `json:"sandbox"`
@@ -343,6 +353,55 @@ func (c *Controller) planAttached(v *view, name string, s spec.Service) *attache
 		Env     map[string]model.TemplateValue `json:"env"`
 	}{1, p.sandbox, p.argv, p.cwd, nonNilMap(p.env)})
 	return p
+}
+
+// attachedEnvs are the envs of the target's attached services in sandbox
+// (the spec's ID, as written), in the order of their names.
+func attachedEnvs(target *spec.Spec, sandbox string) []map[string]spec.EnvValue {
+	var out []map[string]spec.EnvValue
+	for _, name := range slices.Sorted(maps.Keys(target.Services)) {
+		svc := target.Services[name]
+		if svc.Runtime == spec.RuntimeAttached && svc.Sandbox == sandbox {
+			out = append(out, svc.Env)
+		}
+	}
+	return out
+}
+
+// tlsBindings are the TLS bindings (addons.TLSBinder, ADR 0036) that envs'
+// references need, one per addon on its address of loopback, sorted by
+// addon. They need no addon's address: the guest dials the addon by name.
+func (c *Controller) tlsBindings(v *view, loopback map[string]string,
+	envs ...map[string]spec.EnvValue) []model.TemplateTLSBinding {
+	bindings := map[string]model.TemplateTLSBinding{}
+	for _, env := range envs {
+		for _, e := range env {
+			if e.Kind != spec.EnvAddon {
+				continue
+			}
+			a, ok := v.target.Addons[e.Addon]
+			if !ok {
+				continue
+			}
+			bp, ok := c.d.Blueprint(a.Type)
+			if !ok {
+				continue
+			}
+			tb, ok := bp.(addons.TLSBinder)
+			if !ok {
+				continue
+			}
+			if port, alpn, need := tb.TLSBinding(addons.Ref{Key: e.Key, Fields: e.Fields}); need {
+				bindings[e.Addon] = model.TemplateTLSBinding{Listen: loopback[e.Addon] + ":" + strconv.Itoa(port),
+					Host: e.Addon, Port: port, ALPN: alpn, Addon: e.Addon}
+			}
+		}
+	}
+	var out []model.TemplateTLSBinding
+	for _, name := range slices.Sorted(maps.Keys(bindings)) {
+		out = append(out, bindings[name])
+	}
+	return out
 }
 
 func nonNilMap[V any](m map[string]V) map[string]V {
@@ -361,11 +420,17 @@ func nonNilMap[V any](m map[string]V) map[string]V {
 // binding, one per addon, sorted by addon.
 func (c *Controller) renderEnv(v *view, env map[string]spec.EnvValue) (map[string]model.TemplateValue,
 	[]model.TemplateTLSBinding, string, error) {
+	return c.renderEnvWith(v, env, c.bindingLoopbacks(v, env))
+}
+
+// renderEnvWith is renderEnv with the addons' loopback addresses given:
+// an attached service's are numbered over its sandbox (planAttached).
+func (c *Controller) renderEnvWith(v *view, env map[string]spec.EnvValue, loopback map[string]string) (
+	map[string]model.TemplateValue, []model.TemplateTLSBinding, string, error) {
 	if len(env) == 0 {
 		return nil, nil, "", nil
 	}
 	out := make(map[string]model.TemplateValue, len(env))
-	loopback := c.bindingLoopbacks(v, env)
 	bindings := map[string]model.TemplateTLSBinding{}
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		e := env[k]
@@ -432,15 +497,16 @@ func (c *Controller) renderEnv(v *view, env map[string]spec.EnvValue) (map[strin
 	return out, tls, "", nil
 }
 
-// bindingLoopbacks numbers the addons that env's references reach through
+// bindingLoopbacks numbers the addons that envs' references reach through
 // the pod's TLS binding (addons.TLSBinder, ADR 0036), in the order of
 // their names, from addons.Loopback(1): one address per addon, however
 // many references and roles name it. The same references give the same
 // addresses; a reference added or removed moves them, and changes the
-// pod's env anyway.
-func (c *Controller) bindingLoopbacks(v *view, env map[string]spec.EnvValue) map[string]string {
+// pod's env anyway. Several envs are those of the attached services of
+// one sandbox, whose pod they share.
+func (c *Controller) bindingLoopbacks(v *view, envs ...map[string]spec.EnvValue) map[string]string {
 	bound := map[string]bool{}
-	for _, e := range env {
+	for _, e := range mergedValues(envs) {
 		if e.Kind != spec.EnvAddon {
 			continue
 		}
@@ -463,4 +529,15 @@ func (c *Controller) bindingLoopbacks(v *view, env map[string]spec.EnvValue) map
 		loopback[name] = addons.Loopback(i + 1)
 	}
 	return loopback
+}
+
+// mergedValues are the values of envs.
+func mergedValues(envs []map[string]spec.EnvValue) []spec.EnvValue {
+	var out []spec.EnvValue
+	for _, env := range envs {
+		for _, e := range env {
+			out = append(out, e)
+		}
+	}
+	return out
 }

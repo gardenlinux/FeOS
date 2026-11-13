@@ -29,6 +29,7 @@ const (
 	PodService_SuspendPod_FullMethodName         = "/feos.pod.v1.PodService/SuspendPod"
 	PodService_ResumePod_FullMethodName          = "/feos.pod.v1.PodService/ResumePod"
 	PodService_SetPodHttpBindings_FullMethodName = "/feos.pod.v1.PodService/SetPodHttpBindings"
+	PodService_SetPodTlsBindings_FullMethodName  = "/feos.pod.v1.PodService/SetPodTlsBindings"
 	PodService_HibernatePod_FullMethodName       = "/feos.pod.v1.PodService/HibernatePod"
 	PodService_RestorePod_FullMethodName         = "/feos.pod.v1.PodService/RestorePod"
 	PodService_StreamPodConsole_FullMethodName   = "/feos.pod.v1.PodService/StreamPodConsole"
@@ -96,6 +97,13 @@ type PodServiceClient interface {
 	// is stated; what it does not name is gone. A pod that does not run
 	// takes it at its next start, resume or restore.
 	SetPodHttpBindings(ctx context.Context, in *SetPodHttpBindingsRequest, opts ...grpc.CallOption) (*SetPodHttpBindingsResponse, error)
+	// Sets a pod's outbound TLS bindings (ADR 0036) in its record and, while
+	// it runs, in its guest, which listens on every binding's address before
+	// the call returns. The whole list is stated; what it does not name is
+	// gone. A pod that does not run takes them at its next start, resume or
+	// restore. For a sandbox whose attached services reference an addon:
+	// the sandbox is created before they are.
+	SetPodTlsBindings(ctx context.Context, in *SetPodTlsBindingsRequest, opts ...grpc.CallOption) (*SetPodTlsBindingsResponse, error)
 	// Takes the pod off the node into object storage: suspends it if it
 	// runs, seals its disk, its volumes and its memory, uploads them with
 	// its spec, and frees what it held on the node: its microVM, its disk,
@@ -247,6 +255,16 @@ func (c *podServiceClient) SetPodHttpBindings(ctx context.Context, in *SetPodHtt
 	return out, nil
 }
 
+func (c *podServiceClient) SetPodTlsBindings(ctx context.Context, in *SetPodTlsBindingsRequest, opts ...grpc.CallOption) (*SetPodTlsBindingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetPodTlsBindingsResponse)
+	err := c.cc.Invoke(ctx, PodService_SetPodTlsBindings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *podServiceClient) HibernatePod(ctx context.Context, in *HibernatePodRequest, opts ...grpc.CallOption) (*HibernatePodResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HibernatePodResponse)
@@ -342,6 +360,13 @@ type PodServiceServer interface {
 	// is stated; what it does not name is gone. A pod that does not run
 	// takes it at its next start, resume or restore.
 	SetPodHttpBindings(context.Context, *SetPodHttpBindingsRequest) (*SetPodHttpBindingsResponse, error)
+	// Sets a pod's outbound TLS bindings (ADR 0036) in its record and, while
+	// it runs, in its guest, which listens on every binding's address before
+	// the call returns. The whole list is stated; what it does not name is
+	// gone. A pod that does not run takes them at its next start, resume or
+	// restore. For a sandbox whose attached services reference an addon:
+	// the sandbox is created before they are.
+	SetPodTlsBindings(context.Context, *SetPodTlsBindingsRequest) (*SetPodTlsBindingsResponse, error)
 	// Takes the pod off the node into object storage: suspends it if it
 	// runs, seals its disk, its volumes and its memory, uploads them with
 	// its spec, and frees what it held on the node: its microVM, its disk,
@@ -413,6 +438,9 @@ func (UnimplementedPodServiceServer) ResumePod(context.Context, *ResumePodReques
 }
 func (UnimplementedPodServiceServer) SetPodHttpBindings(context.Context, *SetPodHttpBindingsRequest) (*SetPodHttpBindingsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetPodHttpBindings not implemented")
+}
+func (UnimplementedPodServiceServer) SetPodTlsBindings(context.Context, *SetPodTlsBindingsRequest) (*SetPodTlsBindingsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetPodTlsBindings not implemented")
 }
 func (UnimplementedPodServiceServer) HibernatePod(context.Context, *HibernatePodRequest) (*HibernatePodResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HibernatePod not implemented")
@@ -617,6 +645,24 @@ func _PodService_SetPodHttpBindings_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PodService_SetPodTlsBindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetPodTlsBindingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PodServiceServer).SetPodTlsBindings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PodService_SetPodTlsBindings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PodServiceServer).SetPodTlsBindings(ctx, req.(*SetPodTlsBindingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _PodService_HibernatePod_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HibernatePodRequest)
 	if err := dec(in); err != nil {
@@ -702,6 +748,10 @@ var PodService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetPodHttpBindings",
 			Handler:    _PodService_SetPodHttpBindings_Handler,
+		},
+		{
+			MethodName: "SetPodTlsBindings",
+			Handler:    _PodService_SetPodTlsBindings_Handler,
 		},
 		{
 			MethodName: "HibernatePod",

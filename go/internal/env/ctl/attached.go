@@ -766,6 +766,16 @@ func (c *Controller) startAttached(ctx context.Context, v *view, p *attachedPlan
 		after.Phase, after.Detail = model.PhaseStarting, "its env: "+err.Error()
 		return
 	}
+	// Its references reach their addons through the sandbox's TLS
+	// bindings (ADR 0036): the sandbox gets them first, and the guest
+	// listens when the call returns. A sandbox that has none and needs
+	// none is not asked.
+	if len(p.tls) > 0 || (sb.PodTemplate != nil && len(sb.PodTemplate.TLSBindings) > 0) {
+		if err := c.d.Engine.SetTLSBindings(ctx, l, p.tls); err != nil {
+			after.Phase, after.Detail = model.PhaseStarting, "its sandbox's TLS bindings: "+err.Error()
+			return
+		}
+	}
 	id, err := c.d.Runner.StartProcessDetached(ctx, l, tools.ProcessStart{Argv: p.argv, Cwd: p.cwd, Env: env.vars,
 		Name: processName(v.env.ID, p.name)})
 	switch {

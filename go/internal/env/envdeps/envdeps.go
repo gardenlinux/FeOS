@@ -55,6 +55,10 @@ type Engine interface {
 	// bindings (ADR 0028) in the background, when it changed: a new
 	// secret version of a binding, sealed to the running pod again.
 	PushHTTPBindings(id podid.ID)
+	// SetTLSBindings gives the pod of lease the TLS bindings (ADR 0036) of
+	// the attached services in it, stated whole: into its row's template
+	// and to its running pod, which listens on them when it returns.
+	SetTLSBindings(ctx context.Context, lease model.Lease, bindings []model.TemplateTLSBinding) error
 }
 
 // Runner is what the environments run in a pod's main container

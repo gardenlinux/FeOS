@@ -103,6 +103,9 @@ func (f *fakeEngine) Acquire(_ context.Context, id podid.ID, _ model.HoldKind) (
 }
 func (f *fakeEngine) Touch(podid.ID)            {}
 func (f *fakeEngine) PushHTTPBindings(podid.ID) {}
+func (f *fakeEngine) SetTLSBindings(context.Context, model.Lease, []model.TemplateTLSBinding) error {
+	return nil
+}
 func (f *fakeEngine) HibernateToMove(context.Context, podid.ID) (bool, error) {
 	return false, nil
 }

@@ -2768,6 +2768,94 @@ func (*SetPodHttpBindingsResponse) Descriptor() ([]byte, []int) {
 	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{39}
 }
 
+type SetPodTlsBindingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PodId         string                 `protobuf:"bytes,1,opt,name=pod_id,json=podId,proto3" json:"pod_id,omitempty"`
+	TlsBindings   []*TlsBinding          `protobuf:"bytes,2,rep,name=tls_bindings,json=tlsBindings,proto3" json:"tls_bindings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPodTlsBindingsRequest) Reset() {
+	*x = SetPodTlsBindingsRequest{}
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPodTlsBindingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPodTlsBindingsRequest) ProtoMessage() {}
+
+func (x *SetPodTlsBindingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPodTlsBindingsRequest.ProtoReflect.Descriptor instead.
+func (*SetPodTlsBindingsRequest) Descriptor() ([]byte, []int) {
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *SetPodTlsBindingsRequest) GetPodId() string {
+	if x != nil {
+		return x.PodId
+	}
+	return ""
+}
+
+func (x *SetPodTlsBindingsRequest) GetTlsBindings() []*TlsBinding {
+	if x != nil {
+		return x.TlsBindings
+	}
+	return nil
+}
+
+type SetPodTlsBindingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPodTlsBindingsResponse) Reset() {
+	*x = SetPodTlsBindingsResponse{}
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPodTlsBindingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPodTlsBindingsResponse) ProtoMessage() {}
+
+func (x *SetPodTlsBindingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPodTlsBindingsResponse.ProtoReflect.Descriptor instead.
+func (*SetPodTlsBindingsResponse) Descriptor() ([]byte, []int) {
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{41}
+}
+
 var File_feos_pod_v1_pod_proto protoreflect.FileDescriptor
 
 const file_feos_pod_v1_pod_proto_rawDesc = "" +
@@ -2974,7 +3062,11 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\x19SetPodHttpBindingsRequest\x12\x15\n" +
 	"\x06pod_id\x18\x01 \x01(\tR\x05podId\x12A\n" +
 	"\rhttp_bindings\x18\x02 \x01(\v2\x1c.feos.pod.v1.PodHttpBindingsR\fhttpBindings\"\x1c\n" +
-	"\x1aSetPodHttpBindingsResponse*\xb3\x01\n" +
+	"\x1aSetPodHttpBindingsResponse\"m\n" +
+	"\x18SetPodTlsBindingsRequest\x12\x15\n" +
+	"\x06pod_id\x18\x01 \x01(\tR\x05podId\x12:\n" +
+	"\ftls_bindings\x18\x02 \x03(\v2\x17.feos.pod.v1.TlsBindingR\vtlsBindings\"\x1b\n" +
+	"\x19SetPodTlsBindingsResponse*\xb3\x01\n" +
 	"\bPodState\x12\x19\n" +
 	"\x15POD_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11POD_STATE_PENDING\x10\x01\x12\x15\n" +
@@ -2998,7 +3090,7 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\x18CONTAINER_STATE_CREATING\x10\x01\x12\x1b\n" +
 	"\x17CONTAINER_STATE_CREATED\x10\x02\x12\x1b\n" +
 	"\x17CONTAINER_STATE_RUNNING\x10\x03\x12\x1a\n" +
-	"\x16CONTAINER_STATE_EXITED\x10\x042\x84\b\n" +
+	"\x16CONTAINER_STATE_EXITED\x10\x042\xe8\b\n" +
 	"\n" +
 	"PodService\x12J\n" +
 	"\tCreatePod\x12\x1d.feos.pod.v1.CreatePodRequest\x1a\x1e.feos.pod.v1.CreatePodResponse\x12G\n" +
@@ -3011,7 +3103,8 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\n" +
 	"SuspendPod\x12\x1e.feos.pod.v1.SuspendPodRequest\x1a\x1f.feos.pod.v1.SuspendPodResponse\x12J\n" +
 	"\tResumePod\x12\x1d.feos.pod.v1.ResumePodRequest\x1a\x1e.feos.pod.v1.ResumePodResponse\x12e\n" +
-	"\x12SetPodHttpBindings\x12&.feos.pod.v1.SetPodHttpBindingsRequest\x1a'.feos.pod.v1.SetPodHttpBindingsResponse\x12S\n" +
+	"\x12SetPodHttpBindings\x12&.feos.pod.v1.SetPodHttpBindingsRequest\x1a'.feos.pod.v1.SetPodHttpBindingsResponse\x12b\n" +
+	"\x11SetPodTlsBindings\x12%.feos.pod.v1.SetPodTlsBindingsRequest\x1a&.feos.pod.v1.SetPodTlsBindingsResponse\x12S\n" +
 	"\fHibernatePod\x12 .feos.pod.v1.HibernatePodRequest\x1a!.feos.pod.v1.HibernatePodResponse\x12M\n" +
 	"\n" +
 	"RestorePod\x12\x1e.feos.pod.v1.RestorePodRequest\x1a\x1f.feos.pod.v1.RestorePodResponse\x12S\n" +
@@ -3030,7 +3123,7 @@ func file_feos_pod_v1_pod_proto_rawDescGZIP() []byte {
 }
 
 var file_feos_pod_v1_pod_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_feos_pod_v1_pod_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_feos_pod_v1_pod_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_feos_pod_v1_pod_proto_goTypes = []any{
 	(PodState)(0),                      // 0: feos.pod.v1.PodState
 	(HibernationPhase)(0),              // 1: feos.pod.v1.HibernationPhase
@@ -3075,23 +3168,25 @@ var file_feos_pod_v1_pod_proto_goTypes = []any{
 	(*PodConsoleOutput)(nil),           // 40: feos.pod.v1.PodConsoleOutput
 	(*SetPodHttpBindingsRequest)(nil),  // 41: feos.pod.v1.SetPodHttpBindingsRequest
 	(*SetPodHttpBindingsResponse)(nil), // 42: feos.pod.v1.SetPodHttpBindingsResponse
-	nil,                                // 43: feos.pod.v1.PodSpec.LabelsEntry
-	nil,                                // 44: feos.pod.v1.PodSpec.MetadataEntry
-	nil,                                // 45: feos.pod.v1.ContainerSpec.EnvEntry
-	nil,                                // 46: feos.pod.v1.PodInfo.LogLabelsEntry
-	nil,                                // 47: feos.pod.v1.CreatePodRequest.LogLabelsEntry
-	nil,                                // 48: feos.pod.v1.RestorePodRequest.LogLabelsEntry
+	(*SetPodTlsBindingsRequest)(nil),   // 43: feos.pod.v1.SetPodTlsBindingsRequest
+	(*SetPodTlsBindingsResponse)(nil),  // 44: feos.pod.v1.SetPodTlsBindingsResponse
+	nil,                                // 45: feos.pod.v1.PodSpec.LabelsEntry
+	nil,                                // 46: feos.pod.v1.PodSpec.MetadataEntry
+	nil,                                // 47: feos.pod.v1.ContainerSpec.EnvEntry
+	nil,                                // 48: feos.pod.v1.PodInfo.LogLabelsEntry
+	nil,                                // 49: feos.pod.v1.CreatePodRequest.LogLabelsEntry
+	nil,                                // 50: feos.pod.v1.RestorePodRequest.LogLabelsEntry
 }
 var file_feos_pod_v1_pod_proto_depIdxs = []int32{
 	7,  // 0: feos.pod.v1.PodSpec.resources:type_name -> feos.pod.v1.Resources
 	8,  // 1: feos.pod.v1.PodSpec.containers:type_name -> feos.pod.v1.ContainerSpec
 	10, // 2: feos.pod.v1.PodSpec.network:type_name -> feos.pod.v1.PodNetwork
-	43, // 3: feos.pod.v1.PodSpec.labels:type_name -> feos.pod.v1.PodSpec.LabelsEntry
+	45, // 3: feos.pod.v1.PodSpec.labels:type_name -> feos.pod.v1.PodSpec.LabelsEntry
 	6,  // 4: feos.pod.v1.PodSpec.volumes:type_name -> feos.pod.v1.PodVolume
-	44, // 5: feos.pod.v1.PodSpec.metadata:type_name -> feos.pod.v1.PodSpec.MetadataEntry
+	46, // 5: feos.pod.v1.PodSpec.metadata:type_name -> feos.pod.v1.PodSpec.MetadataEntry
 	5,  // 6: feos.pod.v1.PodSpec.http_bindings:type_name -> feos.pod.v1.PodHttpBindings
 	4,  // 7: feos.pod.v1.PodSpec.tls_bindings:type_name -> feos.pod.v1.TlsBinding
-	45, // 8: feos.pod.v1.ContainerSpec.env:type_name -> feos.pod.v1.ContainerSpec.EnvEntry
+	47, // 8: feos.pod.v1.ContainerSpec.env:type_name -> feos.pod.v1.ContainerSpec.EnvEntry
 	9,  // 9: feos.pod.v1.ContainerSpec.volume_mounts:type_name -> feos.pod.v1.VolumeMount
 	3,  // 10: feos.pod.v1.PodInfo.spec:type_name -> feos.pod.v1.PodSpec
 	0,  // 11: feos.pod.v1.PodInfo.state:type_name -> feos.pod.v1.PodState
@@ -3102,51 +3197,54 @@ var file_feos_pod_v1_pod_proto_depIdxs = []int32{
 	17, // 16: feos.pod.v1.PodInfo.image_layers:type_name -> feos.pod.v1.ImageLayers
 	18, // 17: feos.pod.v1.PodInfo.disk:type_name -> feos.pod.v1.BakedLayer
 	18, // 18: feos.pod.v1.PodInfo.baked:type_name -> feos.pod.v1.BakedLayer
-	46, // 19: feos.pod.v1.PodInfo.log_labels:type_name -> feos.pod.v1.PodInfo.LogLabelsEntry
+	48, // 19: feos.pod.v1.PodInfo.log_labels:type_name -> feos.pod.v1.PodInfo.LogLabelsEntry
 	1,  // 20: feos.pod.v1.Hibernation.phase:type_name -> feos.pod.v1.HibernationPhase
 	2,  // 21: feos.pod.v1.ContainerStatus.state:type_name -> feos.pod.v1.ContainerState
 	3,  // 22: feos.pod.v1.CreatePodRequest.spec:type_name -> feos.pod.v1.PodSpec
 	17, // 23: feos.pod.v1.CreatePodRequest.image_layers:type_name -> feos.pod.v1.ImageLayers
-	47, // 24: feos.pod.v1.CreatePodRequest.log_labels:type_name -> feos.pod.v1.CreatePodRequest.LogLabelsEntry
+	49, // 24: feos.pod.v1.CreatePodRequest.log_labels:type_name -> feos.pod.v1.CreatePodRequest.LogLabelsEntry
 	18, // 25: feos.pod.v1.ImageLayers.layers:type_name -> feos.pod.v1.BakedLayer
 	11, // 26: feos.pod.v1.CreatePodResponse.pod:type_name -> feos.pod.v1.PodInfo
 	11, // 27: feos.pod.v1.ListPodsResponse.pods:type_name -> feos.pod.v1.PodInfo
 	0,  // 28: feos.pod.v1.PodEvent.state:type_name -> feos.pod.v1.PodState
 	13, // 29: feos.pod.v1.HibernatePodResponse.checkpoint:type_name -> feos.pod.v1.Checkpoint
-	48, // 30: feos.pod.v1.RestorePodRequest.log_labels:type_name -> feos.pod.v1.RestorePodRequest.LogLabelsEntry
+	50, // 30: feos.pod.v1.RestorePodRequest.log_labels:type_name -> feos.pod.v1.RestorePodRequest.LogLabelsEntry
 	11, // 31: feos.pod.v1.RestorePodResponse.pod:type_name -> feos.pod.v1.PodInfo
 	5,  // 32: feos.pod.v1.SetPodHttpBindingsRequest.http_bindings:type_name -> feos.pod.v1.PodHttpBindings
-	16, // 33: feos.pod.v1.PodService.CreatePod:input_type -> feos.pod.v1.CreatePodRequest
-	20, // 34: feos.pod.v1.PodService.StartPod:input_type -> feos.pod.v1.StartPodRequest
-	22, // 35: feos.pod.v1.PodService.StopPod:input_type -> feos.pod.v1.StopPodRequest
-	24, // 36: feos.pod.v1.PodService.DeletePod:input_type -> feos.pod.v1.DeletePodRequest
-	26, // 37: feos.pod.v1.PodService.GetPod:input_type -> feos.pod.v1.GetPodRequest
-	27, // 38: feos.pod.v1.PodService.ListPods:input_type -> feos.pod.v1.ListPodsRequest
-	29, // 39: feos.pod.v1.PodService.StreamPodEvents:input_type -> feos.pod.v1.StreamPodEventsRequest
-	31, // 40: feos.pod.v1.PodService.SuspendPod:input_type -> feos.pod.v1.SuspendPodRequest
-	33, // 41: feos.pod.v1.PodService.ResumePod:input_type -> feos.pod.v1.ResumePodRequest
-	41, // 42: feos.pod.v1.PodService.SetPodHttpBindings:input_type -> feos.pod.v1.SetPodHttpBindingsRequest
-	35, // 43: feos.pod.v1.PodService.HibernatePod:input_type -> feos.pod.v1.HibernatePodRequest
-	37, // 44: feos.pod.v1.PodService.RestorePod:input_type -> feos.pod.v1.RestorePodRequest
-	39, // 45: feos.pod.v1.PodService.StreamPodConsole:input_type -> feos.pod.v1.PodConsoleInput
-	19, // 46: feos.pod.v1.PodService.CreatePod:output_type -> feos.pod.v1.CreatePodResponse
-	21, // 47: feos.pod.v1.PodService.StartPod:output_type -> feos.pod.v1.StartPodResponse
-	23, // 48: feos.pod.v1.PodService.StopPod:output_type -> feos.pod.v1.StopPodResponse
-	25, // 49: feos.pod.v1.PodService.DeletePod:output_type -> feos.pod.v1.DeletePodResponse
-	11, // 50: feos.pod.v1.PodService.GetPod:output_type -> feos.pod.v1.PodInfo
-	28, // 51: feos.pod.v1.PodService.ListPods:output_type -> feos.pod.v1.ListPodsResponse
-	30, // 52: feos.pod.v1.PodService.StreamPodEvents:output_type -> feos.pod.v1.PodEvent
-	32, // 53: feos.pod.v1.PodService.SuspendPod:output_type -> feos.pod.v1.SuspendPodResponse
-	34, // 54: feos.pod.v1.PodService.ResumePod:output_type -> feos.pod.v1.ResumePodResponse
-	42, // 55: feos.pod.v1.PodService.SetPodHttpBindings:output_type -> feos.pod.v1.SetPodHttpBindingsResponse
-	36, // 56: feos.pod.v1.PodService.HibernatePod:output_type -> feos.pod.v1.HibernatePodResponse
-	38, // 57: feos.pod.v1.PodService.RestorePod:output_type -> feos.pod.v1.RestorePodResponse
-	40, // 58: feos.pod.v1.PodService.StreamPodConsole:output_type -> feos.pod.v1.PodConsoleOutput
-	46, // [46:59] is the sub-list for method output_type
-	33, // [33:46] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	4,  // 33: feos.pod.v1.SetPodTlsBindingsRequest.tls_bindings:type_name -> feos.pod.v1.TlsBinding
+	16, // 34: feos.pod.v1.PodService.CreatePod:input_type -> feos.pod.v1.CreatePodRequest
+	20, // 35: feos.pod.v1.PodService.StartPod:input_type -> feos.pod.v1.StartPodRequest
+	22, // 36: feos.pod.v1.PodService.StopPod:input_type -> feos.pod.v1.StopPodRequest
+	24, // 37: feos.pod.v1.PodService.DeletePod:input_type -> feos.pod.v1.DeletePodRequest
+	26, // 38: feos.pod.v1.PodService.GetPod:input_type -> feos.pod.v1.GetPodRequest
+	27, // 39: feos.pod.v1.PodService.ListPods:input_type -> feos.pod.v1.ListPodsRequest
+	29, // 40: feos.pod.v1.PodService.StreamPodEvents:input_type -> feos.pod.v1.StreamPodEventsRequest
+	31, // 41: feos.pod.v1.PodService.SuspendPod:input_type -> feos.pod.v1.SuspendPodRequest
+	33, // 42: feos.pod.v1.PodService.ResumePod:input_type -> feos.pod.v1.ResumePodRequest
+	41, // 43: feos.pod.v1.PodService.SetPodHttpBindings:input_type -> feos.pod.v1.SetPodHttpBindingsRequest
+	43, // 44: feos.pod.v1.PodService.SetPodTlsBindings:input_type -> feos.pod.v1.SetPodTlsBindingsRequest
+	35, // 45: feos.pod.v1.PodService.HibernatePod:input_type -> feos.pod.v1.HibernatePodRequest
+	37, // 46: feos.pod.v1.PodService.RestorePod:input_type -> feos.pod.v1.RestorePodRequest
+	39, // 47: feos.pod.v1.PodService.StreamPodConsole:input_type -> feos.pod.v1.PodConsoleInput
+	19, // 48: feos.pod.v1.PodService.CreatePod:output_type -> feos.pod.v1.CreatePodResponse
+	21, // 49: feos.pod.v1.PodService.StartPod:output_type -> feos.pod.v1.StartPodResponse
+	23, // 50: feos.pod.v1.PodService.StopPod:output_type -> feos.pod.v1.StopPodResponse
+	25, // 51: feos.pod.v1.PodService.DeletePod:output_type -> feos.pod.v1.DeletePodResponse
+	11, // 52: feos.pod.v1.PodService.GetPod:output_type -> feos.pod.v1.PodInfo
+	28, // 53: feos.pod.v1.PodService.ListPods:output_type -> feos.pod.v1.ListPodsResponse
+	30, // 54: feos.pod.v1.PodService.StreamPodEvents:output_type -> feos.pod.v1.PodEvent
+	32, // 55: feos.pod.v1.PodService.SuspendPod:output_type -> feos.pod.v1.SuspendPodResponse
+	34, // 56: feos.pod.v1.PodService.ResumePod:output_type -> feos.pod.v1.ResumePodResponse
+	42, // 57: feos.pod.v1.PodService.SetPodHttpBindings:output_type -> feos.pod.v1.SetPodHttpBindingsResponse
+	44, // 58: feos.pod.v1.PodService.SetPodTlsBindings:output_type -> feos.pod.v1.SetPodTlsBindingsResponse
+	36, // 59: feos.pod.v1.PodService.HibernatePod:output_type -> feos.pod.v1.HibernatePodResponse
+	38, // 60: feos.pod.v1.PodService.RestorePod:output_type -> feos.pod.v1.RestorePodResponse
+	40, // 61: feos.pod.v1.PodService.StreamPodConsole:output_type -> feos.pod.v1.PodConsoleOutput
+	48, // [48:62] is the sub-list for method output_type
+	34, // [34:48] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_feos_pod_v1_pod_proto_init() }
@@ -3161,7 +3259,7 @@ func file_feos_pod_v1_pod_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_feos_pod_v1_pod_proto_rawDesc), len(file_feos_pod_v1_pod_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   46,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

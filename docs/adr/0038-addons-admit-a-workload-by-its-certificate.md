@@ -296,9 +296,13 @@ yet decided.
 - A `uses` without a variable opens the port (ADR 0012) but grants
   nothing and makes no binding: a call whose address is in the code
   presents no certificate.
-- A sandbox's spec is fixed at its create and names no bindings, so an
-  attached service, granted as its sandbox, reaches an addon with FeID
-  alone.
+- An attached service is granted as its sandbox, and reaches its addons
+  through the sandbox's bindings: the sandbox is made before the
+  service, so the controller sets them (`SetPodTlsBindings`, into the
+  sandbox's template and its running pod) before the service's process
+  starts, their addresses numbered over every attached service of the
+  sandbox. Whatever else runs in the sandbox (a workspace's agent)
+  reaches the addon through them too, as the sandbox's workload.
 - The addon's TLS key lives on its volume, beside the data it protects.
 - Definitions name no `user` or `password` and Valkey 9; one with 8
   deploys with a warning, one whose reference asks for a password fails
@@ -320,3 +324,6 @@ every reference moved onto one. Valkey followed the same day as ADR 0039
 (2f2a0ae), with the bindings offering no ALPN (a0a31b6), and was merged
 here on 2026-11-08. ADR 0036's open question on an addon's own server
 key is answered here by a key of the addon's own on its volume.
+Attached services got their sandbox's bindings on 2026-11-13: until
+then their `url` named a binding no sandbox had, and a workspace's
+preview could not reach its PostgreSQL.

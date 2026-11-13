@@ -1000,3 +1000,32 @@ func (s *Store) SandboxesInState(ctx context.Context, node string, states []stri
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
 		WHERE node = $1 AND op = '' AND client_state = ANY($2) ORDER BY id LIMIT $3`, node, nonNil(states), limit))
 }
+
+// SetSandboxTLSBindings writes the outbound TLS bindings (ADR 0036) into
+// the template of sandbox id of incarnation inc, a sandbox (no instance,
+// no tenant's job): those of the attached services in it, which its
+// environment's controller sets before it starts one, so that every
+// later create of its pod carries them. None removes them. A row without
+// a template gets one that keeps its pod as it is (sleep infinity, the
+// template-less command). Not a lifecycle write: its gen stays. It
+// reports whether the row was there.
+func (s *Store) SetSandboxTLSBindings(ctx context.Context, id podid.ID, inc uuid.UUID,
+	bindings []model.TemplateTLSBinding) (bool, error) {
+	var bj any
+	if len(bindings) > 0 {
+		b, err := json.Marshal(bindings)
+		if err != nil {
+			return false, fmt.Errorf("TLS bindings: %w", err)
+		}
+		bj = string(b)
+	}
+	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET pod_template = CASE
+			WHEN $3::jsonb IS NULL THEN pod_template - 'tlsBindings'
+			ELSE jsonb_set(coalesce(pod_template, '{"command": ["sleep", "infinity"]}'::jsonb), '{tlsBindings}', $3::jsonb)
+		END, updated_at = now()
+		WHERE id = $1 AND incarnation = $2 AND NOT instance AND NOT tenant_job`, id, inc, bj)
+	if err != nil {
+		return false, fmt.Errorf("TLS bindings of sandbox %s: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}

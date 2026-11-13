@@ -60,6 +60,13 @@ service PodService {
   // is stated; what it does not name is gone. A pod that does not run
   // takes it at its next start, resume or restore.
   rpc SetPodHttpBindings(SetPodHttpBindingsRequest) returns (SetPodHttpBindingsResponse);
+  // Sets a pod's outbound TLS bindings (ADR 0036) in its record and, while
+  // it runs, in its guest, which listens on every binding's address before
+  // the call returns. The whole list is stated; what it does not name is
+  // gone. A pod that does not run takes them at its next start, resume or
+  // restore. For a sandbox whose attached services reference an addon:
+  // the sandbox is created before they are.
+  rpc SetPodTlsBindings(SetPodTlsBindingsRequest) returns (SetPodTlsBindingsResponse);
   // Takes the pod off the node into object storage: suspends it if it
   // runs, seals its disk, its volumes and its memory, uploads them with
   // its spec, and frees what it held on the node: its microVM, its disk,
@@ -573,3 +580,10 @@ message SetPodHttpBindingsRequest {
 }
 
 message SetPodHttpBindingsResponse {}
+
+message SetPodTlsBindingsRequest {
+  string pod_id = 1;
+  repeated TlsBinding tls_bindings = 2;
+}
+
+message SetPodTlsBindingsResponse {}

@@ -828,6 +828,26 @@ func (p *podService) SetPodHttpBindings(ctx context.Context, req *podv1.SetPodHt
 	return &podv1.SetPodHttpBindingsResponse{}, nil
 }
 
+// SetPodTlsBindings sets a pod's outbound TLS bindings (ADR 0036) in its
+// record, running or not, whole: none for an empty list.
+func (p *podService) SetPodTlsBindings(ctx context.Context, req *podv1.SetPodTlsBindingsRequest) (*podv1.SetPodTlsBindingsResponse, error) {
+	if err := p.n.script.wait(ctx, podv1.PodService_SetPodTlsBindings_FullMethodName); err != nil {
+		return nil, err
+	}
+	id := req.GetPodId()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	pd := p.pods[id]
+	if pd == nil {
+		return nil, notFound(id)
+	}
+	pd.info.Spec.TlsBindings = nil
+	for _, b := range req.GetTlsBindings() {
+		pd.info.Spec.TlsBindings = append(pd.info.Spec.TlsBindings, proto.Clone(b).(*podv1.TlsBinding))
+	}
+	return &podv1.SetPodTlsBindingsResponse{}, nil
+}
+
 func (p *podService) StartPod(ctx context.Context, req *podv1.StartPodRequest) (*podv1.StartPodResponse, error) {
 	return mutate(p, ctx, func(ctx context.Context) (*podv1.StartPodResponse, error) {
 		return &podv1.StartPodResponse{}, p.start(ctx, req.GetPodId())
