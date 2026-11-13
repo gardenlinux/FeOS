@@ -20,9 +20,12 @@ import (
 
 // EnvExit is one exit of an instance's main container, as env_instances
 // keeps the last five: when, and its code (nil: the node reported none).
+// A start that failed counts as an exit too: NotStarted is then why the
+// container did not start (the pod's failure on its node), and Code nil.
 type EnvExit struct {
-	At   time.Time `json:"at"`
-	Code *int      `json:"code"`
+	At         time.Time `json:"at"`
+	Code       *int      `json:"code"`
+	NotStarted string    `json:"notStarted,omitempty"`
 }
 
 // EnvInstance is a row of env_instances: the controller's view of an
@@ -234,7 +237,9 @@ func (s *Store) UpdateEnvInstance(ctx context.Context, before, after EnvInstance
 }
 
 func sameExits(a, b []EnvExit) bool {
-	return slices.EqualFunc(a, b, func(x, y EnvExit) bool { return x.At.Equal(y.At) && sameIntPtr(x.Code, y.Code) })
+	return slices.EqualFunc(a, b, func(x, y EnvExit) bool {
+		return x.At.Equal(y.At) && sameIntPtr(x.Code, y.Code) && x.NotStarted == y.NotStarted
+	})
 }
 
 // DeleteEnvInstance removes the controller's row of an instance (the

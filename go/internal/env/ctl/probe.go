@@ -464,10 +464,8 @@ func (c *Controller) restartAgain(ctx context.Context, v *view, r store.EnvInsta
 }
 
 // instanceExited records an exit of a service's or an addon's container
-// (§4.4): restarts counted, the exit kept (the last five), the restart
-// due after the backoff; 3 exits within 10 minutes open crash_loop with
-// the exits and the log tail (storedTail: redacted, bounded). pid is the
-// microVM's (0: unknown), remembered with the exit.
+// (§4.4) by countExit. pid is the microVM's (0: unknown), remembered with
+// the exit.
 func (c *Controller) instanceExited(ctx context.Context, v *view, r store.EnvInstanceRow, code *int, pid int64) {
 	tail := c.storedTail(ctx, v, r.Sandbox)
 	obj := objectName(r.Instance.Kind, r.Instance.Object)
@@ -486,39 +484,7 @@ func (c *Controller) instanceExited(ctx context.Context, v *view, r store.EnvIns
 		if err != nil {
 			return err
 		}
-		after := inst
-		after.Restarts++
-		after.LastExit = code
-		after.Exits = appendExit(inst.Exits, store.EnvExit{At: now, Code: code})
-		after.Phase, after.ReadySince, after.ProbeFailures = model.PhaseExited, time.Time{}, 0
-		wait := c.backoff(after.Restarts)
-		after.NextRestartAt = now.Add(wait)
-		after.Detail = "exited without a code; restarting in " + wait.String()
-		if code != nil {
-			after.Detail = fmt.Sprintf("exited with code %d; restarting in %s", *code, wait)
-		}
-		if _, err := tx.UpdateEnvInstance(ctx, inst, after); err != nil {
-			return err
-		}
-		recent := 0
-		for _, e := range after.Exits {
-			if now.Sub(e.At) <= c.t.crashWindow {
-				recent++
-			}
-		}
-		if recent >= c.t.crashExits {
-			last := "without a code"
-			if code != nil {
-				last = fmt.Sprintf("with code %d", *code)
-			}
-			summary := fmt.Sprintf("%s (deployment %d) exited %d times within %s, last %s", r.Instance.Object, inst.Deployment,
-				recent, spell(c.t.crashWindow), last)
-			if _, err := openIncident(ctx, tx, v.env.ID, obj, inst.Deployment, model.ConditionCrashLoop, summary,
-				evidence{Exits: after.Exits, LogTail: tail}); err != nil {
-				return err
-			}
-		}
-		return tx.Notify(ctx, db.ChanLeader, HintReconcile)
+		return c.countExit(ctx, tx, v, inst, store.EnvExit{At: now, Code: code}, tail)
 	})
 	if err != nil {
 		if ctx.Err() == nil && !errors.Is(err, store.ErrNoRow) {
@@ -532,7 +498,154 @@ func (c *Controller) instanceExited(ctx context.Context, v *view, r store.EnvIns
 	c.mu.Lock()
 	c.exitRun[r.Sandbox.ID] = pid
 	c.mu.Unlock()
-	c.log.Info("instance exited", "environment", v.env.ID, "object", obj, "replica", r.Instance.Replica, "code", code)
+	c.log.Info("instance exited", "environment", v.env.ID, "object", obj, "replica", r.Instance.Replica,
+		"code", codeValue(code))
+}
+
+// countExit records exit e of inst (§4.4): a restart counted, the exit
+// kept (the last five), the instance exited (failed for a start that
+// failed) with the restart due after the backoff; 3 exits within 10
+// minutes open crash_loop with the exits and the log tail (storedTail:
+// redacted, bounded).
+func (c *Controller) countExit(ctx context.Context, tx *store.Store, v *view, inst store.EnvInstance, e store.EnvExit,
+	tail []string) error {
+	after := inst
+	after.Restarts++
+	after.LastExit = e.Code
+	after.Exits = appendExit(inst.Exits, e)
+	after.Phase, after.ReadySince, after.ProbeFailures = model.PhaseExited, time.Time{}, 0
+	if e.NotStarted != "" {
+		after.Phase = model.PhaseFailed
+	}
+	wait := c.backoff(after.Restarts)
+	after.NextRestartAt = e.At.Add(wait)
+	after.Detail = exitText(e) + "; restarting in " + wait.String()
+	if _, err := tx.UpdateEnvInstance(ctx, inst, after); err != nil {
+		return err
+	}
+	var recent []store.EnvExit
+	for _, x := range after.Exits {
+		if e.At.Sub(x.At) <= c.t.crashWindow {
+			recent = append(recent, x)
+		}
+	}
+	if len(recent) >= c.t.crashExits {
+		summary := fmt.Sprintf("%s (deployment %d) %s within %s, %s", inst.Object, inst.Deployment, timesText(recent),
+			spell(c.t.crashWindow), lastText(e))
+		if _, err := openIncident(ctx, tx, v.env.ID, objectName(inst.Kind, inst.Object), inst.Deployment,
+			model.ConditionCrashLoop, summary, evidence{Exits: after.Exits, LogTail: tail}); err != nil {
+			return err
+		}
+	}
+	return tx.Notify(ctx, db.ChanLeader, HintReconcile)
+}
+
+// startFailed is the failed callback of an instance's Ensure (healInstance,
+// insertFrom) whose row had gen before: a start that failed counts as an
+// exit (§4.4), so that a container that cannot start (an executable not
+// found, an image the guest cannot run) is started again with the backoff
+// of an exit, not on every pass. It is one when the Ensure moved the row
+// and left it failed without an op; an Ensure that did not get to start
+// the pod (no capacity, a node away, a busy row, its budget) counts
+// nothing. Why is the row's status, redacted of the environment's secrets
+// and cut. A job's run ends failed with it, as at an exit.
+func (c *Controller) startFailed(v *view, id podid.ID, gen int64) func(context.Context, error) {
+	return func(ctx context.Context, _ error) {
+		sb, err := c.st.GetSandbox(ctx, id)
+		if err != nil || sb.Gen == gen || sb.Op != "" || sb.ClientState != model.StateFailed {
+			return
+		}
+		why := sb.StatusDescription
+		if why == "" {
+			why = "its pod failed"
+		}
+		why = storedLog.cut(redact(why, c.envSecretValues(ctx, v, sb.PodTemplate)))
+		inst, err := c.st.GetEnvInstance(ctx, id)
+		if err != nil {
+			return
+		}
+		if inst.Kind == spec.KindJob {
+			c.finishJob(ctx, v, store.EnvInstanceRow{Instance: inst, Sandbox: sb}, nil, "its container did not start: "+why)
+			return
+		}
+		recorded := false
+		err = c.fenced(ctx, func(tx *store.Store) error {
+			recorded = false
+			cur, err := tx.LockEnvInstance(ctx, id, store.ForUpdate)
+			if err != nil {
+				return err
+			}
+			if cur.Phase == model.PhaseStopping {
+				return nil
+			}
+			recorded = true
+			now, err := tx.Now(ctx)
+			if err != nil {
+				return err
+			}
+			return c.countExit(ctx, tx, v, cur, store.EnvExit{At: now, NotStarted: why}, nil)
+		})
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, store.ErrNoRow) {
+				c.rl.warn("probe", "cannot record a start that failed", "sandbox", id, "err", err)
+			}
+			return
+		}
+		if recorded {
+			c.log.Info("instance did not start", "environment", v.env.ID, "object", objectName(inst.Kind, inst.Object),
+				"replica", inst.Replica, "why", why)
+		}
+	}
+}
+
+// exitText says what an exit was: "exited with code 1", "exited without
+// a code", or "did not start: <why>".
+func exitText(e store.EnvExit) string {
+	switch {
+	case e.NotStarted != "":
+		return "did not start: " + e.NotStarted
+	case e.Code != nil:
+		return fmt.Sprintf("exited with code %d", *e.Code)
+	}
+	return "exited without a code"
+}
+
+// timesText counts exits: "exited 3 times", "did not start 3 times", or
+// "exited or did not start 3 times".
+func timesText(exits []store.EnvExit) string {
+	starts := 0
+	for _, e := range exits {
+		if e.NotStarted != "" {
+			starts++
+		}
+	}
+	switch starts {
+	case 0:
+		return fmt.Sprintf("exited %d times", len(exits))
+	case len(exits):
+		return fmt.Sprintf("did not start %d times", len(exits))
+	}
+	return fmt.Sprintf("exited or did not start %d times", len(exits))
+}
+
+// lastText says how the last exit went: "last with code 1", "last without
+// a code", or "last: <why it did not start>".
+func lastText(e store.EnvExit) string {
+	switch {
+	case e.NotStarted != "":
+		return "last: " + e.NotStarted
+	case e.Code != nil:
+		return fmt.Sprintf("last with code %d", *e.Code)
+	}
+	return "last without a code"
+}
+
+// codeValue is an exit code for a log line: the code, or "none".
+func codeValue(code *int) any {
+	if code == nil {
+		return "none"
+	}
+	return *code
 }
 
 // restartInstance restarts an exited instance's pod (Engine.Restart, a

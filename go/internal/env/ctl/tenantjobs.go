@@ -348,7 +348,8 @@ func (c *Controller) probeTenantJobs(ctx context.Context, run func(func()) bool)
 // stepTenantJob is one look at a job that has not ended, at now (the
 // database's): its end when its deadline passed, its pod went, was lost,
 // or stopped after it ran, or its process exited; else its start once
-// its container runs, or its pod brought up.
+// its container runs, or its pod brought up (a start that fails ends it,
+// as an exit would).
 func (c *Controller) stepTenantJob(ctx context.Context, r store.TenantJob, now time.Time) {
 	sb, err := c.st.GetSandbox(ctx, r.ID)
 	if errors.Is(err, model.ErrNotFound) {
@@ -397,7 +398,21 @@ func (c *Controller) stepTenantJob(ctx context.Context, r store.TenantJob, now t
 		if errors.Is(err, model.ErrImageRefused) {
 			c.endTenantJob(ctx, r, &sb, store.TenantJobEnd{Phase: model.JobFailed, Reason: model.JobReasonImage,
 				Detail: err.Error()}, false)
+			return
 		}
+		// A start that failed ends the job as an exit does: the Ensure
+		// moved the row and left it failed, its container not started.
+		cur, gerr := c.st.GetSandbox(ctx, sb.ID)
+		if gerr != nil || cur.Gen == sb.Gen || cur.Op != "" || cur.ClientState != model.StateFailed {
+			return
+		}
+		why := cur.StatusDescription
+		if why == "" {
+			why = "its pod failed"
+		}
+		why = storedLog.cut(redact(why, c.tenantJobSecretValues(ctx, r.ID)))
+		c.endTenantJob(ctx, r, &cur, store.TenantJobEnd{Phase: model.JobFailed, Reason: model.JobReasonNoExitStatus,
+			Detail: "its container did not start: " + why}, false)
 	})
 }
 

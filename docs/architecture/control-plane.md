@@ -2546,7 +2546,7 @@ a deleting one.
 | `env_deployments` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`waiting`, `deploying`, `deployed`, `failed`, `replaced`), `reason`, start and end |
 | `env_tags` | a tag's deployment, who moved it and when |
 | `env_secrets` | one version of a secret, sealed; `system` for an addon's credential, `addon.<addon>.<key>`, never listed; soft-deleted |
-| `env_instances` | the controller's view of an instance row: kind, object, replica, template hash, deployment, phase (`starting`, `ready`, `unready`, `exited`, `succeeded`, `failed`, `stopping`), restarts, the last 5 exits, probe failures, the next restart, an addon's provisioning hash, detail; `ingress_ports`, the ports its `ing-` group opens to the ingress as its node holds them ([Security groups](#security-groups)) |
+| `env_instances` | the controller's view of an instance row: kind, object, replica, template hash, deployment, phase (`starting`, `ready`, `unready`, `exited`, `succeeded`, `failed`, `stopping`), restarts, the last 5 exits (starts that failed among them), probe failures, the next restart, an addon's provisioning hash, detail; `ingress_ports`, the ports its `ing-` group opens to the ingress as its node holds them ([Security groups](#security-groups)) |
 | `env_job_runs` | one attempt of a job: template hash, deployment, attempt, phase, exit code, detail, the last 50 lines of its log, redacted and bounded ([Logs](#probes-exits-and-restarts)) |
 | `env_attached` | an attached service: its sandbox and the incarnation of it the service last used, template hash, process ID, phase, restarts, the next restart, probe failures, the last exit, detail |
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
@@ -3012,12 +3012,15 @@ crash loop closes. Then:
    from the highest; a lost row is replaced. The service's `rollout.timeout`
    counts from R's start, moved on by the time R's deploy jobs waited
    for runs that were not R's (see the deployment's deadline below): past
-   it, or once one of R's new instances exited 3 times, R fails
-   (`rollout_failed`, with the exits, the log tail and the diff since
-   the deployed deployment), and R's new instances stop while the old
-   serve on. Healing, always: a desired row stopped, failed or pending
-   gets Ensure, and one unknown, paused or hibernated too when its
-   service does not idle ([the pool](#the-controller)).
+   it, or once one of R's new instances exited 3 times (a start that
+   failed counts, [below](#probes-exits-and-restarts)), R fails
+   (`rollout_failed`, "service web: a new instance (replica 0) exited 3
+   times, last with code 1", with the exits, the log tail and the diff
+   since the deployed deployment), and R's new instances stop while the
+   old serve on. Healing, always: a desired row stopped, failed or
+   pending gets Ensure, a failed one only once its restart is due, and
+   one unknown, paused or hibernated too when its service does not idle
+   ([the pool](#the-controller)).
 4. **Attached services** ([below](#attached-services)),
    ready within 10 minutes of R's start, moved on in the same way, or R
    fails (`rollout_failed`).
@@ -3070,6 +3073,20 @@ gives, without a hold:
   instance of the object has been ready for 10 minutes and is live, or
   once a later deployment is deployed. Restarts count from zero again after 10
   minutes ready.
+- **A start that failed** counts as an exit: an Ensure of an instance's
+  row (its first, from the insert, and every one healing brings) that
+  moved the row (`gen`) and left it `failed` without an op, its pod
+  failed on its node ("container main: … executable 'sleep 3000' not
+  found in $PATH"). The exit has no code and `notStarted`, the row's
+  status redacted of the environment's secrets and cut to 2 KiB; the
+  instance is `failed` ("did not start: …; restarting in 2s"), and
+  healing Ensures it again only once `next_restart_at` passed (read
+  anew, not from the view), never on every pass. It counts for
+  `crash_loop` ("web (deployment 2) did not start 3 times within 10
+  minutes, last: …") and for a rollout's 3 exits. An Ensure that did not
+  get to start the pod (no capacity, a node away, a busy row, its
+  budget) leaves `gen` or the state as they were and counts nothing. A
+  job's run ends `failed` with it ("its container did not start: …").
 - **Readiness**: http, a GET of the path over a port-forward with `Host:
   localhost:<port>`, 200 to 399 within 2 s; tcp, a port-forward that is
   answered; exec, exit 0 in `main` within 10 s; an addon's, its
@@ -3573,7 +3590,8 @@ domain is its host), and the number of open
 incidents. An instance carries its `image`, `registry/repository@sha256:…`
 as its deployment resolved it. The listing shows `public` and `hosts` too. An
 incident has its object, deployment, condition, summary, opening and
-closing, and evidence: `exits`, `logTail` (redacted and bounded), `diff`
+closing, and evidence: `exits` (`at`, `code`, and `notStarted` for a
+start that failed), `logTail` (redacted and bounded), `diff`
 (since the deployed deployment), `placement`, and `pending`, what a deployment
 past its deadline still waited for with the details of those objects'
 instances, credentials redacted, and `egress` for a binding's
@@ -3702,8 +3720,10 @@ is read by `GetPod`, and a main container that runs marks the job
 `failed`/`exit`, none `failed`/`no_exit_status`) after its result file
 was read through the guest's `Read` tool (the exited container's root
 filesystem stays while the pod does). Any other row is brought up by the
-Ensure pool, and an Ensure that the registry refuses ends the job
-`failed`/`image`. An end reads the log's tail from a pod that runs
+Ensure pool, an Ensure that the registry refuses ends the job
+`failed`/`image`, and one that leaves the row failed, its container not
+started, ends it `failed`/`no_exit_status` ("its container did not
+start: …"), as an exit would. An end reads the log's tail from a pod that runs
 (before it drops the job's secrets, which redact it), writes the job
 once (`finished_at IS NULL`) and deletes the pod; `env-probe` deletes
 the pods whose job ended or went (`LeftTenantJobPods`) as well, and

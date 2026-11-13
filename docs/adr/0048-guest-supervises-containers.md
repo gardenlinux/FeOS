@@ -88,7 +88,10 @@ alive, and they are stopped after the main containers, in reverse order.
 - The guest starts a container again with Kubernetes's backoff: 10 s,
   doubling up to 5 min, reset after 10 min of running. The guest sees an
   exit first, and restarts go on while `feosd` restarts or the control
-  plane cannot be reached.
+  plane cannot be reached. A container that cannot be started (its
+  executable not found, its image unusable) counts as an exit with the
+  same backoff, its reason in its last exit, as the control plane counts
+  it until then (ADR 0018).
 - A container started again keeps its writable layer, as with Docker's
   restart policies: only its process is new. What an agent wrote in its
   sandbox survives a restart.

@@ -166,8 +166,14 @@ it can state and get an answer for at once.
 - The controller heals what it runs: a lost replica is replaced, and
   until the guest supervises containers (ADR 0048) `ferund` runs the
   readiness checks over the node's connection and restarts an exited
-  container by restarting its pod, with a backoff, counting repeated
-  exits as a crash loop.
+  container by restarting its pod, with a backoff (1 s, doubling up to
+  5 minutes, from zero again after 10 minutes ready), counting repeated
+  exits as a crash loop. A container that does not start, its pod
+  failed on its node (an executable not found, an image the guest
+  cannot run), counts as an exit: it is started again after the same
+  backoff, never on every pass of the controller, and counts towards
+  the crash loop and a new instance's three exits that fail a rollout,
+  with the node's reason; a job's run ends with it.
 - What the reconciler cannot resolve ends in an **incident** on the
   environment: the object, the condition (a failed rollout, a crash
   loop, a failed job, no capacity, an addon that cannot run on its data,

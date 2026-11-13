@@ -300,3 +300,21 @@ func TestTenantJobImageRefused(t *testing.T) {
 	}
 	h.podGone(job.ID)
 }
+
+// A job whose container does not start ends failed (no_exit_status) at
+// once, with why, as an exit ends it: it is not started again until its
+// deadline.
+func TestTenantJobThatDoesNotStart(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	ups := failBringUps(n1, func(podid.ID) bool { return false })
+	job := h.createTenantJob(tenantJobSpecOf(time.Minute))
+	done := h.waitTenantJob(job.ID, model.JobFailed, 30*time.Second)
+	if done.Reason != model.JobReasonNoExitStatus || done.Detail != "its container did not start: "+notFound {
+		t.Fatalf("ended %+v", done)
+	}
+	h.podGone(job.ID)
+	if n := len(ups()); n != 1 {
+		t.Errorf("%d starts", n)
+	}
+}

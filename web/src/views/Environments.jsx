@@ -1147,14 +1147,15 @@ function IncidentPane({ tenant, env, id, navigate }) {
   );
 }
 
-// IncidentView is an incident with what the controller saw: the exits,
-// the end of the log, what a deployment past its deadline still waited for,
-// a failed rollout's diff against the deployed deployment, why an instance
-// found no place.
+// IncidentView is an incident with what the controller saw: the exits
+// (a start that failed among them, with why), the end of the log, what a
+// deployment past its deadline still waited for, a failed rollout's diff
+// against the deployed deployment, why an instance found no place.
 export function IncidentView({ inc, tenant, env, navigate }) {
   const open = !inc.closedAt;
   const obj = incidentObject(inc.object);
   const ev = inc.evidence || {};
+  const notStarted = (ev.exits || []).some((x) => x.notStarted);
   return (
     <div className="incident">
       <div className="deployment-head">
@@ -1184,12 +1185,14 @@ export function IncidentView({ inc, tenant, env, navigate }) {
           <div className="sect">exits</div>
           <div className="tblwrap">
             <table className="tbl exits-tbl">
-              <thead><tr><th>when</th><th className="col-num">code</th></tr></thead>
+              <thead><tr><th>when</th><th className="col-num">code</th>{notStarted && <th>why</th>}</tr></thead>
               <tbody>
                 {ev.exits.map((x, k) => (
                   <tr key={k}>
                     <td className="mono small">{fmtDateTime(x.at)} <Ago iso={x.at} /></td>
-                    <td className={'col-num mono ' + (x.code === 0 ? 'ok' : 'bad')}>{exitText(x.code)}</td>
+                    <td className={'col-num mono ' + (x.code === 0 && !x.notStarted ? 'ok' : 'bad')}>
+                      {x.notStarted ? 'did not start' : exitText(x.code)}</td>
+                    {notStarted && <td className="mono small">{x.notStarted || ''}</td>}
                   </tr>
                 ))}
               </tbody>

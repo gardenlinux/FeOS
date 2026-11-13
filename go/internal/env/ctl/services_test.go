@@ -871,3 +871,125 @@ func TestRunJobNotReady(t *testing.T) {
 		t.Fatalf("a job that cannot run yet: %v", err)
 	}
 }
+
+// notFound is what a node reports for a pod whose container cannot start.
+const notFound = "container main: executable 'sleep 3000' not found in $PATH"
+
+// failBringUps makes every bring-up on n fail with notFound except those
+// of pods keep allows, and returns when each failed one happened.
+func failBringUps(n *testnode.Node, keep func(podid.ID) bool) func() []time.Time {
+	var mu sync.Mutex
+	var at []time.Time
+	n.Script().SetBringUp(func(_ context.Context, pod podid.ID) error {
+		if keep(pod) {
+			return nil
+		}
+		mu.Lock()
+		at = append(at, time.Now())
+		mu.Unlock()
+		return errors.New(notFound)
+	})
+	return func() []time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(at)
+	}
+}
+
+// A start that fails counts as an exit: a new instance whose container
+// cannot start is started again after the backoff, not on every pass, and
+// its third failed start fails the deployment naming why (crash_loop
+// opens too); the old instance serves on.
+func TestFailedStartFailsTheRollout(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+	old := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
+	ups := failBringUps(n1, func(p podid.ID) bool { return p == old })
+
+	r2 := h.apply(env.ID, serviceSpec(1, "2", ""))
+	rel := h.waitDeployment(env.ID, r2, model.DeploymentFailed, 30*time.Second)
+	if rel.Reason != "service web: a new instance (replica 0) did not start 3 times, last: "+notFound {
+		t.Errorf("reason %q", rel.Reason)
+	}
+	inc := h.incident(env.ID, "service/web", model.ConditionRolloutFailed, 10*time.Second)
+	var ev evidence
+	if err := json.Unmarshal(inc.Evidence, &ev); err != nil || len(ev.Exits) != 3 || inc.Deployment != r2 {
+		t.Fatalf("rollout incident %+v %+v", inc, ev)
+	}
+	for _, e := range ev.Exits {
+		if e.Code != nil || e.NotStarted != notFound {
+			t.Errorf("exit %+v", e)
+		}
+	}
+	loop := h.incident(env.ID, "service/web", model.ConditionCrashLoop, 10*time.Second)
+	if loop.Summary != "web (deployment 2) did not start 3 times within 10 minutes, last: "+notFound {
+		t.Errorf("crash loop %q", loop.Summary)
+	}
+	eventually(t, 30*time.Second, "the new instance gone, the old one serving", func() bool {
+		rows := h.rows(env.ID)
+		return len(rows) == 1 && rows[0].Sandbox.ID == old && ready(rows[0])
+	})
+	// Three starts, each after the backoff of the failures before it
+	// (200 ms, 400 ms), and none after the deployment failed.
+	never(t, time.Second, "another start", func() bool { return len(ups()) != 3 })
+	at := ups()
+	if gap := at[1].Sub(at[0]); gap < 200*time.Millisecond {
+		t.Errorf("second start %v after the first", gap)
+	}
+	if gap := at[2].Sub(at[1]); gap < 400*time.Millisecond {
+		t.Errorf("third start %v after the second", gap)
+	}
+}
+
+// A deployed instance whose pod failed and cannot start again backs off
+// as at exits: failed with why and the restart due, crash_loop after 3
+// within the window; once its container starts again it is ready.
+func TestFailedStartBacksOff(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, serviceSpec(1, "1", ""))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+	id := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)[0].Sandbox.ID
+	ups := failBringUps(n1, func(podid.ID) bool { return false })
+	if err := n1.Script().FailPod(id, "the microVM crashed: signal 9"); err != nil {
+		t.Fatal(err)
+	}
+	var inst store.EnvInstance
+	eventually(t, 10*time.Second, "the first failed start", func() bool {
+		inst, _ = h.st.GetEnvInstance(bg, id)
+		return inst.Restarts == 1
+	})
+	if inst.Phase != model.PhaseFailed || inst.LastExit != nil || len(inst.Exits) != 1 ||
+		inst.Exits[0].NotStarted != notFound || inst.Detail != "did not start: "+notFound+"; restarting in 200ms" ||
+		!inst.NextRestartAt.Equal(inst.Exits[0].At.Add(200*time.Millisecond)) {
+		t.Fatalf("instance %+v", inst)
+	}
+	loop := h.incident(env.ID, "service/web", model.ConditionCrashLoop, 30*time.Second)
+	if loop.Summary != "web (deployment 1) did not start 3 times within 10 minutes, last: "+notFound {
+		t.Errorf("crash loop %q", loop.Summary)
+	}
+	inst, _ = h.st.GetEnvInstance(bg, id)
+	for i := 1; i < len(inst.Exits); i++ {
+		if gap, least := inst.Exits[i].At.Sub(inst.Exits[i-1].At), c200ms(i); gap < least {
+			t.Errorf("start %d %v after the one before, backoff %v", i+1, gap, least)
+		}
+	}
+	if n := len(ups()); n != inst.Restarts {
+		t.Errorf("%d starts, %d counted", n, inst.Restarts)
+	}
+	n1.Script().SetBringUp(nil)
+	r := h.waitRows(env.ID, spec.KindService, "web", 1, 30*time.Second, "ready again", ready)[0]
+	if r.Sandbox.ID != id || r.Instance.Detail != "" || !r.Instance.NextRestartAt.IsZero() {
+		t.Errorf("instance %+v", r.Instance)
+	}
+}
+
+// c200ms is the backoff after the nth failure in the tests: 200 ms
+// doubling.
+func c200ms(n int) time.Duration {
+	return 200 * time.Millisecond << (n - 1)
+}

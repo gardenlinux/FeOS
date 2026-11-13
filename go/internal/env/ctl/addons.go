@@ -113,7 +113,7 @@ func (c *Controller) stepAddon(ctx context.Context, s *stepState, name string, a
 		// there or stopped or failed there since.
 		c.moveVolume(ctx, v, *vol, sb)
 	}
-	if c.heal(ctx, cur.Sandbox, false) {
+	if c.healInstance(ctx, v, cur, false) {
 		// Replaced only on its volume's node, once that node is up and
 		// reports the volume free (§13.7); otherwise never: its volume is
 		// on the lost node, and Ensure syncs it when the node returns.
@@ -221,7 +221,7 @@ func (c *Controller) refuseAddon(ctx context.Context, s *stepState, p *addonPlan
 	v := s.v
 	reason := fmt.Sprintf("addon %s: %s", p.name, problem)
 	if hasCur {
-		c.heal(ctx, cur.Sandbox, false)
+		c.healInstance(ctx, v, cur, false)
 	}
 	s.wait(p.object(), "%s", reason)
 	if deploying(v) {
@@ -403,7 +403,7 @@ func (c *Controller) stillHolds(ctx context.Context, id podid.ID) (bool, error) 
 func (c *Controller) recreateAddon(ctx context.Context, s *stepState, p *addonPlan, cur store.EnvInstanceRow, vol *store.EnvVolume) {
 	v := s.v
 	sb := cur.Sandbox
-	if c.heal(ctx, cur.Sandbox, false) {
+	if c.healInstance(ctx, v, cur, false) {
 		if replaced, _ := c.replaceLostAddon(ctx, v, p, cur, vol); replaced {
 			s.wait(p.object(), "addon %s was lost; it is recreated on node %s", p.name, lostNode(sb))
 			return
@@ -413,7 +413,8 @@ func (c *Controller) recreateAddon(ctx context.Context, s *stepState, p *addonPl
 		return
 	}
 	if !steady(sb) || !c.nodeReady(ctx, sb.Node) {
-		if sb.Op == "" && sb.ClientState != model.StateRunning {
+		// A failed row is healInstance's, after its backoff.
+		if sb.Op == "" && sb.ClientState != model.StateRunning && sb.ClientState != model.StateFailed {
 			c.ensure(ctx, sb.ID)
 		}
 		s.wait(p.object(), "addon %s: waits for its instance to run before it is recreated", p.name)

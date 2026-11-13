@@ -568,10 +568,12 @@ type IncidentEvidence struct {
 }
 
 // Exit is an exit of a container (env_instances.exits): when, and its
-// code (null when the node reported none).
+// code (null when the node reported none). A start that failed counts as
+// an exit: notStarted is then why the container did not start.
 type Exit struct {
-	At   string `json:"at"`
-	Code *int   `json:"code"`
+	At         string `json:"at"`
+	Code       *int   `json:"code"`
+	NotStarted string `json:"notStarted,omitempty"`
 }
 
 // LogsAnswer is GET /api/v1/environments/{env}/objects/{kind}/{name}/logs.

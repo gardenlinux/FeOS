@@ -191,7 +191,7 @@ func (c *Controller) stepRuns(ctx context.Context, s *stepState) {
 		switch {
 		case v.now.After(run.StartedAt.Add(timeout)):
 			c.finishJob(ctx, v, r, nil, "timed out after "+timeout.String())
-		case c.heal(ctx, r.Sandbox, false):
+		case c.healInstance(ctx, v, r, false):
 			c.finishJob(ctx, v, r, nil, "its instance was lost with node "+lostNode(r.Sandbox))
 		}
 	}

@@ -471,3 +471,21 @@ func TestStartRunRefusedWhileARunRuns(t *testing.T) {
 		t.Fatalf("pending %+v, want %q", s.pending, want)
 	}
 }
+
+// A deploy job whose container does not start fails its attempt as an
+// exit does, with why; its last attempt fails the deployment.
+func TestDeploymentJobThatDoesNotStart(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	failBringUps(n1, func(podid.ID) bool { return false })
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, jobSpec("v1", 1))
+	rel := h.waitDeployment(env.ID, r1, model.DeploymentFailed, 30*time.Second)
+	if rel.Reason != "job migrate failed its last attempt (2 of 2): its container did not start: "+notFound {
+		t.Errorf("reason %q", rel.Reason)
+	}
+	runs, err := h.st.ListJobRuns(bg, env.ID, "migrate", 10)
+	if err != nil || len(runs) != 2 || runs[1].Phase != model.RunFailed || runs[1].ExitCode != nil {
+		t.Fatalf("runs %+v %v", runs, err)
+	}
+}

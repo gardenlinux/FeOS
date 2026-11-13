@@ -421,6 +421,7 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 	// template with the ingress group flag names the row's own group
 	// ing-<id> (model.IngressGroupID) beside the plan's.
 	var id podid.ID
+	var gen int64
 	tmpl := p.template
 	tmpl.Labels = maps.Clone(p.template.Labels)
 	tmpl.SecurityGroups = slices.Clone(p.template.SecurityGroups)
@@ -465,7 +466,7 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 		if err != nil {
 			return err
 		}
-		id = row.ID
+		id, gen = row.ID, row.Gen
 		if _, err := tx.InsertEnvInstance(ctx, store.EnvInstance{SandboxID: id, EnvID: v.env.ID, Kind: p.kind,
 			Object: p.name, Replica: in.replica, TemplateHash: p.hash, Deployment: in.deployment,
 			Phase: model.PhaseStarting}); err != nil {
@@ -494,7 +495,7 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 	c.log.Info("instance inserted", "environment", v.env.ID, "object", p.object(), "replica", in.replica,
 		"sandbox", id, "deployment", in.deployment)
 	if leaderSide {
-		c.ensure(ctx, id)
+		c.ensureThen(ctx, id, c.startFailed(v, id, gen))
 	}
 	return id, nil
 }
@@ -617,19 +618,33 @@ func lostNode(sb store.Sandbox) string {
 	return sb.Node
 }
 
-// heal brings a desired instance's row back up (§4.3): Ensure for a row
-// that is stopped, failed or pending, and for one that is unknown, paused
-// or hibernated when it does not idle (an idle one wakes on traffic; an
-// unknown one may be paused in truth, and the engine's unknown sweep or
-// lost grace finds out without waking it, so that the next pass acts on
-// what it is). It reports whether the row is lost (the caller replaces
-// it, or keeps an addon's).
-func (c *Controller) heal(ctx context.Context, sb store.Sandbox, idles bool) (lost bool) {
-	return c.healThen(ctx, sb, idles, nil)
+// healInstance brings a desired instance's row back up (§4.3) by
+// healThen: a start that failed counts as an exit (startFailed), and a row
+// whose start failed is started again only once its backoff passed
+// (next_restart_at, read anew: the view may predate the count). It
+// reports whether the row is lost (the caller replaces it, or keeps an
+// addon's).
+func (c *Controller) healInstance(ctx context.Context, v *view, r store.EnvInstanceRow, idles bool) (lost bool) {
+	sb := r.Sandbox
+	if sb.Op == "" && sb.ClientState == model.StateFailed {
+		inst := r.Instance
+		if cur, err := c.st.GetEnvInstance(ctx, sb.ID); err == nil {
+			inst = cur
+		}
+		if inst.Phase == model.PhaseFailed && v.now.Before(inst.NextRestartAt) {
+			return false
+		}
+	}
+	return c.healThen(ctx, sb, idles, c.startFailed(v, sb.ID, sb.Gen))
 }
 
-// healThen is heal, with failed called with the error of an Ensure it
-// queued that failed (ensureThen).
+// healThen brings a row back up: Ensure for a row that is stopped, failed
+// or pending, and for one that is unknown, paused or hibernated when it
+// does not idle (an idle one wakes on traffic; an unknown one may be
+// paused in truth, and the engine's unknown sweep or lost grace finds out
+// without waking it, so that the next pass acts on what it is), with
+// failed called with the error of an Ensure it queued that failed
+// (ensureThen). It reports whether the row is lost.
 func (c *Controller) healThen(ctx context.Context, sb store.Sandbox, idles bool, failed func(context.Context, error)) bool {
 	if sb.Op != "" {
 		return false

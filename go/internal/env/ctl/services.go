@@ -66,7 +66,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 	idles := idleOf(svc) > 0
 	// The old keep serving while the new come.
 	for _, r := range old {
-		c.heal(ctx, r.Sandbox, idles)
+		c.healInstance(ctx, v, r, idles)
 	}
 	if !p.ok() {
 		s.wait(objectName(spec.KindService, name), "service %s: %s", name, p.why())
@@ -74,7 +74,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 	}
 	if deploying(v) && (!s.addonsReady || !s.jobsDone) {
 		for _, r := range cur {
-			c.heal(ctx, r.Sandbox, idles)
+			c.healInstance(ctx, v, r, idles)
 		}
 		s.wait(objectName(spec.KindService, name), "service %s waits for the addons and the deploy jobs", name)
 		return
@@ -82,7 +82,7 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 	var lost []store.EnvInstanceRow
 	for _, r := range cur {
 		c.keep(ctx, v, r, p.idle)
-		if c.heal(ctx, r.Sandbox, idles) {
+		if c.healInstance(ctx, v, r, idles) {
 			lost = append(lost, r)
 		}
 	}
@@ -155,8 +155,9 @@ func freeReplicas(rows []store.EnvInstanceRow, n int) []int {
 }
 
 // rolloutFailed fails R when the service's rollout ran past its budget, or
-// when one of its new instances exited 3 times; R's new instances of the
-// service stop, the old keep serving. It reports whether R failed.
+// when one of its new instances exited 3 times (a start that failed counts
+// as an exit); R's new instances of the service stop, the old keep
+// serving. It reports whether R failed.
 func (c *Controller) rolloutFailed(ctx context.Context, s *stepState, name string, svc spec.Service, p *podPlan,
 	cur, old []store.EnvInstanceRow) bool {
 	v := s.v
@@ -179,8 +180,8 @@ func (c *Controller) rolloutFailed(ctx context.Context, s *stepState, name strin
 	var culprit *store.EnvInstanceRow
 	for i, r := range fresh {
 		if len(r.Instance.Exits) >= c.t.crashExits {
-			reason = fmt.Sprintf("service %s: a new instance (replica %d) exited %d times", name, r.Instance.Replica,
-				len(r.Instance.Exits))
+			reason = fmt.Sprintf("service %s: a new instance (replica %d) %s, %s", name, r.Instance.Replica,
+				timesText(r.Instance.Exits), lastText(r.Instance.Exits[len(r.Instance.Exits)-1]))
 			culprit = &fresh[i]
 			break
 		}
