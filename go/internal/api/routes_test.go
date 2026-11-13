@@ -203,6 +203,7 @@ var visitorRouteClasses = map[string]class{
 	"GET /api/v1/visits/{visit}":                     classProvider,
 	"POST /api/v1/visits/end":                        classAuth,
 	"GET /api/v1/oidc-providers/{tenant}/{provider}": classAuth,
+	"GET /api/v1/visit-keys":                         classPublic,
 }
 
 // oidcRoutes exist only with OIDC.

@@ -1279,7 +1279,7 @@ The routes, bodies, status codes and texts are the sandbox system's;
 | forward | `/fwd/…`, `/api/v1/sandboxes/{id}/ports/…` | the sandbox's token in `Authorization` alone ([ports](#ports)) |
 | route | `/api/v1/environments/{env}/http/…` | a route token of the environment ([the route door](#the-route-door)) |
 | service | `POST /api/v1/service-certificates` | a service token of kind `sink` ([The sink](#the-sink)) |
-| public | `/healthz`, `/readyz`, `/auth/…`, the UI | none |
+| public | `/healthz`, `/readyz`, `/auth/…`, the UI, `GET /api/v1/visit-keys` ([Visitors](#visitors)) | none |
 
 A tenant's token is not accepted on a sandbox route, not even for its own
 sandbox (the forward class answers it 401 "forwarding needs a sandbox
@@ -3824,7 +3824,11 @@ so that a copy of the database signs nothing; and `visit-challenge`, the
 AES-256 key the ingress seals challenges with, in plaintext, since every
 ingress holds it. The ingress gets the token key's public half and the
 challenge key in its table (`visitKeys`); `GET /.ferun/keys` on any host
-publishes the first as a JWKS. They do not rotate yet.
+publishes the first as a JWKS, and so does `ferund` at `GET
+/api/v1/visit-keys` (public, `Cache-Control: public, max-age=300`, 404
+without visits as every visitors route), for the providers that verify
+its questions. The token key signs the tokens, the codes and the
+questions. They do not rotate yet.
 
 **The access** is `environments.access` (`anyone` | `visitors`) and
 `access_provider` (with `visitors` the tenant's provider; NULL the
@@ -3943,8 +3947,8 @@ visit`), never 403.
   holds the visit.
 - **The provider's call** (kind `tenant`, at a renewal): `POST <url>`
   with `{"visit": "<id>"}`, `Content-Type` and `Accept`
-  `application/json`, `User-Agent: ferund-visit`, no credential, no
-  cookie; https only, IPv4, every connect judged by `--deny-prefix`'s
+  `application/json`, `User-Agent: ferund-visit`, `Authorization: Bearer
+  <ask>` and no other credential, no cookie; https only, IPv4, every connect judged by `--deny-prefix`'s
   rule, no redirect followed, 3 s for everything, at most 64 KiB read,
   never inside a transaction and on a context of its own. Only status
   200 with `{"admitted": false}` is a no, which ends the visit
@@ -3954,6 +3958,21 @@ visit`), never 403.
   clock, whichever instance renews), and its token never outlives the
   last asking by more than 15 minutes; kind `ferun` has its grant looked
   up at every renewal; kind `oidc` is asked nothing.
+- **The ask** is ferund's signature on the question, since a visit's ID
+  is no secret (a token and a code name it): a JWT signed with the token
+  key, header `{"alg":"EdDSA","typ":"ferun-ask+jwt","kid":"<the token
+  key's ID>"}`, claims `{"iss":"ferun","aud":"<the provider's url
+  exactly as stored>","vid":"<visit>","iat","exp":iat+60,"jti":"<22
+  characters, 16 random bytes>"}`, base64url without padding. The
+  provider answers only an ask that verifies against `GET
+  /api/v1/visit-keys`: a Bearer of at most 4096 characters, `alg`,
+  `typ` and a known `kid`, the signature, `iss` `ferun`, `aud` its own
+  address, `vid` the body's visit, `exp` > now − 60 s, `iat` < now +
+  60 s and `exp − iat` ≤ 300 s; anything else is 401 before any lookup.
+  It caches the keys, refetching them every hour and, at most once a
+  minute, when a `kid` is unknown.
+  A replay within the minute asks the same question again: no `jti` is
+  kept. Its refusal is no answer here, which keeps the visit.
 - **A token** is a JWT of 15 minutes (`typ` `ferun-visit+jwt`, `iss`
   `ferun`, `aud` the environment's ID, `vid`, `sub`, `hst`, `prv`,
   `email`, `name`, `vbnd`, `vend`), at most to the visit's end. `vbnd` is

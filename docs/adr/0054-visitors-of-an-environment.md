@@ -155,11 +155,13 @@ tenants name.
   token past its end counts until its visit's end. What was admitted
   stays admitted while the control plane is away, and nobody new is.
 - The keys are two, shared by every `ferund` instance and made once:
-  one signs the visits' tokens and the codes, and is kept sealed with
-  the installation's secret key, so that a copy of the database signs
-  nothing; the other seals the challenges. The ingress gets the public
-  half of the first and the second in its table, apart from any
-  environment, and keeps them in its cache. They do not rotate yet.
+  one signs the visits' tokens, the codes and `ferund`'s questions to a
+  provider, and is kept sealed with the installation's secret key, so
+  that a copy of the database signs nothing; the other seals the
+  challenges. The ingress gets the public half of the first and the
+  second in its table, apart from any environment, and keeps them in
+  its cache; `ferund` publishes the public half of the first for
+  providers. They do not rotate yet.
 - The visit's cookie holds, beside the token, a secret that only the
   browser holds and whose hash `ferund` keeps; a renewal and a sign-out
   need it. The token the application receives is not the cookie, and
@@ -184,11 +186,14 @@ tenants name.
 - Kind **`tenant`**: the tenant's own service at an address. It reads,
   accepts and rejects challenges with a token of the tenant that
   administers the environment. At a renewal `ferund` calls the same
-  address and names the visit: a POST of `{"visit": "<id>"}`, without a
-  credential and following no redirect; the answer `{"admitted": false}`
-  is a no, every other answer, or none, is no answer; the service reads
-  the visit as it reads a challenge, with its environment, subject and
-  session, and answers yes or no. `ferund` dials that address as it dials a binding's
+  address, names the visit and signs the question with the key of its
+  tokens, whose public part it publishes: a POST of `{"visit": "<id>"}`
+  that carries the signature for that address and that visit as its
+  bearer, following no redirect. The service answers only a question
+  `ferund` signed, since a visit's ID is no secret; the answer
+  `{"admitted": false}` is a no, every other answer, or none, is no
+  answer; the service reads the visit as it reads a challenge, with its
+  environment, subject and session, and answers yes or no. `ferund` dials that address as it dials a binding's
   upstream for a preflight (ADR 0028): never an address of the
   cluster's or the nodes' networks. FeRun signs nobody in and knows
   nothing of the service's people; nothing is kept in step between the
@@ -325,8 +330,9 @@ tenants name.
   environments of the kinds it serves, never to those whose rule is a
   grant without one, and read their issuers' client secrets.
 - A platform on FeRun serves one address, for the browser with a
-  challenge and for `ferund` with a visit, and reads and answers both
-  at the API. It tells FeRun nothing when a membership ends.
+  challenge and for `ferund` with a visit, reads and answers both at
+  the API, and checks `ferund`'s signature on the second against the
+  key `ferund` publishes. It tells FeRun nothing when a membership ends.
 - A removed member stays for up to 16 minutes. While their provider or
   `ferund` is away they stay until one is back, to the visit's end at
   most; an application's visitors are not turned away because the
@@ -363,3 +369,10 @@ the issuer and client it began with (no OAuth mix-up between issuers); a
 frame of the page from another host of the site is no visit; and a
 visitor stays up to 16 minutes, not 15, after their provider would no
 longer admit them.
+
+Refined the same day after another review: `ferund` signs its question
+to a provider of kind `tenant`, for the provider's address and the
+visit, with the key of its tokens, and publishes the key; the provider
+answers only a question `ferund` signed. A visit's ID is in its token
+and its code, so a question anyone could ask would let a removed member
+take the service's answers and keep their visit to its end.

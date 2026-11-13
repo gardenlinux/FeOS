@@ -38,7 +38,9 @@
 //	route     /api/v1/environments/{env}/http/…
 //	                                     the route door's own class: a route token
 //	                                     of the environment (internal/env)
-//	public    /healthz, /readyz, /auth/…, the UI
+//	public    /healthz, /readyz, /auth/…, the UI, /api/v1/visit-keys
+//	                                     (the key of ferund's questions to a
+//	                                     provider, ADR 0054)
 //
 // The two token classes stay apart: a tenant's token is not accepted on a
 // sandbox route, not even for a sandbox the tenant owns (the forward class
@@ -190,6 +192,7 @@ type Visitors interface {
 	GetVisit(ctx context.Context, c visits.Caller, id string) (visits.Visit, error)
 	EndBySession(ctx context.Context, in visits.EndSession) (int, error)
 	OIDCProvider(ctx context.Context, tenant, name string) (visits.OIDCProvider, error)
+	JWKS(ctx context.Context) ([]byte, error)
 }
 
 // Ingress is the ingress's identity service (*ingress/service.Service,
@@ -595,7 +598,7 @@ func (s *server) routes() []route {
 	// Visitors (ADR 0054): the tenant's access providers, the challenges
 	// and visits their providers answer and read, and ferun-auth's own
 	// routes; only with the visits service (--secret-key-file).
-	s.visitorRoutes(tenant, add)
+	s.visitorRoutes(tenant, add, public)
 
 	// People (ADR 0031): the tenants they make, the members, their
 	// grants, invitations and tokens; the operators' switch of a person.

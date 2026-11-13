@@ -82,6 +82,16 @@ func (f *fakeVisitors) count() int {
 
 func (f *fakeVisitors) Kinds() []string { return []string{model.ProviderKindTenant} }
 
+// fakeJWKS is the fake's JWKS.
+const fakeJWKS = `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"x","kid":"k","alg":"EdDSA","use":"sig"}]}`
+
+func (f *fakeVisitors) JWKS(context.Context) ([]byte, error) {
+	if err := f.record(visitorCall{method: "JWKS"}); err != nil {
+		return nil, err
+	}
+	return []byte(fakeJWKS), nil
+}
+
 func (f *fakeVisitors) ListProviders(_ context.Context, tenant string) (visits.ProviderList, error) {
 	if err := f.record(visitorCall{method: "ListProviders", tenant: tenant}); err != nil {
 		return visits.ProviderList{}, err
@@ -575,4 +585,27 @@ func TestVisitorAnswerShape(t *testing.T) {
 	if _, ok := got["oidc"]; ok {
 		t.Errorf("oidc without one: %s", resp.Body.String())
 	}
+}
+
+// GET /api/v1/visit-keys answers the token key as the visits service has
+// it, to anyone, cacheable for 5 minutes; a failure of the service is its
+// answer.
+func TestVisitKeys(t *testing.T) {
+	t.Parallel()
+	f := &fakeVisitors{}
+	e := newEnv(t, envOptions{visitors: f})
+	for _, authz := range []string{"", bearerOf(e.tenantToken), bearerOf("feos-auth-x")} {
+		w := e.do("GET", "/api/v1/visit-keys", authz, nil)
+		expect(t, w, http.StatusOK, fakeJWKS)
+		if w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "public, max-age=300" {
+			t.Fatalf("headers %v", w.Header())
+		}
+	}
+	if c := f.last(t); c.method != "JWKS" {
+		t.Fatalf("call %+v", c)
+	}
+	f.mu.Lock()
+	f.err = apierr.New(http.StatusInternalServerError, "the visits service failed")
+	f.mu.Unlock()
+	expect(t, e.do("GET", "/api/v1/visit-keys", "", nil), http.StatusInternalServerError, errBody("the visits service failed"))
 }

@@ -35,7 +35,7 @@ const maxVisitorBody = 64 << 10
 // service: without it (ferund without --secret-key-file) they fall to the
 // /api/ catch-all, 404 no such route.
 func (s *server) visitorRoutes(tenant func(n need, pattern string, h apiHandler),
-	add func(c class, pattern string, h http.Handler)) {
+	add func(c class, pattern string, h http.Handler), public func(pattern string, h http.Handler)) {
 	v := s.deps.Visitors
 	if vs, ok := v.(*visits.Service); v == nil || (ok && vs == nil) {
 		return
@@ -56,6 +56,10 @@ func (s *server) visitorRoutes(tenant func(n need, pattern string, h apiHandler)
 	provider("POST /api/v1/challenges/accept", s.acceptChallenge)
 	provider("POST /api/v1/challenges/reject", s.rejectChallenge)
 	provider("GET /api/v1/visits/{visit}", s.getVisit)
+
+	// The key ferund signs its questions to the providers of kind tenant
+	// with, for them to verify: public, as the ingress's /.ferun/keys.
+	public("GET /api/v1/visit-keys", s.wrap(s.visitKeys))
 
 	// ferun-auth's own: an issuer's back-channel logout.
 	authOnly("POST /api/v1/visits/end", s.endVisits)
@@ -253,4 +257,18 @@ func (s *server) oidcProvider(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, p)
+}
+
+// visitKeys answers the token key as a JWKS (GET /api/v1/visit-keys), the
+// document the ingress serves at /.ferun/keys: a provider of kind tenant
+// verifies ferund's signed questions with it (ADR 0054).
+func (s *server) visitKeys(w http.ResponseWriter, r *http.Request) error {
+	jwks, err := s.deps.Visitors.JWKS(r.Context())
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	_, _ = w.Write(jwks)
+	return nil
 }

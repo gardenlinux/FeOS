@@ -499,7 +499,8 @@ func TestRenew(t *testing.T) {
 		t.Fatalf("%d asks", f.prov.count())
 	}
 
-	// 7:59 after the ask: no call; 8:01: one, with nothing but the visit.
+	// 7:59 after the ask: no call; 8:01: one, with nothing but the visit
+	// and the question signed for the provider's address and that visit.
 	f.exec("UPDATE visits SET asked_at = now() - interval '7 minutes 59 seconds' WHERE id = $1", vid)
 	if r := f.renew(tok, secret); r.Outcome != wire.OutcomeRenewed || f.prov.count() != 0 {
 		t.Fatalf("7:59: %+v, %d asks", r, f.prov.count())
@@ -513,9 +514,20 @@ func TestRenew(t *testing.T) {
 	h, body := f.prov.header, f.prov.body
 	f.prov.mu.Unlock()
 	if body != `{"visit":"`+vid.String()+`"}` || h.Get("Content-Type") != "application/json" ||
-		h.Get("Accept") != "application/json" || h.Get("User-Agent") != "ferund-visit" || h.Get("Authorization") != "" ||
-		h.Get("Cookie") != "" {
+		h.Get("Accept") != "application/json" || h.Get("User-Agent") != "ferund-visit" || h.Get("Cookie") != "" {
 		t.Fatalf("the ask: %s %v", body, h)
+	}
+	jwks, err := visit.ParseJWKS(f.keys().JWKS())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer, ok := strings.CutPrefix(h.Get("Authorization"), "Bearer ")
+	if !ok {
+		t.Fatalf("the ask's Authorization %q", h.Get("Authorization"))
+	}
+	if a, err := visit.VerifyAsk(bearer, jwks, f.prov.url(), vid.String(), time.Now()); err != nil ||
+		a.Expires-a.IssuedAt != 60 || len(a.ID) != 22 {
+		t.Fatalf("the ask's question %+v: %v", a, err)
 	}
 	next, err := f.keys().VerifyToken(r.Token)
 	if err != nil || next.Binding != visit.BindingHash(secret) || next.Visit != vid.String() {

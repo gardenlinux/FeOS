@@ -96,7 +96,7 @@ describe("a provider's page", () => {
   it("shows a service's address and how it is asked, Edit and Delete for the tenant's admin", () => {
     const out = page(FECODE);
     expect(text(out)).toContain('address https://fecode.dev/api/v1/visit');
-    expect(text(out)).toContain('a POST of the visit\'s ID, no credential');
+    expect(text(out)).toContain('a POST of the visit\'s ID, signed by ferund (its key at /api/v1/visit-keys)');
     expect(out).toContain('href="/tenants/acme/providers/fecode/edit"');
     expect(out).toContain('Delete provider');
     const read = page(FECODE, {}, ME('read'));

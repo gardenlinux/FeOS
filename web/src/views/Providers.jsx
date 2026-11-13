@@ -267,7 +267,7 @@ export function ProviderDefinition({ p }) {
   }
   if (p.kind === 'tenant') {
     rows.push(['address', <span className="mono cred-up">{p.url}</span>]);
-    rows.push(['asked', 'with each renewal of a visit, at most once in 8 minutes: a POST of the visit\'s ID, no credential']);
+    rows.push(['asked', 'with each renewal of a visit, at most once in 8 minutes: a POST of the visit\'s ID, signed by ferund (its key at /api/v1/visit-keys)']);
   }
   if (p.kind === 'oidc') {
     rows.push(['issuer', <span className="mono cred-up">{p.issuer}</span>]);

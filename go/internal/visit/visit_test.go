@@ -158,13 +158,13 @@ func TestJWTRefusals(t *testing.T) {
 	}
 	// Claims that miss a field do not verify, even signed by the key.
 	missing := []byte(`{"iss":"ferun","sub":"u","aud":"e","vid":"v","hst":"h","prv":"p","iat":1,"exp":2,"vend":3}`)
-	input := k.header(TypToken) + "." + enc(missing)
+	input := encodeHeader(TypToken, k.tokenKID) + "." + enc(missing)
 	forged := input + "." + enc(ed25519.Sign(k.priv, []byte(input)))
 	if _, err := k.VerifyToken(forged); !errors.Is(err, ErrMalformed) {
 		t.Errorf("claims without vbnd: %v", err)
 	}
 	wrongIss := []byte(`{"iss":"other","sub":"u","aud":"e","vid":"v","hst":"h","prv":"p","vbnd":"b","iat":1,"exp":2,"vend":3}`)
-	input = k.header(TypToken) + "." + enc(wrongIss)
+	input = encodeHeader(TypToken, k.tokenKID) + "." + enc(wrongIss)
 	if _, err := k.VerifyToken(input + "." + enc(ed25519.Sign(k.priv, []byte(input)))); !errors.Is(err, ErrMalformed) {
 		t.Errorf("another iss: %v", err)
 	}

@@ -184,6 +184,17 @@ func (s *Service) Keys(ctx context.Context) (*visit.Keys, error) {
 	return keys, nil
 }
 
+// JWKS is the token key's public half as a JWKS, the document the
+// ingress serves at /.ferun/keys: what a provider of kind tenant verifies
+// ferund's questions with (GET /api/v1/visit-keys).
+func (s *Service) JWKS(ctx context.Context) ([]byte, error) {
+	keys, err := s.Keys(ctx)
+	if err != nil {
+		return nil, s.failed("the keys", err)
+	}
+	return keys.JWKS(), nil
+}
+
 // clusterSecret reads the cluster secret name, making it when it is
 // missing from 32 random bytes as stored makes them stored.
 func (s *Service) clusterSecret(ctx context.Context, name string, stored func([]byte) ([]byte, error)) ([]byte, error) {

@@ -735,7 +735,7 @@ the ingress, never routed, woken or counted:
 | `/.ferun/auth?code=<code>` | GET | a provider's answer: the code is checked and redeemed (below) |
 | `/.ferun/sign-out` | GET | a page with one button, a POST form to `/.ferun/sign-out` |
 | `/.ferun/sign-out` | POST | ends the visit: an `Origin` that is present must be `https://<host>` and a `Sec-Fetch-Site` that is present `same-origin`, else 403 "cross-site sign-out refused"; then `EndVisit` (2 s, an error ignored), the visit's live connections on this instance closed, the visit remembered as ended until its end, the cookie cleared, 200 "You are signed out of <host>." |
-| `/.ferun/keys` | GET | the token key as a JWKS, `Cache-Control: public, max-age=300`; 404 without keys |
+| `/.ferun/keys` | GET | the token key as a JWKS, `Cache-Control: public, max-age=300`, the document `ferund` serves at `GET /api/v1/visit-keys`; 404 without keys |
 | anything else | any | 404 "no such path" |
 
 Every answer there but the keys carries `Cache-Control: no-store` and
@@ -1648,7 +1648,7 @@ open question.
 | The visits' keys missing from the table | A guarded environment admits nobody: 503 for a navigation, 401 for the rest. | until the table has them |
 | An older ingress behind a `ferund` with visits | Its Hello names no capability: `ferund` gives it no guarded environment, whose hosts it answers 404. Downgraded on the same volume, it finds no `table.json` and serves nothing until it synced. | until it is rolled |
 | An older `ferund` instance during a roll | It ignores `access` and gives a guarded environment open to the ingresses on its streams: no provider is made and no environment set `visitors` until every instance runs the new release ([control-plane.md](control-plane.md#visitors)). | the roll |
-| A provider that does not answer | Its visits get their next token and are asked again at the next renewal, up to their end: only its explicit no ends a visit. | 12 hours at most |
+| A provider that does not answer | Its visits get their next token and are asked again at the next renewal, up to their end: only its explicit no ends a visit. A refusal of `ferund`'s signed question (401, a provider that cannot fetch the keys: 503) is no answer too. | 12 hours at most |
 | `ferund` rolls | Stopping instances refuse new ingress connections and end their streams; older instances close the ALPN; the 5 s backstop covers their writes. | seconds |
 | An ingress instance restarts or crashes | Kubernetes takes it out of the endpoints by readiness; its worker's share of new connections waits until it is ready again, since the balancer sends every worker its share and `Local` keeps a worker to its own instance (the clients' SYN retries bridge it), and the other instances serve the other workers' shares. Its identity and /96 persist; its new pod address reaches the nodes through Hello and `mesh-peers`. It serves the cache at once and is ready once the nodes' handshakes are fresh. A crash leaves its holds to lapse (30 s), and without `left_at` the fence keeps public services awake for up to 15 minutes. | its worker's share waits for it, about 20 s |
 | A force-deleted ingress pod | Two processes may use one key and address, and WireGuard flaps between their endpoints. | until one dies |

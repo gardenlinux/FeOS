@@ -6,6 +6,7 @@ package e2e
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
@@ -123,7 +124,8 @@ func providerCert(t *testing.T) tls.Certificate {
 // /visit?challenge=… is the browser sent to sign in, which it opens and
 // accepts at ferund with the tenant's token and sends on to ferund's
 // redirect; POST /visit {"visit"} is ferund asking at a renewal, which it
-// answers with admit.
+// answers with admit when ferund signed the question for its address and
+// that visit (against ferund's GET /api/v1/visit-keys), and 401 when not.
 type tenantService struct {
 	c   *cluster
 	srv *httptest.Server
@@ -133,10 +135,12 @@ type tenantService struct {
 
 	mu       sync.Mutex
 	admit    bool
+	keys     map[string]ed25519.PublicKey // ferund's, fetched at the first ask
 	signIns  int
 	visits   []string // the visits it accepted
-	asks     []string // the visits ferund asked about
-	askAuth  []string // the asks' Authorization headers
+	asks     []string // the visits ferund asked about, verified
+	askAuth  []string // the verified asks' Authorization headers
+	refused  []string // the asks it refused, and why
 	failures []string
 }
 
@@ -168,6 +172,13 @@ func (s *tenantService) serve(w http.ResponseWriter, r *http.Request) {
 			Visit string `json:"visit"`
 		}
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&in)
+		if err := s.verify(r, in.Visit); err != nil {
+			s.mu.Lock()
+			s.refused = append(s.refused, err.Error())
+			s.mu.Unlock()
+			http.Error(w, "the question is not ferund's", http.StatusUnauthorized)
+			return
+		}
 		s.mu.Lock()
 		s.asks = append(s.asks, in.Visit)
 		s.askAuth = append(s.askAuth, r.Header.Get("Authorization"))
@@ -227,19 +238,81 @@ func (s *tenantService) serve(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, ans.Redirect, http.StatusSeeOther)
 }
 
+// verify checks an ask as FeCode does: a Bearer that visit.VerifyAsk
+// takes with ferund's keys, for this service's address and the body's
+// visit.
+func (s *tenantService) verify(r *http.Request, visitID string) error {
+	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return fmt.Errorf("no bearer: %q", r.Header.Get("Authorization"))
+	}
+	s.mu.Lock()
+	keys := s.keys
+	s.mu.Unlock()
+	if keys == nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		got, err := s.c.callErr(ctx, nil, "GET", "/api/v1/visit-keys", "", "")
+		if err != nil || got.code != http.StatusOK || got.header.Get("Cache-Control") != "public, max-age=300" {
+			return fmt.Errorf("the keys: %d %s (%v)", got.code, got.body, err)
+		}
+		if keys, err = visit.ParseJWKS([]byte(got.body)); err != nil {
+			return fmt.Errorf("the keys %s: %w", got.body, err)
+		}
+		s.mu.Lock()
+		s.keys = keys
+		s.mu.Unlock()
+	}
+	if _, err := visit.VerifyAsk(raw, keys, s.url, visitID, time.Now()); err != nil {
+		return fmt.Errorf("the question: %w", err)
+	}
+	return nil
+}
+
+// askAs posts an ask to the service as anyone could: the visit, and
+// authz as the Authorization header ("" none); it answers the status.
+func (s *tenantService) askAs(visitID, authz string) int {
+	s.c.t.Helper()
+	roots := x509.NewCertPool()
+	roots.AddCert(providerCA.cert)
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}}}
+	defer client.CloseIdleConnections()
+	req, err := http.NewRequest("POST", s.url, strings.NewReader(`{"visit":"`+visitID+`"}`))
+	if err != nil {
+		s.c.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if authz != "" {
+		req.Header.Set("Authorization", authz)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		s.c.t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
 func (s *tenantService) setAdmit(admit bool) {
 	s.mu.Lock()
 	s.admit = admit
 	s.mu.Unlock()
 }
 
-// state is what the service saw: its sign-ins, its visits, ferund's asks
-// with their Authorization headers, and its failures.
+// state is what the service saw: its sign-ins, its visits, ferund's
+// verified asks with their Authorization headers, and its failures.
 func (s *tenantService) state() (signIns int, visits, asks, askAuth, failures []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.signIns, append([]string(nil), s.visits...), append([]string(nil), s.asks...),
 		append([]string(nil), s.askAuth...), append([]string(nil), s.failures...)
+}
+
+// refusals are the asks the service refused, and why.
+func (s *tenantService) refusals() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.refused...)
 }
 
 // browser is a browser of the test's: a cookie jar, the apps zone's hosts
@@ -362,9 +435,11 @@ func wantApp(t *testing.T, what string, p page, host string) {
 // visit cookie and sends it on to the page: the app gets the visitor's
 // headers and none of the ingress's cookies. A request that is no
 // navigation without a visit gets 401. A renewal past the 8 minutes since
-// the last asking asks the service, without a credential: its yes renews,
-// its no ends the visit, and the next navigation goes to the service
-// again. Signing out ends the visit.
+// the last asking asks the service, the question signed for its address
+// and the visit with the key ferund publishes at /api/v1/visit-keys: its
+// yes renews, its no ends the visit, and the next navigation goes to the
+// service again. A question nobody signed, or ferund's for another visit,
+// the service refuses. Signing out ends the visit.
 func TestVisitorsOfATenantService(t *testing.T) {
 	t.Parallel()
 	key := make([]byte, 32)
@@ -452,8 +527,25 @@ func TestVisitorsOfATenantService(t *testing.T) {
 	c.sql(`UPDATE visits SET asked_at = now() - interval '9 minutes' WHERE id = $1`, vid)
 	wantApp(t, "after a yes", br.do("GET", home, "navigate", true, nil), host)
 	_, _, asks, askAuth, _ := svc.state()
-	if len(asks) != 1 || asks[0] != vid || askAuth[0] != "" {
-		t.Fatalf("asks %v, their Authorization %q", asks, askAuth)
+	if len(asks) != 1 || asks[0] != vid || !strings.HasPrefix(askAuth[0], "Bearer ") || len(svc.refusals()) != 0 {
+		t.Fatalf("asks %v, their Authorization %q, refused %v", asks, askAuth, svc.refusals())
+	}
+	// A question nobody signed, or ferund's about another visit, is
+	// refused before it is answered.
+	for name, authz := range map[string]string{"unsigned": "", "a token's": "Bearer x.y.z", "another visit's": askAuth[0]} {
+		other := vid
+		if name == "another visit's" {
+			other = "00000000-0000-4000-8000-0000000000a2"
+		}
+		if code := svc.askAs(other, authz); code != http.StatusUnauthorized {
+			t.Fatalf("an ask %s: %d", name, code)
+		}
+	}
+	if refused := svc.refusals(); len(refused) != 3 {
+		t.Fatalf("refused %v", refused)
+	}
+	if _, _, asks, _, _ := svc.state(); len(asks) != 1 {
+		t.Fatalf("asks %v", asks)
 	}
 	if n := c.count(`SELECT count(*) FROM visits WHERE id = $1 AND asked_at > now() - interval '1 minute'`, vid); n != 1 {
 		t.Fatal("the ask was not recorded")
@@ -497,7 +589,7 @@ func TestVisitorsOfATenantService(t *testing.T) {
 	if loc := pg.header.Get("Location"); pg.code != http.StatusSeeOther || !strings.HasPrefix(loc, svc.url+"?challenge=") {
 		t.Fatalf("after the sign-out: %d %v", pg.code, pg.header)
 	}
-	if _, _, _, _, failures := svc.state(); len(failures) != 0 {
-		t.Fatalf("the service failed: %v", failures)
+	if _, _, _, _, failures := svc.state(); len(failures) != 0 || len(svc.refusals()) != 3 {
+		t.Fatalf("the service failed: %v; refused %v", failures, svc.refusals())
 	}
 }

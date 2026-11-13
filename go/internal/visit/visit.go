@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package visit is the format of ADR 0054's visits, shared by ferund and
-// the ingress: the sealed challenge, the visit's token and the code, the
+// the ingress: the sealed challenge, the visit's token and the code,
+// ferund's signed question to a provider of kind tenant (the ask), the
 // cookies' and headers' names, and the JWKS of the token's key. It imports
 // nothing but the standard library.
 package visit

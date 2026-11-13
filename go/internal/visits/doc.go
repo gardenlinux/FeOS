@@ -9,8 +9,10 @@
 // Ed25519 seed sealed with --secret-key-file; visit-challenge, the AES-256
 // key), made on first use, so visits run only with a sealer. A provider of
 // kind tenant is the tenant's own service, which ferund asks at a visit's
-// renewal, at most every visit.AskEvery and never inside a transaction;
-// kinds ferun and oidc are served by ferun-auth (--visitor-auth-url).
+// renewal, at most every visit.AskEvery and never inside a transaction,
+// the question signed with the token key (visit.SignAsk; its public half
+// at GET /api/v1/visit-keys); kinds ferun and oidc are served by
+// ferun-auth (--visitor-auth-url).
 //
 // The files: visits.go the service, its keys and its sweep (the leader's
 // loop visits-sweep); providers.go a tenant's providers; challenges.go

@@ -71,9 +71,22 @@ type jwtHeader struct {
 	Typ string `json:"typ"`
 }
 
-// header is the encoded header of a JWT of typ under k.
-func (k *Keys) header(typ string) string {
-	b, _ := json.Marshal(jwtHeader{Alg: "EdDSA", Kid: k.tokenKID, Typ: typ})
+// askHeader is an ask's protected header, in the order of its contract
+// (ADR 0054): alg, typ, kid.
+type askHeader struct {
+	Alg string `json:"alg"`
+	Typ string `json:"typ"`
+	Kid string `json:"kid"`
+}
+
+// encodeHeader is the encoded header of a JWT of typ under the key kid.
+func encodeHeader(typ, kid string) string {
+	var b []byte
+	if typ == TypAsk {
+		b, _ = json.Marshal(askHeader{Alg: "EdDSA", Typ: typ, Kid: kid})
+	} else {
+		b, _ = json.Marshal(jwtHeader{Alg: "EdDSA", Kid: kid, Typ: typ})
+	}
 	return b64.EncodeToString(b)
 }
 
@@ -96,7 +109,7 @@ func (k *Keys) SignToken(t Token) (string, error) {
 // VerifyToken checks a token and returns its claims.
 func (k *Keys) VerifyToken(raw string) (Token, error) {
 	var t Token
-	if err := k.verify(raw, TypToken, TypCode, &t); err != nil {
+	if err := k.verify(raw, TypToken, &t); err != nil {
 		return Token{}, err
 	}
 	if !t.complete() {
@@ -119,7 +132,7 @@ func (k *Keys) SignCode(c Code) (string, error) {
 // VerifyCode checks a code and returns its claims.
 func (k *Keys) VerifyCode(raw string) (Code, error) {
 	var c Code
-	if err := k.verify(raw, TypCode, TypToken, &c); err != nil {
+	if err := k.verify(raw, TypCode, &c); err != nil {
 		return Code{}, err
 	}
 	if !c.complete() {
@@ -141,7 +154,7 @@ func (k *Keys) sign(typ string, claims any) (string, error) {
 		return "", fmt.Errorf("visit: code the claims: %w", err)
 	}
 	payload := bytes.TrimSuffix(js.Bytes(), []byte("\n"))
-	input := k.header(typ) + "." + b64.EncodeToString(payload)
+	input := encodeHeader(typ, k.tokenKID) + "." + b64.EncodeToString(payload)
 	jwt := input + "." + b64.EncodeToString(ed25519.Sign(k.priv, []byte(input)))
 	if len(jwt) > MaxJWT {
 		return "", fmt.Errorf("visit: the JWT takes %d characters, more than %d: %w", len(jwt), MaxJWT, ErrMalformed)
@@ -149,9 +162,16 @@ func (k *Keys) sign(typ string, claims any) (string, error) {
 	return jwt, nil
 }
 
-// verify checks raw as a JWT of typ (other is the other type, ErrType)
-// and decodes its claims into v.
-func (k *Keys) verify(raw, typ, other string, v any) error {
+// verify checks raw as a JWT of typ under k's key and decodes its claims
+// into v.
+func (k *Keys) verify(raw, typ string, v any) error {
+	return verifyJWT(raw, typ, map[string]ed25519.PublicKey{k.tokenKID: k.pub}, v)
+}
+
+// verifyJWT checks raw as a JWT of typ (one of this package's other types
+// is ErrType) signed by one of keys, by kid, and decodes its claims into
+// v.
+func verifyJWT(raw, typ string, keys map[string]ed25519.PublicKey, v any) error {
 	if len(raw) == 0 || len(raw) > MaxJWT {
 		return ErrMalformed
 	}
@@ -169,23 +189,24 @@ func (k *Keys) verify(raw, typ, other string, v any) error {
 	}
 	switch h.Typ {
 	case typ:
-	case other:
+	case TypToken, TypCode, TypAsk:
 		return ErrType
 	default:
 		return ErrMalformed
 	}
-	if h.Kid != k.tokenKID {
+	pub, ok := keys[h.Kid]
+	if !ok {
 		return ErrUnknownKey
 	}
 	// Only the header this package writes: nothing else in it.
-	if parts[0] != k.header(typ) {
+	if parts[0] != encodeHeader(typ, h.Kid) {
 		return ErrMalformed
 	}
 	sig, err := b64.DecodeString(parts[2])
 	if err != nil || len(sig) != ed25519.SignatureSize {
 		return ErrMalformed
 	}
-	if !ed25519.Verify(k.pub, []byte(parts[0]+"."+parts[1]), sig) {
+	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
 		return ErrSignature
 	}
 	payload, err := b64.DecodeString(parts[1])
