@@ -16,6 +16,7 @@
 //	          /api/v1/tools              pause, resume, groups, tokens, access; the
 //	          /api/v1/environments[/…]   environments (ADR 0018) but their door;
 //	          /api/v1/domains[/…]        the domains (ADR 0021)
+//	          /api/v1/providers[/…]      the tenant's access providers (ADR 0054)
 //	          /api/v1/jobs[/…]           the tenants' jobs (ADR 0018)
 //	          /api/v1/tenant             the token's tenant (the sink asks, ADR 0026)
 //	          /api/v1/tenant/…           leaving it, its members and their grants,
@@ -24,7 +25,6 @@
 //	                                     acts inside the sandbox
 //	mcp       /mcp                       the MCP door's own class (internal/mcpsrv)
 //	forward   /fwd/…, …/ports/…          the port door's own class (internal/ports)
-//	          /api/v1/providers[/…]      the tenant's access providers (ADR 0054)
 //	service   /api/v1/service-certificates
 //	                                     a service token (ADR 0026): the sink's
 //	                                     certificates

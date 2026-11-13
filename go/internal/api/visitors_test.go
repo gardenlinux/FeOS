@@ -49,6 +49,10 @@ type fakeVisitors struct {
 	err       error
 	providers map[string]visits.Provider
 	version   int
+	// sameSecond: a write keeps UpdatedAt (two writes in one second);
+	// getErr: GetProvider fails.
+	sameSecond bool
+	getErr     bool
 }
 
 func (f *fakeVisitors) record(c visitorCall) error {
@@ -92,6 +96,9 @@ func (f *fakeVisitors) GetProvider(_ context.Context, tenant, name string) (visi
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getErr {
+		return visits.Provider{}, apierr.New(http.StatusInternalServerError, "the visits service failed")
+	}
 	p, ok := f.providers[tenant+"/"+name]
 	if !ok {
 		return visits.Provider{}, apierr.New(http.StatusNotFound, "no such provider")
@@ -113,7 +120,9 @@ func (f *fakeVisitors) PutProvider(_ context.Context, tenant, name string, in vi
 	if ok && old.Kind == in.Kind && old.URL == in.URL {
 		return old, false, nil
 	}
-	f.version++
+	if !f.sameSecond {
+		f.version++
+	}
 	p := visits.Provider{Name: name, Kind: in.Kind, URL: in.URL, Environments: []visits.EnvRef{},
 		CreatedAt: old.CreatedAt, UpdatedAt: fmt.Sprintf("v%d", f.version)}
 	if !ok {
@@ -436,6 +445,34 @@ func TestProviderRoutes(t *testing.T) {
 		http.StatusOK, "")
 	if rows("access_provider_put") != 2 {
 		t.Fatal("no activity row for the change")
+	}
+	// A change within the second of the one before (updated_at the
+	// same) is a change all the same.
+	fv.mu.Lock()
+	fv.sameSecond = true
+	fv.mu.Unlock()
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://third.example.test/v"}`),
+		http.StatusOK, "")
+	if rows("access_provider_put") != 3 {
+		t.Fatal("no activity row for a change in the same second")
+	}
+	fv.mu.Lock()
+	fv.sameSecond = false
+	fv.getErr = true
+	fv.mu.Unlock()
+	// The pre-read failed and nothing changed: no row.
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://third.example.test/v"}`),
+		http.StatusOK, "")
+	fv.mu.Lock()
+	fv.getErr = false
+	fv.mu.Unlock()
+	if rows("access_provider_put") != 3 {
+		t.Fatal("an activity row for an unchanged PUT whose pre-read failed")
+	}
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://other.example.test/v"}`),
+		http.StatusOK, "")
+	if rows("access_provider_put") != 4 {
+		t.Fatal("no activity row for the change back")
 	}
 	resp := e.do("GET", "/api/v1/providers/fecode", tok, nil)
 	expect(t, resp, http.StatusOK, "")

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 
 	"github.com/google/uuid"
 
@@ -132,7 +133,10 @@ func (s *server) putProvider(w http.ResponseWriter, r *http.Request) error {
 	if created {
 		status = http.StatusCreated
 	}
-	if created || beforeErr != nil || before.UpdatedAt != p.UpdatedAt || before.Kind != p.Kind {
+	// Made, or changed: what the provider says differs, or it was
+	// written (updated_at, in seconds; it alone shows a new secret). A
+	// pre-read that failed tells nothing, so it records nothing.
+	if created || beforeErr == nil && (!sameProvider(before, p) || before.UpdatedAt != p.UpdatedAt) {
 		verb := "changed"
 		if created {
 			verb = "made"
@@ -142,6 +146,14 @@ func (s *server) putProvider(w http.ResponseWriter, r *http.Request) error {
 			Detail: detail(map[string]any{"provider": p.Name, "kind": p.Kind, "created": created, "by": by})})
 	}
 	return writeJSON(w, status, p)
+}
+
+// sameProvider reports whether two answers say the same provider: its
+// kind, address, issuer, client, whether a secret is stored, and rule.
+func sameProvider(a, b visits.Provider) bool {
+	return a.Kind == b.Kind && a.URL == b.URL && a.Issuer == b.Issuer && a.ClientID == b.ClientID &&
+		(a.ClientSecret != nil && a.ClientSecret.Set) == (b.ClientSecret != nil && b.ClientSecret.Set) &&
+		reflect.DeepEqual(a.Rule, b.Rule)
 }
 
 // deleteProvider is DELETE /api/v1/providers/{provider}: {"deleted":
