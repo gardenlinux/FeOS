@@ -4,6 +4,7 @@
 package visit
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -131,10 +132,15 @@ func (k *Keys) sign(typ string, claims any) (string, error) {
 	if k.priv == nil {
 		return "", ErrNoSigner
 	}
-	payload, err := json.Marshal(claims)
-	if err != nil {
+	// Without HTML escaping, as SealChallenge: a name of 200 & would
+	// otherwise take six bytes each and push the token past its cookie.
+	var js bytes.Buffer
+	enc := json.NewEncoder(&js)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(claims); err != nil {
 		return "", fmt.Errorf("visit: code the claims: %w", err)
 	}
+	payload := bytes.TrimSuffix(js.Bytes(), []byte("\n"))
 	input := k.header(typ) + "." + b64.EncodeToString(payload)
 	jwt := input + "." + b64.EncodeToString(ed25519.Sign(k.priv, []byte(input)))
 	if len(jwt) > MaxJWT {

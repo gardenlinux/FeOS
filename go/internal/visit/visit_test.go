@@ -89,6 +89,26 @@ func TestJWTRoundTrip(t *testing.T) {
 	}
 }
 
+// The claims are not HTML-escaped: a name of 200 & takes 200 bytes, not
+// 1200, and its token still fits.
+func TestJWTNoHTMLEscape(t *testing.T) {
+	k := testKeys(t, 1, 2)
+	tk := testToken()
+	tk.Name = strings.Repeat("&", 200)
+	tk.Subject = strings.Repeat("<", 255)
+	tok, err := k.SignToken(tk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := base64.RawURLEncoding.DecodeString(strings.Split(tok, ".")[1])
+	if strings.Contains(string(payload), `\u0026`) || !strings.Contains(string(payload), tk.Name) || bytes.HasSuffix(payload, []byte("\n")) {
+		t.Fatalf("payload %s", payload)
+	}
+	if got, err := k.VerifyToken(tok); err != nil || got.Name != tk.Name || got.Subject != tk.Subject {
+		t.Fatalf("verify: %+v %v", got, err)
+	}
+}
+
 // Every refusal has its error.
 func TestJWTRefusals(t *testing.T) {
 	k := testKeys(t, 1, 2)
