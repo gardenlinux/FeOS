@@ -1030,11 +1030,19 @@ func TestHeartbeatsRefreshTheCache(t *testing.T) {
 	const refresh = 500 * time.Millisecond
 	ta := h.joined(func(tm *timing) { tm.cacheRefresh = refresh })
 	d := &stateDir{path: h.cfg.StateDir}
+	// The first write the cache settles at: the table, the mesh and the
+	// keys may come in a few changes, each written at once; first is the
+	// write after which none came for 150 ms.
 	var first time.Time
-	eventually(t, "the cache", func() bool {
+	eventually(t, "the cache settled", func() bool {
 		s, at, err := d.loadTable()
-		first = at
-		return err == nil && s != nil
+		if err != nil || s == nil {
+			return false
+		}
+		time.Sleep(150 * time.Millisecond)
+		_, again, err := d.loadTable()
+		first = again
+		return err == nil && again.Equal(at)
 	})
 	heartbeat := func() {
 		t.Helper()
@@ -1047,7 +1055,7 @@ func TestHeartbeatsRefreshTheCache(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if time.Since(first) < refresh-100*time.Millisecond {
 		if _, at, err := d.loadTable(); err != nil || !at.Equal(first) {
-			t.Errorf("table.json saved at %v (%v) after a heartbeat within the interval; first at %v", at, err, first)
+			t.Errorf("table-v2.json saved at %v (%v) after a heartbeat within the interval; first at %v", at, err, first)
 		}
 	}
 	// One after it writes the cache, though nothing changed.
