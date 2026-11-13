@@ -198,6 +198,8 @@ type fakeVisits struct {
 	ends    []wire.EndVisitRequest
 	redeem  wire.RedeemVisitResponse
 	renew   wire.RenewVisitResponse
+	// stall: Renew waits for its context's end and returns its error.
+	stall bool
 }
 
 func (f *fakeVisits) Redeem(_ context.Context, req wire.RedeemVisitRequest) (wire.RedeemVisitResponse, error) {
@@ -207,10 +209,17 @@ func (f *fakeVisits) Redeem(_ context.Context, req wire.RedeemVisitRequest) (wir
 	return f.redeem, f.err
 }
 
-func (f *fakeVisits) Renew(_ context.Context, req wire.RenewVisitRequest) (wire.RenewVisitResponse, error) {
+func (f *fakeVisits) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.RenewVisitResponse, error) {
+	f.mu.Lock()
+	f.renews = append(f.renews, req)
+	stall := f.stall
+	f.mu.Unlock()
+	if stall {
+		<-ctx.Done()
+		return wire.RenewVisitResponse{}, fmt.Errorf("read a visit: %w", ctx.Err())
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.renews = append(f.renews, req)
 	return f.renew, f.err
 }
 
@@ -345,6 +354,21 @@ func TestVisitCalls(t *testing.T) {
 	h.s.BeginStopping()
 	for name, call := range visitCalls(c) {
 		wantCode(t, name+" while stopping", call(), codes.Unavailable, stoppingText)
+	}
+}
+
+// When ferund's own step timeout ends while the ingress still waits (the
+// database hangs), the answer is UNAVAILABLE, ferund away, not the call's
+// DEADLINE_EXCEEDED. (It takes rpcTimeout.)
+func TestVisitCallStepTimeout(t *testing.T) {
+	f := &fakeVisits{stall: true}
+	h := newHarness(t, harnessOpts{visits: f})
+	_, c, _ := h.connect("in-0", 1, "10.0.0.1:51820", wire.CapabilityVisits)
+	ctx, cancel := context.WithTimeout(bg, rpcTimeout+30*time.Second)
+	defer cancel()
+	_, err := c.api.RenewVisit(ctx, &wire.RenewVisitRequest{Token: "a.b.c", Secret: secret43('s')})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("renew past the step's timeout: %v, want UNAVAILABLE", err)
 	}
 }
 

@@ -58,14 +58,17 @@ func (s *Service) RedeemVisit(ctx context.Context, req *wire.RedeemVisitRequest)
 	case req.Host == "" || len(req.Host) > maxHostLen:
 		return nil, s.visitInvalid(p, "redeem", "host is not a host")
 	}
-	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	// The step's own timeout, beside the call's: dbError and the log
+	// look at the call's context, so that the step's end is UNAVAILABLE
+	// (ferund away), not the call's DEADLINE_EXCEEDED, and logged.
+	dctx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
-	resp, err := s.visits.Redeem(ctx, *req)
+	resp, err := s.visits.Redeem(dctx, *req)
 	if err != nil {
 		return nil, s.visitError(ctx, p, "redeem", err)
 	}
 	if resp.Outcome == wire.OutcomeRefused {
-		s.rl.warn("visit-redeem", "ingress RedeemVisit: a code was refused", "ingress", p.Name, "reason", resp.Reason)
+		s.rl.warn("visit-refused-redeem", "ingress RedeemVisit: a code was refused", "ingress", p.Name, "reason", resp.Reason)
 	}
 	return &resp, nil
 }
@@ -85,15 +88,18 @@ func (s *Service) RenewVisit(ctx context.Context, req *wire.RenewVisitRequest) (
 	case len(req.Secret) != bindingLen:
 		return nil, s.visitInvalid(p, "renew", "secret is not a visit secret")
 	}
-	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	// The step's own timeout, beside the call's: dbError and the log
+	// look at the call's context, so that the step's end is UNAVAILABLE
+	// (ferund away), not the call's DEADLINE_EXCEEDED, and logged.
+	dctx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
-	resp, err := s.visits.Renew(ctx, *req)
+	resp, err := s.visits.Renew(dctx, *req)
 	if err != nil {
 		return nil, s.visitError(ctx, p, "renew", err)
 	}
 	if resp.Outcome == wire.OutcomeEnded && resp.Reason == "unknown" {
 		// A cookie that holds no visit: one a browser made up or kept.
-		s.rl.warn("visit-renew", "ingress RenewVisit: a cookie holds no visit", "ingress", p.Name)
+		s.rl.warn("visit-unknown", "ingress RenewVisit: a cookie holds no visit", "ingress", p.Name)
 	}
 	return &resp, nil
 }
@@ -111,9 +117,12 @@ func (s *Service) EndVisit(ctx context.Context, req *wire.EndVisitRequest) (*wir
 	case len(req.Secret) != bindingLen:
 		return nil, s.visitInvalid(p, "end", "secret is not a visit secret")
 	}
-	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
+	// The step's own timeout, beside the call's: dbError and the log
+	// look at the call's context, so that the step's end is UNAVAILABLE
+	// (ferund away), not the call's DEADLINE_EXCEEDED, and logged.
+	dctx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
-	resp, err := s.visits.End(ctx, *req)
+	resp, err := s.visits.End(dctx, *req)
 	if err != nil {
 		return nil, s.visitError(ctx, p, "end", err)
 	}
@@ -149,15 +158,18 @@ func (s *Service) visitInvalid(p nodelink.IngressPeer, what, why string) error {
 }
 
 // visitError is what a call of visits answers for the visits service's
-// error: INVALID_ARGUMENT for visits.ErrInvalid, else what dbError
+// error, ctx the call's (not the step's): INVALID_ARGUMENT for visits.ErrInvalid, else what dbError
 // answers (UNAVAILABLE while the call goes on), which the ingress reads as
 // ferund away.
 func (s *Service) visitError(ctx context.Context, p nodelink.IngressPeer, what string, err error) error {
 	if errors.Is(err, visits.ErrInvalid) {
 		return s.visitInvalid(p, what, "the request is not valid")
 	}
+	// Failures have their kinds of the rate-limited log apart from the
+	// refusals a browser causes (visitInvalid, visit-refused-redeem,
+	// visit-unknown), so that those never hide them.
 	if ctx.Err() == nil {
-		s.rl.warn("visit-"+what, "ingress call of visits failed", "ingress", p.Name, "call", what, "err", err)
+		s.rl.warn("visit-failed-"+what, "ingress call of visits failed", "ingress", p.Name, "call", what, "err", err)
 	}
 	return dbError(ctx, err, what+" the visit")
 }
