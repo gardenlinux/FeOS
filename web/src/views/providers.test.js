@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api.js';
 import {
   FERUN, KINDS, choices, emptyForm, formOf, inUseProblem, kindLabel, nameProblem, newProviderPath, providerOf, providerPath,
-  providerWords, publishChoice, ruleKey, ruleOf, ruleWords, sameChoice, served, usedWords, valuesOf, whereOf,
+  guardsNone, hostLabelChoice, providerWords, publishChoice, ruleKey, ruleOf, ruleWords, sameChoice, served, usedWords, valuesOf, whereOf,
 } from './providers.js';
 
 // The access providers' arithmetic (ADR 0054), on providers as ferund
@@ -137,6 +137,23 @@ describe('a publish', () => {
     expect(choices([FECODE], kinds, 'fecode').map((c) => c.name)).toEqual(['ferun', 'fecode']);
     expect(served('oidc', null)).toBe(true);
     expect(served('oidc', ['tenant'])).toBe(false);
+  });
+
+  it('publishes a new host label with the access the status says, and none when it says none', () => {
+    const cur = { access: 'visitors', provider: 'fecode' };
+    expect(hostLabelChoice({ public: true, access: 'visitors', provider: 'fecode' }, cur)).toEqual(cur);
+    const anyone = { access: 'anyone', provider: '' };
+    expect(hostLabelChoice({ public: true, access: 'anyone', provider: '' }, anyone)).toEqual(anyone);
+    // An older ferund answered the status: ferund keeps the stored access.
+    expect(hostLabelChoice({ public: true }, anyone)).toEqual({ access: '', provider: '' });
+  });
+
+  it('knows an installation that guards nothing only by its empty kinds', () => {
+    expect(guardsNone([])).toBe(true);
+    expect(guardsNone(null)).toBe(false);
+    expect(guardsNone(['tenant'])).toBe(false);
+    expect(publishChoice({ public: false }, [])).toEqual({ access: 'anyone', provider: '' });
+    expect(publishChoice({ public: false }, null)).toEqual({ access: '', provider: '' });
   });
 
   it('starts from the access a public environment has, and from visitors of ferun for a first one where it is served', () => {

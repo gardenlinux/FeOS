@@ -744,6 +744,10 @@ describe('the domains & access tab', () => {
     expect(all).toContain('The first publish rolls the image services once');
     const on = html(<PublicBox env="e" st={STAGE} ec={ALL} domains={[]} changed={nav} />);
     expect(on).toContain('Unpublish');
+    // Unpublish sits in the host label's form: a plain button, whose
+    // arming click submits nothing.
+    expect(on).toMatch(/<form class="inlineform">.*<button type="button" class="mini danger confirm"[^>]*>Unpublish<\/button><\/form>/);
+    expect(on).toContain('<button class="primary mini" type="submit"');
     expect(on).toContain('<a class="mono host" href="https://expensa-stage-fecode.apps.fecode.dev"');
     expect(html(<PublicBox env="e" st={off} ec={{ ...ALL, admin: false }} domains={[]} changed={nav} />))
       .toContain('title="needs admin on this environment"');
@@ -785,6 +789,15 @@ describe('the domains & access tab', () => {
     expect(out).not.toContain('<select');
     expect(text(box(off, { kinds: ['tenant'] }))).toContain('Choose who it admits');
     expect(out).toContain('disabled="" title="choose who it admits first">Publish</button>');
+  });
+
+  it('offers only anyone, saying why, where the installation guards no environment', () => {
+    const off = { ...STAGE, public: false, hosts: [], access: 'anyone', provider: '' };
+    const out = html(box(off, { kinds: [], providers: [] }));
+    expect(out).toContain('disabled="" title="this installation guards no environments: ferund runs without --secret-key-file">Visitors</button>');
+    expect(out).toContain('<button type="button" class="on" title="">Anyone</button>');
+    expect(out).toContain('<button class="primary mini" type="submit" title="">Publish</button>');
+    expect(text(box(off, { kinds: [], providers: [] }))).toContain('Only anyone: this installation guards no environments');
   });
 
   it("shows a public one's access, with its provider in words, and keeps it on a new host label", () => {

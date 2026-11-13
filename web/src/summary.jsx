@@ -6,10 +6,11 @@
 // page at once. Each list is null while unread and stays null when the
 // role does not offer it or this ferund lacks the route. The access
 // providers (ADR 0054) come with the kinds this installation serves
-// (providerKinds), null alike.
+// (providerKinds), null alike; a ferund without their routes answers
+// none of either.
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { api } from './api.js';
+import { api, notAvailable } from './api.js';
 import { usePoll } from './components.jsx';
 import { attention, navCounts } from './attention.js';
 
@@ -39,6 +40,17 @@ async function optional(fn, pick) {
   }
 }
 
+// providersOf is the providers' list; a ferund without the routes (no
+// secret key: it guards no environment) reads as none and no kinds, not
+// as unread.
+async function providersOf() {
+  try {
+    return await api.listProviders();
+  } catch (e) {
+    return notAvailable(e) ? { providers: [], kinds: [] } : null;
+  }
+}
+
 export function SummaryProvider({ tenant, can, children }) {
   const [data, setData] = useState(empty);
 
@@ -55,7 +67,7 @@ export function SummaryProvider({ tenant, can, children }) {
       can.members ? optional(api.getQuota, (r) => r) : null,
       can.members ? optional(() => api.listJobs(), (r) => r.jobs || []) : null,
       can.readTenant ? optional(api.listCredentials, (r) => r.credentials || []) : null,
-      can.members ? optional(api.listProviders, (r) => r) : null,
+      can.members ? providersOf() : null,
     ]);
     const providers = providerList ? providerList.providers || [] : null;
     const providerKinds = providerList ? providerList.kinds || [] : null;

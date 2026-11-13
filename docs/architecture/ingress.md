@@ -793,7 +793,8 @@ answer, 503 "Signing in is not available right now." with `Retry-After:
   on the request that finds it (one renewal per visit at a time on an
   instance, 2 s): renewed, the new token is used and set as the cookie on
   the answer; ended, the cookie is cleared, the visit remembered as ended
-  and its connections closed, and the request has no visit; no answer,
+  (not for reason `unknown`: another cookie may hold it) and its
+  connections closed, and the request has no visit; no answer,
   it is served with the token it has. A token past its end and a minute
   is renewed the same way with 5 s, and served on (until the visit's end)
   only when `ferund` is away: no session, a timeout, `UNAVAILABLE` or

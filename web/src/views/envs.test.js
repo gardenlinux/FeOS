@@ -387,8 +387,10 @@ describe('domains and access', () => {
     // A publish that says nothing admits visitors of ferun (ADR 0054).
     expect(publishNote(response('PUT_environments_env_public.200'))).toBe('Public at expensa-stage-fecode.apps.fecode.dev, admitting '
       + 'visitors of ferun. This first publish rolls the image services once, so that their pods join the ingress\'s group.');
+    // The sentence of who it admits, whether or not the fixture's publish
+    // rolls (§1.8.1 pins only its access and provider).
     expect(publishNote(response('PUT_environments_env_public.200.anyone')))
-      .toBe('Public at expensa-stage-fecode.apps.fecode.dev, open to anyone.');
+      .toContain('Public at expensa-stage-fecode.apps.fecode.dev, open to anyone.');
     expect(publishNote({ public: true, hosts: [], rolling: false, access: 'visitors', provider: 'fecode' }))
       .toBe('Public, admitting visitors of fecode.');
     // An older ferund answers no access, and serves it to anyone.

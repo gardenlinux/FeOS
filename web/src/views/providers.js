@@ -234,17 +234,38 @@ export function choices(providers, kinds, current = '') {
   return out;
 }
 
+// NO_VISITS says why an installation offers only anyone.
+export const NO_VISITS = 'this installation guards no environments: ferund runs without --secret-key-file';
+
+// guardsNone tells an installation known to guard no environment: its
+// ferund has no providers' routes (kinds [], as the summary reads a 404
+// no such route); null, not read yet, is not known.
+export function guardsNone(kinds) {
+  return !!kinds && kinds.length === 0;
+}
+
 // publishChoice is what the publish box starts with: a public
 // environment's access as it is (anyone when the ferund says none), and
 // for one not public yet visitors of ferun where the installation
-// serves it, else nothing: its admin chooses.
+// serves it, anyone where it guards nothing, else nothing: its admin
+// chooses.
 export function publishChoice(st, kinds) {
   if (st && st.public) {
     if (st.access === 'visitors') return { access: 'visitors', provider: st.provider || FERUN };
     return { access: 'anyone', provider: '' };
   }
   if (kinds && kinds.includes('ferun')) return { access: 'visitors', provider: FERUN };
+  if (guardsNone(kinds)) return { access: 'anyone', provider: '' };
   return { access: '', provider: '' };
+}
+
+// hostLabelChoice is the access a public environment's new host label is
+// published with: the one its status says, and none when the status says
+// none (an older ferund answered it), so that ferund keeps the stored one
+// rather than open a guarded environment to anyone.
+export function hostLabelChoice(st, current) {
+  if (!st || (st.access !== 'visitors' && st.access !== 'anyone')) return { access: '', provider: '' };
+  return current;
 }
 
 // sameChoice tells two choices apart.

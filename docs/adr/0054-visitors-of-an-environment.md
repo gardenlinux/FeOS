@@ -134,9 +134,10 @@ tenants name.
   clock whichever instance is asked, and no token outlives the
   provider's last asking by more than 15 minutes.** `ferund`
   gives the next token while the visit lives and its provider still
-  vouches for it, and ends the visit on the provider's no. So a token's
-  15 minutes are how long a visitor stays after their provider would no
-  longer admit them, and there is no call by which a tenant ends a
+  vouches for it, and ends the visit on the provider's no. So a visitor
+  stays up to 16 minutes after their provider would no longer admit them
+  (asked at most every 8 minutes, a token at most 15 past the last
+  asking), and there is no call by which a tenant ends a
   visit: what the provider knows is asked, not copied. Only the
   provider's explicit no ends a visit.
 - A provider that does not answer has not said no: the visit gets its
@@ -326,7 +327,7 @@ tenants name.
 - A platform on FeRun serves one address, for the browser with a
   challenge and for `ferund` with a visit, and reads and answers both
   at the API. It tells FeRun nothing when a membership ends.
-- A removed member stays for up to 15 minutes. While their provider or
+- A removed member stays for up to 16 minutes. While their provider or
   `ferund` is away they stay until one is back, to the visit's end at
   most; an application's visitors are not turned away because the
   platform that admitted them is being deployed.
@@ -355,3 +356,10 @@ an environment that is not public yet, older ingresses closed out by a
 capability, the two keys, the token and the code, the cookie's secret,
 same-site requests, the renewal's timings and the provider's call, and a
 visit's bound of 12 hours.
+
+Refined on 2026-11-13 after its review: a redirect URI of its own for
+each provider at `ferun-auth`, a sign-in finished only at its own, with
+the issuer and client it began with (no OAuth mix-up between issuers); a
+frame of the page from another host of the site is no visit; and a
+visitor stays up to 16 minutes, not 15, after their provider would no
+longer admit them.

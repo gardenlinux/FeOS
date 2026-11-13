@@ -13,7 +13,7 @@ import {
   UNGUARDED, actionProblem, admitsOf, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, newestFirst, olderCursor,
   publishNote, routeCurl, sparkPoints, statusTone,
 } from './envs.js';
-import { choices, kindLabel, providerWords, publishChoice, sameChoice } from './providers.js';
+import { choices, guardsNone, hostLabelChoice, kindLabel, NO_VISITS, providerWords, publishChoice, sameChoice } from './providers.js';
 import '../styles/environments.css';
 import '../styles/credentials.css';
 import '../styles/providers.css';
@@ -76,12 +76,13 @@ export function OpNote({ op, onDismiss }) {
 }
 
 // ConfirmButton asks twice, as ArmButton does, for an action that is no
-// deletion: a revert, an unpublish's opposite.
+// deletion: a revert, an unpublish's opposite. It is never a form's
+// submit button: its first click only arms it.
 export function ConfirmButton({ label, confirmLabel, onConfirm, disabled, title, className = '', icon }) {
   const [armed, arm, disarm] = useArm();
   const on = armed === 'go';
   return (
-    <button className={className + ' confirm' + (on ? ' armed' : '')} disabled={disabled} title={title}
+    <button type="button" className={className + ' confirm' + (on ? ' armed' : '')} disabled={disabled} title={title}
       onClick={(e) => {
         e.stopPropagation();
         if (!on) { arm('go'); return; }
@@ -447,6 +448,8 @@ export function PublicBox({ env, st, ec, domains, changed, providers: given, kin
   });
   const busy = !!(op && op.busy);
   const off = !ec.admin || busy;
+  // none: the installation guards no environment (no secret key).
+  const none = guardsNone(kinds);
   const why = ec.admin ? '' : NEEDS.admin;
   const changing = st.public && !sameChoice(choice, current);
   const pick = (access) => setPicked(access === 'visitors'
@@ -497,8 +500,8 @@ export function PublicBox({ env, st, ec, domains, changed, providers: given, kin
       <div className="envbox-row admits-form">
         <span className="k">{st.public ? 'admit' : 'it admits'}</span>
         <span className="cred-seg" role="group" aria-label="who it admits">
-          <button type="button" className={choice.access === 'visitors' ? 'on' : ''} disabled={off} title={why}
-            onClick={() => pick('visitors')}>Visitors</button>
+          <button type="button" className={choice.access === 'visitors' ? 'on' : ''} disabled={off || none}
+            title={why || (none ? NO_VISITS : '')} onClick={() => pick('visitors')}>Visitors</button>
           <button type="button" className={choice.access === 'anyone' ? 'on' : ''} disabled={off} title={why}
             onClick={() => pick('anyone')}>Anyone</button>
         </span>
@@ -512,6 +515,7 @@ export function PublicBox({ env, st, ec, domains, changed, providers: given, kin
               </option>))}
           </select>)}
         {!choice.access && <span className="muted small">Choose who it admits: this installation signs no visitors in by itself.</span>}
+        {none && <span className="muted small">Only anyone: {NO_VISITS}.</span>}
         {changing && (choice.access === 'anyone'
           ? <ConfirmButton className="mini" label="Open to anyone" confirmLabel="Open to anyone: sure?" disabled={off}
             title={why || 'its visits end, and everyone reaches it'} onConfirm={() => publish(true, choice, '')} />
@@ -520,7 +524,7 @@ export function PublicBox({ env, st, ec, domains, changed, providers: given, kin
       </div>
       <form className="inlineform" onSubmit={(e) => {
         e.preventDefault();
-        publish(true, st.public ? current : choice);
+        publish(true, st.public ? hostLabelChoice(st, current) : choice);
       }}>
         <input className="mono" placeholder={st.hostLabel ? `host label (now ${st.hostLabel})` : 'host label (optional)'}
           value={label} disabled={off} onChange={(e) => setLabel(e.target.value)}
