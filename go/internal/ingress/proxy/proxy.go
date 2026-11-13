@@ -341,12 +341,15 @@ func (p *Proxy) SetState(s *wire.State) {
 	}
 	p.mu.Unlock()
 	close(old.changed)
+	// The attempts the table no longer admits end first, with their
+	// cause, so that an attempt whose connection cutConns closes as well
+	// is read as the table's cut (re-routed), not as the instance failing.
+	if n := p.visits.retable(t); n > 0 {
+		p.log.Info("closed the connections of visits whose environment no longer admits them", "attempts", n)
+	}
 	if left {
 		p.up.closeIdle()
 		p.cutConns(t, time.Now())
-	}
-	if n := p.visits.retable(t); n > 0 {
-		p.log.Info("closed the connections of visits whose environment no longer admits them", "attempts", n)
 	}
 }
 
