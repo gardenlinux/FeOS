@@ -130,8 +130,11 @@ type Provider struct {
 	EndSession bool
 	// DiscoveryIssuer overrides the issuer discovery names.
 	DiscoveryIssuer string
-	codes           map[string]grant
-	access          map[string]map[string]any
+	// IssParameter: discovery says the issuer names itself in its
+	// authorization responses (RFC 9207).
+	IssParameter bool
+	codes        map[string]grant
+	access       map[string]map[string]any
 	// Mutate changes an ID token's claims and header before signing;
 	// Corrupt changes the token after.
 	Mutate      func(claims, header map[string]any)
@@ -173,12 +176,15 @@ func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 	if p.DiscoveryIssuer != "" {
 		iss = p.DiscoveryIssuer
 	}
-	d := map[string]string{
+	d := map[string]any{
 		"issuer": iss, "authorization_endpoint": p.Srv.URL + "/oauth2/auth", "token_endpoint": p.Srv.URL + "/oauth2/token",
 		"userinfo_endpoint": p.Srv.URL + "/userinfo", "jwks_uri": p.Srv.URL + "/.well-known/jwks.json",
 	}
 	if p.EndSession {
 		d["end_session_endpoint"] = p.Srv.URL + "/oauth2/sessions/logout"
+	}
+	if p.IssParameter {
+		d["authorization_response_iss_parameter_supported"] = true
 	}
 	_ = json.NewEncoder(w).Encode(d)
 }

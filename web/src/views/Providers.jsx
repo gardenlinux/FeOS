@@ -50,7 +50,7 @@ export function Providers({ tenant, sel, isNew, edit, navigate }) {
 // go is a link's click that navigates.
 const go = (navigate, to) => (e) => { e.preventDefault(); e.stopPropagation(); navigate(to); };
 
-// useProviderList reads the list ({providers, kinds, redirectUri}) once:
+// useProviderList reads the list ({providers, kinds}) once:
 // the kinds this installation serves and the redirect URI to register.
 function useProviderList() {
   const [list, setList] = useState(null);
@@ -79,7 +79,7 @@ function ProviderList({ tenant, navigate }) {
   return <ProviderListView tenant={tenant} list={list} err={err} navigate={navigate} />;
 }
 
-// ProviderListView is the list as read: {providers, kinds, redirectUri},
+// ProviderListView is the list as read: {providers, kinds},
 // or the read's error.
 export function ProviderListView({ tenant, list, err, navigate }) {
   const { can: c } = useAccess(tenant);
@@ -163,12 +163,12 @@ function ProviderPage({ tenant, name, navigate }) {
   const deleted = () => { sum.refresh(); navigate(providerPath(tenant)); };
   return (
     <ProviderView tenant={tenant} name={name} p={p} err={err} note={note} kinds={list ? list.kinds || [] : null}
-      redirectUri={list ? list.redirectUri || '' : ''} navigate={navigate} onDeleted={deleted} />
+      navigate={navigate} onDeleted={deleted} />
   );
 }
 
 // ProviderView is a provider's page as read (p, or the read's error).
-export function ProviderView({ tenant, name, p, err, note, kinds, redirectUri, navigate, onDeleted }) {
+export function ProviderView({ tenant, name, p, err, note, kinds, navigate, onDeleted }) {
   const { can: c } = useAccess(tenant);
   const [delErr, setDelErr] = useState('');
   const [armed, arm, disarm] = useArm();
@@ -211,7 +211,7 @@ export function ProviderView({ tenant, name, p, err, note, kinds, redirectUri, n
       <div className="cred-grid">
         <section className="pane">
           <div className="pane-toolbar"><h2><Icon name="lock" size={14} /> Definition</h2></div>
-          <ProviderDefinition p={p} redirectUri={redirectUri} />
+          <ProviderDefinition p={p} />
         </section>
         <section className="pane">
           <div className="pane-toolbar"><h2><Icon name="layers" size={14} /> Used by <span className="count">{envs.length}</span></h2></div>
@@ -256,9 +256,9 @@ function Copyable({ value }) {
 }
 
 // ProviderDefinition is a provider's fields, the client secret shown as
-// set; the URIs to register at an issuer are ferund's, never composed
-// here.
-export function ProviderDefinition({ p, redirectUri }) {
+// set; the URIs to register at an issuer are ferund's (each provider has
+// its own), never composed here.
+export function ProviderDefinition({ p }) {
   const set = <span className="cred-set">set</span>;
   const rows = [];
   if (p.kind === 'ferun') {
@@ -274,7 +274,7 @@ export function ProviderDefinition({ p, redirectUri }) {
     rows.push(['client ID', <span className="mono">{p.clientId}</span>]);
     rows.push(['client secret', p.clientSecret && p.clientSecret.set ? set : '—']);
     rows.push(['rule', ruleWords(p.rule)]);
-    rows.push(['redirect URI', redirectUri ? <Copyable value={redirectUri} /> : <span className="muted">—</span>]);
+    rows.push(['redirect URI', p.redirectUri ? <Copyable value={p.redirectUri} /> : <span className="muted">—</span>]);
     rows.push(['back-channel logout', p.backchannelUri ? <Copyable value={p.backchannelUri} /> : <span className="muted">—</span>]);
   }
   return (
@@ -299,13 +299,12 @@ function ProviderEditor({ tenant, name, navigate }) {
   }, [name]);
   if (err && notAvailable(err)) return <div className="creds"><NotAvailable what="Access providers" /></div>;
   if (name && !p) return err ? <ErrBox error={err.message} /> : <p className="empty">Loading…</p>;
-  return <ProviderForm tenant={tenant} p={p} kinds={list ? list.kinds || [] : null}
-    redirectUri={list ? list.redirectUri || '' : ''} navigate={navigate} />;
+  return <ProviderForm tenant={tenant} p={p} kinds={list ? list.kinds || [] : null} navigate={navigate} />;
 }
 
 // ProviderForm makes a provider (p null) or changes p, whose client
 // secret an empty field keeps.
-export function ProviderForm({ tenant, p, kinds, redirectUri, navigate }) {
+export function ProviderForm({ tenant, p, kinds, navigate }) {
   const { can: c } = useAccess(tenant);
   const sum = useSummary();
   const [f, setF] = useState(() => (p ? formOf(p) : emptyForm()));
@@ -425,8 +424,9 @@ export function ProviderForm({ tenant, p, kinds, redirectUri, navigate }) {
             </div>
             <div className="cred-field">
               <span className="cred-label">register at the issuer</span>
-              <span className="cred-hint">The redirect URI, the same for every provider of this installation:</span>
-              {redirectUri ? <Copyable value={redirectUri} /> : <span className="muted small">— (ferund names none)</span>}
+              <span className="cred-hint">The redirect URI, this provider's own:{' '}
+                {editing && p.redirectUri ? '' : 'shown on the provider\'s page once it is saved.'}</span>
+              {editing && p.redirectUri && <Copyable value={p.redirectUri} />}
               <span className="cred-hint">The back-channel logout URI, with the session required:{' '}
                 {editing && p.backchannelUri ? '' : 'shown on the provider\'s page once it is saved.'}</span>
               {editing && p.backchannelUri && <Copyable value={p.backchannelUri} />}

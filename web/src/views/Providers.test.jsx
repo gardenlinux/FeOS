@@ -28,11 +28,11 @@ const LIST = {
     { name: 'fecode', kind: 'tenant', builtIn: false, url: 'https://fecode.dev/api/v1/visit',
       environments: [{ id: 'e2', name: 'kino--stage' }], createdAt: '2026-11-12T20:00:00Z', updatedAt: '2026-11-12T20:00:00Z' },
     { name: 'sso', kind: 'oidc', builtIn: false, issuer: 'https://login.example.com/', clientId: 'abc', clientSecret: { set: true },
-      rule: { domains: ['example.com'] }, backchannelUri: 'https://auth.fecore.dev/backchannel/acme/sso', environments: [],
+      rule: { domains: ['example.com'] }, redirectUri: 'https://auth.fecore.dev/callback/acme/sso',
+      backchannelUri: 'https://auth.fecore.dev/backchannel/acme/sso', environments: [],
       createdAt: '2026-11-12T20:00:00Z', updatedAt: '2026-11-12T21:00:00Z' },
   ],
   kinds: ['tenant', 'ferun', 'oidc'],
-  redirectUri: 'https://auth.fecore.dev/callback',
 };
 const [FERUN_P, FECODE, SSO] = LIST.providers;
 
@@ -82,7 +82,7 @@ describe('the providers list', () => {
 
 describe("a provider's page", () => {
   const page = (p, extra = {}, me = ME('admin')) => render(me, <ProviderView tenant={T} name={p ? p.name : 'nope'} p={p} err={null}
-    note={null} kinds={LIST.kinds} redirectUri={LIST.redirectUri} navigate={nav} onDeleted={nav} {...extra} />);
+    note={null} kinds={LIST.kinds} navigate={nav} onDeleted={nav} {...extra} />);
 
   it("shows ferun as built in: its rule, the environments that name it, nothing to edit or delete", () => {
     const out = page(FERUN_P);
@@ -110,7 +110,7 @@ describe("a provider's page", () => {
     expect(all).toContain('issuer https://login.example.com/');
     expect(all).toContain('client ID abc');
     expect(out).toContain('<span class="cred-set">set</span>');
-    expect(all).toContain('redirect URI https://auth.fecore.dev/callback');
+    expect(all).toContain('redirect URI https://auth.fecore.dev/callback/acme/sso');
     expect(all).toContain('back-channel logout https://auth.fecore.dev/backchannel/acme/sso');
     expect(all).toContain('No environment admits its visitors.');
     // Without ferun-auth its kind is not served.
@@ -124,7 +124,7 @@ describe("a provider's page", () => {
   });
 
   it('never composes a URI to register: without ferund\'s, it says none', () => {
-    const out = text(render(ME('admin'), <ProviderDefinition p={{ ...SSO, backchannelUri: '' }} redirectUri="" />));
+    const out = text(render(ME('admin'), <ProviderDefinition p={{ ...SSO, redirectUri: '', backchannelUri: '' }} />));
     expect(out).toContain('redirect URI —');
     expect(out).toContain('back-channel logout —');
   });
@@ -132,7 +132,7 @@ describe("a provider's page", () => {
 
 describe('the form', () => {
   const form = (p, kinds = LIST.kinds, me = ME('admin')) => render(me, <ProviderForm tenant={T} p={p} kinds={kinds}
-    redirectUri={LIST.redirectUri} navigate={nav} />);
+    navigate={nav} />);
 
   it('makes a new one, a service of the tenant first, its address explained', () => {
     const out = form(null);
@@ -161,7 +161,7 @@ describe('the form', () => {
     expect(out).toContain('<button type="button" class="on">email domains</button>');
     expect(out).toContain('>example.com</textarea>');
     const all = text(out);
-    expect(all).toContain('https://auth.fecore.dev/callback');
+    expect(all).toContain('https://auth.fecore.dev/callback/acme/sso');
     expect(all).toContain('https://auth.fecore.dev/backchannel/acme/sso');
     expect(all).toContain('A change of the issuer, the client ID or the rule ends the visits it admitted');
   });

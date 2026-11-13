@@ -14,8 +14,11 @@
 // browser goes to the issuer with state, nonce and a PKCE challenge; the
 // sign-in in flight lives in a sealed cookie of its own on ferun-auth's
 // host (__Host-ferun_auth_<k>, k from the state), so instances share
-// nothing but --key-file and several tabs sign in at once. At GET
-// /callback the code is exchanged, the ID token verified, and the
+// nothing but --key-file and several tabs sign in at once. Every
+// provider has a redirect URI of its own, GET /callback/ferun and GET
+// /callback/<tenant>/<provider>, and a flow is finished only at its own,
+// with the issuer and client it began with. There the code is exchanged,
+// the ID token verified, and the
 // challenge accepted (kind ferun: ferund decides by the person's grant;
 // kind oidc: when the provider's rule admits the visitor) or rejected; the
 // browser goes on to ferund's redirect, the host's /.ferun/auth. The

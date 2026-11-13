@@ -24,7 +24,7 @@ func TestProviderList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(l.Kinds, ",") != "tenant,ferun,oidc" || l.RedirectURI != testAuth+"/callback" || len(l.Providers) != 3 {
+	if strings.Join(l.Kinds, ",") != "tenant,ferun,oidc" || len(l.Providers) != 3 {
 		t.Fatalf("list %+v", l)
 	}
 	b, _ := json.Marshal(l.Providers[0])
@@ -39,6 +39,7 @@ func TestProviderList(t *testing.T) {
 	}
 	b, _ = json.Marshal(l.Providers[2])
 	for _, want := range []string{`"clientSecret":{"set":true}`, `"rule":{"domains":["example.com"]}`,
+		`"redirectUri":"https://auth.test/callback/acme/sso"`,
 		`"backchannelUri":"https://auth.test/backchannel/acme/sso"`, `"environments":[]`, `"issuer":"https://login.example/"`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("sso lacks %s: %s", want, b)
@@ -65,7 +66,7 @@ func TestProviderList(t *testing.T) {
 	// Without ferun-auth: tenant alone, no redirect URI, no back-channel.
 	g := newFxOn(t, f.d, Config{})
 	if l, err := g.s.ListProviders(g.ctx, testTenant); err != nil || strings.Join(l.Kinds, ",") != "tenant" ||
-		l.RedirectURI != "" || l.Providers[2].BackchannelURI != "" {
+		l.Providers[2].RedirectURI != "" || l.Providers[2].BackchannelURI != "" {
 		t.Fatalf("without ferun-auth %+v %v", l, err)
 	}
 }

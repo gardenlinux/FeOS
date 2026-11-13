@@ -26,13 +26,31 @@ const maxLogoutBody = 64 << 10
 // nameRE is a tenant's or a provider's name: a DNS label.
 var nameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// logoutToken reads the form's logout_token; "" when there is none.
+// logoutToken reads the form's logout_token; "" when there is none, or
+// when it is not shaped as a JWS (three base64url parts, none empty), so
+// that a call without one costs no call to ferund or the issuer.
 func logoutToken(w http.ResponseWriter, r *http.Request) string {
 	r.Body = http.MaxBytesReader(w, r.Body, maxLogoutBody)
 	if err := r.ParseForm(); err != nil {
 		return ""
 	}
-	return r.PostForm.Get("logout_token")
+	raw := r.PostForm.Get("logout_token")
+	parts := strings.Split(raw, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	for _, p := range parts {
+		if p == "" || strings.Trim(p, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") != "" {
+			return ""
+		}
+	}
+	return raw
+}
+
+// invalidRequest is the answer to a logout without a token that can be
+// one.
+func invalidRequest(w http.ResponseWriter) {
+	jsonAnswer(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
 }
 
 // backchannelFerun is POST /backchannel/ferun: a logout at the
@@ -42,8 +60,13 @@ func (s *Server) backchannelFerun(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	p := s.issuers.get(s.cfg.Issuer, s.cfg.ClientID, s.sec.clientSecret)
-	s.backchannel(w, r, p, endBody{Provider: kindFerun})
+	raw := logoutToken(w, r)
+	if raw == "" {
+		invalidRequest(w)
+		return
+	}
+	rp := relyingParty{s.issuers.get(s.cfg.Issuer, s.cfg.ClientID, s.sec.clientSecret), s.cfg.Issuer, s.cfg.ClientID}
+	s.backchannel(w, r, rp, raw, endBody{Provider: kindFerun})
 }
 
 // backchannelTenant is POST /backchannel/<tenant>/<provider>, rest being
@@ -53,6 +76,12 @@ func (s *Server) backchannelTenant(w http.ResponseWriter, r *http.Request, rest 
 	tenant, name, ok := strings.Cut(rest, "/")
 	if !ok || !nameRE.MatchString(tenant) || !nameRE.MatchString(name) {
 		notFound(w)
+		return
+	}
+	// The token's shape first: the provider's read answers its secret.
+	raw := logoutToken(w, r)
+	if raw == "" {
+		invalidRequest(w)
 		return
 	}
 	prov, err := s.ferund.oidcProvider(r.Context(), tenant, name)
@@ -69,20 +98,24 @@ func (s *Server) backchannelTenant(w http.ResponseWriter, r *http.Request, rest 
 		jsonAnswer(w, http.StatusServiceUnavailable, map[string]string{"error": "temporarily_unavailable"})
 		return
 	}
-	p := s.issuers.get(prov.Issuer, prov.ClientID, prov.ClientSecret)
-	s.backchannel(w, r, p, endBody{Tenant: tenant, Provider: name})
+	rp := relyingParty{s.issuers.get(prov.Issuer, prov.ClientID, prov.ClientSecret), prov.Issuer, prov.ClientID}
+	s.backchannel(w, r, rp, raw, endBody{Tenant: tenant, Provider: name})
 }
 
-// backchannel verifies the logout token with p and ends the visits of its
-// session: 200; a token that does not verify 400; an issuer or ferund
-// that fails 503, which the issuer may try again.
-func (s *Server) backchannel(w http.ResponseWriter, r *http.Request, p *oidc.Provider, end endBody) {
-	raw := logoutToken(w, r)
-	if raw == "" {
-		jsonAnswer(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+// backchannel verifies the logout token raw with rp and ends the visits
+// of its session: 200; a token that does not verify 400; an issuer or
+// ferund that fails (or an issuer with too many calls in flight) 503,
+// which the issuer may try again.
+func (s *Server) backchannel(w http.ResponseWriter, r *http.Request, rp relyingParty, raw string, end endBody) {
+	done, ok := s.issuers.enter(rp.issuer)
+	if !ok {
+		s.log.Warn("ferun-auth: back-channel logout: the issuer cannot be used", "tenant", end.Tenant, "provider", end.Provider, "err", errBusy)
+		jsonAnswer(w, http.StatusServiceUnavailable, map[string]string{"error": "temporarily_unavailable"})
 		return
 	}
-	d, err := discover(r.Context(), p)
+	defer done()
+	p := rp.p
+	d, err := s.issuers.discover(r.Context(), rp)
 	if err != nil {
 		s.log.Warn("ferun-auth: back-channel logout: the issuer cannot be used", "tenant", end.Tenant, "provider", end.Provider, "err", err)
 		jsonAnswer(w, http.StatusServiceUnavailable, map[string]string{"error": "temporarily_unavailable"})
@@ -93,13 +126,14 @@ func (s *Server) backchannel(w http.ResponseWriter, r *http.Request, p *oidc.Pro
 		var re *oidc.ErrRefused
 		if errors.As(err, &re) {
 			s.log.Warn("ferun-auth: back-channel logout refused", "tenant", end.Tenant, "provider", end.Provider, "reason", re.Reason)
-			jsonAnswer(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+			invalidRequest(w)
 			return
 		}
 		s.log.Warn("ferun-auth: back-channel logout: the issuer cannot be used", "tenant", end.Tenant, "provider", end.Provider, "err", err)
 		jsonAnswer(w, http.StatusServiceUnavailable, map[string]string{"error": "temporarily_unavailable"})
 		return
 	}
+	done()
 	end.Session = sid
 	n, err := s.ferund.endVisits(r.Context(), end)
 	if err != nil {

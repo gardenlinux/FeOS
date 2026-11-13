@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,19 +82,20 @@ func New(cfg Config, log *slog.Logger) (*Server, error) {
 	}, nil
 }
 
-// redirectURI is the one redirect URI of the installation's sign-ins.
-func (s *Server) redirectURI() string { return s.cfg.PublicURL + "/callback" }
+// redirectURI is a provider's redirect URI, cb its callback path
+// (callbackOf): <PublicURL>/callback/ferun, <PublicURL>/callback/<tenant>/<provider>.
+func (s *Server) redirectURI(cb string) string { return s.cfg.PublicURL + callbackPrefix + cb }
 
-// Handler is the sign-in's handler: GET /visit, GET /callback, POST
-// /backchannel/ferun and POST /backchannel/{tenant}/{provider}; anything
-// else is 404.
+// Handler is the sign-in's handler: GET /visit, GET /callback/ferun, GET
+// /callback/{tenant}/{provider}, POST /backchannel/ferun and POST
+// /backchannel/{tenant}/{provider}; anything else is 404.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch p := r.URL.EscapedPath(); {
 		case p == "/visit" && r.Method == http.MethodGet:
 			s.visit(w, r)
-		case p == "/callback" && r.Method == http.MethodGet:
-			s.callback(w, r)
+		case strings.HasPrefix(p, callbackPrefix) && validCallback(p[len(callbackPrefix):]) && r.Method == http.MethodGet:
+			s.callback(w, r, p[len(callbackPrefix):])
 		case p == "/backchannel/ferun" && r.Method == http.MethodPost:
 			s.backchannelFerun(w, r)
 		case len(p) > len(backchannelPrefix) && p[:len(backchannelPrefix)] == backchannelPrefix && r.Method == http.MethodPost:

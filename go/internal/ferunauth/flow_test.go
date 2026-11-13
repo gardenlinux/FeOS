@@ -32,7 +32,7 @@ func TestSignInOIDC(t *testing.T) {
 	u, _ := url.Parse(loc)
 	q := u.Query()
 	for k, want := range map[string]string{"response_type": "code", "client_id": h.issuer.ClientID,
-		"redirect_uri": testPublic + "/callback", "scope": "openid profile email", "code_challenge_method": "S256"} {
+		"redirect_uri": testPublic + "/callback/acme/sso", "scope": "openid profile email", "code_challenge_method": "S256"} {
 		if q.Get(k) != want {
 			t.Errorf("%s = %q, want %q", k, q.Get(k), want)
 		}
@@ -60,7 +60,7 @@ func TestSignInOIDC(t *testing.T) {
 	}
 
 	code := h.issuer.Issue(loc, claims())
-	rec = h.do("GET", "/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state)+"&iss="+url.QueryEscape(h.issuer.Issuer), navigation, "")
+	rec = h.do("GET", cbPath(t, loc)+"?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state)+"&iss="+url.QueryEscape(h.issuer.Issuer), navigation, "")
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "https://"+testHost+"/.ferun/auth?code=accepted-code" {
 		t.Fatalf("callback: %d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
@@ -81,7 +81,7 @@ func TestSignInOIDC(t *testing.T) {
 		}
 	}
 	// The flow is used once.
-	rec = h.do("GET", "/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state), navigation, "")
+	rec = h.do("GET", cbPath(t, loc)+"?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state), navigation, "")
 	wantPage(t, rec, http.StatusBadRequest, msgCannotFinish)
 
 	logs := h.logs.String()
@@ -198,7 +198,7 @@ func TestCallbackOtherIssuer(t *testing.T) {
 	h.ferund.view("s", kindOIDC, h.oidcOf(rule{Anyone: true}))
 	loc, state := h.toIssuer(h.visit("s"))
 	code := h.issuer.Issue(loc, claims())
-	rec := h.do("GET", "/callback?code="+code+"&state="+state+"&iss="+url.QueryEscape("https://evil.example/"), navigation, "")
+	rec := h.do("GET", cbPath(t, loc)+"?code="+code+"&state="+state+"&iss="+url.QueryEscape("https://evil.example/"), navigation, "")
 	wantPage(t, rec, http.StatusBadRequest, msgCannotFinish)
 	if len(h.ferund.accepts) != 0 {
 		t.Fatal("accepted")
@@ -209,8 +209,8 @@ func TestCallbackOtherIssuer(t *testing.T) {
 func TestCallbackIssuerError(t *testing.T) {
 	h := newHarness(t)
 	h.ferund.view("s", kindOIDC, h.oidcOf(rule{Anyone: true}))
-	_, state := h.toIssuer(h.visit("s"))
-	rec := h.do("GET", "/callback?error=access_denied&state="+state, navigation, "")
+	loc, state := h.toIssuer(h.visit("s"))
+	rec := h.do("GET", cbPath(t, loc)+"?error=access_denied&state="+state, navigation, "")
 	wantPage(t, rec, http.StatusBadRequest, msgIssuerRefused)
 	if len(h.jar) != 0 {
 		t.Fatalf("cookies left %v", h.jar)
@@ -456,7 +456,9 @@ func TestRuledClient(t *testing.T) {
 // Anything but ferun-auth's routes is 404 text/plain.
 func TestNotFound(t *testing.T) {
 	h := newHarness(t)
-	for _, r := range [][2]string{{"GET", "/"}, {"POST", "/visit"}, {"POST", "/callback"}, {"GET", "/backchannel/ferun"},
+	for _, r := range [][2]string{{"GET", "/"}, {"POST", "/visit"}, {"POST", "/callback/ferun"}, {"GET", "/callback"},
+		{"GET", "/callback/"}, {"GET", "/callback/acme"}, {"GET", "/callback/Acme/sso"}, {"GET", "/callback/acme/sso/x"},
+		{"GET", "/backchannel/ferun"},
 		{"GET", "/visit/x"}, {"HEAD", "/visit"}, {"GET", "/api/v1/challenges/open"}} {
 		rec := h.do(r[0], r[1], navigation, "")
 		if rec.Code != http.StatusNotFound || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {

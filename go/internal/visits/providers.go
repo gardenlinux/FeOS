@@ -71,6 +71,10 @@ func (s *Service) view(p store.AccessProvider, envs []EnvRef) Provider {
 		r := ruleOf(p.Rule)
 		v.Rule = &r
 		if s.cfg.AuthURL != "" {
+			// Each provider its own redirect URI: ferun-auth finishes a
+			// code only at the one its sign-in began with (no OAuth
+			// mix-up between issuers).
+			v.RedirectURI = s.cfg.AuthURL + "/callback/" + p.Tenant + "/" + p.Name
 			v.BackchannelURI = s.cfg.AuthURL + "/backchannel/" + p.Tenant + "/" + p.Name
 		}
 	}
@@ -111,8 +115,8 @@ func refs(r []EnvRef) []EnvRef {
 }
 
 // ListProviders lists a tenant's providers, ferun first, then by name,
-// with the kinds this installation serves and the redirect URI an issuer
-// of a provider of kind oidc registers ("" without ferun-auth).
+// with the kinds this installation serves. A provider of kind oidc names
+// the redirect URI its issuer registers, its own.
 func (s *Service) ListProviders(ctx context.Context, tenant string) (ProviderList, error) {
 	rows, err := s.st.ListAccessProviders(ctx, tenant)
 	if err != nil {
@@ -125,9 +129,6 @@ func (s *Service) ListProviders(ctx context.Context, tenant string) (ProviderLis
 	out := ProviderList{Providers: []Provider{builtin(refs(envs[model.ProviderFerun]))}, Kinds: s.Kinds()}
 	for _, p := range rows {
 		out.Providers = append(out.Providers, s.view(p, refs(envs[p.Name])))
-	}
-	if s.cfg.AuthURL != "" {
-		out.RedirectURI = s.cfg.AuthURL + "/callback"
 	}
 	return out, nil
 }

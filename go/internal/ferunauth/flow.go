@@ -22,8 +22,16 @@ import (
 )
 
 // This file is the sign-in: GET /visit takes the challenge the ingress
-// sent the browser with and sends it on to the issuer, GET /callback takes
-// the issuer's answer and answers the challenge at ferund.
+// sent the browser with and sends it on to the issuer, GET /callback/…
+// takes the issuer's answer and answers the challenge at ferund.
+//
+// Every provider has a redirect URI of its own: <public-url>/callback/ferun
+// for kind ferun, <public-url>/callback/<tenant>/<provider> for kind oidc.
+// The flow is bound to it and to the issuer and client it began with, so
+// that a code one issuer gave cannot be finished as another provider's
+// flow: with one URI for all, a tenant's issuer could send the browser on
+// to another issuer, have its code come back under the tenant's own state,
+// and read it at its token endpoint (the OAuth mix-up attack).
 
 // The provider kinds ferun-auth serves (ferund's model.ProviderKind…).
 const (
@@ -53,12 +61,49 @@ const (
 )
 
 // flow is a sign-in in flight, sealed in its cookie: the challenge, the ID
-// token's nonce, the PKCE verifier and its end (Unix seconds).
+// token's nonce, the PKCE verifier, its end (Unix seconds), the provider's
+// callback path (callbackOf) and the relying party it began with
+// (rpDigest).
 type flow struct {
 	Challenge string `json:"ch"`
 	Nonce     string `json:"nonce"`
 	Verifier  string `json:"ver"`
 	Expires   int64  `json:"exp"`
+	Callback  string `json:"cb"`
+	RP        string `json:"rp"`
+}
+
+// callbackPrefix starts every redirect URI's path.
+const callbackPrefix = "/callback/"
+
+// callbackOf is the path after callbackPrefix of a challenge's provider:
+// "ferun" for kind ferun, "<tenant>/<provider>" for kind oidc. ok is false
+// for a name that is no DNS label (ferund makes none).
+func callbackOf(ch challengeView) (string, bool) {
+	switch ch.Provider.Kind {
+	case kindFerun:
+		return kindFerun, true
+	case kindOIDC:
+		t, n := ch.Environment.Tenant, ch.Provider.Name
+		return t + "/" + n, nameRE.MatchString(t) && nameRE.MatchString(n)
+	}
+	return "", false
+}
+
+// validCallback reports whether cb can be a provider's callback path.
+func validCallback(cb string) bool {
+	if cb == kindFerun {
+		return true
+	}
+	t, n, ok := strings.Cut(cb, "/")
+	return ok && nameRE.MatchString(t) && nameRE.MatchString(n)
+}
+
+// rpDigest names a client at an issuer in a flow: base64url(sha256) of
+// both, so that a long issuer does not crowd the cookie.
+func rpDigest(rp relyingParty) string {
+	sum := sha256.Sum256([]byte(rp.issuer + "\x00" + rp.clientID))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // flowKey is the cookie's k of a state: the first 16 characters of
@@ -108,7 +153,7 @@ func (s *Server) openFlow(k, value string) (flow, bool) {
 		return flow{}, false
 	}
 	var f flow
-	if json.Unmarshal(b, &f) != nil || f.Challenge == "" || f.Nonce == "" || f.Verifier == "" {
+	if json.Unmarshal(b, &f) != nil || f.Challenge == "" || f.Nonce == "" || f.Verifier == "" || f.Callback == "" || f.RP == "" {
 		return flow{}, false
 	}
 	if s.now().Unix() > f.Expires {
@@ -155,8 +200,8 @@ func (s *Server) ferundFailed(w http.ResponseWriter, what string, err error) {
 
 // openChallenge opens a challenge at ferund and answers the browser where
 // that ends the request: ok is false then.
-func (s *Server) openChallenge(w http.ResponseWriter, r *http.Request, sealed string) (challengeView, bool) {
-	ch, err := s.ferund.openChallenge(r.Context(), sealed)
+func (s *Server) openChallenge(ctx context.Context, w http.ResponseWriter, sealed string) (challengeView, bool) {
+	ch, err := s.ferund.openChallenge(ctx, sealed)
 	switch {
 	case statusOf(err) == http.StatusNotFound:
 		page(w, http.StatusBadRequest, msgNotValid)
@@ -235,7 +280,7 @@ func (s *Server) visit(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusBadRequest, msgNotValid)
 		return
 	}
-	ch, ok := s.openChallenge(w, r, sealed)
+	ch, ok := s.openChallenge(r.Context(), w, sealed)
 	if !ok {
 		return
 	}
@@ -243,7 +288,19 @@ func (s *Server) visit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := discover(r.Context(), rp.p)
+	cb, ok := callbackOf(ch)
+	if !ok {
+		s.log.Error("ferun-auth: ferund gave a challenge whose provider has no callback path", "env", ch.Environment.ID)
+		page(w, http.StatusBadGateway, msgUnavailable)
+		return
+	}
+	done, ok := s.issuers.enter(rp.issuer)
+	if !ok {
+		s.issuerFailed(w, ch, errBusy)
+		return
+	}
+	d, err := s.issuers.discover(r.Context(), rp)
+	done()
 	if err != nil {
 		s.issuerFailed(w, ch, err)
 		return
@@ -258,7 +315,7 @@ func (s *Server) visit(w http.ResponseWriter, r *http.Request) {
 	}
 	k := flowKey(state)
 	value, err := s.sealFlow(k, flow{Challenge: sealed, Nonce: nonce, Verifier: verifier,
-		Expires: s.now().Add(flowLifetime).Unix()})
+		Expires: s.now().Add(flowLifetime).Unix(), Callback: cb, RP: rpDigest(rp)})
 	if err != nil {
 		s.log.Error("ferun-auth: seal the flow", "err", err)
 		page(w, http.StatusInternalServerError, msgUnavailable)
@@ -278,7 +335,7 @@ func (s *Server) visit(w http.ResponseWriter, r *http.Request) {
 	q := auth.Query()
 	q.Set("response_type", "code")
 	q.Set("client_id", rp.clientID)
-	q.Set("redirect_uri", s.redirectURI())
+	q.Set("redirect_uri", s.redirectURI(cb))
 	q.Set("scope", strings.Join(s.cfg.Scopes, " "))
 	q.Set("state", state)
 	q.Set("nonce", nonce)
@@ -328,9 +385,17 @@ func (s *Server) oldFlows(r *http.Request) []string {
 	return out
 }
 
-// callback is GET /callback?code=…&state=… (or error=…): the browser comes
-// back from the issuer, and goes on to the ingress with ferund's code.
-func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
+// callbackBudget bounds a callback's calls together (ferund's open, the
+// issuer's discovery, token, key set and userinfo, ferund's answer): the
+// browser gets its answer before the Gateway's 15 s give up on it.
+const callbackBudget = 12 * time.Second
+
+// callback is GET /callback/<cb>?code=…&state=… (or error=…), cb the
+// provider's callback path: the browser comes back from the issuer, and
+// goes on to the ingress with ferund's code.
+func (s *Server) callback(w http.ResponseWriter, r *http.Request, cb string) {
+	ctx, cancel := context.WithTimeout(r.Context(), callbackBudget)
+	defer cancel()
 	q := r.URL.Query()
 	state := q.Get("state")
 	if state == "" || len(state) > maxState {
@@ -358,7 +423,14 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusBadRequest, msgCannotFinish)
 		return
 	}
-	ch, ok := s.openChallenge(w, r, f.Challenge)
+	// The issuer answered at another provider's redirect URI than the
+	// flow's: a code of one provider brought to another's flow.
+	if cb != f.Callback {
+		s.log.Warn("ferun-auth: a callback at another provider's redirect URI than its flow's", "at", cb, "flow", f.Callback)
+		page(w, http.StatusBadRequest, msgCannotFinish)
+		return
+	}
+	ch, ok := s.openChallenge(ctx, w, f.Challenge)
 	if !ok {
 		return
 	}
@@ -366,8 +438,31 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// RFC 9207: an issuer that names itself must be the one asked.
-	if iss, named := q["iss"]; named && (len(iss) != 1 || iss[0] != rp.issuer) {
+	// The provider changed since the flow began (its issuer or client, or
+	// the environment's provider): finish nothing of the old one.
+	if now, ok := callbackOf(ch); !ok || now != f.Callback || rpDigest(rp) != f.RP {
+		s.log.Warn("ferun-auth: the challenge's provider is not the one its sign-in began with", "env", ch.Environment.ID,
+			"provider", ch.Provider.Name)
+		page(w, http.StatusBadRequest, msgCannotFinish)
+		return
+	}
+	done, ok := s.issuers.enter(rp.issuer)
+	if !ok {
+		s.issuerFailed(w, ch, errBusy)
+		return
+	}
+	defer done()
+	d, err := s.issuers.discover(ctx, rp)
+	if err != nil {
+		s.issuerFailed(w, ch, err)
+		return
+	}
+	// RFC 9207: an issuer that names itself must be the one asked, and one
+	// that says it always does must have.
+	iss, named := q["iss"]
+	if named && (len(iss) != 1 || iss[0] != rp.issuer) || !named && d.IssParameterSupported {
+		s.log.Warn("ferun-auth: the callback's iss is not the issuer's", "env", ch.Environment.ID, "provider", ch.Provider.Name,
+			"named", named)
 		page(w, http.StatusBadRequest, msgCannotFinish)
 		return
 	}
@@ -376,7 +471,8 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusBadRequest, msgCannotFinish)
 		return
 	}
-	v, err := s.signIn(r.Context(), rp.p, code, f)
+	v, err := s.signIn(ctx, rp.p, d, code, f)
+	done()
 	if err != nil {
 		s.issuerFailed(w, ch, err)
 		return
@@ -388,19 +484,18 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	var a answer
 	if ch.Provider.Kind == kindOIDC && !ch.OIDC.Rule.admits(v) {
-		a, err = s.ferund.reject(r.Context(), f.Challenge)
+		a, err = s.ferund.reject(ctx, f.Challenge)
 		s.log.Info("ferun-auth: the provider's rule does not admit the visitor", "env", ch.Environment.ID,
 			"tenant", ch.Environment.Tenant, "provider", ch.Provider.Name)
 	} else {
-		a, err = s.ferund.accept(r.Context(), acceptBody{Challenge: f.Challenge, Subject: v.Sub, Email: verifiedEmail(v),
-			Name: clip(v.Name, maxName), Session: optional(v.Session, maxSession)})
+		a, err = s.ferund.accept(ctx, s.acceptOf(ch, f.Challenge, v))
 	}
 	switch {
 	case statusOf(err) == http.StatusNotFound:
 		page(w, http.StatusBadRequest, msgNotValid)
 		return
 	case statusOf(err) == http.StatusConflict && (codeOf(err) == "challenge_expired" || codeOf(err) == "challenge_answered"):
-		if ch, ok := s.openChallenge(w, r, f.Challenge); ok {
+		if ch, ok := s.openChallenge(ctx, w, f.Challenge); ok {
 			// Neither expired nor answered after all: begin again anyway.
 			seeOther(w, ch.Restart)
 		}
@@ -419,15 +514,28 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	seeOther(w, a.Redirect)
 }
 
+// acceptOf is the accept of a visitor: the email only when verified, and
+// what ferund would refuse left out, logged without its value: a dropped
+// session means the issuer's back-channel logout cannot end the visit.
+func (s *Server) acceptOf(ch challengeView, challenge string, v visitor) acceptBody {
+	a := acceptBody{Challenge: challenge, Subject: v.Sub, Email: verifiedEmail(v), Name: clip(v.Name, maxName),
+		Session: optional(v.Session, maxSession)}
+	if v.Session != "" && a.Session == "" {
+		s.log.Warn("ferun-auth: the issuer's session ID cannot be a visit's, so its back-channel logout cannot end the visit",
+			"env", ch.Environment.ID, "provider", ch.Provider.Name, "bytes", len(v.Session))
+	}
+	if v.EmailVerified && v.Email != "" && a.Email == "" {
+		s.log.Warn("ferun-auth: the issuer's email cannot be a visit's; the visit is made without it",
+			"env", ch.Environment.ID, "provider", ch.Provider.Name, "bytes", len(v.Email))
+	}
+	return a
+}
+
 // signIn trades the issuer's code for the visitor: the code exchange with
 // the flow's PKCE verifier, the ID token with its nonce, userinfo as
 // ferund's own sign-in reads it.
-func (s *Server) signIn(ctx context.Context, p *oidc.Provider, code string, f flow) (visitor, error) {
-	d, err := discover(ctx, p)
-	if err != nil {
-		return visitor{}, err
-	}
-	toks, err := p.Exchange(ctx, d, code, s.redirectURI(), f.Verifier)
+func (s *Server) signIn(ctx context.Context, p *oidc.Provider, d *oidc.Discovery, code string, f flow) (visitor, error) {
+	toks, err := p.Exchange(ctx, d, code, s.redirectURI(f.Callback), f.Verifier)
 	if err != nil {
 		return visitor{}, err
 	}

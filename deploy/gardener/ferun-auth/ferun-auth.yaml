@@ -21,7 +21,7 @@
 #                           other fails.
 #   oidc-client-ferun-auth  keys client_id and client_secret: ferun-auth's
 #                           client at OIDC_ISSUER, with the redirect URI
-#                           https://${AUTH_HOST}/callback and the back-channel
+#                           https://${AUTH_HOST}/callback/ferun and the back-channel
 #                           logout URI https://${AUTH_HOST}/backchannel/ferun
 #                           (backchannel_logout_session_required).
 # ferund learns where ferun-auth is from VISITOR_AUTH_URL
@@ -105,7 +105,9 @@ spec:
             # What no issuer fetch may reach: ferund's --deny-prefix, the
             # built-in set and the shoot's networks (DENY_PREFIXES); empty,
             # the built-in set. The blocks of AUTH_ALLOW_PREFIXES are the
-            # exception, for an issuer in a private network.
+            # exception, for an issuer in a private network; each also
+            # needs an egress rule of the NetworkPolicy below, added by
+            # hand (config.env.example).
             - name: FERUN_AUTH_DENY_PREFIX
               value: '${FERUN_DENY_PREFIX}'
             - name: FERUN_AUTH_ALLOW_PREFIX
@@ -253,7 +255,9 @@ spec:
               gateway.envoyproxy.io/owning-gateway-name: ${GATEWAY_NAME}
       ports:
         - { protocol: TCP, port: 10443 }
-    # Issuers on the internet.
+    # Issuers on the internet. An issuer in a private block that
+    # AUTH_ALLOW_PREFIXES allows needs a rule of its own here, added by
+    # hand: an ipBlock of that block and the issuer's port.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

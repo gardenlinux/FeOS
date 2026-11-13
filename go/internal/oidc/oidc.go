@@ -63,6 +63,10 @@ type Discovery struct {
 	UserinfoEndpoint      string `json:"userinfo_endpoint"`
 	JWKSURI               string `json:"jwks_uri"`
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
+	// IssParameterSupported: the issuer names itself in every
+	// authorization response (RFC 9207), so a response without iss is
+	// not its.
+	IssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
 }
 
 // ErrProvider is a failure to talk to the provider (unreachable, an

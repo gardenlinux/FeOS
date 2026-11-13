@@ -194,7 +194,7 @@ describe('the tenant, with the session', () => {
 
   it("reads and writes the tenant's access providers by name, the client secret kept with {\"set\": true} (ADR 0054)", async () => {
     setActiveTenant('acme');
-    const list = { providers: [{ name: 'ferun', kind: 'ferun', builtIn: true, environments: [] }], kinds: ['tenant'], redirectUri: '' };
+    const list = { providers: [{ name: 'ferun', kind: 'ferun', builtIn: true, environments: [] }], kinds: ['tenant'] };
     answer(200, list);
     expect(await api.listProviders()).toEqual(list);
     expect(calls[0].path).toBe('/api/v1/providers');

@@ -114,7 +114,7 @@ func TestVisitsWithTheSecretKey(t *testing.T) {
 	}
 	var list visits.ProviderList
 	if err := json.Unmarshal([]byte(body), &list); err != nil || !slices.Equal(list.Kinds, []string{"tenant"}) ||
-		list.RedirectURI != "" || len(list.Providers) != 1 || list.Providers[0].Name != "ferun" {
+		strings.Contains(body, "redirectUri") || len(list.Providers) != 1 || list.Providers[0].Name != "ferun" {
 		t.Fatalf("providers %s (%v)", body, err)
 	}
 	if code, body := serveAPI(t, i, "POST", "/api/v1/environments", `{"name":"stage"}`); code/100 != 2 {
@@ -144,7 +144,7 @@ func TestVisitsWithTheSecretKey(t *testing.T) {
 	}
 	code, body = serveAPI(t, j, "GET", "/api/v1/providers", "")
 	if err := json.Unmarshal([]byte(body), &list); code != http.StatusOK || err != nil ||
-		!slices.Equal(list.Kinds, []string{"tenant", "oidc"}) || list.RedirectURI != "https://auth.example.test/callback" {
+		!slices.Equal(list.Kinds, []string{"tenant", "oidc"}) {
 		t.Fatalf("providers with ferun-auth: %d %s (%v)", code, body, err)
 	}
 	// ferun-auth's host is reserved: no domain, no tenant of its name.

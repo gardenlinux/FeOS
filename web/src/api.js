@@ -568,8 +568,9 @@ export const api = {
   // tenant's own service; kind oidc {issuer, clientId, clientSecret,
   // rule}, an issuer ferun-auth signs in with; ferun, built in, every
   // tenant's without being made. The list answers {providers (ferun
-  // first), kinds (those this installation serves), redirectUri (the one
-  // to register at an issuer, "" without ferun-auth)}. A read answers
+  // first), kinds (those this installation serves)}; a provider of kind
+  // oidc names the redirect URI and back-channel URI its issuer
+  // registers, its own (none without ferun-auth). A read answers
   // the client secret {"set": true}; a put sends the whole provider,
   // {"set": true} keeping the stored secret (201 made, 200 changed or
   // unchanged); a delete of one an environment names is 409

@@ -412,7 +412,7 @@ func TestProviderRoutes(t *testing.T) {
 		return n
 	}
 	expect(t, e.do("GET", "/api/v1/providers", tok, nil), http.StatusOK,
-		`{"providers":[{"name":"ferun","kind":"ferun","builtIn":true,"environments":[]}],"kinds":["tenant"],"redirectUri":""}`+"\n")
+		`{"providers":[{"name":"ferun","kind":"ferun","builtIn":true,"environments":[]}],"kinds":["tenant"]}`+"\n")
 	if c := fv.last(t); c.method != "ListProviders" || c.tenant != testTenant {
 		t.Fatalf("list %+v", c)
 	}

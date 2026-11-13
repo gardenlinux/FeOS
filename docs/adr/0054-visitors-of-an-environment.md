@@ -220,10 +220,14 @@ tenants name.
   no state: a sign-in in flight lives in a sealed cookie on its host,
   and the long session is the issuer's.
 - It has a host of its own, where the platform's hosts are served, never
-  a path of `ferund`'s host. That host carries the one redirect URI an
-  issuer needs for the installation, whatever hosts and domains its
-  environments have, and takes the issuers' back-channel logouts, which
-  end the visits of a session.
+  a path of `ferund`'s host. That host carries the redirect URIs, one
+  per provider whatever hosts and domains its environments have, and
+  takes the issuers' back-channel logouts, which end the visits of a
+  session. A sign-in is finished only at its own provider's redirect URI,
+  with the issuer and client it began with, and the issuer's `iss` where
+  it says it sends one: with one URI for all, a tenant's issuer could
+  pass the browser on to another issuer and read that issuer's code at
+  its own token endpoint (the OAuth mix-up).
 - To `ferund` it is a caller with a service token of its own kind. With
   it, it reads and answers challenges of environments whose provider is
   of kind `ferun` or `oidc`, reads those providers with their secrets,

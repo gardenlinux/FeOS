@@ -270,14 +270,18 @@ type ProviderIn struct {
 
 // Provider is a provider as answered.
 type Provider struct {
-	Name           string   `json:"name"`
-	Kind           string   `json:"kind"`
-	BuiltIn        bool     `json:"builtIn"`
-	URL            string   `json:"url,omitempty"`
-	Issuer         string   `json:"issuer,omitempty"`
-	ClientID       string   `json:"clientId,omitempty"`
-	ClientSecret   *Secret  `json:"clientSecret,omitempty"`
-	Rule           *Rule    `json:"rule,omitempty"`
+	Name         string  `json:"name"`
+	Kind         string  `json:"kind"`
+	BuiltIn      bool    `json:"builtIn"`
+	URL          string  `json:"url,omitempty"`
+	Issuer       string  `json:"issuer,omitempty"`
+	ClientID     string  `json:"clientId,omitempty"`
+	ClientSecret *Secret `json:"clientSecret,omitempty"`
+	Rule         *Rule   `json:"rule,omitempty"`
+	// RedirectURI and BackchannelURI, for kind oidc with ferun-auth, are
+	// what the tenant registers at its issuer: ferun-auth's
+	// /callback/<tenant>/<provider> and /backchannel/<tenant>/<provider>.
+	RedirectURI    string   `json:"redirectUri,omitempty"`
 	BackchannelURI string   `json:"backchannelUri,omitempty"`
 	Environments   []EnvRef `json:"environments"`
 	CreatedAt      string   `json:"createdAt,omitempty"`
@@ -286,9 +290,8 @@ type Provider struct {
 
 // ProviderList is GET /api/v1/providers' answer.
 type ProviderList struct {
-	Providers   []Provider `json:"providers"`
-	Kinds       []string   `json:"kinds"`
-	RedirectURI string     `json:"redirectUri"`
+	Providers []Provider `json:"providers"`
+	Kinds     []string   `json:"kinds"`
 }
 
 // EnvView is an environment as a provider sees it.

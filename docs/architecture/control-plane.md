@@ -3864,15 +3864,21 @@ built-in `ferun`), written only by a publish. `PUT
 
 | Route | Need | Answer |
 |---|---|---|
-| `GET /api/v1/providers` | member | `{"providers": [ferun first, then by name], "kinds": [the kinds served], "redirectUri": "<--visitor-auth-url>/callback" or ""}` |
+| `GET /api/v1/providers` | member | `{"providers": [ferun first, then by name], "kinds": [the kinds served]}` |
 | `GET /api/v1/providers/{provider}` | member | the provider; 404 `no such provider`; `ferun` always exists |
 | `PUT /api/v1/providers/{provider}` | admin on the tenant | 201 with the provider when made; 200 when changed or unchanged (an unchanged PUT writes nothing) |
 | `DELETE /api/v1/providers/{provider}` | admin on the tenant | 200 `{"deleted": true}`; 404 `no such provider`; 409 `reserved_name` for `ferun`; 409 `provider_in_use` "provider %s is named by %d environments" while an environment names it (the foreign key) |
 
 A provider as answered: `{name, kind, builtIn, url?, issuer?, clientId?,
-clientSecret?: {"set": true}, rule?, backchannelUri?, environments:
-[{id, name}], createdAt?, updatedAt?}`, `environments` the tenant's
-environments with access `visitors` naming it. The client secret is never
+clientSecret?: {"set": true}, rule?, redirectUri?, backchannelUri?,
+environments: [{id, name}], createdAt?, updatedAt?}`, `environments` the
+tenant's environments with access `visitors` naming it. A provider of
+kind `oidc` names, with `--visitor-auth-url`, the URIs its issuer
+registers, its own: `redirectUri` `<--visitor-auth-url>/callback/<tenant>/<provider>`
+and `backchannelUri` `<--visitor-auth-url>/backchannel/<tenant>/<provider>`
+(each provider its own redirect URI: `ferun-auth` finishes a code only at
+the one its sign-in began with, so that one issuer's code is never taken
+for another's, the OAuth mix-up). The client secret is never
 answered here. The PUT's body:
 
 - `{"kind": "tenant", "url": "https://…"}`: the tenant's own service, an

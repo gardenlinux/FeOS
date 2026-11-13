@@ -316,11 +316,27 @@ func (h *harness) toIssuer(rec *httptest.ResponseRecorder) (string, string) {
 	return loc, u.Query().Get("state")
 }
 
-// callback is the browser's GET /callback after the issuer signed it in.
+// callback is the browser's GET of the redirect URI after the issuer
+// signed it in.
 func (h *harness) callback(loc, state string, claims map[string]any) *httptest.ResponseRecorder {
 	h.t.Helper()
 	code := h.issuer.Issue(loc, claims)
-	return h.do("GET", "/callback?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state), navigation, "")
+	return h.do("GET", cbPath(h.t, loc)+"?code="+url.QueryEscape(code)+"&state="+url.QueryEscape(state), navigation, "")
+}
+
+// cbPath is the path of the redirect URI an authorization request names,
+// which must be ferun-auth's.
+func cbPath(t *testing.T, loc string) string {
+	t.Helper()
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ru, err := url.Parse(u.Query().Get("redirect_uri"))
+	if err != nil || ru.Scheme+"://"+ru.Host != testPublic || !strings.HasPrefix(ru.Path, callbackPrefix) || ru.RawQuery != "" {
+		t.Fatalf("redirect_uri %q", u.Query().Get("redirect_uri"))
+	}
+	return ru.Path
 }
 
 // wantPage checks a page's status and text and its headers.

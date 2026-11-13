@@ -487,7 +487,9 @@ of its own on the Gateway. Its program ships in ferund's image
 (`http://ferund.ferun.svc:8100`) with a service token of its own kind,
 and fetches from issuers only at public addresses: never ferund's deny
 set (`FERUN_DENY_PREFIX`) but the blocks of `AUTH_ALLOW_PREFIXES`, its
-NetworkPolicy beside. Visits need ferund's `--secret-key-file`.
+NetworkPolicy beside. A block `AUTH_ALLOW_PREFIXES` allows also needs
+an egress rule of that NetworkPolicy, added by hand (the rendered one
+drops the private blocks). Visits need ferund's `--secret-key-file`.
 
 Setting it up, with every instance of ferund and ferun-ingress on a
 version that knows visitors, and `VISITOR_AUTH_URL` still empty:
@@ -499,11 +501,15 @@ version that knows visitors, and `VISITOR_AUTH_URL` still empty:
 
 2. ferun-auth's service token at ferund:
 
-       kubectl -n ferun exec deploy/ferund -- /ferund service-token --kind auth --name ferun-auth
-       kubectl -n ferun create secret generic ferun-auth-token --from-literal=token=<token>
+       kubectl -n ferun exec deploy/ferund -- /ferund service-token --kind auth --name ferun-auth |
+         kubectl -n ferun create secret generic ferun-auth-token --from-file=token=/dev/stdin
+
+   The token goes straight into the Secret, never to the terminal or the
+   shell's history.
 
 3. Its client at `OIDC_ISSUER`, for kind `ferun`: the redirect URI
-   `https://<AUTH_HOST>/callback`, the back-channel logout URI
+   `https://<AUTH_HOST>/callback/ferun` (only that one: each provider has
+   its own), the back-channel logout URI
    `https://<AUTH_HOST>/backchannel/ferun` with
    `backchannel_logout_session_required`, the grant
    `authorization_code`, the scopes `openid profile email`,
@@ -523,9 +529,10 @@ version that knows visitors, and `VISITOR_AUTH_URL` still empty:
 5. ferund told where ferun-auth is: `VISITOR_AUTH_URL=https://<AUTH_HOST>`
    in `config.env`, then `apply-ferun`. Once that rollout has finished,
    `GET /api/v1/providers` answers the kinds `tenant`, `ferun` and
-   `oidc` and the redirect URI a tenant registers at its own issuer for a
-   provider of kind `oidc`, with the back-channel URI
-   `https://<AUTH_HOST>/backchannel/<tenant>/<provider>` its view names.
+   `oidc`, and a provider of kind `oidc` names the URIs its tenant
+   registers at its own issuer: the redirect URI
+   `https://<AUTH_HOST>/callback/<tenant>/<provider>` and the back-channel
+   URI `https://<AUTH_HOST>/backchannel/<tenant>/<provider>`.
 
 A new image: `make -C deploy/gardener deploy-ferun-auth TAG=<tag>`
 pushes ferund's image and rolls ferun-auth. Without ferun-auth, sign-ins
