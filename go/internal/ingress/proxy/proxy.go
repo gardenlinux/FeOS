@@ -750,6 +750,7 @@ func (q *request) run(v *view, tg target) {
 	p := q.p
 	var exclude map[string]bool
 	retried := false
+	reroutes := 0
 	for {
 		if ep, port, info := p.pick(v, tg, exclude); ep != nil {
 			p.leave(&q.wait)
@@ -758,15 +759,25 @@ func (q *request) run(v *view, tg target) {
 			}
 			release, refused := p.acquire(q.r.Context(), tg.svc, ep)
 			if !refused {
-				if !q.forward(v, tg, ep, port, exclude, !retried, release) {
+				switch q.forward(v, tg, ep, port, exclude, !retried, release) {
+				case attemptAnswered:
 					return
+				case attemptRerouted:
+					// A newer table cut the attempt: no fault of the
+					// instance's, so no retry used up and the instance not
+					// left out; the request routes by that table.
+					if reroutes++; reroutes > maxReroutes {
+						reply{http.StatusBadGateway, textNoAnswer, 0}.write(q.w)
+						return
+					}
+				case attemptFailed:
+					p.m.retries.Add(1)
+					retried = true
+					if exclude == nil {
+						exclude = map[string]bool{}
+					}
+					exclude[ep.instance] = true
 				}
-				p.m.retries.Add(1)
-				retried = true
-				if exclude == nil {
-					exclude = map[string]bool{}
-				}
-				exclude[ep.instance] = true
 			} else {
 				p.skip(ep.instance)
 			}
@@ -905,9 +916,28 @@ func (p *Proxy) candidates(v *view, tg target, exclude map[string]bool) (eps []*
 	return eps, false, info
 }
 
-// forward sends the request to one endpoint. It reports whether the
-// attempt failed so that the request goes to another endpoint, which
-// then answers; otherwise the request is answered.
+// attemptEnd is how an attempt ended (forward).
+type attemptEnd int
+
+const (
+	// attemptAnswered: the request is answered.
+	attemptAnswered attemptEnd = iota
+	// attemptFailed: the attempt failed, and the request goes to another
+	// endpoint (its one retry).
+	attemptFailed
+	// attemptRerouted: a newer table cut the attempt before it could
+	// have reached the app, or one that may be sent again: the request
+	// routes by that table, its retry kept.
+	attemptRerouted
+)
+
+// maxReroutes bounds the re-routes of one request after tables cut its
+// attempts.
+const maxReroutes = 8
+
+// forward sends the request to one endpoint. It reports how the attempt
+// ended: answered; failed, so that the request goes to another endpoint,
+// which then answers; or cut by a newer table, so that it routes again.
 //
 // release ends the request's count at the hold manager when the attempt
 // ends, also when it ends in a panic: ReverseProxy aborts a response
@@ -920,7 +950,7 @@ func (p *Proxy) candidates(v *view, tg target, exclude map[string]bool) (eps []*
 // beyond MaxConnsPerEndpoint without a bound of its own. What comes
 // after, the answer, is not bounded.
 func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude map[string]bool,
-	mayRetry bool, release func()) (again bool) {
+	mayRetry bool, release func()) (end attemptEnd) {
 	p := q.p
 	q.attempts++
 	q.instance = ep.instance
@@ -984,23 +1014,42 @@ func (q *request) forward(v *view, tg target, ep *endpoint, port int, exclude ma
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			if !responded && context.Cause(ctx) == errAccessChanged && q.r.Context().Err() == nil {
 				// A newer table no longer admits the attempt before it
-				// was answered: the instance is not at fault. When nothing
-				// of the body was read, the request routes again by that
-				// table, which answers it (or checks its visit again).
-				if q.body.untouched() {
-					again = true
+				// was answered: the instance is not at fault. When the
+				// request cannot have reached the app (no connection yet,
+				// nothing of the body read), or may be sent again (an
+				// idempotent method without a body), it routes again by
+				// that table, which answers it (or checks its visit
+				// again). Otherwise it is not sent again: that table's
+				// visit check answers it.
+				sent := cw.connected()
+				if !sent && q.body.untouched() || sent && q.body == nil && idempotent(q.r.Method) {
+					end = attemptRerouted
 					return
 				}
-				reply{http.StatusBadGateway, textNoAnswer, 0}.write(q.w)
+				q.answerCut()
 				return
 			}
-			again = q.failed(v, tg, ep, port, exclude, mayRetry, responded, cw.gaveUp(), err)
+			if q.failed(v, tg, ep, port, exclude, mayRetry, responded, cw.gaveUp(), err) {
+				end = attemptFailed
+			}
 		},
 		ErrorLog: p.errLog,
 	}
 	rp.ServeHTTP(q.w, q.r.WithContext(ctx))
 	returned = true
-	return again
+	return end
+}
+
+// answerCut answers a request whose attempt a newer table cut after it
+// may have reached the app, and which is not sent again: by that table's
+// visit check where its host is guarded now (401, or the sign-in), else
+// 502.
+func (q *request) answerCut() {
+	v := q.p.cur.Load()
+	if tg, rep := v.t.route(q.host, q.raw, q.client); rep == nil && tg.env != nil && tg.env.guarded() && !q.checkVisit(v, tg) {
+		return
+	}
+	reply{http.StatusBadGateway, textNoAnswer, 0}.write(q.w)
 }
 
 // errConnWait ends an attempt that waited ConnWaitTimeout for a
@@ -1079,6 +1128,14 @@ func (w *connWait) gotConn(httptrace.GotConnInfo) {
 	case connGaveUp:
 		w.state = connLate
 	}
+}
+
+// connected reports whether the attempt had a connection to the
+// instance, so that the request may have been written.
+func (w *connWait) connected() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.state == connHave || w.state == connLate
 }
 
 // gaveUp reports whether the attempt ended because a wait for a

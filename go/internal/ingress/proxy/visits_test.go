@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1696,9 +1697,81 @@ func TestVisitGuardingDuringTheDial(t *testing.T) {
 	p.SetState(visitState(k, testSignIn, web))
 	close(gate)
 	wantPlain(t, <-done, http.StatusUnauthorized, textVisitRequired)
-	if p.m.dialErrors.Load() != 0 || p.m.responseErrors.Load() != 0 || len(p.cooling) != 0 {
-		t.Errorf("dial errors %d, response errors %d, cooling %v", p.m.dialErrors.Load(), p.m.responseErrors.Load(),
-			p.cooling)
+	if p.m.dialErrors.Load() != 0 || p.m.responseErrors.Load() != 0 || len(p.cooling) != 0 || p.m.retries.Load() != 0 {
+		t.Errorf("dial errors %d, response errors %d, cooling %v, retries %d", p.m.dialErrors.Load(), p.m.responseErrors.Load(),
+			p.cooling, p.m.retries.Load())
+	}
+}
+
+// A request whose attempt a newer table cuts after it was sent (the app
+// has it and has not answered) is sent again only when it may be: a GET
+// without a body goes by the new table, without using up its retry; a
+// POST, though it has no body, is not sent again, and is answered by the
+// new table's visit check (401) where the host turned guarded, else 502.
+func TestVisitCutAfterTheRequestWasSent(t *testing.T) {
+	const otherEnv = "8a6b3c62-6d4f-4b55-9a49-3a1c2c1b0f02"
+	for _, tc := range []struct {
+		name, method string
+		guard        bool
+		status       int
+		text         string
+		web2         int32
+	}{
+		{"GET to another environment", "GET", false, http.StatusOK, "", 1},
+		{"POST to another environment", "POST", false, http.StatusBadGateway, textNoAnswer, 0},
+		{"POST to a guarded environment", "POST", true, http.StatusUnauthorized, textVisitRequired, 0},
+		{"GET to a guarded environment", "GET", true, http.StatusUnauthorized, textVisitRequired, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fn := newFakeNet()
+			var web1, web2 atomic.Int32
+			entered := make(chan struct{}, 4)
+			handlerAt(t, fn, "fd00::1", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				web1.Add(1)
+				entered <- struct{}{}
+				<-r.Context().Done()
+			}))
+			handlerAt(t, fn, "fd00::2", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				web2.Add(1)
+				_, _ = io.WriteString(w, "web2")
+			}))
+			k := newKeys(t)
+			p, srv := newTestProxy(t, Config{}, Deps{Visits: newFakeVisits(k)}, fn, "n1")
+			open := testState(svc("web", ep("w1", "fd00::1", "n1")))
+			open.VisitKeys = wireKeys(k)
+			p.SetState(open)
+			done := make(chan result, 1)
+			go func() { done <- send(context.Background(), srv, tc.method, testHost, "/", nil) }()
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the request did not reach the app")
+			}
+			var next *wire.State
+			if tc.guard {
+				next = visitState(k, testSignIn, svc("web", ep("w1", "fd00::1", "n1")))
+			} else {
+				next = testState(svc("web", ep("w2", "fd00::2", "n1")))
+				next.VisitKeys = wireKeys(k)
+				e := next.Envs[testEnv]
+				delete(next.Envs, testEnv)
+				e.ID = otherEnv
+				next.Envs[otherEnv] = e
+			}
+			p.SetState(next)
+			r := <-done
+			if tc.text != "" {
+				wantPlain(t, r, tc.status, tc.text)
+			} else if r.err != nil || r.status != tc.status || r.body != "web2" {
+				t.Fatalf("got %d %q (%v)", r.status, r.body, r.err)
+			}
+			if web1.Load() != 1 || web2.Load() != tc.web2 {
+				t.Fatalf("the first app got %d requests, the second %d; want 1 and %d", web1.Load(), web2.Load(), tc.web2)
+			}
+			if n := p.m.retries.Load(); n != 0 {
+				t.Fatalf("%d retries counted for a table's cut", n)
+			}
+		})
 	}
 }
 
