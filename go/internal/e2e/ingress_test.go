@@ -35,6 +35,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/podid"
 	engine "github.com/gardenlinux/feos/go/internal/sandbox"
 	"github.com/gardenlinux/feos/go/internal/store"
+	"github.com/gardenlinux/feos/go/internal/visit"
 )
 
 // The ingress's scenarios (ADR 0021, §10 of its design): ferund
@@ -69,8 +70,9 @@ func appSpec(replicas int, idle, version string) string {
 // apps are the replicas of the image services: an HTTP server per pod,
 // started at the pod's first bring-up on a node and mapped as its port
 // appPort there. A replica answers GET /healthz with 200, and anything
-// else with its pod and what it was sent (podOf reads the pod), /slow
-// only once the test lets it (releaseSlow).
+// else with its pod and what it was sent (podOf reads the pod): the
+// host, the path, the forwarded headers, the visitor's headers and the
+// cookies; /slow only once the test lets it (releaseSlow).
 type apps struct {
 	mu      sync.Mutex
 	servers map[podid.ID]*httptest.Server
@@ -122,8 +124,9 @@ func (a *apps) handler(pod podid.ID) http.Handler {
 				return
 			}
 		}
-		fmt.Fprintf(w, "pod=%s host=%s path=%s for=%s proto=%s", pod, r.Host, r.URL.Path,
-			r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"))
+		fmt.Fprintf(w, "pod=%s host=%s path=%s for=%s proto=%s visitor=%s email=%s token=%t cookie=%q", pod, r.Host, r.URL.Path,
+			r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"), r.Header.Get(visit.HeaderSubject),
+			r.Header.Get(visit.HeaderEmail), r.Header.Get(visit.HeaderToken) != "", r.Header.Get("Cookie"))
 	})
 }
 
