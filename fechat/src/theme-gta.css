@@ -1,0 +1,501 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The Vice City theme, after Grand Theft Auto VI's artwork. What makes that
+   artwork recognisable, and what this file takes from it:
+
+   - the hour: dusk in pastel, a sky from lilac over pink to peach, palms
+     and a hazy skyline in violet - a light theme, not a neon night;
+   - the frame: the cover's deep aubergine between its panels, here every
+     panel's fill (code, tool calls, the composer, one's own messages) and
+     the colour of the text on the sky;
+   - the lettering: heavy, white, with an aubergine outline and a thin
+     bright line around it;
+   - the numeral: a gradient from blue over violet and pink to orange,
+     ringed in purple - here the bolt.
+
+   theme.js sets data-theme="gta" on <html>. The tokens are those of
+   styles.css; they come twice, for the sky and for the dark panels on it.
+   The pictures (public/*-gta.svg) are drawn for this theme, none is
+   Rockstar's. Colours measured on the official key art, cover and logo. */
+
+:root[data-theme='gta'] {
+  --aubergine: #20002f;
+  /* on the sky: aubergine text, accents dark enough to read */
+  --bg: #e796a7;
+  --panel: var(--aubergine);
+  --panel-2: #3b1458;
+  --text: var(--aubergine);
+  --text-dim: #5a3572;
+  /* the assistant's colour: the numeral's blue */
+  --cyan: #4a36b8;
+  /* the user's: Vice City pink, darkened to read as text */
+  --magenta: #b0106b;
+  --yellow: #b0106b;
+  /* the menus' cards: cream */
+  --bg-rgb: 255 241 230;
+  --panel-2-rgb: 59 20 88;
+  --cyan-rgb: 74 54 184;
+  --magenta-rgb: 176 16 107;
+  --code-bg: var(--aubergine);
+  --code-bg-2: #2c0a40;
+  --shine: #fff3c4;
+  /* code is always on aubergine */
+  --hl-keyword: #ff5fa8;
+  /* the bay's water */
+  --hl-string: #5fe0cf;
+  --hl-number: #c9a0ff;
+  --hl-comment: #9a80b3;
+  --hl-title: #ffc070;
+  --hl-builtin: #9fb4ff;
+  /* in front the palms, then the horizon with the bay, the sun going down
+     behind the skyline (a glow in the haze, no disc), the sky */
+  --bg-image:
+    url('/palms-gta.svg'), url('/palm-gta.svg'), url('/skyline-gta.svg'),
+    radial-gradient(circle at 64% calc(100% - var(--horizon) * 0.42), #fffbe6 0, #fff0c2 2.4rem, rgb(255 228 170 / 0.6) 4.2rem, rgb(255 205 150 / 0.28) 9rem, transparent 19rem),
+    linear-gradient(to bottom, #b78bbc, #d390b9 25%, #e796a7 50%, #f6a594 75%, #fab9a5);
+  /* how high the horizon's strip stands */
+  --horizon: clamp(11rem, 34vh, 20rem);
+  --scanlines: 0;
+  /* the bolt in the numeral's gradient with its dark edge, no glitch */
+  --bolt-1: #4a5fd6;
+  --bolt-2: #7a45c4;
+  --bolt-3: #d446c6;
+  --bolt-4: #ff7a9c;
+  --bolt-5: #ff9a3d;
+  --bolt-glitch: var(--aubergine);
+  --bolt-glitch-opacity: 0;
+  --bolt-stroke: var(--aubergine);
+  /* the thin bright line around lettering and panels */
+  --line: linear-gradient(150deg, #ffb23f, #ff5fb0 55%, #9a4fd0);
+  --star: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2.2l2.9 6.6 7.1.7-5.4 4.8 1.6 7L12 17.6l-6.2 3.7 1.6-7L2 9.5l7.1-.7z'/%3E%3C/svg%3E");
+  --font-ui: 'Rubik', system-ui, sans-serif;
+  --font-display: 'Changa One', 'Rubik', system-ui, sans-serif;
+  /* sturdy and wide-shouldered like the lettering; loaded a step narrower
+     than its normal width, so a line of code holds what it held */
+  --font-code: 'Martian Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+}
+
+/* The dark panels on the sky: light text, the dusk's orange and pink as
+   lit accents, the supercar's yellow. */
+[data-theme='gta'] :is(.markdown pre, .markdown code, .tool-call, .composer textarea, .message.user .bubble, .avatar) {
+  --text: #fff4ea;
+  --text-dim: #bfa3d4;
+  --cyan: #ffa24d;
+  --magenta: #ff5fa8;
+  --yellow: #fdd156;
+  --panel-2: #4a1d6b;
+  --cyan-rgb: 255 162 77;
+  --magenta-rgb: 255 95 168;
+  --panel-2-rgb: 74 29 107;
+  color: var(--text);
+}
+
+[data-theme='gta'] body {
+  background-repeat: no-repeat, no-repeat, repeat-x, no-repeat, no-repeat;
+  background-position: left -3rem bottom, right -2rem bottom, center bottom, 0 0, 0 0;
+  background-size: auto min(88vh, 46rem), auto min(74vh, 40rem), auto var(--horizon), auto, auto;
+}
+
+/* narrow windows: the column is the whole width, so one small palm only */
+@media (max-width: 720px) {
+  [data-theme='gta'] body {
+    background-position: left -4rem bottom, right -100vw bottom, center bottom, 0 0, 0 0;
+    background-size: auto 52vh, 0 0, auto var(--horizon), auto, auto;
+  }
+}
+
+[data-theme='gta'] {
+  scrollbar-color: rgb(var(--panel-2-rgb) / 0.55) transparent;
+}
+
+[data-theme='gta'] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-theme='gta'] ::selection {
+  background: var(--aubergine);
+  color: #fff;
+}
+
+/* The lettering: white, an aubergine outline, and around it the thin
+   bright line, orange from the top left to violet at the bottom right. The
+   line is a drop shadow per side: a filter takes the outline with it, a
+   text-shadow would lie between the outline and the fill. --o is the
+   outline's width (half of it lies outside the letter), --l the line's. */
+[data-theme='gta'] :is(.logo-name, .empty h1, .markdown h1, .markdown h2, .logo .bolt) {
+  filter:
+    drop-shadow(0 calc(var(--l) * -1) 0 #ffb23f)
+    drop-shadow(calc(var(--l) * -1) 0 0 #ff9a52)
+    drop-shadow(var(--l) 0 0 #ff5fb0)
+    drop-shadow(0 var(--l) 0 #b94fd0);
+}
+
+[data-theme='gta'] :is(.logo-name, .empty h1, .markdown h1, .markdown h2) {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.015em;
+  word-spacing: 0.12em;
+  text-transform: none;
+  color: #fff;
+  -webkit-text-stroke: var(--o) var(--aubergine);
+  paint-order: stroke fill;
+  text-shadow: none;
+}
+
+[data-theme='gta'] .logo {
+  flex-shrink: 0;
+  gap: 0.3rem;
+  padding-bottom: 0.1rem;
+}
+
+[data-theme='gta'] .logo-name {
+  --o: 6px;
+  --l: 2px;
+  white-space: nowrap;
+  font-size: 1.9rem;
+  line-height: 1;
+}
+
+/* no glow on a bright sky */
+[data-theme='gta'] .bolt {
+  filter: none;
+  animation: none;
+}
+
+/* beside the name the bolt is drawn like it: a heavy outline, the line */
+[data-theme='gta'] .logo .bolt {
+  --l: 1.5px;
+  width: 2.3rem;
+  height: 2.3rem;
+  transform: none;
+  overflow: visible;
+}
+
+[data-theme='gta'] .logo .bolt-main {
+  stroke-width: 3;
+}
+
+/* The empty chat: the mark, large, and the greeting across it - the way
+   the logo sets its lettering across the numeral. */
+[data-theme='gta'] .empty {
+  position: relative;
+  isolation: isolate;
+}
+
+[data-theme='gta'] .empty::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: min(21rem, 62vw);
+  aspect-ratio: 1;
+  transform: translate(-50%, -52%) rotate(-4deg);
+  background: url('/mark-gta.svg') no-repeat center / contain;
+  filter: drop-shadow(0 0.8rem 1.6rem rgb(32 0 47 / 0.28));
+}
+
+[data-theme='gta'] .empty h1 {
+  --o: 10px;
+  --l: 3px;
+  font-size: clamp(2.6rem, 9vw, 4.6rem);
+  line-height: 1;
+  text-align: center;
+}
+
+[data-theme='gta'] .cursor {
+  text-shadow: none;
+}
+
+[data-theme='gta'] .empty h1 .cursor {
+  color: #fdd156;
+}
+
+[data-theme='gta'] .markdown :is(h1, h2) {
+  --o: 4px;
+  --l: 1.5px;
+  margin-top: 1em;
+  line-height: 1.15;
+}
+
+[data-theme='gta'] .markdown h1 { font-size: 1.9em; }
+[data-theme='gta'] .markdown h2 { font-size: 1.6em; }
+
+[data-theme='gta'] .markdown h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.25em;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+/* The panels: aubergine, the thin bright line a little inside their edge
+   (the line is the border, the edge a ring outside it), and the cover's
+   slant - no panel there is a rectangle. */
+[data-theme='gta'] :is(.message.user .bubble, .markdown pre, .composer textarea) {
+  border: 2px solid transparent;
+  border-radius: 3px;
+  background:
+    linear-gradient(var(--aubergine), var(--aubergine)) padding-box,
+    var(--line) border-box;
+  box-shadow:
+    0 0 0 3px var(--aubergine),
+    0 0.5rem 1.2rem rgb(32 0 47 / 0.22);
+}
+
+[data-theme='gta'] .message.user .bubble {
+  clip-path: none;
+  padding: 0.6rem 1rem;
+  margin: 3px;
+  transform: rotate(-0.6deg);
+}
+
+[data-theme='gta'] .markdown pre {
+  margin: 1em 3px;
+  padding: 0.9rem 1.1rem;
+  max-width: calc(100% - 6px);
+}
+
+/* the avatars: round badges. The agent's is the dusk itself, a smaller disc
+   in the same place, and the bolt in white like the lettering breaks out of
+   it; yours is a panel, the bright line inside its edge. */
+[data-theme='gta'] .avatar-shape {
+  display: none;
+}
+
+[data-theme='gta'] .avatar {
+  margin: 3px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background:
+    linear-gradient(var(--aubergine), var(--aubergine)) padding-box,
+    var(--line) border-box;
+  box-shadow:
+    0 0 0 3px var(--aubergine),
+    0 0.4rem 0.9rem rgb(32 0 47 / 0.25);
+}
+
+[data-theme='gta'] .message.assistant .avatar {
+  width: 2.4rem;
+  height: 2.4rem;
+  margin: calc(0.249rem + 3px);
+  border: 0;
+  background:
+    radial-gradient(circle at 50% 96%, #ffe9a8 0, #ffc46a 22%, transparent 52%),
+    linear-gradient(#4a5fd6, #7a45c4 30%, #d446c6 55%, #ff7a9c 78%, #ff9a3d);
+}
+
+[data-theme='gta'] .avatar .bolt {
+  flex-shrink: 0;
+  width: 3.6rem;
+  height: 3.6rem;
+  overflow: visible;
+  transform: rotate(6deg);
+}
+
+[data-theme='gta'] .avatar .bolt-main {
+  fill: #fff;
+  stroke-width: 2.4;
+}
+
+[data-theme='gta'] .avatar-inner.user {
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  transform: none;
+}
+
+/* inline code: a small aubergine tag, the supercar's yellow on it */
+[data-theme='gta'] .markdown :not(pre) > code {
+  border: 0;
+  border-radius: 3px;
+  padding: 0.15em 0.45em;
+}
+
+/* strong: the text's colour, marked in yellow */
+[data-theme='gta'] .markdown strong {
+  color: inherit;
+  background: linear-gradient(transparent 58%, rgb(253 209 86 / 0.9) 58%, rgb(253 209 86 / 0.9) 92%, transparent 92%);
+}
+
+[data-theme='gta'] .markdown a {
+  color: inherit;
+  font-weight: 500;
+  text-decoration-color: var(--magenta);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.15em;
+}
+
+[data-theme='gta'] .markdown blockquote {
+  border-left-width: 4px;
+  font-style: italic;
+}
+
+/* tables: an aubergine head, the cells a veil of white on the sky */
+[data-theme='gta'] .markdown :is(th, td) {
+  border: 2px solid var(--aubergine);
+  padding: 0.4em 0.8em;
+}
+
+[data-theme='gta'] .markdown th {
+  background: var(--aubergine);
+  color: #fff;
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  text-align: left;
+}
+
+[data-theme='gta'] .markdown td {
+  background: rgb(255 255 255 / 0.32);
+}
+
+[data-theme='gta'] .tool-call {
+  border: 0;
+  border-left: 4px solid var(--magenta);
+  border-radius: 3px;
+}
+
+[data-theme='gta'] .tool-call.pending {
+  border-left-color: var(--cyan);
+}
+
+/* a running tool: the wanted level, star by star, in place of the spinner */
+[data-theme='gta'] .tool-call .tool-spinner {
+  width: 5em;
+  height: 1em;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(var(--yellow), var(--yellow)) left / 0 100% no-repeat rgb(255 255 255 / 0.16);
+  -webkit-mask: var(--star) left / 20% 100% repeat-x;
+  mask: var(--star) left / 20% 100% repeat-x;
+  animation: wanted 2.4s steps(6, jump-none) infinite;
+}
+
+@keyframes wanted {
+  to { background-size: 100% 100%; }
+}
+
+/* the topbar's field: a veil of white with an aubergine edge */
+[data-theme='gta'] .image-input {
+  background: rgb(255 255 255 / 0.3);
+  border: 2px solid var(--aubergine);
+  border-radius: 3px;
+}
+
+[data-theme='gta'] .image-input:focus:not(:disabled),
+[data-theme='gta'] .image-input.ok {
+  background: rgb(255 255 255 / 0.55);
+  border-color: var(--aubergine);
+  color: var(--text);
+  box-shadow: 0 0 0 2px #fdd156;
+}
+
+[data-theme='gta'] .image-input.invalid {
+  background: rgb(255 255 255 / 0.55);
+  animation: none;
+  box-shadow: 0 0 0 2px var(--magenta);
+}
+
+[data-theme='gta'] .user-initial {
+  background: var(--aubergine);
+  color: #fff;
+}
+
+[data-theme='gta'] .user-button:is(:hover, :focus-visible, .open) {
+  box-shadow: 0 0 0 2px #fdd156;
+}
+
+/* the menus: cream cards with an aubergine edge, no glow */
+[data-theme='gta'] :is(.user-dropdown, .image-tooltip) {
+  border: 2px solid var(--aubergine);
+  box-shadow: 0 0.5rem 1.2rem rgb(32 0 47 / 0.3);
+}
+
+[data-theme='gta'] :is(.user-dropdown, .image-tooltip)::before {
+  top: -6px;
+  border-top: 2px solid var(--aubergine);
+  border-left: 2px solid var(--aubergine);
+}
+
+[data-theme='gta'] :is(.user-name, .image-tooltip-title) {
+  text-shadow: none;
+}
+
+[data-theme='gta'] .user-signout:is(:hover, :focus-visible) {
+  box-shadow: none;
+}
+
+[data-theme='gta'] .composer textarea {
+  margin: 3px;
+}
+
+[data-theme='gta'] .composer textarea::placeholder {
+  color: var(--text-dim);
+}
+
+[data-theme='gta'] .composer textarea:focus {
+  border-color: transparent;
+  box-shadow:
+    0 0 0 3px var(--aubergine),
+    0 0 0 5px #fdd156,
+    0 0.5rem 1.2rem rgb(32 0 47 / 0.22);
+}
+
+/* send: the supercar's yellow */
+[data-theme='gta'] .composer button {
+  margin: 3px 3px 3px 0.2rem;
+  border: 3px solid var(--aubergine);
+  border-radius: 3px;
+  clip-path: none;
+  color: var(--aubergine);
+  background: linear-gradient(170deg, #ffe27a, #fdd156 45%, #f7a83a);
+  box-shadow: 0 0.5rem 1.2rem rgb(32 0 47 / 0.22);
+}
+
+[data-theme='gta'] .composer button:hover:not(:disabled) {
+  background: linear-gradient(170deg, #fff0a8, #ffdc6a 45%, #ffb347);
+  box-shadow: 0 0.5rem 1.2rem rgb(32 0 47 / 0.22);
+  transform: translateY(-1px);
+}
+
+/* nothing to send: the same button, parked */
+[data-theme='gta'] .composer button:disabled {
+  opacity: 1;
+  background: #f6dcae;
+  color: rgb(32 0 47 / 0.4);
+}
+
+[data-theme='gta'] .composer button.stop {
+  background: var(--aubergine);
+  color: #ff5fa8;
+  border-color: var(--aubergine);
+  animation: none;
+}
+
+/* phones: the heavier name needs room beside the image field */
+@media (max-width: 480px) {
+  [data-theme='gta'] .topbar {
+    gap: 0.6rem;
+  }
+
+  [data-theme='gta'] .logo-name {
+    --o: 5px;
+    font-size: 1.5rem;
+  }
+
+  [data-theme='gta'] .logo .bolt {
+    width: 1.7rem;
+    height: 1.7rem;
+  }
+
+  [data-theme='gta'] .image-input {
+    width: min(34ch, 40vw);
+  }
+}

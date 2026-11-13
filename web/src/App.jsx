@@ -662,11 +662,15 @@ function SettingsTabs({ route, me, navigate }) {
   );
 }
 
+// The theme switch says where it leads.
+const THEME_LABELS = { light: 'Light mode', dark: 'Dark mode', gta: 'Vice mode' };
+const THEME_ICONS = { light: 'sun', dark: 'moon', gta: 'star' };
+
 // UserMenu is the signed-in person at the topbar's right end: who, the
 // architecture page, the theme and signing out.
 function UserMenu({ me, onSignOut }) {
   const [open, setOpen, box] = useMenu();
-  const [theme, toggleTheme] = useTheme();
+  const [, toggleTheme, nextTheme] = useTheme();
   const name = displayName(me);
   return (
     <div className="usermenu" ref={box}>
@@ -685,7 +689,7 @@ function UserMenu({ me, onSignOut }) {
           <div className="switch-sep" />
           <a role="menuitem" className="switch-item" href="/docs/"><Icon name="book" size={13} /> Architecture of FeRun</a>
           <button role="menuitem" className="switch-item" onClick={toggleTheme}>
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={13} /> {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            <Icon name={THEME_ICONS[nextTheme]} size={13} /> {THEME_LABELS[nextTheme]}
           </button>
           <div className="switch-sep" />
           <button role="menuitem" className="switch-item" onClick={onSignOut}><Icon name="logout" size={13} /> Sign out</button>

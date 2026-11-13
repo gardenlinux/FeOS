@@ -5,7 +5,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { currentUser } from './auth.js'
+import { applyStoredTheme } from './theme.js'
 import './styles.css'
+import './theme-gta.css'
+
+applyStoredTheme()
 
 const root = ReactDOM.createRoot(document.getElementById('root'))
 

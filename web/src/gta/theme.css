@@ -1,0 +1,206 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The GTA theme, after Grand Theft Auto VI's artwork, as FeChat's
+   (fechat/src/theme-gta.css): a light theme, the hour is dusk in pastel.
+   The window is the sky, from lilac over pink to peach, with palms and a
+   hazy skyline at its foot; what stands on it is written in the cover's
+   aubergine (the sidebar and the topbar too), and the cards, tables and
+   logs are aubergine panels in front of it, of tinted glass: the dusk
+   shows through. The name and a page's title are the cover's lettering:
+   heavy, white, outlined, and the mark is a palm.
+
+   The tokens of styles.css therefore come twice: for the sky (the
+   default) and for the panels (the list at "the panels"). What the list
+   misses stays readable: a pale wash with aubergine text.
+
+   Everything of the theme is in this folder: this file, its face
+   (Changa One) and its pictures, drawn for it, none is Rockstar's.
+   To remove it, delete the folder, its import in main.jsx, its
+   annotation in REUSE.toml and the gta step in components.jsx
+   (THEME_NEXT) with its label and icon in App.jsx (the star in
+   Icon.jsx). */
+
+@font-face { font-family: "Changa One"; font-weight: 400; font-style: normal; font-display: swap; src: url("./ChangaOne-Regular.woff2") format("woff2"); }
+
+[data-theme="gta"] {
+  color-scheme: light;
+  --aubergine: #20002f;
+  /* on the sky */
+  --bg0: #e796a7;
+  --bg1: rgb(255 248 242 / .62);
+  --panel: rgb(255 246 240 / .4);
+  --panel2: rgb(255 246 240 / .28);
+  --panel3: rgb(255 246 240 / .5);
+  --border: rgb(32 0 47 / .4);
+  --border-soft: rgb(32 0 47 / .18);
+  --text: var(--aubergine);
+  --muted: #3a1650;
+  --faint: #411c5a;
+  --shadow: 0 1px 2px rgb(32 0 47 / .1), 0 8px 24px rgb(32 0 47 / .16);
+  --accent: #56003a;
+  --accent-hover: #8c0a58;
+  --accent-dim: rgb(255 244 250 / .5);
+  --accent-rgb: 86, 0, 58;
+  --accent-ink: #fff;
+  /* the layers stay three hues apart: pink, the sun's orange, the bay */
+  --run: #56003a;
+  --run-soft: rgb(86 0 58 / .14);
+  --os: #4a2700;
+  --os-ink: #4a2700;
+  --os-soft: rgb(120 60 0 / .16);
+  --net: #05324a;
+  --net-soft: rgb(5 50 74 / .14);
+  --ok: #04381f;
+  --warn: #452b00;
+  --danger: #680717;
+  /* a state's dot keeps a bright colour, ringed */
+  --dot-ok: #18b877;
+  --dot-warn: #ffc93a;
+  --dot-danger: #f0364a;
+  --dot-ring: var(--aubergine);
+  --brand: "Changa One", var(--sans);
+  /* the thin bright line around a panel */
+  --line: linear-gradient(150deg, #ffb23f, #ff5fb0 55%, #9a4fd0);
+  /* what one presses: the cover's yellow */
+  --go: #ffd23f;
+  --go-hover: #ffe27a;
+  /* how high the horizon's strip stands */
+  --horizon: clamp(10rem, 30vh, 18rem);
+  /* how dense the panels' glass is; set here, not at the panels, so that
+     what opens over the page can say otherwise */
+  --glass: .74;
+}
+
+/* ------------------------------------------------------------ the dusk -- */
+/* In front the palms, then the horizon with the bay, the sun going down
+   behind the skyline (a glow in the haze, no disc), the sky. Fixed: the
+   horizon stays at the window's foot, whatever scrolls. */
+[data-theme="gta"] body {
+  color: var(--text);
+  background:
+    url("./palms.svg") left -40px bottom / auto min(54vh, 480px) no-repeat fixed,
+    url("./skyline.svg") center bottom / auto var(--horizon) repeat-x fixed,
+    radial-gradient(circle at 64% calc(100% - var(--horizon) * .42), #fffbe6 0, #fff0c2 2.4rem, rgb(255 228 170 / .6) 4.2rem, rgb(255 205 150 / .28) 9rem, transparent 19rem) fixed,
+    linear-gradient(to bottom, #b78bbc, #d390b9 25%, #e796a7 50%, #f6a594 75%, #fab9a5) fixed;
+}
+[data-theme="gta"] .sidebar,
+[data-theme="gta"] .content,
+[data-theme="gta"] .login { background: none; }
+[data-theme="gta"] .content::before { content: none; }
+[data-theme="gta"] ::-webkit-scrollbar-thumb { background: rgb(32 0 47 / .35); border-color: transparent; background-clip: padding-box; }
+
+/* the name and a page's title as the cover's lettering */
+[data-theme="gta"] .brand { border-bottom: 0; }
+[data-theme="gta"] .brand-name,
+[data-theme="gta"] .login-name,
+[data-theme="gta"] .pagehead h1 {
+  font-family: var(--brand); font-weight: 400; color: #fff; letter-spacing: .03em;
+  -webkit-text-stroke: 5px var(--aubergine); paint-order: stroke fill;
+}
+[data-theme="gta"] .brand-name { font-size: 27px; }
+[data-theme="gta"] .brand-name b, [data-theme="gta"] .login-name b { color: var(--go); }
+[data-theme="gta"] .pagehead h1 { font-size: 32px; letter-spacing: .06em; -webkit-text-stroke-width: 4px; }
+/* the mark: a palm in place of the box, cut out of the text's colour */
+[data-theme="gta"] .brand-mark {
+  background: var(--text);
+  -webkit-mask: url("./palm.svg") center / contain no-repeat; mask: url("./palm.svg") center / contain no-repeat;
+}
+[data-theme="gta"] .brand-mark * { display: none; }
+[data-theme="gta"] .brand .brand-mark { width: 34px; height: 34px; margin-right: -2px; }
+
+/* ---------------------------------------------------------- the panels -- */
+/* What stands in front of the sky as a panel has the dark tokens. Its
+   ground is aubergine glass (--glass says how dense), so the palms and
+   the skyline show through; a panel in a panel only gets denser. */
+[data-theme="gta"] :is(
+  .palette, .login-card, .switch-menu, .user-menu,
+  .card, .ocard, .statecard, .statcard, .pane, .envobj, .rollout, .jobwhy,
+  .envcard, .tenantrow, .sidebar .objitem.on, .sidebar .snav-item.on,
+  .tbl, .evtable, .tl, .tl-tip, .lg-view, .lg-raw, .logpre, .specpre, .schemapre, .snippet pre, .evdetail-body pre,
+  .b-nav, .b-sect, .b-first, .b-pop, .diff-entry
+) {
+  color-scheme: dark;
+  --bg0: rgb(32 0 47 / var(--glass));
+  --bg1: rgb(20 0 30 / var(--glass));
+  --panel: rgb(32 0 47 / var(--glass));
+  --panel2: rgb(255 255 255 / .08);
+  --panel3: rgb(255 255 255 / .15);
+  --border: rgb(226 190 255 / .42);
+  --border-soft: rgb(226 190 255 / .22);
+  --text: #fff8ff;
+  --muted: #e2d0f0;
+  --faint: #d3bfe4;
+  --shadow: 0 1px 2px rgb(10 0 16 / .4), 0 8px 24px rgb(10 0 16 / .35);
+  --accent: #ffa3d1;
+  --accent-hover: #ffc4e2;
+  --accent-dim: rgba(255, 163, 209, .18);
+  --accent-rgb: 255, 163, 209;
+  --accent-ink: var(--aubergine);
+  --run: #ffa3d1;
+  --run-soft: rgb(255 163 209 / .2);
+  --os: #ffb869;
+  --os-ink: #ffb869;
+  --os-soft: rgb(255 184 105 / .2);
+  --net: #8fdfff;
+  --net-soft: rgb(143 223 255 / .18);
+  --ok: #7cecb4;
+  --warn: #ffe06b;
+  --danger: #ffaaa3;
+  --dot-ok: var(--ok);
+  --dot-warn: var(--warn);
+  --dot-danger: #ff6a62;
+  --dot-ring: transparent;
+  color: var(--text);
+}
+/* what opens over the page is dense, to be read over anything */
+[data-theme="gta"] :is(.palette, .switch-menu, .user-menu, .tl-tip, .b-pop) { --glass: .96; }
+[data-theme="gta"] .evtable thead th { background: rgb(42 8 60); }
+[data-theme="gta"] :is(.tbl, .evtable) { background: var(--panel); }
+[data-theme="gta"] :is(.card, .ocard, .statecard, .statcard, .pane, .tbl, .evtable, .tl, .lg-view) {
+  box-shadow: 0 6px 18px rgb(32 0 47 / .22);
+}
+/* a table in a panel is the panel's */
+[data-theme="gta"] :is(.card, .pane, .envobj, .diff-entry, .b-sect, .palette) .tbl { background: none; box-shadow: none; }
+[data-theme="gta"] .sdot:is(.running, .failed, .unknown) { box-shadow: 0 0 0 1.5px var(--dot-ring); }
+[data-theme="gta"] .sdot.running { background: var(--dot-ok); }
+[data-theme="gta"] .sdot.failed { background: var(--dot-danger); }
+[data-theme="gta"] .sdot.unknown { background: var(--dot-warn); }
+/* what failed keeps its panel, reddened */
+[data-theme="gta"] :is(.ocard.failed, .statecard.failed) {
+  background: linear-gradient(rgb(255 90 82 / .16), rgb(255 90 82 / .16)), var(--panel);
+  border-color: rgb(255 157 150 / .6);
+}
+[data-theme="gta"] .rollout.failed .rollout-reason { color: var(--danger); }
+/* an error is a panel of its own */
+[data-theme="gta"] .error { color: #fff8ff; background: rgb(110 0 34 / .82); border-color: rgb(255 157 150 / .6); }
+
+/* the topbar stands on the sky, as the sidebar; the open environment
+   and the sign-in's card carry the bright line */
+[data-theme="gta"] .topbar { background: none; }
+[data-theme="gta"] .envcard.on,
+[data-theme="gta"] .login-card {
+  border: 2px solid transparent;
+  background: linear-gradient(var(--panel), var(--panel)) padding-box, var(--line) border-box;
+}
+[data-theme="gta"] .envcard, [data-theme="gta"] .tenantrow { box-shadow: 0 6px 16px rgb(32 0 47 / .25); }
+[data-theme="gta"] .tenantrow { background: var(--panel); border-color: transparent; }
+[data-theme="gta"] .tenantrow:hover { background: var(--panel2); }
+[data-theme="gta"] .sidebar .objitem.on,
+[data-theme="gta"] .sidebar .snav-item.on { background: var(--panel); box-shadow: none; }
+[data-theme="gta"] .sidebar .snav-label { font-weight: 700; }
+[data-theme="gta"] .login-card { box-shadow: 0 24px 64px rgb(32 0 47 / .4); }
+[data-theme="gta"] .login-name { font-size: 36px; -webkit-text-stroke-width: 0; }
+
+/* ------------------------------------------------------- what one presses -- */
+[data-theme="gta"] button.primary,
+[data-theme="gta"] a.button.primary,
+[data-theme="gta"] .login-card button.primary {
+  background: var(--go); border-color: var(--aubergine); color: var(--aubergine); font-weight: 700;
+}
+[data-theme="gta"] button.primary:hover,
+[data-theme="gta"] a.button.primary:hover,
+[data-theme="gta"] .login-card button.primary:hover { background: var(--go-hover); border-color: var(--aubergine); filter: none; }
+[data-theme="gta"] .spinner { border-color: rgb(32 0 47 / .3); border-top-color: var(--aubergine); }

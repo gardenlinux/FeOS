@@ -77,3 +77,11 @@ path = ["web/src/fonts/IBMPlexSans-Latin.woff2"]
 precedence = "override"
 SPDX-FileCopyrightText = "2017 IBM Corp. with Reserved Font Name 'Plex'"
 SPDX-License-Identifier = "OFL-1.1"
+
+# Changa One, the lettering of the console's GTA theme (web/src/gta), Google
+# Fonts' latin webfont (v22).
+[[annotations]]
+path = ["web/src/gta/ChangaOne-Regular.woff2"]
+precedence = "override"
+SPDX-FileCopyrightText = "2011 Eduardo Tunni (http://www.tipo.net.ar), with Reserved Font Name 'Changa'"
+SPDX-License-Identifier = "OFL-1.1"

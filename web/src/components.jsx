@@ -9,18 +9,21 @@ import { poller } from './poll.js';
 import { THEME_KEY, writeItem } from './storage.js';
 
 // The theme: html[data-theme], remembered; index.html applies it before
-// the first paint.
+// the first paint. The switch goes light, gta, dark, gta and round again:
+// out of gta it goes to the plain theme it did not come from.
+export const THEME_NEXT = { light: 'gta', dark: 'gta', gta: 'dark' };
+
 export function useTheme() {
   const [theme, setTheme] = useState(document.documentElement.dataset.theme || 'dark');
+  const from = useRef('light');
+  const next = theme === 'gta' && from.current === 'dark' ? 'light' : THEME_NEXT[theme] || 'dark';
   const toggle = useCallback(() => {
-    setTheme((cur) => {
-      const next = cur === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next;
-      writeItem('localStorage', THEME_KEY, next);
-      return next;
-    });
-  }, []);
-  return [theme, toggle];
+    from.current = theme;
+    document.documentElement.dataset.theme = next;
+    writeItem('localStorage', THEME_KEY, next);
+    setTheme(next);
+  }, [theme, next]);
+  return [theme, toggle, next];
 }
 
 // PageHead is a page's head (the concept's object page): what it is, its

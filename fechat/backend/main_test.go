@@ -200,3 +200,16 @@ func TestToolEventSeqAcrossRounds(t *testing.T) {
 		t.Errorf("tool by seq:\n got %v\nwant %v", settled, want)
 	}
 }
+
+// The Vice City theme adds its note to the system prompt; no theme and
+// unknown ones leave the prompt as it is.
+func TestSystemPromptTheme(t *testing.T) {
+	if got := systemPrompt("base", "gta"); got != "base\n\n"+vicePromptNote {
+		t.Errorf("gta: got %q", got)
+	}
+	for _, theme := range []string{"", "cyber", "GTA", "other"} {
+		if got := systemPrompt("base", theme); got != "base" {
+			t.Errorf("%q: got %q", theme, got)
+		}
+	}
+}

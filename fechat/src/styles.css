@@ -13,7 +13,36 @@
   --magenta: #ea00d9;
   --yellow: #ea00d9;
   --accent: var(--cyan);
-  font-family: 'Share Tech Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  /* the same colours as channels, for the translucent glows */
+  --bg-rgb: 6 16 38;
+  --panel-2-rgb: 19 62 124;
+  --cyan-rgb: 10 189 198;
+  --magenta-rgb: 234 0 217;
+  --code-bg: #050e1c;
+  --code-bg-2: #071224;
+  --shine: #eaffff;
+  --hl-keyword: var(--magenta);
+  --hl-string: var(--cyan);
+  --hl-number: #c77dff;
+  --hl-comment: #5a6f9a;
+  --hl-title: #7ee7ee;
+  --hl-builtin: #8899ff;
+  --bg-image:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgb(var(--cyan-rgb) / 0.08), transparent),
+    radial-gradient(ellipse 62% 42% at 80% 112%, rgba(113, 28, 145, 0.35), transparent);
+  --scanlines: 0.35;
+  /* the bolt: a gradient in five stops, a glitch copy behind it, no outline */
+  --bolt-1: rgb(var(--cyan-rgb) / 1);
+  --bolt-2: rgb(var(--cyan-rgb) / 0.89);
+  --bolt-3: rgb(var(--cyan-rgb) / 0.78);
+  --bolt-4: rgb(var(--cyan-rgb) / 0.66);
+  --bolt-5: rgb(var(--cyan-rgb) / 0.55);
+  --bolt-glitch: var(--magenta);
+  --bolt-glitch-opacity: 0.75;
+  --bolt-stroke: none;
+  --font-ui: 'Share Tech Mono', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  --font-code: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-family: var(--font-ui);
 }
 
 * {
@@ -24,9 +53,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(10, 189, 198, 0.08), transparent),
-    radial-gradient(ellipse 62% 42% at 80% 112%, rgba(113, 28, 145, 0.35), transparent);
+  background-image: var(--bg-image);
 }
 
 /* scanlines overlay */
@@ -43,7 +70,7 @@ body::after {
     rgba(0, 0, 0, 0.12) 3px,
     transparent 4px
   );
-  opacity: 0.35;
+  opacity: var(--scanlines);
 }
 
 ::selection {
@@ -58,7 +85,7 @@ body::after {
   background: var(--bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: #133e7c;
+  background: var(--panel-2);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
@@ -66,7 +93,7 @@ body::after {
 }
 
 html {
-  scrollbar-color: #133e7c #061026;
+  scrollbar-color: var(--panel-2) var(--bg);
   scrollbar-width: thin;
 }
 
@@ -105,7 +132,8 @@ body {
   padding: 0.6rem 1rem 1.1rem;
 }
 
-/* The logo starts a new chat (a button without a button's look).
+/* The logo: the bolt switches the theme (theme.js), the name starts a new
+   chat; two buttons without a button's look.
    The text sits at the bottom of the bolt's box (align-items: flex-end);
    padding-bottom is the optical middle between centring on the bolt and
    compensating fully for the descenders: full compensation
@@ -114,28 +142,62 @@ body {
   display: flex;
   align-items: flex-end;
   gap: 0.45rem;
-  font-family: inherit;
+  padding: 0 0 0.3rem;
+}
+
+.logo-bolt,
+.logo-name {
+  display: flex;
+  padding: 0;
   background: none;
   border: 0;
-  padding: 0 0 0.3rem;
   cursor: pointer;
+  color: inherit;
+}
+
+.logo-name {
+  font-family: inherit;
   font-weight: 700;
   font-size: 1.15rem;
   letter-spacing: 0.15em;
   text-transform: uppercase;
   color: var(--cyan);
   text-shadow:
-    0 0 8px rgba(10, 189, 198, 0.7),
-    0 0 24px rgba(10, 189, 198, 0.3);
+    0 0 8px rgb(var(--cyan-rgb) / 0.7),
+    0 0 24px rgb(var(--cyan-rgb) / 0.3);
+}
+
+.logo-bolt:focus-visible,
+.logo-name:focus-visible {
+  outline: 1px dashed var(--cyan);
+  outline-offset: 3px;
 }
 
 .bolt {
   width: 1.55rem;
   height: 1.55rem;
   filter:
-    drop-shadow(0 0 4px rgba(10, 189, 198, 0.8))
-    drop-shadow(0 0 12px rgba(10, 189, 198, 0.35));
+    drop-shadow(0 0 4px rgb(var(--cyan-rgb) / 0.8))
+    drop-shadow(0 0 12px rgb(var(--cyan-rgb) / 0.35));
   animation: boltflicker 4s infinite;
+}
+
+.bolt-stop-1 { stop-color: var(--bolt-1); }
+.bolt-stop-2 { stop-color: var(--bolt-2); }
+.bolt-stop-3 { stop-color: var(--bolt-3); }
+.bolt-stop-4 { stop-color: var(--bolt-4); }
+.bolt-stop-5 { stop-color: var(--bolt-5); }
+
+.bolt-glitch {
+  fill: var(--bolt-glitch);
+  opacity: var(--bolt-glitch-opacity);
+}
+
+.bolt-main {
+  stroke: var(--bolt-stroke);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  paint-order: stroke;
 }
 
 /* optical fine-tuning in the logo only: the bolt otherwise sits slightly
@@ -172,7 +234,7 @@ body {
   outline: none;
   box-shadow:
     0 0 0 1px var(--cyan),
-    0 0 10px rgba(10, 189, 198, 0.5);
+    0 0 10px rgb(var(--cyan-rgb) / 0.5);
 }
 
 .user-avatar {
@@ -201,12 +263,12 @@ body {
   gap: 0.2rem;
   min-width: 12rem;
   padding: 0.7rem 0.85rem;
-  background: rgba(6, 16, 38, 0.97);
+  background: rgb(var(--bg-rgb) / 0.97);
   border: 1px solid var(--cyan);
   border-radius: 3px;
   box-shadow:
-    0 0 12px rgba(10, 189, 198, 0.35),
-    0 0 36px rgba(10, 189, 198, 0.15),
+    0 0 12px rgb(var(--cyan-rgb) / 0.35),
+    0 0 36px rgb(var(--cyan-rgb) / 0.15),
     0 8px 24px rgba(0, 0, 0, 0.6);
   font-size: 0.8rem;
 }
@@ -228,7 +290,7 @@ body {
 .user-name {
   font-weight: 700;
   color: var(--cyan);
-  text-shadow: 0 0 8px rgba(10, 189, 198, 0.6);
+  text-shadow: 0 0 8px rgb(var(--cyan-rgb) / 0.6);
 }
 
 .user-email {
@@ -255,7 +317,7 @@ body {
   border-color: var(--magenta);
   color: var(--magenta);
   outline: none;
-  box-shadow: 0 0 10px rgba(234, 0, 217, 0.35);
+  box-shadow: 0 0 10px rgb(var(--magenta-rgb) / 0.35);
 }
 
 .boot-error {
@@ -292,12 +354,12 @@ body {
   width: max-content;
   max-width: min(46ch, 82vw);
   padding: 0.7rem 0.85rem;
-  background: rgba(6, 16, 38, 0.97);
+  background: rgb(var(--bg-rgb) / 0.97);
   border: 1px solid var(--cyan);
   border-radius: 3px;
   box-shadow:
-    0 0 12px rgba(10, 189, 198, 0.35),
-    0 0 36px rgba(10, 189, 198, 0.15),
+    0 0 12px rgb(var(--cyan-rgb) / 0.35),
+    0 0 36px rgb(var(--cyan-rgb) / 0.15),
     0 8px 24px rgba(0, 0, 0, 0.6);
   font-size: 0.78rem;
   line-height: 1.5;
@@ -340,13 +402,13 @@ body {
   text-transform: uppercase;
   font-size: 0.7rem;
   color: var(--cyan);
-  text-shadow: 0 0 8px rgba(10, 189, 198, 0.6);
+  text-shadow: 0 0 8px rgb(var(--cyan-rgb) / 0.6);
   margin-bottom: 0.35rem;
 }
 
 .image-tooltip code {
   color: var(--cyan);
-  background: rgba(10, 189, 198, 0.12);
+  background: rgb(var(--cyan-rgb) / 0.12);
   padding: 0.05rem 0.35rem;
   border-radius: 2px;
   font-size: 0.75rem;
@@ -368,7 +430,7 @@ body {
 .image-input:focus:not(:disabled) {
   border-color: var(--cyan);
   outline: none;
-  box-shadow: 0 0 10px rgba(10, 189, 198, 0.35);
+  box-shadow: 0 0 10px rgb(var(--cyan-rgb) / 0.35);
 }
 
 /* The check's status on the field itself, in the palette's colours:
@@ -377,8 +439,8 @@ body {
   border-color: var(--cyan);
   color: var(--cyan);
   box-shadow:
-    0 0 8px rgba(10, 189, 198, 0.5),
-    0 0 20px rgba(10, 189, 198, 0.25);
+    0 0 8px rgb(var(--cyan-rgb) / 0.5),
+    0 0 20px rgb(var(--cyan-rgb) / 0.25);
 }
 
 .image-input.invalid {
@@ -389,12 +451,12 @@ body {
 
 @keyframes image-invalid-glow {
   0%, 100% {
-    box-shadow: 0 0 6px rgba(234, 0, 217, 0.3);
+    box-shadow: 0 0 6px rgb(var(--magenta-rgb) / 0.3);
   }
   50% {
     box-shadow:
-      0 0 14px rgba(234, 0, 217, 0.75),
-      0 0 32px rgba(234, 0, 217, 0.4);
+      0 0 14px rgb(var(--magenta-rgb) / 0.75),
+      0 0 32px rgb(var(--magenta-rgb) / 0.4);
   }
 }
 
@@ -483,9 +545,9 @@ body {
   text-transform: uppercase;
   color: var(--text);
   text-shadow:
-    0 0 10px rgba(10, 189, 198, 0.5),
-    2px 0 0 rgba(234, 0, 217, 0.5),
-    -2px 0 0 rgba(10, 189, 198, 0.5);
+    0 0 10px rgb(var(--cyan-rgb) / 0.5),
+    2px 0 0 rgb(var(--magenta-rgb) / 0.5),
+    -2px 0 0 rgb(var(--cyan-rgb) / 0.5);
 }
 
 .hint {
@@ -532,6 +594,25 @@ body {
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.avatar-fill {
+  fill: rgb(var(--cyan-rgb) / 0.1);
+}
+
+.avatar-shape.user .avatar-fill {
+  fill: rgb(var(--magenta-rgb) / 0.12);
+}
+
+.avatar-line {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 3;
+  stroke-linejoin: miter;
+}
+
+.avatar-shape.user .avatar-line {
+  stroke: var(--magenta);
 }
 
 .avatar-inner {
@@ -584,7 +665,7 @@ body {
    open, no glow. */
 .message.user .bubble {
   max-width: 75%;
-  background: rgba(234, 0, 217, 0.08);
+  background: rgb(var(--magenta-rgb) / 0.08);
   border: 1px solid var(--magenta);
   border-radius: 0;
   padding: 0.6rem 0.9rem;
@@ -624,16 +705,16 @@ body {
 .markdown li { margin: 0.2em 0; }
 .markdown li::marker { color: var(--magenta); }
 .markdown code {
-  background: #050e1c;
-  border: 1px solid #133e7c;
+  background: var(--code-bg);
+  border: 1px solid var(--panel-2);
   border-radius: 2px;
   padding: 0.15em 0.35em;
   font-size: 0.9em;
   color: var(--yellow);
 }
 .markdown pre {
-  background: #050e1c;
-  border: 1px solid #133e7c;
+  background: var(--code-bg);
+  border: 1px solid var(--panel-2);
   border-left: 3px solid var(--cyan);
   border-radius: 0;
   padding: 0.8rem 1rem;
@@ -641,7 +722,7 @@ body {
   overflow-x: auto;
   max-width: 100%;
   margin: 0.6em 0;
-  box-shadow: 0 0 14px rgba(10, 189, 198, 0.12);
+  box-shadow: 0 0 14px rgb(var(--cyan-rgb) / 0.12);
 }
 
 .markdown pre code {
@@ -657,9 +738,9 @@ body {
 }
 
 .tool-call {
-  border: 1px solid #133e7c;
+  border: 1px solid var(--panel-2);
   border-left: 3px solid var(--magenta);
-  background: #050e1c;
+  background: var(--code-bg);
   font-size: 0.8rem;
 }
 
@@ -686,7 +767,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-family: var(--font-code);
   font-size: 0.75rem;
   color: var(--cyan);
 }
@@ -728,14 +809,14 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-family: var(--font-code);
   font-size: 0.75rem;
-  text-shadow: 0 0 10px rgba(10, 189, 198, 0.4);
+  text-shadow: 0 0 10px rgb(var(--cyan-rgb) / 0.4);
   background: linear-gradient(
     90deg,
     var(--cyan) 0%,
     var(--cyan) 42%,
-    #eaffff 50%,
+    var(--shine) 50%,
     var(--cyan) 58%,
     var(--cyan) 100%
   );
@@ -756,7 +837,7 @@ body {
   width: 0.65em;
   height: 0.65em;
   align-self: center;
-  border: 2px solid rgba(10, 189, 198, 0.25);
+  border: 2px solid rgb(var(--cyan-rgb) / 0.25);
   border-top-color: var(--cyan);
   border-radius: 50%;
   animation: tool-spin 0.7s linear infinite;
@@ -818,10 +899,10 @@ body {
 .tool-call pre {
   margin: 0;
   padding: 0.4rem 0.6rem;
-  background: #071224;
-  border: 1px solid #133e7c;
+  background: var(--code-bg-2);
+  border: 1px solid var(--panel-2);
   overflow-x: auto;
-  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-family: var(--font-code);
   font-size: 0.78rem;
   white-space: pre;
   color: var(--text);
@@ -836,9 +917,9 @@ body {
   position: absolute;
   top: 0.4rem;
   right: 0.4rem;
-  background: rgba(19, 62, 124, 0.85);
+  background: rgb(var(--panel-2-rgb) / 0.85);
   color: var(--text-dim);
-  border: 1px solid #133e7c;
+  border: 1px solid var(--panel-2);
   font-family: inherit;
   font-size: 0.7rem;
   letter-spacing: 0.08em;
@@ -863,7 +944,7 @@ body {
   border-color: var(--cyan);
 }
 .markdown code {
-  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-family: var(--font-code);
 }
 
 .markdown pre code {
@@ -882,25 +963,25 @@ body {
 /* hljs syntax colours matched to the palette */
 .markdown .hljs-keyword,
 .markdown .hljs-selector-tag,
-.markdown .hljs-meta { color: #ea00d9; }
+.markdown .hljs-meta { color: var(--hl-keyword); }
 .markdown .hljs-string,
-.markdown .hljs-regexp { color: #0abdc6; }
+.markdown .hljs-regexp { color: var(--hl-string); }
 .markdown .hljs-number,
 .markdown .hljs-literal,
-.markdown .hljs-symbol { color: #c77dff; }
+.markdown .hljs-symbol { color: var(--hl-number); }
 .markdown .hljs-comment,
-.markdown .hljs-quote { color: #5a6f9a; font-style: italic; }
+.markdown .hljs-quote { color: var(--hl-comment); font-style: italic; }
 .markdown .hljs-title,
 .markdown .hljs-title.function_,
-.markdown .hljs-section { color: #7ee7ee; }
+.markdown .hljs-section { color: var(--hl-title); }
 .markdown .hljs-title.class_,
-.markdown .hljs-type { color: #c77dff; }
+.markdown .hljs-type { color: var(--hl-number); }
 .markdown .hljs-attr,
 .markdown .hljs-attribute,
 .markdown .hljs-variable,
-.markdown .hljs-template-variable { color: #d6f5ff; }
+.markdown .hljs-template-variable { color: var(--text); }
 .markdown .hljs-built_in,
-.markdown .hljs-name { color: #8899ff; }
+.markdown .hljs-name { color: var(--hl-builtin); }
 .markdown a { color: var(--magenta); }
 .markdown blockquote {
   border-left: 3px solid var(--magenta);
@@ -910,7 +991,7 @@ body {
 }
 .markdown table { border-collapse: collapse; margin: 0.6em 0; width: 100%; }
 .markdown th,
-.markdown td { border: 1px solid #133e7c; padding: 0.3em 0.6em; }
+.markdown td { border: 1px solid var(--panel-2); padding: 0.3em 0.6em; }
 .markdown th { color: var(--cyan); text-transform: uppercase; letter-spacing: 0.05em; }
 .markdown strong { color: var(--yellow); }
 
@@ -929,7 +1010,7 @@ body {
   resize: none;
   background: var(--panel);
   color: var(--text);
-  border: 1px solid #133e7c;
+  border: 1px solid var(--panel-2);
   border-radius: 0;
   padding: 0.75rem 1rem;
   font: inherit;
@@ -948,8 +1029,8 @@ body {
   outline: none;
   border-color: var(--cyan);
   box-shadow:
-    0 0 12px rgba(10, 189, 198, 0.35),
-    inset 0 0 8px rgba(10, 189, 198, 0.08);
+    0 0 12px rgb(var(--cyan-rgb) / 0.35),
+    inset 0 0 8px rgb(var(--cyan-rgb) / 0.08);
 }
 
 .composer button {
@@ -969,8 +1050,8 @@ body {
 }
 
 .composer button:hover:not(:disabled) {
-  background: rgba(10, 189, 198, 0.12);
-  box-shadow: 0 0 14px rgba(10, 189, 198, 0.5);
+  background: rgb(var(--cyan-rgb) / 0.12);
+  box-shadow: 0 0 14px rgb(var(--cyan-rgb) / 0.5);
 }
 
 .composer button:disabled {
@@ -986,12 +1067,12 @@ body {
 }
 
 .composer button.stop:hover {
-  background: rgba(234, 0, 217, 0.12);
-  box-shadow: 0 0 14px rgba(234, 0, 217, 0.5);
+  background: rgb(var(--magenta-rgb) / 0.12);
+  box-shadow: 0 0 14px rgb(var(--magenta-rgb) / 0.5);
 }
 
 @keyframes stoppulse {
   50% {
-    box-shadow: 0 0 10px rgba(234, 0, 217, 0.45);
+    box-shadow: 0 0 10px rgb(var(--magenta-rgb) / 0.45);
   }
 }
