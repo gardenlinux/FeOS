@@ -144,6 +144,17 @@ type Config struct {
 	// profiles extension); empty: the CA's default. The default,
 	// "shortlived", is Let's Encrypt's six-day certificate.
 	ACMEProfile string
+	// ACMEZone is the platform's ACME zone (ADR 0045), such as
+	// acme.fecore.dev: a wildcard domain *.<name> delegates
+	// _acme-challenge.<name> with a CNAME to <token>.<zone>, where ferund
+	// writes its DNS-01 records through ACMEZoneProvider; empty: no
+	// wildcard can be claimed. It needs ACMEDirectory.
+	ACMEZone string
+	// ACMEZoneProvider is the ACME zone's DNS provider: route53.
+	ACMEZoneProvider string
+	// ACMEZoneRoute53ID is the ACME zone's hosted zone in Route 53; the
+	// credentials are the process's (static keys or a Pod Identity).
+	ACMEZoneRoute53ID string
 	// DenyPrefixes are the destinations preflights, bindings and the image
 	// resolver may not reach; nil: the built-in set (DefaultDenyPrefixes),
 	// which "default" in --deny-prefix adds to the prefixes given.
@@ -344,6 +355,7 @@ func Default() Config {
 		TrafficRetention:          168 * time.Hour,
 		DomainChallengeLabel:      "_ferun-challenge",
 		ACMEProfile:               DefaultACMEProfile,
+		ACMEZoneProvider:          ACMEZoneRoute53,
 		DomainGrace:               72 * time.Hour,
 		DomainUnverifiedMax:       50,
 		TenantCreation:            "people",
@@ -416,6 +428,12 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.StringVar(&c.ACMEEmail, "acme-email", c.ACMEEmail, "the contact (an email address) of the platform's ACME account; empty: none")
 	fs.StringVar(&c.ACMEProfile, "acme-profile", c.ACMEProfile,
 		"the certificate profile the orders ask for, one the directory lists (Let's Encrypt: shortlived, six days; classic, 90); empty: the CA's default")
+	fs.StringVar(&c.ACMEZone, "acme-zone", c.ACMEZone,
+		"the platform's ACME zone (ADR 0045), e.g. acme.fecore.dev, a zone of its own delegated by NS records: a wildcard domain *.<name> delegates _acme-challenge.<name> with a CNAME into it, where ferund answers DNS-01; empty: no wildcard can be claimed (needs --acme-directory)")
+	fs.StringVar(&c.ACMEZoneProvider, "acme-zone-provider", c.ACMEZoneProvider,
+		"the ACME zone's DNS provider: route53 (credentials: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or an EKS Pod Identity)")
+	fs.StringVar(&c.ACMEZoneRoute53ID, "acme-zone-route53-id", c.ACMEZoneRoute53ID,
+		"the ACME zone's hosted zone ID in Route 53 (Z…), with --acme-zone-provider route53")
 	fs.Var((*prefixList)(&c.DenyPrefixes), "deny-prefix",
 		"a destination prefix preflights, bindings and the image resolver may not reach, comma-separated or repeated; \"default\" is the built-in set (default: the built-in set)")
 	fs.Var((*registryEgress)(&c.RegistryEgress), "registry-egress",
@@ -663,6 +681,22 @@ func (c *Config) Validate() error {
 		}
 		if c.SecretKeyFile == "" {
 			bad("--acme-directory needs --secret-key-file, which seals the certificates' keys")
+		}
+	}
+	if c.ACMEZone != "" {
+		if err := pki.ValidateDomain(c.ACMEZone); err != nil {
+			bad("--acme-zone: %w", err)
+		}
+		if c.ACMEDirectory == "" {
+			bad("--acme-zone needs --acme-directory: a wildcard's certificate is ordered there")
+		}
+		switch c.ACMEZoneProvider {
+		case ACMEZoneRoute53:
+			if c.ACMEZoneRoute53ID == "" {
+				bad("--acme-zone-provider route53 needs --acme-zone-route53-id, the hosted zone of --acme-zone")
+			}
+		default:
+			bad("--acme-zone-provider %q: the providers are %s", c.ACMEZoneProvider, ACMEZoneRoute53)
 		}
 	}
 	if c.ACMEProfile != "" && !isProfileName(c.ACMEProfile) {
@@ -1002,6 +1036,9 @@ func ParsePodNetwork(s string) (netip.Prefix, error) {
 // DefaultACMEProfile is --acme-profile's default: Let's Encrypt's
 // six-day certificates.
 const DefaultACMEProfile = "shortlived"
+
+// ACMEZoneRoute53 is --acme-zone-provider's Route 53 (internal/route53).
+const ACMEZoneRoute53 = "route53"
 
 // isProfileName reports whether p may name an ACME profile: what the
 // directories in use name them with, and nothing that needs escaping.

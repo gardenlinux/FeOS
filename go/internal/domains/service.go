@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,9 @@ const (
 	CodeDomainsOff = "domains_off"
 	// CodeSuperseded: 409, the claim was superseded and cannot be bound.
 	CodeSuperseded = "superseded"
+	// CodeWildcardsOff: 409, the platform has no ACME zone (--acme-zone),
+	// which a wildcard's certificate needs.
+	CodeWildcardsOff = "wildcards_off"
 )
 
 // The texts of the plain answers.
@@ -47,6 +51,7 @@ const (
 	textNoDomain      = "no such domain"
 	textNoEnvironment = "no such environment"
 	textDomainsOff    = "the platform serves no domains (--edge-name)"
+	textWildcardsOff  = "the platform serves no wildcards: it has no ACME zone (--acme-zone), where a wildcard's certificate is answered"
 )
 
 // The bounds of a claim's labels (as an environment's).
@@ -87,8 +92,12 @@ type Config struct {
 	// EdgeName resolves to.
 	EdgeAddresses []netip.Addr
 	// ChallengeLabel is --domain-challenge-label: a claim's TXT record is
-	// at <label>.<name>.
+	// at <label>.<name>, a wildcard's beside the name it stands on.
 	ChallengeLabel string
+	// ACMEZone is --acme-zone (ADR 0045): a wildcard *.<name> delegates
+	// _acme-challenge.<name> to <token>.<ACMEZone>. "": no wildcard can
+	// be claimed.
+	ACMEZone string
 	// Grace is --domain-grace.
 	Grace time.Duration
 	// UnverifiedMax is --domain-unverified-max.
@@ -155,8 +164,37 @@ func (s *Service) Loops() []model.Loop {
 	}
 }
 
-// txtName is the name of a claim's TXT record.
-func (s *Service) txtName(name string) string { return s.cfg.ChallengeLabel + "." + name }
+// txtName is the name of a claim's TXT record, beside the name it
+// stands on (a wildcard's beside its <name>).
+func (s *Service) txtName(name string) string { return s.cfg.ChallengeLabel + "." + Base(name) }
+
+// AcmeChallengeLabel is the label DNS-01 asks at, beside the name
+// (RFC 8555 §8.4).
+const AcmeChallengeLabel = "_acme-challenge"
+
+// delegationName is the name of a wildcard's delegation, the CNAME
+// _acme-challenge.<name>.
+func (s *Service) delegationName(name string) string { return AcmeChallengeLabel + "." + Base(name) }
+
+// target is where a wildcard's delegation points, its claim's own name in
+// the ACME zone: <token>.<ACME zone>.
+func (s *Service) target(token string) string { return Target(token, s.cfg.ACMEZone) }
+
+// Target is a wildcard claim's DNS-01 target: <token>.<zone>, the name in
+// the ACME zone its delegation names and its challenges' TXT records
+// stand at (ADR 0045).
+func Target(token, zone string) string { return token + "." + zone }
+
+// probeName is a fresh name below a wildcard, whose addresses a check
+// asks for (* itself is no name to resolve): a random label of 16
+// characters of lowercase base32 under its <name>.
+func probeName(name string) (string, error) {
+	t, err := NewToken()
+	if err != nil {
+		return "", err
+	}
+	return t[:16] + "." + Base(name), nil
+}
 
 // inTx runs fn in a transaction; fenced, as the leader (short timeouts,
 // the lease checked first: leader.ErrNotLeader without it).
@@ -235,10 +273,16 @@ func (s *Service) get(ctx context.Context, tenant string, id uuid.UUID) (Domain,
 	return s.answer(v, s.edge.get(ctx, s.dns, s.cfg, s.log)), nil
 }
 
-// reserved returns the zone that reserves name, or "".
+// reserved returns the zone that reserves name, or "": the name is the
+// zone or under it, or for a wildcard its <name> is, or the wildcard
+// covers the zone's name (the zone is one label below its <name>).
 func (s *Service) reserved(name string) string {
+	base := Base(name)
 	for _, z := range append(slices.Clone(s.cfg.Reserved), s.cfg.EdgeName) {
-		if Under(name, z) {
+		if Under(base, z) {
+			return z
+		}
+		if IsWildcard(name) && z != "" && strings.HasSuffix(z, "."+base) && !strings.Contains(strings.TrimSuffix(z, "."+base), ".") {
 			return z
 		}
 	}
@@ -260,20 +304,24 @@ func checkLabels(labels map[string]string) error {
 }
 
 // CreateDomain is POST /api/v1/domains: a new claim of the tenant on a
-// name, unverified, checked at once and then with backoff. Any number of
-// claims may name one name. 400 invalid_name, 422 reserved, 409
-// too_many_unverified, 409 domains_off.
+// name or a wildcard *.<name> (ADR 0045), unverified, checked at once and
+// then with backoff. Any number of claims may name one name. 400
+// invalid_name, 422 reserved, 409 too_many_unverified, 409 domains_off,
+// 409 wildcards_off for a wildcard without --acme-zone.
 func (s *Service) CreateDomain(ctx context.Context, tenant string, req CreateRequest) (Domain, error) {
 	if !s.Enabled() {
 		return Domain{}, apierr.WithCode(http.StatusConflict, CodeDomainsOff, textDomainsOff)
 	}
-	name, err := Normalize(req.Name)
+	name, wildcard, err := NormalizeClaim(req.Name)
 	if err != nil {
 		return Domain{}, apierr.WithCode(http.StatusBadRequest, CodeInvalidName, "%s", err.Error())
 	}
 	if z := s.reserved(name); z != "" {
 		return Domain{}, apierr.WithCode(http.StatusUnprocessableEntity, CodeReserved,
-			"%s is reserved by the platform: no domain can be %s or a name under it", name, z)
+			"%s is reserved by the platform: no domain can be %s or a name under it, nor a wildcard that covers it", name, z)
+	}
+	if wildcard && s.cfg.ACMEZone == "" {
+		return Domain{}, apierr.WithCode(http.StatusConflict, CodeWildcardsOff, textWildcardsOff)
 	}
 	if err := checkLabels(req.Labels); err != nil {
 		return Domain{}, err

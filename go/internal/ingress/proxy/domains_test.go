@@ -271,3 +271,47 @@ func TestTenantZoneCertificateBySNI(t *testing.T) {
 		}
 	}
 }
+
+// A wildcard domain (ADR 0045) serves every name one label below its
+// name, by Host and by SNI, but not its name nor names further below; a
+// name's own domain wins over it, in another environment too.
+func TestWildcardDomain(t *testing.T) {
+	const other = "0b7c4d73-7e5a-4c66-8b5a-4b2d3d2c1f02"
+	wild := domainOf(t, "*.boxed.fecore.dev", "*.boxed.fecore.dev")
+	own := domainOf(t, "own.boxed.fecore.dev", "own.boxed.fecore.dev")
+	s := withDomains(wild)
+	e := s.Envs[testEnv]
+	o := e
+	o.ID, o.Name, o.Hosts, o.Domains = other, "own", []string{own.Name}, []wire.Domain{own}
+	s.Envs[other] = o
+	p := New(Config{}, Deps{})
+	p.SetState(s)
+	tb := p.cur.Load().t
+	for host, want := range map[string]string{"8080--abc.boxed.fecore.dev": testEnv, "own.boxed.fecore.dev": other,
+		"boxed.fecore.dev": "", "a.b.boxed.fecore.dev": "", testHost: testEnv} {
+		got := ""
+		if er := tb.env(host); er != nil {
+			got = er.id
+		}
+		if got != want {
+			t.Errorf("host %s: environment %q, want %q", host, got, want)
+		}
+	}
+	if c := tb.cert("x.boxed.fecore.dev"); c == nil || !slices.Equal(c.Leaf.DNSNames, []string{"*.boxed.fecore.dev"}) {
+		t.Fatalf("the wildcard's certificate %v", c)
+	}
+	if c := tb.cert("own.boxed.fecore.dev"); c == nil || !slices.Equal(c.Leaf.DNSNames, []string{"own.boxed.fecore.dev"}) {
+		t.Fatalf("the name's own certificate %v", c)
+	}
+	if tb.cert("boxed.fecore.dev") != nil {
+		t.Fatal("the wildcard's name got its certificate")
+	}
+	// Port 80 redirects a name below the wildcard, and nothing else.
+	for host, want := range map[string]int{"x.boxed.fecore.dev": http.StatusPermanentRedirect, "boxed.fecore.dev": http.StatusNotFound} {
+		rec := httptest.NewRecorder()
+		p.ServeHTTPRedirect().ServeHTTP(rec, httptest.NewRequest("GET", "http://"+host+"/a", nil))
+		if rec.Code != want {
+			t.Errorf("port 80 %s: %d, want %d", host, rec.Code, want)
+		}
+	}
+}

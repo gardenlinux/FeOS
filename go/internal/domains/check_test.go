@@ -410,7 +410,8 @@ func TestCreateRefusals(t *testing.T) {
 		return ae.Status, ae.Code
 	}
 	for name, want := range map[string]string{
-		"bücher.example": CodeInvalidName, "*.example.com": CodeInvalidName, "10.0.0.1": CodeInvalidName,
+		"bücher.example": CodeInvalidName, "*.*.example.com": CodeInvalidName, "a*.example.com": CodeInvalidName,
+		"*.com": CodeInvalidName, "10.0.0.1": CodeInvalidName,
 		"apps.fecode.test": CodeReserved, "a.apps.fecode.test": CodeReserved, "fecode.dev": CodeReserved,
 		"run.fecode.dev": CodeReserved, testEdge: CodeReserved, "x." + testEdge: CodeReserved,
 	} {

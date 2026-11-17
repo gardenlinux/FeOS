@@ -916,8 +916,10 @@ version, within one `env-groups` pass.
 ### Routing
 
 1. **The host**, in lower case, without its port and a trailing dot,
-   names the environment, a domain as the default host; an unknown host
-   is 404 "no such host".
+   names the environment, a domain as the default host; a name that is
+   no host of any environment is looked up as `*.` and its parent, a
+   wildcard domain's host (ADR 0045), so that a name's own domain wins;
+   an unknown host is 404 "no such host".
 2. **The path** may not hold a segment that is, or decodes once or twice
    to, `.` or `..` (400), and must decode (400).
 3. **The route** with the longest prefix, segment by segment, matches;
@@ -1296,7 +1298,9 @@ environment's domains. Parsed once per table that changes it, and
 reused while it stays the same, so a renewal is served from the next
 handshake on; a certificate that does not parse, whose key is not its
 own, or that is not for its name is logged and its host gets the
-wildcard.
+wildcard. A name without a certificate of its own gets a wildcard
+domain's that covers it (`*.` and its parent, ADR 0045), before the
+zones' wildcards.
 
 An SNI that the tenant zone's wildcard covers (`--tenant-zone-tls-cert`,
 one label under the zone, as a wildcard does) gets that one. Every other

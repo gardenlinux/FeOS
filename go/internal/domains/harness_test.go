@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/netip"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,19 +47,43 @@ func newFakeDNS() *fakeDNS {
 		addrs: map[string][]netip.Addr{}, routeErr: map[string]error{}, edge: testEdgeAddrs}
 }
 
+// Lookup answers a name's routing from what was set for it, else for
+// the wildcard of its parent (*.<parent>), as DNS answers a name below a
+// wildcard record; a wildcard's delegation from the CNAME chain set for
+// its name.
 func (f *fakeDNS) Lookup(_ context.Context, q Query) Answer {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lookups = append(f.lookups, q.Name)
+	name := q.Name
+	if _, ok := f.addrs[name]; !ok && f.routeErr[name] == nil {
+		if w := "*" + name[strings.IndexByte(name, '.'):]; f.addrs[w] != nil || f.routeErr[w] != nil {
+			name = w
+		}
+	}
 	a := Answer{TXT: slices.Clone(f.txt[q.TXTName]), TXTErr: f.txtErr[q.TXTName],
-		CNAME: slices.Clone(f.cname[q.Name]), Addresses: slices.Clone(f.addrs[q.Name]), RouteErr: f.routeErr[q.Name]}
+		CNAME: slices.Clone(f.cname[name]), Addresses: slices.Clone(f.addrs[name]), RouteErr: f.routeErr[name]}
 	if a.TXTErr != nil {
 		a.TXT = nil
 	}
 	if a.RouteErr != nil {
 		a.CNAME, a.Addresses = nil, nil
 	}
+	if q.Delegation != "" {
+		a.Delegation, a.DelegationErr = slices.Clone(f.cname[q.Delegation]), f.routeErr[q.Delegation]
+		if a.DelegationErr != nil {
+			a.Delegation = nil
+		}
+	}
 	return a
+}
+
+// delegate sets the CNAME chain of a wildcard's _acme-challenge name.
+func (f *fakeDNS) delegate(name string, chain ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cname["_acme-challenge."+name] = chain
+	delete(f.routeErr, "_acme-challenge."+name)
 }
 
 func (f *fakeDNS) Resolve(context.Context, string) ([]netip.Addr, error) {

@@ -115,17 +115,28 @@ type Config struct {
 	HTTPClient *http.Client
 	// UserAgent is prepended to the requests' User-Agent.
 	UserAgent string
+	// ACMEZone is --acme-zone (ADR 0045): a wildcard's DNS-01 records are
+	// written at <token>.<ACMEZone> through Deps.Zone; "": a wildcard's
+	// order fails.
+	ACMEZone string
 	// The timings; zero: the defaults.
 	Interval, OrderTimeout, ChallengeTTL, DeliveryWait, FailingFor time.Duration
-	Log                                                            *slog.Logger
+	// ZoneWait bounds the wait for the ACME zone's servers to answer a
+	// DNS-01 record, ZonePoll how often it asks; zero: the defaults.
+	ZoneWait, ZonePoll time.Duration
+	Log                *slog.Logger
 }
 
-// Deps is what the issuer uses.
+// Deps is what the issuer uses. Zone writes the ACME zone (nil: no
+// wildcard is ordered), ZoneServers asks its servers (nil: Go's resolver
+// over the system's).
 type Deps struct {
-	Store     *store.Store
-	Sealer    Sealer
-	Elector   Fencer
-	Refresher Refresher
+	Store       *store.Store
+	Sealer      Sealer
+	Elector     Fencer
+	Refresher   Refresher
+	Zone        Zone
+	ZoneServers ZoneServers
 }
 
 // Issuer obtains and renews the domains' certificates.
@@ -162,6 +173,15 @@ func New(cfg Config, d Deps) (*Issuer, error) {
 	}
 	if cfg.FailingFor <= 0 {
 		cfg.FailingFor = DefaultFailingFor
+	}
+	if cfg.ZoneWait <= 0 {
+		cfg.ZoneWait = DefaultZoneWait
+	}
+	if cfg.ZonePoll <= 0 {
+		cfg.ZonePoll = zonePoll
+	}
+	if d.ZoneServers == nil {
+		d.ZoneServers = NewNetZoneServers("", 0)
 	}
 	if cfg.HTTPClient == nil {
 		t, _ := http.DefaultTransport.(*http.Transport)

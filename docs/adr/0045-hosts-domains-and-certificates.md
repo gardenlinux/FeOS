@@ -1,6 +1,6 @@
 # ADR 0045: Hosts, domains and certificates of public environments
 
-**Status:** Accepted · **Date:** 2026-10-27
+**Status:** Accepted · **Date:** 2026-10-27, wildcard domains 2026-11-17
 
 Every public environment has a default host under the platform's apps
 zone, with a label registered to its tenant for good: a natural label
@@ -12,9 +12,13 @@ claim's token at a label of its own, never by the record that routes the
 name, and both records are checked for as long as the domain lives, with
 a grace before a wrong one deactivates it. `ferund` is the ACME client
 for every domain, over HTTP-01 answered by every ingress instance, in
-Let's Encrypt's short-lived profile renewed at half life; the zones'
-wildcards are the operator's. While a domain of an environment is
-served, its default host is not.
+Let's Encrypt's short-lived profile renewed at half life. A domain may
+be a wildcard, `*.<name>`, which serves every name one label below
+`<name>` in one environment; its certificate comes over DNS-01, which
+its owner delegates with a CNAME of `_acme-challenge.<name>` into a zone
+of the platform's, where `ferund` answers it with the one DNS credential
+it holds. The zones' wildcards are the operator's. While a domain of an
+environment is served, its default host is not.
 
 ## Context
 
@@ -56,6 +60,19 @@ issuer. The domains' cannot: a tenant's DNS is the tenant's, and an ACME
 client of a few hundred lines is cheaper than tying the platform to
 cert-manager on the one path every customer uses.
 
+Some tenants serve names they make faster than a claim can follow:
+FeCode answers every preview of a sandbox's port at
+`<port>--<label>.boxed.fecode.dev`, made and gone within minutes. A
+claim, a TXT record and a certificate per such name would put every
+preview behind DNS and the CA's limits per registered domain. They want
+one wildcard, `*.boxed.fecode.dev`, in one environment, whose
+application tells the names apart itself. HTTP-01 cannot issue a
+wildcard; only DNS-01 can, and DNS-01 writes a TXT record at
+`_acme-challenge.<name>` in the tenant's zone, whose credential the
+platform must not hold. The CA follows a CNAME there as any resolver
+does, so the tenant can delegate that one label into a zone the platform
+writes, and nothing else of its DNS.
+
 ## Decision
 
 ### Zones and default hosts
@@ -93,7 +110,11 @@ cert-manager on the one path every customer uses.
   host answers 404; when none is served any more, the default host is its
   host again, at once, under the same label. A domain is served only
   once its certificate is there, so a binding moves the environment from
-  its default host to its domain without a gap.
+  its default host to its domain without a gap. A wildcard is no
+  address: it is served beside the environment's hosts, and only a
+  served domain that is not a wildcard retires the default host.
+- A route's `host` may be a wildcard domain of its environment; it
+  matches every name the wildcard serves.
 
 ### Domains: a claim and a binding are two facts
 
@@ -107,9 +128,29 @@ cert-manager on the one path every customer uses.
   environment is one call and keeps the verification; no deployment
   moves a domain. An environment's deletion ends its bindings and keeps
   the domains.
-- A name is stored lowercased, as its A-label. A wildcard, an address, a
-  name in the apps zone or the tenant zone, the edge's name and a name
-  under the platform's reserved zones cannot be claimed.
+- A name is stored lowercased, as its A-label. An address, a name in the
+  apps zone or the tenant zone, the edge's name, the ACME zone and a
+  name under the platform's reserved zones cannot be claimed, nor a
+  wildcard of one or one whose `*` would stand for one.
+
+### A wildcard is a domain of its own
+
+- A **wildcard** is a claim on `*.<name>`: the `*` is the whole first
+  label and nothing else, and `<name>` is a name as above, of at least
+  two labels. It serves every name exactly one label below `<name>`, as
+  a certificate's wildcard covers, and not `<name>` itself, which is a
+  claim of its own. It is claimed, bound, moved, superseded and deleted
+  as every domain is, with the token, the TXT record and the rules of
+  the next section; its TXT stands at `_ferun-challenge.<name>`, beside
+  those of claims of `<name>`, each with its own token.
+- **A name's own domain wins over a wildcard.** The ingress looks a host
+  up as it is, and only then as `*.` and its parent, one label up and no
+  further; the certificate by SNI the same way. A name below a wildcard
+  that is a served domain of its own, of the same tenant or another, is
+  served there: whoever controls the name's DNS decides, as for every
+  claim.
+- Wildcards need the platform's **ACME zone** (below): without one, a
+  wildcard cannot be claimed, and the answer says so.
 
 ### The proof is the claim's token in DNS, never the routing record
 
@@ -148,6 +189,16 @@ cert-manager on the one path every customer uses.
   apex takes a CNAME to the edge's name; an apex takes an ALIAS or a
   flattened CNAME where its provider has one, else A and AAAA records
   with the edge's addresses. The answer to a claim names both records.
+- A **wildcard is routed** when two records are right: a name below it
+  resolves to the edge alone, which `ferund` asks of a fresh random label
+  at every check, since `*` itself is no name to resolve; and its
+  **delegation**, the CNAME at `_acme-challenge.<name>`, names its
+  target, `<token>.<ACME zone>`, through any chain of CNAMEs. The target
+  is the claim's own, by its token: a tenant's CNAME lets `ferund` answer
+  for that claim and no other, and a claim superseded or deleted leaves
+  a target nobody answers at. The answer to a wildcard's claim names
+  three records: the TXT, the wildcard's record to the edge and the
+  delegation.
 - Routing proves nothing. `ferund` orders a certificate only for a domain
   that is verified, bound to a public environment and routed, so that no
   challenge is spent on a name that cannot pass it: the CA limits failed
@@ -164,9 +215,10 @@ cert-manager on the one path every customer uses.
 
 - `ferund` checks a verified domain's records every hour for as long as
   the claim exists, the TXT and, once the domain is bound, the routing
-  record, and every quarter of an hour while one of them is wrong. Only
-  an answer counts as wrong: a name or record that does not exist, a TXT
-  without the token, addresses that lead elsewhere. A lookup that fails
+  record (a wildcard's two), and every quarter of an hour while one of
+  them is wrong. Only an answer counts as wrong: a name or record that
+  does not exist, a TXT without the token, addresses that lead elsewhere,
+  a delegation to another target. A lookup that fails
   changes nothing and shows as failing, so that an outage of DNS or of
   the platform's own network deactivates no domain.
 - The first wrong answer for a record that was right starts the domain's
@@ -183,12 +235,15 @@ cert-manager on the one path every customer uses.
   shows is verified from then on, and its own token, put back, verifies
   it again unless another claim was verified meanwhile. With its routing
   wrong it is **inactive** and stays verified; once its name resolves to
-  the edge again, `ferund` obtains a certificate and serves it again.
+  the edge again, `ferund` obtains a certificate and serves it again. A
+  wildcard whose delegation is wrong is routed wrong: the same grace, the
+  same states, with the reason naming the record.
 
 ### Certificates: `ferund` is the ACME client
 
 - `ferund` obtains and renews every domain's certificate with one ACME
-  account per platform. A domain's certificate comes over HTTP-01:
+  account per platform. A domain's certificate comes over HTTP-01,
+  except a wildcard's:
   `ferund` keeps the challenge in the ingress's table and every instance
   answers it for that host on port 80, so that a tenant's DNS needs the
   claim's TXT and a record to the edge, and `ferund` no credential of it.
@@ -201,12 +256,26 @@ cert-manager on the one path every customer uses.
   environment. One order per domain every three days stays far below the
   CA's limits, so its renewal information is not asked. A domain whose
   name resolves elsewhere is not renewed, as HTTP-01 could not succeed.
+- A **wildcard's certificate comes over DNS-01**, for `*.<name>` alone:
+  `ferund` writes the challenge's TXT record at the claim's target in
+  the ACME zone, accepts the challenge only once every server of that
+  zone answers it, since the CA asks any one of them, and deletes it when
+  the order ends. Profile, renewal, backoff, failures and incidents are
+  those of every domain; a wildcard whose delegation is wrong is not
+  renewed, as DNS-01 could not succeed.
+- The **ACME zone** is the operator's: a zone of its own, delegated by NS
+  records, so that the credential that writes it reaches no other name
+  (`acme.fecore.dev` beside `fecore.dev`), with a short negative TTL, so
+  that the CA's resolvers forget an answer from before a challenge. Its
+  DNS provider is pluggable, as the object store is: `ferund` sets and
+  deletes TXT records through it and holds that one credential, for that
+  zone alone, never a tenant's. The first provider is Route 53.
 - Private keys are made by `ferund`, sealed in the database under the key
   that seals secrets (ADR 0044), and sent to the instances over their
   connections, which keep them in memory and in their cache.
 - The zones' wildcard certificates are the operator's: issued by the
   cluster's issuer or by hand, given to the instances as files, and
-  renewed as the operator renews them. `ferund` holds no DNS credential.
+  renewed as the operator renews them.
 
 ## Alternatives considered
 
@@ -251,6 +320,24 @@ cert-manager on the one path every customer uses.
 - **A chosen label without `--` for every tenant**: it would read as
   another tenant's natural label; only the zone's owners, whose names
   the zone is, may hold plain labels.
+- **DNS-01 for every domain**, HTTP-01 dropped: one way for all, but a
+  third record in every tenant's DNS, a delegation every existing domain
+  would need before a cutover, and nothing gained for a name that points
+  at the edge anyway. HTTP-01 stays for names, DNS-01 is what a wildcard
+  needs.
+- **The delegation as a wildcard's proof**, in place of its TXT: one
+  record fewer, but a second kind of proof beside the one every claim
+  has, and the TXT is what tells the platform which tenant a name is
+  for. The delegation only lets `ferund` answer the CA.
+- **DNS-01 in the tenant's zone** with a credential the tenant gives:
+  the platform would hold a key to every such tenant's DNS, which can
+  move any name of it, for one TXT record.
+- **`ferund` as the ACME zone's DNS server**: a DNS server of its own,
+  port 53 on the internet, and its availability the CA's; a DNS
+  provider does that already.
+- **A claim of `<name>` that serves its wildcard too**: two hosts with
+  one binding, one of which the owner may want elsewhere or not at all,
+  as FeCode wants `*.boxed.fecode.dev` and no `boxed.fecode.dev`.
 
 ## Consequences
 
@@ -258,7 +345,21 @@ cert-manager on the one path every customer uses.
   the one that routes it, and keeps both for as long as it keeps the
   domain: without either for longer than the grace, the domain is
   deactivated. A domain's state and its incidents tell the tenant which
-  record is wrong and until when.
+  record is wrong and until when. A wildcard takes a third, its
+  delegation, kept as long as the others.
+- `ferund` holds one DNS credential, the ACME zone's, and an operator
+  who wants wildcards provides that zone and its provider. Whoever steals
+  that credential can obtain certificates for every delegated wildcard;
+  to use one, they still need the wildcard's traffic, which its owner's
+  DNS sends to the edge.
+- `_acme-challenge.<name>` holds the delegation and nothing else, since
+  nothing may stand beside a CNAME: an owner whose other ACME client, or
+  whose DNS provider's own certificates (Cloudflare's universal
+  certificate of an apex and its wildcard, ADR 0030), use that label
+  must choose.
+- A wildcard is served once its records are checked and its certificate
+  issued: after its owner points it here, a check on request saves the
+  wait for the next one.
 - Operators publish the edge's name and the apps zone's wildcard, open
   port 80 to the ingress for HTTP-01, and provide the zones' wildcard
   certificates. They keep the balancer's addresses: an apex names them in
@@ -285,4 +386,8 @@ labels, the default host answering 404 while a domain is served, and
 plain labels for the zone's owners came on 2026-11-01 (b122057, 7c4c105,
 794a2ec); the tenant zone of ADR 0031 on 2026-11-06 (0cda975, 20f8894).
 The draft's zone wildcards over DNS-01 by `ferund` were never built; the
-operator's issuer provides them.
+operator's issuer provides them. Wildcard domains, with DNS-01 delegated
+by the tenant's CNAME into the platform's ACME zone and HTTP-01 kept for
+every name, were decided and built on 2026-11-17, so that FeCode can run
+on FeRun with its previews under `*.boxed.fecode.dev`; the ACME zone's
+first provider is Route 53.

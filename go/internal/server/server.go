@@ -491,11 +491,14 @@ func (i *Instance) newDomains() (*domains.Service, error) {
 	cfg := i.cfg
 	reserved := slices.Clone(cfg.DomainReserved)
 	reserved = append(reserved, cfg.Zones().Names()...)
+	if cfg.ACMEZone != "" {
+		reserved = append(reserved, cfg.ACMEZone)
+	}
 	if h := visitorAuthHost(cfg); h != "" {
 		reserved = append(reserved, h)
 	}
 	s, err := domains.New(domains.Config{
-		EdgeName: cfg.EdgeName, EdgeAddresses: cfg.EdgeAddresses, ChallengeLabel: cfg.DomainChallengeLabel,
+		EdgeName: cfg.EdgeName, EdgeAddresses: cfg.EdgeAddresses, ChallengeLabel: cfg.DomainChallengeLabel, ACMEZone: cfg.ACMEZone,
 		Grace: cfg.DomainGrace, UnverifiedMax: cfg.DomainUnverifiedMax, Reserved: reserved, Log: i.log,
 	}, domains.Deps{Store: i.Store, Elector: i.Elector, DNS: domains.NewResolver(cfg.DNSResolver, 0)})
 	if err != nil {
