@@ -259,7 +259,7 @@ func TestQuickwit(t *testing.T) {
 	prefix := fmt.Sprintf("test-logs-%d", time.Now().UnixNano())
 	id := IndexID(prefix, 1)
 	settings := IndexSettings{RetentionDays: 1, CommitSecs: 1, Partitions: 16}
-	kc, err := kafka.New(strings.Split(brokers, ","))
+	kc, err := kafka.New(strings.Split(brokers, ","), kafka.Auth{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ package kafka
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -19,6 +20,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/sasl"
+	"github.com/twmb/franz-go/pkg/sasl/aws"
+
+	"github.com/gardenlinux/feos/go/internal/awsauth"
 )
 
 // Record is a record of a topic: its key and value, and where it lies
@@ -38,38 +43,82 @@ type TopicConfig struct {
 	Replication int16
 }
 
+// Auth is how a client signs in to the brokers. The zero value signs in
+// with nothing: plaintext without SASL, the reference deployment's
+// listener inside the cluster, which a NetworkPolicy guards.
+type Auth struct {
+	// AWS, when set, makes the client sign in with SASL AWS_MSK_IAM over
+	// TLS, Amazon MSK's IAM access control (its port 9098), with the
+	// credentials it returns. It is asked at every connection and at every
+	// re-authentication the broker asks for (MSK bounds a session's life,
+	// KIP-368): so that a Pod Identity's credentials, fetched again before
+	// they expire (awsauth.Source), are taken up without a restart. The signature's region is the broker's
+	// (its host name, *.kafka.<region>.amazonaws.com), else AWS_REGION's.
+	AWS func(context.Context) (awsauth.Credentials, error)
+}
+
+// opts are the options of a's sign-in: none, or TLS against the system's
+// roots (MSK's certificates are publicly trusted) and the SASL mechanism.
+func (a Auth) opts() []kgo.Opt {
+	if a.AWS == nil {
+		return nil
+	}
+	return []kgo.Opt{kgo.DialTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12}), kgo.SASL(mskIAM(a.AWS))}
+}
+
+// mskIAM is SASL AWS_MSK_IAM with the credentials of get, each session
+// signed with the credentials current when it starts.
+func mskIAM(get func(context.Context) (awsauth.Credentials, error)) sasl.Mechanism {
+	return aws.ManagedStreamingIAM(func(ctx context.Context) (aws.Auth, error) {
+		c, err := get(ctx)
+		if err != nil {
+			return aws.Auth{}, fmt.Errorf("kafka: AWS credentials: %w", err)
+		}
+		return aws.Auth{AccessKey: c.AccessKeyID, SecretKey: c.SecretAccessKey, SessionToken: c.SessionToken}, nil
+	})
+}
+
 // Client is a producer, a reader of partitions and an admin of topics
 // of one cluster.
 type Client struct {
-	seeds []string
-	cl    *kgo.Client
-	adm   *kadm.Client
+	// conn are the options every client of the cluster starts with: the
+	// seed brokers and the sign-in, the reads' own clients as the
+	// producer.
+	conn []kgo.Opt
+	cl   *kgo.Client
+	adm  *kadm.Client
 }
 
-// New returns a client of the brokers seeds: an idempotent producer that
-// waits for every in-sync replica (acks=all), the record's partition the
-// caller's.
-func New(seeds []string) (*Client, error) {
+// New returns a client of the brokers seeds, signing in as auth says: an
+// idempotent producer that waits for every in-sync replica (acks=all),
+// the record's partition the caller's.
+func New(seeds []string, auth Auth) (*Client, error) {
 	if len(seeds) == 0 {
 		return nil, errors.New("kafka: no brokers")
 	}
-	cl, err := kgo.NewClient(
-		kgo.SeedBrokers(seeds...),
+	c := &Client{conn: append([]kgo.Opt{kgo.SeedBrokers(seeds...)}, auth.opts()...)}
+	cl, err := kgo.NewClient(c.with(
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		kgo.RecordPartitioner(kgo.ManualPartitioner()),
 		kgo.ProducerBatchCompression(kgo.ZstdCompression()),
 		kgo.ProducerLinger(2*time.Millisecond),
 		kgo.ProducerBatchMaxBytes(4<<20),
 		kgo.RecordDeliveryTimeout(20*time.Second),
-	)
+	)...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: %w", err)
 	}
-	return &Client{seeds: seeds, cl: cl, adm: kadm.NewClient(cl)}, nil
+	c.cl, c.adm = cl, kadm.NewClient(cl)
+	return c, nil
 }
 
 // Close closes the client.
 func (c *Client) Close() { c.cl.Close() }
+
+// with are the cluster's options and then opts, in a slice of their own.
+func (c *Client) with(opts ...kgo.Opt) []kgo.Opt {
+	return append(append(make([]kgo.Opt, 0, len(c.conn)+len(opts)), c.conn...), opts...)
+}
 
 // Partition is the partition of key among n: FNV-1a, the same for every
 // writer and reader.
@@ -215,9 +264,9 @@ func (c *Client) Read(ctx context.Context, topic string, from, to map[int32]int6
 	if len(want) == 0 {
 		return nil, nil
 	}
-	cl, err := kgo.NewClient(kgo.SeedBrokers(c.seeds...),
+	cl, err := kgo.NewClient(c.with(
 		kgo.ConsumePartitions(map[string]map[int32]kgo.Offset{topic: want}),
-		kgo.FetchMaxWait(200*time.Millisecond))
+		kgo.FetchMaxWait(200*time.Millisecond))...)
 	if err != nil {
 		return nil, fmt.Errorf("kafka: %w", err)
 	}
@@ -272,7 +321,7 @@ type Follower struct {
 // Follow starts reading topic's partitions of from at their offsets (none:
 // none yet, Add adds them).
 func (c *Client) Follow(topic string, from map[int32]int64) (*Follower, error) {
-	opts := []kgo.Opt{kgo.SeedBrokers(c.seeds...), kgo.FetchMaxWait(500 * time.Millisecond)}
+	opts := c.with(kgo.FetchMaxWait(500 * time.Millisecond))
 	if len(from) > 0 {
 		opts = append(opts, kgo.ConsumePartitions(map[string]map[int32]kgo.Offset{topic: offsets(from)}))
 	}

@@ -340,6 +340,23 @@ func TestConfig(t *testing.T) {
 			t.Errorf("%v passed", args)
 		}
 	}
+	if c.KafkaSASL != KafkaSASLNone {
+		t.Errorf("kafka sasl %q, want none", c.KafkaSASL)
+	}
+	env["FERUN_SINK_KAFKA_SASL"] = "aws-msk-iam"
+	if c, err := Parse(nil, func(k string) string { return env[k] }); err != nil || c.KafkaSASL != KafkaSASLAWSMSKIAM {
+		t.Errorf("FERUN_SINK_KAFKA_SASL=aws-msk-iam: %q, %v", c.KafkaSASL, err)
+	}
+	delete(env, "FERUN_SINK_KAFKA_SASL")
+	if _, err := Parse([]string{"--kafka-sasl", "scram"}, func(k string) string { return env[k] }); err == nil {
+		t.Error("--kafka-sasl scram passed")
+	}
+	if a := kafkaAuth(KafkaSASLAWSMSKIAM); a.AWS == nil {
+		t.Error("aws-msk-iam signs in with no credentials")
+	}
+	if a := kafkaAuth(KafkaSASLNone); a.AWS != nil {
+		t.Error("none signs in with AWS credentials")
+	}
 	for _, p := range []string{"0", "201"} {
 		if _, err := Parse([]string{"--index-partitions", p}, func(k string) string { return env[k] }); err == nil {
 			t.Errorf("--index-partitions %s passed", p)
