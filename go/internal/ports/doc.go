@@ -24,7 +24,10 @@
 // Nothing parses the payload, so HTTP, its upgrades (WebSockets, hot
 // reload) and whatever an upgrade turns into ride through unchanged. The
 // sandbox's token stops at the door; the server in the guest sees the
-// Host the client sent, which for FeCode's previews is the preview host.
+// Host the client sent, which for FeCode's previews is the preview host,
+// or the one it names in X-FeRun-Host when the Host had to be the
+// platform's own name to reach the door through an ingress that routes
+// by Host (GuestHost).
 //
 // Connections are pooled per pod, port and node: a page that loads a
 // hundred modules rides a few Forward streams, at most 32 per sandbox on

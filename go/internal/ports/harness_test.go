@@ -95,8 +95,9 @@ func (k *kubePorts) KubePorts(context.Context, podid.ID) ([]int, error) {
 // seen is what the guest's server saw of a request.
 type seen struct {
 	Method, Host, Path, Query, Authorization, ProxyAuthorization, Body string
-	// RouteToken is the route door's own header.
-	RouteToken string
+	// RouteToken is the route door's own header; GuestHost the header
+	// that names the Host, which stops at the door.
+	RouteToken, GuestHost string
 }
 
 // guest is the HTTP server on the guest's port: it answers what it saw,
@@ -147,7 +148,7 @@ func (g *guest) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s := seen{Method: r.Method, Host: r.Host, Path: r.URL.EscapedPath(), Query: r.URL.RawQuery,
 		Authorization: r.Header.Get("Authorization"), ProxyAuthorization: r.Header.Get("Proxy-Authorization"),
-		Body: string(body), RouteToken: r.Header.Get("X-FeRun-Route-Token")}
+		Body: string(body), RouteToken: r.Header.Get("X-FeRun-Route-Token"), GuestHost: r.Header.Get(HostHeader)}
 	g.mu.Lock()
 	g.last = s
 	g.mu.Unlock()

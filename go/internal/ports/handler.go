@@ -480,6 +480,33 @@ func (h *Handler) proxyHeld(w http.ResponseWriter, r *http.Request, lease model.
 	return h.proxy(w, r, lease, tg, mayRetry, &up)
 }
 
+// HostHeader names the Host the server in the guest sees, for a caller
+// that cannot send it as the Host: FeCode's backend reaches the doors
+// through the front door's ingress at the platform's own name, which
+// routes by Host, and names the preview host here. It is no credential:
+// whoever may call the door may send any Host.
+const HostHeader = "X-FeRun-Host"
+
+// maxHost bounds a Host the guest is given: a DNS name and a port.
+const maxHost = 261
+
+// GuestHost is the Host the server in the guest sees for r: X-FeRun-Host
+// when it holds one host[:port] of letters, digits, '.', '-', '_', ':'
+// and brackets, else the Host r came with.
+func GuestHost(r *http.Request) string {
+	h := r.Header.Get(HostHeader)
+	if h == "" || len(h) > maxHost {
+		return r.Host
+	}
+	for i := 0; i < len(h); i++ {
+		c := h[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(".-_:[]", c) >= 0) {
+			return r.Host
+		}
+	}
+	return h
+}
+
 // pseudoHost names a pod's port in the pools' keys: it is never resolved.
 func pseudoHost(id podid.ID, port int) string {
 	return id.String() + "--" + strconv.Itoa(port) + ".ferun.invalid"
@@ -503,8 +530,11 @@ func (h *Handler) proxy(w http.ResponseWriter, r *http.Request, lease model.Leas
 			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			// The server in the guest sees the host the client named
 			// (FeCode's preview host): allowed-hosts checks and hot-reload
-			// URLs are built from it.
-			pr.Out.Host = pr.In.Host
+			// URLs are built from it. A caller that reaches the door
+			// through an ingress that routes by Host names it in
+			// X-FeRun-Host instead (GuestHost).
+			pr.Out.Host = GuestHost(pr.In)
+			pr.Out.Header.Del(HostHeader)
 			// The caller's credential stops here: the sandbox's token,
 			// or what the route door names.
 			creds := tg.credentials
