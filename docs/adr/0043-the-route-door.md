@@ -3,11 +3,12 @@
 **Status:** Accepted · **Date:** 2026-10-18
 
 `ferund` serves an environment's HTTP routes in a door of its own front
-door: the longest route prefix of the deployed deployment picks the
-service, a ready instance takes the request, and a suspended one is
-woken. The door admits only a route token of that environment, minted by
-its tenant and shown once, so that public traffic never travels with a
-tenant's credential. The token travels in a header of its own,
+door: the longest route prefix of the deployed deployment, among the
+routes that answer on the guest's host, picks the service, a ready
+instance takes the request, and a suspended one is woken. The door
+admits only a route token of that environment, minted by its tenant and
+shown once, so that public traffic never travels with a tenant's
+credential. The token travels in a header of its own,
 `X-FeRun-Route-Token`, which stops at the door, so that the application
 receives the client's `Authorization` as it was sent, unless that holds
 a FeRun credential, which the door refuses rather than pass on. Routes
@@ -52,10 +53,11 @@ browser sends the application.
   `Authorization` through.
 - The door serves anonymous clients: a failure inside `ferund` says that
   the door failed and nothing of its cause, which is in the log.
-- A route has no host of its own: the door serves every route of an
-  environment under the environment's path, and the ingress serves a
-  public environment's routes to image services on every host the
-  environment has (ADR 0021). A plan says which doors serve each route.
+- The door serves every route of an environment under the environment's
+  path. A route with a host answers there only to a request whose guest
+  Host, from `X-FeRun-Host` or else the request's, is that host, as the
+  ingress serves it on that host alone (ADR 0045); a route without one
+  answers on every host. A plan says which doors serve each route.
 
 ## Alternatives considered
 
@@ -101,4 +103,7 @@ into a header of its own on 2026-10-19 (3b047c4), and the door refuses a
 FeRun credential in an `Authorization` it would pass on since the same
 day (3c2851f, e46bd4f). Since ADR 0021 on 2026-10-28 (33ea94e) the
 ingress serves public environments' image services beside the door.
-Split out of ADR 0018 on 2026-11-08.
+Split out of ADR 0018 on 2026-11-08. A route has answered on its host
+alone, in the door as in the ingress, since 2026-11-17 (ADR 0045,
+b8578c43); until then a route had no host of its own and answered on
+every host.

@@ -54,6 +54,11 @@ type validateCtx struct {
 	// the environment is public.
 	zone, host string
 	public     bool
+	// routeHosts are the hosts a route may name (RouteHosts), served those
+	// the environment is served at now (hostsOf); hostsKnown: there is an
+	// environment to judge a route's host against.
+	routeHosts, served []string
+	hostsKnown         bool
 	// bindingsOn: HTTP bindings are on (Deps.Bindings); destinations are
 	// the destination rule's words on the hosts of the spec's bindings,
 	// asked before it is validated.
@@ -117,6 +122,12 @@ func (v *validateCtx) Image(image string) (string, error) {
 // any route.
 func (v *validateCtx) IngressHost() (host string, public, ok bool) {
 	return v.host, v.public, v.zone != ""
+}
+
+// RouteHosts are the hosts a route of the environment may name, those it
+// is served at now, and whether there is an environment (ADR 0045).
+func (v *validateCtx) RouteHosts() (hosts, served []string, ok bool) {
+	return v.routeHosts, v.served, v.hostsKnown
 }
 
 // HTTPBindings reports whether HTTP bindings are on (ADR 0028).
@@ -266,6 +277,12 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil {
 			return nil, spec.Pins{}, fmt.Errorf("hosts: %w", err)
 		}
+		if hostRoutes(sp) {
+			if vc.routeHosts, err = s.routeHosts(ctx, *env, vc.host); err != nil {
+				return nil, spec.Pins{}, err
+			}
+			vc.served, vc.hostsKnown = slices.Clone(hosts), true
+		}
 		if hosts = slices.DeleteFunc(hosts, routing.IsWildcard); len(hosts) > 0 {
 			vc.host = hosts[0]
 		}
@@ -354,6 +371,41 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		}
 	}
 	return vc, pins, nil
+}
+
+// hostRoutes reports whether a route of sp has a host.
+func hostRoutes(sp spec.Spec) bool {
+	for _, r := range sp.Routes {
+		if r.Host != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// routeHosts are the hosts a route of environment e may name (ADR 0045):
+// its default host, defaultHost ("" before it has a label), and the names
+// of the domains bound to it, wildcards among them, whatever their state.
+// These are the names the environment answers on, or will answer on
+// without another deployment, once a domain is verified, routed and has
+// its certificate, or once none is served and the default host is its
+// host again; what it is served at this moment changes without a write,
+// and a spec judged by it would pass or fail by timing.
+func (s *Service) routeHosts(ctx context.Context, e store.Environment, defaultHost string) ([]string, error) {
+	var out []string
+	if defaultHost != "" {
+		out = append(out, defaultHost)
+	}
+	ds, err := s.st.ListDomainViews(ctx, e.Owner, e.ID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("the domains: %w", err)
+	}
+	for _, d := range ds {
+		if d.EnvID == e.ID && !slices.Contains(out, d.Name) {
+			out = append(out, d.Name)
+		}
+	}
+	return out, nil
 }
 
 // planned is a plan of a spec for an environment.

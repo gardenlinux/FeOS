@@ -36,7 +36,8 @@ type Pins struct {
 // hashes and diffs: defaults filled (replicas, resources, readiness
 // timing, rollout and job timeouts, job on, an addon's plan, a binding's
 // mode and burst, its upstream as its origin; the binding names of
-// services and jobs sorted), Runtime
+// services and jobs sorted; a route's host in lower case without a
+// trailing dot), Runtime
 // explicit on every service, durations as Go's time.Duration.String
 // writes them ("15m0s"), Image pinned (and ImageAsWritten kept) for every
 // image found in p.Images, a digest reference kept as written, every
@@ -75,7 +76,11 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 		}
 	}
 	if len(s.Routes) > 0 {
-		out.Routes = maps.Clone(s.Routes)
+		out.Routes = make(map[string]Route, len(s.Routes))
+		for name, r := range s.Routes {
+			r.Host = RouteHost(r.Host)
+			out.Routes[name] = r
+		}
 	}
 	if len(s.Bindings) > 0 {
 		out.Bindings = make(map[string]Binding, len(s.Bindings))

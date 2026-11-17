@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -64,6 +65,9 @@ func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver,
 		Resources: &podv1.Resources{Vcpus: uint32(sb.VCPUs), MemoryMib: uint64(sb.MemoryMiB)},
 		Network:   &podv1.PodNetwork{},
 		Labels:    labels,
+		// An image service's instance may drain after SIGTERM; a node
+		// that does not know the field gives it its 10 s.
+		StopGraceSeconds: uint32(sb.StopGrace() / time.Second),
 	}
 	t := sb.PodTemplate
 	if t == nil {

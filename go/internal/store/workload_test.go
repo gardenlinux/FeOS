@@ -5,6 +5,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -45,6 +46,34 @@ func TestSandboxWorkload(t *testing.T) {
 		kind, object, group := c.row.Workload()
 		if kind != c.kind || object != c.object || group != c.group {
 			t.Errorf("%s: (%q, %q, %q), want (%q, %q, %q)", c.name, kind, object, group, c.kind, c.object, c.group)
+		}
+	}
+}
+
+// An image service's instance drains after SIGTERM, for
+// model.ServiceStopGrace; every other pod has the node's grace (0).
+func TestSandboxStopGrace(t *testing.T) {
+	env := uuid.New()
+	id := podid.Mint()
+	labels := func(kind, object string) map[string]string {
+		return map[string]string{model.LogKind: kind, model.LogObject: object}
+	}
+	for _, c := range []struct {
+		name string
+		row  Sandbox
+		want time.Duration
+	}{
+		{"service", Sandbox{ID: id, EnvironmentID: env, Instance: true, LogLabels: labels("service", "api")},
+			model.ServiceStopGrace},
+		{"job run", Sandbox{ID: id, EnvironmentID: env, Instance: true, LogLabels: labels("job", "migrate")}, 0},
+		{"addon", Sandbox{ID: id, EnvironmentID: env, Instance: true, LogLabels: labels("addon", "db")}, 0},
+		{"tenant's job", Sandbox{ID: id, EnvironmentID: env, TenantJob: true}, 0},
+		{"sandbox", Sandbox{ID: id, EnvironmentID: env, LogLabels: labels(model.LogKindSandbox, id.String())}, 0},
+		{"a sandbox labelled as a service", Sandbox{ID: id, EnvironmentID: env, LogLabels: labels("service", "api")}, 0},
+		{"outside an environment", Sandbox{ID: id}, 0},
+	} {
+		if got := c.row.StopGrace(); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}
 }

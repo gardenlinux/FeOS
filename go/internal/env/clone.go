@@ -147,8 +147,10 @@ func secretRefPaths(sp spec.Spec) map[string][]string {
 
 // cloneSpec is the source deployment's spec as a clone applies it: without
 // its attached services (and the routes to them), which run in a
-// sandbox of the source, and with its secrets pinned to nothing (the
-// clone's own versions are pinned).
+// sandbox of the source, without its routes that have a host, which is
+// the source's (ADR 0045: the clone has no domain and no label yet), and
+// with its secrets pinned to nothing (the clone's own versions are
+// pinned).
 func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 	sp, err := parseStored(stored)
 	if err != nil {
@@ -166,10 +168,17 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(sp.Routes)) {
-		if svc := sp.Routes[name].Service; removed[svc] {
+		r := sp.Routes[name]
+		switch {
+		case removed[r.Service]:
 			delete(sp.Routes, name)
 			fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "routes." + name,
-				Problem: "route " + name + " is not cloned: its service " + svc + " is not", Remedy: ""})
+				Problem: "route " + name + " is not cloned: its service " + r.Service + " is not", Remedy: ""})
+		case r.Host != "":
+			delete(sp.Routes, name)
+			fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "routes." + name,
+				Problem: "route " + name + " is not cloned: its host " + r.Host + " is the source's",
+				Remedy:  "pass a spec that routes it on a host of the new environment"})
 		}
 	}
 	for name := range sp.Secrets {

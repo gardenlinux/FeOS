@@ -173,7 +173,7 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `domains` | tenants' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
 | `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table, a wildcard's over DNS-01 in the ACME zone ([Certificates of domains](#certificates-of-domains)) |
 | `route53`, `awsauth` | the ACME zone's first DNS provider: Route 53's ChangeResourceRecordSets, signed with SigV4 by `awsauth` from static keys or an EKS Pod Identity |
-| `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path matching, which the route door uses too |
+| `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path and host matching, which the route door uses too |
 | `visits` | the tenants' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
 | `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
 | `oidc`, `oidc/oidctest` | the OpenID Connect relying party of human sign-in and of `ferun-auth`; a test issuer |
@@ -890,7 +890,7 @@ finished in another transaction that applies what the node did.
 | restore | hibernated | creating | RestorePod of the checkpoint | 7 min 5 s + 8 s/GiB |
 | pause | running | pausing | SuspendPod | 3 min 40 s + 5 s/GiB |
 | hibernate | paused; stopped, failed and running when draining | hibernating | HibernatePod | a pause's + `--hibernate-timeout` + 16 s/GiB |
-| repair | creating without an op, running with an unreachable guest; running, for an instance whose container exited (`Restart`, [Environments](#probes-exits-and-restarts)) | creating | StopPod and StartPod; for a pod stuck in its restore, DeletePod and RestorePod, never for a pod with volumes | 7 min 5 s + 8 s/GiB |
+| repair | creating without an op, running with an unreachable guest; running, for an instance whose container exited (`Restart`, [Environments](#probes-exits-and-restarts)) | creating | StopPod and StartPod; for a pod stuck in its restore, DeletePod and RestorePod, never for a pod with volumes | 7 min 5 s + 8 s/GiB, and an image service's instance's stop grace (660 s), which its StopPod may wait |
 
 GiB is the sandbox's memory, rounded up. **A caller's deadline covers
 its callee's budget**, so that feosd answers, the change or "the VM is
@@ -1206,10 +1206,15 @@ an instance connected to the node: it reads the pod and deletes it only
 when its incarnation is the tombstone's (or it has none), and drops the
 tombstone only after the node answered. Processing always runs detached,
 like an op's calls. Its `DeletePod` has feosd's suspend budget, 30 s,
-and 2 min and 4 s/GiB as its deadline: feosd's delete waits for the
-pod's lock, which a suspend (an idle pause of a sandbox deleted
-meanwhile) holds up to that budget, and feosd runs the delete to its end
-once it has the lock, whatever its caller does. While a tombstone exists, placement puts no pod of
+2 min, the pod's stop grace (`stop_grace_seconds` of the spec the node
+holds: 660 s for an image service's instance, 0 for every other pod,
+whose 10 s the 2 min cover) and 4 s/GiB as its deadline: feosd's delete
+waits for the pod's lock, which a suspend (an idle pause of a sandbox
+deleted meanwhile) holds up to that budget, lets the pod's containers
+exit after SIGTERM, and runs the delete to its end once it has the
+lock, whatever its caller does. The leader's loop skips a tombstone this
+instance processes already and waits for one it starts for 2 min at
+most, so that a delete in its grace holds no pass. While a tombstone exists, placement puts no pod of
 that ID on that node. Tombstones of removed nodes are dropped.
 
 ### Policies
@@ -2752,11 +2757,19 @@ shapes:
   errors, a volume of another type is the warning that its data is
   deleted.
 - **Routes**: a path of unreserved characters without empty, `.` or
-  `..` segments, unique, of at most 1 KiB (every ingress instance holds
-  it); a service and one of its ports; `strip`; `host` is stored and not
-  used (info); `from`, the clients' blocks (1 to 32 canonical prefixes
-  of either family, each once; `[]` is an error), which the ingress
-  checks ([ingress](ingress.md)); left out, every client.
+  `..` segments, unique among the routes of its host, of at most 1 KiB
+  (every ingress instance holds it); a service and one of its ports;
+  `strip`; `host`, the host it answers on alone ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md)): a name of LDH
+  labels or a wildcard `*.<name>`, stored in lower case without a
+  trailing dot, never an address or with a port, and one its environment
+  has or may have: its default host once it has a label, a domain bound
+  to it in any state, or a name a wildcard domain of it serves (else an
+  error naming the hosts it may name; without an environment, in `POST
+  /api/v1/environments/plan`, its form alone); left out, every host of
+  the environment; `from`, the clients' blocks (1 to 32 canonical
+  prefixes of either family, each once; `[]` is an error), which the
+  ingress checks ([ingress](ingress.md)); left out, every client.
 - **Secrets**: every `{"secret": n}` names a tenant secret of the
   environment that exists and is not deleted.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
@@ -2887,7 +2900,8 @@ the nodes through `env-groups`, put whole.
   applies as its deployment 1 (origin `clone`, the source deployment's
   annotations without `ferun.revertOf`, whose number names a deployment of
   the source) a whole spec of the caller's, or the source deployment's
-  without its attached services and their routes (info findings) and
+  without its attached services and their routes, and without its routes
+  that have a host, whose host is the source's (info findings), and
   with its secret pins reset. It changes no single value of the source's
   spec: a caller that wants other sizes or replicas passes its own spec.
   `data: true` is an error: no data is copied.
@@ -3018,7 +3032,20 @@ crash loop closes. Then:
    one stops (phase `stopping`, `retire_at` 10 s ahead: routes drop it
    at once, the env table within a pass of `env-names`, and the answers
    that named it expire after their 5 s) and goes; surplus replicas stop
-   from the highest; a lost row is replaced. The service's `rollout.timeout`
+   from the highest; a lost row is replaced. An instance that goes is
+   deleted by tombstone: its node sends its container SIGTERM and gives
+   it up to 660 s to exit before the microVM ends (the pod's
+   `stop_grace_seconds`, `model.ServiceStopGrace`), so that a service
+   that drains, as FeCode's backend hands its agents' turns over to
+   another replica within 630 s, finishes; a container that exits sooner
+   ends it sooner. Only an image service's pods have that grace: a
+   sandbox's container (`sleep`, which ignores SIGTERM as PID 1) would
+   wait out any grace, an addon's next pod waits for its volume, and a
+   job that is stopped is cancelled; their pods have the node's 10 s. A
+   repair that restarts a service's pod waits the grace in its
+   `StopPod`. The pod's grace runs after its row is gone: its address
+   leaves its groups and the env table, and its node's bookings and its
+   tenant's use no longer count it (BACKLOG, ADR 0018). The service's `rollout.timeout`
    counts from R's start, moved on by the time R's deploy jobs waited
    for runs that were not R's (see the deployment's deadline below): past
    it, or once one of R's new instances exited 3 times (a start that
@@ -3428,8 +3455,12 @@ route token of another environment is 404 "no such environment".
 `POST /api/v1/environments/{env}/route-tokens` mints one (32 random
 bytes, base64url, shown once, only its SHA-256 kept); `DELETE` revokes
 them all. The door matches the longest prefix, segment by segment, over
-the routes of the deployed deployment (the latest while none is deployed;
-no match is 404 "no route for <path>") and forwards with the port door's
+the routes of the deployed deployment (the latest while none is deployed)
+that answer on the Host the guest sees, `X-FeRun-Host`'s or else the
+request's, canonical: those without a host and those whose host is that
+host or its wildcard, of one prefix the closest host first, as the
+ingress matches ([ADR 0045](../adr/0045-hosts-domains-and-certificates.md));
+no match is 404 "no route for <path>". It forwards with the port door's
 `ForwardTo`, naming the headers that carried the token: a forward hold
 and a touch, the Host passed on, upgrades and streams kept, a
 Kubernetes binding's port refused. `X-FeRun-Route-Token` and
@@ -3462,15 +3493,17 @@ serves anonymous clients; a refusal below 500 keeps its text.
 
 FeCode's environment hosts forward to the door with the environment's
 route token in `X-FeRun-Route-Token`, and pass the browser's
-`Authorization` on to the application.
+`Authorization` on to the application. Their hosts are FeCode's, not the
+environment's, so such an environment's routes have no host.
 
 The door serves every environment, with its route tokens. Beside it,
 `ferun-ingress` serves the routes to image services of the environments
-whose tenant made them public, at their default hosts and without a
-token, straight to the pods ([Public environments](#public-environments));
-routes to attached services are the door's alone. A plan's info finding
-at each route says which doors serve it, and the status names each
-route's `door`.
+whose tenant made them public, at their hosts, a route with a host at
+that host alone, and without a token, straight to the pods ([Public
+environments](#public-environments)); routes to attached services are
+the door's alone. A plan's info finding at each route says which doors
+serve it, at which host, and whether the environment is served there yet,
+and the status names each route's `door`.
 
 ### Secrets
 
@@ -3588,9 +3621,13 @@ the ready ones its live instances, and its instances, an addon with
 type, version, plan, phase and `provisioned`, a job with its last run,
 an attached service with its sandbox, phase, restarts and last exit;
 `starting` before an object has an instance), its routes (of the
-deployed deployment, else the latest), each with its `door`, `ingress` with
-its `url` (`https://<host><prefix>`) for a route to an image service of
-a public environment and `route` for every other, `public`, its `hosts`
+deployed deployment, else the latest), each with its `host` (left out
+without one) and its `door`, `ingress` for a route to an image service
+of a public environment and `route` for every other, an `ingress` route
+with its `url` (`https://<host><prefix>`) where it answers its own path:
+at its host while the environment is served there, a route without a
+host at the first of `hosts` that is no wildcard where no route of that
+host has its path, none for a route on a wildcard; `public`, its `hosts`
 (while it is public and not being deleted: its served domains in the
 order they were bound, else its default host when the platform has an
 apps zone; otherwise empty, [ADR 0021](../adr/0021-ingress.md)),
@@ -3633,7 +3670,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET …/{env}/access-logs[?limit=200&beforeTsNs=&traceId=]` | `{records}`: the newest page of the ingress's access log before `beforeTsNs` (a record's `tsNs`, a string), at most 1000, ascending, of the trace `traceId` (32 lower case hex digits; else 400) when given, read from the sink ([The sink](#the-sink)); 503 `no_log_store` without `--sink-url`, 503 `log_store_unavailable` when the sink fails; each `{tsNs, time, durationNs, ingress, service, instance, host, method, path, proto, status, outcome, attempts, heldNs, bytesIn, bytesOut, clientIp, userAgent, traceId, spanId, parentSpanId}` ([ingress.md](ingress.md#access-log)) |
 | `GET …/{env}/traffic[?window=1h]` | the requests of each image service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, source, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every image service of the desired and deployed deployments with a request in the window, by name, each with every bucket, oldest first; `source` `app`, counted from its own OpenTelemetry server spans without its readiness check (`errors`: an error status, or a status of 500 to 599), or `ingress` for a routed service that sends none, what the ingress answered (`errors`: a status ≥ 500 or none written, but not aborted); the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
 | `GET …/{env}/objects/{kind}/{name}/logs?lines=200&replica=0` | `{lines, source}`, the source `container` or `process`; with `--sink-url` a container's log is the sink's first ([The sink](#the-sink)); 501; 409 "paused" (unless the sink has the instance's lines), `not_running` (also for a replica without an instance yet, or none at all); 404 for a replica beyond the object's ([Logs](#probes-exits-and-restarts)) |
-| `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes, or an attached service's process |
+| `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes after its stop grace (660 s), or an attached service's process |
 | `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
 | `POST …/{env}/bindings/{name}/check` `{probe?}` | 200 the preflight's result of the latest deployment's binding, its secrets at their latest versions ([HTTP bindings](#http-bindings)); 404 `no_binding`, `bindings_off` |
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |

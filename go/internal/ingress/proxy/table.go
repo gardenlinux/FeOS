@@ -111,13 +111,14 @@ func envService(env, service string) string {
 }
 
 // envRoutes is one environment's routes: sorted by the number of their
-// path's segments, longest first, then by name, with prefixes and
-// clients in the same order.
+// path's segments, longest first, then by name, with prefixes, hosts
+// (canonical, "": none) and clients in the same order.
 type envRoutes struct {
 	id       string
 	tenant   string
 	routes   []wire.Route
 	prefixes []string
+	hosts    []string
 	clients  []clients
 	services map[string]*service
 	// access is who the environment admits (wire.Env.Access): "" anyone,
@@ -193,12 +194,10 @@ type endpoint struct {
 }
 
 // canonicalHost is a request's host as the table keys it: lower case,
-// without a port and a trailing dot.
+// without a port and a trailing dot (routing.CanonicalHost, which the
+// route door uses too).
 func canonicalHost(h string) string {
-	if host, _, err := net.SplitHostPort(h); err == nil {
-		h = host
-	}
-	return strings.ToLower(strings.TrimSuffix(h, "."))
+	return routing.CanonicalHost(h)
 }
 
 // buildTable builds the routing of a state. Of two environments that
@@ -399,6 +398,7 @@ func buildEnv(e wire.Env) *envRoutes {
 	})
 	for _, r := range er.routes {
 		er.prefixes = append(er.prefixes, r.Path)
+		er.hosts = append(er.hosts, canonicalHost(r.Host))
 		er.clients = append(er.clients, parseClients(r.From))
 	}
 	for _, s := range e.Services {
@@ -434,7 +434,10 @@ type target struct {
 }
 
 // route routes a request by its canonical host and its escaped path from
-// a client's address (clientAddr) to an environment and a route, or
+// a client's address (clientAddr) to an environment and a route, of the
+// routes that answer on that host the one with the longest prefix, of
+// one prefix the one whose host names it most closely
+// (routing.MatchHost, ADR 0045), or
 // returns the answer when the routing does not send it anywhere. When
 // the route matched does not admit the client, the answer is 403 and the
 // target has the environment and the route: the route refused the
@@ -459,7 +462,7 @@ func (t *table) route(host, raw string, client netip.Addr) (target, *reply) {
 	if err != nil {
 		return target{}, &reply{http.StatusBadRequest, textBadEscape, 0}
 	}
-	i, n, ok := routing.Match(e.prefixes, raw)
+	i, n, ok := routing.MatchHost(e.prefixes, e.hosts, host, raw)
 	if !ok {
 		return target{}, &reply{http.StatusNotFound, "no route for " + path, 0}
 	}

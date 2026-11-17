@@ -210,7 +210,9 @@ func Asleep(phase, clientState, op string) bool {
 //     name; a route's Path is its prefix as the route door matches it
 //     (spec.RoutePrefix). A route to an attached service is the route
 //     door's alone (Door). Its From are the spec route's clients' blocks,
-//     canonical (routeFrom).
+//     canonical (routeFrom), its Host the spec route's host as it is
+//     matched (spec.RouteHost, ADR 0045), whether or not the environment
+//     is served there now: a request reaches only the hosts it is.
 //   - Each image service that a route sends to is a Service.
 //     An instance of it is an endpoint when it is ready, running,
 //     without an operation, with an address and a node, and its node
@@ -265,7 +267,7 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 	byService := map[string][]spec.RouteView{}
 	for _, r := range spec.IngressRoutes(sp) {
 		out.Routes = append(out.Routes, wire.Route{Name: r.Name, Path: r.Prefix, Service: r.Service, Port: r.Port.String(),
-			Strip: r.Strip, Door: r.Door, From: routeFrom(sp.Routes[r.Name].From)})
+			Strip: r.Strip, Door: r.Door, From: routeFrom(sp.Routes[r.Name].From), Host: r.Host})
 		if target, ok := sp.Services[r.Service]; ok && !r.Door && !spec.IsAttached(target) {
 			byService[r.Service] = append(byService[r.Service], r)
 		}

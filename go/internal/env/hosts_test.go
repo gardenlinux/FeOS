@@ -40,3 +40,31 @@ func TestHostsOfWildcards(t *testing.T) {
 		t.Fatalf("a wildcard first %+v", rs[0])
 	}
 }
+
+// A route without a host has its URL at the first address where no route
+// of that host takes its path, one with a host at that host while it is
+// served, directly or under a served wildcard (ADR 0045).
+func TestRoutesOfHosts(t *testing.T) {
+	web := spec.Service{Runtime: spec.RuntimeImage, Ports: []spec.Port{{Name: "http", Port: 8080}}}
+	sp := &spec.Spec{Services: map[string]spec.Service{"web": web},
+		Routes: map[string]spec.Route{
+			"root":  {Path: "/", Service: "web", Port: spec.PortRef{Name: "http"}},
+			"a":     {Host: "a.example", Path: "/", Service: "web", Port: spec.PortRef{Name: "http"}},
+			"api":   {Path: "/api", Service: "web", Port: spec.PortRef{Name: "http"}},
+			"under": {Host: "x.boxed.example", Path: "/x", Service: "web", Port: spec.PortRef{Name: "http"}},
+			"gone":  {Host: "gone.example", Path: "/", Service: "web", Port: spec.PortRef{Name: "http"}},
+		}}
+	want := map[string]string{"root": "https://b.example/", "a": "https://a.example/", "api": "https://a.example/api",
+		"under": "https://x.boxed.example/x", "gone": ""}
+	for _, r := range routesOf(sp, []string{"a.example", "b.example", "*.boxed.example"}) {
+		if r.URL != want[r.Name] || r.Door != DoorIngress {
+			t.Errorf("route %s: %+v, want %q", r.Name, r, want[r.Name])
+		}
+	}
+	// On a's host alone, root has no URL: a's route takes its path.
+	for _, r := range routesOf(sp, []string{"a.example"}) {
+		if r.Name == "root" && r.URL != "" {
+			t.Errorf("root %+v", r)
+		}
+	}
+}

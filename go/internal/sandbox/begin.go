@@ -158,7 +158,7 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 		if err != nil {
 			return err
 		}
-		d := e.t.opDeadline(in.Kind, row.MemoryMiB)
+		d := e.opDeadlineOf(in.Kind, row)
 		after := row
 		after.Op, after.OpID, after.OpOwner = string(in.Kind), uuid.New(), e.id
 		after.OpDeadline, after.OpTarget, after.OpFromState = now.Add(d), target, row.ClientState
@@ -314,7 +314,7 @@ func (r *runner) takeover(ctx context.Context, tx *store.Store, row store.Sandbo
 		}
 		noAbandon = err == nil && n.Draining
 	}
-	d := r.e.t.opDeadline(kind, row.MemoryMiB)
+	d := r.e.opDeadlineOf(kind, row)
 	after := row
 	after.OpID, after.OpOwner, after.OpDeadline = uuid.New(), r.e.id, now.Add(d)
 	written, err := tx.UpdateSandbox(ctx, row, after)

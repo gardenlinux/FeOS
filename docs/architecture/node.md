@@ -1221,8 +1221,11 @@ SIGTERM it
    `UNAVAILABLE` "the node stops"; then the reports end, and `feosd` lets
    go of the control plane for good;
 3. suspends every running pod into its directory as `SuspendPod` does
-   ([ADR 0008](../adr/0008-suspend-and-restore.md)), four at a time, and
-   records each in `/var/lib/feos/suspended-for-stop.json` (the pods and
+   ([ADR 0008](../adr/0008-suspend-and-restore.md)), but one whose
+   `StopPod` or `DeletePod` is in flight, which may wait out a long stop
+   grace under the pod's lock: that one is left to it, not waited for, and
+   its microVM ends with `feosd` if it is still there. It suspends four at
+   a time, and records each in `/var/lib/feos/suspended-for-stop.json` (the pods and
    the time of the stop, written whole and synced) as soon as it is
    suspended, so that a stop that is killed keeps what it did. It waits for
    the hibernations in flight, whose pods are not running on the node

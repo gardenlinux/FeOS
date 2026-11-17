@@ -6,12 +6,12 @@ package service
 import (
 	"context"
 	"errors"
-	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/gardenlinux/feos/go/internal/activity"
+	"github.com/gardenlinux/feos/go/internal/ingress/table"
 	"github.com/gardenlinux/feos/go/internal/ingress/wire"
 	"github.com/gardenlinux/feos/go/internal/mesh"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -38,8 +38,9 @@ const notMeshedText = "the cluster is not meshed; the ingress needs the pods' me
 // "…; make a new one"). The answer is the cluster's ULA, the ingress's /96
 // and address, the apps zone and the answering instance. A Hello changes
 // nothing when repeated. The first successful Hello's Capabilities are
-// kept for the connection (wire.CapabilityVisits decides what its
-// streams get, ADR 0054); a later Hello on it does not change them.
+// kept for the connection (wire.CapabilityVisits and
+// wire.CapabilityRouteHosts decide what its streams get, ADR 0054 and
+// 0045); a later Hello on it does not change them.
 func (s *Service) Hello(ctx context.Context, req *wire.HelloRequest) (*wire.HelloResponse, error) {
 	p, err := ingressPeer(ctx)
 	if err != nil {
@@ -122,7 +123,7 @@ func (s *Service) Hello(ctx context.Context, req *wire.HelloRequest) (*wire.Hell
 		}
 		return nil, rpcError(err, "hello")
 	}
-	s.markHello(p, helloInfo{visits: slices.Contains(req.Capabilities, wire.CapabilityVisits)})
+	s.markHello(p, helloInfo{caps: table.CapsOf(req.Capabilities)})
 	if superseded > 0 {
 		s.log.Info("ingress presented a newer certificate; the older ones are superseded", "ingress", p.Name,
 			"serial", p.Serial, "superseded", superseded, "grace", s.cfg.SupersedeGrace)

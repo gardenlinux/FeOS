@@ -296,15 +296,22 @@ type Addon struct {
 }
 
 // Route sends HTTP requests whose path starts with Path (segment-aware) to
-// a port of a service, through the route door.
+// a port of a service, through the route door and the ingress, on Host
+// alone when it has one.
 type Route struct {
-	// Path starts with "/"; unique among the routes.
+	// Path starts with "/"; unique among the routes of its host.
 	Path    string  `json:"path"`
 	Service string  `json:"service"`
 	Port    PortRef `json:"port"`
 	// Strip removes Path from the request's path before it is forwarded.
 	Strip bool `json:"strip,omitempty"`
-	// Host is accepted and stored, not used yet (an info finding).
+	// Host is the host the route answers on (ADR 0045): a host of its
+	// environment, a wildcard domain of it, which matches every name the
+	// wildcard serves, or a name such a wildcard serves; stored in lower
+	// case without a trailing dot (RouteHost). "": every host of the
+	// environment. Of the routes that answer on a request's host the
+	// longest path wins, and of one path the route whose host names the
+	// host most closely (routing.MatchHost).
 	Host string `json:"host,omitempty"`
 	// From are the clients' address blocks (ADR 0034, revised), prefixes
 	// of either family: the ingress answers a client outside them 403.

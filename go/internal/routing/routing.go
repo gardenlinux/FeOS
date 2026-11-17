@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package routing is the path handling an environment's routes share
-// between the route door of ferund and ferun-ingress (ADR 0021): the
-// refusal of dot segments, the segment-aware longest prefix match and
-// the stripping of a route's path. Both serve the same routes, so both
-// must read a path the same way.
+// Package routing is the path and host handling an environment's routes
+// share between the route door of ferund and ferun-ingress (ADR 0021):
+// the refusal of dot segments, the segment-aware longest prefix match
+// over the routes that answer on a host (ADR 0045), and the stripping of
+// a route's path. Both serve the same routes, so both must read a path
+// and a host the same way.
 package routing
 
 import (
@@ -76,14 +77,32 @@ func Unhex(c byte) byte {
 // not a segment ("/api/" is "/api"). Of prefixes of one length, the
 // first wins.
 func Match(prefixes []string, raw string) (idx, segs int, ok bool) {
+	return MatchHost(prefixes, nil, "", raw)
+}
+
+// MatchHost is Match over the routes that answer on host, a request's
+// canonical host (CanonicalHost): hosts[i] is the host of the route of
+// prefixes[i], canonical, "" for none (nil: no route has one). A route
+// answers on host when it has no host or its host covers host (HostRank).
+// The longest prefix wins, whatever the hosts; of prefixes of one length,
+// the route whose host names host most closely, its own name before its
+// wildcard before none (ADR 0045); of those, the first.
+func MatchHost(prefixes, hosts []string, host, raw string) (idx, segs int, ok bool) {
 	parts := strings.Split(strings.TrimPrefix(raw, "/"), "/")
 	idx, segs = -1, -1
+	rank := RankNone
 	for i, prefix := range prefixes {
+		r := RankAny
+		if i < len(hosts) {
+			if r = HostRank(hosts[i], host); r == RankNone {
+				continue
+			}
+		}
 		var want []string
 		if p := strings.TrimSuffix(prefix, "/"); p != "" {
 			want = strings.Split(strings.TrimPrefix(p, "/"), "/")
 		}
-		if len(want) > len(parts) || len(want) <= segs {
+		if len(want) > len(parts) || len(want) < segs || (len(want) == segs && r <= rank) {
 			continue
 		}
 		match := true
@@ -94,7 +113,7 @@ func Match(prefixes []string, raw string) (idx, segs int, ok bool) {
 			}
 		}
 		if match {
-			idx, segs = i, len(want)
+			idx, segs, rank = i, len(want), r
 		}
 	}
 	if idx < 0 {

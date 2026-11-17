@@ -173,10 +173,11 @@ var _ wire.IngressServer = (*Service)(nil)
 
 // helloInfo is what the first successful Hello on a connection said.
 type helloInfo struct {
-	// visits: the ingress checks visits (wire.CapabilityVisits), so its
+	// caps are its capabilities: with Visits (wire.CapabilityVisits) its
 	// streams get the environments that are not open to anyone, and the
-	// keys of visits.
-	visits bool
+	// keys of visits; with RouteHosts (wire.CapabilityRouteHosts) the
+	// environments with a route that has a host (table.Visible).
+	caps table.Caps
 }
 
 // New returns the ingress service.

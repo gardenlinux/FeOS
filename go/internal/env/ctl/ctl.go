@@ -227,7 +227,8 @@ type timings struct {
 	// process's first readiness.
 	attachedReady time.Duration
 	// restartReady bounds how long RestartService waits for a restarted
-	// replica to be ready before it restarts the next.
+	// replica to be ready before it restarts the next: its StopPod may
+	// wait out the replica's stop grace first (model.ServiceStopGrace).
 	restartReady time.Duration
 	// deploymentDeadline is the least time a deployment may roll before it fails
 	// (§13.5: longer when its services' budgets or jobs need more).
@@ -251,7 +252,7 @@ func defaultTimings() timings {
 		probeTimeout:       10 * time.Second,
 		nodeCall:           10 * time.Second,
 		attachedReady:      time.Minute,
-		restartReady:       5 * time.Minute,
+		restartReady:       5*time.Minute + model.ServiceStopGrace,
 		deploymentDeadline: 10 * time.Minute,
 		addonCertTTL:       24 * time.Hour,
 	}

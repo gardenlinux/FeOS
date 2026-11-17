@@ -200,6 +200,14 @@ pub struct CreatePodOptions {
     )]
     mounts: Vec<VolumeMount>,
 
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = 0,
+        help = "How long the containers have to exit after SIGTERM when the pod is stopped or deleted (at most 900); the node's 10 s when 0"
+    )]
+    stop_grace: u32,
+
     #[arg(long, help = "Wait until the pod runs")]
     wait: bool,
 
@@ -412,6 +420,7 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             // A pod's identity is the control plane's to name (ADR 0014).
             identity: String::new(),
             tls_bindings: Vec::new(),
+            stop_grace_seconds: opts.stop_grace,
         }),
         image_layers: None,
         pull_token: String::new(),
@@ -810,8 +819,21 @@ mod tests {
         let spec = create_pod_request(*opts).spec.unwrap();
         assert_eq!(spec.metadata["role"], "web");
         assert_eq!(spec.metadata["url"], "http://a/?b=c");
+        assert_eq!(spec.stop_grace_seconds, 0, "the node's grace");
         assert!(
             Cli::try_parse_from(["pod", "create", "--no-network", "--metadata", "a=b"]).is_err()
+        );
+    }
+
+    #[test]
+    fn a_create_names_its_stop_grace() {
+        let cli = Cli::try_parse_from(["pod", "create", "--stop-grace", "660"]).unwrap();
+        let PodCommand::Create(opts) = cli.command else {
+            panic!("not a create");
+        };
+        assert_eq!(
+            create_pod_request(*opts).spec.unwrap().stop_grace_seconds,
+            660
         );
     }
 
