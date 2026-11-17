@@ -93,6 +93,9 @@ The backend reads its environment:
 | `MODEL`              | ConfigMap, key `model`        | the model, the deployment's `FECHAT_MODEL` |
 | `SYSTEM_PROMPT_FILE` | ConfigMap, mounted at `/etc/fechat` | default `/etc/fechat/system-prompt.txt`; without the file, the backend's built-in prompt (`defaultSystemPrompt` in `backend/main.go`) |
 | `PORT`               |                               | listen port, default 8080 |
+| `BUDGET_URL`         | an addon's `url` (Valkey)     | where the month's cost of the model is counted (`backend/budget.go`); unset, no cap |
+| `BUDGET_MONTHLY_USD` | the deployment                | the cap: no call of the model starts once the month (UTC) cost this much |
+| `PRICE_INPUT_USD`, `PRICE_OUTPUT_USD`, `PRICE_CACHE_READ_USD`, `PRICE_CACHE_WRITE_USD` | the deployment | the model's prices per million tokens, which a call's usage is counted at: the API answers tokens, not money |
 
 ## Secrets
 
