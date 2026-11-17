@@ -1013,6 +1013,10 @@ export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
         <Field label="Path" hint="requests whose path starts with it, by segments: /api takes /api and /api/…, not /apis" findings={atField(f, 'path')}>
           <input className="mono" placeholder="/" value={o.path || ''} onChange={(e) => onChange({ ...o, path: e.target.value })} />
         </Field>
+        <Field label="Host" findings={atField(f, 'host')}
+          hint="the host it answers on alone: the default host, a domain bound to the environment, or a name its wildcard serves; empty, every host">
+          <input className="mono" placeholder="every host" value={o.host || ''} onChange={(e) => onChange(set(o, 'host', e.target.value.trim()))} />
+        </Field>
         <div className="b-grid3">
           <Field label="Service" findings={atField(f, 'service')}>
             <Select value={o.service} options={services.map(([n]) => n)} empty="(a service)" onChange={(v) => {

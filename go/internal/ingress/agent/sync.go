@@ -69,10 +69,12 @@ func (a *Agent) hello(ctx context.Context, s *session) error {
 // helloRequest is the Hello this instance sends, on a new session and to
 // announce a new endpoint alike: its mesh key, its endpoint, its version
 // and its capabilities. It checks visits (ADR 0054), so the control plane
-// gives it the environments that admit visitors.
+// gives it the environments that admit visitors, and serves a route on
+// its host alone (ADR 0045), so it gives it the environments with a
+// route that has one.
 func (a *Agent) helloRequest(pub []byte, endpoint string) *wire.HelloRequest {
 	return &wire.HelloRequest{PublicKey: pub, Endpoint: endpoint, Version: a.cfg.Version,
-		Capabilities: []string{wire.CapabilityVisits}}
+		Capabilities: []string{wire.CapabilityVisits, wire.CapabilityRouteHosts}}
 }
 
 // meshConfigFor is the device's configuration for a place on the mesh:
@@ -215,7 +217,7 @@ func (a *Agent) syncStream(ctx context.Context, s *session) error {
 // the last, which changes nothing yet. A message that changed anything
 // goes to OnState as a copy and to the cache; a new mesh version sets the
 // device's peers. A heartbeat, which confirms the table, goes to the
-// cache when it was written cacheRefresh ago or longer: table-v2.json's
+// cache when it was written cacheRefresh ago or longer: table-v3.json's
 // savedAt then tells a restarted instance how old its table is, also in a
 // cluster where nothing changes.
 func (a *Agent) apply(part *wire.Table) (*wire.Table, error) {
@@ -263,7 +265,7 @@ func (a *Agent) kickCache() {
 	}
 }
 
-// cacheLoop writes the table to table-v2.json cacheDelay after a change, and
+// cacheLoop writes the table to table-v3.json cacheDelay after a change, and
 // once more when ctx ends if a write is pending.
 func (a *Agent) cacheLoop(ctx context.Context) {
 	var (

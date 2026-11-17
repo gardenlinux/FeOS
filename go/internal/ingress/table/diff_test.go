@@ -34,7 +34,7 @@ func TestDiff(t *testing.T) {
 	cur := snapshotOf(wire.Env{ID: "c", Hash: "c1"}, wire.Env{ID: "a", Hash: "a2"}, wire.Env{ID: "b", Hash: "b1"},
 		wire.Env{ID: "e", Hash: "e1"})
 	sent := map[string]string{"a": "a1", "b": "b1", "d": "d1", "f": "f1"}
-	puts, removed := Diff(sent, cur, true)
+	puts, removed := Diff(sent, cur, all)
 	if got := ids(puts); !slices.Equal(got, []string{"a", "c", "e"}) || puts[0].Hash != "a2" {
 		t.Fatalf("puts %+v", puts)
 	}
@@ -43,7 +43,7 @@ func TestDiff(t *testing.T) {
 	}
 
 	// Everything to a stream that sent nothing.
-	puts, removed = Diff(nil, cur, true)
+	puts, removed = Diff(nil, cur, all)
 	if got := ids(puts); !slices.Equal(got, []string{"a", "b", "c", "e"}) || removed != nil {
 		t.Fatalf("from nothing: %v %v", got, removed)
 	}
@@ -52,14 +52,14 @@ func TestDiff(t *testing.T) {
 	if !maps.Equal(sent, map[string]string{"a": "a2", "b": "b1", "c": "c1", "e": "e1"}) {
 		t.Fatalf("hashes %v", sent)
 	}
-	if puts, removed := Diff(sent, cur, true); puts != nil || removed != nil {
+	if puts, removed := Diff(sent, cur, all); puts != nil || removed != nil {
 		t.Fatalf("after sending: %v %v", puts, removed)
 	}
 	// Everything removed for an empty table; nothing for no table.
-	if puts, removed := Diff(sent, newSnapshot(), true); puts != nil || !slices.Equal(removed, []string{"a", "b", "c", "e"}) {
+	if puts, removed := Diff(sent, newSnapshot(), all); puts != nil || !slices.Equal(removed, []string{"a", "b", "c", "e"}) {
 		t.Fatalf("empty table: %v %v", puts, removed)
 	}
-	if puts, removed := Diff(sent, nil, true); puts != nil || removed != nil {
+	if puts, removed := Diff(sent, nil, all); puts != nil || removed != nil {
 		t.Fatalf("no table: %v %v", puts, removed)
 	}
 }
@@ -74,25 +74,74 @@ func TestDiffVisits(t *testing.T) {
 	odd := wire.Env{ID: "c", Hash: "c1", Access: "members"} // an Access the ingress does not know admits nobody
 	cur := snapshotOf(open, guarded, odd)
 
-	puts, removed := Diff(nil, cur, false)
+	puts, removed := Diff(nil, cur, Caps{})
 	if got := ids(puts); !slices.Equal(got, []string{"a"}) || removed != nil {
 		t.Fatalf("without visits: %v %v", got, removed)
 	}
 	// b was sent open before it turned guarded: removed.
-	puts, removed = Diff(map[string]string{"a": "a1", "b": "b1"}, cur, false)
+	puts, removed = Diff(map[string]string{"a": "a1", "b": "b1"}, cur, Caps{})
 	if puts != nil || !slices.Equal(removed, []string{"b"}) {
 		t.Fatalf("turned guarded: %v %v", ids(puts), removed)
 	}
 	// Open again: put.
 	reopened := snapshotOf(open, wire.Env{ID: "b", Hash: "b3"})
-	if puts, removed := Diff(map[string]string{"a": "a1"}, reopened, false); !slices.Equal(ids(puts), []string{"b"}) || removed != nil {
+	if puts, removed := Diff(map[string]string{"a": "a1"}, reopened, Caps{}); !slices.Equal(ids(puts), []string{"b"}) || removed != nil {
 		t.Fatalf("open again: %v %v", ids(puts), removed)
 	}
-	puts, removed = Diff(nil, cur, true)
+	puts, removed = Diff(nil, cur, visits)
 	if got := ids(puts); !slices.Equal(got, []string{"a", "b", "c"}) || removed != nil || puts[1].Access != wire.AccessVisitors {
 		t.Fatalf("with visits: %v %v", got, removed)
 	}
-	if !Visible(open, false) || Visible(guarded, false) || Visible(odd, false) || !Visible(guarded, true) {
+	if !Visible(open, Caps{}) || Visible(guarded, Caps{}) || Visible(odd, Caps{}) || !Visible(guarded, visits) {
 		t.Fatal("Visible")
+	}
+}
+
+// all and visits are the capabilities of a stream whose ingress names
+// every one, or only visits.
+var (
+	all    = Caps{Visits: true, RouteHosts: true}
+	visits = Caps{Visits: true}
+)
+
+// A stream whose ingress does not serve a route's host never gets an
+// environment with a route that has one (ADR 0045), as it would serve
+// every route on every host: it is not put, one sent before is removed
+// once a route gains a host, and put again once none has one. A stream
+// that serves hosts gets it, and the capabilities are read from a Hello.
+func TestDiffRouteHosts(t *testing.T) {
+	plain := wire.Env{ID: "a", Hash: "a1", Routes: []wire.Route{{Name: "root", Path: "/"}}}
+	hosted := wire.Env{ID: "b", Hash: "b2", Routes: []wire.Route{{Name: "root", Path: "/"},
+		{Name: "git", Path: "/", Host: "git.example.com"}}}
+	cur := snapshotOf(plain, hosted)
+	if puts, removed := Diff(nil, cur, visits); !slices.Equal(ids(puts), []string{"a"}) || removed != nil {
+		t.Fatalf("without route hosts: %v %v", ids(puts), removed)
+	}
+	if puts, removed := Diff(map[string]string{"a": "a1", "b": "b1"}, cur, visits); puts != nil ||
+		!slices.Equal(removed, []string{"b"}) {
+		t.Fatalf("gained a host: %v %v", ids(puts), removed)
+	}
+	again := snapshotOf(plain, wire.Env{ID: "b", Hash: "b3", Routes: []wire.Route{{Name: "root", Path: "/"}}})
+	if puts, removed := Diff(map[string]string{"a": "a1"}, again, visits); !slices.Equal(ids(puts), []string{"b"}) ||
+		removed != nil {
+		t.Fatalf("no host again: %v %v", ids(puts), removed)
+	}
+	if puts, removed := Diff(nil, cur, Caps{RouteHosts: true}); !slices.Equal(ids(puts), []string{"a", "b"}) || removed != nil {
+		t.Fatalf("with route hosts: %v %v", ids(puts), removed)
+	}
+	// Both capabilities apply: a guarded environment with a host route
+	// needs both.
+	both := wire.Env{ID: "c", Hash: "c1", Access: wire.AccessVisitors, Routes: hosted.Routes}
+	if Visible(both, visits) || Visible(both, Caps{RouteHosts: true}) || !Visible(both, all) {
+		t.Fatal("Visible with both")
+	}
+	if got := CapsOf([]string{"x", wire.CapabilityRouteHosts}); got != (Caps{RouteHosts: true}) {
+		t.Fatalf("CapsOf %+v", got)
+	}
+	if got := CapsOf([]string{wire.CapabilityVisits, wire.CapabilityRouteHosts}); got != all {
+		t.Fatalf("CapsOf %+v", got)
+	}
+	if CapsOf(nil) != (Caps{}) {
+		t.Fatal("CapsOf nil")
 	}
 }

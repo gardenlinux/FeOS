@@ -36,7 +36,7 @@ const (
 	removedFile = "removed"
 	wgKeyFile   = "wg.key"
 	meshFile    = "mesh.json"
-	tableFile   = "table-v2.json"
+	tableFile   = "table-v3.json"
 	tmpPrefix   = ".tmp-"
 	dirMode     = 0o700
 	fileMode    = 0o600
@@ -48,6 +48,14 @@ const (
 // the control plane gives it a table it may serve, instead of serving
 // guarded environments open from a cache it does not understand.
 const oldTableFile = "table.json"
+
+// priorTableFile is the table cache of the releases before a route's host
+// (ADR 0045). It is read while there is no tableFile, since what it holds
+// is what such a release served: it drops a route's host, and was never
+// given an environment with one. The first save deletes it, so that an
+// older binary started on the same volume finds no cache, as above,
+// instead of serving every route of an environment on every host.
+const priorTableFile = "table-v2.json"
 
 // stateDir is the state directory of an instance.
 type stateDir struct {
@@ -337,15 +345,21 @@ func (d *stateDir) saveMesh(m meshPlace) error {
 	return d.write(meshFile, data)
 }
 
-// tableCache is the content of table-v2.json.
+// tableCache is the content of table-v3.json (and table-v2.json).
 type tableCache struct {
 	SavedAt time.Time   `json:"savedAt"`
 	State   *wire.State `json:"state"`
 }
 
-// loadTable reads table-v2.json. A missing file gives (nil, zero, nil).
+// loadTable reads table-v3.json, else table-v2.json (priorTableFile). No
+// file gives (nil, zero, nil).
 func (d *stateDir) loadTable() (*wire.State, time.Time, error) {
-	data, err := d.read(tableFile)
+	name := tableFile
+	data, err := d.read(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		name = priorTableFile
+		data, err = d.read(name)
+	}
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, time.Time{}, nil
 	}
@@ -354,10 +368,10 @@ func (d *stateDir) loadTable() (*wire.State, time.Time, error) {
 	}
 	var c tableCache
 	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, time.Time{}, fmt.Errorf("%s: %w", tableFile, err)
+		return nil, time.Time{}, fmt.Errorf("%s: %w", name, err)
 	}
 	if c.State == nil {
-		return nil, time.Time{}, fmt.Errorf("%s holds no state", tableFile)
+		return nil, time.Time{}, fmt.Errorf("%s holds no state", name)
 	}
 	if c.State.Envs == nil {
 		c.State.Envs = map[string]wire.Env{}
@@ -373,8 +387,10 @@ func (d *stateDir) saveTable(s *wire.State, savedAt time.Time) error {
 	if err := d.write(tableFile, data); err != nil {
 		return err
 	}
-	if err := os.Remove(d.file(oldTableFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove %s: %w", oldTableFile, err)
+	for _, old := range []string{priorTableFile, oldTableFile} {
+		if err := os.Remove(d.file(old)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", old, err)
+		}
 	}
 	return nil
 }

@@ -30,16 +30,18 @@ type RouteView struct {
 	// Path is the route's path as written, Prefix the path as the route
 	// door matches it (RoutePrefix).
 	Path, Prefix string
-	Service      string
-	Port         PortRef
-	Strip        bool
+	// Host is the route's host as it is matched (RouteHost); "": none.
+	Host    string
+	Service string
+	Port    PortRef
+	Strip   bool
 	// Door: its target is an attached service (IsAttached), which the
 	// route door alone serves.
 	Door bool
 }
 
-// IngressRoutes returns the routes of sp by name, each with its prefix and
-// whether only the route door serves it. A nil spec has none.
+// IngressRoutes returns the routes of sp by name, each with its prefix, its
+// host and whether only the route door serves it. A nil spec has none.
 func IngressRoutes(sp *Spec) []RouteView {
 	if sp == nil {
 		return nil
@@ -48,8 +50,8 @@ func IngressRoutes(sp *Spec) []RouteView {
 	for _, name := range slices.Sorted(maps.Keys(sp.Routes)) {
 		r := sp.Routes[name]
 		target, ok := sp.Services[r.Service]
-		out = append(out, RouteView{Name: name, Path: r.Path, Prefix: RoutePrefix(r.Path), Service: r.Service, Port: r.Port,
-			Strip: r.Strip, Door: ok && IsAttached(target)})
+		out = append(out, RouteView{Name: name, Path: r.Path, Prefix: RoutePrefix(r.Path), Host: RouteHost(r.Host),
+			Service: r.Service, Port: r.Port, Strip: r.Strip, Door: ok && IsAttached(target)})
 	}
 	return out
 }

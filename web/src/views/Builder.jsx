@@ -746,7 +746,7 @@ function Overview({ spec, st, isNew, words, groups, pins, onOpen }) {
             <div className="tblwrap"><table className="tbl b-tbl">
               <thead><tr><th>path</th><th>service</th><th>port</th><th /></tr></thead>
               <tbody>{routes.map(([n, r]) => (
-                <tr key={n}><td>{link(unitKey('routes', n), (r && r.path) || '?')}</td><td className="mono">{r && r.service}</td>
+                <tr key={n}><td>{link(unitKey('routes', n), ((r && r.host) || '') + ((r && r.path) || '?'))}</td><td className="mono">{r && r.service}</td>
                   <td className="mono">{r && r.port !== undefined ? String(r.port) : ''}</td><td className="muted small">{r && r.strip ? 'strips the path' : ''}</td></tr>))}
               </tbody></table></div>)}
         </div>

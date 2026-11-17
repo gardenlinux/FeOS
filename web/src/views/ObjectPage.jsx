@@ -378,7 +378,9 @@ function RoutesTo({ tenant, st, spec, name, navigate }) {
                     <td className="small">
                       {r.url
                         ? <a className="mono host" href={r.url} target="_blank" rel="noreferrer">{r.url.replace(/^https:\/\//, '')}</a>
-                        : <Link to={envPath(tenant, st.name, 'access')} navigate={navigate} className="muted">the route door, with a route token</Link>}
+                        : r.host && r.door === 'ingress'
+                          ? <span className="mono muted" title={r.host.startsWith('*.') ? 'every name the wildcard serves' : 'once the environment is served there'}>{r.host}{r.path}</span>
+                          : <Link to={envPath(tenant, st.name, 'access')} navigate={navigate} className="muted">the route door, with a route token</Link>}
                     </td>
                   </tr>))}
               </tbody>

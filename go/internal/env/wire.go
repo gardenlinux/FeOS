@@ -224,8 +224,11 @@ type JobRunStatus struct {
 // RouteStatus is a route of the deployed deployment (the latest when none
 // is deployed), its port resolved to a number.
 type RouteStatus struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Host is the host it answers on, canonical (ADR 0045); "": every
+	// host of the environment.
+	Host    string `json:"host,omitempty"`
 	Service string `json:"service"`
 	Port    int    `json:"port"`
 	// Door is DoorIngress for a route to an image service of a public
@@ -233,8 +236,11 @@ type RouteStatus struct {
 	// the route door both serve; DoorRoute for every other, which the
 	// route door alone serves (with a route token).
 	Door string `json:"door"`
-	// URL is where the ingress serves an ingress route:
-	// "https://<host><prefix>"; "" for a route door route.
+	// URL is where the ingress serves an ingress route,
+	// "https://<host><prefix>": at its host while the environment is
+	// served there, a route without a host at the environment's first
+	// address where it answers its path; "" for a route door route, and
+	// for a route whose host is a wildcard or not served now.
 	URL string `json:"url,omitempty"`
 }
 

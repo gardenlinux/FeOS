@@ -104,7 +104,9 @@ func (st *syncStream) markDirty() {
 // one it was sent open goes in Removed once it turns so (table.Diff); it
 // gets no keys of visits either. An ingress that named it gets every
 // environment, and the keys of visits in the whole table and in a delta
-// whenever they changed.
+// whenever they changed. In the same way an environment with a route that
+// has a host goes only to an ingress that named wire.CapabilityRouteHosts
+// (ADR 0045): an older one would serve every route on every host.
 //
 // The stream ends with UNAVAILABLE "this instance cannot read the
 // database" once the table is unhealthy (no read for 30 s, D18), with
@@ -157,11 +159,11 @@ func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, info he
 	if err != nil {
 		return err
 	}
-	envs, _ := table.Diff(nil, snap, info.visits)
+	envs, _ := table.Diff(nil, snap, info.caps)
 	mesh := snap.Mesh
 	first := &wire.Table{Seq: 1, Whole: true, Envs: envs, Mesh: &mesh, Self: &self,
 		Challenges: &wire.Challenges{Items: snap.Challenges}, SentAt: time.Now()}
-	if info.visits {
+	if info.caps.Visits {
 		first.VisitKeys = snap.VisitKeys
 	}
 	last, err := s.send(ctx, stream, first)
@@ -169,13 +171,13 @@ func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, info he
 		return err
 	}
 	sent := &syncState{seq: last, sent: make(map[string]string, len(envs)), mesh: snap.Mesh.Version, self: self,
-		challenges: snap.Challenges, visits: info.visits, keys: first.VisitKeys}
+		challenges: snap.Challenges, caps: info.caps, keys: first.VisitKeys}
 	for _, e := range envs {
 		sent.sent[e.ID] = e.Hash
 	}
 	s.recordChallenges(ctx, p.Name, sent)
 	s.log.Debug("ingress stream opened", "ingress", p.Name, "peer", p.Addr, "envs", len(envs), "parts", last,
-		"visits", info.visits)
+		"visits", info.caps.Visits, "route_hosts", info.caps.RouteHosts)
 	want := self
 	tick := time.NewTicker(s.heartbeat)
 	defer tick.Stop()
@@ -219,8 +221,8 @@ func (s *Service) serveSync(ctx context.Context, p nodelink.IngressPeer, info he
 
 // syncState is what a stream sent: its last seq, the environments' hashes
 // by ID (only of those it sent), the mesh's version, Self, the challenges
-// and the keys of visits (nil: none sent); whether its ingress checks
-// visits; and the challenges' tokens last recorded as the ingress's
+// and the keys of visits (nil: none sent); its ingress's capabilities;
+// and the challenges' tokens last recorded as the ingress's
 // (recordChallenges; nil: none yet).
 type syncState struct {
 	seq        uint64
@@ -228,7 +230,7 @@ type syncState struct {
 	mesh       uint64
 	self       wire.Self
 	challenges []wire.Challenge
-	visits     bool
+	caps       table.Caps
 	keys       *wire.VisitKeys
 	recorded   []string
 }
@@ -236,9 +238,9 @@ type syncState struct {
 // delta returns the next message, which brings the ingress from what the
 // stream sent to cur and self; nil when nothing changed.
 func (st *syncState) delta(cur *table.Snapshot, self wire.Self) *wire.Table {
-	puts, removed := table.Diff(st.sent, cur, st.visits)
+	puts, removed := table.Diff(st.sent, cur, st.caps)
 	t := &wire.Table{Envs: puts, Removed: removed}
-	if st.visits && cur.VisitKeys != nil && !table.SameVisitKeys(cur.VisitKeys, st.keys) {
+	if st.caps.Visits && cur.VisitKeys != nil && !table.SameVisitKeys(cur.VisitKeys, st.keys) {
 		t.VisitKeys = cur.VisitKeys
 	}
 	if cur.Mesh.Version != st.mesh {

@@ -21,6 +21,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/ports"
 	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 	"github.com/gardenlinux/feos/go/internal/visit"
@@ -119,16 +120,19 @@ func dotSegment(raw string) string {
 	return routing.DotSegment(raw)
 }
 
-// matchRoute returns the route whose path is the longest segment-aware
-// prefix of raw's segments (each unescaped), and how many segments it
-// has; ok false when none matches.
-func matchRoute(routes map[string]spec.Route, raw string) (spec.Route, int, bool) {
+// matchRoute returns the route that answers on host, canonical, whose
+// path is the longest segment-aware prefix of raw's segments (each
+// unescaped), of one path the one whose host names host most closely
+// (routing.MatchHost, ADR 0045), and how many segments it has; ok false
+// when none matches.
+func matchRoute(routes map[string]spec.Route, host, raw string) (spec.Route, int, bool) {
 	names := slices.Sorted(maps.Keys(routes))
 	prefixes := make([]string, len(names))
+	hosts := make([]string, len(names))
 	for i, name := range names {
-		prefixes[i] = spec.RoutePrefix(routes[name].Path)
+		prefixes[i], hosts[i] = spec.RoutePrefix(routes[name].Path), spec.RouteHost(routes[name].Host)
 	}
-	i, n, ok := routing.Match(prefixes, raw)
+	i, n, ok := routing.MatchHost(prefixes, hosts, host, raw)
 	if !ok {
 		return spec.Route{}, -1, false
 	}
@@ -157,7 +161,9 @@ func rawOf(path, raw string) string {
 // sandbox's: 401 the same way, and nothing is forwarded), the longest
 // segment-aware
 // prefix match over the routes of the deployed deployment (the latest when
-// none is), and the request forwarded through the port door to a ready
+// none is) that answer on the Host the guest sees (ports.GuestHost: from
+// X-FeRun-Host, else the request's Host; ADR 0045), and the request
+// forwarded through the port door to a ready
 // instance of the route's service, round-robin, or, when none is ready,
 // to a paused or hibernated one (the forward wakes it: scale from zero);
 // none at all is 503 with Retry-After 5. The port is the one the chosen
@@ -248,7 +254,9 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 	var n int
 	ok := false
 	if sp != nil {
-		route, n, ok = matchRoute(sp.Routes, raw)
+		// The host the guest sees picks the routes, as the ingress's Host
+		// does.
+		route, n, ok = matchRoute(sp.Routes, routing.CanonicalHost(ports.GuestHost(r)), raw)
 	}
 	if !ok {
 		http.Error(w, "no route for "+path, http.StatusNotFound)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/routing"
 )
 
 // Mode is what a validation is for: it decides which checks run and how
@@ -51,6 +52,17 @@ const (
 // doors serve it (ADR 0021): the route door alone for an attached
 // service; the ingress and the route door for an image service of a
 // public environment.
+//
+// It may also implement interface{ RouteHosts() (hosts, served []string,
+// ok bool) }: the hosts a route of the environment may name (ADR 0045),
+// its default host once it has a label and the names of the domains bound
+// to it, wildcards among them, whatever their state, canonical; and the
+// hosts it is served at now (its served domains, else its default host,
+// while it is public); ok false without an environment to judge against
+// (ModeSpec). A route's host must then be one of hosts or a name a
+// wildcard of them serves, else it is an error; one the environment is
+// not served at now is said so in the doors' finding. Without it, or
+// without ok, a host is checked for its form alone.
 //
 // It may also implement interface{ HTTPBindings() bool }: whether the
 // platform has HTTP bindings on (ADR 0028); a spec with bindings is an
@@ -181,7 +193,14 @@ var (
 	// routePathChars are the characters a route's path may have: those of
 	// a path that needs no escaping.
 	routePathChars = regexp.MustCompile(`^[A-Za-z0-9._~!$&'()*+,;=:@/-]*$`)
+	// routeHostRE is a route's host, canonical: a name of LDH labels, the
+	// last of at least two characters beginning with a letter, so that no
+	// address is one, or a wildcard of such a name.
+	routeHostRE = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
 )
+
+// maxHostBytes bounds a host name (RFC 1035), without its trailing dot.
+const maxHostBytes = 253
 
 // ValidEnvName reports whether name is an environment variable's name, as
 // a spec's env takes them (a tenant's job's env and secrets too).
@@ -815,12 +834,13 @@ func (v *validator) route(name string, r Route) {
 	case badSegments(r.Path):
 		v.errorf(p+".path", "remove the empty, . and .. segments", "path %q has an empty, . or .. segment", r.Path)
 	}
+	hostOK := v.routeHost(p+".host", RouteHost(r.Host))
 	target, ok := v.s.Services[r.Service]
 	if !ok {
 		v.errorf(p+".service", "route to a service that is declared under services", "no service %q", r.Service)
 	} else {
 		v.portRef(p+".port", r.Port, target.Ports, r.Service)
-		if len(r.Path) <= MaxRoutePathBytes {
+		if len(r.Path) <= MaxRoutePathBytes && hostOK {
 			v.doors(p, r, target)
 		}
 	}
@@ -829,29 +849,83 @@ func (v *validator) route(name string, r Route) {
 		v.errorf(p+".from", "remove from, or route to an image service", "from is checked by the ingress, which does "+
 			"not serve attached services")
 	}
-	if r.Host != "" {
-		v.add(SeverityInfo, p+".host", "", "host is stored, not used yet: the ingress and the route door "+
-			"serve the route on every host of the environment")
+}
+
+// routeHost checks a route's host, canonical (RouteHost), at path p (ADR
+// 0045): none, or a host name or a wildcard *.<name> of letters, digits
+// and hyphens, and, where the context knows the environment's hosts
+// (RouteHosts), one of them or a name a wildcard of them serves. It
+// reports whether the host passed.
+func (v *validator) routeHost(p, host string) bool {
+	if host == "" {
+		return true
 	}
+	if !validRouteHost(host) {
+		v.errorf(p, "write a host name such as app.example.com, or a wildcard such as *.example.com, without a port",
+			"host %q is not a host name", host)
+		return false
+	}
+	hosts, _, ok := v.routeHosts()
+	if !ok || CoveredBy(hosts, host) {
+		return true
+	}
+	remedy := "bind the domain to this environment first, or leave host out: a route without one answers on every " +
+		"host of the environment"
+	if len(hosts) > 0 {
+		list := hosts
+		if len(list) > maxHostsNamed {
+			list = append(slices.Clone(list[:maxHostsNamed]), "…")
+		}
+		remedy = "name one of its hosts (" + strings.Join(list, ", ") + "), or bind the domain to this environment first"
+	}
+	v.errorf(p, remedy, "host %s is no host of this environment: its hosts are its default host and the domains "+
+		"bound to it", host)
+	return false
+}
+
+// maxHostsNamed bounds the hosts a finding lists.
+const maxHostsNamed = 4
+
+// routeHosts is the context's RouteHosts; ok false when it has none.
+func (v *validator) routeHosts() (hosts, served []string, ok bool) {
+	rh, is := v.vc.(interface {
+		RouteHosts() ([]string, []string, bool)
+	})
+	if !is {
+		return nil, nil, false
+	}
+	return rh.RouteHosts()
 }
 
 // doors says which doors serve route r to target, at path p, while the
 // platform has an apps zone (the context's IngressHost): nothing without
-// one, where the route door serves every route.
+// one, where the route door serves every route. A route with a host is
+// served by the ingress at that host, once the environment is served
+// there (the context's RouteHosts), and a wildcard at every name it
+// serves.
 func (v *validator) doors(p string, r Route, target Service) {
 	ih, is := v.vc.(interface{ IngressHost() (string, bool, bool) })
 	if !is {
 		return
 	}
 	host, public, ok := ih.IngressHost()
+	own, prefix := RouteHost(r.Host), RoutePrefix(r.Path)
+	_, served, known := v.routeHosts()
 	switch {
 	case !ok:
 	case target.Runtime == RuntimeAttached:
 		v.add(SeverityInfo, p, "", "served by the route door alone: an attached service runs in a sandbox, "+
 			"which the ingress does not reach")
+	case public && own != "" && known && !CoveredBy(served, own):
+		v.add(SeverityInfo, p, "", "served by the route door; the ingress serves it at https://%s%s once the "+
+			"environment is served at %s", own, prefix, own)
+	case public && routing.IsWildcard(own):
+		v.add(SeverityInfo, p, "", "served by the ingress at https://%s%s, on every name the wildcard serves, and by "+
+			"the route door", own, prefix)
+	case public && own != "":
+		v.add(SeverityInfo, p, "", "served by the ingress at https://%s%s and by the route door", own, prefix)
 	case public && host != "":
-		v.add(SeverityInfo, p, "", "served by the ingress at https://%s%s and by the route door", host,
-			RoutePrefix(r.Path))
+		v.add(SeverityInfo, p, "", "served by the ingress at https://%s%s and by the route door", host, prefix)
 	case public:
 		v.add(SeverityInfo, p, "", "served by the ingress and by the route door")
 	default:
@@ -874,6 +948,27 @@ func badSegments(path string) bool {
 	return false
 }
 
+// RouteHost is a route's host as it is stored and matched (ADR 0045): in
+// lower case and without a trailing dot; "" for none.
+func RouteHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+// validRouteHost reports whether a canonical host is a host name of at
+// least two labels of letters, digits and hyphens, whose last begins with
+// a letter, or a wildcard *.<name> of such a name, of at most 253
+// characters.
+func validRouteHost(host string) bool {
+	return len(host) <= maxHostBytes && routeHostRE.MatchString(host)
+}
+
+// CoveredBy reports whether one of hosts, names and wildcards, serves
+// host (routing.Covers): it is one of them, or a name one label below a
+// wildcard of them.
+func CoveredBy(hosts []string, host string) bool {
+	return slices.ContainsFunc(hosts, func(h string) bool { return routing.Covers(h, host) })
+}
+
 // RoutePrefix is a route path as the route door matches it: without a
 // trailing slash, "/" for the root.
 func RoutePrefix(path string) string {
@@ -883,20 +978,28 @@ func RoutePrefix(path string) string {
 	return strings.TrimSuffix(path, "/")
 }
 
-// routePaths refuses two routes of one path.
+// routePaths refuses two routes of one path on one host: routes of one
+// path with different hosts, or one with a host and one without, answer
+// on different hosts (ADR 0045).
 func (v *validator) routePaths() {
-	seen := map[string]string{}
+	type key struct{ host, prefix string }
+	seen := map[key]string{}
 	for _, name := range slices.Sorted(maps.Keys(v.s.Routes)) {
-		path := v.s.Routes[name].Path
-		if !strings.HasPrefix(path, "/") || len(path) > MaxRoutePathBytes {
+		r := v.s.Routes[name]
+		if !strings.HasPrefix(r.Path, "/") || len(r.Path) > MaxRoutePathBytes {
 			continue
 		}
-		key := RoutePrefix(path)
-		if other, ok := seen[key]; ok {
-			v.errorf("routes."+name+".path", "give each route its own path", "path %s is route %s's too", path, other)
+		k := key{RouteHost(r.Host), RoutePrefix(r.Path)}
+		if other, ok := seen[k]; ok {
+			if k.host != "" {
+				v.errorf("routes."+name+".path", "give each route of a host its own path", "path %s on host %s is "+
+					"route %s's too", r.Path, k.host, other)
+				continue
+			}
+			v.errorf("routes."+name+".path", "give each route its own path", "path %s is route %s's too", r.Path, other)
 			continue
 		}
-		seen[key] = name
+		seen[k] = name
 	}
 }
 

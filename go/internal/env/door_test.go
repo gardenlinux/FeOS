@@ -667,12 +667,12 @@ func TestRoutePaths(t *testing.T) {
 		{"/", "/", 0}, {"/api", "/api", 1}, {"/api/", "/api", 1}, {"/apis", "/", 0}, {"/api/v2", "/api/v2/", 2},
 		{"/api/v2/x", "/api/v2/", 2}, {"/api/v3", "/api", 1}, {"/a%20b/c", "/a b", 1}, {"/API", "/", 0},
 	} {
-		r, n, ok := matchRoute(routes, c.raw)
+		r, n, ok := matchRoute(routes, "", c.raw)
 		if !ok || r.Path != c.want || n != c.n {
 			t.Errorf("%s: %+v %d %v, want %s %d", c.raw, r, n, ok, c.want, c.n)
 		}
 	}
-	if _, _, ok := matchRoute(map[string]spec.Route{"api": {Path: "/api"}}, "/web"); ok {
+	if _, _, ok := matchRoute(map[string]spec.Route{"api": {Path: "/api"}}, "", "/web"); ok {
 		t.Error("matched without a root")
 	}
 	for _, c := range []struct {

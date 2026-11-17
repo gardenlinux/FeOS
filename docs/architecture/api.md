@@ -194,7 +194,7 @@ content type `application/grpc+json`. Method names are
   most 2 MiB (a larger one is left out of the table; domains that would
   make it larger are left out of it). An `Env` is `{id, tenant, name,
   hosts, deployment, hash, routes: [{name, path, service, port, strip,
-  door}], services: [{name, idle, endpoints: [{instance, address, node,
+  door, from?, host?}], services: [{name, idle, endpoints: [{instance, address, node,
   ports, groupVersion}], asleep, waking, pending}], domains: [{name,
   chain, key}]}`: `domains`, absent without any, are the hosts with a
   certificate of their own, each its chain (DER, leaf first) and private
@@ -209,6 +209,12 @@ content type `application/grpc+json`. Method names are
   `visits` it checks visits ([ingress.md](ingress.md#visitors), ADR
   0054): `ferund` gives an environment whose `access` is set only to an
   ingress whose Hello named it, and leaves it out of every other stream.
+  With `routeHosts` it serves a route on its `host` alone
+  ([ingress.md](ingress.md#routing), ADR 0045): `ferund` gives an
+  environment with a route that has a `host` only to such an ingress. A
+  route's `host` is canonical, a name or a wildcard `*.<name>`; left out,
+  the route answers on every host of its environment, and an environment
+  without route hosts codes as before, its hash unchanged.
 - **Visits** ([control-plane.md](control-plane.md#visitors)). An `Env`
   gains `access` (`""` anyone, `visitors`; any other value admits
   nobody), `provider` (the name a token's `prv` must equal) and `signIn`

@@ -173,7 +173,7 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `domains` | tenants' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
 | `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table, a wildcard's over DNS-01 in the ACME zone ([Certificates of domains](#certificates-of-domains)) |
 | `route53`, `awsauth` | the ACME zone's first DNS provider: Route 53's ChangeResourceRecordSets, signed with SigV4 by `awsauth` from static keys or an EKS Pod Identity |
-| `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path matching, which the route door uses too |
+| `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path and host matching, which the route door uses too |
 | `visits` | the tenants' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
 | `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
 | `oidc`, `oidc/oidctest` | the OpenID Connect relying party of human sign-in and of `ferun-auth`; a test issuer |
@@ -2752,11 +2752,19 @@ shapes:
   errors, a volume of another type is the warning that its data is
   deleted.
 - **Routes**: a path of unreserved characters without empty, `.` or
-  `..` segments, unique, of at most 1 KiB (every ingress instance holds
-  it); a service and one of its ports; `strip`; `host` is stored and not
-  used (info); `from`, the clients' blocks (1 to 32 canonical prefixes
-  of either family, each once; `[]` is an error), which the ingress
-  checks ([ingress](ingress.md)); left out, every client.
+  `..` segments, unique among the routes of its host, of at most 1 KiB
+  (every ingress instance holds it); a service and one of its ports;
+  `strip`; `host`, the host it answers on alone ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md)): a name of LDH
+  labels or a wildcard `*.<name>`, stored in lower case without a
+  trailing dot, never an address or with a port, and one its environment
+  has or may have: its default host once it has a label, a domain bound
+  to it in any state, or a name a wildcard domain of it serves (else an
+  error naming the hosts it may name; without an environment, in `POST
+  /api/v1/environments/plan`, its form alone); left out, every host of
+  the environment; `from`, the clients' blocks (1 to 32 canonical
+  prefixes of either family, each once; `[]` is an error), which the
+  ingress checks ([ingress](ingress.md)); left out, every client.
 - **Secrets**: every `{"secret": n}` names a tenant secret of the
   environment that exists and is not deleted.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
@@ -2887,7 +2895,8 @@ the nodes through `env-groups`, put whole.
   applies as its deployment 1 (origin `clone`, the source deployment's
   annotations without `ferun.revertOf`, whose number names a deployment of
   the source) a whole spec of the caller's, or the source deployment's
-  without its attached services and their routes (info findings) and
+  without its attached services and their routes, and without its routes
+  that have a host, whose host is the source's (info findings), and
   with its secret pins reset. It changes no single value of the source's
   spec: a caller that wants other sizes or replicas passes its own spec.
   `data: true` is an error: no data is copied.
@@ -3428,8 +3437,12 @@ route token of another environment is 404 "no such environment".
 `POST /api/v1/environments/{env}/route-tokens` mints one (32 random
 bytes, base64url, shown once, only its SHA-256 kept); `DELETE` revokes
 them all. The door matches the longest prefix, segment by segment, over
-the routes of the deployed deployment (the latest while none is deployed;
-no match is 404 "no route for <path>") and forwards with the port door's
+the routes of the deployed deployment (the latest while none is deployed)
+that answer on the Host the guest sees, `X-FeRun-Host`'s or else the
+request's, canonical: those without a host and those whose host is that
+host or its wildcard, of one prefix the closest host first, as the
+ingress matches ([ADR 0045](../adr/0045-hosts-domains-and-certificates.md));
+no match is 404 "no route for <path>". It forwards with the port door's
 `ForwardTo`, naming the headers that carried the token: a forward hold
 and a touch, the Host passed on, upgrades and streams kept, a
 Kubernetes binding's port refused. `X-FeRun-Route-Token` and
@@ -3462,15 +3475,17 @@ serves anonymous clients; a refusal below 500 keeps its text.
 
 FeCode's environment hosts forward to the door with the environment's
 route token in `X-FeRun-Route-Token`, and pass the browser's
-`Authorization` on to the application.
+`Authorization` on to the application. Their hosts are FeCode's, not the
+environment's, so such an environment's routes have no host.
 
 The door serves every environment, with its route tokens. Beside it,
 `ferun-ingress` serves the routes to image services of the environments
-whose tenant made them public, at their default hosts and without a
-token, straight to the pods ([Public environments](#public-environments));
-routes to attached services are the door's alone. A plan's info finding
-at each route says which doors serve it, and the status names each
-route's `door`.
+whose tenant made them public, at their hosts, a route with a host at
+that host alone, and without a token, straight to the pods ([Public
+environments](#public-environments)); routes to attached services are
+the door's alone. A plan's info finding at each route says which doors
+serve it, at which host, and whether the environment is served there yet,
+and the status names each route's `door`.
 
 ### Secrets
 
@@ -3588,9 +3603,13 @@ the ready ones its live instances, and its instances, an addon with
 type, version, plan, phase and `provisioned`, a job with its last run,
 an attached service with its sandbox, phase, restarts and last exit;
 `starting` before an object has an instance), its routes (of the
-deployed deployment, else the latest), each with its `door`, `ingress` with
-its `url` (`https://<host><prefix>`) for a route to an image service of
-a public environment and `route` for every other, `public`, its `hosts`
+deployed deployment, else the latest), each with its `host` (left out
+without one) and its `door`, `ingress` for a route to an image service
+of a public environment and `route` for every other, an `ingress` route
+with its `url` (`https://<host><prefix>`) where it answers its own path:
+at its host while the environment is served there, a route without a
+host at the first of `hosts` that is no wildcard where no route of that
+host has its path, none for a route on a wildcard; `public`, its `hosts`
 (while it is public and not being deleted: its served domains in the
 order they were bound, else its default host when the platform has an
 apps zone; otherwise empty, [ADR 0021](../adr/0021-ingress.md)),

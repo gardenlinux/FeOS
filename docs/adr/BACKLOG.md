@@ -226,10 +226,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 - ADR 0042: a crash loop for attached services; they are restarted with a backoff without one.
 
-## ADR 0043
-
-- ADR 0043: a host per route; `host` is stored and not served, and every route of an environment is served on every host the environment has.
-
 ## ADR 0044
 
 - ADR 0044: `feosd` sealing the pod's record, so that a pod's resolved secrets do not lie in the clear on the node.

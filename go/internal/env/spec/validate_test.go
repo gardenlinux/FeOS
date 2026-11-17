@@ -468,11 +468,11 @@ func TestValidateRules(t *testing.T) {
 			s.Routes["b"] = Route{Path: "/api/expense/", Service: "expense-service", Port: PortRef{Name: "http"}}
 			s.Routes["c"] = Route{Path: "/x?y", Service: "nope", Port: PortRef{Name: "http"}}
 			s.Routes["d"] = Route{Path: "/x/../y", Service: "web", Port: PortRef{Name: "grpc"}}
-			s.Routes["e"] = Route{Path: "/e", Service: "web", Host: "example.com", Port: PortRef{Number: 5173}}
+			s.Routes["e"] = Route{Path: "/e", Service: "web", Host: "example.com:443", Port: PortRef{Number: 5173}}
 			s.Routes["f"] = Route{Path: "/f//g", Service: "web"}
 		}, []expect{e("routes.a.path", "does not begin with /"), e("routes.b.path", "is route api-expense's too"),
 			e("routes.c.path", "needs escaping"), e("routes.c.service", `no service "nope"`),
-			e("routes.d.path", "segment"), e("routes.d.port", "web has no port grpc"), i("routes.e.host", "not used"),
+			e("routes.d.path", "segment"), e("routes.d.port", "web has no port grpc"), e("routes.e.host", "is not a host name"),
 			e("routes.f.path", "segment"), e("routes.f.port", "a port is needed")}},
 		{"images", ModePlan, func(s *Spec) {
 			approval(s)
@@ -517,8 +517,8 @@ func (f fakeIngressVC) IngressHost() (string, bool, bool) { return f.host, f.pub
 
 // Which doors serve a route: info findings at the route while the
 // platform has an apps zone, for each route whose target exists; none
-// without a zone, or from a context that does not say. A stored host is
-// noted either way.
+// without a zone, or from a context that does not say. A route with a
+// host is served at that host.
 func TestValidateRouteDoors(t *testing.T) {
 	routes := func(s *Spec) {
 		s.Services["approval-service"] = Service{Image: "ghcr.io/acme/approval:1.2", Ports: []Port{{Name: "http", Port: 8080}}}
@@ -532,26 +532,24 @@ func TestValidateRouteDoors(t *testing.T) {
 		later    = "served by the route door; the ingress serves it once the environment is public"
 		both     = "served by the ingress and by the route door"
 	)
-	stored := i("routes.approval.host", "host is stored, not used yet: the ingress and the route door serve the route "+
-		"on every host of the environment")
+	own := i("routes.approval", "served by the ingress at https://approval.example.com/api/approval and by the route door")
 	nope := e("routes.nope.service", `no service "nope"`)
 	cases := []struct {
 		name string
 		vc   ValidateContext
 		want []expect
 	}{
-		{"no zone", fakeIngressVC{fakeVC: defaultVC(ModePlan), host: host, public: true}, []expect{stored, nope}},
-		{"no IngressHost", defaultVC(ModePlan), []expect{stored, nope}},
+		{"no zone", fakeIngressVC{fakeVC: defaultVC(ModePlan), host: host, public: true}, []expect{nope}},
+		{"no IngressHost", defaultVC(ModePlan), []expect{nope}},
 		{"public with host", fakeIngressVC{fakeVC: defaultVC(ModePlan), host: host, public: true, ok: true}, []expect{
 			i("routes.api-expense", "served by the ingress at https://stage-acme.apps.test/api/expense and by the route door"),
-			i("routes.approval", "served by the ingress at https://stage-acme.apps.test/api/approval and by the route door"),
-			stored, nope, i("routes.root", attached)}},
+			own, nope, i("routes.root", attached)}},
 		{"public without host", fakeIngressVC{fakeVC: defaultVC(ModeApply), public: true, ok: true}, []expect{
-			i("routes.api-expense", both), i("routes.approval", both), stored, nope, i("routes.root", attached)}},
+			i("routes.api-expense", both), own, nope, i("routes.root", attached)}},
 		{"not public", fakeIngressVC{fakeVC: defaultVC(ModePlan), host: host, ok: true}, []expect{
-			i("routes.api-expense", later), i("routes.approval", later), stored, nope, i("routes.root", attached)}},
+			i("routes.api-expense", later), i("routes.approval", later), nope, i("routes.root", attached)}},
 		{"without an environment", fakeIngressVC{fakeVC: defaultVC(ModeSpec), ok: true}, []expect{
-			i("routes.api-expense", later), i("routes.approval", later), stored, nope, i("routes.root", attached)}},
+			i("routes.api-expense", later), i("routes.approval", later), nope, i("routes.root", attached)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

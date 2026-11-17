@@ -170,19 +170,42 @@ func instanceStatus(row store.EnvInstanceRow) InstanceStatus {
 }
 
 // routesOf are a spec's routes by name, their ports resolved, each with
-// its door: the ingress serves a route to an image service at the first
-// of hosts (the environment's hosts, hostsOf) that is an address, not a
-// wildcard, the route door alone every other route.
+// its host and its door: the ingress serves a route to an image service
+// while the environment has a host that is an address, not a wildcard,
+// among hosts (its hosts, hostsOf), the route door alone every other.
+// A route of the ingress has a URL where it answers its own path (ADR
+// 0045): one with a host at that host while the environment is served
+// there, one without at the first such address where no route of that
+// host takes its path; a route whose host is a wildcard has none, as a
+// wildcard is no address.
 func routesOf(sp *spec.Spec, hosts []string) []RouteStatus {
 	out := []RouteStatus{}
-	hosts = slices.DeleteFunc(slices.Clone(hosts), routing.IsWildcard)
-	for _, name := range slices.Sorted(maps.Keys(sp.Routes)) {
+	addrs := slices.DeleteFunc(slices.Clone(hosts), routing.IsWildcard)
+	names := slices.Sorted(maps.Keys(sp.Routes))
+	prefixes, routeHosts := make([]string, len(names)), make([]string, len(names))
+	for i, name := range names {
+		prefixes[i], routeHosts[i] = spec.RoutePrefix(sp.Routes[name].Path), spec.RouteHost(sp.Routes[name].Host)
+	}
+	for i, name := range names {
 		r := sp.Routes[name]
 		target, ok := sp.Services[r.Service]
 		port, _ := spec.PortNumber(target.Ports, r.Port)
-		rs := RouteStatus{Name: name, Path: r.Path, Service: r.Service, Port: port, Door: DoorRoute}
-		if len(hosts) > 0 && ok && !spec.IsAttached(target) {
-			rs.Door, rs.URL = DoorIngress, "https://"+hosts[0]+spec.RoutePrefix(r.Path)
+		rs := RouteStatus{Name: name, Path: r.Path, Host: routeHosts[i], Service: r.Service, Port: port, Door: DoorRoute}
+		if len(addrs) > 0 && ok && !spec.IsAttached(target) {
+			rs.Door = DoorIngress
+			at := addrs
+			if h := routeHosts[i]; h != "" {
+				at = nil
+				if !routing.IsWildcard(h) && spec.CoveredBy(hosts, h) {
+					at = []string{h}
+				}
+			}
+			for _, h := range at {
+				if j, _, ok := routing.MatchHost(prefixes, routeHosts, h, prefixes[i]); ok && j == i {
+					rs.URL = "https://" + h + prefixes[i]
+					break
+				}
+			}
 		}
 		out = append(out, rs)
 	}

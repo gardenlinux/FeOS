@@ -230,7 +230,7 @@ function ReachCard({ st, tenant, navigate }) {
         <p className="muted small">default host <span className="mono">{dh.label}</span> answers 404 while a domain is served</p>)}
       {routes.map((r) => (
         <div key={r.name} className="ov-route">
-          <span className="mono">{r.path}</span>
+          <span className="mono">{r.host && <span className="muted">{r.host}</span>}{r.path}</span>
           <Icon name="arrowRight" size={14} />
           <span>
             <Link to={envPath(tenant, env, 'objects', `service/${r.service}`)} navigate={navigate} className="strong">{r.service}</Link>

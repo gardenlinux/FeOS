@@ -205,6 +205,10 @@ describe('the forms', () => {
     expect(out).toContain('<option value="web" selected="">web</option>');
     expect(out).toContain('<option value="http" selected="">http</option>');
     expect(out).toContain('Strip the path prefix');
+    expect(out).toContain('placeholder="every host" value=""');
+    const hosted = html(<RouteForm name="git" obj={{ ...STORED.routes.root, host: 'git.example.com' }} ctx={ctx(STORED)}
+      onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(hosted).toContain('value="git.example.com"');
   });
 
   it('show a binding of a tenant credential with its pinned version, or the binding stated here', () => {

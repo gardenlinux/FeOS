@@ -1,6 +1,6 @@
 # ADR 0045: Hosts, domains and certificates of public environments
 
-**Status:** Accepted · **Date:** 2026-10-27, wildcard domains 2026-11-17
+**Status:** Accepted · **Date:** 2026-10-27, wildcard domains and route hosts 2026-11-17
 
 Every public environment has a default host under the platform's apps
 zone, with a label registered to its tenant for good: a natural label
@@ -18,7 +18,9 @@ be a wildcard, `*.<name>`, which serves every name one label below
 its owner delegates with a CNAME of `_acme-challenge.<name>` into a zone
 of the platform's, where `ferund` answers it with the one DNS credential
 it holds. The zones' wildcards are the operator's. While a domain of an
-environment is served, its default host is not.
+environment is served, its default host is not. A route with a host
+answers on that host alone, which must be one the environment has or
+may have; of the routes that answer on a host, the longest path wins.
 
 ## Context
 
@@ -100,10 +102,6 @@ writes, and nothing else of its DNS.
   so that no existing tenant's natural host is ever taken, and a tenant
   made later whose natural label the owner holds gets its fallback. A
   changed label moves the host at once; the old one answers 404.
-- A route's `host` is realised: a route with a host answers on that host,
-  which must be a host of its environment, else the write fails with a
-  finding; a route without a host answers on every host of its
-  environment.
 - The default host is the address of an environment without a name of
   its own. While one of its domains is served, the environment's hosts
   are its served domains, in the order they were bound, and the default
@@ -113,8 +111,54 @@ writes, and nothing else of its DNS.
   its default host to its domain without a gap. A wildcard is no
   address: it is served beside the environment's hosts, and only a
   served domain that is not a wildcard retires the default host.
+
+### A route answers on its host
+
+- A route's `host` is realised: a route with a host answers on that host
+  alone, a route without one on every host of its environment. FeCode
+  runs as one environment with `fecode.dev` (`/api/v1` and `/docs` to its
+  backend, the rest to its UI), `git.fecode.dev` and
+  `*.boxed.fecode.dev`, all to its backend.
+- A route's host must be a **host its environment has or may have**: its
+  default host once it has a label, a domain bound to it, whatever the
+  domain's state, or a name one of its wildcard domains serves; else the
+  plan or apply fails with a finding that names the hosts it may name. The
+  hosts it is served at now are not the measure: they change without a
+  write, as a domain is served once its certificate is there and the
+  default host answers 404 while one is, so a spec judged by them would
+  pass or fail by timing. A route whose host is not served now answers
+  once it is, and its plan says so. A route whose host stops being its
+  environment's, by a move, a deletion, a supersession or a new label,
+  stays in its deployment and answers nowhere; the next write refuses it.
+  A clone leaves the routes with a host out, as they name the source's
+  hosts.
 - A route's `host` may be a wildcard domain of its environment; it
-  matches every name the wildcard serves.
+  matches every name the wildcard serves (`routing.Covers`). A name the
+  wildcard serves may be a route's host too, which takes that name apart
+  from the wildcard's routes.
+- **The longest path wins.** Of the routes that answer on a request's
+  host, those with a host that covers it and those without a host, the
+  longest prefix wins, segment by segment, as it did before hosts; of
+  one prefix the route whose host is the request's host, then the one
+  whose host is the host's wildcard, then the one without a host. Two
+  routes of one path on one host are refused. A route without a host
+  thus answers on every host where no route of that host has its path,
+  and a spec without hosts routes as before.
+- A host is compared in lower case, without a port and a trailing dot;
+  the spec stores a route's host so. It is a name of LDH labels, or a
+  wildcard of one, never an address.
+- The **route door** picks the routes by the Host the guest sees, from
+  `X-FeRun-Host` or else the request's, as the ingress picks them by the
+  request's Host, so that a forwarder that names the public host there is
+  routed as the ingress routes it.
+- An ingress says in its Hello that it serves a route's host
+  (`routeHosts`), and `ferund` gives an environment with a route that has
+  a host only to an ingress that said so: an older one would serve every
+  route on every host, sending a host's requests to another host's
+  routes, past their `from`. It answers that environment's hosts 404
+  until it is rolled. A newer ingress reads the older one's table cache
+  once and deletes it, so that an older binary started on its volume
+  finds no cache, rather than one with routes it cannot read.
 
 ### Domains: a claim and a binding are two facts
 
@@ -338,6 +382,18 @@ writes, and nothing else of its DNS.
 - **A claim of `<name>` that serves its wildcard too**: two hosts with
   one binding, one of which the owner may want elsewhere or not at all,
   as FeCode wants `*.boxed.fecode.dev` and no `boxed.fecode.dev`.
+- **Hosts first, then paths**, a virtual host per host as most proxies
+  have it: a host with routes of its own would lose the routes without a
+  host, which are to answer on every host, and its `/` would shadow every
+  longer path of them. The longest path first is one rule for both doors,
+  and specs without hosts route as before.
+- **A route's host checked against the hosts served now**: a domain bound
+  and waiting for its certificate would be refused, the default host
+  while a domain is served too, and both pass a few minutes later.
+- **An environment with route hosts given to an older ingress anyway**:
+  it would route by path alone on every host; withholding it answers 404
+  there for the minutes of a rollout, which an ingress rolled before
+  `ferund` avoids.
 
 ## Consequences
 
@@ -376,6 +432,16 @@ writes, and nothing else of its DNS.
 - The ingress makes the cookies of answers host-only (ADR 0021), not
   those a page's script sets; a Public Suffix List entry for the apps
   zone, an operator's action, closes that for every environment.
+- A route's host is one of the platform's hosts of its environment. A
+  forwarder in front of the route door whose hosts are its own, as
+  FeCode's previews are, cannot name them on a route: such an
+  environment's routes go without a host. A route whose domain moves
+  away answers nowhere until a deployment drops or changes it.
+- An older ingress is not given an environment with a route that has a
+  host, and answers its hosts 404 until it is rolled: in a rollout with
+  `ferund` first, such an environment is down at the instances not
+  rolled yet; rolled first, the ingress serves as before behind an older
+  `ferund`, which sends no host.
 
 ## History
 
@@ -390,4 +456,7 @@ operator's issuer provides them. Wildcard domains, with DNS-01 delegated
 by the tenant's CNAME into the platform's ACME zone and HTTP-01 kept for
 every name, were decided and built on 2026-11-17, so that FeCode can run
 on FeRun with its previews under `*.boxed.fecode.dev`; the ACME zone's
-first provider is Route 53.
+first provider is Route 53. A route's `host`, stored and unused since
+ADR 0018, was realised the same day, with the longest path first, the
+check against the hosts an environment may have, the route door on the
+guest's Host and the capability `routeHosts`.
