@@ -104,5 +104,6 @@ FeRun credential in an `Authorization` it would pass on since the same
 day (3c2851f, e46bd4f). Since ADR 0021 on 2026-10-28 (33ea94e) the
 ingress serves public environments' image services beside the door.
 Split out of ADR 0018 on 2026-11-08. A route has answered on its host
-alone, in the door as in the ingress, since 2026-11-17 (ADR 0045); until
-then a route had no host of its own and answered on every host.
+alone, in the door as in the ingress, since 2026-11-17 (ADR 0045,
+b8578c43); until then a route had no host of its own and answered on
+every host.

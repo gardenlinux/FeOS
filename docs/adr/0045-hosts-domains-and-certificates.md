@@ -457,6 +457,6 @@ by the tenant's CNAME into the platform's ACME zone and HTTP-01 kept for
 every name, were decided and built on 2026-11-17, so that FeCode can run
 on FeRun with its previews under `*.boxed.fecode.dev`; the ACME zone's
 first provider is Route 53. A route's `host`, stored and unused since
-ADR 0018, was realised the same day, with the longest path first, the
+ADR 0018, was realised the same day (b8578c43), with the longest path first, the
 check against the hosts an environment may have, the route door on the
 guest's Host and the capability `routeHosts`.
