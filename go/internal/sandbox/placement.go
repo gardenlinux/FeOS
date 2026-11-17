@@ -29,8 +29,9 @@ const (
 	gateCPU        = 10 // booked vCPUs within floor(cores × overcommit)
 	gateMemory     = 11 // booked memory within the total less the headroom
 	gateFreeMemory = 12 // live memory less the headroom
-	gateDisk       = 13 // live disk within the disk budget
+	gateDisk       = 13 // live disk for the disk budget and the pod's own disk
 	gatePin        = 14 // create: the node the row is pinned to
+	gateDiskBooked = 15 // booked disks within the disk total less the disk budget
 )
 
 // The gates of each check: a placement's snapshot, the claim of a create
@@ -38,11 +39,11 @@ const (
 // resume), and a booking that reality makes (syncBooking).
 var (
 	placementGates = []int{gateStatus, gatePin, gateDraining, gateForked, gateConnected, gateTombstone, gateAvoid, gateTAP,
-		gateStore, gateSlots, gateCPU, gateMemory, gateFreeMemory, gateDisk}
+		gateStore, gateSlots, gateCPU, gateMemory, gateDiskBooked, gateFreeMemory, gateDisk}
 	claimGates = []int{gateStatus, gatePin, gateDraining, gateForked, gateConnected, gateTombstone, gateTAP, gateStore,
-		gateSlots, gateCPU, gateMemory}
-	admitGates    = []int{gateStatus, gateDraining, gateForked, gateConnected, gateSlots, gateCPU, gateMemory}
-	capacityGates = []int{gateSlots, gateCPU, gateMemory}
+		gateSlots, gateCPU, gateMemory, gateDiskBooked}
+	admitGates    = []int{gateStatus, gateDraining, gateForked, gateConnected, gateSlots, gateCPU, gateMemory, gateDiskBooked}
+	capacityGates = []int{gateSlots, gateCPU, gateMemory, gateDiskBooked}
 )
 
 // gateInput is what the gates look at for one node and one pod.
@@ -57,8 +58,11 @@ type gateInput struct {
 	tap       podid.ID
 	connected bool
 
-	pod             podid.ID
-	vcpus, memMiB   int64
+	pod           podid.ID
+	vcpus, memMiB int64
+	// diskGiB is the pod's disk of its own size; 0: the guest's, which
+	// books nothing.
+	diskGiB         int64
 	pin             string // the only node a create may go to; "": any
 	avoid           []string
 	restore         bool
@@ -148,19 +152,44 @@ func (in *gateInput) gate(g int) string {
 			return fmt.Sprintf("free memory gate (%d MiB available)", max(free, 0))
 		}
 	case gateDisk:
-		if in.telemetry.DiskAvailableBytes < in.diskBudget {
+		need := in.diskBudget + in.diskGiB<<30
+		if in.telemetry.DiskAvailableBytes >= need {
+			return ""
+		}
+		if in.diskGiB == 0 {
 			return "disk gate"
+		}
+		return fmt.Sprintf("disk gate (%d GiB available, %d GiB for the pod's disk and the budget)",
+			max(in.telemetry.DiskAvailableBytes, 0)>>30, need>>30)
+	case gateDiskBooked:
+		if in.diskGiB == 0 {
+			return ""
+		}
+		if c := diskCapacityGiB(n, in.diskBudget); in.booked.DiskGiB+in.diskGiB > c {
+			return fmt.Sprintf("disk booking gate (%dGiB+%dGiB of %dGiB)", in.booked.DiskGiB, in.diskGiB, c)
 		}
 	}
 	return ""
 }
 
+// diskCapacityGiB is what the node's pods may book of its disk for disks
+// of their own size: its total less the disk budget, never below 0. A
+// disk of the guest's size books nothing: the slots and the budget cover
+// those.
+func diskCapacityGiB(n *store.Node, budget int64) int64 {
+	return max(n.DiskTotalBytes-budget, 0) >> 30
+}
+
 // score is the free share of the node's scarcest resource after the pod
-// (the old freeShare): CPU when it is gated, the memory capacity, and the
-// live memory.
+// (the old freeShare): CPU when it is gated, the memory capacity, the
+// live memory, and the disk's capacity for disks of their own size once
+// any is booked or asked for.
 func (in *gateInput) score() float64 {
 	n := &in.node
 	s := 1.0
+	if c := diskCapacityGiB(n, in.diskBudget); c > 0 && in.booked.DiskGiB+in.diskGiB > 0 {
+		s = min(s, float64(c-in.booked.DiskGiB-in.diskGiB)/float64(c))
+	}
 	if c := n.VCPUCapacity(); c > 0 {
 		s = min(s, float64(c-in.booked.VCPUs-in.vcpus)/float64(c))
 	}
@@ -264,7 +293,7 @@ func (e *Engine) place(ctx context.Context, sb store.Sandbox, kind OpKind) (plac
 func (e *Engine) gateInput(sb store.Sandbox, kind OpKind, n store.Node) gateInput {
 	in := gateInput{
 		node: n, connected: e.conns.Connected(n.Name), pod: sb.ID,
-		vcpus: int64(sb.VCPUs), memMiB: int64(sb.MemoryMiB), avoid: sb.AvoidNodes,
+		vcpus: int64(sb.VCPUs), memMiB: int64(sb.MemoryMiB), diskGiB: int64(sb.DiskGiB), avoid: sb.AvoidNodes,
 		restore: kind == OpRestore, checkpointStore: sb.CheckpointStore, diskBudget: e.cfg.DiskBudget,
 	}
 	if sb.PinNode != "" {
@@ -310,8 +339,9 @@ func (e *Engine) claim(ctx context.Context, tx *store.Store, sb store.Sandbox, k
 
 // capacityRefusal evaluates the capacity gates of a booking that reality
 // makes, under the node's row lock the caller took; "" when they pass.
-func capacityRefusal(n store.Node, sb store.Sandbox, booked store.BookingSums) string {
-	in := gateInput{node: n, booked: booked, vcpus: int64(sb.VCPUs), memMiB: int64(sb.MemoryMiB)}
+func capacityRefusal(n store.Node, sb store.Sandbox, booked store.BookingSums, diskBudget int64) string {
+	in := gateInput{node: n, booked: booked, vcpus: int64(sb.VCPUs), memMiB: int64(sb.MemoryMiB),
+		diskGiB: int64(sb.DiskGiB), diskBudget: diskBudget}
 	if r := in.check(capacityGates); r != nil {
 		return r.text
 	}

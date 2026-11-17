@@ -779,12 +779,14 @@ export function readinessText(r) {
   return t.length ? `${s} · ${t.join(', ')}` : s;
 }
 
-// resourcesText says a pod's size: "1 vCPU · 512 MiB".
+// resourcesText says a pod's size: "1 vCPU · 512 MiB", and its disk when
+// it asks for one of its own size: "· 30 GiB disk".
 export function resourcesText(r) {
   if (!r || typeof r !== 'object') return '';
   const parts = [];
   if (r.vcpus) parts.push(`${r.vcpus} vCPU${r.vcpus === 1 ? '' : 's'}`);
   if (r.memoryMib) parts.push(r.memoryMib >= 1024 && r.memoryMib % 1024 === 0 ? `${r.memoryMib / 1024} GiB` : `${r.memoryMib} MiB`);
+  if (r.diskGib) parts.push(`${r.diskGib} GiB disk`);
   return parts.join(' · ');
 }
 

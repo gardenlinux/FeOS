@@ -142,7 +142,7 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 				return err
 			}
 			if err := tx.UpsertBooking(ctx, store.Booking{PodID: id, Node: target, VCPUs: row.VCPUs,
-				MemoryMiB: row.MemoryMiB, Gated: true}); err != nil {
+				MemoryMiB: row.MemoryMiB, DiskGiB: row.DiskGiB, Gated: true}); err != nil {
 				return err
 			}
 		}
@@ -351,7 +351,7 @@ func (r *runner) preemptHibernate(ctx context.Context, tx *store.Store, row stor
 		return nil, nil, err
 	}
 	if err := tx.UpsertBooking(ctx, store.Booking{PodID: row.ID, Node: target, VCPUs: row.VCPUs,
-		MemoryMiB: row.MemoryMiB, Gated: true}); err != nil {
+		MemoryMiB: row.MemoryMiB, DiskGiB: row.DiskGiB, Gated: true}); err != nil {
 		return nil, nil, err
 	}
 	now, err := tx.Now(ctx)

@@ -40,6 +40,37 @@ func serviceSpec(replicas int, version string, extra string) string {
 		"env":{"VERSION":%q},"ports":[{"name":"http","port":8080}]%s}}}`, testImage, replicas, version, extra)
 }
 
+// A service's disk of its own size (resources.diskGib) is its rows' and
+// its pods' on the node, and a change of it rolls the service.
+func TestImageServiceDisk(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, serviceSpec(1, "1", `,"resources":{"diskGib":30}`))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+	v1 := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
+	if v1[0].Sandbox.DiskGiB != 30 {
+		t.Fatalf("the row's disk: %d GiB", v1[0].Sandbox.DiskGiB)
+	}
+	var disk uint32
+	for _, p := range n1.Pods() {
+		if p.GetPodId() == v1[0].Sandbox.ID.String() {
+			disk = p.GetSpec().GetResources().GetDiskGib()
+		}
+	}
+	if disk != 30 {
+		t.Fatalf("the pod's disk on its node: %d GiB", disk)
+	}
+	// Back to the guest's disk: another template, a new pod.
+	r2 := h.apply(env.ID, serviceSpec(1, "1", ""))
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
+	v2 := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
+	if v2[0].Sandbox.ID == v1[0].Sandbox.ID || v2[0].Sandbox.DiskGiB != 0 ||
+		v2[0].Instance.TemplateHash == v1[0].Instance.TemplateHash {
+		t.Fatalf("v2 rows %+v", v2)
+	}
+}
+
 // An image service rolls to a new template one replica at a time, a new
 // one first (surge 1): never more than one replica above its count, the
 // old ones stop only once the new are ready; a new count adds or

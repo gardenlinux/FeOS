@@ -111,11 +111,11 @@ func TestTemplateHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	const image = "docker.io/library/postgres@sha256:" + "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
-	h := tpl.Hash(image, 1, 1024)
+	h := tpl.Hash(image, 1, 1024, 0)
 	if len(h) != 64 || strings.ToLower(h) != h {
 		t.Fatalf("hash %q: want 64 lowercase hex digits", h)
 	}
-	if again := tpl.Hash(image, 1, 1024); again != h {
+	if again := tpl.Hash(image, 1, 1024, 0); again != h {
 		t.Fatalf("hash not deterministic: %s, then %s", h, again)
 	}
 
@@ -126,11 +126,11 @@ func TestTemplateHash(t *testing.T) {
 	same.SecurityGroups = []string{"sbx-b", "env-a"}
 	tpl2 := tpl
 	tpl2.SecurityGroups = []string{"env-a", "sbx-b"}
-	if same.Hash(image, 1, 1024) != tpl2.Hash(image, 1, 1024) {
+	if same.Hash(image, 1, 1024, 0) != tpl2.Hash(image, 1, 1024, 0) {
 		t.Fatal("the security groups' order or the labels change the hash")
 	}
-	if (PodTemplate{}).Hash(image, 1, 512) != (PodTemplate{Command: []string{}, Env: map[string]TemplateValue{},
-		SecurityGroups: []string{}}).Hash(image, 1, 512) {
+	if (PodTemplate{}).Hash(image, 1, 512, 0) != (PodTemplate{Command: []string{}, Env: map[string]TemplateValue{},
+		SecurityGroups: []string{}}).Hash(image, 1, 512, 0) {
 		t.Fatal("nil and empty hash apart")
 	}
 
@@ -154,6 +154,9 @@ func TestTemplateHash(t *testing.T) {
 		},
 		"groups": func(p *PodTemplate) (string, int, int) { p.SecurityGroups = nil; return image, 1, 1024 },
 	}
+	if tpl.Hash(image, 1, 1024, 30) == h {
+		t.Error("a disk of its own size leaves the hash")
+	}
 	for name, change := range changes {
 		c := tpl
 		c.Env = map[string]TemplateValue{}
@@ -161,7 +164,7 @@ func TestTemplateHash(t *testing.T) {
 			c.Env[k] = v
 		}
 		img, cpu, mem := change(&c)
-		if c.Hash(img, cpu, mem) == h {
+		if c.Hash(img, cpu, mem, 0) == h {
 			t.Errorf("a change of the %s leaves the hash", name)
 		}
 	}
@@ -190,13 +193,13 @@ func TestTemplateHashStable(t *testing.T) {
 		{"name tables", tables, 512, "ffddb7b72ce9d7b3605a5d29c256f17e20d0a96b871dd94082da83f757f8a91d"},
 	}
 	for _, g := range golden {
-		h := g.tpl.Hash(image, 1, g.mem)
+		h := g.tpl.Hash(image, 1, g.mem, 0)
 		if h != g.want {
 			t.Errorf("%s: hash %s, want %s", g.name, h, g.want)
 		}
 		flagged := g.tpl
 		flagged.IngressGroup = true
-		if flagged.Hash(image, 1, g.mem) == h {
+		if flagged.Hash(image, 1, g.mem, 0) == h {
 			t.Errorf("%s: the ingress group flag leaves the hash", g.name)
 		}
 	}

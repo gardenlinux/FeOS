@@ -408,7 +408,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
 		DrainTimeout: cfg.DrainTimeout, TenantCreation: cfg.TenantCreation, TenantsPerPerson: cfg.TenantsPerPerson,
 		ReservedTenantNames: reservedTenantNames(cfg), TenantDefaults: tenantDefaults(cfg), Zones: cfg.Zones(),
-		Log: i.log,
+		DiskBudget: cfg.DiskBudget, Log: i.log,
 	}, deps)
 
 	// The front doors' listener, last.

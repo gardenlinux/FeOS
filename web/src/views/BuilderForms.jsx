@@ -455,6 +455,10 @@ function ResourcesFields({ o, onChange, findings }) {
       <Field label="Memory (MiB)" hint="256 to 65536, each replica" findings={atField(findings, 'resources.memoryMib')}>
         <OptNumber value={r.memoryMib} min={256} max={65536} step={256} placeholder="512" onChange={(v) => put('memoryMib', v)} />
       </Field>
+      <Field label="Disk (GiB)" hint="8 to 200, each replica: scratch, a new pod starts empty; what must last goes in an addon"
+        findings={atField(findings, 'resources.diskGib')}>
+        <OptNumber value={r.diskGib} min={8} max={200} placeholder="8" onChange={(v) => put('diskGib', v)} />
+      </Field>
     </>
   );
 }

@@ -418,6 +418,11 @@ type nodeInfo struct {
 	SandboxesBooked   int64 `json:"sandboxesBooked"`
 	VcpusBooked       int64 `json:"vcpusBooked"`
 	MemoryBookedBytes i64   `json:"memoryBookedBytes"`
+	// The disks of their own size booked on the node, against its disk
+	// total less --disk-budget (a disk of the guest's size books
+	// nothing).
+	DiskBookedBytes   i64 `json:"diskBookedBytes"`
+	DiskCapacityBytes i64 `json:"diskCapacityBytes"`
 
 	StartID       string          `json:"startId"`
 	Versions      json.RawMessage `json:"versions"`
@@ -475,6 +480,7 @@ func (s *server) nodeOf(v nodeView) nodeInfo {
 		RegisteredAtNs: unixNs(n.JoinedAt), LastSeenAtNs: unixNs(t.LastSeen), DownSinceNs: unixNs(n.DownSince),
 
 		SandboxesBooked: v.booked.Count, VcpusBooked: v.booked.VCPUs, MemoryBookedBytes: i64(v.booked.MemoryMiB << 20),
+		DiskBookedBytes: i64(v.booked.DiskGiB << 30), DiskCapacityBytes: i64(max(n.DiskTotalBytes-s.cfg.DiskBudget, 0)),
 
 		StartID: startID, Versions: versions, ObjectStore: n.ObjectStore, ObjectStoreID: n.ObjectStoreID,
 		PodPrefix: n.PodPrefix, MeshPrefix: n.MeshPrefix, MeshEndpoint: n.MeshEndpoint,

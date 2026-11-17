@@ -27,6 +27,9 @@ type podPlan struct {
 	// image is the image as the spec (or the blueprint) writes it.
 	image           string
 	vcpus, memoryMB int
+	// diskGiB is the pod's disk when it asks for one larger than the
+	// guest's; 0: the guest's.
+	diskGiB int
 	// template has its labels, hash is its template hash.
 	template model.PodTemplate
 	hash     string
@@ -63,7 +66,7 @@ const minPodMemoryMiB = 256
 func (p *podPlan) finish(envID uuid.UUID) {
 	p.memoryMB = max(p.memoryMB, minPodMemoryMiB)
 	p.template.Labels = nil
-	p.hash = p.template.Hash(p.image, p.vcpus, p.memoryMB)
+	p.hash = p.template.Hash(p.image, p.vcpus, p.memoryMB, p.diskGiB)
 	p.template.Labels = map[string]string{
 		model.LabelEnvironment: envID.String(),
 		model.LabelObject:      p.object(),
@@ -245,7 +248,7 @@ func (p *addonPlan) renderSteps(ctx addons.Context) {
 func (c *Controller) planImage(v *view, kind, name, image string, command []string, env map[string]spec.EnvValue,
 	res *spec.Resources, creds *spec.ImageCredentials, bindings []string, egress *spec.Egress) *podPlan {
 	p := &podPlan{kind: kind, name: name, image: image}
-	p.vcpus, p.memoryMB = resourcesOf(res)
+	p.vcpus, p.memoryMB, p.diskGiB = resourcesOf(res)
 	vals, tls, wait, err := c.renderEnv(v, env)
 	if err != nil || wait != "" {
 		p.err, p.wait = err, wait

@@ -201,6 +201,14 @@ message Resources {
   uint32 vcpus = 1;
   // Defaults to 512.
   uint64 memory_mib = 2;
+  // The size of the pod's disk in GiB, at most 1024: 0 is the size of the
+  // guest's blank data volume (8 GiB), and a size below it is that size.
+  // The disk is thin: the node holds what the pod writes. A larger one
+  // starts on the blank data volume, or on a layer baked of its image,
+  // and the guest grows its filesystem to the disk at its boot; such a pod
+  // bakes no layer (ADR 0025). The size is fixed at the create, and a
+  // checkpoint takes it along.
+  uint32 disk_gib = 3;
 }
 
 message ContainerSpec {

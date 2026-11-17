@@ -1028,11 +1028,9 @@ impl DiskService for DiskSvc {
         }
         let chain = self.load_chain(&req.chain).map_err(internal)?;
         let head = chain.last().ok_or_else(|| internal("empty chain"))?;
-        let logical = if req.logical_size == 0 {
-            head.logical_size
-        } else {
-            req.logical_size
-        };
+        // Never smaller than the chain: a disk that cut its layers would
+        // cut the filesystem in them.
+        let logical = req.logical_size.max(head.logical_size);
         let row = DeviceRow {
             dev_id: None,
             chain: req.chain.clone(),

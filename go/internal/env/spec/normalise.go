@@ -148,6 +148,9 @@ func normResources(r *Resources) *Resources {
 		if r.MemoryMib != 0 {
 			out.MemoryMib = r.MemoryMib
 		}
+		// Left out it stays out, so that a spec of before normalises as
+		// it did: the guest's disk.
+		out.DiskGib = r.DiskGib
 	}
 	return &out
 }

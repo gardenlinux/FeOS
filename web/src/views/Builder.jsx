@@ -764,7 +764,7 @@ function Overview({ spec, st, isNew, words, groups, pins, onOpen }) {
                   <tr key={n}><td>{link(unitKey('services', n), n)}</td>
                     <td className="mono small">{isObject(o) && o.runtime === 'attached' ? `attached · ${o.sandbox || '—'}` : shortImage(o) || <span className="bad">no image</span>}</td>
                     <td className="mono">{isObject(o) && o.replicas !== undefined ? o.replicas : 1}</td>
-                    <td className="mono small">{r.vcpus || 1} vCPU · {r.memoryMib || 512} MiB</td>
+                    <td className="mono small">{r.vcpus || 1} vCPU · {r.memoryMib || 512} MiB{r.diskGib ? ` · ${r.diskGib} GiB disk` : ''}</td>
                     <td className="small">{h || <span className="muted">none</span>}</td></tr>);
               })}</tbody></table></div>)}
         </div>

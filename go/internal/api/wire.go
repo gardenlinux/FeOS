@@ -180,6 +180,8 @@ type sandboxStatus struct {
 	CheckpointAt      string `json:"checkpointAt"`
 	Vcpus             int    `json:"vcpus"`
 	MemoryMib         int    `json:"memoryMib"`
+	// DiskGib is its disk of its own size; absent: the guest's, 8 GiB.
+	DiskGib int `json:"diskGib,omitempty"`
 }
 
 // statusOf renders a row.
@@ -204,6 +206,7 @@ func statusOf(sb store.Sandbox) sandboxStatus {
 		CheckpointAt:      rfc3339(sb.CheckpointAt),
 		Vcpus:             sb.VCPUs,
 		MemoryMib:         sb.MemoryMiB,
+		DiskGib:           sb.DiskGiB,
 	}
 }
 

@@ -1821,7 +1821,8 @@ impl Pods {
             .map(|checkpoint| checkpoint.head_key.as_str())
             .filter(|key| !key.is_empty());
         let image = bake::image_of(&info);
-        let (device, made) = self.inner.disks.open(pod_id, head_key, image).await?;
+        let size = u64::from(bake::disk_gib(&info)) << 30;
+        let (device, made) = self.inner.disks.open(pod_id, head_key, image, size).await?;
         // A new disk: what it was made on is the pod's, for its bake
         // point and for the control plane.
         if let Some(disk) = made {

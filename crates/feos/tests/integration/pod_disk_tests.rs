@@ -85,6 +85,7 @@ fn spec() -> PodSpec {
         resources: Some(Resources {
             vcpus: 1,
             memory_mib: 256,
+            ..Default::default()
         }),
         network: Some(PodNetwork {
             none: true,

@@ -46,6 +46,13 @@ describe('capacityBars', () => {
     expect(s).toMatchObject({ text: '12 / 32', pct: 38, tone: '' });
   });
 
+  it('books the disks of their own size once any is booked', () => {
+    expect(capacityBars(row(NODE))).toHaveLength(3);
+    const bars = capacityBars(row({ ...NODE, diskBookedBytes: String(30 * 2 ** 30), diskCapacityBytes: String(200 * 2 ** 30) }));
+    expect(bars).toHaveLength(4);
+    expect(bars[3]).toMatchObject({ key: 'disk', pct: 15, tone: '' });
+  });
+
   it('has no vCPU bound when CPU is not gated, and a bound of 0 is full', () => {
     const [v, , s] = capacityBars(row({ ...NODE, vcpusCapacity: 0, slots: 0 }));
     expect(v).toMatchObject({ text: '56 / ∞', share: null, pct: 0, tone: '' });

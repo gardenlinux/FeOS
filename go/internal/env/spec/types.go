@@ -70,8 +70,8 @@ type Service struct {
 	Ports []Port `json:"ports,omitempty"`
 	// Replicas is 0..20; nil: 1. Image runtime only.
 	Replicas *int `json:"replicas,omitempty"`
-	// Resources are each replica's; nil: 1 vCPU, 512 MiB. Image runtime
-	// only.
+	// Resources are each replica's; nil: 1 vCPU, 512 MiB, the guest's
+	// disk of 8 GiB. Image runtime only.
 	Resources *Resources `json:"resources,omitempty"`
 	// Readiness decides when a replica receives traffic; nil: ready when
 	// it still runs 2 s after it was first seen running.
@@ -117,6 +117,12 @@ type Resources struct {
 	VCPUs int `json:"vcpus,omitempty"`
 	// MemoryMib is 256..65536 (a pod's floor); 0: 512.
 	MemoryMib int `json:"memoryMib,omitempty"`
+	// DiskGib is the pod's disk, 8..200; 0: the guest's, 8 GiB, which
+	// holds the image, the container's own files and what it writes
+	// outside its volumes. The disk is scratch: a new pod (a new
+	// deployment's, a replacement) starts on an empty one, so what must
+	// last belongs in an addon. A node books a larger disk in full.
+	DiskGib int `json:"diskGib,omitempty"`
 }
 
 // Readiness is a service's readiness check: exactly one of HTTP, TCP and
@@ -627,7 +633,12 @@ const (
 	MinMemoryMib     = 256
 	MaxMemoryMib     = 65536
 	DefaultMemoryMib = 512
-	MaxRetries       = 5
+	// DefaultDiskGib is the guest's blank data volume, which every pod's
+	// disk starts from (feos.pod.v1.Resources.disk_gib): a smaller disk
+	// cannot be. MaxDiskGib bounds what one pod books on its node.
+	DefaultDiskGib = 8
+	MaxDiskGib     = 200
+	MaxRetries     = 5
 
 	DefaultRolloutTimeout = "10m0s"
 	DefaultJobTimeout     = "10m0s"

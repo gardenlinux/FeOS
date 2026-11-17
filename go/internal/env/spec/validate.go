@@ -469,6 +469,10 @@ func (v *validator) resources(path string, r *Resources) {
 		v.errorf(path+".memoryMib", fmt.Sprintf("use %d..%d", MinMemoryMib, MaxMemoryMib), "memoryMib %d is out of range",
 			r.MemoryMib)
 	}
+	if r.DiskGib != 0 && (r.DiskGib < DefaultDiskGib || r.DiskGib > MaxDiskGib) {
+		v.errorf(path+".diskGib", fmt.Sprintf("use %d..%d, or leave it out for the guest's %d GiB", DefaultDiskGib,
+			MaxDiskGib, DefaultDiskGib), "diskGib %d is out of range", r.DiskGib)
+	}
 }
 
 // duration parses a duration, reporting one that is none.

@@ -380,6 +380,20 @@ func TestPodSpecNamesTheStopGrace(t *testing.T) {
 	}
 }
 
+// A row's disk of its own size is its pod's; without one the pod has the
+// guest's (0), as before.
+func TestPodSpecNamesTheDisk(t *testing.T) {
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+		MemoryMiB: 256, EnvironmentID: uuid.New(), Instance: true, PodTemplate: &model.PodTemplate{}}
+	for _, want := range []int{0, 30} {
+		sb.DiskGiB = want
+		spec, err := buildPodSpec(bg, sb, nil, nil)
+		if err != nil || spec.GetResources().GetDiskGib() != uint32(want) {
+			t.Errorf("disk %d GiB, want %d: %v", spec.GetResources().GetDiskGib(), want, err)
+		}
+	}
+}
+
 // A restore sends the row's template's security groups and name tables,
 // which replace the checkpointed spec's (ADR 0035), beside its checkpoint
 // and log labels; a row without a template sends neither.

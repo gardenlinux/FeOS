@@ -33,13 +33,29 @@ pub(crate) fn image_of(info: &PodInfo) -> Option<(&str, &[BakedLayer])> {
     Some((&layers.image_ref, &layers.layers))
 }
 
+/// The size of the pod's disk its spec asks for, in GiB: 0 for the blank
+/// data volume's.
+pub(crate) fn disk_gib(info: &PodInfo) -> u32 {
+    info.spec
+        .as_ref()
+        .and_then(|spec| spec.resources.as_ref())
+        .map_or(0, |resources| resources.disk_gib)
+}
+
 /// What the pod bakes its image as, if its bake is due: its create lets
 /// it, it made its disk on the blank data volume, it never ran from a
 /// checkpoint, and it baked nothing yet. Whether a container is there
-/// already the guest says.
+/// already the guest says. A pod whose disk has a size of its own bakes
+/// nothing: its guest grew the filesystem at its boot, so a layer of it
+/// would not fit a smaller disk, and every layer is made on the blank data
+/// volume's size, which fits any.
 pub(crate) fn due(info: &PodInfo) -> Option<BakedLayer> {
     let (image_ref, _) = image_of(info)?;
-    if !info.image_layers.as_ref()?.bake || info.baked.is_some() || info.checkpoint.is_some() {
+    if !info.image_layers.as_ref()?.bake
+        || info.baked.is_some()
+        || info.checkpoint.is_some()
+        || disk_gib(info) != 0
+    {
         return None;
     }
     let disk = info.disk.as_ref()?;
@@ -72,7 +88,7 @@ pub(crate) fn not_frozen(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use feos_proto::pod_service::{Checkpoint, ContainerSpec, ImageLayers, PodSpec};
+    use feos_proto::pod_service::{Checkpoint, ContainerSpec, ImageLayers, PodSpec, Resources};
 
     const IMAGE: &str = "ghcr.io/acme/app@sha256:aaaa";
 
@@ -160,6 +176,15 @@ mod tests {
         let mut restored = info.clone();
         restored.checkpoint = Some(Checkpoint::default());
         assert_eq!(due(&restored), None);
+        // Nor on a disk of a size of its own, which its guest grew.
+        let mut sized = info.clone();
+        sized.spec.as_mut().unwrap().resources = Some(Resources {
+            disk_gib: 30,
+            ..Default::default()
+        });
+        assert_eq!(disk_gib(&sized), 30);
+        assert_eq!(due(&sized), None);
+        assert_eq!(disk_gib(&info), 0);
     }
 
     #[test]

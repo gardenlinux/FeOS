@@ -176,6 +176,11 @@ whoever may pull an image with them may run it, and no one else.
   matched their digests, of a pod whose containers name one image. A
   node without the object store bakes nothing. A sandbox's image is
   baked like any other.
+- **A layer is baked on a disk of L0's size.** A pod whose disk is
+  larger (ADR 0018's `diskGib`) starts on any layer of its image, and
+  its guest grows the filesystem over it, but bakes none: its disk holds
+  the grown filesystem, which a smaller disk could not take. So the key
+  needs no size, and every layer fits every disk.
 - **The disk, not the memory.** A pod on a baked layer boots its guest.
 
 ### The pull token is the one credential in a pod
@@ -328,4 +333,6 @@ The node's pull and the bake pod are ADR 0050, and the pod's lifecycle in
 the guest is ADR 0004's and ADR 0048's. On 2026-11-13 the guest's version
 left the key: every guest release had baked every image again, about
 100 s for a large one and longer than a client waited, though the twelve
-guests until then had all shipped the same L0.
+guests until then had all shipped the same L0. Since 2026-11-17 a pod
+with a disk of its own size bakes nothing and starts on the layers of
+pods of L0's size.

@@ -275,7 +275,9 @@ A pod ([ADR 0004](../adr/0004-pods.md)) is a microVM
 with the pod's ID, booted from the newest installed guest, on a disk of
 its own from diskd ([disk.md](disk.md)), and the containers its spec
 names, which the guest runs with the names as their IDs. Its spec gives
-vCPUs and memory, the containers (image, command, environment, the
+vCPUs, memory and the disk's size (none: the blank data volume's 8 GiB;
+the guest grows the filesystem into a larger one at its boot,
+[disk.md](disk.md#the-pods-disks)), the containers (image, command, environment, the
 volumes they mount), whether it has a network, and its volumes. The
 microVM has a balloon with free page reporting.
 
@@ -302,8 +304,8 @@ every call with any other ID fails with `INVALID_ARGUMENT`.
   guest's blank data volume, and whose manifest diskd has or fetches
   (`Pull`); one it cannot fetch is passed over, and with none the disk is
   on the blank data volume. The record says what the disk was made on
-  (`disk`). A pod on the blank data volume whose create lets it bakes the
-  image at its bake point, after its volumes are mounted and before its
+  (`disk`). A pod on the blank data volume whose create lets it, and
+  whose spec asks no disk of its own size, bakes the image at its bake point, after its volumes are mounted and before its
   first container, unless the guest has that container already or diskd
   has no object store: the guest pulls the image into its image store
   (`PullImage`), its data volume is frozen (`FreezeFilesystem`, after a
