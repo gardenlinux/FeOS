@@ -1902,7 +1902,12 @@ detached from the request, so that a browser that gives up on a cold
 start does not cancel it. The request goes through a reverse proxy whose
 transport dials `PortForwardService/Forward` on the sandbox's node
 connection; the token stops at the door, and the guest sees the Host the
-client sent, which for FeCode's previews is the preview host. Upgrades
+client sent, which for FeCode's previews is the preview host. A client
+that reaches the door through an ingress that routes by Host, at the
+platform's own name, names that Host in `X-FeRun-Host` instead: a
+`host[:port]` there is the guest's Host, and the header stops at the
+door, also at the route door. It is no credential, since whoever may
+call the door may send any Host. Upgrades
 such as WebSockets ride through. Connections are pooled per pod and port;
 a sandbox has at most 32 on the instance, pooled ones included, and a
 port's pool no more. A request waits up to 30 s for its turn at a
