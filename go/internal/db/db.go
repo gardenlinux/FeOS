@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/gardenlinux/feos/go/internal/awsauth"
 )
 
 // Querier runs statements: a pgx.Tx, a *pgxpool.Pool or a *pgx.Conn.
@@ -131,7 +134,10 @@ type DB struct {
 	log *slog.Logger
 	// listenConfig is the configuration of the hub's own connection.
 	listenConfig *pgx.ConnConfig
-	hub          hub
+	// password gives a connection its password as it dials, nil for the
+	// URL's (iamPassword).
+	password func(context.Context, *pgx.ConnConfig) error
+	hub      hub
 	// lastFailure is the UnixNano of the last connection failure, 0 if
 	// none.
 	lastFailure atomic.Int64
@@ -180,6 +186,10 @@ func Open(ctx context.Context, url string, log *slog.Logger) (*DB, error) {
 	}
 	d := &DB{log: log, listening: make(chan struct{})}
 	d.hub.subs = map[string]map[*subscriber]struct{}{}
+	if d.password, err = iamPassword(); err != nil {
+		return nil, err
+	}
+	cfg.BeforeConnect = d.password
 
 	// Before the copy, so that the listener's connection has both.
 	cfg.ConnConfig.DialFunc = dialer(cfg.ConnConfig.ConnectTimeout).DialContext
@@ -197,6 +207,34 @@ func Open(ctx context.Context, url string, log *slog.Logger) (*DB, error) {
 	}
 	d.Pool = pool
 	return d, nil
+}
+
+// iamPassword is the hook that signs a connection in with an IAM token
+// of Amazon RDS (FERUN_DATABASE_AUTH=aws-iam, in AWS_REGION): the URL
+// names the user and no password, and every new connection gets a fresh
+// token, valid for 15 minutes, from the credentials the platform hands
+// the process (awsauth). nil for the URL's own password.
+func iamPassword() (func(context.Context, *pgx.ConnConfig) error, error) {
+	switch mode := os.Getenv("FERUN_DATABASE_AUTH"); mode {
+	case "", "password":
+		return nil, nil
+	case "aws-iam":
+		region := os.Getenv("AWS_REGION")
+		if region == "" {
+			return nil, errors.New("FERUN_DATABASE_AUTH=aws-iam needs AWS_REGION")
+		}
+		src := awsauth.NewSource()
+		return func(ctx context.Context, cc *pgx.ConnConfig) error {
+			c, err := src.Get(ctx)
+			if err != nil {
+				return fmt.Errorf("the database's IAM token: %w", err)
+			}
+			cc.Password = awsauth.RDSToken(c, region, cc.Host, cc.Port, cc.User, time.Now())
+			return nil
+		}, nil
+	default:
+		return nil, fmt.Errorf("FERUN_DATABASE_AUTH must be password or aws-iam, got %q", mode)
+	}
 }
 
 // onNotice logs the server's WARNING notices, at most one per
