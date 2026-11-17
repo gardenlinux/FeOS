@@ -96,6 +96,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0018: an admin's listing of every tenant's environments.
 - ADR 0018: a CLI for the environments' API.
 - ADR 0018: a FeRun tenant per FeCode project, for quotas and billing; FeCode keeps its projects' environments under one tenant, labelled by project.
+- ADR 0018: an old pod's stop grace (an image service's 660 s) runs after its row is gone: its address leaves its workload's group and the env table, so peers that admit it by group refuse its new connections (established ones pass), its node's bookings no longer count its memory and slot, and a drain counts its node drained. A row kept `stopping` until its pod has ended (StopPod after the traffic's 10 s, then the tombstone) would keep all of it.
+- ADR 0018: a feos-node that stops (`--suspend-on-stop`, 300 s) ends a pod in its stop grace with its microVM, so a node's rollout cuts a service's drain; suspending it for the next `feosd` would resume the drain, but its delete holds its lock.
 
 ## ADR 0019
 
@@ -215,6 +217,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0040: minor upgrades of an addon, and more types (`clickhouse`).
 - ADR 0040: rotating an addon's generated credentials (nats's password); they are never changed.
 - ADR 0040: whether a lost addon whose data ties it to no node is recreated wherever it fits, as a service's lost replica is.
+- ADR 0040: postgres's `SIGTERM` is its smart shutdown, which waits for every client to go, so a stopped addon ends by its microVM after 10 s and recovers from its WAL; `SIGINT`, its fast shutdown, would end it cleanly within that.
 
 ## ADR 0041
 

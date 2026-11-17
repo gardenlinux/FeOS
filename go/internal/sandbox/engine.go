@@ -264,6 +264,18 @@ func deadlineFor(kind OpKind, memoryMiB int, hibernateTimeout time.Duration) tim
 	return PreparationBudget
 }
 
+// opDeadlineOf is the deadline of an op of kind for row: the timings',
+// and for a repair, whose StopPod lets a running pod's containers exit
+// after SIGTERM, the row's stop grace more (feosd's own 10 s is within
+// the preparation budget).
+func (e *Engine) opDeadlineOf(kind OpKind, row store.Sandbox) time.Duration {
+	d := e.t.opDeadline(kind, row.MemoryMiB)
+	if kind == OpRepair {
+		d += row.StopGrace()
+	}
+	return d
+}
+
 // Engine is the sandbox engine of one instance.
 type Engine struct {
 	cfg   Config

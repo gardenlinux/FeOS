@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -68,6 +69,16 @@ func PodGroups(envID uuid.UUID, workload string) []string {
 // SandboxCommand is the command of a sandbox's pod: it waits, and runs
 // what exec, the tools and its attached services start in it.
 var SandboxCommand = []string{"sleep", "infinity"}
+
+// ServiceStopGrace is how long the containers of an image service's
+// instance have between SIGTERM and the end of their microVM when its pod
+// is stopped or deleted (feos.pod.v1.PodSpec.stop_grace_seconds, ADR
+// 0018): a service may drain, as a backend that hands its work over to
+// another replica (FeCode's takes up to 630 s). Every other pod has the
+// node's 10 s: a sandbox's sleep, PID 1 of its container, ignores SIGTERM
+// and waits out any grace; an addon's next pod waits for its volume; a
+// job that is stopped is cancelled.
+const ServiceStopGrace = 660 * time.Second
 
 // SandboxTemplate is the pod template of sandbox id (ADR 0035): its
 // command, its groups (PodGroups with SandboxWorkloadGroupID) and its

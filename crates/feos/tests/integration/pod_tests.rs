@@ -306,6 +306,7 @@ async fn test_pod_lifecycle() -> Result<()> {
         http_bindings: None,
         identity: String::new(),
         tls_bindings: Vec::new(),
+        stop_grace_seconds: 0,
     };
     let create = CreatePodRequest {
         pod_id: pod_id.clone(),

@@ -147,6 +147,17 @@ func (s *Sandbox) Workload() (kind, name, set string) {
 	}
 }
 
+// StopGrace is how long the row's pod's containers have between SIGTERM
+// and the end of its microVM when it is stopped or deleted
+// (feos.pod.v1.PodSpec.stop_grace_seconds): model.ServiceStopGrace for an
+// instance of an image service, 0 (the node's 10 s) for every other pod.
+func (s *Sandbox) StopGrace() time.Duration {
+	if kind, _, _ := s.Workload(); s.Instance && kind == spec.KindService {
+		return model.ServiceStopGrace
+	}
+	return 0
+}
+
 // The policies that back off after a failed op (Sandbox.PolicyFailed).
 const (
 	PolicyIdle           = "idle"

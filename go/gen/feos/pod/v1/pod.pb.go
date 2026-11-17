@@ -261,9 +261,15 @@ type PodSpec struct {
 	// binding's upstream with TLS 1.3, the pod's certificate and its
 	// CertificateVerify signed by feos-authn, the upstream pinned to its
 	// SPIFFE ID under the platform's root. The plaintext stays in the pod.
-	TlsBindings   []*TlsBinding `protobuf:"bytes,9,rep,name=tls_bindings,json=tlsBindings,proto3" json:"tls_bindings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TlsBindings []*TlsBinding `protobuf:"bytes,9,rep,name=tls_bindings,json=tlsBindings,proto3" json:"tls_bindings,omitempty"`
+	// How long the containers have to exit after SIGTERM when the pod is
+	// stopped or deleted while it runs, in seconds, before its microVM ends
+	// them: 0 is the node's 10 s, at most 900. The control plane gives a
+	// service that drains more (ADR 0018). A create again with another
+	// grace is the same create: the pod keeps the one it was created with.
+	StopGraceSeconds uint32 `protobuf:"varint,10,opt,name=stop_grace_seconds,json=stopGraceSeconds,proto3" json:"stop_grace_seconds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PodSpec) Reset() {
@@ -357,6 +363,13 @@ func (x *PodSpec) GetTlsBindings() []*TlsBinding {
 		return x.TlsBindings
 	}
 	return nil
+}
+
+func (x *PodSpec) GetStopGraceSeconds() uint32 {
+	if x != nil {
+		return x.StopGraceSeconds
+	}
+	return 0
 }
 
 // One outbound TLS binding of a pod (ADR 0036).
@@ -2862,7 +2875,7 @@ var File_feos_pod_v1_pod_proto protoreflect.FileDescriptor
 
 const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\n" +
-	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\xed\x04\n" +
+	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\x9b\x05\n" +
 	"\aPodSpec\x124\n" +
 	"\tresources\x18\x01 \x01(\v2\x16.feos.pod.v1.ResourcesR\tresources\x12:\n" +
 	"\n" +
@@ -2874,7 +2887,9 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\bmetadata\x18\x06 \x03(\v2\".feos.pod.v1.PodSpec.MetadataEntryR\bmetadata\x12A\n" +
 	"\rhttp_bindings\x18\a \x01(\v2\x1c.feos.pod.v1.PodHttpBindingsR\fhttpBindings\x12\x1a\n" +
 	"\bidentity\x18\b \x01(\tR\bidentity\x12:\n" +
-	"\ftls_bindings\x18\t \x03(\v2\x17.feos.pod.v1.TlsBindingR\vtlsBindings\x1a9\n" +
+	"\ftls_bindings\x18\t \x03(\v2\x17.feos.pod.v1.TlsBindingR\vtlsBindings\x12,\n" +
+	"\x12stop_grace_seconds\x18\n" +
+	" \x01(\rR\x10stopGraceSeconds\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +

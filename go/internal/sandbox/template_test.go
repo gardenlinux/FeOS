@@ -350,6 +350,36 @@ func TestPodSpecNamesTheIdentity(t *testing.T) {
 	}
 }
 
+// An image service's instance's pod names model.ServiceStopGrace; a
+// sandbox's, a job's and an addon's name none: the node's 10 s.
+func TestPodSpecNamesTheStopGrace(t *testing.T) {
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+		MemoryMiB: 256, EnvironmentID: uuid.New()}
+	instance := func(kind string) store.Sandbox {
+		r := sb
+		r.Instance = true
+		r.PodTemplate = &model.PodTemplate{}
+		r.LogLabels = map[string]string{model.LogKind: kind, model.LogObject: "x"}
+		return r
+	}
+	for _, c := range []struct {
+		name string
+		row  store.Sandbox
+		want uint32
+	}{
+		{"a service's instance", instance("service"), 660},
+		{"a job's run", instance("job"), 0},
+		{"an addon", instance("addon"), 0},
+		{"a sandbox", sb, 0},
+		{"a tenant's job", func() store.Sandbox { r := sb; r.TenantJob = true; return r }(), 0},
+	} {
+		spec, err := buildPodSpec(bg, c.row, nil, nil)
+		if err != nil || spec.GetStopGraceSeconds() != c.want {
+			t.Errorf("%s: stop grace %d, want %d: %v", c.name, spec.GetStopGraceSeconds(), c.want, err)
+		}
+	}
+}
+
 // A restore sends the row's template's security groups and name tables,
 // which replace the checkpointed spec's (ADR 0035), beside its checkpoint
 // and log labels; a row without a template sends neither.

@@ -69,9 +69,10 @@ reads nothing meanwhile: the guest's log is the buffer, and the node
 holds a batch and a few entries a stream. `RESOURCE_EXHAUSTED` drops the
 batch, counted as the limit's drops are. Before a running pod is
 stopped or deleted, `feosd` lets its containers end: SIGTERM to each,
-and up to 10 s for their processes to exit (the guest writes what they
-wrote before it reports an exit), while the pod still runs and its
-streams follow. Then, as before a pod is suspended or hibernates, it
+and up to the pod's stop grace for their processes to exit
+(`PodSpec.stop_grace_seconds`: 10 s when it names none, at most 900 s;
+the guest writes what they wrote before it reports an exit), while the
+pod still runs and its streams follow. Then, as before a pod is suspended or hibernates, it
 sends what its containers wrote: each stream that follows its log reads
 until the log was quiet for 400 ms and the sink took what it read, for
 at most 5 s in all; a stream that does not follow now (no sink, a

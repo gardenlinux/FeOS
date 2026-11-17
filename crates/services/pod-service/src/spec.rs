@@ -41,6 +41,9 @@ const MAX_HTTP_VERSION: usize = 128;
 /// The name of a pod's egress records' log (ADR 0028 §6), which no
 /// container of a pod with HTTP bindings has: `fleet_client::EGRESS_CONTAINER`.
 const EGRESS_CONTAINER: &str = "feos-authn";
+/// The longest stop grace a pod's spec may name (`stop_grace_seconds`):
+/// 15 minutes.
+pub const MAX_STOP_GRACE_SECONDS: u32 = 900;
 
 /// Checks a pod's ID, which also names its microVM and its paths: a short
 /// one, or the UUID of a pod made before short IDs (ADR 0019).
@@ -91,6 +94,11 @@ pub fn normalize(mut spec: PodSpec) -> Result<PodSpec, Status> {
                 container.name
             )));
         }
+    }
+    if spec.stop_grace_seconds > MAX_STOP_GRACE_SECONDS {
+        return Err(Status::invalid_argument(format!(
+            "a pod's stop grace is at most {MAX_STOP_GRACE_SECONDS} seconds"
+        )));
     }
     check_volumes(&spec)?;
     check_metadata(&spec)?;
@@ -674,6 +682,11 @@ mod tests {
             memory_mib: 64,
         });
         assert!(normalize(small).is_err());
+        let mut long = spec(vec![container("main")]);
+        long.stop_grace_seconds = MAX_STOP_GRACE_SECONDS + 1;
+        assert!(normalize(long.clone()).is_err());
+        long.stop_grace_seconds = MAX_STOP_GRACE_SECONDS;
+        assert!(normalize(long).is_ok());
     }
 
     #[test]

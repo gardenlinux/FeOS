@@ -65,13 +65,16 @@ type PodServiceClient interface {
 	// its containers are adopted with what they wrote, or created from the
 	// spec where they are not there.
 	StartPod(ctx context.Context, in *StartPodRequest, opts ...grpc.CallOption) (*StartPodResponse, error)
-	// Shuts the pod's microVM down; its disk stays. A hibernated pod drops
-	// its memory, and its next start boots on the disk of its checkpoint.
+	// Shuts the pod's microVM down; its disk stays. A running pod's
+	// containers get SIGTERM first and its stop grace to exit
+	// (PodSpec.stop_grace_seconds). A hibernated pod drops its memory, and
+	// its next start boots on the disk of its checkpoint.
 	StopPod(ctx context.Context, in *StopPodRequest, opts ...grpc.CallOption) (*StopPodResponse, error)
-	// Removes the pod, its microVM and its disk, in whatever state. Its
-	// checkpoints stay in object storage until a sweep finds no head that
-	// names them (feos.disk.v1 Sweep). Its volumes stay, attached to no
-	// pod.
+	// Removes the pod, its microVM and its disk, in whatever state; a
+	// running pod's containers get SIGTERM and its stop grace first, as in
+	// StopPod. Its checkpoints stay in object storage until a sweep finds
+	// no head that names them (feos.disk.v1 Sweep). Its volumes stay,
+	// attached to no pod.
 	DeletePod(ctx context.Context, in *DeletePodRequest, opts ...grpc.CallOption) (*DeletePodResponse, error)
 	GetPod(ctx context.Context, in *GetPodRequest, opts ...grpc.CallOption) (*PodInfo, error)
 	ListPods(ctx context.Context, in *ListPodsRequest, opts ...grpc.CallOption) (*ListPodsResponse, error)
@@ -328,13 +331,16 @@ type PodServiceServer interface {
 	// its containers are adopted with what they wrote, or created from the
 	// spec where they are not there.
 	StartPod(context.Context, *StartPodRequest) (*StartPodResponse, error)
-	// Shuts the pod's microVM down; its disk stays. A hibernated pod drops
-	// its memory, and its next start boots on the disk of its checkpoint.
+	// Shuts the pod's microVM down; its disk stays. A running pod's
+	// containers get SIGTERM first and its stop grace to exit
+	// (PodSpec.stop_grace_seconds). A hibernated pod drops its memory, and
+	// its next start boots on the disk of its checkpoint.
 	StopPod(context.Context, *StopPodRequest) (*StopPodResponse, error)
-	// Removes the pod, its microVM and its disk, in whatever state. Its
-	// checkpoints stay in object storage until a sweep finds no head that
-	// names them (feos.disk.v1 Sweep). Its volumes stay, attached to no
-	// pod.
+	// Removes the pod, its microVM and its disk, in whatever state; a
+	// running pod's containers get SIGTERM and its stop grace first, as in
+	// StopPod. Its checkpoints stay in object storage until a sweep finds
+	// no head that names them (feos.disk.v1 Sweep). Its volumes stay,
+	// attached to no pod.
 	DeletePod(context.Context, *DeletePodRequest) (*DeletePodResponse, error)
 	GetPod(context.Context, *GetPodRequest) (*PodInfo, error)
 	ListPods(context.Context, *ListPodsRequest) (*ListPodsResponse, error)

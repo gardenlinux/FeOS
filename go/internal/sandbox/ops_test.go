@@ -465,12 +465,16 @@ func TestPauseCoversFeosdSuspend(t *testing.T) {
 
 // TestTombstoneCoversASuspend: a tombstone's DeletePod waits behind a
 // suspend that holds the pod's lock in feosd, and has its own steps
-// after it: its deadline is a pause's and the tombstone's base more.
+// after it, the pod's stop grace among them: its deadline is a pause's,
+// the tombstone's base and the grace more.
 func TestTombstoneCoversASuspend(t *testing.T) {
 	const base = 2 * time.Minute
 	for _, mem := range []int{1024, 4096, 16384} {
-		if got, pause := tombstoneDeadline(base, mem), OpDeadline(OpPause, mem); got < pause+base {
-			t.Errorf("tombstone of %d MiB: %v, shorter than a pause's %v and %v", mem, got, pause, base)
+		for _, grace := range []time.Duration{0, model.ServiceStopGrace} {
+			if got, pause := tombstoneDeadline(base, mem, grace), OpDeadline(OpPause, mem); got < pause+base+grace {
+				t.Errorf("tombstone of %d MiB with a grace of %v: %v, shorter than a pause's %v, %v and the grace",
+					mem, grace, got, pause, base)
+			}
 		}
 	}
 }
@@ -601,6 +605,29 @@ func TestHibernateNoAbandonPerTrigger(t *testing.T) {
 		}
 		wait("takeover", hd)
 		check(fmt.Sprintf("takeover (draining %v)", draining), n, hd.opID, draining)
+	}
+}
+
+// TestRepairCoversTheStopGrace: a repair's StopPod lets a running pod's
+// containers exit after SIGTERM: an image service's instance's repair has
+// its stop grace more than the table's; every other op, and a repair of
+// any other pod, the table's.
+func TestRepairCoversTheStopGrace(t *testing.T) {
+	e := &Engine{t: defaultTimings(DefaultHibernateTimeout)}
+	service := store.Sandbox{ID: podid.Mint(), MemoryMiB: 2048, EnvironmentID: uuid.New(), Instance: true,
+		LogLabels: map[string]string{model.LogKind: "service", model.LogObject: "api"}}
+	if got, want := e.opDeadlineOf(OpRepair, service), OpDeadline(OpRepair, 2048)+model.ServiceStopGrace; got != want {
+		t.Errorf("repair of a service's instance: %v, want %v", got, want)
+	}
+	addon := service
+	addon.LogLabels = map[string]string{model.LogKind: "addon", model.LogObject: "db"}
+	if got := e.opDeadlineOf(OpRepair, addon); got != OpDeadline(OpRepair, 2048) {
+		t.Errorf("repair of an addon: %v", got)
+	}
+	for _, k := range []OpKind{OpCreate, OpStart, OpResume, OpRestore, OpPause, OpHibernate} {
+		if got := e.opDeadlineOf(k, service); got != OpDeadline(k, 2048) {
+			t.Errorf("%s of a service's instance: %v, want %v", k, got, OpDeadline(k, 2048))
+		}
 	}
 }
 

@@ -100,6 +100,12 @@ A pod's network ([ADR 0010](../adr/0010-pod-network.md),
   128 letters, digits, `-`, `_` and `.`, with more than 32 KiB as JSON,
   or with metadata and no network fails with `INVALID_ARGUMENT`.
   `feosctl pod create --metadata KEY=value`.
+- `PodSpec.stop_grace_seconds`: how long a stopped or deleted running
+  pod's containers have to exit after `SIGTERM` before its microVM ends
+  them; 0 is 10 s, more than 900 fails the create with
+  `INVALID_ARGUMENT`. A create again with another grace is the same
+  create, and the pod keeps its own. `feosctl pod create --stop-grace
+  SECONDS`.
 - `PodInfo.ipv6_address`: the pod's address on the network, of the
   node's prefix, while it is on the node. `PodInfo.ipv4_address`: its
   IPv4 address on the node, of `--pod-ipv4-range`, for leaving through

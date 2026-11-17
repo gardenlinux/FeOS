@@ -150,6 +150,16 @@ it can state and get an answer for at once.
   old one goes, routes following readiness, and brings its attached
   services up. It is deployed when every object matches it; the status
   names the deployed deployment and the one in progress.
+- An old pod stops taking traffic first, and goes 10 s later: its node
+  sends its container `SIGTERM` and gives an image service's 660 s to
+  exit before the microVM ends (the pod's stop grace, ADR 0004), so that
+  a service that drains finishes, as FeCode's backend hands its agents'
+  turns over to another replica within 630 s; one that exits sooner goes
+  sooner. The grace is `ferund`'s by the kind of pod, not a field of the
+  environment's spec: a sandbox's, a job's and an addon's pods keep the
+  node's 10 s, since a sandbox's container ignores `SIGTERM` and would
+  wait out any grace, an addon's next pod waits for its volume, and a
+  stopped job is cancelled.
 - A rollout that does not reach readiness within its budget has
   **failed**: the service keeps the pods of the last deployed deployment
   serving, the new ones are removed, and the environment stays on its
@@ -287,6 +297,10 @@ it can state and get an answer for at once.
   environments over time and keep names taken nobody uses. **A display
   name beside a fixed name**: the console, the messages and FeCode's
   operators read the name.
+- **A stop grace per service in the spec**, as Kubernetes's
+  `terminationGracePeriodSeconds`: one more value to know and to get
+  right. The platform's grace covers a drain of ten minutes, and a
+  service that exits sooner goes sooner.
 
 ## Consequences
 
@@ -297,6 +311,11 @@ it can state and get an answer for at once.
 - An environment's pods are no tenant's sandboxes and are absent from
   its sandbox routes; a sandbox is not an object of an environment, an
   attached service names one.
+- A service whose process ignores `SIGTERM`, as a PID 1 without a
+  handler of its own does, keeps its old pods and their memory for the
+  whole 660 s at every rollout and delete, until it handles the signal or
+  the guest's reaper is in front of it (ADR 0048). The grace runs after
+  the old pod's row is gone (BACKLOG).
 - A caller that stores an environment's name or builds URLs with it
   must store the new one after a rename; by ID nothing changes, and the
   rename is idempotent, so a client retries it.
@@ -319,4 +338,7 @@ jobs into environments, and ADR 0034's revision (2026-11-08) replaced
 the environment's own security group and egress table by reachability
 derived from references. ADR 0037, the rename of 2026-11-08 (8951c44),
 is merged here; addons, jobs, attached services, the route door and
-secrets were split into ADR 0040 to 0044 on 2026-11-08.
+secrets were split into ADR 0040 to 0044 on 2026-11-08. An image
+service's pods have had a stop grace of 660 s since 2026-11-17, between
+FeCode's drain of 630 s and the 720 s Kubernetes gives it; before, every
+pod had 10 s and a rollout ended a drain halfway.
