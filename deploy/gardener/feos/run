@@ -17,7 +17,8 @@ log() { echo "run: $*"; }
 
 case "${1:-}" in
 prepare)
-	modprobe ublk_drv
+	# On hosts that lack the module file, an init container before loads it.
+	[ -d /sys/module/ublk_drv ] || modprobe ublk_drv
 	for kind in firecracker guest; do
 		mkdir -p "/var/lib/feos/dist/$kind"
 		for dir in "/usr/lib/feos/$kind"/*/; do
