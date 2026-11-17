@@ -47,6 +47,7 @@ feosd)
 	# the join secret: EKS names nodes ip-10-0-1-2.<region>.compute.internal.
 	NODE_NAME=${NODE_NAME%%.*}
 	set -- --suspend-on-stop \
+		--node-name "$NODE_NAME" \
 		--control-plane "$CONTROL_PLANE" \
 		--control-plane-name "$CONTROL_PLANE_NAME" \
 		--trust-domain "$TRUST_DOMAIN" \
