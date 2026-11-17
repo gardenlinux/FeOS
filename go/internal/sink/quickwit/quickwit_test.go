@@ -186,6 +186,22 @@ func TestEnsure(t *testing.T) {
 		body.Params.Client["session.timeout.ms"] != "10000" || body.Params.Client["heartbeat.interval.ms"] != "3000" {
 		t.Errorf("source %s", f.sources["ferun-logs-v5-30d"])
 	}
+	if _, ok := body.Params.Client["security.protocol"]; ok {
+		t.Errorf("a plaintext source signs in: %s", f.sources["ferun-logs-v5-30d"])
+	}
+	// With a user, over TLS with SCRAM-SHA-512 as that user.
+	scram := Source{Topic: "ferun-traces-v4-30d", Brokers: []string{"b-1:9096"}, Username: "quickwit", Password: "pw"}
+	if err := c.Ensure(ctx, "ferun-traces-v4-30d", cfg, scram); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(f.sources["ferun-traces-v4-30d"], &body); err != nil {
+		t.Fatal(err)
+	}
+	if cp := body.Params.Client; cp["bootstrap.servers"] != "b-1:9096" || cp["security.protocol"] != "SASL_SSL" ||
+		cp["sasl.mechanism"] != "SCRAM-SHA-512" || cp["sasl.username"] != "quickwit" || cp["sasl.password"] != "pw" ||
+		cp["auto.offset.reset"] != "earliest" {
+		t.Errorf("SCRAM source %v", cp)
+	}
 	// Another error than "already exists" is one.
 	f.mu.Lock()
 	f.down = true

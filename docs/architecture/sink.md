@@ -368,7 +368,15 @@ one (stream, offset) once. `--kafka-brokers` names Kafka's brokers
 control on port 9098, with the process's AWS credentials, an EKS Pod
 Identity's). It is the sink's alone: Quickwit 0.9's Kafka source
 (librdkafka, without an OAUTHBEARER token callback) cannot sign in with
-IAM, so its sources still need brokers they reach without it. The hot stage of
+IAM, so the sink makes its sources with brokers and a sign-in of their
+own: `--quickwit-kafka-brokers` (default `--kafka-brokers`) and, with
+`--quickwit-kafka-username` and `--quickwit-kafka-password-file`, TLS
+and SASL SCRAM-SHA-512 as that user (MSK's port 9096, a user that Kafka
+ACLs let read the topics and its groups only). The password goes to
+Quickwit in the source's `client_params`, so its metastore holds it. A
+source that exists keeps what it was made with, and is not compared:
+other brokers take new indexes (a new mapping version) or the old ones
+deleted first, since a source's checkpoint holds its topic's offsets. The hot stage of
 before (`log_batches`, `log_lines`) went on 2026-10-31 (migration `0008`).
 
 **Partitions.** One tenant may hold many projects' environments (FeCode's
