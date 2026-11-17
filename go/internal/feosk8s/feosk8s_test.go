@@ -537,3 +537,66 @@ func TestIsNodeName(t *testing.T) {
 		}
 	}
 }
+
+// EKS names its nodes by their private DNS name: FeRun knows a node by
+// the first label, Kubernetes by the whole name.
+func TestNodeNamesWithADomain(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.NodeNamePrefix = "ip-10-0-"
+	h.cfg.RemoveAfter = time.Minute
+	const node, name = "ip-10-0-1-2.eu-west-1.compute.internal", "ip-10-0-1-2"
+	h.kube.addNode(node, feosLabels)
+	c := h.controller()
+
+	h.pass(c)
+	key := h.key(name)
+	if live := h.ferun.liveTokens(name); len(live) != 1 || key != live[0].secret {
+		t.Fatalf("key %q, live tokens %+v; want one token pinned to %s under that key", key, live, name)
+	}
+	if g, ok := h.guard(node); !ok || g.Spec.NodeName != node {
+		t.Fatalf("guard %+v, %v; want one bound to %s", g, ok, node)
+	}
+	h.ferun.useToken(key)
+	h.ferun.setNode(FeRunNode{Node: name, Status: nodeReady})
+	h.pass(c)
+	if h.key(name) != "" {
+		t.Fatal("the key stays after the node is ready")
+	}
+	h.steady(c)
+
+	// A cordon drains the FeRun node and annotates the Kubernetes one.
+	h.kube.setUnschedulable(node, true)
+	h.pass(c)
+	if n, _ := h.ferun.node(name); !n.Draining {
+		t.Fatal("the cordoned node does not drain in FeRun")
+	}
+	if h.kube.node(node).Metadata.Annotations[AnnotationDrain] != "requested" {
+		t.Fatal("no drain annotation")
+	}
+
+	// Gone from Kubernetes and down in FeRun: removed after RemoveAfter.
+	h.kube.deleteNode(node)
+	h.ferun.setNode(FeRunNode{Node: name, Status: nodeDown})
+	h.pass(c)
+	h.advance(time.Minute)
+	h.pass(c)
+	if n, _ := h.ferun.node(name); n.Status != nodeRemoved {
+		t.Fatalf("%s is %s; want removed", name, n.Status)
+	}
+}
+
+// Two nodes of one first label: FeOS runs on neither.
+func TestNodeNameClash(t *testing.T) {
+	h := newHarness(t)
+	h.kube.addNode("ip-10-0-1-2.eu-west-1.compute.internal", feosLabels)
+	h.kube.addNode("ip-10-0-1-2.eu-central-1.compute.internal", feosLabels)
+	c := h.controller()
+	h.pass(c)
+	if len(h.ferun.liveTokens("ip-10-0-1-2")) != 0 || h.key("ip-10-0-1-2") != "" {
+		t.Fatal("a token for a name two nodes share")
+	}
+	if !strings.Contains(h.logs.String(), "have one FeRun name") {
+		t.Fatalf("no warning: %s", h.logs.String())
+	}
+	h.steady(c)
+}

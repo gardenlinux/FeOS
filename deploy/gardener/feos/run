@@ -43,6 +43,9 @@ diskd)
 	;;
 feosd)
 	: "${NODE_NAME:?}" "${CONTROL_PLANE:?}" "${CONTROL_PLANE_NAME:?}" "${TRUST_DOMAIN:?}"
+	# The node's name in FeRun is its first DNS label, as feos-k8s keys
+	# the join secret: EKS names nodes ip-10-0-1-2.<region>.compute.internal.
+	NODE_NAME=${NODE_NAME%%.*}
 	set -- --suspend-on-stop \
 		--control-plane "$CONTROL_PLANE" \
 		--control-plane-name "$CONTROL_PLANE_NAME" \
