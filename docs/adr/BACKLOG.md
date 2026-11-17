@@ -237,9 +237,10 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0045
 
-- ADR 0045: zones of a tenant's own, and a zone a tenant verified with one record that lets it claim every name below it and wildcard domains, which need DNS-01.
-- ADR 0045: `ferund` as a DNS-01 client for the zones' wildcards, with a DNS credential per provider; the operator's issuer provides them.
-- ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: ADR 0030 proposes DNS-01 through a CNAME of `_acme-challenge.<name>` into a zone of the platform's.
+- ADR 0045: zones of a tenant's own, and a zone a tenant verified with one record that lets it claim every name below it.
+- ADR 0045: `ferund` as the DNS-01 client for the zones' wildcards too, through the ACME zone's delegation; the operator's issuer provides them.
+- ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: ADR 0030 proposes the wildcards' delegated DNS-01 for a name too.
+- ADR 0045: a wildcard's certificate before its name points here, which DNS-01 allows, so that a wildcard moves without a gap.
 - ADR 0045: certificates a tenant brings, for a domain whose CA is not Let's Encrypt.
 - ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a tenant wants a cap on its certificates.
 - ADR 0045: a Public Suffix List entry for the apps zone, an operator's action, so that a page's script cannot set a cookie for the zone.

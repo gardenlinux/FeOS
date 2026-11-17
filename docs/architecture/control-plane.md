@@ -76,6 +76,9 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--acme-directory` | none | the ACME directory, an https URL (`https://acme-v02.api.letsencrypt.org/directory`), from which the domains' certificates are obtained ([Certificates of domains](#certificates-of-domains)); its terms of service are agreed to. Empty: none is obtained, and domains stay `issuing`. Needs `--secret-key-file`, which seals the keys |
 | `--acme-email` | none | the contact of the platform's ACME account, an email address; changing it updates the account |
 | `--acme-profile` | `shortlived` | the certificate profile the orders ask for (ACME profiles), one the directory lists: Let's Encrypt's `shortlived` is six days (160 hours), `classic` 90 days; empty: the CA's default. A profile the directory does not list fails every order |
+| `--acme-zone` | empty | the platform's ACME zone ([ADR 0045](../adr/0045-hosts-domains-and-certificates.md)), such as `acme.fecore.dev`: a zone of its own, delegated by NS records, with a short negative TTL. A wildcard domain `*.<name>` delegates `_acme-challenge.<name>` with a CNAME to `<token>.<zone>`, where ferund writes its DNS-01 records ([Certificates of domains](#certificates-of-domains)). Empty: no wildcard can be claimed. Needs `--acme-directory`; the zone is reserved |
+| `--acme-zone-provider` | `route53` | the ACME zone's DNS provider: `route53`, with the process's credentials, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` or an EKS Pod Identity, which need `route53:ChangeResourceRecordSets` on the zone alone |
+| `--acme-zone-route53-id` | none | the ACME zone's hosted zone ID in Route 53 (`Z…`); required with `route53` |
 | `--deny-prefix` | a built-in set | a destination that preflights, bindings and the image resolver may not reach, repeatable; a set given replaces the built-in one, and `default` stands for it (`default,100.144.0.0/13` adds a network) |
 | `--admin-users` | none | `user:password,...` for the admin API: Basic, beside or instead of OIDC |
 | `--public-url` | none | the front door's external URL, e.g. `https://run.fecode.dev`; required with `--oidc-issuer` |
@@ -168,7 +171,8 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `env`, `env/spec`, `env/addons`, `env/ctl`, `env/envdeps` | the environments ([Environments](#environments)) |
 | `ingress/service`, `ingress/table` | ferund's side of the ingress: the API `ferun-ingress` calls, its identity, the table it serves from ([The ingress](#the-ingress)) |
 | `domains` | tenants' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
-| `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table ([Certificates of domains](#certificates-of-domains)) |
+| `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table, a wildcard's over DNS-01 in the ACME zone ([Certificates of domains](#certificates-of-domains)) |
+| `route53`, `awsauth` | the ACME zone's first DNS provider: Route 53's ChangeResourceRecordSets, signed with SigV4 by `awsauth` from static keys or an EKS Pod Identity |
 | `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path matching, which the route door uses too |
 | `visits` | the tenants' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
 | `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
@@ -4180,6 +4184,25 @@ their claims, checks and states, are the domains core's; ACME owns
   CSR of a new ECDSA P-256 key, and the chain checked: for the name, for
   the key. Requests to the CA are retried 3 times (a bad nonce, a 5xx),
   never on a rate limit.
+- **A wildcard's order** ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md#certificates-ferund-is-the-acme-client))
+  is for `*.<name>` alone, over its authorization's `dns-01` challenge:
+  the record goes to the claim's target, `<token>.<--acme-zone>`,
+  through `--acme-zone-provider` (an UPSERT of one TXT record, TTL 60 s),
+  is accepted only once every server of the ACME zone answers it (its NS
+  records and their addresses through the recursive resolver, then each
+  address, IPv4 ones when there are any, asked itself; every 5 s, at most
+  3 minutes), and is deleted when the order ends, however it ends. The
+  CA follows the tenant's CNAME of `_acme-challenge.<name>` there. No
+  ingress instance is asked and no `acme_challenges` row kept. Its
+  failures: "the platform has no ACME zone (--acme-zone) …", "the CA
+  offers no DNS-01 challenge …", "write the DNS-01 record <target> in
+  the ACME zone: …", "the servers … of the ACME zone did not answer the
+  DNS-01 record <target> within 3m0s", "the CA's DNS-01 challenge for
+  <name> failed: …". A wildcard whose delegation is wrong is not routed
+  and so not ordered or renewed. A record a crash left behind is
+  replaced by the next order of its claim. Pebble accepts DNS-01 without
+  asking DNS too, so the tests fake the zone and its servers.
 - **Success** keeps the chain (DER, leaf first) and the key (PKCS #8,
   sealed with `domain-cert:<domain id>`) in `domain_certs`, replacing
   the one before, with `renew_after` at half the certificate's lifetime
@@ -4223,7 +4246,11 @@ their claims, checks and states, are the domains core's; ACME owns
   verified, bound to a public environment of its tenant, its
   certificate's `not_after` ahead) as one more host of its environment
   with its chain and key, and every pending challenge to every
-  instance ([ingress.md](ingress.md#what-it-holds)).
+  instance ([ingress.md](ingress.md#what-it-holds)). A wildcard's host
+  is `*.<name>`, after the names; it retires no default host. The
+  ingress looks a request's host up as it is, then as `*.` and its
+  parent, and the certificate by SNI the same way, so that a name's own
+  domain wins over a wildcard.
 - **Tests** run against Pebble, Let's Encrypt's test CA, in docker
   (`hack/go/with-pebble`), not a CA of the tests' own. Pebble accepts a
   challenge without fetching it, so the tests check that every instance's
@@ -4273,7 +4300,7 @@ by UUID or name.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/domains` `{name, labels?}` | 201 the domain; 400 `invalid_name`; 422 `reserved`; 409 `too_many_unverified`, `domains_off` |
+| `POST /api/v1/domains` `{name, labels?}` | 201 the domain; 400 `invalid_name`; 422 `reserved`; 409 `too_many_unverified`, `domains_off`, `wildcards_off` (a wildcard without `--acme-zone`) |
 | `GET /api/v1/domains?environment=<env>&label=k=v` | `{domains: [...]}`, oldest first, the labels ANDed; 404 "no such environment" |
 | `GET /api/v1/domains/{id}` | the domain |
 | `PUT /api/v1/domains/{id}/environment` `{environment}` | the domain, bound or moved; 400 without `environment`; 404 "no such environment"; 409 "environment X is being deleted"; 409 `superseded` |
@@ -4283,11 +4310,18 @@ by UUID or name.
 
 - **A claim.** The name is trimmed, lowercased, loses one trailing dot,
   and must be a host name of ASCII letters, digits and hyphens of at
-  least two labels whose last begins with a letter: no wildcard, no
-  address; an internationalized name is given as its A-label, and one in
-  Unicode is refused with that hint. The apps zone, the tenant zone, `--edge-name` and
-  every `--domain-reserved` zone, and every name under them, are
-  reserved. Any number of claims may name one name, of one tenant or of
+  least two labels whose last begins with a letter: no address; an
+  internationalized name is given as its A-label, and one in Unicode is
+  refused with that hint. A **wildcard** is `*.<name>`, the `*` the whole
+  first label and `<name>` such a name ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md#a-wildcard-is-a-domain-of-its-own)):
+  it serves every name one label below `<name>`, not `<name>`, which is a
+  claim of its own; its TXT record stands at
+  `<--domain-challenge-label>.<name>`, beside those of claims of
+  `<name>`. It needs `--acme-zone`. The apps zone, the tenant zone,
+  `--edge-name`, `--acme-zone` and every `--domain-reserved` zone, and
+  every name under them, are reserved, and so is a wildcard whose
+  `<name>` is or whose `*` would stand for one of them. Any number of claims may name one name, of one tenant or of
   several; a tenant holds at most `--domain-unverified-max` claims that
   are not verified (unverified, lapsed or superseded), counted under its
   row's lock. The token is 32 characters of lowercase base32 from 160
@@ -4302,9 +4336,13 @@ by UUID or name.
   `name` and `value`, the `cname` to set, the edge's `addresses`: what
   `--edge-name` resolves to plus every `--edge-address`; `apex`, always
   null, since ferund does not look up a name's zone and the owner picks
-  the CNAME or the addresses), `found` (what the last answer showed:
+  the CNAME or the addresses; `delegation`, a wildcard's CNAME `{name,
+  value}`, `_acme-challenge.<name>` to `<token>.<--acme-zone>`, null for
+  a name), `wildcard`, `found` (what the last answer showed:
   `txt`, `cname`, the canonical name when it differs from the name, for
-  information only, and `addresses`), `warnings` (`recordMissingSince`,
+  information only, `addresses`, a wildcard's of a fresh name below it,
+  and `delegation`, a wildcard's CNAME chain of its `_acme-challenge`
+  name), `warnings` (`recordMissingSince`,
   `dnsMovedSince`, `deactivatesAt`, the earlier of the two plus the grace,
   `checkFailing`, the last lookup's error, and `certificateFailing`, the
   last order's error while the domain has a certificate),
@@ -4378,6 +4416,14 @@ state without a write: `domains-settle` catches it.
   routed now starts its routing grace (`dns_moved_since`) when it is
   verified; routed again ends it; at the grace's end it is `inactive`,
   and stays verified and bound.
+- **A wildcard's routing** is two records: a fresh name below it, 16
+  random characters of lowercase base32 and a check's own, resolves to
+  the edge alone, and the CNAME chain of `_acme-challenge.<name>`, each
+  link asked at its zone's servers, reaches `<token>.<--acme-zone>`
+  (`delegated`). Both right is `routed`, and the grace and the states are
+  a name's; either lookup failing changes nothing. The reasons and the
+  incidents name the record that is wrong: the delegation while the last
+  answer did not show it, else the names below.
 - **Incidents** on the bound environment, object `domain/<name>`, on its
   latest deployment: `domain_record_wrong` when a grace starts (which record
   since when, and `deactivatesAt`; one incident for both records, its

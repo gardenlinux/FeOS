@@ -13,7 +13,9 @@
 #                     issuer.json, bundle.crt (never root.key)
 #   ferund-postgres   password: PostgreSQL's
 #   ferund            FERUN_DATABASE_URL, FERUN_ADMIN_USERS,
-#                     FERUN_BOOTSTRAP_TOKEN
+#                     FERUN_BOOTSTRAP_TOKEN; with an ACME zone in Route
+#                     53 (ADR 0045), AWS_ACCESS_KEY_ID and
+#                     AWS_SECRET_ACCESS_KEY
 #   ferund-secret-key key: seals secrets at rest (ADR 0018)
 #   oidc-client-ferun client_id, client_secret: ferund's client at the
 #                     OpenID Connect provider

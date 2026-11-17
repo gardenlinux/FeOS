@@ -26,9 +26,13 @@ type DNS interface {
 
 // Query is one check's question.
 type Query struct {
-	// Name is the domain's name; TXTName the name of its TXT record,
-	// <label>.<name>.
+	// Name is the name whose addresses route the domain: the domain's
+	// name, or for a wildcard a fresh name below it; TXTName the name of
+	// its TXT record, <label>.<name>.
 	Name, TXTName string
+	// Delegation is a wildcard's _acme-challenge.<name>, whose CNAME
+	// chain is asked too; "" for a name.
+	Delegation string
 }
 
 // Answer is what one check's lookups found. A part whose lookup failed
@@ -45,6 +49,10 @@ type Answer struct {
 	Addresses []netip.Addr
 	CNAME     []string
 	RouteErr  error
+	// Delegation is the CNAME chain of the query's Delegation, each
+	// asked at its zone's servers; empty when it has no CNAME.
+	Delegation    []string
+	DelegationErr error
 }
 
 // Resolver is the DNS of the checks, on Go's own resolver (net.Resolver
@@ -94,12 +102,17 @@ func notFound(err error) bool {
 }
 
 // Lookup answers q at the servers of the zones that hold its names: the
-// TXT record, and the addresses Name ends in through its CNAMEs, which it
-// lists.
+// TXT record, the addresses Name ends in through its CNAMEs, which it
+// lists, and a wildcard's delegation: the CNAMEs of q.Delegation.
 func (r *Resolver) Lookup(ctx context.Context, q Query) Answer {
 	var a Answer
 	a.TXT, a.TXTErr = r.txt(ctx, q.TXTName)
 	a.Addresses, a.CNAME, a.RouteErr = r.route(ctx, q.Name)
+	if q.Delegation != "" {
+		// Where the chain ends need not exist: the ACME zone holds a
+		// record at a target only while an order runs.
+		_, a.Delegation, a.DelegationErr = r.route(ctx, q.Delegation)
+	}
 	return a
 }
 

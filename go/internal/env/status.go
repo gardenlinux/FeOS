@@ -15,6 +15,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -170,10 +171,11 @@ func instanceStatus(row store.EnvInstanceRow) InstanceStatus {
 
 // routesOf are a spec's routes by name, their ports resolved, each with
 // its door: the ingress serves a route to an image service at the first
-// of hosts (the environment's hosts, hostsOf), the route door alone every
-// other route.
+// of hosts (the environment's hosts, hostsOf) that is an address, not a
+// wildcard, the route door alone every other route.
 func routesOf(sp *spec.Spec, hosts []string) []RouteStatus {
 	out := []RouteStatus{}
+	hosts = slices.DeleteFunc(slices.Clone(hosts), routing.IsWildcard)
 	for _, name := range slices.Sorted(maps.Keys(sp.Routes)) {
 		r := sp.Routes[name]
 		target, ok := sp.Services[r.Service]
@@ -188,22 +190,22 @@ func routesOf(sp *spec.Spec, hosts []string) []RouteStatus {
 }
 
 // hostsOf are the hosts the ingress serves environment e at while it is
-// public: domains, the names of its served domains in the order they were
-// bound, else its default host under zone (none without a zone); none
-// while it is not public or is being deleted, which the ingress no longer
-// serves. An environment on a domain of its own is not served at its
-// default host (ADR 0021).
+// public: the names of its served domains in the order they were bound,
+// else its default host under zone (none without a zone), and after them
+// its served wildcard domains, which are no address and retire no
+// default host (ADR 0045); none while it is not public or is being
+// deleted, which the ingress no longer serves. An environment on a domain
+// of its own is not served at its default host (ADR 0021).
 func hostsOf(e store.Environment, zone string, domains []string) []string {
 	if !e.Public || e.Deleting {
 		return []string{}
 	}
-	if len(domains) > 0 {
-		return slices.Clone(domains)
+	names := slices.DeleteFunc(slices.Clone(domains), routing.IsWildcard)
+	wildcards := slices.DeleteFunc(slices.Clone(domains), func(d string) bool { return !routing.IsWildcard(d) })
+	if len(names) == 0 && zone != "" && e.HostLabel != "" {
+		names = []string{e.HostLabel + "." + zone}
 	}
-	if zone == "" || e.HostLabel == "" {
-		return []string{}
-	}
-	return []string{e.HostLabel + "." + zone}
+	return append(names, wildcards...)
 }
 
 // hosts are e's hosts (Hosts).

@@ -145,8 +145,9 @@ TABLE domains
   COLUMN issue_error text NOT NULL DEFAULT ''::text
   COLUMN issue_failing_since timestamp with time zone
   COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN delegated boolean NOT NULL DEFAULT false
   CONSTRAINT CHECK (((env_id IS NULL) OR (bound_at IS NOT NULL)))
-  CONSTRAINT CHECK (((name ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'::text) AND (length(name) <= 253)))
+  CONSTRAINT CHECK (((name ~ '^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'::text) AND (length(name) <= 253)))
   CONSTRAINT CHECK (((verification <> 'verified'::text) OR (verified_at IS NOT NULL)))
   CONSTRAINT CHECK ((check_backoff_s > 0))
   CONSTRAINT CHECK ((issue_backoff_s >= 0))

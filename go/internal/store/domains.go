@@ -33,11 +33,14 @@ const (
 )
 
 // DomainFound is what a domain's last answer showed (domains.found): the
-// TXT strings at its challenge name, its CNAME chain and its addresses.
+// TXT strings at its challenge name, its CNAME chain and its addresses
+// (a wildcard's: those of a name below it), and a wildcard's delegation,
+// the CNAME chain of _acme-challenge.<name> (ADR 0045).
 type DomainFound struct {
-	TXT       []string `json:"txt"`
-	CNAME     []string `json:"cname"`
-	Addresses []string `json:"addresses"`
+	TXT        []string `json:"txt"`
+	CNAME      []string `json:"cname"`
+	Addresses  []string `json:"addresses"`
+	Delegation []string `json:"delegation,omitempty"`
 }
 
 // Domain is a row of domains. Zero times and uuid.Nil are NULL.
@@ -65,8 +68,12 @@ type Domain struct {
 	CheckFailingSince time.Time
 	// (The column apex is read and written by nothing: ferund does not
 	// look up a name's zone.)
-	Found                             DomainFound
-	Routed, WasRouted                 bool
+	Found             DomainFound
+	Routed, WasRouted bool
+	// Delegated: a wildcard's last answer showed its delegation, the
+	// CNAME of _acme-challenge.<name> to its target (ADR 0045); Routed
+	// holds it too. Always false for a name.
+	Delegated                         bool
 	RecordMissingSince, DNSMovedSince time.Time
 
 	State, Reason string
@@ -77,7 +84,7 @@ type Domain struct {
 func domainColumns(p string) string {
 	return prefixed(p, []string{"id", "owner", "name", "labels", "token", "created_at", "env_id", "bound_at",
 		"verification", "verified_at", "superseded_by", "next_check_at", "check_backoff_s", "checked_at", "check_error",
-		"check_failing_since", "found", "routed", "was_routed", "record_missing_since", "dns_moved_since",
+		"check_failing_since", "found", "routed", "was_routed", "delegated", "record_missing_since", "dns_moved_since",
 		"state", "reason"})
 }
 
@@ -94,7 +101,7 @@ type domainScan struct {
 func (d *Domain) targets(sc *domainScan) []any {
 	return []any{&d.ID, &d.Owner, &d.Name, &d.Labels, &d.Token, &d.CreatedAt, &sc.env, &sc.bound,
 		&d.Verification, &sc.verified, &sc.supersededBy, &d.NextCheckAt, &d.CheckBackoffS, &sc.checked, &d.CheckError,
-		&sc.failing, &sc.found, &d.Routed, &d.WasRouted, &sc.missing, &sc.moved,
+		&sc.failing, &sc.found, &d.Routed, &d.WasRouted, &d.Delegated, &sc.missing, &sc.moved,
 		&d.State, &d.Reason}
 }
 
@@ -114,14 +121,20 @@ func (d *Domain) finish(sc *domainScan) error {
 	return nil
 }
 
-// nonNil returns f with empty lists for nil ones.
+// nonNil returns f with empty lists for nil ones; Delegation stays nil
+// when it is empty, which a name that is not a wildcard has.
 func (f DomainFound) nonNil() DomainFound {
-	return DomainFound{TXT: nonNil(f.TXT), CNAME: nonNil(f.CNAME), Addresses: nonNil(f.Addresses)}
+	out := DomainFound{TXT: nonNil(f.TXT), CNAME: nonNil(f.CNAME), Addresses: nonNil(f.Addresses)}
+	if len(f.Delegation) > 0 {
+		out.Delegation = f.Delegation
+	}
+	return out
 }
 
 // Equal reports whether f and g show the same.
 func (f DomainFound) Equal(g DomainFound) bool {
-	return slices.Equal(f.TXT, g.TXT) && slices.Equal(f.CNAME, g.CNAME) && slices.Equal(f.Addresses, g.Addresses)
+	return slices.Equal(f.TXT, g.TXT) && slices.Equal(f.CNAME, g.CNAME) && slices.Equal(f.Addresses, g.Addresses) &&
+		slices.Equal(f.Delegation, g.Delegation)
 }
 
 func scanDomain(row pgx.Row) (Domain, error) {
@@ -354,7 +367,7 @@ func (s *Store) ClaimDueDomains(ctx context.Context, limit int, lease time.Durat
 // UpdateDomain writes the columns the core owns in which after differs
 // from before, the row as the caller read it under its lock: env_id,
 // bound_at, verification, verified_at, superseded_by, the checks'
-// columns, the graces, state and reason. id, owner, name, labels, token,
+// columns (delegated among them), the graces, state and reason. id, owner, name, labels, token,
 // created_at are never written. When
 // nothing differs, before is returned unwritten. A change of the binding
 // or the state sends ferun_ingress "env:<id>" for the environment before
@@ -382,6 +395,7 @@ func (s *Store) UpdateDomain(ctx context.Context, before, after Domain) (Domain,
 	}
 	u.set("routed", before.Routed != after.Routed, after.Routed)
 	u.set("was_routed", before.WasRouted != after.WasRouted, after.WasRouted)
+	u.set("delegated", before.Delegated != after.Delegated, after.Delegated)
 	u.set("record_missing_since", !before.RecordMissingSince.Equal(after.RecordMissingSince), nullTime(after.RecordMissingSince))
 	u.set("dns_moved_since", !before.DNSMovedSince.Equal(after.DNSMovedSince), nullTime(after.DNSMovedSince))
 	u.set("state", before.State != after.State, after.State)

@@ -49,6 +49,14 @@ const STATE_WORDS = {
   issuing: 'ordering its certificate',
 };
 
+// DELEGATION_WORDS say a wildcard's routing state when its delegation is
+// what is wrong.
+const DELEGATION_WORDS = {
+  inactive: 'deactivated: its delegation is wrong',
+  'dns-moved': 'delegation wrong; served until the grace ends',
+  'waiting-for-dns': 'waiting for its delegation',
+};
+
 function ms(iso) {
   const t = Date.parse(iso || '');
   return Number.isNaN(t) ? null : t;
@@ -57,6 +65,8 @@ function ms(iso) {
 // stateWords says a domain's state in a few words.
 export function stateWords(d) {
   if (d.state === 'unpublished' && d.reason === REASON_ENV_DELETING) return 'its environment is being deleted';
+  const dg = delegation(d);
+  if (dg && !dg.ok && d.state in DELEGATION_WORDS && routing(d).ok) return DELEGATION_WORDS[d.state];
   return d.state in STATE_WORDS ? STATE_WORDS[d.state] : (d.state || 'unknown');
 }
 
@@ -105,12 +115,27 @@ export function routing(d) {
   return { ok, shows, chain, addresses: addrs };
 }
 
-// dnsNow is the records table's "DNS says now" of the TXT and the
-// routing record: {ok: true|false|null (not looked up yet), text}.
+// delegation is what DNS says now of a wildcard's delegation (ADR 0045):
+// whether the CNAME chain of its _acme-challenge name reaches its target
+// in the platform's ACME zone, and what it shows; null for a name.
+export function delegation(d) {
+  const rec = d.records || {};
+  if (!d.wildcard || !rec.delegation) return null;
+  const chain = (d.found || {}).delegation || [];
+  return { ok: chain.includes(rec.delegation.value), shows: chain.length ? 'CNAME ' + chain.join(' → ') : '', chain };
+}
+
+// dnsNow is the records table's "DNS says now" of the TXT, the routing
+// record and a wildcard's delegation: {ok: true|false|null (not looked up
+// yet), text}; delegation is null for a name.
 export function dnsNow(d) {
   const rec = d.records || {};
   const found = d.found || {};
-  if (!d.checkedAt) return { txt: { ok: null, text: 'not checked yet' }, route: { ok: null, text: 'not checked yet' } };
+  const dg = delegation(d);
+  if (!d.checkedAt) {
+    const none = { ok: null, text: 'not checked yet' };
+    return { txt: none, route: none, delegation: dg && none };
+  }
   const txts = found.txt || [];
   let txt;
   if (rec.txt && txts.includes(rec.txt.value)) txt = { ok: true, text: 'found' };
@@ -119,7 +144,8 @@ export function dnsNow(d) {
   const r = routing(d);
   const route = r.ok ? { ok: true, text: r.shows ? r.shows.replace(/^CNAME /, '') : 'the edge' }
     : { ok: false, text: r.shows || 'nothing' };
-  return { txt, route };
+  const del = dg && (dg.ok ? { ok: true, text: dg.chain.join(' → ') } : { ok: false, text: dg.shows || 'nothing' });
+  return { txt, route, delegation: del };
 }
 
 // STEPS are the stations of a domain, in the order it passes them.
@@ -144,7 +170,10 @@ export function domainSteps(d, envName = '', now = Date.now()) {
   const env = envName || 'its environment';
   const bound = !!d.environment;
   const r = routing(d);
+  const dg = delegation(d);
+  const routedOK = r.ok && (!dg || dg.ok);
   const cert = certValid(d, now);
+  const challenge = d.wildcard ? 'DNS-01' : 'HTTP-01';
 
   set('claimed', 'done', 'token issued');
 
@@ -166,25 +195,29 @@ export function domainSteps(d, envName = '', now = Date.now()) {
   // routed, certificate, served: only past the binding
   const past = ['inactive', 'dns-moved', 'waiting-for-dns', 'served', 'failed', 'issuing'].includes(st);
   if (!past) {
-    set('routed', r.ok && st !== 'superseded' ? 'done' : 'todo', r.ok && st !== 'superseded' ? 'points to the edge' : 'to the edge');
+    set('routed', routedOK && st !== 'superseded' ? 'done' : 'todo', routedOK && st !== 'superseded' ? 'points to the edge' : 'to the edge');
     set('certificate', 'todo', 'orders once routed');
     set('served', 'todo', 'at the ingress');
   } else if (st === 'inactive') {
-    set('routed', 'bad', 'resolved elsewhere past the grace');
+    set('routed', 'bad', dg && !dg.ok ? 'delegation wrong past the grace' : 'resolved elsewhere past the grace');
     set('certificate', cert ? 'done' : 'todo', cert ? 'valid, not renewed' : 'orders once routed');
     set('served', 'todo', 'no longer');
   } else if (st === 'dns-moved') {
-    set('routed', 'warn', r.shows ? `resolves to ${r.shows}` : 'resolves elsewhere');
+    if (dg && !dg.ok) set('routed', 'warn', 'delegation wrong');
+    else set('routed', 'warn', r.shows ? `resolves to ${r.shows}` : 'resolves elsewhere');
     set('certificate', 'warn', 'valid, not renewed');
     set('served', 'done', 'until the grace ends');
   } else if (st === 'waiting-for-dns') {
-    set('routed', 'warn', r.chain.length ? `CNAME points to ${r.chain[r.chain.length - 1]}`
-      : r.addresses.length ? `resolves to ${r.addresses.join(', ')}` : 'no record yet');
+    if (r.ok && dg && !dg.ok) set('routed', 'warn', dg.chain.length ? `delegation points to ${dg.chain[dg.chain.length - 1]}` : 'no delegation yet');
+    else {
+      set('routed', 'warn', r.chain.length ? `CNAME points to ${r.chain[r.chain.length - 1]}`
+        : r.addresses.length ? `resolves to ${r.addresses.join(', ')}` : 'no record yet');
+    }
     set('certificate', cert ? 'done' : 'todo', cert ? 'valid' : 'orders once routed');
     set('served', 'todo', 'at the ingress');
   } else {
     set('routed', 'done', 'points to the edge');
-    if (st === 'issuing') set('certificate', 'wait', 'ordering (HTTP-01)');
+    if (st === 'issuing') set('certificate', 'wait', `ordering (${challenge})`);
     else if (st === 'failed') set('certificate', 'bad', 'order failed');
     else if (w.certificateFailing) set('certificate', 'warn', 'renewal failing');
     else set('certificate', 'done', 'valid, renewed automatically');
@@ -203,13 +236,18 @@ export function callout(d, envName = '', now = Date.now()) {
   const txt = rec.txt || {};
   const env = envName || 'its environment';
   const r = routing(d);
+  const dg = delegation(d);
+  const del = rec.delegation || {};
+  const delWrong = !!dg && !dg.ok;
+  const setDelegation = `Set the CNAME ${del.name} to ${del.value}: FeRun answers the certificate's DNS-01 challenge there.`;
   const deact = ms(w.deactivatesAt);
   const graceLeft = deact !== null && deact > now ? `The grace ends ${inWords(deact - now)}, then ${graceEnd(w)}.` : '';
   const next = ms(d.nextCheckAt);
   const nextCheck = next !== null ? (next > now ? `FeRun looks again ${inWords(next - now)}.` : 'FeRun looks again now.') : '';
   const out = (tone, ...parts) => {
     if (w.checkFailing) parts.push(`The last lookup failed: ${w.checkFailing}; what it found before stays.`);
-    const mono = [d.name, txt.name, txt.value, rec.cname, envName, ...r.chain, ...r.addresses].filter(Boolean);
+    const mono = [d.name, txt.name, txt.value, rec.cname, del.name, del.value, envName, ...r.chain, ...r.addresses,
+      ...(dg ? dg.chain : [])].filter(Boolean);
     return { tone, text: parts.filter(Boolean).join(' '), mono: [...new Set(mono)] };
   };
   switch (d.state) {
@@ -226,12 +264,21 @@ export function callout(d, envName = '', now = Date.now()) {
       if (d.reason === REASON_ENV_DELETING) return out('info', `${env} is being deleted; its domains are unbound with it.`);
       return out('info', `${env} is not public, so ${d.name} is not served. Publish the environment to serve it.`);
     case 'inactive':
+      if (delWrong) return out('bad', `The delegation of ${d.name} was wrong for longer than the grace; it is no longer served.`, setDelegation);
       return out('bad', `${d.name} resolved elsewhere than the edge for longer than the grace; it is no longer served.`,
         `Point it to the edge again: a CNAME to ${rec.cname}.`);
     case 'dns-moved':
+      if (delWrong) {
+        return out('warn', `The delegation of ${d.name} is wrong${w.dnsMovedSince ? ' since ' + fmtDate(w.dnsMovedSince) : ''}.`,
+          'It is served with its certificate until the grace ends, and its certificate is not renewed meanwhile.', setDelegation, graceLeft);
+      }
       return out('warn', `${d.name} resolves ${r.shows ? 'to ' + r.shows : 'elsewhere'}${w.dnsMovedSince ? ' since ' + fmtDate(w.dnsMovedSince) : ''}, not to the edge.`,
         'It is served with its certificate until the grace ends, and its certificate is not renewed meanwhile.', graceLeft);
     case 'waiting-for-dns': {
+      if (r.ok && delWrong) {
+        return out('warn', `The names below ${d.name} point to the edge, but its delegation is ${dg.chain.length ? 'wrong' : 'not there yet'}.`,
+          setDelegation, graceLeft || nextCheck);
+      }
       const shows = r.shows ? (r.chain.length ? `The CNAME of ${d.name} points to ${r.chain[r.chain.length - 1]}` : `${d.name} resolves to ${r.shows}`)
         : `${d.name} does not resolve yet`;
       return out('warn', `${shows}${w.dnsMovedSince ? ' since ' + fmtDate(w.dnsMovedSince) : ''}.`,

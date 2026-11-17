@@ -139,6 +139,14 @@ patches:
                     value: '${ACME_EMAIL}'
                   - name: FERUN_ACME_PROFILE
                     value: '${ACME_PROFILE}'
+                  # The ACME zone (ADR 0045), where ferund answers wildcard
+                  # domains' DNS-01 through Route 53; empty, no wildcard can
+                  # be claimed. Its credential, AWS_ACCESS_KEY_ID and
+                  # AWS_SECRET_ACCESS_KEY, is in the Secret ferund.
+                  - name: FERUN_ACME_ZONE
+                    value: '${ACME_ZONE}'
+                  - name: FERUN_ACME_ZONE_ROUTE53_ID
+                    value: '${ACME_ZONE_ROUTE53_ID}'
                   # ferun-auth (../ferun-auth, ADR 0054), where a visitor of
                   # a provider of kind ferun or oidc signs in:
                   # https://<AUTH_HOST>, set once ferun-auth runs. Empty,

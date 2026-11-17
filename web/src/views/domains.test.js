@@ -189,9 +189,10 @@ describe('routing and dnsNow', () => {
   });
 
   it('says what DNS shows now, or that it was not checked', () => {
-    expect(dnsNow(domain())).toEqual({ txt: { ok: true, text: 'found' }, route: { ok: true, text: 'edge.run.example.com' } });
+    expect(dnsNow(domain())).toEqual({ txt: { ok: true, text: 'found' }, route: { ok: true, text: 'edge.run.example.com' },
+      delegation: null });
     expect(dnsNow(domain({ found: { txt: ['other'], cname: [], addresses: [] } })))
-      .toEqual({ txt: { ok: false, text: 'other: other' }, route: { ok: false, text: 'nothing' } });
+      .toEqual({ txt: { ok: false, text: 'other: other' }, route: { ok: false, text: 'nothing' }, delegation: null });
     expect(dnsNow(domain({ checkedAt: null })).txt.ok).toBeNull();
   });
 });
@@ -246,5 +247,48 @@ describe('monoSplit', () => {
     ]);
     expect(monoSplit('prod is not product', ['prod']).filter((p) => p.mono)).toEqual([{ text: 'prod', mono: true }]);
     expect(monoSplit('plain', [])).toEqual([{ text: 'plain', mono: false }]);
+  });
+});
+
+// A wildcard (ADR 0045) as the answer has it: three records, the third
+// its delegation into the platform's ACME zone.
+function wildcard(o = {}) {
+  const target = `${TOKEN}.acme.run.example.com`;
+  const { found, ...rest } = o;
+  const d = domain({ name: '*.boxed.example.com', wildcard: true, ...rest });
+  d.records = { ...d.records, txt: { name: '_ferun-challenge.boxed.example.com', value: TOKEN },
+    delegation: { name: '_acme-challenge.boxed.example.com', value: target } };
+  d.found = { ...d.found, delegation: [target], ...(found || {}) };
+  return d;
+}
+
+describe('wildcards', () => {
+  it('says what DNS shows of the delegation', () => {
+    expect(dnsNow(wildcard()).delegation).toEqual({ ok: true, text: `${TOKEN}.acme.run.example.com` });
+    expect(dnsNow(wildcard({ found: { delegation: ['other.example'] } })).delegation).toEqual({ ok: false, text: 'CNAME other.example' });
+    expect(dnsNow(wildcard({ found: { delegation: [] } })).delegation).toEqual({ ok: false, text: 'nothing' });
+    expect(dnsNow(domain()).delegation).toBeNull();
+  });
+
+  it('waits at routed for its delegation and names the CNAME to set', () => {
+    const d = wildcard({ state: 'waiting-for-dns', certificate: null, found: { delegation: [] } });
+    expect(status(d).routed).toBe('warn');
+    expect(subs(d).routed).toBe('no delegation yet');
+    expect(stateWords(d)).toBe('waiting for its delegation');
+    const c = callout(d, 'prod', NOW);
+    expect(c.text).toContain('Set the CNAME _acme-challenge.boxed.example.com to ' + TOKEN + '.acme.run.example.com');
+    expect(c.mono).toContain('_acme-challenge.boxed.example.com');
+  });
+
+  it('orders over DNS-01', () => {
+    expect(subs(wildcard({ state: 'issuing', certificate: null })).certificate).toBe('ordering (DNS-01)');
+    expect(subs(domain({ state: 'issuing', certificate: null })).certificate).toBe('ordering (HTTP-01)');
+  });
+
+  it('is deactivated for a wrong delegation', () => {
+    const d = wildcard({ state: 'inactive', found: { delegation: ['other.example'] } });
+    expect(subs(d).routed).toBe('delegation wrong past the grace');
+    expect(stateWords(d)).toBe('deactivated: its delegation is wrong');
+    expect(callout(d, 'prod', NOW).text).toContain('The delegation of *.boxed.example.com was wrong');
   });
 });

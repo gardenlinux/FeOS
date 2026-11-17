@@ -729,3 +729,33 @@ func TestVisitorAuthURL(t *testing.T) {
 		t.Errorf("serve help lacks the setting")
 	}
 }
+
+// --acme-zone (ADR 0045): empty by default, which claims no wildcard;
+// a DNS name with --acme-directory and the provider's settings, Route 53
+// by default with its hosted zone.
+func TestACMEZone(t *testing.T) {
+	t.Parallel()
+	base := []string{"--database-url", testURL, "--secret-key-file", "/k", "--acme-directory", "https://acme.example/dir"}
+	c, err := Parse(base, env(nil))
+	if err != nil || c.ACMEZone != "" || c.ACMEZoneProvider != ACMEZoneRoute53 {
+		t.Fatalf("default %q %q, %v", c.ACMEZone, c.ACMEZoneProvider, err)
+	}
+	c, err = Parse(base, env(map[string]string{"FERUN_ACME_ZONE": "acme.fecore.dev", "FERUN_ACME_ZONE_ROUTE53_ID": "Z0ACME"}))
+	if err != nil || c.ACMEZone != "acme.fecore.dev" || c.ACMEZoneRoute53ID != "Z0ACME" {
+		t.Fatalf("from the variables %q %q, %v", c.ACMEZone, c.ACMEZoneRoute53ID, err)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--database-url", testURL, "--acme-zone", "acme.fecore.dev", "--acme-zone-route53-id", "Z1"}, "--acme-directory"},
+		{append(slices.Clone(base), "--acme-zone", "acme.fecore.dev"), "--acme-zone-route53-id"},
+		{append(slices.Clone(base), "--acme-zone", "acme.fecore.dev", "--acme-zone-route53-id", "Z1", "--acme-zone-provider", "bind"),
+			"--acme-zone-provider"},
+		{append(slices.Clone(base), "--acme-zone", "not a name", "--acme-zone-route53-id", "Z1"), "--acme-zone"},
+	} {
+		if _, err := Parse(c.args, env(nil)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%v: %v, want %s", c.args, err, c.want)
+		}
+	}
+}

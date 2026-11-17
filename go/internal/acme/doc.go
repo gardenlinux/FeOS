@@ -3,8 +3,9 @@
 
 // Package acme is ferund's ACME client (ADR 0021, "Certificates: ferund
 // is the ACME client"): it obtains and renews the certificates of
-// tenants' domains over HTTP-01, through the ingress's table, with
-// golang.org/x/crypto/acme.
+// tenants' domains over HTTP-01, through the ingress's table, and a
+// wildcard's over DNS-01 in the platform's ACME zone (ADR 0045,
+// dns01.go), with golang.org/x/crypto/acme.
 //
 // # Account
 //
@@ -51,6 +52,14 @@
 //     (a six-day certificate is renewed after three days, with three
 //     left for failures); the domain's failure is cleared, its challenges deleted,
 //     its incident certificate_failing closed, and the table notified.
+//
+// A wildcard's order (*.<name>) takes its authorization's dns-01
+// challenge instead: the record is written at the claim's target,
+// <token>.<--acme-zone>, through Deps.Zone (Route 53 first), accepted
+// once every server of the zone answers it (ZoneServers, at most
+// ZoneWait), and deleted when the order ends. Its owner's CNAME of
+// _acme-challenge.<name> leads the CA there; a wildcard whose delegation
+// is wrong is not routed, so not due.
 //
 // A failure records issue_error (readable: a CAA record that forbids the
 // CA, the CA's rate limit, the challenge's failure with the CA's

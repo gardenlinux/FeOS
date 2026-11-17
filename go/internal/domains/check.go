@@ -38,12 +38,15 @@ type result struct {
 	// txtOK: the TXT lookup answered, with txt.
 	txtOK bool
 	txt   []string
-	// routeOK: the routing lookup answered, and the name is routed or
-	// not.
-	routeOK bool
-	routed  bool
-	cname   []string
-	addrs   []string
+	// routeOK: the routing lookups answered, and the name is routed or
+	// not; a wildcard is routed when a name below it resolves to the edge
+	// and its delegation names its target (delegated).
+	routeOK    bool
+	routed     bool
+	delegated  bool
+	cname      []string
+	addrs      []string
+	delegation []string
 	// errText is the failed lookups' errors; "" when every one answered.
 	errText string
 }
@@ -52,8 +55,11 @@ type result struct {
 // has addresses and every one is an edge address, whether it gets them
 // through a CNAME, an ALIAS or A and AAAA records of its own. With no
 // edge address known, addresses decide nothing, and the routing lookup
-// counts as failed.
-func judge(a Answer, edgeName string, edge []netip.Addr) result {
+// counts as failed. target is a wildcard's delegation target
+// (<token>.<ACME zone>; "" for a name): a wildcard is routed when its
+// name below resolves to the edge and the CNAME chain of its delegation
+// reaches target, and its routing answered only when both lookups did.
+func judge(a Answer, edgeName string, edge []netip.Addr, target string) result {
 	var r result
 	var errs []string
 	if a.TXTErr == nil {
@@ -77,6 +83,16 @@ func judge(a Answer, edgeName string, edge []netip.Addr) result {
 			}
 		}
 	}
+	if target != "" {
+		if a.DelegationErr != nil {
+			errs = append(errs, "delegation: "+a.DelegationErr.Error())
+			r.routeOK, r.routed = false, false
+		} else {
+			r.delegation = nonNilStrings(a.Delegation)
+			r.delegated = slices.Contains(r.delegation, target)
+			r.routed = r.routed && r.delegated
+		}
+	}
 	if r.routeOK {
 		r.cname, r.addrs = nonNilStrings(a.CNAME), addrStrings(a.Addresses)
 	}
@@ -92,14 +108,24 @@ var errGone = errors.New("the domain is gone")
 // transaction of its own (record). manual is POST …/check's, which
 // resets an unverified claim's backoff; fenced writes as the leader.
 func (s *Service) check(ctx context.Context, d store.Domain, manual, fenced bool) error {
+	q := Query{Name: d.Name, TXTName: s.txtName(d.Name)}
+	target := ""
+	if IsWildcard(d.Name) {
+		probe, err := probeName(d.Name)
+		if err != nil {
+			return err
+		}
+		target = s.target(d.Token)
+		q.Name, q.Delegation = probe, s.delegationName(d.Name)
+	}
 	lctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	edge := s.edge.get(lctx, s.dns, s.cfg, s.log)
-	a := s.dns.Lookup(lctx, Query{Name: d.Name, TXTName: s.txtName(d.Name)})
+	a := s.dns.Lookup(lctx, q)
 	cancel()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	r := judge(a, s.cfg.EdgeName, edge)
+	r := judge(a, s.cfg.EdgeName, edge, target)
 	return s.record(ctx, d.ID, r, manual, fenced)
 }
 
@@ -167,6 +193,7 @@ func (s *Service) record(ctx context.Context, id uuid.UUID, r result, manual, fe
 		}
 		if r.routeOK {
 			decideRouting(d, r.routed, now)
+			d.Delegated = r.delegated
 		}
 		noteLookup(d, r, now)
 		return s.settleClaims(ctx, tx, c, id, manual, now)
@@ -264,7 +291,7 @@ func noteLookup(d *store.Domain, r result, now time.Time) {
 		d.Found.TXT = r.txt
 	}
 	if r.routeOK {
-		d.Found.CNAME, d.Found.Addresses = r.cname, r.addrs
+		d.Found.CNAME, d.Found.Addresses, d.Found.Delegation = r.cname, r.addrs, r.delegation
 	}
 	if r.txtOK || r.routeOK {
 		d.CheckedAt = now
@@ -320,7 +347,8 @@ func domainEqual(a, b store.Domain) bool {
 		a.VerifiedAt.Equal(b.VerifiedAt) && a.SupersededBy == b.SupersededBy && a.NextCheckAt.Equal(b.NextCheckAt) &&
 		a.CheckBackoffS == b.CheckBackoffS && a.CheckedAt.Equal(b.CheckedAt) && a.CheckError == b.CheckError &&
 		a.CheckFailingSince.Equal(b.CheckFailingSince) && a.Found.Equal(b.Found) &&
-		a.Routed == b.Routed && a.WasRouted == b.WasRouted && a.RecordMissingSince.Equal(b.RecordMissingSince) &&
+		a.Routed == b.Routed && a.WasRouted == b.WasRouted && a.Delegated == b.Delegated &&
+		a.RecordMissingSince.Equal(b.RecordMissingSince) &&
 		a.DNSMovedSince.Equal(b.DNSMovedSince) && a.State == b.State && a.Reason == b.Reason
 }
 
@@ -383,7 +411,8 @@ func (s *Service) settle(ctx context.Context, tx *store.Store, before, after sto
 	}
 	after.State, after.Reason = Derive(Facts{Verification: after.Verification, Bound: after.EnvID != uuid.Nil,
 		EnvPublic: env.env.Public, EnvDeleting: env.env.Deleting, DNSMovedSince: after.DNSMovedSince, Grace: s.cfg.Grace,
-		Now: now, Routed: after.Routed, CertValid: iss.CertValid(now), IssueError: iss.IssueError})
+		Now: now, Routed: after.Routed, Wildcard: IsWildcard(after.Name), Delegated: after.Delegated,
+		CertValid: iss.CertValid(now), IssueError: iss.IssueError})
 	if sched.checked {
 		s.reschedule(&after, sched.manual, now)
 	}
@@ -547,8 +576,7 @@ func (s *Service) wrongSummary(d store.Domain) string {
 			s.txtName(d.Name), rfc3339(d.RecordMissingSince)))
 	}
 	if !d.DNSMovedSince.IsZero() {
-		parts = append(parts, fmt.Sprintf("%s has resolved elsewhere than %s since %s", d.Name, s.cfg.EdgeName,
-			rfc3339(d.DNSMovedSince)))
+		parts = append(parts, s.routingWrong(d)+" since "+rfc3339(d.DNSMovedSince))
 	}
 	return strings.Join(parts, "; ") + fmt.Sprintf("; %s is deactivated at %s unless it is right again", d.Name,
 		rfc3339(deactivatesAt(d, s.cfg.Grace)))
@@ -560,6 +588,23 @@ func (s *Service) deactivatedSummary(d store.Domain) string {
 		return fmt.Sprintf("the TXT record %s did not show the claim's token for %s (since %s): the claim of %s lapsed",
 			s.txtName(d.Name), s.cfg.Grace, rfc3339(d.RecordMissingSince), d.Name)
 	}
+	if IsWildcard(d.Name) {
+		return fmt.Sprintf("%s for %s (since %s): %s is inactive until both its records are right again",
+			s.routingWrong(d), s.cfg.Grace, rfc3339(d.DNSMovedSince), d.Name)
+	}
 	return fmt.Sprintf("%s resolved elsewhere than %s for %s (since %s): it is inactive until it resolves to the edge again",
 		d.Name, s.cfg.EdgeName, s.cfg.Grace, rfc3339(d.DNSMovedSince))
+}
+
+// routingWrong says which routing record of d answers wrong: a name's
+// addresses, a wildcard's delegation while the last answer did not show
+// it, else the names below the wildcard.
+func (s *Service) routingWrong(d store.Domain) string {
+	switch {
+	case !IsWildcard(d.Name):
+		return fmt.Sprintf("%s has resolved elsewhere than %s", d.Name, s.cfg.EdgeName)
+	case !d.Delegated:
+		return fmt.Sprintf("the CNAME %s has not named %s", s.delegationName(d.Name), s.target(d.Token))
+	}
+	return fmt.Sprintf("the names below %s have resolved elsewhere than %s", d.Name, s.cfg.EdgeName)
 }

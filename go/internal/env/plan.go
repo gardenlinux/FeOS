@@ -24,6 +24,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/quota"
+	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -265,7 +266,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil {
 			return nil, spec.Pins{}, fmt.Errorf("hosts: %w", err)
 		}
-		if len(hosts) > 0 {
+		if hosts = slices.DeleteFunc(hosts, routing.IsWildcard); len(hosts) > 0 {
 			vc.host = hosts[0]
 		}
 	}

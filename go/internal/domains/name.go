@@ -6,6 +6,7 @@ package domains
 import (
 	"crypto/rand"
 	"encoding/base32"
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -50,7 +51,7 @@ func Normalize(name string) (string, error) {
 		return "", nameError("name %q is an IP address, which cannot be claimed", name)
 	}
 	if strings.Contains(n, "*") {
-		return "", nameError("name %q is a wildcard: claim each name on its own", name)
+		return "", nameError("name %q is a wildcard: claim each name on its own, or *.<name> as a wildcard", name)
 	}
 	if len(n) > maxName {
 		return "", nameError("name %q is longer than %d characters", name, maxName)
@@ -70,6 +71,42 @@ func Normalize(name string) (string, error) {
 	}
 	return n, nil
 }
+
+// wildcardPrefix is the first label of a wildcard and its dot.
+const wildcardPrefix = "*."
+
+// NormalizeClaim returns the name a claim stores (ADR 0045): a name as
+// Normalize has it, or a wildcard, *.<name>, whose * is the whole first
+// label and whose <name> is a name as Normalize has it. Its second value
+// reports whether it is a wildcard.
+func NormalizeClaim(name string) (string, bool, error) {
+	n := strings.ToLower(strings.TrimSpace(name))
+	rest, ok := strings.CutPrefix(n, wildcardPrefix)
+	if !ok {
+		out, err := Normalize(name)
+		return out, false, err
+	}
+	base, err := Normalize(rest)
+	if err != nil {
+		var ne *NameError
+		if errors.As(err, &ne) {
+			return "", false, nameError("wildcard %q: %s", name, ne.Msg)
+		}
+		return "", false, err
+	}
+	if len(wildcardPrefix)+len(base) > maxName {
+		return "", false, nameError("wildcard %q is longer than %d characters", name, maxName)
+	}
+	return wildcardPrefix + base, true, nil
+}
+
+// IsWildcard reports whether a stored name is a wildcard, *.<name>.
+func IsWildcard(name string) bool { return strings.HasPrefix(name, wildcardPrefix) }
+
+// Base is the name a stored name stands on: <name> of a wildcard
+// *.<name>, else the name itself. A claim's TXT record and a wildcard's
+// delegation stand beside it.
+func Base(name string) string { return strings.TrimPrefix(name, wildcardPrefix) }
 
 // checkLabel accepts a lowercase LDH label: 1 to 63 letters, digits and
 // hyphens, neither first nor last a hyphen.

@@ -220,11 +220,13 @@ func (s *Store) SetACMEAccount(ctx context.Context, directory, uri, email string
 	return err
 }
 
-// ACMEOrder is a domain an order is for: its ID, name, tenant and
+// ACMEOrder is a domain an order is for: its ID, name, token (a
+// wildcard's DNS-01 target is <token>.<ACME zone>), tenant and
 // environment, and whether it has a certificate still valid (a renewal).
 type ACMEOrder struct {
 	DomainID uuid.UUID
 	Name     string
+	Token    string
 	Owner    string
 	EnvID    uuid.UUID
 	Renewal  bool
@@ -245,7 +247,7 @@ type ACMEOrder struct {
 func (s *Store) ClaimACMEOrder(ctx context.Context, hold time.Duration) (ACMEOrder, bool, error) {
 	var o ACMEOrder
 	var valid bool
-	err := s.q.QueryRow(ctx, `SELECT d.id, d.name, d.owner, d.env_id, coalesce(c.not_after > now(), false)
+	err := s.q.QueryRow(ctx, `SELECT d.id, d.name, d.token, d.owner, d.env_id, coalesce(c.not_after > now(), false)
 		FROM domains d
 		JOIN environments e ON e.id = d.env_id AND e.public AND NOT e.deleting
 		JOIN tenants t ON t.id = d.owner AND t.deleting_at IS NULL
@@ -256,7 +258,7 @@ func (s *Store) ClaimACMEOrder(ctx context.Context, hold time.Duration) (ACMEOrd
 				OR c.renew_after <= now())
 		ORDER BY coalesce(c.not_after > now(), false), coalesce(c.renew_after, d.next_issue_at, d.bound_at), d.id
 		LIMIT 1
-		FOR UPDATE OF d SKIP LOCKED`).Scan(&o.DomainID, &o.Name, &o.Owner, &o.EnvID, &valid)
+		FOR UPDATE OF d SKIP LOCKED`).Scan(&o.DomainID, &o.Name, &o.Token, &o.Owner, &o.EnvID, &valid)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ACMEOrder{}, false, nil
 	}
