@@ -540,8 +540,9 @@ func (c *Controller) keep(ctx context.Context, v *view, r store.EnvInstanceRow, 
 }
 
 // stopInstances marks instances stopping: routes stop sending to them and
-// the env table drops them (env-names, woken); stepStopping deletes them
-// after grace.
+// the env table drops them (env-names, woken); once their traffic drained
+// (grace: stopGrace, else at once) stepStopping stops their pods and
+// deletes their rows when the pods have ended.
 func (c *Controller) stopInstances(ctx context.Context, v *view, grace bool, rows ...store.EnvInstanceRow) error {
 	if len(rows) == 0 {
 		return nil
@@ -592,21 +593,129 @@ func (c *Controller) deleteInstance(ctx context.Context, sb store.Sandbox) error
 	return nil
 }
 
-// stepStopping deletes the stopping instances whose time passed.
+// opStop is the sandboxes' op that stops a pod for good (sandbox.OpStop).
+const opStop = "stop"
+
+// draining reports whether a stopping instance still drains its traffic:
+// its retire_at is ahead, and a deployment waits for it. Past it, its pod
+// stops and its row goes (stepStopping), which nothing waits for: a
+// rollout of a service whose pods drain for minutes would take that long
+// per replica and run out of its budget.
+func draining(i store.EnvInstance, now time.Time) bool {
+	return i.Phase == model.PhaseStopping && now.Before(i.RetireAt)
+}
+
+// stepStopping takes the stopping instances to their end (ADR 0018): an
+// instance drains its traffic until its retire_at, which the deployment
+// waits for; then its pod is stopped (Engine.StopPod: SIGTERM and the
+// pod's stop grace) while its row stays running, booked, in its groups
+// and out of the routes and the env table, and the row is deleted once
+// the pod has ended (endStep), which nothing waits for. The state is the
+// rows': the phase and retire_at, and the sandbox's op and state; the
+// end of a stop wakes the loop (store.HintEnvReconcile).
 func (c *Controller) stepStopping(ctx context.Context, s *stepState) {
 	for _, r := range s.v.rows {
 		if r.Instance.Phase != model.PhaseStopping {
 			continue
 		}
-		obj := objectName(r.Instance.Kind, r.Instance.Object)
-		s.wait(obj, "%s replica %d is stopping", obj, r.Instance.Replica)
-		if !r.Instance.RetireAt.IsZero() && s.v.now.Before(r.Instance.RetireAt) {
+		if draining(r.Instance, s.v.now) {
+			obj := objectName(r.Instance.Kind, r.Instance.Object)
+			s.wait(obj, "%s replica %d is stopping", obj, r.Instance.Replica)
 			continue
 		}
-		if err := c.deleteInstance(ctx, r.Sandbox); err != nil && ctx.Err() == nil {
-			c.rl.warn("stop", "cannot delete a stopping instance", "sandbox", r.Sandbox.ID, "err", err)
-		}
+		c.endInstance(ctx, s.v.now, r)
 	}
+}
+
+// endAction is what endStep decides for a stopping instance whose
+// traffic drained.
+type endAction int
+
+const (
+	// endWait: its pod stops, or what it is is being found out.
+	endWait endAction = iota
+	// endStop: its pod runs; it is stopped.
+	endStop
+	// endDelete: its pod has ended, or is not waited for; the row goes.
+	endDelete
+)
+
+// endStep decides the next step of a stopping instance past its traffic's
+// drain, from its rows as the pass read them and on the database's clock
+// (now). A row that runs without an op is stopped. A stop in flight is
+// waited for, and so is an unknown row on a node that is up (a stop's op
+// released by an instance that stopped, which a sync resolves). Every
+// other row goes at once: its pod has ended (stopped, failed, lost,
+// pending), or holds no work to finish (paused, hibernated, creating, or
+// in another op: an idle pause, a drain's move, a repair); so does one
+// whose node is down or removed. Whatever it is, the row goes once its
+// retire_at, its pod's stop grace and stopMargin have passed.
+func (c *Controller) endStep(ctx context.Context, now time.Time, r store.EnvInstanceRow) endAction {
+	sb := r.Sandbox
+	switch {
+	case !now.Before(r.Instance.RetireAt.Add(sb.StopGrace() + c.t.stopMargin)):
+		return endDelete
+	case sb.Op == opStop:
+		if c.nodeLost(ctx, sb.Node) {
+			return endDelete
+		}
+		return endWait
+	case sb.Op != "":
+		return endDelete
+	case sb.ClientState == model.StateRunning:
+		if c.nodeLost(ctx, sb.Node) {
+			return endDelete
+		}
+		return endStop
+	case sb.ClientState == model.StateUnknown && !c.nodeLost(ctx, sb.Node):
+		return endWait
+	}
+	return endDelete
+}
+
+// endInstance takes a stopping instance whose traffic drained one step
+// towards its end (endStep): its pod's stop begins (the op runs detached,
+// on its own deadline), or its row goes.
+func (c *Controller) endInstance(ctx context.Context, now time.Time, r store.EnvInstanceRow) {
+	sb, inst := r.Sandbox, r.Instance
+	switch c.endStep(ctx, now, r) {
+	case endStop:
+		err := c.d.Engine.StopPod(ctx, sb.ID)
+		switch {
+		case err == nil:
+			c.log.Info("instance's pod stopping", "environment", inst.EnvID, "object", objectName(inst.Kind, inst.Object),
+				"replica", inst.Replica, "sandbox", sb.ID, "node", sb.Node, "grace", sb.StopGrace())
+		case ctx.Err() != nil, errors.Is(err, model.ErrBusy), errors.Is(err, model.ErrPrecondition),
+			errors.Is(err, model.ErrNotFound):
+			// The row changed since the pass read it: the next pass
+			// looks at it again.
+		default:
+			c.rl.warn("stop", "cannot stop a stopping instance's pod", "sandbox", sb.ID, "node", sb.Node, "err", err)
+		}
+	case endDelete:
+		if err := c.deleteInstance(ctx, sb); err != nil {
+			if ctx.Err() == nil {
+				c.rl.warn("stop", "cannot delete a stopping instance", "sandbox", sb.ID, "err", err)
+			}
+			return
+		}
+		c.log.Info("stopping instance deleted", "environment", inst.EnvID, "object", objectName(inst.Kind, inst.Object),
+			"replica", inst.Replica, "sandbox", sb.ID, "state", sb.ClientState, "op", sb.Op)
+	}
+}
+
+// nodeLost reports whether a node is down, removed or gone, or no node at
+// all: a stopping instance's pod there is not waited for. A node that
+// cannot be read is not lost.
+func (c *Controller) nodeLost(ctx context.Context, node string) bool {
+	if node == "" {
+		return true
+	}
+	n, err := c.st.GetNode(ctx, node)
+	if errors.Is(err, store.ErrNoRow) {
+		return true
+	}
+	return err == nil && (n.Status == model.NodeDown || n.Status == model.NodeRemoved)
 }
 
 // lostNode is the node a lost row was lost with: lost_from when its node

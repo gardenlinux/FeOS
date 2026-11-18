@@ -858,7 +858,7 @@ sandbox or a tenant's job's pod, builds its pod from the template instead
 |---|---|---|
 | `pending` | no | no pod yet, a create failed before the pod existed, or its node went down before its pod was ever seen |
 | `creating` | yes | a create, start, restore or repair runs, or the pod was seen pending |
-| `running` | yes | the pod runs |
+| `running` | yes | the pod runs; a stop's too, while its containers drain after SIGTERM |
 | `pausing` | yes | a suspend runs |
 | `paused` | no | the pod is suspended on its node |
 | `resuming` | yes | a resume runs |
@@ -891,6 +891,7 @@ finished in another transaction that applies what the node did.
 | pause | running | pausing | SuspendPod | 3 min 40 s + 5 s/GiB |
 | hibernate | paused; stopped, failed and running when draining | hibernating | HibernatePod | a pause's + `--hibernate-timeout` + 16 s/GiB |
 | repair | creating without an op, running with an unreachable guest; running, for an instance whose container exited (`Restart`, [Environments](#probes-exits-and-restarts)) | creating | StopPod and StartPod; for a pod stuck in its restore, DeletePod and RestorePod, never for a pod with volumes | 7 min 5 s + 8 s/GiB, and an image service's instance's stop grace (660 s), which its StopPod may wait |
+| stop | running, for an environment's instance that goes (`StopPod`, [Environments](#a-reconcile-step)) | running | StopPod | a pause's + 2 min, and the pod's stop grace (660 s for an image service's instance) |
 
 GiB is the sandbox's memory, rounded up. **A caller's deadline covers
 its callee's budget**, so that feosd answers, the change or "the VM is
@@ -1025,6 +1026,22 @@ A newer checkpoint that our pod reports is taken in every state, here and
 by Sync, never an older one. A repair that restarts a pod, and a start,
 resume or restore that came up with a cold boot, end the sandbox's process
 holds; a repair that found the pod healthy and made no call ends nothing.
+
+**A stop** ends an environment's instance's pod for good, once the
+controller has drained its traffic ([A reconcile step](#a-reconcile-step)):
+feosd sends its containers SIGTERM and gives them the pod's stop grace
+before its microVM ends, and runs the stop to its end once it has the
+pod's lock, whatever the call does. The row stays `running` while the
+containers drain, as the pod does: booked, its address in its groups,
+its credentials renewed and its forwards open, the op saying that it
+stops ("stopping: its containers have SIGTERM and 660 s to exit"). A
+stop that ends with the pod stopped leaves the row `stopped`, unbooked,
+and sends `env-reconcile` on `ferun_leader`; one whose StopPod met a
+busy VM leaves it `running`, "stop postponed: …", and one whose pod
+still runs, "stop failed: …". Its deadline covers a pause's, since the
+StopPod may wait for the pod's lock behind a suspend that feosd still
+runs, the stop's own steps and the grace. A takeover's StopPod waits for
+the stop that feosd runs already and answers once the pod has stopped.
 
 **Stale ops.** The leader takes over the op of an instance that died or
 stops, when it is connected to the op's node; otherwise it releases the
@@ -2952,7 +2969,7 @@ inside a transaction:
 | `env-groups` | 10 s, hint `env-groups` | per connected node, the groups its rows' templates name and the groups their rules name (`ferun-ingress` among them), put again where the node's differ, and what the node holds of the ingress's groups recorded ([Security groups](#security-groups)); the groups of environments that are gone, the workloads' and legacy `sg-` groups no row's template names, an `ing-` group of a sandbox that runs elsewhere and the `sbx-` groups of before ADR 0035 too |
 | `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments that are gone, and the `sbx-` tables of before ADR 0035, deleted once no pod names them ([Names](#names)) |
 | `env-volumes` | 30 s | volumes marked deleting, 64 a pass, deleted on their node once no pod holds them (`FAILED_PRECONDITION`: later, at the end of the queue; `NOT_FOUND`: done), then their rows; a removed node's lose their rows only; records of environments' volumes on a connected node that no pod holds and no row places there are deleted |
-| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances deleted, its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
+| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances ended as a rollout's old ones without the traffic's drain (marked stopping, a running pod stopped with its grace, the row deleted once the pod has ended; [A reconcile step](#a-reconcile-step)), its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
 | `env-bindings` | 30 s | the incidents of the environments' HTTP bindings from their pods' requests over the last five minutes ([HTTP bindings](#http-bindings)) |
 
 **The Ensure pool.** The controller runs `Engine.Ensure` for the rows
@@ -3066,20 +3083,46 @@ crash loop closes. Then:
    one stops (phase `stopping`, `retire_at` 10 s ahead: routes drop it
    at once, the env table within a pass of `env-names`, and the answers
    that named it expire after their 5 s) and goes; surplus replicas stop
-   from the highest; a lost row is replaced. An instance that goes is
-   deleted by tombstone: its node sends its container SIGTERM and gives
-   it up to 660 s to exit before the microVM ends (the pod's
-   `stop_grace_seconds`, `model.ServiceStopGrace`), so that a service
-   that drains, as FeCode's backend hands its agents' turns over to
-   another replica within 630 s, finishes; a container that exits sooner
-   ends it sooner. Only an image service's pods have that grace: a
-   sandbox's container (`sleep`, which ignores SIGTERM as PID 1) would
-   wait out any grace, an addon's next pod waits for its volume, and a
-   job that is stopped is cancelled; their pods have the node's 10 s. A
-   repair that restarts a service's pod waits the grace in its
-   `StopPod`. The pod's grace runs after its row is gone: its address
-   leaves its groups and the env table, and its node's bookings and its
-   tenant's use no longer count it (BACKLOG, ADR 0018). The service's `rollout.timeout`
+   from the highest; a lost row is replaced. An instance that goes ends
+   in three steps, its state in its rows alone (`stepStopping`):
+   - **Its traffic drains** until `retire_at`: no route, no name, no
+     ingress sends to it, and the deployment waits for it.
+   - **Its pod stops** (the op `stop`, [Ops](#ops)): its node sends its
+     container SIGTERM and gives it up to 660 s to exit before the
+     microVM ends (the pod's `stop_grace_seconds`,
+     `model.ServiceStopGrace`), so that a service that drains, as
+     FeCode's backend hands its agents' turns over to another replica
+     within 630 s, finishes. The row stays, `running` with the op
+     `stop`: still out of the routes, the env table and the ingress's
+     table, but a member of its groups, so that the peers that admit it
+     by group (its addons, other services) take its new connections
+     while it finishes its work, and booked on its node, so that
+     placement does not fill the node meanwhile and a drain does not
+     count the node drained. Nothing else waits for it: the rollout goes
+     on with the next replica at once, and the deployment is deployed
+     without it.
+   - **Its row goes** once the pod has ended, at once when its container
+     exits sooner (the stop's end wakes `env-reconcile`), and its pod
+     by tombstone. A row that runs nothing to finish goes at once after
+     the drain (paused, hibernated, stopped, failed, lost, pending, or
+     in another op: an idle pause, a drain's move, a repair), and so
+     does one whose node is down or removed. An `unknown` row on a node
+     that is up is waited for (a stop released by a ferund instance
+     that stopped, which a sync resolves, and the next pass stops the
+     pod again, its StopPod joining the stop that feosd runs). Whatever
+     the pod does, the row goes 2 minutes past its drain and its grace.
+
+   Only an image service's pods have that grace: a sandbox's container
+   (`sleep`, which ignores SIGTERM as PID 1) would wait out any grace, an
+   addon's next pod waits for its volume, and a job that is stopped is
+   cancelled; their pods have the node's 10 s, by the same steps when
+   they stop (an environment's deletion, `env-delete`). A repair that
+   restarts a service's pod waits the grace in its `StopPod`. Like a
+   rollout's surge replica, a stopping instance counts against no tenant
+   limit: quotas count what the deployments declare, not the rows. A
+   node without room for the next replica keeps it pending until an old
+   pod there has ended, within the rollout's budget. The service's
+   `rollout.timeout`
    counts from R's start, moved on by the time R's deploy jobs waited
    for runs that were not R's (see the deployment's deadline below): past
    it, or once one of R's new instances exited 3 times (a start that
@@ -3103,7 +3146,8 @@ crash loop closes. Then:
    `volume_unavailable` and `addon_unhealthy` incidents of objects that
    neither T nor R has close.
 6. **Deployed**, when T is R: every object as R has it and ready, addons
-   provisioned, deploy jobs succeeded, nothing stopping. R is
+   provisioned, deploy jobs succeeded, no stopping instance still
+   draining its traffic (a pod's stop goes on after it). R is
    `deployed`, the environment's `deployed` with it, older deployed and
    waiting deployments are replaced, and the open `rollout_failed`,
    `job_failed` and `crash_loop` incidents of older deployments close.
@@ -3668,7 +3712,9 @@ apps zone; otherwise empty, [ADR 0021](../adr/0021-ingress.md)),
 `hostLabel` (its default host's label once it has one, kept while a
 domain is its host), and the number of open
 incidents. An instance carries its `image`, `registry/repository@sha256:…`
-as its deployment resolved it. The listing shows `public` and `hosts` too. An
+as its deployment resolved it; one whose pod stops is `stopping` and
+`running`, its detail the stop's ("stopping: its containers have
+SIGTERM and 660 s to exit"). The listing shows `public` and `hosts` too. An
 incident has its object, deployment, condition, summary, opening and
 closing, and evidence: `exits` (`at`, `code`, and `notStarted` for a
 start that failed), `logTail` (redacted and bounded), `diff`

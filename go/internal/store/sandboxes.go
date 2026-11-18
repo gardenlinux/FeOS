@@ -737,6 +737,11 @@ func (s *Store) UpdateSandbox(ctx context.Context, before, after Sandbox) (Sandb
 // environments' loop env-groups.
 const HintEnvGroups = "env-groups"
 
+// HintEnvReconcile is the ferun_leader hint that wakes the environments'
+// loop env-reconcile: the pod of an instance that goes has stopped, and
+// its row is to go (ADR 0018).
+const HintEnvReconcile = "env-reconcile"
+
 // SetSandboxAddress writes the IPv6 address of the sandbox's pod as an
 // op's call answered it (CreatePod, RestorePod), when the row is still of
 // incarnation and has another: a write of its own that bumps no gen. It
