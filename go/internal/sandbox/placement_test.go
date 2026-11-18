@@ -60,6 +60,15 @@ func TestGates(t *testing.T) {
 			"memory gate (800MiB+512MiB of 1024MiB MiB)"},
 		{"free memory", func(g *gateInput) { g.telemetry.MemoryAvailableBytes = 1<<30 + 100<<20 }, "free memory gate (100 MiB available)"},
 		{"disk", func(g *gateInput) { g.telemetry.DiskAvailableBytes = 1 << 30 }, "disk gate"},
+		// A disk of its own size: room for it and the budget now, and
+		// within what the node's disk may book.
+		{"own disk", func(g *gateInput) { g.node.DiskTotalBytes, g.diskGiB = 500<<30, 30 }, ""},
+		{"own disk without room", func(g *gateInput) { g.node.DiskTotalBytes, g.diskGiB = 500<<30, 100 },
+			"disk gate (100 GiB available, 104 GiB for the pod's disk and the budget)"},
+		{"own disk booked full", func(g *gateInput) { g.node.DiskTotalBytes, g.booked.DiskGiB, g.diskGiB = 104<<30, 80, 30 },
+			"disk booking gate (80GiB+30GiB of 100GiB)"},
+		{"own disk on a node of no disk", func(g *gateInput) { g.diskGiB = 8 }, "disk booking gate (0GiB+8GiB of 0GiB)"},
+		{"the guest's disk books nothing", func(g *gateInput) { g.booked.DiskGiB = 1000 }, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -98,6 +107,26 @@ func TestGates(t *testing.T) {
 	in.booked.MemoryMiB, in.booked.VCPUs = 0, 190
 	if s := in.score(); s != 0.25 {
 		t.Fatalf("score %v", s)
+	}
+	// The disks of their own size: 100 GiB to book, 75 booked with the
+	// pod's. Without any, the disk does not count.
+	in = readyNode("n")
+	in.node.DiskTotalBytes, in.booked.DiskGiB, in.diskGiB = 104<<30, 50, 25
+	if s := in.score(); s != 0.25 {
+		t.Fatalf("score %v", s)
+	}
+	in.booked.DiskGiB, in.diskGiB = 0, 0
+	if s := in.score(); s <= 0.25 {
+		t.Fatalf("score %v without disks of their own size", s)
+	}
+	// The booked disks are rechecked under the node's lock, and on a
+	// pinned node's admission.
+	in = readyNode("n")
+	in.node.DiskTotalBytes, in.booked.DiskGiB, in.diskGiB = 104<<30, 80, 30
+	for name, gates := range map[string][]int{"claim": claimGates, "admission": admitGates, "capacity": capacityGates} {
+		if r := in.check(gates); r == nil || r.gate != gateDiskBooked {
+			t.Errorf("%s: %+v, want the disk booking gate", name, r)
+		}
 	}
 }
 
@@ -188,6 +217,60 @@ func TestPlacementGatesIntegrated(t *testing.T) {
 		if v.Node != c.Node && v.Reason != "another object store" {
 			t.Fatalf("verdict %+v", v)
 		}
+	}
+}
+
+// TestDiskBookings: a pod's disk of its own size goes to its node in the
+// pod's spec and is booked there; a node whose disk total, less the disk
+// budget, its booked disks would pass takes no more of them, while a pod
+// with the guest's disk books none and still fits.
+func TestDiskBookings(t *testing.T) {
+	h := newHarness(t)
+	n1 := h.addNode("n1", func(c *testnode.Config) { c.DiskBytes = 64 << 30 })
+	e := h.eng()
+	sized := func(gib int) store.Sandbox {
+		t.Helper()
+		sb, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: testImage,
+			VCPUs: 1, MemoryMiB: 512, DiskGiB: gib, EnvironmentID: h.boxEnv(testTenant)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sb
+	}
+	a := sized(40)
+	h.ensure(a.ID)
+	if b, err := h.st.GetBooking(bg, a.ID); err != nil || b.Node != "n1" || b.DiskGiB != 40 {
+		t.Fatalf("booking %+v: %v", b, err)
+	}
+	var disk uint32
+	for _, p := range n1.Pods() {
+		if p.GetPodId() == a.ID.String() {
+			disk = p.GetSpec().GetResources().GetDiskGib()
+		}
+	}
+	if disk != 40 {
+		t.Fatalf("the pod's disk on its node: %d GiB", disk)
+	}
+	if sums, err := h.st.SumBookings(bg, "n1", ""); err != nil || sums.DiskGiB != 40 {
+		t.Fatalf("sums %+v: %v", sums, err)
+	}
+	// 64 GiB less the budget to book on the node: 40 + 30 do not fit.
+	b := sized(30)
+	p, err := e.place(bg, h.row(b.ID), OpCreate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("no capacity (retryable): no feasible node; n1: disk booking gate (40GiB+30GiB of %dGiB)",
+		(64<<30-e.cfg.DiskBudget)>>30); p.noCapacity() != want {
+		t.Fatalf("placement: %s, want %s", p.noCapacity(), want)
+	}
+	if err := e.claim(bg, h.st, h.row(b.ID), OpCreate, "n1"); err == nil {
+		t.Fatal("the claim took the node")
+	}
+	// The guest's disk books nothing: it fits.
+	c := h.running(512)
+	if c.Node != "n1" {
+		t.Fatalf("a pod with the guest's disk on %q", c.Node)
 	}
 }
 

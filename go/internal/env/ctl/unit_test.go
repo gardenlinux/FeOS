@@ -440,11 +440,18 @@ func TestDefaults(t *testing.T) {
 	if replicasOf(spec.Service{}) != 1 || replicasOf(spec.Service{Replicas: &two}) != 2 {
 		t.Error("replicas")
 	}
-	if v, m := resourcesOf(nil); v != 1 || m != 512 {
+	if v, m, d := resourcesOf(nil); v != 1 || m != 512 || d != 0 {
 		t.Error("resources")
 	}
-	if v, m := resourcesOf(&spec.Resources{MemoryMib: 1024}); v != 1 || m != 1024 {
+	if v, m, d := resourcesOf(&spec.Resources{MemoryMib: 1024}); v != 1 || m != 1024 || d != 0 {
 		t.Error("resources with memory")
+	}
+	// A disk of the guest's size is the guest's: the same pod.
+	if _, _, d := resourcesOf(&spec.Resources{DiskGib: spec.DefaultDiskGib}); d != 0 {
+		t.Errorf("a disk of the guest's size: %d, want 0", d)
+	}
+	if _, _, d := resourcesOf(&spec.Resources{DiskGib: 30}); d != 30 {
+		t.Errorf("a disk of 30 GiB: %d", d)
 	}
 	if rolloutOf(spec.Service{}) != 10*time.Minute || rolloutOf(spec.Service{Rollout: &spec.Rollout{Timeout: "30s"}}) != 30*time.Second {
 		t.Error("rollout")
@@ -699,6 +706,24 @@ func TestRender(t *testing.T) {
 	if again.hash != p.hash {
 		t.Error("the hash is not deterministic")
 	}
+	// A disk of its own size is another pod; one of the guest's size is
+	// the same.
+	disk := func(gib int) *podPlan {
+		s := v.target.Services["api"]
+		r := spec.Resources{}
+		if s.Resources != nil {
+			r = *s.Resources
+		}
+		r.DiskGib = gib
+		s.Resources = &r
+		return c.planService(v, "api", s)
+	}
+	if d := disk(30); d.diskGiB != 30 || d.hash == p.hash {
+		t.Errorf("a disk of 30 GiB: %d, the same hash %v", d.diskGiB, d.hash == p.hash)
+	}
+	if d := disk(spec.DefaultDiskGib); d.diskGiB != 0 || d.hash != p.hash {
+		t.Errorf("a disk of the guest's size: %d, another hash %v", d.diskGiB, d.hash != p.hash)
+	}
 	// A new address of the addon is a new template.
 	v.rows[0].Sandbox.Address = "fd00::6"
 	if moved := c.planService(v, "api", v.target.Services["api"]); moved.hash == p.hash {
@@ -746,7 +771,7 @@ func TestRender(t *testing.T) {
 	// The hashes of the templates ignore their labels.
 	tmpl := a.template
 	tmpl.Labels = map[string]string{"x": "y"}
-	if tmpl.Hash(a.image, a.vcpus, a.memoryMB) != a.hash {
+	if tmpl.Hash(a.image, a.vcpus, a.memoryMB, a.diskGiB) != a.hash {
 		t.Error("labels are in the hash")
 	}
 

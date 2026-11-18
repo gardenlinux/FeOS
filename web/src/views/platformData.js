@@ -39,14 +39,20 @@ function capBar(key, label, used, cap, text, unbounded) {
 
 // capacityBars are a node row's (fleet.js nodeRows) bookings: vCPUs
 // against floor(cores × overcommit) (0: not gated), memory against the
-// total less the headroom, sandboxes against the slots.
+// total less the headroom, sandboxes against the slots, and, once any is
+// booked, the disks of their own size against the disk total less the
+// disk budget.
 export function capacityBars(row) {
-  return [
+  const bars = [
     capBar('vcpus', 'vCPU', row.vcpusBooked, row.vcpusCapacity,
       `${row.vcpusBooked} / ${vcpuCapacityText(row.vcpusCapacity)}`, !(row.vcpusCapacity > 0)),
     capBar('memory', 'memory', row.memBooked, row.memCapacity, fmtBytesOf(row.memBooked, row.memCapacity), false),
     capBar('slots', 'slots', row.booked, row.slots, `${row.booked} / ${row.slots}`, false),
   ];
+  if (row.diskBooked > 0) {
+    bars.push(capBar('disk', 'disk', row.diskBooked, row.diskCapacity, fmtBytesOf(row.diskBooked, row.diskCapacity), false));
+  }
+  return bars;
 }
 
 // fleetCapacity sums the bookings of the nodes placement may book on
@@ -61,6 +67,7 @@ export function fleetCapacity(rows) {
     bars: on.length ? capacityBars({
       vcpusBooked: sum('vcpusBooked'), vcpusCapacity: unbounded ? 0 : sum('vcpusCapacity'),
       memBooked: sum('memBooked'), memCapacity: sum('memCapacity'), booked: sum('booked'), slots: sum('slots'),
+      diskBooked: sum('diskBooked'), diskCapacity: sum('diskCapacity'),
     }) : [],
   };
 }

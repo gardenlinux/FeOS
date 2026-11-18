@@ -150,7 +150,10 @@ Every pod has one disk (`crates/services/pod-service/src/disk.rs`):
   it the first time a pod needs it after `feosd` started.
 - **A boot** of a pod (create, start) opens its disk: `OpenDisk(pod)` if
   diskd has it, else `OpenDisk(pod, head)` from the pod's checkpoint, else
-  `CreateDisk(pod, [L0])`. The microVM's `data_disk` is the link
+  `CreateDisk(pod, [L0], size)`, the size of the pod's spec
+  (`Resources.disk_gib`, at most 1024 GiB) or, without one, L0's. diskd
+  never makes a disk smaller than its chain; what lies beyond the chain
+  reads as zeroes. The microVM's `data_disk` is the link
   `<state>/live/<pod>/disk`; the microVM layer makes a device node of it,
   `data` in the jail, at every start and restore, and Firecracker attaches
   it as `/data` with `cache_type` `Writeback`. The guest mounts it at
@@ -166,6 +169,27 @@ Every pod has one disk (`crates/services/pod-service/src/disk.rs`):
 
 A pod from before pods had disks gets one at its next boot, in a new
 microVM.
+
+**A disk of its own size.** The disk is thin: the node holds what the
+pod writes, in its top, never the size. The guest finds a disk larger
+than the filesystem on it at its boot
+(`feos_utils::filesystem::mount_data_volume`, from the superblock and
+the virtio disk's size) and grows the filesystem online to the disk's
+whole blocks with `EXT4_IOC_RESIZE_FS`, mounted with the kernel's
+default for the call, then again with `noinit_itable`, as every boot
+mounts it: the disk reads zeroes beyond the blank data volume, so the
+new groups' inode tables are zeroes already, and neither the resize
+nor the kernel's background zeroing writes them. Growing 8 GiB to
+30 GiB writes the new groups' descriptors and the backup superblocks
+and reserved descriptor blocks of the few groups that have them, a few
+MiB to tens of MiB, in well under a second; a filesystem that fills its
+disk is mounted as it is. A grow that fails leaves the filesystem as it
+was, logged, and the pod runs. Such a pod bakes nothing (ADR 0025): its
+disk holds the grown filesystem, which a smaller disk cannot take,
+while every baked layer is made on a disk of L0's size and fits a disk
+of any size, which then grows over it. The size is the pod's for its
+life: a checkpoint's head carries it, and a restore opens the disk as
+large as it was.
 
 ## The volumes' disks
 
@@ -219,6 +243,18 @@ epoch and the request ids of its calls.
 The epoch is the seconds since 1970, or one more than the last
 checkpoint's of the pod and of each of its volumes. A stopped or failed
 pod skips step 1 and the memory.
+
+What a hibernation uploads of the disk is what the pod wrote since its
+last checkpoint (the chunks of its top, less those the bucket has), not
+the disk's size: a larger disk costs nothing until it is written. A
+cache that filled it does: a 30 GiB disk the pod filled seals 30 GiB on
+the node and pushes the chunks the bucket lacks, at the bucket's pace,
+before the head is put, and the restored pod reads them back from the
+bucket as it touches them, through diskd's chunk cache
+(`--budget-bytes`), which a cache larger than it keeps evicting. The
+restore itself does not wait for them: it opens the disk from the head
+and its manifests, whose entries are only the written chunks (52 bytes
+each, 4 MiB for 20 GiB written).
 
 A `ResumePod` that comes before step 5 abandons the hibernation, unless a
 `HibernatePod` of it said `no_abandon`, as the control plane's drains do,

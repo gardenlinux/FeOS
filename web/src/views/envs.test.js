@@ -515,6 +515,7 @@ describe("an object's page", () => {
     expect(readinessText({ tcp: { port: 5432 }, initialDelay: '5s' })).toBe('TCP :5432 · after 5s');
     expect(readinessText({ exec: { command: ['pg_isready'] } })).toBe('exec pg_isready');
     expect(resourcesText({ vcpus: 2, memoryMib: 2048 })).toBe('2 vCPUs · 2 GiB');
+    expect(resourcesText({ vcpus: 2, memoryMib: 4096, diskGib: 30 })).toBe('2 vCPUs · 4 GiB · 30 GiB disk');
   });
 
   it("lists a job's and an addon's definition", () => {

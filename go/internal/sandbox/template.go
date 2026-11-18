@@ -62,7 +62,9 @@ func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver,
 		LabelIncarnation: sb.Incarnation.String(),
 	}
 	spec := &podv1.PodSpec{
-		Resources: &podv1.Resources{Vcpus: uint32(sb.VCPUs), MemoryMib: uint64(sb.MemoryMiB)},
+		// A disk of its own size; a node that does not know the field
+		// gives it the guest's.
+		Resources: &podv1.Resources{Vcpus: uint32(sb.VCPUs), MemoryMib: uint64(sb.MemoryMiB), DiskGib: uint32(sb.DiskGiB)},
 		Network:   &podv1.PodNetwork{},
 		Labels:    labels,
 		// An image service's instance may drain after SIGTERM; a node

@@ -268,20 +268,25 @@ func TestValidateRules(t *testing.T) {
 			approval(s)
 			svc(s, "expense-service", func(v *Service) {
 				v.Replicas = intp(21)
-				v.Resources = &Resources{VCPUs: 33, MemoryMib: 64}
+				v.Resources = &Resources{VCPUs: 33, MemoryMib: 64, DiskGib: 201}
 				v.Rollout = &Rollout{Timeout: "-1m"}
 			})
-			s.Jobs["migrate"] = Job{Image: "img", Retries: 6, Timeout: "3h", On: "never", Resources: &Resources{VCPUs: -1}}
-		}, []expect{e("jobs.migrate.on", `on "never"`), e("jobs.migrate.resources.vcpus", "out of range"),
+			s.Jobs["migrate"] = Job{Image: "img", Retries: 6, Timeout: "3h", On: "never",
+				Resources: &Resources{VCPUs: -1, DiskGib: 4}}
+		}, []expect{e("jobs.migrate.on", `on "never"`), e("jobs.migrate.resources.diskGib", "diskGib 4 is out of range"),
+			e("jobs.migrate.resources.vcpus", "out of range"),
 			e("jobs.migrate.retries", "out of range"), e("jobs.migrate.timeout", "out of range"),
-			e("services.expense-service.replicas", "replicas 21"), e("services.expense-service.resources.memoryMib", "64"),
+			e("services.expense-service.replicas", "replicas 21"),
+			e("services.expense-service.resources.diskGib", "diskGib 201 is out of range"),
+			e("services.expense-service.resources.memoryMib", "64"),
 			e("services.expense-service.resources.vcpus", "33"), e("services.expense-service.rollout.timeout", "not positive")}},
 		{"zero replicas and bounds", ModePlan, func(s *Spec) {
 			approval(s)
 			svc(s, "expense-service", func(v *Service) {
 				v.Replicas = intp(0)
-				v.Resources = &Resources{VCPUs: 32, MemoryMib: 256}
+				v.Resources = &Resources{VCPUs: 32, MemoryMib: 256, DiskGib: 200}
 			})
+			s.Jobs["restore"] = Job{Image: "img", Resources: &Resources{DiskGib: 8}}
 		}, nil},
 		{"idle", ModePlan, func(s *Spec) {
 			approval(s)

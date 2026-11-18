@@ -386,9 +386,9 @@ func (e *Engine) syncBooking(ctx context.Context, tx *store.Store, before, after
 		if err != nil {
 			return nil, err
 		}
-		gate := capacityRefusal(n, after, sums)
+		gate := capacityRefusal(n, after, sums, e.cfg.DiskBudget)
 		if err := tx.UpsertBooking(ctx, store.Booking{PodID: after.ID, Node: after.Node, VCPUs: after.VCPUs,
-			MemoryMiB: after.MemoryMiB, Gated: gate == ""}); err != nil {
+			MemoryMiB: after.MemoryMiB, DiskGiB: after.DiskGiB, Gated: gate == ""}); err != nil {
 			return nil, err
 		}
 		if gate != "" {

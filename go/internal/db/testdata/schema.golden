@@ -90,6 +90,8 @@ TABLE bookings
   COLUMN memory_mib integer NOT NULL
   COLUMN gated boolean NOT NULL
   COLUMN booked_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN disk_gib integer NOT NULL DEFAULT 0
+  CONSTRAINT CHECK ((disk_gib >= 0))
   CONSTRAINT FOREIGN KEY (node) REFERENCES nodes(name)
   CONSTRAINT FOREIGN KEY (pod_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (pod_id)
@@ -880,6 +882,8 @@ TABLE sandboxes
   COLUMN reaches jsonb NOT NULL DEFAULT '[]'::jsonb
   COLUMN egress jsonb
   COLUMN workdir text NOT NULL DEFAULT ''::text
+  COLUMN disk_gib integer NOT NULL DEFAULT 0
+  CONSTRAINT CHECK (((disk_gib >= 0) AND (disk_gib <= 1024)))
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((reaches = '"all"'::jsonb) OR (jsonb_typeof(reaches) = 'array'::text)))

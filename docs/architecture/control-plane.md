@@ -110,7 +110,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--image-bakes` | true | a create names the baked layers of its image and lets its node bake it ([Images](#images), ADR 0025); false: neither |
 | `--default-vcpus`, `--default-memory-mib` | 2, 512 | the size of a sandbox created without one |
 | `--placement` | `binpack` | or `spread` |
-| `--disk-budget` | `4GiB` | placement's disk gate per pod |
+| `--disk-budget` | `4GiB` | placement's disk gate per pod: the free disk a node must have beside a pod's own disk, and what it keeps out of the disks of their own size it books ([Placement](#placement)) |
 | `--idle-pause` | `10s` | a running sandbox idle this long is paused; 0 disables |
 | `--hibernate-after` | 0 | a sandbox paused this long is hibernated; 0 disables |
 | `--node-ttl` | `15s` | the age of a node's telemetry before it is down |
@@ -839,7 +839,7 @@ Every row has an **incarnation**, a UUID set when the row is inserted: a
 row inserted again under an ID that was deleted would be a new
 incarnation (ferund mints new IDs, so only a drawn ID of a deleted
 sandbox could be).
-The pod's spec is `{resources: {vcpus, memory_mib}, containers: [{name:
+The pod's spec is `{resources: {vcpus, memory_mib[, disk_gib]}, containers: [{name:
 "main", image_ref, command: ["sleep", "infinity"]}], network: {}, labels:
 {ferun.sandbox, ferun.tenant, ferun.incarnation}}`, the same on every
 retry: feosd compares specs, labels included, so a create against a
@@ -1108,7 +1108,21 @@ IDs](#sandbox-ids)); for a restore, the
 checkpoint's object store; slots; CPU, `floor(cores × cpu_overcommit)`,
 not gated when 0; memory, the total less the headroom; free memory, the
 reported available less the headroom; disk, the available against
-`--disk-budget`. Among the nodes that pass,
+`--disk-budget`, plus the pod's own disk for a pod that has one
+("disk gate (<n> GiB available, <m> GiB for the pod's disk and the
+budget)"); and for such a pod the disks of their own size booked on the
+node with its own within the node's disk total less `--disk-budget`
+("disk booking gate (<booked>GiB+<pod>GiB of <capacity>GiB)"). A pod's
+disk is thin and holds what it writes: one of the guest's 8 GiB books
+nothing (the slots and the budget cover those, as before), one of its
+own size (`resources.diskGib` of an environment's image service or job,
+`sandboxes.disk_gib`, `0038`) books it whole, `bookings.disk_gib`, while
+the pod runs, as its vCPUs and memory, whatever it wrote of it: the
+gates err on the side of room. The booked disks are part of the score's
+scarcest resource once any is booked, and of the nodes' view
+(`diskBookedBytes`, `diskCapacityBytes`). The live gate sees what the
+node holds now, its other pods' disks and diskd's chunk cache with it;
+the booking gate the large disks' growth to come. Among the nodes that pass,
 `binpack` takes the one whose scarcest resource has the least free share,
 `spread` the most, ties by name; a hibernated sandbox prefers the node
 that holds its record. The op's begin rechecks the gates under the
@@ -1579,7 +1593,10 @@ deleted), `runningJobs` (tenants' jobs queued or running), and the sums
 environments' services of runtime `image` by their current
 deployments' resources, its addons' plans and its running jobs (an
 attached service runs in a sandbox, which counts already; environments'
-own jobs are not counted). A tenant a person makes gets the
+own jobs are not counted). A service's or job's disk (`diskGib`) counts
+towards no limit: it is bounded per pod (200 GiB), booked on its node
+whole while the pod runs ([Placement](#placement)), and scratch, so it
+costs a node's room while it runs and nothing after. A tenant a person makes gets the
 `--tenant-default-*` limits; a tenant an operator makes has none; an
 operator replaces any tenant's with `PUT
 /api/v1/admin/tenants/{tenant}/limits {sandboxes, environments,
@@ -2559,7 +2576,12 @@ beside the template's `ferun.environment`, `ferun.object`
 deployment label: an object a deployment does not change keeps its pods. Rows
 are inserted with `idle_after_s` always written, IDs ferund mints ([Sandbox
 IDs](#sandbox-ids)), and at least 256 MiB, the rows' floor,
-which valkey's and nats's `dev` plans are raised to.
+which valkey's and nats's `dev` plans are raised to. `disk_gib` (`0038`)
+is the row's disk of its own size, fixed, 0 for the guest's: an image
+service's or job's `resources.diskGib` when it is larger than 8, which
+the pod's spec carries (`Resources.disk_gib`) and the template hash
+takes only when it is set, so that every template of before hashes as
+it did.
 
 Instance rows are no tenant's sandboxes: the tenant's listing and the
 admin listing's `sandboxCount` leave them out, the tenant routes answer
@@ -2739,7 +2761,8 @@ absent for lists, maps and objects. Every problem is a finding
 shapes:
 
 - **Services** run `image`, pods of their own: replicas 0 to 20 (1),
-  vCPUs 1 to 32 (1), memory 256 to 65536 MiB (512), readiness by http,
+  vCPUs 1 to 32 (1), memory 256 to 65536 MiB (512), a disk of 8 to 200
+  GiB (`resources.diskGib`, left out the guest's 8 GiB, see below), readiness by http,
   tcp or exec with an initial delay (0s), a period of at least 1 s (2s)
   and a failure threshold (3), `idle` of at least 1m only on a route's
   target ("nothing would wake it"), `rollout.timeout` (10m). Or they run
@@ -2759,7 +2782,18 @@ shapes:
   environment is, where a reference opens its port.
 - **Jobs**: an image, `on` `deploy` (the default, a deploy job; its
   earlier word `release` is the same, accepted for good) or `manual`, retries 0
-  to 5, a timeout of 10m by default and 2h at most.
+  to 5, a timeout of 10m by default and 2h at most; resources as a
+  service's, the disk among them.
+- **The disk** (`resources.diskGib`) is each pod's, the guest's data
+  volume: the image, the container's own files and whatever it writes
+  outside its volumes. It is **scratch**: every new pod, a new
+  deployment's, a replacement, a job's next run, starts on an empty one
+  (or on a baked layer of its image), and what must last belongs in an
+  addon's volume. It does go along when its pod moves (a drain or a
+  hibernation takes the whole disk to the object store and back, [The
+  pods' disks](disk.md#the-pods-disks)). 8, the guest's size, is the
+  same pod as none; a change of the size is a new template, which rolls
+  the object.
 - **Image credentials** (`imageCredentials`, image services and jobs):
   a username and a password, each a string or `{secret}` of the
   environment, the secret existing as an env value's does; not on an

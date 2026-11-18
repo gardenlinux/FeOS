@@ -130,7 +130,8 @@ message CreateDiskRequest {
   string pod_id = 1;
   // Layer ids, L0 first; the last is the parent of the fresh top.
   repeated string chain = 2;
-  // The disk's size in bytes; 0 takes the chain's.
+  // The disk's size in bytes, at least the chain's: 0, or a smaller
+  // size, takes the chain's. What lies beyond the chain reads as zeroes.
   uint64 logical_size = 3;
 }
 

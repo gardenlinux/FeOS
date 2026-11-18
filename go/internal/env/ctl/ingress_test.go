@@ -156,7 +156,7 @@ func storedHash(r store.EnvInstanceRow) string {
 	t.SecurityGroups = slices.DeleteFunc(slices.Clone(t.SecurityGroups), func(g string) bool {
 		return g == model.IngressGroupID(r.Sandbox.ID)
 	})
-	return t.Hash(r.Sandbox.Image, r.Sandbox.VCPUs, r.Sandbox.MemoryMiB)
+	return t.Hash(r.Sandbox.Image, r.Sandbox.VCPUs, r.Sandbox.MemoryMiB, r.Sandbox.DiskGiB)
 }
 
 // ingRule is the one rule of an ing group that opens ports to the

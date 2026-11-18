@@ -266,11 +266,12 @@ func TestNodes(t *testing.T) {
 	if _, err := e.st.MarkNodeReady(ctx, "n1"); err != nil {
 		t.Fatal(err)
 	}
-	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box, VCPUs: 2, MemoryMiB: 512})
+	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box, VCPUs: 2, MemoryMiB: 512,
+		DiskGiB: 30})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.UpsertBooking(ctx, store.Booking{PodID: sb.ID, Node: "n1", VCPUs: 2, MemoryMiB: 512, Gated: true}); err != nil {
+	if err := e.st.UpsertBooking(ctx, store.Booking{PodID: sb.ID, Node: "n1", VCPUs: 2, MemoryMiB: 512, DiskGiB: 30, Gated: true}); err != nil {
 		t.Fatal(err)
 	}
 	notAfter := time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Second)
@@ -301,7 +302,8 @@ func TestNodes(t *testing.T) {
 		"memHeadroomBytes": "1073741824", "vcpusCapacity": 4.0, "memoryCapacityBytes": "7516192768",
 		"cpuOvercommit": 1.5, "memAvailBytes": "4294967296", "diskAvailBytes": "53687091200", "load1": 0.5,
 		"sandboxesRunning": 2.0, "sandboxesPaused": 1.0, "inventoryHash": "hash", "downSinceNs": "0",
-		"sandboxesBooked": 1.0, "vcpusBooked": 2.0, "memoryBookedBytes": "536870912", "objectStore": true,
+		"sandboxesBooked": 1.0, "vcpusBooked": 2.0, "memoryBookedBytes": "536870912", "diskBookedBytes": "32212254720",
+		"diskCapacityBytes": "107374182400", "objectStore": true,
 		"objectStoreId": "os1", "podPrefix": "fd00::/64", "meshPrefix": "fd5e:1b2c:93a0:7::/64",
 		"meshEndpoint": "10.0.0.11:51820", "connected": true, "connections": 2.0, "certSerial": "abc123",
 		"certNotAfter": notAfter.Format(time.RFC3339), "identityForked": false, "removedAt": "", "stoppingUntil": "",

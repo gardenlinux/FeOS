@@ -21,15 +21,18 @@ type Booking struct {
 	Node      string
 	VCPUs     int
 	MemoryMiB int
-	Gated     bool // false: booked because the pod uses the node, past the gates
-	BookedAt  time.Time
+	// DiskGiB is the pod's disk of its own size (Sandbox.DiskGiB), which
+	// it books on the node's disk; 0 for the guest's.
+	DiskGiB  int
+	Gated    bool // false: booked because the pod uses the node, past the gates
+	BookedAt time.Time
 }
 
-const bookingCols = "pod_id, node, vcpus, memory_mib, gated, booked_at"
+const bookingCols = "pod_id, node, vcpus, memory_mib, disk_gib, gated, booked_at"
 
 func scanBooking(row pgx.Row) (Booking, error) {
 	var b Booking
-	err := row.Scan(&b.PodID, &b.Node, &b.VCPUs, &b.MemoryMiB, &b.Gated, &b.BookedAt)
+	err := row.Scan(&b.PodID, &b.Node, &b.VCPUs, &b.MemoryMiB, &b.DiskGiB, &b.Gated, &b.BookedAt)
 	return b, err
 }
 
@@ -43,10 +46,11 @@ func (s *Store) GetBooking(ctx context.Context, podID podid.ID) (Booking, error)
 // replacing a booking on another node; model.ErrNotFound when the sandbox
 // does not exist.
 func (s *Store) UpsertBooking(ctx context.Context, b Booking) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO bookings (pod_id, node, vcpus, memory_mib, gated) VALUES ($1, $2, $3, $4, $5)
+	_, err := s.q.Exec(ctx, `INSERT INTO bookings (pod_id, node, vcpus, memory_mib, disk_gib, gated)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (pod_id) DO UPDATE SET node = excluded.node, vcpus = excluded.vcpus,
-			memory_mib = excluded.memory_mib, gated = excluded.gated, booked_at = now()`,
-		b.PodID, b.Node, b.VCPUs, b.MemoryMiB, b.Gated)
+			memory_mib = excluded.memory_mib, disk_gib = excluded.disk_gib, gated = excluded.gated, booked_at = now()`,
+		b.PodID, b.Node, b.VCPUs, b.MemoryMiB, b.DiskGiB, b.Gated)
 	if isForeignKeyViolation(err) {
 		return model.ErrNotFound
 	}
@@ -73,6 +77,8 @@ type BookingSums struct {
 	Count     int64
 	VCPUs     int64
 	MemoryMiB int64
+	// DiskGiB sums the disks of their own size.
+	DiskGiB int64
 }
 
 // SumBookings sums the bookings on node, without the pod exclude (""
@@ -80,15 +86,16 @@ type BookingSums struct {
 // against, under the node's row lock.
 func (s *Store) SumBookings(ctx context.Context, node string, exclude podid.ID) (BookingSums, error) {
 	var b BookingSums
-	err := s.q.QueryRow(ctx, `SELECT count(*), coalesce(sum(vcpus), 0), coalesce(sum(memory_mib), 0)
-		FROM bookings WHERE node = $1 AND pod_id <> $2`, node, exclude).Scan(&b.Count, &b.VCPUs, &b.MemoryMiB)
+	err := s.q.QueryRow(ctx, `SELECT count(*), coalesce(sum(vcpus), 0), coalesce(sum(memory_mib), 0),
+		coalesce(sum(disk_gib), 0) FROM bookings WHERE node = $1 AND pod_id <> $2`, node, exclude).Scan(&b.Count,
+		&b.VCPUs, &b.MemoryMiB, &b.DiskGiB)
 	return b, err
 }
 
 // SumAllBookings sums the bookings of every node, without the pod exclude
 // ("" excludes nothing).
 func (s *Store) SumAllBookings(ctx context.Context, exclude podid.ID) (map[string]BookingSums, error) {
-	rows, err := s.q.Query(ctx, `SELECT node, count(*), sum(vcpus), sum(memory_mib) FROM bookings
+	rows, err := s.q.Query(ctx, `SELECT node, count(*), sum(vcpus), sum(memory_mib), sum(disk_gib) FROM bookings
 		WHERE pod_id <> $1 GROUP BY node`, exclude)
 	if err != nil {
 		return nil, err
@@ -96,7 +103,7 @@ func (s *Store) SumAllBookings(ctx context.Context, exclude podid.ID) (map[strin
 	out := map[string]BookingSums{}
 	var node string
 	var b BookingSums
-	_, err = pgx.ForEachRow(rows, []any{&node, &b.Count, &b.VCPUs, &b.MemoryMiB}, func() error {
+	_, err = pgx.ForEachRow(rows, []any{&node, &b.Count, &b.VCPUs, &b.MemoryMiB, &b.DiskGiB}, func() error {
 		out[node] = b
 		return nil
 	})
@@ -128,13 +135,13 @@ func (s *Store) PlacementSnapshot(ctx context.Context, podID podid.ID) ([]NodeSn
 			t.node IS NOT NULL, coalesce(t.last_seen, 'epoch'::timestamptz), coalesce(t.load1, 0),
 			coalesce(t.memory_available_bytes, 0), coalesce(t.disk_available_bytes, 0),
 			coalesce(t.inventory_hash, ''),
-			coalesce(b.cnt, 0), coalesce(b.vcpus, 0), coalesce(b.mem, 0),
+			coalesce(b.cnt, 0), coalesce(b.vcpus, 0), coalesce(b.mem, 0), coalesce(b.disk, 0),
 			EXISTS (SELECT 1 FROM pod_tombstones pt WHERE pt.pod_id = $1::text AND pt.node = n.name),
 			(SELECT s.id FROM sandboxes s WHERE s.node = n.name AND `+tapShares(1)+`
 				AND `+tapHolds+` ORDER BY s.id LIMIT 1)
 		FROM nodes n
 		LEFT JOIN node_telemetry t ON t.node = n.name
-		LEFT JOIN (SELECT node, count(*) AS cnt, sum(vcpus) AS vcpus, sum(memory_mib) AS mem
+		LEFT JOIN (SELECT node, count(*) AS cnt, sum(vcpus) AS vcpus, sum(memory_mib) AS mem, sum(disk_gib) AS disk
 			FROM bookings WHERE pod_id <> $1::text GROUP BY node) b ON b.node = n.name
 		WHERE n.status <> 'removed' ORDER BY n.name`, podID)
 	if err != nil {
@@ -147,7 +154,7 @@ func (s *Store) PlacementSnapshot(ctx context.Context, podID podid.ID) ([]NodeSn
 		var tap *podid.ID
 		targets = append(targets, &ns.HasTelemetry, &ns.Telemetry.LastSeen, &load1,
 			&ns.Telemetry.MemoryAvailableBytes, &ns.Telemetry.DiskAvailableBytes, &ns.Telemetry.InventoryHash,
-			&ns.Booked.Count, &ns.Booked.VCPUs, &ns.Booked.MemoryMiB, &ns.Tombstoned, &tap)
+			&ns.Booked.Count, &ns.Booked.VCPUs, &ns.Booked.MemoryMiB, &ns.Booked.DiskGiB, &ns.Tombstoned, &tap)
 		if err := r.Scan(targets...); err != nil {
 			return NodeSnapshot{}, err
 		}

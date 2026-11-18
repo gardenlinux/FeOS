@@ -100,21 +100,24 @@ impl Disks {
 
     /// Starts the pod's disk for a boot, and returns the path Firecracker
     /// takes: the disk the node has of the pod, or the one of its
-    /// checkpoint `head_key`, or a new one, on a layer baked of the pod's
-    /// `image` or on the blank data volume (ADR 0025). For a new disk of a
-    /// pod with an image, it also returns what the disk was made on.
+    /// checkpoint `head_key`, or a new one of `size` bytes (0: the blank
+    /// data volume's, which a smaller size is too), on a layer baked of
+    /// the pod's `image` or on the blank data volume (ADR 0025). For a new
+    /// disk of a pod with an image, it also returns what the disk was made
+    /// on. A disk the node or the checkpoint has keeps its size.
     pub async fn open(
         &self,
         pod_id: &str,
         head_key: Option<&str>,
         image: Option<(&str, &[BakedLayer])>,
+        size: u64,
     ) -> Result<(String, Option<BakedLayer>), Status> {
         if let Some(device) = self.open_existing(pod_id).await? {
             return Ok((device, None));
         }
         match head_key {
             Some(head_key) => Ok((self.open_checkpoint(pod_id, head_key).await?, None)),
-            None => self.create(pod_id, image).await,
+            None => self.create(pod_id, image, size).await,
         }
     }
 
@@ -241,11 +244,15 @@ impl Disks {
     /// when the pod has an image. The guest that baked a layer does not
     /// matter: the guest boots from its own kernel and initramfs, and the
     /// disk holds only what its image service unpacked, so a change to
-    /// that comes with a new blank data volume (ADR 0022).
+    /// that comes with a new blank data volume (ADR 0022). A disk larger
+    /// than the blank data volume reads zeroes beyond it, into which its
+    /// guest grows the filesystem; a baked layer is made on a disk of the
+    /// blank data volume's size (`bake::due`), so it fits any size.
     async fn create(
         &self,
         pod_id: &str,
         image: Option<(&str, &[BakedLayer])>,
+        size: u64,
     ) -> Result<(String, Option<BakedLayer>), Status> {
         let (blank, guest_version) = self.blank().await?;
         let made = |layer_id: &str| {
@@ -261,7 +268,10 @@ impl Disks {
                 .iter()
                 .filter(|layer| bake::fits(layer, image_ref, &blank))
             {
-                match self.create_on_layer(pod_id, &blank, &layer.layer_id).await {
+                match self
+                    .create_on_layer(pod_id, &blank, &layer.layer_id, size)
+                    .await
+                {
                     Ok(device) => {
                         info!(
                             "Disks: {pod_id} has a new disk on layer {} of {image_ref}",
@@ -277,18 +287,19 @@ impl Disks {
                 }
             }
         }
-        let device = self.create_blank(pod_id).await?;
+        let device = self.create_blank(pod_id, size).await?;
         Ok((device, made("")))
     }
 
-    /// A new disk on the baked layer `layer` over the blank data volume's
-    /// `blank`: its manifest is fetched from the object store first, unless
-    /// diskd has it.
+    /// A new disk of `size` bytes on the baked layer `layer` over the
+    /// blank data volume's `blank`: its manifest is fetched from the object
+    /// store first, unless diskd has it.
     async fn create_on_layer(
         &self,
         pod_id: &str,
         blank: &str,
         layer: &str,
+        size: u64,
     ) -> Result<String, Status> {
         let pull = LayerRef {
             layer_id: layer.to_string(),
@@ -298,20 +309,20 @@ impl Disks {
         let request = CreateDiskRequest {
             pod_id: pod_id.to_string(),
             chain: vec![blank.to_string(), layer.to_string()],
-            logical_size: 0,
+            logical_size: size,
         };
         let device = self.client().create_disk(request).await.map_err(diskd)?;
         Ok(device.into_inner().link_path)
     }
 
-    /// A new disk on the blank data volume.
-    async fn create_blank(&self, pod_id: &str) -> Result<String, Status> {
+    /// A new disk of `size` bytes on the blank data volume.
+    async fn create_blank(&self, pod_id: &str, size: u64) -> Result<String, Status> {
         let create = |chain: String| {
             let mut client = self.client();
             let request = CreateDiskRequest {
                 pod_id: pod_id.to_string(),
                 chain: vec![chain],
-                logical_size: 0,
+                logical_size: size,
             };
             async move { client.create_disk(request).await }
         };
@@ -329,7 +340,10 @@ impl Disks {
             }
             Err(e) => return Err(diskd(e)),
         };
-        info!("Disks: {pod_id} has a new disk");
+        match size {
+            0 => info!("Disks: {pod_id} has a new disk"),
+            _ => info!("Disks: {pod_id} has a new disk of {} GiB", size >> 30),
+        }
         Ok(device.into_inner().link_path)
     }
 

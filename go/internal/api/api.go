@@ -229,6 +229,9 @@ type Config struct {
 
 	DefaultImage                   string
 	DefaultVCPUs, DefaultMemoryMiB int
+	// DiskBudget is placement's disk budget (--disk-budget), which a
+	// node's capacity for disks of their own size leaves free.
+	DiskBudget int64
 	// JoinTokenTTL is a join token's lifetime when the request names none.
 	JoinTokenTTL time.Duration
 

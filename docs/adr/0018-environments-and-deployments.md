@@ -65,7 +65,14 @@ it can state and get an answer for at once.
   a service (ADR 0043, ADR 0021); a **secret** (ADR 0044); a **binding**
   (ADR 0028). Services have no volumes of their own: data lives in
   addons, and a spec that mounts a volume into a service is refused
-  with a finding that says so.
+  with a finding that says so. A service's or a job's pods may ask for
+  a disk larger than the guest's 8 GiB (`resources.diskGib`, 8 to 200
+  GiB, beside `vcpus` and `memoryMib`): the room of the image, the
+  container's own files and what it writes, as a cache or a spool.
+  The disk is scratch: every new pod starts on an empty one, and only
+  what moves with a pod (a drain, a hibernation) keeps it. Its node
+  books it whole while the pod runs; it counts towards no tenant's
+  limit.
 - Objects reference each other by name, and the references are resolved
   when a write is validated: a service's environment variable from an
   addon's output, from a secret or from another service's port, a
@@ -320,6 +327,12 @@ it can state and get an answer for at once.
   environments over time and keep names taken nobody uses. **A display
   name beside a fixed name**: the console, the messages and FeCode's
   operators read the name.
+- **A scratch volume per service, mounted at a path**, instead of a
+  larger disk: one more path for the application to name, while the
+  image and the container's own files stay on 8 GiB; a cache under the
+  container's own directories needs the disk itself. **A disk that
+  outlives its pod**: data lives in addons, and a disk kept across
+  replacements would make a service's replicas stateful.
 - **A stop grace per service in the spec**, as Kubernetes's
   `terminationGracePeriodSeconds`: one more value to know and to get
   right. The platform's grace covers a drain of ten minutes, and a
@@ -357,6 +370,12 @@ it can state and get an answer for at once.
   without room for the next replica keeps it pending until an old pod
   there has ended, within the service's budget. An environment's
   deletion takes as long as its pods' drains.
+- A larger disk goes along when its pod moves: a drain or a
+  hibernation uploads what the pod wrote of it since its last
+  checkpoint, and the restored pod reads that back from the object
+  store as it touches it. A cache that filled 30 GiB makes its node's
+  drain that much longer; a replica that is replaced instead starts
+  empty, which a cache takes.
 - A caller that stores an environment's name or builds URLs with it
   must store the new one after a rename; by ID nothing changes, and the
   rename is idempotent, so a client retries it.
@@ -385,4 +404,7 @@ FeCode's drain of 630 s and the 720 s Kubernetes gives it; before, every
 pod had 10 s and a rollout ended a drain halfway. A pod that goes has
 kept its row, its groups and its booking until it ended since
 2026-11-17, by the sandboxes' op `stop` (migration 0039); before, the
-grace ran in its tombstone's `DeletePod` after its row was gone.
+grace ran in its tombstone's `DeletePod` after its row was gone. Since
+2026-11-17 a service or job may also ask for a disk of its own size
+(`resources.diskGib`, migration 0038), for FeCode's git cache and the
+like; before, every pod had the guest's 8 GiB.

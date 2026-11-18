@@ -293,10 +293,11 @@ func (t PodTemplate) HasCredential() bool {
 // in sorted order, then name tables in order, the ingress group flag, the
 // image credentials and the HTTP bindings (name, upstream and mode), each
 // only when there are any or it is set, so that a template without them
-// hashes as before they were). Equal pods hash equal: a nil and an
-// empty list or map hash alike. What an instance is not rebuilt for (its
-// labels, the idle policy, the deployment) is not in it.
-func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
+// hashes as before they were). The disk is in it only when the pod has
+// one of its own size (diskGiB > 0), likewise. Equal pods hash equal: a
+// nil and an empty list or map hash alike. What an instance is not
+// rebuilt for (its labels, the idle policy, the deployment) is not in it.
+func (t PodTemplate) Hash(image string, vcpus, memoryMiB, diskGiB int) string {
 	groups := slices.Clone(t.SecurityGroups)
 	slices.Sort(groups)
 	h := struct {
@@ -320,8 +321,10 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		// With the internet's egress, a template hashes as before it.
 		RestrictEgressNames bool     `json:"restrictEgressNames,omitempty"`
 		EgressDomains       []string `json:"egressDomains,omitempty"`
+		// Without a disk of its own size, a template hashes as before.
+		DiskGiB int `json:"diskGib,omitempty"`
 	}{
-		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
+		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB, DiskGiB: diskGiB,
 		Command: nonNil(t.Command), Env: t.Env, Volumes: nonNil(t.Volumes), Mounts: nonNil(t.Mounts),
 		SecurityGroups: nonNil(groups), NameTables: t.NameTables, IngressGroup: t.IngressGroup,
 		ImageCredentials: t.ImageCredentials, HTTPBindings: t.HTTPBindings, TLSBindings: t.TLSBindings,

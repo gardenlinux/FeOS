@@ -459,7 +459,7 @@ func (en *ensurer) refusedOnNode(ctx context.Context, row store.Sandbox, err err
 		return err
 	}
 	switch a.refusal.gate {
-	case gateDraining, gateSlots, gateCPU, gateMemory:
+	case gateDraining, gateSlots, gateCPU, gateMemory, gateDiskBooked:
 	default:
 		return err
 	}
