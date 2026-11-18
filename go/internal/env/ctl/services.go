@@ -54,7 +54,11 @@ func (c *Controller) stepService(ctx context.Context, s *stepState, name string,
 	for _, r := range v.rowsOf(spec.KindService, name) {
 		switch {
 		case r.Instance.Phase == model.PhaseStopping:
-			stopping = append(stopping, r)
+			// One whose traffic drained no longer counts: its pod's stop
+			// grace runs on after the rollout (stepStopping).
+			if draining(r.Instance, v.now) {
+				stopping = append(stopping, r)
+			}
 		case p.ok() && r.Instance.TemplateHash == p.hash:
 			cur = append(cur, r)
 		default:

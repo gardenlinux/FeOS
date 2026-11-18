@@ -608,21 +608,28 @@ func TestHibernateNoAbandonPerTrigger(t *testing.T) {
 	}
 }
 
-// TestRepairCoversTheStopGrace: a repair's StopPod lets a running pod's
-// containers exit after SIGTERM: an image service's instance's repair has
-// its stop grace more than the table's; every other op, and a repair of
-// any other pod, the table's.
+// TestRepairCoversTheStopGrace: a repair's and a stop's StopPod lets a
+// running pod's containers exit after SIGTERM: an image service's
+// instance's repair and stop have its stop grace more than the table's;
+// every other op, and a repair or stop of any other pod, the table's. A
+// stop's own deadline covers a pause's, as its StopPod may wait for the
+// pod's lock behind a suspend feosd still runs, and its own steps.
 func TestRepairCoversTheStopGrace(t *testing.T) {
 	e := &Engine{t: defaultTimings(DefaultHibernateTimeout)}
 	service := store.Sandbox{ID: podid.Mint(), MemoryMiB: 2048, EnvironmentID: uuid.New(), Instance: true,
 		LogLabels: map[string]string{model.LogKind: "service", model.LogObject: "api"}}
-	if got, want := e.opDeadlineOf(OpRepair, service), OpDeadline(OpRepair, 2048)+model.ServiceStopGrace; got != want {
-		t.Errorf("repair of a service's instance: %v, want %v", got, want)
-	}
 	addon := service
 	addon.LogLabels = map[string]string{model.LogKind: "addon", model.LogObject: "db"}
-	if got := e.opDeadlineOf(OpRepair, addon); got != OpDeadline(OpRepair, 2048) {
-		t.Errorf("repair of an addon: %v", got)
+	for _, k := range []OpKind{OpRepair, OpStop} {
+		if got, want := e.opDeadlineOf(k, service), OpDeadline(k, 2048)+model.ServiceStopGrace; got != want {
+			t.Errorf("%s of a service's instance: %v, want %v", k, got, want)
+		}
+		if got := e.opDeadlineOf(k, addon); got != OpDeadline(k, 2048) {
+			t.Errorf("%s of an addon: %v", k, got)
+		}
+	}
+	if got, pause := OpDeadline(OpStop, 2048), OpDeadline(OpPause, 2048); got < pause+time.Minute {
+		t.Errorf("a stop's deadline %v leaves less than a minute past a pause's %v", got, pause)
 	}
 	for _, k := range []OpKind{OpCreate, OpStart, OpResume, OpRestore, OpPause, OpHibernate} {
 		if got := e.opDeadlineOf(k, service); got != OpDeadline(k, 2048) {

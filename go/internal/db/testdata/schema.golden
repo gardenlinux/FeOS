@@ -888,7 +888,7 @@ TABLE sandboxes
   CONSTRAINT CHECK ((client_state = ANY (ARRAY['pending'::text, 'creating'::text, 'running'::text, 'pausing'::text, 'paused'::text, 'resuming'::text, 'hibernating'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'unknown'::text, 'lost'::text])))
   CONSTRAINT CHECK ((id ~ '^([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'::text))
   CONSTRAINT CHECK ((idle_after_s >= 0))
-  CONSTRAINT CHECK ((op = ANY (ARRAY[''::text, 'create'::text, 'start'::text, 'resume'::text, 'restore'::text, 'pause'::text, 'hibernate'::text, 'repair'::text])))
+  CONSTRAINT CHECK ((op = ANY (ARRAY[''::text, 'create'::text, 'start'::text, 'resume'::text, 'restore'::text, 'pause'::text, 'hibernate'::text, 'repair'::text, 'stop'::text])))
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id)
   CONSTRAINT FOREIGN KEY (lost_from) REFERENCES nodes(name)
   CONSTRAINT FOREIGN KEY (node) REFERENCES nodes(name)

@@ -86,6 +86,7 @@ func (f *fakeEngine) Restart(context.Context, podid.ID, string) error {
 	defer f.mu.Unlock()
 	return f.restartErr
 }
+func (f *fakeEngine) StopPod(context.Context, podid.ID) error { return nil }
 func (f *fakeEngine) ResolveImage(_ context.Context, image string, _ model.RegistryCredentials) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

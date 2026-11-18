@@ -851,6 +851,8 @@ func opGoal(kind OpKind) string {
 		return model.StatePaused
 	case OpHibernate:
 		return model.StateHibernated
+	case OpStop:
+		return model.StateStopped
 	}
 	return model.StateRunning
 }
