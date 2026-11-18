@@ -42,7 +42,9 @@ const (
 	PhaseExited    = "exited"
 	PhaseSucceeded = "succeeded"
 	PhaseFailed    = "failed"
-	// PhaseStopping: it no longer serves and goes after its grace.
+	// PhaseStopping: it no longer serves; its traffic drains until its
+	// retire_at, then its pod stops (the sandboxes' op stop), and its row
+	// goes once the pod has ended (ADR 0018).
 	PhaseStopping = "stopping"
 )
 

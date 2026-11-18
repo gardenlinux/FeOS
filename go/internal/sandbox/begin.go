@@ -18,7 +18,9 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// transitional is the state an op holds the sandbox in while it runs.
+// transitional is the state an op holds the sandbox in while it runs. A
+// stop's pod runs until its containers have exited: the row stays
+// running, booked as one, and its op says that it stops.
 func transitional(k OpKind) string {
 	switch k {
 	case OpResume:
@@ -27,6 +29,8 @@ func transitional(k OpKind) string {
 		return model.StatePausing
 	case OpHibernate:
 		return model.StateHibernating
+	case OpStop:
+		return model.StateRunning
 	}
 	return model.StateCreating
 }
@@ -407,7 +411,7 @@ func (r *runner) noAbandon(ctx context.Context, tx *store.Store, trigger OpTrigg
 // unreachable; begun by the repair loop or Ensure, for longer than the
 // threshold that made them begin it (a Sync that applied RUNNING, or a
 // healthy call that cleared unreachable_since, after their read stops it).
-// Restart's repair needs only a running row.
+// Restart's repair needs only a running row, and so does a stop.
 func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbox, in OpIntent, target string) error {
 	st := row.ClientState
 	ok := false
@@ -436,6 +440,8 @@ func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbo
 		ok = (st == model.StateCreating && !row.PendingSince.IsZero()) ||
 			(st == model.StateRunning && !row.UnreachableSince.IsZero()) ||
 			(st == model.StateRunning && in.Trigger == TriggerRestart)
+	case OpStop:
+		ok = st == model.StateRunning
 	default:
 		return fmt.Errorf("sandbox: unknown op %q", in.Kind)
 	}

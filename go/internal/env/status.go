@@ -161,7 +161,8 @@ func objectsOf(sp *spec.Spec, instances []store.EnvInstanceRow, attached []store
 func instanceStatus(row store.EnvInstanceRow) InstanceStatus {
 	i, sb := row.Instance, row.Sandbox
 	detail := i.Detail
-	if detail == "" && sb.ClientState != model.StateRunning {
+	// A stop's row stays running while its containers drain, and says so.
+	if detail == "" && (sb.ClientState != model.StateRunning || sb.Op != "") {
 		detail = sb.StatusDescription
 	}
 	return InstanceStatus{ID: sb.ID.String(), Replica: i.Replica, Phase: i.Phase, State: sb.ClientState, Node: sb.Node,

@@ -150,16 +150,39 @@ it can state and get an answer for at once.
   old one goes, routes following readiness, and brings its attached
   services up. It is deployed when every object matches it; the status
   names the deployed deployment and the one in progress.
-- An old pod stops taking traffic first, and goes 10 s later: its node
-  sends its container `SIGTERM` and gives an image service's 660 s to
-  exit before the microVM ends (the pod's stop grace, ADR 0004), so that
-  a service that drains finishes, as FeCode's backend hands its agents'
-  turns over to another replica within 630 s; one that exits sooner goes
-  sooner. The grace is `ferund`'s by the kind of pod, not a field of the
-  environment's spec: a sandbox's, a job's and an addon's pods keep the
-  node's 10 s, since a sandbox's container ignores `SIGTERM` and would
-  wait out any grace, an addon's next pod waits for its volume, and a
-  stopped job is cancelled.
+- An old pod stops taking traffic first, and is stopped 10 s later: its
+  node sends its container `SIGTERM` and gives an image service's 660 s
+  to exit before the microVM ends (the pod's stop grace, ADR 0004), so
+  that a service that drains finishes, as FeCode's backend hands its
+  agents' turns over to another replica within 630 s; one that exits
+  sooner goes sooner. The grace is `ferund`'s by the kind of pod, not a
+  field of the environment's spec: a sandbox's, a job's and an addon's
+  pods keep the node's 10 s, since a sandbox's container ignores
+  `SIGTERM` and would wait out any grace, an addon's next pod waits for
+  its volume, and a stopped job is cancelled.
+- **A pod that goes keeps its row until it has ended.** Its instance is
+  `stopping` in three steps, each held in the rows, never in memory: its
+  traffic drains (`retire_at`, 10 s); its pod stops, by the sandboxes'
+  op `stop` (`StopPod`), with the row `running` while its containers
+  drain; its row goes once the pod has stopped, or 2 minutes past the
+  drain and the grace whatever the pod does. Through the stop the pod
+  is no longer named in the routes, the environment's name table or the
+  ingress's table, so nothing sends it new work; it stays a member of
+  its security groups, so that the addons and services that admit it by
+  group take the new connections it opens while it finishes (FeCode
+  writes to its database while it hands its turns over); and it stays
+  booked on its node, so that placement never fills the room it holds
+  and a drain does not count its node drained while it runs. Nothing
+  waits for the stop: a rollout replaces its next replica at once, and
+  a deployment is deployed once its old pods' traffic drained, so that a
+  service of two replicas does not roll for twice the grace. A pod that
+  runs nothing to finish (paused, hibernated, in another op) or whose
+  node is down goes at once after the drain; a stop that a `ferund`
+  instance left when it stopped is taken over by the leader, whose
+  `StopPod` joins the stop that `feosd` runs. An environment's deletion
+  ends its instances by the same steps, without the drain. Like a
+  rollout's surge replica, a stopping instance counts against no tenant
+  limit: limits count what deployments declare.
 - A rollout that does not reach readiness within its budget has
   **failed**: the service keeps the pods of the last deployed deployment
   serving, the new ones are removed, and the environment stays on its
@@ -301,6 +324,21 @@ it can state and get an answer for at once.
   `terminationGracePeriodSeconds`: one more value to know and to get
   right. The platform's grace covers a drain of ten minutes, and a
   service that exits sooner goes sooner.
+- **The row deleted after the traffic's drain, the grace in the
+  tombstone's `DeletePod`** (2026-11-17, e25aca93): the pod drains
+  without its row, so its address leaves its groups and its peers
+  refuse its new connections, and its node's bookings and drain no
+  longer see it.
+- **A phase of its own in `env_instances`** for a pod that stops: the
+  phase `stopping` with `retire_at`, and the sandbox's op and state,
+  say it already, and a phase would be a second record of the op.
+  **The controller calling `StopPod` itself**: an op is what fences a
+  pod against the engine's pauses, drains and repairs, carries its
+  deadline in the row and is taken over when its instance goes.
+- **A deployment that waits for its old pods to end**, as a rollout
+  would that counts terminating pods: every rollout of a service that
+  drains would take its grace per replica and run out of its budget.
+  Kubernetes's rollouts do not wait for terminating pods either.
 
 ## Consequences
 
@@ -314,8 +352,11 @@ it can state and get an answer for at once.
 - A service whose process ignores `SIGTERM`, as a PID 1 without a
   handler of its own does, keeps its old pods and their memory for the
   whole 660 s at every rollout and delete, until it handles the signal or
-  the guest's reaper is in front of it (ADR 0048). The grace runs after
-  the old pod's row is gone (BACKLOG).
+  the guest's reaper is in front of it (ADR 0048).
+- A rollout needs room for its old pods while they drain: a node
+  without room for the next replica keeps it pending until an old pod
+  there has ended, within the service's budget. An environment's
+  deletion takes as long as its pods' drains.
 - A caller that stores an environment's name or builds URLs with it
   must store the new one after a rename; by ID nothing changes, and the
   rename is idempotent, so a client retries it.
@@ -341,4 +382,7 @@ is merged here; addons, jobs, attached services, the route door and
 secrets were split into ADR 0040 to 0044 on 2026-11-08. An image
 service's pods have had a stop grace of 660 s since 2026-11-17, between
 FeCode's drain of 630 s and the 720 s Kubernetes gives it; before, every
-pod had 10 s and a rollout ended a drain halfway.
+pod had 10 s and a rollout ended a drain halfway. A pod that goes has
+kept its row, its groups and its booking until it ended since
+2026-11-17, by the sandboxes' op `stop` (migration 0039); before, the
+grace ran in its tombstone's `DeletePod` after its row was gone.
