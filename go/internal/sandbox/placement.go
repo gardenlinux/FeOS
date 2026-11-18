@@ -4,6 +4,7 @@
 package sandbox
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -32,6 +33,10 @@ const (
 	gateDisk       = 13 // live disk for the disk budget and the pod's own disk
 	gatePin        = 14 // create: the node the row is pinned to
 	gateDiskBooked = 15 // booked disks within the disk total less the disk budget
+	// gatePeers refuses a claim whose node got another instance of the
+	// replica's service since the snapshot (peersCame). It is in no list
+	// and decides only the order: the begin tries the node again last.
+	gatePeers = 16
 )
 
 // The gates of each check: a placement's snapshot, the claim of a create
@@ -225,10 +230,15 @@ func (p *placement) noCapacity() string {
 }
 
 // place scores every node for the sandbox's pod from a snapshot read (the
-// nodes, their telemetry and bookings, this pod's tombstones and TAP
-// conflicts). The op's begin claims the first candidate that passes the
-// gates again under its lock. A restore prefers the node that holds its
-// record whenever it passes every gate.
+// nodes, their telemetry and bookings, this pod's tombstones, TAP
+// conflicts and peers). The op's begin claims the first candidate that
+// passes the gates again under its lock. The nodes that pass rank by the
+// pod's peers first, so that a service's replicas go to different nodes
+// under either policy (ADR 0018): fewer of the service's other instances
+// of its template, then fewer of another; then a restore's record node,
+// then the policy's score, then the name. The peers rank and never
+// refuse: a replica goes beside another when every node that passes holds
+// one. A pod that is no service's instance has no peers.
 func (e *Engine) place(ctx context.Context, sb store.Sandbox, kind OpKind) (placement, error) {
 	snaps, err := e.st.PlacementSnapshot(ctx, sb.ID)
 	if err != nil {
@@ -236,6 +246,7 @@ func (e *Engine) place(ctx context.Context, sb store.Sandbox, kind OpKind) (plac
 	}
 	type scored struct {
 		name  string
+		peers store.Peers
 		score float64
 	}
 	var p placement
@@ -244,7 +255,7 @@ func (e *Engine) place(ctx context.Context, sb store.Sandbox, kind OpKind) (plac
 		in := e.gateInput(sb, kind, ns.Node)
 		in.telemetry, in.hasTelemetry = ns.Telemetry, ns.HasTelemetry
 		in.booked, in.tombstoned, in.tap = ns.Booked, ns.Tombstoned, ns.TAPConflict
-		v := store.PlacementCandidate{Node: ns.Node.Name}
+		v := store.PlacementCandidate{Node: ns.Node.Name, Peers: ns.Peers}
 		if r := in.check(placementGates); r != nil {
 			v.Reason = r.text
 			if r.gate == gateTombstone {
@@ -255,11 +266,27 @@ func (e *Engine) place(ctx context.Context, sb store.Sandbox, kind OpKind) (plac
 			}
 		} else {
 			v.Feasible, v.Score = true, in.score()
-			feasible = append(feasible, scored{ns.Node.Name, v.Score})
+			feasible = append(feasible, scored{ns.Node.Name, ns.Peers, v.Score})
 		}
 		p.verdicts = append(p.verdicts, v)
 	}
+	record := ""
+	if kind == OpRestore {
+		record = sb.Node
+	}
 	slices.SortFunc(feasible, func(a, b scored) int {
+		if c := cmp.Compare(a.peers.Same, b.peers.Same); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.peers.Other, b.peers.Other); c != 0 {
+			return c
+		}
+		if record != "" && (a.name == record) != (b.name == record) {
+			if a.name == record {
+				return -1
+			}
+			return 1
+		}
 		if a.score != b.score {
 			less := a.score < b.score
 			if e.cfg.Placement == PlacementSpread {
@@ -275,12 +302,29 @@ func (e *Engine) place(ctx context.Context, sb store.Sandbox, kind OpKind) (plac
 	for _, f := range feasible {
 		p.candidates = append(p.candidates, f.name)
 	}
-	if kind == OpRestore && sb.Node != "" {
-		if i := slices.Index(p.candidates, sb.Node); i > 0 {
-			p.candidates = append([]string{sb.Node}, slices.Delete(p.candidates, i, i+1)...)
-		}
-	}
 	return p, nil
+}
+
+// peersCame refuses target to a create or restore of a service's replica
+// when another instance of the service came there since the placement's
+// snapshot, whose verdicts say what it saw: replicas placed at once rank
+// the nodes from the same snapshot and would all claim the first. The
+// caller holds the node's row lock, which every claim of the node takes,
+// so the count is the latest. A target without a verdict passes.
+func peersCame(ctx context.Context, tx *store.Store, sb store.Sandbox, target string,
+	verdicts []store.PlacementCandidate) error {
+	i := slices.IndexFunc(verdicts, func(v store.PlacementCandidate) bool { return v.Node == target })
+	if !sb.Instance || i < 0 {
+		return nil
+	}
+	now, err := tx.NodePeers(ctx, sb.ID, target)
+	if err != nil {
+		return err
+	}
+	if seen := verdicts[i].Peers; now.Same > seen.Same || now.Other > seen.Other {
+		return &refusal{node: target, gate: gatePeers, text: "another instance of the service came since the placement"}
+	}
+	return nil
 }
 
 // gateInput is the pod's side of the gates for a sandbox's op on node. A

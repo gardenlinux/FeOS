@@ -86,8 +86,12 @@ type OpIntent struct {
 	// runs (Restart's).
 	reason string
 
-	// verdicts is the placement's verdict per node, for the audit row.
+	// verdicts is the placement's verdict per node, for the audit row and
+	// the peers its claim compares with (peersCame).
 	verdicts []store.PlacementCandidate
+	// besidePeers: the claim takes its node whatever peers came there
+	// since the snapshot (the begin's second try of a candidate).
+	besidePeers bool
 	// takeover, when set, is the op id of a stale op the caller means to
 	// take over: the begin takes it over or fails with ErrPrecondition,
 	// and never begins an op of its own.

@@ -111,8 +111,9 @@ func (s *Store) SumAllBookings(ctx context.Context, exclude podid.ID) (map[strin
 }
 
 // NodeSnapshot is a node as placement scores it for one pod: the row, its
-// latest telemetry, what is booked there without the pod, and the
-// pod-specific gates (a tombstone of the pod there, a TAP prefix taken).
+// latest telemetry, what is booked there without the pod, the
+// pod-specific gates (a tombstone of the pod there, a TAP prefix taken)
+// and the pod's peers there.
 type NodeSnapshot struct {
 	Node Node
 	// Telemetry is the zero value (HasTelemetry false) before the first
@@ -126,6 +127,31 @@ type NodeSnapshot struct {
 	// pod's name and may exist ("" if none): only a pod with a UUID has
 	// one (ADR 0019).
 	TAPConflict podid.ID
+	// Peers are the pod's peers on the node (peersOf).
+	Peers Peers
+}
+
+// peersOf is the statement of the peers of the pod $1 per node (node,
+// same, other): the other instances of its environment's service that
+// are not stopping, on the node their sandbox row names in a state that
+// holds its place there.
+const peersOf = `SELECT s.node, count(*) FILTER (WHERE p.template_hash = me.template_hash) AS same,
+		count(*) FILTER (WHERE p.template_hash <> me.template_hash) AS other
+	FROM env_instances me
+	JOIN env_instances p ON p.env_id = me.env_id AND p.kind = me.kind AND p.object = me.object
+		AND p.sandbox_id <> me.sandbox_id AND p.phase <> 'stopping'
+	JOIN sandboxes s ON s.id = p.sandbox_id
+	WHERE me.sandbox_id = $1::text AND me.kind = 'service' AND s.node IS NOT NULL
+		AND s.client_state NOT IN ('pending', 'hibernated', 'lost')
+	GROUP BY s.node`
+
+// NodePeers counts the peers of podID on node: what a claim, under the
+// node's row lock, compares with its placement's snapshot.
+func (s *Store) NodePeers(ctx context.Context, podID podid.ID, node string) (Peers, error) {
+	var p Peers
+	err := s.q.QueryRow(ctx, `SELECT coalesce(max(same), 0), coalesce(max(other), 0) FROM (`+peersOf+`) pe
+		WHERE pe.node = $2`, podID, node).Scan(&p.Same, &p.Other)
+	return p, err
 }
 
 // PlacementSnapshot reads every node that is not removed, ordered by name,
@@ -138,11 +164,13 @@ func (s *Store) PlacementSnapshot(ctx context.Context, podID podid.ID) ([]NodeSn
 			coalesce(b.cnt, 0), coalesce(b.vcpus, 0), coalesce(b.mem, 0), coalesce(b.disk, 0),
 			EXISTS (SELECT 1 FROM pod_tombstones pt WHERE pt.pod_id = $1::text AND pt.node = n.name),
 			(SELECT s.id FROM sandboxes s WHERE s.node = n.name AND `+tapShares(1)+`
-				AND `+tapHolds+` ORDER BY s.id LIMIT 1)
+				AND `+tapHolds+` ORDER BY s.id LIMIT 1),
+			coalesce(pe.same, 0), coalesce(pe.other, 0)
 		FROM nodes n
 		LEFT JOIN node_telemetry t ON t.node = n.name
 		LEFT JOIN (SELECT node, count(*) AS cnt, sum(vcpus) AS vcpus, sum(memory_mib) AS mem, sum(disk_gib) AS disk
 			FROM bookings WHERE pod_id <> $1::text GROUP BY node) b ON b.node = n.name
+		LEFT JOIN (`+peersOf+`) pe ON pe.node = n.name
 		WHERE n.status <> 'removed' ORDER BY n.name`, podID)
 	if err != nil {
 		return nil, err
@@ -154,7 +182,8 @@ func (s *Store) PlacementSnapshot(ctx context.Context, podID podid.ID) ([]NodeSn
 		var tap *podid.ID
 		targets = append(targets, &ns.HasTelemetry, &ns.Telemetry.LastSeen, &load1,
 			&ns.Telemetry.MemoryAvailableBytes, &ns.Telemetry.DiskAvailableBytes, &ns.Telemetry.InventoryHash,
-			&ns.Booked.Count, &ns.Booked.VCPUs, &ns.Booked.MemoryMiB, &ns.Booked.DiskGiB, &ns.Tombstoned, &tap)
+			&ns.Booked.Count, &ns.Booked.VCPUs, &ns.Booked.MemoryMiB, &ns.Booked.DiskGiB, &ns.Tombstoned, &tap,
+			&ns.Peers.Same, &ns.Peers.Other)
 		if err := r.Scan(targets...); err != nil {
 			return NodeSnapshot{}, err
 		}

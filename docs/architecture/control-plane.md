@@ -1122,11 +1122,30 @@ gates err on the side of room. The booked disks are part of the score's
 scarcest resource once any is booked, and of the nodes' view
 (`diskBookedBytes`, `diskCapacityBytes`). The live gate sees what the
 node holds now, its other pods' disks and diskd's chunk cache with it;
-the booking gate the large disks' growth to come. Among the nodes that pass,
-`binpack` takes the one whose scarcest resource has the least free share,
-`spread` the most, ties by name; a hibernated sandbox prefers the node
-that holds its record. The op's begin rechecks the gates under the
-node's lock, so two instances placing at once never overbook a node.
+the booking gate the large disks' growth to come. The nodes that pass
+rank, for a replica of an image service, by its **peers** first ([ADR
+0018](../adr/0018-environments-and-deployments.md), "A service's
+replicas go to different nodes"): fewer of the service's other
+instances of the replica's template on the node, then fewer of another
+template's (`store.Peers`). A peer is an `env_instances` row of the
+same environment, kind `service` and object that is not `stopping`,
+whose sandbox row names the node in a state other than `pending`,
+`hibernated` and `lost`; a pod in its stop grace (`running`, the op
+`stop`) is none, so a rollout's next replica may take the place it is
+about to free. Then a hibernated sandbox prefers the node that holds
+its record; then `binpack` takes the one whose scarcest resource has
+the least free share, `spread` the most; ties by name. The peers rank
+and never refuse: on one node, or with the others full or draining, a
+replica goes beside the others. A sandbox, a tenant's job, an addon and
+a job's run have no peers. The placement's audit gives each node's
+peers as `instances` and `otherInstances`. The op's begin rechecks the
+gates under the node's lock, so two instances placing at once never
+overbook a node. Under the same lock it counts the replica's peers on
+the node again (`peersCame`): replicas inserted together are placed at
+once from snapshots that rank the same node first, and one that finds a
+peer come since its snapshot tries its next candidate, and the node
+again after all others, without the count. Nothing moves a running
+replica for the spread.
 Nothing fits: the sandbox stays, "no capacity (retryable): no feasible
 node; n1: <reason>; ...". Slots (50), headroom (1 GiB) and overcommit (16)
 are per node, set with `PATCH /api/v1/admin/nodes/{node}`.

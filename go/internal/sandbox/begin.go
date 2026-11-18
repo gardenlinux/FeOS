@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,11 +45,17 @@ func admits(k OpKind) bool {
 // begin begins an op (§9 "Begin"): for a create or restore with
 // candidates, on the first candidate whose claim passes under its lock
 // (each candidate in a transaction of its own, so that the transaction
-// never holds more than one node row); otherwise on the target.
+// never holds more than one node row); otherwise on the target. A
+// candidate that another instance of the replica's service came to since
+// the snapshot (peersCame) is tried again after the others, then without
+// that check: the peers rank, they never refuse.
 func (r *runner) begin(ctx context.Context, id podid.ID, in OpIntent) (*OpHandle, error) {
 	if pinnedTarget(in) == "" {
 		var refused []string
-		for _, c := range in.Candidates {
+		cands := slices.Clone(in.Candidates)
+		for i := 0; i < len(cands); i++ {
+			c := cands[i]
+			in.besidePeers = i >= len(in.Candidates)
 			// Between two transactions nothing is in flight: a caller
 			// that is gone tries no further candidate.
 			if err := ctx.Err(); err != nil {
@@ -56,6 +63,10 @@ func (r *runner) begin(ctx context.Context, id podid.ID, in OpIntent) (*OpHandle
 			}
 			h, err := r.beginOn(ctx, id, in, c)
 			if rf, ok := asRefusal(err); ok {
+				if rf.gate == gatePeers {
+					cands = append(cands, c)
+					continue
+				}
 				refused = append(refused, c+": "+rf.text)
 				in.verdicts = refuseVerdict(in.verdicts, c, rf.text)
 				continue
@@ -144,6 +155,11 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 		if admits(in.Kind) {
 			if err := e.claim(ctx, tx, row, in.Kind, target); err != nil {
 				return err
+			}
+			if (in.Kind == OpCreate || in.Kind == OpRestore) && !in.besidePeers {
+				if err := peersCame(ctx, tx, row, target, in.verdicts); err != nil {
+					return err
+				}
 			}
 			if err := tx.UpsertBooking(ctx, store.Booking{PodID: id, Node: target, VCPUs: row.VCPUs,
 				MemoryMiB: row.MemoryMiB, DiskGiB: row.DiskGiB, Gated: true}); err != nil {

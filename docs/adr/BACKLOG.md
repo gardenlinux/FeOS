@@ -99,6 +99,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0018: a `ferund` instance that stops waits for the stops it runs (an image service's pod, up to 660 s) until `--shutdown-grace`, although the leader takes them over at once: a rolling deploy of `ferund` during a service's rollout lingers for up to 11 minutes. Its runner could leave a stop to the takeover instead of waiting for it.
 - ADR 0018: a tenant's deletion (`Engine.DeleteTenant`) deletes its environments' instance rows at once, so their pods' stop grace runs in their tombstones' `DeletePod` without a row, a group or a booking, as every pod's did before the stop op; and so does a sandbox's or a tenant's job's delete for the node's 10 s.
 - ADR 0018: a feos-node that stops (`--suspend-on-stop`, 300 s) ends a pod in its stop grace with its microVM, so a node's rollout cuts a service's drain; suspending it for the next `feosd` would resume the drain, but its delete holds its lock.
+- ADR 0018: a rollout over two nodes stops its old replicas from the highest, so a first new replica that went beside the old one that stays leaves both ready replicas on one node until the next new one is ready; stopping the old one on the node with the most of the service's instances first would close that.
+- ADR 0018: moving a service's replicas apart once room returns (a node that was full, draining or down, a node that joins): placement spreads them only when it places; and spreading them over failure domains larger than a node (zones), from a label of the node's.
 
 ## ADR 0019
 

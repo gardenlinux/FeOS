@@ -225,6 +225,28 @@ it can state and get an answer for at once.
   condition clears. Incidents are the hook for whoever operates: a
   person, or FeCode's agent.
 
+### A service's replicas go to different nodes
+
+- Placement ranks the nodes that pass every gate for a service's
+  replica by the service's other instances there, under either policy:
+  fewer of the replica's template first, then fewer of another (the old
+  ones of a rollout); binpack or spread chooses only among the nodes
+  that tie. It is a preference, never a gate: on one node, or with the
+  others full, draining or down, a replica goes beside the others, and
+  none waits unplaced for its sake.
+- An instance counts where its pod holds a place: on a node, and not
+  pending, hibernated or lost. A stopping one does not, also while its
+  pod drains through its grace, so that a rollout's next replica may
+  take the place it is about to free.
+- Replicas inserted together are placed at once and rank the nodes
+  from the same snapshot; the claim of a node, under the node's lock,
+  counts again, and a replica that finds another come since tries the
+  next node first, and that one again after all others.
+- Only placement decides: nothing moves a running replica that went
+  beside another, and a rollout still stops its old replicas from the
+  highest. Addons, jobs, attached services, sandboxes and tenants' jobs
+  have no peers.
+
 ### The environment's names
 
 - An environment's names are its addons, image services and attached
@@ -352,6 +374,16 @@ it can state and get an answer for at once.
   would that counts terminating pods: every rollout of a service that
   drains would take its grace per replica and run out of its budget.
   Kubernetes's rollouts do not wait for terminating pods either.
+- **The installation's policy spread alone** (2026-11-18): it ranks the
+  nodes by their free share, not by service, so two replicas meet where
+  one node has the most room, and two placed at once from one snapshot
+  take the same node; on `ferun` both replicas of a test service did.
+  **Replicas kept apart as a gate** (required anti-affinity): an
+  installation of one node could not run two, and a rollout on as many
+  nodes as replicas would find no node for its surge replica. **An
+  advisory lock of the service around its placements**: the claim
+  holds the node's lock already, and moving on to the next candidate
+  needs no new snapshot.
 
 ## Consequences
 
@@ -376,6 +408,12 @@ it can state and get an answer for at once.
   store as it touches it. A cache that filled 30 GiB makes its node's
   drain that much longer; a replica that is replaced instead starts
   empty, which a cache takes.
+- A service of two replicas or more survives the drain or the loss of
+  one node where the installation has room on another, also under
+  binpack. On two nodes a rollout whose first new replica went beside
+  the old one that stays has both ready replicas on that node until the
+  next new one is ready; on three the first new replica takes the node
+  without an old one.
 - A caller that stores an environment's name or builds URLs with it
   must store the new one after a rename; by ID nothing changes, and the
   rename is idempotent, so a client retries it.
@@ -407,4 +445,8 @@ kept its row, its groups and its booking until it ended since
 grace ran in its tombstone's `DeletePod` after its row was gone. Since
 2026-11-17 a service or job may also ask for a disk of its own size
 (`resources.diskGib`, migration 0038), for FeCode's git cache and the
-like; before, every pod had the guest's 8 GiB.
+like; before, every pod had the guest's 8 GiB. A service's replicas have
+gone to different nodes since 2026-11-18, when FeCode's own services
+were to run as an environment's with two replicas each; before, only
+the policy placed them, and both replicas of a test service on `ferun`
+went to one node.
