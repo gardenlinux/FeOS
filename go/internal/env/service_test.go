@@ -450,6 +450,11 @@ func TestAddonCatalog(t *testing.T) {
 		len(pg.Options) != 2 || pg.Options[1].Name != "roles" || !slices.Equal(pg.Options[1].ReservedPrefixes, []string{"pg_"}) {
 		t.Fatalf("postgres %+v", pg)
 	}
+	// Postgres and valkey admit a workload by its certificate (their
+	// blueprints bind TLS); nats hands out a password.
+	if c.Addons[0].ByIdentity || !pg.ByIdentity || !c.Addons[2].ByIdentity {
+		t.Fatalf("byIdentity %v %v %v", c.Addons[0].ByIdentity, pg.ByIdentity, c.Addons[2].ByIdentity)
+	}
 	b, err := json.Marshal(c)
 	if err != nil {
 		t.Fatal(err)

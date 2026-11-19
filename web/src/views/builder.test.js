@@ -319,6 +319,7 @@ describe('catalog', () => {
     expect(pg.plans.map((p) => p.name)).toEqual(['dev', 'small', 'medium', 'large']);
     expect(pg.outputs).toEqual(['host', 'port', 'user', 'database', 'url']);
     expect(pg.fields).toEqual(['role', 'database']);
+    expect(c.types.map((t) => [t.type, t.byIdentity])).toEqual([['nats', false], ['postgres', true], ['valkey', true]]);
     expect(pg.options.map((o) => [o.name, o.kind, o.unique])).toEqual([['databases', 'list', true], ['roles', 'list', true]]);
     expect(c.byType.get('valkey').options[0]).toMatchObject({ kind: 'oneOf', default: 'noeviction' });
     expect(c.byType.get('valkey').options[0].values).toContain('allkeys-lru');
@@ -347,6 +348,7 @@ describe('catalog', () => {
     expect(c.builtin).toBe(true);
     expect(c.types.map((t) => t.type)).toEqual(['nats', 'postgres', 'valkey']);
     expect(planText(c.byType.get('nats').plans[0])).toBe('dev');
+    expect(c.types.every((t) => t.byIdentity === false)).toBe(true);
   });
 });
 

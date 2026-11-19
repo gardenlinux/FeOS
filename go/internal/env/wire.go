@@ -321,6 +321,11 @@ type AddonType struct {
 	// OutputFields the fields it may name besides them ([] for none).
 	OutputKeys   []string `json:"outputKeys"`
 	OutputFields []string `json:"outputFields"`
+	// ByIdentity: the addon admits a referencing workload by its pod's
+	// certificate (ADR 0036, 0038; the blueprint is an addons.TLSBinder),
+	// so a reference hands the container no password; false: the
+	// reference's values carry one (nats).
+	ByIdentity bool `json:"byIdentity"`
 	// Options are the options the blueprint declares; any other is an
 	// error of the plan.
 	Options []addons.Option `json:"options"`

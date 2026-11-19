@@ -3727,11 +3727,15 @@ percent-encoded.
 `GET /api/v1/addons` (tenant class, the same for every tenant) is the
 catalog: `{addons: [{type, versions, defaultVersion, plans: [{name,
 vcpus, memoryMib, volumeMib}], defaultPlan, outputKeys, outputFields,
-options: [{name, kind, required, default, description, values, pattern,
-reserved, reservedPrefixes, unique}]}]}`, the types this ferund runs by
-name, versions oldest first (`defaultVersion` the newest, what a new
-addon is offered with: a spec still names its version), plans smallest
-first, every list `[]` when empty. `TestOptionsMatchValidation` holds
+byIdentity, options: [{name, kind, required, default, description,
+values, pattern, reserved, reservedPrefixes, unique}]}]}`, the types this
+ferund runs by name, versions oldest first (`defaultVersion` the newest,
+what a new addon is offered with: a spec still names its version), plans
+smallest first, every list `[]` when empty. `byIdentity` is true for a
+type that admits a referencing workload by its pod's certificate (its
+blueprint binds TLS, `addons.TLSBinder`: postgres, valkey), so that a
+reference hands the container no password, and false for one whose
+reference carries one (nats). `TestOptionsMatchValidation` holds
 each declaration to its validation.
 
 `FERUN_ADDON_DOCKER=1 go test -run Docker ./internal/env/addons/` runs

@@ -243,6 +243,7 @@ func addonType(b addons.Blueprint) AddonType {
 	t := AddonType{Type: b.Type(), Versions: nonNilStrings(b.Versions()), DefaultPlan: b.DefaultPlan(),
 		Plans: []AddonPlan{}, OutputKeys: nonNilStrings(b.OutputKeys()), OutputFields: nonNilStrings(b.OutputFields()),
 		Options: []addons.Option{}}
+	_, t.ByIdentity = b.(addons.TLSBinder)
 	if n := len(t.Versions); n > 0 {
 		t.DefaultVersion = t.Versions[n-1]
 	}
