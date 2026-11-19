@@ -2234,7 +2234,7 @@ deletes a binding's incidents 30 days after they closed.
 
 ### Credentials of a tenant
 
-A credential ([ADR 0033](../adr/0033-credentials-of-a-tenant.md)) is an
+A credential ([ADR 0033](../adr/0033-credentials-of-an-environment.md)) is an
 HTTP binding's definition that a tenant states once and its sandboxes and
 environments use by name (`internal/bindings/credentials.go`,
 `internal/store/tenant_credentials.go`). It is on with the HTTP bindings.
