@@ -2365,19 +2365,35 @@ credential or its latest or deployed deployment pins it; then every
 version goes, and the name made again goes on from the number it had.
 
 **Rolling it out** (migration `0035_env_credentials.sql`, additive: the
-release before neither reads nor writes `env_credentials`, and
-`tenant_credentials` stays). It refuses, and with it the new instance's
-start, while `tenant_credentials` holds a row, naming the tenants: the
-secret is sealed to the tenant, so the credential is deleted with the
-release before and made again under its environment after the roll.
-While both releases run, an old instance answers the tenant's routes and
-a new one the environment's, so no credential is made until every
-instance runs the new release. A stored deployment that names a
-`tenantCredential` still reads, as a binding without a credential: its
-pods get the binding without one, as they did for a credential that was
-gone, and a revert or a clone of it is refused with a finding at the
-binding. With the table empty, no environment's latest or deployed
-deployment names one, since a credential in use could not be deleted.
+release before neither reads nor writes `env_credentials` and
+`env_credential_names`, and `tenant_credentials` stays), in three steps:
+
+1. **Before the roll**, `SELECT count(*) FROM tenant_credentials` is 0.
+   The migration refuses otherwise, naming the tenants, and with it the
+   new instance's start: the secret is sealed to the tenant, so such a
+   credential is taken from its sandboxes and environments and deleted
+   with the release before (`DELETE /api/v1/credentials/{name}`), and
+   made again under its environment after the roll.
+2. **The roll.** From the migration on, a trigger refuses every insert
+   and update of the release before in `tenant_credentials` ("written by
+   a ferund older than migration 0035"), so that its tenant routes fail
+   instead of storing a credential that nobody reads.
+3. **No credential writes until every instance runs the new release**:
+   no PUT, delete or check under `/api/v1/environments/{env}/credentials`
+   and no sandbox's `credentials` (its create's or the PUT), through the
+   console's Credentials pages or the API. The trigger covers the
+   tenant's side only: an instance of the release before reads a
+   sandbox's names in `sandbox_credentials` as the tenant's credentials,
+   so a pod would get a credential of its environment from a new
+   instance and lose it again to an old one. Once the last old instance
+   is gone, credentials are made.
+
+A stored deployment that names a `tenantCredential` still reads, as a
+binding without a credential: its pods get the binding without one, as
+they did for a credential that was gone, and a revert or a clone of it
+is refused with a finding at the binding. With the table empty, no
+environment's latest or deployed deployment names one, since a
+credential in use could not be deleted.
 
 ### The management UI
 
