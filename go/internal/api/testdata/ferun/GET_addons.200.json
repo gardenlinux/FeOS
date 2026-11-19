@@ -37,6 +37,7 @@
         ],
         "outputFields": [],
         "byIdentity": false,
+        "identityBy": "",
         "options": [
           {
             "name": "jetstream",
@@ -98,6 +99,7 @@
           "database"
         ],
         "byIdentity": true,
+        "identityBy": "ou",
         "options": [
           {
             "name": "databases",
@@ -179,6 +181,7 @@
         ],
         "outputFields": [],
         "byIdentity": true,
+        "identityBy": "uri",
         "options": [
           {
             "name": "maxmemoryPolicy",

@@ -244,6 +244,9 @@ func addonType(b addons.Blueprint) AddonType {
 		Plans: []AddonPlan{}, OutputKeys: nonNilStrings(b.OutputKeys()), OutputFields: nonNilStrings(b.OutputFields()),
 		Options: []addons.Option{}}
 	_, t.ByIdentity = b.(addons.TLSBinder)
+	if r, ok := b.(addons.IdentityReader); ok && t.ByIdentity {
+		t.IdentityBy = r.IdentityBy()
+	}
 	if n := len(t.Versions); n > 0 {
 		t.DefaultVersion = t.Versions[n-1]
 	}

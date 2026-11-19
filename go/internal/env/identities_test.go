@@ -6,6 +6,7 @@ package env
 import (
 	"crypto"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -28,11 +29,20 @@ func (tdIssuer) IssueAddonServer(crypto.PublicKey, string, string, string, time.
 }
 func (tdIssuer) TrustPEM() []byte { return nil }
 
+// namedIssuer is a tdIssuer that says its CA's subject, as pki.Issuer
+// does.
+type namedIssuer struct{ tdIssuer }
+
+func (i namedIssuer) Certificate() *x509.Certificate {
+	return &x509.Certificate{Subject: pkix.Name{CommonName: "FeOS issuer " + string(i.tdIssuer)}}
+}
+
 // The identities: the latest deployment's services (an attached one
 // with its sandbox's), jobs and addons, the environment's sandboxes, and
 // an earlier object's pods still there; each pod with its newest
-// certificate's end and node; another tenant's environment is a 404, and
-// without an issuer every ID is "".
+// certificate's serial, issue, end and node, and the subject and OU its
+// certificates carry; another tenant's environment is a 404, and without
+// an issuer every ID, OU and subject is "".
 func TestIdentities(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.create("stage", nil)
@@ -74,30 +84,58 @@ func TestIdentities(t *testing.T) {
 		t.Errorf("trust domain %q", ids.TrustDomain)
 	}
 	base := "spiffe://run.test/tenant/" + tenantA + "/env/" + e.ID.String() + "/"
-	type pd = PodIdentity
-	want := []WorkloadIdentity{
-		{"service", "api", base + "service/api", []pd{{api0.String(), "2026-11-20T09:15:00Z", "n1"}, {api1.String(), "", "n2"}}},
-		{"service", "dev", base + "sandbox/" + sb.String(), []pd{{sb.String(), "", ""}}},
-		{"service", "web", base + "service/web", []pd{}},
-		{"job", "migrate", base + "job/migrate", []pd{}},
-		{"addon", "pg", base + "addon/pg", []pd{{pg.String(), "2026-11-20T10:15:00Z", "n2"}}},
-		{"addon", "q", base + "addon/q", []pd{}},
-		{"sandbox", sb.String(), base + "sandbox/" + sb.String(), []pd{{sb.String(), "", ""}}},
-		{"service", "old", base + "service/old", []pd{{old.String(), "", "n1"}}},
+	if ids.Issuer != "" {
+		t.Errorf("issuer %q of an issuer that names none", ids.Issuer)
 	}
+	ou := func(kind, name string) string { return model.WorkloadGroupID(e.ID, kind, name) }
+	sbx := model.SandboxWorkloadGroupID(sb.String())
+	type pd = PodIdentity
+	p := func(id podid.ID, ou, serial, issued, notAfter, node string) pd {
+		return pd{Pod: id.String(), Subject: "CN=run.test/" + id.String() + ",OU=" + ou, Serial: serial, IssuedAt: issued,
+			NotAfter: notAfter, Node: node}
+	}
+	wl := func(kind, name, id, ou string, pods ...pd) WorkloadIdentity {
+		return WorkloadIdentity{Kind: kind, Name: name, SPIFFEID: base + id, OU: ou, Pods: append([]pd{}, pods...)}
+	}
+	issued := func(serial string) string {
+		var at time.Time
+		if err := h.d.Pool.QueryRow(h.ctx(), `SELECT issued_at FROM issued_certs WHERE serial = $1`, serial).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return rfc3339(at)
+	}
+	api := []pd{p(api0, ou("service", "api"), "a2", issued("a2"), "2026-11-20T09:15:00Z", "n1"),
+		p(api1, ou("service", "api"), "", "", "", "n2")}
 	// The pods of a workload by their IDs.
 	if api0.String() > api1.String() {
-		want[0].Pods[0], want[0].Pods[1] = want[0].Pods[1], want[0].Pods[0]
+		api[0], api[1] = api[1], api[0]
+	}
+	want := []WorkloadIdentity{
+		wl("service", "api", "service/api", ou("service", "api"), api...),
+		wl("service", "dev", "sandbox/"+sb.String(), sbx, p(sb, sbx, "", "", "", "")),
+		wl("service", "web", "service/web", ou("service", "web")),
+		wl("job", "migrate", "job/migrate", ou("job", "migrate")),
+		wl("addon", "pg", "addon/pg", ou("addon", "pg"), p(pg, ou("addon", "pg"), "p1", issued("p1"), "2026-11-20T10:15:00Z", "n2")),
+		wl("addon", "q", "addon/q", ou("addon", "q")),
+		wl("sandbox", sb.String(), "sandbox/"+sb.String(), sbx, p(sb, sbx, "", "", "", "")),
+		wl("service", "old", "service/old", ou("service", "old"), p(old, ou("service", "old"), "", "", "", "n1")),
 	}
 	gb, _ := json.Marshal(ids.Workloads)
 	wb, _ := json.Marshal(want)
 	if string(gb) != string(wb) {
 		t.Errorf("workloads\n%s\nwant\n%s", gb, wb)
 	}
-	for _, key := range []string{"hpke", "serial", "PRIVATE", "CERTIFICATE"} {
+	// What a certificate names, never a key or the certificate itself.
+	for _, key := range []string{"hpke", "PRIVATE", "CERTIFICATE"} {
 		if b, _ := json.Marshal(ids); strings.Contains(strings.ToLower(string(b)), strings.ToLower(key)) {
 			t.Errorf("the answer names %s: %s", key, b)
 		}
+	}
+
+	// The issuer's subject, of an issuer that says it.
+	h.svc.d.Issuer = namedIssuer{tdIssuer("run.test")}
+	if ids, err = h.svc.Identities(h.ctx(), tenantA, "stage"); err != nil || ids.Issuer != "CN=FeOS issuer run.test" {
+		t.Errorf("issuer %q, %v", ids.Issuer, err)
 	}
 
 	_, err = h.svc.Identities(h.ctx(), tenantB, "stage")
@@ -105,7 +143,8 @@ func TestIdentities(t *testing.T) {
 
 	h.svc.d.Issuer = nil
 	if ids, err = h.svc.Identities(h.ctx(), tenantA, e.ID.String()); err != nil || ids.TrustDomain != "" ||
-		len(ids.Workloads) != len(want) || ids.Workloads[0].SPIFFEID != "" || ids.Workloads[6].SPIFFEID != "" {
+		ids.Issuer != "" || len(ids.Workloads) != len(want) || ids.Workloads[0].SPIFFEID != "" ||
+		ids.Workloads[0].OU != "" || ids.Workloads[0].Pods[0].Subject != "" || ids.Workloads[6].SPIFFEID != "" {
 		t.Errorf("without an issuer: %+v %v", ids, err)
 	}
 

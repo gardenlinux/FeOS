@@ -606,18 +606,23 @@ secrets.
   it; a pod's at three quarters.
 - **Who a workload is.** `GET /api/v1/environments/{env}/identities`
   (tenant class, read on the environment) answers
-  `{"trustDomain", "workloads": [{"kind", "name", "spiffeId", "pods":
-  [{"pod", "notAfter", "node"}]}]}`: every object of the latest
+  `{"trustDomain", "issuer", "workloads": [{"kind", "name", "spiffeId",
+  "ou", "pods": [{"pod", "subject", "serial", "issuedAt", "notAfter",
+  "node"}]}]}`: every object of the latest
   deployment (services, jobs, addons, each by name, also without a pod:
   `"pods": []`), then every sandbox of the environment (by ID), then
   the workloads of pods an earlier deployment left; each with the
   SPIFFE ID its pods' certificates carry (`pki.WorkloadID`), an attached
-  service with its sandbox's, whose pod it runs in. A pod is its row's
-  ID (an instance's as the status shows it), the `not_after` of the
-  newest `issued_certs` row of it and the node that was issued on
-  (`""` and the pod's node before its first). No key, certificate or
-  serial is answered. An instance without an issuer answers
-  `trustDomain` and every `spiffeId` `""`.
+  service with its sandbox's, whose pod it runs in, and the OU of its
+  pods' subjects (the ID its set carries, on which postgres maps a
+  role). A pod is its row's ID (an instance's as the status shows it),
+  its subject (`pki.PodSubject` in RFC 2253, `CN=<td>/<pod>,OU=<set>`),
+  the serial, `issued_at` and `not_after` of the newest `issued_certs`
+  row of it and the node that was issued on (`""` and the pod's node
+  before its first). `issuer` is the issuing CA's subject. No key and no
+  certificate is answered: what a certificate names, not the
+  certificate. An instance without an issuer answers `trustDomain`,
+  `issuer` and every `spiffeId`, `ou` and `subject` `""`.
 - **Join tokens.** A token is 32 random bytes. The node sends
   `feos-join-<secret>`; the operator gets `feos-join-<secret>.<pin>`, where
   the pin is the SHA-256 of the root that anchors the issuer (its
@@ -3827,7 +3832,7 @@ percent-encoded.
 `GET /api/v1/addons` (tenant class, the same for every tenant) is the
 catalog: `{addons: [{type, versions, defaultVersion, plans: [{name,
 vcpus, memoryMib, volumeMib}], defaultPlan, outputKeys, outputFields,
-byIdentity, options: [{name, kind, required, default, description,
+byIdentity, identityBy, options: [{name, kind, required, default, description,
 values, pattern, reserved, reservedPrefixes, unique}]}]}`, the types this
 ferund runs by name, versions oldest first (`defaultVersion` the newest,
 what a new addon is offered with: a spec still names its version), plans
@@ -3835,7 +3840,11 @@ smallest first, every list `[]` when empty. `byIdentity` is true for a
 type that admits a referencing workload by its pod's certificate (its
 blueprint binds TLS, `addons.TLSBinder`: postgres, valkey), so that a
 reference hands the container no password, and false for one whose
-reference carries one (nats). `TestOptionsMatchValidation` holds
+reference carries one (nats). `identityBy` is the part of the
+certificate such a type maps to a user of its own (`addons.IdentityReader`):
+`ou`, the subject's OU (postgres: the role the reference names), or
+`uri`, the SPIFFE ID (valkey's ACL user); `""` for the others.
+`TestOptionsMatchValidation` holds
 each declaration to its validation.
 
 `FERUN_ADDON_DOCKER=1 go test -run Docker ./internal/env/addons/` runs

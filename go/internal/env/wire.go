@@ -326,6 +326,11 @@ type AddonType struct {
 	// so a reference hands the container no password; false: the
 	// reference's values carry one (nats).
 	ByIdentity bool `json:"byIdentity"`
+	// IdentityBy is the part of the certificate such an addon maps to a
+	// user of its own: "ou" (the subject's OU, the workload's set:
+	// postgres's role) or "uri" (the SPIFFE ID: valkey's ACL user); ""
+	// for an addon that admits by a password.
+	IdentityBy string `json:"identityBy"`
 	// Options are the options the blueprint declares; any other is an
 	// error of the plan.
 	Options []addons.Option `json:"options"`
