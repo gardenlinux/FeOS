@@ -541,7 +541,7 @@ describe('the routes it calls', () => {
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
       'accessLogs', 'addonCatalog', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
-      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments', 'listEnvironments',
+      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listCredentials', 'listDeployments', 'listEnvironments',
       'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
     ]);
@@ -646,16 +646,18 @@ describe('the bindings', () => {
     expect(out).toContain('Check');
   });
 
-  it('lists the bindings on Secrets & credentials, each with where its credential comes from', () => {
+  it('lists the bindings on Credentials, each with where its credential comes from', () => {
     const spec = {
       services: { api: { bindings: ['erp', 'gh'] } },
       bindings: {
-        erp: { upstream: 'https://erp.example', credential: { kind: 'oauth2' }, tenantCredential: { name: 'erp', version: 3 } },
+        erp: { upstream: 'https://erp.example', credential: { kind: 'oauth2' }, credentialRef: { name: 'erp', version: 3 } },
         gh: { upstream: 'https://api.github.com', credential: { kind: 'headers', headers: { Authorization: { secret: 'gh-token' } } } },
       },
     };
     const cards = specBindings(spec).map((b) => text(<BindingCard key={b.name} b={b} env="stage" ec={ALL} tenant={T} navigate={nav} />));
-    expect(cards[0]).toContain('credential erp · version 3 of the tenant');
+    expect(cards[0]).toContain('credential erp · version 3 of this environment');
+    expect(html(<BindingCard b={specBindings(spec)[0]} env="stage" ec={ALL} tenant={T} navigate={nav} />))
+      .toContain(`href="/tenants/${T}/environments/stage/credentials/erp"`);
     expect(cards[0]).toContain('Edit in New deployment');
     expect(cards[1]).toContain('secret gh-token of this environment');
   });

@@ -241,8 +241,8 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     })().catch((e) => setLoadErr(e.message));
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The secrets (names and versions), the tenant's credentials and the
-  // catalog.
+  // The secrets (names and versions), the environment's credentials (ADR
+  // 0033; a new environment has none yet) and the catalog.
   const refreshSecrets = useCallback(async () => {
     if (isNew) return;
     try {
@@ -260,11 +260,16 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     return () => { live = false; };
   }, [env, isNew]);
   useEffect(() => {
+    if (isNew) { setCredentials([]); return undefined; }
     let live = true;
-    api.listCredentials().then(
+    api.listCredentials(env).then(
       (r) => { if (live) setCredentials((r && r.credentials) || []); },
       (e) => { if (live) { setCredentials([]); setCredentialsErr(e.message); } },
     );
+    return () => { live = false; };
+  }, [env, isNew]);
+  useEffect(() => {
+    let live = true;
     api.addonCatalog().then(
       (a) => { if (live) setCatalog(readCatalog(a) || builtinCatalog()); },
       (e) => {
@@ -398,7 +403,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
 
   const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const ctx = {
-    spec, catalog, setSecret, isNew, knownSecrets, pins, credentials, credentialsErr, editSpec, editAttached, tenant, navigate,
+    spec, catalog, setSecret, isNew, knownSecrets, pins, credentials, credentialsErr, editSpec, editAttached, tenant, env, navigate,
     sandboxes,
   };
   const review = !readOnly && (

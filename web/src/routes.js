@@ -13,9 +13,6 @@
 //                                       environment (ADR 0035): they lead
 //                                       there (view moved)
 //   /tenants/:t/domains[/:id]           its domains
-//   /tenants/:t/credentials[/:name[/edit]]
-//                                       its credentials (ADR 0033)
-//   /tenants/:t/new-credential          the form of a new credential
 //   /tenants/:t/providers[/:name[/edit]]
 //                                       its access providers (ADR 0054)
 //   /tenants/:t/new-provider            the form of a new access provider
@@ -31,7 +28,12 @@
 //                                       activity, deployments[/:n],
 //                                       incidents[/:id], logs[?search],
 //                                       traces[/:trace][?search], traffic,
-//                                       settings, secrets, access,
+//                                       settings, secrets,
+//                                       credentials[/new | /:name[/edit]]
+//                                       (its credentials, ADR 0033: the
+//                                       list, a new one's form, one's
+//                                       page, its new version's form),
+//                                       access,
 //                                       objects/:kind/:name[/:otab] (an
 //                                       object's page; otab: overview,
 //                                       logs[/:replica][?search],
@@ -63,13 +65,14 @@ function decode(s) {
 // sidebar and the overview.
 export const ENV_TABS = [
   'overview', 'builder', 'activity', 'deployments', 'incidents', 'jobs', 'logs', 'traces', 'traffic', 'reachability', 'settings',
-  'secrets', 'access', 'objects', 'sandboxes',
+  'secrets', 'credentials', 'access', 'objects', 'sandboxes',
 ];
 
 // ENV_LENSES are the views of an environment, its tab bar: the sidebar
 // picks the thing (the environment or one of its objects), the tab bar
 // how to look at it. Activity holds the deployments and the incidents,
-// Settings the secrets and the domains and access (LENS_PAGES). A trace
+// Settings the secrets, the credentials and the domains and access
+// (LENS_PAGES). A trace
 // has no view of its own: it opens from a log line, in Logs (lensOf).
 export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'reachability', 'settings'];
 
@@ -77,7 +80,7 @@ export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'reachabil
 // tab bar.
 export const LENS_PAGES = {
   activity: ['activity', 'deployments', 'incidents', 'jobs'],
-  settings: ['settings', 'secrets', 'access'],
+  settings: ['settings', 'secrets', 'credentials', 'access'],
 };
 
 // lensOf is the view a tab of an environment belongs to; an object's
@@ -116,7 +119,8 @@ export const ENV_TAB_LABELS = {
   traces: 'Traces',
   traffic: 'Traffic',
   reachability: 'Reachability',
-  secrets: 'Secrets & credentials',
+  secrets: 'Secrets',
+  credentials: 'Credentials',
   access: 'Domains & access',
   settings: 'Settings',
   objects: 'Objects',
@@ -126,7 +130,7 @@ export const ENV_TAB_LABELS = {
 // PAGE_LABELS name the pages of a view in its own tab bar (LENS_PAGES).
 export const PAGE_LABELS = {
   activity: 'Everything', deployments: 'Deployments', incidents: 'Incidents', jobs: 'Jobs',
-  settings: 'General', secrets: 'Secrets & credentials', access: 'Domains & access',
+  settings: 'General', secrets: 'Secrets', credentials: 'Credentials', access: 'Domains & access',
 };
 
 // OBJECT_TAB_LABELS name the views of an object's page.
@@ -140,7 +144,8 @@ const SEARCH_TABS = new Set(['logs']);
 // environment, its tab (an unknown one is the overview), and the tab's
 // item: a deployment's number, an incident's ID, a job's ID, a trace's
 // ID, a sandbox's ID ("new": the create form, with otab its page's
-// view), or the
+// view), a credential's name ("new": the form of a new one, with otab
+// "edit" the form of its new version), or the
 // "<kind>/<name>" of the object whose logs show, with the replica (null
 // unless given: every replica); and the logs' search, the address's
 // query (logs.js); on the objects tab the
@@ -155,6 +160,11 @@ function envRoute(tenant, seg, search) {
   if (tab === 'sandboxes') {
     item = seg[2] || '';
     const otab = item && item !== 'new' ? seg[3] || 'overview' : 'overview';
+    return { view: 'environments', tenant, env, tab, item, otab, replica: null, search: '' };
+  }
+  if (tab === 'credentials') {
+    item = seg[2] || '';
+    const otab = item && item !== 'new' && seg[3] === 'edit' ? 'edit' : '';
     return { view: 'environments', tenant, env, tab, item, otab, replica: null, search: '' };
   }
   if (tab === 'builder' && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
@@ -227,6 +237,19 @@ export function jobPath(tenant, env, id = '') {
   return envPath(tenant, env, 'jobs', id);
 }
 
+// credentialPath is an environment's credentials (ADR 0033), one of
+// them (name; "new" is the form of a new one), or the form of its new
+// version (edit). A credential is of one environment, whose name env is.
+export function credentialPath(tenant, env, name = '', edit = false) {
+  const p = envPath(tenant, env, 'credentials', name);
+  return name && name !== 'new' && edit ? `${p}/edit` : p;
+}
+
+// newCredentialPath is the form of a new credential in env.
+export function newCredentialPath(tenant, env) {
+  return credentialPath(tenant, env, 'new');
+}
+
 // newSandboxPath is the create form of a sandbox in env.
 export function newSandboxPath(tenant, env) {
   return sandboxPath(tenant, env, 'new');
@@ -289,10 +312,6 @@ export function parsePath(pathname) {
   if (seg[2] === 'tokens') return { view: 'tokens', tenant };
   if (seg[2] === 'jobs') return { view: 'moved', tenant, what: 'job', sel: seg[3] || '', tab: '', env: '' };
   if (seg[2] === 'domains') return { view: 'domains', tenant, sel: seg[3] || '' };
-  if (seg[2] === 'credentials') {
-    return { view: 'credentials', tenant, sel: seg[3] || '', tab: seg[3] && seg[4] === 'edit' ? 'edit' : '' };
-  }
-  if (seg[2] === 'new-credential') return { view: 'newCredential', tenant };
   if (seg[2] === 'providers') {
     return { view: 'providers', tenant, sel: seg[3] || '', tab: seg[3] && seg[4] === 'edit' ? 'edit' : '' };
   }

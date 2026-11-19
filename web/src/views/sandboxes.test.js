@@ -133,7 +133,7 @@ describe('createRequest', () => {
     expect('egress' in createRequest({ ...empty, egress: 'internet' })[3]).toBe(false);
   });
 
-  it('names the tenant\'s credentials its pod gets, when any', () => {
+  it('names the credentials of its environment its pod gets, when any', () => {
     expect(createRequest({ ...empty, credentials: ['openai', 'github'] }))
       .toEqual(['', 0, 0, { ...opts, credentials: ['github', 'openai'] }]);
     expect(createRequest({ ...empty, credentials: [] })[3]).toEqual(opts);

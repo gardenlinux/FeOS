@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, CopyBtn, EnvName, ErrBox, KV, LiveBadge, StateLabel, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
-import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, envPath, lensOf, newEnvPath } from '../routes.js';
+import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, credentialPath, envPath, lensOf, newEnvPath } from '../routes.js';
 import { useEnvStatus } from '../envstatus.jsx';
 import { focusOf, queryOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
@@ -30,6 +30,7 @@ import { EnvReach } from './EnvReach.jsx';
 import { EnvPods } from './EnvPods.jsx';
 import { Sandboxes } from './Sandboxes.jsx';
 import { Jobs } from './Jobs.jsx';
+import { Credentials } from './Credentials.jsx';
 import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
@@ -42,8 +43,8 @@ import '../styles/environments.css';
 // 0035), the activity (everything, the deployments
 // with revert and tags, the incidents with their evidence, the jobs made
 // by a call: Jobs.jsx), the logs and
-// traces, the traffic, and the settings (general, secrets and
-// credentials, domains and access; EnvTabs.jsx). The sidebar picks the
+// traces, the traffic, and the settings (general, secrets, credentials
+// with the bindings (Credentials.jsx), domains and access; EnvTabs.jsx). The sidebar picks the
 // environment, one of its objects, whose page (ObjectPage.jsx) has the
 // same views where it has them, or one of its sandboxes, whose page
 // (Sandboxes.jsx) has its own. No secret's value is ever read; a route
@@ -294,10 +295,12 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
 
   // Escape goes up: from an item to its tab's list, from there to the
   // environments; from the builder, an object's page and the sandboxes'
-  // list to the overview; from a trace to its lines.
+  // list to the overview; from a trace to its lines; from a credential's
+  // new version to its page.
   const up = activeTab === 'builder' || activeTab === 'objects' || (activeTab === 'sandboxes' && !item) ? envPath(tenant, env)
     : activeTab === 'traces' ? envPath(tenant, env, 'logs', '', null, queryOf({ trace: item }))
-      : item ? envPath(tenant, env, activeTab) : list;
+      : activeTab === 'credentials' && item && otab === 'edit' ? credentialPath(tenant, env, item)
+        : item ? envPath(tenant, env, activeTab) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -386,10 +389,11 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
         {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}
         {activeTab === 'reachability' && body(<EnvReach tenant={tenant} st={st} navigate={navigate} />)}
-        {activeTab === 'secrets' && (
+        {activeTab === 'secrets' && <SecretsTab env={env} st={st} ec={ec} changed={changed} />}
+        {activeTab === 'credentials' && (
           <>
-            <SecretsTab env={env} st={st} ec={ec} changed={changed} />
-            <Offloading env={env} st={st} tenant={tenant} ec={ec} navigate={navigate} />
+            <Credentials tenant={tenant} env={env} sel={item} edit={otab === 'edit'} ec={ec} navigate={navigate} />
+            {!item && <Offloading env={env} st={st} tenant={tenant} ec={ec} navigate={navigate} />}
           </>)}
         {activeTab === 'access' && (
           <AccessTab tenant={tenant} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />)}
@@ -523,31 +527,29 @@ export function ImageShort({ image }) {
 }
 
 // Offloading is the environment's credential offloading (ADR 0028, 0033)
-// on its Secrets & credentials page: the HTTP bindings of the latest
-// deployment, each with where its credential comes from, who uses it and
-// Check. A binding is part of a deployment, so it is added and changed in
-// New deployment; the tenant's credentials are a link away.
+// on its Credentials page, below its credentials: the HTTP bindings of
+// the latest deployment, each with where its credential comes from, who
+// uses it and Check. A binding is part of a deployment, so it is added
+// and changed in New deployment.
 export function Offloading({ env, st, tenant, ec, navigate }) {
   const spec = useLatestSpec(st);
   const bindings = specBindings(spec);
   const n = (st && st.deployment) || 0;
-  const enc = encodeURIComponent;
   const add = envPath(tenant, env, 'builder', 'new/binding');
   const loading = !st || (n > 0 && spec === null);
   return (
     <div className="envsect offloading">
       <div className="sect sect-row">
-        credential offloading <span className="count">· {loading ? '…' : bindings.length}</span>
+        bindings{n ? ` of deployment ${n}` : ''} <span className="count">· {loading ? '…' : bindings.length}</span>
         <span className="spacer" />
-        <Link to={`/tenants/${enc(tenant)}/credentials`} navigate={navigate} className="small">Credentials of the tenant</Link>
         {ec && ec.write && (
           <button className="mini" onClick={() => navigate(add)}><Icon name="plus" size={12} /> Add binding</button>)}
       </div>
       <p className="panel-note envsecrets-note">
         A binding sends a service's calls to an upstream through the platform, which adds the credential to each
-        request: the key never enters the pod. The credential is one of the tenant's (versioned; each deployment pins
-        its version) or made of this environment's secrets. A binding is part of the deployment: adding or changing one
-        makes the next deployment.
+        request: the key never enters the pod. Its credential is one of the credentials above (versioned; each
+        deployment pins its version) or made of this environment's secrets. A binding is part of the deployment: adding
+        or changing one makes the next deployment.
       </p>
       {loading && <p className="empty">Loading…</p>}
       {!loading && bindings.length === 0 && (
@@ -558,18 +560,17 @@ export function Offloading({ env, st, tenant, ec, navigate }) {
 }
 
 // BindingSource says where a binding's credential comes from: a
-// credential of the tenant at its pinned version, or the environment's
-// secrets.
-function BindingSource({ b, tenant, navigate }) {
-  const enc = encodeURIComponent;
-  const tc = b.tenantCredential;
-  if (tc && tc.name) {
+// credential of the environment at its pinned version, or the
+// environment's secrets.
+function BindingSource({ b, env, tenant, navigate }) {
+  const cr = b.credentialRef;
+  if (cr && cr.name) {
     return (
       <>credential{' '}
         {tenant && navigate
-          ? <Link to={`/tenants/${enc(tenant)}/credentials/${enc(tc.name)}`} navigate={navigate} className="mono">{tc.name}</Link>
-          : <span className="mono">{tc.name}</span>}
-        {tc.version ? ` · version ${tc.version}` : ''} of the tenant</>);
+          ? <Link to={credentialPath(tenant, env, cr.name)} navigate={navigate} className="mono">{cr.name}</Link>
+          : <span className="mono">{cr.name}</span>}
+        {cr.version ? ` · version ${cr.version}` : ''} of this environment</>);
   }
   if (b.secrets && b.secrets.length) {
     return <>secret{b.secrets.length === 1 ? '' : 's'} <span className="mono">{b.secrets.join(', ')}</span> of this environment</>;
@@ -598,9 +599,9 @@ export function BindingCard({ b, env, ec, result = null, tenant = '', navigate =
             onClick={() => run(() => api.checkBinding(env, b.name), '')}>
             <Icon name="check" size={12} /> {busy ? 'Checking…' : 'Check'}</button>)}
       </div>
-      {(b.tenantCredential || (b.secrets && b.secrets.length > 0) || (tenant && navigate)) && (
+      {(b.credentialRef || (b.secrets && b.secrets.length > 0) || (tenant && navigate)) && (
         <div className="envbinding-src small muted">
-          <BindingSource b={b} tenant={tenant} navigate={navigate} />
+          <BindingSource b={b} env={env} tenant={tenant} navigate={navigate} />
           {tenant && navigate && ec && ec.write && (
             <Link to={envPath(tenant, env, 'builder', `binding/${b.name}`)} navigate={navigate} className="envbinding-edit">
               Edit in New deployment</Link>)}

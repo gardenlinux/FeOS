@@ -22,7 +22,7 @@ const INCIDENT_ENVS = 8;
 
 const empty = {
   tenant: '', sandboxes: null, environments: null, incidents: {}, domains: null, invitations: null, quota: null,
-  jobs: null, credentials: null, providers: null, providerKinds: null, at: 0,
+  jobs: null, providers: null, providerKinds: null, at: 0,
 };
 
 const SummaryContext = createContext({ ...empty, items: [], counts: {}, refresh: () => {} });
@@ -59,14 +59,13 @@ export function SummaryProvider({ tenant, can, children }) {
       setData(empty);
       return;
     }
-    const [sandboxes, environments, domains, invitations, quota, jobs, credentials, providerList] = await Promise.all([
+    const [sandboxes, environments, domains, invitations, quota, jobs, providerList] = await Promise.all([
       can.members ? optional(() => api.listSandboxes(), (r) => r.sandboxes || []) : null,
       can.environments ? optional(api.listEnvironments, (r) => r.environments || []) : null,
       can.members ? optional(() => api.listDomains(), (r) => r.domains || []) : null,
       can.members ? optional(api.listInvitations, (r) => r.invitations || []) : null,
       can.members ? optional(api.getQuota, (r) => r) : null,
       can.members ? optional(() => api.listJobs(), (r) => r.jobs || []) : null,
-      can.readTenant ? optional(api.listCredentials, (r) => r.credentials || []) : null,
       can.members ? providersOf() : null,
     ]);
     const providers = providerList ? providerList.providers || [] : null;
@@ -77,9 +76,9 @@ export function SummaryProvider({ tenant, can, children }) {
     const incidents = {};
     troubled.forEach((e, i) => { if (lists[i]) incidents[e.name] = lists[i]; });
     setData({
-      tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, credentials, providers, providerKinds, at: Date.now(),
+      tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, providers, providerKinds, at: Date.now(),
     });
-  }, [tenant, can.readTenant, can.environments, can.members]);
+  }, [tenant, can.environments, can.members]);
 
   usePoll(refresh, SUMMARY_MS);
 
@@ -93,8 +92,6 @@ export function SummaryProvider({ tenant, can, children }) {
       domains: d.domains ? d.domains.length : null,
       jobs: running,
     });
-    // The credentials (ADR 0033) by their count.
-    if (d.credentials) counts.credentials = { n: d.credentials.length };
     // The access providers (ADR 0054) by their count, ferun with them.
     if (d.providers) counts.providers = { n: d.providers.length };
     return { ...d, items, counts, refresh };

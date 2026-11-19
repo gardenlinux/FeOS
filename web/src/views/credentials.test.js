@@ -3,20 +3,20 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  behind, bindingOf, credentialPath, curlOf, emptyForm, formOf, hostOf, isName, keptOf, modeWords, needsDeployment,
-  newCredentialPath, oldestPin, pinState, pinWords, pinnedSpec, preflightOf, preflightRows, prefixesOf, specSnippet,
-  usedWords,
+  behind, bindingOf, curlOf, emptyForm, formOf, hostOf, isName, keptOf, modeWords, needsDeployment, oldestPin,
+  pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, specSnippet, usedWords,
 } from './credentials.js';
 
 // The credentials' derivations, from credentials as GET
-// /api/v1/credentials answers them (go/internal/bindings, credentialOut).
+// /api/v1/environments/{env}/credentials answers them (go/internal/
+// bindings, credentialOut): usedBy is the uses in the environment.
 
 const github = {
   name: 'github', upstream: 'https://api.github.com', mode: 'name', caPem: '', pathPrefixes: ['/repos/kino/', '/user'],
   forwardedHost: false, rateLimit: { perSecond: 10, burst: 20 },
   credential: { kind: 'headers', headers: { Authorization: { set: true } } },
   version: 3, createdBy: 'malte@example.com', createdAt: '2026-11-06T10:00:00Z',
-  usedBy: { sandboxes: ['h3k9v2m7qpx'], environments: [{ id: 'e1', name: 'prod', bindings: ['github'], latest: 2, deployed: 2 }] },
+  usedBy: { sandboxes: ['h3k9v2m7qpx'], bindings: ['github'], latest: 2, deployed: 2 },
 };
 
 const partner = {
@@ -86,18 +86,12 @@ describe('the form and the binding', () => {
   });
 });
 
-describe('preflightOf', () => {
-  it('a form with every value is preflighted as it is', () => {
-    const f = { ...formOf(github), headers: [{ name: 'Authorization', value: 'Bearer new', set: true }] };
-    expect(preflightOf(f, github)).toEqual({ how: 'form', binding: bindingOf(f) });
-  });
-
-  it('kept secrets and nothing else changed: the stored credential\'s check', () => {
-    expect(preflightOf(formOf(github), github)).toEqual({ how: 'stored' });
-  });
-
-  it('kept secrets with a change: their values are needed', () => {
-    expect(preflightOf({ ...formOf(github), pathPrefixes: '/orgs/' }, github)).toEqual({ how: 'needs', fields: ['headers.Authorization'] });
+describe('a check of the form', () => {
+  it('sends a kept secret as set: the check takes the latest version\'s value', () => {
+    const f = { ...formOf(github), pathPrefixes: '/orgs/' };
+    expect(keptOf(f)).toEqual(['headers.Authorization']);
+    expect(bindingOf(f).credential).toEqual({ kind: 'headers', headers: { Authorization: { set: true } } });
+    expect(bindingOf(f).pathPrefixes).toEqual(['/orgs/']);
   });
 });
 
@@ -116,13 +110,14 @@ describe('what the code sees', () => {
 
 describe('the uses', () => {
   it('in words', () => {
-    expect(usedWords(github.usedBy)).toBe('1 sandbox · 1 environment');
-    expect(usedWords({ sandboxes: ['a', 'b'], environments: [] })).toBe('2 sandboxes');
+    expect(usedWords(github.usedBy)).toBe('1 sandbox · 1 binding');
+    expect(usedWords({ sandboxes: ['a', 'b'], bindings: [] })).toBe('2 sandboxes');
+    expect(usedWords({ sandboxes: [], bindings: ['gh', 'gh2'], latest: 2, deployed: 2 })).toBe('2 bindings');
     expect(usedWords(undefined)).toBe('unused');
   });
 
-  it('an environment behind the latest, needing a deployment or rolling out', () => {
-    const prod = { latest: 2, deployed: 2 };
+  it('the bindings behind the latest, needing a deployment or rolling out', () => {
+    const prod = github.usedBy;
     expect([behind(prod, 3), needsDeployment(prod, 3), pinState(prod, 3), oldestPin(prod)]).toEqual([true, true, 'behind', 2]);
     const rolling = { latest: 3, deployed: 2 };
     expect([behind(rolling, 3), needsDeployment(rolling, 3), pinState(rolling, 3), oldestPin(rolling)])
@@ -139,23 +134,23 @@ describe('the uses', () => {
     const spec = {
       services: { api: { bindings: ['gh', 'pay'] } },
       bindings: {
-        gh: { tenantCredential: { name: 'github', version: 2 }, upstream: 'https://api.github.com', mode: 'name' },
-        gh2: { tenantCredential: { name: 'github', version: 1 } },
+        gh: { credentialRef: { name: 'github', version: 2 }, upstream: 'https://api.github.com', mode: 'name' },
+        gh2: { credentialRef: { name: 'github', version: 1 } },
         pay: { upstream: 'https://api.stripe.com', credential: { kind: 'basic', user: 'u', password: { secret: 'stripe' } } },
       },
     };
     const out = pinnedSpec(spec, 'github', 3);
     expect(out.bindings).toEqual(['gh', 'gh2']);
-    expect(out.spec.bindings.gh).toEqual({ tenantCredential: { name: 'github', version: 3 } });
-    expect(out.spec.bindings.gh2).toEqual({ tenantCredential: { name: 'github', version: 3 } });
+    expect(out.spec.bindings.gh).toEqual({ credentialRef: { name: 'github', version: 3 } });
+    expect(out.spec.bindings.gh2).toEqual({ credentialRef: { name: 'github', version: 3 } });
     expect(out.spec.bindings.pay).toEqual(spec.bindings.pay);
-    expect(spec.bindings.gh.tenantCredential.version).toBe(2);
+    expect(spec.bindings.gh.credentialRef.version).toBe(2);
     expect(pinnedSpec({ services: {} }, 'github', 3).bindings).toEqual([]);
   });
 
   it('the spec\'s two places, as the builder takes them', () => {
     expect(specSnippet('github')).toBe(
-      '"bindings": { "github": { "tenantCredential": { "name": "github" } } }\n"services": { "api": { "bindings": ["github"] } }');
+      '"bindings": { "github": { "credentialRef": { "name": "github" } } }\n"services": { "api": { "bindings": ["github"] } }');
   });
 });
 
@@ -179,14 +174,5 @@ describe('preflightRows', () => {
     expect(rows).toEqual([{ key: 'destination_denied', ok: false, text: 'the platform\'s own networks are no destination' }]);
     expect(preflightRows({ ok: true, addresses: [], probe: { status: 401, latencyMs: 12 } })[0].ok).toBe(false);
     expect(preflightRows(null)).toEqual([]);
-  });
-});
-
-describe('paths', () => {
-  it('the list, a credential, its form, a new one', () => {
-    expect(credentialPath('kino')).toBe('/tenants/kino/credentials');
-    expect(credentialPath('kino', 'github')).toBe('/tenants/kino/credentials/github');
-    expect(credentialPath('kino', 'github', true)).toBe('/tenants/kino/credentials/github/edit');
-    expect(newCredentialPath('kino')).toBe('/tenants/kino/new-credential');
   });
 });

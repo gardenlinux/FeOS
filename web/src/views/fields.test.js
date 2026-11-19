@@ -38,8 +38,8 @@ describe('the list', () => {
     expect(summaryOf('jobs', { image: 'x:1', on: 'manual' })).toBe('x:1 · manual');
     expect(summaryOf('addons', STORED.addons.postgres)).toBe('postgres · 17 · small');
     expect(summaryOf('routes', STORED.routes['api-expense'])).toBe('/api/expense → expense-service:http');
-    expect(summaryOf('bindings', { tenantCredential: { name: 'stripe', version: 2 } })).toBe('credential stripe · v2');
-    expect(summaryOf('bindings', { tenantCredential: { name: 'stripe' } })).toBe('credential stripe');
+    expect(summaryOf('bindings', { credentialRef: { name: 'stripe', version: 2 } })).toBe('credential stripe · v2');
+    expect(summaryOf('bindings', { credentialRef: { name: 'stripe' } })).toBe('credential stripe');
     expect(summaryOf('bindings', { upstream: 'https://api.github.com' })).toBe('api.github.com');
     expect(summaryOf('secrets', null, { pinned: 3, latest: 3 })).toBe('v3 of 3');
     expect(summaryOf('secrets', null, { pinned: 2, latest: 3, newer: true })).toBe('v2 · v3 newer');
@@ -174,10 +174,10 @@ describe('idle', () => {
 });
 
 describe('bindings', () => {
-  it('adds one of a tenant credential, ticked on the service, once', () => {
+  it('adds one of a credential of the environment, ticked on the service, once', () => {
     const r = credentialBinding(STORED, 'stripe', 'services', 'web');
     expect(r.name).toBe('stripe');
-    expect(r.spec.bindings).toEqual({ stripe: { tenantCredential: { name: 'stripe' } } });
+    expect(r.spec.bindings).toEqual({ stripe: { credentialRef: { name: 'stripe' } } });
     expect(r.spec.services.web.bindings).toEqual(['stripe']);
     const again = credentialBinding(r.spec, 'stripe', 'jobs', 'migrate');
     expect(Object.keys(again.spec.bindings)).toEqual(['stripe']);

@@ -6,7 +6,7 @@
 // the draft's change against its base), and the forms' typed fields to
 // the spec's values and back: a variable's value (Text, Secret, Addon
 // output, Service address), a health check (a readiness), an idle, a
-// binding of a tenant credential. Pure.
+// binding of a credential of the environment. Pure.
 
 import { getObject, imageBaseName, isObject, objectsOf, setObject, uniqueName } from './draft.js';
 import { envValueKind, secretNames } from './refs.js';
@@ -122,12 +122,12 @@ function replicasWord(n) {
   return `${n} replica${n === 1 ? '' : 's'}`;
 }
 
-// bindingSummary is a binding's line: its tenant credential (and the
-// version it pins), or its upstream's host.
+// bindingSummary is a binding's line: the environment's credential it
+// names (and the version it pins), or its upstream's host.
 export function bindingSummary(b) {
   if (!isObject(b)) return '';
-  if (isObject(b.tenantCredential)) {
-    const c = b.tenantCredential;
+  if (isObject(b.credentialRef)) {
+    const c = b.credentialRef;
     return `credential ${c.name || '?'}${c.version ? ` · v${c.version}` : ''}`;
   }
   return String(b.upstream || 'no upstream').replace(/^https?:\/\//, '');
@@ -318,16 +318,16 @@ export function routed(spec, name) {
 
 // ------------------------------------------------------------ bindings --
 
-// credentialBinding adds a binding of the tenant's credential cred (ADR
-// 0033), named after it, and ticks it on key/name when given: {spec,
-// name}. A binding of that credential the draft has is reused.
+// credentialBinding adds a binding of the environment's credential cred
+// (ADR 0033), named after it, and ticks it on key/name when given:
+// {spec, name}. A binding of that credential the draft has is reused.
 export function credentialBinding(spec, cred, key = '', name = '') {
-  const have = objectsOf(spec, 'bindings').find(([, b]) => isObject(b) && isObject(b.tenantCredential) && b.tenantCredential.name === cred);
+  const have = objectsOf(spec, 'bindings').find(([, b]) => isObject(b) && isObject(b.credentialRef) && b.credentialRef.name === cred);
   let out = spec;
   let bn = have ? have[0] : '';
   if (!bn) {
     bn = uniqueName(spec, 'bindings', cred);
-    out = setObject(out, 'bindings', bn, { tenantCredential: { name: cred } });
+    out = setObject(out, 'bindings', bn, { credentialRef: { name: cred } });
   }
   if (key && name) out = toggleBinding(out, key, name, bn, true);
   return { spec: out, name: bn };

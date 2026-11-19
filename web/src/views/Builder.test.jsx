@@ -131,10 +131,10 @@ describe('the forms', () => {
   });
 
   it('show the health check as its kind, the bindings as ticks, the idle as a choice', () => {
-    const spec = setObject(STORED, 'bindings', 'stripe', { tenantCredential: { name: 'stripe', version: 1 } });
+    const spec = setObject(STORED, 'bindings', 'stripe', { credentialRef: { name: 'stripe', version: 1 } });
     const svc = { ...STORED.services.web, bindings: ['stripe', 'gone'], idle: '15m' };
     const creds = [{ name: 'stripe', upstream: 'https://api.stripe.com', version: 2 }, { name: 'github', upstream: 'https://api.github.com', version: 1 }];
-    const out = html(<ServiceForm name="web" obj={svc} ctx={ctx(spec, [], { credentials: creds, tenant: 'kino' })} onChange={nop} onRename={nop} onRemove={nop} />);
+    const out = html(<ServiceForm name="web" obj={svc} ctx={ctx(spec, [], { credentials: creds, tenant: 'kino', env: 'prod' })} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(out).toContain('<button class="ghost mini on" aria-pressed="true">HTTP</button>');
     expect(out).toContain('value="/readyz"');
     expect(out).toMatch(/<input type="checkbox" checked=""\/><span class="mono">stripe<\/span><span class="muted small">credential stripe · v1/);
@@ -142,7 +142,8 @@ describe('the forms', () => {
     // The credential it gets already is not offered again.
     expect(out).toContain('<option value="github" selected="">github · api.github.com</option>');
     expect(out).not.toContain('<option value="stripe"');
-    expect(out).toContain('href="/tenants/kino/credentials"');
+    // The credentials are the environment's (ADR 0033).
+    expect(out).toContain('href="/tenants/kino/environments/prod/credentials"');
     expect(out).toContain('<option value="after" selected="">After</option>');
     expect(out).toContain('value="15"');
     const none = html(<ServiceForm name="web" obj={{ image: 'x:1' }} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />);
@@ -211,15 +212,22 @@ describe('the forms', () => {
     expect(hosted).toContain('value="git.example.com"');
   });
 
-  it('show a binding of a tenant credential with its pinned version, or the binding stated here', () => {
+  it('show a binding of a credential of the environment with its pinned version, or the binding stated here', () => {
     const creds = [{ name: 'stripe', upstream: 'https://api.stripe.com', mode: 'name', version: 3 }];
-    const spec = setObject(setObject(STORED, 'bindings', 'stripe', { tenantCredential: { name: 'stripe', version: 2 } }),
+    const spec = setObject(setObject(STORED, 'bindings', 'stripe', { credentialRef: { name: 'stripe', version: 2 } }),
       'services', 'web', { ...STORED.services.web, bindings: ['stripe'] });
-    const t = text(<BindingForm name="stripe" obj={spec.bindings.stripe} ctx={ctx(spec, [], { credentials: creds, tenant: 'kino' })}
-      onChange={nop} onRename={nop} onRemove={nop} />);
+    const ctx2 = ctx(spec, [], { credentials: creds, tenant: 'kino', env: 'prod' });
+    const t = text(<BindingForm name="stripe" obj={spec.bindings.stripe} ctx={ctx2} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(t).toContain('https://api.stripe.com · reached as http://stripe/');
     expect(t).toContain('v2 v3 is newer Use v3');
     expect(t).toContain('service web');
+    expect(html(<BindingForm name="stripe" obj={spec.bindings.stripe} ctx={ctx2} onChange={nop} onRename={nop} onRemove={nop} />))
+      .toContain('href="/tenants/kino/environments/prod/credentials/stripe"');
+    // A new environment has no credentials yet: they are made in it once
+    // it exists.
+    const fresh = text(<BindingForm name="stripe" obj={{ credentialRef: { name: '' } }}
+      ctx={ctx(spec, [], { isNew: true, tenant: 'kino', env: '' })} onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(fresh).toContain('a new environment has no credentials yet');
     const literal = html(<BindingForm name="gh" obj={{ upstream: 'https://api.github.com', credential: { kind: 'basic', user: 'bot', password: { secret: 'internal-token' } } }}
       ctx={ctx(STORED)} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(literal).toContain('value="https://api.github.com"');

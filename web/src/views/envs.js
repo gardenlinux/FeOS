@@ -330,10 +330,10 @@ export function specBindings(spec) {
     mode: (b && b.mode) || 'name',
     credential: (b && b.credential && b.credential.kind) || '',
     users: users(name),
-    // Where the credential comes from: a credential of the tenant at the
-    // version the deployment pinned (ADR 0033), or the environment's
+    // Where the credential comes from: a credential of the environment at
+    // the version the deployment pinned (ADR 0033), or the environment's
     // secrets its fields name.
-    tenantCredential: (b && b.tenantCredential) || null,
+    credentialRef: (b && b.credentialRef) || null,
     secrets: credentialSecrets(b && b.credential),
   }));
 }
@@ -543,13 +543,20 @@ export function publishNote(res) {
 // ----------------------------------------------------------------- clone --
 
 // cloneBody is a clone's request: the new name, the deployment whose
-// spec it takes (0: the latest), and each secret copied or left out.
-export function cloneBody({ name, deployment, copy }) {
+// spec it takes (0: the latest), and each secret and each credential
+// (ADR 0033) copied or left out.
+export function cloneBody({ name, deployment, copy, copyCredentials }) {
   const body = { name: String(name || '').trim() };
   if (Number(deployment) > 0) body.deployment = Number(deployment);
-  const secrets = {};
-  for (const [k, v] of Object.entries(copy || {})) if (v) secrets[k] = { copy: true };
+  const picked = (m) => {
+    const out = {};
+    for (const [k, v] of Object.entries(m || {})) if (v) out[k] = { copy: true };
+    return out;
+  };
+  const secrets = picked(copy);
   if (Object.keys(secrets).length > 0) body.secrets = secrets;
+  const credentials = picked(copyCredentials);
+  if (Object.keys(credentials).length > 0) body.credentials = credentials;
   return body;
 }
 

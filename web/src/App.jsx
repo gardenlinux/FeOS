@@ -27,7 +27,6 @@ import { JoinTokens } from './views/JoinTokens.jsx';
 import { Instances } from './views/Instances.jsx';
 import { Moved } from './views/Moved.jsx';
 import { Domains } from './views/Domains.jsx';
-import { Credentials } from './views/Credentials.jsx';
 import { Providers } from './views/Providers.jsx';
 import { TenantSettings, Usage } from './views/TenantPages.jsx';
 import { Ingresses, PlatformPeople } from './views/Platform.jsx';
@@ -181,9 +180,6 @@ export default function App() {
       {!needsGate && route.view === 'moved' && <Moved route={route} navigate={navigate} />}
       {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
       {!needsGate && route.view === 'domains' && <Domains key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
-      {!needsGate && (route.view === 'credentials' || route.view === 'newCredential') && (
-        <Credentials key={route.tenant} tenant={route.tenant} sel={route.view === 'newCredential' ? '' : route.sel}
-          isNew={route.view === 'newCredential'} edit={route.tab === 'edit'} navigate={navigate} />)}
       {!needsGate && (route.view === 'providers' || route.view === 'newProvider') && (
         <Providers key={route.tenant} tenant={route.tenant} sel={route.view === 'newProvider' ? '' : route.sel}
           isNew={route.view === 'newProvider'} edit={route.tab === 'edit'} navigate={navigate} />)}
@@ -700,7 +696,7 @@ function UserMenu({ me, onSignOut }) {
 
 // CRUMB_NAMES name the tenant's pages in the trail.
 const CRUMB_NAMES = {
-  tools: 'tools', domains: 'domains', members: 'people', tokens: 'tokens', usage: 'usage', settings: 'general', credentials: 'credentials',
+  tools: 'tools', domains: 'domains', members: 'people', tokens: 'tokens', usage: 'usage', settings: 'general',
   providers: 'access providers',
 };
 
@@ -723,8 +719,6 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {t && SETTINGS_VIEWS.has(route.view) && <>{sep}<span className="crumb">tenant settings</span></>}
         {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
-        {route.view === 'credentials' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
-        {route.view === 'newCredential' && <>{sep}{crumb('credentials', `/tenants/${enc(t)}/credentials`)}{sep}<span className="crumb">new</span></>}
         {route.view === 'providers' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
         {route.view === 'newProvider' && <>{sep}{crumb('access providers', `/tenants/${enc(t)}/providers`)}{sep}<span className="crumb">new</span></>}
         {route.view === 'invite' && <>{sep}<span className="crumb">invitation</span></>}
@@ -739,6 +733,8 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
             {route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
         {route.view === 'environments' && route.tab === 'sandboxes' && route.item && route.item !== 'new' && route.otab
           && route.otab !== 'overview' && <>{sep}<span className="crumb">{route.otab}</span></>}
+        {route.view === 'environments' && route.tab === 'credentials' && route.otab === 'edit' && (
+          <>{sep}<span className="crumb">new version</span></>)}
         {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
         {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}

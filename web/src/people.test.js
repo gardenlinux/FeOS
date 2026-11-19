@@ -106,8 +106,8 @@ describe('me → navigation', () => {
 
   it('a tenant\'s pages by role', () => {
     const views = (me, t) => tenantNav(tenantAccess(me, t)).map((n) => n.view);
-    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'credentials', 'providers', 'members', 'tokens', 'usage', 'settings']);
-    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'credentials', 'providers', 'members', 'usage', 'settings']);
+    expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'providers', 'members', 'tokens', 'usage', 'settings']);
+    expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'providers', 'members', 'usage', 'settings']);
     // Grants on environments alone: their sandboxes and jobs are in them
     // (ADR 0035), no page of the tenant's; the access providers (ADR
     // 0054), which an environment's admin chooses among.
@@ -139,11 +139,10 @@ describe('me → navigation', () => {
     expect(viewGate(ANNA, parsePath('/tenants/shop'))).toBe('');
     expect(viewGate(ANNA, parsePath('/tenants/other'))).toBe('member');
     expect(viewGate(OPERATOR, parsePath('/tenants/brand-new/members'))).toBe('');
-    // The credentials (ADR 0033): read on the tenant; a new one write.
-    expect(viewGate(ANNA, parsePath('/tenants/zeta/credentials/github'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/credentials'))).toBe('role');
-    expect(viewGate(ANNA, parsePath('/tenants/acme/new-credential'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/zeta/new-credential'))).toBe('role');
+    // The credentials (ADR 0033) are an environment's: its pages, with
+    // a grant on the environment alone too.
+    expect(viewGate(ANNA, parsePath('/tenants/shop/environments/shop-prod/credentials/github'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/tenants/shop/environments/shop-prod/credentials/new'))).toBe('');
     // The access providers (ADR 0054): every member reads them; a new
     // one is the tenant admin's.
     expect(viewGate(ANNA, parsePath('/tenants/shop/providers'))).toBe('');

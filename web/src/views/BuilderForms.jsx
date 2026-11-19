@@ -8,7 +8,7 @@ import { envValueKind, refLine, refTargets, referencesTo, refsFrom, suggestVarNa
 import { atField, notAt } from './findings.js';
 import { checkNewer, imageView, pinSecret, setImage } from './pins.js';
 import { optionProblems, planText } from './catalog.js';
-import { credentialPath } from './credentials.js';
+import { credentialPath, newCredentialPath } from '../routes.js';
 import { fromProblems, fromWords, usesTargets, useWords } from './reach.js';
 import { EgressEditor, ListText, Segmented } from './Reach.jsx';
 import '../styles/reach.css';
@@ -27,11 +27,12 @@ import {
 // fields their paths name.
 //
 // ctx is what every form reads: the spec, the catalog, the secrets the
-// environment has (knownSecrets) and their pins, the tenant's credentials,
-// the object's findings, setSecret(name, value) (a promise of the version
-// it made), editSpec(fn), whether the environment is new, whether the
-// role edits attached services, the environment's sandboxes (an attached
-// service's choice) and the tenant (for links).
+// environment has (knownSecrets) and their pins, the environment's
+// credentials (ADR 0033; a new environment has none yet), the object's
+// findings, setSecret(name, value) (a promise of the version it made),
+// editSpec(fn), whether the environment is new, whether the role edits
+// attached services, the environment's sandboxes (an attached service's
+// choice), and the tenant and the environment (for links).
 
 // ------------------------------------------------------------- widgets --
 
@@ -778,18 +779,42 @@ function RegistryLogin({ o, ctx, onChange, findings }) {
   );
 }
 
+// credentialsLink is the environment's credentials, or one of them,
+// for a form's link; '' for a new environment, which has none yet.
+function credentialsLink(ctx, name = '') {
+  return ctx.tenant && ctx.env && !ctx.isNew ? credentialPath(ctx.tenant, ctx.env, name) : '';
+}
+
+// noCredentials says why a form offers no credential of the environment
+// (ADR 0033): they cannot be read, the environment is new (they are made
+// in it once it exists), or it has none yet.
+function noCredentials(ctx) {
+  if (ctx.credentialsErr) return `the credentials cannot be read: ${ctx.credentialsErr}`;
+  if (ctx.isNew) return 'a new environment has no credentials yet: make them under its Settings once it exists';
+  return 'the environment has no credentials yet';
+}
+
+// FormLink is a link within the UI from a form: the router on a plain
+// click.
+function FormLink({ ctx, to, children }) {
+  return (
+    <a className="small" href={to} onClick={(e) => { if (ctx.navigate && e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); ctx.navigate(to); } }}>
+      {children} <Icon name="arrowRight" size={11} /></a>
+  );
+}
+
 // BindingsSection ticks the spec's bindings a service or job gets, and
-// adds one from a credential of the tenant (ADR 0033), ticked.
+// adds one from a credential of the environment (ADR 0033), ticked.
 function BindingsSection({ self, o, ctx, findings }) {
   const list = Array.isArray(o.bindings) ? o.bindings : [];
   const all = objectsOf(ctx.spec, 'bindings');
   const missing = list.filter((b) => !all.some(([n]) => n === b));
   // The credentials it does not get yet.
-  const got = new Set(all.filter(([bn, b]) => list.includes(bn) && isObject(b) && isObject(b.tenantCredential)).map(([, b]) => b.tenantCredential.name));
+  const got = new Set(all.filter(([bn, b]) => list.includes(bn) && isObject(b) && isObject(b.credentialRef)).map(([, b]) => b.credentialRef.name));
   const creds = (ctx.credentials || []).filter((c) => !got.has(c.name));
   const [pick, setPick] = useState('');
   const cred = creds.some((c) => c.name === pick) ? pick : (creds[0] && creds[0].name) || '';
-  const to = ctx.tenant ? credentialPath(ctx.tenant) : '';
+  const to = credentialsLink(ctx);
   return (
     <Section title="Credentials & bindings" hint="APIs its code calls by a name; the platform adds the credential" findings={findings}
       fold={list.length === 0 && all.length === 0}>
@@ -809,18 +834,16 @@ function BindingsSection({ self, o, ctx, findings }) {
       </div>
       <FindingList list={findings} />
       <div className="b-row wrap b-addcred">
-        <span className="muted small">Add a binding from a tenant credential</span>
+        <span className="muted small">Add a binding from a credential of the environment</span>
         {creds.length > 0 ? (
           <>
             <Select value={cred} options={creds.map((c) => ({ value: c.name, label: `${c.name} · ${String(c.upstream || '').replace(/^https?:\/\//, '')}` }))}
-              title="a credential of the tenant" onChange={setPick} />
+              title="a credential of the environment" onChange={setPick} />
             <button className="mini" disabled={!cred} onClick={() => ctx.editSpec((s) => credentialBinding(s, cred, self.key, self.name).spec)}>
               <Icon name="plus" size={12} /> Add</button>
           </>)
-          : <span className="muted small">{ctx.credentialsErr ? `(the credentials cannot be read: ${ctx.credentialsErr})`
-            : (ctx.credentials || []).length ? '(it gets every one of them)' : '(the tenant has none yet)'}</span>}
-        {to && <a className="small" href={to} onClick={(e) => { if (ctx.navigate && e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); ctx.navigate(to); } }}>
-          the tenant's credentials <Icon name="arrowRight" size={11} /></a>}
+          : <span className="muted small">({!ctx.credentialsErr && (ctx.credentials || []).length ? 'it gets every one of them' : noCredentials(ctx)})</span>}
+        {to && <FormLink ctx={ctx} to={to}>the environment&apos;s credentials</FormLink>}
       </div>
     </Section>
   );
@@ -1048,45 +1071,44 @@ export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
 
 // ------------------------------------------------------------- bindings --
 
-const BINDING_FIELDS = ['upstream', 'mode', 'caPem', 'pathPrefixes', 'forwardedHost', 'rateLimit', 'credential', 'tenantCredential'];
+const BINDING_FIELDS = ['upstream', 'mode', 'caPem', 'pathPrefixes', 'forwardedHost', 'rateLimit', 'credential', 'credentialRef'];
 
-// BindingForm is a binding: a credential of the tenant (ADR 0033), or,
-// folded as advanced, the binding stated here with ADR 0028's fields,
-// its secret fields the environment's secrets.
+// BindingForm is a binding: a credential of the environment (ADR 0033),
+// or, folded as advanced, the binding stated here with ADR 0028's
+// fields, its secret fields the environment's secrets.
 export function BindingForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   const o = isObject(obj) ? obj : {};
   const f = ctx.findings;
-  const tc = isObject(o.tenantCredential) ? o.tenantCredential : null;
+  const tc = isObject(o.credentialRef) ? o.credentialRef : null;
   const creds = ctx.credentials || [];
   const cred = tc ? creds.find((c) => c.name === tc.name) : null;
   const users = referencesTo(ctx.spec, 'bindings', name);
-  const to = ctx.tenant ? credentialPath(ctx.tenant, tc ? tc.name : '') : '';
+  const to = credentialsLink(ctx, tc && cred ? tc.name : '');
   return (
     <div className="b-form">
       <FormHead kind="Binding" name={name} onRename={onRename} findings={f} fields={BINDING_FIELDS} />
-      <Section title="Credential" findings={atField(f, 'tenantCredential')}>
+      <Section title="Credential" findings={atField(f, 'credentialRef')}>
         <span className="b-seg">
           <button className={'ghost mini' + (tc ? ' on' : '')} aria-pressed={!!tc}
-            onClick={() => { if (!tc) onChange({ tenantCredential: { name: (creds[0] && creds[0].name) || '' } }); }}>A tenant credential</button>
+            onClick={() => { if (!tc) onChange({ credentialRef: { name: (creds[0] && creds[0].name) || '' } }); }}>A credential of the environment</button>
           <button className={'ghost mini' + (tc ? '' : ' on')} aria-pressed={!tc}
             onClick={() => { if (tc) onChange({ upstream: cred ? cred.upstream : 'https://', mode: cred ? cred.mode : 'name' }); }}>Stated here (advanced)</button>
         </span>
         {tc && (
           <>
-            <Field label="Credential" findings={atField(f, 'tenantCredential.name')}
+            <Field label="Credential" findings={atField(f, 'credentialRef.name')}
               hint={cred ? <>{cred.upstream} · reached as {cred.mode === 'intercept' ? 'its own name' : <span className="mono">http://{name}/</span>}</>
-                : creds.length ? 'not a credential of the tenant' : ctx.credentialsErr || 'the tenant has no credentials yet'}>
+                : creds.length ? 'not a credential of the environment' : noCredentials(ctx)}>
               <Select value={tc.name} options={creds.map((c) => c.name)} empty="(a credential)"
-                onChange={(v) => onChange({ ...o, tenantCredential: { name: v } })} />
-              {to && <a className="small" href={to} onClick={(e) => { if (ctx.navigate && e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); ctx.navigate(to); } }}>
-                {tc.name && cred ? `credential ${tc.name}` : "the tenant's credentials"} <Icon name="arrowRight" size={11} /></a>}
+                onChange={(v) => onChange({ ...o, credentialRef: { name: v } })} />
+              {to && <FormLink ctx={ctx} to={to}>{tc.name && cred ? `credential ${tc.name}` : 'the environment\'s credentials'}</FormLink>}
             </Field>
-            <Field label="Version" findings={atField(f, 'tenantCredential.version')}
+            <Field label="Version" findings={atField(f, 'credentialRef.version')}
               hint={tc.version ? 'pinned: a new version reaches it with a deployment that pins it' : 'the deployment pins the latest version when it is applied'}>
               <span className="mono">{tc.version ? `v${tc.version}` : 'latest'}</span>
               {cred && tc.version && cred.version > tc.version && (
                 <><span className="warntext small">v{cred.version} is newer</span>
-                  <button className="ghost mini" onClick={() => onChange({ ...o, tenantCredential: { ...tc, version: cred.version } })}>Use v{cred.version}</button></>)}
+                  <button className="ghost mini" onClick={() => onChange({ ...o, credentialRef: { ...tc, version: cred.version } })}>Use v{cred.version}</button></>)}
             </Field>
           </>)}
         {!tc && <LiteralBinding o={o} ctx={ctx} onChange={onChange} findings={f} />}
@@ -1192,26 +1214,28 @@ function CredValue({ v, targets, ctx, onChange }) {
   );
 }
 
-// NewBinding is "+ Add" of the bindings: a credential of the tenant, or
-// a binding stated here.
+// NewBinding is "+ Add" of the bindings: a credential of the
+// environment, or a binding stated here.
 export function NewBinding({ ctx, onAdd }) {
   const creds = ctx.credentials || [];
   const [pick, setPick] = useState('');
   const [name, setName] = useState('');
   const cred = pick || (creds[0] && creds[0].name) || '';
+  const toNew = ctx.tenant && ctx.env && !ctx.isNew ? newCredentialPath(ctx.tenant, ctx.env) : '';
   return (
     <div className="b-form">
       <FormHead kind="New binding" name="an API its code calls" findings={[]} fields={[]} />
-      <Section title="From a tenant credential">
-        <p className="muted small">The tenant states an API and its credential once (ADR 0033); a binding of it names it, and the
-          deployment pins its version.</p>
+      <Section title="From a credential of the environment">
+        <p className="muted small">The environment states an API and its credential once (ADR 0033); a binding of it names
+          it, and the deployment pins its version.</p>
         {creds.length > 0
           ? <div className="b-row wrap">
             <Select value={cred} options={creds.map((c) => ({ value: c.name, label: `${c.name} · ${String(c.upstream || '').replace(/^https?:\/\//, '')}` }))} onChange={setPick} />
             <button className="primary mini" disabled={!cred} onClick={() => onAdd(credentialBinding(ctx.spec, cred))}>
               <Icon name="plus" size={12} /> Add binding {cred}</button>
           </div>
-          : <p className="muted small">{ctx.credentialsErr ? `The credentials cannot be read: ${ctx.credentialsErr}` : 'The tenant has no credentials yet.'}</p>}
+          : <p className="muted small">{noCredentials(ctx).replace(/^./, (c) => c.toUpperCase())}.</p>}
+        {toNew && <FormLink ctx={ctx} to={toNew}>New credential</FormLink>}
       </Section>
       <Section title="Stated here (advanced)" fold>
         <p className="muted small">An upstream and a credential whose secret fields are this environment's secrets (ADR 0028).</p>

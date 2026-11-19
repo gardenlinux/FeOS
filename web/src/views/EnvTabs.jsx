@@ -685,6 +685,8 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
   const [deployments, setDeployments] = useState(null);
   const [secrets, setSecrets] = useState(null);
   const [copy, setCopy] = useState({});
+  const [creds, setCreds] = useState(null);
+  const [copyCreds, setCopyCreds] = useState({});
   const [op, run, clear] = useOp();
   useEffect(() => {
     let live = true;
@@ -695,13 +697,21 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
       setSecrets(list);
       setCopy(Object.fromEntries(list.map((s) => [s.name, true])));
     }, () => { if (live) setSecrets([]); });
+    // The credentials are the environment's (ADR 0033): a clone gets the
+    // ones it copies, each at the latest version.
+    api.listCredentials(env).then((r) => {
+      if (!live) return;
+      const list = r.credentials || [];
+      setCreds(list);
+      setCopyCreds(Object.fromEntries(list.map((c) => [c.name, true])));
+    }, () => { if (live) setCreds([]); });
     return () => { live = false; };
   }, [env]);
   const busy = !!(op && op.busy);
   const findings = op && op.error && op.error.body && op.error.body.findings;
   const submit = async (e) => {
     e.preventDefault();
-    const body = cloneBody({ name, deployment, copy });
+    const body = cloneBody({ name, deployment, copy, copyCredentials: copyCreds });
     const r = await run(() => api.cloneEnvironment(env, body), (res) => `${res.name} made from deployment ${body.deployment || st.deployment}.`);
     if (r) { changed(); navigate(envPath(tenant, r.name)); }
   };
@@ -733,6 +743,18 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
                   {' '}{s.name} <span className="muted">v{s.version}</span>
                 </label>))}
               {secrets && secrets.length > 0 && <span className="muted small">copied at their latest versions; one left out the spec names fails the clone</span>}
+            </span>
+          </div>
+          <div className="envfield"><span className="k">credentials</span>
+            <span className="envchecks">
+              {creds === null && <span className="muted small">…</span>}
+              {creds && creds.length === 0 && <span className="muted small">none</span>}
+              {(creds || []).map((c) => (
+                <label key={c.name} className="mono small">
+                  <input type="checkbox" checked={!!copyCreds[c.name]} onChange={(e) => setCopyCreds((m) => ({ ...m, [c.name]: e.target.checked }))} />
+                  {' '}{c.name} <span className="muted">v{c.version}</span>
+                </label>))}
+              {creds && creds.length > 0 && <span className="muted small">copied at their latest versions; one left out the spec names fails the clone</span>}
             </span>
           </div>
           <div><button className="primary mini" type="submit" disabled={!name.trim()}>Clone</button></div>
@@ -779,7 +801,7 @@ export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
       <div className="sect">delete</div>
       <p className="panel-note">
         Deleting {st.name} stops and removes its instances and their volumes, with its addons' data, then the environment
-        with its deployments, tags, secrets and route tokens, and its ended jobs&apos; records. Its default host goes; its
+        with its deployments, tags, secrets, credentials and route tokens, and its ended jobs&apos; records. Its default host goes; its
         domains stay the tenant&apos;s. While it has sandboxes or jobs queued or running it is not deleted. It cannot be undone.
       </p>
       <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} className="mini" icon="trash"
