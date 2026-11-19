@@ -348,7 +348,8 @@ func (s *server) tenant(n need, h apiHandler) http.Handler {
 			return err
 		}
 		r = r.WithContext(auth.WithTenant(r.Context(), t))
-		if err := s.allow(r, t, n); err != nil {
+		r, err = s.allow(r, t, n)
+		if err != nil {
 			return err
 		}
 		return h(w, r)
@@ -526,29 +527,68 @@ func (s *server) authService(r *http.Request, tok string) (auth.Service, bool, e
 // allow checks a route's need: on the tenant, the principal's tenant
 // grant; on an environment, the higher of that and its grant there, an
 // environment it holds no role on being absent (404). A role too low is
-// 403 role_required.
-func (s *server) allow(r *http.Request, t auth.Tenant, n need) error {
+// 403 role_required. An environment it resolved to check the grant
+// there goes with the request it returns (checkedEnv), so that the
+// handler acts on the environment that was checked, whatever its name
+// names by then.
+func (s *server) allow(r *http.Request, t auth.Tenant, n need) (*http.Request, error) {
 	switch n.scope {
 	case scopeTenant:
 		if t.Role >= n.role {
-			return nil
+			return r, nil
 		}
-		return apierr.RoleRequired(n.role.String(), "tenant")
+		return r, apierr.RoleRequired(n.role.String(), "tenant")
 	case scopeEnv:
 		if t.Role >= n.role || (n.orTenant != auth.RoleNone && t.Role >= n.orTenant) {
-			return nil
+			return r, nil
 		}
 		if t.Role == auth.RoleNone && len(t.Envs) == 0 {
-			return errNoEnvironment()
+			return r, errNoEnvironment()
 		}
-		return s.allowEnv(r, t, r.PathValue("env"), n.role)
+		ref := r.PathValue("env")
+		id, err := s.envRef(r, t, ref)
+		if err != nil {
+			return r, err
+		}
+		if err := allowEnvID(t, id, n.role); err != nil {
+			return r, err
+		}
+		return r.WithContext(context.WithValue(r.Context(), checkedEnvKey{}, checkedEnvRef{ref: ref, id: id})), nil
 	case scopeSandbox, scopeJob:
 		if t.Role >= n.role {
-			return nil
+			return r, nil
 		}
-		return s.allowPodEnv(r, t, n)
+		return r, s.allowPodEnv(r, t, n)
 	}
-	return nil
+	return r, nil
+}
+
+type checkedEnvKey struct{}
+
+// checkedEnvRef is the environment allow resolved {env} to.
+type checkedEnvRef struct {
+	ref string
+	id  uuid.UUID
+}
+
+// checkedEnv is the ID of the environment that allow resolved ref to for
+// this request, false when it resolved none (a tenant grant sufficed).
+func checkedEnv(r *http.Request, ref string) (uuid.UUID, bool) {
+	c, ok := r.Context().Value(checkedEnvKey{}).(checkedEnvRef)
+	return c.id, ok && c.ref == ref
+}
+
+// envRef is the ID of the environment of t's tenant that ref names (its
+// ID or its name); none is 404.
+func (s *server) envRef(r *http.Request, t auth.Tenant, ref string) (uuid.UUID, error) {
+	id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
+	if isNoRow(err) {
+		return uuid.Nil, errNoEnvironment()
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("environment %s: %w", ref, err)
+	}
+	return id, nil
 }
 
 // allowPodEnv checks n's role on the environment of the path's sandbox
@@ -606,12 +646,9 @@ func (s *server) allowEnv(r *http.Request, t auth.Tenant, ref string, role auth.
 	if t.Role >= role {
 		return nil
 	}
-	id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
-	if isNoRow(err) {
-		return errNoEnvironment()
-	}
+	id, err := s.envRef(r, t, ref)
 	if err != nil {
-		return fmt.Errorf("environment %s: %w", ref, err)
+		return err
 	}
 	return allowEnvID(t, id, role)
 }

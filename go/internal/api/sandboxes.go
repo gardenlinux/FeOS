@@ -358,24 +358,29 @@ func (s *server) writableEnv(r *http.Request, ref string) (store.Environment, er
 
 // inEnv is a route of an environment's credentials (ADR 0033): the
 // environment the path's {env} names, its grant checked by the route's
-// need, resolved for h; one the tenant does not have is 404.
+// need, resolved for h; one the tenant does not have is 404. It is the
+// environment allow checked the grant on when allow resolved one. An
+// environment being deleted is read, but not written (409).
 func (s *server) inEnv(h func(http.ResponseWriter, *http.Request, bindings.Env)) apiHandler {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		t, _ := auth.TenantFrom(r.Context())
 		ref := r.PathValue("env")
-		id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
-		if isNoRow(err) {
-			return errNoEnvironment()
-		}
-		if err != nil {
-			return fmt.Errorf("environment %s: %w", ref, err)
+		id, ok := checkedEnv(r, ref)
+		if !ok {
+			var err error
+			if id, err = s.envRef(r, t, ref); err != nil {
+				return err
+			}
 		}
 		e, err := s.st.GetEnvironment(r.Context(), id)
-		if isNoRow(err) {
+		if isNoRow(err) || (err == nil && e.Owner != t.Name) {
 			return errNoEnvironment()
 		}
 		if err != nil {
 			return fmt.Errorf("environment %s: %w", ref, err)
+		}
+		if e.Deleting && r.Method != http.MethodGet {
+			return apierr.New(http.StatusConflict, "environment %s is being deleted", e.Name)
 		}
 		h(w, r, bindings.Env{ID: e.ID, Name: e.Name, Tenant: t.Name})
 		return nil

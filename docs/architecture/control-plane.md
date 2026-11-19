@@ -2302,9 +2302,9 @@ with the HTTP bindings.
 |---|---|---|
 | `GET /api/v1/environments/{env}/credentials` | read on the environment | `{credentials}`: the latest version of each, with `usedBy` |
 | `GET /api/v1/environments/{env}/credentials/{name}` | read on the environment | the latest version; 404 `no_credential` |
-| `PUT /api/v1/environments/{env}/credentials/{name}` | write on the environment | 201 a new version, 200 the same definition again; 422 as a binding's PUT |
-| `DELETE /api/v1/environments/{env}/credentials/{name}` | write on the environment | 204; 409 `credential_in_use`, naming its users |
-| `POST /api/v1/environments/{env}/credentials/{name}/check` | write on the environment | the preflight: of the latest version (404 `no_credential` without one), or of `{binding}`, a draft that is not stored; `{probe}` optional; a draft the rules refuse answers 200 with the result's `error`, as `/api/v1/http/preflight` does, a body that is no draft 400 |
+| `PUT /api/v1/environments/{env}/credentials/{name}` | write on the environment | 201 a new version, 200 the same definition again; 422 as a binding's PUT; 409 while the environment is being deleted |
+| `DELETE /api/v1/environments/{env}/credentials/{name}` | write on the environment | 204; 409 `credential_in_use`, naming its users; 409 while the environment is being deleted |
+| `POST /api/v1/environments/{env}/credentials/{name}/check` | write on the environment | the preflight: of the latest version (404 `no_credential` without one), or of `{binding}`, a draft that is not stored; `{probe}` optional; a draft the rules refuse answers 200 with the result's `error`, as `/api/v1/http/preflight` does, a body that is no draft 400; 409 while the environment is being deleted |
 | `GET /api/v1/sandboxes/{id}/credentials` | read on the sandbox's environment | `{credentials}`: the names the sandbox names |
 | `PUT /api/v1/sandboxes/{id}/credentials` | write on the sandbox's environment | the same, after the whole list is stated |
 

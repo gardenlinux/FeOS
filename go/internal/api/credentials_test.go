@@ -4,9 +4,15 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/bindings"
+	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // The credentials' routes act in the environment the path names, by name
@@ -41,5 +47,71 @@ func TestCredentialRoutesResolveTheEnvironment(t *testing.T) {
 		if w := e.do(http.MethodGet, path, authz, nil); w.Code != http.StatusNotFound || w.Header().Get("X-Door") == "bindings" {
 			t.Fatalf("%s: %d %q", path, w.Code, w.Body.String())
 		}
+	}
+}
+
+// An environment being deleted shows its credentials, and takes no write
+// of them: 409.
+func TestCredentialRoutesWhileTheEnvironmentIsDeleted(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
+	id := e.mkEnv(testTenant, "prod")
+	if _, err := e.st.Q().Exec(context.Background(), "UPDATE environments SET deleting = true WHERE id = $1", id); err != nil {
+		t.Fatal(err)
+	}
+	authz := bearerOf(e.tenantToken)
+	for _, path := range []string{"/api/v1/environments/prod/credentials", "/api/v1/environments/prod/credentials/erp"} {
+		if w := e.do(http.MethodGet, path, authz, nil); w.Code != http.StatusOK {
+			t.Errorf("GET %s: %d %q", path, w.Code, w.Body.String())
+		}
+	}
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPut, "/api/v1/environments/prod/credentials/erp"},
+		{http.MethodDelete, "/api/v1/environments/prod/credentials/erp"},
+		{http.MethodPost, "/api/v1/environments/prod/credentials/erp/check"},
+	} {
+		w := e.do(c.method, c.path, authz, map[string]any{})
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "environment prod is being deleted") {
+			t.Errorf("%s %s: %d %q", c.method, c.path, w.Code, w.Body.String())
+		}
+	}
+}
+
+// With a grant on the environment alone, a route acts on the environment
+// its grant was checked on: allow hands the ID it resolved to the
+// handler, which does not read the path's name again, so that a name
+// that names another environment by then does not lead there.
+func TestCredentialRoutesActWhereTheGrantWasChecked(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
+	dev := e.mkEnv(testTenant, "dev")
+	prod := e.mkEnv(testTenant, "prod")
+	tok, hash, err := mintTenantToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.InsertTenantToken(context.Background(), store.TenantToken{Hash: hash, TenantID: testTenant,
+		Role: "write", EnvironmentID: dev}); err != nil {
+		t.Fatal(err)
+	}
+	authz := bearerOf(tok)
+	w := e.do(http.MethodPut, "/api/v1/environments/dev/credentials/erp", authz, map[string]any{})
+	if want := "PutCredential " + testTenant + "/dev/" + dev.String(); w.Code != http.StatusOK || w.Body.String() != want {
+		t.Fatalf("put on dev: %d %q, want %q", w.Code, w.Body.String(), want)
+	}
+	if w := e.do(http.MethodPut, "/api/v1/environments/prod/credentials/erp", authz, map[string]any{}); w.Code != http.StatusNotFound {
+		t.Fatalf("put on prod: %d %q", w.Code, w.Body.String())
+	}
+
+	// As if "dev" had named prod when allow checked it: the handler gets
+	// prod, the environment checked, not dev, which the name names now.
+	var got bindings.Env
+	h := e.srv.inEnv(func(_ http.ResponseWriter, _ *http.Request, env bindings.Env) { got = env })
+	r := httptest.NewRequest(http.MethodPut, "/api/v1/environments/dev/credentials/erp", nil)
+	r.SetPathValue("env", "dev")
+	ctx := auth.WithTenant(r.Context(), auth.Tenant{Name: testTenant})
+	ctx = context.WithValue(ctx, checkedEnvKey{}, checkedEnvRef{ref: "dev", id: prod})
+	if err := h(httptest.NewRecorder(), r.WithContext(ctx)); err != nil || got.ID != prod || got.Name != "prod" {
+		t.Fatalf("the handler got %+v %v, want prod", got, err)
 	}
 }
