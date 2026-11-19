@@ -536,12 +536,12 @@ describe('the logs', () => {
 describe('the routes it calls', () => {
   it('are the reads and the operations of an environment', () => {
     const src = ['./Environments.jsx', './EnvOverview.jsx', './ObjectPage.jsx', './EnvTabs.jsx', './LogSearch.jsx', './Traces.jsx',
-      '../envstatus.jsx', './EnvSecrets.jsx', './accessData.js']
+      '../envstatus.jsx', './EnvSecrets.jsx', './ObjectAccess.jsx', './accessData.js']
       .map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
       'accessLogs', 'addonCatalog', 'bindingUsage', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
-      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listCredentials', 'listDeployments', 'listEnvironments',
+      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'identities', 'listCredentials', 'listDeployments', 'listEnvironments',
       'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
     ]);

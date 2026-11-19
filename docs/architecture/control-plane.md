@@ -2545,11 +2545,15 @@ objects by kind, a row each with its image, ready replicas, last hour's
 traffic, restarts and the deployments it runs, the instances folded
 under it, its routes, its open incidents, its sandboxes and its newest
 jobs made by a call); an object's page
-(`…/objects/<kind>/<name>`: its definition as the latest deployment's
-normalised spec has it, a secret at its pinned version and references
-as links, the routes to it, who uses it, its instances with the node a
-link for operators only, its incidents, and the deployments of the last
-ten whose diff changed it, one read each);
+(`…/objects/<kind>/<name>`: a service's and a job's access on its
+overview, its identity (its SPIFFE ID and when its pods' first
+certificate ends, from `…/identities`) and a row per target it reaches,
+by where the key lives, a binding's with its last 24 h; its definition
+as the latest deployment's normalised spec has it, a secret at its
+pinned version and references as links, the routes to it, who uses it,
+its instances with the node a link for operators only, its incidents,
+and the deployments of the last ten whose diff changed it, one read
+each);
 its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;

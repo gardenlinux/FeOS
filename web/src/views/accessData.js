@@ -3,8 +3,9 @@
 
 // What the views of where a key lives read beside the spec (access.js):
 // the addon catalog (which types admit a workload by its certificate),
-// the environment's credentials and its bindings' use (the sink's counts
-// of the last 24 h). Read with the session; none of it carries a key.
+// the environment's credentials, its bindings' use (the sink's counts of
+// the last 24 h) and its workloads' identities. Read with the session;
+// none of it carries a key.
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
@@ -13,6 +14,7 @@ import { builtinCatalog, readCatalog } from './catalog.js';
 
 const CREDENTIALS_MS = 10000;
 const USAGE_MS = 60000;
+const IDENTITIES_MS = 60000;
 
 // useAddonCatalog is ferund's addon catalog, read once; null until it
 // answers, the built-in list from a ferund that has none or fails.
@@ -66,4 +68,11 @@ export function useBindingUsage(env, wanted = true) {
     }
   }, [env, wanted]);
   return useRead(fn, USAGE_MS).data;
+}
+
+// useIdentities are env's workloads with their SPIFFE IDs and their pods'
+// certificates' ends (GET …/identities).
+export function useIdentities(env) {
+  const fn = useCallback(() => api.identities(env), [env]);
+  return useRead(fn, IDENTITIES_MS);
 }

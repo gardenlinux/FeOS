@@ -343,6 +343,21 @@ export function strayUsage(usage, spec) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// workloadOf is the workload kind/name ('service', 'job') of an
+// identities answer, null when it has none.
+export function workloadOf(identities, kind, name) {
+  const list = isObject(identities) && Array.isArray(identities.workloads) ? identities.workloads : [];
+  return list.find((w) => isObject(w) && w.kind === kind && w.name === name) || null;
+}
+
+// soonestCert is the pod of pods whose certificate ends first (one
+// without a certificate yet left out), null when none has one.
+export function soonestCert(pods) {
+  const has = (Array.isArray(pods) ? pods : []).filter((p) => isObject(p) && p.notAfter && !Number.isNaN(Date.parse(p.notAfter)));
+  if (has.length === 0) return null;
+  return has.reduce((a, b) => (Date.parse(b.notAfter) < Date.parse(a.notAfter) ? b : a));
+}
+
 // secretPinNote says a secret the latest deployment pins at an earlier
 // version than its latest: "the latest deployment pins v2, latest v3";
 // '' when it pins the latest or none.

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accessOf, addonMark, bindingOf, bindingSource, credentialPinNote, fieldsWords, fmtNumber, inventoryOf, kindShort, problemWords,
-  secretPinNote, secretUses, strayUsage, usageOf, usageTone, usageWords, usersWords,
+  secretPinNote, secretUses, soonestCert, strayUsage, usageOf, usageTone, usageWords, usersWords, workloadOf,
 } from './access.js';
 import { response } from '../testing/ferun.js';
 
@@ -185,9 +185,10 @@ describe("an access row's words", () => {
   });
 });
 
-describe("the bindings' use, as ferund answers it", () => {
+describe("the bindings' use and the workloads' identities, as ferund answers them", () => {
   const usage = response('GET_environments_env_bindings_usage.200');
   const down = response('GET_environments_env_bindings_usage.200.unavailable');
+  const ids = response('GET_environments_env_identities.200');
 
   it("finds a binding's numbers, none while the log store is unavailable", () => {
     expect(usageOf(usage, 'erp')).toMatchObject({ requests: 1204, refused: 2 });
@@ -211,5 +212,16 @@ describe("the bindings' use, as ferund answers it", () => {
     const u = { window: '24h', bindings: [...usage.bindings, { name: 'models', requests: 9, users: [{ kind: 'sandbox', name: 's1', requests: 9 }] }] };
     expect(strayUsage(u, { bindings: { erp: {}, mail: {} } }).map((b) => b.name)).toEqual(['models']);
     expect(strayUsage(down, {})).toEqual([]);
+  });
+  it("finds a workload's identity and the certificate that ends first", () => {
+    const api = workloadOf(ids, 'service', 'api');
+    expect(api.spiffeId).toBe('spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api');
+    expect(soonestCert(api.pods)).toEqual({ pod: 'd7r2m4k9pqs', notAfter: '2026-11-20T09:15:00Z', node: 'node-a' });
+    expect(workloadOf(ids, 'job', 'migrate').pods).toEqual([]);
+    expect(soonestCert([])).toBe(null);
+    // A pod before its first certificate has none.
+    expect(soonestCert(workloadOf(ids, 'sandbox', 'c3kv9mwq2hd').pods)).toBe(null);
+    expect(workloadOf(ids, 'service', 'nope')).toBe(null);
+    expect(workloadOf(null, 'service', 'api')).toBe(null);
   });
 });

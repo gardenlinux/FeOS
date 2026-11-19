@@ -1,10 +1,31 @@
 /* SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-/* Where a key lives, as an environment's Secrets view
+/* Where a key lives, as a service's and a job's Access section
+   (views/ObjectAccess.jsx) and an environment's Secrets view
    (views/EnvSecrets.jsx). The marks are marks.css's; teal is the
    network's (an upstream), red what needs someone: a secret without a
    value, a binding the upstream refuses. */
+
+/* Access */
+.acc-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 10px; }
+.acc-k { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; min-width: 64px; }
+.acc-spiffe { overflow-wrap: anywhere; }
+.acc-cert b { font-weight: 600; }
+.acc-pods { display: inline-block; margin-left: 8px; color: var(--muted); }
+.acc-pods summary { cursor: pointer; font-size: 12px; }
+.acc-pods[open] { display: block; margin: 4px 0 0 74px; }
+.acc-none { margin: 0; }
+.tbl.acc-tbl td { padding: 7px 10px; vertical-align: top; }
+.acc-tbl td.acc-what { white-space: nowrap; }
+.acc-tbl td.acc-to { min-width: 160px; }
+.acc-tbl td.acc-mark { white-space: nowrap; }
+.acc-tbl td.acc-detail { color: var(--text); }
+.acc-tbl td.acc-nums-cell { text-align: right; }
+.acc-arrow { color: var(--faint); margin-right: 6px; }
+.acc-nums { font-variant-numeric: tabular-nums; }
+.acc-nums .bad { color: var(--danger); }
+.acc-nums .warn { color: var(--warn); }
 
 /* Secrets */
 .inv { display: flex; flex-direction: column; gap: 6px; max-width: 1240px; }
