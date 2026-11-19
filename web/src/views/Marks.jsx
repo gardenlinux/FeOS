@@ -12,22 +12,25 @@ import '../styles/marks.css';
 
 const MARK_ICON = { identity: 'shield', offloaded: 'lock', container: 'key' };
 
-export function KeyMark({ mark }) {
+// KeyMark is a relation's mark; label may say it more precisely ("OAuth2
+// at the node"), title replace what it means on hover.
+export function KeyMark({ mark, label = '', title = '' }) {
   if (!MARKS.includes(mark)) {
     return <span className="badge mark mark-none" title="Hands over no key.">no key</span>;
   }
   return (
-    <span className={`badge mark mark-${mark}`} title={MARK_TITLE[mark]}>
-      <Icon name={MARK_ICON[mark]} size={11} /> {MARK_LABEL[mark]}
+    <span className={`badge mark mark-${mark}`} title={title || MARK_TITLE[mark]}>
+      <Icon name={MARK_ICON[mark]} size={11} /> {label || MARK_LABEL[mark]}
     </span>
   );
 }
 
-// MarkLegend says once what the three marks mean, where they first show.
-export function MarkLegend() {
+// MarkLegend says once what the three marks mean, where they first show;
+// marks, when given, are the ones shown there.
+export function MarkLegend({ marks = MARKS }) {
   return (
     <div className="mark-legend">
-      {MARKS.map((m) => (
+      {MARKS.filter((m) => marks.includes(m)).map((m) => (
         <span key={m}><KeyMark mark={m} /> {MARK_TITLE[m]}</span>
       ))}
     </div>

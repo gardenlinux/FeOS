@@ -382,3 +382,103 @@ export function credentialPinNote(pins, version) {
   if (d && d < v) return l === v ? `v${v} rolling out; deployed pins v${d}` : `deployed pins v${d}, latest v${v}`;
   return '';
 }
+
+// ----------------------------------------------------- in the picture --
+
+// KIND_WORDS name a binding credential's kind where the reachability
+// picture says where its key is.
+const KIND_WORDS = { headers: 'Headers', basic: 'Basic auth', oauth2: 'OAuth2', clientCertificate: 'Client certificate' };
+
+// keyAtNode says a binding's key and where it is: "OAuth2 at the node";
+// "Key at the node" for a kind not known (yet).
+export function keyAtNode(kind) {
+  return `${KIND_WORDS[kind] || 'Key'} at the node`;
+}
+
+// credentialBinding is a sandbox's binding by an environment's
+// credential c, as bindingOf shows a spec's (a sandbox names a
+// credential by its name, ADR 0033).
+export function credentialBinding(c) {
+  const ref = { name: c.name, version: c.version || 0 };
+  return bindingOf({ bindings: { [c.name]: { credentialRef: ref } } }, c.name, [c]);
+}
+
+// upstreamRow is a binding's row on the right of the reachability
+// picture (reach.js's rows): its upstream's host as the peer (the binding
+// and how the pod reaches it below), the key's kind on the edge, the mark
+// offloaded. usage is bindingUsage's entry of the binding, or null;
+// self ({kind, name}) the object or pod the row is of, whose share of
+// the requests its users say (mine, of by; null without self or users).
+export function upstreamRow(b, usage = null, self = null) {
+  const host = hostOf(b.upstream);
+  const users = usage && Array.isArray(usage.users) ? usage.users : null;
+  const own = self && users ? users.find((u) => isObject(u) && u.kind === self.kind && u.name === self.name) : null;
+  return {
+    key: `binding:${b.name}`,
+    peer: { type: 'upstream', name: host || b.name, sub: `${b.name} · as ${b.reachedAs}` },
+    what: keyAtNode(b.kind),
+    via: [`binding ${b.name}`],
+    mark: 'offloaded',
+    binding: b,
+    usage: usage ? { requests: usage.requests || 0, refused: usage.refused || 0, failing: usage.failing || 0,
+      mine: self && users ? (own && own.requests) || 0 : null, by: self ? self.name : '' } : null,
+  };
+}
+
+const EGRESS_PEERS = new Set(['internet', 'domain', 'cidr']);
+const SELF_KEY = { service: 'services', job: 'jobs' };
+
+// withKeys is reachModel's picture (reach.js) with where each key lives:
+// a service's or a job's row to an addon, and the addon's row from it,
+// carry the addon's mark of accessOf (by identity; in the container; none
+// for host and port alone); a service's or a job's right side gets a row
+// per binding it names (upstreamRow), before its egress, and a sandbox's
+// one per credential of the environment it holds. Rows between services
+// stay as they are: no key goes there. usage is bindingUsage's bindings,
+// or null for no numbers. marks are the marks the picture shows.
+//
+// The numbers are matched by the binding's name: bindingUsage counts per
+// name, so a sandbox's credential and a deployment's binding of the same
+// name share theirs.
+export function withKeys(model, spec, { catalog = null, credentials = [], usage = null } = {}) {
+  const refs = referencesOf(spec);
+  const used = new Map((Array.isArray(usage) ? usage : []).filter((u) => isObject(u) && u.name).map((u) => [u.name, u]));
+  const shown = new Set();
+  const rowsOf = new Map();
+  const access = (kind, name) => {
+    const ref = `${kind}/${name}`;
+    if (!rowsOf.has(ref)) rowsOf.set(ref, SELF_KEY[kind] ? accessOf(spec, SELF_KEY[kind], name, { catalog, credentials, refs }) : []);
+    return rowsOf.get(ref);
+  };
+  const marked = (r, kind, name, addon) => {
+    const a = access(kind, name).find((x) => x.kind === 'addon' && x.target.name === addon);
+    if (!a || !a.mark) return r;
+    shown.add(a.mark);
+    return { ...r, mark: a.mark };
+  };
+  const withUpstreams = (outs, bindings, self) => {
+    if (!bindings.length) return outs;
+    shown.add('offloaded');
+    const rows = bindings.map((b) => upstreamRow(b, used.get(b.name) || null, self));
+    const at = outs.findIndex((r) => EGRESS_PEERS.has(r.peer.type));
+    return at < 0 ? [...outs, ...rows] : [...outs.slice(0, at), ...rows, ...outs.slice(at)];
+  };
+  const objects = model.objects.map((o) => {
+    if (SELF_KEY[o.kind]) {
+      const outs = o.outs.map((r) => (r.peer.type === 'addon' ? marked(r, o.kind, o.name, r.peer.name) : r));
+      const bindings = access(o.kind, o.name).filter((x) => x.kind === 'binding').map((x) => x.binding);
+      return { ...o, outs: withUpstreams(outs, bindings, { kind: o.kind, name: o.name }) };
+    }
+    if (o.kind === 'addon') {
+      return { ...o, ins: o.ins.map((r) => (SELF_KEY[r.peer.type] ? marked(r, r.peer.type, r.peer.name, o.name) : r)) };
+    }
+    return o;
+  });
+  const pods = model.pods.map((p) => {
+    if (p.kind !== 'sandbox') return p;
+    const held = (credentials || []).filter((c) => isObject(c) && isObject(c.usedBy) && Array.isArray(c.usedBy.sandboxes)
+      && c.usedBy.sandboxes.includes(p.name)).sort((a, b) => a.name.localeCompare(b.name));
+    return { ...p, outs: withUpstreams(p.outs, held.map(credentialBinding), { kind: 'sandbox', name: p.name }) };
+  });
+  return { ...model, objects, pods, marks: MARKS.filter((m) => shown.has(m)) };
+}

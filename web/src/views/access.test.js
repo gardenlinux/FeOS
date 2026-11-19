@@ -3,9 +3,12 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  accessOf, addonMark, bindingOf, bindingSource, credentialPinNote, fieldsWords, fmtNumber, inventoryOf, kindShort, problemWords,
-  secretPinNote, secretUses, soonestCert, strayUsage, usageOf, usageTone, usageWords, usersWords, workloadOf,
+  accessOf, addonMark, bindingOf, bindingSource, credentialBinding, credentialPinNote, fieldsWords, fmtNumber,
+  inventoryOf, keyAtNode, kindShort, problemWords, secretPinNote, secretUses, soonestCert, strayUsage, upstreamRow,
+  usageOf, usageTone, usageWords, usersWords, withKeys, workloadOf,
 } from './access.js';
+import { readCatalog } from './catalog.js';
+import { reachModel } from './reach.js';
 import { response } from '../testing/ferun.js';
 
 const catalog = {
@@ -223,5 +226,92 @@ describe("the bindings' use and the workloads' identities, as ferund answers the
     expect(soonestCert(workloadOf(ids, 'sandbox', 'c3kv9mwq2hd').pods)).toBe(null);
     expect(workloadOf(ids, 'service', 'nope')).toBe(null);
     expect(workloadOf(null, 'service', 'api')).toBe(null);
+  });
+});
+
+// The reachability picture with where its keys live, on ferund's answers:
+// expensa's deployment (postgres by identity, NATS by its url), the
+// addons' catalog and what the bindings carried.
+describe('withKeys', () => {
+  const dep = response('GET_environments_env_deployments_n.200');
+  const cat = readCatalog(response('GET_addons.200'));
+  const usage = response('GET_environments_env_bindings_usage.200').bindings;
+  const bound = {
+    ...dep.spec,
+    services: {
+      ...dep.spec.services,
+      'expense-service': { ...dep.spec.services['expense-service'], bindings: ['erp', 'mail'] },
+    },
+    jobs: { migrate: { ...dep.spec.jobs.migrate, bindings: ['erp'] } },
+    bindings: {
+      erp: { upstream: 'https://api.vendor.example', mode: 'intercept', credential: { kind: 'oauth2', clientSecret: { secret: 'erp' } } },
+      mail: { credentialRef: { name: 'mail', version: 2 } },
+    },
+  };
+  const creds = [
+    { name: 'mail', version: 2, upstream: 'https://api.mail.example', mode: 'name', credential: { kind: 'headers' },
+      usedBy: { sandboxes: [], bindings: ['mail'] } },
+    { name: 'erp', version: 1, upstream: 'https://api.vendor.example', mode: 'name', credential: { kind: 'basic' },
+      usedBy: { sandboxes: ['c3kv9mwq2hd'], bindings: [] } },
+  ];
+  const pods = [{ kind: 'sandbox', id: 'c3kv9mwq2hd', reaches: [], egress: 'none' }, { kind: 'sandbox', id: 'other', reaches: [] }];
+  const of = (m, ref) => m.objects.find((o) => o.ref === ref) || m.pods.find((o) => o.ref === ref);
+  const line = (r) => `${r.peer.type}:${r.peer.name}${r.mark ? ` [${r.mark}]` : ''}`;
+
+  it('marks the edges to addons and leaves those between services alone', () => {
+    const m = withKeys(reachModel(dep.spec, dep.reachability), dep.spec, { catalog: cat });
+    expect(of(m, 'service/expense-service').outs.map(line)).toEqual([
+      'service:approval-service', 'addon:nats [container]', 'addon:postgres [identity]', 'internet:Internet']);
+    expect(of(m, 'addon/postgres').ins.map(line)).toEqual([
+      'service:approval-service [identity]', 'service:expense-service [identity]', 'job:migrate [identity]']);
+    expect(of(m, 'service/approval-service').ins.map(line)).toEqual(['ingress:Ingress', 'service:expense-service']);
+    expect(m.marks).toEqual(['identity', 'container']);
+  });
+
+  it('marks nothing without a catalog, and adds no row without a binding', () => {
+    const plain = reachModel(dep.spec, dep.reachability);
+    const m = withKeys(plain, dep.spec, {});
+    expect(m.marks).toEqual([]);
+    expect(m.objects.map((o) => o.outs.length)).toEqual(plain.objects.map((o) => o.outs.length));
+    expect(m.objects.flatMap((o) => [...o.ins, ...o.outs]).some((r) => r.mark)).toBe(false);
+  });
+
+  it("puts each binding's upstream on the right, before the egress, its key at the node", () => {
+    const m = withKeys(reachModel(bound, dep.reachability, pods), bound, { catalog: cat, credentials: creds, usage });
+    expect(of(m, 'service/expense-service').outs.map(line)).toEqual([
+      'service:approval-service', 'addon:nats [container]', 'addon:postgres [identity]',
+      'upstream:api.vendor.example [offloaded]', 'upstream:api.mail.example [offloaded]', 'internet:Internet']);
+    const [erp, mail] = of(m, 'service/expense-service').outs.filter((r) => r.peer.type === 'upstream');
+    expect(erp).toMatchObject({ key: 'binding:erp', what: 'OAuth2 at the node', via: ['binding erp'],
+      peer: { sub: 'erp · as api.vendor.example' }, binding: { upstream: 'https://api.vendor.example', mode: 'intercept' },
+      usage: { requests: 1204, refused: 2, failing: 0, mine: 0, by: 'expense-service' } });
+    expect(mail).toMatchObject({ what: 'Headers at the node', peer: { sub: 'mail · as http://mail' },
+      binding: { credential: { name: 'mail', version: 2 } }, usage: { requests: 0, mine: 0 } });
+    expect(of(m, 'job/migrate').outs.map(line)).toEqual([
+      'addon:postgres [identity]', 'upstream:api.vendor.example [offloaded]', 'internet:Internet']);
+    expect(m.marks).toEqual(['identity', 'offloaded', 'container']);
+  });
+
+  it("gives a sandbox its credentials' bindings, with its own requests", () => {
+    const m = withKeys(reachModel(bound, dep.reachability, pods), bound, { credentials: creds, usage });
+    const sb = of(m, 'sandbox/c3kv9mwq2hd').outs;
+    expect(sb.map(line)).toEqual(['upstream:api.vendor.example [offloaded]']);
+    expect(sb[0]).toMatchObject({ what: 'Basic auth at the node', peer: { sub: 'erp · as http://erp' },
+      usage: { requests: 1204, mine: 4, by: 'c3kv9mwq2hd' } });
+    expect(of(m, 'sandbox/other').outs.map(line)).toEqual(['internet:Internet']);
+  });
+
+  it('says no numbers without usage, and the binding when its upstream is unknown', () => {
+    const r = upstreamRow(bindingOf({ bindings: { gone: { credentialRef: { name: 'gone' } } } }, 'gone', []));
+    expect(r).toMatchObject({ peer: { type: 'upstream', name: 'gone', sub: 'gone · as http://gone' }, what: 'Key at the node', usage: null });
+    expect(upstreamRow(bindingOf(bound, 'erp'), { requests: 3 }, { kind: 'service', name: 'x' }).usage)
+      .toEqual({ requests: 3, refused: 0, failing: 0, mine: null, by: 'x' });
+  });
+
+  it('names the kinds of a key, and reads a credential as a sandbox holds it', () => {
+    expect(['headers', 'basic', 'oauth2', 'clientCertificate', ''].map(keyAtNode)).toEqual([
+      'Headers at the node', 'Basic auth at the node', 'OAuth2 at the node', 'Client certificate at the node', 'Key at the node']);
+    expect(credentialBinding(creds[0])).toMatchObject({ name: 'mail', upstream: 'https://api.mail.example', mode: 'name',
+      kind: 'headers', reachedAs: 'http://mail', credential: { name: 'mail', version: 2 } });
   });
 });

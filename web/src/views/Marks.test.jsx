@@ -20,4 +20,16 @@ describe('KeyMark', () => {
     const out = renderToStaticMarkup(<MarkLegend />);
     for (const w of ['by identity', 'offloaded', 'in the container']) expect(out).toContain(w);
   });
+  it('says a mark more precisely where it is given words and a title', () => {
+    const out = renderToStaticMarkup(<KeyMark mark="offloaded" label="OAuth2 at the node" title="Binding erp" />);
+    expect(out).toContain('mark-offloaded');
+    expect(out).toContain('title="Binding erp"');
+    expect(out).toContain('OAuth2 at the node');
+    expect(out).not.toContain('offloaded</span>');
+  });
+  it('explains only the marks given to the legend, in their order', () => {
+    const out = renderToStaticMarkup(<MarkLegend marks={['container', 'identity']} />);
+    expect(out).not.toContain('mark-offloaded');
+    expect(out.indexOf('mark-identity')).toBeLessThan(out.indexOf('mark-container'));
+  });
 });
