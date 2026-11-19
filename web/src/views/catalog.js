@@ -61,6 +61,9 @@ function blueprint(b) {
     // and a reference hands the container no password (postgres, valkey);
     // a ferund of before it says nothing, which reads false.
     byIdentity: !!b.byIdentity,
+    // identityBy: the part of the certificate it maps to a user of its
+    // own, 'ou' (postgres: the role) or 'uri' (valkey); '' unsaid.
+    identityBy: b.identityBy === 'ou' || b.identityBy === 'uri' ? b.identityBy : '',
     options: options(b.options),
     suggestions: {},
   };

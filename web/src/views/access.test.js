@@ -4,8 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   accessOf, addonMark, bindingOf, bindingSource, credentialBinding, credentialPinNote, fieldsWords, fmtNumber,
-  inventoryOf, keyAtNode, kindShort, problemWords, secretPinNote, secretUses, soonestCert, strayUsage, upstreamRow,
-  usageOf, usageTone, usageWords, usersWords, withKeys, workloadOf,
+  identityReaders, inventoryOf, keyAtNode, kindShort, podSubject, problemWords, secretPinNote, secretUses, soonestCert,
+  strayUsage, subjectParts, upstreamRow, usageOf, usageTone, usageWords, usersWords, withKeys, workloadOf,
 } from './access.js';
 import { readCatalog } from './catalog.js';
 import { reachModel } from './reach.js';
@@ -219,13 +219,48 @@ describe("the bindings' use and the workloads' identities, as ferund answers the
   it("finds a workload's identity and the certificate that ends first", () => {
     const api = workloadOf(ids, 'service', 'api');
     expect(api.spiffeId).toBe('spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api');
-    expect(soonestCert(api.pods)).toEqual({ pod: 'd7r2m4k9pqs', notAfter: '2026-11-20T09:15:00Z', node: 'node-a' });
+    expect(soonestCert(api.pods)).toMatchObject({ pod: 'd7r2m4k9pqs', notAfter: '2026-11-20T09:15:00Z', node: 'node-a' });
     expect(workloadOf(ids, 'job', 'migrate').pods).toEqual([]);
     expect(soonestCert([])).toBe(null);
     // A pod before its first certificate has none.
     expect(soonestCert(workloadOf(ids, 'sandbox', 'c3kv9mwq2hd').pods)).toBe(null);
     expect(workloadOf(ids, 'service', 'nope')).toBe(null);
     expect(workloadOf(null, 'service', 'api')).toBe(null);
+  });
+});
+
+describe("what a workload's certificate names", () => {
+  const ids = response('GET_environments_env_identities.200');
+  const api = workloadOf(ids, 'service', 'api');
+  const ou = 'OU=' + api.ou;
+
+  it('splits a subject into its attributes, in its order', () => {
+    expect(subjectParts(api.pods[0].subject)).toEqual([['CN', 'run.fecore.dev/d7r2m4k9pqs'], ['OU', api.ou]]);
+    expect(subjectParts('')).toEqual([]);
+    expect(subjectParts(null)).toEqual([]);
+  });
+  it("takes a pod's subject as ferund answers it, else makes the workload's", () => {
+    expect(podSubject(ids, api, api.pods[0])).toBe('CN=run.fecore.dev/d7r2m4k9pqs,' + ou);
+    const migrate = workloadOf(ids, 'job', 'migrate');
+    expect(podSubject(ids, migrate)).toBe(`CN=run.fecore.dev/<pod>,OU=${migrate.ou}`);
+    // A ferund of before the OU, or one without an issuer, says none.
+    expect(podSubject(ids, { ...migrate, ou: undefined })).toBe('');
+    expect(podSubject({ trustDomain: '' }, migrate)).toBe('');
+  });
+  it('names the addons that admit it by its certificate and the part each reads', () => {
+    const cat = readCatalog(response('GET_addons.200'));
+    const rows = [
+      { kind: 'addon', mark: 'identity', target: { name: 'db' }, addon: { type: 'postgres' }, fields: { role: 'api_svc' } },
+      { kind: 'addon', mark: 'identity', target: { name: 'cache' }, addon: { type: 'valkey' }, fields: {} },
+      { kind: 'addon', mark: 'container', target: { name: 'bus' }, addon: { type: 'nats' }, fields: {} },
+      { kind: 'binding', mark: 'offloaded', target: { name: 'erp' } },
+    ];
+    expect(identityReaders(rows, cat)).toEqual([
+      { addon: 'cache', type: 'valkey', by: 'uri', role: '' },
+      { addon: 'db', type: 'postgres', by: 'ou', role: 'api_svc' },
+    ]);
+    // A catalog of before identityBy says nothing of the part.
+    expect(identityReaders(rows.slice(0, 1), null)).toEqual([{ addon: 'db', type: 'postgres', by: '', role: 'api_svc' }]);
   });
 });
 

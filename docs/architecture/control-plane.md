@@ -2552,7 +2552,10 @@ under it, its routes, its open incidents, its sandboxes and its newest
 jobs made by a call); an object's page
 (`…/objects/<kind>/<name>`: a service's and a job's access on its
 overview, its identity (its SPIFFE ID and when its pods' first
-certificate ends, from `…/identities`) and a row per target it reaches,
+certificate ends, from `…/identities`; unfolded, the certificate: the
+subject with the pod in the CN and the workload in the OU, the URI, the
+issuer, the key, which part each addon by identity reads, and each
+pod's serial, issue and end) and a row per target it reaches,
 by where the key lives, a binding's with its last 24 h; its definition
 as the latest deployment's normalised spec has it, a secret at its
 pinned version and references as links, the routes to it, who uses it,

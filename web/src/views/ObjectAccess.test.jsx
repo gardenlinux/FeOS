@@ -37,7 +37,33 @@ describe("a service's Access", () => {
     expect(all).toMatch(/Identity .* cert until \S+ \S+ in 21h, the first of 2 pods/);
     expect(out).toContain('d7r2m4k9pqs on node-a: until 2026-11-20');
     expect(out).toContain('f8s3n5m1rtv on node-b: until 2026-11-20');
-    expect(out).toContain('<summary>per pod</summary>');
+  });
+
+  it('unfolds its certificate: the subject (CN the pod, OU the workload), the URI, the issuer, who reads which part, each pod', () => {
+    const api = IDS.workloads.find((w) => w.kind === 'service' && w.name === 'api');
+    const out = html(card('service', 'api'));
+    const all = text(card('service', 'api'));
+    expect(out).toContain('<details class="acc-certd"><summary>Certificate</summary>');
+    expect(all).toContain(`Subject CN=run.fecore.dev/d7r2m4k9pqs,OU=${api.ou}`);
+    expect(all).toContain('CN run.fecore.dev/d7r2m4k9pqs · the pod: each its own');
+    expect(all).toContain(`OU ${api.ou} · the workload: every pod of it the same`);
+    expect(all).toContain(`URI ${api.spiffeId} · the SPIFFE ID, its only name`);
+    expect(all).toContain('Issuer CN=FeOS issuer run.fecore.dev');
+    expect(all).toContain('Key Ed25519, made in the pod, never leaves it');
+    // The postgres addon maps the OU to the role the reference names.
+    expect(all).toContain('Read by db (postgres) maps the OU to role api_svc');
+    expect(all).toMatch(/d7r2m4k9pqs 5f1c9a2e7b3d4c6e8a0b1c2d3e4f5a6b 2026-11-19 \S+ 2026-11-20 \S+ in 21h node-a/);
+    expect(all).toContain('f8s3n5m1rtv a03e6d9c1b7f42e58d6c0b9a8f7e6d5c');
+  });
+
+  it("unfolds what a ferund of before the subject answers: the URI, the ends", () => {
+    const old = { trustDomain: IDS.trustDomain, workloads: IDS.workloads.map(({ ou, pods, ...w }) => ({
+      ...w, pods: pods.map(({ pod, notAfter, node }) => ({ pod, notAfter, node })) })) };
+    const all = text(card('service', 'api', { identities: old }));
+    expect(all).toContain('Certificate URI spiffe://');
+    expect(all).not.toContain('Subject');
+    expect(all).not.toContain('Issuer');
+    expect(all).toMatch(/d7r2m4k9pqs … 2026-11-20 \S+ in 21h node-a/);
   });
 
   it('lists what it reaches sorted by where the key lives, each with its mark', () => {

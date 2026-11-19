@@ -8,13 +8,26 @@
    value, a binding the upstream refuses. */
 
 /* Access */
-.acc-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 10px; }
+.acc-identity { margin: 0 0 10px; }
+.acc-idline { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
 .acc-k { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; min-width: 64px; }
 .acc-spiffe { overflow-wrap: anywhere; }
 .acc-cert b { font-weight: 600; }
-.acc-pods { display: inline-block; margin-left: 8px; color: var(--muted); }
-.acc-pods summary { cursor: pointer; font-size: 12px; }
-.acc-pods[open] { display: block; margin: 4px 0 0 74px; }
+.acc-certd { margin: 4px 0 0 74px; }
+.acc-certd summary { cursor: pointer; font-size: 12px; color: var(--muted); width: max-content; }
+.acc-certd[open] summary { margin-bottom: 6px; }
+.acc-certf { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px; margin: 0 0 8px; }
+.acc-certf dt { font-size: 12px; color: var(--muted); }
+.acc-certf dd { margin: 0; overflow-wrap: anywhere; }
+.acc-dn { margin-top: 3px; padding-left: 10px; border-left: 2px solid var(--line); }
+.acc-dn b { font-weight: 600; }
+.tbl.acc-certpods td, .tbl.acc-certpods th { padding: 5px 10px; }
+.acc-serial { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .acc-certd { margin-left: 0; }
+  .acc-certf { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .acc-certf dd { margin-bottom: 6px; }
+}
 .acc-none { margin: 0; }
 .tbl.acc-tbl td { padding: 7px 10px; vertical-align: top; }
 .acc-tbl td.acc-what { white-space: nowrap; }

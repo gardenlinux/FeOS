@@ -358,6 +358,43 @@ export function soonestCert(pods) {
   return has.reduce((a, b) => (Date.parse(b.notAfter) < Date.parse(a.notAfter) ? b : a));
 }
 
+// subjectParts are an RFC 2253 subject's attributes in its order:
+// "CN=td/pod,OU=wl-x" → [['CN', 'td/pod'], ['OU', 'wl-x']]. A pod's
+// subject holds no character RFC 2253 escapes (ferund's
+// pki.validatePodSubject), so a comma ends an attribute.
+export function subjectParts(dn) {
+  if (typeof dn !== 'string' || !dn) return [];
+  return dn.split(',').map((a) => {
+    const i = a.indexOf('=');
+    return i < 0 ? ['', a] : [a.slice(0, i), a.slice(i + 1)];
+  });
+}
+
+// podSubject is the subject a workload's pods carry, as
+// CN=<trust domain>/<pod>,OU=<workload>: the pod's own when one is
+// given, else with "<pod>" in its place; '' when the answer names no OU
+// (a ferund of before it) or there is no trust domain.
+export function podSubject(identities, workload, pod = null) {
+  if (pod && pod.subject) return pod.subject;
+  const td = isObject(identities) ? identities.trustDomain : '';
+  if (!td || !isObject(workload) || !workload.ou) return '';
+  return `CN=${td}/${pod && pod.pod ? pod.pod : '<pod>'},OU=${workload.ou}`;
+}
+
+// identityReaders are the addons a workload reaches by its certificate
+// (its access rows by identity) with the part of the certificate each
+// maps to a user of its own, by the catalog's identityBy: 'ou' (the
+// subject's OU: postgres's role, which the reference names) or 'uri'
+// (the SPIFFE ID: valkey's ACL user); '' when the catalog does not say.
+// [{addon, type, by, role}], by name.
+export function identityReaders(rows, catalog) {
+  return (rows || []).filter((r) => r.kind === 'addon' && r.mark === 'identity').map((r) => {
+    const bp = catalog && catalog.byType ? catalog.byType.get(r.addon && r.addon.type) : null;
+    return { addon: r.target.name, type: (r.addon && r.addon.type) || '', by: (bp && bp.identityBy) || '',
+      role: (r.fields && r.fields.role) || '' };
+  }).sort((a, b) => a.addon.localeCompare(b.addon));
+}
+
 // secretPinNote says a secret the latest deployment pins at an earlier
 // version than its latest: "the latest deployment pins v2, latest v3";
 // '' when it pins the latest or none.

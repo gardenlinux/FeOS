@@ -6,7 +6,9 @@ import { CopyBtn } from '../components.jsx';
 import { fmtAgo, fmtDate, fmtDateTime } from '../format.js';
 import { queryOf } from '../logs.js';
 import { credentialPath, objectPath, secretsPath } from '../routes.js';
-import { accessOf, fieldsWords, kindShort, soonestCert, usageOf, workloadOf } from './access.js';
+import {
+  accessOf, fieldsWords, identityReaders, kindShort, podSubject, soonestCert, subjectParts, usageOf, workloadOf,
+} from './access.js';
 import { useAddonCatalog, useBindingUsage, useEnvCredentials, useIdentities } from './accessData.js';
 import { hostOf } from './credentials.js';
 import { BindingNumbers } from './EnvSecrets.jsx';
@@ -16,7 +18,8 @@ import '../styles/marks.css';
 import '../styles/access.css';
 
 // The Access section of a service's and a job's overview: who the
-// workload is (its SPIFFE ID and when its pods' certificates end), then
+// workload is (its SPIFFE ID and when its pods' certificates end, and,
+// unfolded, what the certificate names and who reads which part), then
 // what it reaches with a key or without one, one row per target, sorted
 // by where the key lives (access.js): by identity (an addon that admits
 // it by its certificate), offloaded (an HTTP binding, the registry
@@ -60,7 +63,8 @@ export function AccessCard({
         <h2>Access</h2><span className="muted">where its keys live</span>
         <Link to={secretsPath(tenant, env)} navigate={navigate} className="card-more">Secrets</Link>
       </div>
-      <IdentityLine workload={workloadOf(identities, kind, name)} identities={identities} err={identitiesErr} now={now} />
+      <IdentityLine workload={workloadOf(identities, kind, name)} identities={identities} err={identitiesErr} now={now}
+        readers={identityReaders(rows, catalog)} />
       {loading && <p className="muted">Loading…</p>}
       {!loading && rows.length === 0 && (
         <p className="muted acc-none">It names no secret, binding or addon: it holds no key and needs none.</p>)}
@@ -80,9 +84,11 @@ export function AccessCard({
 }
 
 // IdentityLine is who the workload is: its SPIFFE ID, which its pods'
-// certificates carry, and when the first of them ends.
-function IdentityLine({ workload, identities, err, now }) {
+// certificates carry, when the first of them ends, and the certificate
+// to unfold.
+function IdentityLine({ workload, identities, err, now, readers }) {
   let body;
+  let cert = null;
   if (!identities) body = <span className="muted">{err ? `not known: ${err}` : '…'}</span>;
   else if (!identities.trustDomain || !workload || !workload.spiffeId) {
     body = (
@@ -96,17 +102,21 @@ function IdentityLine({ workload, identities, err, now }) {
         <CopyBtn text={workload.spiffeId} mini title="copy the SPIFFE ID" />
         <CertUntil pods={workload.pods} now={now} />
       </>);
+    cert = <Certificate workload={workload} identities={identities} readers={readers} now={now} />;
   }
   return (
     <div className="acc-identity">
-      <span className="acc-k" title="the SPIFFE ID its pods' certificates carry; an addon by identity admits it by that">Identity</span>
-      {body}
+      <div className="acc-idline">
+        <span className="acc-k" title="the SPIFFE ID its pods' certificates carry; an addon by identity admits it by that">Identity</span>
+        {body}
+      </div>
+      {cert}
     </div>
   );
 }
 
 // CertUntil is when its pods' certificate that ends first ends; every
-// pod's on hover, and unfolded when it has more than one.
+// pod's on hover.
 function CertUntil({ pods, now }) {
   const list = Array.isArray(pods) ? pods : [];
   if (list.length === 0) return <span className="muted small">no pod now</span>;
@@ -117,12 +127,78 @@ function CertUntil({ pods, now }) {
     <span className="small acc-cert" title={list.map(line).join('\n')}>
       cert until <b>{untilText(first.notAfter, now)}</b>{' '}
       <span className="muted">{fmtAgo(first.notAfter, now)}{list.length > 1 ? `, the first of ${list.length} pods` : ''}</span>
-      {list.length > 1 && (
-        <details className="acc-pods">
-          <summary>per pod</summary>
-          {list.map((p) => <div key={p.pod} className="mono small">{line(p)}</div>)}
-        </details>)}
     </span>
+  );
+}
+
+// READS says what an addon makes of the part of the certificate it
+// reads (the catalog's identityBy).
+const READS = {
+  ou: (r) => <>maps the <b>OU</b> to {r.role ? <>role <span className="mono">{r.role}</span></> : 'the role its reference names'}</>,
+  uri: () => <>maps the <b>URI</b> to its user</>,
+};
+
+// Certificate is what its pods' certificates name, unfolded: the
+// subject (CN the pod, OU the workload), the URI name (the SPIFFE ID),
+// the issuer, the key, which part each addon by identity reads, and each
+// pod's newest certificate. A ferund of before the subject answers the
+// SPIFFE ID and the ends alone; what it does not answer is left out.
+function Certificate({ workload, identities, readers, now }) {
+  const pods = Array.isArray(workload.pods) ? workload.pods : [];
+  const subject = podSubject(identities, workload, pods.find((p) => p.subject) || null);
+  const parts = subjectParts(subject);
+  const what = { CN: pods.length > 1 ? 'the pod: each its own' : 'the pod', OU: 'the workload: every pod of it the same' };
+  return (
+    <details className="acc-certd">
+      <summary>Certificate</summary>
+      <dl className="acc-certf">
+        {parts.length > 0 && (
+          <>
+            <dt>Subject</dt>
+            <dd>
+              <span className="mono small">{subject}</span>
+              <div className="acc-dn">
+                {parts.map(([k, v]) => (
+                  <div key={k + v}>
+                    <span className="mono small"><b>{k}</b> {v}</span>{what[k] && <span className="muted small"> · {what[k]}</span>}
+                  </div>))}
+              </div>
+            </dd>
+          </>)}
+        <dt>URI</dt>
+        <dd><span className="mono small">{workload.spiffeId}</span><span className="muted small"> · the SPIFFE ID, its only name</span></dd>
+        {identities.issuer && (<><dt>Issuer</dt><dd><span className="mono small">{identities.issuer}</span></dd></>)}
+        <dt>Key</dt>
+        <dd className="small">Ed25519, made in the pod, never leaves it · client and server authentication · renewed at three quarters of its lifetime</dd>
+        {readers.length > 0 && (
+          <>
+            <dt>Read by</dt>
+            <dd className="small">
+              {readers.map((r) => (
+                <div key={r.addon}>
+                  <span className="mono">{r.addon}</span> <span className="muted">({r.type})</span>{' '}
+                  {READS[r.by] ? READS[r.by](r) : 'admits it by it'}
+                </div>))}
+            </dd>
+          </>)}
+      </dl>
+      {pods.length > 0 && (
+        <div className="tblwrap">
+          <table className="tbl acc-certpods">
+            <thead><tr><th>Pod</th><th>Serial</th><th>Issued</th><th>Valid until</th><th>Node</th></tr></thead>
+            <tbody>
+              {pods.map((p) => (
+                <tr key={p.pod}>
+                  <td className="mono small">{p.pod}</td>
+                  <td className="mono small acc-serial">{p.serial || <span className="muted">{p.notAfter ? '…' : 'none yet'}</span>}</td>
+                  <td className="small">{p.issuedAt ? fmtDateTime(p.issuedAt) : ''}</td>
+                  <td className="small">{p.notAfter ? <>{fmtDateTime(p.notAfter)} <span className="muted">{fmtAgo(p.notAfter, now)}</span></> : ''}</td>
+                  <td className="mono small">{p.node}</td>
+                </tr>))}
+            </tbody>
+          </table>
+        </div>)}
+    </details>
   );
 }
 
