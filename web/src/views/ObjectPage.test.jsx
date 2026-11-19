@@ -80,7 +80,8 @@ describe("a service's page", () => {
     expect(all).toContain('image ghcr.io/acme/expense:1.4 pinned to sha256:863e2ebe9c38');
     expect(all).toContain('readiness HTTP GET :http/readyz · every 2s, unready after 3 failures');
     expect(all).toContain('EXPENSA_INTERNAL_TOKEN secret internal-token v3');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets"');
+    // A secret's link is its row in the environment's Secrets view.
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/secret/internal-token"');
     expect(all).toContain('EXPENSA_DATABASE_URL url of addon postgres (database expensa, role expense_svc)');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/addon/postgres"');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/approval-service"');

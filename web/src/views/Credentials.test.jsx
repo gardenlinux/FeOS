@@ -45,20 +45,15 @@ describe('an environment\'s credentials', () => {
     usedBy: { sandboxes: [], bindings: [], latest: 0, deployed: 0 },
   };
 
-  it('the list: New credential needs write on the environment', () => {
-    const out = html(<Credentials tenant="kino" env="prod" sel="" ec={READ} navigate={nav} />);
-    expect(out).toContain('credentials <span class="count">· …</span>');
-    expect(out).toMatch(/<button class="mini" disabled="" title="needs write on this environment">/);
-    expect(out).toContain('A credential is this environment&#x27;s');
-    expect(html(<Credentials tenant="kino" env="prod" sel="" ec={WRITE} navigate={nav} />))
-      .toContain('<button class="mini" title="state an API and its credential once">');
+  it('has no list of its own: the list is a group of the Secrets view (EnvSecrets.test.jsx)', () => {
+    expect(html(<Credentials tenant="kino" env="prod" sel="" ec={WRITE} navigate={nav} />)).toBe('');
   });
 
-  it('a new one\'s form, back to the environment\'s credentials', () => {
+  it('a new one\'s form, back to the environment\'s secrets, where its credentials are', () => {
     const out = html(<Credentials tenant="kino" env="prod" sel="new" ec={WRITE} navigate={nav} />);
     expect(out).toContain('New credential');
-    expect(out).toContain('</svg> credentials</button>');
-    expect(out).toContain('href="/tenants/kino/environments/prod/credentials">Cancel</a>');
+    expect(out).toContain('</svg> secrets</button>');
+    expect(out).toContain('href="/tenants/kino/environments/prod/secrets">Cancel</a>');
     expect(out).toContain('This environment&#x27;s sandboxes and bindings name it');
     expect(out).toMatch(/<button type="submit" class="primary">/);
     const ro = html(<Credentials tenant="kino" env="prod" sel="new" ec={READ} navigate={nav} />);

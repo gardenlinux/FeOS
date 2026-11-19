@@ -2473,14 +2473,28 @@ open the sidebar shows the tenant's pages (`TENANT_NAV` in
 jobs and sandboxes (last: agents use sandboxes through the
 API and FeCode, people rarely through the UI), then Tenant settings, one
 entry whose pages (people, tokens, usage, general) are tabs. An
-environment's Secrets page holds its secrets; its Credentials page
-(`…/credentials[/new | /<name>[/edit]]`, ADR 0033) its credentials with
-their uses, and its credential offloading: the HTTP bindings of the
-latest deployment, each with where its credential comes from (a
-credential of the environment at its pinned version, or the
-environment's secrets), the services that use it and Check; Add binding and Edit open the binding's form in New
-deployment (`…/builder/new/binding`, `…/builder/binding/<name>`), since
-a binding is part of a deployment. Home and the environments, domains,
+environment's Secrets view (`…/secrets[/<kind>/<name>]`, a tab of its
+own between Reachability and Settings; the kind and name point at a
+row) sorts every key its workloads reach by where it lives, not by where
+it is stored (`web/src/views/access.js`): by identity (no key: an addon
+whose type admits a workload by its certificate, the catalog's
+`byIdentity`), offloaded (the key stays at the node: an HTTP binding, a
+registry login) or in the container (a variable from a secret, an
+addon's password). Under the marks' legend it lists, in groups, the
+secrets (who uses each and how, its version against the one the latest
+deployment pins, missing when the spec names one without a value; Set
+value, Delete, Add secret), the credentials (ADR 0033: what each
+reaches, the services through their bindings and the sandboxes that
+name it, the version the deployments pin, Update to vN; New credential,
+and a credential's page with its check, new version and delete at
+`…/credentials/new | /<name>[/edit]`), the HTTP bindings of the latest
+deployment and those the sandboxes' requests named (where each key
+comes from, who names it, its last 24 h from `…/bindings/usage`, Check;
+Add binding and Edit open its form in New deployment,
+`…/builder/new/binding`, `…/builder/binding/<name>`, since a binding is
+part of a deployment) and the addons by identity or with a password.
+Settings keeps General and Domains & access; the credentials' list of
+old (`…/credentials`) leads to Secrets. Home and the environments, domains,
 people, usage and settings go to every member; the tenant's sandboxes
 and jobs pages and the tools' reference with a tenant grant, an
 environment's sandboxes and jobs with a grant on it (ADR 0035); tokens to

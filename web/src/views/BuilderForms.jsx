@@ -790,7 +790,7 @@ function credentialsLink(ctx, name = '') {
 // in it once it exists), or it has none yet.
 function noCredentials(ctx) {
   if (ctx.credentialsErr) return `the credentials cannot be read: ${ctx.credentialsErr}`;
-  if (ctx.isNew) return 'a new environment has no credentials yet: make them under its Settings once it exists';
+  if (ctx.isNew) return 'a new environment has no credentials yet: make them in its Secrets once it exists';
   return 'the environment has no credentials yet';
 }
 

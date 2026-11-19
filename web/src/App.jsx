@@ -9,8 +9,8 @@ import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
 import { Avatar, BrandMark, EnvName, StateDot, useTheme } from './components.jsx';
 import {
-  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, envPath, jobPath, newEnvPath, newSandboxPath, parsePath, pickEnvPath,
-  pickObjectPath, sandboxPath, switchEnvPath,
+  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, credentialPath, envPath, jobPath, newEnvPath, newSandboxPath, parsePath,
+  pickEnvPath, pickObjectPath, sandboxPath, switchEnvPath,
 } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
@@ -725,7 +725,8 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && route.tab !== 'objects' && (
-          <>{sep}{crumb((ENV_TAB_LABELS[route.tab] || route.tab).toLowerCase(), envPath(t, route.env, route.tab))}</>)}
+          <>{sep}{crumb((ENV_TAB_LABELS[route.tab] || route.tab).toLowerCase(),
+            route.tab === 'credentials' ? credentialPath(t, route.env) : envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
           <>{sep}<span className="crumb mono">{String(route.item).replace(/^new\//, 'new ')}</span></>)}
         {route.view === 'environments' && route.tab === 'objects' && route.otab && route.otab !== 'overview' && (

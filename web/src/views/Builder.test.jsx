@@ -142,8 +142,8 @@ describe('the forms', () => {
     // The credential it gets already is not offered again.
     expect(out).toContain('<option value="github" selected="">github · api.github.com</option>');
     expect(out).not.toContain('<option value="stripe"');
-    // The credentials are the environment's (ADR 0033).
-    expect(out).toContain('href="/tenants/kino/environments/prod/credentials"');
+    // The credentials are the environment's (ADR 0033), in its Secrets.
+    expect(out).toContain('href="/tenants/kino/environments/prod/secrets"');
     expect(out).toContain('<option value="after" selected="">After</option>');
     expect(out).toContain('value="15"');
     const none = html(<ServiceForm name="web" obj={{ image: 'x:1' }} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />);

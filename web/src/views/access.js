@@ -167,7 +167,11 @@ function dedupe(uses) {
 // those the spec names), its credentials, its bindings and the addons
 // that admit by identity or hand out a password. Each row: {kind, name,
 // marks, users: [{key, name}], uses?, state, version?, binding?}. state
-// is set, missing (named, no value) or unused (no one names it).
+// is set, missing (named, no value) or unused (no one names it). A
+// secret's row has the version the spec pins (pinned, 0 for none); a
+// credential's the sandboxes that name it (sandboxes, IDs) and the
+// versions its deployments pin (pins: {latest, deployed}); an addon's
+// uses say each user's mark and fields (its role, its database).
 export function inventoryOf(spec, { catalog = null, credentials = [], secrets = [] } = {}) {
   const refs = referencesOf(spec);
   const rows = [];
@@ -179,8 +183,9 @@ export function inventoryOf(spec, { catalog = null, credentials = [], secrets = 
   for (const name of [...names].sort()) {
     const uses = secretUses(spec, name, refs);
     const s = known.get(name);
+    const pin = spec && isObject(spec.secrets) && isObject(spec.secrets[name]) ? Number(spec.secrets[name].version) || 0 : 0;
     rows.push({ kind: 'secret', name, marks: marksOf(uses), users: users(uses), uses,
-      state: !s ? 'missing' : uses.length === 0 ? 'unused' : 'set', version: s ? s.version : 0 });
+      state: !s ? 'missing' : uses.length === 0 ? 'unused' : 'set', version: s ? s.version : 0, pinned: pin });
   }
 
   const bindings = objectsOf(spec, 'bindings').map(([n]) => n);
@@ -190,8 +195,11 @@ export function inventoryOf(spec, { catalog = null, credentials = [], secrets = 
       return isObject(b) && isObject(b.credentialRef) && b.credentialRef.name === c.name;
     });
     const objs = uniqueFrom(refs.filter((r) => r.via === 'bindings' && via.includes(r.to.name)).map((r) => r.from));
-    rows.push({ kind: 'credential', name: c.name, marks: ['offloaded'], users: objs, bindings: via,
-      state: via.length === 0 ? 'unused' : 'set', version: c.version || 0 });
+    const used = isObject(c.usedBy) ? c.usedBy : {};
+    const sandboxes = Array.isArray(used.sandboxes) ? [...used.sandboxes].sort() : [];
+    rows.push({ kind: 'credential', name: c.name, marks: ['offloaded'], users: objs, bindings: via, sandboxes,
+      pins: { latest: Number(used.latest) || 0, deployed: Number(used.deployed) || 0 },
+      state: via.length === 0 && sandboxes.length === 0 ? 'unused' : 'set', version: c.version || 0 });
   }
 
   for (const n of bindings) {
@@ -203,6 +211,7 @@ export function inventoryOf(spec, { catalog = null, credentials = [], secrets = 
   for (const [n, a] of objectsOf(spec, 'addons')) {
     const bp = catalog && catalog.byType && isObject(a) ? catalog.byType.get(a.type) : null;
     const objs = [];
+    const uses = [];
     const marks = new Set();
     for (const [key, objName] of uniqueFrom(refs.filter((r) => r.to.key === 'addons' && r.to.name === n).map((r) => r.from))
       .map((f) => [f.key, f.name])) {
@@ -210,10 +219,11 @@ export function inventoryOf(spec, { catalog = null, credentials = [], secrets = 
       if (row && row.mark) {
         marks.add(row.mark);
         objs.push({ key, name: objName });
+        uses.push({ from: { key, name: objName }, mark: row.mark, fields: row.fields || {}, variables: row.variables });
       }
     }
     if (marks.size === 0 && !(bp && bp.byIdentity)) continue;
-    rows.push({ kind: 'addon', name: n, marks: marks.size ? MARKS.filter((m) => marks.has(m)) : ['identity'], users: objs,
+    rows.push({ kind: 'addon', name: n, marks: marks.size ? MARKS.filter((m) => marks.has(m)) : ['identity'], users: objs, uses,
       addon: { type: isObject(a) ? a.type || '' : '' }, state: objs.length === 0 ? 'unused' : 'set' });
   }
   return rows;
@@ -232,4 +242,128 @@ function uniqueFrom(froms) {
     seen.add(k);
     return true;
   }).sort((a, b) => a.key.localeCompare(b.key) || a.name.localeCompare(b.name));
+}
+
+// INVENTORY_GROUPS are the inventory's groups, in the order the Secrets
+// view shows them.
+export const INVENTORY_GROUPS = [
+  { kind: 'secret', title: 'Secrets' },
+  { kind: 'credential', title: 'Credentials' },
+  { kind: 'binding', title: 'HTTP bindings' },
+  { kind: 'addon', title: 'Addons' },
+];
+
+// fmtNumber is a whole number with thousands separators: "1,204".
+export function fmtNumber(n) {
+  return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// KIND_SHORT name a binding credential's kind in a word or two.
+const KIND_SHORT = { headers: 'headers', basic: 'basic', oauth2: 'OAuth2', clientCertificate: 'client certificate' };
+
+export function kindShort(kind) {
+  return KIND_SHORT[kind] || kind || '';
+}
+
+// bindingSource says where a binding's key comes from (bindingOf's b):
+// "credential github v3" (its latest after it when the environment's
+// credential has a later one), "secret x", "secrets x, y", or ''.
+export function bindingSource(b, credentials = []) {
+  if (b && b.credential) {
+    const c = (credentials || []).find((x) => x && x.name === b.credential.name);
+    const v = b.credential.version;
+    const later = c && v && c.version > v ? `, latest v${c.version}` : '';
+    return `credential ${b.credential.name}${v ? ` v${v}` : ''}${later}`;
+  }
+  const s = (b && b.secrets) || [];
+  if (s.length === 0) return '';
+  return `secret${s.length === 1 ? '' : 's'} ${s.join(', ')}`;
+}
+
+// fieldsWords are a reference's fields to an addon in words: "role
+// api_svc · database app".
+export function fieldsWords(fields) {
+  return Object.entries(isObject(fields) ? fields : {}).sort(([a], [b]) => a.localeCompare(b))
+    .filter(([, v]) => v !== '' && v !== undefined && v !== null).map(([k, v]) => `${k} ${v}`).join(' · ');
+}
+
+// usageOf is binding name's use in a bindingUsage answer; null without
+// numbers (no answer, or the log store unavailable, whose zeros are
+// none).
+export function usageOf(usage, name) {
+  if (!isObject(usage) || usage.unavailable || !Array.isArray(usage.bindings)) return null;
+  return usage.bindings.find((b) => isObject(b) && b.name === name) || null;
+}
+
+// USAGE_PROBLEMS are a binding's problem classes (the incidents' and the
+// refusals they leave out) as the numbers name them.
+const USAGE_PROBLEMS = [['refused', 'refused'], ['failing', 'failing'], ['tokenFailed', 'without a token'], ['blocked', 'blocked']];
+
+// usageWords is a binding's use in the window in a few words: "1,204
+// req/24h · 2 refused · 1 blocked", "no request in 24h"; '' without
+// numbers.
+export function usageWords(u, window = '24h') {
+  if (!u) return '';
+  if (!(Number(u.requests) > 0)) return `no request in ${window}`;
+  const parts = [`${fmtNumber(u.requests)} req/${window}`];
+  for (const [k, w] of USAGE_PROBLEMS) if (Number(u[k]) > 0) parts.push(`${fmtNumber(u[k])} ${w}`);
+  return parts.join(' · ');
+}
+
+// usageTone is how bad a binding's use is: bad when the upstream refused
+// the credential, failed or no token came; warn when only the platform
+// refused requests (a path, a rate); '' else.
+export function usageTone(u) {
+  if (!u) return '';
+  if (Number(u.refused) > 0 || Number(u.failing) > 0 || Number(u.tokenFailed) > 0) return 'bad';
+  return Number(u.blocked) > 0 ? 'warn' : '';
+}
+
+// problemWords say a binding's last problem: "403 denied_path: path /admin
+// is not allowed", "the upstream answered 401"; '' for none.
+export function problemWords(p) {
+  if (!isObject(p)) return '';
+  if (p.code) return `${p.status ? `${p.status} ` : ''}${p.code}${p.message ? `: ${p.message}` : ''}`;
+  return p.status ? `the upstream answered ${p.status}` : 'no answer';
+}
+
+// usersWords say who sent a binding's requests, the most first: "service
+// api 1,200 · sandbox c3kv9mwq2hd 4".
+export function usersWords(users) {
+  return (Array.isArray(users) ? users : []).map((u) => `${u.kind} ${u.name} ${fmtNumber(u.requests)}`).join(' · ');
+}
+
+// strayUsage are the bindings a usage answer counts that spec has none
+// of: those the pods named themselves, a sandbox's (its environment's
+// credentials it names). Only the ones with requests.
+export function strayUsage(usage, spec) {
+  if (!isObject(usage) || usage.unavailable || !Array.isArray(usage.bindings)) return [];
+  const own = new Set(objectsOf(spec, 'bindings').map(([n]) => n));
+  return usage.bindings.filter((b) => isObject(b) && b.name && !own.has(b.name) && Number(b.requests) > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// secretPinNote says a secret the latest deployment pins at an earlier
+// version than its latest: "the latest deployment pins v2, latest v3";
+// '' when it pins the latest or none.
+export function secretPinNote(pinned, version) {
+  const p = Number(pinned) || 0;
+  const v = Number(version) || 0;
+  return p > 0 && v > p ? `the latest deployment pins v${p}, latest v${v}` : '';
+}
+
+// credentialPinNote says a credential its deployments pin behind its
+// latest version (pins: its row's {latest, deployed}): "deployed pins
+// v3, latest v4", "v4 rolling out; deployed pins v3"; '' when they pin
+// the latest or none.
+export function credentialPinNote(pins, version) {
+  const l = Number(pins && pins.latest) || 0;
+  const d = Number(pins && pins.deployed) || 0;
+  const v = Number(version) || 0;
+  if (l && l < v) {
+    if (!d || d === l) return `${d === l ? 'deployed' : 'the latest deployment'} pins v${l}, latest v${v}`;
+    return `the latest deployment pins v${l}, deployed v${d}; latest v${v}`;
+  }
+  if (d && d < v) return l === v ? `v${v} rolling out; deployed pins v${d}` : `deployed pins v${d}, latest v${v}`;
+  return '';
 }

@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, EnvName, ErrBox, KV, LiveBadge, usePoll } from '../components.jsx';
 import { shortId } from '../format.js';
-import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs, sandboxPath } from '../routes.js';
+import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs, sandboxPath, secretsPath } from '../routes.js';
 import {
   CHANGES_READ, KIND_NAMES, changeTone, changesTo, conditionText, definitionRows, envRows, errorShare, fmtCount, fmtLatency,
   fmtValue, heavyEffect, instanceDeployments, isAttached, jobTrigger, objectImage, objectIncidents, objectStateText, objectTone,
@@ -341,7 +341,7 @@ function EnvValue({ v, tenant, env, st, navigate }) {
     return (
       <span className="objref">
         <Icon name="lock" size={11} /> secret{' '}
-        <Link to={envPath(tenant, env, 'secrets')} navigate={navigate} title="the environment's secrets">{v.target}</Link>
+        <Link to={secretsPath(tenant, env, 'secret', v.target)} navigate={navigate} title="its row in the environment's secrets">{v.target}</Link>
         {v.version ? <span className="muted"> v{v.version}</span> : <span className="muted"> (latest)</span>}
       </span>
     );

@@ -9,120 +9,51 @@ import { fmtDateTime, shortId } from '../format.js';
 import { useEnvStatus } from '../envstatus.jsx';
 import { credentialPath, envPath, newCredentialPath, sandboxPath } from '../routes.js';
 import {
-  KINDS, REDACTED, behind, bindingOf, curlOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel, modeWords,
-  needsDeployment, oldestPin, pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, specSnippet, usedWords,
+  KINDS, REDACTED, bindingOf, curlOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel, modeWords,
+  needsDeployment, pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, specSnippet, usedWords,
 } from './credentials.js';
 import { EnvLink, NEEDS } from './EnvTabs.jsx';
 import '../styles/credentials.css';
 
-// An environment's credentials (ADR 0033), on its Settings' Credentials
-// page: an API the environment's code calls by a name, whose credential
-// FeOS adds on the node, outside the pod. The list (the bindings of the
-// latest deployment follow it, Environments.jsx); a credential's page
-// with its check and its uses in the environment (the sandboxes that name
-// it, the bindings and the version its deployments pin, moved to the
-// latest from here); the form of a new one or a new version, with a
+// An environment's credentials (ADR 0033): an API the environment's code
+// calls by a name, whose credential FeOS adds on the node, outside the
+// pod. The list is a group of the environment's Secrets view
+// (EnvSecrets.jsx), whose pages these are: a credential's page with its
+// check and its uses in the environment (the sandboxes that name it, the
+// bindings and the version its deployments pin, moved to the latest from
+// here, moveToLatest); the form of a new one or a new version, with a
 // preflight and what the code sees (the concept's Fig. 5). The sandbox's
 // side (SandboxCredentials, CredentialPicker) is exported for the
 // sandbox pages. Reads need read on the environment, writes write.
 
 const POLL_MS = 10000;
 
-// WHAT is what a credential is, in one sentence.
-const WHAT = 'An API this environment\'s code calls by name; FeOS adds the credential on the node, outside the pod — the code never sees it.';
-
 // saved carries a save's answer to the credential's page, which says it
 // once.
 let saved = null;
 
-// Credentials is the Credentials page of environment env (its name or
-// ID, as the route has it; st its status) and what it holds: sel is a
-// credential's name, "new" the form of a new one; edit the form of a new
-// version.
+// Credentials are the pages of a credential of environment env (its
+// name or ID, as the route has it): sel is a credential's name, "new"
+// the form of a new one; edit the form of a new version. Without sel,
+// nothing: the list is the Secrets view's.
 export function Credentials({ tenant, env, sel, edit, ec, navigate }) {
   if (sel === 'new') return <CredentialEditor tenant={tenant} env={env} name="" ec={ec} navigate={navigate} />;
   if (sel && edit) return <CredentialEditor key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
   if (sel) return <CredentialPage key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
-  return <CredentialList tenant={tenant} env={env} ec={ec} navigate={navigate} />;
+  return null;
 }
 
 // go is a link's click that navigates.
 const go = (navigate, to) => (e) => { e.preventDefault(); e.stopPropagation(); navigate(to); };
 
-// BackTo is the way back to the environment's credentials.
+// BackTo is the way back to the environment's credentials, in its
+// Secrets view.
 function BackTo({ tenant, env, navigate, children }) {
   return (
     <div className="subhead envsubhead">
       <button type="button" className="ghost mini" onClick={() => navigate(credentialPath(tenant, env))}>
-        <Icon name="arrowLeft" size={13} /> credentials</button>
+        <Icon name="arrowLeft" size={13} /> secrets</button>
       {children}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ list --
-
-function CredentialList({ tenant, env, ec, navigate }) {
-  const [list, setList] = useState(null);
-  const [err, setErr] = useState('');
-  const load = useCallback(async () => {
-    try {
-      const r = await api.listCredentials(env);
-      setList(r.credentials || []);
-      setErr('');
-    } catch (e) {
-      setErr(e.message);
-    }
-  }, [env]);
-  usePoll(load, POLL_MS);
-  const creds = list || [];
-  const toNew = newCredentialPath(tenant, env);
-  return (
-    <div className="envsect creds-list">
-      <div className="sect sect-row">
-        credentials <span className="count">· {list ? creds.length : '…'}</span>
-        <span className="spacer" />
-        <button className="mini" disabled={!ec.write} title={ec.write ? 'state an API and its credential once' : NEEDS.write}
-          onClick={() => navigate(toNew)}><Icon name="plus" size={12} /> New credential</button>
-      </div>
-      <p className="panel-note envsecrets-note">
-        {WHAT} A credential is this environment&apos;s: its sandboxes name it and get the latest version at once; a
-        binding of its deployments names it, and each deployment pins the version it got.
-      </p>
-      <ErrBox error={err} />
-      {!list && !err && <p className="empty">Loading…</p>}
-      {list && creds.length === 0 && (
-        <div className="cred-empty">
-          <p>No credential in this environment yet. State one for each API this environment&apos;s services and
-            sandboxes call — GitHub, a model provider, a payment API — and name it in a binding or a sandbox.</p>
-          <p className="muted small">Rotating it is one write: every sandbox here that names it gets the new version at
-            once, the services with the next deployment.</p>
-        </div>)}
-      {creds.length > 0 && (
-        <div className="tblwrap"><table className="tbl cred-list">
-          <thead><tr><th>name</th><th>upstream</th><th>reached as</th><th>kind</th><th>version</th><th>used by</th><th>created</th></tr></thead>
-          <tbody>
-            {creds.map((cr) => {
-              const to = credentialPath(tenant, env, cr.name);
-              const u = cr.usedBy || {};
-              return (
-                <tr key={cr.name} className="clickable" onClick={() => navigate(to)}>
-                  <td><a className="mono" href={to} onClick={go(navigate, to)}>{cr.name}</a></td>
-                  <td className="mono cred-up">{cr.upstream}</td>
-                  <td className="mono small">{modeWords(cr)}</td>
-                  <td className="small">{kindLabel(cr.credential && cr.credential.kind)}</td>
-                  <td className="mono">v{cr.version}</td>
-                  <td className="small">
-                    {usedWords(u)}
-                    {behind(u, cr.version) && (
-                      <div className="warntext" title={pinWords(u)}>bindings on v{oldestPin(u)}</div>)}
-                  </td>
-                  <td className="small" title={fmtDateTime(cr.createdAt)}><Ago iso={cr.createdAt} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table></div>)}
     </div>
   );
 }
@@ -479,7 +410,7 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
 // moveToLatest makes a deployment of env from its latest one with every
 // binding that names credential name at version: {deployment} or, when
 // the plan finds it invalid, {findings}.
-async function moveToLatest(env, name, version) {
+export async function moveToLatest(env, name, version) {
   const e = await api.getEnvironment(env);
   const n = e.deployment;
   const d = await api.getDeployment(env, n);
@@ -491,7 +422,9 @@ async function moveToLatest(env, name, version) {
   return { deployment: dep, bindings };
 }
 
-function DeployResult({ tenant, env, res, navigate }) {
+// DeployResult is what came of moveToLatest: the deployment it made, or
+// why it made none.
+export function DeployResult({ tenant, env, res, navigate }) {
   if (res.deployment) {
     const to = envPath(tenant, env, 'deployments', String(res.deployment.number));
     return (
@@ -860,7 +793,7 @@ export function CredentialPicker({ tenant, env, value, onChange, disabled, navig
       <legend>credentials <span className="muted">· optional</span></legend>
       {list.length === 0 && (
         <span className="sbx-hint">The environment has no credential yet.{navigate && (
-          <> <a href={toNew} onClick={go(navigate, toNew)}>Make one</a> under its Settings.</>)}</span>)}
+          <> <a href={toNew} onClick={go(navigate, toNew)}>Make one</a> in its Secrets.</>)}</span>)}
       <div className="cred-pick">
         {list.map((c) => (
           <label key={c.name} className="sbx-check">

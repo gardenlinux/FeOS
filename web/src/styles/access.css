@@ -1,0 +1,24 @@
+/* SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Where a key lives, as an environment's Secrets view
+   (views/EnvSecrets.jsx). The marks are marks.css's; teal is the
+   network's (an upstream), red what needs someone: a secret without a
+   value, a binding the upstream refuses. */
+
+/* Secrets */
+.inv { display: flex; flex-direction: column; gap: 6px; max-width: 1240px; }
+.inv-note { margin: 0 0 4px; max-width: 90ch; }
+.inv-facts { margin: 6px 0 0; }
+.inv-facts .bad { color: var(--danger); }
+.inv-unavailable { margin: 2px 0 0; }
+.inv-group > .sect { margin-top: 22px; }
+.tbl.inv-tbl td { vertical-align: top; }
+.inv-tbl td:first-child { white-space: nowrap; }
+.inv-marks { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.inv-uses { display: flex; flex-direction: column; gap: 2px; }
+.inv-obj { white-space: nowrap; }
+.inv-state .warntext { font-size: 12px; margin-top: 2px; }
+.tbl tr.inv-missing td { background: rgba(239, 84, 73, .06); }
+.tbl tr.inv-missing td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.tbl tr.inv-stray td { color: var(--muted); }
