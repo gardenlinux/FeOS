@@ -502,15 +502,19 @@ func (s *Service) PutCredential(w http.ResponseWriter, r *http.Request, env Env)
 			return err
 		}
 		cur, err := tx.EnvCredential(r.Context(), env.ID, name, 0)
-		version := 1
 		switch {
 		case err == nil:
 			if old, oerr := s.openCredential(cur); oerr == nil && sameHTTP([]httpBinding{old}, []httpBinding{b}) {
 				stored = cur
 				return nil
 			}
-			version = cur.Version + 1
 		case !errors.Is(err, model.ErrNotFound):
+			return err
+		}
+		// One more than any the name had: a credential deleted and made
+		// again does not start at 1 again.
+		version, err := tx.NextEnvCredentialVersion(r.Context(), env.ID, name)
+		if err != nil {
 			return err
 		}
 		row, err := s.sealCredential(env.ID, version, b)

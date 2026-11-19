@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/db/dbtest"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -159,20 +161,30 @@ func TestCredentialsAreTheEnvironments(t *testing.T) {
 		t.Fatal("a version sealed for box opened in live")
 	}
 
-	// A copy, as a clone makes it, does: version 1, sealed for live.
-	c, err := r.svc.CopyCredential(bg, r.box, "erp", r.live)
-	if err != nil || c.Version != 1 || c.EnvID != r.live {
+	// A copy, as a clone makes it into its new environment, does:
+	// version 1, sealed for that one. Live, whose erp had a version 1,
+	// takes no copy as its version 1 again, not even after a delete.
+	fresh := dbtest.Environment(t, r.st.Q(), "acme", "fresh")
+	c, err := r.svc.CopyCredential(bg, r.box, "erp", fresh)
+	if err != nil || c.Version != 1 || c.EnvID != fresh {
 		t.Fatalf("copy: %+v %v", c, err)
-	}
-	if ok, err := r.st.DeleteEnvCredential(bg, r.live, "erp"); !ok || err != nil {
-		t.Fatalf("delete live's: %v %v", ok, err)
 	}
 	if err := r.st.InsertEnvCredential(bg, c); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := r.svc.OpenCredential(bg, r.live, "erp", 1, "erp"); err != nil ||
+	if p, err := r.svc.OpenCredential(bg, fresh, "erp", 1, "erp"); err != nil ||
 		p.GetHeaders().GetHeaders()["Authorization"] != "Bearer box-token-1" {
 		t.Fatalf("the copy: %v %v", p, err)
+	}
+	reused, err := r.svc.CopyCredential(bg, r.box, "erp", r.live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := r.st.DeleteEnvCredential(bg, r.live, "erp"); !ok || err != nil {
+		t.Fatalf("delete live's: %v %v", ok, err)
+	}
+	if err := r.st.InsertEnvCredential(bg, reused); err == nil {
+		t.Fatal("live took a copy as the version 1 its deleted erp had")
 	}
 	if _, err := r.svc.CopyCredential(bg, r.box, "nope", r.live); err == nil {
 		t.Fatal("a copy of a credential box lacks")
@@ -416,4 +428,51 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// A credential deleted and made again goes on from the versions it had:
+// a number names one definition for as long as the environment lives,
+// so that a pin of the old version 1 never opens the new one. The store
+// refuses a version the name had.
+func TestCredentialVersionsGoOnAfterADelete(t *testing.T) {
+	r := newRig(t)
+	for i, token := range []string{"Bearer old-1", "Bearer old-2"} {
+		code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody(token, 0))
+		if code != http.StatusCreated || decodeCredential(t, raw).Version != i+1 {
+			t.Fatalf("version %d: %d %s", i+1, code, raw)
+		}
+	}
+	if code, raw := r.tenantCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", code, raw)
+	}
+	code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer new", 0))
+	if code != http.StatusCreated || decodeCredential(t, raw).Version != 3 {
+		t.Fatalf("made again: %d %s, want version 3", code, raw)
+	}
+	for _, v := range []int{1, 2} {
+		if _, err := r.svc.OpenCredential(bg, r.box, "erp", v, "erp"); !errors.Is(err, model.ErrNotFound) {
+			t.Errorf("version %d of the deleted credential: %v, want none", v, err)
+		}
+	}
+	if b, err := r.svc.OpenCredential(bg, r.box, "erp", 3, "erp"); err != nil ||
+		b.GetHeaders().GetHeaders()["Authorization"] != "Bearer new" {
+		t.Fatalf("version 3: %v %v", b, err)
+	}
+	// Another environment's name of the same credential has marks of its
+	// own.
+	if code, raw := r.tenantCall("PUT", credPath("live", "erp"), credentialBody("Bearer live", 0)); code != http.StatusCreated ||
+		decodeCredential(t, raw).Version != 1 {
+		t.Fatalf("live's first: %d %s", code, raw)
+	}
+	err := r.st.InTx(bg, func(tx *store.Store) error {
+		c, err := tx.EnvCredential(bg, r.box, "erp", 3)
+		if err != nil {
+			return err
+		}
+		c.Version = 1
+		return tx.InsertEnvCredential(bg, c)
+	})
+	if err == nil || !strings.Contains(err.Error(), "version 1 is not above every version the name had") {
+		t.Fatalf("an insert of a used version: %v", err)
+	}
 }

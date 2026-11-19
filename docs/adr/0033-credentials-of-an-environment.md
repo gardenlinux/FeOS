@@ -61,7 +61,10 @@ key each; a vendor that issues only one key gets it stated twice, where
 anyone can see it.
 
 Every write that changes the definition makes a new version; a version
-never changes; the same definition again makes none. A read answers the
+never changes, and its number is never used again, not even by a
+credential of the name made after a delete, so that a deployment that
+pins a version gets that definition or none; the same definition again
+makes none. A read answers the
 latest, every secret field shown as set. A write may keep a secret field
 of the latest version instead of sending it, so that a definition read,
 edited and written back keeps the secrets it did not touch. It keeps one

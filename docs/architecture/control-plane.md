@@ -2313,7 +2313,10 @@ path's): upstream, mode, CA, path prefixes, forwarded host, rate limit and
 credential, checked by the same rules and the destination rule. Every
 write that changes the definition makes version n+1 (`env_credentials`,
 one row per version, the credential sealed and bound to the environment's
-ID, the name and the version); the same definition again makes none. A
+ID, the name and the version), n the highest version the name ever had in
+the environment, a deleted credential's too (`env_credential_names`), so
+that a number never names two definitions and a pin of a deleted version
+finds none; the same definition again makes none. A
 secret field sent as `{"set": true}` keeps the latest version's value, so
 that a GET's answer, edited and sent back, keeps the secrets it did not
 touch; keeping a field the latest version has not (another kind, a header
@@ -2359,7 +2362,7 @@ that the clone's apply pins its own.
 
 **A delete** is refused while a sandbox of the environment names the
 credential or its latest or deployed deployment pins it; then every
-version goes.
+version goes, and the name made again goes on from the number it had.
 
 **Rolling it out** (migration `0035_env_credentials.sql`, additive: the
 release before neither reads nor writes `env_credentials`, and

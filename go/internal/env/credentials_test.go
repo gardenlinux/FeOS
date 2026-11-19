@@ -213,3 +213,31 @@ func TestApplyPinsNoDeletedCredential(t *testing.T) {
 		t.Fatalf("deployment %d was made", e.Deployment)
 	}
 }
+
+// A revert to a deployment that pinned version 1 of a credential deleted
+// since finds no version 1 once the credential is made again (it is
+// version 2): it is refused, rather than deployed with another secret
+// under the old number.
+func TestRevertFindsNoReusedCredentialVersion(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	bs := h.withCredentials()
+	h.create("prod", nil)
+	h.putCredential(bs, "prod", "pay", "Bearer prod-key-1")
+	one := h.apply("prod", paySpec, 0)
+	two := h.apply("prod", `{"services": {"shop": {"image": "ghcr.io/acme/shop:1"}}}`, one.Number)
+	prod := h.env("prod")
+	if ok, err := h.st.DeleteEnvCredential(h.ctx(), prod.ID, "pay"); err != nil || !ok {
+		t.Fatalf("delete: %v %v", ok, err)
+	}
+	if v := h.putCredential(bs, "prod", "pay", "Bearer someone-elses-key"); v != 2 {
+		t.Fatalf("made again as version %d, want 2", v)
+	}
+	_, err := h.svc.Revert(h.ctx(), tenantA, "prod", one.Number, RevertRequest{Base: two.Number, Author: "tester"})
+	var ise *InvalidSpecError
+	if !errors.As(err, &ise) || !strings.Contains(describe(err), "bindings.pay.credentialRef") {
+		t.Fatalf("a revert onto a credential made again: %s", describe(err))
+	}
+	if e := h.env("prod"); e.Deployment != two.Number {
+		t.Fatalf("deployment %d is the latest, want %d", e.Deployment, two.Number)
+	}
+}

@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,11 +126,32 @@ func (s *Store) EnvCredentialVersions(ctx context.Context, env uuid.UUID) (map[s
 	return out, rows.Err()
 }
 
-// InsertEnvCredential writes c, a new version of its credential. Run it
-// under LockEnvCredential, with the version one more than the latest (or
-// in the transaction that makes the environment).
+// NextEnvCredentialVersion is the version a new version of the
+// environment's credential name gets: one more than any it ever had,
+// those of a deleted credential of the name too, so that a number is
+// never used for two definitions. Run it under LockEnvCredential.
+func (s *Store) NextEnvCredentialVersion(ctx context.Context, env uuid.UUID, name string) (int, error) {
+	var v int
+	err := s.q.QueryRow(ctx, `SELECT COALESCE((SELECT last_version FROM env_credential_names
+		WHERE env_id = $1 AND name = $2), 0) + 1`, env, name).Scan(&v)
+	return v, err
+}
+
+// InsertEnvCredential writes c, a new version of its credential, and
+// moves the name's mark to it (NextEnvCredentialVersion). A version that
+// is not above every version the name had is refused. Run it under
+// LockEnvCredential (or in the transaction that makes the environment).
 func (s *Store) InsertEnvCredential(ctx context.Context, c EnvCredential) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO env_credentials (env_id, name, version, upstream, mode, ca_pem,
+	tag, err := s.q.Exec(ctx, `INSERT INTO env_credential_names (env_id, name, last_version) VALUES ($1, $2, $3)
+		ON CONFLICT (env_id, name) DO UPDATE SET last_version = EXCLUDED.last_version
+		WHERE env_credential_names.last_version < EXCLUDED.last_version`, c.EnvID, c.Name, c.Version)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("credential %s: version %d is not above every version the name had", c.Name, c.Version)
+	}
+	_, err = s.q.Exec(ctx, `INSERT INTO env_credentials (env_id, name, version, upstream, mode, ca_pem,
 			path_prefixes, forwarded_host, rate_per_second, rate_burst, credential_kind, sealed, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		c.EnvID, c.Name, c.Version, c.Upstream, c.Mode, c.CAPEM, nonNil(c.PathPrefixes), c.ForwardedHost,
@@ -137,8 +159,8 @@ func (s *Store) InsertEnvCredential(ctx context.Context, c EnvCredential) error 
 	return err
 }
 
-// DeleteEnvCredential removes every version of a credential; false when
-// it had none.
+// DeleteEnvCredential removes every version of a credential, but not
+// its name's mark (NextEnvCredentialVersion); false when it had none.
 func (s *Store) DeleteEnvCredential(ctx context.Context, env uuid.UUID, name string) (bool, error) {
 	tag, err := s.q.Exec(ctx, `DELETE FROM env_credentials WHERE env_id = $1 AND name = $2`, env, name)
 	if err != nil {

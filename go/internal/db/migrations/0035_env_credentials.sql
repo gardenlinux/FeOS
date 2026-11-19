@@ -10,9 +10,9 @@
 -- an HTTP binding's definition in the clear, as http_bindings has it, and
 -- its credential sealed (AES-256-GCM under --secret-key-file, bound to
 -- the table, the environment's ID, the name and the version). A write is
--- a new version, one more than the latest; a version never changes; a
--- delete removes every version of the name; the environment's delete
--- takes them all.
+-- a new version, one more than any the name had (env_credential_names);
+-- a version never changes; a delete removes every version of the name;
+-- the environment's delete takes them all.
 --
 -- sandbox_credentials stays as it is: the names a sandbox names, which
 -- now resolve in the sandbox's environment (sandboxes.environment_id), at
@@ -69,6 +69,20 @@ CREATE TABLE env_credentials (
   created_by text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (env_id, name, version));
+
+-- env_credential_names holds the highest version each credential name of
+-- an environment ever had, which a delete of the credential keeps: the
+-- name made again goes on from there. So a version names one definition
+-- and one secret for as long as the environment lives, and a deployment
+-- that pinned version 1 of a credential deleted since finds no version 1
+-- when it is reverted to, rather than another secret under that number.
+-- An insert into env_credentials moves the mark first and is refused when
+-- its version is not above it.
+CREATE TABLE env_credential_names (
+  env_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  last_version integer NOT NULL CHECK (last_version >= 1),
+  PRIMARY KEY (env_id, name));
 
 CREATE FUNCTION tenant_credentials_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN

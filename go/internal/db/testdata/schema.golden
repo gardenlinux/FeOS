@@ -191,6 +191,14 @@ TABLE env_attached
   CONSTRAINT PRIMARY KEY (env_id, service)
   CREATE INDEX env_attached_sandbox ON public.env_attached USING btree (sandbox_id)
   CREATE UNIQUE INDEX env_attached_pkey ON public.env_attached USING btree (env_id, service)
+TABLE env_credential_names
+  COLUMN env_id uuid NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN last_version integer NOT NULL
+  CONSTRAINT CHECK ((last_version >= 1))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (env_id, name)
+  CREATE UNIQUE INDEX env_credential_names_pkey ON public.env_credential_names USING btree (env_id, name)
 TABLE env_credentials
   COLUMN env_id uuid NOT NULL
   COLUMN name text NOT NULL
