@@ -123,15 +123,16 @@ type Bindings interface {
 	DeleteHTTP(http.ResponseWriter, *http.Request)
 	HTTPPreflight(http.ResponseWriter, *http.Request)
 	Access(http.ResponseWriter, *http.Request)
-	// The tenant's credentials (ADR 0033).
-	ListCredentials(http.ResponseWriter, *http.Request)
-	GetCredential(http.ResponseWriter, *http.Request)
-	PutCredential(http.ResponseWriter, *http.Request)
-	DeleteCredential(http.ResponseWriter, *http.Request)
-	CheckCredential(http.ResponseWriter, *http.Request)
+	// The environments' credentials (ADR 0033), in the environment api
+	// resolved from the path.
+	ListCredentials(http.ResponseWriter, *http.Request, bindings.Env)
+	GetCredential(http.ResponseWriter, *http.Request, bindings.Env)
+	PutCredential(http.ResponseWriter, *http.Request, bindings.Env)
+	DeleteCredential(http.ResponseWriter, *http.Request, bindings.Env)
+	CheckCredential(http.ResponseWriter, *http.Request, bindings.Env)
 	SandboxCredentialNames(ctx context.Context, id podid.ID) ([]string, error)
-	CheckSandboxCredentials(ctx context.Context, tenant string, names []string) error
-	SetSandboxCredentials(ctx context.Context, tenant string, id podid.ID, names []string) error
+	CheckSandboxCredentials(ctx context.Context, env uuid.UUID, names []string) error
+	SetSandboxCredentials(ctx context.Context, tenant string, env uuid.UUID, id podid.ID, names []string) error
 }
 
 // Environments is the environments service (*env.Service, ADR 0018):
@@ -574,12 +575,16 @@ func (s *server) routes() []route {
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/http", b.DeleteHTTP)
 		tenant(onTenant(write), "POST /api/v1/http/preflight", serve(b.HTTPPreflight))
 
-		// The tenant's credentials (ADR 0033), and the ones a sandbox names.
-		tenant(onTenant(read), "GET /api/v1/credentials", serve(b.ListCredentials))
-		tenant(onTenant(read), "GET /api/v1/credentials/{name}", serve(b.GetCredential))
-		tenant(onTenant(write), "PUT /api/v1/credentials/{name}", serve(b.PutCredential))
-		tenant(onTenant(write), "DELETE /api/v1/credentials/{name}", serve(b.DeleteCredential))
-		tenant(onTenant(write), "POST /api/v1/credentials/{name}/check", serve(b.CheckCredential))
+		// The environments' credentials (ADR 0033), and the ones of its
+		// environment a sandbox names.
+		cred := func(n need, pattern string, h func(http.ResponseWriter, *http.Request, bindings.Env)) {
+			tenant(n, pattern, s.inEnv(h))
+		}
+		cred(onEnv(read), "GET /api/v1/environments/{env}/credentials", b.ListCredentials)
+		cred(onEnv(read), "GET /api/v1/environments/{env}/credentials/{name}", b.GetCredential)
+		cred(onEnv(write), "PUT /api/v1/environments/{env}/credentials/{name}", b.PutCredential)
+		cred(onEnv(write), "DELETE /api/v1/environments/{env}/credentials/{name}", b.DeleteCredential)
+		cred(onEnv(write), "POST /api/v1/environments/{env}/credentials/{name}/check", b.CheckCredential)
 		tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
 		tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
 	}

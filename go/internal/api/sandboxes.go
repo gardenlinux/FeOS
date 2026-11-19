@@ -19,6 +19,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/config"
 	envs "github.com/gardenlinux/feos/go/internal/env"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
@@ -99,8 +100,8 @@ type createSandboxRequest struct {
 	// ImageCredentials are the login for the image's registry (ADR 0025),
 	// sealed and never returned; nil: anonymous.
 	ImageCredentials *model.RegistryCredentials `json:"imageCredentials"`
-	// Credentials are the tenant's credentials its pod gets, at their
-	// latest versions (ADR 0033).
+	// Credentials are the credentials of its environment its pod gets,
+	// at their latest versions (ADR 0033).
 	Credentials []string `json:"credentials"`
 	// Workdir is the absolute directory its tools start in, fixed for its
 	// life: bash runs there, and the file tools take a relative path as
@@ -260,7 +261,7 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		if b == nil || !b.Enabled() {
 			return apierr.New(http.StatusUnprocessableEntity, "credentials: HTTP bindings are not enabled on this platform")
 		}
-		if err := b.CheckSandboxCredentials(r.Context(), tenantOf(r), req.Credentials); err != nil {
+		if err := b.CheckSandboxCredentials(r.Context(), env.ID, req.Credentials); err != nil {
 			return err
 		}
 	}
@@ -311,7 +312,7 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		return passOr(err, "create")
 	}
 	if len(req.Credentials) > 0 {
-		if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenant, row.ID, req.Credentials); err != nil {
+		if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenant, env.ID, row.ID, req.Credentials); err != nil {
 			return passOr(err, "create: its credentials")
 		}
 	}
@@ -353,6 +354,32 @@ func (s *server) writableEnv(r *http.Request, ref string) (store.Environment, er
 		return store.Environment{}, errNoEnvironment()
 	}
 	return e, err
+}
+
+// inEnv is a route of an environment's credentials (ADR 0033): the
+// environment the path's {env} names, its grant checked by the route's
+// need, resolved for h; one the tenant does not have is 404.
+func (s *server) inEnv(h func(http.ResponseWriter, *http.Request, bindings.Env)) apiHandler {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		t, _ := auth.TenantFrom(r.Context())
+		ref := r.PathValue("env")
+		id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
+		if isNoRow(err) {
+			return errNoEnvironment()
+		}
+		if err != nil {
+			return fmt.Errorf("environment %s: %w", ref, err)
+		}
+		e, err := s.st.GetEnvironment(r.Context(), id)
+		if isNoRow(err) {
+			return errNoEnvironment()
+		}
+		if err != nil {
+			return fmt.Errorf("environment %s: %w", ref, err)
+		}
+		h(w, r, bindings.Env{ID: e.ID, Name: e.Name, Tenant: t.Name})
+		return nil
+	}
 }
 
 // readableEnvs is the filter of a list of what runs in environments
@@ -448,7 +475,7 @@ type sandboxCredentials struct {
 }
 
 // getSandboxCredentials is GET /api/v1/sandboxes/{id}/credentials: the
-// tenant's credentials the sandbox names (ADR 0033).
+// credentials of its environment the sandbox names (ADR 0033).
 func (s *server) getSandboxCredentials(w http.ResponseWriter, r *http.Request) error {
 	sb, err := s.owned(r)
 	if err != nil {
@@ -462,8 +489,8 @@ func (s *server) getSandboxCredentials(w http.ResponseWriter, r *http.Request) e
 }
 
 // putSandboxCredentials is PUT /api/v1/sandboxes/{id}/credentials
-// {credentials}: the whole list of the tenant's credentials its pod gets;
-// a running pod gets them at once.
+// {credentials}: the whole list of the credentials of its environment its
+// pod gets; a running pod gets them at once.
 func (s *server) putSandboxCredentials(w http.ResponseWriter, r *http.Request) error {
 	sb, err := s.owned(r)
 	if err != nil {
@@ -476,7 +503,8 @@ func (s *server) putSandboxCredentials(w http.ResponseWriter, r *http.Request) e
 	if req.Credentials == nil {
 		req.Credentials = []string{}
 	}
-	if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenantOf(r), sb.ID, req.Credentials); err != nil {
+	if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenantOf(r), sb.EnvironmentID, sb.ID,
+		req.Credentials); err != nil {
 		return passOr(err, "credentials")
 	}
 	names, err := s.deps.Bindings.SandboxCredentialNames(r.Context(), sb.ID)

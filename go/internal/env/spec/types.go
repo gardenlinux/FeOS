@@ -212,16 +212,16 @@ type Binding struct {
 	RateLimit *BindingRateLimit `json:"rateLimit,omitempty"`
 	// Credential is what the platform adds to each request.
 	Credential *BindingCredential `json:"credential,omitempty"`
-	// TenantCredential names a credential of the tenant (ADR 0033)
+	// CredentialRef names a credential of the environment (ADR 0033)
 	// instead of the fields above: the binding is the credential's, at the
 	// version an apply pins; the normalised binding carries that version's
 	// upstream and mode.
-	TenantCredential *TenantCredentialRef `json:"tenantCredential,omitempty"`
+	CredentialRef *CredentialRef `json:"credentialRef,omitempty"`
 }
 
-// TenantCredentialRef names a credential of the tenant and its version
+// CredentialRef names a credential of the environment and its version
 // (0: the latest when applied).
-type TenantCredentialRef struct {
+type CredentialRef struct {
 	Name    string `json:"name"`
 	Version int    `json:"version,omitempty"`
 }

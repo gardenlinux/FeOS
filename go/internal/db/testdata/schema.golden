@@ -191,6 +191,30 @@ TABLE env_attached
   CONSTRAINT PRIMARY KEY (env_id, service)
   CREATE INDEX env_attached_sandbox ON public.env_attached USING btree (sandbox_id)
   CREATE UNIQUE INDEX env_attached_pkey ON public.env_attached USING btree (env_id, service)
+TABLE env_credentials
+  COLUMN env_id uuid NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN version integer NOT NULL
+  COLUMN upstream text NOT NULL
+  COLUMN mode text NOT NULL
+  COLUMN ca_pem text NOT NULL DEFAULT ''::text
+  COLUMN path_prefixes text[] NOT NULL DEFAULT '{}'::text[]
+  COLUMN forwarded_host boolean NOT NULL DEFAULT false
+  COLUMN rate_per_second integer NOT NULL DEFAULT 0
+  COLUMN rate_burst integer NOT NULL DEFAULT 0
+  COLUMN credential_kind text NOT NULL
+  COLUMN sealed bytea NOT NULL
+  COLUMN created_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((credential_kind = ANY (ARRAY['headers'::text, 'basic'::text, 'oauth2'::text, 'clientCertificate'::text])))
+  CONSTRAINT CHECK ((mode = ANY (ARRAY['name'::text, 'intercept'::text])))
+  CONSTRAINT CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
+  CONSTRAINT CHECK ((rate_burst >= 0))
+  CONSTRAINT CHECK ((rate_per_second >= 0))
+  CONSTRAINT CHECK ((version >= 1))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (env_id, name, version)
+  CREATE UNIQUE INDEX env_credentials_pkey ON public.env_credentials USING btree (env_id, name, version)
 TABLE env_deployments
   COLUMN env_id uuid NOT NULL
   COLUMN number integer NOT NULL

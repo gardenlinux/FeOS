@@ -29,8 +29,11 @@ import (
 // The rig stands the Service up on a fresh database behind a small mux
 // with api's auth classes: a sandbox route takes a sandbox token that must
 // name the path's sandbox (401 without one, 404 for another), a tenant
-// route a tenant token. Tenant acme owns sb1, sb2 and sb3; tenant other
-// owns nothing. The resolver of the destination rule is fakeLookup.
+// route a tenant token, an environment's route that and an environment of
+// the token's tenant by name. Tenant acme owns sb1, sb2 and sb3, all in
+// its environment box, and the environment live; tenant other owns its
+// environment box and nothing in it. The resolver of the destination rule
+// is fakeLookup.
 
 const (
 	tenantToken = "tenant-acme"
@@ -48,6 +51,8 @@ type rig struct {
 	srv           *httptest.Server
 	key           []byte
 	sb1, sb2, sb3 podid.ID
+	// box is acme's environment of the sandboxes, live another of its.
+	box, live uuid.UUID
 }
 
 var bg = context.Background()
@@ -106,9 +111,11 @@ func newRigWith(t *testing.T, enabled bool) *rig {
 			t.Fatal(err)
 		}
 	}
+	r.box, r.live = dbtest.Environment(t, st.Q(), "acme", "box"), dbtest.Environment(t, st.Q(), "acme", "live")
+	dbtest.Environment(t, st.Q(), "other", "box")
 	for _, id := range []podid.ID{r.sb1, r.sb2, r.sb3} {
 		if _, _, err := st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: "acme", Image: "img", VCPUs: 2, MemoryMiB: 512,
-			EnvironmentID: dbtest.Environment(t, st.Q(), "acme", "box")}); err != nil {
+			EnvironmentID: r.box}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,6 +177,17 @@ func (r *rig) mux() http.Handler {
 			h(w, req.WithContext(auth.WithTenant(req.Context(), auth.Tenant{Name: name})))
 		}
 	}
+	env := func(h func(http.ResponseWriter, *http.Request, Env)) http.HandlerFunc {
+		return tenant(func(w http.ResponseWriter, req *http.Request) {
+			t, _ := auth.TenantFrom(req.Context())
+			id, err := r.st.EnvironmentRef(req.Context(), t.Name, req.PathValue("env"))
+			if err != nil {
+				apierr.Write(w, apierr.New(http.StatusNotFound, "no such environment"))
+				return
+			}
+			h(w, req, Env{ID: id, Name: req.PathValue("env"), Tenant: t.Name})
+		})
+	}
 	mux := http.NewServeMux()
 	s := r.svc
 	if s.Enabled() {
@@ -186,11 +204,11 @@ func (r *rig) mux() http.Handler {
 		mux.HandleFunc("GET /api/v1/sandboxes/{id}/http", sandbox(s.GetHTTP))
 		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}/http", sandbox(s.DeleteHTTP))
 		mux.HandleFunc("POST /api/v1/http/preflight", tenant(s.HTTPPreflight))
-		mux.HandleFunc("GET /api/v1/credentials", tenant(s.ListCredentials))
-		mux.HandleFunc("GET /api/v1/credentials/{name}", tenant(s.GetCredential))
-		mux.HandleFunc("PUT /api/v1/credentials/{name}", tenant(s.PutCredential))
-		mux.HandleFunc("DELETE /api/v1/credentials/{name}", tenant(s.DeleteCredential))
-		mux.HandleFunc("POST /api/v1/credentials/{name}/check", tenant(s.CheckCredential))
+		mux.HandleFunc("GET /api/v1/environments/{env}/credentials", env(s.ListCredentials))
+		mux.HandleFunc("GET /api/v1/environments/{env}/credentials/{name}", env(s.GetCredential))
+		mux.HandleFunc("PUT /api/v1/environments/{env}/credentials/{name}", env(s.PutCredential))
+		mux.HandleFunc("DELETE /api/v1/environments/{env}/credentials/{name}", env(s.DeleteCredential))
+		mux.HandleFunc("POST /api/v1/environments/{env}/credentials/{name}/check", env(s.CheckCredential))
 	}
 	mux.HandleFunc("GET /api/v1/sandboxes/{id}/access", tenant(s.Access))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, req *http.Request) {

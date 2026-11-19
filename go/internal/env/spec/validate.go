@@ -128,9 +128,9 @@ type AddonData struct {
 	Type, Version string
 }
 
-// SecretInfo is a tenant secret of an environment.
-// CredentialInfo is a credential of the tenant (ADR 0033) as a binding
-// that names it sees it: its versions with what makes a pod another.
+// CredentialInfo is a credential of the environment (ADR 0033) as a
+// binding that names it sees it: its versions with what makes a pod
+// another.
 type CredentialInfo struct {
 	// Latest is its newest version.
 	Latest int
@@ -146,12 +146,14 @@ type CredentialTemplate struct {
 }
 
 // CredentialContext is what a ValidateContext implements when the
-// tenant's credentials can be named: the credential of that name; ok
-// false when the tenant has none.
+// environment's credentials can be named: the credential of that name; ok
+// false when the environment has none (a spec without an environment has
+// none).
 type CredentialContext interface {
-	TenantCredential(name string) (info CredentialInfo, ok bool)
+	Credential(name string) (info CredentialInfo, ok bool)
 }
 
+// SecretInfo is a tenant secret of an environment.
 type SecretInfo struct {
 	// Latest is its newest version that is not deleted; 0: every version
 	// is deleted.

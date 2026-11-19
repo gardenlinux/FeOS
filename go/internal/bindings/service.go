@@ -225,9 +225,9 @@ type podSnapshot struct {
 	ssh                                  []store.SSHBinding
 	http                                 []store.HTTPBinding
 	cas                                  []store.InterceptCA
-	// creds are the latest versions of the tenant's credentials the
+	// creds are the latest versions of its environment's credentials the
 	// sandbox names (ADR 0033).
-	creds []store.TenantCredential
+	creds []store.EnvCredential
 }
 
 // httpVersionAll is the version of the sandbox's HTTP bindings: its own
@@ -259,7 +259,7 @@ func (s *Service) snapshot(ctx context.Context, id podid.ID) (podSnapshot, error
 		snap.httpVersion, snap.http, err = st.HTTPBindings(ctx, id)
 	}
 	if err == nil {
-		snap.creds, err = st.SandboxTenantCredentials(ctx, id)
+		snap.creds, err = st.SandboxEnvCredentials(ctx, id)
 	}
 	if err == nil {
 		snap.cas, err = st.InterceptCAs(ctx, id)

@@ -64,7 +64,8 @@ type validateCtx struct {
 	// asked before it is validated.
 	bindingsOn   bool
 	destinations map[string]error
-	// credentials are the tenant's credentials (ADR 0033), by name.
+	// credentials are the environment's credentials (ADR 0033), by name;
+	// none for a spec without an environment.
 	credentials map[string]spec.CredentialInfo
 	// deny are the prefixes no pod reaches (Deps.DenyPrefixes).
 	deny []netip.Prefix
@@ -77,8 +78,8 @@ type imageAnswer struct {
 
 func (v *validateCtx) Mode() spec.Mode { return v.mode }
 
-// TenantCredential is spec.CredentialContext.
-func (v *validateCtx) TenantCredential(name string) (spec.CredentialInfo, bool) {
+// Credential is spec.CredentialContext.
+func (v *validateCtx) Credential(name string) (spec.CredentialInfo, bool) {
 	c, ok := v.credentials[name]
 	return c, ok
 }
@@ -249,11 +250,12 @@ func (s *Service) resolveImages(ctx context.Context, env *store.Environment, ask
 // of its normalisation: the tenant's sandboxes its attached services run
 // in (the environment each is in, ADR 0035), the prefixes no pod reaches,
 // the environment's secrets (secrets, when not nil, stands in for them:
-// a clone's), what its addon volumes hold, the addon types, the images,
-// and its default host under the apps zone. env is nil for a spec without
-// an environment.
+// a clone's) and credentials (creds likewise), what its addon volumes
+// hold, the addon types, the images, and its default host under the apps
+// zone. env is nil for a spec without an environment, which has no
+// credentials.
 func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Environment, sp spec.Spec, mode spec.Mode,
-	secrets map[string]spec.SecretInfo) (*validateCtx, spec.Pins, error) {
+	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo) (*validateCtx, spec.Pins, error) {
 	vc := &validateCtx{mode: mode, sandboxes: map[string]spec.SandboxInfo{}, secrets: secrets,
 		volumes: map[string]spec.AddonData{}, blueprint: s.d.Blueprint, zone: s.d.AppsZone,
 		bindingsOn: s.d.Bindings != nil && s.d.Bindings.Enabled(), destinations: map[string]error{},
@@ -288,8 +290,11 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		}
 	}
 	pins := spec.Pins{Images: map[string]string{}, Secrets: map[string]int{}, Plans: map[string]string{}}
-	if vc.bindingsOn && namesCredentials(sp) {
-		creds, err := s.tenantCredentials(ctx, s.st, tenant)
+	switch {
+	case creds != nil:
+		vc.credentials, pins.Credentials = creds, creds
+	case env != nil && vc.bindingsOn && namesCredentials(sp):
+		creds, err := s.envCredentials(ctx, s.st, env.ID)
 		if err != nil {
 			return nil, pins, err
 		}
@@ -459,10 +464,11 @@ func nonNilImages(images map[string]string) map[string]string {
 }
 
 // plan parses, validates and normalises raw for the environment env and
-// diffs it against deployment base (nil: the current one). secrets, when
-// not nil, stands in for the environment's secrets.
+// diffs it against deployment base (nil: the current one). secrets and
+// creds, when not nil, stand in for the environment's secrets and
+// credentials.
 func (s *Service) plan(ctx context.Context, tenant string, env store.Environment, raw []byte, base *int, mode spec.Mode,
-	secrets map[string]spec.SecretInfo) (planned, error) {
+	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo) (planned, error) {
 	p := planned{base: env.Deployment, current: env.Deployment}
 	if base != nil {
 		if *base < 0 || *base > env.Deployment {
@@ -482,7 +488,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 		p.findings = fs
 		return p, nil
 	}
-	vc, pins, err := s.loadContext(ctx, tenant, &env, sp, mode, secrets)
+	vc, pins, err := s.loadContext(ctx, tenant, &env, sp, mode, secrets, creds)
 	if err != nil {
 		return planned{}, err
 	}
@@ -557,7 +563,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 	if env.Deleting {
 		return ApplyAnswer{}, errDeleting(env.Name)
 	}
-	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil)
+	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil, nil)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}
@@ -783,21 +789,21 @@ func (s *Service) quotaFindings(ctx context.Context, tenant string, env uuid.UUI
 }
 
 // namesCredentials reports whether a spec's bindings name a credential of
-// the tenant.
+// the environment.
 func namesCredentials(sp spec.Spec) bool {
 	for _, b := range sp.Bindings {
-		if b.TenantCredential != nil {
+		if b.CredentialRef != nil {
 			return true
 		}
 	}
 	return false
 }
 
-// tenantCredentials are the tenant's credentials as a spec's bindings
+// envCredentials are an environment's credentials as a spec's bindings
 // see them (ADR 0033).
-func (s *Service) tenantCredentials(ctx context.Context, st *store.Store, tenant string) (
+func (s *Service) envCredentials(ctx context.Context, st *store.Store, env uuid.UUID) (
 	map[string]spec.CredentialInfo, error) {
-	versions, err := st.TenantCredentialVersions(ctx, tenant)
+	versions, err := st.EnvCredentialVersions(ctx, env)
 	if err != nil {
 		return nil, fmt.Errorf("credentials: %w", err)
 	}

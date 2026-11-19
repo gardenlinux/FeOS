@@ -476,10 +476,19 @@ type CloneRequest struct {
 	// Secrets are the new environment's secrets: copied from the source
 	// (its latest version) or set.
 	Secrets map[string]CloneSecret `json:"secrets,omitempty"`
-	Author  string                 `json:"author,omitempty"`
+	// Credentials are the new environment's credentials (ADR 0033): each
+	// the source's latest version, copied as the clone's version 1.
+	Credentials map[string]CloneCredential `json:"credentials,omitempty"`
+	Author      string                     `json:"author,omitempty"`
 	// Data asks for a copy of the addons' data, which is not available: an
 	// error finding.
 	Data bool `json:"data,omitempty"`
+}
+
+// CloneCredential is a credential of a clone: {"copy": true}, the only
+// way a credential gets there with the clone.
+type CloneCredential struct {
+	Copy bool `json:"copy,omitempty"`
 }
 
 // CloneSecret is a secret of a clone: exactly one of {"copy": true} and

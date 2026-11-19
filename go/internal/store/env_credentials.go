@@ -7,14 +7,16 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
-// TenantCredential is a version of a tenant's credential (ADR 0033): an
-// HTTP binding's definition, its credential sealed at rest.
-type TenantCredential struct {
-	Tenant        string
+// EnvCredential is a version of an environment's credential (ADR 0033):
+// an HTTP binding's definition, its credential sealed at rest.
+type EnvCredential struct {
+	EnvID         uuid.UUID
 	Name          string
 	Version       int
 	Upstream      string // https://host[:port], canonical
@@ -31,10 +33,10 @@ type TenantCredential struct {
 }
 
 // credentialLock is the first key of the advisory locks that
-// LockTenantCredential takes ("FECR").
+// LockEnvCredential takes ("FECR").
 const credentialLock int32 = 0x46454352
 
-var credentialColumns = []string{"tenant", "name", "version", "upstream", "mode", "ca_pem", "path_prefixes",
+var credentialColumns = []string{"env_id", "name", "version", "upstream", "mode", "ca_pem", "path_prefixes",
 	"forwarded_host", "rate_per_second", "rate_burst", "credential_kind", "sealed", "created_by", "created_at"}
 
 var credentialCols = prefixed("", credentialColumns)
@@ -43,33 +45,34 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanCredential(r rowScanner) (TenantCredential, error) {
-	var c TenantCredential
+func scanCredential(r rowScanner) (EnvCredential, error) {
+	var c EnvCredential
 	var prefixes []string
-	err := r.Scan(&c.Tenant, &c.Name, &c.Version, &c.Upstream, &c.Mode, &c.CAPEM, &prefixes, &c.ForwardedHost,
+	err := r.Scan(&c.EnvID, &c.Name, &c.Version, &c.Upstream, &c.Mode, &c.CAPEM, &prefixes, &c.ForwardedHost,
 		&c.RatePerSecond, &c.RateBurst, &c.Kind, &c.Sealed, &c.CreatedBy, &c.CreatedAt)
 	c.PathPrefixes = nonNil(prefixes)
 	return c, err
 }
 
-// LockTenantCredential serialises the writes of one credential of a
-// tenant until the caller's transaction ends: a new version's number and
-// a delete's check of its uses.
-func (s *Store) LockTenantCredential(ctx context.Context, tenant, name string) error {
-	_, err := s.q.Exec(ctx, "SELECT pg_advisory_xact_lock($1, hashtext($2::text))", credentialLock, tenant+"/"+name)
+// LockEnvCredential serialises the writes of one credential of an
+// environment until the caller's transaction ends: a new version's number
+// and a delete's check of its uses.
+func (s *Store) LockEnvCredential(ctx context.Context, env uuid.UUID, name string) error {
+	_, err := s.q.Exec(ctx, "SELECT pg_advisory_xact_lock($1, hashtext($2::text))", credentialLock,
+		env.String()+"/"+name)
 	return err
 }
 
-// TenantCredentials are the latest versions of a tenant's credentials, by
-// name.
-func (s *Store) TenantCredentials(ctx context.Context, tenant string) ([]TenantCredential, error) {
+// EnvCredentials are the latest versions of an environment's credentials,
+// by name.
+func (s *Store) EnvCredentials(ctx context.Context, env uuid.UUID) ([]EnvCredential, error) {
 	rows, err := s.q.Query(ctx, `SELECT DISTINCT ON (name) `+credentialCols+`
-		FROM tenant_credentials WHERE tenant = $1 ORDER BY name, version DESC`, tenant)
+		FROM env_credentials WHERE env_id = $1 ORDER BY name, version DESC`, env)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []TenantCredential{}
+	out := []EnvCredential{}
 	for rows.Next() {
 		c, err := scanCredential(rows)
 		if err != nil {
@@ -80,15 +83,15 @@ func (s *Store) TenantCredentials(ctx context.Context, tenant string) ([]TenantC
 	return out, rows.Err()
 }
 
-// TenantCredential is a version of a tenant's credential, 0 its latest;
-// model.ErrNotFound when there is none.
-func (s *Store) TenantCredential(ctx context.Context, tenant, name string, version int) (TenantCredential, error) {
-	row := s.q.QueryRow(ctx, `SELECT `+credentialCols+` FROM tenant_credentials
-		WHERE tenant = $1 AND name = $2 AND ($3 = 0 OR version = $3) ORDER BY version DESC LIMIT 1`,
-		tenant, name, version)
+// EnvCredential is a version of an environment's credential, 0 its
+// latest; model.ErrNotFound when there is none.
+func (s *Store) EnvCredential(ctx context.Context, env uuid.UUID, name string, version int) (EnvCredential, error) {
+	row := s.q.QueryRow(ctx, `SELECT `+credentialCols+` FROM env_credentials
+		WHERE env_id = $1 AND name = $2 AND ($3 = 0 OR version = $3) ORDER BY version DESC LIMIT 1`,
+		env, name, version)
 	c, err := scanCredential(row)
 	if err != nil {
-		return TenantCredential{}, noRow(err, model.ErrNotFound)
+		return EnvCredential{}, noRow(err, model.ErrNotFound)
 	}
 	return c, nil
 }
@@ -101,11 +104,11 @@ type CredentialVersion struct {
 	Mode     string
 }
 
-// TenantCredentialVersions are the versions of each of a tenant's
+// EnvCredentialVersions are the versions of each of an environment's
 // credentials, oldest first.
-func (s *Store) TenantCredentialVersions(ctx context.Context, tenant string) (map[string][]CredentialVersion, error) {
-	rows, err := s.q.Query(ctx, `SELECT name, version, upstream, mode FROM tenant_credentials
-		WHERE tenant = $1 ORDER BY name, version`, tenant)
+func (s *Store) EnvCredentialVersions(ctx context.Context, env uuid.UUID) (map[string][]CredentialVersion, error) {
+	rows, err := s.q.Query(ctx, `SELECT name, version, upstream, mode FROM env_credentials
+		WHERE env_id = $1 ORDER BY name, version`, env)
 	if err != nil {
 		return nil, err
 	}
@@ -122,22 +125,22 @@ func (s *Store) TenantCredentialVersions(ctx context.Context, tenant string) (ma
 	return out, rows.Err()
 }
 
-// InsertTenantCredential writes c, a new version of its credential.
-// Run it under LockTenantCredential, with the version one more than the
-// latest.
-func (s *Store) InsertTenantCredential(ctx context.Context, c TenantCredential) error {
-	_, err := s.q.Exec(ctx, `INSERT INTO tenant_credentials (tenant, name, version, upstream, mode, ca_pem,
+// InsertEnvCredential writes c, a new version of its credential. Run it
+// under LockEnvCredential, with the version one more than the latest (or
+// in the transaction that makes the environment).
+func (s *Store) InsertEnvCredential(ctx context.Context, c EnvCredential) error {
+	_, err := s.q.Exec(ctx, `INSERT INTO env_credentials (env_id, name, version, upstream, mode, ca_pem,
 			path_prefixes, forwarded_host, rate_per_second, rate_burst, credential_kind, sealed, created_by)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-		c.Tenant, c.Name, c.Version, c.Upstream, c.Mode, c.CAPEM, nonNil(c.PathPrefixes), c.ForwardedHost,
+		c.EnvID, c.Name, c.Version, c.Upstream, c.Mode, c.CAPEM, nonNil(c.PathPrefixes), c.ForwardedHost,
 		c.RatePerSecond, c.RateBurst, c.Kind, c.Sealed, c.CreatedBy)
 	return err
 }
 
-// DeleteTenantCredential removes every version of a credential; false
-// when it had none.
-func (s *Store) DeleteTenantCredential(ctx context.Context, tenant, name string) (bool, error) {
-	tag, err := s.q.Exec(ctx, `DELETE FROM tenant_credentials WHERE tenant = $1 AND name = $2`, tenant, name)
+// DeleteEnvCredential removes every version of a credential; false when
+// it had none.
+func (s *Store) DeleteEnvCredential(ctx context.Context, env uuid.UUID, name string) (bool, error) {
+	tag, err := s.q.Exec(ctx, `DELETE FROM env_credentials WHERE env_id = $1 AND name = $2`, env, name)
 	if err != nil {
 		return false, err
 	}
@@ -187,19 +190,19 @@ func (s *Store) SetSandboxCredentialNames(ctx context.Context, id podid.ID, name
 	return err
 }
 
-// SandboxTenantCredentials are the latest versions of the credentials a
-// sandbox names, by name; a name its tenant has no credential of is left
-// out.
-func (s *Store) SandboxTenantCredentials(ctx context.Context, id podid.ID) ([]TenantCredential, error) {
-	rows, err := s.q.Query(ctx, `SELECT DISTINCT ON (t.name) `+prefixed("t", credentialColumns)+`
+// SandboxEnvCredentials are the latest versions of the credentials a
+// sandbox names, of its environment, by name; a name its environment has
+// no credential of is left out.
+func (s *Store) SandboxEnvCredentials(ctx context.Context, id podid.ID) ([]EnvCredential, error) {
+	rows, err := s.q.Query(ctx, `SELECT DISTINCT ON (c.name) `+prefixed("c", credentialColumns)+`
 		FROM sandbox_credentials sc JOIN sandboxes s ON s.id = sc.sandbox_id
-		JOIN tenant_credentials t ON t.tenant = s.owner AND t.name = sc.name
-		WHERE sc.sandbox_id = $1 ORDER BY t.name, t.version DESC`, id)
+		JOIN env_credentials c ON c.env_id = s.environment_id AND c.name = sc.name
+		WHERE sc.sandbox_id = $1 ORDER BY c.name, c.version DESC`, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []TenantCredential{}
+	out := []EnvCredential{}
 	for rows.Next() {
 		c, err := scanCredential(rows)
 		if err != nil {
@@ -210,11 +213,11 @@ func (s *Store) SandboxTenantCredentials(ctx context.Context, id podid.ID) ([]Te
 	return out, rows.Err()
 }
 
-// CredentialSandboxes are the sandboxes of a tenant that name each of its
-// credentials, by name.
-func (s *Store) CredentialSandboxes(ctx context.Context, tenant string) (map[string][]podid.ID, error) {
+// CredentialSandboxes are the sandboxes of an environment that name each
+// of its credentials, by name.
+func (s *Store) CredentialSandboxes(ctx context.Context, env uuid.UUID) (map[string][]podid.ID, error) {
 	rows, err := s.q.Query(ctx, `SELECT sc.name, sc.sandbox_id FROM sandbox_credentials sc
-		JOIN sandboxes s ON s.id = sc.sandbox_id WHERE s.owner = $1 ORDER BY sc.name, sc.sandbox_id`, tenant)
+		JOIN sandboxes s ON s.id = sc.sandbox_id WHERE s.environment_id = $1 ORDER BY sc.name, sc.sandbox_id`, env)
 	if err != nil {
 		return nil, err
 	}
