@@ -2317,8 +2317,13 @@ ID, the name and the version); the same definition again makes none. A
 secret field sent as `{"set": true}` keeps the latest version's value, so
 that a GET's answer, edited and sent back, keeps the secrets it did not
 touch; keeping a field the latest version has not (another kind, a header
-it lacks) is a 422. A check's draft takes `{"set": true}` the same way,
-so that a form can be checked before it saves. No answer carries a
+it lacks) is a 422. It keeps one only while the upstream (canonical),
+the mode, the CA (but for the white space around it) and the token URL
+are the latest version's: a write that changes any of them is a 422
+"re-enter the secret fields when the upstream, mode, CA or token URL
+change", so that write on the environment, which reads no secret, never
+sends a stored one elsewhere. A check's draft takes `{"set": true}` the
+same way, so that a form can be checked before it saves. No answer carries a
 secret: each answers `{"set": true}`. `usedBy` lists the environment's
 sandboxes that name the credential (`sandboxes`), its bindings that name
 it in its latest or deployed deployment (`bindings`), and the versions

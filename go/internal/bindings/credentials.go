@@ -357,7 +357,11 @@ func keptSecrets(raw []byte) ([]byte, []string, error) {
 }
 
 // keep fills the kept secret fields of in from prev, a credential of the
-// same kind.
+// same kind that sends them to the same place: its upstream, mode, CA and
+// token URL are prev's (movedFrom). A stored secret goes nowhere its
+// version did not send it: a check sends its draft, a PUT gives it to the
+// pods, and either needs only write on the environment, which never reads
+// a secret.
 func keep(in *httpBindingIn, kept []string, prev *httpBinding) *bindingErr {
 	if len(kept) == 0 {
 		return nil
@@ -365,6 +369,11 @@ func keep(in *httpBindingIn, kept []string, prev *httpBinding) *bindingErr {
 	if prev == nil || in.Credential == nil || prev.Credential.Kind != in.Credential.Kind {
 		return bindingErrf(codeInvalidBinding, "%s: {\"set\": true} keeps a value of the latest version, which "+
 			"has none of this kind; send the value", kept[0])
+	}
+	if field := movedFrom(*in, *prev); field != "" {
+		return bindingErrf(codeInvalidBinding, "credential.%s: {\"set\": true} keeps the latest version's value, "+
+			"whose %s is another; re-enter the secret fields when the upstream, mode, CA or token URL change",
+			kept[0], field)
 	}
 	pc := prev.Credential
 	for _, k := range kept {
@@ -388,11 +397,32 @@ func keep(in *httpBindingIn, kept []string, prev *httpBinding) *bindingErr {
 	return nil
 }
 
+// movedFrom is the first of in's upstream (canonical), mode, CA (but for
+// the white space around it) and token URL that is not prev's, "" when
+// all are: where a secret goes and whom it trusts there. A draft whose
+// upstream or mode is no valid one moved.
+func movedFrom(in httpBindingIn, prev httpBinding) string {
+	up, cerr := httpcheck.ParseUpstream("upstream", in.Upstream)
+	if cerr != nil || up.Origin() != prev.Upstream {
+		return "upstream"
+	}
+	if mode, cerr := httpcheck.Mode("mode", in.Mode, up); cerr != nil || mode != prev.Mode {
+		return "mode"
+	}
+	if strings.TrimSpace(in.CaPem) != strings.TrimSpace(prev.CAPEM) {
+		return "caPem"
+	}
+	if in.Credential.TokenURL != prev.Credential.TokenURL {
+		return "tokenUrl"
+	}
+	return ""
+}
+
 // draft reads a credential's definition as a PUT or a check sends it
 // (raw), named name: a secret field sent as {"set": true} gets the value
 // of the environment's latest version of it. 400 for a body that is no
 // definition or names another credential, 422 for a field to keep that
-// the latest version lacks.
+// the latest version lacks or that would go elsewhere (keep).
 func (s *Service) draft(ctx context.Context, env uuid.UUID, name string, raw []byte) (httpBindingIn, error) {
 	raw, kept, err := keptSecrets(raw)
 	if err != nil {

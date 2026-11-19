@@ -64,7 +64,12 @@ Every write that changes the definition makes a new version; a version
 never changes; the same definition again makes none. A read answers the
 latest, every secret field shown as set. A write may keep a secret field
 of the latest version instead of sending it, so that a definition read,
-edited and written back keeps the secrets it did not touch.
+edited and written back keeps the secrets it did not touch. It keeps one
+only where the latest version sends it: with the same upstream, mode,
+CA and token URL. A write that changes any of them sends its secrets
+again, since `write` reads no secret and must not send a stored one to
+a host of its choice, or trust a CA of its own for it; a check's draft
+is held to the same rule.
 
 Reading an environment's credentials needs `read` on it; writing,
 checking and deleting them need `write` (ADR 0031), as its secrets do.
@@ -187,5 +192,8 @@ merged on 2026-11-19: a credential became its environment's (migration
 the day after and a tenant's credential reached across them. None had
 been made by 2026-11-10; the migration refuses while
 `tenant_credentials` holds a row, whose secret no migration can move.
+Until then a kept secret went with whatever upstream, CA or token URL
+the write named; a review before the merge found it, and since then it
+is kept only for the latest version's.
 The page's view of a credential's requests, decided at first, is not
 built; the sink's egress records are read per environment instead.
