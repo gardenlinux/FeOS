@@ -530,59 +530,6 @@ export function ImageShort({ image }) {
   return <span className="mono small obj-image" title={title}>{image.short}</span>;
 }
 
-// BindingSource says where a binding's credential comes from: a
-// credential of the environment at its pinned version, or the
-// environment's secrets.
-function BindingSource({ b, env, tenant, navigate }) {
-  const cr = b.credentialRef;
-  if (cr && cr.name) {
-    return (
-      <>credential{' '}
-        {tenant && navigate
-          ? <Link to={credentialPath(tenant, env, cr.name)} navigate={navigate} className="mono">{cr.name}</Link>
-          : <span className="mono">{cr.name}</span>}
-        {cr.version ? ` · version ${cr.version}` : ''} of this environment</>);
-  }
-  if (b.secrets && b.secrets.length) {
-    return <>secret{b.secrets.length === 1 ? '' : 's'} <span className="mono">{b.secrets.join(', ')}</span> of this environment</>;
-  }
-  return null;
-}
-
-// BindingCard is an HTTP binding of the latest deployment (ADR 0028):
-// its upstream, mode, credential's kind and users, where its credential
-// comes from and a link to its form; Check runs its preflight with the
-// secrets' latest versions.
-export function BindingCard({ b, env, ec, result = null, tenant = '', navigate = null }) {
-  const [op, run] = useOp();
-  const res = result || (op && op.result) || null;
-  const busy = !!(op && op.busy);
-  return (
-    <div className="envobj envbinding">
-      <div className="envobj-head">
-        <span className={'sdot ' + (res ? (res.ok ? 'running' : 'failed') : 'absent')} title={res ? (res.ok ? 'ok' : 'not ok') : 'not checked'} />
-        <span className="mono strong">{b.name}</span>
-        <span className="mono small host">{b.upstream}</span>
-        <span className="muted small">{b.mode}{b.credential ? ` · ${b.credential}` : ''}{b.users.length ? ` · used by ${b.users.join(', ')}` : ''}</span>
-        <span className="spacer" />
-        {ec && (
-          <button className="mini" disabled={!ec.write || busy} title={ec.write ? 'resolve, dial, check TLS and the credential, from an instance' : NEEDS.write}
-            onClick={() => run(() => api.checkBinding(env, b.name), '')}>
-            <Icon name="check" size={12} /> {busy ? 'Checking…' : 'Check'}</button>)}
-      </div>
-      {(b.credentialRef || (b.secrets && b.secrets.length > 0) || (tenant && navigate)) && (
-        <div className="envbinding-src small muted">
-          <BindingSource b={b} env={env} tenant={tenant} navigate={navigate} />
-          {tenant && navigate && ec && ec.write && (
-            <Link to={envPath(tenant, env, 'builder', `binding/${b.name}`)} navigate={navigate} className="envbinding-edit">
-              Edit in New deployment</Link>)}
-        </div>)}
-      {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
-      {res && <PreflightResult res={res} />}
-    </div>
-  );
-}
-
 // PreflightResult is a binding check's answer as rows.
 export function PreflightResult({ res }) {
   return (

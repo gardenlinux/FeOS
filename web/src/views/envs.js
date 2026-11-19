@@ -317,36 +317,6 @@ export function tagPlan(tags, name, n) {
   return { kind: 'move', tag: t, from: cur.deployment };
 }
 
-// specBindings lists a spec's HTTP bindings (ADR 0028) with the objects
-// that name them.
-export function specBindings(spec) {
-  const s = spec || {};
-  const users = (name) => ['services', 'jobs'].flatMap((key) => Object.entries(s[key] || {})
-    .filter(([, o]) => Array.isArray(o && o.bindings) && o.bindings.includes(name))
-    .map(([n]) => `${key === 'services' ? 'service' : 'job'}/${n}`));
-  return Object.entries(s.bindings || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, b]) => ({
-    name,
-    upstream: (b && b.upstream) || '',
-    mode: (b && b.mode) || 'name',
-    credential: (b && b.credential && b.credential.kind) || '',
-    users: users(name),
-    // Where the credential comes from: a credential of the environment at
-    // the version the deployment pinned (ADR 0033), or the environment's
-    // secrets its fields name.
-    credentialRef: (b && b.credentialRef) || null,
-    secrets: credentialSecrets(b && b.credential),
-  }));
-}
-
-// credentialSecrets are the environment's secrets a binding's credential
-// names, sorted.
-function credentialSecrets(c) {
-  if (!c) return [];
-  const vals = [...Object.values(c.headers || {}),
-    ...['user', 'password', 'tokenUrl', 'clientId', 'clientSecret', 'scope', 'audience', 'certPem', 'keyPem'].map((k) => c[k])];
-  return [...new Set(vals.filter((v) => v && typeof v === 'object' && v.secret).map((v) => v.secret))].sort();
-}
-
 // jobTrigger is when a job of the spec runs: on each deploy that changes
 // it (the default), or only when asked.
 export function jobTrigger(spec, name) {

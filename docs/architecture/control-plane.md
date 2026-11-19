@@ -2549,7 +2549,8 @@ it (ADR 0035): the list, with label filters; an environment's overview
 objects by kind, a row each with its image, ready replicas, last hour's
 traffic, restarts and the deployments it runs, the instances folded
 under it, its routes, its open incidents, its sandboxes and its newest
-jobs made by a call); an object's page
+jobs made by a call, and a line that counts its bindings and secrets and
+leads to its Secrets view, where they are); an object's page
 (`…/objects/<kind>/<name>`: a service's and a job's access on its
 overview, its identity (its SPIFFE ID and when its pods' first
 certificate ends, from `…/identities`; unfolded, the certificate: the

@@ -11,7 +11,7 @@ import {
   jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
   objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
   phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
-  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specBindings, specObject, splitItem,
+  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specObject, splitItem,
   statusState, statusTone, tagPlan, trafficOf, trafficTotals, usedBy,
 } from './envs.js';
 
@@ -270,7 +270,7 @@ describe('the operations', () => {
     expect(tagPlan(tags, 'v1.3', '6')).toEqual({ kind: 'here', tag: 'v1.3' });
   });
 
-  it("read a spec's bindings with their users, and when a job runs", () => {
+  it('read when a job runs', () => {
     const spec = {
       services: { api: { bindings: ['github'] }, web: {} },
       jobs: { sync: { bindings: ['github', 'erp'], on: 'manual' }, migrate: {} },
@@ -279,13 +279,6 @@ describe('the operations', () => {
         erp: { upstream: 'https://erp.example', mode: 'intercept', credential: { kind: 'oauth2' }, credentialRef: { name: 'erp', version: 3 } },
       },
     };
-    expect(specBindings(spec)).toEqual([
-      { name: 'erp', upstream: 'https://erp.example', mode: 'intercept', credential: 'oauth2', users: ['job/sync'],
-        credentialRef: { name: 'erp', version: 3 }, secrets: [] },
-      { name: 'github', upstream: 'https://api.github.com', mode: 'name', credential: 'headers', users: ['service/api', 'job/sync'],
-        credentialRef: null, secrets: ['gh-token'] },
-    ]);
-    expect(specBindings(null)).toEqual([]);
     expect(jobTrigger(spec, 'sync')).toBe('manual');
     expect(jobTrigger(spec, 'migrate')).toBe('deploy');
     expect(jobTrigger(null, 'x')).toBe('deploy');
