@@ -510,6 +510,14 @@ export const api = {
   accessLogs: (env, { limit = 200, beforeTsNs, traceId } = {}) =>
     tenantCall('GET', `/environments/${enc(env)}/access-logs${query({ limit, beforeTsNs, traceId })}`),
   traffic: (env, window = '1h') => tenantCall('GET', `/environments/${enc(env)}/traffic${query({ window })}`),
+  // What the environment's pods sent through each HTTP binding over
+  // window (24h or 1h) and who sent it, as the sink counts it ({window,
+  // unavailable?, truncated, bindings}); and who its workloads are to
+  // the platform: each one's SPIFFE ID and the certificates its pods
+  // hold ({trustDomain, workloads}, ADR 0036).
+  bindingUsage: (env, window = '24h') =>
+    tenantCall('GET', `/environments/${enc(env)}/bindings/usage${query({ window })}`),
+  identities: (env) => tenantCall('GET', `/environments/${enc(env)}/identities`),
 
   // The tenant's domains (ADR 0021): a claim answers the records to set;
   // a domain is bound to one environment, or none.

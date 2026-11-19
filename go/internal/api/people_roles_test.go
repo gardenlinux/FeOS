@@ -84,6 +84,8 @@ var routeNeeds = map[string]string{
 	"GET /api/v1/environments/{env}/incidents/{id}":             "read environment",
 	"GET /api/v1/environments/{env}/access-logs":                "read environment",
 	"GET /api/v1/environments/{env}/traffic":                    "read environment",
+	"GET /api/v1/environments/{env}/bindings/usage":             "read environment",
+	"GET /api/v1/environments/{env}/identities":                 "read environment",
 	"POST /api/v1/environments/{env}/services/{name}/restart":   "write environment",
 	"POST /api/v1/environments/{env}/jobs/{name}/run":           "write environment",
 	"POST /api/v1/environments/{env}/bindings/{name}/check":     "write environment",

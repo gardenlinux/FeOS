@@ -130,6 +130,8 @@ var routeClasses = map[string]class{
 	"GET /api/v1/environments/{env}/incidents/{id}":             classTenant,
 	"GET /api/v1/environments/{env}/access-logs":                classTenant,
 	"GET /api/v1/environments/{env}/traffic":                    classTenant,
+	"GET /api/v1/environments/{env}/bindings/usage":             classTenant,
+	"GET /api/v1/environments/{env}/identities":                 classTenant,
 	"POST /api/v1/environments/{env}/services/{name}/restart":   classTenant,
 	"POST /api/v1/environments/{env}/jobs/{name}/run":           classTenant,
 	"POST /api/v1/environments/{env}/bindings/{name}/check":     classTenant,

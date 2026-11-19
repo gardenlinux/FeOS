@@ -1,0 +1,26 @@
+{
+  "method": "GET",
+  "path": "/api/v1/environments/expensa-stage/bindings/usage",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "the sink does not answer: the bindings with zeros, and why",
+  "response": {
+    "window": "24h",
+    "unavailable": "the log store does not answer; try again shortly",
+    "truncated": false,
+    "bindings": [
+      {
+        "name": "erp",
+        "requests": 0,
+        "refused": 0,
+        "failing": 0,
+        "tokenFailed": 0,
+        "blocked": 0,
+        "lastAt": "",
+        "lastProblem": null,
+        "users": []
+      }
+    ]
+  }
+}

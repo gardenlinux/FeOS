@@ -604,6 +604,20 @@ secrets.
   (`renew_after`): a node's and an ingress instance's at half its
   lifetime, so that one switched off at any time keeps at least half of
   it; a pod's at three quarters.
+- **Who a workload is.** `GET /api/v1/environments/{env}/identities`
+  (tenant class, read on the environment) answers
+  `{"trustDomain", "workloads": [{"kind", "name", "spiffeId", "pods":
+  [{"pod", "notAfter", "node"}]}]}`: every object of the latest
+  deployment (services, jobs, addons, each by name, also without a pod:
+  `"pods": []`), then every sandbox of the environment (by ID), then
+  the workloads of pods an earlier deployment left; each with the
+  SPIFFE ID its pods' certificates carry (`pki.WorkloadID`), an attached
+  service with its sandbox's, whose pod it runs in. A pod is its row's
+  ID (an instance's as the status shows it), the `not_after` of the
+  newest `issued_certs` row of it and the node that was issued on
+  (`""` and the pod's node before its first). No key, certificate or
+  serial is answered. An instance without an issuer answers
+  `trustDomain` and every `spiffeId` `""`.
 - **Join tokens.** A token is 32 random bytes. The node sends
   `feos-join-<secret>`; the operator gets `feos-join-<secret>.<pin>`, where
   the pin is the SHA-256 of the root that anchors the issuer (its
@@ -1501,7 +1515,7 @@ list:
 | read on the job's environment | a tenant job's get and logs |
 | write on the job's environment | a tenant job's cancel and delete |
 | admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`); an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
-| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic |
+| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic, its bindings' use, its workloads' identities |
 | write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
 | admin of the scope the request names (the tenant, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/tenant/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/tenant/invitations`, `DELETE …/{id}`) |
 | admin on the environment | its route tokens, `public`, its access (who it admits) and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
@@ -1523,7 +1537,7 @@ default, the environment by ID or name), and lists them with `role`,
 `environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
 sandbox token is its sandbox's, and the door's answers are as before.
 ferund's own reads of the sink on a session's behalf (logs, traffic,
-access logs) pass the session's cookie and `FeRun-Tenant` on
+access logs, the bindings' use) pass the session's cookie and `FeRun-Tenant` on
 (`auth.Tenant.PassOn`), as they pass a token: no service credential
 reads the sink for a tenant.
 
@@ -2231,6 +2245,50 @@ condition that holds again within an hour of its incident's close, on
 the same deployment, opens that incident again (`closed_at` cleared, its
 summary and evidence the new ones) instead of a new one. The loop
 deletes a binding's incidents 30 days after they closed.
+
+**Use.** `GET /api/v1/environments/{env}/bindings/usage?window=24h|1h`
+(tenant class, read on the environment; 24 h when no window is named,
+another a 400) says what the environment's pods sent through each
+binding in the window that ends now, and who sent it, for the console's
+view of where a credential lives: every binding of the latest
+deployment, an unused one with zeros, and every other one its pods'
+requests named (a sandbox's own set, its environment's credentials), by name.
+
+```json
+{"window": "24h", "unavailable": "…", "truncated": false,
+ "bindings": [{"name": "erp", "requests": 1204, "refused": 2, "failing": 0, "tokenFailed": 0, "blocked": 1,
+   "lastAt": "2026-11-19T10:02:03Z",
+   "lastProblem": {"at": "…", "status": 403, "code": "denied_path", "message": "…", "traceId": "…"},
+   "users": [{"kind": "service", "name": "api", "requests": 1200}, {"kind": "sandbox", "name": "<id>", "requests": 4}]}]}
+```
+
+`requests` is every request through the binding, feos-authn's refusals
+among them; `refused` those the upstream answered 401 or 403 (its
+credential refused), `failing` 429 or 5xx, or not reached (`unreachable`,
+`tls`), `tokenFailed` those without an OAuth token
+(`credential_unavailable`), `blocked` feos-authn's other refusals
+(`denied_path`, `rate_limited`, `misdirected`, `method_not_allowed`,
+`denied_destination`, `not_ready`, `binding_invalid`, …): the classes of
+the incidents above, and the refusals they leave out. A request no
+binding matched (`unknown_binding` without a name) is of none.
+`lastAt` is the newest request's start (`""` for none), `lastProblem` the
+newest of the four classes (`null` for none), with feos-authn's code and
+message for a refusal of its own (`""` for the upstream's answer), and
+`users` the services, jobs (by name) and sandboxes (by ID) that sent
+them, the most first. The numbers are the sink's, counted from the pods'
+egress spans in the trace index ([The sink](#the-sink),
+[traces.md](traces.md#reading-the-bindings-requests)), with the caller's
+token or session; `ferund`'s own counts (`http_egress`) last ten minutes
+and serve the incidents alone. Without `--sink-url` or a credential to
+pass on, and when the sink fails or is older than the route, the
+bindings are answered with zeros and `unavailable` says why (200, never
+a 503: the list is the bindings' and stands without the numbers);
+`truncated` says the sink left span names or users beyond its bounds
+uncounted. A request is counted once its answer ended (its span comes
+with its `http_end`, ADR 0028), at most 5 s after, and for as long as
+the trace index keeps it (`--trace-retention`, 30 days); a pod killed
+mid-request leaves no span, and the spans beyond a tenant's trace quota
+(`--trace-quota`) are not kept, nor counted.
 
 ### Credentials of an environment
 
@@ -3804,6 +3862,8 @@ name; one the tenant does not have is 404 "no such environment".
 | `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes after its stop grace (660 s), or an attached service's process |
 | `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
 | `POST …/{env}/bindings/{name}/check` `{probe?}` | 200 the preflight's result of the latest deployment's binding, its secrets at their latest versions ([HTTP bindings](#http-bindings)); 404 `no_binding`, `bindings_off` |
+| `GET …/{env}/bindings/usage[?window=24h]` | `{window, unavailable?, truncated, bindings: [{name, requests, refused, failing, tokenFailed, blocked, lastAt, lastProblem, users}]}`, `24h` (the default) or `1h`, else 400; read from the sink, 200 with `unavailable` when it cannot be ([HTTP bindings](#http-bindings), Use) |
+| `GET …/{env}/identities` | `{trustDomain, workloads: [{kind, name, spiffeId, pods: [{pod, notAfter, node}]}]}` ([The CA](#the-ca), Who a workload is) |
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |
 | `ANY …/{env}/http/{path...}` | the route door |
 
@@ -4700,6 +4760,15 @@ nor waits for. `ferund`'s part:
   ingress's count to both reads, so it is rolled out first. The 503s are those of `…/access-logs`; a sink without the
   route (older than `ferund`) answers 404, which is a 503
   `log_store_unavailable` too.
+- **The bindings' use.** `…/bindings/usage` is counted by the sink from
+  the pods' egress spans ([traces.md](traces.md#reading-the-bindings-requests)),
+  with the caller's credentials as the logs calls, in one read:
+  `GET <sink-url>/api/v1/egress?environment=<ID>&since=<ns>&until=<ns>`,
+  the window that ends now. `ferund` adds the latest deployment's
+  bindings that had no request and turns ns into RFC 3339. Without
+  `--sink-url`, a credential, or with the sink failing or without the
+  route (404), it answers the bindings with zeros and `unavailable`, not
+  a 503, and logs the sink's error.
 - **`GET /api/v1/tenant`** (tenant class, member), which the sink asks
   for its readers: `{"tenant": "<name>", "role": "read"|"write"|"admin"|"",
   "environments": ["<ID>", …]}` for any principal, a token or a session

@@ -61,6 +61,8 @@ func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	env(onEnv(read), "GET /api/v1/environments/{env}/incidents/{id}", s.getIncident)
 	env(onEnv(read), "GET /api/v1/environments/{env}/access-logs", s.accessLogs)
 	env(onEnv(read), "GET /api/v1/environments/{env}/traffic", s.traffic)
+	env(onEnv(read), "GET /api/v1/environments/{env}/bindings/usage", s.bindingUsage)
+	env(onEnv(read), "GET /api/v1/environments/{env}/identities", s.identities)
 	env(onEnv(write), "POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
 	env(onEnv(write), "POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
 	env(onEnv(write), "POST /api/v1/environments/{env}/bindings/{name}/check", s.checkBinding)
@@ -459,6 +461,32 @@ func (s *server) traffic(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, t)
+}
+
+// bindingUsage is GET …/bindings/usage[?window=1h|24h]: the requests the
+// environment's pods sent through each HTTP binding in the window, 24h
+// by default, as the sink counts them.
+func (s *server) bindingUsage(w http.ResponseWriter, r *http.Request) error {
+	window, err := envs.ParseBindingUsageWindow(r.URL.Query().Get("window"))
+	if err != nil {
+		return err
+	}
+	u, err := s.deps.Environments.BindingUsage(r.Context(), tenantOf(r), r.PathValue("env"), window)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, u)
+}
+
+// identities is GET …/identities: the SPIFFE ID of each of the
+// environment's workloads and the certificates its pods hold, without
+// key material (ADR 0036).
+func (s *server) identities(w http.ResponseWriter, r *http.Request) error {
+	ids, err := s.deps.Environments.Identities(r.Context(), tenantOf(r), r.PathValue("env"))
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, ids)
 }
 
 // isTraceID reports whether s is a trace ID of W3C Trace Context: 32

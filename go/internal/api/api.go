@@ -165,6 +165,8 @@ type Environments interface {
 	Incident(ctx context.Context, tenant, envRef string, id int64) (envs.Incident, error)
 	AccessLogs(ctx context.Context, tenant, envRef string, q envs.AccessLogQuery) (envs.AccessLogList, error)
 	Traffic(ctx context.Context, tenant, envRef, window string) (envs.Traffic, error)
+	BindingUsage(ctx context.Context, tenant, envRef, window string) (envs.BindingUsage, error)
+	Identities(ctx context.Context, tenant, envRef string) (envs.Identities, error)
 	Logs(ctx context.Context, tenant, envRef, kind, name string, lines, replica int) (envs.LogsAnswer, error)
 	RestartService(ctx context.Context, tenant, envRef, name string) error
 	RunJob(ctx context.Context, tenant, envRef, name string) error

@@ -235,6 +235,18 @@ describe('the tenant, with the session', () => {
     expect(notAvailable(err)).toBe(false);
   });
 
+  it('reads the bindings\' use over a window, 24h unless named, and the workloads\' identities', async () => {
+    setActiveTenant('acme');
+    await api.bindingUsage('stage');
+    await api.bindingUsage('stage', '1h');
+    await api.identities('stage');
+    expect(calls.map((c) => [c.init.method || 'GET', c.path])).toEqual([
+      ['GET', '/api/v1/environments/stage/bindings/usage?window=24h'],
+      ['GET', '/api/v1/environments/stage/bindings/usage?window=1h'],
+      ['GET', '/api/v1/environments/stage/identities'],
+    ]);
+  });
+
   it('says who a publish admits, and unpublishes with {public: false} alone (ADR 0054)', async () => {
     setActiveTenant('acme');
     await api.setPublic('stage', true, { hostLabel: 'stage--kino', access: 'visitors', provider: 'fecode' });
