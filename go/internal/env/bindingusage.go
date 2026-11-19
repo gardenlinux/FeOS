@@ -6,6 +6,7 @@ package env
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -158,6 +159,11 @@ func (s *Service) BindingUsage(ctx context.Context, tenant, env, window string) 
 	default:
 		until := time.Now()
 		got, err := s.readSinkEgress(ctx, t, e.ID.String(), until.Add(-length), until)
+		if errors.Is(err, errSinkTooOld) {
+			s.log.Debug("the sink has no egress route", "env", e.ID)
+			out.Unavailable = "the sink is older than this ferund"
+			break
+		}
 		if err != nil {
 			s.log.Warn("cannot read the bindings' requests from the sink", "env", e.ID, "err", err)
 			out.Unavailable = "the log store does not answer; try again shortly"
@@ -185,8 +191,15 @@ func (s *Service) BindingUsage(ctx context.Context, tenant, env, window string) 
 	return out, nil
 }
 
+// errSinkTooOld is readSinkEgress's error for a sink without
+// /api/v1/egress: a release before it, beside this ferund in a rolling
+// update or one not rolled yet.
+var errSinkTooOld = errors.New("the sink has no /api/v1/egress")
+
 // readSinkEgress asks the sink for the requests of the environment envID's
-// pods through their bindings in [since, until), as t.
+// pods through their bindings in [since, until), as t. A 404 that is not
+// one of the sink's own answers (JSON: no such environment, no such
+// tenant) is its mux's for a route it lacks: errSinkTooOld.
 func (s *Service) readSinkEgress(ctx context.Context, t auth.Tenant, envID string, since, until time.Time) (sinkEgress,
 	error) {
 	v := url.Values{"environment": {envID}, "since": {strconv.FormatInt(since.UnixNano(), 10)},
@@ -201,6 +214,9 @@ func (s *Service) readSinkEgress(ctx context.Context, t auth.Tenant, envID strin
 		return sinkEgress{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound && !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		return sinkEgress{}, errSinkTooOld
+	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return sinkEgress{}, fmt.Errorf("the sink answered %s: %s", resp.Status, strings.TrimSpace(string(b)))

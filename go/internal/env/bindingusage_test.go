@@ -5,6 +5,7 @@ package env
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -24,6 +25,9 @@ type fakeEgressSink struct {
 	since []int64
 	until []int64
 	down  bool
+	// old is a sink of a release without the route: its mux's 404;
+	// foreign one that does not let the caller read the environment.
+	old, foreign bool
 }
 
 func (f *fakeEgressSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -33,8 +37,17 @@ func (f *fakeEgressSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	until, _ := strconv.ParseInt(r.URL.Query().Get("until"), 10, 64)
 	f.since, f.until = append(f.since, since), append(f.until, until)
-	if f.down {
+	switch {
+	case f.down:
 		http.Error(w, `{"error":"the sink cannot answer now"}`, http.StatusServiceUnavailable)
+		return
+	case f.old:
+		http.NotFound(w, r)
+		return
+	case f.foreign:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"no such environment"}`))
 		return
 	}
 	_, _ = w.Write([]byte(`{"truncated": true, "bindings": [
@@ -128,4 +141,26 @@ func TestBindingUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	zeros("the sink down", u, "the log store does not answer")
+
+	// A sink of a release before the route says so, without a warning;
+	// the sink's own 404 is no such sink.
+	var logged strings.Builder
+	h.svc.log = slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	sink.mu.Lock()
+	sink.down, sink.old = false, true
+	sink.mu.Unlock()
+	if u, err = h.svc.BindingUsage(ctx, tenantA, "shop", "24h"); err != nil {
+		t.Fatal(err)
+	}
+	zeros("an old sink", u, "the sink is older than this ferund")
+	if logged.Len() != 0 {
+		t.Errorf("an old sink logged %q", logged.String())
+	}
+	sink.mu.Lock()
+	sink.old, sink.foreign = false, true
+	sink.mu.Unlock()
+	if u, err = h.svc.BindingUsage(ctx, tenantA, "shop", "24h"); err != nil {
+		t.Fatal(err)
+	}
+	zeros("the sink's own 404", u, "the log store does not answer")
 }
