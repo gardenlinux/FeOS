@@ -101,21 +101,21 @@ Two things outside FeRun shape the decision:
 - What a role may do on an **environment**:
   - `read`: its objects, deployments and plans, tags, incidents,
     traffic, logs and traces, the names and versions of its secrets
-    (never a value), its hosts and bound domains, and its sandboxes and
-    jobs (ADR 0035);
-  - `write`: also plan and apply, revert, tags, secrets' values,
-    restarts, runs of its jobs, a binding's check, its sandboxes and
-    their tokens, its tenants' jobs, and services with the runtime
-    `attached` (ADR 0035: each of these belongs to one environment);
+    (never a value), its credentials (never a secret, ADR 0033), its
+    hosts and bound domains, and its sandboxes and jobs (ADR 0035);
+  - `write`: also plan and apply, revert, tags, secrets' values, its
+    credentials and their checks, restarts, runs of its jobs, a
+    binding's check, its sandboxes and their tokens, its tenants' jobs,
+    and services with the runtime `attached` (ADR 0035: each of these
+    belongs to one environment);
   - `admin`: also its route tokens, `public` and its host label, binding
     and unbinding domains, its deletion, and the grants on it.
 - What only a **tenant grant** gives, because it reaches beyond one
   environment:
-  - `read`: the whole list of environments, the tools' reference, the
-    tenant's credentials (ADR 0033), and a plan without an environment;
-  - `write`: making, cloning and deleting environments, the tenant's
-    credentials, and the preflights, which check what a sandbox would
-    get;
+  - `read`: the whole list of environments, the tools' reference, and
+    a plan without an environment;
+  - `write`: making, cloning and deleting environments, and the
+    preflights, which check what a sandbox would get;
   - `admin`: members and invitations, the tenant's tokens, and claiming,
     checking and deleting domains (a claim is the tenant's, ADR 0045).
 - A **tenant token** is a principal like a person: it is minted with a

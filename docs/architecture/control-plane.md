@@ -2035,8 +2035,8 @@ They come from three places, and from no other:
 
 - **a sandbox's own set**, `PUT /api/v1/sandboxes/{id}/http` (sandbox
   class), stated whole;
-- **the tenant's credentials a sandbox names**, at their latest versions
-  ([Credentials of a tenant](#credentials-of-a-tenant));
+- **the credentials of its environment a sandbox names**, at their latest
+  versions ([Credentials of an environment](#credentials-of-an-environment));
 - **an environment's pod**: the bindings its image service or job names
   (`"bindings": ["erp"]`), as the deployment its instance or job run
   belongs to has them ([The deployment spec](#the-deployment-spec)), a
@@ -2232,61 +2232,86 @@ the same deployment, opens that incident again (`closed_at` cleared, its
 summary and evidence the new ones) instead of a new one. The loop
 deletes a binding's incidents 30 days after they closed.
 
-### Credentials of a tenant
+### Credentials of an environment
 
-A credential ([ADR 0033](../adr/0033-credentials-of-an-environment.md)) is an
-HTTP binding's definition that a tenant states once and its sandboxes and
-environments use by name (`internal/bindings/credentials.go`,
-`internal/store/tenant_credentials.go`). It is on with the HTTP bindings.
+A credential ([ADR 0033](../adr/0033-credentials-of-an-environment.md)) is
+an HTTP binding's definition that an environment states once and its
+sandboxes and bindings use by name (`internal/bindings/credentials.go`,
+`internal/store/env_credentials.go`). Environments share none. It is on
+with the HTTP bindings.
 
 | Method and path | Need | Answers |
 |---|---|---|
-| `GET /api/v1/credentials` | read on the tenant | `{credentials}`: the latest version of each, with `usedBy` |
-| `GET /api/v1/credentials/{name}` | read on the tenant | the latest version; 404 `no_credential` |
-| `PUT /api/v1/credentials/{name}` | write on the tenant | 201 a new version, 200 the same definition again; 422 as a binding's PUT |
-| `DELETE /api/v1/credentials/{name}` | write on the tenant | 204; 409 `credential_in_use`, naming its users |
-| `POST /api/v1/credentials/{name}/check` | write on the tenant | the preflight of the latest version, `{probe}` optional |
-| `GET /api/v1/sandboxes/{id}/credentials` | read on the tenant | `{credentials}`: the names the sandbox names |
-| `PUT /api/v1/sandboxes/{id}/credentials` | write on the tenant | the same, after the whole list is stated |
+| `GET /api/v1/environments/{env}/credentials` | read on the environment | `{credentials}`: the latest version of each, with `usedBy` |
+| `GET /api/v1/environments/{env}/credentials/{name}` | read on the environment | the latest version; 404 `no_credential` |
+| `PUT /api/v1/environments/{env}/credentials/{name}` | write on the environment | 201 a new version, 200 the same definition again; 422 as a binding's PUT |
+| `DELETE /api/v1/environments/{env}/credentials/{name}` | write on the environment | 204; 409 `credential_in_use`, naming its users |
+| `POST /api/v1/environments/{env}/credentials/{name}/check` | write on the environment | the preflight: of the latest version (404 `no_credential` without one), or of `{binding}`, a draft that is not stored; `{probe}` optional; a draft the rules refuse answers 200 with the result's `error`, as `/api/v1/http/preflight` does, a body that is no draft 400 |
+| `GET /api/v1/sandboxes/{id}/credentials` | read on the sandbox's environment | `{credentials}`: the names the sandbox names |
+| `PUT /api/v1/sandboxes/{id}/credentials` | write on the sandbox's environment | the same, after the whole list is stated |
 
 A PUT's body is a binding of a sandbox's set without its name (the
 path's): upstream, mode, CA, path prefixes, forwarded host, rate limit and
 credential, checked by the same rules and the destination rule. Every
-write that changes the definition makes version n+1 (`tenant_credentials`,
-one row per version, the credential sealed and bound to the tenant, the
-name and the version); the same definition again makes none. A secret
-field sent as `{"set": true}` keeps the latest version's value, so that a
-GET's answer, edited and sent back, keeps the secrets it did not touch;
-keeping a field the latest version has not (another kind, a header it
-lacks) is a 422. No answer carries a secret: each answers `{"set": true}`.
-`usedBy` lists the sandboxes that name the credential and each
-environment whose latest or deployed deployment pins it, with the
-versions both pin.
+write that changes the definition makes version n+1 (`env_credentials`,
+one row per version, the credential sealed and bound to the environment's
+ID, the name and the version); the same definition again makes none. A
+secret field sent as `{"set": true}` keeps the latest version's value, so
+that a GET's answer, edited and sent back, keeps the secrets it did not
+touch; keeping a field the latest version has not (another kind, a header
+it lacks) is a 422. A check's draft takes `{"set": true}` the same way,
+so that a form can be checked before it saves. No answer carries a
+secret: each answers `{"set": true}`. `usedBy` lists the environment's
+sandboxes that name the credential (`sandboxes`), its bindings that name
+it in its latest or deployed deployment (`bindings`), and the versions
+both pin (`latest`, `deployed`; 0: none). A credential goes with its
+environment; a rename keeps it.
 
-**A sandbox** names credentials at its create (`credentials`) or by the
-PUT (`sandbox_credentials`); each must exist, two must not make the pod
-resolve one name, and none may share a name with the sandbox's own set or
-a name an environment gives it (409 `name_taken`). Its pod gets each at
-its latest version as a binding named by the credential, beside its own
-set; its bindings' version covers both, so a new version of a credential
-moves it: the PUT that wrote it makes the interception CAs each such
-sandbox needs and pushes the pod its clear part, and its feos-authn
-fetches the new credential. Nothing restarts.
+**A sandbox** names credentials of its environment at its create
+(`credentials`) or by the PUT (`sandbox_credentials`); each must be one of
+its environment's (422 `no_credential` otherwise, also for another
+environment's), two must not make the pod resolve one name, and none may
+share a name with the sandbox's own set or a name an environment gives it
+(409 `name_taken`). Its pod gets each at its latest version as a binding
+named by the credential, beside its own set; its bindings' version covers
+both, so a new version of a credential moves it: the PUT that wrote it
+makes the interception CAs each such sandbox needs and pushes the pod its
+clear part, and its feos-authn fetches the new credential. Nothing
+restarts.
 
-**An environment's binding** may name a credential instead of stating
-one: `{"tenantCredential": {"name": "github"}}`, with no other field of
-its own. A plan reads the tenant's credentials; one the tenant lacks, a
-version it lacks, or a field of the binding's own is an error at the
-binding. An apply pins the latest version (`"version"`) and writes the
-version's upstream and mode into the normalised binding, which decide
-whether a pod is another; the pods get the pinned version, opened when
-they ask for their bindings. A newer version reaches the environment with
-a deployment that moves the pin: in place unless the upstream or the mode
-changed.
+**An environment's binding** may name a credential of the environment
+instead of stating one: `{"credentialRef": {"name": "github"}}`, with no
+other field of its own. A plan reads the environment's credentials; one
+it lacks, a version it lacks, or a field of the binding's own is an error
+at the binding, and a plan without an environment has none to name. An
+apply pins the latest version (`"version"`) and writes the version's
+upstream and mode into the normalised binding, which decide whether a pod
+is another; the pods get the pinned version, opened when they ask for
+their bindings. A newer version reaches the environment's services with a
+deployment that moves the pin: in place unless the upstream or the mode
+changed. A clone copies the credentials its request names
+(`"credentials": {"github": {"copy": true}}`): the source's latest version
+becomes the clone's version 1, and the cloned spec's pins are dropped, so
+that the clone's apply pins its own.
 
-**A delete** is refused while a sandbox names the credential or the
-latest or the deployed deployment of an environment pins it; then every
+**A delete** is refused while a sandbox of the environment names the
+credential or its latest or deployed deployment pins it; then every
 version goes.
+
+**Rolling it out** (migration `0035_env_credentials.sql`, additive: the
+release before neither reads nor writes `env_credentials`, and
+`tenant_credentials` stays). It refuses, and with it the new instance's
+start, while `tenant_credentials` holds a row, naming the tenants: the
+secret is sealed to the tenant, so the credential is deleted with the
+release before and made again under its environment after the roll.
+While both releases run, an old instance answers the tenant's routes and
+a new one the environment's, so no credential is made until every
+instance runs the new release. A stored deployment that names a
+`tenantCredential` still reads, as a binding without a credential: its
+pods get the binding without one, as they did for a credential that was
+gone, and a revert or a clone of it is refused with a finding at the
+binding. With the table empty, no environment's latest or deployed
+deployment names one, since a credential in use could not be deleted.
 
 ### The management UI
 
@@ -2343,7 +2368,7 @@ reference, what it reaches, its egress; the sandboxes and running jobs
 with their `reaches`) and settings; Activity has the deployments and the
 incidents as pages of its own, besides everything in one list, and
 Settings the general page (the environment's name, ID, labels; clone
-and delete), the secrets and credentials, and the domains and access.
+and delete), the secrets, the credentials, and the domains and access.
 An object's page (`…/objects/<kind>/<name>[/<view>]`) has the views the
 object has: overview, logs, traces and traffic (a service), and config
 (its definition, its row of the reachability, the routes to it, who
@@ -2363,14 +2388,15 @@ instances, its traffic and the deployments that changed it. New
 deployment opens the builder. While none of an environment's pages is
 open the sidebar shows the tenant's pages (`TENANT_NAV` in
 `web/src/people.js`): Home, the environments, the tenant's domains,
-credentials, jobs and sandboxes (last: agents use sandboxes through the
+jobs and sandboxes (last: agents use sandboxes through the
 API and FeCode, people rarely through the UI), then Tenant settings, one
 entry whose pages (people, tokens, usage, general) are tabs. An
-environment's Secrets & credentials page holds its secrets and its
-credential offloading: the HTTP bindings of the latest deployment, each
-with where its credential comes from (a credential of the tenant at its
-pinned version, or the environment's secrets), the services that use it
-and Check; Add binding and Edit open the binding's form in New
+environment's Secrets page holds its secrets; its Credentials page
+(`…/credentials[/new | /<name>[/edit]]`, ADR 0033) its credentials with
+their uses, and its credential offloading: the HTTP bindings of the
+latest deployment, each with where its credential comes from (a
+credential of the environment at its pinned version, or the
+environment's secrets), the services that use it and Check; Add binding and Edit open the binding's form in New
 deployment (`…/builder/new/binding`, `…/builder/binding/<name>`), since
 a binding is part of a deployment. Home and the environments, domains,
 people, usage and settings go to every member; the tenant's sandboxes
@@ -2470,13 +2496,14 @@ says its state in words with what it costs, and its Connect tab mints a
 token (shown once) beside the MCP address, ready snippets and the
 tools' reference; a new sandbox is made in the environment open, and
 takes what it reaches of it, its egress, image credentials and the
-tenant's credentials. The tenant's credentials
-(`/tenants/<t>/credentials[/<name>]`, ADR 0033) list each with its uses;
-a credential's form runs the preflight before it saves, its page checks
-the stored version, adds it to sandboxes, and moves an environment whose
-latest deployment pins an older version to the latest (a plan and an
-apply of that deployment's spec with the pin moved, write on the
-environment). The platform's pages add the ingresses, every person
+environment's credentials. A credential's form runs the preflight before
+it saves (the check of the draft, its kept secrets the stored ones), its
+page checks the stored version, lists the environment's sandboxes that
+name it and its bindings with the versions they pin, and moves the
+environment to the latest when its latest deployment pins an older one
+(a plan and an apply of that deployment's spec with the pin moved).
+Everything about credentials needs a grant on the environment, read to
+see and write to change. The platform's pages add the ingresses, every person
 (disable, enable), a tenant's limits and zone, and join tokens of kind
 `ingress`.
 
@@ -2507,8 +2534,9 @@ goes to `PUT …/secrets/{name}` at once and the draft pins the version it
 made; a new environment's values stay in the page until its first apply,
 which creates the environment (with an ID the draft keeps, so that a
 repeat is the same create), writes them, and applies deployment 1. A
-binding of a tenant credential (ADR 0033) is added from the service's
-form and ticked on it. The draft's operations are pure modules beside
+binding of a credential of the environment (ADR 0033) is added from the
+service's form and ticked on it; a new environment has none until it
+exists. The draft's operations are pure modules beside
 `views/envs.js` (`draft.js`, `refs.js`, `fields.js`, `findings.js`,
 `rebase.js`, `pins.js`, `catalog.js`, `planner.js`). Below 900 px the
 list is the first screen and an object's form opens at full width. The

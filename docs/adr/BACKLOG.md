@@ -193,7 +193,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0033
 
-- ADR 0033: Kubernetes, SSH and registry credentials as the tenant's objects too, once their node side exists (ADR 0014, ADR 0025).
+- ADR 0033: Kubernetes, SSH and registry credentials as an environment's objects too, once their node side exists (ADR 0014, ADR 0025).
+- ADR 0033: migration 0035 left `tenant_credentials` in place for the rolling update (empty, which it checks; read by no instance since); a later migration drops it.
 - ADR 0033: a narrower use: a sandbox or a binding that takes a credential with fewer paths or a lower rate than its definition.
 - ADR 0033: the tools of the general MCP door (ADR 0031) for credentials, without their secrets.
 - ADR 0033: a credential's page shows its requests, which the sink records by the binding's name; they are read per environment as its outbound requests meanwhile.

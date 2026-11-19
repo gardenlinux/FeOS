@@ -13,8 +13,8 @@ mode keeps the API's own host name under TLS, with a certificate
 authority of the pod's put into every container. Every request is
 recorded and shipped to the sink, and the control plane opens incidents
 for a credential that is refused or an upstream that fails. A binding
-comes from a sandbox's own set, from a credential of the tenant (ADR
-0033) or from an environment's deployment.
+comes from a sandbox's own set, from a credential of its environment
+(ADR 0033) or from an environment's deployment.
 
 ## Context
 
@@ -283,9 +283,10 @@ bindings' version covers all three, so that any change reaches its
 - **A sandbox's own set**, stated whole by the sandbox's own token, as
   its other bindings are (ADR 0014), the credentials as literals sealed
   per sandbox. FeCode gives its sandboxes bindings this way.
-- **The tenant's credentials** (ADR 0033): a binding's definition stated
-  once as the tenant's object, versioned, which a sandbox names at its
-  latest version and an environment's binding names at a pinned one.
+- **The environment's credentials** (ADR 0033): a binding's definition
+  stated once as an object of the environment, versioned, which a
+  sandbox of the environment names at its latest version and a binding
+  of its spec names at a pinned one.
 - **An environment's binding**, an object of the spec (ADR 0018, ADR
   0032): name, upstream, CA, mode, options, and a credential whose secret
   fields reference the environment's secrets by name, so that values
@@ -392,7 +393,8 @@ Decided and built on 2026-11-05 (836aca6): the control plane's part,
 `feosd`'s listeners and resolver answers, `feos-authn`'s HTTP side and
 the CAs in every container; the redaction of the credential in answers
 came the same day (f158459). ADR 0033 added the tenant's credentials as
-the third source on 2026-11-06. An answer that came gzip although
+the third source on 2026-11-06, an environment's since 2026-11-10.
+An answer that came gzip although
 identity was asked for was refused until 2026-11-08, when it came to be
 unpacked and redacted instead (caa883d). The text at first leaned on the
 pod's security groups, which ADR 0034 replaced with reachability from
