@@ -26,8 +26,8 @@ type api struct {
 }
 
 // newAPI returns the HTTP API's handler: /api/v1/logs,
-// /api/v1/log-streams, /api/v1/jaeger/api/…, /api/v1/traffic and
-// /healthz; ingest is closed once the ingest serves.
+// /api/v1/log-streams, /api/v1/jaeger/api/…, /api/v1/traffic,
+// /api/v1/egress and /healthz; ingest is closed once the ingest serves.
 func newAPI(store *Store, traces *Traces, tenants *Tenants, ingest <-chan struct{}, log *slog.Logger) http.Handler {
 	a := &api{store: store, traces: traces, tenants: tenants, ingest: ingest, log: log}
 	mux := http.NewServeMux()
@@ -40,6 +40,7 @@ func newAPI(store *Store, traces *Traces, tenants *Tenants, ingest <-chan struct
 	mux.HandleFunc("GET /api/v1/jaeger/api/traces/{traceID}", a.tenant(a.jaegerTrace))
 	mux.HandleFunc("GET /api/v1/jaeger/api/traces", a.tenant(a.jaegerFind))
 	mux.HandleFunc("GET /api/v1/traffic", a.tenant(a.traffic))
+	mux.HandleFunc("GET /api/v1/egress", a.tenant(a.egress))
 	return mux
 }
 

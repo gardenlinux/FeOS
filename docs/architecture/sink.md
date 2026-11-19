@@ -203,7 +203,10 @@ follows; the sink requires nothing of `http_end`.
 - **Reading**: `GET /api/v1/logs?environment=<id>&source=egress` (and
   `kind`, `object` for a service's pods), `GET /api/v1/log-streams` with
   `source` `egress`; the line's text is the JSON above, its level the
-  record's `level`, else its severity.
+  record's `level`, else its severity. `GET /api/v1/egress` counts an
+  environment's requests per binding from their spans instead, and takes
+  a refusal's message from its record here
+  ([traces.md](traces.md#reading-the-bindings-requests)).
 
 ## The ingress's access log
 
