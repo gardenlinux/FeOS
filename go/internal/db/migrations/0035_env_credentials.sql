@@ -29,7 +29,10 @@
 -- A row in it would be a credential no pod gets any more and no page
 -- shows: its secret is sealed to its tenant, so SQL cannot move it into
 -- an environment. The migration refuses while there is one, and with it
--- ferund's start; the instances of the version before run on.
+-- ferund's start; the instances of the version before run on. Once it
+-- has run, a trigger refuses every row the version before inserts or
+-- changes there, so that its PUT of a tenant's credential fails during
+-- the roll instead of storing what nobody reads; its delete still works.
 --
 -- 0035 was left free for this when 0036 and later were numbered, so on
 -- a database of those it runs after them; it needs nothing of theirs.
@@ -66,3 +69,13 @@ CREATE TABLE env_credentials (
   created_by text NOT NULL DEFAULT '',
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (env_id, name, version));
+
+CREATE FUNCTION tenant_credentials_refuse() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '%', 'tenant_credentials is written by a ferund older than migration 0035: credentials are an '
+    || 'environment''s now (ADR 0033); make it under its environment (PUT '
+    || '/api/v1/environments/{env}/credentials/{name}) once every instance runs the new release';
+END $$;
+
+CREATE TRIGGER tenant_credentials_refuse BEFORE INSERT OR UPDATE ON tenant_credentials
+  FOR EACH ROW EXECUTE FUNCTION tenant_credentials_refuse();

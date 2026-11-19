@@ -19,7 +19,7 @@ import (
 // it lacks. While tenant_credentials holds a row it refuses, naming the
 // table, the tenants and what to do, and leaves nothing behind; once the
 // table is empty it makes env_credentials and keeps tenant_credentials
-// for the release before.
+// for the release before, whose writes there fail from then on.
 func TestEnvCredentialsMigration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -75,4 +75,24 @@ func TestEnvCredentialsMigration(t *testing.T) {
 	if err := d.Pool.QueryRow(ctx, "SELECT to_regclass('tenant_credentials') IS NOT NULL").Scan(&kept); err != nil || !kept {
 		t.Fatalf("tenant_credentials kept: %v, %v; want it kept for the release before", kept, err)
 	}
+
+	// The release before writes no row there any more: an insert and an
+	// update fail, naming why; a delete works.
+	refusedWrite := func(q string) {
+		t.Helper()
+		_, err := d.Pool.Exec(ctx, q)
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.Code != "P0001" ||
+			!strings.Contains(pe.Message, "written by a ferund older than migration 0035: credentials are an environment's now") {
+			t.Fatalf("%s: %v, want the trigger's refusal", q, err)
+		}
+	}
+	insert := `INSERT INTO tenant_credentials (tenant, name, version, upstream, mode, credential_kind, sealed)
+		VALUES ('acme', 'github', 1, 'https://api.github.com', 'name', 'headers', '\x01')`
+	refusedWrite(insert)
+	exec("ALTER TABLE tenant_credentials DISABLE TRIGGER tenant_credentials_refuse")
+	exec(insert)
+	exec("ALTER TABLE tenant_credentials ENABLE TRIGGER tenant_credentials_refuse")
+	refusedWrite("UPDATE tenant_credentials SET upstream = 'https://evil.example'")
+	exec("DELETE FROM tenant_credentials")
 }
