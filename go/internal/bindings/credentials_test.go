@@ -285,7 +285,7 @@ func TestSandboxCredentialNameTakenByItsOwnSet(t *testing.T) {
 // fakeUsers are an environment's deployments' uses of its credentials.
 type fakeUsers map[uuid.UUID]map[string]CredentialUse
 
-func (f fakeUsers) CredentialUses(_ context.Context, env uuid.UUID) (map[string]CredentialUse, error) {
+func (f fakeUsers) CredentialUses(_ context.Context, _ *store.Store, env uuid.UUID) (map[string]CredentialUse, error) {
 	return f[env], nil
 }
 

@@ -368,9 +368,11 @@ func (s *Service) resolveCredential(ctx context.Context, envID uuid.UUID, name s
 // CredentialUses is bindings.CredentialUsers: how the latest and the
 // deployed deployment of an environment use its credentials, by the
 // credential's name: the bindings that name it and the version each of
-// the two pins (ADR 0033).
-func (s *Service) CredentialUses(ctx context.Context, envID uuid.UUID) (map[string]bindings.CredentialUse, error) {
-	e, err := s.st.GetEnvironment(ctx, envID)
+// the two pins (ADR 0033). The environment's deployments are read through
+// st, their specs (which never change) from the cache.
+func (s *Service) CredentialUses(ctx context.Context, st *store.Store, envID uuid.UUID) (
+	map[string]bindings.CredentialUse, error) {
+	e, err := st.GetEnvironment(ctx, envID)
 	if errors.Is(err, store.ErrNoRow) {
 		return map[string]bindings.CredentialUse{}, nil
 	}

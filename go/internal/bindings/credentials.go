@@ -77,9 +77,10 @@ type CredentialUse struct {
 }
 
 // CredentialUsers tells how an environment's deployments use its
-// credentials (*env.Service), by the credential's name.
+// credentials (*env.Service), by the credential's name, read through st
+// (a delete's transaction, or the store).
 type CredentialUsers interface {
-	CredentialUses(ctx context.Context, env uuid.UUID) (map[string]CredentialUse, error)
+	CredentialUses(ctx context.Context, st *store.Store, env uuid.UUID) (map[string]CredentialUse, error)
 }
 
 // SetCredentialUsers sets what answers the deployments' uses; nil: none
@@ -206,15 +207,16 @@ func (s *Service) credentialOf(c store.EnvCredential, b httpBinding, uses creden
 		CreatedAt: c.CreatedAt, UsedBy: uses}
 }
 
-// uses reads where each of an environment's credentials is used.
-func (s *Service) uses(ctx context.Context, env uuid.UUID) (map[string]credentialUses, error) {
-	sbs, err := s.st.CredentialSandboxes(ctx, env)
+// uses reads where each of an environment's credentials is used,
+// through st.
+func (s *Service) uses(ctx context.Context, st *store.Store, env uuid.UUID) (map[string]credentialUses, error) {
+	sbs, err := st.CredentialSandboxes(ctx, env)
 	if err != nil {
 		return nil, fmt.Errorf("the credentials' sandboxes: %w", err)
 	}
 	var deps map[string]CredentialUse
 	if u := s.credentialUsers(); u != nil {
-		if deps, err = u.CredentialUses(ctx, env); err != nil {
+		if deps, err = u.CredentialUses(ctx, st, env); err != nil {
 			return nil, fmt.Errorf("the credentials' deployments: %w", err)
 		}
 	}
@@ -260,7 +262,7 @@ func (s *Service) ListCredentials(w http.ResponseWriter, r *http.Request, env En
 		s.fail(w, r, fmt.Errorf("credentials: %w", err))
 		return
 	}
-	uses, err := s.uses(r.Context(), env.ID)
+	uses, err := s.uses(r.Context(), s.st, env.ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -297,7 +299,7 @@ func (s *Service) GetCredential(w http.ResponseWriter, r *http.Request, env Env)
 		s.fail(w, r, err)
 		return
 	}
-	uses, err := s.uses(r.Context(), env.ID)
+	uses, err := s.uses(r.Context(), s.st, env.ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -530,7 +532,7 @@ func (s *Service) PutCredential(w http.ResponseWriter, r *http.Request, env Env)
 	if created {
 		s.rotated(r.Context(), env.ID, name)
 	}
-	uses, err := s.uses(r.Context(), env.ID)
+	uses, err := s.uses(r.Context(), s.st, env.ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -573,7 +575,9 @@ func (s *Service) DeleteCredential(w http.ResponseWriter, r *http.Request, env E
 		if err := tx.LockEnvCredential(r.Context(), env.ID, name); err != nil {
 			return err
 		}
-		uses, err := s.uses(r.Context(), env.ID)
+		// In the transaction, under the lock that SetSandboxCredentials
+		// and an apply that pins the credential take too.
+		uses, err := s.uses(r.Context(), tx, env.ID)
 		if err != nil {
 			return err
 		}
@@ -760,6 +764,20 @@ func (s *Service) SetSandboxCredentials(ctx context.Context, tenant string, env 
 				return noSuchSandbox()
 			}
 			return err
+		}
+		// A DeleteCredential, which takes the same locks, may have deleted
+		// one since it was read above; in name order, as an apply takes
+		// them.
+		for _, name := range sorted {
+			if err := tx.LockEnvCredential(ctx, env, name); err != nil {
+				return err
+			}
+			if _, err := tx.EnvCredential(ctx, env, name, 0); errors.Is(err, model.ErrNotFound) {
+				return apierr.WithCode(http.StatusUnprocessableEntity, codeNoCredential,
+					"no such credential in the sandbox's environment: %s", name)
+			} else if err != nil {
+				return fmt.Errorf("credential %s: %w", name, err)
+			}
 		}
 		return tx.SetSandboxCredentialNames(ctx, id, sorted)
 	})

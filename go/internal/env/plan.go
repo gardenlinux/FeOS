@@ -604,6 +604,12 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		if err := checkPins(ctx, tx, e.ID, p.norm.Secrets); err != nil {
 			return err
 		}
+		// And the credentials: a DeleteCredential checks its uses under
+		// the credential's lock, which this takes until the deployment
+		// that pins it is committed.
+		if err := checkCredentialPins(ctx, tx, e.ID, p.norm.Bindings); err != nil {
+			return err
+		}
 		// The plan's quota finding counted before the lock too.
 		if err := checkQuota(ctx, tx, t, quota.Use{}, e.ID, p.currentSpec, &p.norm); err != nil {
 			return err
@@ -673,6 +679,33 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	for name, ref := range pins {
 		if !slices.Contains(versions[name].Versions, ref.Version) {
 			return errReplan
+		}
+	}
+	return nil
+}
+
+// checkCredentialPins takes the lock of each credential the bindings
+// name (ADR 0033), in name order, and is errReplan when a pinned version
+// is gone.
+func checkCredentialPins(ctx context.Context, tx *store.Store, envID uuid.UUID, bs map[string]spec.Binding) error {
+	pins := map[string][]int{}
+	for _, b := range bs {
+		if ref := b.CredentialRef; ref != nil {
+			pins[ref.Name] = append(pins[ref.Name], ref.Version)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(pins)) {
+		if err := tx.LockEnvCredential(ctx, envID, name); err != nil {
+			return fmt.Errorf("credential %s: %w", name, err)
+		}
+		for _, v := range pins[name] {
+			_, err := tx.EnvCredential(ctx, envID, name, v)
+			if errors.Is(err, model.ErrNotFound) {
+				return errReplan
+			}
+			if err != nil {
+				return fmt.Errorf("credential %s: %w", name, err)
+			}
 		}
 	}
 	return nil

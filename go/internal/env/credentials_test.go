@@ -123,11 +123,11 @@ func TestCredentialRefIsTheEnvironments(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].GetHeaders().GetHeaders()["Authorization"] != "Bearer prod-key-1" {
 		t.Fatalf("the pod's bindings: %v %v", got, err)
 	}
-	uses, err := h.svc.CredentialUses(h.ctx(), prod.ID)
+	uses, err := h.svc.CredentialUses(h.ctx(), h.st, prod.ID)
 	if u := uses["pay"]; err != nil || len(u.Bindings) != 1 || u.Bindings[0] != "pay" || u.Latest != 1 {
 		t.Fatalf("uses: %+v %v", uses, err)
 	}
-	if uses, err := h.svc.CredentialUses(h.ctx(), h.env("dev").ID); err != nil || len(uses) != 0 {
+	if uses, err := h.svc.CredentialUses(h.ctx(), h.st, h.env("dev").ID); err != nil || len(uses) != 0 {
 		t.Fatalf("dev's uses: %+v %v", uses, err)
 	}
 }
@@ -186,5 +186,30 @@ func TestCloneCopiesCredentials(t *testing.T) {
 	}
 	if ref := sp.Bindings["pay"].CredentialRef; ref == nil || ref.Version != 1 {
 		t.Fatalf("the copy's pin: %+v", sp.Bindings["pay"])
+	}
+}
+
+// An apply pins no credential that is gone: one deleted between its plan
+// and its transaction, which takes the credential's lock as a delete
+// does, makes it plan again and find the binding's credential missing.
+func TestApplyPinsNoDeletedCredential(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	bs := h.withCredentials()
+	h.create("prod", nil)
+	h.putCredential(bs, "prod", "pay", "Bearer prod-key-1")
+	prod := h.env("prod")
+	h.svc.afterPlan = func() {
+		h.svc.afterPlan = nil
+		if ok, err := h.st.DeleteEnvCredential(h.ctx(), prod.ID, "pay"); err != nil || !ok {
+			t.Errorf("delete: %v %v", ok, err)
+		}
+	}
+	_, err := h.svc.Apply(h.ctx(), tenantA, "prod", ApplyRequest{Spec: json.RawMessage(paySpec), Author: "tester"})
+	if f, ok := findingAt(err, "bindings.pay.credentialRef.name"); !ok ||
+		!strings.Contains(f.Problem, "the environment has no credential pay") {
+		t.Fatalf("an apply of a credential deleted after its plan: %s", describe(err))
+	}
+	if e := h.env("prod"); e.Deployment != 0 {
+		t.Fatalf("deployment %d was made", e.Deployment)
 	}
 }
