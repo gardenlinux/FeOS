@@ -154,7 +154,7 @@ function FlowRow({ row, dir, link }) {
         {row.mark && <span className="sgf-mark"><KeyMark mark={row.mark} /></span>}
       </span>);
   return (
-    <div className={`sgf-row sgf-row-${dir}${row.mark ? ` sgf-marked` : ''}`} title={title}>
+    <div className={`sgf-row sgf-row-${dir}${row.mark ? ' sgf-marked' : ''}${p.type === 'upstream' ? ' sgf-row-up' : ''}`} title={title}>
       {dir === 'in' ? <>{pill}{wire}</> : <>{wire}{pill}</>}
     </div>
   );

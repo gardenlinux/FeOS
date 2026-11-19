@@ -116,6 +116,7 @@ describe('where the keys live in the picture', () => {
     expect(t).toContain('OAuth2 at the node api.vendor.example erp · as api.vendor.example');
     expect(t).toContain('Headers at the node mail.example.com mail · as http://mail');
     expect(out).toContain('class="sgf-wire sgf-wire-node"><span class="sgf-mark"><span class="badge mark mark-offloaded"');
+    expect(out.match(/class="sgf-row sgf-row-out sgf-marked sgf-row-up"/g)).toHaveLength(2);
     expect(out).toContain('title="Binding erp to https://api.vendor.example: OAuth2 at the node. The key stays at the node, which adds it to '
       + 'each request. The container never sees it. Reached as api.vendor.example. Last 24 h: 1,204 requests (none from expense-service), '
       + '2 refused, 0 failing."');

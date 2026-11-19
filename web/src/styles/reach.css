@@ -156,8 +156,11 @@
 .sgf-wire .sgf-what { flex: 0 1 auto; min-width: 0; }
 .sgf-mark { position: relative; flex: none; display: inline-flex; background: var(--panel); padding: 0 5px; }
 .sgf-mark .badge { margin-left: 0; font-size: 11.5px; }
+/* the host is what a reader needs: where host and lock do not fit on
+   one line, the pill takes a line of its own, whole */
+.sgf-row-up { flex-wrap: wrap; justify-content: flex-end; row-gap: 3px; }
 .sgf-wire-node { justify-content: flex-start; padding-left: 12px; flex: 1 0 auto; min-width: max-content; }
-.sgf-row:has(.sgf-wire-node) .sgf-pill { flex-shrink: 1; }
+.sgf-row-up .sgf-pill { flex: 0 1 auto; max-width: 100%; }
 .sgf-wire-node::before {
   border-top: 0; height: 1.5px; top: calc(50% - .75px);
   background: linear-gradient(90deg, var(--border) 0 20px, var(--net) 20px 100%);
