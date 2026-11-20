@@ -544,7 +544,7 @@ footer code { font-size: 12px; }
         <tr><td class="prog">feosd</td><td><span class="pill os">FeOS · Rust</span></td><td>under systemd or <code>feos-host-init</code>; on Kubernetes in the pod <code>feos-node</code></td><td>The node agent. Runs pods as Firecracker in its jailer, with snapshots, the balloon and volumes. Builds the pods' network (TAP, nftables, DNS, mesh) and ships their logs to the sink. Serves its API on <code>/run/feos/api.sock</code> and on the node connection.</td></tr>
         <tr><td class="prog">diskd</td><td><span class="pill os">FeOS · Rust</span></td><td>beside feosd, one per node</td><td>The pods' disks as ublk devices over sealed, content-addressed layers; a local cache with S3 behind it. Hibernation into the object store, and memory served lazily on restore through userfaultfd.</td></tr>
         <tr><td class="prog">feos-guest</td><td><span class="pill os">FeOS · Rust</span></td><td>PID 1 in every microVM</td><td>Starts the containers with libcontainer and serves tools, watches and port forwards. Talks to feosd over vsock; its time and network are pushed by the host.</td></tr>
-        <tr><td class="prog">feos-authn</td><td><span class="pill os">FeOS · Rust</span></td><td>one process per pod with bindings</td><td>HTTP bindings at <code>169.254.169.1</code>: adds the credential (headers, Basic, OAuth client credentials, a client certificate) and calls the upstream over TLS. The credential never reaches the pod.</td></tr>
+        <tr><td class="prog">feos-authn</td><td><span class="pill os">FeOS · Rust</span></td><td>one process per pod with bindings</td><td>HTTP bindings at <code>169.254.169.1</code>, one per HTTP secret the pod gets: adds the secret's key (headers, Basic, OAuth client credentials, a client certificate) and calls its API over TLS. The key never reaches the pod.</td></tr>
         <tr><td class="prog">Firecracker</td><td><span class="pill ext">external</span></td><td>one process per running pod</td><td>The only VMM, always in its jailer with a cgroup of its own. Nodes keep the versions their snapshots need.</td></tr>
         <tr><td class="prog">feos-host-init</td><td><span class="pill os">FeOS · Rust</span></td><td>PID 1 of a node whose operating system is FeOS</td><td>Sets the machine up (DHCP, NTP, mounts) and keeps diskd and feosd running. On Debian, Garden Linux or Kubernetes the distribution does that.</td></tr>
         <tr><td class="prog">feosctl</td><td><span class="pill os">FeOS · Rust</span></td><td>anywhere</td><td>The command-line client for a node's Unix socket.</td></tr>
@@ -563,7 +563,7 @@ footer code { font-size: 12px; }
       <tbody>
         <tr><td class="nw">FeCode, agents, admins → <code>ferund :8100</code></td><td>HTTPS through a balancer without sticky sessions, a bearer token or an OIDC session</td><td>REST, MCP at <code>/mcp</code>, ports at <code>/fwd/</code>, sign-in at <code>/auth/</code>, the UI, this page at <code>/docs/</code></td></tr>
         <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>TLS 1.3, the node's client certificate, ALPN <code>feos-node/1</code></td><td>The node connection: the node is the HTTP/2 server, ferund the gRPC client of <code>feos.pod.v1</code>, <code>volume.v1</code>, <code>network.v1</code> and the other APIs</td></tr>
-        <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>ALPN <code>h2</code>, the node's certificate (without one: join only)</td><td>The uplink, <code>feos.fleet.v1</code>: join with a one-time token, certificate renewal (168 h), telemetry every 5 s, events, <code>JoinMesh</code>, the pods' credentials</td></tr>
+        <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>ALPN <code>h2</code>, the node's certificate (without one: join only)</td><td>The uplink, <code>feos.fleet.v1</code>: join with a one-time token, certificate renewal (168 h), telemetry every 5 s, events, <code>JoinMesh</code>, the pods' certificates and sealed bindings</td></tr>
         <tr><td class="nw"><code>ferun-ingress</code> → <code>ferund :7443</code></td><td>ALPN <code>ferun-ingress/1</code>, gRPC with JSON, mTLS</td><td>Join, Hello (with the capability <code>visits</code>), <code>Sync</code> (the versioned routing table as a stream, heartbeat every 10 s, with each environment's access, its provider's sign-in address and the visits' keys), <code>Wake</code>, <code>Hold</code>, <code>RedeemVisit</code>, <code>RenewVisit</code>, <code>EndVisit</code></td></tr>
         <tr><td class="nw">Internet → <code>ferun-ingress</code></td><td>an L4 balancer, 80/443 → 8080/8443</td><td>TLS by SNI: a domain's certificate from the table, else the apps zone's wildcard. Port 80 answers ACME HTTP-01, everything else gets a 308 to HTTPS</td></tr>
         <tr><td class="nw">Browser → <code>ferun-ingress</code> <code>/.ferun/</code></td><td>HTTPS on every host, before any route</td><td>The way back from a provider with a code, the sign-out, the token's keys; the visit cookie and the challenge cookie, host-only</td></tr>
@@ -685,8 +685,8 @@ footer code { font-size: 12px; }
   <text x="568" y="308">one per pod with bindings</text>
   <text x="568" y="324">own process, jailed</text>
   <text class="lb" x="568" y="346">169.254.169.1 :80/:443</text>
-  <text x="568" y="364">adds the credential</text>
-  <text x="568" y="380">and calls the upstream</text>
+  <text x="568" y="364">adds an HTTP secret's key</text>
+  <text x="568" y="380">and calls its API</text>
   <text x="568" y="396">over TLS · audit → sink</text>
   <path class="ln" d="M700 236V268" marker-end="url(#m2)"/>
   <text class="lb" x="692" y="258" text-anchor="end">fd</text>
@@ -720,7 +720,7 @@ footer code { font-size: 12px; }
   <text class="lb" x="650" y="578" text-anchor="middle">ublk → virtio-blk</text>
 </svg>
     </div>
-    <figcaption><span class="fig-no">Fig. 2</span><b>Credentials and disks come from the host, not from the pod.</b> feosd starts each pod as a Firecracker process of its own in the jailer. The guest dials the host over vsock and gets its time and network pushed; it runs no DHCP and no NTP. diskd serves the disks as ublk devices. A request to <code>169.254.169.1</code> reaches feosd, which passes the connection with <code>SCM_RIGHTS</code> to the pod's feos-authn. Under systemd, pods outlive a restart of feosd; in a Kubernetes pod they end with the container, so a planned stop suspends them first.</figcaption>
+    <figcaption><span class="fig-no">Fig. 2</span><b>Keys and disks come from the host, not from the pod.</b> feosd starts each pod as a Firecracker process of its own in the jailer. The guest dials the host over vsock and gets its time and network pushed; it runs no DHCP and no NTP. diskd serves the disks as ublk devices. A request to <code>169.254.169.1</code> reaches feosd, which passes the connection with <code>SCM_RIGHTS</code> to the pod's feos-authn. Under systemd, pods outlive a restart of feosd; in a Kubernetes pod they end with the container, so a planned stop suspends them first.</figcaption>
   </figure>
 
   <h3>A pod's network</h3>
@@ -874,7 +874,7 @@ footer code { font-size: 12px; }
   <p class="prose">Environments are not a second system. Every pod of an environment is a row in the same table <code>sandboxes</code> as an agent's sandbox, and the same engine places, pauses and moves it (ADR 0018).</p>
   <figure>
     <div class="fig-scroll">
-<svg class="dg" viewBox="0 0 1200 290" role="img" aria-label="FeCode writes a deployment into an environment; deployments are numbered and immutable; the controller brings the environment to its latest deployment; service, job and addon become sandbox rows that the sandbox engine runs as pods on nodes; route, secret and binding make no pods.">
+<svg class="dg" viewBox="0 0 1200 290" role="img" aria-label="FeCode writes a deployment into an environment; deployments are numbered and immutable; the controller brings the environment to its latest deployment; service, job and addon become sandbox rows that the sandbox engine runs as pods on nodes; routes and the secret versions a deployment pins make no pods.">
   <defs>
     <marker id="m5" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
   </defs>
@@ -920,7 +920,7 @@ footer code { font-size: 12px; }
   <text class="tm2" x="740" y="157">addon</text>
   <text x="740" y="172">postgres · valkey · nats</text>
   <rect class="b-cli" x="726" y="190" width="190" height="40" rx="3"/>
-  <text class="tm2" x="740" y="207">route · secret · binding</text>
+  <text class="tm2" x="740" y="207">route · secret version</text>
   <text x="740" y="222">no pods of their own</text>
 
   <path class="ln" d="M916 60H976" marker-end="url(#m5)"/>
@@ -941,8 +941,21 @@ footer code { font-size: 12px; }
   <text class="lb" x="1080" y="280" text-anchor="middle">→ pods on the nodes</text>
 </svg>
     </div>
-    <figcaption><span class="fig-no">Fig. 5</span><b>An environment changes only by deployments.</b> Each is numbered, immutable and holds the whole spec, its base for compare-and-swap, its author, reason and annotations; images are pinned to digests. The controller brings the environment to its latest deployment and keeps it there. When a rollout fails, the last deployed one keeps serving, and an incident names the cause. Image services roll with a surge of one and scale to zero. Builds run as <b>tenant jobs</b> (<code>/api/v1/jobs</code>): one pod without an environment, run to its end exactly once.</figcaption>
+    <figcaption><span class="fig-no">Fig. 5</span><b>An environment changes only by deployments.</b> Each is numbered, immutable and holds the whole spec, its base for compare-and-swap, its author, reason and annotations; images are pinned to digests and secrets to versions. The controller brings the environment to its latest deployment and keeps it there. When a rollout fails, the last deployed one keeps serving, and an incident names the cause. Image services roll with a surge of one and scale to zero. Builds run as <b>tenant jobs</b> (<code>/api/v1/jobs</code>): one pod without an environment, run to its end exactly once.</figcaption>
   </figure>
+
+  <h3>A secret is a value or an HTTP API</h3>
+  <p class="prose">Every key of an environment is a secret (ADR 0044, ADR 0055). A write is a new version, a version never changes and no answer carries a key; a deployment pins the version it was applied with, and a revert gets the one it had. A secret's kind is fixed when it is made and says where the key lives.</p>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Kind</th><th>What it is</th><th>How a workload gets it</th><th>Where the key lives</th></tr></thead>
+      <tbody>
+        <tr><td class="prog">value</td><td>a value the code reads</td><td>a variable <code>{secret: &lt;name&gt;}</code>; an image pull names one as its login</td><td><b>in the container</b>, or <b>at the node</b> when only image pulls name it</td></tr>
+        <tr><td class="prog">http</td><td>an HTTP API: its URL, how the code calls it (<code>http://&lt;name&gt;</code>, or the API's own name, intercepted at the node), its authentication and options, versioned as one</td><td>a service or job by a variable <code>{secret: &lt;name&gt;, key: url}</code>, the URL to call, at the version its deployment pins; a sandbox by naming it, at its latest version: a new one reaches the running pod at once</td><td><b>at the node</b>, bound to its URL: feos-authn adds it to the pod's requests, and a write that changes the URL sends the key again</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="prose">An addon that admits a workload by its certificate needs no key: <b>by identity</b> (ADR 0038). By these three marks the console's Secrets view groups an environment's keys, each in one row with its uses. Bindings stated in a spec, <code>credentialRef</code> and a sandbox's own HTTP set give way to HTTP secrets; the environment's credentials (ADR 0033) became HTTP secrets of the same names and versions.</p>
 </section>
 
 <!-- ============ Network ============ -->
@@ -1052,7 +1065,7 @@ footer code { font-size: 12px; }
     <li><b>Egress</b> is a service's or a job's own: <code>internet</code> by default (global unicast, without private and special-purpose ranges), <code>none</code>, or <code>{domains, blocks}</code> with exceptions per block. feosd's resolver answers a restricted pod only its domains and puts their addresses into the pod's timed sets for their TTL, at least 5 minutes and at most a day; any other name gets REFUSED. While the guest still pulls images itself, a restricted pod may also reach its image's registry. Addons reach the internet.</li>
     <li><b>A route's <code>from</code></b> lists the client blocks the ingress admits; other clients get 403. Without it, the route is open to everyone while its environment is public.</li>
     <li><b>A sandbox or a tenant's job</b> names at its create what of its environment it <code>reaches</code>: a list, <code>all</code>, or nothing, the default. <code>PUT …/reaches</code> changes a sandbox's in place, since the rules are its targets'; nothing moves. Nothing of the environment reaches a sandbox but through an attached service's port.</li>
-    <li><b>What the platform carries needs no rule</b>: DNS, the metadata service, the node address <code>169.254.169.1</code> (traces, logs, HTTP bindings) and readiness checks over the port forward.</li>
+    <li><b>What the platform carries needs no rule</b>: DNS, the metadata service, the node address <code>169.254.169.1</code> (traces, logs, HTTP secrets) and readiness checks over the port forward. An HTTP secret's API is the node's to call, whatever the workload's own egress allows.</li>
   </ul>
 
   <h3>Layers</h3>
@@ -1073,7 +1086,7 @@ footer code { font-size: 12px; }
 
   <h3>Identity and limits</h3>
   <ul class="facts">
-    <li><b>No mTLS between services.</b> The address already names the workload, and the node admits by it. A workload's certificate (ADR 0014) is for credentials without a password and for calls that leave the cluster, not for who reaches what.</li>
+    <li><b>No mTLS between services.</b> The address already names the workload, and the node admits by it. A workload's certificate (ADR 0014) is for addons that admit it without a password (ADR 0038) and for calls that leave the cluster, not for who reaches what.</li>
     <li><b>A shared address.</b> A CDN serves many names from one address: a pod allowed <code>a.cdn.example</code> reaches that address and may ask it for another name. The server name is recorded, not checked.</li>
     <li><b>A routed cluster</b> (every node with a prefix of the network's, no mesh) has no WireGuard, and no check that a source from another node's prefix came from that node: there, the network must filter (<code>docs/security.md</code>).</li>
   </ul>
@@ -1182,7 +1195,7 @@ footer code { font-size: 12px; }
     <li><b>Not a navigation, no redirect.</b> A script's request or an API client without a valid cookie gets 401. Only a navigation (<code>Sec-Fetch-Mode: navigate</code>, or a GET that accepts <code>text/html</code>) is sent to the provider. A request that is no navigation and comes from another site, or another host of the same zone (one site to the browser), has no visit, whatever its cookie.</li>
     <li><b>The keys</b> are two, made once and shared by every ferund instance: the token key, sealed with the installation's secret key, and the challenge key. The ingress has the public half of the first and the second in its table and its cache (<code>table-v3.json</code>); an ingress whose Hello does not say <code>visits</code> gets no guarded environment.</li>
     <li><b>The challenge</b> is the ingress's own, sealed with a key from the table: the environment, the host, the path, and an end minutes away. ferund keeps nothing of it until a provider accepts, and accepts each once. The way back is the host in the seal, never one a URL names, and a code that arrives in a browser without the challenge's cookie signs nobody in.</li>
-    <li><b>A visitor nobody vouched for costs ferund nothing</b>: no call and no row. Its first caller in a sign-in is a provider with a credential (4), and the ingress redeems only a code that carries ferund's signature.</li>
+    <li><b>A visitor nobody vouched for costs ferund nothing</b>: no call and no row. Its first caller in a sign-in is a provider with its token (4), and the ingress redeems only a code that carries ferund's signature.</li>
   </ul>
 
   <h3>What the app gets</h3>
@@ -1226,7 +1239,7 @@ footer code { font-size: 12px; }
     <div class="group"><h3>Environments</h3><p class="pk">env · env/spec · env/addons · env/ctl · env/envdeps</p><p>Deployments with plan, base, revert and tags; the controller; addons on volumes; secrets; the route door; tenants' jobs.</p></div>
     <div class="group"><h3>Fleet</h3><p class="pk">nodelink · fleet · mesh · pki · leader</p><p>The nodes' port with ALPN and stream budgets, joins, certificates, telemetry, events, each node's /96 and its peers, the CA with SPIFFE IDs, the leader lease.</p></div>
     <div class="group"><h3>Edge</h3><p class="pk">ingress/service · ingress/table · routing · domains · acme · visits · visit · egress</p><p>The API ferun-ingress calls and the table it routes from. Domains with a TXT proof and hourly checks, certificates over ACME. Access providers, challenges and visits, with their tokens and the provider's call through the egress rule.</p></div>
-    <div class="group"><h3>Secrets</h3><p class="pk">seal · bindings</p><p>AES-256-GCM under <code>--secret-key-file</code> for bindings and secrets. Kubernetes, SSH and HTTP bindings, the interception CA per pod, the HTTP preflight.</p></div>
+    <div class="group"><h3>Secrets</h3><p class="pk">seal · bindings</p><p>AES-256-GCM under <code>--secret-key-file</code> for secrets of both kinds and a sandbox's bindings. HTTP secrets with their check, Kubernetes and SSH bindings, the interception CA per pod, a pod's bindings sealed to its run.</p></div>
     <div class="group"><h3>State</h3><p class="pk">db · store · model · activity · config</p><p>PostgreSQL 17, READ COMMITTED with explicit row locks and retries, the embedded schema with its migrations, the partitioned activity log.</p></div>
     <div class="group"><h3>Tests and operations</h3><p class="pk">testnode · e2e · server · kube · feosk8s</p><p>A Go implementation of the node's side for tests, end-to-end tests with several instances, the assembly of one instance, the feos-k8s controller.</p></div>
   </div>
@@ -1237,7 +1250,7 @@ footer code { font-size: 12px; }
   <h2>Principles</h2>
   <ul class="principles">
     <li><b>Nodes open no port for control.</b><span>They connect out to every instance of the control plane, with no broker in between.</span></li>
-    <li><b>No credential enters a pod.</b><span>What a workload may use, feos-authn on the host adds or signs with.</span></li>
+    <li><b>An API's key never enters a pod.</b><span>An HTTP secret's key is bound to its API, and feos-authn on the host adds it to the pod's requests; a variable that references it gets the URL.</span></li>
     <li><b>Pods outlive their node agent.</b><span>A restart or upgrade of feosd leaves the pods running, and the new feosd takes them over. On Kubernetes they are suspended and resumed for it.</span></li>
     <li><b>A snapshot pins what it was written on.</b><span>The Firecracker version, the CPU model and the host's kernel. Nodes keep the Firecracker versions their snapshots need.</span></li>
     <li><b>PID 1 stays small.</b><span>feos-host-init and feos-guest must not die; work that can fail runs in processes that can be restarted.</span></li>
