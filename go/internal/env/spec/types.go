@@ -70,8 +70,8 @@ type Service struct {
 	Ports []Port `json:"ports,omitempty"`
 	// Replicas is 0..20; nil: 1. Image runtime only.
 	Replicas *int `json:"replicas,omitempty"`
-	// Resources are each replica's; nil: 1 vCPU, 512 MiB. Image runtime
-	// only.
+	// Resources are each replica's; nil: 1 vCPU, 512 MiB, the guest's
+	// disk of 8 GiB. Image runtime only.
 	Resources *Resources `json:"resources,omitempty"`
 	// Readiness decides when a replica receives traffic; nil: ready when
 	// it still runs 2 s after it was first seen running.
@@ -117,6 +117,12 @@ type Resources struct {
 	VCPUs int `json:"vcpus,omitempty"`
 	// MemoryMib is 256..65536 (a pod's floor); 0: 512.
 	MemoryMib int `json:"memoryMib,omitempty"`
+	// DiskGib is the pod's disk, 8..200; 0: the guest's, 8 GiB, which
+	// holds the image, the container's own files and what it writes
+	// outside its volumes. The disk is scratch: a new pod (a new
+	// deployment's, a replacement) starts on an empty one, so what must
+	// last belongs in an addon. A node books a larger disk in full.
+	DiskGib int `json:"diskGib,omitempty"`
 }
 
 // Readiness is a service's readiness check: exactly one of HTTP, TCP and
@@ -206,16 +212,16 @@ type Binding struct {
 	RateLimit *BindingRateLimit `json:"rateLimit,omitempty"`
 	// Credential is what the platform adds to each request.
 	Credential *BindingCredential `json:"credential,omitempty"`
-	// TenantCredential names a credential of the tenant (ADR 0033)
+	// CredentialRef names a credential of the environment (ADR 0033)
 	// instead of the fields above: the binding is the credential's, at the
 	// version an apply pins; the normalised binding carries that version's
 	// upstream and mode.
-	TenantCredential *TenantCredentialRef `json:"tenantCredential,omitempty"`
+	CredentialRef *CredentialRef `json:"credentialRef,omitempty"`
 }
 
-// TenantCredentialRef names a credential of the tenant and its version
+// CredentialRef names a credential of the environment and its version
 // (0: the latest when applied).
-type TenantCredentialRef struct {
+type CredentialRef struct {
 	Name    string `json:"name"`
 	Version int    `json:"version,omitempty"`
 }
@@ -296,15 +302,22 @@ type Addon struct {
 }
 
 // Route sends HTTP requests whose path starts with Path (segment-aware) to
-// a port of a service, through the route door.
+// a port of a service, through the route door and the ingress, on Host
+// alone when it has one.
 type Route struct {
-	// Path starts with "/"; unique among the routes.
+	// Path starts with "/"; unique among the routes of its host.
 	Path    string  `json:"path"`
 	Service string  `json:"service"`
 	Port    PortRef `json:"port"`
 	// Strip removes Path from the request's path before it is forwarded.
 	Strip bool `json:"strip,omitempty"`
-	// Host is accepted and stored, not used yet (an info finding).
+	// Host is the host the route answers on (ADR 0045): a host of its
+	// environment, a wildcard domain of it, which matches every name the
+	// wildcard serves, or a name such a wildcard serves; stored in lower
+	// case without a trailing dot (RouteHost). "": every host of the
+	// environment. Of the routes that answer on a request's host the
+	// longest path wins, and of one path the route whose host names the
+	// host most closely (routing.MatchHost).
 	Host string `json:"host,omitempty"`
 	// From are the clients' address blocks (ADR 0034, revised), prefixes
 	// of either family: the ingress answers a client outside them 403.
@@ -620,7 +633,12 @@ const (
 	MinMemoryMib     = 256
 	MaxMemoryMib     = 65536
 	DefaultMemoryMib = 512
-	MaxRetries       = 5
+	// DefaultDiskGib is the guest's blank data volume, which every pod's
+	// disk starts from (feos.pod.v1.Resources.disk_gib): a smaller disk
+	// cannot be. MaxDiskGib bounds what one pod books on its node.
+	DefaultDiskGib = 8
+	MaxDiskGib     = 200
+	MaxRetries     = 5
 
 	DefaultRolloutTimeout = "10m0s"
 	DefaultJobTimeout     = "10m0s"

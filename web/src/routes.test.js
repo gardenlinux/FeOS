@@ -4,8 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, OBJECT_TABS, OBJECT_TAB_LABELS, PAGE_LABELS, TENANT_VIEWS, canonicalPath,
-  chosenEnv, envPath, jobPath, lensOf, newSandboxPath, objectPath, objectTabs, parsePath, pickEnvPath, pickObjectPath, sandboxPath,
-  switchEnvPath,
+  chosenEnv, credentialPath, envPath, jobPath, lensOf, newCredentialPath, newSandboxPath, objectPath, objectTabs, parsePath,
+  pickEnvPath, pickObjectPath, sandboxPath, secretsPath, switchEnvPath,
 } from './routes.js';
 import { fmtAgo, fmtDurNs, fmtMsTime, fmtNs, fmtSeconds, prettyJson } from './format.js';
 import { ADMIN_KEY, readItem, writeItem } from './storage.js';
@@ -31,11 +31,9 @@ describe('parsePath', () => {
     expect(parsePath('/invite/abc_DEF-1')).toEqual({ view: 'invite', token: 'abc_DEF-1' });
     expect(parsePath('/tenants/acme/members')).toEqual({ view: 'members', tenant: 'acme' });
     expect(parsePath('/tenants/acme/tokens')).toEqual({ view: 'tokens', tenant: 'acme' });
-    expect(parsePath('/tenants/acme/credentials')).toEqual({ view: 'credentials', tenant: 'acme', sel: '', tab: '' });
-    expect(parsePath('/tenants/acme/credentials/github')).toEqual({ view: 'credentials', tenant: 'acme', sel: 'github', tab: '' });
-    expect(parsePath('/tenants/acme/credentials/github/edit'))
-      .toEqual({ view: 'credentials', tenant: 'acme', sel: 'github', tab: 'edit' });
-    expect(parsePath('/tenants/acme/new-credential')).toEqual({ view: 'newCredential', tenant: 'acme' });
+    // The credentials are an environment's (ADR 0033): the tenant has no
+    // page of them.
+    expect(parsePath('/tenants/acme/credentials/github')).toEqual({ view: 'overview', tenant: 'acme' });
     // The access providers (ADR 0054).
     expect(parsePath('/tenants/acme/providers')).toEqual({ view: 'providers', tenant: 'acme', sel: '', tab: '' });
     expect(parsePath('/tenants/acme/providers/fecode')).toEqual({ view: 'providers', tenant: 'acme', sel: 'fecode', tab: '' });
@@ -126,13 +124,18 @@ describe('the environments routes', () => {
   });
 
   it('groups the tabs into views: Activity and Settings have pages of their own', () => {
-    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'reachability', 'settings']);
+    expect(ENV_LENSES).toEqual(['overview', 'activity', 'logs', 'traffic', 'reachability', 'secrets', 'settings']);
     // A trace opens from a log line and belongs to Logs.
     expect(lensOf('traces')).toBe('logs');
     expect(lensOf('deployments')).toBe('activity');
     expect(lensOf('incidents')).toBe('activity');
-    expect(lensOf('secrets')).toBe('settings');
+    // Where each key lives is a view of its own, out of Settings; a
+    // credential's pages are its.
+    expect(lensOf('secrets')).toBe('secrets');
+    expect(lensOf('credentials')).toBe('secrets');
     expect(lensOf('access')).toBe('settings');
+    expect(LENS_PAGES.settings).toEqual(['settings', 'access']);
+    expect(LENS_PAGES.secrets).toBe(undefined);
     expect(lensOf('logs')).toBe('logs');
     expect(lensOf('builder')).toBe('');
     expect(lensOf('objects')).toBe('');
@@ -208,7 +211,7 @@ describe('the environments routes', () => {
     }
     expect(ENV_TABS).toEqual([
       'overview', 'builder', 'activity', 'deployments', 'incidents', 'jobs', 'logs', 'traces', 'traffic', 'reachability', 'settings',
-      'secrets', 'access', 'objects', 'sandboxes',
+      'secrets', 'credentials', 'access', 'objects', 'sandboxes',
     ]);
     // An object's page: its kind and name, its view.
     expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/tenants/fecode/environments/e/objects/service/web%20api');
@@ -237,6 +240,48 @@ describe('the environments routes', () => {
       .toEqual(env({ env: 'e', tab: 'traces', item: '4bf92f3577b34da6a3ce929d0e0e4736' }));
     expect(parsePath('/tenants/fecode/environments/e/traces?service=api&since=1d')).toEqual(env({ env: 'e', tab: 'traces' }));
     expect(envPath('fecode', 'e', 'traces', 'abc')).toBe('/tenants/fecode/environments/e/traces/abc');
+  });
+
+  it('an environment\'s credentials: the list, a new one\'s form, one\'s page, its new version (ADR 0033)', () => {
+    // The list is the Secrets view's; Settings' list of old lands there.
+    expect(credentialPath('fecode', 'e')).toBe('/tenants/fecode/environments/e/secrets');
+    expect(canonicalPath('/tenants/fecode/environments/e/credentials')).toBe('/tenants/fecode/environments/e/secrets');
+    expect(canonicalPath('/tenants/fecode/environments/e/credentials/')).toBe('/tenants/fecode/environments/e/secrets');
+    expect(canonicalPath('/tenants/fecode/environments/e/credentials/github')).toBe('/tenants/fecode/environments/e/credentials/github');
+    expect(parsePath('/tenants/fecode/environments/e/credentials')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    expect(newCredentialPath('fecode', 'e')).toBe('/tenants/fecode/environments/e/credentials/new');
+    expect(credentialPath('fecode', 'e', 'github')).toBe('/tenants/fecode/environments/e/credentials/github');
+    expect(credentialPath('fecode', 'e', 'github', true)).toBe('/tenants/fecode/environments/e/credentials/github/edit');
+    expect(credentialPath('fecode', 'e', 'new', true)).toBe('/tenants/fecode/environments/e/credentials/new');
+    expect(parsePath('/tenants/fecode/environments/e/credentials/new'))
+      .toEqual(env({ env: 'e', tab: 'credentials', item: 'new', otab: '' }));
+    expect(parsePath('/tenants/fecode/environments/e/credentials/github'))
+      .toEqual(env({ env: 'e', tab: 'credentials', item: 'github', otab: '' }));
+    expect(parsePath('/tenants/fecode/environments/e/credentials/github/edit'))
+      .toEqual(env({ env: 'e', tab: 'credentials', item: 'github', otab: 'edit' }));
+    expect(parsePath('/tenants/fecode/environments/e/credentials/github/nope'))
+      .toEqual(env({ env: 'e', tab: 'credentials', item: 'github', otab: '' }));
+    // Switching the environment on a credential's page leads to the
+    // other one's secrets: a credential is of one environment.
+    const route = parsePath('/tenants/fecode/environments/e/credentials/github/edit');
+    expect(switchEnvPath(route, 'fecode', 'f')).toBe('/tenants/fecode/environments/f/secrets');
+  });
+
+  it("the Secrets view, pointing at one of its rows; its old place under Settings is the same path", () => {
+    expect(secretsPath('fecode', 'e')).toBe('/tenants/fecode/environments/e/secrets');
+    expect(secretsPath('fecode', 'e', 'binding', 'erp')).toBe('/tenants/fecode/environments/e/secrets/binding/erp');
+    expect(secretsPath('fecode', 'e', 'secret', 'a b')).toBe('/tenants/fecode/environments/e/secrets/secret/a%20b');
+    expect(secretsPath('fecode', 'e', 'secret')).toBe('/tenants/fecode/environments/e/secrets');
+    expect(parsePath('/tenants/fecode/environments/e/secrets')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    for (const kind of ['secret', 'credential', 'binding', 'addon']) {
+      expect(parsePath(`/tenants/fecode/environments/e/secrets/${kind}/x`)).toEqual(env({ env: 'e', tab: 'secrets', item: `${kind}/x` }));
+    }
+    // An unknown kind, or half a row, points at none.
+    expect(parsePath('/tenants/fecode/environments/e/secrets/service/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    expect(parsePath('/tenants/fecode/environments/e/secrets/binding')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    const route = parsePath('/tenants/fecode/environments/e/secrets/binding/erp');
+    expect(switchEnvPath(route, 'fecode', 'f')).toBe('/tenants/fecode/environments/f/secrets');
+    expect(envPath('fecode', 'e', 'secrets', 'binding/erp')).toBe('/tenants/fecode/environments/e/secrets/binding/erp');
   });
 });
 
@@ -322,7 +367,10 @@ describe('the sidebar keeps the view', () => {
     expect(pickObjectPath(r({ tab: 'logs' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api/logs');
     expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api/traffic');
     expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db');
-    expect(pickObjectPath(r({ tab: 'secrets' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db/config');
+    // From the keys of the environment to an object's, on its overview.
+    expect(pickObjectPath(r({ tab: 'secrets' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
+    expect(pickObjectPath(r({ tab: 'credentials', item: 'github' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db');
+    expect(pickObjectPath(r({ tab: 'access' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db/config');
     expect(pickObjectPath(r({ tab: 'deployments' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
     expect(pickObjectPath(r({ tab: 'objects', item: 'service/api', otab: 'traffic' }), 'kino', 'prod', db))
       .toBe('/tenants/kino/environments/prod/objects/addon/db');

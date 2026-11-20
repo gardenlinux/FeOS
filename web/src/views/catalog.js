@@ -12,7 +12,8 @@
 // reservedPrefixes, unique}). The UI copies none of it; a ferund without
 // the route (404 or 405, api.addonCatalog's null) gets a minimal built-in list, which says so. The
 // options' pattern, reserved names and uniqueness give the forms hints;
-// the plan stays the judge. Pure.
+// the plan stays the judge. byIdentity says the addon admits a workload
+// by its certificate, so a reference carries no password. Pure.
 
 import { isObject } from './draft.js';
 
@@ -56,6 +57,13 @@ function blueprint(b) {
     defaultPlan: String(b.defaultPlan || ''),
     outputs: strings(b.outputKeys),
     fields: strings(b.outputFields),
+    // byIdentity: the addon admits a workload by its pod's certificate,
+    // and a reference hands the container no password (postgres, valkey);
+    // a ferund of before it says nothing, which reads false.
+    byIdentity: !!b.byIdentity,
+    // identityBy: the part of the certificate it maps to a user of its
+    // own, 'ou' (postgres: the role) or 'uri' (valkey); '' unsaid.
+    identityBy: b.identityBy === 'ou' || b.identityBy === 'uri' ? b.identityBy : '',
     options: options(b.options),
     suggestions: {},
   };

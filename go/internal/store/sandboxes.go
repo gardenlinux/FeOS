@@ -32,6 +32,10 @@ type Sandbox struct {
 	ImageRef    string    // resolved repo@sha256:..., fixed at the first materialisation
 	VCPUs       int
 	MemoryMiB   int
+	// DiskGiB is the pod's disk when it has one of its own size, larger
+	// than the guest's (feos.pod.v1.Resources.disk_gib); 0: the guest's.
+	// Fixed at the insert; placement books it on the node.
+	DiskGiB int
 
 	ClientState       string // model.State*
 	StatusDescription string
@@ -147,6 +151,17 @@ func (s *Sandbox) Workload() (kind, name, set string) {
 	}
 }
 
+// StopGrace is how long the row's pod's containers have between SIGTERM
+// and the end of its microVM when it is stopped or deleted
+// (feos.pod.v1.PodSpec.stop_grace_seconds): model.ServiceStopGrace for an
+// instance of an image service, 0 (the node's 10 s) for every other pod.
+func (s *Sandbox) StopGrace() time.Duration {
+	if kind, _, _ := s.Workload(); s.Instance && kind == spec.KindService {
+		return model.ServiceStopGrace
+	}
+	return 0
+}
+
 // The policies that back off after a failed op (Sandbox.PolicyFailed).
 const (
 	PolicyIdle           = "idle"
@@ -166,7 +181,7 @@ func sandboxColumns(p string) string {
 		"pending_since", "unreachable_since", "run_id", "kube_version", "ssh_version",
 		"created_at", "updated_at", "last_active_at", "paused_at", "policy_failed", "policy_failures",
 		"policy_not_before", "environment_id", "instance", "pod_template", "pin_node", "idle_after_s", "address",
-		"tenant_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir"}
+		"tenant_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir", "disk_gib"}
 	if p != "" {
 		for i, c := range cols {
 			cols[i] = p + "." + c
@@ -190,7 +205,7 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 		&pendingSince, &unreachableSince, &s.RunID, &s.KubeVersion, &s.SSHVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastActiveAt, &pausedAt, &s.PolicyFailed, &s.PolicyFailures,
 		&policyNotBefore, &s.EnvironmentID, &s.Instance, &template, &s.PinNode, &s.IdleAfterS, &s.Address,
-		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir)
+		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir, &s.DiskGiB)
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -283,6 +298,9 @@ type NewSandbox struct {
 	Image     string
 	VCPUs     int
 	MemoryMiB int
+	// DiskGiB is the pod's disk of its own size (larger than the guest's,
+	// validated by the caller); 0: the guest's.
+	DiskGiB int
 	// ImageRef is the image pinned to its digest, when the caller resolved
 	// it already (an environment's instances of one template share one);
 	// "": the first create resolves Image.
@@ -338,11 +356,12 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 	for range 3 {
 		sb, err := scanSandbox(s.q.QueryRow(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, image_ref,
 				environment_id, instance, pod_template, pin_node, idle_after_s, tenant_job, log_labels, made_by,
-				reaches, egress, workdir)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17)
+				reaches, egress, workdir, disk_gib)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17,
+				$18)
 			ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
 			n.ID, n.Owner, n.Image, n.VCPUs, n.MemoryMiB, n.ImageRef, n.EnvironmentID, n.Instance, template, n.PinNode,
-			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, reaches, egress, n.Workdir))
+			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, reaches, egress, n.Workdir, n.DiskGiB))
 		if err == nil {
 			return sb, true, s.Notify(ctx, chanSandbox, sb.ID.String())
 		}
@@ -595,7 +614,7 @@ func nullableColumn(name string, lifecycle bool, get func(*Sandbox) string) sand
 
 // sandboxWritable lists the columns UpdateSandbox writes. A lifecycle
 // write is one of client_state, node, op*, incarnation, materialised or
-// the checkpoint columns. id, owner, image, vcpus, memory_mib,
+// the checkpoint columns. id, owner, image, vcpus, memory_mib, disk_gib,
 // environment_id, instance, pod_template, tenant_job, log_labels, workdir
 // and created_at are never written; gen and updated_at are UpdateSandbox's;
 // http_version, http_pushed, reaches and a template's legacy groups are
@@ -645,6 +664,7 @@ var sandboxFixed = []sandboxColumn{
 	plainColumn("image", false, func(s *Sandbox) string { return s.Image }),
 	plainColumn("vcpus", false, func(s *Sandbox) int { return s.VCPUs }),
 	plainColumn("memory_mib", false, func(s *Sandbox) int { return s.MemoryMiB }),
+	plainColumn("disk_gib", false, func(s *Sandbox) int { return s.DiskGiB }),
 	plainColumn("gen", false, func(s *Sandbox) int64 { return s.Gen }),
 	timeColumn("created_at", false, func(s *Sandbox) time.Time { return s.CreatedAt }),
 	timeColumn("updated_at", false, func(s *Sandbox) time.Time { return s.UpdatedAt }),
@@ -716,6 +736,11 @@ func (s *Store) UpdateSandbox(ctx context.Context, before, after Sandbox) (Sandb
 // a member of its environment's groups (ADR 0035). It wakes the
 // environments' loop env-groups.
 const HintEnvGroups = "env-groups"
+
+// HintEnvReconcile is the ferun_leader hint that wakes the environments'
+// loop env-reconcile: the pod of an instance that goes has stopped, and
+// its row is to go (ADR 0018).
+const HintEnvReconcile = "env-reconcile"
 
 // SetSandboxAddress writes the IPv6 address of the sandbox's pod as an
 // op's call answered it (CreatePod, RestorePod), when the row is still of

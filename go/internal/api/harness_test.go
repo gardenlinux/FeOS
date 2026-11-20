@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -472,26 +473,28 @@ func (b *fakeBindings) Access(w http.ResponseWriter, _ *http.Request) {
 	b.answer(w, "Access")
 }
 
-func (b *fakeBindings) ListCredentials(w http.ResponseWriter, _ *http.Request) {
-	b.answer(w, "ListCredentials")
+func (b *fakeBindings) ListCredentials(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
+	b.answer(w, "ListCredentials "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
 }
-func (b *fakeBindings) GetCredential(w http.ResponseWriter, _ *http.Request) {
-	b.answer(w, "GetCredential")
+func (b *fakeBindings) GetCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
+	b.answer(w, "GetCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
 }
-func (b *fakeBindings) PutCredential(w http.ResponseWriter, _ *http.Request) {
-	b.answer(w, "PutCredential")
+func (b *fakeBindings) PutCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
+	b.answer(w, "PutCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
 }
-func (b *fakeBindings) DeleteCredential(w http.ResponseWriter, _ *http.Request) {
-	b.answer(w, "DeleteCredential")
+func (b *fakeBindings) DeleteCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
+	b.answer(w, "DeleteCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
 }
-func (b *fakeBindings) CheckCredential(w http.ResponseWriter, _ *http.Request) {
-	b.answer(w, "CheckCredential")
+func (b *fakeBindings) CheckCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
+	b.answer(w, "CheckCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) SandboxCredentialNames(context.Context, podid.ID) ([]string, error) {
 	return []string{}, nil
 }
-func (b *fakeBindings) CheckSandboxCredentials(context.Context, string, []string) error { return nil }
-func (b *fakeBindings) SetSandboxCredentials(context.Context, string, podid.ID, []string) error {
+func (b *fakeBindings) CheckSandboxCredentials(context.Context, uuid.UUID, []string) error {
+	return nil
+}
+func (b *fakeBindings) SetSandboxCredentials(context.Context, string, uuid.UUID, podid.ID, []string) error {
 	return nil
 }
 

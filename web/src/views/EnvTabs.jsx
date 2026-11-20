@@ -19,9 +19,10 @@ import '../styles/credentials.css';
 import '../styles/providers.css';
 
 // An environment's pages beside its objects and deployments: its traffic
-// (the ingress's answers per service and its access log), its secrets,
-// its domains and access (public, who it admits, hosts, domains, route
-// tokens) and its settings (clone, delete), with the small widgets the
+// (the ingress's answers per service and its access log), its secrets'
+// widgets (EnvSecrets.jsx holds the view), its domains and access
+// (public, who it admits, hosts, domains, route tokens) and its
+// settings (clone, delete), with the small widgets the
 // environment's actions share. ec is what the role may do on the environment
 // (Environments.jsx, envCan); every write calls changed, which refreshes
 // the page and the tenant's summary.
@@ -295,83 +296,11 @@ export function AccessTable({ records, tenant, env, navigate }) {
 
 // --------------------------------------------------------------- secrets --
 
-export function SecretsTab({ env, st, ec, changed }) {
-  const [secrets, setSecrets] = useState(null);
-  const [err, setErr] = useState('');
-  const [editing, setEditing] = useState('');
-  const [op, run, clear] = useOp();
-  const refresh = useCallback(async () => {
-    try {
-      setSecrets((await api.listSecrets(env)).secrets || []);
-      setErr('');
-    } catch (e) {
-      setErr(e.message);
-    }
-  }, [env]);
-  usePoll(refresh, 10000);
-  const put = async (name, value) => {
-    const r = await run(() => api.putSecret(env, name, value),
-      (res) => `${res.name}: version ${res.version} stored. Deployment ${st ? st.deployment : '—'} keeps the version it pins; the next deployment that pins ${res.name} takes it.`);
-    if (r) { setEditing(''); refresh(); changed(); }
-    return !!r;
-  };
-  const del = async (name) => {
-    const r = await run(() => api.deleteSecret(env, name).then(() => true), `${name} deleted.`);
-    if (r) { refresh(); changed(); }
-  };
-  return (
-    <>
-      <p className="panel-note envsecrets-note">
-        A deployment pins each secret it names at a version: a new value is a new version, which the pods get with the
-        next deployment (the builder's apply pins it). Values are never shown, here or anywhere.
-      </p>
-      <ErrBox error={err} />
-      <OpNote op={op} onDismiss={clear} />
-      <SecretsTable secrets={secrets} ec={ec} editing={editing} setEditing={setEditing} onPut={put} onDelete={del} busy={!!(op && op.busy)} />
-      {!secrets && !err && <p className="empty">Loading…</p>}
-      {secrets && <NewSecret disabled={!ec.write} onPut={put} />}
-    </>
-  );
-}
+// The secrets' widgets of the Secrets view (EnvSecrets.jsx): a delete, a
+// new value and a new secret. A value is never shown: once stored, it
+// is a version.
 
-export function SecretsTable({ secrets, ec, editing, setEditing, onPut, onDelete, busy }) {
-  const list = secrets || [];
-  return (
-    <>
-      <div className="tblwrap">
-        <table className="tbl secrets-tbl">
-          <thead>
-            <tr><th>name</th><th className="col-num">latest</th><th>set by</th><th className="col-when">set</th><th className="col-quick" /></tr>
-          </thead>
-          <tbody>
-            {list.map((s) => (
-              <React.Fragment key={s.name}>
-                <tr>
-                  <td className="mono strong">{s.name}</td>
-                  <td className="col-num mono">v{s.version}</td>
-                  <td className="mono small trunc" title={s.createdBy}>{s.createdBy || <span className="muted">—</span>}</td>
-                  <td className="col-when"><Ago iso={s.createdAt} /></td>
-                  <td className="col-quick nowrap">
-                    <button className="mini" disabled={!ec.write || busy} title={ec.write ? 'a new version' : NEEDS.write}
-                      onClick={() => setEditing(editing === s.name ? '' : s.name)}><Icon name="key" size={12} /> Set value</button>{' '}
-                    <DeleteSecret name={s.name} disabled={!ec.write || busy} onDelete={onDelete} />
-                  </td>
-                </tr>
-                {editing === s.name && (
-                  <tr className="secret-edit"><td colSpan={5}>
-                    <SecretValue name={s.name} onPut={onPut} onCancel={() => setEditing('')} />
-                  </td></tr>)}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {secrets && list.length === 0 && <p className="empty">No secrets.</p>}
-    </>
-  );
-}
-
-function DeleteSecret({ name, disabled, onDelete }) {
+export function DeleteSecret({ name, disabled, onDelete }) {
   const [armed, arm, disarm] = useArm();
   return (
     <ArmButton armKey={name} armed={armed} arm={arm} disarm={disarm} className="mini" disabled={disabled}
@@ -380,7 +309,7 @@ function DeleteSecret({ name, disabled, onDelete }) {
   );
 }
 
-function SecretValue({ name, onPut, onCancel }) {
+export function SecretValue({ name, onPut, onCancel }) {
   const [value, setValue] = useState('');
   return (
     <form className="inlineform envsecret-form" onSubmit={async (e) => { e.preventDefault(); if (value && await onPut(name, value)) setValue(''); }}>
@@ -393,7 +322,7 @@ function SecretValue({ name, onPut, onCancel }) {
   );
 }
 
-function NewSecret({ disabled, onPut }) {
+export function NewSecret({ disabled, onPut }) {
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   return (
@@ -685,6 +614,8 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
   const [deployments, setDeployments] = useState(null);
   const [secrets, setSecrets] = useState(null);
   const [copy, setCopy] = useState({});
+  const [creds, setCreds] = useState(null);
+  const [copyCreds, setCopyCreds] = useState({});
   const [op, run, clear] = useOp();
   useEffect(() => {
     let live = true;
@@ -695,13 +626,21 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
       setSecrets(list);
       setCopy(Object.fromEntries(list.map((s) => [s.name, true])));
     }, () => { if (live) setSecrets([]); });
+    // The credentials are the environment's (ADR 0033): a clone gets the
+    // ones it copies, each at the latest version.
+    api.listCredentials(env).then((r) => {
+      if (!live) return;
+      const list = r.credentials || [];
+      setCreds(list);
+      setCopyCreds(Object.fromEntries(list.map((c) => [c.name, true])));
+    }, () => { if (live) setCreds([]); });
     return () => { live = false; };
   }, [env]);
   const busy = !!(op && op.busy);
   const findings = op && op.error && op.error.body && op.error.body.findings;
   const submit = async (e) => {
     e.preventDefault();
-    const body = cloneBody({ name, deployment, copy });
+    const body = cloneBody({ name, deployment, copy, copyCredentials: copyCreds });
     const r = await run(() => api.cloneEnvironment(env, body), (res) => `${res.name} made from deployment ${body.deployment || st.deployment}.`);
     if (r) { changed(); navigate(envPath(tenant, r.name)); }
   };
@@ -733,6 +672,18 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
                   {' '}{s.name} <span className="muted">v{s.version}</span>
                 </label>))}
               {secrets && secrets.length > 0 && <span className="muted small">copied at their latest versions; one left out the spec names fails the clone</span>}
+            </span>
+          </div>
+          <div className="envfield"><span className="k">credentials</span>
+            <span className="envchecks">
+              {creds === null && <span className="muted small">…</span>}
+              {creds && creds.length === 0 && <span className="muted small">none</span>}
+              {(creds || []).map((c) => (
+                <label key={c.name} className="mono small">
+                  <input type="checkbox" checked={!!copyCreds[c.name]} onChange={(e) => setCopyCreds((m) => ({ ...m, [c.name]: e.target.checked }))} />
+                  {' '}{c.name} <span className="muted">v{c.version}</span>
+                </label>))}
+              {creds && creds.length > 0 && <span className="muted small">copied at their latest versions; one left out the spec names fails the clone</span>}
             </span>
           </div>
           <div><button className="primary mini" type="submit" disabled={!name.trim()}>Clone</button></div>
@@ -779,7 +730,7 @@ export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
       <div className="sect">delete</div>
       <p className="panel-note">
         Deleting {st.name} stops and removes its instances and their volumes, with its addons' data, then the environment
-        with its deployments, tags, secrets and route tokens, and its ended jobs&apos; records. Its default host goes; its
+        with its deployments, tags, secrets, credentials and route tokens, and its ended jobs&apos; records. Its default host goes; its
         domains stay the tenant&apos;s. While it has sandboxes or jobs queued or running it is not deleted. It cannot be undone.
       </p>
       <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} className="mini" icon="trash"

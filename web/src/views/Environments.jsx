@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, CopyBtn, EnvName, ErrBox, KV, LiveBadge, StateLabel, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
-import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, envPath, lensOf, newEnvPath } from '../routes.js';
+import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, credentialPath, envPath, lensOf, newEnvPath } from '../routes.js';
 import { useEnvStatus } from '../envstatus.jsx';
 import { focusOf, queryOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
@@ -18,11 +18,11 @@ import { useSummary } from '../summary.jsx';
 import {
   admitsShort, admitsWords, changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, hasEvidence, heavyEffect,
   incidentObject, instanceNote, instancePhase, isAttached, labelPairs, logSourceText, logsProblem, mayRevertTo, originText, parseLabelFilter,
-  phaseTone, deploymentTone, preflightRows, deploymentText, revertOffer, rolloutNote, specBindings, statusState,
+  phaseTone, deploymentTone, preflightRows, deploymentText, revertOffer, rolloutNote, statusState,
   tagPlan,
 } from './envs.js';
 import {
-  AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SecretsTab, SettingsTab, TrafficTab, useOp,
+  AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SettingsTab, TrafficTab, useOp,
 } from './EnvTabs.jsx';
 import { ObjectPage } from './ObjectPage.jsx';
 import { AboutBox, ActivityTab, EnvOverview, useActivity } from './EnvOverview.jsx';
@@ -30,6 +30,8 @@ import { EnvReach } from './EnvReach.jsx';
 import { EnvPods } from './EnvPods.jsx';
 import { Sandboxes } from './Sandboxes.jsx';
 import { Jobs } from './Jobs.jsx';
+import { Credentials } from './Credentials.jsx';
+import { EnvSecrets } from './EnvSecrets.jsx';
 import '../styles/environments.css';
 
 // A tenant's environments: the list with a label filter, and an
@@ -42,8 +44,10 @@ import '../styles/environments.css';
 // 0035), the activity (everything, the deployments
 // with revert and tags, the incidents with their evidence, the jobs made
 // by a call: Jobs.jsx), the logs and
-// traces, the traffic, and the settings (general, secrets and
-// credentials, domains and access; EnvTabs.jsx). The sidebar picks the
+// traces, the traffic, the reachability, the secrets (where each key
+// lives: the secrets, the credentials with their pages (Credentials.jsx),
+// the bindings and the addons by identity; EnvSecrets.jsx) and the
+// settings (general, domains and access; EnvTabs.jsx). The sidebar picks the
 // environment, one of its objects, whose page (ObjectPage.jsx) has the
 // same views where it has them, or one of its sandboxes, whose page
 // (Sandboxes.jsx) has its own. No secret's value is ever read; a route
@@ -265,11 +269,12 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
 
 // LENS_ICONS are the icons of the views in the tab bar.
 const LENS_ICONS = {
-  overview: 'gauge', activity: 'history', logs: 'file', traffic: 'chart', reachability: 'shield', settings: 'settings',
+  overview: 'gauge', activity: 'history', logs: 'file', traffic: 'chart', reachability: 'shield', secrets: 'key', settings: 'settings',
 };
 
 // EnvDetail is an environment's page: its head, the tab bar of its views
-// (ENV_LENSES; Activity and Settings with their own pages under it), and
+// (ENV_LENSES; Activity and Settings with their own pages under it,
+// Secrets with a credential's pages), and
 // the view; an object's page instead when one is picked. The status is
 // the shell's (envstatus.jsx), read for the sidebar and this page.
 function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) {
@@ -294,10 +299,13 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
 
   // Escape goes up: from an item to its tab's list, from there to the
   // environments; from the builder, an object's page and the sandboxes'
-  // list to the overview; from a trace to its lines.
+  // list to the overview; from a trace to its lines; from a credential's
+  // new version to its page, from its page to the secrets.
   const up = activeTab === 'builder' || activeTab === 'objects' || (activeTab === 'sandboxes' && !item) ? envPath(tenant, env)
     : activeTab === 'traces' ? envPath(tenant, env, 'logs', '', null, queryOf({ trace: item }))
-      : item ? envPath(tenant, env, activeTab) : list;
+      : activeTab === 'credentials' && item && otab === 'edit' ? credentialPath(tenant, env, item)
+        : activeTab === 'credentials' ? credentialPath(tenant, env)
+          : item ? envPath(tenant, env, activeTab) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -386,11 +394,11 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
         {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}
         {activeTab === 'reachability' && body(<EnvReach tenant={tenant} st={st} navigate={navigate} />)}
-        {activeTab === 'secrets' && (
-          <>
-            <SecretsTab env={env} st={st} ec={ec} changed={changed} />
-            <Offloading env={env} st={st} tenant={tenant} ec={ec} navigate={navigate} />
-          </>)}
+        {(activeTab === 'secrets' || (activeTab === 'credentials' && !item)) && body(
+          <EnvSecrets tenant={tenant} env={st && st.name} st={st} ec={ec} item={activeTab === 'secrets' ? item : ''} changed={changed}
+            navigate={navigate} />)}
+        {activeTab === 'credentials' && item && (
+          <Credentials tenant={tenant} env={env} sel={item} edit={otab === 'edit'} ec={ec} navigate={navigate} />)}
         {activeTab === 'access' && (
           <AccessTab tenant={tenant} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />)}
         {activeTab === 'settings' && (
@@ -520,95 +528,6 @@ export function ImageShort({ image }) {
   if (!image || !image.written) return <span className="muted">—</span>;
   const title = image.pinned && image.pinned !== image.written ? `${image.written}\npinned to ${image.pinned}` : image.written;
   return <span className="mono small obj-image" title={title}>{image.short}</span>;
-}
-
-// Offloading is the environment's credential offloading (ADR 0028, 0033)
-// on its Secrets & credentials page: the HTTP bindings of the latest
-// deployment, each with where its credential comes from, who uses it and
-// Check. A binding is part of a deployment, so it is added and changed in
-// New deployment; the tenant's credentials are a link away.
-export function Offloading({ env, st, tenant, ec, navigate }) {
-  const spec = useLatestSpec(st);
-  const bindings = specBindings(spec);
-  const n = (st && st.deployment) || 0;
-  const enc = encodeURIComponent;
-  const add = envPath(tenant, env, 'builder', 'new/binding');
-  const loading = !st || (n > 0 && spec === null);
-  return (
-    <div className="envsect offloading">
-      <div className="sect sect-row">
-        credential offloading <span className="count">· {loading ? '…' : bindings.length}</span>
-        <span className="spacer" />
-        <Link to={`/tenants/${enc(tenant)}/credentials`} navigate={navigate} className="small">Credentials of the tenant</Link>
-        {ec && ec.write && (
-          <button className="mini" onClick={() => navigate(add)}><Icon name="plus" size={12} /> Add binding</button>)}
-      </div>
-      <p className="panel-note envsecrets-note">
-        A binding sends a service's calls to an upstream through the platform, which adds the credential to each
-        request: the key never enters the pod. The credential is one of the tenant's (versioned; each deployment pins
-        its version) or made of this environment's secrets. A binding is part of the deployment: adding or changing one
-        makes the next deployment.
-      </p>
-      {loading && <p className="empty">Loading…</p>}
-      {!loading && bindings.length === 0 && (
-        <p className="empty">No bindings{n ? ` in deployment ${n}` : ''}: no service's calls carry a credential of the platform.</p>)}
-      {bindings.map((b) => <BindingCard key={b.name} b={b} env={env} ec={ec} tenant={tenant} navigate={navigate} />)}
-    </div>
-  );
-}
-
-// BindingSource says where a binding's credential comes from: a
-// credential of the tenant at its pinned version, or the environment's
-// secrets.
-function BindingSource({ b, tenant, navigate }) {
-  const enc = encodeURIComponent;
-  const tc = b.tenantCredential;
-  if (tc && tc.name) {
-    return (
-      <>credential{' '}
-        {tenant && navigate
-          ? <Link to={`/tenants/${enc(tenant)}/credentials/${enc(tc.name)}`} navigate={navigate} className="mono">{tc.name}</Link>
-          : <span className="mono">{tc.name}</span>}
-        {tc.version ? ` · version ${tc.version}` : ''} of the tenant</>);
-  }
-  if (b.secrets && b.secrets.length) {
-    return <>secret{b.secrets.length === 1 ? '' : 's'} <span className="mono">{b.secrets.join(', ')}</span> of this environment</>;
-  }
-  return null;
-}
-
-// BindingCard is an HTTP binding of the latest deployment (ADR 0028):
-// its upstream, mode, credential's kind and users, where its credential
-// comes from and a link to its form; Check runs its preflight with the
-// secrets' latest versions.
-export function BindingCard({ b, env, ec, result = null, tenant = '', navigate = null }) {
-  const [op, run] = useOp();
-  const res = result || (op && op.result) || null;
-  const busy = !!(op && op.busy);
-  return (
-    <div className="envobj envbinding">
-      <div className="envobj-head">
-        <span className={'sdot ' + (res ? (res.ok ? 'running' : 'failed') : 'absent')} title={res ? (res.ok ? 'ok' : 'not ok') : 'not checked'} />
-        <span className="mono strong">{b.name}</span>
-        <span className="mono small host">{b.upstream}</span>
-        <span className="muted small">{b.mode}{b.credential ? ` · ${b.credential}` : ''}{b.users.length ? ` · used by ${b.users.join(', ')}` : ''}</span>
-        <span className="spacer" />
-        {ec && (
-          <button className="mini" disabled={!ec.write || busy} title={ec.write ? 'resolve, dial, check TLS and the credential, from an instance' : NEEDS.write}
-            onClick={() => run(() => api.checkBinding(env, b.name), '')}>
-            <Icon name="check" size={12} /> {busy ? 'Checking…' : 'Check'}</button>)}
-      </div>
-      {(b.tenantCredential || (b.secrets && b.secrets.length > 0) || (tenant && navigate)) && (
-        <div className="envbinding-src small muted">
-          <BindingSource b={b} tenant={tenant} navigate={navigate} />
-          {tenant && navigate && ec && ec.write && (
-            <Link to={envPath(tenant, env, 'builder', `binding/${b.name}`)} navigate={navigate} className="envbinding-edit">
-              Edit in New deployment</Link>)}
-        </div>)}
-      {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
-      {res && <PreflightResult res={res} />}
-    </div>
-  );
 }
 
 // PreflightResult is a binding check's answer as rows.

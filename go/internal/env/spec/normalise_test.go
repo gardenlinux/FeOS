@@ -72,7 +72,7 @@ func TestNormaliseRules(t *testing.T) {
 		ImageAsWritten: "nginx:1.27"}
 	s.Services["unpinned"] = Service{Image: "ghcr.io/acme/unresolved:1"}
 	s.Services["tuned"] = Service{Image: "ghcr.io/acme/approval:1.2", Replicas: intp(0),
-		Resources: &Resources{MemoryMib: 1024}, Idle: "1h30m", Rollout: &Rollout{Timeout: "90s"},
+		Resources: &Resources{MemoryMib: 1024, DiskGib: 30}, Idle: "1h30m", Rollout: &Rollout{Timeout: "90s"},
 		Readiness: &Readiness{TCP: &TCPCheck{Port: PortRef{Number: 80}}, Period: "5000ms", FailureThreshold: 5}}
 	s.Services["attached"] = Service{Runtime: RuntimeAttached, Sandbox: webSandbox, Command: []string{"x"},
 		Replicas: intp(1), Readiness: &Readiness{Exec: &ExecCheck{Command: []string{"true"}}}, Idle: "900s"}
@@ -99,7 +99,7 @@ func TestNormaliseRules(t *testing.T) {
 		t.Fatalf("unpinned %+v", u)
 	}
 	tuned := got.Services["tuned"]
-	if *tuned.Replicas != 0 || *tuned.Resources != (Resources{VCPUs: 1, MemoryMib: 1024}) || tuned.Idle != "1h30m0s" ||
+	if *tuned.Replicas != 0 || *tuned.Resources != (Resources{VCPUs: 1, MemoryMib: 1024, DiskGib: 30}) || tuned.Idle != "1h30m0s" ||
 		tuned.Rollout.Timeout != "1m30s" || tuned.Readiness.Period != "5s" || tuned.Readiness.FailureThreshold != 5 {
 		t.Fatalf("tuned %+v", tuned)
 	}

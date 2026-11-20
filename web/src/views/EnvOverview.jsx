@@ -6,14 +6,15 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, ErrBox, KV, usePoll } from '../components.jsx';
 import { fmtDateTime, shortId } from '../format.js';
-import { envPath } from '../routes.js';
+import { envPath, secretsPath } from '../routes.js';
 import {
   KIND_TITLES, UNGUARDED, activityItems, admitsOf, conditionText, defaultHost, errorShare, fmtCount, fmtLatency, groupObjects, incidentObject,
   isAttached, jobTrigger, labelPairs, objectImage, objectTone, objectsText, readyText, restartsOf, rolloutNote, routesTo,
-  sparkPoints, specBindings, trafficOf, trafficTotals,
+  sparkPoints, trafficOf, trafficTotals,
 } from './envs.js';
+import { inventoryOf } from './access.js';
 import { EnvLink, HostLink, NEEDS, OpNote, useOp } from './EnvTabs.jsx';
-import { BindingCard, Labels, ToneDot } from './Environments.jsx';
+import { Labels, ToneDot } from './Environments.jsx';
 import { useSummary } from '../summary.jsx';
 import '../styles/overview.css';
 
@@ -21,8 +22,10 @@ import '../styles/overview.css';
 // its evidence and the next step (its open incidents, a failed or running
 // rollout), or that every object matches the deployment; then its
 // traffic and where it is reached; its objects as cards (each leads to
-// its page, where its logs, traces, traffic and config are); its bindings
-// and what happened lately. A state is said once.
+// its page, where its logs, traces, traffic and config are); a line to
+// its keys (the Secrets view has its bindings, secrets and credentials
+// with their checks and users) and what happened lately. A state is
+// said once.
 
 const Link = EnvLink;
 
@@ -48,7 +51,6 @@ export function EnvOverview({
   st, tenant, navigate, spec = null, traffic = null, ec = null, changed = () => {}, incidents = null, activity = null,
 }) {
   const groups = groupObjects(st.objects);
-  const bindings = specBindings(spec);
   return (
     <div className="ov">
       <StatusCards st={st} incidents={incidents} tenant={tenant} navigate={navigate} ec={ec} />
@@ -70,11 +72,7 @@ export function EnvOverview({
         </section>
       ))}
 
-      {bindings.length > 0 && (
-        <section className="ov-sect">
-          <h2 className="ov-h">Bindings <span className="count">{bindings.length}</span></h2>
-          {bindings.map((b) => <BindingCard key={b.name} b={b} env={st.name} ec={ec} tenant={tenant} navigate={navigate} />)}
-        </section>)}
+      <KeysLine spec={spec} tenant={tenant} env={st.name} navigate={navigate} />
 
       {activity && activity.length > 0 && (
         <section className="card ov-activity">
@@ -85,6 +83,23 @@ export function EnvOverview({
           <ActivityList items={activity.slice(0, RECENT)} tenant={tenant} env={st.name} navigate={navigate} />
         </section>)}
     </div>
+  );
+}
+
+// KeysLine counts the bindings and secrets the latest deployment names
+// and leads to the Secrets view, where each is with where its key lives,
+// who uses it and its check; nothing when it names none.
+export function KeysLine({ spec, tenant, env, navigate }) {
+  const rows = spec ? inventoryOf(spec) : [];
+  const n = (kind) => rows.filter((r) => r.kind === kind).length;
+  const parts = [[n('binding'), 'binding'], [n('secret'), 'secret']].filter(([c]) => c > 0);
+  if (parts.length === 0) return null;
+  return (
+    <p className="ov-keys">
+      {parts.map(([c, w], i) => <React.Fragment key={w}>{i > 0 && ' · '}<b>{c}</b> {w}{c === 1 ? '' : 's'}</React.Fragment>)}
+      <span className="muted"> — where each key lives, who uses it, the checks:</span>{' '}
+      <Link to={secretsPath(tenant, env)} navigate={navigate}>Secrets</Link>
+    </p>
   );
 }
 
@@ -230,7 +245,7 @@ function ReachCard({ st, tenant, navigate }) {
         <p className="muted small">default host <span className="mono">{dh.label}</span> answers 404 while a domain is served</p>)}
       {routes.map((r) => (
         <div key={r.name} className="ov-route">
-          <span className="mono">{r.path}</span>
+          <span className="mono">{r.host && <span className="muted">{r.host}</span>}{r.path}</span>
           <Icon name="arrowRight" size={14} />
           <span>
             <Link to={envPath(tenant, env, 'objects', `service/${r.service}`)} navigate={navigate} className="strong">{r.service}</Link>

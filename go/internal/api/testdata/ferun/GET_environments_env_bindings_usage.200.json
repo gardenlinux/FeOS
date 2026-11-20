@@ -1,0 +1,49 @@
+{
+  "method": "GET",
+  "path": "/api/v1/environments/expensa-stage/bindings/usage",
+  "query": {
+    "window": [
+      "24h"
+    ]
+  },
+  "status": 200,
+  "request": null,
+  "note": "every binding of the latest deployment, unused ones with zeros, and the sandboxes' own; counted by the sink from the pods' egress spans",
+  "response": {
+    "window": "24h",
+    "truncated": false,
+    "bindings": [
+      {
+        "name": "erp",
+        "requests": 1204,
+        "refused": 2,
+        "failing": 0,
+        "tokenFailed": 0,
+        "blocked": 1,
+        "lastAt": "2026-11-19T10:02:03Z",
+        "lastProblem": {
+          "at": "2026-11-19T09:41:17Z",
+          "status": 403,
+          "code": "denied_path",
+          "message": "path /admin is not allowed by binding erp",
+          "traceId": "4bf92f3577b34da6a3ce929d0e0e4736"
+        },
+        "users": [
+          {"kind": "service", "name": "api", "requests": 1200},
+          {"kind": "sandbox", "name": "c3kv9mwq2hd", "requests": 4}
+        ]
+      },
+      {
+        "name": "mail",
+        "requests": 0,
+        "refused": 0,
+        "failing": 0,
+        "tokenFailed": 0,
+        "blocked": 0,
+        "lastAt": "",
+        "lastProblem": null,
+        "users": []
+      }
+    ]
+  }
+}

@@ -41,10 +41,6 @@ export function entries({ tenant, nav = [], platform = [], tenants = [], summary
   for (const d of summary.domains || []) {
     out.push({ key: 'dom/' + (d.id || d.name), kind: 'domain', label: d.name, hint: d.state || '', to: `/tenants/${t}/domains/${enc(d.id || d.name)}`, icon: 'globe' });
   }
-  for (const c of summary.credentials || []) {
-    out.push({ key: 'cred/' + c.name, kind: 'credential', label: c.name, hint: c.upstream || '',
-      to: `/tenants/${t}/credentials/${enc(c.name)}`, icon: 'plug' });
-  }
   // The access providers (ADR 0054), ferun among them.
   for (const p of summary.providers || []) {
     out.push({ key: 'prov/' + p.name, kind: 'provider', label: p.name, hint: [p.kind, p.url || p.issuer].filter(Boolean).join(' · '),

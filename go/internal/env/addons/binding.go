@@ -18,6 +18,20 @@ type TLSBinder interface {
 	TLSBinding(ref Ref) (port int, alpn string, ok bool)
 }
 
+// The parts of a pod's certificate an addon admits a workload by
+// (IdentityReader): the subject's OU, which names the workload's set
+// (pki.PodSubject), or the one URI name, its SPIFFE ID.
+const (
+	IdentityOU  = "ou"
+	IdentityURI = "uri"
+)
+
+// IdentityReader is a TLSBinder that says which part of the
+// certificate it maps to a user of its own: IdentityOU or IdentityURI.
+type IdentityReader interface {
+	IdentityBy() string
+}
+
 // Loopback is the n-th loopback address of a pod's bindings, from 1:
 // 127.64.0.1, 127.64.0.2, and on. The addons a pod binds are numbered in
 // the order of their names, so that a re-render gives each the address it

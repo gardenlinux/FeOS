@@ -104,6 +104,7 @@ fn spec(volume_id: &str, container: bool) -> PodSpec {
         resources: Some(Resources {
             vcpus: 1,
             memory_mib: 256,
+            ..Default::default()
         }),
         containers,
         network: (!container).then(|| PodNetwork {

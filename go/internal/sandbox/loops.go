@@ -420,7 +420,10 @@ func (e *Engine) cancelExecs(ctx context.Context, id podid.ID) {
 
 // tombstones drops the tombstones of removed nodes (fenced, with an
 // activity row) and processes the due tombstones of the nodes the leader
-// is connected to, at most 64 a pass, 8 at once.
+// is connected to, at most 64 a pass, 8 at once. A pass skips those that
+// this instance processes already, and waits for one it starts for the
+// tombstone's base (tombstoneBase) at most: a DeletePod that waits out a
+// service's stop grace (model.ServiceStopGrace) goes on by itself.
 func (e *Engine) tombstones(ctx context.Context) error {
 	var dropped []store.Tombstone
 	if err := e.fenced(ctx, func(tx *store.Store) error {
@@ -442,6 +445,9 @@ func (e *Engine) tombstones(ctx context.Context) error {
 	sem := make(chan struct{}, tombstoneConcurrency)
 	var wg sync.WaitGroup
 	for _, t := range due {
+		if e.tombstoneInFlight(t.Key()) {
+			continue
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
@@ -454,7 +460,9 @@ func (e *Engine) tombstones(ctx context.Context) error {
 				<-sem
 				wg.Done()
 			}()
-			_ = e.processTombstone(t.Key()).wait(ctx)
+			wctx, cancel := context.WithTimeout(ctx, e.t.tombstoneBase)
+			defer cancel()
+			_ = e.processTombstone(t.Key()).wait(wctx)
 		}()
 	}
 	wg.Wait()

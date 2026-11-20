@@ -241,8 +241,8 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     })().catch((e) => setLoadErr(e.message));
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The secrets (names and versions), the tenant's credentials and the
-  // catalog.
+  // The secrets (names and versions), the environment's credentials (ADR
+  // 0033; a new environment has none yet) and the catalog.
   const refreshSecrets = useCallback(async () => {
     if (isNew) return;
     try {
@@ -260,11 +260,16 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     return () => { live = false; };
   }, [env, isNew]);
   useEffect(() => {
+    if (isNew) { setCredentials([]); return undefined; }
     let live = true;
-    api.listCredentials().then(
+    api.listCredentials(env).then(
       (r) => { if (live) setCredentials((r && r.credentials) || []); },
       (e) => { if (live) { setCredentials([]); setCredentialsErr(e.message); } },
     );
+    return () => { live = false; };
+  }, [env, isNew]);
+  useEffect(() => {
+    let live = true;
     api.addonCatalog().then(
       (a) => { if (live) setCatalog(readCatalog(a) || builtinCatalog()); },
       (e) => {
@@ -398,7 +403,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
 
   const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const ctx = {
-    spec, catalog, setSecret, isNew, knownSecrets, pins, credentials, credentialsErr, editSpec, editAttached, tenant, navigate,
+    spec, catalog, setSecret, isNew, knownSecrets, pins, credentials, credentialsErr, editSpec, editAttached, tenant, env, navigate,
     sandboxes,
   };
   const review = !readOnly && (
@@ -746,7 +751,7 @@ function Overview({ spec, st, isNew, words, groups, pins, onOpen }) {
             <div className="tblwrap"><table className="tbl b-tbl">
               <thead><tr><th>path</th><th>service</th><th>port</th><th /></tr></thead>
               <tbody>{routes.map(([n, r]) => (
-                <tr key={n}><td>{link(unitKey('routes', n), (r && r.path) || '?')}</td><td className="mono">{r && r.service}</td>
+                <tr key={n}><td>{link(unitKey('routes', n), ((r && r.host) || '') + ((r && r.path) || '?'))}</td><td className="mono">{r && r.service}</td>
                   <td className="mono">{r && r.port !== undefined ? String(r.port) : ''}</td><td className="muted small">{r && r.strip ? 'strips the path' : ''}</td></tr>))}
               </tbody></table></div>)}
         </div>
@@ -764,7 +769,7 @@ function Overview({ spec, st, isNew, words, groups, pins, onOpen }) {
                   <tr key={n}><td>{link(unitKey('services', n), n)}</td>
                     <td className="mono small">{isObject(o) && o.runtime === 'attached' ? `attached · ${o.sandbox || '—'}` : shortImage(o) || <span className="bad">no image</span>}</td>
                     <td className="mono">{isObject(o) && o.replicas !== undefined ? o.replicas : 1}</td>
-                    <td className="mono small">{r.vcpus || 1} vCPU · {r.memoryMib || 512} MiB</td>
+                    <td className="mono small">{r.vcpus || 1} vCPU · {r.memoryMib || 512} MiB{r.diskGib ? ` · ${r.diskGib} GiB disk` : ''}</td>
                     <td className="small">{h || <span className="muted">none</span>}</td></tr>);
               })}</tbody></table></div>)}
         </div>

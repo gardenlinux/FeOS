@@ -148,6 +148,27 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .sgf-row-in .sgf-ingress + .sgf-wire::before { border-top-style: dashed; }
+
+/* where a key lives, on an edge (marks.css): an addon's mark beside the
+   ports; a binding's edge leaves the pod without a key and the node with
+   one, so its lock sits where the edge leaves, the line in the mark's
+   colour from there on */
+.sgf-wire .sgf-what { flex: 0 1 auto; min-width: 0; }
+.sgf-mark { position: relative; flex: none; display: inline-flex; background: var(--panel); padding: 0 5px; }
+.sgf-mark .badge { margin-left: 0; font-size: 11.5px; }
+/* the host is what a reader needs: where host and lock do not fit on
+   one line, the pill takes a line of its own, whole */
+.sgf-row-up { flex-wrap: wrap; justify-content: flex-end; row-gap: 3px; }
+.sgf-wire-node { justify-content: flex-start; padding-left: 12px; flex: 1 0 auto; min-width: max-content; }
+.sgf-row-up .sgf-pill { flex: 0 1 auto; max-width: 100%; }
+.sgf-wire-node::before {
+  border-top: 0; height: 1.5px; top: calc(50% - .75px);
+  background: linear-gradient(90deg, var(--border) 0 20px, var(--net) 20px 100%);
+}
+.sgf-wire-node::after { border-left-color: var(--net); }
+.sgf-pill.sgf-upstream { border-color: rgba(70, 201, 179, .45); }
+.sgf-pill.sgf-upstream svg { color: var(--net); }
+.sg-marks { margin: 2px 0 10px; }
 .sgf-closed { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; padding: 4px 12px; }
 .sgf-out .sgf-closed { align-self: flex-end; }
 

@@ -297,6 +297,7 @@ async fn test_pod_lifecycle() -> Result<()> {
         resources: Some(Resources {
             vcpus: 2,
             memory_mib: 512,
+            ..Default::default()
         }),
         containers: vec![],
         network: None,
@@ -306,6 +307,7 @@ async fn test_pod_lifecycle() -> Result<()> {
         http_bindings: None,
         identity: String::new(),
         tls_bindings: Vec::new(),
+        stop_grace_seconds: 0,
     };
     let create = CreatePodRequest {
         pod_id: pod_id.clone(),
@@ -325,6 +327,7 @@ async fn test_pod_lifecycle() -> Result<()> {
     other.resources = Some(Resources {
         vcpus: 1,
         memory_mib: 512,
+        ..Default::default()
     });
     let status = pods
         .create_pod(CreatePodRequest {
@@ -653,6 +656,7 @@ async fn test_pod_crash() -> Result<()> {
             resources: Some(Resources {
                 vcpus: 1,
                 memory_mib: 256,
+                ..Default::default()
             }),
             // A pod with no network at all.
             network: Some(PodNetwork {
@@ -736,6 +740,7 @@ async fn test_pod_suspend_and_resume() -> Result<()> {
             resources: Some(Resources {
                 vcpus: 1,
                 memory_mib: 256,
+                ..Default::default()
             }),
             ..Default::default()
         }),

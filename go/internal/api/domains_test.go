@@ -129,12 +129,13 @@ func TestDomainsEndToEnd(t *testing.T) {
 	}
 	sort.Strings(keys)
 	if want := []string{"boundAt", "certificate", "checkedAt", "createdAt", "environment", "found", "id", "labels",
-		"name", "nextCheckAt", "reason", "records", "state", "verification", "verifiedAt", "warnings"}; !slices.Equal(keys, want) {
+		"name", "nextCheckAt", "reason", "records", "state", "verification", "verifiedAt", "warnings", "wildcard"}; !slices.Equal(keys, want) {
 		t.Fatalf("keys %v", keys)
 	}
 	for k, want := range map[string]string{"environment": "null", "certificate": "null", "verifiedAt": "null",
 		"boundAt": "null", "checkedAt": "null",
-		"found":    `{"txt":[],"cname":[],"addresses":[]}`,
+		"wildcard": "false",
+		"found":    `{"txt":[],"cname":[],"addresses":[],"delegation":[]}`,
 		"warnings": `{"recordMissingSince":null,"dnsMovedSince":null,"deactivatesAt":null,"checkFailing":"","certificateFailing":""}`} {
 		if string(shape[k]) != want {
 			t.Errorf("%s: %s, want %s", k, shape[k], want)
@@ -147,7 +148,7 @@ func TestDomainsEndToEnd(t *testing.T) {
 		!slices.Equal(d.Records.Addresses, []string{"194.11.242.65"}) || d.Records.Apex != nil {
 		t.Fatalf("created %+v", d)
 	}
-	if !strings.Contains(string(shape["records"]), `"apex":null`) {
+	if !strings.Contains(string(shape["records"]), `"apex":null`) || !strings.Contains(string(shape["records"]), `"delegation":null`) {
 		t.Fatalf("records %s", shape["records"])
 	}
 

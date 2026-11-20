@@ -90,6 +90,8 @@ TABLE bookings
   COLUMN memory_mib integer NOT NULL
   COLUMN gated boolean NOT NULL
   COLUMN booked_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN disk_gib integer NOT NULL DEFAULT 0
+  CONSTRAINT CHECK ((disk_gib >= 0))
   CONSTRAINT FOREIGN KEY (node) REFERENCES nodes(name)
   CONSTRAINT FOREIGN KEY (pod_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (pod_id)
@@ -145,8 +147,9 @@ TABLE domains
   COLUMN issue_error text NOT NULL DEFAULT ''::text
   COLUMN issue_failing_since timestamp with time zone
   COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN delegated boolean NOT NULL DEFAULT false
   CONSTRAINT CHECK (((env_id IS NULL) OR (bound_at IS NOT NULL)))
-  CONSTRAINT CHECK (((name ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'::text) AND (length(name) <= 253)))
+  CONSTRAINT CHECK (((name ~ '^(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$'::text) AND (length(name) <= 253)))
   CONSTRAINT CHECK (((verification <> 'verified'::text) OR (verified_at IS NOT NULL)))
   CONSTRAINT CHECK ((check_backoff_s > 0))
   CONSTRAINT CHECK ((issue_backoff_s >= 0))
@@ -188,6 +191,38 @@ TABLE env_attached
   CONSTRAINT PRIMARY KEY (env_id, service)
   CREATE INDEX env_attached_sandbox ON public.env_attached USING btree (sandbox_id)
   CREATE UNIQUE INDEX env_attached_pkey ON public.env_attached USING btree (env_id, service)
+TABLE env_credential_names
+  COLUMN env_id uuid NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN last_version integer NOT NULL
+  CONSTRAINT CHECK ((last_version >= 1))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (env_id, name)
+  CREATE UNIQUE INDEX env_credential_names_pkey ON public.env_credential_names USING btree (env_id, name)
+TABLE env_credentials
+  COLUMN env_id uuid NOT NULL
+  COLUMN name text NOT NULL
+  COLUMN version integer NOT NULL
+  COLUMN upstream text NOT NULL
+  COLUMN mode text NOT NULL
+  COLUMN ca_pem text NOT NULL DEFAULT ''::text
+  COLUMN path_prefixes text[] NOT NULL DEFAULT '{}'::text[]
+  COLUMN forwarded_host boolean NOT NULL DEFAULT false
+  COLUMN rate_per_second integer NOT NULL DEFAULT 0
+  COLUMN rate_burst integer NOT NULL DEFAULT 0
+  COLUMN credential_kind text NOT NULL
+  COLUMN sealed bytea NOT NULL
+  COLUMN created_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK ((credential_kind = ANY (ARRAY['headers'::text, 'basic'::text, 'oauth2'::text, 'clientCertificate'::text])))
+  CONSTRAINT CHECK ((mode = ANY (ARRAY['name'::text, 'intercept'::text])))
+  CONSTRAINT CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
+  CONSTRAINT CHECK ((rate_burst >= 0))
+  CONSTRAINT CHECK ((rate_per_second >= 0))
+  CONSTRAINT CHECK ((version >= 1))
+  CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (env_id, name, version)
+  CREATE UNIQUE INDEX env_credentials_pkey ON public.env_credentials USING btree (env_id, name, version)
 TABLE env_deployments
   COLUMN env_id uuid NOT NULL
   COLUMN number integer NOT NULL
@@ -879,6 +914,8 @@ TABLE sandboxes
   COLUMN reaches jsonb NOT NULL DEFAULT '[]'::jsonb
   COLUMN egress jsonb
   COLUMN workdir text NOT NULL DEFAULT ''::text
+  COLUMN disk_gib integer NOT NULL DEFAULT 0
+  CONSTRAINT CHECK (((disk_gib >= 0) AND (disk_gib <= 1024)))
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((reaches = '"all"'::jsonb) OR (jsonb_typeof(reaches) = 'array'::text)))
@@ -887,7 +924,7 @@ TABLE sandboxes
   CONSTRAINT CHECK ((client_state = ANY (ARRAY['pending'::text, 'creating'::text, 'running'::text, 'pausing'::text, 'paused'::text, 'resuming'::text, 'hibernating'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'unknown'::text, 'lost'::text])))
   CONSTRAINT CHECK ((id ~ '^([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'::text))
   CONSTRAINT CHECK ((idle_after_s >= 0))
-  CONSTRAINT CHECK ((op = ANY (ARRAY[''::text, 'create'::text, 'start'::text, 'resume'::text, 'restore'::text, 'pause'::text, 'hibernate'::text, 'repair'::text])))
+  CONSTRAINT CHECK ((op = ANY (ARRAY[''::text, 'create'::text, 'start'::text, 'resume'::text, 'restore'::text, 'pause'::text, 'hibernate'::text, 'repair'::text, 'stop'::text])))
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id)
   CONSTRAINT FOREIGN KEY (lost_from) REFERENCES nodes(name)
   CONSTRAINT FOREIGN KEY (node) REFERENCES nodes(name)

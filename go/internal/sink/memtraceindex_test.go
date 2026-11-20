@@ -135,6 +135,51 @@ func (m *memTraceIndex) SpanHistogram(_ context.Context, pattern string, q quick
 	return h, nil
 }
 
+func (m *memTraceIndex) SpanGroups(_ context.Context, pattern string, q quickwit.SpanQuery, fields []string,
+	size int) ([]quickwit.SpanGroup, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	type group struct {
+		count, last int64
+	}
+	groups := map[string]*group{}
+	for _, d := range m.match(pattern, &q) {
+		var keys []string
+		for _, f := range fields {
+			switch f {
+			case "service_name":
+				keys = append(keys, d.ServiceName)
+			case "span_name":
+				keys = append(keys, d.SpanName)
+			}
+		}
+		k := strings.Join(keys, "\x00")
+		if groups[k] == nil {
+			groups[k] = &group{}
+		}
+		groups[k].count++
+		groups[k].last = max(groups[k].last, d.StartNs)
+	}
+	// The groups of the most spans first; size bounds them all at once,
+	// not each level as Quickwit does, which the tests' few groups never
+	// tell apart.
+	var out []quickwit.SpanGroup
+	for _, k := range slices.Sorted(maps.Keys(groups)) {
+		out = append(out, quickwit.SpanGroup{Keys: strings.Split(k, "\x00"), Count: groups[k].count, LastNs: groups[k].last})
+	}
+	slices.SortStableFunc(out, func(a, b quickwit.SpanGroup) int { return cmp.Compare(b.Count, a.Count) })
+	more := len(out) > size
+	return out[:min(len(out), size)], more, nil
+}
+
+func (m *memTraceIndex) NewestSpans(_ context.Context, pattern string, q quickwit.SpanQuery) ([]quickwit.SpanDoc, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.match(pattern, &q)
+	slices.SortStableFunc(out, func(a, b quickwit.SpanDoc) int { return cmp.Compare(b.TS, a.TS) })
+	return out[:min(len(out), max(q.Max, 1))], nil
+}
+
 // percentileCont is the p-th percentile of xs, interpolated between the
 // closest ranks (PostgreSQL's percentile_cont); nil for none. Quickwit
 // estimates it within about 1 %.

@@ -44,7 +44,7 @@ func TestHelloNamesVisits(t *testing.T) {
 	ta.announce()
 	eventually(t, "the announcing Hello", func() bool { return len(h.fake.Hellos()) >= 2 })
 	for _, hl := range h.fake.Hellos() {
-		if !slices.Equal(hl.Request.Capabilities, []string{wire.CapabilityVisits}) {
+		if !slices.Equal(hl.Request.Capabilities, []string{wire.CapabilityVisits, wire.CapabilityRouteHosts}) {
 			t.Errorf("Hello %+v", hl.Request)
 		}
 	}
@@ -87,8 +87,8 @@ func TestVisitKeysAloneReachTheProxyAndTheCache(t *testing.T) {
 	}
 }
 
-// The cache is table-v2.json; the first save deletes the table.json of
-// the releases before, which is never read.
+// The cache is table-v3.json; the first save deletes the table.json of
+// the releases before visits, which is never read.
 func TestTableCacheV2(t *testing.T) {
 	d, err := openStateDir(filepath.Join(t.TempDir(), "state"))
 	if err != nil {
@@ -105,8 +105,8 @@ func TestTableCacheV2(t *testing.T) {
 	if err := d.saveTable(s, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(d.file("table-v2.json")); err != nil {
-		t.Fatalf("table-v2.json: %v", err)
+	if _, err := os.Stat(d.file("table-v3.json")); err != nil {
+		t.Fatalf("table-v3.json: %v", err)
 	}
 	if _, err := os.Stat(d.file("table.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("table.json is still there: %v", err)
@@ -118,6 +118,39 @@ func TestTableCacheV2(t *testing.T) {
 	// A second save without the old file is fine.
 	if err := d.saveTable(s, time.Now()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The cache of the releases before a route's host, table-v2.json, is read
+// while there is no table-v3.json, and the first save deletes it, so that
+// an older binary on the volume finds no cache it would serve every
+// route on every host from. table-v3.json keeps a route's host.
+func TestTableCacheV3(t *testing.T) {
+	d, err := openStateDir(filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := `{"savedAt":"2026-11-16T00:00:00Z","state":{"seq":7,"envs":{"e1":{"id":"e1","hosts":["a.example"],` +
+		`"routes":[{"name":"root","path":"/","service":"web","port":"http"}]}}}}`
+	if err := d.write(priorTableFile, []byte(prior)); err != nil {
+		t.Fatal(err)
+	}
+	s, _, err := d.loadTable()
+	if err != nil || s == nil || s.Seq != 7 || s.Envs["e1"].Routes[0].Name != "root" {
+		t.Fatalf("table-v2.json was not read: %+v %v", s, err)
+	}
+	e := s.Envs["e1"]
+	e.Routes = append(e.Routes, wire.Route{Name: "git", Path: "/", Service: "web", Port: "http", Host: "git.example"})
+	s.Envs["e1"] = e
+	if err := d.saveTable(s, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(d.file(priorTableFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("table-v2.json is still there: %v", err)
+	}
+	got, _, err := d.loadTable()
+	if err != nil || got.Envs["e1"].Routes[1].Host != "git.example" {
+		t.Fatalf("loaded %+v %v", got, err)
 	}
 }
 

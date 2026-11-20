@@ -90,8 +90,10 @@ func replicasOf(s spec.Service) int {
 	return max(0, *s.Replicas)
 }
 
-// resourcesOf is a pod's size: 1 vCPU and 512 MiB where unset.
-func resourcesOf(r *spec.Resources) (vcpus, memoryMiB int) {
+// resourcesOf is a pod's size: 1 vCPU and 512 MiB where unset, and its
+// disk, 0 for the guest's where unset or no larger (a disk of the guest's
+// size is the same pod as one that names none).
+func resourcesOf(r *spec.Resources) (vcpus, memoryMiB, diskGiB int) {
 	vcpus, memoryMiB = spec.DefaultVCPUs, spec.DefaultMemoryMib
 	if r != nil {
 		if r.VCPUs > 0 {
@@ -100,8 +102,11 @@ func resourcesOf(r *spec.Resources) (vcpus, memoryMiB int) {
 		if r.MemoryMib > 0 {
 			memoryMiB = r.MemoryMib
 		}
+		if r.DiskGib > spec.DefaultDiskGib {
+			diskGiB = r.DiskGib
+		}
 	}
-	return vcpus, memoryMiB
+	return vcpus, memoryMiB, diskGiB
 }
 
 // duration parses a Go duration, def when empty or invalid.

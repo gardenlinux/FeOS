@@ -19,6 +19,7 @@ import (
 
 	xacme "golang.org/x/crypto/acme"
 
+	"github.com/gardenlinux/feos/go/internal/domains"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -55,8 +56,9 @@ type issued struct {
 	serial                          string
 }
 
-// order obtains a certificate for o's name with HTTP-01, outside any
-// transaction but the short ones that keep the challenge.
+// order obtains a certificate for o's name with HTTP-01, a wildcard's
+// with DNS-01 in the ACME zone, outside any transaction but the short
+// ones that keep an HTTP-01 challenge.
 func (s *Issuer) order(ctx context.Context, cl *xacme.Client, o store.ACMEOrder) (*issued, error) {
 	var opts []xacme.OrderOption
 	if s.cfg.Profile != "" {
@@ -95,7 +97,8 @@ func (s *Issuer) order(ctx context.Context, cl *xacme.Client, o store.ACMEOrder)
 // authorize satisfies the authorization at url with its http-01
 // challenge: the answer goes into the ingress's table, and once every
 // connected ingress instance holds it the challenge is accepted and the
-// authorization awaited. An authorization valid already needs nothing.
+// authorization awaited; a wildcard's with its dns-01 challenge
+// (authorizeDNS01). An authorization valid already needs nothing.
 func (s *Issuer) authorize(ctx context.Context, cl *xacme.Client, o store.ACMEOrder, url string) error {
 	z, err := cl.GetAuthorization(ctx, url)
 	if err != nil {
@@ -107,6 +110,9 @@ func (s *Issuer) authorize(ctx context.Context, cl *xacme.Client, o store.ACMEOr
 	case xacme.StatusPending:
 	default:
 		return fmt.Errorf("the CA's authorization for %s is %s", z.Identifier.Value, z.Status)
+	}
+	if domains.IsWildcard(o.Name) {
+		return s.authorizeDNS01(ctx, cl, o, z)
 	}
 	var chal *xacme.Challenge
 	for _, c := range z.Challenges {
@@ -226,12 +232,14 @@ const (
 // limit; 0: none).
 func describe(name string, err error, timeout time.Duration) (string, time.Duration) {
 	var nd *notDelivered
+	var np *notPublished
 	var ae *xacme.AuthorizationError
 	var oe *xacme.OrderError
 	var pe *xacme.Error
 	text, wait := "", time.Duration(0)
 	switch {
-	case errors.Is(err, errNoIngress), errors.Is(err, errNoHTTP01), errors.As(err, &nd):
+	case errors.Is(err, errNoIngress), errors.Is(err, errNoHTTP01), errors.As(err, &nd),
+		errors.Is(err, errNoZone), errors.Is(err, errNoDNS01), errors.As(err, &np):
 		text = err.Error()
 	case errors.Is(err, context.DeadlineExceeded):
 		text = fmt.Sprintf("the order did not finish within %v", timeout)
@@ -247,7 +255,11 @@ func describe(name string, err error, timeout time.Duration) (string, time.Durat
 		if len(details) == 0 {
 			details = []string{"no detail"}
 		}
-		text = fmt.Sprintf("the CA's HTTP-01 challenge for %s failed: %s", name, strings.Join(details, "; "))
+		kind := "HTTP-01"
+		if domains.IsWildcard(name) {
+			kind = "DNS-01"
+		}
+		text = fmt.Sprintf("the CA's %s challenge for %s failed: %s", kind, name, strings.Join(details, "; "))
 	case errors.As(err, &oe):
 		if oe.Problem != nil {
 			return describe(name, oe.Problem, timeout)

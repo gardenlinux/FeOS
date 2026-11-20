@@ -109,8 +109,8 @@ func (v *validator) destination(path, host string) {
 // upstream when it is none).
 func (v *validator) binding(name string, b Binding) (httpcheck.Upstream, string) {
 	p := "bindings." + name
-	if b.TenantCredential != nil {
-		return v.tenantCredential(p, b)
+	if b.CredentialRef != nil {
+		return v.credentialRef(p, b)
 	}
 	up, err := httpcheck.ParseUpstream("upstream", b.Upstream)
 	if err != nil {
@@ -136,35 +136,33 @@ func (v *validator) binding(name string, b Binding) (httpcheck.Upstream, string)
 	return up, mode
 }
 
-// tenantCredential checks a binding that names a credential of the
-// tenant (ADR 0033): nothing of its own beyond the upstream and mode a
-// normalised spec carries, which must be the version's; a credential the
-// tenant has, at a version it has. It returns the version's upstream and
-// mode.
-func (v *validator) tenantCredential(p string, b Binding) (httpcheck.Upstream, string) {
-	ref := b.TenantCredential
-	cp := p + ".tenantCredential"
+// credentialRef checks a binding that names a credential of the
+// environment (ADR 0033): nothing of its own beyond the upstream and mode
+// a normalised spec carries, which must be the version's; a credential the
+// environment has, at a version it has. It returns the version's upstream
+// and mode.
+func (v *validator) credentialRef(p string, b Binding) (httpcheck.Upstream, string) {
+	ref := b.CredentialRef
+	cp := p + ".credentialRef"
 	own := map[string]bool{"credential": b.Credential != nil, "caPem": b.CaPem != "",
 		"pathPrefixes": len(b.PathPrefixes) > 0, "forwardedHost": b.ForwardedHost, "rateLimit": b.RateLimit != nil}
 	for _, f := range slices.Sorted(maps.Keys(own)) {
 		if own[f] {
-			v.errorf(p+"."+f, "remove it, or state the binding without tenantCredential",
-				"a binding that names a tenant credential takes its %s from the credential", f)
+			v.errorf(p+"."+f, "remove it, or state the binding without credentialRef",
+				"a binding that names a credential takes its %s from the credential", f)
 		}
 	}
 	if !IsName(ref.Name) {
-		v.errorf(cp+".name", "name a credential of the tenant", "%q is no credential's name", ref.Name)
+		v.errorf(cp+".name", "name a credential of the environment", "%q is no credential's name", ref.Name)
 		return httpcheck.Upstream{}, ""
 	}
-	cc, ok := v.vc.(CredentialContext)
-	if !ok {
-		v.errorf(cp, "state the binding's upstream and credential", "the tenant's credentials are not available here")
-		return httpcheck.Upstream{}, ""
+	info, ok := CredentialInfo{}, false
+	if cc, can := v.vc.(CredentialContext); can {
+		info, ok = cc.Credential(ref.Name)
 	}
-	info, ok := cc.TenantCredential(ref.Name)
 	if !ok {
-		v.errorf(cp+".name", "make the credential under the tenant's credentials first",
-			"the tenant has no credential %s", ref.Name)
+		v.errorf(cp+".name", "make the credential under the environment's credentials first",
+			"the environment has no credential %s", ref.Name)
 		return httpcheck.Upstream{}, ""
 	}
 	version := ref.Version

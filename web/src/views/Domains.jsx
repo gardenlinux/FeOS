@@ -101,6 +101,7 @@ export function RecordsTable({ d }) {
     { type: 'TXT', name: txt.name, value: txt.value, says: now.txt },
     { type: 'CNAME', name: d.name, value: rec.cname, says: now.route },
   ];
+  if (rec.delegation) rows.push({ type: 'CNAME', name: rec.delegation.name, value: rec.delegation.value, says: now.delegation });
   const addrs = rec.addresses || [];
   return (
     <>
@@ -108,7 +109,7 @@ export function RecordsTable({ d }) {
         <thead><tr><th>type</th><th>name</th><th>value</th><th>DNS says now</th></tr></thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.type}>
+            <tr key={r.type + ' ' + r.name}>
               <td className="mono">{r.type}</td>
               <td><span className="dom-copycell"><span className="mono">{r.name}</span>{r.name && <CopyBtn text={r.name} mini title="copy the name" />}</span></td>
               <td><span className="dom-copycell"><span className="mono">{r.value || '—'}</span>{r.value && <CopyBtn text={r.value} mini title="copy the value" />}</span></td>
@@ -117,12 +118,21 @@ export function RecordsTable({ d }) {
           ))}
         </tbody>
       </table></div>
-      <p className="panel-note">
-        At the apex of a zone, which takes no CNAME, use an ALIAS or ANAME record to <span className="mono">{rec.cname}</span>
-        {addrs.length > 0 && <>, or A and AAAA records of the edge's addresses: {addrs.map((a, i) => (
-          <span key={a} className="dom-addr">{i > 0 && ' · '}<span className="mono">{a}</span><CopyBtn text={a} mini /></span>))}</>}.
-        {' '}Keep the TXT record: FeRun checks it every hour, and a claim whose record stays missing past the grace lapses.
-      </p>
+      {rec.delegation ? (
+        <p className="panel-note">
+          A wildcard serves every name one label below it, not the name itself. Its CNAME is the wildcard record
+          {' '}<span className="mono">{d.name}</span>{addrs.length > 0 && <>, or A and AAAA records there of the edge's addresses</>}.
+          {' '}The second CNAME delegates the certificate's DNS-01 challenge to FeRun; nothing else may stand at its name.
+          {' '}Keep all three: FeRun checks them every hour.
+        </p>
+      ) : (
+        <p className="panel-note">
+          At the apex of a zone, which takes no CNAME, use an ALIAS or ANAME record to <span className="mono">{rec.cname}</span>
+          {addrs.length > 0 && <>, or A and AAAA records of the edge's addresses: {addrs.map((a, i) => (
+            <span key={a} className="dom-addr">{i > 0 && ' · '}<span className="mono">{a}</span><CopyBtn text={a} mini /></span>))}</>}.
+          {' '}Keep the TXT record: FeRun checks it every hour, and a claim whose record stays missing past the grace lapses.
+        </p>
+      )}
     </>
   );
 }
@@ -281,8 +291,9 @@ export function ClaimForm({ onDone, onCancel }) {
         <button className="primary" type="submit" disabled={busy || !name.trim()}>{busy ? 'claiming…' : 'Claim'}</button>
         <button type="button" className="ghost" onClick={onCancel}>Cancel</button>
       </form>
-      <p className="panel-note">A host name of at least two labels, no wildcard; an internationalized name as its A-label
-        (<span className="mono">xn--…</span>). Claiming proves nothing yet: the next page shows the TXT record that does.</p>
+      <p className="panel-note">A host name of at least two labels, or a wildcard <span className="mono">*.example.com</span> for every
+        name one label below it; an internationalized name as its A-label (<span className="mono">xn--…</span>). Claiming proves
+        nothing yet: the next page shows the TXT record that does.</p>
       <ErrBox error={err} />
     </section>
   );

@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, EnvName, ErrBox, KV, LiveBadge, usePoll } from '../components.jsx';
 import { shortId } from '../format.js';
-import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs, sandboxPath } from '../routes.js';
+import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs, sandboxPath, secretsPath } from '../routes.js';
 import {
   CHANGES_READ, KIND_NAMES, changeTone, changesTo, conditionText, definitionRows, envRows, errorShare, fmtCount, fmtLatency,
   fmtValue, heavyEffect, instanceDeployments, isAttached, jobTrigger, objectImage, objectIncidents, objectStateText, objectTone,
@@ -15,6 +15,7 @@ import {
 import { builtinCatalog, planText, readCatalog } from './catalog.js';
 import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
 import { ObjectReach } from './EnvReach.jsx';
+import { ObjectAccess } from './ObjectAccess.jsx';
 import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
 import { StateCard, WideSpark } from './EnvOverview.jsx';
 import '../styles/environments.css';
@@ -24,13 +25,14 @@ import '../styles/environments.css';
 // deployment. Its head says what it is and how it is, with Restart or Run
 // now, and Edit; its views are the environment's where it has them
 // (objectTabs): the overview (what is wrong and why, with the end of the
-// log; its instances; the deployments that changed it; its traffic and
-// incidents), its logs and traffic, and its config: its
-// definition as the latest deployment's normalised spec has it (the
+// log; a service's and a job's access, who it is and where its keys
+// live, ObjectAccess.jsx; its instances; the deployments that changed
+// it; its traffic and incidents), its logs and traffic, and its config:
+// its definition as the latest deployment's normalised spec has it (the
 // image as written and its pin, the environment with its references as
-// links, a secret at its pinned version, never its value), the bindings
-// it names, the routes to it, who uses it. st is the environment's
-// status, read by the shell (envstatus.jsx).
+// links, a secret at its pinned version, never its value), the routes
+// to it, who uses it. st is the environment's status, read by the shell
+// (envstatus.jsx).
 
 const Link = EnvLink;
 
@@ -127,7 +129,7 @@ export function ObjectView({
             </span>
           </div>)}
         {view === 'overview' && (
-          <ObjectOverview tenant={tenant} st={st} o={o} kind={kind} name={name} ec={ec} navigate={navigate} />)}
+          <ObjectOverview tenant={tenant} st={st} o={o} so={so} spec={spec} kind={kind} name={name} ec={ec} navigate={navigate} />)}
         {view === 'logs' && (
           <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />)}
         {view === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} service={name} />}
@@ -144,9 +146,11 @@ export function ObjectView({
 }
 
 // ObjectOverview is how the object is: what is wrong while something is
-// (ObjectProblem), its instances, the deployments that changed it, a
-// service's traffic, its incidents.
-function ObjectOverview({ tenant, st, o, kind, name, ec, navigate }) {
+// (ObjectProblem), a service's and a job's access (while the spec loads,
+// or when it has the object), its instances, the deployments that
+// changed it, a service's traffic, its incidents.
+function ObjectOverview({ tenant, st, o, so = null, spec = null, kind, name, ec, navigate }) {
+  const access = (kind === 'service' || kind === 'job') && (so || (!spec && st.deployment > 0));
   const env = st.name;
   const [incidents, setIncidents] = useState(null);
   const readIncidents = useCallback(async () => {
@@ -161,6 +165,7 @@ function ObjectOverview({ tenant, st, o, kind, name, ec, navigate }) {
   return (
     <div className="ov">
       {o && <ObjectProblem tenant={tenant} st={st} o={o} incidents={incidents} navigate={navigate} />}
+      {access && <ObjectAccess tenant={tenant} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
       {o && (
         <section className="card">
           <Instances tenant={tenant} st={st} o={o} ec={ec} navigate={navigate} />
@@ -317,16 +322,10 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
       {bindings.length > 0 && (
         <>
           <div className="sect">bindings <span className="count">· {bindings.length}</span></div>
-          <div className="objchips">
-            {bindings.map((b) => {
-              const def = spec.bindings && spec.bindings[b];
-              return (
-                <Link key={b} to={envPath(tenant, env)} navigate={navigate} className="objchip" title="the bindings, with their check, on the overview">
-                  <span className="mono strong">{b}</span>
-                  {def && def.upstream && <span className="mono small host">{def.upstream}</span>}
-                </Link>);
-            })}
-          </div>
+          <p className="small objbindings">
+            <span className="mono">{bindings.join(', ')}</span>: what each reaches, where its key comes from and its last
+            24 h are in <Link to={objectPath(tenant, env, `${kind}/${name}`)} navigate={navigate}>Access</Link>, on its overview.
+          </p>
         </>)}
     </>
   );
@@ -341,7 +340,7 @@ function EnvValue({ v, tenant, env, st, navigate }) {
     return (
       <span className="objref">
         <Icon name="lock" size={11} /> secret{' '}
-        <Link to={envPath(tenant, env, 'secrets')} navigate={navigate} title="the environment's secrets">{v.target}</Link>
+        <Link to={secretsPath(tenant, env, 'secret', v.target)} navigate={navigate} title="its row in the environment's secrets">{v.target}</Link>
         {v.version ? <span className="muted"> v{v.version}</span> : <span className="muted"> (latest)</span>}
       </span>
     );
@@ -378,7 +377,9 @@ function RoutesTo({ tenant, st, spec, name, navigate }) {
                     <td className="small">
                       {r.url
                         ? <a className="mono host" href={r.url} target="_blank" rel="noreferrer">{r.url.replace(/^https:\/\//, '')}</a>
-                        : <Link to={envPath(tenant, st.name, 'access')} navigate={navigate} className="muted">the route door, with a route token</Link>}
+                        : r.host && r.door === 'ingress'
+                          ? <span className="mono muted" title={r.host.startsWith('*.') ? 'every name the wildcard serves' : 'once the environment is served there'}>{r.host}{r.path}</span>
+                          : <Link to={envPath(tenant, st.name, 'access')} navigate={navigate} className="muted">the route door, with a route token</Link>}
                     </td>
                   </tr>))}
               </tbody>

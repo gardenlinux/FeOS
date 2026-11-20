@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The tenant's credentials (ADR 0033): an HTTP binding's definition
-// (ADR 0028) stated once, versioned, used by name by sandboxes and by
-// environments' bindings. The form's fields to the binding's JSON and
-// back, the secret fields a write keeps ({"set": true}), what the code
-// runs, and the environments whose pin is behind the latest.
+// An environment's credentials (ADR 0033): an HTTP binding's definition
+// (ADR 0028) stated once in an environment, versioned, used by name by
+// its sandboxes and its spec's bindings. The form's fields to the
+// binding's JSON and back, the secret fields a write keeps ({"set":
+// true}), what the code runs, and whether the environment's deployments
+// pin a version behind the latest.
 
 // KINDS are a credential's kinds, as the form offers them.
 export const KINDS = [
@@ -103,10 +104,10 @@ function pem(s) {
   return v ? v + '\n' : '';
 }
 
-// bindingOf is a form as the binding's JSON (PUT /api/v1/credentials/
-// {name}, the preflight's binding): a secret field left empty that the
-// latest version has is {"set": true} when keep, else left out. It throws
-// on a form no request should carry.
+// bindingOf is a form as the binding's JSON (PUT /api/v1/environments/
+// {env}/credentials/{name}, a check's draft): a secret field left empty
+// that the latest version has is {"set": true} when keep, else left out.
+// It throws on a form no request should carry.
 export function bindingOf(f, { keep = true } = {}) {
   const upstream = String(f.upstream || '').trim().replace(/\/+$/, '');
   if (!upstream) throw new Error('the upstream is required: https://host[:port]');
@@ -157,33 +158,6 @@ export function bindingOf(f, { keep = true } = {}) {
   return b;
 }
 
-// sameDefinition tells whether a form states a credential's definition
-// with every secret kept: then the stored credential's check is the
-// form's preflight.
-export function sameDefinition(f, c) {
-  if (!c) return false;
-  let a;
-  let b;
-  try {
-    a = bindingOf(f);
-    b = bindingOf(formOf(c));
-  } catch {
-    return false;
-  }
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-// preflightOf decides how a form is checked before a save: the form's
-// binding with every value in it (form), the stored credential's check
-// when only kept secrets are missing and nothing else changed (stored),
-// or none: the kept fields' values are needed (needs, their paths).
-export function preflightOf(f, c) {
-  const kept = keptOf(f);
-  if (!kept.length) return { how: 'form', binding: bindingOf(f, { keep: false }) };
-  if (sameDefinition(f, c)) return { how: 'stored' };
-  return { how: 'needs', fields: kept };
-}
-
 // hostOf is an upstream's host and port ("api.github.com",
 // "api.example.com:8443"); '' for no URL.
 export function hostOf(upstream) {
@@ -207,22 +181,22 @@ export function curlOf(c) {
   return `curl -s http://${c.name || '<name>'}${path}`;
 }
 
-// behind tells whether an environment's use pins a version before the
-// latest, in its latest or its deployed deployment (0: that one pins
-// none).
+// behind tells whether the environment's bindings pin a version before
+// the latest, in its latest or its deployed deployment (use: the
+// credential's usedBy, latest and deployed 0 where that one pins none).
 export function behind(use, version) {
   return (Number(use.latest) > 0 && Number(use.latest) < version) || (Number(use.deployed) > 0 && Number(use.deployed) < version);
 }
 
-// needsDeployment tells whether an environment's latest deployment pins
-// a version before the latest: a new deployment would move it. One whose
-// latest deployment pins the latest but whose deployed one does not is
+// needsDeployment tells whether the environment's latest deployment pins
+// a version before the latest: a new deployment would move it. When its
+// latest deployment pins the latest but its deployed one does not, it is
 // on its way.
 export function needsDeployment(use, version) {
   return Number(use.latest) > 0 && Number(use.latest) < version;
 }
 
-// pinState is an environment's pins against the latest version, in a
+// pinState is the environment's pins against the latest version, in a
 // word: behind, rolling out (its latest deployment has it, the deployed
 // one not yet) or current.
 export function pinState(use, version) {
@@ -231,7 +205,7 @@ export function pinState(use, version) {
   return 'current';
 }
 
-// pinWords is what an environment's deployments pin, in words.
+// pinWords is what the environment's deployments pin, in words.
 export function pinWords(use) {
   const l = Number(use.latest) || 0;
   const d = Number(use.deployed) || 0;
@@ -242,45 +216,45 @@ export function pinWords(use) {
   return parts.join(' · ') || 'no version';
 }
 
-// oldestPin is the oldest version an environment pins, for the list's
-// "on vN".
+// oldestPin is the oldest version the environment's deployments pin,
+// for the list's "bindings on vN".
 export function oldestPin(use) {
   const vs = [Number(use.latest) || 0, Number(use.deployed) || 0].filter((v) => v > 0);
   return vs.length ? Math.min(...vs) : 0;
 }
 
-// usedWords is a credential's uses in words: "2 sandboxes · 1
-// environment", "unused".
+// usedWords is a credential's uses in its environment, in words: "2
+// sandboxes · 1 binding", "unused".
 export function usedWords(usedBy) {
   const s = ((usedBy && usedBy.sandboxes) || []).length;
-  const e = ((usedBy && usedBy.environments) || []).length;
+  const b = ((usedBy && usedBy.bindings) || []).length;
   const parts = [];
   if (s) parts.push(`${s} sandbox${s === 1 ? '' : 'es'}`);
-  if (e) parts.push(`${e} environment${e === 1 ? '' : 's'}`);
+  if (b) parts.push(`${b} binding${b === 1 ? '' : 's'}`);
   return parts.join(' · ') || 'unused';
 }
 
 // pinnedSpec is a deployment's spec with every binding that names
-// credential name moved to version: {spec, bindings (their names)}; the
-// spec is a copy. A binding keeps nothing else of its own: the
-// credential's version brings its upstream and mode.
+// credential name (credentialRef) moved to version: {spec, bindings
+// (their names)}; the spec is a copy. A binding keeps nothing else of its
+// own: the credential's version brings its upstream and mode.
 export function pinnedSpec(spec, name, version) {
   const out = JSON.parse(JSON.stringify(spec || {}));
   const names = [];
   for (const [k, b] of Object.entries(out.bindings || {})) {
-    if (b && b.tenantCredential && b.tenantCredential.name === name) {
-      out.bindings[k] = { tenantCredential: { name, version } };
+    if (b && b.credentialRef && b.credentialRef.name === name) {
+      out.bindings[k] = { credentialRef: { name, version } };
       names.push(k);
     }
   }
   return { spec: out, bindings: names.sort() };
 }
 
-// specSnippet is the binding an environment's spec names a credential
+// specSnippet is the binding the environment's spec names a credential
 // with, and a service that gets it: the spec's two places, one line each.
 export function specSnippet(name, service = 'api') {
   const j = (v) => JSON.stringify(v).replace(/([{:,])(?=[^\s])/g, '$1 ').replace(/(?<=[^\s])}/g, ' }');
-  return `"bindings": ${j({ [name]: { tenantCredential: { name } } })}\n` +
+  return `"bindings": ${j({ [name]: { credentialRef: { name } } })}\n` +
     `"services": ${j({ [service]: { bindings: [name] } })}`;
 }
 
@@ -305,17 +279,4 @@ export function preflightRows(r, probe = null) {
   }
   if (r.error) rows.push({ key: r.error.code, ok: false, text: r.error.message });
   return rows;
-}
-
-// credentialPath is the credentials' page, or one credential's, or its
-// edit form.
-export function credentialPath(tenant, name = '', edit = false) {
-  const base = `/tenants/${encodeURIComponent(tenant)}/credentials`;
-  if (!name) return base;
-  return `${base}/${encodeURIComponent(name)}${edit ? '/edit' : ''}`;
-}
-
-// newCredentialPath is the form of a new credential.
-export function newCredentialPath(tenant) {
-  return `/tenants/${encodeURIComponent(tenant)}/new-credential`;
 }

@@ -22,6 +22,9 @@ const DEFAULT_MEMORY_MIB: u64 = 512;
 const MAX_VCPUS: u32 = 32;
 /// Less does not hold the guest and an image.
 const MIN_MEMORY_MIB: u64 = 128;
+/// The largest disk a pod asks for (`Resources.disk_gib`): its disk is
+/// thin, but the node must have room for what it may write.
+const MAX_DISK_GIB: u32 = 1024;
 /// The pod's interface in the guest.
 const INTERFACE: &str = "eth0";
 /// A pod's volumes, each a drive: Firecracker's microVM has interrupts for
@@ -41,6 +44,9 @@ const MAX_HTTP_VERSION: usize = 128;
 /// The name of a pod's egress records' log (ADR 0028 §6), which no
 /// container of a pod with HTTP bindings has: `fleet_client::EGRESS_CONTAINER`.
 const EGRESS_CONTAINER: &str = "feos-authn";
+/// The longest stop grace a pod's spec may name (`stop_grace_seconds`):
+/// 15 minutes.
+pub const MAX_STOP_GRACE_SECONDS: u32 = 900;
 
 /// Checks a pod's ID, which also names its microVM and its paths: a short
 /// one, or the UUID of a pod made before short IDs (ADR 0019).
@@ -70,6 +76,11 @@ pub fn normalize(mut spec: PodSpec) -> Result<PodSpec, Status> {
             "a pod has at least {MIN_MEMORY_MIB} MiB of memory"
         )));
     }
+    if resources.disk_gib > MAX_DISK_GIB {
+        return Err(Status::invalid_argument(format!(
+            "a pod's disk has at most {MAX_DISK_GIB} GiB"
+        )));
+    }
 
     let mut names = HashSet::new();
     for container in &spec.containers {
@@ -91,6 +102,11 @@ pub fn normalize(mut spec: PodSpec) -> Result<PodSpec, Status> {
                 container.name
             )));
         }
+    }
+    if spec.stop_grace_seconds > MAX_STOP_GRACE_SECONDS {
+        return Err(Status::invalid_argument(format!(
+            "a pod's stop grace is at most {MAX_STOP_GRACE_SECONDS} seconds"
+        )));
     }
     check_volumes(&spec)?;
     check_metadata(&spec)?;
@@ -654,7 +670,8 @@ mod tests {
             spec.resources,
             Some(Resources {
                 vcpus: 1,
-                memory_mib: 512
+                memory_mib: 512,
+                disk_gib: 0,
             })
         );
         assert_eq!(normalize(spec.clone()).unwrap(), spec);
@@ -672,8 +689,29 @@ mod tests {
         small.resources = Some(Resources {
             vcpus: 1,
             memory_mib: 64,
+            ..Default::default()
         });
         assert!(normalize(small).is_err());
+        let mut large = spec(vec![container("main")]);
+        large.resources = Some(Resources {
+            disk_gib: MAX_DISK_GIB + 1,
+            ..Default::default()
+        });
+        assert!(normalize(large).is_err());
+        let mut sized = spec(vec![container("main")]);
+        sized.resources = Some(Resources {
+            disk_gib: MAX_DISK_GIB,
+            ..Default::default()
+        });
+        assert_eq!(
+            normalize(sized).unwrap().resources.unwrap().disk_gib,
+            MAX_DISK_GIB
+        );
+        let mut long = spec(vec![container("main")]);
+        long.stop_grace_seconds = MAX_STOP_GRACE_SECONDS + 1;
+        assert!(normalize(long.clone()).is_err());
+        long.stop_grace_seconds = MAX_STOP_GRACE_SECONDS;
+        assert!(normalize(long).is_ok());
     }
 
     #[test]

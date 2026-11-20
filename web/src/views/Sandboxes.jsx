@@ -270,7 +270,8 @@ function NewSandbox({ tenant, env, navigate, can: c, busy, err, write, onCreate 
       <div className="tabbody">
         <ErrBox error={err} />
         {!write && <p className="error">Your role does not allow this: it needs write on {env}.</p>}
-        <CreateForm defaults={defaults} busy={busy} disabled={!write} env={env} onSubmit={onCreate} onCancel={() => navigate(back)} />
+        <CreateForm defaults={defaults} busy={busy} disabled={!write} tenant={tenant} env={env} navigate={navigate}
+          onSubmit={onCreate} onCancel={() => navigate(back)} />
       </div>
     </>
   );
@@ -283,7 +284,7 @@ function NewSandbox({ tenant, env, navigate, can: c, busy, err, write, onCreate 
 // name from defaults (the nodes view's), as they name the bounds ferund
 // accepts. disabled: the role may not make one. onSubmit gets
 // createSandbox's arguments.
-export function CreateForm({ defaults, busy, disabled = false, env, onSubmit, onCancel }) {
+export function CreateForm({ defaults, busy, disabled = false, tenant = '', env, navigate = null, onSubmit, onCancel }) {
   const hints = createHints(fleetDefaults(defaults));
   const [f, setF] = useState(() => newSandboxForm(env));
   const [bad, setBad] = useState('');
@@ -351,7 +352,8 @@ export function CreateForm({ defaults, busy, disabled = false, env, onSubmit, on
         </div>
         <span className="sbx-hint">Sealed in ferund and never shown again; rotate or remove it later under the sandbox's Credentials.</span>
       </fieldset>
-      <CredentialPicker value={f.credentials} disabled={disabled} onChange={(credentials) => setF({ ...f, credentials })} />
+      <CredentialPicker tenant={tenant} env={env} value={f.credentials} disabled={disabled} navigate={navigate}
+        onChange={(credentials) => setF({ ...f, credentials })} />
       {bad && <p className="error">{bad}</p>}
       <div className="sbx-formactions">
         <button type="submit" className="primary" disabled={disabled || !!busy}
@@ -447,7 +449,7 @@ function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, w
         {cur === 'credentials' && (
           <>
             <h3 className="sect sect-first"><Icon name="plug" size={13} /> HTTP APIs</h3>
-            <SandboxCredentials tenant={tenant} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
+            <SandboxCredentials tenant={tenant} env={env} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
             <Access sandboxId={sb.sandboxId} />
             <h3 className="sect"><Icon name="key" size={13} /> Image credentials</h3>
             <ImageCredentials sandboxId={sb.sandboxId} write={write} />

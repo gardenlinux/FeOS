@@ -304,6 +304,10 @@ func (p postgres) Outputs(a Addon, c Context, ref Ref) ([]model.TemplatePart, er
 		url.PathEscape(db) + "?sslmode=disable"), nil
 }
 
+// IdentityBy: pg_ident.conf maps the subject's OU, the workload's set,
+// to the role its reference names (postgresIdent).
+func (postgres) IdentityBy() string { return IdentityOU }
+
 // TLSBinding: every reference names a role (Outputs) and reaches the addon
 // through the pod's binding, TLS from the first byte with ALPN postgresql
 // (PostgreSQL 17's direct TLS, ADR 0038).

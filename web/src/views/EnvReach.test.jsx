@@ -4,7 +4,12 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ObjectReachPicture, podsOf } from './EnvReach.jsx';
+import { ObjectCards, ObjectReachPicture, podsOf } from './EnvReach.jsx';
+import { ReachFlow } from './Reach.jsx';
+import { withKeys } from './access.js';
+import { readCatalog } from './catalog.js';
+import { reachModel } from './reach.js';
+import { response } from '../testing/ferun.js';
 
 // An object's row of the environment's reachability on its Config view
 // (ADR 0034, revised), drawn from the deployed deployment's answer.
@@ -29,7 +34,7 @@ const REACH = {
 };
 
 const html = (el) => renderToStaticMarkup(el);
-const text = (el) => html(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ');
+const text = (el) => html(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const pic = (kind, name, extra = {}) => (
   <ObjectReachPicture tenant="t" env="stage" spec={SPEC} reach={REACH} kind={kind} name={name} navigate={() => {}} {...extra} />);
 
@@ -65,5 +70,82 @@ describe("an object's reachability on its Config", () => {
   it('reads the sandboxes and jobs as pods', () => {
     expect(podsOf([{ sandboxId: 's1', reaches: 'all' }], [{ id: 'j1', reaches: [], egress: 'none' }])).toEqual([
       { kind: 'sandbox', id: 's1', reaches: 'all', egress: undefined }, { kind: 'jobrun', id: 'j1', reaches: [], egress: 'none' }]);
+  });
+});
+
+// The outbound side, with where each key lives (access.js): expensa's
+// deployment as ferund answers it, with bindings added; the addons'
+// catalog and the bindings' usage from ferund's fixtures.
+describe('where the keys live in the picture', () => {
+  const dep = response('GET_environments_env_deployments_n.200');
+  const catalog = readCatalog(response('GET_addons.200'));
+  const usage = response('GET_environments_env_bindings_usage.200').bindings;
+  const withBindings = (names) => ({
+    ...dep.spec,
+    services: { ...dep.spec.services, 'expense-service': { ...dep.spec.services['expense-service'], bindings: names } },
+    bindings: Object.fromEntries(names.map((n) => [n, n === 'erp'
+      ? { upstream: 'https://api.vendor.example', mode: 'intercept', credential: { kind: 'oauth2' } }
+      : { upstream: `https://${n}.example.com`, credential: { kind: 'headers' } }])),
+  });
+  const cards = (spec, keys) => (
+    <ObjectCards tenant="t" env="expensa-stage" model={withKeys(reachModel(spec, dep.reachability), spec, keys)} navigate={() => {}} />);
+  const card = (out, ref) => out.slice(out.indexOf(`aria-label="${ref}"`)).split('</section>')[0];
+
+  it('marks the edges to addons, not those between services, and says nothing of keys at the node without a binding', () => {
+    const out = html(cards(dep.spec, { catalog }));
+    const t = text(cards(dep.spec, { catalog }));
+    expect(t).toContain('by identity No key: the workload\'s certificate is enough.');
+    expect(t).toContain('in the container The value is handed to the container.');
+    expect(t).not.toContain('The key stays at the node');
+    expect(t).not.toContain('at the node');
+    expect(card(out, 'service expense-service')).toMatch(/postgres 5432<\/span><span class="sgf-mark"><span class="badge mark mark-identity"/);
+    expect(card(out, 'service expense-service')).toMatch(/nats 4222<\/span><span class="sgf-mark"><span class="badge mark mark-container"/);
+    expect(card(out, 'service expense-service')).toMatch(/http 8080<\/span><\/span><a[^>]*><span class="sgf-pill sgf-service">/);
+    expect(card(out, 'addon postgres')).toContain('mark-identity');
+    expect(card(out, 'service web')).not.toContain('sgf-mark');
+  });
+
+  it('shows no legend when no edge hands a key over', () => {
+    expect(html(cards(dep.spec, {}))).not.toContain('mark-legend');
+  });
+
+  it("draws a binding's upstream on the right, its lock where the edge leaves, the 24 h numbers on hover", () => {
+    const spec = withBindings(['erp', 'mail']);
+    const out = card(html(cards(spec, { catalog, usage })), 'service expense-service');
+    const t = text(<div dangerouslySetInnerHTML={{ __html: out }} />);
+    expect(t).toContain('OAuth2 at the node api.vendor.example erp · as api.vendor.example');
+    expect(t).toContain('Headers at the node mail.example.com mail · as http://mail');
+    expect(out).toContain('class="sgf-wire sgf-wire-node"><span class="sgf-mark"><span class="badge mark mark-offloaded"');
+    expect(out.match(/class="sgf-row sgf-row-out sgf-marked sgf-row-up"/g)).toHaveLength(2);
+    expect(out).toContain('title="Binding erp to https://api.vendor.example: OAuth2 at the node. The key stays at the node, which adds it to '
+      + 'each request. The container never sees it. Reached as api.vendor.example. Last 24 h: 1,204 requests (none from expense-service), '
+      + '2 refused, 0 failing."');
+    expect(out).toContain('title="Binding mail to https://mail.example.com: Headers at the node.');
+    expect(out.indexOf('mail.example.com')).toBeLessThan(out.indexOf('Internet'));
+    expect(html(cards(spec, { catalog, usage }))).toContain('mark mark-offloaded" title="The key stays at the node');
+  });
+
+  it('leaves the numbers out when the sink cannot say', () => {
+    const out = html(cards(withBindings(['erp']), { catalog, usage: null }));
+    expect(out).toContain('Reached as api.vendor.example."');
+    expect(out).not.toContain('Last 24 h');
+  });
+
+  it('stays one row per binding with ten of them', () => {
+    const names = ['erp', ...Array.from({ length: 9 }, (_, i) => `api${i}`)];
+    const out = card(html(cards(withBindings(names), { catalog })), 'service expense-service');
+    expect(out.match(/sgf-wire-node/g)).toHaveLength(10);
+    expect(out.match(/class="sgf-row sgf-row-out/g)).toHaveLength(14);
+  });
+
+  it("says nothing else outside for an egress of none beside a binding, and an object's own picture has its bindings", () => {
+    const row = withKeys(reachModel(withBindings(['erp']), dep.reachability), withBindings(['erp']), {})
+      .objects.find((o) => o.ref === 'service/expense-service').outs.find((r) => r.peer.type === 'upstream');
+    expect(text(<ReachFlow ins={[]} outs={[row]} egress="none"><span>box</span></ReachFlow>)).toContain('Nothing else outside the environment');
+    expect(text(<ReachFlow ins={[]} outs={[]} egress="none"><span>box</span></ReachFlow>)).toContain('Nothing outside the environment');
+    const own = text(<ObjectReachPicture tenant="t" env="expensa-stage" spec={withBindings(['erp'])} reach={dep.reachability}
+      kind="service" name="expense-service" keys={{ catalog }} navigate={() => {}} />);
+    expect(own).toContain('OAuth2 at the node api.vendor.example');
+    expect(own).toContain('postgres 5432 by identity postgres');
   });
 });

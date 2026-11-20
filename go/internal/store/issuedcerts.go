@@ -75,3 +75,26 @@ func (s *Store) DeleteOldIssuedCerts(ctx context.Context, keep time.Duration) (i
 	tag, err := s.q.Exec(ctx, "DELETE FROM issued_certs WHERE not_after < now() - $1::interval", interval(keep))
 	return tag.RowsAffected(), err
 }
+
+// LatestIssuedCerts returns the newest certificate of each of the pods
+// that has one, by its ID: the identities an environment's pods hold
+// (ADR 0036).
+func (s *Store) LatestIssuedCerts(ctx context.Context, podIDs []podid.ID) (map[podid.ID]IssuedCert, error) {
+	out := map[podid.ID]IssuedCert{}
+	if len(podIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.q.Query(ctx, "SELECT DISTINCT ON (pod_id) "+issuedCertCols+` FROM issued_certs WHERE pod_id = ANY($1)
+		ORDER BY pod_id, issued_at DESC, serial`, podIDs)
+	if err != nil {
+		return nil, err
+	}
+	certs, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (IssuedCert, error) { return scanIssuedCert(r) })
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range certs {
+		out[c.PodID] = c
+	}
+	return out, nil
+}

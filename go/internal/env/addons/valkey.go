@@ -293,6 +293,10 @@ func (v valkey) Outputs(_ Addon, c Context, ref Ref) ([]model.TemplatePart, erro
 	return literal("redis://" + loopback + ":" + strconv.Itoa(valkeyPort) + "/0"), nil
 }
 
+// IdentityBy: Valkey takes the certificate's URI, the workload's SPIFFE
+// ID, as the name of its ACL user (tls-auth-clients-user URI).
+func (valkey) IdentityBy() string { return IdentityURI }
+
 // TLSBinding: every reference reaches the addon through the pod's binding,
 // TLS from the first byte with no ALPN protocol, since Valkey has none
 // (ADR 0039).

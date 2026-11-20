@@ -22,9 +22,9 @@ type Pins struct {
 	// Secrets maps a secret's name to the version a reference without a
 	// version is pinned to: its latest.
 	Secrets map[string]int
-	// Credentials are the tenant's credentials (ADR 0033): a binding that
-	// names one without a version is pinned to its latest, and carries
-	// the version's upstream and mode.
+	// Credentials are the environment's credentials (ADR 0033): a binding
+	// that names one without a version is pinned to its latest, and
+	// carries the version's upstream and mode.
 	Credentials map[string]CredentialInfo
 	// Plans maps an addon type to its blueprint's default plan
 	// (addons.Blueprint.DefaultPlan), which an addon without a plan gets:
@@ -36,7 +36,8 @@ type Pins struct {
 // hashes and diffs: defaults filled (replicas, resources, readiness
 // timing, rollout and job timeouts, job on, an addon's plan, a binding's
 // mode and burst, its upstream as its origin; the binding names of
-// services and jobs sorted), Runtime
+// services and jobs sorted; a route's host in lower case without a
+// trailing dot), Runtime
 // explicit on every service, durations as Go's time.Duration.String
 // writes them ("15m0s"), Image pinned (and ImageAsWritten kept) for every
 // image found in p.Images, a digest reference kept as written, every
@@ -75,7 +76,11 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 		}
 	}
 	if len(s.Routes) > 0 {
-		out.Routes = maps.Clone(s.Routes)
+		out.Routes = make(map[string]Route, len(s.Routes))
+		for name, r := range s.Routes {
+			r.Host = RouteHost(r.Host)
+			out.Routes[name] = r
+		}
 	}
 	if len(s.Bindings) > 0 {
 		out.Bindings = make(map[string]Binding, len(s.Bindings))
@@ -143,6 +148,9 @@ func normResources(r *Resources) *Resources {
 		if r.MemoryMib != 0 {
 			out.MemoryMib = r.MemoryMib
 		}
+		// Left out it stays out, so that a spec of before normalises as
+		// it did: the guest's disk.
+		out.DiskGib = r.DiskGib
 	}
 	return &out
 }
@@ -165,13 +173,13 @@ func normReadiness(r *Readiness) *Readiness {
 // (Validate refused it).
 func normBinding(b Binding, p Pins) Binding {
 	out := b
-	if ref := b.TenantCredential; ref != nil {
+	if ref := b.CredentialRef; ref != nil {
 		r := *ref
 		info := p.Credentials[r.Name]
 		if r.Version == 0 {
 			r.Version = info.Latest
 		}
-		out.TenantCredential = &r
+		out.CredentialRef = &r
 		if t, ok := info.Versions[r.Version]; ok {
 			out.Upstream, out.Mode = t.Upstream, t.Mode
 		}

@@ -147,8 +147,11 @@ func secretRefPaths(sp spec.Spec) map[string][]string {
 
 // cloneSpec is the source deployment's spec as a clone applies it: without
 // its attached services (and the routes to them), which run in a
-// sandbox of the source, and with its secrets pinned to nothing (the
-// clone's own versions are pinned).
+// sandbox of the source, without its routes that have a host, which is
+// the source's (ADR 0045: the clone has no domain and no label yet), and
+// with its secrets and its bindings' credentials pinned to nothing (the
+// clone's own versions are pinned, and a credential's upstream and mode
+// are its version's).
 func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 	sp, err := parseStored(stored)
 	if err != nil {
@@ -166,14 +169,28 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(sp.Routes)) {
-		if svc := sp.Routes[name].Service; removed[svc] {
+		r := sp.Routes[name]
+		switch {
+		case removed[r.Service]:
 			delete(sp.Routes, name)
 			fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "routes." + name,
-				Problem: "route " + name + " is not cloned: its service " + svc + " is not", Remedy: ""})
+				Problem: "route " + name + " is not cloned: its service " + r.Service + " is not", Remedy: ""})
+		case r.Host != "":
+			delete(sp.Routes, name)
+			fs = append(fs, spec.Finding{Severity: spec.SeverityInfo, Path: "routes." + name,
+				Problem: "route " + name + " is not cloned: its host " + r.Host + " is the source's",
+				Remedy:  "pass a spec that routes it on a host of the new environment"})
 		}
 	}
 	for name := range sp.Secrets {
 		sp.Secrets[name] = spec.SecretRef{}
+	}
+	for name, b := range sp.Bindings {
+		if ref := b.CredentialRef; ref != nil {
+			b.CredentialRef = &spec.CredentialRef{Name: ref.Name}
+			b.Upstream, b.Mode = "", ""
+			sp.Bindings[name] = b
+		}
 	}
 	b, err := json.Marshal(sp)
 	return b, fs, err
@@ -296,6 +313,65 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		}
 		vcSecrets[name] = spec.SecretInfo{Latest: 1, Versions: []int{1}}
 	}
+	// The credentials: copied, the source's latest version as the clone's
+	// version 1, sealed for it.
+	var creds []store.EnvCredential
+	vcCreds := map[string]spec.CredentialInfo{}
+	for _, name := range slices.Sorted(maps.Keys(req.Credentials)) {
+		p := "credentials." + name
+		switch {
+		case !spec.IsName(name):
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
+				Problem: fmt.Sprintf("%q is no credential's name", name),
+				Remedy:  "credential names are lowercase letters, digits and '-'"})
+			continue
+		case !req.Credentials[name].Copy:
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
+				Problem: "a credential of a clone is {\"copy\": true}", Remedy: "give it, or leave the credential out"})
+			continue
+		case s.d.Bindings == nil || !s.d.Bindings.Enabled():
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
+				Problem: "HTTP bindings are not enabled on this platform", Remedy: "leave the credential out"})
+			continue
+		}
+		c, err := s.d.Bindings.CopyCredential(ctx, src.ID, name, id)
+		if errors.Is(err, model.ErrNotFound) {
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
+				Problem: "environment " + src.Name + " has no credential " + name + " to copy",
+				Remedy:  "leave it out, and make it in the new environment"})
+			continue
+		}
+		if err != nil {
+			return EnvStatus{}, fmt.Errorf("credential %s of %s: %w", name, src.Name, err)
+		}
+		c.CreatedBy = auth.MadeBy(ctx)
+		creds = append(creds, c)
+		vcCreds[name] = spec.CredentialInfo{Latest: 1,
+			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode}}}
+	}
+
+	// A credential the spec names that is not copied: said here, with the
+	// clone's remedy, instead of by the plan.
+	noCred := map[string]bool{}
+	if raw != nil {
+		if sp, pfs := spec.Parse(raw); !spec.HasErrors(pfs) {
+			for _, bname := range slices.Sorted(maps.Keys(sp.Bindings)) {
+				ref := sp.Bindings[bname].CredentialRef
+				if ref == nil || !spec.IsName(ref.Name) {
+					continue
+				}
+				if _, ok := vcCreds[ref.Name]; ok {
+					continue
+				}
+				path := "bindings." + bname + ".credentialRef.name"
+				noCred[path] = true
+				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: path,
+					Problem: "the new environment has no credential " + ref.Name,
+					Remedy:  fmt.Sprintf(`pass credentials: {"%s": {"copy": true}}`, ref.Name)})
+			}
+		}
+	}
+
 	if raw != nil {
 		if sp, pfs := spec.Parse(raw); !spec.HasErrors(pfs) {
 			refs := secretRefPaths(sp)
@@ -316,11 +392,16 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	var norm spec.Spec
 	if raw != nil {
 		p, err := s.plan(ctx, tenant, store.Environment{ID: id, Owner: tenant, Name: req.Name}, raw, nil, spec.ModeApply,
-			vcSecrets)
+			vcSecrets, vcCreds)
 		if err != nil {
 			return EnvStatus{}, err
 		}
-		fs = append(fs, p.findings...)
+		for _, f := range p.findings {
+			if f.Severity == spec.SeverityError && noCred[f.Path] {
+				continue
+			}
+			fs = append(fs, f)
+		}
 		if !p.parsed {
 			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "spec", Problem: "the spec cannot be read",
 				Remedy: "fix the findings above"})
@@ -369,6 +450,11 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		for i, sec := range secrets {
 			if _, err := tx.InsertSecret(ctx, store.EnvSecret{EnvID: e.ID, Name: sec.name, Version: 1, Sealed: sealed[i],
 				CreatedBy: author, MadeBy: auth.MadeBy(ctx)}); err != nil {
+				return err
+			}
+		}
+		for _, c := range creds {
+			if err := tx.InsertEnvCredential(ctx, c); err != nil {
 				return err
 			}
 		}

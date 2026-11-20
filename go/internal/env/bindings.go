@@ -44,9 +44,13 @@ type HTTPBindings interface {
 	CheckDestination(ctx context.Context, host string) error
 	PreflightHTTP(ctx context.Context, tenant string, b *fleetv1.HttpBinding, probe *bindings.HTTPProbe) (
 		*bindings.HTTPPreflightResult, error)
-	// OpenCredential is a version of a tenant's credential as a pod
+	// OpenCredential is a version of an environment's credential as a pod
 	// receives it, under the binding's name (ADR 0033).
-	OpenCredential(ctx context.Context, tenant, name string, version int, as string) (*fleetv1.HttpBinding, error)
+	OpenCredential(ctx context.Context, env uuid.UUID, name string, version int, as string) (
+		*fleetv1.HttpBinding, error)
+	// CopyCredential is the latest version of a credential of environment
+	// from, sealed as version 1 of environment to's: a clone's copy.
+	CopyCredential(ctx context.Context, from uuid.UUID, name string, to uuid.UUID) (store.EnvCredential, error)
 }
 
 // BindingCheckRequest is POST /api/v1/environments/{env}/bindings/{name}/
@@ -146,7 +150,7 @@ type bindingDef struct {
 func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name string, b spec.Binding,
 	pins map[string]spec.SecretRef, open bool) (*fleetv1.HttpBinding, bindingDef, error) {
 	def := bindingDef{Name: name, Binding: b, Versions: map[string]int{}}
-	if ref := b.TenantCredential; ref != nil {
+	if ref := b.CredentialRef; ref != nil {
 		return s.resolveCredential(ctx, envID, name, b, def, open)
 	}
 	up, mode := spec.BindingTemplate(b)
@@ -332,13 +336,13 @@ func (s *Service) CheckBinding(ctx context.Context, tenant, envRef, name string,
 	return s.d.Bindings.PreflightHTTP(ctx, tenant, p, req.Probe)
 }
 
-// resolveCredential is a binding that names a credential of the tenant
-// (ADR 0033) as a pod receives it: the pinned version, opened when open,
-// else its name, upstream and mode only. The definition is the binding,
-// whose pin names the version.
+// resolveCredential is a binding that names a credential of the
+// environment (ADR 0033) as a pod receives it: the pinned version, opened
+// when open, else its name, upstream and mode only. The definition is the
+// binding, whose pin names the version.
 func (s *Service) resolveCredential(ctx context.Context, envID uuid.UUID, name string, b spec.Binding, def bindingDef,
 	open bool) (*fleetv1.HttpBinding, bindingDef, error) {
-	ref := b.TenantCredential
+	ref := b.CredentialRef
 	up, mode := spec.BindingTemplate(b)
 	p := &fleetv1.HttpBinding{Name: name, Upstream: up}
 	if mode == httpcheck.ModeIntercept {
@@ -350,11 +354,7 @@ func (s *Service) resolveCredential(ctx context.Context, envID uuid.UUID, name s
 	if s.d.Bindings == nil {
 		return p, def, &httpcheck.Error{Code: httpcheck.CodeInvalidBinding, Msg: "HTTP bindings are off"}
 	}
-	e, err := s.st.GetEnvironment(ctx, envID)
-	if err != nil {
-		return nil, def, fmt.Errorf("environment %s: %w", envID, err)
-	}
-	opened, err := s.d.Bindings.OpenCredential(ctx, e.Owner, ref.Name, ref.Version, name)
+	opened, err := s.d.Bindings.OpenCredential(ctx, envID, ref.Name, ref.Version, name)
 	if errors.Is(err, model.ErrNotFound) {
 		return p, def, &httpcheck.Error{Code: httpcheck.CodeInvalidBinding,
 			Msg: fmt.Sprintf("credential %s has no version %d any more", ref.Name, ref.Version)}
@@ -365,62 +365,66 @@ func (s *Service) resolveCredential(ctx context.Context, envID uuid.UUID, name s
 	return opened, def, nil
 }
 
-// CredentialUses is bindings.CredentialUsers: the environments of a
-// tenant whose latest or deployed deployment names a credential, by the
-// credential's name, with the bindings that name it and the versions
-// each of the two pins (ADR 0033).
-func (s *Service) CredentialUses(ctx context.Context, tenant string) (map[string][]bindings.EnvCredentialUse, error) {
-	envs, err := s.st.ListEnvironments(ctx, tenant, nil)
-	if err != nil {
-		return nil, fmt.Errorf("environments: %w", err)
+// CredentialUses is bindings.CredentialUsers: how the latest and the
+// deployed deployment of an environment use its credentials, by the
+// credential's name: the bindings that name it and the version each of
+// the two pins (ADR 0033). The environment's deployments are read through
+// st, their specs (which never change) from the cache.
+func (s *Service) CredentialUses(ctx context.Context, st *store.Store, envID uuid.UUID) (
+	map[string]bindings.CredentialUse, error) {
+	e, err := st.GetEnvironment(ctx, envID)
+	if errors.Is(err, store.ErrNoRow) {
+		return map[string]bindings.CredentialUse{}, nil
 	}
-	out := map[string][]bindings.EnvCredentialUse{}
-	for _, e := range envs {
-		uses := map[string]*bindings.EnvCredentialUse{}
-		read := func(number int, latest bool) error {
-			if number == 0 {
-				return nil
-			}
-			sp, err := s.deploymentSpec(ctx, e, number)
-			if err != nil {
-				return err
-			}
-			for _, bname := range slices.Sorted(maps.Keys(sp.Bindings)) {
-				ref := sp.Bindings[bname].TenantCredential
-				if ref == nil {
-					continue
-				}
-				u := uses[ref.Name]
-				if u == nil {
-					u = &bindings.EnvCredentialUse{ID: e.ID.String(), Name: e.Name, Bindings: []string{}}
-					uses[ref.Name] = u
-				}
-				if !slices.Contains(u.Bindings, bname) {
-					u.Bindings = append(u.Bindings, bname)
-				}
-				if latest {
-					u.Latest = max(u.Latest, ref.Version)
-				} else {
-					u.Deployed = max(u.Deployed, ref.Version)
-				}
-			}
+	if err != nil {
+		return nil, fmt.Errorf("environment %s: %w", envID, err)
+	}
+	uses := map[string]*bindings.CredentialUse{}
+	read := func(number int, latest bool) error {
+		if number == 0 {
 			return nil
 		}
-		if err := read(e.Deployment, true); err != nil {
+		sp, err := s.deploymentSpec(ctx, e, number)
+		if err != nil {
+			return err
+		}
+		for _, bname := range slices.Sorted(maps.Keys(sp.Bindings)) {
+			ref := sp.Bindings[bname].CredentialRef
+			if ref == nil {
+				continue
+			}
+			u := uses[ref.Name]
+			if u == nil {
+				u = &bindings.CredentialUse{Bindings: []string{}}
+				uses[ref.Name] = u
+			}
+			if !slices.Contains(u.Bindings, bname) {
+				u.Bindings = append(u.Bindings, bname)
+			}
+			if latest {
+				u.Latest = max(u.Latest, ref.Version)
+			} else {
+				u.Deployed = max(u.Deployed, ref.Version)
+			}
+		}
+		return nil
+	}
+	if err := read(e.Deployment, true); err != nil {
+		return nil, err
+	}
+	if e.Deployed != e.Deployment {
+		if err := read(e.Deployed, false); err != nil {
 			return nil, err
 		}
-		if e.Deployed != e.Deployment {
-			if err := read(e.Deployed, false); err != nil {
-				return nil, err
-			}
-		} else {
-			for _, u := range uses {
-				u.Deployed = u.Latest
-			}
+	} else {
+		for _, u := range uses {
+			u.Deployed = u.Latest
 		}
-		for _, name := range slices.Sorted(maps.Keys(uses)) {
-			out[name] = append(out[name], *uses[name])
-		}
+	}
+	out := make(map[string]bindings.CredentialUse, len(uses))
+	for name, u := range uses {
+		slices.Sort(u.Bindings)
+		out[name] = *u
 	}
 	return out, nil
 }

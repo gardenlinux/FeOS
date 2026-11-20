@@ -111,13 +111,14 @@ func envService(env, service string) string {
 }
 
 // envRoutes is one environment's routes: sorted by the number of their
-// path's segments, longest first, then by name, with prefixes and
-// clients in the same order.
+// path's segments, longest first, then by name, with prefixes, hosts
+// (canonical, "": none) and clients in the same order.
 type envRoutes struct {
 	id       string
 	tenant   string
 	routes   []wire.Route
 	prefixes []string
+	hosts    []string
 	clients  []clients
 	services map[string]*service
 	// access is who the environment admits (wire.Env.Access): "" anyone,
@@ -193,12 +194,10 @@ type endpoint struct {
 }
 
 // canonicalHost is a request's host as the table keys it: lower case,
-// without a port and a trailing dot.
+// without a port and a trailing dot (routing.CanonicalHost, which the
+// route door uses too).
 func canonicalHost(h string) string {
-	if host, _, err := net.SplitHostPort(h); err == nil {
-		h = host
-	}
-	return strings.ToLower(strings.TrimSuffix(h, "."))
+	return routing.CanonicalHost(h)
 }
 
 // buildTable builds the routing of a state. Of two environments that
@@ -336,14 +335,33 @@ func (t *table) challenge(token string) (wire.Challenge, bool) {
 	return c, ok
 }
 
-// cert returns the certificate of a domain by its canonical host; nil
-// when the host has none (the wildcard serves it).
+// cert returns the certificate of a domain by its canonical host, as it
+// is, else of the wildcard domain that covers it (ADR 0045); nil when
+// neither has one (the zones' wildcards serve it).
 func (t *table) cert(host string) *tls.Certificate {
 	if t == nil {
 		return nil
 	}
 	if dc := t.certs[host]; dc != nil {
 		return dc.cert
+	}
+	if w := routing.WildcardOf(host); w != "" {
+		if dc := t.certs[w]; dc != nil {
+			return dc.cert
+		}
+	}
+	return nil
+}
+
+// lookup returns the environment that serves a canonical host: the one
+// whose host it is, else the one whose wildcard domain covers it, so that
+// a name's own domain wins over a wildcard (ADR 0045); nil for none.
+func (t *table) lookup(host string) *envRoutes {
+	if e := t.hosts[host]; e != nil {
+		return e
+	}
+	if w := routing.WildcardOf(host); w != "" {
+		return t.hosts[w]
 	}
 	return nil
 }
@@ -380,6 +398,7 @@ func buildEnv(e wire.Env) *envRoutes {
 	})
 	for _, r := range er.routes {
 		er.prefixes = append(er.prefixes, r.Path)
+		er.hosts = append(er.hosts, canonicalHost(r.Host))
 		er.clients = append(er.clients, parseClients(r.From))
 	}
 	for _, s := range e.Services {
@@ -415,7 +434,10 @@ type target struct {
 }
 
 // route routes a request by its canonical host and its escaped path from
-// a client's address (clientAddr) to an environment and a route, or
+// a client's address (clientAddr) to an environment and a route, of the
+// routes that answer on that host the one with the longest prefix, of
+// one prefix the one whose host names it most closely
+// (routing.MatchHost, ADR 0045), or
 // returns the answer when the routing does not send it anywhere. When
 // the route matched does not admit the client, the answer is 403 and the
 // target has the environment and the route: the route refused the
@@ -426,7 +448,7 @@ func (t *table) route(host, raw string, client netip.Addr) (target, *reply) {
 	if t == nil {
 		return target{}, &reply{http.StatusServiceUnavailable, textNoTable, 5}
 	}
-	e := t.hosts[host]
+	e := t.lookup(host)
 	if e == nil {
 		return target{}, &reply{http.StatusNotFound, textNoHost, 0}
 	}
@@ -440,7 +462,7 @@ func (t *table) route(host, raw string, client netip.Addr) (target, *reply) {
 	if err != nil {
 		return target{}, &reply{http.StatusBadRequest, textBadEscape, 0}
 	}
-	i, n, ok := routing.Match(e.prefixes, raw)
+	i, n, ok := routing.MatchHost(e.prefixes, e.hosts, host, raw)
 	if !ok {
 		return target{}, &reply{http.StatusNotFound, "no route for " + path, 0}
 	}
@@ -473,13 +495,13 @@ func (t *table) bind(tg target, raw string) (target, *reply) {
 	return tg, nil
 }
 
-// env returns the environment that serves a canonical host; nil when
-// none does or there is no table.
+// env returns the environment that serves a canonical host (lookup);
+// nil when none does or there is no table.
 func (t *table) env(host string) *envRoutes {
 	if t == nil {
 		return nil
 	}
-	return t.hosts[host]
+	return t.lookup(host)
 }
 
 // zonesOf are the zones of default hosts that s names, canonical.

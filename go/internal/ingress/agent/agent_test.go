@@ -1055,7 +1055,7 @@ func TestHeartbeatsRefreshTheCache(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if time.Since(first) < refresh-100*time.Millisecond {
 		if _, at, err := d.loadTable(); err != nil || !at.Equal(first) {
-			t.Errorf("table-v2.json saved at %v (%v) after a heartbeat within the interval; first at %v", at, err, first)
+			t.Errorf("table-v3.json saved at %v (%v) after a heartbeat within the interval; first at %v", at, err, first)
 		}
 	}
 	// One after it writes the cache, though nothing changed.

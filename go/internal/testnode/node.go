@@ -32,7 +32,8 @@ const (
 	defaultDiskBytes   = 1 << 40
 	defaultMaxStreams  = 1024
 	// podDiskBytes is what a pod's disk takes of the node's disk: feosd's
-	// blank data volume is 8 GiB.
+	// blank data volume is 8 GiB; a disk of its own size
+	// (Resources.disk_gib) takes that.
 	podDiskBytes = 8 << 30
 )
 

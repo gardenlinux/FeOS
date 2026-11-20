@@ -40,6 +40,37 @@ func serviceSpec(replicas int, version string, extra string) string {
 		"env":{"VERSION":%q},"ports":[{"name":"http","port":8080}]%s}}}`, testImage, replicas, version, extra)
 }
 
+// A service's disk of its own size (resources.diskGib) is its rows' and
+// its pods' on the node, and a change of it rolls the service.
+func TestImageServiceDisk(t *testing.T) {
+	h := newHarness(t, options{})
+	n1 := h.addNode("n1")
+	env := h.newEnv("stage")
+	r1 := h.apply(env.ID, serviceSpec(1, "1", `,"resources":{"diskGib":30}`))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+	v1 := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
+	if v1[0].Sandbox.DiskGiB != 30 {
+		t.Fatalf("the row's disk: %d GiB", v1[0].Sandbox.DiskGiB)
+	}
+	var disk uint32
+	for _, p := range n1.Pods() {
+		if p.GetPodId() == v1[0].Sandbox.ID.String() {
+			disk = p.GetSpec().GetResources().GetDiskGib()
+		}
+	}
+	if disk != 30 {
+		t.Fatalf("the pod's disk on its node: %d GiB", disk)
+	}
+	// Back to the guest's disk: another template, a new pod.
+	r2 := h.apply(env.ID, serviceSpec(1, "1", ""))
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
+	v2 := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
+	if v2[0].Sandbox.ID == v1[0].Sandbox.ID || v2[0].Sandbox.DiskGiB != 0 ||
+		v2[0].Instance.TemplateHash == v1[0].Instance.TemplateHash {
+		t.Fatalf("v2 rows %+v", v2)
+	}
+}
+
 // An image service rolls to a new template one replica at a time, a new
 // one first (surge 1): never more than one replica above its count, the
 // old ones stop only once the new are ready; a new count adds or
@@ -166,6 +197,73 @@ func TestImageServiceRollingAndScale(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.waitRows(env.ID, spec.KindService, "web", 1, 30*time.Second, "running again", running)
+}
+
+// A service's replicas run on different nodes under either policy: the
+// two that a deployment inserts together, and through a rolling update
+// over three nodes, whose first new replica takes the node without an old
+// one and the next the node a stopping one leaves, so that the ready
+// replicas are on two nodes at every moment.
+func TestReplicasOnDifferentNodes(t *testing.T) {
+	for _, policy := range []string{sandbox.PlacementBinpack, sandbox.PlacementSpread} {
+		t.Run(policy, func(t *testing.T) {
+			h := newHarness(t, options{engine: func(c *sandbox.Config) { c.Placement = policy }})
+			for _, n := range []string{"n1", "n2", "n3"} {
+				h.addNode(n)
+			}
+			env := h.newEnv("stage")
+			apart := func(rows []store.EnvInstanceRow) bool {
+				return len(rows) == 2 && rows[0].Sandbox.Node != "" && rows[0].Sandbox.Node != rows[1].Sandbox.Node
+			}
+			r1 := h.apply(env.ID, serviceSpec(2, "1", ""))
+			h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+			if v1 := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready); !apart(v1) {
+				t.Fatalf("the replicas on %s and %s", v1[0].Sandbox.Node, v1[1].Sandbox.Node)
+			}
+
+			var mu sync.Mutex
+			together := ""
+			stop := make(chan struct{})
+			watched := make(chan struct{})
+			go func() {
+				defer close(watched)
+				for {
+					select {
+					case <-stop:
+						return
+					case <-time.After(20 * time.Millisecond):
+					}
+					rows, err := h.st.ListEnvInstanceRows(bg, env.ID)
+					if err != nil {
+						continue
+					}
+					nodes := map[string]bool{}
+					for _, r := range rows {
+						if ready(r) {
+							nodes[r.Sandbox.Node] = true
+						}
+					}
+					if len(nodes) < 2 {
+						mu.Lock()
+						together = fmt.Sprint(nodes)
+						mu.Unlock()
+					}
+				}
+			}()
+			r2 := h.apply(env.ID, serviceSpec(2, "2", ""))
+			h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 60*time.Second)
+			close(stop)
+			<-watched
+			mu.Lock()
+			if together != "" {
+				t.Errorf("during the rollout the ready replicas were on %s alone", together)
+			}
+			mu.Unlock()
+			if v2 := h.waitRows(env.ID, spec.KindService, "web", 2, 10*time.Second, "ready", ready); !apart(v2) {
+				t.Fatalf("after the rollout the replicas are on %s and %s", v2[0].Sandbox.Node, v2[1].Sandbox.Node)
+			}
+		})
+	}
 }
 
 // A container that exits is restarted with a growing backoff, and 3 exits

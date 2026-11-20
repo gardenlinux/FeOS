@@ -76,6 +76,9 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--acme-directory` | none | the ACME directory, an https URL (`https://acme-v02.api.letsencrypt.org/directory`), from which the domains' certificates are obtained ([Certificates of domains](#certificates-of-domains)); its terms of service are agreed to. Empty: none is obtained, and domains stay `issuing`. Needs `--secret-key-file`, which seals the keys |
 | `--acme-email` | none | the contact of the platform's ACME account, an email address; changing it updates the account |
 | `--acme-profile` | `shortlived` | the certificate profile the orders ask for (ACME profiles), one the directory lists: Let's Encrypt's `shortlived` is six days (160 hours), `classic` 90 days; empty: the CA's default. A profile the directory does not list fails every order |
+| `--acme-zone` | empty | the platform's ACME zone ([ADR 0045](../adr/0045-hosts-domains-and-certificates.md)), such as `acme.fecore.dev`: a zone of its own, delegated by NS records, with a short negative TTL. A wildcard domain `*.<name>` delegates `_acme-challenge.<name>` with a CNAME to `<token>.<zone>`, where ferund writes its DNS-01 records ([Certificates of domains](#certificates-of-domains)). Empty: no wildcard can be claimed. Needs `--acme-directory`; the zone is reserved |
+| `--acme-zone-provider` | `route53` | the ACME zone's DNS provider: `route53`, with the process's credentials, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` or an EKS Pod Identity, which need `route53:ChangeResourceRecordSets` on the zone alone |
+| `--acme-zone-route53-id` | none | the ACME zone's hosted zone ID in Route 53 (`Z…`); required with `route53` |
 | `--deny-prefix` | a built-in set | a destination that preflights, bindings and the image resolver may not reach, repeatable; a set given replaces the built-in one, and `default` stands for it (`default,100.144.0.0/13` adds a network) |
 | `--admin-users` | none | `user:password,...` for the admin API: Basic, beside or instead of OIDC |
 | `--public-url` | none | the front door's external URL, e.g. `https://run.fecode.dev`; required with `--oidc-issuer` |
@@ -107,7 +110,7 @@ token of an instance of `ferun-sink` ([The sink](#the-sink)).
 | `--image-bakes` | true | a create names the baked layers of its image and lets its node bake it ([Images](#images), ADR 0025); false: neither |
 | `--default-vcpus`, `--default-memory-mib` | 2, 512 | the size of a sandbox created without one |
 | `--placement` | `binpack` | or `spread` |
-| `--disk-budget` | `4GiB` | placement's disk gate per pod |
+| `--disk-budget` | `4GiB` | placement's disk gate per pod: the free disk a node must have beside a pod's own disk, and what it keeps out of the disks of their own size it books ([Placement](#placement)) |
 | `--idle-pause` | `10s` | a running sandbox idle this long is paused; 0 disables |
 | `--hibernate-after` | 0 | a sandbox paused this long is hibernated; 0 disables |
 | `--node-ttl` | `15s` | the age of a node's telemetry before it is down |
@@ -168,8 +171,9 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `env`, `env/spec`, `env/addons`, `env/ctl`, `env/envdeps` | the environments ([Environments](#environments)) |
 | `ingress/service`, `ingress/table` | ferund's side of the ingress: the API `ferun-ingress` calls, its identity, the table it serves from ([The ingress](#the-ingress)) |
 | `domains` | tenants' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
-| `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table ([Certificates of domains](#certificates-of-domains)) |
-| `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path matching, which the route door uses too |
+| `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table, a wildcard's over DNS-01 in the ACME zone ([Certificates of domains](#certificates-of-domains)) |
+| `route53`, `awsauth` | the ACME zone's first DNS provider: Route 53's ChangeResourceRecordSets, signed with SigV4 by `awsauth` from static keys or an EKS Pod Identity |
+| `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path and host matching, which the route door uses too |
 | `visits` | the tenants' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
 | `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
 | `oidc`, `oidc/oidctest` | the OpenID Connect relying party of human sign-in and of `ferun-auth`; a test issuer |
@@ -600,6 +604,25 @@ secrets.
   (`renew_after`): a node's and an ingress instance's at half its
   lifetime, so that one switched off at any time keeps at least half of
   it; a pod's at three quarters.
+- **Who a workload is.** `GET /api/v1/environments/{env}/identities`
+  (tenant class, read on the environment) answers
+  `{"trustDomain", "issuer", "workloads": [{"kind", "name", "spiffeId",
+  "ou", "pods": [{"pod", "subject", "serial", "issuedAt", "notAfter",
+  "node"}]}]}`: every object of the latest
+  deployment (services, jobs, addons, each by name, also without a pod:
+  `"pods": []`), then every sandbox of the environment (by ID), then
+  the workloads of pods an earlier deployment left; each with the
+  SPIFFE ID its pods' certificates carry (`pki.WorkloadID`), an attached
+  service with its sandbox's, whose pod it runs in, and the OU of its
+  pods' subjects (the ID its set carries, on which postgres maps a
+  role). A pod is its row's ID (an instance's as the status shows it),
+  its subject (`pki.PodSubject` in RFC 2253, `CN=<td>/<pod>,OU=<set>`),
+  the serial, `issued_at` and `not_after` of the newest `issued_certs`
+  row of it and the node that was issued on (`""` and the pod's node
+  before its first). `issuer` is the issuing CA's subject. No key and no
+  certificate is answered: what a certificate names, not the
+  certificate. An instance without an issuer answers `trustDomain`,
+  `issuer` and every `spiffeId`, `ou` and `subject` `""`.
 - **Join tokens.** A token is 32 random bytes. The node sends
   `feos-join-<secret>`; the operator gets `feos-join-<secret>.<pin>`, where
   the pin is the SHA-256 of the root that anchors the issuer (its
@@ -835,7 +858,7 @@ Every row has an **incarnation**, a UUID set when the row is inserted: a
 row inserted again under an ID that was deleted would be a new
 incarnation (ferund mints new IDs, so only a drawn ID of a deleted
 sandbox could be).
-The pod's spec is `{resources: {vcpus, memory_mib}, containers: [{name:
+The pod's spec is `{resources: {vcpus, memory_mib[, disk_gib]}, containers: [{name:
 "main", image_ref, command: ["sleep", "infinity"]}], network: {}, labels:
 {ferun.sandbox, ferun.tenant, ferun.incarnation}}`, the same on every
 retry: feosd compares specs, labels included, so a create against a
@@ -854,7 +877,7 @@ sandbox or a tenant's job's pod, builds its pod from the template instead
 |---|---|---|
 | `pending` | no | no pod yet, a create failed before the pod existed, or its node went down before its pod was ever seen |
 | `creating` | yes | a create, start, restore or repair runs, or the pod was seen pending |
-| `running` | yes | the pod runs |
+| `running` | yes | the pod runs; a stop's too, while its containers drain after SIGTERM |
 | `pausing` | yes | a suspend runs |
 | `paused` | no | the pod is suspended on its node |
 | `resuming` | yes | a resume runs |
@@ -886,7 +909,8 @@ finished in another transaction that applies what the node did.
 | restore | hibernated | creating | RestorePod of the checkpoint | 7 min 5 s + 8 s/GiB |
 | pause | running | pausing | SuspendPod | 3 min 40 s + 5 s/GiB |
 | hibernate | paused; stopped, failed and running when draining | hibernating | HibernatePod | a pause's + `--hibernate-timeout` + 16 s/GiB |
-| repair | creating without an op, running with an unreachable guest; running, for an instance whose container exited (`Restart`, [Environments](#probes-exits-and-restarts)) | creating | StopPod and StartPod; for a pod stuck in its restore, DeletePod and RestorePod, never for a pod with volumes | 7 min 5 s + 8 s/GiB |
+| repair | creating without an op, running with an unreachable guest; running, for an instance whose container exited (`Restart`, [Environments](#probes-exits-and-restarts)) | creating | StopPod and StartPod; for a pod stuck in its restore, DeletePod and RestorePod, never for a pod with volumes | 7 min 5 s + 8 s/GiB, and an image service's instance's stop grace (660 s), which its StopPod may wait |
+| stop | running, for an environment's instance that goes (`StopPod`, [Environments](#a-reconcile-step)) | running | StopPod | a pause's + 2 min, and the pod's stop grace (660 s for an image service's instance) |
 
 GiB is the sandbox's memory, rounded up. **A caller's deadline covers
 its callee's budget**, so that feosd answers, the change or "the VM is
@@ -1022,6 +1046,22 @@ by Sync, never an older one. A repair that restarts a pod, and a start,
 resume or restore that came up with a cold boot, end the sandbox's process
 holds; a repair that found the pod healthy and made no call ends nothing.
 
+**A stop** ends an environment's instance's pod for good, once the
+controller has drained its traffic ([A reconcile step](#a-reconcile-step)):
+feosd sends its containers SIGTERM and gives them the pod's stop grace
+before its microVM ends, and runs the stop to its end once it has the
+pod's lock, whatever the call does. The row stays `running` while the
+containers drain, as the pod does: booked, its address in its groups,
+its credentials renewed and its forwards open, the op saying that it
+stops ("stopping: its containers have SIGTERM and 660 s to exit"). A
+stop that ends with the pod stopped leaves the row `stopped`, unbooked,
+and sends `env-reconcile` on `ferun_leader`; one whose StopPod met a
+busy VM leaves it `running`, "stop postponed: …", and one whose pod
+still runs, "stop failed: …". Its deadline covers a pause's, since the
+StopPod may wait for the pod's lock behind a suspend that feosd still
+runs, the stop's own steps and the grace. A takeover's StopPod waits for
+the stop that feosd runs already and answers once the pod has stopped.
+
 **Stale ops.** The leader takes over the op of an instance that died or
 stops, when it is connected to the op's node; otherwise it releases the
 op and the sandbox becomes `unknown`. An op of a live instance is never
@@ -1087,11 +1127,44 @@ IDs](#sandbox-ids)); for a restore, the
 checkpoint's object store; slots; CPU, `floor(cores × cpu_overcommit)`,
 not gated when 0; memory, the total less the headroom; free memory, the
 reported available less the headroom; disk, the available against
-`--disk-budget`. Among the nodes that pass,
-`binpack` takes the one whose scarcest resource has the least free share,
-`spread` the most, ties by name; a hibernated sandbox prefers the node
-that holds its record. The op's begin rechecks the gates under the
-node's lock, so two instances placing at once never overbook a node.
+`--disk-budget`, plus the pod's own disk for a pod that has one
+("disk gate (<n> GiB available, <m> GiB for the pod's disk and the
+budget)"); and for such a pod the disks of their own size booked on the
+node with its own within the node's disk total less `--disk-budget`
+("disk booking gate (<booked>GiB+<pod>GiB of <capacity>GiB)"). A pod's
+disk is thin and holds what it writes: one of the guest's 8 GiB books
+nothing (the slots and the budget cover those, as before), one of its
+own size (`resources.diskGib` of an environment's image service or job,
+`sandboxes.disk_gib`, `0038`) books it whole, `bookings.disk_gib`, while
+the pod runs, as its vCPUs and memory, whatever it wrote of it: the
+gates err on the side of room. The booked disks are part of the score's
+scarcest resource once any is booked, and of the nodes' view
+(`diskBookedBytes`, `diskCapacityBytes`). The live gate sees what the
+node holds now, its other pods' disks and diskd's chunk cache with it;
+the booking gate the large disks' growth to come. The nodes that pass
+rank, for a replica of an image service, by its **peers** first ([ADR
+0018](../adr/0018-environments-and-deployments.md), "A service's
+replicas go to different nodes"): fewer of the service's other
+instances of the replica's template on the node, then fewer of another
+template's (`store.Peers`). A peer is an `env_instances` row of the
+same environment, kind `service` and object that is not `stopping`,
+whose sandbox row names the node in a state other than `pending`,
+`hibernated` and `lost`; a pod in its stop grace (`running`, the op
+`stop`) is none, so a rollout's next replica may take the place it is
+about to free. Then a hibernated sandbox prefers the node that holds
+its record; then `binpack` takes the one whose scarcest resource has
+the least free share, `spread` the most; ties by name. The peers rank
+and never refuse: on one node, or with the others full or draining, a
+replica goes beside the others. A sandbox, a tenant's job, an addon and
+a job's run have no peers. The placement's audit gives each node's
+peers as `instances` and `otherInstances`. The op's begin rechecks the
+gates under the node's lock, so two instances placing at once never
+overbook a node. Under the same lock it counts the replica's peers on
+the node again (`peersCame`): replicas inserted together are placed at
+once from snapshots that rank the same node first, and one that finds a
+peer come since its snapshot tries its next candidate, and the node
+again after all others, without the count. Nothing moves a running
+replica for the spread.
 Nothing fits: the sandbox stays, "no capacity (retryable): no feasible
 node; n1: <reason>; ...". Slots (50), headroom (1 GiB) and overcommit (16)
 are per node, set with `PATCH /api/v1/admin/nodes/{node}`.
@@ -1202,10 +1275,15 @@ an instance connected to the node: it reads the pod and deletes it only
 when its incarnation is the tombstone's (or it has none), and drops the
 tombstone only after the node answered. Processing always runs detached,
 like an op's calls. Its `DeletePod` has feosd's suspend budget, 30 s,
-and 2 min and 4 s/GiB as its deadline: feosd's delete waits for the
-pod's lock, which a suspend (an idle pause of a sandbox deleted
-meanwhile) holds up to that budget, and feosd runs the delete to its end
-once it has the lock, whatever its caller does. While a tombstone exists, placement puts no pod of
+2 min, the pod's stop grace (`stop_grace_seconds` of the spec the node
+holds: 660 s for an image service's instance, 0 for every other pod,
+whose 10 s the 2 min cover) and 4 s/GiB as its deadline: feosd's delete
+waits for the pod's lock, which a suspend (an idle pause of a sandbox
+deleted meanwhile) holds up to that budget, lets the pod's containers
+exit after SIGTERM, and runs the delete to its end once it has the
+lock, whatever its caller does. The leader's loop skips a tombstone this
+instance processes already and waits for one it starts for 2 min at
+most, so that a delete in its grace holds no pass. While a tombstone exists, placement puts no pod of
 that ID on that node. Tombstones of removed nodes are dropped.
 
 ### Policies
@@ -1442,7 +1520,7 @@ list:
 | read on the job's environment | a tenant job's get and logs |
 | write on the job's environment | a tenant job's cancel and delete |
 | admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`); an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
-| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic |
+| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic, its bindings' use, its workloads' identities |
 | write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
 | admin of the scope the request names (the tenant, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/tenant/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/tenant/invitations`, `DELETE …/{id}`) |
 | admin on the environment | its route tokens, `public`, its access (who it admits) and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
@@ -1464,7 +1542,7 @@ default, the environment by ID or name), and lists them with `role`,
 `environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
 sandbox token is its sandbox's, and the door's answers are as before.
 ferund's own reads of the sink on a session's behalf (logs, traffic,
-access logs) pass the session's cookie and `FeRun-Tenant` on
+access logs, the bindings' use) pass the session's cookie and `FeRun-Tenant` on
 (`auth.Tenant.PassOn`), as they pass a token: no service credential
 reads the sink for a tenant.
 
@@ -1553,7 +1631,10 @@ deleted), `runningJobs` (tenants' jobs queued or running), and the sums
 environments' services of runtime `image` by their current
 deployments' resources, its addons' plans and its running jobs (an
 attached service runs in a sandbox, which counts already; environments'
-own jobs are not counted). A tenant a person makes gets the
+own jobs are not counted). A service's or job's disk (`diskGib`) counts
+towards no limit: it is bounded per pod (200 GiB), booked on its node
+whole while the pod runs ([Placement](#placement)), and scratch, so it
+costs a node's room while it runs and nothing after. A tenant a person makes gets the
 `--tenant-default-*` limits; a tenant an operator makes has none; an
 operator replaces any tenant's with `PUT
 /api/v1/admin/tenants/{tenant}/limits {sandboxes, environments,
@@ -1898,7 +1979,12 @@ detached from the request, so that a browser that gives up on a cold
 start does not cancel it. The request goes through a reverse proxy whose
 transport dials `PortForwardService/Forward` on the sandbox's node
 connection; the token stops at the door, and the guest sees the Host the
-client sent, which for FeCode's previews is the preview host. Upgrades
+client sent, which for FeCode's previews is the preview host. A client
+that reaches the door through an ingress that routes by Host, at the
+platform's own name, names that Host in `X-FeRun-Host` instead: a
+`host[:port]` there is the guest's Host, and the header stops at the
+door, also at the route door. It is no credential, since whoever may
+call the door may send any Host. Upgrades
 such as WebSockets ride through. Connections are pooled per pod and port;
 a sandbox has at most 32 on the instance, pooled ones included, and a
 port's pool no more. A request waits up to 30 s for its turn at a
@@ -1968,8 +2054,8 @@ They come from three places, and from no other:
 
 - **a sandbox's own set**, `PUT /api/v1/sandboxes/{id}/http` (sandbox
   class), stated whole;
-- **the tenant's credentials a sandbox names**, at their latest versions
-  ([Credentials of a tenant](#credentials-of-a-tenant));
+- **the credentials of its environment a sandbox names**, at their latest
+  versions ([Credentials of an environment](#credentials-of-an-environment));
 - **an environment's pod**: the bindings its image service or job names
   (`"bindings": ["erp"]`), as the deployment its instance or job run
   belongs to has them ([The deployment spec](#the-deployment-spec)), a
@@ -2165,61 +2251,154 @@ the same deployment, opens that incident again (`closed_at` cleared, its
 summary and evidence the new ones) instead of a new one. The loop
 deletes a binding's incidents 30 days after they closed.
 
-### Credentials of a tenant
+**Use.** `GET /api/v1/environments/{env}/bindings/usage?window=24h|1h`
+(tenant class, read on the environment; 24 h when no window is named,
+another a 400) says what the environment's pods sent through each
+binding in the window that ends now, and who sent it, for the console's
+view of where a credential lives: every binding of the latest
+deployment, an unused one with zeros, and every other one its pods'
+requests named (a sandbox's own set, its environment's credentials), by name.
 
-A credential ([ADR 0033](../adr/0033-credentials-of-a-tenant.md)) is an
-HTTP binding's definition that a tenant states once and its sandboxes and
-environments use by name (`internal/bindings/credentials.go`,
-`internal/store/tenant_credentials.go`). It is on with the HTTP bindings.
+```json
+{"window": "24h", "unavailable": "…", "truncated": false,
+ "bindings": [{"name": "erp", "requests": 1204, "refused": 2, "failing": 0, "tokenFailed": 0, "blocked": 1,
+   "lastAt": "2026-11-19T10:02:03Z",
+   "lastProblem": {"at": "…", "status": 403, "code": "denied_path", "message": "…", "traceId": "…"},
+   "users": [{"kind": "service", "name": "api", "requests": 1200}, {"kind": "sandbox", "name": "<id>", "requests": 4}]}]}
+```
+
+`requests` is every request through the binding, feos-authn's refusals
+among them; `refused` those the upstream answered 401 or 403 (its
+credential refused), `failing` 429 or 5xx, or not reached (`unreachable`,
+`tls`), `tokenFailed` those without an OAuth token
+(`credential_unavailable`), `blocked` feos-authn's other refusals
+(`denied_path`, `rate_limited`, `misdirected`, `method_not_allowed`,
+`denied_destination`, `not_ready`, `binding_invalid`, …): the classes of
+the incidents above, and the refusals they leave out. A request no
+binding matched (`unknown_binding` without a name) is of none.
+`lastAt` is the newest request's start (`""` for none), `lastProblem` the
+newest of the four classes (`null` for none), with feos-authn's code and
+message for a refusal of its own (`""` for the upstream's answer), and
+`users` the services, jobs (by name) and sandboxes (by ID) that sent
+them, the most first. The numbers are the sink's, counted from the pods'
+egress spans in the trace index ([The sink](#the-sink),
+[traces.md](traces.md#reading-the-bindings-requests)), with the caller's
+token or session; `ferund`'s own counts (`http_egress`) last ten minutes
+and serve the incidents alone. Without `--sink-url` or a credential to
+pass on, and when the sink fails or is older than the route, the
+bindings are answered with zeros and `unavailable` says why (200, never
+a 503: the list is the bindings' and stands without the numbers);
+`truncated` says the sink left span names or users beyond its bounds
+uncounted. A request is counted once its answer ended (its span comes
+with its `http_end`, ADR 0028), at most 5 s after, and for as long as
+the trace index keeps it (`--trace-retention`, 30 days); a pod killed
+mid-request leaves no span, and the spans beyond a tenant's trace quota
+(`--trace-quota`) are not kept, nor counted.
+
+### Credentials of an environment
+
+A credential ([ADR 0033](../adr/0033-credentials-of-an-environment.md)) is
+an HTTP binding's definition that an environment states once and its
+sandboxes and bindings use by name (`internal/bindings/credentials.go`,
+`internal/store/env_credentials.go`). Environments share none. It is on
+with the HTTP bindings.
 
 | Method and path | Need | Answers |
 |---|---|---|
-| `GET /api/v1/credentials` | read on the tenant | `{credentials}`: the latest version of each, with `usedBy` |
-| `GET /api/v1/credentials/{name}` | read on the tenant | the latest version; 404 `no_credential` |
-| `PUT /api/v1/credentials/{name}` | write on the tenant | 201 a new version, 200 the same definition again; 422 as a binding's PUT |
-| `DELETE /api/v1/credentials/{name}` | write on the tenant | 204; 409 `credential_in_use`, naming its users |
-| `POST /api/v1/credentials/{name}/check` | write on the tenant | the preflight of the latest version, `{probe}` optional |
-| `GET /api/v1/sandboxes/{id}/credentials` | read on the tenant | `{credentials}`: the names the sandbox names |
-| `PUT /api/v1/sandboxes/{id}/credentials` | write on the tenant | the same, after the whole list is stated |
+| `GET /api/v1/environments/{env}/credentials` | read on the environment | `{credentials}`: the latest version of each, with `usedBy` |
+| `GET /api/v1/environments/{env}/credentials/{name}` | read on the environment | the latest version; 404 `no_credential` |
+| `PUT /api/v1/environments/{env}/credentials/{name}` | write on the environment | 201 a new version, 200 the same definition again; 422 as a binding's PUT; 409 while the environment is being deleted |
+| `DELETE /api/v1/environments/{env}/credentials/{name}` | write on the environment | 204; 409 `credential_in_use`, naming its users; 409 while the environment is being deleted |
+| `POST /api/v1/environments/{env}/credentials/{name}/check` | write on the environment | the preflight: of the latest version (404 `no_credential` without one), or of `{binding}`, a draft that is not stored; `{probe}` optional; a draft the rules refuse answers 200 with the result's `error`, as `/api/v1/http/preflight` does, a body that is no draft 400; 409 while the environment is being deleted |
+| `GET /api/v1/sandboxes/{id}/credentials` | read on the sandbox's environment | `{credentials}`: the names the sandbox names |
+| `PUT /api/v1/sandboxes/{id}/credentials` | write on the sandbox's environment | the same, after the whole list is stated |
 
 A PUT's body is a binding of a sandbox's set without its name (the
 path's): upstream, mode, CA, path prefixes, forwarded host, rate limit and
 credential, checked by the same rules and the destination rule. Every
-write that changes the definition makes version n+1 (`tenant_credentials`,
-one row per version, the credential sealed and bound to the tenant, the
-name and the version); the same definition again makes none. A secret
-field sent as `{"set": true}` keeps the latest version's value, so that a
-GET's answer, edited and sent back, keeps the secrets it did not touch;
-keeping a field the latest version has not (another kind, a header it
-lacks) is a 422. No answer carries a secret: each answers `{"set": true}`.
-`usedBy` lists the sandboxes that name the credential and each
-environment whose latest or deployed deployment pins it, with the
-versions both pin.
+write that changes the definition makes version n+1 (`env_credentials`,
+one row per version, the credential sealed and bound to the environment's
+ID, the name and the version), n the highest version the name ever had in
+the environment, a deleted credential's too (`env_credential_names`), so
+that a number never names two definitions and a pin of a deleted version
+finds none; the same definition again makes none. A
+secret field sent as `{"set": true}` keeps the latest version's value, so
+that a GET's answer, edited and sent back, keeps the secrets it did not
+touch; keeping a field the latest version has not (another kind, a header
+it lacks) is a 422. It keeps one only while the upstream (canonical),
+the mode, the CA (but for the white space around it) and the token URL
+are the latest version's: a write that changes any of them is a 422
+"re-enter the secret fields when the upstream, mode, CA or token URL
+change", so that write on the environment, which reads no secret, never
+sends a stored one elsewhere. A check's draft takes `{"set": true}` the
+same way, so that a form can be checked before it saves. No answer carries a
+secret: each answers `{"set": true}`. `usedBy` lists the environment's
+sandboxes that name the credential (`sandboxes`), its bindings that name
+it in its latest or deployed deployment (`bindings`), and the versions
+both pin (`latest`, `deployed`; 0: none). A credential goes with its
+environment; a rename keeps it.
 
-**A sandbox** names credentials at its create (`credentials`) or by the
-PUT (`sandbox_credentials`); each must exist, two must not make the pod
-resolve one name, and none may share a name with the sandbox's own set or
-a name an environment gives it (409 `name_taken`). Its pod gets each at
-its latest version as a binding named by the credential, beside its own
-set; its bindings' version covers both, so a new version of a credential
-moves it: the PUT that wrote it makes the interception CAs each such
-sandbox needs and pushes the pod its clear part, and its feos-authn
-fetches the new credential. Nothing restarts.
+**A sandbox** names credentials of its environment at its create
+(`credentials`) or by the PUT (`sandbox_credentials`); each must be one of
+its environment's (422 `no_credential` otherwise, also for another
+environment's), two must not make the pod resolve one name, and none may
+share a name with the sandbox's own set or a name an environment gives it
+(409 `name_taken`). Its pod gets each at its latest version as a binding
+named by the credential, beside its own set; its bindings' version covers
+both, so a new version of a credential moves it: the PUT that wrote it
+makes the interception CAs each such sandbox needs and pushes the pod its
+clear part, and its feos-authn fetches the new credential. Nothing
+restarts.
 
-**An environment's binding** may name a credential instead of stating
-one: `{"tenantCredential": {"name": "github"}}`, with no other field of
-its own. A plan reads the tenant's credentials; one the tenant lacks, a
-version it lacks, or a field of the binding's own is an error at the
-binding. An apply pins the latest version (`"version"`) and writes the
-version's upstream and mode into the normalised binding, which decide
-whether a pod is another; the pods get the pinned version, opened when
-they ask for their bindings. A newer version reaches the environment with
-a deployment that moves the pin: in place unless the upstream or the mode
-changed.
+**An environment's binding** may name a credential of the environment
+instead of stating one: `{"credentialRef": {"name": "github"}}`, with no
+other field of its own. A plan reads the environment's credentials; one
+it lacks, a version it lacks, or a field of the binding's own is an error
+at the binding, and a plan without an environment has none to name. An
+apply pins the latest version (`"version"`) and writes the version's
+upstream and mode into the normalised binding, which decide whether a pod
+is another; the pods get the pinned version, opened when they ask for
+their bindings. A newer version reaches the environment's services with a
+deployment that moves the pin: in place unless the upstream or the mode
+changed. A clone copies the credentials its request names
+(`"credentials": {"github": {"copy": true}}`): the source's latest version
+becomes the clone's version 1, and the cloned spec's pins are dropped, so
+that the clone's apply pins its own.
 
-**A delete** is refused while a sandbox names the credential or the
-latest or the deployed deployment of an environment pins it; then every
-version goes.
+**A delete** is refused while a sandbox of the environment names the
+credential or its latest or deployed deployment pins it; then every
+version goes, and the name made again goes on from the number it had.
+
+**Rolling it out** (migration `0035_env_credentials.sql`, additive: the
+release before neither reads nor writes `env_credentials` and
+`env_credential_names`, and `tenant_credentials` stays), in three steps:
+
+1. **Before the roll**, `SELECT count(*) FROM tenant_credentials` is 0.
+   The migration refuses otherwise, naming the tenants, and with it the
+   new instance's start: the secret is sealed to the tenant, so such a
+   credential is taken from its sandboxes and environments and deleted
+   with the release before (`DELETE /api/v1/credentials/{name}`), and
+   made again under its environment after the roll.
+2. **The roll.** From the migration on, a trigger refuses every insert
+   and update of the release before in `tenant_credentials` ("written by
+   a ferund older than migration 0035"), so that its tenant routes fail
+   instead of storing a credential that nobody reads.
+3. **No credential writes until every instance runs the new release**:
+   no PUT, delete or check under `/api/v1/environments/{env}/credentials`
+   and no sandbox's `credentials` (its create's or the PUT), through the
+   console's Credentials pages or the API. The trigger covers the
+   tenant's side only: an instance of the release before reads a
+   sandbox's names in `sandbox_credentials` as the tenant's credentials,
+   so a pod would get a credential of its environment from a new
+   instance and lose it again to an old one. Once the last old instance
+   is gone, credentials are made.
+
+A stored deployment that names a `tenantCredential` still reads, as a
+binding without a credential: its pods get the binding without one, as
+they did for a credential that was gone, and a revert or a clone of it
+is refused with a finding at the binding. With the table empty, no
+environment's latest or deployed deployment names one, since a
+credential in use could not be deleted.
 
 ### The management UI
 
@@ -2276,7 +2455,7 @@ reference, what it reaches, its egress; the sandboxes and running jobs
 with their `reaches`) and settings; Activity has the deployments and the
 incidents as pages of its own, besides everything in one list, and
 Settings the general page (the environment's name, ID, labels; clone
-and delete), the secrets and credentials, and the domains and access.
+and delete), the secrets, the credentials, and the domains and access.
 An object's page (`…/objects/<kind>/<name>[/<view>]`) has the views the
 object has: overview, logs, traces and traffic (a service), and config
 (its definition, its row of the reachability, the routes to it, who
@@ -2296,16 +2475,31 @@ instances, its traffic and the deployments that changed it. New
 deployment opens the builder. While none of an environment's pages is
 open the sidebar shows the tenant's pages (`TENANT_NAV` in
 `web/src/people.js`): Home, the environments, the tenant's domains,
-credentials, jobs and sandboxes (last: agents use sandboxes through the
+jobs and sandboxes (last: agents use sandboxes through the
 API and FeCode, people rarely through the UI), then Tenant settings, one
 entry whose pages (people, tokens, usage, general) are tabs. An
-environment's Secrets & credentials page holds its secrets and its
-credential offloading: the HTTP bindings of the latest deployment, each
-with where its credential comes from (a credential of the tenant at its
-pinned version, or the environment's secrets), the services that use it
-and Check; Add binding and Edit open the binding's form in New
-deployment (`…/builder/new/binding`, `…/builder/binding/<name>`), since
-a binding is part of a deployment. Home and the environments, domains,
+environment's Secrets view (`…/secrets[/<kind>/<name>]`, a tab of its
+own between Reachability and Settings; the kind and name point at a
+row) sorts every key its workloads reach by where it lives, not by where
+it is stored (`web/src/views/access.js`): by identity (no key: an addon
+whose type admits a workload by its certificate, the catalog's
+`byIdentity`), offloaded (the key stays at the node: an HTTP binding, a
+registry login) or in the container (a variable from a secret, an
+addon's password). Under the marks' legend it lists, in groups, the
+secrets (who uses each and how, its version against the one the latest
+deployment pins, missing when the spec names one without a value; Set
+value, Delete, Add secret), the credentials (ADR 0033: what each
+reaches, the services through their bindings and the sandboxes that
+name it, the version the deployments pin, Update to vN; New credential,
+and a credential's page with its check, new version and delete at
+`…/credentials/new | /<name>[/edit]`), the HTTP bindings of the latest
+deployment and those the sandboxes' requests named (where each key
+comes from, who names it, its last 24 h from `…/bindings/usage`, Check;
+Add binding and Edit open its form in New deployment,
+`…/builder/new/binding`, `…/builder/binding/<name>`, since a binding is
+part of a deployment) and the addons by identity or with a password.
+Settings keeps General and Domains & access; the credentials' list of
+old (`…/credentials`) leads to Secrets. Home and the environments, domains,
 people, usage and settings go to every member; the tenant's sandboxes
 and jobs pages and the tools' reference with a tenant grant, an
 environment's sandboxes and jobs with a grant on it (ADR 0035); tokens to
@@ -2355,12 +2549,20 @@ it (ADR 0035): the list, with label filters; an environment's overview
 objects by kind, a row each with its image, ready replicas, last hour's
 traffic, restarts and the deployments it runs, the instances folded
 under it, its routes, its open incidents, its sandboxes and its newest
-jobs made by a call); an object's page
-(`…/objects/<kind>/<name>`: its definition as the latest deployment's
-normalised spec has it, a secret at its pinned version and references
-as links, the routes to it, who uses it, its instances with the node a
-link for operators only, its incidents, and the deployments of the last
-ten whose diff changed it, one read each);
+jobs made by a call, and a line that counts its bindings and secrets and
+leads to its Secrets view, where they are); an object's page
+(`…/objects/<kind>/<name>`: a service's and a job's access on its
+overview, its identity (its SPIFFE ID and when its pods' first
+certificate ends, from `…/identities`; unfolded, the certificate: the
+subject with the pod in the CN and the workload in the OU, the URI, the
+issuer, the key, which part each addon by identity reads, and each
+pod's serial, issue and end) and a row per target it reaches,
+by where the key lives, a binding's with its last 24 h; its definition
+as the latest deployment's normalised spec has it, a secret at its
+pinned version and references as links, the routes to it, who uses it,
+its instances with the node a link for operators only, its incidents,
+and the deployments of the last ten whose diff changed it, one read
+each);
 its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;
@@ -2403,13 +2605,14 @@ says its state in words with what it costs, and its Connect tab mints a
 token (shown once) beside the MCP address, ready snippets and the
 tools' reference; a new sandbox is made in the environment open, and
 takes what it reaches of it, its egress, image credentials and the
-tenant's credentials. The tenant's credentials
-(`/tenants/<t>/credentials[/<name>]`, ADR 0033) list each with its uses;
-a credential's form runs the preflight before it saves, its page checks
-the stored version, adds it to sandboxes, and moves an environment whose
-latest deployment pins an older version to the latest (a plan and an
-apply of that deployment's spec with the pin moved, write on the
-environment). The platform's pages add the ingresses, every person
+environment's credentials. A credential's form runs the preflight before
+it saves (the check of the draft, its kept secrets the stored ones), its
+page checks the stored version, lists the environment's sandboxes that
+name it and its bindings with the versions they pin, and moves the
+environment to the latest when its latest deployment pins an older one
+(a plan and an apply of that deployment's spec with the pin moved).
+Everything about credentials needs a grant on the environment, read to
+see and write to change. The platform's pages add the ingresses, every person
 (disable, enable), a tenant's limits and zone, and join tokens of kind
 `ingress`.
 
@@ -2440,8 +2643,9 @@ goes to `PUT …/secrets/{name}` at once and the draft pins the version it
 made; a new environment's values stay in the page until its first apply,
 which creates the environment (with an ID the draft keeps, so that a
 repeat is the same create), writes them, and applies deployment 1. A
-binding of a tenant credential (ADR 0033) is added from the service's
-form and ticked on it. The draft's operations are pure modules beside
+binding of a credential of the environment (ADR 0033) is added from the
+service's form and ticked on it; a new environment has none until it
+exists. The draft's operations are pure modules beside
 `views/envs.js` (`draft.js`, `refs.js`, `fields.js`, `findings.js`,
 `rebase.js`, `pins.js`, `catalog.js`, `planner.js`). Below 900 px the
 list is the first screen and an object's form opens at full width. The
@@ -2528,7 +2732,12 @@ beside the template's `ferun.environment`, `ferun.object`
 deployment label: an object a deployment does not change keeps its pods. Rows
 are inserted with `idle_after_s` always written, IDs ferund mints ([Sandbox
 IDs](#sandbox-ids)), and at least 256 MiB, the rows' floor,
-which valkey's and nats's `dev` plans are raised to.
+which valkey's and nats's `dev` plans are raised to. `disk_gib` (`0038`)
+is the row's disk of its own size, fixed, 0 for the guest's: an image
+service's or job's `resources.diskGib` when it is larger than 8, which
+the pod's spec carries (`Resources.disk_gib`) and the template hash
+takes only when it is set, so that every template of before hashes as
+it did.
 
 Instance rows are no tenant's sandboxes: the tenant's listing and the
 admin listing's `sandboxCount` leave them out, the tenant routes answer
@@ -2708,7 +2917,8 @@ absent for lists, maps and objects. Every problem is a finding
 shapes:
 
 - **Services** run `image`, pods of their own: replicas 0 to 20 (1),
-  vCPUs 1 to 32 (1), memory 256 to 65536 MiB (512), readiness by http,
+  vCPUs 1 to 32 (1), memory 256 to 65536 MiB (512), a disk of 8 to 200
+  GiB (`resources.diskGib`, left out the guest's 8 GiB, see below), readiness by http,
   tcp or exec with an initial delay (0s), a period of at least 1 s (2s)
   and a failure threshold (3), `idle` of at least 1m only on a route's
   target ("nothing would wake it"), `rollout.timeout` (10m). Or they run
@@ -2728,7 +2938,18 @@ shapes:
   environment is, where a reference opens its port.
 - **Jobs**: an image, `on` `deploy` (the default, a deploy job; its
   earlier word `release` is the same, accepted for good) or `manual`, retries 0
-  to 5, a timeout of 10m by default and 2h at most.
+  to 5, a timeout of 10m by default and 2h at most; resources as a
+  service's, the disk among them.
+- **The disk** (`resources.diskGib`) is each pod's, the guest's data
+  volume: the image, the container's own files and whatever it writes
+  outside its volumes. It is **scratch**: every new pod, a new
+  deployment's, a replacement, a job's next run, starts on an empty one
+  (or on a baked layer of its image), and what must last belongs in an
+  addon's volume. It does go along when its pod moves (a drain or a
+  hibernation takes the whole disk to the object store and back, [The
+  pods' disks](disk.md#the-pods-disks)). 8, the guest's size, is the
+  same pod as none; a change of the size is a new template, which rolls
+  the object.
 - **Image credentials** (`imageCredentials`, image services and jobs):
   a username and a password, each a string or `{secret}` of the
   environment, the secret existing as an env value's does; not on an
@@ -2743,11 +2964,19 @@ shapes:
   errors, a volume of another type is the warning that its data is
   deleted.
 - **Routes**: a path of unreserved characters without empty, `.` or
-  `..` segments, unique, of at most 1 KiB (every ingress instance holds
-  it); a service and one of its ports; `strip`; `host` is stored and not
-  used (info); `from`, the clients' blocks (1 to 32 canonical prefixes
-  of either family, each once; `[]` is an error), which the ingress
-  checks ([ingress](ingress.md)); left out, every client.
+  `..` segments, unique among the routes of its host, of at most 1 KiB
+  (every ingress instance holds it); a service and one of its ports;
+  `strip`; `host`, the host it answers on alone ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md)): a name of LDH
+  labels or a wildcard `*.<name>`, stored in lower case without a
+  trailing dot, never an address or with a port, and one its environment
+  has or may have: its default host once it has a label, a domain bound
+  to it in any state, or a name a wildcard domain of it serves (else an
+  error naming the hosts it may name; without an environment, in `POST
+  /api/v1/environments/plan`, its form alone); left out, every host of
+  the environment; `from`, the clients' blocks (1 to 32 canonical
+  prefixes of either family, each once; `[]` is an error), which the
+  ingress checks ([ingress](ingress.md)); left out, every client.
 - **Secrets**: every `{"secret": n}` names a tenant secret of the
   environment that exists and is not deleted.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
@@ -2878,7 +3107,8 @@ the nodes through `env-groups`, put whole.
   applies as its deployment 1 (origin `clone`, the source deployment's
   annotations without `ferun.revertOf`, whose number names a deployment of
   the source) a whole spec of the caller's, or the source deployment's
-  without its attached services and their routes (info findings) and
+  without its attached services and their routes, and without its routes
+  that have a host, whose host is the source's (info findings), and
   with its secret pins reset. It changes no single value of the source's
   spec: a caller that wants other sizes or replicas passes its own spec.
   `data: true` is an error: no data is copied.
@@ -2895,7 +3125,7 @@ inside a transaction:
 | `env-groups` | 10 s, hint `env-groups` | per connected node, the groups its rows' templates name and the groups their rules name (`ferun-ingress` among them), put again where the node's differ, and what the node holds of the ingress's groups recorded ([Security groups](#security-groups)); the groups of environments that are gone, the workloads' and legacy `sg-` groups no row's template names, an `ing-` group of a sandbox that runs elsewhere and the `sbx-` groups of before ADR 0035 too |
 | `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments that are gone, and the `sbx-` tables of before ADR 0035, deleted once no pod names them ([Names](#names)) |
 | `env-volumes` | 30 s | volumes marked deleting, 64 a pass, deleted on their node once no pod holds them (`FAILED_PRECONDITION`: later, at the end of the queue; `NOT_FOUND`: done), then their rows; a removed node's lose their rows only; records of environments' volumes on a connected node that no pod holds and no row places there are deleted |
-| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances deleted, its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
+| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances ended as a rollout's old ones without the traffic's drain (marked stopping, a running pod stopped with its grace, the row deleted once the pod has ended; [A reconcile step](#a-reconcile-step)), its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
 | `env-bindings` | 30 s | the incidents of the environments' HTTP bindings from their pods' requests over the last five minutes ([HTTP bindings](#http-bindings)) |
 
 **The Ensure pool.** The controller runs `Engine.Ensure` for the rows
@@ -3009,7 +3239,46 @@ crash loop closes. Then:
    one stops (phase `stopping`, `retire_at` 10 s ahead: routes drop it
    at once, the env table within a pass of `env-names`, and the answers
    that named it expire after their 5 s) and goes; surplus replicas stop
-   from the highest; a lost row is replaced. The service's `rollout.timeout`
+   from the highest; a lost row is replaced. An instance that goes ends
+   in three steps, its state in its rows alone (`stepStopping`):
+   - **Its traffic drains** until `retire_at`: no route, no name, no
+     ingress sends to it, and the deployment waits for it.
+   - **Its pod stops** (the op `stop`, [Ops](#ops)): its node sends its
+     container SIGTERM and gives it up to 660 s to exit before the
+     microVM ends (the pod's `stop_grace_seconds`,
+     `model.ServiceStopGrace`), so that a service that drains, as
+     FeCode's backend hands its agents' turns over to another replica
+     within 630 s, finishes. The row stays, `running` with the op
+     `stop`: still out of the routes, the env table and the ingress's
+     table, but a member of its groups, so that the peers that admit it
+     by group (its addons, other services) take its new connections
+     while it finishes its work, and booked on its node, so that
+     placement does not fill the node meanwhile and a drain does not
+     count the node drained. Nothing else waits for it: the rollout goes
+     on with the next replica at once, and the deployment is deployed
+     without it.
+   - **Its row goes** once the pod has ended, at once when its container
+     exits sooner (the stop's end wakes `env-reconcile`), and its pod
+     by tombstone. A row that runs nothing to finish goes at once after
+     the drain (paused, hibernated, stopped, failed, lost, pending, or
+     in another op: an idle pause, a drain's move, a repair), and so
+     does one whose node is down or removed. An `unknown` row on a node
+     that is up is waited for (a stop released by a ferund instance
+     that stopped, which a sync resolves, and the next pass stops the
+     pod again, its StopPod joining the stop that feosd runs). Whatever
+     the pod does, the row goes 2 minutes past its drain and its grace.
+
+   Only an image service's pods have that grace: a sandbox's container
+   (`sleep`, which ignores SIGTERM as PID 1) would wait out any grace, an
+   addon's next pod waits for its volume, and a job that is stopped is
+   cancelled; their pods have the node's 10 s, by the same steps when
+   they stop (an environment's deletion, `env-delete`). A repair that
+   restarts a service's pod waits the grace in its `StopPod`. Like a
+   rollout's surge replica, a stopping instance counts against no tenant
+   limit: quotas count what the deployments declare, not the rows. A
+   node without room for the next replica keeps it pending until an old
+   pod there has ended, within the rollout's budget. The service's
+   `rollout.timeout`
    counts from R's start, moved on by the time R's deploy jobs waited
    for runs that were not R's (see the deployment's deadline below): past
    it, or once one of R's new instances exited 3 times (a start that
@@ -3033,7 +3302,8 @@ crash loop closes. Then:
    `volume_unavailable` and `addon_unhealthy` incidents of objects that
    neither T nor R has close.
 6. **Deployed**, when T is R: every object as R has it and ready, addons
-   provisioned, deploy jobs succeeded, nothing stopping. R is
+   provisioned, deploy jobs succeeded, no stopping instance still
+   draining its traffic (a pod's stop goes on after it). R is
    `deployed`, the environment's `deployed` with it, older deployed and
    waiting deployments are replaced, and the open `rollout_failed`,
    `job_failed` and `crash_loop` incidents of older deployments close.
@@ -3419,8 +3689,12 @@ route token of another environment is 404 "no such environment".
 `POST /api/v1/environments/{env}/route-tokens` mints one (32 random
 bytes, base64url, shown once, only its SHA-256 kept); `DELETE` revokes
 them all. The door matches the longest prefix, segment by segment, over
-the routes of the deployed deployment (the latest while none is deployed;
-no match is 404 "no route for <path>") and forwards with the port door's
+the routes of the deployed deployment (the latest while none is deployed)
+that answer on the Host the guest sees, `X-FeRun-Host`'s or else the
+request's, canonical: those without a host and those whose host is that
+host or its wildcard, of one prefix the closest host first, as the
+ingress matches ([ADR 0045](../adr/0045-hosts-domains-and-certificates.md));
+no match is 404 "no route for <path>". It forwards with the port door's
 `ForwardTo`, naming the headers that carried the token: a forward hold
 and a touch, the Host passed on, upgrades and streams kept, a
 Kubernetes binding's port refused. `X-FeRun-Route-Token` and
@@ -3453,15 +3727,17 @@ serves anonymous clients; a refusal below 500 keeps its text.
 
 FeCode's environment hosts forward to the door with the environment's
 route token in `X-FeRun-Route-Token`, and pass the browser's
-`Authorization` on to the application.
+`Authorization` on to the application. Their hosts are FeCode's, not the
+environment's, so such an environment's routes have no host.
 
 The door serves every environment, with its route tokens. Beside it,
 `ferun-ingress` serves the routes to image services of the environments
-whose tenant made them public, at their default hosts and without a
-token, straight to the pods ([Public environments](#public-environments));
-routes to attached services are the door's alone. A plan's info finding
-at each route says which doors serve it, and the status names each
-route's `door`.
+whose tenant made them public, at their hosts, a route with a host at
+that host alone, and without a token, straight to the pods ([Public
+environments](#public-environments)); routes to attached services are
+the door's alone. A plan's info finding at each route says which doors
+serve it, at which host, and whether the environment is served there yet,
+and the status names each route's `door`.
 
 ### Secrets
 
@@ -3560,11 +3836,19 @@ percent-encoded.
 `GET /api/v1/addons` (tenant class, the same for every tenant) is the
 catalog: `{addons: [{type, versions, defaultVersion, plans: [{name,
 vcpus, memoryMib, volumeMib}], defaultPlan, outputKeys, outputFields,
-options: [{name, kind, required, default, description, values, pattern,
-reserved, reservedPrefixes, unique}]}]}`, the types this ferund runs by
-name, versions oldest first (`defaultVersion` the newest, what a new
-addon is offered with: a spec still names its version), plans smallest
-first, every list `[]` when empty. `TestOptionsMatchValidation` holds
+byIdentity, identityBy, options: [{name, kind, required, default, description,
+values, pattern, reserved, reservedPrefixes, unique}]}]}`, the types this
+ferund runs by name, versions oldest first (`defaultVersion` the newest,
+what a new addon is offered with: a spec still names its version), plans
+smallest first, every list `[]` when empty. `byIdentity` is true for a
+type that admits a referencing workload by its pod's certificate (its
+blueprint binds TLS, `addons.TLSBinder`: postgres, valkey), so that a
+reference hands the container no password, and false for one whose
+reference carries one (nats). `identityBy` is the part of the
+certificate such a type maps to a user of its own (`addons.IdentityReader`):
+`ou`, the subject's OU (postgres: the role the reference names), or
+`uri`, the SPIFFE ID (valkey's ACL user); `""` for the others.
+`TestOptionsMatchValidation` holds
 each declaration to its validation.
 
 `FERUN_ADDON_DOCKER=1 go test -run Docker ./internal/env/addons/` runs
@@ -3579,16 +3863,22 @@ the ready ones its live instances, and its instances, an addon with
 type, version, plan, phase and `provisioned`, a job with its last run,
 an attached service with its sandbox, phase, restarts and last exit;
 `starting` before an object has an instance), its routes (of the
-deployed deployment, else the latest), each with its `door`, `ingress` with
-its `url` (`https://<host><prefix>`) for a route to an image service of
-a public environment and `route` for every other, `public`, its `hosts`
+deployed deployment, else the latest), each with its `host` (left out
+without one) and its `door`, `ingress` for a route to an image service
+of a public environment and `route` for every other, an `ingress` route
+with its `url` (`https://<host><prefix>`) where it answers its own path:
+at its host while the environment is served there, a route without a
+host at the first of `hosts` that is no wildcard where no route of that
+host has its path, none for a route on a wildcard; `public`, its `hosts`
 (while it is public and not being deleted: its served domains in the
 order they were bound, else its default host when the platform has an
 apps zone; otherwise empty, [ADR 0021](../adr/0021-ingress.md)),
 `hostLabel` (its default host's label once it has one, kept while a
 domain is its host), and the number of open
 incidents. An instance carries its `image`, `registry/repository@sha256:…`
-as its deployment resolved it. The listing shows `public` and `hosts` too. An
+as its deployment resolved it; one whose pod stops is `stopping` and
+`running`, its detail the stop's ("stopping: its containers have
+SIGTERM and 660 s to exit"). The listing shows `public` and `hosts` too. An
 incident has its object, deployment, condition, summary, opening and
 closing, and evidence: `exits` (`at`, `code`, and `notStarted` for a
 start that failed), `logTail` (redacted and bounded), `diff`
@@ -3624,9 +3914,11 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET …/{env}/access-logs[?limit=200&beforeTsNs=&traceId=]` | `{records}`: the newest page of the ingress's access log before `beforeTsNs` (a record's `tsNs`, a string), at most 1000, ascending, of the trace `traceId` (32 lower case hex digits; else 400) when given, read from the sink ([The sink](#the-sink)); 503 `no_log_store` without `--sink-url`, 503 `log_store_unavailable` when the sink fails; each `{tsNs, time, durationNs, ingress, service, instance, host, method, path, proto, status, outcome, attempts, heldNs, bytesIn, bytesOut, clientIp, userAgent, traceId, spanId, parentSpanId}` ([ingress.md](ingress.md#access-log)) |
 | `GET …/{env}/traffic[?window=1h]` | the requests of each image service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, source, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every image service of the desired and deployed deployments with a request in the window, by name, each with every bucket, oldest first; `source` `app`, counted from its own OpenTelemetry server spans without its readiness check (`errors`: an error status, or a status of 500 to 599), or `ingress` for a routed service that sends none, what the ingress answered (`errors`: a status ≥ 500 or none written, but not aborted); the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |
 | `GET …/{env}/objects/{kind}/{name}/logs?lines=200&replica=0` | `{lines, source}`, the source `container` or `process`; with `--sink-url` a container's log is the sink's first ([The sink](#the-sink)); 501; 409 "paused" (unless the sink has the instance's lines), `not_running` (also for a replica without an instance yet, or none at all); 404 for a replica beyond the object's ([Logs](#probes-exits-and-restarts)) |
-| `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes, or an attached service's process |
+| `POST …/{env}/services/{name}/restart` | 202: an image service's replicas one at a time, each waited for until it is live again, up to 5 minutes after its stop grace (660 s), or an attached service's process |
 | `POST …/{env}/jobs/{name}/run` | 202; 409 `busy` "job X runs already (deployment N, attempt M)" with `Retry-After: 30` while a run of the job runs, of any deployment; 409 `not_ready` |
 | `POST …/{env}/bindings/{name}/check` `{probe?}` | 200 the preflight's result of the latest deployment's binding, its secrets at their latest versions ([HTTP bindings](#http-bindings)); 404 `no_binding`, `bindings_off` |
+| `GET …/{env}/bindings/usage[?window=24h]` | `{window, unavailable?, truncated, bindings: [{name, requests, refused, failing, tokenFailed, blocked, lastAt, lastProblem, users}]}`, `24h` (the default) or `1h`, else 400; read from the sink, 200 with `unavailable` when it cannot be ([HTTP bindings](#http-bindings), Use) |
+| `GET …/{env}/identities` | `{trustDomain, workloads: [{kind, name, spiffeId, pods: [{pod, notAfter, node}]}]}` ([The CA](#the-ca), Who a workload is) |
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |
 | `ANY …/{env}/http/{path...}` | the route door |
 
@@ -4180,6 +4472,25 @@ their claims, checks and states, are the domains core's; ACME owns
   CSR of a new ECDSA P-256 key, and the chain checked: for the name, for
   the key. Requests to the CA are retried 3 times (a bad nonce, a 5xx),
   never on a rate limit.
+- **A wildcard's order** ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md#certificates-ferund-is-the-acme-client))
+  is for `*.<name>` alone, over its authorization's `dns-01` challenge:
+  the record goes to the claim's target, `<token>.<--acme-zone>`,
+  through `--acme-zone-provider` (an UPSERT of one TXT record, TTL 60 s),
+  is accepted only once every server of the ACME zone answers it (its NS
+  records and their addresses through the recursive resolver, then each
+  address, IPv4 ones when there are any, asked itself; every 5 s, at most
+  3 minutes), and is deleted when the order ends, however it ends. The
+  CA follows the tenant's CNAME of `_acme-challenge.<name>` there. No
+  ingress instance is asked and no `acme_challenges` row kept. Its
+  failures: "the platform has no ACME zone (--acme-zone) …", "the CA
+  offers no DNS-01 challenge …", "write the DNS-01 record <target> in
+  the ACME zone: …", "the servers … of the ACME zone did not answer the
+  DNS-01 record <target> within 3m0s", "the CA's DNS-01 challenge for
+  <name> failed: …". A wildcard whose delegation is wrong is not routed
+  and so not ordered or renewed. A record a crash left behind is
+  replaced by the next order of its claim. Pebble accepts DNS-01 without
+  asking DNS too, so the tests fake the zone and its servers.
 - **Success** keeps the chain (DER, leaf first) and the key (PKCS #8,
   sealed with `domain-cert:<domain id>`) in `domain_certs`, replacing
   the one before, with `renew_after` at half the certificate's lifetime
@@ -4223,7 +4534,11 @@ their claims, checks and states, are the domains core's; ACME owns
   verified, bound to a public environment of its tenant, its
   certificate's `not_after` ahead) as one more host of its environment
   with its chain and key, and every pending challenge to every
-  instance ([ingress.md](ingress.md#what-it-holds)).
+  instance ([ingress.md](ingress.md#what-it-holds)). A wildcard's host
+  is `*.<name>`, after the names; it retires no default host. The
+  ingress looks a request's host up as it is, then as `*.` and its
+  parent, and the certificate by SNI the same way, so that a name's own
+  domain wins over a wildcard.
 - **Tests** run against Pebble, Let's Encrypt's test CA, in docker
   (`hack/go/with-pebble`), not a CA of the tests' own. Pebble accepts a
   challenge without fetching it, so the tests check that every instance's
@@ -4273,7 +4588,7 @@ by UUID or name.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/domains` `{name, labels?}` | 201 the domain; 400 `invalid_name`; 422 `reserved`; 409 `too_many_unverified`, `domains_off` |
+| `POST /api/v1/domains` `{name, labels?}` | 201 the domain; 400 `invalid_name`; 422 `reserved`; 409 `too_many_unverified`, `domains_off`, `wildcards_off` (a wildcard without `--acme-zone`) |
 | `GET /api/v1/domains?environment=<env>&label=k=v` | `{domains: [...]}`, oldest first, the labels ANDed; 404 "no such environment" |
 | `GET /api/v1/domains/{id}` | the domain |
 | `PUT /api/v1/domains/{id}/environment` `{environment}` | the domain, bound or moved; 400 without `environment`; 404 "no such environment"; 409 "environment X is being deleted"; 409 `superseded` |
@@ -4283,11 +4598,18 @@ by UUID or name.
 
 - **A claim.** The name is trimmed, lowercased, loses one trailing dot,
   and must be a host name of ASCII letters, digits and hyphens of at
-  least two labels whose last begins with a letter: no wildcard, no
-  address; an internationalized name is given as its A-label, and one in
-  Unicode is refused with that hint. The apps zone, the tenant zone, `--edge-name` and
-  every `--domain-reserved` zone, and every name under them, are
-  reserved. Any number of claims may name one name, of one tenant or of
+  least two labels whose last begins with a letter: no address; an
+  internationalized name is given as its A-label, and one in Unicode is
+  refused with that hint. A **wildcard** is `*.<name>`, the `*` the whole
+  first label and `<name>` such a name ([ADR
+  0045](../adr/0045-hosts-domains-and-certificates.md#a-wildcard-is-a-domain-of-its-own)):
+  it serves every name one label below `<name>`, not `<name>`, which is a
+  claim of its own; its TXT record stands at
+  `<--domain-challenge-label>.<name>`, beside those of claims of
+  `<name>`. It needs `--acme-zone`. The apps zone, the tenant zone,
+  `--edge-name`, `--acme-zone` and every `--domain-reserved` zone, and
+  every name under them, are reserved, and so is a wildcard whose
+  `<name>` is or whose `*` would stand for one of them. Any number of claims may name one name, of one tenant or of
   several; a tenant holds at most `--domain-unverified-max` claims that
   are not verified (unverified, lapsed or superseded), counted under its
   row's lock. The token is 32 characters of lowercase base32 from 160
@@ -4302,9 +4624,13 @@ by UUID or name.
   `name` and `value`, the `cname` to set, the edge's `addresses`: what
   `--edge-name` resolves to plus every `--edge-address`; `apex`, always
   null, since ferund does not look up a name's zone and the owner picks
-  the CNAME or the addresses), `found` (what the last answer showed:
+  the CNAME or the addresses; `delegation`, a wildcard's CNAME `{name,
+  value}`, `_acme-challenge.<name>` to `<token>.<--acme-zone>`, null for
+  a name), `wildcard`, `found` (what the last answer showed:
   `txt`, `cname`, the canonical name when it differs from the name, for
-  information only, and `addresses`), `warnings` (`recordMissingSince`,
+  information only, `addresses`, a wildcard's of a fresh name below it,
+  and `delegation`, a wildcard's CNAME chain of its `_acme-challenge`
+  name), `warnings` (`recordMissingSince`,
   `dnsMovedSince`, `deactivatesAt`, the earlier of the two plus the grace,
   `checkFailing`, the last lookup's error, and `certificateFailing`, the
   last order's error while the domain has a certificate),
@@ -4378,6 +4704,14 @@ state without a write: `domains-settle` catches it.
   routed now starts its routing grace (`dns_moved_since`) when it is
   verified; routed again ends it; at the grace's end it is `inactive`,
   and stays verified and bound.
+- **A wildcard's routing** is two records: a fresh name below it, 16
+  random characters of lowercase base32 and a check's own, resolves to
+  the edge alone, and the CNAME chain of `_acme-challenge.<name>`, each
+  link asked at its zone's servers, reaches `<token>.<--acme-zone>`
+  (`delegated`). Both right is `routed`, and the grace and the states are
+  a name's; either lookup failing changes nothing. The reasons and the
+  incidents name the record that is wrong: the delegation while the last
+  answer did not show it, else the names below.
 - **Incidents** on the bound environment, object `domain/<name>`, on its
   latest deployment: `domain_record_wrong` when a grace starts (which record
   since when, and `deactivatesAt`; one incident for both records, its
@@ -4481,6 +4815,15 @@ nor waits for. `ferund`'s part:
   ingress's count to both reads, so it is rolled out first. The 503s are those of `…/access-logs`; a sink without the
   route (older than `ferund`) answers 404, which is a 503
   `log_store_unavailable` too.
+- **The bindings' use.** `…/bindings/usage` is counted by the sink from
+  the pods' egress spans ([traces.md](traces.md#reading-the-bindings-requests)),
+  with the caller's credentials as the logs calls, in one read:
+  `GET <sink-url>/api/v1/egress?environment=<ID>&since=<ns>&until=<ns>`,
+  the window that ends now. `ferund` adds the latest deployment's
+  bindings that had no request and turns ns into RFC 3339. Without
+  `--sink-url`, a credential, or with the sink failing or without the
+  route (404), it answers the bindings with zeros and `unavailable`, not
+  a 503, and logs the sink's error.
 - **`GET /api/v1/tenant`** (tenant class, member), which the sink asks
   for its readers: `{"tenant": "<name>", "role": "read"|"write"|"admin"|"",
   "environments": ["<ID>", …]}` for any principal, a token or a session

@@ -9,11 +9,11 @@ import (
 	"testing"
 )
 
-// credVC is the bindings' context with the tenant's credential github in
-// two versions, the second intercepting.
+// credVC is the bindings' context with the environment's credential
+// github in two versions, the second intercepting.
 type credVC struct{ bindingsVC }
 
-func (c credVC) TenantCredential(name string) (CredentialInfo, bool) {
+func (c credVC) Credential(name string) (CredentialInfo, bool) {
 	if name != "github" {
 		return CredentialInfo{}, false
 	}
@@ -25,22 +25,22 @@ func (c credVC) TenantCredential(name string) (CredentialInfo, bool) {
 
 const credSpec = `{
   "services": {"web": {"image": "ghcr.io/acme/web:1", "bindings": ["gh"]}},
-  "bindings": {"gh": {"tenantCredential": {"name": "github"}}}
+  "bindings": {"gh": {"credentialRef": {"name": "github"}}}
 }`
 
-func TestTenantCredentialBinding(t *testing.T) {
+func TestCredentialRefBinding(t *testing.T) {
 	vc := credVC{newBindingsVC(ModeApply)}
 	s := mustParse(t, credSpec)
 	if fs := Validate(vc, s, nil); HasErrors(fs) {
 		t.Fatalf("findings %+v", fs)
 	}
 	creds := map[string]CredentialInfo{}
-	creds["github"], _ = vc.TenantCredential("github")
+	creds["github"], _ = vc.Credential("github")
 	norm, _ := Normalise(s, Pins{Credentials: creds})
 	gh := norm.Bindings["gh"]
-	if gh.TenantCredential == nil || gh.TenantCredential.Version != 2 || gh.Upstream != "https://api.github.com" ||
+	if gh.CredentialRef == nil || gh.CredentialRef.Version != 2 || gh.Upstream != "https://api.github.com" ||
 		gh.Mode != "intercept" {
-		t.Fatalf("normalised: %+v %+v", gh, gh.TenantCredential)
+		t.Fatalf("normalised: %+v %+v", gh, gh.CredentialRef)
 	}
 	// The normalised spec validates again, reads back and normalises to
 	// itself without the pins.
@@ -65,15 +65,15 @@ func TestTenantCredentialBinding(t *testing.T) {
 	}
 }
 
-func TestTenantCredentialBindingFindings(t *testing.T) {
+func TestCredentialRefBindingFindings(t *testing.T) {
 	vc := credVC{newBindingsVC(ModeApply)}
 	cases := map[string]struct {
 		spec, path string
 	}{
-		"unknown":      {strings.Replace(credSpec, `"github"`, `"gitlab"`, 1), "bindings.gh.tenantCredential.name"},
-		"no version":   {strings.Replace(credSpec, `{"name": "github"}`, `{"name": "github", "version": 7}`, 1), "bindings.gh.tenantCredential.version"},
-		"own fields":   {strings.Replace(credSpec, `{"tenantCredential"`, `{"pathPrefixes": ["/x/"], "tenantCredential"`, 1), "bindings.gh.pathPrefixes"},
-		"other origin": {strings.Replace(credSpec, `{"tenantCredential"`, `{"upstream": "https://example.org", "tenantCredential"`, 1), "bindings.gh.upstream"},
+		"unknown":      {strings.Replace(credSpec, `"github"`, `"gitlab"`, 1), "bindings.gh.credentialRef.name"},
+		"no version":   {strings.Replace(credSpec, `{"name": "github"}`, `{"name": "github", "version": 7}`, 1), "bindings.gh.credentialRef.version"},
+		"own fields":   {strings.Replace(credSpec, `{"credentialRef"`, `{"pathPrefixes": ["/x/"], "credentialRef"`, 1), "bindings.gh.pathPrefixes"},
+		"other origin": {strings.Replace(credSpec, `{"credentialRef"`, `{"upstream": "https://example.org", "credentialRef"`, 1), "bindings.gh.upstream"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -86,9 +86,15 @@ func TestTenantCredentialBindingFindings(t *testing.T) {
 			t.Fatalf("no error at %s: %+v", c.path, fs)
 		})
 	}
-	// Without the tenant's credentials (a context that has none) it is an
-	// error, not a crash.
-	if fs := Validate(newBindingsVC(ModeApply), mustParse(t, credSpec), nil); !HasErrors(fs) {
-		t.Fatal("a context without credentials took the binding")
+	// Without the environment's credentials (a spec without an
+	// environment) it is the same error at the name, not a crash.
+	fs := Validate(newBindingsVC(ModeApply), mustParse(t, credSpec), nil)
+	found := false
+	for _, f := range fs {
+		found = found || (f.Severity == SeverityError && f.Path == "bindings.gh.credentialRef.name" &&
+			strings.Contains(f.Problem, "the environment has no credential github"))
+	}
+	if !found {
+		t.Fatalf("a context without credentials: %+v", fs)
 	}
 }

@@ -82,6 +82,12 @@ type RenewResponse struct {
 // ingress whose Hello named it.
 const CapabilityVisits = "visits"
 
+// CapabilityRouteHosts is the capability of an ingress that serves a
+// route on its Host alone (ADR 0045): ferund gives an environment with a
+// route that has a host only to an ingress whose Hello named it, since
+// an older one would serve every route on every host.
+const CapabilityRouteHosts = "routeHosts"
+
 // HelloRequest is the first call on a connection with a certificate: the
 // ingress's WireGuard public key (32 bytes), its WireGuard endpoint
 // (host:port), its version and its capabilities.
@@ -90,7 +96,8 @@ type HelloRequest struct {
 	Endpoint  string `json:"endpoint"`
 	Version   string `json:"version"`
 	// Capabilities are what this ingress does beyond what the fields' zero
-	// values say (CapabilityVisits); an older one names none.
+	// values say (CapabilityVisits, CapabilityRouteHosts); an older one
+	// names none.
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
@@ -256,7 +263,13 @@ type Domain struct {
 // address blocks, canonical prefixes of either family (ADR 0034,
 // revised): the ingress answers a client whose address is in none of
 // them 403. None: every client. An ingress older than the field ignores
-// it.
+// it. Host is the host the route answers on (ADR 0045), canonical: a
+// name, or a wildcard *.<name> that matches every name one label below
+// <name>; "": every host of the environment. Of the routes that answer on
+// a request's host the longest Path wins, and of one Path the route whose
+// Host names the host most closely: the name, then its wildcard, then
+// none (routing.MatchHost). Only an ingress that named
+// CapabilityRouteHosts is given an environment with a Host on a route.
 type Route struct {
 	Name    string   `json:"name"`
 	Path    string   `json:"path"`
@@ -265,6 +278,7 @@ type Route struct {
 	Strip   bool     `json:"strip"`
 	Door    bool     `json:"door"`
 	From    []string `json:"from,omitempty"`
+	Host    string   `json:"host,omitempty"`
 }
 
 // Service is one routed service: the instances that answer, and the

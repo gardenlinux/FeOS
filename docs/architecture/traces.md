@@ -371,6 +371,62 @@ it yet. The count is best effort: the ingress sends its spans once and
 drops a batch the sink did not take (The ingress), and a span stored
 twice is counted twice.
 
+### Reading: the bindings' requests
+
+`GET /api/v1/egress?environment=<ID>&since=&until=`, with a reader as
+above (404 "no such environment" for an environment it may not read):
+the requests of the environment's pods through their HTTP bindings in
+`[since, until)` (RFC 3339 or Unix ns, at most 7 days; else 400),
+counted from their egress spans ([A pod's egress](#a-pods-egress): source
+`egress`), for `ferund`'s `…/bindings/usage` (control-plane.md, HTTP
+bindings).
+
+```json
+{"bindings": [
+  {"binding": "erp", "requests": 1204, "refused": 2, "failing": 0, "tokenFailed": 0, "blocked": 1,
+   "lastNs": "1795082523000000000",
+   "lastProblem": {"tsNs": "1795081277000000000", "class": "blocked", "status": 403, "code": "denied_path",
+     "message": "path /admin is not allowed by binding erp", "traceId": "…", "spanId": "…"},
+   "users": [{"kind": "service", "object": "api", "requests": 1200}, {"kind": "sandbox", "object": "<id>", "requests": 4}]}
+ ],
+ "truncated": false}
+```
+
+A binding per one that had a request, by name, taken from the span's
+name (`<METHOD> <binding>`; a request no binding matched has the method
+alone and is left out). `requests` counts every span; the classes are
+`refused` (the upstream answered 401 or 403), `failing` (it answered 429
+or 5xx, or `ferun.error.code` is `unreachable` or `tls`), `tokenFailed`
+(`credential_unavailable`) and `blocked` (any other of feos-authn's codes:
+`denied_destination`, `denied_path`, `unknown_binding`,
+`method_not_allowed`, `misdirected`, `rate_limited`, `not_ready`,
+`binding_invalid`, `audit_unavailable`, `bad_request`). The index keeps
+no field presence, so a refusal is told by its code among those: a code
+it does not know counts by its status, as the upstream's answer. `users`
+are the pods that sent them by `kind` (`service`, `job`, `sandbox`) and
+`object` (a sandbox's ID), the most first; `lastNs` the newest span's
+start, to about a microsecond (a maximum is a double); `lastProblem` the
+newest span of the four classes (`null` for none), with, for a refusal of
+feos-authn's own, the `error.message` of the request's egress record,
+found in the log index by its trace and span (`""` when it is not
+there).
+
+`kind` and the attributes are not fast fields, `span_name` and
+`service_name` are: one search groups all the spans by `span_name` (a
+`terms` aggregation with the `max` of `start_ns`), one per kind groups
+its spans by `span_name` and then `service_name`, one per class by
+`span_name`, each class's clause a set of terms of
+`http.response.status_code` and `ferun.error.code` (`NOT
+ferun.error.code:IN […]` for the upstream's answers); then one search
+per binding with a problem takes its newest (`sort_by` `ts`, one hit),
+and the API one search of the log index per refusal. Four searches at a
+time. A `terms` aggregation keeps 1,000 span names, and 1,000 users per
+name; past them its `sum_other_doc_count` sets `truncated`, and the
+counts are short of what it left out. As the traffic's, the count reads
+the index alone (a span is there a commit, 5 s, after it came), a pod
+sends a request's span once its answer ended, and a span stored twice is
+counted twice.
+
 ## FeCode
 
 FeCode reads with its tenant token (tenant `fecode`) and lets only a

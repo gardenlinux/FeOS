@@ -250,6 +250,22 @@ func TestIssuedCerts(t *testing.T) {
 	if l, err := s.ListIssuedCerts(bg, pod); err != nil || len(l) != 3 || l[2].Serial != "01" {
 		t.Fatalf("list %+v %v", l, err)
 	}
+	// The newest of each pod that has one: of the same time, by serial.
+	other, none := podid.Mint(), podid.Mint()
+	if _, err := s.InsertIssuedCert(bg, store.IssuedCert{Serial: "0a", PodID: other, Incarnation: uuid.New(), Node: "n2",
+		SPIFFEID: "spiffe://feos.local/tenant/acme/env/x/service/api", HPKEPublicKey: []byte{9},
+		NotAfter: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, s, "UPDATE issued_certs SET issued_at = now() WHERE pod_id = $1", pod.String())
+	latest, err := s.LatestIssuedCerts(bg, []podid.ID{pod, other, none})
+	if err != nil || len(latest) != 2 || latest[pod].Serial != "01" || latest[other].Serial != "0a" ||
+		latest[other].Node != "n2" || latest[other].NotAfter.IsZero() {
+		t.Fatalf("latest of each %+v %v", latest, err)
+	}
+	if latest, err := s.LatestIssuedCerts(bg, nil); err != nil || len(latest) != 0 {
+		t.Fatalf("latest of none %+v %v", latest, err)
+	}
 	exec(t, s, "UPDATE issued_certs SET not_after = now() - interval '100 days' WHERE serial = '01'")
 	if n, err := s.DeleteOldIssuedCerts(bg, 90*24*time.Hour); err != nil || n != 1 {
 		t.Fatalf("old %d %v", n, err)

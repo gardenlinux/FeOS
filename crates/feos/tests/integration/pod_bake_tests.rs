@@ -40,6 +40,7 @@ fn spec() -> PodSpec {
         resources: Some(Resources {
             vcpus: 1,
             memory_mib: 256,
+            ..Default::default()
         }),
         containers: vec![ContainerSpec {
             name: "main".to_string(),

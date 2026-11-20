@@ -42,8 +42,12 @@ While the guest does not supervise, the control plane does (ADR 0018): it
 restarts an environment's exited container by stopping and starting its
 pod, runs the readiness checks over the node's connection, counts restarts
 and exits itself, and runs a sandbox's container as `sleep infinity`.
-`feosd` sends a stopped pod's containers `SIGTERM` and gives them a fixed
-grace before the microVM ends them (ADR 0004).
+`feosd` sends a stopped pod's containers `SIGTERM` and gives them the
+grace the spec names (`stop_grace_seconds`, 10 s when unset) before the
+microVM ends them (ADR 0004); the control plane gives an image service's
+pods 660 s (ADR 0018). A process that is PID 1 of its container and has
+no handler of its own ignores `SIGTERM`, so `sleep infinity` waits out
+every sandbox's grace, and such a service its 660 s.
 
 ## Decision
 
@@ -125,8 +129,9 @@ events (ADR 0015). Nothing above the node polls a pod for its containers.
   that has none, never ends on its own: it runs until it is stopped,
   suspended or deleted.
 - Stopping a pod sends its main containers `SIGTERM`, and `SIGKILL` after
-  the pod's grace period, 30 s when unset, as in Kubernetes; then the
-  sidecars the same way, in reverse order. Then the microVM shuts down.
+  the pod's grace period (`stop_grace_seconds`), 30 s when unset, as in
+  Kubernetes; then the sidecars the same way, in reverse order. Then the
+  microVM shuts down.
 - A start brings an ended pod up again: a new boot, from its init
   containers on.
 
@@ -192,6 +197,12 @@ until the pod is deleted: a job's output is there when the job is not.
   it sees every restart, and stops the pod.
 - Exec into a container whose process does not reap leaves zombies there,
   as with Docker and Kubernetes; the reaper on request is the remedy.
+- With the reaper as PID 1, a process without a `SIGTERM` handler of its
+  own ends at the stop's `SIGTERM`, which the reaper forwards, instead of
+  waiting out the pod's grace; an idle container ends at once. A
+  sandbox's stop no longer waits its 10 s, and a service that never
+  handled the signal no longer holds its old pod for 660 s at every
+  rollout (ADR 0018).
 - The control plane's API can take Kubernetes's `command`, `args`,
   `restartPolicy`, init containers, sidecars and probes as they are.
 - The pod and container specs and the container's status grow additively

@@ -236,11 +236,14 @@ impl Pods {
     /// Suspends every running pod for a stop of feosd, `PARALLEL` at a
     /// time, and records them in `record` as each is done: a stop cut off
     /// by a kill keeps what it suspended. A pod in a hibernation is left to
-    /// it, which the stop waits for. A pod whose VM is busy is tried again
-    /// after the others, until `until`, the end of the stop's grace less
-    /// what it needs to exit; one that is then suspended, by the stop or as
-    /// its microVM's suspend went through after all, is recorded too. One
-    /// whose suspend fails ends with feosd.
+    /// it, which the stop waits for. A pod whose stop or delete is in
+    /// flight is left to it, which the stop does not wait for: its
+    /// containers may have a long grace, and its microVM ends with feosd.
+    /// A pod whose VM is busy is tried again after the others, until
+    /// `until`, the end of the stop's grace less what it needs to exit;
+    /// one that is then suspended, by the stop or as its microVM's suspend
+    /// went through after all, is recorded too. One whose suspend fails
+    /// ends with feosd.
     pub async fn suspend_for_stop(&self, record: &Path, until: Instant) -> Stopped {
         self.begin_stop();
         let _record = self.inner.stop_record.lock().await;
@@ -261,7 +264,11 @@ impl Pods {
         let running: Vec<String> = self
             .pods()
             .iter()
-            .filter(|(_, pod)| pod.info.state() == PodState::Running && pod.hibernation.is_none())
+            .filter(|(_, pod)| {
+                pod.info.state() == PodState::Running
+                    && pod.hibernation.is_none()
+                    && pod.ending == 0
+            })
             .map(|(pod_id, _)| pod_id.clone())
             .collect();
         info!(

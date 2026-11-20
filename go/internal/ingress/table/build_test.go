@@ -350,9 +350,38 @@ func TestBuildEnvRouteFrom(t *testing.T) {
 	if changed.Hash == got.Hash {
 		t.Fatal("a change of from kept the hash")
 	}
-	if puts, _ := Diff(map[string]string{got.ID: got.Hash}, &Snapshot{Envs: map[string]wire.Env{changed.ID: changed}}, true); len(puts) != 1 ||
+	if puts, _ := Diff(map[string]string{got.ID: got.Hash}, &Snapshot{Envs: map[string]wire.Env{changed.ID: changed}}, all); len(puts) != 1 ||
 		!slices.Equal(puts[0].Routes[2].From, []string{"192.0.2.0/25"}) {
 		t.Fatalf("diff: %+v", puts)
+	}
+}
+
+// A route's host goes into its entry as it is matched, in lower case
+// without a trailing dot (ADR 0045); a route without one has none, so the
+// entry and hash of an environment without host routes are those of
+// before. A change of a host changes the hash.
+func TestBuildEnvRouteHost(t *testing.T) {
+	plain, _ := build(t, "apps.example", baseEnv(1, 1), specsOf(map[int]*spec.Spec{1: deployment1()}))
+	b, err := json.Marshal(plain.Routes)
+	if err != nil || strings.Contains(string(b), `"host"`) {
+		t.Fatalf("routes without hosts code a host: %s %v", b, err)
+	}
+	sp := deployment1()
+	admin := sp.Routes["admin"]
+	admin.Host = "Admin.Example.com."
+	sp.Routes["admin"] = admin
+	got, _ := build(t, "apps.example", baseEnv(1, 1), specsOf(map[int]*spec.Spec{1: sp}))
+	if r := got.Routes[0]; r.Name != "admin" || r.Host != "admin.example.com" {
+		t.Fatalf("admin: %+v", r)
+	}
+	if r := got.Routes[2]; r.Name != "root" || r.Host != "" {
+		t.Fatalf("root: %+v", r)
+	}
+	if got.Hash == plain.Hash {
+		t.Fatal("a host kept the hash")
+	}
+	if !HostRoutes(got) || HostRoutes(plain) {
+		t.Fatal("HostRoutes")
 	}
 }
 

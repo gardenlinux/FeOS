@@ -6,6 +6,8 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { envPath } from '../routes.js';
 import { EnvLink } from './EnvTabs.jsx';
+import { KeyMark } from './Marks.jsx';
+import { MARK_TITLE } from './access.js';
 import {
   blockWords, egressMode, egressParts, egressProblems, egressWords, reachChoices, reachKey, reachesWords,
   toggleReach, useWords, withEgressList, withEgressMode,
@@ -38,7 +40,7 @@ export function useDeployed(env) {
 
 const PEER_ICONS = {
   service: 'box', job: 'jobs', addon: 'layers', ingress: 'route', sandbox: 'terminal', jobrun: 'play', env: 'layers',
-  internet: 'globe', domain: 'globe', cidr: 'network', other: 'alert',
+  internet: 'globe', domain: 'globe', cidr: 'network', upstream: 'plug', other: 'alert',
 };
 const KIND_ICONS = { service: 'box', addon: 'layers', job: 'jobs', jobrun: 'play', sandbox: 'terminal' };
 
@@ -49,12 +51,16 @@ export function kindIcon(kind) {
 
 // ReachFlow is the picture of a pod: who reaches it on the left, the pod
 // in the middle (children), what it reaches on the right, each row a peer
-// with an arrow and its ports. ins and outs are reachModel's rows; link(peer,
-// pill) may wrap a pill in a link. closedOut says, when nothing is on the
-// right, why: its egress is none.
+// with an arrow and its ports. ins and outs are reachModel's rows, with
+// withKeys's marks (access.js) where a key is handed over and its
+// bindings' upstreams on the right; link(peer, pill) may wrap a pill in
+// a link. The right side says, when its egress is none, that nothing
+// (else: a binding's upstream is the node's connection) is reached
+// outside.
 export function ReachFlow({ ins, outs, children, link, heads = true, egress, inWords = 'Nothing gets in' }) {
   const none = egress !== undefined && egressMode(egress) !== 'internet' && !egressParts(egress).domains.length
     && !egressParts(egress).blocks.length;
+  const bound = outs.some((r) => r.peer.type === 'upstream');
   return (
     <div className={'sgf' + (heads ? '' : ' sgf-noheads')}>
       {heads && <FlowHeads />}
@@ -67,7 +73,9 @@ export function ReachFlow({ ins, outs, children, link, heads = true, egress, inW
       <div className="sgf-side sgf-out">
         {outs.map((r) => <FlowRow key={r.key} row={r} dir="out" link={link} />)}
         {outs.length === 0 && !none && <span className="sgf-closed"><Icon name="lock" size={13} /> Reaches nothing</span>}
-        {none && <span className="sgf-closed"><Icon name="lock" size={13} /> Nothing outside the environment</span>}
+        {none && (
+          <span className="sgf-closed" title={bound ? 'Its egress is none. A binding\'s upstream is reached by the node, whatever the egress.' : undefined}>
+            <Icon name="lock" size={13} /> {bound ? 'Nothing else outside the environment' : 'Nothing outside the environment'}</span>)}
       </div>
     </div>
   );
@@ -90,9 +98,33 @@ export function FlowLegend({ mid }) {
   return <div className="sgf sgf-legend" aria-hidden="true"><FlowHeads mid={mid} /></div>;
 }
 
+const count = (n) => Number(n || 0).toLocaleString('en-US');
+
+// upstreamTitle says a binding's row in full: where it goes, where its
+// key is, how the pod reaches it, and its last 24 hours when the sink
+// counted them.
+export function upstreamTitle(row) {
+  const b = row.binding || {};
+  const c = b.credential;
+  const parts = [
+    `Binding ${b.name} to ${b.upstream || 'its upstream'}: ${row.what}. ${MARK_TITLE.offloaded}`,
+    `Reached as ${b.reachedAs}${c ? `, with the environment's credential ${c.name}${c.version ? ` (version ${c.version})` : ''}` : ''}.`,
+  ];
+  const u = row.usage;
+  if (u) {
+    let mine = '';
+    if (u.mine !== null && u.mine !== undefined && u.by && u.mine !== u.requests) {
+      mine = u.mine ? ` (${count(u.mine)} of them from ${u.by})` : ` (none from ${u.by})`;
+    }
+    parts.push(`Last 24 h: ${count(u.requests)} request${u.requests === 1 ? '' : 's'}${mine}, ${count(u.refused)} refused, ${count(u.failing)} failing.`);
+  }
+  return parts.join(' ');
+}
+
 // rowTitle says a row in full, for its tooltip.
 function rowTitle(row, dir) {
   const p = row.peer;
+  if (p.type === 'upstream') return upstreamTitle(row);
   const via = row.via.length ? ` (by ${row.via.join(', ')})` : '';
   if (p.type === 'ingress') return `${row.what} from the ingress, for ${p.sub}${via}`;
   if (p.missing) return `${p.name}: not in the deployed deployment, admits nothing`;
@@ -111,9 +143,18 @@ function FlowRow({ row, dir, link }) {
     </span>
   );
   if (link) pill = link(p, pill) || pill;
-  const wire = <span className="sgf-wire"><span className="sgf-what">{row.what}</span></span>;
+  const title = rowTitle(row, dir);
+  // A binding's edge leaves the pod without a key and the node with one:
+  // the lock where it leaves, the line in the mark's colour from there.
+  const wire = p.type === 'upstream'
+    ? <span className="sgf-wire sgf-wire-node"><span className="sgf-mark"><KeyMark mark="offloaded" label={row.what} title={title} /></span></span>
+    : (
+      <span className="sgf-wire">
+        <span className="sgf-what">{row.what}</span>
+        {row.mark && <span className="sgf-mark"><KeyMark mark={row.mark} /></span>}
+      </span>);
   return (
-    <div className={`sgf-row sgf-row-${dir}`} title={rowTitle(row, dir)}>
+    <div className={`sgf-row sgf-row-${dir}${row.mark ? ' sgf-marked' : ''}${p.type === 'upstream' ? ' sgf-row-up' : ''}`} title={title}>
       {dir === 'in' ? <>{pill}{wire}</> : <>{wire}{pill}</>}
     </div>
   );

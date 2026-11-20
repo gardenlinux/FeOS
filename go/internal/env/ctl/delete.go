@@ -15,8 +15,53 @@ import (
 	volumev1 "github.com/gardenlinux/feos/go/gen/feos/volume/v1"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
+
+// endInstances ends the instances of an environment being deleted as a
+// rollout ends its old ones (stepStopping), with no traffic to drain:
+// each is marked stopping now, a running pod is stopped (SIGTERM and its
+// stop grace) while its row stays booked and in its groups, and the row
+// goes once its pod has ended, or at once when it runs nothing. A row
+// without the controller's row of it goes at once.
+func (c *Controller) endInstances(ctx context.Context, v *view) error {
+	rows, err := c.st.EnvCtlSandboxes(ctx, v.env.ID)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	insts, err := c.st.ListEnvInstanceRows(ctx, v.env.ID)
+	if err != nil {
+		return err
+	}
+	now, err := c.st.Now(ctx)
+	if err != nil {
+		return err
+	}
+	byID := map[podid.ID]store.EnvInstanceRow{}
+	var mark []store.EnvInstanceRow
+	for _, r := range insts {
+		if r.Instance.Phase != model.PhaseStopping {
+			mark = append(mark, r)
+			r.Instance.Phase, r.Instance.RetireAt = model.PhaseStopping, now
+		}
+		byID[r.Sandbox.ID] = r
+	}
+	if err := c.stopInstances(ctx, v, false, mark...); err != nil {
+		return err
+	}
+	for _, sb := range rows {
+		r, ok := byID[sb.ID]
+		if !ok {
+			if err := c.deleteInstance(ctx, sb); err != nil {
+				return err
+			}
+			continue
+		}
+		c.endInstance(ctx, now, r)
+	}
+	return nil
+}
 
 // volumesBatch is how many deleting volumes one env-volumes pass takes.
 const volumesBatch = 64
@@ -183,11 +228,11 @@ func (c *Controller) deleteVolume(ctx context.Context, vol store.EnvVolume) (boo
 const deleteBatch = 16
 
 // deleteLoop is env-delete: the environments of deleting tenants are
-// marked deleting; each deleting environment loses its instances
-// (Engine.Delete), its attached services (their processes stop, a
-// sleeping sandbox woken for it, before their rows and names go), its
-// volumes (marked deleting) and its group and name table on every
-// connected node; its row goes once no instance row, volume, group, name
+// marked deleting; each deleting environment loses its instances, once
+// their pods have ended (endInstances), its attached services (their
+// processes stop, a sleeping sandbox woken for it, before their rows and
+// names go), its volumes (marked deleting) and its group and name table
+// on every connected node; its row goes once no instance row, volume, group, name
 // table or attached service still to clean is left (its deployments, secrets, runs, incidents
 // and route tokens cascade). An environment whose pass could not finish
 // (a volume on a node that is down, a sandbox that cannot be woken yet)
@@ -241,14 +286,9 @@ func (c *Controller) deleteLoop(ctx context.Context) error {
 // deleteEnvironment is one pass of env-delete over an environment, and
 // reports whether its row went.
 func (c *Controller) deleteEnvironment(ctx context.Context, e store.Environment) (bool, error) {
-	rows, err := c.st.EnvCtlSandboxes(ctx, e.ID)
-	if err != nil {
+	v := &view{env: e, target: emptySpec(), latestSpec: emptySpec()}
+	if err := c.endInstances(ctx, v); err != nil {
 		return false, err
-	}
-	for _, sb := range rows {
-		if err := c.deleteInstance(ctx, sb); err != nil {
-			return false, err
-		}
 	}
 	// The attached services' processes stop (a sleeping sandbox is woken
 	// for it) before their rows, and with them their names, go: cleanOld.
@@ -256,7 +296,6 @@ func (c *Controller) deleteEnvironment(ctx context.Context, e store.Environment)
 	if err != nil {
 		return false, err
 	}
-	v := &view{env: e, target: emptySpec(), latestSpec: emptySpec()}
 	cleaning := false
 	for _, a := range attached {
 		if !c.cleanOld(ctx, v, a, c.dropCleaned) {

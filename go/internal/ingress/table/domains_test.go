@@ -68,6 +68,28 @@ func TestBuildEnvDomains(t *testing.T) {
 	}
 }
 
+// A wildcard domain is a host after the others and retires no default
+// host (ADR 0045): served alone, it stands beside the default host;
+// beside a name, beside the name.
+func TestBuildEnvWildcardDomains(t *testing.T) {
+	specs := specsOf(map[int]*spec.Spec{1: deployment1()})
+	e := baseEnv(1, 1, ready("a0000000001", "web", 1, 8080))
+	e.Domains = []wire.Domain{domain("*.boxed.fecore.dev", 100, 1)}
+	got, _ := build(t, "apps.example", e, specs)
+	if !slices.Equal(got.Hosts, []string{"web-acme.apps.example", "*.boxed.fecore.dev"}) || len(got.Domains) != 1 {
+		t.Fatalf("a wildcard alone: hosts %v", got.Hosts)
+	}
+	e.Domains = []wire.Domain{domain("*.boxed.fecore.dev", 100, 1), domain("fecode.dev", 100, 2)}
+	got, _ = build(t, "apps.example", e, specs)
+	if !slices.Equal(got.Hosts, []string{"fecode.dev", "*.boxed.fecore.dev"}) || len(got.Domains) != 2 {
+		t.Fatalf("a wildcard and a name: hosts %v", got.Hosts)
+	}
+	noZone, _ := build(t, "", e, specs)
+	if !slices.Equal(noZone.Hosts, []string{"fecode.dev", "*.boxed.fecore.dev"}) {
+		t.Fatalf("without a zone: hosts %v", noZone.Hosts)
+	}
+}
+
 // Domains never make an environment too large: those that do not fit
 // within MaxEnvBytes, or alone take more than MaxDomainBytes, are left
 // out, in their order, and the entry stays within its bound.

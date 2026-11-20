@@ -17,6 +17,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 	"github.com/gardenlinux/feos/go/internal/visit"
 )
@@ -60,7 +61,8 @@ func (s *Service) opened(ctx context.Context, sealed string) (visit.Challenge, e
 // deleted, guarded (visitors) by a provider of a kind this installation
 // serves, which the caller answers for (a tenant principal: of kind
 // tenant, its own tenant's, and admin on the environment; ferun-auth: of
-// kinds ferun and oidc), and ch's host is one of its hosts. Anything else
+// kinds ferun and oidc), and ch's host is one of its hosts or a name one
+// of its wildcard domains covers (ADR 0045). Anything else
 // is notFound, never a 403.
 func (s *Service) admit(ctx context.Context, q *store.Store, c Caller, envID, host string, lock store.RowLock,
 	notFound func() error) (guarded, error) {
@@ -96,7 +98,7 @@ func (s *Service) admit(ctx context.Context, q *store.Store, c Caller, envID, ho
 	if err != nil {
 		return guarded{}, s.failed("the hosts of an environment", err)
 	}
-	if !slices.Contains(hosts, host) {
+	if !slices.ContainsFunc(hosts, func(h string) bool { return routing.Covers(h, host) }) {
 		return guarded{}, notFound()
 	}
 	return g, nil

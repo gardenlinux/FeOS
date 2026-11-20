@@ -132,7 +132,7 @@ of the directory, so that a crash leaves the old content or the new.
 | `removed` | the refusal that said the ingress was removed, until the next join |
 | `wg.key` | the WireGuard private key, 32 raw bytes |
 | `mesh.json` | the place on the mesh: `{podNetwork, prefix, address}` |
-| `table-v2.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges and the visits' keys. The first save deletes a `table.json` of an older binary ([Visitors](#the-tables-part)) |
+| `table-v3.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges, the visits' keys and the routes' hosts. Without it the agent reads a `table-v2.json` of an older binary once; the first save deletes that and a `table.json` ([Visitors](#the-tables-part), [Routing](#routing)) |
 
 The certificate is renewed for the same key; a new key is made only
 when the identity is declared lost. A new `wg.key` is made after every
@@ -246,7 +246,8 @@ comes.
 
 On a connection the agent says `Hello` first: its WireGuard public key,
 its endpoint, its version and its capabilities (`visits`: it checks
-visits, [Visitors](#the-tables-part)). Hello takes the instance's place on the
+visits, [Visitors](#the-tables-part); `routeHosts`: it serves a route
+on its host alone, [Routing](#routing)). Hello takes the instance's place on the
 mesh and answers the cluster's ULA, its /96 and address, the apps zone,
 the tenant zone and the answering instance; the agent keeps `mesh.json` and configures
 the device ([The mesh](#the-mesh)). `Sync` then streams the table. A
@@ -310,9 +311,11 @@ The table is what the ingress routes, one entry per public environment
 - the routes of its routing deployment, the deployed one, else the latest
   while none is deployed: name, path prefix, service, port name,
   `strip`, `door` for a route to an attached service, which the
-  route door alone serves, and `from`, the route's clients' address
+  route door alone serves, `from`, the route's clients' address
   blocks, canonical prefixes of either family (ADR 0034); left out, the
-  route admits every client;
+  route admits every client; and `host`, the host it answers on alone,
+  canonical, a name or a wildcard (ADR 0045), whether the environment
+  is served there now or not; left out, every host of the environment;
 - per image service that a route sends to, its idle policy, its
   **endpoints**, the instances that are ready, run without an op and have
   an address and a node, with the ports their node admits under the
@@ -344,6 +347,16 @@ every entry, so one tenant's environment must not grow the messages of
 all. A valid spec stays far below that size, since a route's path has at
 most 1 KiB ([control-plane.md](control-plane.md#the-deployment-spec)); a
 deployment stored before that limit can exceed it.
+
+An environment with a route that has a `host` goes only to an ingress
+whose Hello named `routeHosts`: an older one reads no `host` and would
+serve every route on every host, sending a host's requests to another
+host's routes, past their `from`. It answers that environment's hosts 404, and
+one it was sent before a route gained a host leaves its table. In the
+usual order of a deploy, `ferund` first ([Operations](#operations)), an
+environment with a route host is 404 at the instances not rolled yet; an
+ingress rolled first serves as before behind an older `ferund`, which
+sends no `host`.
 
 ### The builder
 
@@ -428,7 +441,8 @@ nothing expires it.
 
 ### The cache
 
-At its start the agent loads `table-v2.json`, `mesh.json` and `wg.key`,
+At its start the agent loads `table-v3.json` (else an older binary's
+`table-v2.json`), `mesh.json` and `wg.key`,
 configures the mesh device and hands the cached table to the proxy before
 it contacts `ferund`: an instance that restarts while `ferund` is away
 serves at once what was routable, with the domains' certificates, and
@@ -600,9 +614,11 @@ other. A plan says the same as info findings at `routes.<name>`: "served
 by the ingress at https://<host><prefix> and by the route door", "served
 by the route door; the ingress serves it once the environment is
 public", or "served by the route door alone: an attached service runs in
-a sandbox, which the ingress does not reach". A route's `host` stays
-stored and not used: the ingress and the route door serve a route on
-every host of its environment.
+a sandbox, which the ingress does not reach". A route with a `host` is
+served on that host alone, by the ingress and by the route door
+([Routing](#routing)); its finding names its host, a wildcard's with "on
+every name the wildcard serves", and one the environment is not served
+at yet says that the ingress serves it once it is.
 
 ### Host labels
 
@@ -708,11 +724,11 @@ connection; it holds no list and no rule.
   (reason `visit-unavailable`), anything else 401. A guarded environment
   never loses its `access` on an error path of the builder; a provider
   without a row gives `signIn` "".
-- The cache is `table-v2.json`, and the agent's first save deletes
-  `table.json`: an older binary started on the same volume finds no cache
-  and serves nothing until `ferund` gives it a table without the guarded
-  environments, instead of serving them open from a new cache. The new
-  binary does not read `table.json`.
+- The cache is `table-v3.json` (`table-v2.json` until routes had hosts),
+  and the agent's first save deletes `table.json`: an older binary started
+  on the same volume finds no cache and serves nothing until `ferund`
+  gives it a table without the guarded environments, instead of serving
+  them open from a new cache. The new binary does not read `table.json`.
 
 ### The order
 
@@ -916,14 +932,23 @@ version, within one `env-groups` pass.
 ### Routing
 
 1. **The host**, in lower case, without its port and a trailing dot,
-   names the environment, a domain as the default host; an unknown host
-   is 404 "no such host".
+   names the environment, a domain as the default host; a name that is
+   no host of any environment is looked up as `*.` and its parent, a
+   wildcard domain's host (ADR 0045), so that a name's own domain wins;
+   an unknown host is 404 "no such host".
 2. **The path** may not hold a segment that is, or decodes once or twice
    to, `.` or `..` (400), and must decode (400).
-3. **The route** with the longest prefix, segment by segment, matches;
-   ties go to the route whose name sorts first. None is 404 "no route for
-   <path>"; a route to an attached service is 404 "route <path> is served
-   by the route door".
+3. **The route**: of the routes that answer on the host, those without a
+   `host` and those whose `host` is the host or the wildcard that covers
+   it (ADR 0045), the one with the longest prefix, segment by segment,
+   matches; of one prefix, the one whose `host` is the host, then the
+   one whose `host` is its wildcard, then the one without; ties go to the
+   route whose name sorts first. A route without a host so answers on
+   every host where no route of that host has its path, and an
+   environment without route hosts routes by path alone. None is 404
+   "no route for <path>"; a route to an attached service is 404 "route
+   <path> is served by the route door". The route door matches the same
+   way on the Host its guest sees.
 4. **The client**: a route with `from` admits a client only when its
    address is in one of the blocks, else it answers 403 "this route does
    not admit your address", before any instance is held or woken. The
@@ -1296,7 +1321,9 @@ environment's domains. Parsed once per table that changes it, and
 reused while it stays the same, so a renewal is served from the next
 handshake on; a certificate that does not parse, whose key is not its
 own, or that is not for its name is logged and its host gets the
-wildcard.
+wildcard. A name without a certificate of its own gets a wildcard
+domain's that covers it (`*.` and its parent, ADR 0045), before the
+zones' wildcards.
 
 An SNI that the tenant zone's wildcard covers (`--tenant-zone-tls-cert`,
 one label under the zone, as a wildcard does) gets that one. Every other
@@ -1647,6 +1674,7 @@ open question.
 | The ingress busy renewing | 8 renewals in flight on its connection, and apart from them 8 redeems and ends: a call beyond fails at once. A request whose token is past its end and a minute then has no visit (busy is not away); one whose token is still valid is served with it. | |
 | The visits' keys missing from the table | A guarded environment admits nobody: 503 for a navigation, 401 for the rest. | until the table has them |
 | An older ingress behind a `ferund` with visits | Its Hello names no capability: `ferund` gives it no guarded environment, whose hosts it answers 404. Downgraded on the same volume, it finds no `table.json` and serves nothing until it synced. | until it is rolled |
+| An older ingress behind a `ferund` with route hosts | Its Hello does not name `routeHosts`: `ferund` gives it no environment with a route that has a host, whose hosts it answers 404. Downgraded on the same volume, it finds no `table-v2.json` and serves nothing until it synced. A newer ingress behind an older `ferund` gets no route's host and serves as before. | until it is rolled |
 | An older `ferund` instance during a roll | It ignores `access` and gives a guarded environment open to the ingresses on its streams: no provider is made and no environment set `visitors` until every instance runs the new release ([control-plane.md](control-plane.md#visitors)). | the roll |
 | A provider that does not answer | Its visits get their next token and are asked again at the next renewal, up to their end: only its explicit no ends a visit. A refusal of `ferund`'s signed question (401, a provider that cannot fetch the keys: 503) is no answer too. | 12 hours at most |
 | `ferund` rolls | Stopping instances refuse new ingress connections and end their streams; older instances close the ALPN; the 5 s backstop covers their writes. | seconds |

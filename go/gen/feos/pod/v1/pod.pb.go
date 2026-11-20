@@ -261,9 +261,15 @@ type PodSpec struct {
 	// binding's upstream with TLS 1.3, the pod's certificate and its
 	// CertificateVerify signed by feos-authn, the upstream pinned to its
 	// SPIFFE ID under the platform's root. The plaintext stays in the pod.
-	TlsBindings   []*TlsBinding `protobuf:"bytes,9,rep,name=tls_bindings,json=tlsBindings,proto3" json:"tls_bindings,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TlsBindings []*TlsBinding `protobuf:"bytes,9,rep,name=tls_bindings,json=tlsBindings,proto3" json:"tls_bindings,omitempty"`
+	// How long the containers have to exit after SIGTERM when the pod is
+	// stopped or deleted while it runs, in seconds, before its microVM ends
+	// them: 0 is the node's 10 s, at most 900. The control plane gives a
+	// service that drains more (ADR 0018). A create again with another
+	// grace is the same create: the pod keeps the one it was created with.
+	StopGraceSeconds uint32 `protobuf:"varint,10,opt,name=stop_grace_seconds,json=stopGraceSeconds,proto3" json:"stop_grace_seconds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PodSpec) Reset() {
@@ -357,6 +363,13 @@ func (x *PodSpec) GetTlsBindings() []*TlsBinding {
 		return x.TlsBindings
 	}
 	return nil
+}
+
+func (x *PodSpec) GetStopGraceSeconds() uint32 {
+	if x != nil {
+		return x.StopGraceSeconds
+	}
+	return 0
 }
 
 // One outbound TLS binding of a pod (ADR 0036).
@@ -585,7 +598,15 @@ type Resources struct {
 	// Defaults to 1.
 	Vcpus uint32 `protobuf:"varint,1,opt,name=vcpus,proto3" json:"vcpus,omitempty"`
 	// Defaults to 512.
-	MemoryMib     uint64 `protobuf:"varint,2,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
+	MemoryMib uint64 `protobuf:"varint,2,opt,name=memory_mib,json=memoryMib,proto3" json:"memory_mib,omitempty"`
+	// The size of the pod's disk in GiB, at most 1024: 0 is the size of the
+	// guest's blank data volume (8 GiB), and a size below it is that size.
+	// The disk is thin: the node holds what the pod writes. A larger one
+	// starts on the blank data volume, or on a layer baked of its image,
+	// and the guest grows its filesystem to the disk at its boot; such a pod
+	// bakes no layer (ADR 0025). The size is fixed at the create, and a
+	// checkpoint takes it along.
+	DiskGib       uint32 `protobuf:"varint,3,opt,name=disk_gib,json=diskGib,proto3" json:"disk_gib,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -630,6 +651,13 @@ func (x *Resources) GetVcpus() uint32 {
 func (x *Resources) GetMemoryMib() uint64 {
 	if x != nil {
 		return x.MemoryMib
+	}
+	return 0
+}
+
+func (x *Resources) GetDiskGib() uint32 {
+	if x != nil {
+		return x.DiskGib
 	}
 	return 0
 }
@@ -2862,7 +2890,7 @@ var File_feos_pod_v1_pod_proto protoreflect.FileDescriptor
 
 const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\n" +
-	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\xed\x04\n" +
+	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\x9b\x05\n" +
 	"\aPodSpec\x124\n" +
 	"\tresources\x18\x01 \x01(\v2\x16.feos.pod.v1.ResourcesR\tresources\x12:\n" +
 	"\n" +
@@ -2874,7 +2902,9 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\bmetadata\x18\x06 \x03(\v2\".feos.pod.v1.PodSpec.MetadataEntryR\bmetadata\x12A\n" +
 	"\rhttp_bindings\x18\a \x01(\v2\x1c.feos.pod.v1.PodHttpBindingsR\fhttpBindings\x12\x1a\n" +
 	"\bidentity\x18\b \x01(\tR\bidentity\x12:\n" +
-	"\ftls_bindings\x18\t \x03(\v2\x17.feos.pod.v1.TlsBindingR\vtlsBindings\x1a9\n" +
+	"\ftls_bindings\x18\t \x03(\v2\x17.feos.pod.v1.TlsBindingR\vtlsBindings\x12,\n" +
+	"\x12stop_grace_seconds\x18\n" +
+	" \x01(\rR\x10stopGraceSeconds\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +
@@ -2895,11 +2925,12 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\aversion\x18\x04 \x01(\tR\aversion\"<\n" +
 	"\tPodVolume\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
-	"\tvolume_id\x18\x02 \x01(\tR\bvolumeId\"@\n" +
+	"\tvolume_id\x18\x02 \x01(\tR\bvolumeId\"[\n" +
 	"\tResources\x12\x14\n" +
 	"\x05vcpus\x18\x01 \x01(\rR\x05vcpus\x12\x1d\n" +
 	"\n" +
-	"memory_mib\x18\x02 \x01(\x04R\tmemoryMib\"\x88\x02\n" +
+	"memory_mib\x18\x02 \x01(\x04R\tmemoryMib\x12\x19\n" +
+	"\bdisk_gib\x18\x03 \x01(\rR\adiskGib\"\x88\x02\n" +
 	"\rContainerSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
 	"\timage_ref\x18\x02 \x01(\tR\bimageRef\x12\x18\n" +

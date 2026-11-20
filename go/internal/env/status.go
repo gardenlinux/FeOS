@@ -15,6 +15,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -160,7 +161,8 @@ func objectsOf(sp *spec.Spec, instances []store.EnvInstanceRow, attached []store
 func instanceStatus(row store.EnvInstanceRow) InstanceStatus {
 	i, sb := row.Instance, row.Sandbox
 	detail := i.Detail
-	if detail == "" && sb.ClientState != model.StateRunning {
+	// A stop's row stays running while its containers drain, and says so.
+	if detail == "" && (sb.ClientState != model.StateRunning || sb.Op != "") {
 		detail = sb.StatusDescription
 	}
 	return InstanceStatus{ID: sb.ID.String(), Replica: i.Replica, Phase: i.Phase, State: sb.ClientState, Node: sb.Node,
@@ -169,18 +171,42 @@ func instanceStatus(row store.EnvInstanceRow) InstanceStatus {
 }
 
 // routesOf are a spec's routes by name, their ports resolved, each with
-// its door: the ingress serves a route to an image service at the first
-// of hosts (the environment's hosts, hostsOf), the route door alone every
-// other route.
+// its host and its door: the ingress serves a route to an image service
+// while the environment has a host that is an address, not a wildcard,
+// among hosts (its hosts, hostsOf), the route door alone every other.
+// A route of the ingress has a URL where it answers its own path (ADR
+// 0045): one with a host at that host while the environment is served
+// there, one without at the first such address where no route of that
+// host takes its path; a route whose host is a wildcard has none, as a
+// wildcard is no address.
 func routesOf(sp *spec.Spec, hosts []string) []RouteStatus {
 	out := []RouteStatus{}
-	for _, name := range slices.Sorted(maps.Keys(sp.Routes)) {
+	addrs := slices.DeleteFunc(slices.Clone(hosts), routing.IsWildcard)
+	names := slices.Sorted(maps.Keys(sp.Routes))
+	prefixes, routeHosts := make([]string, len(names)), make([]string, len(names))
+	for i, name := range names {
+		prefixes[i], routeHosts[i] = spec.RoutePrefix(sp.Routes[name].Path), spec.RouteHost(sp.Routes[name].Host)
+	}
+	for i, name := range names {
 		r := sp.Routes[name]
 		target, ok := sp.Services[r.Service]
 		port, _ := spec.PortNumber(target.Ports, r.Port)
-		rs := RouteStatus{Name: name, Path: r.Path, Service: r.Service, Port: port, Door: DoorRoute}
-		if len(hosts) > 0 && ok && !spec.IsAttached(target) {
-			rs.Door, rs.URL = DoorIngress, "https://"+hosts[0]+spec.RoutePrefix(r.Path)
+		rs := RouteStatus{Name: name, Path: r.Path, Host: routeHosts[i], Service: r.Service, Port: port, Door: DoorRoute}
+		if len(addrs) > 0 && ok && !spec.IsAttached(target) {
+			rs.Door = DoorIngress
+			at := addrs
+			if h := routeHosts[i]; h != "" {
+				at = nil
+				if !routing.IsWildcard(h) && spec.CoveredBy(hosts, h) {
+					at = []string{h}
+				}
+			}
+			for _, h := range at {
+				if j, _, ok := routing.MatchHost(prefixes, routeHosts, h, prefixes[i]); ok && j == i {
+					rs.URL = "https://" + h + prefixes[i]
+					break
+				}
+			}
 		}
 		out = append(out, rs)
 	}
@@ -188,22 +214,22 @@ func routesOf(sp *spec.Spec, hosts []string) []RouteStatus {
 }
 
 // hostsOf are the hosts the ingress serves environment e at while it is
-// public: domains, the names of its served domains in the order they were
-// bound, else its default host under zone (none without a zone); none
-// while it is not public or is being deleted, which the ingress no longer
-// serves. An environment on a domain of its own is not served at its
-// default host (ADR 0021).
+// public: the names of its served domains in the order they were bound,
+// else its default host under zone (none without a zone), and after them
+// its served wildcard domains, which are no address and retire no
+// default host (ADR 0045); none while it is not public or is being
+// deleted, which the ingress no longer serves. An environment on a domain
+// of its own is not served at its default host (ADR 0021).
 func hostsOf(e store.Environment, zone string, domains []string) []string {
 	if !e.Public || e.Deleting {
 		return []string{}
 	}
-	if len(domains) > 0 {
-		return slices.Clone(domains)
+	names := slices.DeleteFunc(slices.Clone(domains), routing.IsWildcard)
+	wildcards := slices.DeleteFunc(slices.Clone(domains), func(d string) bool { return !routing.IsWildcard(d) })
+	if len(names) == 0 && zone != "" && e.HostLabel != "" {
+		names = []string{e.HostLabel + "." + zone}
 	}
-	if zone == "" || e.HostLabel == "" {
-		return []string{}
-	}
-	return []string{e.HostLabel + "." + zone}
+	return append(names, wildcards...)
 }
 
 // hosts are e's hosts (Hosts).

@@ -210,7 +210,7 @@ func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecReque
 	sp, fs := spec.Parse(req.Spec)
 	var images map[string]string
 	if !spec.HasErrors(fs) {
-		vc, pins, err := s.loadContext(ctx, tenant, nil, sp, spec.ModeSpec, map[string]spec.SecretInfo{})
+		vc, pins, err := s.loadContext(ctx, tenant, nil, sp, spec.ModeSpec, map[string]spec.SecretInfo{}, nil)
 		if err != nil {
 			return PlanSpecAnswer{}, err
 		}
@@ -243,6 +243,10 @@ func addonType(b addons.Blueprint) AddonType {
 	t := AddonType{Type: b.Type(), Versions: nonNilStrings(b.Versions()), DefaultPlan: b.DefaultPlan(),
 		Plans: []AddonPlan{}, OutputKeys: nonNilStrings(b.OutputKeys()), OutputFields: nonNilStrings(b.OutputFields()),
 		Options: []addons.Option{}}
+	_, t.ByIdentity = b.(addons.TLSBinder)
+	if r, ok := b.(addons.IdentityReader); ok && t.ByIdentity {
+		t.IdentityBy = r.IdentityBy()
+	}
 	if n := len(t.Versions); n > 0 {
 		t.DefaultVersion = t.Versions[n-1]
 	}
@@ -275,7 +279,7 @@ func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
-	p, err := s.plan(ctx, tenant, e, req.Spec, req.Base, spec.ModePlan, nil)
+	p, err := s.plan(ctx, tenant, e, req.Spec, req.Base, spec.ModePlan, nil, nil)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
@@ -438,7 +442,7 @@ func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name stri
 		return ObjectAnswer{}, errNoObject(kind, name)
 	}
 	if dryRun {
-		p, err := s.plan(ctx, tenant, e, raw, &base, spec.ModePlan, nil)
+		p, err := s.plan(ctx, tenant, e, raw, &base, spec.ModePlan, nil, nil)
 		if err != nil {
 			return ObjectAnswer{}, err
 		}

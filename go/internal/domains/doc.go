@@ -6,6 +6,10 @@
 // <--domain-challenge-label>.<name>, bound to an environment of the
 // tenant, routed to the edge by a CNAME to --edge-name or by A and AAAA
 // records of the edge's addresses, and checked for as long as they live.
+// A claim may be a wildcard, *.<name> (ADR 0045): its TXT record stands
+// beside <name>, its routing is a fresh name below it resolving to the
+// edge and its delegation, the CNAME of _acme-challenge.<name> to
+// <token>.<--acme-zone>, where internal/acme answers its DNS-01.
 //
 //   - name.go: a name's normalization (lowercase LDH, IDNs as A-labels)
 //     and the claims' tokens;

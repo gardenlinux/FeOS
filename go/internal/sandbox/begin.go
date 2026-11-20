@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,7 +19,9 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// transitional is the state an op holds the sandbox in while it runs.
+// transitional is the state an op holds the sandbox in while it runs. A
+// stop's pod runs until its containers have exited: the row stays
+// running, booked as one, and its op says that it stops.
 func transitional(k OpKind) string {
 	switch k {
 	case OpResume:
@@ -27,6 +30,8 @@ func transitional(k OpKind) string {
 		return model.StatePausing
 	case OpHibernate:
 		return model.StateHibernating
+	case OpStop:
+		return model.StateRunning
 	}
 	return model.StateCreating
 }
@@ -40,11 +45,17 @@ func admits(k OpKind) bool {
 // begin begins an op (§9 "Begin"): for a create or restore with
 // candidates, on the first candidate whose claim passes under its lock
 // (each candidate in a transaction of its own, so that the transaction
-// never holds more than one node row); otherwise on the target.
+// never holds more than one node row); otherwise on the target. A
+// candidate that another instance of the replica's service came to since
+// the snapshot (peersCame) is tried again after the others, then without
+// that check: the peers rank, they never refuse.
 func (r *runner) begin(ctx context.Context, id podid.ID, in OpIntent) (*OpHandle, error) {
 	if pinnedTarget(in) == "" {
 		var refused []string
-		for _, c := range in.Candidates {
+		cands := slices.Clone(in.Candidates)
+		for i := 0; i < len(cands); i++ {
+			c := cands[i]
+			in.besidePeers = i >= len(in.Candidates)
 			// Between two transactions nothing is in flight: a caller
 			// that is gone tries no further candidate.
 			if err := ctx.Err(); err != nil {
@@ -52,6 +63,10 @@ func (r *runner) begin(ctx context.Context, id podid.ID, in OpIntent) (*OpHandle
 			}
 			h, err := r.beginOn(ctx, id, in, c)
 			if rf, ok := asRefusal(err); ok {
+				if rf.gate == gatePeers {
+					cands = append(cands, c)
+					continue
+				}
 				refused = append(refused, c+": "+rf.text)
 				in.verdicts = refuseVerdict(in.verdicts, c, rf.text)
 				continue
@@ -141,8 +156,13 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 			if err := e.claim(ctx, tx, row, in.Kind, target); err != nil {
 				return err
 			}
+			if (in.Kind == OpCreate || in.Kind == OpRestore) && !in.besidePeers {
+				if err := peersCame(ctx, tx, row, target, in.verdicts); err != nil {
+					return err
+				}
+			}
 			if err := tx.UpsertBooking(ctx, store.Booking{PodID: id, Node: target, VCPUs: row.VCPUs,
-				MemoryMiB: row.MemoryMiB, Gated: true}); err != nil {
+				MemoryMiB: row.MemoryMiB, DiskGiB: row.DiskGiB, Gated: true}); err != nil {
 				return err
 			}
 		}
@@ -158,7 +178,7 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 		if err != nil {
 			return err
 		}
-		d := e.t.opDeadline(in.Kind, row.MemoryMiB)
+		d := e.opDeadlineOf(in.Kind, row)
 		after := row
 		after.Op, after.OpID, after.OpOwner = string(in.Kind), uuid.New(), e.id
 		after.OpDeadline, after.OpTarget, after.OpFromState = now.Add(d), target, row.ClientState
@@ -314,7 +334,7 @@ func (r *runner) takeover(ctx context.Context, tx *store.Store, row store.Sandbo
 		}
 		noAbandon = err == nil && n.Draining
 	}
-	d := r.e.t.opDeadline(kind, row.MemoryMiB)
+	d := r.e.opDeadlineOf(kind, row)
 	after := row
 	after.OpID, after.OpOwner, after.OpDeadline = uuid.New(), r.e.id, now.Add(d)
 	written, err := tx.UpdateSandbox(ctx, row, after)
@@ -351,7 +371,7 @@ func (r *runner) preemptHibernate(ctx context.Context, tx *store.Store, row stor
 		return nil, nil, err
 	}
 	if err := tx.UpsertBooking(ctx, store.Booking{PodID: row.ID, Node: target, VCPUs: row.VCPUs,
-		MemoryMiB: row.MemoryMiB, Gated: true}); err != nil {
+		MemoryMiB: row.MemoryMiB, DiskGiB: row.DiskGiB, Gated: true}); err != nil {
 		return nil, nil, err
 	}
 	now, err := tx.Now(ctx)
@@ -407,7 +427,7 @@ func (r *runner) noAbandon(ctx context.Context, tx *store.Store, trigger OpTrigg
 // unreachable; begun by the repair loop or Ensure, for longer than the
 // threshold that made them begin it (a Sync that applied RUNNING, or a
 // healthy call that cleared unreachable_since, after their read stops it).
-// Restart's repair needs only a running row.
+// Restart's repair needs only a running row, and so does a stop.
 func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbox, in OpIntent, target string) error {
 	st := row.ClientState
 	ok := false
@@ -436,6 +456,8 @@ func (r *runner) precheck(ctx context.Context, tx *store.Store, row store.Sandbo
 		ok = (st == model.StateCreating && !row.PendingSince.IsZero()) ||
 			(st == model.StateRunning && !row.UnreachableSince.IsZero()) ||
 			(st == model.StateRunning && in.Trigger == TriggerRestart)
+	case OpStop:
+		ok = st == model.StateRunning
 	default:
 		return fmt.Errorf("sandbox: unknown op %q", in.Kind)
 	}

@@ -29,7 +29,7 @@ An environment holds services, jobs, addons, routes, secrets and
 bindings, each with a name, and they reference each other by name: a
 service's variable takes an addon's output, another service's address
 or a secret; a route names a service and its port; a service names its
-bindings, a binding its secrets or a credential of the tenant. A
+bindings, a binding its secrets or a credential of the environment. A
 dangling reference is a finding of the write, not a pod that fails.
 Every one of these references is a field of one object.
 
@@ -163,10 +163,11 @@ draws no graph.
   references and its `egress`, ADR 0012; a route's `from`), scaling and
   resources within the spec's bounds and the idle, the health check,
   credentials and bindings (the spec's bindings to tick; a binding of a
-  tenant's credential, ADR 0033, added and ticked at once) and the
-  rollout; its remove at the bottom, which offers to take the
-  references to it along. A binding is a tenant's credential, or, folded
-  as advanced, ADR 0028's fields with the environment's secrets. An
+  credential of the environment, ADR 0033, added and ticked at once) and
+  the rollout; its remove at the bottom, which offers to take the
+  references to it along. A binding is a credential of the environment,
+  or, folded as advanced, ADR 0028's fields with the environment's
+  secrets. An
   attached service's form names its sandbox and says that its
   reachability is its sandbox's pod's (ADR 0035).
 - **The address names the object**: an object's form has an address of

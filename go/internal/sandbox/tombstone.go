@@ -59,6 +59,13 @@ func (e *Engine) processTombstone(k store.TombstoneKey) *tombRun {
 	return r
 }
 
+// tombstoneInFlight reports whether this instance processes tombstone k.
+func (e *Engine) tombstoneInFlight(k store.TombstoneKey) bool {
+	e.tombsMu.Lock()
+	defer e.tombsMu.Unlock()
+	return e.tombs[k] != nil
+}
+
 // wait waits for the run, or ctx.
 func (r *tombRun) wait(ctx context.Context) error {
 	select {
@@ -121,7 +128,8 @@ func (e *Engine) runTombstone(bg context.Context, k store.TombstoneKey) error {
 		return e.dropTombstone(bg, t, fmt.Sprintf("tombstone dropped: node %s holds incarnation %s", k.Node, incarnationText(obs.info)))
 	}
 	mem := int(obs.info.GetSpec().GetResources().GetMemoryMib())
-	dctx, dcancel := e.detached(bg, time.Now().Add(tombstoneDeadline(e.t.tombstoneBase, mem)))
+	grace := time.Duration(obs.info.GetSpec().GetStopGraceSeconds()) * time.Second
+	dctx, dcancel := e.detached(bg, time.Now().Add(tombstoneDeadline(e.t.tombstoneBase, mem, grace)))
 	pc, err := e.podClient(dctx, k.Node)
 	if err == nil {
 		_, err = pc.DeletePod(dctx, &podv1.DeletePodRequest{PodId: k.PodID.String()})
@@ -324,12 +332,14 @@ func (e *Engine) deleteTenantSandboxes(ctx context.Context, tenant string, fence
 const tenantBatch = 256
 
 // tombstoneDeadline is the deadline of a tombstone's DeletePod of a pod of
-// memoryMiB. feosd's delete waits for the pod's lock, which a suspend (an
-// idle pause of the sandbox deleted meanwhile) holds for up to feosd's
-// suspend budget; the delete's own steps then take base and 4 s per GiB.
-// The deadline covers both, and pauseMargin for the call's way there and
-// back, so that the DeletePod answers before it: one that ran out while it
+// memoryMiB whose spec names the stop grace grace (0: feosd's 10 s, which
+// base covers). feosd's delete waits for the pod's lock, which a suspend
+// (an idle pause of the sandbox deleted meanwhile) holds for up to feosd's
+// suspend budget; the delete's own steps then take base, the pod's grace
+// for its containers to exit after SIGTERM, and 4 s per GiB. The deadline
+// covers all of them, and pauseMargin for the call's way there and back,
+// so that the DeletePod answers before it: one that ran out while it
 // waited would be tried again only after noteAttempt's backoff.
-func tombstoneDeadline(base time.Duration, memoryMiB int) time.Duration {
-	return feosdSuspendBudget(memoryMiB) + pauseMargin + base + 4*time.Second*gib(memoryMiB)
+func tombstoneDeadline(base time.Duration, memoryMiB int, grace time.Duration) time.Duration {
+	return feosdSuspendBudget(memoryMiB) + pauseMargin + base + grace + 4*time.Second*gib(memoryMiB)
 }

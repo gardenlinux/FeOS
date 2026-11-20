@@ -14,6 +14,7 @@ import (
 
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 	"github.com/gardenlinux/feos/go/internal/activity"
+	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -96,6 +97,13 @@ func (r *runner) finishOnce(ctx context.Context, h *OpHandle, res callResult, ob
 		applyOutcome(c, h, res, obs)
 		if err := c.commit(ctx); err != nil {
 			return err
+		}
+		if h.kind == OpStop && row.Instance {
+			// The controller deletes an instance's row once its pod has
+			// stopped: it need not wait for its next pass.
+			if err := tx.Notify(ctx, db.ChanLeader, store.HintEnvReconcile); err != nil {
+				return err
+			}
 		}
 		w := c.written
 		result = OpResult{State: w.ClientState, Node: w.Node, Description: w.StatusDescription,
@@ -357,8 +365,11 @@ func applyOurs(c *change, h *OpHandle, res callResult, info *podv1.PodInfo) {
 			a.LastActiveAt = c.now
 		}
 		a.StatusDescription = ""
-		if h.kind == OpPause {
+		switch h.kind {
+		case OpPause:
 			a.StatusDescription = "pause failed: " + errText(res.err, "the pod still runs")
+		case OpStop:
+			a.StatusDescription = "stop failed: " + errText(res.err, "the pod still runs")
 		}
 		var pe *prepareError
 		if h.kind == OpRepair && errors.As(res.err, &pe) {

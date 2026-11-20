@@ -1,0 +1,13 @@
+/* SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Where a key lives (views/access.js): one badge per mark, the same
+   everywhere. By identity and offloaded are the strong places, in the
+   container the weaker one: a calm colour, not a warning. */
+.badge.mark { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.badge.mark-identity { color: var(--ok); border-color: rgba(63, 202, 122, .45); }
+.badge.mark-offloaded { color: var(--net); border-color: rgba(70, 201, 179, .45); }
+.badge.mark-container { color: var(--muted); border-color: rgba(160, 170, 186, .45); }
+.badge.mark-none { color: var(--muted); border-style: dashed; }
+.mark-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; color: var(--muted); }
+.mark-legend > span { display: inline-flex; align-items: center; gap: 6px; }

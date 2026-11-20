@@ -100,11 +100,11 @@ export function can(access) {
   const role = (access && access.role) || '';
   const member = !!(access && access.member);
   return {
-    // A tenant grant read: tools, credentials, the whole list of
+    // A tenant grant read: tools, the whole list of
     // environments. Sandboxes and jobs are their environment's (ADR
     // 0035): a member lists those it may read.
     readTenant: atLeast(role, 'read'),
-    // write: environments made or deleted, credentials.
+    // write: environments made or deleted.
     writeTenant: atLeast(role, 'write'),
     // admin: members' grants, invitations, tokens, the domains' claims,
     // the access providers (ADR 0054).
@@ -135,7 +135,6 @@ export const TENANT_NAV = [
   { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '' },
   { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env', views: ['environments', 'newEnvironment'] },
   { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant' },
-  { view: 'credentials', label: 'Credentials', icon: 'plug', path: '/credentials', needs: 'readTenant', group: 'tenant', views: ['credentials', 'newCredential'] },
   { view: 'providers', label: 'Access providers', icon: 'lock', path: '/providers', needs: 'members', group: 'tenant', views: ['providers', 'newProvider'] },
   { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage' },
   { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage' },
@@ -163,10 +162,11 @@ export const PLATFORM_GROUPS = [
 ];
 
 // VIEW_NEEDS are what the tenant's pages outside the sidebar need: a
-// new environment's builder (ADR 0032) and a new credential's form (ADR
-// 0033) a tenant grant write, a new access provider's form (ADR 0054)
-// admin on the tenant, the tools' reference a tenant grant.
-const VIEW_NEEDS = { newEnvironment: 'writeTenant', newCredential: 'writeTenant', newProvider: 'adminTenant', tools: 'readTenant' };
+// new environment's builder (ADR 0032) a tenant grant write, a new access
+// provider's form (ADR 0054) admin on the tenant, the tools' reference a
+// tenant grant. A credential is its environment's (ADR 0033): its pages
+// need the environment's grant, as the environment's other pages do.
+const VIEW_NEEDS = { newEnvironment: 'writeTenant', newProvider: 'adminTenant', tools: 'readTenant' };
 
 // tenantNav is the tenant's pages that access offers.
 export function tenantNav(access) {

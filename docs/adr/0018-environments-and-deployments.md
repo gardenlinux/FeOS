@@ -65,7 +65,14 @@ it can state and get an answer for at once.
   a service (ADR 0043, ADR 0021); a **secret** (ADR 0044); a **binding**
   (ADR 0028). Services have no volumes of their own: data lives in
   addons, and a spec that mounts a volume into a service is refused
-  with a finding that says so.
+  with a finding that says so. A service's or a job's pods may ask for
+  a disk larger than the guest's 8 GiB (`resources.diskGib`, 8 to 200
+  GiB, beside `vcpus` and `memoryMib`): the room of the image, the
+  container's own files and what it writes, as a cache or a spool.
+  The disk is scratch: every new pod starts on an empty one, and only
+  what moves with a pod (a drain, a hibernation) keeps it. Its node
+  books it whole while the pod runs; it counts towards no tenant's
+  limit.
 - Objects reference each other by name, and the references are resolved
   when a write is validated: a service's environment variable from an
   addon's output, from a secret or from another service's port, a
@@ -150,6 +157,39 @@ it can state and get an answer for at once.
   old one goes, routes following readiness, and brings its attached
   services up. It is deployed when every object matches it; the status
   names the deployed deployment and the one in progress.
+- An old pod stops taking traffic first, and is stopped 10 s later: its
+  node sends its container `SIGTERM` and gives an image service's 660 s
+  to exit before the microVM ends (the pod's stop grace, ADR 0004), so
+  that a service that drains finishes, as FeCode's backend hands its
+  agents' turns over to another replica within 630 s; one that exits
+  sooner goes sooner. The grace is `ferund`'s by the kind of pod, not a
+  field of the environment's spec: a sandbox's, a job's and an addon's
+  pods keep the node's 10 s, since a sandbox's container ignores
+  `SIGTERM` and would wait out any grace, an addon's next pod waits for
+  its volume, and a stopped job is cancelled.
+- **A pod that goes keeps its row until it has ended.** Its instance is
+  `stopping` in three steps, each held in the rows, never in memory: its
+  traffic drains (`retire_at`, 10 s); its pod stops, by the sandboxes'
+  op `stop` (`StopPod`), with the row `running` while its containers
+  drain; its row goes once the pod has stopped, or 2 minutes past the
+  drain and the grace whatever the pod does. Through the stop the pod
+  is no longer named in the routes, the environment's name table or the
+  ingress's table, so nothing sends it new work; it stays a member of
+  its security groups, so that the addons and services that admit it by
+  group take the new connections it opens while it finishes (FeCode
+  writes to its database while it hands its turns over); and it stays
+  booked on its node, so that placement never fills the room it holds
+  and a drain does not count its node drained while it runs. Nothing
+  waits for the stop: a rollout replaces its next replica at once, and
+  a deployment is deployed once its old pods' traffic drained, so that a
+  service of two replicas does not roll for twice the grace. A pod that
+  runs nothing to finish (paused, hibernated, in another op) or whose
+  node is down goes at once after the drain; a stop that a `ferund`
+  instance left when it stopped is taken over by the leader, whose
+  `StopPod` joins the stop that `feosd` runs. An environment's deletion
+  ends its instances by the same steps, without the drain. Like a
+  rollout's surge replica, a stopping instance counts against no tenant
+  limit: limits count what deployments declare.
 - A rollout that does not reach readiness within its budget has
   **failed**: the service keeps the pods of the last deployed deployment
   serving, the new ones are removed, and the environment stays on its
@@ -184,6 +224,28 @@ it can state and get an answer for at once.
   is opened once per object and deployment and closed when the
   condition clears. Incidents are the hook for whoever operates: a
   person, or FeCode's agent.
+
+### A service's replicas go to different nodes
+
+- Placement ranks the nodes that pass every gate for a service's
+  replica by the service's other instances there, under either policy:
+  fewer of the replica's template first, then fewer of another (the old
+  ones of a rollout); binpack or spread chooses only among the nodes
+  that tie. It is a preference, never a gate: on one node, or with the
+  others full, draining or down, a replica goes beside the others, and
+  none waits unplaced for its sake.
+- An instance counts where its pod holds a place: on a node, and not
+  pending, hibernated or lost. A stopping one does not, also while its
+  pod drains through its grace, so that a rollout's next replica may
+  take the place it is about to free.
+- Replicas inserted together are placed at once and rank the nodes
+  from the same snapshot; the claim of a node, under the node's lock,
+  counts again, and a replica that finds another come since tries the
+  next node first, and that one again after all others.
+- Only placement decides: nothing moves a running replica that went
+  beside another, and a rollout still stops its old replicas from the
+  highest. Addons, jobs, attached services, sandboxes and tenants' jobs
+  have no peers.
 
 ### The environment's names
 
@@ -287,6 +349,41 @@ it can state and get an answer for at once.
   environments over time and keep names taken nobody uses. **A display
   name beside a fixed name**: the console, the messages and FeCode's
   operators read the name.
+- **A scratch volume per service, mounted at a path**, instead of a
+  larger disk: one more path for the application to name, while the
+  image and the container's own files stay on 8 GiB; a cache under the
+  container's own directories needs the disk itself. **A disk that
+  outlives its pod**: data lives in addons, and a disk kept across
+  replacements would make a service's replicas stateful.
+- **A stop grace per service in the spec**, as Kubernetes's
+  `terminationGracePeriodSeconds`: one more value to know and to get
+  right. The platform's grace covers a drain of ten minutes, and a
+  service that exits sooner goes sooner.
+- **The row deleted after the traffic's drain, the grace in the
+  tombstone's `DeletePod`** (2026-11-17, e25aca93): the pod drains
+  without its row, so its address leaves its groups and its peers
+  refuse its new connections, and its node's bookings and drain no
+  longer see it.
+- **A phase of its own in `env_instances`** for a pod that stops: the
+  phase `stopping` with `retire_at`, and the sandbox's op and state,
+  say it already, and a phase would be a second record of the op.
+  **The controller calling `StopPod` itself**: an op is what fences a
+  pod against the engine's pauses, drains and repairs, carries its
+  deadline in the row and is taken over when its instance goes.
+- **A deployment that waits for its old pods to end**, as a rollout
+  would that counts terminating pods: every rollout of a service that
+  drains would take its grace per replica and run out of its budget.
+  Kubernetes's rollouts do not wait for terminating pods either.
+- **The installation's policy spread alone** (2026-11-18): it ranks the
+  nodes by their free share, not by service, so two replicas meet where
+  one node has the most room, and two placed at once from one snapshot
+  take the same node; on `ferun` both replicas of a test service did.
+  **Replicas kept apart as a gate** (required anti-affinity): an
+  installation of one node could not run two, and a rollout on as many
+  nodes as replicas would find no node for its surge replica. **An
+  advisory lock of the service around its placements**: the claim
+  holds the node's lock already, and moving on to the next candidate
+  needs no new snapshot.
 
 ## Consequences
 
@@ -297,6 +394,26 @@ it can state and get an answer for at once.
 - An environment's pods are no tenant's sandboxes and are absent from
   its sandbox routes; a sandbox is not an object of an environment, an
   attached service names one.
+- A service whose process ignores `SIGTERM`, as a PID 1 without a
+  handler of its own does, keeps its old pods and their memory for the
+  whole 660 s at every rollout and delete, until it handles the signal or
+  the guest's reaper is in front of it (ADR 0048).
+- A rollout needs room for its old pods while they drain: a node
+  without room for the next replica keeps it pending until an old pod
+  there has ended, within the service's budget. An environment's
+  deletion takes as long as its pods' drains.
+- A larger disk goes along when its pod moves: a drain or a
+  hibernation uploads what the pod wrote of it since its last
+  checkpoint, and the restored pod reads that back from the object
+  store as it touches it. A cache that filled 30 GiB makes its node's
+  drain that much longer; a replica that is replaced instead starts
+  empty, which a cache takes.
+- A service of two replicas or more survives the drain or the loss of
+  one node where the installation has room on another, also under
+  binpack. On two nodes a rollout whose first new replica went beside
+  the old one that stays has both ready replicas on that node until the
+  next new one is ready; on three the first new replica takes the node
+  without an old one.
 - A caller that stores an environment's name or builds URLs with it
   must store the new one after a rename; by ID nothing changes, and the
   rename is idempotent, so a client retries it.
@@ -319,4 +436,17 @@ jobs into environments, and ADR 0034's revision (2026-11-08) replaced
 the environment's own security group and egress table by reachability
 derived from references. ADR 0037, the rename of 2026-11-08 (8951c44),
 is merged here; addons, jobs, attached services, the route door and
-secrets were split into ADR 0040 to 0044 on 2026-11-08.
+secrets were split into ADR 0040 to 0044 on 2026-11-08. An image
+service's pods have had a stop grace of 660 s since 2026-11-17, between
+FeCode's drain of 630 s and the 720 s Kubernetes gives it; before, every
+pod had 10 s and a rollout ended a drain halfway. A pod that goes has
+kept its row, its groups and its booking until it ended since
+2026-11-17, by the sandboxes' op `stop` (migration 0039); before, the
+grace ran in its tombstone's `DeletePod` after its row was gone. Since
+2026-11-17 a service or job may also ask for a disk of its own size
+(`resources.diskGib`, migration 0038), for FeCode's git cache and the
+like; before, every pod had the guest's 8 GiB. A service's replicas have
+gone to different nodes since 2026-11-18, when FeCode's own services
+were to run as an environment's with two replicas each; before, only
+the policy placed them, and both replicas of a test service on `ferun`
+went to one node.

@@ -532,7 +532,7 @@ func (p *Proxy) ServeHTTPRedirect() http.Handler {
 			p.answerChallenge(rec, r, host)
 			return
 		}
-		if t := p.cur.Load().t; t == nil || t.hosts[host] == nil {
+		if p.cur.Load().t.env(host) == nil {
 			reply{http.StatusNotFound, textNoHost, 0}.write(rec)
 			return
 		}

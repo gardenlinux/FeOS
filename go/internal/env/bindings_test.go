@@ -30,8 +30,12 @@ type fakeHTTPBindings struct {
 	last *fleetv1.HttpBinding
 }
 
-func (f *fakeHTTPBindings) OpenCredential(context.Context, string, string, int, string) (*fleetv1.HttpBinding, error) {
+func (f *fakeHTTPBindings) OpenCredential(context.Context, uuid.UUID, string, int, string) (*fleetv1.HttpBinding, error) {
 	return nil, errors.New("no credentials here")
+}
+
+func (f *fakeHTTPBindings) CopyCredential(context.Context, uuid.UUID, string, uuid.UUID) (store.EnvCredential, error) {
+	return store.EnvCredential{}, errors.New("no credentials here")
 }
 
 func (f *fakeHTTPBindings) Enabled() bool { return true }

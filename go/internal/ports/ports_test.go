@@ -121,6 +121,27 @@ func TestForwardClass(t *testing.T) {
 	}
 }
 
+// A caller that reaches the door at the platform's own name names the
+// guest's Host in X-FeRun-Host: the guest sees that Host, and not the
+// header; one that is no host[:port] leaves the Host as it came.
+func TestForwardGuestHost(t *testing.T) {
+	w := newWorld(t)
+	for given, want := range map[string]string{"5173--wt1.boxed.example.test": "5173--wt1.boxed.example.test",
+		"[fd00::1]:8080": "[fd00::1]:8080", "a b": "run.example.test", "": "run.example.test"} {
+		hdr := http.Header{"Host": {"run.example.test"}}
+		if given != "" {
+			hdr.Set(HostHeader, given)
+		}
+		code, _, body := w.do("GET", w.url(guestPort, "/"), hdr, "")
+		if code != 200 {
+			t.Fatalf("%q: %d %s", given, code, body)
+		}
+		if got := w.guest.lastSeen(); got.Host != want || got.GuestHost != "" {
+			t.Errorf("%q: the guest saw Host %q, %s %q", given, got.Host, HostHeader, got.GuestHost)
+		}
+	}
+}
+
 // The token stops at the door, the Host the client named goes on, and the
 // rest of the path keeps its escaping, on both mounts.
 func TestForwardHeadersAndPath(t *testing.T) {

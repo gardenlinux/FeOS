@@ -122,8 +122,13 @@ const AUTHN_READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long the guest may take to write the pod's interception CAs.
 const CA_PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a stopped or deleted pod's containers may take to exit after
-/// SIGTERM, before its microVM ends them.
+/// SIGTERM, before its microVM ends them, when its spec names no grace of
+/// its own (`stop_grace_seconds`, `container_grace`).
 pub const CONTAINER_GRACE: Duration = Duration::from_secs(10);
+/// How long a stop waits for the guest to answer one of its calls to end
+/// the containers: one that does not answer is not waited for, whatever
+/// the pod's grace.
+const GUEST_CALL_TIMEOUT: Duration = Duration::from_secs(10);
 const SIGTERM: u32 = 15;
 /// How many request ids a hibernation keeps of the calls that started or
 /// joined it, and a pod of its abandoned hibernations: the last ones.
@@ -238,6 +243,10 @@ struct Pod {
     /// What keeps its microVM from answering now, as a suspend does, for a
     /// call to its guest that gets no answer.
     busy: Option<&'static str>,
+    /// How many stops and deletes of the pod are in flight, from their
+    /// call on: a stop of feosd leaves such a pod to them, in its grace
+    /// (`suspend_for_stop`).
+    ending: usize,
     /// The Bearer token for the guest's pull of the pod's image that its
     /// create or start brought (ADR 0025): in memory only, for the next
     /// bring-up, which takes it.
@@ -257,6 +266,7 @@ impl Pod {
             hibernation: None,
             abandoned: VecDeque::new(),
             busy: None,
+            ending: 0,
             pull_token: None,
             ca_push: Arc::default(),
         }
@@ -291,6 +301,20 @@ impl Drop for BusyMark {
     fn drop(&mut self) {
         if let Some(pod) = self.pods.pods().get_mut(&self.pod_id) {
             pod.busy = None;
+        }
+    }
+}
+
+/// A stop or a delete of a pod in flight (`Pod::ending`), until dropped.
+struct EndingMark {
+    pods: Pods,
+    pod_id: String,
+}
+
+impl Drop for EndingMark {
+    fn drop(&mut self) {
+        if let Some(pod) = self.pods.pods().get_mut(&self.pod_id) {
+            pod.ending = pod.ending.saturating_sub(1);
         }
     }
 }
@@ -705,6 +729,7 @@ impl Pods {
     }
 
     async fn stop_detached(&self, pod_id: &str) -> Result<(), Status> {
+        let _ending = self.mark_ending(pod_id);
         let _lock = self.end_bring_up_and_lock(pod_id).await?;
         match self.info(pod_id)?.state() {
             PodState::Stopped => return Ok(()),
@@ -758,6 +783,7 @@ impl Pods {
     }
 
     async fn delete_detached(&self, pod_id: &str) -> Result<(), Status> {
+        let _ending = self.mark_ending(pod_id);
         let _lock = self.end_bring_up_and_lock(pod_id).await?;
         if self.info(pod_id)?.state() == PodState::Running {
             self.end_running(pod_id).await;
@@ -1795,7 +1821,8 @@ impl Pods {
             .map(|checkpoint| checkpoint.head_key.as_str())
             .filter(|key| !key.is_empty());
         let image = bake::image_of(&info);
-        let (device, made) = self.inner.disks.open(pod_id, head_key, image).await?;
+        let size = u64::from(bake::disk_gib(&info)) << 30;
+        let (device, made) = self.inner.disks.open(pod_id, head_key, image, size).await?;
         // A new disk: what it was made on is the pod's, for its bake
         // point and for the control plane.
         if let Some(disk) = made {
@@ -2244,71 +2271,89 @@ impl Pods {
 
     /// Lets a running pod's containers end before its microVM does, and
     /// sends what they wrote to their logs (ADR 0026), while the pod is
-    /// still running: [`CONTAINER_GRACE`] and [`LOG_DRAIN`] at most.
+    /// still running: its grace (`container_grace`) and [`LOG_DRAIN`] at
+    /// most.
     async fn end_running(&self, pod_id: &str) {
         self.end_containers(pod_id).await;
         self.drain_logs(pod_id).await;
     }
 
     /// Sends each of the pod's running containers SIGTERM and waits for
-    /// their processes to exit, [`CONTAINER_GRACE`] at most: the guest has
-    /// their last lines in their logs once it reports their exit codes.
+    /// their processes to exit, for the pod's grace at most
+    /// (`container_grace`): the guest has their last lines in their logs
+    /// once it reports their exit codes. A container whose guest does not
+    /// answer a call within [`GUEST_CALL_TIMEOUT`] is not waited for.
     /// Whatever fails is logged; the stop goes on.
     async fn end_containers(&self, pod_id: &str) {
-        let names: Vec<String> = match self.info(pod_id) {
-            Ok(info) => info
-                .spec
-                .map(|spec| spec.containers.into_iter().map(|c| c.name).collect())
-                .unwrap_or_default(),
-            Err(_) => return,
+        let Ok(info) = self.info(pod_id) else {
+            return;
         };
-        let ended = timeout(CONTAINER_GRACE, async {
-            let mut guest = ContainerServiceClient::new(self.guest_channel(pod_id).await?);
-            let mut signalled = Vec::new();
-            for name in names {
-                let request = StopContainerRequest {
-                    container_id: name.clone(),
-                    signal: Some(SIGTERM),
-                    timeout_seconds: None,
-                };
+        let spec = info.spec.unwrap_or_default();
+        let grace = container_grace(&spec);
+        let started = Instant::now();
+        let mut guest = match self.guest_channel(pod_id).await {
+            Ok(channel) => ContainerServiceClient::new(channel),
+            Err(e) => {
+                warn!(
+                    "Pods: {pod_id}'s containers were not stopped before its microVM: {}",
+                    e.message()
+                );
+                return;
+            }
+        };
+        let mut running = Vec::new();
+        for container in spec.containers {
+            let request = StopContainerRequest {
+                container_id: container.name.clone(),
+                signal: Some(SIGTERM),
+                timeout_seconds: None,
+            };
+            match timeout(GUEST_CALL_TIMEOUT, guest.stop_container(request)).await {
+                Ok(Ok(_)) => running.push(container.name),
                 // One that does not run is not waited for.
-                if guest.stop_container(request).await.is_ok() {
-                    signalled.push(name);
+                Ok(Err(_)) => {}
+                Err(_) => {
+                    warn!("Pods: {pod_id}'s guest did not answer the stop of its containers");
+                    break;
                 }
             }
-            while !signalled.is_empty() {
-                let mut running = Vec::new();
-                for name in signalled {
-                    let request = GetContainerRequest {
-                        container_id: name.clone(),
-                    };
-                    let exited = guest
-                        .get_container(request)
-                        .await
-                        .map(|info| info.into_inner().exit_code.is_some())
-                        .unwrap_or(true);
-                    if !exited {
-                        running.push(name);
-                    }
-                }
-                signalled = running;
-                if !signalled.is_empty() {
-                    sleep(POLL).await;
+        }
+        let deadline = started + grace;
+        while !running.is_empty() {
+            let mut still = Vec::new();
+            for name in running {
+                let request = GetContainerRequest {
+                    container_id: name.clone(),
+                };
+                // One whose guest does not answer is not waited for.
+                match timeout(GUEST_CALL_TIMEOUT, guest.get_container(request)).await {
+                    Ok(Ok(info)) if info.get_ref().exit_code.is_none() => still.push(name),
+                    Ok(_) => {}
+                    Err(_) => warn!(
+                        "Pods: {pod_id}'s guest did not answer for container {name}; it is not \
+                         waited for"
+                    ),
                 }
             }
-            Ok::<(), Status>(())
-        })
-        .await;
-        match ended {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => warn!(
-                "Pods: {pod_id}'s containers were not stopped before its microVM: {}",
-                e.message()
-            ),
-            Err(_) => warn!(
-                "Pods: {pod_id}'s containers did not end within {}s; its microVM ends them",
-                CONTAINER_GRACE.as_secs()
-            ),
+            running = still;
+            let now = Instant::now();
+            if running.is_empty() {
+                info!(
+                    "Pods: {pod_id}'s containers ended within {:.1}s of SIGTERM",
+                    (now - started).as_secs_f64()
+                );
+                return;
+            }
+            if now >= deadline {
+                warn!(
+                    "Pods: {pod_id}'s containers {} did not end within their grace of {}s; its \
+                     microVM ends them",
+                    running.join(", "),
+                    grace.as_secs()
+                );
+                return;
+            }
+            sleep(POLL.min(deadline - now)).await;
         }
     }
 
@@ -2421,6 +2466,18 @@ impl Pods {
             pod.busy = Some(why);
         }
         BusyMark {
+            pods: self.clone(),
+            pod_id: pod_id.to_string(),
+        }
+    }
+
+    /// Marks a stop or a delete of the pod in flight until the mark is
+    /// dropped.
+    fn mark_ending(&self, pod_id: &str) -> EndingMark {
+        if let Some(pod) = self.pods().get_mut(pod_id) {
+            pod.ending += 1;
+        }
+        EndingMark {
             pods: self.clone(),
             pod_id: pod_id.to_string(),
         }
@@ -3648,6 +3705,17 @@ fn stale(vm: &VmInfo, wanted: &VmConfig) -> bool {
     ))
 }
 
+/// How long `spec`'s containers have to exit after SIGTERM when the pod
+/// is stopped or deleted: its stop grace, [`CONTAINER_GRACE`] when it
+/// names none, and never more than `spec::MAX_STOP_GRACE_SECONDS`, which
+/// a create checks.
+fn container_grace(spec: &PodSpec) -> Duration {
+    match spec.stop_grace_seconds {
+        0 => CONTAINER_GRACE,
+        seconds => Duration::from_secs(u64::from(seconds.min(spec::MAX_STOP_GRACE_SECONDS))),
+    }
+}
+
 /// A create of a pod that exists finds it if the spec is the same.
 /// A pod's record as the API answers it: without the values its logs are
 /// redacted of, which are secrets.
@@ -3662,7 +3730,8 @@ fn shown(mut info: PodInfo) -> PodInfo {
 /// (ADR 0028, 0036). A pod created without an identity is the same create
 /// with one, as a control plane that names identities since sends it
 /// again: the pod keeps its spec, and its next create has the identity
-/// (ADR 0014).
+/// (ADR 0014). So is one with another stop grace, which a control plane
+/// of another version may give it: the pod keeps its own.
 fn same_spec(existing: PodInfo, spec: &PodSpec) -> Result<PodInfo, Status> {
     let same = existing.spec.as_ref().is_some_and(|own| {
         let mut asked = spec::without_http_bindings(spec);
@@ -3670,8 +3739,10 @@ fn same_spec(existing: PodInfo, spec: &PodSpec) -> Result<PodInfo, Status> {
             asked.identity.clear();
         }
         asked.tls_bindings.clear();
+        asked.stop_grace_seconds = 0;
         let mut own = spec::without_http_bindings(own);
         own.tls_bindings.clear();
+        own.stop_grace_seconds = 0;
         own == asked
     });
     if same {
@@ -3878,6 +3949,85 @@ mod tests {
         assert!(same_spec(pod("spiffe://t/a"), &asked("spiffe://t/a")).is_ok());
         assert!(same_spec(pod("spiffe://t/a"), &asked("spiffe://t/b")).is_err());
         assert!(same_spec(pod("spiffe://t/a"), &asked("")).is_err());
+    }
+
+    #[test]
+    fn a_create_again_with_another_stop_grace_is_the_same_create() {
+        let spec = |seconds| PodSpec {
+            stop_grace_seconds: seconds,
+            ..Default::default()
+        };
+        let pod = |seconds| PodInfo {
+            pod_id: "p".into(),
+            spec: Some(spec(seconds)),
+            ..Default::default()
+        };
+        assert!(same_spec(pod(0), &spec(660)).is_ok());
+        assert!(same_spec(pod(660), &spec(0)).is_ok());
+        assert_eq!(
+            same_spec(pod(660), &spec(0))
+                .unwrap()
+                .spec
+                .unwrap()
+                .stop_grace_seconds,
+            660,
+            "the pod keeps its own"
+        );
+    }
+
+    #[test]
+    fn a_pods_grace_is_its_specs_the_nodes_without_one_and_bounded() {
+        let grace = |seconds| {
+            container_grace(&PodSpec {
+                stop_grace_seconds: seconds,
+                ..Default::default()
+            })
+        };
+        assert_eq!(grace(0), CONTAINER_GRACE);
+        assert_eq!(grace(660), Duration::from_secs(660));
+        assert_eq!(
+            grace(5_000),
+            Duration::from_secs(spec::MAX_STOP_GRACE_SECONDS.into())
+        );
+    }
+
+    /// A stop of feosd leaves a pod whose delete is in flight to it: it
+    /// does not wait behind the delete, which holds the pod's lock through
+    /// its containers' grace, and does not suspend or record the pod. A
+    /// running pod without one is waited for.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stop_of_feosd_leaves_a_pod_that_is_being_deleted_to_its_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let pods = bare_pods(dir.path());
+        let info = PodInfo {
+            pod_id: POD.to_string(),
+            state: PodState::Running as i32,
+            spec: Some(PodSpec::default()),
+            ..Default::default()
+        };
+        pods.pods().insert(POD.to_string(), Pod::new(info));
+        let record = dir.path().join("suspended-for-stop.json");
+        let ending = pods.mark_ending(POD);
+        let _lock = pods.lock(POD).await.unwrap();
+        let stopped = timeout(
+            Duration::from_secs(5),
+            pods.suspend_for_stop(&record, Instant::now() + Duration::from_secs(60)),
+        )
+        .await
+        .expect("the stop waited behind the delete");
+        assert!(stopped.recorded.is_empty());
+        assert!(stopped.failed.is_empty());
+        drop(ending);
+        assert_eq!(pods.pods().get(POD).unwrap().ending, 0);
+        assert!(
+            timeout(
+                Duration::from_millis(300),
+                pods.suspend_for_stop(&record, Instant::now() + Duration::from_secs(60)),
+            )
+            .await
+            .is_err(),
+            "a running pod is suspended, after what holds its lock"
+        );
     }
 
     #[test]

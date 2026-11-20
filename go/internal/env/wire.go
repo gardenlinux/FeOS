@@ -224,8 +224,11 @@ type JobRunStatus struct {
 // RouteStatus is a route of the deployed deployment (the latest when none
 // is deployed), its port resolved to a number.
 type RouteStatus struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Host is the host it answers on, canonical (ADR 0045); "": every
+	// host of the environment.
+	Host    string `json:"host,omitempty"`
 	Service string `json:"service"`
 	Port    int    `json:"port"`
 	// Door is DoorIngress for a route to an image service of a public
@@ -233,8 +236,11 @@ type RouteStatus struct {
 	// the route door both serve; DoorRoute for every other, which the
 	// route door alone serves (with a route token).
 	Door string `json:"door"`
-	// URL is where the ingress serves an ingress route:
-	// "https://<host><prefix>"; "" for a route door route.
+	// URL is where the ingress serves an ingress route,
+	// "https://<host><prefix>": at its host while the environment is
+	// served there, a route without a host at the environment's first
+	// address where it answers its path; "" for a route door route, and
+	// for a route whose host is a wildcard or not served now.
 	URL string `json:"url,omitempty"`
 }
 
@@ -315,6 +321,16 @@ type AddonType struct {
 	// OutputFields the fields it may name besides them ([] for none).
 	OutputKeys   []string `json:"outputKeys"`
 	OutputFields []string `json:"outputFields"`
+	// ByIdentity: the addon admits a referencing workload by its pod's
+	// certificate (ADR 0036, 0038; the blueprint is an addons.TLSBinder),
+	// so a reference hands the container no password; false: the
+	// reference's values carry one (nats).
+	ByIdentity bool `json:"byIdentity"`
+	// IdentityBy is the part of the certificate such an addon maps to a
+	// user of its own: "ou" (the subject's OU, the workload's set:
+	// postgres's role) or "uri" (the SPIFFE ID: valkey's ACL user); ""
+	// for an addon that admits by a password.
+	IdentityBy string `json:"identityBy"`
 	// Options are the options the blueprint declares; any other is an
 	// error of the plan.
 	Options []addons.Option `json:"options"`
@@ -470,10 +486,19 @@ type CloneRequest struct {
 	// Secrets are the new environment's secrets: copied from the source
 	// (its latest version) or set.
 	Secrets map[string]CloneSecret `json:"secrets,omitempty"`
-	Author  string                 `json:"author,omitempty"`
+	// Credentials are the new environment's credentials (ADR 0033): each
+	// the source's latest version, copied as the clone's version 1.
+	Credentials map[string]CloneCredential `json:"credentials,omitempty"`
+	Author      string                     `json:"author,omitempty"`
 	// Data asks for a copy of the addons' data, which is not available: an
 	// error finding.
 	Data bool `json:"data,omitempty"`
+}
+
+// CloneCredential is a credential of a clone: {"copy": true}, the only
+// way a credential gets there with the clone.
+type CloneCredential struct {
+	Copy bool `json:"copy,omitempty"`
 }
 
 // CloneSecret is a secret of a clone: exactly one of {"copy": true} and

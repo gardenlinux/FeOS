@@ -79,10 +79,12 @@ type SpanLink struct {
 // Environments, when not nil, bounds the spans to those of the
 // environments it names (a reader's grants on environments, ADR 0031):
 // a span of no environment is none of them, and an empty list selects
-// nothing.
+// nothing. ObjectKind is the label ferun.kind (service, job, sandbox, …);
+// Egress, a pod's egress spans of that class only (EgressClass).
 type SpanQuery struct {
 	Tenant                                     string
 	Environment, Object, Job, Instance, Source string
+	ObjectKind, Egress                         string
 	Environments                               []string
 	TraceID, Service, Operation                string
 	Tags                                       map[string]string
@@ -115,6 +117,7 @@ func (q SpanQuery) String() string {
 		}
 		c = append(c, "("+strings.Join(or, " OR ")+")")
 	}
+	term("kind", q.ObjectKind)
 	term("object", q.Object)
 	term("job", q.Job)
 	term("instance", q.Instance)
@@ -160,6 +163,13 @@ func (q SpanQuery) String() string {
 	if q.ServerFailed {
 		c = append(c, serverFailedClause)
 	}
+	if q.Egress != "" {
+		clause, ok := egressClauses[q.Egress]
+		if !ok {
+			clause = "NOT *"
+		}
+		c = append(c, clause)
+	}
 	for _, p := range q.NotPaths {
 		v := quote(p)
 		c = append(c, "NOT span_attributes."+fieldPath(attrPath)+":"+v, "NOT span_attributes."+fieldPath(attrTarget)+":"+v)
@@ -196,7 +206,8 @@ func ValidTagKey(k string) bool {
 // fields, the durations and the attributes).
 func (q *SpanQuery) Match(d *SpanDoc) bool {
 	eq := func(want, got string) bool { return want == "" || want == got }
-	if !eq(q.Tenant, d.Tenant) || !eq(q.Environment, d.Environment) || !eq(q.Object, d.Object) || !eq(q.Job, d.Job) ||
+	if !eq(q.Tenant, d.Tenant) || !eq(q.Environment, d.Environment) || !eq(q.ObjectKind, d.Kind) ||
+		!eq(q.Object, d.Object) || !eq(q.Job, d.Job) ||
 		!eq(q.Instance, d.Instance) || !eq(q.Source, d.Source) || !eq(q.TraceID, d.TraceID) ||
 		!eq(q.Service, d.ServiceName) || !eq(q.Operation, d.SpanName) {
 		return false
@@ -220,6 +231,12 @@ func (q *SpanQuery) Match(d *SpanDoc) bool {
 	}
 	if q.ServerFailed && !ServerFailed(d) {
 		return false
+	}
+	if q.Egress != "" {
+		class := EgressClass(d)
+		if class == "" || (q.Egress != EgressProblem && q.Egress != class) {
+			return false
+		}
 	}
 	for _, p := range q.NotPaths {
 		if valueIs(d.SpanAttributes[attrPath], p) || valueIs(d.SpanAttributes[attrTarget], p) {

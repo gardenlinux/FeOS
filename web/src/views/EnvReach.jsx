@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { ErrBox } from '../components.jsx';
 import { shortId } from '../format.js';
@@ -11,6 +12,10 @@ import { EnvLink } from './EnvTabs.jsx';
 import { HOW_WORDS, reachModel } from './reach.js';
 import { onItsWay } from './jobs.js';
 import { FlowLegend, ReachFlow, kindIcon, useDeployed } from './Reach.jsx';
+import { withKeys } from './access.js';
+import { readCatalog } from './catalog.js';
+import { isObject, objectsOf } from './draft.js';
+import { MarkLegend } from './Marks.jsx';
 import '../styles/reach.css';
 
 // The reachability of an environment, read (ADR 0034, revised; ADR
@@ -19,7 +24,46 @@ import '../styles/reach.css';
 // reaches in the environment; its egress), then its sandboxes and running
 // jobs with what they reach; and an object's row of it on its Config
 // view. Drawn from the deployed deployment's reachability; references
-// change in New deployment, a sandbox's reaches on its page.
+// change in New deployment, a sandbox's reaches on its page. Its edges
+// say where a key lives (access.js): an addon's by identity or in the
+// container, a binding's upstream on the right with its key at the node.
+
+// useKeys reads what the picture's marks need beside the deployment: the
+// addon catalog (null until read, and from a ferund without one), env's
+// credentials (a binding's upstream may be its credential's; a sandbox
+// holds some) and, once spec or a sandbox has a binding, what the
+// bindings carried over the last 24 hours (null while unread, or when the
+// sink cannot say): {catalog, credentials, usage}.
+export function useKeys(env, spec) {
+  const [catalog, setCatalog] = useState(null);
+  const [creds, setCreds] = useState({ env: '', list: [] });
+  const [usage, setUsage] = useState({ env: '', list: null });
+  useEffect(() => {
+    let live = true;
+    api.addonCatalog().then((a) => { const c = readCatalog(a); if (live && c) setCatalog(c); }, () => {});
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (!env) return undefined;
+    let live = true;
+    api.listCredentials(env).then(
+      (r) => { if (live) setCreds({ env, list: (r && r.credentials) || [] }); },
+      () => { if (live) setCreds({ env, list: [] }); });
+    return () => { live = false; };
+  }, [env]);
+  const credentials = creds.env === env ? creds.list : [];
+  const want = !!env && (objectsOf(spec, 'bindings').length > 0
+    || credentials.some((c) => isObject(c) && isObject(c.usedBy) && Array.isArray(c.usedBy.sandboxes) && c.usedBy.sandboxes.length > 0));
+  useEffect(() => {
+    if (!want) return undefined;
+    let live = true;
+    api.bindingUsage(env, '24h').then(
+      (r) => { if (live) setUsage({ env, list: r && !r.unavailable && Array.isArray(r.bindings) ? r.bindings : null }); },
+      () => { if (live) setUsage({ env, list: null }); });
+    return () => { live = false; };
+  }, [env, want]);
+  return useMemo(() => ({ catalog, credentials, usage: usage.env === env ? usage.list : null }), [catalog, credentials, usage, env]);
+}
 
 // useEnvPods is the environment's sandboxes and running jobs, as its
 // status reads them (envstatus.jsx): {sandboxes, jobs, err}.
@@ -53,8 +97,9 @@ export function EnvReach({ tenant, st, navigate }) {
   const env = st.name;
   const { n, spec, reach, err } = useDeployed(env);
   const pods = useEnvPods();
+  const keys = useKeys(env, spec);
   const latest = Number(st.deployment) || 0;
-  const model = spec ? reachModel(spec, reach, podsOf(pods.sandboxes, pods.jobs)) : null;
+  const model = spec ? withKeys(reachModel(spec, reach, podsOf(pods.sandboxes, pods.jobs)), spec, keys) : null;
   const link = peerLink(tenant, env, navigate);
   return (
     <div className="sg-page">
@@ -76,13 +121,7 @@ export function EnvReach({ tenant, st, navigate }) {
       {!spec && !err && <p className="empty">Loading…</p>}
       {spec && n > 0 && !reach && (
         <p className="panel-note">This ferund answers no reachability with a deployment yet; the pictures fill once it does.</p>)}
-      {model && model.objects.length > 0 && <FlowLegend mid="Object" />}
-      {model && model.objects.map((o) => (
-        <section key={o.ref} className="card sg-card" id={`reach-${o.kind}-${o.name}`} aria-label={`${o.kind} ${o.name}`}>
-          <ReachFlow ins={o.ins} outs={o.outs} egress={o.egress} link={link} heads={false}>
-            <ObjectBox tenant={tenant} env={env} o={o} navigate={navigate} />
-          </ReachFlow>
-        </section>))}
+      {model && <ObjectCards tenant={tenant} env={env} model={model} navigate={navigate} />}
       {model && (
         <>
           <h2 className="sect rc-podhead"><Icon name="terminal" size={13} /> Sandboxes and jobs
@@ -107,6 +146,25 @@ export function EnvReach({ tenant, st, navigate }) {
   );
 }
 
+// ObjectCards are the environment's objects' pictures (withKeys's model),
+// under the marks they show and the columns' heads.
+export function ObjectCards({ tenant, env, model, navigate }) {
+  if (!model.objects.length) return null;
+  const link = peerLink(tenant, env, navigate);
+  return (
+    <>
+      {model.marks.length > 0 && <div className="sg-marks"><MarkLegend marks={model.marks} /></div>}
+      <FlowLegend mid="Object" />
+      {model.objects.map((o) => (
+        <section key={o.ref} className="card sg-card" id={`reach-${o.kind}-${o.name}`} aria-label={`${o.kind} ${o.name}`}>
+          <ReachFlow ins={o.ins} outs={o.outs} egress={o.egress} link={link} heads={false}>
+            <ObjectBox tenant={tenant} env={env} o={o} navigate={navigate} />
+          </ReachFlow>
+        </section>))}
+    </>
+  );
+}
+
 // ObjectBox is the middle of an object's card: its kind and name, a
 // link to its Config.
 function ObjectBox({ tenant, env, o, navigate }) {
@@ -126,6 +184,7 @@ function ObjectBox({ tenant, env, o, navigate }) {
 export function ObjectReach({ tenant, st, kind, name, navigate }) {
   const env = st.name;
   const { n, spec, reach, err } = useDeployed(env);
+  const keys = useKeys(env, spec);
   const all = envPath(tenant, env, 'reachability');
   const head = (
     <div className="sect sg-objsect">
@@ -136,15 +195,16 @@ export function ObjectReach({ tenant, st, kind, name, navigate }) {
   );
   if (err) return <>{head}<p className="muted small">{err}</p></>;
   if (!spec) return <>{head}<p className="empty small">Loading…</p></>;
-  return <>{head}<ObjectReachPicture tenant={tenant} env={env} spec={spec} reach={reach} kind={kind} name={name} n={n} navigate={navigate} /></>;
+  return <>{head}<ObjectReachPicture tenant={tenant} env={env} spec={spec} reach={reach} kind={kind} name={name} n={n} keys={keys} navigate={navigate} /></>;
 }
 
 // ObjectReachPicture is an object's picture from spec and reach, the
-// deployed deployment's.
-export function ObjectReachPicture({ tenant, env, spec, reach, kind, name, n = 1, navigate }) {
+// deployed deployment's; keys (useKeys's) mark where its keys live.
+export function ObjectReachPicture({ tenant, env, spec, reach, kind, name, n = 1, keys = null, navigate }) {
   if (!n) return <p className="empty small">Not deployed yet.</p>;
   if (!reach) return <p className="muted small">This ferund answers no reachability with a deployment yet.</p>;
-  const o = reachModel(spec, reach).objects.find((x) => x.ref === `${kind}/${name}`);
+  const model = reachModel(spec, reach);
+  const o = (keys ? withKeys(model, spec, keys) : model).objects.find((x) => x.ref === `${kind}/${name}`);
   if (!o) return <p className="empty small">Not in the deployed deployment.</p>;
   return (
     <>

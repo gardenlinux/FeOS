@@ -64,6 +64,10 @@ export function nodeRows(nodes) {
       cpuOvercommit: Number(Number(n.cpuOvercommit || 0).toPrecision(6)),
       memBooked: Number(n.memoryBookedBytes || 0),
       memCapacity: Number(n.memoryCapacityBytes || 0),
+      // The disks of their own size against the disk total less the disk
+      // budget; a disk of the guest's size books nothing.
+      diskBooked: Number(n.diskBookedBytes || 0),
+      diskCapacity: Number(n.diskCapacityBytes || 0),
       memHeadroom: Number(n.memHeadroomBytes || 0),
       certSerial: n.certSerial || '',
       certNotAfter: n.certNotAfter || '',

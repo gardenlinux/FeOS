@@ -28,13 +28,16 @@ service PodService {
   // its containers are adopted with what they wrote, or created from the
   // spec where they are not there.
   rpc StartPod(StartPodRequest) returns (StartPodResponse);
-  // Shuts the pod's microVM down; its disk stays. A hibernated pod drops
-  // its memory, and its next start boots on the disk of its checkpoint.
+  // Shuts the pod's microVM down; its disk stays. A running pod's
+  // containers get SIGTERM first and its stop grace to exit
+  // (PodSpec.stop_grace_seconds). A hibernated pod drops its memory, and
+  // its next start boots on the disk of its checkpoint.
   rpc StopPod(StopPodRequest) returns (StopPodResponse);
-  // Removes the pod, its microVM and its disk, in whatever state. Its
-  // checkpoints stay in object storage until a sweep finds no head that
-  // names them (feos.disk.v1 Sweep). Its volumes stay, attached to no
-  // pod.
+  // Removes the pod, its microVM and its disk, in whatever state; a
+  // running pod's containers get SIGTERM and its stop grace first, as in
+  // StopPod. Its checkpoints stay in object storage until a sweep finds
+  // no head that names them (feos.disk.v1 Sweep). Its volumes stay,
+  // attached to no pod.
   rpc DeletePod(DeletePodRequest) returns (DeletePodResponse);
   rpc GetPod(GetPodRequest) returns (PodInfo);
   rpc ListPods(ListPodsRequest) returns (ListPodsResponse);
@@ -140,6 +143,12 @@ message PodSpec {
   // CertificateVerify signed by feos-authn, the upstream pinned to its
   // SPIFFE ID under the platform's root. The plaintext stays in the pod.
   repeated TlsBinding tls_bindings = 9;
+  // How long the containers have to exit after SIGTERM when the pod is
+  // stopped or deleted while it runs, in seconds, before its microVM ends
+  // them: 0 is the node's 10 s, at most 900. The control plane gives a
+  // service that drains more (ADR 0018). A create again with another
+  // grace is the same create: the pod keeps the one it was created with.
+  uint32 stop_grace_seconds = 10;
 }
 
 // One outbound TLS binding of a pod (ADR 0036).
@@ -192,6 +201,14 @@ message Resources {
   uint32 vcpus = 1;
   // Defaults to 512.
   uint64 memory_mib = 2;
+  // The size of the pod's disk in GiB, at most 1024: 0 is the size of the
+  // guest's blank data volume (8 GiB), and a size below it is that size.
+  // The disk is thin: the node holds what the pod writes. A larger one
+  // starts on the blank data volume, or on a layer baked of its image,
+  // and the guest grows its filesystem to the disk at its boot; such a pod
+  // bakes no layer (ADR 0025). The size is fixed at the create, and a
+  // checkpoint takes it along.
+  uint32 disk_gib = 3;
 }
 
 message ContainerSpec {

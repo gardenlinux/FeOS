@@ -96,6 +96,11 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0018: an admin's listing of every tenant's environments.
 - ADR 0018: a CLI for the environments' API.
 - ADR 0018: a FeRun tenant per FeCode project, for quotas and billing; FeCode keeps its projects' environments under one tenant, labelled by project.
+- ADR 0018: a `ferund` instance that stops waits for the stops it runs (an image service's pod, up to 660 s) until `--shutdown-grace`, although the leader takes them over at once: a rolling deploy of `ferund` during a service's rollout lingers for up to 11 minutes. Its runner could leave a stop to the takeover instead of waiting for it.
+- ADR 0018: a tenant's deletion (`Engine.DeleteTenant`) deletes its environments' instance rows at once, so their pods' stop grace runs in their tombstones' `DeletePod` without a row, a group or a booking, as every pod's did before the stop op; and so does a sandbox's or a tenant's job's delete for the node's 10 s.
+- ADR 0018: a feos-node that stops (`--suspend-on-stop`, 300 s) ends a pod in its stop grace with its microVM, so a node's rollout cuts a service's drain; suspending it for the next `feosd` would resume the drain, but its delete holds its lock.
+- ADR 0018: a rollout over two nodes stops its old replicas from the highest, so a first new replica that went beside the old one that stays leaves both ready replicas on one node until the next new one is ready; stopping the old one on the node with the most of the service's instances first would close that.
+- ADR 0018: moving a service's replicas apart once room returns (a node that was full, draining or down, a node that joins): placement spreads them only when it places; and spreading them over failure domains larger than a node (zones), from a label of the node's.
 
 ## ADR 0019
 
@@ -188,7 +193,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0033
 
-- ADR 0033: Kubernetes, SSH and registry credentials as the tenant's objects too, once their node side exists (ADR 0014, ADR 0025).
+- ADR 0033: Kubernetes, SSH and registry credentials as an environment's objects too, once their node side exists (ADR 0014, ADR 0025).
+- ADR 0033: migration 0035 left `tenant_credentials` in place for the rolling update (empty, which it checks; read by no instance since, and its trigger refuses every write); a later migration drops it, repeating 0035's refusal while the table holds a row, and its trigger function with it.
 - ADR 0033: a narrower use: a sandbox or a binding that takes a credential with fewer paths or a lower rate than its definition.
 - ADR 0033: the tools of the general MCP door (ADR 0031) for credentials, without their secrets.
 - ADR 0033: a credential's page shows its requests, which the sink records by the binding's name; they are read per environment as its outbound requests meanwhile.
@@ -215,6 +221,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0040: minor upgrades of an addon, and more types (`clickhouse`).
 - ADR 0040: rotating an addon's generated credentials (nats's password); they are never changed.
 - ADR 0040: whether a lost addon whose data ties it to no node is recreated wherever it fits, as a service's lost replica is.
+- ADR 0040: postgres's `SIGTERM` is its smart shutdown, which waits for every client to go, so a stopped addon ends by its microVM after 10 s and recovers from its WAL; `SIGINT`, its fast shutdown, would end it cleanly within that.
 
 ## ADR 0041
 
@@ -226,10 +233,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 - ADR 0042: a crash loop for attached services; they are restarted with a backoff without one.
 
-## ADR 0043
-
-- ADR 0043: a host per route; `host` is stored and not served, and every route of an environment is served on every host the environment has.
-
 ## ADR 0044
 
 - ADR 0044: `feosd` sealing the pod's record, so that a pod's resolved secrets do not lie in the clear on the node.
@@ -237,9 +240,10 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0045
 
-- ADR 0045: zones of a tenant's own, and a zone a tenant verified with one record that lets it claim every name below it and wildcard domains, which need DNS-01.
-- ADR 0045: `ferund` as a DNS-01 client for the zones' wildcards, with a DNS credential per provider; the operator's issuer provides them.
-- ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: ADR 0030 proposes DNS-01 through a CNAME of `_acme-challenge.<name>` into a zone of the platform's.
+- ADR 0045: zones of a tenant's own, and a zone a tenant verified with one record that lets it claim every name below it.
+- ADR 0045: `ferund` as the DNS-01 client for the zones' wildcards too, through the ACME zone's delegation; the operator's issuer provides them.
+- ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: ADR 0030 proposes the wildcards' delegated DNS-01 for a name too.
+- ADR 0045: a wildcard's certificate before its name points here, which DNS-01 allows, so that a wildcard moves without a gap.
 - ADR 0045: certificates a tenant brings, for a domain whose CA is not Let's Encrypt.
 - ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a tenant wants a cap on its certificates.
 - ADR 0045: a Public Suffix List entry for the apps zone, an operator's action, so that a page's script cannot set a cookie for the zone.

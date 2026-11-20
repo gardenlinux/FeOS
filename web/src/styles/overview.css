@@ -140,3 +140,5 @@
 }
 .ov-src { color: var(--faint); }
 .ov-note { margin: 10px 0 0; font-size: 13px; color: var(--faint); }
+.ov-keys { margin: 0; font-size: 14px; }
+.ov-keys b { font-weight: 600; }

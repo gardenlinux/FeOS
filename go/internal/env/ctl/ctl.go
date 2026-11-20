@@ -197,11 +197,16 @@ type Deps struct {
 // timings are the controller's durations, fields so that the package's
 // tests shorten them.
 type timings struct {
-	// stopGrace is how long a stopping instance stays before it is
-	// deleted: routes stop sending to it at once, the env table drops it
-	// within a pass of env-names, and the answers that named it expire
-	// after their TTL (5 s).
+	// stopGrace is how long a stopping instance drains its traffic
+	// before its pod is stopped: routes stop sending to it at once, the
+	// env table drops it within a pass of env-names, and the answers that
+	// named it expire after their TTL (5 s).
 	stopGrace time.Duration
+	// stopMargin is how long past its traffic's drain and its pod's stop
+	// grace a stopping instance's row waits for its pod to end before it
+	// is deleted all the same (endStep): feosd's stop has more to do than
+	// the grace, and a node that does not answer is not waited for.
+	stopMargin time.Duration
 	// crashWindow: so many exits within it open crash_loop; restarts
 	// reset after an instance was ready for as long.
 	crashWindow time.Duration
@@ -227,7 +232,8 @@ type timings struct {
 	// process's first readiness.
 	attachedReady time.Duration
 	// restartReady bounds how long RestartService waits for a restarted
-	// replica to be ready before it restarts the next.
+	// replica to be ready before it restarts the next: its StopPod may
+	// wait out the replica's stop grace first (model.ServiceStopGrace).
 	restartReady time.Duration
 	// deploymentDeadline is the least time a deployment may roll before it fails
 	// (§13.5: longer when its services' budgets or jobs need more).
@@ -240,6 +246,7 @@ type timings struct {
 func defaultTimings() timings {
 	return timings{
 		stopGrace:          10 * time.Second,
+		stopMargin:         2 * time.Minute,
 		crashWindow:        10 * time.Minute,
 		crashExits:         3,
 		restartMax:         5 * time.Minute,
@@ -251,7 +258,7 @@ func defaultTimings() timings {
 		probeTimeout:       10 * time.Second,
 		nodeCall:           10 * time.Second,
 		attachedReady:      time.Minute,
-		restartReady:       5 * time.Minute,
+		restartReady:       5*time.Minute + model.ServiceStopGrace,
 		deploymentDeadline: 10 * time.Minute,
 		addonCertTTL:       24 * time.Hour,
 	}

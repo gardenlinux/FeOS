@@ -179,9 +179,10 @@ export function newSandboxForm(env = '') {
 // arguments: [image, vcpus, memoryMib, {environment, reaches?, egress?,
 // imageCredentials, credentials?}]; the environment is required (ADR
 // 0035); reaches is "all" or the chosen entries, left out for nothing;
-// egress is left out for the internet; credentials are the tenant's its
-// pod gets (ADR 0033). An empty image or size is the platform's default
-// (0); the registry login takes a username and a password, or neither.
+// egress is left out for the internet; credentials are the
+// environment's its pod gets (ADR 0033). An empty image or size is the
+// platform's default (0); the registry login takes a username and a
+// password, or neither.
 // It throws on a bad value.
 export function createRequest(form) {
   const environment = String(form.environment || '').trim();

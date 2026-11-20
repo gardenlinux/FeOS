@@ -11,7 +11,7 @@ import {
   jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
   objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
   phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
-  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specBindings, specObject, splitItem,
+  routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specObject, splitItem,
   statusState, statusTone, tagPlan, trafficOf, trafficTotals, usedBy,
 } from './envs.js';
 
@@ -270,22 +270,15 @@ describe('the operations', () => {
     expect(tagPlan(tags, 'v1.3', '6')).toEqual({ kind: 'here', tag: 'v1.3' });
   });
 
-  it("read a spec's bindings with their users, and when a job runs", () => {
+  it('read when a job runs', () => {
     const spec = {
       services: { api: { bindings: ['github'] }, web: {} },
       jobs: { sync: { bindings: ['github', 'erp'], on: 'manual' }, migrate: {} },
       bindings: {
         github: { upstream: 'https://api.github.com', credential: { kind: 'headers', headers: { Authorization: { secret: 'gh-token' } } } },
-        erp: { upstream: 'https://erp.example', mode: 'intercept', credential: { kind: 'oauth2' }, tenantCredential: { name: 'erp', version: 3 } },
+        erp: { upstream: 'https://erp.example', mode: 'intercept', credential: { kind: 'oauth2' }, credentialRef: { name: 'erp', version: 3 } },
       },
     };
-    expect(specBindings(spec)).toEqual([
-      { name: 'erp', upstream: 'https://erp.example', mode: 'intercept', credential: 'oauth2', users: ['job/sync'],
-        tenantCredential: { name: 'erp', version: 3 }, secrets: [] },
-      { name: 'github', upstream: 'https://api.github.com', mode: 'name', credential: 'headers', users: ['service/api', 'job/sync'],
-        tenantCredential: null, secrets: ['gh-token'] },
-    ]);
-    expect(specBindings(null)).toEqual([]);
     expect(jobTrigger(spec, 'sync')).toBe('manual');
     expect(jobTrigger(spec, 'migrate')).toBe('deploy');
     expect(jobTrigger(null, 'x')).toBe('deploy');
@@ -425,10 +418,14 @@ describe('domains and access', () => {
     expect(actionProblem(k)).toBe('this installation guards no environments: ferund runs without --secret-key-file');
   });
 
-  it('clone with the chosen deployment and the secrets copied', () => {
+  it('clone with the chosen deployment and the secrets and credentials copied', () => {
     expect(cloneBody({ name: ' demo ', deployment: 6, copy: { 'internal-token': true, other: false } }))
       .toEqual({ name: 'demo', deployment: 6, secrets: { 'internal-token': { copy: true } } });
     expect(cloneBody({ name: 'demo', deployment: 0, copy: {} })).toEqual({ name: 'demo' });
+    // The credentials are the environment's (ADR 0033): a clone copies
+    // the ones ticked, each at its latest version.
+    expect(cloneBody({ name: 'demo', copy: {}, copyCredentials: { github: true, stripe: false } }))
+      .toEqual({ name: 'demo', credentials: { github: { copy: true } } });
   });
 });
 
@@ -515,6 +512,7 @@ describe("an object's page", () => {
     expect(readinessText({ tcp: { port: 5432 }, initialDelay: '5s' })).toBe('TCP :5432 · after 5s');
     expect(readinessText({ exec: { command: ['pg_isready'] } })).toBe('exec pg_isready');
     expect(resourcesText({ vcpus: 2, memoryMib: 2048 })).toBe('2 vCPUs · 2 GiB');
+    expect(resourcesText({ vcpus: 2, memoryMib: 4096, diskGib: 30 })).toBe('2 vCPUs · 4 GiB · 30 GiB disk');
   });
 
   it("lists a job's and an addon's definition", () => {

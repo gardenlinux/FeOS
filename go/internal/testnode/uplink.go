@@ -500,7 +500,7 @@ func (n *Node) telemetry() *fleetv1.Telemetry {
 			memUsed += p.GetSpec().GetResources().GetMemoryMib() << 20
 		}
 		if p.GetState() != podv1.PodState_POD_STATE_HIBERNATED {
-			diskUsed += podDiskBytes
+			diskUsed += max(podDiskBytes, uint64(p.GetSpec().GetResources().GetDiskGib())<<30)
 		}
 	}
 	t.MemoryAvailableBytes = n.cfg.MemoryBytes - min(memUsed, n.cfg.MemoryBytes)

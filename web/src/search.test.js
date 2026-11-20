@@ -11,7 +11,6 @@ const summary = {
     { sandboxId: 'q8w1z4c0dnr', image: 'agent-base:2.4' }],
   jobs: [{ id: 'a3ze6kkjvfx', image: 'builder:1', phase: 'succeeded', environment: { id: 'e1', name: 'prod' } }],
   domains: [{ id: 'd-2', name: 'shop.example.com', state: 'waiting-for-dns' }],
-  credentials: [{ name: 'github', upstream: 'https://api.github.com' }],
   providers: [{ name: 'ferun', kind: 'ferun', builtIn: true }, { name: 'fecode', kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' },
     { name: 'sso', kind: 'oidc', issuer: 'https://login.example.com/' }],
 };
@@ -47,7 +46,6 @@ describe('search', () => {
     expect(search(all, 'pr').map((e) => e.label).slice(0, 2)).toEqual(['prod', 'preview-42']);
     expect(search(all, 'example')[0]).toMatchObject({ label: 'prod' });
     expect(search(all, 'shop')[0]).toMatchObject({ kind: 'domain', to: '/tenants/kino/domains/d-2' });
-    expect(search(all, 'git')[0]).toMatchObject({ kind: 'credential', to: '/tenants/kino/credentials/github' });
   });
 
   it('finds an access provider by its name, its kind and where it is (ADR 0054)', () => {

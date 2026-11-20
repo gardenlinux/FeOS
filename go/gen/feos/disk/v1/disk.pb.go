@@ -378,7 +378,8 @@ type CreateDiskRequest struct {
 	PodId string                 `protobuf:"bytes,1,opt,name=pod_id,json=podId,proto3" json:"pod_id,omitempty"`
 	// Layer ids, L0 first; the last is the parent of the fresh top.
 	Chain []string `protobuf:"bytes,2,rep,name=chain,proto3" json:"chain,omitempty"`
-	// The disk's size in bytes; 0 takes the chain's.
+	// The disk's size in bytes, at least the chain's: 0, or a smaller
+	// size, takes the chain's. What lies beyond the chain reads as zeroes.
 	LogicalSize   uint64 `protobuf:"varint,3,opt,name=logical_size,json=logicalSize,proto3" json:"logical_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

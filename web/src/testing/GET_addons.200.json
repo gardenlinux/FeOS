@@ -36,6 +36,8 @@
           "url"
         ],
         "outputFields": [],
+        "byIdentity": false,
+        "identityBy": "",
         "options": [
           {
             "name": "jetstream",
@@ -96,6 +98,8 @@
           "role",
           "database"
         ],
+        "byIdentity": true,
+        "identityBy": "ou",
         "options": [
           {
             "name": "databases",
@@ -176,6 +180,8 @@
           "url"
         ],
         "outputFields": [],
+        "byIdentity": true,
+        "identityBy": "uri",
         "options": [
           {
             "name": "maxmemoryPolicy",

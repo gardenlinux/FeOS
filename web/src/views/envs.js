@@ -317,36 +317,6 @@ export function tagPlan(tags, name, n) {
   return { kind: 'move', tag: t, from: cur.deployment };
 }
 
-// specBindings lists a spec's HTTP bindings (ADR 0028) with the objects
-// that name them.
-export function specBindings(spec) {
-  const s = spec || {};
-  const users = (name) => ['services', 'jobs'].flatMap((key) => Object.entries(s[key] || {})
-    .filter(([, o]) => Array.isArray(o && o.bindings) && o.bindings.includes(name))
-    .map(([n]) => `${key === 'services' ? 'service' : 'job'}/${n}`));
-  return Object.entries(s.bindings || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, b]) => ({
-    name,
-    upstream: (b && b.upstream) || '',
-    mode: (b && b.mode) || 'name',
-    credential: (b && b.credential && b.credential.kind) || '',
-    users: users(name),
-    // Where the credential comes from: a credential of the tenant at the
-    // version the deployment pinned (ADR 0033), or the environment's
-    // secrets its fields name.
-    tenantCredential: (b && b.tenantCredential) || null,
-    secrets: credentialSecrets(b && b.credential),
-  }));
-}
-
-// credentialSecrets are the environment's secrets a binding's credential
-// names, sorted.
-function credentialSecrets(c) {
-  if (!c) return [];
-  const vals = [...Object.values(c.headers || {}),
-    ...['user', 'password', 'tokenUrl', 'clientId', 'clientSecret', 'scope', 'audience', 'certPem', 'keyPem'].map((k) => c[k])];
-  return [...new Set(vals.filter((v) => v && typeof v === 'object' && v.secret).map((v) => v.secret))].sort();
-}
-
 // jobTrigger is when a job of the spec runs: on each deploy that changes
 // it (the default), or only when asked.
 export function jobTrigger(spec, name) {
@@ -543,13 +513,20 @@ export function publishNote(res) {
 // ----------------------------------------------------------------- clone --
 
 // cloneBody is a clone's request: the new name, the deployment whose
-// spec it takes (0: the latest), and each secret copied or left out.
-export function cloneBody({ name, deployment, copy }) {
+// spec it takes (0: the latest), and each secret and each credential
+// (ADR 0033) copied or left out.
+export function cloneBody({ name, deployment, copy, copyCredentials }) {
   const body = { name: String(name || '').trim() };
   if (Number(deployment) > 0) body.deployment = Number(deployment);
-  const secrets = {};
-  for (const [k, v] of Object.entries(copy || {})) if (v) secrets[k] = { copy: true };
+  const picked = (m) => {
+    const out = {};
+    for (const [k, v] of Object.entries(m || {})) if (v) out[k] = { copy: true };
+    return out;
+  };
+  const secrets = picked(copy);
   if (Object.keys(secrets).length > 0) body.secrets = secrets;
+  const credentials = picked(copyCredentials);
+  if (Object.keys(credentials).length > 0) body.credentials = credentials;
   return body;
 }
 
@@ -779,12 +756,14 @@ export function readinessText(r) {
   return t.length ? `${s} · ${t.join(', ')}` : s;
 }
 
-// resourcesText says a pod's size: "1 vCPU · 512 MiB".
+// resourcesText says a pod's size: "1 vCPU · 512 MiB", and its disk when
+// it asks for one of its own size: "· 30 GiB disk".
 export function resourcesText(r) {
   if (!r || typeof r !== 'object') return '';
   const parts = [];
   if (r.vcpus) parts.push(`${r.vcpus} vCPU${r.vcpus === 1 ? '' : 's'}`);
   if (r.memoryMib) parts.push(r.memoryMib >= 1024 && r.memoryMib % 1024 === 0 ? `${r.memoryMib / 1024} GiB` : `${r.memoryMib} MiB`);
+  if (r.diskGib) parts.push(`${r.diskGib} GiB disk`);
   return parts.join(' · ');
 }
 

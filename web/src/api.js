@@ -332,7 +332,8 @@ export const api = {
   // revised);
   // imageCredentials ({username, password}) pull a private image (ADR
   // 0025), sealed, never answered.
-  // credentials name the tenant's credentials its pod gets (ADR 0033).
+  // credentials name the credentials of its environment its pod gets
+  // (ADR 0033).
   createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, reaches, egress, imageCredentials = null, credentials = [] } = {}) =>
     tenantCall('POST', '/sandboxes', {
       image, vcpus, memoryMib, environment,
@@ -348,9 +349,6 @@ export const api = {
     tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/reaches`, { reaches }),
   putImageCredentials: (sandboxId, creds) => tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
   deleteImageCredentials: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
-  // An HTTP binding's preflight (ADR 0028): {binding, probe{method,path}}
-  // answers {ok, addresses, tls, token, probe, error}.
-  httpPreflight: (binding, probe) => tenantCall('POST', '/http/preflight', probe ? { binding, probe } : { binding }),
   deleteSandbox: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}`),
   pauseSandbox: (sandboxId) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/pause`),
   resumeSandbox: (sandboxId) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/resume`),
@@ -454,6 +452,21 @@ export const api = {
   // new version, {name, version}.
   listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
   putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
+  // credentials (ADR 0033): an environment's HTTP bindings stated once,
+  // versioned (env: its name or ID). A read answers every secret field
+  // {"set": true}; a put sends the whole definition, a secret field
+  // {"set": true} keeping the latest version's value (201 a new version,
+  // 200 unchanged); a delete of one in use is 409 credential_in_use. A
+  // check is the preflight ({ok, addresses, tls, token, probe, error}) of
+  // the stored latest version, or with binding of a draft, whose secret
+  // fields {"set": true} are the latest version's; nothing is stored.
+  listCredentials: (env) => tenantCall('GET', `/environments/${enc(env)}/credentials`),
+  getCredential: (env, name) => tenantCall('GET', `/environments/${enc(env)}/credentials/${enc(name)}`),
+  putCredential: (env, name, binding) => tenantCall('PUT', `/environments/${enc(env)}/credentials/${enc(name)}`, binding),
+  deleteCredential: (env, name) => tenantCall('DELETE', `/environments/${enc(env)}/credentials/${enc(name)}`),
+  checkCredential: (env, name, { binding = null, probe = null } = {}) =>
+    tenantCall('POST', `/environments/${enc(env)}/credentials/${enc(name)}/check`,
+      { ...(binding ? { binding } : {}), ...(probe ? { probe } : {}) }),
   // An environment's operations beside the builder (ADR 0018).
   deleteEnvironment: (env) => tenantCall('DELETE', `/environments/${enc(env)}`),
   renameEnvironment: (env, name) => tenantCall('PATCH', `/environments/${enc(env)}`, { name }),
@@ -464,7 +477,8 @@ export const api = {
   listTags: (env) => tenantCall('GET', `/environments/${enc(env)}/tags`),
   putTag: (env, tag, deployment) => tenantCall('PUT', `/environments/${enc(env)}/tags/${enc(tag)}`, { deployment }),
   deleteTag: (env, tag) => tenantCall('DELETE', `/environments/${enc(env)}/tags/${enc(tag)}`),
-  // A clone: {name, deployment?, labels?, secrets: {name: {copy: true} | {value}}}.
+  // A clone: {name, deployment?, labels?, secrets: {name: {copy: true} | {value}},
+  // credentials: {name: {copy: true}}}.
   cloneEnvironment: (env, body) => tenantCall('POST', `/environments/${enc(env)}/clone`, body),
   deleteSecret: (env, name) => tenantCall('DELETE', `/environments/${enc(env)}/secrets/${enc(name)}`),
   restartService: (env, name) => tenantCall('POST', `/environments/${enc(env)}/services/${enc(name)}/restart`),
@@ -496,6 +510,14 @@ export const api = {
   accessLogs: (env, { limit = 200, beforeTsNs, traceId } = {}) =>
     tenantCall('GET', `/environments/${enc(env)}/access-logs${query({ limit, beforeTsNs, traceId })}`),
   traffic: (env, window = '1h') => tenantCall('GET', `/environments/${enc(env)}/traffic${query({ window })}`),
+  // What the environment's pods sent through each HTTP binding over
+  // window (24h or 1h) and who sent it, as the sink counts it ({window,
+  // unavailable?, truncated, bindings}); and who its workloads are to
+  // the platform: each one's SPIFFE ID and the certificates its pods
+  // hold ({trustDomain, workloads}, ADR 0036).
+  bindingUsage: (env, window = '24h') =>
+    tenantCall('GET', `/environments/${enc(env)}/bindings/usage${query({ window })}`),
+  identities: (env) => tenantCall('GET', `/environments/${enc(env)}/identities`),
 
   // The tenant's domains (ADR 0021): a claim answers the records to set;
   // a domain is bound to one environment, or none.
@@ -552,17 +574,6 @@ export const api = {
     adminCall('POST', `/tenants/${enc(name)}/tokens`,
       { label, ...(role ? { role } : {}), ...(environment ? { environment } : {}) }),
 
-  // credentials (ADR 0033): the tenant's HTTP bindings stated once,
-  // versioned. A read answers every secret field {"set": true}; a put
-  // sends the whole definition, a secret field {"set": true} keeping the
-  // latest version's value (201 a new version, 200 unchanged); a delete
-  // of one in use is 409 credential_in_use; a check is the preflight of
-  // the stored latest version.
-  listCredentials: () => tenantCall('GET', '/credentials'),
-  getCredential: (name) => tenantCall('GET', `/credentials/${enc(name)}`),
-  putCredential: (name, binding) => tenantCall('PUT', `/credentials/${enc(name)}`, binding),
-  deleteCredential: (name) => tenantCall('DELETE', `/credentials/${enc(name)}`),
-  checkCredential: (name, probe) => tenantCall('POST', `/credentials/${enc(name)}/check`, probe ? { probe } : {}),
   // The tenant's access providers (ADR 0054), who vouch for the visitors
   // of an environment that admits visitors: kind tenant {url}, the
   // tenant's own service; kind oidc {issuer, clientId, clientSecret,
@@ -580,7 +591,8 @@ export const api = {
   getProvider: (name) => tenantCall('GET', `/providers/${enc(name)}`),
   putProvider: (name, provider) => tenantCall('PUT', `/providers/${enc(name)}`, provider),
   deleteProvider: (name) => tenantCall('DELETE', `/providers/${enc(name)}`),
-  // The credentials a sandbox names, the whole list on a put.
+  // The credentials a sandbox names, of its environment; the whole list
+  // on a put.
   getSandboxCredentials: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/credentials`),
   putSandboxCredentials: (sandboxId, names) =>
     tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/credentials`, { credentials: names }),

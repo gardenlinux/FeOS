@@ -24,6 +24,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/quota"
+	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -53,12 +54,18 @@ type validateCtx struct {
 	// the environment is public.
 	zone, host string
 	public     bool
+	// routeHosts are the hosts a route may name (RouteHosts), served those
+	// the environment is served at now (hostsOf); hostsKnown: there is an
+	// environment to judge a route's host against.
+	routeHosts, served []string
+	hostsKnown         bool
 	// bindingsOn: HTTP bindings are on (Deps.Bindings); destinations are
 	// the destination rule's words on the hosts of the spec's bindings,
 	// asked before it is validated.
 	bindingsOn   bool
 	destinations map[string]error
-	// credentials are the tenant's credentials (ADR 0033), by name.
+	// credentials are the environment's credentials (ADR 0033), by name;
+	// none for a spec without an environment.
 	credentials map[string]spec.CredentialInfo
 	// deny are the prefixes no pod reaches (Deps.DenyPrefixes).
 	deny []netip.Prefix
@@ -71,8 +78,8 @@ type imageAnswer struct {
 
 func (v *validateCtx) Mode() spec.Mode { return v.mode }
 
-// TenantCredential is spec.CredentialContext.
-func (v *validateCtx) TenantCredential(name string) (spec.CredentialInfo, bool) {
+// Credential is spec.CredentialContext.
+func (v *validateCtx) Credential(name string) (spec.CredentialInfo, bool) {
 	c, ok := v.credentials[name]
 	return c, ok
 }
@@ -116,6 +123,12 @@ func (v *validateCtx) Image(image string) (string, error) {
 // any route.
 func (v *validateCtx) IngressHost() (host string, public, ok bool) {
 	return v.host, v.public, v.zone != ""
+}
+
+// RouteHosts are the hosts a route of the environment may name, those it
+// is served at now, and whether there is an environment (ADR 0045).
+func (v *validateCtx) RouteHosts() (hosts, served []string, ok bool) {
+	return v.routeHosts, v.served, v.hostsKnown
 }
 
 // HTTPBindings reports whether HTTP bindings are on (ADR 0028).
@@ -237,11 +250,12 @@ func (s *Service) resolveImages(ctx context.Context, env *store.Environment, ask
 // of its normalisation: the tenant's sandboxes its attached services run
 // in (the environment each is in, ADR 0035), the prefixes no pod reaches,
 // the environment's secrets (secrets, when not nil, stands in for them:
-// a clone's), what its addon volumes hold, the addon types, the images,
-// and its default host under the apps zone. env is nil for a spec without
-// an environment.
+// a clone's) and credentials (creds likewise), what its addon volumes
+// hold, the addon types, the images, and its default host under the apps
+// zone. env is nil for a spec without an environment, which has no
+// credentials.
 func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Environment, sp spec.Spec, mode spec.Mode,
-	secrets map[string]spec.SecretInfo) (*validateCtx, spec.Pins, error) {
+	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo) (*validateCtx, spec.Pins, error) {
 	vc := &validateCtx{mode: mode, sandboxes: map[string]spec.SandboxInfo{}, secrets: secrets,
 		volumes: map[string]spec.AddonData{}, blueprint: s.d.Blueprint, zone: s.d.AppsZone,
 		bindingsOn: s.d.Bindings != nil && s.d.Bindings.Enabled(), destinations: map[string]error{},
@@ -265,13 +279,22 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil {
 			return nil, spec.Pins{}, fmt.Errorf("hosts: %w", err)
 		}
-		if len(hosts) > 0 {
+		if hostRoutes(sp) {
+			if vc.routeHosts, err = s.routeHosts(ctx, *env, vc.host); err != nil {
+				return nil, spec.Pins{}, err
+			}
+			vc.served, vc.hostsKnown = slices.Clone(hosts), true
+		}
+		if hosts = slices.DeleteFunc(hosts, routing.IsWildcard); len(hosts) > 0 {
 			vc.host = hosts[0]
 		}
 	}
 	pins := spec.Pins{Images: map[string]string{}, Secrets: map[string]int{}, Plans: map[string]string{}}
-	if vc.bindingsOn && namesCredentials(sp) {
-		creds, err := s.tenantCredentials(ctx, s.st, tenant)
+	switch {
+	case creds != nil:
+		vc.credentials, pins.Credentials = creds, creds
+	case env != nil && vc.bindingsOn && namesCredentials(sp):
+		creds, err := s.envCredentials(ctx, s.st, env.ID)
 		if err != nil {
 			return nil, pins, err
 		}
@@ -355,6 +378,41 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	return vc, pins, nil
 }
 
+// hostRoutes reports whether a route of sp has a host.
+func hostRoutes(sp spec.Spec) bool {
+	for _, r := range sp.Routes {
+		if r.Host != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// routeHosts are the hosts a route of environment e may name (ADR 0045):
+// its default host, defaultHost ("" before it has a label), and the names
+// of the domains bound to it, wildcards among them, whatever their state.
+// These are the names the environment answers on, or will answer on
+// without another deployment, once a domain is verified, routed and has
+// its certificate, or once none is served and the default host is its
+// host again; what it is served at this moment changes without a write,
+// and a spec judged by it would pass or fail by timing.
+func (s *Service) routeHosts(ctx context.Context, e store.Environment, defaultHost string) ([]string, error) {
+	var out []string
+	if defaultHost != "" {
+		out = append(out, defaultHost)
+	}
+	ds, err := s.st.ListDomainViews(ctx, e.Owner, e.ID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("the domains: %w", err)
+	}
+	for _, d := range ds {
+		if d.EnvID == e.ID && !slices.Contains(out, d.Name) {
+			out = append(out, d.Name)
+		}
+	}
+	return out, nil
+}
+
 // planned is a plan of a spec for an environment.
 type planned struct {
 	findings []spec.Finding
@@ -406,10 +464,11 @@ func nonNilImages(images map[string]string) map[string]string {
 }
 
 // plan parses, validates and normalises raw for the environment env and
-// diffs it against deployment base (nil: the current one). secrets, when
-// not nil, stands in for the environment's secrets.
+// diffs it against deployment base (nil: the current one). secrets and
+// creds, when not nil, stand in for the environment's secrets and
+// credentials.
 func (s *Service) plan(ctx context.Context, tenant string, env store.Environment, raw []byte, base *int, mode spec.Mode,
-	secrets map[string]spec.SecretInfo) (planned, error) {
+	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo) (planned, error) {
 	p := planned{base: env.Deployment, current: env.Deployment}
 	if base != nil {
 		if *base < 0 || *base > env.Deployment {
@@ -429,7 +488,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 		p.findings = fs
 		return p, nil
 	}
-	vc, pins, err := s.loadContext(ctx, tenant, &env, sp, mode, secrets)
+	vc, pins, err := s.loadContext(ctx, tenant, &env, sp, mode, secrets, creds)
 	if err != nil {
 		return planned{}, err
 	}
@@ -504,7 +563,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 	if env.Deleting {
 		return ApplyAnswer{}, errDeleting(env.Name)
 	}
-	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil)
+	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil, nil)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}
@@ -543,6 +602,12 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		// The plan read the secrets before the lock: a DeleteSecret, which
 		// takes the same lock, may have deleted a version it pins since.
 		if err := checkPins(ctx, tx, e.ID, p.norm.Secrets); err != nil {
+			return err
+		}
+		// And the credentials: a DeleteCredential checks its uses under
+		// the credential's lock, which this takes until the deployment
+		// that pins it is committed.
+		if err := checkCredentialPins(ctx, tx, e.ID, p.norm.Bindings); err != nil {
 			return err
 		}
 		// The plan's quota finding counted before the lock too.
@@ -614,6 +679,33 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	for name, ref := range pins {
 		if !slices.Contains(versions[name].Versions, ref.Version) {
 			return errReplan
+		}
+	}
+	return nil
+}
+
+// checkCredentialPins takes the lock of each credential the bindings
+// name (ADR 0033), in name order, and is errReplan when a pinned version
+// is gone.
+func checkCredentialPins(ctx context.Context, tx *store.Store, envID uuid.UUID, bs map[string]spec.Binding) error {
+	pins := map[string][]int{}
+	for _, b := range bs {
+		if ref := b.CredentialRef; ref != nil {
+			pins[ref.Name] = append(pins[ref.Name], ref.Version)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(pins)) {
+		if err := tx.LockEnvCredential(ctx, envID, name); err != nil {
+			return fmt.Errorf("credential %s: %w", name, err)
+		}
+		for _, v := range pins[name] {
+			_, err := tx.EnvCredential(ctx, envID, name, v)
+			if errors.Is(err, model.ErrNotFound) {
+				return errReplan
+			}
+			if err != nil {
+				return fmt.Errorf("credential %s: %w", name, err)
+			}
 		}
 	}
 	return nil
@@ -730,21 +822,21 @@ func (s *Service) quotaFindings(ctx context.Context, tenant string, env uuid.UUI
 }
 
 // namesCredentials reports whether a spec's bindings name a credential of
-// the tenant.
+// the environment.
 func namesCredentials(sp spec.Spec) bool {
 	for _, b := range sp.Bindings {
-		if b.TenantCredential != nil {
+		if b.CredentialRef != nil {
 			return true
 		}
 	}
 	return false
 }
 
-// tenantCredentials are the tenant's credentials as a spec's bindings
+// envCredentials are an environment's credentials as a spec's bindings
 // see them (ADR 0033).
-func (s *Service) tenantCredentials(ctx context.Context, st *store.Store, tenant string) (
+func (s *Service) envCredentials(ctx context.Context, st *store.Store, env uuid.UUID) (
 	map[string]spec.CredentialInfo, error) {
-	versions, err := st.TenantCredentialVersions(ctx, tenant)
+	versions, err := st.EnvCredentialVersions(ctx, env)
 	if err != nil {
 		return nil, fmt.Errorf("credentials: %w", err)
 	}

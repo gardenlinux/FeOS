@@ -21,6 +21,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/mesh"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/routing"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
@@ -209,7 +210,9 @@ func Asleep(phase, clientState, op string) bool {
 //     name; a route's Path is its prefix as the route door matches it
 //     (spec.RoutePrefix). A route to an attached service is the route
 //     door's alone (Door). Its From are the spec route's clients' blocks,
-//     canonical (routeFrom).
+//     canonical (routeFrom), its Host the spec route's host as it is
+//     matched (spec.RouteHost, ADR 0045), whether or not the environment
+//     is served there now: a request reaches only the hosts it is.
 //   - Each image service that a route sends to is a Service.
 //     An instance of it is an endpoint when it is ready, running,
 //     without an operation, with an address and a node, and its node
@@ -223,7 +226,9 @@ func Asleep(phase, clientState, op string) bool {
 //     fit is left out, never the environment. A name twice is taken once.
 //     Its default host, <label>.<zone>, is its host only while none of its
 //     domains is: an environment on a domain of its own is not served in
-//     its zone too (ADR 0021).
+//     its zone too (ADR 0021). A wildcard domain (ADR 0045) is no address:
+//     it is a host beside the others, after them, and retires no default
+//     host.
 //   - Who it admits (ADR 0054): open to anyone (e.Access anyone or ""), it
 //     carries none of Access, Provider and SignIn, so its entry and hash
 //     are those of before. Otherwise its Access is e.Access, Provider the
@@ -262,7 +267,7 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 	byService := map[string][]spec.RouteView{}
 	for _, r := range spec.IngressRoutes(sp) {
 		out.Routes = append(out.Routes, wire.Route{Name: r.Name, Path: r.Prefix, Service: r.Service, Port: r.Port.String(),
-			Strip: r.Strip, Door: r.Door, From: routeFrom(sp.Routes[r.Name].From)})
+			Strip: r.Strip, Door: r.Door, From: routeFrom(sp.Routes[r.Name].From), Host: r.Host})
 		if target, ok := sp.Services[r.Service]; ok && !r.Door && !spec.IsAttached(target) {
 			byService[r.Service] = append(byService[r.Service], r)
 		}
@@ -334,7 +339,7 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 		}
 		if size > MaxEnvBytes {
 			// The estimate was short: the domains stay out.
-			out.Hosts, out.Domains = defaultHosts, nil
+			out.Hosts, out.Domains = slices.Clone(defaultHosts), nil
 			if h, _, err = digest(out); err != nil {
 				return wire.Env{}, nil, fmt.Errorf("environment %s: %w", e.ID, err)
 			}
@@ -345,19 +350,20 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 }
 
 // withDomains returns e, which takes size bytes coded, with the domains
-// of ds that fit as its Hosts and Domains in place of its default host
-// (BuildEnv), and whether any did. The budget counts the default host,
-// which errs on the safe side.
+// of ds that fit as its Hosts and Domains (BuildEnv), and whether any
+// did: the names in place of its default host, the wildcards after them,
+// or after the default host while no name fits. The budget counts the
+// default host, which errs on the safe side.
 func withDomains(e wire.Env, ds []wire.Domain, size int) (wire.Env, bool, error) {
 	if len(ds) == 0 {
 		return e, false, nil
 	}
 	// ,"domains":[] once, then each domain and its host with a comma.
 	budget := MaxEnvBytes - size - len(`,"domains":[]`)
-	hosts := []string{}
+	hosts, wildcards := []string{}, []string{}
 	var domains []wire.Domain
 	for _, d := range ds {
-		if d.Name == "" || slices.Contains(hosts, d.Name) {
+		if d.Name == "" || slices.ContainsFunc(domains, func(x wire.Domain) bool { return x.Name == d.Name }) {
 			continue
 		}
 		dn, err := wire.Size(&d)
@@ -373,13 +379,20 @@ func withDomains(e wire.Env, ds []wire.Domain, size int) (wire.Env, bool, error)
 			continue
 		}
 		budget -= n
-		hosts = append(hosts, d.Name)
+		if routing.IsWildcard(d.Name) {
+			wildcards = append(wildcards, d.Name)
+		} else {
+			hosts = append(hosts, d.Name)
+		}
 		domains = append(domains, d)
 	}
 	if len(domains) == 0 {
 		return e, false, nil
 	}
-	e.Hosts, e.Domains = hosts, domains
+	if len(hosts) == 0 {
+		hosts = slices.Clone(e.Hosts)
+	}
+	e.Hosts, e.Domains = append(hosts, wildcards...), domains
 	return e, true, nil
 }
 

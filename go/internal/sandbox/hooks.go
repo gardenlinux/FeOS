@@ -176,6 +176,43 @@ func (e *Engine) Restart(ctx context.Context, id podid.ID, reason string) error 
 	return nil
 }
 
+// StopPod stops the pod of a running row for good, for an environment's
+// instance that goes once its traffic drained: a stop op (StopPod), whose
+// node sends the containers SIGTERM and gives them the pod's stop grace
+// (store.Sandbox.StopGrace) before its microVM ends. The row stays
+// running, booked and in its groups while the containers drain, and is
+// stopped once the pod has ended; the op's deadline covers the grace, and
+// a takeover of it waits for the stop feosd runs. It returns once the op
+// began (ErrBusy: an op in flight; ErrPrecondition: the row does not run;
+// ErrNodeUnavailable: its node is not connected to this instance); the
+// op's outcome arrives as the row's state.
+func (e *Engine) StopPod(ctx context.Context, id podid.ID) error {
+	row, err := e.st.GetSandbox(ctx, id)
+	if err != nil {
+		return err
+	}
+	if row.Op != "" {
+		return errorf(model.ErrBusy, "an op %s of instance %s is in flight", row.Op, row.OpOwner)
+	}
+	if row.ClientState != model.StateRunning {
+		return errorf(model.ErrPrecondition, "sandbox %s is %s: no stop", id, row.ClientState)
+	}
+	reason := "stopping: its containers have SIGTERM and the node's 10 s to exit"
+	if g := row.StopGrace(); g > 0 {
+		reason = fmt.Sprintf("stopping: its containers have SIGTERM and %d s to exit", int(g/time.Second))
+	}
+	h, err := e.runner.Start(ctx, id, OpIntent{Kind: OpStop, Trigger: TriggerStop, Target: row.Node,
+		Incarnation: row.Incarnation, reason: reason})
+	if err != nil {
+		return err
+	}
+	if h.kind != OpStop {
+		// This instance's op of another kind, begun after the read.
+		return errorf(model.ErrBusy, "an op %s is in flight", h.kind)
+	}
+	return nil
+}
+
 // prepareError is a failure of what an op does before its pod call
 // (prepareSpec, prepareNode): the prepare hook's, or the building of a
 // create's pod spec. Nothing was sent: the op rolls back with it as its

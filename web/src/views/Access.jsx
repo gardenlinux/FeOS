@@ -12,8 +12,8 @@ import { credentialsOf } from './sandboxes.js';
 // and SSH servers bound to it, each with what the audit log says it was
 // used for, and the newest refusals. Read with the session; the sets are
 // changed with the sandbox's token, by the client that owns them, not
-// here. The HTTP APIs it gets are the tenant's credentials it names (ADR
-// 0033, SandboxCredentials); its own HTTP set is read with its token
+// here. The HTTP APIs it gets are the credentials of its environment it
+// names (ADR 0033, SandboxCredentials); its own HTTP set is read with its token
 // only. No credential reaches this view: fingerprints and public keys only.
 // Where ferund runs without bindings, kube and ssh are null.
 

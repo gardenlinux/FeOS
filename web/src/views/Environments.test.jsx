@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { specBindings } from './envs.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import React from 'react';
@@ -9,13 +8,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveTenant } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
 import {
-  BindingCard, DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceNote, InstanceTable, LogsBody, LogsTab, DeploymentTable,
-  DeploymentView, TagsBox, envCan,
+  DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceNote, InstanceTable, LogsBody, LogsTab, DeploymentTable,
+  DeploymentView, PreflightResult, TagsBox, envCan,
 } from './Environments.jsx';
-import { AboutBox, EnvOverview } from './EnvOverview.jsx';
+import { AboutBox, EnvOverview, KeysLine } from './EnvOverview.jsx';
 import { activityItems } from './envs.js';
 import {
-  AccessTable, CloneBox, DeleteBox, DomainsBox, PublicBox, RouteTokenBox, SecretsTable, TrafficTable,
+  AccessTable, CloneBox, DeleteBox, DomainsBox, PublicBox, RouteTokenBox, TrafficTable,
 } from './EnvTabs.jsx';
 import { logsProblem } from './envs.js';
 import { LogSearch } from './LogSearch.jsx';
@@ -536,12 +535,12 @@ describe('the logs', () => {
 describe('the routes it calls', () => {
   it('are the reads and the operations of an environment', () => {
     const src = ['./Environments.jsx', './EnvOverview.jsx', './ObjectPage.jsx', './EnvTabs.jsx', './LogSearch.jsx', './Traces.jsx',
-      '../envstatus.jsx']
+      '../envstatus.jsx', './EnvSecrets.jsx', './ObjectAccess.jsx', './accessData.js']
       .map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
-      'accessLogs', 'addonCatalog', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
-      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'listDeployments', 'listEnvironments',
+      'accessLogs', 'addonCatalog', 'bindingUsage', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
+      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'identities', 'listCredentials', 'listDeployments', 'listEnvironments',
       'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
     ]);
@@ -636,34 +635,27 @@ describe('AboutBox', () => {
   });
 });
 
-describe('the bindings', () => {
-  it("lists the latest deployment's bindings in the overview, each with Check", () => {
-    const spec = { services: { 'expense-service': { bindings: ['erp'] } }, bindings: { erp: { upstream: 'https://erp.example', credential: { kind: 'basic' } } } };
+describe('the keys on the overview', () => {
+  const spec = {
+    services: { 'expense-service': { bindings: ['erp'], env: { TOKEN: { secret: 'token' }, KEY: { secret: 'key' } } } },
+    bindings: { erp: { upstream: 'https://erp.example', credential: { kind: 'basic' } } },
+  };
+  it('counts the bindings and secrets and leads to the Secrets view, where they are with their checks', () => {
     const out = html(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />);
-    expect(out).toContain('Bindings <span class="count">1</span>');
-    expect(out).toContain('https://erp.example');
-    expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />)).toContain('name · basic · used by service/expense-service');
-    expect(out).toContain('Check');
+    expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />))
+      .toContain('1 binding · 2 secrets — where each key lives, who uses it, the checks: Secrets');
+    expect(out).toContain(`href="/tenants/${T}/environments/expensa-stage/secrets"`);
+    // No card of its own: the binding and its check are the Secrets view's.
+    expect(out).not.toContain('https://erp.example');
+    expect(out).not.toContain('Check');
   });
-
-  it('lists the bindings on Secrets & credentials, each with where its credential comes from', () => {
-    const spec = {
-      services: { api: { bindings: ['erp', 'gh'] } },
-      bindings: {
-        erp: { upstream: 'https://erp.example', credential: { kind: 'oauth2' }, tenantCredential: { name: 'erp', version: 3 } },
-        gh: { upstream: 'https://api.github.com', credential: { kind: 'headers', headers: { Authorization: { secret: 'gh-token' } } } },
-      },
-    };
-    const cards = specBindings(spec).map((b) => text(<BindingCard key={b.name} b={b} env="stage" ec={ALL} tenant={T} navigate={nav} />));
-    expect(cards[0]).toContain('credential erp · version 3 of the tenant');
-    expect(cards[0]).toContain('Edit in New deployment');
-    expect(cards[1]).toContain('secret gh-token of this environment');
+  it('says nothing of keys a deployment names none of', () => {
+    expect(html(<KeysLine spec={{ services: { web: {} } }} tenant={T} env="e" navigate={nav} />)).toBe('');
+    expect(html(<KeysLine spec={null} tenant={T} env="e" navigate={nav} />)).toBe('');
   });
-
   it("shows a binding check's result", () => {
-    const b = { name: 'erp', upstream: 'https://erp.example', mode: 'name', credential: 'oauth2', users: [] };
     const res = { ok: false, addresses: ['203.0.113.40'], tls: null, token: null, probe: { status: 401, latencyMs: 80 }, error: 'unauthorized' };
-    const all = text(<BindingCard b={b} env="e" ec={ALL} result={res} />);
+    const all = text(<PreflightResult res={res} />);
     expect(all).toContain('result not ok');
     expect(all).toContain('error unauthorized');
     expect(all).toContain('addresses 203.0.113.40');
@@ -716,22 +708,6 @@ describe('the traffic tab', () => {
     expect(out).toContain('held 2.4 s while the service woke');
     expect(out).toContain('/api/login');
     expect(out.indexOf('0af76519')).toBeLessThan(out.indexOf('4bf92f35'));
-  });
-});
-
-describe('the secrets tab', () => {
-  const secrets = response('GET_environments_env_secrets.200').secrets;
-  it('lists names, versions and who set them, never a value', () => {
-    const out = html(<SecretsTable secrets={secrets} ec={ALL} editing="" setEditing={nav} onPut={nav} onDelete={nav} />);
-    expect(out).toContain('<td class="mono strong">internal-token</td><td class="col-num mono">v3</td>');
-    expect(out).toContain('fecode:0193a000-aaaa-7bbb-8ccc-000000000001');
-    expect(out).toContain('Set value');
-    expect(out).not.toContain('type="password"');
-    const editing = html(<SecretsTable secrets={secrets} ec={ALL} editing="internal-token" setEditing={nav} onPut={nav} onDelete={nav} />);
-    expect(editing).toContain('type="password"');
-    expect(editing).toContain('shown never again once stored');
-    expect(html(<SecretsTable secrets={secrets} ec={NONE} editing="" setEditing={nav} onPut={nav} onDelete={nav} />))
-      .toContain('disabled="" title="needs write on this environment"');
   });
 });
 

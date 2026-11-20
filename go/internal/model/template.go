@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -68,6 +69,16 @@ func PodGroups(envID uuid.UUID, workload string) []string {
 // SandboxCommand is the command of a sandbox's pod: it waits, and runs
 // what exec, the tools and its attached services start in it.
 var SandboxCommand = []string{"sleep", "infinity"}
+
+// ServiceStopGrace is how long the containers of an image service's
+// instance have between SIGTERM and the end of their microVM when its pod
+// is stopped or deleted (feos.pod.v1.PodSpec.stop_grace_seconds, ADR
+// 0018): a service may drain, as a backend that hands its work over to
+// another replica (FeCode's takes up to 630 s). Every other pod has the
+// node's 10 s: a sandbox's sleep, PID 1 of its container, ignores SIGTERM
+// and waits out any grace; an addon's next pod waits for its volume; a
+// job that is stopped is cancelled.
+const ServiceStopGrace = 660 * time.Second
 
 // SandboxTemplate is the pod template of sandbox id (ADR 0035): its
 // command, its groups (PodGroups with SandboxWorkloadGroupID) and its
@@ -282,10 +293,11 @@ func (t PodTemplate) HasCredential() bool {
 // in sorted order, then name tables in order, the ingress group flag, the
 // image credentials and the HTTP bindings (name, upstream and mode), each
 // only when there are any or it is set, so that a template without them
-// hashes as before they were). Equal pods hash equal: a nil and an
-// empty list or map hash alike. What an instance is not rebuilt for (its
-// labels, the idle policy, the deployment) is not in it.
-func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
+// hashes as before they were). The disk is in it only when the pod has
+// one of its own size (diskGiB > 0), likewise. Equal pods hash equal: a
+// nil and an empty list or map hash alike. What an instance is not
+// rebuilt for (its labels, the idle policy, the deployment) is not in it.
+func (t PodTemplate) Hash(image string, vcpus, memoryMiB, diskGiB int) string {
 	groups := slices.Clone(t.SecurityGroups)
 	slices.Sort(groups)
 	h := struct {
@@ -309,8 +321,10 @@ func (t PodTemplate) Hash(image string, vcpus, memoryMiB int) string {
 		// With the internet's egress, a template hashes as before it.
 		RestrictEgressNames bool     `json:"restrictEgressNames,omitempty"`
 		EgressDomains       []string `json:"egressDomains,omitempty"`
+		// Without a disk of its own size, a template hashes as before.
+		DiskGiB int `json:"diskGib,omitempty"`
 	}{
-		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
+		Scheme: 1, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB, DiskGiB: diskGiB,
 		Command: nonNil(t.Command), Env: t.Env, Volumes: nonNil(t.Volumes), Mounts: nonNil(t.Mounts),
 		SecurityGroups: nonNil(groups), NameTables: t.NameTables, IngressGroup: t.IngressGroup,
 		ImageCredentials: t.ImageCredentials, HTTPBindings: t.HTTPBindings, TLSBindings: t.TLSBindings,

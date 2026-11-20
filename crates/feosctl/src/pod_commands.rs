@@ -132,6 +132,14 @@ pub struct CreatePodOptions {
     #[arg(long, default_value_t = 512, help = "Memory in MiB")]
     memory: u64,
 
+    #[arg(
+        long,
+        value_name = "GIB",
+        default_value_t = 0,
+        help = "The pod's disk in GiB (at most 1024); the guest's blank data volume's size (8 GiB) when 0 or less"
+    )]
+    disk_gib: u32,
+
     #[arg(long, default_value = "main", help = "The container's name")]
     name: String,
 
@@ -199,6 +207,14 @@ pub struct CreatePodOptions {
         help = "Mounts the pod's volume NAME in the container at PATH, read-only with :ro (repeatable)"
     )]
     mounts: Vec<VolumeMount>,
+
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = 0,
+        help = "How long the containers have to exit after SIGTERM when the pod is stopped or deleted (at most 900); the node's 10 s when 0"
+    )]
+    stop_grace: u32,
 
     #[arg(long, help = "Wait until the pod runs")]
     wait: bool,
@@ -392,6 +408,7 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             resources: Some(Resources {
                 vcpus: opts.vcpus,
                 memory_mib: opts.memory,
+                disk_gib: opts.disk_gib,
             }),
             containers: opts
                 .image
@@ -412,6 +429,7 @@ fn create_pod_request(opts: CreatePodOptions) -> CreatePodRequest {
             // A pod's identity is the control plane's to name (ADR 0014).
             identity: String::new(),
             tls_bindings: Vec::new(),
+            stop_grace_seconds: opts.stop_grace,
         }),
         image_layers: None,
         pull_token: String::new(),
@@ -504,8 +522,13 @@ fn print_pod(pod: &PodInfo) {
     };
     if let Some(resources) = &spec.resources {
         println!(
-            "  Resources: {} vCPUs, {} MiB",
-            resources.vcpus, resources.memory_mib
+            "  Resources: {} vCPUs, {} MiB{}",
+            resources.vcpus,
+            resources.memory_mib,
+            match resources.disk_gib {
+                0 => String::new(),
+                gib => format!(", a disk of {gib} GiB"),
+            }
         );
     }
     if let Some(microvm) = &pod.microvm {
@@ -810,9 +833,33 @@ mod tests {
         let spec = create_pod_request(*opts).spec.unwrap();
         assert_eq!(spec.metadata["role"], "web");
         assert_eq!(spec.metadata["url"], "http://a/?b=c");
+        assert_eq!(spec.stop_grace_seconds, 0, "the node's grace");
+        assert_eq!(spec.resources.unwrap().disk_gib, 0, "the guest's disk");
         assert!(
             Cli::try_parse_from(["pod", "create", "--no-network", "--metadata", "a=b"]).is_err()
         );
+    }
+
+    #[test]
+    fn a_create_names_its_stop_grace() {
+        let cli = Cli::try_parse_from(["pod", "create", "--stop-grace", "660"]).unwrap();
+        let PodCommand::Create(opts) = cli.command else {
+            panic!("not a create");
+        };
+        assert_eq!(
+            create_pod_request(*opts).spec.unwrap().stop_grace_seconds,
+            660
+        );
+    }
+
+    #[test]
+    fn a_create_names_its_disk() {
+        let cli = Cli::try_parse_from(["pod", "create", "--disk-gib", "30"]).unwrap();
+        let PodCommand::Create(opts) = cli.command else {
+            panic!("not a create");
+        };
+        let resources = create_pod_request(*opts).spec.unwrap().resources.unwrap();
+        assert_eq!(resources.disk_gib, 30);
     }
 
     #[test]

@@ -242,13 +242,23 @@ func feosdSuspendBudget(memoryMiB int) time.Duration {
 // gives up.
 const pauseMargin = 30 * time.Second
 
+// stopSteps is what a stop's StopPod takes in feosd besides the wait for
+// the pod's lock and the pod's grace: the calls that send SIGTERM, the
+// containers' last log lines (5 s), the microVM's shutdown (30 s at
+// most) and the release of its disk.
+const stopSteps = 2 * time.Minute
+
 // deadlineFor is OpDeadline with the instance's hibernate timeout. A pause
 // waits feosd's whole suspend budget and pauseMargin more. A hibernate's
 // deadline is a pause's, since feosd suspends a running pod first, plus
 // hibernateTimeout and 16 seconds per GiB for the upload. A resume has the
 // restore's: a ResumePod that meets a hibernation it cannot abandon (past
 // its point of no return, a drain's, a pod without memory) waits for it
-// and then restores the pod from the new checkpoint, inside the call.
+// and then restores the pod from the new checkpoint, inside the call. A
+// stop's StopPod may wait for the pod's lock behind a suspend that feosd
+// still runs (one that outlived its pause), as a tombstone's DeletePod
+// does: a pause's deadline and stopSteps, before the pod's grace
+// (opDeadlineOf).
 func deadlineFor(kind OpKind, memoryMiB int, hibernateTimeout time.Duration) time.Duration {
 	g := gib(memoryMiB)
 	switch kind {
@@ -260,8 +270,22 @@ func deadlineFor(kind OpKind, memoryMiB int, hibernateTimeout time.Duration) tim
 		return feosdSuspendBudget(memoryMiB) + pauseMargin
 	case OpHibernate:
 		return feosdSuspendBudget(memoryMiB) + pauseMargin + hibernateTimeout + 16*time.Second*g
+	case OpStop:
+		return feosdSuspendBudget(memoryMiB) + pauseMargin + stopSteps
 	}
 	return PreparationBudget
+}
+
+// opDeadlineOf is the deadline of an op of kind for row: the timings',
+// and for a repair and a stop, whose StopPod lets a running pod's
+// containers exit after SIGTERM, the row's stop grace more (feosd's own
+// 10 s is within the preparation budget and stopSteps).
+func (e *Engine) opDeadlineOf(kind OpKind, row store.Sandbox) time.Duration {
+	d := e.t.opDeadline(kind, row.MemoryMiB)
+	if kind == OpRepair || kind == OpStop {
+		d += row.StopGrace()
+	}
+	return d
 }
 
 // Engine is the sandbox engine of one instance.

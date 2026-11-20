@@ -43,7 +43,7 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0030](0030-cdns.md) | CDNs in front of the ingress, declared on a tenant's domain | Proposed |
 | [0031](0031-people-in-ferun.md) | People in FeRun: tenants with members, grants, and the tenants' console | Accepted |
 | [0032](0032-the-deployment-builder.md) | The deployment builder: one draft, forms and JSON, planned on every change | Accepted |
-| [0033](0033-credentials-of-a-tenant.md) | Credentials of a tenant: a binding stated once, versioned, used by name | Accepted |
+| [0033](0033-credentials-of-an-environment.md) | Credentials of an environment: a binding stated once, versioned, used by name | Accepted |
 | [0034](0034-reachability-from-declarations.md) | Reachability from declarations | Merged into [ADR 0012](0012-reachability-from-declarations.md) |
 | [0035](0035-everything-runs-in-an-environment.md) | Everything runs in an environment: sandboxes and tenants' jobs belong to one | Accepted |
 | [0036](0036-a-workloads-identity.md) | A workload's identity: one ID per service, job, addon and sandbox | Merged into [ADR 0014](0014-identity-and-credentials.md) |

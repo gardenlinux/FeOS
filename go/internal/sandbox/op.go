@@ -31,6 +31,12 @@ const (
 	OpPause     OpKind = "pause"
 	OpHibernate OpKind = "hibernate"
 	OpRepair    OpKind = "repair"
+	// OpStop ends a running pod for good, by StopPod: its containers get
+	// SIGTERM and the pod's stop grace before its microVM ends. The row
+	// stays running, booked and in its groups while the containers drain,
+	// and is stopped once the pod has ended (an environment's instance
+	// that goes, Engine.StopPod).
+	OpStop OpKind = "stop"
 )
 
 // OpTrigger says who asked for an op: it selects begin step 3's rechecks
@@ -48,6 +54,9 @@ const (
 	// TriggerRestart is Restart's: a repair of a running row whose
 	// container exited, with no recheck.
 	TriggerRestart OpTrigger = "restart"
+	// TriggerStop is StopPod's: the stop of an environment's instance
+	// that goes.
+	TriggerStop OpTrigger = "stop"
 )
 
 // waits reports whether ops of the trigger wait in Before begin for a node
@@ -77,8 +86,12 @@ type OpIntent struct {
 	// runs (Restart's).
 	reason string
 
-	// verdicts is the placement's verdict per node, for the audit row.
+	// verdicts is the placement's verdict per node, for the audit row and
+	// the peers its claim compares with (peersCame).
 	verdicts []store.PlacementCandidate
+	// besidePeers: the claim takes its node whatever peers came there
+	// since the snapshot (the begin's second try of a candidate).
+	besidePeers bool
 	// takeover, when set, is the op id of a stale op the caller means to
 	// take over: the begin takes it over or fails with ErrPrecondition,
 	// and never begins an op of its own.
@@ -636,6 +649,11 @@ func (e *Engine) callOp(ctx context.Context, pc podv1.PodServiceClient, h *OpHan
 		}
 	case OpRepair:
 		res = e.callRepair(ctx, pc, h)
+	case OpStop:
+		// feosd runs the stop to its end once it has the pod's lock,
+		// whatever its caller does: a takeover's StopPod waits for it and
+		// answers once the pod has stopped.
+		_, res.err = pc.StopPod(ctx, &podv1.StopPodRequest{PodId: id})
 	}
 	return res
 }

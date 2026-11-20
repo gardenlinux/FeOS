@@ -28,6 +28,8 @@ type TraceIndex interface {
 	SpanTerms(ctx context.Context, pattern string, q quickwit.SpanQuery, field string, size int) ([]string, error)
 	NewestTraces(ctx context.Context, pattern string, q quickwit.SpanQuery, n int) ([]quickwit.TraceHit, error)
 	SpanHistogram(ctx context.Context, pattern string, q quickwit.SpanQuery, step time.Duration, durations bool) (quickwit.Histogram, error)
+	SpanGroups(ctx context.Context, pattern string, q quickwit.SpanQuery, fields []string, size int) ([]quickwit.SpanGroup, bool, error)
+	NewestSpans(ctx context.Context, pattern string, q quickwit.SpanQuery) ([]quickwit.SpanDoc, error)
 }
 
 var _ TraceIndex = (*quickwit.Client)(nil)
