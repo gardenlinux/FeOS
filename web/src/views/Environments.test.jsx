@@ -602,12 +602,18 @@ describe('EnvHead', () => {
     expect(head(STAGE, NONE)).toContain('disabled="" title="needs write on this environment"');
   });
 
-  it('shows Done while the builder is open, and the default host that answers 404 while a domain is served', () => {
+  it('is the new deployment while the builder is open: its title, under the environment, with Done; and the default host that answers 404 while a domain is served', () => {
     const st = { ...STAGE, hosts: ['kino.example.com'], hostLabel: 'stage--kino' };
     const domains = [{ id: 'd', name: 'kino.example.com', state: 'served', environment: st.id }];
-    const out = html(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing lastOk={0} changed={nav} navigate={nav} domains={domains} />);
+    const out = html(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing lastOk={5} changed={nav} navigate={nav} domains={domains} />);
+    expect(out).toContain('<h1>New deployment</h1>');
+    expect(out).toMatch(/<p class="pagehead-kind">Environment <a href="\/tenants\/fecode\/environments\/expensa-stage">/);
     expect(out).toContain('Done');
-    expect(out).not.toContain('New deployment');
+    expect(out).not.toContain('statepill');
+    expect(out).not.toContain('LIVE');
+    expect(out.split('New deployment').length - 1).toBe(1);
+    expect(html(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing={false} lastOk={0} changed={nav} navigate={nav} domains={domains} />))
+      .not.toContain('<h1>New deployment</h1>');
     expect(text(<EnvHead st={st} env={st.name} tenant={T} ec={ALL} editing={false} lastOk={0} changed={nav} navigate={nav} domains={domains} />))
       .toContain('default host stage--kino answers 404 while a domain is served');
   });

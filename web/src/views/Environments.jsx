@@ -414,8 +414,10 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
 // EnvHead is an environment's page head: its name, its state, the line
 // of what runs and where it is reached; Revert to the deployment that
 // serves while a later one failed or is under way, and New deployment
-// (the builder; Done while it is open). Its labels, ID and creation are
-// on Settings.
+// (the builder). While the builder is open, the page is the new
+// deployment: its title says so, under the environment's name, with
+// Done instead of New deployment and without the environment's state.
+// Its labels, ID and creation are on Settings.
 export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed, navigate }) {
   const [op, run, clear] = useOp();
   const state = statusState(st);
@@ -435,14 +437,17 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
   const hosts = (st && st.hosts) || [];
   return (
     <header className="pagehead envhead">
+      {editing && (
+        <p className="pagehead-kind">Environment{' '}
+          <a href={envPath(tenant, env)} onClick={go(envPath(tenant, env))}><EnvName name={st ? st.name : env} className="" /></a></p>)}
       <div className="pagehead-title">
-        <h1><EnvName name={st ? st.name : env} className="" /></h1>
-        {st && (
+        <h1>{editing ? 'New deployment' : <EnvName name={st ? st.name : env} className="" />}</h1>
+        {st && !editing && (
           <span className={'statepill ' + tone}>
             <ToneDot tone={tone} title={state} />
             {incidents > 0 ? `${incidents} open incident${incidents === 1 ? '' : 's'}` : st.deleting ? 'deleting' : r ? r.state : 'no deployment'}
           </span>)}
-        {lastOk > 0 && <LiveBadge lastOk={lastOk} />}
+        {lastOk > 0 && !editing && <LiveBadge lastOk={lastOk} />}
         <span className="pagehead-actions">
           {offer > 0 && (
             <ConfirmButton label={`Revert to ${offer}`} confirmLabel={`Revert to ${offer}: a new deployment`} icon="undo"

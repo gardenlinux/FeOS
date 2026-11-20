@@ -2620,7 +2620,8 @@ see and write to change. The platform's pages add the ingresses, every person
 `ingress`.
 
 The Edit action (the route's tab `builder`, `…/builder/<kind>/<name>`
-for one object's form, which an object page's Edit opens) and
+for one object's form, which an object page's Edit opens; its page is
+titled New deployment, under the environment's name) and
 `/tenants/<t>/new-environment` are the deployment builder (ADR 0032), the
 main part that writes: a draft, a spec and its base, from the latest
 deployment, empty or an imported file, kept in the browser's local
