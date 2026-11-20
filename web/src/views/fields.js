@@ -4,11 +4,11 @@
 // The builder's forms and list (ADR 0032, "The builder edits the draft in
 // forms"): what the list of objects shows (groups, one-line summaries,
 // the draft's change against its base), and the forms' typed fields to
-// the spec's values and back: a variable's value (Text, Secret, Addon
-// output, Service address), a health check (a readiness), an idle, a
-// binding of a credential of the environment. Pure.
+// the spec's values and back: a variable's value (Text, Secret value,
+// URL or host of an HTTP secret, Addon output, Service address), a health
+// check (a readiness), an idle. Pure.
 
-import { getObject, imageBaseName, isObject, objectsOf, setObject, uniqueName } from './draft.js';
+import { imageBaseName, isObject, objectsOf } from './draft.js';
 import { envValueKind, secretNames } from './refs.js';
 import { changesSince } from './rebase.js';
 import { unitKey } from './findings.js';
@@ -21,7 +21,8 @@ import { imageView } from './pins.js';
 // '' for none or a kind the spec lacks. itemOfUnit is the way back.
 export function unitOfItem(item) {
   const s = String(item || '');
-  // new/<kind>: the form for a new one (secrets and bindings have one).
+  // new/<kind>: the form for a new one (secrets have one; a binding's
+  // says that bindings give way to HTTP secrets, ADR 0055).
   if (s.startsWith('new/')) {
     const g = GROUPS.find((x) => x.kind === s.slice(4));
     return g ? `${g.key}/` : '';
@@ -96,13 +97,15 @@ export function shortImage(o) {
 
 // summaryOf is a row's line under its name: a service's image tag, a
 // job's and when it runs, an addon's type, version and plan, a route's
-// path → service, a binding's credential or upstream, a secret's pin.
+// path → service, a binding's HTTP secret or upstream, a secret's pin
+// (an HTTP secret's with its kind first).
 export function summaryOf(key, o, pin) {
   if (key === 'secrets') {
     if (!pin) return '';
-    if (pin.missing) return 'no value yet';
+    const kind = pin.type === 'http' ? 'HTTP · ' : '';
+    if (pin.missing) return `${kind}${pin.type === 'http' ? 'not in the environment' : 'no value yet'}`;
     const p = pin.pinned ? `v${pin.pinned}` : 'latest';
-    return pin.newer ? `${p} · v${pin.latest} newer` : pin.latest && pin.pinned ? `${p} of ${pin.latest}` : p;
+    return kind + (pin.newer ? `${p} · v${pin.latest} newer` : pin.latest && pin.pinned ? `${p} of ${pin.latest}` : p);
   }
   if (!isObject(o)) return '';
   switch (key) {
@@ -122,37 +125,47 @@ function replicasWord(n) {
   return `${n} replica${n === 1 ? '' : 's'}`;
 }
 
-// bindingSummary is a binding's line: the environment's credential it
-// names (and the version it pins), or its upstream's host.
+// bindingSummary is a binding's line: the HTTP secret it names (an
+// environment's credential before ADR 0055, credentialRef) and the
+// version it pins, or its upstream's host.
 export function bindingSummary(b) {
   if (!isObject(b)) return '';
   if (isObject(b.credentialRef)) {
     const c = b.credentialRef;
-    return `credential ${c.name || '?'}${c.version ? ` · v${c.version}` : ''}`;
+    return `HTTP secret ${c.name || '?'}${c.version ? ` · v${c.version}` : ''}`;
   }
   return String(b.upstream || 'no upstream').replace(/^https?:\/\//, '');
 }
 
 // ----------------------------------------------------------- variables --
 
-// VALUE_TYPES are the typed choices of a variable's value.
+// VALUE_TYPES are the typed choices of a variable's value: an HTTP
+// secret's URL or host is {secret, key: url | host} (ADR 0055), its key
+// stays at the node.
 export const VALUE_TYPES = [
   { key: 'text', label: 'Text' },
-  { key: 'secret', label: 'Secret' },
+  { key: 'secret', label: 'Secret value' },
+  { key: 'httpUrl', label: 'URL of an HTTP secret' },
+  { key: 'httpHost', label: 'Host of an HTTP secret' },
   { key: 'addon', label: 'Addon output' },
   { key: 'service', label: 'Service address' },
 ];
+
+// HTTP_KEYS are the value types of an HTTP secret's keys.
+const HTTP_KEYS = { httpUrl: 'url', httpHost: 'host' };
 
 // SERVICE_KEYS are what a service address gives: its URL, host or port.
 export { SERVICE_KEYS } from './refs.js';
 
 // valueType is the choice an env value is: a string or {value} is text;
-// {secret}; {addon, key, …fields}; {service, port, key}; else other
-// (kept as it is, edited in the JSON).
+// {secret}; {secret, key: url} httpUrl and {secret, key: host} httpHost;
+// {addon, key, …fields}; {service, port, key}; else other (kept as it
+// is, edited in the JSON).
 export function valueType(v) {
   switch (envValueKind(v)) {
     case 'string': case 'value': return 'text';
     case 'secret': return 'secret';
+    case 'http': return v.key === 'url' ? 'httpUrl' : v.key === 'host' ? 'httpHost' : 'other';
     case 'addon': return 'addon';
     case 'service': return 'service';
     default: return 'other';
@@ -171,12 +184,18 @@ export function withText(v, s) {
 
 // retypeValue is v as another choice, started with its first target:
 // targets as refTargets answers them ({addons: [{name, keys}], services:
-// [{name, ports}], secrets: [name]}). Text keeps the text it had.
-export function retypeValue(v, type, targets = { addons: [], services: [], secrets: [] }) {
+// [{name, ports}], secrets: [name], http: [{name}]}). Text keeps the text
+// it had; an HTTP secret's URL and host keep their secret between them.
+export function retypeValue(v, type, targets = { addons: [], services: [], secrets: [], http: [] }) {
   if (type === valueType(v)) return v;
   switch (type) {
     case 'text': return typeof v === 'string' ? v : '';
     case 'secret': return { secret: targets.secrets[0] || '' };
+    case 'httpUrl': case 'httpHost': {
+      const keep = envValueKind(v) === 'http' ? v.secret : '';
+      const first = (targets.http || [])[0];
+      return { secret: keep || (first ? first.name : ''), key: HTTP_KEYS[type] };
+    }
     case 'addon': {
       const a = targets.addons[0];
       const out = { addon: a ? a.name : '' };
@@ -315,42 +334,3 @@ export function idleValue(mode, minutes) {
 export function routed(spec, name) {
   return objectsOf(spec, 'routes').some(([, r]) => isObject(r) && r.service === name);
 }
-
-// ------------------------------------------------------------ bindings --
-
-// credentialBinding adds a binding of the environment's credential cred
-// (ADR 0033), named after it, and ticks it on key/name when given:
-// {spec, name}. A binding of that credential the draft has is reused.
-export function credentialBinding(spec, cred, key = '', name = '') {
-  const have = objectsOf(spec, 'bindings').find(([, b]) => isObject(b) && isObject(b.credentialRef) && b.credentialRef.name === cred);
-  let out = spec;
-  let bn = have ? have[0] : '';
-  if (!bn) {
-    bn = uniqueName(spec, 'bindings', cred);
-    out = setObject(out, 'bindings', bn, { credentialRef: { name: cred } });
-  }
-  if (key && name) out = toggleBinding(out, key, name, bn, true);
-  return { spec: out, name: bn };
-}
-
-// toggleBinding is spec with binding bn on or off key/name's list; an
-// empty list goes.
-export function toggleBinding(spec, key, name, bn, on) {
-  const o = getObject(spec, key, name);
-  if (!isObject(o)) return spec;
-  const list = Array.isArray(o.bindings) ? o.bindings : [];
-  if (on === list.includes(bn)) return spec;
-  const next = on ? [...list, bn] : list.filter((b) => b !== bn);
-  const out = { ...o, bindings: next };
-  if (next.length === 0) delete out.bindings;
-  return setObject(spec, key, name, out);
-}
-
-// CREDENTIAL_FIELDS are a literal binding credential's value fields by
-// kind (ADR 0028): each text or a secret, tokenUrl text only.
-export const CREDENTIAL_FIELDS = {
-  headers: [],
-  basic: ['user', 'password'],
-  oauth2: ['tokenUrl', 'clientId', 'clientSecret', 'scope', 'audience'],
-  clientCertificate: ['certPem', 'keyPem'],
-};

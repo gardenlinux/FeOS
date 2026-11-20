@@ -243,7 +243,7 @@ export function jobRequest(form) {
 
   const user = f.username.trim();
   if (user || f.password) {
-    if (!user || !f.password) errors.push('the image\'s credentials need a username and a password');
+    if (!user || !f.password) errors.push('the registry login needs a username and a password');
     else body.imageCredentials = { username: user, password: f.password };
   }
   return { body, errors };

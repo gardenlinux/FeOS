@@ -52,10 +52,10 @@ export function kindIcon(kind) {
 // ReachFlow is the picture of a pod: who reaches it on the left, the pod
 // in the middle (children), what it reaches on the right, each row a peer
 // with an arrow and its ports. ins and outs are reachModel's rows, with
-// withKeys's marks (access.js) where a key is handed over and its
-// bindings' upstreams on the right; link(peer, pill) may wrap a pill in
-// a link. The right side says, when its egress is none, that nothing
-// (else: a binding's upstream is the node's connection) is reached
+// withKeys's marks (access.js) where a key is handed over and its HTTP
+// secrets' and bindings' upstreams on the right; link(peer, pill) may
+// wrap a pill in a link. The right side says, when its egress is none,
+// that nothing (else: an upstream is the node's connection) is reached
 // outside.
 export function ReachFlow({ ins, outs, children, link, heads = true, egress, inWords = 'Nothing gets in' }) {
   const none = egress !== undefined && egressMode(egress) !== 'internet' && !egressParts(egress).domains.length
@@ -74,7 +74,7 @@ export function ReachFlow({ ins, outs, children, link, heads = true, egress, inW
         {outs.map((r) => <FlowRow key={r.key} row={r} dir="out" link={link} />)}
         {outs.length === 0 && !none && <span className="sgf-closed"><Icon name="lock" size={13} /> Reaches nothing</span>}
         {none && (
-          <span className="sgf-closed" title={bound ? 'Its egress is none. A binding\'s upstream is reached by the node, whatever the egress.' : undefined}>
+          <span className="sgf-closed" title={bound ? 'Its egress is none. An HTTP secret\'s upstream is reached by the node, whatever the egress.' : undefined}>
             <Icon name="lock" size={13} /> {bound ? 'Nothing else outside the environment' : 'Nothing outside the environment'}</span>)}
       </div>
     </div>
@@ -100,15 +100,18 @@ export function FlowLegend({ mid }) {
 
 const count = (n) => Number(n || 0).toLocaleString('en-US');
 
-// upstreamTitle says a binding's row in full: where it goes, where its
-// key is, how the pod reaches it, and its last 24 hours when the sink
-// counted them.
+// upstreamTitle says an API's row in full (an HTTP secret's, a
+// binding's of the spec): where it goes, where its key is, how the pod
+// reaches it and the version it pins, and its last 24 hours when the
+// sink counted them.
 export function upstreamTitle(row) {
   const b = row.binding || {};
   const c = b.credential;
+  const what = b.source === 'http' ? `HTTP secret ${b.name}` : `Binding ${b.name}`;
+  const pinned = b.source === 'http' && b.pinned ? `, version ${b.pinned}` : '';
   const parts = [
-    `Binding ${b.name} to ${b.upstream || 'its upstream'}: ${row.what}. ${MARK_TITLE.offloaded}`,
-    `Reached as ${b.reachedAs}${c ? `, with the environment's credential ${c.name}${c.version ? ` (version ${c.version})` : ''}` : ''}.`,
+    `${what} to ${b.upstream || 'its upstream'}: ${row.what}. ${MARK_TITLE.offloaded}`,
+    `Reached as ${b.reachedAs}${pinned}${c ? `, with HTTP secret ${c.name}${c.version ? ` (version ${c.version})` : ''}` : ''}.`,
   ];
   const u = row.usage;
   if (u) {

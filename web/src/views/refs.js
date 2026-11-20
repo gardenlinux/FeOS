@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The references of a spec (ADR 0032): who names whom. A variable names
-// an addon's output, another service's port or a secret; a registry login
-// names a secret; a service or job names its bindings, a binding's
-// credential its secrets; a route names a service's port. The forms make
+// an addon's output, another service's port, a secret's value or an HTTP
+// secret's URL or host (ADR 0055); a registry login names a secret; a
+// service or job names its bindings and a binding's credential its
+// secrets (both from before ADR 0055); a route names a service's port. The forms make
 // them as typed fields and show them as lines ("used by"); a remove
 // offers to take them along. A service's or a job's uses names a
 // service's port or an addon without a variable (ADR 0034). Pure.
@@ -12,23 +13,27 @@
 import { isObject, mapEnvValues, mapUses, objectsOf, removeObject, setObject } from './draft.js';
 
 // envValueKind names an env value's form: string (a plain string), value
-// ({value}), secret, addon, service, or invalid.
+// ({value}), secret ({secret}: its value), http ({secret, key}: an HTTP
+// secret's url or host, ADR 0055), addon, service, or invalid.
 export function envValueKind(v) {
   if (typeof v === 'string') return 'string';
   if (!isObject(v)) return 'invalid';
   const keys = Object.keys(v);
   if (keys.length === 1 && typeof v.value === 'string') return 'value';
   if (keys.length === 1 && typeof v.secret === 'string') return 'secret';
+  if (keys.length === 2 && typeof v.secret === 'string' && typeof v.key === 'string') return 'http';
   if ('addon' in v && !('service' in v)) return 'addon';
   if ('service' in v && !('addon' in v)) return 'service';
   return 'invalid';
 }
 
 // valueRef is the reference an env value makes, or null: {to: {key,
-// name}, port?, refKey?, fields?}.
+// name}, port?, refKey?, fields?, http?}. An HTTP secret's is a secret's
+// with its key and http set.
 function valueRef(v) {
   switch (envValueKind(v)) {
     case 'secret': return { to: { key: 'secrets', name: v.secret } };
+    case 'http': return { to: { key: 'secrets', name: v.secret }, refKey: v.key, http: true };
     case 'addon': {
       const fields = {};
       for (const [k, f] of Object.entries(v)) if (k !== 'addon' && k !== 'key') fields[k] = f;
@@ -40,8 +45,9 @@ function valueRef(v) {
 }
 
 // referencesOf lists every reference of spec: {from: {key, name}, field,
-// to: {key, name}, via, port?, refKey?, fields?, dashed?}. via says what
-// holds it: env, imageCredentials, bindings, credential, route or uses.
+// to: {key, name}, via, port?, refKey?, fields?, http?, dashed?}. via
+// says what holds it: env, imageCredentials, bindings, credential, route
+// or uses.
 export function referencesOf(spec) {
   const out = [];
   for (const key of ['services', 'jobs']) {
@@ -112,6 +118,7 @@ export function refLine(r) {
   const port = r.port !== undefined && r.port !== '' ? `:${r.port}` : '';
   switch (r.via) {
     case 'env': {
+      if (r.to.key === 'secrets' && r.http) return `${r.variable} → ${r.refKey} of HTTP secret ${r.to.name}`;
       if (r.to.key === 'secrets') return `${r.variable} → secret ${r.to.name}`;
       const extra = Object.entries(r.fields || {}).map(([k, v]) => `${k} ${v}`).join(', ');
       const target = r.to.key === 'services' ? `${r.to.name}${port}` : r.to.name;
@@ -176,11 +183,23 @@ export function removeWithRefs(spec, key, name) {
 // SERVICE_KEYS are the keys of a reference to a service.
 export const SERVICE_KEYS = ['url', 'host', 'port'];
 
+// httpSecretNames are the secrets a draft holds for HTTP secrets (ADR
+// 0055): those a variable references with a key, and those it pins with
+// their type http (a stored spec's normalised pin), sorted.
+export function httpSecretNames(spec) {
+  const s = new Set();
+  for (const r of referencesOf(spec)) if (r.to.key === 'secrets' && r.http) s.add(r.to.name);
+  for (const [n, p] of objectsOf(spec, 'secrets')) if (isObject(p) && p.type === 'http') s.add(n);
+  return [...s].sort();
+}
+
 // refTargets are what a variable may reference, for the forms' typed
 // values: the addons with their output keys and fields
-// (from the catalog), the image services with their ports (not self), and
-// the secrets (the draft's and the environment's).
-export function refTargets(spec, catalog, { self, knownSecrets = [] } = {}) {
+// (from the catalog), the image services with their ports (not self), the
+// value secrets (the draft's and the environment's, knownSecrets) and the
+// HTTP secrets (the environment's, httpSecrets as GET …/secrets answers
+// them, and those the draft references: [{name, upstream, mode}]).
+export function refTargets(spec, catalog, { self, knownSecrets = [], httpSecrets = [] } = {}) {
   const addons = objectsOf(spec, 'addons').map(([name, a]) => {
     const bp = catalog && isObject(a) ? catalog.byType.get(a.type) : null;
     return { name, type: isObject(a) ? a.type : '', keys: bp ? bp.outputs : [], fields: bp ? bp.fields : [] };
@@ -188,18 +207,21 @@ export function refTargets(spec, catalog, { self, knownSecrets = [] } = {}) {
   const services = objectsOf(spec, 'services')
     .filter(([n, s]) => n !== self && isObject(s) && s.runtime !== 'attached')
     .map(([name, s]) => ({ name, ports: (Array.isArray(s.ports) ? s.ports : []).map((p) => p && (p.name || p.port)).filter(Boolean) }));
-  const secrets = [...new Set([...secretNames(spec), ...knownSecrets])].sort();
-  return { addons, services, secrets };
+  const http = new Map((httpSecrets || []).filter((h) => isObject(h) && h.name)
+    .map((h) => [h.name, { name: h.name, upstream: h.upstream || '', mode: h.mode || 'name' }]));
+  for (const n of httpSecretNames(spec)) if (!http.has(n)) http.set(n, { name: n, upstream: '', mode: '' });
+  const secrets = [...new Set([...secretNames(spec), ...knownSecrets])].filter((n) => !http.has(n)).sort();
+  return { addons, services, secrets, http: [...http.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 // suggestVarName proposes a variable's name for a reference: the
 // catalog's suggestion for an addon's key when it has one, DATABASE_URL
 // for a postgres url, else <TARGET>_<KEY> in upper case; a secret's name
-// in upper case.
+// in upper case, an HTTP secret's with its key (S4_URL).
 export function suggestVarName(target, { type = '', key = '', suggestion = '' } = {}) {
   if (suggestion) return suggestion;
   const up = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  if (target.key === 'secrets') return up(target.name);
+  if (target.key === 'secrets') return [up(target.name), up(key)].filter(Boolean).join('_');
   if (target.key === 'addons' && type === 'postgres' && key === 'url') return 'DATABASE_URL';
   return [up(target.name), up(key)].filter(Boolean).join('_');
 }

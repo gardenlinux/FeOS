@@ -30,14 +30,14 @@
 //                                       traces[/:trace][?search], traffic,
 //                                       reachability,
 //                                       secrets[/:kind/:name] (where each
-//                                       key lives: its secrets,
-//                                       credentials, bindings and addons;
-//                                       kind/name the row it points at),
-//                                       credentials/new | /:name[/edit]
-//                                       (its credentials, ADR 0033: a new
-//                                       one's form, one's page, its new
-//                                       version's form; the list is
-//                                       secrets), settings, access,
+//                                       key lives, ADR 0055: its secrets,
+//                                       the bindings of its spec and its
+//                                       addons; kind/name the row it
+//                                       points at), secrets/http/new |
+//                                       /:name[/edit] (an HTTP secret: a
+//                                       new one's form, one's page, its
+//                                       new version's form; credentials/…
+//                                       of old leads there), settings, access,
 //                                       objects/:kind/:name[/:otab] (an
 //                                       object's page; otab: overview,
 //                                       logs[/:replica][?search],
@@ -45,7 +45,7 @@
 //                                       sandboxes[/new | /:id[/:otab]] (its
 //                                       sandboxes, a new one, one's page;
 //                                       otab: overview, connect,
-//                                       credentials, network, activity,
+//                                       secrets, network, activity,
 //                                       settings), jobs[/:id] (the jobs
 //                                       made by a call, in Activity)
 //   /nodes[/:node[/:tab]]               the nodes; tab: overview, certs, activity
@@ -69,7 +69,7 @@ function decode(s) {
 // sidebar and the overview.
 export const ENV_TABS = [
   'overview', 'builder', 'activity', 'deployments', 'incidents', 'jobs', 'logs', 'traces', 'traffic', 'reachability', 'settings',
-  'secrets', 'credentials', 'access', 'objects', 'sandboxes',
+  'secrets', 'access', 'objects', 'sandboxes',
 ];
 
 // ENV_LENSES are the views of an environment, its tab bar: the sidebar
@@ -77,8 +77,8 @@ export const ENV_TABS = [
 // how to look at it. Activity holds the deployments and the incidents,
 // Settings the general settings and the domains and access (LENS_PAGES).
 // Secrets is where each key lives. A trace has no view of its own: it
-// opens from a log line, in Logs; a credential's pages are Secrets'
-// (SUB_PAGES, lensOf).
+// opens from a log line, in Logs (SUB_PAGES, lensOf); an HTTP secret's
+// pages are Secrets'.
 export const ENV_LENSES = ['overview', 'activity', 'logs', 'traffic', 'reachability', 'secrets', 'settings'];
 
 // LENS_PAGES are the pages of a view that has more than one, in its own
@@ -89,8 +89,8 @@ export const LENS_PAGES = {
 };
 
 // SUB_PAGES are the tabs that open from a view without a tab of their
-// own: a trace from Logs, a credential's pages from Secrets.
-const SUB_PAGES = { traces: 'logs', credentials: 'secrets' };
+// own: a trace from Logs.
+const SUB_PAGES = { traces: 'logs' };
 
 // lensOf is the view a tab of an environment belongs to; an object's
 // page, a sandbox's and the builder belong to none ('').
@@ -132,7 +132,6 @@ export const ENV_TAB_LABELS = {
   traffic: 'Traffic',
   reachability: 'Reachability',
   secrets: 'Secrets',
-  credentials: 'Credentials',
   access: 'Domains & access',
   settings: 'Settings',
   objects: 'Objects',
@@ -153,16 +152,18 @@ export const OBJECT_TAB_LABELS = { overview: 'Overview', logs: 'Logs', traffic: 
 const SEARCH_TABS = new Set(['logs']);
 
 // INVENTORY_KINDS are the kinds of the Secrets view's rows, which its
-// address may point at (secrets/:kind/:name).
-const INVENTORY_KINDS = ['secret', 'credential', 'binding', 'addon'];
+// address may point at (secrets/:kind/:name): a value secret, a binding
+// of the spec, an addon. An HTTP secret's address is its page
+// (secrets/http/:name).
+const INVENTORY_KINDS = ['secret', 'binding', 'addon'];
 
 // envRoute reads the segments after /tenants/:t/environments: the
 // environment, its tab (an unknown one is the overview), and the tab's
 // item: a deployment's number, an incident's ID, a job's ID, a trace's
 // ID, a sandbox's ID ("new": the create form, with otab its page's
-// view), a credential's name ("new": the form of a new one, with otab
-// "edit" the form of its new version), the "<kind>/<name>" of the
-// Secrets view's row it points at, or the
+// view), the "<kind>/<name>" of the Secrets view's row it points at, an
+// HTTP secret's "http/<name>" ("http/new": the form of a new one, with
+// otab "edit" the form of its new version), or the
 // "<kind>/<name>" of the object whose logs show, with the replica (null
 // unless given: every replica); and the logs' search, the address's
 // query (logs.js); on the objects tab the
@@ -179,10 +180,9 @@ function envRoute(tenant, seg, search) {
     const otab = item && item !== 'new' ? seg[3] || 'overview' : 'overview';
     return { view: 'environments', tenant, env, tab, item, otab, replica: null, search: '' };
   }
-  if (tab === 'credentials') {
-    item = seg[2] || '';
-    const otab = item && item !== 'new' && seg[3] === 'edit' ? 'edit' : '';
-    return { view: 'environments', tenant, env, tab, item, otab, replica: null, search: '' };
+  if (tab === 'secrets' && seg[2] === 'http' && seg[3]) {
+    const otab = seg[3] !== 'new' && seg[4] === 'edit' ? 'edit' : '';
+    return { view: 'environments', tenant, env, tab, item: `http/${seg[3]}`, otab, replica: null, search: '' };
   }
   if (tab === 'builder' && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
   if (tab === 'secrets' && INVENTORY_KINDS.includes(seg[2]) && seg[3]) item = `${seg[2]}/${seg[3]}`;
@@ -255,26 +255,27 @@ export function jobPath(tenant, env, id = '') {
   return envPath(tenant, env, 'jobs', id);
 }
 
-// credentialPath is an environment's credentials (ADR 0033), in its
-// Secrets view, one of them (name; "new" is the form of a new one), or
-// the form of its new version (edit). A credential is of one
-// environment, whose name env is.
-export function credentialPath(tenant, env, name = '', edit = false) {
+// httpSecretPath is an HTTP secret's page (ADR 0055) in its
+// environment's Secrets view (name; "new" is the form of a new one), the
+// form of its new version (edit), or without a name the Secrets view. An
+// HTTP secret is of one environment, whose name env is.
+export function httpSecretPath(tenant, env, name = '', edit = false) {
   if (!name) return secretsPath(tenant, env);
-  const p = envPath(tenant, env, 'credentials', name);
+  const p = envPath(tenant, env, 'secrets', `http/${name}`);
   return name !== 'new' && edit ? `${p}/edit` : p;
 }
 
 // secretsPath is an environment's Secrets view, where each key lives,
-// pointing at the row of kind (secret, credential, binding, addon) and
-// name when both are given.
+// pointing at the row of kind (secret, binding, addon) and name when both
+// are given; an HTTP secret's (kind http) is its page.
 export function secretsPath(tenant, env, kind = '', name = '') {
+  if (kind === 'http' && name) return httpSecretPath(tenant, env, name);
   return envPath(tenant, env, 'secrets', kind && name ? `${kind}/${name}` : '');
 }
 
-// newCredentialPath is the form of a new credential in env.
-export function newCredentialPath(tenant, env) {
-  return credentialPath(tenant, env, 'new');
+// newHttpSecretPath is the form of a new HTTP secret in env.
+export function newHttpSecretPath(tenant, env) {
+  return httpSecretPath(tenant, env, 'new');
 }
 
 // newSandboxPath is the create form of a sandbox in env.
@@ -289,18 +290,24 @@ export function newSandboxPath(tenant, env) {
 const EARLIER_TABS = { releases: 'deployments', edit: 'builder', groups: 'reachability' };
 
 // canonicalPath is pathname with an environment tab's earlier name
-// replaced by its name, the credentials' list of Settings of old by the
-// Secrets view that holds them, and an object's logs under the
-// environment's Logs (logs/:kind/:name[/:replica]) moved to its page's,
-// so that an old link redirects; else pathname.
+// replaced by its name, the credentials of old (ADR 0033: their list, a
+// new one's form, one's page and its new version's form, and a
+// credential's row of the Secrets view) by their HTTP secrets' (ADR
+// 0055), and an object's logs under the environment's Logs
+// (logs/:kind/:name[/:replica]) moved to its page's, so that an old link
+// redirects; else pathname.
 export function canonicalPath(pathname) {
   const seg = String(pathname || '/').split('/');
   if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && EARLIER_TABS[seg[5]]) {
     seg[5] = EARLIER_TABS[seg[5]];
     return seg.join('/');
   }
-  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'credentials' && !seg[6]) {
-    return [...seg.slice(0, 5), 'secrets'].join('/');
+  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'credentials') {
+    if (!seg[6]) return [...seg.slice(0, 5), 'secrets'].join('/');
+    return [...seg.slice(0, 5), 'secrets', 'http', seg[6], ...(seg[6] !== 'new' && seg[7] === 'edit' ? ['edit'] : [])].join('/');
+  }
+  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'secrets' && seg[6] === 'credential' && seg[7]) {
+    return [...seg.slice(0, 5), 'secrets', 'http', seg[7]].join('/');
   }
   if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'logs' && seg[6] && seg[7]) {
     const rest = /^\d+$/.test(seg[8] || '') ? `/${seg[8]}` : '';
@@ -400,8 +407,8 @@ export function chosenEnv(route, envs, last = '') {
 export function switchEnvPath(route, tenant, env) {
   const inEnv = route.view === 'environments' && route.env && route.tenant === tenant;
   if (inEnv && route.tab === 'objects') return pickEnvPath(route, tenant, env);
-  // A trace and a credential are of one environment only: the other
-  // one's logs, its secrets.
+  // A trace and an HTTP secret are of one environment only: the other
+  // one's logs, its secrets (envPath drops the item).
   const tab = !inEnv ? 'overview' : SUB_PAGES[route.tab] || route.tab;
   return envPath(tenant, env, tab);
 }

@@ -8,31 +8,33 @@ import { envValueKind, refLine, refTargets, referencesTo, refsFrom, suggestVarNa
 import { atField, notAt } from './findings.js';
 import { checkNewer, imageView, pinSecret, setImage } from './pins.js';
 import { optionProblems, planText } from './catalog.js';
-import { credentialPath, newCredentialPath } from '../routes.js';
+import { httpSecretPath, newHttpSecretPath } from '../routes.js';
+import { refValue } from './httpSecret.js';
 import { fromProblems, fromWords, usesTargets, useWords } from './reach.js';
 import { EgressEditor, ListText, Segmented } from './Reach.jsx';
 import '../styles/reach.css';
 import {
-  CREDENTIAL_FIELDS, HEALTH_KINDS, SERVICE_KEYS, VALUE_TYPES, addonValue, bindingSummary, credentialBinding, freeName,
-  healthOf, idleOf, idleValue, portValue, readinessOf, renameVar, retypeHealth, retypeValue, routed, serviceValue,
-  textOf, toggleBinding, valueType, withText,
+  HEALTH_KINDS, SERVICE_KEYS, VALUE_TYPES, addonValue, bindingSummary, freeName, healthOf, idleOf, idleValue, portValue,
+  readinessOf, renameVar, retypeHealth, retypeValue, routed, serviceValue, textOf, valueType, withText,
 } from './fields.js';
 
 // The builder's forms (ADR 0032, "The builder edits the draft in forms"):
 // one per kind, in sections, with the API's fields and its defaults as
 // placeholders. A form gets its object and gives back the next one
-// (onChange); a change across objects (a binding added and ticked, a
-// secret's pin) goes through ctx.editSpec. Its own checks only make a
-// field enterable; the verdict is the plan's, whose findings show at the
-// fields their paths name.
+// (onChange); a change across objects (a secret's pin) goes through
+// ctx.editSpec. Its own checks only make a field enterable; the verdict
+// is the plan's, whose findings show at the fields their paths name.
 //
 // ctx is what every form reads: the spec, the catalog, the secrets the
-// environment has (knownSecrets) and their pins, the environment's
-// credentials (ADR 0033; a new environment has none yet), the object's
-// findings, setSecret(name, value) (a promise of the version it made),
-// editSpec(fn), whether the environment is new, whether the role edits
-// attached services, the environment's sandboxes (an attached service's
-// choice), and the tenant and the environment (for links).
+// environment has (knownSecrets, both kinds) and their pins, the
+// environment's HTTP secrets (httpSecrets, ADR 0055, as GET …/secrets
+// answers them; a new environment has none yet) and why they cannot be
+// read (httpSecretsErr), the object's findings, setSecret(name, value)
+// (a promise of the version it made), editSpec(fn), whether the
+// environment is new, whether the role edits attached services, the
+// environment's sandboxes (an attached service's choice), and the tenant
+// and the environment (for links). A binding stated in the spec (from
+// before ADR 0055) shows read-only: no form makes a new one.
 
 // ------------------------------------------------------------- widgets --
 
@@ -231,7 +233,7 @@ export function ServiceForm({ name, obj, ctx, onChange, onRename, onRemove }) {
         <HealthField o={o} onChange={onChange} findings={atField(f, 'readiness')} />
       </Section>
       <ReachSection self={self} o={o} ctx={ctx} onChange={onChange} findings={f} />
-      <BindingsSection self={self} o={o} ctx={ctx} findings={atField(f, 'bindings')} />
+      <BindingsSection o={o} ctx={ctx} findings={atField(f, 'bindings')} />
       <Section title="Rollout" fold={!o.rollout} findings={atField(f, 'rollout')}>
         <Field label="Timeout" hint="a rollout that takes longer fails; empty: 10m" findings={atField(f, 'rollout')}>
           <input className="mono short" placeholder="10m" value={(isObject(o.rollout) && o.rollout.timeout) || ''}
@@ -298,7 +300,7 @@ function AttachedForm({ name, o, ctx, onChange, onRemove }) {
         <EnvTable self={self} obj={o} ctx={ctx} onChange={onChange} findings={f} />
       </Section>
       <AttachedReach o={o} onChange={onChange} findings={[...atField(f, 'uses'), ...atField(f, 'egress')]} />
-      <BindingsSection self={self} o={o} ctx={ctx} findings={atField(f, 'bindings')} />
+      <BindingsSection o={o} ctx={ctx} findings={atField(f, 'bindings')} />
       <FormFoot onRemove={onRemove} what={`service ${name}`} />
     </div>
   );
@@ -526,10 +528,12 @@ function HealthField({ o, onChange, findings }) {
 // ------------------------------------------------------------ variables --
 
 // EnvTable edits the variables, a row each: NAME | value, the value a
-// typed choice (Text, Secret, Addon output, Service address).
+// typed choice (Text, Secret value, URL or host of an HTTP secret, Addon
+// output, Service address).
 function EnvTable({ self, obj, ctx, onChange, findings }) {
   const env = isObject(obj.env) ? obj.env : {};
-  const targets = refTargets(ctx.spec, ctx.catalog, { self: self.key === 'services' ? self.name : '', knownSecrets: ctx.knownSecrets });
+  const targets = refTargets(ctx.spec, ctx.catalog, { self: self.key === 'services' ? self.name : '', knownSecrets: ctx.knownSecrets,
+    httpSecrets: ctx.httpSecrets });
   const put = (next) => onChange(set(obj, 'env', Object.keys(next).length ? next : undefined));
   const rows = Object.entries(env);
   return (
@@ -596,6 +600,7 @@ export function ValueEditor({ name = '', v, targets, ctx, onChange }) {
     }
     if (k === 'service' && nv.service) return suggestVarName({ key: 'services', name: nv.service }, { key: nv.key || '' });
     if (k === 'secret' && nv.secret) return suggestVarName({ key: 'secrets', name: nv.secret });
+    if (k === 'http' && nv.secret) return suggestVarName({ key: 'secrets', name: nv.secret }, { key: nv.key });
     return '';
   };
   // A name still a placeholder, or the one the value before proposed,
@@ -610,6 +615,7 @@ export function ValueEditor({ name = '', v, targets, ctx, onChange }) {
       {type === 'text' && (
         <input className="mono grow" value={textOf(v)} placeholder="value" aria-label="value" onChange={(e) => onChange(withText(v, e.target.value))} />)}
       {type === 'secret' && <SecretValue name={name} v={v} targets={targets} ctx={ctx} onChange={change} />}
+      {(type === 'httpUrl' || type === 'httpHost') && <HttpSecretValue v={v} targets={targets} ctx={ctx} onChange={change} />}
       {type === 'addon' && <AddonValue v={v} targets={targets} onChange={change} />}
       {type === 'service' && <ServiceValue v={v} targets={targets} onChange={change} />}
       {type === 'other' && <span className="mono small muted grow" title="edit it in the JSON view">{JSON.stringify(v)}</span>}
@@ -643,6 +649,41 @@ function SecretValue({ name, v, targets, ctx, onChange }) {
           onDone={(s) => { setAdding(false); onChange({ secret: s }); }} onCancel={() => setAdding(false)} />)}
       {valueFor && !adding && (
         <SecretInline proposed={v.secret} ctx={ctx} onDone={() => setValueFor(false)} onCancel={() => setValueFor(false)} />)}
+    </>
+  );
+}
+
+// HttpSecretValue picks an HTTP secret of the environment for a
+// variable's {secret, key} (ADR 0055): the environment's HTTP secrets,
+// with what the variable gets (http://<name> or the API's own https URL;
+// the host alone for host), the version the draft pins against the
+// latest, and the way to a new one in the environment's Secrets (the
+// draft stays in this browser meanwhile).
+function HttpSecretValue({ v, targets, ctx, onChange }) {
+  const list = targets.http || [];
+  const h = list.find((x) => x.name === v.secret);
+  const known = (ctx.httpSecrets || []).find((x) => x && x.name === v.secret);
+  const pin = (ctx.pins || []).find((p) => p.name === v.secret);
+  const toNew = ctx.tenant && ctx.env && !ctx.isNew ? newHttpSecretPath(ctx.tenant, ctx.env) : '';
+  return (
+    <>
+      <Select value={v.secret} empty="(an HTTP secret)" title="the HTTP secret"
+        options={list.map((x) => ({ value: x.name, label: x.upstream ? `${x.name} · ${x.upstream.replace(/^https?:\/\//, '')}` : x.name }))}
+        onChange={(n) => onChange({ secret: n, key: v.key })} />
+      {v.secret && (
+        <span className="b-pin small">
+          {known
+            ? <span className="muted">gets <span className="mono">{refValue(known, v.key)}</span></span>
+            : <span className="bad">{ctx.isNew ? 'a new environment has no HTTP secrets yet' : 'not an HTTP secret of the environment'}</span>}
+          {pin && pin.newer && (
+            <> · <span className="warntext">v{pin.pinned} pinned, v{pin.latest} newer</span>{' '}
+              <button className="b-link acc" onClick={() => ctx.editSpec((s) => pinSecret(s, v.secret, pin.latest))}>use v{pin.latest}</button></>)}
+          {pin && !pin.newer && known && <span className="muted"> · {pin.pinned ? `v${pin.pinned}` : `latest (v${known.version})`}</span>}
+          {known && ctx.tenant && ctx.env && (
+            <> · <FormLink ctx={ctx} to={httpSecretPath(ctx.tenant, ctx.env, v.secret)}>its page</FormLink></>)}
+        </span>)}
+      {list.length === 0 && <span className="muted small">{noHttpSecrets(ctx)}</span>}
+      {toNew && !h && <FormLink ctx={ctx} to={toNew}>New HTTP secret</FormLink>}
     </>
   );
 }
@@ -729,7 +770,7 @@ function RegistryLogin({ o, ctx, onChange, findings }) {
   const [err, setErr] = useState('');
   const proposed = `registry-${registryHost(imageView(o).written)}`;
   const sname = secret || proposed;
-  const secrets = [...new Set([...(ctx.knownSecrets || []), ...objectsOf(ctx.spec, 'secrets').map(([n]) => n)])].sort();
+  const secrets = refTargets(ctx.spec, ctx.catalog, { knownSecrets: ctx.knownSecrets, httpSecrets: ctx.httpSecrets }).secrets;
   const current = c && envValueKind(c.password) === 'secret' ? c.password.secret : '';
   const literal = c && !current;
   const username = c && typeof c.username === 'string' ? c.username : c ? textOf(c.username) : '';
@@ -779,19 +820,13 @@ function RegistryLogin({ o, ctx, onChange, findings }) {
   );
 }
 
-// credentialsLink is the environment's credentials, or one of them,
-// for a form's link; '' for a new environment, which has none yet.
-function credentialsLink(ctx, name = '') {
-  return ctx.tenant && ctx.env && !ctx.isNew ? credentialPath(ctx.tenant, ctx.env, name) : '';
-}
-
-// noCredentials says why a form offers no credential of the environment
-// (ADR 0033): they cannot be read, the environment is new (they are made
+// noHttpSecrets says why a form offers no HTTP secret of the environment
+// (ADR 0055): they cannot be read, the environment is new (they are made
 // in it once it exists), or it has none yet.
-function noCredentials(ctx) {
-  if (ctx.credentialsErr) return `the credentials cannot be read: ${ctx.credentialsErr}`;
-  if (ctx.isNew) return 'a new environment has no credentials yet: make them in its Secrets once it exists';
-  return 'the environment has no credentials yet';
+function noHttpSecrets(ctx) {
+  if (ctx.httpSecretsErr) return `the HTTP secrets cannot be read: ${ctx.httpSecretsErr}`;
+  if (ctx.isNew) return 'a new environment has no HTTP secrets yet: make them in its Secrets once it exists';
+  return 'the environment has no HTTP secret yet';
 }
 
 // FormLink is a link within the UI from a form: the router on a plain
@@ -803,48 +838,30 @@ function FormLink({ ctx, to, children }) {
   );
 }
 
-// BindingsSection ticks the spec's bindings a service or job gets, and
-// adds one from a credential of the environment (ADR 0033), ticked.
-function BindingsSection({ self, o, ctx, findings }) {
+// GIVE_WAY says once why a binding of the spec takes no new entry (ADR
+// 0055), and what to do instead.
+const GIVE_WAY = 'Bindings in the spec give way to HTTP secrets: make an HTTP secret in the environment\'s Secrets and '
+  + 'reference it by a variable, URL of an HTTP secret.';
+
+// BindingsSection is the bindings of the spec a service or job names
+// (from before ADR 0055), read-only with what becomes of them; nothing
+// for one that names none. A variable "URL of an HTTP secret" takes
+// their place.
+function BindingsSection({ o, ctx, findings }) {
   const list = Array.isArray(o.bindings) ? o.bindings : [];
-  const all = objectsOf(ctx.spec, 'bindings');
-  const missing = list.filter((b) => !all.some(([n]) => n === b));
-  // The credentials it does not get yet.
-  const got = new Set(all.filter(([bn, b]) => list.includes(bn) && isObject(b) && isObject(b.credentialRef)).map(([, b]) => b.credentialRef.name));
-  const creds = (ctx.credentials || []).filter((c) => !got.has(c.name));
-  const [pick, setPick] = useState('');
-  const cred = creds.some((c) => c.name === pick) ? pick : (creds[0] && creds[0].name) || '';
-  const to = credentialsLink(ctx);
+  if (list.length === 0 && findings.length === 0) return null;
+  const all = new Map(objectsOf(ctx.spec, 'bindings'));
   return (
-    <Section title="Credentials & bindings" hint="APIs its code calls by a name; the platform adds the credential" findings={findings}
-      fold={list.length === 0 && all.length === 0}>
-      {all.length === 0 && missing.length === 0 && <p className="muted small">The draft has no bindings.</p>}
-      <div className="b-checks">
-        {all.map(([bn, b]) => (
-          <label key={bn} className="b-check">
-            <input type="checkbox" checked={list.includes(bn)}
-              onChange={(e) => ctx.editSpec((s) => toggleBinding(s, self.key, self.name, bn, e.target.checked))} />
-            <span className="mono">{bn}</span><span className="muted small">{bindingSummary(b)}</span>
-          </label>))}
-        {missing.map((bn) => (
-          <label key={bn} className="b-check bad">
-            <input type="checkbox" checked onChange={() => ctx.editSpec((s) => toggleBinding(s, self.key, self.name, bn, false))} />
-            <span className="mono">{bn}</span><span className="small">not in the draft</span>
-          </label>))}
-      </div>
+    <Section title="Bindings in the spec" hint="read-only: each becomes an HTTP secret" findings={findings}>
+      <ul className="b-uses">
+        {list.map((bn) => (
+          <li key={bn} className={all.has(bn) ? '' : 'bad'}>
+            <span className="mono">{bn}</span>{' '}
+            <span className="muted small">{all.has(bn) ? bindingSummary(all.get(bn)) : 'not in the draft'}</span>
+          </li>))}
+      </ul>
+      <p className="muted small">{GIVE_WAY}</p>
       <FindingList list={findings} />
-      <div className="b-row wrap b-addcred">
-        <span className="muted small">Add a binding from a credential of the environment</span>
-        {creds.length > 0 ? (
-          <>
-            <Select value={cred} options={creds.map((c) => ({ value: c.name, label: `${c.name} · ${String(c.upstream || '').replace(/^https?:\/\//, '')}` }))}
-              title="a credential of the environment" onChange={setPick} />
-            <button className="mini" disabled={!cred} onClick={() => ctx.editSpec((s) => credentialBinding(s, cred, self.key, self.name).spec)}>
-              <Icon name="plus" size={12} /> Add</button>
-          </>)
-          : <span className="muted small">({!ctx.credentialsErr && (ctx.credentials || []).length ? 'it gets every one of them' : noCredentials(ctx)})</span>}
-        {to && <FormLink ctx={ctx} to={to}>the environment&apos;s credentials</FormLink>}
-      </div>
     </Section>
   );
 }
@@ -890,7 +907,7 @@ export function JobForm({ name, obj, ctx, onChange, onRename, onRemove }) {
         <div className="b-grid3"><ResourcesFields o={o} onChange={onChange} findings={f} /></div>
       </Section>
       <ReachSection self={self} o={o} ctx={ctx} onChange={onChange} findings={f} />
-      <BindingsSection self={self} o={o} ctx={ctx} findings={atField(f, 'bindings')} />
+      <BindingsSection o={o} ctx={ctx} findings={atField(f, 'bindings')} />
       <FormFoot onRemove={onRemove} what={`job ${name}`} />
     </div>
   );
@@ -1071,50 +1088,33 @@ export function RouteForm({ name, obj, ctx, onChange, onRename, onRemove }) {
 
 // ------------------------------------------------------------- bindings --
 
-const BINDING_FIELDS = ['upstream', 'mode', 'caPem', 'pathPrefixes', 'forwardedHost', 'rateLimit', 'credential', 'credentialRef'];
-
-// BindingForm is a binding: a credential of the environment (ADR 0033),
-// or, folded as advanced, the binding stated here with ADR 0028's
-// fields, its secret fields the environment's secrets.
-export function BindingForm({ name, obj, ctx, onChange, onRename, onRemove }) {
+// BindingForm is a binding stated in the spec (ADR 0028, from before ADR
+// 0055), read-only: what it is, what becomes of it, who names it, and
+// its remove. Its findings show at its head.
+export function BindingForm({ name, obj, ctx, onRemove }) {
   const o = isObject(obj) ? obj : {};
   const f = ctx.findings;
   const tc = isObject(o.credentialRef) ? o.credentialRef : null;
-  const creds = ctx.credentials || [];
-  const cred = tc ? creds.find((c) => c.name === tc.name) : null;
   const users = referencesTo(ctx.spec, 'bindings', name);
-  const to = credentialsLink(ctx, tc && cred ? tc.name : '');
+  const http = (ctx.httpSecrets || []).find((c) => c && c.name === (tc ? tc.name : name));
+  const link = ctx.tenant && ctx.env && !ctx.isNew
+    ? (http ? httpSecretPath(ctx.tenant, ctx.env, http.name) : newHttpSecretPath(ctx.tenant, ctx.env)) : '';
   return (
     <div className="b-form">
-      <FormHead kind="Binding" name={name} onRename={onRename} findings={f} fields={BINDING_FIELDS} />
-      <Section title="Credential" findings={atField(f, 'credentialRef')}>
-        <span className="b-seg">
-          <button className={'ghost mini' + (tc ? ' on' : '')} aria-pressed={!!tc}
-            onClick={() => { if (!tc) onChange({ credentialRef: { name: (creds[0] && creds[0].name) || '' } }); }}>A credential of the environment</button>
-          <button className={'ghost mini' + (tc ? '' : ' on')} aria-pressed={!tc}
-            onClick={() => { if (tc) onChange({ upstream: cred ? cred.upstream : 'https://', mode: cred ? cred.mode : 'name' }); }}>Stated here (advanced)</button>
-        </span>
-        {tc && (
-          <>
-            <Field label="Credential" findings={atField(f, 'credentialRef.name')}
-              hint={cred ? <>{cred.upstream} · reached as {cred.mode === 'intercept' ? 'its own name' : <span className="mono">http://{name}/</span>}</>
-                : creds.length ? 'not a credential of the environment' : noCredentials(ctx)}>
-              <Select value={tc.name} options={creds.map((c) => c.name)} empty="(a credential)"
-                onChange={(v) => onChange({ ...o, credentialRef: { name: v } })} />
-              {to && <FormLink ctx={ctx} to={to}>{tc.name && cred ? `credential ${tc.name}` : 'the environment\'s credentials'}</FormLink>}
-            </Field>
-            <Field label="Version" findings={atField(f, 'credentialRef.version')}
-              hint={tc.version ? 'pinned: a new version reaches it with a deployment that pins it' : 'the deployment pins the latest version when it is applied'}>
-              <span className="mono">{tc.version ? `v${tc.version}` : 'latest'}</span>
-              {cred && tc.version && cred.version > tc.version && (
-                <><span className="warntext small">v{cred.version} is newer</span>
-                  <button className="ghost mini" onClick={() => onChange({ ...o, credentialRef: { ...tc, version: cred.version } })}>Use v{cred.version}</button></>)}
-            </Field>
-          </>)}
-        {!tc && <LiteralBinding o={o} ctx={ctx} onChange={onChange} findings={f} />}
+      <FormHead kind="Binding in the spec" name={name} findings={f} fields={[]} />
+      <Section title="It becomes an HTTP secret">
+        <p className="small">{GIVE_WAY} Then remove this binding: the variable is the dependency.</p>
+        {http
+          ? <p className="small">HTTP secret <span className="mono">{http.name}</span> exists
+            ({String(http.upstream || '').replace(/^https?:\/\//, '')}, v{http.version}): reference it by a variable.</p>
+          : null}
+        {link && <FormLink ctx={ctx} to={link}>{http ? `HTTP secret ${http.name}` : 'New HTTP secret'}</FormLink>}
+      </Section>
+      <Section title="As the spec has it">
+        <pre className="specpre b-raw">{JSON.stringify(o, null, 2)}</pre>
       </Section>
       <Section title="Used by">
-        {users.length === 0 ? <p className="muted small">No service or job gets it yet: tick it in their Credentials &amp; bindings.</p>
+        {users.length === 0 ? <p className="muted small">No service or job names it.</p>
           : <ul className="b-uses">{users.map((r, i) => <li key={i} className="mono small">{r.from.key === 'jobs' ? 'job' : 'service'} {r.from.name}</li>)}</ul>}
       </Section>
       <FormFoot onRemove={onRemove} what={`binding ${name}`} />
@@ -1122,129 +1122,16 @@ export function BindingForm({ name, obj, ctx, onChange, onRename, onRemove }) {
   );
 }
 
-// LiteralBinding is ADR 0028's binding: upstream, mode, paths, rate
-// limit, CA and the credential, each value field text or a secret.
-function LiteralBinding({ o, ctx, onChange, findings }) {
-  const c = isObject(o.credential) ? o.credential : null;
-  const kind = c ? c.kind : '';
-  const secrets = [...new Set([...(ctx.knownSecrets || []), ...objectsOf(ctx.spec, 'secrets').map(([n]) => n)])].sort();
-  const targets = { addons: [], services: [], secrets };
-  const rl = isObject(o.rateLimit) ? o.rateLimit : {};
-  const putCred = (patch) => onChange({ ...o, credential: without({ ...c, ...patch }) });
-  const headers = c && isObject(c.headers) ? c.headers : {};
-  return (
-    <div className="b-rows">
-      <Field label="Upstream" hint="https://host[:port]; plain http is refused" findings={atField(findings, 'upstream')}>
-        <input className="mono" placeholder="https://api.example.com" value={o.upstream || ''} onChange={(e) => onChange({ ...o, upstream: e.target.value })} />
-      </Field>
-      <div className="b-grid3">
-        <Field label="Reached as" findings={atField(findings, 'mode')}>
-          <Select value={o.mode || 'name'} options={[{ value: 'name', label: 'its binding name (http://name/)' }, { value: 'intercept', label: 'its own name (intercept)' }]}
-            onChange={(v) => onChange(set(o, 'mode', v === 'name' ? undefined : v))} />
-        </Field>
-        <Field label="Requests per second" hint="per pod; empty: no limit" findings={atField(findings, 'rateLimit')}>
-          <OptNumber value={rl.perSecond} min={1} placeholder="—" onChange={(v) => {
-            const next = without({ ...rl, perSecond: v });
-            onChange(set(o, 'rateLimit', Object.keys(next).length ? next : undefined));
-          }} />
-        </Field>
-        <Field label="Burst">
-          <OptNumber value={rl.burst} min={0} placeholder="the rate" onChange={(v) => {
-            const next = without({ ...rl, burst: v });
-            onChange(set(o, 'rateLimit', Object.keys(next).length ? next : undefined));
-          }} />
-        </Field>
-      </div>
-      <Field label="Paths" hint="the path prefixes the pods may reach, one per line; none: all" findings={atField(findings, 'pathPrefixes')}>
-        <Lines value={o.pathPrefixes} onChange={(v) => onChange(set(o, 'pathPrefixes', v))} placeholder="/v1/" />
-      </Field>
-      <label className="b-check"><input type="checkbox" checked={!!o.forwardedHost}
-        onChange={(e) => onChange(set(o, 'forwardedHost', e.target.checked || undefined))} /><span>Send X-Forwarded-Host and -Proto</span></label>
-      <Field label="Upstream CA (PEM)" hint="empty: the WebPKI" findings={atField(findings, 'caPem')}>
-        <textarea className="mono b-lines" rows={2} placeholder="-----BEGIN CERTIFICATE-----" value={o.caPem || ''}
-          onChange={(e) => onChange(set(o, 'caPem', e.target.value))} />
-      </Field>
-      <Field label="Credential" hint="what the platform adds to each request; secret fields name the environment's secrets" findings={atField(findings, 'credential')}>
-        <Select value={kind} empty="None" options={[{ value: 'headers', label: 'Headers' }, { value: 'basic', label: 'Basic' },
-          { value: 'oauth2', label: 'OAuth2 client credentials' }, { value: 'clientCertificate', label: 'Client certificate' }]}
-        onChange={(k) => onChange(set(o, 'credential', k ? { kind: k } : undefined))} />
-      </Field>
-      {kind === 'headers' && (
-        <table className="b-vars">
-          <thead><tr><th>Header</th><th>Value</th><th /></tr></thead>
-          <tbody>
-            {Object.entries(headers).map(([h, v]) => (
-              <tr key={h}>
-                <td className="b-varcell"><VarName name={h} onRename={(to) => putCred({ headers: renameVar(headers, h, to) })} /></td>
-                <td className="b-valcell"><CredValue v={v} targets={targets} ctx={ctx} onChange={(nv) => putCred({ headers: { ...headers, [h]: nv } })} /></td>
-                <td className="b-delcell"><button className="iconbtn" title={`remove ${h}`} onClick={() => {
-                  const next = { ...headers };
-                  delete next[h];
-                  putCred({ headers: Object.keys(next).length ? next : undefined });
-                }}><Icon name="x" size={13} /></button></td>
-              </tr>))}
-          </tbody>
-        </table>)}
-      {kind === 'headers' && <span><button className="ghost mini" onClick={() => putCred({ headers: { ...headers, [freeName(headers, 'Authorization')]: { secret: '' } } })}>
-        <Icon name="plus" size={12} /> Add a header</button></span>}
-      {kind && (CREDENTIAL_FIELDS[kind] || []).map((fd) => (
-        <Field key={fd} label={fd} findings={atField(findings, `credential.${fd}`)}>
-          {fd === 'tokenUrl'
-            ? <input className="mono" placeholder="https://auth.example.com/token" value={textOf(c[fd])} onChange={(e) => putCred({ [fd]: e.target.value || undefined })} />
-            : <CredValue v={c[fd] === undefined ? '' : c[fd]} targets={targets} ctx={ctx} onChange={(nv) => putCred({ [fd]: nv === '' ? undefined : nv })} />}
-        </Field>))}
-      {kind === 'oauth2' && (
-        <label className="b-check"><input type="checkbox" checked={!!c.clientAuthInBody}
-          onChange={(e) => putCred({ clientAuthInBody: e.target.checked || undefined })} /><span>Client authentication in the body</span></label>)}
-    </div>
-  );
-}
-
-// CredValue is a binding credential's value: text or a secret.
-function CredValue({ v, targets, ctx, onChange }) {
-  const type = valueType(v) === 'secret' ? 'secret' : 'text';
-  return (
-    <div className="b-value">
-      <Select value={type} options={[{ value: 'text', label: 'Text' }, { value: 'secret', label: 'Secret' }]} className="b-vtype"
-        onChange={(t) => onChange(retypeValue(v, t, targets))} />
-      {type === 'text'
-        ? <input className="mono grow" value={textOf(v)} placeholder="value" onChange={(e) => onChange(withText(v, e.target.value))} />
-        : <SecretValue name="" v={v} targets={targets} ctx={ctx} onChange={onChange} />}
-    </div>
-  );
-}
-
-// NewBinding is "+ Add" of the bindings: a credential of the
-// environment, or a binding stated here.
-export function NewBinding({ ctx, onAdd }) {
-  const creds = ctx.credentials || [];
-  const [pick, setPick] = useState('');
-  const [name, setName] = useState('');
-  const cred = pick || (creds[0] && creds[0].name) || '';
-  const toNew = ctx.tenant && ctx.env && !ctx.isNew ? newCredentialPath(ctx.tenant, ctx.env) : '';
+// NewBinding is where "+ Add" of the bindings led: no new binding (ADR
+// 0055), the way to an HTTP secret instead.
+export function NewBinding({ ctx }) {
+  const toNew = ctx.tenant && ctx.env && !ctx.isNew ? newHttpSecretPath(ctx.tenant, ctx.env) : '';
   return (
     <div className="b-form">
-      <FormHead kind="New binding" name="an API its code calls" findings={[]} fields={[]} />
-      <Section title="From a credential of the environment">
-        <p className="muted small">The environment states an API and its credential once (ADR 0033); a binding of it names
-          it, and the deployment pins its version.</p>
-        {creds.length > 0
-          ? <div className="b-row wrap">
-            <Select value={cred} options={creds.map((c) => ({ value: c.name, label: `${c.name} · ${String(c.upstream || '').replace(/^https?:\/\//, '')}` }))} onChange={setPick} />
-            <button className="primary mini" disabled={!cred} onClick={() => onAdd(credentialBinding(ctx.spec, cred))}>
-              <Icon name="plus" size={12} /> Add binding {cred}</button>
-          </div>
-          : <p className="muted small">{noCredentials(ctx).replace(/^./, (c) => c.toUpperCase())}.</p>}
-        {toNew && <FormLink ctx={ctx} to={toNew}>New credential</FormLink>}
-      </Section>
-      <Section title="Stated here (advanced)" fold>
-        <p className="muted small">An upstream and a credential whose secret fields are this environment's secrets (ADR 0028).</p>
-        <div className="b-row wrap">
-          <input className="mono" placeholder="name" value={name} onChange={(e) => setName(e.target.value.trim())} />
-          <button className="mini" disabled={!isDnsLabel(name) || objectsOf(ctx.spec, 'bindings').some(([n]) => n === name)}
-            onClick={() => onAdd({ spec: { ...ctx.spec, bindings: { ...(ctx.spec.bindings || {}), [name]: { upstream: 'https://', mode: 'name' } } }, name })}>
-            <Icon name="plus" size={12} /> Add</button>
-        </div>
+      <FormHead kind="No new binding" name="an API its code calls" findings={[]} fields={[]} />
+      <Section title="An HTTP secret instead">
+        <p className="small">{GIVE_WAY}</p>
+        {toNew ? <FormLink ctx={ctx} to={toNew}>New HTTP secret</FormLink> : <p className="muted small">{noHttpSecrets(ctx)}.</p>}
       </Section>
     </div>
   );
@@ -1273,6 +1160,7 @@ export function SecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
     }
   };
   const login = refs.some((r) => r.via === 'imageCredentials');
+  if (pin.type === 'http') return <HttpSecretForm name={name} pin={pin} refs={refs} ctx={ctx} onPin={onPin} onRemove={onRemove} />;
   return (
     <div className="b-form">
       <FormHead kind="Secret" name={name} findings={ctx.findings} fields={['version']} />
@@ -1310,8 +1198,53 @@ export function SecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
   );
 }
 
-// NewSecret is "+ Add" of the secrets: a name and a value, written at
-// once (a new environment's kept until its first deploy).
+// HttpSecretForm shows an HTTP secret the draft references (ADR 0055):
+// its pinned and latest versions and what references it. Its definition
+// and its key are written on its page in the environment's Secrets,
+// never here.
+function HttpSecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
+  const known = (ctx.httpSecrets || []).find((c) => c && c.name === name);
+  const page = ctx.tenant && ctx.env && !ctx.isNew ? (known ? httpSecretPath(ctx.tenant, ctx.env, name) : newHttpSecretPath(ctx.tenant, ctx.env)) : '';
+  return (
+    <div className="b-form">
+      <FormHead kind="HTTP secret" name={name} findings={ctx.findings} fields={['version']} />
+      <Section title="Versions" findings={atField(ctx.findings, 'version')}>
+        <div className="kv-grid">
+          <span className="k">pinned</span>
+          <span className="v">{pin.pinned ? <>version <span className="mono">{pin.pinned}</span></> : <span className="muted">the latest when deployed</span>}</span>
+          <span className="k">latest</span>
+          <span className="v">
+            {pin.latest ? <>version <span className="mono">{pin.latest}</span></>
+              : <span className="bad">{ctx.isNew ? 'a new environment has no HTTP secrets yet' : 'missing: the environment has no such HTTP secret'}</span>}
+            {pin.newer && (
+              <> · <span className="warntext">version {pin.latest}, pinned {pin.pinned}</span>{' '}
+                <button className="ghost mini" onClick={() => onPin(pin.latest)}>Use version {pin.latest}</button></>)}
+          </span>
+          {known && (
+            <>
+              <span className="k">upstream</span>
+              <span className="v mono">{known.upstream}</span>
+              <span className="k">called as</span>
+              <span className="v mono">{refValue(known, 'url')}</span>
+            </>)}
+        </div>
+        <FindingList list={atField(ctx.findings, 'version')} />
+        <p className="muted small">Its URL, its authentication and its key are written on its page, never into the draft; a
+          variable gets its URL or host, and the platform adds the key at the node.</p>
+        {page && <FormLink ctx={ctx} to={page}>{known ? `HTTP secret ${name}` : 'New HTTP secret'}</FormLink>}
+      </Section>
+      <Section title="Used by">
+        {refs.length === 0 ? <p className="muted small">Nothing references it: a deployment drops its pin.</p>
+          : <ul className="b-uses">{refs.map((r, i) => <li key={i} className="mono small">{r.from.name} · {refLine(r)}</li>)}</ul>}
+      </Section>
+      <FormFoot onRemove={onRemove} what={`HTTP secret ${name} from the draft`} />
+    </div>
+  );
+}
+
+// NewSecret is "+ Add" of the secrets: a value, its name and the value,
+// written at once (a new environment's kept until its first deploy); an
+// HTTP API's key is an HTTP secret instead, made on its page.
 export function NewSecret({ ctx, onDone }) {
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
@@ -1321,7 +1254,11 @@ export function NewSecret({ ctx, onDone }) {
   return (
     <div className="b-form">
       <FormHead kind="New secret" name="a value the services read" findings={[]} fields={[]} />
-      <Section title="Secret">
+      {ctx.tenant && ctx.env && !ctx.isNew && (
+        <p className="panel-note">A key for an HTTP API? Make it an HTTP secret (recommended for an API): the platform adds
+          the key at the node, and a variable gets its URL.{' '}
+          <FormLink ctx={ctx} to={newHttpSecretPath(ctx.tenant, ctx.env)}>New HTTP secret</FormLink></p>)}
+      <Section title="A value your code reads">
         <p className="muted small">{ctx.isNew
           ? 'Its value stays in this page until the first deploy, which writes it before the deployment.'
           : 'Its value goes to the environment at once and never into the draft, this browser\'s storage or an export.'}</p>

@@ -115,7 +115,7 @@ describe("a service's page", () => {
     expect(out.indexOf('environment <span class="count">')).toBeLessThan(out.indexOf('acc-sect'));
     expect(out.indexOf('acc-sect')).toBeLessThan(out.indexOf('Reachability'));
     expect(all).toContain('Secrets where its keys live');
-    expect(all).toContain('erp → erp.example reached as http://erp offloaded basic');
+    expect(all).toContain('erp → erp.example reached as http://erp at the node basic binding in the spec — becomes an HTTP secret');
     expect(all).toContain('EXPENSA_INTERNAL_TOKEN ← internal-token in the container secret v3');
     expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/binding/erp"');
     expect(all).not.toContain('bindings · 1');
@@ -123,6 +123,20 @@ describe("a service's page", () => {
     expect(html(page('job', 'migrate', { otab: 'config' }))).toContain('acc-sect');
     expect(html(page('addon', 'postgres', { otab: 'config' }))).not.toContain('acc-sect');
     expect(text(page('service', 'expense-service', { spec: null, otab: 'config' }))).toMatch(/Secrets where its keys live .* Loading…/);
+  });
+
+  it("config: a variable of an HTTP secret's URL shows it, linked to its page, at its pinned version (ADR 0055)", () => {
+    const es = SPEC.services['expense-service'];
+    const spec = { ...SPEC, services: { ...SPEC.services, 'expense-service': { ...es, env: { ...es.env, S4_URL: { secret: 's4', key: 'url' } } } },
+      secrets: { ...SPEC.secrets, s4: { version: 2, type: 'http', upstream: 'https://api.s4.example', mode: 'name' } } };
+    const cfg = page('service', 'expense-service', { spec, otab: 'config' });
+    const out = html(cfg);
+    const all = text(cfg);
+    expect(all).toContain('environment · 6');
+    expect(all).toContain('S4_URL url of HTTP secret s4 v2');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/http/s4"');
+    // Its Secrets have its row, at the node, from the spec alone while the list loads.
+    expect(all).toContain('S4_URL → api.s4.example reached as http://s4 at the node HTTP secret s4 v2 · its url');
   });
 
   it('an attached service shows its process; a service the latest deployment lacks says so', () => {

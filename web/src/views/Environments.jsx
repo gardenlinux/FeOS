@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, CopyBtn, EnvName, ErrBox, KV, LiveBadge, StateLabel, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
-import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, credentialPath, envPath, lensOf, newEnvPath } from '../routes.js';
+import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, envPath, httpSecretPath, lensOf, newEnvPath } from '../routes.js';
 import { useEnvStatus } from '../envstatus.jsx';
 import { focusOf, queryOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
@@ -30,7 +30,7 @@ import { EnvReach } from './EnvReach.jsx';
 import { EnvPods } from './EnvPods.jsx';
 import { Sandboxes } from './Sandboxes.jsx';
 import { Jobs } from './Jobs.jsx';
-import { Credentials } from './Credentials.jsx';
+import { HttpSecrets } from './HttpSecret.jsx';
 import { EnvSecrets } from './EnvSecrets.jsx';
 import '../styles/environments.css';
 
@@ -45,8 +45,8 @@ import '../styles/environments.css';
 // with revert and tags, the incidents with their evidence, the jobs made
 // by a call: Jobs.jsx), the logs and
 // traces, the traffic, the reachability, the secrets (where each key
-// lives: the secrets, the credentials with their pages (Credentials.jsx),
-// the bindings and the addons by identity; EnvSecrets.jsx) and the
+// lives, ADR 0055: by identity, at the node, in the container, unused;
+// EnvSecrets.jsx, an HTTP secret's pages HttpSecret.jsx) and the
 // settings (general, domains and access; EnvTabs.jsx). The sidebar picks the
 // environment, one of its objects, whose page (ObjectPage.jsx) has the
 // same views where it has them, or one of its sandboxes, whose page
@@ -274,7 +274,7 @@ const LENS_ICONS = {
 
 // EnvDetail is an environment's page: its head, the tab bar of its views
 // (ENV_LENSES; Activity and Settings with their own pages under it,
-// Secrets with a credential's pages), and
+// Secrets with an HTTP secret's pages), and
 // the view; an object's page instead when one is picked. The status is
 // the shell's (envstatus.jsx), read for the sidebar and this page.
 function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) {
@@ -290,6 +290,8 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const activeTab = tab === 'traces' && !item ? 'logs'
     : ENV_TABS.includes(tab) && !(tab === 'objects' && !item) ? tab : 'overview';
   const lens = lensOf(activeTab);
+  // An HTTP secret's page (secrets/http/<name>) is the Secrets view's.
+  const httpPage = activeTab === 'secrets' && String(item).startsWith('http/') ? String(item).slice(5) : '';
 
   useNow(1000);
   // changed follows a write: the page and the tenant's summary read again.
@@ -299,13 +301,12 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
 
   // Escape goes up: from an item to its tab's list, from there to the
   // environments; from the builder, an object's page and the sandboxes'
-  // list to the overview; from a trace to its lines; from a credential's
-  // new version to its page, from its page to the secrets.
+  // list to the overview; from a trace to its lines; from an HTTP
+  // secret's new version to its page, from its page to the secrets.
   const up = activeTab === 'builder' || activeTab === 'objects' || (activeTab === 'sandboxes' && !item) ? envPath(tenant, env)
     : activeTab === 'traces' ? envPath(tenant, env, 'logs', '', null, queryOf({ trace: item }))
-      : activeTab === 'credentials' && item && otab === 'edit' ? credentialPath(tenant, env, item)
-        : activeTab === 'credentials' ? credentialPath(tenant, env)
-          : item ? envPath(tenant, env, activeTab) : list;
+      : httpPage && otab === 'edit' ? httpSecretPath(tenant, env, httpPage)
+        : item ? envPath(tenant, env, activeTab) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -394,11 +395,9 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
         {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}
         {activeTab === 'reachability' && body(<EnvReach tenant={tenant} st={st} navigate={navigate} />)}
-        {(activeTab === 'secrets' || (activeTab === 'credentials' && !item)) && body(
-          <EnvSecrets tenant={tenant} env={st && st.name} st={st} ec={ec} item={activeTab === 'secrets' ? item : ''} changed={changed}
-            navigate={navigate} />)}
-        {activeTab === 'credentials' && item && (
-          <Credentials tenant={tenant} env={env} sel={item} edit={otab === 'edit'} ec={ec} navigate={navigate} />)}
+        {activeTab === 'secrets' && !httpPage && body(
+          <EnvSecrets tenant={tenant} env={st && st.name} st={st} ec={ec} item={item} changed={changed} navigate={navigate} />)}
+        {httpPage && <HttpSecrets tenant={tenant} env={env} sel={httpPage} edit={otab === 'edit'} ec={ec} navigate={navigate} />}
         {activeTab === 'access' && (
           <AccessTab tenant={tenant} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />)}
         {activeTab === 'settings' && (

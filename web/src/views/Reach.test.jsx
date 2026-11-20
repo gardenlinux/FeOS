@@ -45,7 +45,7 @@ const SPEC = {
 };
 const ctx = (extra = {}) => ({
   spec: SPEC, catalog: builtinCatalog(), findings: [], setSecret: async () => 1, isNew: false, knownSecrets: [], pins: [],
-  credentials: [], editSpec: nop, editAttached: true, tenant: 'kino', navigate: null, sandboxes: null, ...extra,
+  httpSecrets: [], editSpec: nop, editAttached: true, tenant: 'kino', navigate: null, sandboxes: null, ...extra,
 });
 const form = (F, name, obj, extra) => <F name={name} obj={obj} ctx={ctx(extra)} onChange={nop} onRename={nop} onRemove={nop} />;
 const pressed = (label) => `<button type="button" class="on" aria-pressed="true">${label}</button>`;

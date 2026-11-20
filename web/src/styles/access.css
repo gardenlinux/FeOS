@@ -56,3 +56,17 @@
 .tbl tr.inv-missing td { background: rgba(239, 84, 73, .06); }
 .tbl tr.inv-missing td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
 .tbl tr.inv-stray td { color: var(--muted); }
+.inv-group .sect-row .badge.mark { font-size: 12px; }
+.inv-kind { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.inv-hint { font-size: 12px; margin-top: 2px; }
+.inv-facts .spacer { flex: 1; }
+
+/* Add secret: the kind first (ADR 0055) */
+.inv-add { flex-basis: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; margin-top: 6px; }
+.inv-add-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.inv-add-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.inv-add-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; cursor: pointer; white-space: normal; height: auto; }
+.inv-add-choice:hover { border-color: var(--accent); }
+.inv-add-choice.rec { border-color: var(--accent); }
+.inv-add-title { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }

@@ -1,14 +1,17 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// An environment's credentials (ADR 0033): an HTTP binding's definition
-// (ADR 0028) stated once in an environment, versioned, used by name by
-// its sandboxes and its spec's bindings. The form's fields to the
-// binding's JSON and back, the secret fields a write keeps ({"set":
+// An environment's HTTP secrets (ADR 0055, the credentials of ADR 0033
+// before): an HTTP API stated once in an environment, its URL, how the
+// code calls it, its authentication (its credential, ADR 0028's kinds)
+// and its options, versioned as one; a variable {secret, key: url |
+// host} of a service or job gets it, a sandbox names it. The form's
+// fields to its JSON and back, the secret fields a write keeps ({"set":
 // true}), what the code runs, and whether the environment's deployments
 // pin a version behind the latest.
 
-// KINDS are a credential's kinds, as the form offers them.
+// KINDS are the kinds of an HTTP secret's authentication, as the form
+// offers them.
 export const KINDS = [
   { key: 'headers', label: 'headers' },
   { key: 'basic', label: 'basic' },
@@ -29,15 +32,16 @@ export const SECRETS = { headers: [], basic: ['password'], oauth2: ['clientSecre
 // REDACTED is what an upstream's echo of a secret comes back as.
 export const REDACTED = 'redacted-by-FeOS-binding';
 
-// nameRe is a credential's name: a DNS label.
+// nameRe is an HTTP secret's name: a DNS label, since the name mode
+// makes it a host name.
 const nameRe = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
-// isName tells a credential's name.
+// isName tells an HTTP secret's name.
 export function isName(s) {
   return nameRe.test(String(s || ''));
 }
 
-// emptyForm is a new credential's form.
+// emptyForm is a new HTTP secret's form.
 export function emptyForm() {
   return {
     name: '', kind: 'headers', upstream: '', mode: 'name',
@@ -51,7 +55,7 @@ export function emptyForm() {
   };
 }
 
-// formOf is the form of a credential as a read answers it: its secret
+// formOf is the form of an HTTP secret as a read answers it: its secret
 // fields empty and marked set.
 export function formOf(c) {
   const f = emptyForm();
@@ -104,11 +108,12 @@ function pem(s) {
   return v ? v + '\n' : '';
 }
 
-// bindingOf is a form as the binding's JSON (PUT /api/v1/environments/
-// {env}/credentials/{name}, a check's draft): a secret field left empty
-// that the latest version has is {"set": true} when keep, else left out.
-// It throws on a form no request should carry.
-export function bindingOf(f, { keep = true } = {}) {
+// definitionOf is a form as the HTTP secret's definition (the body of
+// PUT /api/v1/environments/{env}/secrets/{name} beside its type, a
+// check's draft): a secret field left empty that the latest version has
+// is {"set": true} when keep, else left out. It throws on a form no
+// request should carry.
+export function definitionOf(f, { keep = true } = {}) {
   const upstream = String(f.upstream || '').trim().replace(/\/+$/, '');
   if (!upstream) throw new Error('the upstream is required: https://host[:port]');
   const b = { upstream, mode: f.mode === 'intercept' ? 'intercept' : 'name', pathPrefixes: prefixesOf(f.pathPrefixes) };
@@ -165,11 +170,22 @@ export function hostOf(upstream) {
   return m ? m[1].toLowerCase().replace(/:443$/, '') : '';
 }
 
-// modeWords is how the code reaches a credential: "http://github/…" or
-// "intercepts api.github.com".
+// modeWords is how the code reaches an HTTP secret: "http://github/…"
+// or "intercepts api.github.com".
 export function modeWords(c) {
   if (c.mode === 'intercept') return `intercepts ${hostOf(c.upstream) || 'the upstream\'s host'}`;
   return `http://${c.name || '<name>'}/…`;
+}
+
+// refValue is what a variable {secret, key} of HTTP secret c gets (ADR
+// 0055): key url the base URL the code calls, http://<name> in the name
+// mode and https://<the upstream's host> in the intercept mode; key host
+// the host alone.
+export function refValue(c, key = 'url') {
+  const intercept = c && c.mode === 'intercept';
+  const host = intercept ? hostOf(c.upstream) || '<host>' : (c && c.name) || '<name>';
+  if (key === 'host') return host;
+  return `${intercept ? 'https' : 'http'}://${host}`;
 }
 
 // curlOf is the request the code runs: by the name, or at the upstream's
@@ -181,9 +197,9 @@ export function curlOf(c) {
   return `curl -s http://${c.name || '<name>'}${path}`;
 }
 
-// behind tells whether the environment's bindings pin a version before
-// the latest, in its latest or its deployed deployment (use: the
-// credential's usedBy, latest and deployed 0 where that one pins none).
+// behind tells whether the environment's deployments pin a version
+// before the latest, in its latest or its deployed deployment (use: the
+// HTTP secret's usedBy, latest and deployed 0 where that one pins none).
 export function behind(use, version) {
   return (Number(use.latest) > 0 && Number(use.latest) < version) || (Number(use.deployed) > 0 && Number(use.deployed) < version);
 }
@@ -216,28 +232,36 @@ export function pinWords(use) {
   return parts.join(' · ') || 'no version';
 }
 
-// oldestPin is the oldest version the environment's deployments pin,
-// for the list's "bindings on vN".
+// oldestPin is the oldest version the environment's deployments pin.
 export function oldestPin(use) {
   const vs = [Number(use.latest) || 0, Number(use.deployed) || 0].filter((v) => v > 0);
   return vs.length ? Math.min(...vs) : 0;
 }
 
-// usedWords is a credential's uses in its environment, in words: "2
-// sandboxes · 1 binding", "unused".
+// usedWords is an HTTP secret's uses in its environment, in words: "1
+// service · 2 sandboxes", "1 binding in the spec", "unused". usedBy's
+// objects are "kind/name"; its bindings those of the spec that name it
+// (credentialRef, from before ADR 0055).
 export function usedWords(usedBy) {
+  const objs = ((usedBy && usedBy.objects) || []).map((o) => String(o).split('/')[0]);
+  const n = (k) => objs.filter((x) => x === k).length;
   const s = ((usedBy && usedBy.sandboxes) || []).length;
   const b = ((usedBy && usedBy.bindings) || []).length;
   const parts = [];
+  if (n('service')) parts.push(`${n('service')} service${n('service') === 1 ? '' : 's'}`);
+  if (n('job')) parts.push(`${n('job')} job${n('job') === 1 ? '' : 's'}`);
   if (s) parts.push(`${s} sandbox${s === 1 ? '' : 'es'}`);
-  if (b) parts.push(`${b} binding${b === 1 ? '' : 's'}`);
+  if (b) parts.push(`${b} binding${b === 1 ? '' : 's'} in the spec`);
   return parts.join(' · ') || 'unused';
 }
 
-// pinnedSpec is a deployment's spec with every binding that names
-// credential name (credentialRef) moved to version: {spec, bindings
-// (their names)}; the spec is a copy. A binding keeps nothing else of its
-// own: the credential's version brings its upstream and mode.
+// pinnedSpec is a deployment's spec with HTTP secret name moved to
+// version: its pin (the spec's secrets, for the variables that reference
+// it) and every binding of the spec that names it (credentialRef, from
+// before ADR 0055): {spec, moved (whether anything moved), bindings
+// (their names)}; the spec is a copy. The pin is the version alone: the
+// apply puts that version's upstream and mode beside it; a binding keeps
+// nothing else of its own either.
 export function pinnedSpec(spec, name, version) {
   const out = JSON.parse(JSON.stringify(spec || {}));
   const names = [];
@@ -247,15 +271,20 @@ export function pinnedSpec(spec, name, version) {
       names.push(k);
     }
   }
-  return { spec: out, bindings: names.sort() };
+  let pinned = false;
+  if (out.secrets && Object.prototype.hasOwnProperty.call(out.secrets, name)) {
+    out.secrets[name] = { version };
+    pinned = true;
+  }
+  return { spec: out, moved: pinned || names.length > 0, bindings: names.sort() };
 }
 
-// specSnippet is the binding the environment's spec names a credential
-// with, and a service that gets it: the spec's two places, one line each.
+// specSnippet is the variable a service gets HTTP secret name by: its
+// URL, which the code calls.
 export function specSnippet(name, service = 'api') {
   const j = (v) => JSON.stringify(v).replace(/([{:,])(?=[^\s])/g, '$1 ').replace(/(?<=[^\s])}/g, ' }');
-  return `"bindings": ${j({ [name]: { credentialRef: { name } } })}\n` +
-    `"services": ${j({ [service]: { bindings: [name] } })}`;
+  const variable = `${name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_URL`;
+  return `"services": ${j({ [service]: { env: { [variable]: { secret: name, key: 'url' } } } })}`;
 }
 
 // preflightRows are a preflight's answer as rows: what was checked, ok

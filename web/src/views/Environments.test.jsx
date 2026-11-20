@@ -539,8 +539,8 @@ describe('the routes it calls', () => {
       .map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
-      'accessLogs', 'addonCatalog', 'bindingUsage', 'checkBinding', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
-      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'identities', 'listCredentials', 'listDeployments', 'listEnvironments',
+      'accessLogs', 'addonCatalog', 'bindingUsage', 'checkBinding', 'checkSecret', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
+      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'identities', 'listDeployments', 'listEnvironments',
       'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
       'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
     ]);
@@ -646,10 +646,13 @@ describe('the keys on the overview', () => {
     services: { 'expense-service': { bindings: ['erp'], env: { TOKEN: { secret: 'token' }, KEY: { secret: 'key' } } } },
     bindings: { erp: { upstream: 'https://erp.example', credential: { kind: 'basic' } } },
   };
-  it('counts the bindings and secrets and leads to the Secrets view, where they are with their checks', () => {
+  it('counts the keys by where they live and leads to the Secrets view, where they are with their checks', () => {
     const out = html(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />);
     expect(text(<EnvOverview st={STAGE} tenant={T} navigate={nav} spec={spec} ec={ALL} />))
-      .toContain('1 binding · 2 secrets — where each key lives, who uses it, the checks: Secrets');
+      .toContain('1 at the node · 2 in the container — where each key lives, who uses it, the checks: Secrets');
+    // An HTTP secret a variable references (ADR 0055) is at the node.
+    const http = { services: { api: { env: { S4_URL: { secret: 's4', key: 'url' }, TOKEN: { secret: 'token' } } } } };
+    expect(text(<KeysLine spec={http} tenant={T} env="e" navigate={nav} />)).toMatch(/^ ?1 at the node · 1 in the container/);
     expect(out).toContain(`href="/tenants/${T}/environments/expensa-stage/secrets"`);
     // No card of its own: the binding and its check are the Secrets view's.
     expect(out).not.toContain('https://erp.example');

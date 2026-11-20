@@ -5,13 +5,14 @@ import React, { Fragment } from 'react';
 import { CopyBtn } from '../components.jsx';
 import { fmtAgo, fmtDate, fmtDateTime } from '../format.js';
 import { queryOf } from '../logs.js';
-import { credentialPath, objectPath, secretsPath } from '../routes.js';
+import { httpSecretPath, objectPath, secretsPath } from '../routes.js';
 import {
   MARKS, MARK_LABEL, accessOf, fieldsWords, identityReaders, kindShort, podSubject, soonestCert, subjectParts, usageOf, usageTone,
   usageWords, workloadOf,
 } from './access.js';
-import { useAddonCatalog, useBindingUsage, useEnvCredentials, useIdentities } from './accessData.js';
-import { hostOf } from './credentials.js';
+import { useAddonCatalog, useBindingUsage, useEnvSecrets, useIdentities } from './accessData.js';
+import { hostOf } from './httpSecret.js';
+import { referencesOf } from './refs.js';
 import { BindingNumbers } from './EnvSecrets.jsx';
 import { EnvLink } from './EnvTabs.jsx';
 import { KeyMark } from './Marks.jsx';
@@ -23,42 +24,54 @@ import '../styles/access.css';
 // unfolded, what the certificate names and who reads which part), then
 // what it reaches with a key or without one, one row per target, sorted
 // by where the key lives (access.js): by identity (an addon that admits
-// it by its certificate), offloaded (an HTTP binding, the registry
-// login the node pulls with), in the container (a variable from a
-// secret, an addon's password). A binding's row has its numbers of the
-// last 24 h. Never a key: names, versions and counts only. Its overview
-// has the counts alone (ObjectKeysLine), with the bindings that failed.
+// it by its certificate), at the node (an HTTP secret its variables
+// reference, ADR 0055; a binding still stated in the spec; the registry
+// login the node pulls with), in the container (a variable from a value
+// secret, an addon's password). An HTTP secret's and a binding's row has
+// its numbers of the last 24 h. Never a key: names, versions and counts
+// only. Its overview has the counts alone (ObjectKeysLine), with the
+// APIs that failed.
 
 const Link = EnvLink;
 
 const SPEC_KEY = { service: 'services', job: 'jobs' };
 
+// callsApis tells whether object kind/name of spec calls an API through
+// the node: a variable that references a secret with a key (an HTTP
+// secret's url or host), or a binding of the spec; then its numbers are
+// read. A variable without a key that names an HTTP secret shows without
+// them.
+function callsApis(spec, kind, name) {
+  const so = spec && spec[SPEC_KEY[kind]] ? spec[SPEC_KEY[kind]][name] : null;
+  if (so && Array.isArray(so.bindings) && so.bindings.length > 0) return true;
+  return referencesOf(spec).some((r) => r.from.key === SPEC_KEY[kind] && r.from.name === name && r.http);
+}
+
 // ObjectAccess reads what the section shows beside the spec: the
-// catalog, the environment's credentials, its workloads' identities and,
-// when the object names a binding, the bindings' use.
+// catalog, the environment's secrets (an HTTP secret's definition), its
+// workloads' identities and, when the object calls an API through the
+// node, the bindings' use.
 export function ObjectAccess({ tenant, st, kind, name, spec, navigate }) {
   const env = st.name;
-  const so = spec && spec[SPEC_KEY[kind]] ? spec[SPEC_KEY[kind]][name] : null;
-  const named = !!(so && Array.isArray(so.bindings) && so.bindings.length > 0);
   const catalog = useAddonCatalog();
-  const creds = useEnvCredentials(env);
+  const secrets = useEnvSecrets(env);
   const ids = useIdentities(env);
-  const usage = useBindingUsage(env, named);
+  const usage = useBindingUsage(env, callsApis(spec, kind, name));
   return (
     <AccessCard tenant={tenant} env={env} kind={kind} name={name} spec={spec} loading={!spec && st.deployment > 0}
-      catalog={catalog} credentials={creds.data} identities={ids.data} identitiesErr={ids.err} usage={usage}
+      catalog={catalog} secrets={secrets.data} identities={ids.data} identitiesErr={ids.err} usage={usage}
       navigate={navigate} />
   );
 }
 
-// AccessCard is the section, its data given: catalog, credentials,
-// identities and usage null while they load.
+// AccessCard is the section, its data given: catalog, secrets (the
+// environment's, both kinds), identities and usage null while they load.
 export function AccessCard({
-  tenant, env, kind, name, spec, loading = false, catalog = null, credentials = null, identities = null, identitiesErr = '',
+  tenant, env, kind, name, spec, loading = false, catalog = null, secrets = null, identities = null, identitiesErr = '',
   usage = null, now = Date.now(), navigate,
 }) {
-  const rows = spec ? accessOf(spec, SPEC_KEY[kind], name, { catalog, credentials: credentials || [] }) : [];
-  const bindings = rows.some((r) => r.kind === 'binding');
+  const rows = spec ? accessOf(spec, SPEC_KEY[kind], name, { catalog, secrets: secrets || [] }) : [];
+  const bindings = rows.some((r) => r.kind === 'binding' || r.kind === 'http');
   return (
     <div className="acc-sect">
       <div className="sect sg-objsect">
@@ -70,14 +83,14 @@ export function AccessCard({
         readers={identityReaders(rows, catalog)} />
       {loading && <p className="muted">Loading…</p>}
       {!loading && rows.length === 0 && (
-        <p className="muted acc-none">It names no secret, binding or addon: it holds no key and needs none.</p>)}
+        <p className="muted acc-none">It names no secret or addon: it holds no key and needs none.</p>)}
       {rows.length > 0 && (
         <div className="tblwrap">
           <table className="tbl acc-tbl">
             <tbody>
               {rows.map((r) => (
                 <AccessRow key={`${r.kind}/${r.target.name}`} r={r} tenant={tenant} env={env} item={`${kind}/${name}`} spec={spec}
-                  credentials={credentials} catalog={catalog} usage={usage} navigate={navigate} />))}
+                  listed={secrets !== null} catalog={catalog} usage={usage} navigate={navigate} />))}
             </tbody>
           </table>
         </div>)}
@@ -87,27 +100,27 @@ export function AccessCard({
 }
 
 // ObjectKeysLine is the Secrets section's count on the overview: how
-// many of its targets it reaches by identity, offloaded and in the
-// container, and each binding whose upstream refused or failed in the
-// last 24 h; with the way to its Config. Nothing for one that names no
-// secret, binding or addon.
+// many of its targets it reaches by identity, at the node and in the
+// container, and each HTTP secret or binding whose upstream refused or
+// failed in the last 24 h; with the way to its Config. Nothing for one
+// that names no secret or addon.
 export function ObjectKeysLine({ tenant, st, kind, name, spec, navigate }) {
   const env = st.name;
-  const so = spec && spec[SPEC_KEY[kind]] ? spec[SPEC_KEY[kind]][name] : null;
-  const named = !!(so && Array.isArray(so.bindings) && so.bindings.length > 0);
   const catalog = useAddonCatalog();
-  const usage = useBindingUsage(env, named);
+  const usage = useBindingUsage(env, callsApis(spec, kind, name));
   return <KeysCount tenant={tenant} env={env} kind={kind} name={name} spec={spec} catalog={catalog} usage={usage} navigate={navigate} />;
 }
 
 // KeysCount is the line, its data given: catalog and usage null while
-// they load (an addon's row counts once the catalog says its mark).
+// they load (an addon's row counts once the catalog says its mark). The
+// spec says which secret is an HTTP one (its reference's key, a pin's
+// type), the list is not read for it.
 export function KeysCount({ tenant, env, kind, name, spec, catalog = null, usage = null, navigate }) {
   if (!spec) return null;
   const rows = accessOf(spec, SPEC_KEY[kind], name, { catalog });
   if (rows.length === 0) return null;
   const counts = MARKS.map((m) => [m, rows.filter((r) => r.mark === m).length]).filter(([, n]) => n > 0);
-  const failed = rows.filter((r) => r.kind === 'binding').map((r) => [r.binding.name, usageOf(usage, r.binding.name)])
+  const failed = rows.filter((r) => r.kind === 'binding' || r.kind === 'http').map((r) => [r.target.name, usageOf(usage, r.target.name)])
     .filter(([, u]) => usageTone(u) === 'bad');
   const config = objectPath(tenant, env, `${kind}/${name}`, 'config');
   return (
@@ -250,16 +263,32 @@ function untilText(iso, now) {
 }
 
 // AccessRow is one target: what the code names, what it reaches, the
-// mark of where the key lives, the key's source or the fields, and a
-// binding's numbers.
-function AccessRow({ r, tenant, env, item, spec, credentials, catalog, usage, navigate }) {
+// mark of where the key lives, the key's source or the fields, and an
+// API's numbers. listed says the environment's secrets answered: until
+// then an HTTP secret's definition is its pin's.
+function AccessRow({ r, tenant, env, item, spec, listed, catalog, usage, navigate }) {
   const secret = (n) => (
     <Link to={secretsPath(tenant, env, 'secret', n)} navigate={navigate} className="mono" title="its row in the environment's secrets">{n}</Link>);
+  const logs = objectPath(tenant, env, item, 'logs', null, queryOf({ source: 'egress', since: '1d' }));
   let what = null;
   let to = null;
   let detail = null;
   let nums = null;
-  if (r.kind === 'binding') {
+  if (r.kind === 'http') {
+    const h = r.http;
+    what = (
+      <>
+        {r.variables.length > 0 && <span className="mono strong">{r.variables.join(', ')}</span>}
+        {r.variables.length === 0 && r.via.length > 0 && <span className="mono strong">binding {r.via.join(', ')}</span>}
+      </>);
+    to = (
+      <>
+        <span className="acc-arrow">→</span><span className="mono host">{hostOf(h.upstream) || h.name}</span>{' '}
+        <span className="muted small">{h.mode === 'intercept' ? 'at its own name, intercepted' : <>reached as <span className="mono">{h.reachedAs}</span></>}</span>
+      </>);
+    detail = <HttpKey r={r} tenant={tenant} env={env} listed={listed} navigate={navigate} />;
+    nums = <BindingNumbers u={usageOf(usage, h.name)} tenant={tenant} env={env} navigate={navigate} logs={logs} />;
+  } else if (r.kind === 'binding') {
     const b = r.binding;
     what = (
       <Link to={secretsPath(tenant, env, 'binding', b.name)} navigate={navigate} className="mono strong"
@@ -269,10 +298,12 @@ function AccessRow({ r, tenant, env, item, spec, credentials, catalog, usage, na
         <span className="acc-arrow">→</span><span className="mono host">{hostOf(b.upstream) || '…'}</span>{' '}
         <span className="muted small">{b.mode === 'intercept' ? 'at its own name, intercepted' : <>reached as <span className="mono">{b.reachedAs}</span></>}</span>
       </>);
-    detail = <BindingKey b={b} tenant={tenant} env={env} credentials={credentials} navigate={navigate} secret={secret} />;
-    nums = (
-      <BindingNumbers u={usageOf(usage, b.name)} tenant={tenant} env={env} navigate={navigate}
-        logs={objectPath(tenant, env, item, 'logs', null, queryOf({ source: 'egress', since: '1d' }))} />);
+    detail = (
+      <>
+        <BindingKey b={b} secret={secret} />
+        <div className="warntext small">binding in the spec — becomes an HTTP secret</div>
+      </>);
+    nums = <BindingNumbers u={usageOf(usage, b.name)} tenant={tenant} env={env} navigate={navigate} logs={logs} />;
   } else if (r.kind === 'addon') {
     what = <Link to={objectPath(tenant, env, `addon/${r.target.name}`)} navigate={navigate} className="mono strong">{r.target.name}</Link>;
     to = <><span className="acc-arrow">→</span><span>{r.addon.type || 'addon'}</span></>;
@@ -305,24 +336,35 @@ function AccessRow({ r, tenant, env, item, spec, credentials, catalog, usage, na
   );
 }
 
-// BindingKey is a binding's credential: its kind and where it comes
-// from, a credential of the environment at its pinned version or the
-// environment's secrets.
-function BindingKey({ b, tenant, env, credentials, navigate, secret }) {
+// HttpKey is an HTTP secret's key: its authentication's kind, the secret
+// at the version the latest deployment pins, the latest beside it when
+// it is later; the keys of its variables (url, host); the binding of the
+// spec it comes through, when one names it.
+function HttpKey({ r, tenant, env, listed, navigate }) {
+  const h = r.http;
+  const kind = kindShort(h.kind);
+  return (
+    <>
+      {kind && <span>{kind} · </span>}
+      HTTP secret{' '}
+      <Link to={httpSecretPath(tenant, env, h.name)} navigate={navigate} className="mono" title="its page: definition, check, uses">{h.name}</Link>
+      {h.pinned > 0 && <span className="mono"> v{h.pinned}</span>}
+      {h.pinned > 0 && h.version > h.pinned && <span className="warntext"> · latest v{h.version}</span>}
+      {listed && !h.known && <span className="bad"> · not in this environment</span>}
+      {r.keys.length > 0 && <span className="muted"> · its {r.keys.join(' and ')}</span>}
+      {r.via.length > 0 && <div className="warntext small">through binding {r.via.join(', ')} in the spec — becomes a variable</div>}
+    </>
+  );
+}
+
+// BindingKey is a binding's key: its kind and the environment's secrets
+// its credential names.
+function BindingKey({ b, secret }) {
   const kind = kindShort(b.kind);
-  const c = b.credential ? (credentials || []).find((x) => x && x.name === b.credential.name) : null;
   return (
     <>
       {kind && <span>{kind}</span>}
-      {b.credential && (
-        <>
-          {kind && ' · '}credential{' '}
-          <Link to={credentialPath(tenant, env, b.credential.name)} navigate={navigate} className="mono">{b.credential.name}</Link>
-          {b.credential.version > 0 && <span className="mono"> v{b.credential.version}</span>}
-          {c && b.credential.version > 0 && c.version > b.credential.version && (
-            <span className="warntext"> · latest v{c.version}</span>)}
-        </>)}
-      {!b.credential && b.secrets.length > 0 && (
+      {b.secrets.length > 0 && (
         <>
           {kind && ' · '}secret{b.secrets.length === 1 ? '' : 's'}{' '}
           {b.secrets.map((n, i) => <Fragment key={n}>{i > 0 && ', '}{secret(n)}</Fragment>)}
