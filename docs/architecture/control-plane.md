@@ -2058,9 +2058,11 @@ SSH bindings, `--bindings` and `--secret-key-file` (`internal/bindings`,
 `http*.go`, the rules shared with the spec in `internal/bindings/httpcheck`).
 They come from three places, and from no other:
 
-- **a sandbox's own set**, `PUT /api/v1/sandboxes/{id}/http` (sandbox
-  class), stated whole; it gives way once FeCode's workspaces name their
-  environments' HTTP secrets (ADR 0055);
+- **a sandbox's own set**, stated whole by `PUT
+  /api/v1/sandboxes/{id}/http` (sandbox class) before ADR 0055's release
+  2, which answers it 410 `gone` "a sandbox's own HTTP set is gone (ADR
+  0055): name HTTP secrets of its environment"; a set stated before
+  serves until its sandbox ends, and reads and deletes as before;
 - **the HTTP secrets of its environment a sandbox names**, at their
   latest versions ([HTTP secrets of an
   environment](#http-secrets-of-an-environment));
@@ -2079,7 +2081,7 @@ They come from three places, and from no other:
 
 | Method and path | Class | Answers |
 |---|---|---|
-| `PUT /api/v1/sandboxes/{id}/http` `{"bindings": [B…]}` | sandbox | 200 the set as `GET` answers it; 400 with a code below; `bindings` absent is 400 (`[]` is none) |
+| `PUT /api/v1/sandboxes/{id}/http` `{"bindings": [B…]}` | sandbox | 410 `gone` since ADR 0055's release 2; before, 200 the set as `GET` answers it, 400 with a code below, `bindings` absent 400 (`[]` is none) |
 | `GET /api/v1/sandboxes/{id}/http` | sandbox | `{"version", "bindings": [B…]}`, by name, every secret field `{"set": true}`: a header's value, `password`, `clientSecret`, `keyPem`; `version` `""` for none |
 | `DELETE /api/v1/sandboxes/{id}/http` | sandbox | 204 |
 | `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object; 429 `too_many_preflights` |
