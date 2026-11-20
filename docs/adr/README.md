@@ -61,6 +61,7 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0052](0052-pushed-membership-deltas.md) | Membership changes reach the nodes as pushed deltas, members before names | Proposed |
 | [0053](0053-kubernetes-and-ssh-bindings.md) | Kubernetes and SSH bindings: the host adds the credential | Proposed |
 | [0054](0054-visitors-of-an-environment.md) | Visitors: a guarded environment admits whom its tenant's access provider vouches for | Accepted |
+| [0055](0055-a-secret-is-a-value-or-an-http-api.md) | A secret is a value or an HTTP API: one object per key, its kind says where it lives | Proposed |
 
 ## Rules
 

@@ -271,3 +271,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0054: a CDN in front of a guarded host (ADR 0030): what it may cache, and who checks the visit at the edge.
 - ADR 0054: the visitor's subject in the access log (ADR 0021).
 - ADR 0054: a visit's longest time as an installation's setting; the first value is 12 hours.
+
+## ADR 0055
+
+- ADR 0055: a `registry` kind of secret, a registry's login bound to its registry and used by the node's pulls alone, instead of a value secret that image credentials name.
+- ADR 0055: Kubernetes and SSH bindings (ADR 0053) as kinds of secret of the same shape, once their node side exists.
