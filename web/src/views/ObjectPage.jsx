@@ -15,7 +15,7 @@ import {
 import { builtinCatalog, planText, readCatalog } from './catalog.js';
 import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
 import { ObjectReach } from './EnvReach.jsx';
-import { ObjectAccess } from './ObjectAccess.jsx';
+import { ObjectAccess, ObjectKeysLine } from './ObjectAccess.jsx';
 import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
 import { StateCard, WideSpark } from './EnvOverview.jsx';
 import '../styles/environments.css';
@@ -25,14 +25,15 @@ import '../styles/environments.css';
 // deployment. Its head says what it is and how it is, with Restart or Run
 // now, and Edit; its views are the environment's where it has them
 // (objectTabs): the overview (what is wrong and why, with the end of the
-// log; a service's and a job's access, who it is and where its keys
-// live, ObjectAccess.jsx; its instances; the deployments that changed
-// it; its traffic and incidents), its logs and traffic, and its config:
-// its definition as the latest deployment's normalised spec has it (the
-// image as written and its pin, the environment with its references as
-// links, a secret at its pinned version, never its value), the routes
-// to it, who uses it. st is the environment's status, read by the shell
-// (envstatus.jsx).
+// log; a service's and a job's keys counted by where they live; its
+// instances; the deployments that changed it; its traffic and
+// incidents), its logs and traffic, and its config: its definition as
+// the latest deployment's normalised spec has it (the image as written
+// and its pin, the environment with its references as links, a secret
+// at its pinned version, never its value), a service's and a job's
+// secrets (who it is and where each of its keys lives,
+// ObjectAccess.jsx), its reachability, the routes to it, who uses it.
+// st is the environment's status, read by the shell (envstatus.jsx).
 
 const Link = EnvLink;
 
@@ -87,6 +88,7 @@ export function ObjectView({
   );
 
   const deps = o ? instanceDeployments(o) : [];
+  const access = (kind === 'service' || kind === 'job') && (so || (!spec && st.deployment > 0));
   return (
     <>
       <header className="pagehead objhead">
@@ -136,6 +138,8 @@ export function ObjectView({
         {view === 'config' && (
           <section className="pane objpage">
             <Definition tenant={tenant} st={st} kind={kind} name={name} so={so} spec={spec} navigate={navigate} />
+            {access && <ObjectAccess tenant={tenant} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
+            {so && <ObjectReach tenant={tenant} st={st} kind={kind} name={name} navigate={navigate} />}
             {kind === 'service' && <RoutesTo tenant={tenant} st={st} spec={spec} name={name} navigate={navigate} />}
             {kind === 'addon' && <AddonOutputs tenant={tenant} st={st} so={so} spec={spec} name={name} navigate={navigate} />}
             {kind === 'service' && <UsedBy tenant={tenant} env={env} spec={spec} kind={kind} name={name} navigate={navigate} />}
@@ -146,11 +150,11 @@ export function ObjectView({
 }
 
 // ObjectOverview is how the object is: what is wrong while something is
-// (ObjectProblem), a service's and a job's access (while the spec loads,
-// or when it has the object), its instances, the deployments that
-// changed it, a service's traffic, its incidents.
+// (ObjectProblem), a service's and a job's keys counted (the way to its
+// Secrets in Config), its instances, the deployments that changed it, a
+// service's traffic, its incidents.
 function ObjectOverview({ tenant, st, o, so = null, spec = null, kind, name, ec, navigate }) {
-  const access = (kind === 'service' || kind === 'job') && (so || (!spec && st.deployment > 0));
+  const keys = (kind === 'service' || kind === 'job') && so;
   const env = st.name;
   const [incidents, setIncidents] = useState(null);
   const readIncidents = useCallback(async () => {
@@ -165,7 +169,7 @@ function ObjectOverview({ tenant, st, o, so = null, spec = null, kind, name, ec,
   return (
     <div className="ov">
       {o && <ObjectProblem tenant={tenant} st={st} o={o} incidents={incidents} navigate={navigate} />}
-      {access && <ObjectAccess tenant={tenant} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
+      {keys && <ObjectKeysLine tenant={tenant} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
       {o && (
         <section className="card">
           <Instances tenant={tenant} st={st} o={o} ec={ec} navigate={navigate} />
@@ -271,7 +275,8 @@ function ServiceTraffic({ tenant, env, name, navigate }) {
 }
 
 // Definition is the object as the latest deployment's normalised spec
-// has it.
+// has it: its fields, then its environment. Its bindings are rows of
+// its Secrets (ObjectAccess.jsx).
 export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
   const env = st.name;
   const n = st.deployment;
@@ -284,7 +289,6 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
   if (!so) return <>{head}<p className="empty small">Not in this deployment.</p></>;
   const rows = definitionRows(so, kind);
   const vars = envRows(so, spec);
-  const bindings = Array.isArray(so.bindings) ? so.bindings : [];
   const sandbox = (id) => sandboxPath(tenant, st.name, id);
   return (
     <>
@@ -301,8 +305,6 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
           </KV>))}
       </div>
 
-      <ObjectReach tenant={tenant} st={st} kind={kind} name={name} navigate={navigate} />
-
       {vars.length > 0 && (
         <>
           <div className="sect">environment <span className="count">· {vars.length}</span></div>
@@ -317,15 +319,6 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
               </tbody>
             </table>
           </div>
-        </>)}
-
-      {bindings.length > 0 && (
-        <>
-          <div className="sect">bindings <span className="count">· {bindings.length}</span></div>
-          <p className="small objbindings">
-            <span className="mono">{bindings.join(', ')}</span>: what each reaches, where its key comes from and its last
-            24 h are in <Link to={objectPath(tenant, env, `${kind}/${name}`)} navigate={navigate}>Access</Link>, on its overview.
-          </p>
         </>)}
     </>
   );

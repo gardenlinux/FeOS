@@ -2551,18 +2551,21 @@ traffic, restarts and the deployments it runs, the instances folded
 under it, its routes, its open incidents, its sandboxes and its newest
 jobs made by a call, and a line that counts its bindings and secrets and
 leads to its Secrets view, where they are); an object's page
-(`…/objects/<kind>/<name>`: a service's and a job's access on its
-overview, its identity (its SPIFFE ID and when its pods' first
-certificate ends, from `…/identities`; unfolded, the certificate: the
-subject with the pod in the CN and the workload in the OU, the URI, the
-issuer, the key, which part each addon by identity reads, and each
-pod's serial, issue and end) and a row per target it reaches,
-by where the key lives, a binding's with its last 24 h; its definition
-as the latest deployment's normalised spec has it, a secret at its
-pinned version and references as links, the routes to it, who uses it,
-its instances with the node a link for operators only, its incidents,
-and the deployments of the last ten whose diff changed it, one read
-each);
+(`…/objects/<kind>/<name>`: on its overview a service's and a job's
+keys counted by where they live, with each binding whose upstream
+refused or failed in the last 24 h, its instances with the node a link
+for operators only, its incidents, and the deployments of the last ten
+whose diff changed it, one read each; in its Config its definition as
+the latest deployment's normalised spec has it, its environment with a
+secret at its pinned version and references as links, then a service's
+and a job's Secrets: its identity (its SPIFFE ID and when its pods'
+first certificate ends, from `…/identities`; unfolded, the
+certificate: the subject with the pod in the CN and the workload in
+the OU, the URI, the issuer, the key, which part each addon by identity
+reads, and each pod's serial, issue and end) and a row per target it
+reaches, by where the key lives (a variable from a secret, a binding
+with its credential and its last 24 h, the registry login, an addon),
+then its reachability, the routes to it, who uses it);
 its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
 with their evidence, also what a deployment past its deadline waited for;

@@ -7,7 +7,8 @@ import { fmtAgo, fmtDate, fmtDateTime } from '../format.js';
 import { queryOf } from '../logs.js';
 import { credentialPath, objectPath, secretsPath } from '../routes.js';
 import {
-  accessOf, fieldsWords, identityReaders, kindShort, podSubject, soonestCert, subjectParts, usageOf, workloadOf,
+  MARKS, MARK_LABEL, accessOf, fieldsWords, identityReaders, kindShort, podSubject, soonestCert, subjectParts, usageOf, usageTone,
+  usageWords, workloadOf,
 } from './access.js';
 import { useAddonCatalog, useBindingUsage, useEnvCredentials, useIdentities } from './accessData.js';
 import { hostOf } from './credentials.js';
@@ -17,7 +18,7 @@ import { KeyMark } from './Marks.jsx';
 import '../styles/marks.css';
 import '../styles/access.css';
 
-// The Access section of a service's and a job's overview: who the
+// The Secrets section of a service's and a job's Config: who the
 // workload is (its SPIFFE ID and when its pods' certificates end, and,
 // unfolded, what the certificate names and who reads which part), then
 // what it reaches with a key or without one, one row per target, sorted
@@ -25,7 +26,8 @@ import '../styles/access.css';
 // it by its certificate), offloaded (an HTTP binding, the registry
 // login the node pulls with), in the container (a variable from a
 // secret, an addon's password). A binding's row has its numbers of the
-// last 24 h. Never a key: names, versions and counts only.
+// last 24 h. Never a key: names, versions and counts only. Its overview
+// has the counts alone (ObjectKeysLine), with the bindings that failed.
 
 const Link = EnvLink;
 
@@ -58,10 +60,11 @@ export function AccessCard({
   const rows = spec ? accessOf(spec, SPEC_KEY[kind], name, { catalog, credentials: credentials || [] }) : [];
   const bindings = rows.some((r) => r.kind === 'binding');
   return (
-    <section className="card access-card">
-      <div className="card-head">
-        <h2>Access</h2><span className="muted">where its keys live</span>
-        <Link to={secretsPath(tenant, env)} navigate={navigate} className="card-more">Secrets</Link>
+    <div className="acc-sect">
+      <div className="sect sg-objsect">
+        Secrets
+        <span className="muted small">where its keys live</span>
+        <Link to={secretsPath(tenant, env)} navigate={navigate} className="small sg-all">All of the environment&apos;s</Link>
       </div>
       <IdentityLine workload={workloadOf(identities, kind, name)} identities={identities} err={identitiesErr} now={now}
         readers={identityReaders(rows, catalog)} />
@@ -79,7 +82,44 @@ export function AccessCard({
           </table>
         </div>)}
       {bindings && usage && usage.unavailable && <p className="ov-note">No numbers of the last 24 h: {usage.unavailable}</p>}
-    </section>
+    </div>
+  );
+}
+
+// ObjectKeysLine is the Secrets section's count on the overview: how
+// many of its targets it reaches by identity, offloaded and in the
+// container, and each binding whose upstream refused or failed in the
+// last 24 h; with the way to its Config. Nothing for one that names no
+// secret, binding or addon.
+export function ObjectKeysLine({ tenant, st, kind, name, spec, navigate }) {
+  const env = st.name;
+  const so = spec && spec[SPEC_KEY[kind]] ? spec[SPEC_KEY[kind]][name] : null;
+  const named = !!(so && Array.isArray(so.bindings) && so.bindings.length > 0);
+  const catalog = useAddonCatalog();
+  const usage = useBindingUsage(env, named);
+  return <KeysCount tenant={tenant} env={env} kind={kind} name={name} spec={spec} catalog={catalog} usage={usage} navigate={navigate} />;
+}
+
+// KeysCount is the line, its data given: catalog and usage null while
+// they load (an addon's row counts once the catalog says its mark).
+export function KeysCount({ tenant, env, kind, name, spec, catalog = null, usage = null, navigate }) {
+  if (!spec) return null;
+  const rows = accessOf(spec, SPEC_KEY[kind], name, { catalog });
+  if (rows.length === 0) return null;
+  const counts = MARKS.map((m) => [m, rows.filter((r) => r.mark === m).length]).filter(([, n]) => n > 0);
+  const failed = rows.filter((r) => r.kind === 'binding').map((r) => [r.binding.name, usageOf(usage, r.binding.name)])
+    .filter(([, u]) => usageTone(u) === 'bad');
+  const config = objectPath(tenant, env, `${kind}/${name}`, 'config');
+  return (
+    <p className="ov-keys obj-keys">
+      Keys:{' '}
+      {counts.map(([m, n], i) => <Fragment key={m}>{i > 0 && ' · '}<b>{n}</b> {MARK_LABEL[m]}</Fragment>)}
+      {counts.length === 0 && <span className="muted">…</span>}
+      {failed.map(([b, u]) => (
+        <Fragment key={b}> · <span className="bad">{b}: {usageWords(u).split(' · ').slice(1).join(' · ')}</span></Fragment>))}
+      <span className="muted"> — each with its source, its identity and certificate:</span>{' '}
+      <Link to={config} navigate={navigate}>Config</Link>
+    </p>
   );
 }
 

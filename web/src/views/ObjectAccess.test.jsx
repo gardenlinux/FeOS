@@ -7,11 +7,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ACCESS_CREDENTIALS as CREDS, ACCESS_SPEC as SPEC } from '../testing/access.js';
 import { response } from '../testing/ferun.js';
 import { readCatalog } from './catalog.js';
-import { AccessCard } from './ObjectAccess.jsx';
+import { AccessCard, KeysCount } from './ObjectAccess.jsx';
 
-// A service's and a job's Access section, with ferund's answers of the
-// catalog, the identities and the bindings' use, and a spec whose names
-// are theirs (testing/access.js).
+// A service's and a job's Secrets section of its Config, and its count
+// on its overview, with ferund's answers of the catalog, the identities
+// and the bindings' use, and a spec whose names are theirs
+// (testing/access.js).
 
 const T = 'fecode';
 const E = 'expensa-stage';
@@ -28,7 +29,13 @@ const card = (kind, name, extra = {}) => (
   <AccessCard tenant={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} credentials={CREDS} identities={IDS}
     usage={USAGE} now={NOW} navigate={nav} {...extra} />);
 
-describe("a service's Access", () => {
+describe("a service's Secrets", () => {
+  it('heads as Secrets, where its keys live, with the way to all of the environment\'s', () => {
+    const out = html(card('service', 'api'));
+    expect(text(card('service', 'api'))).toMatch(/^ Secrets where its keys live All of the environment's Identity /);
+    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets" class="small sg-all">All of the environment&#x27;s</a>`);
+  });
+
   it('says first who it is: its SPIFFE ID, copyable, and when its first certificate ends, per pod on hover', () => {
     const out = html(card('service', 'api'));
     const all = text(card('service', 'api'));
@@ -134,11 +141,35 @@ describe("a service's Access", () => {
   });
 });
 
-describe("a job's Access", () => {
+describe("a job's Secrets", () => {
   it('its identity without a pod, its addon by identity with its role', () => {
     const all = text(card('job', 'migrate'));
     expect(all).toContain('spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/job/migrate');
     expect(all).toContain('no pod now');
     expect(all).toContain('db → postgres by identity role owner · DATABASE_URL');
+  });
+});
+
+describe("an object's keys on its overview", () => {
+  const line = (kind, name, extra = {}) => (
+    <KeysCount tenant={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} usage={USAGE} navigate={nav} {...extra} />);
+
+  it('counts its targets by where the key lives and leads to its Config', () => {
+    const all = text(line('service', 'api'));
+    expect(all).toMatch(/^ Keys: 1 by identity · 3 offloaded · 2 in the container /);
+    expect(all).toContain('— each with its source, its identity and certificate: Config');
+    expect(html(line('service', 'api'))).toContain(`href="/tenants/${T}/environments/${E}/objects/service/api/config"`);
+    expect(text(line('job', 'migrate'))).toMatch(/^ Keys: 1 by identity — /);
+  });
+
+  it('names a binding whose upstream refused or failed in the last 24 h', () => {
+    expect(html(line('service', 'api'))).toContain('<span class="bad">erp: 2 refused · 1 blocked</span>');
+    expect(html(line('service', 'api', { usage: null }))).not.toContain('class="bad"');
+  });
+
+  it('counts an addon once the catalog says its mark, and is not there for one that names nothing', () => {
+    expect(text(line('service', 'api', { catalog: null }))).toMatch(/^ Keys: 3 offloaded · 1 in the container /);
+    expect(html(line('service', 'web'))).toBe('');
+    expect(html(line('service', 'api', { spec: null }))).toBe('');
   });
 });

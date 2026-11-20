@@ -90,30 +90,39 @@ describe("a service's page", () => {
     expect(all).toContain('api-expense /api/expense http 8080 expensa-stage-fecode.apps.fecode.dev/api/expense');
   });
 
-  it('has its Access high on its overview, after what is wrong and before its instances', () => {
+  it('counts its keys on its overview, after what is wrong and before its instances, with the way to its Config', () => {
     const out = html(page('service', 'expense-service'));
     const all = text(page('service', 'expense-service'));
-    expect(out).toContain('<section class="card access-card">');
-    expect(out.indexOf('statecard failed')).toBeLessThan(out.indexOf('access-card'));
-    expect(out.indexOf('access-card')).toBeLessThan(out.indexOf('instances <span class="count">'));
-    expect(all).toContain('Access where its keys live');
-    expect(all).toContain('EXPENSA_INTERNAL_TOKEN ← internal-token in the container secret v3');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets" class="card-more">Secrets</a>');
-    // A job has it too; an addon, and an object the latest deployment lacks, have none.
-    expect(html(page('job', 'migrate'))).toContain('access-card');
-    expect(html(page('addon', 'postgres'))).not.toContain('access-card');
-    expect(html(page('service', 'old-api'))).not.toContain('access-card');
-    // While the spec loads, it waits.
-    expect(text(page('service', 'expense-service', { spec: null }))).toMatch(/Access where its keys live .* Loading…/);
+    expect(out).toContain('<p class="ov-keys obj-keys">');
+    expect(out.indexOf('statecard failed')).toBeLessThan(out.indexOf('obj-keys'));
+    expect(out.indexOf('obj-keys')).toBeLessThan(out.indexOf('instances <span class="count">'));
+    expect(all).toContain('Keys: 1 in the container — each with its source, its identity and certificate: Config');
+    expect(out).not.toContain('acc-sect');
+    // A job has it too; an addon, an object the latest deployment lacks, and one while the spec loads, have none.
+    expect(html(page('job', 'migrate'))).toContain('obj-keys');
+    expect(html(page('addon', 'postgres'))).not.toContain('obj-keys');
+    expect(html(page('service', 'old-api'))).not.toContain('obj-keys');
+    expect(html(page('service', 'expense-service', { spec: null }))).not.toContain('obj-keys');
   });
 
-  it("config: its bindings' keys and numbers are its Access's, a link there", () => {
+  it('config: its Secrets after its environment, a binding offloaded with its upstream, then its reachability', () => {
     const spec = { ...SPEC, services: { ...SPEC.services, 'expense-service': { ...SPEC.services['expense-service'], bindings: ['erp'] } },
       bindings: { erp: { upstream: 'https://erp.example', credential: { kind: 'basic' } } } };
     const cfg = page('service', 'expense-service', { spec, otab: 'config' });
-    expect(text(cfg)).toContain('bindings · 1 erp : what each reaches, where its key comes from and its last 24 h are in Access , on its overview.');
-    expect(html(cfg)).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service">Access</a>');
-    expect(html(cfg)).not.toContain('objchip');
+    const out = html(cfg);
+    const all = text(cfg);
+    expect(out).toContain('<div class="acc-sect">');
+    expect(out.indexOf('environment <span class="count">')).toBeLessThan(out.indexOf('acc-sect'));
+    expect(out.indexOf('acc-sect')).toBeLessThan(out.indexOf('Reachability'));
+    expect(all).toContain('Secrets where its keys live');
+    expect(all).toContain('erp → erp.example reached as http://erp offloaded basic');
+    expect(all).toContain('EXPENSA_INTERNAL_TOKEN ← internal-token in the container secret v3');
+    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/binding/erp"');
+    expect(all).not.toContain('bindings · 1');
+    // A job's Config has it too; an addon's has none. While the spec loads, it waits.
+    expect(html(page('job', 'migrate', { otab: 'config' }))).toContain('acc-sect');
+    expect(html(page('addon', 'postgres', { otab: 'config' }))).not.toContain('acc-sect');
+    expect(text(page('service', 'expense-service', { spec: null, otab: 'config' }))).toMatch(/Secrets where its keys live .* Loading…/);
   });
 
   it('an attached service shows its process; a service the latest deployment lacks says so', () => {
