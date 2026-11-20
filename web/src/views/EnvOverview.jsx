@@ -12,7 +12,7 @@ import {
   isAttached, jobTrigger, labelPairs, objectImage, objectTone, objectsText, readyText, restartsOf, rolloutNote, routesTo,
   sparkPoints, trafficOf, trafficTotals,
 } from './envs.js';
-import { inventoryOf } from './access.js';
+import { MARK_LABEL, PLACES, inventoryOf } from './access.js';
 import { EnvLink, HostLink, NEEDS, OpNote, useOp } from './EnvTabs.jsx';
 import { Labels, ToneDot } from './Environments.jsx';
 import { useSummary } from '../summary.jsx';
@@ -23,8 +23,8 @@ import '../styles/overview.css';
 // rollout), or that every object matches the deployment; then its
 // traffic and where it is reached; its objects as cards (each leads to
 // its page, where its logs, traces, traffic and config are); a line to
-// its keys (the Secrets view has its bindings, secrets and credentials
-// with their checks and users) and what happened lately. A state is
+// its keys (the Secrets view has each, by where it lives, with its
+// checks and users) and what happened lately. A state is
 // said once.
 
 const Link = EnvLink;
@@ -86,17 +86,17 @@ export function EnvOverview({
   );
 }
 
-// KeysLine counts the bindings and secrets the latest deployment names
-// and leads to the Secrets view, where each is with where its key lives,
-// who uses it and its check; nothing when it names none.
+// KeysLine counts the keys the latest deployment names by where they
+// live (ADR 0055: at the node, in the container; the spec alone says it)
+// and leads to the Secrets view, where each is with who uses it and its
+// check; nothing when it names none.
 export function KeysLine({ spec, tenant, env, navigate }) {
-  const rows = spec ? inventoryOf(spec) : [];
-  const n = (kind) => rows.filter((r) => r.kind === kind).length;
-  const parts = [[n('binding'), 'binding'], [n('secret'), 'secret']].filter(([c]) => c > 0);
+  const rows = spec ? inventoryOf(spec).filter((r) => r.kind !== 'addon' && !r.folded) : [];
+  const parts = PLACES.map((p) => [rows.filter((r) => r.place === p).length, p]).filter(([c]) => c > 0);
   if (parts.length === 0) return null;
   return (
     <p className="ov-keys">
-      {parts.map(([c, w], i) => <React.Fragment key={w}>{i > 0 && ' · '}<b>{c}</b> {w}{c === 1 ? '' : 's'}</React.Fragment>)}
+      {parts.map(([c, p], i) => <React.Fragment key={p}>{i > 0 && ' · '}<b>{c}</b> {p === 'unused' ? 'unused' : MARK_LABEL[p]}</React.Fragment>)}
       <span className="muted"> — where each key lives, who uses it, the checks:</span>{' '}
       <Link to={secretsPath(tenant, env)} navigate={navigate}>Secrets</Link>
     </p>

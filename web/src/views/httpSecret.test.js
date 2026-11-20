@@ -3,34 +3,35 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  behind, bindingOf, curlOf, emptyForm, formOf, hostOf, isName, keptOf, modeWords, needsDeployment, oldestPin,
-  pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, specSnippet, usedWords,
-} from './credentials.js';
+  behind, curlOf, definitionOf, emptyForm, formOf, hostOf, isName, keptOf, modeWords, needsDeployment, oldestPin,
+  pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, refValue, specSnippet, usedWords,
+} from './httpSecret.js';
 
-// The credentials' derivations, from credentials as GET
-// /api/v1/environments/{env}/credentials answers them (go/internal/
-// bindings, credentialOut): usedBy is the uses in the environment.
+// The HTTP secrets' derivations (ADR 0055), from HTTP secrets as GET
+// /api/v1/environments/{env}/secrets answers them (type http, the
+// credential's JSON of ADR 0033 before): usedBy is the uses in the
+// environment.
 
 const github = {
-  name: 'github', upstream: 'https://api.github.com', mode: 'name', caPem: '', pathPrefixes: ['/repos/kino/', '/user'],
+  name: 'github', type: 'http', upstream: 'https://api.github.com', mode: 'name', caPem: '', pathPrefixes: ['/repos/kino/', '/user'],
   forwardedHost: false, rateLimit: { perSecond: 10, burst: 20 },
   credential: { kind: 'headers', headers: { Authorization: { set: true } } },
   version: 3, createdBy: 'malte@example.com', createdAt: '2026-11-06T10:00:00Z',
-  usedBy: { sandboxes: ['h3k9v2m7qpx'], bindings: ['github'], latest: 2, deployed: 2 },
+  usedBy: { sandboxes: ['h3k9v2m7qpx'], objects: ['service/api'], latest: 2, deployed: 2 },
 };
 
 const partner = {
-  name: 'partner', upstream: 'https://api.partner.example.net:8443', mode: 'name', caPem: '', pathPrefixes: [],
+  name: 'partner', type: 'http', upstream: 'https://api.partner.example.net:8443', mode: 'name', caPem: '', pathPrefixes: [],
   forwardedHost: true, rateLimit: null,
   credential: { kind: 'oauth2', tokenUrl: 'https://auth.partner.example.net/token', clientId: 'kino', clientSecret: { set: true }, scope: 'a b' },
   version: 2,
 };
 
-describe('the form and the binding', () => {
-  it('a new credential: the form as the binding, every value in it', () => {
+describe('the form and the definition', () => {
+  it('a new HTTP secret: the form as its definition, every value in it', () => {
     const f = { ...emptyForm(), name: 'github', upstream: 'https://api.github.com/', pathPrefixes: '/repos/kino/, /user',
       ratePerSecond: '10', headers: [{ name: 'Authorization', value: 'Bearer ghp_x', set: false }] };
-    expect(bindingOf(f)).toEqual({
+    expect(definitionOf(f)).toEqual({
       upstream: 'https://api.github.com', mode: 'name', pathPrefixes: ['/repos/kino/', '/user'],
       rateLimit: { perSecond: 10, burst: 10 }, credential: { kind: 'headers', headers: { Authorization: 'Bearer ghp_x' } },
     });
@@ -45,37 +46,37 @@ describe('the form and the binding', () => {
   });
 
   it('a secret field left empty is {"set": true}, a typed one its value', () => {
-    expect(bindingOf(formOf(github)).credential).toEqual({ kind: 'headers', headers: { Authorization: { set: true } } });
+    expect(definitionOf(formOf(github)).credential).toEqual({ kind: 'headers', headers: { Authorization: { set: true } } });
     expect(keptOf(formOf(github))).toEqual(['headers.Authorization']);
     const f = { ...formOf(partner), clientSecret: 'n3w' };
-    expect(bindingOf(f).credential).toEqual({ kind: 'oauth2', tokenUrl: 'https://auth.partner.example.net/token',
+    expect(definitionOf(f).credential).toEqual({ kind: 'oauth2', tokenUrl: 'https://auth.partner.example.net/token',
       clientId: 'kino', clientSecret: 'n3w', scope: 'a b' });
     expect(keptOf(f)).toEqual([]);
-    expect(bindingOf(formOf(partner)).forwardedHost).toBe(true);
+    expect(definitionOf(formOf(partner)).forwardedHost).toBe(true);
   });
 
   it('a new header needs its value; another kind keeps nothing', () => {
     const f = formOf(github);
     f.headers = [...f.headers, { name: 'X-Org', value: '', set: false }];
-    expect(() => bindingOf(f)).toThrow('the header X-Org needs a value');
+    expect(() => definitionOf(f)).toThrow('the header X-Org needs a value');
     const basic = { ...formOf(github), kind: 'basic', user: 'bot' };
-    expect(bindingOf(basic).credential).toEqual({ kind: 'basic', user: 'bot' });
+    expect(definitionOf(basic).credential).toEqual({ kind: 'basic', user: 'bot' });
   });
 
   it('PEM fields end in one newline; forwarded host is the name mode\'s', () => {
     const f = { ...emptyForm(), kind: 'clientCertificate', upstream: 'https://mtls.example.com', mode: 'intercept',
       forwardedHost: true, certPem: '  CERT  ', keyPem: 'KEY\n\n', caPem: 'CA' };
-    const b = bindingOf(f);
+    const b = definitionOf(f);
     expect(b.credential).toEqual({ kind: 'clientCertificate', certPem: 'CERT\n', keyPem: 'KEY\n' });
     expect(b.caPem).toBe('CA\n');
     expect(b.forwardedHost).toBeUndefined();
   });
 
   it('refuses a form no request should carry', () => {
-    expect(() => bindingOf(emptyForm())).toThrow('the upstream is required');
-    expect(() => bindingOf({ ...emptyForm(), upstream: 'https://x.example', headers: [] })).toThrow('add a header');
-    expect(() => bindingOf({ ...formOf(github), rateBurst: '5', ratePerSecond: '' })).toThrow('a burst needs a rate');
-    expect(() => bindingOf({ ...formOf(github), ratePerSecond: '1.5' })).toThrow('whole number');
+    expect(() => definitionOf(emptyForm())).toThrow('the upstream is required');
+    expect(() => definitionOf({ ...emptyForm(), upstream: 'https://x.example', headers: [] })).toThrow('add a header');
+    expect(() => definitionOf({ ...formOf(github), rateBurst: '5', ratePerSecond: '' })).toThrow('a burst needs a rate');
+    expect(() => definitionOf({ ...formOf(github), ratePerSecond: '1.5' })).toThrow('whole number');
   });
 
   it('names are DNS labels; prefixes split at blanks and commas', () => {
@@ -90,12 +91,20 @@ describe('a check of the form', () => {
   it('sends a kept secret as set: the check takes the latest version\'s value', () => {
     const f = { ...formOf(github), pathPrefixes: '/orgs/' };
     expect(keptOf(f)).toEqual(['headers.Authorization']);
-    expect(bindingOf(f).credential).toEqual({ kind: 'headers', headers: { Authorization: { set: true } } });
-    expect(bindingOf(f).pathPrefixes).toEqual(['/orgs/']);
+    expect(definitionOf(f).credential).toEqual({ kind: 'headers', headers: { Authorization: { set: true } } });
+    expect(definitionOf(f).pathPrefixes).toEqual(['/orgs/']);
   });
 });
 
 describe('what the code sees', () => {
+  it('a variable gets the URL or the host, never the key', () => {
+    expect(refValue(github, 'url')).toBe('http://github');
+    expect(refValue(github, 'host')).toBe('github');
+    expect(refValue({ ...github, mode: 'intercept' }, 'url')).toBe('https://api.github.com');
+    expect(refValue({ ...partner, mode: 'intercept' }, 'host')).toBe('api.partner.example.net:8443');
+    expect(refValue(null)).toBe('http://<name>');
+  });
+
   it('calls the name in the name mode, the host in the intercept mode', () => {
     expect(curlOf(github)).toBe('curl -s http://github/repos/kino/');
     expect(curlOf({ ...github, mode: 'intercept' })).toBe('curl -s https://api.github.com/repos/kino/');
@@ -110,9 +119,11 @@ describe('what the code sees', () => {
 
 describe('the uses', () => {
   it('in words', () => {
-    expect(usedWords(github.usedBy)).toBe('1 sandbox · 1 binding');
-    expect(usedWords({ sandboxes: ['a', 'b'], bindings: [] })).toBe('2 sandboxes');
-    expect(usedWords({ sandboxes: [], bindings: ['gh', 'gh2'], latest: 2, deployed: 2 })).toBe('2 bindings');
+    expect(usedWords(github.usedBy)).toBe('1 service · 1 sandbox');
+    expect(usedWords({ sandboxes: ['a', 'b'], objects: [] })).toBe('2 sandboxes');
+    expect(usedWords({ sandboxes: [], objects: ['service/a', 'service/b', 'job/m'] })).toBe('2 services · 1 job');
+    // A binding of the spec that names it, from before ADR 0055.
+    expect(usedWords({ sandboxes: [], bindings: ['gh', 'gh2'], latest: 2, deployed: 2 })).toBe('2 bindings in the spec');
     expect(usedWords(undefined)).toBe('unused');
   });
 
@@ -130,7 +141,19 @@ describe('the uses', () => {
     expect(pinWords({ latest: 0, deployed: 1 })).toBe('deployed v1');
   });
 
-  it('moves every binding that names the credential, and nothing else', () => {
+  it('moves its pin to the version alone, the spec a copy', () => {
+    const spec = {
+      services: { api: { env: { GH: { secret: 'github', key: 'url' } } } },
+      secrets: { github: { version: 2, type: 'http', upstream: 'https://api.github.com', mode: 'name' }, other: { version: 1 } },
+    };
+    const out = pinnedSpec(spec, 'github', 3);
+    expect(out.moved).toBe(true);
+    expect(out.spec.secrets).toEqual({ github: { version: 3 }, other: { version: 1 } });
+    expect(spec.secrets.github.version).toBe(2);
+    expect(pinnedSpec(spec, 'nope', 3)).toMatchObject({ moved: false, bindings: [] });
+  });
+
+  it('moves every binding of the spec that names it, and nothing else', () => {
     const spec = {
       services: { api: { bindings: ['gh', 'pay'] } },
       bindings: {
@@ -141,6 +164,7 @@ describe('the uses', () => {
     };
     const out = pinnedSpec(spec, 'github', 3);
     expect(out.bindings).toEqual(['gh', 'gh2']);
+    expect(out.moved).toBe(true);
     expect(out.spec.bindings.gh).toEqual({ credentialRef: { name: 'github', version: 3 } });
     expect(out.spec.bindings.gh2).toEqual({ credentialRef: { name: 'github', version: 3 } });
     expect(out.spec.bindings.pay).toEqual(spec.bindings.pay);
@@ -148,9 +172,9 @@ describe('the uses', () => {
     expect(pinnedSpec({ services: {} }, 'github', 3).bindings).toEqual([]);
   });
 
-  it('the spec\'s two places, as the builder takes them', () => {
-    expect(specSnippet('github')).toBe(
-      '"bindings": { "github": { "credentialRef": { "name": "github" } } }\n"services": { "api": { "bindings": ["github"] } }');
+  it('the variable a service gets it by', () => {
+    expect(specSnippet('github')).toBe('"services": { "api": { "env": { "GITHUB_URL": { "secret": "github", "key": "url" } } } }');
+    expect(specSnippet('s4-erp', 'web')).toBe('"services": { "web": { "env": { "S4_ERP_URL": { "secret": "s4-erp", "key": "url" } } } }');
   });
 });
 

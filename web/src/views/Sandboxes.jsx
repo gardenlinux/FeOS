@@ -26,11 +26,11 @@ import { Activity } from './Activity.jsx';
 import { Network } from './Network.jsx';
 import { Access, ImageCredentials } from './Access.jsx';
 import { Connect } from './SandboxConnect.jsx';
-import { CredentialPicker, SandboxCredentials } from './Credentials.jsx';
+import { HttpSecretPicker, SandboxHttpSecrets } from './HttpSecret.jsx';
 import '../styles/sandboxes.css';
 
 // An environment's sandboxes (ADR 0035): their list, the create form and
-// a sandbox's page with its views (overview, connect, credentials,
+// a sandbox's page with its views (overview, connect, secrets,
 // network, activity, settings), inside the environment, whose sidebar
 // lists them under its objects. The selection and the view are the
 // route's: /tenants/:t/environments/:env/sandboxes[/new | /:id[/:tab]]
@@ -350,10 +350,10 @@ export function CreateForm({ defaults, busy, disabled = false, tenant = '', env,
             <input type="password" autoComplete="new-password" value={f.password} onChange={set('password')} />
           </label>
         </div>
-        <span className="sbx-hint">Sealed in ferund and never shown again; rotate or remove it later under the sandbox's Credentials.</span>
+        <span className="sbx-hint">Sealed in ferund and never shown again; rotate or remove it later under the sandbox's Secrets.</span>
       </fieldset>
-      <CredentialPicker tenant={tenant} env={env} value={f.credentials} disabled={disabled} navigate={navigate}
-        onChange={(credentials) => setF({ ...f, credentials })} />
+      <HttpSecretPicker tenant={tenant} env={env} value={f.secrets} disabled={disabled} navigate={navigate}
+        onChange={(secrets) => setF({ ...f, secrets })} />
       {bad && <p className="error">{bad}</p>}
       <div className="sbx-formactions">
         <button type="submit" className="primary" disabled={disabled || !!busy}
@@ -446,12 +446,12 @@ function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, w
         <ErrBox error={err} />
         {cur === 'overview' && <Overview sb={sb} tenant={tenant} can={c} navigate={navigate} write={write} busy={busy} act={act} />}
         {cur === 'connect' && <Connect sandboxId={sb.sandboxId} write={write} fresh={fresh} onFreshSeen={onFreshSeen} />}
-        {cur === 'credentials' && (
+        {cur === 'secrets' && (
           <>
-            <h3 className="sect sect-first"><Icon name="plug" size={13} /> HTTP APIs</h3>
-            <SandboxCredentials tenant={tenant} env={env} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
+            <h3 className="sect sect-first"><Icon name="plug" size={13} /> HTTP secrets</h3>
+            <SandboxHttpSecrets tenant={tenant} env={env} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
             <Access sandboxId={sb.sandboxId} />
-            <h3 className="sect"><Icon name="key" size={13} /> Image credentials</h3>
+            <h3 className="sect"><Icon name="key" size={13} /> Registry login</h3>
             <ImageCredentials sandboxId={sb.sandboxId} write={write} />
           </>)}
         {cur === 'network' && <Network sandboxId={sb.sandboxId} />}

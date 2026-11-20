@@ -7,60 +7,68 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, CopyBtn, ErrBox, PageHead, StateDot, useArm, usePoll } from '../components.jsx';
 import { fmtDateTime, shortId } from '../format.js';
 import { useEnvStatus } from '../envstatus.jsx';
-import { credentialPath, envPath, newCredentialPath, sandboxPath } from '../routes.js';
+import { envPath, httpSecretPath, newHttpSecretPath, objectPath, sandboxPath, secretsPath } from '../routes.js';
 import {
-  KINDS, REDACTED, bindingOf, curlOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel, modeWords,
-  needsDeployment, pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, specSnippet, usedWords,
-} from './credentials.js';
+  KINDS, REDACTED, curlOf, definitionOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel, modeWords,
+  needsDeployment, pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, refValue, specSnippet, usedWords,
+} from './httpSecret.js';
+import { httpSecretsOf } from './access.js';
 import { EnvLink, NEEDS } from './EnvTabs.jsx';
 import '../styles/credentials.css';
 
-// An environment's credentials (ADR 0033): an API the environment's code
-// calls by a name, whose credential FeOS adds on the node, outside the
-// pod. The list is a group of the environment's Secrets view
-// (EnvSecrets.jsx), whose pages these are: a credential's page with its
-// check and its uses in the environment (the sandboxes that name it, the
-// bindings and the version its deployments pin, moved to the latest from
-// here, moveToLatest); the form of a new one or a new version, with a
-// preflight and what the code sees (the concept's Fig. 5). The sandbox's
-// side (SandboxCredentials, CredentialPicker) is exported for the
-// sandbox pages. Reads need read on the environment, writes write.
+// An environment's HTTP secrets (ADR 0055; ADR 0033 called them
+// credentials): an HTTP API the environment's code calls, by the secret's
+// name or by the API's own name, whose key FeOS adds on the node, outside
+// the pod. The list is the Secrets view's (EnvSecrets.jsx), at the node,
+// whose pages these are: an HTTP secret's page with its check and its
+// uses in the environment (the sandboxes that name it, the services and
+// jobs whose variables reference it and the version their deployments
+// pin, moved to the latest from here, moveToLatest); the form of a new
+// one or a new version, with a preflight and what the code sees. The
+// sandbox's side (SandboxHttpSecrets, HttpSecretPicker) is exported for
+// the sandbox pages. Reads need read on the environment, writes write.
+// The word "credential" is the authentication inside one.
 
 const POLL_MS = 10000;
 
-// saved carries a save's answer to the credential's page, which says it
+// saved carries a save's answer to the HTTP secret's page, which says it
 // once.
 let saved = null;
 
-// Credentials are the pages of a credential of environment env (its
-// name or ID, as the route has it): sel is a credential's name, "new"
-// the form of a new one; edit the form of a new version. Without sel,
-// nothing: the list is the Secrets view's.
-export function Credentials({ tenant, env, sel, edit, ec, navigate }) {
-  if (sel === 'new') return <CredentialEditor tenant={tenant} env={env} name="" ec={ec} navigate={navigate} />;
-  if (sel && edit) return <CredentialEditor key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
-  if (sel) return <CredentialPage key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
+// HttpSecrets are the pages of an HTTP secret of environment env (its
+// name or ID, as the route has it): sel is its name, "new" the form of a
+// new one; edit the form of a new version. Without sel, nothing: the
+// list is the Secrets view's.
+export function HttpSecrets({ tenant, env, sel, edit, ec, navigate }) {
+  if (sel === 'new') return <HttpSecretEditor tenant={tenant} env={env} name="" ec={ec} navigate={navigate} />;
+  if (sel && edit) return <HttpSecretEditor key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
+  if (sel) return <HttpSecretPage key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
   return null;
 }
 
 // go is a link's click that navigates.
 const go = (navigate, to) => (e) => { e.preventDefault(); e.stopPropagation(); navigate(to); };
 
-// BackTo is the way back to the environment's credentials, in its
-// Secrets view.
+// BackTo is the way back to the environment's Secrets view.
 function BackTo({ tenant, env, navigate, children }) {
   return (
     <div className="subhead envsubhead">
-      <button type="button" className="ghost mini" onClick={() => navigate(credentialPath(tenant, env))}>
+      <button type="button" className="ghost mini" onClick={() => navigate(secretsPath(tenant, env))}>
         <Icon name="arrowLeft" size={13} /> secrets</button>
       {children}
     </div>
   );
 }
 
+// refusal is a write's refusal in words, with ferund's code.
+function refusal(e) {
+  const code = e && e.body && e.body.code;
+  return code ? `${code}: ${e.message}` : e.message;
+}
+
 // ------------------------------------------------------------------ page --
 
-function CredentialPage({ tenant, env, name, ec, navigate }) {
+function HttpSecretPage({ tenant, env, name, ec, navigate }) {
   const [cred, setCred] = useState(null);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
@@ -77,7 +85,7 @@ function CredentialPage({ tenant, env, name, ec, navigate }) {
 
   const load = useCallback(async () => {
     try {
-      setCred(await api.getCredential(env, name));
+      setCred(await api.getSecret(env, name));
       setErr('');
     } catch (e) {
       if (e.status === 404) setMissing(true);
@@ -90,18 +98,28 @@ function CredentialPage({ tenant, env, name, ec, navigate }) {
     return (
       <div className="creds">
         <BackTo tenant={tenant} env={env} navigate={navigate} />
-        <p className="empty">No credential <span className="mono">{name}</span> in this environment.</p>
+        <p className="empty">No HTTP secret <span className="mono">{name}</span> in this environment.</p>
       </div>
     );
   }
   if (!cred) return err ? <ErrBox error={err} /> : <p className="empty">Loading…</p>;
+  if (cred.type !== 'http') {
+    const row = secretsPath(tenant, env, 'secret', name);
+    return (
+      <div className="creds">
+        <BackTo tenant={tenant} env={env} navigate={navigate} />
+        <p className="empty"><span className="mono">{name}</span> is a value secret, not an HTTP secret:{' '}
+          <EnvLink to={row} navigate={navigate}>its row in the secrets</EnvLink>.</p>
+      </div>
+    );
+  }
 
   const runCheck = async () => {
     setChecking(true);
     try {
       const path = probe.path.trim();
       const p = path ? { method: probe.method, path } : null;
-      setCheck({ result: await api.checkCredential(env, name, { probe: p }), probe: p });
+      setCheck({ result: await api.checkSecret(env, name, { probe: p }), probe: p });
     } catch (e) {
       setCheck({ result: { ok: false, addresses: [], error: { code: (e.body && e.body.code) || 'error', message: e.message } } });
     } finally {
@@ -110,16 +128,16 @@ function CredentialPage({ tenant, env, name, ec, navigate }) {
   };
   const cr = cred.credential || {};
   const why = ec.write ? undefined : NEEDS.write;
-  const toEdit = credentialPath(tenant, env, name, true);
+  const toEdit = httpSecretPath(tenant, env, name, true);
 
   return (
     <div className="creds">
       <BackTo tenant={tenant} env={env} navigate={navigate} />
-      <PageHead kind="Credential" title={name} mono
+      <PageHead kind="HTTP secret" title={name} mono
         state={<span className="badge acc">version {cred.version}</span>}
         actions={(
           <>
-            <button disabled={!ec.write || checking} title={why || 'the preflight with the stored credential'} onClick={runCheck}>
+            <button disabled={!ec.write || checking} title={why || 'the preflight with the stored key'} onClick={runCheck}>
               <Icon name="check" size={14} /> {checking ? 'Checking…' : 'Check'}</button>
             <a className={'button primary' + (ec.write ? '' : ' disabled')} href={toEdit}
               title={why || 'write a new version'}
@@ -129,8 +147,8 @@ function CredentialPage({ tenant, env, name, ec, navigate }) {
         facts={(
           <>
             <span>upstream <b className="mono cred-up">{cred.upstream}</b></span>
-            <span>reached as <b className="mono">{modeWords(cred)}</b></span>
-            <span>kind <b>{kindLabel(cr.kind)}</b></span>
+            <span>called as <b className="mono">{modeWords(cred)}</b></span>
+            <span>authentication <b>{kindLabel(cr.kind)}</b></span>
             <span>created by <b>{cred.createdBy || '—'}</b></span>
             <span title={fmtDateTime(cred.createdAt)}>version {cred.version} saved <b><Ago iso={cred.createdAt} /></b></span>
           </>)} />
@@ -139,7 +157,7 @@ function CredentialPage({ tenant, env, name, ec, navigate }) {
         <p className="ok small cred-note"><Icon name="check" size={12} />{' '}
           {note.created ? `Saved as version ${note.version}.` : `Unchanged: still version ${note.version}.`}
           {note.created && ((cred.usedBy && cred.usedBy.sandboxes) || []).length > 0 && ' The sandboxes that name it have it now.'}
-          {note.created && needsDeployment(cred.usedBy || {}, cred.version) && ' The bindings get it with a deployment, below.'}
+          {note.created && needsDeployment(cred.usedBy || {}, cred.version) && ' The services get it with a deployment, below.'}
         </p>)}
 
       {check && (
@@ -180,33 +198,33 @@ function CredentialPage({ tenant, env, name, ec, navigate }) {
           onConfirm={async () => {
             setDelErr('');
             try {
-              await api.deleteCredential(env, name);
-              navigate(credentialPath(tenant, env));
+              await api.deleteSecret(env, name);
+              navigate(secretsPath(tenant, env));
             } catch (e) {
               setDelErr(e.message);
             }
-          }}>Delete credential</ArmButton>
+          }}>Delete HTTP secret</ArmButton>
       </section>
     </div>
   );
 }
 
-// Definition is a stored credential's fields, every secret one shown as
+// Definition is a stored HTTP secret's fields, every secret one shown as
 // set.
-function Definition({ cred }) {
+export function Definition({ cred }) {
   const cr = cred.credential || {};
   const set = <span className="cred-set">set</span>;
   const rows = [
     ['upstream', <span className="mono cred-up">{cred.upstream}</span>],
-    ['mode', cred.mode === 'intercept'
-      ? <span>intercept <span className="mono">{hostOf(cred.upstream)}:443</span></span>
-      : <span>by name <span className="mono">http://{cred.name}/…</span></span>],
+    ['called as', cred.mode === 'intercept'
+      ? <span>its own name, intercepted <span className="mono">{hostOf(cred.upstream)}:443</span></span>
+      : <span>the secret&apos;s name <span className="mono">http://{cred.name}/…</span></span>],
     ['paths', (cred.pathPrefixes || []).length ? <span className="mono">{cred.pathPrefixes.join('  ')}</span> : <span className="muted">all</span>],
     ['rate limit', cred.rateLimit ? `${cred.rateLimit.perSecond} per second, burst ${cred.rateLimit.burst}` : <span className="muted">none</span>],
   ];
   if (cred.forwardedHost) rows.push(['forwarded host', 'X-Forwarded-Host and X-Forwarded-Proto sent']);
   rows.push(['CA', cred.caPem ? 'its own CA' : <span className="muted">the WebPKI</span>]);
-  rows.push(['credential', kindLabel(cr.kind)]);
+  rows.push(['authentication', kindLabel(cr.kind)]);
   if (cr.kind === 'headers') {
     for (const h of Object.keys(cr.headers || {}).sort()) rows.push([h, set]);
   }
@@ -234,17 +252,17 @@ function Definition({ cred }) {
   );
 }
 
-// CodeSees is the request the code runs, without a credential, and what
-// comes back of an echoed secret.
+// CodeSees is the request the code runs, without a key, and what comes
+// back of an echoed secret.
 export function CodeSees({ c }) {
   return (
     <div className="cred-sees">
-      <pre className="cred-snip"><span className="c"># in the pod, no credential anywhere</span>{'\n'}$ {curlOf(c)}{'\n'}{'{ …, "token": "'}<span className="red">{REDACTED}</span>{'" }'}</pre>
+      <pre className="cred-snip"><span className="c"># in the pod, no key anywhere</span>{'\n'}$ {curlOf(c)}{'\n'}{'{ …, "token": "'}<span className="red">{REDACTED}</span>{'" }'}</pre>
       <p className="muted small">
         {c.mode === 'intercept'
           ? <>The code calls the API under its own name; the pod trusts FeOS's interception CA for <span className="mono">{hostOf(c.upstream) || 'the host'}</span>.</>
           : <>The code calls plain HTTP to the name; FeOS speaks TLS to the upstream.</>}
-        {' '}FeOS adds the credential on the node, and a secret an answer echoes comes back masked as{' '}
+        {' '}FeOS adds the key on the node, and a secret an answer echoes comes back masked as{' '}
         <span className="mono">{REDACTED}</span>.
       </p>
     </div>
@@ -269,15 +287,20 @@ export function PreflightRows({ result, probe = null }) {
 
 // ---------------------------------------------------------------- used by --
 
-// UsedBy is a credential's uses in its environment: the sandboxes that
-// name it (added and taken out here) and the bindings of its deployments
-// that name it, with the version each pins and one deployment that moves
-// them to the latest.
+// OBJECT_KINDS are the kinds of usedBy's objects ("service/api").
+const OBJECT_KINDS = new Set(['service', 'job']);
+
+// UsedBy is an HTTP secret's uses in its environment: the sandboxes that
+// name it (added and taken out here), each at the latest version, and
+// the services and jobs of the latest deployment whose variables
+// reference it, with the version the deployments pin and one deployment
+// that moves them to the latest.
 function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
   const { sandboxes, refreshPods } = useEnvStatus();
   const name = cred.name;
   const uses = cred.usedBy || {};
   const sbs = uses.sandboxes || [];
+  const objects = (uses.objects || []).map((o) => String(o).split('/')).filter(([k, n]) => OBJECT_KINDS.has(k) && n);
   const bindings = uses.bindings || [];
   const mine = sandboxes || [];
   const sbOf = (id) => mine.find((s) => s.sandboxId === id);
@@ -287,14 +310,14 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
   const [result, setResult] = useState(null);
   const why = ec.write ? undefined : NEEDS.write;
 
-  // setSandbox adds the credential to a sandbox's list, or takes it out.
+  // setSandbox adds the HTTP secret to a sandbox's list, or takes it out.
   const setSandbox = async (id, on) => {
     setBusy('sb:' + id);
     setErr('');
     try {
-      const cur = (await api.getSandboxCredentials(id)).credentials || [];
+      const cur = (await api.getSandboxSecrets(id)).secrets || [];
       const next = on ? [...new Set([...cur, name])] : cur.filter((n) => n !== name);
-      await api.putSandboxCredentials(id, next);
+      await api.putSandboxSecrets(id, next);
       setPick('');
       await onChanged();
       if (refreshPods) refreshPods();
@@ -321,11 +344,50 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
   const free = mine.filter((s) => !sbs.includes(s.sandboxId));
   const state = pinState(uses, cred.version);
   const builder = envPath(tenant, env, 'builder');
+  const deployed = objects.length > 0 || bindings.length > 0;
 
   return (
     <section className="pane">
       <div className="pane-toolbar"><h2><Icon name="link" size={14} /> Used by <span className="count">{usedWords(uses)}</span></h2></div>
       <ErrBox error={err} />
+
+      <h3 className="sect"><Icon name="layers" size={13} /> Services and jobs</h3>
+      <p className="muted small">A service or job whose variable references it (its URL or host) gets it; each deployment
+        pins the version it got, and a new version reaches them with the next deployment.</p>
+      {!deployed && <p className="empty">No service or job of the latest deployment references it.</p>}
+      {deployed && (
+        <div className="tblwrap"><table className="tbl cred-envs">
+          <thead><tr><th>used by</th><th>pins</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td className="small">
+                <span className="inv-uses">
+                  {objects.map(([k, n]) => (
+                    <span key={`${k}/${n}`} className="inv-obj"><span className="muted">{k}</span>{' '}
+                      <EnvLink to={objectPath(tenant, env, `${k}/${n}`)} navigate={navigate} className="mono">{n}</EnvLink></span>))}
+                  {bindings.length > 0 && (
+                    <span className="muted">binding{bindings.length === 1 ? '' : 's'} <span className="mono">{bindings.join(', ')}</span> in the spec</span>)}
+                </span>
+              </td>
+              <td className="small">
+                <span className={state === 'current' ? '' : 'warntext'}>{pinWords(uses)}</span>
+                <span className="muted">
+                  {state === 'behind' && ` · behind v${cred.version}`}
+                  {state === 'rolling out' && ` · v${cred.version} rolling out`}
+                  {state === 'current' && ' · the latest'}
+                </span>
+              </td>
+              <td className="col-actions">
+                {needsDeployment(uses, cred.version) && (
+                  <button className="primary small" disabled={!ec.write || !!busy}
+                    title={why || `a new deployment with ${name} at version ${cred.version}`} onClick={update}>
+                    {busy === 'deploy' ? 'Deploying…' : `Move to v${cred.version}`}</button>)}
+              </td>
+            </tr>
+            {result && (
+              <tr className="subrow"><td colSpan={3}><DeployResult tenant={tenant} env={env} name={name} res={result} navigate={navigate} /></td></tr>)}
+          </tbody>
+        </table></div>)}
 
       <h3 className="sect"><Icon name="box" size={13} /> Sandboxes</h3>
       <p className="muted small">A sandbox of this environment that names it gets the latest version, at once and
@@ -337,7 +399,7 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
           <tbody>
             {sbs.map((id) => {
               const sb = sbOf(id);
-              const to = sandboxPath(tenant, env, id, 'credentials');
+              const to = sandboxPath(tenant, env, id, 'secrets');
               return (
                 <tr key={id}>
                   <td><a className="mono" href={to} onClick={go(navigate, to)}>{id}</a></td>
@@ -361,76 +423,47 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
           <Icon name="plus" size={14} /> {busy === 'sb:' + pick ? 'Adding…' : 'Add'}</button>
       </div>
 
-      <h3 className="sect"><Icon name="layers" size={13} /> Bindings</h3>
-      <p className="muted small">A binding of this environment&apos;s spec names the credential; each deployment pins the
-        version it got, and a new version reaches the services with the next deployment.</p>
-      {bindings.length === 0 && <p className="empty">No binding of a deployment names it.</p>}
-      {bindings.length > 0 && (
-        <div className="tblwrap"><table className="tbl cred-envs">
-          <thead><tr><th>bindings</th><th>pins</th><th></th></tr></thead>
-          <tbody>
-            <tr>
-              <td className="mono small">{bindings.join(', ')}</td>
-              <td className="small">
-                <span className={state === 'current' ? '' : 'warntext'}>{pinWords(uses)}</span>
-                <span className="muted">
-                  {state === 'behind' && ` · behind v${cred.version}`}
-                  {state === 'rolling out' && ` · v${cred.version} rolling out`}
-                  {state === 'current' && ' · the latest'}
-                </span>
-              </td>
-              <td className="col-actions">
-                {needsDeployment(uses, cred.version) && (
-                  <button className="primary small" disabled={!ec.write || !!busy}
-                    title={why || `a new deployment with ${name} at version ${cred.version}`} onClick={update}>
-                    {busy === 'deploy' ? 'Deploying…' : `Update to v${cred.version}`}</button>)}
-              </td>
-            </tr>
-            {result && (
-              <tr className="subrow"><td colSpan={3}><DeployResult tenant={tenant} env={env} res={result} navigate={navigate} /></td></tr>)}
-          </tbody>
-        </table></div>)}
-
       <details className="cred-fold">
         <summary>Use in a service</summary>
-        <p className="small">The environment&apos;s spec names the credential in a binding, and each service (or job)
-          that calls it names the binding. The next deployment pins the latest version:</p>
+        <p className="small">A service (or job) gets it by a variable that references its URL, which the code calls; the
+          next deployment pins the latest version:</p>
         <div className="snippet"><pre className="cred-snip">{specSnippet(name)}</pre><CopyBtn text={specSnippet(name)} title="copy" /></div>
-        <p className="muted small">The binding takes nothing else: the upstream, paths, rate and credential are the
-          credential&apos;s.</p>
-        <p className="muted small">The code then calls <span className="mono">{curlOf(cred).replace(/^curl -s /, '')}</span>.
-          Write it in{' '}
-          <EnvLink to={builder} navigate={navigate}>New deployment</EnvLink>: a service&apos;s form offers this
-          environment&apos;s credentials.</p>
+        <p className="muted small">The variable gets <span className="mono">{refValue(cred, 'url')}</span>, never the key;{' '}
+          <span className="mono">key: host</span> gets <span className="mono">{refValue(cred, 'host')}</span>. The code then calls{' '}
+          <span className="mono">{curlOf(cred).replace(/^curl -s /, '')}</span>. Write it in{' '}
+          <EnvLink to={builder} navigate={navigate}>New deployment</EnvLink>: a variable&apos;s kind &quot;URL of an HTTP
+          secret&quot;.</p>
       </details>
     </section>
   );
 }
 
-// moveToLatest makes a deployment of env from its latest one with every
-// binding that names credential name at version: {deployment} or, when
-// the plan finds it invalid, {findings}.
+// moveToLatest makes a deployment of env from its latest one with HTTP
+// secret name at version: its pin and every binding of the spec that
+// names it moved (pinnedSpec): {deployment} or, when the plan finds it
+// invalid, {findings}.
 export async function moveToLatest(env, name, version) {
   const e = await api.getEnvironment(env);
   const n = e.deployment;
   const d = await api.getDeployment(env, n);
-  const { spec, bindings } = pinnedSpec(d.spec, name, version);
-  if (!bindings.length) return { error: `deployment #${n} names no binding of ${name}` };
+  const { spec, moved, bindings } = pinnedSpec(d.spec, name, version);
+  if (!moved) return { error: `deployment #${n} pins no version of ${name}` };
   const plan = await api.planEnvironment(env, spec, n);
   if (!plan.valid) return { findings: plan.findings || [], error: 'the plan is invalid' };
-  const dep = await api.applyDeployment(env, { spec, base: n, message: `credential ${name} to version ${version}` });
-  return { deployment: dep, bindings };
+  const dep = await api.applyDeployment(env, { spec, base: n, message: `HTTP secret ${name} to version ${version}` });
+  return { deployment: dep, bindings, version };
 }
 
 // DeployResult is what came of moveToLatest: the deployment it made, or
 // why it made none.
-export function DeployResult({ tenant, env, res, navigate }) {
+export function DeployResult({ tenant, env, name = '', res, navigate }) {
   if (res.deployment) {
     const to = envPath(tenant, env, 'deployments', String(res.deployment.number));
     return (
       <span className="ok small">
         <Icon name="check" size={12} /> Deployment <a className="mono" href={to} onClick={go(navigate, to)}>#{res.deployment.number}</a>{' '}
-        <span className="muted">{res.deployment.state}</span> · bindings <span className="mono">{res.bindings.join(', ')}</span>
+        <span className="muted">{res.deployment.state}</span>
+        {name && res.version ? <> · <span className="mono">{name}</span> at v{res.version}</> : null}
       </span>
     );
   }
@@ -447,24 +480,43 @@ export function DeployResult({ tenant, env, res, navigate }) {
 
 // ------------------------------------------------------------------ form --
 
-function CredentialEditor({ tenant, env, name, ec, navigate }) {
+function HttpSecretEditor({ tenant, env, name, ec, navigate }) {
   const [cred, setCred] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!name) return undefined;
     let live = true;
-    api.getCredential(env, name).then((c) => { if (live) setCred(c); }, (e) => { if (live) setErr(e.message); });
+    api.getSecret(env, name).then((c) => { if (live) setCred(c); }, (e) => { if (live) setErr(e.message); });
     return () => { live = false; };
   }, [env, name]);
   if (name && !cred) return err ? <ErrBox error={err} /> : <p className="empty">Loading…</p>;
-  return <CredentialForm tenant={tenant} env={env} cred={cred} ec={ec} navigate={navigate} />;
+  if (cred && cred.type !== 'http') return <ErrBox error={`${name} is a value secret: a secret's kind does not change`} />;
+  return <HttpSecretForm tenant={tenant} env={env} cred={cred} ec={ec} navigate={navigate} />;
 }
 
-// CredentialForm writes a new credential of env (cred null) or a new
-// version of cred, whose secret fields an empty field keeps. Its
-// preflight checks the draft as it stands: a kept field is the latest
-// version's value, which never leaves ferund.
-export function CredentialForm({ tenant, env, cred, ec, navigate }) {
+// originOf is an upstream's origin, as the keep rule compares it.
+function originOf(u) {
+  return String(u || '').trim().replace(/\/+$/, '').toLowerCase().replace(/:443$/, '');
+}
+
+// rebinds tells whether form f sends the key to another API than stored
+// HTTP secret cred: its origin, its CA or its token URL changed (ADR
+// 0055). Then no secret field is kept: each is entered again.
+export function rebinds(f, cred) {
+  if (!cred) return false;
+  const cr = cred.credential || {};
+  const pemOf = (s) => String(s || '').trim();
+  if (originOf(f.upstream) !== originOf(cred.upstream)) return true;
+  if (pemOf(f.caPem) !== pemOf(cred.caPem)) return true;
+  return f.kind === 'oauth2' && cr.kind === 'oauth2' && String(f.tokenUrl || '').trim() !== String(cr.tokenUrl || '');
+}
+
+// HttpSecretForm writes a new HTTP secret of env (cred null) or a new
+// version of cred, whose secret fields an empty field keeps while its
+// origin, CA and token URL stay. Its preflight checks the draft as it
+// stands: a kept field is the latest version's value, which never
+// leaves ferund.
+export function HttpSecretForm({ tenant, env, cred, ec, navigate }) {
   const [f, setF] = useState(() => (cred ? formOf(cred) : emptyForm()));
   const [bad, setBad] = useState('');
   const [saving, setSaving] = useState(false);
@@ -476,21 +528,25 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
   const name = editing ? cred.name : f.name.trim();
   const view = useMemo(() => ({ ...f, name: name || '<name>', pathPrefixes: prefixesOf(f.pathPrefixes) }), [f, name]);
   const kept = keptOf(f);
+  const rebound = rebinds(f, cred);
   const host = hostOf(f.upstream);
-  const back = editing ? credentialPath(tenant, env, cred.name) : credentialPath(tenant, env);
+  const back = editing ? httpSecretPath(tenant, env, cred.name) : secretsPath(tenant, env);
   const why = ec.write ? undefined : NEEDS.write;
+  const again = rebound && kept.length > 0
+    ? `the key goes to another API now: enter ${kept.join(', ')} again` : '';
 
   const runPreflight = async () => {
     setBad('');
+    if (again) { setBad(again); return; }
     setPreBusy(true);
     try {
-      const binding = bindingOf(f);
+      const binding = definitionOf(f);
       const path = probe.path.trim();
       const p = path ? { method: probe.method, path } : null;
-      // A new credential without a valid name yet is checked under a
+      // A new HTTP secret without a valid name yet is checked under a
       // stand-in: the name decides nothing of the check.
       const as = isName(name) ? name : 'preflight';
-      setPre({ result: await api.checkCredential(env, as, { binding, probe: p }), probe: p, kept });
+      setPre({ result: await api.checkSecret(env, as, { binding, probe: p }), probe: p, kept });
     } catch (e) {
       if (e.status) setPre({ result: { ok: false, addresses: [], error: { code: (e.body && e.body.code) || 'error', message: e.message } } });
       else setBad(e.message);
@@ -510,20 +566,24 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
       setBad('"new" is the form\'s own address; choose another name');
       return;
     }
+    if (again) {
+      setBad(again);
+      return;
+    }
     let body;
     try {
-      body = bindingOf(f);
+      body = definitionOf(f);
     } catch (e2) {
       setBad(e2.message);
       return;
     }
     setSaving(true);
     try {
-      const out = await api.putCredential(env, name, body);
+      const out = await api.putHttpSecret(env, name, body);
       saved = { env, name, version: out.version, created: !editing || out.version !== cred.version };
-      navigate(credentialPath(tenant, env, name));
+      navigate(httpSecretPath(tenant, env, name));
     } catch (e2) {
-      setBad(e2.body && e2.body.code ? `${e2.body.code}: ${e2.message}` : e2.message);
+      setBad(refusal(e2));
     } finally {
       setSaving(false);
     }
@@ -533,7 +593,7 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
     const isSet = !!f.set[k];
     const props = {
       value: f[k], onChange: set(k), autoComplete: 'new-password',
-      placeholder: isSet ? 'set — leave empty to keep' : '',
+      placeholder: isSet ? (rebound ? 'set — enter it again for the new API' : 'set — leave empty to keep') : '',
     };
     return (
       <label className="cred-field">
@@ -554,7 +614,7 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
   return (
     <form className="creds" onSubmit={save}>
       <BackTo tenant={tenant} env={env} navigate={navigate} />
-      <PageHead kind={editing ? 'Edit credential' : 'New credential'} title={editing ? cred.name : name || 'New credential'}
+      <PageHead kind={editing ? 'Edit HTTP secret' : 'New HTTP secret'} title={editing ? cred.name : name || 'New HTTP secret'}
         mono={editing || !!name}
         state={editing ? <span className="badge">version {cred.version} → {cred.version + 1}</span> : null}
         actions={(
@@ -563,31 +623,26 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
             <button type="submit" className="primary" disabled={!ec.write || saving} title={why}>
               <Icon name="check" size={14} /> {saving ? 'Saving…' : editing ? 'Save a new version' : 'Save'}</button>
           </>)}
-        facts={<span>Code calls the upstream through FeOS. FeOS adds the credential on the node, outside the pod.</span>} />
+        facts={<span>An HTTP API the platform calls with the key: the code calls it through FeOS, which adds the key on
+          the node, outside the pod.</span>} />
       {bad && <ErrBox error={bad} />}
       <div className="cred-grid">
         <section className="pane cred-form">
-          <div className="pane-toolbar"><h2><Icon name="plug" size={14} /> How it is applied</h2></div>
+          <div className="pane-toolbar"><h2><Icon name="plug" size={14} /> The API</h2></div>
           {!editing && (
             <label className="cred-field">
               <span className="cred-label">name</span>
               <input className="mono" value={f.name} onChange={set('name')} placeholder="github" autoFocus />
-              <span className="cred-hint">A DNS label. This environment&apos;s sandboxes and bindings name it; in the name mode the code calls{' '}
+              <span className="cred-hint">A DNS label. A service gets it by a variable that references its URL, a sandbox
+                of this environment names it; in the name mode the code calls{' '}
                 <span className="mono">http://{f.name.trim() || '<name>'}/…</span>.</span>
             </label>)}
-          <div className="cred-field">
-            <span className="cred-label">kind</span>
-            <span className="cred-seg" role="group" aria-label="kind">
-              {KINDS.map((k) => (
-                <button key={k.key} type="button" className={f.kind === k.key ? 'on' : ''} onClick={() => setF({ ...f, kind: k.key })}>{k.label}</button>))}
-            </span>
-          </div>
           {textInput('upstream', 'upstream', 'https://api.github.com', 'An https origin, no path; restrict paths below.')}
           <div className="cred-field">
-            <span className="cred-label">how the code reaches it</span>
+            <span className="cred-label">how the code calls it</span>
             <span className="cred-seg" role="group" aria-label="mode">
               <button type="button" className={f.mode !== 'intercept' ? 'on' : ''} onClick={() => setF({ ...f, mode: 'name' })}>
-                by name <span className="mono">http://{f.name.trim() || (editing ? cred.name : '<name>')}/…</span></button>
+                by its name <span className="mono">http://{f.name.trim() || (editing ? cred.name : '<name>')}/…</span></button>
               <button type="button" className={f.mode === 'intercept' ? 'on' : ''} onClick={() => setF({ ...f, mode: 'intercept' })}>
                 intercept <span className="mono">{host || '<host>'}:443</span></button>
             </span>
@@ -595,11 +650,16 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
               {f.mode === 'intercept'
                 ? 'The code calls the API under its own name, unchanged; the pod trusts an interception CA for that host.'
                 : 'The code calls plain HTTP to the name; FeOS speaks TLS to the upstream.'}
+              {editing && ' A change of the mode keeps the key: it goes to the same API.'}
             </span>
           </div>
 
           <fieldset className="cred-fieldset">
             <legend>credential · {kindLabel(f.kind)}</legend>
+            <span className="cred-seg" role="group" aria-label="kind">
+              {KINDS.map((k) => (
+                <button key={k.key} type="button" className={f.kind === k.key ? 'on' : ''} onClick={() => setF({ ...f, kind: k.key })}>{k.label}</button>))}
+            </span>
             {f.kind === 'headers' && (
               <>
                 {f.headers.map((h, i) => (
@@ -607,7 +667,8 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
                     <input className="mono" value={h.name} placeholder="Authorization" aria-label="header name"
                       onChange={(e) => setHeader(i, { name: e.target.value })} />
                     <input type="password" value={h.value} aria-label="header value" autoComplete="new-password"
-                      placeholder={h.set ? 'set — leave empty to keep' : 'Bearer …'} onChange={(e) => setHeader(i, { value: e.target.value })} />
+                      placeholder={h.set ? (rebound ? 'set — enter it again for the new API' : 'set — leave empty to keep') : 'Bearer …'}
+                      onChange={(e) => setHeader(i, { value: e.target.value })} />
                     <button type="button" className="iconbtn" title="remove the header"
                       onClick={() => setF({ ...f, headers: f.headers.filter((_, j) => j !== i) })}><Icon name="x" size={13} /></button>
                   </div>))}
@@ -635,8 +696,11 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
                 </label>
                 {secretInput('keyPem', 'key (PEM)', true)}
               </>)}
-            {editing && kept.length > 0 && (
+            {editing && kept.length > 0 && !rebound && (
               <span className="cred-hint">Kept from version {cred.version}: <span className="mono">{kept.join(', ')}</span>.</span>)}
+            {editing && rebound && (
+              <span className="cred-hint warntext">The upstream, CA or token URL changed: the key goes to another API, so
+                every secret field is entered again.</span>)}
           </fieldset>
 
           {textInput('pathPrefixes', 'only these paths', '/repos/kino/ /user', 'Path prefixes, separated by blanks; empty: every path.')}
@@ -659,7 +723,7 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
           <div className="pane-toolbar"><h2><Icon name="shield" size={14} /> Preflight</h2>
             {pre && pre.result && <span className={'badge ' + (pre.result.ok ? 'ok' : 'bad')}>{pre.result.ok ? 'ok' : 'failed'}</span>}</div>
           <p className="muted small">Resolves the upstream, checks its certificate, fetches a token for OAuth2, and with a
-            path sends one request with the credential, before anything is stored.</p>
+            path sends one request with the key, before anything is stored.</p>
           <div className="cred-probe">
             <select value={probe.method} onChange={(e) => setProbe({ ...probe, method: e.target.value })}>
               <option>GET</option><option>HEAD</option>
@@ -684,11 +748,11 @@ export function CredentialForm({ tenant, env, cred, ec, navigate }) {
 
 // ------------------------------------------------------------- sandboxes --
 
-// SandboxCredentials are the credentials a sandbox names, of its
+// SandboxHttpSecrets are the HTTP secrets a sandbox names, of its
 // environment env, with their upstream and version, and the way to add
 // and remove one (write on the environment): the whole list is written,
-// and the running pod gets it at once.
-export function SandboxCredentials({ tenant, env, sandboxId, write, navigate }) {
+// and the running pod gets it at once, each at its latest version.
+export function SandboxHttpSecrets({ tenant, env, sandboxId, write, navigate }) {
   const [names, setNames] = useState(null);
   const [all, setAll] = useState(null);
   const [err, setErr] = useState('');
@@ -697,9 +761,9 @@ export function SandboxCredentials({ tenant, env, sandboxId, write, navigate }) 
   const [done, setDone] = useState('');
   const load = useCallback(async () => {
     try {
-      const [mine, list] = await Promise.all([api.getSandboxCredentials(sandboxId), api.listCredentials(env)]);
-      setNames(mine.credentials || []);
-      setAll(list.credentials || []);
+      const [mine, list] = await Promise.all([api.getSandboxSecrets(sandboxId), api.listSecrets(env)]);
+      setNames(mine.secrets || []);
+      setAll(httpSecretsOf(list.secrets));
       setErr('');
     } catch (e) {
       setErr(e.message);
@@ -713,8 +777,8 @@ export function SandboxCredentials({ tenant, env, sandboxId, write, navigate }) 
     setErr('');
     setDone('');
     try {
-      const r = await api.putSandboxCredentials(sandboxId, next);
-      setNames(r.credentials || next);
+      const r = await api.putSandboxSecrets(sandboxId, next);
+      setNames(r.secrets || next);
       setPick('');
       setDone(ok);
     } catch (e) {
@@ -725,23 +789,34 @@ export function SandboxCredentials({ tenant, env, sandboxId, write, navigate }) 
   };
 
   if (!names) return err ? <ErrBox error={err} /> : <p className="empty">Loading…</p>;
-  const of = (n) => (all || []).find((c) => c.name === n);
-  const free = (all || []).filter((c) => !names.includes(c.name));
-  const list = credentialPath(tenant, env);
+  return (
+    <SandboxHttpList tenant={tenant} env={env} names={names} all={all || []} write={write} why={why} err={err} busy={busy}
+      pick={pick} setPick={setPick} done={done} navigate={navigate}
+      onRemove={(n) => put('rm:' + n, names.filter((x) => x !== n), `${n} taken from the sandbox.`)}
+      onAdd={(n) => put('add', [...names, n], `${n} added: the pod reaches it now.`)} />
+  );
+}
+
+// SandboxHttpList is SandboxHttpSecrets' list, its data given.
+export function SandboxHttpList({ tenant, env, names, all, write, why, err = '', busy = '', pick = '', setPick = () => {}, done = '',
+  navigate, onRemove = () => {}, onAdd = () => {} }) {
+  const of = (n) => all.find((c) => c.name === n);
+  const free = all.filter((c) => !names.includes(c.name));
+  const list = secretsPath(tenant, env);
   return (
     <div className="cred-sbx">
-      <p className="muted small">The credentials of its environment this sandbox&apos;s code calls by name; FeOS adds
-        each on the node, outside the pod. A change reaches the running pod at once, without a restart.</p>
+      <p className="muted small">The HTTP secrets of its environment this sandbox&apos;s code calls; FeOS adds each key on
+        the node, outside the pod. A change reaches the running pod at once, without a restart.</p>
       <ErrBox error={err} />
       {done && <p className="ok small"><Icon name="check" size={12} /> {done}</p>}
-      {names.length === 0 && <p className="empty">It names no credential.</p>}
+      {names.length === 0 && <p className="empty">It names no HTTP secret.</p>}
       {names.length > 0 && (
         <div className="tblwrap"><table className="tbl">
-          <thead><tr><th>credential</th><th>upstream</th><th>the code calls</th><th>version</th><th></th></tr></thead>
+          <thead><tr><th>HTTP secret</th><th>upstream</th><th>the code calls</th><th>version</th><th></th></tr></thead>
           <tbody>
             {names.map((n) => {
               const cr = of(n);
-              const to = credentialPath(tenant, env, n);
+              const to = httpSecretPath(tenant, env, n);
               return (
                 <tr key={n}>
                   <td><a className="mono" href={to} onClick={go(navigate, to)}>{n}</a></td>
@@ -749,8 +824,7 @@ export function SandboxCredentials({ tenant, env, sandboxId, write, navigate }) 
                   <td className="mono small">{cr ? curlOf(cr).replace(/^curl -s /, '') : '—'}</td>
                   <td className="mono small">{cr ? `v${cr.version}` : '—'} <span className="muted">· the latest</span></td>
                   <td className="col-actions">
-                    <button className="ghost small" disabled={!write || !!busy} title={why}
-                      onClick={() => put('rm:' + n, names.filter((x) => x !== n), `${n} taken from the sandbox.`)}>
+                    <button className="ghost small" disabled={!write || !!busy} title={why} onClick={() => onRemove(n)}>
                       {busy === 'rm:' + n ? 'Removing…' : 'Remove'}</button>
                   </td>
                 </tr>
@@ -758,41 +832,41 @@ export function SandboxCredentials({ tenant, env, sandboxId, write, navigate }) 
             })}
           </tbody>
         </table></div>)}
-      <form className="createpanel" onSubmit={(e) => {
-        e.preventDefault();
-        if (pick) put('add', [...names, pick], `${pick} added: the pod reaches it now.`);
-      }}>
+      <form className="createpanel" onSubmit={(e) => { e.preventDefault(); if (pick) onAdd(pick); }}>
         <select value={pick} onChange={(e) => setPick(e.target.value)} disabled={!write || !free.length} title={why}>
-          <option value="">{free.length ? 'add a credential…' : (all || []).length ? 'it names every credential' : 'the environment has no credential yet'}</option>
+          <option value="">{free.length ? 'add an HTTP secret…' : all.length ? 'it names every HTTP secret' : 'the environment has no HTTP secret yet'}</option>
           {free.map((c) => <option key={c.name} value={c.name}>{c.name} · {c.upstream}</option>)}
         </select>
         <button type="submit" disabled={!write || !pick || !!busy} title={why}><Icon name="plus" size={14} /> {busy === 'add' ? 'Adding…' : 'Add'}</button>
-        <a className="small" href={list} onClick={go(navigate, list)}>the environment&apos;s credentials →</a>
+        <a className="small" href={list} onClick={go(navigate, list)}>the environment&apos;s secrets →</a>
       </form>
-      <p className="muted small">The sandbox&apos;s own HTTP set, which its token writes (<code className="mono">PUT /api/v1/sandboxes/&lt;id&gt;/http</code>),
-        doesn&apos;t show here.</p>
     </div>
   );
 }
 
-// CredentialPicker picks credentials of env for a new sandbox there.
-export function CredentialPicker({ tenant, env, value, onChange, disabled, navigate }) {
+// HttpSecretPicker picks HTTP secrets of env for a new sandbox there.
+export function HttpSecretPicker({ tenant, env, value, onChange, disabled, navigate }) {
   const [list, setList] = useState(null);
   useEffect(() => {
     let live = true;
     setList(null);
     if (!env) return undefined;
-    api.listCredentials(env).then((r) => { if (live) setList(r.credentials || []); }, () => { if (live) setList([]); });
+    api.listSecrets(env).then((r) => { if (live) setList(httpSecretsOf(r.secrets)); }, () => { if (live) setList([]); });
     return () => { live = false; };
   }, [env]);
   if (!env || !list) return null;
+  return <HttpSecretChoice tenant={tenant} env={env} list={list} value={value} onChange={onChange} disabled={disabled} navigate={navigate} />;
+}
+
+// HttpSecretChoice is the picker, the environment's HTTP secrets given.
+export function HttpSecretChoice({ tenant, env, list, value, onChange, disabled, navigate }) {
   const toggle = (n) => onChange(value.includes(n) ? value.filter((x) => x !== n) : [...value, n]);
-  const toNew = newCredentialPath(tenant, env);
+  const toNew = newHttpSecretPath(tenant, env);
   return (
     <fieldset className="sbx-fieldset">
-      <legend>credentials <span className="muted">· optional</span></legend>
+      <legend>HTTP secrets <span className="muted">· optional</span></legend>
       {list.length === 0 && (
-        <span className="sbx-hint">The environment has no credential yet.{navigate && (
+        <span className="sbx-hint">The environment has no HTTP secret yet.{navigate && (
           <> <a href={toNew} onClick={go(navigate, toNew)}>Make one</a> in its Secrets.</>)}</span>)}
       <div className="cred-pick">
         {list.map((c) => (
@@ -801,7 +875,7 @@ export function CredentialPicker({ tenant, env, value, onChange, disabled, navig
             <span><b className="mono">{c.name}</b> <span className="muted mono small">{c.upstream}</span></span>
           </label>))}
       </div>
-      {list.length > 0 && <span className="sbx-hint">The code calls each by its name; FeOS adds the credential on the node.</span>}
+      {list.length > 0 && <span className="sbx-hint">The sandbox gets each at its latest version; FeOS adds the key on the node.</span>}
     </fieldset>
   );
 }

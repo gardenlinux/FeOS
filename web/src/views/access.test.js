@@ -3,9 +3,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  accessOf, addonMark, bindingOf, bindingSource, credentialBinding, credentialPinNote, fieldsWords, fmtNumber,
-  identityReaders, inventoryOf, keyAtNode, kindShort, podSubject, problemWords, secretPinNote, secretUses, soonestCert,
-  strayUsage, subjectParts, upstreamRow, usageOf, usageTone, usageWords, usersWords, withKeys, workloadOf,
+  INVENTORY_GROUPS, accessOf, addonMark, bindingOf, bindingSource, fieldsWords, fmtNumber, groupRows, httpOf, httpPinNote,
+  identityReaders, inventoryOf, keyAtNode, kindShort, kindsOf, podSubject, problemWords, secretPinNote, secretUses,
+  soonestCert, strayUsage, subjectParts, upstreamRow, usageOf, usageTone, usageWords, usersWords, withKeys, workloadOf,
 } from './access.js';
 import { readCatalog } from './catalog.js';
 import { reachModel } from './reach.js';
@@ -19,6 +19,10 @@ const catalog = {
   ]),
 };
 
+// A service api with an HTTP secret erp by a variable (ADR 0055), a
+// binding stated in the spec (mail, its key a value secret) and one that
+// names an HTTP secret (github, an environment's credential before),
+// its addons, a value secret and a registry login.
 const spec = {
   services: {
     api: {
@@ -29,28 +33,41 @@ const spec = {
         SESSION_KEY: { secret: 'session-key' },
         NATS_URL: { addon: 'bus', key: 'url' },
         NATS_HOST: { addon: 'bus', key: 'host' },
+        ERP_URL: { secret: 'erp', key: 'url' },
+        ERP_HOST: { secret: 'erp', key: 'host' },
       },
       imageCredentials: { username: 'bot', password: { secret: 'ghcr-pull' } },
-      bindings: ['erp', 'github'],
+      bindings: ['mail', 'github'],
     },
     web: { image: 'ghcr.io/x/web:1', env: { NATS_HOST: { addon: 'bus', key: 'host' } } },
   },
-  jobs: { migrate: { image: 'ghcr.io/x/api:1', env: { DATABASE_URL: { addon: 'db', key: 'url', role: 'owner' } } } },
+  jobs: {
+    migrate: { image: 'ghcr.io/x/api:1', env: { DATABASE_URL: { addon: 'db', key: 'url', role: 'owner' }, ERP: { secret: 'erp', key: 'url' } } },
+  },
   addons: { db: { type: 'postgres' }, cache: { type: 'valkey' }, bus: { type: 'nats' }, spare: { type: 'valkey' } },
   bindings: {
-    erp: { upstream: 'https://api.vendor.example', mode: 'intercept',
-      credential: { kind: 'oauth2', clientId: 'radar', clientSecret: { secret: 'erp-secret' }, tokenUrl: 'https://id.vendor.example/token' } },
+    mail: { upstream: 'https://api.mail.example', credential: { kind: 'basic', user: 'app', password: { secret: 'mail-pass' } } },
     github: { credentialRef: { name: 'github', version: 3 } },
   },
-  secrets: { 'session-key': { version: 2 }, 'erp-secret': { version: 1 } },
+  secrets: {
+    'session-key': { version: 2 }, 'mail-pass': { version: 1 },
+    erp: { version: 2, type: 'http', upstream: 'https://api.vendor.example', mode: 'intercept' },
+  },
 };
 
-const credentials = [
-  { name: 'github', version: 4, upstream: 'https://api.github.com', mode: 'name', kind: 'headers',
-    usedBy: { sandboxes: [], bindings: ['github'], latest: 3, deployed: 3 } },
-  { name: 'old', version: 1, upstream: 'https://old.example', mode: 'name', kind: 'basic' },
-  { name: 'models', version: 2, upstream: 'https://models.example', mode: 'name', kind: 'headers',
-    usedBy: { sandboxes: ['s2', 's1'], bindings: [], latest: 0, deployed: 0 } },
+// The environment's secrets, both kinds, as GET …/secrets answers them.
+const secrets = [
+  { name: 'erp', type: 'http', version: 3, upstream: 'https://api.vendor.example', mode: 'intercept', credential: { kind: 'oauth2' },
+    usedBy: { sandboxes: ['s1'], objects: ['service/api', 'job/migrate'], latest: 2, deployed: 2 } },
+  { name: 'github', type: 'http', version: 4, upstream: 'https://api.github.com', mode: 'name', credential: { kind: 'headers' },
+    usedBy: { sandboxes: [], objects: [], bindings: ['github'], latest: 3, deployed: 3 } },
+  { name: 'models', type: 'http', version: 2, upstream: 'https://models.example', mode: 'name', credential: { kind: 'headers' },
+    usedBy: { sandboxes: ['s2', 's1'], objects: [], latest: 0, deployed: 0 } },
+  { name: 'old', type: 'http', version: 1, upstream: 'https://old.example', mode: 'name', credential: { kind: 'basic' },
+    usedBy: { sandboxes: [], objects: [], latest: 0, deployed: 0 } },
+  { name: 'session-key', type: 'value', version: 2 },
+  { name: 'mail-pass', type: 'value', version: 1 },
+  { name: 'leftover', type: 'value', version: 1 },
 ];
 
 describe('addonMark', () => {
@@ -69,30 +86,44 @@ describe('addonMark', () => {
   });
 });
 
+describe('kindsOf', () => {
+  it("takes a secret's kind from the environment's list, else from the spec", () => {
+    const k = kindsOf(spec, secrets);
+    expect([k.get('erp'), k.get('github'), k.get('session-key'), k.get('ghcr-pull')]).toEqual(['http', 'http', 'value', 'value']);
+    // Without the list: a reference with a key, a pin of type http and a
+    // binding's credentialRef say http; anything else is a value.
+    const bare = kindsOf(spec, []);
+    expect([bare.get('erp'), bare.get('github'), bare.get('session-key'), bare.get('mail-pass')]).toEqual(['http', 'http', 'value', 'value']);
+    // An older ferund's item without a type is a value.
+    expect(kindsOf({}, [{ name: 'x', version: 1 }]).get('x')).toBe('value');
+  });
+});
+
 describe('bindingOf', () => {
-  it('reads an inline binding', () => {
-    expect(bindingOf(spec, 'erp', credentials)).toEqual({
-      name: 'erp', upstream: 'https://api.vendor.example', mode: 'intercept', kind: 'oauth2',
-      reachedAs: 'api.vendor.example', credential: null, secrets: ['erp-secret'],
+  it('reads a binding stated in the spec', () => {
+    expect(bindingOf(spec, 'mail', secrets)).toEqual({
+      name: 'mail', source: 'binding', upstream: 'https://api.mail.example', mode: 'name', kind: 'basic',
+      reachedAs: 'http://mail', credential: null, secrets: ['mail-pass'],
     });
   });
-  it("fills a credential reference in from the environment's credential", () => {
-    expect(bindingOf(spec, 'github', credentials)).toEqual({
-      name: 'github', upstream: 'https://api.github.com', mode: 'name', kind: 'headers',
+  it('fills a credentialRef in from the HTTP secret of its name', () => {
+    expect(bindingOf(spec, 'github', secrets)).toEqual({
+      name: 'github', source: 'binding', upstream: 'https://api.github.com', mode: 'name', kind: 'headers',
       reachedAs: 'http://github', credential: { name: 'github', version: 3 }, secrets: [],
     });
   });
 });
 
 describe('accessOf', () => {
-  it("lists a service's access sorted by where the key lives", () => {
-    const rows = accessOf(spec, 'services', 'api', { catalog, credentials });
+  it("lists a service's access sorted by where the key lives, an HTTP secret once for its variables", () => {
+    const rows = accessOf(spec, 'services', 'api', { catalog, secrets });
     expect(rows.map((r) => [r.mark, r.kind, r.target.name])).toEqual([
       ['identity', 'addon', 'cache'],
       ['identity', 'addon', 'db'],
-      ['offloaded', 'binding', 'erp'],
+      ['offloaded', 'http', 'erp'],
       ['offloaded', 'image', 'ghcr-pull'],
-      ['offloaded', 'binding', 'github'],
+      ['offloaded', 'http', 'github'],
+      ['offloaded', 'binding', 'mail'],
       ['container', 'addon', 'bus'],
       ['container', 'secret', 'session-key'],
     ]);
@@ -100,6 +131,22 @@ describe('accessOf', () => {
     expect(db.variables).toEqual(['DATABASE_URL']);
     expect(db.fields).toEqual({ role: 'api_svc', database: 'app' });
     expect(rows.find((r) => r.target.name === 'bus').variables).toEqual(['NATS_HOST', 'NATS_URL']);
+  });
+  it('gives an HTTP secret its variables and keys, the version the spec pins and the latest', () => {
+    const rows = accessOf(spec, 'services', 'api', { catalog, secrets });
+    expect(rows.find((r) => r.target.name === 'erp')).toMatchObject({
+      variables: ['ERP_HOST', 'ERP_URL'], keys: ['host', 'url'], via: [],
+      http: { name: 'erp', source: 'http', upstream: 'https://api.vendor.example', mode: 'intercept', kind: 'oauth2',
+        reachedAs: 'api.vendor.example', version: 3, pinned: 2, known: true },
+    });
+    // A binding of the spec that names an HTTP secret is that HTTP secret's row, through it.
+    expect(rows.find((r) => r.target.name === 'github')).toMatchObject({ kind: 'http', variables: [], via: ['github'],
+      http: { pinned: 3, version: 4, reachedAs: 'http://github' } });
+  });
+  it('knows an HTTP secret from the spec alone, without its definition', () => {
+    const rows = accessOf(spec, 'jobs', 'migrate', { catalog });
+    expect(rows.find((r) => r.target.name === 'erp')).toMatchObject({ kind: 'http', mark: 'offloaded',
+      http: { known: false, pinned: 2, version: 0 } });
   });
   it('gives an addon reached by host alone no mark', () => {
     expect(accessOf(spec, 'services', 'web', { catalog })).toEqual([
@@ -110,9 +157,9 @@ describe('accessOf', () => {
 });
 
 describe('secretUses', () => {
-  it("names a binding's users for a secret its credential names", () => {
-    expect(secretUses(spec, 'erp-secret')).toEqual([
-      { from: { key: 'services', name: 'api' }, mark: 'offloaded', how: 'binding', binding: 'erp' },
+  it("names a binding's users for a value secret its credential names", () => {
+    expect(secretUses(spec, 'mail-pass')).toEqual([
+      { from: { key: 'services', name: 'api' }, mark: 'offloaded', how: 'binding', binding: 'mail' },
     ]);
   });
   it('tells a variable from a registry login', () => {
@@ -122,34 +169,65 @@ describe('secretUses', () => {
 });
 
 describe('inventoryOf', () => {
-  const secrets = [{ name: 'session-key', version: 2 }, { name: 'erp-secret', version: 1 }, { name: 'leftover', version: 1 }];
-  const rows = inventoryOf(spec, { catalog, credentials, secrets });
+  const rows = inventoryOf(spec, { catalog, secrets });
   const row = (kind, name) => rows.find((r) => r.kind === kind && r.name === name);
 
-  it('marks a secret by its uses and says when it has no value or no user', () => {
-    expect(row('secret', 'session-key')).toMatchObject({ marks: ['container'], users: [{ key: 'services', name: 'api' }], state: 'set' });
-    expect(row('secret', 'ghcr-pull')).toMatchObject({ marks: ['offloaded'], state: 'missing' });
-    expect(row('secret', 'leftover')).toMatchObject({ marks: [], users: [], state: 'unused' });
+  it('puts each key once, where it lives: an HTTP secret at the node whoever uses it', () => {
+    const at = (place) => groupRows(rows, place).map((r) => `${r.kind} ${r.name}`);
+    expect(INVENTORY_GROUPS.map((g) => g.place)).toEqual(['identity', 'offloaded', 'container', 'unused']);
+    expect(at('identity')).toEqual(['addon cache', 'addon db', 'addon spare']);
+    expect(at('offloaded')).toEqual(['http erp', 'http github', 'http models', 'http old', 'binding mail', 'value ghcr-pull']);
+    expect(at('container')).toEqual(['value session-key', 'addon bus']);
+    expect(at('unused')).toEqual(['value leftover']);
+    // The key of a binding of the spec is its value secret: in its row, not one of its own.
+    expect(row('value', 'mail-pass')).toMatchObject({ folded: true, bindings: ['mail'], place: 'offloaded' });
+    expect(rows.filter((r) => r.name === 'mail-pass')).toHaveLength(1);
   });
-  it("names a credential's bindings and their users, the sandboxes that name it and what its deployments pin", () => {
-    expect(row('credential', 'github')).toMatchObject({ bindings: ['github'], users: [{ key: 'services', name: 'api' }], state: 'set', version: 4,
-      sandboxes: [], pins: { latest: 3, deployed: 3 } });
-    expect(row('credential', 'old')).toMatchObject({ bindings: [], sandboxes: [], state: 'unused', pins: { latest: 0, deployed: 0 } });
-    // A credential only sandboxes name is in use.
-    expect(row('credential', 'models')).toMatchObject({ bindings: [], users: [], sandboxes: ['s1', 's2'], state: 'set' });
+  it('marks a value secret by its uses and says when it has no value or no user', () => {
+    expect(row('value', 'session-key')).toMatchObject({ marks: ['container'], users: [{ key: 'services', name: 'api' }], state: 'set' });
+    expect(row('value', 'ghcr-pull')).toMatchObject({ marks: ['offloaded'], state: 'missing' });
+    expect(row('value', 'leftover')).toMatchObject({ marks: [], users: [], state: 'unused', place: 'unused' });
   });
-  it('says the version the spec pins of a secret', () => {
-    expect(row('secret', 'session-key')).toMatchObject({ version: 2, pinned: 2 });
-    expect(row('secret', 'leftover')).toMatchObject({ version: 1, pinned: 0 });
+  it("names an HTTP secret's users with their variables, the sandboxes at the latest, what its deployments pin", () => {
+    expect(row('http', 'erp')).toMatchObject({
+      users: [{ key: 'jobs', name: 'migrate', variables: ['ERP'], bindings: [] },
+        { key: 'services', name: 'api', variables: ['ERP_HOST', 'ERP_URL'], bindings: [] }],
+      sandboxes: ['s1'], pins: { latest: 2, deployed: 2 }, pinned: 2, version: 3, state: 'set',
+      http: { reachedAs: 'api.vendor.example', kind: 'oauth2' },
+    });
+    // Through a binding of the spec (credentialRef), with the version it pins.
+    expect(row('http', 'github')).toMatchObject({ users: [{ key: 'services', name: 'api', variables: [], bindings: ['github'] }],
+      bindings: ['github'], pinned: 3, pins: { latest: 3, deployed: 3 } });
+    expect(row('http', 'old')).toMatchObject({ users: [], sandboxes: [], state: 'unused', place: 'offloaded' });
+    // One only sandboxes name is in use.
+    expect(row('http', 'models')).toMatchObject({ users: [], sandboxes: ['s1', 's2'], state: 'set' });
+  });
+  it("adds the objects ferund's usedBy names, and an HTTP secret the spec names that the list lacks is missing", () => {
+    const r = inventoryOf({}, { secrets }).find((x) => x.name === 'erp');
+    expect(r.users).toEqual([{ key: 'services', name: 'api', variables: [], bindings: [] }, { key: 'jobs', name: 'migrate', variables: [], bindings: [] }]);
+    const gone = inventoryOf(spec, { catalog, secrets: secrets.filter((x) => x.name !== 'erp') }).find((x) => x.name === 'erp');
+    expect(gone).toMatchObject({ kind: 'http', state: 'missing', place: 'offloaded', item: null, pinned: 2 });
+  });
+  it("says a binding of the spec's key and when an HTTP secret of its name takes its place", () => {
+    expect(row('binding', 'mail')).toMatchObject({ users: [{ key: 'services', name: 'api' }], place: 'offloaded', taken: false,
+      secrets: [{ name: 'mail-pass', state: 'set', version: 1, pinned: 1 }], binding: { upstream: 'https://api.mail.example' } });
+    const taken = inventoryOf(spec, { catalog, secrets: [...secrets, { name: 'mail', type: 'http', version: 1, upstream: 'https://api.mail.example' }] });
+    expect(taken.find((r) => r.kind === 'binding' && r.name === 'mail').taken).toBe(true);
+    // A binding of an HTTP secret (credentialRef) has no row: its HTTP secret's is it.
+    expect(row('binding', 'github')).toBeUndefined();
+  });
+  it('says the version the spec pins of a value secret', () => {
+    expect(row('value', 'session-key')).toMatchObject({ version: 2, pinned: 2 });
+    expect(row('value', 'leftover')).toMatchObject({ version: 1, pinned: 0 });
   });
   it('lists the addons that admit by identity or hand out a password', () => {
-    expect(row('addon', 'db')).toMatchObject({ marks: ['identity'],
+    expect(row('addon', 'db')).toMatchObject({ marks: ['identity'], place: 'identity',
       users: [{ key: 'jobs', name: 'migrate' }, { key: 'services', name: 'api' }] });
     expect(row('addon', 'db').uses).toEqual([
       { from: { key: 'jobs', name: 'migrate' }, mark: 'identity', fields: { role: 'owner' }, variables: ['DATABASE_URL'] },
       { from: { key: 'services', name: 'api' }, mark: 'identity', fields: { role: 'api_svc', database: 'app' }, variables: ['DATABASE_URL'] },
     ]);
-    expect(row('addon', 'bus')).toMatchObject({ marks: ['container'], users: [{ key: 'services', name: 'api' }] });
+    expect(row('addon', 'bus')).toMatchObject({ marks: ['container'], place: 'container', users: [{ key: 'services', name: 'api' }] });
     expect(row('addon', 'spare')).toMatchObject({ marks: ['identity'], users: [], state: 'unused' });
   });
 });
@@ -164,9 +242,9 @@ describe("an access row's words", () => {
   it("a binding's kind short and where its key comes from", () => {
     expect(kindShort('oauth2')).toBe('OAuth2');
     expect(kindShort('clientCertificate')).toBe('client certificate');
-    expect(bindingSource(bindingOf(spec, 'github', credentials), credentials)).toBe('credential github v3, latest v4');
-    expect(bindingSource(bindingOf(spec, 'github', []), [])).toBe('credential github v3');
-    expect(bindingSource(bindingOf(spec, 'erp', credentials), credentials)).toBe('secret erp-secret');
+    expect(bindingSource(bindingOf(spec, 'github', secrets), secrets)).toBe('HTTP secret github v3, latest v4');
+    expect(bindingSource(bindingOf(spec, 'github', []), [])).toBe('HTTP secret github v3');
+    expect(bindingSource(bindingOf(spec, 'mail', secrets), secrets)).toBe('secret mail-pass');
     expect(bindingSource({ credential: null, secrets: ['a', 'b'] })).toBe('secrets a, b');
     expect(bindingSource({ credential: null, secrets: [] })).toBe('');
   });
@@ -178,13 +256,13 @@ describe("an access row's words", () => {
     expect(secretPinNote(2, 3)).toBe('the latest deployment pins v2, latest v3');
     expect(secretPinNote(3, 3)).toBe('');
     expect(secretPinNote(0, 3)).toBe('');
-    expect(credentialPinNote({ latest: 3, deployed: 3 }, 4)).toBe('deployed pins v3, latest v4');
-    expect(credentialPinNote({ latest: 3, deployed: 0 }, 4)).toBe('the latest deployment pins v3, latest v4');
-    expect(credentialPinNote({ latest: 3, deployed: 2 }, 4)).toBe('the latest deployment pins v3, deployed v2; latest v4');
-    expect(credentialPinNote({ latest: 4, deployed: 3 }, 4)).toBe('v4 rolling out; deployed pins v3');
-    expect(credentialPinNote({ latest: 0, deployed: 3 }, 4)).toBe('deployed pins v3, latest v4');
-    expect(credentialPinNote({ latest: 4, deployed: 4 }, 4)).toBe('');
-    expect(credentialPinNote({ latest: 0, deployed: 0 }, 4)).toBe('');
+    expect(httpPinNote({ latest: 3, deployed: 3 }, 4)).toBe('deployed pins v3, latest v4');
+    expect(httpPinNote({ latest: 3, deployed: 0 }, 4)).toBe('the latest deployment pins v3, latest v4');
+    expect(httpPinNote({ latest: 3, deployed: 2 }, 4)).toBe('the latest deployment pins v3, deployed v2; latest v4');
+    expect(httpPinNote({ latest: 4, deployed: 3 }, 4)).toBe('v4 rolling out; deployed pins v3');
+    expect(httpPinNote({ latest: 0, deployed: 3 }, 4)).toBe('deployed pins v3, latest v4');
+    expect(httpPinNote({ latest: 4, deployed: 4 }, 4)).toBe('');
+    expect(httpPinNote({ latest: 0, deployed: 0 }, 4)).toBe('');
   });
 });
 
@@ -211,9 +289,11 @@ describe("the bindings' use and the workloads' identities, as ferund answers the
     expect(problemWords(null)).toBe('');
     expect(usersWords(usageOf(usage, 'erp').users)).toBe('service api 1,200 · sandbox c3kv9mwq2hd 4');
   });
-  it("lists the bindings the pods named that the spec has none of", () => {
-    const u = { window: '24h', bindings: [...usage.bindings, { name: 'models', requests: 9, users: [{ kind: 'sandbox', name: 's1', requests: 9 }] }] };
-    expect(strayUsage(u, { bindings: { erp: {}, mail: {} } }).map((b) => b.name)).toEqual(['models']);
+  it("lists the bindings the pods named that are neither the spec's nor an HTTP secret", () => {
+    const u = { window: '24h', bindings: [...usage.bindings, { name: 'models', requests: 9, users: [{ kind: 'sandbox', name: 's1', requests: 9 }] },
+      { name: 'own', requests: 2, users: [{ kind: 'sandbox', name: 's1', requests: 2 }] }] };
+    expect(strayUsage(u, { bindings: { mail: {} } }, secrets).map((b) => b.name)).toEqual(['own']);
+    expect(strayUsage(u, { bindings: { erp: {}, mail: {} } }).map((b) => b.name)).toEqual(['models', 'own']);
     expect(strayUsage(down, {})).toEqual([]);
   });
   it("finds a workload's identity and the certificate that ends first", () => {
@@ -253,7 +333,7 @@ describe("what a workload's certificate names", () => {
       { kind: 'addon', mark: 'identity', target: { name: 'db' }, addon: { type: 'postgres' }, fields: { role: 'api_svc' } },
       { kind: 'addon', mark: 'identity', target: { name: 'cache' }, addon: { type: 'valkey' }, fields: {} },
       { kind: 'addon', mark: 'container', target: { name: 'bus' }, addon: { type: 'nats' }, fields: {} },
-      { kind: 'binding', mark: 'offloaded', target: { name: 'erp' } },
+      { kind: 'http', mark: 'offloaded', target: { name: 'erp' } },
     ];
     expect(identityReaders(rows, cat)).toEqual([
       { addon: 'cache', type: 'valkey', by: 'uri', role: '' },
@@ -271,23 +351,25 @@ describe('withKeys', () => {
   const dep = response('GET_environments_env_deployments_n.200');
   const cat = readCatalog(response('GET_addons.200'));
   const usage = response('GET_environments_env_bindings_usage.200').bindings;
+  const es = dep.spec.services['expense-service'];
   const bound = {
     ...dep.spec,
     services: {
       ...dep.spec.services,
-      'expense-service': { ...dep.spec.services['expense-service'], bindings: ['erp', 'mail'] },
+      'expense-service': { ...es, env: { ...es.env, ERP_URL: { secret: 'erp', key: 'url' } }, bindings: ['mail'] },
     },
-    jobs: { migrate: { ...dep.spec.jobs.migrate, bindings: ['erp'] } },
+    jobs: { migrate: { ...dep.spec.jobs.migrate, env: { ...dep.spec.jobs.migrate.env, ERP_HOST: { secret: 'erp', key: 'host' } } } },
     bindings: {
-      erp: { upstream: 'https://api.vendor.example', mode: 'intercept', credential: { kind: 'oauth2', clientSecret: { secret: 'erp' } } },
-      mail: { credentialRef: { name: 'mail', version: 2 } },
+      mail: { upstream: 'https://api.mail.example', credential: { kind: 'headers', headers: { Authorization: { secret: 'mail' } } } },
     },
+    secrets: { ...(dep.spec.secrets || {}), erp: { version: 2, type: 'http', upstream: 'https://api.vendor.example', mode: 'intercept' } },
   };
-  const creds = [
-    { name: 'mail', version: 2, upstream: 'https://api.mail.example', mode: 'name', credential: { kind: 'headers' },
-      usedBy: { sandboxes: [], bindings: ['mail'] } },
-    { name: 'erp', version: 1, upstream: 'https://api.vendor.example', mode: 'name', credential: { kind: 'basic' },
-      usedBy: { sandboxes: ['c3kv9mwq2hd'], bindings: [] } },
+  const list = [
+    { name: 'erp', type: 'http', version: 2, upstream: 'https://api.vendor.example', mode: 'intercept', credential: { kind: 'oauth2' },
+      usedBy: { sandboxes: [], objects: ['service/expense-service', 'job/migrate'], latest: 2, deployed: 2 } },
+    { name: 'models', type: 'http', version: 1, upstream: 'https://models.example', mode: 'name', credential: { kind: 'basic' },
+      usedBy: { sandboxes: ['c3kv9mwq2hd'], objects: [] } },
+    { name: 'mail', type: 'value', version: 1 },
   ];
   const pods = [{ kind: 'sandbox', id: 'c3kv9mwq2hd', reaches: [], egress: 'none' }, { kind: 'sandbox', id: 'other', reaches: [] }];
   const of = (m, ref) => m.objects.find((o) => o.ref === ref) || m.pods.find((o) => o.ref === ref);
@@ -303,7 +385,7 @@ describe('withKeys', () => {
     expect(m.marks).toEqual(['identity', 'container']);
   });
 
-  it('marks nothing without a catalog, and adds no row without a binding', () => {
+  it('marks nothing without a catalog, and adds no row without an API at the node', () => {
     const plain = reachModel(dep.spec, dep.reachability);
     const m = withKeys(plain, dep.spec, {});
     expect(m.marks).toEqual([]);
@@ -311,42 +393,41 @@ describe('withKeys', () => {
     expect(m.objects.flatMap((o) => [...o.ins, ...o.outs]).some((r) => r.mark)).toBe(false);
   });
 
-  it("puts each binding's upstream on the right, before the egress, its key at the node", () => {
-    const m = withKeys(reachModel(bound, dep.reachability, pods), bound, { catalog: cat, credentials: creds, usage });
+  it("puts each HTTP secret's and binding's upstream on the right, before the egress, its key at the node", () => {
+    const m = withKeys(reachModel(bound, dep.reachability, pods), bound, { catalog: cat, secrets: list, usage });
     expect(of(m, 'service/expense-service').outs.map(line)).toEqual([
       'service:approval-service', 'addon:nats [container]', 'addon:postgres [identity]',
       'upstream:api.vendor.example [offloaded]', 'upstream:api.mail.example [offloaded]', 'internet:Internet']);
     const [erp, mail] = of(m, 'service/expense-service').outs.filter((r) => r.peer.type === 'upstream');
-    expect(erp).toMatchObject({ key: 'binding:erp', what: 'OAuth2 at the node', via: ['binding erp'],
-      peer: { sub: 'erp · as api.vendor.example' }, binding: { upstream: 'https://api.vendor.example', mode: 'intercept' },
+    expect(erp).toMatchObject({ key: 'secret:erp', what: 'OAuth2 at the node', via: ['HTTP secret erp'],
+      peer: { sub: 'erp · as api.vendor.example' }, binding: { source: 'http', upstream: 'https://api.vendor.example', mode: 'intercept', pinned: 2 },
       usage: { requests: 1204, refused: 2, failing: 0, mine: 0, by: 'expense-service' } });
-    expect(mail).toMatchObject({ what: 'Headers at the node', peer: { sub: 'mail · as http://mail' },
-      binding: { credential: { name: 'mail', version: 2 } }, usage: { requests: 0, mine: 0 } });
+    expect(mail).toMatchObject({ key: 'binding:mail', what: 'Headers at the node', via: ['binding mail'], peer: { sub: 'mail · as http://mail' },
+      binding: { source: 'binding' }, usage: { requests: 0, mine: 0 } });
     expect(of(m, 'job/migrate').outs.map(line)).toEqual([
       'addon:postgres [identity]', 'upstream:api.vendor.example [offloaded]', 'internet:Internet']);
     expect(m.marks).toEqual(['identity', 'offloaded', 'container']);
   });
 
-  it("gives a sandbox its credentials' bindings, with its own requests", () => {
-    const m = withKeys(reachModel(bound, dep.reachability, pods), bound, { credentials: creds, usage });
+  it('gives a sandbox the HTTP secrets it names, with its own requests', () => {
+    const own = [...usage, { name: 'models', requests: 9, refused: 0, failing: 0, users: [{ kind: 'sandbox', name: 'c3kv9mwq2hd', requests: 4 }] }];
+    const m = withKeys(reachModel(bound, dep.reachability, pods), bound, { secrets: list, usage: own });
     const sb = of(m, 'sandbox/c3kv9mwq2hd').outs;
-    expect(sb.map(line)).toEqual(['upstream:api.vendor.example [offloaded]']);
-    expect(sb[0]).toMatchObject({ what: 'Basic auth at the node', peer: { sub: 'erp · as http://erp' },
-      usage: { requests: 1204, mine: 4, by: 'c3kv9mwq2hd' } });
+    expect(sb.map(line)).toEqual(['upstream:models.example [offloaded]']);
+    expect(sb[0]).toMatchObject({ what: 'Basic auth at the node', peer: { sub: 'models · as http://models' }, via: ['HTTP secret models'],
+      usage: { requests: 9, mine: 4, by: 'c3kv9mwq2hd' } });
     expect(of(m, 'sandbox/other').outs.map(line)).toEqual(['internet:Internet']);
   });
 
-  it('says no numbers without usage, and the binding when its upstream is unknown', () => {
-    const r = upstreamRow(bindingOf({ bindings: { gone: { credentialRef: { name: 'gone' } } } }, 'gone', []));
+  it('says no numbers without usage, and the name when its upstream is unknown', () => {
+    const r = upstreamRow(httpOf('gone', null));
     expect(r).toMatchObject({ peer: { type: 'upstream', name: 'gone', sub: 'gone · as http://gone' }, what: 'Key at the node', usage: null });
-    expect(upstreamRow(bindingOf(bound, 'erp'), { requests: 3 }, { kind: 'service', name: 'x' }).usage)
+    expect(upstreamRow(bindingOf(bound, 'mail'), { requests: 3 }, { kind: 'service', name: 'x' }).usage)
       .toEqual({ requests: 3, refused: 0, failing: 0, mine: null, by: 'x' });
   });
 
-  it('names the kinds of a key, and reads a credential as a sandbox holds it', () => {
+  it('names the kinds of a key', () => {
     expect(['headers', 'basic', 'oauth2', 'clientCertificate', ''].map(keyAtNode)).toEqual([
       'Headers at the node', 'Basic auth at the node', 'OAuth2 at the node', 'Client certificate at the node', 'Key at the node']);
-    expect(credentialBinding(creds[0])).toMatchObject({ name: 'mail', upstream: 'https://api.mail.example', mode: 'name',
-      kind: 'headers', reachedAs: 'http://mail', credential: { name: 'mail', version: 2 } });
   });
 });

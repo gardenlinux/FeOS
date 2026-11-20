@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ACCESS_CREDENTIALS as CREDS, ACCESS_SPEC as SPEC } from '../testing/access.js';
+import { ACCESS_SECRETS as SECRETS, ACCESS_SPEC as SPEC } from '../testing/access.js';
 import { response } from '../testing/ferun.js';
 import { readCatalog } from './catalog.js';
 import { AccessCard, KeysCount } from './ObjectAccess.jsx';
@@ -26,7 +26,7 @@ const html = (el) => renderToStaticMarkup(el);
 const text = (el) => html(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const card = (kind, name, extra = {}) => (
-  <AccessCard tenant={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} credentials={CREDS} identities={IDS}
+  <AccessCard tenant={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} secrets={SECRETS} identities={IDS}
     usage={USAGE} now={NOW} navigate={nav} {...extra} />);
 
 describe("a service's Secrets", () => {
@@ -78,16 +78,15 @@ describe("a service's Secrets", () => {
     const marks = [...out.matchAll(/badge mark mark-(\w+)/g)].map((m) => m[1]);
     expect(marks).toEqual(['identity', 'offloaded', 'offloaded', 'offloaded', 'container', 'container']);
     const rows = [...out.matchAll(/<tr class="acc-row acc-(\w+)">/g)].map((m) => m[1]);
-    expect(rows).toEqual(['addon', 'binding', 'image', 'binding', 'addon', 'secret']);
+    expect(rows).toEqual(['addon', 'http', 'image', 'binding', 'addon', 'secret']);
   });
 
-  it('a binding: its upstream, as what the code reaches it, its credential at the pinned version, its 24 h', () => {
+  it('an HTTP secret: the variable that gets it, its upstream as the code calls it, the pinned version, its 24 h', () => {
     const out = html(card('service', 'api'));
     const all = text(card('service', 'api'));
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/binding/erp"`);
-    expect(all).toContain('erp → api.vendor.example at its own name, intercepted');
-    expect(all).toContain('OAuth2 · credential erp v3 · latest v4');
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/credentials/erp"`);
+    expect(all).toContain('ERP_URL → api.vendor.example at its own name, intercepted at the node');
+    expect(all).toContain('OAuth2 · HTTP secret erp v3 · latest v4 · its url');
+    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/http/erp"`);
     expect(all).toContain('1,204 req/24h · 2 refused · 1 blocked');
     expect(out).toContain('<span class="bad"> · 2 refused · 1 blocked</span>');
     expect(out).toContain('last problem 2026-11-19');
@@ -96,11 +95,26 @@ describe("a service's Secrets", () => {
     // Its outbound requests in its logs, and the last problem's trace.
     expect(out).toContain(`href="/tenants/${T}/environments/${E}/objects/service/api/logs?source=egress&amp;since=1d"`);
     expect(out).toContain(`href="/tenants/${T}/environments/${E}/traces/4bf92f3577b34da6a3ce929d0e0e4736"`);
-    // An inline credential of secrets, by name; a binding without requests says so.
-    expect(all).toContain('mail → mail.example reached as http://mail');
-    expect(all).toContain('basic · secret mail-pass');
+  });
+
+  it('a binding of the spec, still shown: its upstream, its key from secrets, what becomes of it, its 24 h', () => {
+    const out = html(card('service', 'api'));
+    const all = text(card('service', 'api'));
+    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/binding/mail"`);
+    expect(all).toContain('mail → mail.example reached as http://mail at the node basic · secret mail-pass');
+    expect(all).toContain('binding in the spec — becomes an HTTP secret');
     expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/secret/mail-pass"`);
     expect(all).toContain('no request in 24h');
+  });
+
+  it('an HTTP secret a binding of the spec names, through it; one not in the environment says so', () => {
+    const spec = { ...SPEC, services: { api: { ...SPEC.services.api, env: {}, bindings: ['gh'] } },
+      bindings: { gh: { credentialRef: { name: 'models', version: 1 } } } };
+    const all = text(card('service', 'api', { spec }));
+    expect(all).toContain('binding gh → models.example reached as http://models at the node headers · HTTP secret models v1');
+    expect(all).toContain('through binding gh in the spec — becomes a variable');
+    const gone = text(card('service', 'api', { secrets: SECRETS.filter((x) => x.name !== 'erp') }));
+    expect(gone).toContain('HTTP secret erp v3 · not in this environment');
   });
 
   it('an addon by its type and fields, a secret by its variables and pinned version, the registry login at the node', () => {
@@ -111,7 +125,7 @@ describe("a service's Secrets", () => {
     expect(all).toContain('bus → nats in the container BUS_URL');
     expect(all).toContain('SESSION_KEY ← session-key in the container secret v2');
     expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/secret/session-key"`);
-    expect(all).toContain('image pull ← ghcr-pull offloaded the node pulls with it');
+    expect(all).toContain('image pull ← ghcr-pull at the node the node pulls with it');
     // A plain variable hands over no key: no row.
     expect(all).not.toContain('PLAIN');
   });
@@ -130,7 +144,7 @@ describe("a service's Secrets", () => {
 
   it('one that names nothing says so in one line', () => {
     const all = text(card('service', 'web'));
-    expect(all).toContain('It names no secret, binding or addon: it holds no key and needs none.');
+    expect(all).toContain('It names no secret or addon: it holds no key and needs none.');
     expect(html(card('service', 'web'))).not.toContain('acc-tbl');
   });
 
@@ -156,19 +170,19 @@ describe("an object's keys on its overview", () => {
 
   it('counts its targets by where the key lives and leads to its Config', () => {
     const all = text(line('service', 'api'));
-    expect(all).toMatch(/^ Keys: 1 by identity · 3 offloaded · 2 in the container /);
+    expect(all).toMatch(/^ Keys: 1 by identity · 3 at the node · 2 in the container /);
     expect(all).toContain('— each with its source, its identity and certificate: Config');
     expect(html(line('service', 'api'))).toContain(`href="/tenants/${T}/environments/${E}/objects/service/api/config"`);
     expect(text(line('job', 'migrate'))).toMatch(/^ Keys: 1 by identity — /);
   });
 
-  it('names a binding whose upstream refused or failed in the last 24 h', () => {
+  it('names an HTTP secret or binding whose upstream refused or failed in the last 24 h', () => {
     expect(html(line('service', 'api'))).toContain('<span class="bad">erp: 2 refused · 1 blocked</span>');
     expect(html(line('service', 'api', { usage: null }))).not.toContain('class="bad"');
   });
 
   it('counts an addon once the catalog says its mark, and is not there for one that names nothing', () => {
-    expect(text(line('service', 'api', { catalog: null }))).toMatch(/^ Keys: 3 offloaded · 1 in the container /);
+    expect(text(line('service', 'api', { catalog: null }))).toMatch(/^ Keys: 3 at the node · 1 in the container /);
     expect(html(line('service', 'web'))).toBe('');
     expect(html(line('service', 'api', { spec: null }))).toBe('');
   });

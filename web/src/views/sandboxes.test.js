@@ -92,12 +92,14 @@ describe('the list', () => {
 
 describe('tabs', () => {
   it("offers every tab to its environment's readers", () => {
-    expect(SANDBOX_TABS.map((t) => t.key)).toEqual(['overview', 'connect', 'credentials', 'network', 'activity', 'settings']);
+    expect(SANDBOX_TABS.map((t) => t.key)).toEqual(['overview', 'connect', 'secrets', 'network', 'activity', 'settings']);
   });
 
   it('maps earlier names and anything else to the overview', () => {
     expect(activeTab('tokens')).toBe('connect');
-    expect(activeTab('access')).toBe('credentials');
+    expect(activeTab('access')).toBe('secrets');
+    // The secrets were the credentials (ADR 0055).
+    expect(activeTab('credentials')).toBe('secrets');
     expect(activeTab('activity')).toBe('activity');
     expect(activeTab('network')).toBe('network');
     expect(activeTab('nope')).toBe('overview');
@@ -133,10 +135,11 @@ describe('createRequest', () => {
     expect('egress' in createRequest({ ...empty, egress: 'internet' })[3]).toBe(false);
   });
 
-  it('names the credentials of its environment its pod gets, when any', () => {
-    expect(createRequest({ ...empty, credentials: ['openai', 'github'] }))
-      .toEqual(['', 0, 0, { ...opts, credentials: ['github', 'openai'] }]);
-    expect(createRequest({ ...empty, credentials: [] })[3]).toEqual(opts);
+  it('names the HTTP secrets of its environment its pod gets, when any (ADR 0055)', () => {
+    expect(createRequest({ ...empty, secrets: ['openai', 'github'] }))
+      .toEqual(['', 0, 0, { ...opts, secrets: ['github', 'openai'] }]);
+    expect(createRequest({ ...empty, secrets: [] })[3]).toEqual(opts);
+    expect(newSandboxForm('kino-dev').secrets).toEqual([]);
   });
 
   it('needs an environment and an egress the plan would take', () => {

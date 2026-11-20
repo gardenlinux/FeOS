@@ -30,14 +30,21 @@ const none = { global: [], objects: new Map() };
 const nop = () => {};
 const ctx = (spec, findings = [], extra = {}) => ({
   spec, catalog: builtinCatalog(), findings, setSecret: async () => 1, isNew: false, knownSecrets: ['internal-token'], pins: [],
-  credentials: [], editSpec: nop, editAttached: false, tenant: '', navigate: null, ...extra,
+  httpSecrets: [], editSpec: nop, editAttached: false, tenant: '', navigate: null, ...extra,
 });
+
+// HTTP are an environment's HTTP secrets (ADR 0055) as GET …/secrets
+// answers them.
+const HTTP = [
+  { name: 's4', type: 'http', version: 3, upstream: 'https://api.s4.example', mode: 'name', credential: { kind: 'headers' } },
+  { name: 'openai', type: 'http', version: 1, upstream: 'https://api.openai.com', mode: 'intercept', credential: { kind: 'headers' } },
+];
 
 describe('ObjectNav', () => {
   const nav = (props) => html(<ObjectNav spec={STORED} base={STORED} groups={none} open="" pins={[]} catalog={builtinCatalog()}
     marks={new Map()} onOpen={nop} onAdd={nop} {...props} />);
 
-  it('lists the objects by kind with their lines, and adds per kind unless read-only', () => {
+  it('lists the objects by kind with their lines, and adds per kind unless read-only; no binding is added', () => {
     const pins = [{ name: 'internal-token', pinned: 3, latest: 3, newer: false, missing: false }];
     const t = text(<ObjectNav spec={STORED} base={STORED} groups={none} open="services/web" pins={pins} catalog={builtinCatalog()}
       marks={new Map()} onOpen={nop} onAdd={nop} />);
@@ -45,7 +52,9 @@ describe('ObjectNav', () => {
     expect(t).toContain('Jobs 1');
     expect(t).toContain('Addons 2');
     expect(t).toContain('Routes 3');
-    expect(t).toContain('Bindings 0');
+    // Bindings in the spec give way to HTTP secrets (ADR 0055): no group
+    // without one, and never an Add.
+    expect(t).not.toContain('Bindings');
     expect(t).not.toContain('Security groups');
     expect(t).toContain('Secrets 1');
     expect(t).toContain('expense-service expense:1.4 · 2 replicas');
@@ -53,8 +62,17 @@ describe('ObjectNav', () => {
     expect(t).toContain('api-expense /api/expense → expense-service:http');
     expect(t).toContain('internal-token v3 of 3');
     expect(nav({ open: 'services/web' })).toContain('class="b-row-obj on"');
-    expect((nav({}).match(/class="ghost mini b-add"/g) || []).length).toBe(6);
+    expect((nav({}).match(/class="ghost mini b-add"/g) || []).length).toBe(5);
     expect(nav({ onAdd: null })).not.toContain('ghost mini b-add');
+    const legacy = setObject(STORED, 'bindings', 'mail', { upstream: 'https://mail.example' });
+    const lt = text(<ObjectNav spec={legacy} base={STORED} groups={none} open="" pins={[]} catalog={builtinCatalog()}
+      marks={new Map()} onOpen={nop} onAdd={nop} />);
+    expect(lt).toMatch(/Bindings 1 [+~−]? ?mail mail\.example/);
+    expect((nav({ spec: legacy }).match(/class="ghost mini b-add"/g) || []).length).toBe(5);
+    // An HTTP secret's pin says its kind.
+    const http = [{ name: 'internal-token', type: 'http', pinned: 3, latest: 4, newer: true, missing: false }];
+    expect(text(<ObjectNav spec={STORED} base={STORED} groups={none} open="" pins={http} catalog={builtinCatalog()}
+      marks={new Map()} onOpen={nop} onAdd={nop} />)).toContain('internal-token HTTP · v3 · v4 newer');
   });
 
   it('marks what the draft changes, what it removes, and the findings', () => {
@@ -87,9 +105,11 @@ describe('the forms', () => {
     expect(out).toContain('Check for a newer image');
     expect(out).toContain('no addon mysql — declare the addon under addons, or reference one that is declared');
     expect(out).toContain('nothing would wake it: no route targets expense-service');
-    for (const s of ['Container', 'Variables', 'Scaling & resources', 'Health check', 'Credentials & bindings', 'Rollout', 'Remove service expense-service']) {
+    for (const s of ['Container', 'Variables', 'Scaling & resources', 'Health check', 'Rollout', 'Remove service expense-service']) {
       expect(out).toContain(s);
     }
+    // No binding of the spec: no section of them.
+    expect(out).not.toContain('Bindings in the spec');
     const markup = html(<ServiceForm name="expense-service" obj={STORED.services['expense-service']}
       ctx={ctx(STORED, f)} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(markup).toContain('value="ghcr.io/acme/expense:1.4"');
@@ -108,6 +128,7 @@ describe('the forms', () => {
     const svc = { image: 'ghcr.io/acme/x:1', ports: [{ name: 'http', port: 8080 }], env: {
       LOG_LEVEL: 'info', FROM: { value: 'noreply@example.com' }, TOKEN: { secret: 'internal-token' },
       DATABASE_URL: { addon: 'postgres', key: 'url', role: 'expense_svc' }, APPROVAL: { service: 'approval-service', port: 'http', key: 'host' },
+      S4_URL: { secret: 's4', key: 'url' },
     } };
     const pins = [{ name: 'internal-token', pinned: 2, latest: 3, newer: true, missing: false }];
     const out = html(<ServiceForm name="x" obj={svc} ctx={ctx(STORED, [], { pins })} onChange={nop} onRename={nop} onRemove={nop} />);
@@ -115,8 +136,10 @@ describe('the forms', () => {
     expect(rowOf('LOG_LEVEL')).toContain('<option value="text" selected="">Text</option>');
     expect(rowOf('LOG_LEVEL')).toContain('value="info"');
     expect(rowOf('FROM')).toContain('value="noreply@example.com"');
-    expect(rowOf('TOKEN')).toContain('<option value="secret" selected="">Secret</option>');
+    expect(rowOf('TOKEN')).toContain('<option value="secret" selected="">Secret value</option>');
     expect(rowOf('TOKEN')).toContain('<option value="internal-token" selected="">internal-token</option>');
+    // The HTTP secrets are no value to pick here (ADR 0055).
+    expect(rowOf('TOKEN')).not.toContain('<option value="s4"');
     expect(rowOf('TOKEN')).toContain('v2 pinned, v3 newer');
     expect(rowOf('TOKEN')).toContain('+ New secret…');
     expect(rowOf('DATABASE_URL')).toContain('<option value="addon" selected="">Addon output</option>');
@@ -128,28 +151,61 @@ describe('the forms', () => {
     expect(rowOf('APPROVAL')).toContain('<option value="host" selected="">host</option>');
     // A service's own address is no target.
     expect(rowOf('APPROVAL')).not.toContain('<option value="x">');
+    // An HTTP secret's URL: {secret, key}, with what the variable gets.
+    expect(rowOf('S4_URL')).toContain('<option value="httpUrl" selected="">URL of an HTTP secret</option>');
+    expect(rowOf('S4_URL')).toContain('<option value="httpHost">Host of an HTTP secret</option>');
   });
 
-  it('show the health check as its kind, the bindings as ticks, the idle as a choice', () => {
+  it("give a variable an HTTP secret's URL or host from the environment's HTTP secrets (ADR 0055)", () => {
+    const svc = { image: 'ghcr.io/acme/x:1', env: { S4_URL: { secret: 's4', key: 'url' }, OPENAI_HOST: { secret: 'openai', key: 'host' },
+      GONE_URL: { secret: 'gone', key: 'url' } } };
+    const spec = { ...STORED, secrets: { ...STORED.secrets, s4: { version: 2, type: 'http' } } };
+    const pins = [{ name: 's4', type: 'http', pinned: 2, latest: 3, newer: true, missing: false }];
+    const c = ctx(spec, [], { httpSecrets: HTTP, pins, tenant: 'kino', env: 'prod', knownSecrets: ['internal-token', 's4', 'openai'] });
+    const out = html(<ServiceForm name="x" obj={svc} ctx={c} onChange={nop} onRename={nop} onRemove={nop} />);
+    const rowOf = (name) => { const r = out.slice(out.indexOf(`value="${name}"`)); return r.slice(0, r.indexOf('</tr>')); };
+    const t = (name) => rowOf(name).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    expect(rowOf('S4_URL')).toContain('<option value="s4" selected="">s4 · api.s4.example</option>');
+    expect(rowOf('S4_URL')).toContain('<option value="openai">openai · api.openai.com</option>');
+    expect(t('S4_URL')).toContain('gets http://s4');
+    expect(t('S4_URL')).toContain('v2 pinned, v3 newer use v3');
+    expect(rowOf('S4_URL')).toContain('href="/tenants/kino/environments/prod/secrets/http/s4"');
+    // In the intercept mode its own host; a host alone for key host.
+    expect(rowOf('OPENAI_HOST')).toContain('<option value="httpHost" selected="">Host of an HTTP secret</option>');
+    expect(t('OPENAI_HOST')).toContain('gets api.openai.com');
+    // One the environment has not, and the way to a new one.
+    expect(t('GONE_URL')).toContain('not an HTTP secret of the environment');
+    expect(rowOf('GONE_URL')).toContain('href="/tenants/kino/environments/prod/secrets/http/new"');
+    // The value secrets stay the Secret value's choice.
+    const tok = html(<ServiceForm name="x" obj={{ env: { T: { secret: 'internal-token' } } }} ctx={c} onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(tok).not.toContain('<option value="s4"');
+    expect(tok).not.toContain('<option value="openai"');
+    // A new environment has none yet.
+    const fresh = text(<ServiceForm name="x" obj={{ env: { U: { secret: '', key: 'url' } } }} ctx={ctx({}, [], { isNew: true })}
+      onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(fresh).toContain('a new environment has no HTTP secrets yet: make them in its Secrets once it exists');
+  });
+
+  it('show the health check as its kind, the bindings of the spec read-only, the idle as a choice', () => {
     const spec = setObject(STORED, 'bindings', 'stripe', { credentialRef: { name: 'stripe', version: 1 } });
     const svc = { ...STORED.services.web, bindings: ['stripe', 'gone'], idle: '15m' };
-    const creds = [{ name: 'stripe', upstream: 'https://api.stripe.com', version: 2 }, { name: 'github', upstream: 'https://api.github.com', version: 1 }];
-    const out = html(<ServiceForm name="web" obj={svc} ctx={ctx(spec, [], { credentials: creds, tenant: 'kino', env: 'prod' })} onChange={nop} onRename={nop} onRemove={nop} />);
+    const out = html(<ServiceForm name="web" obj={svc} ctx={ctx(spec, [], { httpSecrets: HTTP, tenant: 'kino', env: 'prod' })}
+      onChange={nop} onRename={nop} onRemove={nop} />);
     expect(out).toContain('<button class="ghost mini on" aria-pressed="true">HTTP</button>');
     expect(out).toContain('value="/readyz"');
-    expect(out).toMatch(/<input type="checkbox" checked=""\/><span class="mono">stripe<\/span><span class="muted small">credential stripe · v1/);
+    // A binding of the spec (ADR 0055): shown, no tick, no new one.
+    expect(out).toContain('Bindings in the spec');
+    expect(out).toMatch(/<span class="mono">stripe<\/span> <span class="muted small">HTTP secret stripe · v1<\/span>/);
     expect(out).toContain('not in the draft');
-    // The credential it gets already is not offered again.
-    expect(out).toContain('<option value="github" selected="">github · api.github.com</option>');
-    expect(out).not.toContain('<option value="stripe"');
-    // The credentials are the environment's (ADR 0033), in its Secrets.
-    expect(out).toContain('href="/tenants/kino/environments/prod/secrets"');
+    expect(out).toContain('Bindings in the spec give way to HTTP secrets');
+    const section = out.slice(out.indexOf('Bindings in the spec'), out.indexOf('Rollout'));
+    expect(section).not.toContain('type="checkbox"');
+    expect(section).not.toContain('<select');
     expect(out).toContain('<option value="after" selected="">After</option>');
     expect(out).toContain('value="15"');
     const none = html(<ServiceForm name="web" obj={{ image: 'x:1' }} ctx={ctx({})} onChange={nop} onRename={nop} onRemove={nop} />);
     expect(none).toContain('<button class="ghost mini on" aria-pressed="true">None</button>');
-    // Without bindings, the section stays folded.
-    expect(none).toMatch(/aria-expanded="false"><svg[^]*?<\/svg> Credentials &amp; bindings/);
+    expect(none).not.toContain('Bindings in the spec');
   });
 
   it('show an attached service read-only, or as a form for those who write the environment', () => {
@@ -212,28 +268,30 @@ describe('the forms', () => {
     expect(hosted).toContain('value="git.example.com"');
   });
 
-  it('show a binding of a credential of the environment with its pinned version, or the binding stated here', () => {
-    const creds = [{ name: 'stripe', upstream: 'https://api.stripe.com', mode: 'name', version: 3 }];
-    const spec = setObject(setObject(STORED, 'bindings', 'stripe', { credentialRef: { name: 'stripe', version: 2 } }),
-      'services', 'web', { ...STORED.services.web, bindings: ['stripe'] });
-    const ctx2 = ctx(spec, [], { credentials: creds, tenant: 'kino', env: 'prod' });
-    const t = text(<BindingForm name="stripe" obj={spec.bindings.stripe} ctx={ctx2} onChange={nop} onRename={nop} onRemove={nop} />);
-    expect(t).toContain('https://api.stripe.com · reached as http://stripe/');
-    expect(t).toContain('v2 v3 is newer Use v3');
+  it('show a binding of the spec read-only, with what it becomes and its findings', () => {
+    const spec = setObject(setObject(STORED, 'bindings', 's4', { upstream: 'https://api.s4.example', credential: { kind: 'headers' } }),
+      'services', 'web', { ...STORED.services.web, bindings: ['s4'] });
+    const findings = [{ path: 'bindings.s4', severity: 'warning', problem: 'bindings in the spec give way to HTTP secrets (ADR 0055)',
+      remedy: 'make an HTTP secret s4 and reference it by a variable {secret, key: url}' }];
+    const c = ctx(spec, findings, { httpSecrets: HTTP, tenant: 'kino', env: 'prod' });
+    const out = html(<BindingForm name="s4" obj={spec.bindings.s4} ctx={c} onChange={nop} onRename={nop} onRemove={nop} />);
+    const t = text(<BindingForm name="s4" obj={spec.bindings.s4} ctx={c} onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(t).toContain('Binding in the spec s4');
+    expect(t).toContain('It becomes an HTTP secret');
+    expect(t).toContain('HTTP secret s4 exists (api.s4.example, v3): reference it by a variable.');
+    expect(out).toContain('href="/tenants/kino/environments/prod/secrets/http/s4"');
     expect(t).toContain('service web');
-    expect(html(<BindingForm name="stripe" obj={spec.bindings.stripe} ctx={ctx2} onChange={nop} onRename={nop} onRemove={nop} />))
-      .toContain('href="/tenants/kino/environments/prod/credentials/stripe"');
-    // A new environment has no credentials yet: they are made in it once
-    // it exists.
-    const fresh = text(<BindingForm name="stripe" obj={{ credentialRef: { name: '' } }}
-      ctx={ctx(spec, [], { isNew: true, tenant: 'kino', env: '' })} onChange={nop} onRename={nop} onRemove={nop} />);
-    expect(fresh).toContain('a new environment has no credentials yet');
-    const literal = html(<BindingForm name="gh" obj={{ upstream: 'https://api.github.com', credential: { kind: 'basic', user: 'bot', password: { secret: 'internal-token' } } }}
-      ctx={ctx(STORED)} onChange={nop} onRename={nop} onRemove={nop} />);
-    expect(literal).toContain('value="https://api.github.com"');
-    expect(literal).toContain('<option value="basic" selected="">Basic</option>');
-    expect(literal).toContain('value="bot"');
-    expect(literal).toContain('<option value="internal-token" selected="">internal-token</option>');
+    expect(t).toContain('make an HTTP secret s4 and reference it by a variable {secret, key: url}');
+    expect(t).toContain('Remove binding s4');
+    // Read-only: no field to change.
+    expect(out).not.toContain('<input');
+    expect(out).not.toContain('<select');
+    // Without an HTTP secret of its name, the way to a new one; none in a new environment.
+    const other = html(<BindingForm name="mail" obj={{ upstream: 'https://mail.example' }} ctx={c} onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(other).toContain('href="/tenants/kino/environments/prod/secrets/http/new"');
+    const fresh = html(<BindingForm name="mail" obj={{ upstream: 'https://mail.example' }} ctx={ctx(spec, [], { isNew: true, tenant: 'kino' })}
+      onChange={nop} onRename={nop} onRemove={nop} />);
+    expect(fresh).not.toContain('href=');
   });
 
   it('show a secret without its value, and a missing one with Set a value', () => {
@@ -248,6 +306,22 @@ describe('the forms', () => {
       refs={[]} ctx={ctx(STORED)} onPin={nop} onRemove={nop} />);
     expect(missing).toContain('missing: the environment has no such secret');
     expect(missing).toContain('Set a value');
+  });
+
+  it("show an HTTP secret's pin and uses, never a value field: its key is written on its page", () => {
+    const spec = setObject(STORED, 'services', 'web', { ...STORED.services.web, env: { S4_URL: { secret: 's4', key: 'url' } } });
+    const refs = referencesTo(spec, 'secrets', 's4');
+    const c = ctx(spec, [], { httpSecrets: HTTP, tenant: 'kino', env: 'prod' });
+    const pin = { name: 's4', type: 'http', pinned: 2, latest: 3, newer: true, missing: false };
+    const out = html(<SecretForm name="s4" pin={pin} refs={refs} ctx={c} onPin={nop} onRemove={nop} />);
+    const t = text(<SecretForm name="s4" pin={pin} refs={refs} ctx={c} onPin={nop} onRemove={nop} />);
+    expect(t).toContain('HTTP secret s4');
+    expect(t).toContain('version 3, pinned 2 Use version 3');
+    expect(t).toContain('upstream https://api.s4.example called as http://s4');
+    expect(t).toContain('web · S4_URL → url of HTTP secret s4');
+    expect(out).toContain('href="/tenants/kino/environments/prod/secrets/http/s4"');
+    expect(out).not.toContain('type="password"');
+    expect(t).not.toContain('Save as a new version');
   });
 });
 

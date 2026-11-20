@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, CopyBtn, EnvName, ErrBox, KV, LiveBadge, usePoll } from '../components.jsx';
 import { shortId } from '../format.js';
-import { OBJECT_TAB_LABELS, envPath, objectPath, objectTabs, sandboxPath, secretsPath } from '../routes.js';
+import { OBJECT_TAB_LABELS, envPath, httpSecretPath, objectPath, objectTabs, sandboxPath, secretsPath } from '../routes.js';
 import {
   CHANGES_READ, KIND_NAMES, changeTone, changesTo, conditionText, definitionRows, envRows, errorShare, fmtCount, fmtLatency,
   fmtValue, heavyEffect, instanceDeployments, isAttached, jobTrigger, objectImage, objectIncidents, objectStateText, objectTone,
@@ -325,10 +325,21 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
 }
 
 // EnvValue is an environment variable's value: plain text, a secret at
-// its pinned version (a link to the secrets), an addon's output or a
-// service's address (links to their pages).
-function EnvValue({ v, tenant, env, st, navigate }) {
+// its pinned version (a link to the secrets), an HTTP secret's url or
+// host at its pinned version (a link to its page; its key stays at the
+// node, ADR 0055), an addon's output or a service's address (links to
+// their pages).
+export function EnvValue({ v, tenant, env, st, navigate }) {
   if (v.form === 'plain') return v.text === '' ? <span className="muted">""</span> : <>{v.text}</>;
+  if (v.form === 'http') {
+    return (
+      <span className="objref" title="the platform adds its key at the node; the variable holds its URL or host alone">
+        <Icon name="lock" size={11} /> <span className="muted">{v.key} of HTTP secret </span>
+        <Link to={httpSecretPath(tenant, env, v.target)} navigate={navigate}>{v.target}</Link>
+        {v.version ? <span className="muted"> v{v.version}</span> : <span className="muted"> (latest)</span>}
+      </span>
+    );
+  }
   if (v.form === 'secret') {
     return (
       <span className="objref">

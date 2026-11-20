@@ -418,14 +418,16 @@ describe('domains and access', () => {
     expect(actionProblem(k)).toBe('this installation guards no environments: ferund runs without --secret-key-file');
   });
 
-  it('clone with the chosen deployment and the secrets and credentials copied', () => {
+  it('clone with the chosen deployment and the secrets of both kinds copied', () => {
     expect(cloneBody({ name: ' demo ', deployment: 6, copy: { 'internal-token': true, other: false } }))
       .toEqual({ name: 'demo', deployment: 6, secrets: { 'internal-token': { copy: true } } });
     expect(cloneBody({ name: 'demo', deployment: 0, copy: {} })).toEqual({ name: 'demo' });
-    // The credentials are the environment's (ADR 0033): a clone copies
-    // the ones ticked, each at its latest version.
-    expect(cloneBody({ name: 'demo', copy: {}, copyCredentials: { github: true, stripe: false } }))
-      .toEqual({ name: 'demo', credentials: { github: { copy: true } } });
+    // An HTTP secret (ADR 0055) is copied under the request's credentials,
+    // a value under its secrets, each ticked one at its latest version.
+    const secrets = [{ name: 'github', type: 'http', version: 2 }, { name: 'stripe', type: 'http', version: 1 },
+      { name: 'session-key', type: 'value', version: 3 }];
+    expect(cloneBody({ name: 'demo', copy: { github: true, stripe: false, 'session-key': true }, secrets }))
+      .toEqual({ name: 'demo', secrets: { 'session-key': { copy: true } }, credentials: { github: { copy: true } } });
   });
 });
 
@@ -497,6 +499,11 @@ describe("an object's page", () => {
     expect(by.EXPENSA_APPROVAL_URL).toMatchObject({ form: 'service', ref: 'service/approval-service', text: 'url of service approval-service port http' });
     expect(envValueRef({ value: 'x' }).text).toBe('x');
     expect(envValueRef({ secret: 'k' }, {}).text).toBe('secret k');
+    // An HTTP secret's url or host (ADR 0055), at the version the spec pins.
+    const pinned = { secrets: { s4: { version: 2, type: 'http', upstream: 'https://s4.example', mode: 'name' } } };
+    expect(envValueRef({ secret: 's4', key: 'url' }, pinned)).toEqual({ form: 'http', target: 's4', key: 'url', version: 2,
+      ref: 'http/s4', text: 'url of HTTP secret s4 v2' });
+    expect(envValueRef({ secret: 's4', key: 'host' }, {}).text).toBe('host of HTTP secret s4');
   });
 
   it("lists a service's definition: image as written and its pin, command, ports, replicas, size, readiness, rollout", () => {

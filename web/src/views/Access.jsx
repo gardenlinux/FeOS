@@ -8,13 +8,13 @@ import { Ago, CopyBtn, ErrBox, LiveBadge, useNow, usePoll } from '../components.
 import { fmtDateTime } from '../format.js';
 import { credentialsOf } from './sandboxes.js';
 
-// The credentials a sandbox uses but never sees: the Kubernetes clusters
-// and SSH servers bound to it, each with what the audit log says it was
-// used for, and the newest refusals. Read with the session; the sets are
+// The keys a sandbox uses but never sees: the Kubernetes clusters and SSH
+// servers bound to it, each with what the audit log says it was used
+// for, and the newest refusals. Read with the session; the sets are
 // changed with the sandbox's token, by the client that owns them, not
-// here. The HTTP APIs it gets are the credentials of its environment it
-// names (ADR 0033, SandboxCredentials); its own HTTP set is read with its token
-// only. No credential reaches this view: fingerprints and public keys only.
+// here. The HTTP APIs it gets are the HTTP secrets of its environment it
+// names (ADR 0055, SandboxHttpSecrets); its own HTTP set is read with its
+// token only. No key reaches this view: fingerprints and public keys only.
 // Where ferund runs without bindings, kube and ssh are null.
 
 export function Access({ sandboxId }) {
@@ -39,7 +39,7 @@ export function Access({ sandboxId }) {
     <div className="access">
       <div className="access-head">
         <span className="muted small">
-          Credentials the sandbox uses but never sees: they stay on its node, and the sandbox reaches a local
+          Keys the sandbox uses but never sees: they stay on its node, and the sandbox reaches a local
           endpoint that adds them.
         </span>
         <span className="spacer" />
@@ -53,7 +53,7 @@ export function Access({ sandboxId }) {
       {data.kube && (data.kube.bindings || []).length > 0 && (
         <div className="tblwrap"><table className="tbl">
           <thead>
-            <tr><th>name</th><th>server</th><th>credential</th><th>in the sandbox</th><th>use</th></tr>
+            <tr><th>name</th><th>server</th><th>key</th><th>in the sandbox</th><th>use</th></tr>
           </thead>
           <tbody>
             {data.kube.bindings.map((b) => (
@@ -66,7 +66,7 @@ export function Access({ sandboxId }) {
                 </td>
                 <td className="small">
                   {b.authType === 'client_cert' ? 'client certificate' : 'bearer token'}
-                  <div className="mono muted" title="the fingerprint of the stored credential">{b.fingerprint}</div>
+                  <div className="mono muted" title="the fingerprint of the stored key">{b.fingerprint}</div>
                 </td>
                 <td className="mono small">http://127.0.0.1:{b.port}</td>
                 <td><Use use={b.use} unit="request" /></td>

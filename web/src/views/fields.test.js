@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { response } from '../testing/ferun.js';
 import { removeObject, setObject } from './draft.js';
 import {
-  addonValue, changeMarks, credentialBinding, healthOf, idleOf, idleValue, itemOfUnit, listGroups, readinessOf, renameVar,
-  retypeHealth, retypeValue, routed, serviceValue, shortImage, summaryOf, textOf, toggleBinding, unitOfItem, valueType, withText,
+  VALUE_TYPES, addonValue, changeMarks, healthOf, idleOf, idleValue, itemOfUnit, listGroups, readinessOf, renameVar,
+  retypeHealth, retypeValue, routed, serviceValue, shortImage, summaryOf, textOf, unitOfItem, valueType, withText,
 } from './fields.js';
 
 // The forms' typed fields against the spec's values, and the list's
@@ -38,13 +38,16 @@ describe('the list', () => {
     expect(summaryOf('jobs', { image: 'x:1', on: 'manual' })).toBe('x:1 · manual');
     expect(summaryOf('addons', STORED.addons.postgres)).toBe('postgres · 17 · small');
     expect(summaryOf('routes', STORED.routes['api-expense'])).toBe('/api/expense → expense-service:http');
-    expect(summaryOf('bindings', { credentialRef: { name: 'stripe', version: 2 } })).toBe('credential stripe · v2');
-    expect(summaryOf('bindings', { credentialRef: { name: 'stripe' } })).toBe('credential stripe');
+    expect(summaryOf('bindings', { credentialRef: { name: 'stripe', version: 2 } })).toBe('HTTP secret stripe · v2');
+    expect(summaryOf('bindings', { credentialRef: { name: 'stripe' } })).toBe('HTTP secret stripe');
     expect(summaryOf('bindings', { upstream: 'https://api.github.com' })).toBe('api.github.com');
     expect(summaryOf('secrets', null, { pinned: 3, latest: 3 })).toBe('v3 of 3');
     expect(summaryOf('secrets', null, { pinned: 2, latest: 3, newer: true })).toBe('v2 · v3 newer');
     expect(summaryOf('secrets', null, { pinned: 0, latest: 0, missing: true })).toBe('no value yet');
     expect(summaryOf('secrets', null, { pinned: 0, latest: 4 })).toBe('latest');
+    // An HTTP secret's (ADR 0055) says its kind first.
+    expect(summaryOf('secrets', null, { type: 'http', pinned: 2, latest: 3, newer: true })).toBe('HTTP · v2 · v3 newer');
+    expect(summaryOf('secrets', null, { type: 'http', pinned: 0, latest: 0, missing: true })).toBe('HTTP · not in the environment');
     expect(shortImage({ image: 'nginx' })).toBe('nginx');
   });
 
@@ -83,10 +86,16 @@ describe('the list', () => {
 });
 
 describe('a variable\'s value', () => {
-  it('is one of four choices, whatever form the spec writes it in', () => {
+  it('is one of its choices, whatever form the spec writes it in', () => {
+    expect(VALUE_TYPES.map((t) => t.label)).toEqual(['Text', 'Secret value', 'URL of an HTTP secret', 'Host of an HTTP secret',
+      'Addon output', 'Service address']);
     expect(valueType('info')).toBe('text');
     expect(valueType({ value: 'info' })).toBe('text');
     expect(valueType({ secret: 'k' })).toBe('secret');
+    // An HTTP secret's URL or host (ADR 0055); another key is no choice.
+    expect(valueType({ secret: 's4', key: 'url' })).toBe('httpUrl');
+    expect(valueType({ secret: 's4', key: 'host' })).toBe('httpHost');
+    expect(valueType({ secret: 's4', key: 'token' })).toBe('other');
     expect(valueType({ addon: 'postgres', key: 'url', role: 'r', database: 'd' })).toBe('addon');
     expect(valueType({ service: 'web', port: 'http', key: 'url' })).toBe('service');
     expect(valueType({ addon: 'a', service: 'b' })).toBe('other');
@@ -110,6 +119,15 @@ describe('a variable\'s value', () => {
     expect(retypeValue({ value: 'v' }, 'text', TARGETS)).toEqual({ value: 'v' });
     expect(retypeValue('x', 'addon', { addons: [], services: [], secrets: [] })).toEqual({ addon: '' });
     expect(retypeValue('x', 'service', { addons: [], services: [], secrets: [] })).toEqual({ service: '', key: 'url' });
+  });
+
+  it("writes an HTTP secret's URL or host as {secret, key}, keeping its secret between them", () => {
+    const t = { ...TARGETS, http: [{ name: 's4', upstream: 'https://s4.example', mode: 'name' }] };
+    expect(retypeValue('x', 'httpUrl', t)).toEqual({ secret: 's4', key: 'url' });
+    expect(retypeValue({ secret: 'erp', key: 'url' }, 'httpHost', t)).toEqual({ secret: 'erp', key: 'host' });
+    expect(retypeValue({ secret: 'internal-token' }, 'httpUrl', t)).toEqual({ secret: 's4', key: 'url' });
+    expect(retypeValue('x', 'httpUrl', TARGETS)).toEqual({ secret: '', key: 'url' });
+    expect(retypeValue({ secret: 's4', key: 'url' }, 'text', t)).toBe('');
   });
 
   it('writes an addon output with its key and fields, dropping what another addon lacks', () => {
@@ -173,25 +191,3 @@ describe('idle', () => {
   });
 });
 
-describe('bindings', () => {
-  it('adds one of a credential of the environment, ticked on the service, once', () => {
-    const r = credentialBinding(STORED, 'stripe', 'services', 'web');
-    expect(r.name).toBe('stripe');
-    expect(r.spec.bindings).toEqual({ stripe: { credentialRef: { name: 'stripe' } } });
-    expect(r.spec.services.web.bindings).toEqual(['stripe']);
-    const again = credentialBinding(r.spec, 'stripe', 'jobs', 'migrate');
-    expect(Object.keys(again.spec.bindings)).toEqual(['stripe']);
-    expect(again.spec.jobs.migrate.bindings).toEqual(['stripe']);
-    // A binding of that name stated otherwise keeps its name; the new one takes the next.
-    const taken = setObject(STORED, 'bindings', 'stripe', { upstream: 'https://api.stripe.com' });
-    expect(credentialBinding(taken, 'stripe').name).toBe('stripe-2');
-  });
-
-  it('ticks and unticks, dropping an empty list', () => {
-    const on = toggleBinding(STORED, 'services', 'web', 'github', true);
-    expect(on.services.web.bindings).toEqual(['github']);
-    expect(toggleBinding(on, 'services', 'web', 'github', true)).toBe(on);
-    expect('bindings' in toggleBinding(on, 'services', 'web', 'github', false).services.web).toBe(false);
-    expect(toggleBinding(STORED, 'services', 'nobody', 'x', true)).toBe(STORED);
-  });
-});

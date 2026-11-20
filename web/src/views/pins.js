@@ -10,6 +10,7 @@
 // yet pins at apply, as before. Pure.
 
 import { isObject, objectsOf, setObject } from './draft.js';
+import { httpSecretNames } from './refs.js';
 
 // isDigestRef says whether an image is a digest reference, as ferund
 // says it (an "@sha256:" in it): the plan answers no pin for one, and
@@ -89,20 +90,27 @@ export function applyPins(spec, images) {
 }
 
 // secretPins are the secrets a draft knows with their pins against the
-// environment's list (GET …/secrets): {name, pinned (0: the latest at
-// apply), latest (0: the environment has none), newer, missing}.
-// pending names those whose values wait in memory (a new environment).
+// environment's list (GET …/secrets, both kinds): {name, type (http or
+// value, ADR 0055: the list's, else the draft's reference with a key or
+// its pin's type), pinned (0: the latest at apply), latest (0: the
+// environment has none), newer, missing}. pending names those whose
+// values wait in memory (a new environment).
 export function secretPins(spec, names, list, pending = new Set()) {
   const latest = new Map((list || []).map((s) => [s.name, s.version]));
+  const types = new Map((list || []).map((s) => [s.name, s.type === 'http' ? 'http' : 'value']));
+  const http = new Set(httpSecretNames(spec));
   return names.map((name) => {
     const ref = spec && isObject(spec.secrets) && isObject(spec.secrets[name]) ? spec.secrets[name] : null;
     const pinned = ref && Number.isInteger(ref.version) ? ref.version : 0;
     const l = latest.get(name) || 0;
-    return { name, pinned, latest: l, newer: pinned > 0 && l > pinned, missing: !l && !pending.has(name) };
+    const type = types.get(name) || (http.has(name) ? 'http' : 'value');
+    return { name, type, pinned, latest: l, newer: pinned > 0 && l > pinned, missing: !l && !pending.has(name) };
   });
 }
 
-// pinSecret pins secret name to version (0: the latest at apply).
+// pinSecret pins secret name to version (0: the latest at apply): the
+// version alone, an HTTP secret's too (the apply writes its upstream and
+// mode beside it).
 export function pinSecret(spec, name, version) {
   return setObject(spec, 'secrets', name, version > 0 ? { version } : {});
 }

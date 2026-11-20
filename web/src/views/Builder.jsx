@@ -18,6 +18,7 @@ import { groupFindings, severityCounts, unitKey, worst } from './findings.js';
 import { changesSince, rebase, resolve } from './rebase.js';
 import { applyPins, pinSecret, secretPins } from './pins.js';
 import { builtinCatalog, newAddon, readCatalog } from './catalog.js';
+import { httpSecretsOf } from './access.js';
 import { planner } from './planner.js';
 import {
   AddonForm, BindingForm, FindingList, JobForm, NewBinding, NewSecret, RouteForm, SecretForm, ServiceForm,
@@ -44,7 +45,10 @@ const HISTORY = 100;
 
 // ObjectNav is the draft's objects by kind: each row its name, a line
 // (image tag, addon type and plan, route path → service, binding's
-// credential), its change against the base (+ ~ −) and its findings.
+// HTTP secret, a secret's pin), its change against the base (+ ~ −) and
+// its findings. The bindings stated in the spec (from before ADR 0055)
+// show while the draft has some, without Add: HTTP secrets take their
+// place.
 export function ObjectNav({ spec, base, groups, open, onOpen, onAdd, pins, catalog, marks }) {
   const list = useMemo(() => listGroups(spec, base || {}, marks), [spec, base, marks]);
   const pinByName = new Map((pins || []).map((p) => [p.name, p]));
@@ -52,13 +56,13 @@ export function ObjectNav({ spec, base, groups, open, onOpen, onAdd, pins, catal
     <nav className="b-nav" aria-label="the draft's objects">
       <button className={'b-navtop' + (open === '' ? ' on' : '')} onClick={() => onOpen('')}>
         <Icon name="layers" size={13} /> Overview</button>
-      {list.map((g) => (
+      {list.filter((g) => g.key !== 'bindings' || g.rows.length > 0).map((g) => (
         <div key={g.key} className="b-group">
           <div className="b-grouphead">
             <span className="b-grouptitle">{g.title}</span>
             <span className="count">{g.rows.filter((r) => !r.removed).length}</span>
             <span className="spacer" />
-            {onAdd && (g.key === 'addons'
+            {onAdd && g.key !== 'bindings' && (g.key === 'addons'
               ? <AddAddonButton catalog={catalog} onAdd={(type) => onAdd('addons', type)} />
               : <button className="ghost mini b-add" title={`add a ${g.one}`} onClick={() => onAdd(g.key)}><Icon name="plus" size={11} /> Add</button>)}
           </div>
@@ -142,8 +146,6 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
   const [planning, setPlanning] = useState(false);
   const [secrets, setSecrets] = useState(null);
   const [secretsErr, setSecretsErr] = useState('');
-  const [credentials, setCredentials] = useState(null);
-  const [credentialsErr, setCredentialsErr] = useState('');
   const pending = useRef(new Map());
   const [, bumpPending] = useState(0);
   const [catalog, setCatalog] = useState(null);
@@ -241,8 +243,8 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     })().catch((e) => setLoadErr(e.message));
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The secrets (names and versions), the environment's credentials (ADR
-  // 0033; a new environment has none yet) and the catalog.
+  // The secrets (names and versions, an HTTP secret with its definition,
+  // ADR 0055; a new environment has none yet) and the catalog.
   const refreshSecrets = useCallback(async () => {
     if (isNew) return;
     try {
@@ -257,15 +259,6 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     if (isNew) { setSandboxes([]); return undefined; }
     let live = true;
     api.listSandboxes(env).then((r) => { if (live) setSandboxes(r.sandboxes || []); }, () => { if (live) setSandboxes(null); });
-    return () => { live = false; };
-  }, [env, isNew]);
-  useEffect(() => {
-    if (isNew) { setCredentials([]); return undefined; }
-    let live = true;
-    api.listCredentials(env).then(
-      (r) => { if (live) setCredentials((r && r.credentials) || []); },
-      (e) => { if (live) { setCredentials([]); setCredentialsErr(e.message); } },
-    );
     return () => { live = false; };
   }, [env, isNew]);
   useEffect(() => {
@@ -403,8 +396,8 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
 
   const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const ctx = {
-    spec, catalog, setSecret, isNew, knownSecrets, pins, credentials, credentialsErr, editSpec, editAttached, tenant, env, navigate,
-    sandboxes,
+    spec, catalog, setSecret, isNew, knownSecrets, pins, httpSecrets: httpSecretsOf(secrets), httpSecretsErr: secretsErr, editSpec,
+    editAttached, tenant, env, navigate, sandboxes,
   };
   const review = !readOnly && (
     <ReviewPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} findings={findings}
@@ -641,9 +634,7 @@ function Editor({ unit, spec, base, groups, pins, ctx, marks, edit, draftRef, se
   if (unit === 'secrets/') {
     return <NewSecret ctx={{ ...ctx, findings: [] }} onDone={(n) => setOpen(unitKey('secrets', n))} />;
   }
-  if (unit === 'bindings/') {
-    return <NewBinding ctx={{ ...ctx, findings: [] }} onAdd={(r) => { edit(r.spec); setOpen(unitKey('bindings', r.name)); }} />;
-  }
+  if (unit === 'bindings/') return <NewBinding ctx={{ ...ctx, findings: [] }} />;
   const i = unit.indexOf('/');
   const key = unit.slice(0, i);
   const name = unit.slice(i + 1);
@@ -727,7 +718,8 @@ function Overview({ spec, st, isNew, words, groups, pins, onOpen }) {
   const services = objectsOf(spec, 'services');
   const addons = objectsOf(spec, 'addons');
   const routes = objectsOf(spec, 'routes').sort(([, a], [, b]) => String((a && a.path) || '').localeCompare(String((b && b.path) || '')));
-  const counts = GROUPS.map((g) => [g, g.key === 'secrets' ? secretNames(spec).length : objectsOf(spec, g.key).length]);
+  const counts = GROUPS.map((g) => [g, g.key === 'secrets' ? secretNames(spec).length : objectsOf(spec, g.key).length])
+    .filter(([g, n]) => g.key !== 'bindings' || n > 0);
   const hosts = st && st.public ? st.hosts || [] : [];
   const missing = (pins || []).filter((p) => p.missing).length;
   const sev = (u) => worst(groups.objects.get(u) || []);

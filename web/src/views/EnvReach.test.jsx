@@ -125,6 +125,24 @@ describe('where the keys live in the picture', () => {
     expect(html(cards(spec, { catalog, usage }))).toContain('mark mark-offloaded" title="The key stays at the node');
   });
 
+  it("draws an HTTP secret a variable references as an edge out at the node, with its pinned version", () => {
+    const es = dep.spec.services['expense-service'];
+    const spec = { ...dep.spec, services: { ...dep.spec.services,
+      'expense-service': { ...es, env: { ...es.env, ERP_URL: { secret: 'erp', key: 'url' } } } },
+    secrets: { ...(dep.spec.secrets || {}), erp: { version: 3, type: 'http', upstream: 'https://api.vendor.example', mode: 'intercept' } } };
+    const secrets = [{ name: 'erp', type: 'http', version: 4, upstream: 'https://api.vendor.example', mode: 'intercept',
+      credential: { kind: 'oauth2' }, usedBy: { sandboxes: [], objects: ['service/expense-service'], latest: 3, deployed: 3 } }];
+    const out = card(html(cards(spec, { catalog, secrets, usage })), 'service expense-service');
+    const t = text(<div dangerouslySetInnerHTML={{ __html: out }} />);
+    expect(t).toContain('OAuth2 at the node api.vendor.example erp · as api.vendor.example');
+    expect(out).toContain('class="sgf-wire sgf-wire-node"><span class="sgf-mark"><span class="badge mark mark-offloaded"');
+    expect(out).toContain('title="HTTP secret erp to https://api.vendor.example: OAuth2 at the node. The key stays at the node, which adds it to '
+      + 'each request. The container never sees it. Reached as api.vendor.example, version 3. Last 24 h: 1,204 requests');
+    // From the spec alone, before the list answered: its pin says the upstream and the mode.
+    const bare = text(cards(spec, { catalog }));
+    expect(bare).toContain('Key at the node api.vendor.example erp · as api.vendor.example');
+  });
+
   it('leaves the numbers out when the sink cannot say', () => {
     const out = html(cards(withBindings(['erp']), { catalog, usage: null }));
     expect(out).toContain('Reached as api.vendor.example."');

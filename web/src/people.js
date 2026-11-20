@@ -164,8 +164,8 @@ export const PLATFORM_GROUPS = [
 // VIEW_NEEDS are what the tenant's pages outside the sidebar need: a
 // new environment's builder (ADR 0032) a tenant grant write, a new access
 // provider's form (ADR 0054) admin on the tenant, the tools' reference a
-// tenant grant. A credential is its environment's (ADR 0033): its pages
-// need the environment's grant, as the environment's other pages do.
+// tenant grant. An HTTP secret is its environment's (ADR 0055): its
+// pages need the environment's grant, as the environment's other pages do.
 const VIEW_NEEDS = { newEnvironment: 'writeTenant', newProvider: 'adminTenant', tools: 'readTenant' };
 
 // tenantNav is the tenant's pages that access offers.

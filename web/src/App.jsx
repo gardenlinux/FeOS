@@ -9,7 +9,7 @@ import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
 import { Avatar, BrandMark, EnvName, StateDot, useTheme } from './components.jsx';
 import {
-  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, credentialPath, envPath, jobPath, newEnvPath, newSandboxPath, parsePath,
+  ENV_TAB_LABELS, OBJECT_TAB_LABELS, canonicalPath, chosenEnv, envPath, jobPath, newEnvPath, newSandboxPath, parsePath,
   pickEnvPath, pickObjectPath, sandboxPath, switchEnvPath,
 } from './routes.js';
 import { shortId } from './format.js';
@@ -700,6 +700,16 @@ const CRUMB_NAMES = {
   providers: 'access providers',
 };
 
+// crumbItem is an environment's item in the trail: "new service" for
+// new/service, "HTTP secret s4" for an HTTP secret's page (ADR 0055),
+// "new HTTP secret" for its form, else the item.
+function crumbItem(item) {
+  const s = String(item);
+  if (s === 'http/new') return 'new HTTP secret';
+  if (s.startsWith('http/')) return `HTTP secret ${s.slice(5)}`;
+  return s.replace(/^new\//, 'new ');
+}
+
 function Topbar({ route, navigate, me, onSearch, onSignOut }) {
   const t = route.tenant;
   const platform = platformSpace(route, isOperator(me));
@@ -725,16 +735,15 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
         {route.view === 'environments' && route.env && route.tab !== 'overview' && route.tab !== 'objects' && (
-          <>{sep}{crumb((ENV_TAB_LABELS[route.tab] || route.tab).toLowerCase(),
-            route.tab === 'credentials' ? credentialPath(t, route.env) : envPath(t, route.env, route.tab))}</>)}
+          <>{sep}{crumb((ENV_TAB_LABELS[route.tab] || route.tab).toLowerCase(), envPath(t, route.env, route.tab))}</>)}
         {route.view === 'environments' && route.item && (
-          <>{sep}<span className="crumb mono">{String(route.item).replace(/^new\//, 'new ')}</span></>)}
+          <>{sep}<span className="crumb mono">{crumbItem(route.item)}</span></>)}
         {route.view === 'environments' && route.tab === 'objects' && route.otab && route.otab !== 'overview' && (
           <>{sep}<span className="crumb">{(OBJECT_TAB_LABELS[route.otab] || route.otab).toLowerCase()}
             {route.replica != null ? ` · replica ${route.replica}` : ''}</span></>)}
         {route.view === 'environments' && route.tab === 'sandboxes' && route.item && route.item !== 'new' && route.otab
           && route.otab !== 'overview' && <>{sep}<span className="crumb">{route.otab}</span></>}
-        {route.view === 'environments' && route.tab === 'credentials' && route.otab === 'edit' && (
+        {route.view === 'environments' && route.tab === 'secrets' && route.otab === 'edit' && (
           <>{sep}<span className="crumb">new version</span></>)}
         {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
         {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}

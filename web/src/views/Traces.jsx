@@ -79,7 +79,7 @@ function SpanDetail({ span, trace, self, critical, onTrace }) {
       <p className="tr-facts">
         {span.kind && <span><span className="k">kind</span> {span.kind}</span>}
         {bindingOf(span) && (
-          <span title="the platform sent it on with the binding's credential (ADR 0028)">
+          <span title="the platform sent it on and added the key at the node (an HTTP secret, ADR 0055)">
             <span className="k">through the binding</span> <span className="mono">{bindingOf(span)}</span>
           </span>
         )}

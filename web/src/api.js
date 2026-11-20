@@ -332,15 +332,15 @@ export const api = {
   // revised);
   // imageCredentials ({username, password}) pull a private image (ADR
   // 0025), sealed, never answered.
-  // credentials name the credentials of its environment its pod gets
-  // (ADR 0033).
-  createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, reaches, egress, imageCredentials = null, credentials = [] } = {}) =>
+  // secrets name the HTTP secrets of its environment its pod gets, each
+  // at its latest version (ADR 0055).
+  createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, reaches, egress, imageCredentials = null, secrets = [] } = {}) =>
     tenantCall('POST', '/sandboxes', {
       image, vcpus, memoryMib, environment,
       ...(reaches !== undefined && reaches !== null ? { reaches } : {}),
       ...(egress !== undefined && egress !== null ? { egress } : {}),
       ...(imageCredentials ? { imageCredentials } : {}),
-      ...(credentials && credentials.length ? { credentials } : {}),
+      ...(secrets && secrets.length ? { secrets } : {}),
     }),
   // What a sandbox reaches of its environment, the whole of it: "all" or
   // the list ([] for nothing); in place, no move (ADR 0035, revised).
@@ -448,24 +448,27 @@ export const api = {
   planSpec: (spec) => tenantCall('POST', '/environments/plan', { spec }),
   applyDeployment: (env, { spec, base, message }) =>
     tenantCall('POST', `/environments/${enc(env)}/deployments`, message ? { spec, base, message } : { spec, base }),
-  // The secrets' names and latest versions, never a value; a put makes a
-  // new version, {name, version}.
-  listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
-  putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
-  // credentials (ADR 0033): an environment's HTTP bindings stated once,
-  // versioned (env: its name or ID). A read answers every secret field
-  // {"set": true}; a put sends the whole definition, a secret field
-  // {"set": true} keeping the latest version's value (201 a new version,
-  // 200 unchanged); a delete of one in use is 409 credential_in_use. A
-  // check is the preflight ({ok, addresses, tls, token, probe, error}) of
+  // An environment's secrets (ADR 0055), both kinds in one list sorted by
+  // name, never a value: a value secret {name, type: "value", version,
+  // createdBy, createdAt}; an HTTP secret also its definition (upstream,
+  // mode, caPem?, pathPrefixes, forwardedHost, rateLimit?, credential:
+  // its authentication, every secret field {"set": true}) and usedBy
+  // {sandboxes, objects, latest, deployed}. A put of {value} makes a
+  // value's new version, a put of {type: "http", …} an HTTP secret's,
+  // whose secret fields {"set": true} keep the latest version's while
+  // its origin, CA and token URL stay; 201 a new version, 200 unchanged,
+  // 409 secret_kind for a name of the other kind. A delete of one a
+  // deployment pins or a sandbox names is 409. A check is an HTTP
+  // secret's preflight ({ok, addresses, tls, token, probe, error}) of
   // the stored latest version, or with binding of a draft, whose secret
   // fields {"set": true} are the latest version's; nothing is stored.
-  listCredentials: (env) => tenantCall('GET', `/environments/${enc(env)}/credentials`),
-  getCredential: (env, name) => tenantCall('GET', `/environments/${enc(env)}/credentials/${enc(name)}`),
-  putCredential: (env, name, binding) => tenantCall('PUT', `/environments/${enc(env)}/credentials/${enc(name)}`, binding),
-  deleteCredential: (env, name) => tenantCall('DELETE', `/environments/${enc(env)}/credentials/${enc(name)}`),
-  checkCredential: (env, name, { binding = null, probe = null } = {}) =>
-    tenantCall('POST', `/environments/${enc(env)}/credentials/${enc(name)}/check`,
+  listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
+  getSecret: (env, name) => tenantCall('GET', `/environments/${enc(env)}/secrets/${enc(name)}`),
+  putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
+  putHttpSecret: (env, name, def) =>
+    tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { ...def, type: 'http' }),
+  checkSecret: (env, name, { binding = null, probe = null } = {}) =>
+    tenantCall('POST', `/environments/${enc(env)}/secrets/${enc(name)}/check`,
       { ...(binding ? { binding } : {}), ...(probe ? { probe } : {}) }),
   // An environment's operations beside the builder (ADR 0018).
   deleteEnvironment: (env) => tenantCall('DELETE', `/environments/${enc(env)}`),
@@ -478,7 +481,8 @@ export const api = {
   putTag: (env, tag, deployment) => tenantCall('PUT', `/environments/${enc(env)}/tags/${enc(tag)}`, { deployment }),
   deleteTag: (env, tag) => tenantCall('DELETE', `/environments/${enc(env)}/tags/${enc(tag)}`),
   // A clone: {name, deployment?, labels?, secrets: {name: {copy: true} | {value}},
-  // credentials: {name: {copy: true}}}.
+  // credentials: {name: {copy: true}}} — the HTTP secrets go under
+  // credentials, their name of before ADR 0055, which ferund keeps.
   cloneEnvironment: (env, body) => tenantCall('POST', `/environments/${enc(env)}/clone`, body),
   deleteSecret: (env, name) => tenantCall('DELETE', `/environments/${enc(env)}/secrets/${enc(name)}`),
   restartService: (env, name) => tenantCall('POST', `/environments/${enc(env)}/services/${enc(name)}/restart`),
@@ -591,11 +595,11 @@ export const api = {
   getProvider: (name) => tenantCall('GET', `/providers/${enc(name)}`),
   putProvider: (name, provider) => tenantCall('PUT', `/providers/${enc(name)}`, provider),
   deleteProvider: (name) => tenantCall('DELETE', `/providers/${enc(name)}`),
-  // The credentials a sandbox names, of its environment; the whole list
-  // on a put.
-  getSandboxCredentials: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/credentials`),
-  putSandboxCredentials: (sandboxId, names) =>
-    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/credentials`, { credentials: names }),
+  // The HTTP secrets a sandbox names, of its environment (ADR 0055); the
+  // whole list on a put, which reaches its running pod at once.
+  getSandboxSecrets: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/secrets`),
+  putSandboxSecrets: (sandboxId, names) =>
+    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/secrets`, { secrets: names }),
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

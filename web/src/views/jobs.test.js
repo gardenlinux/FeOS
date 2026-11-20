@@ -130,7 +130,7 @@ describe('the form', () => {
       'memory (MiB) must be a whole number from 256 to 65536',
       'the deadline is a duration of up to 2h (90s, 15m, 1h30m), not 3h',
       'the result path must be an absolute, clean path of a file outside /dev, not /dev/out',
-      'the image\'s credentials need a username and a password',
+      'the registry login needs a username and a password',
     ]);
     for (const p of ['tmp/r', '/tmp/../r', '/tmp/', '/a//b', '/']) {
       expect(jobRequest({ ...EMPTY_FORM, environment: 'e', image: 'x', resultPath: p }).errors).toHaveLength(1);

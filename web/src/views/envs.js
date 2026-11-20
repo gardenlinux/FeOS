@@ -513,19 +513,18 @@ export function publishNote(res) {
 // ----------------------------------------------------------------- clone --
 
 // cloneBody is a clone's request: the new name, the deployment whose
-// spec it takes (0: the latest), and each secret and each credential
-// (ADR 0033) copied or left out.
-export function cloneBody({ name, deployment, copy, copyCredentials }) {
+// spec it takes (0: the latest), and each secret copied or left out
+// (copy: name → true). secrets is the environment's list: its HTTP
+// secrets (ADR 0055) go under credentials, the name the clone's request
+// has for them since ADR 0033, its value secrets under secrets.
+export function cloneBody({ name, deployment, copy, secrets = [] }) {
   const body = { name: String(name || '').trim() };
   if (Number(deployment) > 0) body.deployment = Number(deployment);
-  const picked = (m) => {
-    const out = {};
-    for (const [k, v] of Object.entries(m || {})) if (v) out[k] = { copy: true };
-    return out;
-  };
-  const secrets = picked(copy);
-  if (Object.keys(secrets).length > 0) body.secrets = secrets;
-  const credentials = picked(copyCredentials);
+  const http = new Set((secrets || []).filter((s) => s && s.type === 'http').map((s) => s.name));
+  const values = {};
+  const credentials = {};
+  for (const [k, v] of Object.entries(copy || {})) if (v) (http.has(k) ? credentials : values)[k] = { copy: true };
+  if (Object.keys(values).length > 0) body.secrets = values;
   if (Object.keys(credentials).length > 0) body.credentials = credentials;
   return body;
 }
@@ -709,9 +708,10 @@ export function trafficOf(traffic, name) {
 }
 
 // envValueRef is what an environment variable's value is: a plain
-// string (also {value}), or a reference to a secret (with the version the
-// spec pins, 0: none), an addon's output or a service's address; target
-// is the name it names, ref its "<kind>/<name>".
+// string (also {value}), or a reference to a secret's value or an HTTP
+// secret's url or host ({secret, key}, ADR 0055; both with the version
+// the spec pins, 0: none), an addon's output or a service's address;
+// target is the name it names, ref its "<kind>/<name>".
 export function envValueRef(v, spec) {
   if (typeof v === 'string') return { form: 'plain', text: v, ref: '' };
   if (!v || typeof v !== 'object') return { form: 'plain', text: v == null ? '' : String(v), ref: '' };
@@ -719,6 +719,10 @@ export function envValueRef(v, spec) {
   if (v.secret) {
     const pin = spec && spec.secrets && spec.secrets[v.secret];
     const version = (pin && pin.version) || 0;
+    if (v.key) {
+      return { form: 'http', target: v.secret, key: v.key, version, ref: `http/${v.secret}`,
+        text: `${v.key} of HTTP secret ${v.secret}${version ? ` v${version}` : ''}` };
+    }
     return { form: 'secret', target: v.secret, version, text: `secret ${v.secret}${version ? ` v${version}` : ''}`, ref: `secret/${v.secret}` };
   }
   if (v.addon) {

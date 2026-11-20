@@ -3,8 +3,9 @@
 
 // What the views of where a key lives read beside the spec (access.js):
 // the addon catalog (which types admit a workload by its certificate),
-// the environment's credentials, its bindings' use (the sink's counts of
-// the last 24 h) and its workloads' identities. Read with the session;
+// the environment's secrets (both kinds, ADR 0055), its bindings' use
+// (the sink's counts of the last 24 h, per binding: an HTTP secret's
+// under its name) and its workloads' identities. Read with the session;
 // none of it carries a key.
 
 import { useCallback, useEffect, useState } from 'react';
@@ -12,7 +13,7 @@ import { api } from '../api.js';
 import { usePoll } from '../components.jsx';
 import { builtinCatalog, readCatalog } from './catalog.js';
 
-const CREDENTIALS_MS = 10000;
+const SECRETS_MS = 10000;
 const USAGE_MS = 60000;
 const IDENTITIES_MS = 60000;
 
@@ -47,11 +48,11 @@ function useRead(fn, ms) {
   return { ...state, reload: read };
 }
 
-// useEnvCredentials are environment env's credentials (ADR 0033), each
-// with its usedBy.
-export function useEnvCredentials(env) {
-  const fn = useCallback(async () => (await api.listCredentials(env)).credentials || [], [env]);
-  return useRead(fn, CREDENTIALS_MS);
+// useEnvSecrets are environment env's secrets, value and HTTP (ADR
+// 0055), an HTTP secret with its definition and usedBy.
+export function useEnvSecrets(env) {
+  const fn = useCallback(async () => (await api.listSecrets(env)).secrets || [], [env]);
+  return useRead(fn, SECRETS_MS);
 }
 
 // useBindingUsage is what env's bindings carried in the last 24 h

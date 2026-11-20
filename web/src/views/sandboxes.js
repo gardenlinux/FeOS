@@ -152,14 +152,15 @@ export function ownerShown(sb, tenant) {
 export const SANDBOX_TABS = [
   { key: 'overview', label: 'Overview', icon: 'gauge' },
   { key: 'connect', label: 'Connect', icon: 'plug' },
-  { key: 'credentials', label: 'Credentials', icon: 'lock' },
+  { key: 'secrets', label: 'Secrets', icon: 'lock' },
   { key: 'network', label: 'Network', icon: 'globe' },
   { key: 'activity', label: 'Activity', icon: 'activity' },
   { key: 'settings', label: 'Settings', icon: 'settings' },
 ];
 
-// EARLIER_TABS map a tab's earlier name to its name.
-const EARLIER_TABS = { tokens: 'connect', access: 'credentials' };
+// EARLIER_TABS map a tab's earlier name to its name: the secrets were
+// the credentials (ADR 0055) and the access before.
+const EARLIER_TABS = { tokens: 'connect', access: 'secrets', credentials: 'secrets' };
 
 // activeTab is the tab a route's tab names: an earlier name is its new
 // one, anything else the overview.
@@ -172,15 +173,15 @@ export function activeTab(tab) {
 // of it, out to the internet.
 export function newSandboxForm(env = '') {
   return { environment: env, reachMode: 'none', reaches: [], egress: undefined, image: '', vcpus: '', memoryMib: '', username: '',
-    password: '', credentials: [] };
+    password: '', secrets: [] };
 }
 
 // createRequest turns the create form's fields into createSandbox's
 // arguments: [image, vcpus, memoryMib, {environment, reaches?, egress?,
-// imageCredentials, credentials?}]; the environment is required (ADR
+// imageCredentials, secrets?}]; the environment is required (ADR
 // 0035); reaches is "all" or the chosen entries, left out for nothing;
-// egress is left out for the internet; credentials are the
-// environment's its pod gets (ADR 0033). An empty image or size is the
+// egress is left out for the internet; secrets are the environment's
+// HTTP secrets its pod gets (ADR 0055). An empty image or size is the
 // platform's default (0); the registry login takes a username and a
 // password, or neither.
 // It throws on a bad value.
@@ -203,7 +204,7 @@ export function createRequest(form) {
   const opts = { environment, imageCredentials: creds };
   if (reaches !== undefined) opts.reaches = reaches;
   if (form.egress !== undefined && form.egress !== 'internet') opts.egress = form.egress;
-  if (form.credentials && form.credentials.length) opts.credentials = [...form.credentials].sort();
+  if (form.secrets && form.secrets.length) opts.secrets = [...form.secrets].sort();
   return [image, vcpus, memoryMib, opts];
 }
 

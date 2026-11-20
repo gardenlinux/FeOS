@@ -298,11 +298,18 @@ describe('pins', () => {
     const list = response('GET_environments_env_secrets.200').secrets;
     const s = pinSecret(pinSecret(STORED, 'internal-token', 2), 'new-one', 0);
     expect(secretPins(s, ['internal-token', 'new-one', 'later'], list, new Set(['later']))).toEqual([
-      { name: 'internal-token', pinned: 2, latest: 3, newer: true, missing: false },
-      { name: 'new-one', pinned: 0, latest: 0, newer: false, missing: true },
-      { name: 'later', pinned: 0, latest: 0, newer: false, missing: false },
+      { name: 'internal-token', type: 'value', pinned: 2, latest: 3, newer: true, missing: false },
+      { name: 'new-one', type: 'value', pinned: 0, latest: 0, newer: false, missing: true },
+      { name: 'later', type: 'value', pinned: 0, latest: 0, newer: false, missing: false },
     ]);
     expect(s.secrets['new-one']).toEqual({});
+    // An HTTP secret (ADR 0055): the list says its kind, else the draft's
+    // reference with a key or its normalised pin; a move pins the version alone.
+    const http = { ...STORED, services: { ...STORED.services, web: { ...STORED.services.web, env: { S4: { secret: 's4', key: 'url' } } } },
+      secrets: { ...STORED.secrets, s4: { version: 1, type: 'http', upstream: 'https://s4.example', mode: 'name' }, gh: { version: 2, type: 'http' } } };
+    expect(secretPins(http, ['s4', 'gh', 'internal-token'], [{ name: 's4', type: 'http', version: 2 }]).map((p) => [p.name, p.type, p.newer]))
+      .toEqual([['s4', 'http', true], ['gh', 'http', false], ['internal-token', 'value', false]]);
+    expect(pinSecret(http, 's4', 2).secrets.s4).toEqual({ version: 2 });
   });
 });
 

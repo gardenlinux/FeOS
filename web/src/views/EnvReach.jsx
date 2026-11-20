@@ -12,9 +12,10 @@ import { EnvLink } from './EnvTabs.jsx';
 import { HOW_WORDS, reachModel } from './reach.js';
 import { onItsWay } from './jobs.js';
 import { FlowLegend, ReachFlow, kindIcon, useDeployed } from './Reach.jsx';
-import { withKeys } from './access.js';
+import { httpSecretsOf, withKeys } from './access.js';
 import { readCatalog } from './catalog.js';
 import { isObject, objectsOf } from './draft.js';
+import { httpSecretNames } from './refs.js';
 import { MarkLegend } from './Marks.jsx';
 import '../styles/reach.css';
 
@@ -26,17 +27,18 @@ import '../styles/reach.css';
 // view. Drawn from the deployed deployment's reachability; references
 // change in New deployment, a sandbox's reaches on its page. Its edges
 // say where a key lives (access.js): an addon's by identity or in the
-// container, a binding's upstream on the right with its key at the node.
+// container, an HTTP secret's upstream (and a binding's of the spec) on
+// the right with its key at the node.
 
 // useKeys reads what the picture's marks need beside the deployment: the
 // addon catalog (null until read, and from a ferund without one), env's
-// credentials (a binding's upstream may be its credential's; a sandbox
-// holds some) and, once spec or a sandbox has a binding, what the
+// secrets (an HTTP secret's upstream; the sandboxes that name one) and,
+// once spec or a sandbox calls an API through the node, what the
 // bindings carried over the last 24 hours (null while unread, or when the
-// sink cannot say): {catalog, credentials, usage}.
+// sink cannot say): {catalog, secrets, usage}.
 export function useKeys(env, spec) {
   const [catalog, setCatalog] = useState(null);
-  const [creds, setCreds] = useState({ env: '', list: [] });
+  const [list, setList] = useState({ env: '', list: [] });
   const [usage, setUsage] = useState({ env: '', list: null });
   useEffect(() => {
     let live = true;
@@ -46,14 +48,14 @@ export function useKeys(env, spec) {
   useEffect(() => {
     if (!env) return undefined;
     let live = true;
-    api.listCredentials(env).then(
-      (r) => { if (live) setCreds({ env, list: (r && r.credentials) || [] }); },
-      () => { if (live) setCreds({ env, list: [] }); });
+    api.listSecrets(env).then(
+      (r) => { if (live) setList({ env, list: (r && r.secrets) || [] }); },
+      () => { if (live) setList({ env, list: [] }); });
     return () => { live = false; };
   }, [env]);
-  const credentials = creds.env === env ? creds.list : [];
-  const want = !!env && (objectsOf(spec, 'bindings').length > 0
-    || credentials.some((c) => isObject(c) && isObject(c.usedBy) && Array.isArray(c.usedBy.sandboxes) && c.usedBy.sandboxes.length > 0));
+  const secrets = list.env === env ? list.list : [];
+  const want = !!env && (objectsOf(spec, 'bindings').length > 0 || httpSecretNames(spec).length > 0
+    || httpSecretsOf(secrets).some((c) => isObject(c.usedBy) && Array.isArray(c.usedBy.sandboxes) && c.usedBy.sandboxes.length > 0));
   useEffect(() => {
     if (!want) return undefined;
     let live = true;
@@ -62,7 +64,7 @@ export function useKeys(env, spec) {
       () => { if (live) setUsage({ env, list: null }); });
     return () => { live = false; };
   }, [env, want]);
-  return useMemo(() => ({ catalog, credentials, usage: usage.env === env ? usage.list : null }), [catalog, credentials, usage, env]);
+  return useMemo(() => ({ catalog, secrets, usage: usage.env === env ? usage.list : null }), [catalog, secrets, usage, env]);
 }
 
 // useEnvPods is the environment's sandboxes and running jobs, as its
