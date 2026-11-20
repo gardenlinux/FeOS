@@ -11,9 +11,11 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/bindings/httpcheck"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -265,7 +267,7 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 		TLSBindings:         tls,
 	}
 	p.template.ImageCredentials = templateCredentials(creds)
-	if p.template.HTTPBindings, err = templateBindings(v.target, bindings); err != nil {
+	if p.template.HTTPBindings, err = templateBindings(v.target, bindings, env); err != nil {
 		p.err = fmt.Errorf("%s %s: %w", kind, name, err)
 		return p
 	}
@@ -273,15 +275,25 @@ func (c *Controller) planImage(v *view, kind, name, image string, command []stri
 	return p
 }
 
-// templateBindings are the HTTP bindings (ADR 0028) an object names as its
-// pod's template keeps them: by name, each with its upstream and mode,
-// what makes the pod another; the rest is read from the instance's
-// deployment whenever the pod asks for its bindings.
-func templateBindings(target *spec.Spec, names []string) ([]model.TemplateHTTPBinding, error) {
-	if len(names) == 0 {
+// templateBindings are the HTTP bindings (ADR 0028) an object gets as its
+// pod's template keeps them: those it names and the HTTP secrets its
+// variables reference (ADR 0055), named by the secret, by name, each with
+// its upstream and mode, what makes the pod another; the rest is read from
+// the instance's deployment whenever the pod asks for its bindings. An
+// object that gets none has none, so that a template of before stays as
+// it was.
+func templateBindings(target *spec.Spec, names []string, env map[string]spec.EnvValue) ([]model.TemplateHTTPBinding,
+	error) {
+	var secrets []string
+	for _, e := range env {
+		if e.IsHTTPSecretRef() {
+			secrets = append(secrets, e.Secret)
+		}
+	}
+	if len(names) == 0 && len(secrets) == 0 {
 		return nil, nil
 	}
-	out := make([]model.TemplateHTTPBinding, 0, len(names))
+	out := make([]model.TemplateHTTPBinding, 0, len(names)+len(secrets))
 	for _, n := range slices.Sorted(slices.Values(names)) {
 		b, ok := target.Bindings[n]
 		if !ok {
@@ -290,6 +302,18 @@ func templateBindings(target *spec.Spec, names []string) ([]model.TemplateHTTPBi
 		up, mode := spec.BindingTemplate(b)
 		out = append(out, model.TemplateHTTPBinding{Name: n, Upstream: up, Mode: mode})
 	}
+	for _, n := range slices.Compact(slices.Sorted(slices.Values(secrets))) {
+		if _, ok := target.Bindings[n]; ok {
+			return nil, fmt.Errorf("binding %s and the HTTP secret %s are both the pods' binding %s", n, n, n)
+		}
+		ref, ok := target.Secrets[n]
+		if !ok || !ref.IsHTTP() {
+			return nil, fmt.Errorf("no HTTP secret %s pinned", n)
+		}
+		up, mode := spec.BindingTemplate(spec.HTTPSecretBinding(n, ref))
+		out = append(out, model.TemplateHTTPBinding{Name: n, Upstream: up, Mode: mode})
+	}
+	slices.SortFunc(out, func(a, b model.TemplateHTTPBinding) int { return strings.Compare(a.Name, b.Name) })
 	return slices.CompactFunc(out, func(a, b model.TemplateHTTPBinding) bool { return a.Name == b.Name }), nil
 }
 
@@ -441,6 +465,14 @@ func (c *Controller) renderEnvWith(v *view, env map[string]spec.EnvValue, loopba
 		case spec.EnvString, spec.EnvLiteral:
 			out[k] = model.Literal(e.Value)
 		case spec.EnvSecret:
+			if e.IsHTTPSecretRef() {
+				lit, err := httpSecretValue(v.target, e)
+				if err != nil {
+					return nil, nil, "", fmt.Errorf("env %s: %w", k, err)
+				}
+				out[k] = model.Literal(lit)
+				continue
+			}
 			version := secretVersion(v.target, e.Secret)
 			if version == 0 {
 				version = v.secrets[e.Secret]
@@ -498,6 +530,34 @@ func (c *Controller) renderEnvWith(v *view, env map[string]spec.EnvValue, loopba
 		tls = append(tls, bindings[name])
 	}
 	return out, tls, "", nil
+}
+
+// httpSecretValue is what a variable that references an HTTP secret
+// renders as (ADR 0055), by the version target pins: its base URL,
+// http://<name> in the name mode and https://<the API's host> (its
+// origin) in the intercept mode, or its host alone, the secret's name or
+// the API's host. Never a field of it: its key stays at the node.
+func httpSecretValue(target *spec.Spec, e spec.EnvValue) (string, error) {
+	ref, ok := target.Secrets[e.Secret]
+	if !ok || !ref.IsHTTP() {
+		return "", fmt.Errorf("no HTTP secret %s pinned", e.Secret)
+	}
+	up, err := httpcheck.ParseUpstream("upstream", ref.Upstream)
+	if err != nil {
+		return "", fmt.Errorf("HTTP secret %s: %v", e.Secret, err.Msg)
+	}
+	intercept := ref.Mode == httpcheck.ModeIntercept
+	switch {
+	case e.Key == spec.SecretKeyHost && intercept:
+		return up.Host, nil
+	case e.Key == spec.SecretKeyHost:
+		return e.Secret, nil
+	case e.Key == spec.SecretKeyURL && intercept:
+		return up.Origin(), nil
+	case e.Key == spec.SecretKeyURL:
+		return "http://" + e.Secret, nil
+	}
+	return "", fmt.Errorf("an HTTP secret's key is url or host, not %q", e.Key)
 }
 
 // bindingLoopbacks numbers the addons that envs' references reach through

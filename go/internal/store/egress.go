@@ -141,14 +141,21 @@ type BindingEnv struct {
 }
 
 // BindingEnvs returns the environments that are not being deleted and
-// have bindings in their latest deployment or an open incident of one.
+// have bindings in their latest deployment, the bindings stated in its
+// spec and the HTTP secrets it pins (ADR 0055: its pods' bindings named by
+// the secret), or an open incident of one.
 func (s *Store) BindingEnvs(ctx context.Context) ([]BindingEnv, error) {
 	rows, err := s.q.Query(ctx, `SELECT e.id, e.deployment,
-			coalesce((SELECT array_agg(k ORDER BY k) FROM jsonb_object_keys(coalesce(d.spec->'bindings', '{}'::jsonb)) k),
+			coalesce((SELECT array_agg(k ORDER BY k) FROM (
+				SELECT k FROM jsonb_object_keys(coalesce(d.spec->'bindings', '{}'::jsonb)) k
+				UNION SELECT k FROM jsonb_each(coalesce(d.spec->'secrets', '{}'::jsonb)) AS p(k, v)
+					WHERE p.v->>'type' = 'http') n(k)),
 				'{}')
 		FROM environments e LEFT JOIN env_deployments d ON d.env_id = e.id AND d.number = e.deployment
-		WHERE NOT e.deleting AND e.deployment > 0 AND (d.spec ? 'bindings' OR EXISTS (SELECT 1 FROM env_incidents i
-			WHERE i.env_id = e.id AND i.closed_at IS NULL AND i.object LIKE 'binding/%'))
+		WHERE NOT e.deleting AND e.deployment > 0 AND (d.spec ? 'bindings'
+			OR jsonb_path_exists(coalesce(d.spec->'secrets', '{}'::jsonb), '$.* ? (@.type == "http")')
+			OR EXISTS (SELECT 1 FROM env_incidents i
+				WHERE i.env_id = e.id AND i.closed_at IS NULL AND i.object LIKE 'binding/%'))
 		ORDER BY e.id`)
 	if err != nil {
 		return nil, err

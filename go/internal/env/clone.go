@@ -122,8 +122,8 @@ type cloneSecret struct {
 	value []byte
 }
 
-// secretRefPaths are the paths of a spec's secret references, by secret,
-// each list sorted.
+// secretRefPaths are the paths of a spec's secret references, values' and
+// HTTP secrets', by secret, each list sorted.
 func secretRefPaths(sp spec.Spec) map[string][]string {
 	out := map[string][]string{}
 	add := func(prefix string, env map[string]spec.EnvValue) {
@@ -261,13 +261,33 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		}
 	}
 
-	// The secrets: copied (the source's latest version) or set.
+	// The secrets: copied (the source's latest version) or set; an HTTP
+	// secret copied as a credential is (ADR 0055).
 	if len(req.Secrets) > 0 && s.d.Sealer == nil {
 		return EnvStatus{}, errNoSecrets()
 	}
 	var latest map[string]store.EnvSecret
 	var secrets []cloneSecret
+	var creds []store.EnvCredential
 	vcSecrets := map[string]spec.SecretInfo{}
+	vcCreds := map[string]spec.CredentialInfo{}
+	copyHTTP := func(name string) (bool, error) {
+		if !s.httpSecretsOn() || !spec.IsName(name) {
+			return false, nil
+		}
+		c, err := s.d.Bindings.CopyCredential(ctx, src.ID, name, id)
+		if errors.Is(err, model.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("HTTP secret %s of %s: %w", name, src.Name, err)
+		}
+		c.CreatedBy = auth.MadeBy(ctx)
+		creds = append(creds, c)
+		vcCreds[name] = spec.CredentialInfo{Latest: 1,
+			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode}}}
+		return true, nil
+	}
 	for _, name := range slices.Sorted(maps.Keys(req.Secrets)) {
 		cs := req.Secrets[name]
 		p := "secrets." + name
@@ -300,6 +320,13 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 			}
 			row, ok := latest[name]
 			if !ok {
+				copied, err := copyHTTP(name)
+				if err != nil {
+					return EnvStatus{}, err
+				}
+				if copied {
+					continue
+				}
 				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
 					Problem: "environment " + src.Name + " has no secret " + name + " to copy",
 					Remedy:  "set it with a value instead"})
@@ -313,13 +340,20 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		}
 		vcSecrets[name] = spec.SecretInfo{Latest: 1, Versions: []int{1}}
 	}
-	// The credentials: copied, the source's latest version as the clone's
-	// version 1, sealed for it.
-	var creds []store.EnvCredential
-	vcCreds := map[string]spec.CredentialInfo{}
+	// The credentials of ADR 0033, the HTTP secrets' alias: copied, the
+	// source's latest version as the clone's version 1, sealed for it.
 	for _, name := range slices.Sorted(maps.Keys(req.Credentials)) {
 		p := "credentials." + name
+		_, isValue := vcSecrets[name]
+		_, copied := vcCreds[name]
 		switch {
+		case copied:
+			continue
+		case isValue:
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
+				Problem: "secret " + name + " is set as a value and copied as a credential: a secret is one or the other",
+				Remedy:  "leave one of them out"})
+			continue
 		case !spec.IsName(name):
 			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: p,
 				Problem: fmt.Sprintf("%q is no credential's name", name),
@@ -377,6 +411,19 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 			refs := secretRefPaths(sp)
 			for _, name := range slices.Sorted(maps.Keys(refs)) {
 				if _, ok := vcSecrets[name]; ok || !spec.IsSecretName(name) {
+					continue
+				}
+				if _, ok := vcCreds[name]; ok {
+					continue
+				}
+				if slices.Contains(spec.ReferencedHTTP(sp), name) {
+					fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: refs[name][0],
+						Problem: "the new environment has no HTTP secret " + name,
+						Remedy:  fmt.Sprintf(`pass secrets: {"%s": {"copy": true}}`, name)})
+					// Validate says no more of it.
+					for _, path := range refs[name] {
+						noCred[path] = true
+					}
 					continue
 				}
 				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: refs[name][0],

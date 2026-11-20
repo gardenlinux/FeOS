@@ -209,6 +209,7 @@ func (r *rig) mux() http.Handler {
 		mux.HandleFunc("PUT /api/v1/environments/{env}/credentials/{name}", env(s.PutCredential))
 		mux.HandleFunc("DELETE /api/v1/environments/{env}/credentials/{name}", env(s.DeleteCredential))
 		mux.HandleFunc("POST /api/v1/environments/{env}/credentials/{name}/check", env(s.CheckCredential))
+		mux.HandleFunc("POST /api/v1/environments/{env}/secrets/{name}/check", env(s.CheckSecret))
 	}
 	mux.HandleFunc("GET /api/v1/sandboxes/{id}/access", tenant(s.Access))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, req *http.Request) {

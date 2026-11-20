@@ -22,9 +22,10 @@ type Pins struct {
 	// Secrets maps a secret's name to the version a reference without a
 	// version is pinned to: its latest.
 	Secrets map[string]int
-	// Credentials are the environment's credentials (ADR 0033): a binding
-	// that names one without a version is pinned to its latest, and
-	// carries the version's upstream and mode.
+	// Credentials are the environment's credentials, its HTTP secrets
+	// (ADR 0033, ADR 0055): a binding that names one, or a variable that
+	// references one, without a version is pinned to its latest, and the
+	// pin carries the version's upstream and mode.
 	Credentials map[string]CredentialInfo
 	// Plans maps an addon type to its blueprint's default plan
 	// (addons.Blueprint.DefaultPlan), which an addon without a plan gets:
@@ -88,14 +89,24 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 			out.Bindings[name] = normBinding(b, p)
 		}
 	}
-	referenced := Referenced(s)
+	referenced, http := Referenced(s), ReferencedHTTP(s)
 	for _, name := range slices.Sorted(maps.Keys(s.Secrets)) {
-		if !slices.Contains(referenced, name) {
+		if !slices.Contains(referenced, name) && !slices.Contains(http, name) {
 			fs = append(fs, Finding{Severity: SeverityInfo, Path: "secrets." + name,
 				Problem: "secret " + name + " is not referenced: dropped", Remedy: ""})
 		}
 	}
+	pin := func(name string, ref SecretRef) {
+		if out.Secrets == nil {
+			out.Secrets = map[string]SecretRef{}
+		}
+		out.Secrets[name] = ref
+	}
 	for _, name := range referenced {
+		if slices.Contains(http, name) {
+			// Validate refused one of the two references.
+			continue
+		}
 		v := s.Secrets[name].Version
 		if v <= 0 {
 			v = p.Secrets[name]
@@ -104,10 +115,24 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 			// Validate refused the reference; nothing to pin.
 			continue
 		}
-		if out.Secrets == nil {
-			out.Secrets = map[string]SecretRef{}
+		pin(name, SecretRef{Version: v})
+	}
+	for _, name := range http {
+		info := p.Credentials[name]
+		v := s.Secrets[name].Version
+		if v <= 0 {
+			v = info.Latest
 		}
-		out.Secrets[name] = SecretRef{Version: v}
+		t, ok := info.Versions[v]
+		switch in := s.Secrets[name]; {
+		case ok:
+			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: t.Upstream, Mode: t.Mode})
+		case v > 0 && in.Upstream != "":
+			// A normalised pin, normalised without the secrets: as it is.
+			up, mode := BindingTemplate(Binding{Upstream: in.Upstream, Mode: in.Mode})
+			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: up, Mode: mode})
+		}
+		// Else Validate refused the reference or the pin; nothing to pin.
 	}
 	return out, SortFindings(fs)
 }

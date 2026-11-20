@@ -55,10 +55,11 @@ func (c *catcher) requests() []string {
 
 // A secret field {"set": true} keeps the latest version's value only for
 // a definition that sends it where that version does. A check or a PUT
-// whose upstream, mode, CA or token URL is another is 422 and calls no
-// one: write on the environment never makes ferund send a stored secret
-// to a host of the writer's choice, nor trust a CA of the writer's for
-// it. The same place written another way keeps.
+// whose upstream, CA or token URL is another is 422 and calls no one:
+// write on the environment never makes ferund send a stored secret to a
+// host of the writer's choice, nor trust a CA of the writer's for it. The
+// same place written another way keeps, and so does another mode, which
+// says how the code calls the API, not where the key goes (ADR 0055).
 func TestKeptSecretStaysWhereItWent(t *testing.T) {
 	r := newRig(t)
 	r.allowLoopback()
@@ -95,13 +96,11 @@ func TestKeptSecretStaysWhereItWent(t *testing.T) {
 		{"another token URL", "sso", "tokenUrl", map[string]any{"upstream": f.srv.URL, "caPem": ca,
 			"credential": map[string]any{"kind": "oauth2", "tokenUrl": evil.srv.URL + "/oauth/token",
 				"clientId": fakeClientID, "clientSecret": set}}},
-		{"another mode", "erp", "mode", map[string]any{"upstream": "https://api.erp.example.test", "mode": "intercept",
-			"credential": keptPassword}},
 	}
 	refused := func(what, call string, code int, raw, field string) {
 		t.Helper()
 		if code != http.StatusUnprocessableEntity || !strings.Contains(raw, "whose "+field+" is another") ||
-			!strings.Contains(raw, "re-enter the secret fields when the upstream, mode, CA or token URL change") {
+			!strings.Contains(raw, "re-enter the secret fields when the upstream, CA or token URL change") {
 			t.Errorf("%s, %s: %d %s", what, call, code, raw)
 		}
 		for _, secret := range []string{httpAPIKey, httpPassword, fakeClientSec} {
@@ -139,5 +138,17 @@ func TestKeptSecretStaysWhereItWent(t *testing.T) {
 	b, err := r.svc.OpenCredential(bg, r.box, "api", 2, "api")
 	if err != nil || b.GetHeaders().GetHeaders()["X-Api-Key"] != httpAPIKey {
 		t.Fatalf("version 2 holds %v %v, want the kept key", b, err)
+	}
+
+	// Another mode, the forwarded host and the prefixes keep it too: the
+	// key goes to the same API.
+	moved := map[string]any{"upstream": "https://api.erp.example.test", "mode": "intercept",
+		"pathPrefixes": []string{"/odata/"}, "credential": keptPassword}
+	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), mustJSON(t, moved)); code != http.StatusCreated {
+		t.Fatalf("put in another mode: %d %s", code, raw)
+	}
+	b, err = r.svc.OpenCredential(bg, r.box, "erp", 2, "erp")
+	if err != nil || b.GetBasic().GetPassword() != httpPassword || b.GetMode().String() != "HTTP_BINDING_MODE_INTERCEPT" {
+		t.Fatalf("erp version 2 holds %v %v, want the kept password in the intercept mode", b, err)
 	}
 }

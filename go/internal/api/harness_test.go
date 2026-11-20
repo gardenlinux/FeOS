@@ -497,6 +497,13 @@ func (b *fakeBindings) CheckSandboxCredentials(context.Context, uuid.UUID, []str
 func (b *fakeBindings) SetSandboxCredentials(context.Context, string, uuid.UUID, podid.ID, []string) error {
 	return nil
 }
+func (b *fakeBindings) CheckSecret(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
+	b.answer(w, "CheckSecret "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+}
+func (b *fakeBindings) CheckSandboxSecrets(context.Context, uuid.UUID, []string) error { return nil }
+func (b *fakeBindings) SetSandboxSecrets(context.Context, string, uuid.UUID, podid.ID, []string) error {
+	return nil
+}
 
 // fakeWatches answers each handler's name.
 type fakeWatches struct{}

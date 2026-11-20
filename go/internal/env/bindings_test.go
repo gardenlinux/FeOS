@@ -38,6 +38,23 @@ func (f *fakeHTTPBindings) CopyCredential(context.Context, uuid.UUID, string, uu
 	return store.EnvCredential{}, errors.New("no credentials here")
 }
 
+func (f *fakeHTTPBindings) HTTPSecrets(context.Context, uuid.UUID) ([]bindings.HTTPSecret, error) {
+	return []bindings.HTTPSecret{}, nil
+}
+
+func (f *fakeHTTPBindings) HTTPSecret(context.Context, uuid.UUID, string) (bindings.HTTPSecret, error) {
+	return bindings.HTTPSecret{}, model.ErrNotFound
+}
+
+func (f *fakeHTTPBindings) PutHTTPSecret(context.Context, uuid.UUID, string, []byte, string) (bindings.HTTPSecret,
+	bool, error) {
+	return bindings.HTTPSecret{}, false, errors.New("no HTTP secrets here")
+}
+
+func (f *fakeHTTPBindings) DeleteHTTPSecret(context.Context, uuid.UUID, string) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeHTTPBindings) Enabled() bool { return true }
 func (f *fakeHTTPBindings) CheckDestination(_ context.Context, host string) error {
 	if strings.HasSuffix(host, ".internal.example") {

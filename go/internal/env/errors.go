@@ -136,7 +136,7 @@ func errBadRequest(format string, args ...any) error {
 // what the environment does not have.
 func errNoDeployment() error { return apierr.New(http.StatusNotFound, "no such deployment") }
 func errNoTag() error        { return apierr.New(http.StatusNotFound, "no such tag") }
-func errNoSecret() error     { return apierr.New(http.StatusNotFound, "no such secret") }
+func errNoSecret() error     { return apierr.WithCode(http.StatusNotFound, "no_secret", "no such secret") }
 func errNoIncident() error   { return apierr.New(http.StatusNotFound, "no such incident") }
 
 // errNoObject is the 404 of an object the environment's deployment does not

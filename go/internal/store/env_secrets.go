@@ -5,11 +5,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // EnvSecret is a row of env_secrets: one version of a secret, sealed
@@ -112,4 +114,22 @@ func (s *Store) PurgeSecrets(ctx context.Context, envID uuid.UUID, prefix string
 	ct, err := s.q.Exec(ctx, `DELETE FROM env_secrets WHERE env_id = $1 AND system AND left(name, length($2)) = $2`,
 		envID, prefix)
 	return ct.RowsAffected(), err
+}
+
+// ValueSecretExists reports whether the environment has a tenant's value
+// secret of the name with a version that is not deleted: a name an HTTP
+// secret cannot take (ADR 0055, one name space of both kinds).
+func (s *Store) ValueSecretExists(ctx context.Context, envID uuid.UUID, name string) (bool, error) {
+	var ok bool
+	err := s.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM env_secrets
+		WHERE env_id = $1 AND name = $2 AND NOT system AND deleted_at IS NULL)`, envID, name).Scan(&ok)
+	return ok, err
+}
+
+// SecretKindConflict reports an insert that migration 0040's trigger
+// refused: a value secret's of a name an HTTP secret of the environment
+// holds, or the other way round (ADR 0055).
+func SecretKindConflict(err error) bool {
+	var pe *pgconn.PgError
+	return errors.As(err, &pe) && pe.ConstraintName == "secret_kind"
 }

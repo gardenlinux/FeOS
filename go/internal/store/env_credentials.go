@@ -255,3 +255,12 @@ func (s *Store) CredentialSandboxes(ctx context.Context, env uuid.UUID) (map[str
 	}
 	return out, rows.Err()
 }
+
+// EnvCredentialExists reports whether the environment has a version of
+// the credential, its HTTP secret (ADR 0055).
+func (s *Store) EnvCredentialExists(ctx context.Context, env uuid.UUID, name string) (bool, error) {
+	var ok bool
+	err := s.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM env_credentials WHERE env_id = $1 AND name = $2)`,
+		env, name).Scan(&ok)
+	return ok, err
+}

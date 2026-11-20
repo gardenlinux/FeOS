@@ -51,6 +51,15 @@ type HTTPBindings interface {
 	// CopyCredential is the latest version of a credential of environment
 	// from, sealed as version 1 of environment to's: a clone's copy.
 	CopyCredential(ctx context.Context, from uuid.UUID, name string, to uuid.UUID) (store.EnvCredential, error)
+	// The environment's HTTP secrets (ADR 0055) as the secrets routes
+	// answer and write them: the latest of each, one (model.ErrNotFound
+	// for none), a new version of the definition raw by by (whether it
+	// made one), and a delete (false for none).
+	HTTPSecrets(ctx context.Context, env uuid.UUID) ([]bindings.HTTPSecret, error)
+	HTTPSecret(ctx context.Context, env uuid.UUID, name string) (bindings.HTTPSecret, error)
+	PutHTTPSecret(ctx context.Context, env uuid.UUID, name string, raw []byte, by string) (bindings.HTTPSecret, bool,
+		error)
+	DeleteHTTPSecret(ctx context.Context, env uuid.UUID, name string) (bool, error)
 }
 
 // BindingCheckRequest is POST /api/v1/environments/{env}/bindings/{name}/
@@ -103,7 +112,7 @@ func (s *Service) RowHTTPBindings(ctx context.Context, row store.Sandbox, open b
 	var out []*fleetv1.HttpBinding
 	var defs []bindingDef
 	for _, tb := range t.HTTPBindings {
-		b, ok := sp.Bindings[tb.Name]
+		b, ok := podBindingOf(sp, tb.Name)
 		if up, mode := spec.BindingTemplate(b); !ok || up != tb.Upstream || mode != tb.Mode {
 			s.log.Warn("a pod's binding is not its deployment's any more; it is left out", "sandbox", row.ID,
 				"binding", tb.Name, "deployment", num)
@@ -134,11 +143,27 @@ func (s *Service) RowHTTPBindings(ctx context.Context, row store.Sandbox, open b
 var _ bindings.EnvSource = (*Service)(nil)
 
 // bindingDef is what a binding's version hashes: the binding as the spec
-// has it and the versions of the secrets it names.
+// has it and the versions of the secrets it names; an HTTP secret's (ADR
+// 0055), its pin.
 type bindingDef struct {
-	Name     string         `json:"name"`
-	Binding  spec.Binding   `json:"binding"`
-	Versions map[string]int `json:"versions"`
+	Name     string          `json:"name"`
+	Binding  spec.Binding    `json:"binding"`
+	Versions map[string]int  `json:"versions"`
+	Secret   *spec.SecretRef `json:"secret,omitempty"`
+}
+
+// podBindingOf is binding name of a normalised spec as its pods get it:
+// the spec's binding, or the HTTP secret of the name it pins (ADR 0055),
+// as a binding that names it at the pinned version
+// (spec.HTTPSecretBinding); ok false when it has neither.
+func podBindingOf(sp *spec.Spec, name string) (spec.Binding, bool) {
+	if b, ok := sp.Bindings[name]; ok {
+		return b, true
+	}
+	if ref, ok := sp.Secrets[name]; ok && ref.IsHTTP() {
+		return spec.HTTPSecretBinding(name, ref), true
+	}
+	return spec.Binding{}, false
 }
 
 // resolveBinding is a binding as a pod receives it: its secrets at the
@@ -151,6 +176,10 @@ func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name stri
 	pins map[string]spec.SecretRef, open bool) (*fleetv1.HttpBinding, bindingDef, error) {
 	def := bindingDef{Name: name, Binding: b, Versions: map[string]int{}}
 	if ref := b.CredentialRef; ref != nil {
+		if pin, ok := pins[name]; ok && pin.IsHTTP() && ref.Name == name {
+			// An HTTP secret's (podBindingOf): its pin is its definition.
+			def = bindingDef{Name: name, Versions: map[string]int{}, Secret: &pin}
+		}
 		return s.resolveCredential(ctx, envID, name, b, def, open)
 	}
 	up, mode := spec.BindingTemplate(b)
@@ -247,6 +276,10 @@ func (s *Service) resolveBinding(ctx context.Context, envID uuid.UUID, name stri
 func (s *Service) bindingValueFindings(ctx context.Context, envID uuid.UUID, sp spec.Spec) []spec.Finding {
 	var out []spec.Finding
 	for _, name := range slices.Sorted(maps.Keys(sp.Bindings)) {
+		if sp.Bindings[name].CredentialRef != nil {
+			// A stored version, checked at its write.
+			continue
+		}
 		_, _, err := s.resolveBinding(ctx, envID, name, sp.Bindings[name], sp.Secrets, true)
 		if ce := httpcheck.AsError(err); ce != nil {
 			out = append(out, spec.Finding{Severity: spec.SeverityWarning, Path: "bindings." + name + ".credential",
@@ -318,7 +351,11 @@ func (s *Service) CheckBinding(ctx context.Context, tenant, envRef, name string,
 		if err != nil {
 			return nil, err
 		}
-		b, ok = sp.Bindings[name]
+		if b, ok = podBindingOf(sp, name); ok && b.CredentialRef != nil {
+			// A stored credential, an HTTP secret: its latest version,
+			// what the next deployment would pin.
+			b.CredentialRef = &spec.CredentialRef{Name: b.CredentialRef.Name}
+		}
 	}
 	if !ok {
 		return nil, apierr.WithCode(http.StatusNotFound, CodeNoBinding,
@@ -366,10 +403,12 @@ func (s *Service) resolveCredential(ctx context.Context, envID uuid.UUID, name s
 }
 
 // CredentialUses is bindings.CredentialUsers: how the latest and the
-// deployed deployment of an environment use its credentials, by the
-// credential's name: the bindings that name it and the version each of
-// the two pins (ADR 0033). The environment's deployments are read through
-// st, their specs (which never change) from the cache.
+// deployed deployment of an environment use its credentials, its HTTP
+// secrets, by the secret's name: the services and jobs of the latest that
+// get it (by a variable, ADR 0055, or a binding that names it), the
+// bindings that name it (ADR 0033) and the version each of the two
+// deployments pins. The environment's deployments are read through st,
+// their specs (which never change) from the cache.
 func (s *Service) CredentialUses(ctx context.Context, st *store.Store, envID uuid.UUID) (
 	map[string]bindings.CredentialUse, error) {
 	e, err := st.GetEnvironment(ctx, envID)
@@ -388,24 +427,56 @@ func (s *Service) CredentialUses(ctx context.Context, st *store.Store, envID uui
 		if err != nil {
 			return err
 		}
+		use := func(name string, version int) *bindings.CredentialUse {
+			u := uses[name]
+			if u == nil {
+				u = &bindings.CredentialUse{Objects: []string{}, Bindings: []string{}}
+				uses[name] = u
+			}
+			if latest {
+				u.Latest = max(u.Latest, version)
+			} else {
+				u.Deployed = max(u.Deployed, version)
+			}
+			return u
+		}
+		credOf := map[string]string{}
 		for _, bname := range slices.Sorted(maps.Keys(sp.Bindings)) {
 			ref := sp.Bindings[bname].CredentialRef
 			if ref == nil {
 				continue
 			}
-			u := uses[ref.Name]
-			if u == nil {
-				u = &bindings.CredentialUse{Bindings: []string{}}
-				uses[ref.Name] = u
-			}
+			credOf[bname] = ref.Name
+			u := use(ref.Name, ref.Version)
 			if !slices.Contains(u.Bindings, bname) {
 				u.Bindings = append(u.Bindings, bname)
 			}
-			if latest {
-				u.Latest = max(u.Latest, ref.Version)
-			} else {
-				u.Deployed = max(u.Deployed, ref.Version)
+		}
+		for name, ref := range sp.Secrets {
+			if ref.IsHTTP() {
+				use(name, ref.Version)
 			}
+		}
+		if !latest {
+			return nil
+		}
+		object := func(obj string, env map[string]spec.EnvValue, bs []string) {
+			for _, val := range env {
+				if val.IsHTTPSecretRef() && uses[val.Secret] != nil {
+					uses[val.Secret].Objects = append(uses[val.Secret].Objects, obj)
+				}
+			}
+			for _, b := range bs {
+				if c, ok := credOf[b]; ok {
+					uses[c].Objects = append(uses[c].Objects, obj)
+				}
+			}
+		}
+		for name, svc := range sp.Services {
+			object(spec.KindService+"/"+name, svc.Env, svc.Bindings)
+		}
+		for name, j := range sp.Jobs {
+			object(spec.KindJob+"/"+name, j.Env, j.Bindings)
 		}
 		return nil
 	}
@@ -424,6 +495,8 @@ func (s *Service) CredentialUses(ctx context.Context, st *store.Store, envID uui
 	out := make(map[string]bindings.CredentialUse, len(uses))
 	for name, u := range uses {
 		slices.Sort(u.Bindings)
+		slices.Sort(u.Objects)
+		u.Objects = slices.Compact(u.Objects)
 		out[name] = *u
 	}
 	return out, nil

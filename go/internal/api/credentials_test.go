@@ -115,3 +115,29 @@ func TestCredentialRoutesActWhereTheGrantWasChecked(t *testing.T) {
 		t.Fatalf("the handler got %+v %v, want prod", got, err)
 	}
 }
+
+// A sandbox names HTTP secrets (ADR 0055) by secrets at its create and on
+// its own route; credentials stays their alias, and both at once is 400.
+func TestSandboxSecretsRoutes(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
+	authz := bearerOf(e.tenantToken)
+	w := e.do("POST", "/api/v1/sandboxes", authz, map[string]any{"environment": "box", "secrets": []string{"s4"},
+		"credentials": []string{"s4"}})
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "not both") {
+		t.Fatalf("secrets and credentials: %d %s", w.Code, w.Body.String())
+	}
+	w = e.do("POST", "/api/v1/sandboxes", authz, map[string]any{"environment": "box", "secrets": []string{"s4"}})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create with secrets: %d %s", w.Code, w.Body.String())
+	}
+	id, _ := e.createSandbox()
+	if w := e.do("PUT", "/api/v1/sandboxes/"+id+"/secrets", authz, map[string]any{"secrets": []string{"s4"}}); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"secrets":[]`) {
+		t.Fatalf("put: %d %s", w.Code, w.Body.String())
+	}
+	if w := e.do("GET", "/api/v1/sandboxes/"+id+"/secrets", authz, nil); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"secrets":[]`) {
+		t.Fatalf("get: %d %s", w.Code, w.Body.String())
+	}
+}

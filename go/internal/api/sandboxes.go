@@ -100,8 +100,11 @@ type createSandboxRequest struct {
 	// ImageCredentials are the login for the image's registry (ADR 0025),
 	// sealed and never returned; nil: anonymous.
 	ImageCredentials *model.RegistryCredentials `json:"imageCredentials"`
-	// Credentials are the credentials of its environment its pod gets,
-	// at their latest versions (ADR 0033).
+	// Secrets are the HTTP secrets of its environment its pod gets, at
+	// their latest versions (ADR 0055).
+	Secrets []string `json:"secrets"`
+	// Credentials is Secrets' alias of ADR 0033, for one release, with
+	// its codes (no_credential).
 	Credentials []string `json:"credentials"`
 	// Workdir is the absolute directory its tools start in, fixed for its
 	// life: bash runs there, and the file tools take a relative path as
@@ -256,12 +259,23 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err := s.checkCredentials(req.ImageCredentials); err != nil {
 		return err
 	}
-	if len(req.Credentials) > 0 {
+	if len(req.Secrets) > 0 && len(req.Credentials) > 0 {
+		return apierr.New(http.StatusBadRequest, "give secrets or credentials, its alias of before, not both")
+	}
+	if len(req.Secrets) > 0 || len(req.Credentials) > 0 {
 		b := s.deps.Bindings
-		if b == nil || !b.Enabled() {
-			return apierr.New(http.StatusUnprocessableEntity, "credentials: HTTP bindings are not enabled on this platform")
+		field := "secrets"
+		if len(req.Credentials) > 0 {
+			field = "credentials"
 		}
-		if err := b.CheckSandboxCredentials(r.Context(), env.ID, req.Credentials); err != nil {
+		if b == nil || !b.Enabled() {
+			return apierr.New(http.StatusUnprocessableEntity, "%s: HTTP bindings are not enabled on this platform", field)
+		}
+		check := b.CheckSandboxSecrets
+		if len(req.Credentials) > 0 {
+			check = b.CheckSandboxCredentials
+		}
+		if err := check(r.Context(), env.ID, append(req.Secrets, req.Credentials...)); err != nil {
 			return err
 		}
 	}
@@ -310,6 +324,11 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	})
 	if err != nil {
 		return passOr(err, "create")
+	}
+	if len(req.Secrets) > 0 {
+		if err := s.deps.Bindings.SetSandboxSecrets(r.Context(), tenant, env.ID, row.ID, req.Secrets); err != nil {
+			return passOr(err, "create: its secrets")
+		}
 	}
 	if len(req.Credentials) > 0 {
 		if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenant, env.ID, row.ID, req.Credentials); err != nil {
@@ -477,6 +496,53 @@ func (s *server) putSandboxReaches(w http.ResponseWriter, r *http.Request) error
 // sandboxCredentials is the answer of the credentials a sandbox names.
 type sandboxCredentials struct {
 	Credentials []string `json:"credentials"`
+}
+
+// sandboxSecrets is the answer of the HTTP secrets a sandbox names (ADR
+// 0055).
+type sandboxSecrets struct {
+	Secrets []string `json:"secrets"`
+}
+
+// getSandboxSecrets is GET /api/v1/sandboxes/{id}/secrets: the HTTP
+// secrets of its environment the sandbox names (ADR 0055).
+func (s *server) getSandboxSecrets(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	names, err := s.deps.Bindings.SandboxCredentialNames(r.Context(), sb.ID)
+	if err != nil {
+		return passOr(err, "secrets")
+	}
+	return writeJSON(w, http.StatusOK, sandboxSecrets{Secrets: names})
+}
+
+// putSandboxSecrets is PUT /api/v1/sandboxes/{id}/secrets {secrets}: the
+// whole list of the HTTP secrets of its environment its pod gets, each at
+// its latest version; a running pod gets them at once. A value secret is
+// 422 secret_kind, a name the environment has no secret of 422 no_secret.
+func (s *server) putSandboxSecrets(w http.ResponseWriter, r *http.Request) error {
+	sb, err := s.owned(r)
+	if err != nil {
+		return err
+	}
+	var req sandboxSecrets
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Secrets == nil {
+		req.Secrets = []string{}
+	}
+	if err := s.deps.Bindings.SetSandboxSecrets(r.Context(), tenantOf(r), sb.EnvironmentID, sb.ID,
+		req.Secrets); err != nil {
+		return passOr(err, "secrets")
+	}
+	names, err := s.deps.Bindings.SandboxCredentialNames(r.Context(), sb.ID)
+	if err != nil {
+		return passOr(err, "secrets")
+	}
+	return writeJSON(w, http.StatusOK, sandboxSecrets{Secrets: names})
 }
 
 // getSandboxCredentials is GET /api/v1/sandboxes/{id}/credentials: the

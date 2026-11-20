@@ -78,7 +78,7 @@ func TestCredentialVersionsAndSecrets(t *testing.T) {
 	if strings.Contains(raw, "one-secret-token") || string(a.Credential.Headers["Authorization"]) != `{"set":true}` {
 		t.Fatalf("an answer shows a secret: %s", raw)
 	}
-	if !strings.Contains(raw, `"usedBy":{"sandboxes":[],"bindings":[],"latest":0,"deployed":0}`) {
+	if !strings.Contains(raw, `"usedBy":{"sandboxes":[],"objects":[],"bindings":[],"latest":0,"deployed":0}`) {
 		t.Fatalf("an unused credential's uses: %s", raw)
 	}
 
@@ -474,5 +474,84 @@ func TestCredentialVersionsGoOnAfterADelete(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "version 1 is not above every version the name had") {
 		t.Fatalf("an insert of a used version: %v", err)
+	}
+}
+
+// The HTTP secrets (ADR 0055) share their environment's names with its
+// value secrets: an HTTP secret's write to a value's name is 409
+// secret_kind, a sandbox that names a value 422 secret_kind, one that
+// names neither 422 no_secret, and the secrets' check refuses a value.
+func TestHTTPSecretsAndValues(t *testing.T) {
+	r := newRig(t)
+	if _, err := r.st.InsertSecret(bg, store.EnvSecret{EnvID: r.box, Name: "token", Version: 1, Sealed: []byte{1}}); err != nil {
+		t.Fatal(err)
+	}
+	code, raw := r.tenantCall("PUT", credPath("box", "token"), credentialBody("Bearer t-1", 0))
+	if _, c := codeOf(raw); code != http.StatusConflict || c != CodeSecretKind || !strings.Contains(raw, "secret token is a value") {
+		t.Fatalf("an HTTP secret over a value: %d %s", code, raw)
+	}
+	if _, created, err := r.svc.PutHTTPSecret(bg, r.box, "erp", []byte(credentialBody("Bearer e-1", 0)), "malte"); err != nil ||
+		!created {
+		t.Fatalf("put: %v %v", created, err)
+	}
+	h, err := r.svc.HTTPSecret(bg, r.box, "erp")
+	if err != nil || h.CreatedBy != "malte" || h.Def.Upstream != "https://api.erp.example.test" ||
+		h.Def.Credential.Headers["Authorization"] != (SecretSet{Set: true}) {
+		t.Fatalf("the HTTP secret: %+v %v", h, err)
+	}
+
+	for _, c := range []struct {
+		names  []string
+		status int
+		code   string
+	}{{[]string{"token"}, http.StatusUnprocessableEntity, CodeSecretKind},
+		{[]string{"nope"}, http.StatusUnprocessableEntity, CodeNoSecret}} {
+		if st, got := apiCode(r.svc.CheckSandboxSecrets(bg, r.box, c.names)); st != c.status || got != c.code {
+			t.Errorf("check %v: %d %s", c.names, st, got)
+		}
+		if st, got := apiCode(r.svc.SetSandboxSecrets(bg, "acme", r.box, r.sb1, c.names)); st != c.status || got != c.code {
+			t.Errorf("set %v: %d %s", c.names, st, got)
+		}
+	}
+	// The credentials' alias keeps its code.
+	if st, got := apiCode(r.svc.CheckSandboxCredentials(bg, r.box, []string{"token"})); st != http.StatusUnprocessableEntity ||
+		got != codeNoCredential {
+		t.Errorf("the alias: %d %s", st, got)
+	}
+	if err := r.svc.SetSandboxSecrets(bg, "acme", r.box, r.sb1, []string{"erp"}); err != nil {
+		t.Fatalf("a sandbox names erp: %v", err)
+	}
+	if names, err := r.svc.SandboxCredentialNames(bg, r.sb1); err != nil || len(names) != 1 || names[0] != "erp" {
+		t.Fatalf("its names: %v %v", names, err)
+	}
+
+	code, raw = r.tenantCall("POST", "/api/v1/environments/box/secrets/token/check", "")
+	if _, c := codeOf(raw); code != http.StatusConflict || c != CodeSecretKind {
+		t.Fatalf("a value's check: %d %s", code, raw)
+	}
+	code, raw = r.tenantCall("POST", "/api/v1/environments/box/secrets/nope/check", "")
+	if _, c := codeOf(raw); code != http.StatusNotFound || c != CodeNoSecret {
+		t.Fatalf("no secret's check: %d %s", code, raw)
+	}
+	// A draft as the secrets' PUT sends it, its type among it.
+	draft := `{"binding":{"type":"http","upstream":"https://api.erp.example.test","credential":{"kind":"headers",` +
+		`"headers":{"Authorization":{"set":true}}}}}`
+	code, raw = r.tenantCall("POST", "/api/v1/environments/box/secrets/erp/check", draft)
+	if code != http.StatusOK || !strings.Contains(raw, `"addresses"`) {
+		t.Fatalf("a draft's check: %d %s", code, raw)
+	}
+
+	ok, err := r.svc.DeleteHTTPSecret(bg, r.box, "erp")
+	if st, c := apiCode(err); ok || st != http.StatusConflict || c != codeSecretInUse || !strings.Contains(err.Error(), "sandbox "+r.sb1.String()) {
+		t.Fatalf("delete while a sandbox names it: %v %v", ok, err)
+	}
+	if err := r.svc.SetSandboxSecrets(bg, "acme", r.box, r.sb1, []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := r.svc.DeleteHTTPSecret(bg, r.box, "erp"); err != nil || !ok {
+		t.Fatalf("delete: %v %v", ok, err)
+	}
+	if ok, err := r.svc.DeleteHTTPSecret(bg, r.box, "erp"); err != nil || ok {
+		t.Fatalf("delete again: %v %v", ok, err)
 	}
 }

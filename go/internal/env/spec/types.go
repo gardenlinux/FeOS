@@ -326,10 +326,24 @@ type Route struct {
 }
 
 // SecretRef pins a tenant secret of the environment to a version; 0: the
-// latest when the deployment is applied.
+// latest when the deployment is applied. A value secret's pin is its
+// version alone. An HTTP secret's (ADR 0055), which a variable references
+// by {"secret": n, "key": "url"|"host"}, has its Type, and, normalised,
+// the pinned version's upstream (canonical) and mode: what makes a pod
+// another, since its pods resolve the secret's name in the name mode and
+// the upstream's host in the intercept mode.
 type SecretRef struct {
-	Version int `json:"version,omitempty"`
+	Version  int    `json:"version,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Upstream string `json:"upstream,omitempty"`
+	Mode     string `json:"mode,omitempty"`
 }
+
+// SecretTypeHTTP is the Type of an HTTP secret's pin (ADR 0055).
+const SecretTypeHTTP = "http"
+
+// IsHTTP reports whether the pin is an HTTP secret's.
+func (r SecretRef) IsHTTP() bool { return r.Type == SecretTypeHTTP }
 
 // PortRef names a port of a service by its name ("http") or its number
 // (8080); in JSON a string or a number.
@@ -391,8 +405,10 @@ const (
 	EnvString EnvKind = ""
 	// EnvLiteral is {"value": "s"}.
 	EnvLiteral EnvKind = "value"
-	// EnvSecret is {"secret": "name"}: a tenant secret of the
-	// environment, at the version the deployment pins.
+	// EnvSecret is {"secret": "name"}: a value secret of the environment,
+	// at the version the deployment pins; with a key, {"secret": "name",
+	// "key": "url"|"host"}, an HTTP secret's base URL or host (ADR 0055),
+	// whose binding the object's pods get at the pinned version.
 	EnvSecret EnvKind = "secret"
 	// EnvAddon is {"addon": "a", "key": "k", …fields}: an output of an
 	// addon (a URL, a host, a password), with the blueprint's fields
@@ -410,6 +426,14 @@ const (
 	ServiceKeyPort = "port"
 )
 
+// The keys of an HTTP secret's reference (ADR 0055): the base URL the
+// code calls, http://<name> in the name mode and https://<the API's host>
+// in the intercept mode, and its host alone.
+const (
+	SecretKeyURL  = "url"
+	SecretKeyHost = "host"
+)
+
 // EnvValue is the value of an environment variable in a spec: a plain
 // string or exactly one reference form (EnvKind). It marshals to the form
 // it was read from: a plain string stays a string, {"value": s} stays an
@@ -425,7 +449,8 @@ type EnvValue struct {
 	// Service and Port are EnvService's service and port.
 	Service string
 	Port    PortRef
-	// Key is EnvAddon's and EnvService's key ("url", "host", …).
+	// Key is EnvAddon's, EnvService's and an HTTP secret's EnvSecret's
+	// key ("url", "host", …); "" for a value secret's.
 	Key string
 	// Fields are EnvAddon's other fields, which its blueprint defines.
 	Fields map[string]string
@@ -436,6 +461,16 @@ func String(s string) EnvValue { return EnvValue{Value: s} }
 
 // SecretEnv is an EnvValue of the secret name.
 func SecretEnv(name string) EnvValue { return EnvValue{Kind: EnvSecret, Secret: name} }
+
+// HTTPSecretEnv is an EnvValue of an HTTP secret's key, SecretKeyURL or
+// SecretKeyHost (ADR 0055).
+func HTTPSecretEnv(name, key string) EnvValue {
+	return EnvValue{Kind: EnvSecret, Secret: name, Key: key}
+}
+
+// IsHTTPSecretRef reports whether v references an HTTP secret: a secret
+// reference with a key.
+func (v EnvValue) IsHTTPSecretRef() bool { return v.Kind == EnvSecret && v.Key != "" }
 
 // The keys an EnvAddon may not use as fields: they belong to the other
 // forms.
@@ -453,7 +488,8 @@ func (v EnvValue) MarshalJSON() ([]byte, error) {
 	case EnvSecret:
 		return json.Marshal(struct {
 			Secret string `json:"secret"`
-		}{v.Secret})
+			Key    string `json:"key,omitempty"`
+		}{v.Secret, v.Key})
 	case EnvAddon:
 		m := make(map[string]string, len(v.Fields)+2)
 		for k, f := range v.Fields {
@@ -489,7 +525,7 @@ func (v *EnvValue) UnmarshalJSON(b []byte) error {
 	}
 	var m map[string]json.RawMessage
 	if len(b) == 0 || b[0] != '{' || json.Unmarshal(b, &m) != nil {
-		return errors.New(`an env value is a string or one of {"value"}, {"secret"}, {"addon", "key", …} and {"service", "port", "key"}`)
+		return errors.New(`an env value is a string or one of {"value"}, {"secret"}, {"secret", "key"}, {"addon", "key", …} and {"service", "port", "key"}`)
 	}
 	str := func(k string) (string, error) {
 		var s string
@@ -509,6 +545,11 @@ func (v *EnvValue) UnmarshalJSON(b []byte) error {
 	case len(m) == 1 && m["secret"] != nil:
 		out.Kind = EnvSecret
 		out.Secret, err = str("secret")
+	case len(m) == 2 && m["secret"] != nil && m["key"] != nil:
+		out.Kind = EnvSecret
+		if out.Secret, err = str("secret"); err == nil {
+			out.Key, err = str("key")
+		}
 	case isAddon && !isService:
 		out.Kind = EnvAddon
 		for k := range m {
@@ -554,7 +595,7 @@ func (v *EnvValue) UnmarshalJSON(b []byte) error {
 			keys = append(keys, k)
 		}
 		slices.Sort(keys)
-		return fmt.Errorf(`env value with keys %s: want exactly one of {"value"}, {"secret"}, {"addon", "key", …} and {"service", "port", "key"}`,
+		return fmt.Errorf(`env value with keys %s: want exactly one of {"value"}, {"secret"}, {"secret", "key"}, {"addon", "key", …} and {"service", "port", "key"}`,
 			strings.Join(keys, ", "))
 	}
 	if err != nil {

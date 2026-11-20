@@ -120,6 +120,9 @@ type SandboxInfo struct {
 	// make its resolver answer, which no name of an environment there may
 	// be.
 	HTTPNames []string
+	// Secrets are the HTTP secrets of its environment the sandbox names
+	// (ADR 0055), which an attached service in it gets; nil: not known.
+	Secrets []string
 }
 
 // AddonData is what an addon's volume holds: data of addon type Type,
@@ -146,9 +149,9 @@ type CredentialTemplate struct {
 }
 
 // CredentialContext is what a ValidateContext implements when the
-// environment's credentials can be named: the credential of that name; ok
-// false when the environment has none (a spec without an environment has
-// none).
+// environment's credentials, its HTTP secrets (ADR 0055), can be named:
+// the HTTP secret of that name; ok false when the environment has none (a
+// spec without an environment has none).
 type CredentialContext interface {
 	Credential(name string) (info CredentialInfo, ok bool)
 }
@@ -231,7 +234,8 @@ func IsName(name string) bool { return dnsLabel.MatchString(name) }
 // is an error). Findings about the spec as written; Normalise adds its
 // own (dropped secrets).
 func Validate(vc ValidateContext, s Spec, prev *Spec) []Finding {
-	v := &validator{vc: vc, mode: vc.Mode(), s: s, prev: prev, routed: map[string]bool{}, referenced: map[string]bool{}}
+	v := &validator{vc: vc, mode: vc.Mode(), s: s, prev: prev, routed: map[string]bool{}, referenced: map[string]bool{},
+		httpRefs: map[string][]string{}}
 	if v.mode == ModeSpec {
 		v.prev = nil
 	}
@@ -268,9 +272,14 @@ type validator struct {
 	prev *Spec
 	// routed are the services a route targets.
 	routed map[string]bool
-	// referenced are the secrets an env value references.
+	// referenced are the value secrets an env value references.
 	referenced map[string]bool
-	out        []Finding
+	// httpRefs are the HTTP secrets the variables of image services and
+	// jobs reference (ADR 0055), each with the paths of its references,
+	// in the order of the objects and their variables: the bindings their
+	// pods get.
+	httpRefs map[string][]string
+	out      []Finding
 }
 
 func (v *validator) add(sev Severity, path, remedy, format string, args ...any) {
@@ -426,7 +435,10 @@ func (v *validator) service(name string, svc Service) {
 		v.errorf(p+".mounts", "keep the data in an addon (postgres, valkey, nats), which has a volume of its own",
 			"volumes for services are not available yet")
 	}
-	v.env(p+".env", svc.Env)
+	v.env(p+".env", svc.Env, runtime == RuntimeImage)
+	if runtime == RuntimeAttached {
+		v.attachedSecrets(p, svc)
+	}
 	if runtime == RuntimeAttached && len(svc.Bindings) > 0 {
 		v.errorf(p+".bindings", "remove bindings: set the sandbox's HTTP bindings (PUT /api/v1/sandboxes/{id}/http), or "+
 			"run the service as an image", "attached services use their sandbox's bindings")
@@ -590,8 +602,10 @@ func (v *validator) readiness(path string, r *Readiness, ports []Port) {
 // env checks environment variables. An attached service is reached like
 // any other pod of the environment (ADR 0035: its name is in the
 // environment's name table with its sandbox's address), where a
-// reference of the caller opens its port (Derive).
-func (v *validator) env(path string, env map[string]EnvValue) {
+// reference of the caller opens its port (Derive). pod: the object's own
+// pods get the HTTP secrets its variables reference (an image service or
+// a job; an attached service has its sandbox's).
+func (v *validator) env(path string, env map[string]EnvValue, pod bool) {
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		val := env[key]
 		kp := path + "." + key
@@ -601,7 +615,11 @@ func (v *validator) env(path string, env map[string]EnvValue) {
 		}
 		switch val.Kind {
 		case EnvSecret:
-			v.secretRef(kp, val.Secret)
+			if val.Key != "" {
+				v.httpSecretRef(kp, val, pod)
+			} else {
+				v.valueRef(kp, val)
+			}
 		case EnvAddon:
 			a, ok := v.s.Addons[val.Addon]
 			if !ok {
@@ -647,13 +665,111 @@ func (v *validator) imageCredentials(path string, c *ImageCredentials) {
 		fp := path + "." + f.name
 		switch f.val.Kind {
 		case EnvSecret:
-			v.secretRef(fp, f.val.Secret)
+			v.valueRef(fp, f.val)
 		case EnvString, EnvLiteral:
 			if f.val.Value == "" {
 				v.errorf(fp, `set it to a string or {"secret": "<name>"}`, "the image's %s is empty", f.name)
 			}
 		default:
 			v.errorf(fp, `use a string or {"secret": "<name>"}`, "the image's %s is a string or a secret", f.name)
+		}
+	}
+}
+
+// valueRef checks a reference to a value secret where a value is
+// needed: a variable's, an image's login, a binding credential's field.
+// A key is an HTTP secret's reference, which only a variable makes, and
+// an HTTP secret's key never reaches a container (ADR 0055).
+func (v *validator) valueRef(path string, val EnvValue) {
+	if val.Key != "" {
+		v.errorf(path, `reference a value secret as {"secret": "<name>"}`, "a key is an HTTP secret's reference, "+
+			"which only a variable makes")
+		return
+	}
+	if _, ok := v.httpSecret(val.Secret); ok {
+		v.errorf(path, fmt.Sprintf(`reference its url or host: {"secret": "%s", "key": "url"}`, val.Secret),
+			"secret %s is an HTTP secret: its key never reaches a container", val.Secret)
+		return
+	}
+	if v.s.Secrets[val.Secret].IsHTTP() {
+		v.errorf("secrets."+val.Secret, "remove the pin's type, or reference the secret by its url or host",
+			"secret %s is pinned as an HTTP secret and referenced as a value", val.Secret)
+	}
+	v.secretRef(path, val.Secret)
+}
+
+// httpSecret is the environment's HTTP secret of the name, when the
+// context knows the environment's (outside ModeSpec).
+func (v *validator) httpSecret(name string) (CredentialInfo, bool) {
+	if v.mode == ModeSpec {
+		return CredentialInfo{}, false
+	}
+	cc, ok := v.vc.(CredentialContext)
+	if !ok {
+		return CredentialInfo{}, false
+	}
+	return cc.Credential(name)
+}
+
+// httpSecretRef checks a variable's reference to an HTTP secret (ADR
+// 0055), {"secret": n, "key": "url"|"host"}: a secret of the environment
+// of that kind; pod: its binding is the object's pods' (httpRefs). A spec
+// without an environment has none to look up: a warning.
+func (v *validator) httpSecretRef(path string, val EnvValue, pod bool) {
+	name := val.Secret
+	if val.Key != SecretKeyURL && val.Key != SecretKeyHost {
+		v.errorf(path, "use key url or host", "an HTTP secret's reference has key url or host, not %q", val.Key)
+		return
+	}
+	if !IsName(name) {
+		v.errorf(path, "HTTP secrets are named by DNS labels: lowercase letters, digits and '-'",
+			"%q is no HTTP secret's name", name)
+		return
+	}
+	if on, ok := v.vc.(interface{ HTTPBindings() bool }); ok && !on.HTTPBindings() {
+		v.errorf(path, "reference a value secret instead, or ask the platform's operators for --bindings",
+			"HTTP secrets need the HTTP bindings, which are not enabled on this platform")
+		return
+	}
+	if pod {
+		v.httpRefs[name] = append(v.httpRefs[name], path)
+	}
+	if v.mode == ModeSpec {
+		v.warnf(path, "plan it for an environment, which has its HTTP secrets",
+			"a spec without an environment has no HTTP secret %s to look up", name)
+		return
+	}
+	if _, ok := v.httpSecret(name); ok {
+		return
+	}
+	if info, ok := v.vc.Secret(name); ok && info.Latest > 0 {
+		v.errorf(path, fmt.Sprintf(`reference the value as {"secret": "%s"}, or make an HTTP secret of another name`,
+			name), "secret %s is a value: a key is an HTTP secret's reference", name)
+		return
+	}
+	v.errorf(path, `make it with PUT /api/v1/environments/{env}/secrets/`+name+` {"type": "http", …}, then plan again`,
+		"no HTTP secret %s", name)
+}
+
+// attachedSecrets warns of an HTTP secret an attached service's
+// variables reference that its sandbox does not name: the service runs in
+// the sandbox's pod, which gets the HTTP secrets the sandbox names (ADR
+// 0055), so its calls would find no binding.
+func (v *validator) attachedSecrets(p string, svc Service) {
+	sid, err := podid.Parse(svc.Sandbox)
+	if err != nil {
+		return
+	}
+	info, ok := v.vc.Sandbox(sid.String())
+	if !ok || info.Secrets == nil {
+		return
+	}
+	for _, key := range slices.Sorted(maps.Keys(svc.Env)) {
+		val := svc.Env[key]
+		if val.IsHTTPSecretRef() && !slices.Contains(info.Secrets, val.Secret) {
+			v.warnf(p+".env."+key, fmt.Sprintf("name it in the sandbox's secrets (PUT /api/v1/sandboxes/%s/secrets)",
+				svc.Sandbox), "sandbox %s does not name HTTP secret %s: an attached service has its sandbox's, "+
+				"and its calls to it would find no binding", svc.Sandbox, val.Secret)
 		}
 	}
 }
@@ -694,6 +810,19 @@ func (v *validator) secrets() {
 			v.errorf(p+".version", "pin a version, or leave it out to pin the latest", "version %d is negative", ref.Version)
 			continue
 		}
+		if ref.Type != "" && ref.Type != SecretTypeHTTP {
+			v.errorf(p+".type", `leave it out: an HTTP secret's pin is of type "http", a value's has none`,
+				"type %q is no secret's pin", ref.Type)
+			continue
+		}
+		if _, http := v.httpRefs[name]; http || v.httpRef(name) {
+			v.httpPin(p, name, ref)
+			continue
+		}
+		if ref.Upstream != "" || ref.Mode != "" {
+			v.errorf(p, "remove upstream and mode: a value secret's pin is its version", "secret %s is no HTTP "+
+				"secret's pin", name)
+		}
 		if !v.referenced[name] || v.mode == ModeSpec || ref.Version == 0 {
 			continue
 		}
@@ -708,6 +837,60 @@ func (v *validator) secrets() {
 		default:
 			v.errorf(p, fmt.Sprintf("pin an existing version (the latest is %d), or leave it out to pin the latest",
 				info.Latest), "secret %s has no version %d", name, ref.Version)
+		}
+	}
+}
+
+// httpRef reports whether a variable of the spec, an attached service's
+// too, references the HTTP secret name.
+func (v *validator) httpRef(name string) bool {
+	refs := func(env map[string]EnvValue) bool {
+		for _, val := range env {
+			if val.IsHTTPSecretRef() && val.Secret == name {
+				return true
+			}
+		}
+		return false
+	}
+	for _, svc := range v.s.Services {
+		if refs(svc.Env) {
+			return true
+		}
+	}
+	for _, j := range v.s.Jobs {
+		if refs(j.Env) {
+			return true
+		}
+	}
+	return false
+}
+
+// httpPin checks an HTTP secret's pin, at p: a version the secret has,
+// and the version's upstream and mode where it names them (a normalised
+// spec, a revert's).
+func (v *validator) httpPin(p, name string, ref SecretRef) {
+	if v.mode == ModeSpec || (ref.Version == 0 && ref.Upstream == "" && ref.Mode == "") {
+		return
+	}
+	info, ok := v.httpSecret(name)
+	if !ok {
+		// The reference's finding says so.
+		return
+	}
+	version := ref.Version
+	if version == 0 {
+		version = info.Latest
+	}
+	t, ok := info.Versions[version]
+	if !ok {
+		v.errorf(p+".version", fmt.Sprintf("pin a version it has (the latest is %d), or leave it out to pin the latest",
+			info.Latest), "HTTP secret %s has no version %d", name, version)
+		return
+	}
+	if ref.Upstream != "" || ref.Mode != "" {
+		if up, mode := BindingTemplate(Binding{Upstream: ref.Upstream, Mode: ref.Mode}); up != t.Upstream || mode != t.Mode {
+			v.errorf(p, "remove upstream and mode: they are the HTTP secret's version's", "HTTP secret %s version "+
+				"%d calls %s in the %s mode", name, version, t.Upstream, t.Mode)
 		}
 	}
 }
@@ -736,7 +919,7 @@ func (v *validator) job(name string, j Job) {
 	}
 	v.resources(p+".resources", j.Resources)
 	v.imageCredentials(p+".imageCredentials", j.ImageCredentials)
-	v.env(p+".env", j.Env)
+	v.env(p+".env", j.Env, true)
 	v.gone(p+".securityGroups", j.SecurityGroups)
 	v.usesOf(p+".uses", j.Uses)
 	v.egressOf(p+".egress", j.Egress)
@@ -1091,13 +1274,14 @@ func SandboxNames(s Spec, sandbox string) []string {
 	return slices.Compact(out)
 }
 
-// Referenced returns the secrets the env values of the spec's services
-// and jobs and the credentials of its bindings reference, by name.
+// Referenced returns the value secrets the env values of the spec's
+// services and jobs, their images' logins and the credentials of its
+// bindings reference, by name; ReferencedHTTP the HTTP secrets.
 func Referenced(s Spec) []string {
 	set := map[string]bool{}
 	add := func(env map[string]EnvValue) {
 		for _, val := range env {
-			if val.Kind == EnvSecret {
+			if val.Kind == EnvSecret && val.Key == "" {
 				set[val.Secret] = true
 			}
 		}
@@ -1122,6 +1306,26 @@ func Referenced(s Spec) []string {
 	}
 	for _, b := range s.Bindings {
 		add(b.Credential.Values())
+	}
+	return slices.Sorted(maps.Keys(set))
+}
+
+// ReferencedHTTP returns the HTTP secrets the variables of the spec's
+// services (attached ones too) and jobs reference (ADR 0055), by name.
+func ReferencedHTTP(s Spec) []string {
+	set := map[string]bool{}
+	add := func(env map[string]EnvValue) {
+		for _, val := range env {
+			if val.IsHTTPSecretRef() {
+				set[val.Secret] = true
+			}
+		}
+	}
+	for _, svc := range s.Services {
+		add(svc.Env)
+	}
+	for _, j := range s.Jobs {
+		add(j.Env)
 	}
 	return slices.Sorted(maps.Keys(set))
 }

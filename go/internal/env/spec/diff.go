@@ -325,13 +325,26 @@ func bindingView(b Binding, sp *Spec) map[string]any {
 
 // envView is env as a diff shows it: each value in its JSON form, a
 // secret reference with the version sp pins, and, resolved, a service
-// reference with its port's number.
+// reference with its port's number. An HTTP secret's reference (ADR 0055)
+// shows its pinned version; resolved, what of it makes the pod another
+// instead, the pinned version's upstream and mode: a new version alone is
+// sealed to the running pods again.
 func envView(env map[string]EnvValue, sp *Spec, resolved bool) any {
 	if len(env) == 0 {
 		return nil
 	}
 	out := make(map[string]any, len(env))
 	for k, val := range env {
+		switch {
+		case val.IsHTTPSecretRef() && resolved:
+			ref := sp.Secrets[val.Secret]
+			out[k] = map[string]any{"secret": val.Secret, "key": val.Key, "upstream": ref.Upstream, "mode": ref.Mode}
+			continue
+		case val.IsHTTPSecretRef():
+			out[k] = map[string]any{"secret": val.Secret, "key": val.Key,
+				"version": float64(sp.Secrets[val.Secret].Version)}
+			continue
+		}
 		switch val.Kind {
 		case EnvSecret:
 			out[k] = map[string]any{"secret": val.Secret, "version": float64(sp.Secrets[val.Secret].Version)}

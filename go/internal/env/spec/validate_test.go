@@ -141,6 +141,9 @@ func i(path, problem string) expect { return expect{SeverityInfo, path, problem}
 
 func checkFindings(t *testing.T, fs []Finding, want []expect) {
 	t.Helper()
+	// The warning of every binding stated in the spec (ADR 0055) is
+	// TestBindingsGiveWay's.
+	fs = slices.DeleteFunc(slices.Clone(fs), func(f Finding) bool { return f.Problem == GivesWay })
 	if len(fs) != len(want) {
 		t.Fatalf("findings\n%s\nwant %d: %+v", dump(fs), len(want), want)
 	}

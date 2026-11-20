@@ -293,7 +293,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	switch {
 	case creds != nil:
 		vc.credentials, pins.Credentials = creds, creds
-	case env != nil && vc.bindingsOn && namesCredentials(sp):
+	case env != nil && vc.bindingsOn && (namesCredentials(sp) || referencesSecrets(sp)):
 		creds, err := s.envCredentials(ctx, s.st, env.ID)
 		if err != nil {
 			return nil, pins, err
@@ -335,6 +335,11 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		}
 		if info.HTTPNames, err = s.sandboxHTTPNames(ctx, id); err != nil {
 			return nil, pins, err
+		}
+		if vc.bindingsOn {
+			if info.Secrets, err = s.st.SandboxCredentialNames(ctx, id); err != nil {
+				return nil, pins, fmt.Errorf("the HTTP secrets of sandbox %s: %w", id, err)
+			}
 		}
 		vc.sandboxes[id.String()] = info
 	}
@@ -604,10 +609,10 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 		if err := checkPins(ctx, tx, e.ID, p.norm.Secrets); err != nil {
 			return err
 		}
-		// And the credentials: a DeleteCredential checks its uses under
-		// the credential's lock, which this takes until the deployment
-		// that pins it is committed.
-		if err := checkCredentialPins(ctx, tx, e.ID, p.norm.Bindings); err != nil {
+		// And the credentials, the HTTP secrets: a DeleteCredential
+		// checks its uses under the credential's lock, which this takes
+		// until the deployment that pins it is committed.
+		if err := checkCredentialPins(ctx, tx, e.ID, p.norm); err != nil {
 			return err
 		}
 		// The plan's quota finding counted before the lock too.
@@ -677,6 +682,10 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 		return fmt.Errorf("secrets: %w", err)
 	}
 	for name, ref := range pins {
+		if ref.IsHTTP() {
+			// checkCredentialPins'.
+			continue
+		}
 		if !slices.Contains(versions[name].Versions, ref.Version) {
 			return errReplan
 		}
@@ -684,14 +693,20 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	return nil
 }
 
-// checkCredentialPins takes the lock of each credential the bindings
-// name (ADR 0033), in name order, and is errReplan when a pinned version
-// is gone.
-func checkCredentialPins(ctx context.Context, tx *store.Store, envID uuid.UUID, bs map[string]spec.Binding) error {
+// checkCredentialPins takes the lock of each credential a normalised
+// spec pins, by its bindings (ADR 0033) or as an HTTP secret its
+// variables reference (ADR 0055), in name order, and is errReplan when a
+// pinned version is gone.
+func checkCredentialPins(ctx context.Context, tx *store.Store, envID uuid.UUID, sp spec.Spec) error {
 	pins := map[string][]int{}
-	for _, b := range bs {
+	for _, b := range sp.Bindings {
 		if ref := b.CredentialRef; ref != nil {
 			pins[ref.Name] = append(pins[ref.Name], ref.Version)
+		}
+	}
+	for name, ref := range sp.Secrets {
+		if ref.IsHTTP() {
+			pins[name] = append(pins[name], ref.Version)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(pins)) {
@@ -819,6 +834,13 @@ func (s *Service) quotaFindings(ctx context.Context, tenant string, env uuid.UUI
 		return nil, err
 	}
 	return quota.SpecFindings(t.Limits, others, current, next), nil
+}
+
+// referencesSecrets reports whether a spec references a secret: an HTTP
+// secret it must pin, or a name that may be one (ADR 0055), which a
+// value's reference cannot be.
+func referencesSecrets(sp spec.Spec) bool {
+	return len(spec.Referenced(sp)) > 0 || len(spec.ReferencedHTTP(sp)) > 0
 }
 
 // namesCredentials reports whether a spec's bindings name a credential of

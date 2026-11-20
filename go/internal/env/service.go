@@ -17,6 +17,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
 	"github.com/gardenlinux/feos/go/internal/env/envdeps"
@@ -556,7 +557,9 @@ func (s *Service) DeleteTag(ctx context.Context, tenant, env, tag string) error 
 }
 
 // Secrets is GET /api/v1/environments/{env}/secrets: the tenant's
-// secrets at their latest versions, never a value; 503 without a sealer.
+// secrets of both kinds (ADR 0055) at their latest versions, by name,
+// never a value or a secret field; 503 without a sealer. The HTTP
+// secrets are the bindings' (s.d.Bindings), none while they are off.
 func (s *Service) Secrets(ctx context.Context, tenant, env string) (SecretList, error) {
 	if s.d.Sealer == nil {
 		return SecretList{}, errNoSecrets()
@@ -571,18 +574,97 @@ func (s *Service) Secrets(ctx context.Context, tenant, env string) (SecretList, 
 	}
 	out := SecretList{Secrets: make([]SecretInfo, 0, len(rows))}
 	for _, r := range rows {
-		out.Secrets = append(out.Secrets, SecretInfo{Name: r.Name, Version: r.Version, CreatedBy: r.CreatedBy,
-			CreatedAt: rfc3339(r.CreatedAt)})
+		out.Secrets = append(out.Secrets, valueSecretInfo(r))
 	}
+	if s.httpSecretsOn() {
+		hs, err := s.d.Bindings.HTTPSecrets(ctx, e.ID)
+		if err != nil {
+			return SecretList{}, fmt.Errorf("HTTP secrets: %w", err)
+		}
+		for _, h := range hs {
+			out.Secrets = append(out.Secrets, httpSecretInfo(h))
+		}
+	}
+	slices.SortStableFunc(out.Secrets, func(a, b SecretInfo) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
 }
 
+// httpSecretsOn reports whether the environments have HTTP secrets: the
+// HTTP bindings are on.
+func (s *Service) httpSecretsOn() bool { return s.d.Bindings != nil && s.d.Bindings.Enabled() }
+
+func valueSecretInfo(r store.EnvSecret) SecretInfo {
+	return SecretInfo{Name: r.Name, Type: SecretValue, Version: r.Version, CreatedBy: r.CreatedBy,
+		CreatedAt: rfc3339(r.CreatedAt)}
+}
+
+func httpSecretInfo(h bindings.HTTPSecret) SecretInfo {
+	def := h.Def
+	return SecretInfo{Name: h.Name, Type: SecretHTTP, Version: h.Version, CreatedBy: h.CreatedBy,
+		CreatedAt: rfc3339(h.CreatedAt), HTTPSecretDef: &def}
+}
+
+// errSecretKind is the 409 of a write to a name the other kind holds
+// (ADR 0055): a secret's kind does not change.
+func errSecretKind(name, is string) error {
+	return apierr.WithCode(http.StatusConflict, bindings.CodeSecretKind, "secret %s is %s; a secret's kind does not "+
+		"change: delete it and make a new one", name, is)
+}
+
+// Secret is GET /api/v1/environments/{env}/secrets/{name}: the latest
+// version of a secret of either kind, as Secrets lists it; 404 no_secret
+// for none (a value whose versions are all deleted is none), 503 without
+// a sealer.
+func (s *Service) Secret(ctx context.Context, tenant, env, name string) (SecretInfo, error) {
+	if s.d.Sealer == nil {
+		return SecretInfo{}, errNoSecrets()
+	}
+	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	if err != nil {
+		return SecretInfo{}, err
+	}
+	if s.httpSecretsOn() && spec.IsName(name) {
+		h, err := s.d.Bindings.HTTPSecret(ctx, e.ID, name)
+		if err == nil {
+			return httpSecretInfo(h), nil
+		}
+		if !errors.Is(err, model.ErrNotFound) {
+			return SecretInfo{}, fmt.Errorf("HTTP secret %s: %w", name, err)
+		}
+	}
+	if !spec.IsSecretName(name) {
+		return SecretInfo{}, errNoSecret()
+	}
+	r, err := s.st.LatestSecret(ctx, e.ID, name)
+	if errors.Is(err, store.ErrNoRow) || (err == nil && (!r.DeletedAt.IsZero() || r.System)) {
+		return SecretInfo{}, errNoSecret()
+	}
+	if err != nil {
+		return SecretInfo{}, fmt.Errorf("secret %s: %w", name, err)
+	}
+	return valueSecretInfo(r), nil
+}
+
 // PutSecret is PUT /api/v1/environments/{env}/secrets/{name}: a new
-// version (the highest ever plus one), sealed under its AAD (200); 503
-// without a sealer. A deployment pins it at its next apply.
+// version (the highest ever plus one), of a value (200, sealed under its
+// AAD) or, with type "http", of an HTTP secret (201 a new version, 200
+// the same definition again; the bindings' rules and codes); 409
+// secret_kind for a name the other kind holds (ADR 0055); 503 without a
+// sealer. A deployment pins it at its next apply.
 func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req PutSecretRequest) (SecretVersion, error) {
 	if s.d.Sealer == nil {
 		return SecretVersion{}, errNoSecrets()
+	}
+	switch req.Type {
+	case "", SecretValue:
+		if req.httpFields() {
+			return SecretVersion{}, errBadRequest("upstream, mode, caPem, pathPrefixes, forwardedHost, rateLimit and " +
+				"credential are an HTTP secret's: send them with \"type\": \"http\"")
+		}
+	case SecretHTTP:
+		return s.putHTTPSecret(ctx, tenant, env, name, req)
+	default:
+		return SecretVersion{}, errBadRequest("type %q: a secret is of type \"value\" or \"http\"", req.Type)
 	}
 	if !spec.IsSecretName(name) {
 		return SecretVersion{}, errBadRequest("secret name %q must be lowercase letters, digits, '.', '_' and '-' "+
@@ -611,6 +693,13 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 		if e.Deleting {
 			return errDeleting(e.Name)
 		}
+		// One name space of both kinds (ADR 0055); the insert's trigger
+		// (migration 0040) holds it against a write that races this one.
+		if isHTTP, err := tx.EnvCredentialExists(ctx, e.ID, name); err != nil {
+			return err
+		} else if isHTTP {
+			return errSecretKind(name, "an HTTP secret")
+		}
 		version = 1
 		if last, err := tx.LatestSecret(ctx, e.ID, name); err == nil {
 			version = last.Version + 1
@@ -623,6 +712,9 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 		}
 		_, err = tx.InsertSecret(ctx, store.EnvSecret{EnvID: e.ID, Name: name, Version: version, Sealed: sealed,
 			CreatedBy: by, MadeBy: auth.MadeBy(ctx)})
+		if store.SecretKindConflict(err) {
+			return errSecretKind(name, "an HTTP secret")
+		}
 		return err
 	})
 	if err != nil {
@@ -631,12 +723,76 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 	return SecretVersion{Name: name, Version: version}, nil
 }
 
+// putHTTPSecret is PutSecret of type "http": the bindings' PutHTTPSecret
+// in the environment, which is not being deleted.
+func (s *Service) putHTTPSecret(ctx context.Context, tenant, env, name string, req PutSecretRequest) (
+	SecretVersion, error) {
+	if !s.httpSecretsOn() {
+		return SecretVersion{}, apierr.WithCode(http.StatusUnprocessableEntity, "invalid_binding",
+			"HTTP bindings are not enabled on this platform: an HTTP secret needs them")
+	}
+	if req.Value != "" {
+		return SecretVersion{}, errBadRequest("value: an HTTP secret has no value; its credential holds its key")
+	}
+	if err := checkDeploymentMeta(req.Author, "", nil); err != nil {
+		return SecretVersion{}, err
+	}
+	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	if err != nil {
+		return SecretVersion{}, err
+	}
+	if e.Deleting {
+		return SecretVersion{}, errDeleting(e.Name)
+	}
+	raw, err := req.httpDefinition()
+	if err != nil {
+		return SecretVersion{}, errBadRequest("the definition: %v", err)
+	}
+	by := req.Author
+	if by == "" {
+		by = auth.MadeBy(ctx)
+	}
+	h, created, err := s.d.Bindings.PutHTTPSecret(ctx, e.ID, name, raw, by)
+	if err != nil {
+		return SecretVersion{}, err
+	}
+	info := httpSecretInfo(h)
+	return SecretVersion{Name: info.Name, Version: info.Version, Type: info.Type, CreatedBy: info.CreatedBy,
+		CreatedAt: info.CreatedAt, HTTPSecretDef: info.HTTPSecretDef, Created: created}, nil
+}
+
 // DeleteSecret is DELETE /api/v1/environments/{env}/secrets/{name}: every
-// version soft-deleted (204); 409 while the latest deployment pins it, 404
-// "no such secret", 503 without a sealer.
+// version of a secret of either kind (204). A value's are soft-deleted;
+// 409 while the latest deployment pins it. An HTTP secret's go (the
+// bindings' DeleteHTTPSecret): 409 secret_in_use while a sandbox names it
+// or the latest or deployed deployment pins it, 409 while the
+// environment is being deleted. 404 no_secret for none, 503 without a
+// sealer.
 func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) error {
 	if s.d.Sealer == nil {
 		return errNoSecrets()
+	}
+	if s.httpSecretsOn() && spec.IsName(name) {
+		e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+		if err != nil {
+			return err
+		}
+		isHTTP, err := s.st.EnvCredentialExists(ctx, e.ID, name)
+		if err != nil {
+			return fmt.Errorf("HTTP secret %s: %w", name, err)
+		}
+		if isHTTP {
+			if e.Deleting {
+				return errDeleting(e.Name)
+			}
+			found, err := s.d.Bindings.DeleteHTTPSecret(ctx, e.ID, name)
+			if err != nil || found {
+				return err
+			}
+			// Deleted since it was read: a value of the name is no more
+			// there than it was.
+			return errNoSecret()
+		}
 	}
 	if !spec.IsSecretName(name) {
 		// A system secret is no tenant's to delete.
@@ -656,7 +812,8 @@ func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) er
 			if err != nil {
 				return err
 			}
-			if _, pinned := sp.Secrets[name]; pinned || slices.Contains(spec.Referenced(*sp), name) {
+			if ref, pinned := sp.Secrets[name]; (pinned && ref.Type != spec.SecretTypeHTTP) ||
+				slices.Contains(spec.Referenced(*sp), name) {
 				return apierr.New(http.StatusConflict, "deployment %d pins secret %s: apply a deployment without it first",
 					e.Deployment, name)
 			}

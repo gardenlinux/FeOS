@@ -241,7 +241,10 @@ func (c *Controller) envSecretValues(ctx context.Context, v *view, tmpl *model.P
 	for _, sp := range specs {
 		if sp != nil {
 			for _, name := range slices.Sorted(maps.Keys(sp.Secrets)) {
-				resolve(name, sp.Secrets[name].Version)
+				if ref := sp.Secrets[name]; !ref.IsHTTP() {
+					// An HTTP secret's key reaches no container (ADR 0055).
+					resolve(name, ref.Version)
+				}
 			}
 		}
 	}

@@ -148,6 +148,13 @@ func (s *Service) BindingUsage(ctx context.Context, tenant, env, window string) 
 		for name := range sp.Bindings {
 			use(name)
 		}
+		// An HTTP secret its variables reference is its pods' binding of
+		// the secret's name (ADR 0055).
+		for name, ref := range sp.Secrets {
+			if ref.IsHTTP() {
+				use(name)
+			}
+		}
 	}
 	out := BindingUsage{Window: window, Bindings: []BindingUse{}}
 	t, _ := auth.TenantFrom(ctx)

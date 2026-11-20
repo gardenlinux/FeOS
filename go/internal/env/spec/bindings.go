@@ -23,39 +23,87 @@ import (
 
 const bindingsRemedy = "see the HTTP bindings in ADR 0028"
 
-// bindings checks the spec's bindings and that each is named.
+// GivesWay is the warning of a binding stated in the spec, inline or by
+// credentialRef, while plans still accept it (ADR 0055, release 1).
+const GivesWay = "bindings in the spec give way to HTTP secrets (ADR 0055)"
+
+// givesWayRemedy is its remedy for binding name.
+func givesWayRemedy(name string) string {
+	return fmt.Sprintf(`make an HTTP secret %s and reference it by a variable {"secret": "%s", "key": "url"}`, name, name)
+}
+
+// podBinding is a binding the environment's pods get: one stated in the
+// spec, or an HTTP secret a variable references (ADR 0055), with the
+// path its findings name.
+type podBinding struct {
+	name, path string
+	up         httpcheck.Upstream
+	mode       string
+	secret     bool
+}
+
+// bindings checks the spec's bindings and the HTTP secrets its image
+// services' and jobs' variables reference, which are their pods'
+// bindings too, named by the secret: each named, no two the pods resolve
+// as one name, none the name of a service or an addon.
 func (v *validator) bindings() {
-	if len(v.s.Bindings) == 0 {
-		return
+	if len(v.s.Bindings) > 0 {
+		if on, ok := v.vc.(interface{ HTTPBindings() bool }); ok && !on.HTTPBindings() {
+			v.errorf("bindings", "remove the bindings, or ask the platform's operators for --bindings",
+				"HTTP bindings are not enabled on this platform")
+		}
 	}
-	if on, ok := v.vc.(interface{ HTTPBindings() bool }); ok && !on.HTTPBindings() {
-		v.errorf("bindings", "remove the bindings, or ask the platform's operators for --bindings",
-			"HTTP bindings are not enabled on this platform")
-	}
-	resolved := map[string]string{}
+	var all []podBinding
 	for _, name := range slices.Sorted(maps.Keys(v.s.Bindings)) {
 		b := v.s.Bindings[name]
+		v.warnf("bindings."+name, givesWayRemedy(name), GivesWay)
 		up, mode := v.binding(name, b)
 		if up.Host == "" {
 			continue
 		}
-		r := name
-		if mode == httpcheck.ModeIntercept {
-			r = up.Host
-		}
-		if other, ok := resolved[r]; ok {
-			v.errorf("bindings."+name, "intercept each host once", "bindings %s and %s both make the pods resolve %s",
-				other, name, r)
+		all = append(all, podBinding{name: name, path: "bindings." + name, up: up, mode: mode})
+	}
+	for _, name := range slices.Sorted(maps.Keys(v.httpRefs)) {
+		path := v.httpRefs[name][0]
+		if _, ok := v.s.Bindings[name]; ok {
+			v.errorf("bindings."+name, givesWayRemedy(name)+", and remove the binding",
+				"binding %s and the HTTP secret %s that %s references would both be the pods' binding %s", name, name,
+				path, name)
 			continue
 		}
-		resolved[r] = name
-		if _, ok := v.s.Services[r]; ok && r != name {
-			v.errorf("bindings."+name+".upstream", "rename the service", "the pods would resolve %s, a service's "+
-				"name, to the binding", r)
+		up, mode, ok := v.httpTemplate(name)
+		if !ok {
+			continue
 		}
-		if _, ok := v.s.Addons[r]; ok && r != name {
-			v.errorf("bindings."+name+".upstream", "rename the addon", "the pods would resolve %s, an addon's "+
-				"name, to the binding", r)
+		all = append(all, podBinding{name: name, path: path, up: up, mode: mode, secret: true})
+	}
+	if n := len(all); n > MaxBindings {
+		v.errorf("bindings", "split the environment", "the pods would get %d bindings and HTTP secrets; at most %d "+
+			"are allowed", n, MaxBindings)
+	}
+	resolved := map[string]string{}
+	for _, b := range all {
+		r := b.name
+		if b.mode == httpcheck.ModeIntercept {
+			r = b.up.Host
+		}
+		if other, ok := resolved[r]; ok {
+			v.errorf(b.path, "intercept each host once", "bindings %s and %s both make the pods resolve %s",
+				other, b.name, r)
+			continue
+		}
+		resolved[r] = b.name
+		at := b.path
+		if !b.secret {
+			at += ".upstream"
+		}
+		if _, ok := v.s.Services[r]; ok && (r != b.name || b.secret) {
+			v.errorf(at, "rename the service", "the pods would resolve %s, a service's name, to the binding %s", r,
+				b.name)
+		}
+		if _, ok := v.s.Addons[r]; ok && (r != b.name || b.secret) {
+			v.errorf(at, "rename the addon", "the pods would resolve %s, an addon's name, to the binding %s", r,
+				b.name)
 		}
 	}
 	for name := range v.s.Bindings {
@@ -85,6 +133,28 @@ func (v *validator) bindings() {
 				"no service or job names binding %s: no pod gets it", name)
 		}
 	}
+}
+
+// httpTemplate is the upstream and mode of the version of HTTP secret
+// name the spec pins, or its latest; ok false when the context has none.
+func (v *validator) httpTemplate(name string) (httpcheck.Upstream, string, bool) {
+	info, ok := v.httpSecret(name)
+	if !ok {
+		return httpcheck.Upstream{}, "", false
+	}
+	version := v.s.Secrets[name].Version
+	if version == 0 {
+		version = info.Latest
+	}
+	t, ok := info.Versions[version]
+	if !ok {
+		return httpcheck.Upstream{}, "", false
+	}
+	up, err := httpcheck.ParseUpstream("upstream", t.Upstream)
+	if err != nil {
+		return httpcheck.Upstream{}, "", false
+	}
+	return up, t.Mode, true
 }
 
 // fail adds a check's failure at path.
@@ -237,7 +307,7 @@ func (v *validator) credential(p string, c *BindingCredential) {
 		}
 		switch val.Kind {
 		case EnvSecret:
-			v.secretRef(fp, val.Secret)
+			v.valueRef(fp, *val)
 		case EnvString, EnvLiteral:
 			if literal == nil {
 				literal = func(field, s string) *httpcheck.Error { return httpcheck.Text(field, s, !required) }
@@ -255,7 +325,7 @@ func (v *validator) credential(p string, c *BindingCredential) {
 		case val == nil:
 			v.errorf(fp, `set it to {"secret": "<name>"}`, "a credential of kind %s needs %s", c.Kind, field)
 		case val.Kind == EnvSecret:
-			v.secretRef(fp, val.Secret)
+			v.valueRef(fp, *val)
 		default:
 			v.errorf(fp, `store the value as a secret of the environment and write {"secret": "<name>"}`,
 				"a credential's %s is a secret's: a literal would stand in the clear in the spec, its plans and its "+
@@ -320,6 +390,11 @@ func (v *validator) bindingRefs(path string, names []string) {
 		case seen[n]:
 			v.errorf(ip, "name each binding once", "binding %s is named twice", n)
 		case v.s.Bindings == nil || !hasBinding(v.s.Bindings, n):
+			if _, ok := v.httpSecret(n); ok {
+				v.errorf(ip, fmt.Sprintf(`remove it, and reference the HTTP secret by a variable {"secret": "%s", `+
+					`"key": "url"}`, n), "%s is an HTTP secret, which an object gets by a variable, not a binding", n)
+				break
+			}
 			v.errorf(ip, "declare the binding under bindings, or name one that is declared", "no binding %s", n)
 		}
 		seen[n] = true
@@ -343,4 +418,12 @@ func BindingTemplate(b Binding) (upstream, mode string) {
 		m = b.Mode
 	}
 	return up.Origin(), m
+}
+
+// HTTPSecretBinding is the binding of HTTP secret name pinned by ref (ADR
+// 0055) as the pods get it: a binding that names the secret at the pinned
+// version, with that version's upstream and mode, as a normalised binding
+// that names a credential has them (ADR 0033).
+func HTTPSecretBinding(name string, ref SecretRef) Binding {
+	return Binding{Upstream: ref.Upstream, Mode: ref.Mode, CredentialRef: &CredentialRef{Name: name, Version: ref.Version}}
 }

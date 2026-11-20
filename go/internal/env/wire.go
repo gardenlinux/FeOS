@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 )
@@ -528,31 +529,85 @@ type PutTagRequest struct {
 }
 
 // SecretList is GET /api/v1/environments/{env}/secrets: the tenant's
-// secrets of the environment at their latest versions (never a value,
-// never a system secret).
+// secrets of the environment, both kinds (ADR 0055), at their latest
+// versions, by name (never a value, never a secret field, never a system
+// secret).
 type SecretList struct {
 	Secrets []SecretInfo `json:"secrets"`
 }
 
-// SecretInfo is a secret's latest version.
+// The kinds of a secret (ADR 0055).
+const (
+	// SecretValue is a value, handed to the containers that reference it.
+	SecretValue = "value"
+	// SecretHTTP is an HTTP API whose key only the node uses.
+	SecretHTTP = "http"
+)
+
+// SecretInfo is a secret's latest version: its name, kind, version and
+// who made it when; an HTTP secret's also its definition, every secret
+// field {"set": true}, and its uses (HTTPSecretDef, nil for a value).
 type SecretInfo struct {
 	Name      string `json:"name"`
+	Type      string `json:"type"`
 	Version   int    `json:"version"`
 	CreatedBy string `json:"createdBy"`
 	CreatedAt string `json:"createdAt"`
+	*bindings.HTTPSecretDef
 }
 
 // PutSecretRequest is PUT /api/v1/environments/{env}/secrets/{name}: a new
-// version.
+// version. Type "value" or none is a value secret's: Value. Type "http"
+// is an HTTP secret's (ADR 0055): its definition as a credential's PUT of
+// ADR 0033 has it, a secret field {"set": true} for the latest version's
+// value while the origin, the CA and the token URL stay.
 type PutSecretRequest struct {
-	Value  string `json:"value"`
+	Type   string `json:"type,omitempty"`
+	Value  string `json:"value,omitempty"`
 	Author string `json:"author,omitempty"`
+
+	Upstream      string          `json:"upstream,omitempty"`
+	Mode          string          `json:"mode,omitempty"`
+	CaPem         string          `json:"caPem,omitempty"`
+	PathPrefixes  []string        `json:"pathPrefixes,omitempty"`
+	ForwardedHost bool            `json:"forwardedHost,omitempty"`
+	RateLimit     json.RawMessage `json:"rateLimit,omitempty"`
+	Credential    json.RawMessage `json:"credential,omitempty"`
 }
 
-// SecretVersion is a secret put's answer.
+// httpFields reports whether the request has a field of an HTTP secret's
+// definition.
+func (r PutSecretRequest) httpFields() bool {
+	return r.Upstream != "" || r.Mode != "" || r.CaPem != "" || r.PathPrefixes != nil || r.ForwardedHost ||
+		len(r.RateLimit) > 0 || len(r.Credential) > 0
+}
+
+// httpDefinition is the request's HTTP secret's definition as the
+// bindings read it.
+func (r PutSecretRequest) httpDefinition() ([]byte, error) {
+	return json.Marshal(struct {
+		Upstream      string          `json:"upstream,omitempty"`
+		Mode          string          `json:"mode,omitempty"`
+		CaPem         string          `json:"caPem,omitempty"`
+		PathPrefixes  []string        `json:"pathPrefixes,omitempty"`
+		ForwardedHost bool            `json:"forwardedHost,omitempty"`
+		RateLimit     json.RawMessage `json:"rateLimit,omitempty"`
+		Credential    json.RawMessage `json:"credential,omitempty"`
+	}{r.Upstream, r.Mode, r.CaPem, r.PathPrefixes, r.ForwardedHost, r.RateLimit, r.Credential})
+}
+
+// SecretVersion is a secret put's answer: a value's name and version; an
+// HTTP secret's the secret as GET answers it.
 type SecretVersion struct {
-	Name    string `json:"name"`
-	Version int    `json:"version"`
+	Name      string `json:"name"`
+	Version   int    `json:"version"`
+	Type      string `json:"type,omitempty"`
+	CreatedBy string `json:"createdBy,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	*bindings.HTTPSecretDef
+	// Created: an HTTP secret's PUT made a new version (201); else it
+	// was the same definition again (200). A value's PUT answers 200.
+	Created bool `json:"-"`
 }
 
 // IncidentList is GET /api/v1/environments/{env}/incidents[?open=1],

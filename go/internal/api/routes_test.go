@@ -124,6 +124,7 @@ var routeClasses = map[string]class{
 	"DELETE /api/v1/environments/{env}/tags/{tag}":              classTenant,
 	"POST /api/v1/environments/{env}/clone":                     classTenant,
 	"GET /api/v1/environments/{env}/secrets":                    classTenant,
+	"GET /api/v1/environments/{env}/secrets/{name}":             classTenant,
 	"PUT /api/v1/environments/{env}/secrets/{name}":             classTenant,
 	"DELETE /api/v1/environments/{env}/secrets/{name}":          classTenant,
 	"GET /api/v1/environments/{env}/incidents":                  classTenant,
@@ -190,6 +191,9 @@ var bindingRoutes = map[string]class{
 	"POST /api/v1/environments/{env}/credentials/{name}/check": classTenant,
 	"GET /api/v1/sandboxes/{id}/credentials":                   classTenant,
 	"PUT /api/v1/sandboxes/{id}/credentials":                   classTenant,
+	"POST /api/v1/environments/{env}/secrets/{name}/check":     classTenant,
+	"GET /api/v1/sandboxes/{id}/secrets":                       classTenant,
+	"PUT /api/v1/sandboxes/{id}/secrets":                       classTenant,
 }
 
 // visitorRouteClasses are the routes that exist only with the visits

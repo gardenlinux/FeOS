@@ -133,6 +133,11 @@ type Bindings interface {
 	SandboxCredentialNames(ctx context.Context, id podid.ID) ([]string, error)
 	CheckSandboxCredentials(ctx context.Context, env uuid.UUID, names []string) error
 	SetSandboxCredentials(ctx context.Context, tenant string, env uuid.UUID, id podid.ID, names []string) error
+	// The HTTP secrets (ADR 0055): an environment's check of one, and
+	// those a sandbox names, with the secrets' codes.
+	CheckSecret(http.ResponseWriter, *http.Request, bindings.Env)
+	CheckSandboxSecrets(ctx context.Context, env uuid.UUID, names []string) error
+	SetSandboxSecrets(ctx context.Context, tenant string, env uuid.UUID, id podid.ID, names []string) error
 }
 
 // Environments is the environments service (*env.Service, ADR 0018):
@@ -159,6 +164,7 @@ type Environments interface {
 	PutTag(ctx context.Context, tenant, envRef, tag string, req envs.PutTagRequest) (envs.Tag, error)
 	DeleteTag(ctx context.Context, tenant, envRef, tag string) error
 	Secrets(ctx context.Context, tenant, envRef string) (envs.SecretList, error)
+	Secret(ctx context.Context, tenant, envRef, name string) (envs.SecretInfo, error)
 	PutSecret(ctx context.Context, tenant, envRef, name string, req envs.PutSecretRequest) (envs.SecretVersion, error)
 	DeleteSecret(ctx context.Context, tenant, envRef, name string) error
 	Incidents(ctx context.Context, tenant, envRef string, openOnly bool) (envs.IncidentList, error)
@@ -589,6 +595,14 @@ func (s *server) routes() []route {
 		cred(onEnv(write), "POST /api/v1/environments/{env}/credentials/{name}/check", b.CheckCredential)
 		tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
 		tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
+		// The HTTP secrets (ADR 0055), which the credentials' routes above
+		// are aliases of for one release: an environment's check of one,
+		// and those of its environment a sandbox names. The environment's
+		// list, read, write and delete of its secrets of both kinds are
+		// the environments' routes.
+		cred(onEnv(write), "POST /api/v1/environments/{env}/secrets/{name}/check", b.CheckSecret)
+		tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/secrets", s.getSandboxSecrets)
+		tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/secrets", s.putSandboxSecrets)
 	}
 
 	// The environments (ADR 0018): the tenant's, and their route door.

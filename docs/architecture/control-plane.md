@@ -2053,14 +2053,20 @@ SSH bindings, `--bindings` and `--secret-key-file` (`internal/bindings`,
 They come from three places, and from no other:
 
 - **a sandbox's own set**, `PUT /api/v1/sandboxes/{id}/http` (sandbox
-  class), stated whole;
-- **the credentials of its environment a sandbox names**, at their latest
-  versions ([Credentials of an environment](#credentials-of-an-environment));
-- **an environment's pod**: the bindings its image service or job names
-  (`"bindings": ["erp"]`), as the deployment its instance or job run
-  belongs to has them ([The deployment spec](#the-deployment-spec)), a
-  binding that names a credential at the version the deployment pins. A
-  pod gets exactly those; an attached service has its sandbox's.
+  class), stated whole; it gives way once FeCode's workspaces name their
+  environments' HTTP secrets (ADR 0055);
+- **the HTTP secrets of its environment a sandbox names**, at their
+  latest versions ([HTTP secrets of an
+  environment](#http-secrets-of-an-environment));
+- **an environment's pod**: the HTTP secrets its image service's or
+  job's variables reference (`{"secret": "s4", "key": "url"}`), each a
+  binding named by the secret at the version the deployment pins, and,
+  while plans accept them (ADR 0055, release 1), the bindings stated in
+  the spec that it names (`"bindings": ["erp"]`), as the deployment its
+  instance or job run belongs to has them ([The deployment
+  spec](#the-deployment-spec)), a binding that names a credential at the
+  version the deployment pins. A pod gets exactly those; an attached
+  service has its sandbox's.
 
 **The routes.**
 
@@ -2070,7 +2076,7 @@ They come from three places, and from no other:
 | `GET /api/v1/sandboxes/{id}/http` | sandbox | `{"version", "bindings": [B…]}`, by name, every secret field `{"set": true}`: a header's value, `password`, `clientSecret`, `keyPem`; `version` `""` for none |
 | `DELETE /api/v1/sandboxes/{id}/http` | sandbox | 204 |
 | `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object; 429 `too_many_preflights` |
-| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions; 404 `no_binding`, `bindings_off`; 429 `too_many_preflights` |
+| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions (of one that names a credential, or of an HTTP secret the deployment pins, its latest version); 404 `no_binding`, `bindings_off`; 429 `too_many_preflights` |
 
 A tenant has at most two preflights and checks in flight on an
 instance, together: each resolves, dials out and may take its 10 s.
@@ -2196,13 +2202,21 @@ status of the probe is ok: it is the API's to answer.
 names each of its bindings with its upstream and mode
 (`PodTemplate.httpBindings`): a change of a binding's name, upstream or
 mode, or of the bindings an object names, is a new template, a rollout.
+An HTTP secret a variable references is such a binding, named by the
+secret, its upstream and mode the pinned version's (the pin carries
+them, [The deployment spec](#the-deployment-spec)); an object that gets
+no binding has none in its template, as before ADR 0055, so that a
+release of `ferund` changes no pod's template.
 The rest of a binding, its options and its credential with its secrets'
 pinned versions, is read from the instance's deployment whenever the pod
 asks for its bindings (`env.RowHTTPBindings`): a deployment that pins a
 new version of a binding's secret keeps the pods (`in place`), and the
-kept instance, moved to it, is sent its bindings again. A secret a
+kept instance, moved to it, is sent its bindings again; so does a
+deployment that pins a new version of an HTTP secret whose upstream and
+mode stay, whose binding is read the same way (`OpenCredential` of the
+pinned version, its definition's hash the pin). A secret a
 binding names enters no container's environment unless a service's env
-names it itself. A binding whose resolved secret is no valid value (a
+names it itself; an HTTP secret's key enters none. A binding whose resolved secret is no valid value (a
 header value with a line break) is given to the pod without its
 credential, so that its names and version are the same in its clear part
 and in what its `feos-authn` gets, which answers its requests 503
@@ -2230,7 +2244,8 @@ of the current minute and the five before it. A binding's requests are those the
 (`denied_destination`, `not_ready`, `binding_invalid`,
 `audit_unavailable`) count for none. With at least five requests it
 opens, on the object `binding/<name>` of the environment's latest
-deployment:
+deployment (its bindings are those stated in its spec and the HTTP
+secrets it pins, by name):
 
 | Condition | While more than half of the requests |
 |---|---|
@@ -2256,7 +2271,8 @@ deletes a binding's incidents 30 days after they closed.
 another a 400) says what the environment's pods sent through each
 binding in the window that ends now, and who sent it, for the console's
 view of where a credential lives: every binding of the latest
-deployment, an unused one with zeros, and every other one its pods'
+deployment (those stated in its spec and the HTTP secrets it pins), an
+unused one with zeros, and every other one its pods'
 requests named (a sandbox's own set, its environment's credentials), by name.
 
 ```json
@@ -2295,23 +2311,50 @@ the trace index keeps it (`--trace-retention`, 30 days); a pod killed
 mid-request leaves no span, and the spans beyond a tenant's trace quota
 (`--trace-quota`) are not kept, nor counted.
 
-### Credentials of an environment
+### HTTP secrets of an environment
 
-A credential ([ADR 0033](../adr/0033-credentials-of-an-environment.md)) is
-an HTTP binding's definition that an environment states once and its
-sandboxes and bindings use by name (`internal/bindings/credentials.go`,
+An HTTP secret ([ADR 0055](../adr/0055-a-secret-is-a-value-or-an-http-api.md),
+what [ADR 0033](../adr/0033-credentials-of-an-environment.md) called a
+credential of the environment) is an HTTP API's definition that an
+environment states once and its workloads use by name: its origin, its
+CA, how the code calls it (the mode), the forwarded host, the path
+prefixes, the rate limit and its authentication, the `credential`, of
+one of the four kinds of a binding (`internal/bindings/credentials.go`,
 `internal/store/env_credentials.go`). Environments share none. It is on
-with the HTTP bindings.
+with the HTTP bindings. A secret of an environment is a value
+([Secrets](#secrets)) or an HTTP secret: one name space of both, and a
+secret's kind does not change.
+
+| Method and path | Need | Answers |
+|---|---|---|
+| `GET /api/v1/environments/{env}/secrets` | read on the environment | `{secrets}`: both kinds, by name ([Secrets](#secrets)); an HTTP secret's item is its latest version as below with `"type": "http"` |
+| `GET /api/v1/environments/{env}/secrets/{name}` | read on the environment | one item of either kind; 404 `no_secret` |
+| `PUT /api/v1/environments/{env}/secrets/{name}` `{"type": "http", upstream, mode?, caPem?, pathPrefixes?, forwardedHost?, rateLimit?, credential}` | write on the environment | 201 the item of a new version, 200 the same definition again; 400 for a `value` beside the definition; 422 as a binding's PUT; 409 `secret_kind` for a value's name ("secret s4 is a value; a secret's kind does not change: delete it and make a new one"); 409 while the environment is being deleted |
+| `DELETE /api/v1/environments/{env}/secrets/{name}` | write on the environment | 204; 409 `secret_in_use`, naming its users; 409 while the environment is being deleted |
+| `POST /api/v1/environments/{env}/secrets/{name}/check` | write on the environment | the preflight: of the latest version (404 `no_secret` without one), or of `{binding}`, a draft that is not stored (its `type` `http` allowed); `{probe}` optional; a draft the rules refuse answers 200 with the result's `error`, as `/api/v1/http/preflight` does, a body that is no draft 400; 409 `secret_kind` for a value; 409 while the environment is being deleted |
+| `GET /api/v1/sandboxes/{id}/secrets` | read on the sandbox's environment | `{secrets}`: the HTTP secrets the sandbox names |
+| `PUT /api/v1/sandboxes/{id}/secrets` `{secrets}` | write on the sandbox's environment | the same, after the whole list is stated; 422 `secret_kind` for a value secret, `no_secret` for a name its environment has no secret of |
+
+An item: `{name, type, version, createdBy, createdAt, upstream, mode,
+caPem, pathPrefixes, forwardedHost, rateLimit, credential, usedBy}`,
+`upstream` its origin, `mode` and `rateLimit.burst` explicit
+(`rateLimit` null for none), the header names canonical, every secret
+field `{"set": true}`; `usedBy` `{sandboxes, objects, bindings, latest,
+deployed}`: the environment's sandboxes that name it, the services and
+jobs of its latest deployment that get it (`service/app`: by a variable
+that references it, or a binding stated in the spec that names it), the
+bindings of the latest or deployed deployment that name it
+(`credentialRef`), and the versions the two deployments pin (0: none).
+
+The credentials' routes of ADR 0033 stay one release as aliases on the
+same data, with their words and codes (`no_credential`,
+`credential_in_use`, a sandbox's `credentials`):
 
 | Method and path | Need | Answers |
 |---|---|---|
 | `GET /api/v1/environments/{env}/credentials` | read on the environment | `{credentials}`: the latest version of each, with `usedBy` |
-| `GET /api/v1/environments/{env}/credentials/{name}` | read on the environment | the latest version; 404 `no_credential` |
-| `PUT /api/v1/environments/{env}/credentials/{name}` | write on the environment | 201 a new version, 200 the same definition again; 422 as a binding's PUT; 409 while the environment is being deleted |
-| `DELETE /api/v1/environments/{env}/credentials/{name}` | write on the environment | 204; 409 `credential_in_use`, naming its users; 409 while the environment is being deleted |
-| `POST /api/v1/environments/{env}/credentials/{name}/check` | write on the environment | the preflight: of the latest version (404 `no_credential` without one), or of `{binding}`, a draft that is not stored; `{probe}` optional; a draft the rules refuse answers 200 with the result's `error`, as `/api/v1/http/preflight` does, a body that is no draft 400; 409 while the environment is being deleted |
-| `GET /api/v1/sandboxes/{id}/credentials` | read on the sandbox's environment | `{credentials}`: the names the sandbox names |
-| `PUT /api/v1/sandboxes/{id}/credentials` | write on the sandbox's environment | the same, after the whole list is stated |
+| `GET`, `PUT`, `DELETE /api/v1/environments/{env}/credentials/{name}`, `POST …/{name}/check` | as the secrets' | the item without `type`; 404 `no_credential`; 409 `credential_in_use`; a PUT's 409 `secret_kind` as the secrets' |
+| `GET`, `PUT /api/v1/sandboxes/{id}/credentials` `{credentials}` | as the secrets' | `{credentials}`; 422 `no_credential` |
 
 A PUT's body is a binding of a sandbox's set without its name (the
 path's): upstream, mode, CA, path prefixes, forwarded host, rate limit and
@@ -2319,86 +2362,99 @@ credential, checked by the same rules and the destination rule. Every
 write that changes the definition makes version n+1 (`env_credentials`,
 one row per version, the credential sealed and bound to the environment's
 ID, the name and the version), n the highest version the name ever had in
-the environment, a deleted credential's too (`env_credential_names`), so
+the environment, a deleted one's too (`env_credential_names`), so
 that a number never names two definitions and a pin of a deleted version
 finds none; the same definition again makes none. A
 secret field sent as `{"set": true}` keeps the latest version's value, so
 that a GET's answer, edited and sent back, keeps the secrets it did not
 touch; keeping a field the latest version has not (another kind, a header
-it lacks) is a 422. It keeps one only while the upstream (canonical),
-the mode, the CA (but for the white space around it) and the token URL
-are the latest version's: a write that changes any of them is a 422
-"re-enter the secret fields when the upstream, mode, CA or token URL
-change", so that write on the environment, which reads no secret, never
-sends a stored one elsewhere. A check's draft takes `{"set": true}` the
-same way, so that a form can be checked before it saves. No answer carries a
-secret: each answers `{"set": true}`. `usedBy` lists the environment's
-sandboxes that name the credential (`sandboxes`), its bindings that name
-it in its latest or deployed deployment (`bindings`), and the versions
-both pin (`latest`, `deployed`; 0: none). A credential goes with its
-environment; a rename keeps it.
+it lacks) is a 422. **The key is bound to its API**: it keeps one only
+while the origin (the upstream, canonical), the CA (but for the white
+space around it) and the token URL are the latest version's: a write
+that changes any of them is a 422 "re-enter the secret fields when the
+upstream, CA or token URL change", so that write on the environment,
+which reads no secret, never sends a stored one elsewhere. The mode, the
+forwarded host, the prefixes and the rate limit change while keeping it:
+the key goes to the same API. A check's draft takes `{"set": true}` the
+same way, so that a form can be checked before it saves. No answer
+carries a secret: each answers `{"set": true}`. An HTTP secret goes with
+its environment; a rename keeps it.
 
-**A sandbox** names credentials of its environment at its create
-(`credentials`) or by the PUT (`sandbox_credentials`); each must be one of
-its environment's (422 `no_credential` otherwise, also for another
-environment's), two must not make the pod resolve one name, and none may
+**One name space.** A write of an HTTP secret checks, under the
+secret's advisory lock (`LockEnvCredential`), that no value secret of the
+environment holds the name (a version that is not deleted), and a
+value's write, under its environment's lock, that no HTTP secret does:
+409 `secret_kind` either way. Migration `0040_secret_kinds.sql` makes it
+the database's rule as well: a trigger on the inserts of `env_secrets`
+(but a system secret's or a deleted version's) and of `env_credentials`
+takes the same advisory lock and refuses a name the other kind holds,
+its error the constraint `secret_kind` (`store.SecretKindConflict`),
+which ferund answers as the 409; the migration refuses to run, naming
+them, while a name of an environment is both.
+
+**A sandbox** names HTTP secrets of its environment at its create
+(`secrets`, or `credentials`, its alias; not both) or by the PUT
+(`sandbox_credentials`); each must be one of its environment's (422
+`no_secret` otherwise, also for another environment's, 422 `secret_kind`
+for a value), two must not make the pod resolve one name, and none may
 share a name with the sandbox's own set or a name an environment gives it
 (409 `name_taken`). Its pod gets each at its latest version as a binding
-named by the credential, beside its own set; its bindings' version covers
-both, so a new version of a credential moves it: the PUT that wrote it
-makes the interception CAs each such sandbox needs and pushes the pod its
-clear part, and its feos-authn fetches the new credential. Nothing
-restarts.
+named by the secret, beside its own set; its bindings' version covers
+both, so a new version moves it: the PUT that wrote it makes the
+interception CAs each such sandbox needs and pushes the pod its clear
+part, and its feos-authn fetches the new definition. Nothing restarts.
 
-**An environment's binding** may name a credential of the environment
-instead of stating one: `{"credentialRef": {"name": "github"}}`, with no
-other field of its own. A plan reads the environment's credentials; one
-it lacks, a version it lacks, or a field of the binding's own is an error
-at the binding, and a plan without an environment has none to name. An
-apply pins the latest version (`"version"`) and writes the version's
-upstream and mode into the normalised binding, which decide whether a pod
-is another; the pods get the pinned version, opened when they ask for
-their bindings. A newer version reaches the environment's services with a
-deployment that moves the pin: in place unless the upstream or the mode
-changed. A clone copies the credentials its request names
-(`"credentials": {"github": {"copy": true}}`): the source's latest version
-becomes the clone's version 1, and the cloned spec's pins are dropped, so
-that the clone's apply pins its own.
+**A service or job** gets an HTTP secret by a variable that references
+it, `{"secret": "s4", "key": "url"}` (or `"host"`), and its pods get it
+as a binding named by the secret ([The deployment
+spec](#the-deployment-spec)): the variable is `http://s4` in the name
+mode and the API's origin, `https://<host>`, in the intercept mode (`key:
+host`: `s4`, or the API's host), never a field of it. An apply pins the
+latest version, `"secrets": {"s4": {"version": 2, "type": "http",
+"upstream": "https://api.example.com", "mode": "name"}}`, whose upstream
+and mode decide whether a pod is another; the pods get the pinned
+version, opened when they ask for their bindings. A newer version reaches
+the environment's services with a deployment that moves the pin: in
+place unless the upstream or the mode changed, which replaces their
+pods. An attached service's variable renders the same, and the service
+has its sandbox's bindings: a sandbox that does not name the secret is a
+warning.
+
+**A binding stated in the spec** may name an HTTP secret instead of
+stating one: `{"credentialRef": {"name": "github"}}` (ADR 0033), with no
+other field of its own, pinned with the version's upstream and mode in
+the normalised binding. While plans accept bindings stated in the spec
+(ADR 0055, release 1) such a binding, and an inline one, is a warning
+"bindings in the spec give way to HTTP secrets (ADR 0055)", whose remedy
+is the HTTP secret of its name and a variable; a binding and an HTTP
+secret a variable references of the same name are an error.
+
+**A clone** copies the HTTP secrets its request names in `secrets`
+(`{"s4": {"copy": true}}`, as a value is copied; `credentials`, the
+alias, too): the source's latest version becomes the clone's version 1,
+and the cloned spec's pins are dropped, so that the clone's apply pins
+its own. One its variables reference that it does not copy is the
+clone's finding at the first of them.
 
 **A delete** is refused while a sandbox of the environment names the
-credential or its latest or deployed deployment pins it; then every
+HTTP secret or its latest or deployed deployment pins it; then every
 version goes, and the name made again goes on from the number it had.
 
-**Rolling it out** (migration `0035_env_credentials.sql`, additive: the
-release before neither reads nor writes `env_credentials` and
-`env_credential_names`, and `tenant_credentials` stays), in three steps:
+**Rolling it out** (migration `0040_secret_kinds.sql`, additive but for
+its trigger: the release before neither reads nor writes the kinds).
+Before the roll, no name of an environment is both a secret and a
+credential (the migration refuses otherwise, naming them). The release
+changes no pod: an object that references no HTTP secret has the
+template it had, and a stored deployment's bindings resolve as before.
+During the roll an old instance's write of a name the other kind holds
+fails with a server error (the trigger), and an old instance answers no
+`/secrets/{name}` GET, no `type` and no sandbox `secrets`.
 
-1. **Before the roll**, `SELECT count(*) FROM tenant_credentials` is 0.
-   The migration refuses otherwise, naming the tenants, and with it the
-   new instance's start: the secret is sealed to the tenant, so such a
-   credential is taken from its sandboxes and environments and deleted
-   with the release before (`DELETE /api/v1/credentials/{name}`), and
-   made again under its environment after the roll.
-2. **The roll.** From the migration on, a trigger refuses every insert
-   and update of the release before in `tenant_credentials` ("written by
-   a ferund older than migration 0035"), so that its tenant routes fail
-   instead of storing a credential that nobody reads.
-3. **No credential writes until every instance runs the new release**:
-   no PUT, delete or check under `/api/v1/environments/{env}/credentials`
-   and no sandbox's `credentials` (its create's or the PUT), through the
-   console's Credentials pages or the API. The trigger covers the
-   tenant's side only: an instance of the release before reads a
-   sandbox's names in `sandbox_credentials` as the tenant's credentials,
-   so a pod would get a credential of its environment from a new
-   instance and lose it again to an old one. Once the last old instance
-   is gone, credentials are made.
-
-A stored deployment that names a `tenantCredential` still reads, as a
-binding without a credential: its pods get the binding without one, as
-they did for a credential that was gone, and a revert or a clone of it
-is refused with a finding at the binding. With the table empty, no
-environment's latest or deployed deployment names one, since a
-credential in use could not be deleted.
+The migration of ADR 0033's credentials (`0035_env_credentials.sql`)
+refused while `tenant_credentials` held a row; a stored deployment that
+names a `tenantCredential` still reads, as a binding without a
+credential: its pods get the binding without one, and a revert or a
+clone of it is refused with a finding at the binding.
 
 ### The management UI
 
@@ -2935,7 +2991,8 @@ shapes:
   names). Port names are required DNS labels; two attached services in
   one sandbox do not share a port number. A service and an addon do not
   share a name: both are names of the env table.
-- **Env values**: a string, `{value}`, `{secret}`, `{addon, key, …}` with
+- **Env values**: a string, `{value}`, `{secret}`, `{secret, key}` with
+  key `url` or `host` (an HTTP secret's, ADR 0055), `{addon, key, …}` with
   the blueprint's fields, `{service, port, key}` with key `url`, `host` or
   `port`. Every reference resolves. An attached service is a name of the
   env table with its sandbox's address, reached as any pod of the
@@ -2981,8 +3038,24 @@ shapes:
   the environment; `from`, the clients' blocks (1 to 32 canonical
   prefixes of either family, each once; `[]` is an error), which the
   ingress checks ([ingress](ingress.md)); left out, every client.
-- **Secrets**: every `{"secret": n}` names a tenant secret of the
-  environment that exists and is not deleted.
+- **Secrets**: every `{"secret": n}` names a value secret of the
+  environment that exists and is not deleted; one that names an HTTP
+  secret is an error ("its key never reaches a container: reference its
+  url or host"), as is one in an image's login or a binding's
+  credential. Every `{"secret": n, "key": "url" | "host"}` names an HTTP
+  secret of the environment (ADR 0055), a DNS label: another key, a value
+  secret's name, none of the name and HTTP bindings that are off are
+  errors at the variable; a spec without an environment (`POST
+  /api/v1/environments/plan`) has none to look up, a warning. An image
+  service's or job's pods get each HTTP secret their variables
+  reference, as a binding named by the secret, which is one of the pods'
+  names in the name mode and the API's host in the intercept mode: a
+  service or an addon of that name, another binding the pods would
+  resolve as the same name, and a binding stated in the spec of the
+  secret's name are errors; an attached service has its sandbox's, and a
+  sandbox that does not name the secret is a warning. A pin in `secrets`
+  of a version the HTTP secret lacks, or with an upstream and mode that
+  are not the version's, is an error.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
   label each, at most 32, checked as a sandbox's (upstream, mode, CA,
   prefixes, rate limit, headers), the credential's secret fields (a
@@ -2999,7 +3072,10 @@ shapes:
   sandbox's bindings"); a binding no object names is a warning; the
   names a sandbox's own HTTP bindings resolve are no names of an
   environment's attached services there. Bindings while they are off
-  are an error.
+  are an error. Every binding stated in the spec, inline or by
+  `credentialRef`, is a warning "bindings in the spec give way to HTTP
+  secrets (ADR 0055)" at `bindings.<name>`, its remedy the HTTP secret of
+  its name referenced by a variable.
 - **Reachability** ([ADR
   0034](../adr/0034-reachability-from-declarations.md), revised): what a
   deployment references, it may reach; nothing else is open between its
@@ -3039,7 +3115,11 @@ shapes:
 Normalisation fills the defaults, writes durations as Go does, pins
 every image to `<registry>/<repository>@sha256:…` (keeping
 `imageAsWritten`; a digest reference stays) and every referenced secret
-to its latest version, and drops the secrets nothing references. The
+to its latest version, and drops the secrets nothing references. A value
+secret's pin is its version, `{"version": 3}`; an HTTP secret's carries
+its kind and what makes a pod another, the version's upstream and mode:
+`{"version": 2, "type": "http", "upstream": "https://api.example.com",
+"mode": "name"}`. The
 normalised spec is what a deployment stores and what plans diff. A diff
 entry is `{kind, name, change, fields: [{path, from, to}], effect}`, the
 effect `in place`, `restarts` (a job's template), `replaces N pods` (an
@@ -3051,6 +3131,11 @@ its version, an image as written with its digest. A binding's entry
 secret's new version among them (sealed to the running pods again), and
 `replaces N pods` of the image services that name it (or `restarts` its
 jobs) for its upstream or mode, which their own entries show as well.
+An HTTP secret's pin shows in its `secret` entry (`in place`) and in the
+variables that reference it (`{secret, key, version}`); the objects'
+entries are `in place` for a new version alone, sealed to their pods
+again, and replace their pods (restart a job) for another upstream or
+mode.
 A change of `uses`, of a reference's port or of a route's `from` is `in
 place`: rules, put on the nodes that hold them. An egress's domains are
 part of its pods' template (their resolver's names): a change of them
@@ -3107,7 +3192,8 @@ the nodes through `env-groups`, put whole.
   not repeated; an ID taken, whoever's environment holds it, is refused
   with `id_taken` before anything is planned under it), sets its secrets
   (`{"copy": true}` the source's latest version that is not deleted,
-  opened and sealed again as version 1, `{"value": …}` version 1), and
+  opened and sealed again as version 1, of an HTTP secret too, `{"value":
+  …}` version 1 of a value), and
   applies as its deployment 1 (origin `clone`, the source deployment's
   annotations without `ferun.revertOf`, whose number names a deployment of
   the source) a whole spec of the caller's, or the source deployment's
@@ -3745,7 +3831,23 @@ and the status names each route's `door`.
 
 ### Secrets
 
-A tenant secret is named `^[a-z0-9][a-z0-9._-]{0,62}$`, never beginning
+A secret of an environment has a kind ([ADR
+0055](../adr/0055-a-secret-is-a-value-or-an-http-api.md)), fixed when it
+is made: a **value**, which this section describes, handed to the
+containers that reference it, or an **HTTP secret**, an HTTP API whose
+key only the node uses ([HTTP secrets of an
+environment](#http-secrets-of-an-environment)). Both share one name
+space per environment (409 `secret_kind`) and the routes
+`/api/v1/environments/{env}/secrets[/{name}]`: the list answers both,
+`{"secrets": [{name, type, version, createdBy, createdAt, …}]}` by name,
+a value's item exactly those five fields with `"type": "value"`, an HTTP
+secret's its definition beside them; `GET …/secrets/{name}` answers one
+of either kind (404 `no_secret`); a `PUT` of `{"value": …}` (`"type":
+"value"` allowed) writes a value and answers `{name, version}`, one of
+`{"type": "http", …}` an HTTP secret; a `DELETE` takes either with its
+rules.
+
+A value secret is named `^[a-z0-9][a-z0-9._-]{0,62}$`, never beginning
 with `addon.`, the system secrets' prefix, and holds at most 64 KiB; a
 new value is a new version, the highest ever plus one, also after a
 delete. Versions are sealed with `internal/seal` under
@@ -3756,7 +3858,8 @@ an addon is deployed. The controller resolves them (`ResolveSecret`,
 also the engine's resolver) into a pod's env at its create, a process's
 and a provisioning step's, and writes them nowhere. A delete is refused
 (409) while the latest deployment pins the secret, and soft-deletes every
-version, so that an older deployment still resolves.
+version, so that an older deployment still resolves; once deleted, the
+name is free for an HTTP secret.
 
 **Known exposure.** A resolved env reaches feosd's record of the pod,
 `GetPod` and `ListPods`, the node's disk and hibernation checkpoints in
@@ -3913,7 +4016,8 @@ name; one the tenant does not have is 404 "no such environment".
 | `PUT`, `DELETE …/{env}/objects/{kind}/{name}` | as a deployment; with `dryRun` a plan; `{kind}` is `service`, `job`, `addon`, `route`, `secret` or `securityGroup` |
 | `GET`, `PUT`, `DELETE …/{env}/tags[/{tag}]` | the tags, a tag (`PUT {deployment, author?}`), 204 |
 | `POST …/{env}/clone` `{name, id?, deployment?, spec?, labels?, secrets?, author?, data?}` | 201 the new environment's status; 409 `id_taken` before the spec is planned, `name_taken`; 422 findings |
-| `GET …/{env}/secrets`, `PUT`, `DELETE …/secrets/{name}` | the names with their latest versions; `{name, version}`; 204, 409 while pinned |
+| `GET …/{env}/secrets`, `GET`, `PUT`, `DELETE …/secrets/{name}` | both kinds by name with their latest versions ([Secrets](#secrets)); one, 404 `no_secret`; a value's `{name, version}`, an HTTP secret's item (201 a new version); 204, 409 while pinned or in use; 409 `secret_kind` for the other kind's name ([HTTP secrets of an environment](#http-secrets-of-an-environment)) |
+| `POST …/{env}/secrets/{name}/check` `{binding?, probe?}` | an HTTP secret's preflight, while the HTTP bindings are on ([HTTP secrets of an environment](#http-secrets-of-an-environment)) |
 | `GET …/{env}/incidents[?open=1]`, `…/incidents/{id}` | newest first; one |
 | `GET …/{env}/access-logs[?limit=200&beforeTsNs=&traceId=]` | `{records}`: the newest page of the ingress's access log before `beforeTsNs` (a record's `tsNs`, a string), at most 1000, ascending, of the trace `traceId` (32 lower case hex digits; else 400) when given, read from the sink ([The sink](#the-sink)); 503 `no_log_store` without `--sink-url`, 503 `log_store_unavailable` when the sink fails; each `{tsNs, time, durationNs, ingress, service, instance, host, method, path, proto, status, outcome, attempts, heldNs, bytesIn, bytesOut, clientIp, userAgent, traceId, spanId, parentSpanId}` ([ingress.md](ingress.md#access-log)) |
 | `GET …/{env}/traffic[?window=1h]` | the requests of each image service in the window, `1h` (60 steps of `1m`, the default) or `24h` (96 of `15m`), else 400: `{window, since, until, step, services: [{service, source, requests, errors, p50Ms, p95Ms, series: [{t, requests, errors, p95Ms}]}]}`, `until` now truncated to the step, `since` the window before it, a bucket `[t, t+step)`; every image service of the desired and deployed deployments with a request in the window, by name, each with every bucket, oldest first; `source` `app`, counted from its own OpenTelemetry server spans without its readiness check (`errors`: an error status, or a status of 500 to 599), or `ingress` for a routed service that sends none, what the ingress answered (`errors`: a status ≥ 500 or none written, but not aborted); the percentiles in ms to a tenth, `null` without requests; read from the ingress's spans in the sink ([The sink](#the-sink), [traces.md](traces.md#reading-the-traffic)), 503 `no_log_store` and `log_store_unavailable` as `…/access-logs` |

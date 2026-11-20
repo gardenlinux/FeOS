@@ -177,6 +177,10 @@ func (f *fakeEnvs) Secrets(_ context.Context, tenant, env string) (envs.SecretLi
 	var out envs.SecretList
 	return out, f.do(envCall{"Secrets", tenant, env, nil}, &out)
 }
+func (f *fakeEnvs) Secret(_ context.Context, tenant, env, name string) (envs.SecretInfo, error) {
+	var out envs.SecretInfo
+	return out, f.do(envCall{"Secret", tenant, env, []any{name}}, &out)
+}
 func (f *fakeEnvs) PutSecret(_ context.Context, tenant, env, name string, req envs.PutSecretRequest) (envs.SecretVersion, error) {
 	var out envs.SecretVersion
 	return out, f.do(envCall{"PutSecret", tenant, env, []any{req, name}}, &out)
@@ -280,6 +284,7 @@ var fixtureMethods = map[string]string{
 	"DELETE_environments_env_tags_tag":            "DeleteTag",
 	"POST_environments_env_clone":                 "Clone",
 	"GET_environments_env_secrets":                "Secrets",
+	"GET_environments_env_secrets_name":           "Secret",
 	"PUT_environments_env_secrets_name":           "PutSecret",
 	"DELETE_environments_env_secrets_name":        "DeleteSecret",
 	"GET_environments_env_incidents":              "Incidents",

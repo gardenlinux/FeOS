@@ -55,6 +55,7 @@ func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	env(onEnv(write), "DELETE /api/v1/environments/{env}/tags/{tag}", s.deleteTag)
 	env(onTenant(write), "POST /api/v1/environments/{env}/clone", s.cloneEnv)
 	env(onEnv(read), "GET /api/v1/environments/{env}/secrets", s.listSecrets)
+	env(onEnv(read), "GET /api/v1/environments/{env}/secrets/{name}", s.getSecret)
 	env(onEnv(write), "PUT /api/v1/environments/{env}/secrets/{name}", s.putSecret)
 	env(onEnv(write), "DELETE /api/v1/environments/{env}/secrets/{name}", s.deleteSecret)
 	env(onEnv(read), "GET /api/v1/environments/{env}/incidents", s.listIncidents)
@@ -381,6 +382,17 @@ func (s *server) listSecrets(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, list)
 }
 
+func (s *server) getSecret(w http.ResponseWriter, r *http.Request) error {
+	sec, err := s.deps.Environments.Secret(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name"))
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, sec)
+}
+
+// putSecret is PUT …/secrets/{name}: a value's answer is 200 {name,
+// version}; an HTTP secret's (type http) the secret, 201 for a new
+// version, 200 for the same definition again.
 func (s *server) putSecret(w http.ResponseWriter, r *http.Request) error {
 	var req envs.PutSecretRequest
 	if _, err := decodeJSON(r, &req); err != nil {
@@ -390,7 +402,11 @@ func (s *server) putSecret(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, v)
+	status := http.StatusOK
+	if v.Created {
+		status = http.StatusCreated
+	}
+	return writeJSON(w, status, v)
 }
 
 func (s *server) deleteSecret(w http.ResponseWriter, r *http.Request) error {

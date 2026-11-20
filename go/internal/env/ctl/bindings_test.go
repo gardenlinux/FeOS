@@ -274,3 +274,71 @@ func TestBindingIncidents(t *testing.T) {
 		t.Fatalf("%d rows after the sweep: %v", left, err)
 	}
 }
+
+// httpSecretSpec is a stored spec whose web service references HTTP
+// secret erp by a variable (ADR 0055), pinned at version in mode.
+func httpSecretSpec(version int, upstream, mode string) string {
+	return fmt.Sprintf(`{"services":{"web":{"image":%q,"command":["/app"],"replicas":1,
+		"env":{"ERP_URL":{"secret":"erp","key":"url"},"ERP_HOST":{"secret":"erp","key":"host"}},
+		"ports":[{"name":"http","port":8080}]}},
+		"secrets":{"erp":{"version":%d,"type":"http","upstream":%q,"mode":%q}}}`, testImage, version, upstream, mode)
+}
+
+// A service gets the HTTP secret its variable references as its pods'
+// binding named by the secret, and the variable its URL, never a field
+// of it. A new version alone keeps the pods and sends them their
+// bindings again; another mode is another template, another pod, and
+// another URL.
+func TestServiceHTTPSecrets(t *testing.T) {
+	h := newHarness(t, options{})
+	h.addNode("n1")
+	h.eng.SetHTTPBindings(deploymentPart{h.st})
+	env := h.newEnv("stage")
+
+	r1 := h.apply(env.ID, httpSecretSpec(1, "https://api.erp.example", "name"))
+	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
+	rows := h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "ready", ready)
+	tmpl := rows[0].Sandbox.PodTemplate
+	want := []model.TemplateHTTPBinding{{Name: "erp", Upstream: "https://api.erp.example", Mode: "name"}}
+	if !reflect.DeepEqual(tmpl.HTTPBindings, want) {
+		t.Fatalf("the template's bindings: %+v", tmpl.HTTPBindings)
+	}
+	if got, host := tmpl.Env["ERP_URL"], tmpl.Env["ERP_HOST"]; !reflect.DeepEqual(got, model.Literal("http://erp")) ||
+		!reflect.DeepEqual(host, model.Literal("erp")) {
+		t.Fatalf("the variables: %+v %+v", got, host)
+	}
+	first := rows[0].Sandbox.ID
+	if got := h.pod("n1", first).GetSpec().GetHttpBindings().GetVersion(); got != "d1" {
+		t.Fatalf("the create's part: %q", got)
+	}
+
+	// Version 2 of the same API: the same pod, its part sent again.
+	r2 := h.apply(env.ID, httpSecretSpec(2, "https://api.erp.example", "name"))
+	h.waitDeployment(env.ID, r2, model.DeploymentDeployed, 30*time.Second)
+	rows = h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "kept", ready)
+	if rows[0].Sandbox.ID != first {
+		t.Fatal("a new version of the HTTP secret replaced the pod")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for h.pod("n1", first).GetSpec().GetHttpBindings().GetVersion() != "d2" {
+		if time.Now().After(deadline) {
+			t.Fatalf("the kept pod's part: %v", h.pod("n1", first).GetSpec().GetHttpBindings())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// The intercept mode: another pod, which calls the API by its own name.
+	r3 := h.apply(env.ID, httpSecretSpec(3, "https://api.erp.example", "intercept"))
+	h.waitDeployment(env.ID, r3, model.DeploymentDeployed, 30*time.Second)
+	rows = h.waitRows(env.ID, spec.KindService, "web", 1, 10*time.Second, "replaced", func(r store.EnvInstanceRow) bool {
+		return ready(r) && r.Sandbox.ID != first
+	})
+	tmpl = rows[0].Sandbox.PodTemplate
+	if got := tmpl.HTTPBindings; len(got) != 1 || got[0].Mode != "intercept" {
+		t.Fatalf("the new pod's bindings: %+v", got)
+	}
+	if got, host := tmpl.Env["ERP_URL"], tmpl.Env["ERP_HOST"]; !reflect.DeepEqual(got, model.Literal("https://api.erp.example")) ||
+		!reflect.DeepEqual(host, model.Literal("api.erp.example")) {
+		t.Fatalf("the variables in the intercept mode: %+v %+v", got, host)
+	}
+}

@@ -84,27 +84,30 @@ type httpBindingIn struct {
 	Credential    *httpCredentialIn `json:"credential"`
 }
 
-// secretSet stands for a secret field's value in an answer.
-type secretSet struct {
+// SecretSet stands for a secret field's value in an answer.
+type SecretSet struct {
 	Set bool `json:"set"`
 }
 
-type httpCredentialOut struct {
+// HTTPCredentialOut is a binding's credential as an answer carries it:
+// its kind and fields, every secret field {"set": true}.
+type HTTPCredentialOut struct {
 	Kind             string               `json:"kind"`
-	Headers          map[string]secretSet `json:"headers,omitempty"`
+	Headers          map[string]SecretSet `json:"headers,omitempty"`
 	User             string               `json:"user,omitempty"`
-	Password         *secretSet           `json:"password,omitempty"`
+	Password         *SecretSet           `json:"password,omitempty"`
 	TokenURL         string               `json:"tokenUrl,omitempty"`
 	ClientID         string               `json:"clientId,omitempty"`
-	ClientSecret     *secretSet           `json:"clientSecret,omitempty"`
+	ClientSecret     *SecretSet           `json:"clientSecret,omitempty"`
 	Scope            string               `json:"scope,omitempty"`
 	Audience         string               `json:"audience,omitempty"`
 	ClientAuthInBody bool                 `json:"clientAuthInBody,omitempty"`
 	CertPem          string               `json:"certPem,omitempty"`
-	KeyPem           *secretSet           `json:"keyPem,omitempty"`
+	KeyPem           *SecretSet           `json:"keyPem,omitempty"`
 }
 
-type httpRateLimitOut struct {
+// HTTPRateLimitOut is a binding's rate limit as an answer carries it.
+type HTTPRateLimitOut struct {
 	PerSecond int `json:"perSecond"`
 	Burst     int `json:"burst"`
 }
@@ -116,8 +119,8 @@ type httpBindingOut struct {
 	CaPem         string            `json:"caPem"`
 	PathPrefixes  []string          `json:"pathPrefixes"`
 	ForwardedHost bool              `json:"forwardedHost"`
-	RateLimit     *httpRateLimitOut `json:"rateLimit"`
-	Credential    httpCredentialOut `json:"credential"`
+	RateLimit     *HTTPRateLimitOut `json:"rateLimit"`
+	Credential    HTTPCredentialOut `json:"credential"`
 }
 
 type httpSetOut struct {
@@ -646,16 +649,16 @@ func (s *Service) httpSetOf(_ podid.ID, version string, bs []httpBinding) httpSe
 			o.PathPrefixes = []string{}
 		}
 		if b.RatePerSecond > 0 {
-			o.RateLimit = &httpRateLimitOut{PerSecond: b.RatePerSecond, Burst: b.RateBurst}
+			o.RateLimit = &HTTPRateLimitOut{PerSecond: b.RatePerSecond, Burst: b.RateBurst}
 		}
 		c := b.Credential
-		o.Credential = httpCredentialOut{Kind: c.Kind, User: c.User, TokenURL: c.TokenURL, ClientID: c.ClientID,
+		o.Credential = HTTPCredentialOut{Kind: c.Kind, User: c.User, TokenURL: c.TokenURL, ClientID: c.ClientID,
 			Scope: c.Scope, Audience: c.Audience, ClientAuthInBody: c.ClientAuthInBody, CertPem: c.CertPEM}
-		set := &secretSet{Set: true}
+		set := &SecretSet{Set: true}
 		if len(c.Headers) > 0 {
-			o.Credential.Headers = map[string]secretSet{}
+			o.Credential.Headers = map[string]SecretSet{}
 			for k := range c.Headers {
-				o.Credential.Headers[k] = secretSet{Set: true}
+				o.Credential.Headers[k] = SecretSet{Set: true}
 			}
 		}
 		if c.Password != "" {
