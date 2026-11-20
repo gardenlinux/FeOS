@@ -235,7 +235,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	// --secret-key-file.
 	var sealer *seal.Sealer
 	if cfg.SecretKeyFile != "" {
-		if key, err = readSecretKey(cfg.SecretKeyFile); err != nil {
+		if key, err = ReadSecretKey(cfg.SecretKeyFile); err != nil {
 			return nil, fmt.Errorf("--secret-key-file: %w", err)
 		}
 		if sealer, err = seal.New(key); err != nil {
@@ -934,10 +934,10 @@ func defaultInstanceID() (string, error) {
 	return strings.ToLower(host) + "-" + hex.EncodeToString(b[:]), nil
 }
 
-// readSecretKey reads the 32-byte key of --secret-key-file: the raw bytes,
+// ReadSecretKey reads the 32-byte key of --secret-key-file: the raw bytes,
 // or their hex or base64 (standard or URL alphabet, padded or not), with
 // surrounding whitespace ignored.
-func readSecretKey(path string) ([]byte, error) {
+func ReadSecretKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

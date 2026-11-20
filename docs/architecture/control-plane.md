@@ -45,6 +45,8 @@ instance serves any request. Each has two listeners:
                       [--kind node|ingress] [--ttl 1h] [--node NAME]
     ferund service-token --database-url URL --kind sink --name NAME
     ferund migrate --database-url URL
+    ferund convert-bindings --database-url URL --secret-key-file F
+                            [--deny-prefix P] [--apply]
 
 Every flag has an environment variable `FERUN_<NAME>`, the flag's name in
 upper snake case (`--database-url`: `FERUN_DATABASE_URL`); a flag on the
@@ -57,6 +59,10 @@ that. `join-token` issues a node's token, or with `--kind ingress` one
 for an instance of `ferun-ingress`; `--node` pins it to a name of that
 kind ([The ingress](#the-ingress)). `service-token` issues the long-lived
 token of an instance of `ferun-sink` ([The sink](#the-sink)).
+`convert-bindings` is the one-off step 2 of ADR 0055: it turns the
+bindings stated in the environments' specs into HTTP secrets ([HTTP
+secrets of an environment](#http-secrets-of-an-environment), The
+conversion).
 
 ### serve's flags
 
@@ -2439,6 +2445,29 @@ clone's finding at the first of them.
 **A delete** is refused while a sandbox of the environment names the
 HTTP secret or its latest or deployed deployment pins it; then every
 version goes, and the name made again goes on from the number it had.
+
+**The conversion** (ADR 0055, step 2). `ferund convert-bindings`
+turns, for every environment that is not being deleted, each binding
+stated inline in its latest deployment (not one that names a credential)
+into an HTTP secret of the binding's name: its upstream, mode, CA,
+prefixes, forwarded host and rate limit, and its credential with every
+field that names a secret resolved at the version that deployment pins
+(a literal stays a literal), written as a PUT writes one (every rule, the
+destination rule among them, `createdBy` `ferund convert-bindings`). A
+name a secret of either kind holds is skipped and said. It writes no
+deployment: the next deployment of each environment references the
+HTTP secrets, and until then its pods keep their bindings. Without
+`--apply` it prints what it would make. Each line names the environment,
+the binding, the upstream, the mode and the credential's kind and the
+outcome, never a value; a binding it cannot convert is a line and the
+command's exit 1 after the others. It reads the flags and variables of
+`serve` for the database (`FERUN_DATABASE_URL`, and
+`FERUN_DATABASE_AUTH` where the release signs in by IAM), the key
+(`FERUN_SECRET_KEY_FILE`) and the destination rule (`FERUN_DENY_PREFIX`),
+so that it runs in an instance's container:
+
+    kubectl -n ferun exec deploy/ferund -c ferund -- /ferund convert-bindings
+    kubectl -n ferun exec deploy/ferund -c ferund -- /ferund convert-bindings --apply
 
 **Rolling it out** (migration `0040_secret_kinds.sql`, additive but for
 its trigger: the release before neither reads nor writes the kinds).

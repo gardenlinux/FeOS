@@ -11,6 +11,7 @@
 //	ferund join-token --database-url URL [--kind node|ingress] [--ttl 1h] [--node NAME]
 //	ferund service-token --database-url URL --kind sink|auth --name NAME
 //	ferund migrate --database-url URL
+//	ferund convert-bindings --database-url URL --secret-key-file F [--apply]
 //
 // Every flag has an environment variable FERUN_<NAME> (internal/config).
 // SIGTERM and SIGINT stop an instance as §7 of the design says: requests,
@@ -32,12 +33,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/db"
+	"github.com/gardenlinux/feos/go/internal/env"
 	"github.com/gardenlinux/feos/go/internal/fleet"
 	ingresssvc "github.com/gardenlinux/feos/go/internal/ingress/service"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/pki"
+	"github.com/gardenlinux/feos/go/internal/seal"
 	"github.com/gardenlinux/feos/go/internal/server"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -74,6 +78,8 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		err = serviceToken(args, getenv, stdout, stderr)
 	case config.CmdMigrate:
 		err = migrate(args, getenv, stderr)
+	case config.CmdConvertBindings:
+		err = convertBindings(args, getenv, stdout, stderr)
 	case "help":
 		topic := ""
 		if len(args) > 0 {
@@ -279,5 +285,64 @@ func migrate(args []string, getenv func(string) string, stderr io.Writer) error 
 		return err
 	}
 	log.Info("the database is migrated")
+	return nil
+}
+
+// convertBindings turns the bindings stated in every environment's latest
+// deployment into HTTP secrets of the environment (ADR 0055), with
+// --apply, or prints what it would make: one line per binding to stdout,
+// never a value. It opens the database and the secret key as serve does
+// (the same flags and variables, FERUN_DATABASE_AUTH among them), so that
+// `kubectl exec` runs it in serve's container. A binding that cannot be
+// converted fails the command after the others.
+func convertBindings(args []string, getenv func(string) string, stdout, stderr io.Writer) error {
+	c, err := config.ParseConvertBindings(args, getenv)
+	if err != nil {
+		return flagErr(err)
+	}
+	log := newLogger(stderr, c.LogLevel)
+	key, err := server.ReadSecretKey(c.SecretKeyFile)
+	if err != nil {
+		return fmt.Errorf("--secret-key-file: %w", err)
+	}
+	sealer, err := seal.New(key)
+	if err != nil {
+		return fmt.Errorf("--secret-key-file: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	d, err := db.Open(ctx, c.DatabaseURL, log)
+	if err != nil {
+		return fmt.Errorf("open the database: %w", err)
+	}
+	defer d.Close()
+	st := store.New(d)
+	bs, err := bindings.New(bindings.Config{Enabled: true, Key: key, DenyPrefixes: c.DenyPrefixes, Log: log}, st, d)
+	if err != nil {
+		return fmt.Errorf("bindings: %w", err)
+	}
+	convs, err := env.ConvertBindings(ctx, st, sealer, bs, c.Apply, "ferund convert-bindings")
+	failed := 0
+	count := map[string]int{}
+	for _, cv := range convs {
+		fmt.Fprintln(stdout, cv.String())
+		count[cv.Outcome]++
+		if cv.Outcome == env.ConvertFailed {
+			failed++
+		}
+	}
+	if err != nil {
+		return err
+	}
+	mode := "dry run (--apply writes)"
+	if c.Apply {
+		mode = "applied"
+	}
+	fmt.Fprintf(stdout, "%s: %d bindings; %d would be made, %d made, %d unchanged, %d skipped, %d failed\n", mode,
+		len(convs), count[env.ConvertWould], count[env.ConvertMade], count[env.ConvertSame], count[env.ConvertSkipped],
+		failed)
+	if failed > 0 {
+		return fmt.Errorf("%d bindings were not converted", failed)
+	}
 	return nil
 }

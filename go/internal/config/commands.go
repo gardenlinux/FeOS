@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -24,6 +25,9 @@ const (
 	CmdJoinToken    = "join-token"
 	CmdServiceToken = "service-token"
 	CmdMigrate      = "migrate"
+	// CmdConvertBindings turns the bindings stated in the environments'
+	// specs into HTTP secrets (ADR 0055), once.
+	CmdConvertBindings = "convert-bindings"
 )
 
 // InitCA is the configuration of `ferund init-ca`: the platform CA's root
@@ -218,6 +222,50 @@ func registerMigrate(fs *flag.FlagSet, c *Migrate) *string {
 	return &level
 }
 
+// ConvertBindings is the configuration of `ferund convert-bindings`: the
+// database, the secret key and the destination rule as serve has them
+// (the same flags and FERUN_ variables, so that it runs beside serve in
+// its container), and whether it writes.
+type ConvertBindings struct {
+	DatabaseURL   string
+	SecretKeyFile string
+	DenyPrefixes  []netip.Prefix
+	Apply         bool
+	LogLevel      slog.Level
+}
+
+// ParseConvertBindings reads the flags of convert-bindings.
+func ParseConvertBindings(args []string, getenv func(string) string) (ConvertBindings, error) {
+	c := ConvertBindings{LogLevel: slog.LevelInfo}
+	fs := newFlagSet(CmdConvertBindings)
+	level := registerConvertBindings(fs, &c)
+	if err := parseFlags(fs, args, getenv); err != nil {
+		return ConvertBindings{}, err
+	}
+	var errs []error
+	if err := c.LogLevel.UnmarshalText([]byte(*level)); err != nil {
+		errs = append(errs, fmt.Errorf("--log-level: %w", err))
+	}
+	if c.DatabaseURL == "" {
+		errs = append(errs, errors.New("--database-url is required"))
+	}
+	if c.SecretKeyFile == "" {
+		errs = append(errs, errors.New("--secret-key-file is required: it opens the secrets and seals the HTTP secrets"))
+	}
+	return c, errors.Join(errs...)
+}
+
+func registerConvertBindings(fs *flag.FlagSet, c *ConvertBindings) *string {
+	level := strings.ToLower(c.LogLevel.String())
+	fs.StringVar(&c.DatabaseURL, "database-url", c.DatabaseURL, "PostgreSQL DSN (required); FERUN_DATABASE_AUTH as for serve")
+	fs.StringVar(&c.SecretKeyFile, "secret-key-file", c.SecretKeyFile, "file of serve's 32-byte key (raw, hex or base64; required)")
+	fs.Var((*prefixList)(&c.DenyPrefixes), "deny-prefix",
+		"the destinations no binding may reach, as serve's --deny-prefix (\"default\" for the built-in set)")
+	fs.BoolVar(&c.Apply, "apply", c.Apply, "write the HTTP secrets; without it, print what it would make")
+	fs.StringVar(&level, "log-level", level, "debug, info, warn or error")
+	return &level
+}
+
 // Usage writes the help of a subcommand ("" or "ferund": the overview).
 func Usage(w io.Writer, cmd string) {
 	var fs *flag.FlagSet
@@ -248,6 +296,14 @@ func Usage(w io.Writer, cmd string) {
 		fs = newFlagSet(cmd)
 		registerMigrate(fs, &Migrate{LogLevel: slog.LevelInfo})
 		fmt.Fprintln(w, "Usage: ferund migrate --database-url URL\n\nApplies the database migrations and exits.")
+	case CmdConvertBindings:
+		fs = newFlagSet(cmd)
+		registerConvertBindings(fs, &ConvertBindings{LogLevel: slog.LevelInfo})
+		fmt.Fprintln(w, "Usage: ferund convert-bindings --database-url URL --secret-key-file F [--apply]\n\n"+
+			"Turns each binding stated in an environment's latest deployment (not one that names a\n"+
+			"credential) into an HTTP secret of that environment of the binding's name (ADR 0055),\n"+
+			"its secret fields from the versions that deployment pins, unless a secret of the name\n"+
+			"exists. Without --apply it prints what it would make; it writes no deployment.")
 	default:
 		fmt.Fprintln(w, `Usage: ferund <command> [flags]
 
@@ -260,6 +316,8 @@ Commands:
   join-token     issue a join token for a node or an ingress instance
   service-token  issue a service token for an instance of ferun-sink or ferun-auth
   migrate        apply the database migrations and exit
+  convert-bindings
+                 turn the environments' spec bindings into HTTP secrets (ADR 0055), once
 
 Every flag has an environment variable FERUN_<NAME>, the flag's name in upper
 snake case (--database-url: FERUN_DATABASE_URL); a flag wins over its variable.
