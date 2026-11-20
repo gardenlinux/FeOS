@@ -286,3 +286,45 @@ func TestCloneCopiesHTTPSecrets(t *testing.T) {
 		t.Fatalf("the copy's pin: %+v", ref)
 	}
 }
+
+// A new plan refuses bindings stated in the spec (ADR 0055); a stored
+// deployment with them keeps running, takes a deployment that leaves them
+// as they are, a revert to it and a clone of it.
+func TestStatedBindingsRefused(t *testing.T) {
+	h := newHarness(t, harnessOptions{bindings: &fakeHTTPBindings{}})
+	h.create("shop", nil)
+	h.putSecret("shop", "erp-key", "k")
+	h.putSecret("shop", "pay-pass", "p")
+	_, err := h.svc.Apply(h.ctx(), tenantA, "shop", ApplyRequest{Spec: json.RawMessage(shopSpec), Author: "tester"})
+	for _, path := range []string{"bindings.erp", "bindings.pay"} {
+		if f, ok := findingAt(err, path); !ok || f.Problem != spec.GivesWay ||
+			!strings.Contains(f.Remedy, "make an HTTP secret") {
+			t.Fatalf("a new plan's %s: %s", path, describe(err))
+		}
+	}
+	ans, err := h.svc.PlanSpec(h.ctx(), tenantA, PlanSpecRequest{Spec: json.RawMessage(shopSpec)})
+	if err != nil || ans.Valid {
+		t.Fatalf("a spec without an environment: %+v %v", ans, err)
+	}
+
+	one := h.applyStored("shop", shopSpec, 0)
+	more := strings.Replace(shopSpec, `"bindings": ["erp"]}`, `"bindings": ["erp"], "replicas": 2}`, 1)
+	two := h.apply("shop", more, one.Number)
+	changed := strings.Replace(more, "https://api.erp.example", "https://api2.erp.example", 1)
+	_, err = h.svc.Apply(h.ctx(), tenantA, "shop", ApplyRequest{Spec: json.RawMessage(changed), Base: two.Number})
+	if _, ok := findingAt(err, "bindings.erp"); !ok {
+		t.Fatalf("a changed binding: %s", describe(err))
+	}
+	if _, ok := findingAt(err, "bindings.pay"); ok {
+		t.Fatalf("an unchanged binding refused: %s", describe(err))
+	}
+	three := h.apply("shop", `{"services": {"web": {"image": "ghcr.io/acme/web:1"}}}`, two.Number)
+	if _, err := h.svc.Revert(h.ctx(), tenantA, "shop", one.Number, RevertRequest{Base: three.Number,
+		Author: "tester"}); err != nil {
+		t.Fatalf("a revert to a deployment with bindings: %s", describe(err))
+	}
+	if _, err := h.svc.Clone(h.ctx(), tenantA, "shop", CloneRequest{Name: "copy", Deployment: &one.Number,
+		Secrets: map[string]CloneSecret{"erp-key": {Copy: true}, "pay-pass": {Copy: true}}}); err != nil {
+		t.Fatalf("a clone of it: %s", describe(err))
+	}
+}

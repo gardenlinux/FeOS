@@ -6,6 +6,7 @@ package spec
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -23,9 +24,40 @@ import (
 
 const bindingsRemedy = "see the HTTP bindings in ADR 0028"
 
-// GivesWay is the warning of a binding stated in the spec, inline or by
-// credentialRef, while plans still accept it (ADR 0055, release 1).
+// GivesWay is the finding of a binding stated in the spec, inline or by
+// credentialRef (ADR 0055): an error in a new plan of a context that
+// refuses them (RefusesStatedBindings), unless the current deployment has
+// the binding unchanged; else a warning.
 const GivesWay = "bindings in the spec give way to HTTP secrets (ADR 0055)"
+
+// refusesStated reports whether the context refuses bindings stated in
+// the spec (ADR 0055): a plan that is no stored deployment's, a revert's
+// or a clone's of its source's (interface{ RefusesStatedBindings() bool
+// }). Without it they are accepted with a warning.
+func (v *validator) refusesStated() bool {
+	r, ok := v.vc.(interface{ RefusesStatedBindings() bool })
+	return ok && r.RefusesStatedBindings()
+}
+
+// unchangedStated reports whether the current deployment has binding name
+// as b states it: normalised alike, a credentialRef by its name alone
+// (its pin moves with each deployment).
+func (v *validator) unchangedStated(name string, b Binding) bool {
+	if v.prev == nil {
+		return false
+	}
+	pb, ok := v.prev.Bindings[name]
+	return ok && reflect.DeepEqual(statedView(normBinding(b, Pins{})), statedView(pb))
+}
+
+// statedView is what of a normalised binding a new plan must leave as it
+// is: all of it, of one that names a credential the name.
+func statedView(b Binding) any {
+	if b.CredentialRef != nil {
+		b = Binding{CredentialRef: &CredentialRef{Name: b.CredentialRef.Name}}
+	}
+	return toAny(b)
+}
 
 // givesWayRemedy is its remedy for binding name.
 func givesWayRemedy(name string) string {
@@ -56,7 +88,11 @@ func (v *validator) bindings() {
 	var all []podBinding
 	for _, name := range slices.Sorted(maps.Keys(v.s.Bindings)) {
 		b := v.s.Bindings[name]
-		v.warnf("bindings."+name, givesWayRemedy(name), GivesWay)
+		if v.refusesStated() && !v.unchangedStated(name, b) {
+			v.errorf("bindings."+name, givesWayRemedy(name), GivesWay)
+		} else {
+			v.warnf("bindings."+name, givesWayRemedy(name), GivesWay)
+		}
 		up, mode := v.binding(name, b)
 		if up.Host == "" {
 			continue

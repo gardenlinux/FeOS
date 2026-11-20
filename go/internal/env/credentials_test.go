@@ -105,7 +105,7 @@ func TestCredentialRefIsTheEnvironments(t *testing.T) {
 		t.Fatalf("a spec without an environment: %+v %v", ans, err)
 	}
 
-	a := h.apply("prod", paySpec, 0)
+	a := h.applyStored("prod", paySpec, 0)
 	prod := h.env("prod")
 	sp, err := h.svc.deploymentSpec(h.ctx(), prod, a.Number)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestCloneCopiesCredentials(t *testing.T) {
 	bs := h.withCredentials()
 	h.create("prod", nil)
 	h.putCredential(bs, "prod", "pay", "Bearer prod-key-1")
-	h.apply("prod", paySpec, 0)
+	h.applyStored("prod", paySpec, 0)
 	h.putCredential(bs, "prod", "pay", "Bearer prod-key-2")
 
 	_, err := h.svc.Clone(h.ctx(), tenantA, "prod", CloneRequest{Name: "copy"})
@@ -189,25 +189,24 @@ func TestCloneCopiesCredentials(t *testing.T) {
 	}
 }
 
-// An apply pins no credential that is gone: one deleted between its plan
-// and its transaction, which takes the credential's lock as a delete
-// does, makes it plan again and find the binding's credential missing.
+// An apply pins no HTTP secret that is gone: one deleted between its
+// plan and its transaction, which takes the secret's lock as a delete
+// does, makes it plan again and find the variable's HTTP secret missing.
 func TestApplyPinsNoDeletedCredential(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
-	bs := h.withCredentials()
+	h.withCredentials()
 	h.create("prod", nil)
-	h.putCredential(bs, "prod", "pay", "Bearer prod-key-1")
+	h.putHTTPSecret("prod", "s4", "key-1", "")
 	prod := h.env("prod")
 	h.svc.afterPlan = func() {
 		h.svc.afterPlan = nil
-		if ok, err := h.st.DeleteEnvCredential(h.ctx(), prod.ID, "pay"); err != nil || !ok {
+		if ok, err := h.st.DeleteEnvCredential(h.ctx(), prod.ID, "s4"); err != nil || !ok {
 			t.Errorf("delete: %v %v", ok, err)
 		}
 	}
-	_, err := h.svc.Apply(h.ctx(), tenantA, "prod", ApplyRequest{Spec: json.RawMessage(paySpec), Author: "tester"})
-	if f, ok := findingAt(err, "bindings.pay.credentialRef.name"); !ok ||
-		!strings.Contains(f.Problem, "the environment has no credential pay") {
-		t.Fatalf("an apply of a credential deleted after its plan: %s", describe(err))
+	_, err := h.svc.Apply(h.ctx(), tenantA, "prod", ApplyRequest{Spec: json.RawMessage(s4Spec), Author: "tester"})
+	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok || !strings.Contains(f.Problem, "no HTTP secret s4") {
+		t.Fatalf("an apply of an HTTP secret deleted after its plan: %s", describe(err))
 	}
 	if e := h.env("prod"); e.Deployment != 0 {
 		t.Fatalf("deployment %d was made", e.Deployment)
@@ -223,7 +222,7 @@ func TestRevertFindsNoReusedCredentialVersion(t *testing.T) {
 	bs := h.withCredentials()
 	h.create("prod", nil)
 	h.putCredential(bs, "prod", "pay", "Bearer prod-key-1")
-	one := h.apply("prod", paySpec, 0)
+	one := h.applyStored("prod", paySpec, 0)
 	two := h.apply("prod", `{"services": {"shop": {"image": "ghcr.io/acme/shop:1"}}}`, one.Number)
 	prod := h.env("prod")
 	if ok, err := h.st.DeleteEnvCredential(h.ctx(), prod.ID, "pay"); err != nil || !ok {

@@ -247,8 +247,11 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		srcRel = &r
 	}
 	raw := []byte(req.Spec)
+	// stored: the clone applies its source's deployment, whose bindings
+	// stated in its spec it accepts as they ran (ADR 0055).
+	stored := false
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
-		raw = nil
+		raw, stored = nil, true
 		if srcRel == nil {
 			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "deployment",
 				Problem: "environment " + src.Name + " has no deployment to clone", Remedy: "pass a spec, or apply a deployment first"})
@@ -439,7 +442,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	var norm spec.Spec
 	if raw != nil {
 		p, err := s.plan(ctx, tenant, store.Environment{ID: id, Owner: tenant, Name: req.Name}, raw, nil, spec.ModeApply,
-			vcSecrets, vcCreds)
+			vcSecrets, vcCreds, stored)
 		if err != nil {
 			return EnvStatus{}, err
 		}

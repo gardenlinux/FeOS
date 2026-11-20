@@ -142,7 +142,7 @@ func TestClone(t *testing.T) {
 	}
 	wantStatus(t, err, http.StatusConflict, "an environment of id "+src.ID+" exists with another name")
 	p, err := h.svc.plan(ctx, tenantB, store.Environment{ID: srcID, Owner: tenantB, Name: "probe"}, json.RawMessage(probe),
-		nil, spec.ModeApply, map[string]spec.SecretInfo{}, nil)
+		nil, spec.ModeApply, map[string]spec.SecretInfo{}, nil, false)
 	if err != nil || p.valid() {
 		t.Fatalf("plan %+v %v", p, err)
 	}

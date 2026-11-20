@@ -2067,8 +2067,9 @@ They come from three places, and from no other:
 - **an environment's pod**: the HTTP secrets its image service's or
   job's variables reference (`{"secret": "s4", "key": "url"}`), each a
   binding named by the secret at the version the deployment pins, and,
-  while plans accept them (ADR 0055, release 1), the bindings stated in
-  the spec that it names (`"bindings": ["erp"]`), as the deployment its
+  in a deployment stored with them (a new plan refuses them, ADR 0055),
+  the bindings stated in the spec that it names (`"bindings": ["erp"]`),
+  as the deployment its
   instance or job run belongs to has them ([The deployment
   spec](#the-deployment-spec)), a binding that names a credential at the
   version the deployment pins. A pod gets exactly those; an attached
@@ -2429,10 +2430,15 @@ warning.
 **A binding stated in the spec** may name an HTTP secret instead of
 stating one: `{"credentialRef": {"name": "github"}}` (ADR 0033), with no
 other field of its own, pinned with the version's upstream and mode in
-the normalised binding. While plans accept bindings stated in the spec
-(ADR 0055, release 1) such a binding, and an inline one, is a warning
-"bindings in the spec give way to HTTP secrets (ADR 0055)", whose remedy
-is the HTTP secret of its name and a variable; a binding and an HTTP
+the normalised binding. Since ADR 0055's release 2 a new plan refuses
+such a binding, and an inline one, with the error "bindings in the spec
+give way to HTTP secrets (ADR 0055)" at `bindings.<name>`, whose remedy
+is the HTTP secret of its name and a variable, but for one the current
+deployment has unchanged (normalised alike, a `credentialRef` by its name
+alone), so that a deployment that changes something else leaves an
+environment not yet converted as it is. A stored deployment's spec, a
+revert's and a clone's of its source's deployment, takes them with the
+warning of the same words: it runs what it ran. A binding and an HTTP
 secret a variable references of the same name are an error.
 
 **A clone** copies the HTTP secrets its request names in `secrets`
@@ -2477,7 +2483,11 @@ changes no pod: an object that references no HTTP secret has the
 template it had, and a stored deployment's bindings resolve as before.
 During the roll an old instance's write of a name the other kind holds
 fails with a server error (the trigger), and an old instance answers no
-`/secrets/{name}` GET, no `type` and no sandbox `secrets`.
+`/secrets/{name}` GET, no `type` and no sandbox `secrets`. Release 2,
+which refuses bindings stated in a new plan (and then a sandbox's own
+set's PUT), follows once `convert-bindings` has run and the clients reference
+HTTP secrets and name them in their sandboxes; it needs no migration,
+and a stored deployment and a set stated before keep running.
 
 The migration of ADR 0033's credentials (`0035_env_credentials.sql`)
 refused while `tenant_credentials` held a row; a stored deployment that
@@ -3102,9 +3112,12 @@ shapes:
   names a sandbox's own HTTP bindings resolve are no names of an
   environment's attached services there. Bindings while they are off
   are an error. Every binding stated in the spec, inline or by
-  `credentialRef`, is a warning "bindings in the spec give way to HTTP
+  `credentialRef`, is an error "bindings in the spec give way to HTTP
   secrets (ADR 0055)" at `bindings.<name>`, its remedy the HTTP secret of
-  its name referenced by a variable.
+  its name referenced by a variable, unless the current deployment has
+  it unchanged or the spec is a stored deployment's (a revert's, a
+  clone's of its source's), which takes it with a warning of the same
+  words ([HTTP secrets of an environment](#http-secrets-of-an-environment)).
 - **Reachability** ([ADR
   0034](../adr/0034-reachability-from-declarations.md), revised): what a
   deployment references, it may reach; nothing else is open between its

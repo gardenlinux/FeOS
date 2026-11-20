@@ -280,7 +280,7 @@ func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
-	p, err := s.plan(ctx, tenant, e, req.Spec, req.Base, spec.ModePlan, nil, nil)
+	p, err := s.plan(ctx, tenant, e, req.Spec, req.Base, spec.ModePlan, nil, nil, false)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
@@ -443,7 +443,7 @@ func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name stri
 		return ObjectAnswer{}, errNoObject(kind, name)
 	}
 	if dryRun {
-		p, err := s.plan(ctx, tenant, e, raw, &base, spec.ModePlan, nil, nil)
+		p, err := s.plan(ctx, tenant, e, raw, &base, spec.ModePlan, nil, nil, false)
 		if err != nil {
 			return ObjectAnswer{}, err
 		}
