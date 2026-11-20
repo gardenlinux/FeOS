@@ -194,9 +194,50 @@ func TestHTTPSecretDiff(t *testing.T) {
 	}
 }
 
+// refusingVC is the bindings' context of a plan that refuses bindings
+// stated in the spec (ADR 0055): a new plan's.
+type refusingVC struct{ bindingsVC }
+
+func (refusingVC) RefusesStatedBindings() bool { return true }
+
+// A plan that refuses bindings stated in the spec refuses each, inline or
+// by credentialRef, but one the current deployment has unchanged: a spec
+// changed elsewhere keeps its bindings, a binding changed or added is
+// refused.
+func TestBindingsRefused(t *testing.T) {
+	vc := refusingVC{newBindingsVC(ModeApply)}
+	errorsAt := func(fs []Finding) map[string]bool {
+		out := map[string]bool{}
+		for _, f := range fs {
+			if f.Problem == GivesWay && f.Severity == SeverityError {
+				out[f.Path] = true
+			}
+		}
+		return out
+	}
+	s := mustParse(t, bindingsSpec)
+	if got := errorsAt(Validate(vc, s, nil)); !got["bindings.erp"] || !got["bindings.pay"] || len(got) != 2 {
+		t.Fatalf("a new plan: %v", got)
+	}
+	prev, _ := Normalise(s, Pins{Secrets: map[string]int{"erp-key": 2, "pay-secret": 1}})
+	again := mustParse(t, bindingsSpec)
+	svc(&again, "web", func(v *Service) { v.Replicas = intp(3) })
+	if got := errorsAt(Validate(vc, again, &prev)); len(got) != 0 {
+		t.Fatalf("the current deployment's bindings again: %v", got)
+	}
+	binding(&again, "erp", func(b *Binding) { b.PathPrefixes = []string{"/other/"} })
+	if got := errorsAt(Validate(vc, again, &prev)); !got["bindings.erp"] || len(got) != 1 {
+		t.Fatalf("a changed binding: %v", got)
+	}
+	// Without the context's word, accepted with the warning.
+	if got := errorsAt(Validate(newBindingsVC(ModeApply), s, nil)); len(got) != 0 {
+		t.Fatalf("a context that accepts them: %v", got)
+	}
+}
+
 // Every binding stated in the spec, inline or by credentialRef, is
-// accepted with a warning while the HTTP secrets take their place (ADR
-// 0055, release 1).
+// accepted with a warning by a context that does not refuse them (a
+// stored deployment's plan).
 func TestBindingsGiveWay(t *testing.T) {
 	fs := Validate(newBindingsVC(ModeApply), mustParse(t, bindingsSpec), nil)
 	got := map[string]bool{}

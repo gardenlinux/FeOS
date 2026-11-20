@@ -262,6 +262,19 @@ func (h *harness) apply(env, raw string, base int) ApplyAnswer {
 	return a
 }
 
+// applyStored applies a spec to tenantA's environment as a deployment
+// stored before plans refused bindings stated in a spec (ADR 0055): by
+// the path a revert takes, which accepts them as they ran.
+func (h *harness) applyStored(env, raw string, base int) ApplyAnswer {
+	h.t.Helper()
+	a, err := h.svc.apply(h.ctx(), tenantA, env, applyArgs{raw: []byte(raw), base: base, author: "tester",
+		origin: model.OriginRevert, originRef: "0"})
+	if err != nil {
+		h.t.Fatalf("apply stored on %d: %v", base, describe(err))
+	}
+	return a
+}
+
 // describe is an error with an invalid spec's findings.
 func describe(err error) string {
 	var ise *InvalidSpecError

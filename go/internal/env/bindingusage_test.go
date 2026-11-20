@@ -70,7 +70,7 @@ func TestBindingUsage(t *testing.T) {
 	h.create("shop", nil)
 	h.putSecret("shop", "erp-key", "erp-key-v1")
 	h.putSecret("shop", "pay-pass", "pay-pass-v1")
-	h.apply("shop", shopSpec, 0)
+	h.applyStored("shop", shopSpec, 0)
 	envID := h.envID("shop")
 	sink := &fakeEgressSink{}
 	srv := httptest.NewServer(sink)

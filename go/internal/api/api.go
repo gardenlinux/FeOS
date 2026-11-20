@@ -69,6 +69,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/config"
@@ -578,7 +579,10 @@ func (s *server) routes() []route {
 		sandboxHTTP("POST /api/v1/sandboxes/{id}/ssh/{name}/check", b.CheckSSH)
 		tenant(onTenant(write), "POST /api/v1/kube/preflight", serve(b.KubePreflight))
 		tenant(onTenant(write), "POST /api/v1/ssh/preflight", serve(b.SSHPreflight))
-		sandboxHTTP("PUT /api/v1/sandboxes/{id}/http", b.PutHTTP)
+		// A sandbox's own HTTP set takes no write (ADR 0055): a sandbox
+		// names HTTP secrets of its environment. A set stated before
+		// serves until its sandbox ends; it reads and deletes as before.
+		sandboxHTTP("PUT /api/v1/sandboxes/{id}/http", goneHTTPSet)
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/http", b.GetHTTP)
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/http", b.DeleteHTTP)
 		tenant(onTenant(write), "POST /api/v1/http/preflight", serve(b.HTTPPreflight))
@@ -693,4 +697,15 @@ func badForwardPath(w http.ResponseWriter, _ *http.Request) {
 // noRoute is the catch-all of /api/ and /auth/.
 func noRoute(_ http.ResponseWriter, r *http.Request) error {
 	return errNoRoute(r)
+}
+
+// CodeGone is the code of a 410 for a write a surface no longer takes.
+const CodeGone = "gone"
+
+// goneHTTPSet is PUT /api/v1/sandboxes/{id}/http since ADR 0055's
+// release 2: 410 gone. The sandbox names HTTP secrets of its environment
+// instead (PUT /api/v1/sandboxes/{id}/secrets).
+func goneHTTPSet(w http.ResponseWriter, _ *http.Request) {
+	apierr.Write(w, apierr.WithCode(http.StatusGone, CodeGone, "a sandbox's own HTTP set is gone (ADR 0055): name "+
+		"HTTP secrets of its environment"))
 }

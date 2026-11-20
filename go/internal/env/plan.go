@@ -69,6 +69,10 @@ type validateCtx struct {
 	credentials map[string]spec.CredentialInfo
 	// deny are the prefixes no pod reaches (Deps.DenyPrefixes).
 	deny []netip.Prefix
+	// stored: the spec is a stored deployment's (a revert's, or a clone's
+	// of its source's deployment), whose bindings stated in it are
+	// accepted as they ran (ADR 0055).
+	stored bool
 }
 
 type imageAnswer struct {
@@ -133,6 +137,11 @@ func (v *validateCtx) RouteHosts() (hosts, served []string, ok bool) {
 
 // HTTPBindings reports whether HTTP bindings are on (ADR 0028).
 func (v *validateCtx) HTTPBindings() bool { return v.bindingsOn }
+
+// RefusesStatedBindings reports whether a binding stated in the spec that
+// the current deployment does not have unchanged is refused (ADR 0055):
+// in every plan but a stored deployment's.
+func (v *validateCtx) RefusesStatedBindings() bool { return !v.stored }
 
 // Destination is the destination rule's word on a binding's host.
 func (v *validateCtx) Destination(host string) error {
@@ -471,9 +480,10 @@ func nonNilImages(images map[string]string) map[string]string {
 // plan parses, validates and normalises raw for the environment env and
 // diffs it against deployment base (nil: the current one). secrets and
 // creds, when not nil, stand in for the environment's secrets and
-// credentials.
+// credentials. stored: raw is a stored deployment's spec (a revert's, a
+// clone's of its source's), whose bindings stated in it are accepted.
 func (s *Service) plan(ctx context.Context, tenant string, env store.Environment, raw []byte, base *int, mode spec.Mode,
-	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo) (planned, error) {
+	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo, stored bool) (planned, error) {
 	p := planned{base: env.Deployment, current: env.Deployment}
 	if base != nil {
 		if *base < 0 || *base > env.Deployment {
@@ -497,6 +507,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 	if err != nil {
 		return planned{}, err
 	}
+	vc.stored = stored
 	fs = append(fs, spec.Validate(vc, sp, p.currentSpec)...)
 	norm, nfs := spec.Normalise(sp, pins)
 	fs = append(fs, nfs...)
@@ -568,7 +579,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 	if env.Deleting {
 		return ApplyAnswer{}, errDeleting(env.Name)
 	}
-	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil, nil)
+	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil, nil, a.origin == model.OriginRevert)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}

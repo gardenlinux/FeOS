@@ -125,7 +125,7 @@ func TestEnvBindingsScoped(t *testing.T) {
 	h.create("shop", nil)
 	h.putSecret("shop", "erp-key", "erp-key-v1")
 	h.putSecret("shop", "pay-pass", "pay-pass-v1")
-	h.apply("shop", shopSpec, 0)
+	h.applyStored("shop", shopSpec, 0)
 	envID := h.envID("shop")
 	web := h.podOf(envID, "web", 1, erpTemplate)
 	worker := h.podOf(envID, "worker", 1, payTemplate)
@@ -171,9 +171,10 @@ func TestEnvBindingsScoped(t *testing.T) {
 		t.Fatalf("worker's clear part: %v %v", wpart, err)
 	}
 
-	// A new version of erp-key and a deployment that pins it: web's pod,
-	// moved to it in place, gets the new value under a new version; the
-	// worker's is as it was.
+	// A new version of erp-key and a deployment that pins it, its
+	// bindings as the current deployment has them (a new plan takes them
+	// so): web's pod, moved to it in place, gets the new value under a new
+	// version; the worker's is as it was.
 	h.putSecret("shop", "erp-key", "erp-key-v2")
 	if a := h.apply("shop", shopSpec, 1); a.Number != 2 {
 		t.Fatalf("the second deployment: %+v", a)
@@ -268,6 +269,7 @@ func TestEnvBindingsInvalidValue(t *testing.T) {
 	h.putSecret("shop", "erp-key", "erp-key-v1")
 	h.putSecret("shop", "pay-token", "Bearer t0ken\r\nX-Injected: 1")
 
+	h.applyStored("shop", invalidSpec, 0)
 	plan, err := h.svc.Plan(h.ctx(), tenantA, "shop", PlanRequest{Spec: []byte(invalidSpec)})
 	if err != nil || !plan.Valid {
 		t.Fatalf("plan: %+v %v", plan, err)
@@ -284,7 +286,6 @@ func TestEnvBindingsInvalidValue(t *testing.T) {
 	if !warned {
 		t.Fatalf("no warning: %+v", plan.Findings)
 	}
-	h.apply("shop", invalidSpec, 0)
 	worker := h.podOf(h.envID("shop"), "worker", 1, erpTemplate, payTemplate)
 
 	open, v, err := h.svc.RowHTTPBindings(h.ctx(), worker, true)

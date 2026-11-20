@@ -73,6 +73,13 @@ const (
 // endpoint, which the caller asked before it validates (nil: a
 // destination); an error is a finding. Without it, no host is judged.
 //
+// It may also implement interface{ RefusesStatedBindings() bool }: true
+// refuses a binding stated in the spec, inline or by credentialRef (ADR
+// 0055), that the current deployment does not have unchanged, an error
+// finding; false, or without it, accepts it with a warning. The
+// environments' plans refuse them but in a stored deployment's spec, a
+// revert's or a clone's of its source's, which runs what it ran.
+//
 // It may also implement interface{ DenyPrefixes() []netip.Prefix }: the
 // prefixes no pod of the cluster reaches (--deny-prefix, ADR 0010), which
 // no egress opens: a block inside one is an error. Without it, no block

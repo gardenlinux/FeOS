@@ -456,7 +456,6 @@ func TestBindingRoutes(t *testing.T) {
 		{"POST", "/api/v1/sandboxes/" + id3 + "/ssh/k1/check", bearerOf(tok3), "CheckSSH"},
 		{"POST", "/api/v1/kube/preflight", bearerOf(on.tenantToken), "KubePreflight"},
 		{"POST", "/api/v1/ssh/preflight", bearerOf(on.tenantToken), "SSHPreflight"},
-		{"PUT", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "PutHTTP"},
 		{"GET", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "GetHTTP"},
 		{"DELETE", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "DeleteHTTP"},
 		{"POST", "/api/v1/http/preflight", bearerOf(on.tenantToken), "HTTPPreflight"},
@@ -465,6 +464,10 @@ func TestBindingRoutes(t *testing.T) {
 		w := on.do(c.method, c.path, c.authz, nil)
 		expect(t, w, http.StatusOK, c.want)
 	}
+	// A sandbox's own HTTP set takes no write (ADR 0055): 410 gone.
+	w = on.do("PUT", "/api/v1/sandboxes/"+id3+"/http", bearerOf(tok3), map[string]any{"bindings": []any{}})
+	expect(t, w, http.StatusGone, `{"error":"a sandbox's own HTTP set is gone (ADR 0055): name HTTP secrets of its `+
+		`environment","code":"gone"}`+"\n")
 	// The classes hold: a tenant's token on a set, a sandbox's on a
 	// preflight.
 	expect(t, on.do("PUT", "/api/v1/sandboxes/"+id3+"/kube", bearerOf(on.tenantToken), nil), http.StatusNotFound,
