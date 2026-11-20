@@ -194,6 +194,43 @@ func TestHTTPSecretDiff(t *testing.T) {
 	}
 }
 
+// A binding that moves from the spec to an HTTP secret of the same name,
+// upstream and mode, its URL variable from a literal to the reference
+// that renders the same, leaves the pods as they are: the plan says "in
+// place", as the controller does.
+func TestBindingMovesToHTTPSecretInPlace(t *testing.T) {
+	two := 2
+	before := &Spec{
+		Services: map[string]Service{"app": {Runtime: RuntimeImage, Image: "ghcr.io/acme/app@sha256:" + strings.Repeat("a", 64),
+			Replicas: &two, Env: map[string]EnvValue{"S4_URL": String("http://s4")}, Bindings: []string{"s4"}}},
+		Bindings: map[string]Binding{"s4": {Upstream: "https://api.s4.example", Mode: "name",
+			Credential: &BindingCredential{Kind: "headers", Headers: map[string]EnvValue{"APIKey": SecretEnv("http.s4.header.apikey")}}}},
+		Secrets: map[string]SecretRef{"http.s4.header.apikey": {Version: 1}},
+	}
+	after := &Spec{
+		Services: map[string]Service{"app": {Runtime: RuntimeImage, Image: before.Services["app"].Image, Replicas: &two,
+			Env: map[string]EnvValue{"S4_URL": HTTPSecretEnv("s4", SecretKeyURL)}}},
+		Secrets: map[string]SecretRef{"s4": {Version: 1, Type: SecretTypeHTTP, Upstream: "https://api.s4.example", Mode: "name"}},
+	}
+	var svc *DiffEntry
+	diff := Diff(before, after)
+	for i := range diff {
+		if diff[i].Kind == KindService {
+			svc = &diff[i]
+		}
+	}
+	if svc == nil || svc.Effect != EffectInPlace {
+		t.Fatalf("the service: %+v", diff)
+	}
+	// Another mode is another pod.
+	after.Secrets["s4"] = SecretRef{Version: 1, Type: SecretTypeHTTP, Upstream: "https://api.s4.example", Mode: "intercept"}
+	for _, d := range Diff(before, after) {
+		if d.Kind == KindService && d.Effect != EffectReplaces(2) {
+			t.Fatalf("another mode: %+v", d)
+		}
+	}
+}
+
 // refusingVC is the bindings' context of a plan that refuses bindings
 // stated in the spec (ADR 0055): a new plan's.
 type refusingVC struct{ bindingsVC }

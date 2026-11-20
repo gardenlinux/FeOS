@@ -463,3 +463,31 @@ func BindingTemplate(b Binding) (upstream, mode string) {
 func HTTPSecretBinding(name string, ref SecretRef) Binding {
 	return Binding{Upstream: ref.Upstream, Mode: ref.Mode, CredentialRef: &CredentialRef{Name: name, Version: ref.Version}}
 }
+
+// HTTPSecretValue is what a variable that references an HTTP secret
+// renders as (ADR 0055), by the version sp pins: its base URL,
+// http://<name> in the name mode and https://<the API's host> (its
+// origin) in the intercept mode, or its host alone, the secret's name or
+// the API's host. Never a field of it: its key stays at the node.
+func HTTPSecretValue(sp *Spec, e EnvValue) (string, error) {
+	ref, ok := sp.Secrets[e.Secret]
+	if !ok || !ref.IsHTTP() {
+		return "", fmt.Errorf("no HTTP secret %s pinned", e.Secret)
+	}
+	up, err := httpcheck.ParseUpstream("upstream", ref.Upstream)
+	if err != nil {
+		return "", fmt.Errorf("HTTP secret %s: %v", e.Secret, err.Msg)
+	}
+	intercept := ref.Mode == httpcheck.ModeIntercept
+	switch {
+	case e.Key == SecretKeyHost && intercept:
+		return up.Host, nil
+	case e.Key == SecretKeyHost:
+		return e.Secret, nil
+	case e.Key == SecretKeyURL && intercept:
+		return up.Origin(), nil
+	case e.Key == SecretKeyURL:
+		return "http://" + e.Secret, nil
+	}
+	return "", fmt.Errorf("an HTTP secret's key is url or host, not %q", e.Key)
+}

@@ -15,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/gardenlinux/feos/go/internal/bindings/httpcheck"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -538,26 +537,7 @@ func (c *Controller) renderEnvWith(v *view, env map[string]spec.EnvValue, loopba
 // origin) in the intercept mode, or its host alone, the secret's name or
 // the API's host. Never a field of it: its key stays at the node.
 func httpSecretValue(target *spec.Spec, e spec.EnvValue) (string, error) {
-	ref, ok := target.Secrets[e.Secret]
-	if !ok || !ref.IsHTTP() {
-		return "", fmt.Errorf("no HTTP secret %s pinned", e.Secret)
-	}
-	up, err := httpcheck.ParseUpstream("upstream", ref.Upstream)
-	if err != nil {
-		return "", fmt.Errorf("HTTP secret %s: %v", e.Secret, err.Msg)
-	}
-	intercept := ref.Mode == httpcheck.ModeIntercept
-	switch {
-	case e.Key == spec.SecretKeyHost && intercept:
-		return up.Host, nil
-	case e.Key == spec.SecretKeyHost:
-		return e.Secret, nil
-	case e.Key == spec.SecretKeyURL && intercept:
-		return up.Origin(), nil
-	case e.Key == spec.SecretKeyURL:
-		return "http://" + e.Secret, nil
-	}
-	return "", fmt.Errorf("an HTTP secret's key is url or host, not %q", e.Key)
+	return spec.HTTPSecretValue(target, e)
 }
 
 // bindingLoopbacks numbers the addons that envs' references reach through

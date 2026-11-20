@@ -166,17 +166,17 @@ func (d *differ) job(a, b Job) ([]FieldChange, string) {
 	va["image"], vb["image"] = imageDisplay(a.Image, a.ImageAsWritten), imageDisplay(b.Image, b.ImageAsWritten)
 	va["env"], vb["env"] = envView(a.Env, d.prev, false), envView(b.Env, d.next, false)
 	fields := changes(clean(va), clean(vb))
-	if reflect.DeepEqual(va["bindings"], vb["bindings"]) && !reflect.DeepEqual(bindingsTemplate(a.Bindings, d.prev),
-		bindingsTemplate(b.Bindings, d.next)) {
-		fields = append(fields, FieldChange{Path: "bindings", From: bindingsTemplate(a.Bindings, d.prev),
-			To: bindingsTemplate(b.Bindings, d.next)})
+	if reflect.DeepEqual(va["bindings"], vb["bindings"]) && !reflect.DeepEqual(bindingsTemplate(a.Bindings, a.Env, d.prev),
+		bindingsTemplate(b.Bindings, b.Env, d.next)) {
+		fields = append(fields, FieldChange{Path: "bindings", From: bindingsTemplate(a.Bindings, a.Env, d.prev),
+			To: bindingsTemplate(b.Bindings, b.Env, d.next)})
 	}
 	ta := map[string]any{"image": a.Image, "command": a.Command, "env": envView(a.Env, d.prev, true),
 		"resources": view(a.Resources), "imageCredentials": toAny(a.ImageCredentials),
-		"bindings": bindingsTemplate(a.Bindings, d.prev), "egress": egressTemplate(a.Egress)}
+		"bindings": bindingsTemplate(a.Bindings, a.Env, d.prev), "egress": egressTemplate(a.Egress)}
 	tb := map[string]any{"image": b.Image, "command": b.Command, "env": envView(b.Env, d.next, true),
 		"resources": view(b.Resources), "imageCredentials": toAny(b.ImageCredentials),
-		"bindings": bindingsTemplate(b.Bindings, d.next), "egress": egressTemplate(b.Egress)}
+		"bindings": bindingsTemplate(b.Bindings, b.Env, d.next), "egress": egressTemplate(b.Egress)}
 	if reflect.DeepEqual(ta, tb) {
 		return fields, EffectInPlace
 	}
@@ -231,7 +231,7 @@ func (d *differ) template(s Service, sp *Spec) map[string]any {
 	}
 	return map[string]any{"image": s.Image, "command": s.Command, "env": envView(s.Env, sp, true),
 		"resources": view(s.Resources), "imageCredentials": toAny(s.ImageCredentials),
-		"bindings": bindingsTemplate(s.Bindings, sp), "egress": egressTemplate(s.Egress)}
+		"bindings": bindingsTemplate(s.Bindings, s.Env, sp), "egress": egressTemplate(s.Egress)}
 }
 
 // egressTemplate is what of an egress a pod's template holds (ADR 0034,
@@ -244,18 +244,31 @@ func egressTemplate(e *Egress) any {
 	return map[string]any{"restrictNames": true, "domains": toAny(e.NameDomains())}
 }
 
-// bindingsTemplate is what of an object's bindings its template holds:
-// each binding it names with its upstream and mode, by name.
-func bindingsTemplate(names []string, sp *Spec) any {
-	if len(names) == 0 {
+// bindingsTemplate is what of an object's bindings its template holds,
+// as the controller makes it: each binding it names and each HTTP secret
+// its variables reference (ADR 0055), with its upstream and mode, by
+// name, sorted, once. A binding that moves from the spec to an HTTP
+// secret of the same name, upstream and mode leaves it as it was.
+func bindingsTemplate(names []string, env map[string]EnvValue, sp *Spec) any {
+	all := slices.Clone(names)
+	for _, e := range env {
+		if e.IsHTTPSecretRef() {
+			all = append(all, e.Secret)
+		}
+	}
+	if len(all) == 0 {
 		return nil
 	}
-	out := make([]any, 0, len(names))
-	for _, n := range names {
+	out := make([]any, 0, len(all))
+	for _, n := range slices.Compact(slices.Sorted(slices.Values(all))) {
 		b, ok := sp.Bindings[n]
 		if !ok {
-			out = append(out, map[string]any{"name": n})
-			continue
+			ref, isSecret := sp.Secrets[n]
+			if !isSecret || !ref.IsHTTP() {
+				out = append(out, map[string]any{"name": n})
+				continue
+			}
+			b = HTTPSecretBinding(n, ref)
 		}
 		up, mode := BindingTemplate(b)
 		out = append(out, map[string]any{"name": n, "upstream": up, "mode": mode})
@@ -337,6 +350,12 @@ func envView(env map[string]EnvValue, sp *Spec, resolved bool) any {
 	for k, val := range env {
 		switch {
 		case val.IsHTTPSecretRef() && resolved:
+			// What the pod gets: the URL or host the pinned version
+			// renders, which equals a literal of the same string.
+			if s, err := HTTPSecretValue(sp, val); err == nil {
+				out[k] = s
+				continue
+			}
 			ref := sp.Secrets[val.Secret]
 			out[k] = map[string]any{"secret": val.Secret, "key": val.Key, "upstream": ref.Upstream, "mode": ref.Mode}
 			continue
