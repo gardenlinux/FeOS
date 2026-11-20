@@ -402,3 +402,8 @@ declarations on 2026-11-08 (a061348), declaring a binding's upstream
 egress the binding declares; the pod's second address, from which ADR
 0014 wants a binding's connections to leave, is not built, and the proxy
 dials from the node.
+
+Amended on 2026-11-20 by ADR 0055: a pod's HTTP bindings come from the
+HTTP secrets its variables reference (at the version its deployment
+pins) and those its sandbox names (at the latest); bindings stated in a
+spec, credentials and a sandbox's own set give way.

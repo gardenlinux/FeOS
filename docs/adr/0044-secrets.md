@@ -97,3 +97,7 @@ Decided with ADR 0018 on 2026-10-18 and built the same day (abd2c87);
 the tails' redaction of values and their URL-escaped form came with the
 controller (cf5457a), and the lab's `ferund` got a key to seal with on
 2026-10-19 (2c8cea8). Split out of ADR 0018 on 2026-11-08.
+
+Amended on 2026-11-20 by ADR 0055: a secret has a kind, `value` (these
+rules) or `http` (an HTTP API whose key only the node uses, bound to its
+URL); a variable references an HTTP secret's URL or host, never its key.

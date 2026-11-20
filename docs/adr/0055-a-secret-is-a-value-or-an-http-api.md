@@ -1,6 +1,6 @@
 # ADR 0055: A secret is a value or an HTTP API: one object per key, its kind says where it lives
 
-**Status:** Proposed · **Date:** 2026-11-20
+**Status:** Accepted · **Date:** 2026-11-20
 
 Every key of an environment is a secret, and its kind says where the key
 lives. A `value` secret is handed to the containers that reference it. An
@@ -12,8 +12,9 @@ which gives it the URL to call, and a deployment pins the version; a
 sandbox names the HTTP secrets of its environment and gets each at its
 latest version. Bindings stated in a spec, a sandbox's own set of
 bindings and the environment's credentials (ADR 0033) give way to it.
-The console shows each key once, under where it lives. Once built, this
-supersedes ADR 0033 and amends ADR 0044 and ADR 0028.
+The console shows each key once, under where it lives. It supersedes
+ADR 0033 and amends ADR 0044 (a secret has a kind) and ADR 0028 (a pod's
+HTTP bindings come from HTTP secrets).
 
 ## Context
 
@@ -146,11 +147,14 @@ left to the authentication inside an HTTP secret.
 
 ### What gives way
 
-A plan refuses a binding stated in the spec and a `credentialRef`;
-deployments stored with them keep them, so that a revert to one runs
-what it ran. The environment's credentials become HTTP secrets of the
-same names and versions. A sandbox's own set of bindings goes once
-FeCode gives its workspaces their environments' HTTP secrets.
+A new plan refuses a binding stated in the spec and a `credentialRef`,
+but one the current deployment has unchanged, so that a spec changed
+elsewhere still deploys; a revert and a clone of a stored deployment
+keep theirs, with a warning, so that a revert runs what it ran. The
+environment's credentials are HTTP secrets of the same names and
+versions, and their routes answer as the HTTP secrets' for a release. A
+sandbox's own set of bindings takes no new write; one stated before
+serves until its sandbox ends, and can be deleted.
 
 ## Alternatives considered
 
@@ -172,6 +176,14 @@ FeCode gives its workspaces their environments' HTTP secrets.
   secret, which a deployment pins.
 - **A list of the HTTP secrets a service uses, beside its variables.**
   A second way to say the same; the variable is the dependency.
+- **A key of the tenant** that every environment's sandboxes and
+  bindings name (ADR 0033 before its correction): a grant on `dev` would
+  reach `prod`'s keys, and one leaked key would stop both. A key is its
+  environment's.
+- **The latest version for services too**, without a pin: a rotation
+  would reach them at once, but a deployment would no longer say what
+  its pods get, and a revert would not restore it. A sandbox, which has
+  no deployment, gets the latest.
 - **A kind that changes.** A value handed to containers would be marked
   at the node from then on, which it is not.
 
@@ -192,32 +204,25 @@ FeCode gives its workspaces their environments' HTTP secrets.
 - A registry login stays a value secret that image pulls name; a
   `registry` kind of the same shape, bound to its registry, follows
   (BACKLOG).
-- **The way there**, each step working on its own:
-  1. ferund: the kinds in the environment's secrets, `{secret, key}` in
-     the spec, a sandbox's names; the environment's credentials become
-     HTTP secrets in a migration that refuses, naming them, while a
-     name is both a credential and a secret.
-  2. A command of ferund turns each environment's spec bindings of its
-     latest deployment into HTTP secrets, their keys from the versions
-     that deployment pins, so that nobody enters a key again; the next
-     deployment of each environment references them.
-  3. The console: the Secrets view by marks, the new secret's question,
-     the builder's variable "URL of an HTTP secret" instead of its
-     binding form.
-  4. FeCode renders HTTP secrets and writes them per environment; once
-     each environment's latest deployment pins them, the
-     `http.<name>.<field>` secrets go.
-  5. FeCode's workspaces name their environments' HTTP secrets; then a
-     sandbox's own set goes.
-  6. Plans refuse spec bindings and `credentialRef`.
-- On acceptance ADR 0033 is superseded by this one, ADR 0044 is amended
-  by its kinds and ADR 0028's "Where bindings come from" by its single
-  source; `docs/architecture/control-plane.md` changes with the code.
+- `docs/architecture/control-plane.md` describes the API, the spec and
+  the console as built.
 
 ## History
 
-Proposed on 2026-11-20. A reader of an environment's Secrets view could
-not tell a secret from a credential, and took a binding's mode for the
-difference; a review of the model found that a key in a spec binding is
-bound to no upstream, and that FeCode already declares an HTTP API as a
-secret of type `http` (FeCode ADR 0018), which this follows.
+Proposed and accepted on 2026-11-20. A reader of an environment's
+Secrets view could not tell a secret from a credential, and took a
+binding's mode for the difference; a review of the model found that a
+key in a spec binding is bound to no upstream, and that FeCode already
+declares an HTTP API as a secret of type `http` (FeCode ADR 0018), which
+this follows. Built the same day, by parallel builders against one
+contract: the kinds, the `/secrets` routes, `{secret, key}`, the pods'
+bindings and sandboxes' names (574bf380), `ferund convert-bindings`,
+which turned the spec bindings of four live environments into HTTP
+secrets with their keys (46081e92), the console's Secrets view by where
+each key lives (92632fc7) and the architecture page (5e152729); then
+the plans' refusal and the sandbox's own set without writes (f777f989,
+de5f8d89), and a plan that says "in place" when a binding becomes an
+HTTP secret unchanged (c655470f). FeCode followed with its rendering,
+workspaces and cleanup (FeCode dee7490). The keep rule of ADR 0033
+bound a kept key to the mode as well; it binds it to the origin, the CA
+and the token URL alone, since the mode sends the key to the same API.

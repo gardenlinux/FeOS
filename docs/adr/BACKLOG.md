@@ -191,14 +191,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0032: whether the list carries an environment at the spec's limits (64 services, 32 jobs, 128 routes), or needs a search and grouping by label.
 - ADR 0032: a review of a draft before it is applied, if deployments get approvals; that is a policy of the caller.
 
-## ADR 0033
-
-- ADR 0033: Kubernetes, SSH and registry credentials as an environment's objects too, once their node side exists (ADR 0014, ADR 0025).
-- ADR 0033: migration 0035 left `tenant_credentials` in place for the rolling update (empty, which it checks; read by no instance since, and its trigger refuses every write); a later migration drops it, repeating 0035's refusal while the table holds a row, and its trigger function with it.
-- ADR 0033: a narrower use: a sandbox or a binding that takes a credential with fewer paths or a lower rate than its definition.
-- ADR 0033: the tools of the general MCP door (ADR 0031) for credentials, without their secrets.
-- ADR 0033: a credential's page shows its requests, which the sink records by the binding's name; they are read per environment as its outbound requests meanwhile.
-
 ## ADR 0035
 
 - ADR 0035: An environment's secrets by name in a sandbox's or a tenant's job's create, pinned at the create as an apply pins; both carry literals.
@@ -274,5 +266,11 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0055
 
+- ADR 0055: migration 0035 left `tenant_credentials` in place for the rolling update (empty, which it checked; read by no instance since, and its trigger refuses every write); a later migration drops it, repeating 0035's refusal while the table holds a row, and its trigger function with it.
+- ADR 0055: the `…/credentials` routes and a sandbox's `credentials` field answer as the HTTP secrets' for a release; then they go, and the table `env_credentials` may take the HTTP secrets' name.
+- ADR 0055: a sandbox's own HTTP set takes no write; once no sandbox holds one, its storage and its delete go.
+- ADR 0055: a narrower use: a sandbox or a variable that takes an HTTP secret with fewer paths or a lower rate than its definition.
+- ADR 0055: the tools of the general MCP door (ADR 0031) for HTTP secrets, without their keys.
+- ADR 0055: an HTTP secret's page shows its requests, which the sink records by its name; they are read per environment as its outbound requests meanwhile.
 - ADR 0055: a `registry` kind of secret, a registry's login bound to its registry and used by the node's pulls alone, instead of a value secret that image credentials name.
 - ADR 0055: Kubernetes and SSH bindings (ADR 0053) as kinds of secret of the same shape, once their node side exists.
