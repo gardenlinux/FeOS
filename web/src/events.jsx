@@ -31,7 +31,7 @@ export const LANES = [
   { key: 'lifecycle', label: 'lifecycle' },
   { key: 'tool', label: 'tool calls' },
   { key: 'network', label: 'network' },
-  { key: 'credential', label: 'credentials' },
+  { key: 'credential', label: 'certificates' },
 ];
 
 // laneOf is the event's lane: its category ('' reads as lifecycle).
@@ -62,7 +62,7 @@ export const KIND_LABEL = {
   placement: 'placed on a node',
   overbooked: 'node overbooked',
   tombstone: 'pod tombstoned',
-  pod_credentials: 'pod credentials issued',
+  pod_credentials: 'pod certificate issued',
   node_cert: 'node certificate issued',
   node_start: 'feosd started',
   node_removed: 'node removed',

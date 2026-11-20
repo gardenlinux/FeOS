@@ -45,7 +45,7 @@ describe('kindLabel and eventTitle', () => {
   it('the new kinds have labels', () => {
     for (const [kind, label] of [
       ['pod_state', 'pod state changed'], ['node_start', 'feosd started'],
-      ['pod_credentials', 'pod credentials issued'], ['overbooked', 'node overbooked'],
+      ['pod_credentials', 'pod certificate issued'], ['overbooked', 'node overbooked'],
       ['tombstone', 'pod tombstoned'], ['gap', 'gap in stream'],
     ]) {
       expect(kindLabel(rec({ kind })), kind).toBe(label);

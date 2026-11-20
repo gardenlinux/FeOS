@@ -2540,7 +2540,7 @@ reference, what it reaches, its egress; the sandboxes and running jobs
 with their `reaches`) and settings; Activity has the deployments and the
 incidents as pages of its own, besides everything in one list, and
 Settings the general page (the environment's name, ID, labels; clone
-and delete), the secrets, the credentials, and the domains and access.
+and delete) and the domains and access.
 An object's page (`…/objects/<kind>/<name>[/<view>]`) has the views the
 object has: overview, logs, traces and traffic (a service), and config
 (its definition, its row of the reachability, the routes to it, who
@@ -2564,27 +2564,47 @@ jobs and sandboxes (last: agents use sandboxes through the
 API and FeCode, people rarely through the UI), then Tenant settings, one
 entry whose pages (people, tokens, usage, general) are tabs. An
 environment's Secrets view (`…/secrets[/<kind>/<name>]`, a tab of its
-own between Reachability and Settings; the kind and name point at a
-row) sorts every key its workloads reach by where it lives, not by where
-it is stored (`web/src/views/access.js`): by identity (no key: an addon
-whose type admits a workload by its certificate, the catalog's
-`byIdentity`), offloaded (the key stays at the node: an HTTP binding, a
-registry login) or in the container (a variable from a secret, an
-addon's password). Under the marks' legend it lists, in groups, the
-secrets (who uses each and how, its version against the one the latest
-deployment pins, missing when the spec names one without a value; Set
-value, Delete, Add secret), the credentials (ADR 0033: what each
-reaches, the services through their bindings and the sandboxes that
-name it, the version the deployments pin, Update to vN; New credential,
-and a credential's page with its check, new version and delete at
-`…/credentials/new | /<name>[/edit]`), the HTTP bindings of the latest
-deployment and those the sandboxes' requests named (where each key
-comes from, who names it, its last 24 h from `…/bindings/usage`, Check;
-Add binding and Edit open its form in New deployment,
-`…/builder/new/binding`, `…/builder/binding/<name>`, since a binding is
-part of a deployment) and the addons by identity or with a password.
-Settings keeps General and Domains & access; the credentials' list of
-old (`…/credentials`) leads to Secrets. Home and the environments, domains,
+own between Reachability and Settings; kind `secret`, `binding` or
+`addon` and a name point at a row) shows every key its workloads reach
+once, grouped by where it lives (ADR 0055, `web/src/views/access.js`):
+**by identity** (an addon whose type admits a workload by its
+certificate, the catalog's `byIdentity`), **at the node** (the HTTP
+secrets; value secrets only image pulls name; bindings still stated in
+the latest deployment's spec, marked "in the spec — becomes an HTTP
+secret", with the value secrets they hold in their row; bindings a
+sandbox's own set stated, from their requests), **in the container**
+(value secrets a variable references, addons' passwords) and **unused**
+(value secrets nothing references). An HTTP secret's row has its URL,
+how the code calls it (`http://<name>` or the API's own name,
+intercepted), its authentication's kind, who uses it (the services and
+jobs of the latest deployment with their variables, the version the
+deployments pin; the sandboxes, at the latest), its last 24 h from
+`…/bindings/usage`, Check and Move to vN, a plan and an apply of the
+latest deployment's spec with the pin moved. A value secret's row has
+its uses, its version against the pin, missing when the spec names it
+without a value, Set value and Delete. Add secret asks the kind first:
+an HTTP API the platform calls with the key (recommended for an API)
+opens the HTTP secret's form, a value the code reads asks for a name
+and a value. An HTTP secret's pages are `…/secrets/http/new |
+/<name>[/edit]`: the form runs the preflight before it saves (the
+draft's check, its kept secret fields the stored ones; a change of the
+origin, CA or token URL asks for every secret field again), the page
+checks the stored version, lists the sandboxes that name it (added and
+removed there) and the services and jobs whose variables reference it
+with the versions their deployments pin, and deletes it. The mark
+`offloaded` reads "at the node"; the word credential names only the
+authentication inside an HTTP secret. In the builder a variable's value
+is a typed choice: text, a secret value, the URL or the host of an HTTP
+secret (`{secret, key}`, from the environment's HTTP secrets), an
+addon's output, a service's address; no form makes a binding: one still
+in the draft shows read-only with what becomes of it and can be
+removed. A new sandbox names HTTP secrets of its environment
+(`secrets`); its page's Secrets tab lists them, each at its latest
+version, with add and remove (`PUT …/sandboxes/{id}/secrets`), beside
+its cluster and SSH access and its registry login.
+Settings keeps General and Domains & access; the credentials' paths of
+old (`…/credentials[/…]`, `…/secrets/credential/<name>`) lead to the
+Secrets view and an HTTP secret's page. Home and the environments, domains,
 people, usage and settings go to every member; the tenant's sandboxes
 and jobs pages and the tools' reference with a tenant grant, an
 environment's sandboxes and jobs with a grant on it (ADR 0035); tokens to
@@ -2634,8 +2654,8 @@ it (ADR 0035): the list, with label filters; an environment's overview
 objects by kind, a row each with its image, ready replicas, last hour's
 traffic, restarts and the deployments it runs, the instances folded
 under it, its routes, its open incidents, its sandboxes and its newest
-jobs made by a call, and a line that counts its bindings and secrets and
-leads to its Secrets view, where they are); an object's page
+jobs made by a call, and a line that counts its keys and leads to its
+Secrets view, where they are); an object's page
 (`…/objects/<kind>/<name>`: on its overview a service's and a job's
 keys counted by where they live, with each binding whose upstream
 refused or failed in the last 24 h, its instances with the node a link
@@ -2648,8 +2668,11 @@ first certificate ends, from `…/identities`; unfolded, the
 certificate: the subject with the pod in the CN and the workload in
 the OU, the URI, the issuer, the key, which part each addon by identity
 reads, and each pod's serial, issue and end) and a row per target it
-reaches, by where the key lives (a variable from a secret, a binding
-with its credential and its last 24 h, the registry login, an addon),
+reaches, by where the key lives (an HTTP secret a variable references,
+with its upstream, how it is called, the pinned version and its last
+24 h; a binding still stated in the spec; a variable from a value
+secret; the registry login; an addon), its environment table showing
+`{secret, key}` as "url (or host) of HTTP secret <name> v<pin>",
 then its reachability, the routes to it, who uses it);
 its deployments with their tags, annotations, diff and spec (which it
 exports as a file); its incidents
