@@ -27,7 +27,7 @@ const plain = (s) => s.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const text = (el) => plain(html(el));
 const view = (extra = {}) => (
-  <SecretsInventory tenant={T} env={E} deployment={7} spec={ACCESS_SPEC} secrets={ACCESS_SECRETS}
+  <SecretsInventory project={T} env={E} deployment={7} spec={ACCESS_SPEC} secrets={ACCESS_SECRETS}
     catalog={CATALOG} usage={USAGE} ec={W} onPut={nav} onDelete={nav} navigate={nav} {...extra} />);
 // group is the markup of one group of the view, by its place.
 const group = (out, place) => {
@@ -74,10 +74,10 @@ describe('the Secrets view', () => {
     const out = html(view());
     const erp = plain(row(out, 'inv-http-erp'));
     expect(erp).toMatch(/erp HTTP secret api\.vendor\.example intercepted OAuth2 service api · ERP_URL sandbox c3kv9mwq2hd · the latest v4 .* deployed pins v3, latest v4 1,204 req\/24h · 2 refused · 1 blocked/);
-    expect(row(out, 'inv-http-erp')).toContain(`href="/tenants/${T}/environments/${E}/secrets/http/erp"`);
-    expect(row(out, 'inv-http-erp')).toContain(`href="/tenants/${T}/environments/${E}/objects/service/api"`);
-    expect(row(out, 'inv-http-erp')).toContain(`href="/tenants/${T}/environments/${E}/sandboxes/c3kv9mwq2hd"`);
-    expect(row(out, 'inv-http-erp')).toContain(`href="/tenants/${T}/environments/${E}/logs?source=egress&amp;since=1d"`);
+    expect(row(out, 'inv-http-erp')).toContain(`href="/projects/${T}/environments/${E}/secrets/http/erp"`);
+    expect(row(out, 'inv-http-erp')).toContain(`href="/projects/${T}/environments/${E}/objects/service/api"`);
+    expect(row(out, 'inv-http-erp')).toContain(`href="/projects/${T}/environments/${E}/sandboxes/c3kv9mwq2hd"`);
+    expect(row(out, 'inv-http-erp')).toContain(`href="/projects/${T}/environments/${E}/logs?source=egress&amp;since=1d"`);
     // Check, and the deployment that moves the pins to the latest.
     expect(row(out, 'inv-http-erp')).toContain('Check</button>');
     expect(row(out, 'inv-http-erp')).toContain('Move to v4</button>');
@@ -122,7 +122,7 @@ describe('the Secrets view', () => {
     const out = html(view());
     expect(plain(row(out, 'inv-addon-db'))).toMatch(/db addon postgres job migrate · role owner service api · database app · role api_svc its certificate/);
     expect(plain(row(out, 'inv-addon-bus'))).toMatch(/bus addon nats service api its password/);
-    expect(row(out, 'inv-addon-db')).toContain(`href="/tenants/${T}/environments/${E}/objects/addon/db"`);
+    expect(row(out, 'inv-addon-db')).toContain(`href="/projects/${T}/environments/${E}/objects/addon/db"`);
     // Without the catalog yet, the places an addon may take wait.
     expect(plain(group(html(view({ catalog: null })), 'identity'))).toContain('By identity · … ');
   });
@@ -169,7 +169,7 @@ describe('the Secrets view', () => {
 });
 
 describe('Add secret', () => {
-  const add = (initial) => <AddSecret tenant={T} env={E} ec={W} onPut={nav} navigate={nav} initial={initial} />;
+  const add = (initial) => <AddSecret project={T} env={E} ec={W} onPut={nav} navigate={nav} initial={initial} />;
 
   it('asks the kind first: an HTTP API (recommended for an API) or a value the code reads', () => {
     const out = html(add('ask'));

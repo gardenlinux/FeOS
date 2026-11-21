@@ -124,13 +124,13 @@ func (c *Controller) stepOneAttached(ctx context.Context, s *stepState, name str
 // goneDetail is the detail of an attached service whose sandbox it may
 // not use (§13.5).
 func goneDetail(id podid.ID) string {
-	return fmt.Sprintf("sandbox %s is gone or not this tenant's", id)
+	return fmt.Sprintf("sandbox %s is gone or not this project's", id)
 }
 
 // attachedUsable reports whether an attached service of env may use the
 // sandbox row sb, the one it names (§13.6): a sandbox of env (ADR 0035),
-// not an instance row or a tenant's job's pod. A sandbox of another
-// tenant under a reused ID is never the service's: it is never started,
+// not an instance row or a project's job's pod. A sandbox of another
+// project under a reused ID is never the service's: it is never started,
 // checked, named or made a member there. The owner's sandbox deleted and created again under the
 // same ID (FeCode replaces a lost workspace sandbox so) is a new
 // incarnation, in which the service starts anew (newIncarnation).
@@ -210,7 +210,7 @@ func (c *Controller) attachedGone(ctx context.Context, envID uuid.UUID, a store.
 		if _, err := tx.UpdateAttached(ctx, cur, after); err != nil {
 			return err
 		}
-		c.log.Warn("an attached service's sandbox is gone or not its tenant's", "environment", envID,
+		c.log.Warn("an attached service's sandbox is gone or not its project's", "environment", envID,
 			"service", a.Service, "sandbox", a.SandboxID)
 		if err := tx.Notify(ctx, db.ChanLeader, HintGroups); err != nil {
 			return err
@@ -305,7 +305,7 @@ func (c *Controller) stopAttachedIn(ctx context.Context, a store.EnvAttached, l 
 }
 
 // leftNothing reports whether the sandbox row sb, the one a names, holds
-// nothing of a's to clean: it is not a's to use (another tenant's under a
+// nothing of a's to clean: it is not a's to use (another project's under a
 // reused ID, an instance row), it is a new incarnation (a's process went
 // with the old one, and its disk with it), or it is stopped, failed or
 // lost (no process outlives a boot).

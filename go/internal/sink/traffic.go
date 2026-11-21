@@ -35,19 +35,19 @@ const (
 	TrafficApp     = "app"
 )
 
-// TrafficQuery is a read of the traffic: a tenant's environment and its
+// TrafficQuery is a read of the traffic: a project's environment and its
 // services by name, the range [SinceNs, UntilNs) in Unix ns, the step,
 // whole seconds, of which both ends are multiples, and the source:
 // TrafficIngress (also when empty), what the ingress answered for each
 // service, or TrafficApp, the requests each service's own server spans
 // count, without those to its Skip paths (its readiness check).
 type TrafficQuery struct {
-	Tenant, Environment string
-	Services            []string
-	SinceNs, UntilNs    int64
-	Step                time.Duration
-	Source              string
-	Skip                map[string][]string
+	Project, Environment string
+	Services             []string
+	SinceNs, UntilNs     int64
+	Step                 time.Duration
+	Source               string
+	Skip                 map[string][]string
 }
 
 // ServiceTraffic is a service's requests in a read's range: how many, how
@@ -99,10 +99,10 @@ func (t *Traces) Traffic(ctx context.Context, q TrafficQuery) ([]ServiceTraffic,
 }
 
 func (t *Traces) serviceTraffic(ctx context.Context, q TrafficQuery, service string) (ServiceTraffic, error) {
-	sel := quickwit.SpanQuery{Tenant: q.Tenant, Environment: q.Environment, Object: service, Source: SourceIngress,
+	sel := quickwit.SpanQuery{Project: q.Project, Environment: q.Environment, Object: service, Source: SourceIngress,
 		SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1, Failed: true}
 	if q.Source == TrafficApp {
-		sel = quickwit.SpanQuery{Tenant: q.Tenant, Environment: q.Environment, Object: service, Source: SourceContainer,
+		sel = quickwit.SpanQuery{Project: q.Project, Environment: q.Environment, Object: service, Source: SourceContainer,
 			Kind: quickwit.SpanKindServer, NotPaths: q.Skip[service], SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1,
 			ServerFailed: true}
 	}
@@ -132,8 +132,8 @@ func (t *Traces) serviceTraffic(ctx context.Context, q TrafficQuery, service str
 // service (repeated), since and until (RFC 3339 or Unix ns, multiples of
 // step), step (a Go duration of whole seconds), source (ingress, the
 // default, or app) and skip (repeated, "<service>:<path>", app only).
-func parseTrafficQuery(v url.Values, tenant string) (TrafficQuery, error) {
-	q := TrafficQuery{Tenant: tenant, Environment: v.Get("environment"), Source: v.Get("source")}
+func parseTrafficQuery(v url.Values, project string) (TrafficQuery, error) {
+	q := TrafficQuery{Project: project, Environment: v.Get("environment"), Source: v.Get("source")}
 	if q.Environment == "" {
 		return q, fmt.Errorf("environment is required")
 	}
@@ -203,7 +203,7 @@ func parseTrafficQuery(v url.Values, tenant string) (TrafficQuery, error) {
 }
 
 func (a *api) traffic(w http.ResponseWriter, r *http.Request, acc Access) {
-	q, err := parseTrafficQuery(r.URL.Query(), acc.Tenant)
+	q, err := parseTrafficQuery(r.URL.Query(), acc.Project)
 	if err != nil {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 		return

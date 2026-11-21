@@ -14,12 +14,12 @@ func TestSpanQueryString(t *testing.T) {
 		want string
 	}{
 		{SpanQuery{}, "*"},
-		{SpanQuery{Tenant: "acme", Environment: "e", Source: "ingress", TraceID: "ab", Service: "api", Operation: `GET "/"`},
-			`tenant:"acme" AND environment:"e" AND source:"ingress" AND trace_id:"ab" AND service_name:"api" AND span_name:"GET \"/\""`},
+		{SpanQuery{Project: "acme", Environment: "e", Source: "ingress", TraceID: "ab", Service: "api", Operation: `GET "/"`},
+			`tenant:"acme" AND environment:"e" AND source:"ingress" AND trace_id:"ab" AND service_name:"api" AND span_name:"GET \"/\""`}, // KEEP-TENANT: Quickwit's stored name
 		{SpanQuery{SinceNs: 1, MinDurationNs: 5}, `ts:[1970-01-01T00:00:00.000000001Z TO *] AND duration_ns:[5 TO *]`},
 		{SpanQuery{MaxDurationNs: 7}, `duration_ns:[* TO 7]`},
-		{SpanQuery{Tenant: "acme", Environments: []string{"e1", "e2"}},
-			`tenant:"acme" AND (environment:"e1" OR environment:"e2")`},
+		{SpanQuery{Project: "acme", Environments: []string{"e1", "e2"}},
+			`tenant:"acme" AND (environment:"e1" OR environment:"e2")`}, // KEEP-TENANT: Quickwit's stored name
 		{SpanQuery{Environments: []string{}}, `(NOT *)`},
 		{SpanQuery{Tags: map[string]string{"b": "2", "http.method": "GET", "a b:c": `x"y`}},
 			`(span_attributes.a\ b\:c:"x\"y" OR resource_attributes.a\ b\:c:"x\"y") AND ` +
@@ -33,7 +33,7 @@ func TestSpanQueryString(t *testing.T) {
 }
 
 func TestSpanQueryMatch(t *testing.T) {
-	d := SpanDoc{TS: 100, Tenant: "acme", Environment: "e", Source: "container", TraceID: "t", ServiceName: "api", SpanName: "GET",
+	d := SpanDoc{TS: 100, Project: "acme", Environment: "e", Source: "container", TraceID: "t", ServiceName: "api", SpanName: "GET",
 		DurationNs: 50, SpanAttributes: map[string]json.RawMessage{"code": json.RawMessage(`500`), "f": json.RawMessage(`2.0`),
 			"ok": json.RawMessage(`true`)},
 		ResourceAttributes: map[string]json.RawMessage{"ferun.object": json.RawMessage(`"web"`)}}
@@ -41,8 +41,8 @@ func TestSpanQueryMatch(t *testing.T) {
 		q    SpanQuery
 		want bool
 	}{
-		{SpanQuery{Tenant: "acme"}, true},
-		{SpanQuery{Tenant: "other"}, false},
+		{SpanQuery{Project: "acme"}, true},
+		{SpanQuery{Project: "other"}, false},
 		{SpanQuery{Environment: "e", Source: "container", TraceID: "t", Service: "api", Operation: "GET"}, true},
 		{SpanQuery{Source: "ingress"}, false},
 		{SpanQuery{SinceNs: 100, UntilNs: 100}, true},

@@ -8,7 +8,7 @@ import {
 } from './jobs.js';
 
 // The arithmetic of the jobs made by a call, on jobs in the shape of ferund's
-// TenantJobStatus (go/internal/env/tenantjobs.go).
+// ProjectJobStatus (go/internal/env/projectjobs.go).
 
 const job = (over) => ({
   id: 'k2m7qpxh3v9', image: 'ghcr.io/acme/report:3', imageRef: 'ghcr.io/acme/report@sha256:9f3c', phase: 'running',

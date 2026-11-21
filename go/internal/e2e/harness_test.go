@@ -60,12 +60,12 @@ import (
 const (
 	trustDomain = "feos.test"
 	dnsDomain   = "example.test"
-	// tenantToken is the bootstrap token: the tenant "operator", as
+	// projectToken is the bootstrap token: the project "operator", as
 	// FeCode's FECODE_SANDBOX_API_TOKEN.
-	tenantToken = "e2e-tenant-token-0123456789abcdef"
-	tenant      = "operator"
-	adminUser   = "admin"
-	adminPass   = "pw"
+	projectToken = "e2e-project-token-0123456789abcdef"
+	project      = "operator"
+	adminUser    = "admin"
+	adminPass    = "pw"
 	// testImage is pinned by digest, so that no registry is asked.
 	testImage = "example.test/img@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	// poolSize bounds every instance's database pool: a test runs up to
@@ -88,8 +88,8 @@ var bg = context.Background()
 var clusterSlots = make(chan struct{}, maxClusters)
 
 var (
-	tenantAuth = "Bearer " + tenantToken
-	adminAuth  = "Basic " + base64.StdEncoding.EncodeToString([]byte(adminUser+":"+adminPass))
+	projectAuth = "Bearer " + projectToken
+	adminAuth   = "Basic " + base64.StdEncoding.EncodeToString([]byte(adminUser+":"+adminPass))
 )
 
 // cluster is one control plane: a database, a CA, the instances that run
@@ -168,7 +168,7 @@ func newCluster(t *testing.T, tune func(*config.Config)) *cluster {
 	c.cfg = config.Default()
 	c.cfg.DatabaseURL, c.cfg.CADir, c.cfg.TrustDomain = u, caDir, trustDomain
 	c.cfg.Listen = "127.0.0.1:0"
-	c.cfg.BootstrapToken = tenantToken
+	c.cfg.BootstrapToken = projectToken
 	c.cfg.AdminUsers = map[string]string{adminUser: adminPass}
 	c.cfg.DefaultImage = testImage
 	c.cfg.IdlePause = 0
@@ -556,8 +556,8 @@ func (sb sandbox) path(p string) string {
 // carries.
 func (c *cluster) create(in *instance) sandbox {
 	c.t.Helper()
-	dbtest.Environment(c.t, c.st.Q(), tenant, "box")
-	r := c.call(in, "POST", "/api/v1/sandboxes", tenantAuth, `{"environment":"box"}`)
+	dbtest.Environment(c.t, c.st.Q(), project, "box")
+	r := c.call(in, "POST", "/api/v1/sandboxes", projectAuth, `{"environment":"box"}`)
 	if r.code != http.StatusCreated {
 		c.t.Fatalf("create: %d %s", r.code, r.body)
 	}
@@ -581,7 +581,7 @@ func (c *cluster) create(in *instance) sandbox {
 // createID makes a sandbox under a given ID, which no client can any more
 // (ADR 0019): its row and a token written to the database directly, as
 // for an ID used again (a sandbox with a UUID made before, or a short ID
-// drawn again after its sandbox was deleted), in the tenant's environment
+// drawn again after its sandbox was deleted), in the project's environment
 // env. The ID must be new; templated gives the row the template every
 // sandbox made over REST has (ADR 0035, revised), else it has none.
 func (c *cluster) createID(id podid.ID, env string, templated bool) sandbox {
@@ -591,8 +591,8 @@ func (c *cluster) createID(id podid.ID, env string, templated bool) sandbox {
 		c.t.Fatal(err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(b[:])
-	n := store.NewSandbox{ID: id, Owner: tenant, Image: testImage, VCPUs: c.cfg.DefaultVCPUs, MemoryMiB: c.cfg.DefaultMemoryMiB,
-		EnvironmentID: dbtest.Environment(c.t, c.st.Q(), tenant, env)}
+	n := store.NewSandbox{ID: id, Owner: project, Image: testImage, VCPUs: c.cfg.DefaultVCPUs, MemoryMiB: c.cfg.DefaultMemoryMiB,
+		EnvironmentID: dbtest.Environment(c.t, c.st.Q(), project, env)}
 	if templated {
 		n.PodTemplate = model.SandboxTemplate(n.EnvironmentID, id.String(), false, nil)
 	}
@@ -666,7 +666,7 @@ func decodeExec(r reply) (execResult, error) {
 // pause pauses the sandbox through REST and expects the 200.
 func (c *cluster) pause(in *instance, sb sandbox) {
 	c.t.Helper()
-	if r := c.call(in, "POST", sb.path("/pause"), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(in, "POST", sb.path("/pause"), projectAuth, ""); r.code != http.StatusOK {
 		c.t.Fatalf("pause %s: %d %s", sb.id, r.code, r.body)
 	}
 }
@@ -1038,7 +1038,7 @@ func (c *cluster) ingressToken(name string) string {
 }
 
 // setPublic makes an environment public, open to anyone (ADR 0054), or
-// not, with the tenant's token through the balancer (PUT …/public), and
+// not, with the project's token through the balancer (PUT …/public), and
 // returns the answer. (publish is the events' already.)
 func (c *cluster) setPublic(envID uuid.UUID, public bool) env.PublicAnswer {
 	c.t.Helper()
@@ -1046,7 +1046,7 @@ func (c *cluster) setPublic(envID uuid.UUID, public bool) env.PublicAnswer {
 	if public {
 		body = `{"public":true,"access":"anyone"}`
 	}
-	r := c.call(nil, "PUT", "/api/v1/environments/"+envID.String()+"/public", tenantAuth, body)
+	r := c.call(nil, "PUT", "/api/v1/environments/"+envID.String()+"/public", projectAuth, body)
 	if r.code != http.StatusOK {
 		c.t.Fatalf("public %t: %d %s", public, r.code, r.body)
 	}

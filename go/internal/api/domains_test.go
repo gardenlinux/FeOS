@@ -79,10 +79,10 @@ func (f *domainDNS) set(name, token string, routed bool) {
 }
 
 // The domains' routes on the real service, through the API's mux with a
-// tenant's token: create, the answer's shape, refusals, list and its
+// project's token: create, the answer's shape, refusals, list and its
 // filters, bind (to an environment made public through its own route,
 // whose change the domain follows at once), check, unbind, delete;
-// another tenant's domain is absent.
+// another project's domain is absent.
 func TestDomainsEndToEnd(t *testing.T) {
 	t.Parallel()
 	dns := &domainDNS{txt: map[string][]string{}, routed: map[string]bool{}}
@@ -110,7 +110,7 @@ func TestDomainsEndToEnd(t *testing.T) {
 			return svc
 		},
 	})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	do := func(method, path string, body any) *recorderT {
 		t.Helper()
 		return e.do(method, path, tok, body)
@@ -243,8 +243,8 @@ func TestDomainsEndToEnd(t *testing.T) {
 		t.Fatalf("get %+v", g)
 	}
 
-	// Another tenant sees nothing of it.
-	other := bearerOf(e.mintTenantToken(mustTenant(t, e, "rival")))
+	// Another project sees nothing of it.
+	other := bearerOf(e.mintProjectToken(mustProject(t, e, "rival")))
 	for _, rq := range [][2]string{{"GET", ""}, {"DELETE", ""}, {"POST", "/check"}, {"DELETE", "/environment"}} {
 		expect(t, e.do(rq[0], "/api/v1/domains/"+d.ID+rq[1], other, nil), http.StatusNotFound, errBody("no such domain"))
 	}
@@ -276,7 +276,7 @@ func TestDomainsOff(t *testing.T) {
 		}
 		return svc
 	}})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	expect(t, e.do("POST", "/api/v1/domains", tok, map[string]any{"name": "a.example.com"}), http.StatusConflict,
 		`{"error":"the platform serves no domains (--edge-name)","code":"domains_off"}`+"\n")
 	expect(t, e.do("GET", "/api/v1/domains", tok, nil), http.StatusOK, `{"domains":[]}`+"\n")

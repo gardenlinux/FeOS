@@ -388,10 +388,10 @@ func TestVisitSignIn(t *testing.T) {
 	}
 
 	// A sign-in address with a query of its own gets "&".
-	s := visitState(k, testSignIn+"?tenant=acme", svc("web", ep("w1", "fd00::1", "n1")))
+	s := visitState(k, testSignIn+"?project=acme", svc("web", ep("w1", "fd00::1", "n1")))
 	p.SetState(s)
 	rec = serveCall(p, nav("/"))
-	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, testSignIn+"?tenant=acme&challenge=") {
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, testSignIn+"?project=acme&challenge=") {
 		t.Fatalf("Location %q", loc)
 	}
 	// One that ends with "?" has a query too (§1.11, literally).
@@ -1303,7 +1303,7 @@ func TestFerunPath(t *testing.T) {
 			rec.Header().Get("Referrer-Policy") != "no-referrer" {
 			t.Fatalf("%s %s: %d %q", c.method, c.path, rec.Code, rec.Body.String())
 		}
-		if r := al.next(t); r.Reason != wire.ReasonFerunPath || r.Env != testEnv || r.Tenant != "acme" || r.Service != "" {
+		if r := al.next(t); r.Reason != wire.ReasonFerunPath || r.Env != testEnv || r.Project != "acme" || r.Service != "" {
 			t.Fatalf("record %+v", r)
 		}
 	}

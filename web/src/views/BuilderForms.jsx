@@ -32,7 +32,7 @@ import {
 // read (httpSecretsErr), the object's findings, setSecret(name, value)
 // (a promise of the version it made), editSpec(fn), whether the
 // environment is new, whether the role edits attached services, the
-// environment's sandboxes (an attached service's choice), and the tenant
+// environment's sandboxes (an attached service's choice), and the project
 // and the environment (for links). A binding stated in the spec (from
 // before ADR 0055) shows read-only: no form makes a new one.
 
@@ -664,7 +664,7 @@ function HttpSecretValue({ v, targets, ctx, onChange }) {
   const h = list.find((x) => x.name === v.secret);
   const known = (ctx.httpSecrets || []).find((x) => x && x.name === v.secret);
   const pin = (ctx.pins || []).find((p) => p.name === v.secret);
-  const toNew = ctx.tenant && ctx.env && !ctx.isNew ? newHttpSecretPath(ctx.tenant, ctx.env) : '';
+  const toNew = ctx.project && ctx.env && !ctx.isNew ? newHttpSecretPath(ctx.project, ctx.env) : '';
   return (
     <>
       <Select value={v.secret} empty="(an HTTP secret)" title="the HTTP secret"
@@ -679,8 +679,8 @@ function HttpSecretValue({ v, targets, ctx, onChange }) {
             <> · <span className="warntext">v{pin.pinned} pinned, v{pin.latest} newer</span>{' '}
               <button className="b-link acc" onClick={() => ctx.editSpec((s) => pinSecret(s, v.secret, pin.latest))}>use v{pin.latest}</button></>)}
           {pin && !pin.newer && known && <span className="muted"> · {pin.pinned ? `v${pin.pinned}` : `latest (v${known.version})`}</span>}
-          {known && ctx.tenant && ctx.env && (
-            <> · <FormLink ctx={ctx} to={httpSecretPath(ctx.tenant, ctx.env, v.secret)}>its page</FormLink></>)}
+          {known && ctx.project && ctx.env && (
+            <> · <FormLink ctx={ctx} to={httpSecretPath(ctx.project, ctx.env, v.secret)}>its page</FormLink></>)}
         </span>)}
       {list.length === 0 && <span className="muted small">{noHttpSecrets(ctx)}</span>}
       {toNew && !h && <FormLink ctx={ctx} to={toNew}>New HTTP secret</FormLink>}
@@ -1097,8 +1097,8 @@ export function BindingForm({ name, obj, ctx, onRemove }) {
   const tc = isObject(o.credentialRef) ? o.credentialRef : null;
   const users = referencesTo(ctx.spec, 'bindings', name);
   const http = (ctx.httpSecrets || []).find((c) => c && c.name === (tc ? tc.name : name));
-  const link = ctx.tenant && ctx.env && !ctx.isNew
-    ? (http ? httpSecretPath(ctx.tenant, ctx.env, http.name) : newHttpSecretPath(ctx.tenant, ctx.env)) : '';
+  const link = ctx.project && ctx.env && !ctx.isNew
+    ? (http ? httpSecretPath(ctx.project, ctx.env, http.name) : newHttpSecretPath(ctx.project, ctx.env)) : '';
   return (
     <div className="b-form">
       <FormHead kind="Binding in the spec" name={name} findings={f} fields={[]} />
@@ -1125,7 +1125,7 @@ export function BindingForm({ name, obj, ctx, onRemove }) {
 // NewBinding is where "+ Add" of the bindings led: no new binding (ADR
 // 0055), the way to an HTTP secret instead.
 export function NewBinding({ ctx }) {
-  const toNew = ctx.tenant && ctx.env && !ctx.isNew ? newHttpSecretPath(ctx.tenant, ctx.env) : '';
+  const toNew = ctx.project && ctx.env && !ctx.isNew ? newHttpSecretPath(ctx.project, ctx.env) : '';
   return (
     <div className="b-form">
       <FormHead kind="No new binding" name="an API its code calls" findings={[]} fields={[]} />
@@ -1204,7 +1204,7 @@ export function SecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
 // never here.
 function HttpSecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
   const known = (ctx.httpSecrets || []).find((c) => c && c.name === name);
-  const page = ctx.tenant && ctx.env && !ctx.isNew ? (known ? httpSecretPath(ctx.tenant, ctx.env, name) : newHttpSecretPath(ctx.tenant, ctx.env)) : '';
+  const page = ctx.project && ctx.env && !ctx.isNew ? (known ? httpSecretPath(ctx.project, ctx.env, name) : newHttpSecretPath(ctx.project, ctx.env)) : '';
   return (
     <div className="b-form">
       <FormHead kind="HTTP secret" name={name} findings={ctx.findings} fields={['version']} />
@@ -1254,10 +1254,10 @@ export function NewSecret({ ctx, onDone }) {
   return (
     <div className="b-form">
       <FormHead kind="New secret" name="a value the services read" findings={[]} fields={[]} />
-      {ctx.tenant && ctx.env && !ctx.isNew && (
+      {ctx.project && ctx.env && !ctx.isNew && (
         <p className="panel-note">A key for an HTTP API? Make it an HTTP secret (recommended for an API): the platform adds
           the key at the node, and a variable gets its URL.{' '}
-          <FormLink ctx={ctx} to={newHttpSecretPath(ctx.tenant, ctx.env)}>New HTTP secret</FormLink></p>)}
+          <FormLink ctx={ctx} to={newHttpSecretPath(ctx.project, ctx.env)}>New HTTP secret</FormLink></p>)}
       <Section title="A value your code reads">
         <p className="muted small">{ctx.isNew
           ? 'Its value stays in this page until the first deploy, which writes it before the deployment.'

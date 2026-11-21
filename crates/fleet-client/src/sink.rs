@@ -14,7 +14,7 @@
 //! takes it, and sent again after a backoff; meanwhile the stream reads
 //! nothing more: what the container writes waits in its log, in the
 //! guest, and the shipper's memory is a batch and a few entries a stream.
-//! A tenant over its quota (`RESOURCE_EXHAUSTED`) has its batch dropped
+//! A project over its quota (`RESOURCE_EXHAUSTED`) has its batch dropped
 //! and counted as the limit's drops are.
 //!
 //! Before a pod pauses, hibernates or is deleted, `drain` sends what its
@@ -762,7 +762,7 @@ impl Shipping {
     }
 
     /// Exports the batch until the sink takes it, then empties it; one the
-    /// sink refuses for its tenant's quota is dropped and counted. Fails
+    /// sink refuses for its project's quota is dropped and counted. Fails
     /// when there is no sink any more.
     async fn send(
         &mut self,

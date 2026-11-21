@@ -11,7 +11,7 @@ import '../styles/sandboxes.css';
 
 // The tools a sandbox offers its agents, over MCP and REST alike: each
 // with its description and input schema, folded. A sandbox's Connect tab
-// shows the same reference; /tenants/:t/tools is it on a page of its own.
+// shows the same reference; /projects/:t/tools is it on a page of its own.
 
 export function Tools() {
   return (

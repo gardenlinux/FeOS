@@ -33,7 +33,7 @@ import (
 //	PUT    /api/v1/sandboxes/{id}/kube   sandbox  the complete binding set
 //	GET    /api/v1/sandboxes/{id}/kube   sandbox  the set without secret material
 //	DELETE /api/v1/sandboxes/{id}/kube   sandbox  no bindings
-//	POST   /api/v1/kube/preflight        tenant   one binding, no sandbox
+//	POST   /api/v1/kube/preflight        project   one binding, no sandbox
 //
 // A PUT states the whole set, so a client's reconcile is one verb. The set
 // is stored with its credentials sealed; it reaches a pod sealed to the

@@ -25,10 +25,10 @@ const (
 	textNoChallenge        = "no such challenge"
 	textNoVisit            = "no such visit"
 	textNoProvider         = "no such provider"
-	textReservedName       = "ferun is every tenant's provider and cannot be made"
+	textReservedName       = "ferun is every project's provider and cannot be made"
 	textDestinationDenied  = "the address of %s is not reachable from the control plane"
 	textOIDCNeedsFerunAuth = "providers of kind oidc need ferun-auth, which this installation does not run"
-	textTooManyProviders   = "a tenant has at most %d providers"
+	textTooManyProviders   = "a project has at most %d providers"
 	textProviderInUse      = "provider %s is named by %d environments"
 	textChallengeExpired   = "the challenge has expired: send the browser to its restart address"
 	textChallengeAnswered  = "the challenge was answered before: send the browser to its restart address"
@@ -37,7 +37,7 @@ const (
 	textFailed = "the visits service failed"
 )
 
-// maxProviders is how many providers a tenant has at most.
+// maxProviders is how many providers a project has at most.
 const maxProviders = 50
 
 func errNoChallenge() error { return apierr.New(http.StatusNotFound, textNoChallenge) }

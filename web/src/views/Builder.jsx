@@ -118,18 +118,18 @@ function AddAddonButton({ catalog, onAdd }) {
 
 // ---------------------------------------------------------------- builder --
 
-export function Builder({ tenant, env, st, navigate, item = '' }) {
+export function Builder({ project, env, st, navigate, item = '' }) {
   const isNew = !env;
   // What the role allows (ADR 0031, ADR 0035): a new environment needs
-  // write on the tenant, a deployment, a secret's value and an attached
-  // service write on the environment (the tenant grant or the
+  // write on the project, a deployment, a secret's value and an attached
+  // service write on the environment (the project grant or the
   // environment's, the higher). Below that the builder shows the latest
   // deployment's spec and changes nothing: no plan (it needs write), no
   // apply, no secret written, no draft stored.
-  const access = useAccess(tenant);
+  const access = useAccess(project);
   const readOnly = !mayBuild(access, isNew ? '' : (st && st.id) || env);
   const editAttached = !readOnly;
-  const key = draftKey(tenant, env);
+  const key = draftKey(project, env);
   const [draft, setDraftState] = useState(null);
   const draftRef = useRef(null);
   const [baseSpec, setBaseSpec] = useState(null);
@@ -161,10 +161,10 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     setOpenState(u);
     setReviewing(false);
     if (!isNew && navigate) {
-      const to = envPath(tenant, env, 'builder', itemOfUnit(u));
+      const to = envPath(project, env, 'builder', itemOfUnit(u));
       if (typeof location === 'undefined' || to !== location.pathname) navigate(to);
     }
-  }, [isNew, navigate, tenant, env]);
+  }, [isNew, navigate, project, env]);
   // The address changed (back, a link): select what it names.
   useEffect(() => {
     if (itemOfUnit(openRef.current) !== String(item || '')) { setOpenState(unitOfItem(item)); setReviewing(false); }
@@ -390,14 +390,14 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
   if (!draft) return <p className="empty">Loading the draft…</p>;
 
   if (applied) {
-    return <Applied applied={applied} tenant={tenant} env={env} st={st} navigate={navigate}
+    return <Applied applied={applied} project={project} env={env} st={st} navigate={navigate}
       onAgain={() => { setApplied(null); draftRef.current = null; setDraftState(null); loadLatest(applied.number).catch((e) => setLoadErr(e.message)); }} />;
   }
 
   const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const ctx = {
     spec, catalog, setSecret, isNew, knownSecrets, pins, httpSecrets: httpSecretsOf(secrets), httpSecretsErr: secretsErr, editSpec,
-    editAttached, tenant, env, navigate, sandboxes,
+    editAttached, project, env, navigate, sandboxes,
   };
   const review = !readOnly && (
     <ReviewPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} findings={findings}
@@ -412,7 +412,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
             setNotice(`Nothing changes: the draft equals deployment ${res.number}.`);
           } else {
             writeItem('localStorage', key, '');
-            if (isNew) navigate(envPath(tenant, draftRef.current.name));
+            if (isNew) navigate(envPath(project, draftRef.current.name));
             else setApplied(res);
           }
         } catch (e) {
@@ -565,7 +565,7 @@ async function applyDraft({ draftRef, set, edit, isNew, env, answer, message, pe
       await api.createEnvironment(target, d.id);
     } catch (e) {
       if (e.status === 409 && e.body && e.body.code === 'name_taken') {
-        throw new Error(`the tenant has an environment ${target} already: choose another name`);
+        throw new Error(`the project has an environment ${target} already: choose another name`);
       }
       throw e;
     }
@@ -1031,7 +1031,7 @@ function ChangeRow({ d, onOpen }) {
   );
 }
 
-function Applied({ applied, tenant, env, st, navigate, onAgain }) {
+function Applied({ applied, project, env, st, navigate, onAgain }) {
   const rollout = st && st.rollout && st.rollout.deployment === applied.number ? st.rollout : null;
   return (
     <div className="b-applied">
@@ -1041,10 +1041,10 @@ function Applied({ applied, tenant, env, st, navigate, onAgain }) {
           : <>It waits for its rollout ({applied.state}).</>}
       </p>
       {(applied.diff || []).length > 0 && <ul className="b-changes">{applied.diff.map((d) => (
-        <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={() => navigate(envPath(tenant, env, 'deployments', applied.number))} />))}</ul>}
+        <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={() => navigate(envPath(project, env, 'deployments', applied.number))} />))}</ul>}
       <div className="b-row">
-        <button onClick={() => navigate(envPath(tenant, env))}>The overview</button>
-        <button onClick={() => navigate(envPath(tenant, env, 'deployments', applied.number))}>Deployment {applied.number}</button>
+        <button onClick={() => navigate(envPath(project, env))}>The overview</button>
+        <button onClick={() => navigate(envPath(project, env, 'deployments', applied.number))}>Deployment {applied.number}</button>
         <button className="primary" onClick={onAgain}><Icon name="plus" size={13} /> New deployment</button>
       </div>
     </div>

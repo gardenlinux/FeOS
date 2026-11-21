@@ -11,7 +11,7 @@ const iso = (msAgo) => new Date(NOW - msAgo).toISOString();
 describe('attention', () => {
   it('puts what is broken before what will break before what is worth knowing, each with its place', () => {
     const items = attention({
-      tenant: 'kino',
+      project: 'kino',
       environments: [{ name: 'prod', openIncidents: 1, state: 'failed', deployment: 13, deployed: 12 }],
       incidents: { prod: [{ id: '12', object: 'service/api', condition: 'crash_loop', summary: 'exited 3 times', openedAt: iso(H) }] },
       sandboxes: [{ sandboxId: 'f1g6n3w9yzp', clientState: 'failed', statusDescription: 'the registry refused it', updatedAt: iso(2 * H),
@@ -25,18 +25,18 @@ describe('attention', () => {
       quota: { limits: { sandboxes: 10 }, use: { sandboxes: 9 } },
     }, NOW);
     expect(items.map((i) => [i.severity, i.title, i.to])).toEqual([
-      ['bad', 'crash_loop', '/tenants/kino/environments/prod/incidents/12'],
-      ['bad', 'sandbox failed', '/tenants/kino/environments/kino--tools/sandboxes/f1g6n3w9yzp'],
-      ['warn', 'waiting-for-dns', '/tenants/kino/domains/d-2'],
-      ['warn', 'sandboxes: 90 % of the limit', '/tenants/kino/usage'],
-      ['info', 'invitation expires in 20 h', '/tenants/kino/members'],
+      ['bad', 'crash_loop', '/projects/kino/environments/prod/incidents/12'],
+      ['bad', 'sandbox failed', '/projects/kino/environments/kino--tools/sandboxes/f1g6n3w9yzp'],
+      ['warn', 'waiting-for-dns', '/projects/kino/domains/d-2'],
+      ['warn', 'sandboxes: 90 % of the limit', '/projects/kino/usage'],
+      ['info', 'invitation expires in 20 h', '/projects/kino/members'],
     ]);
     expect(items[2].detail).toBe('the CNAME points elsewhere · turns inactive in 70 h');
   });
 
   it('names a failed deployment without an incident, and a count it could not read one by one', () => {
     const items = attention({
-      tenant: 't',
+      project: 't',
       environments: [{ name: 'stage', state: 'failed', deployment: 4, deployed: 3, openIncidents: 0 },
         { name: 'prod', state: 'deployed', deployment: 2, openIncidents: 2 }],
     }, NOW);
@@ -45,12 +45,12 @@ describe('attention', () => {
   });
 
   it('is empty when nothing needs anyone', () => {
-    expect(attention({ tenant: 't', environments: [{ name: 'prod', state: 'deployed', openIncidents: 0 }] }, NOW)).toEqual([]);
+    expect(attention({ project: 't', environments: [{ name: 'prod', state: 'deployed', openIncidents: 0 }] }, NOW)).toEqual([]);
   });
 
   it('counts for the sidebar', () => {
     const items = attention({
-      tenant: 't',
+      project: 't',
       incidents: { prod: [{ id: '1', condition: 'crash_loop' }] },
       environments: [{ name: 'prod', openIncidents: 1 }],
       domains: [{ id: 'd', name: 'a.example', state: 'unbound' }],

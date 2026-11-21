@@ -36,7 +36,7 @@ const REACH = {
 const html = (el) => renderToStaticMarkup(el);
 const text = (el) => html(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const pic = (kind, name, extra = {}) => (
-  <ObjectReachPicture tenant="t" env="stage" spec={SPEC} reach={REACH} kind={kind} name={name} navigate={() => {}} {...extra} />);
+  <ObjectReachPicture project="t" env="stage" spec={SPEC} reach={REACH} kind={kind} name={name} navigate={() => {}} {...extra} />);
 
 describe("an object's reachability on its Config", () => {
   it('shows who reaches it, with the route\'s clients, and what it reaches, with links', () => {
@@ -46,7 +46,7 @@ describe("an object's reachability on its Config", () => {
     expect(t).toContain('http 8080 catalog');
     expect(t).toContain('postgres 5432 db');
     expect(t).toContain('all traffic Internet');
-    expect(html(pic('service', 'api'))).toContain('href="/tenants/t/environments/stage/objects/addon/db/config"');
+    expect(html(pic('service', 'api'))).toContain('href="/projects/t/environments/stage/objects/addon/db/config"');
     expect(html(pic('service', 'api'))).toContain('title="postgres 5432 to addon db (by env DATABASE_URL)"');
   });
 
@@ -61,7 +61,7 @@ describe("an object's reachability on its Config", () => {
 
   it('sends an attached service to its sandbox, and says what is not there yet', () => {
     expect(text(pic('service', 'preview'))).toContain('Runs in sandbox sbx1 : its calls are the sandbox\'s pod\'s');
-    expect(html(pic('service', 'preview'))).toContain('href="/tenants/t/environments/stage/sandboxes/sbx1"');
+    expect(html(pic('service', 'preview'))).toContain('href="/projects/t/environments/stage/sandboxes/sbx1"');
     expect(text(pic('service', 'gone'))).toContain('Not in the deployed deployment.');
     expect(text(pic('service', 'api', { reach: null }))).toContain('answers no reachability');
     expect(text(pic('service', 'api', { n: 0 }))).toContain('Not deployed yet.');
@@ -88,7 +88,7 @@ describe('where the keys live in the picture', () => {
       : { upstream: `https://${n}.example.com`, credential: { kind: 'headers' } }])),
   });
   const cards = (spec, keys) => (
-    <ObjectCards tenant="t" env="expensa-stage" model={withKeys(reachModel(spec, dep.reachability), spec, keys)} navigate={() => {}} />);
+    <ObjectCards project="t" env="expensa-stage" model={withKeys(reachModel(spec, dep.reachability), spec, keys)} navigate={() => {}} />);
   const card = (out, ref) => out.slice(out.indexOf(`aria-label="${ref}"`)).split('</section>')[0];
 
   it('marks the edges to addons, not those between services, and says nothing of keys at the node without a binding', () => {
@@ -161,7 +161,7 @@ describe('where the keys live in the picture', () => {
       .objects.find((o) => o.ref === 'service/expense-service').outs.find((r) => r.peer.type === 'upstream');
     expect(text(<ReachFlow ins={[]} outs={[row]} egress="none"><span>box</span></ReachFlow>)).toContain('Nothing else outside the environment');
     expect(text(<ReachFlow ins={[]} outs={[]} egress="none"><span>box</span></ReachFlow>)).toContain('Nothing outside the environment');
-    const own = text(<ObjectReachPicture tenant="t" env="expensa-stage" spec={withBindings(['erp'])} reach={dep.reachability}
+    const own = text(<ObjectReachPicture project="t" env="expensa-stage" spec={withBindings(['erp'])} reach={dep.reachability}
       kind="service" name="expense-service" keys={{ catalog }} navigate={() => {}} />);
     expect(own).toContain('OAuth2 at the node api.vendor.example');
     expect(own).toContain('postgres 5432 by identity postgres');

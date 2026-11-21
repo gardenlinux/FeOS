@@ -147,11 +147,11 @@ func TestCursor(t *testing.T) {
 	}
 }
 
-func TestTenants(t *testing.T) {
+func TestProjects(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != pathTenant || r.URL.Query().Get("filter") != "environments" {
+		if r.URL.Path != pathProject || r.URL.Query().Get("filter") != "environments" {
 			http.NotFound(w, r)
 			return
 		}
@@ -159,20 +159,20 @@ func TestTenants(t *testing.T) {
 		// A ferund of the release before reads the cookie's old name,
 		// which the sink passes on beside the new one.
 		if c, err := r.Cookie(auth.OldSessionCookie); err == nil {
-			session = c.Value + " " + r.Header.Get("FeRun-Tenant")
+			session = c.Value + " " + r.Header.Get("FeRun-Project")
 		}
 		switch r.Header.Get("Authorization") + session {
 		case "Bearer good":
-			// A ferund of before people answers the tenant alone.
-			_, _ = w.Write([]byte(`{"tenant":"acme"}`))
+			// A ferund of before people answers the project alone.
+			_, _ = w.Write([]byte(`{"project":"acme"}`))
 		case "Bearer reader":
-			_, _ = w.Write([]byte(`{"tenant":"acme","role":"read","environments":[]}`))
+			_, _ = w.Write([]byte(`{"project":"acme","role":"read","environments":[]}`))
 		case "Bearer stage":
-			_, _ = w.Write([]byte(`{"tenant":"acme","role":"","environments":["e1",""]}`))
+			_, _ = w.Write([]byte(`{"project":"acme","role":"","environments":["e1",""]}`))
 		case "s1 acme":
-			_, _ = w.Write([]byte(`{"tenant":"acme","role":"write","environments":["e1"]}`))
+			_, _ = w.Write([]byte(`{"project":"acme","role":"write","environments":["e1"]}`))
 		case "s1 other":
-			http.Error(w, `{"error":"no such tenant"}`, http.StatusNotFound)
+			http.Error(w, `{"error":"no such project"}`, http.StatusNotFound)
 		case "Bearer broken":
 			http.Error(w, "boom", http.StatusInternalServerError)
 		default:
@@ -182,13 +182,13 @@ func TestTenants(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	ts := NewTenants(srv.URL, nil, time.Minute)
+	ts := NewProjects(srv.URL, nil, time.Minute)
 	now := time.Now()
 	ts.now = func() time.Time { return now }
 	ctx := context.Background()
 	good := Credential{Authorization: "Bearer good"}
 	for range 3 {
-		if got, err := ts.Resolve(ctx, good); err != nil || !reflect.DeepEqual(got, Access{Tenant: "acme", All: true, Write: true}) {
+		if got, err := ts.Resolve(ctx, good); err != nil || !reflect.DeepEqual(got, Access{Project: "acme", All: true, Write: true}) {
 			t.Fatalf("Resolve = %+v, %v", got, err)
 		}
 	}
@@ -203,25 +203,25 @@ func TestTenants(t *testing.T) {
 		c    Credential
 		want Access
 	}{
-		{Credential{Authorization: "Bearer reader"}, Access{Tenant: "acme", All: true}},
-		{Credential{Authorization: "Bearer stage"}, Access{Tenant: "acme", Envs: []string{"e1"}}},
-		{Credential{Session: "s1", Tenant: "acme"}, Access{Tenant: "acme", All: true, Write: true}},
+		{Credential{Authorization: "Bearer reader"}, Access{Project: "acme", All: true}},
+		{Credential{Authorization: "Bearer stage"}, Access{Project: "acme", Envs: []string{"e1"}}},
+		{Credential{Session: "s1", Project: "acme"}, Access{Project: "acme", All: true, Write: true}},
 	} {
 		if got, err := ts.Resolve(ctx, c.c); err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%+v: %+v, %v", c.c, got, err)
 		}
 	}
-	// A session's answer is kept for sessionTTL, per tenant.
+	// A session's answer is kept for sessionTTL, per project.
 	n := calls.Load()
 	var ref *refusal
-	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "other"}); !errors.As(err, &ref) || ref.status != 404 {
-		t.Errorf("another tenant: %v", err)
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Project: "other"}); !errors.As(err, &ref) || ref.status != 404 {
+		t.Errorf("another project: %v", err)
 	}
-	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "acme"}); err != nil || calls.Load() != n+1 {
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Project: "acme"}); err != nil || calls.Load() != n+1 {
 		t.Errorf("kept: %v, %d calls", err, calls.Load()-n)
 	}
 	now = now.Add(sessionTTL)
-	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "acme"}); err != nil || calls.Load() != n+2 {
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Project: "acme"}); err != nil || calls.Load() != n+2 {
 		t.Errorf("after sessionTTL: %v, %d calls", err, calls.Load()-n)
 	}
 	_, err := ts.Resolve(ctx, Credential{Authorization: "Bearer bad"})
@@ -251,7 +251,7 @@ func TestParseExport(t *testing.T) {
 		t.Fatalf("%d streams", len(got))
 	}
 	b := got[0]
-	if b.Labels.Node != "node-1" || b.Labels.Replica != 2 || b.Labels.RetentionDays != 90 || b.Labels.Tenant != "acme" ||
+	if b.Labels.Node != "node-1" || b.Labels.Replica != 2 || b.Labels.RetentionDays != 90 || b.Labels.Project != "acme" ||
 		b.Labels.Source != SourceContainer {
 		t.Errorf("labels %+v", b.Labels)
 	}
@@ -263,7 +263,7 @@ func TestParseExport(t *testing.T) {
 	}
 	bad := exportRequest(resourceAttrs("p1", "main", "L1", "", nil), record(0, 1, "", "x"))
 	if _, err := parseExport(bad, ingestPeer{node: "n"}, now); err == nil {
-		t.Error("a resource without a tenant passed")
+		t.Error("a resource without a project passed")
 	}
 	noOff := exportRequest(resourceAttrs("p1", "main", "L1", "acme", nil), &logsv1.LogRecord{Body: str("x")})
 	if _, err := parseExport(noOff, ingestPeer{node: "n"}, now); err == nil {
@@ -380,10 +380,10 @@ func kv(k string, v *commonv1.AnyValue) *commonv1.KeyValue {
 	return &commonv1.KeyValue{Key: k, Value: v}
 }
 
-func resourceAttrs(pod, container, logID, tenant string, more map[string]string) []*commonv1.KeyValue {
+func resourceAttrs(pod, container, logID, project string, more map[string]string) []*commonv1.KeyValue {
 	attrs := []*commonv1.KeyValue{kv(attrPod, str(pod)), kv(attrContainer, str(container)), kv(attrLogID, str(logID))}
-	if tenant != "" {
-		attrs = append(attrs, kv(attrTenant, str(tenant)))
+	if project != "" {
+		attrs = append(attrs, kv(attrProject, str(project)))
 	}
 	for k, v := range more {
 		attrs = append(attrs, kv(k, str(v)))

@@ -2,7 +2,7 @@
 
 **Status:** Accepted · **Date:** 2026-10-18
 
-An environment is a tenant's set of typed objects, services, jobs,
+An environment is a project's set of typed objects, services, jobs,
 addons, routes, secrets and bindings, that reference each other by name;
 its ID is its identity and its name a handle that can change. It changes
 only by deployments: numbered, immutable records of the whole desired
@@ -51,8 +51,8 @@ it can state and get an answer for at once.
 
 ### An environment holds typed objects
 
-- An **environment** is the unit of CaaS in `ferund`: a tenant's, with a
-  name that is a DNS label unique in the tenant and an ID that is its
+- An **environment** is the unit of CaaS in `ferund`: a project's, with a
+  name that is a DNS label unique in the project and an ID that is its
   identity, and a name space in which its objects address each other by
   name. Either names it in a path.
 - It holds objects, each with a name unique in the environment: a
@@ -71,7 +71,7 @@ it can state and get an answer for at once.
   container's own files and what it writes, as a cache or a spool.
   The disk is scratch: every new pod starts on an empty one, and only
   what moves with a pod (a drain, a hibernation) keeps it. Its node
-  books it whole while the pod runs; it counts towards no tenant's
+  books it whole while the pod runs; it counts towards no project's
   limit.
 - Objects reference each other by name, and the references are resolved
   when a write is validated: a service's environment variable from an
@@ -90,10 +90,10 @@ it can state and get an answer for at once.
   ID. The name is for people and a second way to address the
   environment in a path.
 - A rename gives the environment a new name in one call, checked as a
-  create's name is; a name another environment of the tenant has is a
+  create's name is; a name another environment of the project has is a
   conflict, the name it has already changes nothing, and the old name is
   free for another environment at once. It is the environment admin's
-  or the tenant writer's, as a deletion is.
+  or the project writer's, as a deletion is.
 - A rename leaves the ID, labels, deployments, tags, secrets, grants,
   tokens and domains, the default host whose label was claimed at the
   first publish, every pod, template, group and name table, the
@@ -188,7 +188,7 @@ it can state and get an answer for at once.
   instance left when it stopped is taken over by the leader, whose
   `StopPod` joins the stop that `feosd` runs. An environment's deletion
   ends its instances by the same steps, without the drain. Like a
-  rollout's surge replica, a stopping instance counts against no tenant
+  rollout's surge replica, a stopping instance counts against no project
   limit: limits count what deployments declare.
 - A rollout that does not reach readiness within its budget has
   **failed**: the service keeps the pods of the last deployed deployment
@@ -244,7 +244,7 @@ it can state and get an answer for at once.
   next node first, and that one again after all others.
 - Only placement decides: nothing moves a running replica that went
   beside another, and a rollout still stops its old replicas from the
-  highest. Addons, jobs, attached services, sandboxes and tenants' jobs
+  highest. Addons, jobs, attached services, sandboxes and projects' jobs
   have no peers.
 
 ### The environment's names
@@ -391,7 +391,7 @@ it can state and get an answer for at once.
   tombstones. The node knows nothing of environments or deployments; it
   sees pods, volumes, security groups and name tables, and labels carry
   the rest.
-- An environment's pods are no tenant's sandboxes and are absent from
+- An environment's pods are no project's sandboxes and are absent from
   its sandbox routes; a sandbox is not an object of an environment, an
   attached service names one.
 - A service whose process ignores `SIGTERM`, as a PID 1 without a

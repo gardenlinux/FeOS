@@ -21,13 +21,13 @@ const ServiceName = "ferun-ingress"
 // ingress instance name (docs/architecture/traces.md, The ingress): a
 // ResourceSpans per (environment, service). It returns the request, nil
 // when it holds no span, and how many records it skipped: those without
-// an environment or tenant, or without valid IDs.
+// an environment or project, or without valid IDs.
 func Spans(name string, recs []wire.AccessLogEntry) (req *otlptracev1.ExportTraceServiceRequest, skipped int) {
 	byKey := map[streamKey]*tracev1.ResourceSpans{}
 	var out []*tracev1.ResourceSpans
 	for _, e := range recs {
 		sp := span(e)
-		if e.Env == "" || e.Tenant == "" || sp == nil {
+		if e.Env == "" || e.Project == "" || sp == nil {
 			skipped++
 			continue
 		}
@@ -39,7 +39,7 @@ func Spans(name string, recs []wire.AccessLogEntry) (req *otlptracev1.ExportTrac
 					kv("service.name", str(ServiceName)),
 					kv(attrPod, str("ingress/"+name)),
 					kv(attrSource, str(SourceIngress)),
-					kv(attrTenant, str(e.Tenant)),
+					kv(attrProject, str(e.Project)),
 					kv(attrEnvironment, str(e.Env)),
 					kv(attrKind, str("service")),
 					kv(attrObject, str(e.Service)),

@@ -129,7 +129,7 @@ func (f *fakeDNS) fail(name string) {
 }
 
 // harness is a domains service on a fresh database whose instance leads,
-// with the tenants acme and rival, and a fake DNS. Its loops are not
+// with the projects acme and rival, and a fake DNS. Its loops are not
 // registered: the tests run them.
 type harness struct {
 	t   *testing.T
@@ -170,8 +170,8 @@ func newHarness(t *testing.T, mod func(*Config)) *harness {
 		t.Fatal(err)
 	}
 	h := &harness{t: t, d: d, st: st, dns: f, s: s}
-	for _, tenant := range []string{"acme", "rival"} {
-		if _, _, err := st.CreateTenant(bg, tenant); err != nil {
+	for _, project := range []string{"acme", "rival"} {
+		if _, _, err := st.CreateProject(bg, project); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -185,10 +185,10 @@ func (h *harness) exec(sql string, args ...any) {
 	}
 }
 
-// env makes an environment of tenant, public or not, with deployment 1.
-func (h *harness) env(tenant, name string, public bool) store.Environment {
+// env makes an environment of project, public or not, with deployment 1.
+func (h *harness) env(project, name string, public bool) store.Environment {
 	h.t.Helper()
-	e, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
+	e, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: project, Name: name})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -201,10 +201,10 @@ func (h *harness) env(tenant, name string, public bool) store.Environment {
 	return e
 }
 
-// claim claims name for tenant and returns its row.
-func (h *harness) claim(tenant, name string) store.DomainView {
+// claim claims name for project and returns its row.
+func (h *harness) claim(project, name string) store.DomainView {
 	h.t.Helper()
-	d, err := h.s.CreateDomain(bg, tenant, CreateRequest{Name: name})
+	d, err := h.s.CreateDomain(bg, project, CreateRequest{Name: name})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -229,9 +229,9 @@ func (h *harness) check(id uuid.UUID) store.DomainView {
 	return h.row(id)
 }
 
-func (h *harness) bind(tenant string, id uuid.UUID, env string) store.DomainView {
+func (h *harness) bind(project string, id uuid.UUID, env string) store.DomainView {
 	h.t.Helper()
-	if _, err := h.s.BindDomain(bg, tenant, id.String(), env); err != nil {
+	if _, err := h.s.BindDomain(bg, project, id.String(), env); err != nil {
 		h.t.Fatal(err)
 	}
 	return h.row(id)

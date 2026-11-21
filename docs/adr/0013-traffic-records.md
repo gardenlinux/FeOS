@@ -76,7 +76,7 @@ ECH configuration of its own is not seen.
   node (`TrafficService`, `feosctl traffic watch`), from a bounded buffer
   behind which a subscriber that falls behind misses records and learns
   how many.
-- Whatever store takes them off the node joins them to tenants and
+- Whatever store takes them off the node joins them to projects and
   decides how long they are kept and who sees them.
 
 ## Alternatives considered
@@ -90,12 +90,12 @@ ECH configuration of its own is not seen.
   name before a connection goes on, but traffic would wait for `feosd`,
   and stall while it restarts.
 - **Recording in `feos-guest`**: the guest knows containers and
-  processes, but it runs inside the tenant's VM, where the workload can
+  processes, but it runs inside the project's VM, where the workload can
   forge or suppress its records.
 - **Intercepting TLS** with a CA of ours in every container: full URLs,
-  but it breaks pinning, needs the CA in every image, and reads tenants'
+  but it breaks pinning, needs the CA in every image, and reads projects'
   content.
-- **Capturing whole packets**: the volume, and tenants' content.
+- **Capturing whole packets**: the volume, and projects' content.
 - **Blocking by name** before a connection goes on, should rules by name
   not be enough: not pursued; the resolver's egress by name (ADR 0012)
   refuses a name a pod may not reach before any connection is made.
@@ -107,7 +107,7 @@ ECH configuration of its own is not seen.
 - `feosd`'s work grows with the pods' connections. Under load the kernel
   drops events that `feosd` does not read in time, and the counts say
   so.
-- Tenants' DNS names and server names are recorded on the node and kept
+- Projects' DNS names and server names are recorded on the node and kept
   there only until a subscriber has read them; whoever stores them
   decides their retention.
 - A record is attributed to a pod by its addresses, so an address handed
@@ -121,7 +121,7 @@ ECH configuration of its own is not seen.
   retention of its own and an admin view per sandbox and node (ADR 0015),
   but `feosd` sends none; ADR 0012 names the sink (ADR 0026) for drops
   and refused names, mapped to the deployment's words. Until one of the
-  two is built, records are read on the node alone, and tenants see
+  two is built, records are read on the node alone, and projects see
   nothing of their pods' traffic.
 
 ## History

@@ -42,7 +42,7 @@ const (
 )
 
 // fakeFerund is ferund's part of the contract: the service certificate,
-// issued with pki, and a token's tenant.
+// issued with pki, and a token's project.
 type fakeFerund struct {
 	iss   *pki.Issuer
 	certs atomic.Int32
@@ -97,14 +97,14 @@ func (f *fakeFerund) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.certs.Add(1)
 		writeJSON(w, http.StatusOK, certAnswer{Certificate: pemCerts(c.Chain...), Bundle: pemCerts(c.TrustBundle...), NotAfter: leaf.NotAfter})
-	case r.Method == http.MethodGet && r.URL.Path == pathTenant:
-		if r.Header.Get("Authorization") != "Bearer tenant-token" {
+	case r.Method == http.MethodGet && r.URL.Path == pathProject:
+		if r.Header.Get("Authorization") != "Bearer project-token" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"invalid token"}`))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"tenant": "acme"})
+		writeJSON(w, http.StatusOK, map[string]string{"project": "acme"})
 	default:
 		http.NotFound(w, r)
 	}
@@ -262,7 +262,7 @@ func TestEndToEnd(t *testing.T) {
 			}
 		}
 		var resp *http.Response
-		resp, b = get("/api/v1/logs?environment=env1", "tenant-token")
+		resp, b = get("/api/v1/logs?environment=env1", "project-token")
 		if resp.StatusCode != 200 {
 			t.Fatalf("%s: logs: %d %s", when, resp.StatusCode, b)
 		}
@@ -275,21 +275,21 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}
 	st := page.Streams[page.Lines[0].Stream]
-	if st.Node != "node-1" || st.Environment != "env1" || st.Deployment != 4 || st.Lines != 3 || st.Tenant != "acme" {
+	if st.Node != "node-1" || st.Environment != "env1" || st.Deployment != 4 || st.Lines != 3 || st.Project != "acme" {
 		t.Errorf("stream %+v", st)
 	}
 	if !strings.Contains(string(b), `"ts":"`) || !strings.Contains(string(b), `"offset":"20"`) {
 		t.Errorf("ts and offset are not strings: %s", b)
 	}
-	resp, b := get("/api/v1/logs?environment=env1&trace="+traceA, "tenant-token")
+	resp, b := get("/api/v1/logs?environment=env1&trace="+traceA, "project-token")
 	if resp.StatusCode != 200 || strings.Count(string(b), `"offset"`) != 1 {
 		t.Errorf("trace: %d %s", resp.StatusCode, b)
 	}
-	resp, b = get("/api/v1/log-streams?environment=env1", "tenant-token")
+	resp, b = get("/api/v1/log-streams?environment=env1", "project-token")
 	if resp.StatusCode != 200 || !strings.Contains(string(b), `"container":"main"`) {
 		t.Errorf("streams: %d %s", resp.StatusCode, b)
 	}
-	if resp, _ := get("/api/v1/logs?kind=service", "tenant-token"); resp.StatusCode != 400 {
+	if resp, _ := get("/api/v1/logs?kind=service", "project-token"); resp.StatusCode != 400 {
 		t.Errorf("no selector: %d", resp.StatusCode)
 	}
 
@@ -297,7 +297,7 @@ func TestEndToEnd(t *testing.T) {
 	fctx, fcancel := context.WithCancel(actx)
 	defer fcancel()
 	fr, _ := http.NewRequestWithContext(fctx, http.MethodGet, api+"/api/v1/logs?environment=env1&kind=service&object=api&follow=1", nil)
-	fr.Header.Set("Authorization", "Bearer tenant-token")
+	fr.Header.Set("Authorization", "Bearer project-token")
 	fresp, err := http.DefaultClient.Do(fr)
 	if err != nil {
 		t.Fatal(err)
@@ -330,13 +330,13 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, _ := http.NewRequestWithContext(actx, http.MethodDelete, api+"/api/v1/log-streams?environment=env1", nil)
-	r.Header.Set("Authorization", "Bearer tenant-token")
+	r.Header.Set("Authorization", "Bearer project-token")
 	dresp, err := http.DefaultClient.Do(r)
 	if err != nil || dresp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete: %v %v", dresp, err)
 	}
 	_ = dresp.Body.Close()
-	resp, b = get("/api/v1/log-streams?environment=env1", "tenant-token")
+	resp, b = get("/api/v1/log-streams?environment=env1", "project-token")
 	if resp.StatusCode != 200 || string(b) != "{\"streams\":[]}\n" {
 		t.Errorf("after delete: %s", b)
 	}
@@ -402,14 +402,14 @@ func TestIngressEndToEnd(t *testing.T) {
 	defer func() { _ = client.Close() }()
 	t0 := time.Now().Add(-time.Minute).UTC()
 	rec := func(at time.Duration, path string, status int, outcome, trace string) wire.AccessLogEntry {
-		return wire.AccessLogEntry{Time: t0.Add(at), DurationNs: 1500, Env: "env1", Tenant: "acme", Service: "web",
+		return wire.AccessLogEntry{Time: t0.Add(at), DurationNs: 1500, Env: "env1", Project: "acme", Service: "web",
 			Instance: "i1", Host: "app.apps.example.com", Method: "GET", Path: path, Proto: "HTTP/2.0", Status: status,
 			Outcome: outcome, Attempts: 1, TraceID: trace, SpanID: "00f067aa0ba902b7"}
 	}
 	streams := sinklog.NewStreams("in-0", "3f0c2a4e-8d1b-4c55-9a39-0d6f1b7a2c11")
 	req, taken, skipped := streams.Batch([]wire.AccessLogEntry{
 		rec(0, "/a", 200, "2xx", ""), rec(time.Second, "/b", 503, "5xx", traceA), rec(2*time.Second, "/c", 404, "4xx", ""),
-		{Env: "env1", Service: "web"}, // no tenant: skipped
+		{Env: "env1", Service: "web"}, // no project: skipped
 	})
 	if taken != 4 || skipped != 1 {
 		t.Fatalf("taken %d, skipped %d", taken, skipped)
@@ -425,7 +425,7 @@ func TestIngressEndToEnd(t *testing.T) {
 	read := func(query string) PageJSON {
 		t.Helper()
 		r, _ := http.NewRequestWithContext(actx, http.MethodGet, api+"/api/v1/logs?"+query, nil)
-		r.Header.Set("Authorization", "Bearer tenant-token")
+		r.Header.Set("Authorization", "Bearer project-token")
 		resp, err := http.DefaultClient.Do(r)
 		if err != nil {
 			t.Fatal(err)
@@ -453,7 +453,7 @@ func TestIngressEndToEnd(t *testing.T) {
 	}
 	st := page.Streams[page.Lines[0].Stream]
 	if st.Source != SourceIngress || st.Node != "" || st.Environment != "env1" || st.Kind != "service" ||
-		st.Object != "web" || st.Container != "env1/web" || st.Tenant != "acme" || st.Lines != 3 {
+		st.Object != "web" || st.Container != "env1/web" || st.Project != "acme" || st.Lines != 3 {
 		t.Errorf("stream %+v", st)
 	}
 	if page := read("environment=env1&source=ingress&level=warn,error&object=web"); len(page.Lines) != 2 ||

@@ -20,7 +20,7 @@ import (
 
 // CreateEnvRequest is POST /api/v1/environments.
 type CreateEnvRequest struct {
-	// Name is a DNS label, never a UUID, unique per tenant.
+	// Name is a DNS label, never a UUID, unique per project.
 	Name string `json:"name"`
 	// ID is the environment's UUID; "": a new one. Creating the same ID
 	// and name again answers 200 with the environment.
@@ -69,7 +69,7 @@ type EnvStatus struct {
 	Deployment int               `json:"deployment"`
 	Deployed   int               `json:"deployed"`
 	Deleting   bool              `json:"deleting"`
-	// Public: its tenant made it public (PUT …/public), and the ingress
+	// Public: its project made it public (PUT …/public), and the ingress
 	// serves its image services' routes without a route token (ADR 0021).
 	Public bool `json:"public"`
 	// Hosts are the hosts the ingress serves it at while it is public: its
@@ -78,7 +78,7 @@ type EnvStatus struct {
 	// while it is being deleted.
 	Hosts []string `json:"hosts"`
 	// HostLabel is the label of its default host, given at its first
-	// publish or chosen by its tenant; empty before. It stays while a
+	// publish or chosen by its project; empty before. It stays while a
 	// domain is its host.
 	HostLabel string `json:"hostLabel,omitempty"`
 	// Access is who the ingress admits while it is public (ADR 0054):
@@ -528,7 +528,7 @@ type PutTagRequest struct {
 	Author     string `json:"author,omitempty"`
 }
 
-// SecretList is GET /api/v1/environments/{env}/secrets: the tenant's
+// SecretList is GET /api/v1/environments/{env}/secrets: the project's
 // secrets of the environment, both kinds (ADR 0055), at their latest
 // versions, by name (never a value, never a secret field, never a system
 // secret).
@@ -667,9 +667,9 @@ type LogsAnswer struct {
 
 // PublicRequest is PUT /api/v1/environments/{env}/public: whether the
 // ingress serves the environment (ADR 0021). Public is required.
-// HostLabel, with public true, is the default host's label its tenant
+// HostLabel, with public true, is the default host's label its project
 // chooses (model.ChosenHostLabel: a DNS label with "--" in it; for a
-// tenant that owns the apps zone also model.PlainHostLabel, one without);
+// project that owns the apps zone also model.PlainHostLabel, one without);
 // without it the environment keeps its label, or gets one at its first
 // publish. Access and Provider, only with public true, say who the
 // ingress admits (ADR 0054; Service.SetPublic).
@@ -679,7 +679,7 @@ type PublicRequest struct {
 	// Access is who the ingress admits (ADR 0054): model.AccessAnyone or
 	// model.AccessVisitors; "" says nothing (see below).
 	Access string `json:"access,omitempty"`
-	// Provider, with access visitors, is one of the tenant's providers, or
+	// Provider, with access visitors, is one of the project's providers, or
 	// model.ProviderFerun; "": ferun.
 	Provider string `json:"provider,omitempty"`
 }

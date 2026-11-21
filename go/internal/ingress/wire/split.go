@@ -5,7 +5,7 @@ package wire
 
 // The sizes of the Sync stream's messages. The control plane bounds one
 // environment far below PartBytes (table.MaxEnvBytes), so that no
-// tenant's environments can make a message too large for every ingress.
+// project's environments can make a message too large for every ingress.
 const (
 	// MaxMessageBytes is the largest message an ingress receives (its
 	// calls' MaxCallRecvMsgSize). A larger one fails the stream with

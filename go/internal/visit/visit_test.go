@@ -436,7 +436,7 @@ func TestIsVisitorHeader(t *testing.T) {
 			t.Errorf("%s is not a visitor header", h)
 		}
 	}
-	for _, h := range []string{"X-FeRun-Visitor", "FeRun-Tenant", "FeRun-Visi", "", "Visitor", "FeRunVisitor", "FeRun-Vis1t"} {
+	for _, h := range []string{"X-FeRun-Visitor", "FeRun-Project", "FeRun-Visi", "", "Visitor", "FeRunVisitor", "FeRun-Vis1t"} {
 		if IsVisitorHeader(h) {
 			t.Errorf("%s is a visitor header", h)
 		}

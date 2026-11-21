@@ -1,8 +1,8 @@
-# ADR 0035: Everything runs in an environment: sandboxes and tenants' jobs belong to one
+# ADR 0035: Everything runs in an environment: sandboxes and projects' jobs belong to one
 
 **Status:** Accepted · **Date:** 2026-11-07
 
-A sandbox and a tenant's job are made in an environment, which their
+A sandbox and a project's job are made in an environment, which their
 create names and which is fixed for the pod's life; they are not
 objects of the spec, so making one is no deployment. They say what of
 the environment they reach, as ADR 0012 has it, and are otherwise
@@ -17,9 +17,9 @@ An environment holds what a deployment declares: services, jobs,
 addons, routes, volumes, secrets, bindings. Two kinds of pod are made by
 a call instead:
 
-- a **sandbox**, the tenant's, with its own idle, pause and
+- a **sandbox**, the project's, with its own idle, pause and
   hibernation, reached by exec and its port door;
-- a **tenant's job** (ADR 0041), one pod run once, a build or one-off
+- a **project's job** (ADR 0041), one pod run once, a build or one-off
   maintenance.
 
 In `ferund` they are rows of the same registry as an environment's
@@ -33,36 +33,36 @@ the API kept them apart, the separation would cost:
   environments mixes their names and ports. A pod whose groups change
   while it runs is the one exception to ADR 0012's rule that
   memberships never change.
-- **Grants.** Sandboxes, tenants' jobs and attached services would
-  belong to a tenant grant alone (ADR 0031), because a sandbox might
-  reach any of the tenant's environments. A person with `write` on one
+- **Grants.** Sandboxes, projects' jobs and attached services would
+  belong to a project grant alone (ADR 0031), because a sandbox might
+  reach any of the project's environments. A person with `write` on one
   environment could deploy there but not start a pod beside it: no
   shell next to the database, no migration run by hand, no preview.
 - **Logs, traces, deletion.** What the sink keeps of a sandbox would be
-  the tenant's, not an environment's; a person who reads one
+  the project's, not an environment's; a person who reads one
   environment would not see the sandbox that runs its preview. An
   environment that is deleted would leave its sandboxes behind.
 
 What is wanted is the namespace of Kubernetes: one place where a
-tenant's declared workloads and its single pods run side by side, under
+project's declared workloads and its single pods run side by side, under
 the same rules for network, names and access.
 
 ## Decision
 
-### A sandbox and a tenant's job belong to an environment
+### A sandbox and a project's job belong to an environment
 
-- A sandbox's and a tenant's job's create names its **environment**,
+- A sandbox's and a project's job's create names its **environment**,
   by name or ID. It is required and fixed for the pod's life. There is
-  no sandbox or tenant's job without an environment.
+  no sandbox or project's job without an environment.
 - They are **not objects of the spec.** A deployment declares what
-  should run; a sandbox and a tenant's job are made by a call and live
+  should run; a sandbox and a project's job are made by a call and live
   until deleted, ended or expired. Making one creates no deployment,
   and a deployment never makes, changes or removes one. An environment
   without deployments is a valid place for them: a room with nothing
   declared.
 - Their IDs are the cluster's (ADR 0019), so their paths do not carry
   the environment; a list takes the environment as a filter, and
-  without it lists the tenant's.
+  without it lists the project's.
 - A sandbox's token, its exec, its tools, its port door, its idle,
   pause and hibernation do not depend on its environment. `/mcp` on a
   sandbox's token is FeCode's contract (ADR 0031) and is untouched by
@@ -82,7 +82,7 @@ the same rules for network, names and access.
   address, no broken connection. A removal counts as gone when the
   nodes that hold the rule have it, as any rule's does. A hibernated
   sandbox takes a new `reaches` at its restore, as it takes everything.
-  A tenant's job's `reaches` is fixed: it runs once.
+  A project's job's `reaches` is fixed: it runs once.
 - Exec, the tools, the port door and the routes to an attached service
   do not go over the pod network: they need no declaration.
 - Like every pod of the environment, a sandbox's and a job's pod are
@@ -116,18 +116,18 @@ the same rules for network, names and access.
 ### Grants follow the environment
 
 - On an environment (ADR 0031):
-  - `read`: also its sandboxes and tenants' jobs, their status, their
+  - `read`: also its sandboxes and projects' jobs, their status, their
     logs and traces;
   - `write`: also making, pausing, resuming, deleting its sandboxes,
     their tokens, their tools and what they reach; making and cancelling
-    its tenants' jobs; services with the runtime `attached`.
-- A tenant grant's `read` still lists them all; what only a tenant
+    its projects' jobs; services with the runtime `attached`.
+- A project grant's `read` still lists them all; what only a project
   grant gives does not include sandboxes, jobs or attached services. A
   sandbox reaches only its environment, so there is no reason to keep
-  them on the tenant.
+  them on the project.
 - A sandbox's token stays the sandbox's own, of no principal.
-- Quotas are per tenant (ADR 0031), and an environment's sandboxes and
-  jobs count against the tenant's.
+- Quotas are per project (ADR 0031), and an environment's sandboxes and
+  jobs count against the project's.
 
 ### What an environment's life does to them
 
@@ -152,14 +152,14 @@ the same rules for network, names and access.
   network and deletion, and an exception in ADR 0012 for the ones that
   serve environments. One mode is simpler, and an environment with
   nothing declared costs nothing.
-- **A default environment per tenant** for sandboxes made without one:
+- **A default environment per project** for sandboxes made without one:
   the same two kinds under one name, and a place where every sandbox
   without a better home reaches every other.
 - **`reaches` required on the create**: nothing of the environment is
   the safe default, and a sandbox that needs only its token needs no
   list.
 - **A sandbox reaching all of its environment by default**: a sandbox
-  runs agents' code, and what it reaches is the tenant's decision, made
+  runs agents' code, and what it reaches is the project's decision, made
   per sandbox; `all` is one word away.
 - **A move for a changed `reaches`**, a hibernation and a restore under
   a new address: this was the decision while a sandbox named security
@@ -174,7 +174,7 @@ the same rules for network, names and access.
 
 - A person with `write` on an environment opens a shell next to its
   database, runs a migration by hand and starts a preview there,
-  without a tenant grant.
+  without a project grant.
 - A sandbox is usable by its token alone the moment it is made, and
   reaches nothing of its environment until it is told to; what it is
   told changes without a new address.
@@ -195,7 +195,7 @@ the same rules for network, names and access.
 Decided on 2026-11-07 (fea6fcb) and live the same day: a migration
 moved every sandbox and job into an environment once, into the one its
 attached service named, else into an environment `sandboxes` made for
-the tenant, and `ferund` moved the running ones under their new groups.
+the project, and `ferund` moved the running ones under their new groups.
 At first a sandbox named security groups on its create and moved under
 a new address when they changed; on 2026-11-08 they became `reaches`,
 changed in place (a061348, built in a529381), together with the

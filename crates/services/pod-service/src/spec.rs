@@ -977,13 +977,13 @@ mod tests {
     #[test]
     fn tls_bindings_take_an_alpn_protocol_or_none() {
         let with = |alpn: &str| PodSpec {
-            identity: "spiffe://run.example/tenant/t/env/e/service/api".into(),
+            identity: "spiffe://run.example/project/t/env/e/service/api".into(),
             tls_bindings: vec![TlsBinding {
                 listen: "127.64.0.2:6379".into(),
                 host: "cache".into(),
                 port: 6379,
                 alpn: alpn.into(),
-                server_id: "spiffe://run.example/tenant/t/env/e/addon/cache".into(),
+                server_id: "spiffe://run.example/project/t/env/e/addon/cache".into(),
             }],
             ..spec(vec![])
         };

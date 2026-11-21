@@ -323,7 +323,7 @@ func TestLongPathCookie(t *testing.T) {
 	path += strings.Repeat("a", visit.MaxPath-len(path))
 	now := time.Now().Unix()
 	sealed, err := keys.SealChallenge(visit.Challenge{ID: id, Env: "6f0c1d2e-0000-4000-8000-000000000001",
-		Host: "a-rather-long-environment-name--a-long-tenant-name.apps.example.test", Path: path,
+		Host: "a-rather-long-environment-name--a-long-project-name.apps.example.test", Path: path,
 		Binding: visit.BindingHash(secret), IssuedAt: now, Expires: now + 600})
 	if err != nil {
 		t.Fatal(err)

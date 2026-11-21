@@ -29,10 +29,10 @@ import (
 // environment and its service instances that are not stopping.
 type EnvRows struct {
 	ID        uuid.UUID
-	Tenant    string
+	Project   string
 	Name      string
 	HostLabel string
-	// Zone is its tenant's zone (tenants.zone; "": the apps zone).
+	// Zone is its project's zone (projects.zone; "": the apps zone).
 	Zone string
 	// Deployment is the latest desired deployment, Deployed the latest
 	// deployed one (0: none).
@@ -91,7 +91,7 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 	var out []EnvRows
 	for _, r := range rows {
 		if len(out) == 0 || out[len(out)-1].ID != r.EnvID {
-			out = append(out, EnvRows{ID: r.EnvID, Tenant: r.Owner, Name: r.Name, HostLabel: r.HostLabel,
+			out = append(out, EnvRows{ID: r.EnvID, Project: r.Owner, Name: r.Name, HostLabel: r.HostLabel,
 				Zone: r.Zone, Deployment: r.Deployment, Deployed: r.Deployed, CreatedAt: r.CreatedAt,
 				Access: r.Access, Provider: r.AccessProvider, ProviderKind: r.ProviderKind, ProviderURL: r.ProviderURL})
 		}
@@ -109,7 +109,7 @@ func Group(rows []store.IngressRoutingRow) []EnvRows {
 
 // SignIn returns where the ingress sends a navigation of e without a
 // visit (ADR 0054), with authURL ferun-auth's base URL (--visitor-auth-url;
-// "": none): for visitors of a provider of kind tenant its URL; of ferun
+// "": none): for visitors of a provider of kind project its URL; of ferun
 // or of a provider of kind oidc, authURL's /visit when there is one; ""
 // otherwise, also for a provider whose row is missing, so that the
 // ingress signs no one in (it fails closed). "" for an environment open
@@ -123,7 +123,7 @@ func SignIn(e EnvRows, authURL string) string {
 		kind = model.ProviderKindFerun
 	}
 	switch kind {
-	case model.ProviderKindTenant:
+	case model.ProviderKindProject:
 		return e.ProviderURL
 	case model.ProviderKindFerun, model.ProviderKindOIDC:
 		if authURL != "" {
@@ -202,7 +202,7 @@ func Asleep(phase, clientState, op string) bool {
 }
 
 // BuildEnv builds the table's entry of environment e for the platform's
-// zones: its default host is in its tenant's zone (zones.Of; "": no
+// zones: its default host is in its project's zone (zones.Of; "": no
 // default host, so the ingress serves nothing of it but its domains), and returns
 // the sandboxes of the instances it counted, whose changes change it.
 //
@@ -252,7 +252,7 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 	if zone := zones.Of(e.Zone); zone != "" && e.HostLabel != "" {
 		defaultHosts = append(defaultHosts, e.HostLabel+"."+zone)
 	}
-	out := wire.Env{ID: e.ID.String(), Tenant: e.Tenant, Name: e.Name, Hosts: defaultHosts, Deployment: number,
+	out := wire.Env{ID: e.ID.String(), Project: e.Project, Name: e.Name, Hosts: defaultHosts, Deployment: number,
 		Routes: []wire.Route{}, Services: []wire.Service{}}
 	if e.Access != "" && e.Access != model.AccessAnyone {
 		// Any other value than visitors goes as it is: it admits nobody.
@@ -327,8 +327,8 @@ func BuildEnv(zones model.Zones, e EnvRows, specs SpecFunc) (wire.Env, []podid.I
 		return wire.Env{}, nil, fmt.Errorf("environment %s: %w", e.ID, err)
 	}
 	if size > MaxEnvBytes {
-		return wire.Env{}, nil, fmt.Errorf("environment %s (%s of tenant %s), routing deployment %d: %d bytes, at most %d: %w",
-			e.ID, e.Name, e.Tenant, number, size, MaxEnvBytes, ErrTooLarge)
+		return wire.Env{}, nil, fmt.Errorf("environment %s (%s of project %s), routing deployment %d: %d bytes, at most %d: %w",
+			e.ID, e.Name, e.Project, number, size, MaxEnvBytes, ErrTooLarge)
 	}
 	if with, ok, err := withDomains(out, e.Domains, size); err != nil {
 		return wire.Env{}, nil, fmt.Errorf("environment %s: %w", e.ID, err)

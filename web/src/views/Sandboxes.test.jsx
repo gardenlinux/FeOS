@@ -68,25 +68,25 @@ const SB = {
   reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }], egress: 'none',
 };
 const head = (sb, write) => renderToStaticMarkup(
-  <SandboxHead sb={sb} tenant="kino" busy="" act={() => {}} write={write} onConnect={() => {}} />,
+  <SandboxHead sb={sb} project="kino" busy="" act={() => {}} write={write} onConnect={() => {}} />,
 );
 
 describe('SandboxHead', () => {
   it('says the state with its cost, and offers resume and connect', () => {
     const out = head(SB, true);
-    expect(out).toContain('<p class="pagehead-kind">Sandbox in <a href="/tenants/kino/environments/kino-dev"');
+    expect(out).toContain('<p class="pagehead-kind">Sandbox in <a href="/projects/kino/environments/kino-dev"');
     expect(out).toContain('<h1 class="mono">h3k9v2m7qpx</h1>');
     expect(out).toContain('paused on n3 · its memory on the node&#x27;s disk, no RAM · resumes on the next call');
     expect(out).toContain('Resume');
     expect(out).not.toContain('Pause<');
     expect(out).toContain('Connect an agent');
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev"');
+    expect(out).toContain('href="/projects/kino/environments/kino-dev"');
     expect(out).toContain('reaches <b><span class="rc-reaches">');
     expect(out).toContain(' api:http, db</span>');
     expect(head({ ...SB, reaches: 'all' }, true)).toContain('all of the environment');
     expect(head({ ...SB, reaches: [] }, true)).toContain('nothing of the environment');
     expect(out).not.toContain('attachable');
-    // The owner is the tenant: it says nothing here.
+    // The owner is the project: it says nothing here.
     expect(out).not.toContain('>kino<');
   });
 

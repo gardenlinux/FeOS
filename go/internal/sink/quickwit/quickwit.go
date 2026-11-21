@@ -24,7 +24,7 @@ import (
 // labels, and the line.
 type Doc struct {
 	TS          int64  `json:"ts"`
-	Tenant      string `json:"tenant"`
+	Project     string `json:"tenant"` // KEEP-TENANT: Quickwit's stored name of MappingVersion 5, as Deployment keeps release
 	Stream      string `json:"stream"`
 	Environment string `json:"environment,omitempty"`
 	Kind        string `json:"kind,omitempty"`
@@ -50,14 +50,14 @@ type Doc struct {
 	Text       string `json:"text"`
 }
 
-// Query selects a tenant's lines: the labels set (empty or nil: any), a
+// Query selects a project's lines: the labels set (empty or nil: any), a
 // time range in Unix ns (both ends included; 0: open), offsets after
 // OffAfter up to OffTo (nil: any), levels (a mask; 0: any), a trace ID,
 // words each in the text as a phrase, words none of which may be there,
 // at most Max hits in the order Order. With OrPartial a partial line
 // passes the words: they may be in its rest.
 type Query struct {
-	Tenant                                                      string
+	Project                                                     string
 	Environment, Kind, Object, Instance, Container, Job, Stream string
 	Source, IOStream                                            string
 	Replica, Attempt                                            *int
@@ -97,7 +97,7 @@ func (q Query) String() string {
 			c = append(c, field+":"+quote(v))
 		}
 	}
-	term("tenant", q.Tenant)
+	term("tenant", q.Project) // KEEP-TENANT: Quickwit's stored name
 	term("environment", q.Environment)
 	term("kind", q.Kind)
 	term("object", q.Object)
@@ -248,7 +248,7 @@ func (c *Client) do(ctx context.Context, method, url, ctype string, body []byte,
 // IndexConfig is a new version: new lines go to the new version's
 // indexes, a read searches <prefix>-* and so the old ones too, which
 // their retention empties. Version 1 is the indexes named <prefix>-<days>d
-// (tenant the only tag, no partitions), version 2 partitions by tenant,
+// (project the only tag, no partitions), version 2 partitions by project,
 // environment and job, version 3 is the same mapping filled by a Kafka
 // source (ADR 0026 §11): an index has its source from its start; version
 // 4 the same on Apache Kafka in place of Redpanda (a source's brokers do
@@ -269,7 +269,7 @@ func IndexID(prefix string, days int) string {
 
 // IndexSettings are what an index is made with, and never change for it:
 // its lines are kept RetentionDays, committed every CommitSecs, and
-// hashed by their tenant, environment and job into Partitions partitions
+// hashed by their project, environment and job into Partitions partitions
 // (1 to MaxPartitions), a split holding one partition's lines.
 type IndexSettings struct {
 	RetentionDays, CommitSecs, Partitions int
@@ -279,7 +279,7 @@ type IndexSettings struct {
 // search for an environment or a job prunes the splits whose tags lack it
 // (tag_fields), so a split should hold few of them.
 func partitionKey(n int) string {
-	return "hash_mod((tenant,environment,job), " + strconv.Itoa(n) + ")"
+	return "hash_mod((tenant,environment,job), " + strconv.Itoa(n) + ")" // KEEP-TENANT: Quickwit's stored name
 }
 
 // IndexConfig is the configuration of the log index id.
@@ -298,7 +298,7 @@ func IndexConfig(id string, s IndexSettings) []byte {
 			"field_mappings": []map[string]any{
 				{"name": "ts", "type": "datetime", "input_formats": []string{"unix_timestamp"},
 					"output_format": "unix_timestamp_nanos", "fast": true, "fast_precision": "nanoseconds"},
-				raw("tenant"), raw("stream"), raw("environment"), raw("kind"), raw("object"),
+				raw("tenant"), raw("stream"), raw("environment"), raw("kind"), raw("object"), // KEEP-TENANT: Quickwit's stored name
 				num("replica", false), num("release", false), raw("instance"), raw("container"), raw("job"),
 				num("attempt", false), raw("source"), raw("iostream"), num("level", true), raw("trace_id"),
 				num("off", true),
@@ -309,7 +309,7 @@ func IndexConfig(id string, s IndexSettings) []byte {
 			"timestamp_field": "ts",
 			// Quickwit records a split's values of a tag field while
 			// they are fewer than 1,000.
-			"tag_fields":    []string{"tenant", "environment", "job"},
+			"tag_fields":    []string{"tenant", "environment", "job"}, // KEEP-TENANT: Quickwit's stored name
 			"partition_key": partitionKey(s.Partitions),
 		},
 		"indexing_settings": map[string]any{"commit_timeout_secs": s.CommitSecs},

@@ -84,7 +84,7 @@ func TestRecorderBatches(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := range 100 {
-				r.Record(activity.Event{SandboxID: sb, TenantID: "acme", Kind: activity.KindToolStart,
+				r.Record(activity.Event{SandboxID: sb, ProjectID: "acme", Kind: activity.KindToolStart,
 					SpanID: activity.NewSpanID("call"), Name: "bash:   ls\n -la", Tool: "bash",
 					Params: json.RawMessage(`{"command":"ls"}`), Detail: map[string]any{"g": g, "i": i}})
 			}
@@ -101,7 +101,7 @@ func TestRecorderBatches(t *testing.T) {
 	}
 	row := rows[0]
 	if row.Source != store.SourceFerund || row.InstanceID != "i1" || row.Name != "bash: ls -la" || row.Category != activity.CategoryTool ||
-		row.TenantID != "acme" || row.TsNs == 0 || !strings.HasPrefix(row.SpanID, "call-") || string(row.Params) != `{"command": "ls"}` {
+		row.ProjectID != "acme" || row.TsNs == 0 || !strings.HasPrefix(row.SpanID, "call-") || string(row.Params) != `{"command": "ls"}` {
 		t.Fatalf("row %+v", row)
 	}
 }

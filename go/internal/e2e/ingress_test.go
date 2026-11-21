@@ -155,11 +155,11 @@ func podOf(body string) podid.ID {
 	return podid.ID(id)
 }
 
-// mkApp makes the tenant's environment name with appSpec's first deployment
+// mkApp makes the project's environment name with appSpec's first deployment
 // and waits until it is deployed.
 func (c *cluster) mkApp(name string, replicas int, idle string) uuid.UUID {
 	c.t.Helper()
-	e, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
+	e, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: project, Name: name})
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func TestIngressJoinAndMesh(t *testing.T) {
 }
 
 // Scenario: an environment's image service is served by the ingress only
-// once the tenant makes the environment public. The first publish gives
+// once the project makes the environment public. The first publish gives
 // its host, rolls the service once to name the groups ing-<id>, whose
 // rules let ferun-ingress in on the routed port, and records what the
 // nodes admit; the ingress then serves the host round robin over the
@@ -626,7 +626,7 @@ func TestIngressPublishAndRoute(t *testing.T) {
 			t.Fatalf("an instance of an environment never published: template %+v", tmpl)
 		}
 	}
-	host := "web-" + tenant + "." + appsZone
+	host := "web-" + project + "." + appsZone
 	if r, err := p.get(bg, host, "/"); err != nil || r.code != http.StatusNotFound || !strings.Contains(r.body, "no such host") {
 		t.Fatalf("before the publish: %+v %v", r, err)
 	}
@@ -657,7 +657,7 @@ func TestIngressPublishAndRoute(t *testing.T) {
 
 	c.checkAdmitted(p, envID)
 	// The environment's status names the host and the door.
-	st := c.call(nil, "GET", "/api/v1/environments/"+envID.String(), tenantAuth, "")
+	st := c.call(nil, "GET", "/api/v1/environments/"+envID.String(), projectAuth, "")
 	var es env.EnvStatus
 	if err := json.Unmarshal([]byte(st.body), &es); st.code != http.StatusOK || err != nil || !es.Public ||
 		!slices.Equal(es.Hosts, []string{host}) || len(es.Routes) != 1 || es.Routes[0].Door != env.DoorIngress ||

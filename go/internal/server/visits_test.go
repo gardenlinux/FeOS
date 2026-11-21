@@ -27,7 +27,7 @@ import (
 var _ service.Visits = (*visits.Service)(nil)
 
 // serveAPI sends a request to the instance's front doors' handler, as the
-// bootstrap tenant's token, and returns the status and the body.
+// bootstrap project's token, and returns the status and the body.
 func serveAPI(t *testing.T, i *Instance, method, path, body string) (int, string) {
 	t.Helper()
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -89,11 +89,11 @@ func TestVisitsNeedTheSecretKey(t *testing.T) {
 }
 
 // With --secret-key-file the visits service runs: the providers' routes
-// answer, with the kinds served (tenant alone without
+// answer, with the kinds served (project alone without
 // --visitor-auth-url; oidc beside it with one, and the redirect URI on
 // ferun-auth's host); a bare publish of a new environment needs
 // ferun-auth (409 ferun_auth_required); the installation's keys are made
-// once; and ferun-auth's host can be neither a domain nor a tenant's
+// once; and ferun-auth's host can be neither a domain nor a project's
 // name.
 func TestVisitsWithTheSecretKey(t *testing.T) {
 	caDir := testCA(t)
@@ -113,7 +113,7 @@ func TestVisitsWithTheSecretKey(t *testing.T) {
 		t.Fatalf("providers: %d %s", code, body)
 	}
 	var list visits.ProviderList
-	if err := json.Unmarshal([]byte(body), &list); err != nil || !slices.Equal(list.Kinds, []string{"tenant"}) ||
+	if err := json.Unmarshal([]byte(body), &list); err != nil || !slices.Equal(list.Kinds, []string{"project"}) ||
 		strings.Contains(body, "redirectUri") || len(list.Providers) != 1 || list.Providers[0].Name != "ferun" {
 		t.Fatalf("providers %s (%v)", body, err)
 	}
@@ -144,11 +144,11 @@ func TestVisitsWithTheSecretKey(t *testing.T) {
 	}
 	code, body = serveAPI(t, j, "GET", "/api/v1/providers", "")
 	if err := json.Unmarshal([]byte(body), &list); code != http.StatusOK || err != nil ||
-		!slices.Equal(list.Kinds, []string{"tenant", "oidc"}) {
+		!slices.Equal(list.Kinds, []string{"project", "oidc"}) {
 		t.Fatalf("providers with ferun-auth: %d %s (%v)", code, body, err)
 	}
-	// ferun-auth's host is reserved: no domain, no tenant of its name.
-	if _, _, err := j.Store.CreateTenant(context.Background(), "acme"); err != nil {
+	// ferun-auth's host is reserved: no domain, no project of its name.
+	if _, _, err := j.Store.CreateProject(context.Background(), "acme"); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"auth.example.test", "x.auth.example.test"} {
@@ -161,7 +161,7 @@ func TestVisitsWithTheSecretKey(t *testing.T) {
 	if _, err := j.Domains.CreateDomain(context.Background(), "acme", domains.CreateRequest{Name: "example.test"}); err != nil {
 		t.Errorf("a name beside ferun-auth's host: %v", err)
 	}
-	if !slices.Contains(reservedTenantNames(cfg), "auth") {
-		t.Errorf("reserved tenant names %v", reservedTenantNames(cfg))
+	if !slices.Contains(reservedProjectNames(cfg), "auth") {
+		t.Errorf("reserved project names %v", reservedProjectNames(cfg))
 	}
 }

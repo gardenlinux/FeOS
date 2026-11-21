@@ -486,10 +486,10 @@ func TestPostgresTLSStep(t *testing.T) {
 	)
 	tls := &TLS{CertPEM: "-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n", CAPEM: "CA",
 		Grants: []Grant{
-			{Workload: api, ID: "spiffe://run.fecode.dev/tenant/t/env/e/service/catalog", Role: "catalog"},
-			{Workload: migrate, ID: "spiffe://run.fecode.dev/tenant/t/env/e/job/migrate", Role: "catalog"},
-			{Workload: migrate, ID: "spiffe://run.fecode.dev/tenant/t/env/e/job/migrate", Role: "seats"},
-			{Workload: "wl-s-xmxfgckmkt6", ID: "spiffe://run.fecode.dev/tenant/t/env/e/sandbox/xmxfgckmkt6", Role: "seats"},
+			{Workload: api, ID: "spiffe://run.fecode.dev/project/t/env/e/service/catalog", Role: "catalog"},
+			{Workload: migrate, ID: "spiffe://run.fecode.dev/project/t/env/e/job/migrate", Role: "catalog"},
+			{Workload: migrate, ID: "spiffe://run.fecode.dev/project/t/env/e/job/migrate", Role: "seats"},
+			{Workload: "wl-s-xmxfgckmkt6", ID: "spiffe://run.fecode.dev/project/t/env/e/sandbox/xmxfgckmkt6", Role: "seats"},
 			// Never mapped: the superuser, a workload that is no ID, a
 			// role that is no name.
 			{Workload: api, ID: "x", Role: "postgres"},
@@ -516,13 +516,13 @@ func TestPostgresTLSStep(t *testing.T) {
 	wantIdent := `# Written by ferund (ADR 0038); a change here is overwritten.
 ferun  root      postgres
 ferun  postgres  postgres
-# spiffe://run.fecode.dev/tenant/t/env/e/service/catalog
+# spiffe://run.fecode.dev/project/t/env/e/service/catalog
 feid  "/^CN=[^,]+,OU=wl-0123456789abcdef0123456789abcdef$"  catalog
-# spiffe://run.fecode.dev/tenant/t/env/e/job/migrate
+# spiffe://run.fecode.dev/project/t/env/e/job/migrate
 feid  "/^CN=[^,]+,OU=wl-fedcba9876543210fedcba9876543210$"  catalog
-# spiffe://run.fecode.dev/tenant/t/env/e/job/migrate
+# spiffe://run.fecode.dev/project/t/env/e/job/migrate
 feid  "/^CN=[^,]+,OU=wl-fedcba9876543210fedcba9876543210$"  seats
-# spiffe://run.fecode.dev/tenant/t/env/e/sandbox/xmxfgckmkt6
+# spiffe://run.fecode.dev/project/t/env/e/sandbox/xmxfgckmkt6
 feid  "/^CN=[^,]+,OU=wl-s-xmxfgckmkt6$"  seats
 `
 	if got := st.Env["FERUN_PG_IDENT"].Value; got != wantIdent {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package store is ferund's typed access to the schema of internal/db: one
-// file per domain (sandboxes, tenants, tokens, nodes, telemetry, node
+// file per domain (sandboxes, projects, tokens, nodes, telemetry, node
 // certificates, join tokens, leases, instances, holds, bookings,
 // placements, tombstones, node events, activity, traffic, issued
 // certificates, watches, bindings, cluster secrets, the keyed tool calls
@@ -24,8 +24,8 @@
 // ingress's table follows send ferun_ingress: "env:<id>" (or "*" for more
 // than 256 environments) for an environment's publicity, host label,
 // deployments and deletion (env_environments.go), its service instances and
-// their admitted ports (env_instances.go) and its tenant's deletion
-// (tenants.go); "ingress:<name>" for an ingress instance's re-join,
+// their admitted ports (env_instances.go) and its project's deletion
+// (projects.go); "ingress:<name>" for an ingress instance's re-join,
 // removal, mesh join and certificates (ingresses.go); "mesh" for every
 // change of the mesh's peers, a node's or an ingress's (bumpMeshPeers in
 // mesh.go); and "*" for a node's version of the ingress's peer group, and

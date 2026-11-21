@@ -345,7 +345,7 @@ bindings' version covers all three, so that any change reaches its
   rewritten too.
 - **A CA made by each run's `feos-authn`**, whose key never leaves it. A
   resumed pod's processes would trust a CA whose key is gone.
-- **One CA per tenant or environment.** One key trusted by many pods;
+- **One CA per project or environment.** One key trusted by many pods;
   one per pod keeps a leak to that pod.
 - **`feosd` as the proxy.** Hostile HTTP in the privileged process that
   owns every microVM (ADR 0014).
@@ -353,7 +353,7 @@ bindings' version covers all three, so that any change reaches its
   but needs a port per process in their shared namespace and NAT state
   per connection; passing the accepted socket changes no table.
 - **The pod's security groups as the bound of a binding's connections**,
-  the rule at first: tenant security groups went when ADR 0012 derived reachability from references, and the
+  the rule at first: project security groups went when ADR 0012 derived reachability from references, and the
   connection is the node's, so the destination rule bounds it until
   bindings dial from the pod's address.
 - **Credentials in environment variables**: every credential in the
@@ -392,7 +392,7 @@ bindings' version covers all three, so that any change reaches its
 Decided and built on 2026-11-05 (836aca6): the control plane's part,
 `feosd`'s listeners and resolver answers, `feos-authn`'s HTTP side and
 the CAs in every container; the redaction of the credential in answers
-came the same day (f158459). ADR 0033 added the tenant's credentials as
+came the same day (f158459). ADR 0033 added the project's credentials as
 the third source on 2026-11-06, an environment's since 2026-11-10.
 An answer that came gzip although
 identity was asked for was refused until 2026-11-08, when it came to be

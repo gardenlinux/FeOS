@@ -18,8 +18,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{peer_id, tls, Error, Feid, SpiffeId};
 
-const WEB: &str = "spiffe://run.example/tenant/acme/env/prod/service/web";
-const API: &str = "spiffe://run.example/tenant/acme/env/prod/service/api";
+const WEB: &str = "spiffe://run.example/project/acme/env/prod/service/web";
+const API: &str = "spiffe://run.example/project/acme/env/prod/service/api";
 
 struct Ca {
     issuer: rcgen::Issuer<'static, rcgen::KeyPair>,
@@ -398,7 +398,7 @@ async fn without_a_signer_there_is_no_identity() {
 fn spiffe_ids() {
     let id = SpiffeId::parse(API).unwrap();
     assert_eq!(id.trust_domain(), "run.example");
-    assert_eq!(id.path(), "/tenant/acme/env/prod/service/api");
+    assert_eq!(id.path(), "/project/acme/env/prod/service/api");
     assert_eq!(SpiffeId::parse("spiffe://run.example").unwrap().path(), "");
     for bad in [
         "https://run.example/x",

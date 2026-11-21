@@ -32,7 +32,7 @@ import (
 
 // envCall is a call of the fake environments service.
 type envCall struct {
-	method, tenant, env string
+	method, project, env string
 	// args are the call's other arguments: its request, kind, name, …
 	args []any
 }
@@ -81,53 +81,53 @@ func (f *fakeEnvs) last(t *testing.T) envCall {
 	return f.calls[0]
 }
 
-func (f *fakeEnvs) CreateEnv(_ context.Context, tenant string, req envs.CreateEnvRequest) (envs.EnvStatus, bool, error) {
+func (f *fakeEnvs) CreateEnv(_ context.Context, project string, req envs.CreateEnvRequest) (envs.EnvStatus, bool, error) {
 	var st envs.EnvStatus
-	err := f.do(envCall{"CreateEnv", tenant, "", []any{req}}, &st)
+	err := f.do(envCall{"CreateEnv", project, "", []any{req}}, &st)
 	return st, f.created, err
 }
-func (f *fakeEnvs) ListEnvs(_ context.Context, tenant string, labels map[string]string) (envs.EnvList, error) {
+func (f *fakeEnvs) ListEnvs(_ context.Context, project string, labels map[string]string) (envs.EnvList, error) {
 	var out envs.EnvList
-	return out, f.do(envCall{"ListEnvs", tenant, "", []any{labels}}, &out)
+	return out, f.do(envCall{"ListEnvs", project, "", []any{labels}}, &out)
 }
-func (f *fakeEnvs) GetEnv(_ context.Context, tenant, env string) (envs.EnvStatus, error) {
+func (f *fakeEnvs) GetEnv(_ context.Context, project, env string) (envs.EnvStatus, error) {
 	var out envs.EnvStatus
-	return out, f.do(envCall{"GetEnv", tenant, env, nil}, &out)
+	return out, f.do(envCall{"GetEnv", project, env, nil}, &out)
 }
-func (f *fakeEnvs) RenameEnv(_ context.Context, tenant, env string, req envs.RenameEnvRequest) (envs.EnvStatus, error) {
+func (f *fakeEnvs) RenameEnv(_ context.Context, project, env string, req envs.RenameEnvRequest) (envs.EnvStatus, error) {
 	var out envs.EnvStatus
-	return out, f.do(envCall{"RenameEnv", tenant, env, []any{req}}, &out)
+	return out, f.do(envCall{"RenameEnv", project, env, []any{req}}, &out)
 }
-func (f *fakeEnvs) DeleteEnv(_ context.Context, tenant, env string) error {
-	return f.do(envCall{"DeleteEnv", tenant, env, nil}, nil)
+func (f *fakeEnvs) DeleteEnv(_ context.Context, project, env string) error {
+	return f.do(envCall{"DeleteEnv", project, env, nil}, nil)
 }
-func (f *fakeEnvs) PlanSpec(_ context.Context, tenant string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error) {
+func (f *fakeEnvs) PlanSpec(_ context.Context, project string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error) {
 	var out envs.PlanSpecAnswer
-	return out, f.do(envCall{"PlanSpec", tenant, "", []any{req}}, &out)
+	return out, f.do(envCall{"PlanSpec", project, "", []any{req}}, &out)
 }
-func (f *fakeEnvs) Addons(_ context.Context, tenant string) (envs.AddonCatalog, error) {
+func (f *fakeEnvs) Addons(_ context.Context, project string) (envs.AddonCatalog, error) {
 	var out envs.AddonCatalog
-	return out, f.do(envCall{"Addons", tenant, "", nil}, &out)
+	return out, f.do(envCall{"Addons", project, "", nil}, &out)
 }
-func (f *fakeEnvs) Plan(_ context.Context, tenant, env string, req envs.PlanRequest) (envs.PlanAnswer, error) {
+func (f *fakeEnvs) Plan(_ context.Context, project, env string, req envs.PlanRequest) (envs.PlanAnswer, error) {
 	var out envs.PlanAnswer
-	return out, f.do(envCall{"Plan", tenant, env, []any{req}}, &out)
+	return out, f.do(envCall{"Plan", project, env, []any{req}}, &out)
 }
-func (f *fakeEnvs) Apply(_ context.Context, tenant, env string, req envs.ApplyRequest) (envs.ApplyAnswer, error) {
+func (f *fakeEnvs) Apply(_ context.Context, project, env string, req envs.ApplyRequest) (envs.ApplyAnswer, error) {
 	var out envs.ApplyAnswer
-	return out, f.do(envCall{"Apply", tenant, env, []any{req}}, &out)
+	return out, f.do(envCall{"Apply", project, env, []any{req}}, &out)
 }
-func (f *fakeEnvs) Deployments(_ context.Context, tenant, env string, limit int) (envs.DeploymentList, error) {
+func (f *fakeEnvs) Deployments(_ context.Context, project, env string, limit int) (envs.DeploymentList, error) {
 	var out envs.DeploymentList
-	return out, f.do(envCall{"Deployments", tenant, env, []any{limit}}, &out)
+	return out, f.do(envCall{"Deployments", project, env, []any{limit}}, &out)
 }
-func (f *fakeEnvs) Deployment(_ context.Context, tenant, env string, n int) (envs.DeploymentDetail, error) {
+func (f *fakeEnvs) Deployment(_ context.Context, project, env string, n int) (envs.DeploymentDetail, error) {
 	var out envs.DeploymentDetail
-	return out, f.do(envCall{"Deployment", tenant, env, []any{n}}, &out)
+	return out, f.do(envCall{"Deployment", project, env, []any{n}}, &out)
 }
-func (f *fakeEnvs) Revert(_ context.Context, tenant, env string, n int, req envs.RevertRequest) (envs.ApplyAnswer, error) {
+func (f *fakeEnvs) Revert(_ context.Context, project, env string, n int, req envs.RevertRequest) (envs.ApplyAnswer, error) {
 	var out envs.ApplyAnswer
-	return out, f.do(envCall{"Revert", tenant, env, []any{req, n}}, &out)
+	return out, f.do(envCall{"Revert", project, env, []any{req, n}}, &out)
 }
 
 // objectAnswer reads an object route's answer: a plan's (it has "valid")
@@ -146,97 +146,97 @@ func (o *objectAnswer) UnmarshalJSON(b []byte) error {
 	return strictDecode(b, &o.a.Apply)
 }
 
-func (f *fakeEnvs) PutObject(_ context.Context, tenant, env, kind, name string, req envs.PutObjectRequest) (envs.ObjectAnswer, error) {
+func (f *fakeEnvs) PutObject(_ context.Context, project, env, kind, name string, req envs.PutObjectRequest) (envs.ObjectAnswer, error) {
 	var out objectAnswer
-	return out.a, f.do(envCall{"PutObject", tenant, env, []any{req, kind, name}}, &out)
+	return out.a, f.do(envCall{"PutObject", project, env, []any{req, kind, name}}, &out)
 }
-func (f *fakeEnvs) DeleteObject(_ context.Context, tenant, env, kind, name string, req envs.DeleteObjectRequest) (envs.ObjectAnswer, error) {
+func (f *fakeEnvs) DeleteObject(_ context.Context, project, env, kind, name string, req envs.DeleteObjectRequest) (envs.ObjectAnswer, error) {
 	var out objectAnswer
-	return out.a, f.do(envCall{"DeleteObject", tenant, env, []any{req, kind, name}}, &out)
+	return out.a, f.do(envCall{"DeleteObject", project, env, []any{req, kind, name}}, &out)
 }
-func (f *fakeEnvs) Clone(_ context.Context, tenant, env string, req envs.CloneRequest) (envs.EnvStatus, error) {
+func (f *fakeEnvs) Clone(_ context.Context, project, env string, req envs.CloneRequest) (envs.EnvStatus, error) {
 	var out envs.EnvStatus
-	return out, f.do(envCall{"Clone", tenant, env, []any{req}}, &out)
+	return out, f.do(envCall{"Clone", project, env, []any{req}}, &out)
 }
-func (f *fakeEnvs) Tags(_ context.Context, tenant, env string) (envs.TagList, error) {
+func (f *fakeEnvs) Tags(_ context.Context, project, env string) (envs.TagList, error) {
 	var out envs.TagList
-	return out, f.do(envCall{"Tags", tenant, env, nil}, &out)
+	return out, f.do(envCall{"Tags", project, env, nil}, &out)
 }
-func (f *fakeEnvs) Tag(_ context.Context, tenant, env, tag string) (envs.Tag, error) {
+func (f *fakeEnvs) Tag(_ context.Context, project, env, tag string) (envs.Tag, error) {
 	var out envs.Tag
-	return out, f.do(envCall{"Tag", tenant, env, []any{tag}}, &out)
+	return out, f.do(envCall{"Tag", project, env, []any{tag}}, &out)
 }
-func (f *fakeEnvs) PutTag(_ context.Context, tenant, env, tag string, req envs.PutTagRequest) (envs.Tag, error) {
+func (f *fakeEnvs) PutTag(_ context.Context, project, env, tag string, req envs.PutTagRequest) (envs.Tag, error) {
 	var out envs.Tag
-	return out, f.do(envCall{"PutTag", tenant, env, []any{req, tag}}, &out)
+	return out, f.do(envCall{"PutTag", project, env, []any{req, tag}}, &out)
 }
-func (f *fakeEnvs) DeleteTag(_ context.Context, tenant, env, tag string) error {
-	return f.do(envCall{"DeleteTag", tenant, env, []any{tag}}, nil)
+func (f *fakeEnvs) DeleteTag(_ context.Context, project, env, tag string) error {
+	return f.do(envCall{"DeleteTag", project, env, []any{tag}}, nil)
 }
-func (f *fakeEnvs) Secrets(_ context.Context, tenant, env string) (envs.SecretList, error) {
+func (f *fakeEnvs) Secrets(_ context.Context, project, env string) (envs.SecretList, error) {
 	var out envs.SecretList
-	return out, f.do(envCall{"Secrets", tenant, env, nil}, &out)
+	return out, f.do(envCall{"Secrets", project, env, nil}, &out)
 }
-func (f *fakeEnvs) Secret(_ context.Context, tenant, env, name string) (envs.SecretInfo, error) {
+func (f *fakeEnvs) Secret(_ context.Context, project, env, name string) (envs.SecretInfo, error) {
 	var out envs.SecretInfo
-	return out, f.do(envCall{"Secret", tenant, env, []any{name}}, &out)
+	return out, f.do(envCall{"Secret", project, env, []any{name}}, &out)
 }
-func (f *fakeEnvs) PutSecret(_ context.Context, tenant, env, name string, req envs.PutSecretRequest) (envs.SecretVersion, error) {
+func (f *fakeEnvs) PutSecret(_ context.Context, project, env, name string, req envs.PutSecretRequest) (envs.SecretVersion, error) {
 	var out envs.SecretVersion
-	return out, f.do(envCall{"PutSecret", tenant, env, []any{req, name}}, &out)
+	return out, f.do(envCall{"PutSecret", project, env, []any{req, name}}, &out)
 }
-func (f *fakeEnvs) DeleteSecret(_ context.Context, tenant, env, name string) error {
-	return f.do(envCall{"DeleteSecret", tenant, env, []any{name}}, nil)
+func (f *fakeEnvs) DeleteSecret(_ context.Context, project, env, name string) error {
+	return f.do(envCall{"DeleteSecret", project, env, []any{name}}, nil)
 }
-func (f *fakeEnvs) Incidents(_ context.Context, tenant, env string, open bool) (envs.IncidentList, error) {
+func (f *fakeEnvs) Incidents(_ context.Context, project, env string, open bool) (envs.IncidentList, error) {
 	var out envs.IncidentList
-	return out, f.do(envCall{"Incidents", tenant, env, []any{open}}, &out)
+	return out, f.do(envCall{"Incidents", project, env, []any{open}}, &out)
 }
-func (f *fakeEnvs) Incident(_ context.Context, tenant, env string, id int64) (envs.Incident, error) {
+func (f *fakeEnvs) Incident(_ context.Context, project, env string, id int64) (envs.Incident, error) {
 	var out envs.Incident
-	return out, f.do(envCall{"Incident", tenant, env, []any{id}}, &out)
+	return out, f.do(envCall{"Incident", project, env, []any{id}}, &out)
 }
-func (f *fakeEnvs) AccessLogs(_ context.Context, tenant, env string, q envs.AccessLogQuery) (envs.AccessLogList, error) {
+func (f *fakeEnvs) AccessLogs(_ context.Context, project, env string, q envs.AccessLogQuery) (envs.AccessLogList, error) {
 	var out envs.AccessLogList
-	return out, f.do(envCall{"AccessLogs", tenant, env, []any{q}}, &out)
+	return out, f.do(envCall{"AccessLogs", project, env, []any{q}}, &out)
 }
-func (f *fakeEnvs) Traffic(_ context.Context, tenant, env, window string) (envs.Traffic, error) {
+func (f *fakeEnvs) Traffic(_ context.Context, project, env, window string) (envs.Traffic, error) {
 	var out envs.Traffic
-	return out, f.do(envCall{"Traffic", tenant, env, []any{window}}, &out)
+	return out, f.do(envCall{"Traffic", project, env, []any{window}}, &out)
 }
-func (f *fakeEnvs) BindingUsage(_ context.Context, tenant, env, window string) (envs.BindingUsage, error) {
+func (f *fakeEnvs) BindingUsage(_ context.Context, project, env, window string) (envs.BindingUsage, error) {
 	var out envs.BindingUsage
-	return out, f.do(envCall{"BindingUsage", tenant, env, []any{window}}, &out)
+	return out, f.do(envCall{"BindingUsage", project, env, []any{window}}, &out)
 }
-func (f *fakeEnvs) Identities(_ context.Context, tenant, env string) (envs.Identities, error) {
+func (f *fakeEnvs) Identities(_ context.Context, project, env string) (envs.Identities, error) {
 	var out envs.Identities
-	return out, f.do(envCall{"Identities", tenant, env, nil}, &out)
+	return out, f.do(envCall{"Identities", project, env, nil}, &out)
 }
-func (f *fakeEnvs) Logs(_ context.Context, tenant, env, kind, name string, lines, replica int) (envs.LogsAnswer, error) {
+func (f *fakeEnvs) Logs(_ context.Context, project, env, kind, name string, lines, replica int) (envs.LogsAnswer, error) {
 	var out envs.LogsAnswer
-	return out, f.do(envCall{"Logs", tenant, env, []any{kind, name, lines, replica}}, &out)
+	return out, f.do(envCall{"Logs", project, env, []any{kind, name, lines, replica}}, &out)
 }
-func (f *fakeEnvs) RestartService(_ context.Context, tenant, env, name string) error {
-	return f.do(envCall{"RestartService", tenant, env, []any{name}}, nil)
+func (f *fakeEnvs) RestartService(_ context.Context, project, env, name string) error {
+	return f.do(envCall{"RestartService", project, env, []any{name}}, nil)
 }
-func (f *fakeEnvs) RunJob(_ context.Context, tenant, env, name string) error {
-	return f.do(envCall{"RunJob", tenant, env, []any{name}}, nil)
+func (f *fakeEnvs) RunJob(_ context.Context, project, env, name string) error {
+	return f.do(envCall{"RunJob", project, env, []any{name}}, nil)
 }
-func (f *fakeEnvs) CheckBinding(_ context.Context, tenant, env, name string, req envs.BindingCheckRequest) (
+func (f *fakeEnvs) CheckBinding(_ context.Context, project, env, name string, req envs.BindingCheckRequest) (
 	*bindings.HTTPPreflightResult, error) {
 	out := &bindings.HTTPPreflightResult{}
-	return out, f.do(envCall{"CheckBinding", tenant, env, []any{name, req}}, out)
+	return out, f.do(envCall{"CheckBinding", project, env, []any{name, req}}, out)
 }
-func (f *fakeEnvs) CreateRouteToken(_ context.Context, tenant, env string) (envs.RouteToken, error) {
+func (f *fakeEnvs) CreateRouteToken(_ context.Context, project, env string) (envs.RouteToken, error) {
 	var out envs.RouteToken
-	return out, f.do(envCall{"CreateRouteToken", tenant, env, nil}, &out)
+	return out, f.do(envCall{"CreateRouteToken", project, env, nil}, &out)
 }
-func (f *fakeEnvs) RevokeRouteTokens(_ context.Context, tenant, env string) error {
-	return f.do(envCall{"RevokeRouteTokens", tenant, env, nil}, nil)
+func (f *fakeEnvs) RevokeRouteTokens(_ context.Context, project, env string) error {
+	return f.do(envCall{"RevokeRouteTokens", project, env, nil}, nil)
 }
-func (f *fakeEnvs) SetPublic(_ context.Context, tenant, env string, req envs.PublicRequest) (envs.PublicAnswer, error) {
+func (f *fakeEnvs) SetPublic(_ context.Context, project, env string, req envs.PublicRequest) (envs.PublicAnswer, error) {
 	var out envs.PublicAnswer
-	return out, f.do(envCall{"SetPublic", tenant, env, []any{req}}, &out)
+	return out, f.do(envCall{"SetPublic", project, env, []any{req}}, &out)
 }
 func (f *fakeEnvs) ServeRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Door", "route")
@@ -407,7 +407,7 @@ func TestEnvironmentFixtures(t *testing.T) {
 				body = []byte(f.Request)
 			}
 			r := request{method: f.Method, path: target, body: body,
-				header: http.Header{"Authorization": {bearerOf(e.tenantToken)}}}
+				header: http.Header{"Authorization": {bearerOf(e.projectToken)}}}
 			w := e.serveWith(srv, r)
 			if w.Code != f.Status {
 				t.Fatalf("status %d, want %d: %s", w.Code, f.Status, w.Body)
@@ -416,7 +416,7 @@ func TestEnvironmentFixtures(t *testing.T) {
 				t.Fatalf("answer\n%s\nwant\n%s", got, want)
 			}
 			c := fe.last(t)
-			if c.method != method || c.tenant != testTenant {
+			if c.method != method || c.project != testProject {
 				t.Fatalf("call %+v, want %s", c, method)
 			}
 			if parts := strings.Split(f.Path, "/"); len(parts) > 4 && parts[4] != "plan" && c.env != parts[4] {
@@ -450,7 +450,7 @@ func (e *env) serveWith(srv *server, rq request) *recorderT {
 func TestEnvironmentArguments(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	three := 3
 	cases := []struct {
 		method, path string
@@ -459,60 +459,60 @@ func TestEnvironmentArguments(t *testing.T) {
 		status       int
 	}{
 		{"GET", "/api/v1/environments?label=a=b&label=c=d%3De", nil,
-			envCall{"ListEnvs", testTenant, "", []any{map[string]string{"a": "b", "c": "d=e"}}}, 200},
+			envCall{"ListEnvs", testProject, "", []any{map[string]string{"a": "b", "c": "d=e"}}}, 200},
 		{"DELETE", "/api/v1/environments/stage/objects/route/api?base=7&dryRun=1&author=me&message=hi", nil,
-			envCall{"DeleteObject", testTenant, "stage", []any{envs.DeleteObjectRequest{Base: 7, DryRun: true, Author: "me",
+			envCall{"DeleteObject", testProject, "stage", []any{envs.DeleteObjectRequest{Base: 7, DryRun: true, Author: "me",
 				Message: "hi"}, "route", "api"}}, 201},
 		{"GET", "/api/v1/environments/stage/objects/service/api/logs?lines=50&replica=1", nil,
-			envCall{"Logs", testTenant, "stage", []any{"service", "api", 50, 1}}, 200},
+			envCall{"Logs", testProject, "stage", []any{"service", "api", 50, 1}}, 200},
 		{"GET", "/api/v1/environments/stage/objects/addon/pg/logs", nil,
-			envCall{"Logs", testTenant, "stage", []any{"addon", "pg", 0, 0}}, 200},
-		{"GET", "/api/v1/environments/stage/deployments?limit=5", nil, envCall{"Deployments", testTenant, "stage", []any{5}}, 200},
-		{"GET", "/api/v1/environments/stage/deployments", nil, envCall{"Deployments", testTenant, "stage", []any{0}}, 200},
-		{"GET", "/api/v1/environments/stage/deployments/7", nil, envCall{"Deployment", testTenant, "stage", []any{7}}, 200},
-		{"GET", "/api/v1/environments/stage/incidents?open=1", nil, envCall{"Incidents", testTenant, "stage", []any{true}}, 200},
-		{"GET", "/api/v1/environments/stage/incidents", nil, envCall{"Incidents", testTenant, "stage", []any{false}}, 200},
-		{"GET", "/api/v1/environments/stage/incidents/12", nil, envCall{"Incident", testTenant, "stage", []any{int64(12)}}, 200},
+			envCall{"Logs", testProject, "stage", []any{"addon", "pg", 0, 0}}, 200},
+		{"GET", "/api/v1/environments/stage/deployments?limit=5", nil, envCall{"Deployments", testProject, "stage", []any{5}}, 200},
+		{"GET", "/api/v1/environments/stage/deployments", nil, envCall{"Deployments", testProject, "stage", []any{0}}, 200},
+		{"GET", "/api/v1/environments/stage/deployments/7", nil, envCall{"Deployment", testProject, "stage", []any{7}}, 200},
+		{"GET", "/api/v1/environments/stage/incidents?open=1", nil, envCall{"Incidents", testProject, "stage", []any{true}}, 200},
+		{"GET", "/api/v1/environments/stage/incidents", nil, envCall{"Incidents", testProject, "stage", []any{false}}, 200},
+		{"GET", "/api/v1/environments/stage/incidents/12", nil, envCall{"Incident", testProject, "stage", []any{int64(12)}}, 200},
 		{"GET", "/api/v1/environments/stage/access-logs?limit=5&beforeTsNs=1761739200000000000&traceId=4bf92f3577b34da6a3ce929d0e0e4736", nil,
-			envCall{"AccessLogs", testTenant, "stage", []any{envs.AccessLogQuery{Limit: 5, BeforeTsNs: 1761739200000000000,
+			envCall{"AccessLogs", testProject, "stage", []any{envs.AccessLogQuery{Limit: 5, BeforeTsNs: 1761739200000000000,
 				TraceID: "4bf92f3577b34da6a3ce929d0e0e4736"}}}, 200},
-		{"GET", "/api/v1/environments/stage/access-logs", nil, envCall{"AccessLogs", testTenant, "stage", []any{envs.AccessLogQuery{}}}, 200},
-		{"GET", "/api/v1/environments/stage/traffic", nil, envCall{"Traffic", testTenant, "stage", []any{"1h"}}, 200},
-		{"GET", "/api/v1/environments/stage/traffic?window=", nil, envCall{"Traffic", testTenant, "stage", []any{"1h"}}, 200},
-		{"GET", "/api/v1/environments/stage/traffic?window=1h", nil, envCall{"Traffic", testTenant, "stage", []any{"1h"}}, 200},
-		{"GET", "/api/v1/environments/stage/traffic?window=24h", nil, envCall{"Traffic", testTenant, "stage", []any{"24h"}}, 200},
-		{"GET", "/api/v1/environments/stage/bindings/usage", nil, envCall{"BindingUsage", testTenant, "stage", []any{"24h"}}, 200},
+		{"GET", "/api/v1/environments/stage/access-logs", nil, envCall{"AccessLogs", testProject, "stage", []any{envs.AccessLogQuery{}}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic", nil, envCall{"Traffic", testProject, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic?window=", nil, envCall{"Traffic", testProject, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic?window=1h", nil, envCall{"Traffic", testProject, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/traffic?window=24h", nil, envCall{"Traffic", testProject, "stage", []any{"24h"}}, 200},
+		{"GET", "/api/v1/environments/stage/bindings/usage", nil, envCall{"BindingUsage", testProject, "stage", []any{"24h"}}, 200},
 		{"GET", "/api/v1/environments/stage/bindings/usage?window=1h", nil,
-			envCall{"BindingUsage", testTenant, "stage", []any{"1h"}}, 200},
-		{"GET", "/api/v1/environments/stage/identities", nil, envCall{"Identities", testTenant, "stage", nil}, 200},
-		{"GET", "/api/v1/environments/stage/tags/v1.4", nil, envCall{"Tag", testTenant, "stage", []any{"v1.4"}}, 200},
-		{"DELETE", "/api/v1/environments/stage/secrets/token", nil, envCall{"DeleteSecret", testTenant, "stage",
+			envCall{"BindingUsage", testProject, "stage", []any{"1h"}}, 200},
+		{"GET", "/api/v1/environments/stage/identities", nil, envCall{"Identities", testProject, "stage", nil}, 200},
+		{"GET", "/api/v1/environments/stage/tags/v1.4", nil, envCall{"Tag", testProject, "stage", []any{"v1.4"}}, 200},
+		{"DELETE", "/api/v1/environments/stage/secrets/token", nil, envCall{"DeleteSecret", testProject, "stage",
 			[]any{"token"}}, 204},
-		{"POST", "/api/v1/environments/stage/services/api/restart", nil, envCall{"RestartService", testTenant, "stage",
+		{"POST", "/api/v1/environments/stage/services/api/restart", nil, envCall{"RestartService", testProject, "stage",
 			[]any{"api"}}, 202},
-		{"POST", "/api/v1/environments/stage/jobs/migrate/run", nil, envCall{"RunJob", testTenant, "stage",
+		{"POST", "/api/v1/environments/stage/jobs/migrate/run", nil, envCall{"RunJob", testProject, "stage",
 			[]any{"migrate"}}, 202},
 		{"POST", "/api/v1/environments/stage/deployments/6/revert", map[string]any{"base": 7},
-			envCall{"Revert", testTenant, "stage", []any{envs.RevertRequest{Base: 7}, 6}}, 201},
+			envCall{"Revert", testProject, "stage", []any{envs.RevertRequest{Base: 7}, 6}}, 201},
 		{"POST", "/api/v1/environments/stage/clone", map[string]any{"name": "demo", "deployment": 3},
-			envCall{"Clone", testTenant, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
+			envCall{"Clone", testProject, "stage", []any{envs.CloneRequest{Name: "demo", Deployment: &three}}}, 201},
 		{"POST", "/api/v1/environments/plan", map[string]any{"spec": map[string]any{}},
-			envCall{"PlanSpec", testTenant, "", []any{envs.PlanSpecRequest{Spec: json.RawMessage(`{}`)}}}, 200},
-		{"GET", "/api/v1/addons", nil, envCall{"Addons", testTenant, "", nil}, 200},
+			envCall{"PlanSpec", testProject, "", []any{envs.PlanSpecRequest{Spec: json.RawMessage(`{}`)}}}, 200},
+		{"GET", "/api/v1/addons", nil, envCall{"Addons", testProject, "", nil}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true},
-			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true}}}, 200},
+			envCall{"SetPublic", testProject, "stage", []any{envs.PublicRequest{Public: true}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": false},
-			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: false}}}, 200},
+			envCall{"SetPublic", testProject, "stage", []any{envs.PublicRequest{Public: false}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "hostLabel": "stage--kino"},
-			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino"}}}, 200},
+			envCall{"SetPublic", testProject, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino"}}}, 200},
 		{"PUT", "/api/v1/environments/prod/public", map[string]any{"public": true, "hostLabel": "kino"},
-			envCall{"SetPublic", testTenant, "prod", []any{envs.PublicRequest{Public: true, HostLabel: "kino"}}}, 200},
+			envCall{"SetPublic", testProject, "prod", []any{envs.PublicRequest{Public: true, HostLabel: "kino"}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "access": "visitors",
 			"provider": "fecode", "hostLabel": "stage--kino"},
-			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino",
+			envCall{"SetPublic", testProject, "stage", []any{envs.PublicRequest{Public: true, HostLabel: "stage--kino",
 				Access: "visitors", Provider: "fecode"}}}, 200},
 		{"PUT", "/api/v1/environments/stage/public", map[string]any{"public": true, "access": "anyone"},
-			envCall{"SetPublic", testTenant, "stage", []any{envs.PublicRequest{Public: true, Access: "anyone"}}}, 200},
+			envCall{"SetPublic", testProject, "stage", []any{envs.PublicRequest{Public: true, Access: "anyone"}}}, 200},
 	}
 	for _, c := range cases {
 		fe := &fakeEnvs{}
@@ -594,7 +594,7 @@ func TestRouteDoorClass(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	for _, method := range []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"} {
-		w := e.do(method, "/api/v1/environments/stage/http/api/expense/reports?x=1", bearerOf(e.tenantToken), nil)
+		w := e.do(method, "/api/v1/environments/stage/http/api/expense/reports?x=1", bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusTeapot, "route stage api/expense/reports")
 	}
 	expect(t, e.do("GET", "/api/v1/environments/stage/http/", "", nil), http.StatusTeapot, "route stage ")
@@ -662,7 +662,7 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 		}
 		return svc
 	}})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	do := func(method, path string, body any) *recorderT {
 		t.Helper()
 		return e.do(method, path, tok, body)
@@ -743,8 +743,8 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 	expect(t, e.do("GET", "/api/v1/environments/stage/http/api/x", bearerOf(rt.Token), nil), http.StatusUnauthorized,
 		"route token required\n")
 
-	// Another tenant's environment is absent; delete is a 202.
-	other := e.mintTenantToken(mustTenant(t, e, "rival"))
+	// Another project's environment is absent; delete is a 202.
+	other := e.mintProjectToken(mustProject(t, e, "rival"))
 	expect(t, e.do("GET", "/api/v1/environments/stage", bearerOf(other), nil), http.StatusNotFound,
 		errBody("no such environment"))
 	expect(t, do("DELETE", "/api/v1/environments/stage", nil), http.StatusAccepted, "")

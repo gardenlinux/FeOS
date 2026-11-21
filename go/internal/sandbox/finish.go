@@ -142,7 +142,7 @@ func (r *runner) fencedOut(ctx context.Context, tx *store.Store, h *OpHandle, ro
 			return OpResult{}, ac, nil, err
 		}
 		ac.tombstones = []store.TombstoneKey{t.Key()}
-		events = append(events, activity.Event{SandboxID: h.id, TenantID: h.row.Owner, Node: h.target,
+		events = append(events, activity.Event{SandboxID: h.id, ProjectID: h.row.Owner, Node: h.target,
 			Kind: activity.KindTombstone, Name: fmt.Sprintf("tombstone on node %s: %s", h.target, t.Reason),
 			Detail: map[string]any{"node": h.target, "incarnation": h.inc.String(), "reason": t.Reason}})
 		return result, ac, events, nil
@@ -533,7 +533,7 @@ func (h *OpHandle) endEvent(w store.Sandbox, res callResult) activity.Event {
 	if res.err != nil {
 		detail["error"] = callText(res.err)
 	}
-	return activity.Event{SandboxID: h.id, TenantID: w.Owner, Node: h.target, Kind: activity.KindLifecycleEnd,
+	return activity.Event{SandboxID: h.id, ProjectID: w.Owner, Node: h.target, Kind: activity.KindLifecycleEnd,
 		SpanID: h.span, ParentSpanID: parent, DurationNs: &d,
 		Name: fmt.Sprintf("%s on node %s: %s", h.kind, h.target, w.ClientState), Detail: detail}
 }

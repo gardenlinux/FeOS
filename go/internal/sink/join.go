@@ -69,7 +69,7 @@ func (j *joiner) finish(partial bool) bool {
 // on with it, those at or below bound[stream] (the streams' last offsets
 // the read saw): from the index and the topic's tail of its stream, each
 // offset once. A head whose rest is not there stays partial.
-func (s *Store) joinParts(ctx context.Context, tenant string, heads []Line, streams map[int64]*streamRow,
+func (s *Store) joinParts(ctx context.Context, project string, heads []Line, streams map[int64]*streamRow,
 	bound map[int64]int64) error {
 	tails := map[int64][]quickwit.Doc{}
 	for i := range heads {
@@ -83,7 +83,7 @@ func (s *Store) joinParts(ctx context.Context, tenant string, heads []Line, stre
 			continue
 		}
 		from := h.Off
-		rest, err := s.index.Search(ctx, s.indexPattern(), quickwit.Query{Tenant: tenant, Environment: st.Environment,
+		rest, err := s.index.Search(ctx, s.indexPattern(), quickwit.Query{Project: project, Environment: st.Environment,
 			Job: st.Job, Stream: st.SID, IOStream: h.Source, OffAfter: &from, OffTo: &upTo, Order: quickwit.ByOffset,
 			Max: 2000})
 		if err != nil {

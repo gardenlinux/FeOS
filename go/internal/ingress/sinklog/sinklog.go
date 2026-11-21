@@ -31,7 +31,7 @@ const (
 	attrPod         = "ferun.pod"
 	attrContainer   = "ferun.container"
 	attrLogID       = "ferun.log_id"
-	attrTenant      = "ferun.tenant"
+	attrProject     = "ferun.project"
 	attrEnvironment = "ferun.environment"
 	attrKind        = "ferun.kind"
 	attrObject      = "ferun.object"
@@ -114,7 +114,7 @@ func NewStreams(name, start string) *Streams {
 // record its stream's next offset, which it uses up. It returns the
 // request, nil when it holds no record, how many records it took from
 // recs, and how many of them it skipped: those without an environment or
-// tenant. A request is sent until the sink takes or refuses it; Batch
+// project. A request is sent until the sink takes or refuses it; Batch
 // never numbers a record twice.
 func (s *Streams) Batch(recs []wire.AccessLogEntry) (req *otlplogsv1.ExportLogsServiceRequest, taken, skipped int) {
 	byKey := map[streamKey]*logsv1.ResourceLogs{}
@@ -124,7 +124,7 @@ func (s *Streams) Batch(recs []wire.AccessLogEntry) (req *otlplogsv1.ExportLogsS
 		if taken == MaxRecords {
 			break
 		}
-		if e.Env == "" || e.Tenant == "" {
+		if e.Env == "" || e.Project == "" {
 			taken++
 			skipped++
 			continue
@@ -144,7 +144,7 @@ func (s *Streams) Batch(recs []wire.AccessLogEntry) (req *otlplogsv1.ExportLogsS
 		rl := byKey[k]
 		if rl == nil {
 			rl = &logsv1.ResourceLogs{
-				Resource:  &resourcev1.Resource{Attributes: s.resource(k, e.Tenant)},
+				Resource:  &resourcev1.Resource{Attributes: s.resource(k, e.Project)},
 				ScopeLogs: []*logsv1.ScopeLogs{{}},
 			}
 			byKey[k] = rl
@@ -167,12 +167,12 @@ func (s *Streams) Batch(recs []wire.AccessLogEntry) (req *otlplogsv1.ExportLogsS
 
 // resource is a stream's resource attributes: its key and the service's
 // labels.
-func (s *Streams) resource(k streamKey, tenant string) []*commonv1.KeyValue {
+func (s *Streams) resource(k streamKey, project string) []*commonv1.KeyValue {
 	return []*commonv1.KeyValue{
 		kv(attrPod, str("ingress/"+s.name)),
 		kv(attrContainer, str(k.env+"/"+k.service)),
 		kv(attrLogID, str(s.start)),
-		kv(attrTenant, str(tenant)),
+		kv(attrProject, str(project)),
 		kv(attrEnvironment, str(k.env)),
 		kv(attrKind, str("service")),
 		kv(attrObject, str(k.service)),

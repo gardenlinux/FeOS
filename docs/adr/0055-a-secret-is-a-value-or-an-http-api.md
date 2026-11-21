@@ -176,7 +176,7 @@ serves until its sandbox ends, and can be deleted.
   secret, which a deployment pins.
 - **A list of the HTTP secrets a service uses, beside its variables.**
   A second way to say the same; the variable is the dependency.
-- **A key of the tenant** that every environment's sandboxes and
+- **A key of the project** that every environment's sandboxes and
   bindings name (ADR 0033 before its correction): a grant on `dev` would
   reach `prod`'s keys, and one leaked key would stop both. A key is its
   environment's.

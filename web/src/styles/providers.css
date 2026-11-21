@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* The tenant's access providers (views/Providers.jsx) beside the
+/* The project's access providers (views/Providers.jsx) beside the
    credentials' page parts (credentials.css), and who an environment
    admits in its publish box (EnvTabs.jsx, PublicBox). */
 .tbl.prov-list td { vertical-align: top; }

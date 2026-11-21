@@ -34,13 +34,13 @@ type fakeAccessSink struct {
 }
 
 // passedOn reports whether a request to the sink brings the caller's
-// credentials: the token "tok", or the session "sess" with its tenant.
+// credentials: the token "tok", or the session "sess" with its project.
 func passedOn(r *http.Request) bool {
 	if a := r.Header.Get("Authorization"); a != "" {
-		return a == "Bearer tok" && r.Header.Get(auth.TenantHeader) == ""
+		return a == "Bearer tok" && r.Header.Get(auth.ProjectHeader) == ""
 	}
 	c, err := r.Cookie(auth.SessionCookie)
-	return err == nil && c.Value == "sess" && r.Header.Get(auth.TenantHeader) == tenantA
+	return err == nil && c.Value == "sess" && r.Header.Get(auth.ProjectHeader) == projectA
 }
 
 func (f *fakeAccessSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +110,7 @@ func TestAccessLogsFromSink(t *testing.T) {
 	sink := &fakeAccessSink{t: t, env: e.ID.String()}
 	for i := range 5 {
 		rec := wire.AccessLogEntry{Time: t0.Add(time.Duration(10+i) * time.Second), DurationNs: 1500, Env: e.ID.String(),
-			Tenant: tenantA, Service: "web", Instance: "i1", Host: "app.apps.example", Method: "GET",
+			Project: projectA, Service: "web", Instance: "i1", Host: "app.apps.example", Method: "GET",
 			Path: "/new" + strconv.Itoa(i), Proto: "HTTP/2.0", Status: 503, Outcome: "5xx", BytesIn: 3, BytesOut: 12,
 			ClientIP: "203.0.113.9", UserAgent: "ua", Attempts: 2, HeldNs: 7, SpanID: "00f067aa0ba902b7"}
 		if i == 2 {
@@ -120,12 +120,12 @@ func TestAccessLogsFromSink(t *testing.T) {
 	}
 	srv := httptest.NewServer(sink)
 	t.Cleanup(srv.Close)
-	ctx := auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantA, Token: "tok"})
+	ctx := auth.WithProject(h.ctx(), auth.Project{Name: projectA, Token: "tok"})
 
 	// refused checks that the read answers 503 with code.
 	refused := func(name string, ctx context.Context, code string) {
 		t.Helper()
-		_, err := h.svc.AccessLogs(ctx, tenantA, "stage", AccessLogQuery{})
+		_, err := h.svc.AccessLogs(ctx, projectA, "stage", AccessLogQuery{})
 		var ae *apierr.Error
 		if !errors.As(err, &ae) || ae.Status != http.StatusServiceUnavailable || ae.Code != code {
 			t.Errorf("%s: %v, want 503 %s", name, err, code)
@@ -137,7 +137,7 @@ func TestAccessLogsFromSink(t *testing.T) {
 
 	paths := func(ctx context.Context, q AccessLogQuery) []string {
 		t.Helper()
-		l, err := h.svc.AccessLogs(ctx, tenantA, "stage", q)
+		l, err := h.svc.AccessLogs(ctx, projectA, "stage", q)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,13 +165,13 @@ func TestAccessLogsFromSink(t *testing.T) {
 	}
 
 	// A person's session is passed on as the token is (ADR 0031).
-	sess := auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantA, Session: "sess"})
+	sess := auth.WithProject(h.ctx(), auth.Project{Name: projectA, Session: "sess"})
 	if got := paths(sess, AccessLogQuery{Limit: 2}); !slices.Equal(got, []string{"/new3", "/new4"}) {
 		t.Errorf("a session: %v", got)
 	}
 
 	// A record from the sink is the one the ingress recorded.
-	l, err := h.svc.AccessLogs(ctx, tenantA, "stage", AccessLogQuery{Limit: 1})
+	l, err := h.svc.AccessLogs(ctx, projectA, "stage", AccessLogQuery{Limit: 1})
 	if err != nil || len(l.Records) != 1 {
 		t.Fatalf("%+v, %v", l, err)
 	}

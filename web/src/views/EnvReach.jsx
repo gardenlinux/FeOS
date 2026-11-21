@@ -84,25 +84,25 @@ export function podsOf(sandboxes, jobs) {
 }
 
 // peerLink links a pill of the picture to its object's or pod's page.
-function peerLink(tenant, env, navigate) {
+function peerLink(project, env, navigate) {
   return (p, pill) => {
     let to = '';
-    if ((p.type === 'service' || p.type === 'job' || p.type === 'addon') && !p.missing) to = objectPath(tenant, env, `${p.type}/${p.name}`, 'config');
-    if (p.type === 'sandbox') to = sandboxPath(tenant, env, p.name);
-    if (p.type === 'jobrun') to = jobPath(tenant, env, p.name);
+    if ((p.type === 'service' || p.type === 'job' || p.type === 'addon') && !p.missing) to = objectPath(project, env, `${p.type}/${p.name}`, 'config');
+    if (p.type === 'sandbox') to = sandboxPath(project, env, p.name);
+    if (p.type === 'jobrun') to = jobPath(project, env, p.name);
     return to ? <EnvLink to={to} navigate={navigate} className="sgf-link">{pill}</EnvLink> : null;
   };
 }
 
 // EnvReach is an environment's Reachability view.
-export function EnvReach({ tenant, st, navigate }) {
+export function EnvReach({ project, st, navigate }) {
   const env = st.name;
   const { n, spec, reach, err } = useDeployed(env);
   const pods = useEnvPods();
   const keys = useKeys(env, spec);
   const latest = Number(st.deployment) || 0;
   const model = spec ? withKeys(reachModel(spec, reach, podsOf(pods.sandboxes, pods.jobs)), spec, keys) : null;
-  const link = peerLink(tenant, env, navigate);
+  const link = peerLink(project, env, navigate);
   return (
     <div className="sg-page">
       <div className="sg-top">
@@ -112,7 +112,7 @@ export function EnvReach({ tenant, st, navigate }) {
             <p>{HOW_WORDS}</p>
             <p className="muted small">
               {n > 0
-                ? <>As <EnvLink to={envPath(tenant, env, 'deployments', n)} navigate={navigate}>deployment {n}</EnvLink> declares it.</>
+                ? <>As <EnvLink to={envPath(project, env, 'deployments', n)} navigate={navigate}>deployment {n}</EnvLink> declares it.</>
                 : <>No deployment yet: nothing is declared, nothing reaches anything.</>}
               {latest > n && n > 0 && <span className="sg-pending"> Deployment {latest} is not deployed; its references count once it is.</span>}
             </p>
@@ -123,7 +123,7 @@ export function EnvReach({ tenant, st, navigate }) {
       {!spec && !err && <p className="empty">Loading…</p>}
       {spec && n > 0 && !reach && (
         <p className="panel-note">This ferund answers no reachability with a deployment yet; the pictures fill once it does.</p>)}
-      {model && <ObjectCards tenant={tenant} env={env} model={model} navigate={navigate} />}
+      {model && <ObjectCards project={project} env={env} model={model} navigate={navigate} />}
       {model && (
         <>
           <h2 className="sect rc-podhead"><Icon name="terminal" size={13} /> Sandboxes and jobs
@@ -136,7 +136,7 @@ export function EnvReach({ tenant, st, navigate }) {
                 inWords="Nothing gets in">
                 <div className="sgf-self">
                   <Icon name={kindIcon(p.kind)} size={14} />
-                  <EnvLink to={p.kind === 'sandbox' ? sandboxPath(tenant, env, p.name) : jobPath(tenant, env, p.name)} navigate={navigate} className="mono">
+                  <EnvLink to={p.kind === 'sandbox' ? sandboxPath(project, env, p.name) : jobPath(project, env, p.name)} navigate={navigate} className="mono">
                     {p.kind === 'sandbox' ? p.name : shortId(p.name)}</EnvLink>
                 </div>
                 <div className="sgf-boxhead">{p.kind === 'sandbox' ? 'sandbox' : 'job run'}
@@ -150,9 +150,9 @@ export function EnvReach({ tenant, st, navigate }) {
 
 // ObjectCards are the environment's objects' pictures (withKeys's model),
 // under the marks they show and the columns' heads.
-export function ObjectCards({ tenant, env, model, navigate }) {
+export function ObjectCards({ project, env, model, navigate }) {
   if (!model.objects.length) return null;
-  const link = peerLink(tenant, env, navigate);
+  const link = peerLink(project, env, navigate);
   return (
     <>
       {model.marks.length > 0 && <div className="sg-marks"><MarkLegend marks={model.marks} /></div>}
@@ -160,7 +160,7 @@ export function ObjectCards({ tenant, env, model, navigate }) {
       {model.objects.map((o) => (
         <section key={o.ref} className="card sg-card" id={`reach-${o.kind}-${o.name}`} aria-label={`${o.kind} ${o.name}`}>
           <ReachFlow ins={o.ins} outs={o.outs} egress={o.egress} link={link} heads={false}>
-            <ObjectBox tenant={tenant} env={env} o={o} navigate={navigate} />
+            <ObjectBox project={project} env={env} o={o} navigate={navigate} />
           </ReachFlow>
         </section>))}
     </>
@@ -169,12 +169,12 @@ export function ObjectCards({ tenant, env, model, navigate }) {
 
 // ObjectBox is the middle of an object's card: its kind and name, a
 // link to its Config.
-function ObjectBox({ tenant, env, o, navigate }) {
+function ObjectBox({ project, env, o, navigate }) {
   return (
     <>
       <div className="sgf-self">
         <Icon name={kindIcon(o.kind)} size={14} />
-        <EnvLink to={objectPath(tenant, env, o.ref, 'config')} navigate={navigate} className="mono">{o.name}</EnvLink>
+        <EnvLink to={objectPath(project, env, o.ref, 'config')} navigate={navigate} className="mono">{o.name}</EnvLink>
       </div>
       <div className="sgf-boxhead">{o.kind}{o.attached && <> · in sandbox <span className="mono">{o.attached}</span></>}</div>
     </>
@@ -183,11 +183,11 @@ function ObjectBox({ tenant, env, o, navigate }) {
 
 // ObjectReach is the reachability section of an object's Config: its
 // row of the environment's picture, from the deployed deployment.
-export function ObjectReach({ tenant, st, kind, name, navigate }) {
+export function ObjectReach({ project, st, kind, name, navigate }) {
   const env = st.name;
   const { n, spec, reach, err } = useDeployed(env);
   const keys = useKeys(env, spec);
-  const all = envPath(tenant, env, 'reachability');
+  const all = envPath(project, env, 'reachability');
   const head = (
     <div className="sect sg-objsect">
       Reachability
@@ -197,12 +197,12 @@ export function ObjectReach({ tenant, st, kind, name, navigate }) {
   );
   if (err) return <>{head}<p className="muted small">{err}</p></>;
   if (!spec) return <>{head}<p className="empty small">Loading…</p></>;
-  return <>{head}<ObjectReachPicture tenant={tenant} env={env} spec={spec} reach={reach} kind={kind} name={name} n={n} keys={keys} navigate={navigate} /></>;
+  return <>{head}<ObjectReachPicture project={project} env={env} spec={spec} reach={reach} kind={kind} name={name} n={n} keys={keys} navigate={navigate} /></>;
 }
 
 // ObjectReachPicture is an object's picture from spec and reach, the
 // deployed deployment's; keys (useKeys's) mark where its keys live.
-export function ObjectReachPicture({ tenant, env, spec, reach, kind, name, n = 1, keys = null, navigate }) {
+export function ObjectReachPicture({ project, env, spec, reach, kind, name, n = 1, keys = null, navigate }) {
   if (!n) return <p className="empty small">Not deployed yet.</p>;
   if (!reach) return <p className="muted small">This ferund answers no reachability with a deployment yet.</p>;
   const model = reachModel(spec, reach);
@@ -212,9 +212,9 @@ export function ObjectReachPicture({ tenant, env, spec, reach, kind, name, n = 1
     <>
       {o.attached && (
         <p className="small">Runs in sandbox{' '}
-          <EnvLink to={sandboxPath(tenant, env, o.attached)} navigate={navigate} className="mono">{o.attached}</EnvLink>: its calls are the
+          <EnvLink to={sandboxPath(project, env, o.attached)} navigate={navigate} className="mono">{o.attached}</EnvLink>: its calls are the
           sandbox&apos;s pod&apos;s, and so is its egress.</p>)}
-      <ReachFlow ins={o.ins} outs={o.outs} egress={o.egress} link={peerLink(tenant, env, navigate)}>
+      <ReachFlow ins={o.ins} outs={o.outs} egress={o.egress} link={peerLink(project, env, navigate)}>
         <div className="sgf-self">
           <Icon name={kindIcon(kind)} size={14} />
           <span className="mono">{name || kind}</span>

@@ -90,7 +90,7 @@ const shopSpec = `{
 func (h *harness) podOf(envID uuid.UUID, object string, deployment int, tb ...model.TemplateHTTPBinding) store.Sandbox {
 	h.t.Helper()
 	id := podid.Mint()
-	row, _, err := h.st.CreateSandbox(h.ctx(), store.NewSandbox{ID: id, Owner: tenantA, Image: "img", VCPUs: 1,
+	row, _, err := h.st.CreateSandbox(h.ctx(), store.NewSandbox{ID: id, Owner: projectA, Image: "img", VCPUs: 1,
 		MemoryMiB: 512, EnvironmentID: envID, Instance: true, PodTemplate: &model.PodTemplate{HTTPBindings: tb}})
 	if err != nil {
 		h.t.Fatal(err)
@@ -204,15 +204,15 @@ func TestEnvBindingsScoped(t *testing.T) {
 	// The check takes the latest secret version; a binding the latest
 	// deployment lacks is 404.
 	h.putSecret("shop", "erp-key", "erp-key-v3")
-	res, err := h.svc.CheckBinding(h.ctx(), tenantA, "shop", "erp", BindingCheckRequest{})
+	res, err := h.svc.CheckBinding(h.ctx(), projectA, "shop", "erp", BindingCheckRequest{})
 	if err != nil || !res.OK || fb.last.GetHeaders().GetHeaders()["X-Api-Key"] != "erp-key-v3" {
 		t.Fatalf("check: %+v %v", res, err)
 	}
-	if _, err := h.svc.CheckBinding(h.ctx(), tenantA, "shop", "crm", BindingCheckRequest{}); !hasCode(err, CodeNoBinding) {
+	if _, err := h.svc.CheckBinding(h.ctx(), projectA, "shop", "crm", BindingCheckRequest{}); !hasCode(err, CodeNoBinding) {
 		t.Fatalf("check of no binding: %v", err)
 	}
-	if _, err := h.svc.CheckBinding(h.ctx(), tenantB, "shop", "erp", BindingCheckRequest{}); err == nil {
-		t.Fatal("another tenant's check")
+	if _, err := h.svc.CheckBinding(h.ctx(), projectB, "shop", "erp", BindingCheckRequest{}); err == nil {
+		t.Fatal("another project's check")
 	}
 }
 
@@ -229,7 +229,7 @@ func TestEnvBindingsPlan(t *testing.T) {
 	h.putSecret("shop", "erp-key", "k")
 	h.putSecret("shop", "pay-pass", "p")
 	internal := strings.Replace(shopSpec, "https://api.erp.example", "https://erp.internal.example", 1)
-	_, err := h.svc.Apply(h.ctx(), tenantA, "shop", ApplyRequest{Spec: []byte(internal), Author: "tester"})
+	_, err := h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: []byte(internal), Author: "tester"})
 	if !strings.Contains(describe(err), "bindings.erp.upstream: erp.internal.example resolves to an internal address") {
 		t.Fatalf("an internal upstream: %s", describe(err))
 	}
@@ -238,11 +238,11 @@ func TestEnvBindingsPlan(t *testing.T) {
 	off.create("shop", nil)
 	off.putSecret("shop", "erp-key", "k")
 	off.putSecret("shop", "pay-pass", "p")
-	_, err = off.svc.Apply(off.ctx(), tenantA, "shop", ApplyRequest{Spec: []byte(shopSpec), Author: "tester"})
+	_, err = off.svc.Apply(off.ctx(), projectA, "shop", ApplyRequest{Spec: []byte(shopSpec), Author: "tester"})
 	if !strings.Contains(describe(err), "HTTP bindings are not enabled") {
 		t.Fatalf("bindings off: %s", describe(err))
 	}
-	if _, err := off.svc.CheckBinding(off.ctx(), tenantA, "shop", "erp", BindingCheckRequest{}); !hasCode(err, CodeBindingsOff) {
+	if _, err := off.svc.CheckBinding(off.ctx(), projectA, "shop", "erp", BindingCheckRequest{}); !hasCode(err, CodeBindingsOff) {
 		t.Fatalf("check while off: %v", err)
 	}
 }
@@ -270,7 +270,7 @@ func TestEnvBindingsInvalidValue(t *testing.T) {
 	h.putSecret("shop", "pay-token", "Bearer t0ken\r\nX-Injected: 1")
 
 	h.applyStored("shop", invalidSpec, 0)
-	plan, err := h.svc.Plan(h.ctx(), tenantA, "shop", PlanRequest{Spec: []byte(invalidSpec)})
+	plan, err := h.svc.Plan(h.ctx(), projectA, "shop", PlanRequest{Spec: []byte(invalidSpec)})
 	if err != nil || !plan.Valid {
 		t.Fatalf("plan: %+v %v", plan, err)
 	}

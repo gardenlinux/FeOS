@@ -22,7 +22,7 @@ import (
 )
 
 // ferund's routes of the sink (ADR 0026, docs/architecture/sink.md): the
-// tenant of a token, which the sink asks for its readers; the
+// project of a token, which the sink asks for its readers; the
 // certificates of its instances, under their service tokens; and the
 // operators' list and revoke of those tokens (`ferund service-token`
 // creates them).
@@ -36,8 +36,8 @@ const (
 )
 
 func (s *server) sinkRoutes(admin, service func(pattern string, h apiHandler),
-	tenant func(n need, pattern string, h apiHandler)) {
-	tenant(member, "GET /api/v1/tenant", s.getTenant)
+	project func(n need, pattern string, h apiHandler)) {
+	project(member, "GET /api/v1/project", s.getProject)
 	service("POST /api/v1/service-certificates", s.issueServiceCert)
 	admin("GET /api/v1/admin/service-tokens", s.listServiceTokens)
 	admin("DELETE /api/v1/admin/service-tokens/{id}", s.revokeServiceToken)
@@ -55,21 +55,21 @@ func (s *server) service(h apiHandler) http.Handler {
 	})
 }
 
-// getTenant is GET /api/v1/tenant, which the sink asks for its readers
-// (ADR 0026, 0031): the tenant of the request's principal, a token or a
-// session with FeRun-Tenant; the principal's role on the tenant ("": none,
+// getProject is GET /api/v1/project, which the sink asks for its readers
+// (ADR 0026, 0031): the project of the request's principal, a token or a
+// session with FeRun-Project; the principal's role on the project ("": none,
 // its grants are on environments only); and the IDs of the environments
-// it holds a grant on, sorted. The sink lets a role on the tenant read
+// it holds a grant on, sorted. The sink lets a role on the project read
 // every stream and span, and the others only those of the environments
-// listed. An answer of only {tenant} is a ferund of before people, whose
-// every token was the tenant's. A sink of before people reads such an
-// answer as the whole tenant's, so a principal of environments only is
+// listed. An answer of only {project} is a ferund of before people, whose
+// every token was the project's. A sink of before people reads such an
+// answer as the whole project's, so a principal of environments only is
 // answered only an asker that says it filters (filter=environments), and
-// any other 403 role_required read on the tenant.
-func (s *server) getTenant(w http.ResponseWriter, r *http.Request) error {
-	t, _ := auth.TenantFrom(r.Context())
+// any other 403 role_required read on the project.
+func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
+	t, _ := auth.ProjectFrom(r.Context())
 	if t.Role == auth.RoleNone && r.URL.Query().Get("filter") != "environments" {
-		return apierr.RoleRequired(auth.RoleRead.String(), "tenant")
+		return apierr.RoleRequired(auth.RoleRead.String(), "project")
 	}
 	envs := make([]string, 0, len(t.Envs))
 	for id, role := range t.Envs {
@@ -79,7 +79,7 @@ func (s *server) getTenant(w http.ResponseWriter, r *http.Request) error {
 	}
 	slices.Sort(envs)
 	return writeJSON(w, http.StatusOK, struct {
-		Tenant       string   `json:"tenant"`
+		Project      string   `json:"project"`
 		Role         string   `json:"role"`
 		Environments []string `json:"environments"`
 	}{t.Name, t.Role.String(), envs})

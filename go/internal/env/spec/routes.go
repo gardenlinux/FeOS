@@ -9,7 +9,7 @@ import (
 )
 
 // IsAttached reports whether a service runs attached to a sandbox of the
-// tenant rather than as replicas of an image, as the controller decides
+// project rather than as replicas of an image, as the controller decides
 // it: its runtime is attached, or it names neither a runtime nor an image.
 // The ingress does not reach an attached service; the route door alone
 // serves its routes.

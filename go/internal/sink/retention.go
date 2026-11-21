@@ -58,15 +58,15 @@ func (s *Store) Sweep(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// DeleteStreams deletes a tenant's streams of an environment or a job:
+// DeleteStreams deletes a project's streams of an environment or a job:
 // it leaves a delete task of them in every log index (Quickwit removes
 // their lines when it rewrites their splits; until then no read finds
 // them, their streams being gone), then deletes the streams with their
 // hot lines, each under its lock, which keeps the cold stage from moving
 // its mark meanwhile. It returns how many streams went.
-func (s *Store) DeleteStreams(ctx context.Context, tenant, environment, job string) (int, error) {
+func (s *Store) DeleteStreams(ctx context.Context, project, environment, job string) (int, error) {
 	sel := Selector{Environment: environment, Job: job}
-	streams, err := selectStreams(ctx, s.db.Pool, tenant, streamFilter{sel: sel, limit: maxStreamsRead})
+	streams, err := selectStreams(ctx, s.db.Pool, project, streamFilter{sel: sel, limit: maxStreamsRead})
 	if err != nil {
 		return 0, err
 	}
@@ -76,14 +76,14 @@ func (s *Store) DeleteStreams(ctx context.Context, tenant, environment, job stri
 			return 0, fmt.Errorf("index: %w", err)
 		}
 		for _, id := range ids {
-			if err := s.index.Delete(ctx, id, quickwit.Query{Tenant: tenant, Environment: environment, Job: job}); err != nil {
+			if err := s.index.Delete(ctx, id, quickwit.Query{Project: project, Environment: environment, Job: job}); err != nil {
 				return 0, fmt.Errorf("index %s: delete: %w", id, err)
 			}
 		}
 	}
 	gone := 0
 	for _, st := range streams {
-		tag, err := s.db.Pool.Exec(ctx, `DELETE FROM log_streams WHERE id = $1 AND tenant = $2`, st.ID, tenant)
+		tag, err := s.db.Pool.Exec(ctx, `DELETE FROM log_streams WHERE id = $1 AND project = $2`, st.ID, project)
 		if err != nil {
 			return gone, err
 		}

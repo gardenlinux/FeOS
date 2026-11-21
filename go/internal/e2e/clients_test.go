@@ -86,7 +86,7 @@ func TestRESTAndMCP(t *testing.T) {
 		}
 	}
 	// REST lists the same tools.
-	r := c.call(nil, "GET", "/api/v1/tools", tenantAuth, "")
+	r := c.call(nil, "GET", "/api/v1/tools", projectAuth, "")
 	var tools struct {
 		Tools []struct {
 			Name        string          `json:"name"`
@@ -116,7 +116,7 @@ func TestMCPSessions(t *testing.T) {
 
 	mint := func() string {
 		t.Helper()
-		r := c.call(nil, "POST", sb.path("/tokens"), tenantAuth, `{"label":"fecode-backend"}`)
+		r := c.call(nil, "POST", sb.path("/tokens"), projectAuth, `{"label":"fecode-backend"}`)
 		var out struct {
 			Token string `json:"token"`
 		}
@@ -131,7 +131,7 @@ func TestMCPSessions(t *testing.T) {
 		if text, _, err := callTool(cs, "bash", map[string]any{"command": "echo one"}); err != nil || text != "one\n" {
 			t.Fatalf("before the revocation: %q %v", text, err)
 		}
-		r := c.call(nil, "DELETE", sb.path("/tokens/"+store.HashToken(token)), tenantAuth, "")
+		r := c.call(nil, "DELETE", sb.path("/tokens/"+store.HashToken(token)), projectAuth, "")
 		if r.code != http.StatusOK || r.body != `{"revoked":true}`+"\n" {
 			t.Fatalf("revoke: %d %s", r.code, r.body)
 		}
@@ -207,8 +207,8 @@ func TestBindingsOffAndLostSandbox(t *testing.T) {
 		{"GET", sb.path("/ssh"), sb.auth()},
 		{"DELETE", sb.path("/ssh"), sb.auth()},
 		{"POST", sb.path("/ssh/prod/check"), sb.auth()},
-		{"POST", "/api/v1/kube/preflight", tenantAuth},
-		{"POST", "/api/v1/ssh/preflight", tenantAuth},
+		{"POST", "/api/v1/kube/preflight", projectAuth},
+		{"POST", "/api/v1/ssh/preflight", projectAuth},
 	} {
 		body := ""
 		if tc.method != "GET" && tc.method != "DELETE" {
@@ -220,7 +220,7 @@ func TestBindingsOffAndLostSandbox(t *testing.T) {
 			t.Errorf("%s %s: %d %s, want 404 %s", tc.method, tc.path, r.code, r.body, want)
 		}
 	}
-	if r := c.call(nil, "GET", sb.path("/access"), tenantAuth, ""); r.code != http.StatusOK ||
+	if r := c.call(nil, "GET", sb.path("/access"), projectAuth, ""); r.code != http.StatusOK ||
 		r.body != `{"kube":null,"ssh":null,"denies":[]}`+"\n" {
 		t.Errorf("access: %d %s", r.code, r.body)
 	}
@@ -248,11 +248,11 @@ func TestBindingsOffAndLostSandbox(t *testing.T) {
 	// FeCode then reads the state, deletes the lost sandbox and creates a
 	// new one at once; with no node left, its first call
 	// is refused for capacity, and nothing is placed.
-	r = c.call(nil, "GET", sb.path(""), tenantAuth, "")
+	r = c.call(nil, "GET", sb.path(""), projectAuth, "")
 	if !strings.Contains(r.body, `"clientState":"lost"`) {
 		t.Errorf("state: %d %s", r.code, r.body)
 	}
-	if r := c.call(nil, "DELETE", sb.path(""), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(nil, "DELETE", sb.path(""), projectAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
 	again := c.create(nil)

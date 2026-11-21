@@ -141,7 +141,7 @@ in upper snake case; a flag wins over its variable.
 ## The FeRun credential
 
 FeRun's admin routes take an admin's UI session (OIDC, for people) or
-Basic credentials of `--admin-users`; the bootstrap token and tenant
+Basic credentials of `--admin-users`; the bootstrap token and project
 tokens are refused there. So feos-k8s is an admin user of its own, which
 FeRun's records then name as who acted (join tokens' `createdBy`, the
 removal of a node, the drain's log line):

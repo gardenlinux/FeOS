@@ -5,7 +5,7 @@
 Before `ferund` creates a pod, it asks the image's registry whether the
 credentials the create brings may pull that image, and only a yes
 creates the pod; a sandbox's create, and an environment's service's or
-job's, brings its own registry credentials, never the tenant's. An image
+job's, brings its own registry credentials, never the project's. An image
 is baked once into a sealed layer of diskd's (ADR 0011), keyed by its
 source (registry, repository and manifest digest, with the L0 it was
 made on) and recorded in a catalog of `ferund`'s, and every
@@ -15,7 +15,7 @@ registry alike and issues no registry tokens; the platform's registry is
 FeCode's. The bake is made in an image's first pod, after the guest's
 pull and before its first container, and the guest pulls with the
 registry's short-lived pull token, the one credential that enters a pod
-until the node pulls itself (ADR 0050). A build is a tenant's job
+until the node pulls itself (ADR 0050). A build is a project's job
 (ADR 0018).
 
 ## Context
@@ -57,7 +57,7 @@ to whoever names it:
   says nothing about next month's replica, revert, or re-create after a
   lost node.
 
-The boundary is not FeRun's tenant: FeRun's one tenant is FeCode, which
+The boundary is not FeRun's project: FeRun's one project is FeCode, which
 serves every project and person. It is the credentials a create brings:
 whoever may pull an image with them may run it, and no one else.
 
@@ -133,10 +133,10 @@ whoever may pull an image with them may run it, and no one else.
   secret of a deployment, a secret named there is read at its latest
   version at every create, not pinned to the deployment: it is access,
   not configuration, and a token rotated or revoked must reach next
-  month's replica of last month's deployment. A tenant's job (ADR 0041)
+  month's replica of last month's deployment. A project's job (ADR 0041)
   brings its image credentials in the call.
-- **No credentials of the tenant, and no matching by host.** A tenant
-  serves many: FeCode serves every project. A credential of the tenant
+- **No credentials of the project, and no matching by host.** A project
+  serves many: FeCode serves every project. A credential of the project
   chosen by the image's registry would ask for one project's image with
   another's credentials, the crossing this ADR prevents.
 
@@ -148,7 +148,7 @@ whoever may pull an image with them may run it, and no one else.
   (ADR 0011), thaws it, and only then creates the containers. It pushes
   the layer to the object store in the background and reports the bake
   once the store has it. The bake point comes before anything of the
-  pod's own reaches its disk: no container has run, so no tenant's code
+  pod's own reaches its disk: no container has run, so no project's code
   either, and the spec's command, environment and volumes are not there
   yet. A bake that fails costs only the next pod's pull.
 - **The key is the source**: the registry, the repository and the
@@ -208,10 +208,10 @@ whoever may pull an image with them may run it, and no one else.
   the credentials a create brings, issues no registry tokens and keeps
   no namespaces. The platform's own images are pulled as any other.
 
-### A build is a tenant's job
+### A build is a project's job
 
-- A build is a tenant's job (ADR 0041) of a builder image, placed,
-  admitted, logged and bounded in time like any tenant's job: the
+- A build is a project's job (ADR 0041) of a builder image, placed,
+  admitted, logged and bounded in time like any project's job: the
   builder clones the source and pushes the image with short-lived tokens
   the caller passes as the job's secrets. `ferund` keeps no build
   record, fetches no source and has no builds API.
@@ -241,9 +241,9 @@ whoever may pull an image with them may run it, and no one else.
   create asks the registry for it anyway; a plan that asked too would
   ask twice for one answer. This was the first text of this ADR; the
   code pins a digest reference as written.
-- **The tenant as the boundary**, its credentials chosen by the image's
+- **The project as the boundary**, its credentials chosen by the image's
   host as Docker's `config.json` does (this ADR's first draft): FeRun's
-  one tenant serves every project, so one project's image would be asked
+  one project serves every project, so one project's image would be asked
   for with another's credentials.
 - **The node asks** before it attaches a layer, or checks a grant that
   `ferund` signed: the node would need every create's credentials, even
@@ -269,23 +269,23 @@ whoever may pull an image with them may run it, and no one else.
   store is fetched lazily by chunk already (ADR 0011).
 - **A memory snapshot** of an image's first pod, restored for the next:
   the boot saved, but every pod starts with the same random state and
-  the same guest until each is reseeded, tenants' pods share the guest's
+  the same guest until each is reseeded, projects' pods share the guest's
   pages (a side channel, as with KSM), and the snapshot is pinned to the
   node's versions (ADR 0008). A decision of its own, if the boot is ever
   what a start waits for.
 - **`ferund` as the registry's token issuer**, with a namespace per
-  tenant (this ADR's first draft): FeRun would own an authorization
+  project (this ADR's first draft): FeRun would own an authorization
   model of FeCode's projects and members that it has nowhere else;
   withdrawn by FeCode's ADR 0012.
 - **The platform's own images under a prefix in FeCode's registry**, so
   that their question stays in the cluster (an earlier text of this ADR): the
   platform's images are pulled from GHCR like any other image, so that the
   platform does not depend on a registry it runs.
-- **Builds elsewhere than in a tenant's job**: a builds API in `ferund`
+- **Builds elsewhere than in a project's job**: a builds API in `ferund`
   that fetches the source itself (this ADR's first draft, deferred by
   FeCode's ADR 0009), a build sandbox driven by exec, a build in the
   agent's own sandbox, or a CI outside pushing to the registry. ADR 0018
-  records why a tenant's job: FeCode's projects have no CI, FeCode is
+  records why a project's job: FeCode's projects have no CI, FeCode is
   their workbench, and "stage follows main" is true only when the
   platform builds what main is.
 - **kaniko or buildah** as the builder: BuildKit is what `docker build`
@@ -312,7 +312,7 @@ whoever may pull an image with them may run it, and no one else.
   create with credentials until the node pulls (ADR 0050).
 - The registry's authentication is FeCode's, and nothing of it is
   FeRun's. FeCode's stage and production run images the platform built
-  as tenants' jobs (ADR 0041), and promotion carries their digests.
+  as projects' jobs (ADR 0041), and promotion carries their digests.
 - Layers baked of images that no deployment names stay in the object
   store and the catalog until a collection removes them.
 
@@ -322,12 +322,12 @@ Written on 2026-10-27 and committed on 2026-10-28 (33ea94e) with four
 decisions: the node's pull with a bake pod, the registry as FeRun's with
 `ferund` its token issuer, builds on the platform, and a service's pod
 supervised by its guest. On 2026-10-29 ADR 0025 (01b6de1) moved the
-credentials from the tenant to the create, put the question before every
+credentials from the project to the create, put the question before every
 pod, keyed the bake by its source and brought it back into an image's
 first pod; it was built the same day (11537e4, fc10bf7) and merged into
 this ADR on 2026-11-08. The token issuer was withdrawn on 2026-10-29 by
 FeCode's ADR 0012, the builds API was deferred the same day by FeCode's
-ADR 0009, and builds became tenants' jobs on 2026-10-30 (ADR 0018,
+ADR 0009, and builds became projects' jobs on 2026-10-30 (ADR 0018,
 86eff10); the platform's images moved to GHCR on 2026-10-31 (518608d).
 The node's pull and the bake pod are ADR 0050, and the pod's lifecycle in
 the guest is ADR 0004's and ADR 0048's. On 2026-11-13 the guest's version

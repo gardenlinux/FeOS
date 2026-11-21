@@ -563,7 +563,7 @@ func TestActivityRows(t *testing.T) {
 	start, end := rows[0], rows[1]
 	if start.Kind != "tool_start" || start.Category != "tool" || start.Source != "ferund" || start.InstanceID != toolstest.InstanceID ||
 		start.SpanID == "" || start.RequestID != start.SpanID || start.ParentSpanID != "run-1" || start.Tool != "bash" ||
-		start.Name != "bash: echo hi …" || start.TenantID != toolstest.Tenant || start.Node != toolstest.NodeName {
+		start.Name != "bash: echo hi …" || start.ProjectID != toolstest.Project || start.Node != toolstest.NodeName {
 		t.Errorf("tool_start %+v", start)
 	}
 	var params map[string]any

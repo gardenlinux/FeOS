@@ -93,23 +93,23 @@ conversion).
 | `--oidc-client-secret-file` | none | the client's secret; required with `--oidc-issuer` |
 | `--oidc-scopes` | `openid profile email` | space-separated, with `openid` |
 | `--oidc-admin-group` | `admins` | a person is an admin when the `groups` claim holds it |
-| `--visitor-auth-url` | none | ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind tenant. An absolute `https` URL without path, query or fragment (`http` only for a loopback host), whose host is neither `--public-url`'s nor under the apps zone or the tenant zone; a trailing `/` is trimmed ([Visitors](#visitors)) |
+| `--visitor-auth-url` | none | ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind project. An absolute `https` URL without path, query or fragment (`http` only for a loopback host), whose host is neither `--public-url`'s nor under the apps zone or the project zone; a trailing `/` is trimmed ([Visitors](#visitors)) |
 | `--session-ttl` | `12h` | the absolute lifetime of a UI session |
-| `--tenant-creation` | `people` | who makes tenants with `POST /api/v1/tenants` ([Members, invitations and tokens](#members-invitations-and-tokens)): `people` (every signed-in person) or `operators` |
-| `--tenants-per-person` | `3` | the most tenants one person may make that are not being deleted; `0`: no bound; operators are never bound |
-| `--tenant-default-sandboxes`, `--tenant-default-environments`, `--tenant-default-running-jobs`, `--tenant-default-vcpus`, `--tenant-default-memory-mib` | `5`, `5`, `3`, `8`, `16384` | the limits of a tenant a person makes ([Quotas](#quotas)); negative: none |
-| `--bootstrap-token` | none | becomes a token of the tenant `operator` while no tenant exists |
+| `--project-creation` | `people` | who makes projects with `POST /api/v1/projects` ([Members, invitations and tokens](#members-invitations-and-tokens)): `people` (every signed-in person) or `operators` |
+| `--projects-per-person` | `3` | the most projects one person may make that are not being deleted; `0`: no bound; operators are never bound |
+| `--project-default-sandboxes`, `--project-default-environments`, `--project-default-running-jobs`, `--project-default-vcpus`, `--project-default-memory-mib` | `5`, `5`, `3`, `8`, `16384` | the limits of a project a person makes ([Quotas](#quotas)); negative: none |
+| `--bootstrap-token` | none | becomes a token of the project `operator` while no project exists |
 | `--mcp-allowed-origins` | none | the Origins `/mcp` accepts; empty refuses every request with an Origin |
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
 | `--apps-zone` | empty | the DNS zone of public environments' default hosts, `<label>.<zone>`, which `ferun-ingress` serves ([The ingress](#the-ingress)); empty: no hosts, and no environment can be made public |
-| `--tenant-zone` | empty | the DNS zone of the default hosts of the tenants people make (ADR 0031), such as `apps.run.example.com`, which `ferun-ingress` serves with a wildcard of its own; needs `--apps-zone`, and neither may be or lie under the other; empty: every tenant's hosts are under `--apps-zone` ([Public environments](#public-environments)) |
-| `--apps-zone-owners` | none | the tenants that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<project>.<zone>` ([Public environments](#public-environments)); empty: none may |
-| `--edge-name` | empty | the name tenants' domains point at with a CNAME, such as `edge.fecode.dev`, which the operator publishes with the balancer's addresses ([Domains](#domains)); empty: domains are off |
+| `--project-zone` | empty | the DNS zone of the default hosts of the projects people make (ADR 0031), such as `apps.run.example.com`, which `ferun-ingress` serves with a wildcard of its own; needs `--apps-zone`, and neither may be or lie under the other; empty: every project's hosts are under `--apps-zone` ([Public environments](#public-environments)) |
+| `--apps-zone-owners` | none | the projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<project>.<zone>` ([Public environments](#public-environments)); empty: none may |
+| `--edge-name` | empty | the name projects' domains point at with a CNAME, such as `edge.fecode.dev`, which the operator publishes with the balancer's addresses ([Domains](#domains)); empty: domains are off |
 | `--edge-address` | none | an edge address beside what `--edge-name` resolves to, which a domain's A and AAAA records may name; repeatable |
 | `--domain-challenge-label` | `_ferun-challenge` | the label of a claim's TXT record, `<label>.<name>`; a lowercase DNS label that may hold `_` |
 | `--domain-grace` | `72h` | how long a record of a verified domain may answer wrong before the domain is deactivated |
-| `--domain-unverified-max` | 50 | the most claims a tenant may hold that are not verified |
-| `--domain-reserved` | none | a zone no domain may be or be under (the platform's own domain, where `run`, `id` and `edge` are), beside the apps zone, the tenant zone and `--edge-name`; repeatable |
+| `--domain-unverified-max` | 50 | the most claims a project may hold that are not verified |
+| `--domain-reserved` | none | a zone no domain may be or be under (the platform's own domain, where `run`, `id` and `edge` are), beside the apps zone, the project zone and `--edge-name`; repeatable |
 | `--dns-resolver` | the system's resolvers (`/etc/resolv.conf`) | the DNS resolver, `host:port`, the domains' checks ask |
 | `--default-image` | `ghcr.io/maltej/debian-ai:latest` | the image of a sandbox created without one |
 | `--registry-egress` | none | per registry host, the further names its pulls talk to, `host=name,name;host=name` (`oci.example=*.objects.example` for a registry that redirects its blobs to object storage): a pod whose egress restricts names may resolve and reach them with its image's registry ([Security groups](#security-groups)) |
@@ -176,11 +176,11 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `seal` | AES-256-GCM sealing under `--secret-key-file`'s key: the bindings' credentials, the environments' secrets |
 | `env`, `env/spec`, `env/addons`, `env/ctl`, `env/envdeps` | the environments ([Environments](#environments)) |
 | `ingress/service`, `ingress/table` | ferund's side of the ingress: the API `ferun-ingress` calls, its identity, the table it serves from ([The ingress](#the-ingress)) |
-| `domains` | tenants' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
+| `domains` | projects' domains: claims, bindings, their checks, their states and incidents ([Domains](#domains)) |
 | `acme` | the ACME client: the platform's account, the orders of the domains' certificates over HTTP-01 through the ingress's table, a wildcard's over DNS-01 in the ACME zone ([Certificates of domains](#certificates-of-domains)) |
 | `route53`, `awsauth` | the ACME zone's first DNS provider: Route 53's ChangeResourceRecordSets, signed with SigV4 by `awsauth` from static keys or an EKS Pod Identity |
 | `ingress/wire`, `routing` | shared with `ferun-ingress`: the ingress's protocol; path and host matching, which the route door uses too |
-| `visits` | the tenants' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
+| `visits` | the projects' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
 | `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
 | `oidc`, `oidc/oidctest` | the OpenID Connect relying party of human sign-in and of `ferun-auth`; a test issuer |
 | `api`, `auth`, `apierr` | the REST router, its auth classes and errors, human sign-in |
@@ -246,8 +246,8 @@ replicate synchronously ([Operations](#operations)).
   domains](#certificates-of-domains)); `0016_access_logs.sql`, the
   ingress's access log of before the sink, which `0020_drop_access_logs.sql`
   drops with its partitions ([The sink](#the-sink));
-  `0017_tenant_jobs.sql`, the tenants' jobs and `sandboxes.tenant_job`
-  ([Tenants' jobs](#tenants-jobs)); `0019_sink.sql`, `sandboxes.log_labels`,
+  `0017_project_jobs.sql`, the projects' jobs and `sandboxes.project_job`
+  ([Projects' jobs](#projects-jobs)); `0019_sink.sql`, `sandboxes.log_labels`,
   `jobs.log_retention_days` and `service_tokens` ([The sink](#the-sink));
   `0034_visitors.sql`, `access_providers`, `visits`, `visit_answers`,
   `environments.access` and `access_provider` and the service token kind
@@ -255,8 +255,8 @@ replicate synchronously ([Operations](#operations)).
   applied under an advisory lock, recorded in `schema_migrations`. The
   same locked section creates the cluster's MCP session key, reconciles
   `--pod-network` with the database's ([The pods'
-  mesh](#the-pods-mesh)) and, with `--bootstrap-token`, creates the tenant
-  `operator` and its token, when no tenant exists.
+  mesh](#the-pods-mesh)) and, with `--bootstrap-token`, creates the project
+  `operator` and its token, when no project exists.
 - **Notifications.** One connection per instance listens on the channels
   below and fans them out in the process. A writer sends its notification
   in the transaction that made the change, so it arrives at commit. After
@@ -274,10 +274,10 @@ replicate synchronously ([Operations](#operations)).
 | `ferun_watch` | a watch ID | a watch's paths, owner or result changed |
 | `ferun_cancel` | JSON | an exec, an MCP call or a keyed call (ADR 0023) is to be cancelled on whichever instance runs it |
 | `ferun_call` | a tool call's ID (`tool_calls.id`), or `*` for more than 256 | a keyed call left running: done, interrupted, not run |
-| `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, access (who it admits, its provider and the provider's changes), label, deployments, deletion (its tenant's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
+| `ferun_ingress` | `env:<uuid>`, `ingress:<name>`, `mesh`, `challenges`, or `*` | what the ingress's table shows changed: an environment's publicity, access (who it admits, its provider and the provider's changes), label, deployments, deletion (its project's too), service instances or their admitted ports, a domain's binding, state or certificate (the environment it is or was bound to); an ingress instance's row or certificates; the mesh's peers; the ACME challenges (`challenges`); a node's admitted version of `ferun-ingress`, or more than 256 environments (`*`) |
 
-The tables: `instances`, `leases`, `cluster_secrets`; `tenants`,
-`tenant_tokens`; `people`, `grants`, `invitations` ([People and
+The tables: `instances`, `leases`, `cluster_secrets`; `projects`,
+`project_tokens`; `people`, `grants`, `invitations` ([People and
 grants](#people-and-grants)); `nodes`, `node_telemetry` (the hot row, about a hundred
 updates a second at 512 nodes, never locked by placement), `node_certs`
 (every node certificate issued), `join_tokens` (of kind `node` or
@@ -286,7 +286,7 @@ its peers' version and the version of the group `ferun-ingress`, one
 row while the cluster is meshed); `ingresses` (the instances of
 `ferun-ingress`, never deleted), `ingress_certs` (every ingress
 certificate issued), `host_labels` (every default host label ever given,
-and its tenant); `sandboxes`, `sandbox_tokens`, `sandbox_holds`,
+and its project); `sandboxes`, `sandbox_tokens`, `sandbox_holds`,
 `pod_tombstones`, `bookings`; `tool_calls` (the keyed tool calls, [Calls
 that outlive their caller](#calls-that-outlive-their-caller));
 `image_bakes` (the baked layers of images, [Images](#images)),
@@ -301,18 +301,18 @@ that outlive their caller](#calls-that-outlive-their-caller));
 `env_incidents`, `env_route_tokens` ([Environments](#environments));
 `domains` ([Domains](#domains)); `domain_certs`, `acme_accounts`,
 `acme_challenges` (the domains' certificates, [Certificates of
-domains](#certificates-of-domains)); `jobs` (the tenants' jobs,
-[Tenants' jobs](#tenants-jobs)); `service_tokens` (the sink's and
+domains](#certificates-of-domains)); `jobs` (the projects' jobs,
+[Projects' jobs](#projects-jobs)); `service_tokens` (the sink's and
 `ferun-auth`'s tokens, [The sink](#the-sink)); `access_providers`,
 `visits`, `visit_answers` ([Visitors](#visitors)); `cluster_secrets`
 holds the visits' keys, `visit-token` (sealed) and `visit-challenge`.
 Tokens are stored as SHA-256 hashes only, and shown once, at their
 creation. The rows ferund makes for a principal carry it in `made_by`
-(ADR 0031): `person:<people.id>`, `token:<tenant token hash>` or
+(ADR 0031): `person:<people.id>`, `token:<project token hash>` or
 `basic:<user>`, beside the free `author` a client sends; that is
 `env_deployments` (answered as `madeBy`), `env_secrets`, `env_tags`,
 `env_route_tokens`, `domains`, `sandboxes`, `sandbox_tokens`, `jobs`,
-`tenant_tokens`, `grants` and `invitations`; `''` is ferund's own or a
+`project_tokens`, `grants` and `invitations`; `''` is ferund's own or a
 row of a version before `0027`.
 `placements`, which held the placement decisions and was written and read
 by nothing since `0003` emptied it, was dropped by `0008`. A placement's
@@ -364,7 +364,7 @@ audit is its activity row.
 | repair | 30 s | repairs pods stuck pending or with an unreachable guest |
 | pending re-description | 30 s | tells a sandbox waiting for capacity that there is some |
 | process holds, expired holds | 60 s | releases holds of processes that ended, and expired leases; expired holds only under the same condition |
-| tenant deletion | 60 s | finishes deleting tenants |
+| project deletion | 60 s | finishes deleting projects |
 | `sandbox-http-bindings` | 15 s | sends the pods on connected nodes the clear part of their HTTP bindings that their node did not take ([HTTP bindings](#http-bindings)) |
 | watch expiry | 60 s | deletes watches past their lease |
 | `tool-calls-expiry` | 5 s | marks running keyed calls whose lease passed: interrupted if they reached the guest, not run otherwise; only while the leader has led for a call lease (30 s) and the database has not failed within it. Waiters mark the call they wait on themselves after two leases ([Calls that outlive their caller](#calls-that-outlive-their-caller)) |
@@ -598,10 +598,10 @@ secrets.
   auth, `spiffe://<td>/ingress/<name>`, the name as CN, Ed25519 or ECDSA
   P-256, `--node-cert-ttl`. Pods: client and server auth, their
   workload's SPIFFE ID (ADR 0036)
-  `spiffe://<td>/tenant/<tenant>/env/<environment ID>/<kind>/<name>`
+  `spiffe://<td>/project/<project>/env/<environment ID>/<kind>/<name>`
   (`service`, `job` or `addon` with the object's name, `sandbox` or
-  `tenant-job` with the pod's ID; a row outside an environment
-  `spiffe://<td>/tenant/<tenant>/sandbox/<id>`), the subject
+  `project-job` with the pod's ID; a row outside an environment
+  `spiffe://<td>/project/<project>/sandbox/<id>`), the subject
   `CN=<td>/<pod ID>,OU=<workload's set ID>` (`wl-…`, as the nodes' sets;
   a CN of at most 64 bytes, every value of letters, digits, `.`, `/` and
   `-` alone, none of which RFC 2253 escapes, so that a map anchored on
@@ -611,7 +611,7 @@ secrets.
   lifetime, so that one switched off at any time keeps at least half of
   it; a pod's at three quarters.
 - **Who a workload is.** `GET /api/v1/environments/{env}/identities`
-  (tenant class, read on the environment) answers
+  (project class, read on the environment) answers
   `{"trustDomain", "issuer", "workloads": [{"kind", "name", "spiffeId",
   "ou", "pods": [{"pod", "subject", "serial", "issuedAt", "notAfter",
   "node"}]}]}`: every object of the latest
@@ -827,9 +827,9 @@ a sandbox lives in an instance.
 A sandbox's ID, which is its pod's ([ADR 0019](../adr/0019-pod-ids.md)),
 is 11 characters of lowercase Crockford base32, the first a letter
 (`^[a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}$`, `internal/podid`). ferund
-mints every one from the cryptographic random source: a tenant's sandbox
+mints every one from the cryptographic random source: a project's sandbox
 at its create, an environment's instance at its insert. They are unique
-over all tenants, the primary key of `sandboxes`; an insert whose drawn
+over all projects, the primary key of `sandboxes`; an insert whose drawn
 ID is taken draws another (`CreateMintedSandbox`). A client names none:
 `POST /api/v1/sandboxes` refuses a `sandboxId` ([REST](#rest)) and
 answers the new one. feosd names the pod's TAP device `pod-<ID>`, so two
@@ -866,13 +866,13 @@ incarnation (ferund mints new IDs, so only a drawn ID of a deleted
 sandbox could be).
 The pod's spec is `{resources: {vcpus, memory_mib[, disk_gib]}, containers: [{name:
 "main", image_ref, command: ["sleep", "infinity"]}], network: {}, labels:
-{ferun.sandbox, ferun.tenant, ferun.incarnation}}`, the same on every
+{ferun.sandbox, ferun.project, ferun.incarnation}}`, the same on every
 retry: feosd compares specs, labels included, so a create against a
 leftover pod of an earlier incarnation fails instead of returning it. A
 pod is **ours** when its incarnation label is the row's; ferund never
 touches a pod without `ferun.sandbox`, and never adopts the state of a pod
 that is not ours. A row with a pod template, an environment's instance, a
-sandbox or a tenant's job's pod, builds its pod from the template instead
+sandbox or a project's job's pod, builds its pod from the template instead
 ([Environments](#instances-are-sandbox-rows)).
 
 ### States
@@ -897,7 +897,7 @@ sandbox or a tenant's job's pod, builds its pod from the template instead
 size on its node or frees it, as the table says. An op's admission books
 through the gates; a pod that is found running where the gates would
 refuse it is booked anyway, as overbooked, with an activity row: reality
-wins over the books. Lock order everywhere: tenant, sandbox, at most one
+wins over the books. Lock order everywhere: project, sandbox, at most one
 node.
 
 ### Ops
@@ -1161,7 +1161,7 @@ about to free. Then a hibernated sandbox prefers the node that holds
 its record; then `binpack` takes the one whose scarcest resource has
 the least free share, `spread` the most; ties by name. The peers rank
 and never refuse: on one node, or with the others full or draining, a
-replica goes beside the others. A sandbox, a tenant's job, an addon and
+replica goes beside the others. A sandbox, a project's job, an addon and
 a job's run have no peers. The placement's audit gives each node's
 peers as `instances` and `otherInstances`. The op's begin rechecks the
 gates under the node's lock, so two instances placing at once never
@@ -1182,7 +1182,7 @@ A sandbox's image is resolved once, before its first create, to
 `linux/amd64` from an index, the registry's tokens for the create's
 credentials or anonymous ones, a tag cache of 60 s per asker), and pinned
 in the row: every retry and every later create sends the same digest, so
-a moved tag never changes a sandbox. The tenant names the image, and the image names the
+a moved tag never changes a sandbox. The project names the image, and the image names the
 registry, so the resolver reaches registries as bindings reach servers:
 over https only, without a proxy, and at IPv4 addresses outside the deny
 set (`--deny-prefix`, by default the private, shared, link-local,
@@ -1354,10 +1354,10 @@ The routes, bodies, status codes and texts are the sandbox system's;
 | Class | Routes | Credential |
 |---|---|---|
 | admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users` |
-| person | `POST /api/v1/tenants`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no tenant; else 401 "sign-in required" |
-| tenant | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/tenant[/…]` (leave, members, invitations, tokens) | a tenant's token, or a person's session naming its tenant in `FeRun-Tenant`, with the role and scope each route states ([People and grants](#people-and-grants)) |
-| provider | `POST /api/v1/challenges/open`, `…/accept`, `…/reject`, `GET /api/v1/visits/{visit}` ([Visitors](#visitors)) | a bearer `feos-auth-…` is a service token of kind `auth` (else 401 "unknown service token"); any other credential is a tenant principal as in the tenant class, with its CSRF rules. None: 401 `{"error": "provider credential required"}` with `WWW-Authenticate: Bearer realm="ferun"`. The visits service decides who may, after opening the challenge or reading the visit |
-| auth | `POST /api/v1/visits/end`, `GET /api/v1/oidc-providers/{tenant}/{provider}` ([Visitors](#visitors)) | `ferun-auth`'s service token of kind `auth` alone; else 401 `{"error": "ferun-auth token required"}` with `WWW-Authenticate: Bearer realm="ferun"` |
+| person | `POST /api/v1/projects`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no project; else 401 "sign-in required" |
+| project | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/project[/…]` (leave, members, invitations, tokens) | a project's token, or a person's session naming its project in `FeRun-Project`, with the role and scope each route states ([People and grants](#people-and-grants)) |
+| provider | `POST /api/v1/challenges/open`, `…/accept`, `…/reject`, `GET /api/v1/visits/{visit}` ([Visitors](#visitors)) | a bearer `feos-auth-…` is a service token of kind `auth` (else 401 "unknown service token"); any other credential is a project principal as in the project class, with its CSRF rules. None: 401 `{"error": "provider credential required"}` with `WWW-Authenticate: Bearer realm="ferun"`. The visits service decides who may, after opening the challenge or reading the visit |
+| auth | `POST /api/v1/visits/end`, `GET /api/v1/oidc-providers/{project}/{provider}` ([Visitors](#visitors)) | `ferun-auth`'s service token of kind `auth` alone; else 401 `{"error": "ferun-auth token required"}` with `WWW-Authenticate: Bearer realm="ferun"` |
 | sandbox | `/api/v1/sandboxes/{id}/…`: exec, files, dirs, search, fetch, processes, calls, watches, bindings | the sandbox's own token |
 | mcp | `/mcp` | the sandbox's token, with the door's own answers |
 | forward | `/fwd/…`, `/api/v1/sandboxes/{id}/ports/…` | the sandbox's token in `Authorization` alone ([ports](#ports)) |
@@ -1365,7 +1365,7 @@ The routes, bodies, status codes and texts are the sandbox system's;
 | service | `POST /api/v1/service-certificates` | a service token of kind `sink` ([The sink](#the-sink)) |
 | public | `/healthz`, `/readyz`, `/auth/…`, the UI, `GET /api/v1/visit-keys` ([Visitors](#visitors)) | none |
 
-A tenant's token is not accepted on a sandbox route, not even for its own
+A project's token is not accepted on a sandbox route, not even for its own
 sandbox (the forward class answers it 401 "forwarding needs a sandbox
 token", [ports](#ports)); whoever names what they may not see gets the
 answer of an absent thing, 404. Every unknown route under `/api/` is 404
@@ -1384,13 +1384,13 @@ and no `sandboxId`: one that is neither absent, null nor `""` is 400
 and keep status.sandboxId of the answer". Every create makes a new
 sandbox, 201 `{status, token, created: true}`, the ID ferund minted in
 `status.sandboxId`; it is not idempotent, so a client keeps the ID before
-it relies on the sandbox. The admin API has tenants, each with `sandboxCount` (its
+it relies on the sandbox. The admin API has projects, each with `sandboxCount` (its
 sandboxes, without its environments' instances), `environmentCount` (its
 environments not being deleted) and its tokens (hashed, shown once),
 nodes (with their connections to the serving instance, certificates,
 drain, removal and capacity settings), join tokens, service tokens (list and revoke, [The sink](#the-sink)), instances and the leader, and the
 activity of a sandbox or a node, with gaps and traffic records, whole
-and a deleted sandbox's too. A tenant reads its own sandbox's on `GET
+and a deleted sandbox's too. A project reads its own sandbox's on `GET
 /api/v1/sandboxes/{id}/activity` (read on its environment, [ADR
 0031](../adr/0031-people-in-ferun.md)), with the same parameters and
 answer but without the fleet's part: a `placement` row's detail has no
@@ -1405,7 +1405,7 @@ them gets), and `minVcpus`, `maxVcpus`, `minMemoryMib` and
 `maxMemoryMib` (the bounds a create accepts). An undrain clears the text
 the drain loop left in the node's status description ("draining: …",
 "drained", "cannot drain: …"); another writer's text stays. Deleting
-a tenant deletes its tokens at once, then its sandboxes in batches as a
+a project deletes its tokens at once, then its sandboxes in batches as a
 sandbox delete does, and its environments with their addons' data
 (`env-delete`); the leader finishes what a request did not.
 `/readyz` fails while the instance stops, and after its start until it is
@@ -1433,10 +1433,10 @@ disabled (`people.disabled_at`) gets a page "Your account … is disabled
 in FeRun" and no session, and their sessions resolve no more at once.
 The session keeps the ID token's `sid`. `GET /auth/me` answers who is
 signed in: `sub`, `person`, `email`, `name`, `username`, `picture`,
-`admin` (an operator), `method` and `tenants`, each `{tenant, role,
+`admin` (an operator), `method` and `projects`, each `{project, role,
 environments: [{id, name, role}]}` with the person's grants (`role` ""
-for a tenant where they hold environment grants alone); an operator's
-are every tenant, as `admin`.
+for a project where they hold environment grants alone); an operator's
+are every project, as `admin`.
 
 `POST /auth/backchannel-logout` is the provider's back-channel logout
 (OpenID Connect Back-Channel Logout 1.0), the URI of ferund's client: the
@@ -1452,7 +1452,7 @@ no-store`. A sign-out ends sessions only: tokens live on. The session's
 cookie is `__Host-ferun_session` (`auth.SessionCookie`): HttpOnly,
 SameSite=Lax, Secure whatever the public URL (browsers take it from
 `http://localhost` too), `Path=/`, no `Domain`, so that no app of a
-tenant in a zone below ferund's host (`apps.run.<domain>`) can set one
+project in a zone below ferund's host (`apps.run.<domain>`) can set one
 the browser sends to ferund. Its name before, `ferun_session`, is read
 too for one release (sessions of the release before survive its
 rollout; a sign-in or sign-out clears it), and ferund and the sink pass
@@ -1477,23 +1477,23 @@ not bring up the browser's dialog over it.
 
 ### People and grants
 
-ADR 0031 gives the tenants members. A **grant** (`grants`) gives a
+ADR 0031 gives the projects members. A **grant** (`grants`) gives a
 principal a role in a scope: the principal is a person (`person_id`) or
-a tenant token (`token_hash`), exactly one; the scope is the tenant
+a project token (`token_hash`), exactly one; the scope is the project
 (`environment_id` NULL) or one environment of it; the role is `read`,
 `write` or `admin`, each including the one before. A principal holds at
 most one grant per scope; its role on an environment is the higher of
-its tenant grant and its grant there, its role on the tenant its tenant
+its project grant and its grant there, its role on the project its project
 grant alone. A grant on an environment goes with the environment, every
-grant with its tenant, person or token. A tenant token's own grant is
-on its row, minted with it (`tenant_tokens.role`, `environment_id`):
+grant with its project, person or token. A project token's own grant is
+on its row, minted with it (`project_tokens.role`, `environment_id`):
 every token made before `0027`, and every token made without a role, is
-`admin` on its tenant, so FeCode and FeChat go on unchanged; a token's
+`admin` on its project, so FeCode and FeChat go on unchanged; a token's
 grants rows add to it. `invitations` hold single-use links with a role
 and a scope (their secret hashed, `used_by` and `used_at` once taken).
-`tenants` carry their `zone` (NULL: the apps zone; the tenant zone's
-name for a tenant a person makes while there is one,
-`model.Zones.ForNewTenant` and `store.MakeTenant`; [Public
+`projects` carry their `zone` (NULL: the apps zone; the project zone's
+name for a project a person makes while there is one,
+`model.Zones.ForNewProject` and `store.MakeProject`; [Public
 environments](#public-environments)), the person who made
 them (`made_by`, NULL for an operator's) and their limits
 (`limit_sandboxes`, `limit_environments`, `limit_running_jobs`,
@@ -1501,125 +1501,125 @@ them (`made_by`, NULL for an operator's) and their limits
 deleted; `disabled_at` ends their sessions and every grant's effect, the
 grants kept.
 
-**The tenant class takes a principal.** A bearer is a tenant token, its
-tenant its own: a `FeRun-Tenant` header that names another is 404 "no
-such tenant". Without a bearer, a person's session cookie acts in the
-tenant its `FeRun-Tenant` names (400 "a session names its tenant in the
-FeRun-Tenant header" without it), with the CSRF rules of an operator's
+**The project class takes a principal.** A bearer is a project token, its
+project its own: a `FeRun-Project` header that names another is 404 "no
+such project". Without a bearer, a person's session cookie acts in the
+project its `FeRun-Project` names (400 "a session names its project in the
+FeRun-Project header" without it), with the CSRF rules of an operator's
 session (`X-Requested-With: ferun` on a change, an `Origin` the public
-URL's); a tenant where the person holds no grant is 404 "no such
-tenant", and an operator's session holds `admin` in every tenant,
+URL's); a project where the person holds no grant is 404 "no such
+project", and an operator's session holds `admin` in every project,
 recorded as the operator's own. A session of a version before people
-(no person) and an unknown cookie are 401 "tenant bearer required", as
-no credential is. Every tenant-class route states its need at the route
+(no person) and an unknown cookie are 401 "project bearer required", as
+no credential is. Every project-class route states its need at the route
 in the route table (`go/internal/api`), and `TestRouteNeeds` holds the
 list:
 
 | Need | Routes |
 |---|---|
-| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the tenant, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/providers`, `GET /api/v1/providers/{provider}` (an environment's admin chooses among them), `GET /api/v1/tenant`, `GET /api/v1/tenant/members` (the grants on environments it reads), `GET /api/v1/tenant/invitations` (those of the scopes it is admin of), `POST /api/v1/tenant/leave` |
-| read on the tenant | `GET /api/v1/tools`, `POST /api/v1/environments/plan` |
-| write on the tenant | the preflights, `POST /api/v1/environments`, `…/{env}/clone` |
+| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the project, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/providers`, `GET /api/v1/providers/{provider}` (an environment's admin chooses among them), `GET /api/v1/project`, `GET /api/v1/project/members` (the grants on environments it reads), `GET /api/v1/project/invitations` (those of the scopes it is admin of), `POST /api/v1/project/leave` |
+| read on the project | `GET /api/v1/tools`, `POST /api/v1/environments/plan` |
+| write on the project | the preflights, `POST /api/v1/environments`, `…/{env}/clone` |
 | read on the sandbox's environment (ADR 0035) | a sandbox's get, tokens, access, credentials |
 | write on the sandbox's environment | a sandbox's delete, pause, resume, reaches, image credentials, tokens, credentials |
-| write on the environment the body names, which the handler checks | a sandbox's create, a tenant job's create |
-| read on the job's environment | a tenant job's get and logs |
-| write on the job's environment | a tenant job's cancel and delete |
-| admin on the tenant | a domain's claim, check and deletion; the tenant's tokens (`GET`, `POST /api/v1/tenant/tokens`, `DELETE …/{hash}`); an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
+| write on the environment the body names, which the handler checks | a sandbox's create, a project job's create |
+| read on the job's environment | a project job's get and logs |
+| write on the job's environment | a project job's cancel and delete |
+| admin on the project | a domain's claim, check and deletion; the project's tokens (`GET`, `POST /api/v1/project/tokens`, `DELETE …/{hash}`); an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
 | read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic, its bindings' use, its workloads' identities |
 | write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
-| admin of the scope the request names (the tenant, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/tenant/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/tenant/invitations`, `DELETE …/{id}`) |
+| admin of the scope the request names (the project, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/project/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/project/invitations`, `DELETE …/{id}`) |
 | admin on the environment | its route tokens, `public`, its access (who it admits) and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
-| admin on the environment, or write on the tenant | `DELETE …/{env}` |
+| admin on the environment, or write on the project | `DELETE …/{env}` |
 
-On an environment the higher of the principal's tenant grant and its
+On an environment the higher of the principal's project grant and its
 grant there counts; an environment it holds no role on is 404 "no such
 environment", as an absent one. A principal that sees what it names but
 lacks the role is 403 `{"error": "this needs the role <role> on the
-<tenant|environment>", "code": "role_required", "role", "scope"}`. A
-sandbox or a tenant's job in an environment the principal may not read
+<project|environment>", "code": "role_required", "role", "scope"}`. A
+sandbox or a project's job in an environment the principal may not read
 is absent as an unknown one (404 "unknown sandbox <id>", "no such job").
 Services of runtime `attached` need write on the environment alone: they
-run in a sandbox of the environment (ADR 0035), which ADR 0031's tenant
+run in a sandbox of the environment (ADR 0035), which ADR 0031's project
 grant no longer guards. Callers inside ferund carry no principal and are
 not checked. The admin API mints
-tenant tokens with `{label, role, environment}` (role `admin` by
+project tokens with `{label, role, environment}` (role `admin` by
 default, the environment by ID or name), and lists them with `role`,
 `environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
 sandbox token is its sandbox's, and the door's answers are as before.
 ferund's own reads of the sink on a session's behalf (logs, traffic,
-access logs, the bindings' use) pass the session's cookie and `FeRun-Tenant` on
-(`auth.Tenant.PassOn`), as they pass a token: no service credential
-reads the sink for a tenant.
+access logs, the bindings' use) pass the session's cookie and `FeRun-Project` on
+(`auth.Project.PassOn`), as they pass a token: no service credential
+reads the sink for a project.
 
 ### Members, invitations and tokens
 
-**A person makes a tenant**: `POST /api/v1/tenants {name}` (class
+**A person makes a project**: `POST /api/v1/projects {name}` (class
 person) makes it under today's name rule, with `made_by` the person, and
 gives them `admin` on it; the answer is `{name, createdAt, role}`, no
-token (the session acts). `--tenant-creation operators` keeps it to
-operators (403 "on this platform only operators make tenants");
-`--tenants-per-person` bounds the tenants a person made that are not
+token (the session acts). `--project-creation operators` keeps it to
+operators (403 "on this platform only operators make projects");
+`--projects-per-person` bounds the projects a person made that are not
 being deleted, under a lock of the person's row so that concurrent
-creates do not pass it (422 `quota_exceeded`, `resource` `tenants`);
+creates do not pass it (422 `quota_exceeded`, `resource` `projects`);
 operators are not bound. Names the platform keeps are 422
 `reserved_name`: `operator`, `admin`, `api`, `www`, the
 `--apps-zone-owners`, and the first label of the public URL's host, of
-`--edge-name`, of `--apps-zone` and of `--tenant-zone`. A taken name is
-409. Tenants an
+`--edge-name`, of `--apps-zone` and of `--project-zone`. A taken name is
+409. Projects an
 operator makes with the admin API are as before (no maker, a token).
 
-**Members.** `GET /api/v1/tenant/members` answers `{members: [{person,
+**Members.** `GET /api/v1/project/members` answers `{members: [{person,
 name, email, disabled?, role, environments: [{id, name, role}]}]}`:
-every person with a grant in the tenant, which only its members see,
-`role` their tenant grant ("" for none), and of their environments'
+every person with a grant in the project, which only its members see,
+`role` their project grant ("" for none), and of their environments'
 grants those the caller reads. An admin of the scope sets a member's
-role with `PUT /api/v1/tenant/members/{person}/grants {role,
-environment?}` (the environment by ID or name; none: the tenant) and
+role with `PUT /api/v1/project/members/{person}/grants {role,
+environment?}` (the environment by ID or name; none: the project) and
 removes it with `DELETE …/grants[?environment=…]`; the handler checks
 the scope (403 `role_required`, an environment the caller does not see
-404). Only a member (a person with a grant in the tenant) is given one:
+404). Only a member (a person with a grant in the project) is given one:
 a person joins by an invitation (404 "no such member"). `POST
-/api/v1/tenant/leave` gives up every grant of the calling person (a
+/api/v1/project/leave` gives up every grant of the calling person (a
 token is 400: it is revoked instead).
 
-**A tenant keeps an admin**: removing, lowering or leaving that would
-leave a tenant that had an admin without one is 409 `last_admin`. Its
-admins are the people with `admin` on the tenant itself who are not
-disabled and its tokens with `admin` on the tenant (their own grant or a
+**A project keeps an admin**: removing, lowering or leaving that would
+leave a project that had an admin without one is 409 `last_admin`. Its
+admins are the people with `admin` on the project itself who are not
+disabled and its tokens with `admin` on the project (their own grant or a
 grants row); the changes of admin grants and the tokens' revocation run
-with the tenant's row `FOR NO KEY UPDATE`, so two concurrent ones cannot
+with the project's row `FOR NO KEY UPDATE`, so two concurrent ones cannot
 both pass. The admin API's revocation of a token is an operator's and
 not checked.
 
-**Invitations** are single-use links: `POST /api/v1/tenant/invitations
+**Invitations** are single-use links: `POST /api/v1/project/invitations
 {role, environment?}`, by an admin of the scope (checked by the
 handler), answers `{id, role, environment?, environmentName?, madeBy,
 createdAt, expiresAt, token, url}` once; `id` is the SHA-256 of the
 secret `token`, which alone is stored, and `url` the UI's page
 `<public URL>/invite/<token>`. They are valid 7 days by the database's
-clock. FeRun sends no mail. `GET /api/v1/tenant/invitations` lists the
-tenant's invitations (open, used with `usedAt`, `usedBy` and
+clock. FeRun sends no mail. `GET /api/v1/project/invitations` lists the
+project's invitations (open, used with `usedAt`, `usedBy` and
 `usedByName`, expired) of the scopes the caller is admin of; `DELETE
-/api/v1/tenant/invitations/{id}` revokes one (admin of its scope; one on
+/api/v1/project/invitations/{id}` revokes one (admin of its scope; one on
 an environment the caller does not see is 404). Class person: `GET
-/api/v1/invitations/{token}` previews one, `{tenant, role,
+/api/v1/invitations/{token}` previews one, `{project, role,
 environment?, environmentName?, expiresAt}`, while it is open or the
 caller's (else 404); `POST /api/v1/invitations/{token}/accept` marks it
 used by the person in one `UPDATE`, so only the first taker gets it, and
 gives them its role on its scope, or keeps the higher role they hold
-there: `{tenant, role, environment?, environmentName?}`. The taker
+there: `{project, role, environment?, environmentName?}`. The taker
 asking again gets the same answer; anyone else 410 "this invitation was
 used", after 7 days 410 "this invitation expired", a revoked or unknown
 one 404 "no such invitation". The grant's `made_by` is the inviter. The
 secret is in those paths and the UI's: `ferund`'s request log writes
 `/api/v1/invitations/…` and `/invite/…` without it.
 
-**Tokens**: an admin of the tenant lists (`GET /api/v1/tenant/tokens`,
-as the admin API does), mints (`POST /api/v1/tenant/tokens {label?,
+**Tokens**: an admin of the project lists (`GET /api/v1/project/tokens`,
+as the admin API does), mints (`POST /api/v1/project/tokens {label?,
 role, environment?}`, the role required, never above the minter's role
 on the token's scope; the answer has the token once) and revokes
-(`DELETE /api/v1/tenant/tokens/{hash}`) the tenant's tokens.
+(`DELETE /api/v1/project/tokens/{hash}`) the project's tokens.
 
 **People**: an operator lists them (`GET /api/v1/admin/people`, the last
 seen first) and disables or enables one (`POST
@@ -1629,10 +1629,10 @@ enabling restores them.
 
 ### Quotas
 
-A tenant has **limits** (`tenants.limit_*`, NULL: none) on what it asks
+A project has **limits** (`projects.limit_*`, NULL: none) on what it asks
 for (ADR 0031, `go/internal/quota`): `sandboxes` (its own, not an
 environment's instances or a job's), `environments` (not being
-deleted), `runningJobs` (tenants' jobs queued or running), and the sums
+deleted), `runningJobs` (projects' jobs queued or running), and the sums
 `vcpus` and `memoryMib` over its sandboxes, the replicas of its
 environments' services of runtime `image` by their current
 deployments' resources, its addons' plans and its running jobs (an
@@ -1640,17 +1640,17 @@ attached service runs in a sandbox, which counts already; environments'
 own jobs are not counted). A service's or job's disk (`diskGib`) counts
 towards no limit: it is bounded per pod (200 GiB), booked on its node
 whole while the pod runs ([Placement](#placement)), and scratch, so it
-costs a node's room while it runs and nothing after. A tenant a person makes gets the
-`--tenant-default-*` limits; a tenant an operator makes has none; an
-operator replaces any tenant's with `PUT
-/api/v1/admin/tenants/{tenant}/limits {sandboxes, environments,
+costs a node's room while it runs and nothing after. A project a person makes gets the
+`--project-default-*` limits; a project an operator makes has none; an
+operator replaces any project's with `PUT
+/api/v1/admin/projects/{project}/limits {sandboxes, environments,
 runningJobs, vcpus, memoryMib}` (each at least 0, null or left out for
 none), and the admin list shows them with `madeBy`. A member reads `GET
-/api/v1/tenant/quota`: `{limits, use}`, each `{sandboxes, environments,
+/api/v1/project/quota`: `{limits, use}`, each `{sandboxes, environments,
 runningJobs, vcpus, memoryMib}`, a limit left out being none.
 
 They are checked when asked. A sandbox's create, an environment's
-create and clone and a tenant job's create that would pass a limit are
+create and clone and a project job's create that would pass a limit are
 422 `{"error", "code": "quota_exceeded", "resource", "limit", "use"}`
 (`use` before the request). A plan, and so an apply, revert or object
 change, whose deployment brings `vcpus` or `memoryMib` past a limit and
@@ -1658,10 +1658,10 @@ asks for more than the current deployment has an error finding (path
 ""); a deployment that asks for no more passes, so lowering what an
 environment asks for works under a lowered limit. What runs stays when
 a limit goes down. Concurrent creates cannot pass a limit together: a
-create of a tenant with limits takes the tenant's row `FOR NO KEY
-UPDATE` (a tenant without limits `FOR SHARE`, as before) and counts and
+create of a project with limits takes the project's row `FOR NO KEY
+UPDATE` (a project without limits `FOR SHARE`, as before) and counts and
 inserts under it, and an apply rechecks its finding under it; the
-creates of one tenant with limits run one after the other. The sink's
+creates of one project with limits run one after the other. The sink's
 daily quotas for logs and traces are apart.
 
 ### Tools and MCP
@@ -1978,7 +1978,7 @@ marked is not sent, so that every state is exact, whoever writes it:
 `/fwd/{id}/{port}/…` and `/api/v1/sandboxes/{id}/ports/{port}/…` forward
 HTTP to a port inside the sandbox, with the sandbox's token in
 `Authorization: Bearer` and nowhere else. Without it the door answers 401
-"forwarding needs a sandbox token", and so it answers a tenant's token,
+"forwarding needs a sandbox token", and so it answers a project's token,
 on both paths: the answer names no sandbox. An unknown token and another
 sandbox's get 404 "no such sandbox". A sleeping sandbox is brought up
 detached from the request, so that a browser that gives up on a cold
@@ -2084,10 +2084,10 @@ They come from three places, and from no other:
 | `PUT /api/v1/sandboxes/{id}/http` `{"bindings": [B…]}` | sandbox | 410 `gone` since ADR 0055's release 2; before, 200 the set as `GET` answers it, 400 with a code below, `bindings` absent 400 (`[]` is none) |
 | `GET /api/v1/sandboxes/{id}/http` | sandbox | `{"version", "bindings": [B…]}`, by name, every secret field `{"set": true}`: a header's value, `password`, `clientSecret`, `keyPem`; `version` `""` for none |
 | `DELETE /api/v1/sandboxes/{id}/http` | sandbox | 204 |
-| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | tenant | 200 the result, ok or not; 400 for a body that is no JSON object; 429 `too_many_preflights` |
-| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | tenant | 200 the result of the latest deployment's binding with the secrets' latest versions (of one that names a credential, or of an HTTP secret the deployment pins, its latest version); 404 `no_binding`, `bindings_off`; 429 `too_many_preflights` |
+| `POST /api/v1/http/preflight` `{"binding": B, "probe"?: {"method", "path"}}` | project | 200 the result, ok or not; 400 for a body that is no JSON object; 429 `too_many_preflights` |
+| `POST /api/v1/environments/{env}/bindings/{name}/check` `{"probe"?}` | project | 200 the result of the latest deployment's binding with the secrets' latest versions (of one that names a credential, or of an HTTP secret the deployment pins, its latest version); 404 `no_binding`, `bindings_off`; 429 `too_many_preflights` |
 
-A tenant has at most two preflights and checks in flight on an
+A project has at most two preflights and checks in flight on an
 instance, together: each resolves, dials out and may take its 10 s.
 Beyond, 429 `too_many_preflights` with `Retry-After: 1`.
 
@@ -2276,7 +2276,7 @@ summary and evidence the new ones) instead of a new one. The loop
 deletes a binding's incidents 30 days after they closed.
 
 **Use.** `GET /api/v1/environments/{env}/bindings/usage?window=24h|1h`
-(tenant class, read on the environment; 24 h when no window is named,
+(project class, read on the environment; 24 h when no window is named,
 another a 400) says what the environment's pods sent through each
 binding in the window that ends now, and who sent it, for the console's
 view of where a credential lives: every binding of the latest
@@ -2317,7 +2317,7 @@ a 503: the list is the bindings' and stands without the numbers);
 uncounted. A request is counted once its answer ended (its span comes
 with its `http_end`, ADR 0028), at most 5 s after, and for as long as
 the trace index keeps it (`--trace-retention`, 30 days); a pod killed
-mid-request leaves no span, and the spans beyond a tenant's trace quota
+mid-request leaves no span, and the spans beyond a project's trace quota
 (`--trace-quota`) are not kept, nor counted.
 
 ### HTTP secrets of an environment
@@ -2492,8 +2492,8 @@ HTTP secrets and name them in their sandboxes; it needs no migration,
 and a stored deployment and a set stated before keep running.
 
 The migration of ADR 0033's credentials (`0035_env_credentials.sql`)
-refused while `tenant_credentials` held a row; a stored deployment that
-names a `tenantCredential` still reads, as a binding without a
+refused while `project_credentials` held a row; a stored deployment that
+names a `projectCredential` still reads, as a binding without a
 credential: its pods get the binding without one, and a revert or a
 clone of it is refused with a finding at the binding.
 
@@ -2502,10 +2502,10 @@ clone of it is refused with a finding at the binding.
 `web/` is a React app built with Vite into `go/internal/ui/dist`, which
 ferund embeds; only `dist/.keep` is committed, so the module builds
 without npm, and such a build answers the UI's routes with 404. It shows
-tenants with their members and tokens, sandboxes with their activity, network and
+projects with their members and tokens, sandboxes with their activity, network and
 access, nodes with their certificates and capacity, join tokens, and
 instances with the leader, and signs people in through `/auth/`. A
-tenant's delete asks with the number of its sandboxes and environments
+project's delete asks with the number of its sandboxes and environments
 ("delete with 2 sandboxes and 3 environments and their data?") and says
 that its environments' addon data goes with it. A table
 too wide for the window scrolls sideways in its own box; the nodes'
@@ -2518,30 +2518,30 @@ live, stopping while it stops but still writes its row (it serves on),
 or gone once its row is older than 15 s; the API's `live` and `fresh`
 say which, on the database clock.
 
-The UI is the tenants' console ([ADR 0031](../adr/0031-people-in-ferun.md)).
+The UI is the projects' console ([ADR 0031](../adr/0031-people-in-ferun.md)).
 `/auth/me` decides what it offers (`web/src/people.js`): an operator gets
-the operators' pages (tenants, nodes, join tokens, instances) and acts
-in every tenant as its admin; everyone
-else gets their tenants with their roles ("Your tenants", a new one with
-`POST /api/v1/tenants`), never an operator's page, and the UI calls no
-admin route for them. The browser keeps no tenant token: every tenant
-page calls with the session and names its tenant in `FeRun-Tenant`; the
-tokens an earlier UI kept in `localStorage` (`ferun-tenants`) are removed
+the operators' pages (projects, nodes, join tokens, instances) and acts
+in every project as its admin; everyone
+else gets their projects with their roles ("Your projects", a new one with
+`POST /api/v1/projects`), never an operator's page, and the UI calls no
+admin route for them. The browser keeps no project token: every project
+page calls with the session and names its project in `FeRun-Project`; the
+tokens an earlier UI kept in `localStorage` (`ferun-projects`) are removed
 at sign-in. The topbar holds where one works, the search (⌘K) and the
 person's menu (the architecture page, light or dark, sign-out). Where
 one works is a switcher at the head of the topbar's trail, in two
-columns: a tenant, from the person's tenants with their roles, and one
+columns: a project, from the person's projects with their roles, and one
 of its environments (the right column lists the environments of the
-tenant chosen on the left); for operators also the platform (fleet:
-nodes, ingresses, control plane, join tokens; accounts: tenants,
+project chosen on the left); for operators also the platform (fleet:
+nodes, ingresses, control plane, join tokens; accounts: projects,
 people). Choosing another environment keeps the page open (prod's logs
 lead to stage's logs). The sidebar picks the thing, the tab bar how to
 look at it. In an environment the sidebar shows the environment as a
 card (its name, a suffix of 8 hex digits that FeCode adds dimmed; its
 state; its host) and below it its objects by kind, each with the dot of
 its state and, only while something is wrong, what (`1/2`, `failed`);
-the tenant is one entry at its foot. The environment is the open one,
-else the one last open in this browser, else the tenant's first, since
+the project is one entry at its foot. The environment is the open one,
+else the one last open in this browser, else the project's first, since
 people use the UI in an environment; its status is read once for the
 sidebar and the page (`web/src/envstatus.jsx`, every 3 s while one of
 its pages is open). An environment's views are its tab bar
@@ -2570,10 +2570,10 @@ says first what is wrong with it (its open incident, else its first
 instance that exited with the end of that replica's log), then its
 instances, its traffic and the deployments that changed it. New
 deployment opens the builder. While none of an environment's pages is
-open the sidebar shows the tenant's pages (`TENANT_NAV` in
-`web/src/people.js`): Home, the environments, the tenant's domains,
+open the sidebar shows the project's pages (`PROJECT_NAV` in
+`web/src/people.js`): Home, the environments, the project's domains,
 jobs and sandboxes (last: agents use sandboxes through the
-API and FeCode, people rarely through the UI), then Tenant settings, one
+API and FeCode, people rarely through the UI), then Project settings, one
 entry whose pages (people, tokens, usage, general) are tabs. An
 environment's Secrets view (`…/secrets[/<kind>/<name>]`, a tab of its
 own between Reachability and Settings; kind `secret`, `binding` or
@@ -2617,8 +2617,8 @@ its cluster and SSH access and its registry login.
 Settings keeps General and Domains & access; the credentials' paths of
 old (`…/credentials[/…]`, `…/secrets/credential/<name>`) lead to the
 Secrets view and an HTTP secret's page. Home and the environments, domains,
-people, usage and settings go to every member; the tenant's sandboxes
-and jobs pages and the tools' reference with a tenant grant, an
+people, usage and settings go to every member; the project's sandboxes
+and jobs pages and the tools' reference with a project grant, an
 environment's sandboxes and jobs with a grant on it (ADR 0035); tokens to
 its admin. The UI is set
 in FeCode's face and forms (IBM Plex Sans at 15 px, cards with 12 px
@@ -2631,36 +2631,36 @@ deployment without one, sandboxes `failed`, `lost` or `unknown`, domains
 whose state needs someone, open invitations that end within 48 h, and
 limits from 80 % of their quota; then the environments, the most
 recently active sandboxes and the use against the limits. One summary
-per tenant (`web/src/summary.jsx`, every 15 s) reads the lists for Home,
+per project (`web/src/summary.jsx`, every 15 s) reads the lists for Home,
 the counts and the search; the open incidents one by one for at most 8
 environments, the rest by their count. ⌘K (or Ctrl+K) searches the
-pages, the person's tenants and the tenant's things by name or ID (a
+pages, the person's projects and the project's things by name or ID (a
 prefix of a sandbox's ID too), and opens "prod#13" or "prod 13" as
 deployment 13 of prod (`web/src/search.js`). A page hides the actions
 the role lacks (a sandbox's create, pause, resume, delete and tokens need
-`write` on the tenant); ferund decides anyway, and a 403 `role_required`
-reads "Your role does not allow this: it needs write on this tenant.". A
-person with grants on environments alone opens a tenant at those
+`write` on the project); ferund decides anyway, and a 403 `role_required`
+reads "Your role does not allow this: it needs write on this project.". A
+person with grants on environments alone opens a project at those
 environments. A Basic sign-in (`--admin-users`) has the operators' pages
-but no tenant's: the tenant routes take a person's session or a token.
+but no project's: the project routes take a person's session or a token.
 
 The people's pages call the routes of members, invitations, tokens and
-quotas (`web/src/api.js`): `GET /api/v1/tenant/members`, `PUT|DELETE
-/api/v1/tenant/members/{person}/grants` (`{role, environment?}`, `?environment=`),
-`POST /api/v1/tenant/leave`, `GET|POST /api/v1/tenant/invitations`,
-`DELETE /api/v1/tenant/invitations/{id}`, `GET /api/v1/invitations/{token}`
-and `POST …/accept` (the session's, no tenant header), `GET|POST
-/api/v1/tenant/tokens` (`{label, role, environment?}`), `DELETE
-/api/v1/tenant/tokens/{hash}` and `GET /api/v1/tenant/quota` (`{limits,
+quotas (`web/src/api.js`): `GET /api/v1/project/members`, `PUT|DELETE
+/api/v1/project/members/{person}/grants` (`{role, environment?}`, `?environment=`),
+`POST /api/v1/project/leave`, `GET|POST /api/v1/project/invitations`,
+`DELETE /api/v1/project/invitations/{id}`, `GET /api/v1/invitations/{token}`
+and `POST …/accept` (the session's, no project header), `GET|POST
+/api/v1/project/tokens` (`{label, role, environment?}`), `DELETE
+/api/v1/project/tokens/{hash}` and `GET /api/v1/project/quota` (`{limits,
 use}`, each `{sandboxes, environments, runningJobs, vcpus, memoryMib}`).
 A ferund without one answers 404 "no such route", and the page says it
-is not available; the quota card on a tenant's overview is left out. An
+is not available; the quota card on a project's overview is left out. An
 invitation is shown once as a link, `/invite/<token>` (or the answer's
 `url`); opened signed out, the sign-in returns to it, and the signed-in
 person accepts it with a click.
 
-In a tenant the UI shows its environments
-(`/tenants/<t>/environments[/<env>[/<tab>]]`), and in each what runs in
+In a project the UI shows its environments
+(`/projects/<t>/environments[/<env>[/<tab>]]`), and in each what runs in
 it (ADR 0035): the list, with label filters; an environment's overview
 (its rollout, its
 objects by kind, a row each with its image, ready replicas, last hour's
@@ -2708,22 +2708,22 @@ check with `write`, as are a sandbox's changes and a job's run, cancel
 and delete; public, the host label and route tokens with
 `admin`. The sidebar lists, under the environment, its objects, the
 jobs made by a call that are on their way, and its sandboxes (many
-hibernated ones folded into one entry). The tenant's former pages of
-sandboxes and jobs (`/tenants/<t>/sandboxes[/<id>[/<tab>]]`,
-`/tenants/<t>/jobs[/<id>]`) lead to their environment, which `GET
+hibernated ones folded into one entry). The project's former pages of
+sandboxes and jobs (`/projects/<t>/sandboxes[/<id>[/<tab>]]`,
+`/projects/<t>/jobs[/<id>]`) lead to their environment, which `GET
 /api/v1/sandboxes/{id}` and `GET /api/v1/jobs/{id}` name. It polls (the
 list every 4 s, an environment every 3 s, its sandboxes and jobs every
 4 s while one of its pages is open, the rest every 5 s) and reads no
 secret's value.
 
-The tenant's domains (`/tenants/<t>/domains[/<id>]`) show each claim
+The project's domains (`/projects/<t>/domains[/<id>]`) show each claim
 with its state in words and its way (claimed, verified, bound, routed,
 certificate, served, from `domains.Derive`'s states), the records to
 set with what DNS answers now (`found`), the check, the binding (admin
 on the environments), the certificate and the delete; the claim needs
-admin on the tenant. Usage
+admin on the project. Usage
 shows the quota's use against each limit and where vCPUs and memory are
-booked; Settings the tenant, the role and leaving it. A sandbox's page
+booked; Settings the project, the role and leaving it. A sandbox's page
 says its state in words with what it costs, and its Connect tab mints a
 token (shown once) beside the MCP address, ready snippets and the
 tools' reference; a new sandbox is made in the environment open, and
@@ -2736,17 +2736,17 @@ environment to the latest when its latest deployment pins an older one
 (a plan and an apply of that deployment's spec with the pin moved).
 Everything about credentials needs a grant on the environment, read to
 see and write to change. The platform's pages add the ingresses, every person
-(disable, enable), a tenant's limits and zone, and join tokens of kind
+(disable, enable), a project's limits and zone, and join tokens of kind
 `ingress`.
 
 The Edit action (the route's tab `builder`, `…/builder/<kind>/<name>`
 for one object's form, which an object page's Edit opens; its page is
 titled New deployment, under the environment's name) and
-`/tenants/<t>/new-environment` are the deployment builder (ADR 0032), the
+`/projects/<t>/new-environment` are the deployment builder (ADR 0032), the
 main part that writes: a draft, a spec and its base, from the latest
 deployment, empty or an imported file, kept in the browser's local
-storage per tenant and environment (`ferun-draft:<tenant>/<env>`,
-`ferun-draft:<tenant>/` for a new one; in memory where storage
+storage per project and environment (`ferun-draft:<project>/<env>`,
+`ferun-draft:<project>/` for a new one; in memory where storage
 refuses). It is edited in forms, as cloud consoles edit a service: a
 list of the spec's objects by kind (services, jobs, addons, routes,
 bindings, secrets), each with a one-line summary and its change against
@@ -2774,9 +2774,9 @@ exists. The draft's operations are pure modules beside
 `rebase.js`, `pins.js`, `catalog.js`, `planner.js`). Below 900 px the
 list is the first screen and an object's form opens at full width. The
 role decides what it offers (`people.js`, `mayBuild`): "New
-environment" needs `write` on the tenant, a change of an environment
-`write` on it (the tenant grant or the environment's), an attached
-service `write` on the tenant; below that the builder shows the latest
+environment" needs `write` on the project, a change of an environment
+`write` on it (the project grant or the environment's), an attached
+service `write` on the project; below that the builder shows the latest
 deployment's spec read-only, plans nothing (a plan needs `write`),
 applies nothing, writes no secret and
 stores no draft. The
@@ -2794,7 +2794,7 @@ names no file gets the UI's `index.html`.
 ## Environments
 
 An environment ([ADR 0018](../adr/0018-environments-and-deployments.md)) is
-a tenant's set of typed objects that run together: services, jobs,
+a project's set of typed objects that run together: services, jobs,
 addons, routes and secrets, each with a DNS label for its name. It
 changes only by deployments, numbered from 1 per environment and never
 changed: a deployment holds the whole desired state as a spec, the deployment
@@ -2830,16 +2830,16 @@ is a row of `sandboxes` with `instance` set (`0032`; before it,
 `environment_id` alone marked an instance): the engine places,
 creates, syncs, moves, pauses, hibernates and deletes it as any sandbox,
 with its ops, bookings, tombstones and holds. Every other row is in an
-environment too, a sandbox or a tenant's job's pod ([Sandboxes and jobs
+environment too, a sandbox or a project's job's pod ([Sandboxes and jobs
 in an environment](#sandboxes-and-jobs-in-an-environment)), so a query
 of an environment's instances asks `environment_id` and `instance`;
-`store.Sandbox.IsOwn` tells a tenant's own sandbox. `0006` adds five
+`store.Sandbox.IsOwn` tells a project's own sandbox. `0006` adds five
 columns:
 
 | Column | What it is |
 |---|---|
 | `environment_id` | the row's environment, not null since `0032`; fixed |
-| `instance` | (`0032`) the row is an instance of it; fixed, never with `tenant_job` |
+| `instance` | (`0032`) the row is an instance of it; fixed, never with `project_job` |
 | `pod_template` | `model.PodTemplate`: the pod's command, env (literals, secrets by name and version, or parts of both with a URL's userinfo escaped), volumes, mounts, security groups, name tables, its egress by name (`restrictEgressNames`, `egressDomains`, ADR 0034 revised) and labels; fixed, but that the begin of a pod's next create or restore drops the first version's `sg-` groups from it (`store.DropLegacyGroups`). NULL: a pod without one (sleep infinity, feosd's default group) |
 | `pin_node` | a create goes to this node alone; a start or resume goes to the row's own node anyway, where its pod and volume are, and a restore anywhere, its checkpoint carrying the volume; a pinned row avoids no node |
 | `idle_after_s` | NULL: `--idle-pause`; 0: never; n: seconds |
@@ -2863,19 +2863,19 @@ the pod's spec carries (`Resources.disk_gib`) and the template hash
 takes only when it is set, so that every template of before hashes as
 it did.
 
-Instance rows are no tenant's sandboxes: the tenant's listing and the
-admin listing's `sandboxCount` leave them out, the tenant routes answer
+Instance rows are no project's sandboxes: the project's listing and the
+admin listing's `sandboxCount` leave them out, the project routes answer
 them 404 `unknown sandbox <id>`, the sandbox-token doors `no such
 sandbox`, and no sandbox token is minted for one.
-A tenant with environments is not deleted: `DeleteTenantIfEmpty` waits
-for them, `env-delete` marks the environments of a deleting tenant
+A project with environments is not deleted: `DeleteProjectIfEmpty` waits
+for them, `env-delete` marks the environments of a deleting project
 deleting, and an environment's create, apply, clone and secret, and the
-controller's instance insert, take the tenant's row FOR SHARE and refuse
+controller's instance insert, take the project's row FOR SHARE and refuse
 a deleting one.
 
 | Table | Holds |
 |---|---|
-| `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `deployment` (the latest desired), `deployed` (the latest deployed), `deleting`, `gen` (the env group's version); `public` (its tenant's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish or chosen by its tenant, unique), public only with both ([Public environments](#public-environments)) |
+| `environments` | owner, name (a DNS label, never a UUID, unique per owner), labels, `deployment` (the latest desired), `deployed` (the latest deployed), `deleting`, `gen` (the env group's version); `public` (its project's decision that the ingress serves it), `ingress_group` (set at its first publish and never cleared: its image services' pods name `ing-<sandbox id>`) and `host_label` (its default host's label, given at its first publish or chosen by its project, unique), public only with both ([Public environments](#public-environments)) |
 | `env_deployments` | per number: the normalised spec, `base`, author, message, annotations (a string map, at most 4 KiB), `origin` (`apply`, `revert`, `clone`, `object`) with `origin_ref` (the number reverted to, `<env id>/<number>` of a clone's source, `<kind>/<name>` of an object change), `state` (`waiting`, `deploying`, `deployed`, `failed`, `replaced`), `reason`, start and end |
 | `env_tags` | a tag's deployment, who moved it and when |
 | `env_secrets` | one version of a secret, sealed; `system` for an addon's credential, `addon.<addon>.<key>`, never listed; soft-deleted |
@@ -2885,7 +2885,7 @@ a deleting one.
 | `env_volumes` | an addon's volume (`addon/<name>`): ID, size, node, `provisioned`, holder, `addon_type` (fixed) and `data_version`, `deleting` |
 | `env_incidents` | a condition of an object in a deployment: `rollout_failed`, `crash_loop`, `job_failed`, `no_capacity`, `addon_unhealthy`, `volume_unavailable`, `names_unserved`, or of a binding `credential_refused`, `upstream_failing`, `token_failing` (`attach_failed` is reserved), opened, closed, summary, evidence, when a binding's condition last held; one open per object, deployment and condition; a binding's deleted 30 days after it closed |
 | `env_route_tokens` | the route door's tokens, as hashes |
-| `host_labels` | every default host label ever given, per zone (`zone`: `''` for the apps zone, else the zone's name; key `(zone, label)`, `0029`): its owner, the tenant that first claimed it there and alone may claim it again, and the environment that has it, set free when that is deleted |
+| `host_labels` | every default host label ever given, per zone (`zone`: `''` for the apps zone, else the zone's name; key `(zone, label)`, `0029`): its owner, the project that first claimed it there and alone may claim it again, and the environment that has it, set free when that is deleted |
 
 `hosts_written` of `env_instances` and `env_attached`, the hash of the
 hosts block that ferund wrote into a pod before its names moved into
@@ -2927,17 +2927,17 @@ redaction reaches ([Logs](#probes-exits-and-restarts)). A writer that
 wants the controller to act sends `env-reconcile` (or `env-groups`,
 `env-names`) on `ferun_leader` in its transaction. The writers of what
 the ingress's table shows (publishing, an environment's deployment,
-deployed deployment and deletion, a tenant's deletion, a service
+deployed deployment and deletion, a project's deletion, a service
 instance's insert, delete, phase, deployment and admitted ports) send
 `ferun_ingress` `env:<id>` themselves.
 
 ### Sandboxes and jobs in an environment
 
-ADR 0035 puts every sandbox and every tenant's job into an environment,
+ADR 0035 puts every sandbox and every project's job into an environment,
 outside its deployments: a call makes one, a deployment never does, and
 an environment without deployments is a valid place for them.
 
-- **Rows.** A sandbox's row and a tenant's job's pod name the
+- **Rows.** A sandbox's row and a project's job's pod name the
   environment (`environment_id`, required at the insert, fixed), what of
   it they reach (`sandboxes.reaches`: `"all"` or a list of entries
   `{service, port}` and `{addon}`, `[]` for nothing, the default) and
@@ -2973,19 +2973,19 @@ an environment without deployments is a valid place for them.
   them first. A create holds the environment FOR SHARE, so it cannot slip
   in after the check. `env-delete` waits for every row of an environment
   (`CountEnvironmentRows`) before it deletes it, which matters for a
-  tenant's deletion, where the engine deletes the sandboxes. A clone
+  project's deletion, where the engine deletes the sandboxes. A clone
   copies neither.
 - **Grants** follow the environment ([People and
   grants](#people-and-grants)).
-- **Logs.** A sandbox's `log_labels` are `ferun.tenant`,
+- **Logs.** A sandbox's `log_labels` are `ferun.project`,
   `ferun.instance`, `ferun.environment`, `ferun.kind` `sandbox` and
-  `ferun.object` its ID; a tenant's job's carry `ferun.environment`
+  `ferun.object` its ID; a project's job's carry `ferun.environment`
   beside its own, so that a reader of the environment sees them ([The
   sink](#the-sink)).
 - **Every sandbox has a template** (`model.SandboxTemplate`, made at the
   create): `sleep infinity`, the groups `env-<env>` and `wl-s-<id>`, the
   name table `env-<env>` and its egress by name (`restrictEgressNames`,
-  `egressDomains`); a tenant's job's pod names `env-<env>` and
+  `egressDomains`); a project's job's pod names `env-<env>` and
   `wl-j-<id>`, the same table and its egress, beside its own command and
   env. Any sandbox can run its environment's attached services: an
   attached service names a sandbox of its own environment, is its
@@ -2998,12 +2998,12 @@ an environment without deployments is a valid place for them.
 - **The migration** (`0032`) moved the rows once: a sandbox that the
   latest deployment of an environment not being deleted named as an
   attached service's went into that environment, the most recently
-  created of several; every other sandbox, and every job of a tenant
-  (its record and its pod), into the tenant's environment `sandboxes`,
-  which it made (empty; a tenant that had one kept it). Their log labels
+  created of several; every other sandbox, and every job of a project
+  (its record and its pod), into the project's environment `sandboxes`,
+  which it made (empty; a project that had one kept it). Their log labels
   got their environment. It is not additive: the version before inserts
   rows without an environment, which the not-null columns refuse. A
-  tenant with a limit of environments got one more for the environment
+  project with a limit of environments got one more for the environment
   `sandboxes` made for it. **Nodes first**: feosd takes a restore's
   `security_groups` and `name_tables` (`RestorePodRequest`, which
   replace the checkpointed spec's; every restore of a row with a template
@@ -3024,11 +3024,11 @@ an environment without deployments is a valid place for them.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/sandboxes` `{environment, reaches?, egress?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?, workdir?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` ("securityGroups is gone (ADR 0034, revised); use reaches"), a malformed `reaches` entry or `egress`, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a tenant being deleted; 422 for an entry naming an object or a port the deployed deployment does not have, with what it has |
+| `POST /api/v1/sandboxes` `{environment, reaches?, egress?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?, workdir?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` ("securityGroups is gone (ADR 0034, revised); use reaches"), a malformed `reaches` entry or `egress`, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a project being deleted; 422 for an entry naming an object or a port the deployed deployment does not have, with what it has |
 | `GET /api/v1/sandboxes[?environment=]` | `{sandboxes}`, oldest first: those the principal reads, of the one environment when it names one (by name or ID) |
 | `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}`, `reaches` (`"all"` or the entries, `[]` for nothing), `egress` (`"internet"` when the create left it out, `"none"` or `{domains, blocks}`) and `workdir` (`"/"` when the create left it out) |
 | `PUT /api/v1/sandboxes/{id}/reaches` `{reaches}` | 200 the view, the rules changed in place; 400 without `reaches` or for one malformed, 422 as a create's. `…/security-groups` is gone (404) |
-| `POST /api/v1/jobs` `{environment, reaches?, egress?, …}` | as before ([Tenants' jobs](#tenants-jobs)), and as a sandbox's create for the two fields |
+| `POST /api/v1/jobs` `{environment, reaches?, egress?, …}` | as before ([Projects' jobs](#projects-jobs)), and as a sandbox's create for the two fields |
 | `DELETE /api/v1/environments/{env}` | 409 `environment_in_use` while sandboxes or queued or running jobs are in it |
 
 ### The deployment spec
@@ -3241,7 +3241,7 @@ the nodes through `env-groups`, put whole.
   is not one drops a stale `imageAsWritten`.
 - **Apply** plans and refuses any error (422 with every finding), pins
   the images outside the transaction (one that does not resolve is now
-  an error), then in one transaction locks the tenant FOR SHARE and the
+  an error), then in one transaction locks the project FOR SHARE and the
   environment FOR UPDATE (each refused while it is deleted), checks the
   pinned secret versions again, answers a spec equal to the current
   deployment's with that deployment (200 `unchanged`, checked before the base,
@@ -3278,11 +3278,11 @@ inside a transaction:
 | Loop | Interval | Does |
 |---|---|---|
 | `env-reconcile` | 2 s, hint `env-reconcile` | a step ([below](#a-reconcile-step)) for each environment that has a deployment and is not deleted, four at once |
-| `env-probe` | 1 s | exits, restarts and readiness of the instances whose rows run without an op on a node this instance is connected to; attached services; the tenants' jobs that have not ended, and the pods their ends left ([Tenants' jobs](#tenants-jobs)); at most 16 checks at once |
+| `env-probe` | 1 s | exits, restarts and readiness of the instances whose rows run without an op on a node this instance is connected to; attached services; the projects' jobs that have not ended, and the pods their ends left ([Projects' jobs](#projects-jobs)); at most 16 checks at once |
 | `env-groups` | 10 s, hint `env-groups` | per connected node, the groups its rows' templates name and the groups their rules name (`ferun-ingress` among them), put again where the node's differ, and what the node holds of the ingress's groups recorded ([Security groups](#security-groups)); the groups of environments that are gone, the workloads' and legacy `sg-` groups no row's template names, an `ing-` group of a sandbox that runs elsewhere and the `sbx-` groups of before ADR 0035 too |
 | `env-names` | 2 s, hint `env-names` | per connected node, the name tables its rows' templates name and the tables they include, updated by a delta or put again where the node's differ; the tables of environments that are gone, and the `sbx-` tables of before ADR 0035, deleted once no pod names them ([Names](#names)) |
 | `env-volumes` | 30 s | volumes marked deleting, 64 a pass, deleted on their node once no pod holds them (`FAILED_PRECONDITION`: later, at the end of the queue; `NOT_FOUND`: done), then their rows; a removed node's lose their rows only; records of environments' volumes on a connected node that no pod holds and no row places there are deleted |
-| `env-delete` | 5 s | the environments of deleting tenants marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances ended as a rollout's old ones without the traffic's drain (marked stopping, a running pod stopped with its grace, the row deleted once the pod has ended; [A reconcile step](#a-reconcile-step)), its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the tenants' jobs that ended 7 days ago |
+| `env-delete` | 5 s | the environments of deleting projects marked deleting; per deleting environment, 16 a pass, the oldest-touched first: its instances ended as a rollout's old ones without the traffic's drain (marked stopping, a running pod stopped with its grace, the row deleted once the pod has ended; [A reconcile step](#a-reconcile-step)), its attached services cleaned up ([below](#attached-services)) before their rows go, its volumes marked deleting, its env group and env table deleted from every connected node; its row goes once no instance, volume, group, table or attached service still to clean is left, and its deployments, secrets, runs, incidents and route tokens with it; an environment whose pass did not finish (a volume on a node that is down, a sandbox not woken yet) is touched, so that it goes to the end of the queue and stuck environments never hold the others back; the projects' jobs that ended 7 days ago |
 | `env-bindings` | 30 s | the incidents of the environments' HTTP bindings from their pods' requests over the last five minutes ([HTTP bindings](#http-bindings)) |
 
 **The Ensure pool.** The controller runs `Engine.Ensure` for the rows
@@ -3431,7 +3431,7 @@ crash loop closes. Then:
    cancelled; their pods have the node's 10 s, by the same steps when
    they stop (an environment's deletion, `env-delete`). A repair that
    restarts a service's pod waits the grace in its `StopPod`. Like a
-   rollout's surge replica, a stopping instance counts against no tenant
+   rollout's surge replica, a stopping instance counts against no project
    limit: quotas count what the deployments declare, not the rows. A
    node without room for the next replica keeps it pending until an old
    pod there has ended, within the rollout's budget. The service's
@@ -3559,7 +3559,7 @@ all; `job_failed` copies the run's. Redaction comes before the cut, so
 that no part of a value the cut splits is kept, and replaces with
 `[redacted]` every value of four bytes or more, also as it reads escaped
 in a URL's userinfo, of: the credentials of every addon of T and R, the
-environment's tenant secrets at their latest versions and at those T and
+environment's project secrets at their latest versions and at those T and
 R pin, and the secrets the instance's own template names. It is best
 effort: a value in another encoding is not caught. A logs answer read
 from a running instance is not redacted.
@@ -3569,7 +3569,7 @@ from a running instance is not redacted.
 The controller's groups are `env-<env id>` and the workloads' `wl-…`
 (ADR 0034 revised, ADR 0035 revised), the first version's `sg-<uuid>` as
 a transition, and the ingress's `ing-<sandbox id>` and `ferun-ingress`
-(below). Every group and rule is derived; a tenant writes none. The
+(below). Every group and rule is derived; a project writes none. The
 internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0.0.0/8`, `10.0.0.0/8`,
 `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`,
 `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`,
@@ -3581,7 +3581,7 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
 - **Every pod of an environment** names `env-<env>` and its workload's
   group, in its template: an instance `wl-` and the first 32 hex digits
   of the SHA-256 of `<env id>/<kind>/<name>` (`model.WorkloadGroupID`,
-  35 characters), a sandbox `wl-s-<id>`, a tenant's job's pod
+  35 characters), a sandbox `wl-s-<id>`, a project's job's pod
   `wl-j-<id>`. A pod's groups never change while it lives. An attached
   service has no group of its own: its process runs in its sandbox's pod,
   so its references are that pod's and a reference to it opens the
@@ -3602,7 +3602,7 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
   protocol to itself, the implied rule: a pod may send to every pod of
   its environment, and the receiver's rules decide. Its members are the
   IPv6 addresses of every row of the environment, its instances in any
-  phase until the row goes, its sandboxes and its tenants' jobs' pods.
+  phase until the row goes, its sandboxes and its projects' jobs' pods.
 - **A workload's group** has derived rules (`envReachOf`, once per pass
   and environment). The specs are the target (the latest deployment,
   unless it failed: then the deployed one) and the deployed deployment:
@@ -3611,7 +3611,7 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
     ports, an addon's port): a workload's replicas reach each other.
   - In: for every edge caller → it on port n (`spec.Derive`; the
     ingress's go through `ing-`), TCP on n from the caller's group (an
-    attached caller's sandbox's); for every sandbox and tenant's job of
+    attached caller's sandbox's); for every sandbox and project's job of
     the environment (`store.EnvCtlReachers`) whose `reaches` names it,
     TCP on the entry's port (an addon's: its type's) from that pod's
     group, entries resolved in the target; for one whose `reaches` is
@@ -3644,7 +3644,7 @@ internet, wherever a rule names it, is the egress table: `0.0.0.0/0` except `0.0
   numbers, in the pod's own deployment, of the ports that the routes of the
   deployed and the latest deployment give its service. Otherwise, or
   without routed ports, it has no rules; it never has members. Addons,
-  jobs, sandboxes and tenants' jobs' pods name none.
+  jobs, sandboxes and projects' jobs' pods name none.
 - **`ferun-ingress`** has no rules; its members are the mesh addresses of
   the ingress instances that are not removed. It is never deleted.
 - **Versions.** An env group's is `environments.gen`, counted up when a
@@ -3712,7 +3712,7 @@ from the name tables the controller puts on the nodes
 
 - **The env table**, `env-<env id>`, which the templates of the
   environment's service and job instances, its sandboxes and its
-  tenants' jobs' pods name (an addon's names none: it reaches nothing by
+  projects' jobs' pods name (an addon's names none: it reaches nothing by
   name), names T's addons and image services with the IPv6 addresses of
   their live replicas; while none is live, those of the replicas whose
   row's state is known; only then those of unknown ones, whose node is
@@ -3794,8 +3794,8 @@ writes only onto a row that still records the process it looked at.
 
 The service may use its sandbox while that exists, is the environment
 owner's and is no instance row. Otherwise the service is `failed`,
-"sandbox <id> is gone or not this tenant's", and is never started,
-checked, routed to or made a group member there; another tenant's
+"sandbox <id> is gone or not this project's", and is never started,
+checked, routed to or made a group member there; another project's
 sandbox under its ID stays refused. A new incarnation of the owner's
 sandbox under the same ID is one in which the service starts anew: the
 row records the new incarnation and forgets the process, which went with
@@ -3816,7 +3816,7 @@ any more counts as stopped). Only then does the row go, while it still
 names the sandbox and process that were cleaned, or, for a move, forget
 its process, so that the next round moves it, its counters reset.
 Nothing is left to clean when the service never started a process, or
-when its sandbox is gone, another tenant's, an instance row, a new
+when its sandbox is gone, another project's, an instance row, a new
 incarnation (the old process went with the old one), or stopped, failed
 or lost (no process outlives a boot). A sandbox in an op, between states
 or on a node out of reach is looked at again in a later round. A
@@ -3839,7 +3839,7 @@ pinned version.
 own, `route`: a route token of the environment and plain-text answers.
 The door reads the token from `X-FeRun-Route-Token`, and from
 `Authorization: Bearer` only when that header is absent or blank, as
-older clients send it. A token that is no route token, a tenant's
+older clients send it. A token that is no route token, a project's
 included, is 401 "route token required" in either place, and a wrong
 one in `X-FeRun-Route-Token` is never made good by `Authorization`; a
 route token of another environment is 404 "no such environment".
@@ -3858,7 +3858,7 @@ Kubernetes binding's port refused. `X-FeRun-Route-Token` and
 `Proxy-Authorization` stop at the door; with the token from
 `X-FeRun-Route-Token` the client's `Authorization` reaches the upstream
 unchanged, unless a bearer token in it (in any of its values, the scheme
-in any case) is a FeRun credential, a tenant's or a sandbox's token,
+in any case) is a FeRun credential, a project's or a sandbox's token,
 which is 401 "route token required" with nothing forwarded; with the
 token from `Authorization` that stops too. A failure
 inside ferund (the database, a stored spec that does not parse) is 500
@@ -3875,7 +3875,7 @@ serves anonymous clients; a refusal below 500 keeps its text.
   incarnation of it too, where the controller starts the service anew.
   The door does not look at the service's phase: a port nothing listens
   on yet is the port door's 502. Else 503 "sandbox <id> of service
-  <service> is gone or not this tenant's", and without a row yet 503
+  <service> is gone or not this project's", and without a row yet 503
   "no ready instance of <service>", both with `Retry-After: 5`.
 - The path loses the route's prefix only with `strip`; the query stays.
   A segment that is, or decodes once or twice to, `.` or `..` is 400
@@ -3889,7 +3889,7 @@ environment's, so such an environment's routes have no host.
 
 The door serves every environment, with its route tokens. Beside it,
 `ferun-ingress` serves the routes to image services of the environments
-whose tenant made them public, at their hosts, a route with a host at
+whose project made them public, at their hosts, a route with a host at
 that host alone, and without a token, straight to the pods ([Public
 environments](#public-environments)); routes to attached services are
 the door's alone. A plan's info finding at each route says which doors
@@ -4007,7 +4007,7 @@ percent-encoded.
   addon's ID.
 - **nats**: JetStream turned off is a warning; its volume stays, unused.
 
-`GET /api/v1/addons` (tenant class, the same for every tenant) is the
+`GET /api/v1/addons` (project class, the same for every project) is the
 catalog: `{addons: [{type, versions, defaultVersion, plans: [{name,
 vcpus, memoryMib, volumeMib}], defaultPlan, outputKeys, outputFields,
 byIdentity, identityBy, options: [{name, kind, required, default, description,
@@ -4064,8 +4064,8 @@ incident's summary.
 
 ### The environments' REST API
 
-Tenant class, JSON in camelCase. `{env}` is the environment's UUID or its
-name; one the tenant does not have is 404 "no such environment".
+Project class, JSON in camelCase. `{env}` is the environment's UUID or its
+name; one the project does not have is 404 "no such environment".
 
 | Method and path | Answers |
 |---|---|
@@ -4073,7 +4073,7 @@ name; one the tenant does not have is 404 "no such environment".
 | `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest deployment's, `none` or `deleting` |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
 | `PATCH /api/v1/environments/{env}` `{name}` | 200 its status under the new name ([Renaming](#renaming-an-environment)); the name it has again 200, changing nothing; 400 for a name a create refuses; 409 `name_taken` "an environment named X exists"; 409 while it is being deleted |
-| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a tenant of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another tenant or environment holds, or a plain label that is the natural label of an existing tenant's environment; 409 while the platform has no apps zone (publishing) or the environment or its tenant is being deleted ([Public environments](#public-environments)) |
+| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a project of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another project or environment holds, or a plain label that is the natural label of an existing project's environment; 409 while the platform has no apps zone (publishing) or the environment or its project is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings, images}` |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current, images}`, `images` `{"<as written>": "<registry>/<repository>@sha256:…"}` ([Plan](#plan-apply-revert-clone)) |
 | `GET /api/v1/addons` | the addon types' catalog ([Addons](#addons)) |
@@ -4102,7 +4102,7 @@ version, `0024`'s, while the clients moved (ADR 0018, "The deployments'
 word"): `…/{env}/releases[…]` and the keys `release` and `releases`.
 They are gone; a deploy job's `on: release` stays accepted.
 
-Other answers: plain 409s "environment X is being deleted", "tenant X is
+Other answers: plain 409s "environment X is being deleted", "project X is
 being deleted", "deployment N pins secret X: apply a deployment without it
 first", "the platform serves no apps zone (--apps-zone); an environment
 cannot be public" and "paused"; 409s with a code for states the
@@ -4122,10 +4122,10 @@ backups and minor upgrades, a CLI.
 
 An environment's identity is its ID ([ADR
 0037](../adr/0037-environments-can-be-renamed.md)); its name, a DNS label
-unique per tenant, is a handle. `PATCH …/{env} {"name"}` (an
-environment admin's or a tenant writer's, as a deletion) checks the name
+unique per project, is a handle. `PATCH …/{env} {"name"}` (an
+environment admin's or a project writer's, as a deletion) checks the name
 as a create does, locks the row FOR UPDATE, refuses a name another
-environment of the tenant has (`UNIQUE (owner, name)` catches a race),
+environment of the project has (`UNIQUE (owner, name)` catches a race),
 writes `environments.name` alone (`store.RenameEnvironment`) and sends
 `ferun_ingress` `env:<id>`, so that the ingress's table carries the new
 name. It wakes no controller loop: nothing the controller makes is
@@ -4142,14 +4142,14 @@ route door's too (the old name is 404 and free at once), the console's
 URLs, which name it, and the names in messages from then on. It is not recorded in activity,
 as no other change of an environment is.
 
-### Tenants' jobs
+### Projects' jobs
 
-A tenant's job (ADR 0018, "A tenant's job") is a job outside its
+A project's job (ADR 0018, "A project's job") is a job outside its
 environment's spec (ADR 0035): one pod run to its end exactly once, its
 input in the create, and never retried. It has one run, so the job carries its
 status, exit code, result and log under its one ID, where an
 environment's job has runs (`env_job_runs`). Its pod is a row of
-`sandboxes` under the job's ID with `tenant_job` set (`0017`), a
+`sandboxes` under the job's ID with `project_job` set (`0017`), a
 template (the job's command, its `env` as literals, its secrets as
 secrets of version 0, its image credentials as the secrets
 `imageCredentials.username` and `imageCredentials.password`),
@@ -4157,9 +4157,9 @@ secrets of version 0, its image credentials as the secrets
 ([Sandboxes and jobs in an
 environment](#sandboxes-and-jobs-in-an-environment)) and no name tables
 in its template yet. It is no sandbox to every query that tells a
-tenant's sandbox from the rest (`store.Sandbox.IsOwn`): absent from the
-tenant's sandboxes, no tokens, 404 on the sandbox routes. The engine's secret
-resolver (`RowSecret`) unseals a tenant job's secrets and image
+project's sandbox from the rest (`store.Sandbox.IsOwn`): absent from the
+project's sandboxes, no tokens, 404 on the sandbox routes. The engine's secret
+resolver (`RowSecret`) unseals a project job's secrets and image
 credentials from `jobs.sealed` (AAD `jobs|<id>`), an environment's from
 `env_secrets`; the image is pinned to its digest at the create, asked
 with the credentials, and the registry is asked again before the pod's
@@ -4168,7 +4168,7 @@ create (ADR 0025).
 | Column of `jobs` | What it is |
 |---|---|
 | `id` | its pod's sandbox ID, a short one |
-| `owner`, `idempotency_key`, `request_hash` | the tenant; the create's `Idempotency-Key`, unique per tenant; the body's SHA-256 without the values of its secrets and image credentials, which a caller mints anew for a repeat |
+| `owner`, `idempotency_key`, `request_hash` | the project; the create's `Idempotency-Key`, unique per project; the body's SHA-256 without the values of its secrets and image credentials, which a caller mints anew for a repeat |
 | `environment_id`, `security_groups` | (`0032`) its environment, by its ID, and the names of its pod's groups, fixed; the record goes with the environment |
 | `image`, `image_ref`, `vcpus`, `memory_mib`, `result_path`, `labels` | as created, the image pinned |
 | `sealed` | the secrets and image credentials, sealed; NULL once the job has ended |
@@ -4177,11 +4177,11 @@ create (ADR 0025).
 | `log_retention_days` | the create's `logRetentionDays` (`0019`), the pod's `ferun.retention_days`; NULL: the sink's default |
 | `created_at`, `started_at`, `finished_at`, `deadline_at` | `deadline_at` is the create's `now()` plus its deadline (10 minutes when unset, at most 2 hours) |
 
-`env-probe` looks at every tenant's job that has not ended, on the
+`env-probe` looks at every project's job that has not ended, on the
 database's clock: past its deadline it ends `deadline_exceeded`; a lost
 row `failed`/`node_lost`, never run again; a row that is gone
 `failed`/`no_exit_status`; a row stopped or failed after the job
-started, the same, since a tenant's job never runs twice; a running pod
+started, the same, since a project's job never runs twice; a running pod
 is read by `GetPod`, and a main container that runs marks the job
 `running`, one that exited ends it (0 `succeeded`, another code
 `failed`/`exit`, none `failed`/`no_exit_status`) after its result file
@@ -4193,24 +4193,24 @@ started, ends it `failed`/`no_exit_status` ("its container did not
 start: …"), as an exit would. An end reads the log's tail from a pod that runs
 (before it drops the job's secrets, which redact it), writes the job
 once (`finished_at IS NULL`) and deletes the pod; `env-probe` deletes
-the pods whose job ended or went (`LeftTenantJobPods`) as well, and
+the pods whose job ended or went (`LeftProjectJobPods`) as well, and
 `env-delete` sweeps the jobs that ended 7 days ago. A create, a cancel
 and a delete run on the instance that takes the request: a cancel ends
 the job `cancelled` with its tail and deletes its pod, a delete cancels
-a job that has not ended and removes its record. A tenant's job is never
+a job that has not ended and removes its record. A project's job is never
 paused, suspended or hibernated for want of calls; a drain moves it as
 any row, and its deadline counts on.
 
 | Method and path | Answers |
 |---|---|
-| `POST /api/v1/jobs` `{environment, reaches?, egress?, image, command?, env?, secrets?, imageCredentials?, vcpus?, memoryMib?, deadline?, resultPath?, labels?, logRetentionDays?}` | 201 the job; 400 without `environment`, or for `securityGroups`, `reaches` or `egress` as a sandbox's create; 404 "no such environment"; 409 while it is being deleted; 422 for a `reaches` entry its deployed deployment does not have; with an `Idempotency-Key` a create made with the same body 200 with that job, another body 422 `job_key_conflict`; 422 for an image that does not resolve; 400 for what the body gets wrong (an env or secret name that is no variable's, one in both, a size out of range, a deadline above 2h, a `resultPath` that is not absolute and clean or lies under `/dev`, a `logRetentionDays` outside 1 to 400); 503 "secrets need --secret-key-file" for secrets or image credentials without it; 409 while the tenant is being deleted |
+| `POST /api/v1/jobs` `{environment, reaches?, egress?, image, command?, env?, secrets?, imageCredentials?, vcpus?, memoryMib?, deadline?, resultPath?, labels?, logRetentionDays?}` | 201 the job; 400 without `environment`, or for `securityGroups`, `reaches` or `egress` as a sandbox's create; 404 "no such environment"; 409 while it is being deleted; 422 for a `reaches` entry its deployed deployment does not have; with an `Idempotency-Key` a create made with the same body 200 with that job, another body 422 `job_key_conflict`; 422 for an image that does not resolve; 400 for what the body gets wrong (an env or secret name that is no variable's, one in both, a size out of range, a deadline above 2h, a `resultPath` that is not absolute and clean or lies under `/dev`, a `logRetentionDays` outside 1 to 400); 503 "secrets need --secret-key-file" for secrets or image credentials without it; 409 while the project is being deleted |
 | `GET /api/v1/jobs?label=k=v&environment=` | `{jobs}`, newest first, the labels ANDed, those of the environments the principal reads (of the one it names) |
 | `GET /api/v1/jobs/{id}` | `{id, environment {id, name}, reaches, egress, image, imageRef, phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib, labels, createdAt, startedAt, finishedAt, deadlineAt, logRetentionDays?}` (`logRetentionDays` only when the create asked) |
 | `GET /api/v1/jobs/{id}/logs?lines=200` | `{lines}`: the sink's (with `--sink-url`), else from the pod while it runs, redacted of the job's secrets; none while it is queued; the kept tail once it has ended and the sink has no line |
 | `POST /api/v1/jobs/{id}/cancel` | the job, `cancelled` unless it had ended |
 | `DELETE /api/v1/jobs/{id}` | 204 |
 
-A job the tenant does not have is 404 "no such job". Not built (ADR
+A job the project does not have is 404 "no such job". Not built (ADR
 0018's later steps): `follow` on the log, exits as events, a cancel by
 `SIGTERM`, MCP tools and the UI.
 
@@ -4218,7 +4218,7 @@ A job the tenant does not have is 404 "no such job". Not built (ADR
 
 `ferun-ingress` ([ADR 0021](../adr/0021-ingress.md),
 [ingress.md](ingress.md)) serves public environments' hosts,
-`https://<label>.<zone>/…` under the apps zone or the tenant zone,
+`https://<label>.<zone>/…` under the apps zone or the project zone,
 straight to their image services' pods:
 a program of its own and a peer on the pods' mesh, which connects out to
 `ferund` on the nodes' port as a node does and serves from the table
@@ -4229,10 +4229,10 @@ traffic, and any instance serves any of its instances. This section is
 ### Public environments
 
 The route door serves every environment, with its route tokens. The
-ingress serves an environment only once its tenant made it public, `PUT
-/api/v1/environments/{env}/public {"public": true}` (tenant class), and
+ingress serves an environment only once its project made it public, `PUT
+/api/v1/environments/{env}/public {"public": true}` (project class), and
 at its hosts only to whom the environment admits: anyone, or visitors
-of one of its tenant's providers, which the same call sets
+of one of its project's providers, which the same call sets
 ([Visitors](#visitors)); the route door asks for no visit:
 
 - **The first publish**, in one transaction under the environment's row
@@ -4247,69 +4247,69 @@ of one of its tenant's providers, which the same call sets
   `env-groups` pass. Label and `ingress_group` stay, so publishing again
   rolls nothing.
 - **Refusals**: 409 for publishing while `--apps-zone` is empty, the
-  platform's switch, or while the tenant's zone is one the platform does
-  not serve, and for either while the environment or its tenant
+  platform's switch, or while the project's zone is one the platform does
+  not serve, and for either while the environment or its project
   is being deleted. A clone never copies `public`; deploying the ingress
   makes nothing public.
-- **The label** is `<environment>-<tenant>` when it names that pair
-  alone: the name has no hyphen, the tenant no dot, it does not end in a
+- **The label** is `<environment>-<project>` when it names that pair
+  alone: the name has no hyphen, the project no dot, it does not end in a
   hyphen and 16 hex characters, and it is a DNS label of at most 63
   characters without `--` as its third and fourth characters. Else it is
   at most 46 characters of the name, a hyphen and 16 hex characters of
   the SHA-256 of the environment's UUID ([Host
-  labels](ingress.md#host-labels)), unless the tenant chose one:
+  labels](ingress.md#host-labels)), unless the project chose one:
   `{"public": true, "hostLabel": "stage--kino"}` gives the environment
   that label, a DNS label with `--` in it that does not end as a
   fallback does (400 otherwise, and without `public: true`), in place of
-  the one it had, which stays the tenant's; 409 `host_label_taken` when
-  another tenant owns it or another environment holds it. `host_labels`
-  registers every label to the tenant that first claimed it, in one
-  atomic upsert: another tenant never gets it, and its owner may claim
+  the one it had, which stays the project's; 409 `host_label_taken` when
+  another project owns it or another environment holds it. `host_labels`
+  registers every label to the project that first claimed it, in one
+  atomic upsert: another project never gets it, and its owner may claim
   it again once no environment holds it. It changes only by a chosen
   label.
-- **Plain labels** (ADR 0021, 2026-11-01): a tenant of
+- **Plain labels** (ADR 0021, 2026-11-01): a project of
   `--apps-zone-owners` (FeCode's installation: `fecode`) may also choose
   a label without `--`, `{"public": true, "hostLabel": "kino"}`: a DNS
   label that is not R-LDH and does not end as a fallback does (400
   otherwise, with the chosen form's text less the `--`). One that splits
   at its first hyphen into an environment's name and an existing
-  tenant, its natural label, is a 409 `host_label_taken` "host label
-  web-acme is the natural label of environment web of tenant acme",
-  unless `host_labels` registers it to the tenant already; the rest is
-  as for a chosen label. A tenant made later whose natural label the
-  owner holds gets its fallback. Every other tenant's plain label is the
+  project, its natural label, is a 409 `host_label_taken` "host label
+  web-acme is the natural label of environment web of project acme",
+  unless `host_labels` registers it to the project already; the rest is
+  as for a chosen label. A project made later whose natural label the
+  owner holds gets its fallback. Every other project's plain label is the
   chosen form's 400, and so is an owner's while its hosts are in the
-  tenant zone.
-- **Zones** (ADR 0031): a host is `<label>.<zone>` in its tenant's zone,
-  `tenants.zone`: NULL for the apps zone (`--apps-zone`), the tenants
-  operators make; the tenant zone (`--tenant-zone`, such as
-  `apps.run.example.com`) for the tenants people make, set at their
+  project zone.
+- **Zones** (ADR 0031): a host is `<label>.<zone>` in its project's zone,
+  `projects.zone`: NULL for the apps zone (`--apps-zone`), the projects
+  operators make; the project zone (`--project-zone`, such as
+  `apps.run.example.com`) for the projects people make, set at their
   creation. A label is a name in its zone: `host_labels` registers it
-  per zone, so a label taken in the tenant zone is free in the apps
-  zone. The tenant zone has no owners, hence no plain labels. The
+  per zone, so a label taken in the project zone is free in the apps
+  zone. The project zone has no owners, hence no plain labels. The
   status, the listing, the plans' route URLs and the ingress's table all
-  use the tenant's zone; a zone the platform does not serve (any more)
-  gives no default host. No domain can be the tenant zone or a name
+  use the project's zone; a zone the platform does not serve (any more)
+  gives no default host. No domain can be the project zone or a name
   under it ([Domains](#domains)).
-- **Moving a tenant**, `PUT /api/v1/admin/tenants/{tenant}/zone
-  {"zone": "<the apps zone's or the tenant zone's name>"}` (admin
-  class): under the tenant's row lock, `tenants.zone` changes and every
+- **Moving a project**, `PUT /api/v1/admin/projects/{project}/zone
+  {"zone": "<the apps zone's or the project zone's name>"}` (admin
+  class): under the project's row lock, `projects.zone` changes and every
   environment that holds a label moves it into the new zone as a
-  changed label moves (`store.SetTenantZone`): kept where it is free or
-  the tenant's there, and not a plain one unless the tenant owns the new
+  changed label moves (`store.SetProjectZone`): kept where it is free or
+  the project's there, and not a plain one unless the project owns the new
   zone's plain names, else its natural label or its fallback there; the
-  labels left behind stay the tenant's in their zone. `ferun_ingress`
+  labels left behind stay the project's in their zone. `ferun_ingress`
   `env:<id>` for each, so the old hosts answer 404 at once. The answer
-  is `{tenant, zone, environments: [{id, name, hostLabel,
+  is `{project, zone, environments: [{id, name, hostLabel,
   hostLabelBefore, host}]}`; 400 for any other zone, 404 for an unknown
-  tenant, 409 while it is being deleted; an activity row
-  `tenant_zone_set`. `GET /api/v1/admin/tenants` shows each tenant's
+  project, 409 while it is being deleted; an activity row
+  `project_zone_set`. `GET /api/v1/admin/projects` shows each project's
   `zone`.
 
 ### Visitors
 
 [ADR 0054](../adr/0054-visitors-of-an-environment.md): a public
-environment admits `anyone`, or `visitors` of one of its tenant's
+environment admits `anyone`, or `visitors` of one of its project's
 **access providers**, who vouch for them. `ferund` keeps the providers,
 the answers to the ingress's challenges and the **visits** they make
 (`internal/visits`), and answers the providers on its API and the
@@ -4324,7 +4324,7 @@ visits service: every publish that admits visitors is 409
 `visits_need_secret_key` "this installation guards no environments:
 ferund runs without --secret-key-file", and the routes below answer 404
 `no such route`; the installation publishes `anyone` only.
-`--visitor-auth-url` names `ferun-auth`; the kinds served are `tenant`
+`--visitor-auth-url` names `ferun-auth`; the kinds served are `project`
 always, `ferun` with `--visitor-auth-url` and `--oidc-issuer`, `oidc`
 with `--visitor-auth-url`.
 
@@ -4343,7 +4343,7 @@ its questions. The token key signs the tokens, the codes and the
 questions. They do not rotate yet.
 
 **The access** is `environments.access` (`anyone` | `visitors`) and
-`access_provider` (with `visitors` the tenant's provider; NULL the
+`access_provider` (with `visitors` the project's provider; NULL the
 built-in `ferun`), written only by a publish. `PUT
 /api/v1/environments/{env}/public` (admin on the environment) takes
 `{"public": true, "hostLabel"?, "access"?: "anyone" | "visitors",
@@ -4360,8 +4360,8 @@ built-in `ferun`), written only by a publish. `PUT
   client); `anyone` is anyone; `visitors` with `provider` "" or `ferun`
   is visitors of `ferun`, with a name visitors of that provider.
 - Visitors while `ferund` runs no visits service: 409
-  `visits_need_secret_key`. Of a provider the tenant does not have: 422
-  `unknown_provider` "no provider %s in this tenant". Of `ferun`, or of a
+  `visits_need_secret_key`. Of a provider the project does not have: 422
+  `unknown_provider` "no provider %s in this project". Of `ferun`, or of a
   provider of kind `oidc`, where that kind is not served: 409
   `ferun_auth_required` "visitors of %s need ferun-auth, which this
   installation does not run", the default of a first publish included.
@@ -4376,28 +4376,28 @@ built-in `ferun`), written only by a publish. `PUT
   without them is an older `ferund`'s, which serves every public
   environment to anyone.
 
-**Providers** (tenant class; `access_providers`, at most 50 per tenant):
+**Providers** (project class; `access_providers`, at most 50 per project):
 
 | Route | Need | Answer |
 |---|---|---|
 | `GET /api/v1/providers` | member | `{"providers": [ferun first, then by name], "kinds": [the kinds served]}` |
 | `GET /api/v1/providers/{provider}` | member | the provider; 404 `no such provider`; `ferun` always exists |
-| `PUT /api/v1/providers/{provider}` | admin on the tenant | 201 with the provider when made; 200 when changed or unchanged (an unchanged PUT writes nothing) |
-| `DELETE /api/v1/providers/{provider}` | admin on the tenant | 200 `{"deleted": true}`; 404 `no such provider`; 409 `reserved_name` for `ferun`; 409 `provider_in_use` "provider %s is named by %d environments" while an environment names it (the foreign key) |
+| `PUT /api/v1/providers/{provider}` | admin on the project | 201 with the provider when made; 200 when changed or unchanged (an unchanged PUT writes nothing) |
+| `DELETE /api/v1/providers/{provider}` | admin on the project | 200 `{"deleted": true}`; 404 `no such provider`; 409 `reserved_name` for `ferun`; 409 `provider_in_use` "provider %s is named by %d environments" while an environment names it (the foreign key) |
 
 A provider as answered: `{name, kind, builtIn, url?, issuer?, clientId?,
 clientSecret?: {"set": true}, rule?, redirectUri?, backchannelUri?,
 environments: [{id, name}], createdAt?, updatedAt?}`, `environments` the
-tenant's environments with access `visitors` naming it. A provider of
+project's environments with access `visitors` naming it. A provider of
 kind `oidc` names, with `--visitor-auth-url`, the URIs its issuer
-registers, its own: `redirectUri` `<--visitor-auth-url>/callback/<tenant>/<provider>`
-and `backchannelUri` `<--visitor-auth-url>/backchannel/<tenant>/<provider>`
+registers, its own: `redirectUri` `<--visitor-auth-url>/callback/<project>/<provider>`
+and `backchannelUri` `<--visitor-auth-url>/backchannel/<project>/<provider>`
 (each provider its own redirect URI: `ferun-auth` finishes a code only at
 the one its sign-in began with, so that one issuer's code is never taken
 for another's, the OAuth mix-up). The client secret is never
 answered here. The PUT's body:
 
-- `{"kind": "tenant", "url": "https://…"}`: the tenant's own service, an
+- `{"kind": "project", "url": "https://…"}`: the project's own service, an
   absolute `https` URL with a host, no userinfo, no fragment, at most
   2048 bytes (else 400 `invalid_provider`); its host is resolved and
   judged with `--deny-prefix`'s rule, as a preflight's upstream: 422
@@ -4408,14 +4408,14 @@ answered here. The PUT's body:
   where `oidc` is served (else 409 `ferun_auth_required`): the issuer an
   absolute `https` URL of at most 2048 bytes, compared exactly; the
   client ID 1 to 255 printable characters; the secret a string of 1 to
-  4096 bytes, sealed under the AAD `access_providers|<tenant>|<name>`,
+  4096 bytes, sealed under the AAD `access_providers|<project>|<name>`,
   or `{"set": true}`, which keeps the stored one (400 without one); the
   rule exactly one of `{"anyone": true}`, `{"emails": […]}`,
   `{"domains": […]}`, `{"groups": […]}` (1 to 100 values; addresses and
   domains kept in lower case).
 - The name a DNS label of at most 63 characters (400
   `invalid_provider`); `ferun` is 409 `reserved_name` "ferun is every
-  tenant's provider and cannot be made". An unknown field, or one of the
+  project's provider and cannot be made". An unknown field, or one of the
   other kind, is 400 `invalid_provider` naming it; more than 50
   providers 409 `too_many_providers`.
 - A change of `kind`, `issuer`, `clientId` or `rule` ends the provider's
@@ -4423,18 +4423,18 @@ answered here. The PUT's body:
   alone does not. Every change sends `ferun_ingress` `env:<id>` for each
   environment that names it (`*` past 256).
 
-**Challenges and visits** (class `provider`: a tenant principal, or
+**Challenges and visits** (class `provider`: a project principal, or
 `ferun-auth`'s service token). A sealed challenge travels in POST bodies
-only, never in a path, which is logged. A tenant principal may answer
-only for an environment of its tenant whose provider is of kind
-`tenant`, with admin on that environment; `ferun-auth` only for one whose
+only, never in a path, which is logged. A project principal may answer
+only for an environment of its project whose provider is of kind
+`project`, with admin on that environment; `ferun-auth` only for one whose
 provider is of kind `ferun` or `oidc`. Everything else, a forged or
 foreign challenge included, is 404 `no such challenge` (`no such
 visit`), never 403.
 
 | Route | Body | Answer |
 |---|---|---|
-| `POST /api/v1/challenges/open` | `{"challenge": "<sealed>"}` | 200 `{environment: {id, name, tenant, labels}, host, path, expiresAt, expired, answered, restart, provider: {name, kind}, oidc?}`; `oidc` (`{issuer, clientId, clientSecret, rule}`) only for `ferun-auth` and a provider of kind `oidc`. 404 `no such challenge` when it does not open, is longer than 4096, its environment is gone, being deleted, not public, not `visitors`, names another provider now, its host is not one of the environment's hosts, or the caller may not |
+| `POST /api/v1/challenges/open` | `{"challenge": "<sealed>"}` | 200 `{environment: {id, name, project, labels}, host, path, expiresAt, expired, answered, restart, provider: {name, kind}, oidc?}`; `oidc` (`{issuer, clientId, clientSecret, rule}`) only for `ferun-auth` and a provider of kind `oidc`. 404 `no such challenge` when it does not open, is longer than 4096, its environment is gone, being deleted, not public, not `visitors`, names another provider now, its host is not one of the environment's hosts, or the caller may not |
 | `POST /api/v1/challenges/accept` | `{"challenge", "subject", "email"?, "name"?, "session"?, "endsAt"?}` | 200 `{"redirect": "https://<host>/.ferun/auth?code=<code>", "admitted": true, "visit": "<uuid>"}`; for kind `ferun` without a grant `{"redirect", "admitted": false}`. 400 `invalid_accept`; 404 as for open; 409 `challenge_expired` "the challenge has expired: send the browser to its restart address"; 409 `challenge_answered` |
 | `POST /api/v1/challenges/reject` | `{"challenge": "<sealed>"}` | 200 `{"redirect": "https://<host>/.ferun/auth?code=<rejected code>", "admitted": false}`; the same refusals |
 | `GET /api/v1/visits/{visit}` | | 200 `{id, environment, host, provider: {name, kind}, subject, email, name, session, createdAt, endsAt, endedAt, endReason}`, an ended visit too until it is swept; 404 `no such visit` unless the caller may. The visit's binding is never answered |
@@ -4444,7 +4444,7 @@ visit`), never 403.
   `endsAt` RFC 3339 after now. The visit ends at `least(endsAt, now() +
   12 h)`. Kind `ferun`: the subject is the `sub` of `--oidc-issuer`'s
   person; a person of that issuer and sub who is not disabled, with a
-  grant on the tenant or on the environment, in a tenant not being
+  grant on the project or on the environment, in a project not being
   deleted, is admitted, anyone else recorded rejected; no `people` row
   is ever made here. In one transaction: the environment locked FOR
   SHARE and checked again, `visit_answers` inserted (its primary key
@@ -4457,7 +4457,7 @@ visit`), never 403.
   secret beside it; a redeem whose answer was lost may be repeated with
   the same binding for 60 s, and the browser that got the last answer
   holds the visit.
-- **The provider's call** (kind `tenant`, at a renewal): `POST <url>`
+- **The provider's call** (kind `project`, at a renewal): `POST <url>`
   with `{"visit": "<id>"}`, `Content-Type` and `Accept`
   `application/json`, `User-Agent: ferund-visit`, `Authorization: Bearer
   <ask>` and no other credential, no cookie; https only, IPv4, every connect judged by `--deny-prefix`'s
@@ -4465,7 +4465,7 @@ visit`), never 403.
   never inside a transaction and on a context of its own. Only status
   200 with `{"admitted": false}` is a no, which ends the visit
   (`provider_no`); `{"admitted": true}` is a yes; anything else is no
-  answer, which keeps it. A visit of kind `tenant` is asked at most once
+  answer, which keeps it. A visit of kind `project` is asked at most once
   in 8 minutes (an autocommit claim of `asked_at` on the database's
   clock, whichever instance renews), and its token never outlives the
   last asking by more than 15 minutes; kind `ferun` has its grant looked
@@ -4502,15 +4502,15 @@ visit`), never 403.
 **`ferun-auth`'s routes** (class `auth`: a service token of kind `auth`
 only, else 401 `{"error": "ferun-auth token required"}`):
 
-- `GET /api/v1/oidc-providers/{tenant}/{provider}` → `{tenant, name,
+- `GET /api/v1/oidc-providers/{project}/{provider}` → `{project, name,
   issuer, clientId, clientSecret, rule}`, the secret opened; 404 `no such
   provider` unless it is of kind `oidc`.
-- `POST /api/v1/visits/end` `{"tenant", "provider", "session"}` or
+- `POST /api/v1/visits/end` `{"project", "provider", "session"}` or
   `{"provider": "ferun", "session"}` → `{"ended": <n>}`: ends with
   `backchannel_logout` every open visit of kind `ferun` with that session
-  (any tenant), or of that tenant's `oidc` provider with it. 400
+  (any project), or of that project's `oidc` provider with it. 400
   `invalid_request` without a session or of another shape; a provider of
-  kind `tenant` is 404.
+  kind `project` is 404.
 
 `ferun-auth`'s token is minted with `ferund service-token --kind auth
 --name ferun-auth` (`feos-auth-<secret>`); it gets no certificate. It is
@@ -4518,7 +4518,7 @@ used in the cluster only: a call with it that carries `X-Forwarded-For`
 (it came through the Gateway) is logged at warn, "ferun-auth's token
 used from outside the cluster". Whoever holds it can admit anyone to an
 environment of kind `oidc`, and any person with a grant to one of kind
-`ferun`, and reads every tenant's `oidc` client secret: it is mounted in
+`ferun`, and reads every project's `oidc` client secret: it is mounted in
 a pod with no other secret.
 
 **Rolling it out** (migration `0034_visitors.sql`, additive: the release
@@ -4552,11 +4552,11 @@ port](#the-nodes-port), [api.md](api.md#the-ingresss-api)), from
   makes the presenting certificate current, superseding the older ones
   10 minutes ahead, and puts the instance on the mesh with its fixed key
   ([The pods' mesh](#the-pods-mesh)); its answer is the ULA, the
-  instance's /96 and address, the apps zone, the tenant zone and the answering instance.
+  instance's /96 and address, the apps zone, the project zone and the answering instance.
   `ingress_certs` records every certificate.
 - **Sync** streams the instance's table: whole, then the environments
   put and removed, the mesh's nodes when their version changes, `Self`
-  (its address, the apps zone, the tenant zone, its admitted version of `ferun-ingress`)
+  (its address, the apps zone, the project zone, its admitted version of `ferun-ingress`)
   when its row changes, the ACME challenges, all of them, when they
   change, and an empty table every 10 s that records the instance as
   seen. Once it has sent the challenges it records their tokens as the
@@ -4621,7 +4621,7 @@ their claims, checks and states, are the domains core's; ACME owns
   `acme`): expired challenges are deleted; with a directory, the due
   domains are ordered one at a time, at most 25 a run. A domain is due
   when it is verified, bound to a public environment that is not
-  deleting (of a tenant that is not), routed, its TXT record not missing
+  deleting (of a project that is not), routed, its TXT record not missing
   (`record_missing_since` NULL), its `next_issue_at` passed or NULL, and
   either `issuing` or `failed` without a valid certificate, or with a
   certificate past its `renew_after`; new domains go before renewals.
@@ -4656,7 +4656,7 @@ their claims, checks and states, are the domains core's; ACME owns
   records and their addresses through the recursive resolver, then each
   address, IPv4 ones when there are any, asked itself; every 5 s, at most
   3 minutes), and is deleted when the order ends, however it ends. The
-  CA follows the tenant's CNAME of `_acme-challenge.<name>` there. No
+  CA follows the project's CNAME of `_acme-challenge.<name>` there. No
   ingress instance is asked and no `acme_challenges` row kept. Its
   failures: "the platform has no ACME zone (--acme-zone) …", "the CA
   offers no DNS-01 challenge …", "write the DNS-01 record <target> in
@@ -4706,7 +4706,7 @@ their claims, checks and states, are the domains core's; ACME owns
   its summary; once, whatever the deployments; a renewal that succeeds
   closes it.
 - **The table** carries a served domain (`served` or `dns-moved`,
-  verified, bound to a public environment of its tenant, its
+  verified, bound to a public environment of its project, its
   certificate's `not_after` ahead) as one more host of its environment
   with its chain and key, and every pending challenge to every
   instance ([ingress.md](ingress.md#what-it-holds)). A wildcard's host
@@ -4742,10 +4742,10 @@ their claims, checks and states, are the domains core's; ACME owns
 
 ### Domains
 
-A domain ([ADR 0021](../adr/0021-ingress.md)) is a tenant's claim on one
+A domain ([ADR 0021](../adr/0021-ingress.md)) is a project's claim on one
 name, proven by a TXT record of the claim's token at
 `<--domain-challenge-label>.<name>`, bound to at most one environment of
-the tenant, and routed to the ingress by a CNAME to `--edge-name`, an
+the project, and routed to the ingress by a CNAME to `--edge-name`, an
 ALIAS, or A and AAAA records of the edge's addresses. `internal/domains`
 holds the claims, their bindings, their checks, the states derived from
 them and the incidents of their environments. With `--edge-name` empty,
@@ -4756,8 +4756,8 @@ domains](#certificates-of-domains)): a verified, bound and routed domain
 waits in `issuing` until ACME kept its certificate, and is `served` with
 it from then on.
 
-**The routes**, tenant class, JSON in camelCase. `{id}` is the domain's
-UUID; a domain of another tenant, or anything that is no UUID, is 404 "no
+**The routes**, project class, JSON in camelCase. `{id}` is the domain's
+UUID; a domain of another project, or anything that is no UUID, is 404 "no
 such domain". `{env}` resolves as the environments' routes resolve it,
 by UUID or name.
 
@@ -4781,11 +4781,11 @@ by UUID or name.
   it serves every name one label below `<name>`, not `<name>`, which is a
   claim of its own; its TXT record stands at
   `<--domain-challenge-label>.<name>`, beside those of claims of
-  `<name>`. It needs `--acme-zone`. The apps zone, the tenant zone,
+  `<name>`. It needs `--acme-zone`. The apps zone, the project zone,
   `--edge-name`, `--acme-zone` and every `--domain-reserved` zone, and
   every name under them, are reserved, and so is a wildcard whose
-  `<name>` is or whose `*` would stand for one of them. Any number of claims may name one name, of one tenant or of
-  several; a tenant holds at most `--domain-unverified-max` claims that
+  `<name>` is or whose `*` would stand for one of them. Any number of claims may name one name, of one project or of
+  several; a project holds at most `--domain-unverified-max` claims that
   are not verified (unverified, lapsed or superseded), counted under its
   row's lock. The token is 32 characters of lowercase base32 from 160
   random bits.
@@ -4914,15 +4914,15 @@ first looks whether the record is right again.
 nor waits for. `ferund`'s part:
 
 - **Labels.** The insert of an environment's instance or job run, of a
-  tenant's job's pod and of a sandbox writes `sandboxes.log_labels`
-  (`model.Log*`): `ferun.tenant`, `ferun.instance` (the row's ID),
+  project's job's pod and of a sandbox writes `sandboxes.log_labels`
+  (`model.Log*`): `ferun.project`, `ferun.instance` (the row's ID),
   `ferun.environment` (every row's since `0032`, ADR 0035); an
   instance's `ferun.kind`, `ferun.object`, `ferun.replica`,
   `ferun.deployment` (the deployment the instance was inserted for: a
   kept instance's later deployment does not change it; a pod made before
   `0025`'s version may carry it under its earlier word `ferun.release`,
   which the sink reads too), a job run's
-  `ferun.attempt`; a tenant's job's `ferun.job` (its ID), `ferun.attempt`
+  `ferun.attempt`; a project's job's `ferun.job` (its ID), `ferun.attempt`
   `1` and, when it asked, `ferun.retention_days`; a sandbox's
   `ferun.kind` `sandbox` and `ferun.object` its ID. The engine sends them
   as `CreatePodRequest.log_labels`, beside the spec: a create delivered
@@ -4933,7 +4933,7 @@ nor waits for. `ferund`'s part:
   replaces with `[redacted]` in the lines it ships: asked of the
   controller at each create (`LogRedact`, the engine's `LogRedactor`)
   and stored nowhere, the secret values a stored tail is redacted of
-  ([Logs](#probes-exits-and-restarts); a tenant's job's secrets and image
+  ([Logs](#probes-exits-and-restarts); a project's job's secrets and image
   credentials) with their userinfo escaping. A failure there fails the
   create before any pod call. Every restore (`RestorePodRequest`, also
   a repair's) sends the labels and the redactions too, with the same
@@ -4947,16 +4947,16 @@ nor waits for. `ferund`'s part:
   (`sink_endpoint`), a name as one of its addresses per node, looked up
   every 10 s (`fleet/sink.go`); empty, the nodes ship nothing.
 - **Reads.** With `--sink-url`, the objects' logs call (a replica's or an
-  addon's instance, a job's latest run) and a running tenant's job's logs
+  addon's instance, a job's latest run) and a running project's job's logs
   ask the sink first: `GET <sink-url>/api/v1/logs?instance=<sandbox ID>`
-  (`job=<ID>` for a tenant's job) `&container=main&direction=backward&since=<the row's creation, the run's
+  (`job=<ID>` for a project's job) `&container=main&direction=backward&since=<the row's creation, the run's
   start>&limit=500`, paged by its `cursor` up to `lines` and the answer's
   budget (8 KiB a line, 4 MiB), with the caller's own credentials
-  (`auth.Tenant.PassOn`: its bearer, or a session's cookie
-  `__Host-ferun_session` and `FeRun-Tenant`), so that the sink answers what the
+  (`auth.Project.PassOn`: its bearer, or a session's cookie
+  `__Host-ferun_session` and `FeRun-Project`), so that the sink answers what the
   caller may read only (ADR 0031). A sink that fails or has no
   line leaves the read to the node, as before; a paused instance whose
-  lines the sink has is answered, not 409 "paused". A tenant's job's log
+  lines the sink has is answered, not 409 "paused". A project's job's log
   is the sink's also once it has ended (its node redacted the lines),
   its kept tail when the sink has none; a running job's sink lines are
   redacted of its secrets again. An attached service's process log is
@@ -4999,21 +4999,21 @@ nor waits for. `ferund`'s part:
   `--sink-url`, a credential, or with the sink failing or without the
   route (404), it answers the bindings with zeros and `unavailable`, not
   a 503, and logs the sink's error.
-- **`GET /api/v1/tenant`** (tenant class, member), which the sink asks
-  for its readers: `{"tenant": "<name>", "role": "read"|"write"|"admin"|"",
+- **`GET /api/v1/project`** (project class, member), which the sink asks
+  for its readers: `{"project": "<name>", "role": "read"|"write"|"admin"|"",
   "environments": ["<ID>", …]}` for any principal, a token or a session
-  with `FeRun-Tenant`: its role on the tenant (`""`: none, an operator's
+  with `FeRun-Project`: its role on the project (`""`: none, an operator's
   `admin`) and the IDs of the environments it holds a grant on, sorted.
   A principal of environments only (`role` `""`) is answered only with
   `?filter=environments`, which a sink that filters by environment
-  sends; without it 403 `role_required` (read on the tenant), since a
-  sink of before people reads any answer as the whole tenant's. 401 for
-  no principal, 404 for a tenant it holds nothing in.
+  sends; without it 403 `role_required` (read on the project), since a
+  sink of before people reads any answer as the whole project's. 401 for
+  no principal, 404 for a project it holds nothing in.
 - **Reads for a session.** The sink trusts no one but ferund's answer:
   `ferund`'s own reads for a person pass the session's cookie and
-  `FeRun-Tenant` on, as the browser does where the sink is served under
-  `ferund`'s host, and the sink asks `/api/v1/tenant` with them. No
-  service credential reads the sink for a tenant. A sink of before
+  `FeRun-Project` on, as the browser does where the sink is served under
+  `ferund`'s host, and the sink asks `/api/v1/project` with them. No
+  service credential reads the sink for a project. A sink of before
   people takes tokens only: there a session's `…/access-logs` and
   `…/traffic` answer 503 `log_store_unavailable` and its logs calls read
   the node, so the sink is deployed first.
@@ -5186,7 +5186,7 @@ that dial the instances.
   different nodes do not reach each other over the mesh.
 - **Labels per zone, `0029`.** `host_labels` gets its zone and the key
   `(zone, label)`, and `environments.host_label` loses its unique index
-  (ADR 0031, the tenant zone). An instance of the previous version beside
+  (ADR 0031, the project zone). An instance of the previous version beside
   it claims labels with `ON CONFLICT (label)`, which no constraint
   matches any more: its first publishes (`PUT …/public` of an environment
   without a label) and chosen labels (`hostLabel`) fail with 500 until the rolling
@@ -5195,9 +5195,9 @@ that dial the instances.
   window (a partial unique index on `label` serves no `ON CONFLICT
   (label)`, and a unique label across zones is what `0029` ends; see the
   migration); to have none, roll ferund with the `Recreate` strategy for
-  this one deploy, at the price of a short outage of the API instead. Roll ferun-ingress with the tenant zone's
-  certificate before ferund gets `--tenant-zone`; an ingress of before
-  serves the tenant zone's hosts with the apps zone's wildcard and keeps
+  this one deploy, at the price of a short outage of the API instead. Roll ferun-ingress with the project zone's
+  certificate before ferund gets `--project-zone`; an ingress of before
+  serves the project zone's hosts with the apps zone's wildcard and keeps
   their cookies' `Domain`.
 - **Clients first for `0021`.** From `0021` on, the environments' API
   answers the release states, `deployed` and the stopping phase in
@@ -5378,8 +5378,8 @@ nodes back first.
 
 - The front doors stay on port 8100, with the same paths and texts;
   FeCode's backend and its MCP client work unchanged.
-- Tenant and sandbox tokens are stored as hashes: a token is shown once,
-  when it is made, and tenants' tokens are listed by hash.
+- Project and sandbox tokens are stored as hashes: a token is shown once,
+  when it is made, and projects' tokens are listed by hash.
 - The bindings are off by default.
 - The SQLite registry is not imported: sandboxes are created again.
 

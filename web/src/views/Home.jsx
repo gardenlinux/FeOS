@@ -12,23 +12,23 @@ import { byActivity } from './sandboxes.js';
 import { ToneDot } from './Environments.jsx';
 import { RoleBadge } from './People.jsx';
 
-// A tenant's Home: first what needs someone (attention.js), each item
+// A project's Home: first what needs someone (attention.js), each item
 // with the place that fixes it; then what runs, its environments and its
 // most recently active sandboxes, each on its environment's page (ADR
-// 0035); then the use against the limits. All of it from the tenant's
+// 0035); then the use against the limits. All of it from the project's
 // summary (summary.jsx), which the sidebar's counts read too.
 
 // SANDBOXES_SHOWN is how many of the most recently active sandboxes show.
 const SANDBOXES_SHOWN = 6;
 
 
-export function Home({ tenant, navigate }) {
-  const access = useAccess(tenant);
+export function Home({ project, navigate }) {
+  const access = useAccess(project);
   const c = access.can;
   const sum = useSummary();
   useNow(10000);
   const enc = encodeURIComponent;
-  const base = `/tenants/${enc(tenant)}`;
+  const base = `/projects/${enc(project)}`;
   const link = (to) => (e) => { e.preventDefault(); navigate(to); };
   const loaded = sum.at > 0;
 
@@ -41,11 +41,11 @@ export function Home({ tenant, navigate }) {
     <div className="home">
       <header className="pagehead">
         <div className="pagehead-title">
-          <span className="kind">Tenant</span>
-          <h1>{tenant}</h1>
+          <span className="kind">Project</span>
+          <h1>{project}</h1>
           {access.role && <RoleBadge role={access.role} />}
           <span className="spacer" />
-          {c.writeTenant && (
+          {c.writeProject && (
             <a className="button primary" href={`${base}/new-environment`} onClick={link(`${base}/new-environment`)}>
               <Icon name="plus" size={14} /> New environment</a>)}
         </div>
@@ -88,17 +88,17 @@ export function Home({ tenant, navigate }) {
             <div className="pane-toolbar">
               <h2><Icon name="layers" size={14} /> Environments</h2>
               <span className="spacer" />
-              <a className="small" href={envPath(tenant)} onClick={link(envPath(tenant))}>all <Icon name="arrowRight" size={12} /></a>
+              <a className="small" href={envPath(project)} onClick={link(envPath(project))}>all <Icon name="arrowRight" size={12} /></a>
             </div>
             {envs.length === 0 && (
-              <p className="empty">None yet. {c.writeTenant && (
+              <p className="empty">None yet. {c.writeProject && (
                 <a href={`${base}/new-environment`} onClick={link(`${base}/new-environment`)}>Deploy a container →</a>)}</p>)}
             {envs.length > 0 && (
               <div className="tblwrap"><table className="tbl">
                 <thead><tr><th>name</th><th>deployment</th><th>hosts</th></tr></thead>
                 <tbody>
                   {envs.map((e) => (
-                    <tr key={e.id} className="clickable" onClick={() => navigate(envPath(tenant, e.name))}>
+                    <tr key={e.id} className="clickable" onClick={() => navigate(envPath(project, e.name))}>
                       <td><span className="cell-state"><ToneDot tone={deploymentTone(e.state)} title={e.state} /> <span className="strong">{e.name}</span></span></td>
                       <td className="mono small">{deploymentText(e)}</td>
                       <td className="mono small trunc">{e.public ? (e.hosts || []).join(', ') || '—' : <span className="muted">route door only</span>}
@@ -124,10 +124,10 @@ export function Home({ tenant, navigate }) {
                 <tbody>
                   {byActivity(sandboxes).slice(0, SANDBOXES_SHOWN).map((s) => {
                     const env = s.environment ? s.environment.name || s.environment.id : '';
-                    const to = env ? sandboxPath(tenant, env, s.sandboxId) : `${base}/sandboxes/${enc(s.sandboxId)}`;
+                    const to = env ? sandboxPath(project, env, s.sandboxId) : `${base}/sandboxes/${enc(s.sandboxId)}`;
                     return (
                       <tr key={s.sandboxId} className="clickable" onClick={() => navigate(to)}>
-                        <td className="mono">{s.sandboxId}{s.owner && s.owner !== tenant && <div className="muted small">{s.owner}</div>}</td>
+                        <td className="mono">{s.sandboxId}{s.owner && s.owner !== project && <div className="muted small">{s.owner}</div>}</td>
                         <td className="mono small">{env || <span className="muted">—</span>}</td>
                         <td><span className="cell-state"><StateDot state={s.clientState} /> {s.clientState || 'unknown'}</span></td>
                         <td className="muted small"><Ago iso={s.updatedAt} /></td>

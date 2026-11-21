@@ -20,7 +20,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
-// What a sandbox and a tenant's job reach (ADR 0034 revised, ADR 0035
+// What a sandbox and a project's job reach (ADR 0034 revised, ADR 0035
 // revised): sandboxes.reaches and jobs.reaches ("all" or a list of
 // entries, [] for nothing) and their egress (NULL: the internet). A
 // sandbox's reaches change in place (SetSandboxReaches); a job's are
@@ -100,7 +100,7 @@ func (s *Store) SetSandboxReaches(ctx context.Context, id podid.ID, r spec.Reach
 		return false, err
 	}
 	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET reaches = $2::jsonb, updated_at = now()
-		WHERE id = $1 AND NOT instance AND NOT tenant_job`, id, rb)
+		WHERE id = $1 AND NOT instance AND NOT project_job`, id, rb)
 	if err != nil {
 		return false, fmt.Errorf("reaches of sandbox %s: %w", id, err)
 	}
@@ -111,18 +111,18 @@ func (s *Store) SetSandboxReaches(ctx context.Context, id podid.ID, r spec.Reach
 }
 
 // Reacher is a pod of an environment outside its spec (ADR 0035): a
-// sandbox or a tenant's job's pod, with what it reaches and its egress.
+// sandbox or a project's job's pod, with what it reaches and its egress.
 type Reacher struct {
-	ID        podid.ID
-	TenantJob bool
-	Reaches   spec.Reaches
-	Egress    *spec.Egress
+	ID         podid.ID
+	ProjectJob bool
+	Reaches    spec.Reaches
+	Egress     *spec.Egress
 }
 
-// EnvCtlReachers are environment envID's sandboxes and tenants' jobs'
+// EnvCtlReachers are environment envID's sandboxes and projects' jobs'
 // pods (rows that are not instances), by ID.
 func (s *Store) EnvCtlReachers(ctx context.Context, envID uuid.UUID) ([]Reacher, error) {
-	rows, err := s.q.Query(ctx, `SELECT id, tenant_job, reaches, egress FROM sandboxes
+	rows, err := s.q.Query(ctx, `SELECT id, project_job, reaches, egress FROM sandboxes
 		WHERE environment_id = $1 AND NOT instance ORDER BY id`, envID)
 	if err != nil {
 		return nil, fmt.Errorf("reachers of environment %s: %w", envID, err)
@@ -130,7 +130,7 @@ func (s *Store) EnvCtlReachers(ctx context.Context, envID uuid.UUID) ([]Reacher,
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Reacher, error) {
 		var out Reacher
 		var reaches, egress []byte
-		if err := r.Scan(&out.ID, &out.TenantJob, &reaches, &egress); err != nil {
+		if err := r.Scan(&out.ID, &out.ProjectJob, &reaches, &egress); err != nil {
 			return Reacher{}, err
 		}
 		var err error
@@ -139,7 +139,7 @@ func (s *Store) EnvCtlReachers(ctx context.Context, envID uuid.UUID) ([]Reacher,
 	})
 }
 
-// OwnSandbox is a sandbox of a tenant as an environment's plan sees it
+// OwnSandbox is a sandbox of a project as an environment's plan sees it
 // (ADR 0035): the environment it is in.
 type OwnSandbox struct {
 	ID      podid.ID
@@ -148,13 +148,13 @@ type OwnSandbox struct {
 }
 
 // GetOwnSandbox reads owner's sandbox id (not an environment's instance,
-// not a tenant's job's pod) with its environment; ErrNoRow when owner has
+// not a project's job's pod) with its environment; ErrNoRow when owner has
 // none of that ID.
 func (s *Store) GetOwnSandbox(ctx context.Context, owner string, id podid.ID) (OwnSandbox, error) {
 	var out OwnSandbox
 	err := s.q.QueryRow(ctx, `SELECT s.id, s.environment_id, e.name
 		FROM sandboxes s JOIN environments e ON e.id = s.environment_id
-		WHERE s.id = $2 AND s.owner = $1 AND NOT s.instance AND NOT s.tenant_job`, owner, id).
+		WHERE s.id = $2 AND s.owner = $1 AND NOT s.instance AND NOT s.project_job`, owner, id).
 		Scan(&out.ID, &out.EnvID, &out.EnvName)
 	if err != nil {
 		return OwnSandbox{}, noRow(err, ErrNoRow)
@@ -164,7 +164,7 @@ func (s *Store) GetOwnSandbox(ctx context.Context, owner string, id podid.ID) (O
 
 // DeployedSpec is environment envID's deployed deployment's spec as
 // stored (nil without a deployed deployment): what a sandbox's or a
-// tenant's job's reaches may name. ErrNoRow when there is no such
+// project's job's reaches may name. ErrNoRow when there is no such
 // environment.
 func (s *Store) DeployedSpec(ctx context.Context, envID uuid.UUID) ([]byte, error) {
 	var raw []byte
@@ -177,7 +177,7 @@ func (s *Store) DeployedSpec(ctx context.Context, envID uuid.UUID) ([]byte, erro
 	return raw, nil
 }
 
-// InUse are the sandboxes and the queued and running tenants' jobs of an
+// InUse are the sandboxes and the queued and running projects' jobs of an
 // environment, by ID: what keeps it from being deleted (ADR 0035).
 type InUse struct {
 	Sandboxes []podid.ID
@@ -191,7 +191,7 @@ func (u InUse) Empty() bool { return len(u.Sandboxes) == 0 && len(u.Jobs) == 0 }
 func (s *Store) EnvironmentInUse(ctx context.Context, envID uuid.UUID) (InUse, error) {
 	var out InUse
 	err := s.q.QueryRow(ctx, `SELECT
-			ARRAY(SELECT id FROM sandboxes WHERE environment_id = $1 AND NOT instance AND NOT tenant_job ORDER BY id),
+			ARRAY(SELECT id FROM sandboxes WHERE environment_id = $1 AND NOT instance AND NOT project_job ORDER BY id),
 			ARRAY(SELECT id FROM jobs WHERE environment_id = $1 AND finished_at IS NULL ORDER BY id)`, envID).
 		Scan(&out.Sandboxes, &out.Jobs)
 	if err != nil {

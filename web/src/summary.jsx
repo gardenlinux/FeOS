@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The tenant's summary: the lists Home, the sidebar's counts and the
-// search read, asked once per tenant and every SUMMARY_MS, for every
+// The project's summary: the lists Home, the sidebar's counts and the
+// search read, asked once per project and every SUMMARY_MS, for every
 // page at once. Each list is null while unread and stays null when the
 // role does not offer it or this ferund lacks the route. The access
 // providers (ADR 0054) come with the kinds this installation serves
@@ -21,7 +21,7 @@ const SUMMARY_MS = 15000;
 const INCIDENT_ENVS = 8;
 
 const empty = {
-  tenant: '', sandboxes: null, environments: null, incidents: {}, domains: null, invitations: null, quota: null,
+  project: '', sandboxes: null, environments: null, incidents: {}, domains: null, invitations: null, quota: null,
   jobs: null, providers: null, providerKinds: null, at: 0,
 };
 
@@ -51,11 +51,11 @@ async function providersOf() {
   }
 }
 
-export function SummaryProvider({ tenant, can, children }) {
+export function SummaryProvider({ project, can, children }) {
   const [data, setData] = useState(empty);
 
   const refresh = useCallback(async () => {
-    if (!tenant) {
+    if (!project) {
       setData(empty);
       return;
     }
@@ -76,14 +76,14 @@ export function SummaryProvider({ tenant, can, children }) {
     const incidents = {};
     troubled.forEach((e, i) => { if (lists[i]) incidents[e.name] = lists[i]; });
     setData({
-      tenant, sandboxes, environments, incidents, domains, invitations, quota, jobs, providers, providerKinds, at: Date.now(),
+      project, sandboxes, environments, incidents, domains, invitations, quota, jobs, providers, providerKinds, at: Date.now(),
     });
-  }, [tenant, can.environments, can.members]);
+  }, [project, can.environments, can.members]);
 
   usePoll(refresh, SUMMARY_MS);
 
   const value = useMemo(() => {
-    const d = data.tenant === tenant ? data : { ...empty, tenant };
+    const d = data.project === project ? data : { ...empty, project };
     const items = attention(d);
     const running = (d.jobs || []).filter((j) => j.phase === 'queued' || j.phase === 'running').length;
     const counts = navCounts(items, {
@@ -95,7 +95,7 @@ export function SummaryProvider({ tenant, can, children }) {
     // The access providers (ADR 0054) by their count, ferun with them.
     if (d.providers) counts.providers = { n: d.providers.length };
     return { ...d, items, counts, refresh };
-  }, [data, tenant, refresh]);
+  }, [data, project, refresh]);
 
   return <SummaryContext.Provider value={value}>{children}</SummaryContext.Provider>;
 }

@@ -79,10 +79,10 @@ type Config struct {
 	// TLSCert and TLSKey are the HTTPS listener's certificate (the apps
 	// zone's wildcard) and key, PEM, read again every 30 s.
 	TLSCert, TLSKey string
-	// TenantZoneTLSCert and TenantZoneTLSKey are the tenant zone's wildcard
+	// ProjectZoneTLSCert and ProjectZoneTLSKey are the project zone's wildcard
 	// (ADR 0031) and its key, PEM, read again every 30 s: served for every
 	// SNI it covers; "" both: none, every default host gets TLSCert.
-	TenantZoneTLSCert, TenantZoneTLSKey string
+	ProjectZoneTLSCert, ProjectZoneTLSKey string
 	// MeshDevice is the WireGuard device's name.
 	MeshDevice string
 	// MeshPort is its UDP port.
@@ -96,15 +96,15 @@ type Config struct {
 	// WakeHold bounds a request held while instances of its service are
 	// asleep or waking; PendingHold one held while they are only pending.
 	WakeHold, PendingHold time.Duration
-	// MaxHeld is how many requests may be held at once, MaxHeldPerTenant
-	// how many of them one tenant's, MaxHeldPerEnv how many one
+	// MaxHeld is how many requests may be held at once, MaxHeldPerProject
+	// how many of them one project's, MaxHeldPerEnv how many one
 	// environment's.
-	MaxHeld, MaxHeldPerTenant, MaxHeldPerEnv int
+	MaxHeld, MaxHeldPerProject, MaxHeldPerEnv int
 	// MaxInflight is how many requests may be forwarded at once, waiting
 	// for a connection or an answer, upgraded ones included;
-	// MaxInflightPerTenant how many of them one tenant's,
+	// MaxInflightPerProject how many of them one project's,
 	// MaxInflightPerEnv how many one environment's.
-	MaxInflight, MaxInflightPerTenant, MaxInflightPerEnv int
+	MaxInflight, MaxInflightPerProject, MaxInflightPerEnv int
 	// UpstreamDialTimeout bounds a dial to an instance;
 	// UpstreamIdleTimeout closes a pooled connection idle that long.
 	UpstreamDialTimeout, UpstreamIdleTimeout time.Duration
@@ -140,26 +140,26 @@ type Config struct {
 // and none of the required settings.
 func Default() Config {
 	return Config{
-		StateDir:             "/var/lib/ferun-ingress",
-		MeshDevice:           agent.DefaultMeshDevice,
-		MeshPort:             agent.DefaultMeshPort,
-		WakeHold:             proxy.DefaultWakeHold,
-		PendingHold:          proxy.DefaultPendingHold,
-		MaxHeld:              proxy.DefaultMaxHeld,
-		MaxHeldPerTenant:     proxy.DefaultMaxHeldPerTenant,
-		MaxHeldPerEnv:        proxy.DefaultMaxHeldPerEnv,
-		MaxInflight:          proxy.DefaultMaxInflight,
-		MaxInflightPerTenant: proxy.DefaultMaxInflightPerTenant,
-		MaxInflightPerEnv:    proxy.DefaultMaxInflightPerEnv,
-		UpstreamDialTimeout:  proxy.DefaultDialTimeout,
-		UpstreamIdleTimeout:  proxy.DefaultIdleTimeout,
-		UpstreamWaitTimeout:  proxy.DefaultConnWaitTimeout,
-		MaxRequestBody:       proxy.DefaultMaxBody,
-		MaxConnsPerEndpoint:  proxy.DefaultMaxConnsPerEndpoint,
-		ShutdownDelay:        10 * time.Second,
-		ShutdownGrace:        40 * time.Second,
-		LogLevel:             slog.LevelInfo,
-		LogFormat:            LogFormatJSON,
+		StateDir:              "/var/lib/ferun-ingress",
+		MeshDevice:            agent.DefaultMeshDevice,
+		MeshPort:              agent.DefaultMeshPort,
+		WakeHold:              proxy.DefaultWakeHold,
+		PendingHold:           proxy.DefaultPendingHold,
+		MaxHeld:               proxy.DefaultMaxHeld,
+		MaxHeldPerProject:     proxy.DefaultMaxHeldPerProject,
+		MaxHeldPerEnv:         proxy.DefaultMaxHeldPerEnv,
+		MaxInflight:           proxy.DefaultMaxInflight,
+		MaxInflightPerProject: proxy.DefaultMaxInflightPerProject,
+		MaxInflightPerEnv:     proxy.DefaultMaxInflightPerEnv,
+		UpstreamDialTimeout:   proxy.DefaultDialTimeout,
+		UpstreamIdleTimeout:   proxy.DefaultIdleTimeout,
+		UpstreamWaitTimeout:   proxy.DefaultConnWaitTimeout,
+		MaxRequestBody:        proxy.DefaultMaxBody,
+		MaxConnsPerEndpoint:   proxy.DefaultMaxConnsPerEndpoint,
+		ShutdownDelay:         10 * time.Second,
+		ShutdownGrace:         40 * time.Second,
+		LogLevel:              slog.LevelInfo,
+		LogFormat:             LogFormatJSON,
 	}
 }
 
@@ -210,9 +210,9 @@ func registerServe(fs *flag.FlagSet, c *Config) *string {
 		"the listener of /healthz, /readyz, /metrics and /statusz, an IP address and a port, never a wildcard (required)")
 	fs.StringVar(&c.TLSCert, "tls-cert", c.TLSCert, "the HTTPS certificate file (PEM), the apps zone's wildcard, read again every 30 s (required)")
 	fs.StringVar(&c.TLSKey, "tls-key", c.TLSKey, "the key file (PEM) of --tls-cert (required)")
-	fs.StringVar(&c.TenantZoneTLSCert, "tenant-zone-tls-cert", c.TenantZoneTLSCert,
-		"the tenant zone's wildcard certificate file (PEM), served for every name it covers, read again every 30 s; empty: none")
-	fs.StringVar(&c.TenantZoneTLSKey, "tenant-zone-tls-key", c.TenantZoneTLSKey, "the key file (PEM) of --tenant-zone-tls-cert")
+	fs.StringVar(&c.ProjectZoneTLSCert, "project-zone-tls-cert", c.ProjectZoneTLSCert,
+		"the project zone's wildcard certificate file (PEM), served for every name it covers, read again every 30 s; empty: none")
+	fs.StringVar(&c.ProjectZoneTLSKey, "project-zone-tls-key", c.ProjectZoneTLSKey, "the key file (PEM) of --project-zone-tls-cert")
 	fs.StringVar(&c.MeshDevice, "mesh-device", c.MeshDevice, "the WireGuard device on the pods' mesh")
 	fs.IntVar(&c.MeshPort, "mesh-port", c.MeshPort, "the WireGuard device's UDP port")
 	fs.StringVar(&c.MeshEndpoint, "mesh-endpoint", c.MeshEndpoint,
@@ -221,12 +221,12 @@ func registerServe(fs *flag.FlagSet, c *Config) *string {
 	fs.DurationVar(&c.WakeHold, "wake-hold", c.WakeHold, "how long a request waits while instances of its service are asleep or waking")
 	fs.DurationVar(&c.PendingHold, "pending-hold", c.PendingHold, "how long a request waits while instances of its service are only pending")
 	fs.IntVar(&c.MaxHeld, "max-held", c.MaxHeld, "how many requests may wait at once")
-	fs.IntVar(&c.MaxHeldPerTenant, "max-held-per-tenant", c.MaxHeldPerTenant, "how many requests of one tenant may wait at once")
+	fs.IntVar(&c.MaxHeldPerProject, "max-held-per-project", c.MaxHeldPerProject, "how many requests of one project may wait at once")
 	fs.IntVar(&c.MaxHeldPerEnv, "max-held-per-env", c.MaxHeldPerEnv, "how many requests of one environment may wait at once")
 	fs.IntVar(&c.MaxInflight, "max-inflight", c.MaxInflight,
 		"how many requests may be forwarded at once, waiting for a connection or an answer, upgraded ones included")
-	fs.IntVar(&c.MaxInflightPerTenant, "max-inflight-per-tenant", c.MaxInflightPerTenant,
-		"how many requests of one tenant may be forwarded at once")
+	fs.IntVar(&c.MaxInflightPerProject, "max-inflight-per-project", c.MaxInflightPerProject,
+		"how many requests of one project may be forwarded at once")
 	fs.IntVar(&c.MaxInflightPerEnv, "max-inflight-per-env", c.MaxInflightPerEnv,
 		"how many requests of one environment may be forwarded at once")
 	fs.DurationVar(&c.UpstreamDialTimeout, "upstream-dial-timeout", c.UpstreamDialTimeout, "the bound of a dial to an instance")
@@ -299,8 +299,8 @@ func (c *Config) Validate() error {
 	if c.TLSKey == "" {
 		bad("--tls-key is required")
 	}
-	if (c.TenantZoneTLSCert == "") != (c.TenantZoneTLSKey == "") {
-		bad("--tenant-zone-tls-cert and --tenant-zone-tls-key go together")
+	if (c.ProjectZoneTLSCert == "") != (c.ProjectZoneTLSKey == "") {
+		bad("--project-zone-tls-cert and --project-zone-tls-key go together")
 	}
 	if c.MeshDevice == "" || len(c.MeshDevice) > maxDeviceName || strings.ContainsAny(c.MeshDevice, "/: \t\n") {
 		bad("--mesh-device %q is not a device name (1 to %d characters, no slash, colon or blank)", c.MeshDevice, maxDeviceName)
@@ -320,8 +320,8 @@ func (c *Config) Validate() error {
 		name string
 		v    int
 	}{
-		{"max-held", c.MaxHeld}, {"max-held-per-tenant", c.MaxHeldPerTenant}, {"max-held-per-env", c.MaxHeldPerEnv},
-		{"max-inflight", c.MaxInflight}, {"max-inflight-per-tenant", c.MaxInflightPerTenant},
+		{"max-held", c.MaxHeld}, {"max-held-per-project", c.MaxHeldPerProject}, {"max-held-per-env", c.MaxHeldPerEnv},
+		{"max-inflight", c.MaxInflight}, {"max-inflight-per-project", c.MaxInflightPerProject},
 		{"max-inflight-per-env", c.MaxInflightPerEnv},
 		{"max-conns-per-endpoint", c.MaxConnsPerEndpoint},
 	} {

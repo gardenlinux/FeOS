@@ -33,7 +33,7 @@ import (
 // marked admin. A sign-in under way lives in auth_logins, so that it may
 // complete on another instance than it began on. The provider's
 // back-channel logout ends the sessions of its sid. Machine credentials
-// (tenant and sandbox tokens, /mcp) are not touched by any of it.
+// (project and sandbox tokens, /mcp) are not touched by any of it.
 
 // loginCookieAge is the life of the ferun_login cookie, the sign-in's
 // limit.
@@ -61,10 +61,10 @@ func (s *server) authConfig(w http.ResponseWriter, _ *http.Request) error {
 	}{s.oidc != nil, len(s.cfg.AdminUsers) > 0})
 }
 
-// meTenant is a tenant of /auth/me: the person's role on it ("" with
+// meProject is a project of /auth/me: the person's role on it ("" with
 // grants on environments alone) and their grants on its environments.
-type meTenant struct {
-	Tenant       string          `json:"tenant"`
+type meProject struct {
+	Project      string          `json:"project"`
 	Role         string          `json:"role"`
 	Environments []meEnvironment `json:"environments"`
 }
@@ -75,17 +75,17 @@ type meEnvironment struct {
 	Role string `json:"role"`
 }
 
-// myTenants lists a session's tenants: an operator's are every tenant, as
+// myProjects lists a session's projects: an operator's are every project, as
 // admin; a person's those of their grants.
-func (s *server) myTenants(r *http.Request, sess store.UISession) ([]meTenant, error) {
-	out := []meTenant{}
+func (s *server) myProjects(r *http.Request, sess store.UISession) ([]meProject, error) {
+	out := []meProject{}
 	if sess.Admin {
-		names, err := s.st.LiveTenantNames(r.Context())
+		names, err := s.st.LiveProjectNames(r.Context())
 		if err != nil {
-			return nil, internalf("tenants: %v", err)
+			return nil, internalf("projects: %v", err)
 		}
 		for _, n := range names {
-			out = append(out, meTenant{Tenant: n, Role: auth.RoleAdmin.String(), Environments: []meEnvironment{}})
+			out = append(out, meProject{Project: n, Role: auth.RoleAdmin.String(), Environments: []meEnvironment{}})
 		}
 		return out, nil
 	}
@@ -97,8 +97,8 @@ func (s *server) myTenants(r *http.Request, sess store.UISession) ([]meTenant, e
 		return nil, internalf("grants: %v", err)
 	}
 	for _, g := range gs {
-		if len(out) == 0 || out[len(out)-1].Tenant != g.Tenant {
-			out = append(out, meTenant{Tenant: g.Tenant, Environments: []meEnvironment{}})
+		if len(out) == 0 || out[len(out)-1].Project != g.Project {
+			out = append(out, meProject{Project: g.Project, Environments: []meEnvironment{}})
 		}
 		t := &out[len(out)-1]
 		if g.EnvironmentID == uuid.Nil {
@@ -112,7 +112,7 @@ func (s *server) myTenants(r *http.Request, sess store.UISession) ([]meTenant, e
 }
 
 // authMe is GET /auth/me: who is signed in, whether an operator, and the
-// person's tenants with their roles. Basic credentials that pass win, as
+// person's projects with their roles. Basic credentials that pass win, as
 // on the admin routes; then the session.
 func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if a, present, err := s.basicAdmin(r); present && err == nil {
@@ -129,7 +129,7 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return apierr.New(http.StatusUnauthorized, "not signed in")
 	}
-	tenants, err := s.myTenants(r, sess)
+	projects, err := s.myProjects(r, sess)
 	if err != nil {
 		return err
 	}
@@ -138,16 +138,16 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 		person = sess.PersonID.String()
 	}
 	return writeJSON(w, http.StatusOK, struct {
-		Sub      string     `json:"sub"`
-		Person   string     `json:"person"`
-		Email    string     `json:"email"`
-		Name     string     `json:"name"`
-		Username string     `json:"username"`
-		Picture  string     `json:"picture"`
-		Admin    bool       `json:"admin"`
-		Method   string     `json:"method"`
-		Tenants  []meTenant `json:"tenants"`
-	}{sess.Sub, person, sess.Email, sess.Name, sess.Username, sess.Picture, sess.Admin, auth.AdminOIDC, tenants})
+		Sub      string      `json:"sub"`
+		Person   string      `json:"person"`
+		Email    string      `json:"email"`
+		Name     string      `json:"name"`
+		Username string      `json:"username"`
+		Picture  string      `json:"picture"`
+		Admin    bool        `json:"admin"`
+		Method   string      `json:"method"`
+		Projects []meProject `json:"projects"`
+	}{sess.Sub, person, sess.Email, sess.Name, sess.Username, sess.Picture, sess.Admin, auth.AdminOIDC, projects})
 }
 
 // randomToken returns 32 random bytes, base64url without padding.

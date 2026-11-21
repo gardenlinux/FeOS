@@ -23,7 +23,7 @@ func TestIssueAddonServer(t *testing.T) {
 	}
 	envID := uuid.MustParse("01a196e9-4ac8-71a8-94d7-f6aa5688b1fc")
 	id := WorkloadID(testTD, "acme", envID, "addon", "postgres")
-	if id != "spiffe://"+testTD+"/tenant/acme/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/addon/postgres" {
+	if id != "spiffe://"+testTD+"/project/acme/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/addon/postgres" {
 		t.Fatalf("WorkloadID = %s", id)
 	}
 	const workload = "wl-0123456789abcdef0123456789abcdef"
@@ -72,7 +72,7 @@ func TestIssueAddonServer(t *testing.T) {
 	for _, bad := range []struct{ id, pod, workload string }{
 		{ControlPlaneID(testTD), "p", workload},
 		{NodeID(testTD, "n1"), "p", workload},
-		{"spiffe://other.example/tenant/acme/env/e/addon/db", "p", workload},
+		{"spiffe://other.example/project/acme/env/e/addon/db", "p", workload},
 		{id, "", workload},
 		{id, "p", ""},
 		{id, "p,OU=wl-x", workload},

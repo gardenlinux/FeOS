@@ -3,10 +3,10 @@
 **Status:** Accepted · **Date:** 2026-10-27, wildcard domains and route hosts 2026-11-17
 
 Every public environment has a default host under the platform's apps
-zone, with a label registered to its tenant for good: a natural label
-`<environment>-<tenant>` where that names one pair, a label with `--` a
-tenant chooses, or a plain label for the tenants that own the zone. A
-tenant claims a domain of its own by one call and binds it to one
+zone, with a label registered to its project for good: a natural label
+`<environment>-<project>` where that names one pair, a label with `--` a
+project chooses, or a plain label for the projects that own the zone. A
+project claims a domain of its own by one call and binds it to one
 environment by another; the claim is proven by a TXT record of the
 claim's token at a label of its own, never by the record that routes the
 name, and both records are checked for as long as the domain lives, with
@@ -26,43 +26,43 @@ may have; of the routes that answer on a host, the longest path wins.
 
 The ingress (ADR 0021) serves hosts and needs to know which names are
 whose. A public environment wants an address from the moment it is
-public, without a tenant setting up DNS; a production wants its owner's
+public, without a project setting up DNS; a production wants its owner's
 own name, with DNS at a provider that can carry an A record or a CNAME.
 The first such production is a dashboard at `dashboard.fecore.dev`.
 
-Every tenant's domains point at the same edge. A CNAME to the edge's
+Every project's domains point at the same edge. A CNAME to the edge's
 name, or A records with its addresses, says "the platform serves this
-name", not "this tenant does": a claim proven by routing would give a
+name", not "this project does": a claim proven by routing would give a
 name to whoever asked first, and give it again to anyone once its owner
 removed the domain and left the CNAME in DNS, or kept a wildcard there.
 An apex behind an ALIAS or a flattened CNAME answers with A records, so
 not even a routing target per claim would show whose it is. A caller
-that is one tenant for many owners, as FeCode is for its projects, needs
+that is one project for many owners, as FeCode is for its projects, needs
 a proof between them.
 
 A proof must hold for as long as it is used. A claim that stayed
 verified without its record would go on holding a name its owner gave up
-or lost, and the platform would answer on that name for the old tenant,
+or lost, and the platform would answer on that name for the old project,
 and renew its certificate, whenever its DNS pointed here again. But a
 record deleted by mistake, a DNS provider's hour of trouble or a zone
 moved to another provider must not take a production off the internet
 at once.
 
 Default hosts under one zone share a cookie scope. A natural label
-`<environment>-<tenant>` with the tenant's dots as hyphens reads the
+`<environment>-<project>` with the project's dots as hyphens reads the
 same for different pairs: `shop` of `acme.io`, `shop` of `acme-io` and
 `shop-acme` of `io`; whoever published first would keep the label, so
-another tenant could hold the host that reads as yours. A tenant that is
-a product of its own, with one tenant per project, wants to name its
+another project could hold the host that reads as yours. A project that is
+a product of its own, with one project per project, wants to name its
 hosts: a production at `<project>.<zone>` and every other environment at
 `<environment>--<project>`.
 
 The certificates of the platform's own hosts come from the cluster's
-issuer. The domains' cannot: a tenant's DNS is the tenant's, and an ACME
+issuer. The domains' cannot: a project's DNS is the project's, and an ACME
 client of a few hundred lines is cheaper than tying the platform to
 cert-manager on the one path every customer uses.
 
-Some tenants serve names they make faster than a claim can follow:
+Some projects serve names they make faster than a claim can follow:
 FeCode answers every preview of a sandbox's port at
 `<port>--<label>.boxed.fecode.dev`, made and gone within minutes. A
 claim, a TXT record and a certificate per such name would put every
@@ -70,9 +70,9 @@ preview behind DNS and the CA's limits per registered domain. They want
 one wildcard, `*.boxed.fecode.dev`, in one environment, whose
 application tells the names apart itself. HTTP-01 cannot issue a
 wildcard; only DNS-01 can, and DNS-01 writes a TXT record at
-`_acme-challenge.<name>` in the tenant's zone, whose credential the
+`_acme-challenge.<name>` in the project's zone, whose credential the
 platform must not hold. The CA follows a CNAME there as any resolver
-does, so the tenant can delegate that one label into a zone the platform
+does, so the project can delegate that one label into a zone the platform
 writes, and nothing else of its DNS.
 
 ## Decision
@@ -82,24 +82,24 @@ writes, and nothing else of its DNS.
 - The platform has an **apps zone**, whose wildcard DNS points at the
   ingress. Every public environment has one default host, `<label>.<apps
   zone>`, given at its first publish, and the label is registered to its
-  tenant for good: a label an environment gives up stays its tenant's,
-  and one another tenant or environment holds is refused. Without an apps
-  zone no environment can be made public. The tenants people make have a
+  project for good: a label an environment gives up stays its project's,
+  and one another project or environment holds is refused. Without an apps
+  zone no environment can be made public. The projects people make have a
   second zone with the same rules (ADR 0031).
-- The **natural label** is `<environment>-<tenant>`, given only when it
-  names one pair: the environment's name has no hyphen, the tenant's
+- The **natural label** is `<environment>-<project>`, given only when it
+  names one pair: the environment's name has no hyphen, the project's
   name no dot and no `--`, and the label does not end as a fallback
   does. Every other environment gets the **fallback**, the name's start
-  and a hash. A host that reads as `<environment>-<tenant>` is therefore
-  that tenant's, or the zone owner's.
-- A tenant may **choose** its environment's label when it publishes, and
+  and a hash. A host that reads as `<environment>-<project>` is therefore
+  that project's, or the zone owner's.
+- A project may **choose** its environment's label when it publishes, and
   change it later: a DNS label with `--` in it, which a natural label
   never has, so that the forms stay apart; what stands left and right of
-  the `--` is the tenant's own. The tenants the operator names as the
+  the `--` is the project's own. The projects the operator names as the
   apps zone's **owners** may also choose a **plain** label without `--`,
   as a platform holds the names under its own domain; a plain label that
-  is the natural label of an existing tenant's environment is refused,
-  so that no existing tenant's natural host is ever taken, and a tenant
+  is the natural label of an existing project's environment is refused,
+  so that no existing project's natural host is ever taken, and a project
   made later whose natural label the owner holds gets its fallback. A
   changed label moves the host at once; the old one answers 404.
 - The default host is the address of an environment without a name of
@@ -162,8 +162,8 @@ writes, and nothing else of its DNS.
 
 ### Domains: a claim and a binding are two facts
 
-- A **domain** is a tenant's claim on one name, made by one call, and
-  bound to at most one environment of its tenant by another. Whose a
+- A **domain** is a project's claim on one name, made by one call, and
+  bound to at most one environment of its project by another. Whose a
   name is lasts as long as its owner keeps it; which environment serves
   it changes with a move, and an environment is deleted and made again.
   A domain may be claimed before anything serves it and bound before it
@@ -173,7 +173,7 @@ writes, and nothing else of its DNS.
   moves a domain. An environment's deletion ends its bindings and keeps
   the domains.
 - A name is stored lowercased, as its A-label. An address, a name in the
-  apps zone or the tenant zone, the edge's name, the ACME zone and a
+  apps zone or the project zone, the edge's name, the ACME zone and a
   name under the platform's reserved zones cannot be claimed, nor a
   wildcard of one or one whose `*` would stand for one.
 
@@ -190,7 +190,7 @@ writes, and nothing else of its DNS.
 - **A name's own domain wins over a wildcard.** The ingress looks a host
   up as it is, and only then as `*.` and its parent, one label up and no
   further; the certificate by SNI the same way. A name below a wildcard
-  that is a served domain of its own, of the same tenant or another, is
+  that is a served domain of its own, of the same project or another, is
   served there: whoever controls the name's DNS decides, as for every
   claim.
 - Wildcards need the platform's **ACME zone** (below): without one, a
@@ -204,8 +204,8 @@ writes, and nothing else of its DNS.
   of its own because nothing else may stand beside a CNAME at the name
   itself. The record stays as long as the claim.
 - **Claims are not exclusive while unverified.** Any number of claims,
-  of one tenant or of several, may name the same name, each with its own
-  token, so that nobody blocks a name by claiming it first; a tenant
+  of one project or of several, may name the same name, each with its own
+  token, so that nobody blocks a name by claiming it first; a project
   holds a bounded number of unverified claims. At most one claim of a
   name is **verified**: the one whose token DNS shows. If DNS shows
   several, the one verified before stays so; of new claims, the oldest
@@ -238,7 +238,7 @@ writes, and nothing else of its DNS.
   at every check, since `*` itself is no name to resolve; and its
   **delegation**, the CNAME at `_acme-challenge.<name>`, names its
   target, `<token>.<ACME zone>`, through any chain of CNAMEs. The target
-  is the claim's own, by its token: a tenant's CNAME lets `ferund` answer
+  is the claim's own, by its token: a project's CNAME lets `ferund` answer
   for that claim and no other, and a claim superseded or deleted leaves
   a target nobody answers at. The answer to a wildcard's claim names
   three records: the TXT, the wildcard's record to the edge and the
@@ -289,7 +289,7 @@ writes, and nothing else of its DNS.
   account per platform. A domain's certificate comes over HTTP-01,
   except a wildcard's:
   `ferund` keeps the challenge in the ingress's table and every instance
-  answers it for that host on port 80, so that a tenant's DNS needs the
+  answers it for that host on port 80, so that a project's DNS needs the
   claim's TXT and a record to the edge, and `ferund` no credential of it.
   A challenge is accepted only once every connected instance holds it,
   since the CA validates through the balancer against any one of them.
@@ -313,7 +313,7 @@ writes, and nothing else of its DNS.
   that the CA's resolvers forget an answer from before a challenge. Its
   DNS provider is pluggable, as the object store is: `ferund` sets and
   deletes TXT records through it and holds that one credential, for that
-  zone alone, never a tenant's. The first provider is Route 53.
+  zone alone, never a project's. The first provider is Route 53.
 - Private keys are made by `ferund`, sealed in the database under the key
   that seals secrets (ADR 0044), and sent to the instances over their
   connections, which keep them in memory and in their cache.
@@ -324,10 +324,10 @@ writes, and nothing else of its DNS.
 ## Alternatives considered
 
 - **Routing as the proof**: a CNAME to the edge or A records with its
-  addresses, and a TXT record only where another tenant held the name or
-  had claimed it. The routing record is every tenant's, so it proves no
-  tenant's claim; a CNAME left behind or a wildcard gave a name nobody
-  had claimed to whoever asked, and a caller that is one tenant for many
+  addresses, and a TXT record only where another project held the name or
+  had claimed it. The routing record is every project's, so it proves no
+  project's claim; a CNAME left behind or a wildcard gave a name nobody
+  had claimed to whoever asked, and a caller that is one project for many
   owners got no proof between them at all.
 - **A routing target per claim**, `<id>.edge.<domain>`, in place of the
   TXT record, as some platforms do: it shows whose a name is for a
@@ -338,7 +338,7 @@ writes, and nothing else of its DNS.
   take it back.
 - **A verified claim kept without its record, and a moved domain served
   until its certificate expires**: a proof checked once and trusted for
-  good, a name that changed owners still answered for the old tenant,
+  good, a name that changed owners still answered for the old project,
   and keys of names that no longer point here.
 - **Deactivating at the first wrong answer**: a record deleted by
   mistake, a DNS provider's hour of trouble or a zone moved to another
@@ -351,30 +351,30 @@ writes, and nothing else of its DNS.
 - **Renewal at two thirds of a certificate's life**, the usual rule for
   90-day certificates: a six-day certificate renewed at two thirds leaves
   two days for failures; half leaves three.
-- **Refusing tenant names that collide after the mapping** of dots to
+- **Refusing project names that collide after the mapping** of dots to
   hyphens, or **a discriminator on every label**: the first does not
-  cover the hyphen between name and tenant, the second makes simple
+  cover the hyphen between name and project, the second makes simple
   names unreadable. The natural label only where it names one pair, and
   a fallback otherwise, keeps simple names simple and every host its
-  tenant's.
+  project's.
 - **The default host served beside an environment's domains**: a second
   address of the same production, which search engines, links and
-  cookies split between, and one its tenant did not ask for. Replaced on
+  cookies split between, and one its project did not ask for. Replaced on
   2026-11-01 by the default host answering 404 while a domain is served.
-- **A chosen label without `--` for every tenant**: it would read as
-  another tenant's natural label; only the zone's owners, whose names
+- **A chosen label without `--` for every project**: it would read as
+  another project's natural label; only the zone's owners, whose names
   the zone is, may hold plain labels.
 - **DNS-01 for every domain**, HTTP-01 dropped: one way for all, but a
-  third record in every tenant's DNS, a delegation every existing domain
+  third record in every project's DNS, a delegation every existing domain
   would need before a cutover, and nothing gained for a name that points
   at the edge anyway. HTTP-01 stays for names, DNS-01 is what a wildcard
   needs.
 - **The delegation as a wildcard's proof**, in place of its TXT: one
   record fewer, but a second kind of proof beside the one every claim
-  has, and the TXT is what tells the platform which tenant a name is
+  has, and the TXT is what tells the platform which project a name is
   for. The delegation only lets `ferund` answer the CA.
-- **DNS-01 in the tenant's zone** with a credential the tenant gives:
-  the platform would hold a key to every such tenant's DNS, which can
+- **DNS-01 in the project's zone** with a credential the project gives:
+  the platform would hold a key to every such project's DNS, which can
   move any name of it, for one TXT record.
 - **`ferund` as the ACME zone's DNS server**: a DNS server of its own,
   port 53 on the internet, and its availability the CA's; a DNS
@@ -397,10 +397,10 @@ writes, and nothing else of its DNS.
 
 ## Consequences
 
-- A tenant's DNS holds two records per domain, the TXT of its claim and
+- A project's DNS holds two records per domain, the TXT of its claim and
   the one that routes it, and keeps both for as long as it keeps the
   domain: without either for longer than the grace, the domain is
-  deactivated. A domain's state and its incidents tell the tenant which
+  deactivated. A domain's state and its incidents tell the project which
   record is wrong and until when. A wildcard takes a third, its
   delegation, kept as long as the others.
 - `ferund` holds one DNS credential, the ACME zone's, and an operator
@@ -419,16 +419,16 @@ writes, and nothing else of its DNS.
 - Operators publish the edge's name and the apps zone's wildcard, open
   port 80 to the ingress for HTTP-01, and provide the zones' wildcard
   certificates. They keep the balancer's addresses: an apex names them in
-  A records that are its tenant's, so a new address is a change every
-  such tenant makes in its own DNS; an operator who has to change them
-  names the old addresses beside the new ones until the tenants have
+  A records that are its project's, so a new address is a change every
+  such project makes in its own DNS; an operator who has to change them
+  names the old addresses beside the new ones until the projects have
   moved.
 - A stolen domain key is worth six days, and revocation does not matter.
   An outage of `ferund` or the CA longer than about three days leaves the
   ingress serving an expired certificate from its cache.
 - A production answers on its domain alone; its default host is the
   address of an environment without one. A host under the apps zone that
-  reads as `<environment>-<tenant>` is that tenant's or the zone owner's.
+  reads as `<environment>-<project>` is that project's or the zone owner's.
 - The ingress makes the cookies of answers host-only (ADR 0021), not
   those a page's script sets; a Public Suffix List entry for the apps
   zone, an operator's action, closes that for every environment.
@@ -450,10 +450,10 @@ with the TXT proof, the checks and the grace were built on 2026-10-29
 (ace4fa5, 90503f0), their certificates the same day (f8a5f9a). Chosen
 labels, the default host answering 404 while a domain is served, and
 plain labels for the zone's owners came on 2026-11-01 (b122057, 7c4c105,
-794a2ec); the tenant zone of ADR 0031 on 2026-11-06 (0cda975, 20f8894).
+794a2ec); the project zone of ADR 0031 on 2026-11-06 (0cda975, 20f8894).
 The draft's zone wildcards over DNS-01 by `ferund` were never built; the
 operator's issuer provides them. Wildcard domains, with DNS-01 delegated
-by the tenant's CNAME into the platform's ACME zone and HTTP-01 kept for
+by the project's CNAME into the platform's ACME zone and HTTP-01 kept for
 every name, were decided and built on 2026-11-17, so that FeCode can run
 on FeRun with its previews under `*.boxed.fecode.dev`; the ACME zone's
 first provider is Route 53. A route's `host`, stored and unused since

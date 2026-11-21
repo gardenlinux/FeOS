@@ -3,7 +3,7 @@
 
 // The arithmetic of the jobs made by a call (ADR 0041): pure, so
 // that the tests load it as it is. A job's shape is ferund's
-// TenantJobStatus (go/internal/env/tenantjobs.go): id, image, imageRef,
+// ProjectJobStatus (go/internal/env/projectjobs.go): id, image, imageRef,
 // phase, reason, detail, exitCode, result, resultPath, vcpus, memoryMib,
 // labels, createdAt, startedAt, finishedAt, deadlineAt, and (ADR 0035)
 // environment {id, name}, reaches and egress, fixed at its create.

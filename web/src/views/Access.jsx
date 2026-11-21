@@ -157,14 +157,14 @@ function Disabled() {
 // creates pull its image with (ADR 0025): sealed in ferund, never
 // answered, so the form cannot say whether there is one. A pod that runs
 // keeps running; the next create asks the registry with it. write: the
-// session may change them (a tenant grant write).
+// session may change them (a project grant write).
 export function ImageCredentials({ sandboxId, write }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [done, setDone] = useState('');
-  const why = write ? undefined : 'needs write on this tenant';
+  const why = write ? undefined : 'needs write on this project';
   const run = async (label, fn, ok) => {
     setBusy(label); setErr(''); setDone('');
     try {

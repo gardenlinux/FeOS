@@ -18,29 +18,29 @@ import (
 
 // api is the HTTP API (sink.md, Reading).
 type api struct {
-	store   *Store
-	traces  *Traces
-	tenants *Tenants
-	ingest  <-chan struct{}
-	log     *slog.Logger
+	store    *Store
+	traces   *Traces
+	projects *Projects
+	ingest   <-chan struct{}
+	log      *slog.Logger
 }
 
 // newAPI returns the HTTP API's handler: /api/v1/logs,
 // /api/v1/log-streams, /api/v1/jaeger/api/…, /api/v1/traffic,
 // /api/v1/egress and /healthz; ingest is closed once the ingest serves.
-func newAPI(store *Store, traces *Traces, tenants *Tenants, ingest <-chan struct{}, log *slog.Logger) http.Handler {
-	a := &api{store: store, traces: traces, tenants: tenants, ingest: ingest, log: log}
+func newAPI(store *Store, traces *Traces, projects *Projects, ingest <-chan struct{}, log *slog.Logger) http.Handler {
+	a := &api{store: store, traces: traces, projects: projects, ingest: ingest, log: log}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.healthz)
-	mux.HandleFunc("GET /api/v1/logs", a.tenant(a.logs))
-	mux.HandleFunc("GET /api/v1/log-streams", a.tenant(a.streams))
-	mux.HandleFunc("DELETE /api/v1/log-streams", a.tenant(a.deleteStreams))
-	mux.HandleFunc("GET /api/v1/jaeger/api/services", a.tenant(a.jaegerNames))
-	mux.HandleFunc("GET /api/v1/jaeger/api/services/{service}/operations", a.tenant(a.jaegerNames))
-	mux.HandleFunc("GET /api/v1/jaeger/api/traces/{traceID}", a.tenant(a.jaegerTrace))
-	mux.HandleFunc("GET /api/v1/jaeger/api/traces", a.tenant(a.jaegerFind))
-	mux.HandleFunc("GET /api/v1/traffic", a.tenant(a.traffic))
-	mux.HandleFunc("GET /api/v1/egress", a.tenant(a.egress))
+	mux.HandleFunc("GET /api/v1/logs", a.project(a.logs))
+	mux.HandleFunc("GET /api/v1/log-streams", a.project(a.streams))
+	mux.HandleFunc("DELETE /api/v1/log-streams", a.project(a.deleteStreams))
+	mux.HandleFunc("GET /api/v1/jaeger/api/services", a.project(a.jaegerNames))
+	mux.HandleFunc("GET /api/v1/jaeger/api/services/{service}/operations", a.project(a.jaegerNames))
+	mux.HandleFunc("GET /api/v1/jaeger/api/traces/{traceID}", a.project(a.jaegerTrace))
+	mux.HandleFunc("GET /api/v1/jaeger/api/traces", a.project(a.jaegerFind))
+	mux.HandleFunc("GET /api/v1/traffic", a.project(a.traffic))
+	mux.HandleFunc("GET /api/v1/egress", a.project(a.egress))
 	return mux
 }
 
@@ -77,18 +77,18 @@ var crossOrigin http.CrossOriginProtection
 
 // credential is the reader's credential: a token (Authorization: Bearer
 // …), else a person's session (its cookie, where the sink is served under
-// ferund's host), which names its tenant in FeRun-Tenant and whose
+// ferund's host), which names its project in FeRun-Project and whose
 // changes need X-Requested-With: ferun and a request of the same origin,
 // as ferund's do (ADR 0031).
 func credential(r *http.Request) (Credential, error) {
-	c := Credential{Tenant: r.Header.Get(auth.TenantHeader)}
+	c := Credential{Project: r.Header.Get(auth.ProjectHeader)}
 	if v := r.Header.Get("Authorization"); strings.HasPrefix(v, "Bearer ") && len(v) > len("Bearer ") {
 		c.Authorization = v
 		return c, nil
 	}
 	session := auth.SessionOf(r)
 	if session == "" {
-		return c, apierr.New(http.StatusUnauthorized, "a tenant's token (Authorization: Bearer …) or a session is required")
+		return c, apierr.New(http.StatusUnauthorized, "a project's token (Authorization: Bearer …) or a session is required")
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
@@ -100,24 +100,24 @@ func credential(r *http.Request) (Credential, error) {
 			return c, apierr.New(http.StatusForbidden, "cross-origin request refused")
 		}
 	}
-	if c.Tenant == "" {
-		return c, apierr.New(http.StatusBadRequest, "a session names its tenant in the %s header", auth.TenantHeader)
+	if c.Project == "" {
+		return c, apierr.New(http.StatusBadRequest, "a session names its project in the %s header", auth.ProjectHeader)
 	}
 	c.Session = session
 	return c, nil
 }
 
-// tenant resolves the request's reader to what it may read through
+// project resolves the request's reader to what it may read through
 // ferund; a refusal of ferund is passed on as it came, and a reader that
-// may read nothing of the tenant is answered as an unknown tenant.
-func (a *api) tenant(h func(w http.ResponseWriter, r *http.Request, acc Access)) http.HandlerFunc {
+// may read nothing of the project is answered as an unknown project.
+func (a *api) project(h func(w http.ResponseWriter, r *http.Request, acc Access)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := credential(r)
 		if err != nil {
 			apierr.Write(w, err)
 			return
 		}
-		acc, err := a.tenants.Resolve(r.Context(), c)
+		acc, err := a.projects.Resolve(r.Context(), c)
 		var ref *refusal
 		if errors.As(err, &ref) {
 			if ref.contentType != "" {
@@ -128,12 +128,12 @@ func (a *api) tenant(h func(w http.ResponseWriter, r *http.Request, acc Access))
 			return
 		}
 		if err != nil {
-			a.log.Warn("resolve a tenant", "err", err)
-			apierr.Write(w, apierr.New(http.StatusBadGateway, "cannot ask ferund for the reader's tenant"))
+			a.log.Warn("resolve a project", "err", err)
+			apierr.Write(w, apierr.New(http.StatusBadGateway, "cannot ask ferund for the reader's project"))
 			return
 		}
 		if acc.none() {
-			apierr.Write(w, apierr.New(http.StatusNotFound, "no such tenant"))
+			apierr.Write(w, apierr.New(http.StatusNotFound, "no such project"))
 			return
 		}
 		h(w, r, acc)
@@ -147,12 +147,12 @@ func (a *api) logs(w http.ResponseWriter, r *http.Request, acc Access) {
 		return
 	}
 	q.Sel.Within = acc.within()
-	tenant := acc.Tenant
+	project := acc.Project
 	if q.Follow {
-		a.follow(w, r, tenant, q)
+		a.follow(w, r, project, q)
 		return
 	}
-	res, err := a.store.Read(r.Context(), tenant, q)
+	res, err := a.store.Read(r.Context(), project, q)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -168,7 +168,7 @@ func (a *api) streams(w http.ResponseWriter, r *http.Request, acc Access) {
 		return
 	}
 	sel.Within = acc.within()
-	tenant := acc.Tenant
+	project := acc.Project
 	since := time.Now().Add(-7 * 24 * time.Hour).UnixNano()
 	if t := v.Get("since"); t != "" {
 		if since, err = parseTime("since", t); err != nil {
@@ -176,7 +176,7 @@ func (a *api) streams(w http.ResponseWriter, r *http.Request, acc Access) {
 			return
 		}
 	}
-	rows, err := a.store.Streams(r.Context(), tenant, sel, since)
+	rows, err := a.store.Streams(r.Context(), project, sel, since)
 	if err != nil {
 		a.fail(w, r, err)
 		return
@@ -190,26 +190,26 @@ func (a *api) streams(w http.ResponseWriter, r *http.Request, acc Access) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// deleteStreams needs write on the tenant (FeCode's token, which deletes
+// deleteStreams needs write on the project (FeCode's token, which deletes
 // an environment's streams with the environment).
 func (a *api) deleteStreams(w http.ResponseWriter, r *http.Request, acc Access) {
 	if !acc.Write {
-		apierr.Write(w, apierr.RoleRequired("write", "tenant"))
+		apierr.Write(w, apierr.RoleRequired("write", "project"))
 		return
 	}
-	tenant := acc.Tenant
+	project := acc.Project
 	v := r.URL.Query()
 	env, job := v.Get("environment"), v.Get("job")
 	if (env == "") == (job == "") || len(v) != 1 {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "give environment or job, and nothing else"))
 		return
 	}
-	n, err := a.store.DeleteStreams(r.Context(), tenant, env, job)
+	n, err := a.store.DeleteStreams(r.Context(), project, env, job)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	a.log.Info("deleted streams", "tenant", tenant, "environment", env, "job", job, "streams", n)
+	a.log.Info("deleted streams", "project", project, "environment", env, "job", job, "streams", n)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -222,10 +222,10 @@ func (a *api) fail(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // follow answers follow=1 as NDJSON.
-func (a *api) follow(w http.ResponseWriter, r *http.Request, tenant string, q Query) {
+func (a *api) follow(w http.ResponseWriter, r *http.Request, project string, q Query) {
 	// What is followed is checked before the answer starts: an
 	// environment as a whole is searched, not followed.
-	if _, err := a.store.FollowKey(r.Context(), tenant, q.Sel); err != nil {
+	if _, err := a.store.FollowKey(r.Context(), project, q.Sel); err != nil {
 		if errors.Is(err, ErrFollowScope) {
 			apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 			return
@@ -240,7 +240,7 @@ func (a *api) follow(w http.ResponseWriter, r *http.Request, tenant string, q Qu
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()
 	out := &ndjsonFollow{w: w, rc: rc, enc: json.NewEncoder(w), sent: map[int64]bool{}}
-	if err := a.store.Follow(r.Context(), tenant, q, out); err != nil && r.Context().Err() == nil {
+	if err := a.store.Follow(r.Context(), project, q, out); err != nil && r.Context().Err() == nil {
 		a.log.Warn("follow", "err", err)
 	}
 }

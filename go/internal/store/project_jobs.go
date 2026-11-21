@@ -16,12 +16,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
-// TenantJob is a tenant's job (jobs, ADR 0018): a container run to
-// its end. Its pod is the sandbox row of the same ID (tenant_job) while
-// it has not ended. Its sealed secrets are read apart (TenantJobSealed).
-type TenantJob struct {
+// ProjectJob is a project's job (jobs, ADR 0018): a container run to
+// its end. Its pod is the sandbox row of the same ID (project_job) while
+// it has not ended. Its sealed secrets are read apart (ProjectJobSealed).
+type ProjectJob struct {
 	// MadeBy is the principal that created it (ADR 0031); written by
-	// InsertTenantJob, not read back.
+	// InsertProjectJob, not read back.
 	MadeBy string
 	ID     podid.ID
 	Owner  string
@@ -57,116 +57,116 @@ type TenantJob struct {
 }
 
 // Ended reports whether the job has ended.
-func (r *TenantJob) Ended() bool { return !r.FinishedAt.IsZero() }
+func (r *ProjectJob) Ended() bool { return !r.FinishedAt.IsZero() }
 
-const tenantJobCols = `id, owner, coalesce(idempotency_key, ''), request_hash, image, image_ref, vcpus, memory_mib,
+const projectJobCols = `id, owner, coalesce(idempotency_key, ''), request_hash, image, image_ref, vcpus, memory_mib,
 	result_path, labels, phase, reason, detail, exit_code, result, log_tail, created_at, started_at, finished_at,
 	deadline_at, coalesce(log_retention_days, 0), environment_id,
 	coalesce((SELECT e.name FROM environments e WHERE e.id = environment_id), ''), reaches, egress`
 
-func scanTenantJob(row pgx.Row) (TenantJob, error) {
-	var r TenantJob
+func scanProjectJob(row pgx.Row) (ProjectJob, error) {
+	var r ProjectJob
 	var started, finished *time.Time
 	var reaches, egress []byte
 	if err := row.Scan(&r.ID, &r.Owner, &r.Key, &r.RequestHash, &r.Image, &r.ImageRef, &r.VCPUs, &r.MemoryMiB,
 		&r.ResultPath, &r.Labels, &r.Phase, &r.Reason, &r.Detail, &r.ExitCode, &r.Result, &r.LogTail, &r.CreatedAt,
 		&started, &finished, &r.DeadlineAt, &r.LogRetentionDays, &r.EnvID, &r.EnvName, &reaches, &egress); err != nil {
-		return TenantJob{}, err
+		return ProjectJob{}, err
 	}
 	r.StartedAt, r.FinishedAt = timeOf(started), timeOf(finished)
 	r.Labels, r.LogTail = stringMap(r.Labels), nonNil(r.LogTail)
 	var err error
 	if r.Reaches, r.Egress, err = scanReach(reaches, egress); err != nil {
-		return TenantJob{}, fmt.Errorf("job %s: %w", r.ID, err)
+		return ProjectJob{}, fmt.Errorf("job %s: %w", r.ID, err)
 	}
 	return r, nil
 }
 
-func collectTenantJobs(rows pgx.Rows, err error) ([]TenantJob, error) {
+func collectProjectJobs(rows pgx.Rows, err error) ([]ProjectJob, error) {
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (TenantJob, error) { return scanTenantJob(r) })
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ProjectJob, error) { return scanProjectJob(r) })
 }
 
-// InsertTenantJob inserts a queued job, due deadline after the database's now,
+// InsertProjectJob inserts a queued job, due deadline after the database's now,
 // with its sealed secrets (nil: none). A key another job of the owner
 // holds is ErrExists.
-func (s *Store) InsertTenantJob(ctx context.Context, r TenantJob, sealed []byte, deadline time.Duration) (TenantJob, error) {
+func (s *Store) InsertProjectJob(ctx context.Context, r ProjectJob, sealed []byte, deadline time.Duration) (ProjectJob, error) {
 	labels, err := jsonText(stringMap(r.Labels))
 	if err != nil {
-		return TenantJob{}, err
+		return ProjectJob{}, err
 	}
 	reaches, egress, err := reachJSON(r.Reaches, r.Egress)
 	if err != nil {
-		return TenantJob{}, fmt.Errorf("insert job %s: %w", r.ID, err)
+		return ProjectJob{}, fmt.Errorf("insert job %s: %w", r.ID, err)
 	}
-	out, err := scanTenantJob(s.q.QueryRow(ctx, `INSERT INTO jobs (id, owner, idempotency_key, request_hash, image, image_ref,
+	out, err := scanProjectJob(s.q.QueryRow(ctx, `INSERT INTO jobs (id, owner, idempotency_key, request_hash, image, image_ref,
 			vcpus, memory_mib, result_path, labels, sealed, deadline_at, log_retention_days, made_by, environment_id,
 			reaches, egress)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, now() + $12::interval, $13, $14, $15, $16::jsonb,
 			$17::jsonb)
-		RETURNING `+tenantJobCols,
+		RETURNING `+projectJobCols,
 		r.ID, r.Owner, nullString(r.Key), r.RequestHash, r.Image, r.ImageRef, r.VCPUs, r.MemoryMiB, r.ResultPath, labels,
 		sealed, interval(deadline), nullPositive(r.LogRetentionDays), r.MadeBy, r.EnvID, reaches, egress))
 	if err != nil {
-		return TenantJob{}, insertError("insert job "+r.ID.String(), err)
+		return ProjectJob{}, insertError("insert job "+r.ID.String(), err)
 	}
 	return out, nil
 }
 
-// GetTenantJob reads a job of owner (any owner for ""); ErrNoRow if there is
+// GetProjectJob reads a job of owner (any owner for ""); ErrNoRow if there is
 // none.
-func (s *Store) GetTenantJob(ctx context.Context, owner string, id podid.ID) (TenantJob, error) {
-	r, err := scanTenantJob(s.q.QueryRow(ctx, "SELECT "+tenantJobCols+" FROM jobs WHERE id = $1 AND ($2 = '' OR owner = $2)",
+func (s *Store) GetProjectJob(ctx context.Context, owner string, id podid.ID) (ProjectJob, error) {
+	r, err := scanProjectJob(s.q.QueryRow(ctx, "SELECT "+projectJobCols+" FROM jobs WHERE id = $1 AND ($2 = '' OR owner = $2)",
 		id, owner))
 	return r, noRow(err, ErrNoRow)
 }
 
-// TenantJobByKey reads the job of owner that a create with key made; ErrNoRow
+// ProjectJobByKey reads the job of owner that a create with key made; ErrNoRow
 // if there is none.
-func (s *Store) TenantJobByKey(ctx context.Context, owner, key string) (TenantJob, error) {
-	r, err := scanTenantJob(s.q.QueryRow(ctx, "SELECT "+tenantJobCols+" FROM jobs WHERE owner = $1 AND idempotency_key = $2",
+func (s *Store) ProjectJobByKey(ctx context.Context, owner, key string) (ProjectJob, error) {
+	r, err := scanProjectJob(s.q.QueryRow(ctx, "SELECT "+projectJobCols+" FROM jobs WHERE owner = $1 AND idempotency_key = $2",
 		owner, key))
 	return r, noRow(err, ErrNoRow)
 }
 
-// ListTenantJobs returns the jobs of owner that carry every label of labels,
+// ListProjectJobs returns the jobs of owner that carry every label of labels,
 // newest first; envs, when not nil, keeps those of these environments.
-func (s *Store) ListTenantJobs(ctx context.Context, owner string, labels map[string]string, envs []uuid.UUID) (
-	[]TenantJob, error) {
+func (s *Store) ListProjectJobs(ctx context.Context, owner string, labels map[string]string, envs []uuid.UUID) (
+	[]ProjectJob, error) {
 	want, err := jsonText(stringMap(labels))
 	if err != nil {
 		return nil, err
 	}
-	return collectTenantJobs(s.q.Query(ctx, "SELECT "+tenantJobCols+` FROM jobs WHERE owner = $1 AND labels @> $2::jsonb
+	return collectProjectJobs(s.q.Query(ctx, "SELECT "+projectJobCols+` FROM jobs WHERE owner = $1 AND labels @> $2::jsonb
 			AND ($3::uuid[] IS NULL OR environment_id = ANY($3))
 		ORDER BY created_at DESC, id DESC`, owner, want, envs))
 }
 
-// OpenTenantJobs returns every job that has not ended, oldest first.
-func (s *Store) OpenTenantJobs(ctx context.Context) ([]TenantJob, error) {
-	return collectTenantJobs(s.q.Query(ctx, "SELECT "+tenantJobCols+" FROM jobs WHERE finished_at IS NULL ORDER BY created_at, id"))
+// OpenProjectJobs returns every job that has not ended, oldest first.
+func (s *Store) OpenProjectJobs(ctx context.Context) ([]ProjectJob, error) {
+	return collectProjectJobs(s.q.Query(ctx, "SELECT "+projectJobCols+" FROM jobs WHERE finished_at IS NULL ORDER BY created_at, id"))
 }
 
-// TenantJobSealed reads a job's sealed secrets: nil once it has ended or when
+// ProjectJobSealed reads a job's sealed secrets: nil once it has ended or when
 // it has none; ErrNoRow if there is no job.
-func (s *Store) TenantJobSealed(ctx context.Context, id podid.ID) ([]byte, error) {
+func (s *Store) ProjectJobSealed(ctx context.Context, id podid.ID) ([]byte, error) {
 	var sealed []byte
 	err := s.q.QueryRow(ctx, "SELECT sealed FROM jobs WHERE id = $1", id).Scan(&sealed)
 	return sealed, noRow(err, ErrNoRow)
 }
 
-// StartTenantJob marks a queued job running, started now; it reports whether
+// StartProjectJob marks a queued job running, started now; it reports whether
 // it did.
-func (s *Store) StartTenantJob(ctx context.Context, id podid.ID) (bool, error) {
+func (s *Store) StartProjectJob(ctx context.Context, id podid.ID) (bool, error) {
 	tag, err := s.q.Exec(ctx, `UPDATE jobs SET phase = $2, started_at = now()
 		WHERE id = $1 AND phase = $3`, id, model.JobRunning, model.JobQueued)
 	return tag.RowsAffected() > 0, err
 }
 
-// TenantJobEnd is how a job ended.
-type TenantJobEnd struct {
+// ProjectJobEnd is how a job ended.
+type ProjectJobEnd struct {
 	Phase, Reason, Detail string
 	ExitCode              *int
 	Result                string
@@ -176,10 +176,10 @@ type TenantJobEnd struct {
 	Exited bool
 }
 
-// EndTenantJob ends a job that has not ended, now, and drops its sealed
+// EndProjectJob ends a job that has not ended, now, and drops its sealed
 // secrets. It reports whether it did: false when the job has ended
 // already, or is gone.
-func (s *Store) EndTenantJob(ctx context.Context, id podid.ID, e TenantJobEnd) (bool, error) {
+func (s *Store) EndProjectJob(ctx context.Context, id podid.ID, e ProjectJobEnd) (bool, error) {
 	switch e.Phase {
 	case model.JobSucceeded, model.JobFailed, model.JobDeadlineExceeded, model.JobCancelled:
 	default:
@@ -197,25 +197,25 @@ func (s *Store) EndTenantJob(ctx context.Context, id podid.ID, e TenantJobEnd) (
 	return tag.RowsAffected() > 0, err
 }
 
-// DeleteTenantJob removes a job of owner; it reports whether there was one.
-func (s *Store) DeleteTenantJob(ctx context.Context, owner string, id podid.ID) (bool, error) {
+// DeleteProjectJob removes a job of owner; it reports whether there was one.
+func (s *Store) DeleteProjectJob(ctx context.Context, owner string, id podid.ID) (bool, error) {
 	tag, err := s.q.Exec(ctx, "DELETE FROM jobs WHERE id = $1 AND owner = $2", id, owner)
 	return tag.RowsAffected() > 0, err
 }
 
-// SweepTenantJobs removes the jobs that ended more than retention ago, by the
+// SweepProjectJobs removes the jobs that ended more than retention ago, by the
 // database's clock, and returns how many.
-func (s *Store) SweepTenantJobs(ctx context.Context, retention time.Duration) (int64, error) {
+func (s *Store) SweepProjectJobs(ctx context.Context, retention time.Duration) (int64, error) {
 	tag, err := s.q.Exec(ctx, "DELETE FROM jobs WHERE finished_at < now() - $1::interval", interval(retention))
 	return tag.RowsAffected(), err
 }
 
-// LeftTenantJobPods returns the jobs' pods (tenant_job) whose job has ended or
+// LeftProjectJobPods returns the jobs' pods (project_job) whose job has ended or
 // is gone: a job's end deletes its pod, and these are the deletes that
 // did not happen.
-func (s *Store) LeftTenantJobPods(ctx context.Context) ([]Sandbox, error) {
+func (s *Store) LeftProjectJobPods(ctx context.Context) ([]Sandbox, error) {
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxColumns("s")+` FROM sandboxes s
-		LEFT JOIN jobs j ON j.id = s.id WHERE s.tenant_job AND (j.id IS NULL OR j.finished_at IS NOT NULL)
+		LEFT JOIN jobs j ON j.id = s.id WHERE s.project_job AND (j.id IS NULL OR j.finished_at IS NOT NULL)
 		ORDER BY s.id`))
 }
 

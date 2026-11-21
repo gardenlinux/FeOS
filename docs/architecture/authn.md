@@ -304,7 +304,7 @@ byte:
   key is found as PEM, joined, or with escaped line breaks. An upstream
   never receives the key; this is for one that has it from elsewhere.
 
-A shorter value (a tenant header of `42`) is not redacted: it would mask
+A shorter value (a project header of `42`) is not redacted: it would mask
 ordinary text. A value the upstream changes — escapes (`\/` in JSON),
 encodes otherwise, cuts itself (an API's own paging of a text) — is not
 recognised.

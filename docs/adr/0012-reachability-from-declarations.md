@@ -7,10 +7,10 @@ reference of a deployment, a variable from a service's port or an
 addon's output, a URL that names one, a route, an entry of `uses`,
 opens the port it names from the object that holds it to the object it
 names; a workload's replicas reach each other; a service, a job, a
-sandbox and a tenant's job choose their egress; a route names its
-clients; a sandbox and a tenant's job say what of their environment
+sandbox and a project's job choose their egress; a route names its
+clients; a sandbox and a project's job say what of their environment
 they reach. From this the control plane derives every pod's
-memberships and stateful rules that only allow, which no tenant
+memberships and stateful rules that only allow, which no project
 writes, and sends them to the nodes as security groups. `feosd`
 enforces them per pod with nftables, denied prefixes first, and its
 resolver enforces egress by name: it answers an allowed name into a
@@ -19,7 +19,7 @@ timed set and refuses every other.
 ## Context
 
 With ADR 0010, every pod has an IPv6 address that other pods and the
-internet can reach. Pods run untrusted code of many tenants (ADR 0001),
+internet can reach. Pods run untrusted code of many projects (ADR 0001),
 so what may reach a pod, and what a pod may reach, has to be said for
 every pod and enforced on its node.
 
@@ -39,7 +39,7 @@ that sends the ingress to a port. In a project of eight services, two
 addons and a job, the services call each other over 25 edges, every one
 a reference; a second grammar for the same 25 facts is kept by hand,
 and an agent that reads a warning asking for it pastes the rule. What a
-tenant wants beyond the references is short: "only the payment
+project wants beyond the references is short: "only the payment
 provider" or "no egress"; "only the company's network" for a public
 route.
 
@@ -47,7 +47,7 @@ Within a cluster the address is the workload: a pod sends from its own
 address only (ADR 0010), a node's prefix arrives only from the node
 that holds the key, and the traffic between nodes is the mesh's (ADR
 0010). The node can decide by address; a certificate per workload (ADR
-0014) is no part of how a tenant says who reaches what.
+0014) is no part of how a project says who reaches what.
 
 `feosd` keeps a pod's labels and does not read them (ADR 0004). A pod's
 address changes when it resumes on another node (ADR 0010), and a rule
@@ -153,7 +153,7 @@ else; the ingress reaches `api` on `http`.
   a bare `0.0.0.0/0`.
 - **Egress is about what is not the environment.** `none` keeps the
   send to the environment's own pods; it takes away the internet.
-- **An addon's** egress is its type's, the internet; the tenant does
+- **An addon's** egress is its type's, the internet; the project does
   not set it.
 - **An image's registry is egress the image declares.** The guest pulls
   a pod's image over the pod's network until the node pulls (ADR 0022,
@@ -182,7 +182,7 @@ else; the ingress reaches `api` on `http`.
 - A route to an attached service is served by the route door, not by
   the ingress (ADR 0043), and takes no `from`.
 
-### A sandbox and a tenant's job say what they reach
+### A sandbox and a project's job say what they reach
 
 - Their create names **`reaches`**: what of their environment the pod
   may reach, a list of the deployed deployment's objects with a port
@@ -192,24 +192,24 @@ else; the ingress reaches `api` on `http`.
   network. They have `egress` as a service does. ADR 0035 has the rest.
 - **A change is no move.** What a sandbox reaches is a rule of its
   targets, in from the sandbox's pod; the sandbox's memberships never
-  change, so a changed `reaches` changes rules in place. A tenant's
+  change, so a changed `reaches` changes rules in place. A project's
   job's is fixed: it runs once.
 - An entry that names an object the deployed deployment no longer has
   admits nothing and is shown on the sandbox; the plan does not refuse
   a deployment for it.
-- Nothing references a sandbox or a tenant's job, so no deployment's
+- Nothing references a sandbox or a project's job, so no deployment's
   pod reaches them. A reference to an attached service opens the
   sandbox's pod it runs in (ADR 0035), and a pod whose `reaches` is
   `all` reaches them as it reaches everything of the environment.
 
-### Memberships are the control plane's, never a tenant's
+### Memberships are the control plane's, never a project's
 
 - Every pod is a member of its **environment's** membership, the set
   of all the environment's pods, which admits nothing and has one rule
   out, to itself: a pod may send to every pod of its environment, and
   the receiver's rules decide.
 - Every pod is a member of its **workload's** membership: the object's
-  pods, or the one pod of a sandbox or a tenant's job. An attached
+  pods, or the one pod of a sandbox or a project's job. An attached
   service has none of its own: its process runs in its sandbox's pod. A
   workload's rules in are its references' and `reaches`' sources, by
   their memberships, on the ports they name; its rules out are its
@@ -220,7 +220,7 @@ else; the ingress reaches `api` on `http`.
   environment is public, from the membership of the ingress instances
   (ADR 0021).
 - Labels and selectors are the control plane's. `feosd` sees groups,
-  members and rules; a tenant sees references, `uses`, `egress`, `from`
+  members and rules; a project sees references, `uses`, `egress`, `from`
   and `reaches`, and never a group.
 - A pod's memberships are in its template and never change: its
   environment and its workload. A member leaves a membership only when
@@ -299,7 +299,7 @@ else; the ingress reaches `api` on `http`.
 
 ## Alternatives considered
 
-- **Named security groups of the tenant's own**, as clouds have them:
+- **Named security groups of the project's own**, as clouds have them:
   named sets that pods are put in, rules that name other groups, ports
   and blocks, in and out, nothing open by default. This was the
   decision for one day. It made two declarations for one fact, kept by
@@ -312,7 +312,7 @@ else; the ingress reaches `api` on `http`.
   that cannot derive the first.
 - **Kubernetes's NetworkPolicy**, in `feosd` or in the control plane:
   `feosd` would read labels, everything would be allowed until a policy
-  selects a pod, which untrusted tenants should not get, and a selector
+  selects a pod, which untrusted projects should not get, and a selector
   is checked only at run time, while a reference is checked by the plan.
 - **A list of callers on the receiver** (`services.db.allowFrom:
   [api]`): shorter for three services, but the caller's declaration
@@ -324,7 +324,7 @@ else; the ingress reaches `api` on `http`.
   the receiver names the caller: it would protect a service from its own
   deployment, which owns both sides.
 - **Egress open for good**: "only the payment provider" and "no egress"
-  are what tenants ask a firewall first, and the resolver has every
+  are what projects ask a firewall first, and the resolver has every
   answer in hand.
 - **Egress as `0.0.0.0/0` and `::/0`**: it would open the pods' mesh and
   every internal network that the denied prefixes leave out on a
@@ -333,7 +333,7 @@ else; the ingress reaches `api` on `http`.
   limit: a packet queued to `feosd` per connection, which ADR 0013
   refused for records. `feosd` reads server names for its records
   already and could refuse one it did not allow; that comes when a
-  tenant asks for it, not before.
+  project asks for it, not before.
 - **Relations learned from traffic**: never. Observed flows are shown
   and proposed; a deployment declares.
 - **Egress `none` for addons**: it failed every addon's image pull, since
@@ -347,7 +347,7 @@ else; the ingress reaches `api` on `http`.
   agent that writes policies gets unordered allows right more easily.
 - **Layers**, as Kubernetes puts AdminNetworkPolicy before NetworkPolicy
   and BaselineAdminNetworkPolicy after it: the operator's ordered rules
-  before the tenants', defaults after them. The denied prefixes and the
+  before the projects', defaults after them. The denied prefixes and the
   default group cover what we need of them. A layer of ordered rules
   before the groups can still come without changing them.
 - **eBPF on every TAP**, with maps of prefixes: a delta is a map update,
@@ -385,12 +385,12 @@ else; the ingress reaches `api` on `http`.
 
 ## Consequences
 
-- A tenant writes no network rule. What a deployment references is
+- A project writes no network rule. What a deployment references is
   what it reaches; a timeout between two services is a missing
   reference, and the plan names it. An agent is told one sentence:
   reference what you call, and the platform admits exactly that.
 - The spec has `uses` and `egress` on services and jobs and `from` on
-  routes; a sandbox's and a tenant's job's create has `reaches` and
+  routes; a sandbox's and a project's job's create has `reaches` and
   `egress`. A deployment that drops a variable drops the rule; a changed
   port number changes it.
 - A workload's rules change with deployments and with a sandbox's
@@ -411,7 +411,7 @@ else; the ingress reaches `api` on `http`.
 ## History
 
 Decided on 2026-10-15 (commit 42717c5) as security groups on the node,
-with egress by name left open. ADR 0034 of 2026-11-06 gave tenants
+with egress by name left open. ADR 0034 of 2026-11-06 gave projects
 security groups of their own on top of them; it was live for one day,
 2026-11-07 (5c76142), and was replaced on 2026-11-08 by reachability
 derived from a deployment's references (a061348, built in a529381),

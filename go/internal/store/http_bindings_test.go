@@ -16,7 +16,7 @@ import (
 // loop pushes again; a create resets it.
 func TestSetHTTPPushed(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	sb := mkSandbox(t, s, "acme")
 	pushed := func() string {
 		t.Helper()

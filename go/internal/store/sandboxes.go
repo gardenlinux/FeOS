@@ -27,7 +27,7 @@ import (
 type Sandbox struct {
 	ID          podid.ID  // = the pod's ID on feosd
 	Incarnation uuid.UUID // the pod label ferun.incarnation
-	Owner       string    // the tenant
+	Owner       string    // the project
 	Image       string    // as the client gave it
 	ImageRef    string    // resolved repo@sha256:..., fixed at the first materialisation
 	VCPUs       int
@@ -84,7 +84,7 @@ type Sandbox struct {
 	PolicyNotBefore time.Time
 
 	// EnvironmentID is the environment the row belongs to (ADR 0035):
-	// an instance's, a sandbox's, a tenant's job's. Fixed at the insert,
+	// an instance's, a sandbox's, a project's job's. Fixed at the insert,
 	// as are Instance and PodTemplate (nil: NULL, a pod without one), but
 	// a template's legacy groups, which DropLegacyGroups drops.
 	EnvironmentID uuid.UUID
@@ -92,7 +92,7 @@ type Sandbox struct {
 	// its pod built from a deployment's template; fixed at the insert.
 	Instance    bool
 	PodTemplate *model.PodTemplate
-	// Reaches is what of its environment a sandbox's or a tenant's job's
+	// Reaches is what of its environment a sandbox's or a project's job's
 	// pod reaches (ADR 0035, revised); nothing for an instance, whose
 	// references are its deployment's. Written by SetSandboxReaches.
 	// Egress is its egress (nil: the internet), fixed at the insert.
@@ -106,9 +106,9 @@ type Sandbox struct {
 	// Address is the pod's IPv6 address as the engine last observed it;
 	// "" when there is none (no pod, or a hibernated one).
 	Address string
-	// TenantJob makes the row a tenant's job's pod (ADR 0018), its ID the
+	// ProjectJob makes the row a project's job's pod (ADR 0018), its ID the
 	// job's; fixed at the insert.
-	TenantJob bool
+	ProjectJob bool
 	// LogLabels are the labels of the pod's container logs (ADR 0026),
 	// sent with its create; fixed at the insert.
 	LogLabels map[string]string
@@ -117,15 +117,15 @@ type Sandbox struct {
 	Workdir string
 }
 
-// IsOwn reports whether the row is a sandbox, the tenant's own (POST
-// /api/v1/sandboxes): neither an environment's instance nor a tenant's
+// IsOwn reports whether the row is a sandbox, the project's own (POST
+// /api/v1/sandboxes): neither an environment's instance nor a project's
 // job's pod, which the sandbox doors treat as absent.
-func (s *Sandbox) IsOwn() bool { return !s.Instance && !s.TenantJob }
+func (s *Sandbox) IsOwn() bool { return !s.Instance && !s.ProjectJob }
 
 // Workload is the workload the row's pod is part of (ADR 0036): an
 // instance's object, by the kind and the object its log labels name
 // (fixed at the insert), with the ID its pods' set carries on the nodes
-// (model.WorkloadGroupID, ADR 0034); a tenant's job or a sandbox by the
+// (model.WorkloadGroupID, ADR 0034); a project's job or a sandbox by the
 // row's ID. kind is "" for a row outside an environment, or an instance
 // whose labels name no object.
 func (s *Sandbox) Workload() (kind, name, set string) {
@@ -144,8 +144,8 @@ func (s *Sandbox) Workload() (kind, name, set string) {
 			return "", "", ""
 		}
 		return kind, name, model.WorkloadGroupID(s.EnvironmentID, kind, name)
-	case s.TenantJob:
-		return "tenant-job", s.ID.String(), model.JobWorkloadGroupID(s.ID.String())
+	case s.ProjectJob:
+		return "project-job", s.ID.String(), model.JobWorkloadGroupID(s.ID.String())
 	default:
 		return "sandbox", s.ID.String(), model.SandboxWorkloadGroupID(s.ID.String())
 	}
@@ -181,7 +181,7 @@ func sandboxColumns(p string) string {
 		"pending_since", "unreachable_since", "run_id", "kube_version", "ssh_version",
 		"created_at", "updated_at", "last_active_at", "paused_at", "policy_failed", "policy_failures",
 		"policy_not_before", "environment_id", "instance", "pod_template", "pin_node", "idle_after_s", "address",
-		"tenant_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir", "disk_gib"}
+		"project_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir", "disk_gib"}
 	if p != "" {
 		for i, c := range cols {
 			cols[i] = p + "." + c
@@ -205,7 +205,7 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 		&pendingSince, &unreachableSince, &s.RunID, &s.KubeVersion, &s.SSHVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastActiveAt, &pausedAt, &s.PolicyFailed, &s.PolicyFailures,
 		&policyNotBefore, &s.EnvironmentID, &s.Instance, &template, &s.PinNode, &s.IdleAfterS, &s.Address,
-		&s.TenantJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir, &s.DiskGiB)
+		&s.ProjectJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir, &s.DiskGiB)
 	if err != nil {
 		return Sandbox{}, err
 	}
@@ -306,12 +306,12 @@ type NewSandbox struct {
 	// "": the first create resolves Image.
 	ImageRef string
 	// EnvironmentID is the environment the row belongs to (the caller
-	// holds the tenant and the environment, and refuses one being
+	// holds the project and the environment, and refuses one being
 	// deleted); required.
 	EnvironmentID uuid.UUID
 	// Instance makes the row an instance of the environment.
 	Instance bool
-	// Reaches and Egress are a sandbox's or a tenant's job's (validated
+	// Reaches and Egress are a sandbox's or a project's job's (validated
 	// by the caller); an instance has neither.
 	Reaches spec.Reaches
 	Egress  *spec.Egress
@@ -321,9 +321,9 @@ type NewSandbox struct {
 	PinNode     string
 	// IdleAfterS: nil the instance's --idle-pause, 0 never, n seconds.
 	IdleAfterS *int
-	// TenantJob makes the row a tenant's job's pod (the caller inserts
+	// ProjectJob makes the row a project's job's pod (the caller inserts
 	// the job under its ID in the same transaction).
-	TenantJob bool
+	ProjectJob bool
 	// LogLabels are the labels of the pod's logs (model.Log*); nil: none.
 	LogLabels map[string]string
 	// MadeBy is the principal that asked for it (ADR 0031); "": ferund.
@@ -355,13 +355,13 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 	}
 	for range 3 {
 		sb, err := scanSandbox(s.q.QueryRow(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, image_ref,
-				environment_id, instance, pod_template, pin_node, idle_after_s, tenant_job, log_labels, made_by,
+				environment_id, instance, pod_template, pin_node, idle_after_s, project_job, log_labels, made_by,
 				reaches, egress, workdir, disk_gib)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17,
 				$18)
 			ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
 			n.ID, n.Owner, n.Image, n.VCPUs, n.MemoryMiB, n.ImageRef, n.EnvironmentID, n.Instance, template, n.PinNode,
-			n.IdleAfterS, n.TenantJob, logLabels, n.MadeBy, reaches, egress, n.Workdir, n.DiskGiB))
+			n.IdleAfterS, n.ProjectJob, logLabels, n.MadeBy, reaches, egress, n.Workdir, n.DiskGiB))
 		if err == nil {
 			return sb, true, s.Notify(ctx, chanSandbox, sb.ID.String())
 		}
@@ -385,7 +385,7 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 const mintAttempts = 8
 
 // CreateMintedSandbox inserts a sandbox under a new short ID
-// (podid.Mint), unique over all tenants: an ID that is taken is drawn
+// (podid.Mint), unique over all projects: an ID that is taken is drawn
 // again. of makes the row of an ID drawn (its ID set to it; a template
 // may name it). It returns the new row; the insert sends ferun_sandbox.
 func (s *Store) CreateMintedSandbox(ctx context.Context, of func(id podid.ID) NewSandbox) (Sandbox, error) {
@@ -429,18 +429,18 @@ func (s *Store) ListSandboxes(ctx context.Context, owner string, envs []uuid.UUI
 		return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+" FROM sandboxes ORDER BY created_at, id"))
 	}
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
-		WHERE owner = $1 AND NOT instance AND NOT tenant_job AND ($2::uuid[] IS NULL OR environment_id = ANY($2))
+		WHERE owner = $1 AND NOT instance AND NOT project_job AND ($2::uuid[] IS NULL OR environment_id = ANY($2))
 		ORDER BY created_at, id`, owner, envs))
 }
 
 // LockSandboxesOfOwner locks up to limit sandboxes of owner, ordered by id:
-// a batch of a tenant's deletion.
+// a batch of a project's deletion.
 func (s *Store) LockSandboxesOfOwner(ctx context.Context, owner string, limit int) ([]Sandbox, error) {
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+" FROM sandboxes WHERE owner = $1 ORDER BY id LIMIT $2 FOR UPDATE",
 		owner, limit))
 }
 
-// CountSandboxesOfOwner counts a tenant's sandboxes.
+// CountSandboxesOfOwner counts a project's sandboxes.
 func (s *Store) CountSandboxesOfOwner(ctx context.Context, owner string) (int64, error) {
 	var n int64
 	err := s.q.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE owner = $1", owner).Scan(&n)
@@ -562,7 +562,7 @@ func (s *Store) TAPConflicts(ctx context.Context, id podid.ID) (map[string]podid
 // Attribution is the sandbox a node's record about a pod belongs to.
 type Attribution struct {
 	SandboxID podid.ID
-	TenantID  string
+	ProjectID string
 }
 
 // AttributePod decides whether a pod-scoped record from node about podID
@@ -575,7 +575,7 @@ func (s *Store) AttributePod(ctx context.Context, podID podid.ID, node string) (
 			s.node = $2 OR s.op_target = $2 OR s.lost_from = $2
 			OR EXISTS (SELECT 1 FROM pod_tombstones t WHERE t.pod_id = $1 AND t.node = $2)
 			OR EXISTS (SELECT 1 FROM issued_certs c WHERE c.pod_id = $1 AND c.node = $2
-				AND c.issued_at > now() - interval '1 day'))`, podID, node).Scan(&a.SandboxID, &a.TenantID)
+				AND c.issued_at > now() - interval '1 day'))`, podID, node).Scan(&a.SandboxID, &a.ProjectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Attribution{}, false, nil
 	}
@@ -615,7 +615,7 @@ func nullableColumn(name string, lifecycle bool, get func(*Sandbox) string) sand
 // sandboxWritable lists the columns UpdateSandbox writes. A lifecycle
 // write is one of client_state, node, op*, incarnation, materialised or
 // the checkpoint columns. id, owner, image, vcpus, memory_mib, disk_gib,
-// environment_id, instance, pod_template, tenant_job, log_labels, workdir
+// environment_id, instance, pod_template, project_job, log_labels, workdir
 // and created_at are never written; gen and updated_at are UpdateSandbox's;
 // http_version, http_pushed, reaches and a template's legacy groups are
 // written by queries of their own (SetHTTPBindings, SetHTTPPushed,
@@ -671,7 +671,7 @@ var sandboxFixed = []sandboxColumn{
 	{name: "environment_id", equal: func(a, b *Sandbox) bool { return a.EnvironmentID == b.EnvironmentID }},
 	{name: "instance", equal: func(a, b *Sandbox) bool { return a.Instance == b.Instance }},
 	{name: "pod_template", equal: func(a, b *Sandbox) bool { return sameTemplate(a.PodTemplate, b.PodTemplate) }},
-	{name: "tenant_job", equal: func(a, b *Sandbox) bool { return a.TenantJob == b.TenantJob }},
+	{name: "project_job", equal: func(a, b *Sandbox) bool { return a.ProjectJob == b.ProjectJob }},
 	{name: "log_labels", equal: func(a, b *Sandbox) bool { return maps.Equal(a.LogLabels, b.LogLabels) }},
 	plainColumn("workdir", false, func(s *Sandbox) string { return s.Workdir }),
 }
@@ -1035,7 +1035,7 @@ func (s *Store) SandboxesInState(ctx context.Context, node string, states []stri
 
 // SetSandboxTLSBindings writes the outbound TLS bindings (ADR 0036) into
 // the template of sandbox id of incarnation inc, a sandbox (no instance,
-// no tenant's job): those of the attached services in it, which its
+// no project's job): those of the attached services in it, which its
 // environment's controller sets before it starts one, so that every
 // later create of its pod carries them. None removes them. A row without
 // a template gets one that keeps its pod as it is (sleep infinity, the
@@ -1055,7 +1055,7 @@ func (s *Store) SetSandboxTLSBindings(ctx context.Context, id podid.ID, inc uuid
 			WHEN $3::jsonb IS NULL THEN pod_template - 'tlsBindings'
 			ELSE jsonb_set(coalesce(pod_template, '{"command": ["sleep", "infinity"]}'::jsonb), '{tlsBindings}', $3::jsonb)
 		END, updated_at = now()
-		WHERE id = $1 AND incarnation = $2 AND NOT instance AND NOT tenant_job`, id, inc, bj)
+		WHERE id = $1 AND incarnation = $2 AND NOT instance AND NOT project_job`, id, inc, bj)
 	if err != nil {
 		return false, fmt.Errorf("TLS bindings of sandbox %s: %w", id, err)
 	}

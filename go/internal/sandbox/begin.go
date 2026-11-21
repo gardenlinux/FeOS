@@ -229,7 +229,7 @@ func (r *runner) beginOn(ctx context.Context, id podid.ID, in OpIntent, target s
 			if len(verdicts) == 0 {
 				verdicts = []store.PlacementCandidate{{Node: target, Feasible: true}}
 			}
-			events = append(events, activity.Event{SandboxID: id, TenantID: row.Owner, Node: target,
+			events = append(events, activity.Event{SandboxID: id, ProjectID: row.Owner, Node: target,
 				Kind: activity.KindPlacement, Name: fmt.Sprintf("placed on %s (%s)", target, in.Kind),
 				Detail: map[string]any{"node": target, "op": string(in.Kind), "trigger": string(in.Trigger),
 					"candidates": verdicts}})
@@ -539,7 +539,7 @@ func recheckFailed(id podid.ID, why string, err error) error {
 // startEvent is the activity row of the op's begin.
 func (h *OpHandle) startEvent(before store.Sandbox) activity.Event {
 	return activity.Event{
-		SandboxID: h.id, TenantID: before.Owner, Node: h.target, Kind: activity.KindLifecycleStart,
+		SandboxID: h.id, ProjectID: before.Owner, Node: h.target, Kind: activity.KindLifecycleStart,
 		SpanID: h.span, ParentSpanID: h.parent, Name: fmt.Sprintf("%s on node %s", h.kind, h.target),
 		Detail: map[string]any{"op": string(h.kind), "trigger": string(h.trigger), "node": h.target,
 			"from": before.ClientState, "takeover": h.takeover},

@@ -58,7 +58,7 @@ var rfc3339Seconds = regexp.MustCompile(`^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$`)
 func TestCreateSandbox(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
+	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken),
 		map[string]any{"environment": "box", "image": "img:1", "vcpus": 4, "memoryMib": 1024, "workdir": "/workspace/app"})
 	expect(t, w, http.StatusCreated, "")
 	var created struct {
@@ -85,7 +85,7 @@ func TestCreateSandbox(t *testing.T) {
 	if pid, err := podid.Parse(id); err != nil || pid.IsLegacy() || pid.String() != id {
 		t.Fatalf("sandboxId %q is not a short ID: %v", id, err)
 	}
-	want := map[string]any{"sandboxId": id, "state": "pending", "image": "img:1", "node": "", "owner": testTenant,
+	want := map[string]any{"sandboxId": id, "state": "pending", "image": "img:1", "node": "", "owner": testProject,
 		"desiredState": "active", "clientState": "pending", "statusDescription": "awaiting first tool call",
 		"checkpointEpoch": "0", "checkpointHead": "", "checkpointAt": "", "vcpus": 4.0, "memoryMib": 1024.0,
 		"workdir": "/workspace/app"}
@@ -104,7 +104,7 @@ func TestCreateSandbox(t *testing.T) {
 	}
 	// The token works at once on a sandbox route.
 	sb, err := ResolveSandboxToken(context.Background(), e.st.Q(), created.Token)
-	if err != nil || sb.ID.String() != id || sb.Owner != testTenant {
+	if err != nil || sb.ID.String() != id || sb.Owner != testProject {
 		t.Fatalf("resolve: %+v %v", sb, err)
 	}
 	toks, err := e.st.ListSandboxTokens(context.Background(), sb.ID)
@@ -121,7 +121,7 @@ func TestCreateSandbox(t *testing.T) {
 	seen := map[string]bool{id: true}
 	for _, body := range []any{map[string]any{"environment": "box"}, map[string]any{"environment": "box", "sandboxId": nil},
 		map[string]any{"environment": "box", "sandboxId": ""}} {
-		w = e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken), body)
+		w = e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken), body)
 		expect(t, w, http.StatusCreated, "")
 		minted := decode[struct {
 			Status struct {
@@ -178,19 +178,19 @@ func TestCreateSandboxRefusals(t *testing.T) {
 		{`[1]`, 400, "request body must be a JSON object: json: cannot unmarshal array into Go value of type map[string]json.RawMessage"},
 		{`{"vcpus":"two"}`, 400, "invalid request body: json: cannot unmarshal string into Go struct field createSandboxRequest.vcpus of type int"},
 	} {
-		w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken), c.body)
+		w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken), c.body)
 		expect(t, w, c.status, errBody(c.msg))
 	}
 }
 
-// The tenant routes see only the tenant's sandboxes: a foreign one is an
-// unknown one; a sandbox's token is no tenant's, and a tenant's token no
+// The project routes see only the project's sandboxes: a foreign one is an
+// unknown one; a sandbox's token is no project's, and a project's token no
 // sandbox's.
-func TestTenantScoping(t *testing.T) {
+func TestProjectScoping(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	id, tok := e.createSandbox()
-	other := e.mintTenantToken(mustTenant(t, e, "other"))
+	other := e.mintProjectToken(mustProject(t, e, "other"))
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/api/v1/sandboxes/" + id},
 		{"DELETE", "/api/v1/sandboxes/" + id},
@@ -204,17 +204,17 @@ func TestTenantScoping(t *testing.T) {
 		w := e.do(c.method, c.path, bearerOf(other), nil)
 		expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+id))
 		w = e.do(c.method, c.path, bearerOf(tok), nil)
-		expect(t, w, http.StatusUnauthorized, errBody("unknown tenant token"))
+		expect(t, w, http.StatusUnauthorized, errBody("unknown project token"))
 	}
-	w := e.do("GET", "/api/v1/sandboxes/sb-1", bearerOf(e.tenantToken), nil)
+	w := e.do("GET", "/api/v1/sandboxes/sb-1", bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusBadRequest, errBody(apierr.MsgSandboxID))
 	w = e.do("GET", "/api/v1/sandboxes/"+podid.Mint().String(), "Basic eDp5", nil)
-	expect(t, w, http.StatusUnauthorized, errBody("tenant bearer required"))
+	expect(t, w, http.StatusUnauthorized, errBody("project bearer required"))
 
-	// The list holds only the tenant's.
+	// The list holds only the project's.
 	w = e.do("GET", "/api/v1/sandboxes", bearerOf(other), nil)
 	expect(t, w, http.StatusOK, `{"sandboxes":[]}`+"\n")
-	w = e.do("GET", "/api/v1/sandboxes", bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes", bearerOf(e.projectToken), nil)
 	list := decode[struct {
 		Sandboxes []map[string]any `json:"sandboxes"`
 	}](t, w)
@@ -231,7 +231,7 @@ func TestTenantScoping(t *testing.T) {
 	}{
 		{"", 401, "sandbox token required"},
 		{basicOf("a", "b"), 401, "sandbox token required"},
-		{bearerOf(e.tenantToken), 404, "no such sandbox"},
+		{bearerOf(e.projectToken), 404, "no such sandbox"},
 		{bearerOf(tok2), 404, "no such sandbox"},
 		{bearerOf("nope"), 404, "no such sandbox"},
 	} {
@@ -248,7 +248,7 @@ func TestSandboxTokens(t *testing.T) {
 	e := newEnv(t, envOptions{})
 	id, first := e.createSandbox()
 	id2, other := e.createSandbox()
-	w := e.do("POST", "/api/v1/sandboxes/"+id+"/tokens", bearerOf(e.tenantToken), map[string]any{"label": "fecode-backend"})
+	w := e.do("POST", "/api/v1/sandboxes/"+id+"/tokens", bearerOf(e.projectToken), map[string]any{"label": "fecode-backend"})
 	expect(t, w, http.StatusCreated, "")
 	if got := keysInOrder(t, w.Body.Bytes()); strings.Join(got, ",") != "token,hashPrefix,createdAt" {
 		t.Fatalf("keys %v", got)
@@ -258,7 +258,7 @@ func TestSandboxTokens(t *testing.T) {
 		!rfc3339Seconds.MatchString(minted.CreatedAt) {
 		t.Fatalf("minted %+v", minted)
 	}
-	w = e.do("GET", "/api/v1/sandboxes/"+id+"/tokens", bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes/"+id+"/tokens", bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 	list := decode[struct {
 		Tokens []map[string]any `json:"tokens"`
@@ -275,7 +275,7 @@ func TestSandboxTokens(t *testing.T) {
 	}
 	// Used once: lastUsedAt appears.
 	e.do("GET", "/api/v1/sandboxes/"+id+"/processes", bearerOf(first), nil)
-	w = e.do("GET", "/api/v1/sandboxes/"+id+"/tokens", bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes/"+id+"/tokens", bearerOf(e.projectToken), nil)
 	list = decode[struct {
 		Tokens []map[string]any `json:"tokens"`
 	}](t, w)
@@ -283,11 +283,11 @@ func TestSandboxTokens(t *testing.T) {
 		t.Fatalf("lastUsedAt %q", s)
 	}
 
-	w = e.do("DELETE", "/api/v1/sandboxes/"+id+"/tokens/"+store.HashToken(other), bearerOf(e.tenantToken), nil)
+	w = e.do("DELETE", "/api/v1/sandboxes/"+id+"/tokens/"+store.HashToken(other), bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusNotFound, errBody("unknown token"))
-	w = e.do("DELETE", "/api/v1/sandboxes/"+id+"/tokens/"+store.HashToken(first), bearerOf(e.tenantToken), nil)
+	w = e.do("DELETE", "/api/v1/sandboxes/"+id+"/tokens/"+store.HashToken(first), bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, `{"revoked":true}`+"\n")
-	w = e.do("DELETE", "/api/v1/sandboxes/"+id+"/tokens/"+store.HashToken(first), bearerOf(e.tenantToken), nil)
+	w = e.do("DELETE", "/api/v1/sandboxes/"+id+"/tokens/"+store.HashToken(first), bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, `{"revoked":false}`+"\n")
 	// The revoked token no longer reaches the sandbox; the other still does.
 	w = e.do("GET", "/api/v1/sandboxes/"+id+"/processes", bearerOf(first), nil)
@@ -295,7 +295,7 @@ func TestSandboxTokens(t *testing.T) {
 	if _, err := ResolveSandboxToken(context.Background(), e.st.Q(), other); err != nil {
 		t.Fatal(err)
 	}
-	w = e.do("POST", "/api/v1/sandboxes/"+podid.Mint().String()+"/tokens", bearerOf(e.tenantToken), nil)
+	w = e.do("POST", "/api/v1/sandboxes/"+podid.Mint().String()+"/tokens", bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusNotFound, "")
 	_ = id2
 }
@@ -335,7 +335,7 @@ func TestPauseResume(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	id, _ := e.createSandbox()
-	w := e.do("POST", "/api/v1/sandboxes/"+id+"/pause", bearerOf(e.tenantToken), nil)
+	w := e.do("POST", "/api/v1/sandboxes/"+id+"/pause", bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 	if st := decode[sandboxStatus](t, w); st.ClientState != "pending" || st.SandboxID != id {
 		t.Fatalf("pause answer %+v", st)
@@ -357,7 +357,7 @@ func TestPauseResume(t *testing.T) {
 		e.fake.mu.Lock()
 		e.fake.pauseErr = c.err
 		e.fake.mu.Unlock()
-		w := e.do("POST", "/api/v1/sandboxes/"+id+"/pause", bearerOf(e.tenantToken), nil)
+		w := e.do("POST", "/api/v1/sandboxes/"+id+"/pause", bearerOf(e.projectToken), nil)
 		expect(t, w, c.status, c.body)
 	}
 	for _, c := range []struct {
@@ -376,7 +376,7 @@ func TestPauseResume(t *testing.T) {
 		e.fake.mu.Lock()
 		e.fake.resumeErr = c.err
 		e.fake.mu.Unlock()
-		w := e.do("POST", "/api/v1/sandboxes/"+id+"/resume", bearerOf(e.tenantToken), nil)
+		w := e.do("POST", "/api/v1/sandboxes/"+id+"/resume", bearerOf(e.projectToken), nil)
 		expect(t, w, c.status, c.body)
 	}
 	_ = stopping
@@ -434,7 +434,7 @@ func TestToolRouteErrors(t *testing.T) {
 func TestListTools(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	w := e.do("GET", "/api/v1/tools", bearerOf(e.tenantToken), nil)
+	w := e.do("GET", "/api/v1/tools", bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 	out := decode[struct {
 		Tools []struct {
@@ -462,15 +462,15 @@ func TestDeleteRecreate(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{realEngine: true})
 	id, tok := e.createSandbox()
-	w := e.do("DELETE", "/api/v1/sandboxes/"+id, bearerOf(e.tenantToken), nil)
+	w := e.do("DELETE", "/api/v1/sandboxes/"+id, bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 	st := decode[sandboxStatus](t, w)
 	if st.DesiredState != "deleted" || st.ClientState != "pending" || st.State != "pending" || st.SandboxID != id {
 		t.Fatalf("delete answer %+v", st)
 	}
-	w = e.do("GET", "/api/v1/sandboxes/"+id, bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes/"+id, bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+id))
-	w = e.do("DELETE", "/api/v1/sandboxes/"+id, bearerOf(e.tenantToken), nil)
+	w = e.do("DELETE", "/api/v1/sandboxes/"+id, bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+id))
 	if _, err := ResolveSandboxToken(context.Background(), e.st.Q(), tok); !errors.Is(err, model.ErrUnknownToken) {
 		t.Fatalf("old token: %v", err)
@@ -501,7 +501,7 @@ func TestDeleteRecreate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	w = e.do("DELETE", "/api/v1/sandboxes/"+again, bearerOf(e.tenantToken), nil)
+	w = e.do("DELETE", "/api/v1/sandboxes/"+again, bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 	st = decode[sandboxStatus](t, w)
 	if st.ClientState != "absent" || st.State != "absent" || st.Node != "n1" || st.DesiredState != "deleted" {
@@ -517,7 +517,7 @@ func TestLegacySandboxID(t *testing.T) {
 	e := newEnv(t, envOptions{})
 	ctx := context.Background()
 	legacy := podid.ID("0199f0a2-7b1c-7d3e-8f00-1234567890ab")
-	if _, created, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: legacy, Owner: testTenant, Image: "img",
+	if _, created, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: legacy, Owner: testProject, Image: "img",
 		VCPUs: 1, MemoryMiB: 512, EnvironmentID: e.box}); err != nil || !created {
 		t.Fatalf("legacy row: %v %v", created, err)
 	}
@@ -531,20 +531,20 @@ func TestLegacySandboxID(t *testing.T) {
 	short, _ := e.createSandbox()
 
 	for _, path := range []string{legacy.String(), strings.ToUpper(legacy.String())} {
-		w := e.do("GET", "/api/v1/sandboxes/"+path, bearerOf(e.tenantToken), nil)
+		w := e.do("GET", "/api/v1/sandboxes/"+path, bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusOK, "")
 		if st := decode[sandboxStatus](t, w); st.SandboxID != legacy.String() {
 			t.Fatalf("GET %s: %+v", path, st)
 		}
 	}
-	w := e.do("GET", "/api/v1/sandboxes", bearerOf(e.tenantToken), nil)
+	w := e.do("GET", "/api/v1/sandboxes", bearerOf(e.projectToken), nil)
 	list := decode[struct {
 		Sandboxes []map[string]any `json:"sandboxes"`
 	}](t, w)
 	if len(list.Sandboxes) != 2 || list.Sandboxes[0]["sandboxId"] != legacy.String() || list.Sandboxes[1]["sandboxId"] != short {
 		t.Fatalf("list %+v", list)
 	}
-	w = e.do("GET", "/api/v1/sandboxes/"+legacy.String()+"/tokens", bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes/"+legacy.String()+"/tokens", bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 
 	// Its token is its sandbox's, whatever the case of the path's ID; the
@@ -562,9 +562,9 @@ func TestLegacySandboxID(t *testing.T) {
 	w = e.do("POST", "/api/v1/sandboxes/"+short+"/exec", bearerOf(tok), map[string]any{"command": "true"})
 	expect(t, w, http.StatusNotFound, errBody("no such sandbox"))
 
-	w = e.do("DELETE", "/api/v1/sandboxes/"+legacy.String(), bearerOf(e.tenantToken), nil)
+	w = e.do("DELETE", "/api/v1/sandboxes/"+legacy.String(), bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
-	w = e.do("GET", "/api/v1/sandboxes/"+legacy.String(), bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes/"+legacy.String(), bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+legacy.String()))
 }
 
@@ -573,11 +573,11 @@ func TestSandboxIDFormats(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	for _, bad := range []string{"sb-1", "ABCDEFGHJKM", "0bcdefghjkm", "abcdefghjkl", "0199f0a27b1c7d3e8f001234567890ab"} {
-		w := e.do("GET", "/api/v1/sandboxes/"+bad, bearerOf(e.tenantToken), nil)
+		w := e.do("GET", "/api/v1/sandboxes/"+bad, bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusBadRequest, errBody(apierr.MsgSandboxID))
 	}
 	for _, unknown := range []string{"abcdefghjkm", "0199f0a2-7b1c-7d3e-8f00-1234567890ab"} {
-		w := e.do("GET", "/api/v1/sandboxes/"+unknown, bearerOf(e.tenantToken), nil)
+		w := e.do("GET", "/api/v1/sandboxes/"+unknown, bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+unknown))
 	}
 }

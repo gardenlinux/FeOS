@@ -80,7 +80,7 @@ func newFakeAPI(t *testing.T) (*fakeAPI, string) {
 func (r *rig) httpPreflight(body map[string]any) HTTPPreflightResult {
 	r.t.Helper()
 	b, _ := json.Marshal(body)
-	code, raw := r.tenantCall(http.MethodPost, "/api/v1/http/preflight", string(b))
+	code, raw := r.projectCall(http.MethodPost, "/api/v1/http/preflight", string(b))
 	if code != http.StatusOK {
 		r.t.Fatalf("preflight: %d %s", code, raw)
 	}
@@ -185,7 +185,7 @@ func TestHTTPPreflight(t *testing.T) {
 	if res.OK || res.Error.Code != codeInsecureUpstream || len(res.Addresses) != 0 {
 		t.Fatalf("plain http: %+v %+v", res, res.Error)
 	}
-	if code, _ := r.tenantCall(http.MethodPost, "/api/v1/http/preflight", "[1]"); code != http.StatusBadRequest {
+	if code, _ := r.projectCall(http.MethodPost, "/api/v1/http/preflight", "[1]"); code != http.StatusBadRequest {
 		t.Fatalf("a body that is no object: %d", code)
 	}
 }
@@ -215,12 +215,12 @@ func TestHTTPPreflightDestinationRule(t *testing.T) {
 	}
 }
 
-// A tenant has at most maxTenantPreflights preflights and binding checks in
-// flight on an instance; beyond, 429. Another tenant's are its own.
-func TestHTTPPreflightPerTenant(t *testing.T) {
+// A project has at most maxProjectPreflights preflights and binding checks in
+// flight on an instance; beyond, 429. Another project's are its own.
+func TestHTTPPreflightPerProject(t *testing.T) {
 	r := newRig(t)
 	var releases []func()
-	for range maxTenantPreflights {
+	for range maxProjectPreflights {
 		release, err := r.svc.takePreflight("acme")
 		if err != nil {
 			t.Fatal(err)
@@ -229,7 +229,7 @@ func TestHTTPPreflightPerTenant(t *testing.T) {
 	}
 	body := `{"binding": {"name": "erp", "upstream": "https://api.erp.example",
 		"credential": {"kind": "headers", "headers": {"X-API-Key": "k"}}}}`
-	code, raw := r.tenantCall(http.MethodPost, "/api/v1/http/preflight", body)
+	code, raw := r.projectCall(http.MethodPost, "/api/v1/http/preflight", body)
 	if msg, c := codeOf(raw); code != http.StatusTooManyRequests || c != codeTooManyPreflights {
 		t.Fatalf("over the limit: %d %s %s", code, c, msg)
 	}
@@ -238,7 +238,7 @@ func TestHTTPPreflightPerTenant(t *testing.T) {
 	}
 	other, err := r.svc.takePreflight("other")
 	if err != nil {
-		t.Fatalf("another tenant: %v", err)
+		t.Fatalf("another project: %v", err)
 	}
 	other()
 	releases[0]()
@@ -249,6 +249,6 @@ func TestHTTPPreflightPerTenant(t *testing.T) {
 	again()
 	releases[1]()
 	if n := len(r.svc.preflights); n != 0 {
-		t.Fatalf("%d tenants in flight after all ended", n)
+		t.Fatalf("%d projects in flight after all ended", n)
 	}
 }

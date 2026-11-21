@@ -394,8 +394,8 @@ type insert struct {
 }
 
 // insertInstance inserts an instance row and the controller's row of it
-// (and a job's run) in one fenced transaction, which holds the tenant FOR
-// SHARE and refuses a deleting tenant or environment, then queues its
+// (and a job's run) in one fenced transaction, which holds the project FOR
+// SHARE and refuses a deleting project or environment, then queues its
 // Ensure. The image is pinned first (outside the transaction): every row
 // gets the digest its image has now.
 func (c *Controller) insertInstance(ctx context.Context, v *view, in insert) (podid.ID, error) {
@@ -427,12 +427,12 @@ func (c *Controller) insertFrom(ctx context.Context, v *view, in insert, leaderS
 	tmpl.SecurityGroups = slices.Clone(p.template.SecurityGroups)
 	idle := p.idle
 	write := func(tx *store.Store) error {
-		t, err := tx.LockTenant(ctx, v.env.Owner, store.ForShare)
+		t, err := tx.LockProject(ctx, v.env.Owner, store.ForShare)
 		if err != nil {
 			return err
 		}
 		if t.Deleting() {
-			return errTenantDeleting
+			return errProjectDeleting
 		}
 		lock := store.ForShare
 		if in.once {

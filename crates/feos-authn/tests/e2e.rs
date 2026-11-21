@@ -221,7 +221,7 @@ async fn the_jailed_binary_signs_for_the_pod_over_vsock() {
     let pid = proc.0.id();
     feosd.hello(&[], None);
     let pki = IdentityPki::new();
-    let spiffe = "spiffe://run.example/tenant/acme/env/prod/service/api";
+    let spiffe = "spiffe://run.example/project/acme/env/prod/service/api";
     feosd.answer_identity(&pki, spiffe, 2700);
     feosd.ready("");
     assert_eq!(status_field(pid, "Seccomp"), "2");

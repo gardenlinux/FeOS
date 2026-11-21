@@ -16,7 +16,7 @@ import (
 
 func intPtr(v int) *int { return &v }
 
-// A tenant's limits (ADR 0031): an environment's create and clone past
+// A project's limits (ADR 0031): an environment's create and clone past
 // the number of environments are 422 quota_exceeded, also when they come
 // at once; a deployment that brings the vCPUs past the limit has an error
 // finding in its plan and is not applied, nor cloned.
@@ -24,19 +24,19 @@ func TestQuotaEnvironments(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
-	if _, err := h.st.SetTenantLimits(ctx, tenantA, store.TenantLimits{Environments: intPtr(2), VCPUs: intPtr(4)}); err != nil {
+	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(2), VCPUs: intPtr(4)}); err != nil {
 		t.Fatal(err)
 	}
 	a := h.create("a", nil)
 	h.create("b", nil)
-	_, _, err := h.svc.CreateEnv(ctx, tenantA, CreateEnvRequest{Name: "c"})
-	wantStatus(t, err, http.StatusUnprocessableEntity, "the tenant's limit of environments is 2, 2 are in use")
+	_, _, err := h.svc.CreateEnv(ctx, projectA, CreateEnvRequest{Name: "c"})
+	wantStatus(t, err, http.StatusUnprocessableEntity, "the project's limit of environments is 2, 2 are in use")
 	// The same create again asks for nothing.
-	if _, created, err := h.svc.CreateEnv(ctx, tenantA, CreateEnvRequest{Name: "a", ID: a.ID}); err != nil || created {
+	if _, created, err := h.svc.CreateEnv(ctx, projectA, CreateEnvRequest{Name: "a", ID: a.ID}); err != nil || created {
 		t.Fatalf("again: %v %v", created, err)
 	}
-	// Another tenant's are its own.
-	if _, _, err := h.svc.CreateEnv(ctx, tenantB, CreateEnvRequest{Name: "c"}); err != nil {
+	// Another project's are its own.
+	if _, _, err := h.svc.CreateEnv(ctx, projectB, CreateEnvRequest{Name: "c"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -44,38 +44,38 @@ func TestQuotaEnvironments(t *testing.T) {
 		return fmt.Sprintf(`{"services": {"web": {"image": "nginx:1", "replicas": %d}}}`, n)
 	}
 	first := h.apply("a", replicas(3), 0)
-	plan, err := h.svc.Plan(ctx, tenantA, "b", PlanRequest{Spec: json.RawMessage(replicas(2))})
+	plan, err := h.svc.Plan(ctx, projectA, "b", PlanRequest{Spec: json.RawMessage(replicas(2))})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Valid || !hasFinding(plan.Findings, spec.SeverityError, "", "brings the tenant to 5 of its limit 4") {
+	if plan.Valid || !hasFinding(plan.Findings, spec.SeverityError, "", "brings the project to 5 of its limit 4") {
 		t.Fatalf("plan %+v", plan)
 	}
-	_, err = h.svc.Apply(ctx, tenantA, "b", ApplyRequest{Spec: json.RawMessage(replicas(2))})
+	_, err = h.svc.Apply(ctx, projectA, "b", ApplyRequest{Spec: json.RawMessage(replicas(2))})
 	wantStatus(t, err, http.StatusUnprocessableEntity, "")
 	h.apply("b", replicas(1), 0)
 	// Lowering what one asks for passes after the limit went down.
-	if _, err := h.st.SetTenantLimits(ctx, tenantA, store.TenantLimits{Environments: intPtr(2), VCPUs: intPtr(1)}); err != nil {
+	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(2), VCPUs: intPtr(1)}); err != nil {
 		t.Fatal(err)
 	}
 	h.apply("a", replicas(2), first.Number)
 
-	if _, err := h.st.SetTenantLimits(ctx, tenantA, store.TenantLimits{Environments: intPtr(2)}); err != nil {
+	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(2)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.svc.Clone(ctx, tenantA, "a", CloneRequest{Name: "a2"})
-	wantStatus(t, err, http.StatusUnprocessableEntity, "the tenant's limit of environments is 2")
-	if _, err := h.st.SetTenantLimits(ctx, tenantA, store.TenantLimits{Environments: intPtr(9), VCPUs: intPtr(4)}); err != nil {
+	_, err = h.svc.Clone(ctx, projectA, "a", CloneRequest{Name: "a2"})
+	wantStatus(t, err, http.StatusUnprocessableEntity, "the project's limit of environments is 2")
+	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(9), VCPUs: intPtr(4)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.svc.Clone(ctx, tenantA, "a", CloneRequest{Name: "a2"})
+	_, err = h.svc.Clone(ctx, projectA, "a", CloneRequest{Name: "a2"})
 	if got, _ := statusOf(err); got != http.StatusUnprocessableEntity ||
-		!hasFindingOf(err, "brings the tenant to 5 of its limit 4") {
+		!hasFindingOf(err, "brings the project to 5 of its limit 4") {
 		t.Fatalf("clone: %s", describe(err))
 	}
 
 	// Concurrent creates pass the limit no more than one by one.
-	if _, err := h.st.SetTenantLimits(ctx, tenantA, store.TenantLimits{Environments: intPtr(4)}); err != nil {
+	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(4)}); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -84,7 +84,7 @@ func TestQuotaEnvironments(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, errs[i] = h.svc.CreateEnv(ctx, tenantA, CreateEnvRequest{Name: fmt.Sprintf("p%d", i)})
+			_, _, errs[i] = h.svc.CreateEnv(ctx, projectA, CreateEnvRequest{Name: fmt.Sprintf("p%d", i)})
 		}()
 	}
 	wg.Wait()
@@ -93,7 +93,7 @@ func TestQuotaEnvironments(t *testing.T) {
 		if err == nil {
 			made++
 		} else {
-			wantStatus(t, err, http.StatusUnprocessableEntity, "the tenant's limit of environments is 4")
+			wantStatus(t, err, http.StatusUnprocessableEntity, "the project's limit of environments is 4")
 		}
 	}
 	if made != 2 {

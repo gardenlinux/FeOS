@@ -33,7 +33,7 @@ should scale to zero.
 Both products run on one unit: the **pod**, a Firecracker microVM that runs
 `feos-guest` and one or more containers in it.
 
-- The microVM is the boundary between tenants; the container is the boundary
+- The microVM is the boundary between projects; the container is the boundary
   around the workload inside it.
 - A pod can be suspended to a snapshot and resumed: in place, and later on
   another node.
@@ -52,7 +52,7 @@ Both products run on one unit: the **pod**, a Firecracker microVM that runs
                                   │
   ┌───────────────────────────────┴───────────────────────────────┐
   │ control plane: FeRun, ferund in replicas                      │
-  │ tenants, registry, placement, idle policies, front doors      │
+  │ projects, registry, placement, idle policies, front doors      │
   └───────────────────────────────┬───────────────────────────────┘
                                   │ feos.* APIs over mTLS
                                   │ (the node connects out)
@@ -83,7 +83,7 @@ process beside each pod that holds its identity and credentials
 ### The control plane
 
 One program, `ferund`, FeRun's daemon, in replicas over one database,
-holds what is more than one node's business: tenants and their tokens,
+holds what is more than one node's business: projects and their tokens,
 the registry of sandboxes and services, placement on nodes, the policies
 that pause, hibernate and scale to zero, and the front doors: a REST API,
 MCP for agents, and HTTP to the ports of pods. It reaches nodes only over
@@ -98,7 +98,7 @@ what `ferund` streams to it, so that no application byte crosses
 
 ### Who reaches whom
 
-A tenant writes no firewall rule. What a deployment references (a
+A project writes no firewall rule. What a deployment references (a
 variable from a service's port or an addon's output, a URL, a route,
 `uses`) opens the port it names, and nothing else reaches a pod, not
 even from its own environment; a service chooses its egress (the
@@ -152,8 +152,8 @@ The guest's API is internal between `feosd` and `feos-guest`.
 | `diskd` | the disk daemon (ADR 0011): ublk devices over sealed layers, a local cache and S3. Every pod has a disk from it, and hibernates into its object store: `HibernatePod` and `RestorePod`, here or on another node, with the pod's memory served lazily where the snapshot fits the node, and a boot on its disk where it does not (ADR 0008). Packaged beside `feosd`; no baked images, no sweep yet |
 | packages | `.deb` packages of `feosd`, `feosctl`, `diskd`, Firecracker and the guest, in a signed apt repository at apt.fecode.dev; `ferund`'s is published beside them |
 | control plane connections | `feosd --control-plane` (ADR 0015): joins with a one-time token, keeps its key and certificate and renews it, reports telemetry and its events (pods, start, stop) on the uplink, and serves its API on a node connection to every instance. The event buffer is in memory, not yet on disk; pods' credentials are not built |
-| control plane | `ferund` (ADR 0015), in Go: tenants and their tokens, sandboxes on the nodes with placement, ops that survive their callers, pause, hibernation and restore elsewhere, drains, the agent's tools over REST and MCP, ports and file watches, Kubernetes and SSH bindings (off until feosd delivers them), the fleet of nodes with joins, certificates, telemetry and events, human sign-in with OIDC and the management UI; replicas over PostgreSQL with a leader. It runs on Kubernetes, on k3s or on a Gardener shoot, where `feos-k8s` joins new nodes and drains replaced ones in FeRun (ADR 0020, [deploy/](../deploy/)). Beside it `ferun-ingress` (ADR 0021): instances that join with a token, take a /96 of the pods' mesh, keep the table `ferund` streams to them through an outage, and proxy public environments' hosts over HTTPS to the pods, gated by the nodes' security groups and the mesh's handshakes, holding idle services awake and waking sleeping ones; two on the Gardener shoot behind a balancer of their own |
-| CaaS | partly built in `ferund` (ADR 0018): environments with services, jobs, addons (`postgres`, `valkey`, `nats` on volumes), routes and sealed secrets; numbered deployments with a plan, compare-and-swap, revert and tags; image services rolled with a surge of one and scaled to zero, attached services in sandboxes of their environment (ADR 0035); names from the nodes' name tables, reachability from the deployment's references with egress by domain and block and routes' client blocks (ADR 0034), incidents, HTTP through `ferund`'s route door with route tokens, and for environments their tenant made public (`PUT …/public`) through `ferun-ingress` at a default host under the apps zone, with an operator's wildcard certificate; the REST API and a read-only view in the UI. Not built: volumes for services, MCP tools and a CLI for environments, data on a clone, addon backups, domains and their ACME certificates, the ingress's traffic records, L4 routes |
+| control plane | `ferund` (ADR 0015), in Go: projects and their tokens, sandboxes on the nodes with placement, ops that survive their callers, pause, hibernation and restore elsewhere, drains, the agent's tools over REST and MCP, ports and file watches, Kubernetes and SSH bindings (off until feosd delivers them), the fleet of nodes with joins, certificates, telemetry and events, human sign-in with OIDC and the management UI; replicas over PostgreSQL with a leader. It runs on Kubernetes, on k3s or on a Gardener shoot, where `feos-k8s` joins new nodes and drains replaced ones in FeRun (ADR 0020, [deploy/](../deploy/)). Beside it `ferun-ingress` (ADR 0021): instances that join with a token, take a /96 of the pods' mesh, keep the table `ferund` streams to them through an outage, and proxy public environments' hosts over HTTPS to the pods, gated by the nodes' security groups and the mesh's handshakes, holding idle services awake and waking sleeping ones; two on the Gardener shoot behind a balancer of their own |
+| CaaS | partly built in `ferund` (ADR 0018): environments with services, jobs, addons (`postgres`, `valkey`, `nats` on volumes), routes and sealed secrets; numbered deployments with a plan, compare-and-swap, revert and tags; image services rolled with a surge of one and scaled to zero, attached services in sandboxes of their environment (ADR 0035); names from the nodes' name tables, reachability from the deployment's references with egress by domain and block and routes' client blocks (ADR 0034), incidents, HTTP through `ferund`'s route door with route tokens, and for environments their project made public (`PUT …/public`) through `ferun-ingress` at a default host under the apps zone, with an operator's wildcard certificate; the REST API and a read-only view in the UI. Not built: volumes for services, MCP tools and a CLI for environments, data on a clone, addon backups, domains and their ACME certificates, the ingress's traffic records, L4 routes |
 
 ## Glossary
 
@@ -166,7 +166,7 @@ The guest's API is internal between `feosd` and `feos-guest`.
 - **Service:** the control plane's object for a customer's workload in
   CaaS; it runs as one or more pods.
 - **Host / guest:** the node's side of a pod and the inside of its microVM.
-- **Tenant:** whoever owns sandboxes or services; the unit of isolation and
+- **Project:** whoever owns sandboxes or services; the unit of isolation and
   of authorization.
 
 ## Further reading

@@ -29,7 +29,7 @@ import (
 )
 
 // The admin class with Basic: neither way configured is a 503; a wrong
-// password names the user (and the paste mistake); a tenant's bearer is no
+// password names the user (and the paste mistake); a project's bearer is no
 // admin's.
 func TestAdminBasic(t *testing.T) {
 	t.Parallel()
@@ -40,33 +40,33 @@ func TestAdminBasic(t *testing.T) {
 		msg    string
 	}{
 		{"", 401, "admin sign-in required"},
-		{bearerOf(e.tenantToken), 401, "admin sign-in required"},
+		{bearerOf(e.projectToken), 401, "admin sign-in required"},
 		{basicOf(testAdmin, "wrong"), 401, `admin basic auth failed for user "admin"`},
 		{basicOf("nobody", testPassword), 401, `admin basic auth failed for user "nobody"`},
 		{basicOf(testAdmin, testPassword+",dev:other"), 401, `admin basic auth failed for user "admin" — the password looks ` +
 			`like the rest of the --admin-users list; that value holds comma-separated user:password pairs, pass exactly one to curl -u`},
 		{"Basic !!!", 401, "admin basic auth failed: the Authorization header is not Basic <base64 user:password>"},
 	} {
-		w := e.do("GET", "/api/v1/admin/tenants", c.authz, nil)
+		w := e.do("GET", "/api/v1/admin/projects", c.authz, nil)
 		expect(t, w, c.status, errBody(c.msg))
 		if got := w.Header().Get("WWW-Authenticate"); got != `Basic realm="ferun"` {
 			t.Fatalf("WWW-Authenticate %q", got)
 		}
 	}
-	expect(t, e.do("GET", "/api/v1/admin/tenants", adminAuth(), nil), http.StatusOK, "")
+	expect(t, e.do("GET", "/api/v1/admin/projects", adminAuth(), nil), http.StatusOK, "")
 
 	none := newEnv(t, envOptions{noAdminUsers: true})
-	w := none.do("GET", "/api/v1/admin/tenants", adminAuth(), nil)
+	w := none.do("GET", "/api/v1/admin/projects", adminAuth(), nil)
 	expect(t, w, http.StatusServiceUnavailable, errBody("no admin sign-in configured (--oidc-issuer or --admin-users)"))
 }
 
-// Tenants: the list shows hashes, never tokens; a create shows its token
-// once; the refusals' texts; a deleting tenant's creates and mints are 409
+// Projects: the list shows hashes, never tokens; a create shows its token
+// once; the refusals' texts; a deleting project's creates and mints are 409
 // and its tokens stop resolving at once.
-func TestTenants(t *testing.T) {
+func TestProjects(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	w := e.do("POST", "/api/v1/admin/tenants", adminAuth(), map[string]any{"name": "beta"})
+	w := e.do("POST", "/api/v1/admin/projects", adminAuth(), map[string]any{"name": "beta"})
 	expect(t, w, http.StatusCreated, "")
 	if got := keysInOrder(t, w.Body.Bytes()); strings.Join(got, ",") != "name,token,createdAt,sandboxCount" {
 		t.Fatalf("keys %v", got)
@@ -78,7 +78,7 @@ func TestTenants(t *testing.T) {
 	if created.Name != "beta" || len(created.Token) != 64 || !rfc3339Seconds.MatchString(created.CreatedAt) {
 		t.Fatalf("created %+v", created)
 	}
-	// The token works as the tenant's.
+	// The token works as the project's.
 	expect(t, e.do("GET", "/api/v1/sandboxes", bearerOf(created.Token), nil), http.StatusOK, `{"sandboxes":[]}`+"\n")
 
 	for _, c := range []struct {
@@ -86,36 +86,36 @@ func TestTenants(t *testing.T) {
 		status int
 		msg    string
 	}{
-		{"Bad_Name", 400, "tenant name must match ^[a-z0-9][a-z0-9.-]{1,62}$"},
-		{"x", 400, "tenant name must match ^[a-z0-9][a-z0-9.-]{1,62}$"},
-		{"beta", 409, "tenant beta already exists"},
+		{"Bad_Name", 400, "project name must match ^[a-z0-9][a-z0-9.-]{1,62}$"},
+		{"x", 400, "project name must match ^[a-z0-9][a-z0-9.-]{1,62}$"},
+		{"beta", 409, "project beta already exists"},
 	} {
-		w := e.do("POST", "/api/v1/admin/tenants", adminAuth(), map[string]any{"name": c.name})
+		w := e.do("POST", "/api/v1/admin/projects", adminAuth(), map[string]any{"name": c.name})
 		expect(t, w, c.status, errBody(c.msg))
 	}
 
 	e.createSandbox()
-	w = e.do("GET", "/api/v1/admin/tenants", adminAuth(), nil)
+	w = e.do("GET", "/api/v1/admin/projects", adminAuth(), nil)
 	expect(t, w, http.StatusOK, "")
 	list := decode[struct {
-		Tenants []struct {
+		Projects []struct {
 			Name             string            `json:"name"`
 			CreatedAt        string            `json:"createdAt"`
 			SandboxCount     int               `json:"sandboxCount"`
 			EnvironmentCount *int              `json:"environmentCount"`
 			Tokens           []json.RawMessage `json:"tokens"`
-		} `json:"tenants"`
+		} `json:"projects"`
 	}](t, w)
-	if len(list.Tenants) != 2 || list.Tenants[0].Name != testTenant || list.Tenants[1].Name != "beta" ||
-		list.Tenants[0].SandboxCount != 1 || len(list.Tenants[1].Tokens) != 1 ||
-		list.Tenants[0].EnvironmentCount == nil || *list.Tenants[0].EnvironmentCount != 1 {
-		t.Fatalf("tenants %+v", list.Tenants)
+	if len(list.Projects) != 2 || list.Projects[0].Name != testProject || list.Projects[1].Name != "beta" ||
+		list.Projects[0].SandboxCount != 1 || len(list.Projects[1].Tokens) != 1 ||
+		list.Projects[0].EnvironmentCount == nil || *list.Projects[0].EnvironmentCount != 1 {
+		t.Fatalf("projects %+v", list.Projects)
 	}
 	if strings.Contains(w.Body.String(), created.Token) {
 		t.Fatal("the list shows a token")
 	}
 	var tok map[string]any
-	if err := json.Unmarshal(list.Tenants[1].Tokens[0], &tok); err != nil {
+	if err := json.Unmarshal(list.Projects[1].Tokens[0], &tok); err != nil {
 		t.Fatal(err)
 	}
 	if tok["hash"] != store.HashToken(created.Token) || tok["hashPrefix"] != store.HashToken(created.Token)[:8] ||
@@ -123,110 +123,110 @@ func TestTenants(t *testing.T) {
 		t.Fatalf("token %+v", tok)
 	}
 
-	// The tenant's own token routes.
-	w = e.do("POST", "/api/v1/admin/tenants/beta/tokens", adminAuth(), map[string]any{"label": "ci"})
+	// The project's own token routes.
+	w = e.do("POST", "/api/v1/admin/projects/beta/tokens", adminAuth(), map[string]any{"label": "ci"})
 	expect(t, w, http.StatusCreated, "")
 	second := decode[mintedToken](t, w)
 	expect(t, e.do("GET", "/api/v1/sandboxes", bearerOf(second.Token), nil), http.StatusOK, "")
-	w = e.do("GET", "/api/v1/admin/tenants/beta/tokens", adminAuth(), nil)
+	w = e.do("GET", "/api/v1/admin/projects/beta/tokens", adminAuth(), nil)
 	toks := decode[struct {
 		Tokens []map[string]any `json:"tokens"`
 	}](t, w)
 	if len(toks.Tokens) != 2 || toks.Tokens[1]["label"] != "ci" {
 		t.Fatalf("tokens %+v", toks)
 	}
-	w = e.do("DELETE", "/api/v1/admin/tenants/beta/tokens/"+store.HashToken(second.Token), adminAuth(), nil)
+	w = e.do("DELETE", "/api/v1/admin/projects/beta/tokens/"+store.HashToken(second.Token), adminAuth(), nil)
 	expect(t, w, http.StatusOK, `{"revoked":true}`+"\n")
 	expect(t, e.do("GET", "/api/v1/sandboxes", bearerOf(second.Token), nil), http.StatusUnauthorized,
-		errBody("unknown tenant token"))
-	expect(t, e.do("GET", "/api/v1/admin/tenants/nope/tokens", adminAuth(), nil), http.StatusNotFound,
-		errBody("unknown tenant nope"))
-	expect(t, e.do("POST", "/api/v1/admin/tenants/nope/tokens", adminAuth(), nil), http.StatusNotFound,
-		errBody("unknown tenant nope"))
+		errBody("unknown project token"))
+	expect(t, e.do("GET", "/api/v1/admin/projects/nope/tokens", adminAuth(), nil), http.StatusNotFound,
+		errBody("unknown project nope"))
+	expect(t, e.do("POST", "/api/v1/admin/projects/nope/tokens", adminAuth(), nil), http.StatusNotFound,
+		errBody("unknown project nope"))
 
 	// Being deleted: creates and mints are 409, its tokens are unknown.
-	if _, err := e.st.Q().Exec(context.Background(), "UPDATE tenants SET deleting_at = now() WHERE id = 'beta'"); err != nil {
+	if _, err := e.st.Q().Exec(context.Background(), "UPDATE projects SET deleting_at = now() WHERE id = 'beta'"); err != nil {
 		t.Fatal(err)
 	}
 	expect(t, e.do("GET", "/api/v1/sandboxes", bearerOf(created.Token), nil), http.StatusUnauthorized,
-		errBody("unknown tenant token"))
-	expect(t, e.do("POST", "/api/v1/admin/tenants", adminAuth(), map[string]any{"name": "beta"}), http.StatusConflict,
-		errBody("tenant beta is being deleted"))
-	expect(t, e.do("POST", "/api/v1/admin/tenants/beta/tokens", adminAuth(), nil), http.StatusConflict,
-		errBody("tenant beta is being deleted"))
-	// A sandbox create of a tenant whose deletion began after its token
-	// resolved: refused under the tenant's row lock.
-	if _, err := e.st.Q().Exec(context.Background(), "UPDATE tenants SET deleting_at = now() WHERE id = $1", testTenant); err != nil {
+		errBody("unknown project token"))
+	expect(t, e.do("POST", "/api/v1/admin/projects", adminAuth(), map[string]any{"name": "beta"}), http.StatusConflict,
+		errBody("project beta is being deleted"))
+	expect(t, e.do("POST", "/api/v1/admin/projects/beta/tokens", adminAuth(), nil), http.StatusConflict,
+		errBody("project beta is being deleted"))
+	// A sandbox create of a project whose deletion began after its token
+	// resolved: refused under the project's row lock.
+	if _, err := e.st.Q().Exec(context.Background(), "UPDATE projects SET deleting_at = now() WHERE id = $1", testProject); err != nil {
 		t.Fatal(err)
 	}
 	req := map[string]any{"environment": "box"}
 	w = e.serve(request{method: "POST", path: "/api/v1/sandboxes", body: req,
-		header: http.Header{"Authorization": {bearerOf(e.tenantToken)}}})
-	expect(t, w, http.StatusUnauthorized, errBody("unknown tenant token"))
+		header: http.Header{"Authorization": {bearerOf(e.projectToken)}}})
+	expect(t, w, http.StatusUnauthorized, errBody("unknown project token"))
 }
 
-// A sandbox create that finds its tenant being deleted (it began after the
+// A sandbox create that finds its project being deleted (it began after the
 // token resolved) is a 409.
-func TestCreateWhileTenantDeleting(t *testing.T) {
+func TestCreateWhileProjectDeleting(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	var resp int
 	err := e.st.InTx(context.Background(), func(tx *store.Store) error {
-		_, err := tx.Q().Exec(context.Background(), "UPDATE tenants SET deleting_at = now() WHERE id = $1", testTenant)
+		_, err := tx.Q().Exec(context.Background(), "UPDATE projects SET deleting_at = now() WHERE id = $1", testProject)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Resolution ignores the deleting tenant; the create's own check is
+	// Resolution ignores the deleting project; the create's own check is
 	// reached through a token resolved before (simulated by the handler
-	// with the tenant in the context).
+	// with the project in the context).
 	s := e.srv
-	r := newTenantRequest(t, "POST", "/api/v1/sandboxes", testTenant)
-	r = r.WithContext(auth.WithTenant(r.Context(), auth.Tenant{Name: testTenant, Role: auth.RoleAdmin}))
+	r := newProjectRequest(t, "POST", "/api/v1/sandboxes", testProject)
+	r = r.WithContext(auth.WithProject(r.Context(), auth.Project{Name: testProject, Role: auth.RoleAdmin}))
 	r.Body = io.NopCloser(strings.NewReader(`{"environment": "box"}`))
 	w := recorder()
 	if err := s.createSandbox(w, r); err != nil {
 		writeError(w, err)
 	}
 	resp = w.Code
-	if resp != http.StatusConflict || w.Body.String() != errBody("tenant acme is being deleted") {
+	if resp != http.StatusConflict || w.Body.String() != errBody("project acme is being deleted") {
 		t.Fatalf("%d %s", resp, w.Body.String())
 	}
 }
 
-// A tenant's deletion on an instance that does not lead: its tokens go at
-// once, its sandboxes in batches of 256, then the tenant, once its
+// A project's deletion on an instance that does not lead: its tokens go at
+// once, its sandboxes in batches of 256, then the project, once its
 // environments have gone too (the environments' controller deletes them).
-func TestDeleteTenantInBatches(t *testing.T) {
+func TestDeleteProjectInBatches(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{realEngine: true})
 	ctx := context.Background()
 	for range 300 {
-		if _, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box,
+		if _, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testProject, Image: "img", EnvironmentID: e.box,
 			VCPUs: 1, MemoryMiB: 256}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	w := e.do("DELETE", "/api/v1/admin/tenants/"+testTenant, adminAuth(), nil)
+	w := e.do("DELETE", "/api/v1/admin/projects/"+testProject, adminAuth(), nil)
 	expect(t, w, http.StatusOK, `{"deleted":true}`+"\n")
-	if n, err := e.st.CountSandboxesOfOwner(ctx, testTenant); err != nil || n != 0 {
+	if n, err := e.st.CountSandboxesOfOwner(ctx, testProject); err != nil || n != 0 {
 		t.Fatalf("left %d %v", n, err)
 	}
-	if tn, err := e.st.GetTenant(ctx, testTenant); err != nil || !tn.Deleting() {
-		t.Fatalf("tenant with its environment: %+v %v", tn, err)
+	if tn, err := e.st.GetProject(ctx, testProject); err != nil || !tn.Deleting() {
+		t.Fatalf("project with its environment: %+v %v", tn, err)
 	}
-	if _, err := e.st.Q().Exec(ctx, "DELETE FROM environments WHERE owner = $1", testTenant); err != nil {
+	if _, err := e.st.Q().Exec(ctx, "DELETE FROM environments WHERE owner = $1", testProject); err != nil {
 		t.Fatal(err)
 	}
-	w = e.do("DELETE", "/api/v1/admin/tenants/"+testTenant, adminAuth(), nil)
+	w = e.do("DELETE", "/api/v1/admin/projects/"+testProject, adminAuth(), nil)
 	expect(t, w, http.StatusOK, `{"deleted":true}`+"\n")
-	if _, err := e.st.GetTenant(ctx, testTenant); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("tenant: %v", err)
+	if _, err := e.st.GetProject(ctx, testProject); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("project: %v", err)
 	}
-	expect(t, e.do("GET", "/api/v1/sandboxes", bearerOf(e.tenantToken), nil), http.StatusUnauthorized,
-		errBody("unknown tenant token"))
-	w = e.do("DELETE", "/api/v1/admin/tenants/"+testTenant, adminAuth(), nil)
+	expect(t, e.do("GET", "/api/v1/sandboxes", bearerOf(e.projectToken), nil), http.StatusUnauthorized,
+		errBody("unknown project token"))
+	w = e.do("DELETE", "/api/v1/admin/projects/"+testProject, adminAuth(), nil)
 	expect(t, w, http.StatusOK, `{"deleted":false}`+"\n")
 }
 
@@ -266,7 +266,7 @@ func TestNodes(t *testing.T) {
 	if _, err := e.st.MarkNodeReady(ctx, "n1"); err != nil {
 		t.Fatal(err)
 	}
-	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box, VCPUs: 2, MemoryMiB: 512,
+	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testProject, Image: "img", EnvironmentID: e.box, VCPUs: 2, MemoryMiB: 512,
 		DiskGiB: 30})
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +410,7 @@ func TestNodeChanges(t *testing.T) {
 	expect(t, e.do("GET", "/api/v1/admin/nodes/nope/certs", adminAuth(), nil), http.StatusNotFound, errBody("unknown node nope"))
 
 	// Removal: refused while sandboxes are on it, unless forced.
-	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img", EnvironmentID: e.box, VCPUs: 1, MemoryMiB: 256})
+	sb, _, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testProject, Image: "img", EnvironmentID: e.box, VCPUs: 1, MemoryMiB: 256})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,15 +672,15 @@ func TestInstances(t *testing.T) {
 	}
 }
 
-// An operator moves a tenant to the tenant zone and back (ADR 0031): the
+// An operator moves a project to the project zone and back (ADR 0031): the
 // answer names each environment's label and host, the listing the
-// tenant's zone; a zone the platform does not serve is a 400, an unknown
-// tenant a 404, a deleting one a 409.
-func TestSetTenantZone(t *testing.T) {
+// project's zone; a zone the platform does not serve is a 400, an unknown
+// project a 404, a deleting one a 409.
+func TestSetProjectZone(t *testing.T) {
 	t.Parallel()
 	const tz = "apps.run.example.com"
-	e := newEnv(t, envOptions{zones: model.Zones{Apps: "apps.example.com", Tenant: tz}})
-	expect(t, e.do("POST", "/api/v1/admin/tenants", adminAuth(), map[string]any{"name": "beta"}), http.StatusCreated, "")
+	e := newEnv(t, envOptions{zones: model.Zones{Apps: "apps.example.com", Project: tz}})
+	expect(t, e.do("POST", "/api/v1/admin/projects", adminAuth(), map[string]any{"name": "beta"}), http.StatusCreated, "")
 	ctx := t.Context()
 	web, err := e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: "beta", Name: "web"})
 	if err != nil {
@@ -690,44 +690,44 @@ func TestSetTenantZone(t *testing.T) {
 		t.Fatal(err)
 	}
 	type answer struct {
-		Tenant, Zone string
-		Environments []struct{ ID, Name, HostLabel, HostLabelBefore, Host string }
+		Project, Zone string
+		Environments  []struct{ ID, Name, HostLabel, HostLabelBefore, Host string }
 	}
-	w := e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": tz})
+	w := e.do("PUT", "/api/v1/admin/projects/beta/zone", adminAuth(), map[string]any{"zone": tz})
 	expect(t, w, http.StatusOK, "")
 	a := decode[answer](t, w)
-	if a.Tenant != "beta" || a.Zone != tz || len(a.Environments) != 1 || a.Environments[0].ID != web.ID.String() ||
+	if a.Project != "beta" || a.Zone != tz || len(a.Environments) != 1 || a.Environments[0].ID != web.ID.String() ||
 		a.Environments[0].HostLabel != "web-beta" || a.Environments[0].HostLabelBefore != "web-beta" ||
 		a.Environments[0].Host != "web-beta."+tz {
 		t.Fatalf("moved %+v", a)
 	}
 	list := decode[struct {
-		Tenants []struct{ Name, Zone string }
-	}](t, e.do("GET", "/api/v1/admin/tenants", adminAuth(), nil))
+		Projects []struct{ Name, Zone string }
+	}](t, e.do("GET", "/api/v1/admin/projects", adminAuth(), nil))
 	zones := map[string]string{}
-	for _, tn := range list.Tenants {
+	for _, tn := range list.Projects {
 		zones[tn.Name] = tn.Zone
 	}
-	if zones["beta"] != tz || zones[testTenant] != "apps.example.com" {
+	if zones["beta"] != tz || zones[testProject] != "apps.example.com" {
 		t.Fatalf("listing %+v", list)
 	}
-	if tn, err := e.st.GetTenant(ctx, "beta"); err != nil || tn.Zone != tz {
+	if tn, err := e.st.GetProject(ctx, "beta"); err != nil || tn.Zone != tz {
 		t.Fatalf("row %+v %v", tn, err)
 	}
-	w = e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": "apps.example.com"})
+	w = e.do("PUT", "/api/v1/admin/projects/beta/zone", adminAuth(), map[string]any{"zone": "apps.example.com"})
 	expect(t, w, http.StatusOK, "")
 	if a := decode[answer](t, w); a.Zone != "apps.example.com" || a.Environments[0].Host != "web-beta.apps.example.com" {
 		t.Fatalf("moved back %+v", a)
 	}
 	for _, bad := range []string{"", "other.example.com"} {
-		expect(t, e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": bad}),
+		expect(t, e.do("PUT", "/api/v1/admin/projects/beta/zone", adminAuth(), map[string]any{"zone": bad}),
 			http.StatusBadRequest, errBody(`zone must be one the platform serves, apps.example.com or `+tz+`; got "`+bad+`"`))
 	}
-	expect(t, e.do("PUT", "/api/v1/admin/tenants/nope/zone", adminAuth(), map[string]any{"zone": tz}),
-		http.StatusNotFound, errBody("unknown tenant nope"))
-	if _, err := e.st.MarkTenantDeleting(ctx, "beta"); err != nil {
+	expect(t, e.do("PUT", "/api/v1/admin/projects/nope/zone", adminAuth(), map[string]any{"zone": tz}),
+		http.StatusNotFound, errBody("unknown project nope"))
+	if _, err := e.st.MarkProjectDeleting(ctx, "beta"); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, e.do("PUT", "/api/v1/admin/tenants/beta/zone", adminAuth(), map[string]any{"zone": tz}),
-		http.StatusConflict, errBody("tenant beta is being deleted"))
+	expect(t, e.do("PUT", "/api/v1/admin/projects/beta/zone", adminAuth(), map[string]any{"zone": tz}),
+		http.StatusConflict, errBody("project beta is being deleted"))
 }

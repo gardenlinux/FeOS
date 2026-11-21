@@ -66,7 +66,7 @@ type downRow struct{}
 
 func (downRow) Scan(...any) error { return errDown }
 
-// fixture is a database with a tenant, a node and a public environment
+// fixture is a database with a project, a node and a public environment
 // whose deployment 1 routes / to the image service web's port http (8080),
 // with one ready instance of it, running on n1 with an address, whose
 // node admits 8080 and holds version 2 of ferun-ingress.
@@ -86,7 +86,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Parallel()
 	d := dbtest.New(t)
 	f := &fixture{d: d, st: store.New(d), q: &flaky{q: d.Pool}}
-	if _, _, err := f.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := f.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.st.InsertNode(bg, "n1"); err != nil {
@@ -248,7 +248,7 @@ func webService(s *Snapshot, env uuid.UUID) (wire.Service, bool) {
 // first snapshot has the endpoint; a sandbox change (ferun_sandbox) makes
 // it asleep and back; stopping takes it out; unpublishing removes the
 // environment (its read has no rows); publishing again brings it back,
-// and the tenant's deletion removes it. An environment whose routing
+// and the project's deletion removes it. An environment whose routing
 // deployment does not parse is left out.
 func TestBuilderFollows(t *testing.T) {
 	f := newFixture(t)
@@ -318,8 +318,8 @@ func TestBuilderFollows(t *testing.T) {
 		return ok
 	})
 
-	// The tenant's deletion marks its environments deleting: removed.
-	if _, err := f.st.MarkTenantEnvironmentsDeleting(bg, "acme"); err != nil {
+	// The project's deletion marks its environments deleting: removed.
+	if _, err := f.st.MarkProjectEnvironmentsDeleting(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	s = await(t, b, time.Second, "the deleting environment removed", func(s *Snapshot) bool { return len(s.Envs) == 0 })

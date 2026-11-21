@@ -34,19 +34,19 @@ func TestClone(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
 	src := h.create("preview", nil)
-	sb := h.sandbox(tenantA, "preview")
+	sb := h.sandbox(projectA, "preview")
 	srcID := uuid.MustParse(src.ID)
 	h.putSecret("preview", "token", "v1")
 	h.putSecret("preview", "token", "v2")
 	withDev := strings.Replace(previewSpec(sb), `"root": {"path": "/", "service": "web", "port": "http"}`,
 		`"root": {"path": "/", "service": "web", "port": "http"}, "dev": {"path": "/dev", "service": "dev", "port": "http"}`, 1)
-	if _, err := h.svc.Apply(ctx, tenantA, "preview", ApplyRequest{Spec: json.RawMessage(withDev),
+	if _, err := h.svc.Apply(ctx, projectA, "preview", ApplyRequest{Spec: json.RawMessage(withDev),
 		Annotations: map[string]string{"fecode.dev/revision": "r7"}}); err != nil {
 		t.Fatal(describe(err))
 	}
 
 	// Without the secret, and asking for data: both refused at once.
-	_, err := h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo", Data: true})
+	_, err := h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", Data: true})
 	var ise *InvalidSpecError
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "data", "copying data is not available") ||
 		!hasFinding(ise.Findings, spec.SeverityError, "services.api.env.TOKEN", "the new environment has no secret token") ||
@@ -58,13 +58,13 @@ func TestClone(t *testing.T) {
 		ise.Error() != "the spec has 2 errors, the first: data: copying data is not available" {
 		t.Fatalf("remedy %q, %v", ise.Findings[2].Remedy, ise)
 	}
-	if _, err := h.svc.GetEnv(ctx, tenantA, "demo"); err == nil {
+	if _, err := h.svc.GetEnv(ctx, projectA, "demo"); err == nil {
 		t.Fatal("a refused clone left an environment")
 	}
 
 	// Copied: the latest version, sealed again for the new environment.
 	id := uuid.New()
-	st, err := h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo", ID: id.String(),
+	st, err := h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", ID: id.String(),
 		Labels: map[string]string{"fecode.class": "demo"}, Secrets: map[string]CloneSecret{"token": {Copy: true}},
 		Author: "a"})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestClone(t *testing.T) {
 	given := strings.Replace(stageSpec, `"replicas": 2`, `"replicas": 1`, 1)
 	one := 1
 	value := "fresh"
-	st, err = h.svc.Clone(ctx, tenantA, src.ID, CloneRequest{Name: "demo2", Deployment: &one, Spec: json.RawMessage(given),
+	st, err = h.svc.Clone(ctx, projectA, src.ID, CloneRequest{Name: "demo2", Deployment: &one, Spec: json.RawMessage(given),
 		Secrets: map[string]CloneSecret{"token": {Value: &value}}})
 	if err != nil {
 		t.Fatal(describe(err))
@@ -112,15 +112,15 @@ func TestClone(t *testing.T) {
 	if *sp2.Services["api"].Replicas != 1 {
 		t.Fatalf("given spec %+v", sp2.Services["api"])
 	}
-	_, err = h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo", Secrets: map[string]CloneSecret{"token": {Copy: true}}})
+	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", Secrets: map[string]CloneSecret{"token": {Copy: true}}})
 	wantStatus(t, err, http.StatusConflict, "an environment named demo exists")
-	_, err = h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo3", Secrets: map[string]CloneSecret{
+	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo3", Secrets: map[string]CloneSecret{
 		"token": {Copy: true, Value: &value}, "absent": {Copy: true}}})
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "secrets.token", "is {\"copy\": true} or") ||
 		!hasFinding(ise.Findings, spec.SeverityError, "secrets.absent", "has no secret absent to copy") {
 		t.Fatalf("bad secrets %v", describe(err))
 	}
-	// Another tenant's environment's ID: refused as taken before the spec
+	// Another project's environment's ID: refused as taken before the spec
 	// is planned under it, so nothing of what that environment's volumes
 	// hold shows; planned for an environment that is not there yet, no
 	// volume is read.
@@ -128,20 +128,20 @@ func TestClone(t *testing.T) {
 		SizeMiB: 1024, AddonType: "postgres", DataVersion: "16"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.svc.CreateEnv(ctx, tenantB, CreateEnvRequest{Name: "own"}); err != nil {
+	if _, _, err := h.svc.CreateEnv(ctx, projectB, CreateEnvRequest{Name: "own"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.Apply(ctx, tenantB, "own", ApplyRequest{Spec: json.RawMessage(
+	if _, err := h.svc.Apply(ctx, projectB, "own", ApplyRequest{Spec: json.RawMessage(
 		`{"services": {"web": {"image": "ghcr.io/acme/web:1"}}}`)}); err != nil {
 		t.Fatal(describe(err))
 	}
 	probe := `{"addons": {"db": {"type": "postgres", "version": "17"}}, "routes": {"bad": {"path": "x", "service": "nope"}}}`
-	_, err = h.svc.Clone(ctx, tenantB, "own", CloneRequest{Name: "probe", ID: src.ID, Spec: json.RawMessage(probe)})
+	_, err = h.svc.Clone(ctx, projectB, "own", CloneRequest{Name: "probe", ID: src.ID, Spec: json.RawMessage(probe)})
 	if errors.As(err, &ise) {
 		t.Fatalf("a foreign ID was planned: %v", describe(err))
 	}
 	wantStatus(t, err, http.StatusConflict, "an environment of id "+src.ID+" exists with another name")
-	p, err := h.svc.plan(ctx, tenantB, store.Environment{ID: srcID, Owner: tenantB, Name: "probe"}, json.RawMessage(probe),
+	p, err := h.svc.plan(ctx, projectB, store.Environment{ID: srcID, Owner: projectB, Name: "probe"}, json.RawMessage(probe),
 		nil, spec.ModeApply, map[string]spec.SecretInfo{}, nil, false)
 	if err != nil || p.valid() {
 		t.Fatalf("plan %+v %v", p, err)
@@ -153,12 +153,12 @@ func TestClone(t *testing.T) {
 	}
 
 	nine := 9
-	_, err = h.svc.Clone(ctx, tenantA, "preview", CloneRequest{Name: "demo3", Deployment: &nine})
+	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo3", Deployment: &nine})
 	wantStatus(t, err, http.StatusNotFound, "no such deployment")
-	_, err = h.svc.Clone(ctx, tenantB, "preview", CloneRequest{Name: "demo3"})
+	_, err = h.svc.Clone(ctx, projectB, "preview", CloneRequest{Name: "demo3"})
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
 	h.create("bare", nil)
-	_, err = h.svc.Clone(ctx, tenantA, "bare", CloneRequest{Name: "demo3"})
+	_, err = h.svc.Clone(ctx, projectA, "bare", CloneRequest{Name: "demo3"})
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "deployment", "has no deployment to clone") {
 		t.Fatalf("clone of nothing %v", describe(err))
 	}
@@ -169,7 +169,7 @@ func TestStatus(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	ctx := h.ctx()
 	st := h.create("stage", map[string]string{"k": "v"})
-	sb := h.sandbox(tenantA, "stage")
+	sb := h.sandbox(projectA, "stage")
 	e := h.env("stage")
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", previewSpec(sb), 0)
@@ -212,7 +212,7 @@ func TestStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := h.svc.GetEnv(ctx, tenantA, st.ID)
+	got, err := h.svc.GetEnv(ctx, projectA, st.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,19 +270,19 @@ func TestStatus(t *testing.T) {
 	}
 
 	// Incidents.
-	list, err := h.svc.Incidents(ctx, tenantA, "stage", false)
+	list, err := h.svc.Incidents(ctx, projectA, "stage", false)
 	if err != nil || len(list.Incidents) != 1 || list.Incidents[0].Object != "service/api" ||
 		list.Incidents[0].Evidence.LogTail[0] != "boom" || *list.Incidents[0].Evidence.Exits[0].Code != 1 {
 		t.Fatalf("incidents %+v %v", list, err)
 	}
-	inc, err := h.svc.Incident(ctx, tenantA, "stage", mustInt64(t, list.Incidents[0].ID))
+	inc, err := h.svc.Incident(ctx, projectA, "stage", mustInt64(t, list.Incidents[0].ID))
 	if err != nil || inc.Condition != model.ConditionCrashLoop || inc.ClosedAt != "" {
 		t.Fatalf("incident %+v %v", inc, err)
 	}
-	_, err = h.svc.Incident(ctx, tenantA, "stage", 999)
+	_, err = h.svc.Incident(ctx, projectA, "stage", 999)
 	wantStatus(t, err, http.StatusNotFound, "no such incident")
 	h.exec("UPDATE env_incidents SET closed_at = now() WHERE env_id = $1", e.ID)
-	if list, _ := h.svc.Incidents(ctx, tenantA, "stage", true); len(list.Incidents) != 0 {
+	if list, _ := h.svc.Incidents(ctx, projectA, "stage", true); len(list.Incidents) != 0 {
 		t.Fatalf("open %+v", list)
 	}
 
@@ -291,16 +291,16 @@ func TestStatus(t *testing.T) {
 	changed := strings.Replace(previewSpec(sb), `"replicas": 2`, `"replicas": 4`, 1)
 	h.apply("stage", changed, 1)
 	h.exec("UPDATE env_deployments SET state = 'failed', reason = 'rollout timed out' WHERE env_id = $1 AND number = 2", e.ID)
-	got, _ = h.svc.GetEnv(ctx, tenantA, "stage")
+	got, _ = h.svc.GetEnv(ctx, projectA, "stage")
 	if got.Rollout.Deployment != 2 || got.Rollout.State != model.DeploymentFailed || got.Rollout.Reason != "rollout timed out" ||
 		got.Objects[0].Desired != 2 {
 		t.Fatalf("failed latest %+v", got)
 	}
 	h.exec("UPDATE env_deployments SET state = 'deploying' WHERE env_id = $1 AND number = 2", e.ID)
-	if got, _ := h.svc.GetEnv(ctx, tenantA, "stage"); got.Objects[0].Desired != 4 {
+	if got, _ := h.svc.GetEnv(ctx, projectA, "stage"); got.Objects[0].Desired != 4 {
 		t.Fatalf("rolling latest %+v", got.Objects[0])
 	}
-	list2, _ := h.svc.ListEnvs(ctx, tenantA, nil)
+	list2, _ := h.svc.ListEnvs(ctx, projectA, nil)
 	if list2.Environments[0].State != model.DeploymentDeploying || list2.Environments[0].OpenIncidents != 0 {
 		t.Fatalf("list %+v", list2)
 	}
@@ -329,11 +329,11 @@ func TestIncidentEvidence(t *testing.T) {
 		Evidence: json.RawMessage(stored)}); err != nil {
 		t.Fatal(err)
 	}
-	list, err := h.svc.Incidents(ctx, tenantA, "stage", true)
+	list, err := h.svc.Incidents(ctx, projectA, "stage", true)
 	if err != nil || len(list.Incidents) != 1 {
 		t.Fatalf("incidents %+v %v", list, err)
 	}
-	inc, err := h.svc.Incident(ctx, tenantA, "stage", mustInt64(t, list.Incidents[0].ID))
+	inc, err := h.svc.Incident(ctx, projectA, "stage", mustInt64(t, list.Incidents[0].ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,24 +393,24 @@ func TestRouteDoor(t *testing.T) {
 	// A sandbox made before ADR 0019, with a UUID: its attached service
 	// is routed to as a short ID's is.
 	st := h.create("stage", nil)
-	sb := h.legacySandbox(tenantA, "stage")
+	sb := h.legacySandbox(projectA, "stage")
 	e := h.env("stage")
 	h.create("prod", nil)
-	tok, err := h.svc.CreateRouteToken(ctx, tenantA, "stage")
+	tok, err := h.svc.CreateRouteToken(ctx, projectA, "stage")
 	if err != nil {
 		t.Fatal(err)
 	}
-	prodTok, _ := h.svc.CreateRouteToken(ctx, tenantA, "prod")
+	prodTok, _ := h.svc.CreateRouteToken(ctx, projectA, "prod")
 
-	// The token: required, the environment's own; a tenant token is no
+	// The token: required, the environment's own; a project token is no
 	// route token.
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", ""), 401, "route token required\n")
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", "not-a-token"), 401, "route token required\n")
-	tenantTok := "tenant-token"
-	if _, err := h.st.CreateTenantToken(ctx, store.HashToken(tenantTok), tenantA, "t"); err != nil {
+	projectTok := "project-token"
+	if _, err := h.st.CreateProjectToken(ctx, store.HashToken(projectTok), projectA, "t"); err != nil {
 		t.Fatal(err)
 	}
-	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", tenantTok), 401, "route token required\n")
+	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", projectTok), 401, "route token required\n")
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", prodTok.Token), 404, "no such environment\n")
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/nope/http/", tok.Token), 404, "no such environment\n")
 	// No deployment, no route.
@@ -454,7 +454,7 @@ func TestRouteDoor(t *testing.T) {
 	}
 	// The route token in X-FeRun-Route-Token: that header stops at the
 	// door, the client's Authorization goes on; it wins over a bearer
-	// token, and a tenant token is no route token there either.
+	// token, and a project token is no route token there either.
 	withHeader := func(routeTok, authz string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("GET", "/api/v1/environments/stage/http/api/me", nil)
 		r.Header.Set(RouteTokenHeader, routeTok)
@@ -499,11 +499,11 @@ func TestRouteDoor(t *testing.T) {
 			t.Fatalf("the door dropped another header: %v", f.header)
 		}
 	}
-	wantPlain(t, withHeader(tenantTok, ""), 401, "route token required\n")
-	wantPlain(t, withHeader(tenantTok, "Bearer "+tok.Token), 401, "route token required\n")
+	wantPlain(t, withHeader(projectTok, ""), 401, "route token required\n")
+	wantPlain(t, withHeader(projectTok, "Bearer "+tok.Token), 401, "route token required\n")
 	wantPlain(t, withHeader("not-a-token", "Bearer "+tok.Token), 401, "route token required\n")
 	// Beside the header, the Authorization that would go on may hold no
-	// FeRun credential: a tenant's or a sandbox's token as its bearer is
+	// FeRun credential: a project's or a sandbox's token as its bearer is
 	// refused and nothing forwarded; any other passes, as above.
 	sandboxTok := "sandbox-token"
 	if _, err := h.st.CreateSandboxToken(ctx, store.HashToken(sandboxTok), sb, "s", ""); err != nil {
@@ -514,7 +514,7 @@ func TestRouteDoor(t *testing.T) {
 		defer h.ports.mu.Unlock()
 		return len(h.ports.calls)
 	}
-	for _, authz := range []string{"Bearer " + tenantTok, "bearer " + tenantTok, "Bearer " + sandboxTok} {
+	for _, authz := range []string{"Bearer " + projectTok, "bearer " + projectTok, "Bearer " + sandboxTok} {
 		before := forwards()
 		wantPlain(t, withHeader(tok.Token, authz), 401, "route token required\n")
 		if forwards() != before {
@@ -529,7 +529,7 @@ func TestRouteDoor(t *testing.T) {
 	r2 := httptest.NewRequest("GET", "/api/v1/environments/stage/http/api/me", nil)
 	r2.Header.Set(RouteTokenHeader, tok.Token)
 	r2.Header.Add("Authorization", "Bearer client-jwt")
-	r2.Header.Add("Authorization", "Bearer "+tenantTok)
+	r2.Header.Add("Authorization", "Bearer "+projectTok)
 	w2 := httptest.NewRecorder()
 	mux.ServeHTTP(w2, r2)
 	wantPlain(t, w2, 401, "route token required\n")
@@ -603,12 +603,12 @@ func TestRouteDoor(t *testing.T) {
 	if rt.LastUsedAt.IsZero() {
 		t.Fatal("last_used_at not set")
 	}
-	if err := h.svc.RevokeRouteTokens(ctx, tenantA, "stage"); err != nil {
+	if err := h.svc.RevokeRouteTokens(ctx, projectA, "stage"); err != nil {
 		t.Fatal(err)
 	}
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/", tok.Token), 401, "route token required\n")
 	// A deleting environment is gone for the door.
-	if err := h.svc.DeleteEnv(ctx, tenantA, "prod"); err != nil {
+	if err := h.svc.DeleteEnv(ctx, projectA, "prod"); err != nil {
 		t.Fatal(err)
 	}
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/prod/http/", prodTok.Token), 404, "no such environment\n")
@@ -618,7 +618,7 @@ func TestRouteDoor(t *testing.T) {
 	off.create("stage", nil)
 	off.putSecret("stage", "token", "x")
 	off.apply("stage", stageSpec, 0)
-	offTok, _ := off.svc.CreateRouteToken(off.ctx(), tenantA, "stage")
+	offTok, _ := off.svc.CreateRouteToken(off.ctx(), projectA, "stage")
 	wantPlain(t, routeRequest(doorMux(off.svc), "GET", "/api/v1/environments/stage/http/", offTok.Token), 503,
 		"not available on this instance\n")
 }
@@ -632,19 +632,19 @@ func TestRouteDoorFailure(t *testing.T) {
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "x")
 	h.apply("stage", stageSpec, 0)
-	tok, err := h.svc.CreateRouteToken(h.ctx(), tenantA, "stage")
+	tok, err := h.svc.CreateRouteToken(h.ctx(), projectA, "stage")
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The lookup of a bearer token beside the route token header.
-	h.exec(`ALTER TABLE tenant_tokens RENAME TO tenant_tokens_away`)
+	h.exec(`ALTER TABLE project_tokens RENAME TO project_tokens_away`)
 	r := httptest.NewRequest("GET", "/api/v1/environments/stage/http/api/x", nil)
 	r.Header.Set(RouteTokenHeader, tok.Token)
 	r.Header.Set("Authorization", "Bearer client-jwt")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
 	wantPlain(t, w, 500, "the route door failed\n")
-	h.exec(`ALTER TABLE tenant_tokens_away RENAME TO tenant_tokens`)
+	h.exec(`ALTER TABLE project_tokens_away RENAME TO project_tokens`)
 	// A stored spec that does not parse.
 	h.exec(`UPDATE env_deployments SET spec = '{"services": 5}' WHERE env_id = $1`, h.env("stage").ID)
 	wantPlain(t, routeRequest(mux, "GET", "/api/v1/environments/stage/http/api/x", tok.Token), 500,
@@ -702,7 +702,7 @@ func TestRoutePaths(t *testing.T) {
 
 // The route door forwards to an attached service's sandbox only while it
 // is the environment owner's and not an instance row: a sandbox ID is
-// free again once deleted, and another tenant may take it. The owner's
+// free again once deleted, and another project may take it. The owner's
 // sandbox created again under the same ID (FeCode's replaceLostSandbox)
 // is a new incarnation, which is routed to (§13.6).
 func TestRouteDoorAttachedOwner(t *testing.T) {
@@ -711,9 +711,9 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	ctx := h.ctx()
 	mux := doorMux(h.svc)
 	h.create("preview", nil)
-	sb := h.sandbox(tenantA, "preview")
+	sb := h.sandbox(projectA, "preview")
 	e := h.env("preview")
-	tok, err := h.svc.CreateRouteToken(ctx, tenantA, "preview")
+	tok, err := h.svc.CreateRouteToken(ctx, projectA, "preview")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,7 +741,7 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 		t.Helper()
 		before := calls()
 		w := routeRequest(mux, "GET", path, tok.Token)
-		wantPlain(t, w, 503, "sandbox "+sb.String()+" of service dev is gone or not this tenant's\n")
+		wantPlain(t, w, 503, "sandbox "+sb.String()+" of service dev is gone or not this project's\n")
 		if calls() != before {
 			t.Fatalf("%s: forwarded %+v", why, h.ports.last(t))
 		}
@@ -760,22 +760,22 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	// Gone.
 	recreate(store.NewSandbox{})
 	refused("gone")
-	// Another tenant's sandbox of the same ID, attachable.
-	recreate(store.NewSandbox{Owner: tenantB, EnvironmentID: h.envOf(tenantB, "preview"),
+	// Another project's sandbox of the same ID, attachable.
+	recreate(store.NewSandbox{Owner: projectB, EnvironmentID: h.envOf(projectB, "preview"),
 		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
-	refused("another tenant's")
+	refused("another project's")
 	// An instance row of the same ID.
 	zero := 0
-	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: e.ID, Instance: true, IdleAfterS: &zero,
+	recreate(store.NewSandbox{Owner: projectA, EnvironmentID: e.ID, Instance: true, IdleAfterS: &zero,
 		PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(e.ID)}}})
 	refused("an instance row")
 	// A sandbox of another environment (ADR 0035).
-	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: h.envOf(tenantA, "other"),
+	recreate(store.NewSandbox{Owner: projectA, EnvironmentID: h.envOf(projectA, "other"),
 		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
 	refused("another environment's")
 	// The owner's own sandbox again, a new incarnation under the same ID
 	// (the row still records the first one): routed to.
-	recreate(store.NewSandbox{Owner: tenantA, EnvironmentID: e.ID,
+	recreate(store.NewSandbox{Owner: projectA, EnvironmentID: e.ID,
 		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
 	if again, err := h.st.GetSandbox(ctx, sb); err != nil || again.Incarnation == first.Incarnation {
 		t.Fatalf("the recreated sandbox %+v %v", again, err)
@@ -786,10 +786,10 @@ func TestRouteDoorAttachedOwner(t *testing.T) {
 	if w := routeRequest(mux, "GET", path, tok.Token); w.Code != 200 || h.ports.last(t).sandbox != sb {
 		t.Fatalf("recreated own sandbox: %d %s", w.Code, w.Body)
 	}
-	// Another tenant's again: refused.
-	recreate(store.NewSandbox{Owner: tenantB, EnvironmentID: h.envOf(tenantB, "preview"),
+	// Another project's again: refused.
+	recreate(store.NewSandbox{Owner: projectB, EnvironmentID: h.envOf(projectB, "preview"),
 		PodTemplate: &model.PodTemplate{Command: []string{"sleep", "infinity"}}})
-	refused("another tenant's after the owner's")
+	refused("another project's after the owner's")
 }
 
 // The port of a request comes from the deployment of the instance it goes
@@ -802,7 +802,7 @@ func TestRouteDoorRollingPort(t *testing.T) {
 	mux := doorMux(h.svc)
 	h.create("stage", nil)
 	e := h.env("stage")
-	tok, err := h.svc.CreateRouteToken(ctx, tenantA, "stage")
+	tok, err := h.svc.CreateRouteToken(ctx, projectA, "stage")
 	if err != nil {
 		t.Fatal(err)
 	}

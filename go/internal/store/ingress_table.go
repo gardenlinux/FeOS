@@ -21,10 +21,10 @@ import (
 // zero.
 type IngressRoutingRow struct {
 	EnvID     uuid.UUID
-	Owner     string // the tenant
+	Owner     string // the project
 	Name      string
 	HostLabel string
-	// Zone is its tenant's zone (tenants.zone; "": the apps zone), which
+	// Zone is its project's zone (projects.zone; "": the apps zone), which
 	// its label is in.
 	Zone string
 	// Deployment is the environment's latest desired deployment, Deployed its
@@ -65,7 +65,7 @@ type IngressRoutingRow struct {
 }
 
 // IngressRouting returns what the ingress's table is built from (ADR
-// 0021): every environment that is public, not deleting, of a tenant that
+// 0021): every environment that is public, not deleting, of a project that
 // is not deleting, with a deployment and a host label, each with its service
 // instances that are not stopping, and who it admits with its provider's
 // row (ADR 0054); envIDs limits it to those environments
@@ -81,8 +81,8 @@ func (s *Store) IngressRouting(ctx context.Context, envIDs []uuid.UUID) ([]Ingre
 			i.sandbox_id, i.object, i.replica, i.deployment, i.phase, i.ingress_ports,
 			s.address, s.client_state, s.op, coalesce(s.node, ''), coalesce(n.ingress_group_version, 0), s.idle_after_s
 		FROM environments e
-		JOIN tenants t ON t.id = e.owner AND t.deleting_at IS NULL
-		LEFT JOIN access_providers p ON p.tenant = e.owner AND p.name = e.access_provider
+		JOIN projects t ON t.id = e.owner AND t.deleting_at IS NULL
+		LEFT JOIN access_providers p ON p.project = e.owner AND p.name = e.access_provider
 		LEFT JOIN env_instances i ON i.env_id = e.id AND i.kind = 'service' AND i.phase <> 'stopping'
 		LEFT JOIN sandboxes s ON s.id = i.sandbox_id
 		LEFT JOIN nodes n ON n.name = s.node

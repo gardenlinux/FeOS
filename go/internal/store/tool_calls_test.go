@@ -70,10 +70,10 @@ func finishCall(t *testing.T, s *store.Store, c store.ToolCall, state string) {
 	}
 }
 
-// callSandbox makes the tenant acme and a sandbox of it.
+// callSandbox makes the project acme and a sandbox of it.
 func callSandbox(t *testing.T, s *store.Store) podid.ID {
 	t.Helper()
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	return mkSandbox(t, s, "acme").ID
 }
 

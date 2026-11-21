@@ -18,17 +18,17 @@ import (
 	"github.com/gardenlinux/feos/go/internal/auth"
 )
 
-// pathTenant is ferund's call that names a reader's tenant and what it
-// may read of it; askTenant asks it as a sink that filters by environment
+// pathProject is ferund's call that names a reader's project and what it
+// may read of it; askProject asks it as a sink that filters by environment
 // (ferund answers a reader of environments only no other).
 const (
-	pathTenant = "/api/v1/tenant"
-	askTenant  = pathTenant + "?filter=environments"
+	pathProject = "/api/v1/project"
+	askProject  = pathProject + "?filter=environments"
 )
 
-// tenantCacheMax bounds the cached readers; beyond it the expired go, and
+// projectCacheMax bounds the cached readers; beyond it the expired go, and
 // then all.
-const tenantCacheMax = 10000
+const projectCacheMax = 10000
 
 // sessionTTL bounds how long a session's answer is kept: a person signs
 // out, or loses a grant, more often than a token is revoked.
@@ -36,11 +36,11 @@ const sessionTTL = 10 * time.Second
 
 // Credential is how a reader asks: a token (Authorization: Bearer …), or
 // a person's session (its cookie's value) served under ferund's host; and
-// the tenant it names in FeRun-Tenant (a session must, a token may).
+// the project it names in FeRun-Project (a session must, a token may).
 type Credential struct {
 	Authorization string
 	Session       string
-	Tenant        string
+	Project       string
 }
 
 // key is the credential's cache key: the SHA-256 of what ferund is asked
@@ -51,20 +51,20 @@ func (c Credential) key() [32]byte {
 	if v == "" {
 		kind, v = "s", c.Session
 	}
-	return sha256.Sum256([]byte(kind + "\x00" + v + "\x00" + c.Tenant))
+	return sha256.Sum256([]byte(kind + "\x00" + v + "\x00" + c.Project))
 }
 
-// Access is what a reader may read, as ferund answers GET /api/v1/tenant
-// (ADR 0031): of Tenant, with All (a role on the tenant) every stream and
+// Access is what a reader may read, as ferund answers GET /api/v1/project
+// (ADR 0031): of Project, with All (a role on the project) every stream and
 // span, else only those whose environment is one of Envs (its grants on
 // environments); a stream or span of no environment (a sandbox's, a
-// tenant's job's) needs All. Write (write on the tenant) may delete
+// project's job's) needs All. Write (write on the project) may delete
 // streams.
 type Access struct {
-	Tenant string
-	All    bool
-	Envs   []string
-	Write  bool
+	Project string
+	All     bool
+	Envs    []string
+	Write   bool
 }
 
 // none reports a reader that may read nothing.
@@ -83,35 +83,35 @@ func (a Access) within() []string {
 	return append([]string{}, a.Envs...)
 }
 
-// Tenants resolves a reader's credential to its Access through ferund
-// (GET /api/v1/tenant?filter=environments with the same Authorization,
-// or the session's cookie, and FeRun-Tenant) and keeps the answer for TTL (a session's for
+// Projects resolves a reader's credential to its Access through ferund
+// (GET /api/v1/project?filter=environments with the same Authorization,
+// or the session's cookie, and FeRun-Project) and keeps the answer for TTL (a session's for
 // at most sessionTTL), by the SHA-256 of the credential. Refusals are not
 // kept.
-type Tenants struct {
+type Projects struct {
 	ferunURL string
 	hc       *http.Client
 	ttl      time.Duration
 	now      func() time.Time
 
 	mu sync.Mutex
-	m  map[[32]byte]tenantEntry
+	m  map[[32]byte]projectEntry
 }
 
-type tenantEntry struct {
+type projectEntry struct {
 	access  Access
 	expires time.Time
 }
 
-// NewTenants returns the resolver of ferund at ferunURL.
-func NewTenants(ferunURL string, hc *http.Client, ttl time.Duration) *Tenants {
+// NewProjects returns the resolver of ferund at ferunURL.
+func NewProjects(ferunURL string, hc *http.Client, ttl time.Duration) *Projects {
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Tenants{ferunURL: strings.TrimSuffix(ferunURL, "/"), hc: hc, ttl: ttl, now: time.Now, m: map[[32]byte]tenantEntry{}}
+	return &Projects{ferunURL: strings.TrimSuffix(ferunURL, "/"), hc: hc, ttl: ttl, now: time.Now, m: map[[32]byte]projectEntry{}}
 }
 
-// refusal is ferund's answer that is not a tenant, passed on as it came.
+// refusal is ferund's answer that is not a project, passed on as it came.
 type refusal struct {
 	status      int
 	contentType string
@@ -122,34 +122,34 @@ func (r *refusal) Error() string {
 	return fmt.Sprintf("ferund answered %d: %s", r.status, strings.TrimSpace(string(r.body)))
 }
 
-// tenantAnswer is ferund's answer: role and environments are left out by
+// projectAnswer is ferund's answer: role and environments are left out by
 // a ferund of before people (ADR 0031), whose every token was its
-// tenant's.
-type tenantAnswer struct {
-	Tenant       string   `json:"tenant"`
+// project's.
+type projectAnswer struct {
+	Project      string   `json:"project"`
 	Role         *string  `json:"role"`
 	Environments []string `json:"environments"`
 }
 
 // access is the answer as an Access.
-func (a tenantAnswer) access() Access {
+func (a projectAnswer) access() Access {
 	if a.Role == nil {
-		return Access{Tenant: a.Tenant, All: true, Write: true}
+		return Access{Project: a.Project, All: true, Write: true}
 	}
 	switch *a.Role {
 	case "read":
-		return Access{Tenant: a.Tenant, All: true}
+		return Access{Project: a.Project, All: true}
 	case "write", "admin":
-		return Access{Tenant: a.Tenant, All: true, Write: true}
+		return Access{Project: a.Project, All: true, Write: true}
 	}
 	envs := slices.DeleteFunc(slices.Clone(a.Environments), func(e string) bool { return e == "" })
-	return Access{Tenant: a.Tenant, Envs: envs}
+	return Access{Project: a.Project, Envs: envs}
 }
 
 // Resolve returns what the reader of c may read. A 4xx of ferund (401
-// unknown, 404 no such tenant, 400) comes back as a *refusal; any other
+// unknown, 404 no such project, 400) comes back as a *refusal; any other
 // failure as an error.
-func (t *Tenants) Resolve(ctx context.Context, c Credential) (Access, error) {
+func (t *Projects) Resolve(ctx context.Context, c Credential) (Access, error) {
 	h := c.key()
 	now := t.now()
 	t.mu.Lock()
@@ -158,7 +158,7 @@ func (t *Tenants) Resolve(ctx context.Context, c Credential) (Access, error) {
 	if ok && now.Before(e.expires) {
 		return e.access, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.ferunURL+askTenant, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.ferunURL+askProject, nil)
 	if err != nil {
 		return Access{}, err
 	}
@@ -169,41 +169,41 @@ func (t *Tenants) Resolve(ctx context.Context, c Credential) (Access, error) {
 		req.Header.Set("Cookie", auth.SessionCookieHeader(c.Session))
 		ttl = min(ttl, sessionTTL)
 	}
-	if c.Tenant != "" {
-		req.Header.Set(auth.TenantHeader, c.Tenant)
+	if c.Project != "" {
+		req.Header.Set(auth.ProjectHeader, c.Project)
 	}
 	resp, err := t.hc.Do(req)
 	if err != nil {
-		return Access{}, fmt.Errorf("ask ferund for the tenant: %w", err)
+		return Access{}, fmt.Errorf("ask ferund for the project: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer))
 	if err != nil {
-		return Access{}, fmt.Errorf("ask ferund for the tenant: %w", err)
+		return Access{}, fmt.Errorf("ask ferund for the project: %w", err)
 	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
 		return Access{}, &refusal{status: resp.StatusCode, contentType: resp.Header.Get("Content-Type"), body: b}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Access{}, fmt.Errorf("ask ferund for the tenant: %s: %s", resp.Status, strings.TrimSpace(string(b)))
+		return Access{}, fmt.Errorf("ask ferund for the project: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}
-	var a tenantAnswer
-	if err := json.Unmarshal(b, &a); err != nil || a.Tenant == "" {
-		return Access{}, fmt.Errorf("ask ferund for the tenant: no tenant in %q", b)
+	var a projectAnswer
+	if err := json.Unmarshal(b, &a); err != nil || a.Project == "" {
+		return Access{}, fmt.Errorf("ask ferund for the project: no project in %q", b)
 	}
 	acc := a.access()
 	t.mu.Lock()
-	if len(t.m) >= tenantCacheMax {
+	if len(t.m) >= projectCacheMax {
 		for k, v := range t.m {
 			if !now.Before(v.expires) {
 				delete(t.m, k)
 			}
 		}
-		if len(t.m) >= tenantCacheMax {
+		if len(t.m) >= projectCacheMax {
 			clear(t.m)
 		}
 	}
-	t.m[h] = tenantEntry{access: acc, expires: now.Add(ttl)}
+	t.m[h] = projectEntry{access: acc, expires: now.Add(ttl)}
 	t.mu.Unlock()
 	return acc, nil
 }

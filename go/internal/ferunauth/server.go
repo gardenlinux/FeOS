@@ -83,12 +83,12 @@ func New(cfg Config, log *slog.Logger) (*Server, error) {
 }
 
 // redirectURI is a provider's redirect URI, cb its callback path
-// (callbackOf): <PublicURL>/callback/ferun, <PublicURL>/callback/<tenant>/<provider>.
+// (callbackOf): <PublicURL>/callback/ferun, <PublicURL>/callback/<project>/<provider>.
 func (s *Server) redirectURI(cb string) string { return s.cfg.PublicURL + callbackPrefix + cb }
 
 // Handler is the sign-in's handler: GET /visit, GET /callback/ferun, GET
-// /callback/{tenant}/{provider}, POST /backchannel/ferun and POST
-// /backchannel/{tenant}/{provider}; anything else is 404.
+// /callback/{project}/{provider}, POST /backchannel/ferun and POST
+// /backchannel/{project}/{provider}; anything else is 404.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch p := r.URL.EscapedPath(); {
@@ -99,7 +99,7 @@ func (s *Server) Handler() http.Handler {
 		case p == "/backchannel/ferun" && r.Method == http.MethodPost:
 			s.backchannelFerun(w, r)
 		case len(p) > len(backchannelPrefix) && p[:len(backchannelPrefix)] == backchannelPrefix && r.Method == http.MethodPost:
-			s.backchannelTenant(w, r, p[len(backchannelPrefix):])
+			s.backchannelProject(w, r, p[len(backchannelPrefix):])
 		default:
 			notFound(w)
 		}

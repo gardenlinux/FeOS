@@ -231,7 +231,7 @@ func (e *Engine) deleteLocked(ctx context.Context, tx *store.Store, row store.Sa
 			return nil, nil, err
 		}
 		keys = append(keys, t.Key())
-		events = append(events, activity.Event{SandboxID: row.ID, TenantID: row.Owner, Node: n, Kind: activity.KindTombstone,
+		events = append(events, activity.Event{SandboxID: row.ID, ProjectID: row.Owner, Node: n, Kind: activity.KindTombstone,
 			Name:   fmt.Sprintf("tombstone on node %s: deleted", n),
 			Detail: map[string]any{"node": n, "incarnation": row.Incarnation.String(), "reason": "deleted"}})
 	}
@@ -247,24 +247,24 @@ func (e *Engine) deleteLocked(ctx context.Context, tx *store.Store, row store.Sa
 			return nil, nil, err
 		}
 	}
-	events = append(events, activity.Event{SandboxID: row.ID, TenantID: row.Owner, Node: row.Node,
+	events = append(events, activity.Event{SandboxID: row.ID, ProjectID: row.Owner, Node: row.Node,
 		Kind: activity.KindSandboxState, ParentSpanID: row.RunID, Name: fmt.Sprintf("%s → deleted", row.ClientState),
 		Detail: map[string]any{"from": row.ClientState, "to": "deleted"}})
 	return keys, events, nil
 }
 
-// DeleteTenant deletes a tenant as §11 says: its deletion is marked and
+// DeleteProject deletes a project as §11 says: its deletion is marked and
 // its tokens go in a first transaction, then its sandboxes in batches of
-// at most 256, each as Delete does, then the tenant row once it has no
-// sandbox left. existed is false for an unknown tenant. The batches are
+// at most 256, each as Delete does, then the project row once it has no
+// sandbox left. existed is false for an unknown project. The batches are
 // not fenced: the row locks serialise them with the leader's loop, which
 // finishes a deletion this call did not.
-func (e *Engine) DeleteTenant(ctx context.Context, tenant string) (bool, error) {
+func (e *Engine) DeleteProject(ctx context.Context, project string) (bool, error) {
 	err := e.st.InTx(ctx, func(tx *store.Store) error {
-		if _, err := tx.LockTenant(ctx, tenant, store.ForUpdate); err != nil {
+		if _, err := tx.LockProject(ctx, project, store.ForUpdate); err != nil {
 			return err
 		}
-		_, err := tx.MarkTenantDeleting(ctx, tenant)
+		_, err := tx.MarkProjectDeleting(ctx, project)
 		return err
 	})
 	if errors.Is(err, store.ErrNoRow) {
@@ -273,15 +273,15 @@ func (e *Engine) DeleteTenant(ctx context.Context, tenant string) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	if err := e.deleteTenantSandboxes(ctx, tenant, nil); err != nil {
+	if err := e.deleteProjectSandboxes(ctx, project, nil); err != nil {
 		return true, err
 	}
 	return true, nil
 }
 
-// deleteTenantSandboxes deletes a deleting tenant's sandboxes in batches,
-// then the tenant. fence, when set, runs first in every transaction.
-func (e *Engine) deleteTenantSandboxes(ctx context.Context, tenant string, fence func(tx *store.Store) error) error {
+// deleteProjectSandboxes deletes a deleting project's sandboxes in batches,
+// then the project. fence, when set, runs first in every transaction.
+func (e *Engine) deleteProjectSandboxes(ctx context.Context, project string, fence func(tx *store.Store) error) error {
 	for {
 		var n int
 		var keys []store.TombstoneKey
@@ -293,7 +293,7 @@ func (e *Engine) deleteTenantSandboxes(ctx context.Context, tenant string, fence
 					return err
 				}
 			}
-			rows, err := tx.LockSandboxesOfOwner(ctx, tenant, tenantBatch)
+			rows, err := tx.LockSandboxesOfOwner(ctx, project, projectBatch)
 			if err != nil {
 				return err
 			}
@@ -312,7 +312,7 @@ func (e *Engine) deleteTenantSandboxes(ctx context.Context, tenant string, fence
 		}
 		e.record(events...)
 		e.processAfterCommit(afterCommit{tombstones: keys})
-		if n < tenantBatch {
+		if n < projectBatch {
 			break
 		}
 	}
@@ -322,14 +322,14 @@ func (e *Engine) deleteTenantSandboxes(ctx context.Context, tenant string, fence
 				return err
 			}
 		}
-		_, err := tx.DeleteTenantIfEmpty(ctx, tenant)
+		_, err := tx.DeleteProjectIfEmpty(ctx, project)
 		return err
 	})
 }
 
-// tenantBatch is the most sandboxes one transaction of a tenant's
+// projectBatch is the most sandboxes one transaction of a project's
 // deletion deletes.
-const tenantBatch = 256
+const projectBatch = 256
 
 // tombstoneDeadline is the deadline of a tombstone's DeletePod of a pod of
 // memoryMiB whose spec names the stop grace grace (0: feosd's 10 s, which

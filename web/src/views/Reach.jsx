@@ -326,9 +326,9 @@ export function ReachesPicker({ spec, mode, list, onChange, disabled = false, er
 
 // EnvLinkName is the environment a sandbox or a job is in, as a link to
 // its page.
-export function EnvLinkName({ tenant, env, navigate }) {
+export function EnvLinkName({ project, env, navigate }) {
   if (!env) return <span className="muted">—</span>;
-  return <EnvLink to={envPath(tenant, env.name || env.id)} navigate={navigate} className="mono">{env.name || env.id}</EnvLink>;
+  return <EnvLink to={envPath(project, env.name || env.id)} navigate={navigate} className="mono">{env.name || env.id}</EnvLink>;
 }
 
 // EgressWords say an egress, with its blocks' exceptions on hover.

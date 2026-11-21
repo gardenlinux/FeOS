@@ -59,19 +59,19 @@ func TestBackchannelFerunWithoutIssuer(t *testing.T) {
 	}
 }
 
-// A tenant's issuer's logout: the provider read from ferund, the token
+// A project's issuer's logout: the provider read from ferund, the token
 // verified against its issuer and client, its visits of the session ended.
-func TestBackchannelTenant(t *testing.T) {
+func TestBackchannelProject(t *testing.T) {
 	h := newHarness(t)
 	h.ferund.set(func(f *fakeFerund) {
-		f.providers["acme/sso"] = oidcProvider{Tenant: "acme", Name: "sso", Issuer: h.issuer.Issuer, ClientID: h.issuer.ClientID,
+		f.providers["acme/sso"] = oidcProvider{Project: "acme", Name: "sso", Issuer: h.issuer.Issuer, ClientID: h.issuer.ClientID,
 			ClientSecret: h.issuer.ClientSecret, Rule: rule{Anyone: true}}
 	})
 	rec := h.do("POST", "/backchannel/acme/sso", nil, logoutForm(h.issuer.LogoutToken(map[string]any{"sid": testSession})))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	if len(h.ferund.ends) != 1 || h.ferund.ends[0] != (endBody{Tenant: "acme", Provider: "sso", Session: testSession}) {
+	if len(h.ferund.ends) != 1 || h.ferund.ends[0] != (endBody{Project: "acme", Provider: "sso", Session: testSession}) {
 		t.Fatalf("ends %+v", h.ferund.ends)
 	}
 	// Unknown at ferund: 404.

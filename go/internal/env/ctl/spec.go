@@ -227,7 +227,7 @@ func checkOf(s spec.Service) check {
 	return c
 }
 
-// secretVersion is the version of a tenant secret a spec pins; 0 when it
+// secretVersion is the version of a project secret a spec pins; 0 when it
 // pins none (the caller takes the latest).
 func secretVersion(s *spec.Spec, name string) int {
 	if s == nil {
@@ -252,7 +252,7 @@ type view struct {
 	rows           []store.EnvInstanceRow
 	volumes        map[string]store.EnvVolume
 	attached       map[string]store.EnvAttached
-	// secrets are the latest versions of the tenant's secrets, for a spec
+	// secrets are the latest versions of the project's secrets, for a spec
 	// that pins none.
 	secrets map[string]int
 	// open are the environment's open incidents.

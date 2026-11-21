@@ -250,7 +250,7 @@ func (c *Controller) probe(ctx context.Context) error {
 			}
 		}
 	}
-	c.probeTenantJobs(ctx, run)
+	c.probeProjectJobs(ctx, run)
 	return nil
 }
 

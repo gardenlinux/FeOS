@@ -18,7 +18,7 @@ import (
 // Attributes are JSON values as they came from OTLP's AnyValue.
 type SpanDoc struct {
 	TS          int64  `json:"ts"`
-	Tenant      string `json:"tenant"`
+	Project     string `json:"tenant"` // KEEP-TENANT: Quickwit's stored name of TraceMappingVersion 4, as Deployment keeps release
 	Environment string `json:"environment,omitempty"`
 	Kind        string `json:"kind,omitempty"`
 	Object      string `json:"object,omitempty"`
@@ -67,7 +67,7 @@ type SpanLink struct {
 	Attributes map[string]json.RawMessage `json:"attributes,omitempty"`
 }
 
-// SpanQuery selects a tenant's spans: the labels and fields set (empty:
+// SpanQuery selects a project's spans: the labels and fields set (empty:
 // any), a time range of ts in Unix ns (both ends included; 0: open), a
 // range of durations (0: open), and attributes each with its value in
 // the span's or the resource's attributes; with Failed only the
@@ -82,7 +82,7 @@ type SpanLink struct {
 // nothing. ObjectKind is the label ferun.kind (service, job, sandbox, …);
 // Egress, a pod's egress spans of that class only (EgressClass).
 type SpanQuery struct {
-	Tenant                                     string
+	Project                                    string
 	Environment, Object, Job, Instance, Source string
 	ObjectKind, Egress                         string
 	Environments                               []string
@@ -105,7 +105,7 @@ func (q SpanQuery) String() string {
 			c = append(c, field+":"+quote(v))
 		}
 	}
-	term("tenant", q.Tenant)
+	term("tenant", q.Project) // KEEP-TENANT: Quickwit's stored name
 	term("environment", q.Environment)
 	if q.Environments != nil {
 		var or []string
@@ -206,7 +206,7 @@ func ValidTagKey(k string) bool {
 // fields, the durations and the attributes).
 func (q *SpanQuery) Match(d *SpanDoc) bool {
 	eq := func(want, got string) bool { return want == "" || want == got }
-	if !eq(q.Tenant, d.Tenant) || !eq(q.Environment, d.Environment) || !eq(q.ObjectKind, d.Kind) ||
+	if !eq(q.Project, d.Project) || !eq(q.Environment, d.Environment) || !eq(q.ObjectKind, d.Kind) ||
 		!eq(q.Object, d.Object) || !eq(q.Job, d.Job) ||
 		!eq(q.Instance, d.Instance) || !eq(q.Source, d.Source) || !eq(q.TraceID, d.TraceID) ||
 		!eq(q.Service, d.ServiceName) || !eq(q.Operation, d.SpanName) {
@@ -289,7 +289,7 @@ func TraceIndexID(prefix string, days int) string {
 }
 
 // TraceIndexConfig is the configuration of the trace index id: its spans
-// partitioned as the log indexes' lines are, by tenant, environment and
+// partitioned as the log indexes' lines are, by project, environment and
 // job (IndexSettings).
 func TraceIndexConfig(id string, s IndexSettings) []byte {
 	raw := func(name string, fast bool) map[string]any {
@@ -306,7 +306,7 @@ func TraceIndexConfig(id string, s IndexSettings) []byte {
 			"field_mappings": []map[string]any{
 				{"name": "ts", "type": "datetime", "input_formats": []string{"unix_timestamp"},
 					"output_format": "unix_timestamp_nanos", "fast": true, "fast_precision": "nanoseconds"},
-				raw("tenant", false), raw("environment", false), raw("kind", false), raw("object", false),
+				raw("tenant", false), raw("environment", false), raw("kind", false), raw("object", false), // KEEP-TENANT: Quickwit's stored name
 				raw("instance", false), raw("job", false), raw("source", false), raw("pod", false), raw("node", false),
 				typed("replica", "u64", false), typed("release", "u64", false), typed("attempt", "u64", false),
 				raw("trace_id", true), raw("span_id", false), raw("parent_span_id", false),
@@ -324,7 +324,7 @@ func TraceIndexConfig(id string, s IndexSettings) []byte {
 				{"name": "links", "type": "array<json>"},
 			},
 			"timestamp_field": "ts",
-			"tag_fields":      []string{"tenant", "environment", "job"},
+			"tag_fields":      []string{"tenant", "environment", "job"}, // KEEP-TENANT: Quickwit's stored name
 			"partition_key":   partitionKey(s.Partitions),
 		},
 		"indexing_settings": map[string]any{"commit_timeout_secs": s.CommitSecs},

@@ -26,20 +26,20 @@ type followSink interface {
 // ErrFollowScope refuses a follow of more than one object: what can be
 // followed live is an environment's object (a service, an addon, a job,
 // by environment, kind and name), finer its replica, instance or stream,
-// or a tenant's job; an environment as a whole is searched, not followed.
-var ErrFollowScope = errors.New("a follow is of one object: environment, kind and object, or a tenant's job, or an instance or stream of one")
+// or a project's job; an environment as a whole is searched, not followed.
+var ErrFollowScope = errors.New("a follow is of one object: environment, kind and object, or a project's job, or an instance or stream of one")
 
 // FollowKey is the topic key of what q's selector follows: one object's,
 // or ErrFollowScope. An instance or a stream is the key of its streams,
 // which must be there and of one object.
-func (s *Store) FollowKey(ctx context.Context, tenant string, sel Selector) (string, error) {
+func (s *Store) FollowKey(ctx context.Context, project string, sel Selector) (string, error) {
 	switch {
 	case sel.Environment != "" && sel.Kind != "" && sel.Object != "":
-		return streamKey(tenant, sel.Environment, sel.Kind, sel.Object, ""), nil
+		return streamKey(project, sel.Environment, sel.Kind, sel.Object, ""), nil
 	case sel.Kind == "" && sel.Job != "":
-		return streamKey(tenant, "", "", "", sel.Job), nil
+		return streamKey(project, "", "", "", sel.Job), nil
 	case sel.Instance != "" || sel.Stream != "":
-		sts, err := selectStreams(ctx, s.db.Pool, tenant, streamFilter{sel: sel, limit: maxStreamsRead})
+		sts, err := selectStreams(ctx, s.db.Pool, project, streamFilter{sel: sel, limit: maxStreamsRead})
 		if err != nil {
 			return "", err
 		}
@@ -78,8 +78,8 @@ const (
 // a stream of the object that starts meanwhile is followed too (its key is
 // the same). Lines beyond followRate a second are skipped, error and warn
 // lines last.
-func (s *Store) Follow(ctx context.Context, tenant string, q Query, out followSink) error {
-	followed, err := s.FollowKey(ctx, tenant, q.Sel)
+func (s *Store) Follow(ctx context.Context, project string, q Query, out followSink) error {
+	followed, err := s.FollowKey(ctx, project, q.Sel)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (s *Store) Follow(ctx context.Context, tenant string, q Query, out followSi
 			}
 		}()
 	}
-	res, err := s.Read(ctx, tenant, q)
+	res, err := s.Read(ctx, project, q)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func (s *Store) Follow(ctx context.Context, tenant string, q Query, out followSi
 		case rs := <-recs:
 			now := time.Now()
 			for _, d := range docsOf(rs) {
-				if !selects(tenant, q.Sel, &d) || given[key{d.Stream, d.Off}] {
+				if !selects(project, q.Sel, &d) || given[key{d.Stream, d.Off}] {
 					continue
 				}
 				given[key{d.Stream, d.Off}] = true
@@ -191,7 +191,7 @@ func (s *Store) Follow(ctx context.Context, tenant string, q Query, out followSi
 			var st *streamRow
 			if !unknown[w.d.Stream] {
 				var err error
-				if st, err = s.followed(ctx, tenant, w.d.Stream, known, now.Sub(w.since) >= streamWait); err != nil {
+				if st, err = s.followed(ctx, project, w.d.Stream, known, now.Sub(w.since) >= streamWait); err != nil {
 					return err
 				}
 			}
@@ -254,11 +254,11 @@ const (
 // followed is the stream of sid that a follow gives a line of: known, or
 // read from the database (a stream that started during the follow); nil
 // for one not found, which is gone once final (known[sid] nil).
-func (s *Store) followed(ctx context.Context, tenant, sid string, known map[string]*streamRow, final bool) (*streamRow, error) {
+func (s *Store) followed(ctx context.Context, project, sid string, known map[string]*streamRow, final bool) (*streamRow, error) {
 	if st, ok := known[sid]; ok {
 		return st, nil
 	}
-	sts, err := selectStreams(ctx, s.db.Pool, tenant, streamFilter{sel: Selector{Stream: sid}, limit: 1})
+	sts, err := selectStreams(ctx, s.db.Pool, project, streamFilter{sel: Selector{Stream: sid}, limit: 1})
 	if err != nil {
 		return nil, fmt.Errorf("stream %s: %w", sid, err)
 	}
@@ -272,10 +272,10 @@ func (s *Store) followed(ctx context.Context, tenant, sid string, known map[stri
 	return sts[0], nil
 }
 
-// selects reports whether a document is of tenant's streams of sel.
-func selects(tenant string, sel Selector, d *quickwit.Doc) bool {
+// selects reports whether a document is of project's streams of sel.
+func selects(project string, sel Selector, d *quickwit.Doc) bool {
 	eq := func(want, got string) bool { return want == "" || want == got }
-	return d.Tenant == tenant && eq(sel.Environment, d.Environment) && eq(sel.Kind, d.Kind) && eq(sel.Object, d.Object) &&
+	return d.Project == project && eq(sel.Environment, d.Environment) && eq(sel.Kind, d.Kind) && eq(sel.Object, d.Object) &&
 		eq(sel.Instance, d.Instance) && eq(sel.Container, d.Container) && eq(sel.Job, d.Job) && eq(sel.Stream, d.Stream) &&
 		eq(sel.Source, d.Source) && (sel.Replica == nil || *sel.Replica == d.Replica) &&
 		(sel.Attempt == nil || *sel.Attempt == d.Attempt) &&

@@ -29,9 +29,9 @@ import (
 )
 
 // The operations of the environments' REST routes (the contract's §5),
-// one method each. tenant is the request's tenant (auth.Tenant.Name); env
+// one method each. project is the request's project (auth.Project.Name); env
 // is the path's {env}: the environment's UUID or its name. An environment
-// the tenant does not have, foreign or absent, is 404 "no such
+// the project does not have, foreign or absent, is 404 "no such
 // environment"; a change of one being deleted is 409. Errors are
 // *apierr.Error with their statuses, or an InvalidSpecError (422) or a
 // BaseMismatchError (409), which WriteError answers; any other error is a
@@ -51,8 +51,8 @@ var tagName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 // CreateEnv is POST /api/v1/environments: the new environment's status
 // and created true (201), or the existing one's and false when the same
 // ID and name exist (200); 409 CodeNameTaken or CodeIDTaken. A deleting
-// tenant is refused.
-func (s *Service) CreateEnv(ctx context.Context, tenant string, req CreateEnvRequest) (EnvStatus, bool, error) {
+// project is refused.
+func (s *Service) CreateEnv(ctx context.Context, project string, req CreateEnvRequest) (EnvStatus, bool, error) {
 	id, err := checkNewEnv(req.Name, req.ID, req.Labels)
 	if err != nil {
 		return EnvStatus{}, false, err
@@ -60,17 +60,17 @@ func (s *Service) CreateEnv(ctx context.Context, tenant string, req CreateEnvReq
 	var row store.Environment
 	var created bool
 	err = s.inTxRetry(ctx, func(tx *store.Store) error {
-		t, err := lockQuota(ctx, tx, tenant)
+		t, err := lockQuota(ctx, tx, project)
 		if err != nil {
 			return err
 		}
 		var use quota.Use
 		if t.Limits.Any() {
-			if use, err = quota.Of(ctx, tx, tenant, uuid.Nil); err != nil {
+			if use, err = quota.Of(ctx, tx, project, uuid.Nil); err != nil {
 				return err
 			}
 		}
-		row, created, err = insertEnv(ctx, tx, tenant, id, req.Name, req.Labels, true)
+		row, created, err = insertEnv(ctx, tx, project, id, req.Name, req.Labels, true)
 		if err != nil || !created {
 			return err
 		}
@@ -85,10 +85,10 @@ func (s *Service) CreateEnv(ctx context.Context, tenant string, req CreateEnvReq
 	return st, created, err
 }
 
-// ListEnvs is GET /api/v1/environments: the tenant's environments with
+// ListEnvs is GET /api/v1/environments: the project's environments with
 // every label of labels (?label=k=v, repeatable, AND), by name.
-func (s *Service) ListEnvs(ctx context.Context, tenant string, labels map[string]string) (EnvList, error) {
-	rows, err := s.st.EnvSummaries(ctx, tenant, labels)
+func (s *Service) ListEnvs(ctx context.Context, project string, labels map[string]string) (EnvList, error) {
+	rows, err := s.st.EnvSummaries(ctx, project, labels)
 	if err != nil {
 		return EnvList{}, fmt.Errorf("list environments: %w", err)
 	}
@@ -102,7 +102,7 @@ func (s *Service) ListEnvs(ctx context.Context, tenant string, labels map[string
 	if err != nil {
 		return EnvList{}, fmt.Errorf("list environments: %w", err)
 	}
-	zone, err := s.hostZone(ctx, s.st, tenant)
+	zone, err := s.hostZone(ctx, s.st, project)
 	if err != nil {
 		return EnvList{}, fmt.Errorf("list environments: %w", err)
 	}
@@ -115,8 +115,8 @@ func (s *Service) ListEnvs(ctx context.Context, tenant string, labels map[string
 
 // GetEnv is GET /api/v1/environments/{env}: its status (§4.9), a read
 // that wakes nothing.
-func (s *Service) GetEnv(ctx context.Context, tenant, env string) (EnvStatus, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) GetEnv(ctx context.Context, project, env string) (EnvStatus, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return EnvStatus{}, err
 	}
@@ -126,17 +126,17 @@ func (s *Service) GetEnv(ctx context.Context, tenant, env string) (EnvStatus, er
 // RenameEnv is PATCH /api/v1/environments/{env} {"name"} (ADR 0037): the
 // environment gets the new name under the same ID and answers its status
 // as GetEnv does. The name is checked as a create's (400); one another
-// environment of the tenant has is 409 CodeNameTaken; the name it has
+// environment of the project has is 409 CodeNameTaken; the name it has
 // already changes nothing; one being deleted is 409. Its hosts, its
 // grants, its logs and everything else keyed by its ID stay.
-func (s *Service) RenameEnv(ctx context.Context, tenant, env string, req RenameEnvRequest) (EnvStatus, error) {
+func (s *Service) RenameEnv(ctx context.Context, project, env string, req RenameEnvRequest) (EnvStatus, error) {
 	if err := checkEnvName(req.Name); err != nil {
 		return EnvStatus{}, err
 	}
 	var before, row store.Environment
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
 		var err error
-		if before, err = resolveEnv(ctx, tx, tenant, env, store.ForUpdate); err != nil {
+		if before, err = resolveEnv(ctx, tx, project, env, store.ForUpdate); err != nil {
 			return err
 		}
 		row = before
@@ -146,7 +146,7 @@ func (s *Service) RenameEnv(ctx context.Context, tenant, env string, req RenameE
 		if before.Deleting {
 			return errDeleting(before.Name)
 		}
-		if _, err := tx.LockEnvironmentByName(ctx, tenant, req.Name, store.NoLock); err == nil {
+		if _, err := tx.LockEnvironmentByName(ctx, project, req.Name, store.NoLock); err == nil {
 			return errNameTaken(req.Name)
 		} else if !errors.Is(err, store.ErrNoRow) {
 			return err
@@ -161,13 +161,13 @@ func (s *Service) RenameEnv(ctx context.Context, tenant, env string, req RenameE
 		return EnvStatus{}, err
 	}
 	if before.Name != row.Name {
-		s.log.Info("environment renamed", "tenant", tenant, "id", row.ID, "from", before.Name, "to", row.Name)
+		s.log.Info("environment renamed", "project", project, "id", row.ID, "from", before.Name, "to", row.Name)
 	}
 	return s.status(ctx, row)
 }
 
 // errNameTaken refuses a rename to a name another environment of the
-// tenant has.
+// project has.
 func errNameTaken(name string) error {
 	return apierr.WithCode(http.StatusConflict, CodeNameTaken, "an environment named %s exists", name)
 }
@@ -177,9 +177,9 @@ func errNameTaken(name string) error {
 // the environment, and its ended jobs' records go with it. Deleting one
 // that is being deleted is no error. One with sandboxes or queued or
 // running jobs is 409 environment_in_use, which names them.
-func (s *Service) DeleteEnv(ctx context.Context, tenant, env string) error {
+func (s *Service) DeleteEnv(ctx context.Context, project, env string) error {
 	return s.st.InTx(ctx, func(tx *store.Store) error {
-		e, err := resolveEnv(ctx, tx, tenant, env, store.ForUpdate)
+		e, err := resolveEnv(ctx, tx, project, env, store.ForUpdate)
 		if err != nil || e.Deleting {
 			return err
 		}
@@ -206,12 +206,12 @@ func (s *Service) DeleteEnv(ctx context.Context, tenant, env string) error {
 
 // PlanSpec is POST /api/v1/environments/plan: a spec validated without an
 // environment (spec.ModeSpec): no secrets, no deployment to compare with, but
-// the tenant's sandboxes and the images.
-func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecRequest) (PlanSpecAnswer, error) {
+// the project's sandboxes and the images.
+func (s *Service) PlanSpec(ctx context.Context, project string, req PlanSpecRequest) (PlanSpecAnswer, error) {
 	sp, fs := spec.Parse(req.Spec)
 	var images map[string]string
 	if !spec.HasErrors(fs) {
-		vc, pins, err := s.loadContext(ctx, tenant, nil, sp, spec.ModeSpec, map[string]spec.SecretInfo{}, nil)
+		vc, pins, err := s.loadContext(ctx, project, nil, sp, spec.ModeSpec, map[string]spec.SecretInfo{}, nil)
 		if err != nil {
 			return PlanSpecAnswer{}, err
 		}
@@ -226,7 +226,7 @@ func (s *Service) PlanSpec(ctx context.Context, tenant string, req PlanSpecReque
 
 // Addons is GET /api/v1/addons: the catalog of the addon types this
 // service validates and runs (Deps.Blueprint), sorted by type; the same
-// for every tenant.
+// for every project.
 func (s *Service) Addons(_ context.Context, _ string) (AddonCatalog, error) {
 	out := AddonCatalog{Addons: []AddonType{}}
 	for _, typ := range addons.Types() {
@@ -275,12 +275,12 @@ func nonNilStrings(ss []string) []string {
 // Plan is POST /api/v1/environments/{env}/plan: parse, validate, resolve
 // the images (unresolvable: a warning), normalise, and diff against
 // req.Base or the current deployment. It changes nothing.
-func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest) (PlanAnswer, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Plan(ctx context.Context, project, env string, req PlanRequest) (PlanAnswer, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
-	p, err := s.plan(ctx, tenant, e, req.Spec, req.Base, spec.ModePlan, nil, nil, false)
+	p, err := s.plan(ctx, project, e, req.Spec, req.Base, spec.ModePlan, nil, nil, false)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
@@ -294,18 +294,18 @@ func (s *Service) Plan(ctx context.Context, tenant, env string, req PlanRequest)
 // older waiting and deploying ones and wake the controller. A normalised
 // spec equal to the current deployment's answers that deployment Unchanged
 // (200), unless it failed.
-func (s *Service) Apply(ctx context.Context, tenant, env string, req ApplyRequest) (ApplyAnswer, error) {
+func (s *Service) Apply(ctx context.Context, project, env string, req ApplyRequest) (ApplyAnswer, error) {
 	if err := checkDeploymentMeta(req.Author, req.Message, req.Annotations); err != nil {
 		return ApplyAnswer{}, err
 	}
-	return s.apply(ctx, tenant, env, applyArgs{raw: req.Spec, base: req.Base, author: req.Author, message: req.Message,
+	return s.apply(ctx, project, env, applyArgs{raw: req.Spec, base: req.Base, author: req.Author, message: req.Message,
 		annotations: req.Annotations, origin: model.OriginApply})
 }
 
 // Deployments is GET /api/v1/environments/{env}/deployments: the newest limit
 // deployments (default 50), newest first.
-func (s *Service) Deployments(ctx context.Context, tenant, env string, limit int) (DeploymentList, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Deployments(ctx context.Context, project, env string, limit int) (DeploymentList, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return DeploymentList{}, err
 	}
@@ -330,8 +330,8 @@ func (s *Service) Deployments(ctx context.Context, tenant, env string, limit int
 
 // Deployment is GET /api/v1/environments/{env}/deployments/{n}: the deployment,
 // its spec and its diff against deployment n-1; 404 "no such deployment".
-func (s *Service) Deployment(ctx context.Context, tenant, env string, number int) (DeploymentDetail, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Deployment(ctx context.Context, project, env string, number int) (DeploymentDetail, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return DeploymentDetail{}, err
 	}
@@ -370,11 +370,11 @@ func isNotFound(err error) bool {
 // deployment n's spec with origin revert, originRef n, and n's annotations
 // plus "ferun.revertOf": n. A secret version n pins that was deleted is an
 // error finding.
-func (s *Service) Revert(ctx context.Context, tenant, env string, number int, req RevertRequest) (ApplyAnswer, error) {
+func (s *Service) Revert(ctx context.Context, project, env string, number int, req RevertRequest) (ApplyAnswer, error) {
 	if err := checkDeploymentMeta(req.Author, req.Message, nil); err != nil {
 		return ApplyAnswer{}, err
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}
@@ -385,7 +385,7 @@ func (s *Service) Revert(ctx context.Context, tenant, env string, number int, re
 	if err != nil {
 		return ApplyAnswer{}, fmt.Errorf("deployment %d: %w", number, err)
 	}
-	return s.apply(ctx, tenant, e.ID.String(), applyArgs{raw: r.Spec, base: req.Base, author: req.Author,
+	return s.apply(ctx, project, e.ID.String(), applyArgs{raw: r.Spec, base: req.Base, author: req.Author,
 		message: req.Message, annotations: revertAnnotations(r), origin: model.OriginRevert,
 		originRef: strconv.Itoa(number)})
 }
@@ -407,27 +407,27 @@ func (s *Service) currentRaw(ctx context.Context, e store.Environment) ([]byte, 
 // originRef "<kind>/<name>") or, with DryRun, planned against req.Base.
 // kind is spec.KindService, KindJob, KindAddon, KindRoute, KindSecret or
 // KindSecurityGroup.
-func (s *Service) PutObject(ctx context.Context, tenant, env, kind, name string, req PutObjectRequest) (ObjectAnswer, error) {
+func (s *Service) PutObject(ctx context.Context, project, env, kind, name string, req PutObjectRequest) (ObjectAnswer, error) {
 	if len(req.Object) == 0 {
 		return ObjectAnswer{}, errBadRequest("object is required: the object as a spec has it under its kind")
 	}
-	return s.objectChange(ctx, tenant, env, kind, name, req.Object, req.Base, req.DryRun, req.Author, req.Message)
+	return s.objectChange(ctx, project, env, kind, name, req.Object, req.Base, req.DryRun, req.Author, req.Message)
 }
 
 // DeleteObject is DELETE /api/v1/environments/{env}/objects/{kind}/{name}:
 // the current deployment's spec without the object, applied or planned; 404
 // "no such object" when the current deployment has none.
-func (s *Service) DeleteObject(ctx context.Context, tenant, env, kind, name string, req DeleteObjectRequest) (ObjectAnswer, error) {
-	return s.objectChange(ctx, tenant, env, kind, name, nil, req.Base, req.DryRun, req.Author, req.Message)
+func (s *Service) DeleteObject(ctx context.Context, project, env, kind, name string, req DeleteObjectRequest) (ObjectAnswer, error) {
+	return s.objectChange(ctx, project, env, kind, name, nil, req.Base, req.DryRun, req.Author, req.Message)
 }
 
 // objectChange is PutObject (object set) and DeleteObject (nil).
-func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name string, object []byte, base int, dryRun bool,
+func (s *Service) objectChange(ctx context.Context, project, env, kind, name string, object []byte, base int, dryRun bool,
 	author, message string) (ObjectAnswer, error) {
 	if err := checkDeploymentMeta(author, message, nil); err != nil {
 		return ObjectAnswer{}, err
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return ObjectAnswer{}, err
 	}
@@ -443,13 +443,13 @@ func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name stri
 		return ObjectAnswer{}, errNoObject(kind, name)
 	}
 	if dryRun {
-		p, err := s.plan(ctx, tenant, e, raw, &base, spec.ModePlan, nil, nil, false)
+		p, err := s.plan(ctx, project, e, raw, &base, spec.ModePlan, nil, nil, false)
 		if err != nil {
 			return ObjectAnswer{}, err
 		}
 		return ObjectAnswer{DryRun: true, Plan: p.answer()}, nil
 	}
-	a, err := s.apply(ctx, tenant, e.ID.String(), applyArgs{raw: raw, base: base, author: author, message: message,
+	a, err := s.apply(ctx, project, e.ID.String(), applyArgs{raw: raw, base: base, author: author, message: message,
 		origin: model.OriginObject, originRef: kind + "/" + name})
 	if err != nil {
 		return ObjectAnswer{}, err
@@ -465,8 +465,8 @@ func (s *Service) objectChange(ctx context.Context, tenant, env, kind, name stri
 // spec without its attached services. No data is copied (Data is an
 // error finding); a secret reference the new environment would not have
 // is one too.
-func (s *Service) Clone(ctx context.Context, tenant, env string, req CloneRequest) (EnvStatus, error) {
-	return s.clone(ctx, tenant, env, req)
+func (s *Service) Clone(ctx context.Context, project, env string, req CloneRequest) (EnvStatus, error) {
+	return s.clone(ctx, project, env, req)
 }
 
 // tagOf is a tag as the answers show it.
@@ -475,8 +475,8 @@ func tagOf(t store.EnvTag) Tag {
 }
 
 // Tags is GET /api/v1/environments/{env}/tags.
-func (s *Service) Tags(ctx context.Context, tenant, env string) (TagList, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Tags(ctx context.Context, project, env string) (TagList, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return TagList{}, err
 	}
@@ -492,8 +492,8 @@ func (s *Service) Tags(ctx context.Context, tenant, env string) (TagList, error)
 }
 
 // Tag is GET /api/v1/environments/{env}/tags/{tag}; 404 "no such tag".
-func (s *Service) Tag(ctx context.Context, tenant, env, tag string) (Tag, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Tag(ctx context.Context, project, env, tag string) (Tag, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return Tag{}, err
 	}
@@ -508,16 +508,16 @@ func (s *Service) Tag(ctx context.Context, tenant, env, tag string) (Tag, error)
 }
 
 // PutTag is PUT /api/v1/environments/{env}/tags/{tag}: set or move the
-// tag to a deployment (movedBy the author, else the tenant); 404 "no such
+// tag to a deployment (movedBy the author, else the project); 404 "no such
 // deployment".
-func (s *Service) PutTag(ctx context.Context, tenant, env, tag string, req PutTagRequest) (Tag, error) {
+func (s *Service) PutTag(ctx context.Context, project, env, tag string, req PutTagRequest) (Tag, error) {
 	if !tagName.MatchString(tag) {
 		return Tag{}, errBadRequest("tag %q must match %s", tag, tagName)
 	}
 	if err := checkDeploymentMeta(req.Author, "", nil); err != nil {
 		return Tag{}, err
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return Tag{}, err
 	}
@@ -526,7 +526,7 @@ func (s *Service) PutTag(ctx context.Context, tenant, env, tag string, req PutTa
 	}
 	by := req.Author
 	if by == "" {
-		by = tenant
+		by = project
 	}
 	t, err := s.st.PutTag(ctx, store.EnvTag{EnvID: e.ID, Tag: tag, Number: req.Deployment, MovedBy: by,
 		MadeBy: auth.MadeBy(ctx)})
@@ -541,8 +541,8 @@ func (s *Service) PutTag(ctx context.Context, tenant, env, tag string, req PutTa
 
 // DeleteTag is DELETE /api/v1/environments/{env}/tags/{tag} (204); 404
 // "no such tag".
-func (s *Service) DeleteTag(ctx context.Context, tenant, env, tag string) error {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) DeleteTag(ctx context.Context, project, env, tag string) error {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return err
 	}
@@ -556,15 +556,15 @@ func (s *Service) DeleteTag(ctx context.Context, tenant, env, tag string) error 
 	return nil
 }
 
-// Secrets is GET /api/v1/environments/{env}/secrets: the tenant's
+// Secrets is GET /api/v1/environments/{env}/secrets: the project's
 // secrets of both kinds (ADR 0055) at their latest versions, by name,
 // never a value or a secret field; 503 without a sealer. The HTTP
 // secrets are the bindings' (s.d.Bindings), none while they are off.
-func (s *Service) Secrets(ctx context.Context, tenant, env string) (SecretList, error) {
+func (s *Service) Secrets(ctx context.Context, project, env string) (SecretList, error) {
 	if s.d.Sealer == nil {
 		return SecretList{}, errNoSecrets()
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return SecretList{}, err
 	}
@@ -615,11 +615,11 @@ func errSecretKind(name, is string) error {
 // version of a secret of either kind, as Secrets lists it; 404 no_secret
 // for none (a value whose versions are all deleted is none), 503 without
 // a sealer.
-func (s *Service) Secret(ctx context.Context, tenant, env, name string) (SecretInfo, error) {
+func (s *Service) Secret(ctx context.Context, project, env, name string) (SecretInfo, error) {
 	if s.d.Sealer == nil {
 		return SecretInfo{}, errNoSecrets()
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return SecretInfo{}, err
 	}
@@ -651,7 +651,7 @@ func (s *Service) Secret(ctx context.Context, tenant, env, name string) (SecretI
 // the same definition again; the bindings' rules and codes); 409
 // secret_kind for a name the other kind holds (ADR 0055); 503 without a
 // sealer. A deployment pins it at its next apply.
-func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req PutSecretRequest) (SecretVersion, error) {
+func (s *Service) PutSecret(ctx context.Context, project, env, name string, req PutSecretRequest) (SecretVersion, error) {
 	if s.d.Sealer == nil {
 		return SecretVersion{}, errNoSecrets()
 	}
@@ -662,7 +662,7 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 				"credential are an HTTP secret's: send them with \"type\": \"http\"")
 		}
 	case SecretHTTP:
-		return s.putHTTPSecret(ctx, tenant, env, name, req)
+		return s.putHTTPSecret(ctx, project, env, name, req)
 	default:
 		return SecretVersion{}, errBadRequest("type %q: a secret is of type \"value\" or \"http\"", req.Type)
 	}
@@ -679,14 +679,14 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 	}
 	by := req.Author
 	if by == "" {
-		by = tenant
+		by = project
 	}
 	var version int
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
-		if err := lockTenant(ctx, tx, tenant); err != nil {
+		if err := lockProject(ctx, tx, project); err != nil {
 			return err
 		}
-		e, err := resolveEnv(ctx, tx, tenant, env, store.ForUpdate)
+		e, err := resolveEnv(ctx, tx, project, env, store.ForUpdate)
 		if err != nil {
 			return err
 		}
@@ -725,7 +725,7 @@ func (s *Service) PutSecret(ctx context.Context, tenant, env, name string, req P
 
 // putHTTPSecret is PutSecret of type "http": the bindings' PutHTTPSecret
 // in the environment, which is not being deleted.
-func (s *Service) putHTTPSecret(ctx context.Context, tenant, env, name string, req PutSecretRequest) (
+func (s *Service) putHTTPSecret(ctx context.Context, project, env, name string, req PutSecretRequest) (
 	SecretVersion, error) {
 	if !s.httpSecretsOn() {
 		return SecretVersion{}, apierr.WithCode(http.StatusUnprocessableEntity, "invalid_binding",
@@ -737,7 +737,7 @@ func (s *Service) putHTTPSecret(ctx context.Context, tenant, env, name string, r
 	if err := checkDeploymentMeta(req.Author, "", nil); err != nil {
 		return SecretVersion{}, err
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return SecretVersion{}, err
 	}
@@ -768,12 +768,12 @@ func (s *Service) putHTTPSecret(ctx context.Context, tenant, env, name string, r
 // or the latest or deployed deployment pins it, 409 while the
 // environment is being deleted. 404 no_secret for none, 503 without a
 // sealer.
-func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) error {
+func (s *Service) DeleteSecret(ctx context.Context, project, env, name string) error {
 	if s.d.Sealer == nil {
 		return errNoSecrets()
 	}
 	if s.httpSecretsOn() && spec.IsName(name) {
-		e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+		e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 		if err != nil {
 			return err
 		}
@@ -795,11 +795,11 @@ func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) er
 		}
 	}
 	if !spec.IsSecretName(name) {
-		// A system secret is no tenant's to delete.
+		// A system secret is no project's to delete.
 		return errNoSecret()
 	}
 	return s.st.InTx(ctx, func(tx *store.Store) error {
-		e, err := resolveEnv(ctx, tx, tenant, env, store.ForUpdate)
+		e, err := resolveEnv(ctx, tx, project, env, store.ForUpdate)
 		if err != nil {
 			return err
 		}
@@ -831,8 +831,8 @@ func (s *Service) DeleteSecret(ctx context.Context, tenant, env, name string) er
 
 // Incidents is GET /api/v1/environments/{env}/incidents: newest first,
 // only the open ones with openOnly.
-func (s *Service) Incidents(ctx context.Context, tenant, env string, openOnly bool) (IncidentList, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Incidents(ctx context.Context, project, env string, openOnly bool) (IncidentList, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return IncidentList{}, err
 	}
@@ -849,8 +849,8 @@ func (s *Service) Incidents(ctx context.Context, tenant, env string, openOnly bo
 
 // Incident is GET /api/v1/environments/{env}/incidents/{id}; 404 "no
 // such incident".
-func (s *Service) Incident(ctx context.Context, tenant, env string, id int64) (Incident, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Incident(ctx context.Context, project, env string, id int64) (Incident, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return Incident{}, err
 	}
@@ -881,7 +881,7 @@ const (
 // ctlError maps the controller's answers: ErrNoObject 404, ErrPaused
 // 409 "paused", ErrNoContainerLogs 501, and its refusals of expected
 // states 409 with a code (CodeBusy with Retry-After, CodeNotRunning,
-// CodeNotReady) or plain (an environment or tenant being deleted), never
+// CodeNotReady) or plain (an environment or project being deleted), never
 // 500. Some of those refusals carry no sentinel of the controller's, and
 // are known by their texts.
 func ctlError(err error, kind, name string) error {
@@ -919,7 +919,7 @@ func ctlError(err error, kind, name string) error {
 		return apierr.WithCode(http.StatusConflict, CodeNotRunning, "%s", msg)
 	case errors.Is(err, ctl.ErrNotReady):
 		return apierr.WithCode(http.StatusConflict, CodeNotReady, "%s", msg)
-	case msg == "the environment is being deleted" || msg == "the tenant is being deleted":
+	case msg == "the environment is being deleted" || msg == "the project is being deleted":
 		return apierr.New(http.StatusConflict, "%s", msg)
 	case strings.HasPrefix(msg, "process logs need the tools' runner"):
 		return apierr.New(http.StatusServiceUnavailable, "%s", msg)
@@ -933,8 +933,8 @@ func ctlError(err error, kind, name string) error {
 // 409 "paused" for a paused instance (never woken), 409 CodeNotRunning
 // for one that does not run or is not there yet, 404 naming the replica
 // for one the object does not have.
-func (s *Service) Logs(ctx context.Context, tenant, env, kind, name string, lines, replica int) (LogsAnswer, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Logs(ctx context.Context, project, env, kind, name string, lines, replica int) (LogsAnswer, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return LogsAnswer{}, err
 	}
@@ -964,8 +964,8 @@ func (s *Service) Logs(ctx context.Context, tenant, env, kind, name string, line
 // (202): an attached service's process, an image service's replicas one
 // at a time; 409 CodeBusy (Retry-After) while the first has an op in
 // flight.
-func (s *Service) RestartService(ctx context.Context, tenant, env, name string) error {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) RestartService(ctx context.Context, project, env, name string) error {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return err
 	}
@@ -979,8 +979,8 @@ func (s *Service) RestartService(ctx context.Context, tenant, env, name string) 
 // run, attempt 1; 409 CodeBusy while a run of the job runs, of any deployment
 // ("job X runs already (deployment N, attempt M)", Retry-After 30); 409
 // CodeNotReady while its template cannot render.
-func (s *Service) RunJob(ctx context.Context, tenant, env, name string) error {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) RunJob(ctx context.Context, project, env, name string) error {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return err
 	}
@@ -993,8 +993,8 @@ func (s *Service) RunJob(ctx context.Context, tenant, env, name string) error {
 // CreateRouteToken is POST /api/v1/environments/{env}/route-tokens: a new
 // token of the route door (32 random bytes, base64url), shown once (201);
 // only its SHA-256 is kept.
-func (s *Service) CreateRouteToken(ctx context.Context, tenant, env string) (RouteToken, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) CreateRouteToken(ctx context.Context, project, env string) (RouteToken, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return RouteToken{}, err
 	}
@@ -1012,8 +1012,8 @@ func (s *Service) CreateRouteToken(ctx context.Context, tenant, env string) (Rou
 
 // RevokeRouteTokens is DELETE /api/v1/environments/{env}/route-tokens:
 // every route token of the environment revoked (204).
-func (s *Service) RevokeRouteTokens(ctx context.Context, tenant, env string) error {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) RevokeRouteTokens(ctx context.Context, project, env string) error {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return err
 	}

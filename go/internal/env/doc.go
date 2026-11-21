@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package env is ferund's environments service (ADR 0018): typed objects
-// of a tenant (services, jobs, addons, routes, secrets) that run
+// of a project (services, jobs, addons, routes, secrets) that run
 // together, changed only by numbered, immutable deployments.
 //
 // The service answers the REST API's environment routes (internal/api

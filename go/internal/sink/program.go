@@ -19,20 +19,20 @@ import (
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
 )
 
-// tenantTTL is how long a token's tenant is kept.
-const tenantTTL = time.Minute
+// projectTTL is how long a token's project is kept.
+const projectTTL = time.Minute
 
 // Program is a running sink: its database, index, identity, the two
 // listeners and the loops of the cold stage and the sweep.
 type Program struct {
-	cfg     Config
-	log     *slog.Logger
-	db      *db.DB
-	store   *Store
-	traces  *Traces
-	ident   *Identity
-	tenants *Tenants
-	apiLis  net.Listener
+	cfg      Config
+	log      *slog.Logger
+	db       *db.DB
+	store    *Store
+	traces   *Traces
+	ident    *Identity
+	projects *Projects
+	apiLis   net.Listener
 
 	mu        sync.Mutex
 	ingestLis net.Listener
@@ -103,7 +103,7 @@ func New(ctx context.Context, cfg Config, deps Deps, log *slog.Logger) (*Program
 		store:    NewStore(d, index, rlog, cfg, log),
 		traces:   NewTraces(d, traceIndex, rlog, cfg, log),
 		ident:    NewIdentity(cfg.FerunURL, cfg.ServiceToken, cfg.TrustDomain, cfg.Name, deps.HTTP, log),
-		tenants:  NewTenants(cfg.FerunURL, deps.HTTP, tenantTTL),
+		projects: NewProjects(cfg.FerunURL, deps.HTTP, projectTTL),
 		apiLis:   lis,
 		ingestUp: make(chan struct{}),
 	}, nil
@@ -174,7 +174,7 @@ func (p *Program) Run(ctx context.Context) error {
 
 func (p *Program) serveAPI(ctx context.Context) error {
 	srv := &http.Server{
-		Handler:           newAPI(p.store, p.traces, p.tenants, p.ingestUp, p.log),
+		Handler:           newAPI(p.store, p.traces, p.projects, p.ingestUp, p.log),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		BaseContext:       func(net.Listener) context.Context { return ctx },

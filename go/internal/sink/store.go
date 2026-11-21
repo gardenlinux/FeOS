@@ -62,7 +62,7 @@ func (k StreamKey) less(o StreamKey) bool {
 // attributes. Node is "" for an ingress's stream; Source is
 // SourceIngress, SourceEgress or SourceContainer.
 type Labels struct {
-	Tenant, Node, Instance, Environment, Kind, Object, Job string
+	Project, Node, Instance, Environment, Kind, Object, Job string
 	// Deployment is ferun.deployment (or its earlier word ferun.release);
 	// it is stored in the column release, as Doc keeps the field release.
 	Replica, Deployment, Attempt int
@@ -96,9 +96,9 @@ type StreamBatch struct {
 	Next   int64
 }
 
-// ErrQuota is Ingest's refusal of a tenant over its quota; the other
-// tenants' lines of the batch are stored.
-var ErrQuota = errors.New("over the tenant's log quota")
+// ErrQuota is Ingest's refusal of a project over its quota; the other
+// projects' lines of the batch are stored.
+var ErrQuota = errors.New("over the project's log quota")
 
 // newSID returns a new stream ID, s_ and 16 hex digits.
 func newSID() (string, error) {
@@ -112,8 +112,8 @@ func newSID() (string, error) {
 // Ingest stores a batch: in one transaction, each stream's row (its
 // labels the first write's) locked, its new lines (above its last
 // offset) produced to its index's topic, then the stream's counters and
-// times and the tenants' usage of the day, and the commit. A stream of a
-// tenant over its quota is left out and Ingest returns ErrQuota (wrapped)
+// times and the projects' usage of the day, and the commit. A stream of a
+// project over its quota is left out and Ingest returns ErrQuota (wrapped)
 // after the commit. A failed produce stores nothing: the node sends
 // again.
 func (s *Store) Ingest(ctx context.Context, batch []StreamBatch) error {
@@ -124,12 +124,12 @@ func (s *Store) Ingest(ctx context.Context, batch []StreamBatch) error {
 		refused := map[string]bool{}
 		if s.cfg.Quota > 0 {
 			for _, b := range batch {
-				t := b.Labels.Tenant
+				t := b.Labels.Project
 				if _, seen := refused[t]; seen {
 					continue
 				}
 				var used int64
-				err := tx.QueryRow(ctx, `SELECT bytes FROM log_usage WHERE tenant = $1 AND day = (now() AT TIME ZONE 'utc')::date`,
+				err := tx.QueryRow(ctx, `SELECT bytes FROM log_usage WHERE project = $1 AND day = (now() AT TIME ZONE 'utc')::date`,
 					t).Scan(&used)
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 					return err
@@ -145,7 +145,7 @@ func (s *Store) Ingest(ctx context.Context, batch []StreamBatch) error {
 		var counts []streamCount
 		for i := range batch {
 			b := &batch[i]
-			if refused[b.Labels.Tenant] {
+			if refused[b.Labels.Project] {
 				continue
 			}
 			c, rs, err := s.ingestStream(ctx, tx, b)
@@ -154,7 +154,7 @@ func (s *Store) Ingest(ctx context.Context, batch []StreamBatch) error {
 			}
 			counts = append(counts, c)
 			recs[c.topic] = append(recs[c.topic], rs...)
-			usage[b.Labels.Tenant] += c.bytes
+			usage[b.Labels.Project] += c.bytes
 		}
 		for topic, rs := range recs {
 			if err := s.pipes.produce(ctx, topic, rs); err != nil {
@@ -173,8 +173,8 @@ func (s *Store) Ingest(ctx context.Context, batch []StreamBatch) error {
 			if n == 0 {
 				continue
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO log_usage (tenant, day, bytes) VALUES ($1, (now() AT TIME ZONE 'utc')::date, $2)
-				ON CONFLICT (tenant, day) DO UPDATE SET bytes = log_usage.bytes + EXCLUDED.bytes`, t, n); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO log_usage (project, day, bytes) VALUES ($1, (now() AT TIME ZONE 'utc')::date, $2)
+				ON CONFLICT (project, day) DO UPDATE SET bytes = log_usage.bytes + EXCLUDED.bytes`, t, n); err != nil {
 				return err
 			}
 		}
@@ -216,11 +216,11 @@ func (s *Store) ingestStream(ctx context.Context, tx pgx.Tx, b *StreamBatch) (st
 	if source == "" {
 		source = SourceContainer
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO log_streams (sid, pod, container, log_id, tenant, node, instance, environment,
+	if _, err := tx.Exec(ctx, `INSERT INTO log_streams (sid, pod, container, log_id, project, node, instance, environment,
 			kind, object, replica, release, job, attempt, retention_days, labels, source)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		ON CONFLICT (pod, container, log_id) DO NOTHING`,
-		sid, b.Key.Pod, b.Key.Container, b.Key.LogID, l.Tenant, l.Node, l.Instance, l.Environment,
+		sid, b.Key.Pod, b.Key.Container, b.Key.LogID, l.Project, l.Node, l.Instance, l.Environment,
 		l.Kind, l.Object, l.Replica, l.Deployment, l.Job, l.Attempt, retention, l.Attrs, source); err != nil {
 		return streamCount{}, nil, fmt.Errorf("stream: %w", err)
 	}

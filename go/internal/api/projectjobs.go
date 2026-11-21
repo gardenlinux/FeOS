@@ -15,45 +15,45 @@ import (
 	"github.com/gardenlinux/feos/go/internal/tools"
 )
 
-// TenantJobs is the tenants' jobs (*env.Service, ADR 0018 "A tenant's job"):
-// one method per job route, tenant class. nil: no job route is
+// ProjectJobs is the projects' jobs (*env.Service, ADR 0018 "A project's job"):
+// one method per job route, project class. nil: no job route is
 // registered.
-type TenantJobs interface {
-	CreateTenantJob(ctx context.Context, tenant, key string, req envs.CreateTenantJobRequest) (envs.TenantJobStatus, bool, error)
-	ListTenantJobs(ctx context.Context, tenant string, labels map[string]string, envIDs []uuid.UUID) (envs.TenantJobList,
+type ProjectJobs interface {
+	CreateProjectJob(ctx context.Context, project, key string, req envs.CreateProjectJobRequest) (envs.ProjectJobStatus, bool, error)
+	ListProjectJobs(ctx context.Context, project string, labels map[string]string, envIDs []uuid.UUID) (envs.ProjectJobList,
 		error)
-	GetTenantJob(ctx context.Context, tenant, id string) (envs.TenantJobStatus, error)
-	TenantJobLogs(ctx context.Context, tenant, id string, lines int) (envs.TenantJobLogsAnswer, error)
-	CancelTenantJob(ctx context.Context, tenant, id string) (envs.TenantJobStatus, error)
-	DeleteTenantJob(ctx context.Context, tenant, id string) error
+	GetProjectJob(ctx context.Context, project, id string) (envs.ProjectJobStatus, error)
+	ProjectJobLogs(ctx context.Context, project, id string, lines int) (envs.ProjectJobLogsAnswer, error)
+	CancelProjectJob(ctx context.Context, project, id string) (envs.ProjectJobStatus, error)
+	DeleteProjectJob(ctx context.Context, project, id string) error
 }
 
-// tenantJobRoutes registers the jobs' routes, tenant class, each a thin adapter
-// of a request to one method of Deps.TenantJobs; none without the service.
-// A tenant's job runs in an environment (ADR 0035): its routes need the
-// role on it, an environment's grant or the tenant's; the list shows what
+// projectJobRoutes registers the jobs' routes, project class, each a thin adapter
+// of a request to one method of Deps.ProjectJobs; none without the service.
+// A project's job runs in an environment (ADR 0035): its routes need the
+// role on it, an environment's grant or the project's; the list shows what
 // the principal reads.
-func (s *server) tenantJobRoutes(tenant func(n need, pattern string, h apiHandler)) {
-	if s.deps.TenantJobs == nil {
+func (s *server) projectJobRoutes(project func(n need, pattern string, h apiHandler)) {
+	if s.deps.ProjectJobs == nil {
 		return
 	}
-	tenant(byHandler(write), "POST /api/v1/jobs", s.createTenantJob)
-	tenant(member, "GET /api/v1/jobs", s.listTenantJobs)
-	tenant(onJob(read), "GET /api/v1/jobs/{id}", s.getTenantJob)
-	tenant(onJob(write), "DELETE /api/v1/jobs/{id}", s.deleteTenantJob)
-	tenant(onJob(read), "GET /api/v1/jobs/{id}/logs", s.tenantJobLogs)
-	tenant(onJob(write), "POST /api/v1/jobs/{id}/cancel", s.cancelTenantJob)
+	project(byHandler(write), "POST /api/v1/jobs", s.createProjectJob)
+	project(member, "GET /api/v1/jobs", s.listProjectJobs)
+	project(onJob(read), "GET /api/v1/jobs/{id}", s.getProjectJob)
+	project(onJob(write), "DELETE /api/v1/jobs/{id}", s.deleteProjectJob)
+	project(onJob(read), "GET /api/v1/jobs/{id}/logs", s.projectJobLogs)
+	project(onJob(write), "POST /api/v1/jobs/{id}/cancel", s.cancelProjectJob)
 }
 
-// createTenantJob is POST /api/v1/jobs, with an Idempotency-Key as the tool
+// createProjectJob is POST /api/v1/jobs, with an Idempotency-Key as the tool
 // calls take one: 201 for a new job, 200 with the job a create of the
 // same request and key made. It needs write on the job's environment.
-func (s *server) createTenantJob(w http.ResponseWriter, r *http.Request) error {
+func (s *server) createProjectJob(w http.ResponseWriter, r *http.Request) error {
 	key, err := tools.IdempotencyKey(r)
 	if err != nil {
 		return err
 	}
-	var req envs.CreateTenantJobRequest
+	var req envs.CreateProjectJobRequest
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func (s *server) createTenantJob(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	job, created, err := s.deps.TenantJobs.CreateTenantJob(r.Context(), tenantOf(r), key, req)
+	job, created, err := s.deps.ProjectJobs.CreateProjectJob(r.Context(), projectOf(r), key, req)
 	if err != nil {
 		return err
 	}
@@ -73,9 +73,9 @@ func (s *server) createTenantJob(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, status, job)
 }
 
-// listTenantJobs is GET /api/v1/jobs?label=k=v…[&environment=]: every
+// listProjectJobs is GET /api/v1/jobs?label=k=v…[&environment=]: every
 // label must match; the jobs of the environments the principal reads.
-func (s *server) listTenantJobs(w http.ResponseWriter, r *http.Request) error {
+func (s *server) listProjectJobs(w http.ResponseWriter, r *http.Request) error {
 	envIDs, err := s.readableEnvs(r)
 	if err != nil {
 		return err
@@ -88,43 +88,43 @@ func (s *server) listTenantJobs(w http.ResponseWriter, r *http.Request) error {
 		}
 		labels[k] = v
 	}
-	list, err := s.deps.TenantJobs.ListTenantJobs(r.Context(), tenantOf(r), labels, envIDs)
+	list, err := s.deps.ProjectJobs.ListProjectJobs(r.Context(), projectOf(r), labels, envIDs)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, list)
 }
 
-func (s *server) getTenantJob(w http.ResponseWriter, r *http.Request) error {
-	job, err := s.deps.TenantJobs.GetTenantJob(r.Context(), tenantOf(r), r.PathValue("id"))
+func (s *server) getProjectJob(w http.ResponseWriter, r *http.Request) error {
+	job, err := s.deps.ProjectJobs.GetProjectJob(r.Context(), projectOf(r), r.PathValue("id"))
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, job)
 }
 
-func (s *server) deleteTenantJob(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.TenantJobs.DeleteTenantJob(r.Context(), tenantOf(r), r.PathValue("id")); err != nil {
+func (s *server) deleteProjectJob(w http.ResponseWriter, r *http.Request) error {
+	if err := s.deps.ProjectJobs.DeleteProjectJob(r.Context(), projectOf(r), r.PathValue("id")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusNoContent)
 }
 
-// tenantJobLogs is GET /api/v1/jobs/{id}/logs?lines=N.
-func (s *server) tenantJobLogs(w http.ResponseWriter, r *http.Request) error {
+// projectJobLogs is GET /api/v1/jobs/{id}/logs?lines=N.
+func (s *server) projectJobLogs(w http.ResponseWriter, r *http.Request) error {
 	lines, err := queryInt(r, "lines")
 	if err != nil {
 		return err
 	}
-	out, err := s.deps.TenantJobs.TenantJobLogs(r.Context(), tenantOf(r), r.PathValue("id"), lines)
+	out, err := s.deps.ProjectJobs.ProjectJobLogs(r.Context(), projectOf(r), r.PathValue("id"), lines)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
 
-func (s *server) cancelTenantJob(w http.ResponseWriter, r *http.Request) error {
-	job, err := s.deps.TenantJobs.CancelTenantJob(r.Context(), tenantOf(r), r.PathValue("id"))
+func (s *server) cancelProjectJob(w http.ResponseWriter, r *http.Request) error {
+	job, err := s.deps.ProjectJobs.CancelProjectJob(r.Context(), projectOf(r), r.PathValue("id"))
 	if err != nil {
 		return err
 	}

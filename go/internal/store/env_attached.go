@@ -16,11 +16,11 @@ import (
 )
 
 // EnvAttached is a row of env_attached: an attached service, a supervised
-// process in a tenant's sandbox.
+// process in a project's sandbox.
 type EnvAttached struct {
 	EnvID     uuid.UUID
 	Service   string
-	SandboxID podid.ID // the tenant's sandbox it runs in (no foreign key)
+	SandboxID podid.ID // the project's sandbox it runs in (no foreign key)
 	// SandboxIncarnation is the incarnation of the sandbox the service
 	// last used (its process started in, or recorded with); a new one
 	// under the same ID starts the service anew (§13.6). uuid.Nil: NULL.

@@ -146,7 +146,7 @@ func TestWorkloadRules(t *testing.T) {
 		{ID: sbx, Reaches: spec.Reaches{Entries: []spec.Use{{Service: "catalog", Port: spec.PortRef{Name: "http"}},
 			{Addon: "db"}, {Service: "gone", Port: spec.PortRef{Name: "x"}}}}},
 		{ID: all, Reaches: spec.Reaches{All: true}, Egress: &spec.Egress{Mode: spec.EgressNone}},
-		{ID: job, TenantJob: true},
+		{ID: job, ProjectJob: true},
 		{ID: box},
 	}
 	port := func(string, spec.Addon) int { return 5432 }

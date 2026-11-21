@@ -96,34 +96,34 @@ func (r *HTTPPreflightResult) fail(berr *bindingErr) *HTTPPreflightResult {
 // maxProbePath bounds a probe's path.
 const maxProbePath = 4096
 
-// maxTenantPreflights bounds a tenant's HTTP preflights and environment
+// maxProjectPreflights bounds a project's HTTP preflights and environment
 // binding checks in flight on this instance: each resolves, dials out and
 // may take its whole budget. Beyond, 429 too_many_preflights.
-const maxTenantPreflights = 2
+const maxProjectPreflights = 2
 
-// codeTooManyPreflights is the 429 of a tenant with maxTenantPreflights in
+// codeTooManyPreflights is the 429 of a project with maxProjectPreflights in
 // flight.
 const codeTooManyPreflights = "too_many_preflights"
 
-// takePreflight takes one of the tenant's preflights in flight and returns
-// what gives it back; a 429 when the tenant has maxTenantPreflights.
-func (s *Service) takePreflight(tenant string) (func(), error) {
+// takePreflight takes one of the project's preflights in flight and returns
+// what gives it back; a 429 when the project has maxProjectPreflights.
+func (s *Service) takePreflight(project string) (func(), error) {
 	s.preflightMu.Lock()
 	defer s.preflightMu.Unlock()
-	if s.preflights[tenant] >= maxTenantPreflights {
+	if s.preflights[project] >= maxProjectPreflights {
 		return nil, apierr.WithCode(http.StatusTooManyRequests, codeTooManyPreflights,
-			"%d HTTP preflights or binding checks of this tenant are in flight; try again once one has ended",
-			maxTenantPreflights).RetryAfter(1)
+			"%d HTTP preflights or binding checks of this project are in flight; try again once one has ended",
+			maxProjectPreflights).RetryAfter(1)
 	}
 	if s.preflights == nil {
 		s.preflights = map[string]int{}
 	}
-	s.preflights[tenant]++
+	s.preflights[project]++
 	return func() {
 		s.preflightMu.Lock()
 		defer s.preflightMu.Unlock()
-		if s.preflights[tenant]--; s.preflights[tenant] <= 0 {
-			delete(s.preflights, tenant)
+		if s.preflights[project]--; s.preflights[project] <= 0 {
+			delete(s.preflights, project)
 		}
 	}, nil
 }
@@ -131,7 +131,7 @@ func (s *Service) takePreflight(tenant string) (func(), error) {
 // HTTPPreflight is POST /api/v1/http/preflight: {"binding": B, "probe":
 // {"method", "path"}?}. It answers 200 with the result, ok or not; 400
 // only for a body that is not the request's JSON; 429 too_many_preflights
-// while the tenant has maxTenantPreflights in flight.
+// while the project has maxProjectPreflights in flight.
 func (s *Service) HTTPPreflight(w http.ResponseWriter, r *http.Request) {
 	if s.off(w, r) {
 		return
@@ -149,8 +149,8 @@ func (s *Service) HTTPPreflight(w http.ResponseWriter, r *http.Request) {
 		apierr.WriteJSON(w, http.StatusOK, res.fail(bindingErrf(codeInvalidBinding, "binding is required")))
 		return
 	}
-	tenant, _ := auth.TenantFrom(r.Context())
-	release, err := s.takePreflight(tenant.Name)
+	project, _ := auth.ProjectFrom(r.Context())
+	release, err := s.takePreflight(project.Name)
 	if err != nil {
 		apierr.Write(w, err)
 		return
@@ -161,15 +161,15 @@ func (s *Service) HTTPPreflight(w http.ResponseWriter, r *http.Request) {
 
 // PreflightHTTP runs the preflight of a binding as a pod would receive it
 // (an environment's binding, its secrets resolved), for the environments'
-// check of the tenant's; a 429 too_many_preflights while the tenant has
-// maxTenantPreflights in flight.
-func (s *Service) PreflightHTTP(ctx context.Context, tenant string, p *fleetv1.HttpBinding, probe *HTTPProbe) (
+// check of the project's; a 429 too_many_preflights while the project has
+// maxProjectPreflights in flight.
+func (s *Service) PreflightHTTP(ctx context.Context, project string, p *fleetv1.HttpBinding, probe *HTTPProbe) (
 	*HTTPPreflightResult, error) {
 	if !s.enabled {
 		res := &HTTPPreflightResult{Addresses: []string{}}
 		return res.fail(bindingErrf(codeUnreachable, "HTTP bindings are not enabled on this platform")), nil
 	}
-	release, err := s.takePreflight(tenant)
+	release, err := s.takePreflight(project)
 	if err != nil {
 		return nil, err
 	}

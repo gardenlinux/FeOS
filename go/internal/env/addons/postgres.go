@@ -433,7 +433,7 @@ hostssl   all  all       all   cert  clientname=DN map=` + postgresMap + `
 // "feid" takes a workload's certificate to each role a reference of the
 // deployment grants it. A line names the workload by its certificate's
 // OU, which the issuer writes (ADR 0036): a hash of the environment's ID,
-// the object's kind and its name, so tenant, environment and object at
+// the object's kind and its name, so project, environment and object at
 // once, never a name alone. The CN, which names one pod, is matched for
 // its shape alone. PostgreSQL prints the subject as RFC 2253 does, the
 // encoding's order reversed: "CN=<td>/<pod>,OU=<workload>".
@@ -456,7 +456,7 @@ func postgresIdent(grants []Grant) string {
 
 // postgresWorkload is a workload's ID as a certificate's OU carries it:
 // wl-<32 hex> (a service, a job), wl-s-<id> (a sandbox), wl-j-<id> (a
-// tenant's job). Nothing in it is special to a regular expression.
+// project's job). Nothing in it is special to a regular expression.
 var postgresWorkload = regexp.MustCompile(`^wl-([0-9a-f]{32}|[sj]-[a-z0-9][a-z0-9-]{0,62})$`)
 
 // postgresTLSScript is the tls step. First TLS: the key, the chain and

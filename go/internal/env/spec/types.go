@@ -40,7 +40,7 @@ type Spec struct {
 }
 
 // Service is a long-running object: replicas of an image (runtime
-// "image"), or a supervised process in a sandbox of the tenant (runtime
+// "image"), or a supervised process in a sandbox of the project (runtime
 // "attached", e.g. a dev server of a workspace).
 type Service struct {
 	// Runtime is RuntimeImage (the default when Image is set) or
@@ -57,7 +57,7 @@ type Service struct {
 	// nil: anonymous. Image runtime only.
 	ImageCredentials *ImageCredentials `json:"imageCredentials,omitempty"`
 	// Sandbox is the attached runtime's sandbox: the ID of a sandbox of
-	// the tenant (not an instance row), short or a UUID.
+	// the project (not an instance row), short or a UUID.
 	Sandbox string `json:"sandbox,omitempty"`
 	// Command replaces the image's entrypoint and cmd (empty: they run);
 	// the attached runtime's process (required there).
@@ -325,7 +325,7 @@ type Route struct {
 	From []string `json:"from,omitempty"`
 }
 
-// SecretRef pins a tenant secret of the environment to a version; 0: the
+// SecretRef pins a project secret of the environment to a version; 0: the
 // latest when the deployment is applied. A value secret's pin is its
 // version alone. An HTTP secret's (ADR 0055), which a variable references
 // by {"secret": n, "key": "url"|"host"}, has its Type, and, normalised,

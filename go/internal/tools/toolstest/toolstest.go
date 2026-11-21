@@ -44,7 +44,7 @@ const (
 	Domain      = "example.test"
 	InstanceID  = "i1"
 	NodeName    = "n1"
-	Tenant      = "acme"
+	Project     = "acme"
 )
 
 // Options shape an environment.
@@ -176,7 +176,7 @@ func New(t testing.TB, o Options) *Env {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if _, _, err := st.CreateTenant(ctx, Tenant); err != nil {
+	if _, _, err := st.CreateProject(ctx, Project); err != nil {
 		t.Fatal(err)
 	}
 	e.Engine = newEngine(e)
@@ -195,21 +195,21 @@ func (hooks) RegistryHash(context.Context, string) (string, error) { return "", 
 // need none.
 func Sandbox() auth.Sandbox {
 	id := podid.Mint()
-	return auth.Sandbox{ID: id, Owner: Tenant, TokenHash: store.HashToken(id.String())}
+	return auth.Sandbox{ID: id, Owner: Project, TokenHash: store.HashToken(id.String())}
 }
 
-// NewSandbox records a sandbox of the tenant in the database and returns
+// NewSandbox records a sandbox of the project in the database and returns
 // how a request with its token names it.
 func (e *Env) NewSandbox() auth.Sandbox {
 	e.t.Helper()
 	id := podid.Mint()
 	if _, _, err := e.Store.CreateSandbox(context.Background(), store.NewSandbox{
-		ID: id, Owner: Tenant, Image: "test", VCPUs: 1, MemoryMiB: 512,
-		EnvironmentID: dbtest.Environment(e.t, e.Store.Q(), Tenant, "box"),
+		ID: id, Owner: Project, Image: "test", VCPUs: 1, MemoryMiB: 512,
+		EnvironmentID: dbtest.Environment(e.t, e.Store.Q(), Project, "box"),
 	}); err != nil {
 		e.t.Fatal(err)
 	}
-	return auth.Sandbox{ID: id, Owner: Tenant, TokenHash: store.HashToken(id.String())}
+	return auth.Sandbox{ID: id, Owner: Project, TokenHash: store.HashToken(id.String())}
 }
 
 // Pods is the node's PodService over the instance's node connection.

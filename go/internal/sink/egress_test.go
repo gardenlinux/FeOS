@@ -67,7 +67,7 @@ func egressSpan(n int, method, binding string, status int64, code string) *trace
 // erp, answered, and through crm, without a token; job migrate's through
 // crm, answered; one of api that no binding matched. Not counted: a
 // request of api before the range and one of e2, a server span of api,
-// a request of another tenant.
+// a request of another project.
 func egressRequests(t *testing.T, tr *Traces) {
 	t.Helper()
 	for _, r := range []struct {
@@ -91,7 +91,7 @@ func egressRequests(t *testing.T, tr *Traces) {
 		}
 	}
 	other := egressPod("e1", "service", "api")
-	other[attrTenant] = "other"
+	other[attrProject] = "other"
 	if err := ingestSpans(t, tr, traceRequest(other, egressSpan(13, "GET", "erp", 401, ""))); err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +116,12 @@ func egressWant() Egress {
 // The requests through each binding of the environment, from its pods'
 // egress spans: every class counted, the users by kind and object, the
 // newest problem; requests no binding matched, of another environment
-// or tenant, outside the range or not egress are none.
+// or project, outside the range or not egress are none.
 func TestEgress(t *testing.T) {
 	tr, idx, lg := newTestTraces(t, testConfig())
 	ctx := context.Background()
 	egressRequests(t, tr)
-	q := EgressQuery{Tenant: "acme", Environment: "e1", SinceNs: egressT0.UnixNano(), UntilNs: egressT0.Add(time.Minute).UnixNano()}
+	q := EgressQuery{Project: "acme", Environment: "e1", SinceNs: egressT0.UnixNano(), UntilNs: egressT0.Add(time.Minute).UnixNano()}
 	got, err := tr.Egress(ctx, q)
 	if err != nil || len(got.Bindings) != 0 || got.Bindings == nil || got.Truncated {
 		t.Fatalf("before the index's commit: %+v %v", got, err)
@@ -183,7 +183,7 @@ func TestEgressClass(t *testing.T) {
 func TestParseEgressQuery(t *testing.T) {
 	until := egressT0.Add(time.Hour)
 	ok := url.Values{"environment": {"e"}, "since": {"2026-11-19T10:00:00Z"}, "until": {fmt.Sprint(until.UnixNano())}}
-	if q, err := parseEgressQuery(ok, "acme"); err != nil || q.Tenant != "acme" || q.Environment != "e" ||
+	if q, err := parseEgressQuery(ok, "acme"); err != nil || q.Project != "acme" || q.Environment != "e" ||
 		q.SinceNs != egressT0.UnixNano() || q.UntilNs != until.UnixNano() {
 		t.Fatalf("%+v %v", q, err)
 	}
@@ -248,7 +248,7 @@ func TestEgressAPI(t *testing.T) {
 	defer ferund.Close()
 	ready := make(chan struct{})
 	close(ready)
-	srv := httptest.NewServer(newAPI(s, tr, NewTenants(ferund.URL, nil, time.Minute), ready, dbtest.Logger(t)))
+	srv := httptest.NewServer(newAPI(s, tr, NewProjects(ferund.URL, nil, time.Minute), ready, dbtest.Logger(t)))
 	defer srv.Close()
 	get := func(who string, v url.Values) (int, []byte) {
 		t.Helper()
@@ -285,7 +285,7 @@ func TestEgressAPI(t *testing.T) {
 		t.Errorf("another's environment: %d %s", code, b)
 	}
 	if code, _ := get("all", v); code != http.StatusOK {
-		t.Errorf("the tenant's reader: %d", code)
+		t.Errorf("the project's reader: %d", code)
 	}
 	v.Del("since")
 	if code, b := get("all", v); code != http.StatusBadRequest || !strings.Contains(string(b), "since is required") {
@@ -346,7 +346,7 @@ func TestEgressQuickwit(t *testing.T) {
 		t.Fatal(err)
 	}
 	pattern := prefix + "-*"
-	base := quickwit.SpanQuery{Tenant: "acme", Environment: "e1", Source: SourceEgress, SinceNs: egressT0.UnixNano(),
+	base := quickwit.SpanQuery{Project: "acme", Environment: "e1", Source: SourceEgress, SinceNs: egressT0.UnixNano(),
 		UntilNs: egressT0.Add(time.Minute).UnixNano() - 1}
 	queries := []quickwit.SpanQuery{base}
 	for _, k := range egressKinds {

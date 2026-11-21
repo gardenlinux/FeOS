@@ -61,7 +61,7 @@ learned from its transport shapes the third:
 
 - The control plane is one program, `ferund`, the successor of
   `sandbox-api`. It holds everything that is more than one node's
-  business (ADR 0001): tenants and their tokens, the registry of
+  business (ADR 0001): projects and their tokens, the registry of
   sandboxes and environments, placement, the policies that pause,
   hibernate and scale to zero, the front doors, the fleet of nodes, and
   the issuer of ADR 0014.
@@ -80,7 +80,7 @@ learned from its transport shapes the third:
 
 ### One database, one leader
 
-- The state is in PostgreSQL: the registry, tenants, tokens, nodes,
+- The state is in PostgreSQL: the registry, projects, tokens, nodes,
   bookings, events and audit. PostgreSQL runs with replicas and
   automatic failover; `ferund` sees a failover as a reconnect. The
   database is the only part made highly available by something other
@@ -187,7 +187,7 @@ learned from its transport shapes the third:
 
 - The REST API, MCP, the console and the doors to the ports of pods are
   served by every instance behind an ordinary HTTPS balancer, without
-  sticky sessions. The bearer is the sandbox or the tenant; an MCP
+  sticky sessions. The bearer is the sandbox or the project; an MCP
   session ID is signed and self-describing, so any instance accepts it.
   An exec, a tool call or a port forward goes over the serving
   instance's own node connection. A broken stream is the client's to

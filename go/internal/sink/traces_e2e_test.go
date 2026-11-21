@@ -28,7 +28,7 @@ import (
 )
 
 // A node and an ingress export spans over the ingest with their
-// certificates; a tenant reads them in the shape of Jaeger's API: a trace
+// certificates; a project reads them in the shape of Jaeger's API: a trace
 // by its ID from the topic's tail at once, and every read from the index
 // once it committed.
 func TestTracesEndToEnd(t *testing.T) {
@@ -73,7 +73,7 @@ func TestTracesEndToEnd(t *testing.T) {
 
 	start := time.Now().Add(-time.Minute).UnixNano()
 	inSpan := testSpan(traceA, "00f067aa0ba902b7", "", "GET", start, 30*time.Millisecond)
-	inAttrs := map[string]string{attrTenant: "acme", attrPod: "ingress/in-0", attrSource: SourceIngress,
+	inAttrs := map[string]string{attrProject: "acme", attrPod: "ingress/in-0", attrSource: SourceIngress,
 		attrServiceName: "ferun-ingress", attrEnvironment: "env1", attrKind: "service", attrObject: "web"}
 	if resp, err := export(ingress, traceRequest(inAttrs, inSpan)); err != nil || resp.GetPartialSuccess() != nil {
 		t.Fatalf("the ingress's export: %v %v", resp, err)
@@ -135,7 +135,7 @@ func TestTracesEndToEnd(t *testing.T) {
 	}
 	read := func(path string, want int) answer {
 		t.Helper()
-		code, b := get(path, "tenant-token")
+		code, b := get(path, "project-token")
 		var a answer
 		if err := json.Unmarshal(b, &a); code != want || err != nil {
 			t.Fatalf("%s: %d %s", path, code, b)
@@ -144,7 +144,7 @@ func TestTracesEndToEnd(t *testing.T) {
 	}
 	names := func(path string) string {
 		t.Helper()
-		code, b := get(path, "tenant-token")
+		code, b := get(path, "project-token")
 		var a struct {
 			Data  []string `json:"data"`
 			Total int      `json:"total"`
@@ -206,7 +206,7 @@ func TestTracesEndToEnd(t *testing.T) {
 		"service": {"web", "api"}, "since": {fmt.Sprint(until - int64(time.Hour))}, "until": {fmt.Sprint(until)},
 		"step": {"60s"}}.Encode()
 	r, _ := http.NewRequestWithContext(actx, http.MethodGet, traffic, nil)
-	r.Header.Set("Authorization", "Bearer tenant-token")
+	r.Header.Set("Authorization", "Bearer project-token")
 	tresp, err := http.DefaultClient.Do(r)
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestTracesEndToEnd(t *testing.T) {
 		t.Errorf("traffic: %d %+v %v", tresp.StatusCode, tr, err)
 	}
 	r, _ = http.NewRequestWithContext(actx, http.MethodGet, strings.Replace(traffic, "step=60s", "step=1ms", 1), nil)
-	r.Header.Set("Authorization", "Bearer tenant-token")
+	r.Header.Set("Authorization", "Bearer project-token")
 	if tresp, err := http.DefaultClient.Do(r); err != nil || tresp.StatusCode != http.StatusBadRequest {
 		t.Errorf("traffic of a bad step: %v %v", tresp, err)
 	} else {

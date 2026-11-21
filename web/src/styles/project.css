@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* An environment's jobs made by a call, the tenant's Usage and Settings pages. */
-.tenantpage { display: flex; flex-direction: column; gap: 14px; max-width: 1280px; }
-.tenantpage > .pagehead { margin-bottom: 0; }
+/* An environment's jobs made by a call, the project's Usage and Settings pages. */
+.projectpage { display: flex; flex-direction: column; gap: 14px; max-width: 1280px; }
+.projectpage > .pagehead { margin-bottom: 0; }
 .facts b.bad { color: var(--danger); }
 .facts b.ok { color: var(--ok); }
 .facts b.warn { color: var(--warn); }

@@ -220,6 +220,6 @@ func TestIngressesAdmin(t *testing.T) {
 	// Its row stays: removing it again changes nothing and answers the
 	// same, as a node's removal does.
 	expect(t, e.do("DELETE", "/api/v1/admin/ingresses/in-0", adminAuth(), nil), http.StatusNoContent, "")
-	// A tenant is no admin.
-	expect(t, e.do("GET", "/api/v1/admin/ingresses", bearerOf(e.tenantToken), nil), http.StatusUnauthorized, "")
+	// A project is no admin.
+	expect(t, e.do("GET", "/api/v1/admin/ingresses", bearerOf(e.projectToken), nil), http.StatusUnauthorized, "")
 }

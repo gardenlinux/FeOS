@@ -21,7 +21,7 @@ import (
 
 // The names of the engine's leader loops. A ferun_leader hint wakes the
 // loops whose name contains it ("down" after node expiry, "drain",
-// "tombstone", "tenant").
+// "tombstone", "project").
 const (
 	LoopDownSweep        = "sandbox-down-sweep"
 	LoopLostGrace        = "sandbox-lost-grace"
@@ -35,7 +35,7 @@ const (
 	LoopPendingDescribe  = "sandbox-pending-redescription"
 	LoopProcessHolds     = "sandbox-process-holds"
 	LoopExpiredHolds     = "sandbox-expired-holds"
-	LoopTenantDeletion   = "sandbox-tenant-deletion"
+	LoopProjectDeletion  = "sandbox-project-deletion"
 	fencedLockTimeout    = time.Second
 	fencedStmtTimeout    = 3 * time.Second
 	fencedBatch          = 256
@@ -54,7 +54,7 @@ const (
 // hibernate-after (5 s, when set), drain (5 s), tombstones (10 s), stale
 // ops (10 s), the unknown sweep (15 s), repair (30 s), the pending
 // re-description (30 s), process holds (60 s), expired holds (60 s),
-// tenant deletion (60 s) and the lost pushes of HTTP bindings (15 s). The loops that begin ops or call nodes consider
+// project deletion (60 s) and the lost pushes of HTTP bindings (15 s). The loops that begin ops or call nodes consider
 // only nodes the leader is connected to; the database-only loops are not
 // filtered by connection. Idle pause, stale ops and expired holds act on
 // leases that an outage lets expire, and wait until the leader has
@@ -77,7 +77,7 @@ func (e *Engine) Loops() []leader.Loop {
 		leader.Loop{Name: LoopPendingDescribe, Interval: 30 * time.Second, Run: e.pendingRedescription},
 		leader.Loop{Name: LoopProcessHolds, Interval: time.Minute, Run: e.processHolds},
 		leader.Loop{Name: LoopExpiredHolds, Interval: time.Minute, Run: e.expiredHolds},
-		leader.Loop{Name: LoopTenantDeletion, Interval: time.Minute, Run: e.tenantDeletion},
+		leader.Loop{Name: LoopProjectDeletion, Interval: time.Minute, Run: e.projectDeletion},
 		leader.Loop{Name: LoopHTTPBindings, Interval: httpLoopInterval, Run: e.httpBindingsLoop},
 	)
 }
@@ -159,7 +159,7 @@ func (e *Engine) lostGrace(ctx context.Context) error {
 			if l.RunID != "" {
 				e.record(c.runEnd(l.RunID, "lost"))
 			}
-			e.record(activity.Event{SandboxID: l.ID, TenantID: l.Owner, Node: l.Node, Kind: activity.KindSandboxState,
+			e.record(activity.Event{SandboxID: l.ID, ProjectID: l.Owner, Node: l.Node, Kind: activity.KindSandboxState,
 				ParentSpanID: l.RunID, Name: fmt.Sprintf("%s → %s", model.StateUnknown, l.State),
 				Detail: map[string]any{"from": model.StateUnknown, "to": l.State, "previous": l.Previous}})
 		}
@@ -732,17 +732,17 @@ func (e *Engine) expiredHolds(ctx context.Context) error {
 	return nil
 }
 
-// tenantDeletion continues the deletions of tenants that a DELETE began,
+// projectDeletion continues the deletions of projects that a DELETE began,
 // in fenced batches.
-func (e *Engine) tenantDeletion(ctx context.Context) error {
-	tenants, err := e.st.DeletingTenants(ctx)
+func (e *Engine) projectDeletion(ctx context.Context) error {
+	projects, err := e.st.DeletingProjects(ctx)
 	if err != nil {
-		return fmt.Errorf("tenant deletion: %w", err)
+		return fmt.Errorf("project deletion: %w", err)
 	}
 	var errs []error
-	for _, t := range tenants {
-		if err := e.deleteTenantSandboxes(ctx, t, func(tx *store.Store) error { return e.fence(ctx, tx) }); err != nil {
-			errs = append(errs, fmt.Errorf("delete tenant %s: %w", t, err))
+	for _, t := range projects {
+		if err := e.deleteProjectSandboxes(ctx, t, func(tx *store.Store) error { return e.fence(ctx, tx) }); err != nil {
+			errs = append(errs, fmt.Errorf("delete project %s: %w", t, err))
 		}
 	}
 	return errors.Join(errs...)

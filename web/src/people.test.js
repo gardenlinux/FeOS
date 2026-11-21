@@ -3,42 +3,42 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  atLeast, can, envRole, mayBuild, fmtQuota, grantableRoles, higher, inviteLink, myTenants, quotaRows, roleLabel, tenantAccess,
-  tenantHome, tenantNav, viewGate,
+  atLeast, can, envRole, mayBuild, fmtQuota, grantableRoles, higher, inviteLink, myProjects, quotaRows, roleLabel, projectAccess,
+  projectHome, projectNav, viewGate,
 } from './people.js';
 import { parsePath } from './routes.js';
 
 // What /auth/me decides in the UI (ADR 0031): the operator's pages for
-// operators only, a person's tenants with what each role offers.
+// operators only, a person's projects with what each role offers.
 
 const OPERATOR = {
   sub: 'op', person: 'p-op', admin: true, method: 'oidc',
-  tenants: [{ tenant: 'fecode', role: 'admin', environments: [] }, { tenant: 'acme', role: 'admin', environments: [] }],
+  projects: [{ project: 'fecode', role: 'admin', environments: [] }, { project: 'acme', role: 'admin', environments: [] }],
 };
 const BASIC = { username: 'malte', admin: true, method: 'basic' };
 const ANNA = {
   sub: 'anna', person: 'p-anna', admin: false, method: 'oidc',
-  tenants: [
-    { tenant: 'zeta', role: 'read', environments: [{ id: 'e-z1', name: 'stage', role: 'write' }] },
-    { tenant: 'acme', role: 'admin', environments: [] },
-    { tenant: 'shop', role: '', environments: [{ id: 'e-s1', name: 'shop-prod', role: 'read' }] },
+  projects: [
+    { project: 'zeta', role: 'read', environments: [{ id: 'e-z1', name: 'stage', role: 'write' }] },
+    { project: 'acme', role: 'admin', environments: [] },
+    { project: 'shop', role: '', environments: [{ id: 'e-s1', name: 'shop-prod', role: 'read' }] },
   ],
 };
 
 describe('the builder', () => {
-  it('changes a new environment with write on the tenant, one environment with write on it', () => {
-    const zeta = tenantAccess(ANNA, 'zeta');
+  it('changes a new environment with write on the project, one environment with write on it', () => {
+    const zeta = projectAccess(ANNA, 'zeta');
     expect(mayBuild(zeta, '')).toBe(false);
     expect(mayBuild(zeta, 'stage')).toBe(true);
     expect(mayBuild(zeta, 'e-z1')).toBe(true);
     expect(mayBuild(zeta, 'prod')).toBe(false);
-    const shop = tenantAccess(ANNA, 'shop');
+    const shop = projectAccess(ANNA, 'shop');
     expect(mayBuild(shop, 'shop-prod')).toBe(false);
     expect(mayBuild(shop, '')).toBe(false);
-    const acme = tenantAccess(ANNA, 'acme');
+    const acme = projectAccess(ANNA, 'acme');
     expect(mayBuild(acme, '')).toBe(true);
     expect(mayBuild(acme, 'anything')).toBe(true);
-    expect(mayBuild(tenantAccess(null, 'acme'), 'x')).toBe(false);
+    expect(mayBuild(projectAccess(null, 'acme'), 'x')).toBe(false);
   });
 });
 
@@ -62,63 +62,63 @@ describe('roles', () => {
 });
 
 describe('what a role offers', () => {
-  const offers = (role) => can({ tenant: 't', member: true, role, environments: [], operator: false });
+  const offers = (role) => can({ project: 't', member: true, role, environments: [], operator: false });
 
-  it('read: the tenant\'s lists, no change', () => {
-    expect(offers('read')).toMatchObject({ readTenant: true, writeTenant: false, adminTenant: false, members: true, leave: true, operator: false });
+  it('read: the project\'s lists, no change', () => {
+    expect(offers('read')).toMatchObject({ readProject: true, writeProject: false, adminProject: false, members: true, leave: true, operator: false });
   });
 
   it('write: sandboxes and environments; admin: members, invitations and tokens', () => {
-    expect(offers('write')).toMatchObject({ readTenant: true, writeTenant: true, adminTenant: false });
-    expect(offers('admin')).toMatchObject({ readTenant: true, writeTenant: true, adminTenant: true });
+    expect(offers('write')).toMatchObject({ readProject: true, writeProject: true, adminProject: false });
+    expect(offers('admin')).toMatchObject({ readProject: true, writeProject: true, adminProject: true });
   });
 
-  it('grants on environments alone: their environments and the members, no tenant lists', () => {
-    expect(offers('')).toMatchObject({ readTenant: false, writeTenant: false, environments: true, members: true });
+  it('grants on environments alone: their environments and the members, no project lists', () => {
+    expect(offers('')).toMatchObject({ readProject: false, writeProject: false, environments: true, members: true });
   });
 
   it('a non-member is offered nothing', () => {
-    expect(Object.values(can(tenantAccess(ANNA, 'other'))).some(Boolean)).toBe(false);
+    expect(Object.values(can(projectAccess(ANNA, 'other'))).some(Boolean)).toBe(false);
   });
 
-  it('an operator is admin in every tenant, sees the activity, and leaves none', () => {
-    const a = tenantAccess(OPERATOR, 'any-tenant');
+  it('an operator is admin in every project, sees the activity, and leaves none', () => {
+    const a = projectAccess(OPERATOR, 'any-project');
     expect(a).toMatchObject({ member: true, role: 'admin', operator: true });
-    expect(can(a)).toMatchObject({ adminTenant: true, operator: true, leave: false });
+    expect(can(a)).toMatchObject({ adminProject: true, operator: true, leave: false });
   });
 
-  it('the role on an environment is the higher of the tenant\'s and the environment\'s', () => {
-    const z = tenantAccess(ANNA, 'zeta');
+  it('the role on an environment is the higher of the project\'s and the environment\'s', () => {
+    const z = projectAccess(ANNA, 'zeta');
     expect(envRole(z, 'stage')).toBe('write');
     expect(envRole(z, 'e-z1')).toBe('write');
     expect(envRole(z, 'prod')).toBe('read');
-    expect(envRole(tenantAccess(ANNA, 'shop'), 'other')).toBe('');
+    expect(envRole(projectAccess(ANNA, 'shop'), 'other')).toBe('');
   });
 });
 
 describe('me → navigation', () => {
-  it('lists a person\'s tenants by name, with the role or "environments"', () => {
-    expect(myTenants(ANNA).map((t) => [t.tenant, roleLabel(t)])).toEqual([
+  it('lists a person\'s projects by name, with the role or "environments"', () => {
+    expect(myProjects(ANNA).map((t) => [t.project, roleLabel(t)])).toEqual([
       ['acme', 'admin'], ['shop', 'environments'], ['zeta', 'read'],
     ]);
-    expect(myTenants(null)).toEqual([]);
+    expect(myProjects(null)).toEqual([]);
   });
 
-  it('a tenant\'s pages by role', () => {
-    const views = (me, t) => tenantNav(tenantAccess(me, t)).map((n) => n.view);
+  it('a project\'s pages by role', () => {
+    const views = (me, t) => projectNav(projectAccess(me, t)).map((n) => n.view);
     expect(views(ANNA, 'acme')).toEqual(['overview', 'environments', 'domains', 'providers', 'members', 'tokens', 'usage', 'settings']);
     expect(views(ANNA, 'zeta')).toEqual(['overview', 'environments', 'domains', 'providers', 'members', 'usage', 'settings']);
     // Grants on environments alone: their sandboxes and jobs are in them
-    // (ADR 0035), no page of the tenant's; the access providers (ADR
+    // (ADR 0035), no page of the project's; the access providers (ADR
     // 0054), which an environment's admin chooses among.
     expect(views(ANNA, 'shop')).toEqual(['overview', 'environments', 'domains', 'providers', 'members', 'usage', 'settings']);
     expect(views(ANNA, 'nope')).toEqual([]);
     expect(views(BASIC, 'acme')).toEqual([]);
   });
 
-  it('a tenant opens at its overview, or at the environments for grants on environments alone', () => {
-    expect(tenantHome(tenantAccess(ANNA, 'acme'))).toBe('/tenants/acme');
-    expect(tenantHome(tenantAccess(ANNA, 'shop'))).toBe('/tenants/shop/environments');
+  it('a project opens at its overview, or at the environments for grants on environments alone', () => {
+    expect(projectHome(projectAccess(ANNA, 'acme'))).toBe('/projects/acme');
+    expect(projectHome(projectAccess(ANNA, 'shop'))).toBe('/projects/shop/environments');
   });
 
   it('the operators\' pages are for operators only', () => {
@@ -129,36 +129,36 @@ describe('me → navigation', () => {
     }
   });
 
-  it('a tenant\'s pages need a membership and the role of the page', () => {
-    expect(viewGate(ANNA, parsePath('/tenants/acme/tokens'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/zeta/tokens'))).toBe('role');
-    expect(viewGate(ANNA, parsePath('/tenants/zeta/sandboxes/abc'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/sandboxes'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/tools'))).toBe('role');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/environments/shop-prod/logs'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/other'))).toBe('member');
-    expect(viewGate(OPERATOR, parsePath('/tenants/brand-new/members'))).toBe('');
+  it('a project\'s pages need a membership and the role of the page', () => {
+    expect(viewGate(ANNA, parsePath('/projects/acme/tokens'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/zeta/tokens'))).toBe('role');
+    expect(viewGate(ANNA, parsePath('/projects/zeta/sandboxes/abc'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/shop/sandboxes'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/shop/tools'))).toBe('role');
+    expect(viewGate(ANNA, parsePath('/projects/shop/environments/shop-prod/logs'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/shop'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/other'))).toBe('member');
+    expect(viewGate(OPERATOR, parsePath('/projects/brand-new/members'))).toBe('');
     // The credentials (ADR 0033) are an environment's: its pages, with
     // a grant on the environment alone too.
-    expect(viewGate(ANNA, parsePath('/tenants/shop/environments/shop-prod/credentials/github'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/environments/shop-prod/credentials/new'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/shop/environments/shop-prod/credentials/github'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/shop/environments/shop-prod/credentials/new'))).toBe('');
     // The access providers (ADR 0054): every member reads them; a new
-    // one is the tenant admin's.
-    expect(viewGate(ANNA, parsePath('/tenants/shop/providers'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/providers/fecode/edit'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/acme/new-provider'))).toBe('');
-    expect(viewGate(ANNA, parsePath('/tenants/zeta/new-provider'))).toBe('role');
-    expect(viewGate(ANNA, parsePath('/tenants/shop/new-provider'))).toBe('role');
+    // one is the project admin's.
+    expect(viewGate(ANNA, parsePath('/projects/shop/providers'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/shop/providers/fecode/edit'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/acme/new-provider'))).toBe('');
+    expect(viewGate(ANNA, parsePath('/projects/zeta/new-provider'))).toBe('role');
+    expect(viewGate(ANNA, parsePath('/projects/shop/new-provider'))).toBe('role');
   });
 
-  it('a Basic sign-in has the operators\' pages but acts in no tenant', () => {
-    expect(viewGate(BASIC, parsePath('/tenants/acme'))).toBe('basic');
-    expect(viewGate(BASIC, parsePath('/tenants'))).toBe('');
+  it('a Basic sign-in has the operators\' pages but acts in no project', () => {
+    expect(viewGate(BASIC, parsePath('/projects/acme'))).toBe('basic');
+    expect(viewGate(BASIC, parsePath('/projects'))).toBe('');
   });
 
-  it('the tenants list and an invitation are open to every sign-in', () => {
-    expect(viewGate(ANNA, parsePath('/tenants'))).toBe('');
+  it('the projects list and an invitation are open to every sign-in', () => {
+    expect(viewGate(ANNA, parsePath('/projects'))).toBe('');
     expect(viewGate(ANNA, parsePath('/invite/s3cr3t'))).toBe('');
   });
 });

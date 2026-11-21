@@ -141,7 +141,7 @@ func fixed(what string, cols map[string]bool) error {
 // Environment is a row of environments.
 type Environment struct {
 	ID     uuid.UUID
-	Owner  string // the tenant
+	Owner  string // the project
 	Name   string // a DNS label, never a UUID
 	Labels map[string]string
 	// Deployment is the latest desired deployment, Deployed the latest deployed
@@ -153,16 +153,16 @@ type Environment struct {
 	Gen                  int64
 	CreatedAt, UpdatedAt time.Time
 	// Public: the ingress serves it at its default host, without a route
-	// token (its tenant's decision, SetEnvironmentPublic). IngressGroup:
+	// token (its project's decision, SetEnvironmentPublic). IngressGroup:
 	// its image services' pods name ing-<sandbox id>; set at the first
 	// publish, never cleared. HostLabel is its default host's label under
 	// the apps zone, given at the first publish and changed only when its
-	// tenant chooses one (SetEnvironmentHostLabel); "": never published.
+	// project chooses one (SetEnvironmentHostLabel); "": never published.
 	Public, IngressGroup bool
 	HostLabel            string
 	// Access is who the ingress admits while it is public (ADR 0054):
 	// model.AccessAnyone or model.AccessVisitors; AccessProvider, with
-	// visitors, the name of its tenant's provider, "" for the provider
+	// visitors, the name of its project's provider, "" for the provider
 	// model.ProviderFerun (a NULL access_provider). Both are written only
 	// by SetEnvironmentAccess.
 	Access, AccessProvider string
@@ -215,7 +215,7 @@ type NewEnvironment struct {
 	Labels map[string]string
 }
 
-// InsertEnvironment inserts an environment (the caller holds its tenant
+// InsertEnvironment inserts an environment (the caller holds its project
 // FOR SHARE and refuses a deleting one). An ID or (owner, name) that
 // another row holds is ErrExists, an unknown owner ErrNoRow.
 func (s *Store) InsertEnvironment(ctx context.Context, n NewEnvironment) (Environment, error) {
@@ -355,7 +355,7 @@ func (s *Store) RenameEnvironment(ctx context.Context, id uuid.UUID, name string
 // the environment's open visits (ADR 0054) with model.VisitUnpublished, and
 // keeps the access, which a publish again sets (SetEnvironmentAccess). A
 // write sends ferun_ingress "env:<id>"; a call that changes nothing writes
-// nothing. The caller refuses a deleting environment or tenant and sends
+// nothing. The caller refuses a deleting environment or project and sends
 // the controller's hints.
 func (s *Store) SetEnvironmentPublic(ctx context.Context, id uuid.UUID, public bool) (Environment, error) {
 	var out Environment
@@ -443,10 +443,10 @@ func (s *Store) BumpEnvironmentGen(ctx context.Context, id uuid.UUID) (int64, er
 	return gen, noRow(err, ErrNoRow)
 }
 
-// MarkTenantEnvironmentsDeleting marks the environments of owner deleting
-// (a deleting tenant's) and returns those it marked, each with
+// MarkProjectEnvironmentsDeleting marks the environments of owner deleting
+// (a deleting project's) and returns those it marked, each with
 // ferun_ingress "env:<id>".
-func (s *Store) MarkTenantEnvironmentsDeleting(ctx context.Context, owner string) ([]uuid.UUID, error) {
+func (s *Store) MarkProjectEnvironmentsDeleting(ctx context.Context, owner string) ([]uuid.UUID, error) {
 	rows, err := s.q.Query(ctx, `UPDATE environments SET deleting = true, updated_at = now()
 		WHERE owner = $1 AND NOT deleting RETURNING id`, owner)
 	if err != nil {
@@ -464,7 +464,7 @@ func (s *Store) MarkTenantEnvironmentsDeleting(ctx context.Context, owner string
 
 // DeleteEnvironment removes the environment row; its deployments, tags,
 // secrets, job runs, attached services, incidents and route tokens
-// cascade, and its host label becomes free for its tenant
+// cascade, and its host label becomes free for its project
 // (host_labels.env_id ON DELETE SET NULL). It fails while an instance
 // row, an env_instances row or a volume names it. It reports whether a row
 // was there, and sends ferun_ingress "env:<id>" when one was.
@@ -499,7 +499,7 @@ func (s *Store) notifyIngressEnvs(ctx context.Context, ids []uuid.UUID) error {
 	return nil
 }
 
-// CountEnvironmentsOfOwner counts a tenant's environments.
+// CountEnvironmentsOfOwner counts a project's environments.
 func (s *Store) CountEnvironmentsOfOwner(ctx context.Context, owner string) (int64, error) {
 	var n int64
 	err := s.q.QueryRow(ctx, "SELECT count(*) FROM environments WHERE owner = $1", owner).Scan(&n)

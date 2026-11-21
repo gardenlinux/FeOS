@@ -11,9 +11,9 @@ and keeps them, the node follows them and ships them over OTLP with its
 node certificate, at least once on the wire and once in the store. The
 sink is the gate in front of Kafka, the log of record, and Quickwit, the
 index and store of every word, label, level and trace ID; the database
-keeps streams, positions and quota, never a line. A tenant reads its own
+keeps streams, positions and quota, never a line. A project reads its own
 streams and traces with its token or session, within a retention and a
-quota per tenant; the ingress's access log is a stream and the server
+quota per project; the ingress's access log is a stream and the server
 spans of the service it served.
 
 ## Context
@@ -24,7 +24,7 @@ through the node, and a job's run keeps its last lines on its row. The
 file goes with its pod: the log of an instance a deployment replaced, of
 one that crashed and was recreated, of a paused pod or of a job's run
 beyond its kept end cannot be read. Nothing searches a service's
-replicas together, or a week back. Tenants work around it: a builder
+replicas together, or a week back. Projects work around it: a builder
 keeps its own output and uploads it to a bucket as it exits; the
 ingress's access log would have to live in the control plane's database
 for want of another place, and nowhere could the rest of a trace a pod
@@ -60,7 +60,7 @@ exactly once.
   status while the sink is down, and a node keeps what it could not send.
   It is where the platform puts what is said rather than decided: logs
   and traces, each a kind of record sharing ingest, the gate and the
-  tenants' reads. The reference deployment runs two or more instances,
+  projects' reads. The reference deployment runs two or more instances,
   which share nothing but the database, Kafka and Quickwit.
 - The sink holds an identity of the platform CA, obtained from `ferund`
   with a service token, and asks `ferund` whose token or session a reader
@@ -69,11 +69,11 @@ exactly once.
 ### A stream is one container's output, labelled by FeRun
 
 - A **stream** is the output of one container of one pod: an image
-  service's or an addon's instance, a job's run, a tenant's job, a
+  service's or an addon's instance, a job's run, a project's job, a
   sandbox's container. Its labels are fixed and set by `ferund` with the
-  pod's create, never by the pod: the tenant always; the environment,
+  pod's create, never by the pod: the project always; the environment,
   kind, object, replica and deployment of an environment's pods; the job
-  and attempt of a tenant's job; the pod's sandbox ID; and the source,
+  and attempt of a project's job; the pod's sandbox ID; and the source,
   stdout or stderr, per line. The node stamps the stream with them, and
   a restore brings them again.
 - The labels are bounded by the pods FeRun makes, so streams stay few:
@@ -107,7 +107,7 @@ exactly once.
   reaches the store.
 - A stream may send a bounded rate with a burst. Beyond it the node drops
   lines and, once the rate allows, sends one of its own that says how
-  many. A tenant's lines count against its quota in the sink.
+  many. A project's lines count against its quota in the sink.
 - A pod sends its spans over OTLP to its node, at an address of the
   node's own, `169.254.169.1`, held like the resolver's and not the pods'
   gateway, which the node never holds. The node knows the pod by its
@@ -123,8 +123,8 @@ exactly once.
   answered, and Kafka answers once two replicas have it. A topic per
   index, of the index's name, made by the sink at its start together
   with the index and its source: a fixed set the platform owns, which
-  nothing a tenant does ever makes. The topics are a replay buffer of a
-  day; the index is the store. A tenant never reaches Kafka.
+  nothing a project does ever makes. The topics are a replay buffer of a
+  day; the index is the store. A project never reaches Kafka.
 - The sink stays the gate: it checks the peers, takes the labels, counts
   the quota, and for a log stream keeps its row, labels, time span, the
   next offset for the node, and the rule that a line at or below the last
@@ -134,8 +134,8 @@ exactly once.
   the topic twice; the reads take each (stream, offset) and each span ID
   once.
 - The partition is the reader's address: a log record's key is its
-  stream's object (tenant, environment, kind, object; a tenant's job:
-  tenant and job), so a stream's lines stay in order, an object's
+  stream's object (project, environment, kind, object; a project's job:
+  project and job), so a stream's lines stay in order, an object's
   replicas and deployments share a partition, and a follow of a service
   reads one partition per topic. A span's key is its trace ID: a trace
   is read from one partition.
@@ -150,20 +150,20 @@ exactly once.
 - An index per retention: Quickwit drops whole splits by age, per index,
   so a stream's retention picks its index, the default or the longer one
   a job may ask for. A stream is never kept shorter than asked.
-- An index's lines are hashed into partitions by tenant, environment and
+- An index's lines are hashed into partitions by project, environment and
   job, a split holds one partition's, and the three are tags, so that a
-  search for one environment of a tenant that holds many reads only the
+  search for one environment of a project that holds many reads only the
   splits that have it. An index's configuration has a version in its
   name, since Quickwit changes neither a partition key nor a split's
   mapping: a new version's indexes take the new lines, and the old ones
   are read beside them until their retention has emptied them.
-- Deleting a tenant's environment or job deletes its streams' rows at
+- Deleting a project's environment or job deletes its streams' rows at
   once, so no read finds their lines any more, and leaves a delete task
   in Quickwit, which removes the documents when it rewrites their splits.
 
 ### Reading
 
-- A tenant reads its own streams with its FeRun token or a person's
+- A project reads its own streams with its FeRun token or a person's
   session, filtered to the environments it may read (ADR 0031). `GET
   /api/v1/logs` answers lines with their labels, source, level and time:
   a stream selector, a time range, filters (words that must all appear,
@@ -178,7 +178,7 @@ exactly once.
   not committed, seconds of them. Every line is in one of the two, some
   in both; the read takes each once. A line is readable at once and
   searchable within the commit interval.
-- A follow is of one object (a service, a job, a tenant's job, or one of
+- A follow is of one object (a service, a job, a project's job, or one of
   its instances or streams), read from its partition as records come; an
   environment as a whole is searched, not followed. A follow gives a
   bounded number of lines a second, then some more of error and warn
@@ -188,7 +188,7 @@ exactly once.
   so a paused pod's and a replaced instance's logs are read without a
   node. A run's log tail is no longer kept on its row.
 - Traces are read through Jaeger's query API, served by the sink for a
-  tenant with the tenant's filter forced; a trace by ID reads its
+  project with the project's filter forced; a trace by ID reads its
   partition's tail too, so a fresh request's trace is found at once. An
   environment's traffic per service is counted from spans in Quickwit
   (ADR 0021).
@@ -200,15 +200,15 @@ exactly once.
 
 ### Retention and quota
 
-- Lines are kept for thirty days. A tenant's job may ask for longer at
+- Lines are kept for thirty days. A project's job may ask for longer at
   its create, up to four hundred days: a version's build log matters
-  while the version does. A tenant may delete an environment's or a job's
+  while the version does. A project may delete an environment's or a job's
   streams. Spans are kept for thirty days; every span is kept, none
   sampled.
-- A tenant has a quota of bytes per day for its lines and one for its
+- A project has a quota of bytes per day for its lines and one for its
   spans, set by the operator and counted at ingest. Beyond it the sink
-  refuses that tenant's
-  batches with `RESOURCE_EXHAUSTED`, the other tenants' in the same
+  refuses that project's
+  batches with `RESOURCE_EXHAUSTED`, the other projects' in the same
   batch are stored, and the node drops and counts what was refused.
 
 ### The ingress's access log is a stream of the service's
@@ -232,7 +232,7 @@ exactly once.
 
 ## Alternatives considered
 
-- **Into `ferund`.** It has the database, the tenants and the nodes'
+- **Into `ferund`.** It has the database, the projects and the nodes'
   connections. Not chosen: logs are a write path of their own with their
   own load, and the control plane should not carry it, nor fail with it.
   Traces belong in the same place, and that place is not the control
@@ -252,7 +252,7 @@ exactly once.
   transforms but stores nothing; it may stand between nodes and the sink
   later, since both ends speak OTLP.
 - **FeCode collects** by following each container through `ferund`: a
-  tenant's logs would depend on its client being up, over long streams
+  project's logs would depend on its client being up, over long streams
   per container through the control plane, and only FeCode would have
   them.
 - **The guest ships** directly: a guest has no credentials for the
@@ -285,12 +285,12 @@ exactly once.
   enough for doubt, and the architecture should not bend around a
   licence. Kafka is Apache-2.0, run by Strimzi.
 - **`feosd` producing to the topics itself**: Kafka's ACLs know a client,
-  not a tenant or a stream, so neither the rule that a node writes only
-  its pods' streams nor a tenant's quota could be kept there; the
+  not a project or a stream, so neither the rule that a node writes only
+  its pods' streams nor a project's quota could be kept there; the
   position a moved or restored pod's stream goes on from must be kept
   beside the node anyway; and `feosd` would carry a Kafka client of its
   own. The gate stays one program with one certificate check.
-- **Records keyed by tenant and environment** rather than by object: a
+- **Records keyed by project and environment** rather than by object: a
   follow is of one service, and a busy neighbour in the same environment
   would fill its partition.
 - **Grafana Tempo** for traces (and Loki for logs): AGPL-3.0, and a
@@ -301,7 +301,7 @@ exactly once.
   the choice if analytics over spans come to matter more than search.
   **Jaeger** stores nothing in an object store itself.
 - **Sampling traces** at the node or the sink: every span is kept, and
-  the quota per tenant bounds the volume instead.
+  the quota per project bounds the volume instead.
 
 ## Consequences
 
@@ -321,7 +321,7 @@ exactly once.
   restore, the call that answers whose a token or session is, and its
   logs and access-log calls read from the sink. A guest of before the
   format change keeps the old format, and its pods' logs are not shipped.
-- A tenant's secrets never reach the store; a line that printed one
+- A project's secrets never reach the store; a line that printed one
   shows a marker in its place.
 
 ## History

@@ -25,9 +25,9 @@ import (
 	"github.com/gardenlinux/feos/go/internal/podid"
 )
 
-// The pods of an environment's job run and instance, and of a tenant's
+// The pods of an environment's job run and instance, and of a project's
 // job, are created with their log labels (ADR 0026), kept on their rows,
-// each with its environment (ADR 0035); a tenant's job's retention
+// each with its environment (ADR 0035); a project's job's retention
 // becomes ferun.retention_days.
 func TestLogLabels(t *testing.T) {
 	h := newHarness(t, options{})
@@ -35,7 +35,7 @@ func TestLogLabels(t *testing.T) {
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, jobSpec("v1", 0))
 	run := runningJob(t, h, env.ID)
-	want := map[string]string{model.LogTenant: testTenant, model.LogInstance: run.String(),
+	want := map[string]string{model.LogProject: testProject, model.LogInstance: run.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: spec.KindJob, model.LogObject: "migrate",
 		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1), model.LogAttempt: "1"}
 	if got := n1.LogLabels(run); !maps.Equal(got, want) {
@@ -49,22 +49,22 @@ func TestLogLabels(t *testing.T) {
 	}
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 30*time.Second)
 	api := h.waitRows(env.ID, spec.KindService, "api", 1, 10*time.Second, "running", running)[0].Sandbox.ID
-	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: api.String(),
+	want = map[string]string{model.LogProject: testProject, model.LogInstance: api.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: spec.KindService, model.LogObject: "api",
 		model.LogReplica: "0", model.LogDeployment: strconv.Itoa(r1)}
 	if got := n1.LogLabels(api); !maps.Equal(got, want) {
 		t.Fatalf("the service's create: %v, want %v", got, want)
 	}
 
-	rs := tenantJobSpecOf(time.Minute)
+	rs := projectJobSpecOf(time.Minute)
 	rs.EnvID = env.ID
 	rs.LogRetentionDays = 30
-	job := h.createTenantJob(rs)
+	job := h.createProjectJob(rs)
 	if job.LogRetentionDays != 30 {
 		t.Fatalf("the job's retention %d", job.LogRetentionDays)
 	}
 	h.runningPod(job.ID)
-	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: job.ID.String(),
+	want = map[string]string{model.LogProject: testProject, model.LogInstance: job.ID.String(),
 		model.LogEnvironment: env.ID.String(), model.LogJob: job.ID.String(), model.LogAttempt: "1",
 		model.LogRetentionDays: "30"}
 	if got := n1.LogLabels(job.ID); !maps.Equal(got, want) {
@@ -72,9 +72,9 @@ func TestLogLabels(t *testing.T) {
 	}
 	// A sandbox's are its environment's, of the kind sandbox.
 	sbx := podid.Mint()
-	want = map[string]string{model.LogTenant: testTenant, model.LogInstance: sbx.String(),
+	want = map[string]string{model.LogProject: testProject, model.LogInstance: sbx.String(),
 		model.LogEnvironment: env.ID.String(), model.LogKind: model.LogKindSandbox, model.LogObject: sbx.String()}
-	if got := SandboxLogLabels(testTenant, sbx, env.ID); !maps.Equal(got, want) {
+	if got := SandboxLogLabels(testProject, sbx, env.ID); !maps.Equal(got, want) {
 		t.Fatalf("a sandbox's: %v, want %v", got, want)
 	}
 }
@@ -95,7 +95,7 @@ func TestRedactValues(t *testing.T) {
 
 // A create with log labels names the values its node redacts
 // (log_redact), asked anew at the create and stored nowhere: an
-// environment's tenant secrets with their userinfo forms, a tenant's
+// environment's project secrets with their userinfo forms, a project's
 // job's secrets and image credentials.
 func TestLogRedact(t *testing.T) {
 	h := newHarness(t, options{})
@@ -115,16 +115,16 @@ func TestLogRedact(t *testing.T) {
 		t.Fatalf("a secret on a row: %d %v", stored, err)
 	}
 
-	rs := tenantJobSpecOf(time.Minute)
+	rs := projectJobSpecOf(time.Minute)
 	rs.Secrets = map[string]string{"GIT_TOKEN": "git-secret-value"}
 	rs.ImageCredentials = &model.RegistryCredentials{Username: "build", Password: "registry-password"}
-	job := h.createTenantJob(rs)
+	job := h.createProjectJob(rs)
 	h.runningPod(job.ID)
 	if got := n1.LogRedact(job.ID); !slices.Equal(got, []string{"registry-password", "git-secret-value", "build"}) {
 		t.Fatalf("the job's create: %q", got)
 	}
 	// A job without secrets names none.
-	plain := h.createTenantJob(tenantJobSpecOf(time.Minute))
+	plain := h.createProjectJob(projectJobSpecOf(time.Minute))
 	h.runningPod(plain.ID)
 	if got := n1.LogRedact(plain.ID); len(got) != 0 {
 		t.Fatalf("a job without secrets: %q", got)
@@ -232,7 +232,7 @@ func (f *fakeSink) setLines(key string, lines []sinkLine, down bool) {
 
 // With --sink-url, the logs calls read the sink with the caller's token:
 // an instance's lines, in pages, also those of a paused one (no
-// ErrPaused), a job run's and a tenant's job's (redacted of its secrets);
+// ErrPaused), a job run's and a project's job's (redacted of its secrets);
 // without a token, without lines or with the sink down, the node's.
 func TestSinkLogs(t *testing.T) {
 	h := newHarness(t, options{})
@@ -241,7 +241,7 @@ func TestSinkLogs(t *testing.T) {
 	srv := httptest.NewServer(sink)
 	t.Cleanup(srv.Close)
 	h.c.d.SinkURL = srv.URL + "/"
-	ctx := auth.WithTenant(bg, auth.Tenant{Name: testTenant, Token: "tok"})
+	ctx := auth.WithProject(bg, auth.Project{Name: testProject, Token: "tok"})
 
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, fmt.Sprintf(`{"services":{"web":{"image":%q},"idler":{"image":%q,"idle":"15m"}}}`,
@@ -308,28 +308,28 @@ func TestSinkLogs(t *testing.T) {
 		t.Fatalf("paused: %q", got)
 	}
 
-	// A tenant's job: redacted of its secrets.
-	rs := tenantJobSpecOf(time.Minute)
+	// A project's job: redacted of its secrets.
+	rs := projectJobSpecOf(time.Minute)
 	rs.Secrets = map[string]string{"GIT_TOKEN": "s3cr3t-token-value"}
-	job := h.createTenantJob(rs)
+	job := h.createProjectJob(rs)
 	h.runningPod(job.ID)
 	sink.set("job="+job.ID.String(), []string{"cloning with s3cr3t-token-value", "done"}, false)
-	got, err := h.c.TenantJobLog(ctx, testTenant, job.ID, 10)
+	got, err := h.c.ProjectJobLog(ctx, testProject, job.ID, 10)
 	if err != nil || len(got) != 2 || got[0] != "cloning with "+redactedMark || got[1] != "done" {
 		t.Fatalf("the job's log: %q %v", got, err)
 	}
 	// Once it has ended: the sink's lines as the node redacted them, else
 	// its kept tail.
-	if _, err := h.c.CancelTenantJob(bg, testTenant, job.ID); err != nil {
+	if _, err := h.c.CancelProjectJob(bg, testProject, job.ID); err != nil {
 		t.Fatal(err)
 	}
 	sink.set("job="+job.ID.String(), []string{"cloning with [redacted]", "done", "cancelled"}, false)
-	got, err = h.c.TenantJobLog(ctx, testTenant, job.ID, 10)
+	got, err = h.c.ProjectJobLog(ctx, testProject, job.ID, 10)
 	if err != nil || !slices.Equal(got, []string{"cloning with [redacted]", "done", "cancelled"}) {
 		t.Fatalf("the ended job's log: %q %v", got, err)
 	}
 	sink.set("job="+job.ID.String(), nil, false)
-	if got, err = h.c.TenantJobLog(ctx, testTenant, job.ID, 10); err != nil || slices.Contains(got, "cancelled") {
+	if got, err = h.c.ProjectJobLog(ctx, testProject, job.ID, 10); err != nil || slices.Contains(got, "cancelled") {
 		t.Fatalf("the ended job's kept tail: %q %v", got, err)
 	}
 	sink.mu.Lock()
@@ -349,7 +349,7 @@ func TestSinkJobRunLog(t *testing.T) {
 	srv := httptest.NewServer(sink)
 	t.Cleanup(srv.Close)
 	h.c.d.SinkURL = srv.URL
-	ctx := auth.WithTenant(bg, auth.Tenant{Name: testTenant, Token: "tok"})
+	ctx := auth.WithProject(bg, auth.Project{Name: testProject, Token: "tok"})
 	env := h.newEnv("stage")
 	r1 := h.apply(env.ID, jobSpec("v1", 0))
 	run := finishRun(t, h, n1, env.ID, 0, "kept")

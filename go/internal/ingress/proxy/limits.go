@@ -13,42 +13,42 @@ const (
 	fits full = iota
 	// envFull: its environment's share is taken.
 	envFull
-	// tenantFull: its tenant's share is taken.
-	tenantFull
+	// projectFull: its project's share is taken.
+	projectFull
 	// allFull: the cap of the whole instance is taken.
 	allFull
 )
 
-// budget counts requests against a share per tenant, within it a share
-// per environment, and a cap for the whole instance, so that one tenant
+// budget counts requests against a share per project, within it a share
+// per environment, and a cap for the whole instance, so that one project
 // cannot take what the others need, nor one of its environments what
-// its others need: the held requests (MaxHeldPerEnv, MaxHeldPerTenant,
+// its others need: the held requests (MaxHeldPerEnv, MaxHeldPerProject,
 // MaxHeld) and the forwarded ones (MaxInflightPerEnv,
-// MaxInflightPerTenant, MaxInflight).
+// MaxInflightPerProject, MaxInflight).
 type budget struct {
-	perEnv, perTenant, total int
+	perEnv, perProject, total int
 
-	mu      sync.Mutex
-	envs    map[string]int
-	tenants map[string]int
-	n       int
+	mu       sync.Mutex
+	envs     map[string]int
+	projects map[string]int
+	n        int
 }
 
-func newBudget(perEnv, perTenant, total int) *budget {
-	return &budget{perEnv: perEnv, perTenant: perTenant, total: total, envs: map[string]int{}, tenants: map[string]int{}}
+func newBudget(perEnv, perProject, total int) *budget {
+	return &budget{perEnv: perEnv, perProject: perProject, total: total, envs: map[string]int{}, projects: map[string]int{}}
 }
 
 // slot is one request's place in a budget; only the request's own
 // goroutine uses it.
 type slot struct {
-	tenant, env string
-	counted     bool
+	project, env string
+	counted      bool
 }
 
-// enter counts a request of the environment env of tenant unless it is
+// enter counts a request of the environment env of project unless it is
 // counted already. It returns fits, or the cap that is taken; then the
 // request is not counted.
-func (b *budget) enter(s *slot, tenant, env string) full {
+func (b *budget) enter(s *slot, project, env string) full {
 	if s.counted {
 		return fits
 	}
@@ -57,15 +57,15 @@ func (b *budget) enter(s *slot, tenant, env string) full {
 	switch {
 	case b.envs[env] >= b.perEnv:
 		return envFull
-	case b.tenants[tenant] >= b.perTenant:
-		return tenantFull
+	case b.projects[project] >= b.perProject:
+		return projectFull
 	case b.n >= b.total:
 		return allFull
 	}
 	b.envs[env]++
-	b.tenants[tenant]++
+	b.projects[project]++
 	b.n++
-	s.tenant, s.env, s.counted = tenant, env, true
+	s.project, s.env, s.counted = project, env, true
 	return fits
 }
 
@@ -81,8 +81,8 @@ func (b *budget) leave(s *slot) {
 	if b.envs[s.env]--; b.envs[s.env] <= 0 {
 		delete(b.envs, s.env)
 	}
-	if b.tenants[s.tenant]--; b.tenants[s.tenant] <= 0 {
-		delete(b.tenants, s.tenant)
+	if b.projects[s.project]--; b.projects[s.project] <= 0 {
+		delete(b.projects, s.project)
 	}
 }
 
@@ -100,9 +100,9 @@ func (b *budget) of(env string) int {
 	return b.envs[env]
 }
 
-// ofTenant is how many requests of the tenant are counted.
-func (b *budget) ofTenant(tenant string) int {
+// ofProject is how many requests of the project are counted.
+func (b *budget) ofProject(project string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.tenants[tenant]
+	return b.projects[project]
 }

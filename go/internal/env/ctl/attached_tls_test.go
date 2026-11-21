@@ -67,14 +67,14 @@ func TestAttachedTLSBindings(t *testing.T) {
 		return 0, false, nil
 	})
 	sbID = podid.Mint()
-	sb := h.sandboxAs(testTenant, sbID)
+	sb := h.sandboxAs(testProject, sbID)
 	if err := os.MkdirAll(filepath.Join(n1.PodDir(sb.ID), "app"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.pod("n1", sb.ID).GetSpec().GetTlsBindings(); len(got) != 0 {
 		t.Fatalf("the sandbox's pod has TLS bindings before any service: %v", got)
 	}
-	env := h.envOf(testTenant, "dev")
+	env := h.envOf(testProject, "dev")
 
 	r1 := h.apply(env.ID, attachedTLSSpec(sb.ID, false))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 90*time.Second)

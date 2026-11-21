@@ -227,7 +227,7 @@ func (c *Controller) deleteVolume(ctx context.Context, vol store.EnvVolume) (boo
 // takes.
 const deleteBatch = 16
 
-// deleteLoop is env-delete: the environments of deleting tenants are
+// deleteLoop is env-delete: the environments of deleting projects are
 // marked deleting; each deleting environment loses its instances, once
 // their pods have ended (endInstances), its attached services (their
 // processes stop, a sleeping sandbox woken for it, before their rows and
@@ -239,17 +239,17 @@ const deleteBatch = 16
 // is touched, so that it goes to the end of the queue: the oldest-touched
 // come first, and those that wait long never hold the others back.
 func (c *Controller) deleteLoop(ctx context.Context) error {
-	if err := c.sweepTenantJobs(ctx); err != nil {
-		return fmt.Errorf("sweep the tenant jobs: %w", err)
+	if err := c.sweepProjectJobs(ctx); err != nil {
+		return fmt.Errorf("sweep the project jobs: %w", err)
 	}
-	tenants, err := c.st.DeletingTenants(ctx)
+	projects, err := c.st.DeletingProjects(ctx)
 	if err != nil {
 		return err
 	}
-	for _, t := range tenants {
+	for _, t := range projects {
 		var marked []string
 		err := c.fenced(ctx, func(tx *store.Store) error {
-			ids, err := tx.MarkTenantEnvironmentsDeleting(ctx, t)
+			ids, err := tx.MarkProjectEnvironmentsDeleting(ctx, t)
 			for _, id := range ids {
 				marked = append(marked, id.String())
 			}
@@ -259,7 +259,7 @@ func (c *Controller) deleteLoop(ctx context.Context) error {
 			return err
 		}
 		if len(marked) > 0 {
-			c.log.Info("a deleting tenant's environments are deleted", "tenant", t, "environments", marked)
+			c.log.Info("a deleting project's environments are deleted", "project", t, "environments", marked)
 		}
 	}
 	envs, err := c.st.DeletingEnvironments(ctx, deleteBatch)
@@ -353,7 +353,7 @@ func (c *Controller) deleteEnvironment(ctx context.Context, e store.Environment)
 		}
 	}
 	// A sandbox or a job's pod of it (ADR 0035) keeps it too: the API
-	// refuses the delete of an environment that has one, but a tenant's
+	// refuses the delete of an environment that has one, but a project's
 	// deletion goes on while the engine deletes its sandboxes.
 	others, err := c.st.CountEnvironmentRows(ctx, e.ID)
 	if err != nil {

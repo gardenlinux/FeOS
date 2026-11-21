@@ -13,7 +13,7 @@ import {
 
 const FERUN_P = { name: 'ferun', kind: 'ferun', builtIn: true, environments: [{ id: 'e1', name: 'stage' }] };
 const FECODE = {
-  name: 'fecode', kind: 'tenant', builtIn: false, url: 'https://fecode.dev/api/v1/visit',
+  name: 'fecode', kind: 'project', builtIn: false, url: 'https://fecode.dev/api/v1/visit',
   environments: [{ id: 'e2', name: 'kino--stage' }, { id: 'e3', name: 'kino--prod' }], createdAt: '2026-11-12T20:00:00Z',
 };
 const SSO = {
@@ -22,9 +22,9 @@ const SSO = {
 };
 
 describe('a provider', () => {
-  it('has a kind of its tenant, or is ferun, built in', () => {
-    expect(KINDS.map((k) => k.key)).toEqual(['tenant', 'oidc']);
-    expect(kindLabel('tenant')).toBe('your own service');
+  it('has a kind of its project, or is ferun, built in', () => {
+    expect(KINDS.map((k) => k.key)).toEqual(['project', 'oidc']);
+    expect(kindLabel('project')).toBe('your own service');
     expect(kindLabel('oidc')).toBe('OpenID Connect');
     expect(kindLabel('ferun')).toBe('FeRun sign-in');
     expect(kindLabel('other')).toBe('other');
@@ -34,7 +34,7 @@ describe('a provider', () => {
   it('is named by a DNS label, never ferun', () => {
     expect(nameProblem('members')).toBe('');
     expect(nameProblem(' sso-2 ')).toBe('');
-    expect(nameProblem('ferun')).toBe('ferun is every tenant\'s provider and cannot be made');
+    expect(nameProblem('ferun')).toBe('ferun is every project\'s provider and cannot be made');
     expect(nameProblem('Sso')).toContain('DNS label');
     expect(nameProblem('-a')).toContain('DNS label');
     expect(nameProblem('a'.repeat(64))).toContain('DNS label');
@@ -42,10 +42,10 @@ describe('a provider', () => {
   });
 
   it('has its pages', () => {
-    expect(providerPath('acme')).toBe('/tenants/acme/providers');
-    expect(providerPath('acme', 'sso')).toBe('/tenants/acme/providers/sso');
-    expect(providerPath('a b', 'sso', true)).toBe('/tenants/a%20b/providers/sso/edit');
-    expect(newProviderPath('acme')).toBe('/tenants/acme/new-provider');
+    expect(providerPath('acme')).toBe('/projects/acme/providers');
+    expect(providerPath('acme', 'sso')).toBe('/projects/acme/providers/sso');
+    expect(providerPath('a b', 'sso', true)).toBe('/projects/a%20b/providers/sso/edit');
+    expect(newProviderPath('acme')).toBe('/projects/acme/new-provider');
   });
 
   it('says whom it admits, where it is, and who names it', () => {
@@ -72,20 +72,20 @@ describe('a provider', () => {
 });
 
 describe('the form', () => {
-  it('starts empty, as a service of the tenant', () => {
-    expect(emptyForm()).toMatchObject({ name: '', kind: 'tenant', url: '', rule: 'anyone', secretSet: false });
+  it('starts empty, as a service of the project', () => {
+    expect(emptyForm()).toMatchObject({ name: '', kind: 'project', url: '', rule: 'anyone', secretSet: false });
   });
 
   it('reads a provider back, its secret empty and marked set', () => {
-    expect(formOf(FECODE)).toMatchObject({ name: 'fecode', kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' });
+    expect(formOf(FECODE)).toMatchObject({ name: 'fecode', kind: 'project', url: 'https://fecode.dev/api/v1/visit' });
     const f = formOf(SSO);
     expect(f).toMatchObject({ kind: 'oidc', issuer: 'https://login.example.com/', clientId: 'abc', clientSecret: '',
       secretSet: true, rule: 'domains', values: 'example.com' });
   });
 
-  it('writes a service of the tenant: an https URL with a host', () => {
+  it('writes a service of the project: an https URL with a host', () => {
     expect(providerOf({ ...emptyForm(), url: ' https://fecode.dev/api/v1/visit ' }))
-      .toEqual({ kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' });
+      .toEqual({ kind: 'project', url: 'https://fecode.dev/api/v1/visit' });
     expect(() => providerOf(emptyForm())).toThrow('the address is required');
     expect(() => providerOf({ ...emptyForm(), url: 'http://fecode.dev/x' })).toThrow('https URL');
     expect(() => providerOf({ ...emptyForm(), url: 'https://u:p@fecode.dev/x' })).toThrow('https URL');
@@ -123,20 +123,20 @@ describe('the form', () => {
 });
 
 describe('a publish', () => {
-  const kinds = ['tenant', 'ferun', 'oidc'];
+  const kinds = ['project', 'ferun', 'oidc'];
 
-  it('names ferun first, then the tenant\'s by name, each served or not', () => {
+  it('names ferun first, then the project\'s by name, each served or not', () => {
     expect(choices([SSO, FERUN_P, FECODE], kinds)).toEqual([
-      { name: 'ferun', kind: 'ferun', served: true }, { name: 'fecode', kind: 'tenant', served: true }, { name: 'sso', kind: 'oidc', served: true },
+      { name: 'ferun', kind: 'ferun', served: true }, { name: 'fecode', kind: 'project', served: true }, { name: 'sso', kind: 'oidc', served: true },
     ]);
-    // Without ferun-auth only the tenant's own services are served.
-    expect(choices([FERUN_P, FECODE, SSO], ['tenant']).map((c) => [c.name, c.served]))
+    // Without ferun-auth only the project's own services are served.
+    expect(choices([FERUN_P, FECODE, SSO], ['project']).map((c) => [c.name, c.served]))
       .toEqual([['ferun', false], ['fecode', true], ['sso', false]]);
     // A list that is not readable still offers ferun and the current one.
     expect(choices(null, null, 'fecode')).toEqual([{ name: 'ferun', kind: 'ferun', served: true }, { name: 'fecode', kind: '', served: true }]);
     expect(choices([FECODE], kinds, 'fecode').map((c) => c.name)).toEqual(['ferun', 'fecode']);
     expect(served('oidc', null)).toBe(true);
-    expect(served('oidc', ['tenant'])).toBe(false);
+    expect(served('oidc', ['project'])).toBe(false);
   });
 
   it('publishes a new host label with the access the status says, and none when it says none', () => {
@@ -151,7 +151,7 @@ describe('a publish', () => {
   it('knows an installation that guards nothing only by its empty kinds', () => {
     expect(guardsNone([])).toBe(true);
     expect(guardsNone(null)).toBe(false);
-    expect(guardsNone(['tenant'])).toBe(false);
+    expect(guardsNone(['project'])).toBe(false);
     expect(publishChoice({ public: false }, [])).toEqual({ access: 'anyone', provider: '' });
     expect(publishChoice({ public: false }, null)).toEqual({ access: '', provider: '' });
   });
@@ -164,7 +164,7 @@ describe('a publish', () => {
     expect(publishChoice({ public: true }, kinds)).toEqual({ access: 'anyone', provider: '' });
     expect(publishChoice({ public: false, access: 'anyone' }, kinds)).toEqual({ access: 'visitors', provider: 'ferun' });
     // Without ferun-auth, or not known yet, the admin chooses.
-    expect(publishChoice({ public: false }, ['tenant'])).toEqual({ access: '', provider: '' });
+    expect(publishChoice({ public: false }, ['project'])).toEqual({ access: '', provider: '' });
     expect(publishChoice({ public: false }, null)).toEqual({ access: '', provider: '' });
   });
 

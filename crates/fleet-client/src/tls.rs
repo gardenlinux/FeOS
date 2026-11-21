@@ -751,7 +751,7 @@ pub(crate) mod tests {
         // A pod's certificate of the same CA, without the control plane's
         // URI; two URIs; the control plane of another trust domain.
         for uris in [
-            &["spiffe://feos.local/tenant/t/sandbox/s"][..],
+            &["spiffe://feos.local/project/t/sandbox/s"][..],
             &[ferun, "spiffe://feos.local/node/n1"],
             &["spiffe://other.local/ferun"],
             &[],
@@ -861,7 +861,7 @@ pub(crate) mod tests {
         );
         let pod = issuer.leaf(
             &["ferun.feos.test"],
-            &["spiffe://feos.local/tenant/t/sandbox/s"],
+            &["spiffe://feos.local/project/t/sandbox/s"],
             ExtendedKeyUsagePurpose::ServerAuth,
             &key,
         );
@@ -906,7 +906,7 @@ pub(crate) mod tests {
         // sink without a name, two URIs.
         for uris in [
             &["spiffe://feos.local/ferun"][..],
-            &["spiffe://feos.local/tenant/t/sandbox/s"],
+            &["spiffe://feos.local/project/t/sandbox/s"],
             &["spiffe://other.local/sink/a"],
             &["spiffe://feos.local/sink/"],
             &["spiffe://feos.local/sink/a/b"],
@@ -959,7 +959,7 @@ pub(crate) mod tests {
         // A pod's certificate of the same issuer is still refused.
         let pod = issuer.leaf(
             &["ferun.feos.test"],
-            &["spiffe://feos.local/tenant/t/sandbox/s"],
+            &["spiffe://feos.local/project/t/sandbox/s"],
             ExtendedKeyUsagePurpose::ServerAuth,
             &key,
         );

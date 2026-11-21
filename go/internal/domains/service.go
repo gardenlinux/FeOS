@@ -34,7 +34,7 @@ const (
 	// CodeReserved: 422, the name is the apps zone, the edge's name, a
 	// --domain-reserved zone, or under one of them.
 	CodeReserved = "reserved"
-	// CodeTooManyUnverified: 409, the tenant holds --domain-unverified-max
+	// CodeTooManyUnverified: 409, the project holds --domain-unverified-max
 	// claims that are not verified.
 	CodeTooManyUnverified = "too_many_unverified"
 	// CodeDomainsOff: 409, the platform has no --edge-name.
@@ -215,7 +215,7 @@ func (s *Service) inTx(ctx context.Context, fenced bool, fn func(tx *store.Store
 	})
 }
 
-// errNoDomain answers a domain the tenant does not have, foreign or
+// errNoDomain answers a domain the project does not have, foreign or
 // absent alike.
 func errNoDomain() error { return apierr.New(http.StatusNotFound, textNoDomain) }
 
@@ -232,18 +232,18 @@ func parseID(s string) (uuid.UUID, error) {
 	return id, nil
 }
 
-// resolveEnv reads the environment of tenant that ref names, its UUID or
+// resolveEnv reads the environment of project that ref names, its UUID or
 // its name, as the environments' routes resolve {env}, and locks it with
 // lock; 404 "no such environment" otherwise.
-func resolveEnv(ctx context.Context, st *store.Store, tenant, ref string, lock store.RowLock) (store.Environment, error) {
+func resolveEnv(ctx context.Context, st *store.Store, project, ref string, lock store.RowLock) (store.Environment, error) {
 	var e store.Environment
 	var err error
 	if id, perr := uuid.Parse(ref); perr == nil && len(ref) == 36 {
 		e, err = st.LockEnvironment(ctx, id, lock)
 	} else {
-		e, err = st.LockEnvironmentByName(ctx, tenant, ref, lock)
+		e, err = st.LockEnvironmentByName(ctx, project, ref, lock)
 	}
-	if errors.Is(err, store.ErrNoRow) || (err == nil && e.Owner != tenant) {
+	if errors.Is(err, store.ErrNoRow) || (err == nil && e.Owner != project) {
 		return store.Environment{}, apierr.New(http.StatusNotFound, textNoEnvironment)
 	}
 	if err != nil {
@@ -252,10 +252,10 @@ func resolveEnv(ctx context.Context, st *store.Store, tenant, ref string, lock s
 	return e, nil
 }
 
-// view reads the tenant's domain id with lock; 404 for another's.
-func (s *Service) view(ctx context.Context, tx *store.Store, tenant string, id uuid.UUID, lock store.RowLock) (store.DomainView, error) {
+// view reads the project's domain id with lock; 404 for another's.
+func (s *Service) view(ctx context.Context, tx *store.Store, project string, id uuid.UUID, lock store.RowLock) (store.DomainView, error) {
 	v, err := tx.LockDomainView(ctx, id, lock)
-	if errors.Is(err, store.ErrNoRow) || (err == nil && v.Owner != tenant) {
+	if errors.Is(err, store.ErrNoRow) || (err == nil && v.Owner != project) {
 		return store.DomainView{}, errNoDomain()
 	}
 	if err != nil {
@@ -264,9 +264,9 @@ func (s *Service) view(ctx context.Context, tx *store.Store, tenant string, id u
 	return v, nil
 }
 
-// get answers the tenant's domain id.
-func (s *Service) get(ctx context.Context, tenant string, id uuid.UUID) (Domain, error) {
-	v, err := s.view(ctx, s.st, tenant, id, store.NoLock)
+// get answers the project's domain id.
+func (s *Service) get(ctx context.Context, project string, id uuid.UUID) (Domain, error) {
+	v, err := s.view(ctx, s.st, project, id, store.NoLock)
 	if err != nil {
 		return Domain{}, err
 	}
@@ -303,12 +303,12 @@ func checkLabels(labels map[string]string) error {
 	return nil
 }
 
-// CreateDomain is POST /api/v1/domains: a new claim of the tenant on a
+// CreateDomain is POST /api/v1/domains: a new claim of the project on a
 // name or a wildcard *.<name> (ADR 0045), unverified, checked at once and
 // then with backoff. Any number of claims may name one name. 400
 // invalid_name, 422 reserved, 409 too_many_unverified, 409 domains_off,
 // 409 wildcards_off for a wildcard without --acme-zone.
-func (s *Service) CreateDomain(ctx context.Context, tenant string, req CreateRequest) (Domain, error) {
+func (s *Service) CreateDomain(ctx context.Context, project string, req CreateRequest) (Domain, error) {
 	if !s.Enabled() {
 		return Domain{}, apierr.WithCode(http.StatusConflict, CodeDomainsOff, textDomainsOff)
 	}
@@ -335,49 +335,49 @@ func (s *Service) CreateDomain(ctx context.Context, tenant string, req CreateReq
 		return Domain{}, fmt.Errorf("a domain's ID: %w", err)
 	}
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		t, err := tx.LockTenant(ctx, tenant, store.ForNoKeyUpdate)
+		t, err := tx.LockProject(ctx, project, store.ForNoKeyUpdate)
 		if errors.Is(err, store.ErrNoRow) {
-			return apierr.New(http.StatusUnauthorized, "unknown tenant token")
+			return apierr.New(http.StatusUnauthorized, "unknown project token")
 		}
 		if err != nil {
-			return fmt.Errorf("tenant %s: %w", tenant, err)
+			return fmt.Errorf("project %s: %w", project, err)
 		}
 		if t.Deleting() {
-			return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+			return apierr.New(http.StatusConflict, "project %s is being deleted", project)
 		}
-		n, err := tx.CountUnverifiedDomains(ctx, tenant)
+		n, err := tx.CountUnverifiedDomains(ctx, project)
 		if err != nil {
-			return fmt.Errorf("count the unverified domains of %s: %w", tenant, err)
+			return fmt.Errorf("count the unverified domains of %s: %w", project, err)
 		}
 		if n >= s.cfg.UnverifiedMax {
 			return apierr.WithCode(http.StatusConflict, CodeTooManyUnverified,
-				"tenant %s holds %d domains that are not verified, the most it may (--domain-unverified-max): "+
-					"verify or delete one first", tenant, n)
+				"project %s holds %d domains that are not verified, the most it may (--domain-unverified-max): "+
+					"verify or delete one first", project, n)
 		}
-		_, err = tx.InsertDomain(ctx, store.NewDomain{ID: id, Owner: tenant, Name: name, Labels: req.Labels,
+		_, err = tx.InsertDomain(ctx, store.NewDomain{ID: id, Owner: project, Name: name, Labels: req.Labels,
 			Token: token, State: StateUnverified, Reason: ReasonUnverified, MadeBy: auth.MadeBy(ctx)})
 		return err
 	})
 	if err != nil {
 		return Domain{}, err
 	}
-	s.log.Info("domain claimed", "tenant", tenant, "domain", name, "id", id)
-	return s.get(ctx, tenant, id)
+	s.log.Info("domain claimed", "project", project, "domain", name, "id", id)
+	return s.get(ctx, project, id)
 }
 
-// ListDomains is GET /api/v1/domains: the tenant's domains, those bound
+// ListDomains is GET /api/v1/domains: the project's domains, those bound
 // to env (its UUID or name; "": any) with every label of labels, oldest
 // first.
-func (s *Service) ListDomains(ctx context.Context, tenant, env string, labels map[string]string) (List, error) {
+func (s *Service) ListDomains(ctx context.Context, project, env string, labels map[string]string) (List, error) {
 	envID := uuid.Nil
 	if env != "" {
-		e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+		e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 		if err != nil {
 			return List{}, err
 		}
 		envID = e.ID
 	}
-	views, err := s.st.ListDomainViews(ctx, tenant, envID, labels)
+	views, err := s.st.ListDomainViews(ctx, project, envID, labels)
 	if err != nil {
 		return List{}, fmt.Errorf("list domains: %w", err)
 	}
@@ -390,22 +390,22 @@ func (s *Service) ListDomains(ctx context.Context, tenant, env string, labels ma
 }
 
 // GetDomain is GET /api/v1/domains/{id}.
-func (s *Service) GetDomain(ctx context.Context, tenant, id string) (Domain, error) {
+func (s *Service) GetDomain(ctx context.Context, project, id string) (Domain, error) {
 	did, err := parseID(id)
 	if err != nil {
 		return Domain{}, err
 	}
-	return s.get(ctx, tenant, did)
+	return s.get(ctx, project, did)
 }
 
 // BindDomain is PUT /api/v1/domains/{id}/environment: binds the domain to
-// an environment of its tenant, or moves it there, also before it is
+// an environment of its project, or moves it there, also before it is
 // verified. A bind starts no grace: it clears was_routed and
 // dns_moved_since, and has the domain checked at once with its backoff
 // reset. Binding to the environment it is bound to changes nothing. 404
-// for an environment the tenant does not have, 409 while it is being
+// for an environment the project does not have, 409 while it is being
 // deleted, 409 superseded for a superseded claim.
-func (s *Service) BindDomain(ctx context.Context, tenant, id, env string) (Domain, error) {
+func (s *Service) BindDomain(ctx context.Context, project, id, env string) (Domain, error) {
 	did, err := parseID(id)
 	if err != nil {
 		return Domain{}, err
@@ -414,14 +414,14 @@ func (s *Service) BindDomain(ctx context.Context, tenant, id, env string) (Domai
 		return Domain{}, apierr.New(http.StatusBadRequest, "environment is required: the environment's ID or name")
 	}
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		e, err := resolveEnv(ctx, tx, tenant, env, store.ForShare)
+		e, err := resolveEnv(ctx, tx, project, env, store.ForShare)
 		if err != nil {
 			return err
 		}
 		if e.Deleting {
 			return apierr.New(http.StatusConflict, "environment %s is being deleted", e.Name)
 		}
-		v, err := s.view(ctx, tx, tenant, did, store.ForUpdate)
+		v, err := s.view(ctx, tx, project, did, store.ForUpdate)
 		if err != nil {
 			return err
 		}
@@ -446,18 +446,18 @@ func (s *Service) BindDomain(ctx context.Context, tenant, id, env string) (Domai
 	if err != nil {
 		return Domain{}, err
 	}
-	return s.get(ctx, tenant, did)
+	return s.get(ctx, project, did)
 }
 
 // UnbindDomain is DELETE /api/v1/domains/{id}/environment: ends the
 // binding. An unbound domain stays as it is.
-func (s *Service) UnbindDomain(ctx context.Context, tenant, id string) (Domain, error) {
+func (s *Service) UnbindDomain(ctx context.Context, project, id string) (Domain, error) {
 	did, err := parseID(id)
 	if err != nil {
 		return Domain{}, err
 	}
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		v, err := s.view(ctx, tx, tenant, did, store.ForUpdate)
+		v, err := s.view(ctx, tx, project, did, store.ForUpdate)
 		if err != nil || v.EnvID == uuid.Nil {
 			return err
 		}
@@ -470,19 +470,19 @@ func (s *Service) UnbindDomain(ctx context.Context, tenant, id string) (Domain, 
 	if err != nil {
 		return Domain{}, err
 	}
-	return s.get(ctx, tenant, did)
+	return s.get(ctx, project, did)
 }
 
 // CheckDomain is POST /api/v1/domains/{id}/check: one check now, its
 // lookups bounded by 15 s (a timeout counts as a failed lookup), with an
 // unverified claim's backoff reset; then the domain. A superseded claim
 // is not checked. The check is not cut when the caller leaves.
-func (s *Service) CheckDomain(ctx context.Context, tenant, id string) (Domain, error) {
+func (s *Service) CheckDomain(ctx context.Context, project, id string) (Domain, error) {
 	did, err := parseID(id)
 	if err != nil {
 		return Domain{}, err
 	}
-	v, err := s.view(ctx, s.st, tenant, did, store.NoLock)
+	v, err := s.view(ctx, s.st, project, did, store.NoLock)
 	if err != nil {
 		return Domain{}, err
 	}
@@ -498,19 +498,19 @@ func (s *Service) CheckDomain(ctx context.Context, tenant, id string) (Domain, e
 			return Domain{}, err
 		}
 	}
-	return s.get(ctx, tenant, did)
+	return s.get(ctx, project, did)
 }
 
 // DeleteDomain is DELETE /api/v1/domains/{id}: the claim and its binding
 // go; the incidents it left open in its environment are closed.
-func (s *Service) DeleteDomain(ctx context.Context, tenant, id string) error {
+func (s *Service) DeleteDomain(ctx context.Context, project, id string) error {
 	did, err := parseID(id)
 	if err != nil {
 		return err
 	}
 	var name string
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		v, err := s.view(ctx, tx, tenant, did, store.ForUpdate)
+		v, err := s.view(ctx, tx, project, did, store.ForUpdate)
 		if err != nil {
 			return err
 		}
@@ -528,7 +528,7 @@ func (s *Service) DeleteDomain(ctx context.Context, tenant, id string) error {
 	if err != nil {
 		return err
 	}
-	s.log.Info("domain deleted", "tenant", tenant, "domain", name, "id", did)
+	s.log.Info("domain deleted", "project", project, "domain", name, "id", did)
 	return nil
 }
 

@@ -35,7 +35,7 @@ func TestFixedInstanceIDRestart(t *testing.T) {
 	st := i.Store
 	// The killed run: its row stopping and written 13 s ago, an op of its
 	// own in flight.
-	if _, _, err := st.CreateTenant(ctx, "acme"); err != nil {
+	if _, _, err := st.CreateProject(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.InsertNode(ctx, "n1"); err != nil {

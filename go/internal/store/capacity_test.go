@@ -17,7 +17,7 @@ import (
 
 func TestBookingSums(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	a := mkSandbox(t, s, "acme")
@@ -77,7 +77,7 @@ func TestBookingSums(t *testing.T) {
 
 func TestPlacementSnapshot(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	mkNode(t, s, "n3")
@@ -183,7 +183,7 @@ func TestTombstones(t *testing.T) {
 
 func TestHolds(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	sb := mkSandbox(t, s, "acme")
 	place(t, s, sb.ID, "n1", model.StateRunning)

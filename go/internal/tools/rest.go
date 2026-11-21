@@ -104,7 +104,7 @@ type toolResult struct {
 	Image     *toolImage `json:"image,omitempty"`
 }
 
-// IdempotencyKey is the request's call id (and a tenant's job's create key): its Idempotency-Key header,
+// IdempotencyKey is the request's call id (and a project's job's create key): its Idempotency-Key header,
 // trimmed, with one pair of surrounding quotes taken off (an RFC 8941
 // sf-string, which holds no escape in this alphabet), or "" without the
 // header. More than one value, or one that is not ValidCallKey, is a 400

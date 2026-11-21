@@ -189,7 +189,7 @@ func (rec sshServerRecord) noChannels(t *testing.T) {
 func (r *rig) sshPreflight(body map[string]any) (int, string, string) {
 	r.t.Helper()
 	b, _ := json.Marshal(body)
-	code, raw := r.tenantCall(http.MethodPost, "/api/v1/ssh/preflight", string(b))
+	code, raw := r.projectCall(http.MethodPost, "/api/v1/ssh/preflight", string(b))
 	_, c := codeOf(raw)
 	return code, raw, c
 }

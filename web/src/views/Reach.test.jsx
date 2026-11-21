@@ -45,7 +45,7 @@ const SPEC = {
 };
 const ctx = (extra = {}) => ({
   spec: SPEC, catalog: builtinCatalog(), findings: [], setSecret: async () => 1, isNew: false, knownSecrets: [], pins: [],
-  httpSecrets: [], editSpec: nop, editAttached: true, tenant: 'kino', navigate: null, sandboxes: null, ...extra,
+  httpSecrets: [], editSpec: nop, editAttached: true, project: 'kino', navigate: null, sandboxes: null, ...extra,
 });
 const form = (F, name, obj, extra) => <F name={name} obj={obj} ctx={ctx(extra)} onChange={nop} onRename={nop} onRemove={nop} />;
 const pressed = (label) => `<button type="button" class="on" aria-pressed="true">${label}</button>`;
@@ -159,28 +159,28 @@ describe('an environment\'s sandboxes and jobs', () => {
     const sandboxes = [{ sandboxId: 'h3k9v2m7qpx', clientState: 'paused', image: 'agent:1', reaches: [{ addon: 'db-admin' }],
       updatedAt: '2026-11-06T09:00:00Z' }];
     const jobs = [{ id: 'k2m7qpxh3v9aaaa', phase: 'running', image: 'report:3', reaches: 'all', createdAt: '2026-11-06T09:00:00Z' }];
-    const out = html(<PodTables tenant="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />);
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes/h3k9v2m7qpx"');
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes/new"');
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes"');
+    const out = html(<PodTables project="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />);
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/sandboxes/h3k9v2m7qpx"');
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/sandboxes/new"');
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/sandboxes"');
     expect(out).toContain('<th>reaches</th>');
-    expect(text(<PodTables tenant="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />))
+    expect(text(<PodTables project="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />))
       .toContain('db-admin');
     expect(out).toContain('all of the environment');
     expect(out).not.toContain('groups');
     expect(out).toContain('1, 1 on their way');
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/jobs/k2m7qpxh3v9aaaa"');
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/jobs"');
-    expect(text(<PodTables tenant="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />))
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/jobs/k2m7qpxh3v9aaaa"');
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/jobs"');
+    expect(text(<PodTables project="kino" env="kino-dev" sandboxes={sandboxes} jobs={jobs} write navigate={nop} />))
       .toContain('jobs made by a call');
-    expect(out).not.toContain('of the tenant');
-    const empty = text(<PodTables tenant="kino" env="kino-dev" sandboxes={[]} jobs={[]} navigate={nop} />);
+    expect(out).not.toContain('of the project');
+    const empty = text(<PodTables project="kino" env="kino-dev" sandboxes={[]} jobs={[]} navigate={nop} />);
     expect(empty).toContain('No sandbox in this environment.');
     expect(empty).not.toContain('new sandbox');
     // The overview shows the newest jobs; the rest are in Activity's Jobs.
     const many = Array.from({ length: 8 }, (_, i) => ({ id: `job${i}`, phase: 'succeeded', image: 'b:1', reaches: [],
       createdAt: `2026-11-06T09:0${i}:00Z` }));
-    const shown = html(<PodTables tenant="kino" env="kino-dev" sandboxes={[]} jobs={many} navigate={nop} />);
+    const shown = html(<PodTables project="kino" env="kino-dev" sandboxes={[]} jobs={many} navigate={nop} />);
     expect(shown).toContain('/jobs/job7"');
     expect(shown).toContain('/jobs/job3"');
     expect(shown).not.toContain('/jobs/job2"');
@@ -189,11 +189,11 @@ describe('an environment\'s sandboxes and jobs', () => {
   it('says which sandboxes and jobs keep a delete from happening', () => {
     const e = new ApiError('environment kino-dev is in use', 409,
       { code: 'environment_in_use', sandboxes: ['h3k9v2m7qpx', 'q8w1z4c0dnr'], jobs: ['k2m7qpxh3v9'] });
-    const out = html(<InUse error={e} tenant="kino" env="kino-dev" navigate={nop} />);
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/sandboxes/q8w1z4c0dnr"');
-    expect(out).toContain('href="/tenants/kino/environments/kino-dev/jobs/k2m7qpxh3v9"');
-    expect(text(<InUse error={e} tenant="kino" env="kino-dev" navigate={nop} />)).toContain('Delete the sandboxes and cancel the jobs first');
-    expect(html(<InUse error={new ApiError('x', 409, { code: 'busy' })} tenant="kino" env="kino-dev" navigate={nop} />)).toBe('');
+    const out = html(<InUse error={e} project="kino" env="kino-dev" navigate={nop} />);
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/sandboxes/q8w1z4c0dnr"');
+    expect(out).toContain('href="/projects/kino/environments/kino-dev/jobs/k2m7qpxh3v9"');
+    expect(text(<InUse error={e} project="kino" env="kino-dev" navigate={nop} />)).toContain('Delete the sandboxes and cancel the jobs first');
+    expect(html(<InUse error={new ApiError('x', 409, { code: 'busy' })} project="kino" env="kino-dev" navigate={nop} />)).toBe('');
   });
 
   it('makes a sandbox and runs a job in the environment open, which is no choice', () => {

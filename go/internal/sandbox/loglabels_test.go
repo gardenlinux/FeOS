@@ -30,8 +30,8 @@ func TestRestoreSendsLogLabels(t *testing.T) {
 	n2 := h.addNode("n2")
 	sb := h.hibernatedOn("n1")
 	h.settle(sb.ID)
-	labels := map[string]string{model.LogTenant: testTenant, model.LogInstance: sb.ID.String()}
-	h.exec(`UPDATE sandboxes SET log_labels = '{"ferun.tenant":"`+testTenant+`","ferun.instance":"`+sb.ID.String()+`"}'
+	labels := map[string]string{model.LogProject: testProject, model.LogInstance: sb.ID.String()}
+	h.exec(`UPDATE sandboxes SET log_labels = '{"ferun.project":"`+testProject+`","ferun.instance":"`+sb.ID.String()+`"}'
 		WHERE id = $1`, sb.ID)
 	var asked int
 	h.eng().SetLogRedactor(func(_ context.Context, row store.Sandbox) ([]string, error) {

@@ -22,7 +22,7 @@ import (
 // spiffe://<td>/ingress/<name>, an instance of ferun-sink is
 // spiffe://<td>/sink/<name>, the control plane's instances share
 // spiffe://<td>/ferun; a pod has its workload's ID (WorkloadID, ADR
-// 0036), a pod outside an environment spiffe://<td>/tenant/<tenant>/sandbox/<id>.
+// 0036), a pod outside an environment spiffe://<td>/project/<project>/sandbox/<id>.
 const (
 	spiffeScheme    = "spiffe://"
 	nodePath        = "/node/"
@@ -49,8 +49,8 @@ func SinkID(td, name string) string {
 
 // SandboxID is the SPIFFE ID of a sandbox's pod outside an environment,
 // which only rows from before ADR 0035 are.
-func SandboxID(td, tenant string, id podid.ID) string {
-	return spiffeScheme + td + "/tenant/" + tenant + "/sandbox/" + id.String()
+func SandboxID(td, project string, id podid.ID) string {
+	return spiffeScheme + td + "/project/" + project + "/sandbox/" + id.String()
 }
 
 // validatePodSubject checks what IssuePod puts in a subject: a CN of at
@@ -81,11 +81,11 @@ func validatePodSubject(n pkix.Name) error {
 // and the subject with the pod in the CN and the workload's set ID in the
 // OU. A pod outside an environment (kind "") keeps SandboxID and a
 // subject without an OU.
-func PodIdentity(td, tenant string, envID uuid.UUID, pod podid.ID, kind, name, set string) (string, pkix.Name) {
+func PodIdentity(td, project string, envID uuid.UUID, pod podid.ID, kind, name, set string) (string, pkix.Name) {
 	if kind == "" {
-		return SandboxID(td, tenant, pod), PodSubject(td, pod.String(), "")
+		return SandboxID(td, project, pod), PodSubject(td, pod.String(), "")
 	}
-	return WorkloadID(td, tenant, envID, kind, name), PodSubject(td, pod.String(), set)
+	return WorkloadID(td, project, envID, kind, name), PodSubject(td, pod.String(), set)
 }
 
 // ControlPlaneID is the SPIFFE ID that every instance's certificate on the

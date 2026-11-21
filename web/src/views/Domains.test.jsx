@@ -76,7 +76,7 @@ describe('CertificateCard', () => {
 
 describe('BindingCard', () => {
   const card = (access, dom = d) => renderToStaticMarkup(
-    <BindingCard tenant="kino" d={dom} env={null} envName="prod" access={access} busy="" act={() => {}} navigate={() => {}} />,
+    <BindingCard project="kino" d={dom} env={null} envName="prod" access={access} busy="" act={() => {}} navigate={() => {}} />,
   );
   it('says the default host answers 404 while the domain is served', () => {
     expect(card({ role: 'admin', environments: [] })).toContain('default host answers 404');
@@ -95,14 +95,14 @@ describe('DomainsEmpty', () => {
     expect(renderToStaticMarkup(<DomainsEmpty admin onClaim={() => {}} />)).toContain('Claim domain');
     const out = renderToStaticMarkup(<DomainsEmpty admin={false} onClaim={() => {}} />);
     expect(out).toContain('instead of its default host');
-    expect(out).toContain('needs admin on this tenant');
+    expect(out).toContain('needs admin on this project');
   });
 });
 
 describe('domainPath and envOf', () => {
   it('link by the ID and find the environment by its ID', () => {
-    expect(domainPath('kino', d)).toBe('/tenants/kino/domains/0193d1a0-0000-7000-8000-000000000002');
-    expect(domainPath('kino')).toBe('/tenants/kino/domains');
+    expect(domainPath('kino', d)).toBe('/projects/kino/domains/0193d1a0-0000-7000-8000-000000000002');
+    expect(domainPath('kino')).toBe('/projects/kino/domains');
     expect(envOf(d, [{ id: ENV, name: 'prod' }])).toEqual({ id: ENV, name: 'prod' });
     expect(envOf({ ...d, environment: null }, [{ id: ENV, name: 'prod' }])).toBeNull();
   });

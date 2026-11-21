@@ -40,7 +40,7 @@ func TestEnsureCreates(t *testing.T) {
 		t.Fatalf("booking %+v %v", b, ok)
 	}
 	info := h.podState("n1", sb.ID, podv1.PodState_POD_STATE_RUNNING)
-	if podIncarnation(info) != sb.Incarnation || info.GetSpec().GetLabels()[LabelTenant] != testTenant {
+	if podIncarnation(info) != sb.Incarnation || info.GetSpec().GetLabels()[LabelProject] != testProject {
 		t.Fatalf("pod labels %v", info.GetSpec().GetLabels())
 	}
 	// Running: Ensure returns at once with the same lease.
@@ -241,7 +241,7 @@ func TestRecreateWhileOldOpRuns(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("the old incarnation's create did not arrive")
 	}
-	if _, _, err := e.Delete(bg, testTenant, id); err != nil {
+	if _, _, err := e.Delete(bg, testProject, id); err != nil {
 		t.Fatal(err)
 	}
 	sb := h.sandboxWithID(id, 512)

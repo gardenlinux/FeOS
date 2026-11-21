@@ -70,16 +70,16 @@ func checkNewEnv(name, id string, labels map[string]string) (uuid.UUID, error) {
 // its write: the transaction runs again.
 var errRace = errors.New("another request created the environment first")
 
-// insertEnv inserts an environment in tx (whose tenant it locked): the
+// insertEnv inserts an environment in tx (whose project it locked): the
 // existing one and false when idempotent and the same ID and name are
-// the tenant's already; 409 id_taken or name_taken otherwise.
-func insertEnv(ctx context.Context, tx *store.Store, tenant string, id uuid.UUID, name string, labels map[string]string,
+// the project's already; 409 id_taken or name_taken otherwise.
+func insertEnv(ctx context.Context, tx *store.Store, project string, id uuid.UUID, name string, labels map[string]string,
 	idempotent bool) (store.Environment, bool, error) {
 	byID, err := tx.GetEnvironment(ctx, id)
 	switch {
-	case err == nil && idempotent && byID.Owner == tenant && byID.Name == name:
+	case err == nil && idempotent && byID.Owner == project && byID.Name == name:
 		return byID, false, nil
-	case err == nil && byID.Owner == tenant && byID.Name == name:
+	case err == nil && byID.Owner == project && byID.Name == name:
 		return store.Environment{}, false, apierr.WithCode(http.StatusConflict, CodeIDTaken,
 			"an environment of id %s exists", id)
 	case err == nil:
@@ -88,13 +88,13 @@ func insertEnv(ctx context.Context, tx *store.Store, tenant string, id uuid.UUID
 	case !errors.Is(err, store.ErrNoRow):
 		return store.Environment{}, false, err
 	}
-	if _, err := tx.LockEnvironmentByName(ctx, tenant, name, store.NoLock); err == nil {
+	if _, err := tx.LockEnvironmentByName(ctx, project, name, store.NoLock); err == nil {
 		return store.Environment{}, false, apierr.WithCode(http.StatusConflict, CodeNameTaken,
 			"an environment named %s exists with another id", name)
 	} else if !errors.Is(err, store.ErrNoRow) {
 		return store.Environment{}, false, err
 	}
-	e, err := tx.InsertEnvironment(ctx, store.NewEnvironment{ID: id, Owner: tenant, Name: name, Labels: labels})
+	e, err := tx.InsertEnvironment(ctx, store.NewEnvironment{ID: id, Owner: project, Name: name, Labels: labels})
 	if errors.Is(err, store.ErrExists) {
 		return store.Environment{}, false, errRace
 	}
@@ -197,8 +197,8 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 }
 
 // clone is Clone.
-func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneRequest) (EnvStatus, error) {
-	src, err := resolveEnv(ctx, s.st, tenant, ref, store.NoLock)
+func (s *Service) clone(ctx context.Context, project, ref string, req CloneRequest) (EnvStatus, error) {
+	src, err := resolveEnv(ctx, s.st, project, ref, store.NoLock)
 	if err != nil {
 		return EnvStatus{}, err
 	}
@@ -210,11 +210,11 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		return EnvStatus{}, err
 	}
 	// A taken ID is refused before anything is planned under it: it may
-	// be another tenant's environment. insertEnv checks again.
+	// be another project's environment. insertEnv checks again.
 	if req.ID != "" {
 		byID, err := s.st.GetEnvironment(ctx, id)
 		switch {
-		case err == nil && byID.Owner == tenant && byID.Name == req.Name:
+		case err == nil && byID.Owner == project && byID.Name == req.Name:
 			return EnvStatus{}, apierr.WithCode(http.StatusConflict, CodeIDTaken, "an environment of id %s exists", id)
 		case err == nil:
 			return EnvStatus{}, apierr.WithCode(http.StatusConflict, CodeIDTaken,
@@ -441,7 +441,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	// The plan, as deployment 1 of an environment that is not there yet.
 	var norm spec.Spec
 	if raw != nil {
-		p, err := s.plan(ctx, tenant, store.Environment{ID: id, Owner: tenant, Name: req.Name}, raw, nil, spec.ModeApply,
+		p, err := s.plan(ctx, project, store.Environment{ID: id, Owner: project, Name: req.Name}, raw, nil, spec.ModeApply,
 			vcSecrets, vcCreds, stored)
 		if err != nil {
 			return EnvStatus{}, err
@@ -474,7 +474,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	}
 	author := req.Author
 	if author == "" {
-		author = tenant
+		author = project
 	}
 	var annotations map[string]string
 	if srcRel != nil {
@@ -482,7 +482,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	}
 	var row store.Environment
 	err = s.inTxRetry(ctx, func(tx *store.Store) error {
-		t, err := lockQuota(ctx, tx, tenant)
+		t, err := lockQuota(ctx, tx, project)
 		if err != nil {
 			return err
 		}
@@ -493,7 +493,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		if err := checkQuota(ctx, tx, t, quota.Use{Environments: 1}, id, nil, next); err != nil {
 			return err
 		}
-		e, _, err := insertEnv(ctx, tx, tenant, id, req.Name, req.Labels, false)
+		e, _, err := insertEnv(ctx, tx, project, id, req.Name, req.Labels, false)
 		if err != nil {
 			return err
 		}

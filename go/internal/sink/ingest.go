@@ -54,7 +54,7 @@ const (
 	attrPod         = "ferun.pod"
 	attrContainer   = "ferun.container"
 	attrLogID       = "ferun.log_id"
-	attrTenant      = "ferun.tenant"
+	attrProject     = "ferun.project"
 	attrInstance    = "ferun.instance"
 	attrEnvironment = "ferun.environment"
 	attrKind        = "ferun.kind"
@@ -211,7 +211,7 @@ var errNotYours = errors.New("not the peer's stream")
 // parseExport reads an Export into the streams' batches: a ResourceLogs a
 // stream (two of the same key are joined), its labels from the resource's
 // attributes and the peer, the node of the certificate. A record without
-// log.offset, a resource without its key or tenant, and more than
+// log.offset, a resource without its key or project, and more than
 // maxExportRecords records are refused. A stream with ferun.source
 // ingress is an ingress's whose name its ferun.pod has (ingress/<name>),
 // every other (a container's, or egress, a pod's requests through its
@@ -240,8 +240,8 @@ func parseExport(req *otlplogsv1.ExportLogsServiceRequest, p ingestPeer, now tim
 		if key.Pod == "" || key.Container == "" || key.LogID == "" {
 			return nil, fmt.Errorf("resource %d: %s, %s and %s are required", i, attrPod, attrContainer, attrLogID)
 		}
-		if attrs[attrTenant] == "" {
-			return nil, fmt.Errorf("resource %d: %s is required", i, attrTenant)
+		if attrs[attrProject] == "" {
+			return nil, fmt.Errorf("resource %d: %s is required", i, attrProject)
 		}
 		source := sourceOf(attrs[attrSource])
 		if source == SourceIngress {
@@ -304,7 +304,7 @@ func labelsOf(attrs map[string]string, node, source string) Labels {
 		return max(n, 0)
 	}
 	return Labels{
-		Tenant: attrs[attrTenant], Node: node, Instance: attrs[attrInstance],
+		Project: attrs[attrProject], Node: node, Instance: attrs[attrInstance],
 		Environment: attrs[attrEnvironment], Kind: attrs[attrKind], Object: attrs[attrObject], Job: attrs[attrJob],
 		Replica: num(attrReplica), Deployment: num(deploymentAttr(attrs)), Attempt: num(attrAttempt),
 		RetentionDays: num(attrRetentionDays), Source: source, Attrs: attrs,

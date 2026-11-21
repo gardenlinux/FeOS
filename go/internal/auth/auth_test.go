@@ -8,19 +8,19 @@ import (
 	"testing"
 )
 
-// A read on a tenant's behalf passes on the caller's token, or its
-// session's cookie and the tenant; a caller within the process has
+// A read on a project's behalf passes on the caller's token, or its
+// session's cookie and the project; a caller within the process has
 // neither.
 func TestPassOn(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		t    Tenant
+		t    Project
 		want http.Header
 	}{
-		{"a token", Tenant{Name: "acme", Token: "tok"}, http.Header{"Authorization": {"Bearer tok"}}},
-		{"a session", Tenant{Name: "acme", Session: "s1"}, http.Header{"Cookie": {"__Host-ferun_session=s1; ferun_session=s1"},
-			"Ferun-Tenant": {"acme"}}},
-		{"nobody", Tenant{Name: "acme"}, http.Header{}},
+		{"a token", Project{Name: "acme", Token: "tok"}, http.Header{"Authorization": {"Bearer tok"}}},
+		{"a session", Project{Name: "acme", Session: "s1"}, http.Header{"Cookie": {"__Host-ferun_session=s1; ferun_session=s1"},
+			"Ferun-Project": {"acme"}}},
+		{"nobody", Project{Name: "acme"}, http.Header{}},
 	} {
 		h := http.Header{}
 		c.t.PassOn(h)

@@ -14,54 +14,54 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-func TestTenantsAndTokens(t *testing.T) {
+func TestProjectsAndTokens(t *testing.T) {
 	s, _ := newStore(t)
-	tn, created, err := s.CreateTenant(bg, "acme")
+	tn, created, err := s.CreateProject(bg, "acme")
 	if err != nil || !created || tn.ID != "acme" || tn.Deleting() {
 		t.Fatalf("create %+v %v %v", tn, created, err)
 	}
-	if _, created, err := s.CreateTenant(bg, "acme"); err != nil || created {
+	if _, created, err := s.CreateProject(bg, "acme"); err != nil || created {
 		t.Fatalf("create twice %v %v", created, err)
 	}
-	if _, _, err := s.CreateTenant(bg, "Bad_Name"); err == nil {
-		t.Fatal("a bad tenant name was accepted")
+	if _, _, err := s.CreateProject(bg, "Bad_Name"); err == nil {
+		t.Fatal("a bad project name was accepted")
 	}
-	if !store.TenantNamePattern.MatchString("acme") || store.TenantNamePattern.MatchString("a") {
-		t.Fatal("tenant name pattern")
+	if !store.ProjectNamePattern.MatchString("acme") || store.ProjectNamePattern.MatchString("a") {
+		t.Fatal("project name pattern")
 	}
-	mkTenant(t, s, "beta")
+	mkProject(t, s, "beta")
 
 	tokA := store.HashToken("token-a")
 	if len(tokA) != 64 {
 		t.Fatalf("hash %q", tokA)
 	}
-	if _, err := s.CreateTenantToken(bg, tokA, "acme", "ci"); err != nil {
+	if _, err := s.CreateProjectToken(bg, tokA, "acme", "ci"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateTenantToken(bg, store.HashToken("x"), "nobody", ""); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("token of a missing tenant: %v", err)
+	if _, err := s.CreateProjectToken(bg, store.HashToken("x"), "nobody", ""); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("token of a missing project: %v", err)
 	}
-	if tenant, err := s.ResolveTenantToken(bg, tokA); err != nil || tenant != "acme" {
-		t.Fatalf("resolve %q %v", tenant, err)
+	if project, err := s.ResolveProjectToken(bg, tokA); err != nil || project != "acme" {
+		t.Fatalf("resolve %q %v", project, err)
 	}
-	if _, err := s.ResolveTenantToken(bg, store.HashToken("nope")); !errors.Is(err, model.ErrUnknownToken) {
+	if _, err := s.ResolveProjectToken(bg, store.HashToken("nope")); !errors.Is(err, model.ErrUnknownToken) {
 		t.Fatalf("resolve unknown: %v", err)
 	}
-	must(t, s.TouchTenantToken(bg, tokA))
-	toks, err := s.ListTenantTokens(bg, "acme")
+	must(t, s.TouchProjectToken(bg, tokA))
+	toks, err := s.ListProjectTokens(bg, "acme")
 	if err != nil || len(toks) != 1 || toks[0].Label != "ci" || toks[0].LastUsedAt.IsZero() {
 		t.Fatalf("tokens %+v %v", toks, err)
 	}
 	// A second touch within the minute writes nothing.
 	first := toks[0].LastUsedAt
-	must(t, s.TouchTenantToken(bg, tokA))
-	if toks, _ := s.ListTenantTokens(bg, "acme"); !toks[0].LastUsedAt.Equal(first) {
+	must(t, s.TouchProjectToken(bg, tokA))
+	if toks, _ := s.ListProjectTokens(bg, "acme"); !toks[0].LastUsedAt.Equal(first) {
 		t.Fatal("touch is not throttled")
 	}
 
 	sb := mkSandbox(t, s, "acme")
 	mkSandbox(t, s, "acme")
-	list, err := s.ListTenants(bg)
+	list, err := s.ListProjects(bg)
 	if err != nil || len(list) != 2 || list[0].ID != "acme" || list[0].SandboxCount != 2 || len(list[0].Tokens) != 1 ||
 		list[1].SandboxCount != 0 || list[1].Tokens == nil {
 		t.Fatalf("list %+v %v", list, err)
@@ -88,65 +88,65 @@ func TestTenantsAndTokens(t *testing.T) {
 		t.Fatalf("list sandbox tokens %v %v", l, err)
 	}
 
-	// Deleting: the tenant's tokens go, its sandbox tokens stop resolving,
+	// Deleting: the project's tokens go, its sandbox tokens stop resolving,
 	// and it stays while it has sandboxes.
 	tx(t, s, func(tx *store.Store) error {
-		if _, err := tx.LockTenant(bg, "acme", store.ForUpdate); err != nil {
+		if _, err := tx.LockProject(bg, "acme", store.ForUpdate); err != nil {
 			return err
 		}
-		ok, err := tx.MarkTenantDeleting(bg, "acme")
+		ok, err := tx.MarkProjectDeleting(bg, "acme")
 		if err == nil && !ok {
-			t.Error("mark deleting: no tenant")
+			t.Error("mark deleting: no project")
 		}
 		return err
 	})
-	if _, err := s.ResolveTenantToken(bg, tokA); !errors.Is(err, model.ErrUnknownToken) {
-		t.Fatalf("tenant token of a deleting tenant: %v", err)
+	if _, err := s.ResolveProjectToken(bg, tokA); !errors.Is(err, model.ErrUnknownToken) {
+		t.Fatalf("project token of a deleting project: %v", err)
 	}
 	if _, _, err := s.ResolveSandboxToken(bg, sbTok); !errors.Is(err, model.ErrUnknownToken) {
-		t.Fatalf("sandbox token of a deleting tenant: %v", err)
+		t.Fatalf("sandbox token of a deleting project: %v", err)
 	}
-	if tn, _ := s.GetTenant(bg, "acme"); !tn.Deleting() {
+	if tn, _ := s.GetProject(bg, "acme"); !tn.Deleting() {
 		t.Fatal("not deleting")
 	}
-	if names, err := s.DeletingTenants(bg); err != nil || len(names) != 1 || names[0] != "acme" {
-		t.Fatalf("deleting tenants %v %v", names, err)
+	if names, err := s.DeletingProjects(bg); err != nil || len(names) != 1 || names[0] != "acme" {
+		t.Fatalf("deleting projects %v %v", names, err)
 	}
-	if ok, err := s.DeleteTenantIfEmpty(bg, "acme"); err != nil || ok {
+	if ok, err := s.DeleteProjectIfEmpty(bg, "acme"); err != nil || ok {
 		t.Fatalf("deleted with sandboxes: %v %v", ok, err)
 	}
 	exec(t, s, "DELETE FROM sandboxes WHERE owner = 'acme'")
 	exec(t, s, "DELETE FROM environments WHERE owner = 'acme'")
-	if ok, err := s.DeleteTenantIfEmpty(bg, "acme"); err != nil || !ok {
+	if ok, err := s.DeleteProjectIfEmpty(bg, "acme"); err != nil || !ok {
 		t.Fatalf("delete empty: %v %v", ok, err)
 	}
-	if _, err := s.GetTenant(bg, "acme"); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("deleted tenant: %v", err)
+	if _, err := s.GetProject(bg, "acme"); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("deleted project: %v", err)
 	}
-	if ok, err := s.MarkTenantDeleting(bg, "acme"); err != nil || ok {
-		t.Fatalf("mark a missing tenant: %v %v", ok, err)
+	if ok, err := s.MarkProjectDeleting(bg, "acme"); err != nil || ok {
+		t.Fatalf("mark a missing project: %v %v", ok, err)
 	}
 
 	// Revocation by hash.
 	tokB := store.HashToken("token-b")
-	_, err = s.CreateTenantToken(bg, tokB, "beta", "")
+	_, err = s.CreateProjectToken(bg, tokB, "beta", "")
 	must(t, err)
-	if ok, err := s.DeleteTenantToken(bg, "acme", tokB); err != nil || ok {
-		t.Fatalf("revoke another tenant's token: %v %v", ok, err)
+	if ok, err := s.DeleteProjectToken(bg, "acme", tokB); err != nil || ok {
+		t.Fatalf("revoke another project's token: %v %v", ok, err)
 	}
-	if ok, err := s.DeleteTenantToken(bg, "beta", tokB); err != nil || !ok {
+	if ok, err := s.DeleteProjectToken(bg, "beta", tokB); err != nil || !ok {
 		t.Fatalf("revoke: %v %v", ok, err)
 	}
 }
 
-// Starting a tenant's deletion takes its environments out of the
-// ingress's table: MarkTenantDeleting sends ferun_ingress for each of
+// Starting a project's deletion takes its environments out of the
+// ingress's table: MarkProjectDeleting sends ferun_ingress for each of
 // them, with its transaction's commit, and only when it starts the
 // deletion.
-func TestMarkTenantDeletingNotifiesIngress(t *testing.T) {
+func TestMarkProjectDeletingNotifiesIngress(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "beta")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "beta")
 	web := mkEnv(t, s, "acme", "web")
 	api := mkEnv(t, s, "acme", "api")
 	other := mkEnv(t, s, "beta", "web")
@@ -187,7 +187,7 @@ func TestMarkTenantDeletingNotifiesIngress(t *testing.T) {
 
 	errRollback := errors.New("rolled back")
 	if err := s.InTx(bg, func(tx *store.Store) error {
-		if _, err := tx.MarkTenantDeleting(bg, "acme"); err != nil {
+		if _, err := tx.MarkProjectDeleting(bg, "acme"); err != nil {
 			return err
 		}
 		return errRollback
@@ -199,12 +199,12 @@ func TestMarkTenantDeletingNotifiesIngress(t *testing.T) {
 	}
 
 	tx(t, s, func(tx *store.Store) error {
-		if _, err := tx.LockTenant(bg, "acme", store.ForUpdate); err != nil {
+		if _, err := tx.LockProject(bg, "acme", store.ForUpdate); err != nil {
 			return err
 		}
-		ok, err := tx.MarkTenantDeleting(bg, "acme")
+		ok, err := tx.MarkProjectDeleting(bg, "acme")
 		if err == nil && !ok {
-			t.Error("mark deleting: no tenant")
+			t.Error("mark deleting: no project")
 		}
 		return err
 	})
@@ -212,7 +212,7 @@ func TestMarkTenantDeletingNotifiesIngress(t *testing.T) {
 		t.Fatalf("payloads %v", got)
 	}
 	// Marked again: deleting_at stays, and nothing is sent.
-	if ok, err := s.MarkTenantDeleting(bg, "acme"); err != nil || !ok {
+	if ok, err := s.MarkProjectDeleting(bg, "acme"); err != nil || !ok {
 		t.Fatalf("mark again: %v %v", ok, err)
 	}
 	if got := seen(); len(got) != 0 {
@@ -229,12 +229,12 @@ func TestBootstrapOperator(t *testing.T) {
 		return err
 	})
 	if !created {
-		t.Fatal("no operator tenant")
+		t.Fatal("no operator project")
 	}
-	if tenant, err := s.ResolveTenantToken(bg, h); err != nil || tenant != store.OperatorTenant {
-		t.Fatalf("bootstrap token %q %v", tenant, err)
+	if project, err := s.ResolveProjectToken(bg, h); err != nil || project != store.OperatorProject {
+		t.Fatalf("bootstrap token %q %v", project, err)
 	}
-	// Once any tenant exists, nothing more is made.
+	// Once any project exists, nothing more is made.
 	if created, err := s.BootstrapOperator(bg, store.HashToken("other")); err != nil || created {
 		t.Fatalf("second bootstrap %v %v", created, err)
 	}
@@ -242,7 +242,7 @@ func TestBootstrapOperator(t *testing.T) {
 
 func TestSandboxTokenOfDeletedSandbox(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	sb := mkSandbox(t, s, "acme")
 	h := store.HashToken("t")
 	_, err := s.CreateSandboxToken(bg, h, sb.ID, "", "")

@@ -50,11 +50,11 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 	app := newGuestApp(t)
 	n1.Script().SetPortAddr(5173, app.srv.Listener.Addr().String())
 
-	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: "preview"})
+	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: project, Name: "preview"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := c.call(a, "POST", "/api/v1/sandboxes", tenantAuth, `{"environment":"preview"}`)
+	r := c.call(a, "POST", "/api/v1/sandboxes", projectAuth, `{"environment":"preview"}`)
 	if r.code != http.StatusCreated {
 		t.Fatalf("create the workspace sandbox: %d %s", r.code, r.body)
 	}
@@ -79,7 +79,7 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 		t.Fatalf("attached %+v %v", first, err)
 	}
 
-	r = c.call(a, "POST", "/api/v1/environments/preview/route-tokens", tenantAuth, "")
+	r = c.call(a, "POST", "/api/v1/environments/preview/route-tokens", projectAuth, "")
 	var tok struct {
 		Token string `json:"token"`
 	}
@@ -108,7 +108,7 @@ func TestAttachedReplacedSandbox(t *testing.T) {
 
 	// Lost and replaced under the same ID (no client can since ADR 0019;
 	// a lost sandbox comes back as a new incarnation under its ID too).
-	if r := c.call(a, "DELETE", "/api/v1/sandboxes/"+id.String(), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(a, "DELETE", "/api/v1/sandboxes/"+id.String(), projectAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
 	c.createID(id, "preview", true)

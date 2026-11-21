@@ -71,7 +71,7 @@ func newPipes(log Log, index SourceIndex, cfg Config) *pipes {
 // ensure makes id's topic, its index of config and the index's source, and
 // returns the topic's partitions. Only the sink's start makes them
 // (Program.ensurePipes): the topics are the platform's, fixed, never made
-// by what a tenant does (ADR 0026 §11).
+// by what a project does (ADR 0026 §11).
 func (p *pipes) ensure(ctx context.Context, id string, config func() []byte) (int32, error) {
 	p.mu.Lock()
 	n, ok := p.parts[id]

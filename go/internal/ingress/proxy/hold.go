@@ -32,7 +32,7 @@ type waiter struct {
 	class    holdClass
 	deadline time.Time
 	// held is its place among the held requests (MaxHeldPerEnv,
-	// MaxHeldPerTenant, MaxHeld).
+	// MaxHeldPerProject, MaxHeld).
 	held slot
 }
 
@@ -51,22 +51,22 @@ func (w *waiter) raise(c holdClass, cfg Config) {
 	}
 }
 
-// enter counts a request of the environment env of tenant among the
+// enter counts a request of the environment env of project among the
 // held ones: against its environment's share, MaxHeldPerEnv, its
-// tenant's, MaxHeldPerTenant, and against MaxHeld. It returns fits, or
+// project's, MaxHeldPerProject, and against MaxHeld. It returns fits, or
 // the cap that is taken.
-func (p *Proxy) enter(w *waiter, tenant, env string) full {
+func (p *Proxy) enter(w *waiter, project, env string) full {
 	if w.held.counted {
 		return fits
 	}
-	f := p.held.enter(&w.held, tenant, env)
+	f := p.held.enter(&w.held, project, env)
 	switch f {
 	case fits:
 		p.m.heldTotal.Add(1)
 	case envFull:
 		p.m.rejectedHeldEnv.Add(1)
-	case tenantFull:
-		p.m.rejectedHeldTenant.Add(1)
+	case projectFull:
+		p.m.rejectedHeldProject.Add(1)
 	case allFull:
 		p.m.rejectedHeld.Add(1)
 	}
@@ -122,8 +122,8 @@ func (q *request) hold(v *view, tg target, info pickInfo) bool {
 		p.m.wakes.Add(1)
 		p.d.Waker.Wake(tg.env.id, svc.name)
 	}
-	switch p.enter(&q.wait, tg.env.tenant, tg.env.id) {
-	case envFull, tenantFull:
+	switch p.enter(&q.wait, tg.env.project, tg.env.id) {
+	case envFull, projectFull:
 		reply{http.StatusServiceUnavailable, textTooManyHere, 1}.write(q.w)
 		return false
 	case allFull:

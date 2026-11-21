@@ -175,7 +175,7 @@ func sameMesh(a, b wire.Mesh) bool {
 // ferun_sandbox (an instance's sandbox) and reads what they name after
 // Debounce, and reads the whole table again every Full. An environment
 // whose read returns no rows has left the table: it is not public any
-// more, deleting, of a deleting tenant, or without a deployment. The
+// more, deleting, of a deleting project, or without a deployment. The
 // domains' keys are opened with Sealer; without one, no domain is
 // served. Each environment says who it admits (ADR 0054; BuildEnv), with
 // SignIn from its provider and AuthURL, and the snapshot carries the

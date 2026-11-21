@@ -28,13 +28,13 @@ type TrafficRow struct {
 	PodID      podid.ID // as sent
 	SandboxID  podid.ID // the attributed sandbox; "" for a foreign record
 	ForeignPod bool
-	TenantID   string
+	ProjectID  string
 	Kind       string // flow, drop, dns, server_name
 	Missed     int64
 	Detail     json.RawMessage // protojson (UseProtoNames) of the record
 }
 
-const trafficInsertCols = "ts_ns, node, start_id, seq, pod_id, sandbox_id, foreign_pod, tenant_id, kind, missed, detail"
+const trafficInsertCols = "ts_ns, node, start_id, seq, pod_id, sandbox_id, foreign_pod, project_id, kind, missed, detail"
 
 const trafficCols = "day, id, " + trafficInsertCols
 
@@ -54,7 +54,7 @@ func (s *Store) InsertTraffic(ctx context.Context, rows ...TrafficRow) error {
 		n := len(chunk)
 		var (
 			tsNs, seq, missed = make([]int64, n), make([]int64, n), make([]int64, n)
-			node, tenantID    = make([]string, n), make([]string, n)
+			node, projectID   = make([]string, n), make([]string, n)
 			kind, detail      = make([]string, n), make([]string, n)
 			startID           = make([]uuid.UUID, n)
 			podID, sandboxID  = make([]*string, n), make([]*string, n)
@@ -62,12 +62,12 @@ func (s *Store) InsertTraffic(ctx context.Context, rows ...TrafficRow) error {
 		)
 		for i, r := range chunk {
 			tsNs[i], seq[i], missed[i] = r.TsNs, r.Seq, r.Missed
-			node[i], tenantID[i], kind[i], detail[i] = r.Node, r.TenantID, r.Kind, jsonObject(r.Detail)
+			node[i], projectID[i], kind[i], detail[i] = r.Node, r.ProjectID, r.Kind, jsonObject(r.Detail)
 			startID[i], podID[i], sandboxID[i] = r.StartID, idOrNull(r.PodID), idOrNull(r.SandboxID)
 			foreignPod[i] = r.ForeignPod
 		}
 		if _, err := s.q.Exec(ctx, insertTrafficSQL, tsNs, node, startID, seq, podID, sandboxID, foreignPod,
-			tenantID, kind, missed, detail); err != nil {
+			projectID, kind, missed, detail); err != nil {
 			return fmt.Errorf("insert traffic records: %w", err)
 		}
 	}
@@ -79,7 +79,7 @@ func scanTraffic(row pgx.Row) (TrafficRow, error) {
 	var podID, sandboxID *podid.ID
 	var detail []byte
 	if err := row.Scan(&r.Day, &r.ID, &r.TsNs, &r.Node, &r.StartID, &r.Seq, &podID, &sandboxID, &r.ForeignPod,
-		&r.TenantID, &r.Kind, &r.Missed, &detail); err != nil {
+		&r.ProjectID, &r.Kind, &r.Missed, &detail); err != nil {
 		return TrafficRow{}, err
 	}
 	r.PodID, r.SandboxID = idOf(podID), idOf(sandboxID)

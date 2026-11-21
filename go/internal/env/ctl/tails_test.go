@@ -133,7 +133,7 @@ func longLines(n int) []string {
 }
 
 // A job's run keeps its log tail redacted of the addon credentials and
-// the tenant secrets it was given, and bounded (§13.7); its job_failed
+// the project secrets it was given, and bounded (§13.7); its job_failed
 // evidence is the same tail.
 func TestJobLogTailRedacted(t *testing.T) {
 	h := newHarness(t, options{})

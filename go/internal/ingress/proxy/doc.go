@@ -27,9 +27,9 @@
 // without a body also when it was sent but no response came. Responses
 // stream unbuffered, and upgrades pass through.
 //
-// One tenant cannot take the instance from the others, nor one
-// environment its tenant's (limits.go): forwarded and held requests each
-// have a share per tenant and within it one per environment beside the
+// One project cannot take the instance from the others, nor one
+// environment its project's (limits.go): forwarded and held requests each
+// have a share per project and within it one per environment beside the
 // instance's cap, each wait for a connection to an instance is bounded,
 // and an HTTP/2 connection carries at most 63 streams. What a request
 // keeps while it waits is bounded as well: 32 KiB of headers in 100
@@ -54,7 +54,7 @@
 // requests, and the applications' Set-Cookie of them; a request of a
 // visit gets the visitor's subject, email and token in headers.
 //
-// On a host under the apps zone or the tenant zone (ADR 0031), the proxy
+// On a host under the apps zone or the project zone (ADR 0031), the proxy
 // makes every cookie of a response host-only (cookies.go): an app can then
 // set no cookie for other apps under the zone, nor for the platform's
 // hosts beside it.

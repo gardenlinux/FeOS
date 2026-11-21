@@ -67,7 +67,7 @@ func credPath(env, name string) string {
 
 func TestCredentialVersionsAndSecrets(t *testing.T) {
 	r := newRig(t)
-	code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer one-secret-token", 0))
+	code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer one-secret-token", 0))
 	if code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
@@ -83,14 +83,14 @@ func TestCredentialVersionsAndSecrets(t *testing.T) {
 	}
 
 	// The same definition again is no new version.
-	if code, raw = r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer one-secret-token", 0)); code != http.StatusOK || decodeCredential(t, raw).Version != 1 {
+	if code, raw = r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer one-secret-token", 0)); code != http.StatusOK || decodeCredential(t, raw).Version != 1 {
 		t.Fatalf("same again: %d %s", code, raw)
 	}
 
 	// {"set": true} keeps the secret; the rate makes version 2.
 	keep := `{"upstream":"https://api.erp.example.test","pathPrefixes":["/odata/"],"rateLimit":{"perSecond":5},
 		"credential":{"kind":"headers","headers":{"Authorization":{"set":true}}}}`
-	if code, raw = r.tenantCall("PUT", credPath("box", "erp"), keep); code != http.StatusCreated || decodeCredential(t, raw).Version != 2 {
+	if code, raw = r.projectCall("PUT", credPath("box", "erp"), keep); code != http.StatusCreated || decodeCredential(t, raw).Version != 2 {
 		t.Fatalf("keep: %d %s", code, raw)
 	}
 	p, err := r.svc.OpenCredential(bg, r.box, "erp", 2, "erp")
@@ -106,39 +106,39 @@ func TestCredentialVersionsAndSecrets(t *testing.T) {
 
 	// Keeping a header the latest version lacks is refused.
 	bad := `{"upstream":"https://api.erp.example.test","credential":{"kind":"headers","headers":{"X-Key":{"set":true}}}}`
-	if code, raw = r.tenantCall("PUT", credPath("box", "erp"), bad); code != http.StatusUnprocessableEntity {
+	if code, raw = r.projectCall("PUT", credPath("box", "erp"), bad); code != http.StatusUnprocessableEntity {
 		t.Fatalf("keep a missing header: %d %s", code, raw)
 	}
-	if code, raw = r.tenantCall("GET", credPath("box", ""), ""); code != http.StatusOK || !strings.Contains(raw, `"version":2`) {
+	if code, raw = r.projectCall("GET", credPath("box", ""), ""); code != http.StatusOK || !strings.Contains(raw, `"version":2`) {
 		t.Fatalf("list: %d %s", code, raw)
 	}
 }
 
-// A credential is its environment's: another environment of the tenant
-// has none of it, another tenant does not see the environment, and a
+// A credential is its environment's: another environment of the project
+// has none of it, another project does not see the environment, and a
 // version sealed for one environment does not open for another.
 func TestCredentialsAreTheEnvironments(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer box-token-1", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer box-token-1", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
-	code, raw := r.tenantCall("GET", credPath("live", "erp"), "")
+	code, raw := r.projectCall("GET", credPath("live", "erp"), "")
 	if _, c := codeOf(raw); code != http.StatusNotFound || c != codeNoCredential {
 		t.Fatalf("another environment: %d %s", code, raw)
 	}
-	if code, raw = r.tenantCall("GET", credPath("live", ""), ""); code != http.StatusOK || raw != `{"credentials":[]}`+"\n" {
+	if code, raw = r.projectCall("GET", credPath("live", ""), ""); code != http.StatusOK || raw != `{"credentials":[]}`+"\n" {
 		t.Fatalf("another environment's list: %d %q", code, raw)
 	}
 	if code, raw = r.call("GET", credPath("box", "erp"), "Bearer "+otherToken, ""); code != http.StatusNotFound ||
 		strings.Contains(raw, "erp.example") {
-		t.Fatalf("another tenant's box: %d %s", code, raw)
+		t.Fatalf("another project's box: %d %s", code, raw)
 	}
 	if _, err := r.svc.OpenCredential(bg, r.live, "erp", 0, "erp"); err == nil {
 		t.Fatal("box's credential opened in live")
 	}
 
 	// The same name in live is another credential, versioned on its own.
-	if code, raw = r.tenantCall("PUT", credPath("live", "erp"), credentialBody("Bearer live-token-1", 0)); code != http.StatusCreated ||
+	if code, raw = r.projectCall("PUT", credPath("live", "erp"), credentialBody("Bearer live-token-1", 0)); code != http.StatusCreated ||
 		decodeCredential(t, raw).Version != 1 {
 		t.Fatalf("live's own: %d %s", code, raw)
 	}
@@ -193,7 +193,7 @@ func TestCredentialsAreTheEnvironments(t *testing.T) {
 
 func TestSandboxCredentialsReachThePodAndRotate(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer v1-token", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer v1-token", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	if err := r.svc.CheckSandboxCredentials(bg, r.box, []string{"nope"}); err == nil {
@@ -213,13 +213,13 @@ func TestSandboxCredentialsReachThePodAndRotate(t *testing.T) {
 	if err != nil || part == nil || len(part.Names) != 1 || part.Names[0] != "erp" {
 		t.Fatalf("clear part: %v %v", part, err)
 	}
-	code, raw := r.tenantCall("GET", credPath("box", "erp"), "")
+	code, raw := r.projectCall("GET", credPath("box", "erp"), "")
 	if a := decodeCredential(t, raw); code != http.StatusOK || len(a.UsedBy.Sandboxes) != 1 || a.UsedBy.Sandboxes[0] != r.sb1.String() {
 		t.Fatalf("uses: %d %s", code, raw)
 	}
 
 	// A new version reaches the pod: another version, the new token.
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer v2-token", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer v2-token", 0)); code != http.StatusCreated {
 		t.Fatalf("rotate: %d %s", code, raw)
 	}
 	pb, v2, err := r.svc.PodBindings(bg, r.sb1)
@@ -229,7 +229,7 @@ func TestSandboxCredentialsReachThePodAndRotate(t *testing.T) {
 
 	// A credential of the same name in another environment changes
 	// nothing for the sandbox.
-	if code, raw := r.tenantCall("PUT", credPath("live", "erp"), credentialBody("Bearer live-token", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("live", "erp"), credentialBody("Bearer live-token", 0)); code != http.StatusCreated {
 		t.Fatalf("live: %d %s", code, raw)
 	}
 	if pb, v3, err := r.svc.PodBindings(bg, r.sb1); err != nil || v3 != v2 ||
@@ -238,20 +238,20 @@ func TestSandboxCredentialsReachThePodAndRotate(t *testing.T) {
 	}
 
 	// A credential in use is not deleted; once unnamed it is.
-	code, raw = r.tenantCall("DELETE", credPath("box", "erp"), "")
+	code, raw = r.projectCall("DELETE", credPath("box", "erp"), "")
 	if _, c := codeOf(raw); code != http.StatusConflict || c != codeCredentialInUse || !strings.Contains(raw, r.sb1.String()) {
 		t.Fatalf("delete in use: %d %s", code, raw)
 	}
 	if err := r.svc.SetSandboxCredentials(bg, "acme", r.box, r.sb1, nil); err != nil {
 		t.Fatal(err)
 	}
-	if code, raw = r.tenantCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
+	if code, raw = r.projectCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", code, raw)
 	}
 	if pb, _, err = r.svc.PodBindings(bg, r.sb1); err != nil || pb != nil {
 		t.Fatalf("after the delete the pod has %v %v", pb, err)
 	}
-	if code, raw = r.tenantCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNotFound {
+	if code, raw = r.projectCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNotFound {
 		t.Fatalf("delete again: %d %s", code, raw)
 	}
 }
@@ -259,7 +259,7 @@ func TestSandboxCredentialsReachThePodAndRotate(t *testing.T) {
 // A sandbox names credentials of its own environment only.
 func TestSandboxNamesItsEnvironmentsCredentials(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("live", "erp"), credentialBody("Bearer live-token", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("live", "erp"), credentialBody("Bearer live-token", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	err := r.svc.SetSandboxCredentials(bg, "acme", r.box, r.sb1, []string{"erp"})
@@ -282,7 +282,7 @@ func TestSandboxNamesItsEnvironmentsCredentials(t *testing.T) {
 
 func TestSandboxCredentialNameTakenByItsOwnSet(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer x-token-1", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer x-token-1", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	own := `{"bindings":[` + mustJSON(t, headersBinding("erp", "https://api.erp.example.test")) + `]}`
@@ -305,22 +305,22 @@ func (f fakeUsers) CredentialUses(_ context.Context, _ *store.Store, env uuid.UU
 // it from being deleted, and the answer says which and at what version.
 func TestCredentialUsedByADeployment(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer d-token-1", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer d-token-1", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	r.svc.SetCredentialUsers(fakeUsers{r.box: {"erp": {Bindings: []string{"erp-api"}, Latest: 1, Deployed: 1}}})
-	code, raw := r.tenantCall("GET", credPath("box", "erp"), "")
+	code, raw := r.projectCall("GET", credPath("box", "erp"), "")
 	if a := decodeCredential(t, raw); code != http.StatusOK || len(a.UsedBy.Bindings) != 1 || a.UsedBy.Bindings[0] != "erp-api" ||
 		a.UsedBy.Latest != 1 || a.UsedBy.Deployed != 1 || len(a.UsedBy.Sandboxes) != 0 {
 		t.Fatalf("uses: %d %s", code, raw)
 	}
-	code, raw = r.tenantCall("DELETE", credPath("box", "erp"), "")
+	code, raw = r.projectCall("DELETE", credPath("box", "erp"), "")
 	if _, c := codeOf(raw); code != http.StatusConflict || c != codeCredentialInUse || !strings.Contains(raw, "binding erp-api") {
 		t.Fatalf("delete in use: %d %s", code, raw)
 	}
 	// Another environment's uses are not box's.
 	r.svc.SetCredentialUsers(fakeUsers{r.live: {"erp": {Bindings: []string{"erp-api"}, Latest: 1}}})
-	if code, raw = r.tenantCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
+	if code, raw = r.projectCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", code, raw)
 	}
 }
@@ -334,13 +334,13 @@ func TestCheckCredentialStoredAndDraft(t *testing.T) {
 	f, ca := newFakeAPI(t)
 	def := map[string]any{"upstream": f.srv.URL, "caPem": ca, "pathPrefixes": []string{"/odata/"},
 		"credential": map[string]any{"kind": "headers", "headers": map[string]any{"X-API-Key": httpAPIKey}}}
-	if code, raw := r.tenantCall("PUT", credPath("box", "api"), mustJSON(t, def)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "api"), mustJSON(t, def)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	probe := map[string]any{"method": "GET", "path": "/odata/ok"}
 	check := func(name string, body map[string]any) (int, HTTPPreflightResult, string) {
 		t.Helper()
-		code, raw := r.tenantCall("POST", credPath("box", name)+"/check", mustJSON(t, body))
+		code, raw := r.projectCall("POST", credPath("box", name)+"/check", mustJSON(t, body))
 		var res HTTPPreflightResult
 		if code == http.StatusOK {
 			if err := json.Unmarshal([]byte(raw), &res); err != nil {
@@ -437,15 +437,15 @@ func mustJSON(t *testing.T, v any) string {
 func TestCredentialVersionsGoOnAfterADelete(t *testing.T) {
 	r := newRig(t)
 	for i, token := range []string{"Bearer old-1", "Bearer old-2"} {
-		code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody(token, 0))
+		code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody(token, 0))
 		if code != http.StatusCreated || decodeCredential(t, raw).Version != i+1 {
 			t.Fatalf("version %d: %d %s", i+1, code, raw)
 		}
 	}
-	if code, raw := r.tenantCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
+	if code, raw := r.projectCall("DELETE", credPath("box", "erp"), ""); code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", code, raw)
 	}
-	code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer new", 0))
+	code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer new", 0))
 	if code != http.StatusCreated || decodeCredential(t, raw).Version != 3 {
 		t.Fatalf("made again: %d %s, want version 3", code, raw)
 	}
@@ -460,7 +460,7 @@ func TestCredentialVersionsGoOnAfterADelete(t *testing.T) {
 	}
 	// Another environment's name of the same credential has marks of its
 	// own.
-	if code, raw := r.tenantCall("PUT", credPath("live", "erp"), credentialBody("Bearer live", 0)); code != http.StatusCreated ||
+	if code, raw := r.projectCall("PUT", credPath("live", "erp"), credentialBody("Bearer live", 0)); code != http.StatusCreated ||
 		decodeCredential(t, raw).Version != 1 {
 		t.Fatalf("live's first: %d %s", code, raw)
 	}
@@ -486,7 +486,7 @@ func TestHTTPSecretsAndValues(t *testing.T) {
 	if _, err := r.st.InsertSecret(bg, store.EnvSecret{EnvID: r.box, Name: "token", Version: 1, Sealed: []byte{1}}); err != nil {
 		t.Fatal(err)
 	}
-	code, raw := r.tenantCall("PUT", credPath("box", "token"), credentialBody("Bearer t-1", 0))
+	code, raw := r.projectCall("PUT", credPath("box", "token"), credentialBody("Bearer t-1", 0))
 	if _, c := codeOf(raw); code != http.StatusConflict || c != CodeSecretKind || !strings.Contains(raw, "secret token is a value") {
 		t.Fatalf("an HTTP secret over a value: %d %s", code, raw)
 	}
@@ -525,18 +525,18 @@ func TestHTTPSecretsAndValues(t *testing.T) {
 		t.Fatalf("its names: %v %v", names, err)
 	}
 
-	code, raw = r.tenantCall("POST", "/api/v1/environments/box/secrets/token/check", "")
+	code, raw = r.projectCall("POST", "/api/v1/environments/box/secrets/token/check", "")
 	if _, c := codeOf(raw); code != http.StatusConflict || c != CodeSecretKind {
 		t.Fatalf("a value's check: %d %s", code, raw)
 	}
-	code, raw = r.tenantCall("POST", "/api/v1/environments/box/secrets/nope/check", "")
+	code, raw = r.projectCall("POST", "/api/v1/environments/box/secrets/nope/check", "")
 	if _, c := codeOf(raw); code != http.StatusNotFound || c != CodeNoSecret {
 		t.Fatalf("no secret's check: %d %s", code, raw)
 	}
 	// A draft as the secrets' PUT sends it, its type among it.
 	draft := `{"binding":{"type":"http","upstream":"https://api.erp.example.test","credential":{"kind":"headers",` +
 		`"headers":{"Authorization":{"set":true}}}}}`
-	code, raw = r.tenantCall("POST", "/api/v1/environments/box/secrets/erp/check", draft)
+	code, raw = r.projectCall("POST", "/api/v1/environments/box/secrets/erp/check", draft)
 	if code != http.StatusOK || !strings.Contains(raw, `"addresses"`) {
 		t.Fatalf("a draft's check: %d %s", code, raw)
 	}

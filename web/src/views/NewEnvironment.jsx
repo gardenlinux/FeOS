@@ -11,11 +11,11 @@ import { Builder } from './Builder.jsx';
 // an environment; its first apply creates the environment, writes the
 // secrets whose values the page holds and applies deployment 1, in that
 // order.
-export function NewEnvironment({ tenant, navigate }) {
+export function NewEnvironment({ project, navigate }) {
   return (
     <section className="pane pane-detail">
       <div className="detail-head">
-        <button className="iconbtn" title="back to the environments" onClick={() => navigate(envPath(tenant))}>
+        <button className="iconbtn" title="back to the environments" onClick={() => navigate(envPath(project))}>
           <Icon name="arrowLeft" size={15} /></button>
         <div className="detail-title">
           <span className="strong">New environment</span>
@@ -23,7 +23,7 @@ export function NewEnvironment({ tenant, navigate }) {
         </div>
       </div>
       <div className="tabbody">
-        <Builder tenant={tenant} env="" st={null} navigate={navigate} />
+        <Builder project={project} env="" st={null} navigate={navigate} />
       </div>
     </section>
   );

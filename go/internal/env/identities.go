@@ -77,8 +77,8 @@ func issuerName(iss any) string {
 // name, then the environment's sandboxes by ID, then the workloads of
 // pods that are of no object of it; each pod with the newest certificate
 // issued_certs keeps of it.
-func (s *Service) Identities(ctx context.Context, tenant, env string) (Identities, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Identities(ctx context.Context, project, env string) (Identities, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return Identities{}, err
 	}

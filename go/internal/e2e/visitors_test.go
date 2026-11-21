@@ -37,14 +37,14 @@ import (
 )
 
 // The visitors' scenario (ADR 0054): an environment that admits the
-// visitors of a provider of kind tenant, the tenant's own service, here
+// visitors of a provider of kind project, the project's own service, here
 // an HTTPS server of the test's. ferund calls that service at a
 // renewal through its ruled client, which trusts the system's roots
 // only; TestMain makes the test's CA one of them (SSL_CERT_FILE, read
 // once per process, before any test), so that the service's certificate
 // verifies as a public one would.
 
-// providerCA signs the certificates of the tenants' services.
+// providerCA signs the certificates of the projects' services.
 var providerCA struct {
 	cert *x509.Certificate
 	key  *ecdsa.PrivateKey
@@ -120,13 +120,13 @@ func providerCert(t *testing.T) tls.Certificate {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 }
 
-// tenantService is a provider of kind tenant, as FeCode is one: GET
+// projectService is a provider of kind project, as FeCode is one: GET
 // /visit?challenge=… is the browser sent to sign in, which it opens and
-// accepts at ferund with the tenant's token and sends on to ferund's
+// accepts at ferund with the project's token and sends on to ferund's
 // redirect; POST /visit {"visit"} is ferund asking at a renewal, which it
 // answers with admit when ferund signed the question for its address and
 // that visit (against ferund's GET /api/v1/visit-keys), and 401 when not.
-type tenantService struct {
+type projectService struct {
 	c   *cluster
 	srv *httptest.Server
 	url string
@@ -144,9 +144,9 @@ type tenantService struct {
 	failures []string
 }
 
-func (c *cluster) runTenantService(endsIn time.Duration) *tenantService {
+func (c *cluster) runProjectService(endsIn time.Duration) *projectService {
 	c.t.Helper()
-	s := &tenantService{c: c, endsIn: endsIn, admit: true}
+	s := &projectService{c: c, endsIn: endsIn, admit: true}
 	s.srv = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
 	s.srv.TLS = &tls.Config{Certificates: []tls.Certificate{providerCert(c.t)}}
 	s.srv.StartTLS()
@@ -155,14 +155,14 @@ func (c *cluster) runTenantService(endsIn time.Duration) *tenantService {
 	return s
 }
 
-func (s *tenantService) fail(w http.ResponseWriter, format string, args ...any) {
+func (s *projectService) fail(w http.ResponseWriter, format string, args ...any) {
 	s.mu.Lock()
 	s.failures = append(s.failures, fmt.Sprintf(format, args...))
 	s.mu.Unlock()
 	http.Error(w, "the test's service failed", http.StatusInternalServerError)
 }
 
-func (s *tenantService) serve(w http.ResponseWriter, r *http.Request) {
+func (s *projectService) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/visit" {
 		http.NotFound(w, r)
 		return
@@ -195,11 +195,11 @@ func (s *tenantService) serve(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"challenge": sealed})
-	op, err := s.c.callErr(ctx, nil, "POST", "/api/v1/challenges/open", tenantAuth, string(body))
+	op, err := s.c.callErr(ctx, nil, "POST", "/api/v1/challenges/open", projectAuth, string(body))
 	var ch struct {
 		Environment struct {
-			ID     string `json:"id"`
-			Tenant string `json:"tenant"`
+			ID      string `json:"id"`
+			Project string `json:"project"`
 		} `json:"environment"`
 		Host     string `json:"host"`
 		Path     string `json:"path"`
@@ -214,14 +214,14 @@ func (s *tenantService) serve(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "open: %d %s (%v)", op.code, op.body, err)
 		return
 	}
-	if ch.Provider.Name != "members" || ch.Provider.Kind != model.ProviderKindTenant || ch.Environment.Tenant != tenant ||
+	if ch.Provider.Name != "members" || ch.Provider.Kind != model.ProviderKindProject || ch.Environment.Project != project ||
 		ch.Expired || ch.Answered {
 		s.fail(w, "the challenge opened as %s", op.body)
 		return
 	}
 	body, _ = json.Marshal(map[string]string{"challenge": sealed, "subject": "u-ada", "email": "ada@example.test",
 		"name": "Ada", "session": "s-1", "endsAt": time.Now().Add(s.endsIn).UTC().Format(time.RFC3339)})
-	acc, err := s.c.callErr(ctx, nil, "POST", "/api/v1/challenges/accept", tenantAuth, string(body))
+	acc, err := s.c.callErr(ctx, nil, "POST", "/api/v1/challenges/accept", projectAuth, string(body))
 	var ans struct {
 		Redirect string `json:"redirect"`
 		Admitted bool   `json:"admitted"`
@@ -241,7 +241,7 @@ func (s *tenantService) serve(w http.ResponseWriter, r *http.Request) {
 // verify checks an ask as FeCode does: a Bearer that visit.VerifyAsk
 // takes with ferund's keys, for this service's address and the body's
 // visit.
-func (s *tenantService) verify(r *http.Request, visitID string) error {
+func (s *projectService) verify(r *http.Request, visitID string) error {
 	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok {
 		return fmt.Errorf("no bearer: %q", r.Header.Get("Authorization"))
@@ -271,7 +271,7 @@ func (s *tenantService) verify(r *http.Request, visitID string) error {
 
 // askAs posts an ask to the service as anyone could: the visit, and
 // authz as the Authorization header ("" none); it answers the status.
-func (s *tenantService) askAs(visitID, authz string) int {
+func (s *projectService) askAs(visitID, authz string) int {
 	s.c.t.Helper()
 	roots := x509.NewCertPool()
 	roots.AddCert(providerCA.cert)
@@ -293,7 +293,7 @@ func (s *tenantService) askAs(visitID, authz string) int {
 	return resp.StatusCode
 }
 
-func (s *tenantService) setAdmit(admit bool) {
+func (s *projectService) setAdmit(admit bool) {
 	s.mu.Lock()
 	s.admit = admit
 	s.mu.Unlock()
@@ -301,7 +301,7 @@ func (s *tenantService) setAdmit(admit bool) {
 
 // state is what the service saw: its sign-ins, its visits, ferund's
 // verified asks with their Authorization headers, and its failures.
-func (s *tenantService) state() (signIns int, visits, asks, askAuth, failures []string) {
+func (s *projectService) state() (signIns int, visits, asks, askAuth, failures []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.signIns, append([]string(nil), s.visits...), append([]string(nil), s.asks...),
@@ -309,7 +309,7 @@ func (s *tenantService) state() (signIns int, visits, asks, askAuth, failures []
 }
 
 // refusals are the asks the service refused, and why.
-func (s *tenantService) refusals() []string {
+func (s *projectService) refusals() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.refused...)
@@ -426,11 +426,11 @@ func wantApp(t *testing.T, what string, p page, host string) {
 	}
 }
 
-// Scenario: the whole visit chain of a provider of kind tenant. The
-// tenant makes the provider (its service's address) and publishes an
+// Scenario: the whole visit chain of a provider of kind project. The
+// project makes the provider (its service's address) and publishes an
 // environment to its visitors. A navigation without a visit goes to the
 // service with a challenge the ingress sealed; the service opens and
-// accepts it at ferund with the tenant's token and sends the browser to
+// accepts it at ferund with the project's token and sends the browser to
 // the host's /.ferun/auth, where the ingress redeems the code for the
 // visit cookie and sends it on to the page: the app gets the visitor's
 // headers and none of the ingress's cookies. A request that is no
@@ -440,7 +440,7 @@ func wantApp(t *testing.T, what string, p page, host string) {
 // yes renews, its no ends the visit, and the next navigation goes to the
 // service again. A question nobody signed, or ferund's for another visit,
 // the service refuses. Signing out ends the visit.
-func TestVisitorsOfATenantService(t *testing.T) {
+func TestVisitorsOfAProjectService(t *testing.T) {
 	t.Parallel()
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
@@ -452,7 +452,7 @@ func TestVisitorsOfATenantService(t *testing.T) {
 	}
 	c := newCluster(t, ingressCluster(func(cfg *config.Config) {
 		cfg.SecretKeyFile = keyFile
-		// The tenant's service is on loopback: no block but TEST-NET-1
+		// The project's service is on loopback: no block but TEST-NET-1
 		// is denied, which ferund's rule then judges as any.
 		cfg.DenyPrefixes = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
 	}))
@@ -465,12 +465,12 @@ func TestVisitorsOfATenantService(t *testing.T) {
 
 	// Visits end 4 minutes after the accept, so that every token has less
 	// than visit.RenewBefore left and every request renews it in line.
-	svc := c.runTenantService(4 * time.Minute)
-	b, _ := json.Marshal(map[string]string{"kind": model.ProviderKindTenant, "url": svc.url})
-	if r := c.call(nil, "PUT", "/api/v1/providers/members", tenantAuth, string(b)); r.code != http.StatusCreated {
+	svc := c.runProjectService(4 * time.Minute)
+	b, _ := json.Marshal(map[string]string{"kind": model.ProviderKindProject, "url": svc.url})
+	if r := c.call(nil, "PUT", "/api/v1/providers/members", projectAuth, string(b)); r.code != http.StatusCreated {
 		t.Fatalf("the provider: %d %s", r.code, r.body)
 	}
-	r := c.call(nil, "PUT", "/api/v1/environments/"+envID.String()+"/public", tenantAuth,
+	r := c.call(nil, "PUT", "/api/v1/environments/"+envID.String()+"/public", projectAuth,
 		`{"public":true,"access":"visitors","provider":"members"}`)
 	var ans struct {
 		Public   bool     `json:"public"`

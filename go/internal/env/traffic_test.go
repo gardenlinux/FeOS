@@ -144,13 +144,13 @@ func (f *fakeTrafficSink) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // The traffic is read from the sink with the caller's token, for the
 // services the environment's desired and deployed deployments route to an
 // image service; without --sink-url or a token, or with the sink down,
-// it answers 503 as the access log does, and another tenant's
+// it answers 503 as the access log does, and another project's
 // environment is a 404.
 func TestTrafficFromSink(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "v1")
-	sb := h.sandbox(tenantA, "stage")
+	sb := h.sandbox(projectA, "stage")
 	// Deployment 1 routes / to web, /api to api and /dev to the attached
 	// dev, which the route door alone serves; deployment 2 drops /api.
 	withDev := strings.Replace(previewSpec(sb), `"root": {"path": "/", "service": "web", "port": "http"}`,
@@ -161,22 +161,22 @@ func TestTrafficFromSink(t *testing.T) {
 	sink := &fakeTrafficSink{t: t}
 	srv := httptest.NewServer(sink)
 	t.Cleanup(srv.Close)
-	ctx := auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantA, Token: "tok"})
+	ctx := auth.WithProject(h.ctx(), auth.Project{Name: projectA, Token: "tok"})
 
-	refused := func(name string, ctx context.Context, tenant, window string, status int, code string) {
+	refused := func(name string, ctx context.Context, project, window string, status int, code string) {
 		t.Helper()
-		_, err := h.svc.Traffic(ctx, tenant, "stage", window)
+		_, err := h.svc.Traffic(ctx, project, "stage", window)
 		var ae *apierr.Error
 		if !errors.As(err, &ae) || ae.Status != status || ae.Code != code {
 			t.Errorf("%s: %v, want %d %s", name, err, status, code)
 		}
 	}
-	refused("no --sink-url", ctx, tenantA, "1h", http.StatusServiceUnavailable, CodeNoLogStore)
+	refused("no --sink-url", ctx, projectA, "1h", http.StatusServiceUnavailable, CodeNoLogStore)
 	h.svc.d.SinkURL = srv.URL + "/"
-	refused("no token", h.ctx(), tenantA, "1h", http.StatusServiceUnavailable, CodeNoLogStore)
-	refused("another tenant's", auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantB, Token: "tok"}), tenantB, "1h",
+	refused("no token", h.ctx(), projectA, "1h", http.StatusServiceUnavailable, CodeNoLogStore)
+	refused("another project's", auth.WithProject(h.ctx(), auth.Project{Name: projectB, Token: "tok"}), projectB, "1h",
 		http.StatusNotFound, "")
-	refused("another window", ctx, tenantA, "7d", http.StatusBadRequest, "")
+	refused("another window", ctx, projectA, "7d", http.StatusBadRequest, "")
 
 	// Every image service's own spans are asked for, without api's
 	// readiness check (the attached dev is none); the ingress for the
@@ -184,7 +184,7 @@ func TestTrafficFromSink(t *testing.T) {
 	// web alone, the deployed one adds api.
 	read := func(window string) Traffic {
 		t.Helper()
-		tr, err := h.svc.Traffic(ctx, tenantA, "stage", window)
+		tr, err := h.svc.Traffic(ctx, projectA, "stage", window)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -227,7 +227,7 @@ func TestTrafficFromSink(t *testing.T) {
 	// An environment without a deployment has no traffic, and the sink is
 	// not asked.
 	h.create("empty", nil)
-	if tr, err := h.svc.Traffic(ctx, tenantA, "empty", "1h"); err != nil || len(tr.Services) != 0 || tr.Services == nil ||
+	if tr, err := h.svc.Traffic(ctx, projectA, "empty", "1h"); err != nil || len(tr.Services) != 0 || tr.Services == nil ||
 		len(sink.asked) != 4 {
 		t.Errorf("empty: %+v %v %v", tr, err, sink.asked)
 	}
@@ -235,7 +235,7 @@ func TestTrafficFromSink(t *testing.T) {
 	sink.mu.Lock()
 	sink.down = true
 	sink.mu.Unlock()
-	refused("the sink down", ctx, tenantA, "1h", http.StatusServiceUnavailable, CodeLogStoreUnavailable)
+	refused("the sink down", ctx, projectA, "1h", http.StatusServiceUnavailable, CodeLogStoreUnavailable)
 }
 
 func itoa(n int64) string { b, _ := json.Marshal(n); return string(b) }

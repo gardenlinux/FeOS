@@ -22,7 +22,7 @@ Postgres from apt, a `nats-server` built from source, an init SQL for
 roles and schemas, a shell supervisor that waits for their health
 (ADR 0018). None of it is what production runs, and none of it is the
 same twice. A service's own volume would tie a stateful program to one
-replica and leave its roles, schemas and credentials to the tenant; a
+replica and leave its roles, schemas and credentials to the project; a
 backing service with a volume of its own, provisioned by the platform
 and referenced by name, is what the agent and the person both ask for.
 Data outlives software: a volume holds what one type at one version
@@ -99,9 +99,9 @@ read it.
 
 ## Alternatives considered
 
-- **The tenant's own database as a service with a volume.** A volume
+- **The project's own database as a service with a volume.** A volume
   attaches to one pod, so the program could not scale; roles, schemas,
-  credentials and health would be the tenant's to script, which is the
+  credentials and health would be the project's to script, which is the
   shell supervisor of ADR 0018's context, done again per project.
 - **Recreating an addon back onto older software when a deployment
   fails.** The data may have been written by the newer version; the
@@ -117,10 +117,10 @@ read it.
 ## Consequences
 
 - `ferund` creates volumes on nodes (ADR 0016), generates credentials
-  and runs provisioning inside tenants' pods.
+  and runs provisioning inside projects' pods.
 - A clone's addons start empty: an addon has no backup and no copy, and a
   copy of an environment is a copy of its declaration, not of its data.
-- A plan's warnings about data are the tenant's last word before it is
+- A plan's warnings about data are the project's last word before it is
   deleted: a type change and a dropped database are both warned, and
   only the first deletes anything.
 - The nats addon's password is in its server's arguments inside its pod,

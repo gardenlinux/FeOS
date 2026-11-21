@@ -76,7 +76,7 @@ func TestKeptSecretStaysWhereItWent(t *testing.T) {
 			"credential": map[string]any{"kind": "basic", "user": "fecode", "password": httpPassword}},
 	}
 	for name, def := range defs {
-		if code, raw := r.tenantCall("PUT", credPath("box", name), mustJSON(t, def)); code != http.StatusCreated {
+		if code, raw := r.projectCall("PUT", credPath("box", name), mustJSON(t, def)); code != http.StatusCreated {
 			t.Fatalf("create %s: %d %s", name, code, raw)
 		}
 	}
@@ -110,10 +110,10 @@ func TestKeptSecretStaysWhereItWent(t *testing.T) {
 		}
 	}
 	for _, m := range moves {
-		code, raw := r.tenantCall("POST", credPath("box", m.cred)+"/check",
+		code, raw := r.projectCall("POST", credPath("box", m.cred)+"/check",
 			mustJSON(t, map[string]any{"binding": m.draft, "probe": probe}))
 		refused(m.what, "check", code, raw, m.field)
-		code, raw = r.tenantCall("PUT", credPath("box", m.cred), mustJSON(t, m.draft))
+		code, raw = r.projectCall("PUT", credPath("box", m.cred), mustJSON(t, m.draft))
 		refused(m.what, "put", code, raw, m.field)
 		if c, err := r.st.EnvCredential(bg, r.box, m.cred, 0); err != nil || c.Version != 1 {
 			t.Errorf("%s: the latest version is %+v %v, want version 1 alone", m.what, c, err)
@@ -128,11 +128,11 @@ func TestKeptSecretStaysWhereItWent(t *testing.T) {
 	// 2 with it.
 	same := map[string]any{"upstream": "HTTPS://" + strings.TrimPrefix(f.srv.URL, "https://") + "/", "mode": "name",
 		"caPem": "\n" + ca + "\n", "rateLimit": map[string]any{"perSecond": 5}, "credential": keptKey}
-	code, raw := r.tenantCall("POST", credPath("box", "api")+"/check", mustJSON(t, map[string]any{"binding": same, "probe": probe}))
+	code, raw := r.projectCall("POST", credPath("box", "api")+"/check", mustJSON(t, map[string]any{"binding": same, "probe": probe}))
 	if code != http.StatusOK || !strings.Contains(raw, `"ok":true`) || !strings.Contains(raw, `"status":200`) {
 		t.Fatalf("check in the same place: %d %s", code, raw)
 	}
-	if code, raw := r.tenantCall("PUT", credPath("box", "api"), mustJSON(t, same)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "api"), mustJSON(t, same)); code != http.StatusCreated {
 		t.Fatalf("put in the same place: %d %s", code, raw)
 	}
 	b, err := r.svc.OpenCredential(bg, r.box, "api", 2, "api")
@@ -144,7 +144,7 @@ func TestKeptSecretStaysWhereItWent(t *testing.T) {
 	// key goes to the same API.
 	moved := map[string]any{"upstream": "https://api.erp.example.test", "mode": "intercept",
 		"pathPrefixes": []string{"/odata/"}, "credential": keptPassword}
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), mustJSON(t, moved)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), mustJSON(t, moved)); code != http.StatusCreated {
 		t.Fatalf("put in another mode: %d %s", code, raw)
 	}
 	b, err = r.svc.OpenCredential(bg, r.box, "erp", 2, "erp")

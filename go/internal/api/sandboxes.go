@@ -45,13 +45,13 @@ func mintSandboxToken() (token, hash string, err error) {
 	return token, store.HashToken(token), nil
 }
 
-// tenantOf is the tenant the request was authenticated as.
-func tenantOf(r *http.Request) string {
-	t, _ := auth.TenantFrom(r.Context())
+// projectOf is the project the request was authenticated as.
+func projectOf(r *http.Request) string {
+	t, _ := auth.ProjectFrom(r.Context())
 	return t.Name
 }
 
-// errUnknownSandbox is the answer to a sandbox the tenant does not own,
+// errUnknownSandbox is the answer to a sandbox the project does not own,
 // the same whether it is foreign, absent, an environment's instance (ADR
 // 0018: the environments' API shows those), or in an environment the
 // principal may not read (ADR 0035).
@@ -59,8 +59,8 @@ func errUnknownSandbox(id string) error {
 	return apierr.New(http.StatusNotFound, "unknown sandbox %s", id)
 }
 
-// owned reads the sandbox of the path's {id} that the request's tenant
-// owns; an environment's instance row and a tenant's job's pod are none.
+// owned reads the sandbox of the path's {id} that the request's project
+// owns; an environment's instance row and a project's job's pod are none.
 // The route's need (onSandbox) checked the principal's role on its
 // environment.
 func (s *server) owned(r *http.Request) (store.Sandbox, error) {
@@ -69,7 +69,7 @@ func (s *server) owned(r *http.Request) (store.Sandbox, error) {
 		return store.Sandbox{}, err
 	}
 	sb, err := s.st.GetSandbox(r.Context(), id)
-	if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenantOf(r) || !sb.IsOwn())) {
+	if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != projectOf(r) || !sb.IsOwn())) {
 		return store.Sandbox{}, errUnknownSandbox(id.String())
 	}
 	if err != nil {
@@ -217,7 +217,7 @@ func (s *server) size(req createSandboxRequest) (vcpus, memoryMiB int, err error
 	return vcpus, memoryMiB, nil
 }
 
-// createSandbox is POST /api/v1/sandboxes: in one transaction, the tenant
+// createSandbox is POST /api/v1/sandboxes: in one transaction, the project
 // (refused while it is being deleted), its environment (FOR SHARE,
 // refused while it is being deleted, the entries of reaches checked
 // against its deployed deployment, 422), a new row under an ID ferund mints (ADR 0019),
@@ -283,25 +283,25 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if image == "" {
 		image = s.cfg.DefaultImage
 	}
-	tenant := tenantOf(r)
+	project := projectOf(r)
 	token, hash, err := mintSandboxToken()
 	if err != nil {
 		return fmt.Errorf("create: %w", err)
 	}
 	var row store.Sandbox
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
-		t, err := quota.LockAndCheck(r.Context(), tx, tenant, quota.Use{Sandboxes: 1, VCPUs: int64(vcpus),
+		t, err := quota.LockAndCheck(r.Context(), tx, project, quota.Use{Sandboxes: 1, VCPUs: int64(vcpus),
 			MemoryMiB: int64(memoryMiB)})
 		if isNoRow(err) {
-			return apierr.New(http.StatusUnauthorized, "unknown tenant token")
+			return apierr.New(http.StatusUnauthorized, "unknown project token")
 		}
 		if err != nil {
 			return err
 		}
 		if t.Deleting() {
-			return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+			return apierr.New(http.StatusConflict, "project %s is being deleted", project)
 		}
-		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, env.ID, req.Reaches)); err != nil {
+		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, project, env.ID, req.Reaches)); err != nil {
 			return err
 		}
 		row, err = tx.CreateMintedSandbox(r.Context(), func(id podid.ID) store.NewSandbox {
@@ -309,9 +309,9 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 			// group, and resolves its egress's names (ADR 0034, 0035
 			// revised).
 			tmpl := model.SandboxTemplate(env.ID, id.String(), req.Egress.RestrictsNames(), req.Egress.NameDomains())
-			return store.NewSandbox{ID: id, Owner: tenant, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
+			return store.NewSandbox{ID: id, Owner: project, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 				EnvironmentID: env.ID, Reaches: req.Reaches, Egress: req.Egress, PodTemplate: tmpl,
-				LogLabels: ctl.SandboxLogLabels(tenant, id, env.ID), MadeBy: auth.MadeBy(r.Context()), Workdir: req.Workdir}
+				LogLabels: ctl.SandboxLogLabels(project, id, env.ID), MadeBy: auth.MadeBy(r.Context()), Workdir: req.Workdir}
 		})
 		if err != nil {
 			return err
@@ -326,12 +326,12 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		return passOr(err, "create")
 	}
 	if len(req.Secrets) > 0 {
-		if err := s.deps.Bindings.SetSandboxSecrets(r.Context(), tenant, env.ID, row.ID, req.Secrets); err != nil {
+		if err := s.deps.Bindings.SetSandboxSecrets(r.Context(), project, env.ID, row.ID, req.Secrets); err != nil {
 			return passOr(err, "create: its secrets")
 		}
 	}
 	if len(req.Credentials) > 0 {
-		if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenant, env.ID, row.ID, req.Credentials); err != nil {
+		if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), project, env.ID, row.ID, req.Credentials); err != nil {
 			return passOr(err, "create: its credentials")
 		}
 	}
@@ -353,11 +353,11 @@ func podEnvError(err error) error {
 	return err
 }
 
-// writableEnv is the environment of the request's tenant that ref names
+// writableEnv is the environment of the request's project that ref names
 // (its name or ID), on which the principal holds write: none it may see
 // is 404, too low a role 403.
 func (s *server) writableEnv(r *http.Request, ref string) (store.Environment, error) {
-	t, _ := auth.TenantFrom(r.Context())
+	t, _ := auth.ProjectFrom(r.Context())
 	id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
 	if isNoRow(err) {
 		return store.Environment{}, errNoEnvironment()
@@ -377,12 +377,12 @@ func (s *server) writableEnv(r *http.Request, ref string) (store.Environment, er
 
 // inEnv is a route of an environment's credentials (ADR 0033): the
 // environment the path's {env} names, its grant checked by the route's
-// need, resolved for h; one the tenant does not have is 404. It is the
+// need, resolved for h; one the project does not have is 404. It is the
 // environment allow checked the grant on when allow resolved one. An
 // environment being deleted is read, but not written (409).
 func (s *server) inEnv(h func(http.ResponseWriter, *http.Request, bindings.Env)) apiHandler {
 	return func(w http.ResponseWriter, r *http.Request) error {
-		t, _ := auth.TenantFrom(r.Context())
+		t, _ := auth.ProjectFrom(r.Context())
 		ref := r.PathValue("env")
 		id, ok := checkedEnv(r, ref)
 		if !ok {
@@ -401,7 +401,7 @@ func (s *server) inEnv(h func(http.ResponseWriter, *http.Request, bindings.Env))
 		if e.Deleting && r.Method != http.MethodGet {
 			return apierr.New(http.StatusConflict, "environment %s is being deleted", e.Name)
 		}
-		h(w, r, bindings.Env{ID: e.ID, Name: e.Name, Tenant: t.Name})
+		h(w, r, bindings.Env{ID: e.ID, Name: e.Name, Project: t.Name})
 		return nil
 	}
 }
@@ -409,9 +409,9 @@ func (s *server) inEnv(h func(http.ResponseWriter, *http.Request, bindings.Env))
 // readableEnvs is the filter of a list of what runs in environments
 // (sandboxes, jobs): ?environment= names one the principal may read (404
 // when it may not see it); without it nil (every one) for a reader of the
-// tenant, else the environments the principal reads.
+// project, else the environments the principal reads.
 func (s *server) readableEnvs(r *http.Request) ([]uuid.UUID, error) {
-	t, _ := auth.TenantFrom(r.Context())
+	t, _ := auth.ProjectFrom(r.Context())
 	if ref := r.URL.Query().Get("environment"); ref != "" {
 		id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
 		if isNoRow(err) {
@@ -425,7 +425,7 @@ func (s *server) readableEnvs(r *http.Request) ([]uuid.UUID, error) {
 		}
 		return []uuid.UUID{id}, nil
 	}
-	if t.MayOnTenant(read) {
+	if t.MayOnProject(read) {
 		return nil, nil
 	}
 	out := []uuid.UUID{}
@@ -464,17 +464,17 @@ func (s *server) putSandboxReaches(w http.ResponseWriter, r *http.Request) error
 	if msg := spec.CheckPod(sent["securityGroups"], *req.Reaches, nil, nil); msg != "" {
 		return apierr.New(http.StatusBadRequest, "%s", msg)
 	}
-	tenant := tenantOf(r)
+	project := projectOf(r)
 	var row store.Sandbox
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
 		sb, err := tx.LockSandbox(r.Context(), id, store.ForUpdate)
-		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenant || !sb.IsOwn())) {
+		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != project || !sb.IsOwn())) {
 			return errUnknownSandbox(id.String())
 		}
 		if err != nil {
 			return err
 		}
-		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, tenant, sb.EnvironmentID, *req.Reaches)); err != nil {
+		if err := podEnvError(ctl.LockPodEnvironment(r.Context(), tx, project, sb.EnvironmentID, *req.Reaches)); err != nil {
 			return err
 		}
 		if _, err := tx.SetSandboxReaches(r.Context(), id, *req.Reaches); err != nil {
@@ -534,7 +534,7 @@ func (s *server) putSandboxSecrets(w http.ResponseWriter, r *http.Request) error
 	if req.Secrets == nil {
 		req.Secrets = []string{}
 	}
-	if err := s.deps.Bindings.SetSandboxSecrets(r.Context(), tenantOf(r), sb.EnvironmentID, sb.ID,
+	if err := s.deps.Bindings.SetSandboxSecrets(r.Context(), projectOf(r), sb.EnvironmentID, sb.ID,
 		req.Secrets); err != nil {
 		return passOr(err, "secrets")
 	}
@@ -574,7 +574,7 @@ func (s *server) putSandboxCredentials(w http.ResponseWriter, r *http.Request) e
 	if req.Credentials == nil {
 		req.Credentials = []string{}
 	}
-	if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), tenantOf(r), sb.EnvironmentID, sb.ID,
+	if err := s.deps.Bindings.SetSandboxCredentials(r.Context(), projectOf(r), sb.EnvironmentID, sb.ID,
 		req.Credentials); err != nil {
 		return passOr(err, "credentials")
 	}
@@ -585,7 +585,7 @@ func (s *server) putSandboxCredentials(w http.ResponseWriter, r *http.Request) e
 	return writeJSON(w, http.StatusOK, sandboxCredentials{Credentials: names})
 }
 
-// listSandboxes is GET /api/v1/sandboxes[?environment=]: the tenant's
+// listSandboxes is GET /api/v1/sandboxes[?environment=]: the project's
 // that the principal may read (readableEnvs), oldest first, without its
 // environments' instances.
 func (s *server) listSandboxes(w http.ResponseWriter, r *http.Request) error {
@@ -593,7 +593,7 @@ func (s *server) listSandboxes(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	rows, err := s.st.ListSandboxes(r.Context(), tenantOf(r), envIDs)
+	rows, err := s.st.ListSandboxes(r.Context(), projectOf(r), envIDs)
 	if err != nil {
 		return fmt.Errorf("list: %w", err)
 	}
@@ -638,7 +638,7 @@ func (s *server) deleteSandbox(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	id := sb.ID
-	row, tombstoned, err := s.deps.Engine.Delete(r.Context(), tenantOf(r), id)
+	row, tombstoned, err := s.deps.Engine.Delete(r.Context(), projectOf(r), id)
 	if errors.Is(err, model.ErrNotFound) {
 		return errUnknownSandbox(id.String())
 	}
@@ -766,7 +766,7 @@ func (s *server) createSandboxToken(w http.ResponseWriter, r *http.Request) erro
 	var tok store.SandboxToken
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
 		sb, err := tx.LockSandbox(r.Context(), id, store.ForShare)
-		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != tenantOf(r) || !sb.IsOwn())) {
+		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != projectOf(r) || !sb.IsOwn())) {
 			return errUnknownSandbox(id.String())
 		}
 		if err != nil {
@@ -813,7 +813,7 @@ func (s *server) revokeSandboxToken(w http.ResponseWriter, r *http.Request) erro
 var emptyAccess = json.RawMessage(`{"kube":null,"ssh":null,"denies":[]}`)
 
 // access is GET /api/v1/sandboxes/{id}/access: the binding sets of the
-// tenant's sandbox with their use; the empty object while bindings are
+// project's sandbox with their use; the empty object while bindings are
 // off.
 func (s *server) access(w http.ResponseWriter, r *http.Request) error {
 	if _, err := s.owned(r); err != nil {

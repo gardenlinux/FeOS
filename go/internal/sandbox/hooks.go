@@ -22,7 +22,7 @@ import (
 // pod needs before the pod call (its security groups, its volume).
 
 // SecretResolver returns the value of version version of the secret name
-// of the row's environment, or of its job when the row is a tenant's
+// of the row's environment, or of its job when the row is a project's
 // job's pod (ADR 0018), for a pod template's env (model.TemplateValue and
 // its parts) and image credentials. An error fails the op before any pod
 // call.

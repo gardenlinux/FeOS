@@ -30,8 +30,8 @@ import (
 // with another request (422).
 const CodeJobKeyConflict = "job_key_conflict"
 
-// CreateTenantJobRequest is POST /api/v1/jobs (ADR 0018, "A tenant's job").
-type CreateTenantJobRequest struct {
+// CreateProjectJobRequest is POST /api/v1/jobs (ADR 0018, "A project's job").
+type CreateProjectJobRequest struct {
 	// Environment names the environment the job runs in (ADR 0035), by
 	// name or ID; required.
 	Environment string `json:"environment"`
@@ -71,8 +71,8 @@ type CreateTenantJobRequest struct {
 	LogRetentionDays int `json:"logRetentionDays,omitempty"`
 }
 
-// TenantJobStatus is a job as the answers show it.
-type TenantJobStatus struct {
+// ProjectJobStatus is a job as the answers show it.
+type ProjectJobStatus struct {
 	ID string `json:"id"`
 	// Environment is the environment it runs in; Reaches what of it its
 	// pod reaches ("all", or the entries, [] for nothing) and Egress its
@@ -110,62 +110,62 @@ type EnvRef struct {
 	Name string `json:"name"`
 }
 
-// TenantJobList is GET /api/v1/jobs.
-type TenantJobList struct {
-	TenantJobs []TenantJobStatus `json:"jobs"`
+// ProjectJobList is GET /api/v1/jobs.
+type ProjectJobList struct {
+	ProjectJobs []ProjectJobStatus `json:"jobs"`
 }
 
-// TenantJobLogsAnswer is GET /api/v1/jobs/{id}/logs.
-type TenantJobLogsAnswer struct {
+// ProjectJobLogsAnswer is GET /api/v1/jobs/{id}/logs.
+type ProjectJobLogsAnswer struct {
 	Lines []string `json:"lines"`
 }
 
-func tenantJobStatus(r store.TenantJob) TenantJobStatus {
-	return TenantJobStatus{ID: r.ID.String(), Environment: EnvRef{ID: r.EnvID.String(), Name: r.EnvName},
+func projectJobStatus(r store.ProjectJob) ProjectJobStatus {
+	return ProjectJobStatus{ID: r.ID.String(), Environment: EnvRef{ID: r.EnvID.String(), Name: r.EnvName},
 		Reaches: r.Reaches, Egress: egressView(r.Egress), Image: r.Image, ImageRef: r.ImageRef, Phase: r.Phase, Reason: r.Reason,
 		Detail: r.Detail, ExitCode: r.ExitCode, Result: r.Result, ResultPath: r.ResultPath, Vcpus: r.VCPUs,
 		MemoryMib: r.MemoryMiB, Labels: r.Labels, CreatedAt: rfc3339(r.CreatedAt), StartedAt: rfc3339(r.StartedAt),
 		FinishedAt: rfc3339(r.FinishedAt), DeadlineAt: rfc3339(r.DeadlineAt), LogRetentionDays: r.LogRetentionDays}
 }
 
-// CreateTenantJob is POST /api/v1/jobs: a job of the tenant, created (true) or,
+// CreateProjectJob is POST /api/v1/jobs: a job of the project, created (true) or,
 // for a key a create with the same request made, the job that create
 // made (false). A key that names a job of another request is 422
 // job_key_conflict; the secrets and image credentials need
 // --secret-key-file (503). Its environment must exist and not be being
 // deleted (404, 409), the entries of its reaches its deployed
 // deployment's (422), its egress's blocks outside --deny-prefix (400).
-func (s *Service) CreateTenantJob(ctx context.Context, tenant, key string, req CreateTenantJobRequest) (TenantJobStatus, bool, error) {
-	rs, err := tenantJobSpec(req)
+func (s *Service) CreateProjectJob(ctx context.Context, project, key string, req CreateProjectJobRequest) (ProjectJobStatus, bool, error) {
+	rs, err := projectJobSpec(req)
 	if err != nil {
-		return TenantJobStatus{}, false, err
+		return ProjectJobStatus{}, false, err
 	}
 	if msg := spec.CheckPod(nil, rs.Reaches, rs.Egress, s.d.DenyPrefixes); msg != "" {
-		return TenantJobStatus{}, false, errBadRequest("%s", msg)
+		return ProjectJobStatus{}, false, errBadRequest("%s", msg)
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, req.Environment, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, req.Environment, store.NoLock)
 	if err != nil {
-		return TenantJobStatus{}, false, err
+		return ProjectJobStatus{}, false, err
 	}
 	rs.EnvID = e.ID
 	rs.Key, rs.Hash = key, requestHash(req)
-	r, created, err := s.ctl.CreateTenantJob(ctx, tenant, rs)
+	r, created, err := s.ctl.CreateProjectJob(ctx, project, rs)
 	if err != nil {
-		return TenantJobStatus{}, false, tenantJobError(err)
+		return ProjectJobStatus{}, false, projectJobError(err)
 	}
-	return tenantJobStatus(r), created, nil
+	return projectJobStatus(r), created, nil
 }
 
 // requestHash is a create's hash for its key: the request without the
 // values of its secrets and image credentials, which a caller mints anew
 // when it sends a create again.
-func requestHash(req CreateTenantJobRequest) string {
+func requestHash(req CreateProjectJobRequest) string {
 	names := slices.Sorted(maps.Keys(req.Secrets))
 	req.Secrets = nil
 	hasCreds := req.ImageCredentials != nil
 	req.ImageCredentials = nil
 	b, _ := json.Marshal(struct {
-		CreateTenantJobRequest
+		CreateProjectJobRequest
 		SecretNames []string `json:"secretNames"`
 		Credentials bool     `json:"credentials"`
 	}{req, names, hasCreds})
@@ -173,10 +173,10 @@ func requestHash(req CreateTenantJobRequest) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// tenantJobSpec validates a create (400 for what it gets wrong) and fills in
+// projectJobSpec validates a create (400 for what it gets wrong) and fills in
 // the defaults.
-func tenantJobSpec(req CreateTenantJobRequest) (ctl.TenantJobSpec, error) {
-	rs := ctl.TenantJobSpec{Image: strings.TrimSpace(req.Image), Command: req.Command, Env: req.Env, Secrets: req.Secrets,
+func projectJobSpec(req CreateProjectJobRequest) (ctl.ProjectJobSpec, error) {
+	rs := ctl.ProjectJobSpec{Image: strings.TrimSpace(req.Image), Command: req.Command, Env: req.Env, Secrets: req.Secrets,
 		ImageCredentials: req.ImageCredentials, ResultPath: req.ResultPath, Labels: req.Labels}
 	if rs.Image == "" {
 		return rs, errBadRequest("image is required")
@@ -248,15 +248,15 @@ func tenantJobSpec(req CreateTenantJobRequest) (ctl.TenantJobSpec, error) {
 	return rs, nil
 }
 
-// tenantJobError maps the controller's errors of the jobs.
-func tenantJobError(err error) error {
+// projectJobError maps the controller's errors of the jobs.
+func projectJobError(err error) error {
 	switch {
 	case err == nil:
 		return nil
 	case errors.Is(err, ctl.ErrNoEnvironment):
 		return errNoEnvironment()
 	case errors.Is(err, ctl.ErrNoObject), errors.Is(err, store.ErrNoRow):
-		return errNoTenantJob()
+		return errNoProjectJob()
 	case errors.Is(err, ctl.ErrJobKeyConflict):
 		return apierr.WithCode(http.StatusUnprocessableEntity, CodeJobKeyConflict, "%s", err.Error())
 	case errors.Is(err, ctl.ErrJobImage):
@@ -269,95 +269,95 @@ func tenantJobError(err error) error {
 		return apierr.New(http.StatusNotImplemented, "%s", err.Error())
 	case err.Error() == "secrets need --secret-key-file":
 		return errNoSecrets()
-	case err.Error() == "the tenant is being deleted":
+	case err.Error() == "the project is being deleted":
 		return apierr.New(http.StatusConflict, "%s", err.Error())
 	}
 	return err
 }
 
-func errNoTenantJob() error { return apierr.New(http.StatusNotFound, "no such job") }
+func errNoProjectJob() error { return apierr.New(http.StatusNotFound, "no such job") }
 
-// tenantJobID parses a job's ID; one that is none is no job (404).
-func tenantJobID(s string) (podid.ID, error) {
+// projectJobID parses a job's ID; one that is none is no job (404).
+func projectJobID(s string) (podid.ID, error) {
 	id, err := podid.Parse(s)
 	if err != nil || len(id) != podid.Len {
-		return "", errNoTenantJob()
+		return "", errNoProjectJob()
 	}
 	return id, nil
 }
 
-// GetTenantJob is GET /api/v1/jobs/{id}.
-func (s *Service) GetTenantJob(ctx context.Context, tenant, id string) (TenantJobStatus, error) {
-	rid, err := tenantJobID(id)
+// GetProjectJob is GET /api/v1/jobs/{id}.
+func (s *Service) GetProjectJob(ctx context.Context, project, id string) (ProjectJobStatus, error) {
+	rid, err := projectJobID(id)
 	if err != nil {
-		return TenantJobStatus{}, err
+		return ProjectJobStatus{}, err
 	}
-	r, err := s.st.GetTenantJob(ctx, tenant, rid)
+	r, err := s.st.GetProjectJob(ctx, project, rid)
 	if err != nil {
-		return TenantJobStatus{}, tenantJobError(err)
+		return ProjectJobStatus{}, projectJobError(err)
 	}
-	return tenantJobStatus(r), nil
+	return projectJobStatus(r), nil
 }
 
-// ListTenantJobs is GET /api/v1/jobs?label=k=v…: the tenant's kept jobs that
+// ListProjectJobs is GET /api/v1/jobs?label=k=v…: the project's kept jobs that
 // carry every label, newest first; envs, when not nil, keeps those of
 // these environments.
-func (s *Service) ListTenantJobs(ctx context.Context, tenant string, labels map[string]string, envs []uuid.UUID) (
-	TenantJobList, error) {
-	rows, err := s.st.ListTenantJobs(ctx, tenant, labels, envs)
+func (s *Service) ListProjectJobs(ctx context.Context, project string, labels map[string]string, envs []uuid.UUID) (
+	ProjectJobList, error) {
+	rows, err := s.st.ListProjectJobs(ctx, project, labels, envs)
 	if err != nil {
-		return TenantJobList{}, err
+		return ProjectJobList{}, err
 	}
-	out := TenantJobList{TenantJobs: make([]TenantJobStatus, 0, len(rows))}
+	out := ProjectJobList{ProjectJobs: make([]ProjectJobStatus, 0, len(rows))}
 	for _, r := range rows {
-		out.TenantJobs = append(out.TenantJobs, tenantJobStatus(r))
+		out.ProjectJobs = append(out.ProjectJobs, projectJobStatus(r))
 	}
 	return out, nil
 }
 
-// TenantJobLogs is GET /api/v1/jobs/{id}/logs?lines=N (200 when not above 0, at
+// ProjectJobLogs is GET /api/v1/jobs/{id}/logs?lines=N (200 when not above 0, at
 // most 10000): from the job's pod while it runs, its kept tail once it
 // has ended.
-func (s *Service) TenantJobLogs(ctx context.Context, tenant, id string, lines int) (TenantJobLogsAnswer, error) {
-	rid, err := tenantJobID(id)
+func (s *Service) ProjectJobLogs(ctx context.Context, project, id string, lines int) (ProjectJobLogsAnswer, error) {
+	rid, err := projectJobID(id)
 	if err != nil {
-		return TenantJobLogsAnswer{}, err
+		return ProjectJobLogsAnswer{}, err
 	}
 	if lines <= 0 {
 		lines = defaultLogLines
 	}
-	out, err := s.ctl.TenantJobLog(ctx, tenant, rid, min(lines, maxLogLines))
+	out, err := s.ctl.ProjectJobLog(ctx, project, rid, min(lines, maxLogLines))
 	if err != nil {
-		return TenantJobLogsAnswer{}, tenantJobError(err)
+		return ProjectJobLogsAnswer{}, projectJobError(err)
 	}
 	if out == nil {
 		out = []string{}
 	}
-	return TenantJobLogsAnswer{Lines: out}, nil
+	return ProjectJobLogsAnswer{Lines: out}, nil
 }
 
-// CancelTenantJob is POST /api/v1/jobs/{id}/cancel: the job as it is after the
+// CancelProjectJob is POST /api/v1/jobs/{id}/cancel: the job as it is after the
 // cancel, which changes nothing of a job that has ended.
-func (s *Service) CancelTenantJob(ctx context.Context, tenant, id string) (TenantJobStatus, error) {
-	rid, err := tenantJobID(id)
+func (s *Service) CancelProjectJob(ctx context.Context, project, id string) (ProjectJobStatus, error) {
+	rid, err := projectJobID(id)
 	if err != nil {
-		return TenantJobStatus{}, err
+		return ProjectJobStatus{}, err
 	}
-	r, err := s.ctl.CancelTenantJob(ctx, tenant, rid)
+	r, err := s.ctl.CancelProjectJob(ctx, project, rid)
 	if err != nil {
-		return TenantJobStatus{}, tenantJobError(err)
+		return ProjectJobStatus{}, projectJobError(err)
 	}
-	return tenantJobStatus(r), nil
+	return projectJobStatus(r), nil
 }
 
-// DeleteTenantJob is DELETE /api/v1/jobs/{id}: a job that has not ended is
+// DeleteProjectJob is DELETE /api/v1/jobs/{id}: a job that has not ended is
 // cancelled first; its record goes.
-func (s *Service) DeleteTenantJob(ctx context.Context, tenant, id string) error {
-	rid, err := tenantJobID(id)
+func (s *Service) DeleteProjectJob(ctx context.Context, project, id string) error {
+	rid, err := projectJobID(id)
 	if err != nil {
 		return err
 	}
-	return tenantJobError(s.ctl.DeleteTenantJob(ctx, tenant, rid))
+	return projectJobError(s.ctl.DeleteProjectJob(ctx, project, rid))
 }
 
 // egressView is an egress as the views show it: "internet" for none

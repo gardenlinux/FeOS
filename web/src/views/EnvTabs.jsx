@@ -25,7 +25,7 @@ import '../styles/providers.css';
 // settings (clone, delete), with the small widgets the
 // environment's actions share. ec is what the role may do on the environment
 // (Environments.jsx, envCan); every write calls changed, which refreshes
-// the page and the tenant's summary.
+// the page and the project's summary.
 
 // ---------------------------------------------------------------- widgets --
 
@@ -100,8 +100,8 @@ export function ConfirmButton({ label, confirmLabel, onConfirm, disabled, title,
 export const NEEDS = {
   write: 'needs write on this environment',
   admin: 'needs admin on this environment',
-  del: 'needs admin on this environment or write on the tenant',
-  clone: 'needs write on the tenant',
+  del: 'needs admin on this environment or write on the project',
+  clone: 'needs write on the project',
 };
 
 // --------------------------------------------------------------- traffic --
@@ -164,7 +164,7 @@ export function TrafficTable({ traffic, service = '' }) {
 // TrafficTab is an environment's traffic, or on a service's page
 // (service, its name) the service's: its line of the table and the
 // access log's records of it.
-export function TrafficTab({ tenant, env, navigate, service = '' }) {
+export function TrafficTab({ project, env, navigate, service = '' }) {
   const [win, setWin] = useState('1h');
   const [traffic, setTraffic] = useState(null);
   const [err, setErr] = useState('');
@@ -195,7 +195,7 @@ export function TrafficTab({ tenant, env, navigate, service = '' }) {
         its readiness check; errors are spans with an error status or a status of 500 to 599. A routed service that sends no
         spans shows what the ingress answered at the public hosts (errors: 500 or more, or none); the route door's requests
         are not counted.</p>
-      <AccessLog tenant={tenant} env={env} navigate={navigate} service={service} />
+      <AccessLog project={project} env={env} navigate={navigate} service={service} />
     </>
   );
 }
@@ -204,7 +204,7 @@ const ACCESS_PAGE = 100;
 
 // AccessLog is the ingress's access log of the environment, newest
 // first: the newest page polled, older pages read on demand.
-function AccessLog({ tenant, env, navigate, service = '' }) {
+function AccessLog({ project, env, navigate, service = '' }) {
   const [newest, setNewest] = useState(null);
   const [older, setOlder] = useState([]);
   const [err, setErr] = useState('');
@@ -242,7 +242,7 @@ function AccessLog({ tenant, env, navigate, service = '' }) {
         <span className="muted small">the ingress's records, newest first</span>
       </div>
       <ErrBox error={err} />
-      <AccessTable records={records} tenant={tenant} env={env} navigate={navigate} />
+      <AccessTable records={records} project={project} env={env} navigate={navigate} />
       {!records && !err && <p className="empty">Loading…</p>}
       {records && records.length >= ACCESS_PAGE && more && (
         <button className="ghost mini" disabled={busy} onClick={loadOlder}>{busy ? 'Loading…' : 'Older'}</button>)}
@@ -250,7 +250,7 @@ function AccessLog({ tenant, env, navigate, service = '' }) {
   );
 }
 
-export function AccessTable({ records, tenant, env, navigate }) {
+export function AccessTable({ records, project, env, navigate }) {
   const list = records || [];
   return (
     <>
@@ -281,7 +281,7 @@ export function AccessTable({ records, tenant, env, navigate }) {
                 <td className="mono small cut-start" title={r.userAgent}>{r.clientIp}</td>
                 <td className="mono small">
                   {r.traceId
-                    ? <EnvLink to={envPath(tenant, env, 'traces', r.traceId)} navigate={navigate} title="the trace">{r.traceId.slice(0, 8)}</EnvLink>
+                    ? <EnvLink to={envPath(project, env, 'traces', r.traceId)} navigate={navigate} title="the trace">{r.traceId.slice(0, 8)}</EnvLink>
                     : <span className="muted">—</span>}
                 </td>
               </tr>
@@ -340,19 +340,19 @@ export function NewSecret({ disabled, onPut }) {
 
 // ------------------------------------------------------ domains & access --
 
-export function AccessTab({ tenant, env, st, ec, domains, changed, navigate }) {
+export function AccessTab({ project, env, st, ec, domains, changed, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
   return (
     <>
       <PublicBox env={env} st={st} ec={ec} domains={domains} changed={changed} />
-      <DomainsBox tenant={tenant} st={st} domains={domains} navigate={navigate} />
+      <DomainsBox project={project} st={st} domains={domains} navigate={navigate} />
       <RouteTokenBox env={st.name} ec={ec} />
     </>
   );
 }
 
 // PublicBox publishes the environment and says who the ingress admits
-// at its hosts (ADR 0054): visitors of one of the tenant's providers, or
+// at its hosts (ADR 0054): visitors of one of the project's providers, or
 // anyone. The providers and the kinds this installation serves are the
 // summary's, unless given; a publish always says the access.
 export function PublicBox({ env, st, ec, domains, changed, providers: given, kinds: givenKinds }) {
@@ -491,13 +491,13 @@ function provider(list, name) {
 // DOMAIN_TONES are the state dots of a domain's state.
 const DOMAIN_TONES = { served: 'running', 'dns-moved': 'unknown', unverified: 'absent', 'waiting-for-dns': 'moving', 'waiting-for-certificate': 'moving', deactivated: 'failed' };
 
-export function DomainsBox({ tenant, st, domains, navigate }) {
+export function DomainsBox({ project, st, domains, navigate }) {
   const list = envDomains(domains, st);
-  const base = `/tenants/${encodeURIComponent(tenant)}/domains`;
+  const base = `/projects/${encodeURIComponent(project)}/domains`;
   return (
     <div className="envsect envbox">
       <div className="sect">domains <span className="count">· {domains ? list.length : '…'}</span></div>
-      {domains === null && <p className="empty small">The tenant's domains are not read yet, or not readable with this role.</p>}
+      {domains === null && <p className="empty small">The project's domains are not read yet, or not readable with this role.</p>}
       {domains && list.length === 0 && (
         <p className="empty small">No domain is bound to this environment. <EnvLink to={base} navigate={navigate}>The domains →</EnvLink></p>)}
       {list.length > 0 && (
@@ -566,20 +566,20 @@ function RevokeTokens({ disabled, onRevoke }) {
 
 // -------------------------------------------------------------- settings --
 
-export function SettingsTab({ tenant, env, st, ec, changed, navigate }) {
+export function SettingsTab({ project, env, st, ec, changed, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
   return (
     <>
-      <RenameBox tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
-      <CloneBox tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
-      <DeleteBox tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
+      <RenameBox project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
+      <CloneBox project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
+      <DeleteBox project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
     </>
   );
 }
 
 // RenameBox renames the environment (ADR 0037): the same environment
 // under a new name, its hosts, grants and logs kept.
-export function RenameBox({ tenant, env, st, ec, changed, navigate }) {
+export function RenameBox({ project, env, st, ec, changed, navigate }) {
   const [name, setName] = useState('');
   const [op, run, clear] = useOp();
   const busy = !!(op && op.busy);
@@ -587,7 +587,7 @@ export function RenameBox({ tenant, env, st, ec, changed, navigate }) {
   const submit = async (e) => {
     e.preventDefault();
     const r = await run(() => api.renameEnvironment(env, next), (res) => `Renamed to ${res.name}.`);
-    if (r) { setName(''); changed(); navigate(envPath(tenant, r.name, 'settings')); }
+    if (r) { setName(''); changed(); navigate(envPath(project, r.name, 'settings')); }
   };
   return (
     <div className="envsect envbox">
@@ -608,7 +608,7 @@ export function RenameBox({ tenant, env, st, ec, changed, navigate }) {
   );
 }
 
-export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
+export function CloneBox({ project, env, st, ec, changed, navigate }) {
   const [name, setName] = useState('');
   const [deployment, setDeployment] = useState(0);
   const [deployments, setDeployments] = useState(null);
@@ -634,7 +634,7 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
     e.preventDefault();
     const body = cloneBody({ name, deployment, copy, secrets: secrets || [] });
     const r = await run(() => api.cloneEnvironment(env, body), (res) => `${res.name} made from deployment ${body.deployment || st.deployment}.`);
-    if (r) { changed(); navigate(envPath(tenant, r.name)); }
+    if (r) { changed(); navigate(envPath(project, r.name)); }
   };
   return (
     <div className="envsect envbox">
@@ -642,7 +642,7 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
       <p className="panel-note">
         A new environment with a deployment's spec, its references reaching its own objects. Its data is not copied: its
         addons start empty. Its sandboxes and jobs stay here, and attached services are dropped (they run in a sandbox of
-        this one). It is not public until its tenant publishes it.
+        this one). It is not public until its project publishes it.
       </p>
       <form className="envclone" onSubmit={submit} title={ec.clone ? '' : NEEDS.clone}>
         <fieldset disabled={!ec.clone || busy}>
@@ -684,11 +684,11 @@ export function CloneBox({ tenant, env, st, ec, changed, navigate }) {
 // InUse says why a delete was refused (409 environment_in_use, ADR
 // 0035): the sandboxes and the jobs on their way that keep the
 // environment, each a link; nothing for any other error.
-export function InUse({ error, tenant, env, navigate }) {
+export function InUse({ error, project, env, navigate }) {
   const u = inUse(error);
   if (!u) return null;
   const links = (ids, path) => ids.map((id, i) => (
-    <React.Fragment key={id}>{i > 0 && ', '}<EnvLink to={path(tenant, env, id)} navigate={navigate} className="mono">{id}</EnvLink></React.Fragment>));
+    <React.Fragment key={id}>{i > 0 && ', '}<EnvLink to={path(project, env, id)} navigate={navigate} className="mono">{id}</EnvLink></React.Fragment>));
   return (
     <div className="message"><Icon name="alert" size={14} />
       <span>
@@ -701,7 +701,7 @@ export function InUse({ error, tenant, env, navigate }) {
   );
 }
 
-export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
+export function DeleteBox({ project, env, st, ec, changed, navigate }) {
   const [armed, arm, disarm] = useArm();
   const [op, run] = useOp();
   const blocked = op && op.tone === 'bad' ? inUse(op.error) : null;
@@ -711,19 +711,19 @@ export function DeleteBox({ tenant, env, st, ec, changed, navigate }) {
       <p className="panel-note">
         Deleting {st.name} stops and removes its instances and their volumes, with its addons' data, then the environment
         with its deployments, tags, secrets and route tokens, and its ended jobs&apos; records. Its default host goes; its
-        domains stay the tenant&apos;s. While it has sandboxes or jobs queued or running it is not deleted. It cannot be undone.
+        domains stay the project&apos;s. While it has sandboxes or jobs queued or running it is not deleted. It cannot be undone.
       </p>
       <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} className="mini" icon="trash"
         disabled={!ec.del || st.deleting || !!(op && op.busy)} title={ec.del ? '' : NEEDS.del}
         confirmLabel={`Delete ${st.name}: sure?`}
         onConfirm={async () => {
           const r = await run(() => api.deleteEnvironment(env).then(() => true), '');
-          if (r) { changed(); navigate(envPath(tenant)); }
+          if (r) { changed(); navigate(envPath(project)); }
         }}>
         {st.deleting ? 'Being deleted' : 'Delete environment'}
       </ArmButton>
       {op && op.tone === 'bad' && (blocked
-        ? <InUse error={op.error} tenant={tenant} env={st.name} navigate={navigate} />
+        ? <InUse error={op.error} project={project} env={st.name} navigate={navigate} />
         : <ErrBox error={op.text} />)}
       {st.deleting && <p className="muted small">The deletion is under way: ferund removes what runs first.</p>}
     </div>

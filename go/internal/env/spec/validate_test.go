@@ -15,10 +15,10 @@ import (
 // The sandbox the Expensa spec's attached service runs in.
 const webSandbox = "0193a000-0000-7000-8000-00000000000a"
 
-// Another attachable sandbox of the tenant.
+// Another attachable sandbox of the project.
 const otherSandbox = "0193a000-0000-7000-8000-00000000000b"
 
-// An attachable sandbox of the tenant with a short ID (ADR 0019); the two
+// An attachable sandbox of the project with a short ID (ADR 0019); the two
 // above have UUIDs, as sandboxes made before do.
 const shortSandbox = "k3x9m2p7q4r"
 

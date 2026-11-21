@@ -34,7 +34,7 @@ import { HttpSecrets } from './HttpSecret.jsx';
 import { EnvSecrets } from './EnvSecrets.jsx';
 import '../styles/environments.css';
 
-// A tenant's environments: the list with a label filter, and an
+// A project's environments: the list with a label filter, and an
 // environment's page: a head with its state and what runs where, Revert
 // (while the latest deployment failed or is under way and an earlier one
 // serves) and New deployment, the builder (Builder.jsx, ADR 0032); then
@@ -52,31 +52,31 @@ import '../styles/environments.css';
 // same views where it has them, or one of its sandboxes, whose page
 // (Sandboxes.jsx) has its own. No secret's value is ever read; a route
 // token shows once, at its mint. The environment, the tab and its item
-// are the route's: /tenants/:t/environments/:env/:tab/:item.
+// are the route's: /projects/:t/environments/:env/:tab/:item.
 
-export function Environments({ tenant, env, tab, item, otab = 'overview', replica, search, navigate }) {
+export function Environments({ project, env, tab, item, otab = 'overview', replica, search, navigate }) {
   if (env) {
     return (
-      <EnvDetail key={env} tenant={tenant} env={env} tab={tab} item={item} otab={otab} replica={replica} search={search}
+      <EnvDetail key={env} project={project} env={env} tab={tab} item={item} otab={otab} replica={replica} search={search}
         navigate={navigate} />
     );
   }
-  return <EnvList tenant={tenant} navigate={navigate} />;
+  return <EnvList project={project} navigate={navigate} />;
 }
 
 // envCan is what a role may do on an environment (ADR 0031, the route
 // needs): write on it (revert, tags, secrets, restarts, runs, checks),
 // admin on it (public and who it admits, route tokens), a delete (admin on it or write on
-// the tenant), a clone (write on the tenant); operator: the nodes are
+// the project), a clone (write on the project); operator: the nodes are
 // theirs to open.
 export function envCan(access, env) {
   const role = envRole(access, env);
-  const writeTenant = atLeast((access && access.role) || '', 'write');
+  const writeProject = atLeast((access && access.role) || '', 'write');
   return {
     write: atLeast(role, 'write'),
     admin: atLeast(role, 'admin'),
-    del: atLeast(role, 'admin') || writeTenant,
-    clone: writeTenant,
+    del: atLeast(role, 'admin') || writeProject,
+    clone: writeProject,
     operator: !!(access && access.operator),
   };
 }
@@ -123,9 +123,9 @@ function Annotations({ annotations }) {
 
 // ------------------------------------------------------------------- list --
 
-function EnvList({ tenant, navigate }) {
-  // A new environment needs write on the tenant (ADR 0031).
-  const access = useAccess(tenant);
+function EnvList({ project, navigate }) {
+  // A new environment needs write on the project (ADR 0031).
+  const access = useAccess(project);
   const [envs, setEnvs] = useState(null);
   const [err, setErr] = useState('');
   const [labels, setLabels] = useState([]);
@@ -159,8 +159,8 @@ function EnvList({ tenant, navigate }) {
         <div className="pagehead-title">
           <h1>Environments</h1>
           <span className="pagehead-actions">
-            <button className="primary" disabled={!access.can.writeTenant} title={access.can.writeTenant ? '' : 'needs write on this tenant'}
-              onClick={() => navigate(newEnvPath(tenant))}>
+            <button className="primary" disabled={!access.can.writeProject} title={access.can.writeProject ? '' : 'needs write on this project'}
+              onClick={() => navigate(newEnvPath(project))}>
               <Icon name="plus" size={14} /> New environment</button>
           </span>
         </div>
@@ -198,7 +198,7 @@ function EnvList({ tenant, navigate }) {
         <ErrBox error={err} />
         {bad.length > 0 && <p className="notice small">A label filter is key=value: {bad.join(', ')}</p>}
 
-        <EnvTable envs={envs} filtered={labels.length > 0} tenant={tenant} navigate={navigate}
+        <EnvTable envs={envs} filtered={labels.length > 0} project={project} navigate={navigate}
           onLabel={(k, v) => addLabels([`${k}=${v}`])} />
         {!envs && !err && <p className="empty">Loading…</p>}
       </section>
@@ -209,7 +209,7 @@ function EnvList({ tenant, navigate }) {
 // EnvTable is the environments' table (GET /api/v1/environments): the
 // state, the deployments in words, the hosts; a label chip filters by its
 // label.
-export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
+export function EnvTable({ envs, filtered, project, navigate, onLabel }) {
   const list = envs || [];
   return (
     <>
@@ -228,7 +228,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
           </thead>
           <tbody>
             {list.map((e) => {
-              const to = envPath(tenant, e.name);
+              const to = envPath(project, e.name);
               const tone = deploymentTone(e.state);
               return (
                 <tr key={e.id} className="clickable" onClick={() => navigate(to)}>
@@ -260,7 +260,7 @@ export function EnvTable({ envs, filtered, tenant, navigate, onLabel }) {
         </table>
       </div>
       {envs && list.length === 0 && (
-        <p className="empty">{filtered ? 'No environment has these labels.' : 'No environments in this tenant.'}</p>)}
+        <p className="empty">{filtered ? 'No environment has these labels.' : 'No environments in this project.'}</p>)}
     </>
   );
 }
@@ -277,13 +277,13 @@ const LENS_ICONS = {
 // Secrets with an HTTP secret's pages), and
 // the view; an object's page instead when one is picked. The status is
 // the shell's (envstatus.jsx), read for the sidebar and this page.
-function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) {
+function EnvDetail({ project, env, tab, item, otab, replica, search, navigate }) {
   const status = useEnvStatus();
   const { err, gone, lastOk, refresh } = status;
   const st = status.env === env ? status.st : null;
-  const access = useAccess(tenant);
+  const access = useAccess(project);
   const sum = useSummary();
-  const list = envPath(tenant);
+  const list = envPath(project);
   // The objects tab without an object is the overview, which lists them;
   // traces without a trace are the logs, where traces open from. The
   // sandboxes without one are their list.
@@ -294,7 +294,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const httpPage = activeTab === 'secrets' && String(item).startsWith('http/') ? String(item).slice(5) : '';
 
   useNow(1000);
-  // changed follows a write: the page and the tenant's summary read again.
+  // changed follows a write: the page and the project's summary read again.
   const sumRefresh = sum.refresh;
   const changed = useCallback(() => { refresh(); sumRefresh(); }, [refresh, sumRefresh]);
   const ec = envCan(access, (st && st.id) || env);
@@ -303,10 +303,10 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   // environments; from the builder, an object's page and the sandboxes'
   // list to the overview; from a trace to its lines; from an HTTP
   // secret's new version to its page, from its page to the secrets.
-  const up = activeTab === 'builder' || activeTab === 'objects' || (activeTab === 'sandboxes' && !item) ? envPath(tenant, env)
-    : activeTab === 'traces' ? envPath(tenant, env, 'logs', '', null, queryOf({ trace: item }))
-      : httpPage && otab === 'edit' ? httpSecretPath(tenant, env, httpPage)
-        : item ? envPath(tenant, env, activeTab) : list;
+  const up = activeTab === 'builder' || activeTab === 'objects' || (activeTab === 'sandboxes' && !item) ? envPath(project, env)
+    : activeTab === 'traces' ? envPath(project, env, 'logs', '', null, queryOf({ trace: item }))
+      : httpPage && otab === 'edit' ? httpSecretPath(project, env, httpPage)
+        : item ? envPath(project, env, activeTab) : list;
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && !e.target.closest('input,textarea,select')) navigate(up);
@@ -318,7 +318,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   if (gone && !st) {
     return (
       <section className="pane">
-        <p className="error">No environment {env} in this tenant.</p>
+        <p className="error">No environment {env} in this project.</p>
         <button className="ghost" onClick={() => navigate(list)}><Icon name="arrowLeft" size={14} /> the environments</button>
       </section>
     );
@@ -331,7 +331,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
     return (
       <>
         <ErrBox error={err} />
-        {body(<ObjectPage key={item} tenant={tenant} st={st} item={item} otab={otab} replica={replica} search={search}
+        {body(<ObjectPage key={item} project={project} st={st} item={item} otab={otab} replica={replica} search={search}
           ec={ec} lastOk={lastOk} changed={changed} navigate={navigate} />)}
       </>
     );
@@ -343,7 +343,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
     return (
       <>
         <ErrBox error={err} />
-        <Sandboxes tenant={tenant} env={st ? st.name : env} sel={item} tab={otab} write={ec.write} navigate={navigate} />
+        <Sandboxes project={project} env={st ? st.name : env} sel={item} tab={otab} write={ec.write} navigate={navigate} />
       </>
     );
   }
@@ -352,11 +352,11 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
   const pages = LENS_PAGES[lens];
   return (
     <>
-      <EnvHead st={st} env={env} tenant={tenant} ec={ec} domains={sum.domains} editing={activeTab === 'builder'}
+      <EnvHead st={st} env={env} project={project} ec={ec} domains={sum.domains} editing={activeTab === 'builder'}
         lastOk={lastOk} changed={changed} navigate={navigate} />
       <nav className="tabbar env-tabs" aria-label="views">
         {ENV_LENSES.map((t) => {
-          const to = envPath(tenant, env, t);
+          const to = envPath(project, env, t);
           return (
             <a key={t} href={to} className={'tab' + (lens === t ? ' on' : '')} aria-current={lens === t ? 'page' : undefined}
               onClick={go(to)}>
@@ -371,7 +371,7 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
         {pages && (
           <nav className="subtabs" aria-label={ENV_TAB_LABELS[lens]}>
             {pages.map((p) => {
-              const to = envPath(tenant, env, p);
+              const to = envPath(project, env, p);
               return (
                 <a key={p} href={to} className={'subtab' + (activeTab === p ? ' on' : '')} onClick={go(to)}
                   aria-current={activeTab === p ? 'page' : undefined}>
@@ -382,28 +382,28 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
             })}
           </nav>)}
 
-        {activeTab === 'overview' && body(<OverviewTab st={st} tenant={tenant} ec={ec} changed={changed} navigate={navigate} />)}
-        {activeTab === 'builder' && body(<Builder key={st && st.id} tenant={tenant} env={st && st.name} st={st} item={item} navigate={navigate} />)}
-        {activeTab === 'activity' && <ActivityTab tenant={tenant} env={env} navigate={navigate} />}
+        {activeTab === 'overview' && body(<OverviewTab st={st} project={project} ec={ec} changed={changed} navigate={navigate} />)}
+        {activeTab === 'builder' && body(<Builder key={st && st.id} project={project} env={st && st.name} st={st} item={item} navigate={navigate} />)}
+        {activeTab === 'activity' && <ActivityTab project={project} env={env} navigate={navigate} />}
         {activeTab === 'deployments' && (
-          <DeploymentsTab tenant={tenant} env={env} st={st} item={item} ec={ec} changed={changed} navigate={navigate} />)}
+          <DeploymentsTab project={project} env={env} st={st} item={item} ec={ec} changed={changed} navigate={navigate} />)}
         {activeTab === 'incidents' && (item
-          ? <IncidentPane key={item} tenant={tenant} env={env} id={item} navigate={navigate} />
-          : <IncidentsList tenant={tenant} env={env} navigate={navigate} />)}
-        {activeTab === 'jobs' && <Jobs tenant={tenant} env={st ? st.name : env} sel={item} write={ec.write} navigate={navigate} />}
-        {activeTab === 'logs' && <LogsTab tenant={tenant} env={env} st={st} item="" replica={null} search={search} navigate={navigate} />}
-        {activeTab === 'traces' && <Traces tenant={tenant} env={env} st={st} item={item} navigate={navigate} />}
-        {activeTab === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} />}
-        {activeTab === 'reachability' && body(<EnvReach tenant={tenant} st={st} navigate={navigate} />)}
+          ? <IncidentPane key={item} project={project} env={env} id={item} navigate={navigate} />
+          : <IncidentsList project={project} env={env} navigate={navigate} />)}
+        {activeTab === 'jobs' && <Jobs project={project} env={st ? st.name : env} sel={item} write={ec.write} navigate={navigate} />}
+        {activeTab === 'logs' && <LogsTab project={project} env={env} st={st} item="" replica={null} search={search} navigate={navigate} />}
+        {activeTab === 'traces' && <Traces project={project} env={env} st={st} item={item} navigate={navigate} />}
+        {activeTab === 'traffic' && <TrafficTab project={project} env={env} navigate={navigate} />}
+        {activeTab === 'reachability' && body(<EnvReach project={project} st={st} navigate={navigate} />)}
         {activeTab === 'secrets' && !httpPage && body(
-          <EnvSecrets tenant={tenant} env={st && st.name} st={st} ec={ec} item={item} changed={changed} navigate={navigate} />)}
-        {httpPage && <HttpSecrets tenant={tenant} env={env} sel={httpPage} edit={otab === 'edit'} ec={ec} navigate={navigate} />}
+          <EnvSecrets project={project} env={st && st.name} st={st} ec={ec} item={item} changed={changed} navigate={navigate} />)}
+        {httpPage && <HttpSecrets project={project} env={env} sel={httpPage} edit={otab === 'edit'} ec={ec} navigate={navigate} />}
         {activeTab === 'access' && (
-          <AccessTab tenant={tenant} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />)}
+          <AccessTab project={project} env={env} st={st} ec={ec} domains={sum.domains} changed={changed} navigate={navigate} />)}
         {activeTab === 'settings' && (
           <>
             {st && <AboutBox st={st} />}
-            <SettingsTab tenant={tenant} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
+            <SettingsTab project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
           </>)}
       </div>
     </>
@@ -417,19 +417,19 @@ function EnvDetail({ tenant, env, tab, item, otab, replica, search, navigate }) 
 // deployment: its title says so, under the environment's name, with
 // Done instead of New deployment and without the environment's state.
 // Its labels, ID and creation are on Settings.
-export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed, navigate }) {
+export function EnvHead({ st, env, project, ec, domains, editing, lastOk, changed, navigate }) {
   const [op, run, clear] = useOp();
   const state = statusState(st);
   const incidents = st ? Number(st.openIncidents) || 0 : 0;
   const tone = incidents > 0 ? 'failed' : deploymentTone(state);
   const offer = revertOffer(st);
   const dh = defaultHost(st, domains || []);
-  const builder = envPath(tenant, env, 'builder');
+  const builder = envPath(project, env, 'builder');
   const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
   const revert = async () => {
     const r = await run(() => api.revertDeployment(st.name, offer, { base: st.deployment }),
       (res) => `Deployment ${res.number} reverts to ${offer}.`);
-    if (r) { changed(); navigate(envPath(tenant, st.name, 'deployments', r.number)); }
+    if (r) { changed(); navigate(envPath(project, st.name, 'deployments', r.number)); }
   };
   const r = st && st.rollout;
   const note = st ? rolloutNote(st) : '';
@@ -438,7 +438,7 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
     <header className="pagehead envhead">
       {editing && (
         <p className="pagehead-kind">Environment{' '}
-          <a href={envPath(tenant, env)} onClick={go(envPath(tenant, env))}><EnvName name={st ? st.name : env} className="" /></a></p>)}
+          <a href={envPath(project, env)} onClick={go(envPath(project, env))}><EnvName name={st ? st.name : env} className="" /></a></p>)}
       <div className="pagehead-title">
         <h1>{editing ? 'New deployment' : <EnvName name={st ? st.name : env} className="" />}</h1>
         {st && !editing && (
@@ -453,7 +453,7 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
               disabled={!ec.write || !!(op && op.busy)}
               title={ec.write ? `a new deployment with deployment ${offer}'s spec` : NEEDS.write} onConfirm={revert} />)}
           {editing
-            ? <a className="button" href={envPath(tenant, env)} onClick={go(envPath(tenant, env))}><Icon name="check" size={14} /> Done</a>
+            ? <a className="button" href={envPath(project, env)} onClick={go(envPath(project, env))}><Icon name="check" size={14} /> Done</a>
             : (
               <a className={'button' + (incidents > 0 ? '' : ' primary')} href={builder} onClick={go(builder)}
                 title={ec.write ? 'change the environment: a draft, planned, applied as the next deployment' : 'read-only: needs write on this environment'}>
@@ -486,7 +486,7 @@ export function EnvHead({ st, env, tenant, ec, domains, editing, lastOk, changed
 // minute (none while the log store does not answer), the open incidents
 // while there are, and the newest deployments and incidents; below,
 // what runs beside the deployments: its sandboxes and jobs (ADR 0035).
-function OverviewTab({ st, tenant, ec, changed, navigate }) {
+function OverviewTab({ st, project, ec, changed, navigate }) {
   const spec = useLatestSpec(st);
   const [traffic, setTraffic] = useState(null);
   const [incidents, setIncidents] = useState(null);
@@ -504,9 +504,9 @@ function OverviewTab({ st, tenant, ec, changed, navigate }) {
   const [activity] = useActivity(env, 5);
   return (
     <>
-      <EnvOverview st={st} tenant={tenant} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed}
+      <EnvOverview st={st} project={project} navigate={navigate} spec={spec} traffic={traffic} ec={ec} changed={changed}
         incidents={incidents} activity={activity} />
-      <EnvPods tenant={tenant} env={st.name} write={ec.write} navigate={navigate} />
+      <EnvPods project={project} env={st.name} write={ec.write} navigate={navigate} />
     </>
   );
 }
@@ -647,7 +647,7 @@ export function InstanceTable({ instances, latest, navigate, logsTo, operator = 
 // shows the list, or one deployment. The spec and diff of a deployment
 // never change, so they are read once; its state, reason, finish and
 // tags do, so the polled list's entry is laid over them.
-function DeploymentsTab({ tenant, env, st, item, ec, changed, navigate }) {
+function DeploymentsTab({ project, env, st, item, ec, changed, navigate }) {
   const [deployments, setDeployments] = useState(null);
   const [tags, setTags] = useState(null);
   const [err, setErr] = useState('');
@@ -666,24 +666,24 @@ function DeploymentsTab({ tenant, env, st, item, ec, changed, navigate }) {
   const after = () => { refresh(); changed(); };
   const revert = (n) => api.revertDeployment(env, n, { base: latest }).then((r) => {
     after();
-    navigate(envPath(tenant, env, 'deployments', r.number));
+    navigate(envPath(project, env, 'deployments', r.number));
     return r;
   });
 
   if (item) {
     const listed = (deployments || []).find((r) => String(r.number) === item) || null;
     return (
-      <DeploymentPane key={item} tenant={tenant} env={env} n={item} listed={listed} latest={latest} tags={tags} ec={ec}
+      <DeploymentPane key={item} project={project} env={env} n={item} listed={listed} latest={latest} tags={tags} ec={ec}
         onRevert={revert} onTags={after} navigate={navigate} />
     );
   }
   return (
     <>
       <ErrBox error={err} />
-      <DeploymentTable deployments={deployments} latest={latest} tenant={tenant} env={env} navigate={navigate}
+      <DeploymentTable deployments={deployments} latest={latest} project={project} env={env} navigate={navigate}
         ec={ec} onRevert={revert} />
       {!deployments && !err && <p className="empty">Loading…</p>}
-      {tags && <TagsBox env={env} tags={tags} ec={ec} tenant={tenant} navigate={navigate} onChange={after} />}
+      {tags && <TagsBox env={env} tags={tags} ec={ec} project={project} navigate={navigate} onChange={after} />}
     </>
   );
 }
@@ -705,7 +705,7 @@ function RevertButton({ n, ec, onRevert, label = 'Revert to this' }) {
 
 // DeploymentTable is the deployments' table; with ec each but the latest
 // offers its revert.
-export function DeploymentTable({ deployments, latest, tenant, env, navigate, ec = null, onRevert = null }) {
+export function DeploymentTable({ deployments, latest, project, env, navigate, ec = null, onRevert = null }) {
   const list = deployments || [];
   return (
     <>
@@ -726,7 +726,7 @@ export function DeploymentTable({ deployments, latest, tenant, env, navigate, ec
           </thead>
           <tbody>
             {list.map((r) => {
-              const to = envPath(tenant, env, 'deployments', r.number);
+              const to = envPath(project, env, 'deployments', r.number);
               return (
                 <tr key={r.number} className="clickable" onClick={() => navigate(to)}>
                   <td className="col-num nowrap">
@@ -763,7 +763,7 @@ export function DeploymentTable({ deployments, latest, tenant, env, navigate, ec
 
 // TagsBox lists the environment's tags: each names a deployment and
 // moves only by an explicit call, which is recorded (ADR 0018).
-export function TagsBox({ env, tags, ec, tenant, navigate, onChange }) {
+export function TagsBox({ env, tags, ec, project, navigate, onChange }) {
   const [op, run, clear] = useOp();
   const [armed, arm, disarm] = useArm();
   const [moving, setMoving] = useState('');
@@ -784,7 +784,7 @@ export function TagsBox({ env, tags, ec, tenant, navigate, onChange }) {
                   <tr key={t.tag}>
                     <td className="mono strong"><Icon name="tag" size={11} /> {t.tag}</td>
                     <td className="col-num mono">
-                      <Link to={envPath(tenant, env, 'deployments', t.deployment)} navigate={navigate}>{t.deployment}</Link>
+                      <Link to={envPath(project, env, 'deployments', t.deployment)} navigate={navigate}>{t.deployment}</Link>
                     </td>
                     <td className="mono small trunc" title={t.movedBy}>{t.movedBy || <span className="muted">—</span>}</td>
                     <td className="col-when"><Ago iso={t.movedAt} /></td>
@@ -843,7 +843,7 @@ function TagForm({ env, n, tags, ec, onChange }) {
   );
 }
 
-function DeploymentPane({ tenant, env, n, listed, latest, tags, ec, onRevert, onTags, navigate }) {
+function DeploymentPane({ project, env, n, listed, latest, tags, ec, onRevert, onTags, navigate }) {
   const [rel, setRel] = useState(null);
   const [err, setErr] = useState('');
   const [armed, arm, disarm] = useArm();
@@ -859,7 +859,7 @@ function DeploymentPane({ tenant, env, n, listed, latest, tags, ec, onRevert, on
   return (
     <>
       <div className="subhead envsubhead">
-        <button className="ghost mini" onClick={() => navigate(envPath(tenant, env, 'deployments'))}>
+        <button className="ghost mini" onClick={() => navigate(envPath(project, env, 'deployments'))}>
           <Icon name="arrowLeft" size={13} /> deployments</button>
         <span className="spacer" />
         {mayRevertTo(n, latest) && <RevertButton n={Number(n)} ec={ec} onRevert={onRevert} />}
@@ -967,7 +967,7 @@ export function DiffView({ diff, empty = 'No changes.' }) {
 
 // -------------------------------------------------------------- incidents --
 
-function IncidentsList({ tenant, env, navigate }) {
+function IncidentsList({ project, env, navigate }) {
   const [openOnly, setOpenOnly] = useState(false);
   const [incidents, setIncidents] = useState(null);
   const [err, setErr] = useState('');
@@ -991,14 +991,14 @@ function IncidentsList({ tenant, env, navigate }) {
         <button className={'chipbtn' + (openOnly ? ' on' : '')} onClick={() => setOpenOnly(true)}>open</button>
       </div>
       <ErrBox error={err} />
-      <IncidentTable incidents={incidents} openOnly={openOnly} tenant={tenant} env={env} navigate={navigate} />
+      <IncidentTable incidents={incidents} openOnly={openOnly} project={project} env={env} navigate={navigate} />
       {!incidents && !err && <p className="empty">Loading…</p>}
     </>
   );
 }
 
 // IncidentTable is the incidents' table, newest first.
-export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
+export function IncidentTable({ incidents, openOnly, project, env, navigate }) {
   const list = incidents || [];
   return (
     <>
@@ -1018,7 +1018,7 @@ export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
           </thead>
           <tbody>
             {list.map((i) => {
-              const to = envPath(tenant, env, 'incidents', i.id);
+              const to = envPath(project, env, 'incidents', i.id);
               const open = !i.closedAt;
               return (
                 <tr key={i.id} className={'clickable' + (open ? '' : ' dim')} onClick={() => navigate(to)}>
@@ -1027,7 +1027,7 @@ export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
                   <td className="nowrap">{conditionText(i.condition)}</td>
                   <td className="mono small nowrap">
                     {incidentObject(i.object).hasLogs
-                      ? <Link to={envPath(tenant, env, 'objects', i.object)} navigate={navigate}>{i.object}</Link>
+                      ? <Link to={envPath(project, env, 'objects', i.object)} navigate={navigate}>{i.object}</Link>
                       : i.object}
                   </td>
                   <td className="col-num mono">{i.deployment}</td>
@@ -1045,7 +1045,7 @@ export function IncidentTable({ incidents, openOnly, tenant, env, navigate }) {
   );
 }
 
-function IncidentPane({ tenant, env, id, navigate }) {
+function IncidentPane({ project, env, id, navigate }) {
   const [inc, setInc] = useState(null);
   const [err, setErr] = useState('');
   const refresh = useCallback(async () => {
@@ -1060,12 +1060,12 @@ function IncidentPane({ tenant, env, id, navigate }) {
   return (
     <>
       <div className="subhead">
-        <button className="ghost mini" onClick={() => navigate(envPath(tenant, env, 'incidents'))}>
+        <button className="ghost mini" onClick={() => navigate(envPath(project, env, 'incidents'))}>
           <Icon name="arrowLeft" size={13} /> incidents</button>
       </div>
       <ErrBox error={err} />
       {!inc && !err && <p className="empty">Loading…</p>}
-      {inc && <IncidentView inc={inc} tenant={tenant} env={env} navigate={navigate} />}
+      {inc && <IncidentView inc={inc} project={project} env={env} navigate={navigate} />}
     </>
   );
 }
@@ -1074,7 +1074,7 @@ function IncidentPane({ tenant, env, id, navigate }) {
 // (a start that failed among them, with why), the end of the log, what a
 // deployment past its deadline still waited for, a failed rollout's diff
 // against the deployed deployment, why an instance found no place.
-export function IncidentView({ inc, tenant, env, navigate }) {
+export function IncidentView({ inc, project, env, navigate }) {
   const open = !inc.closedAt;
   const obj = incidentObject(inc.object);
   const ev = inc.evidence || {};
@@ -1090,12 +1090,12 @@ export function IncidentView({ inc, tenant, env, navigate }) {
       <div className="kv-grid">
         <KV k="object">
           {obj.hasLogs
-            ? <Link to={envPath(tenant, env, 'objects', inc.object)} navigate={navigate} className="mono">{inc.object}</Link>
+            ? <Link to={envPath(project, env, 'objects', inc.object)} navigate={navigate} className="mono">{inc.object}</Link>
             : <span className="mono">{inc.object}</span>}
-          {obj.hasLogs && <> · <Link to={envPath(tenant, env, 'logs', inc.object)} navigate={navigate}>its logs</Link></>}
+          {obj.hasLogs && <> · <Link to={envPath(project, env, 'logs', inc.object)} navigate={navigate}>its logs</Link></>}
         </KV>
         <KV k="deployment">
-          <Link to={envPath(tenant, env, 'deployments', inc.deployment)} navigate={navigate} className="mono">{inc.deployment}</Link>
+          <Link to={envPath(project, env, 'deployments', inc.deployment)} navigate={navigate} className="mono">{inc.deployment}</Link>
         </KV>
         <KV k="opened">{fmtDateTime(inc.openedAt)} <Ago iso={inc.openedAt} /></KV>
         <KV k="closed">
@@ -1148,19 +1148,19 @@ export function IncidentView({ inc, tenant, env, navigate }) {
 
 // ------------------------------------------------------------------- logs --
 
-export function LogsTab({ tenant, env, st, item, replica, search, navigate }) {
+export function LogsTab({ project, env, st, item, replica, search, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
   // On an object's page (item) the object is the page's; in the
   // environment's Logs the one picked, from the query.
   const focus = focusOf(item, replica, search);
   const obj = focus.object || '';
   const o = findObject(st.objects || [], obj);
-  const page = o ? envPath(tenant, env, 'objects', obj) : '';
+  const page = o ? envPath(project, env, 'objects', obj) : '';
   const tail = obj
     ? <LogsPane key={`${obj}/${focus.replica}`} env={env} item={obj} replica={focus.replica || 0} o={o} page={page} navigate={navigate} />
     : null;
   return (
-    <LogSearch tenant={tenant} env={env} st={st} focus={focus} navigate={navigate} tail={tail} tailOnly={!!(o && isAttached(o))}
+    <LogSearch project={project} env={env} st={st} focus={focus} navigate={navigate} tail={tail} tailOnly={!!(o && isAttached(o))}
       scoped={!!item} />
   );
 }

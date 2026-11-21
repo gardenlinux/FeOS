@@ -13,7 +13,7 @@ On FeOS the signer is the pod's `feos-authn` on the host, which makes the
 key in its own memory and never gives it out
 ([ADR 0014](../docs/adr/0014-identity-and-credentials.md)). A pod has
 its workload's ID,
-`spiffe://<trust domain>/tenant/<tenant>/env/<environment ID>/service/<name>`
+`spiffe://<trust domain>/project/<project>/env/<environment ID>/service/<name>`
 for a service's every replica, and its subject names the pod
 (`CN=<trust domain>/<pod ID>`) and the workload (`OU=wl-…`), on which an
 addon maps a role ([ADR 0036](../docs/adr/0036-a-workloads-identity.md)).

@@ -44,11 +44,11 @@ func mkInstance(t *testing.T, s *store.Store, env store.Environment, mod ...func
 }
 
 // The instance columns of sandboxes: inserted, read back, the writable
-// ones written beside the lifecycle, the fixed ones refused; the tenant's
+// ones written beside the lifecycle, the fixed ones refused; the project's
 // listing leaves instance rows out.
 func TestSandboxInstanceColumns(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	env := mkEnv(t, s, "acme", "stage")
 	idle := 90
 	tpl := &model.PodTemplate{
@@ -77,7 +77,7 @@ func TestSandboxInstanceColumns(t *testing.T) {
 		t.Fatalf("plain row %+v", plain)
 	}
 	if l, err := s.ListSandboxes(bg, "acme", nil); err != nil || len(l) != 1 || l[0].ID != plain.ID {
-		t.Fatalf("the tenant's listing: %v %v", l, err)
+		t.Fatalf("the project's listing: %v %v", l, err)
 	}
 	if l, err := s.ListSandboxes(bg, "", nil); err != nil || len(l) != 2 {
 		t.Fatalf("every row: %v %v", l, err)
@@ -137,7 +137,7 @@ func TestSandboxInstanceColumns(t *testing.T) {
 // 0035).
 func TestSetSandboxAddress(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	env := mkEnv(t, s, "acme", "stage")
 	inst := mkInstance(t, s, env)
 	attachable := mkSandbox(t, s, "acme")
@@ -183,7 +183,7 @@ func TestSetSandboxAddress(t *testing.T) {
 // Lost grace clears the address, with the hint when a member had one.
 func TestLostGraceClearsAddress(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "stage")
 	inst := mkInstance(t, s, env)
@@ -210,7 +210,7 @@ func TestLostGraceClearsAddress(t *testing.T) {
 // Per-row idle: idle_after_s over the instance's interval, 0 never.
 func TestIdleAfterPerRow(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "stage")
 	zero, minute := 0, 60
@@ -255,26 +255,26 @@ func TestIdleAfterPerRow(t *testing.T) {
 	}
 }
 
-// A tenant with an environment is not deleted.
-func TestDeleteTenantNeedsNoEnvironments(t *testing.T) {
+// A project with an environment is not deleted.
+func TestDeleteProjectNeedsNoEnvironments(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	env := mkEnv(t, s, "acme", "stage")
-	if ok, err := s.DeleteTenantIfEmpty(bg, "acme"); err != nil || ok {
+	if ok, err := s.DeleteProjectIfEmpty(bg, "acme"); err != nil || ok {
 		t.Fatalf("deleted with an environment: %v %v", ok, err)
 	}
 	if ok, err := s.DeleteEnvironment(bg, env.ID); err != nil || !ok {
 		t.Fatalf("delete environment: %v %v", ok, err)
 	}
-	if ok, err := s.DeleteTenantIfEmpty(bg, "acme"); err != nil || !ok {
-		t.Fatalf("delete tenant: %v %v", ok, err)
+	if ok, err := s.DeleteProjectIfEmpty(bg, "acme"); err != nil || !ok {
+		t.Fatalf("delete project: %v %v", ok, err)
 	}
 }
 
 func TestEnvironments(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	e := mkEnv(t, s, "acme", "stage")
 	if e.Deployment != 0 || e.Deployed != 0 || e.Deleting || e.Gen != 0 || e.Labels["app"] != "stage" || e.CreatedAt.IsZero() {
 		t.Fatalf("new environment %+v", e)
@@ -357,8 +357,8 @@ func TestEnvironments(t *testing.T) {
 		t.Fatalf("bump unknown: %v", err)
 	}
 
-	// A deleting tenant's environments are marked.
-	marked, err := s.MarkTenantEnvironmentsDeleting(bg, "acme")
+	// A deleting project's environments are marked.
+	marked, err := s.MarkProjectEnvironmentsDeleting(bg, "acme")
 	if err != nil || len(marked) != 2 {
 		t.Fatalf("marked %v %v", marked, err)
 	}
@@ -377,7 +377,7 @@ func TestEnvironments(t *testing.T) {
 
 func TestEnvDeploymentsAndTags(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 	spec := json.RawMessage(`{"services":{"web":{"image":"x"}}}`)
 	r1, err := s.InsertDeployment(bg, store.EnvDeployment{EnvID: e.ID, Number: 1, Spec: spec, Author: "me", Message: "first",
@@ -454,7 +454,7 @@ func TestEnvDeploymentsAndTags(t *testing.T) {
 
 func TestEnvSecretsAndRouteTokens(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 	put := func(name string, version int, system bool) store.EnvSecret {
 		t.Helper()
@@ -475,7 +475,7 @@ func TestEnvSecretsAndRouteTokens(t *testing.T) {
 		t.Fatalf("version taken: %v", err)
 	}
 	if _, err := s.InsertSecret(bg, store.EnvSecret{EnvID: e.ID, Name: "addon.x", Version: 1, Sealed: []byte{1}}); err == nil {
-		t.Fatal("a tenant secret with the addon prefix")
+		t.Fatal("a project secret with the addon prefix")
 	}
 	if got, err := s.LatestSecret(bg, e.ID, "token"); err != nil || got.Version != 2 || got.Sealed[1] != 2 {
 		t.Fatalf("latest %+v %v", got, err)
@@ -485,7 +485,7 @@ func TestEnvSecretsAndRouteTokens(t *testing.T) {
 	}
 	l, err := s.ListSecrets(bg, e.ID, false)
 	if err != nil || len(l) != 2 || l[0].Name != "other" || l[1].Name != "token" || l[1].Version != 2 {
-		t.Fatalf("tenant secrets %+v %v", l, err)
+		t.Fatalf("project secrets %+v %v", l, err)
 	}
 	if l, err := s.ListSecrets(bg, e.ID, true); err != nil || len(l) != 3 {
 		t.Fatalf("system secrets %+v %v", l, err)
@@ -539,7 +539,7 @@ func TestEnvSecretsAndRouteTokens(t *testing.T) {
 
 func TestEnvInstancesAndJobRuns(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 	sb := mkInstance(t, s, e)
 	i, err := s.InsertEnvInstance(bg, store.EnvInstance{SandboxID: sb.ID, EnvID: e.ID, Kind: "service", Object: "web",
@@ -645,7 +645,7 @@ func TestEnvInstancesAndJobRuns(t *testing.T) {
 
 func TestEnvAttachedVolumesIncidents(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 	box := mkSandbox(t, s, "acme")
 
@@ -773,12 +773,12 @@ func TestEnvAttachedVolumesIncidents(t *testing.T) {
 	}
 }
 
-// The admin listing's count of a tenant's sandboxes leaves its
-// environments' instance rows out, as the tenant's sandbox listing does;
+// The admin listing's count of a project's sandboxes leaves its
+// environments' instance rows out, as the project's sandbox listing does;
 // its environments are counted apart (one being deleted is none).
-func TestTenantCountLeavesInstancesOut(t *testing.T) {
+func TestProjectCountLeavesInstancesOut(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkSandbox(t, s, "acme")
 	mkInstance(t, s, mkEnv(t, s, "acme", "stage"))
 	gone := mkEnv(t, s, "acme", "gone")
@@ -788,10 +788,10 @@ func TestTenantCountLeavesInstancesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	mkEnv(t, s, "acme", "prod")
-	list, err := s.ListTenants(bg)
+	list, err := s.ListProjects(bg)
 	// The sandbox's environment box, stage and prod.
 	if err != nil || len(list) != 1 || list[0].SandboxCount != 1 || list[0].EnvironmentCount != 3 {
-		t.Fatalf("tenants %+v %v", list, err)
+		t.Fatalf("projects %+v %v", list, err)
 	}
 }
 
@@ -810,10 +810,10 @@ func ingressEnv(id uuid.UUID) string { return "env:" + id.String() }
 
 // Publishing claims the natural host label, sets ingress_group and
 // notifies; unpublishing and publishing again keep both. TestClaimHostLabel
-// has the labels across tenants.
+// has the labels across projects.
 func TestSetEnvironmentPublic(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme-io")
+	mkProject(t, s, "acme-io")
 	ch, unsubscribe := d.Subscribe(db.ChanIngress)
 	defer unsubscribe()
 
@@ -899,10 +899,10 @@ func TestSetEnvironmentPublic(t *testing.T) {
 // The writes the ingress's table follows send ferun_ingress "env:<id>":
 // the ports admitted to an instance (once), a service instance's insert,
 // phase or deployment and deletion, an environment's deployment, deployed or
-// deleting, a tenant's deletion and an environment's.
+// deleting, a project's deletion and an environment's.
 func TestIngressNotifications(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 	ch, unsubscribe := d.Subscribe(db.ChanIngress)
 	defer unsubscribe()
@@ -1011,9 +1011,9 @@ func TestIngressNotifications(t *testing.T) {
 	}
 	expectPayload(t, ch, want)
 
-	// A deleting tenant's environments, each; the deletion.
+	// A deleting project's environments, each; the deletion.
 	prod := mkEnv(t, s, "acme", "prod")
-	marked, err := s.MarkTenantEnvironmentsDeleting(bg, "acme")
+	marked, err := s.MarkProjectEnvironmentsDeleting(bg, "acme")
 	if err != nil || len(marked) != 2 {
 		t.Fatalf("marked %v %v", marked, err)
 	}
@@ -1045,7 +1045,7 @@ func TestIngressNotifications(t *testing.T) {
 // loop and its recheck agree.
 func TestAttachedServicesKeepTheirSandboxAwake(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "preview")
 	sb := mkSandbox(t, s, "acme")

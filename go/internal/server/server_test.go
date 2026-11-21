@@ -163,13 +163,13 @@ func TestBootstrapRace(t *testing.T) {
 		started(t, i)
 	}
 	st := store.New(insts[0].DB)
-	tenants, err := st.ListTenants(ctx)
+	projects, err := st.ListProjects(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tenants) != 1 || tenants[0].ID != "operator" || len(tenants[0].Tokens) != 1 ||
-		tenants[0].Tokens[0].Hash != store.HashToken(bootstrapToken) || tenants[0].Tokens[0].Label != "bootstrap" {
-		t.Fatalf("tenants %+v", tenants)
+	if len(projects) != 1 || projects[0].ID != "operator" || len(projects[0].Tokens) != 1 ||
+		projects[0].Tokens[0].Hash != store.HashToken(bootstrapToken) || projects[0].Tokens[0].Label != "bootstrap" {
+		t.Fatalf("projects %+v", projects)
 	}
 	if insts[0].ID() == insts[1].ID() || !strings.Contains(insts[0].ID(), "-") {
 		t.Fatalf("ids %s %s", insts[0].ID(), insts[1].ID())
@@ -657,7 +657,7 @@ func TestLoggedPath(t *testing.T) {
 		"/api/v1/invitations/s3cret":        "/api/v1/invitations/…",
 		"/api/v1/invitations/s3cret/accept": "/api/v1/invitations/…/accept",
 		"/invite/s3cret":                    "/invite/…",
-		"/api/v1/tenant/invitations/abc":    "/api/v1/tenant/invitations/abc",
+		"/api/v1/project/invitations/abc":   "/api/v1/project/invitations/abc",
 		"/api/v1/invitations/":              "/api/v1/invitations/",
 	} {
 		if got := loggedPath(in); got != want {

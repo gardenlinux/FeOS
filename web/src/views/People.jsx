@@ -7,12 +7,12 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, LiveBadge, PageHead, Secret, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate } from '../format.js';
 import {
-  ROLES, grantableRoles, invitationState, inviteLink, myTenants, personLabel, quotaRows, fmtQuota, roleLabel, scopeLabel,
-  tenantAccess, tenantHome, useAccess, useMe,
+  ROLES, grantableRoles, invitationState, inviteLink, myProjects, personLabel, quotaRows, fmtQuota, roleLabel, scopeLabel,
+  projectAccess, projectHome, useAccess, useMe,
 } from '../people.js';
 
-// The people's pages (ADR 0031, "The UI is the tenants' console"): a
-// person's tenants and a new one, a tenant's members and invitations, its
+// The people's pages (ADR 0031, "The UI is the projects' console"): a
+// person's projects and a new one, a project's members and invitations, its
 // tokens, the quota's use, and an invitation's acceptance. Each offers
 // what the role allows; ferund decides. A ferund without these routes
 // answers 404 "no such route": the page says it is not available.
@@ -26,29 +26,29 @@ export function NotAvailable({ what }) {
   );
 }
 
-// ------------------------------------------------------------ my tenants --
+// ------------------------------------------------------------ my projects --
 
-// MyTenants is a person's tenants, from /auth/me, with their role, and
+// MyProjects is a person's projects, from /auth/me, with their role, and
 // the form for a new one.
-export function MyTenants({ navigate }) {
+export function MyProjects({ navigate }) {
   const { me, reload } = useMe();
-  const tenants = myTenants(me);
-  // /tenants?new opens the form (the switcher's New tenant).
-  const [showCreate, setShowCreate] = useState(tenants.length === 0 || new URLSearchParams(location.search).has('new'));
+  const projects = myProjects(me);
+  // /projects?new opens the form (the switcher's New project).
+  const [showCreate, setShowCreate] = useState(projects.length === 0 || new URLSearchParams(location.search).has('new'));
   const [name, setName] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
   return (
-    <div className="tenants single">
-      <PageHead kind="Tenants" title="Your tenants"
-        facts={<span>A tenant holds sandboxes, environments, domains and the people who may use them.</span>} />
+    <div className="projects single">
+      <PageHead kind="Projects" title="Your projects"
+        facts={<span>A project holds sandboxes, environments, domains and the people who may use them.</span>} />
       <section className="pane">
         <div className="pane-toolbar">
-          <h2><Icon name="users" size={15} /> Your tenants <span className="count">{tenants.length}</span></h2>
+          <h2><Icon name="users" size={15} /> Your projects <span className="count">{projects.length}</span></h2>
           <span className="spacer" />
           <button className={'ghost mini' + (showCreate ? ' on' : '')} onClick={() => setShowCreate(!showCreate)}>
-            <Icon name="plus" size={13} /> New tenant
+            <Icon name="plus" size={13} /> New project
           </button>
         </div>
 
@@ -59,38 +59,38 @@ export function MyTenants({ navigate }) {
             setBusy(true);
             setErr('');
             try {
-              await api.createOwnTenant(n);
+              await api.createOwnProject(n);
               await reload();
               setName('');
               setShowCreate(false);
-              navigate(`/tenants/${encodeURIComponent(n)}`);
+              navigate(`/projects/${encodeURIComponent(n)}`);
             } catch (e2) {
-              setErr(notAvailable(e2) ? 'Making tenants is not available on this ferund yet.' : e2.message);
+              setErr(notAvailable(e2) ? 'Making projects is not available on this ferund yet.' : e2.message);
             } finally {
               setBusy(false);
             }
           }}>
             <input placeholder="name: lowercase letters, digits and '-'" value={name} autoFocus
-              aria-label="the new tenant's name" onChange={(e) => setName(e.target.value)} />
+              aria-label="the new project's name" onChange={(e) => setName(e.target.value)} />
             <button type="submit" className="primary" disabled={busy || !name.trim()}>
               <Icon name="plus" size={14} /> Create</button>
           </form>
         )}
         {showCreate && (
           <p className="hint">
-            The name is part of the tenant's hosts. You become its admin, and can invite others.
+            The name is part of the project's hosts. You become its admin, and can invite others.
           </p>
         )}
         <ErrBox error={err} />
 
         <div className="tblwrap"><table className="tbl">
           <thead>
-            <tr><th>tenant</th><th>your role</th><th>environments</th><th className="col-quick" /></tr>
+            <tr><th>project</th><th>your role</th><th>environments</th><th className="col-quick" /></tr>
           </thead>
           <tbody>
-            {tenants.map((t) => (
-              <tr key={t.tenant} className="clickable" onClick={() => navigate(tenantHome(tenantAccess(me, t.tenant)))}>
-                <td className="strong">{t.tenant}</td>
+            {projects.map((t) => (
+              <tr key={t.project} className="clickable" onClick={() => navigate(projectHome(projectAccess(me, t.project)))}>
+                <td className="strong">{t.project}</td>
                 <td><RoleBadge role={roleLabel(t)} /></td>
                 <td className="muted small">
                   {(t.environments || []).length === 0 ? (t.role ? 'all' : '—')
@@ -101,9 +101,9 @@ export function MyTenants({ navigate }) {
             ))}
           </tbody>
         </table></div>
-        {tenants.length === 0 && (
+        {projects.length === 0 && (
           <p className="empty">
-            You are a member of no tenant yet. Make one, or ask a tenant's admin for an invitation link.
+            You are a member of no project yet. Make one, or ask a project's admin for an invitation link.
           </p>
         )}
       </section>
@@ -131,17 +131,17 @@ function useEnvironments(enabled) {
   return envs;
 }
 
-// Members is a tenant's members with their grants and, for its admin,
+// Members is a project's members with their grants and, for its admin,
 // the changes of grants and the invitations; every member may leave.
-export function Members({ tenant, navigate }) {
+export function Members({ project, navigate }) {
   const { me, reload } = useMe();
-  const access = useAccess(tenant);
+  const access = useAccess(project);
   const c = access.can;
   const [members, setMembers] = useState(null);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
   const [armed, arm, disarm] = useArm();
-  const envs = useEnvironments(c.adminTenant);
+  const envs = useEnvironments(c.adminProject);
   useNow(10000);
 
   const refresh = useCallback(async () => {
@@ -167,8 +167,8 @@ export function Members({ tenant, navigate }) {
 
   return (
     <div className="single">
-      <PageHead kind="Tenant" title="People"
-        facts={<span>Members with a role on the tenant or on single environments; invitations bring new ones in.</span>} />
+      <PageHead kind="Project" title="People"
+        facts={<span>Members with a role on the project or on single environments; invitations bring new ones in.</span>} />
       <section className="pane">
         <div className="pane-toolbar">
           <h2><Icon name="users" size={15} /> Members {!missing && <span className="count">{members ? members.length : '…'}</span>}</h2>
@@ -177,11 +177,11 @@ export function Members({ tenant, navigate }) {
           {!missing && <LiveBadge lastOk={lastOk} />}
         </div>
         <ErrBox error={err} />
-        {missing && <NotAvailable what="A tenant's members" />}
+        {missing && <NotAvailable what="A project's members" />}
         {!missing && (
           <div className="tblwrap"><table className="tbl members">
             <thead>
-              <tr><th>person</th><th>on the tenant</th><th>on environments</th><th className="col-quick" /></tr>
+              <tr><th>person</th><th>on the project</th><th>on environments</th><th className="col-quick" /></tr>
             </thead>
             <tbody>
               {(members || []).map((m) => {
@@ -194,8 +194,8 @@ export function Members({ tenant, navigate }) {
                       {m.email && m.name && <div className="muted small">{m.email}</div>}
                     </td>
                     <td>
-                      {c.adminTenant && !self ? (
-                        <select value={m.role || ''} aria-label={`${personLabel(m)}'s role on the tenant`}
+                      {c.adminProject && !self ? (
+                        <select value={m.role || ''} aria-label={`${personLabel(m)}'s role on the project`}
                           onChange={(e) => act(() => (e.target.value
                             ? api.putGrant(m.person, { role: e.target.value })
                             : api.deleteGrant(m.person)))}>
@@ -208,24 +208,24 @@ export function Members({ tenant, navigate }) {
                       {(m.environments || []).map((e) => (
                         <span key={e.id} className="grantchip">
                           {e.name} · {e.role}
-                          {c.adminTenant && !self && (
+                          {c.adminProject && !self && (
                             <button className="iconbtn mini" title={`remove the grant on ${e.name}`}
                               onClick={() => act(() => api.deleteGrant(m.person, e.id))}><Icon name="x" size={11} /></button>)}
                         </span>
                       ))}
                       {(m.environments || []).length === 0 && <span className="muted">—</span>}
-                      {c.adminTenant && !self && envs.length > 0 && (
+                      {c.adminProject && !self && envs.length > 0 && (
                         <EnvGrantForm envs={envs} onGrant={(environment, role) => act(() => api.putGrant(m.person, { role, environment }))} />
                       )}
                     </td>
                     <td className="col-quick">
                       {self && c.leave && (
                         <ArmButton armKey={'leave'} armed={armed} arm={arm} disarm={disarm} icon="logout" className="mini"
-                          confirmLabel="leave the tenant?" title="give up every grant you hold in this tenant"
+                          confirmLabel="leave the project?" title="give up every grant you hold in this project"
                           onConfirm={() => act(async () => {
-                            await api.leaveTenant();
+                            await api.leaveProject();
                             await reload();
-                            navigate('/tenants');
+                            navigate('/projects');
                           })}>Leave</ArmButton>
                       )}
                     </td>
@@ -238,11 +238,11 @@ export function Members({ tenant, navigate }) {
         {members && members.length === 0 && <p className="empty">No members.</p>}
         {!members && !err && !missing && <p className="empty">Loading…</p>}
         <p className="hint">
-          Members see each other's name and e-mail address in this tenant only. A role on the tenant reaches every
-          environment; a role on an environment that one alone. A tenant always keeps an admin.
+          Members see each other's name and e-mail address in this project only. A role on the project reaches every
+          environment; a role on an environment that one alone. A project always keeps an admin.
         </p>
       </section>
-      {c.adminTenant && <Invitations envs={envs} role={access.role} />}
+      {c.adminProject && <Invitations envs={envs} role={access.role} />}
     </div>
   );
 }
@@ -284,14 +284,14 @@ function ScopeRoleFields({ role, setRole, env, setEnv, envs, max }) {
       </select>
       <span className="muted small">on</span>
       <select value={env} aria-label="scope" onChange={(e) => setEnv(e.target.value)}>
-        <option value="">the tenant</option>
+        <option value="">the project</option>
         {envs.map((x) => <option key={x.id} value={x.id}>environment {x.name}</option>)}
       </select>
     </>
   );
 }
 
-// Invitations are a tenant's single-use links: made with a role and a
+// Invitations are a project's single-use links: made with a role and a
 // scope, shown once, valid for 7 days. FeRun sends no mail: the admin
 // passes the link on.
 function Invitations({ envs, role: myRole }) {
@@ -390,11 +390,11 @@ function Invitations({ envs, role: myRole }) {
 
 // ---------------------------------------------------------------- tokens --
 
-// Tokens are a tenant's tokens: for clients (FeCode, an agent, a CI) to
-// act in the tenant with a role and a scope, never above the minter's.
+// Tokens are a project's tokens: for clients (FeCode, an agent, a CI) to
+// act in the project with a role and a scope, never above the minter's.
 // A token is shown once; the browser keeps none.
-export function Tokens({ tenant }) {
-  const access = useAccess(tenant);
+export function Tokens({ project }) {
+  const access = useAccess(project);
   const [tokens, setTokens] = useState(null);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
@@ -408,7 +408,7 @@ export function Tokens({ tenant }) {
 
   const refresh = useCallback(async () => {
     try {
-      setTokens((await api.listTokensOfTenant()).tokens || []);
+      setTokens((await api.listTokensOfProject()).tokens || []);
       setErr('');
     } catch (e) {
       if (notAvailable(e)) setMissing(true);
@@ -420,22 +420,22 @@ export function Tokens({ tenant }) {
 
   return (
     <div className="single">
-      <PageHead kind="Tenant" title="Tokens"
-        facts={<span>For CI and automation: a role on the tenant or on one environment, never above yours. A token shows once.</span>} />
+      <PageHead kind="Project" title="Tokens"
+        facts={<span>For CI and automation: a role on the project or on one environment, never above yours. A token shows once.</span>} />
       <section className="pane">
         <div className="pane-toolbar">
           <h2><Icon name="key" size={15} /> Tokens {!missing && <span className="count">{tokens ? tokens.length : '…'}</span>}</h2>
           <span className="spacer" />
           {!missing && <LiveBadge lastOk={lastOk} />}
         </div>
-        {missing && <NotAvailable what="A tenant's tokens" />}
+        {missing && <NotAvailable what="A project's tokens" />}
         {!missing && (
           <>
             <form className="createpanel" onSubmit={async (e) => {
               e.preventDefault();
               setErr('');
               try {
-                const res = await api.mintTokenOfTenant({ label: label.trim(), role, environment: env });
+                const res = await api.mintTokenOfProject({ label: label.trim(), role, environment: env });
                 setFresh({ ...res, role: res.role || role, environment: res.environment || env });
                 setLabel('');
                 await refresh();
@@ -465,14 +465,14 @@ export function Tokens({ tenant }) {
                     <td className="mono muted" title={t.hash}>{(t.hashPrefix || t.hash || '').slice(0, 8)}…</td>
                     <td>{t.label || <span className="muted">(no label)</span>}</td>
                     <td><RoleBadge role={t.role || 'admin'} /></td>
-                    <td className="small">{t.environment ? `environment ${t.environmentName || envName(t.environment)}` : 'the tenant'}</td>
+                    <td className="small">{t.environment ? `environment ${t.environmentName || envName(t.environment)}` : 'the project'}</td>
                     <td className="col-when muted">{fmtDate(t.createdAt)}</td>
                     <td className="col-when">{t.lastUsedAt ? <Ago iso={t.lastUsedAt} /> : <span className="muted">never</span>}</td>
                     <td className="col-quick">
                       <ArmButton armKey={t.hash} armed={armed} arm={arm} disarm={disarm} icon="trash" className="mini"
                         confirmLabel="revoke?" onConfirm={async () => {
                           try {
-                            await api.revokeTokenOfTenant(t.hash);
+                            await api.revokeTokenOfProject(t.hash);
                             await refresh();
                           } catch (e) {
                             setErr(e.message);
@@ -483,11 +483,11 @@ export function Tokens({ tenant }) {
                 ))}
               </tbody>
             </table></div>
-            {tokens && tokens.length === 0 && <p className="empty">No tokens: only members act in this tenant.</p>}
+            {tokens && tokens.length === 0 && <p className="empty">No tokens: only members act in this project.</p>}
           </>
         )}
         <p className="hint">
-          FeCode's and FeChat's tokens are admins of their tenant. Sandbox tokens are a sandbox's own, under Sandboxes.
+          FeCode's and FeChat's tokens are admins of their project. Sandbox tokens are a sandbox's own, under Sandboxes.
         </p>
       </section>
     </div>
@@ -496,7 +496,7 @@ export function Tokens({ tenant }) {
 
 // ----------------------------------------------------------------- quota --
 
-// QuotaCard is the tenant's use against its limits; nothing when this
+// QuotaCard is the project's use against its limits; nothing when this
 // ferund has no quotas.
 export function QuotaCard() {
   const [q, setQ] = useState(null);
@@ -515,7 +515,7 @@ export function QuotaCard() {
     <section className="pane quota">
       <div className="pane-toolbar">
         <h2><Icon name="gauge" size={14} /> Quota</h2>
-        <span className="muted small">what the tenant asks for, against its limits</span>
+        <span className="muted small">what the project asks for, against its limits</span>
       </div>
       <div className="quotagrid">
         {rows.map((r) => (
@@ -562,8 +562,8 @@ export function InviteAccept({ token, navigate }) {
     try {
       const res = await api.acceptInvitation(token);
       const fresh = await reload();
-      const name = (res && res.tenant) || (inv && inv.tenant) || '';
-      navigate(name ? tenantHome(tenantAccess(fresh || me, name)) : '/tenants');
+      const name = (res && res.project) || (inv && inv.project) || '';
+      navigate(name ? projectHome(projectAccess(fresh || me, name)) : '/projects');
     } catch (e) {
       if (notAvailable(e)) setErr('Invitations are not available on this ferund yet.');
       else if (e.status === 404) setErr('This invitation is not valid: used, expired or revoked.');
@@ -581,15 +581,15 @@ export function InviteAccept({ token, navigate }) {
         <>
           {inv ? (
             <p>
-              You are invited to tenant <span className="mono strong">{inv.tenant}</span> as{' '}
+              You are invited to project <span className="mono strong">{inv.project}</span> as{' '}
               <RoleBadge role={inv.role} /> on {inv.environmentName ? `environment ${inv.environmentName}` : scopeLabel(inv.environment)}.
               {inv.expiresAt && <span className="muted small"> Valid until {fmtDate(inv.expiresAt)}.</span>}
             </p>
-          ) : !err && <p className="muted">Someone passed you a link to a tenant of this FeRun.</p>}
+          ) : !err && <p className="muted">Someone passed you a link to a project of this FeRun.</p>}
           <p className="muted small">Signed in as {(me && (me.name || me.email)) || 'you'}. Accepting gives this account the grant.</p>
           <div className="actionrow">
             <button className="primary" disabled={busy || !token} onClick={accept}><Icon name="check" size={14} /> Accept</button>
-            <button className="ghost" onClick={() => navigate('/tenants')}>Not now</button>
+            <button className="ghost" onClick={() => navigate('/projects')}>Not now</button>
           </div>
         </>
       )}

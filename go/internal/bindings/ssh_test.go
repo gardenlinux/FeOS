@@ -204,7 +204,7 @@ func jsonString(s string) string {
 
 // The wiring these tests assume, and api is expected to provide: the set
 // and the check behind a sandbox token that names the path's sandbox, the
-// preflight behind a tenant token. It checks the harness's mux, not this
+// preflight behind a project token. It checks the harness's mux, not this
 // package; the route table and its auth classes are api's to test.
 func TestSSHHarnessWiring(t *testing.T) {
 	r := newRig(t)
@@ -214,11 +214,11 @@ func TestSSHHarnessWiring(t *testing.T) {
 		want                     int
 	}{
 		{"set without token", http.MethodGet, own + "/ssh", "", http.StatusUnauthorized},
-		{"set with tenant bearer", http.MethodGet, own + "/ssh", "Bearer " + tenantToken, http.StatusNotFound},
+		{"set with project bearer", http.MethodGet, own + "/ssh", "Bearer " + projectToken, http.StatusNotFound},
 		{"another sandbox's set", http.MethodGet, "/api/v1/sandboxes/" + r.sb2.String() + "/ssh", "Bearer " + sb1Token,
 			http.StatusNotFound},
 		{"own set", http.MethodGet, own + "/ssh", "Bearer " + sb1Token, http.StatusOK},
-		{"check with tenant bearer", http.MethodPost, own + "/ssh/prod/check", "Bearer " + tenantToken, http.StatusNotFound},
+		{"check with project bearer", http.MethodPost, own + "/ssh/prod/check", "Bearer " + projectToken, http.StatusNotFound},
 		{"preflight with sandbox token", http.MethodPost, "/api/v1/ssh/preflight", "Bearer " + sb1Token,
 			http.StatusUnauthorized},
 	} {
@@ -664,7 +664,7 @@ func TestSSHGeneratedKeyRetention(t *testing.T) {
 	}
 	// A preflight cannot use generate: the key exists only in a binding.
 	b, _ := json.Marshal(genBinding("gh", "ssh://git.example.test", "git", host))
-	if code, raw := r.tenantCall(http.MethodPost, "/api/v1/ssh/preflight", string(b)); code != http.StatusBadRequest ||
+	if code, raw := r.projectCall(http.MethodPost, "/api/v1/ssh/preflight", string(b)); code != http.StatusBadRequest ||
 		!strings.Contains(raw, codeInvalidBinding) {
 		t.Fatalf("preflight with generate: %d %s", code, raw)
 	}

@@ -38,8 +38,8 @@ import (
 var bg = context.Background()
 
 const (
-	testTD     = "feos.test"
-	testTenant = "t1"
+	testTD      = "feos.test"
+	testProject = "t1"
 )
 
 // issuerDir holds the platform CA of every test of the package.
@@ -88,7 +88,7 @@ type harness struct {
 	nodes map[string]*testnode.Node
 }
 
-// newHarness gives the test a database with the tenant t1 and one
+// newHarness gives the test a database with the project t1 and one
 // instance; mod changes the engine's configuration.
 func newHarness(t *testing.T, mod ...func(*Config)) *harness {
 	t.Helper()
@@ -100,7 +100,7 @@ func newHarness(t *testing.T, mod ...func(*Config)) *harness {
 	}
 	h := &harness{t: t, d: d, st: store.New(d), iss: iss, objs: testnode.NewObjectStore("store-1"),
 		nodes: map[string]*testnode.Node{}}
-	if _, _, err := h.st.CreateTenant(bg, testTenant); err != nil {
+	if _, _, err := h.st.CreateProject(bg, testProject); err != nil {
 		t.Fatal(err)
 	}
 	h.addInstance("i1", mod...)
@@ -425,7 +425,7 @@ func podSpec(sb store.Sandbox) *podv1.PodSpec {
 // testImage is a pinned image: no registry is asked.
 const testImage = "docker.io/library/alpine@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
 
-// sandbox inserts a sandbox of the test tenant.
+// sandbox inserts a sandbox of the test project.
 func (h *harness) sandbox(memoryMiB int) store.Sandbox {
 	return h.sandboxWithID(podid.Mint(), memoryMiB)
 }
@@ -450,8 +450,8 @@ func (h *harness) boxEnv(owner string) uuid.UUID {
 
 func (h *harness) sandboxWithID(id podid.ID, memoryMiB int) store.Sandbox {
 	h.t.Helper()
-	sb, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: testTenant, Image: testImage, VCPUs: 1,
-		MemoryMiB: memoryMiB, EnvironmentID: h.boxEnv(testTenant)})
+	sb, created, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: testProject, Image: testImage, VCPUs: 1,
+		MemoryMiB: memoryMiB, EnvironmentID: h.boxEnv(testProject)})
 	if err != nil || !created {
 		h.t.Fatalf("create sandbox: %v (created %v)", err, created)
 	}

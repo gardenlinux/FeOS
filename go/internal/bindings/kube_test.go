@@ -132,7 +132,7 @@ func (r *rig) kubeRows() (string, []store.KubeBinding) {
 
 // The wiring these tests assume, and api is expected to provide: the set
 // behind a sandbox token that names the path's sandbox, the preflight
-// behind a tenant token. It checks the harness's mux, not this package;
+// behind a project token. It checks the harness's mux, not this package;
 // the route table and its auth classes are api's to test.
 func TestKubeHarnessWiring(t *testing.T) {
 	r := newRig(t)
@@ -142,7 +142,7 @@ func TestKubeHarnessWiring(t *testing.T) {
 		want                     int
 	}{
 		{"set without token", http.MethodGet, own, "", http.StatusUnauthorized},
-		{"set with tenant bearer", http.MethodGet, own, "Bearer " + tenantToken, http.StatusNotFound},
+		{"set with project bearer", http.MethodGet, own, "Bearer " + projectToken, http.StatusNotFound},
 		{"another sandbox's set", http.MethodGet, "/api/v1/sandboxes/" + r.sb2.String() + "/kube",
 			"Bearer " + sb1Token, http.StatusNotFound},
 		{"own set", http.MethodGet, own, "Bearer " + sb1Token, http.StatusOK},

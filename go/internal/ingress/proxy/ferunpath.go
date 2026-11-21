@@ -76,7 +76,7 @@ func collapseSlashes(p string) string {
 // whatever its access, before any route: it is never routed, wakes
 // nothing and is not counted among the forwarded requests.
 func (q *request) ferun(v *view, e *envRoutes, sub string) {
-	q.env, q.tenant, q.reason = e.id, e.tenant, wire.ReasonFerunPath
+	q.env, q.project, q.reason = e.id, e.project, wire.ReasonFerunPath
 	m := q.r.Method
 	switch {
 	case sub == "/auth" && m == http.MethodGet:

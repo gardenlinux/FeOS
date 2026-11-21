@@ -20,39 +20,39 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// tenantJobSpecOf is a job of the test image with a deadline of d.
-func tenantJobSpecOf(d time.Duration) TenantJobSpec {
-	return TenantJobSpec{Image: testImage, Command: []string{"/build"}, VCPUs: 1, MemoryMiB: 512, Deadline: d, Hash: "h"}
+// projectJobSpecOf is a job of the test image with a deadline of d.
+func projectJobSpecOf(d time.Duration) ProjectJobSpec {
+	return ProjectJobSpec{Image: testImage, Command: []string{"/build"}, VCPUs: 1, MemoryMiB: 512, Deadline: d, Hash: "h"}
 }
 
-// jobSpecOf is tenantJobSpecOf in the tenant's environment builds.
-func (h *harness) jobSpecOf(d time.Duration) TenantJobSpec {
-	rs := tenantJobSpecOf(d)
+// jobSpecOf is projectJobSpecOf in the project's environment builds.
+func (h *harness) jobSpecOf(d time.Duration) ProjectJobSpec {
+	rs := projectJobSpecOf(d)
 	rs.EnvID = h.newEnv("builds").ID
 	return rs
 }
 
-// createTenantJob creates a job of the tenant in its environment builds
+// createProjectJob creates a job of the project in its environment builds
 // (one without an environment: there) and returns it.
-func (h *harness) createTenantJob(rs TenantJobSpec) store.TenantJob {
+func (h *harness) createProjectJob(rs ProjectJobSpec) store.ProjectJob {
 	h.t.Helper()
 	if rs.EnvID == uuid.Nil {
 		rs.EnvID = h.newEnv("builds").ID
 	}
-	r, created, err := h.c.CreateTenantJob(bg, testTenant, rs)
+	r, created, err := h.c.CreateProjectJob(bg, testProject, rs)
 	if err != nil || !created {
-		h.t.Fatalf("create a tenant job: %v (created %v)", err, created)
+		h.t.Fatalf("create a project job: %v (created %v)", err, created)
 	}
 	return r
 }
 
-// waitTenantJob waits until the job is in phase, and returns it.
-func (h *harness) waitTenantJob(id podid.ID, phase string, within time.Duration) store.TenantJob {
+// waitProjectJob waits until the job is in phase, and returns it.
+func (h *harness) waitProjectJob(id podid.ID, phase string, within time.Duration) store.ProjectJob {
 	h.t.Helper()
-	var r store.TenantJob
+	var r store.ProjectJob
 	eventually(h.t, within, "job "+id.String()+" "+phase, func() bool {
 		var err error
-		r, err = h.st.GetTenantJob(bg, testTenant, id)
+		r, err = h.st.GetProjectJob(bg, testProject, id)
 		return err == nil && r.Phase == phase
 	})
 	return r
@@ -81,42 +81,42 @@ func (h *harness) podGone(id podid.ID) {
 	})
 }
 
-// A job's pod is a row the tenant does not see, built from the job's
+// A job's pod is a row the project does not see, built from the job's
 // template with its secrets and never idle; its exit 0 ends it succeeded
 // with its result file and its log's tail, redacted of its secrets, and
 // its pod goes. A create with its key and body answers with it; with
 // another body it is refused.
-func TestTenantJobSucceeds(t *testing.T) {
+func TestProjectJobSucceeds(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	const token = "s3cr3t-token-value"
-	rs := tenantJobSpecOf(time.Minute)
+	rs := projectJobSpecOf(time.Minute)
 	rs.Env = map[string]string{"COMMIT": "abc123"}
 	rs.Secrets = map[string]string{"GIT_TOKEN": token}
 	rs.ImageCredentials = &model.RegistryCredentials{Username: "build", Password: "registry-password"}
 	rs.ResultPath = "/run/fecode-build/digest"
 	rs.Key, rs.Labels = "build-1", map[string]string{"project": "p1"}
-	job := h.createTenantJob(rs)
+	job := h.createProjectJob(rs)
 	if job.Phase != model.JobQueued || job.ImageRef != testImage || job.Ended() ||
 		job.DeadlineAt.Sub(job.CreatedAt) != time.Minute {
 		t.Fatalf("created %+v", job)
 	}
-	again, created, err := h.c.CreateTenantJob(bg, testTenant, rs)
+	again, created, err := h.c.CreateProjectJob(bg, testProject, rs)
 	if err != nil || created || again.ID != job.ID {
 		t.Fatalf("the repeat: %+v %v %v", again, created, err)
 	}
 	other := rs
 	other.Hash = "another body"
-	if _, _, err := h.c.CreateTenantJob(bg, testTenant, other); !errors.Is(err, ErrJobKeyConflict) {
+	if _, _, err := h.c.CreateProjectJob(bg, testProject, other); !errors.Is(err, ErrJobKeyConflict) {
 		t.Fatalf("another body under the key: %v", err)
 	}
-	if list, err := h.st.ListSandboxes(bg, testTenant, nil); err != nil || len(list) != 0 {
-		t.Fatalf("the tenant sees %d sandboxes (%v)", len(list), err)
+	if list, err := h.st.ListSandboxes(bg, testProject, nil); err != nil || len(list) != 0 {
+		t.Fatalf("the project sees %d sandboxes (%v)", len(list), err)
 	}
 
 	h.runningPod(job.ID)
 	sb, _ := h.st.GetSandbox(bg, job.ID)
-	if !sb.TenantJob || sb.IsOwn() || sb.Instance || sb.EnvironmentID != job.EnvID || sb.IdleAfterS == nil ||
+	if !sb.ProjectJob || sb.IsOwn() || sb.Instance || sb.EnvironmentID != job.EnvID || sb.IdleAfterS == nil ||
 		*sb.IdleAfterS != 0 || sb.Reaches.All || len(sb.Reaches.Entries) != 0 || sb.Egress != nil ||
 		!slices.Equal(sb.PodTemplate.SecurityGroups, []string{model.EnvGroupID(job.EnvID),
 			model.JobWorkloadGroupID(job.ID.String())}) {
@@ -127,7 +127,7 @@ func TestTenantJobSucceeds(t *testing.T) {
 		!slices.Equal(spec.GetCommand(), []string{"/build"}) {
 		t.Fatalf("the pod's container %+v", spec)
 	}
-	h.waitTenantJob(job.ID, model.JobRunning, 10*time.Second)
+	h.waitProjectJob(job.ID, model.JobRunning, 10*time.Second)
 
 	dir := filepath.Join(n1.PodDir(job.ID), "run", "fecode-build")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -144,39 +144,39 @@ func TestTenantJobSucceeds(t *testing.T) {
 	if err := n1.Script().ExitContainer(job.ID, "main", 0); err != nil {
 		t.Fatal(err)
 	}
-	done := h.waitTenantJob(job.ID, model.JobSucceeded, 30*time.Second)
+	done := h.waitProjectJob(job.ID, model.JobSucceeded, 30*time.Second)
 	if done.ExitCode == nil || *done.ExitCode != 0 || done.Reason != "" || done.Result != "sha256:0123\n" ||
 		!slices.Equal(done.LogTail, []string{"cloning with [redacted]", "pushed"}) || done.FinishedAt.IsZero() ||
 		done.StartedAt.IsZero() {
 		t.Fatalf("ended %+v", done)
 	}
 	h.podGone(job.ID)
-	if sealed, err := h.st.TenantJobSealed(bg, job.ID); err != nil || sealed != nil {
+	if sealed, err := h.st.ProjectJobSealed(bg, job.ID); err != nil || sealed != nil {
 		t.Errorf("the ended job keeps its secrets: %v %v", sealed, err)
 	}
-	if lines, err := h.c.TenantJobLog(bg, testTenant, job.ID, 1); err != nil || !slices.Equal(lines, []string{"pushed"}) {
+	if lines, err := h.c.ProjectJobLog(bg, testProject, job.ID, 1); err != nil || !slices.Equal(lines, []string{"pushed"}) {
 		t.Errorf("the ended job's log %v %v", lines, err)
 	}
 	// Cancelling a job that ended changes nothing.
-	if r, err := h.c.CancelTenantJob(bg, testTenant, job.ID); err != nil || r.Phase != model.JobSucceeded {
+	if r, err := h.c.CancelProjectJob(bg, testProject, job.ID); err != nil || r.Phase != model.JobSucceeded {
 		t.Errorf("cancel after the end: %+v %v", r, err)
 	}
-	if err := h.c.DeleteTenantJob(bg, testTenant, job.ID); err != nil {
+	if err := h.c.DeleteProjectJob(bg, testProject, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.GetTenantJob(bg, testTenant, job.ID); !errors.Is(err, store.ErrNoRow) {
+	if _, err := h.st.GetProjectJob(bg, testProject, job.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Errorf("the deleted job stays: %v", err)
 	}
 }
 
 // Another exit code fails the job (exit); a missing result file is its
 // detail.
-func TestTenantJobFails(t *testing.T) {
+func TestProjectJobFails(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
-	rs := tenantJobSpecOf(time.Minute)
+	rs := projectJobSpecOf(time.Minute)
 	rs.ResultPath = "/run/none"
-	job := h.createTenantJob(rs)
+	job := h.createProjectJob(rs)
 	h.runningPod(job.ID)
 	if err := n1.Script().AppendLog(job.ID, "main", "error: boom"); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestTenantJobFails(t *testing.T) {
 	if err := n1.Script().ExitContainer(job.ID, "main", 3); err != nil {
 		t.Fatal(err)
 	}
-	done := h.waitTenantJob(job.ID, model.JobFailed, 30*time.Second)
+	done := h.waitProjectJob(job.ID, model.JobFailed, 30*time.Second)
 	if done.Reason != model.JobReasonExit || done.ExitCode == nil || *done.ExitCode != 3 ||
 		!slices.Equal(done.LogTail, []string{"error: boom"}) || !strings.HasPrefix(done.Detail, "its result /run/none") {
 		t.Fatalf("ended %+v", done)
@@ -193,15 +193,15 @@ func TestTenantJobFails(t *testing.T) {
 }
 
 // A job whose deadline passes ends deadline_exceeded, its tail kept.
-func TestTenantJobDeadline(t *testing.T) {
+func TestProjectJobDeadline(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
-	job := h.createTenantJob(tenantJobSpecOf(3 * time.Second))
+	job := h.createProjectJob(projectJobSpecOf(3 * time.Second))
 	h.runningPod(job.ID)
 	if err := n1.Script().AppendLog(job.ID, "main", "still building"); err != nil {
 		t.Fatal(err)
 	}
-	done := h.waitTenantJob(job.ID, model.JobDeadlineExceeded, 30*time.Second)
+	done := h.waitProjectJob(job.ID, model.JobDeadlineExceeded, 30*time.Second)
 	if done.ExitCode != nil || done.Detail != "its deadline of 3s passed" ||
 		!slices.Equal(done.LogTail, []string{"still building"}) {
 		t.Fatalf("ended %+v", done)
@@ -211,40 +211,40 @@ func TestTenantJobDeadline(t *testing.T) {
 
 // A cancel ends a running job cancelled, its tail kept and its pod
 // deleted; a delete of a running job cancels it and removes it.
-func TestTenantJobCancel(t *testing.T) {
+func TestProjectJobCancel(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
-	job := h.createTenantJob(tenantJobSpecOf(time.Minute))
+	job := h.createProjectJob(projectJobSpecOf(time.Minute))
 	h.runningPod(job.ID)
 	if err := n1.Script().AppendLog(job.ID, "main", "step 1"); err != nil {
 		t.Fatal(err)
 	}
-	r, err := h.c.CancelTenantJob(bg, testTenant, job.ID)
+	r, err := h.c.CancelProjectJob(bg, testProject, job.ID)
 	if err != nil || r.Phase != model.JobCancelled || !slices.Equal(r.LogTail, []string{"step 1"}) {
 		t.Fatalf("cancelled %+v %v", r, err)
 	}
 	h.podGone(job.ID)
 
-	second := h.createTenantJob(tenantJobSpecOf(time.Minute))
+	second := h.createProjectJob(projectJobSpecOf(time.Minute))
 	h.runningPod(second.ID)
-	if err := h.c.DeleteTenantJob(bg, testTenant, second.ID); err != nil {
+	if err := h.c.DeleteProjectJob(bg, testProject, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.GetTenantJob(bg, testTenant, second.ID); !errors.Is(err, store.ErrNoRow) {
+	if _, err := h.st.GetProjectJob(bg, testProject, second.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Errorf("the deleted job stays: %v", err)
 	}
 	h.podGone(second.ID)
-	if _, err := h.c.CancelTenantJob(bg, testTenant, second.ID); !errors.Is(err, ErrNoObject) {
+	if _, err := h.c.CancelProjectJob(bg, testProject, second.ID); !errors.Is(err, ErrNoObject) {
 		t.Errorf("cancel of a deleted job: %v", err)
 	}
 }
 
 // A job whose pod is lost with its node fails node_lost and is not run
 // again.
-func TestTenantJobNodeLost(t *testing.T) {
+func TestProjectJobNodeLost(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
-	job := h.createTenantJob(tenantJobSpecOf(time.Minute))
+	job := h.createProjectJob(projectJobSpecOf(time.Minute))
 	h.runningPod(job.ID)
 	if err := n1.Script().ForgetPod(job.ID); err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func TestTenantJobNodeLost(t *testing.T) {
 	if err := h.eng.Sync(bg, job.ID); err != nil { // finds it lost, sooner than the engine's loops
 		t.Fatal(err)
 	}
-	done := h.waitTenantJob(job.ID, model.JobFailed, 30*time.Second)
+	done := h.waitProjectJob(job.ID, model.JobFailed, 30*time.Second)
 	if done.Reason != model.JobReasonNodeLost || done.Detail != "its pod was lost with node n1" {
 		t.Fatalf("ended %+v", done)
 	}
@@ -262,39 +262,39 @@ func TestTenantJobNodeLost(t *testing.T) {
 	}
 }
 
-// The sweep removes the jobs that ended TenantJobRetention ago, and only those.
-func TestTenantJobSweep(t *testing.T) {
+// The sweep removes the jobs that ended ProjectJobRetention ago, and only those.
+func TestProjectJobSweep(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
-	old := h.createTenantJob(tenantJobSpecOf(time.Minute))
-	fresh := h.createTenantJob(tenantJobSpecOf(time.Minute))
+	old := h.createProjectJob(projectJobSpecOf(time.Minute))
+	fresh := h.createProjectJob(projectJobSpecOf(time.Minute))
 	for _, id := range []podid.ID{old.ID, fresh.ID} {
-		if _, err := h.c.CancelTenantJob(bg, testTenant, id); err != nil {
+		if _, err := h.c.CancelProjectJob(bg, testProject, id); err != nil {
 			t.Fatal(err)
 		}
 	}
 	h.exec("UPDATE jobs SET finished_at = now() - interval '8 days' WHERE id = $1", old.ID)
-	if err := h.c.sweepTenantJobs(bg); err != nil {
+	if err := h.c.sweepProjectJobs(bg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.GetTenantJob(bg, testTenant, old.ID); !errors.Is(err, store.ErrNoRow) {
+	if _, err := h.st.GetProjectJob(bg, testProject, old.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Errorf("the old job stays: %v", err)
 	}
-	if _, err := h.st.GetTenantJob(bg, testTenant, fresh.ID); err != nil {
+	if _, err := h.st.GetProjectJob(bg, testProject, fresh.ID); err != nil {
 		t.Errorf("the fresh job went: %v", err)
 	}
 }
 
 // A job whose image its registry refuses to the pod's create fails
 // (image).
-func TestTenantJobImageRefused(t *testing.T) {
+func TestProjectJobImageRefused(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
 	h.eng.SetImageAccess(func(context.Context, string, model.RegistryCredentials) error {
 		return errors.New("401: denied")
 	})
-	job := h.createTenantJob(tenantJobSpecOf(time.Minute))
-	done := h.waitTenantJob(job.ID, model.JobFailed, 30*time.Second)
+	job := h.createProjectJob(projectJobSpecOf(time.Minute))
+	done := h.waitProjectJob(job.ID, model.JobFailed, 30*time.Second)
 	if done.Reason != model.JobReasonImage || !strings.Contains(done.Detail, "denied") {
 		t.Fatalf("ended %+v", done)
 	}
@@ -304,12 +304,12 @@ func TestTenantJobImageRefused(t *testing.T) {
 // A job whose container does not start ends failed (no_exit_status) at
 // once, with why, as an exit ends it: it is not started again until its
 // deadline.
-func TestTenantJobThatDoesNotStart(t *testing.T) {
+func TestProjectJobThatDoesNotStart(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
 	ups := failBringUps(n1, func(podid.ID) bool { return false })
-	job := h.createTenantJob(tenantJobSpecOf(time.Minute))
-	done := h.waitTenantJob(job.ID, model.JobFailed, 30*time.Second)
+	job := h.createProjectJob(projectJobSpecOf(time.Minute))
+	done := h.waitProjectJob(job.ID, model.JobFailed, 30*time.Second)
 	if done.Reason != model.JobReasonNoExitStatus || done.Detail != "its container did not start: "+notFound {
 		t.Fatalf("ended %+v", done)
 	}

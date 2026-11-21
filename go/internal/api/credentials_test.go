@@ -16,17 +16,17 @@ import (
 )
 
 // The credentials' routes act in the environment the path names, by name
-// or ID, of the principal's tenant only (ADR 0033); the tenant's routes
+// or ID, of the principal's project only (ADR 0033); the project's routes
 // of before are gone.
 func TestCredentialRoutesResolveTheEnvironment(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
-	id := e.mkEnv(testTenant, "prod")
-	mustTenant(t, e, "other")
+	id := e.mkEnv(testProject, "prod")
+	mustProject(t, e, "other")
 	foreign := e.mkEnv("other", "prod")
-	authz := bearerOf(e.tenantToken)
+	authz := bearerOf(e.projectToken)
 
-	want := "ListCredentials " + testTenant + "/prod/" + id.String()
+	want := "ListCredentials " + testProject + "/prod/" + id.String()
 	for _, ref := range []string{"prod", id.String()} {
 		w := e.do(http.MethodGet, "/api/v1/environments/"+ref+"/credentials", authz, nil)
 		if w.Code != http.StatusOK || w.Body.String() != want {
@@ -34,7 +34,7 @@ func TestCredentialRoutesResolveTheEnvironment(t *testing.T) {
 		}
 	}
 	w := e.do(http.MethodPut, "/api/v1/environments/prod/credentials/erp", authz, map[string]any{})
-	if w.Code != http.StatusOK || !strings.HasPrefix(w.Body.String(), "PutCredential "+testTenant+"/prod/") {
+	if w.Code != http.StatusOK || !strings.HasPrefix(w.Body.String(), "PutCredential "+testProject+"/prod/") {
 		t.Fatalf("put: %d %q", w.Code, w.Body.String())
 	}
 	for _, ref := range []string{"nope", foreign.String()} {
@@ -55,11 +55,11 @@ func TestCredentialRoutesResolveTheEnvironment(t *testing.T) {
 func TestCredentialRoutesWhileTheEnvironmentIsDeleted(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
-	id := e.mkEnv(testTenant, "prod")
+	id := e.mkEnv(testProject, "prod")
 	if _, err := e.st.Q().Exec(context.Background(), "UPDATE environments SET deleting = true WHERE id = $1", id); err != nil {
 		t.Fatal(err)
 	}
-	authz := bearerOf(e.tenantToken)
+	authz := bearerOf(e.projectToken)
 	for _, path := range []string{"/api/v1/environments/prod/credentials", "/api/v1/environments/prod/credentials/erp"} {
 		if w := e.do(http.MethodGet, path, authz, nil); w.Code != http.StatusOK {
 			t.Errorf("GET %s: %d %q", path, w.Code, w.Body.String())
@@ -84,19 +84,19 @@ func TestCredentialRoutesWhileTheEnvironmentIsDeleted(t *testing.T) {
 func TestCredentialRoutesActWhereTheGrantWasChecked(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
-	dev := e.mkEnv(testTenant, "dev")
-	prod := e.mkEnv(testTenant, "prod")
-	tok, hash, err := mintTenantToken()
+	dev := e.mkEnv(testProject, "dev")
+	prod := e.mkEnv(testProject, "prod")
+	tok, hash, err := mintProjectToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.st.InsertTenantToken(context.Background(), store.TenantToken{Hash: hash, TenantID: testTenant,
+	if _, err := e.st.InsertProjectToken(context.Background(), store.ProjectToken{Hash: hash, ProjectID: testProject,
 		Role: "write", EnvironmentID: dev}); err != nil {
 		t.Fatal(err)
 	}
 	authz := bearerOf(tok)
 	w := e.do(http.MethodPut, "/api/v1/environments/dev/credentials/erp", authz, map[string]any{})
-	if want := "PutCredential " + testTenant + "/dev/" + dev.String(); w.Code != http.StatusOK || w.Body.String() != want {
+	if want := "PutCredential " + testProject + "/dev/" + dev.String(); w.Code != http.StatusOK || w.Body.String() != want {
 		t.Fatalf("put on dev: %d %q, want %q", w.Code, w.Body.String(), want)
 	}
 	if w := e.do(http.MethodPut, "/api/v1/environments/prod/credentials/erp", authz, map[string]any{}); w.Code != http.StatusNotFound {
@@ -109,7 +109,7 @@ func TestCredentialRoutesActWhereTheGrantWasChecked(t *testing.T) {
 	h := e.srv.inEnv(func(_ http.ResponseWriter, _ *http.Request, env bindings.Env) { got = env })
 	r := httptest.NewRequest(http.MethodPut, "/api/v1/environments/dev/credentials/erp", nil)
 	r.SetPathValue("env", "dev")
-	ctx := auth.WithTenant(r.Context(), auth.Tenant{Name: testTenant})
+	ctx := auth.WithProject(r.Context(), auth.Project{Name: testProject})
 	ctx = context.WithValue(ctx, checkedEnvKey{}, checkedEnvRef{ref: "dev", id: prod})
 	if err := h(httptest.NewRecorder(), r.WithContext(ctx)); err != nil || got.ID != prod || got.Name != "prod" {
 		t.Fatalf("the handler got %+v %v, want prod", got, err)
@@ -121,7 +121,7 @@ func TestCredentialRoutesActWhereTheGrantWasChecked(t *testing.T) {
 func TestSandboxSecretsRoutes(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
-	authz := bearerOf(e.tenantToken)
+	authz := bearerOf(e.projectToken)
 	w := e.do("POST", "/api/v1/sandboxes", authz, map[string]any{"environment": "box", "secrets": []string{"s4"},
 		"credentials": []string{"s4"}})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "not both") {

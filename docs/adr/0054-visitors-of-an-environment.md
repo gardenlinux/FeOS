@@ -1,11 +1,11 @@
-# ADR 0054: Visitors: a guarded environment admits whom its tenant's access provider vouches for
+# ADR 0054: Visitors: a guarded environment admits whom its project's access provider vouches for
 
 **Status:** Accepted · **Date:** 2026-11-12
 
 A public environment admits `anyone` or `visitors`, and one that is
 published without saying admits visitors. Who a visitor is, and whether
 they may enter, is not FeRun's to know: an access provider of the
-environment's tenant vouches for them, by answering through `ferund`'s
+environment's project vouches for them, by answering through `ferund`'s
 API a challenge the ingress handed the browser. `ferund` records the
 answer as a visit, and the ingress keeps it in a cookie on the host the
 visitor opened: a token of `ferund`'s for 15 minutes that the ingress
@@ -14,9 +14,9 @@ sign-in neither `ferund` nor the provider is in a request's path. At
 each renewal `ferund` asks the provider whether it still vouches, so
 nobody has to tell FeRun that a visitor may no longer enter. A provider
 is the
-tenant's own service, which knows its people by itself, or `ferun-auth`,
+project's own service, which knows its people by itself, or `ferun-auth`,
 a program of its own beside `ferund`: an OpenID Connect proxy for
-FeRun's people and for any issuer a tenant names. `ferund` serves no
+FeRun's people and for any issuer a project names. `ferund` serves no
 visitor.
 
 ## Context
@@ -28,34 +28,34 @@ way to close it is not to publish it, which leaves it without a host.
 
 Three callers want it closed in three ways. A platform built on FeRun
 gives its projects environments, and wants a project's environments open
-to the project's members: FeCode is one tenant for all its projects, and
+to the project's members: FeCode is one project for all its projects, and
 its people, its projects and its sign-in are its own, not FeRun's
-persons and grants (ADR 0031), even where both use one issuer. A tenant
+persons and grants (ADR 0031), even where both use one issuer. A project
 people made wants its stage open to the people who work on it, who hold
 grants. And an application that has no sign-in of its own wants one in
 front of it, with whatever issuer its owner uses.
 
 An environment's hosts have nothing in common. Its default host lies
-under the apps zone or the tenant zone, where cookies are host-only
-(ADR 0021), and its domains are its tenant's (ADR 0045). A cookie shared
+under the apps zone or the project zone, where cookies are host-only
+(ADR 0021), and its domains are its project's (ADR 0045). A cookie shared
 between hosts is not possible and not wanted, and an issuer takes no
-redirect URI per domain a tenant binds tomorrow.
+redirect URI per domain a project binds tomorrow.
 
 The ingress serves from what it has through an outage of `ferund`
 (ADR 0021). A check that asks someone on every request would end that,
 and would put whoever is asked into the path of every application.
 
-`ferund`'s front door serves tenants and operators: the API and the
+`ferund`'s front door serves projects and operators: the API and the
 console. A sign-in for visitors is a page open to anyone on the
 internet, and an OpenID Connect proxy fetches from addresses that
-tenants name.
+projects name.
 
 ## Decision
 
 ### An environment admits anyone or visitors
 
 - A public environment has an **access**: `anyone`, or `visitors`
-  together with the name of one of its tenant's providers. It is set
+  together with the name of one of its project's providers. It is set
   where the environment is made public, by the same right. A publish
   that does not say admits visitors of the provider `ferun` when the
   environment is not public yet, and keeps its access when it is; to
@@ -137,7 +137,7 @@ tenants name.
   vouches for it, and ends the visit on the provider's no. So a visitor
   stays up to 16 minutes after their provider would no longer admit them
   (asked at most every 8 minutes, a token at most 15 past the last
-  asking), and there is no call by which a tenant ends a
+  asking), and there is no call by which a project ends a
   visit: what the provider knows is asked, not copied. Only the
   provider's explicit no ends a visit.
 - A provider that does not answer has not said no: the visit gets its
@@ -178,13 +178,13 @@ tenants name.
 - An answer that `ferund` does not know the call, or no answer, means
   `ferund` is away, never that a visit ended.
 
-### A provider is the tenant's own service, or ferun-auth
+### A provider is the project's own service, or ferun-auth
 
-- A **provider** is a tenant's object with a name and a kind. An
+- A **provider** is a project's object with a name and a kind. An
   environment names one provider; the rule that says who is admitted is
   the provider's, not the environment's.
-- Kind **`tenant`**: the tenant's own service at an address. It reads,
-  accepts and rejects challenges with a token of the tenant that
+- Kind **`project`**: the project's own service at an address. It reads,
+  accepts and rejects challenges with a token of the project that
   administers the environment. At a renewal `ferund` calls the same
   address, names the visit and signs the question with the key of its
   tokens, whose public part it publishes: a POST of `{"visit": "<id>"}`
@@ -199,19 +199,19 @@ tenants name.
   nothing of the service's people; nothing is kept in step between the
   two. This is the kind for a platform on FeRun: FeCode admits a
   project's members.
-- Kind **`oidc`**: an OpenID Connect issuer the tenant names, with a
+- Kind **`oidc`**: an OpenID Connect issuer the project names, with a
   client and its secret, kept sealed, and a rule over the ID token's
   claims: everyone the issuer signs in, or those of an email, an email
   domain or a group. `ferun-auth` runs the sign-in. Nothing is asked
   again at a renewal: the visit lives to its end, or until the issuer's
   back-channel logout names its session.
-- Kind **`ferun`**, which every tenant has without making it: the
+- Kind **`ferun`**, which every project has without making it: the
   installation's own issuer, and the rule is a grant of at least `read`
   on the environment (ADR 0031). `ferun-auth` runs the sign-in, and
   `ferund` looks the grant up itself, at the accept and before every
-  next token. Its name is reserved: no tenant makes a provider called
+  next token. Its name is reserved: no project makes a provider called
   `ferun`. A person who is disabled has no grant.
-- An installation without `ferun-auth` serves providers of kind `tenant`
+- An installation without `ferun-auth` serves providers of kind `project`
   alone, and refuses with an error of its own a publish that asks for
   another, the publish that does not say included. `ferund` knows
   `ferun-auth`'s address from a setting; without it the installation has
@@ -222,7 +222,7 @@ tenants name.
 
 - `ferun-auth` is built from the Go module beside `ferund` and shipped
   in the same image. It is the provider for the kinds `ferun` and
-  `oidc`, and nothing else: no API for tenants, no access to the
+  `oidc`, and nothing else: no API for projects, no access to the
   database, no node connection. It runs as identical instances that hold
   no state: a sign-in in flight lives in a sealed cookie on its host,
   and the long session is the issuer's.
@@ -232,14 +232,14 @@ tenants name.
   takes the issuers' back-channel logouts, which end the visits of a
   session. A sign-in is finished only at its own provider's redirect URI,
   with the issuer and client it began with, and the issuer's `iss` where
-  it says it sends one: with one URI for all, a tenant's issuer could
+  it says it sends one: with one URI for all, a project's issuer could
   pass the browser on to another issuer and read that issuer's code at
   its own token endpoint (the OAuth mix-up).
 - To `ferund` it is a caller with a service token of its own kind. With
   it, it reads and answers challenges of environments whose provider is
   of kind `ferun` or `oidc`, reads those providers with their secrets,
   and ends visits by an issuer's session. It reaches nothing else of a
-  tenant.
+  project.
 - It fetches from an issuer only at addresses of the public internet:
   not the cluster's networks, not private or link-local ranges, checked
   on the address it connects to. Blocks an operator names are the
@@ -262,11 +262,11 @@ tenants name.
 
 ## Alternatives considered
 
-- **`ferund` signs visitors in with its own issuer**, and a tenant
+- **`ferund` signs visitors in with its own issuer**, and a project
   pushes the list of who may open each environment. A platform's people
   are not FeRun's, the list would have to be kept in step with every
   change of membership, and `ferund`'s sign-in would stand in front of
-  every tenant's application.
+  every project's application.
 - **A signed answer carried through the browser**, a ticket the
   provider signs and the ingress verifies. Every provider would hold a
   signing key and every environment its public keys, with their
@@ -286,34 +286,34 @@ tenants name.
   the provider again each time. Only a navigation can be sent there: a
   page that stays open would have its requests refused every quarter of
   an hour, and a form sent after a pause would be lost.
-- **The tenant ends visits through the API**, when a member is removed,
+- **The project ends visits through the API**, when a member is removed,
   signs out or is disabled. Every place that changes who may enter would
   have to call, and a call that fails leaves the visit to its end.
-  Asking again finds out whatever changed, without the tenant's doing.
+  Asking again finds out whatever changed, without the project's doing.
 - **One cookie for a zone**, so that a sign-in holds on every host under
   it. An application could read and send another's visit, the zones'
-  cookies are host-only for that reason (ADR 0021), and a tenant's
+  cookies are host-only for that reason (ADR 0021), and a project's
   domains share no parent anyway.
 - **An OpenID Connect client per host.** An issuer wants every redirect
   URI registered and takes no wildcard; a domain bound tomorrow would
-  need its tenant to go to the issuer first.
+  need its project to go to the issuer first.
 - **The OpenID Connect proxy in `ferund`'s front door.** `ferund` would
   serve a page to anyone on the internet and fetch from addresses that
-  tenants name, from where the database and the nodes' port are. It
-  keeps to tenants and operators.
+  projects name, from where the database and the nodes' port are. It
+  keeps to projects and operators.
 - **`ferun-auth` as a workload on FeRun**, in an environment of the
   operator's: a microVM and an egress rule from the platform instead of
   a check of its own. FeRun has no way to deploy its own parts onto
   itself, and would need one for this alone.
-- **A proxy in every tenant's deployment**, a container in front of each
-  application. Every tenant would run and configure one, per
+- **A proxy in every project's deployment**, a container in front of each
+  application. Every project would run and configure one, per
   environment, behind an ingress that already ends TLS and knows the
   host.
 - **The platform's forwarder in front of its environments**, as FeCode
   has for previews. It would stand in the data path of applications
   again, which ADR 0021 took it out of.
 - **Guarding every environment that is public today.** What is live and
-  open would close without its tenant's doing.
+  open would close without its project's doing.
 
 ## Consequences
 
@@ -337,10 +337,10 @@ tenants name.
   `ferund` is away they stay until one is back, to the visit's end at
   most; an application's visitors are not turned away because the
   platform that admitted them is being deployed.
-- `ferund` calls an address a tenant names, once per visit and quarter
+- `ferund` calls an address a project names, once per visit and quarter
   of an hour, bounded as its preflights are.
 - An environment that is public when this is built stays open to
-  everyone; its tenant closes it.
+  everyone; its project closes it.
 - A guarded environment answers machines 401. One that takes webhooks or
   serves an API beside its pages stays `anyone` and guards itself.
 - An application gets the visitor's identity without a sign-in of its
@@ -371,7 +371,7 @@ visitor stays up to 16 minutes, not 15, after their provider would no
 longer admit them.
 
 Refined the same day after another review: `ferund` signs its question
-to a provider of kind `tenant`, for the provider's address and the
+to a provider of kind `project`, for the provider's address and the
 visit, with the key of its tokens, and publishes the key; the provider
 answers only a question `ferund` signed. A visit's ID is in its token
 and its code, so a question anyone could ask would let a removed member
@@ -379,4 +379,4 @@ take the service's answers and keep their visit to its end.
 
 Built and live on 2026-11-13: ferund, ferun-ingress and ferun-auth from
 ae54fe77 (migration 0034), ferun-auth at `https://auth.fecore.dev`, and
-FeCode as the first provider of kind `tenant` (FeCode ADR 0035).
+FeCode as the first provider of kind `project` (FeCode ADR 0035).

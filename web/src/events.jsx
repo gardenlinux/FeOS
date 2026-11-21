@@ -66,7 +66,7 @@ export const KIND_LABEL = {
   node_cert: 'node certificate issued',
   node_start: 'feosd started',
   node_removed: 'node removed',
-  tenant_created: 'tenant created',
+  project_created: 'project created',
   sign_in: 'signed in',
   // feosd
   pod_state: 'pod state changed',

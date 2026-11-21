@@ -25,7 +25,7 @@ import (
 var errNoSealer = errors.New("the sandbox has image credentials, and this instance has no --secret-key-file to open them")
 
 // registryAuth is what the row's creates bring for its image: an
-// environment's instance or a tenant's job its template's login, its
+// environment's instance or a project's job its template's login, its
 // secrets at their latest versions; a sandbox its sealed credentials,
 // opened; none when it has none. A sandbox has a template too (ADR 0035:
 // its environment's groups), but never a login in it: the row's kind

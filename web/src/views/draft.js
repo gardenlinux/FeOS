@@ -322,12 +322,12 @@ function short(v) {
 
 // ------------------------------------------------------------- storage --
 
-// DRAFT_PREFIX keys the drafts in local storage, one per tenant and
-// environment and one slot per tenant for a new environment.
+// DRAFT_PREFIX keys the drafts in local storage, one per project and
+// environment and one slot per project for a new environment.
 export const DRAFT_PREFIX = 'ferun-draft:';
 
-export function draftKey(tenant, env) {
-  return `${DRAFT_PREFIX}${tenant}/${env || ''}`;
+export function draftKey(project, env) {
+  return `${DRAFT_PREFIX}${project}/${env || ''}`;
 }
 
 // encodeDraft is what storage keeps: the spec, the base, where the draft

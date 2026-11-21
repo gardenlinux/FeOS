@@ -28,7 +28,7 @@ type Error struct {
 	// Header is set on the response, e.g. Retry-After.
 	Header http.Header
 	// Role and Scope are a role_required answer's (ADR 0031): the role
-	// the principal lacks, and on what ("tenant" or "environment").
+	// the principal lacks, and on what ("project" or "environment").
 	Role, Scope string
 	// Quota is a quota_exceeded answer's (ADR 0031): the resource, its
 	// limit and the use before the request.
@@ -109,14 +109,14 @@ func RetryAfterOf(err error, def int) int {
 const CodeRoleRequired = "role_required"
 
 // RoleRequired is 403 {"code": "role_required", "role", "scope"}: the
-// principal needs role on scope ("tenant" or "environment").
+// principal needs role on scope ("project" or "environment").
 func RoleRequired(role, scope string) *Error {
 	return &Error{Status: http.StatusForbidden, Code: CodeRoleRequired, Role: role, Scope: scope,
 		Msg: fmt.Sprintf("this needs the role %s on the %s", role, scope)}
 }
 
 // CodeQuotaExceeded is the code of a 422 for a create that would pass
-// one of its tenant's limits (ADR 0031, "Quotas per tenant").
+// one of its project's limits (ADR 0031, "Quotas per project").
 const CodeQuotaExceeded = "quota_exceeded"
 
 // QuotaExceeded is 422 {"code": "quota_exceeded", "resource", "limit",
@@ -125,7 +125,7 @@ const CodeQuotaExceeded = "quota_exceeded"
 func QuotaExceeded(resource string, limit, use, ask int64) *Error {
 	return &Error{Status: http.StatusUnprocessableEntity, Code: CodeQuotaExceeded,
 		Quota: &Quota{Resource: resource, Limit: limit, Use: use},
-		Msg:   fmt.Sprintf("the tenant's limit of %s is %d, %d are in use and this asks for %d more", resource, limit, use, ask)}
+		Msg:   fmt.Sprintf("the project's limit of %s is %d, %d are in use and this asks for %d more", resource, limit, use, ask)}
 }
 
 type body struct {

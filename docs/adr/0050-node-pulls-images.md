@@ -7,7 +7,7 @@ layers with the create's registry credentials, held in memory and
 written nowhere, keeps the blobs by digest in a cache of the node's, and
 runs a bake pod, a microVM of the node's own with `feos-guest` and no
 container, which unpacks the layers into a fresh volume that `feosd`
-seals as the image's layer (ADR 0022). No tenant's code runs in a bake
+seals as the image's layer (ADR 0022). No project's code runs in a bake
 pod and no credential enters it, so no credential enters any pod: the
 guest's pull on the registry's token ends, and a registry that takes only
 Basic authentication works like any other. The key, the catalog and the
@@ -22,7 +22,7 @@ repository while the token lives, the exposure recorded in
 [security.md](../security.md). A registry that answers with a Basic
 challenge issues no token, so a create with credentials for it is
 refused: its password would have to enter the pod. And the bake happens
-in a tenant's pod, before any container of its own has run, which keeps
+in a project's pod, before any container of its own has run, which keeps
 the layer clean but makes the first pod of every image slower than the
 rest and ties the bake to that pod's guest.
 
@@ -44,7 +44,7 @@ second is the node's own tool for that.
   and no container, takes the layers over vsock, unpacks them in order
   into a fresh volume formatted as ADR 0016 formats one, and stops;
   `feosd` seals the volume as the image's layer, keyed and catalogued as
-  ADR 0022 says. No tenant's code runs in a bake pod, and no credential
+  ADR 0022 says. No project's code runs in a bake pod, and no credential
   enters it.
 - **The bake pod replaces the bake in an image's first pod.** A pod gets
   a layer; the guest never sees the registry, and no pull token is sent
@@ -67,7 +67,7 @@ second is the node's own tool for that.
   mkfs (ADR 0001, ADR 0016), and writing ext4 or erofs from Rust is a
   project of its own.
 - **The bake in an image's first pod** (ADR 0022's rule meanwhile): the
-  registry's token in the guest, a tenant's pod doing the node's work,
+  registry's token in the guest, a project's pod doing the node's work,
   and no Basic-only registries; kept until the node pulls, since FeCode
   needed private images from a token-issuing registry first.
 

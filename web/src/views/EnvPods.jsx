@@ -26,21 +26,21 @@ export const JOBS_SHOWN = 5;
 // EnvPods lists the sandboxes and the newest jobs of env, as the
 // environment's status reads them (envstatus.jsx); write offers a new
 // sandbox in it.
-export function EnvPods({ tenant, env, write = false, navigate }) {
+export function EnvPods({ project, env, write = false, navigate }) {
   const { sandboxes, jobs, podsErr } = useEnvStatus();
-  return <PodTables tenant={tenant} env={env} sandboxes={sandboxes} jobs={jobs} err={podsErr} write={write} navigate={navigate} />;
+  return <PodTables project={project} env={env} sandboxes={sandboxes} jobs={jobs} err={podsErr} write={write} navigate={navigate} />;
 }
 
 // PodTables are the two lists, as EnvPods reads them.
-export function PodTables({ tenant, env, sandboxes, jobs, err = '', write = false, navigate }) {
+export function PodTables({ project, env, sandboxes, jobs, err = '', write = false, navigate }) {
   const running = (jobs || []).filter((j) => onItsWay(j.phase)).length;
   const newest = [...(jobs || [])].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, JOBS_SHOWN);
   return (
     <>
       <div className="envsect">
         <div className="sect">sandboxes <span className="count">· {sandboxes ? sandboxes.length : '…'}</span>
-          {sandboxes && sandboxes.length > 0 && <> · <EnvLink to={sandboxPath(tenant, env)} navigate={navigate}>all sandboxes</EnvLink></>}
-          {write && <> · <EnvLink to={newSandboxPath(tenant, env)} navigate={navigate}><Icon name="plus" size={11} /> new sandbox</EnvLink></>}
+          {sandboxes && sandboxes.length > 0 && <> · <EnvLink to={sandboxPath(project, env)} navigate={navigate}>all sandboxes</EnvLink></>}
+          {write && <> · <EnvLink to={newSandboxPath(project, env)} navigate={navigate}><Icon name="plus" size={11} /> new sandbox</EnvLink></>}
         </div>
         <ErrBox error={err} />
         {sandboxes && sandboxes.length === 0 && (
@@ -53,7 +53,7 @@ export function PodTables({ tenant, env, sandboxes, jobs, err = '', write = fals
               <tbody>
                 {sandboxes.map((sb) => (
                   <tr key={sb.sandboxId}>
-                    <td className="mono"><EnvLink to={sandboxPath(tenant, env, sb.sandboxId)} navigate={navigate}>{sb.sandboxId}</EnvLink></td>
+                    <td className="mono"><EnvLink to={sandboxPath(project, env, sb.sandboxId)} navigate={navigate}>{sb.sandboxId}</EnvLink></td>
                     <td className="nowrap"><StateDot state={sb.clientState} /> {stateWords(sb).short}</td>
                     <td className="small"><ReachesWords reaches={reachesOf(sb)} /></td>
                     <td className="mono small muted trunc" title={sb.image}>{sb.image || 'the default'}</td>
@@ -65,7 +65,7 @@ export function PodTables({ tenant, env, sandboxes, jobs, err = '', write = fals
       </div>
       <div className="envsect">
         <div className="sect">jobs made by a call <span className="count">· {jobs ? jobs.length : '…'}{running ? `, ${running} on their way` : ''}</span>
-          {jobs && jobs.length > 0 && <> · <EnvLink to={jobPath(tenant, env)} navigate={navigate}>all jobs</EnvLink></>}
+          {jobs && jobs.length > 0 && <> · <EnvLink to={jobPath(project, env)} navigate={navigate}>all jobs</EnvLink></>}
         </div>
         {jobs && jobs.length === 0 && <p className="empty small">No job made by a call in this environment is kept.</p>}
         {newest.length > 0 && (
@@ -77,7 +77,7 @@ export function PodTables({ tenant, env, sandboxes, jobs, err = '', write = fals
                   <tr key={j.id}>
                     <td className="nowrap"><span className={'state-label ' + jobTone(j.phase)}>
                       <span className={'sdot ' + jobTone(j.phase)} title={j.phase} />{phaseWord(j.phase)}</span></td>
-                    <td className="mono"><EnvLink to={jobPath(tenant, env, j.id)} navigate={navigate}>{shortId(j.id)}</EnvLink></td>
+                    <td className="mono"><EnvLink to={jobPath(project, env, j.id)} navigate={navigate}>{shortId(j.id)}</EnvLink></td>
                     <td className="small"><ReachesWords reaches={reachesOf(j)} /></td>
                     <td className="mono small trunc" title={j.imageRef || j.image}>{j.image}</td>
                     <td className="col-when"><Ago iso={j.createdAt} /></td>

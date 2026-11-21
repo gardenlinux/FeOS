@@ -43,7 +43,7 @@ func oidcEnvs(t *testing.T, p *oidctest.Provider, basic bool) (*env, *env) {
 	a := newEnv(t, o)
 	o.db = a.d
 	b := newEnv(t, o)
-	b.tenantToken = a.tenantToken
+	b.projectToken = a.projectToken
 	return a, b
 }
 
@@ -155,11 +155,11 @@ func TestSignIn(t *testing.T) {
 		expect(t, w, http.StatusOK, "")
 		if me := decode[me](t, w); me.Sub != "0b8c5ef1-0000-4000-8000-000000000001" || me.Email != "ada@example.test" ||
 			me.Name != "Ada" || me.Username != "ada" || me.Picture != "https://example.test/ada.png" || !me.Admin ||
-			me.Method != "oidc" || me.Person == "" || len(me.Tenants) != 1 || me.Tenants[0].Tenant != testTenant ||
-			me.Tenants[0].Role != "admin" {
+			me.Method != "oidc" || me.Person == "" || len(me.Projects) != 1 || me.Projects[0].Project != testProject ||
+			me.Projects[0].Role != "admin" {
 			t.Fatalf("me %+v", me)
 		}
-		expect(t, e.serve(withCookie(request{method: "GET", path: "/api/v1/admin/tenants"}, sc)), http.StatusOK, "")
+		expect(t, e.serve(withCookie(request{method: "GET", path: "/api/v1/admin/projects"}, sc)), http.StatusOK, "")
 	}
 	sess, err := a.st.UISessionOf(context.Background(), store.HashToken(sc.Value))
 	if err != nil || strings.Join(sess.Groups, ",") != "admins" || sess.IDToken == "" {
@@ -192,7 +192,7 @@ func TestSignIn(t *testing.T) {
 	expect(t, post(http.Header{"X-Requested-With": {"ferun"}}), http.StatusServiceUnavailable, "")
 	// Basic wins over the cookie: wrong Basic with a good cookie is a 401;
 	// Basic needs no CSRF header.
-	w = a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/tenants",
+	w = a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/projects",
 		header: http.Header{"Authorization": {basicOf(testAdmin, "wrong")}}}, sc))
 	expect(t, w, http.StatusUnauthorized, errBody(`admin basic auth failed for user "admin"`))
 	w = a.serve(request{method: "POST", path: "/api/v1/admin/join-tokens", header: http.Header{"Authorization": {adminAuth()}}})
@@ -226,7 +226,7 @@ func TestSignIn(t *testing.T) {
 		t.Fatalf("old session cookie not cleared: %+v", c)
 	}
 	expect(t, a.serve(withCookie(request{method: "GET", path: "/auth/me"}, sc)), http.StatusUnauthorized, errBody("not signed in"))
-	w = a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/tenants"}, sc))
+	w = a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/projects"}, sc))
 	expect(t, w, http.StatusUnauthorized, errBody("admin sign-in required"))
 }
 
@@ -391,7 +391,7 @@ func TestSignInRefusals(t *testing.T) {
 type me struct {
 	Sub, Person, Email, Name, Username, Picture, Method string
 	Admin                                               bool
-	Tenants                                             []meTenant
+	Projects                                            []meProject
 }
 
 // The browser's state: a missing or another login cookie is refused, an
@@ -459,7 +459,7 @@ func TestSignInKeyRotation(t *testing.T) {
 	a := newEnv(t, o)
 	o.db, o.oidc = a.d, later
 	b := newEnv(t, o)
-	b.tenantToken = a.tenantToken
+	b.projectToken = a.projectToken
 	signIn(t, a, b, p, oidctest.AdminClaims())
 	p.Mu.Lock()
 	fetches := p.JWKSFetches
@@ -658,7 +658,7 @@ func TestLocalPath(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{
 		"": "/", "/": "/", "/nodes": "/nodes", "//x": "/", `/\x`: "/", "x": "/", "http://x/": "/",
-		"/a\nb": "/", "/tenants/acme?tab=1#x": "/tenants/acme?tab=1#x",
+		"/a\nb": "/", "/projects/acme?tab=1#x": "/projects/acme?tab=1#x",
 	} {
 		if got := localPath(in); got != want {
 			t.Errorf("localPath(%q) = %q, want %q", in, got, want)

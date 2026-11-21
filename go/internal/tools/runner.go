@@ -728,7 +728,7 @@ func (r *Runner) toolStart(ctx context.Context, sb auth.Sandbox, lease model.Lea
 		detail = map[string]any{"callId": key}
 	}
 	r.rec.Record(activity.Event{
-		SandboxID: sb.ID, TenantID: sb.Owner, Node: lease.Node,
+		SandboxID: sb.ID, ProjectID: sb.Owner, Node: lease.Node,
 		Kind: activity.KindToolStart, Category: activity.CategoryTool,
 		RequestID: spanID, SpanID: spanID, ParentSpanID: r.runID(ctx, sb.ID),
 		Name: toolName(tool, args), Tool: tool, Params: auditParams(args), Detail: detail,
@@ -754,7 +754,7 @@ func (r *Runner) toolEnd(ctx context.Context, sb auth.Sandbox, lease model.Lease
 		exit, detail = -1, map[string]any{"error": err.Error()}
 	}
 	r.rec.Record(activity.Event{
-		SandboxID: sb.ID, TenantID: sb.Owner, Node: lease.Node,
+		SandboxID: sb.ID, ProjectID: sb.Owner, Node: lease.Node,
 		Kind: activity.KindToolEnd, Category: activity.CategoryTool,
 		RequestID: spanID, SpanID: spanID,
 		Name: toolEndName(tool, exit, cancelled), Tool: tool,

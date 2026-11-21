@@ -55,7 +55,7 @@ const (
 	RunFailed    = "failed"
 )
 
-// The phases of a tenant's job (jobs.phase), which are its one run's.
+// The phases of a project's job (jobs.phase), which are its one run's.
 const (
 	JobQueued           = "queued"
 	JobRunning          = RunRunning
@@ -65,7 +65,7 @@ const (
 	JobCancelled        = "cancelled"
 )
 
-// The reasons of a tenant's failed job (jobs.reason).
+// The reasons of a project's failed job (jobs.reason).
 const (
 	// JobReasonExit: its process exited with a code other than 0.
 	JobReasonExit = "exit"

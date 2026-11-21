@@ -20,8 +20,8 @@ import (
 
 func TestSandboxCreateAndDelete(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	ch, unsubscribe := d.Subscribe(db.ChanSandbox)
 	defer unsubscribe()
 
@@ -71,7 +71,7 @@ func TestSandboxCreateAndDelete(t *testing.T) {
 
 func TestUpdateSandbox(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	ch, unsubscribe := d.Subscribe(db.ChanSandbox)
 	defer unsubscribe()
@@ -181,7 +181,7 @@ func TestUpdateSandbox(t *testing.T) {
 
 func TestSmallSandboxWrites(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	sb := mkSandbox(t, s, "acme")
 	if ok, err := s.MarkUnreachable(bg, sb.ID); err != nil || ok {
@@ -218,7 +218,7 @@ func TestSmallSandboxWrites(t *testing.T) {
 
 func TestTAPConflict(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	// Only UUIDs, the IDs of sandboxes made before ADR 0019, share a TAP
@@ -283,7 +283,7 @@ func TestTAPConflict(t *testing.T) {
 
 func TestAttributePod(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	for _, n := range []string{"n1", "n2", "n3", "n4", "n5", "n6"} {
 		mkNode(t, s, n)
 	}
@@ -296,7 +296,7 @@ func TestAttributePod(t *testing.T) {
 	must(t, err)
 	for _, n := range []string{"n1", "n2", "n3", "n4", "n5"} {
 		a, ok, err := s.AttributePod(bg, sb.ID, n)
-		if err != nil || !ok || a.SandboxID != sb.ID || a.TenantID != "acme" {
+		if err != nil || !ok || a.SandboxID != sb.ID || a.ProjectID != "acme" {
 			t.Fatalf("%s: %+v %v %v", n, a, ok, err)
 		}
 	}
@@ -315,7 +315,7 @@ func TestAttributePod(t *testing.T) {
 
 func TestSteadyPodsAndNodeSandboxes(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	ids := []podid.ID{
@@ -359,7 +359,7 @@ func TestSteadyPodsAndNodeSandboxes(t *testing.T) {
 
 func TestLockSandboxesOfOwner(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	for range 5 {
 		mkSandbox(t, s, "acme")
 	}

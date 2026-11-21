@@ -153,7 +153,7 @@ its own, and a blank filesystem per size is not a thing to ship.
   volumes look the same.
 - **mkfs on the node**, by `feosd` or diskd on the ublk device: a
   filesystem the host's tools and kernel make for a guest kernel that
-  may know other features, and the host mounting tenants' data.
+  may know other features, and the host mounting projects' data.
 - **A blank filesystem per size**, built with the guest as the pods'
   disks' is: one per size, and every size another L0.
 - **Formatting whenever no filesystem mounts**: a disk that is broken,

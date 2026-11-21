@@ -348,10 +348,10 @@ func TestPrepareHookFailureInRepair(t *testing.T) {
 	seq := &sequence{}
 	h.eng().SetPrepareHook(seq.hook)
 	h.recordCalls("n1", seq)
-	// A sandbox: a tenant's row with a template, held by its background
+	// A sandbox: a project's row with a template, held by its background
 	// processes.
 	id := podid.Mint()
-	sb := h.instance(h.boxEnv(testTenant), &model.PodTemplate{Command: []string{"/bin/sh"},
+	sb := h.instance(h.boxEnv(testProject), &model.PodTemplate{Command: []string{"/bin/sh"},
 		SecurityGroups: []string{"sg-" + id.String()}}, func(n *store.NewSandbox) { n.ID, n.Instance = id, false })
 	h.ensure(sb.ID)
 	seq.take()

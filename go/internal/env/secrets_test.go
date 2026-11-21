@@ -16,12 +16,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// putHTTPSecret writes a version of HTTP secret name of tenantA's
+// putHTTPSecret writes a version of HTTP secret name of projectA's
 // environment env through the secrets' PUT: a header APIKey with key on
 // an upstream that is an address on the internet, in mode.
 func (h *harness) putHTTPSecret(env, name, key, mode string) SecretVersion {
 	h.t.Helper()
-	v, err := h.svc.PutSecret(h.ctx(), tenantA, env, name, PutSecretRequest{Type: SecretHTTP,
+	v, err := h.svc.PutSecret(h.ctx(), projectA, env, name, PutSecretRequest{Type: SecretHTTP,
 		Upstream: "https://203.0.113.40", Mode: mode, Author: "tester",
 		Credential: json.RawMessage(`{"kind":"headers","headers":{"APIKey":` + mustQuote(key) + `}}`)})
 	if err != nil {
@@ -63,14 +63,14 @@ func TestSecretsOfBothKinds(t *testing.T) {
 	}
 	// A kept key under other prefixes is version 2 (the key goes to the
 	// same API).
-	two, err := h.svc.PutSecret(h.ctx(), tenantA, "prod", "s4", PutSecretRequest{Type: SecretHTTP,
+	two, err := h.svc.PutSecret(h.ctx(), projectA, "prod", "s4", PutSecretRequest{Type: SecretHTTP,
 		Upstream: "https://203.0.113.40", PathPrefixes: []string{"/odata/"},
 		Credential: json.RawMessage(`{"kind":"headers","headers":{"APIKey":{"set":true}}}`)})
 	if err != nil || !two.Created || two.Version != 2 || len(two.PathPrefixes) != 1 {
 		t.Fatalf("a kept key under other prefixes: %+v %v", two, err)
 	}
 
-	list, err := h.svc.Secrets(h.ctx(), tenantA, "prod")
+	list, err := h.svc.Secrets(h.ctx(), projectA, "prod")
 	if err != nil || len(list.Secrets) != 2 {
 		t.Fatalf("the list: %+v %v", list, err)
 	}
@@ -92,26 +92,26 @@ func TestSecretsOfBothKinds(t *testing.T) {
 		t.Fatalf("a value's item has its five fields: %s", b)
 	}
 
-	if got, err := h.svc.Secret(h.ctx(), tenantA, "prod", "s4"); err != nil || got.Type != SecretHTTP || got.Version != 2 {
+	if got, err := h.svc.Secret(h.ctx(), projectA, "prod", "s4"); err != nil || got.Type != SecretHTTP || got.Version != 2 {
 		t.Fatalf("GET s4: %+v %v", got, err)
 	}
-	if got, err := h.svc.Secret(h.ctx(), tenantA, "prod", "token"); err != nil || got.Type != SecretValue {
+	if got, err := h.svc.Secret(h.ctx(), projectA, "prod", "token"); err != nil || got.Type != SecretValue {
 		t.Fatalf("GET token: %+v %v", got, err)
 	}
-	if _, err := h.svc.Secret(h.ctx(), tenantA, "prod", "nope"); !isCode(err, http.StatusNotFound, "no_secret") {
+	if _, err := h.svc.Secret(h.ctx(), projectA, "prod", "nope"); !isCode(err, http.StatusNotFound, "no_secret") {
 		t.Fatalf("GET nope: %v", err)
 	}
 
-	_, err = h.svc.PutSecret(h.ctx(), tenantA, "prod", "s4", PutSecretRequest{Value: "v"})
+	_, err = h.svc.PutSecret(h.ctx(), projectA, "prod", "s4", PutSecretRequest{Value: "v"})
 	if !isCode(err, http.StatusConflict, "secret_kind") {
 		t.Fatalf("a value over an HTTP secret: %v", err)
 	}
-	_, err = h.svc.PutSecret(h.ctx(), tenantA, "prod", "token", PutSecretRequest{Type: SecretHTTP,
+	_, err = h.svc.PutSecret(h.ctx(), projectA, "prod", "token", PutSecretRequest{Type: SecretHTTP,
 		Upstream: "https://203.0.113.40", Credential: json.RawMessage(`{"kind":"headers","headers":{"APIKey":"k"}}`)})
 	if !isCode(err, http.StatusConflict, "secret_kind") {
 		t.Fatalf("an HTTP secret over a value: %v", err)
 	}
-	_, err = h.svc.PutSecret(h.ctx(), tenantA, "prod", "x", PutSecretRequest{Value: "v", Upstream: "https://a.example"})
+	_, err = h.svc.PutSecret(h.ctx(), projectA, "prod", "x", PutSecretRequest{Value: "v", Upstream: "https://a.example"})
 	if st, _ := codeOf(err); st != http.StatusBadRequest {
 		t.Fatalf("a value with an upstream: %v", err)
 	}
@@ -131,16 +131,16 @@ func TestSecretsOfBothKinds(t *testing.T) {
 	}
 
 	// Deleted, a value's name is free for an HTTP secret.
-	if err := h.svc.DeleteSecret(h.ctx(), tenantA, "prod", "token"); err != nil {
+	if err := h.svc.DeleteSecret(h.ctx(), projectA, "prod", "token"); err != nil {
 		t.Fatal(err)
 	}
 	if v := h.putHTTPSecret("prod", "token", "k", ""); v.Version != 1 {
 		t.Fatalf("an HTTP secret of a deleted value's name: %+v", v)
 	}
-	if err := h.svc.DeleteSecret(h.ctx(), tenantA, "prod", "s4"); err != nil {
+	if err := h.svc.DeleteSecret(h.ctx(), projectA, "prod", "s4"); err != nil {
 		t.Fatalf("delete an unused HTTP secret: %v", err)
 	}
-	if err := h.svc.DeleteSecret(h.ctx(), tenantA, "prod", "s4"); !isCode(err, http.StatusNotFound, "no_secret") {
+	if err := h.svc.DeleteSecret(h.ctx(), projectA, "prod", "s4"); !isCode(err, http.StatusNotFound, "no_secret") {
 		t.Fatalf("delete it again: %v", err)
 	}
 }
@@ -214,7 +214,7 @@ func TestHTTPSecretByVariable(t *testing.T) {
 	if u := uses["s4"]; err != nil || len(u.Objects) != 1 || u.Objects[0] != "service/shop" || u.Latest != 2 {
 		t.Fatalf("uses: %+v %v", uses, err)
 	}
-	if err := h.svc.DeleteSecret(h.ctx(), tenantA, "prod", "s4"); !isCode(err, http.StatusConflict, "secret_in_use") ||
+	if err := h.svc.DeleteSecret(h.ctx(), projectA, "prod", "s4"); !isCode(err, http.StatusConflict, "secret_in_use") ||
 		!strings.Contains(err.Error(), "service shop") {
 		t.Fatalf("delete while pinned: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestHTTPSecretByVariable(t *testing.T) {
 		{`{"secret": "nope", "key": "url"}`, "no HTTP secret nope"},
 	} {
 		raw := `{"services": {"shop": {"image": "ghcr.io/acme/shop:1", "env": {"X": ` + c.env + `}}}}`
-		_, err := h.svc.Apply(h.ctx(), tenantA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number})
+		_, err := h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number})
 		if f, ok := findingAt(err, "services.shop.env.X"); !ok || !strings.Contains(f.Problem, c.problem) {
 			t.Errorf("%s: %s", c.env, describe(err))
 		}
@@ -235,12 +235,12 @@ func TestHTTPSecretByVariable(t *testing.T) {
 	// A service of the name the pods would resolve to the API.
 	raw := `{"services": {"shop": {"image": "ghcr.io/acme/shop:1", "env": {"X": {"secret": "s4", "key": "host"}}},
 	  "s4": {"image": "ghcr.io/acme/shop:1"}}}`
-	_, err = h.svc.Apply(h.ctx(), tenantA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number})
+	_, err = h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number})
 	if f, ok := findingAt(err, "services.shop.env.X"); !ok || !strings.Contains(f.Problem, "a service's name") {
 		t.Errorf("a service named as the binding: %s", describe(err))
 	}
 	// A spec without an environment cannot look it up: a warning.
-	ans, err := h.svc.PlanSpec(h.ctx(), tenantA, PlanSpecRequest{Spec: json.RawMessage(s4Spec)})
+	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(s4Spec)})
 	if err != nil || !ans.Valid {
 		t.Fatalf("a spec without an environment: %+v %v", ans, err)
 	}
@@ -264,11 +264,11 @@ func TestCloneCopiesHTTPSecrets(t *testing.T) {
 	h.apply("prod", s4Spec, 0)
 	h.putHTTPSecret("prod", "s4", "key-2", "")
 
-	_, err := h.svc.Clone(h.ctx(), tenantA, "prod", CloneRequest{Name: "copy"})
+	_, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy"})
 	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok || !strings.Contains(f.Remedy, `secrets: {"s4": {"copy": true}}`) {
 		t.Fatalf("a clone without the HTTP secret: %s", describe(err))
 	}
-	st, err := h.svc.Clone(h.ctx(), tenantA, "prod", CloneRequest{Name: "copy",
+	st, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy",
 		Secrets: map[string]CloneSecret{"s4": {Copy: true}}})
 	if err != nil {
 		t.Fatalf("clone: %s", describe(err))
@@ -295,14 +295,14 @@ func TestStatedBindingsRefused(t *testing.T) {
 	h.create("shop", nil)
 	h.putSecret("shop", "erp-key", "k")
 	h.putSecret("shop", "pay-pass", "p")
-	_, err := h.svc.Apply(h.ctx(), tenantA, "shop", ApplyRequest{Spec: json.RawMessage(shopSpec), Author: "tester"})
+	_, err := h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: json.RawMessage(shopSpec), Author: "tester"})
 	for _, path := range []string{"bindings.erp", "bindings.pay"} {
 		if f, ok := findingAt(err, path); !ok || f.Problem != spec.GivesWay ||
 			!strings.Contains(f.Remedy, "make an HTTP secret") {
 			t.Fatalf("a new plan's %s: %s", path, describe(err))
 		}
 	}
-	ans, err := h.svc.PlanSpec(h.ctx(), tenantA, PlanSpecRequest{Spec: json.RawMessage(shopSpec)})
+	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(shopSpec)})
 	if err != nil || ans.Valid {
 		t.Fatalf("a spec without an environment: %+v %v", ans, err)
 	}
@@ -311,7 +311,7 @@ func TestStatedBindingsRefused(t *testing.T) {
 	more := strings.Replace(shopSpec, `"bindings": ["erp"]}`, `"bindings": ["erp"], "replicas": 2}`, 1)
 	two := h.apply("shop", more, one.Number)
 	changed := strings.Replace(more, "https://api.erp.example", "https://api2.erp.example", 1)
-	_, err = h.svc.Apply(h.ctx(), tenantA, "shop", ApplyRequest{Spec: json.RawMessage(changed), Base: two.Number})
+	_, err = h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: json.RawMessage(changed), Base: two.Number})
 	if _, ok := findingAt(err, "bindings.erp"); !ok {
 		t.Fatalf("a changed binding: %s", describe(err))
 	}
@@ -319,11 +319,11 @@ func TestStatedBindingsRefused(t *testing.T) {
 		t.Fatalf("an unchanged binding refused: %s", describe(err))
 	}
 	three := h.apply("shop", `{"services": {"web": {"image": "ghcr.io/acme/web:1"}}}`, two.Number)
-	if _, err := h.svc.Revert(h.ctx(), tenantA, "shop", one.Number, RevertRequest{Base: three.Number,
+	if _, err := h.svc.Revert(h.ctx(), projectA, "shop", one.Number, RevertRequest{Base: three.Number,
 		Author: "tester"}); err != nil {
 		t.Fatalf("a revert to a deployment with bindings: %s", describe(err))
 	}
-	if _, err := h.svc.Clone(h.ctx(), tenantA, "shop", CloneRequest{Name: "copy", Deployment: &one.Number,
+	if _, err := h.svc.Clone(h.ctx(), projectA, "shop", CloneRequest{Name: "copy", Deployment: &one.Number,
 		Secrets: map[string]CloneSecret{"erp-key": {Copy: true}, "pay-pass": {Copy: true}}}); err != nil {
 		t.Fatalf("a clone of it: %s", describe(err))
 	}

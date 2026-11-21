@@ -284,10 +284,10 @@ figure.shot .frame { position: relative; }
   <div class="head-text">
     <p class="eyebrow"><a href="/">FeRun</a> · Demo · 10 November 2026</p>
     <h1><span class="chat">FeChat</span> on <span class="run">FeRun</span></h1>
-    <p class="lede">FeChat is a chat with an agent that runs commands. Every conversation gets a <b>sandbox</b> of its own from FeRun, a Firecracker microVM, and FeChat itself runs on FeRun as an <b>ordinary app</b>. So one tenant shows both halves of FeRun. This page follows one conversation from the chat window down to the trace.</p>
+    <p class="lede">FeChat is a chat with an agent that runs commands. Every conversation gets a <b>sandbox</b> of its own from FeRun, a Firecracker microVM, and FeChat itself runs on FeRun as an <b>ordinary app</b>. So one project shows both halves of FeRun. This page follows one conversation from the chat window down to the trace.</p>
     <div class="layers">
-      <div class="layer run"><p class="lname">sandboxes <span>an environment of tenant chat</span></p><p>One sandbox per conversation, made by FeChat's backend through FeRun's public API. It pauses when nobody calls it and hibernates later.</p></div>
-      <div class="layer app"><p class="lname">prod <span>another environment of tenant chat</span></p><p>FeChat's two services, <code>web</code> and <code>api</code>, deployed like any app, at <code>chat.fecore.dev</code>.</p></div>
+      <div class="layer run"><p class="lname">sandboxes <span>an environment of project chat</span></p><p>One sandbox per conversation, made by FeChat's backend through FeRun's public API. It pauses when nobody calls it and hibernates later.</p></div>
+      <div class="layer app"><p class="lname">prod <span>another environment of project chat</span></p><p>FeChat's two services, <code>web</code> and <code>api</code>, deployed like any app, at <code>chat.fecore.dev</code>.</p></div>
     </div>
     <p class="src">Screenshots of <code>chat.fecore.dev</code> and <code>run.fecore.dev</code>, one FeRun installation, taken at 1024×768 on 10 November 2026. Numbered boxes mark what the caption below explains. Times in the console are Central European. How it works inside: <a href="/docs/">the architecture page</a>.</p>
   </div>
@@ -374,7 +374,7 @@ figure.shot .frame { position: relative; }
 <!-- ============ The sandbox behind it ============ -->
 <section id="sandbox">
   <h2>The sandbox behind it</h2>
-  <p class="prose">In FeRun's console, tenant <code>chat</code>, environment <code>sandboxes</code>: what a sandbox costs while nobody talks to it, and what it may reach.</p>
+  <p class="prose">In FeRun's console, project <code>chat</code>, environment <code>sandboxes</code>: what a sandbox costs while nobody talks to it, and what it may reach.</p>
   <figure class="shot">
     <div class="frame"><a href="shots/03-sandboxes.webp"><img src="shots/03-sandboxes.webp" width="1024" height="768" alt="FeRun console: Sandboxes in environment sandboxes: 0 running, 1 paused, 12 hibernated. c9rpysphhkn is paused; the others are hibernated."></a><span class="hl" style="left:30.47%;top:20.05%;width:49.90%;height:4.04%"><b>1</b></span><span class="hl" style="left:30.47%;top:39.06%;width:66.41%;height:6.38%"><b>2</b></span></div>
     <figcaption><span class="fig-no">Fig. 3</span><b>Thirteen conversations, and not one of them holds memory.</b> <span class="pin">1</span> 0 running, 1 paused, 12 hibernated. Only a running sandbox books RAM and CPU on a node; the others cost disk or object storage, nothing more. <span class="pin">2</span> Ours, <code>c9rpysphhkn</code>, ten seconds after the ping: FeRun paused it because no call came. It reaches <i>nothing of the environment</i>: not FeChat's own services, not the other conversations' sandboxes.</figcaption>
@@ -487,10 +487,10 @@ figure.shot .frame { position: relative; }
 <!-- ============ FeChat as an app ============ -->
 <section id="app">
   <h2>FeChat as an app</h2>
-  <p class="prose">The other environment of the tenant, <code>prod</code>, holds FeChat itself: <code>web</code>, an nginx with the single-page app, and <code>api</code>, the Go backend. Nothing here knows that the app is FeRun's own chat.</p>
+  <p class="prose">The other environment of the project, <code>prod</code>, holds FeChat itself: <code>web</code>, an nginx with the single-page app, and <code>api</code>, the Go backend. Nothing here knows that the app is FeRun's own chat.</p>
   <figure class="shot">
     <div class="frame"><a href="shots/09-prod.webp"><img src="shots/09-prod.webp" width="1024" height="768" alt="FeRun console: environment prod, deployment 5 deployed, every object matches it, public at chat.fecore.dev. Traffic of the last hour per service, and the routes /api to api and / to web."></a><span class="hl" style="left:30.57%;top:34.64%;width:66.21%;height:13.02%"><b>1</b></span><span class="hl" style="left:30.57%;top:50.52%;width:32.52%;height:36.46%"><b>2</b></span><span class="hl" style="left:64.16%;top:50.39%;width:32.71%;height:33.98%"><b>3</b></span></div>
-    <figcaption><span class="fig-no">Fig. 10</span><b>Running as deployed, getting traffic, reachable: one screen answers all three.</b> <span class="pin">1</span> Every object matches deployment 5: FeRun brought the environment to its latest deployment and keeps it there. When something is wrong, an incident takes this place, with the log lines that explain it. <span class="pin">2</span> Requests per service from the services' own OpenTelemetry spans, with no sidecar and no mesh; for <code>web</code>, which sends none, from the ingress. <code>api</code>'s p95 of 14 s is the chat: an answer streams until the model is done. <span class="pin">3</span> The routes at <code>chat.fecore.dev</code>, a domain of the tenant's own, proven by a TXT record, its certificate fetched by FeRun.</figcaption>
+    <figcaption><span class="fig-no">Fig. 10</span><b>Running as deployed, getting traffic, reachable: one screen answers all three.</b> <span class="pin">1</span> Every object matches deployment 5: FeRun brought the environment to its latest deployment and keeps it there. When something is wrong, an incident takes this place, with the log lines that explain it. <span class="pin">2</span> Requests per service from the services' own OpenTelemetry spans, with no sidecar and no mesh; for <code>web</code>, which sends none, from the ingress. <code>api</code>'s p95 of 14 s is the chat: an answer streams until the model is done. <span class="pin">3</span> The routes at <code>chat.fecore.dev</code>, a domain of the project's own, proven by a TXT record, its certificate fetched by FeRun.</figcaption>
   </figure>
 </section>
 
@@ -500,7 +500,7 @@ figure.shot .frame { position: relative; }
   <p class="prose">The third message, the one that woke the sandbox, seen from FeChat's backend.</p>
   <figure class="shot">
     <div class="frame"><a href="shots/10-logs.webp"><img src="shots/10-logs.webp" width="1024" height="768" alt="FeRun console: service api, Logs: the backend's lines that the conversation's sandbox c9rpysphhkn was created and an MCP session established; request lines POST /api/v1/chat with a trace link, the last one 10.5 s."></a><span class="hl" style="left:30.57%;top:53.78%;width:66.21%;height:8.85%"><b>1</b></span><span class="hl" style="left:30.57%;top:83.07%;width:66.21%;height:6.51%"><b>2</b></span></div>
-    <figcaption><span class="fig-no">Fig. 11</span><b>The app's log names the sandbox from Fig. 3.</b> <span class="pin">1</span> FeChat's backend writes which sandbox it made for the conversation, <code>c9rpysphhkn</code>: here the two halves of the tenant meet in one line. <span class="pin">2</span> Request lines (⇄) stand between the app's own lines, each with a link to its trace. This one took 10.5 s: the third message.</figcaption>
+    <figcaption><span class="fig-no">Fig. 11</span><b>The app's log names the sandbox from Fig. 3.</b> <span class="pin">1</span> FeChat's backend writes which sandbox it made for the conversation, <code>c9rpysphhkn</code>: here the two halves of the project meet in one line. <span class="pin">2</span> Request lines (⇄) stand between the app's own lines, each with a link to its trace. This one took 10.5 s: the third message.</figcaption>
   </figure>
   <figure class="shot">
     <div class="frame"><a href="shots/11-trace.webp"><img src="shots/11-trace.webp" width="1024" height="768" alt="FeRun console: the trace of the third message, 10.5 s, 8 spans: ferun-ingress POST /api/v1/chat; api /api/v1/chat; chat kimi-k3-sovereign 1.0 s; execute_tool bash 3.9 s with POST /mcp; chat kimi-k3-sovereign 5.5 s."></a><span class="hl" style="left:30.47%;top:69.79%;width:66.41%;height:6.25%"><b>1</b></span><span class="hl" style="left:30.47%;top:80.99%;width:66.41%;height:6.25%"><b>2</b></span><span class="hl" style="left:30.47%;top:92.32%;width:66.41%;height:6.25%"><b>3</b></span></div>

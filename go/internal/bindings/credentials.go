@@ -54,9 +54,9 @@ const tableCredentials = "env_credentials"
 // Env is the environment a credentials route acts in, resolved by api
 // from the path's {env} once the grant on it is checked.
 type Env struct {
-	ID     uuid.UUID
-	Name   string
-	Tenant string
+	ID      uuid.UUID
+	Name    string
+	Project string
 }
 
 // The codes of the credentials beyond the bindings' own.
@@ -838,7 +838,7 @@ func (s *Service) check(w http.ResponseWriter, r *http.Request, env Env, wd word
 			s.fail(w, r, err)
 			return
 		}
-		release, err := s.takePreflight(env.Tenant)
+		release, err := s.takePreflight(env.Project)
 		if err != nil {
 			s.fail(w, r, err)
 			return
@@ -856,7 +856,7 @@ func (s *Service) check(w http.ResponseWriter, r *http.Request, env Env, wd word
 		s.fail(w, r, err)
 		return
 	}
-	res, err := s.PreflightHTTP(r.Context(), env.Tenant, p, body.Probe)
+	res, err := s.PreflightHTTP(r.Context(), env.Project, p, body.Probe)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -952,24 +952,24 @@ func (s *Service) noSandboxSecret(ctx context.Context, env uuid.UUID, name strin
 }
 
 // SetSandboxCredentials states the credentials of its environment env a
-// sandbox of tenant names (none: an empty list), refused like
+// sandbox of project names (none: an empty list), refused like
 // CheckSandboxCredentials and, beyond, when one shares a name with the
 // sandbox's own HTTP set or a name an environment gives the sandbox; then
 // its pod is sent them.
-func (s *Service) SetSandboxCredentials(ctx context.Context, tenant string, env uuid.UUID, id podid.ID,
+func (s *Service) SetSandboxCredentials(ctx context.Context, project string, env uuid.UUID, id podid.ID,
 	names []string) error {
-	return s.setSandboxCredentials(ctx, tenant, env, id, names, credentialWords)
+	return s.setSandboxCredentials(ctx, project, env, id, names, credentialWords)
 }
 
 // SetSandboxSecrets states the HTTP secrets of its environment env a
-// sandbox of tenant names (ADR 0055): SetSandboxCredentials with the
+// sandbox of project names (ADR 0055): SetSandboxCredentials with the
 // secrets' words and codes (CheckSandboxSecrets).
-func (s *Service) SetSandboxSecrets(ctx context.Context, tenant string, env uuid.UUID, id podid.ID,
+func (s *Service) SetSandboxSecrets(ctx context.Context, project string, env uuid.UUID, id podid.ID,
 	names []string) error {
-	return s.setSandboxCredentials(ctx, tenant, env, id, names, secretWords)
+	return s.setSandboxCredentials(ctx, project, env, id, names, secretWords)
 }
 
-func (s *Service) setSandboxCredentials(ctx context.Context, tenant string, env uuid.UUID, id podid.ID,
+func (s *Service) setSandboxCredentials(ctx context.Context, project string, env uuid.UUID, id podid.ID,
 	names []string, w words) error {
 	bs, err := s.sandboxCredentials(ctx, env, names, w)
 	if err != nil {
@@ -987,7 +987,7 @@ func (s *Service) setSandboxCredentials(ctx context.Context, tenant string, env 
 				mine[up.Host] = true
 			}
 		}
-		taken, err := s.sandboxNames(ctx, id, tenant)
+		taken, err := s.sandboxNames(ctx, id, project)
 		if err != nil {
 			return fmt.Errorf("the names of the sandbox's environments: %w", err)
 		}

@@ -6,8 +6,8 @@
 door: the longest route prefix of the deployed deployment, among the
 routes that answer on the guest's host, picks the service, a ready
 instance takes the request, and a suspended one is woken. The door
-admits only a route token of that environment, minted by its tenant and
-shown once, so that public traffic never travels with a tenant's
+admits only a route token of that environment, minted by its project and
+shown once, so that public traffic never travels with a project's
 credential. The token travels in a header of its own,
 `X-FeRun-Route-Token`, which stops at the door, so that the application
 receives the client's `Authorization` as it was sent, unless that holds
@@ -25,7 +25,7 @@ sandbox for the first request. An attached service runs in a sandbox,
 which no ingress reaches: sandboxes stay behind the doors (ADR 0021). An
 environment that is not public has no host of its own. FeCode serves
 each environment on a host of its own and forwards to `ferund`; what it
-forwards with must not be a tenant's token, which would travel with
+forwards with must not be a project's token, which would travel with
 every public request, and must not displace the `Authorization` a
 browser sends the application.
 
@@ -43,12 +43,12 @@ browser sends the application.
   and upgrades pass as the port door passes them.
 - The door takes only a **route token** of that environment: minted by
   the environment's admin, shown once, kept as a hash, revoked all at
-  once. A token of another environment finds nothing. A tenant's or a
+  once. A token of another environment finds nothing. A project's or a
   sandbox's token is refused, in whichever header it comes.
 - The token travels in a header of its own, **`X-FeRun-Route-Token`**,
   which stops at the door. The client's `Authorization` reaches the
   application as it was sent, unless it carries a FeRun credential, a
-  tenant's or a sandbox's token, which the door refuses rather than pass
+  project's or a sandbox's token, which the door refuses rather than pass
   on. A client that sends the route token as its bearer gets no
   `Authorization` through.
 - The door serves anonymous clients: a failure inside `ferund` says that
@@ -72,12 +72,12 @@ browser sends the application.
   `Authorization`, and the application would never see the credential
   its own client sent; a header of the platform's own leaves the
   client's alone.
-- **Forwarding with the tenant's token.** One credential for every
-  public request, revocable only by revoking the tenant's access; a
+- **Forwarding with the project's token.** One credential for every
+  public request, revocable only by revoking the project's access; a
   route token is minted for the one purpose and revoked without
   touching anything else.
 - **Passing every `Authorization` on unread.** A client that sends a
-  tenant's or a sandbox's token there would hand it to the application;
+  project's or a sandbox's token there would hand it to the application;
   the door refuses a FeRun credential and forwards the rest.
 
 ## Consequences

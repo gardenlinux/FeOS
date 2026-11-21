@@ -1,22 +1,22 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The tenant's access providers (ADR 0054): who vouches for the visitors
-// of an environment that admits visitors. A provider of kind tenant is
-// the tenant's own service at an address, one of kind oidc an issuer
+// The project's access providers (ADR 0054): who vouches for the visitors
+// of an environment that admits visitors. A provider of kind project is
+// the project's own service at an address, one of kind oidc an issuer
 // that ferun-auth signs people in with, under a rule over their claims;
-// ferun is every tenant's without being made, and admits the people with
+// ferun is every project's without being made, and admits the people with
 // a grant on the environment. The form's fields to the provider's JSON
 // and back, the words the pages use, and which provider a publish may
 // name. Pure, with no React or browser imports, so that the tests load
 // it as it is.
 
-// FERUN is the built-in provider's name, which no tenant makes.
+// FERUN is the built-in provider's name, which no project makes.
 export const FERUN = 'ferun';
 
-// KINDS are the kinds a tenant makes, as the form offers them.
+// KINDS are the kinds a project makes, as the form offers them.
 export const KINDS = [
-  { key: 'tenant', label: 'your own service' },
+  { key: 'project', label: 'your own service' },
   { key: 'oidc', label: 'OpenID Connect' },
 ];
 
@@ -46,27 +46,27 @@ const nameRe = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 export function nameProblem(s) {
   const n = String(s || '').trim();
   if (!nameRe.test(n)) return 'the name must be a DNS label: lowercase letters, digits and "-", at most 63';
-  if (n === FERUN) return 'ferun is every tenant\'s provider and cannot be made';
+  if (n === FERUN) return 'ferun is every project\'s provider and cannot be made';
   return '';
 }
 
 // providerPath is the providers' page, or one provider's, or its edit
 // form.
-export function providerPath(tenant, name = '', edit = false) {
-  const base = `/tenants/${encodeURIComponent(tenant)}/providers`;
+export function providerPath(project, name = '', edit = false) {
+  const base = `/projects/${encodeURIComponent(project)}/providers`;
   if (!name) return base;
   return `${base}/${encodeURIComponent(name)}${edit ? '/edit' : ''}`;
 }
 
 // newProviderPath is the form of a new provider.
-export function newProviderPath(tenant) {
-  return `/tenants/${encodeURIComponent(tenant)}/new-provider`;
+export function newProviderPath(project) {
+  return `/projects/${encodeURIComponent(project)}/new-provider`;
 }
 
 // emptyForm is a new provider's form.
 export function emptyForm() {
   return {
-    name: '', kind: 'tenant', url: '', issuer: '', clientId: '', clientSecret: '', rule: 'anyone', values: '',
+    name: '', kind: 'project', url: '', issuer: '', clientId: '', clientSecret: '', rule: 'anyone', values: '',
     // secretSet: the stored provider has a client secret, which an
     // empty field keeps.
     secretSet: false,
@@ -87,7 +87,7 @@ export function formOf(p) {
   const key = ruleKey(p.rule);
   return {
     ...f,
-    name: p.name || '', kind: p.kind === 'oidc' ? 'oidc' : 'tenant', url: p.url || '', issuer: p.issuer || '',
+    name: p.name || '', kind: p.kind === 'oidc' ? 'oidc' : 'project', url: p.url || '', issuer: p.issuer || '',
     clientId: p.clientId || '', rule: key, values: key === 'anyone' ? '' : (p.rule[key] || []).join(' '),
     secretSet: !!(p.clientSecret && p.clientSecret.set),
   };
@@ -143,12 +143,12 @@ export function ruleOf(f) {
 // {name}): an empty client secret the stored provider has is {"set":
 // true}, which keeps it. It throws on a form no request should carry.
 export function providerOf(f) {
-  if (f.kind === 'tenant') {
+  if (f.kind === 'project') {
     const url = String(f.url || '').trim();
     if (!url) throw new Error('the address is required: https://host/path');
     if (!httpsURL(url)) throw new Error('the address must be an https URL with a host, without user or fragment');
     if (url.length > 2048) throw new Error('the address is at most 2048 bytes');
-    return { kind: 'tenant', url };
+    return { kind: 'project', url };
   }
   if (f.kind !== 'oidc') throw new Error('choose a kind');
   const issuer = String(f.issuer || '').trim();
@@ -183,7 +183,7 @@ export function ruleWords(rule) {
 export function providerWords(p) {
   if (!p) return '';
   if (p.kind === 'ferun') return 'people with a grant on the environment, signed in by this installation';
-  if (p.kind === 'tenant') return p.url ? `whom ${p.url} admits` : 'whom the tenant\'s service admits';
+  if (p.kind === 'project') return p.url ? `whom ${p.url} admits` : 'whom the project\'s service admits';
   if (p.kind === 'oidc') return `${ruleWords(p.rule)}, signed in at ${p.issuer || 'the issuer'}`;
   return '';
 }
@@ -192,7 +192,7 @@ export function providerWords(p) {
 // installation's sign-in.
 export function whereOf(p) {
   if (!p) return '';
-  if (p.kind === 'tenant') return p.url || '';
+  if (p.kind === 'project') return p.url || '';
   if (p.kind === 'oidc') return p.issuer || '';
   return 'this installation';
 }
@@ -213,7 +213,7 @@ export function usedWords(p) {
 }
 
 // choices are the providers a publish may name, as the select offers
-// them: ferun first, then the tenant's by name, each {name, kind,
+// them: ferun first, then the project's by name, each {name, kind,
 // served}; the environment's current one is among them even when the
 // list is not readable (null), with ferun.
 export function choices(providers, kinds, current = '') {

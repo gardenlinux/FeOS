@@ -17,7 +17,7 @@ import (
 
 // authnRow is an attributed audit record of sb's feos-authn.
 func authnRow(sb podid.ID, ts int64, kind, name, detail string) store.ActivityRow {
-	return store.ActivityRow{TsNs: ts, SandboxID: sb, PodID: sb, TenantID: "acme", Node: "n1",
+	return store.ActivityRow{TsNs: ts, SandboxID: sb, PodID: sb, ProjectID: "acme", Node: "n1",
 		Source: store.SourceAuthn, Kind: kind, Category: "credential", Name: name, Detail: json.RawMessage(detail)}
 }
 
@@ -34,7 +34,7 @@ func (r *rig) record(rows ...store.ActivityRow) {
 
 func (r *rig) access(id podid.ID) accessOut {
 	r.t.Helper()
-	code, raw := r.tenantCall(http.MethodGet, "/api/v1/sandboxes/"+id.String()+"/access", "")
+	code, raw := r.projectCall(http.MethodGet, "/api/v1/sandboxes/"+id.String()+"/access", "")
 	if code != http.StatusOK {
 		r.t.Fatalf("GET access: HTTP %d %s", code, raw)
 	}
@@ -75,7 +75,7 @@ func TestAccessReadsBindingsWithUse(t *testing.T) {
 	}
 	r.record(rows...)
 
-	code, raw := r.tenantCall(http.MethodGet, "/api/v1/sandboxes/"+r.sb1.String()+"/access", "")
+	code, raw := r.projectCall(http.MethodGet, "/api/v1/sandboxes/"+r.sb1.String()+"/access", "")
 	if code != http.StatusOK {
 		t.Fatalf("GET access: %d %s", code, raw)
 	}
@@ -147,7 +147,7 @@ func TestAccessDenyLimit(t *testing.T) {
 	}
 }
 
-// Only the owner's tenant bearer gets in; a foreign or absent sandbox is
+// Only the owner's project bearer gets in; a foreign or absent sandbox is
 // 404, a non-UUID 400.
 func TestAccessAuth(t *testing.T) {
 	r := newRig(t)
@@ -157,9 +157,9 @@ func TestAccessAuth(t *testing.T) {
 	}{
 		{"sandbox token", "/api/v1/sandboxes/" + r.sb1.String() + "/access", "Bearer " + sb1Token, http.StatusUnauthorized},
 		{"no token", "/api/v1/sandboxes/" + r.sb1.String() + "/access", "", http.StatusUnauthorized},
-		{"unknown sandbox", "/api/v1/sandboxes/" + podid.Mint().String() + "/access", "Bearer " + tenantToken, http.StatusNotFound},
-		{"another tenant", "/api/v1/sandboxes/" + r.sb1.String() + "/access", "Bearer " + otherToken, http.StatusNotFound},
-		{"not a uuid", "/api/v1/sandboxes/sb-9/access", "Bearer " + tenantToken, http.StatusBadRequest},
+		{"unknown sandbox", "/api/v1/sandboxes/" + podid.Mint().String() + "/access", "Bearer " + projectToken, http.StatusNotFound},
+		{"another project", "/api/v1/sandboxes/" + r.sb1.String() + "/access", "Bearer " + otherToken, http.StatusNotFound},
+		{"not a uuid", "/api/v1/sandboxes/sb-9/access", "Bearer " + projectToken, http.StatusBadRequest},
 	} {
 		if code, body := r.call(http.MethodGet, c.path, c.auth, ""); code != c.want {
 			t.Errorf("%s: HTTP %d %s, want %d", c.name, code, body, c.want)
@@ -176,11 +176,11 @@ func TestAccessAuth(t *testing.T) {
 func TestAccessWhenOff(t *testing.T) {
 	r := newRigWith(t, false)
 	r.record(authnRow(r.sb1, 1, "ssh_deny", "denied", `{"reason":"r"}`))
-	code, raw := r.tenantCall(http.MethodGet, "/api/v1/sandboxes/"+r.sb1.String()+"/access", "")
+	code, raw := r.projectCall(http.MethodGet, "/api/v1/sandboxes/"+r.sb1.String()+"/access", "")
 	if want := `{"kube":null,"ssh":null,"denies":[]}`; code != http.StatusOK || strings.TrimSpace(raw) != want {
 		t.Fatalf("access off: %d %s, want %s", code, raw, want)
 	}
 	if code, _ := r.call(http.MethodGet, "/api/v1/sandboxes/"+r.sb1.String()+"/access", "Bearer "+otherToken, ""); code != http.StatusNotFound {
-		t.Fatalf("access off, another tenant: %d", code)
+		t.Fatalf("access off, another project: %d", code)
 	}
 }

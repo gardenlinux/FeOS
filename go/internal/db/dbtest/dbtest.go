@@ -172,7 +172,7 @@ func (w *testWriter) close() {
 var _ io.Writer = (*testWriter)(nil)
 
 // Environment is the ID of owner's environment name, inserted when it
-// has none: the place of a test's sandboxes and tenants' jobs, which
+// has none: the place of a test's sandboxes and projects' jobs, which
 // every one is in (ADR 0035). q is a pool or a transaction of a migrated
 // database where owner exists.
 func Environment(t testing.TB, q db.Querier, owner, name string) uuid.UUID {

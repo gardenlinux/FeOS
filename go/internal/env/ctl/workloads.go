@@ -23,7 +23,7 @@ import (
 // pod of an environment is a member of env-<env id> and of its
 // workload's group, model.WorkloadGroupID for an object's pods,
 // model.SandboxWorkloadGroupID for a sandbox's (and the attached services
-// that run in it), model.JobWorkloadGroupID for a tenant's job's. The
+// that run in it), model.JobWorkloadGroupID for a project's job's. The
 // group's rules are derived, never written:
 //
 //   - in: from its own group on the ports it declares (a service's
@@ -31,7 +31,7 @@ import (
 //     reach each other on its ports;
 //     for every edge caller → it on port n that its environment's
 //     specs declare (spec.Derive; the ingress's go through ing-<id>), TCP
-//     on n from the caller's group; for every sandbox and tenant's job of
+//     on n from the caller's group; for every sandbox and project's job of
 //     the environment whose reaches names it, TCP on the port named from
 //     that pod's group; for every one whose reaches is "all", anything
 //     from that pod's group, on every workload of the environment;
@@ -165,9 +165,9 @@ func workloadOf(envID uuid.UUID, sp *spec.Spec, kind, name string) string {
 	return model.WorkloadGroupID(envID, kind, name)
 }
 
-// reacherGroup is the group of a sandbox's or a tenant's job's pod.
+// reacherGroup is the group of a sandbox's or a project's job's pod.
 func reacherGroup(r store.Reacher) string {
-	if r.TenantJob {
+	if r.ProjectJob {
 		return model.JobWorkloadGroupID(r.ID.String())
 	}
 	return model.SandboxWorkloadGroupID(r.ID.String())
@@ -214,7 +214,7 @@ func (c *Controller) envReachOf(ctx context.Context, pass *groupPass, envID uuid
 }
 
 // deriveEnvReach derives the workloads' rules of environment envID from
-// its specs (the target first) and its sandboxes' and tenants' jobs' pods.
+// its specs (the target first) and its sandboxes' and projects' jobs' pods.
 func deriveEnvReach(envID uuid.UUID, specs []*spec.Spec, reachers []store.Reacher, addonPort spec.AddonPort) *envReach {
 	r := &envReach{in: map[string]map[string]*peerPorts{}, egress: map[string]*spec.Egress{}}
 	var known []string

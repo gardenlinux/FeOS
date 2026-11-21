@@ -6,13 +6,13 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MeContext } from '../people.js';
 import { Jobs, PhaseLabel, RunForm, withLabels } from './Jobs.jsx';
-import { TenantSettings, Usage } from './TenantPages.jsx';
+import { ProjectSettings, Usage } from './ProjectPages.jsx';
 
 // The pages' first paint: their heads, and what a role may not do shown
 // but disabled.
 
 const ME = (role, admin = false) => ({
-  me: { person: 'p', method: 'oidc', admin, tenants: [{ tenant: 'kino', role, environments: [] }] }, reload: async () => {},
+  me: { person: 'p', method: 'oidc', admin, projects: [{ project: 'kino', role, environments: [] }] }, reload: async () => {},
 });
 const render = (me, el) => renderToStaticMarkup(<MeContext.Provider value={me}>{el}</MeContext.Provider>);
 
@@ -23,17 +23,17 @@ describe('Jobs', () => {
   });
 
   it('offers "Run a job" to write on the environment, disables it below', () => {
-    const write = render(ME('write'), <Jobs tenant="kino" env="kino-dev" sel="" write navigate={() => {}} />);
+    const write = render(ME('write'), <Jobs project="kino" env="kino-dev" sel="" write navigate={() => {}} />);
     expect(write).toMatch(/<button class="primary" title="run a container to its end">/);
     expect(write).toContain('A job made by a call');
-    expect(write).not.toContain('tenant&#x27;s job');
-    const read = render(ME('read'), <Jobs tenant="kino" env="kino-dev" sel="" navigate={() => {}} />);
+    expect(write).not.toContain('project&#x27;s job');
+    const read = render(ME('read'), <Jobs project="kino" env="kino-dev" sel="" navigate={() => {}} />);
     expect(read).toMatch(/<button class="primary" disabled="" title="needs write on this environment">/);
     expect(read).toContain('kept 7 days after it ends');
   });
 
   it("heads a job's page with its ID, back to the environment's jobs", () => {
-    const out = render(ME('read'), <Jobs tenant="kino" env="kino-dev" sel="k2m7qpxh3v9" navigate={() => {}} />);
+    const out = render(ME('read'), <Jobs project="kino" env="kino-dev" sel="k2m7qpxh3v9" navigate={() => {}} />);
     expect(out).toContain('<span class="mono strong">job k2m7qpxh3v9</span>');
     expect(out).toContain('> jobs</button>');
   });
@@ -63,17 +63,17 @@ describe('RunForm', () => {
 
 describe('Usage and Settings', () => {
   it('head their pages', () => {
-    expect(render(ME('read'), <Usage tenant="kino" navigate={() => {}} />)).toContain('<span class="kind">Tenant</span><h1>Usage</h1>');
-    const s = render(ME('read'), <TenantSettings tenant="kino" navigate={() => {}} />);
-    expect(s).toContain('<span class="kind">Tenant</span><h1>Settings</h1>');
-    expect(s).toContain('Leave this tenant');
+    expect(render(ME('read'), <Usage project="kino" navigate={() => {}} />)).toContain('<span class="kind">Project</span><h1>Usage</h1>');
+    const s = render(ME('read'), <ProjectSettings project="kino" navigate={() => {}} />);
+    expect(s).toContain('<span class="kind">Project</span><h1>Settings</h1>');
+    expect(s).toContain('Leave this project');
     expect(s).not.toContain('Limits, zone and deletion');
   });
 
   it('send an operator to the platform instead of leaving', () => {
-    const s = render(ME('', true), <TenantSettings tenant="kino" navigate={() => {}} />);
-    expect(s).not.toContain('Leave this tenant');
+    const s = render(ME('', true), <ProjectSettings project="kino" navigate={() => {}} />);
+    expect(s).not.toContain('Leave this project');
     expect(s).toContain('Limits, zone and deletion');
-    expect(s).toContain('href="/tenants"');
+    expect(s).toContain('href="/projects"');
   });
 });

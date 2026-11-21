@@ -14,8 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// This file holds the typed queries of a tenant's access providers (ADR
-// 0054, migration 0034): access_providers, of kind tenant (the tenant's
+// This file holds the typed queries of a project's access providers (ADR
+// 0054, migration 0034): access_providers, of kind project (the project's
 // own service at url) and of kind oidc (an issuer with a sealed client
 // secret and a rule). The builtin provider ferun has no row: an
 // environment that names it has a NULL access_provider.
@@ -26,14 +26,14 @@ var ErrInUse = errors.New("the row is named by another")
 
 // AccessProvider is a row of access_providers.
 type AccessProvider struct {
-	Tenant, Name string
-	// Kind is model.ProviderKindTenant or model.ProviderKindOIDC.
+	Project, Name string
+	// Kind is model.ProviderKindProject or model.ProviderKindOIDC.
 	Kind string
-	// URL is a tenant provider's https URL; "" for oidc.
+	// URL is a project provider's https URL; "" for oidc.
 	URL string
 	// Issuer, ClientID and ClientSecretSealed are an oidc provider's,
 	// the secret sealed under the AAD AccessProviderAAD; Rule its rule
-	// as JSON ({} for tenant).
+	// as JSON ({} for project).
 	Issuer, ClientID   string
 	ClientSecretSealed []byte
 	Rule               json.RawMessage
@@ -43,18 +43,18 @@ type AccessProvider struct {
 }
 
 // AccessProviderAAD is the AAD an oidc provider's client secret is sealed
-// under: "access_providers|<tenant>|<name>".
-func AccessProviderAAD(tenant, name string) []byte {
-	return []byte("access_providers|" + tenant + "|" + name)
+// under: "access_providers|<project>|<name>".
+func AccessProviderAAD(project, name string) []byte {
+	return []byte("access_providers|" + project + "|" + name)
 }
 
-const accessProviderCols = `tenant, name, kind, url, issuer, client_id, client_secret_sealed, rule, made_by,
+const accessProviderCols = `project, name, kind, url, issuer, client_id, client_secret_sealed, rule, made_by,
 	created_at, updated_at`
 
 func scanAccessProvider(row pgx.Row) (AccessProvider, error) {
 	var p AccessProvider
 	var rule []byte
-	if err := row.Scan(&p.Tenant, &p.Name, &p.Kind, &p.URL, &p.Issuer, &p.ClientID, &p.ClientSecretSealed, &rule,
+	if err := row.Scan(&p.Project, &p.Name, &p.Kind, &p.URL, &p.Issuer, &p.ClientID, &p.ClientSecretSealed, &rule,
 		&p.MadeBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return AccessProvider{}, err
 	}
@@ -70,51 +70,51 @@ func ruleText(r json.RawMessage) string {
 	return string(r)
 }
 
-// ListAccessProviders returns the providers of tenant, by name.
-func (s *Store) ListAccessProviders(ctx context.Context, tenant string) ([]AccessProvider, error) {
-	rows, err := s.q.Query(ctx, "SELECT "+accessProviderCols+" FROM access_providers WHERE tenant = $1 ORDER BY name",
-		tenant)
+// ListAccessProviders returns the providers of project, by name.
+func (s *Store) ListAccessProviders(ctx context.Context, project string) ([]AccessProvider, error) {
+	rows, err := s.q.Query(ctx, "SELECT "+accessProviderCols+" FROM access_providers WHERE project = $1 ORDER BY name",
+		project)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (AccessProvider, error) { return scanAccessProvider(r) })
 }
 
-// GetAccessProvider reads a provider of tenant; ErrNoRow if there is none.
-func (s *Store) GetAccessProvider(ctx context.Context, tenant, name string) (AccessProvider, error) {
-	return s.LockAccessProvider(ctx, tenant, name, NoLock)
+// GetAccessProvider reads a provider of project; ErrNoRow if there is none.
+func (s *Store) GetAccessProvider(ctx context.Context, project, name string) (AccessProvider, error) {
+	return s.LockAccessProvider(ctx, project, name, NoLock)
 }
 
-// LockAccessProvider reads a provider of tenant and locks its row with
+// LockAccessProvider reads a provider of project and locks its row with
 // lock; ErrNoRow if there is none.
-func (s *Store) LockAccessProvider(ctx context.Context, tenant, name string, lock RowLock) (AccessProvider, error) {
+func (s *Store) LockAccessProvider(ctx context.Context, project, name string, lock RowLock) (AccessProvider, error) {
 	p, err := scanAccessProvider(s.q.QueryRow(ctx, "SELECT "+accessProviderCols+
-		" FROM access_providers WHERE tenant = $1 AND name = $2 "+string(lock), tenant, name))
+		" FROM access_providers WHERE project = $1 AND name = $2 "+string(lock), project, name))
 	return p, noRow(err, ErrNoRow)
 }
 
-// CountAccessProviders counts the providers of tenant.
-func (s *Store) CountAccessProviders(ctx context.Context, tenant string) (int, error) {
+// CountAccessProviders counts the providers of project.
+func (s *Store) CountAccessProviders(ctx context.Context, project string) (int, error) {
 	var n int
-	err := s.q.QueryRow(ctx, "SELECT count(*) FROM access_providers WHERE tenant = $1", tenant).Scan(&n)
+	err := s.q.QueryRow(ctx, "SELECT count(*) FROM access_providers WHERE project = $1", project).Scan(&n)
 	return n, err
 }
 
-// InsertAccessProvider inserts a provider; a name its tenant has is
-// ErrExists, an unknown tenant ErrNoRow. The database checks the kind's
-// fields (access_providers_tenant_kind, access_providers_oidc_kind).
+// InsertAccessProvider inserts a provider; a name its project has is
+// ErrExists, an unknown project ErrNoRow. The database checks the kind's
+// fields (access_providers_project_kind, access_providers_oidc_kind).
 func (s *Store) InsertAccessProvider(ctx context.Context, p AccessProvider) (AccessProvider, error) {
-	out, err := scanAccessProvider(s.q.QueryRow(ctx, `INSERT INTO access_providers (tenant, name, kind, url, issuer,
+	out, err := scanAccessProvider(s.q.QueryRow(ctx, `INSERT INTO access_providers (project, name, kind, url, issuer,
 			client_id, client_secret_sealed, rule, made_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) RETURNING `+accessProviderCols, p.Tenant, p.Name, p.Kind,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) RETURNING `+accessProviderCols, p.Project, p.Name, p.Kind,
 		p.URL, p.Issuer, p.ClientID, p.ClientSecretSealed, ruleText(p.Rule), p.MadeBy))
 	switch {
 	case isUniqueViolation(err):
-		return AccessProvider{}, fmt.Errorf("insert provider %s of %s: %w", p.Name, p.Tenant, ErrExists)
+		return AccessProvider{}, fmt.Errorf("insert provider %s of %s: %w", p.Name, p.Project, ErrExists)
 	case isForeignKeyViolation(err):
-		return AccessProvider{}, fmt.Errorf("insert provider %s of %s: %w", p.Name, p.Tenant, ErrNoRow)
+		return AccessProvider{}, fmt.Errorf("insert provider %s of %s: %w", p.Name, p.Project, ErrNoRow)
 	case err != nil:
-		return AccessProvider{}, fmt.Errorf("insert provider %s of %s: %w", p.Name, p.Tenant, err)
+		return AccessProvider{}, fmt.Errorf("insert provider %s of %s: %w", p.Name, p.Project, err)
 	}
 	return out, nil
 }
@@ -131,43 +131,43 @@ func (s *Store) UpdateAccessProvider(ctx context.Context, p AccessProvider) (Acc
 		var err error
 		out, err = scanAccessProvider(tx.q.QueryRow(ctx, `UPDATE access_providers SET kind = $3, url = $4, issuer = $5,
 				client_id = $6, client_secret_sealed = $7, rule = $8::jsonb, made_by = $9, updated_at = now()
-			WHERE tenant = $1 AND name = $2 RETURNING `+accessProviderCols, p.Tenant, p.Name, p.Kind, p.URL, p.Issuer,
+			WHERE project = $1 AND name = $2 RETURNING `+accessProviderCols, p.Project, p.Name, p.Kind, p.URL, p.Issuer,
 			p.ClientID, p.ClientSecretSealed, ruleText(p.Rule), p.MadeBy))
 		if err != nil {
 			return noRow(err, ErrNoRow)
 		}
-		ids, err := tx.EnvironmentsNamingProvider(ctx, p.Tenant, p.Name)
+		ids, err := tx.EnvironmentsNamingProvider(ctx, p.Project, p.Name)
 		if err != nil {
 			return err
 		}
 		return tx.notifyIngressEnvs(ctx, ids)
 	})
 	if err != nil {
-		return AccessProvider{}, fmt.Errorf("update provider %s of %s: %w", p.Name, p.Tenant, err)
+		return AccessProvider{}, fmt.Errorf("update provider %s of %s: %w", p.Name, p.Project, err)
 	}
 	return out, nil
 }
 
-// DeleteAccessProvider deletes a provider of tenant and reports whether
+// DeleteAccessProvider deletes a provider of project and reports whether
 // there was one; one an environment names is ErrInUse.
-func (s *Store) DeleteAccessProvider(ctx context.Context, tenant, name string) (bool, error) {
-	tag, err := s.q.Exec(ctx, "DELETE FROM access_providers WHERE tenant = $1 AND name = $2", tenant, name)
+func (s *Store) DeleteAccessProvider(ctx context.Context, project, name string) (bool, error) {
+	tag, err := s.q.Exec(ctx, "DELETE FROM access_providers WHERE project = $1 AND name = $2", project, name)
 	if isForeignKeyViolation(err) {
-		return false, fmt.Errorf("delete provider %s of %s: %w", name, tenant, ErrInUse)
+		return false, fmt.Errorf("delete provider %s of %s: %w", name, project, ErrInUse)
 	}
 	if err != nil {
-		return false, fmt.Errorf("delete provider %s of %s: %w", name, tenant, err)
+		return false, fmt.Errorf("delete provider %s of %s: %w", name, project, err)
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-// EnvironmentsNamingProvider returns the IDs of the environments of tenant
+// EnvironmentsNamingProvider returns the IDs of the environments of project
 // whose access is visitors of the provider name, "" for the provider
 // ferun (a NULL access_provider), oldest first.
-func (s *Store) EnvironmentsNamingProvider(ctx context.Context, tenant, name string) ([]uuid.UUID, error) {
+func (s *Store) EnvironmentsNamingProvider(ctx context.Context, project, name string) ([]uuid.UUID, error) {
 	rows, err := s.q.Query(ctx, `SELECT id FROM environments
 		WHERE owner = $1 AND access = 'visitors' AND coalesce(access_provider, '') = $2 ORDER BY created_at, id`,
-		tenant, name)
+		project, name)
 	if err != nil {
 		return nil, err
 	}
@@ -183,11 +183,11 @@ type ProviderEnvironment struct {
 	Provider string
 }
 
-// ProviderEnvironments returns the environments of tenant whose access is
+// ProviderEnvironments returns the environments of project whose access is
 // visitors, with the provider each names, by name.
-func (s *Store) ProviderEnvironments(ctx context.Context, tenant string) ([]ProviderEnvironment, error) {
+func (s *Store) ProviderEnvironments(ctx context.Context, project string) ([]ProviderEnvironment, error) {
 	rows, err := s.q.Query(ctx, `SELECT id, name, coalesce(access_provider, '') FROM environments
-		WHERE owner = $1 AND access = 'visitors' ORDER BY name`, tenant)
+		WHERE owner = $1 AND access = 'visitors' ORDER BY name`, project)
 	if err != nil {
 		return nil, err
 	}

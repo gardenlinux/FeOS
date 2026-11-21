@@ -29,8 +29,8 @@ func TestQueryString(t *testing.T) {
 		want string
 	}{
 		{Query{}, "*"},
-		{Query{Tenant: "acme", Environment: `e"1`, Replica: &two}, `tenant:"acme" AND environment:"e\"1" AND replica:2`},
-		{Query{Tenant: "t", SinceNs: 1, UntilNs: 2e9}, `tenant:"t" AND ts:[1970-01-01T00:00:00.000000001Z TO 1970-01-01T00:00:02.000000000Z]`},
+		{Query{Project: "acme", Environment: `e"1`, Replica: &two}, `tenant:"acme" AND environment:"e\"1" AND replica:2`},                       // KEEP-TENANT: Quickwit's stored name
+		{Query{Project: "t", SinceNs: 1, UntilNs: 2e9}, `tenant:"t" AND ts:[1970-01-01T00:00:00.000000001Z TO 1970-01-01T00:00:02.000000000Z]`}, // KEEP-TENANT: Quickwit's stored name
 		{Query{Stream: "s_1", OffAfter: &off, OffTo: &to}, `stream:"s_1" AND off:{10 TO 30]`},
 		{Query{Levels: 1 | 2}, `level:IN [1 2]`},
 		{Query{Levels: 31}, `*`},
@@ -90,7 +90,7 @@ func TestIndexConfig(t *testing.T) {
 	}
 	m := cfg.DocMapping
 	if cfg.IndexID != "ferun-logs-v5-30d" || cfg.Indexing.CommitSecs != 10 || cfg.Retention.Period != "30 days" ||
-		m.PartitionKey != "hash_mod((tenant,environment,job), 16)" || fmt.Sprint(m.TagFields) != "[tenant environment job]" ||
+		m.PartitionKey != "hash_mod((tenant,environment,job), 16)" || fmt.Sprint(m.TagFields) != "[tenant environment job]" || // KEEP-TENANT: Quickwit's stored name
 		m.Timestamp != "ts" || len(m.FieldMappings) == 0 || m.FieldMappings[0].Name != "ts" || m.FieldMappings[0].Type != "datetime" {
 		t.Errorf("config %+v", cfg)
 	}
@@ -279,21 +279,21 @@ func TestQuickwit(t *testing.T) {
 	}
 	now := time.Now().UnixNano()
 	docs := []Doc{
-		{TS: now, Tenant: "acme", Stream: "s_1", Environment: "e", Source: "container", IOStream: "stdout", Level: 1, Off: 10,
+		{TS: now, Project: "acme", Stream: "s_1", Environment: "e", Source: "container", IOStream: "stdout", Level: 1, Off: 10,
 			Text: "GET /x user_id=42 ERROR connection reset", TraceID: "4bf92f3577b34da6a3ce929d0e0e4736"},
-		{TS: now + 1, Tenant: "acme", Stream: "s_1", Environment: "e", Source: "container", IOStream: "stdout", Level: 4, Off: 20,
+		{TS: now + 1, Project: "acme", Stream: "s_1", Environment: "e", Source: "container", IOStream: "stdout", Level: 4, Off: 20,
 			Text: "second line", Partial: true},
-		{TS: now + 1, Tenant: "acme", Stream: "s_2", Environment: "e", Source: "container", IOStream: "stderr", Level: 4, Off: 20,
+		{TS: now + 1, Project: "acme", Stream: "s_2", Environment: "e", Source: "container", IOStream: "stderr", Level: 4, Off: 20,
 			Text: "other stream"},
-		{TS: now, Tenant: "other", Stream: "s_3", Environment: "e", Source: "container", Level: 1, Off: 0, Text: "ERROR not acme's"},
+		{TS: now, Project: "other", Stream: "s_3", Environment: "e", Source: "container", Level: 1, Off: 0, Text: "ERROR not acme's"},
 	}
-	// A tenant of many environments and a job: their lines go to splits
+	// A project of many environments and a job: their lines go to splits
 	// of their partitions.
 	for i, env := range []string{"prod", "stage", "dev", "preview-1", "preview-2", "preview-3"} {
-		docs = append(docs, Doc{TS: now + int64(i), Tenant: "part", Stream: "s_" + env, Environment: env, Source: "container",
+		docs = append(docs, Doc{TS: now + int64(i), Project: "part", Stream: "s_" + env, Environment: env, Source: "container",
 			Level: 1, Text: "a line of " + env})
 	}
-	docs = append(docs, Doc{TS: now, Tenant: "part", Stream: "s_job", Job: "build-1", Source: "container", Level: 1, Text: "a job's line"})
+	docs = append(docs, Doc{TS: now, Project: "part", Stream: "s_job", Job: "build-1", Source: "container", Level: 1, Text: "a job's line"})
 	if err := ingestForTest(ctx, c, id, docs); err != nil {
 		t.Fatal(err)
 	}
@@ -317,24 +317,24 @@ func TestQuickwit(t *testing.T) {
 		q    Query
 		want string
 	}{
-		{Query{Tenant: "acme"}, "s_2/20 s_1/20 s_1/10"},
-		{Query{Tenant: "acme", Order: OldestFirst}, "s_1/10 s_1/20 s_2/20"},
-		{Query{Tenant: "acme", Words: []string{"user_id=42"}}, "s_1/10"},
-		{Query{Tenant: "acme", Words: []string{"erro"}}, ""},
-		{Query{Tenant: "acme", Words: []string{"reset"}, OrPartial: true}, "s_1/20 s_1/10"},
-		{Query{Tenant: "acme", NotWords: []string{"second"}}, "s_2/20 s_1/10"},
-		{Query{Tenant: "acme", Levels: 1}, "s_1/10"},
-		{Query{Tenant: "acme", Trace: "4bf92f3577b34da6a3ce929d0e0e4736"}, "s_1/10"},
-		{Query{Tenant: "acme", SinceNs: now + 1, UntilNs: now + 1}, "s_2/20 s_1/20"},
-		{Query{Tenant: "acme", Stream: "s_1", OffAfter: new(int64), OffTo: ptr(int64(15)), Order: ByOffset}, "s_1/10"},
-		{Query{Tenant: "acme", IOStream: "stderr"}, "s_2/20"},
-		{Query{Tenant: "acme", Max: 1}, "s_2/20"},
+		{Query{Project: "acme"}, "s_2/20 s_1/20 s_1/10"},
+		{Query{Project: "acme", Order: OldestFirst}, "s_1/10 s_1/20 s_2/20"},
+		{Query{Project: "acme", Words: []string{"user_id=42"}}, "s_1/10"},
+		{Query{Project: "acme", Words: []string{"erro"}}, ""},
+		{Query{Project: "acme", Words: []string{"reset"}, OrPartial: true}, "s_1/20 s_1/10"},
+		{Query{Project: "acme", NotWords: []string{"second"}}, "s_2/20 s_1/10"},
+		{Query{Project: "acme", Levels: 1}, "s_1/10"},
+		{Query{Project: "acme", Trace: "4bf92f3577b34da6a3ce929d0e0e4736"}, "s_1/10"},
+		{Query{Project: "acme", SinceNs: now + 1, UntilNs: now + 1}, "s_2/20 s_1/20"},
+		{Query{Project: "acme", Stream: "s_1", OffAfter: new(int64), OffTo: ptr(int64(15)), Order: ByOffset}, "s_1/10"},
+		{Query{Project: "acme", IOStream: "stderr"}, "s_2/20"},
+		{Query{Project: "acme", Max: 1}, "s_2/20"},
 	} {
 		if got := search(x.q); got != x.want {
 			t.Errorf("%s: got %q, want %q", x.q, got, x.want)
 		}
 	}
-	hits, err := c.Search(ctx, pattern, Query{Tenant: "acme", Stream: "s_1", Max: 1})
+	hits, err := c.Search(ctx, pattern, Query{Project: "acme", Stream: "s_1", Max: 1})
 	if err != nil || len(hits) != 1 || hits[0].TS != now+1 || !hits[0].Partial || hits[0].Text != "second line" {
 		t.Errorf("a hit's fields: %+v, %v", hits, err)
 	}
@@ -353,7 +353,7 @@ func TestQuickwit(t *testing.T) {
 	withProd := 0
 	for _, sp := range splits.Splits {
 		tags := strings.Join(sp.Tags, " ")
-		if !strings.Contains(tags, "tenant!") || !strings.Contains(tags, "environment!") || !strings.Contains(tags, "job!") {
+		if !strings.Contains(tags, "project!") || !strings.Contains(tags, "environment!") || !strings.Contains(tags, "job!") {
 			t.Errorf("split %s without its tag fields: %v", sp.SplitID, sp.Tags)
 		}
 		if strings.Contains(tags, "environment:prod") {
@@ -374,12 +374,12 @@ func TestQuickwit(t *testing.T) {
 		}
 		return len(out.Searched)
 	}
-	if all, prod, job := plan(Query{Tenant: "part"}), plan(Query{Tenant: "part", Environment: "prod"}),
-		plan(Query{Tenant: "part", Job: "build-1"}); prod != 1 || job != 1 || all < 2 {
-		t.Errorf("splits searched: %d for the tenant, %d for an environment, %d for a job", all, prod, job)
+	if all, prod, job := plan(Query{Project: "part"}), plan(Query{Project: "part", Environment: "prod"}),
+		plan(Query{Project: "part", Job: "build-1"}); prod != 1 || job != 1 || all < 2 {
+		t.Errorf("splits searched: %d for the project, %d for an environment, %d for a job", all, prod, job)
 	}
 
-	// An index of version 1 (<prefix>-<days>d: tenant its only tag, no
+	// An index of version 1 (<prefix>-<days>d: project its only tag, no
 	// partitions) is searched with the current one's, in one order.
 	old := prefix + "-1d"
 	var v1 map[string]any
@@ -391,17 +391,17 @@ func TestQuickwit(t *testing.T) {
 		t.Fatalf("config %v", v1)
 	}
 	delete(dm, "partition_key")
-	dm["tag_fields"] = []string{"tenant"}
+	dm["tag_fields"] = []string{"tenant"} // KEEP-TENANT: Quickwit's stored name
 	body, _ := json.Marshal(v1)
 	if err := c.do(ctx, "POST", c.search+"/api/v1/indexes", "application/json", body, nil); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.do(context.Background(), "DELETE", c.search+"/api/v1/indexes/"+old, "", nil, nil) }()
-	if err := ingestForTest(ctx, c, old, []Doc{{TS: now + 10, Tenant: "part", Stream: "s_prod", Environment: "prod",
+	if err := ingestForTest(ctx, c, old, []Doc{{TS: now + 10, Project: "part", Stream: "s_prod", Environment: "prod",
 		Source: "container", Level: 1, Off: 5, Text: "a line of before"}}); err != nil {
 		t.Fatal(err)
 	}
-	hits, err = c.Search(ctx, pattern, Query{Tenant: "part", Environment: "prod", Max: 10})
+	hits, err = c.Search(ctx, pattern, Query{Project: "part", Environment: "prod", Max: 10})
 	if err != nil || len(hits) != 2 || hits[0].TS != now+10 || hits[0].Text != "a line of before" || hits[1].Text != "a line of prod" {
 		t.Errorf("across versions: %+v, %v", hits, err)
 	}
@@ -411,7 +411,7 @@ func TestQuickwit(t *testing.T) {
 	if err != nil || fmt.Sprint(ids) != fmt.Sprint([]string{old, id}) {
 		t.Errorf("indexes %v, %v", ids, err)
 	}
-	if err := c.Delete(ctx, id, Query{Tenant: "acme", Environment: "e"}); err != nil {
+	if err := c.Delete(ctx, id, Query{Project: "acme", Environment: "e"}); err != nil {
 		t.Errorf("delete task: %v", err)
 	}
 }

@@ -7,18 +7,18 @@
 // lives as long as the page.
 //
 //   localStorage   ferun-theme     dark or light
-//                  ferun-tenants   an earlier UI's tenant tokens: removed at
-//                                  sign-in (api.js, forgetTenantTokens)
-//                  ferun-draft:<tenant>/<env>
+//                  ferun-tenants   an earlier UI's tokens (KEEP-TENANT): removed at
+//                                  sign-in (api.js, forgetOldTokens)
+//                  ferun-draft:<project>/<env>
 //                                  the deployment builder's draft of an
-//                                  environment, "<tenant>/" a new one's
+//                                  environment, "<project>/" a new one's
 //                                  (views/draft.js): a spec and its base,
 //                                  never a secret's value
 //   sessionStorage ferun-admin     "user:password" of a Basic sign-in, for
 //                                  the life of the tab only
 
 export const THEME_KEY = 'ferun-theme';
-export const TENANTS_KEY = 'ferun-tenants';
+export const OLD_TOKENS_KEY = 'ferun-tenants'; // KEEP-TENANT: the key an earlier UI wrote
 export const ADMIN_KEY = 'ferun-admin';
 
 // memory holds what storage refused, by "<kind>/<key>".

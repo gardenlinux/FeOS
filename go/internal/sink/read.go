@@ -24,19 +24,19 @@ const maxChunksRead = 10000
 
 // streamRow is a stream as the reads know it.
 type streamRow struct {
-	ID                                                          int64
-	SID, Tenant, Instance, Container, Environment, Kind, Object string
-	Replica, Deployment                                         int
-	Job                                                         string
-	Attempt                                                     int
-	Node, Source                                                string
-	FirstNs, LastNs                                             *int64
-	EndedAt                                                     *time.Time
-	Lines, Bytes                                                int64
-	LastOff                                                     int64
+	ID                                                           int64
+	SID, Project, Instance, Container, Environment, Kind, Object string
+	Replica, Deployment                                          int
+	Job                                                          string
+	Attempt                                                      int
+	Node, Source                                                 string
+	FirstNs, LastNs                                              *int64
+	EndedAt                                                      *time.Time
+	Lines, Bytes                                                 int64
+	LastOff                                                      int64
 }
 
-const streamCols = `id, sid, tenant, instance, container, environment, kind, object, replica, release, job, attempt, node,
+const streamCols = `id, sid, project, instance, container, environment, kind, object, replica, release, job, attempt, node,
 	source, first_ns, last_ns, ended_at, lines, bytes, last_off`
 
 func scanStream(r pgx.CollectableRow) (*streamRow, error) { return scanStreamWith(r) }
@@ -45,7 +45,7 @@ func scanStream(r pgx.CollectableRow) (*streamRow, error) { return scanStreamWit
 // more.
 func scanStreamWith(r interface{ Scan(...any) error }, more ...any) (*streamRow, error) {
 	var s streamRow
-	err := r.Scan(append([]any{&s.ID, &s.SID, &s.Tenant, &s.Instance, &s.Container, &s.Environment, &s.Kind, &s.Object,
+	err := r.Scan(append([]any{&s.ID, &s.SID, &s.Project, &s.Instance, &s.Container, &s.Environment, &s.Kind, &s.Object,
 		&s.Replica, &s.Deployment, &s.Job, &s.Attempt, &s.Node, &s.Source, &s.FirstNs, &s.LastNs, &s.EndedAt,
 		&s.Lines, &s.Bytes, &s.LastOff}, more...)...)
 	return &s, err
@@ -60,7 +60,7 @@ func prefixed(a, cols string) string {
 	return strings.Join(out, ", ")
 }
 
-// streamFilter is a selection of a tenant's streams: the selector, the
+// streamFilter is a selection of a project's streams: the selector, the
 // streams with lines between since and until (Unix ns; nil: no bound), and with live only those open or ended in the last ten
 // minutes (DB clock).
 type streamFilter struct {
@@ -71,11 +71,11 @@ type streamFilter struct {
 	limit        int
 }
 
-// selectStreams lists a tenant's streams that f selects; only the
-// tenant's are ever seen.
-func selectStreams(ctx context.Context, q db.Querier, tenant string, f streamFilter) ([]*streamRow, error) {
-	args := []any{tenant}
-	where := []string{"tenant = $1"}
+// selectStreams lists a project's streams that f selects; only the
+// project's are ever seen.
+func selectStreams(ctx context.Context, q db.Querier, project string, f streamFilter) ([]*streamRow, error) {
+	args := []any{project}
+	where := []string{"project = $1"}
 	add := func(cond string, v any) {
 		args = append(args, v)
 		where = append(where, strings.ReplaceAll(cond, "?", "$"+strconv.Itoa(len(args))))
@@ -130,12 +130,12 @@ type scanResult struct {
 	partial bool
 }
 
-// Read answers a page of /api/v1/logs for tenant (not follow). It reads
+// Read answers a page of /api/v1/logs for project (not follow). It reads
 // the streams from the database, the newest lines from their topics'
 // tail (what Quickwit has not published, ADR 0026 §11), then the index;
 // a line in both is taken once. It stops at the limit, at ScanLimit bytes
 // of lines read, or at the end.
-func (s *Store) Read(ctx context.Context, tenant string, q Query) (scanResult, error) {
+func (s *Store) Read(ctx context.Context, project string, q Query) (scanResult, error) {
 	select {
 	case s.scans <- struct{}{}:
 	case <-ctx.Done():
@@ -148,7 +148,7 @@ func (s *Store) Read(ctx context.Context, tenant string, q Query) (scanResult, e
 	if q.SinceSet || !q.Forward {
 		f.since = &q.Since
 	}
-	streams, err := selectStreams(ctx, s.db.Pool, tenant, f)
+	streams, err := selectStreams(ctx, s.db.Pool, project, f)
 	if err != nil {
 		return scanResult{}, err
 	}
@@ -165,7 +165,7 @@ func (s *Store) Read(ctx context.Context, tenant string, q Query) (scanResult, e
 	if err != nil {
 		return scanResult{}, fmt.Errorf("tail: %w", err)
 	}
-	cold, through, err := s.readIndex(ctx, tenant, &q, res.streams, nil, scanned)
+	cold, through, err := s.readIndex(ctx, project, &q, res.streams, nil, scanned)
 	if err != nil {
 		return scanResult{}, err
 	}
@@ -196,7 +196,7 @@ func (s *Store) Read(ctx context.Context, tenant string, q Query) (scanResult, e
 	for id, st := range res.streams {
 		upTo[id] = st.LastOff
 	}
-	if err := s.joinParts(ctx, tenant, found, res.streams, upTo); err != nil {
+	if err := s.joinParts(ctx, project, found, res.streams, upTo); err != nil {
 		return scanResult{}, err
 	}
 	res.lines = found[:0]
@@ -261,11 +261,11 @@ func earlier(q *Query, a *pos, b pos) *pos {
 	return &b
 }
 
-// indexQuery is the part of q the index answers: the tenant, the
+// indexQuery is the part of q the index answers: the project, the
 // selector's labels, the time range, levels, trace and words (a partial
 // line passes the words: they may be in its rest).
-func indexQuery(tenant string, q *Query) quickwit.Query {
-	iq := quickwit.Query{Tenant: tenant, Environment: q.Sel.Environment, Kind: q.Sel.Kind, Object: q.Sel.Object,
+func indexQuery(project string, q *Query) quickwit.Query {
+	iq := quickwit.Query{Project: project, Environment: q.Sel.Environment, Kind: q.Sel.Kind, Object: q.Sel.Object,
 		Instance: q.Sel.Instance, Container: q.Sel.Container, Job: q.Sel.Job, Stream: q.Sel.Stream,
 		Source: q.Sel.Source, Replica: q.Sel.Replica, Attempt: q.Sel.Attempt, SinceNs: q.Since, UntilNs: q.Until,
 		Levels: q.Levels, Trace: q.Trace, Words: q.Words, NotWords: q.NotWords, OrPartial: true}
@@ -285,13 +285,13 @@ func indexQuery(tenant string, q *Query) quickwit.Query {
 // the filters (a partial one passes, to be joined). It stops with enough
 // lines for the page, at the end, or at ScanLimit bytes of lines
 // (counting scanned, the hot ones'), returning then where it stopped.
-func (s *Store) readIndex(ctx context.Context, tenant string, q *Query, streams map[int64]*streamRow, through *pos,
+func (s *Store) readIndex(ctx context.Context, project string, q *Query, streams map[int64]*streamRow, through *pos,
 	scanned int64) ([]Line, *pos, error) {
 	bySID := make(map[string]*streamRow, len(streams))
 	for _, st := range streams {
 		bySID[st.SID] = st
 	}
-	iq := indexQuery(tenant, q)
+	iq := indexQuery(project, q)
 	if c := q.Cursor; c != nil {
 		if q.Forward {
 			iq.SinceNs = max(iq.SinceNs, c.TS)
@@ -368,10 +368,10 @@ func (s *Store) readIndex(ctx context.Context, tenant string, q *Query, streams 
 	}
 }
 
-// Streams answers /api/v1/log-streams: a tenant's streams of the selector
+// Streams answers /api/v1/log-streams: a project's streams of the selector
 // with lines since since, the latest first, at most 500.
-func (s *Store) Streams(ctx context.Context, tenant string, sel Selector, since int64) ([]*streamRow, error) {
-	return selectStreams(ctx, s.db.Pool, tenant, streamFilter{sel: sel, since: &since,
+func (s *Store) Streams(ctx context.Context, project string, sel Selector, since int64) ([]*streamRow, error) {
+	return selectStreams(ctx, s.db.Pool, project, streamFilter{sel: sel, since: &since,
 		order: "last_ns DESC NULLS LAST, id DESC", limit: maxStreamsList})
 }
 
@@ -390,7 +390,7 @@ type LineJSON struct {
 // StreamJSON is a stream of /api/v1/logs and /api/v1/log-streams.
 type StreamJSON struct {
 	ID          string     `json:"id"`
-	Tenant      string     `json:"tenant"`
+	Project     string     `json:"project"`
 	Instance    string     `json:"instance"`
 	Container   string     `json:"container"`
 	Environment string     `json:"environment"`
@@ -424,7 +424,7 @@ func (st *streamRow) json() StreamJSON {
 		ended = &t
 	}
 	return StreamJSON{
-		ID: st.SID, Tenant: st.Tenant, Instance: st.Instance, Container: st.Container, Environment: st.Environment,
+		ID: st.SID, Project: st.Project, Instance: st.Instance, Container: st.Container, Environment: st.Environment,
 		Kind: st.Kind, Object: st.Object, Replica: st.Replica, Deployment: st.Deployment, Job: st.Job, Attempt: st.Attempt,
 		Node: st.Node, Source: st.Source, FirstTime: nsTime(st.FirstNs), LastTime: nsTime(st.LastNs), EndedAt: ended,
 		Lines: st.Lines, Bytes: st.Bytes,

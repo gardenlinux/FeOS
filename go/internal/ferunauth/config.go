@@ -39,7 +39,7 @@ type Config struct {
 	Listen, HealthListen string
 	// PublicURL is ferun-auth's own base URL, https://host without a
 	// path: the redirect URIs <PublicURL>/callback/ferun and
-	// <PublicURL>/callback/<tenant>/<provider> and the back-channel URIs
+	// <PublicURL>/callback/<project>/<provider> and the back-channel URIs
 	// derive from it.
 	PublicURL string
 	// FerunURL is ferund's API, inside the cluster.

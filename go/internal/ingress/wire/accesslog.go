@@ -40,7 +40,7 @@ const (
 // ReasonVisit…, ReasonFerunPath),
 // else "". Instance is the instance the last attempt
 // went to, "" when none; Attempts counts the attempts, HeldNs how long
-// the request waited for an instance. Tenant is the environment's owner,
+// the request waited for an instance. Project is the environment's owner,
 // which labels its stream in the sink (ADR 0026 §8), where the agent
 // writes it as a line (internal/ingress/sinklog); it never goes to the
 // control plane.
@@ -48,7 +48,7 @@ type AccessLogEntry struct {
 	Time         time.Time `json:"time"`
 	DurationNs   int64     `json:"durationNs"`
 	Env          string    `json:"env"`
-	Tenant       string    `json:"tenant,omitempty"`
+	Project      string    `json:"project,omitempty"`
 	Service      string    `json:"service"`
 	Instance     string    `json:"instance"`
 	Host         string    `json:"host"`

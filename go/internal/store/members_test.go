@@ -13,12 +13,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// A tenant's admins are its people with admin on it who are not
+// A project's admins are its people with admin on it who are not
 // disabled and its tokens admin on it; members come with their grants;
 // an invitation is used once, and not after it expired.
 func TestMembersAndInvitations(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	stage := mkEnv(t, s, "acme", "stage")
 	admins := func(want int) {
 		t.Helper()
@@ -33,18 +33,18 @@ func TestMembersAndInvitations(t *testing.T) {
 	must(t, err)
 	for _, g := range []store.Grant{{PersonID: a.ID, Role: "admin"}, {PersonID: b.ID, Role: "admin", EnvironmentID: stage.ID},
 		{PersonID: b.ID, Role: "read"}} {
-		g.TenantID = "acme"
+		g.ProjectID = "acme"
 		_, err := s.PutGrant(bg, g)
 		must(t, err)
 	}
 	admins(1)
-	_, err = s.InsertTenantToken(bg, store.TenantToken{Hash: "h-admin", TenantID: "acme", Role: "admin"})
+	_, err = s.InsertProjectToken(bg, store.ProjectToken{Hash: "h-admin", ProjectID: "acme", Role: "admin"})
 	must(t, err)
-	_, err = s.InsertTenantToken(bg, store.TenantToken{Hash: "h-stage", TenantID: "acme", Role: "admin",
+	_, err = s.InsertProjectToken(bg, store.ProjectToken{Hash: "h-stage", ProjectID: "acme", Role: "admin",
 		EnvironmentID: stage.ID})
 	must(t, err)
 	admins(2)
-	_, err = s.PutGrant(bg, store.Grant{TenantID: "acme", TokenHash: "h-stage", Role: "admin"})
+	_, err = s.PutGrant(bg, store.Grant{ProjectID: "acme", TokenHash: "h-stage", Role: "admin"})
 	must(t, err)
 	admins(3)
 	_, err = s.SetPersonDisabled(bg, a.ID, true)
@@ -64,12 +64,12 @@ func TestMembersAndInvitations(t *testing.T) {
 		t.Fatalf("still a member %v %v", ok, err)
 	}
 
-	inv, err := s.InsertInvitation(bg, store.Invitation{Hash: "i1", TenantID: "acme", EnvironmentID: stage.ID,
+	inv, err := s.InsertInvitation(bg, store.Invitation{Hash: "i1", ProjectID: "acme", EnvironmentID: stage.ID,
 		Role: "write", MadeBy: "person:" + a.ID.String()}, time.Hour)
 	if err != nil || inv.EnvironmentName != "stage" || !inv.Open(time.Now()) {
 		t.Fatalf("invitation %+v %v", inv, err)
 	}
-	if _, err := s.InsertInvitation(bg, store.Invitation{Hash: "i2", TenantID: "acme", EnvironmentID: uuid.New(),
+	if _, err := s.InsertInvitation(bg, store.Invitation{Hash: "i2", ProjectID: "acme", EnvironmentID: uuid.New(),
 		Role: "read", MadeBy: "x"}, time.Hour); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("foreign environment: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestMembersAndInvitations(t *testing.T) {
 	if _, err := s.UseInvitation(bg, "i1", a.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("second use: %v", err)
 	}
-	_, err = s.InsertInvitation(bg, store.Invitation{Hash: "i3", TenantID: "acme", Role: "read", MadeBy: "x"}, time.Hour)
+	_, err = s.InsertInvitation(bg, store.Invitation{Hash: "i3", ProjectID: "acme", Role: "read", MadeBy: "x"}, time.Hour)
 	must(t, err)
 	exec(t, s, "UPDATE invitations SET expires_at = now() - interval '1 second' WHERE hash = 'i3'")
 	if _, err := s.UseInvitation(bg, "i3", a.ID); !errors.Is(err, store.ErrNoRow) {
@@ -91,15 +91,15 @@ func TestMembersAndInvitations(t *testing.T) {
 		t.Fatalf("invitations %+v %v", all, err)
 	}
 
-	// The tenants a person made.
-	tn, created, err := s.MakeTenant(bg, "mine", store.NewTenant{MadeBy: a.ID})
+	// The projects a person made.
+	tn, created, err := s.MakeProject(bg, "mine", store.NewProject{MadeBy: a.ID})
 	if err != nil || !created || tn.MadeBy != a.ID {
 		t.Fatalf("insert %+v %v %v", tn, created, err)
 	}
-	if n, err := s.CountTenantsMadeBy(bg, a.ID); err != nil || n != 1 {
+	if n, err := s.CountProjectsMadeBy(bg, a.ID); err != nil || n != 1 {
 		t.Fatalf("made %d %v", n, err)
 	}
-	if _, created, err := s.MakeTenant(bg, "mine", store.NewTenant{}); err != nil || created {
+	if _, created, err := s.MakeProject(bg, "mine", store.NewProject{}); err != nil || created {
 		t.Fatalf("again %v %v", created, err)
 	}
 }

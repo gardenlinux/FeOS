@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canDrain, certState, createHints, fleetDefaults, fmtBytes, fmtBytesOf, fmtSeconds, joinTokenState, memBar,
-  nodeRows, settingsForm, settingsPatch, stopping, tenantDeleteText, tokenRows, vcpuCapacityText,
+  nodeRows, settingsForm, settingsPatch, stopping, projectDeleteText, tokenRows, vcpuCapacityText,
 } from './fleet.js';
 
 // The node view's rows, from GET /api/v1/admin/nodes as ferund renders
@@ -185,15 +185,15 @@ describe('tokenRows', () => {
   });
 });
 
-describe('tenantDeleteText', () => {
+describe('projectDeleteText', () => {
   it('warns that the environments and their data go too', () => {
-    expect(tenantDeleteText({ sandboxCount: 0, environmentCount: 3 }).confirm)
+    expect(projectDeleteText({ sandboxCount: 0, environmentCount: 3 }).confirm)
       .toBe('delete with 3 environments and their data?');
-    expect(tenantDeleteText({ sandboxCount: 2, environmentCount: 1 }).confirm)
+    expect(projectDeleteText({ sandboxCount: 2, environmentCount: 1 }).confirm)
       .toBe('delete with 2 sandboxes and 1 environment and their data?');
-    expect(tenantDeleteText({ sandboxCount: 1, environmentCount: 0 }).confirm).toBe('delete with 1 sandbox?');
-    expect(tenantDeleteText({ sandboxCount: 0 }).confirm).toBe('delete?');
-    expect(tenantDeleteText({}).title).toContain('every environment of it, with the environments\' addon data');
+    expect(projectDeleteText({ sandboxCount: 1, environmentCount: 0 }).confirm).toBe('delete with 1 sandbox?');
+    expect(projectDeleteText({ sandboxCount: 0 }).confirm).toBe('delete?');
+    expect(projectDeleteText({}).title).toContain('every environment of it, with the environments\' addon data');
   });
 });
 

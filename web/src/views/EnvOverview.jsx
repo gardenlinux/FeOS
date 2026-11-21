@@ -48,17 +48,17 @@ export function WideSpark({ series, h = 30 }) {
 }
 
 export function EnvOverview({
-  st, tenant, navigate, spec = null, traffic = null, ec = null, changed = () => {}, incidents = null, activity = null,
+  st, project, navigate, spec = null, traffic = null, ec = null, changed = () => {}, incidents = null, activity = null,
 }) {
   const groups = groupObjects(st.objects);
   return (
     <div className="ov">
-      <StatusCards st={st} incidents={incidents} tenant={tenant} navigate={navigate} ec={ec} />
+      <StatusCards st={st} incidents={incidents} project={project} navigate={navigate} ec={ec} />
 
       {(st.objects || []).length > 0 && (
         <div className="ov-two">
-          <TrafficCard st={st} traffic={traffic} tenant={tenant} navigate={navigate} />
-          <ReachCard st={st} tenant={tenant} navigate={navigate} />
+          <TrafficCard st={st} traffic={traffic} project={project} navigate={navigate} />
+          <ReachCard st={st} project={project} navigate={navigate} />
         </div>)}
 
       {groups.map(({ kind, objects }) => (
@@ -66,21 +66,21 @@ export function EnvOverview({
           <h2 className="ov-h">{KIND_TITLES[kind][0].toUpperCase() + KIND_TITLES[kind].slice(1)} <span className="count">{objects.length}</span></h2>
           <div className="ov-grid">
             {objects.map((o) => (
-              <ObjectCard key={`${o.kind}/${o.name}`} o={o} st={st} spec={spec} traffic={traffic} tenant={tenant}
+              <ObjectCard key={`${o.kind}/${o.name}`} o={o} st={st} spec={spec} traffic={traffic} project={project}
                 navigate={navigate} ec={ec} changed={changed} />))}
           </div>
         </section>
       ))}
 
-      <KeysLine spec={spec} tenant={tenant} env={st.name} navigate={navigate} />
+      <KeysLine spec={spec} project={project} env={st.name} navigate={navigate} />
 
       {activity && activity.length > 0 && (
         <section className="card ov-activity">
           <div className="card-head">
             <h2>Recent activity</h2>
-            <Link to={envPath(tenant, st.name, 'activity')} navigate={navigate} className="card-more">All activity</Link>
+            <Link to={envPath(project, st.name, 'activity')} navigate={navigate} className="card-more">All activity</Link>
           </div>
-          <ActivityList items={activity.slice(0, RECENT)} tenant={tenant} env={st.name} navigate={navigate} />
+          <ActivityList items={activity.slice(0, RECENT)} project={project} env={st.name} navigate={navigate} />
         </section>)}
     </div>
   );
@@ -90,7 +90,7 @@ export function EnvOverview({
 // live (ADR 0055: at the node, in the container; the spec alone says it)
 // and leads to the Secrets view, where each is with who uses it and its
 // check; nothing when it names none.
-export function KeysLine({ spec, tenant, env, navigate }) {
+export function KeysLine({ spec, project, env, navigate }) {
   const rows = spec ? inventoryOf(spec).filter((r) => r.kind !== 'addon' && !r.folded) : [];
   const parts = PLACES.map((p) => [rows.filter((r) => r.place === p).length, p]).filter(([c]) => c > 0);
   if (parts.length === 0) return null;
@@ -98,7 +98,7 @@ export function KeysLine({ spec, tenant, env, navigate }) {
     <p className="ov-keys">
       {parts.map(([c, p], i) => <React.Fragment key={p}>{i > 0 && ' · '}<b>{c}</b> {p === 'unused' ? 'unused' : MARK_LABEL[p]}</React.Fragment>)}
       <span className="muted"> — where each key lives, who uses it, the checks:</span>{' '}
-      <Link to={secretsPath(tenant, env)} navigate={navigate}>Secrets</Link>
+      <Link to={secretsPath(project, env)} navigate={navigate}>Secrets</Link>
     </p>
   );
 }
@@ -107,7 +107,7 @@ export function KeysLine({ spec, tenant, env, navigate }) {
 // summary, the end of its log and the way to its object; a failed or
 // running rollout with its reason; else that every object matches the
 // deployment.
-export function StatusCards({ st, incidents, tenant, navigate, ec = null }) {
+export function StatusCards({ st, incidents, project, navigate, ec = null }) {
   const r = st.rollout;
   const env = st.name;
   const open = (incidents || []).filter((i) => !i.closedAt);
@@ -117,18 +117,18 @@ export function StatusCards({ st, incidents, tenant, navigate, ec = null }) {
       <StateCard key="deleting" tone="moving" icon="trash" title="Deleting"
         text="ferund removes its instances, volumes and groups, then the environment." />);
   } else if (!r) {
-    const builder = envPath(tenant, env, 'builder');
+    const builder = envPath(project, env, 'builder');
     cards.push(
       <StateCard key="none" tone="absent" icon="layers" title="No deployment yet" text="Nothing runs. A deployment says what should."
         actions={ec && ec.write && <Link to={builder} navigate={navigate} className="button primary"><Icon name="plus" size={14} /> New deployment</Link>} />);
   }
   for (const inc of open.slice(0, 3)) {
-    cards.push(<IncidentCard key={inc.id} inc={inc} st={st} tenant={tenant} navigate={navigate} />);
+    cards.push(<IncidentCard key={inc.id} inc={inc} st={st} project={project} navigate={navigate} />);
   }
   if (open.length > 3) {
     cards.push(
       <p key="more" className="ov-more">
-        <Link to={envPath(tenant, env, 'incidents')} navigate={navigate}>{open.length - 3} more open incidents</Link>
+        <Link to={envPath(project, env, 'incidents')} navigate={navigate}>{open.length - 3} more open incidents</Link>
       </p>);
   }
   if (r && !st.deleting && r.state !== 'deployed') {
@@ -139,7 +139,7 @@ export function StatusCards({ st, incidents, tenant, navigate, ec = null }) {
         title={`Deployment ${r.deployment} ${r.state}`}
         when={r.startedAt && <>started <Ago iso={r.startedAt} /></>}
         text={<>{r.reason && <span className="ov-reason">{r.reason}</span>}{note && <span>{note[0].toUpperCase() + note.slice(1)}.</span>}</>}
-        actions={<Link to={envPath(tenant, env, 'deployments', r.deployment)} navigate={navigate} className="button">Deployment {r.deployment}</Link>} />);
+        actions={<Link to={envPath(project, env, 'deployments', r.deployment)} navigate={navigate} className="button">Deployment {r.deployment}</Link>} />);
   }
   if (r && !st.deleting && r.state === 'deployed' && open.length === 0 && incidents !== null) {
     const what = objectsText(st.objects);
@@ -167,19 +167,19 @@ export function StateCard({ tone, icon, title, text, when = null, actions = null
 // IncidentCard is an open incident: what and since when, its summary, the
 // end of its object's log, and the way to the object, the incident and
 // its deployment.
-export function IncidentCard({ inc, st, tenant, navigate }) {
+export function IncidentCard({ inc, st, project, navigate }) {
   const env = st.name;
   const obj = incidentObject(inc.object);
   const known = (st.objects || []).some((o) => `${o.kind}/${o.name}` === inc.object);
   const tail = ((inc.evidence && inc.evidence.logTail) || []).slice(-3);
-  const objTo = envPath(tenant, env, 'objects', inc.object);
+  const objTo = envPath(project, env, 'objects', inc.object);
   return (
     <StateCard tone="failed" icon="alert" title={<>{obj.name} <span className="statecard-cond">{conditionText(inc.condition)}</span></>}
       when={<>since <Ago iso={inc.openedAt} /></>} text={inc.summary}
       actions={<>
         {known && <Link to={objTo} navigate={navigate} className="button primary">Open {obj.name} <Icon name="arrowRight" size={14} /></Link>}
-        <Link to={envPath(tenant, env, 'incidents', inc.id)} navigate={navigate} className="button">Incident {inc.id}</Link>
-        <Link to={envPath(tenant, env, 'deployments', inc.deployment)} navigate={navigate} className="button">Deployment {inc.deployment}</Link>
+        <Link to={envPath(project, env, 'incidents', inc.id)} navigate={navigate} className="button">Incident {inc.id}</Link>
+        <Link to={envPath(project, env, 'deployments', inc.deployment)} navigate={navigate} className="button">Deployment {inc.deployment}</Link>
       </>}>
       {tail.length > 0 && (
         <>
@@ -193,7 +193,7 @@ export function IncidentCard({ inc, st, tenant, navigate }) {
 // TrafficCard is the requests of the last hour: the sum, and a line per
 // service with requests, counted from its own spans, or for a routed
 // service that sends none, what the ingress answered for it (so marked).
-function TrafficCard({ st, traffic, tenant, navigate }) {
+function TrafficCard({ st, traffic, project, navigate }) {
   const env = st.name;
   const totals = trafficTotals(traffic);
   const list = ((traffic && traffic.services) || []).filter((s) => s.requests > 0);
@@ -201,7 +201,7 @@ function TrafficCard({ st, traffic, tenant, navigate }) {
     <section className="card">
       <div className="card-head">
         <h2>Traffic</h2><span className="muted">last hour</span>
-        <Link to={envPath(tenant, env, 'traffic')} navigate={navigate} className="card-more">Traffic</Link>
+        <Link to={envPath(project, env, 'traffic')} navigate={navigate} className="card-more">Traffic</Link>
       </div>
       {!traffic && <p className="muted">No numbers: the log store does not answer.</p>}
       {totals && (
@@ -212,7 +212,7 @@ function TrafficCard({ st, traffic, tenant, navigate }) {
         </p>)}
       {list.map((s) => (
         <div key={s.service} className="ov-trow">
-          <Link to={envPath(tenant, env, 'objects', `service/${s.service}`, null)} navigate={navigate} className="strong">{s.service}</Link>
+          <Link to={envPath(project, env, 'objects', `service/${s.service}`, null)} navigate={navigate} className="strong">{s.service}</Link>
           <WideSpark series={s.series} />
           <span className="ov-trow-nums">{fmtCount(s.requests)} req · p95 {fmtLatency(s.p95Ms)}
             {s.source === 'ingress' && <span className="ov-src" title="it sends no server spans: what the ingress answered for it"> · ingress</span>}</span>
@@ -226,7 +226,7 @@ function TrafficCard({ st, traffic, tenant, navigate }) {
 // ReachCard is where the environment is reached: its public hosts, who
 // it admits there (ADR 0054), and the routes to its services, or the
 // route door while it is not public.
-function ReachCard({ st, tenant, navigate }) {
+function ReachCard({ st, project, navigate }) {
   const env = st.name;
   const { domains } = useSummary();
   const dh = defaultHost(st, domains || []);
@@ -235,7 +235,7 @@ function ReachCard({ st, tenant, navigate }) {
     <section className="card">
       <div className="card-head">
         <h2>{st.public ? 'Reachable at' : 'Not public'}</h2>
-        <Link to={envPath(tenant, env, 'access')} navigate={navigate} className="card-more">Domains &amp; access</Link>
+        <Link to={envPath(project, env, 'access')} navigate={navigate} className="card-more">Domains &amp; access</Link>
       </div>
       {st.public && (st.hosts || []).length > 0 && (
         <div className="ov-hosts">{st.hosts.map((h) => <HostLink key={h} host={h} />)}</div>)}
@@ -248,7 +248,7 @@ function ReachCard({ st, tenant, navigate }) {
           <span className="mono">{r.host && <span className="muted">{r.host}</span>}{r.path}</span>
           <Icon name="arrowRight" size={14} />
           <span>
-            <Link to={envPath(tenant, env, 'objects', `service/${r.service}`)} navigate={navigate} className="strong">{r.service}</Link>
+            <Link to={envPath(project, env, 'objects', `service/${r.service}`)} navigate={navigate} className="strong">{r.service}</Link>
             <span className="muted"> port {r.port}</span>
           </span>
         </div>))}
@@ -271,10 +271,10 @@ function Admits({ st }) {
 // ObjectCard is an object: its state, name and readiness, what it runs,
 // and one line of how it is; it leads to the object's page. A job's card
 // runs it.
-function ObjectCard({ o, st, spec, traffic, tenant, navigate, ec, changed }) {
+function ObjectCard({ o, st, spec, traffic, project, navigate, ec, changed }) {
   const env = st.name;
   const tone = objectTone(o);
-  const to = envPath(tenant, env, 'objects', `${o.kind}/${o.name}`);
+  const to = envPath(project, env, 'objects', `${o.kind}/${o.name}`);
   const [op, run, clear] = useOp();
   const image = objectImage(o, spec);
   const t = o.kind === 'service' ? trafficOf(traffic, o.name) : null;
@@ -345,11 +345,11 @@ function cardLine(o, t, routed, manual, counted) {
 
 // ActivityList is the activity's entries: each with its tone, what, its
 // detail and when, a link to the deployment or incident.
-export function ActivityList({ items, tenant, env, navigate }) {
+export function ActivityList({ items, project, env, navigate }) {
   return (
     <div className="actlist">
       {items.map((a) => {
-        const to = a.kind === 'deployment' ? envPath(tenant, env, 'deployments', a.number) : envPath(tenant, env, 'incidents', a.id);
+        const to = a.kind === 'deployment' ? envPath(project, env, 'deployments', a.number) : envPath(project, env, 'incidents', a.id);
         return (
           <div key={a.key} className={'act' + (a.kind === 'incident' && !a.open ? ' dim' : '')}>
             <ToneDot tone={a.tone} title={a.kind} />
@@ -386,12 +386,12 @@ export function useActivity(env, limit = 20, ms = 15000) {
 
 // ActivityTab is everything that happened to the environment: its
 // deployments and its incidents, newest first.
-export function ActivityTab({ tenant, env, navigate }) {
+export function ActivityTab({ project, env, navigate }) {
   const [items, err] = useActivity(env, 50, 5000);
   return (
     <>
       <ErrBox error={err} />
-      {items && items.length > 0 && <ActivityList items={items} tenant={tenant} env={env} navigate={navigate} />}
+      {items && items.length > 0 && <ActivityList items={items} project={project} env={env} navigate={navigate} />}
       {items && items.length === 0 && <p className="empty">Nothing yet: no deployment, no incident.</p>}
       {!items && !err && <p className="empty">Loading…</p>}
     </>

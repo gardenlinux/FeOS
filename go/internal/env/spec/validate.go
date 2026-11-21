@@ -22,7 +22,7 @@ type Mode string
 
 const (
 	// ModeSpec is POST /api/v1/environments/plan: no environment, so no
-	// check that needs one (secrets, the current deployment); the tenant's
+	// check that needs one (secrets, the current deployment); the project's
 	// sandboxes are checked.
 	ModeSpec Mode = "spec"
 	// ModePlan is a plan of an environment: an image that cannot be
@@ -87,11 +87,11 @@ const (
 type ValidateContext interface {
 	// Mode is what the validation is for.
 	Mode() Mode
-	// Sandbox reports the tenant's sandbox of id (its canonical form: a
-	// short ID, or a UUID in lowercase); ok false when the tenant has no sandbox of that ID,
+	// Sandbox reports the project's sandbox of id (its canonical form: a
+	// short ID, or a UUID in lowercase); ok false when the project has no sandbox of that ID,
 	// or it is an environment's instance row.
 	Sandbox(id string) (info SandboxInfo, ok bool)
-	// Secret reports a tenant secret of the environment (never a system
+	// Secret reports a project secret of the environment (never a system
 	// secret "addon.…"); ok false when the environment never had a version
 	// of it. A secret whose versions are all deleted is ok with Latest 0.
 	// Not asked in ModeSpec.
@@ -163,7 +163,7 @@ type CredentialContext interface {
 	Credential(name string) (info CredentialInfo, ok bool)
 }
 
-// SecretInfo is a tenant secret of an environment.
+// SecretInfo is a project secret of an environment.
 type SecretInfo struct {
 	// Latest is its newest version that is not deleted; 0: every version
 	// is deleted.
@@ -197,7 +197,7 @@ type Blueprint interface {
 var (
 	// dnsLabel is an object's name: services, jobs, addons, routes, ports.
 	dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	// secretName is a tenant secret's name (env_secrets' CHECK; "addon."
+	// secretName is a project secret's name (env_secrets' CHECK; "addon."
 	// is the system secrets').
 	secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 	// envVarName is an environment variable's name.
@@ -215,18 +215,18 @@ var (
 const maxHostBytes = 253
 
 // ValidEnvName reports whether name is an environment variable's name, as
-// a spec's env takes them (a tenant's job's env and secrets too).
+// a spec's env takes them (a project's job's env and secrets too).
 func ValidEnvName(name string) bool { return envVarName.MatchString(name) }
 
 // SystemSecretPrefix begins the names of the addons' credentials, which
-// tenants cannot use.
+// projects cannot use.
 const SystemSecretPrefix = "addon."
 
 // IsDigestRef reports whether an image reference names its image by a
 // sha256 digest, which pins it already.
 func IsDigestRef(image string) bool { return strings.Contains(image, "@sha256:") }
 
-// IsSecretName reports whether name is a tenant secret's name.
+// IsSecretName reports whether name is a project secret's name.
 func IsSecretName(name string) bool {
 	return secretName.MatchString(name) && !strings.HasPrefix(name, SystemSecretPrefix)
 }
@@ -781,7 +781,7 @@ func (v *validator) attachedSecrets(p string, svc Service) {
 	}
 }
 
-// secretRef checks a reference to a tenant secret.
+// secretRef checks a reference to a project secret.
 func (v *validator) secretRef(path, name string) {
 	if !IsSecretName(name) {
 		v.errorf(path, "secret names are lowercase letters, digits, '.', '_' and '-'; \"addon.\" is reserved",

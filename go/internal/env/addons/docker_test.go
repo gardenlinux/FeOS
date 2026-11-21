@@ -411,15 +411,15 @@ func TestPostgresDocker(t *testing.T) {
 			ca := newTestPKI(t)
 			creds := credentials(t, b, a)
 			serverCert, serverKey := ca.leaf("pgpod", "wl-00000000000000000000000000000000",
-				"spiffe://run.test/tenant/t/env/e/addon/postgres", x509.ExtKeyUsageServerAuth)
+				"spiffe://run.test/project/t/env/e/addon/postgres", x509.ExtKeyUsageServerAuth)
 			creds[TLSKey] = serverKey
 			const (
 				expenseWL  = "wl-0123456789abcdef0123456789abcdef"
 				approvalWL = "wl-s-xmxfgckmkt6"
 			)
 			c := Context{Env: "test", Name: a.Name, TLS: &TLS{CertPEM: serverCert, CAPEM: ca.rootPEM(), Grants: []Grant{
-				{Workload: expenseWL, ID: "spiffe://run.test/tenant/t/env/e/service/expense", Role: "expense_svc"},
-				{Workload: approvalWL, ID: "spiffe://run.test/tenant/t/env/e/sandbox/xmxfgckmkt6", Role: "approval_svc"},
+				{Workload: expenseWL, ID: "spiffe://run.test/project/t/env/e/service/expense", Role: "expense_svc"},
+				{Workload: approvalWL, ID: "spiffe://run.test/project/t/env/e/sandbox/xmxfgckmkt6", Role: "approval_svc"},
 			}}}
 			inst, err := b.Render(a, c)
 			if err != nil {
@@ -460,21 +460,21 @@ func TestPostgresDocker(t *testing.T) {
 				}
 			}
 			write("root.crt", ca.rootPEM())
-			expCert, expKey := ca.leaf("pod1", expenseWL, "spiffe://run.test/tenant/t/env/e/service/expense", x509.ExtKeyUsageClientAuth)
+			expCert, expKey := ca.leaf("pod1", expenseWL, "spiffe://run.test/project/t/env/e/service/expense", x509.ExtKeyUsageClientAuth)
 			write("expense.crt", expCert)
 			write("expense.key", expKey)
-			appCert, appKey := ca.leaf("xmxfgckmkt6", approvalWL, "spiffe://run.test/tenant/t/env/e/sandbox/xmxfgckmkt6", x509.ExtKeyUsageClientAuth)
+			appCert, appKey := ca.leaf("xmxfgckmkt6", approvalWL, "spiffe://run.test/project/t/env/e/sandbox/xmxfgckmkt6", x509.ExtKeyUsageClientAuth)
 			write("approval.crt", appCert)
 			write("approval.key", appKey)
 			// The same workload's ID under another root.
 			other := newTestPKI(t)
-			strCert, strKey := other.leaf("pod1", expenseWL, "spiffe://run.test/tenant/t/env/e/service/expense", x509.ExtKeyUsageClientAuth)
+			strCert, strKey := other.leaf("pod1", expenseWL, "spiffe://run.test/project/t/env/e/service/expense", x509.ExtKeyUsageClientAuth)
 			write("stranger.crt", strCert)
 			write("stranger.key", strKey)
 			// Another workload: the same name in another environment has
 			// another OU.
 			elseCert, elseKey := ca.leaf("pod2", "wl-ffffffffffffffffffffffffffffffff",
-				"spiffe://run.test/tenant/u/env/f/service/expense", x509.ExtKeyUsageClientAuth)
+				"spiffe://run.test/project/u/env/f/service/expense", x509.ExtKeyUsageClientAuth)
 			write("else.crt", elseCert)
 			write("else.key", elseKey)
 
@@ -658,9 +658,9 @@ func TestValkeyDocker(t *testing.T) {
 
 	ca := newTestPKI(t)
 	const (
-		addonID   = "spiffe://run.test/tenant/t/env/e/addon/cache"
-		catalogID = "spiffe://run.test/tenant/t/env/e/service/catalog"
-		sandboxID = "spiffe://run.test/tenant/t/env/e/sandbox/xmxfgckmkt6"
+		addonID   = "spiffe://run.test/project/t/env/e/addon/cache"
+		catalogID = "spiffe://run.test/project/t/env/e/service/catalog"
+		sandboxID = "spiffe://run.test/project/t/env/e/sandbox/xmxfgckmkt6"
 		catalogWL = "wl-0123456789abcdef0123456789abcdef"
 		sandboxWL = "wl-s-xmxfgckmkt6"
 	)
@@ -692,7 +692,7 @@ func TestValkeyDocker(t *testing.T) {
 		{"catalog", "pod1", catalogWL, catalogID},
 		{"sandbox", "xmxfgckmkt6", sandboxWL, sandboxID},
 		// Another workload: the same name in another environment.
-		{"else", "pod2", "wl-ffffffffffffffffffffffffffffffff", "spiffe://run.test/tenant/u/env/f/service/catalog"},
+		{"else", "pod2", "wl-ffffffffffffffffffffffffffffffff", "spiffe://run.test/project/u/env/f/service/catalog"},
 		// The addon's own ID, by a pod of elsewhere: only a certificate
 		// with ClientAuth.
 		{"self", "pod3", "wl-00000000000000000000000000000000", addonID},

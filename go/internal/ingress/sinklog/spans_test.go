@@ -18,7 +18,7 @@ import (
 func TestSpans(t *testing.T) {
 	t0 := time.Date(2026, 10, 31, 12, 0, 0, 123456789, time.UTC)
 	rec := func(env, svc string, status int, outcome string) wire.AccessLogEntry {
-		return wire.AccessLogEntry{Time: t0, DurationNs: 1500, Env: env, Tenant: "acme", Service: svc, Instance: "i1",
+		return wire.AccessLogEntry{Time: t0, DurationNs: 1500, Env: env, Project: "acme", Service: svc, Instance: "i1",
 			Host: "app.apps.example", Method: "POST", Path: "/a/b", Proto: "HTTP/2.0", Status: status, Outcome: outcome,
 			BytesIn: 3, BytesOut: 12, ClientIP: "203.0.113.9", UserAgent: "ua", Attempts: 2, HeldNs: 7,
 			TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7", ParentSpanID: "b7ad6b7169203331",
@@ -38,7 +38,7 @@ func TestSpans(t *testing.T) {
 	}
 	web := req.ResourceSpans[0]
 	want := map[string]any{
-		"service.name": "ferun-ingress", "ferun.pod": "ingress/in-0", "ferun.source": "ingress", "ferun.tenant": "acme",
+		"service.name": "ferun-ingress", "ferun.pod": "ingress/in-0", "ferun.source": "ingress", "ferun.project": "acme",
 		"ferun.environment": "e1", "ferun.kind": "service", "ferun.object": "web",
 	}
 	if got := attrs(web.GetResource().GetAttributes()); !maps.Equal(got, want) {

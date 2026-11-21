@@ -29,9 +29,9 @@ const maxFerundBody = 1 << 20
 // challengeView is ferund's answer to POST /api/v1/challenges/open.
 type challengeView struct {
 	Environment struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Tenant string `json:"tenant"`
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Project string `json:"project"`
 	} `json:"environment"`
 	Host     string `json:"host"`
 	Expired  bool   `json:"expired"`
@@ -44,10 +44,10 @@ type challengeView struct {
 	OIDC *oidcProvider `json:"oidc"`
 }
 
-// oidcProvider is a tenant's provider of kind oidc: the challenge's
-// "oidc", and GET /api/v1/oidc-providers/{tenant}/{provider}.
+// oidcProvider is a project's provider of kind oidc: the challenge's
+// "oidc", and GET /api/v1/oidc-providers/{project}/{provider}.
 type oidcProvider struct {
-	Tenant       string `json:"tenant"`
+	Project      string `json:"project"`
 	Name         string `json:"name"`
 	Issuer       string `json:"issuer"`
 	ClientID     string `json:"clientId"`
@@ -72,7 +72,7 @@ type answer struct {
 
 // endBody is POST /api/v1/visits/end's body.
 type endBody struct {
-	Tenant   string `json:"tenant,omitempty"`
+	Project  string `json:"project,omitempty"`
 	Provider string `json:"provider"`
 	Session  string `json:"session"`
 }
@@ -198,9 +198,9 @@ func (c *ferundClient) reject(ctx context.Context, sealed string) (answer, error
 	return a, err
 }
 
-func (c *ferundClient) oidcProvider(ctx context.Context, tenant, name string) (oidcProvider, error) {
+func (c *ferundClient) oidcProvider(ctx context.Context, project, name string) (oidcProvider, error) {
 	var p oidcProvider
-	err := c.do(ctx, http.MethodGet, "/api/v1/oidc-providers/"+url.PathEscape(tenant)+"/"+url.PathEscape(name), nil, &p)
+	err := c.do(ctx, http.MethodGet, "/api/v1/oidc-providers/"+url.PathEscape(project)+"/"+url.PathEscape(name), nil, &p)
 	return p, err
 }
 

@@ -47,14 +47,14 @@ type metrics struct {
 	acmeAnswered atomic.Uint64
 	acmeUnknown  atomic.Uint64
 
-	waitErrors             atomic.Uint64
-	rejectedInflightEnv    atomic.Uint64
-	rejectedInflightTenant atomic.Uint64
-	rejectedInflight       atomic.Uint64
-	rejectedHeldEnv        atomic.Uint64
-	rejectedHeldTenant     atomic.Uint64
-	rejectedHeld           atomic.Uint64
-	connsCut               atomic.Uint64
+	waitErrors              atomic.Uint64
+	rejectedInflightEnv     atomic.Uint64
+	rejectedInflightProject atomic.Uint64
+	rejectedInflight        atomic.Uint64
+	rejectedHeldEnv         atomic.Uint64
+	rejectedHeldProject     atomic.Uint64
+	rejectedHeld            atomic.Uint64
+	connsCut                atomic.Uint64
 
 	visitSignIns     atomic.Uint64
 	visitRequired    atomic.Uint64
@@ -138,15 +138,15 @@ func (p *Proxy) Metrics(w io.Writer) {
 		Sample{Labels: []string{"kind", "response"}, Value: float64(m.responseErrors.Load())},
 		Sample{Labels: []string{"kind", "wait"}, Value: float64(m.waitErrors.Load())})
 	WriteMetric(bw, "ferun_ingress_rejected_total", "counter",
-		"Requests answered 503 because a limit was taken: the environment's or the tenant's share of "+
-			"forwarded requests (inflight_env, inflight_tenant) or the instance's cap (inflight), the "+
-			"environment's or the tenant's share of held requests (held_env, held_tenant) or the instance's "+
+		"Requests answered 503 because a limit was taken: the environment's or the project's share of "+
+			"forwarded requests (inflight_env, inflight_project) or the instance's cap (inflight), the "+
+			"environment's or the project's share of held requests (held_env, held_project) or the instance's "+
 			"cap (held).",
 		Sample{Labels: []string{"limit", "inflight_env"}, Value: float64(m.rejectedInflightEnv.Load())},
-		Sample{Labels: []string{"limit", "inflight_tenant"}, Value: float64(m.rejectedInflightTenant.Load())},
+		Sample{Labels: []string{"limit", "inflight_project"}, Value: float64(m.rejectedInflightProject.Load())},
 		Sample{Labels: []string{"limit", "inflight"}, Value: float64(m.rejectedInflight.Load())},
 		Sample{Labels: []string{"limit", "held_env"}, Value: float64(m.rejectedHeldEnv.Load())},
-		Sample{Labels: []string{"limit", "held_tenant"}, Value: float64(m.rejectedHeldTenant.Load())},
+		Sample{Labels: []string{"limit", "held_project"}, Value: float64(m.rejectedHeldProject.Load())},
 		Sample{Labels: []string{"limit", "held"}, Value: float64(m.rejectedHeld.Load())})
 	WriteMetric(bw, "ferun_ingress_headers_rejected_total", "counter",
 		"Requests rejected for their headers, by reason: more than 100 fields (431), announced trailers (400).",
@@ -178,7 +178,7 @@ func (p *Proxy) Metrics(w io.Writer) {
 		counter("ferun_ingress_idle_hold_renew_failures_total",
 			"Renewals of the idle holds that failed.", m.holdRenewFailures.Load()),
 		counter("ferun_ingress_cookie_domains_removed_total",
-			"Domain attributes removed from Set-Cookie headers on hosts under the apps zone or the tenant zone.",
+			"Domain attributes removed from Set-Cookie headers on hosts under the apps zone or the project zone.",
 			m.cookieDomains.Load()),
 		counter("ferun_ingress_upstream_connections_cut_total",
 			"Open connections to instances closed because the table no longer routes to them.",

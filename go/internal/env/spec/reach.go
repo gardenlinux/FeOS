@@ -41,7 +41,7 @@ const (
 )
 
 // Egress is what a service's or a job's pods (or a sandbox's or a
-// tenant's job's pod) may reach outside their environment: the string
+// project's job's pod) may reach outside their environment: the string
 // "internet" or "none", or {"domains": […], "blocks": […]}, which allows
 // those alone ({} is none).
 type Egress struct {
@@ -141,7 +141,7 @@ func (e *Egress) UnmarshalJSON(b []byte) error {
 }
 
 // Use is an entry of a service's or a job's uses, and of a sandbox's or
-// a tenant's job's reaches: {"service": name, "port": name or number} or
+// a project's job's reaches: {"service": name, "port": name or number} or
 // {"addon": name}.
 type Use struct {
 	Service string  `json:"service,omitempty"`
@@ -157,7 +157,7 @@ func (u Use) String() string {
 	return "service " + u.Service + " port " + u.Port.String()
 }
 
-// Reaches is what of its environment a sandbox or a tenant's job reaches
+// Reaches is what of its environment a sandbox or a project's job reaches
 // (ADR 0035, revised): "all" (every port of every pod of the
 // environment) or a list of entries; the zero value reaches nothing.
 type Reaches struct {
@@ -544,7 +544,7 @@ func nonNilStrings(s []string) []string {
 }
 
 // UnknownReaches is the text of a 422 for entries of a sandbox's or a
-// tenant's job's reaches that the environment's deployed deployment s
+// project's job's reaches that the environment's deployed deployment s
 // lacks (an object, or a service's port), naming what it has; "" when
 // every entry names something of it. nil s is an environment without a
 // deployment.
@@ -596,7 +596,7 @@ func UnknownReaches(r Reaches, s *Spec) string {
 	return fmt.Sprintf("reaches: the environment's deployed deployment has no %s; %s", strings.Join(unknown, ", "), has)
 }
 
-// CheckReaches checks the form of a sandbox's or a tenant's job's
+// CheckReaches checks the form of a sandbox's or a project's job's
 // reaches: each entry a service with its port or an addon, at most
 // MaxUses; the text of a 400, or "".
 func CheckReaches(r Reaches) string {
@@ -625,7 +625,7 @@ func CheckReaches(r Reaches) string {
 	return ""
 }
 
-// CheckPod checks what a sandbox's or a tenant's job's create says of its
+// CheckPod checks what a sandbox's or a project's job's create says of its
 // network (ADR 0035, revised): securityGroups is gone (sent: its raw
 // value, nil when left out), reaches has its form (CheckReaches), and the
 // egress its domains and blocks, none inside deny (EgressFindings). The

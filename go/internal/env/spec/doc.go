@@ -8,7 +8,7 @@
 //   - Parse reads a spec strictly: unknown fields anywhere are error
 //     findings, never ignored.
 //   - Validate checks it against the rules of the contract's §3, looking
-//     up what lies outside the spec (the tenant's sandboxes, the
+//     up what lies outside the spec (the project's sandboxes, the
 //     environment's secrets, the addon types, the images' resolution)
 //     through a ValidateContext the caller filled beforehand.
 //   - Normalise fills the defaults, makes the runtime explicit, writes

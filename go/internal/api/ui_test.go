@@ -27,7 +27,7 @@ func TestUIFiles(t *testing.T) {
 		location string
 	}{
 		{path: "/", code: http.StatusOK, body: "the UI"},
-		{path: "/tenants/acme/environments", code: http.StatusOK, body: "the UI"},
+		{path: "/projects/acme/environments", code: http.StatusOK, body: "the UI"},
 		{path: "/assets/app.js", code: http.StatusOK, body: "app"},
 		{path: "/assets/", code: http.StatusOK, body: "the UI"},
 		{path: "/docs/", code: http.StatusOK, body: "the architecture page"},

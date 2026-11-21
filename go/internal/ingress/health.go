@@ -136,10 +136,10 @@ type Status struct {
 	// TLSNotAfter and TLSNames describe the HTTPS certificate in use.
 	TLSNotAfter time.Time `json:"tlsNotAfter,omitzero"`
 	TLSNames    []string  `json:"tlsNames,omitempty"`
-	// TenantZoneTLSNotAfter and TenantZoneTLSNames describe the tenant
+	// ProjectZoneTLSNotAfter and ProjectZoneTLSNames describe the project
 	// zone's certificate in use, when there is one.
-	TenantZoneTLSNotAfter time.Time `json:"tenantZoneTlsNotAfter,omitzero"`
-	TenantZoneTLSNames    []string  `json:"tenantZoneTlsNames,omitempty"`
+	ProjectZoneTLSNotAfter time.Time `json:"projectZoneTlsNotAfter,omitzero"`
+	ProjectZoneTLSNames    []string  `json:"projectZoneTlsNames,omitempty"`
 }
 
 // MeshPeer is a node on the mesh device, and whether its last handshake
@@ -181,9 +181,9 @@ func (p *Program) Status() Status {
 		st.TLSNotAfter = leaf.NotAfter
 		st.TLSNames = leaf.DNSNames
 	}
-	if p.tenantCerts != nil {
-		if leaf := p.tenantCerts.Leaf(); leaf != nil {
-			st.TenantZoneTLSNotAfter, st.TenantZoneTLSNames = leaf.NotAfter, leaf.DNSNames
+	if p.projectCerts != nil {
+		if leaf := p.projectCerts.Leaf(); leaf != nil {
+			st.ProjectZoneTLSNotAfter, st.ProjectZoneTLSNames = leaf.NotAfter, leaf.DNSNames
 		}
 	}
 	return st
@@ -218,7 +218,7 @@ func (p *Program) Metrics(w io.Writer) {
 	proxy.WriteMetric(bw, "ferun_ingress_spans_sent_total", "counter",
 		"Server spans the sink took.", proxy.Sample{Value: float64(spansSent)})
 	proxy.WriteMetric(bw, "ferun_ingress_spans_dropped_total", "counter",
-		"Server spans dropped: the sink failed, refused or rejected them, or their record had no tenant.",
+		"Server spans dropped: the sink failed, refused or rejected them, or their record had no project.",
 		proxy.Sample{Value: float64(spansDropped)})
 	proxy.WriteMetric(bw, "ferun_ingress_control_refusals_total", "counter",
 		"Connection attempts the control plane refused (PERMISSION_DENIED).", proxy.Sample{Value: float64(as.RefusalsTotal)})
@@ -230,10 +230,10 @@ func (p *Program) Metrics(w io.Writer) {
 		gauge("ferun_ingress_tls_not_after_seconds", "When the HTTPS certificate in use expires, in Unix seconds.",
 			float64(leaf.NotAfter.Unix()))
 	}
-	if p.tenantCerts != nil {
-		if leaf := p.tenantCerts.Leaf(); leaf != nil {
-			gauge("ferun_ingress_tenant_zone_tls_not_after_seconds",
-				"When the tenant zone's HTTPS certificate in use expires, in Unix seconds.", float64(leaf.NotAfter.Unix()))
+	if p.projectCerts != nil {
+		if leaf := p.projectCerts.Leaf(); leaf != nil {
+			gauge("ferun_ingress_project_zone_tls_not_after_seconds",
+				"When the project zone's HTTPS certificate in use expires, in Unix seconds.", float64(leaf.NotAfter.Unix()))
 		}
 	}
 	gauge("ferun_ingress_mesh_configured", "1 when the mesh device is configured.", boolValue(as.MeshConfigured))

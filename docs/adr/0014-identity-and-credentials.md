@@ -8,7 +8,7 @@ a jailed process of its own on the host, one per running pod, which
 signs only TLS 1.3 CertificateVerify inputs over one vsock port and
 records every signature before it gives it. A service's, a job's or an
 addon's pods share their object's ID through every replica and every
-roll, a sandbox and a tenant's job are named by their IDs, and the
+roll, a sandbox and a project's job are named by their IDs, and the
 subject names the pod in its CN and the workload's set in an OU, nothing
 readable. The certificate says who, never what: within a cluster the
 address is the workload (ADR 0012), and the certificate serves an
@@ -70,7 +70,7 @@ issues all of this is the platform's one (ADR 0024).
   resume and restore, and stops it when the run ends. A suspended pod
   has no process, and no key or secret of it is on any node.
 - The process holds one pod's material and nothing else. There is no
-  lookup from a connection to a tenant, and a bug in a parser costs one
+  lookup from a connection to a project, and a bug in a parser costs one
   pod's credentials, not the node's.
 - It survives a restart of `feosd` with the microVM: `feosd` binds a
   control socket in the pod's directory and hands it to the process; a
@@ -119,18 +119,18 @@ issues all of this is the platform's one (ADR 0024).
 - A pod's ID names the workload the pod is part of, never the pod:
 
   ```text
-  spiffe://<td>/tenant/<tenant>/env/<environment ID>/service/<name>
-  spiffe://<td>/tenant/<tenant>/env/<environment ID>/job/<name>
-  spiffe://<td>/tenant/<tenant>/env/<environment ID>/addon/<name>
-  spiffe://<td>/tenant/<tenant>/env/<environment ID>/sandbox/<id>
-  spiffe://<td>/tenant/<tenant>/env/<environment ID>/tenant-job/<id>
+  spiffe://<td>/project/<project>/env/<environment ID>/service/<name>
+  spiffe://<td>/project/<project>/env/<environment ID>/job/<name>
+  spiffe://<td>/project/<project>/env/<environment ID>/addon/<name>
+  spiffe://<td>/project/<project>/env/<environment ID>/sandbox/<id>
+  spiffe://<td>/project/<project>/env/<environment ID>/project-job/<id>
   ```
 
 - A service's, a job's and an addon's pods share their object's ID:
   every replica, every run, every pod after a roll. A deployment that
   removes an object and adds one of the same name gives the new one the
   old ID, as it gives it the old name.
-- A sandbox and a tenant's job, made by a call and not by the spec (ADR
+- A sandbox and a project's job, made by a call and not by the spec (ADR
   0035), are one pod each and are named by their IDs (ADR 0019); their
   segments differ from the objects', so a pod's ID never reads as a
   job's name. An attached service runs in its sandbox's pod and has the
@@ -155,7 +155,7 @@ issues all of this is the platform's one (ADR 0024).
   name for a service, a job or an addon; the sandbox's or the job's ID
   for the others. An addon that maps a subject maps this attribute (ADR
   0038).
-- The subject carries no readable name: the tenant's, the environment's
+- The subject carries no readable name: the project's, the environment's
   and the object's are in the URI. A readable attribute would be the
   next one a verifier maps alone. The issuer refuses a subject with
   anything but letters, digits, `.`, `/` and `-`, so that a map anchored
@@ -178,7 +178,7 @@ issues all of this is the platform's one (ADR 0024).
 - **A reference to an addon's role is its grant**: it grants the role to
   the referencing object's ID, and the addon maps the certificate to the
   role, never admitting on the chain alone, since every workload of
-  every tenant is under one root (ADR 0038). The same reference opens
+  every project is under one root (ADR 0038). The same reference opens
   the addon's port (ADR 0012); the network decides whether the pod
   reaches the addon, the map which role it gets there, and each holds
   without the other.
@@ -299,9 +299,9 @@ issues all of this is the platform's one (ADR 0024).
 - **One process per kind and pod**, as the sandbox system ran them, the
   SSH agent in an empty network namespace: it halves the isolation for
   little, since a process that has been taken over can always write
-  back to the guest over its vsock stream. The tenant boundary, one pod
+  back to the guest over its vsock stream. The project boundary, one pod
   per process, stays.
-- **One daemon per node**, under the rule "no sidecars": every tenant's
+- **One daemon per node**, under the rule "no sidecars": every project's
   keys in one address space and a lookup on every connection. A per-pod
   process on the host is no sidecar: nothing runs in the pod.
 - **`feosd` running itself again**, as for the task service: the process
@@ -348,7 +348,7 @@ issues all of this is the platform's one (ADR 0024).
 - **An ID per pod**, as the issuer wrote at first: an addon's map would
   change with every replica and every roll. Reversed.
 - **The workload in the CN**, as a readable name or a UUID derived from
-  the ID: a name is ambiguous across environments and tenants, so a
+  the ID: a name is ambiguous across environments and projects, so a
   verifier that checks only the CN admits every workload of that name;
   a UUID tells no replica from another, and every log line names a
   group instead of a microVM. An earlier CN layout, the ID without
@@ -366,11 +366,11 @@ issues all of this is the platform's one (ADR 0024).
   names no workload; so are a default scope in FeID's servers and
   inbound bindings that hand a server its caller's ID, which the first
   version of the identity decision had.
-- **An issuer per tenant**, and a tenant's pods trusting only their
-  tenant's: a verifier that checks only the chain would refuse other
-  tenants too, but it puts a key per tenant on every instance and a
-  bundle per tenant on every pod. The addons' maps never admit on the
-  chain, and other tenants cannot reach a pod past the network.
+- **An issuer per project**, and a project's pods trusting only their
+  project's: a verifier that checks only the chain would refuse other
+  projects too, but it puts a key per project on every instance and a
+  bundle per project on every pod. The addons' maps never admit on the
+  chain, and other projects cannot reach a pod past the network.
 - **Authorization in the platform** by method and path, as a mesh's
   proxy does: a proxy in the data path that reads HTTP, on every
   connection. FeOS adds none.

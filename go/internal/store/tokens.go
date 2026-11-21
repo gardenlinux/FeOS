@@ -19,12 +19,12 @@ import (
 // most.
 const tokenTouchInterval = "1 minute"
 
-// TenantToken is a row of tenant_tokens. Only the hash is stored. Role and
+// ProjectToken is a row of project_tokens. Only the hash is stored. Role and
 // EnvironmentID are the token's own grant, minted with it (ADR 0031):
-// EnvironmentID uuid.Nil is the tenant.
-type TenantToken struct {
+// EnvironmentID uuid.Nil is the project.
+type ProjectToken struct {
 	Hash          string
-	TenantID      string
+	ProjectID     string
 	Label         string
 	Role          string
 	EnvironmentID uuid.UUID
@@ -33,77 +33,77 @@ type TenantToken struct {
 	LastUsedAt    time.Time // zero: never used
 }
 
-const tenantTokenCols = "hash, tenant_id, label, role, environment_id, made_by, created_at, last_used_at"
+const projectTokenCols = "hash, project_id, label, role, environment_id, made_by, created_at, last_used_at"
 
-func scanTenantToken(row pgx.Row) (TenantToken, error) {
-	var t TenantToken
+func scanProjectToken(row pgx.Row) (ProjectToken, error) {
+	var t ProjectToken
 	var used *time.Time
 	var env *uuid.UUID
-	if err := row.Scan(&t.Hash, &t.TenantID, &t.Label, &t.Role, &env, &t.MadeBy, &t.CreatedAt, &used); err != nil {
-		return TenantToken{}, err
+	if err := row.Scan(&t.Hash, &t.ProjectID, &t.Label, &t.Role, &env, &t.MadeBy, &t.CreatedAt, &used); err != nil {
+		return ProjectToken{}, err
 	}
 	t.LastUsedAt, t.EnvironmentID = timeOf(used), uuidOf(env)
 	return t, nil
 }
 
-// CreateTenantToken stores a tenant token by its hash, admin on its
-// tenant. ErrNoRow when the tenant does not exist.
-func (s *Store) CreateTenantToken(ctx context.Context, hash, tenant, label string) (TenantToken, error) {
-	return s.InsertTenantToken(ctx, TenantToken{Hash: hash, TenantID: tenant, Label: label, Role: "admin"})
+// CreateProjectToken stores a project token by its hash, admin on its
+// project. ErrNoRow when the project does not exist.
+func (s *Store) CreateProjectToken(ctx context.Context, hash, project, label string) (ProjectToken, error) {
+	return s.InsertProjectToken(ctx, ProjectToken{Hash: hash, ProjectID: project, Label: label, Role: "admin"})
 }
 
-// InsertTenantToken stores a tenant token by its hash with its role, scope
+// InsertProjectToken stores a project token by its hash with its role, scope
 // and maker (the fields the database sets are ignored). ErrNoRow when the
-// tenant does not exist or the scope is not an environment of it.
-func (s *Store) InsertTenantToken(ctx context.Context, n TenantToken) (TenantToken, error) {
-	t, err := scanTenantToken(s.q.QueryRow(ctx, `INSERT INTO tenant_tokens (hash, tenant_id, label, role,
+// project does not exist or the scope is not an environment of it.
+func (s *Store) InsertProjectToken(ctx context.Context, n ProjectToken) (ProjectToken, error) {
+	t, err := scanProjectToken(s.q.QueryRow(ctx, `INSERT INTO project_tokens (hash, project_id, label, role,
 			environment_id, made_by)
 		SELECT $1, $2, $3, $4, $5, $6
 		WHERE $5::uuid IS NULL OR EXISTS (SELECT 1 FROM environments WHERE id = $5 AND owner = $2)
-		RETURNING `+tenantTokenCols, n.Hash, n.TenantID, n.Label, n.Role, nullUUID(n.EnvironmentID), n.MadeBy))
+		RETURNING `+projectTokenCols, n.Hash, n.ProjectID, n.Label, n.Role, nullUUID(n.EnvironmentID), n.MadeBy))
 	if isForeignKeyViolation(err) || errors.Is(err, pgx.ErrNoRows) {
-		return TenantToken{}, ErrNoRow
+		return ProjectToken{}, ErrNoRow
 	}
 	return t, err
 }
 
-// ListTenantTokens returns a tenant's tokens, oldest first.
-func (s *Store) ListTenantTokens(ctx context.Context, tenant string) ([]TenantToken, error) {
-	return s.listTenantTokens(ctx, tenant)
+// ListProjectTokens returns a project's tokens, oldest first.
+func (s *Store) ListProjectTokens(ctx context.Context, project string) ([]ProjectToken, error) {
+	return s.listProjectTokens(ctx, project)
 }
 
-// listTenantTokens returns the tokens of tenant, or of every tenant for "".
-func (s *Store) listTenantTokens(ctx context.Context, tenant string) ([]TenantToken, error) {
-	rows, err := s.q.Query(ctx, `SELECT `+tenantTokenCols+` FROM tenant_tokens
-		WHERE $1 = '' OR tenant_id = $1 ORDER BY tenant_id, created_at, hash`, tenant)
+// listProjectTokens returns the tokens of project, or of every project for "".
+func (s *Store) listProjectTokens(ctx context.Context, project string) ([]ProjectToken, error) {
+	rows, err := s.q.Query(ctx, `SELECT `+projectTokenCols+` FROM project_tokens
+		WHERE $1 = '' OR project_id = $1 ORDER BY project_id, created_at, hash`, project)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (TenantToken, error) { return scanTenantToken(r) })
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (ProjectToken, error) { return scanProjectToken(r) })
 }
 
-// DeleteTenantToken revokes a tenant's token by its hash. It reports
+// DeleteProjectToken revokes a project's token by its hash. It reports
 // whether there was one.
-func (s *Store) DeleteTenantToken(ctx context.Context, tenant, hash string) (bool, error) {
-	tag, err := s.q.Exec(ctx, "DELETE FROM tenant_tokens WHERE tenant_id = $1 AND hash = $2", tenant, hash)
+func (s *Store) DeleteProjectToken(ctx context.Context, project, hash string) (bool, error) {
+	tag, err := s.q.Exec(ctx, "DELETE FROM project_tokens WHERE project_id = $1 AND hash = $2", project, hash)
 	return tag.RowsAffected() > 0, err
 }
 
-// ResolveTenantToken returns the tenant of a token hash, ignoring a tenant
+// ResolveProjectToken returns the project of a token hash, ignoring a project
 // being deleted; model.ErrUnknownToken when there is none.
-func (s *Store) ResolveTenantToken(ctx context.Context, hash string) (string, error) {
-	var tenant string
-	err := s.q.QueryRow(ctx, `SELECT t.tenant_id FROM tenant_tokens t JOIN tenants n ON n.id = t.tenant_id
-		WHERE t.hash = $1 AND n.deleting_at IS NULL`, hash).Scan(&tenant)
+func (s *Store) ResolveProjectToken(ctx context.Context, hash string) (string, error) {
+	var project string
+	err := s.q.QueryRow(ctx, `SELECT t.project_id FROM project_tokens t JOIN projects n ON n.id = t.project_id
+		WHERE t.hash = $1 AND n.deleting_at IS NULL`, hash).Scan(&project)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", model.ErrUnknownToken
 	}
-	return tenant, err
+	return project, err
 }
 
-// TouchTenantToken sets last_used_at = now(), at most once a minute.
-func (s *Store) TouchTenantToken(ctx context.Context, hash string) error {
-	_, err := s.q.Exec(ctx, `UPDATE tenant_tokens SET last_used_at = now() WHERE hash = $1
+// TouchProjectToken sets last_used_at = now(), at most once a minute.
+func (s *Store) TouchProjectToken(ctx context.Context, hash string) error {
+	_, err := s.q.Exec(ctx, `UPDATE project_tokens SET last_used_at = now() WHERE hash = $1
 		AND (last_used_at IS NULL OR last_used_at < now() - interval '`+tokenTouchInterval+`')`, hash)
 	return err
 }
@@ -164,15 +164,15 @@ func (s *Store) DeleteSandboxToken(ctx context.Context, sandboxID podid.ID, hash
 }
 
 // ResolveSandboxToken returns the sandbox and owner of a token hash,
-// ignoring a tenant being deleted and an environment's instance row (the
+// ignoring a project being deleted and an environment's instance row (the
 // sandbox doors treat it as absent; it has no token of its own);
 // model.ErrUnknownToken when there is none.
 func (s *Store) ResolveSandboxToken(ctx context.Context, hash string) (podid.ID, string, error) {
 	var id podid.ID
 	var owner string
 	err := s.q.QueryRow(ctx, `SELECT t.sandbox_id, s.owner FROM sandbox_tokens t
-		JOIN sandboxes s ON s.id = t.sandbox_id JOIN tenants n ON n.id = s.owner
-		WHERE t.hash = $1 AND n.deleting_at IS NULL AND NOT s.instance AND NOT s.tenant_job`, hash).Scan(&id, &owner)
+		JOIN sandboxes s ON s.id = t.sandbox_id JOIN projects n ON n.id = s.owner
+		WHERE t.hash = $1 AND n.deleting_at IS NULL AND NOT s.instance AND NOT s.project_job`, hash).Scan(&id, &owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", model.ErrUnknownToken
 	}

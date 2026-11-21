@@ -31,9 +31,9 @@ import (
 
 // The tests' installation.
 const (
-	testTenant = "acme"
-	testIssuer = "https://id.test/"
-	testAuth   = "https://auth.test"
+	testProject = "acme"
+	testIssuer  = "https://id.test/"
+	testAuth    = "https://auth.test"
 )
 
 // denyButLoopback is the built-in deny set without 127/8, so that the
@@ -49,7 +49,7 @@ func denyButLoopback() []netip.Prefix {
 	return out
 }
 
-// fakeProvider is a tenant's provider on an httptest TLS server: it
+// fakeProvider is a project's provider on an httptest TLS server: it
 // answers with answer (200 {"admitted": true} when nil), after gate (when
 // set) lets it, and counts its calls.
 type fakeProvider struct {
@@ -109,8 +109,8 @@ func (p *fakeProvider) count() int {
 	return p.calls
 }
 
-// fx is a visits service over a fresh database, with a tenant, its
-// provider "fecode" of kind tenant at a fake provider, and the
+// fx is a visits service over a fresh database, with a project, its
+// provider "fecode" of kind project at a fake provider, and the
 // installation's keys as the ingress holds them.
 type fx struct {
 	t      *testing.T
@@ -150,12 +150,12 @@ func newFxOn(t *testing.T, d *db.DB, cfg Config) *fx {
 	if f.s, err = newService(cfg, Deps{Store: st, Sealer: sl}, f.prov.roots()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.CreateTenant(f.ctx, testTenant); err != nil && !errors.Is(err, store.ErrExists) {
+	if _, _, err := st.CreateProject(f.ctx, testProject); err != nil && !errors.Is(err, store.ErrExists) {
 		t.Fatal(err)
 	}
-	if _, err := st.GetAccessProvider(f.ctx, testTenant, "fecode"); errors.Is(err, store.ErrNoRow) {
-		if _, err := st.InsertAccessProvider(f.ctx, store.AccessProvider{Tenant: testTenant, Name: "fecode",
-			Kind: model.ProviderKindTenant, URL: f.prov.url()}); err != nil {
+	if _, err := st.GetAccessProvider(f.ctx, testProject, "fecode"); errors.Is(err, store.ErrNoRow) {
+		if _, err := st.InsertAccessProvider(f.ctx, store.AccessProvider{Project: testProject, Name: "fecode",
+			Kind: model.ProviderKindProject, URL: f.prov.url()}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -169,25 +169,25 @@ func (f *fx) exec(sql string, args ...any) {
 	}
 }
 
-// oidcProvider inserts an oidc provider of the tenant, its secret sealed.
+// oidcProvider inserts an oidc provider of the project, its secret sealed.
 func (f *fx) oidcProvider(name, secret string) {
 	f.t.Helper()
-	sealed, err := f.sealer.Seal([]byte(secret), store.AccessProviderAAD(testTenant, name))
+	sealed, err := f.sealer.Seal([]byte(secret), store.AccessProviderAAD(testProject, name))
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.st.InsertAccessProvider(f.ctx, store.AccessProvider{Tenant: testTenant, Name: name,
+	if _, err := f.st.InsertAccessProvider(f.ctx, store.AccessProvider{Project: testProject, Name: name,
 		Kind: model.ProviderKindOIDC, Issuer: "https://login.example/", ClientID: "client", ClientSecretSealed: sealed,
 		Rule: []byte(`{"domains":["example.com"]}`)}); err != nil {
 		f.t.Fatal(err)
 	}
 }
 
-// env makes a public environment of the tenant guarded by provider ("":
+// env makes a public environment of the project guarded by provider ("":
 // ferun) and returns it with its host.
 func (f *fx) env(name, provider string) (store.Environment, string) {
 	f.t.Helper()
-	e, err := f.st.InsertEnvironment(f.ctx, store.NewEnvironment{ID: uuid.New(), Owner: testTenant, Name: name,
+	e, err := f.st.InsertEnvironment(f.ctx, store.NewEnvironment{ID: uuid.New(), Owner: testProject, Name: name,
 		Labels: map[string]string{"fecode.project": "p1"}})
 	if err != nil {
 		f.t.Fatal(err)
@@ -232,12 +232,12 @@ func (f *fx) challenge(e store.Environment, host, path string) (string, string) 
 	return sealed, secret
 }
 
-// The callers: a tenant principal that is admin on every environment,
+// The callers: a project principal that is admin on every environment,
 // one that is admin on none, and ferun-auth.
 var (
-	tenantCaller  = Caller{Tenant: testTenant, Admin: func(uuid.UUID) bool { return true }, MadeBy: "token:abc"}
-	readerCaller  = Caller{Tenant: testTenant, Admin: func(uuid.UUID) bool { return false }, MadeBy: "person:p"}
-	foreignCaller = Caller{Tenant: "other", Admin: func(uuid.UUID) bool { return true }, MadeBy: "token:o"}
+	projectCaller = Caller{Project: testProject, Admin: func(uuid.UUID) bool { return true }, MadeBy: "token:abc"}
+	readerCaller  = Caller{Project: testProject, Admin: func(uuid.UUID) bool { return false }, MadeBy: "person:p"}
+	foreignCaller = Caller{Project: "other", Admin: func(uuid.UUID) bool { return true }, MadeBy: "token:o"}
 	authCaller    = Caller{Auth: true, MadeBy: "service:auth"}
 )
 

@@ -72,14 +72,14 @@ type Deps struct {
 	// (--apps-zone, ADR 0021); "": no hosts, and no environment can be
 	// made public.
 	AppsZone string
-	// AppsZoneOwners are the tenants that own the apps zone's plain names
+	// AppsZoneOwners are the projects that own the apps zone's plain names
 	// (--apps-zone-owners, ADR 0021): each may choose a host label without
-	// "--" (model.PlainHostLabel); nil: no tenant may.
+	// "--" (model.PlainHostLabel); nil: no project may.
 	AppsZoneOwners []string
-	// TenantZone is the zone of the default hosts of the tenants people
-	// make (--tenant-zone, ADR 0031): a tenant whose tenants.zone names it
+	// ProjectZone is the zone of the default hosts of the projects people
+	// make (--project-zone, ADR 0031): a project whose projects.zone names it
 	// has its hosts there, and no plain labels; "": none.
-	TenantZone string
+	ProjectZone string
 	// SinkURL is the sink's API (--sink-url, ADR 0026), which the logs
 	// calls ask first and the access log alone; "": the logs calls read
 	// the nodes only, and the access log answers 503.
@@ -98,7 +98,7 @@ type Deps struct {
 	Bindings HTTPBindings
 	Log      *slog.Logger
 	// VisitKinds are the kinds of access providers this installation
-	// serves (ADR 0054; visits.Service.Kinds: model.ProviderKindTenant,
+	// serves (ADR 0054; visits.Service.Kinds: model.ProviderKindProject,
 	// …Ferun, …OIDC), which a publish with access visitors needs; nil:
 	// no visits service runs (ferund without --secret-key-file), and every
 	// such publish is refused.
@@ -197,7 +197,7 @@ func (s *Service) Controller() *ctl.Controller { return s.ctl }
 func (s *Service) SecretsEnabled() bool { return s.d.Sealer != nil }
 
 // ResolveSecret is the value of version version of the secret name of
-// environment envID, a tenant's or a system secret, unsealed with its AAD
+// environment envID, a project's or a system secret, unsealed with its AAD
 // (envdeps.SecretAAD). A deleted version still resolves (a deployment pins
 // it until a later one is deployed). The controller resolves it, which
 // also generates the addons' credentials.
@@ -207,7 +207,7 @@ func (s *Service) ResolveSecret(ctx context.Context, envID uuid.UUID, name strin
 
 // RowSecret is the engine's secret resolver (sandbox.SecretResolver): an
 // environment's secret for its instance rows (ResolveSecret), a job's for
-// a tenant's job's pod.
+// a project's job's pod.
 func (s *Service) RowSecret(ctx context.Context, row store.Sandbox, name string, version int) (string, error) {
 	return s.ctl.RowSecret(ctx, row, name, version)
 }

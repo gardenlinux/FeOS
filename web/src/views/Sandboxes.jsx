@@ -33,11 +33,11 @@ import '../styles/sandboxes.css';
 // a sandbox's page with its views (overview, connect, secrets,
 // network, activity, settings), inside the environment, whose sidebar
 // lists them under its objects. The selection and the view are the
-// route's: /tenants/:t/environments/:env/sandboxes[/new | /:id[/:tab]]
+// route's: /projects/:t/environments/:env/sandboxes[/new | /:id[/:tab]]
 // ("new" is no sandbox ID). A sandbox reaches what it is told of its
 // environment (ADR 0034 revised), changed in place. The list is the
 // environment's (envstatus.jsx), which the sidebar reads too. A change
-// needs write on the environment (write: its grant or the tenant's, the
+// needs write on the environment (write: its grant or the project's, the
 // higher); the activity and the network are the operators' (the activity
 // log carries tool params and outputs), as is a node.
 
@@ -48,14 +48,14 @@ const NEW = 'new';
 const WRITE_REASON = 'needs write on its environment';
 const CREATE_REASON = 'needs write on this environment';
 
-export function Sandboxes({ tenant, env, sel, tab, write = false, navigate }) {
+export function Sandboxes({ project, env, sel, tab, write = false, navigate }) {
   const { sandboxes, podsErr, podsOk, refreshPods, refresh: refreshStatus } = useEnvStatus();
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState('');
   // created is the create's answer, {sandboxId, token}: its token shows
   // once, on the new sandbox's Connect tab.
   const [created, setCreated] = useState(null);
-  const access = useAccess(tenant);
+  const access = useAccess(project);
   const c = access.can;
   const summary = useSummary();
   useNow(1000);
@@ -80,14 +80,14 @@ export function Sandboxes({ tenant, env, sel, tab, write = false, navigate }) {
 
   if (sel === NEW) {
     return (
-      <NewSandbox tenant={tenant} env={env} navigate={navigate} can={c} busy={busy} err={err} write={write}
+      <NewSandbox project={project} env={env} navigate={navigate} can={c} busy={busy} err={err} write={write}
         onCreate={(args) => act('create', async () => {
           const res = await api.createSandbox(...args);
           const id = res.status && res.status.sandboxId;
           if (!id) return;
           setCreated({ sandboxId: id, token: res.token || '' });
           await refreshPods();
-          navigate(sandboxPath(tenant, env, id, 'connect'));
+          navigate(sandboxPath(project, env, id, 'connect'));
         })} />
     );
   }
@@ -97,14 +97,14 @@ export function Sandboxes({ tenant, env, sel, tab, write = false, navigate }) {
     // Keyed by the sandbox, so that its tabs start afresh for another one
     // and no answer for the previous sandbox lands in them.
     return (
-      <SandboxPage key={selSb.sandboxId} tenant={tenant} env={env} sb={selSb} tab={tab} busy={busy} act={act} err={err}
+      <SandboxPage key={selSb.sandboxId} project={project} env={env} sb={selSb} tab={tab} busy={busy} act={act} err={err}
         navigate={navigate} can={c} write={write} lastOk={podsOk}
         fresh={created && created.sandboxId === selSb.sandboxId ? created.token : ''} onFreshSeen={forgetCreated} />
     );
   }
 
   return (
-    <SandboxList tenant={tenant} env={env} sandboxes={sandboxes} err={err || podsErr} busy={busy} act={act} navigate={navigate}
+    <SandboxList project={project} env={env} sandboxes={sandboxes} err={err || podsErr} busy={busy} act={act} navigate={navigate}
       write={write} lastOk={podsOk} missing={sel && sandboxes ? sel : ''} />
   );
 }
@@ -124,19 +124,19 @@ export function StateCounts({ counts }) {
 
 // SandboxList is the environment's sandboxes: their counts by state, a
 // search, and one row each, the newest activity first.
-export function SandboxList({ tenant, env, sandboxes, err, busy, act, navigate, write = false, lastOk, missing }) {
+export function SandboxList({ project, env, sandboxes, err, busy, act, navigate, write = false, lastOk, missing }) {
   const [q, setQ] = useState('');
   const list = useMemo(() => byActivity(filterSandboxes(sandboxes, q)), [sandboxes, q]);
   const counts = useMemo(() => stateCounts(sandboxes), [sandboxes]);
-  const showOwner = (sandboxes || []).some((s) => ownerShown(s, tenant));
-  const newPath = newSandboxPath(tenant, env);
-  const pick = (sb) => navigate(sandboxPath(tenant, env, sb.sandboxId));
+  const showOwner = (sandboxes || []).some((s) => ownerShown(s, project));
+  const newPath = newSandboxPath(project, env);
+  const pick = (sb) => navigate(sandboxPath(project, env, sb.sandboxId));
 
   return (
     <>
       <header className="pagehead objhead">
         <p className="pagehead-kind">Sandboxes in{' '}
-          <EnvLink to={envPath(tenant, env)} navigate={navigate}><EnvName name={env} className="" /></EnvLink></p>
+          <EnvLink to={envPath(project, env)} navigate={navigate}><EnvName name={env} className="" /></EnvLink></p>
         <div className="pagehead-title">
           <h1>Sandboxes</h1>
           {lastOk > 0 && <LiveBadge lastOk={lastOk} />}
@@ -181,12 +181,12 @@ export function SandboxList({ tenant, env, sandboxes, err, busy, act, navigate, 
                   <tr key={sb.sandboxId} className="clickable" onClick={() => pick(sb)}>
                     <td className="mono" title={sb.sandboxId}>
                       <span className="sbx-id">
-                        <EnvLink to={sandboxPath(tenant, env, sb.sandboxId)} navigate={navigate}>{sb.sandboxId}</EnvLink>
+                        <EnvLink to={sandboxPath(project, env, sb.sandboxId)} navigate={navigate}>{sb.sandboxId}</EnvLink>
                         <CopyBtn text={sb.sandboxId} mini title="copy the sandbox ID" />
                       </span>
                     </td>
                     <td className="small"><ReachesWords reaches={reachesOf(sb)} /></td>
-                    {showOwner && <td className="small">{ownerShown(sb, tenant) || <span className="muted">—</span>}</td>}
+                    {showOwner && <td className="small">{ownerShown(sb, project) || <span className="muted">—</span>}</td>}
                     <td className="mono small muted trunc" title={sb.image}>{sb.image || 'the default'}</td>
                     <td>
                       <span className="cell-state" title={sb.statusDescription || sb.clientState}>
@@ -242,9 +242,9 @@ function QuickAction({ sb, busy, act, write }) {
 
 // NewSandbox is the create form's page, in env; write tells whether
 // the role may make one there.
-function NewSandbox({ tenant, env, navigate, can: c, busy, err, write, onCreate }) {
+function NewSandbox({ project, env, navigate, can: c, busy, err, write, onCreate }) {
   const [defaults, setDefaults] = useState(null);
-  const back = sandboxPath(tenant, env);
+  const back = sandboxPath(project, env);
   // The platform's defaults and bounds are in the nodes view's answer
   // (GET /api/v1/admin/nodes), an operator's; others see "the default".
   useEffect(() => {
@@ -257,7 +257,7 @@ function NewSandbox({ tenant, env, navigate, can: c, busy, err, write, onCreate 
     <>
       <header className="pagehead objhead">
         <p className="pagehead-kind">Sandbox in{' '}
-          <EnvLink to={envPath(tenant, env)} navigate={navigate}><EnvName name={env} className="" /></EnvLink></p>
+          <EnvLink to={envPath(project, env)} navigate={navigate}><EnvName name={env} className="" /></EnvLink></p>
         <div className="pagehead-title">
           <h1>New sandbox</h1>
           <span className="pagehead-actions">
@@ -270,7 +270,7 @@ function NewSandbox({ tenant, env, navigate, can: c, busy, err, write, onCreate 
       <div className="tabbody">
         <ErrBox error={err} />
         {!write && <p className="error">Your role does not allow this: it needs write on {env}.</p>}
-        <CreateForm defaults={defaults} busy={busy} disabled={!write} tenant={tenant} env={env} navigate={navigate}
+        <CreateForm defaults={defaults} busy={busy} disabled={!write} project={project} env={env} navigate={navigate}
           onSubmit={onCreate} onCancel={() => navigate(back)} />
       </div>
     </>
@@ -284,7 +284,7 @@ function NewSandbox({ tenant, env, navigate, can: c, busy, err, write, onCreate 
 // name from defaults (the nodes view's), as they name the bounds ferund
 // accepts. disabled: the role may not make one. onSubmit gets
 // createSandbox's arguments.
-export function CreateForm({ defaults, busy, disabled = false, tenant = '', env, navigate = null, onSubmit, onCancel }) {
+export function CreateForm({ defaults, busy, disabled = false, project = '', env, navigate = null, onSubmit, onCancel }) {
   const hints = createHints(fleetDefaults(defaults));
   const [f, setF] = useState(() => newSandboxForm(env));
   const [bad, setBad] = useState('');
@@ -352,7 +352,7 @@ export function CreateForm({ defaults, busy, disabled = false, tenant = '', env,
         </div>
         <span className="sbx-hint">Sealed in ferund and never shown again; rotate or remove it later under the sandbox's Secrets.</span>
       </fieldset>
-      <HttpSecretPicker tenant={tenant} env={env} value={f.secrets} disabled={disabled} navigate={navigate}
+      <HttpSecretPicker project={project} env={env} value={f.secrets} disabled={disabled} navigate={navigate}
         onChange={(secrets) => setF({ ...f, secrets })} />
       {bad && <p className="error">{bad}</p>}
       <div className="sbx-formactions">
@@ -370,9 +370,9 @@ export function CreateForm({ defaults, busy, disabled = false, tenant = '', env,
 // environment, the ID, the owner, the state in words with what it
 // costs, the main actions, the facts (what it reaches of the
 // environment, its image and size, its times).
-export function SandboxHead({ sb, tenant, busy, act, write, onConnect, lastOk = 0, navigate = () => {} }) {
+export function SandboxHead({ sb, project, busy, act, write, onConnect, lastOk = 0, navigate = () => {} }) {
   const words = stateWords(sb);
-  const owner = ownerShown(sb, tenant);
+  const owner = ownerShown(sb, project);
   const hibernated = sb.clientState === 'hibernated';
   const why = write ? undefined : WRITE_REASON;
   const env = envRef(sb);
@@ -380,7 +380,7 @@ export function SandboxHead({ sb, tenant, busy, act, write, onConnect, lastOk = 
     <header className="pagehead objhead">
       <p className="pagehead-kind">Sandbox in{' '}
         {env
-          ? <EnvLink to={envPath(tenant, env.name || env.id)} navigate={navigate}><EnvName name={env.name || env.id} className="" /></EnvLink>
+          ? <EnvLink to={envPath(project, env.name || env.id)} navigate={navigate}><EnvName name={env.name || env.id} className="" /></EnvLink>
           : <span className="muted">—</span>}</p>
       <div className="pagehead-title">
         <h1 className="mono">{sb.sandboxId}</h1>
@@ -421,16 +421,16 @@ export function SandboxHead({ sb, tenant, busy, act, write, onConnect, lastOk = 
 
 // SandboxPage is a sandbox's page in its environment: the head, the tab
 // bar of its views (links, as an object's), the view.
-function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, write, lastOk, fresh, onFreshSeen }) {
+function SandboxPage({ project, env, sb, tab, busy, act, err, navigate, can: c, write, lastOk, fresh, onFreshSeen }) {
   const tabs = SANDBOX_TABS;
   const cur = activeTab(tab);
-  const pathOf = (t) => sandboxPath(tenant, env, sb.sandboxId, t);
+  const pathOf = (t) => sandboxPath(project, env, sb.sandboxId, t);
   const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
   const load = useCallback((source) => api.listActivity(sb.sandboxId, { source }), [sb.sandboxId]);
 
   return (
     <>
-      <SandboxHead sb={sb} tenant={tenant} busy={busy} act={act} write={write} lastOk={lastOk}
+      <SandboxHead sb={sb} project={project} busy={busy} act={act} write={write} lastOk={lastOk}
         onConnect={() => navigate(pathOf('connect'))} navigate={navigate} />
       <nav className="tabbar obj-tabs" aria-label="views">
         {tabs.map((t) => {
@@ -444,12 +444,12 @@ function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, w
       </nav>
       <div className="tabbody">
         <ErrBox error={err} />
-        {cur === 'overview' && <Overview sb={sb} tenant={tenant} can={c} navigate={navigate} write={write} busy={busy} act={act} />}
+        {cur === 'overview' && <Overview sb={sb} project={project} can={c} navigate={navigate} write={write} busy={busy} act={act} />}
         {cur === 'connect' && <Connect sandboxId={sb.sandboxId} write={write} fresh={fresh} onFreshSeen={onFreshSeen} />}
         {cur === 'secrets' && (
           <>
             <h3 className="sect sect-first"><Icon name="plug" size={13} /> HTTP secrets</h3>
-            <SandboxHttpSecrets tenant={tenant} env={env} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
+            <SandboxHttpSecrets project={project} env={env} sandboxId={sb.sandboxId} write={write} navigate={navigate} />
             <Access sandboxId={sb.sandboxId} />
             <h3 className="sect"><Icon name="key" size={13} /> Registry login</h3>
             <ImageCredentials sandboxId={sb.sandboxId} write={write} />
@@ -457,7 +457,7 @@ function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, w
         {cur === 'network' && <Network sandboxId={sb.sandboxId} />}
         {cur === 'activity' && <Activity load={load} />}
         {cur === 'settings' && (
-          <Settings sb={sb} busy={busy} act={act} write={write} onDeleted={() => navigate(sandboxPath(tenant, env))} />)}
+          <Settings sb={sb} busy={busy} act={act} write={write} onDeleted={() => navigate(sandboxPath(project, env))} />)}
       </div>
     </>
   );
@@ -465,7 +465,7 @@ function SandboxPage({ tenant, env, sb, tab, busy, act, err, navigate, can: c, w
 
 // Overview is the facts, what it reaches with its change, and what
 // the sandbox does when idle.
-export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '', act = async () => {} }) {
+export function Overview({ sb, project, can: c, navigate, write = false, busy = '', act = async () => {} }) {
   const node = sb.node && c.operator
     ? <a href={`/nodes/${encodeURIComponent(sb.node)}`} onClick={(e) => { e.preventDefault(); navigate(`/nodes/${encodeURIComponent(sb.node)}`); }}>{sb.node}</a>
     : sb.node || '—';
@@ -476,12 +476,12 @@ export function Overview({ sb, tenant, can: c, navigate, write = false, busy = '
         <span className="v">{stateWords(sb).long}</span>
         {sb.statusDescription && <><span className="k">status</span><span className="v small">{sb.statusDescription}</span></>}
         <span className="k">sandbox ID</span><span className="v mono">{sb.sandboxId} <CopyBtn text={sb.sandboxId} mini /></span>
-        <span className="k">owner</span><span className="v">{ownerShown(sb, tenant) || <span className="muted">the tenant {tenant}</span>}</span>
+        <span className="k">owner</span><span className="v">{ownerShown(sb, project) || <span className="muted">the project {project}</span>}</span>
         <span className="k">image</span><span className="v mono">{sb.image || 'the default image'}</span>
         <span className="k">node</span><span className="v mono">{node}</span>
         <span className="k">size</span><span className="v">{sizeWords(sb) || 'the default'}</span>
         <span className="k">environment</span>
-        <span className="v"><EnvLinkName tenant={tenant} env={envRef(sb)} navigate={navigate} />
+        <span className="v"><EnvLinkName project={project} env={envRef(sb)} navigate={navigate} />
           <span className="muted"> · fixed at its create; its attached services run in this sandbox</span></span>
         <span className="k">reaches</span><span className="v"><ReachesSummary pod={{ reaches: reachesOf(sb), egress: sb.egress }} /></span>
         <span className="k">created</span><span className="v">{fmtDate(sb.createdAt)} <Ago iso={sb.createdAt} /></span>

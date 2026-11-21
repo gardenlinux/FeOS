@@ -261,17 +261,17 @@ func (s *server) challengeBasic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="`+realm+`"`)
 }
 
-// tenantHeader names the tenant a person's session acts in (ADR 0031); a
-// token's tenant is its own.
-const tenantHeader = auth.TenantHeader
+// projectHeader names the project a person's session acts in (ADR 0031); a
+// token's project is its own.
+const projectHeader = auth.ProjectHeader
 
-// scope is what a tenant-class route's role is checked on.
+// scope is what a project-class route's role is checked on.
 type scope int
 
 const (
-	// scopeTenant: the principal's tenant grant.
-	scopeTenant scope = iota
-	// scopeEnv: the path's {env}, the higher of the principal's tenant
+	// scopeProject: the principal's project grant.
+	scopeProject scope = iota
+	// scopeEnv: the path's {env}, the higher of the principal's project
 	// grant and its grant on that environment.
 	scopeEnv
 	// scopeHandler: the handler checks, on what the request names (a
@@ -282,30 +282,30 @@ const (
 	// 0035), as scopeEnv; a sandbox in one the principal may not read is
 	// absent (404).
 	scopeSandbox
-	// scopeJob: the environment of the path's tenant's job {id}, as
+	// scopeJob: the environment of the path's project's job {id}, as
 	// scopeSandbox.
 	scopeJob
 )
 
-// need is the role and scope a tenant-class route needs of its principal,
-// stated at the route (ADR 0031). A need of RoleNone on the tenant is a
-// member's: any grant in the tenant, the answer filtered to what the
+// need is the role and scope a project-class route needs of its principal,
+// stated at the route (ADR 0031). A need of RoleNone on the project is a
+// member's: any grant in the project, the answer filtered to what the
 // principal may read.
 type need struct {
 	role  auth.Role
 	scope scope
-	// orTenant is, on scopeEnv, a tenant role that suffices too (an
-	// environment's deletion: its admin, or write on the tenant).
-	orTenant auth.Role
+	// orProject is, on scopeEnv, a project role that suffices too (an
+	// environment's deletion: its admin, or write on the project).
+	orProject auth.Role
 }
 
-func onTenant(r auth.Role) need  { return need{role: r} }
+func onProject(r auth.Role) need { return need{role: r} }
 func onEnv(r auth.Role) need     { return need{role: r, scope: scopeEnv} }
 func onSandbox(r auth.Role) need { return need{role: r, scope: scopeSandbox} }
 func onJob(r auth.Role) need     { return need{role: r, scope: scopeJob} }
 func byHandler(r auth.Role) need { return need{role: r, scope: scopeHandler} }
 
-// member is the need of the routes every principal of the tenant may
+// member is the need of the routes every principal of the project may
 // call, whose answers are filtered to what it may read.
 var member = need{}
 
@@ -318,36 +318,36 @@ func (n need) String() string {
 		return n.role.String() + " sandbox's environment"
 	case n.scope == scopeJob:
 		return n.role.String() + " job's environment"
-	case n.scope == scopeEnv && n.orTenant != auth.RoleNone:
-		return n.role.String() + " environment or " + n.orTenant.String() + " tenant"
+	case n.scope == scopeEnv && n.orProject != auth.RoleNone:
+		return n.role.String() + " environment or " + n.orProject.String() + " project"
 	case n.scope == scopeEnv:
 		return n.role.String() + " environment"
 	case n.role == auth.RoleNone:
 		return "member"
 	}
-	return n.role.String() + " tenant"
+	return n.role.String() + " project"
 }
 
-// errNoTenant is the answer for a tenant the principal is no member of,
+// errNoProject is the answer for a project the principal is no member of,
 // absent or foreign alike, and for a token's request that names another
-// tenant than its own.
-func errNoTenant() error { return apierr.New(http.StatusNotFound, "no such tenant") }
+// project than its own.
+func errNoProject() error { return apierr.New(http.StatusNotFound, "no such project") }
 
 // errNoEnvironment is the environments' answer for an environment the
 // principal may not see (env.errNoEnvironment's text).
 func errNoEnvironment() error { return apierr.New(http.StatusNotFound, "no such environment") }
 
-// tenant is the tenant class: the principal is a tenant's token (the
-// bearer), or a person's session that names its tenant in FeRun-Tenant,
+// project is the project class: the principal is a project's token (the
+// bearer), or a person's session that names its project in FeRun-Project,
 // with the CSRF rules of a session. Then the route's need is checked
 // (allow).
-func (s *server) tenant(n need, h apiHandler) http.Handler {
+func (s *server) project(n need, h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
-		t, err := s.tenantPrincipal(w, r)
+		t, err := s.projectPrincipal(w, r)
 		if err != nil {
 			return err
 		}
-		r = r.WithContext(auth.WithTenant(r.Context(), t))
+		r = r.WithContext(auth.WithProject(r.Context(), t))
 		r, err = s.allow(r, t, n)
 		if err != nil {
 			return err
@@ -356,60 +356,60 @@ func (s *server) tenant(n need, h apiHandler) http.Handler {
 	})
 }
 
-// tenantPrincipal resolves the principal of a tenant-class request and
-// its grants in the tenant.
-func (s *server) tenantPrincipal(w http.ResponseWriter, r *http.Request) (auth.Tenant, error) {
-	return s.tenantPrincipalOr(w, r, "tenant bearer required")
+// projectPrincipal resolves the principal of a project-class request and
+// its grants in the project.
+func (s *server) projectPrincipal(w http.ResponseWriter, r *http.Request) (auth.Project, error) {
+	return s.projectPrincipalOr(w, r, "project bearer required")
 }
 
-// tenantPrincipalOr is tenantPrincipal, whose 401 for a request with no
+// projectPrincipalOr is projectPrincipal, whose 401 for a request with no
 // credential at all says missing (the class's text).
-func (s *server) tenantPrincipalOr(w http.ResponseWriter, r *http.Request, missing string) (auth.Tenant, error) {
+func (s *server) projectPrincipalOr(w http.ResponseWriter, r *http.Request, missing string) (auth.Project, error) {
 	ctx := r.Context()
-	named := r.Header.Get(tenantHeader)
+	named := r.Header.Get(projectHeader)
 	if tok := bearer(r); tok != "" {
 		hash := store.HashToken(tok)
 		name, roles, err := s.st.TokenAccess(ctx, hash)
 		if errors.Is(err, model.ErrUnknownToken) {
-			return auth.Tenant{}, apierr.New(http.StatusUnauthorized, "unknown tenant token")
+			return auth.Project{}, apierr.New(http.StatusUnauthorized, "unknown project token")
 		}
 		if err != nil {
-			return auth.Tenant{}, fmt.Errorf("token lookup: %w", err)
+			return auth.Project{}, fmt.Errorf("token lookup: %w", err)
 		}
 		if named != "" && named != name {
-			return auth.Tenant{}, errNoTenant()
+			return auth.Project{}, errNoProject()
 		}
 		if s.touches.due("t:" + hash) {
-			if err := s.st.TouchTenantToken(ctx, hash); err != nil {
-				s.log.Warn("touch a tenant token", "err", err)
+			if err := s.st.TouchProjectToken(ctx, hash); err != nil {
+				s.log.Warn("touch a project token", "err", err)
 			}
 		}
-		t := auth.Tenant{Name: name, Token: tok, Principal: auth.Principal{TokenHash: hash}}
+		t := auth.Project{Name: name, Token: tok, Principal: auth.Principal{TokenHash: hash}}
 		grantRoles(&t, roles)
 		return t, nil
 	}
 	sess, ok, err := s.session(r)
 	if err != nil {
-		return auth.Tenant{}, err
+		return auth.Project{}, err
 	}
 	if !ok || sess.PersonID == uuid.Nil {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
-		return auth.Tenant{}, apierr.New(http.StatusUnauthorized, "%s", missing)
+		return auth.Project{}, apierr.New(http.StatusUnauthorized, "%s", missing)
 	}
 	if err := s.checkCSRF(r); err != nil {
-		return auth.Tenant{}, err
+		return auth.Project{}, err
 	}
 	if named == "" {
-		return auth.Tenant{}, apierr.New(http.StatusBadRequest, "a session names its tenant in the %s header", tenantHeader)
+		return auth.Project{}, apierr.New(http.StatusBadRequest, "a session names its project in the %s header", projectHeader)
 	}
 	roles, exists, err := s.st.PersonAccess(ctx, named, sess.PersonID)
 	if err != nil {
-		return auth.Tenant{}, fmt.Errorf("grants: %w", err)
+		return auth.Project{}, fmt.Errorf("grants: %w", err)
 	}
 	if !exists || (!sess.Admin && len(roles) == 0) {
-		return auth.Tenant{}, errNoTenant()
+		return auth.Project{}, errNoProject()
 	}
-	t := auth.Tenant{Name: named, Principal: auth.Principal{Person: sess.PersonID, Operator: sess.Admin}}
+	t := auth.Project{Name: named, Principal: auth.Principal{Person: sess.PersonID, Operator: sess.Admin}}
 	t.Session = auth.SessionOf(r)
 	grantRoles(&t, roles)
 	if sess.Admin {
@@ -420,7 +420,7 @@ func (s *server) tenantPrincipalOr(w http.ResponseWriter, r *http.Request, missi
 
 // grantRoles sets a principal's roles from its grants: per scope the
 // highest.
-func grantRoles(t *auth.Tenant, roles []store.RoleAt) {
+func grantRoles(t *auth.Project, roles []store.RoleAt) {
 	for _, ra := range roles {
 		role, ok := auth.ParseRole(ra.Role)
 		if !ok {
@@ -450,9 +450,9 @@ var authTokenPrefix = pki.ServiceTokenPrefix(model.ServiceAuth)
 
 // provider is the provider class (ADR 0054): a bearer that starts with
 // feos-auth- is a service token, which must be ferun-auth's (kind auth;
-// else 401 unknown service token); any other credential is a tenant's
-// principal, taken exactly as the tenant class takes it (a token, or a
-// session that names its tenant, with the CSRF rules of a session). The
+// else 401 unknown service token); any other credential is a project's
+// principal, taken exactly as the project class takes it (a token, or a
+// session that names its project, with the CSRF rules of a session). The
 // route states no need: the visits service decides, on the challenge or
 // the visit, whether the caller answers for its environment.
 func (s *server) provider(h apiHandler) http.Handler {
@@ -467,11 +467,11 @@ func (s *server) provider(h apiHandler) http.Handler {
 			}
 			return h(w, r.WithContext(auth.WithService(r.Context(), svc)))
 		}
-		t, err := s.tenantPrincipalOr(w, r, textProviderRequired)
+		t, err := s.projectPrincipalOr(w, r, textProviderRequired)
 		if err != nil {
 			return err
 		}
-		return h(w, r.WithContext(auth.WithTenant(r.Context(), t)))
+		return h(w, r.WithContext(auth.WithProject(r.Context(), t)))
 	})
 }
 
@@ -524,22 +524,22 @@ func (s *server) authService(r *http.Request, tok string) (auth.Service, bool, e
 	return auth.Service{Kind: t.Kind, Name: t.Name, ID: t.ID, TokenHash: hash}, true, nil
 }
 
-// allow checks a route's need: on the tenant, the principal's tenant
+// allow checks a route's need: on the project, the principal's project
 // grant; on an environment, the higher of that and its grant there, an
 // environment it holds no role on being absent (404). A role too low is
 // 403 role_required. An environment it resolved to check the grant
 // there goes with the request it returns (checkedEnv), so that the
 // handler acts on the environment that was checked, whatever its name
 // names by then.
-func (s *server) allow(r *http.Request, t auth.Tenant, n need) (*http.Request, error) {
+func (s *server) allow(r *http.Request, t auth.Project, n need) (*http.Request, error) {
 	switch n.scope {
-	case scopeTenant:
+	case scopeProject:
 		if t.Role >= n.role {
 			return r, nil
 		}
-		return r, apierr.RoleRequired(n.role.String(), "tenant")
+		return r, apierr.RoleRequired(n.role.String(), "project")
 	case scopeEnv:
-		if t.Role >= n.role || (n.orTenant != auth.RoleNone && t.Role >= n.orTenant) {
+		if t.Role >= n.role || (n.orProject != auth.RoleNone && t.Role >= n.orProject) {
 			return r, nil
 		}
 		if t.Role == auth.RoleNone && len(t.Envs) == 0 {
@@ -572,15 +572,15 @@ type checkedEnvRef struct {
 }
 
 // checkedEnv is the ID of the environment that allow resolved ref to for
-// this request, false when it resolved none (a tenant grant sufficed).
+// this request, false when it resolved none (a project grant sufficed).
 func checkedEnv(r *http.Request, ref string) (uuid.UUID, bool) {
 	c, ok := r.Context().Value(checkedEnvKey{}).(checkedEnvRef)
 	return c.id, ok && c.ref == ref
 }
 
-// envRef is the ID of the environment of t's tenant that ref names (its
+// envRef is the ID of the environment of t's project that ref names (its
 // ID or its name); none is 404.
-func (s *server) envRef(r *http.Request, t auth.Tenant, ref string) (uuid.UUID, error) {
+func (s *server) envRef(r *http.Request, t auth.Project, ref string) (uuid.UUID, error) {
 	id, err := s.st.EnvironmentRef(r.Context(), t.Name, ref)
 	if isNoRow(err) {
 		return uuid.Nil, errNoEnvironment()
@@ -592,13 +592,13 @@ func (s *server) envRef(r *http.Request, t auth.Tenant, ref string) (uuid.UUID, 
 }
 
 // allowPodEnv checks n's role on the environment of the path's sandbox
-// (scopeSandbox) or tenant's job (scopeJob) of t's tenant: one that is
-// none of the tenant's, or in an environment the principal may not read,
+// (scopeSandbox) or project's job (scopeJob) of t's project: one that is
+// none of the project's, or in an environment the principal may not read,
 // is absent (404); too low a role is 403.
-func (s *server) allowPodEnv(r *http.Request, t auth.Tenant, n need) error {
+func (s *server) allowPodEnv(r *http.Request, t auth.Project, n need) error {
 	absent := func() error { return errUnknownSandbox(r.PathValue("id")) }
 	if n.scope == scopeJob {
-		absent = errNoTenantJob
+		absent = errNoProjectJob
 	}
 	if t.Role == auth.RoleNone && len(t.Envs) == 0 {
 		return absent()
@@ -618,7 +618,7 @@ func (s *server) allowPodEnv(r *http.Request, t auth.Tenant, n need) error {
 		}
 		envID = sb.EnvID
 	} else {
-		j, err := s.st.GetTenantJob(r.Context(), t.Name, id)
+		j, err := s.st.GetProjectJob(r.Context(), t.Name, id)
 		if isNoRow(err) {
 			return absent()
 		}
@@ -636,13 +636,13 @@ func (s *server) allowPodEnv(r *http.Request, t auth.Tenant, n need) error {
 	return nil
 }
 
-// errNoTenantJob is the jobs' answer for a job the principal may not see
-// (env.errNoTenantJob's text).
-func errNoTenantJob() error { return apierr.New(http.StatusNotFound, "no such job") }
+// errNoProjectJob is the jobs' answer for a job the principal may not see
+// (env.errNoProjectJob's text).
+func errNoProjectJob() error { return apierr.New(http.StatusNotFound, "no such job") }
 
-// allowEnv checks role on the environment of t's tenant that ref names
+// allowEnv checks role on the environment of t's project that ref names
 // (its ID or its name).
-func (s *server) allowEnv(r *http.Request, t auth.Tenant, ref string, role auth.Role) error {
+func (s *server) allowEnv(r *http.Request, t auth.Project, ref string, role auth.Role) error {
 	if t.Role >= role {
 		return nil
 	}
@@ -654,7 +654,7 @@ func (s *server) allowEnv(r *http.Request, t auth.Tenant, ref string, role auth.
 }
 
 // allowEnvID checks role on the environment id: none is 404, too low 403.
-func allowEnvID(t auth.Tenant, id uuid.UUID, role auth.Role) error {
+func allowEnvID(t auth.Project, id uuid.UUID, role auth.Role) error {
 	switch have := t.EnvRole(id); {
 	case have == auth.RoleNone:
 		return errNoEnvironment()
@@ -667,8 +667,8 @@ func allowEnvID(t auth.Tenant, id uuid.UUID, role auth.Role) error {
 // mayReadEnv reports whether the request's principal may read the
 // environment of that ID (a list's filter).
 func mayReadEnv(r *http.Request, id string) bool {
-	t, _ := auth.TenantFrom(r.Context())
-	if t.MayOnTenant(auth.RoleRead) {
+	t, _ := auth.ProjectFrom(r.Context())
+	if t.MayOnProject(auth.RoleRead) {
 		return true
 	}
 	u, err := uuid.Parse(id)
@@ -677,7 +677,7 @@ func mayReadEnv(r *http.Request, id string) bool {
 
 // sandbox is the sandbox class: the bearer is a sandbox's token, and the
 // {id} of the path is a claim the token must back. A token of another
-// sandbox, a tenant's token and an unknown one all get the answer of an
+// sandbox, a project's token and an unknown one all get the answer of an
 // absent sandbox.
 func (s *server) sandbox(h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
@@ -705,7 +705,7 @@ func (s *server) sandbox(h apiHandler) http.Handler {
 }
 
 // ResolveSandboxToken resolves a bearer for the mcp and forward classes
-// (and the sandbox class): the sandbox it is a token of, ignoring a tenant
+// (and the sandbox class): the sandbox it is a token of, ignoring a project
 // being deleted; model.ErrUnknownToken when it is none.
 func ResolveSandboxToken(ctx context.Context, q db.Querier, bearer string) (auth.Sandbox, error) {
 	if bearer == "" {

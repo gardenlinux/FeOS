@@ -6,7 +6,7 @@ import { Icon } from '../Icon.jsx';
 import { search } from '../search.js';
 
 // The search (⌘K or Ctrl+K anywhere, or the sidebar's field): jumps to a
-// page, a tenant or a thing of the tenant by its name or ID (search.js).
+// page, a project or a thing of the project by its name or ID (search.js).
 // Arrows move, Enter opens, Escape closes.
 
 // usePaletteKey opens the search on ⌘K / Ctrl+K.
@@ -23,11 +23,11 @@ export function usePaletteKey(open) {
   }, [open]);
 }
 
-export function Palette({ all, tenant, environments, onClose, navigate }) {
+export function Palette({ all, project, environments, onClose, navigate }) {
   const [q, setQ] = useState('');
   const [at, setAt] = useState(0);
   const input = useRef(null);
-  const results = useMemo(() => search(all, q, { tenant, environments }), [all, q, tenant, environments]);
+  const results = useMemo(() => search(all, q, { project, environments }), [all, q, project, environments]);
 
   useEffect(() => { input.current && input.current.focus(); }, []);
   useEffect(() => { setAt(0); }, [q]);
@@ -54,7 +54,7 @@ export function Palette({ all, tenant, environments, onClose, navigate }) {
           <kbd>esc</kbd>
         </div>
         <div className="palette-list" role="listbox">
-          {results.length === 0 && <p className="empty">Nothing by that name or ID{tenant ? ` in ${tenant}` : ''}.</p>}
+          {results.length === 0 && <p className="empty">Nothing by that name or ID{project ? ` in ${project}` : ''}.</p>}
           {results.map((r, i) => (
             <button key={r.key} role="option" aria-selected={i === at}
               className={'palette-item' + (i === at ? ' on' : '')}

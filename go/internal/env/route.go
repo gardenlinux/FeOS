@@ -72,7 +72,7 @@ func routeToken(r *http.Request) (tok string, creds []string, header bool) {
 }
 
 // ferunBearer reports whether a request's Authorization, any of its
-// values, carries a FeRun credential as its bearer token, a tenant's
+// values, carries a FeRun credential as its bearer token, a project's
 // token or a sandbox's (the scheme in any case): one the door refuses to
 // pass on to an upstream.
 func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error) {
@@ -83,7 +83,7 @@ func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error
 			continue
 		}
 		hash := store.HashToken(tok)
-		switch _, err := s.st.ResolveTenantToken(ctx, hash); {
+		switch _, err := s.st.ResolveProjectToken(ctx, hash); {
 		case err == nil:
 			return true, nil
 		case !errors.Is(err, model.ErrUnknownToken):
@@ -155,9 +155,9 @@ func rawOf(path, raw string) string {
 // ServeRoute is the route door, ANY
 // /api/v1/environments/{env}/http/{path...}, an auth class of its own: a
 // route token of the environment in X-FeRun-Route-Token, else as Bearer
-// (401 "route token required"; a tenant token is refused the same way),
+// (401 "route token required"; a project token is refused the same way),
 // which stops here (from X-FeRun-Route-Token, the client's Authorization
-// goes on to the upstream, unless its bearer token is a tenant's or a
+// goes on to the upstream, unless its bearer token is a project's or a
 // sandbox's: 401 the same way, and nothing is forwarded), the longest
 // segment-aware
 // prefix match over the routes of the deployed deployment (the latest when
@@ -331,7 +331,7 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 // (FeCode replaces a lost workspace sandbox so) is routed to, as the
 // controller starts the service there anew. Otherwise refusal says why
 // not: a sandbox ID is free again once its sandbox is deleted, and
-// another tenant may take it, which the spec validated at apply never
+// another project may take it, which the spec validated at apply never
 // sees.
 func (s *Service) attachedSandbox(ctx context.Context, e store.Environment, service string) (podid.ID, string, error) {
 	a, err := s.st.GetAttached(ctx, e.ID, service)
@@ -346,7 +346,7 @@ func (s *Service) attachedSandbox(ctx context.Context, e store.Environment, serv
 		return "", "", fmt.Errorf("sandbox %s: %w", a.SandboxID, err)
 	}
 	if err != nil || sb.Owner != e.Owner || sb.EnvironmentID != e.ID || !sb.IsOwn() {
-		return "", fmt.Sprintf("sandbox %s of service %s is gone or not this tenant's", a.SandboxID, service), nil
+		return "", fmt.Sprintf("sandbox %s of service %s is gone or not this project's", a.SandboxID, service), nil
 	}
 	return sb.ID, "", nil
 }

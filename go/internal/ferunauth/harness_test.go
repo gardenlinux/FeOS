@@ -141,7 +141,7 @@ func (f *fakeFerund) serve(w http.ResponseWriter, r *http.Request) {
 // view adds a challenge of kind kind under sealed.
 func (f *fakeFerund) view(sealed string, kind string, o *oidcProvider) *challengeView {
 	v := &challengeView{Host: testHost, Restart: "https://" + testHost + "/menu?x=1", OIDC: o}
-	v.Environment.ID, v.Environment.Name, v.Environment.Tenant = "6f0c1d2e-0000-4000-8000-000000000001", "stage", "acme"
+	v.Environment.ID, v.Environment.Name, v.Environment.Project = "6f0c1d2e-0000-4000-8000-000000000001", "stage", "acme"
 	v.Provider.Name, v.Provider.Kind = "sso", kind
 	if kind == kindFerun {
 		v.Provider.Name = "ferun"

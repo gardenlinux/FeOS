@@ -8,12 +8,12 @@ import (
 	"testing"
 )
 
-// The zones of default hosts (ADR 0031): a tenant's hosts are in the apps
-// zone or the tenant zone, a zone the platform does not serve has none;
-// people's tenants get the tenant zone while there is one; only the apps
+// The zones of default hosts (ADR 0031): a project's hosts are in the apps
+// zone or the project zone, a zone the platform does not serve has none;
+// people's projects get the project zone while there is one; only the apps
 // zone's owners choose plain labels, and only there.
 func TestZones(t *testing.T) {
-	z := Zones{Apps: "apps.example.com", AppsOwners: []string{"fecode"}, Tenant: "apps.run.example.com"}
+	z := Zones{Apps: "apps.example.com", AppsOwners: []string{"fecode"}, Project: "apps.run.example.com"}
 	for zone, want := range map[string]string{
 		"": "apps.example.com", "apps.example.com": "apps.example.com",
 		"apps.run.example.com": "apps.run.example.com", "old.example.com": "",
@@ -22,12 +22,12 @@ func TestZones(t *testing.T) {
 			t.Errorf("Of(%q) = %q, want %q", zone, got, want)
 		}
 	}
-	if z.ForNewTenant(true) != "apps.run.example.com" || z.ForNewTenant(false) != "" {
-		t.Errorf("new tenants %q %q", z.ForNewTenant(true), z.ForNewTenant(false))
+	if z.ForNewProject(true) != "apps.run.example.com" || z.ForNewProject(false) != "" {
+		t.Errorf("new projects %q %q", z.ForNewProject(true), z.ForNewProject(false))
 	}
-	noTenantZone := Zones{Apps: "apps.example.com"}
-	if noTenantZone.ForNewTenant(true) != "" || noTenantZone.Of("apps.run.example.com") != "" {
-		t.Error("without a tenant zone")
+	noProjectZone := Zones{Apps: "apps.example.com"}
+	if noProjectZone.ForNewProject(true) != "" || noProjectZone.Of("apps.run.example.com") != "" {
+		t.Error("without a project zone")
 	}
 	for name, want := range map[string]struct {
 		zone string
@@ -44,20 +44,20 @@ func TestZones(t *testing.T) {
 		t.Error("no zones: the empty name is a zone")
 	}
 	for _, c := range []struct {
-		tenant, zone string
-		want         bool
+		project, zone string
+		want          bool
 	}{
 		{"fecode", "", true}, {"fecode", "apps.run.example.com", false}, {"acme", "", false},
 		{"fecode", "old.example.com", false},
 	} {
-		if got := z.PlainLabels(c.tenant, c.zone); got != c.want {
-			t.Errorf("PlainLabels(%q, %q) = %v", c.tenant, c.zone, got)
+		if got := z.PlainLabels(c.project, c.zone); got != c.want {
+			t.Errorf("PlainLabels(%q, %q) = %v", c.project, c.zone, got)
 		}
 	}
 	if got := z.Names(); !slices.Equal(got, []string{"apps.example.com", "apps.run.example.com"}) {
 		t.Errorf("names %v", got)
 	}
-	if got := noTenantZone.Names(); !slices.Equal(got, []string{"apps.example.com"}) {
+	if got := noProjectZone.Names(); !slices.Equal(got, []string{"apps.example.com"}) {
 		t.Errorf("names %v", got)
 	}
 }

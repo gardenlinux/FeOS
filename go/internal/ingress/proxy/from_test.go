@@ -74,7 +74,7 @@ func TestRouteFrom(t *testing.T) {
 					t.Fatalf("got %d %q, want 403 %q", rec.Code, rec.Body.String(), textRefused)
 				}
 				if r.Status != http.StatusForbidden || r.Reason != wire.ReasonRouteRefusedClient ||
-					r.Env != testEnv || r.Tenant != "acme" || r.Service != "web" || r.Instance != "" ||
+					r.Env != testEnv || r.Project != "acme" || r.Service != "web" || r.Instance != "" ||
 					r.Attempts != 0 || r.Outcome != "4xx" {
 					t.Fatalf("record %+v", r)
 				}

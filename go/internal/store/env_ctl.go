@@ -19,15 +19,15 @@ import (
 
 // attachedUsable is the condition under which an attached service a of
 // environment e may use the sandbox s it names (§13.6): s is a sandbox of
-// e (ADR 0035), not an instance row or a tenant's job's pod. A sandbox of the owner deleted and
+// e (ADR 0035), not an instance row or a project's job's pod. A sandbox of the owner deleted and
 // created again under the same ID (FeCode replaces a lost workspace
 // sandbox so) is a new incarnation the service starts in anew; one of
-// another tenant under that ID is never used.
-const attachedUsable = `s.owner = e.owner AND s.environment_id = e.id AND NOT s.instance AND NOT s.tenant_job`
+// another project under that ID is never used.
+const attachedUsable = `s.owner = e.owner AND s.environment_id = e.id AND NOT s.instance AND NOT s.project_job`
 
 // EnvCtlMembers returns the members of an environment's group env-<id>
 // (ADR 0034, 0035): the addresses of every row of the environment, its
-// instances, its sandboxes and its tenants' jobs' pods (any state, until
+// instances, its sandboxes and its projects' jobs' pods (any state, until
 // the row is gone), without the empty ones, distinct and sorted. The
 // caller keeps the IPv6 ones.
 func (s *Store) EnvCtlMembers(ctx context.Context, envID uuid.UUID) ([]string, error) {
@@ -42,7 +42,7 @@ func (s *Store) EnvCtlMembers(ctx context.Context, envID uuid.UUID) ([]string, e
 // EnvCtlGroupMembers returns the members of a workload's group wl-…
 // of environment envID (ADR 0034, revised): the addresses of the
 // environment's rows whose pod template names group, an instance's as its
-// object's, a sandbox's or a tenant's job's pod's as its own; without the
+// object's, a sandbox's or a project's job's pod's as its own; without the
 // empty ones, distinct and sorted. An attached service is its sandbox's
 // pod: its sandbox's row counts. The caller keeps the IPv6 ones.
 func (s *Store) EnvCtlGroupMembers(ctx context.Context, envID uuid.UUID, group string) ([]string, error) {
@@ -63,7 +63,7 @@ func (s *Store) EnvCtlSandboxes(ctx context.Context, envID uuid.UUID) ([]Sandbox
 }
 
 // CountEnvironmentRows counts the rows of sandboxes of an environment:
-// its instances, its sandboxes and its tenants' jobs' pods.
+// its instances, its sandboxes and its projects' jobs' pods.
 func (s *Store) CountEnvironmentRows(ctx context.Context, envID uuid.UUID) (int64, error) {
 	var n int64
 	err := s.q.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE environment_id = $1", envID).Scan(&n)
@@ -211,7 +211,7 @@ func (s *Store) EnvCtlJobWaitedUntil(ctx context.Context, envID uuid.UUID, job, 
 }
 
 // EnvCtlTemplatedOnNode returns the rows with a pod template whose pod is
-// on node, or is being brought there by an op: instance rows, tenants'
+// on node, or is being brought there by an op: instance rows, projects'
 // jobs' pods and sandboxes, by id.
 func (s *Store) EnvCtlTemplatedOnNode(ctx context.Context, node string) ([]Sandbox, error) {
 	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes

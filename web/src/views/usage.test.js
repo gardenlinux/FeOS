@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { QUOTA_ITEMS } from '../people.js';
 import { AT_LIMIT, COUNTS, booked } from './usage.js';
 
-// Where a tenant's booked vCPUs and memory are: its sandboxes by state,
+// Where a project's booked vCPUs and memory are: its sandboxes by state,
 // its jobs on their way, and the environments' rest of the quota's use.
 
 const QUOTA = {

@@ -121,8 +121,8 @@ func TestAddonLifecycle(t *testing.T) {
 		}
 		creds = append(creds, string(plain))
 	}
-	if tenant, _ := h.st.ListSecrets(bg, env.ID, false); len(tenant) != 0 {
-		t.Errorf("the credentials are listed as the tenant's: %+v", tenant)
+	if project, _ := h.st.ListSecrets(bg, env.ID, false); len(project) != 0 {
+		t.Errorf("the credentials are listed as the project's: %+v", project)
 	}
 
 	rows := h.rowsOf(env.ID, spec.KindAddon, "postgres")
@@ -667,8 +667,8 @@ func (h *harness) removeNode(name string) {
 }
 
 // A removed node never serves its volumes again: an addon whose row went
-// is not pinned there again (volume_unavailable), and a deleting tenant's
-// environment and the tenant are deleted although their volume was on it.
+// is not pinned there again (volume_unavailable), and a deleting project's
+// environment and the project are deleted although their volume was on it.
 func TestVolumeOfRemovedNode(t *testing.T) {
 	h := newHarness(t, options{})
 	h.addNode("n1")
@@ -685,7 +685,7 @@ func TestVolumeOfRemovedNode(t *testing.T) {
 		return len(h.rowsOf(env.ID, spec.KindAddon, "cache")) != 0
 	})
 
-	if _, err := h.st.MarkTenantDeleting(bg, testTenant); err != nil {
+	if _, err := h.st.MarkProjectDeleting(bg, testProject); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 60*time.Second, "the environment gone", func() bool {
@@ -696,10 +696,10 @@ func TestVolumeOfRemovedNode(t *testing.T) {
 	if err := h.d.Pool.QueryRow(bg, `SELECT count(*) FROM env_volumes`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("%d volume rows stay, %v", n, err)
 	}
-	// Nothing of the environment holds the tenant's deletion (the engine's
+	// Nothing of the environment holds the project's deletion (the engine's
 	// loop deletes it within its own interval).
-	if deleted, err := h.st.DeleteTenantIfEmpty(bg, testTenant); err != nil || !deleted {
-		t.Errorf("the tenant was not deleted: %v", err)
+	if deleted, err := h.st.DeleteProjectIfEmpty(bg, testProject); err != nil || !deleted {
+		t.Errorf("the project was not deleted: %v", err)
 	}
 }
 

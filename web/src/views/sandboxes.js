@@ -139,11 +139,11 @@ export function filterSandboxes(sandboxes, q, env = '') {
 }
 
 // ownerShown is the owner a sandbox page names beside the ID: ferund's
-// owner is the tenant, which says nothing on the tenant's own page, so
-// only an owner other than the tenant shows.
-export function ownerShown(sb, tenant) {
+// owner is the project, which says nothing on the project's own page, so
+// only an owner other than the project shows.
+export function ownerShown(sb, project) {
   const o = (sb && sb.owner) || '';
-  return o && o !== tenant ? o : '';
+  return o && o !== project ? o : '';
 }
 
 // SANDBOX_TABS are a sandbox's tabs, every reader of its environment's

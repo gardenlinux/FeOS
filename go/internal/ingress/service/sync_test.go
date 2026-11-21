@@ -32,11 +32,11 @@ import (
 const webSpec = `{"services": {"web": {"runtime": "image", "image": "web@sha256:1",
 	"ports": [{"name": "http", "port": 8080}]}}, "routes": {"root": {"path": "/", "service": "web", "port": "http"}}}`
 
-// world makes the tenant acme and the node n1, which holds version 2 of
+// world makes the project acme and the node n1, which holds version 2 of
 // the group ferun-ingress.
 func (h *harness) world() {
 	h.t.Helper()
-	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "acme"); err != nil {
 		h.t.Fatal(err)
 	}
 	if _, err := h.st.InsertNode(bg, "n1"); err != nil {

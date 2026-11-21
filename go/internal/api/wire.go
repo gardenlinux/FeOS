@@ -48,7 +48,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) error {
 	return nil
 }
 
-// rfc3339 renders a time as the API does for sandboxes, tokens, tenants
+// rfc3339 renders a time as the API does for sandboxes, tokens, projects
 // and the other row times: RFC 3339 in seconds, UTC; "" for the zero time.
 func rfc3339(t time.Time) string {
 	if t.IsZero() {

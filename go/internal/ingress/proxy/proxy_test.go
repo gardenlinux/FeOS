@@ -148,7 +148,7 @@ func stateWith(self wire.Self, hosts []string, services ...wire.Service) *wire.S
 	s := wire.NewState()
 	s.Self = self
 	s.Envs[testEnv] = wire.Env{
-		ID: testEnv, Tenant: "acme", Name: "app", Hosts: hosts, Deployment: 1,
+		ID: testEnv, Project: "acme", Name: "app", Hosts: hosts, Deployment: 1,
 		Routes: []wire.Route{
 			{Name: "root", Path: "/", Service: "web", Port: "http"},
 			{Name: "api", Path: "/api/", Service: "api", Port: "http", Strip: true},
@@ -1078,7 +1078,7 @@ func TestHostOnlyCookies(t *testing.T) {
 }
 
 // The proxy makes cookies host-only on hosts under the apps zone and the
-// tenant zone (ADR 0031), on every status, and leaves those of other
+// project zone (ADR 0031), on every status, and leaves those of other
 // hosts alone.
 func TestCookieFilter(t *testing.T) {
 	fn := newFakeNet()
@@ -1095,9 +1095,9 @@ func TestCookieFilter(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	}))
 	p, srv := newTestProxy(t, Config{}, Deps{}, fn, "n1")
-	const tenantHost = "web-acme.apps.run.example"
-	p.SetState(stateWith(wire.Self{AppsZone: "Apps.Example.", TenantZone: "apps.run.example"},
-		[]string{testHost, "custom.example.org", tenantHost},
+	const projectHost = "web-acme.apps.run.example"
+	p.SetState(stateWith(wire.Self{AppsZone: "Apps.Example.", ProjectZone: "apps.run.example"},
+		[]string{testHost, "custom.example.org", projectHost},
 		svc("web", ep("w1", "fd00::1", "n1"))))
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	var early []string
@@ -1129,9 +1129,9 @@ func TestCookieFilter(t *testing.T) {
 	if p.m.cookieDomains.Load() != 3 {
 		t.Errorf("removed %d", p.m.cookieDomains.Load())
 	}
-	want = []string{"a=1; Path=/", "b=2", "c=3", "d=4; Domain=" + tenantHost}
-	if got := do(tenantHost); strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Errorf("in the tenant zone: %q, want %q", got, want)
+	want = []string{"a=1; Path=/", "b=2", "c=3", "d=4; Domain=" + projectHost}
+	if got := do(projectHost); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("in the project zone: %q, want %q", got, want)
 	}
 	if p.m.cookieDomains.Load() != 6 {
 		t.Errorf("removed %d", p.m.cookieDomains.Load())

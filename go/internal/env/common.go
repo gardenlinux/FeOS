@@ -40,23 +40,23 @@ func parseUUID(s string) (uuid.UUID, bool) {
 	return id, err == nil
 }
 
-// resolveEnv reads the environment of tenant that ref names (its UUID or
-// its name) and locks its row with lock; an environment the tenant does
+// resolveEnv reads the environment of project that ref names (its UUID or
+// its name) and locks its row with lock; an environment the project does
 // not have, foreign or absent, is errNoEnvironment.
-func resolveEnv(ctx context.Context, st *store.Store, tenant, ref string, lock store.RowLock) (store.Environment, error) {
+func resolveEnv(ctx context.Context, st *store.Store, project, ref string, lock store.RowLock) (store.Environment, error) {
 	var e store.Environment
 	var err error
 	if id, ok := parseUUID(ref); ok {
-		if e, err = st.GetEnvironment(ctx, id); err == nil && e.Owner == tenant && lock != store.NoLock {
+		if e, err = st.GetEnvironment(ctx, id); err == nil && e.Owner == project && lock != store.NoLock {
 			e, err = st.LockEnvironment(ctx, id, lock)
 		}
 	} else {
 		if !spec.IsName(ref) {
 			return store.Environment{}, errNoEnvironment()
 		}
-		e, err = st.LockEnvironmentByName(ctx, tenant, ref, lock)
+		e, err = st.LockEnvironmentByName(ctx, project, ref, lock)
 	}
-	if errors.Is(err, store.ErrNoRow) || (err == nil && e.Owner != tenant) {
+	if errors.Is(err, store.ErrNoRow) || (err == nil && e.Owner != project) {
 		return store.Environment{}, errNoEnvironment()
 	}
 	if err != nil {
@@ -65,44 +65,44 @@ func resolveEnv(ctx context.Context, st *store.Store, tenant, ref string, lock s
 	return e, nil
 }
 
-// lockTenant takes the tenant's row FOR SHARE and refuses a deleting
+// lockProject takes the project's row FOR SHARE and refuses a deleting
 // one: what an environment's create, deployment and secret need.
-func lockTenant(ctx context.Context, tx *store.Store, tenant string) error {
-	t, err := tx.LockTenant(ctx, tenant, store.ForShare)
+func lockProject(ctx context.Context, tx *store.Store, project string) error {
+	t, err := tx.LockProject(ctx, project, store.ForShare)
 	if errors.Is(err, store.ErrNoRow) {
-		return apierr.New(http.StatusUnauthorized, "unknown tenant token")
+		return apierr.New(http.StatusUnauthorized, "unknown project token")
 	}
 	if err != nil {
-		return fmt.Errorf("tenant %s: %w", tenant, err)
+		return fmt.Errorf("project %s: %w", project, err)
 	}
 	if t.Deleting() {
-		return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+		return apierr.New(http.StatusConflict, "project %s is being deleted", project)
 	}
 	return nil
 }
 
-// lockQuota is lockTenant for what counts against the tenant's limits
+// lockQuota is lockProject for what counts against the project's limits
 // (ADR 0031): the row FOR NO KEY UPDATE when it has any (quota.Lock), so
-// that two creates do not pass a limit together. It returns the tenant.
-func lockQuota(ctx context.Context, tx *store.Store, tenant string) (store.Tenant, error) {
-	t, err := quota.Lock(ctx, tx, tenant)
+// that two creates do not pass a limit together. It returns the project.
+func lockQuota(ctx context.Context, tx *store.Store, project string) (store.Project, error) {
+	t, err := quota.Lock(ctx, tx, project)
 	if errors.Is(err, store.ErrNoRow) {
-		return store.Tenant{}, apierr.New(http.StatusUnauthorized, "unknown tenant token")
+		return store.Project{}, apierr.New(http.StatusUnauthorized, "unknown project token")
 	}
 	if err != nil {
-		return store.Tenant{}, fmt.Errorf("tenant %s: %w", tenant, err)
+		return store.Project{}, fmt.Errorf("project %s: %w", project, err)
 	}
 	if t.Deleting() {
-		return store.Tenant{}, apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+		return store.Project{}, apierr.New(http.StatusConflict, "project %s is being deleted", project)
 	}
 	return t, nil
 }
 
-// checkQuota refuses in tx what ask asks of a tenant with limits beyond
+// checkQuota refuses in tx what ask asks of a project with limits beyond
 // them (422 quota_exceeded), and a deployment of next in place of the
 // environment exclude's current (nil: none, a new environment) whose sums
 // would pass them (an InvalidSpecError). The caller holds lockQuota.
-func checkQuota(ctx context.Context, tx *store.Store, t store.Tenant, ask quota.Use, exclude uuid.UUID,
+func checkQuota(ctx context.Context, tx *store.Store, t store.Project, ask quota.Use, exclude uuid.UUID,
 	current, next *spec.Spec) error {
 	if !t.Limits.Any() {
 		return nil
@@ -143,15 +143,15 @@ func wake(ctx context.Context, tx *store.Store, hints ...string) error {
 
 // zones are the platform's zones of default hosts.
 func (s *Service) zones() model.Zones {
-	return model.Zones{Apps: s.d.AppsZone, AppsOwners: s.d.AppsZoneOwners, Tenant: s.d.TenantZone}
+	return model.Zones{Apps: s.d.AppsZone, AppsOwners: s.d.AppsZoneOwners, Project: s.d.ProjectZone}
 }
 
-// hostZone is the zone of the tenant's default hosts (model.Zones.Of):
+// hostZone is the zone of the project's default hosts (model.Zones.Of):
 // "" when the platform serves none of it, so that it has no default host.
-func (s *Service) hostZone(ctx context.Context, q *store.Store, tenant string) (string, error) {
-	t, err := q.GetTenant(ctx, tenant)
+func (s *Service) hostZone(ctx context.Context, q *store.Store, project string) (string, error) {
+	t, err := q.GetProject(ctx, project)
 	if err != nil {
-		return "", fmt.Errorf("the zone of tenant %s: %w", tenant, err)
+		return "", fmt.Errorf("the zone of project %s: %w", project, err)
 	}
 	return s.zones().Of(t.Zone), nil
 }

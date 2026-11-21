@@ -9,5 +9,5 @@
   "response": {
     "error": "the platform serves no apps zone (--apps-zone); an environment cannot be public"
   },
-  "note": "also 409 while the environment or its tenant is being deleted"
+  "note": "also 409 while the environment or its project is being deleted"
 }

@@ -139,7 +139,7 @@ Each binary is named after where it runs ([ADR 0003](adr/0003-programs.md)):
 - **`ferun-auth`** (`go/cmd/ferun-auth`): the access provider of the
   kinds `ferun` and `oidc`, an OpenID Connect relying party on a host of
   its own that signs a guarded environment's visitors in at the
-  installation's issuer or at a tenant's and answers their challenges at
+  installation's issuer or at a project's and answers their challenges at
   `ferund` ([ADR 0054](adr/0054-visitors-of-an-environment.md)). It
   holds no state and links no database driver. It ships in `ferund`'s
   image as `/ferun-auth`. Static, `CGO_ENABLED=0`.

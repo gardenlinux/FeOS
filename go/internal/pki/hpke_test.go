@@ -112,7 +112,7 @@ func TestParseNodeID(t *testing.T) {
 		mk("spiffe://" + testTD + "/node/a?x=1"),
 		mk("spiffe://" + testTD + ":1/node/a"),
 		mk("https://" + testTD + "/node/a"),
-		mk("spiffe://" + testTD + "/tenant/a/sandbox/b"),
+		mk("spiffe://" + testTD + "/project/a/sandbox/b"),
 	} {
 		if name, err := ParseNodeID(testTD, c); err == nil {
 			t.Errorf("ParseNodeID accepted %v as %q", c, name)

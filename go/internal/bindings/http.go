@@ -33,7 +33,7 @@ import (
 //	PUT    /api/v1/sandboxes/{id}/http   sandbox  the complete binding set
 //	GET    /api/v1/sandboxes/{id}/http   sandbox  the set, every secret field {"set": true}
 //	DELETE /api/v1/sandboxes/{id}/http   sandbox  no bindings
-//	POST   /api/v1/http/preflight        tenant   one binding, no sandbox
+//	POST   /api/v1/http/preflight        project   one binding, no sandbox
 //
 // A PUT states the whole set. It is stored with its credentials sealed,
 // a new interception CA is made when the set's intercepted names change,
@@ -229,7 +229,7 @@ func httpBindingOf(p *fleetv1.HttpBinding) httpBinding {
 
 // ------------------------------------------------------------ validation --
 
-// ownerOf is the tenant of the sandbox a sandbox-class request was made
+// ownerOf is the project of the sandbox a sandbox-class request was made
 // as.
 func ownerOf(r *http.Request) string {
 	sb, _ := auth.SandboxFrom(r.Context())

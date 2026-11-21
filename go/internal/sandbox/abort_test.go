@@ -101,7 +101,7 @@ func TestNoNodeCallCancelledByCaller(t *testing.T) {
 
 	// The tombstone of a delete: its DeletePod runs detached too.
 	n.Script().SetDelay(podv1.PodService_DeletePod_FullMethodName, 700*time.Millisecond)
-	if _, _, err := e.Delete(bg, testTenant, sb.ID); err != nil {
+	if _, _, err := e.Delete(bg, testProject, sb.ID); err != nil {
 		t.Fatal(err)
 	}
 	h.noPod("n1", sb.ID)

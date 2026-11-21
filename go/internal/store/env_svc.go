@@ -17,7 +17,7 @@ import (
 // the jobs' latest runs a status shows, and the attached services of
 // other environments in a sandbox.
 
-// EnvSummaryRow is an environment as its tenant's listing shows it.
+// EnvSummaryRow is an environment as its project's listing shows it.
 type EnvSummaryRow struct {
 	Environment
 	// DeploymentState is the state of its latest deployment; "" without one.
@@ -51,16 +51,16 @@ func (s *Store) EnvSummaries(ctx context.Context, owner string, labels map[strin
 	})
 }
 
-// SecretVersions are the versions of a tenant secret.
+// SecretVersions are the versions of a project secret.
 type SecretVersions struct {
 	// Versions are those not deleted, Deleted the deleted ones, both
 	// ascending.
 	Versions, Deleted []int
 }
 
-// TenantSecretVersions returns the versions of every tenant secret
+// ProjectSecretVersions returns the versions of every project secret
 // (system false) the environment ever had, by name.
-func (s *Store) TenantSecretVersions(ctx context.Context, envID uuid.UUID) (map[string]SecretVersions, error) {
+func (s *Store) ProjectSecretVersions(ctx context.Context, envID uuid.UUID) (map[string]SecretVersions, error) {
 	rows, err := s.q.Query(ctx, `SELECT name, version, deleted_at IS NOT NULL FROM env_secrets
 		WHERE env_id = $1 AND NOT system ORDER BY name, version`, envID)
 	if err != nil {

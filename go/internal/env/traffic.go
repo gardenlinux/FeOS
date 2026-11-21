@@ -122,16 +122,16 @@ type sinkTraffic struct {
 // (an attached service's routes only the route door serves). As
 // …/access-logs: without --sink-url or either 503 no_log_store, when the
 // sink fails 503 log_store_unavailable.
-func (s *Service) Traffic(ctx context.Context, tenant, env, window string) (Traffic, error) {
+func (s *Service) Traffic(ctx context.Context, project, env, window string) (Traffic, error) {
 	w, ok := trafficWindows[window]
 	if !ok {
 		return Traffic{}, apierr.New(http.StatusBadRequest, "window must be 1h or 24h, got %q", window)
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return Traffic{}, err
 	}
-	t, _ := auth.TenantFrom(ctx)
+	t, _ := auth.ProjectFrom(ctx)
 	switch {
 	case s.d.SinkURL == "":
 		return Traffic{}, apierr.WithCode(http.StatusServiceUnavailable, CodeNoLogStore,
@@ -274,7 +274,7 @@ func nsToMs(ns *float64) *float64 {
 // readSinkTraffic asks the sink for the traffic of services of the
 // environment envID from source in [since, until) by step, as t, without
 // the requests to a service's path in skip.
-func (s *Service) readSinkTraffic(ctx context.Context, t auth.Tenant, envID, source string, services []string,
+func (s *Service) readSinkTraffic(ctx context.Context, t auth.Project, envID, source string, services []string,
 	skip map[string]string, since, until time.Time, step time.Duration) ([]sinkTraffic, error) {
 	v := url.Values{"environment": {envID}, "service": services, "since": {strconv.FormatInt(since.UnixNano(), 10)},
 		"until": {strconv.FormatInt(until.UnixNano(), 10)}, "step": {strconv.FormatInt(int64(step/time.Second), 10) + "s"},

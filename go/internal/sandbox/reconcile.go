@@ -117,7 +117,7 @@ func (e *Engine) reconcilePod(ctx context.Context, node string, id podid.ID, p *
 			if !gone {
 				owner = row.Owner
 			}
-			events = []activity.Event{{SandboxID: id, TenantID: owner, Node: node, Kind: activity.KindTombstone,
+			events = []activity.Event{{SandboxID: id, ProjectID: owner, Node: node, Kind: activity.KindTombstone,
 				Name:   fmt.Sprintf("tombstone on node %s: %s", node, orphan),
 				Detail: map[string]any{"node": node, "incarnation": inc.String(), "reason": orphan}}}
 			return nil

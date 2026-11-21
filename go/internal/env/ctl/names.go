@@ -29,7 +29,7 @@ import (
 // names of the name tables its spec names (NameService, ADR 0010), as the
 // controller puts them on the pod's node, the way it puts security
 // groups. env-<env id>, which every pod of the environment names (its
-// service and job pods, its sandboxes and its tenants' jobs' pods, ADR
+// service and job pods, its sandboxes and its projects' jobs' pods, ADR
 // 0035), holds its addons and image services with the addresses of their
 // live replicas, and its attached services with their sandbox's address;
 // feosd answers a pod a name whose addresses include its own with

@@ -229,8 +229,8 @@ type world struct {
 	forwards atomic.Int64
 	// failLookup makes the token lookup fail.
 	failLookup atomic.Bool
-	// failTenantLookup makes the lookup of a tenant's token fail.
-	failTenantLookup atomic.Bool
+	// failProjectLookup makes the lookup of a project's token fail.
+	failProjectLookup atomic.Bool
 }
 
 func newWorld(t *testing.T, tune ...func(*timings)) *world {
@@ -252,12 +252,12 @@ func newWorld(t *testing.T, tune ...func(*timings)) *world {
 		return auth.Sandbox{}, model.ErrUnknownToken
 	}
 	w.h = New(w.eng, env.Port, w.kube, resolve, env.DB, env.Log)
-	tenantOf := w.h.tenantOf
-	w.h.tenantOf = func(ctx context.Context, hash string) (string, error) {
-		if w.failTenantLookup.Load() {
+	projectOf := w.h.projectOf
+	w.h.projectOf = func(ctx context.Context, hash string) (string, error) {
+		if w.failProjectLookup.Load() {
 			return "", errors.New("the database is gone")
 		}
-		return tenantOf(ctx, hash)
+		return projectOf(ctx, hash)
 	}
 	for _, f := range tune {
 		f(&w.h.t)

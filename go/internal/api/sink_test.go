@@ -19,15 +19,15 @@ import (
 	"github.com/gardenlinux/feos/go/internal/pki"
 )
 
-// GET /api/v1/tenant answers a tenant's token with its tenant and role,
+// GET /api/v1/project answers a project's token with its project and role,
 // anything else 401.
-func TestGetTenant(t *testing.T) {
+func TestGetProject(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	expect(t, e.do("GET", "/api/v1/tenant", bearerOf(e.tenantToken), nil), http.StatusOK,
-		`{"tenant":"acme","role":"admin","environments":[]}`+"\n")
-	expect(t, e.do("GET", "/api/v1/tenant", bearerOf("nope"), nil), http.StatusUnauthorized, errBody("unknown tenant token"))
-	expect(t, e.do("GET", "/api/v1/tenant", "", nil), http.StatusUnauthorized, errBody("tenant bearer required"))
+	expect(t, e.do("GET", "/api/v1/project", bearerOf(e.projectToken), nil), http.StatusOK,
+		`{"project":"acme","role":"admin","environments":[]}`+"\n")
+	expect(t, e.do("GET", "/api/v1/project", bearerOf("nope"), nil), http.StatusUnauthorized, errBody("unknown project token"))
+	expect(t, e.do("GET", "/api/v1/project", "", nil), http.StatusUnauthorized, errBody("project bearer required"))
 }
 
 // testIssuer is a fresh platform CA's issuer.
@@ -47,7 +47,7 @@ func testIssuer(t *testing.T) *pki.Issuer {
 
 // A sink's service token gets a certificate of 24 h whose one URI names
 // the token's sink, verified by the bundle as a server's; a wrong, a
-// tenant's or a revoked token is 401, a bad CSR 400, and the eleventh
+// project's or a revoked token is 401, a bad CSR 400, and the eleventh
 // certificate within an hour 429. The token's revoke is the admin's.
 func TestServiceCertificates(t *testing.T) {
 	t.Parallel()
@@ -107,7 +107,7 @@ func TestServiceCertificates(t *testing.T) {
 		t.Fatalf("notAfter %v (%s)", leaf.NotAfter, got.NotAfter)
 	}
 
-	for _, authz := range []string{bearerOf("feos-sink-nope"), bearerOf(e.tenantToken), bearerOf(token + "x")} {
+	for _, authz := range []string{bearerOf("feos-sink-nope"), bearerOf(e.projectToken), bearerOf(token + "x")} {
 		expect(t, e.do("POST", "/api/v1/service-certificates", authz, body), http.StatusUnauthorized,
 			errBody("unknown service token"))
 	}

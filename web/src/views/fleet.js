@@ -182,16 +182,16 @@ export function joinTokenState(t, now = Date.now()) {
   return 'open';
 }
 
-// tokenRows orders the tokens of a tenant's list newest first.
+// tokenRows orders the tokens of a project's list newest first.
 export function tokenRows(tokens) {
   return [...(tokens || [])]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
 
-// tenantDeleteText is the delete button's confirmation and title for a
-// tenant of the admin list: a tenant's deletion takes its sandboxes and
+// projectDeleteText is the delete button's confirmation and title for a
+// project of the admin list: a project's deletion takes its sandboxes and
 // its environments, with their addons' data, along.
-export function tenantDeleteText(t) {
+export function projectDeleteText(t) {
   const n = (v) => Number(v) || 0;
   const of = (k, one, many) => `${k} ${k === 1 ? one : many}`;
   const sandboxes = n(t && t.sandboxCount);
@@ -207,7 +207,7 @@ export function tenantDeleteText(t) {
   }
   return {
     confirm,
-    title: 'delete the tenant, its tokens, every sandbox and every environment of it, with the environments\' addon data',
+    title: 'delete the project, its tokens, every sandbox and every environment of it, with the environments\' addon data',
   };
 }
 

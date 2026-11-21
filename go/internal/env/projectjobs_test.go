@@ -17,18 +17,18 @@ import (
 )
 
 // A job's create gets its defaults, and a 400 for what it gets wrong.
-func TestTenantJobSpec(t *testing.T) {
-	rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "builder:1", ResultPath: "/run/out/digest"})
+func TestProjectJobSpec(t *testing.T) {
+	rs, err := projectJobSpec(CreateProjectJobRequest{Environment: "builds", Image: "builder:1", ResultPath: "/run/out/digest"})
 	if err != nil || rs.VCPUs != spec.DefaultVCPUs || rs.MemoryMiB != spec.DefaultMemoryMib ||
 		rs.Deadline != 10*time.Minute || rs.ResultPath != "/run/out/digest" || rs.Reaches.All || len(rs.Reaches.Entries) != 0 || rs.Egress != nil {
 		t.Fatalf("defaults %+v %v", rs, err)
 	}
-	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", Vcpus: 2, MemoryMib: 2048, Deadline: "20m"}); err != nil ||
+	if rs, err := projectJobSpec(CreateProjectJobRequest{Environment: "builds", Image: "b", Vcpus: 2, MemoryMib: 2048, Deadline: "20m"}); err != nil ||
 		rs.VCPUs != 2 || rs.MemoryMiB != 2048 || rs.Deadline != 20*time.Minute {
 		t.Fatalf("sized %+v %v", rs, err)
 	}
 	for _, d := range []int{0, 1, 400} {
-		if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", LogRetentionDays: d}); err != nil || rs.LogRetentionDays != d {
+		if rs, err := projectJobSpec(CreateProjectJobRequest{Environment: "builds", Image: "b", LogRetentionDays: d}); err != nil || rs.LogRetentionDays != d {
 			t.Fatalf("logRetentionDays %d: %+v %v", d, rs, err)
 		}
 	}
@@ -36,19 +36,19 @@ func TestTenantJobSpec(t *testing.T) {
 	// revised), as asked.
 	reaches := spec.Reaches{Entries: []spec.Use{{Service: "api", Port: spec.PortRef{Name: "http"}}, {Addon: "db"}}}
 	egress := &spec.Egress{Domains: []string{"ghcr.io"}}
-	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b", Reaches: reaches,
+	if rs, err := projectJobSpec(CreateProjectJobRequest{Environment: "builds", Image: "b", Reaches: reaches,
 		Egress: egress}); err != nil || len(rs.Reaches.Entries) != 2 || rs.Egress != egress {
 		t.Fatalf("reaches %+v %v", rs, err)
 	}
-	if rs, err := tenantJobSpec(CreateTenantJobRequest{Environment: "builds", Image: "b",
+	if rs, err := projectJobSpec(CreateProjectJobRequest{Environment: "builds", Image: "b",
 		Reaches: spec.Reaches{All: true}}); err != nil || !rs.Reaches.All {
 		t.Fatalf("reaches all %+v %v", rs, err)
 	}
-	_, err = tenantJobSpec(CreateTenantJobRequest{Environment: "e", Image: "b", SecurityGroups: []byte(`["default"]`)})
+	_, err = projectJobSpec(CreateProjectJobRequest{Environment: "e", Image: "b", SecurityGroups: []byte(`["default"]`)})
 	if _, msg := statusOf(err); msg != "securityGroups is gone (ADR 0034, revised); use reaches" {
 		t.Fatalf("securityGroups: %v", err)
 	}
-	for _, bad := range []CreateTenantJobRequest{
+	for _, bad := range []CreateProjectJobRequest{
 		{},
 		{Image: "b"},
 		{Environment: "e", Image: "b", SecurityGroups: []byte(`[]`)},
@@ -72,7 +72,7 @@ func TestTenantJobSpec(t *testing.T) {
 		{Environment: "e", Image: "b", LogRetentionDays: -1},
 		{Environment: "e", Image: "b", LogRetentionDays: 401},
 	} {
-		_, err := tenantJobSpec(bad)
+		_, err := projectJobSpec(bad)
 		var ae *apierr.Error
 		if !errors.As(err, &ae) || ae.Status != http.StatusBadRequest {
 			t.Errorf("%+v: %v, want a 400", bad, err)
@@ -83,8 +83,8 @@ func TestTenantJobSpec(t *testing.T) {
 // A create's hash for its key leaves out the values of its secrets and
 // image credentials, which a caller mints anew for a repeat, and keeps
 // everything else.
-func TestTenantJobRequestHash(t *testing.T) {
-	a := CreateTenantJobRequest{Image: "b", Env: map[string]string{"C": "1"}, Secrets: map[string]string{"T": "one"},
+func TestProjectJobRequestHash(t *testing.T) {
+	a := CreateProjectJobRequest{Image: "b", Env: map[string]string{"C": "1"}, Secrets: map[string]string{"T": "one"},
 		ImageCredentials: &model.RegistryCredentials{Username: "u", Password: "p1"}}
 	b := a
 	b.Secrets = map[string]string{"T": "two"}
@@ -92,7 +92,7 @@ func TestTenantJobRequestHash(t *testing.T) {
 	if requestHash(a) != requestHash(b) {
 		t.Error("new secret values change the hash")
 	}
-	for _, c := range []CreateTenantJobRequest{
+	for _, c := range []CreateProjectJobRequest{
 		{Image: "b", Env: map[string]string{"C": "2"}, Secrets: a.Secrets, ImageCredentials: a.ImageCredentials},
 		{Image: "b", Env: a.Env, Secrets: map[string]string{"U": "one"}, ImageCredentials: a.ImageCredentials},
 		{Image: "b", Env: a.Env, Secrets: a.Secrets},
@@ -104,7 +104,7 @@ func TestTenantJobRequestHash(t *testing.T) {
 }
 
 // The controller's answers of the jobs map to their statuses.
-func TestTenantJobErrors(t *testing.T) {
+func TestProjectJobErrors(t *testing.T) {
 	for _, c := range []struct {
 		err    error
 		status int
@@ -114,14 +114,14 @@ func TestTenantJobErrors(t *testing.T) {
 		{fmt.Errorf("image x: denied: %w", ctl.ErrJobImage), http.StatusUnprocessableEntity, ""},
 		{ctl.ErrNoObject, http.StatusNotFound, ""},
 		{errors.New("secrets need --secret-key-file"), http.StatusServiceUnavailable, ""},
-		{errors.New("the tenant is being deleted"), http.StatusConflict, ""},
+		{errors.New("the project is being deleted"), http.StatusConflict, ""},
 	} {
 		var ae *apierr.Error
-		if err := tenantJobError(c.err); !errors.As(err, &ae) || ae.Status != c.status || ae.Code != c.code {
+		if err := projectJobError(c.err); !errors.As(err, &ae) || ae.Status != c.status || ae.Code != c.code {
 			t.Errorf("%v: %v", c.err, err)
 		}
 	}
-	if tenantJobError(nil) != nil {
+	if projectJobError(nil) != nil {
 		t.Error("nil is an error")
 	}
 }

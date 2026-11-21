@@ -94,7 +94,7 @@ type Runner interface {
 	// nil when it was not running any more.
 	StopProcessDetached(ctx context.Context, lease model.Lease, id string) error
 	// ReadDetached reads a text file of the main container, also once its
-	// process has exited (a tenant's job's result file).
+	// process has exited (a project's job's result file).
 	ReadDetached(ctx context.Context, lease model.Lease, path string) (string, error)
 }
 

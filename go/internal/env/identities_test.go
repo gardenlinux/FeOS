@@ -41,13 +41,13 @@ func (i namedIssuer) Certificate() *x509.Certificate {
 // with its sandbox's), jobs and addons, the environment's sandboxes, and
 // an earlier object's pods still there; each pod with its newest
 // certificate's serial, issue, end and node, and the subject and OU its
-// certificates carry; another tenant's environment is a 404, and without
+// certificates carry; another project's environment is a 404, and without
 // an issuer every ID, OU and subject is "".
 func TestIdentities(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.create("stage", nil)
 	h.putSecret("stage", "token", "v1")
-	sb := h.sandbox(tenantA, "stage")
+	sb := h.sandbox(projectA, "stage")
 	h.apply("stage", previewSpec(sb), 0)
 	e := h.env("stage")
 	h.svc.d.Issuer = tdIssuer("run.test")
@@ -60,8 +60,8 @@ func TestIdentities(t *testing.T) {
 	api0, api1 := pod("service", "api", 0, "n1"), pod("service", "api", 1, "n2")
 	pg := pod("addon", "pg", 0, "n2")
 	old := pod("service", "old", 0, "n1")
-	// A tenant's job's pod in the environment is none of its workloads.
-	h.exec(`INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id, tenant_job, log_labels)
+	// A project's job's pod in the environment is none of its workloads.
+	h.exec(`INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id, project_job, log_labels)
 		SELECT $1, owner, image, vcpus, memory_mib, environment_id, true, '{}' FROM sandboxes WHERE id = $2`,
 		podid.Mint(), sb)
 	cert := func(p podid.ID, serial, node string, notAfter time.Time, ago time.Duration) {
@@ -76,14 +76,14 @@ func TestIdentities(t *testing.T) {
 	cert(api0, "a2", "n1", end, time.Minute)
 	cert(pg, "p1", "n2", end.Add(time.Hour), time.Minute)
 
-	ids, err := h.svc.Identities(h.ctx(), tenantA, "stage")
+	ids, err := h.svc.Identities(h.ctx(), projectA, "stage")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ids.TrustDomain != "run.test" {
 		t.Errorf("trust domain %q", ids.TrustDomain)
 	}
-	base := "spiffe://run.test/tenant/" + tenantA + "/env/" + e.ID.String() + "/"
+	base := "spiffe://run.test/project/" + projectA + "/env/" + e.ID.String() + "/"
 	if ids.Issuer != "" {
 		t.Errorf("issuer %q of an issuer that names none", ids.Issuer)
 	}
@@ -134,15 +134,15 @@ func TestIdentities(t *testing.T) {
 
 	// The issuer's subject, of an issuer that says it.
 	h.svc.d.Issuer = namedIssuer{tdIssuer("run.test")}
-	if ids, err = h.svc.Identities(h.ctx(), tenantA, "stage"); err != nil || ids.Issuer != "CN=FeOS issuer run.test" {
+	if ids, err = h.svc.Identities(h.ctx(), projectA, "stage"); err != nil || ids.Issuer != "CN=FeOS issuer run.test" {
 		t.Errorf("issuer %q, %v", ids.Issuer, err)
 	}
 
-	_, err = h.svc.Identities(h.ctx(), tenantB, "stage")
+	_, err = h.svc.Identities(h.ctx(), projectB, "stage")
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
 
 	h.svc.d.Issuer = nil
-	if ids, err = h.svc.Identities(h.ctx(), tenantA, e.ID.String()); err != nil || ids.TrustDomain != "" ||
+	if ids, err = h.svc.Identities(h.ctx(), projectA, e.ID.String()); err != nil || ids.TrustDomain != "" ||
 		ids.Issuer != "" || len(ids.Workloads) != len(want) || ids.Workloads[0].SPIFFEID != "" ||
 		ids.Workloads[0].OU != "" || ids.Workloads[0].Pods[0].Subject != "" || ids.Workloads[6].SPIFFEID != "" {
 		t.Errorf("without an issuer: %+v %v", ids, err)
@@ -150,8 +150,8 @@ func TestIdentities(t *testing.T) {
 
 	// An environment without a deployment: its sandboxes alone.
 	h.create("empty", nil)
-	other := h.sandbox(tenantA, "empty")
-	if ids, err = h.svc.Identities(h.ctx(), tenantA, "empty"); err != nil || len(ids.Workloads) != 1 ||
+	other := h.sandbox(projectA, "empty")
+	if ids, err = h.svc.Identities(h.ctx(), projectA, "empty"); err != nil || len(ids.Workloads) != 1 ||
 		ids.Workloads[0].Name != other.String() || len(ids.Workloads[0].Pods) != 1 {
 		t.Errorf("empty: %+v %v", ids, err)
 	}

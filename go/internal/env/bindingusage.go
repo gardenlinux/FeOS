@@ -124,12 +124,12 @@ type sinkEgress struct {
 // Without --sink-url or a credential to pass on, or when the sink fails,
 // the bindings are answered with zeros and Unavailable says why: the
 // numbers are an addition to the bindings, not their state.
-func (s *Service) BindingUsage(ctx context.Context, tenant, env, window string) (BindingUsage, error) {
+func (s *Service) BindingUsage(ctx context.Context, project, env, window string) (BindingUsage, error) {
 	length, ok := bindingUsageWindows[window]
 	if !ok {
 		return BindingUsage{}, apierr.New(http.StatusBadRequest, "window must be 1h or 24h, got %q", window)
 	}
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return BindingUsage{}, err
 	}
@@ -157,7 +157,7 @@ func (s *Service) BindingUsage(ctx context.Context, tenant, env, window string) 
 		}
 	}
 	out := BindingUsage{Window: window, Bindings: []BindingUse{}}
-	t, _ := auth.TenantFrom(ctx)
+	t, _ := auth.ProjectFrom(ctx)
 	switch {
 	case s.d.SinkURL == "":
 		out.Unavailable = "the requests are counted in the log store, and this ferund has none (--sink-url)"
@@ -206,8 +206,8 @@ var errSinkTooOld = errors.New("the sink has no /api/v1/egress")
 // readSinkEgress asks the sink for the requests of the environment envID's
 // pods through their bindings in [since, until), as t. A 404 that is not
 // one of the sink's own answers (JSON: no such environment, no such
-// tenant) is its mux's for a route it lacks: errSinkTooOld.
-func (s *Service) readSinkEgress(ctx context.Context, t auth.Tenant, envID string, since, until time.Time) (sinkEgress,
+// project) is its mux's for a route it lacks: errSinkTooOld.
+func (s *Service) readSinkEgress(ctx context.Context, t auth.Project, envID string, since, until time.Time) (sinkEgress,
 	error) {
 	v := url.Values{"environment": {envID}, "since": {strconv.FormatInt(since.UnixNano(), 10)},
 		"until": {strconv.FormatInt(until.UnixNano(), 10)}}

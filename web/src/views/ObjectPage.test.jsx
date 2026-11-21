@@ -22,7 +22,7 @@ const html = (el) => renderToStaticMarkup(el);
 const text = (el) => html(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const page = (kind, name, { st = STAGE, spec = SPEC, ec = W, otab = 'overview' } = {}) => (
-  <ObjectView tenant={T} st={st} kind={kind} name={name} spec={spec} ec={ec} otab={otab} navigate={nav} />);
+  <ObjectView project={T} st={st} kind={kind} name={name} spec={spec} ec={ec} otab={otab} navigate={nav} />);
 
 describe("a service's page", () => {
   it('heads with its kind in its environment, name, state, Restart and Edit, and its facts', () => {
@@ -32,7 +32,7 @@ describe("a service's page", () => {
     expect(out).toContain('<h1>expense-service</h1>');
     expect(out).toContain('<span class="statepill failed">');
     expect(all).toContain('1 of 2 ready');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/builder/service/expense-service"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/builder/service/expense-service"');
     expect(all).toContain('Restart');
     expect(all).toContain('image expense:1.4');
     expect(all).toContain('deployment 6 and 7 (rolling) · 3 restarts');
@@ -43,11 +43,11 @@ describe("a service's page", () => {
     const out = html(page('service', 'expense-service'));
     expect(out).not.toContain('Traces');
     for (const t of ['logs', 'traffic', 'config']) {
-      expect(out).toContain(`href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service/${t}"`);
+      expect(out).toContain(`href="/projects/fecode/environments/expensa-stage/objects/service/expense-service/${t}"`);
     }
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service" class="tab on" aria-current="page"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/objects/service/expense-service" class="tab on" aria-current="page"');
     expect(html(page('service', 'expense-service', { otab: 'logs' })))
-      .toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs" class="tab on"');
+      .toContain('href="/projects/fecode/environments/expensa-stage/objects/service/expense-service/logs" class="tab on"');
   });
 
   it("says first what is wrong: its first instance that exited, with the way to that replica's logs and to its config", () => {
@@ -56,8 +56,8 @@ describe("a service's page", () => {
     expect(out).toContain('<section class="statecard failed">');
     expect(all).toContain('Replica 1 exited');
     expect(all).toContain('exited with code 1; restarting in 4s · deployment 7');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs/1" class="button">All logs of replica 1</a>');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/expense-service/config" class="button">Config</a>');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/objects/service/expense-service/logs/1" class="button">All logs of replica 1</a>');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/objects/service/expense-service/config" class="button">Config</a>');
     // Nothing is wrong with a ready one.
     expect(html(page('service', 'web'))).not.toContain('statecard');
   });
@@ -76,15 +76,15 @@ describe("a service's page", () => {
     const cfg = page('service', 'expense-service', { otab: 'config' });
     const out = html(cfg);
     const all = text(cfg);
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/deployments/7" class="mono">deployment 7</a>');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/deployments/7" class="mono">deployment 7</a>');
     expect(all).toContain('image ghcr.io/acme/expense:1.4 pinned to sha256:863e2ebe9c38');
     expect(all).toContain('readiness HTTP GET :http/readyz · every 2s, unready after 3 failures');
     expect(all).toContain('EXPENSA_INTERNAL_TOKEN secret internal-token v3');
     // A secret's link is its row in the environment's Secrets view.
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/secret/internal-token"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/secrets/secret/internal-token"');
     expect(all).toContain('EXPENSA_DATABASE_URL url of addon postgres (database expensa, role expense_svc)');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/addon/postgres"');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/objects/service/approval-service"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/objects/addon/postgres"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/objects/service/approval-service"');
     expect(all).toContain('EXPENSA_HTTP_ADDR [::]:8080');
     expect(all).toContain('routes to it · 1');
     expect(all).toContain('api-expense /api/expense http 8080 expensa-stage-fecode.apps.fecode.dev/api/expense');
@@ -117,7 +117,7 @@ describe("a service's page", () => {
     expect(all).toContain('Secrets where its keys live');
     expect(all).toContain('erp → erp.example reached as http://erp at the node basic binding in the spec — becomes an HTTP secret');
     expect(all).toContain('EXPENSA_INTERNAL_TOKEN ← internal-token in the container secret v3');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/binding/erp"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/secrets/binding/erp"');
     expect(all).not.toContain('bindings · 1');
     // A job's Config has it too; an addon's has none. While the spec loads, it waits.
     expect(html(page('job', 'migrate', { otab: 'config' }))).toContain('acc-sect');
@@ -134,7 +134,7 @@ describe("a service's page", () => {
     const all = text(cfg);
     expect(all).toContain('environment · 6');
     expect(all).toContain('S4_URL url of HTTP secret s4 v2');
-    expect(out).toContain('href="/tenants/fecode/environments/expensa-stage/secrets/http/s4"');
+    expect(out).toContain('href="/projects/fecode/environments/expensa-stage/secrets/http/s4"');
     // Its Secrets have its row, at the node, from the spec alone while the list loads.
     expect(all).toContain('S4_URL → api.s4.example reached as http://s4 at the node HTTP secret s4 v2 · its url');
   });
@@ -164,7 +164,7 @@ describe("an addon's and a job's page", () => {
     expect(html(cfg)).toContain('<span class="labelchip mono on" title="named by an object">url</span>');
     expect(html(cfg)).toContain('<span class="labelchip mono" title="not named">password</span>');
     expect(text(cfg)).toContain('used by · 3');
-    expect(html(cfg)).toContain('href="/tenants/fecode/environments/expensa-stage/objects/job/migrate"');
+    expect(html(cfg)).toContain('href="/projects/fecode/environments/expensa-stage/objects/job/migrate"');
   });
 
   it('a job: when it runs, its last run, Run now', () => {

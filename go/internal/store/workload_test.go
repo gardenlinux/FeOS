@@ -15,7 +15,7 @@ import (
 )
 
 // A row's workload is its object for an instance, by its log labels, and
-// the row itself for a tenant's job and a sandbox; its set is the one the
+// the row itself for a project's job and a sandbox; its set is the one the
 // nodes' sets carry (ADR 0034, 0036).
 func TestSandboxWorkload(t *testing.T) {
 	env := uuid.New()
@@ -34,8 +34,8 @@ func TestSandboxWorkload(t *testing.T) {
 			"job", "migrate", model.WorkloadGroupID(env, "job", "migrate")},
 		{"addon", Sandbox{ID: id, EnvironmentID: env, Instance: true, LogLabels: labels("addon", "db")},
 			"addon", "db", model.WorkloadGroupID(env, "addon", "db")},
-		{"tenant's job", Sandbox{ID: id, EnvironmentID: env, TenantJob: true},
-			pki.WorkloadTenantJob, id.String(), model.JobWorkloadGroupID(id.String())},
+		{"project's job", Sandbox{ID: id, EnvironmentID: env, ProjectJob: true},
+			pki.WorkloadProjectJob, id.String(), model.JobWorkloadGroupID(id.String())},
 		{"sandbox", Sandbox{ID: id, EnvironmentID: env, LogLabels: labels(model.LogKindSandbox, id.String())},
 			pki.WorkloadSandbox, id.String(), model.SandboxWorkloadGroupID(id.String())},
 		{"outside an environment", Sandbox{ID: id}, "", "", ""},
@@ -67,7 +67,7 @@ func TestSandboxStopGrace(t *testing.T) {
 			model.ServiceStopGrace},
 		{"job run", Sandbox{ID: id, EnvironmentID: env, Instance: true, LogLabels: labels("job", "migrate")}, 0},
 		{"addon", Sandbox{ID: id, EnvironmentID: env, Instance: true, LogLabels: labels("addon", "db")}, 0},
-		{"tenant's job", Sandbox{ID: id, EnvironmentID: env, TenantJob: true}, 0},
+		{"project's job", Sandbox{ID: id, EnvironmentID: env, ProjectJob: true}, 0},
 		{"sandbox", Sandbox{ID: id, EnvironmentID: env, LogLabels: labels(model.LogKindSandbox, id.String())}, 0},
 		{"a sandbox labelled as a service", Sandbox{ID: id, EnvironmentID: env, LogLabels: labels("service", "api")}, 0},
 		{"outside an environment", Sandbox{ID: id}, 0},

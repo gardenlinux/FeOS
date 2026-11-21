@@ -4,7 +4,7 @@
 output of the pods FeRun makes, shipped by the nodes, and the requests
 `ferun-ingress` answered, written by its instances, appended to
 Kafka's topics and indexed from there by Quickwit (ADR 0026 §10,
-§11), and read by tenants over HTTP. This page is the contract between its parts;
+§11), and read by projects over HTTP. This page is the contract between its parts;
 the ADR says why.
 
 ```
@@ -13,7 +13,7 @@ guest ──CRI lines──▶ logs/container.log
 feosd (node) ──OTLP LogsService/Export, SinkService (mTLS, node cert)──▶ ferun-sink ──▶ PostgreSQL `sink` (streams, positions, quota)
      ▲ TelemetryResponse.sink_endpoint                                       │   └──▶ Kafka topic ferun-logs-v5-<days>d ──Kafka source──▶ Quickwit index of that name
 ferund ──CreatePodRequest.log_labels──▶ feosd                                │
-     ◀── GET /api/v1/tenant (token or session) ──────────────────────────────┤
+     ◀── GET /api/v1/project (token or session) ──────────────────────────────┤
 readers ── GET /api/v1/logs, /api/v1/log-streams (Bearer, or cookie) ────────┘
 ```
 
@@ -118,12 +118,12 @@ One `ResourceLogs` per stream. Its resource attributes are the pod's
 | `ferun.container` | the container's name | node |
 | `ferun.log_id` | the guest's ID of the log | node |
 | `ferun.node` | the node's name | node |
-| `ferun.tenant` | the tenant | `ferund` |
+| `ferun.project` | the project | `ferund` |
 | `ferun.instance` | the sandbox's ID (`InstanceStatus.id`) | `ferund` |
-| `ferun.environment` | the environment's ID | `ferund`, every pod (a sandbox's and a tenant's job's too, ADR 0035) |
+| `ferun.environment` | the environment's ID | `ferund`, every pod (a sandbox's and a project's job's too, ADR 0035) |
 | `ferun.kind`, `ferun.object` | `service`, `addon` or `job`, and its name; `sandbox` and the sandbox's ID | `ferund`, an environment's instances and its sandboxes |
 | `ferun.replica`, `ferun.deployment` | numbers, as text; `ferun.release` is `ferun.deployment`'s earlier word, read where it is not set | `ferund`, an environment's pods |
-| `ferun.job`, `ferun.attempt` | a tenant's job's ID, the attempt | `ferund`, a tenant's job |
+| `ferun.job`, `ferun.attempt` | a project's job's ID, the attempt | `ferund`, a project's job |
 | `ferun.retention_days` | days, as text | `ferund`, when a job asked |
 
 One `LogRecord` per entry: `time_unix_nano` the line's time (0 for an
@@ -220,7 +220,7 @@ is not kept, and the agent counts its records as dropped.
 - **Stream**: one per (ingress instance, start of its agent,
   environment, service). Key: `ferun.pod` = `ingress/<instance name>`,
   `ferun.container` = `<environment id>/<service>`, `ferun.log_id` = the
-  agent's start (a UUID). Labels: `ferun.tenant` (the environment's
+  agent's start (a UUID). Labels: `ferun.project` (the environment's
   owner, as the proxy's routing table has it), `ferun.environment`,
   `ferun.kind` = `service`, `ferun.object` = the service, `ferun.source`
   = `ingress`. A record's `log.offset` is its number in the stream from
@@ -251,7 +251,7 @@ is not kept, and the agent counts its records as dropped.
   (1 to 30 s) while new records wait in the buffer, which drops and
   counts what overflows it. A batch refused with `INVALID_ARGUMENT` or
   `RESOURCE_EXHAUSTED` is dropped and counted, as is a record without a
-  tenant.
+  project.
 - **Reading**: the selector `source` (`ingress`, `egress` or
   `container`; none: all) picks them; a stream's JSON has `source`
   (`log_streams.source`, migration `0003`, `container` for every stream
@@ -277,14 +277,14 @@ database (`sink`, migrations of its own), two ports:
   answers once two of its three replicas have them), the row and the usage
   updated, the commit. A line is stored once per (stream, offset), and
   one at or below the last offset stored counts as stored: a node sends
-  a stream's lines in the order of their offsets. A tenant over
+  a stream's lines in the order of their offsets. A project over
   its quota (`--log-quota`, bytes of text a day, UTC, 0: none; reached by
   what is stored, so the batch that crosses it is stored) is refused with
-  `RESOURCE_EXHAUSTED`, which names it; the other tenants' streams of the
+  `RESOURCE_EXHAUSTED`, which names it; the other projects' streams of the
   same batch are stored. A failure of the database or of Kafka is
   `UNAVAILABLE`, and nothing of the batch is stored; a request
   over 8 MiB, of more than 10,000 records, or with a resource without
-  `ferun.pod`, `ferun.container`, `ferun.log_id` and `ferun.tenant` or a
+  `ferun.pod`, `ferun.container`, `ferun.log_id` and `ferun.project` or a
   record without `log.offset` is refused. A stream's `node` is the name
   in the node's certificate, not `ferun.node`; the sink does not check
   that the node runs the pod. A stream's `source` is `ingress` for
@@ -313,25 +313,25 @@ and the ingresses' (`spiffe://<td>/ingress/<name>`).
 Bearer …`), or, where the sink is served under `ferund`'s host (the
 Gateway's `run.<domain>`), a person's session: the cookie
 `__Host-ferun_session` (or, for one release, its old name
-`ferun_session`) and the tenant in `FeRun-Tenant` (400 without it). A
+`ferun_session`) and the project in `FeRun-Project` (400 without it). A
 session's change (`DELETE`) needs `X-Requested-With: ferun` and a
 request of the same origin (`Sec-Fetch-Site`, or `Origin` against
 `Host`; 403 otherwise), as `ferund`'s own. The sink asks `ferund` `GET
-/api/v1/tenant?filter=environments` with the same `Authorization`, or
-the cookie and `FeRun-Tenant` (`200 {"tenant", "role", "environments"}`;
+/api/v1/project?filter=environments` with the same `Authorization`, or
+the cookie and `FeRun-Project` (`200 {"project", "role", "environments"}`;
 a 4xx but 429 passed on as it came), and keeps the answer by the
-SHA-256 of the credential and the tenant, a token's a minute, a
-session's 10 s. A `role` on the tenant reads every stream and span; a
+SHA-256 of the credential and the project, a token's a minute, a
+session's 10 s. A `role` on the project reads every stream and span; a
 principal without one (a person's or a token's grants on environments)
 reads those whose `environment` is one of `environments`, a sandbox's and
-a tenant's job's among them (ADR 0035), and none of no environment (a
+a project's job's among them (ADR 0035), and none of no environment (a
 stream shipped before); one that may
-read nothing is 404 "no such tenant". An answer without `role` is a
-`ferund` of before people: the whole tenant's, as its every token was.
+read nothing is 404 "no such project". An answer without `role` is a
+`ferund` of before people: the whole project's, as its every token was.
 
 **Stages.** `log_streams` (one row per stream key: labels, first and
 last time, next offset, the last offset stored, ended; its ID `s_` and 16
-random hex digits) and `log_usage` (a tenant's bytes of a day) in the
+random hex digits) and `log_usage` (a project's bytes of a day) in the
 database; the lines in Kafka, then in Quickwit (§11). A topic per
 index, of its name: `<--index-prefix>-v<version>-<days>d`
 (`ferun-logs-v5-30d`), the days of `--log-retention`, or of
@@ -344,7 +344,7 @@ index API) with its retention, `--index-commit-timeout` (10 s) as its
 commit interval and `--index-partitions` (16, at most 200) partitions,
 and the index's one Kafka source `kafka` on the topic
 (`auto.offset.reset` earliest; a session of 10 s). A record is a line as
-the index's document, JSON: `ts` (ns, the time field), `tenant`,
+the index's document, JSON: `ts` (ns, the time field), `project`,
 `stream` (the ID), `environment`, `kind`, `object`, `replica`,
 `release` (the stream's deployment: the field keeps the label's earlier
 word, since a field of its own is a new mapping, so a new index and
@@ -352,10 +352,10 @@ topic of every retention, for a field no search filters by; it takes
 the new name with the next mapping version), `instance`, `container`, `job`, `attempt`, `source`,
 `iostream`, `level` (the bit), `trace_id`, `off`, `partial`, `cont`, and
 `text` (Quickwit's `default` tokenizer, with positions). Its key is
-its stream's object, `<tenant>/<environment>/<kind>/<object>` (an
+its stream's object, `<project>/<environment>/<kind>/<object>` (an
 environment's job run: kind `job`, its job's name; a sandbox: kind
-`sandbox`, its ID), or `<tenant>//<job>` for a stream of no object (a
-tenant's job, which names its environment since ADR 0035), its partition the key's
+`sandbox`, its ID), or `<project>//<job>` for a stream of no object (a
+project's job, which names its environment since ADR 0035), its partition the key's
 FNV-1a hash modulo the topic's partitions, chosen by the sink: a
 stream's lines are in order in one partition, and an object's streams
 (its replicas, deployments and runs) share theirs. An environment's objects
@@ -368,12 +368,12 @@ one (stream, offset) once. `--kafka-brokers` names Kafka's brokers
 (also the sources'), `--index-search-url` Quickwit's REST API. The hot stage of
 before (`log_batches`, `log_lines`) went on 2026-10-31 (migration `0008`).
 
-**Partitions.** One tenant may hold many projects' environments (FeCode's
-does), so an index's lines are hashed into partitions by their tenant,
-environment and job (`partition_key: hash_mod((tenant,environment,job),
+**Partitions.** One project may hold many projects' environments (FeCode's
+does), so an index's lines are hashed into partitions by their project,
+environment and job (`partition_key: hash_mod((project,environment,job),
 <--index-partitions>)`), and a split holds one partition's lines: a
 commit writes a split per partition that got lines, and merges keep
-them apart. `tenant`, `environment` and `job` are tags (`tag_fields`):
+them apart. `project`, `environment` and `job` are tags (`tag_fields`):
 Quickwit records a split's values of each while they are fewer than
 1,000, and a search for an environment or a job reads only the splits
 that have it. More partitions mean fewer environments a split and more,
@@ -383,7 +383,7 @@ smaller splits; Quickwit's own bound is 200 (`max_num_partitions`).
 field, and a changed mapping only applies to new splits, so the index
 configuration has a version in the index's name
 (`quickwit.MappingVersion`): version 1, `<prefix>-<days>d`, had
-`tenant` as its only tag and no partitions; version 2 is the above. A
+`project` as its only tag and no partitions; version 2 is the above. A
 new version's indexes take every new line; a read searches
 `<prefix>-*`, the old and the new together (the fields it reads are the
 same in both, `ts` a datetime in each, so they sort as one), and a
@@ -454,7 +454,7 @@ taken once (stream, offset).
     {"ts": "1793361600123456789", "time": "2026-10-30T12:00:00.123456789Z", "stream": "s_…",
      "offset": "4096", "source": "stdout", "level": "error", "partial": false, "text": "…"}
   ],
-  "streams": {"s_…": {"id": "s_…", "tenant": "…", "instance": "…", "container": "main",
+  "streams": {"s_…": {"id": "s_…", "project": "…", "instance": "…", "container": "main",
      "environment": "…", "kind": "service", "object": "api", "replica": 0, "deployment": 12,
      "job": "", "attempt": 0, "node": "…", "source": "container", "firstTime": "…", "lastTime": "…", "endedAt": null,
      "lines": 1234, "bytes": 56789}},
@@ -488,7 +488,7 @@ partition of the selector's object, read from its end of before the page
 as records come (a fetch waits up to 500 ms); a line the page gave is not
 given again, and a stream of the object that starts meanwhile is followed
 too. A follow is of one object: `environment`, `kind` and `object`; a
-tenant's `job`; or an `instance` or `stream` (of one object); any other
+project's `job`; or an `instance` or `stream` (of one object); any other
 selector is `400` (an environment as a whole is read, not followed). A
 follow gives at most 100 lines a second (a burst of 500), and once those
 are spent 50 more a second of `error` and `warn` lines (a burst of 200);
@@ -504,11 +504,11 @@ most 500.
 
 ### `DELETE /api/v1/log-streams?environment=<id>` or `?job=<id>`
 
-Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows, and leaves a delete task of the environment's or job's lines in every log index (Quickwit removes them when its janitor rewrites their splits; no read finds them meanwhile). 204.
+Needs write on the project (else 403 `role_required`). Deletes the streams' rows, and leaves a delete task of the environment's or job's lines in every log index (Quickwit removes them when its janitor rewrites their splits; no read finds them meanwhile). 204.
 
 ## `ferund`
 
-- **Labels**: an environment's instance and job run, a tenant's job and a
+- **Labels**: an environment's instance and job run, a project's job and a
   sandbox get `log_labels` on their pod's create (the table above), kept
   on their sandbox row (`sandboxes.log_labels`, migration `0019`), each
   with its environment (`0032`, ADR 0035).
@@ -517,14 +517,14 @@ Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows,
   `ferun.release` where it is not set, which `ferund` wrote, beside
   `ferun.deployment`, up to the version of its migration `0024` (ADR
   0018, "The deployments' word"). The column `log_streams.release` and
-  the index field `release` hold it. A sandbox a tenant made
+  the index field `release` hold it. A sandbox a project made
   itself (an attached service's workspace too) has none: its logs are
   not shipped. `POST /api/v1/jobs` takes `logRetentionDays` (1 to 400),
   which becomes `ferun.retention_days`.
 - `--sink-endpoint` (host:port of the ingest) to the nodes, a name
   resolved every 10 s into one ready instance's address per node;
   `--sink-url` (the API, inside the cluster) for its own reads.
-- `GET /api/v1/tenant`: the principal's tenant, its role there and the
+- `GET /api/v1/project`: the principal's project, its role there and the
   environments it holds a grant on (control-plane.md, The sink).
 - `ferund service-token --kind sink --name <name>` prints
   `feos-sink-<secret>` once; `GET /api/v1/admin/service-tokens` lists the
@@ -551,14 +551,14 @@ Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows,
   (`instance=<sandbox ID>&container=main&direction=backward&since=<its
   start>`, paged), and from the node as before when the sink has no lines
   or fails; a paused instance's lines are answered from the sink. A
-  tenant's job's log reads the sink too, also once the job has ended;
+  project's job's log reads the sink too, also once the job has ended;
   its kept tail when the sink has no line.
 - **Redaction**: a create with labels names `log_redact`, asked anew at
   each create and stored nowhere: the values `ferund` redacts its stored
   tails of, each also in its URL-userinfo escaping, of 4 bytes or more,
   longest first. An environment's pod: its addons' credentials, its
-  tenant secrets (latest versions and those its deployments pin) and those
-  its template names; a tenant's job's: its secrets and image
+  project secrets (latest versions and those its deployments pin) and those
+  its template names; a project's job's: its secrets and image
   credentials. A failure to compute them fails the create, so that no
   pod ships unredacted lines. Every restore sends the row's labels and
   the redactions, asked anew, as well (`RestorePodRequest`), with the
@@ -568,6 +568,6 @@ Needs write on the tenant (else 403 `role_required`). Deletes the streams' rows,
   sink, a partial entry is joined with the next entries of its source up
   to one that is not partial, the line cut to its budget (8 KiB in an
   answer); a line still open at the end goes in as far as it came. From
-  the sink it pages back until `lines` + 1 lines have ended. `ferund` redacts a running tenant job's
+  the sink it pages back until `lines` + 1 lines have ended. `ferund` redacts a running project job's
   sink lines again; an ended job's (its secrets are gone) are the node's
   redaction alone.

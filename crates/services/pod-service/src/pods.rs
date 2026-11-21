@@ -4708,15 +4708,15 @@ mod tests {
             }),
             ..Default::default()
         };
-        let labels = |tenant: &str| -> HashMap<String, String> {
-            [("ferun.tenant", tenant), ("ferun.instance", "i-1")]
+        let labels = |project: &str| -> HashMap<String, String> {
+            [("ferun.project", project), ("ferun.instance", "i-1")]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect()
         };
-        let beside = |tenant: &str| Beside {
-            log_labels: labels(tenant),
-            log_redact: vec![format!("{tenant}-secret")],
+        let beside = |project: &str| Beside {
+            log_labels: labels(project),
+            log_redact: vec![format!("{project}-secret")],
             ..Default::default()
         };
         let created = pods
@@ -4751,8 +4751,8 @@ mod tests {
     async fn a_restore_replaces_a_pods_log_settings() {
         let dir = tempfile::tempdir().unwrap();
         let pods = bare_pods(dir.path());
-        let labels = |tenant: &str| -> HashMap<String, String> {
-            [("ferun.tenant".to_string(), tenant.to_string())].into()
+        let labels = |project: &str| -> HashMap<String, String> {
+            [("ferun.project".to_string(), project.to_string())].into()
         };
         let info = PodInfo {
             pod_id: POD.to_string(),

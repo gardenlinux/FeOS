@@ -149,7 +149,7 @@ and `pip download requests` took 6.8 seconds.
 
 - `feosd` gives every pod an address of a link-local range, as a /32,
   unique on the node and not across nodes. No network routes link-local
-  addresses (RFC 3927), and no tenant's network collides with them.
+  addresses (RFC 3927), and no project's network collides with them.
 - Nothing allows by a pod's IPv4 address, and link-local destinations
   are denied (below), so an IPv4 address may come round again: `feosd`
   hands out the one that has been free longest, and drops the
@@ -271,7 +271,7 @@ and `pip download requests` took 6.8 seconds.
   IPv4 clients reach pods. But a /24 holds 253 pods, suspended ones
   included; addresses come round again, so a change of who may reach a
   pod would have to reach every node before its address is handed out
-  again; and private IPv4 ranges collide with tenants' own networks once
+  again; and private IPv4 ranges collide with projects' own networks once
   those are joined.
 - **The same IPv4 address in every pod**, such as `169.254.0.2`: the
   guest's IPv4 would be the same on every node. But connection tracking
@@ -280,7 +280,7 @@ and `pip download requests` took 6.8 seconds.
   inner headers of ICMP errors included. And a resume elsewhere changes
   the pod's IPv6 address anyway.
 - **A private range for the pods' IPv4**, such as `10.200.0.0/16`: it
-  collides with the node's and tenants' networks; link-local addresses
+  collides with the node's and projects' networks; link-local addresses
   do not.
 - **A CLAT (464XLAT, RFC 6877)**, in the guest or on the node, so that
   pods have IPv4 on nodes without IPv4 of their own, through a NAT64 in

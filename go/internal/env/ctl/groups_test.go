@@ -154,7 +154,7 @@ func TestEnvGroups(t *testing.T) {
 
 // Deleting an environment leaves nothing: its instances and their pods,
 // its volume on its node, its attached rows, its group on the node, its
-// row. A deleting tenant's environments are deleted too.
+// row. A deleting project's environments are deleted too.
 func TestEnvDeletion(t *testing.T) {
 	h := newHarness(t, options{})
 	n1 := h.addNode("n1")
@@ -193,8 +193,8 @@ func TestEnvDeletion(t *testing.T) {
 		t.Errorf("%d rows stay, %v", n, err)
 	}
 
-	// A deleting tenant's environment.
-	if _, _, err := h.st.CreateTenant(bg, "t2"); err != nil {
+	// A deleting project's environment.
+	if _, _, err := h.st.CreateProject(bg, "t2"); err != nil {
 		t.Fatal(err)
 	}
 	e2, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "t2", Name: "x"})
@@ -203,22 +203,22 @@ func TestEnvDeletion(t *testing.T) {
 	}
 	r := h.apply(e2.ID, serviceSpec(1, "1", ""))
 	h.waitDeployment(e2.ID, r, model.DeploymentDeployed, 30*time.Second)
-	if _, err := h.st.MarkTenantDeleting(bg, "t2"); err != nil {
+	if _, err := h.st.MarkProjectDeleting(bg, "t2"); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, 60*time.Second, "the tenant's environment gone", func() bool {
+	eventually(t, 60*time.Second, "the project's environment gone", func() bool {
 		_, err := h.st.GetEnvironment(bg, e2.ID)
 		return errors.Is(err, store.ErrNoRow)
 	})
-	// A deleting tenant gets no new instance.
-	if _, _, err := h.st.CreateTenant(bg, "t3"); err != nil {
+	// A deleting project gets no new instance.
+	if _, _, err := h.st.CreateProject(bg, "t3"); err != nil {
 		t.Fatal(err)
 	}
 	e3, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "t3", Name: "y"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.MarkTenantDeleting(bg, "t3"); err != nil {
+	if _, err := h.st.MarkProjectDeleting(bg, "t3"); err != nil {
 		t.Fatal(err)
 	}
 	v, err := h.c.load(bg, e3.ID)
@@ -230,8 +230,8 @@ func TestEnvDeletion(t *testing.T) {
 	}
 	vw := &view{env: e3, target: &spec.Spec{}, latestSpec: &spec.Spec{}}
 	p := h.c.planService(vw, "web", spec.Service{Image: testImage})
-	if _, err := h.c.insertInstance(bg, vw, insert{plan: p, deployment: 1}); !errors.Is(err, errTenantDeleting) {
-		t.Errorf("an insert for a deleting tenant: %v", err)
+	if _, err := h.c.insertInstance(bg, vw, insert{plan: p, deployment: 1}); !errors.Is(err, errProjectDeleting) {
+		t.Errorf("an insert for a deleting project: %v", err)
 	}
 }
 
@@ -373,7 +373,7 @@ func TestEnvIDReused(t *testing.T) {
 		_, err := h.st.GetEnvironment(bg, env.ID)
 		return errors.Is(err, store.ErrNoRow)
 	})
-	again, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: env.ID, Owner: testTenant, Name: "stage"})
+	again, err := h.st.InsertEnvironment(bg, store.NewEnvironment{ID: env.ID, Owner: testProject, Name: "stage"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func outBlocks(g *networkv1.SecurityGroup) []string {
 }
 
 // The workloads' groups (ADR 0034 revised, ADR 0035 revised): each pod of
-// the environment, its instances, sandboxes and tenants' jobs' pods,
+// the environment, its instances, sandboxes and projects' jobs' pods,
 // names env-<id> and its workload's group and the env table; each
 // workload's group is on the node with the rules its environment derives
 // (a reference's port from the caller's group, a sandbox's or job's
@@ -460,9 +460,9 @@ func TestWorkloadGroups(t *testing.T) {
 	narrow := h.sandboxIn(env, podid.Mint(), spec.Reaches{Entries: []spec.Use{{Service: "store",
 		Port: spec.PortRef{Name: "db"}}}})
 	wide := h.sandboxIn(env, podid.Mint(), spec.Reaches{All: true})
-	rs := tenantJobSpecOf(time.Hour)
+	rs := projectJobSpecOf(time.Hour)
 	rs.EnvID, rs.Egress = env.ID, &spec.Egress{Mode: spec.EgressNone}
-	job := h.createTenantJob(rs)
+	job := h.createProjectJob(rs)
 	h.runningPod(job.ID)
 
 	envGroup := model.EnvGroupID(env.ID)

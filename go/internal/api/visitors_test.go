@@ -28,16 +28,16 @@ var _ Visitors = (*visits.Service)(nil)
 
 // visitorCall is one call the fake visits service took.
 type visitorCall struct {
-	method string
-	tenant string
-	name   string
-	caller visits.Caller
-	sealed string
-	accept visits.Accept
-	in     visits.ProviderIn
-	madeBy string
-	end    visits.EndSession
-	id     string
+	method  string
+	project string
+	name    string
+	caller  visits.Caller
+	sealed  string
+	accept  visits.Accept
+	in      visits.ProviderIn
+	madeBy  string
+	end     visits.EndSession
+	id      string
 }
 
 // fakeVisitors is the visits service of the API's tests: it records every
@@ -80,7 +80,7 @@ func (f *fakeVisitors) count() int {
 	return len(f.calls)
 }
 
-func (f *fakeVisitors) Kinds() []string { return []string{model.ProviderKindTenant} }
+func (f *fakeVisitors) Kinds() []string { return []string{model.ProviderKindProject} }
 
 // fakeJWKS is the fake's JWKS.
 const fakeJWKS = `{"keys":[{"kty":"OKP","crv":"Ed25519","x":"x","kid":"k","alg":"EdDSA","use":"sig"}]}`
@@ -92,16 +92,16 @@ func (f *fakeVisitors) JWKS(context.Context) ([]byte, error) {
 	return []byte(fakeJWKS), nil
 }
 
-func (f *fakeVisitors) ListProviders(_ context.Context, tenant string) (visits.ProviderList, error) {
-	if err := f.record(visitorCall{method: "ListProviders", tenant: tenant}); err != nil {
+func (f *fakeVisitors) ListProviders(_ context.Context, project string) (visits.ProviderList, error) {
+	if err := f.record(visitorCall{method: "ListProviders", project: project}); err != nil {
 		return visits.ProviderList{}, err
 	}
 	return visits.ProviderList{Providers: []visits.Provider{{Name: "ferun", Kind: "ferun", BuiltIn: true,
 		Environments: []visits.EnvRef{}}}, Kinds: f.Kinds()}, nil
 }
 
-func (f *fakeVisitors) GetProvider(_ context.Context, tenant, name string) (visits.Provider, error) {
-	if err := f.record(visitorCall{method: "GetProvider", tenant: tenant, name: name}); err != nil {
+func (f *fakeVisitors) GetProvider(_ context.Context, project, name string) (visits.Provider, error) {
+	if err := f.record(visitorCall{method: "GetProvider", project: project, name: name}); err != nil {
 		return visits.Provider{}, err
 	}
 	f.mu.Lock()
@@ -109,16 +109,16 @@ func (f *fakeVisitors) GetProvider(_ context.Context, tenant, name string) (visi
 	if f.getErr {
 		return visits.Provider{}, apierr.New(http.StatusInternalServerError, "the visits service failed")
 	}
-	p, ok := f.providers[tenant+"/"+name]
+	p, ok := f.providers[project+"/"+name]
 	if !ok {
 		return visits.Provider{}, apierr.New(http.StatusNotFound, "no such provider")
 	}
 	return p, nil
 }
 
-func (f *fakeVisitors) PutProvider(_ context.Context, tenant, name string, in visits.ProviderIn, madeBy string) (
+func (f *fakeVisitors) PutProvider(_ context.Context, project, name string, in visits.ProviderIn, madeBy string) (
 	visits.Provider, bool, error) {
-	if err := f.record(visitorCall{method: "PutProvider", tenant: tenant, name: name, in: in, madeBy: madeBy}); err != nil {
+	if err := f.record(visitorCall{method: "PutProvider", project: project, name: name, in: in, madeBy: madeBy}); err != nil {
 		return visits.Provider{}, false, err
 	}
 	f.mu.Lock()
@@ -126,7 +126,7 @@ func (f *fakeVisitors) PutProvider(_ context.Context, tenant, name string, in vi
 	if f.providers == nil {
 		f.providers = map[string]visits.Provider{}
 	}
-	old, ok := f.providers[tenant+"/"+name]
+	old, ok := f.providers[project+"/"+name]
 	if ok && old.Kind == in.Kind && old.URL == in.URL {
 		return old, false, nil
 	}
@@ -138,12 +138,12 @@ func (f *fakeVisitors) PutProvider(_ context.Context, tenant, name string, in vi
 	if !ok {
 		p.CreatedAt = p.UpdatedAt
 	}
-	f.providers[tenant+"/"+name] = p
+	f.providers[project+"/"+name] = p
 	return p, !ok, nil
 }
 
-func (f *fakeVisitors) DeleteProvider(_ context.Context, tenant, name string) error {
-	return f.record(visitorCall{method: "DeleteProvider", tenant: tenant, name: name})
+func (f *fakeVisitors) DeleteProvider(_ context.Context, project, name string) error {
+	return f.record(visitorCall{method: "DeleteProvider", project: project, name: name})
 }
 
 func (f *fakeVisitors) OpenChallenge(_ context.Context, c visits.Caller, sealed string) (visits.Challenge, error) {
@@ -151,7 +151,7 @@ func (f *fakeVisitors) OpenChallenge(_ context.Context, c visits.Caller, sealed 
 		return visits.Challenge{}, err
 	}
 	return visits.Challenge{Host: "stage--kino.apps.example.test", Path: "/", Restart: "https://stage--kino.apps.example.test/",
-		Provider: visits.ProviderRef{Name: "fecode", Kind: "tenant"}}, nil
+		Provider: visits.ProviderRef{Name: "fecode", Kind: "project"}}, nil
 }
 
 func (f *fakeVisitors) AcceptChallenge(_ context.Context, c visits.Caller, in visits.Accept) (visits.Answer, error) {
@@ -183,11 +183,11 @@ func (f *fakeVisitors) EndBySession(_ context.Context, in visits.EndSession) (in
 	return 2, nil
 }
 
-func (f *fakeVisitors) OIDCProvider(_ context.Context, tenant, name string) (visits.OIDCProvider, error) {
-	if err := f.record(visitorCall{method: "OIDCProvider", tenant: tenant, name: name}); err != nil {
+func (f *fakeVisitors) OIDCProvider(_ context.Context, project, name string) (visits.OIDCProvider, error) {
+	if err := f.record(visitorCall{method: "OIDCProvider", project: project, name: name}); err != nil {
 		return visits.OIDCProvider{}, err
 	}
-	return visits.OIDCProvider{Tenant: tenant, Name: name, Issuer: "https://login.example.test/", ClientID: "abc",
+	return visits.OIDCProvider{Project: project, Name: name, Issuer: "https://login.example.test/", ClientID: "abc",
 		ClientSecret: "s3cret", Rule: visits.Rule{Anyone: true}}, nil
 }
 
@@ -207,7 +207,7 @@ func (e *env) mintServiceToken(kind, name string) (string, store.ServiceToken) {
 }
 
 // The provider class: ferun-auth's token reaches the challenge and visit
-// routes as Caller{Auth}, a tenant's token as Caller{Tenant} whose Admin
+// routes as Caller{Auth}, a project's token as Caller{Project} whose Admin
 // is its role on the environment; a sink's token, a feos-auth- token that
 // is no row of kind auth and nothing at all are 401, each with its text. The auth class
 // takes ferun-auth's token only.
@@ -237,36 +237,36 @@ func TestVisitorClasses(t *testing.T) {
 		n := fv.count()
 		expect(t, e.do(rt.method, rt.path, bearerOf(authTok), rt.body), http.StatusOK, "")
 		c := fv.last(t)
-		if fv.count() != n+1 || !c.caller.Auth || c.caller.Tenant != "" || c.caller.Admin != nil ||
+		if fv.count() != n+1 || !c.caller.Auth || c.caller.Project != "" || c.caller.Admin != nil ||
 			c.caller.MadeBy != "service:"+authRow.ID.String() {
 			t.Fatalf("%s %s as ferun-auth: %+v", rt.method, rt.path, c.caller)
 		}
-		// The tenant's admin token: admin on every environment.
-		expect(t, e.do(rt.method, rt.path, bearerOf(e.tenantToken), rt.body), http.StatusOK, "")
+		// The project's admin token: admin on every environment.
+		expect(t, e.do(rt.method, rt.path, bearerOf(e.projectToken), rt.body), http.StatusOK, "")
 		c = fv.last(t)
-		if c.caller.Auth || c.caller.Tenant != testTenant || c.caller.Admin == nil || !c.caller.Admin(w.stage) ||
-			c.caller.MadeBy != "token:"+store.HashToken(e.tenantToken) {
-			t.Fatalf("%s %s as the tenant: %+v", rt.method, rt.path, c.caller)
+		if c.caller.Auth || c.caller.Project != testProject || c.caller.Admin == nil || !c.caller.Admin(w.stage) ||
+			c.caller.MadeBy != "token:"+store.HashToken(e.projectToken) {
+			t.Fatalf("%s %s as the project: %+v", rt.method, rt.path, c.caller)
 		}
 		// A token that is admin on stage alone.
 		expect(t, e.do(rt.method, rt.path, bearerOf(stageAdmin), rt.body), http.StatusOK, "")
 		c = fv.last(t)
-		if c.caller.Tenant != testTenant || !c.caller.Admin(w.stage) || c.caller.Admin(w.prod) ||
+		if c.caller.Project != testProject || !c.caller.Admin(w.stage) || c.caller.Admin(w.prod) ||
 			c.caller.Admin(uuid.New()) {
 			t.Fatalf("%s %s as stage's admin: %+v", rt.method, rt.path, c.caller)
 		}
 		// Refusals reach nothing.
 		n = fv.count()
 		// A sink's token is no feos-auth- token: it is looked up as a
-		// tenant's, and is none.
+		// project's, and is none.
 		expect(t, e.do(rt.method, rt.path, bearerOf(sinkTok), rt.body), http.StatusUnauthorized,
-			errBody("unknown tenant token"))
+			errBody("unknown project token"))
 		expect(t, e.do(rt.method, rt.path, bearerOf(unknown), rt.body), http.StatusUnauthorized,
 			errBody("unknown service token"))
 		expect(t, e.do(rt.method, rt.path, bearerOf(misfiled), rt.body), http.StatusUnauthorized,
 			errBody("unknown service token"))
 		expect(t, e.do(rt.method, rt.path, bearerOf("nope"), rt.body), http.StatusUnauthorized,
-			errBody("unknown tenant token"))
+			errBody("unknown project token"))
 		resp := e.do(rt.method, rt.path, "", rt.body)
 		expect(t, resp, http.StatusUnauthorized, errBody("provider credential required"))
 		if got := resp.Header().Get("WWW-Authenticate"); got != `Bearer realm="ferun"` {
@@ -284,13 +284,13 @@ func TestVisitorClasses(t *testing.T) {
 		t.Fatalf("end %+v", c)
 	}
 	expect(t, e.do("GET", "/api/v1/oidc-providers/acme/sso", bearerOf(authTok), nil), http.StatusOK,
-		`{"tenant":"acme","name":"sso","issuer":"https://login.example.test/","clientId":"abc","clientSecret":"s3cret",`+
+		`{"project":"acme","name":"sso","issuer":"https://login.example.test/","clientId":"abc","clientSecret":"s3cret",`+
 			`"rule":{"anyone":true}}`+"\n")
-	if c := fv.last(t); c.method != "OIDCProvider" || c.tenant != "acme" || c.name != "sso" {
+	if c := fv.last(t); c.method != "OIDCProvider" || c.project != "acme" || c.name != "sso" {
 		t.Fatalf("oidc provider %+v", c)
 	}
 	n := fv.count()
-	for _, authz := range []string{"", bearerOf(sinkTok), bearerOf(unknown), bearerOf(misfiled), bearerOf(e.tenantToken),
+	for _, authz := range []string{"", bearerOf(sinkTok), bearerOf(unknown), bearerOf(misfiled), bearerOf(e.projectToken),
 		adminAuth()} {
 		for _, rt := range []struct{ method, path string }{
 			{"POST", "/api/v1/visits/end"}, {"GET", "/api/v1/oidc-providers/acme/sso"},
@@ -302,9 +302,9 @@ func TestVisitorClasses(t *testing.T) {
 			}
 		}
 	}
-	// ferun-auth's token is no tenant's: the tenant routes refuse it.
+	// ferun-auth's token is no project's: the project routes refuse it.
 	expect(t, e.do("GET", "/api/v1/providers", bearerOf(authTok), nil), http.StatusUnauthorized,
-		errBody("unknown tenant token"))
+		errBody("unknown project token"))
 	if fv.count() != n {
 		t.Fatal("a refused call reached the service")
 	}
@@ -316,7 +316,7 @@ func TestVisitorClasses(t *testing.T) {
 	}
 }
 
-// A person's session reaches the provider routes as a tenant's principal,
+// A person's session reaches the provider routes as a project's principal,
 // with the CSRF rules of a session: a POST needs X-Requested-With, an
 // Origin the public URL's.
 func TestVisitorSession(t *testing.T) {
@@ -329,7 +329,7 @@ func TestVisitorSession(t *testing.T) {
 		if h == nil {
 			h = http.Header{}
 		}
-		h.Set(tenantHeader, testTenant)
+		h.Set(projectHeader, testProject)
 		return request{method: "POST", path: "/api/v1/challenges/open", body: `{"challenge":"sealed-1"}`, header: h,
 			cookies: []*http.Cookie{{Name: cookieSession, Value: cookie}}}
 	}
@@ -342,15 +342,15 @@ func TestVisitorSession(t *testing.T) {
 	}
 	expect(t, e.serve(sess(http.Header{csrfHeader: {csrfValue}, "Origin": {testPublicURL}})), http.StatusOK, "")
 	c := fv.last(t)
-	if c.caller.Auth || c.caller.Tenant != testTenant || c.caller.MadeBy != "person:"+w.persons["ra"].String() ||
+	if c.caller.Auth || c.caller.Project != testProject || c.caller.MadeBy != "person:"+w.persons["ra"].String() ||
 		!c.caller.Admin(w.stage) || c.caller.Admin(w.prod) || c.sealed != "sealed-1" {
 		t.Fatalf("session caller %+v", c)
 	}
-	// The session names its tenant; one it has no grant in is absent.
+	// The session names its project; one it has no grant in is absent.
 	h := http.Header{csrfHeader: {csrfValue}}
 	rq := sess(h)
-	rq.header.Set(tenantHeader, "other")
-	expect(t, e.serve(rq), http.StatusNotFound, errBody("no such tenant"))
+	rq.header.Set(projectHeader, "other")
+	expect(t, e.serve(rq), http.StatusNotFound, errBody("no such project"))
 }
 
 // The bodies are decoded into the visits types (unknown fields ignored),
@@ -359,7 +359,7 @@ func TestVisitorBodiesAndErrors(t *testing.T) {
 	t.Parallel()
 	fv := &fakeVisitors{}
 	e := newEnv(t, envOptions{visitors: fv})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	expect(t, e.do("POST", "/api/v1/challenges/accept", tok, `{"challenge":"sealed-1","subject":"u-1",`+
 		`"email":"a@example.test","name":"Ada","session":"s-1","endsAt":"2026-11-13T08:00:00Z","extra":true}`),
 		http.StatusOK, `{"redirect":"https://stage--kino.apps.example.test/.ferun/auth?code=c","admitted":true,`+
@@ -413,34 +413,34 @@ func TestVisitorBodiesAndErrors(t *testing.T) {
 	}
 }
 
-// The tenant's providers: the routes pass the tenant, the name and the
+// The project's providers: the routes pass the project, the name and the
 // body; a make is 201, a change or an unchanged PUT 200, and only a make,
 // a change or a delete writes an activity row.
 func TestProviderRoutes(t *testing.T) {
 	t.Parallel()
 	fv := &fakeVisitors{}
 	e := newEnv(t, envOptions{visitors: fv})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	rows := func(kind string) int {
 		t.Helper()
 		var n int
-		if err := e.d.Pool.QueryRow(context.Background(), "SELECT count(*) FROM activity WHERE kind = $1 AND tenant_id = $2",
-			kind, testTenant).Scan(&n); err != nil {
+		if err := e.d.Pool.QueryRow(context.Background(), "SELECT count(*) FROM activity WHERE kind = $1 AND project_id = $2",
+			kind, testProject).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
 	}
 	expect(t, e.do("GET", "/api/v1/providers", tok, nil), http.StatusOK,
-		`{"providers":[{"name":"ferun","kind":"ferun","builtIn":true,"environments":[]}],"kinds":["tenant"]}`+"\n")
-	if c := fv.last(t); c.method != "ListProviders" || c.tenant != testTenant {
+		`{"providers":[{"name":"ferun","kind":"ferun","builtIn":true,"environments":[]}],"kinds":["project"]}`+"\n")
+	if c := fv.last(t); c.method != "ListProviders" || c.project != testProject {
 		t.Fatalf("list %+v", c)
 	}
-	body := `{"kind":"tenant","url":"https://fecode.example.test/api/v1/visit","ignored":1}`
+	body := `{"kind":"project","url":"https://fecode.example.test/api/v1/visit","ignored":1}`
 	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, body), http.StatusCreated, "")
 	c := fv.last(t)
-	if c.method != "PutProvider" || c.tenant != testTenant || c.name != "fecode" ||
-		c.in.Kind != "tenant" || c.in.URL != "https://fecode.example.test/api/v1/visit" ||
-		c.madeBy != "token:"+store.HashToken(e.tenantToken) {
+	if c.method != "PutProvider" || c.project != testProject || c.name != "fecode" ||
+		c.in.Kind != "project" || c.in.URL != "https://fecode.example.test/api/v1/visit" ||
+		c.madeBy != "token:"+store.HashToken(e.projectToken) {
 		t.Fatalf("put %+v", c)
 	}
 	if rows("access_provider_put") != 1 {
@@ -451,7 +451,7 @@ func TestProviderRoutes(t *testing.T) {
 	if rows("access_provider_put") != 1 {
 		t.Fatal("an unchanged PUT wrote an activity row")
 	}
-	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://other.example.test/v"}`),
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"project","url":"https://other.example.test/v"}`),
 		http.StatusOK, "")
 	if rows("access_provider_put") != 2 {
 		t.Fatal("no activity row for the change")
@@ -461,7 +461,7 @@ func TestProviderRoutes(t *testing.T) {
 	fv.mu.Lock()
 	fv.sameSecond = true
 	fv.mu.Unlock()
-	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://third.example.test/v"}`),
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"project","url":"https://third.example.test/v"}`),
 		http.StatusOK, "")
 	if rows("access_provider_put") != 3 {
 		t.Fatal("no activity row for a change in the same second")
@@ -471,7 +471,7 @@ func TestProviderRoutes(t *testing.T) {
 	fv.getErr = true
 	fv.mu.Unlock()
 	// The pre-read failed and nothing changed: no row.
-	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://third.example.test/v"}`),
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"project","url":"https://third.example.test/v"}`),
 		http.StatusOK, "")
 	fv.mu.Lock()
 	fv.getErr = false
@@ -479,7 +479,7 @@ func TestProviderRoutes(t *testing.T) {
 	if rows("access_provider_put") != 3 {
 		t.Fatal("an activity row for an unchanged PUT whose pre-read failed")
 	}
-	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"tenant","url":"https://other.example.test/v"}`),
+	expect(t, e.do("PUT", "/api/v1/providers/fecode", tok, `{"kind":"project","url":"https://other.example.test/v"}`),
 		http.StatusOK, "")
 	if rows("access_provider_put") != 4 {
 		t.Fatal("no activity row for the change back")
@@ -490,7 +490,7 @@ func TestProviderRoutes(t *testing.T) {
 		t.Fatalf("get %+v", p)
 	}
 	expect(t, e.do("DELETE", "/api/v1/providers/fecode", tok, nil), http.StatusOK, `{"deleted":true}`+"\n")
-	if c := fv.last(t); c.method != "DeleteProvider" || c.tenant != testTenant || c.name != "fecode" {
+	if c := fv.last(t); c.method != "DeleteProvider" || c.project != testProject || c.name != "fecode" {
 		t.Fatalf("delete %+v", c)
 	}
 	if rows("access_provider_deleted") != 1 {
@@ -571,7 +571,7 @@ func (s *syncBuffer) String() string {
 func TestVisitorAnswerShape(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{visitors: &fakeVisitors{}})
-	resp := e.do("POST", "/api/v1/challenges/open", bearerOf(e.tenantToken), `{"challenge":"s"}`)
+	resp := e.do("POST", "/api/v1/challenges/open", bearerOf(e.projectToken), `{"challenge":"s"}`)
 	expect(t, resp, http.StatusOK, "")
 	var got map[string]json.RawMessage
 	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
@@ -594,7 +594,7 @@ func TestVisitKeys(t *testing.T) {
 	t.Parallel()
 	f := &fakeVisitors{}
 	e := newEnv(t, envOptions{visitors: f})
-	for _, authz := range []string{"", bearerOf(e.tenantToken), bearerOf("feos-auth-x")} {
+	for _, authz := range []string{"", bearerOf(e.projectToken), bearerOf("feos-auth-x")} {
 		w := e.do("GET", "/api/v1/visit-keys", authz, nil)
 		expect(t, w, http.StatusOK, fakeJWKS)
 		if w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "public, max-age=300" {

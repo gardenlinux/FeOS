@@ -10,11 +10,11 @@ import { fmtQuota, quotaRows, useAccess, useMe } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import { RoleBadge } from './People.jsx';
 import { AT_LIMIT, COUNTS, booked } from './usage.js';
-import '../styles/tenant.css';
+import '../styles/project.css';
 
-// The tenant's usage (its use against the limits the platform's
-// operators set, ADR 0031 "Quotas per tenant") and its settings (who you
-// are in it, leaving it; for operators the way to the platform's tenant
+// The project's usage (its use against the limits the platform's
+// operators set, ADR 0031 "Quotas per project") and its settings (who you
+// are in it, leaving it; for operators the way to the platform's project
 // list, where limits, zone and deletion are).
 
 // ------------------------------------------------------------------ usage --
@@ -23,8 +23,8 @@ function Link({ to, navigate, children }) {
   return <a href={to} onClick={(e) => { e.preventDefault(); navigate(to); }}>{children}</a>;
 }
 
-export function Usage({ tenant, navigate }) {
-  const access = useAccess(tenant);
+export function Usage({ project, navigate }) {
+  const access = useAccess(project);
   const sum = useSummary();
   const [quota, setQuota] = useState(null);
   const [err, setErr] = useState('');
@@ -47,15 +47,15 @@ export function Usage({ tenant, navigate }) {
   const parts = booked(quota, sum.sandboxes, sum.jobs);
 
   return (
-    <div className="tenantpage">
+    <div className="projectpage">
       <header className="pagehead">
         <div className="pagehead-title">
-          <span className="kind">Tenant</span>
+          <span className="kind">Project</span>
           <h1>Usage</h1>
           <span className="pagehead-actions"><LiveBadge lastOk={lastOk} /></span>
         </div>
         <div className="facts">
-          <span>tenant <b className="mono">{tenant}</b></span>
+          <span>project <b className="mono">{project}</b></span>
           {quota && <span><b>{limited}</b> of {rows.length} limits set</span>}
           {quota && near > 0 && <span className="warn"><b className="warn">{near}</b> near or at the limit</span>}
         </div>
@@ -95,7 +95,7 @@ export function Usage({ tenant, navigate }) {
           </div>
           <p className="hint">
             A sandbox books its vCPUs and memory in every state: paused or hibernated it still counts, until it is
-            deleted. The environments' share is the rest of the tenant's use, by their current deployments. The lists
+            deleted. The environments' share is the rest of the project's use, by their current deployments. The lists
             are read apart from the use, so a share can lag a few seconds.
           </p>
         </section>)}
@@ -103,7 +103,7 @@ export function Usage({ tenant, navigate }) {
       {quota && (
         <p className="footnote muted small">
           The platform's operators set these limits{access.can.operator
-            ? <>: you are one, change them in the <Link to="/tenants" navigate={navigate}>platform's tenant list</Link>.</>
+            ? <>: you are one, change them in the <Link to="/projects" navigate={navigate}>platform's project list</Link>.</>
             : '; ask them for more.'} A limit is checked when something new is asked for: past it the request is
           refused with <code>quota_exceeded</code>. What runs stays when a limit goes down. No limit: nothing is counted
           against one. The daily quotas of logs and traces are apart.
@@ -171,46 +171,46 @@ function BookedBars({ parts, quota }) {
 
 // --------------------------------------------------------------- settings --
 
-export function TenantSettings({ tenant, navigate }) {
-  const access = useAccess(tenant);
+export function ProjectSettings({ project, navigate }) {
+  const access = useAccess(project);
   const c = access.can;
   const { reload } = useMe();
   const [armed, arm, disarm] = useArm();
   const [err, setErr] = useState('');
   const [info, setInfo] = useState(null);
 
-  // An operator reads the tenant from the admin list: its zone, its
+  // An operator reads the project from the admin list: its zone, its
   // maker, whether it is being deleted. A person's answers carry no zone.
   useEffect(() => {
     if (!c.operator) return undefined;
     let live = true;
-    api.listTenants().then((r) => {
-      if (live) setInfo((r.tenants || []).find((t) => t.name === tenant) || null);
+    api.listProjects().then((r) => {
+      if (live) setInfo((r.projects || []).find((t) => t.name === project) || null);
     }, () => {});
     return () => { live = false; };
-  }, [c.operator, tenant]);
+  }, [c.operator, project]);
 
   const envs = access.environments || [];
   return (
-    <div className="tenantpage">
+    <div className="projectpage">
       <header className="pagehead">
         <div className="pagehead-title">
-          <span className="kind">Tenant</span>
+          <span className="kind">Project</span>
           <h1>Settings</h1>
         </div>
         <div className="facts">
-          <span>tenant <b className="mono">{tenant}</b></span>
+          <span>project <b className="mono">{project}</b></span>
           <span>your role <b>{access.role || (envs.length ? 'on environments alone' : '—')}</b></span>
         </div>
       </header>
 
       <section className="pane">
-        <div className="pane-toolbar"><h2><Icon name="building" size={14} /> This tenant</h2></div>
+        <div className="pane-toolbar"><h2><Icon name="building" size={14} /> This project</h2></div>
         <div className="kv-grid">
-          <KV k="name" className="mono">{tenant}</KV>
+          <KV k="name" className="mono">{project}</KV>
           <KV k="your role">
-            {access.role ? <RoleBadge role={access.role} /> : <span className="muted">none on the tenant</span>}
-            {c.operator && <span className="muted small"> · as an operator: admin in every tenant, no member of it</span>}
+            {access.role ? <RoleBadge role={access.role} /> : <span className="muted">none on the project</span>}
+            {c.operator && <span className="muted small"> · as an operator: admin in every project, no member of it</span>}
           </KV>
           {envs.length > 0 && (
             <KV k="environments">
@@ -226,42 +226,42 @@ export function TenantSettings({ tenant, navigate }) {
         </div>
         <p className="hint">
           {access.role === 'admin' ? 'As its admin you hand out roles on the People page. ' : ''}
-          The tenant's name, zone, limits and deletion are the platform's operators'.
+          The project's name, zone, limits and deletion are the platform's operators'.
         </p>
       </section>
 
       {c.leave && (
         <section className="pane danger-zone">
-          <div className="pane-toolbar"><h2><Icon name="logout" size={14} /> Leave this tenant</h2></div>
+          <div className="pane-toolbar"><h2><Icon name="logout" size={14} /> Leave this project</h2></div>
           <p className="small">
-            Gives up every grant you hold in <span className="mono">{tenant}</span>, on the tenant and on its
+            Gives up every grant you hold in <span className="mono">{project}</span>, on the project and on its
             environments. You see it no more until someone invites you again. Its last admin cannot leave: make
             another member admin first.
           </p>
           <ErrBox error={err} />
           <ArmButton armKey="leave" armed={armed} arm={arm} disarm={disarm} icon="logout"
-            confirmLabel="really leave?" title="give up every grant you hold in this tenant"
+            confirmLabel="really leave?" title="give up every grant you hold in this project"
             onConfirm={async () => {
               setErr('');
               try {
-                await api.leaveTenant();
+                await api.leaveProject();
                 await reload();
-                navigate('/tenants');
+                navigate('/projects');
               } catch (e) {
                 setErr(e.message);
               }
-            }}>Leave {tenant}</ArmButton>
+            }}>Leave {project}</ArmButton>
         </section>)}
 
       {c.operator && (
         <section className="pane">
           <div className="pane-toolbar"><h2><Icon name="crown" size={14} /> Limits, zone and deletion</h2></div>
           <p className="small">
-            You are an operator: no member to leave. A tenant's limits, its zone and its deletion are set in the
-            platform's tenant list.
+            You are an operator: no member to leave. A project's limits, its zone and its deletion are set in the
+            platform's project list.
           </p>
-          <a className="button" href="/tenants" onClick={(e) => { e.preventDefault(); navigate('/tenants'); }}>
-            <Icon name="building" size={14} /> Platform · Tenants <Icon name="arrowRight" size={12} /></a>
+          <a className="button" href="/projects" onClick={(e) => { e.preventDefault(); navigate('/projects'); }}>
+            <Icon name="building" size={14} /> Platform · Projects <Icon name="arrowRight" size={12} /></a>
         </section>)}
     </div>
   );

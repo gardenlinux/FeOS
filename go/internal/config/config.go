@@ -185,12 +185,12 @@ type Config struct {
 	OIDCAdminGroup string
 	// VisitorAuthURL is ferun-auth's base URL (ADR 0054), without a
 	// trailing slash: where a visitor of a provider of kind ferun or oidc
-	// signs in. Empty: no ferun-auth, and only providers of kind tenant.
+	// signs in. Empty: no ferun-auth, and only providers of kind project.
 	VisitorAuthURL string
 	// SessionTTL is the absolute lifetime of a UI session.
 	SessionTTL time.Duration
-	// BootstrapToken becomes a token of the tenant "operator" while no
-	// tenant exists.
+	// BootstrapToken becomes a token of the project "operator" while no
+	// project exists.
 	BootstrapToken string
 	// MCPAllowedOrigins are the Origins /mcp accepts; empty: every request
 	// with an Origin is refused.
@@ -204,28 +204,28 @@ type Config struct {
 	// which ferun-ingress serves (ADR 0021); empty: no hosts, and no
 	// environment can be public.
 	AppsZone string
-	// AppsZoneOwners are the tenants that own the apps zone's plain names
-	// (ADR 0021, 2026-11-01): such a tenant may choose a default host
+	// AppsZoneOwners are the projects that own the apps zone's plain names
+	// (ADR 0021, 2026-11-01): such a project may choose a default host
 	// label without "--", as FeCode does for a project's production
-	// (<project>.<apps zone>); nil: no tenant may.
+	// (<project>.<apps zone>); nil: no project may.
 	AppsZoneOwners []string
-	// TenantCreation says who makes tenants with POST /api/v1/tenants
+	// ProjectCreation says who makes projects with POST /api/v1/projects
 	// (ADR 0031): "people" (every signed-in person) or "operators".
-	TenantCreation string
-	// TenantsPerPerson bounds the tenants one person makes; 0: no bound.
-	TenantsPerPerson int
-	// The limits of the tenants people make (ADR 0031, "Quotas per
-	// tenant"); negative: none.
-	TenantDefaultSandboxes, TenantDefaultEnvironments, TenantDefaultRunningJobs, TenantDefaultVCPUs int
-	TenantDefaultMemoryMiB                                                                          int64
-	// TenantZone is the zone of the default hosts of the tenants that
+	ProjectCreation string
+	// ProjectsPerPerson bounds the projects one person makes; 0: no bound.
+	ProjectsPerPerson int
+	// The limits of the projects people make (ADR 0031, "Quotas per
+	// project"); negative: none.
+	ProjectDefaultSandboxes, ProjectDefaultEnvironments, ProjectDefaultRunningJobs, ProjectDefaultVCPUs int
+	ProjectDefaultMemoryMiB                                                                             int64
+	// ProjectZone is the zone of the default hosts of the projects that
 	// people make (ADR 0031), such as apps.run.example.com, which
 	// ferun-ingress serves with a wildcard certificate of its own; the
-	// tenants that operators make keep AppsZone. Empty: every tenant's
+	// projects that operators make keep AppsZone. Empty: every project's
 	// hosts are under AppsZone. It needs AppsZone, and neither lies
 	// under the other.
-	TenantZone string
-	// EdgeName is the name tenants' domains point at with a CNAME (ADR
+	ProjectZone string
+	// EdgeName is the name projects' domains point at with a CNAME (ADR
 	// 0021), such as edge.fecode.dev, which the operator publishes with the
 	// balancer's addresses; empty: domains are off.
 	EdgeName string
@@ -238,7 +238,7 @@ type Config struct {
 	// DomainGrace is how long a record of a verified domain may answer
 	// wrong before the domain is deactivated.
 	DomainGrace time.Duration
-	// DomainUnverifiedMax is the most claims a tenant may hold that are
+	// DomainUnverifiedMax is the most claims a project may hold that are
 	// not verified.
 	DomainUnverifiedMax int
 	// DomainReserved are zones no domain may be or be under, beside the
@@ -314,62 +314,62 @@ type Config struct {
 
 // Default returns the configuration of serve with every default of §3 and
 // Zones are the platform's zones of default hosts: the apps zone, its
-// owners and the tenant zone (ADR 0021, ADR 0031).
+// owners and the project zone (ADR 0021, ADR 0031).
 func (c Config) Zones() model.Zones {
-	return model.Zones{Apps: c.AppsZone, AppsOwners: c.AppsZoneOwners, Tenant: c.TenantZone}
+	return model.Zones{Apps: c.AppsZone, AppsOwners: c.AppsZoneOwners, Project: c.ProjectZone}
 }
 
 // no database URL.
 func Default() Config {
 	return Config{
-		Listen:                    ":8100",
-		NodeListen:                ":7443",
-		TrustDomain:               "feos.local",
-		CADir:                     "/etc/ferun/ca",
-		OIDCClientID:              "ferun",
-		OIDCScopes:                []string{"openid", "profile", "email"},
-		OIDCAdminGroup:            "admins",
-		SessionTTL:                12 * time.Hour,
-		DefaultImage:              "ghcr.io/maltej/debian-ai:latest",
-		ImageBakes:                true,
-		DefaultVCPUs:              2,
-		DefaultMemoryMiB:          512,
-		Placement:                 PlacementBinpack,
-		DiskBudget:                4 << 30,
-		IdlePause:                 10 * time.Second,
-		HibernateAfter:            0,
-		NodeTTL:                   15 * time.Second,
-		LostGrace:                 10 * time.Minute,
-		NodeWait:                  5 * time.Second,
-		RolloutGrace:              30 * time.Second,
-		DrainTimeout:              2 * time.Minute,
-		PendingRepairAfter:        10 * time.Minute,
-		UnreachableRepairAfter:    2 * time.Minute,
-		NodeCertTTL:               168 * time.Hour,
-		PodCertTTL:                time.Hour,
-		NodeMaxStreams:            1024,
-		ConnDrainTimeout:          20 * time.Minute,
-		HibernateTimeout:          time.Hour,
-		ShutdownGrace:             11 * time.Minute,
-		ActivityRetention:         720 * time.Hour,
-		TrafficRetention:          168 * time.Hour,
-		DomainChallengeLabel:      "_ferun-challenge",
-		ACMEProfile:               DefaultACMEProfile,
-		ACMEZoneProvider:          ACMEZoneRoute53,
-		DomainGrace:               72 * time.Hour,
-		DomainUnverifiedMax:       50,
-		TenantCreation:            "people",
-		TenantsPerPerson:          3,
-		TenantDefaultSandboxes:    5,
-		TenantDefaultEnvironments: 5,
-		TenantDefaultRunningJobs:  3,
-		TenantDefaultVCPUs:        8,
-		TenantDefaultMemoryMiB:    16384,
-		LogLevel:                  slog.LevelInfo,
-		ReadinessDelay:            ReadinessDelay,
-		ReadyWindow:               ReadyWindow,
-		CallLease:                 CallLease,
-		CallRetention:             CallRetention,
+		Listen:                     ":8100",
+		NodeListen:                 ":7443",
+		TrustDomain:                "feos.local",
+		CADir:                      "/etc/ferun/ca",
+		OIDCClientID:               "ferun",
+		OIDCScopes:                 []string{"openid", "profile", "email"},
+		OIDCAdminGroup:             "admins",
+		SessionTTL:                 12 * time.Hour,
+		DefaultImage:               "ghcr.io/maltej/debian-ai:latest",
+		ImageBakes:                 true,
+		DefaultVCPUs:               2,
+		DefaultMemoryMiB:           512,
+		Placement:                  PlacementBinpack,
+		DiskBudget:                 4 << 30,
+		IdlePause:                  10 * time.Second,
+		HibernateAfter:             0,
+		NodeTTL:                    15 * time.Second,
+		LostGrace:                  10 * time.Minute,
+		NodeWait:                   5 * time.Second,
+		RolloutGrace:               30 * time.Second,
+		DrainTimeout:               2 * time.Minute,
+		PendingRepairAfter:         10 * time.Minute,
+		UnreachableRepairAfter:     2 * time.Minute,
+		NodeCertTTL:                168 * time.Hour,
+		PodCertTTL:                 time.Hour,
+		NodeMaxStreams:             1024,
+		ConnDrainTimeout:           20 * time.Minute,
+		HibernateTimeout:           time.Hour,
+		ShutdownGrace:              11 * time.Minute,
+		ActivityRetention:          720 * time.Hour,
+		TrafficRetention:           168 * time.Hour,
+		DomainChallengeLabel:       "_ferun-challenge",
+		ACMEProfile:                DefaultACMEProfile,
+		ACMEZoneProvider:           ACMEZoneRoute53,
+		DomainGrace:                72 * time.Hour,
+		DomainUnverifiedMax:        50,
+		ProjectCreation:            "people",
+		ProjectsPerPerson:          3,
+		ProjectDefaultSandboxes:    5,
+		ProjectDefaultEnvironments: 5,
+		ProjectDefaultRunningJobs:  3,
+		ProjectDefaultVCPUs:        8,
+		ProjectDefaultMemoryMiB:    16384,
+		LogLevel:                   slog.LevelInfo,
+		ReadinessDelay:             ReadinessDelay,
+		ReadyWindow:                ReadyWindow,
+		CallLease:                  CallLease,
+		CallRetention:              CallRetention,
 	}
 }
 
@@ -449,9 +449,9 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.StringVar(&t.scopes, "oidc-scopes", t.scopes, "OIDC scopes, space-separated; must contain openid")
 	fs.StringVar(&c.OIDCAdminGroup, "oidc-admin-group", c.OIDCAdminGroup, "a signed-in user is an admin when the groups claim holds this group")
 	fs.StringVar(&c.VisitorAuthURL, "visitor-auth-url", c.VisitorAuthURL,
-		"ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind tenant")
+		"ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind project")
 	fs.DurationVar(&c.SessionTTL, "session-ttl", c.SessionTTL, "lifetime of a UI session (absolute)")
-	fs.StringVar(&c.BootstrapToken, "bootstrap-token", c.BootstrapToken, "becomes a token of tenant operator when no tenant exists")
+	fs.StringVar(&c.BootstrapToken, "bootstrap-token", c.BootstrapToken, "becomes a token of project operator when no project exists")
 	fs.Var((*listValue)(&c.MCPAllowedOrigins), "mcp-allowed-origins",
 		"comma-separated Origin allowlist of /mcp; empty: every request with an Origin is refused")
 	fs.StringVar(&c.PodNetwork, "pod-network", c.PodNetwork,
@@ -459,25 +459,25 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.StringVar(&c.AppsZone, "apps-zone", c.AppsZone,
 		"the DNS zone of public environments' default hosts, served by ferun-ingress (ADR 0021); empty: no hosts, and no environment can be public")
 	fs.Var((*listValue)(&c.AppsZoneOwners), "apps-zone-owners",
-		"tenants that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without \"--\", <label>.<apps zone> (ADR 0021); empty: none may")
-	fs.StringVar(&c.TenantCreation, "tenant-creation", c.TenantCreation,
-		"who makes tenants with POST /api/v1/tenants (ADR 0031): people (every signed-in person) or operators")
-	fs.IntVar(&c.TenantsPerPerson, "tenants-per-person", c.TenantsPerPerson,
-		"the most tenants one person may make that are not being deleted; 0: no bound (operators are never bound)")
-	fs.IntVar(&c.TenantDefaultSandboxes, "tenant-default-sandboxes", c.TenantDefaultSandboxes,
-		"the limit of sandboxes of a tenant a person makes; negative: none")
-	fs.IntVar(&c.TenantDefaultEnvironments, "tenant-default-environments", c.TenantDefaultEnvironments,
-		"the limit of environments of a tenant a person makes; negative: none")
-	fs.IntVar(&c.TenantDefaultRunningJobs, "tenant-default-running-jobs", c.TenantDefaultRunningJobs,
-		"the limit of running tenants' jobs of a tenant a person makes; negative: none")
-	fs.IntVar(&c.TenantDefaultVCPUs, "tenant-default-vcpus", c.TenantDefaultVCPUs,
-		"the limit of vCPUs over the sandboxes, services, addons and running jobs of a tenant a person makes; negative: none")
-	fs.Int64Var(&c.TenantDefaultMemoryMiB, "tenant-default-memory-mib", c.TenantDefaultMemoryMiB,
-		"the limit of memory (MiB) over the sandboxes, services, addons and running jobs of a tenant a person makes; negative: none")
-	fs.StringVar(&c.TenantZone, "tenant-zone", c.TenantZone,
-		"the DNS zone of the default hosts of the tenants people make (ADR 0031), served by ferun-ingress with a wildcard of its own; needs --apps-zone; empty: every tenant's hosts are under --apps-zone")
+		"projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without \"--\", <label>.<apps zone> (ADR 0021); empty: none may")
+	fs.StringVar(&c.ProjectCreation, "project-creation", c.ProjectCreation,
+		"who makes projects with POST /api/v1/projects (ADR 0031): people (every signed-in person) or operators")
+	fs.IntVar(&c.ProjectsPerPerson, "projects-per-person", c.ProjectsPerPerson,
+		"the most projects one person may make that are not being deleted; 0: no bound (operators are never bound)")
+	fs.IntVar(&c.ProjectDefaultSandboxes, "project-default-sandboxes", c.ProjectDefaultSandboxes,
+		"the limit of sandboxes of a project a person makes; negative: none")
+	fs.IntVar(&c.ProjectDefaultEnvironments, "project-default-environments", c.ProjectDefaultEnvironments,
+		"the limit of environments of a project a person makes; negative: none")
+	fs.IntVar(&c.ProjectDefaultRunningJobs, "project-default-running-jobs", c.ProjectDefaultRunningJobs,
+		"the limit of running projects' jobs of a project a person makes; negative: none")
+	fs.IntVar(&c.ProjectDefaultVCPUs, "project-default-vcpus", c.ProjectDefaultVCPUs,
+		"the limit of vCPUs over the sandboxes, services, addons and running jobs of a project a person makes; negative: none")
+	fs.Int64Var(&c.ProjectDefaultMemoryMiB, "project-default-memory-mib", c.ProjectDefaultMemoryMiB,
+		"the limit of memory (MiB) over the sandboxes, services, addons and running jobs of a project a person makes; negative: none")
+	fs.StringVar(&c.ProjectZone, "project-zone", c.ProjectZone,
+		"the DNS zone of the default hosts of the projects people make (ADR 0031), served by ferun-ingress with a wildcard of its own; needs --apps-zone; empty: every project's hosts are under --apps-zone")
 	fs.StringVar(&c.EdgeName, "edge-name", c.EdgeName,
-		"the name tenants' domains point at with a CNAME (ADR 0021), e.g. edge.fecode.dev; empty: domains are off")
+		"the name projects' domains point at with a CNAME (ADR 0021), e.g. edge.fecode.dev; empty: domains are off")
 	fs.Var((*addrList)(&c.EdgeAddresses), "edge-address",
 		"an edge address beside what --edge-name resolves to, which a domain's A and AAAA records may name; comma-separated or repeated")
 	fs.StringVar(&c.DomainChallengeLabel, "domain-challenge-label", c.DomainChallengeLabel,
@@ -485,7 +485,7 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.DurationVar(&c.DomainGrace, "domain-grace", c.DomainGrace,
 		"how long a record of a verified domain may answer wrong before the domain is deactivated")
 	fs.IntVar(&c.DomainUnverifiedMax, "domain-unverified-max", c.DomainUnverifiedMax,
-		"the most domain claims a tenant may hold that are not verified")
+		"the most domain claims a project may hold that are not verified")
 	fs.Var((*listValue)(&c.DomainReserved), "domain-reserved",
 		"a zone no domain may be or be under (the platform's own domain), beside the apps zone and --edge-name; comma-separated or repeated")
 	fs.StringVar(&c.DNSResolver, "dns-resolver", c.DNSResolver,
@@ -620,27 +620,27 @@ func (c *Config) Validate() error {
 			bad("--apps-zone: %w", err)
 		}
 	}
-	if c.TenantZone != "" {
-		switch err := pki.ValidateDomain(c.TenantZone); {
+	if c.ProjectZone != "" {
+		switch err := pki.ValidateDomain(c.ProjectZone); {
 		case err != nil:
-			bad("--tenant-zone: %w", err)
+			bad("--project-zone: %w", err)
 		case c.AppsZone == "":
-			bad("--tenant-zone needs --apps-zone")
-		case c.TenantZone == c.AppsZone || strings.HasSuffix(c.TenantZone, "."+c.AppsZone) ||
-			strings.HasSuffix(c.AppsZone, "."+c.TenantZone):
-			bad("--tenant-zone %s and --apps-zone %s: neither may be or lie under the other", c.TenantZone, c.AppsZone)
+			bad("--project-zone needs --apps-zone")
+		case c.ProjectZone == c.AppsZone || strings.HasSuffix(c.ProjectZone, "."+c.AppsZone) ||
+			strings.HasSuffix(c.AppsZone, "."+c.ProjectZone):
+			bad("--project-zone %s and --apps-zone %s: neither may be or lie under the other", c.ProjectZone, c.AppsZone)
 		}
 	}
 	for _, tn := range c.AppsZoneOwners {
-		if !store.TenantNamePattern.MatchString(tn) {
-			bad("--apps-zone-owners: %q is not a tenant name (%s)", tn, store.TenantNamePattern)
+		if !store.ProjectNamePattern.MatchString(tn) {
+			bad("--apps-zone-owners: %q is not a project name (%s)", tn, store.ProjectNamePattern)
 		}
 	}
-	if c.TenantCreation != "people" && c.TenantCreation != "operators" {
-		bad("--tenant-creation must be people or operators, got %q", c.TenantCreation)
+	if c.ProjectCreation != "people" && c.ProjectCreation != "operators" {
+		bad("--project-creation must be people or operators, got %q", c.ProjectCreation)
 	}
-	if c.TenantsPerPerson < 0 {
-		bad("--tenants-per-person must not be negative")
+	if c.ProjectsPerPerson < 0 {
+		bad("--projects-per-person must not be negative")
 	}
 	if c.EdgeName != "" {
 		if err := pki.ValidateDomain(c.EdgeName); err != nil {
@@ -776,7 +776,7 @@ func checkPublicURL(s string) error {
 // checkVisitorAuthURL accepts ferun-auth's URL: an absolute https URL of
 // a host (http only for a loopback one, for tests), without a path, query
 // or fragment, whose host is neither the front door's nor under the apps
-// zone or the tenant zone, where it would be a tenant's host.
+// zone or the project zone, where it would be a project's host.
 func (c *Config) checkVisitorAuthURL() error {
 	u, err := url.Parse(c.VisitorAuthURL)
 	if err != nil {
@@ -796,9 +796,9 @@ func (c *Config) checkVisitorAuthURL() error {
 	if p, err := url.Parse(c.PublicURL); c.PublicURL != "" && err == nil && strings.EqualFold(p.Hostname(), host) {
 		return fmt.Errorf("its host %s is --public-url's: ferun-auth needs a host of its own", host)
 	}
-	for _, z := range []string{c.AppsZone, c.TenantZone} {
+	for _, z := range []string{c.AppsZone, c.ProjectZone} {
 		if z != "" && (host == z || strings.HasSuffix(host, "."+z)) {
-			return fmt.Errorf("its host %s is under the zone %s, a tenant's host", host, z)
+			return fmt.Errorf("its host %s is under the zone %s, a project's host", host, z)
 		}
 	}
 	return nil

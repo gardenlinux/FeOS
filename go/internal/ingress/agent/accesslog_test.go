@@ -216,7 +216,7 @@ func TestAccessLogToSink(t *testing.T) {
 	ctx := context.Background()
 	rec := func(path string) wire.AccessLogEntry {
 		e := entry(path)
-		e.Tenant, e.Service = "acme", "web"
+		e.Project, e.Service = "acme", "web"
 		return e
 	}
 	ta.Record(rec("/a"))
@@ -272,7 +272,7 @@ func TestSpansToSink(t *testing.T) {
 	rec := func() wire.AccessLogEntry {
 		n++
 		e := entry(fmt.Sprintf("/%d", n))
-		e.Tenant, e.Service, e.Method = "acme", "web", "GET"
+		e.Project, e.Service, e.Method = "acme", "web", "GET"
 		e.TraceID, e.SpanID, e.TraceFlags = "4bf92f3577b34da6a3ce929d0e0e4736", fmt.Sprintf("%016x", n), 1
 		return e
 	}
