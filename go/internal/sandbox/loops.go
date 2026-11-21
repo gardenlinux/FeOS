@@ -54,7 +54,8 @@ const (
 // hibernate-after (5 s, when set), drain (5 s), tombstones (10 s), stale
 // ops (10 s), the unknown sweep (15 s), repair (30 s), the pending
 // re-description (30 s), process holds (60 s), expired holds (60 s),
-// project deletion (60 s) and the lost pushes of HTTP bindings (15 s). The loops that begin ops or call nodes consider
+// project deletion (60 s), the lost pushes of HTTP bindings (15 s) and the
+// sweep of TLS bindings (30 s, a node once a leadership). The loops that begin ops or call nodes consider
 // only nodes the leader is connected to; the database-only loops are not
 // filtered by connection. Idle pause, stale ops and expired holds act on
 // leases that an outage lets expire, and wait until the leader has
@@ -79,6 +80,7 @@ func (e *Engine) Loops() []leader.Loop {
 		leader.Loop{Name: LoopExpiredHolds, Interval: time.Minute, Run: e.expiredHolds},
 		leader.Loop{Name: LoopProjectDeletion, Interval: time.Minute, Run: e.projectDeletion},
 		leader.Loop{Name: LoopHTTPBindings, Interval: httpLoopInterval, Run: e.httpBindingsLoop},
+		leader.Loop{Name: LoopTLSBindings, Interval: tlsLoopInterval, Run: e.tlsBindingsLoop},
 	)
 }
 

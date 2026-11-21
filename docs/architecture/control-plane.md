@@ -366,6 +366,7 @@ audit is its activity row.
 | process holds, expired holds | 60 s | releases holds of processes that ended, and expired leases; expired holds only under the same condition |
 | project deletion | 60 s | finishes deleting projects |
 | `sandbox-http-bindings` | 15 s | sends the pods on connected nodes the clear part of their HTTP bindings that their node did not take ([HTTP bindings](#http-bindings)) |
+| `sandbox-tls-bindings` | 30 s | sends every running pod with TLS bindings on a connected node its bindings of now, once a node in each leadership; a pod that runs again other than by a create (a resume, a restore, a start, a repair, an adoption) is sent them after its commit, so a workload ID that changed (ADR 0061) heals by itself |
 | watch expiry | 60 s | deletes watches past their lease |
 | `tool-calls-expiry` | 5 s | marks running keyed calls whose lease passed: interrupted if they reached the guest, not run otherwise; only while the leader has led for a call lease (30 s) and the database has not failed within it. Waiters mark the call they wait on themselves after two leases ([Calls that outlive their caller](#calls-that-outlive-their-caller)) |
 | `tool-calls-retention` | 60 s | deletes keyed calls that ended more than an hour ago |

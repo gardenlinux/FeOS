@@ -1033,6 +1033,17 @@ func (s *Store) SandboxesInState(ctx context.Context, node string, states []stri
 		WHERE node = $1 AND op = '' AND client_state = ANY($2) ORDER BY id LIMIT $3`, node, nonNil(states), limit))
 }
 
+// TLSPushCandidates returns the rows whose pod runs on one of nodes
+// without an op and whose template names TLS bindings, ordered by id and
+// after the id after (the empty one: from the start), at most limit: the
+// pods the leader's sweep sends their TLS bindings (sandbox, tls.go).
+func (s *Store) TLSPushCandidates(ctx context.Context, nodes []string, after podid.ID, limit int) ([]Sandbox, error) {
+	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxCols+` FROM sandboxes
+		WHERE node = ANY($1) AND op = '' AND client_state = 'running' AND materialised
+			AND jsonb_array_length(coalesce(pod_template->'tlsBindings', '[]')) > 0 AND id > $2
+		ORDER BY id LIMIT $3`, nonNil(nodes), after, limit))
+}
+
 // SetSandboxTLSBindings writes the outbound TLS bindings (ADR 0036) into
 // the template of sandbox id of incarnation inc, a sandbox (no instance,
 // no project's job): those of the attached services in it, which its

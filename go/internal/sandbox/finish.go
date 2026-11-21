@@ -20,10 +20,12 @@ import (
 )
 
 // afterCommit is what follows a committed end of an op: the tombstones to
-// process now (best effort), and whether the sandbox is to be synced.
+// process now (best effort), whether the sandbox is to be synced, and the
+// push of its pod's TLS bindings (nil: none).
 type afterCommit struct {
 	tombstones []store.TombstoneKey
 	sync       bool
+	tls        *tlsPush
 }
 
 // finish is §9 "Finish": one transaction, retried with backoff until it
@@ -109,6 +111,7 @@ func (r *runner) finishOnce(ctx context.Context, h *OpHandle, res callResult, ob
 		result = OpResult{State: w.ClientState, Node: w.Node, Description: w.StatusDescription,
 			busy: vmBusy(res.err) && w.ClientState != model.StateUnknown && w.ClientState != opGoal(h.kind)}
 		ac.tombstones = append(c.tombstoneKeys(), h.tombstones...)
+		ac.tls = c.tls
 		events = append(c.events, h.endEvent(w, res))
 		return nil
 	})

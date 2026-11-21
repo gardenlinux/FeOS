@@ -40,6 +40,9 @@ type change struct {
 
 	written store.Sandbox
 	events  []activity.Event
+	// tls is the push of the pod's TLS bindings that follows the commit
+	// (tlsPushOf); nil: none.
+	tls *tlsPush
 }
 
 func (e *Engine) newChange(ctx context.Context, tx *store.Store, row store.Sandbox) (*change, error) {
@@ -71,9 +74,11 @@ func (c *change) commit(ctx context.Context) error {
 		c.events = append(c.events, c.runEnd(a.RunID, c.closeRun))
 		a.RunID = ""
 	}
+	opened := ""
 	if a.ClientState == model.StateRunning && a.RunID == "" && c.openRun != "" {
 		a.RunID = newRunID()
 		c.events = append(c.events, c.runStart(a.RunID, c.openRun))
+		opened = c.openRun
 	}
 	for _, t := range c.tombstones {
 		if _, err := c.tx.UpsertTombstone(ctx, t); err != nil {
@@ -88,6 +93,7 @@ func (c *change) commit(ctx context.Context) error {
 		return err
 	}
 	c.written = written
+	c.tls = tlsPushOf(written, opened)
 	if written.Address != c.before.Address {
 		if err := c.tx.Notify(ctx, db.ChanLeader, store.HintEnvGroups); err != nil {
 			return err

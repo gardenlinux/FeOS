@@ -79,10 +79,14 @@ func (r *tombRun) wait(ctx context.Context) error {
 // processAfterCommit processes the tombstones a committed transaction of
 // this instance wrote, at once and without waiting (best effort; not on a
 // stopping instance, and not for a node it is not connected to: the
-// leader's loop is the backstop).
+// leader's loop is the backstop), and begins the push of TLS bindings it
+// asks for (tls.go).
 func (e *Engine) processAfterCommit(ac afterCommit) {
-	if len(ac.tombstones) == 0 || e.isStopping() {
+	if e.isStopping() {
 		return
+	}
+	if ac.tls != nil {
+		e.beginTLSPush(*ac.tls)
 	}
 	for _, k := range ac.tombstones {
 		if e.conns.Connected(k.Node) {

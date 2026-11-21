@@ -91,8 +91,9 @@ func (e *Engine) reconcilePod(ctx context.Context, node string, id podid.ID, p *
 	inc := podIncarnation(p)
 	var events []activity.Event
 	var keys []store.TombstoneKey
+	var tls *tlsPush
 	err := e.st.InTx(ctx, func(tx *store.Store) error {
-		events, keys = nil, nil
+		events, keys, tls = nil, nil, nil
 		row, err := tx.LockSandbox(ctx, id, store.ForUpdate)
 		gone := errors.Is(err, model.ErrNotFound)
 		if err != nil && !gone {
@@ -137,14 +138,14 @@ func (e *Engine) reconcilePod(ctx context.Context, node string, id podid.ID, p *
 		if err := c.commit(ctx); err != nil {
 			return err
 		}
-		events, keys = c.events, c.tombstoneKeys()
+		events, keys, tls = c.events, c.tombstoneKeys(), c.tls
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 	e.record(events...)
-	e.processAfterCommit(afterCommit{tombstones: keys})
+	e.processAfterCommit(afterCommit{tombstones: keys, tls: tls})
 	return nil
 }
 
