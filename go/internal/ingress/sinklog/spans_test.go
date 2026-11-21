@@ -39,6 +39,7 @@ func TestSpans(t *testing.T) {
 	web := req.ResourceSpans[0]
 	want := map[string]any{
 		"service.name": "ferun-ingress", "ferun.pod": "ingress/in-0", "ferun.source": "ingress", "ferun.project": "acme",
+		"ferun.tenant":      "acme", // KEEP-TENANT: for the sink before ADR 0061
 		"ferun.environment": "e1", "ferun.kind": "service", "ferun.object": "web",
 	}
 	if got := attrs(web.GetResource().GetAttributes()); !maps.Equal(got, want) {

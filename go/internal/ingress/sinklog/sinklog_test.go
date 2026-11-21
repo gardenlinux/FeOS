@@ -67,6 +67,7 @@ func TestBatch(t *testing.T) {
 	web := req.ResourceLogs[0]
 	want := map[string]any{
 		"ferun.pod": "ingress/in-0", "ferun.container": "e1/web", "ferun.log_id": "run-1", "ferun.project": "acme",
+		"ferun.tenant":      "acme", // KEEP-TENANT: for the sink before ADR 0061
 		"ferun.environment": "e1", "ferun.kind": "service", "ferun.object": "web", "ferun.source": "ingress",
 	}
 	if got := attrs(web.GetResource().GetAttributes()); !maps.Equal(got, want) {

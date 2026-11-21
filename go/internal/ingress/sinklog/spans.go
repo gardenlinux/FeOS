@@ -40,6 +40,7 @@ func Spans(name string, recs []wire.AccessLogEntry) (req *otlptracev1.ExportTrac
 					kv(attrPod, str("ingress/"+name)),
 					kv(attrSource, str(SourceIngress)),
 					kv(attrProject, str(e.Project)),
+					kv(attrProjectLegacy, str(e.Project)),
 					kv(attrEnvironment, str(e.Env)),
 					kv(attrKind, str("service")),
 					kv(attrObject, str(e.Service)),

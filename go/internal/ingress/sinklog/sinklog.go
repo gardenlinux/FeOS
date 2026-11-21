@@ -42,6 +42,12 @@ const (
 	SourceIngress = "ingress"
 )
 
+// attrProjectLegacy is written beside attrProject, with the same value,
+// for one release (ADR 0061): from the ingress's roll until the sink's,
+// the sink of before refuses a batch without it. Removed in the next
+// release, with the sink's fallback.
+const attrProjectLegacy = "ferun.tenant" // KEEP-TENANT: the sink before ADR 0061 requires it
+
 // Line is a request's line in the sink: the fields and names of
 // ferund's AccessLogRecord (internal/env), and its level. Reason is the
 // record's (wire.AccessLogEntry.Reason).
@@ -173,6 +179,7 @@ func (s *Streams) resource(k streamKey, project string) []*commonv1.KeyValue {
 		kv(attrContainer, str(k.env+"/"+k.service)),
 		kv(attrLogID, str(s.start)),
 		kv(attrProject, str(project)),
+		kv(attrProjectLegacy, str(project)),
 		kv(attrEnvironment, str(k.env)),
 		kv(attrKind, str("service")),
 		kv(attrObject, str(k.service)),
