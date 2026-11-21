@@ -127,12 +127,13 @@ func (c *Controller) Healthy(maxAge time.Duration) bool {
 	return last != 0 && time.Since(time.Unix(0, last)) <= maxAge
 }
 
-// pass is what one pass read.
+// pass is what one pass read. Its maps are by FeRun name (FeRunName).
 type pass struct {
 	all    map[string]bool      // every Kubernetes node
 	feos   map[string]kube.Node // the nodes of the selector
+	clash  map[string]bool      // names that two nodes of the selector share
 	ferun  map[string]FeRunNode
-	guards map[string]kube.Pod // by node
+	guards map[string]kube.Pod // by their node
 
 	secretExists bool
 	secretData   map[string][]byte
@@ -163,7 +164,7 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		}
 	}
 	for key := range c.noted {
-		if node, _, _ := strings.Cut(key, "/"); p.feos[node].Metadata.Name == "" {
+		if node, _, _ := strings.Cut(key, "/"); p.feos[node].Metadata.Name == "" && !p.clash[node] {
 			delete(c.noted, key)
 		}
 	}
@@ -194,20 +195,29 @@ func (c *Controller) read(ctx context.Context) (*pass, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list the guards: %w", err)
 	}
-	p := &pass{all: map[string]bool{}, feos: map[string]kube.Node{}, ferun: map[string]FeRunNode{},
-		guards: map[string]kube.Pod{}, secretData: map[string][]byte{}}
+	p := &pass{all: map[string]bool{}, feos: map[string]kube.Node{}, clash: map[string]bool{},
+		ferun: map[string]FeRunNode{}, guards: map[string]kube.Pod{}, secretData: map[string][]byte{}}
 	for _, n := range all {
-		p.all[n.Metadata.Name] = true
+		p.all[FeRunName(n.Metadata.Name)] = true
 	}
 	for _, n := range feos {
-		p.feos[n.Metadata.Name] = n
+		name := FeRunName(n.Metadata.Name)
+		if o, ok := p.feos[name]; ok {
+			c.note(name, "name", "nodes "+o.Metadata.Name+" and "+n.Metadata.Name+" have one FeRun name; FeOS runs on neither", slog.LevelWarn)
+			p.clash[name] = true
+			continue
+		}
+		p.feos[name] = n
+	}
+	for name := range p.clash {
+		delete(p.feos, name)
 	}
 	for _, n := range fnodes {
 		p.ferun[n.Node] = n
 	}
 	for _, g := range guards {
 		if g.Spec.NodeName != "" {
-			p.guards[g.Spec.NodeName] = g
+			p.guards[FeRunName(g.Spec.NodeName)] = g
 		}
 	}
 	s, err := c.kube.GetSecret(ctx, c.cfg.Namespace, c.cfg.JoinSecret)
@@ -315,7 +325,7 @@ func (c *Controller) putKey(ctx context.Context, p *pass, key string, value []by
 // or has it down or removed: then nothing on the node waits for a drain.
 // An uncordon undrains a drain the controller began.
 func (c *Controller) guard(ctx context.Context, p *pass, n kube.Node) error {
-	name := n.Metadata.Name
+	node, name := n.Metadata.Name, FeRunName(n.Metadata.Name)
 	f, known := p.ferun[name]
 	annotated := n.Metadata.Annotations[AnnotationDrain] == drainRequested
 	g, hasGuard := p.guards[name]
@@ -328,12 +338,12 @@ func (c *Controller) guard(ctx context.Context, p *pass, n kube.Node) error {
 				}
 				c.log.Info("node uncordoned; undrained in FeRun", "node", name)
 			}
-			if err := c.kube.PatchNodeAnnotations(ctx, name, map[string]*string{AnnotationDrain: nil}); err != nil {
+			if err := c.kube.PatchNodeAnnotations(ctx, node, map[string]*string{AnnotationDrain: nil}); err != nil {
 				return fmt.Errorf("remove the drain annotation of %s: %w", name, err)
 			}
 		}
 		delete(c.noted, name+"/drain")
-		return c.ensureGuard(ctx, name, g, hasGuard)
+		return c.ensureGuard(ctx, node, g, hasGuard)
 	}
 
 	release, why := false, ""
@@ -346,7 +356,7 @@ func (c *Controller) guard(ctx context.Context, p *pass, n kube.Node) error {
 	if !release && !f.Draining {
 		if !annotated {
 			v := drainRequested
-			if err := c.kube.PatchNodeAnnotations(ctx, name, map[string]*string{AnnotationDrain: &v}); err != nil {
+			if err := c.kube.PatchNodeAnnotations(ctx, node, map[string]*string{AnnotationDrain: &v}); err != nil {
 				return fmt.Errorf("annotate %s for its drain: %w", name, err)
 			}
 		}
@@ -524,6 +534,15 @@ func (c *Controller) note(node, topic, msg string, level slog.Level) {
 	}
 	c.noted[key] = msg
 	c.log.Log(context.Background(), level, msg, "node", node)
+}
+
+// FeRunName is a Kubernetes node's name in FeRun: its first DNS label,
+// which is all of it on Gardener, and "ip-10-0-1-2" of EKS's
+// "ip-10-0-1-2.eu-west-1.compute.internal". The join secret's keys are
+// these names; feos-node's run cuts its node's name the same way.
+func FeRunName(node string) string {
+	name, _, _ := strings.Cut(node, ".")
+	return name
 }
 
 // isNodeName reports whether name is a DNS label, as FeRun's node names

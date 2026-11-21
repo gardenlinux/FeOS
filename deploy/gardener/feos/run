@@ -17,7 +17,8 @@ log() { echo "run: $*"; }
 
 case "${1:-}" in
 prepare)
-	modprobe ublk_drv
+	# On hosts that lack the module file, an init container before loads it.
+	[ -d /sys/module/ublk_drv ] || modprobe ublk_drv
 	for kind in firecracker guest; do
 		mkdir -p "/var/lib/feos/dist/$kind"
 		for dir in "/usr/lib/feos/$kind"/*/; do
@@ -42,13 +43,23 @@ diskd)
 	;;
 feosd)
 	: "${NODE_NAME:?}" "${CONTROL_PLANE:?}" "${CONTROL_PLANE_NAME:?}" "${TRUST_DOMAIN:?}"
+	# The node's name in FeRun is its first DNS label, as feos-k8s keys
+	# the join secret: EKS names nodes ip-10-0-1-2.<region>.compute.internal.
+	NODE_NAME=${NODE_NAME%%.*}
 	set -- --suspend-on-stop \
+		--node-name "$NODE_NAME" \
 		--control-plane "$CONTROL_PLANE" \
 		--control-plane-name "$CONTROL_PLANE_NAME" \
 		--trust-domain "$TRUST_DOMAIN" \
 		--join-token-file "/join/$NODE_NAME"
 	for prefix in ${DENY_PREFIXES:-}; do
 		set -- "$@" --deny-prefix "$prefix"
+	done
+	# The pods' upstream resolvers, instead of feosd's public defaults
+	# (IPv6 first), e.g. the VPC's resolver where the node has no IPv6
+	# address of its own.
+	for upstream in ${DNS_UPSTREAMS:-}; do
+		set -- "$@" --dns-upstream "$upstream"
 	done
 	exec /usr/sbin/feosd "$@"
 	;;

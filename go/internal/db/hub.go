@@ -148,7 +148,14 @@ func (d *DB) RunListener(ctx context.Context) error {
 func (d *DB) listen(ctx context.Context) (*pgx.Conn, error) {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, err := pgx.ConnectConfig(cctx, d.listenConfig)
+	lc := d.listenConfig
+	if d.password != nil {
+		lc = lc.Copy()
+		if err := d.password(cctx, lc); err != nil {
+			return nil, err
+		}
+	}
+	conn, err := pgx.ConnectConfig(cctx, lc)
 	if err != nil {
 		return nil, err
 	}
