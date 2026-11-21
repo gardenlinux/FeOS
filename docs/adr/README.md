@@ -62,6 +62,10 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0053](0053-kubernetes-and-ssh-bindings.md) | Kubernetes and SSH bindings: the host adds the credential | Proposed |
 | [0054](0054-visitors-of-an-environment.md) | Visitors: a guarded environment admits whom its tenant's access provider vouches for | Accepted |
 | [0055](0055-a-secret-is-a-value-or-an-http-api.md) | A secret is a value or an HTTP API: one object per key, its kind says where it lives | Accepted |
+| [0056](0056-an-integration-works-in-the-tenants-that-grant-it.md) | An integration is a principal that works in the tenants whose admins grant it a role | Proposed |
+| [0057](0057-the-spec-is-one-format-for-every-caller.md) | The spec is one format for every caller: a published module, JSON or YAML | Proposed |
+| [0058](0058-a-spec-says-what-its-code-expects-of-a-secret.md) | A spec says what its code expects of a secret, and the plan checks it | Proposed |
+| [0059](0059-a-tenant-is-on-an-account.md) | A tenant is on an account, which says whom its use is charged to | Proposed |
 
 ## Rules
 

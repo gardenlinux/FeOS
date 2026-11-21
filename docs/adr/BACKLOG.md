@@ -95,7 +95,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0018: volumes for services and their mounts; data lives in addons until then.
 - ADR 0018: an admin's listing of every tenant's environments.
 - ADR 0018: a CLI for the environments' API.
-- ADR 0018: a FeRun tenant per FeCode project, for quotas and billing; FeCode keeps its projects' environments under one tenant, labelled by project.
 - ADR 0018: a `ferund` instance that stops waits for the stops it runs (an image service's pod, up to 660 s) until `--shutdown-grace`, although the leader takes them over at once: a rolling deploy of `ferund` during a service's rollout lingers for up to 11 minutes. Its runner could leave a stop to the takeover instead of waiting for it.
 - ADR 0018: a tenant's deletion (`Engine.DeleteTenant`) deletes its environments' instance rows at once, so their pods' stop grace runs in their tombstones' `DeletePod` without a row, a group or a booking, as every pod's did before the stop op; and so does a sandbox's or a tenant's job's delete for the node's 10 s.
 - ADR 0018: a feos-node that stops (`--suspend-on-stop`, 300 s) ends a pod in its stop grace with its microVM, so a node's rollout cuts a service's drain; suspending it for the next `feosd` would resume the drain, but its delete holds its lock.
@@ -175,13 +174,11 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0031: a general MCP door for a person's agents (`/mcp/tenants`: an OAuth 2.1 resource server taking the shared provider's audience-bound access tokens and tenant tokens, one tool per operation of the tenant class, tokens, secrets' values and image credentials left out, a `secret_generate` tool), once the provider's login app grants audiences (FeCode's ADR 0020).
 - ADR 0031: a tenant's admin deletes the tenant themselves (an operator does, through the admin API).
 - ADR 0031: a CLI with a person's tokens, and a terminal into a sandbox (needs interactive exec, ADR 0004).
-- ADR 0031: billing beside the limits.
 - ADR 0031: a registrable domain of its own as the tenant zone, keeping cookies, reputation and blocklists apart from the platform's (a subdomain of the platform's domain serves it).
 - ADR 0031: a person removed at the provider without a sign-out keeps their session until its TTL (back-channel logout covers a sign-out; FeCode's requirement A9 asks the same).
 - ADR 0031: inviting a person who has no account yet, by a registration ticket from the provider (FeCode's ADR 0020), a decision about cost.
 - ADR 0031: whether internet egress of the tenants people make waits for an operator's allowance, against abuse (a service's egress is declared per ADR 0034; a sandbox's default is out to the internet).
 - ADR 0031: a tenant's display name beside its name, which is part of its hosts.
-- ADR 0031: FeCode's projects as tenants of their own, one authorization model for both products (FeCode's ADR 0008, question 4).
 
 ## ADR 0032
 
@@ -239,6 +236,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0045: certificates a tenant brings, for a domain whose CA is not Let's Encrypt.
 - ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a tenant wants a cap on its certificates.
 - ADR 0045: a Public Suffix List entry for the apps zone, an operator's action, so that a page's script cannot set a cookie for the zone.
+- ADR 0045: a tenant takes its own name as the label of one of its environments, in the zone it is in (FeCode's ADR 0037 waits for it with a project's address).
 
 ## ADR 0048
 
@@ -274,3 +272,28 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0055: an HTTP secret's page shows its requests, which the sink records by its name; they are read per environment as its outbound requests meanwhile.
 - ADR 0055: a `registry` kind of secret, a registry's login bound to its registry and used by the node's pulls alone, instead of a value secret that image credentials name.
 - ADR 0055: Kubernetes and SSH bindings (ADR 0053) as kinds of secret of the same shape, once their node side exists.
+
+## ADR 0056
+
+- ADR 0056: an environment that a tenant's grant does not reach, where only grants on it count, so that an integration with `write` on a tenant stays out of production.
+- ADR 0056: a grant asked for from the integration's side: a link into the console that names the integration and a role, and a tenant made and granted in one step.
+
+## ADR 0057
+
+- ADR 0057: a JSON Schema of the spec, served by the API, for callers that are not Go and for editors.
+- ADR 0057: an environment's values as FeRun's own, a merge patch kept with the environment and laid over every spec it is given; FeCode keeps them meanwhile (FeCode's ADR 0038).
+- ADR 0057: the bounds of a spec answered beside the catalog, for forms that want them before a plan.
+- ADR 0057: the console's import takes a YAML file.
+- ADR 0057: the console's views of an environment offered for mounting in another frontend, without the console's shell and with their data, width and look given (FeCode's ADR 0039).
+
+## ADR 0058
+
+- ADR 0058: the console's form for a missing secret starts from what the spec expects.
+
+## ADR 0059
+
+- ADR 0059: a meter of what a tenant uses over time, prices, and a report per account's reference that the operator's accounting takes.
+- ADR 0059: an account's limits, its number of tenants and a budget, beside or in place of the number per person.
+- ADR 0059: accounts people make themselves, with a means of payment, for an installation that serves the public.
+- ADR 0059: an account's admin suspends or deletes a tenant on it.
+- ADR 0059: an account's members filled from the provider's claims, a group or a cost centre.
