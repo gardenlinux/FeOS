@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	ferunapi "github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/quota"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -19,13 +20,7 @@ import (
 // at the creates (internal/quota).
 
 // limitsView is a project's limits; a limit left out is none.
-type limitsView struct {
-	Sandboxes    *int   `json:"sandboxes,omitempty"`
-	Environments *int   `json:"environments,omitempty"`
-	RunningJobs  *int   `json:"runningJobs,omitempty"`
-	VCPUs        *int   `json:"vcpus,omitempty"`
-	MemoryMiB    *int64 `json:"memoryMib,omitempty"`
-}
+type limitsView = ferunapi.QuotaLimits
 
 func limitsOf(l store.ProjectLimits) limitsView {
 	return limitsView{Sandboxes: l.Sandboxes, Environments: l.Environments, RunningJobs: l.RunningJobs,
@@ -53,10 +48,7 @@ func (s *server) getQuota(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, struct {
-		Limits limitsView `json:"limits"`
-		Use    quota.Use  `json:"use"`
-	}{limitsOf(t.Limits), use})
+	return writeJSON(w, http.StatusOK, ferunapi.Quota{Limits: limitsOf(t.Limits), Use: use})
 }
 
 // putProjectLimits is PUT /api/v1/admin/projects/{project}/limits

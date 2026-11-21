@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -38,57 +39,14 @@ func ParseBindingUsageWindow(s string) (string, error) {
 	return s, nil
 }
 
-// BindingUsage is GET /api/v1/environments/{env}/bindings/usage: what the
-// environment's pods (its services' and jobs' and its sandboxes') sent
-// through each HTTP binding in the window that ends now. Unavailable
-// says, when the log store could not be asked, why the numbers are
-// zeros; Truncated that the store left some requests uncounted.
-type BindingUsage struct {
-	Window      string       `json:"window"`
-	Unavailable string       `json:"unavailable,omitempty"`
-	Truncated   bool         `json:"truncated"`
-	Bindings    []BindingUse `json:"bindings"`
-}
-
-// BindingUse is a binding's requests in the window: every one of them,
-// those the upstream refused the credential of (401, 403), those that
-// failed (429 or 5xx, or the upstream not reached: unreachable, tls),
-// those that had no OAuth token (credential_unavailable) and those
-// feos-authn refused itself (blocked: denied_path, rate_limited,
-// unknown_binding, misdirected, …); the newest's start ("" for none),
-// the newest problem (null for none), and the workloads that sent them,
-// the most requests first.
-type BindingUse struct {
-	Name        string          `json:"name"`
-	Requests    int64           `json:"requests"`
-	Refused     int64           `json:"refused"`
-	Failing     int64           `json:"failing"`
-	TokenFailed int64           `json:"tokenFailed"`
-	Blocked     int64           `json:"blocked"`
-	LastAt      string          `json:"lastAt"`
-	LastProblem *BindingProblem `json:"lastProblem"`
-	Users       []BindingUser   `json:"users"`
-}
-
-// BindingProblem is a binding's request that was a problem: its start,
-// the status the pod was answered (0: none), feos-authn's code and
-// message of a refusal of its own ("" for the upstream's answer), and
-// its trace.
-type BindingProblem struct {
-	At      string `json:"at"`
-	Status  int    `json:"status"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	TraceID string `json:"traceId"`
-}
-
-// BindingUser is a workload's requests through a binding: a service or a
-// job by its name, a sandbox by its ID.
-type BindingUser struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-	Requests int64  `json:"requests"`
-}
+// BindingUsage, BindingUse, BindingProblem and BindingUser are the
+// published module's answers (ADR 0057).
+type (
+	BindingUsage   = api.BindingUsage
+	BindingUse     = api.BindingUse
+	BindingProblem = api.BindingProblem
+	BindingUser    = api.BindingUser
+)
 
 // sinkEgress is the sink's GET /api/v1/egress answer.
 type sinkEgress struct {

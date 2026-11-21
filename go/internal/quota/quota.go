@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -30,21 +31,16 @@ import (
 
 // The resources, as answers and limits name them.
 const (
-	Sandboxes    = "sandboxes"
-	Environments = "environments"
-	RunningJobs  = "runningJobs"
-	VCPUs        = "vcpus"
-	MemoryMiB    = "memoryMib"
+	Sandboxes    = api.ResourceSandboxes
+	Environments = api.ResourceEnvironments
+	RunningJobs  = api.ResourceRunningJobs
+	VCPUs        = api.ResourceVCPUs
+	MemoryMiB    = api.ResourceMemoryMiB
 )
 
-// Use is a project's use, or what a request asks for.
-type Use struct {
-	Sandboxes    int64 `json:"sandboxes"`
-	Environments int64 `json:"environments"`
-	RunningJobs  int64 `json:"runningJobs"`
-	VCPUs        int64 `json:"vcpus"`
-	MemoryMiB    int64 `json:"memoryMib"`
-}
+// Use is a project's use, or what a request asks for: the published
+// module's answer (ADR 0057).
+type Use = api.QuotaUse
 
 // Lock reads a project in tx and locks its row: FOR NO KEY UPDATE when it
 // has limits, which serialises the creates that count against them, else

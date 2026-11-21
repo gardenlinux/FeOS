@@ -3,16 +3,18 @@
 
 package model
 
+import "github.com/gardenlinux/feos/go/ferun/api"
+
 // Who a public environment admits (ADR 0054): environments.access.
 const (
-	AccessAnyone   = "anyone"
-	AccessVisitors = "visitors"
+	AccessAnyone   = api.AccessAnyone
+	AccessVisitors = api.AccessVisitors
 )
 
 // ProviderFerun is the provider every project has without making it: the
 // installation's issuer, admitting people with a grant on the environment.
 // No project makes a provider of this name.
-const ProviderFerun = "ferun"
+const ProviderFerun = api.ProviderFerun
 
 // The kinds of providers (access_providers.kind; "ferun" has no row).
 const (

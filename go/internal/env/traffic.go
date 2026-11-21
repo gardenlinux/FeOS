@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -48,50 +49,19 @@ func ParseTrafficWindow(s string) (string, error) {
 	return s, nil
 }
 
-// Traffic is GET /api/v1/environments/{env}/traffic: the requests each
-// of the environment's services answered in the window (FeCode ADR 0009
-// §4), from the [Since, Until) that ends at now truncated to the step, in
-// buckets of the step.
-type Traffic struct {
-	Window   string           `json:"window"`
-	Since    time.Time        `json:"since"`
-	Until    time.Time        `json:"until"`
-	Step     string           `json:"step"`
-	Services []ServiceTraffic `json:"services"`
-}
-
-// ServiceTraffic is a service's traffic in the window: where it is
-// counted (Source), its requests, those that failed, the 50th and 95th
-// percentiles of their durations in milliseconds to a tenth (null without
-// requests), and every bucket of the window, the oldest first.
-type ServiceTraffic struct {
-	Service string `json:"service"`
-	// Source is TrafficApp, the service's own server spans (a failed
-	// request's status an error, or 500 to 599), or, for a routed service
-	// that sends none, TrafficIngress, what the ingress answered for it (a
-	// status of 500 or more, or none written unless the client went away).
-	Source   string         `json:"source"`
-	Requests int64          `json:"requests"`
-	Errors   int64          `json:"errors"`
-	P50Ms    *float64       `json:"p50Ms"`
-	P95Ms    *float64       `json:"p95Ms"`
-	Series   []TrafficPoint `json:"series"`
-}
-
-// TrafficPoint is a bucket [T, T+step) of a service's traffic; P95Ms is
-// null in a bucket without requests.
-type TrafficPoint struct {
-	T        time.Time `json:"t"`
-	Requests int64     `json:"requests"`
-	Errors   int64     `json:"errors"`
-	P95Ms    *float64  `json:"p95Ms"`
-}
+// Traffic, ServiceTraffic and TrafficPoint are the published module's
+// answers (ADR 0057), and so are the sources of a service's traffic.
+type (
+	Traffic        = api.Traffic
+	ServiceTraffic = api.ServiceTraffic
+	TrafficPoint   = api.TrafficPoint
+)
 
 // The sources of a service's traffic (ServiceTraffic.Source), as the
 // sink's traffic reads them (GET /api/v1/traffic?source=).
 const (
-	TrafficApp     = "app"
-	TrafficIngress = "ingress"
+	TrafficApp     = api.TrafficApp
+	TrafficIngress = api.TrafficIngress
 )
 
 // sinkTraffic is a service's traffic as the sink answers it

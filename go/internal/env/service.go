@@ -657,7 +657,7 @@ func (s *Service) PutSecret(ctx context.Context, project, env, name string, req 
 	}
 	switch req.Type {
 	case "", SecretValue:
-		if req.httpFields() {
+		if httpFields(req) {
 			return SecretVersion{}, errBadRequest("upstream, mode, caPem, pathPrefixes, forwardedHost, rateLimit and " +
 				"credential are an HTTP secret's: send them with \"type\": \"http\"")
 		}
@@ -744,7 +744,7 @@ func (s *Service) putHTTPSecret(ctx context.Context, project, env, name string, 
 	if e.Deleting {
 		return SecretVersion{}, errDeleting(e.Name)
 	}
-	raw, err := req.httpDefinition()
+	raw, err := httpDefinition(req)
 	if err != nil {
 		return SecretVersion{}, errBadRequest("the definition: %v", err)
 	}

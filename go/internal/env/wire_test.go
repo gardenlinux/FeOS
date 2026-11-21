@@ -78,7 +78,8 @@ func TestStatusJSON(t *testing.T) {
 		Hosts: []string{}, Access: model.AccessAnyone, Objects: []ObjectStatus{}, Routes: []RouteStatus{},
 		CreatedAt: "2026-10-18T12:00:00Z"}
 	const want = `{"id":"0193a000-0000-7000-8000-0000000000e1","name":"stage","labels":{},"deployment":0,"deployed":0,` +
-		`"deleting":false,"public":false,"hosts":[],"access":"anyone","provider":"","rollout":null,"objects":[],"routes":[],"openIncidents":0,` +
+		`"deleting":false,"public":false,"hosts":[],"access":"anyone","provider":"","protected":false,"rollout":null,"objects":[],"routes":[],` +
+		`"openIncidents":0,` +
 		`"createdAt":"2026-10-18T12:00:00Z"}`
 	if got := marshal(t, st); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
@@ -95,7 +96,7 @@ func TestStatusJSON(t *testing.T) {
 		Hosts: []string{"stage-acme.apps.test"}, Access: model.AccessVisitors, Provider: "fecode", CreatedAt: st.CreatedAt}
 	const wantSum = `{"id":"0193a000-0000-7000-8000-0000000000e1","name":"stage","labels":{},"deployment":0,"deployed":0,` +
 		`"state":"none","public":true,"hosts":["stage-acme.apps.test"],"access":"visitors","provider":"fecode",` +
-		`"openIncidents":0,"createdAt":"2026-10-18T12:00:00Z"}`
+		`"protected":false,"openIncidents":0,"createdAt":"2026-10-18T12:00:00Z"}`
 	if got := marshal(t, sum); got != wantSum {
 		t.Fatalf("summary\n got %s\nwant %s", got, wantSum)
 	}

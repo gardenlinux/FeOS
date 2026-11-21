@@ -19,6 +19,7 @@
     "hosts": [],
     "access": "anyone",
     "provider": "",
+    "protected": false,
     "rollout": {
       "deployment": 3,
       "state": "deployed",

@@ -184,6 +184,7 @@
     "hosts": [],
     "access": "anyone",
     "provider": "",
+    "protected": false,
     "rollout": {
       "deployment": 1,
       "state": "waiting",

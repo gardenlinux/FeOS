@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	fleetv1 "github.com/gardenlinux/feos/go/gen/feos/fleet/v1"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
@@ -68,7 +69,7 @@ const (
 	CodeSecretKind = "secret_kind"
 	// CodeNoSecret: 404 or 422 for a secret the environment does not
 	// have.
-	CodeNoSecret    = "no_secret"
+	CodeNoSecret    = api.CodeNoSecret
 	codeSecretInUse = "secret_in_use"
 )
 
@@ -136,35 +137,19 @@ func (s *Service) credentialUsers() CredentialUsers {
 	return s.credUsers
 }
 
-// SecretUses are where an HTTP secret is used in its environment: the
-// sandboxes that name it, the services and jobs of the latest deployment
-// that get it, the bindings of the latest or deployed deployment that
-// name it (credentialRef), and the version each of the two deployments
-// pins (0: none).
-type SecretUses struct {
-	Sandboxes []string `json:"sandboxes"`
-	Objects   []string `json:"objects"`
-	Bindings  []string `json:"bindings"`
-	Latest    int      `json:"latest"`
-	Deployed  int      `json:"deployed"`
-}
+// SecretUses, HTTPSecretDef, HTTPCredentialOut, HTTPRateLimitOut and
+// SecretSet are the published module's answers (ADR 0057).
+type (
+	SecretUses        = api.SecretUses
+	HTTPSecretDef     = api.HTTPSecretDef
+	HTTPCredentialOut = api.HTTPCredentialOut
+	HTTPRateLimitOut  = api.HTTPRateLimitOut
+	SecretSet         = api.SecretSet
+)
 
-// used reports whether anything uses the secret.
-func (u SecretUses) used() bool {
+// usesUsed reports whether anything uses the secret.
+func usesUsed(u SecretUses) bool {
 	return len(u.Sandboxes) > 0 || len(u.Bindings) > 0 || len(u.Objects) > 0 || u.Latest > 0 || u.Deployed > 0
-}
-
-// HTTPSecretDef is an HTTP secret's definition as an answer carries it,
-// every secret field {"set": true}, with its uses.
-type HTTPSecretDef struct {
-	Upstream      string            `json:"upstream"`
-	Mode          string            `json:"mode"`
-	CaPem         string            `json:"caPem"`
-	PathPrefixes  []string          `json:"pathPrefixes"`
-	ForwardedHost bool              `json:"forwardedHost"`
-	RateLimit     *HTTPRateLimitOut `json:"rateLimit"`
-	Credential    HTTPCredentialOut `json:"credential"`
-	UsedBy        SecretUses        `json:"usedBy"`
 }
 
 // HTTPSecret is the latest version of an HTTP secret as the answers
@@ -734,7 +719,7 @@ func (s *Service) deleteCredential(ctx context.Context, env uuid.UUID, name stri
 		if err != nil {
 			return err
 		}
-		if u := uses[name]; u.used() {
+		if u := uses[name]; usesUsed(u) {
 			var who []string
 			for _, id := range u.Sandboxes {
 				who = append(who, "sandbox "+id)

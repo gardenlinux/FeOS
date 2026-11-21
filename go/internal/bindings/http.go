@@ -84,34 +84,6 @@ type httpBindingIn struct {
 	Credential    *httpCredentialIn `json:"credential"`
 }
 
-// SecretSet stands for a secret field's value in an answer.
-type SecretSet struct {
-	Set bool `json:"set"`
-}
-
-// HTTPCredentialOut is a binding's credential as an answer carries it:
-// its kind and fields, every secret field {"set": true}.
-type HTTPCredentialOut struct {
-	Kind             string               `json:"kind"`
-	Headers          map[string]SecretSet `json:"headers,omitempty"`
-	User             string               `json:"user,omitempty"`
-	Password         *SecretSet           `json:"password,omitempty"`
-	TokenURL         string               `json:"tokenUrl,omitempty"`
-	ClientID         string               `json:"clientId,omitempty"`
-	ClientSecret     *SecretSet           `json:"clientSecret,omitempty"`
-	Scope            string               `json:"scope,omitempty"`
-	Audience         string               `json:"audience,omitempty"`
-	ClientAuthInBody bool                 `json:"clientAuthInBody,omitempty"`
-	CertPem          string               `json:"certPem,omitempty"`
-	KeyPem           *SecretSet           `json:"keyPem,omitempty"`
-}
-
-// HTTPRateLimitOut is a binding's rate limit as an answer carries it.
-type HTTPRateLimitOut struct {
-	PerSecond int `json:"perSecond"`
-	Burst     int `json:"burst"`
-}
-
 type httpBindingOut struct {
 	Name          string            `json:"name"`
 	Upstream      string            `json:"upstream"`
