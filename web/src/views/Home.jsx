@@ -3,8 +3,8 @@
 
 import React from 'react';
 import { Icon } from '../Icon.jsx';
-import { Ago, StateDot, useNow } from '../components.jsx';
-import { fmtQuota, quotaRows, useAccess } from '../people.js';
+import { Ago, EnvName, StateDot, useNow } from '../components.jsx';
+import { accountLabel, fmtQuota, quotaRows, useAccess } from '../people.js';
 import { envPath, sandboxPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import { admitsShort, deploymentText, deploymentTone } from './envs.js';
@@ -53,6 +53,7 @@ export function Home({ project, navigate }) {
           {sum.environments && <span><b>{envs.length}</b> environment{envs.length === 1 ? '' : 's'}</span>}
           {sum.sandboxes && <span><b>{sandboxes.length}</b> sandbox{sandboxes.length === 1 ? '' : 'es'}, {awake} running</span>}
           {sum.domains && <span><b>{sum.domains.length}</b> domain{sum.domains.length === 1 ? '' : 's'}</span>}
+          {access.account && <span title="who is charged for its use (ADR 0059)">on account <b>{accountLabel(access.account)}</b></span>}
         </div>
       </header>
 
@@ -99,7 +100,7 @@ export function Home({ project, navigate }) {
                 <tbody>
                   {envs.map((e) => (
                     <tr key={e.id} className="clickable" onClick={() => navigate(envPath(project, e.name))}>
-                      <td><span className="cell-state"><ToneDot tone={deploymentTone(e.state)} title={e.state} /> <span className="strong">{e.name}</span></span></td>
+                      <td><span className="cell-state"><ToneDot tone={deploymentTone(e.state)} title={e.state} /> <EnvName name={e.name} className="strong" protected={!!e.protected} /></span></td>
                       <td className="mono small">{deploymentText(e)}</td>
                       <td className="mono small trunc">{e.public ? (e.hosts || []).join(', ') || '—' : <span className="muted">route door only</span>}
                         {e.public && <span className="muted"> · {admitsShort(e)}</span>}</td>

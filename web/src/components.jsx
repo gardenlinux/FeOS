@@ -43,8 +43,21 @@ export function PageHead({ kind, title, mono = false, state, actions, facts }) {
 }
 
 // EnvName is an environment's name, whole: FeRun reads nothing into it.
-export function EnvName({ name, className = 'envcard-name' }) {
-  return <span className={className}>{String(name || '')}</span>;
+// A protected one (ADR 0060) has a shield after it.
+export function EnvName({ name, className = 'envcard-name', protected: isProtected = false }) {
+  return (
+    <span className={className}>{String(name || '')}{isProtected && <>{' '}<ProtectedMark /></>}</span>
+  );
+}
+
+// PROTECTED_TITLE says what protection means where a shield shows.
+export const PROTECTED_TITLE = 'protected: a project grant of read or write reads it; changing it takes a grant on it or admin on the project';
+
+// ProtectedMark is the shield of a protected environment (ADR 0060).
+export function ProtectedMark() {
+  return (
+    <span className="protected-mark" title={PROTECTED_TITLE} aria-label="protected"><Icon name="shield" size={12} /></span>
+  );
 }
 
 // BrandMark is FeRun's mark, drawn in FeCode's thin open lines: a box

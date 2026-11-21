@@ -14,6 +14,7 @@ import {
   publishNote, routeCurl, sparkPoints, statusTone,
 } from './envs.js';
 import { choices, guardsNone, hostLabelChoice, kindLabel, NO_VISITS, providerWords, publishChoice, sameChoice } from './providers.js';
+import { useMe } from '../people.js';
 import '../styles/environments.css';
 import '../styles/credentials.css';
 import '../styles/providers.css';
@@ -102,7 +103,21 @@ export const NEEDS = {
   admin: 'needs admin on this environment',
   del: 'needs admin on this environment or write on the project',
   clone: 'needs write on the project',
+  // A protected environment (ADR 0060): a project grant of write reads it.
+  protected: 'protected: needs a grant on this environment, or admin on the project',
+  delProtected: 'protected: needs admin on this environment',
 };
+
+// needsWrite is why a write is not offered on the environment of ec: its
+// protection, or the role.
+export function needsWrite(ec) {
+  return ec && ec.protected && !ec.write ? NEEDS.protected : NEEDS.write;
+}
+
+// needsDel is why a delete or a rename is not offered.
+export function needsDel(ec) {
+  return ec && ec.protected ? NEEDS.delProtected : NEEDS.del;
+}
 
 // --------------------------------------------------------------- traffic --
 
@@ -545,10 +560,10 @@ export function RouteTokenBox({ env, ec }) {
           <div className="snippet"><pre>{curl}</pre></div>
         </Secret>)}
       <div className="envbox-row">
-        <button className="mini" disabled={!ec.admin || busy} title={ec.admin ? '' : NEEDS.admin}
+        <button className="mini" disabled={!ec.write || busy} title={ec.write ? '' : needsWrite(ec)}
           onClick={async () => { const r = await run(() => api.mintRouteToken(env), ''); if (r) setToken(r.token); }}>
           <Icon name="key" size={12} /> Mint a route token</button>
-        <RevokeTokens disabled={!ec.admin || busy} onRevoke={() => run(() => api.revokeRouteTokens(env).then(() => true),
+        <RevokeTokens disabled={!ec.write || busy} why={needsWrite(ec)} onRevoke={() => run(() => api.revokeRouteTokens(env).then(() => true),
           'Every route token of the environment is revoked: requests with one are refused from now on.')} />
       </div>
       <OpNote op={op} onDismiss={clear} />
@@ -556,11 +571,11 @@ export function RouteTokenBox({ env, ec }) {
   );
 }
 
-function RevokeTokens({ disabled, onRevoke }) {
+function RevokeTokens({ disabled, why, onRevoke }) {
   const [armed, arm, disarm] = useArm();
   return (
     <ArmButton armKey="revoke" armed={armed} arm={arm} disarm={disarm} className="mini" disabled={disabled}
-      title={disabled ? NEEDS.admin : 'revoke every route token of the environment'} onConfirm={onRevoke}>Revoke all</ArmButton>
+      title={disabled ? why : 'revoke every route token of the environment'} onConfirm={onRevoke}>Revoke all</ArmButton>
   );
 }
 
@@ -570,6 +585,7 @@ export function SettingsTab({ project, env, st, ec, changed, navigate }) {
   if (!st) return <p className="empty">Loading…</p>;
   return (
     <>
+      <ProtectBox env={env} st={st} ec={ec} changed={changed} />
       <RenameBox project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
       <CloneBox project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
       <DeleteBox project={project} env={env} st={st} ec={ec} changed={changed} navigate={navigate} />
@@ -582,12 +598,13 @@ export function SettingsTab({ project, env, st, ec, changed, navigate }) {
 export function RenameBox({ project, env, st, ec, changed, navigate }) {
   const [name, setName] = useState('');
   const [op, run, clear] = useOp();
+  const { reload } = useMe();
   const busy = !!(op && op.busy);
   const next = name.trim();
   const submit = async (e) => {
     e.preventDefault();
     const r = await run(() => api.renameEnvironment(env, next), (res) => `Renamed to ${res.name}.`);
-    if (r) { setName(''); changed(); navigate(envPath(project, r.name, 'settings')); }
+    if (r) { setName(''); changed(); reload().catch(() => {}); navigate(envPath(project, r.name, 'settings')); }
   };
   return (
     <div className="envsect envbox">
@@ -596,7 +613,7 @@ export function RenameBox({ project, env, st, ec, changed, navigate }) {
         The same environment under a new name: its ID, hosts, grants, logs and everything that runs stay. Links and
         scripts that name it by its old name do not follow it; by its ID they do.
       </p>
-      <form className="envclone" onSubmit={submit} title={ec.del ? '' : NEEDS.del}>
+      <form className="envclone" onSubmit={submit} title={ec.del ? '' : needsDel(ec)}>
         <fieldset disabled={!ec.del || st.deleting || busy}>
           <label className="envfield"><span className="k">name</span>
             <input className="mono" value={name} placeholder={st.name} onChange={(e) => setName(e.target.value)} /></label>
@@ -615,6 +632,7 @@ export function CloneBox({ project, env, st, ec, changed, navigate }) {
   const [secrets, setSecrets] = useState(null);
   const [copy, setCopy] = useState({});
   const [op, run, clear] = useOp();
+  const { reload } = useMe();
   useEffect(() => {
     let live = true;
     api.listDeployments(env).then((r) => { if (live) setDeployments(r.deployments || []); }, () => { if (live) setDeployments([]); });
@@ -634,7 +652,7 @@ export function CloneBox({ project, env, st, ec, changed, navigate }) {
     e.preventDefault();
     const body = cloneBody({ name, deployment, copy, secrets: secrets || [] });
     const r = await run(() => api.cloneEnvironment(env, body), (res) => `${res.name} made from deployment ${body.deployment || st.deployment}.`);
-    if (r) { changed(); navigate(envPath(project, r.name)); }
+    if (r) { changed(); reload().catch(() => {}); navigate(envPath(project, r.name)); }
   };
   return (
     <div className="envsect envbox">
@@ -642,7 +660,7 @@ export function CloneBox({ project, env, st, ec, changed, navigate }) {
       <p className="panel-note">
         A new environment with a deployment's spec, its references reaching its own objects. Its data is not copied: its
         addons start empty. Its sandboxes and jobs stay here, and attached services are dropped (they run in a sandbox of
-        this one). It is not public until its project publishes it.
+        this one). It is not public until its project publishes it. It is not protected, whatever this one is.
       </p>
       <form className="envclone" onSubmit={submit} title={ec.clone ? '' : NEEDS.clone}>
         <fieldset disabled={!ec.clone || busy}>
@@ -704,6 +722,7 @@ export function InUse({ error, project, env, navigate }) {
 export function DeleteBox({ project, env, st, ec, changed, navigate }) {
   const [armed, arm, disarm] = useArm();
   const [op, run] = useOp();
+  const { reload } = useMe();
   const blocked = op && op.tone === 'bad' ? inUse(op.error) : null;
   return (
     <div className="envsect envbox envbox-danger">
@@ -714,11 +733,11 @@ export function DeleteBox({ project, env, st, ec, changed, navigate }) {
         domains stay the project&apos;s. While it has sandboxes or jobs queued or running it is not deleted. It cannot be undone.
       </p>
       <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} className="mini" icon="trash"
-        disabled={!ec.del || st.deleting || !!(op && op.busy)} title={ec.del ? '' : NEEDS.del}
+        disabled={!ec.del || st.deleting || !!(op && op.busy)} title={ec.del ? '' : needsDel(ec)}
         confirmLabel={`Delete ${st.name}: sure?`}
         onConfirm={async () => {
           const r = await run(() => api.deleteEnvironment(env).then(() => true), '');
-          if (r) { changed(); navigate(envPath(project)); }
+          if (r) { changed(); reload().catch(() => {}); navigate(envPath(project)); }
         }}>
         {st.deleting ? 'Being deleted' : 'Delete environment'}
       </ArmButton>
@@ -727,5 +746,163 @@ export function DeleteBox({ project, env, st, ec, changed, navigate }) {
         : <ErrBox error={op.text} />)}
       {st.deleting && <p className="muted small">The deletion is under way: ferund removes what runs first.</p>}
     </div>
+  );
+}
+
+// ------------------------------------------------------------ protection --
+
+// ProtectBox is the environment's protection (ADR 0060): its state and
+// the rule, Protect (a dialog that names who changes it today by a
+// project grant of write and offers each a grant on it) and Lift
+// protection, for an admin of the environment.
+export function ProtectBox({ env, st, ec, changed }) {
+  const [dialog, setDialog] = useState(false);
+  const [armed, arm, disarm] = useArm();
+  const [op, run, clear] = useOp();
+  const { reload } = useMe();
+  const busy = !!(op && op.busy);
+  const lift = async () => {
+    const r = await run(() => api.setProtected(env, false), 'Protection lifted: a project grant of write changes it again.');
+    if (r) { changed(); reload().catch(() => {}); }
+  };
+  return (
+    <div className="envsect envbox">
+      <div className="sect">protection</div>
+      <p className="panel-note">
+        {st.protected
+          ? <><Icon name="shield" size={12} /> <b>{st.name} is protected.</b> A project grant of read or write reads it;
+            changing it takes a grant on it, or admin on the project. Whoever has write on the project still plans
+            against it.</>
+          : <>{st.name} is not protected: whoever has write on the project changes it. Protected, a project grant of
+            read or write only reads it, and changing it takes a grant on it, or admin on the project. Visitors
+            and hosts are apart (Domains &amp; access).</>}
+      </p>
+      <div className="envbox-row">
+        {st.protected
+          ? (
+            <ArmButton armKey="lift" armed={armed} arm={arm} disarm={disarm} className="mini" icon="shield"
+              disabled={!ec.admin || busy} title={ec.admin ? 'project write changes it again' : NEEDS.admin}
+              confirmLabel="lift? project write changes it again" onConfirm={lift}>Lift protection</ArmButton>)
+          : (
+            <button className="mini" disabled={!ec.admin || busy} title={ec.admin ? 'who changes it today, then protect' : NEEDS.admin}
+              onClick={() => { clear(); setDialog(true); }}>
+              <Icon name="shield" size={12} /> Protect…</button>)}
+      </div>
+      <OpNote op={op} onDismiss={clear} />
+      {dialog && (
+        <ProtectDialog env={env} st={st} onClose={() => setDialog(false)}
+          onDone={() => { setDialog(false); changed(); reload().catch(() => {}); }} />)}
+    </div>
+  );
+}
+
+// grantOf is the call that gives a principal of GET …/principals the
+// role on an environment, by its kind: a person's, an integration's, a
+// project token's grant (ADR 0060's dialog).
+export function grantOf(p, environment, role = 'write') {
+  if (p.kind === 'person') return () => api.putGrant(p.id, { role, environment });
+  if (p.kind === 'integration') return () => api.putIntegrationGrant(p.id, { role, environment });
+  if (p.kind === 'token') return () => api.putTokenGrant(p.id, { role, environment });
+  return null;
+}
+
+// PRINCIPAL_KINDS name the kinds of principals in the dialog.
+const PRINCIPAL_KINDS = { person: 'person', token: 'project token', integration: 'integration' };
+
+// ProtectDialog names everyone with a grant in the project (ferund's
+// principals), marks those who change the environment today by a project
+// grant of write and read it once it is protected (losesWrite, ferund's),
+// and offers each of them a grant write on it, ticked by default. Protect
+// gives the ticked grants first, then protects.
+export function ProtectDialog({ env, st, onClose, onDone }) {
+  const [list, setList] = useState(null);
+  const [err, setErr] = useState('');
+  const [give, setGive] = useState({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.envPrincipals(env).then((r) => {
+      if (!live) return;
+      const ps = r.principals || [];
+      setList(ps);
+      setGive(Object.fromEntries(ps.filter((p) => p.losesWrite).map((p) => [`${p.kind}/${p.id}`, true])));
+    }, (e) => { if (live) setErr(e.message); });
+    return () => { live = false; };
+  }, [env]);
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
+  }, [onClose]);
+  const protect = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      for (const p of list || []) {
+        const fn = give[`${p.kind}/${p.id}`] ? grantOf(p, st.id) : null;
+        if (fn) await fn();
+      }
+      await api.setProtected(env, true);
+      onDone();
+    } catch (e) {
+      setErr(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="palette-back" onMouseDown={onClose}>
+      <div className="palette dialog" role="dialog" aria-label={`Protect ${st.name}`} onMouseDown={(e) => e.stopPropagation()}>
+        <h3><Icon name="shield" size={16} /> Protect <span className="mono">{st.name}</span></h3>
+        <ProtectPrincipals list={list} give={give} setGive={setGive} env={st.name} />
+        <ErrBox error={err} />
+        <div className="actionrow">
+          <button className="primary" disabled={busy || !list} onClick={protect}><Icon name="shield" size={14} /> Protect</button>
+          <button className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ProtectPrincipals is the dialog's body: who loses write by the
+// protection, with a grant offered each, and everyone else who holds a
+// grant in the project.
+export function ProtectPrincipals({ list, give, setGive, env }) {
+  if (!list) return <p className="empty">Reading who holds a grant…</p>;
+  const losers = list.filter((p) => p.losesWrite);
+  const rest = list.filter((p) => !p.losesWrite);
+  const row = (p) => {
+    const key = `${p.kind}/${p.id}`;
+    return (
+      <tr key={key}>
+        <td><span className="principal-kind">{PRINCIPAL_KINDS[p.kind] || p.kind}</span><div>{p.label || p.id}</div></td>
+        <td className="small">project {p.projectRole || '—'}{p.environmentRole ? ` · ${env} ${p.environmentRole}` : ''}</td>
+        <td className="small">
+          {p.losesWrite ? (
+            <label>
+              <input type="checkbox" checked={!!give[key]} onChange={(e) => setGive((g) => ({ ...g, [key]: e.target.checked }))} />
+              {' '}give write on {env}
+              {p.kind === 'token' && <div className="muted small">without it the token stops deploying here</div>}
+              {p.kind === 'integration' && <div className="muted small">an integration then changes it only for a person it names who may</div>}
+            </label>)
+            : <span className="muted">keeps what it has</span>}
+        </td>
+      </tr>
+    );
+  };
+  return (
+    <>
+      <p className="small">
+        Protected, a project grant of read or write reads {env}; changing it takes a grant on it, or admin on the project.
+        {losers.length > 0
+          ? ` These change it today by a project grant of write and read it from then on, unless they get a grant on it:`
+          : ' Nobody changes it today by a project grant of write alone: nobody loses write.'}
+      </p>
+      {list.length > 0 && (
+        <div className="tblwrap"><table className="tbl">
+          <thead><tr><th>who</th><th>grants</th><th>on protection</th></tr></thead>
+          <tbody>{losers.map(row)}{rest.map(row)}</tbody>
+        </table></div>)}
+    </>
   );
 }

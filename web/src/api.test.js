@@ -366,6 +366,125 @@ describe('the project, with the session', () => {
   });
 });
 
+describe('integrations, protection and accounts (FeOS ADRs 0056, 0059, 0060)', () => {
+  const sent = () => calls.map((c) => [c.init.method, c.path, c.init.body ? JSON.parse(c.init.body) : null]);
+
+  it('the project\'s routes, with the session in the project', async () => {
+    setActiveProject('kino');
+    await api.putIntegrationGrant('fecode', { role: 'write' });
+    await api.putIntegrationGrant('fecode', { role: 'admin', environment: 'env-1' });
+    await api.deleteIntegrationGrant('fecode');
+    await api.deleteIntegrationGrant('fecode', 'env-1');
+    await api.putTokenGrant('3f9a', { role: 'write', environment: 'env-1' });
+    await api.deleteTokenGrant('3f9a', 'env-1');
+    await api.setProtected('prod', true);
+    await api.setProtected('prod', false);
+    await api.envPrincipals('prod');
+    await api.getProjectAccount();
+    await api.moveProject('cc-4711');
+    await api.mintRouteToken('prod');
+    expect(sent()).toEqual([
+      ['PUT', '/api/v1/project/integrations/fecode/grants', { role: 'write' }],
+      ['PUT', '/api/v1/project/integrations/fecode/grants', { role: 'admin', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/integrations/fecode/grants', null],
+      ['DELETE', '/api/v1/project/integrations/fecode/grants?environment=env-1', null],
+      ['PUT', '/api/v1/project/tokens/3f9a/grants', { role: 'write', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/tokens/3f9a/grants?environment=env-1', null],
+      ['PUT', '/api/v1/environments/prod/protected', { protected: true }],
+      ['PUT', '/api/v1/environments/prod/protected', { protected: false }],
+      ['GET', '/api/v1/environments/prod/principals', null],
+      ['GET', '/api/v1/project/account', null],
+      ['POST', '/api/v1/project/move', { account: 'cc-4711' }],
+      ['POST', '/api/v1/environments/prod/route-tokens', null],
+    ]);
+    for (const c of calls) expect(c.init.headers['FeRun-Project']).toBe('kino');
+  });
+
+  it('the person\'s routes name no project', async () => {
+    setActiveProject('kino');
+    await api.createOwnProject('mine', 'cc-4711');
+    await api.createOwnProject('other');
+    await api.listIntegrations();
+    await api.listAccounts();
+    await api.getAccount('cc-4711');
+    await api.putAccountMember('cc-4711', 'p-1', 'admin');
+    await api.deleteAccountMember('cc-4711', 'p-1');
+    await api.listAccountInvitations('cc-4711');
+    await api.createAccountInvitation('cc-4711', { role: 'member' });
+    await api.revokeAccountInvitation('cc-4711', 'i-1');
+    await api.getInvitation('t');
+    expect(sent()).toEqual([
+      ['POST', '/api/v1/projects', { name: 'mine', account: 'cc-4711' }],
+      ['POST', '/api/v1/projects', { name: 'other' }],
+      ['GET', '/api/v1/integrations', null],
+      ['GET', '/api/v1/accounts', null],
+      ['GET', '/api/v1/accounts/cc-4711', null],
+      ['PUT', '/api/v1/accounts/cc-4711/members/p-1', { role: 'admin' }],
+      ['DELETE', '/api/v1/accounts/cc-4711/members/p-1', null],
+      ['GET', '/api/v1/accounts/cc-4711/invitations', null],
+      ['POST', '/api/v1/accounts/cc-4711/invitations', { role: 'member' }],
+      ['DELETE', '/api/v1/accounts/cc-4711/invitations/i-1', null],
+      ['GET', '/api/v1/invitations/t', null],
+    ]);
+    for (const c of calls) expect(c.init.headers['FeRun-Project']).toBeUndefined();
+  });
+
+  it('the operators\' routes', async () => {
+    await api.listProjects();
+    await api.listProjects('cc-4711');
+    await api.createProject('p1', 'cc-4711');
+    await api.createProject('p2');
+    await api.adminMoveProject('p1', 'default');
+    await api.adminListIntegrations();
+    await api.adminPutIntegration('fecode', { title: 'FeCode', url: 'https://fecode.dev', subject: 'dd32' });
+    await api.adminPutIntegration('x', { title: 'X', url: '', issuer: 'https://id.example/', subject: 's' });
+    await api.adminDisableIntegration('fecode');
+    await api.adminEnableIntegration('fecode');
+    await api.adminDeleteIntegration('fecode');
+    await api.adminListAccounts();
+    await api.adminCreateAccount({ name: 'cc-4711', title: 'Team X', reference: 'CC 4711' });
+    await api.adminCreateAccount({ name: 'bare' });
+    await api.adminGetAccount('cc-4711');
+    await api.adminPatchAccount('cc-4711', { closed: true });
+    await api.adminDeleteAccount('bare');
+    await api.adminPutAccountMember('cc-4711', 'p-1', 'member');
+    await api.adminDeleteAccountMember('cc-4711', 'p-1');
+    expect(sent()).toEqual([
+      ['GET', '/api/v1/admin/projects', null],
+      ['GET', '/api/v1/admin/projects?account=cc-4711', null],
+      ['POST', '/api/v1/admin/projects', { name: 'p1', account: 'cc-4711' }],
+      ['POST', '/api/v1/admin/projects', { name: 'p2' }],
+      ['POST', '/api/v1/admin/projects/p1/move', { account: 'default' }],
+      ['GET', '/api/v1/admin/integrations', null],
+      ['PUT', '/api/v1/admin/integrations/fecode', { title: 'FeCode', url: 'https://fecode.dev', subject: 'dd32' }],
+      ['PUT', '/api/v1/admin/integrations/x', { title: 'X', url: '', issuer: 'https://id.example/', subject: 's' }],
+      ['POST', '/api/v1/admin/integrations/fecode/disable', null],
+      ['POST', '/api/v1/admin/integrations/fecode/enable', null],
+      ['DELETE', '/api/v1/admin/integrations/fecode', null],
+      ['GET', '/api/v1/admin/accounts', null],
+      ['POST', '/api/v1/admin/accounts', { name: 'cc-4711', title: 'Team X', reference: 'CC 4711' }],
+      ['POST', '/api/v1/admin/accounts', { name: 'bare' }],
+      ['GET', '/api/v1/admin/accounts/cc-4711', null],
+      ['PATCH', '/api/v1/admin/accounts/cc-4711', { closed: true }],
+      ['DELETE', '/api/v1/admin/accounts/bare', null],
+      ['PUT', '/api/v1/admin/accounts/cc-4711/members/p-1', { role: 'member' }],
+      ['DELETE', '/api/v1/admin/accounts/cc-4711/members/p-1', null],
+    ]);
+  });
+
+  it('never names a person: FeRun-Person is an integration\'s header (ADR 0056)', async () => {
+    setActiveProject('kino');
+    await api.listMembers();
+    await auth.me();
+    await api.createOwnProject('x');
+    await api.listProjects();
+    await api.setProtected('prod', true);
+    for (const c of calls) {
+      expect(Object.keys(c.init.headers).map((h) => h.toLowerCase())).not.toContain('ferun-person');
+    }
+  });
+});
+
 describe('the admin routes', () => {
   it("reads a node's activity with a source and a page bound", async () => {
     await api.nodeActivity('node-a', { beforeTsNs: '123', source: 'feosd' });

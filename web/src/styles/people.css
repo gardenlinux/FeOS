@@ -1,0 +1,49 @@
+/*
+ * SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Who may do what: the protected mark and its dialog (ADR 0060), the
+   integrations beside the members (ADR 0056), the accounts (ADR 0059).
+   Tokens only, so that every theme (Vice mode too) carries them. */
+
+/* a protected environment's shield, after its name */
+.protected-mark { display: inline-flex; vertical-align: -1px; color: var(--accent); }
+.protected-mark .icon { flex: none; }
+.statepill.protected { color: var(--accent); border-color: rgba(var(--accent-rgb), .45); }
+
+/* the head's notice for one whose write is the project's alone */
+.protected-notice {
+  display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 0; padding: 8px 10px;
+  border: 1px solid rgba(var(--accent-rgb), .35); border-radius: var(--radius-sm); background: var(--accent-dim);
+  color: var(--text); font-size: 13px;
+}
+.protected-notice .icon { flex: none; margin-top: 2px; color: var(--accent); }
+
+/* a dialog over the page: the search's backdrop and panel */
+.dialog { padding: 16px 18px; max-height: 80vh; overflow-y: auto; }
+.dialog h3 { margin: 0 0 6px; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+.dialog .actionrow { margin-top: 14px; }
+.dialog .tbl td { vertical-align: top; }
+.principal-kind { text-transform: uppercase; letter-spacing: .04em; font-size: 11px; color: var(--muted); }
+
+/* an issuer and subject under a member's name */
+.who-sub { color: var(--faint); font-size: 12px; overflow-wrap: anywhere; }
+
+/* an integration's role in words */
+.role-lines { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.role-lines li { margin: 2px 0; }
+.role-lines li:last-child { list-style: none; margin-left: -18px; color: var(--text); }
+
+/* accounts */
+.account-ref { color: var(--faint); font-size: 12px; }
+.quota-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px 12px; min-width: 240px; }
+.quota-mini .meter-k { font-size: 11.5px; }
+.quota-mini .meter-v { font-size: 12px; }
+.moves { list-style: none; margin: 0; padding: 0; }
+.moves li { padding: 6px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; }
+.moves li:last-child { border-bottom: none; }
+
+/* a form of several lines: the integration's grant and its role in words */
+.createpanel.column { flex-direction: column; align-items: stretch; }
+.createpanel.column .inlineform { flex-wrap: wrap; }

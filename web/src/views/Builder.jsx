@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { ErrBox } from '../components.jsx';
 import { readItem, writeItem } from '../storage.js';
 import { envPath } from '../routes.js';
-import { mayBuild, useAccess } from '../people.js';
+import { mayBuild, mayPlan, useAccess, useMe } from '../people.js';
 import { admitsWords, fmtValue, heavyEffect, statusState } from './envs.js';
 import {
   addService, decodeDraft, deployBlock, draftKey, draftWords, encodeDraft, getObject, isDnsLabel, isObject, isSecretName,
@@ -116,6 +116,9 @@ function AddAddonButton({ catalog, onAdd }) {
   );
 }
 
+// PROTECTED_DEPLOY says why a plan-only builder deploys nothing (ADR 0060).
+const PROTECTED_DEPLOY = 'Protected: deploying here needs a grant on this environment, or admin on the project.';
+
 // ---------------------------------------------------------------- builder --
 
 export function Builder({ project, env, st, navigate, item = '' }) {
@@ -125,10 +128,15 @@ export function Builder({ project, env, st, navigate, item = '' }) {
   // service write on the environment (the project grant or the
   // environment's, the higher). Below that the builder shows the latest
   // deployment's spec and changes nothing: no plan (it needs write), no
-  // apply, no secret written, no draft stored.
+  // apply, no secret written, no draft stored. On a protected environment
+  // (ADR 0060) whoever ferund lets plan but not deploy (a project grant of
+  // write) edits and plans a draft, and deploys nothing: plan-only.
   const access = useAccess(project);
-  const readOnly = !mayBuild(access, isNew ? '' : (st && st.id) || env);
-  const editAttached = !readOnly;
+  const { reload } = useMe();
+  const target = isNew ? '' : (st && st.id) || env;
+  const readOnly = !mayPlan(access, target);
+  const planOnly = !readOnly && !mayBuild(access, target);
+  const editAttached = !readOnly && !planOnly;
   const key = draftKey(project, env);
   const [draft, setDraftState] = useState(null);
   const draftRef = useRef(null);
@@ -294,6 +302,7 @@ export function Builder({ project, env, st, navigate, item = '' }) {
   // first apply writes it.
   const setSecret = useCallback(async (name, value) => {
     if (readOnly) throw new Error('Your role does not allow this: it needs write on this environment.');
+    if (planOnly) throw new Error(PROTECTED_DEPLOY);
     if (!isSecretName(name)) throw new Error(`${name} is not a secret name: a-z, 0-9, '.', '_' and '-'`);
     if (isNew) {
       pending.current.set(name, value);
@@ -305,7 +314,7 @@ export function Builder({ project, env, st, navigate, item = '' }) {
     edit(pinSecret(draftRef.current.spec, name, v.version));
     refreshSecrets();
     return v.version;
-  }, [env, isNew, edit, refreshSecrets, readOnly]);
+  }, [env, isNew, edit, refreshSecrets, readOnly, planOnly]);
 
   // ----------------------------------------------------------- derived --
   const spec = draft ? draft.spec : {};
@@ -401,7 +410,7 @@ export function Builder({ project, env, st, navigate, item = '' }) {
   };
   const review = !readOnly && (
     <ReviewPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} findings={findings}
-      pinned={pinned} applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
+      pinned={pinned} applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0} planOnly={planOnly}
       changes={changes} next={words.next} onOpen={setOpen} onClose={() => setReviewing(false)}
       onApply={async (message, setBusy, setErr) => {
         setBusy(true);
@@ -412,7 +421,8 @@ export function Builder({ project, env, st, navigate, item = '' }) {
             setNotice(`Nothing changes: the draft equals deployment ${res.number}.`);
           } else {
             writeItem('localStorage', key, '');
-            if (isNew) navigate(envPath(project, draftRef.current.name));
+            // A new environment is listed in /auth/me once it is read again.
+            if (isNew) { reload().catch(() => {}); navigate(envPath(project, draftRef.current.name)); }
             else setApplied(res);
           }
         } catch (e) {
@@ -440,7 +450,7 @@ export function Builder({ project, env, st, navigate, item = '' }) {
 
   return (
     <div className={'builder' + (paneFirst ? ' pane-first' : '')}>
-      <Band words={words} readOnly={readOnly} isNew={isNew} draft={draft} plan={plan} planning={planning || stale}
+      <Band words={words} readOnly={readOnly} planOnly={planOnly} isNew={isNew} draft={draft} plan={plan} planning={planning || stale}
         changes={changes.length} view={view} setView={setView}
         undo={history.current.past.length ? undo : null} redo={history.current.future.length ? redo : null}
         onExport={exportDraft} onImport={(s) => { edit(s); setNotice('Imported: the review shows what it changes against the base.'); }}
@@ -479,7 +489,7 @@ export function Builder({ project, env, st, navigate, item = '' }) {
 // Band says what the builder edits: the draft of which deployment, from
 // which, how many changes, that nothing changes until it is deployed; and
 // carries the draft's actions and the way to its review.
-function Band({ words, readOnly, isNew, draft, plan, planning, changes, view, setView, undo, redo, onExport, onImport, onError,
+function Band({ words, readOnly, planOnly = false, isNew, draft, plan, planning, changes, view, setView, undo, redo, onExport, onImport, onError,
   onDiscard, latest, onName, onRebase, reviewing, onReview, conflicts }) {
   const answer = plan && plan.answer;
   const errors = answer ? severityCounts(answer.findings || []).error : 0;
@@ -502,6 +512,7 @@ function Band({ words, readOnly, isNew, draft, plan, planning, changes, view, se
                 : answer ? <span className="muted"><Icon name="check" size={11} /> the plan accepts it</span> : null)}
           <span className="muted">{readOnly
             ? 'Your role does not allow changes here: it needs write on this environment. You see the latest deployment\'s spec.'
+            : planOnly ? `${PROTECTED_DEPLOY} You plan against it; the draft is kept in this browser.`
             : isNew ? 'Nothing exists until you deploy. The draft is kept in this browser.'
               : 'Nothing changes in the environment until you deploy. The draft is kept in this browser.'}</span>
         </div>
@@ -864,7 +875,7 @@ function Conflicts({ conflicts, onPick }) {
 // without a value, an acceptance of data loss or downtime, the message
 // the builder proposes, and the deploy.
 export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [], pinned, applyFindings, pins, conflicts = 0,
-  changes = [], next = 0, onApply, onOpen = () => {}, onClose }) {
+  changes = [], next = 0, onApply, onOpen = () => {}, onClose, planOnly = false }) {
   const answer = plan && plan.answer;
   const diff = answer && answer.diff ? answer.diff : [];
   const heavy = diff.filter((d) => heavyEffect(d.effect));
@@ -884,7 +895,7 @@ export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [
   const counts = severityCounts(all);
   const unresolved = pinned ? pinned.unresolved : [];
   const missing = (pins || []).filter((p) => p.missing).map((p) => p.name);
-  const block = deployBlock({ isNew, name: draft.name, planning, answer, diff, unresolved, heavy: heavy.length, ack, conflicts, busy });
+  const block = deployBlock({ isNew, name: draft.name, planning, answer, diff, unresolved, heavy: heavy.length, ack, conflicts, busy, planOnly });
   const open = (kind, name) => {
     const key = keyOfKind(kind);
     if (key) onOpen(unitKey(key, name));

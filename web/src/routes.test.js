@@ -404,3 +404,19 @@ describe('the sidebar keeps the view', () => {
     expect(pickEnvPath({ view: 'domains', project: 'kino' }, 'kino', 'prod')).toBe('/projects/kino/environments/prod');
   });
 });
+
+describe('the pages of accounts and integrations (FeOS ADRs 0056, 0059)', () => {
+  it('parses the accounts, an account and the integrations', () => {
+    expect(parsePath('/accounts')).toEqual({ view: 'accounts' });
+    expect(parsePath('/accounts/cc-4711')).toEqual({ view: 'account', account: 'cc-4711' });
+    expect(parsePath('/accounts/a%20b')).toEqual({ view: 'account', account: 'a b' });
+    expect(parsePath('/integrations')).toEqual({ view: 'integrations' });
+  });
+
+  it('keeps the two ways FeCode links here', () => {
+    // A person without a project makes one; a project's admin grants FeCode.
+    expect(parsePath('/projects?new')).toEqual({ view: 'projects' });
+    expect(parsePath('/projects/kino/members?integration=fecode')).toEqual({ view: 'members', project: 'kino' });
+    expect(canonicalPath('/projects/kino/members')).toBe('/projects/kino/members');
+  });
+});

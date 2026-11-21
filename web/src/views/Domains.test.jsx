@@ -82,8 +82,10 @@ describe('BindingCard', () => {
     expect(card({ role: 'admin', environments: [] })).toContain('default host answers 404');
   });
   it('without admin on its environment the select is disabled', () => {
-    expect(card({ role: 'read', environments: [] })).toMatch(/<select[^>]*disabled/);
-    expect(card({ role: 'admin', environments: [] })).not.toMatch(/<select[^>]*disabled/);
+    const on = (role) => [{ id: d.environment, name: 'prod', role }];
+    expect(card({ role: 'read', environments: on('read') })).toMatch(/<select[^>]*disabled/);
+    expect(card({ role: 'admin', environments: [] })).toMatch(/<select[^>]*disabled/);
+    expect(card({ role: 'admin', environments: on('admin') })).not.toMatch(/<select[^>]*disabled/);
   });
   it('a superseded claim cannot be bound', () => {
     expect(card({ role: 'admin', environments: [] }, { ...d, state: 'superseded', environment: null })).toContain('cannot be bound');

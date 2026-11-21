@@ -383,10 +383,14 @@ export function draftWords({ isNew = false, readOnly = false, base = 0, latest =
 }
 
 // deployBlock is why a draft cannot be deployed yet, '' when it can:
-// in the order a person fixes them.
+// in the order a person fixes them; planOnly, a protected environment's
+// for one ferund lets plan but not deploy, before everything.
 export function deployBlock({ isNew = false, name = '', planning = false, answer = null, diff = [], unresolved = [],
-  heavy = 0, ack = false, conflicts = 0, busy = false }) {
+  heavy = 0, ack = false, conflicts = 0, busy = false, planOnly = false }) {
   if (busy) return 'deploying…';
+  // A protected environment's plan-only builder (ADR 0060) plans, and
+  // deploys nothing.
+  if (planOnly) return 'protected: deploying here needs a grant on this environment';
   if (isNew && !isDnsLabel(name)) return 'name the environment first';
   if (conflicts > 0) return 'decide the conflicts first';
   if (planning || !answer) return 'planning…';

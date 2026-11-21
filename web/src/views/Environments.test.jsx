@@ -7,14 +7,15 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveProject } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
+import { wire } from '../testing/wire.js';
 import {
   DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceNote, InstanceTable, LogsBody, LogsTab, DeploymentTable,
-  DeploymentView, PreflightResult, TagsBox, envCan,
+  DeploymentView, PreflightResult, ProtectedNotice, TagsBox, envCan, protectedCount,
 } from './Environments.jsx';
 import { AboutBox, EnvOverview, KeysLine } from './EnvOverview.jsx';
 import { activityItems } from './envs.js';
 import {
-  AccessTable, CloneBox, DeleteBox, DomainsBox, PublicBox, RouteTokenBox, TrafficTable,
+  AccessTable, CloneBox, DeleteBox, DomainsBox, ProtectBox, ProtectPrincipals, PublicBox, RouteTokenBox, TrafficTable, grantOf,
 } from './EnvTabs.jsx';
 import { logsProblem } from './envs.js';
 import { LogSearch } from './LogSearch.jsx';
@@ -540,9 +541,10 @@ describe('the routes it calls', () => {
     const used = [...new Set([...src.matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1]))].sort();
     expect(used).toEqual([
       'accessLogs', 'addonCatalog', 'bindingUsage', 'checkBinding', 'checkSecret', 'cloneEnvironment', 'deleteEnvironment', 'deleteSecret', 'deleteTag',
-      'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'identities', 'listDeployments', 'listEnvironments',
-      'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putSecret', 'putTag', 'renameEnvironment', 'restartService',
-      'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setPublic', 'traffic',
+      'envPrincipals', 'followLogs', 'getDeployment', 'getEnvironment', 'getIncident', 'getTrace', 'identities', 'listDeployments', 'listEnvironments',
+      'listIncidents', 'listJobs', 'listSandboxes', 'listSecrets', 'listTags', 'mintRouteToken', 'objectLogs', 'putGrant', 'putIntegrationGrant',
+      'putSecret', 'putTag', 'putTokenGrant', 'renameEnvironment', 'restartService',
+      'revertDeployment', 'revokeRouteTokens', 'runJob', 'searchLogs', 'setProtected', 'setPublic', 'traffic',
     ]);
   });
 });
@@ -553,14 +555,36 @@ const ALL = { write: true, admin: true, del: true, clone: true, operator: false 
 const NONE = { write: false, admin: false, del: false, clone: false, operator: false };
 
 describe('envCan', () => {
-  it('reads the roles: the higher of the project grant and the environment grant', () => {
-    expect(envCan({ role: 'read', environments: [{ id: 'e1', name: 'stage', role: 'write' }] }, 'stage'))
-      .toEqual({ write: true, admin: false, del: false, clone: false, operator: false });
-    expect(envCan({ role: 'write', environments: [] }, 'stage')).toEqual({ write: true, admin: false, del: true, clone: true, operator: false });
-    expect(envCan({ role: '', environments: [{ id: 'e1', name: 'stage', role: 'admin' }] }, 'e1'))
-      .toEqual({ write: true, admin: true, del: true, clone: false, operator: false });
-    expect(envCan({ role: 'read', environments: [] }, 'stage')).toEqual(NONE);
+  const entry = (o) => ({ id: 'e1', name: 'stage', role: '', protected: false, plan: false, delete: false, ...o });
+  it('reads ferund\'s answer: role, delete, plan and protected of the entry, clone from the project\'s role', () => {
+    expect(envCan({ role: 'read', environments: [entry({ role: 'write', plan: true })] }, 'stage'))
+      .toEqual({ write: true, admin: false, del: false, clone: false, plan: true, protected: false, operator: false });
+    expect(envCan({ role: 'write', environments: [entry({ role: 'write', plan: true, delete: true })] }, 'stage'))
+      .toEqual({ write: true, admin: false, del: true, clone: true, plan: true, protected: false, operator: false });
+    expect(envCan({ role: '', environments: [entry({ role: 'admin', plan: true, delete: true })] }, 'e1'))
+      .toEqual({ write: true, admin: true, del: true, clone: false, plan: true, protected: false, operator: false });
+    // A protected one a project write reads: plan, no write, no delete.
+    expect(envCan({ role: 'write', environments: [entry({ role: 'read', plan: true, protected: true })] }, 'stage'))
+      .toEqual({ write: false, admin: false, del: false, clone: true, plan: true, protected: true, operator: false });
+    // Not listed: nothing on it, whatever the project's role.
+    expect(envCan({ role: 'write', environments: [] }, 'stage')).toEqual({ ...NONE, clone: true, plan: false, protected: false });
     expect(envCan({ role: 'admin', environments: [], operator: true }, 'stage').operator).toBe(true);
+  });
+
+  it('holds over every entry of ferund\'s /auth/me answers', () => {
+    for (const name of ['GET_auth_me.session.200', 'GET_auth_me.operator.200', 'GET_auth_me.token.200',
+      'GET_auth_me.integration.200', 'GET_auth_me.integration_person.200']) {
+      for (const p of wire(name).projects) {
+        for (const e of p.environments) {
+          const ec = envCan({ role: p.role, environments: p.environments }, e.id);
+          expect(ec, `${name} ${p.project}/${e.name}`).toMatchObject({
+            write: e.role === 'write' || e.role === 'admin', admin: e.role === 'admin', del: e.delete, plan: e.plan, protected: e.protected,
+            clone: p.role === 'write' || p.role === 'admin',
+          });
+          expect(envCan({ role: p.role, environments: p.environments }, e.name)).toEqual(ec);
+        }
+      }
+    }
   });
 });
 
@@ -821,13 +845,17 @@ describe('the domains & access tab', () => {
     expect(text(<DomainsBox project={T} st={STAGE} domains={[]} navigate={nav} />)).toContain('No domain is bound to this environment.');
   });
 
-  it('mints route tokens and revokes them all, admin on the environment', () => {
+  it('mints route tokens and revokes them all, write on the environment', () => {
     const all = text(<RouteTokenBox env="expensa-stage" ec={ALL} />);
     expect(all).toContain('/api/v1/environments/expensa-stage/http/…');
     expect(all).toContain('X-FeRun-Route-Token');
     expect(all).toContain('Mint a route token');
     expect(all).toContain('Revoke all');
-    expect(count(html(<RouteTokenBox env="e" ec={NONE} />), 'title="needs admin on this environment"')).toBe(2);
+    // Route tokens are write's (ADR 0056); a protected one says why.
+    expect(count(html(<RouteTokenBox env="e" ec={NONE} />), 'title="needs write on this environment"')).toBe(2);
+    expect(count(html(<RouteTokenBox env="e" ec={{ ...NONE, protected: true, plan: true }} />),
+      'title="protected: needs a grant on this environment, or admin on the project"')).toBe(2);
+    expect(html(<RouteTokenBox env="e" ec={{ ...NONE, write: true }} />)).not.toContain('disabled=""');
   });
 });
 
@@ -847,5 +875,73 @@ describe('the settings tab', () => {
     expect(all).toContain('Delete environment');
     expect(html(<DeleteBox project={T} env="e" st={STAGE} ec={NONE} changed={nav} navigate={nav} />))
       .toContain('title="needs admin on this environment or write on the project"');
+  });
+});
+
+describe('protection (ADR 0060)', () => {
+  const list = response('GET_environments.200').environments;
+  const prot = list.map((e, i) => ({ ...e, protected: i === 0 }));
+
+  it('the list marks a protected environment with a shield and counts them', () => {
+    const out = html(<EnvTable envs={prot} project={T} navigate={nav} onLabel={() => {}} />);
+    expect(count(out, 'class="protected-mark"')).toBe(1);
+    expect(protectedCount(prot)).toBe(1);
+    expect(protectedCount(list)).toBe(list.filter((e) => e.protected).length);
+  });
+
+  it('the head names it protected, and tells one who plans but deploys not', () => {
+    const st = { ...STAGE, protected: true };
+    const out = html(<EnvHead st={st} env={st.name} project={T} ec={{ ...NONE, plan: true, protected: true }} domains={[]} editing={false}
+      lastOk={0} changed={nav} navigate={nav} />);
+    expect(out).toContain('class="protected-mark"');
+    expect(out).toContain('protected-notice');
+    expect(text(<ProtectedNotice ec={{ ...NONE, plan: true, protected: true }} />)).toContain('take a grant on it');
+    expect(html(<ProtectedNotice ec={{ ...ALL, plan: true, protected: true }} />)).toBe('');
+    expect(html(<ProtectedNotice ec={{ ...NONE, protected: true }} />)).toBe('');
+    expect(html(<EnvHead st={STAGE} env={STAGE.name} project={T} ec={ALL} domains={[]} editing={false}
+      lastOk={0} changed={nav} navigate={nav} />)).not.toContain('protected');
+  });
+
+  it('the settings offer Protect to an admin of the environment, Lift protection once protected', () => {
+    expect(text(<ProtectBox env="e" st={STAGE} ec={ALL} changed={nav} />)).toContain('Protect…');
+    expect(html(<ProtectBox env="e" st={STAGE} ec={NONE} changed={nav} />)).toContain('title="needs admin on this environment"');
+    const on = text(<ProtectBox env="e" st={{ ...STAGE, protected: true }} ec={ALL} changed={nav} />);
+    expect(on).toContain('is protected');
+    expect(on).toContain('Lift protection');
+  });
+
+  it('the dialog names who loses write, ticks a grant for each, and says a token stops deploying', () => {
+    const ps = wire('GET_environments_env_principals.200').principals;
+    const losers = ps.filter((p) => p.losesWrite);
+    const give = Object.fromEntries(losers.map((p) => [`${p.kind}/${p.id}`, true]));
+    const out = html(<ProtectPrincipals list={ps} give={give} setGive={() => {}} env="prod" />);
+    expect(count(out, 'type="checkbox"')).toBe(losers.length);
+    expect(count(out, 'checked=""')).toBe(losers.length);
+    expect(count(out, 'keeps what it has')).toBe(ps.length - losers.length);
+    if (losers.some((p) => p.kind === 'token')) expect(out).toContain('the token stops deploying here');
+    expect(text(<ProtectPrincipals list={[]} give={{}} setGive={() => {}} env="prod" />)).toContain('nobody loses write');
+  });
+
+  it('each kind gets its grant by its own route', async () => {
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (path, init) => {
+      calls.push([init.method, path, JSON.parse(init.body)]);
+      return { ok: true, status: 200, text: async () => '{}' };
+    }));
+    setActiveProject(T);
+    for (const p of wire('GET_environments_env_principals.200').principals) await grantOf(p, 'env-1')();
+    const kinds = wire('GET_environments_env_principals.200').principals.map((p) => p.kind);
+    expect(calls.map((c) => c[1].replace(/\/[^/]+\/grants$/, '/…/grants'))).toEqual(kinds.map((k) => ({
+      person: '/api/v1/project/members/…/grants', token: '/api/v1/project/tokens/…/grants', integration: '/api/v1/project/integrations/…/grants',
+    })[k]));
+    for (const c of calls) expect(c[2]).toEqual({ role: 'write', environment: 'env-1' });
+    expect(grantOf({ kind: 'other', id: 'x' }, 'e')).toBeNull();
+  });
+
+  it('a clone is not protected, and deleting a protected one takes admin on it', () => {
+    expect(text(<CloneBox project={T} env="e" st={STAGE} ec={ALL} changed={nav} navigate={nav} />))
+      .toContain('It is not protected, whatever this one is.');
+    expect(html(<DeleteBox project={T} env="e" st={STAGE} ec={{ ...NONE, protected: true }} changed={nav} navigate={nav} />))
+      .toContain('title="protected: needs admin on this environment"');
   });
 });

@@ -285,8 +285,14 @@ export const ACTIVITY_LIMIT = 300;
 
 export const api = {
   // Admin: every project and its tokens (an operator's).
-  listProjects: () => adminCall('GET', '/projects'),
-  createProject: (name) => adminCall('POST', '/projects', { name }),
+  // account: the list of one account's projects ('' every project); each
+  // project names its account {name, title} (ADR 0059).
+  listProjects: (account = '') => adminCall('GET', '/projects' + query({ account })),
+  // A project on account ('' or left out: default).
+  createProject: (name, account = '') => adminCall('POST', '/projects', account ? { name, account } : { name }),
+  // A project moved to another account: {project, account, from, movedAt,
+  // moved} (moved false when it is already there).
+  adminMoveProject: (name, account) => adminCall('POST', `/projects/${enc(name)}/move`, { account }),
   deleteProject: (name) => adminCall('DELETE', `/projects/${enc(name)}`),
   listProjectTokens: (name) => adminCall('GET', `/projects/${enc(name)}/tokens`),
   createProjectToken: (name, label) => adminCall('POST', `/projects/${enc(name)}/tokens`, { label }),
@@ -398,14 +404,40 @@ export const api = {
   // tokens and the quota's use. A ferund without these routes answers
   // 404 "no such route" (notAvailable).
   //
-  // A new project, its maker its admin: {project, role}.
-  createOwnProject: (name) => sessionCall('POST', '/projects', { name }),
+  // A new project on an account the person may put projects on (ADR
+  // 0059; '' or left out: default), its maker its admin: {name,
+  // createdAt, role, limits, account}.
+  createOwnProject: (name, account = '') => sessionCall('POST', '/projects', account ? { name, account } : { name }),
   // The project as the session sees it: {project, role, environments}.
   getProject: () => projectCall('GET', '/project'),
-  // The members: {members: [{person, name, email, role, environments:
-  // [{id, name, role}]}]}, role the project grant's ('' with grants on
-  // environments alone).
+  // The members and the integrations the project grants (ADR 0056):
+  // {members: [{person, name, email, issuer, subject, disabled?, role,
+  // madeBy, madeByName, environments: [{id, name, role, madeBy,
+  // madeByName}]}], integrations: [{integration, title, url, disabled,
+  // role, madeBy, madeByName, environments}]}, role the project grant's
+  // ('' with grants on environments alone).
   listMembers: () => projectCall('GET', '/project/members'),
+  // An integration's grant on the project (environment '') or on one of
+  // its environments (ID or name), and its removal (ADR 0056): {integration,
+  // role, environment}.
+  putIntegrationGrant: (integration, { role, environment = '' }) =>
+    projectCall('PUT', `/project/integrations/${enc(integration)}/grants`, environment ? { role, environment } : { role }),
+  deleteIntegrationGrant: (integration, environment = '') =>
+    projectCall('DELETE', `/project/integrations/${enc(integration)}/grants${query({ environment })}`),
+  // A project token's grant on the project or on an environment, its hash
+  // as the token list answers it (ADR 0060: the protect dialog gives one a
+  // grant on the environment): {token, role, environment}.
+  putTokenGrant: (hash, { role, environment = '' }) =>
+    projectCall('PUT', `/project/tokens/${enc(hash)}/grants`, environment ? { role, environment } : { role }),
+  deleteTokenGrant: (hash, environment = '') =>
+    projectCall('DELETE', `/project/tokens/${enc(hash)}/grants${query({ environment })}`),
+  // The project's account, since when, and its moves (ADR 0059): {account:
+  // {name, title}, since, moves: [{project, from, to, at, by}]}; every
+  // member reads it.
+  getProjectAccount: () => projectCall('GET', '/project/account'),
+  // The project to another account, by one of its admins who may put
+  // projects there: {project, account, from, movedAt, moved}.
+  moveProject: (account) => projectCall('POST', '/project/move', { account }),
   // A grant of a member on the project (environment '') or on one of its
   // environments (its ID); its removal. The last admin stays (ferund).
   putGrant: (person, { role, environment = '' }) =>
@@ -422,8 +454,10 @@ export const api = {
     projectCall('POST', '/project/invitations', environment ? { role, environment } : { role }),
   revokeInvitation: (id) => projectCall('DELETE', `/project/invitations/${enc(id)}`),
   // An invitation by its link's secret, for the person who opens it:
-  // what it grants ({project, role, environment?, expiresAt}); its
-  // acceptance gives the session's person the grant.
+  // what it grants, a project's ({project, role, environment?,
+  // environmentName?, expiresAt}) or an account's ({account: {name,
+  // title}, role, expiresAt}, ADR 0059); its acceptance gives the
+  // session's person the grant ({project, role} or {account, role}).
   getInvitation: (token) => sessionCall('GET', `/invitations/${enc(token)}`),
   acceptInvitation: (token) => sessionCall('POST', `/invitations/${enc(token)}/accept`),
   // The project's tokens, with a role and an optional environment, never
@@ -489,8 +523,16 @@ export const api = {
   runJob: (env, name) => projectCall('POST', `/environments/${enc(env)}/jobs/${enc(name)}/run`),
   checkBinding: (env, name, probe) =>
     projectCall('POST', `/environments/${enc(env)}/bindings/${enc(name)}/check`, probe ? { probe } : {}),
-  // The route door's token: a mint answers it once ({token}); one delete
-  // revokes every one.
+  // Protection (ADR 0060): a protected environment's changes take a grant
+  // on it or admin on the project; a project grant of write reads it.
+  // Answers {id, name, protected, changed}.
+  setProtected: (env, isProtected) => projectCall('PUT', `/environments/${enc(env)}/protected`, { protected: !!isProtected }),
+  // Who changes the environment today, by which grant: {principals: [{kind
+  // person|token|integration, id, label, projectRole, environmentRole,
+  // losesWrite}]}.
+  envPrincipals: (env) => projectCall('GET', `/environments/${enc(env)}/principals`),
+  // The route door's token (write on the environment, ADR 0056): a mint
+  // answers it once ({token}); one delete revokes every one.
   mintRouteToken: (env) => projectCall('POST', `/environments/${enc(env)}/route-tokens`),
   revokeRouteTokens: (env) => projectCall('DELETE', `/environments/${enc(env)}/route-tokens`),
   // Publish or unpublish at the ingress (ADR 0054): a publish with an
@@ -552,6 +594,44 @@ export const api = {
   jobLogs: (id) => projectCall('GET', `/jobs/${enc(id)}/logs`),
   cancelJob: (id) => projectCall('POST', `/jobs/${enc(id)}/cancel`),
   deleteJob: (id) => projectCall('DELETE', `/jobs/${enc(id)}`),
+
+  // The integrations registered here, for a person who grants one (ADR
+  // 0056): {integrations: [{name, title, url}]}, the enabled ones.
+  listIntegrations: () => sessionCall('GET', '/integrations'),
+  // Admin: the integrations, each {name, title, url, issuer, subject,
+  // disabled, disabledAt?, createdAt, updatedAt, lastSeen?, madeBy,
+  // projects}; a put registers or changes one (issuer '' : the
+  // installation's provider).
+  adminListIntegrations: () => adminCall('GET', '/integrations'),
+  adminPutIntegration: (name, { title = '', url = '', issuer = '', subject = '' }) =>
+    adminCall('PUT', `/integrations/${enc(name)}`, { title, url, ...(issuer ? { issuer } : {}), subject }),
+  adminDisableIntegration: (name) => adminCall('POST', `/integrations/${enc(name)}/disable`),
+  adminEnableIntegration: (name) => adminCall('POST', `/integrations/${enc(name)}/enable`),
+  adminDeleteIntegration: (name) => adminCall('DELETE', `/integrations/${enc(name)}`),
+
+  // Accounts (ADR 0059), for a person: theirs ({accounts} as /auth/me),
+  // one's page ({name, title, reference, closed, role, members, projects,
+  // moves}), its members' roles, and its invitations ({role}, a new one's
+  // token and url shown once).
+  listAccounts: () => sessionCall('GET', '/accounts'),
+  getAccount: (a) => sessionCall('GET', `/accounts/${enc(a)}`),
+  putAccountMember: (a, person, role) => sessionCall('PUT', `/accounts/${enc(a)}/members/${enc(person)}`, { role }),
+  deleteAccountMember: (a, person) => sessionCall('DELETE', `/accounts/${enc(a)}/members/${enc(person)}`),
+  listAccountInvitations: (a) => sessionCall('GET', `/accounts/${enc(a)}/invitations`),
+  createAccountInvitation: (a, { role }) => sessionCall('POST', `/accounts/${enc(a)}/invitations`, { role }),
+  revokeAccountInvitation: (a, id) => sessionCall('DELETE', `/accounts/${enc(a)}/invitations/${enc(id)}`),
+  // Admin: every account ({name, title, reference, createdAt, madeBy,
+  // closed, closedAt?, projects, members}), a new one, one's page, a
+  // change (title, reference, closed), a deletion (one that never held a
+  // project), and its members.
+  adminListAccounts: () => adminCall('GET', '/accounts'),
+  adminCreateAccount: ({ name, title = '', reference = '' }) =>
+    adminCall('POST', '/accounts', { name, ...(title ? { title } : {}), ...(reference ? { reference } : {}) }),
+  adminGetAccount: (a) => adminCall('GET', `/accounts/${enc(a)}`),
+  adminPatchAccount: (a, patch) => adminCall('PATCH', `/accounts/${enc(a)}`, patch),
+  adminDeleteAccount: (a) => adminCall('DELETE', `/accounts/${enc(a)}`),
+  adminPutAccountMember: (a, person, role) => adminCall('PUT', `/accounts/${enc(a)}/members/${enc(person)}`, { role }),
+  adminDeleteAccountMember: (a, person) => adminCall('DELETE', `/accounts/${enc(a)}/members/${enc(person)}`),
 
   // Admin: the ingresses, the people, a project's limits and zone.
   listIngresses: () => adminCall('GET', '/ingresses'),

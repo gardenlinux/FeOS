@@ -63,35 +63,82 @@ export function myProjects(me) {
     .sort((a, b) => a.project.localeCompare(b.project));
 }
 
-// projectAccess is the sign-in's access to a project: whether it may enter
-// at all (member), its role on the project ('' with grants on
-// environments alone), its grants on environments, and whether it is an
-// operator's (admin in every project, as ferund has it).
+// projectAccess is the sign-in's access to a project as /auth/me answers
+// it (§2.3 of ferund's people answers): whether it may enter at all
+// (member), its effective role on the project ('' with roles on
+// environments alone), its environments, each with ferund's effective
+// role, protected, plan and delete, the account it is on, and whether it
+// is an operator's (admin in every project, as ferund answers it). The
+// console computes no role: it reads ferund's (ADR 0060).
 export function projectAccess(me, name) {
-  const none = { project: name, member: false, role: '', environments: [], operator: false };
+  const none = { project: name, member: false, role: '', environments: [], operator: false, account: null };
   if (!me || !name || !actsInProjects(me)) return none;
   const t = myProjects(me).find((x) => x.project === name);
+  const account = (t && t.account) || null;
   if (isOperator(me)) {
-    return { project: name, member: true, role: 'admin', environments: (t && t.environments) || [], operator: true };
+    // ferund lists every live project for an operator, as admin; one
+    // made a moment ago is not listed until /auth/me is read again.
+    return { project: name, member: true, role: (t && t.role) || 'admin', environments: (t && t.environments) || [], operator: true, account };
   }
   if (!t) return none;
-  return { project: name, member: true, role: t.role || '', environments: t.environments || [], operator: false };
+  return { project: name, member: true, role: t.role || '', environments: t.environments || [], operator: false, account };
 }
 
-// envRole is the role on an environment (its name or ID): the higher of
-// the project grant and the grant on it.
+// envEntry is /auth/me's entry of an environment (its name or ID) in an
+// access: {id, name, role, protected, plan, delete}; null when it is not
+// listed, which is no role on it.
+export function envEntry(access, env) {
+  if (!env) return null;
+  return ((access && access.environments) || []).find((e) => e.id === env || e.name === env) || null;
+}
+
+// envRole is the effective role on an environment (its name or ID), as
+// ferund answers it: a protected one reads a project grant of read or
+// write as read (ADR 0060), an integration's call the lower of both
+// sides (ADR 0056). '' when the environment is not listed.
 export function envRole(access, env) {
-  const g = ((access && access.environments) || []).find((e) => e.id === env || e.name === env);
-  return higher((access && access.role) || '', g ? g.role : '');
+  const e = envEntry(access, env);
+  return (e && e.role) || '';
 }
 
-// mayBuild tells whether the deployment builder may change env (its ID
+// envCan is what the sign-in may do on an environment, every flag read
+// from ferund's answer: write and admin from the entry's role (write:
+// revert, tags, secrets, restarts, runs, checks, sandboxes, jobs and
+// route tokens, ADR 0056; admin: public and who it admits, its
+// protection, domains bound), del (delete and rename) from its delete,
+// plan from its plan (a plan against it, the protection aside), clone
+// from the project's role (write; a clone is never protected), and
+// protected; operator: the nodes are theirs to open.
+export function envCan(access, env) {
+  const e = envEntry(access, env);
+  const role = (e && e.role) || '';
+  return {
+    write: atLeast(role, 'write'),
+    admin: atLeast(role, 'admin'),
+    del: !!(e && e.delete),
+    clone: atLeast((access && access.role) || '', 'write'),
+    plan: !!(e && e.plan),
+    protected: !!(e && e.protected),
+    operator: !!(access && access.operator),
+  };
+}
+
+// mayBuild tells whether the deployment builder may deploy to env (its ID
 // or name; '' for a new environment, ADR 0032): a new one needs write on
-// the project, a deployment or a secret's value write on the environment
-// (envRole). Below that the builder is a read-only view.
+// the project, a deployment or a secret's value the effective write on
+// the environment.
 export function mayBuild(access, env) {
   if (!env) return can(access).writeProject;
-  return atLeast(envRole(access, env), 'write');
+  return envCan(access, env).write;
+}
+
+// mayPlan tells whether the builder may plan against env: a new one with
+// write on the project, an existing one where ferund says plan (the role
+// it would have were it not protected, ADR 0060). Below that the builder
+// is a read-only view.
+export function mayPlan(access, env) {
+  if (!env) return can(access).writeProject;
+  return envCan(access, env).plan;
 }
 
 // can is what a project's pages offer for an access, by the routes' needs
@@ -152,8 +199,10 @@ export const PLATFORM_NAV = [
   { view: 'ingresses', label: 'Ingresses', icon: 'route', path: '/ingresses', group: 'fleet' },
   { view: 'instances', label: 'Control plane', icon: 'network', path: '/instances', group: 'fleet' },
   { view: 'joinTokens', label: 'Join tokens', icon: 'ticket', path: '/join-tokens', group: 'fleet' },
-  { view: 'projects', label: 'Projects', icon: 'building', path: '/projects', group: 'accounts' },
+  { view: 'accounts', label: 'Accounts', icon: 'building', path: '/accounts', group: 'accounts', views: ['accounts', 'account'] },
+  { view: 'projects', label: 'Projects', icon: 'folder', path: '/projects', group: 'accounts' },
   { view: 'people', label: 'People', icon: 'users', path: '/people', group: 'accounts' },
+  { view: 'integrations', label: 'Integrations', icon: 'plug', path: '/integrations', group: 'accounts' },
 ];
 
 export const PLATFORM_GROUPS = [
@@ -174,17 +223,21 @@ export function projectNav(access) {
   return PROJECT_NAV.filter((n) => c[n.needs]);
 }
 
-// OPERATOR_VIEWS are the operators' pages.
-export const OPERATOR_VIEWS = new Set(['nodes', 'node', 'joinTokens', 'instances', 'ingresses', 'people']);
+// OPERATOR_VIEWS are the operators' pages: the fleet's, every person and
+// the registered integrations (ADR 0056).
+export const OPERATOR_VIEWS = new Set(['nodes', 'node', 'joinTokens', 'instances', 'ingresses', 'people', 'integrations']);
 
 // viewGate decides a route for a sign-in: '' when the view may show,
 // 'operator' for an operator's page a person opened, 'basic' for a
 // project's page under a Basic sign-in, 'member' for a project the sign-in
 // is no member of (or that does not exist), 'role' for a project's page
-// its role does not offer.
+// its role does not offer, 'account' for an account whose page the
+// sign-in may not read (ADR 0059: its explicit members' and the
+// operators'; default's the operators').
 export function viewGate(me, route) {
   if (!route) return '';
   if (OPERATOR_VIEWS.has(route.view)) return isOperator(me) ? '' : 'operator';
+  if (route.view === 'account') return accountAccess(me, route.account).member ? '' : 'account';
   if (!route.project) return '';
   if (!actsInProjects(me)) return 'basic';
   const access = projectAccess(me, route.project);
@@ -281,4 +334,107 @@ export function invitationState(inv, now = Date.now()) {
   const exp = Date.parse(inv.expiresAt || '');
   if (!Number.isNaN(exp) && exp <= now) return 'expired';
   return 'open';
+}
+
+// ---------------------------------------------------------------- accounts --
+
+// myAccounts are /auth/me's accounts (ADR 0059), sorted by name: those
+// the person may put projects on or read; default without a row of its
+// own (explicit false) when it is open to them.
+export function myAccounts(me) {
+  return [...((me && me.accounts) || [])]
+    .filter((a) => a && a.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// accountAccess is the sign-in's access to an account: member when its
+// page is readable (an explicit row, or an operator's), its role
+// (member, admin; '' for none), whether it is closed, and operator.
+// Operators are admins of every account.
+export function accountAccess(me, name) {
+  const a = myAccounts(me).find((x) => x.name === name);
+  if (isOperator(me)) {
+    return { account: name, member: !!name, role: 'admin', explicit: true, closed: !!(a && a.closed), title: (a && a.title) || '', operator: true };
+  }
+  if (!a || !name) return { account: name, member: false, role: '', explicit: false, closed: false, title: '', operator: false };
+  return {
+    account: name, member: !!a.explicit, role: a.role || '', explicit: !!a.explicit, closed: !!a.closed, title: a.title || '', operator: false,
+  };
+}
+
+// accountsToMakeOn are the accounts a person may put a new project on:
+// the open ones of /auth/me, default first.
+export function accountsToMakeOn(me) {
+  const open = myAccounts(me).filter((a) => !a.closed);
+  return [...open.filter((a) => a.name === 'default'), ...open.filter((a) => a.name !== 'default')];
+}
+
+// moveTargets are the accounts a project on current may move to: open
+// ones other than current (ADR 0059: a closed account takes no project),
+// from accounts (/auth/me's for a person, the admin list for an
+// operator).
+export function moveTargets(accounts, current) {
+  return (accounts || []).filter((a) => a && a.name && !a.closed && a.name !== current)
+    .sort((a, b) => (a.name === 'default' ? -1 : b.name === 'default' ? 1 : a.name.localeCompare(b.name)));
+}
+
+// accountLabel names an account: its title and name, or the name alone.
+export function accountLabel(a) {
+  if (!a) return '';
+  return a.title && a.title !== a.name ? `${a.title} (${a.name})` : a.name || '';
+}
+
+// moveText says a move of an account's history (ADR 0059): where from
+// and to, and who moved it.
+export function moveText(m) {
+  if (!m) return '';
+  const by = m.by && m.by.name ? ` by ${m.by.name}` : '';
+  if (!m.from) return `${m.project} begins on ${accountLabel(m.to)}${by}`;
+  return `${m.project} moved from ${accountLabel(m.from)} to ${accountLabel(m.to)}${by}`;
+}
+
+// ------------------------------------------------------------ integrations --
+
+// integrationRoleText says what a role lets an integration do on a scope
+// (ADR 0056), one line per role up to it, and what it never does.
+// scope '' is the project, else an environment.
+export function integrationRoleText(role, scope = '') {
+  const env = !!scope;
+  const lines = [];
+  if (!atLeast(role, 'read')) return lines;
+  lines.push(env
+    ? 'reads the environment: its state, deployments, logs, traces and traffic'
+    : 'reads state, deployments, logs, traces and traffic of every environment');
+  if (atLeast(role, 'write')) {
+    lines.push(env
+      ? 'also deploys, reverts, sets secrets, runs jobs and sandboxes, restarts and mints route tokens in it'
+      : 'also makes, clones and deletes environments; deploys, reverts, sets secrets, runs jobs and sandboxes, restarts and mints route tokens in each; reads a protected one');
+  }
+  if (atLeast(role, 'admin')) {
+    lines.push(env
+      ? 'also publishes it and binds its domains'
+      : 'also claims and deletes domains and sets the access providers');
+  }
+  if (atLeast(role, 'write')) {
+    lines.push('On a protected environment it reads alone; for a person it names it changes what both of you may.');
+  }
+  lines.push('Never: members, invitations, grants, tokens, the account, making or deleting a project. '
+    + 'A call it makes for a person does what both of you may do.');
+  return lines;
+}
+
+// madeByText names who gave a grant (ferund's madeBy and madeByName): the
+// name when ferund answers one, else the principal's kind.
+export function madeByText(madeBy, madeByName) {
+  if (madeByName) {
+    return String(madeBy || '').startsWith('integration:') && String(madeBy).includes('/person:')
+      ? `${madeByName}, through an integration` : madeByName;
+  }
+  const p = String(madeBy || '');
+  if (!p) return '';
+  if (p.startsWith('basic:')) return `operator ${p.slice(6)}`;
+  if (p.startsWith('token:')) return 'a project token';
+  if (p.startsWith('integration:')) return 'an integration';
+  if (p.startsWith('person:')) return 'a person';
+  return p;
 }

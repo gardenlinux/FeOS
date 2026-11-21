@@ -61,3 +61,12 @@ describe('search', () => {
     expect(search(all, 'access prov')[0]).toMatchObject({ kind: 'page', label: 'Access providers', to: '/projects/kino/providers' });
   });
 });
+
+describe('a protected environment (ADR 0060)', () => {
+  it('says so before its host', () => {
+    const all = entries({ project: 'kino', summary: { environments: [
+      { id: 'e1', name: 'prod', protected: true, hosts: ['kino.example'] }, { id: 'e2', name: 'stage', hosts: [] }] } });
+    expect(all.find((e) => e.label === 'prod').hint).toBe('protected · kino.example');
+    expect(all.find((e) => e.label === 'stage').hint).toBe('e2');
+  });
+});

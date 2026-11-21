@@ -4,7 +4,9 @@
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, ArmButton, CopyBtn, EnvName, ErrBox, KV, LiveBadge, StateLabel, useArm, useNow, usePoll } from '../components.jsx';
+import {
+  Ago, ArmButton, CopyBtn, EnvName, ErrBox, KV, LiveBadge, ProtectedMark, StateLabel, useArm, useNow, usePoll,
+} from '../components.jsx';
 import { fmtDate, fmtDateTime, prettyJson, shortId } from '../format.js';
 import { newest } from '../poll.js';
 import { ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, PAGE_LABELS, envPath, httpSecretPath, lensOf, newEnvPath } from '../routes.js';
@@ -13,7 +15,7 @@ import { focusOf, queryOf } from '../logs.js';
 import { LogSearch } from './LogSearch.jsx';
 import { Traces } from './Traces.jsx';
 import { Builder } from './Builder.jsx';
-import { atLeast, envRole, useAccess } from '../people.js';
+import { envCan, envEntry, useAccess, useMe } from '../people.js';
 import { useSummary } from '../summary.jsx';
 import {
   admitsShort, admitsWords, changeTone, conditionText, defaultHost, envCounts, exitText, findObject, fmtValue, hasEvidence, heavyEffect,
@@ -22,7 +24,7 @@ import {
   tagPlan,
 } from './envs.js';
 import {
-  AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SettingsTab, TrafficTab, useOp,
+  AccessTab, ConfirmButton, EnvLink, HostLink, NEEDS, OpNote, SettingsTab, TrafficTab, needsWrite, useOp,
 } from './EnvTabs.jsx';
 import { ObjectPage } from './ObjectPage.jsx';
 import { AboutBox, ActivityTab, EnvOverview, useActivity } from './EnvOverview.jsx';
@@ -64,22 +66,11 @@ export function Environments({ project, env, tab, item, otab = 'overview', repli
   return <EnvList project={project} navigate={navigate} />;
 }
 
-// envCan is what a role may do on an environment (ADR 0031, the route
-// needs): write on it (revert, tags, secrets, restarts, runs, checks),
-// admin on it (public and who it admits, route tokens), a delete (admin on it or write on
-// the project), a clone (write on the project); operator: the nodes are
-// theirs to open.
-export function envCan(access, env) {
-  const role = envRole(access, env);
-  const writeProject = atLeast((access && access.role) || '', 'write');
-  return {
-    write: atLeast(role, 'write'),
-    admin: atLeast(role, 'admin'),
-    del: atLeast(role, 'admin') || writeProject,
-    clone: writeProject,
-    operator: !!(access && access.operator),
-  };
-}
+// envCan is what the sign-in may do on an environment, as ferund's
+// /auth/me answers it (people.js; ADR 0060): write, admin, del (delete
+// and rename), clone, plan, protected, operator. The console restates no
+// rule of ferund's.
+export { envCan };
 
 // ---------------------------------------------------------------- widgets --
 
@@ -170,6 +161,9 @@ function EnvList({ project, navigate }) {
           {counts.deploying > 0 && <span className="acc" title="waiting or deploying">● <b>{counts.deploying}</b> deploying</span>}
           {counts.failed > 0 && <span className="bad" title="the latest deployment failed">● <b>{counts.failed}</b> failed</span>}
           {counts.incidents > 0 && <span className="bad" title="open incidents">▲ <b>{counts.incidents}</b> open incident{counts.incidents === 1 ? '' : 's'}</span>}
+          {protectedCount(envs) > 0 && (
+            <span className="acc" title="protected: changing one takes a grant on it or admin on the project (ADR 0060)">
+              <Icon name="shield" size={12} /> <b>{protectedCount(envs)}</b> protected</span>)}
         </div>
       </header>
       <section className="pane">
@@ -235,6 +229,7 @@ export function EnvTable({ envs, filtered, project, navigate, onLabel }) {
                   <td className="col-state"><ToneDot tone={tone} title={e.state} /></td>
                   <td className="nowrap">
                     <Link to={to} navigate={navigate} className="mono strong">{e.name}</Link>
+                    {e.protected && <>{' '}<ProtectedMark /></>}
                     <span className="muted small mono idsub" title={e.id}>{shortId(e.id)}</span>
                   </td>
                   <td className={'mono small nowrap state-label ' + tone}>{deploymentText(e)}</td>
@@ -298,6 +293,16 @@ function EnvDetail({ project, env, tab, item, otab, replica, search, navigate })
   const sumRefresh = sum.refresh;
   const changed = useCallback(() => { refresh(); sumRefresh(); }, [refresh, sumRefresh]);
   const ec = envCan(access, (st && st.id) || env);
+  // An environment /auth/me does not list yet (made or granted since it
+  // was read) has no role in it: it is read again once.
+  const { reload } = useMe();
+  const listed = !!envEntry(access, (st && st.id) || env);
+  const asked = useRef('');
+  useEffect(() => {
+    if (!st || listed || asked.current === st.id) return;
+    asked.current = st.id;
+    reload().catch(() => {});
+  }, [st, listed, reload]);
 
   // Escape goes up: from an item to its tab's list, from there to the
   // environments; from the builder, an object's page and the sandboxes'
@@ -440,7 +445,7 @@ export function EnvHead({ st, env, project, ec, domains, editing, lastOk, change
         <p className="pagehead-kind">Environment{' '}
           <a href={envPath(project, env)} onClick={go(envPath(project, env))}><EnvName name={st ? st.name : env} className="" /></a></p>)}
       <div className="pagehead-title">
-        <h1>{editing ? 'New deployment' : <EnvName name={st ? st.name : env} className="" />}</h1>
+        <h1>{editing ? 'New deployment' : <EnvName name={st ? st.name : env} className="" protected={!!(st && st.protected)} />}</h1>
         {st && !editing && (
           <span className={'statepill ' + tone}>
             <ToneDot tone={tone} title={state} />
@@ -451,12 +456,13 @@ export function EnvHead({ st, env, project, ec, domains, editing, lastOk, change
           {offer > 0 && (
             <ConfirmButton label={`Revert to ${offer}`} confirmLabel={`Revert to ${offer}: a new deployment`} icon="undo"
               disabled={!ec.write || !!(op && op.busy)}
-              title={ec.write ? `a new deployment with deployment ${offer}'s spec` : NEEDS.write} onConfirm={revert} />)}
+              title={ec.write ? `a new deployment with deployment ${offer}'s spec` : needsWrite(ec)} onConfirm={revert} />)}
           {editing
             ? <a className="button" href={envPath(project, env)} onClick={go(envPath(project, env))}><Icon name="check" size={14} /> Done</a>
             : (
               <a className={'button' + (incidents > 0 ? '' : ' primary')} href={builder} onClick={go(builder)}
-                title={ec.write ? 'change the environment: a draft, planned, applied as the next deployment' : 'read-only: needs write on this environment'}>
+                title={ec.write ? 'change the environment: a draft, planned, applied as the next deployment'
+                  : ec.plan ? 'plan against it: deploying takes a grant on it (protected)' : 'read-only: needs write on this environment'}>
                 <Icon name="plus" size={14} /> New deployment</a>)}
         </span>
       </div>
@@ -470,11 +476,32 @@ export function EnvHead({ st, env, project, ec, domains, editing, lastOk, change
             ? <>public{hosts.length > 0 && <> at {hosts.map((h, i) => <Fragment key={h}>{i > 0 && ', '}<HostLink host={h} /></Fragment>)}</>}
               {' · '}{admitsWords(st)}</>
             : 'not public · route door only'}
+          {st.protected && <> · <span className="acc">protected</span></>}
           {dh && !dh.serving && <> · default host <span className="mono">{dh.label}</span> answers 404 while a domain is served</>}
           {dh && dh.serving && hosts.length > 1 && <> · default host <HostLink host={dh.host} /></>}
         </p>)}
+      {st && !editing && <ProtectedNotice ec={ec} />}
       {op && op.tone === 'bad' ? <ErrBox error={op.text} /> : <OpNote op={op} onDismiss={clear} />}
     </header>
+  );
+}
+
+// protectedCount is how many of envs are protected (ADR 0060).
+export function protectedCount(envs) {
+  return (envs || []).filter((e) => e && e.protected).length;
+}
+
+// ProtectedNotice is the head's line for one who plans against a
+// protected environment but changes it not (ferund answers plan, not
+// write): their write is the project's alone (ADR 0060).
+export function ProtectedNotice({ ec }) {
+  if (!ec || !ec.protected || ec.write || !ec.plan) return null;
+  return (
+    <p className="protected-notice">
+      <Icon name="shield" size={14} />
+      <span>Protected: you read it and plan against it; deploying, secrets&apos; values, restarts, jobs, sandboxes and
+        route tokens take a grant on it, or admin on the project.</span>
+    </p>
   );
 }
 

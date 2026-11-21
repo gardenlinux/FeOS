@@ -360,6 +360,11 @@ describe('ReviewPanel', () => {
     expect(out).toContain(`value="${proposeMessage(PLAN.diff, STORED)}"`);
     expect(deployButton(out)).not.toContain('disabled');
     expect(t).toContain('Deploy as deployment 7');
+    // Plan-only on a protected environment: the plan shows, the deploy not.
+    const only = panel({ answer: PLAN, spec: STORED, base: 6 }, { planOnly: true });
+    expect(deployButton(only)).toContain('disabled');
+    expect(only).toContain('protected: deploying here needs a grant on this environment');
+    expect(only).toContain('expense-service');
     expect(out).toContain('pins the images at deploy');
   });
 
@@ -433,6 +438,10 @@ describe('the band', () => {
     expect(deployBlock({ ...ok, heavy: 1 })).toBe('accept the data loss or downtime first');
     expect(deployBlock({ ...ok, heavy: 1, ack: true })).toBe('');
     expect(deployBlock({ ...ok, conflicts: 2, planning: true })).toBe('decide the conflicts first');
+    // A protected environment's plan-only builder (ADR 0060) plans and
+    // deploys nothing, whatever else holds.
+    expect(deployBlock({ ...ok, planOnly: true })).toBe('protected: deploying here needs a grant on this environment');
+    expect(deployBlock({ ...ok, planOnly: true, planning: true })).toBe('protected: deploying here needs a grant on this environment');
   });
 });
 

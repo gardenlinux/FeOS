@@ -16,7 +16,8 @@
 //   /projects/:t/providers[/:name[/edit]]
 //                                       its access providers (ADR 0054)
 //   /projects/:t/new-provider            the form of a new access provider
-//   /projects/:t/members                 its people: members and invitations
+//   /projects/:t/members[?integration=<name>]
+//                                       its people: members, integrations, invitations
 //   /projects/:t/tokens                  its tokens
 //   /projects/:t/usage                   its use against its limits
 //   /projects/:t/settings                the project itself
@@ -53,7 +54,13 @@
 //   /instances                          the control plane's instances
 //   /ingresses                          the ingresses
 //   /people                             every person (operators)
-//   /invite/:token                      an invitation, to accept
+//   /integrations                       the registered integrations (operators, ADR 0056)
+//   /accounts                           the accounts: a person's, or every one (operators, ADR 0059)
+//   /accounts/:a                        an account's page: its projects, moves, people, invitations
+//   /invite/:token                      an invitation, to accept (a project's or an account's)
+//
+// FeCode links here: /projects?new (make a project) and
+// /projects/:t/members?integration=<name> (grant that integration).
 
 function decode(s) {
   try {
@@ -343,6 +350,10 @@ export function parsePath(pathname) {
       return { view: 'people' };
     case 'invite':
       return { view: 'invite', token: seg[1] || '' };
+    case 'accounts':
+      return seg[1] ? { view: 'account', account: seg[1] } : { view: 'accounts' };
+    case 'integrations':
+      return { view: 'integrations' };
     case 'projects':
       break;
     default:

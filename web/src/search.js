@@ -26,10 +26,12 @@ export function entries({ project, nav = [], platform = [], projects = [], summa
   }
   for (const tn of projects) {
     if (tn.project === project) continue;
-    out.push({ key: 'project/' + tn.project, kind: 'project', label: tn.project, hint: 'switch project', to: `/projects/${enc(tn.project)}`, icon: 'building' });
+    out.push({ key: 'project/' + tn.project, kind: 'project', label: tn.project, hint: 'switch project', to: `/projects/${enc(tn.project)}`, icon: 'folder' });
   }
   for (const e of summary.environments || []) {
-    out.push({ key: 'env/' + e.id, kind: 'environment', label: e.name, hint: (e.hosts || [])[0] || e.id, to: envPath(project, e.name), icon: 'layers' });
+    // A protected one (ADR 0060) says so before its host.
+    const hint = [e.protected && 'protected', (e.hosts || [])[0] || e.id].filter(Boolean).join(' · ');
+    out.push({ key: 'env/' + e.id, kind: 'environment', label: e.name, hint, to: envPath(project, e.name), icon: 'layers' });
   }
   // A sandbox and a job are of an environment (ADR 0035), and their
   // pages its; one without (an older ferund) is found by its ID.
