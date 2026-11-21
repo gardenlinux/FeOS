@@ -135,12 +135,31 @@ type AccountInfo struct {
 // ListAccounts returns every account by name, with the number of projects
 // on it now and of its people.
 func (s *Store) ListAccounts(ctx context.Context) ([]AccountInfo, error) {
+	return s.accountInfos(ctx, "", nil)
+}
+
+// GetAccountInfo is one account of ListAccounts; ErrNoRow if there is
+// none.
+func (s *Store) GetAccountInfo(ctx context.Context, id string) (AccountInfo, error) {
+	all, err := s.accountInfos(ctx, "WHERE a.id = $1", []any{id})
+	if err != nil {
+		return AccountInfo{}, err
+	}
+	if len(all) == 0 {
+		return AccountInfo{}, ErrNoRow
+	}
+	return all[0], nil
+}
+
+// accountInfos is the accounts that where (with args) selects, by name,
+// with their counts.
+func (s *Store) accountInfos(ctx context.Context, where string, args []any) ([]AccountInfo, error) {
 	rows, err := s.q.Query(ctx, `SELECT `+prefixed("a", []string{"id", "title", "reference", "created_at", "made_by",
 		"closed_at", "closed_by"})+`,
 			(SELECT count(*) FROM projects p LEFT JOIN project_accounts c ON c.project_id = p.id AND c.left_at IS NULL
 				WHERE coalesce(c.account_id, '`+DefaultAccount+`') = a.id),
 			(SELECT count(*) FROM account_members m WHERE m.account_id = a.id)
-		FROM accounts a ORDER BY a.id`)
+		FROM accounts a `+where+` ORDER BY a.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,19 +172,13 @@ func (s *Store) ListAccounts(ctx context.Context) ([]AccountInfo, error) {
 	})
 }
 
-// GetAccountInfo is one account of ListAccounts; ErrNoRow if there is
-// none.
-func (s *Store) GetAccountInfo(ctx context.Context, id string) (AccountInfo, error) {
-	all, err := s.ListAccounts(ctx)
+// AllAccounts returns every account by name, without counts.
+func (s *Store) AllAccounts(ctx context.Context) ([]Account, error) {
+	rows, err := s.q.Query(ctx, "SELECT "+accountCols+" FROM accounts ORDER BY id")
 	if err != nil {
-		return AccountInfo{}, err
+		return nil, err
 	}
-	for _, a := range all {
-		if a.ID == id {
-			return a, nil
-		}
-	}
-	return AccountInfo{}, ErrNoRow
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Account, error) { return scanAccount(r) })
 }
 
 // PersonAccount is an account a person holds a row of, with its role.
@@ -433,12 +446,14 @@ func (s *Store) AccountProjects(ctx context.Context, account string) ([]AccountP
 }
 
 // MoveProject puts a project on account, by: the account it is on now
-// is left and account taken at the same now(). It changes nothing else
-// of the project. It runs in the caller's transaction, which holds the
-// project's row FOR UPDATE and account's FOR SHARE, and returns the
-// account it was on and whether it moved (false: it is on account
-// already, and nothing is written). A project without a current row gets
-// its row on DefaultAccount first.
+// is left and account taken at one moment, now() or, when a move that
+// began later committed first, the moment the current row was taken. It
+// changes nothing else of the project. It runs in the caller's
+// transaction, which holds the project's row FOR UPDATE and account's FOR
+// SHARE, and returns the account it was on and whether it moved (false:
+// it is on account already, and nothing is written). A project without a
+// current row is on DefaultAccount; a move elsewhere writes that row
+// first.
 func (s *Store) MoveProject(ctx context.Context, project, account, by string) (from string, moved bool, err error) {
 	if !s.tx {
 		return "", false, errors.New("store: MoveProject outside a transaction")
@@ -447,6 +462,12 @@ func (s *Store) MoveProject(ctx context.Context, project, account, by string) (f
 	err = s.q.QueryRow(ctx, `SELECT id, account_id FROM project_accounts WHERE project_id = $1 AND left_at IS NULL
 		FOR UPDATE`, project).Scan(&id, &from)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if account == DefaultAccount {
+			if _, err := s.LockProject(ctx, project, NoLock); err != nil {
+				return "", false, err
+			}
+			return DefaultAccount, false, nil
+		}
 		from = DefaultAccount
 		err = s.q.QueryRow(ctx, `INSERT INTO project_accounts (project_id, account_id, moved_at, moved_by)
 			SELECT id, $2, created_at, '' FROM projects WHERE id = $1 RETURNING id`, project, DefaultAccount).Scan(&id)
@@ -457,11 +478,13 @@ func (s *Store) MoveProject(ctx context.Context, project, account, by string) (f
 	if from == account {
 		return from, false, nil
 	}
-	if _, err := s.q.Exec(ctx, "UPDATE project_accounts SET left_at = now() WHERE id = $1", id); err != nil {
+	var at time.Time
+	if err := s.q.QueryRow(ctx, `UPDATE project_accounts SET left_at = greatest(now(), moved_at) WHERE id = $1
+		RETURNING left_at`, id).Scan(&at); err != nil {
 		return "", false, err
 	}
-	if _, err := s.q.Exec(ctx, `INSERT INTO project_accounts (project_id, account_id, moved_by)
-		VALUES ($1, $2, $3)`, project, account, by); err != nil {
+	if _, err := s.q.Exec(ctx, `INSERT INTO project_accounts (project_id, account_id, moved_at, moved_by)
+		VALUES ($1, $2, $3, $4)`, project, account, at, by); err != nil {
 		return "", false, err
 	}
 	return from, true, nil

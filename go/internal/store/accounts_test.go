@@ -179,17 +179,52 @@ func TestProjectAccounts(t *testing.T) {
 	if from, moved := move("shop", "cc-4711"); moved || from != "cc-4711" {
 		t.Fatalf("to the same: %s %v", from, moved)
 	}
+	// One without a row, to default where it is: nothing written.
+	if from, moved := move("old", store.DefaultAccount); moved || from != store.DefaultAccount {
+		t.Fatalf("old to default: %s %v", from, moved)
+	}
+	var n int
+	must(t, s.Q().QueryRow(bg, "SELECT count(*) FROM project_accounts WHERE project_id = 'old'").Scan(&n))
+	if n != 0 {
+		t.Fatalf("old has %d rows", n)
+	}
+	for _, to := range []string{store.DefaultAccount, "cc-4711"} {
+		if err := s.InTx(bg, func(tx *store.Store) error {
+			_, _, err := tx.MoveProject(bg, "nope", to, "")
+			return err
+		}); !errors.Is(err, store.ErrNoRow) {
+			t.Fatalf("unknown to %s: %v", to, err)
+		}
+	}
 	if from, moved := move("old", "cc-4711"); !moved || from != store.DefaultAccount {
 		t.Fatalf("old: %s %v", from, moved)
 	}
 	if from, moved := move("shop", store.DefaultAccount); !moved || from != "cc-4711" {
 		t.Fatalf("shop: %s %v", from, moved)
 	}
+	// A move whose transaction began before one that committed first
+	// (here: the current row taken later than this transaction's now())
+	// leaves and takes at the moment that row was taken.
+	exec(t, s, "UPDATE project_accounts SET moved_at = now() + interval '1 hour' WHERE project_id = 'shop' AND left_at IS NULL")
+	if from, moved := move("shop", "cc-4711"); !moved || from != store.DefaultAccount {
+		t.Fatalf("shop back: %s %v", from, moved)
+	}
+	var gap bool
+	must(t, s.Q().QueryRow(bg, `SELECT bool_and(l.left_at = c.moved_at AND l.moved_at = c.moved_at)
+		FROM project_accounts c JOIN project_accounts l ON l.project_id = c.project_id AND l.left_at IS NOT NULL
+			AND l.account_id = 'default'
+		WHERE c.project_id = 'shop' AND c.left_at IS NULL`).Scan(&gap))
+	if !gap {
+		t.Fatal("the later row's moment is not kept")
+	}
+	if from, moved := move("shop", store.DefaultAccount); !moved || from != "cc-4711" {
+		t.Fatalf("shop again: %s %v", from, moved)
+	}
 	ms, err := s.ProjectMoves(bg, "shop")
 	must(t, err)
-	if len(ms) != 2 || ms[0].From != "cc-4711" || ms[0].To != store.DefaultAccount || ms[0].By != "basic:root" ||
-		ms[1].From != "" || ms[1].To != "cc-4711" || ms[1].ToTitle != "Team X" || ms[1].By != by ||
-		ms[1].ByName != "Mia" || !ms[1].At.Equal(shop.CreatedAt) {
+	if len(ms) != 4 || ms[0].From != "cc-4711" || ms[0].To != store.DefaultAccount || ms[0].By != "basic:root" ||
+		ms[3].From != "" || ms[3].To != "cc-4711" || ms[3].ToTitle != "Team X" || ms[3].By != by ||
+		ms[3].ByName != "Mia" || !ms[3].At.Equal(shop.CreatedAt) {
 		t.Fatalf("shop's moves %+v", ms)
 	}
 	ms, err = s.ProjectMoves(bg, "old")
@@ -199,9 +234,9 @@ func TestProjectAccounts(t *testing.T) {
 	}
 	ms, err = s.AccountMoves(bg, "cc-4711")
 	must(t, err)
-	// shop came and left; old came.
-	if len(ms) != 3 || ms[0].Project != "shop" || ms[0].From != "cc-4711" || ms[1].Project != "old" ||
-		ms[2].Project != "shop" || ms[2].From != "" {
+	// shop came and left, came and left; old came.
+	if len(ms) != 5 || ms[0].Project != "shop" || ms[0].From != "cc-4711" || ms[4].Project != "shop" ||
+		ms[4].From != "" {
 		t.Fatalf("cc-4711's moves %+v", ms)
 	}
 

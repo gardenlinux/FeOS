@@ -230,7 +230,9 @@ func (s *server) defaultOpen() bool { return s.cfg.ProjectCreation != ProjectCre
 // accountRole is a caller's role on an account: an operator's is admin;
 // a person's their row's; default's, while it is open, member for a
 // person without a row. explicit: the account's page is the caller's to
-// read (a row, or an operator). "" is none.
+// read (a row of an account but default, or an operator: default's page
+// is the operators', a row of it only lets a person put projects on it).
+// "" is none.
 func (s *server) accountRole(ctx context.Context, st *store.Store, person uuid.UUID, operator bool,
 	account string) (role string, explicit bool, err error) {
 	if operator {
@@ -244,7 +246,7 @@ func (s *server) accountRole(ctx context.Context, st *store.Store, person uuid.U
 		return "", false, fmt.Errorf("account %s: %w", account, err)
 	}
 	if role != "" {
-		return role, true, nil
+		return role, account != store.DefaultAccount, nil
 	}
 	if account == store.DefaultAccount && s.defaultOpen() {
 		return store.AccountMember, false, nil
@@ -258,7 +260,7 @@ func (s *server) accountRole(ctx context.Context, st *store.Store, person uuid.U
 func (s *server) myAccounts(ctx context.Context, sess store.UISession) ([]meAccount, error) {
 	out := []meAccount{}
 	if sess.Admin {
-		all, err := s.st.ListAccounts(ctx)
+		all, err := s.st.AllAccounts(ctx)
 		if err != nil {
 			return nil, internalf("accounts: %v", err)
 		}
@@ -278,7 +280,8 @@ func (s *server) myAccounts(ctx context.Context, sess store.UISession) ([]meAcco
 	onDefault := false
 	for _, a := range rows {
 		onDefault = onDefault || a.ID == store.DefaultAccount
-		out = append(out, meAccount{Name: a.ID, Title: a.Title, Role: a.Role, Explicit: true, Closed: a.Closed()})
+		out = append(out, meAccount{Name: a.ID, Title: a.Title, Role: a.Role, Explicit: a.ID != store.DefaultAccount,
+			Closed: a.Closed()})
 	}
 	if !onDefault && s.defaultOpen() {
 		d, err := s.st.GetAccount(ctx, store.DefaultAccount)
@@ -344,8 +347,8 @@ func (s *server) useAccount(ctx context.Context, tx *store.Store, name string, p
 }
 
 // readableAccountIn reads the account name for the session, in st with
-// lock: absent (404) unless the person holds a row of it or is an
-// operator; role is theirs on it.
+// lock: absent (404) unless its page is the caller's (accountRole's
+// explicit); role is theirs on it.
 func (s *server) readableAccountIn(ctx context.Context, st *store.Store, sess store.UISession, name string,
 	lock store.RowLock) (store.Account, string, error) {
 	a, err := st.LockAccount(ctx, name, lock)
@@ -363,6 +366,28 @@ func (s *server) readableAccountIn(ctx context.Context, st *store.Store, sess st
 		return store.Account{}, "", errNoAccount()
 	}
 	return a, role, nil
+}
+
+// leavableAccountIn reads the account name for its member leaving it, in
+// st with the row FOR NO KEY UPDATE: absent (404) unless the caller holds
+// a role on it. A person with a row of default leaves it though its page
+// is the operators'.
+func (s *server) leavableAccountIn(ctx context.Context, st *store.Store, sess store.UISession, name string) error {
+	_, err := st.LockAccount(ctx, name, store.ForNoKeyUpdate)
+	if isNoRow(err) {
+		return errNoAccount()
+	}
+	if err != nil {
+		return err
+	}
+	role, _, err := s.accountRole(ctx, st, sess.PersonID, sess.Admin, name)
+	if err != nil {
+		return err
+	}
+	if role == "" {
+		return errNoAccount()
+	}
+	return nil
 }
 
 // keepAccountAdmin runs change and refuses (409 last_admin) a change that
@@ -469,7 +494,7 @@ func (s *server) listMyAccounts(w http.ResponseWriter, r *http.Request) error {
 }
 
 // getAccountPage is GET /api/v1/accounts/{account}: the account's page,
-// for its people and the operators.
+// for its people and the operators; default's for the operators only.
 func (s *server) getAccountPage(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	a, role, err := s.readableAccountIn(ctx, s.st, personSession(r), r.PathValue("account"), store.NoLock)
@@ -556,7 +581,7 @@ func (s *server) deleteAccountMember(w http.ResponseWriter, r *http.Request) err
 	var deleted bool
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
 		if person == sess.PersonID {
-			if _, _, err := s.readableAccountIn(ctx, tx, sess, name, store.ForNoKeyUpdate); err != nil {
+			if err := s.leavableAccountIn(ctx, tx, sess, name); err != nil {
 				return err
 			}
 		} else if _, err := s.adminOfAccount(ctx, tx, sess, name); err != nil {
@@ -948,6 +973,23 @@ func (s *server) moveProject(ctx context.Context, project, account string, by au
 		}
 		if t.Deleting() {
 			return apierr.New(http.StatusConflict, "project %s is being deleted", project)
+		}
+		cur, since, err := tx.ProjectAccount(ctx, project)
+		if err != nil {
+			return err
+		}
+		if cur.ID == account {
+			// Already there: nothing is written, so a closed account,
+			// which only refuses taking a project, answers too.
+			role, _, err := s.accountRole(ctx, tx, by.Person, by.Operator, account)
+			if err != nil {
+				return err
+			}
+			if role == "" {
+				return errNoAccount()
+			}
+			out = projectMoveAnswer{Project: project, Account: refOf(cur), From: refOf(cur), MovedAt: rfc3339(since)}
+			return nil
 		}
 		to, err := s.useAccount(ctx, tx, account, by.Person, by.Operator)
 		if err != nil {

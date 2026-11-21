@@ -471,14 +471,28 @@ func TestAccountPeople(t *testing.T) {
 	if strings.Contains(resp.Body.String(), "stage") {
 		t.Fatal("the page shows what is inside a project")
 	}
-	// default's page is the operators', and its explicit members'.
+	// default's page is the operators': a row of it lets a person put
+	// projects on it and read nothing of it.
 	expect(t, e.serve(as(w.am, "", "GET", "/api/v1/accounts/default", nil)), http.StatusNotFound, "")
-	expect(t, e.serve(as(w.pi, "", "GET", "/api/v1/accounts/default", nil)), http.StatusOK, "")
+	expect(t, e.serve(as(w.pi, "", "GET", "/api/v1/accounts/default", nil)), http.StatusNotFound,
+		errBody("no such account"))
+	expect(t, e.serve(as(w.pi, "", "GET", "/api/v1/accounts/default/invitations", nil)), http.StatusNotFound, "")
+	resp = e.serve(as(w.pi, "", "GET", "/api/v1/accounts", nil))
+	if got := decode[struct{ Accounts []meAccount }](t, resp).Accounts; len(got) != 1 ||
+		got[0] != (meAccount{"default", "Default", "member", false, false}) {
+		t.Fatalf("pi's accounts %+v", got)
+	}
 	resp = e.serve(as(w.op, "", "GET", "/api/v1/accounts/default", nil))
 	expect(t, resp, http.StatusOK, "")
 	if p := decode[accountPage](t, resp); p.Role != "admin" || len(p.Projects) != 2 || p.Projects[0].MadeBy != nil {
 		t.Fatalf("default's page %+v", p)
 	}
+	// Its member leaves it all the same; a stranger finds no account.
+	expect(t, e.serve(as(w.am, "", "DELETE", "/api/v1/accounts/nope/members/"+am, nil)), http.StatusNotFound, "")
+	expect(t, e.serve(as(w.pi, "", "DELETE", "/api/v1/accounts/default/members/"+pi, nil)), http.StatusOK,
+		`{"deleted":true}`+"\n")
+	expect(t, e.serve(as(w.pi, "", "DELETE", "/api/v1/accounts/default/members/"+pi, nil)), http.StatusOK,
+		`{"deleted":false}`+"\n")
 }
 
 // An account's invitation makes whoever takes it one of its people, the
@@ -739,6 +753,15 @@ func TestProjectMove(t *testing.T) {
 	// A project leaves a closed account.
 	expect(t, e.do("PATCH", "/api/v1/admin/accounts/"+testAccount, adminAuth(), map[string]any{"closed": true}),
 		http.StatusOK, "")
+	// To a closed account where it is: nothing written, moved false; to
+	// one the mover may not use still 404.
+	resp = move(w.aa, testAccount)
+	expect(t, resp, http.StatusOK, "")
+	if out := decode[projectMoveAnswer](t, resp); out.Moved || out.From.Name != testAccount ||
+		out.Account.Name != testAccount || out.MovedAt == "" {
+		t.Fatalf("to the closed account where it is %+v", out)
+	}
+	expect(t, move(w.pi, testAccount), http.StatusNotFound, errBody("no such account"))
 	expect(t, move(w.op, "default"), http.StatusOK, "")
 	expect(t, move(w.op, testAccount), http.StatusConflict, "")
 
@@ -801,6 +824,17 @@ func TestProjectAccountWithoutRow(t *testing.T) {
 	}](t, resp)
 	if pa.Account.Name != "default" || len(pa.Moves) != 1 || pa.Moves[0].From != nil || pa.Moves[0].By.Name != "FeRun" {
 		t.Fatalf("account %+v", pa)
+	}
+	// To default, where it is: no row written.
+	resp = e.serve(as(w.aa, testProject, "POST", "/api/v1/project/move", map[string]string{"account": "default"}))
+	expect(t, resp, http.StatusOK, "")
+	if out := decode[projectMoveAnswer](t, resp); out.Moved || out.From.Name != "default" {
+		t.Fatalf("to default %+v", out)
+	}
+	var n int
+	if err := e.d.Pool.QueryRow(context.Background(), "SELECT count(*) FROM project_accounts WHERE project_id = $1",
+		testProject).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("%d rows, %v", n, err)
 	}
 	expect(t, e.serve(as(w.aa, testProject, "POST", "/api/v1/project/move", map[string]string{"account": testAccount})),
 		http.StatusOK, "")
