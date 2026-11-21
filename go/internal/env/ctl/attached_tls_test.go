@@ -106,9 +106,16 @@ func TestAttachedTLSBindings(t *testing.T) {
 	}
 	// The addon admits the sandbox's workload as svc.
 	own := model.SandboxWorkloadGroupID(sb.ID.String())
+	// The valkey addon's tls step may run after postgres': the last of
+	// postgres' own is the one that counts.
 	eventually(t, 20*time.Second, "the sandbox's grant", func() bool {
-		s := execs.step("tls")
-		return len(s) > 0 && strings.Contains(s[len(s)-1].Env["FERUN_PG_IDENT"], `OU=`+own+`$"  svc`)
+		ident := ""
+		for _, c := range execs.step("tls") {
+			if v, ok := c.Env["FERUN_PG_IDENT"]; ok {
+				ident = v
+			}
+		}
+		return strings.Contains(ident, `OU=`+own+`$"  svc`)
 	})
 
 	// A second attached service in the sandbox: valkey's name sorts first,
