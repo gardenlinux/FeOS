@@ -38,7 +38,7 @@ func TestKafkaEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kc, err := kafka.New(cfg.KafkaBrokers)
+	kc, err := kafka.New(cfg.KafkaBrokers, kafka.Auth{})
 	if err != nil {
 		t.Fatal(err)
 	}

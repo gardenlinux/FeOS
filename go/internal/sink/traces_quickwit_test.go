@@ -42,7 +42,7 @@ func TestTraceIndexQuickwit(t *testing.T) {
 	defer cancel()
 	prefix := fmt.Sprintf("test-traces-%d", time.Now().UnixNano())
 	id := quickwit.TraceIndexID(prefix, 1)
-	kc, err := kafka.New(strings.Split(brokers, ","))
+	kc, err := kafka.New(strings.Split(brokers, ","), kafka.Auth{})
 	if err != nil {
 		t.Fatal(err)
 	}
