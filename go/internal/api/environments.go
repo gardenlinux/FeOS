@@ -422,11 +422,42 @@ func (s *server) cloneEnv(w http.ResponseWriter, r *http.Request) error {
 		req = envs.CloneRequest{Name: q.Get("name"), ID: q.Get("id"), Deployment: deployment, Spec: doc,
 			Author: q.Get("author")}
 	}
-	st, err := s.deps.Environments.Clone(r.Context(), projectOf(r), r.PathValue("env"), req, format)
+	ref := r.PathValue("env")
+	// A clone that copies secrets or credentials hands their values to an
+	// environment its maker writes: that needs write on the source too, so
+	// that a reader of a protected environment (ADR 0060) takes none.
+	if cloneCopies(req) {
+		t, _ := auth.ProjectFrom(r.Context())
+		if !t.EveryEnv(write) {
+			id, err := s.envRef(r, t, ref)
+			if err != nil {
+				return err
+			}
+			if err := allowEnvID(t, id, write); err != nil {
+				return err
+			}
+			ref = id.String()
+		}
+	}
+	st, err := s.deps.Environments.Clone(r.Context(), projectOf(r), ref, req, format)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusCreated, st)
+}
+
+// cloneCopies reports whether a clone copies a secret or a credential of
+// its source.
+func cloneCopies(req envs.CloneRequest) bool {
+	if len(req.Credentials) > 0 {
+		return true
+	}
+	for _, sec := range req.Secrets {
+		if sec.Copy {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *server) listSecrets(w http.ResponseWriter, r *http.Request) error {
