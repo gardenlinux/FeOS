@@ -66,6 +66,8 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0057](0057-the-spec-is-one-format-for-every-caller.md) | The spec is one format for every caller: a published module, JSON or YAML | Proposed |
 | [0058](0058-a-spec-says-what-its-code-expects-of-a-secret.md) | A spec says what its code expects of a secret, and the plan checks it | Proposed |
 | [0059](0059-a-tenant-is-on-an-account.md) | A tenant is on an account, which says whom its use is charged to | Proposed |
+| [0060](0060-a-protected-environment-is-changed-by-a-grant-on-itself.md) | A protected environment is changed by a grant on itself, and by an integration only for a person | Proposed |
+| [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project | Proposed |
 
 ## Rules
 

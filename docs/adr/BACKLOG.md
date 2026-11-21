@@ -275,7 +275,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0056
 
-- ADR 0056: an environment that a tenant's grant does not reach, where only grants on it count, so that an integration with `write` on a tenant stays out of production.
+- ADR 0056: proof that the person an integration names asked, for the changes that need one: the person's own token passed on, or exchanged for one bound to the call.
+- ADR 0056: an integration that admits visitors of its own, people who hold no role in the tenant, as an access provider by its registration (ADR 0054).
 - ADR 0056: a grant asked for from the integration's side: a link into the console that names the integration and a role, and a tenant made and granted in one step.
 
 ## ADR 0057
@@ -297,3 +298,12 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0059: accounts people make themselves, with a means of payment, for an installation that serves the public.
 - ADR 0059: an account's admin suspends or deletes a tenant on it.
 - ADR 0059: an account's members filled from the provider's claims, a group or a cost centre.
+
+## ADR 0060
+
+- ADR 0060: an integration that changes a protected environment by itself, an agent that answers an incident at night: what it may do there, how often, and who hears of it.
+- ADR 0060: a change that needs two people, the one who asks for it and another who agrees.
+
+## ADR 0061
+
+- ADR 0061: the old routes and the old header answered beside the new for one release, for an installation with callers of its own.

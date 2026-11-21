@@ -8,7 +8,9 @@ develops and operates one application per tenant, is an
 operator, that signs in as itself with the shared provider's client
 credentials. It reaches a tenant only by a grant that the tenant's
 admin gives it, with the roles people have, and it is out when the
-grant goes. It makes and deletes no tenant. Whatever its role, it never
+grant goes. It makes and deletes no tenant. A call it makes for a
+person names that person and does what both may do: the lower of the
+two roles decides. Whatever its role and whomever it names, it never
 decides who else has access: members, grants and tenant tokens are not
 its to change. `write` then works inside a tenant, and `admin` decides
 what the outside sees of it.
@@ -39,11 +41,14 @@ a way for software to work in a tenant that is not its own, on the word
 of the people the tenant belongs to: they let it in, see that it is in,
 say how far, and put it out again.
 
-Two things shape that way. Some of a platform's users work in the
-platform alone and are to have no access at FeRun, so the platform
-cannot act with its users' rights. And a platform acts without a person
-in front of it, a poller, a build, an agent that answers an incident,
-so there is not always a person to act for.
+Two things shape that way. A platform's users are the people of the
+tenants it works in. A platform that kept a list of them, with roles of
+its own, would give a tenant two answers to who may do what, and FeRun
+could not see the platform's. So what a platform does for a person is
+bounded by that person's role at FeRun, and the platform needs no roles
+of its own. And a platform acts without a person in front of it, a
+poller, a build, an agent that answers an incident. There is not always
+a person to act for, so it needs a role that is its own.
 
 The shared provider knows such software already. FeCode, FeRun and
 FeChat are its clients (FeCode's ADR 0020), and a client gets a token
@@ -59,9 +64,8 @@ for itself there, without a person.
   principal, beside a person and a tenant token (ADR 0031).
 - An operator registers it, through the admin API and on the operators'
   pages: a name, which is unique and shown wherever it acts; a title
-  and a URL that tell the people who grant it what it is; the issuer
-  and subject its tokens carry; and, where it admits visitors, the
-  address at which it answers for them (below).
+  and a URL that tell the people who grant it what it is; and the
+  issuer and subject its tokens carry.
 - A registration reaches no tenant. An integration has no session and
   no console, is no member of a tenant and on no account (ADR 0059),
   takes no invitation, and makes and deletes no tenant.
@@ -82,10 +86,9 @@ for itself there, without a person.
 - A token whose subject is no registered integration opens nothing, a
   person's access token among them. This is not the door for a person's
   agents (backlog, ADR 0031).
-- An integration never acts in a person's name. It holds no token of a
-  person's, and what it does for one of its users it does itself, by
-  its own grant. Its users need no grant at FeRun, and no person's
-  access at FeRun is in software's hands.
+- It holds no token of a person's. Whom a call is made for it says with
+  the call (below), and the most it can do for anyone is what its own
+  grants give.
 - A call names its tenant in the request header, as a session does. A
   tenant that gave the integration no grant is an unknown tenant to it.
 - It reads the tenants that granted it, in the answer a session gets
@@ -104,22 +107,41 @@ for itself there, without a person.
   once.
 - Every view of who has access to a tenant shows its integrations
   beside its people and tokens, with their roles and who gave them.
+
+### A call names the person it is made for
+
+- A call an integration makes for a person names that person in a
+  request header, as it names its tenant: by their subject at the
+  provider that signs the integration's own tokens. It names nobody of
+  another issuer. A call that names nobody is the integration's own: a
+  poller, a build, an agent with no one in front of it.
+- For a call that names a person, the role on every scope is the lower
+  of two, the integration's and the person's. The call does what both
+  may do. Nothing an integration does for a person goes beyond its own
+  grant, and nothing beyond that person's.
+- A named person whom FeRun does not know, one who is disabled, and one
+  who holds no role where the call goes are answered as that person
+  would be: the tenant, or the environment, is unknown.
+- Asked with a person named, the answer about itself lists the tenants
+  in which both hold a role, and for each the two roles, on the tenant
+  and on its environments. A platform reads there what a person sees
+  and may do, and keeps no members and no roles of its own.
 - ferund records the integration as the principal of what it changes,
-  beside the free `author` it sends, in which a platform names its own
-  user or the agent that acted.
-- Who of an integration's own users may do what within the grant is the
-  integration's to decide. FeRun knows the integration, never its
-  users.
+  the person it named, and the free `author` it sends, in which a
+  platform names the session or the agent that acted.
+- Naming a person is the integration's word. FeRun holds the
+  integration's signature and no proof that the person asked. A named
+  person therefore narrows a call and never widens it.
 
 ### An integration acts and never decides who acts
 
-- Whatever its role, an integration changes no principal of a tenant:
-  no member, no invitation, no tenant token, and no grant on the tenant
-  or an environment. Of its own grants it may give one up and nothing
-  more. It reads what every member reads: the tenant with its limits
-  and its use, and its members with their roles, each person with
-  issuer and subject, so that software on the same provider finds its
-  own users among them.
+- Whatever its role and whomever it names, an integration changes no
+  principal of a tenant: no member, no invitation, no tenant token, and
+  no grant on the tenant or an environment. Of its own grants it may
+  give one up and nothing more. It reads what every member reads: the
+  tenant with its limits and its use, and its members with their roles,
+  each person with issuer and subject, so that software on the same
+  provider finds its own users among them.
 - So it cannot raise its role, let anyone else in, or mint a key that
   outlasts it. `admin` means for an integration what it means for a
   person without that part.
@@ -149,27 +171,13 @@ for itself there, without a person.
   - `write` on the tenant: it also makes, clones and deletes
     environments, and in each one plans and deploys, reverts, sets
     secrets, runs jobs and sandboxes, restarts, and mints route tokens;
+    a protected environment it reads (ADR 0060);
   - `admin` on an environment: it also publishes that one, `public`
     with its access and host label, and binds domains to it;
   - `admin` on the tenant: it also claims and deletes domains and sets
     the tenant's access providers;
   - whatever its role, never: members, invitations, grants, tenant
     tokens, the tenant's account, making or deleting a tenant.
-
-### An integration answers for its own visitors
-
-- An integration registered with a visits address is an access provider
-  (ADR 0054) in every tenant that grants it, under its own name and
-  without being made there. An environment of such a tenant names it
-  as it names a provider of kind `tenant`.
-- The integration reads, accepts and rejects the challenges of those
-  environments as itself, whatever its role in the tenant, and ferund
-  asks its address at a renewal as it asks a tenant's service.
-- Its name is reserved as `ferun` is: no tenant makes a provider of a
-  registered integration's name, and no integration is registered under
-  a name a tenant's provider holds.
-- The provider goes with the grant. An environment that still names it
-  admits no visitor until its admin names another.
 
 ## Alternatives considered
 
@@ -191,12 +199,23 @@ for itself there, without a person.
   nobody's: no person to count them for, to answer for their cost or to
   take them out of the software's hands, and one credential would be
   `admin` on all of them.
-- **Acting in the user's name**, each call with a token of the person
-  in front of the software. Every user would need a grant at FeRun,
-  which is what users of the platform alone are not to have; the
-  platform's own rules, an approval or a protected environment, would
-  have to be said in FeRun's roles; and its work without a person would
-  have no name to act in.
+- **An integration that acts by its own grant alone**, for users FeRun
+  never hears of. The third draft. The platform then keeps members and
+  roles of its own: a second answer to who may do what in a tenant,
+  which holds only for who comes through the platform, and rules for
+  production that the tenant's own console passes by.
+- **The person's own token on every call**, in place of a name. FeRun
+  would have proof that the person is there. The platform would hold
+  its users' tokens for FeRun's whole API and keep them fresh for work
+  that goes on after the person left, an agent's turn or a build.
+  Naming is weaker and says so; a proof for the changes that need one
+  is backlog.
+- **The person's role alone**, or the higher of the two. The
+  integration would act beyond what the tenant's admin granted it.
+- **An integration as an access provider**, which admits its own users
+  as an environment's visitors (ADR 0054). Its users are the tenant's
+  people, and the provider `ferun` admits those. A platform whose
+  visitors are others is backlog.
 - **An operator's token in the software.** It reaches every tenant of
   the installation. A flaw in the software would be a flaw of the
   platform.
@@ -223,16 +242,20 @@ for itself there, without a person.
 ## Consequences
 
 - ferund gains the integrations with their routes in the admin API, a
-  kind of principal in a grant, and a bearer that is the provider's
-  signed token, verified with the keys it already reads and without a
-  new dependency. The routes that change principals refuse an
-  integration by its kind, and the routes' role list and its test say
-  so. Route tokens move to `write` on the environment; route tokens and
-  sandbox tokens record who minted them. The members' list gains each
-  person's issuer and subject.
+  kind of principal in a grant, a bearer that is the provider's signed
+  token, verified with the keys it already reads and without a new
+  dependency, and the header that names a person, with the lower of
+  two roles taken where a role is computed. The routes that change
+  principals refuse an integration by its kind, and the routes' role
+  list and its test say so. Route tokens move to `write` on the
+  environment; route tokens and sandbox tokens record who minted them.
+  The members' list gains each person's issuer and subject, and the
+  record of a change the person it was made for.
 - The tenant answer the sink asks for (ADR 0026) is given for an
   integration as for a session: the tenant its header names, its role
-  there and the environments it reads.
+  there and the environments it reads, bounded by the person's where
+  the call names one. The sink passes that header on as it passes a
+  session's.
 - The provider has to issue a client an access token for itself, signed
   and with FeRun's API as its audience. FeCode ID does for a client set
   up for it, which is the token form of FeCode's ADR 0034 without its
@@ -241,38 +264,52 @@ for itself there, without a person.
 - A tenant's page of access lists integrations beside members and
   tokens. Adding one names its role and says in a line what `write`
   and `admin` let it do.
-- An integration with `write` on a tenant reaches every environment of
-  it, production among them, since a tenant's grant reaches them all.
-  What stands between its users and production are the integration's
-  own rules. An environment that a tenant's grant does not reach is
-  backlog.
-- `author` is the integration's word. FeRun vouches for the
-  integration, not for the person it names.
+- A platform in front of FeRun keeps no people. Who its users are in a
+  tenant and what each may do are the tenant's grants, and every one of
+  its users has signed in at FeRun once, to open an invitation, and may
+  work there directly with the same role.
+- `write` on a tenant changes every environment of it but a protected
+  one, which it reads. An integration changes a protected environment
+  only for a person, whatever its grant (ADR 0060).
+- The person named and `author` are the integration's word. FeRun
+  vouches for the integration and for the bound, not for the person's
+  asking.
 - A flaw in an integration reaches the tenants that grant it, as far as
   their admins said, and nothing else: no other tenant, no principal,
-  and nothing that outlasts the grant.
-- FeCode becomes an integration, and every project a tenant (FeCode's
-  ADR 0037): names, domain claims, streams, quotas and limits are then
-  the tenant's, and FeCode maps none of them. FeChat keeps its one
-  tenant and its token, and tenant tokens change in nothing.
+  and nothing that outlasts the grant. Within that it can name whom it
+  likes, so a grant is given to software that is trusted that far.
+- FeCode becomes an integration, every project a tenant and a project's
+  people the tenant's (FeCode's ADR 0037 and ADR 0040): names, domain
+  claims, streams, quotas, limits, members and roles are then the
+  tenant's, and FeCode maps none of them. Its access provider goes,
+  since the provider `ferun` admits the same people (ADR 0054). FeChat
+  keeps its one tenant and its token, and tenant tokens change in
+  nothing.
 - `docs/architecture/control-plane.md` describes the third principal,
-  its sign-in and what it never does. Tests cover a token for another
-  audience, an expired one, a subject that is no integration, a tenant
-  without a grant, each route of principals, and a minted token after
-  the grant is gone.
+  its sign-in, how it names a person and what it never does. Tests
+  cover a token for another audience, an expired one, a subject that is
+  no integration, a tenant without a grant, a named person with the
+  lower role, with none and unknown, each route of principals with an
+  admin named, and a minted token after the grant is gone.
 
 ## History
 
 Proposed on 2026-11-21, together with ADR 0059 and FeCode's ADR 0037;
 nothing of it is built. It amends ADR 0031 (the kinds of principal, and
-the role that mints route tokens), ADR 0043 (who mints a route token)
-and ADR 0054 (a provider that is an integration's).
+the role that mints route tokens) and ADR 0043 (who mints a route
+token).
 
-Two drafts of the same day were set aside. The first made such
+Three drafts of the same day were set aside. The first made such
 software a principal that made and held its tenants; the second let it
 make a tenant in a person's name and gave it an admin token of that
-tenant. Both began the tenant at the software. They gave way once it
-was said that FeRun is the base people come to first, with tenants on
-accounts, and a platform like FeCode an addition, some of whose users
-are never to act at FeRun themselves. That FeCode reaches no tenant
-but those it is let into was Malte's condition from the start.
+tenant. Both began the tenant at the software, and gave way once it was
+said that FeRun is the base people come to first, with tenants on
+accounts, and a platform like FeCode an addition. That FeCode reaches
+no tenant but those it is let into was Malte's condition from the
+start.
+
+The third (ff307feb) had the integration act by its own grant alone,
+for users FeRun never knew, and answer for them as an access provider.
+Malte saw in a second layer of rights in the platform the duality this
+change was to end: FeRun's three roles are the roles of a platform's
+users. Naming the person, and the lower of two roles, is how they are.
