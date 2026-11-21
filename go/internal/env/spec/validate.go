@@ -766,6 +766,10 @@ func (v *validator) httpSecretRef(path string, val EnvValue, pod bool) {
 	if pod {
 		v.httpRefs[name] = append(v.httpRefs[name], path)
 	}
+	if v.s.Secrets[name].Type == SecretTypeValue {
+		// The spec expects a value: the finding is the secret's (secrets).
+		return
+	}
 	if v.mode == ModeSpec {
 		v.warnf(path, "plan it for an environment, which has its HTTP secrets",
 			"a spec without an environment has no HTTP secret %s to look up", name)
@@ -788,16 +792,16 @@ func (v *validator) httpSecretRef(path string, val EnvValue, pod bool) {
 			name), "secret %s is a value: a key is an HTTP secret's reference", name)
 		return
 	}
-	v.errorf(path, "make it with PUT /api/v1/environments/{env}/secrets/"+name+" "+v.httpSecretToMake(name)+
+	v.errorf(path, "make it with PUT /api/v1/environments/{env}/secrets/"+name+" "+HTTPSecretToMake(v.s, name)+
 		", then plan again", "no HTTP secret %s", name)
 }
 
-// httpSecretToMake is the body of a PUT that makes the HTTP secret name
+// HTTPSecretToMake is the body of a PUT that makes the HTTP secret name
 // as the spec's code expects it (ADR 0058): its mode, the name mode
 // unless the spec says otherwise, and the forwarded host where the spec
 // says it.
-func (v *validator) httpSecretToMake(name string) string {
-	ref := v.s.Secrets[name]
+func HTTPSecretToMake(s Spec, name string) string {
+	ref := s.Secrets[name]
 	mode := ref.Mode
 	if mode == "" {
 		mode = SecretModeName

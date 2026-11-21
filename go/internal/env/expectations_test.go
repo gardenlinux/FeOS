@@ -78,7 +78,17 @@ func TestSecretExpectationsPlanned(t *testing.T) {
 	// Not copied, the missing secret's finding says what to make.
 	_, err = h.svc.Clone(ctx, projectA, "prod", CloneRequest{Name: "copy", Deployment: &a.Number,
 		Spec: json.RawMessage(withPin(`{"mode": "name", "forwardedHost": true}`))}, spec.FormatJSON)
-	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok || !strings.Contains(f.Remedy, `secrets: {"s4": {"copy": true}}`) {
+	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok ||
+		!strings.HasPrefix(f.Remedy, `pass secrets: {"s4": {"copy": true}}; the spec's code expects {"type": "http", `+
+			`"mode": "name", "forwardedHost": true`) {
 		t.Fatalf("clone without the secret: %s", describe(err))
+	}
+	// A YAML clone copies no secret, and says so.
+	_, err = h.svc.Clone(ctx, projectA, "prod", CloneRequest{Name: "copy", Deployment: &a.Number,
+		Spec: []byte(withPin(`{"mode": "name", "forwardedHost": true}`))}, spec.FormatYAML)
+	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok ||
+		!strings.HasPrefix(f.Remedy, `a YAML clone copies no secret: clone with JSON and pass secrets: {"s4": {"copy": true}}; `+
+			`the spec's code expects {"type": "http", "mode": "name", "forwardedHost": true`) {
+		t.Fatalf("YAML clone without the secret: %s", describe(err))
 	}
 }

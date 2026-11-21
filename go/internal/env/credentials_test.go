@@ -161,6 +161,12 @@ func TestCloneCopiesCredentials(t *testing.T) {
 			t.Fatalf("the finding %d times: %s", n, describe(err))
 		}
 	}
+	// A YAML clone copies no credential, and says so.
+	_, err = h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy"}, spec.FormatYAML)
+	if f, ok := findingAt(err, "bindings.pay.credentialRef.name"); !ok || f.Remedy !=
+		`a YAML clone copies no credential: clone with JSON and pass credentials: {"pay": {"copy": true}}` {
+		t.Fatalf("a YAML clone without the credential: %s", describe(err))
+	}
 	_, err = h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy",
 		Credentials: map[string]CloneCredential{"pay": {Copy: true}, "nope": {Copy: true}}}, spec.FormatJSON)
 	if _, ok := findingAt(err, "credentials.nope"); !ok {

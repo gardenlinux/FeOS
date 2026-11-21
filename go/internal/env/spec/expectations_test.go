@@ -211,3 +211,22 @@ func TestNormalisedExpectations(t *testing.T) {
 	checkFindings(t, Validate(vc, carried, nil), []expect{e("secrets.s4.mode", "(version 2) is called in the "+
 		"intercept mode; the spec's code expects the name mode")})
 }
+
+// A spec that expects a value and references it by a key has one finding,
+// the secret's: the reference does not add a remedy that says otherwise,
+// whether the environment has the secret as a value or not at all.
+func TestValueExpectedByAKey(t *testing.T) {
+	s := mustParse(t, `{"services": {"web": {"image": "ghcr.io/acme/web:1",
+  "env": {"A": {"secret": "token", "key": "url"}, "B": {"secret": "s9", "key": "host"}}}},
+  "secrets": {"token": {"type": "value"}, "s9": {"type": "value"}}}`)
+	fs := Validate(newHTTPVC(ModeApply), s, nil)
+	checkFindings(t, fs, []expect{
+		e("secrets.s9.type", "the spec expects a value secret and a variable references s9 by its url or host"),
+		e("secrets.token.type", "the spec expects a value secret and a variable references token by its url or host"),
+	})
+	for _, f := range fs {
+		if strings.Contains(f.Remedy, `"type": "http"`) {
+			t.Fatalf("remedy that makes an HTTP secret: %+v", f)
+		}
+	}
+}

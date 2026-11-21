@@ -95,4 +95,10 @@ func TestYAMLSpecs(t *testing.T) {
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "services.api.env.TOKEN", "no secret token") {
 		t.Fatalf("empty YAML clone %v", err)
 	}
+	for _, f := range ise.Findings {
+		if f.Path == "services.api.env.TOKEN" &&
+			f.Remedy != `a YAML clone copies no secret: clone with JSON and pass secrets: {"token": {"copy": true}} or a value` {
+			t.Fatalf("empty YAML clone: remedy %q", f.Remedy)
+		}
+	}
 }

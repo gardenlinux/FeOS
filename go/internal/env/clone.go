@@ -189,6 +189,16 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 	return b, fs, err
 }
 
+// cloneRemedy is the remedy of a secret or credential the new
+// environment lacks: pass, the JSON field that copies it; a YAML clone
+// has no such field and copies none (ADR 0057).
+func cloneRemedy(format spec.Format, what, pass string) string {
+	if format == spec.FormatYAML {
+		return "a YAML clone copies no " + what + ": clone with JSON and " + pass
+	}
+	return pass
+}
+
 // clone is Clone.
 func (s *Service) clone(ctx context.Context, project, ref string, req CloneRequest, format spec.Format) (EnvStatus,
 	error) {
@@ -414,7 +424,8 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 				noCred[path] = true
 				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: path,
 					Problem: "the new environment has no credential " + ref.Name,
-					Remedy:  fmt.Sprintf(`pass credentials: {"%s": {"copy": true}}`, ref.Name)})
+					Remedy: cloneRemedy(format, "credential",
+						fmt.Sprintf(`pass credentials: {"%s": {"copy": true}}`, ref.Name))})
 			}
 		}
 	}
@@ -430,9 +441,13 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 					continue
 				}
 				if slices.Contains(spec.ReferencedHTTP(sp), name) {
+					if sp.Secrets[name].Type == spec.SecretTypeValue {
+						continue // the plan's finding at secrets.<name>.type says it
+					}
 					fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: refs[name][0],
 						Problem: "the new environment has no HTTP secret " + name,
-						Remedy:  fmt.Sprintf(`pass secrets: {"%s": {"copy": true}}`, name)})
+						Remedy: cloneRemedy(format, "secret", fmt.Sprintf(`pass secrets: {"%s": {"copy": true}}`, name)) +
+							"; the spec's code expects " + spec.HTTPSecretToMake(sp, name)})
 					// Validate says no more of it.
 					for _, path := range refs[name] {
 						noCred[path] = true
@@ -441,7 +456,7 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 				}
 				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: refs[name][0],
 					Problem: "the new environment has no secret " + name,
-					Remedy:  fmt.Sprintf(`pass secrets: {"%s": {"copy": true}} or a value`, name)})
+					Remedy:  cloneRemedy(format, "secret", fmt.Sprintf(`pass secrets: {"%s": {"copy": true}} or a value`, name))})
 				// Validate says no more of it.
 				vcSecrets[name] = spec.SecretInfo{Latest: 1, Versions: []int{1}}
 			}
