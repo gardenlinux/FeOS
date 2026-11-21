@@ -14,7 +14,7 @@ pod (OTel SDK) ──OTLP/gRPC :4317, OTLP/HTTP protobuf :4318──▶ feosd at
                                    │ the pod by its source address, its ferun.* labels stamped
 feosd (node) ──OTLP TraceService/Export (mTLS, node cert)──▶ ferun-sink ──▶ PostgreSQL `trace_usage` (quota)
 ferun-ingress ──TraceService/Export (mTLS, ingress cert)──▶     │   └──▶ Kafka ferun-traces-v4-<days>d ──Kafka source──▶ Quickwit index of that name
-projects (FeCode) ── GET /api/v1/jaeger/api/… (Bearer) ──────────┤
+projects (FeCode) ── GET /api/v1/jaeger/api/… (Bearer) ─────────┤
 ferund ── GET /api/v1/traffic (the caller's Bearer) ────────────┘
 ```
 
@@ -229,15 +229,15 @@ indexes are, with a commit interval of 5 s. `N` is the
 mapping's version (`quickwit.TraceMappingVersion`): a changed mapping is
 a new index, and reads search `<prefix>-*`, every version, until the old
 one ages out. Spans are partitioned as the log indexes' lines are, by
-`hash_mod((project, environment, job), --index-partitions)` (16), and
-`project`, `environment` and `job` are tag fields, so a read of one
+`hash_mod((tenant, environment, job), --index-partitions)` (16), and <!-- KEEP-TENANT: Quickwit's stored name -->
+`tenant`, `environment` and `job` are tag fields, <!-- KEEP-TENANT: Quickwit's stored name --> so a read of one
 environment's spans opens only its partition's splits. A document is a
 span:
 
 | field | type | from |
 |---|---|---|
 | `ts` | datetime (ns), the timestamp field, fast | `start_time_unix_nano` |
-| `project` | raw text, the tag field | `ferun.project` |
+| `tenant` | raw text, the tag field: the project, under the earlier word of ADR 0061, as `release` | `ferun.project` (`ferun.tenant` from a pod placed before) | <!-- KEEP-TENANT: Quickwit's stored name -->
 | `environment`, `kind`, `object`, `instance`, `job`, `source`, `pod`, `node` | raw text | the `ferun.*` attributes; `source` `ingress` or `egress` as `ferun.source` says, else `container` |
 | `replica`, `release`, `attempt` | u64 | the `ferun.*` attributes; `release` is the deployment, under the label's earlier word, as the log index has it (sink.md) |
 | `trace_id`, `span_id`, `parent_span_id` | raw text, lower-case hex, `trace_id` fast | the span |
@@ -430,7 +430,7 @@ counted twice.
 ## FeCode
 
 FeCode reads with its project token (project `fecode`) and lets only a
-project's members read its environments' traces (as its logs, FeCode
+FeCode project's members read its environments' traces (as its logs, FeCode
 ADR 0009 §12): its backend passes a member's request on to the sink with
 the environment's FeRun ID as `environment` set by FeCode, never the
 caller's. A trace ID in the Logs tab (a request's, a line's) opens the

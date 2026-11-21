@@ -52,7 +52,7 @@ Both products run on one unit: the **pod**, a Firecracker microVM that runs
                                   │
   ┌───────────────────────────────┴───────────────────────────────┐
   │ control plane: FeRun, ferund in replicas                      │
-  │ projects, registry, placement, idle policies, front doors      │
+  │ projects, registry, placement, idle policies, front doors     │
   └───────────────────────────────┬───────────────────────────────┘
                                   │ feos.* APIs over mTLS
                                   │ (the node connects out)

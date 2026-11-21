@@ -52,8 +52,8 @@ Default hosts under one zone share a cookie scope. A natural label
 `<environment>-<project>` with the project's dots as hyphens reads the
 same for different pairs: `shop` of `acme.io`, `shop` of `acme-io` and
 `shop-acme` of `io`; whoever published first would keep the label, so
-another project could hold the host that reads as yours. A project that is
-a product of its own, with one project per project, wants to name its
+another project could hold the host that reads as yours. A FeRun project that is
+a product of its own, with projects of its own in it, wants to name their
 hosts: a production at `<project>.<zone>` and every other environment at
 `<environment>--<project>`.
 

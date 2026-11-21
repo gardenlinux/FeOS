@@ -28,8 +28,8 @@ way to close it is not to publish it, which leaves it without a host.
 
 Three callers want it closed in three ways. A platform built on FeRun
 gives its projects environments, and wants a project's environments open
-to the project's members: FeCode is one project for all its projects, and
-its people, its projects and its sign-in are its own, not FeRun's
+to the project's members: FeCode is one FeRun project for all of its own
+projects, and its people, its projects and its sign-in are its own, not FeRun's
 persons and grants (ADR 0031), even where both use one issuer. A project
 people made wants its stage open to the people who work on it, who hold
 grants. And an application that has no sign-in of its own wants one in

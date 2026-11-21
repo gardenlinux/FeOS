@@ -13,7 +13,7 @@ guest ──CRI lines──▶ logs/container.log
 feosd (node) ──OTLP LogsService/Export, SinkService (mTLS, node cert)──▶ ferun-sink ──▶ PostgreSQL `sink` (streams, positions, quota)
      ▲ TelemetryResponse.sink_endpoint                                       │   └──▶ Kafka topic ferun-logs-v5-<days>d ──Kafka source──▶ Quickwit index of that name
 ferund ──CreatePodRequest.log_labels──▶ feosd                                │
-     ◀── GET /api/v1/project (token or session) ──────────────────────────────┤
+     ◀── GET /api/v1/project (token or session) ─────────────────────────────┤
 readers ── GET /api/v1/logs, /api/v1/log-streams (Bearer, or cookie) ────────┘
 ```
 
@@ -344,7 +344,8 @@ index API) with its retention, `--index-commit-timeout` (10 s) as its
 commit interval and `--index-partitions` (16, at most 200) partitions,
 and the index's one Kafka source `kafka` on the topic
 (`auto.offset.reset` earliest; a session of 10 s). A record is a line as
-the index's document, JSON: `ts` (ns, the time field), `project`,
+the index's document, JSON: `ts` (ns, the time field), `tenant` (the <!-- KEEP-TENANT: Quickwit's stored name -->
+project: the field keeps the earlier word of ADR 0061, as `release` does),
 `stream` (the ID), `environment`, `kind`, `object`, `replica`,
 `release` (the stream's deployment: the field keeps the label's earlier
 word, since a field of its own is a new mapping, so a new index and
@@ -368,12 +369,14 @@ one (stream, offset) once. `--kafka-brokers` names Kafka's brokers
 (also the sources'), `--index-search-url` Quickwit's REST API. The hot stage of
 before (`log_batches`, `log_lines`) went on 2026-10-31 (migration `0008`).
 
-**Partitions.** One project may hold many projects' environments (FeCode's
-does), so an index's lines are hashed into partitions by their project,
-environment and job (`partition_key: hash_mod((project,environment,job),
-<--index-partitions>)`), and a split holds one partition's lines: a
-commit writes a split per partition that got lines, and merges keep
-them apart. `project`, `environment` and `job` are tags (`tag_fields`):
+**Partitions.** One project may hold the environments of many
+applications (FeCode's one project at FeRun holds those of all of
+FeCode's projects), so an index's lines are hashed into partitions by
+their project, environment and job (`partition_key:
+hash_mod((tenant,environment,job), <--index-partitions>)`), and a split <!-- KEEP-TENANT: Quickwit's stored name -->
+holds one partition's lines: a commit writes a split per partition that
+got lines, and merges keep them apart. `tenant`, `environment` and `job` <!-- KEEP-TENANT: Quickwit's stored name -->
+are tags (`tag_fields`):
 Quickwit records a split's values of each while they are fewer than
 1,000, and a search for an environment or a job reads only the splits
 that have it. More partitions mean fewer environments a split and more,
@@ -383,7 +386,7 @@ smaller splits; Quickwit's own bound is 200 (`max_num_partitions`).
 field, and a changed mapping only applies to new splits, so the index
 configuration has a version in the index's name
 (`quickwit.MappingVersion`): version 1, `<prefix>-<days>d`, had
-`project` as its only tag and no partitions; version 2 is the above. A
+`tenant` as its only tag <!-- KEEP-TENANT: Quickwit's stored name --> and no partitions; version 2 is the above. A
 new version's indexes take every new line; a read searches
 `<prefix>-*`, the old and the new together (the fields it reads are the
 same in both, `ts` a datetime in each, so they sort as one), and a

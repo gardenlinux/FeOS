@@ -57,8 +57,8 @@ to whoever names it:
   says nothing about next month's replica, revert, or re-create after a
   lost node.
 
-The boundary is not FeRun's project: FeRun's one project is FeCode, which
-serves every project and person. It is the credentials a create brings:
+The boundary is not FeRun's project: FeCode's one project at FeRun
+serves all of FeCode's projects and people. It is the credentials a create brings:
 whoever may pull an image with them may run it, and no one else.
 
 ## Decision
@@ -136,7 +136,8 @@ whoever may pull an image with them may run it, and no one else.
   month's replica of last month's deployment. A project's job (ADR 0041)
   brings its image credentials in the call.
 - **No credentials of the project, and no matching by host.** A project
-  serves many: FeCode serves every project. A credential of the project
+  serves many: FeCode's one project at FeRun serves all of FeCode's
+  projects. A credential of the project
   chosen by the image's registry would ask for one project's image with
   another's credentials, the crossing this ADR prevents.
 
@@ -242,9 +243,9 @@ whoever may pull an image with them may run it, and no one else.
   ask twice for one answer. This was the first text of this ADR; the
   code pins a digest reference as written.
 - **The project as the boundary**, its credentials chosen by the image's
-  host as Docker's `config.json` does (this ADR's first draft): FeRun's
-  one project serves every project, so one project's image would be asked
-  for with another's credentials.
+  host as Docker's `config.json` does (this ADR's first draft): FeCode's
+  one project at FeRun serves all of FeCode's projects, so one of them
+  would be asked for its image with another's credentials.
 - **The node asks** before it attaches a layer, or checks a grant that
   `ferund` signed: the node would need every create's credentials, even
   for a layer it has, and `ferund`, its only caller, may create any pod

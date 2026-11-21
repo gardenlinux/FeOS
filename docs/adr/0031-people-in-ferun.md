@@ -35,7 +35,7 @@ from a CLI or a CI. Without people in FeRun only the first exists:
   baseline, nothing about sandboxes or environments. ADR 0018 deferred
   the MCP tools and their grants.
 - The products on FeRun keep their people apart themselves. FeCode is
-  one project, with its projects as labels and its own members and
+  one FeRun project, with its own projects as labels and its own members and
   roles; FeChat holds one project's token. FeCode's ADR 0012 rejected an
   authorization model in FeRun for the registry, because FeRun had none.
 
@@ -336,7 +336,7 @@ Two things outside FeRun shape the decision:
 - FeCode and FeChat change nothing: their tokens are admins of their
   projects. FeCode's ADR 0012 still holds for the registry, and FeRun's
   grants reach none of FeCode's projects, which stay labels in FeCode's
-  project.
+  one project at FeRun.
 - The console works with the session alone; a person with grants on
   environments alone opens a project at those environments. The sink
   resolves sessions and environment grants through ferund. `/mcp` stays

@@ -23,8 +23,8 @@ that serves one project, a team's pipeline or a script. An operator's
 token reads and changes every project of the installation.
 
 A platform that serves many customers has neither. FeCode took the
-first and put every project into its one project, and drew the projects'
-borders there again, one feature at a time: it names every environment
+first and put all of its projects into its one FeRun project, and drew
+their borders there again, one feature at a time: it names every environment
 by its project, maps domain claims to projects because the rule between
 projects does not separate them, filters the sink's streams by
 environment, answers the ingress as one access provider for every
@@ -278,8 +278,9 @@ for itself there, without a person.
   their admins said, and nothing else: no other project, no principal,
   and nothing that outlasts the grant. Within that it can name whom it
   likes, so a grant is given to software that is trusted that far.
-- FeCode becomes an integration, every project a project and a project's
-  people the project's (FeCode's ADR 0037 and ADR 0040): names, domain
+- FeCode becomes an integration, every FeCode project a FeRun project
+  and a FeCode project's people the FeRun project's (FeCode's ADR 0037
+  and ADR 0040): names, domain
   claims, streams, quotas, limits, members and roles are then the
   project's, and FeCode maps none of them. Its access provider goes,
   since the provider `ferun` admits the same people (ADR 0054). FeChat

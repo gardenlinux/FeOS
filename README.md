@@ -30,7 +30,7 @@ FeOS is written in Rust, statically linked against musl; FeRun in Go.
                                   │
   ┌───────────────────────────────┴───────────────────────────────┐
   │ control plane: FeRun, ferund in replicas over PostgreSQL      │
-  │ projects, sandboxes, environments, placement, idle policies    │
+  │ projects, sandboxes, environments, placement, idle policies   │
   └───────────────────────────────┬───────────────────────────────┘
                                   │ feos.* gRPC APIs over mTLS
                                   │ (the node connects out)

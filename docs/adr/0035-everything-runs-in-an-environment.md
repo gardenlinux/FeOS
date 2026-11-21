@@ -186,8 +186,8 @@ the same rules for network, names and access.
 - A reader of an environment sees the logs and traces of the sandboxes
   and jobs that run in it.
 - FeCode makes a workspace's dev environment before its sandbox and the
-  sandbox in it, reaching all of it; a project's own sandbox and its
-  build jobs get environments of the project, and need only the
+  sandbox in it, reaching all of it; a FeCode project's own sandbox
+  and its build jobs get environments of FeCode's project at FeRun, and need only the
   internet, which `egress` gives.
 
 ## History

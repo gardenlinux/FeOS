@@ -31,8 +31,8 @@ stop for that, and its addresses do not change.
 
 Software in front of FeRun needs the same answer and has none of its
 own. FeCode works in projects that exist, by a grant (ADR 0056), and
-what it runs for a project, its builds and its workspaces' sandboxes,
-runs in the project's project. If the project says whom its use is
+what it runs for one of its projects, its builds and its workspaces'
+sandboxes, runs in that project at FeRun. If the project says whom its use is
 charged to, a platform in front needs no accounts, no prices and no
 billing; if it does not, every platform invents them.
 
@@ -172,7 +172,7 @@ billing; if it does not, every platform invents them.
 - What is built for a project later, a store, a queue, a report, names
   the project and looks its account up. Whatever carried the account in
   a name or a key would break the move.
-- A platform on FeRun keeps no accounts. FeCode's projects are projects
+- A platform on FeRun keeps no accounts. FeCode's projects are FeRun projects
   on the accounts of those who made them, and what FeCode runs for a
   project is that project's use (FeCode's ADR 0037). FeCode itself is
   not what is charged.
