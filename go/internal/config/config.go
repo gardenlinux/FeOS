@@ -212,8 +212,10 @@ type Config struct {
 	// label without "--", as FeCode does for one of its projects'
 	// production (<FeCode project>.<apps zone>); nil: no project may.
 	AppsZoneOwners []string
-	// ProjectCreation says who makes projects with POST /api/v1/projects
-	// (ADR 0031): "people" (every signed-in person) or "operators".
+	// ProjectCreation says whether the account default is open (ADR 0059,
+	// ADR 0031): "people", every signed-in person may put projects on it;
+	// "operators", only its people and the operators. A member of another
+	// account makes projects on that one either way.
 	ProjectCreation string
 	// ProjectsPerPerson bounds the projects one person makes; 0: no bound.
 	ProjectsPerPerson int
@@ -466,7 +468,7 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.Var((*listValue)(&c.AppsZoneOwners), "apps-zone-owners",
 		"projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without \"--\", <label>.<apps zone> (ADR 0021); empty: none may")
 	fs.StringVar(&c.ProjectCreation, "project-creation", c.ProjectCreation,
-		"who makes projects with POST /api/v1/projects (ADR 0031): people (every signed-in person) or operators")
+		"whether the account default is open (ADR 0059): people (every signed-in person may make projects on it) or operators (only its people and the operators); a member of another account makes projects on that one either way")
 	fs.IntVar(&c.ProjectsPerPerson, "projects-per-person", c.ProjectsPerPerson,
 		"the most projects one person may make that are not being deleted; 0: no bound (operators are never bound)")
 	fs.IntVar(&c.ProjectDefaultSandboxes, "project-default-sandboxes", c.ProjectDefaultSandboxes,
@@ -645,7 +647,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.ProjectCreation != "people" && c.ProjectCreation != "operators" {
-		bad("--project-creation must be people or operators, got %q", c.ProjectCreation)
+		bad("--project-creation (whether the account default is open) must be people or operators, got %q", c.ProjectCreation)
 	}
 	if c.ProjectsPerPerson < 0 {
 		bad("--projects-per-person must not be negative")
