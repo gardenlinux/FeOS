@@ -332,15 +332,45 @@ type Route struct {
 // the pinned version's upstream (canonical) and mode: what makes a pod
 // another, since its pods resolve the secret's name in the name mode and
 // the upstream's host in the intercept mode.
+//
+// Written by a caller, Type, Mode and ForwardedHost are what the spec's
+// code expects of the secret (ADR 0058), and the plan refuses a version
+// of another kind, mode or forwarded host; what is left out is not
+// expected. Version and Upstream are the place's: a spec carried to
+// another environment leaves them behind (Portable).
 type SecretRef struct {
-	Version  int    `json:"version,omitempty"`
-	Type     string `json:"type,omitempty"`
+	Version int `json:"version,omitempty"`
+	// Type is "", SecretTypeValue or SecretTypeHTTP: the kind the code
+	// expects; normalised, "http" for an HTTP secret's pin, and a written
+	// "value" is kept.
+	Type string `json:"type,omitempty"`
+	// Upstream is the pinned version's origin; written, it is compared
+	// with the version's.
 	Upstream string `json:"upstream,omitempty"`
-	Mode     string `json:"mode,omitempty"`
+	// Mode is "", SecretModeName or SecretModeIntercept: the mode the
+	// code expects of an HTTP secret; normalised, the pinned version's.
+	Mode string `json:"mode,omitempty"`
+	// ForwardedHost, in the name mode only, is whether the code expects
+	// the node to forward the host; nil: not expected. Normalised it is
+	// the expectation written, else left out.
+	ForwardedHost *bool `json:"forwardedHost,omitempty"`
 }
 
-// SecretTypeHTTP is the Type of an HTTP secret's pin (ADR 0055).
-const SecretTypeHTTP = "http"
+// The kinds of a secret a pin may expect (SecretRef.Type): a value,
+// handed to the containers that reference it, and an HTTP API whose key
+// only the node uses (ADR 0055).
+const (
+	SecretTypeValue = "value"
+	SecretTypeHTTP  = "http"
+)
+
+// The modes of an HTTP secret (SecretRef.Mode, ADR 0055): the code calls
+// http://<name> (the name mode, the default) or the API's own host over
+// TLS (intercept).
+const (
+	SecretModeName      = "name"
+	SecretModeIntercept = "intercept"
+)
 
 // IsHTTP reports whether the pin is an HTTP secret's.
 func (r SecretRef) IsHTTP() bool { return r.Type == SecretTypeHTTP }

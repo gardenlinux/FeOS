@@ -149,9 +149,10 @@ func secretRefPaths(sp spec.Spec) map[string][]string {
 // its attached services (and the routes to them), which run in a
 // sandbox of the source, without its routes that have a host, which is
 // the source's (ADR 0045: the clone has no domain and no label yet), and
-// with its secrets and its bindings' credentials pinned to nothing (the
-// clone's own versions are pinned, and a credential's upstream and mode
-// are its version's).
+// carried to the clone (spec.Portable, ADR 0058): its secrets keep what
+// the code expects of them and are pinned to no version, its bindings'
+// credentials too (the clone's own versions are pinned, and a
+// credential's upstream and mode are its version's).
 func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 	sp, err := parseStored(stored)
 	if err != nil {
@@ -182,17 +183,9 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 				Remedy:  "pass a spec that routes it on a host of the new environment"})
 		}
 	}
-	for name := range sp.Secrets {
-		sp.Secrets[name] = spec.SecretRef{}
-	}
-	for name, b := range sp.Bindings {
-		if ref := b.CredentialRef; ref != nil {
-			b.CredentialRef = &spec.CredentialRef{Name: ref.Name}
-			b.Upstream, b.Mode = "", ""
-			sp.Bindings[name] = b
-		}
-	}
-	b, err := json.Marshal(sp)
+	// The secrets keep what the code expects and the bindings their
+	// credentials' names; versions and upstreams are the source's.
+	b, err := json.Marshal(spec.Portable(*sp))
 	return b, fs, err
 }
 
@@ -303,7 +296,8 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 		c.CreatedBy = auth.MadeBy(ctx)
 		creds = append(creds, c)
 		vcCreds[name] = spec.CredentialInfo{Latest: 1,
-			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode}}}
+			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode,
+				ForwardedHost: c.ForwardedHost}}}
 		return true, nil
 	}
 	for _, name := range slices.Sorted(maps.Keys(req.Secrets)) {
@@ -399,7 +393,8 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 		c.CreatedBy = auth.MadeBy(ctx)
 		creds = append(creds, c)
 		vcCreds[name] = spec.CredentialInfo{Latest: 1,
-			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode}}}
+			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode,
+				ForwardedHost: c.ForwardedHost}}}
 	}
 
 	// A credential the spec names that is not copied: said here, with the

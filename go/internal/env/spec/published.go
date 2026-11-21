@@ -67,6 +67,10 @@ const (
 	SecretKeyHost  = fs.SecretKeyHost
 	SecretTypeHTTP = fs.SecretTypeHTTP
 
+	SecretTypeValue     = fs.SecretTypeValue
+	SecretModeName      = fs.SecretModeName
+	SecretModeIntercept = fs.SecretModeIntercept
+
 	RuntimeImage    = fs.RuntimeImage
 	RuntimeAttached = fs.RuntimeAttached
 
@@ -115,6 +119,10 @@ func ParseYAML(raw []byte) (Spec, []Finding) { return fs.ParseYAML(raw) }
 
 // YAMLToJSON is the JSON a YAML document stands for (fs.YAMLToJSON).
 func YAMLToJSON(raw []byte) ([]byte, []Finding) { return fs.YAMLToJSON(raw) }
+
+// Portable is s carried to another place (fs.Portable): its pins keep
+// what the code expects and lose their versions and upstreams.
+func Portable(s Spec) Spec { return fs.Portable(s) }
 
 // MergePatch applies an RFC 7396 merge patch to a JSON document
 // (fs.MergePatch).

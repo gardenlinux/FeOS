@@ -115,7 +115,13 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 			// Validate refused the reference; nothing to pin.
 			continue
 		}
-		pin(name, SecretRef{Version: v})
+		// A written expectation of a value stays (ADR 0058); none is
+		// added, so that stored deployments do not change.
+		ref := SecretRef{Version: v}
+		if s.Secrets[name].Type == SecretTypeValue {
+			ref.Type = SecretTypeValue
+		}
+		pin(name, ref)
 	}
 	for _, name := range http {
 		info := p.Credentials[name]
@@ -126,11 +132,17 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 		t, ok := info.Versions[v]
 		switch in := s.Secrets[name]; {
 		case ok:
-			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: t.Upstream, Mode: t.Mode})
+			// The version's upstream and mode; the forwarded host as the
+			// spec expects it, left out when it says nothing (ADR 0058:
+			// a normalised spec keeps the expectation, and stored
+			// deployments do not change).
+			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: t.Upstream, Mode: t.Mode,
+				ForwardedHost: in.ForwardedHost})
 		case v > 0 && in.Upstream != "":
 			// A normalised pin, normalised without the secrets: as it is.
 			up, mode := BindingTemplate(Binding{Upstream: in.Upstream, Mode: in.Mode})
-			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: up, Mode: mode})
+			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: up, Mode: mode,
+				ForwardedHost: in.ForwardedHost})
 		}
 		// Else Validate refused the reference or the pin; nothing to pin.
 	}

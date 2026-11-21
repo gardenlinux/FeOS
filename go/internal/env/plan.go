@@ -880,7 +880,8 @@ func (s *Service) envCredentials(ctx context.Context, st *store.Store, env uuid.
 	for name, vs := range versions {
 		info := spec.CredentialInfo{Versions: map[int]spec.CredentialTemplate{}}
 		for _, v := range vs {
-			info.Versions[v.Version] = spec.CredentialTemplate{Upstream: v.Upstream, Mode: v.Mode}
+			info.Versions[v.Version] = spec.CredentialTemplate{Upstream: v.Upstream, Mode: v.Mode,
+				ForwardedHost: v.ForwardedHost}
 			info.Latest = max(info.Latest, v.Version)
 		}
 		out[name] = info

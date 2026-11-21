@@ -52,7 +52,7 @@ func TestYAMLBlockTwin(t *testing.T) {
   "addons": {"pg": {"type": "postgres", "version": "17", "plan": "small",
     "options": {"databases": ["app"], "public": false, "limit": 31, "ratio": 0.5}}},
   "routes": {"root": {"path": "/", "service": "api", "port": "http", "strip": false}},
-  "secrets": {"token": {"version": 3}, "s4": {"type": "http", "mode": "name"}}
+  "secrets": {"token": {"version": 3}, "s4": {"type": "http", "mode": "name", "forwardedHost": true}}
 }`
 	const yamlDoc = `# Acme's stage
 routes:
@@ -100,6 +100,7 @@ secrets:
   s4:
     type: http
     mode: name
+    forwardedHost: TRUE
 `
 	js, jfs := Parse([]byte(jsonDoc))
 	if len(jfs) > 0 {
