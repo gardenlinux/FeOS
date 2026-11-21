@@ -17,6 +17,31 @@ TABLE access_providers
   CONSTRAINT FOREIGN KEY (project) REFERENCES projects(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (project, name)
   CREATE UNIQUE INDEX access_providers_pkey ON public.access_providers USING btree (project, name)
+TABLE account_members
+  COLUMN account_id text NOT NULL
+  COLUMN person_id uuid NOT NULL
+  COLUMN role text NOT NULL
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  CONSTRAINT CHECK (((account_id <> 'default'::text) OR (role = 'member'::text)))
+  CONSTRAINT CHECK ((role = ANY (ARRAY['member'::text, 'admin'::text])))
+  CONSTRAINT FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (account_id, person_id)
+  CREATE INDEX account_members_person ON public.account_members USING btree (person_id)
+  CREATE UNIQUE INDEX account_members_pkey ON public.account_members USING btree (account_id, person_id)
+TABLE accounts
+  COLUMN id text NOT NULL
+  COLUMN title text NOT NULL DEFAULT ''::text
+  COLUMN reference text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN closed_at timestamp with time zone
+  COLUMN closed_by text NOT NULL DEFAULT ''::text
+  CONSTRAINT CHECK ((id ~ '^[a-z0-9][a-z0-9.-]{1,62}$'::text))
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE UNIQUE INDEX accounts_pkey ON public.accounts USING btree (id)
 TABLE acme_accounts
   COLUMN directory text NOT NULL
   COLUMN key_sealed bytea NOT NULL
@@ -595,7 +620,7 @@ TABLE integrations
   CREATE UNIQUE INDEX integrations_pkey ON public.integrations USING btree (id)
 TABLE invitations
   COLUMN hash text NOT NULL
-  COLUMN project_id text NOT NULL
+  COLUMN project_id text
   COLUMN environment_id uuid
   COLUMN role text NOT NULL
   COLUMN made_by text NOT NULL
@@ -603,12 +628,15 @@ TABLE invitations
   COLUMN expires_at timestamp with time zone NOT NULL
   COLUMN used_by uuid
   COLUMN used_at timestamp with time zone
+  COLUMN account_id text
+  CONSTRAINT CHECK ((((project_id IS NOT NULL) AND (account_id IS NULL) AND (role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text]))) OR ((account_id IS NOT NULL) AND (project_id IS NULL) AND (environment_id IS NULL) AND (role = ANY (ARRAY['member'::text, 'admin'::text])))))
   CONSTRAINT CHECK (((used_by IS NULL) OR (used_at IS NOT NULL)))
-  CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
+  CONSTRAINT FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (used_by) REFERENCES people(id) ON DELETE SET NULL
   CONSTRAINT PRIMARY KEY (hash)
+  CREATE INDEX invitations_account ON public.invitations USING btree (account_id, created_at) WHERE (account_id IS NOT NULL)
   CREATE INDEX invitations_project ON public.invitations USING btree (project_id, created_at)
   CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (hash)
 TABLE issued_certs
@@ -855,6 +883,21 @@ TABLE pod_tombstones
   CONSTRAINT PRIMARY KEY (pod_id, node, incarnation)
   CREATE INDEX pod_tombstones_node ON public.pod_tombstones USING btree (node, not_before)
   CREATE UNIQUE INDEX pod_tombstones_pkey ON public.pod_tombstones USING btree (pod_id, node, incarnation)
+TABLE project_accounts
+  COLUMN id bigint NOT NULL GENERATED ALWAYS AS IDENTITY
+  COLUMN project_id text NOT NULL
+  COLUMN account_id text NOT NULL
+  COLUMN moved_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN moved_by text NOT NULL DEFAULT ''::text
+  COLUMN left_at timestamp with time zone
+  CONSTRAINT CHECK (((left_at IS NULL) OR (left_at >= moved_at)))
+  CONSTRAINT FOREIGN KEY (account_id) REFERENCES accounts(id)
+  CONSTRAINT FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX project_accounts_account ON public.project_accounts USING btree (account_id, moved_at)
+  CREATE INDEX project_accounts_project ON public.project_accounts USING btree (project_id, moved_at)
+  CREATE UNIQUE INDEX project_accounts_current ON public.project_accounts USING btree (project_id) WHERE (left_at IS NULL)
+  CREATE UNIQUE INDEX project_accounts_pkey ON public.project_accounts USING btree (id)
 TABLE project_tokens
   COLUMN hash text NOT NULL
   COLUMN project_id text NOT NULL

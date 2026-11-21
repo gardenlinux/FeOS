@@ -171,13 +171,13 @@ func TestMigrationSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTables := []string{"access_providers", "acme_accounts", "acme_challenges", "activity", "auth_logins", "bookings", "cluster_secrets",
+	wantTables := []string{"access_providers", "account_members", "accounts", "acme_accounts", "acme_challenges", "activity", "auth_logins", "bookings", "cluster_secrets",
 		"domain_certs", "domains", "env_attached", "env_credential_names", "env_credentials", "env_deployments",
 		"env_incidents", "env_instances", "env_job_runs", "env_route_tokens", "env_secrets", "env_tags", "env_volumes",
 		"environments", "event_gaps", "grants", "host_labels", "http_bindings", "http_egress", "http_egress_records", "image_bakes",
 		"ingress_certs", "ingresses",
 		"instances", "integrations", "invitations", "issued_certs", "jobs", "join_tokens", "kube_bindings", "leases", "node_certs", "node_starts",
-		"node_telemetry", "nodes", "people", "pod_intercept_cas", "pod_network", "pod_tombstones", "project_tokens", "projects", "sandbox_credentials", "sandbox_holds", "sandbox_image_credentials", "sandbox_tokens", "sandboxes",
+		"node_telemetry", "nodes", "people", "pod_intercept_cas", "pod_network", "pod_tombstones", "project_accounts", "project_tokens", "projects", "sandbox_credentials", "sandbox_holds", "sandbox_image_credentials", "sandbox_tokens", "sandboxes",
 		"schema_migrations", "service_tokens", "ssh_bindings", "tool_calls", "traffic_records",
 		"ui_sessions", "visit_answers", "visits", "watches"}
 	if strings.Join(tables, ",") != strings.Join(wantTables, ",") {
