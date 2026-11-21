@@ -6,7 +6,9 @@ import { api, notAvailable } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, KV, LiveBadge, useArm, usePoll } from '../components.jsx';
 import { fmtDateTime } from '../format.js';
-import { fmtQuota, quotaRows, useAccess, useMe } from '../people.js';
+import {
+  accountLabel, fmtQuota, moveTargets, moveText, myAccounts, quotaRows, useAccess, useMe,
+} from '../people.js';
 import { useSummary } from '../summary.jsx';
 import { RoleBadge } from './People.jsx';
 import { AT_LIMIT, COUNTS, booked } from './usage.js';
@@ -107,6 +109,7 @@ export function Usage({ project, navigate }) {
             : '; ask them for more.'} A limit is checked when something new is asked for: past it the request is
           refused with <code>quota_exceeded</code>. What runs stays when a limit goes down. No limit: nothing is counted
           against one. The daily quotas of logs and traces are apart.
+          {access.account && <> Its use is charged to account <b>{accountLabel(access.account)}</b>.</>}
         </p>)}
     </div>
   );
@@ -205,7 +208,7 @@ export function ProjectSettings({ project, navigate }) {
       </header>
 
       <section className="pane">
-        <div className="pane-toolbar"><h2><Icon name="building" size={14} /> This project</h2></div>
+        <div className="pane-toolbar"><h2><Icon name="folder" size={14} /> This project</h2></div>
         <div className="kv-grid">
           <KV k="name" className="mono">{project}</KV>
           <KV k="your role">
@@ -226,9 +229,11 @@ export function ProjectSettings({ project, navigate }) {
         </div>
         <p className="hint">
           {access.role === 'admin' ? 'As its admin you hand out roles on the People page. ' : ''}
-          The project's name, zone, limits and deletion are the platform's operators'.
+          The project&apos;s zone, limits and deletion are the platform&apos;s operators&apos;; its account is its admins&apos;.
         </p>
       </section>
+
+      {(access.member || c.operator) && <ProjectAccount project={project} access={access} />}
 
       {c.leave && (
         <section className="pane danger-zone">
@@ -261,8 +266,94 @@ export function ProjectSettings({ project, navigate }) {
             platform's project list.
           </p>
           <a className="button" href="/projects" onClick={(e) => { e.preventDefault(); navigate('/projects'); }}>
-            <Icon name="building" size={14} /> Platform · Projects <Icon name="arrowRight" size={12} /></a>
+            <Icon name="folder" size={14} /> Platform · Projects <Icon name="arrowRight" size={12} /></a>
         </section>)}
     </div>
+  );
+}
+
+// ProjectAccount is the account the project is on (ADR 0059): its name
+// and title, since when, its moves; for an admin of the project who may
+// put projects on another open account, or an operator, the move. Every
+// member reads it; a move changes who is charged from that moment, and
+// nothing else.
+export function ProjectAccount({ project, access }) {
+  const { me, reload } = useMe();
+  const c = access.can;
+  const [info, setInfo] = useState(null);
+  const [err, setErr] = useState('');
+  const [missing, setMissing] = useState(false);
+  const [target, setTarget] = useState('');
+  const [operatorAccounts, setOperatorAccounts] = useState(null);
+  const [moved, setMoved] = useState(null);
+  const [armed, arm, disarm] = useArm();
+  const refresh = useCallback(async () => {
+    try {
+      setInfo(await api.getProjectAccount());
+      setErr('');
+    } catch (e) {
+      if (notAvailable(e)) setMissing(true);
+      else setErr(e.message);
+    }
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+  // An operator moves to any open account; a person to those of /auth/me.
+  useEffect(() => {
+    if (!c.operator) return undefined;
+    let live = true;
+    api.adminListAccounts().then((r) => { if (live) setOperatorAccounts(r.accounts || []); }, () => { if (live) setOperatorAccounts([]); });
+    return () => { live = false; };
+  }, [c.operator]);
+  if (missing) return null;
+  const current = info && info.account ? info.account.name : '';
+  const options = moveTargets(c.operator ? operatorAccounts : myAccounts(me), current);
+  const pick = options.find((a) => a.name === target) || options[0] || null;
+  const mayMove = c.adminProject;
+  const moves = [...((info && info.moves) || [])].sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+  return (
+    <section className="pane">
+      <div className="pane-toolbar"><h2><Icon name="building" size={14} /> Account</h2></div>
+      <ErrBox error={err} />
+      {!info && !err && <p className="empty">Loading…</p>}
+      {info && (
+        <div className="kv-grid">
+          <KV k="account"><span className="strong">{info.account.title || info.account.name}</span> <span className="mono muted">{info.account.name}</span></KV>
+          {info.since && <KV k="since">{fmtDateTime(info.since)} <Ago iso={info.since} /></KV>}
+        </div>)}
+      {moves.length > 0 && (
+        <ul className="moves">
+          {moves.map((m, i) => (
+            <li key={`${m.at}-${i}`}><span className="muted small">{fmtDateTime(m.at)}</span> <span>{moveText(m)}</span></li>))}
+        </ul>)}
+      {info && mayMove && (
+        options.length === 0
+          ? <p className="hint">You are a member of no other open account. An account&apos;s admin can invite you, or an operator moves it.</p>
+          : (
+            <div className="pf-form">
+              <span className="muted small">move to</span>
+              <select value={pick ? pick.name : ''} aria-label="the account to move to" onChange={(e) => setTarget(e.target.value)}>
+                {options.map((a) => <option key={a.name} value={a.name}>{accountLabel(a)}</option>)}
+              </select>
+              <ArmButton armKey="move" armed={armed} arm={arm} disarm={disarm} disabled={!pick} icon="building"
+                confirmLabel="move? charges go there from now on" title="move the project to this account"
+                onConfirm={async () => {
+                  setErr('');
+                  try {
+                    const res = await api.moveProject(pick.name);
+                    setMoved(res);
+                    await refresh();
+                    reload().catch(() => {});
+                  } catch (e) {
+                    setErr(e.message);
+                  }
+                }}>Move to this account</ArmButton>
+            </div>))}
+      {info && mayMove && options.length > 0 && (
+        <p className="hint">
+          From that moment its use is charged to {pick ? accountLabel(pick) : 'the account you pick'}. Its name, hosts, domains,
+          people, tokens, limits and workloads stay as they are: nothing restarts. The account it leaves is not asked.
+        </p>)}
+      {moved && <p className="small ok">{moved.moved ? `Moved to ${accountLabel(moved.account)}.` : `It is on ${accountLabel(moved.account)} already.`}</p>}
+    </section>
   );
 }

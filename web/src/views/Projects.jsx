@@ -6,7 +6,7 @@ import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, LiveBadge, Secret, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate } from '../format.js';
-import { QUOTA_ITEMS, ROLES, fmtQuota, useMe } from '../people.js';
+import { QUOTA_ITEMS, ROLES, accountLabel, fmtQuota, moveTargets, useMe } from '../people.js';
 import { projectDeleteText, tokenRows } from './fleet.js';
 import { knownZones, limitsBody, limitsForm, limitsText, zoneMoveText } from './platformData.js';
 import { Fact, PageHead } from './platformParts.jsx';
@@ -24,6 +24,8 @@ export function Projects({ navigate }) {
   const [people, setPeople] = useState(null);
   const [err, setErr] = useState('');
   const [name, setName] = useState('');
+  const [account, setAccount] = useState('');
+  const [accounts, setAccounts] = useState(null);
   // /projects?new opens the form (the switcher's New project).
   const [showCreate, setShowCreate] = useState(() => new URLSearchParams(location.search).has('new'));
   const [created, setCreated] = useState(null); // {name, token}
@@ -44,6 +46,12 @@ export function Projects({ navigate }) {
   useEffect(() => {
     api.listPeople().then((r) => setPeople(r.people || []), () => setPeople([]));
   }, []);
+  // The accounts (ADR 0059): where a new project goes, where one moves.
+  const readAccounts = useCallback(() => {
+    api.adminListAccounts().then((r) => setAccounts(r.accounts || []), () => setAccounts([]));
+  }, []);
+  useEffect(() => { readAccounts(); }, [readAccounts]);
+  const openAccounts = moveTargets(accounts, '');
 
   const go = (t) => navigate(`/projects/${encodeURIComponent(t)}`);
   const all = projects || [];
@@ -74,7 +82,7 @@ export function Projects({ navigate }) {
               e.preventDefault();
               try {
                 const n = name.trim();
-                const res = await api.createProject(n);
+                const res = await api.createProject(n, account === 'default' ? '' : account);
                 setCreated({ name: n, token: res.token });
                 reload().catch(() => {});
                 setName('');
@@ -86,10 +94,15 @@ export function Projects({ navigate }) {
             }}>
               <input className="mono" placeholder="project name: lowercase letters, digits, '.' and '-'" value={name} autoFocus
                 onChange={(e) => setName(e.target.value)} />
+              {openAccounts.length > 0 && (
+                <select value={account || 'default'} aria-label="the account" title="the account charged for its use"
+                  onChange={(e) => setAccount(e.target.value)}>
+                  {openAccounts.map((a) => <option key={a.name} value={a.name}>{accountLabel(a)}</option>)}
+                </select>)}
               <button type="submit" className="primary" disabled={!name.trim()}><Icon name="plus" size={14} /> Create</button>
               <button type="button" className="ghost" onClick={() => setShowCreate(false)}><Icon name="x" size={14} /></button>
             </form>)}
-          {showCreate && <p className="muted small">A project an operator makes has no limits, the apps zone, and a first token (admin), shown once.</p>}
+          {showCreate && <p className="muted small">A project an operator makes has no limits, the apps zone, a first token (admin) shown once, and is on the account you name.</p>}
           {created && (
             <Secret value={created.token} title={`Token of project ${created.name}`} onDismiss={() => setCreated(null)}>
               <p className="muted small">For a client such as FeCode; this browser keeps it not.</p>
@@ -102,6 +115,7 @@ export function Projects({ navigate }) {
           <thead>
             <tr>
               <th>name</th>
+              <th>account</th>
               <th>zone</th>
               <th className="col-num">sandboxes</th>
               <th className="col-num">environments</th>
@@ -126,6 +140,9 @@ export function Projects({ navigate }) {
                       {t.deleting && <span className="badge warn">being deleted</span>}
                       <div className="muted small nowrap">{t.madeBy ? <>by {maker(t.madeBy)}</> : 'by an operator'}</div>
                     </td>
+                    <td className="small">{t.account
+                      ? <><span>{t.account.title || t.account.name}</span> <span className="mono muted">{t.account.name}</span></>
+                      : <span className="muted">—</span>}</td>
                     <td className="mono small zone">{t.zone || <span className="muted">none served</span>}</td>
                     <td className="col-num mono">{t.sandboxCount}</td>
                     <td className="col-num mono">{t.environmentCount || 0}</td>
@@ -133,6 +150,7 @@ export function Projects({ navigate }) {
                     <td className="col-num mono">{(t.tokens || []).length}</td>
                     <td className="col-when muted">{fmtDate(t.createdAt)}</td>
                     <td className="col-quick nowrap">
+                      {btn('account', 'building', 'account', 'the account charged for it, and a move')}
                       {btn('limits', 'gauge', 'limits', "the project's limits")}
                       {btn('zone', 'globe', 'zone', 'the zone of its default hosts')}
                       {btn('tokens', 'key', 'tokens', "the project's tokens")}
@@ -153,8 +171,10 @@ export function Projects({ navigate }) {
                   </tr>
                   {isOpen && (
                     <tr className="subrow">
-                      <td colSpan={8}>
+                      <td colSpan={9}>
                         <div className="pf-sub">
+                          {open.tab === 'account' && (
+                            <ProjectAccountMove project={t} accounts={accounts} onChange={() => { refresh(); readAccounts(); reload().catch(() => {}); }} />)}
                           {open.tab === 'limits' && <ProjectLimits project={t} onChange={refresh} />}
                           {open.tab === 'zone' && <ProjectZone project={t} zones={zones} onChange={refresh} />}
                           {open.tab === 'tokens' && <ProjectTokens project={t.name} onChange={refresh} />}
@@ -171,11 +191,53 @@ export function Projects({ navigate }) {
         {!projects && !err && <p className="empty">Loading…</p>}
 
         <p className="hint">
-          A project's token acts in the project with its role, for a client such as FeCode's backend; people work in it
-          with their sign-in and the grants its admins give. Deleting a project revokes its tokens at once and deletes
-          all its sandboxes and environments.
+          A project&apos;s token acts in the project with its role, for a program such as FeChat&apos;s backend; integrations
+          such as FeCode act by the grants its admins give them; people work in it with their sign-in and their grants.
+          Deleting a project revokes its tokens at once and deletes all its sandboxes and environments.
         </p>
       </section>
+    </div>
+  );
+}
+
+// ProjectAccountMove is a project's account in the operators' list (ADR
+// 0059): where it is, and a move to another open account, armed.
+export function ProjectAccountMove({ project, accounts, onChange }) {
+  const current = project.account ? project.account.name : '';
+  const options = moveTargets(accounts, current);
+  const [target, setTarget] = useState('');
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState(null);
+  const [armed, arm, disarm] = useArm();
+  const pick = options.find((a) => a.name === target) || options[0] || null;
+  return (
+    <div>
+      <p className="small">On account <b>{project.account ? accountLabel(project.account) : '—'}</b>.</p>
+      {accounts === null && <p className="muted small">Reading the accounts…</p>}
+      {accounts && options.length === 0 && <p className="muted small">No other open account.</p>}
+      {pick && (
+        <div className="pf-form">
+          <span className="muted small">move to</span>
+          <select value={pick.name} aria-label="the account to move to" onChange={(e) => setTarget(e.target.value)}>
+            {options.map((a) => <option key={a.name} value={a.name}>{accountLabel(a)}</option>)}
+          </select>
+          <ArmButton armKey="move" armed={armed} arm={arm} disarm={disarm} confirmLabel="move? charges go there from now on"
+            onConfirm={async () => {
+              try {
+                setDone(await api.adminMoveProject(project.name, pick.name));
+                setErr('');
+                onChange();
+              } catch (e) {
+                setErr(e.message);
+              }
+            }}>Move</ArmButton>
+        </div>)}
+      <ErrBox error={err} />
+      {done && <p className="small ok">{done.moved ? `Moved to ${accountLabel(done.account)}.` : 'It is there already.'}</p>}
+      <p className="muted small">
+        A move changes who is charged from that moment and nothing else: its name, hosts, domains, people, tokens, limits
+        and workloads stay. Both accounts see the move in their history.
+      </p>
     </div>
   );
 }

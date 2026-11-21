@@ -12,7 +12,12 @@ import { Icon } from '../Icon.jsx';
 const TEXTS = {
   operator: {
     icon: 'shield', title: 'For operators',
-    text: 'This page is the operators\' of this FeRun: nodes, join tokens and instances.',
+    text: 'This page is the operators\' of this FeRun: nodes, join tokens, instances, people and integrations.',
+  },
+  account: {
+    icon: 'building', title: 'No such account',
+    text: 'There is no account of this name whose page you may read: its members\' and the operators\'. '
+      + 'An account\'s admin can invite you.',
   },
   member: {
     icon: 'lock', title: 'No such project',
@@ -29,14 +34,17 @@ const TEXTS = {
   },
 };
 
-export function ProjectGate({ reason, project, navigate }) {
+export function ProjectGate({ reason, project, account = '', navigate }) {
   const t = TEXTS[reason] || TEXTS.member;
   return (
     <section className="pane gate">
-      <h2><Icon name={t.icon} size={15} /> {t.title}{reason !== 'operator' && project ? <> · <span className="mono">{project}</span></> : null}</h2>
+      <h2><Icon name={t.icon} size={15} /> {t.title}{reason !== 'operator' && (project || account)
+        ? <> · <span className="mono">{project || account}</span></> : null}</h2>
       <p className="muted">{t.text}</p>
       <div className="actionrow">
-        <button className="ghost" onClick={() => navigate('/projects')}><Icon name="arrowLeft" size={14} /> Your projects</button>
+        {reason === 'account'
+          ? <button className="ghost" onClick={() => navigate('/accounts')}><Icon name="arrowLeft" size={14} /> Your accounts</button>
+          : <button className="ghost" onClick={() => navigate('/projects')}><Icon name="arrowLeft" size={14} /> Your projects</button>}
       </div>
     </section>
   );

@@ -30,6 +30,9 @@ import { Domains } from './views/Domains.jsx';
 import { Providers } from './views/Providers.jsx';
 import { ProjectSettings, Usage } from './views/ProjectPages.jsx';
 import { Ingresses, PlatformPeople } from './views/Platform.jsx';
+import { Accounts } from './views/Accounts.jsx';
+import { Account } from './views/Account.jsx';
+import { Integrations } from './views/Integrations.jsx';
 import { Palette, usePaletteKey } from './views/Palette.jsx';
 import { SummaryProvider, useSummary } from './summary.jsx';
 import { entries } from './search.js';
@@ -40,9 +43,10 @@ import { sandboxMeta, sideSandboxes } from './views/sandboxes.js';
 import { jobTone, onItsWay } from './views/jobs.js';
 import { EnvStatusProvider, useEnvStatus } from './envstatus.jsx';
 import './styles/shell.css';
+import './styles/people.css';
 import { ToneDot } from './views/Environments.jsx';
 import {
-  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, atLeast, can, envRole, higher, isOperator, myProjects,
+  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, actsInProjects, can, envCan, isOperator, myProjects,
   projectAccess, projectHome, projectNav, viewGate,
 } from './people.js';
 
@@ -175,7 +179,10 @@ export default function App() {
         ? <Projects key={location.search} navigate={navigate} />
         : <MyProjects key={location.search} navigate={navigate} />)}
       {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
-      {needsGate && <ProjectGate key={route.project} reason={gate} project={route.project} navigate={navigate} />}
+      {route.view === 'accounts' && <Accounts key={location.search} navigate={navigate} />}
+      {!needsGate && route.view === 'account' && <Account key={route.account} name={route.account} navigate={navigate} />}
+      {needsGate && <ProjectGate key={route.project || route.account} reason={gate} project={route.project}
+        account={route.account} navigate={navigate} />}
       {!needsGate && route.view === 'overview' && <Home key={route.project} project={route.project} navigate={navigate} />}
       {!needsGate && route.view === 'moved' && <Moved route={route} navigate={navigate} />}
       {!needsGate && route.view === 'tools' && <Tools key={route.project} />}
@@ -198,6 +205,7 @@ export default function App() {
       {!needsGate && route.view === 'instances' && <Instances />}
       {!needsGate && route.view === 'ingresses' && <Ingresses navigate={navigate} />}
       {!needsGate && route.view === 'people' && <PlatformPeople navigate={navigate} />}
+      {!needsGate && route.view === 'integrations' && <Integrations navigate={navigate} />}
     </Shell>
     </SummaryProvider>
     </MeContext.Provider>
@@ -207,9 +215,10 @@ export default function App() {
 // ------------------------------------------------------------------ shell --
 
 // platformSpace tells whether a route is in the operators' space: their
-// pages, and the list of every project.
+// pages, the list of every project, and the accounts (ADR 0059; a
+// person's accounts are not the platform's space).
 function platformSpace(route, operator) {
-  return OPERATOR_VIEWS.has(route.view) || (operator && route.view === 'projects');
+  return OPERATOR_VIEWS.has(route.view) || (operator && ['projects', 'accounts', 'account'].includes(route.view));
 }
 
 // lastEnvKey stores the environment last open in a project: the sidebar
@@ -348,7 +357,7 @@ function EnvSide({ route, navigate, env, access, objects }) {
     <div className="side-env">
       <a className={'envcard' + (cardOn ? ' on' : '')} href={to} onClick={go(to)} aria-current={cardOn ? 'page' : undefined}
         title="the environment: its overview, or the view open now">
-        <EnvName name={known.name} />
+        <EnvName name={known.name} protected={!!(status ? status.protected : known.protected)} />
         {state && (
           <span className={'envcard-state ' + tone}>
             <ToneDot tone={tone} title={state} />
@@ -364,7 +373,7 @@ function EnvSide({ route, navigate, env, access, objects }) {
       </a>
       {objects && (status
         ? <ObjectList route={route} navigate={navigate} st={status} project={t}
-          write={atLeast(higher(envRole(access, status.id), envRole(access, status.name)), 'write')} />
+          write={envCan(access, status.id).write || envCan(access, status.name).write} />
         : <div className="sidehint muted small">…</div>)}
     </div>
   );
@@ -471,7 +480,7 @@ function ProjectRow({ project, nav, to, navigate }) {
   return (
     <a className="projectrow" href={to} onClick={(e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } }}
       title="the project's home and its pages">
-      <Icon name="building" size={16} />
+      <Icon name="folder" size={16} />
       <span className="projectrow-text">
         <span className="projectrow-name">{project}</span>
         <span className="projectrow-pages">Project{pages.length > 0 ? `: ${pages.join(', ')}` : ''}</span>
@@ -567,7 +576,7 @@ function Switcher({ route, navigate, me, platform }) {
   return (
     <div className="switcher" ref={box}>
       <button className={'switch' + (open ? ' on' : '')} onClick={toggle} aria-expanded={open}>
-        <Icon name={platform ? 'server' : 'building'} size={14} />
+        <Icon name={platform ? 'server' : 'folder'} size={14} />
         <span className="switch-name">{platform ? 'Administration' : t || 'Choose a project'}</span>
         {!platform && t && envName && <><span className="switch-slash">/</span><span className="switch-name">{envName}</span></>}
         <Icon name="chevronDown" size={13} />
@@ -607,7 +616,7 @@ function Switcher({ route, navigate, me, platform }) {
                   className={'switch-item' + (picked === t && (envName === e.name || envName === e.id) ? ' on' : '')}
                   onClick={() => go(switchEnvPath(route, picked, e.name))}>
                   <ToneDot tone={deploymentTone(e.state)} title={e.state} />
-                  <span className="mono">{e.name}</span>
+                  <EnvName name={e.name} className="mono" protected={!!e.protected} />
                   {Number(e.openIncidents) > 0 && <span className="snav-count bad" title="open incidents">{e.openIncidents}</span>}
                 </button>
               ))}
@@ -664,7 +673,7 @@ const THEME_ICONS = { light: 'sun', dark: 'moon', gta: 'star' };
 
 // UserMenu is the signed-in person at the topbar's right end: who, the
 // architecture page, the theme and signing out.
-function UserMenu({ me, onSignOut }) {
+function UserMenu({ me, onSignOut, navigate }) {
   const [open, setOpen, box] = useMenu();
   const [, toggleTheme, nextTheme] = useTheme();
   const name = displayName(me);
@@ -683,6 +692,10 @@ function UserMenu({ me, onSignOut }) {
             {me.email && me.email !== name && <span className="muted small">{me.email}</span>}
           </div>
           <div className="switch-sep" />
+          {actsInProjects(me) && (
+            <button role="menuitem" className="switch-item" onClick={() => { setOpen(false); navigate('/accounts'); }}>
+              <Icon name="building" size={13} /> Your accounts
+            </button>)}
           <a role="menuitem" className="switch-item" href="/docs/"><Icon name="book" size={13} /> Architecture of FeRun</a>
           <button role="menuitem" className="switch-item" onClick={toggleTheme}>
             <Icon name={THEME_ICONS[nextTheme]} size={13} /> {THEME_LABELS[nextTheme]}
@@ -752,11 +765,14 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
         {route.view === 'instances' && <>{sep}<span className="crumb strong">control plane</span></>}
         {route.view === 'ingresses' && <>{sep}<span className="crumb strong">ingresses</span></>}
         {route.view === 'people' && <>{sep}<span className="crumb strong">people</span></>}
+        {route.view === 'integrations' && <>{sep}<span className="crumb strong">integrations</span></>}
+        {(route.view === 'accounts' || route.view === 'account') && <>{sep}{crumb('accounts', '/accounts', route.view === 'accounts')}</>}
+        {route.view === 'account' && <>{sep}<span className="crumb mono strong">{route.account}</span></>}
       </nav>
       <button className="topsearch" onClick={onSearch} title="search (⌘K)">
         <Icon name="search" size={14} /> <span>Search or jump to…</span> <kbd>⌘K</kbd>
       </button>
-      <UserMenu me={me} onSignOut={onSignOut} />
+      <UserMenu me={me} onSignOut={onSignOut} navigate={navigate} />
     </header>
   );
 }
