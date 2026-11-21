@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A JSON document is a YAML document: the fixtures and Parse's findings
@@ -201,6 +202,18 @@ func TestYAMLRefusals(t *testing.T) {
 		{"duplicate", "services:\n  web: {}\n  web: {}\n", "services.web", `the key "web" is given twice`},
 		{"unknown anchor", "v: *nope\n", "", "the spec is not valid YAML"},
 		{"too large", "v: " + strings.Repeat("a", MaxSpecBytes) + "\n", "", "at most"},
+		{"non-specific tag", "v: ! 123\n", "v", "tags are not read (!)"},
+		{"non-specific tag, anchored", "v: &x ! 123\nw: *x\n", "v", "tags are not read (!)"},
+		{"non-specific tag, then an anchor", "v: ! &x 123\n", "v", "tags are not read (!)"},
+		{"non-specific tag on its own line", "v: &x\n  ! 2\n", "v", "tags are not read (!)"},
+		{"non-specific tag, empty", "v: !\n", "v", "tags are not read (!)"},
+		{"non-specific tag in a flow list", "v: [1, ! 2]\n", "v[1]", "tags are not read (!)"},
+		{"non-specific tag on a mapping", "v: !\n  k: 1\n", "v", "tags are not read (!)"},
+		{"non-specific tag on a flow mapping", "v: ! {k: 1}\n", "v", "tags are not read (!)"},
+		{"non-specific tag on a key", "! k: 1\n", "k", "tags are not read (!)"},
+		{"non-specific tag on a key in a list", "- ! k: 1\n", "[0].k", "tags are not read (!)"},
+		{"non-specific tag after characters", "ä: [ö, ! 1]\n", "ä[1]", "tags are not read (!)"},
+		{"non-specific tag, CRLF and BOM", "\ufeffa: 1\r\nb: ! 2\r\n", "b", "tags are not read (!)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			raw, fs := YAMLToJSON([]byte(c.raw))
@@ -216,8 +229,13 @@ func TestYAMLRefusals(t *testing.T) {
 			}
 		})
 	}
+	// What only looks like the tag "!" is text.
+	raw, fs := YAMLToJSON([]byte("a: x ! y\nb: \"! 1\"\nc: |\n  ! 2\n!!str d: '!'\ne: [!!str 1, '!']\n"))
+	if len(fs) > 0 || string(raw) != `{"a":"x ! y","b":"! 1","c":"! 2\n","d":"!","e":["1","!"]}` {
+		t.Fatalf("%s %+v", raw, fs)
+	}
 	// A quoted "<<" is an ordinary key.
-	raw, fs := YAMLToJSON([]byte(`"<<": 1`))
+	raw, fs = YAMLToJSON([]byte(`"<<": 1`))
 	if len(fs) > 0 || string(raw) != `{"\u003c\u003c":1}` {
 		t.Fatalf("%s %+v", raw, fs)
 	}
@@ -270,5 +288,82 @@ func TestYAMLAliasBudget(t *testing.T) {
 	}
 	if _, fs := YAMLToJSON([]byte(b.String())); len(fs) == 0 || !strings.Contains(fs[0].Problem, "nests deeper") {
 		t.Fatalf("deep aliases: %+v", fs)
+	}
+}
+
+// A refusal behind aliases is not repeated without end: every node
+// visited counts, and the reading stops at maxYAMLErrors errors.
+func TestYAMLRefusalsBehindAliases(t *testing.T) {
+	laughs := func(leaf string, width int) string {
+		var b strings.Builder
+		fmt.Fprintf(&b, "l0: &l0 [%s", leaf)
+		for range width - 1 {
+			b.WriteString(", " + leaf)
+		}
+		b.WriteString("]\n")
+		for i := 1; i < 9; i++ {
+			fmt.Fprintf(&b, "l%d: &l%d [*l%d", i, i, i-1)
+			for range width - 1 {
+				fmt.Fprintf(&b, ", *l%d", i-1)
+			}
+			b.WriteString("]\n")
+		}
+		return b.String()
+	}
+	for _, doc := range []string{laughs("!!int 1", 10), laughs(".inf", 10), laughs("{[a]: 1}", 10),
+		laughs("! 1", 10), laughs("!!int 1", 20), laughs("{<<: {}}", 10), laughs("{!!int 1: x}", 10)} {
+		start := time.Now()
+		_, fs := ParseYAML([]byte(doc))
+		if len(fs) == 0 || len(fs) > maxYAMLErrors+1 || time.Since(start) > 5*time.Second {
+			t.Fatalf("%.40q: %d findings in %s", doc, len(fs), time.Since(start))
+		}
+		if last := fs[len(fs)-1]; len(fs) == maxYAMLErrors+1 && !strings.Contains(fs[0].Problem+last.Problem,
+			"the reading stopped after") {
+			t.Fatalf("%.40q: %+v", doc, fs[:2])
+		}
+	}
+	// A wide list of refusals used many times: one document of 22 KB.
+	var b strings.Builder
+	b.WriteString("a: &a [!!int 1" + strings.Repeat(", !!int 1", 1999) + "]\nb: [*a" + strings.Repeat(", *a", 1999) + "]\n")
+	if _, fs := YAMLToJSON([]byte(b.String())); len(fs) != maxYAMLErrors+1 {
+		t.Fatalf("%d findings", len(fs))
+	}
+	// Every node counts: aliases of an empty list, which writes little.
+	b.Reset()
+	b.WriteString("l0: &l0 []\n")
+	for i := 1; i < 9; i++ {
+		fmt.Fprintf(&b, "l%d: &l%d [*l%d%s]\n", i, i, i-1, strings.Repeat(fmt.Sprintf(", *l%d", i-1), 9))
+	}
+	if _, fs := YAMLToJSON([]byte(b.String())); len(fs) != 1 || !strings.Contains(fs[0].Problem, "larger than") &&
+		!strings.Contains(fs[0].Problem, "nodes") {
+		t.Fatalf("%+v", fs)
+	}
+}
+
+// The reader counts the bytes of the JSON exactly: separators, escapes
+// and characters included, so MaxSpecBytes bounds the JSON as Parse does.
+func TestYAMLSizeIsTheJSONs(t *testing.T) {
+	for _, doc := range []string{
+		"a: 1\n", "[]\n", "{}\n", "[1, 2, [3, {}], {a: [], b: {}}]\n",
+		"a: \"<>&\\u00e9\\n\\t\\x01\\u2028 \\\\ \\\"\"\n\"k<>\\\"\": \"\\xff\"\n",
+		"ä: [ö, ü, \"\\U0001F600\"]\nb: &x {c: [true, false, null, -1.5e3, 0x1f]}\nd: [*x, *x]\n",
+		string(readFile(t, "testdata/expensa-stage-request.json")),
+		expensa,
+	} {
+		var r yamlReader
+		root, fs := r.read([]byte(doc))
+		if len(fs) > 0 {
+			t.Fatalf("%.40q: %+v", doc, fs)
+		}
+		if n := len(root.bytes()); r.size != n {
+			t.Fatalf("%.40q: counted %d, JSON has %d: %s", doc, r.size, n, root.bytes())
+		}
+	}
+	// Aliases that stand for a JSON larger than MaxSpecBytes, separators
+	// included, are refused.
+	doc := "a: &a [1" + strings.Repeat(",1", 160000-1) + "]\nb: *a\nc: *a\nd: *a\ne: *a\nf: *a\n"
+	raw, fs := YAMLToJSON([]byte(doc))
+	if raw != nil || len(fs) != 1 || !strings.Contains(fs[0].Problem, "the spec as JSON is larger than") {
+		t.Fatalf("%d bytes, %+v", len(raw), fs)
 	}
 }
