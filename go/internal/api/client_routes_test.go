@@ -43,7 +43,7 @@ func (r *clientRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 // clientCalls calls every method of the published client once, through
-// rec. The sink's reads are named in sink. F3 appends its methods here.
+// rec. The sink's reads are named in sink.
 func clientCalls(t *testing.T, rec *clientRecorder) (sink map[string]bool) {
 	t.Helper()
 	c := client.New("https://run.test", client.WithHTTPClient(&http.Client{Transport: rec}))
@@ -115,6 +115,13 @@ func clientCalls(t *testing.T, rec *clientRecorder) (sink map[string]bool) {
 		}},
 		{"UnbindDomain", func() error { _, err := c.UnbindDomain(ctx, "d1"); return err }},
 		{"CheckDomain", func() error { _, err := c.CheckDomain(ctx, "d1"); return err }},
+		// The people answers (F3).
+		{"Me", func() error { _, err := c.Me(ctx); return err }},
+		{"Project", func() error { _, err := c.Project(ctx); return err }},
+		{"Members", func() error { _, err := c.Members(ctx); return err }},
+		{"Integrations", func() error { _, err := c.Integrations(ctx); return err }},
+		{"SetProtected", func() error { _, err := c.SetProtected(ctx, "stage", true); return err }},
+		{"Principals", func() error { _, err := c.Principals(ctx, "stage"); return err }},
 		// The sink's reads.
 		{"Logs", func() error { _, err := c.Logs(ctx, url.Values{"environment": {"e"}}); return err }},
 		{"LogStreams", func() error { _, err := c.LogStreams(ctx, nil); return err }},
