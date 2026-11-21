@@ -26,6 +26,11 @@ func TestEnvCredentialsMigration(t *testing.T) {
 	d := dbtest.Open(t)
 	migrateBefore(t, d, 35)
 	migrateRange(t, d, 36, 40)
+	// 0041 drops tenant_credentials; recorded as applied, Migrate below
+	// applies 0035 alone, as the release of 0035 did.
+	if _, err := d.Pool.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES (41)"); err != nil {
+		t.Fatal(err)
+	}
 
 	exec := func(q string) {
 		t.Helper()

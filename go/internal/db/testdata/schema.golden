@@ -1,5 +1,5 @@
 TABLE access_providers
-  COLUMN tenant text NOT NULL
+  COLUMN project text NOT NULL
   COLUMN name text NOT NULL
   COLUMN kind text NOT NULL
   COLUMN url text NOT NULL DEFAULT ''::text
@@ -11,12 +11,12 @@ TABLE access_providers
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
   CONSTRAINT CHECK (((kind <> 'oidc'::text) OR ((url = ''::text) AND (issuer <> ''::text) AND (client_id <> ''::text) AND (client_secret_sealed IS NOT NULL))))
-  CONSTRAINT CHECK (((kind <> 'tenant'::text) OR ((url <> ''::text) AND (issuer = ''::text) AND (client_id = ''::text) AND (client_secret_sealed IS NULL))))
+  CONSTRAINT CHECK (((kind <> 'project'::text) OR ((url <> ''::text) AND (issuer = ''::text) AND (client_id = ''::text) AND (client_secret_sealed IS NULL))))
   CONSTRAINT CHECK (((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (name <> 'ferun'::text)))
-  CONSTRAINT CHECK ((kind = ANY (ARRAY['tenant'::text, 'oidc'::text])))
-  CONSTRAINT FOREIGN KEY (tenant) REFERENCES tenants(id) ON DELETE CASCADE
-  CONSTRAINT PRIMARY KEY (tenant, name)
-  CREATE UNIQUE INDEX access_providers_pkey ON public.access_providers USING btree (tenant, name)
+  CONSTRAINT CHECK ((kind = ANY (ARRAY['project'::text, 'oidc'::text])))
+  CONSTRAINT FOREIGN KEY (project) REFERENCES projects(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (project, name)
+  CREATE UNIQUE INDEX access_providers_pkey ON public.access_providers USING btree (project, name)
 TABLE acme_accounts
   COLUMN directory text NOT NULL
   COLUMN key_sealed bytea NOT NULL
@@ -44,7 +44,7 @@ TABLE activity PARTITION BY RANGE (day)
   COLUMN sandbox_id text COLLATE "C"
   COLUMN pod_id text COLLATE "C"
   COLUMN foreign_pod boolean NOT NULL DEFAULT false
-  COLUMN tenant_id text NOT NULL DEFAULT ''::text
+  COLUMN project_id text NOT NULL DEFAULT ''::text
   COLUMN node text NOT NULL DEFAULT ''::text
   COLUMN start_id uuid
   COLUMN seq bigint
@@ -157,7 +157,7 @@ TABLE domains
   CONSTRAINT CHECK ((token ~ '^[a-z2-7]{32}$'::text))
   CONSTRAINT CHECK ((verification = ANY (ARRAY['unverified'::text, 'verified'::text, 'lapsed'::text, 'superseded'::text])))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE SET NULL
-  CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (owner) REFERENCES projects(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX domains_env ON public.domains USING btree (env_id, bound_at) WHERE (env_id IS NOT NULL)
   CREATE INDEX domains_name ON public.domains USING btree (name)
@@ -402,8 +402,8 @@ TABLE environments
   CONSTRAINT CHECK ((access = ANY (ARRAY['anyone'::text, 'visitors'::text])))
   CONSTRAINT CHECK ((deployed >= 0))
   CONSTRAINT CHECK ((deployment >= 0))
-  CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id)
-  CONSTRAINT FOREIGN KEY (owner, access_provider) REFERENCES access_providers(tenant, name)
+  CONSTRAINT FOREIGN KEY (owner) REFERENCES projects(id)
+  CONSTRAINT FOREIGN KEY (owner, access_provider) REFERENCES access_providers(project, name)
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, name)
   CREATE INDEX environments_owner ON public.environments USING btree (owner, created_at)
@@ -420,7 +420,7 @@ TABLE event_gaps
   CREATE UNIQUE INDEX event_gaps_pkey ON public.event_gaps USING btree (node, start_id, from_seq)
 TABLE grants
   COLUMN id bigint NOT NULL GENERATED ALWAYS AS IDENTITY
-  COLUMN tenant_id text NOT NULL
+  COLUMN project_id text NOT NULL
   COLUMN person_id uuid
   COLUMN token_hash text
   COLUMN environment_id uuid
@@ -432,14 +432,14 @@ TABLE grants
   CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
-  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
-  CONSTRAINT FOREIGN KEY (token_hash) REFERENCES tenant_tokens(hash) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (token_hash) REFERENCES project_tokens(hash) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX grants_environment ON public.grants USING btree (environment_id) WHERE (environment_id IS NOT NULL)
   CREATE INDEX grants_person ON public.grants USING btree (person_id) WHERE (person_id IS NOT NULL)
   CREATE INDEX grants_token ON public.grants USING btree (token_hash) WHERE (token_hash IS NOT NULL)
   CREATE UNIQUE INDEX grants_pkey ON public.grants USING btree (id)
-  CREATE UNIQUE INDEX grants_principal_scope ON public.grants USING btree (tenant_id, COALESCE((person_id)::text, token_hash), COALESCE((environment_id)::text, ''::text))
+  CREATE UNIQUE INDEX grants_principal_scope ON public.grants USING btree (project_id, COALESCE((person_id)::text, token_hash), COALESCE((environment_id)::text, ''::text))
 TABLE host_labels
   COLUMN label text NOT NULL
   COLUMN owner text NOT NULL
@@ -567,7 +567,7 @@ TABLE instances
   CREATE UNIQUE INDEX instances_pkey ON public.instances USING btree (id)
 TABLE invitations
   COLUMN hash text NOT NULL
-  COLUMN tenant_id text NOT NULL
+  COLUMN project_id text NOT NULL
   COLUMN environment_id uuid
   COLUMN role text NOT NULL
   COLUMN made_by text NOT NULL
@@ -578,10 +578,10 @@ TABLE invitations
   CONSTRAINT CHECK (((used_by IS NULL) OR (used_at IS NOT NULL)))
   CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
-  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (used_by) REFERENCES people(id) ON DELETE SET NULL
   CONSTRAINT PRIMARY KEY (hash)
-  CREATE INDEX invitations_tenant ON public.invitations USING btree (tenant_id, created_at)
+  CREATE INDEX invitations_project ON public.invitations USING btree (project_id, created_at)
   CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (hash)
 TABLE issued_certs
   COLUMN serial text NOT NULL
@@ -630,7 +630,7 @@ TABLE jobs
   CONSTRAINT CHECK ((id ~ '^[a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}$'::text))
   CONSTRAINT CHECK ((phase = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'deadline_exceeded'::text, 'cancelled'::text])))
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
-  CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (owner) REFERENCES projects(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, idempotency_key)
   CREATE INDEX jobs_environment ON public.jobs USING btree (environment_id, created_at)
@@ -827,6 +827,42 @@ TABLE pod_tombstones
   CONSTRAINT PRIMARY KEY (pod_id, node, incarnation)
   CREATE INDEX pod_tombstones_node ON public.pod_tombstones USING btree (node, not_before)
   CREATE UNIQUE INDEX pod_tombstones_pkey ON public.pod_tombstones USING btree (pod_id, node, incarnation)
+TABLE project_tokens
+  COLUMN hash text NOT NULL
+  COLUMN project_id text NOT NULL
+  COLUMN label text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN last_used_at timestamp with time zone
+  COLUMN role text NOT NULL DEFAULT 'admin'::text
+  COLUMN environment_id uuid
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
+  CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+  CONSTRAINT PRIMARY KEY (hash)
+  CREATE INDEX project_tokens_project ON public.project_tokens USING btree (project_id, created_at)
+  CREATE UNIQUE INDEX project_tokens_pkey ON public.project_tokens USING btree (hash)
+TABLE projects
+  COLUMN id text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN deleting_at timestamp with time zone
+  COLUMN zone text
+  COLUMN made_by uuid
+  COLUMN limit_sandboxes integer
+  COLUMN limit_environments integer
+  COLUMN limit_running_jobs integer
+  COLUMN limit_vcpus integer
+  COLUMN limit_memory_mib bigint
+  CONSTRAINT CHECK ((id ~ '^[a-z0-9][a-z0-9.-]{1,62}$'::text))
+  CONSTRAINT CHECK ((limit_environments >= 0))
+  CONSTRAINT CHECK ((limit_memory_mib >= 0))
+  CONSTRAINT CHECK ((limit_running_jobs >= 0))
+  CONSTRAINT CHECK ((limit_sandboxes >= 0))
+  CONSTRAINT CHECK ((limit_vcpus >= 0))
+  CONSTRAINT FOREIGN KEY (made_by) REFERENCES people(id) ON DELETE SET NULL
+  CONSTRAINT PRIMARY KEY (id)
+  CREATE INDEX projects_made_by ON public.projects USING btree (made_by) WHERE (made_by IS NOT NULL)
+  CREATE UNIQUE INDEX projects_pkey ON public.projects USING btree (id)
 TABLE sandbox_credentials
   COLUMN sandbox_id text COLLATE "C" NOT NULL
   COLUMN name text NOT NULL
@@ -905,7 +941,7 @@ TABLE sandboxes
   COLUMN pin_node text NOT NULL DEFAULT ''::text
   COLUMN idle_after_s integer
   COLUMN address text NOT NULL DEFAULT ''::text
-  COLUMN tenant_job boolean NOT NULL DEFAULT false
+  COLUMN project_job boolean NOT NULL DEFAULT false
   COLUMN log_labels jsonb NOT NULL DEFAULT '{}'::jsonb
   COLUMN http_version text NOT NULL DEFAULT ''::text
   COLUMN http_pushed text NOT NULL DEFAULT ''::text
@@ -920,7 +956,7 @@ TABLE sandboxes
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((reaches = '"all"'::jsonb) OR (jsonb_typeof(reaches) = 'array'::text)))
   CONSTRAINT CHECK (((vcpus >= 1) AND (vcpus <= 32)))
-  CONSTRAINT CHECK ((NOT (instance AND tenant_job)))
+  CONSTRAINT CHECK ((NOT (instance AND project_job)))
   CONSTRAINT CHECK ((client_state = ANY (ARRAY['pending'::text, 'creating'::text, 'running'::text, 'pausing'::text, 'paused'::text, 'resuming'::text, 'hibernating'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'unknown'::text, 'lost'::text])))
   CONSTRAINT CHECK ((id ~ '^([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'::text))
   CONSTRAINT CHECK ((idle_after_s >= 0))
@@ -928,7 +964,7 @@ TABLE sandboxes
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id)
   CONSTRAINT FOREIGN KEY (lost_from) REFERENCES nodes(name)
   CONSTRAINT FOREIGN KEY (node) REFERENCES nodes(name)
-  CONSTRAINT FOREIGN KEY (owner) REFERENCES tenants(id)
+  CONSTRAINT FOREIGN KEY (owner) REFERENCES projects(id)
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX sandboxes_attention ON public.sandboxes USING btree (client_state) WHERE ((client_state = ANY (ARRAY['unknown'::text, 'creating'::text, 'pending'::text])) OR (unreachable_since IS NOT NULL))
   CREATE INDEX sandboxes_environment ON public.sandboxes USING btree (environment_id)
@@ -938,8 +974,8 @@ TABLE sandboxes
   CREATE INDEX sandboxes_op ON public.sandboxes USING btree (op_owner, op_deadline) WHERE (op <> ''::text)
   CREATE INDEX sandboxes_owner ON public.sandboxes USING btree (owner, created_at)
   CREATE INDEX sandboxes_paused ON public.sandboxes USING btree (paused_at) WHERE ((client_state = 'paused'::text) AND (op = ''::text))
+  CREATE INDEX sandboxes_project_job ON public.sandboxes USING btree (id) WHERE project_job
   CREATE INDEX sandboxes_tap ON public.sandboxes USING btree (node, "left"(id, 8)) WHERE ((node IS NOT NULL) AND (length(id) = 36))
-  CREATE INDEX sandboxes_tenant_job ON public.sandboxes USING btree (id) WHERE tenant_job
   CREATE UNIQUE INDEX sandboxes_pkey ON public.sandboxes USING btree (id)
 TABLE schema_migrations
   COLUMN version integer NOT NULL
@@ -978,66 +1014,6 @@ TABLE ssh_bindings
   CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (sandbox_id, name)
   CREATE UNIQUE INDEX ssh_bindings_pkey ON public.ssh_bindings USING btree (sandbox_id, name)
-TABLE tenant_credentials
-  COLUMN tenant text NOT NULL
-  COLUMN name text NOT NULL
-  COLUMN version integer NOT NULL
-  COLUMN upstream text NOT NULL
-  COLUMN mode text NOT NULL
-  COLUMN ca_pem text NOT NULL DEFAULT ''::text
-  COLUMN path_prefixes text[] NOT NULL DEFAULT '{}'::text[]
-  COLUMN forwarded_host boolean NOT NULL DEFAULT false
-  COLUMN rate_per_second integer NOT NULL DEFAULT 0
-  COLUMN rate_burst integer NOT NULL DEFAULT 0
-  COLUMN credential_kind text NOT NULL
-  COLUMN sealed bytea NOT NULL
-  COLUMN created_by text NOT NULL DEFAULT ''::text
-  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
-  CONSTRAINT CHECK ((credential_kind = ANY (ARRAY['headers'::text, 'basic'::text, 'oauth2'::text, 'clientCertificate'::text])))
-  CONSTRAINT CHECK ((mode = ANY (ARRAY['name'::text, 'intercept'::text])))
-  CONSTRAINT CHECK ((name ~ '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'::text))
-  CONSTRAINT CHECK ((rate_burst >= 0))
-  CONSTRAINT CHECK ((rate_per_second >= 0))
-  CONSTRAINT CHECK ((version >= 1))
-  CONSTRAINT FOREIGN KEY (tenant) REFERENCES tenants(id) ON DELETE CASCADE
-  CONSTRAINT PRIMARY KEY (tenant, name, version)
-  CREATE UNIQUE INDEX tenant_credentials_pkey ON public.tenant_credentials USING btree (tenant, name, version)
-TABLE tenant_tokens
-  COLUMN hash text NOT NULL
-  COLUMN tenant_id text NOT NULL
-  COLUMN label text NOT NULL DEFAULT ''::text
-  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
-  COLUMN last_used_at timestamp with time zone
-  COLUMN role text NOT NULL DEFAULT 'admin'::text
-  COLUMN environment_id uuid
-  COLUMN made_by text NOT NULL DEFAULT ''::text
-  CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
-  CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
-  CONSTRAINT FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
-  CONSTRAINT PRIMARY KEY (hash)
-  CREATE INDEX tenant_tokens_tenant ON public.tenant_tokens USING btree (tenant_id, created_at)
-  CREATE UNIQUE INDEX tenant_tokens_pkey ON public.tenant_tokens USING btree (hash)
-TABLE tenants
-  COLUMN id text NOT NULL
-  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
-  COLUMN deleting_at timestamp with time zone
-  COLUMN zone text
-  COLUMN made_by uuid
-  COLUMN limit_sandboxes integer
-  COLUMN limit_environments integer
-  COLUMN limit_running_jobs integer
-  COLUMN limit_vcpus integer
-  COLUMN limit_memory_mib bigint
-  CONSTRAINT CHECK ((id ~ '^[a-z0-9][a-z0-9.-]{1,62}$'::text))
-  CONSTRAINT CHECK ((limit_environments >= 0))
-  CONSTRAINT CHECK ((limit_memory_mib >= 0))
-  CONSTRAINT CHECK ((limit_running_jobs >= 0))
-  CONSTRAINT CHECK ((limit_sandboxes >= 0))
-  CONSTRAINT CHECK ((limit_vcpus >= 0))
-  CONSTRAINT FOREIGN KEY (made_by) REFERENCES people(id) ON DELETE SET NULL
-  CONSTRAINT PRIMARY KEY (id)
-  CREATE INDEX tenants_made_by ON public.tenants USING btree (made_by) WHERE (made_by IS NOT NULL)
-  CREATE UNIQUE INDEX tenants_pkey ON public.tenants USING btree (id)
 TABLE tool_calls
   COLUMN id uuid NOT NULL DEFAULT gen_random_uuid()
   COLUMN sandbox_id text COLLATE "C" NOT NULL
@@ -1078,7 +1054,7 @@ TABLE traffic_records PARTITION BY RANGE (day)
   COLUMN pod_id text COLLATE "C"
   COLUMN sandbox_id text COLLATE "C"
   COLUMN foreign_pod boolean NOT NULL DEFAULT false
-  COLUMN tenant_id text NOT NULL DEFAULT ''::text
+  COLUMN project_id text NOT NULL DEFAULT ''::text
   COLUMN kind text NOT NULL
   COLUMN missed bigint NOT NULL DEFAULT 0
   COLUMN detail jsonb NOT NULL
@@ -1135,7 +1111,7 @@ TABLE visit_answers
 TABLE visits
   COLUMN id uuid NOT NULL
   COLUMN env_id uuid NOT NULL
-  COLUMN tenant text NOT NULL
+  COLUMN project text NOT NULL
   COLUMN provider text NOT NULL
   COLUMN provider_kind text NOT NULL
   COLUMN host text NOT NULL
@@ -1155,7 +1131,7 @@ TABLE visits
   CONSTRAINT CHECK (((length(subject) >= 1) AND (length(subject) <= 255)))
   CONSTRAINT CHECK (((provider_kind = 'ferun'::text) = (person_id IS NOT NULL)))
   CONSTRAINT CHECK ((end_reason = ANY (ARRAY[''::text, 'expired'::text, 'provider_no'::text, 'signed_out'::text, 'unpublished'::text, 'provider_changed'::text, 'backchannel_logout'::text])))
-  CONSTRAINT CHECK ((provider_kind = ANY (ARRAY['tenant'::text, 'oidc'::text, 'ferun'::text])))
+  CONSTRAINT CHECK ((provider_kind = ANY (ARRAY['project'::text, 'oidc'::text, 'ferun'::text])))
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
