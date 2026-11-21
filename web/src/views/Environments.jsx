@@ -723,7 +723,7 @@ function RevertButton({ n, ec, onRevert, label = 'Revert to this' }) {
     <>
       <ConfirmButton className="mini" label={label} confirmLabel={`Revert to ${n}: sure?`} icon="undo"
         disabled={!ec || !ec.write || !!(op && op.busy)}
-        title={ec && ec.write ? `a new deployment with deployment ${n}'s spec` : NEEDS.write}
+        title={ec && ec.write ? `a new deployment with deployment ${n}'s spec` : needsWrite(ec)}
         onConfirm={() => run(() => onRevert(n), '')} />
       {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
     </>

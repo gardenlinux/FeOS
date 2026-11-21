@@ -10,7 +10,6 @@
 /* a protected environment's shield, after its name */
 .protected-mark { display: inline-flex; vertical-align: -1px; color: var(--accent); }
 .protected-mark .icon { flex: none; }
-.statepill.protected { color: var(--accent); border-color: rgba(var(--accent-rgb), .45); }
 
 /* the head's notice for one whose write is the project's alone */
 .protected-notice {
@@ -36,7 +35,6 @@
 .role-lines li:last-child { list-style: none; margin-left: -18px; color: var(--text); }
 
 /* accounts */
-.account-ref { color: var(--faint); font-size: 12px; }
 .quota-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 4px 12px; min-width: 240px; }
 .quota-mini .meter-k { font-size: 11.5px; }
 .quota-mini .meter-v { font-size: 12px; }

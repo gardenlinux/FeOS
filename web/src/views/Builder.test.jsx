@@ -440,8 +440,8 @@ describe('the band', () => {
     expect(deployBlock({ ...ok, conflicts: 2, planning: true })).toBe('decide the conflicts first');
     // A protected environment's plan-only builder (ADR 0060) plans and
     // deploys nothing, whatever else holds.
-    expect(deployBlock({ ...ok, planOnly: true })).toBe('protected: deploying here needs a grant on this environment');
-    expect(deployBlock({ ...ok, planOnly: true, planning: true })).toBe('protected: deploying here needs a grant on this environment');
+    expect(deployBlock({ ...ok, planOnly: true })).toBe('protected: deploying here needs a grant on this environment, or admin on the project');
+    expect(deployBlock({ ...ok, planOnly: true, planning: true })).toBe('protected: deploying here needs a grant on this environment, or admin on the project');
   });
 });
 

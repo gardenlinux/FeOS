@@ -16,6 +16,7 @@ import { AboutBox, EnvOverview, KeysLine } from './EnvOverview.jsx';
 import { activityItems } from './envs.js';
 import {
   AccessTable, CloneBox, DeleteBox, DomainsBox, ProtectBox, ProtectPrincipals, PublicBox, RouteTokenBox, TrafficTable, grantOf,
+  defaultTicks, offersGrant, principalKey, protectEnvironment,
 } from './EnvTabs.jsx';
 import { logsProblem } from './envs.js';
 import { LogSearch } from './LogSearch.jsx';
@@ -910,16 +911,63 @@ describe('protection (ADR 0060)', () => {
     expect(on).toContain('Lift protection');
   });
 
-  it('the dialog names who loses write, ticks a grant for each, and says a token stops deploying', () => {
+  it('the dialog offers a grant to each without write on it otherwise, ticked for who loses write, and says a token stops deploying', () => {
     const ps = wire('GET_environments_env_principals.200').principals;
     const losers = ps.filter((p) => p.losesWrite);
-    const give = Object.fromEntries(losers.map((p) => [`${p.kind}/${p.id}`, true]));
+    const offered = ps.filter(offersGrant);
+    // The answer's cases the dialog is about: one who loses write, one
+    // offered a grant who does not, one who keeps what it has.
+    expect(losers.length).toBeGreaterThan(0);
+    expect(offered.length).toBeGreaterThan(losers.length);
+    expect(offered.length).toBeLessThan(ps.length);
+    expect(losers.some((p) => p.kind === 'token')).toBe(true);
+    for (const p of losers) expect(offersGrant(p)).toBe(true);
+    const give = defaultTicks(ps);
+    expect(Object.keys(give).sort()).toEqual(losers.map(principalKey).sort());
     const out = html(<ProtectPrincipals list={ps} give={give} setGive={() => {}} env="prod" />);
-    expect(count(out, 'type="checkbox"')).toBe(losers.length);
+    expect(count(out, 'type="checkbox"')).toBe(offered.length);
     expect(count(out, 'checked=""')).toBe(losers.length);
-    expect(count(out, 'keeps what it has')).toBe(ps.length - losers.length);
-    if (losers.some((p) => p.kind === 'token')) expect(out).toContain('the token stops deploying here');
+    expect(count(out, 'keeps what it has')).toBe(ps.length - offered.length);
+    expect(out).toContain('the token stops deploying here');
+    // Each tick is named by whom it gives the grant.
+    const labels = [...out.matchAll(/aria-label="give ([^"]+) write on prod"/g)].map((m) => m[1]);
+    expect(labels).toHaveLength(offered.length);
+    expect(new Set(labels).size).toBe(offered.length);
     expect(text(<ProtectPrincipals list={[]} give={{}} setGive={() => {}} env="prod" />)).toContain('nobody loses write');
+    expect(offersGrant({ kind: 'person', id: 'a', projectRole: 'admin', environmentRole: '' })).toBe(false);
+    expect(offersGrant({ kind: 'person', id: 'a', projectRole: 'read', environmentRole: 'admin' })).toBe(false);
+    expect(offersGrant({ kind: 'other', id: 'x', projectRole: 'write', environmentRole: '' })).toBe(false);
+  });
+
+  it('Protect gives the ticked grants, then protects; a failure stops it', async () => {
+    const ps = wire('GET_environments_env_principals.200').principals;
+    const calls = [];
+    let failOn = '';
+    vi.stubGlobal('fetch', vi.fn(async (path, init) => {
+      calls.push([init.method, path, init.body ? JSON.parse(init.body) : null]);
+      if (failOn && path.includes(failOn)) return { ok: false, status: 500, text: async () => '{"error":"no"}' };
+      return { ok: true, status: 200, text: async () => '{}' };
+    }));
+    setActiveProject(T);
+    const read = ps.find((p) => !p.losesWrite && offersGrant(p));
+    const give = { ...defaultTicks(ps), [principalKey(read)]: true, [principalKey(ps.find((p) => !offersGrant(p)))]: true };
+    await protectEnvironment(ps, give, 'env-1', 'prod');
+    const ticked = ps.filter((p) => offersGrant(p) && give[principalKey(p)]);
+    expect(calls).toHaveLength(ticked.length + 1);
+    ticked.forEach((p, i) => {
+      expect(calls[i][0]).toBe('PUT');
+      expect(calls[i][1]).toContain(`/${encodeURIComponent(p.id)}/grants`);
+      expect(calls[i][2]).toEqual({ role: 'write', environment: 'env-1' });
+    });
+    expect(calls[calls.length - 1].slice(0, 2)).toEqual(['PUT', '/api/v1/environments/prod/protected']);
+    expect(calls[calls.length - 1][2]).toEqual({ protected: true });
+
+    // The second grant fails: nothing after it, and no protection.
+    calls.length = 0;
+    failOn = `/${encodeURIComponent(ticked[1].id)}/grants`;
+    await expect(protectEnvironment(ps, give, 'env-1', 'prod')).rejects.toThrow('no');
+    expect(calls).toHaveLength(2);
+    expect(calls.some((c) => c[1].endsWith('/protected'))).toBe(false);
   });
 
   it('each kind gets its grant by its own route', async () => {

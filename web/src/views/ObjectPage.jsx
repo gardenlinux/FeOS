@@ -13,7 +13,7 @@ import {
   phaseTone, deploymentTone, restartsOf, routesTo, specObject, splitItem, trafficOf, usedBy,
 } from './envs.js';
 import { builtinCatalog, planText, readCatalog } from './catalog.js';
-import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
+import { EnvLink, OpNote, TrafficTab, needsWrite, useOp } from './EnvTabs.jsx';
 import { ObjectReach } from './EnvReach.jsx';
 import { ObjectAccess, ObjectKeysLine } from './ObjectAccess.jsx';
 import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
@@ -70,19 +70,20 @@ export function ObjectView({
     <>
       {kind === 'service' && o && (
         <button disabled={!ec || !ec.write || busy}
-          title={ec && ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : NEEDS.write}
+          title={ec && ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : needsWrite(ec)}
           onClick={() => run(() => api.restartService(env, name).then(() => true),
             isAttached(o) ? `${name}: its process restarts.` : `${name}: its replicas restart one at a time, each once the one before is live again.`)
             .then((r) => { if (r) changed(); })}>
           <Icon name="refresh" size={14} /> Restart</button>)}
       {kind === 'job' && o && (
         <button className={manual ? 'primary' : ''} disabled={!ec || !ec.write || busy}
-          title={ec && ec.write ? 'a new run of the job, of the latest deployment' : NEEDS.write}
+          title={ec && ec.write ? 'a new run of the job, of the latest deployment' : needsWrite(ec)}
           onClick={() => run(() => api.runJob(env, name).then(() => true), `${name}: a new run starts.`)
             .then((r) => { if (r) changed(); })}>
           <Icon name="play" size={14} /> Run now</button>)}
       <a className="button" href={builder} onClick={go(builder)}
-        title={ec && ec.write ? `change ${name} in the builder: a draft, planned, applied as the next deployment` : 'read-only: needs write on this environment'}>
+        title={ec && ec.write ? `change ${name} in the builder: a draft, planned, applied as the next deployment`
+          : ec && ec.plan ? 'plan against it: deploying takes a grant on it (protected)' : `read-only: ${needsWrite(ec)}`}>
         <Icon name="blocks" size={14} /> Edit</a>
     </>
   );

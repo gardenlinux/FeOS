@@ -415,7 +415,13 @@ export function integrationRoleText(role, scope = '') {
       ? 'also publishes it and binds its domains'
       : 'also claims and deletes domains and sets the access providers');
   }
-  if (atLeast(role, 'write')) {
+  // On a protected environment (ADR 0060, §2.2): a project grant of
+  // write reads it, alone or for a person, unless a grant on it says
+  // more; admin on the project, or a grant on the environment, changes it
+  // only for a person it names, who may too.
+  if (!env && role === 'write') {
+    lines.push('On a protected environment it reads, alone or for a person, unless it holds a grant on it.');
+  } else if (atLeast(role, 'write')) {
     lines.push('On a protected environment it reads alone; for a person it names it changes what both of you may.');
   }
   lines.push('Never: members, invitations, grants, tokens, the account, making or deleting a project. '

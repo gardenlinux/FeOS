@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { response } from './ferun.js';
 
 // The answers of ferund's people routes (FeOS ADRs 0056, 0059, 0060): the
@@ -104,6 +104,7 @@ const SHAPES = {
       { kind: 'person', id: '0199a1b2-0000-7000-8000-00000000dddd', label: 'Cy <cy@example.com>', projectRole: 'admin', environmentRole: '', losesWrite: false },
       { kind: 'token', id: '3f9a1c2b7d4e00000000000000000000000000000000000000000000000000ff', label: 'landscape release', projectRole: 'write', environmentRole: '', losesWrite: true },
       { kind: 'integration', id: 'fecode', label: 'FeCode', projectRole: 'write', environmentRole: 'write', losesWrite: false },
+      { kind: 'person', id: '0199a1b2-0000-7000-8000-00000000eeee', label: 'Eve <eve@example.com>', projectRole: 'read', environmentRole: '', losesWrite: false },
     ],
   },
   'GET_accounts.200': {
@@ -141,6 +142,23 @@ const SHAPES = {
 
 // WIRE_NAMES are the fixture names of the release's people answers.
 export const WIRE_NAMES = Object.keys(SHAPES);
+
+// WIRE_BY_PACKAGE are the fixtures of §2.16 by the package whose handler
+// tests write them: a package lands all of its own at once, so that a
+// part of them is one named otherwise (wire.test.js).
+export const WIRE_BY_PACKAGE = {
+  F3: ['GET_auth_me.session.200', 'GET_auth_me.operator.200', 'GET_auth_me.token.200', 'GET_auth_me.integration.200',
+    'GET_auth_me.integration_person.200', 'GET_project_members.200', 'GET_integrations.200', 'GET_admin_integrations.200',
+    'PUT_environments_env_protected.200', 'GET_environments_env_principals.200'],
+  F4: ['GET_accounts.200', 'GET_accounts_account.200', 'GET_project_account.200', 'POST_project_move.200',
+    'GET_admin_accounts.200', 'GET_invitations_token.account.200'],
+};
+
+// ferundFixtures are the names of every fixture ferund's tests wrote.
+export function ferundFixtures() {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -'.json'.length));
+}
 
 // fromFerund tells whether ferund's fixture of name exists.
 export function fromFerund(name) {

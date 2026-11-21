@@ -243,12 +243,13 @@ describe('the release\'s answers (FeOS ADRs 0056, 0059, 0060)', () => {
     const explicit = session.accounts.find((a) => a.explicit && !a.closed);
     const implicit = session.accounts.find((a) => !a.explicit);
     expect(accountAccess(session, explicit.name)).toMatchObject({ member: true, role: explicit.role, operator: false });
-    if (implicit) expect(accountAccess(session, implicit.name)).toMatchObject({ member: false, explicit: false });
+    expect(implicit).toBeTruthy();
+    expect(accountAccess(session, implicit.name)).toMatchObject({ member: false, explicit: false });
     expect(accountAccess(session, 'nope').member).toBe(false);
     expect(accountAccess(operator, 'any')).toMatchObject({ member: true, role: 'admin', operator: true });
     expect(viewGate(session, parsePath(`/accounts/${explicit.name}`))).toBe('');
     expect(viewGate(session, parsePath('/accounts/nope'))).toBe('account');
-    if (implicit) expect(viewGate(session, parsePath(`/accounts/${implicit.name}`))).toBe('account');
+    expect(viewGate(session, parsePath(`/accounts/${implicit.name}`))).toBe('account');
     expect(viewGate(operator, parsePath('/accounts/nope'))).toBe('');
     expect(viewGate(session, parsePath('/accounts'))).toBe('');
     expect(viewGate(BASIC, parsePath('/accounts'))).toBe('');
@@ -257,7 +258,8 @@ describe('the release\'s answers (FeOS ADRs 0056, 0059, 0060)', () => {
   it('a project is made on an open account, default first; it moves to an open one but its own', () => {
     const makeOn = accountsToMakeOn(session);
     expect(makeOn.every((a) => !a.closed)).toBe(true);
-    if (makeOn.some((a) => a.name === 'default')) expect(makeOn[0].name).toBe('default');
+    expect(makeOn.some((a) => a.name === 'default')).toBe(true);
+    expect(makeOn[0].name).toBe('default');
     expect(accountsToMakeOn({ accounts: [] })).toEqual([]);
     const list = wire('GET_admin_accounts.200').accounts;
     const targets = moveTargets(list, 'cc-4711');
@@ -304,6 +306,22 @@ describe('the release\'s answers (FeOS ADRs 0056, 0059, 0060)', () => {
     for (const lines of [read, write, admin]) {
       expect(lines[lines.length - 1]).toMatch(/^Never: members, invitations, grants, tokens, the account/);
     }
+  });
+
+  // §2.2: r_int(e) = max(cap(G_int, protected), g_int(e)); write on the
+  // project reads a protected environment, for a person too.
+  it('says what a protected environment leaves each grant of an integration', () => {
+    const PROJECT_WRITE = 'On a protected environment it reads, alone or for a person, unless it holds a grant on it.';
+    const CHANGES_FOR_PERSON = 'On a protected environment it reads alone; for a person it names it changes what both of you may.';
+    expect(integrationRoleText('read')).not.toContain(PROJECT_WRITE);
+    expect(integrationRoleText('read')).not.toContain(CHANGES_FOR_PERSON);
+    expect(integrationRoleText('write')).toContain(PROJECT_WRITE);
+    expect(integrationRoleText('write')).not.toContain(CHANGES_FOR_PERSON);
+    expect(integrationRoleText('admin')).toContain(CHANGES_FOR_PERSON);
+    expect(integrationRoleText('admin')).not.toContain(PROJECT_WRITE);
+    expect(integrationRoleText('write', 'e1')).toContain(CHANGES_FOR_PERSON);
+    expect(integrationRoleText('admin', 'e1')).toContain(CHANGES_FOR_PERSON);
+    expect(integrationRoleText('read', 'e1')).not.toContain(CHANGES_FOR_PERSON);
   });
 
   it('names who gave a grant', () => {

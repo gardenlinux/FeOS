@@ -30,12 +30,16 @@ describe('MyProjects', () => {
     const me = wire('GET_auth_me.session.200');
     const out = html(withMe(me, <MyProjects navigate={nav} />));
     const open = me.accounts.filter((a) => !a.closed);
-    if (open.length > 1) {
-      expect(out).toContain('aria-label="the account"');
-      expect((out.match(/<option /g) || []).length).toBe(open.length);
-    }
+    // The screen's case: more than one open account offers a choice.
+    expect(open.length).toBeGreaterThan(1);
+    expect(out).toContain('aria-label="the account"');
+    expect((out.match(/<option /g) || []).length).toBe(open.length);
     for (const a of me.accounts.filter((x) => x.closed)) expect(out).not.toContain(`<option value="${a.name}"`);
-    for (const p of me.projects) if (p.account) expect(text(withMe(me, <MyProjects navigate={nav} />))).toContain(p.account.title || p.account.name);
+    const t = text(withMe(me, <MyProjects navigate={nav} />));
+    for (const p of me.projects) {
+      expect(p.account).toBeTruthy();
+      expect(t).toContain(p.account.title || p.account.name);
+    }
     expect(out).toContain('Your accounts');
   });
 
@@ -53,8 +57,10 @@ describe('the accounts', () => {
     const me = wire('GET_auth_me.session.200');
     const out = html(<AccountList accounts={me.accounts} navigate={nav} />);
     expect((out.match(/class="clickable"/g) || []).length).toBe(me.accounts.filter((a) => a.explicit).length);
-    if (me.accounts.some((a) => !a.explicit)) expect(out).toContain('open to you');
-    if (me.accounts.some((a) => a.closed)) expect(out).toContain('closed: takes no new project');
+    expect(me.accounts.some((a) => !a.explicit)).toBe(true);
+    expect(out).toContain('open to you');
+    expect(me.accounts.some((a) => a.closed)).toBe(true);
+    expect(out).toContain('closed: takes no new project');
     expect(text(withMe(me, <Accounts navigate={nav} />))).toContain('Your accounts');
   });
 
@@ -124,6 +130,11 @@ describe('registering an integration', () => {
     expect(integrationProblem({ ...ok, url: 'http://x' })).toContain('https://');
     expect(integrationProblem({ ...ok, url: '' })).toBe('');
     expect(integrationProblem({ ...ok, subject: ' ' })).toContain('subject');
+    // A new one never re-points a registered one (the PUT is an upsert).
+    expect(integrationProblem(ok, { isNew: true, taken: ['fecode'] })).toBe('fecode is registered: edit it');
+    expect(integrationProblem({ ...ok, name: ' fecode ' }, { isNew: true, taken: ['fecode'] })).toContain('is registered');
+    expect(integrationProblem(ok, { isNew: false, taken: ['fecode'] })).toBe('');
+    expect(integrationProblem(ok, { isNew: true, taken: ['other'] })).toBe('');
     expect(INTEGRATION_NAME.test('a')).toBe(true);
     expect(INTEGRATION_NAME.test('-a')).toBe(false);
     for (const i of wire('GET_admin_integrations.200').integrations) {

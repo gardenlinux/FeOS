@@ -44,9 +44,10 @@ export function Accounts({ navigate }) {
   );
 }
 
-// OperatorAccounts is every account, for the platform's operators.
-function OperatorAccounts({ navigate }) {
-  const [list, setList] = useState(null);
+// OperatorAccounts is every account, for the platform's operators;
+// initial is GET /api/v1/admin/accounts's list when it is read already.
+export function OperatorAccounts({ navigate, initial = null }) {
+  const [list, setList] = useState(initial);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
   const [showCreate, setShowCreate] = useState(() => new URLSearchParams(location.search).has('new'));

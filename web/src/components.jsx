@@ -171,6 +171,7 @@ export function ArmButton({ armKey, armed, arm, disarm, onConfirm, className = '
       className={className + ' danger' + (isArmed ? ' armed' : '')}
       disabled={disabled}
       title={title}
+      aria-label={!isArmed && !children && title ? title : undefined}
       onClick={(e) => {
         e.stopPropagation();
         if (!isArmed) { arm(armKey); return; }

@@ -31,11 +31,12 @@ export function accountPageFacts(page) {
   };
 }
 
-export function Account({ name, navigate }) {
+// initial is the account's page when it is read already.
+export function Account({ name, navigate, initial = null }) {
   const { me, reload } = useMe();
   const acc = accountAccess(me, name);
   const operator = acc.operator;
-  const [page, setPage] = useState(null);
+  const [page, setPage] = useState(initial);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
   const [people, setPeople] = useState(null);
@@ -47,7 +48,7 @@ export function Account({ name, navigate }) {
       setErr('');
     } catch (e) {
       if (notAvailable(e)) setMissing(true);
-      else setErr(e.status === 404 ? `There is no account ${name} whose page you may read.` : e.message);
+      else setErr(e.message);
     }
   }, [name, operator]);
   const lastOk = usePoll(refresh, 15000);

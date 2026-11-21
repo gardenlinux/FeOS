@@ -16,6 +16,10 @@ import { Fact, PageHead } from './platformParts.jsx';
 // (every grant stops at once), enables and removes it. FeRun keeps no
 // secret of one: its client's secret is the provider's.
 
+// INTEGRATIONS_UNAVAILABLE is the code of ferund's 503 when it verifies
+// no provider's tokens (§2.13).
+export const INTEGRATIONS_UNAVAILABLE = 'integrations_unavailable';
+
 // INTEGRATION_NAME is the rule of an integration's name.
 export const INTEGRATION_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
@@ -26,9 +30,12 @@ export function integrationForm(i) {
 }
 
 // integrationProblem is what is wrong with a form, '' when ferund may be
-// asked: the name's rule, an https URL or none, a subject.
-export function integrationProblem(f) {
+// asked: the name's rule, a name not registered yet for a new one (the
+// PUT changes a registered one, ADR 0056), an https URL or none, a
+// subject.
+export function integrationProblem(f, { isNew = false, taken = [] } = {}) {
   if (!INTEGRATION_NAME.test(f.name.trim())) return 'a name of lowercase letters, digits and \'-\', at most 63';
+  if (isNew && taken.includes(f.name.trim())) return `${f.name.trim()} is registered: edit it`;
   const url = f.url.trim();
   if (url && !/^https:\/\/\S+$/.test(url)) return 'the URL is an https:// URL, or none';
   if (!f.subject.trim()) return 'the subject of its client at the provider';
@@ -36,9 +43,12 @@ export function integrationProblem(f) {
   return '';
 }
 
-export function Integrations() {
-  const [list, setList] = useState(null);
+// Integrations is the operators' page; initial is GET
+// /api/v1/admin/integrations's list when it is read already.
+export function Integrations({ initial = null }) {
+  const [list, setList] = useState(initial);
   const [err, setErr] = useState('');
+  const [errCode, setErrCode] = useState('');
   const [missing, setMissing] = useState(false);
   const [edit, setEdit] = useState(null); // {form, isNew}
   const [armed, arm, disarm] = useArm();
@@ -48,9 +58,13 @@ export function Integrations() {
     try {
       setList((await api.adminListIntegrations()).integrations || []);
       setErr('');
+      setErrCode('');
     } catch (e) {
       if (notAvailable(e)) setMissing(true);
-      else setErr(e.status === 503 ? 'This installation verifies no provider\'s tokens (--oidc-issuer): it takes no integration.' : e.message);
+      else {
+        setErr(e.message);
+        setErrCode((e.body && e.body.code) || '');
+      }
     }
   }, []);
   const lastOk = usePoll(refresh, 15000);
@@ -78,7 +92,7 @@ export function Integrations() {
 
       {edit && (
         <section className="pane">
-          <IntegrationForm initial={edit.form} isNew={edit.isNew} onCancel={() => setEdit(null)}
+          <IntegrationForm initial={edit.form} isNew={edit.isNew} taken={all.map((i) => i.name)} onCancel={() => setEdit(null)}
             onSave={async (f) => {
               await api.adminPutIntegration(f.name.trim(), {
                 title: f.title.trim(), url: f.url.trim(), issuer: f.issuer.trim(), subject: f.subject.trim(),
@@ -90,6 +104,8 @@ export function Integrations() {
 
       <section className="pane">
         <ErrBox error={err} />
+        {err && errCode === INTEGRATIONS_UNAVAILABLE && (
+          <p className="muted small">This installation verifies no provider&apos;s tokens (--oidc-issuer): it takes no integration.</p>)}
         {missing && <p className="empty">This ferund has no integrations yet.</p>}
         {!missing && (
           <div className="tblwrap"><table className="tbl">
@@ -142,12 +158,12 @@ export function Integrations() {
 
 // IntegrationForm registers an integration or changes one (its name is
 // fixed once registered).
-export function IntegrationForm({ initial, isNew, onSave, onCancel }) {
+export function IntegrationForm({ initial, isNew, taken = [], onSave, onCancel }) {
   const [f, setF] = useState(initial);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const problem = integrationProblem(f);
+  const problem = integrationProblem(f, { isNew, taken });
   return (
     <form onSubmit={async (e) => {
       e.preventDefault();

@@ -382,6 +382,10 @@ export function draftWords({ isNew = false, readOnly = false, base = 0, latest =
   return { title: `Draft of deployment ${latest + 1}`, from, behind: latest > base ? latest : 0, count, next: latest + 1 };
 }
 
+// PROTECTED_DEPLOY says why a plan-only builder deploys nothing (ADR
+// 0060): the deploy's blocker and the builder's notice alike.
+export const PROTECTED_DEPLOY = 'protected: deploying here needs a grant on this environment, or admin on the project';
+
 // deployBlock is why a draft cannot be deployed yet, '' when it can:
 // in the order a person fixes them; planOnly, a protected environment's
 // for one ferund lets plan but not deploy, before everything.
@@ -390,7 +394,7 @@ export function deployBlock({ isNew = false, name = '', planning = false, answer
   if (busy) return 'deploying…';
   // A protected environment's plan-only builder (ADR 0060) plans, and
   // deploys nothing.
-  if (planOnly) return 'protected: deploying here needs a grant on this environment';
+  if (planOnly) return PROTECTED_DEPLOY;
   if (isNew && !isDnsLabel(name)) return 'name the environment first';
   if (conflicts > 0) return 'decide the conflicts first';
   if (planning || !answer) return 'planning…';

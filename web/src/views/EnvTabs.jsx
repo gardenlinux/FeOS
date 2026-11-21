@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, Secret, useArm, usePoll } from '../components.jsx';
@@ -809,49 +809,118 @@ export function grantOf(p, environment, role = 'write') {
 // PRINCIPAL_KINDS name the kinds of principals in the dialog.
 const PRINCIPAL_KINDS = { person: 'person', token: 'project token', integration: 'integration' };
 
+// principalKey is a principal's key in the dialog's ticks.
+export function principalKey(p) {
+  return `${p.kind}/${p.id}`;
+}
+
+// offersGrant tells whether the dialog offers a principal a grant write
+// on the environment (ADR 0060: each of them): every one of a kind with a
+// grant route, but one that holds write or admin on it already, or admin
+// on the project (which changes it protected or not).
+export function offersGrant(p) {
+  return !!grantOf(p, '') && !['write', 'admin'].includes(p.environmentRole) && p.projectRole !== 'admin';
+}
+
+// defaultTicks are the dialog's ticks as it opens: those that lose write
+// by the protection (losesWrite, ferund's).
+export function defaultTicks(list) {
+  return Object.fromEntries((list || []).filter((p) => p.losesWrite && offersGrant(p)).map((p) => [principalKey(p), true]));
+}
+
+// protectEnvironment gives the ticked principals their grant write on the
+// environment (its ID), one after the other, then protects it (env, its
+// name). The first failure stops it: grants given stay, and the
+// environment is not protected.
+export async function protectEnvironment(list, give, environment, env) {
+  for (const p of list || []) {
+    const fn = give[principalKey(p)] && offersGrant(p) ? grantOf(p, environment) : null;
+    if (fn) await fn();
+  }
+  await api.setProtected(env, true);
+}
+
+// FOCUSABLE are the elements Tab reaches inside a dialog.
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
 // ProtectDialog names everyone with a grant in the project (ferund's
 // principals), marks those who change the environment today by a project
 // grant of write and read it once it is protected (losesWrite, ferund's),
-// and offers each of them a grant write on it, ticked by default. Protect
-// gives the ticked grants first, then protects.
+// and offers each who has no write on it otherwise a grant write on it,
+// ticked by default for those who lose write. Protect gives the ticked
+// grants first, then protects. It is modal: focus moves in, stays in, and
+// returns to what opened it; while it works it does not close.
 export function ProtectDialog({ env, st, onClose, onDone }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState('');
   const [give, setGive] = useState({});
   const [busy, setBusy] = useState(false);
+  const box = useRef(null);
+  const busyNow = useRef(false);
+  busyNow.current = busy;
   useEffect(() => {
     let live = true;
     api.envPrincipals(env).then((r) => {
       if (!live) return;
       const ps = r.principals || [];
       setList(ps);
-      setGive(Object.fromEntries(ps.filter((p) => p.losesWrite).map((p) => [`${p.kind}/${p.id}`, true])));
+      setGive(defaultTicks(ps));
     }, (e) => { if (live) setErr(e.message); });
     return () => { live = false; };
   }, [env]);
+  // Focus moves into the dialog and back to its opener when it closes.
   useEffect(() => {
-    const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
-    window.addEventListener('keydown', esc, true);
-    return () => window.removeEventListener('keydown', esc, true);
+    const opener = document.activeElement;
+    if (box.current) box.current.focus();
+    return () => {
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+    };
+  }, []);
+  // Once the list is read: the first tick, else Protect.
+  useEffect(() => {
+    if (!list || !box.current) return;
+    const first = box.current.querySelector('input[type="checkbox"]:not([disabled])') || box.current.querySelector('button.primary:not([disabled])');
+    if (first) first.focus();
+  }, [list]);
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (!busyNow.current) onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !box.current) return;
+      const all = [...box.current.querySelectorAll(FOCUSABLE)];
+      if (all.length === 0) { e.preventDefault(); box.current.focus(); return; }
+      const first = all[0];
+      const last = all[all.length - 1];
+      const at = document.activeElement;
+      if (e.shiftKey && (at === first || !box.current.contains(at) || at === box.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
   }, [onClose]);
   const protect = async () => {
     setBusy(true);
     setErr('');
     try {
-      for (const p of list || []) {
-        const fn = give[`${p.kind}/${p.id}`] ? grantOf(p, st.id) : null;
-        if (fn) await fn();
-      }
-      await api.setProtected(env, true);
+      await protectEnvironment(list, give, st.id, env);
       onDone();
     } catch (e) {
-      setErr(e.message);
+      setErr(`${e.message} Grants given so far stay; ${st.name} is not protected yet.`);
       setBusy(false);
     }
   };
   return (
-    <div className="palette-back" onMouseDown={onClose}>
-      <div className="palette dialog" role="dialog" aria-label={`Protect ${st.name}`} onMouseDown={(e) => e.stopPropagation()}>
+    <div className="palette-back" onMouseDown={() => { if (!busyNow.current) onClose(); }}>
+      <div className="palette dialog" role="dialog" aria-modal="true" aria-label={`Protect ${st.name}`} tabIndex={-1} ref={box}
+        onMouseDown={(e) => e.stopPropagation()}>
         <h3><Icon name="shield" size={16} /> Protect <span className="mono">{st.name}</span></h3>
         <ProtectPrincipals list={list} give={give} setGive={setGive} env={st.name} />
         <ErrBox error={err} />
@@ -865,24 +934,26 @@ export function ProtectDialog({ env, st, onClose, onDone }) {
 }
 
 // ProtectPrincipals is the dialog's body: who loses write by the
-// protection, with a grant offered each, and everyone else who holds a
-// grant in the project.
+// protection, then everyone else who holds a grant in the project; each
+// without write on it otherwise is offered a grant write on it.
 export function ProtectPrincipals({ list, give, setGive, env }) {
   if (!list) return <p className="empty">Reading who holds a grant…</p>;
   const losers = list.filter((p) => p.losesWrite);
   const rest = list.filter((p) => !p.losesWrite);
   const row = (p) => {
-    const key = `${p.kind}/${p.id}`;
+    const key = principalKey(p);
+    const who = p.label || p.id;
     return (
       <tr key={key}>
-        <td><span className="principal-kind">{PRINCIPAL_KINDS[p.kind] || p.kind}</span><div>{p.label || p.id}</div></td>
+        <td><span className="principal-kind">{PRINCIPAL_KINDS[p.kind] || p.kind}</span><div>{who}</div></td>
         <td className="small">project {p.projectRole || '—'}{p.environmentRole ? ` · ${env} ${p.environmentRole}` : ''}</td>
         <td className="small">
-          {p.losesWrite ? (
+          {offersGrant(p) ? (
             <label>
-              <input type="checkbox" checked={!!give[key]} onChange={(e) => setGive((g) => ({ ...g, [key]: e.target.checked }))} />
+              <input type="checkbox" checked={!!give[key]} aria-label={`give ${who} write on ${env}`}
+                onChange={(e) => setGive((g) => ({ ...g, [key]: e.target.checked }))} />
               {' '}give write on {env}
-              {p.kind === 'token' && <div className="muted small">without it the token stops deploying here</div>}
+              {p.kind === 'token' && p.losesWrite && <div className="muted small">without it the token stops deploying here</div>}
               {p.kind === 'integration' && <div className="muted small">an integration then changes it only for a person it names who may</div>}
             </label>)
             : <span className="muted">keeps what it has</span>}

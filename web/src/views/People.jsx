@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, notAvailable } from '../api.js';
 import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, LiveBadge, PageHead, Secret, useArm, useNow, usePoll } from '../components.jsx';
@@ -332,8 +332,18 @@ export function Members({ project, navigate }) {
 // reads it.
 export function IntegrationsPane({ list, access, envs, adminEnvs, act, preselect }) {
   const c = access.can;
-  const mayGrant = c.adminProject || adminEnvs.length > 0;
+  // Who may grant is /auth/me's, known at once; which environments the
+  // form offers comes with their list.
+  const mayGrant = c.adminProject || (access.environments || []).some((e) => e.role === 'admin');
   const [adding, setAdding] = useState(!!preselect && mayGrant);
+  // ?integration=<name> opens the form once the sign-in may grant, should
+  // /auth/me be read after the first render.
+  const opened = useRef(!!preselect && mayGrant);
+  useEffect(() => {
+    if (!preselect || !mayGrant || opened.current) return;
+    opened.current = true;
+    setAdding(true);
+  }, [preselect, mayGrant]);
   const envAdmin = (id) => c.adminProject || adminEnvs.some((e) => e.id === id);
   return (
     <section className="pane">
@@ -808,12 +818,24 @@ export function QuotaCard() {
 
 // ------------------------------------------------------------ invitation --
 
+// acceptedPath is where an accepted invitation leads: an account's
+// (ADR 0059) to its page, a project's to the project as me now sees it,
+// else the projects. res is the acceptance's answer, inv the preview.
+export function acceptedPath(res, inv, me) {
+  const account = (res && res.account) || (inv && inv.account) || '';
+  const accountName = typeof account === 'string' ? account : account.name || '';
+  if (accountName) return `/accounts/${encodeURIComponent(accountName)}`;
+  const name = (res && res.project) || (inv && inv.project) || '';
+  return name ? projectHome(projectAccess(me, name)) : '/projects';
+}
+
 // InviteAccept is /invite/<token>: what the invitation grants, and its
 // acceptance by the signed-in person. Signed out, the sign-in brings the
 // browser back here.
-export function InviteAccept({ token, navigate }) {
+// initial is the invitation's preview when it is read already.
+export function InviteAccept({ token, navigate, initial = null }) {
   const { me, reload } = useMe();
-  const [inv, setInv] = useState(null);
+  const [inv, setInv] = useState(initial);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const basic = me && me.method === 'basic';
@@ -834,15 +856,7 @@ export function InviteAccept({ token, navigate }) {
     try {
       const res = await api.acceptInvitation(token);
       const fresh = await reload();
-      // An account's invitation (ADR 0059) leads to its page.
-      const account = (res && res.account) || (inv && inv.account && inv.account.name) || '';
-      const accountName = typeof account === 'string' ? account : account.name || '';
-      if (accountName) {
-        navigate(`/accounts/${encodeURIComponent(accountName)}`);
-        return;
-      }
-      const name = (res && res.project) || (inv && inv.project) || '';
-      navigate(name ? projectHome(projectAccess(fresh || me, name)) : '/projects');
+      navigate(acceptedPath(res, inv, fresh || me));
     } catch (e) {
       if (notAvailable(e)) setErr('Invitations are not available on this ferund yet.');
       else if (e.status === 404) setErr('This invitation is not valid: used, expired or revoked.');
@@ -871,7 +885,7 @@ export function InviteAccept({ token, navigate }) {
               {inv.expiresAt && <span className="muted small"> Valid until {fmtDate(inv.expiresAt)}.</span>}
             </p>
           ) : !err && <p className="muted">Someone passed you a link to a project or an account of this FeRun.</p>}
-          <p className="muted small">Signed in as {(me && (me.name || me.email)) || 'you'}. Accepting gives this account the grant.</p>
+          <p className="muted small">Signed in as {(me && (me.name || me.email)) || 'you'}. Accepting gives you the role.</p>
           <div className="actionrow">
             <button className="primary" disabled={busy || !token} onClick={accept}><Icon name="check" size={14} /> Accept</button>
             <button className="ghost" onClick={() => navigate('/projects')}>Not now</button>

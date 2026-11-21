@@ -11,7 +11,7 @@ import { mayBuild, mayPlan, useAccess, useMe } from '../people.js';
 import { admitsWords, fmtValue, heavyEffect, statusState } from './envs.js';
 import {
   addService, decodeDraft, deployBlock, draftKey, draftWords, encodeDraft, getObject, isDnsLabel, isObject, isSecretName,
-  keyOfKind, newEnvID, objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
+  keyOfKind, newEnvID, PROTECTED_DEPLOY, objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
 } from './draft.js';
 import { refLine, referencesTo, removeWithRefs, secretNames } from './refs.js';
 import { groupFindings, severityCounts, unitKey, worst } from './findings.js';
@@ -116,8 +116,8 @@ function AddAddonButton({ catalog, onAdd }) {
   );
 }
 
-// PROTECTED_DEPLOY says why a plan-only builder deploys nothing (ADR 0060).
-const PROTECTED_DEPLOY = 'Protected: deploying here needs a grant on this environment, or admin on the project.';
+// PROTECTED_NOTICE is draft.js's PROTECTED_DEPLOY as a sentence.
+const PROTECTED_NOTICE = `${PROTECTED_DEPLOY[0].toUpperCase()}${PROTECTED_DEPLOY.slice(1)}.`;
 
 // ---------------------------------------------------------------- builder --
 
@@ -302,7 +302,7 @@ export function Builder({ project, env, st, navigate, item = '' }) {
   // first apply writes it.
   const setSecret = useCallback(async (name, value) => {
     if (readOnly) throw new Error('Your role does not allow this: it needs write on this environment.');
-    if (planOnly) throw new Error(PROTECTED_DEPLOY);
+    if (planOnly) throw new Error(PROTECTED_NOTICE);
     if (!isSecretName(name)) throw new Error(`${name} is not a secret name: a-z, 0-9, '.', '_' and '-'`);
     if (isNew) {
       pending.current.set(name, value);
@@ -512,7 +512,7 @@ function Band({ words, readOnly, planOnly = false, isNew, draft, plan, planning,
                 : answer ? <span className="muted"><Icon name="check" size={11} /> the plan accepts it</span> : null)}
           <span className="muted">{readOnly
             ? 'Your role does not allow changes here: it needs write on this environment. You see the latest deployment\'s spec.'
-            : planOnly ? `${PROTECTED_DEPLOY} You plan against it; the draft is kept in this browser.`
+            : planOnly ? `${PROTECTED_NOTICE} You plan against it; the draft is kept in this browser.`
             : isNew ? 'Nothing exists until you deploy. The draft is kept in this browser.'
               : 'Nothing changes in the environment until you deploy. The draft is kept in this browser.'}</span>
         </div>

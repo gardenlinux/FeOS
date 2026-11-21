@@ -277,10 +277,11 @@ export function ProjectSettings({ project, navigate }) {
 // put projects on another open account, or an operator, the move. Every
 // member reads it; a move changes who is charged from that moment, and
 // nothing else.
-export function ProjectAccount({ project, access }) {
+// initial is GET /api/v1/project/account's answer when it is read already.
+export function ProjectAccount({ project, access, initial = null }) {
   const { me, reload } = useMe();
   const c = access.can;
-  const [info, setInfo] = useState(null);
+  const [info, setInfo] = useState(initial);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
   const [target, setTarget] = useState('');
