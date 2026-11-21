@@ -42,6 +42,23 @@ func codeOf(t *testing.T, w *httptest.ResponseRecorder) string {
 	return decode[struct{ Code string }](t, w).Code
 }
 
+// The provider's keys out of reach: an integration's bearer is 502
+// provider_unreachable, not a refusal.
+func TestIntegrationProviderUnreachable(t *testing.T) {
+	t.Parallel()
+	w := newPeopleWorld(t, envOptions{})
+	expect(t, w.e.do("PUT", "/api/v1/admin/integrations/fecode", adminAuth(), map[string]any{"subject": "client-fecode"}),
+		http.StatusCreated, "")
+	jwt := w.p.AccessToken("client-fecode", map[string]any{"aud": testPublicURL})
+	w.p.Mu.Lock()
+	w.p.JWKSDown = true
+	w.p.Mu.Unlock()
+	expect(t, w.e.serve(asIntegration("GET", "/api/v1/project", jwt, testProject, "", nil)), http.StatusBadGateway,
+		`{"error":"the provider's keys cannot be read","code":"provider_unreachable"}`+"\n")
+	expect(t, w.e.do("GET", "/auth/me", bearerOf(jwt), nil), http.StatusBadGateway,
+		`{"error":"the provider's keys cannot be read","code":"provider_unreachable"}`+"\n")
+}
+
 // An operator registers an integration, which then signs in with the
 // provider's access token: a token of another audience, a person's token
 // and the token of no registered integration open nothing; a project that

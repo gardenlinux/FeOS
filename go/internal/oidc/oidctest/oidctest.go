@@ -140,6 +140,11 @@ type Provider struct {
 	Mutate      func(claims, header map[string]any)
 	Corrupt     func(token string) string
 	JWKSFetches int
+	// DiscoveryFetches counts the discovery document's fetches.
+	DiscoveryFetches int
+	// DiscoveryDown and JWKSDown make discovery and the key set answer
+	// 503.
+	DiscoveryDown, JWKSDown bool
 	// UserinfoSub overrides the sub of userinfo.
 	UserinfoSub string
 }
@@ -172,6 +177,11 @@ func New(t *testing.T, alg string) *Provider {
 func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
+	p.DiscoveryFetches++
+	if p.DiscoveryDown {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+		return
+	}
 	iss := p.Issuer
 	if p.DiscoveryIssuer != "" {
 		iss = p.DiscoveryIssuer
@@ -193,6 +203,10 @@ func (p *Provider) jwks(w http.ResponseWriter, _ *http.Request) {
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
 	p.JWKSFetches++
+	if p.JWKSDown {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+		return
+	}
 	keys := []map[string]string{}
 	for _, k := range p.Published {
 		keys = append(keys, k.JWK())

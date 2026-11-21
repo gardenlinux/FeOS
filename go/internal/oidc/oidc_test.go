@@ -160,7 +160,8 @@ func TestVerifyAccessToken(t *testing.T) {
 		{"expired", "the token has expired", map[string]any{"exp": now - 120}, aud},
 		{"no exp", "the token has expired", map[string]any{"exp": nil}, aud},
 		{"nbf ahead", "the token is not valid yet (nbf)", map[string]any{"nbf": now + 600}, aud},
-		{"iat ahead", "the token is issued in the future", map[string]any{"iat": now + 600}, aud},
+		{"iat ahead", "the token has no iat or is issued in the future", map[string]any{"iat": now + 600}, aud},
+		{"no iat", "the token has no iat or is issued in the future", map[string]any{"iat": nil}, aud},
 		{"a person's", "the token is not a client's own (client_id is not sub)", map[string]any{"client_id": "fecode"}, aud},
 		{"no client_id", "the token is not a client's own (client_id is not sub)", map[string]any{"client_id": nil}, aud},
 		{"no subject", "the token names no subject", map[string]any{"sub": nil, "client_id": nil}, aud},
@@ -215,5 +216,55 @@ func TestVerifyAccessToken(t *testing.T) {
 	var pe *ErrProvider
 	if _, err := down.VerifyAccessToken(ctx, tok, aud); !errors.As(err, &pe) {
 		t.Fatalf("provider down: %v", err)
+	}
+}
+
+// A failed discovery, and a failed fetch of the key set while none is
+// held, answer every token for failedRetryAfter without asking the
+// provider again; then it is asked once more.
+func TestProviderFailureKept(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := oidctest.New(t, AlgRS256)
+	var mu sync.Mutex
+	clock := time.Now()
+	advance := func(d time.Duration) { mu.Lock(); clock = clock.Add(d); mu.Unlock() }
+	rp := New(Config{Issuer: p.Issuer, ClientID: p.ClientID, ClientSecret: p.ClientSecret, HTTPClient: p.Client,
+		Now: func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }})
+	const aud = oidctest.AccessAudience
+	tok := p.AccessToken("client-1", nil)
+	fetches := func() (int, int) { p.Mu.Lock(); defer p.Mu.Unlock(); return p.DiscoveryFetches, p.JWKSFetches }
+	set := func(disc, jwks bool) { p.Mu.Lock(); p.DiscoveryDown, p.JWKSDown = disc, jwks; p.Mu.Unlock() }
+	var pe *ErrProvider
+	set(true, false)
+	for range 3 {
+		if _, err := rp.VerifyAccessToken(ctx, tok, aud); !errors.As(err, &pe) {
+			t.Fatalf("discovery down: %v", err)
+		}
+	}
+	if d, _ := fetches(); d != 1 {
+		t.Errorf("%d discovery fetches while it failed, want 1", d)
+	}
+	set(false, true)
+	advance(failedRetryAfter)
+	for range 3 {
+		if _, err := rp.VerifyAccessToken(ctx, tok, aud); !errors.As(err, &pe) {
+			t.Fatalf("key set down: %v", err)
+		}
+	}
+	if d, k := fetches(); d != 2 || k != 1 {
+		t.Errorf("%d discovery and %d key set fetches, want 2 and 1", d, k)
+	}
+	set(false, false)
+	advance(failedRetryAfter - time.Second)
+	if _, err := rp.VerifyAccessToken(ctx, tok, aud); !errors.As(err, &pe) {
+		t.Fatalf("within failedRetryAfter: %v", err)
+	}
+	advance(time.Second)
+	if _, err := rp.VerifyAccessToken(ctx, tok, aud); err != nil {
+		t.Fatalf("after failedRetryAfter: %v", err)
+	}
+	if _, k := fetches(); k != 2 {
+		t.Errorf("%d key set fetches, want 2", k)
 	}
 }
