@@ -18,10 +18,6 @@ import (
 	"sync"
 )
 
-// ErrNotImplemented is the error of a function that a later lane
-// implements.
-var ErrNotImplemented = errors.New("spec: not implemented yet")
-
 // maxDepth bounds how deeply a spec's JSON may nest: far beyond any spec,
 // low enough that a hostile one cannot make the reader recurse without
 // end.
@@ -76,34 +72,6 @@ func syntaxFinding(err error) Finding {
 	}
 	return Finding{Severity: SeverityError, Path: "", Problem: "the spec is not valid JSON: " + msg,
 		Remedy: "send the spec as one JSON object"}
-}
-
-// EqualNormalised reports whether two normalised specs are the same
-// deployment: their canonical JSON (map keys sorted by the encoder) is
-// equal, a deploy job's on in either word. Specs that are not normalised
-// may differ only in form.
-func EqualNormalised(a, b Spec) bool {
-	ja, errA := json.Marshal(oneJobWord(a))
-	jb, errB := json.Marshal(oneJobWord(b))
-	return errA == nil && errB == nil && string(ja) == string(jb)
-}
-
-// oneJobWord is s with each deploy job's On JobOnDeploy, whichever word
-// it was stored in (JobOnStored), so that two versions in a rolling
-// deploy, which store different words, see the same spec.
-func oneJobWord(s Spec) Spec {
-	if len(s.Jobs) == 0 {
-		return s
-	}
-	jobs := make(map[string]Job, len(s.Jobs))
-	for name, j := range s.Jobs {
-		if IsJobOnDeploy(j.On) {
-			j.On = JobOnDeploy
-		}
-		jobs[name] = j
-	}
-	s.Jobs = jobs
-	return s
 }
 
 // SortFindings orders findings by path, keeping the order of those of one

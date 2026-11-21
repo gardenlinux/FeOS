@@ -1336,3 +1336,6 @@ func ReferencedHTTP(s Spec) []string {
 	}
 	return slices.Sorted(maps.Keys(set))
 }
+
+// index is path's list element i: "a[2]", as Parse writes it.
+func index(path string, i int) string { return path + "[" + strconv.Itoa(i) + "]" }

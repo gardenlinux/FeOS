@@ -137,7 +137,7 @@ func TestSpecRoundTrip(t *testing.T) {
 	}
 	var again Spec
 	strictUnmarshal(t, out, &again)
-	if !EqualNormalised(s, again) {
+	if back, err := json.Marshal(again); err != nil || string(back) != string(out) {
 		t.Fatal("a spec does not survive its own encoding")
 	}
 }

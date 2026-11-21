@@ -298,3 +298,31 @@ func Hash(s Spec) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
+
+// EqualNormalised reports whether two normalised specs are the same
+// deployment: their canonical JSON (map keys sorted by the encoder) is
+// equal, a deploy job's on in either word. Specs that are not normalised
+// may differ only in form.
+func EqualNormalised(a, b Spec) bool {
+	ja, errA := json.Marshal(oneJobWord(a))
+	jb, errB := json.Marshal(oneJobWord(b))
+	return errA == nil && errB == nil && string(ja) == string(jb)
+}
+
+// oneJobWord is s with each deploy job's On JobOnDeploy, whichever word
+// it was stored in (JobOnStored), so that two versions in a rolling
+// deploy, which store different words, see the same spec.
+func oneJobWord(s Spec) Spec {
+	if len(s.Jobs) == 0 {
+		return s
+	}
+	jobs := make(map[string]Job, len(s.Jobs))
+	for name, j := range s.Jobs {
+		if IsJobOnDeploy(j.On) {
+			j.On = JobOnDeploy
+		}
+		jobs[name] = j
+	}
+	s.Jobs = jobs
+	return s
+}

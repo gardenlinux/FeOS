@@ -1,0 +1,198 @@
+{
+  "services": {
+    "approval-service": {
+      "runtime": "image",
+      "image": "ghcr.io/acme/approval@sha256:11cdf88d1c2c3802016199fb7e7e2a5377ed51b81855411f3f5840fe9d703e93",
+      "imageAsWritten": "ghcr.io/acme/approval:1.2",
+      "command": [
+        "/app/approval-service"
+      ],
+      "env": {
+        "APPROVAL_DATABASE_URL": {
+          "addon": "postgres",
+          "database": "expensa",
+          "key": "url",
+          "role": "approval_svc"
+        },
+        "APPROVAL_HTTP_ADDR": "[::]:8080",
+        "APPROVAL_INTERNAL_TOKEN": {
+          "secret": "internal-token"
+        }
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 8080
+        }
+      ],
+      "replicas": 1,
+      "resources": {
+        "vcpus": 1,
+        "memoryMib": 512
+      },
+      "readiness": {
+        "http": {
+          "port": "http",
+          "path": "/readyz"
+        },
+        "initialDelay": "0s",
+        "period": "2s",
+        "failureThreshold": 3
+      },
+      "rollout": {
+        "timeout": "10m0s"
+      }
+    },
+    "expense-service": {
+      "runtime": "image",
+      "image": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a",
+      "imageAsWritten": "ghcr.io/acme/expense:1.4",
+      "command": [
+        "/app/expense-service"
+      ],
+      "env": {
+        "EXPENSA_APPROVAL_URL": {
+          "service": "approval-service",
+          "port": "http",
+          "key": "url"
+        },
+        "EXPENSA_DATABASE_URL": {
+          "addon": "postgres",
+          "database": "expensa",
+          "key": "url",
+          "role": "expense_svc"
+        },
+        "EXPENSA_HTTP_ADDR": "[::]:8080",
+        "EXPENSA_INTERNAL_TOKEN": {
+          "secret": "internal-token"
+        },
+        "EXPENSA_NATS_URL": {
+          "addon": "nats",
+          "key": "url"
+        }
+      },
+      "ports": [
+        {
+          "name": "http",
+          "port": 8080
+        }
+      ],
+      "replicas": 2,
+      "resources": {
+        "vcpus": 1,
+        "memoryMib": 512
+      },
+      "readiness": {
+        "http": {
+          "port": "http",
+          "path": "/readyz"
+        },
+        "initialDelay": "0s",
+        "period": "2s",
+        "failureThreshold": 3
+      },
+      "rollout": {
+        "timeout": "10m0s"
+      }
+    },
+    "web": {
+      "runtime": "image",
+      "image": "ghcr.io/acme/expensa-web@sha256:de2feb13b0b780dd0dfd7aa32bcd02b306a4680f4958f896b3347f3ba3521a81",
+      "imageAsWritten": "ghcr.io/acme/expensa-web:1.4",
+      "ports": [
+        {
+          "name": "http",
+          "port": 8080
+        }
+      ],
+      "replicas": 1,
+      "resources": {
+        "vcpus": 1,
+        "memoryMib": 512
+      },
+      "readiness": {
+        "http": {
+          "port": "http",
+          "path": "/readyz"
+        },
+        "initialDelay": "0s",
+        "period": "2s",
+        "failureThreshold": 3
+      },
+      "rollout": {
+        "timeout": "10m0s"
+      }
+    }
+  },
+  "jobs": {
+    "migrate": {
+      "image": "ghcr.io/acme/expense@sha256:863e2ebe9c3820e6d1b20ef70fdb2bebe152f5f0fbbddb7c7e5f5144c438658a",
+      "imageAsWritten": "ghcr.io/acme/expense:1.4",
+      "command": [
+        "/app/expense-service",
+        "migrate"
+      ],
+      "env": {
+        "EXPENSA_DATABASE_URL": {
+          "addon": "postgres",
+          "database": "expensa",
+          "key": "url",
+          "role": "expense_svc"
+        }
+      },
+      "resources": {
+        "vcpus": 1,
+        "memoryMib": 512
+      },
+      "on": "deploy",
+      "timeout": "10m0s",
+      "retries": 1
+    }
+  },
+  "addons": {
+    "nats": {
+      "type": "nats",
+      "version": "2",
+      "plan": "small",
+      "options": {
+        "jetstream": true
+      }
+    },
+    "postgres": {
+      "type": "postgres",
+      "version": "17",
+      "plan": "small",
+      "options": {
+        "databases": [
+          "expensa"
+        ],
+        "roles": [
+          "expense_svc",
+          "approval_svc"
+        ]
+      }
+    }
+  },
+  "routes": {
+    "api-approval": {
+      "path": "/api/approval",
+      "service": "approval-service",
+      "port": "http"
+    },
+    "api-expense": {
+      "path": "/api/expense",
+      "service": "expense-service",
+      "port": "http"
+    },
+    "root": {
+      "path": "/",
+      "service": "web",
+      "port": "http"
+    }
+  },
+  "secrets": {
+    "internal-token": {
+      "version": 3
+    }
+  }
+}

@@ -647,50 +647,12 @@ const (
 	KindBinding = "binding"
 )
 
-// The defaults and limits of the contract's §3.
-const (
-	MaxSpecBytes = 1 << 20
-	MaxServices  = 64
-	MaxJobs      = 32
-	MaxAddons    = 16
-	MaxRoutes    = 128
-	MaxBindings  = 32
-	// MaxUses bounds an object's uses and a sandbox's reaches,
-	// MaxEgressDomains and MaxEgressBlocks an egress's lists, MaxRouteFrom
-	// a route's blocks (ADR 0034, revised).
-	MaxUses          = 64
-	MaxEgressDomains = 64
-	MaxEgressBlocks  = 32
-	MaxRouteFrom     = 32
-	// MaxRoutePathBytes bounds a route's path, which every instance of
-	// ferun-ingress holds for every public environment.
-	MaxRoutePathBytes = 1024
+// MaxSpecBytes bounds a spec's JSON; Parse applies it. Every other bound
+// and default is ferund's, behind the plan: its findings name them.
+const MaxSpecBytes = 1 << 20
 
-	DefaultReplicas  = 1
-	MaxReplicas      = 20
-	MinVCPUs         = 1
-	MaxVCPUs         = 32
-	DefaultVCPUs     = 1
-	MinMemoryMib     = 256
-	MaxMemoryMib     = 65536
-	DefaultMemoryMib = 512
-	// DefaultDiskGib is the guest's blank data volume, which every pod's
-	// disk starts from (feos.pod.v1.Resources.disk_gib): a smaller disk
-	// cannot be. MaxDiskGib bounds what one pod books on its node.
-	DefaultDiskGib = 8
-	MaxDiskGib     = 200
-	MaxRetries     = 5
-
-	DefaultRolloutTimeout = "10m0s"
-	DefaultJobTimeout     = "10m0s"
-	MaxJobTimeout         = "2h0m0s"
-	MinIdle               = "1m0s"
-	// IdleNever keeps an attached service's sandbox awake while it runs.
-	IdleNever               = "never"
-	DefaultInitialDelay     = "0s"
-	DefaultPeriod           = "2s"
-	DefaultFailureThreshold = 3
-)
+// IdleNever keeps an attached service's sandbox awake while it runs.
+const IdleNever = "never"
 
 // Severity is how bad a finding is.
 type Severity string

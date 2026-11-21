@@ -4,7 +4,6 @@
 package spec
 
 import (
-	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -189,20 +188,5 @@ func TestSortFindings(t *testing.T) {
 	}
 	if SortFindings(nil) != nil {
 		t.Fatal("nil")
-	}
-}
-
-func TestHash(t *testing.T) {
-	a := mustParse(t, expensa)
-	b := mustParse(t, expensa)
-	if Hash(a) == "" || Hash(a) != Hash(b) || len(Hash(a)) != 64 {
-		t.Fatal(Hash(a))
-	}
-	b.Routes["root"] = Route{Path: "/x", Service: "web", Port: PortRef{Name: "http"}}
-	if Hash(a) == Hash(b) {
-		t.Fatal("a change keeps the hash")
-	}
-	if _, err := json.Marshal(a); err != nil {
-		t.Fatal(err)
 	}
 }
