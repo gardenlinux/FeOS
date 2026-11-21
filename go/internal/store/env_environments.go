@@ -166,6 +166,10 @@ type Environment struct {
 	// model.ProviderFerun (a NULL access_provider). Both are written only
 	// by SetEnvironmentAccess.
 	Access, AccessProvider string
+	// Protected: a grant on its project reads it and no longer changes it
+	// (ADR 0060); written only by SetEnvironmentProtected, false for a
+	// new environment and a clone.
+	Protected bool
 }
 
 // environmentColumns are the columns of an Environment, each prefixed with
@@ -176,7 +180,8 @@ func environmentColumns(p string) string {
 	if p != "" {
 		p += "."
 	}
-	return cols + ", coalesce(" + p + "host_label, ''), " + p + "access, coalesce(" + p + "access_provider, '')"
+	return cols + ", coalesce(" + p + "host_label, ''), " + p + "access, coalesce(" + p + "access_provider, ''), " + p +
+		"protected"
 }
 
 var environmentCols = environmentColumns("")
@@ -185,7 +190,7 @@ var environmentCols = environmentColumns("")
 // the function that finishes the scan.
 func environmentTargets(e *Environment) ([]any, func()) {
 	return []any{&e.ID, &e.Owner, &e.Name, &e.Labels, &e.Deployment, &e.Deployed, &e.Deleting, &e.Gen,
-			&e.CreatedAt, &e.UpdatedAt, &e.Public, &e.IngressGroup, &e.HostLabel, &e.Access, &e.AccessProvider}, func() {
+			&e.CreatedAt, &e.UpdatedAt, &e.Public, &e.IngressGroup, &e.HostLabel, &e.Access, &e.AccessProvider, &e.Protected}, func() {
 			e.Labels = stringMap(e.Labels)
 		}
 }
@@ -433,6 +438,22 @@ func (s *Store) SetEnvironmentAccess(ctx context.Context, id uuid.UUID, access, 
 		return Environment{}, false, fmt.Errorf("set environment %s access %s %q: %w", id, access, provider, err)
 	}
 	return out, changed, nil
+}
+
+// SetEnvironmentProtected protects an environment or lifts it (ADR 0060)
+// and returns the row and whether it changed; a call that changes nothing
+// writes nothing. ErrNoRow for an unknown environment.
+func (s *Store) SetEnvironmentProtected(ctx context.Context, id uuid.UUID, protected bool) (Environment, bool, error) {
+	e, err := scanEnvironment(s.q.QueryRow(ctx, `UPDATE environments SET protected = $2, updated_at = now()
+		WHERE id = $1 AND protected <> $2 RETURNING `+environmentCols, id, protected))
+	if err == nil {
+		return e, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return Environment{}, false, fmt.Errorf("set environment %s protected %v: %w", id, protected, err)
+	}
+	e, err = s.GetEnvironment(ctx, id)
+	return e, false, err
 }
 
 // BumpEnvironmentGen increments the version of the environment's security

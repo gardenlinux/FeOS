@@ -46,7 +46,7 @@
         "hosts": [],
         "access": "anyone",
         "provider": "",
-        "protected": false,
+        "protected": true,
         "openIncidents": 0,
         "createdAt": "2026-10-01T09:14:02Z"
       },

@@ -35,7 +35,7 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 	access, provider := accessOf(e)
 	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Deployment: e.Deployment, Deployed: e.Deployed,
 		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Access: access, Provider: provider,
-		Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: rfc3339(e.CreatedAt)}
+		Protected: e.Protected, Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
 		st.Labels = map[string]string{}
 	}
@@ -288,7 +288,7 @@ func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary 
 	access, provider := accessOf(r.Environment)
 	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Deployment: r.Deployment, Deployed: r.Deployed,
 		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel,
-		Access: access, Provider: provider, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
+		Access: access, Provider: provider, Protected: r.Protected, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
 }
 
 // incidentOf is an incident as the answers show it.
