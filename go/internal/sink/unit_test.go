@@ -261,6 +261,28 @@ func TestProjects(t *testing.T) {
 		ref.status != 404 {
 		t.Fatalf("naming nobody: %v", err)
 	}
+	// An integration's answers, with a person or without, are kept for
+	// sessionTTL, as a session's: a person loses a grant more often than a
+	// token is revoked.
+	n = calls.Load()
+	now = now.Add(sessionTTL - time.Second)
+	for _, c := range []Credential{in, ada} {
+		if _, err := ts.Resolve(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != n {
+		t.Errorf("an integration's answer was not kept: %d calls", calls.Load()-n)
+	}
+	now = now.Add(time.Second)
+	for _, c := range []Credential{in, ada} {
+		if _, err := ts.Resolve(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != n+2 {
+		t.Errorf("after sessionTTL: %d calls, want 2", calls.Load()-n)
+	}
 	r := httptest.NewRequest("GET", "/api/v1/logs", nil)
 	r.Header.Set("Authorization", "Bearer a.b.c")
 	r.Header.Set(auth.ProjectHeader, "acme")

@@ -30,8 +30,10 @@ const (
 // then all.
 const projectCacheMax = 10000
 
-// sessionTTL bounds how long a session's answer is kept: a person signs
-// out, or loses a grant, more often than a token is revoked.
+// sessionTTL bounds how long a session's answer is kept, and an
+// integration's (ADR 0056), which acts for a person or reaches what it
+// holds by grants: a person signs out, or loses a grant, more often than
+// a token is revoked.
 const sessionTTL = 10 * time.Second
 
 // Credential is how a reader asks: a token (Authorization: Bearer …), an
@@ -155,6 +157,13 @@ func (a projectAnswer) access() Access {
 	return Access{Project: a.Project, Envs: envs}
 }
 
+// integrationBearer reports whether an Authorization's bearer is a JWT
+// (exactly two dots), which only an integration's is.
+func integrationBearer(authz string) bool {
+	_, tok, _ := strings.Cut(strings.TrimSpace(authz), " ")
+	return strings.Count(strings.TrimSpace(tok), ".") == 2
+}
+
 // Resolve returns what the reader of c may read. A 4xx of ferund (401
 // unknown, 404 no such project, 400) comes back as a *refusal; any other
 // failure as an error.
@@ -174,6 +183,9 @@ func (t *Projects) Resolve(ctx context.Context, c Credential) (Access, error) {
 	ttl := t.ttl
 	if c.Authorization != "" {
 		req.Header.Set("Authorization", c.Authorization)
+		if c.PersonSent || integrationBearer(c.Authorization) {
+			ttl = min(ttl, sessionTTL)
+		}
 	} else {
 		req.Header.Set("Cookie", auth.SessionCookieHeader(c.Session))
 		ttl = min(ttl, sessionTTL)
