@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -77,23 +78,41 @@ func (s *Store) CreateProject(ctx context.Context, id string) (Project, bool, er
 // NewProject is what a project gets at its creation beside its name: its
 // zone (projects.zone, model.Zones.ForNewProject: the project zone for one a
 // person makes; "": the apps zone), the person who made it (uuid.Nil:
-// an operator) and its limits (--project-default-* for a person's).
+// an operator), its limits (--project-default-* for a person's), the
+// account it is on (ADR 0059; "": DefaultAccount) and who made it there,
+// as a principal string ("": FeRun itself).
 type NewProject struct {
-	Zone   string
-	MadeBy uuid.UUID
-	Limits ProjectLimits
+	Zone    string
+	MadeBy  uuid.UUID
+	Limits  ProjectLimits
+	Account string
+	By      string
 }
 
-// MakeProject inserts a project with n. It returns the new row and true, or
-// the existing row, unchanged, and false when the name is taken.
+// MakeProject inserts a project with n, and its first row of
+// project_accounts in the same statement: on n.Account since its
+// creation. It returns the new row and true, or the existing row,
+// unchanged, and false when the name is taken. An account that does not
+// exist is ErrNoRow; the caller locks the one it names.
 func (s *Store) MakeProject(ctx context.Context, id string, n NewProject) (Project, bool, error) {
 	l := n.Limits
-	t, err := scanProject(s.q.QueryRow(ctx, `INSERT INTO projects (id, zone, made_by, limit_sandboxes,
+	account := n.Account
+	if account == "" {
+		account = DefaultAccount
+	}
+	t, err := scanProject(s.q.QueryRow(ctx, `WITH t AS (INSERT INTO projects (id, zone, made_by, limit_sandboxes,
 			limit_environments, limit_running_jobs, limit_vcpus, limit_memory_mib)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING RETURNING `+projectCols,
-		id, nullString(n.Zone), nullUUID(n.MadeBy), l.Sandboxes, l.Environments, l.RunningJobs, l.VCPUs, l.MemoryMiB))
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING RETURNING *),
+		h AS (INSERT INTO project_accounts (project_id, account_id, moved_at, moved_by)
+			SELECT id, $9, created_at, $10 FROM t)
+		SELECT `+projectCols+` FROM t`,
+		id, nullString(n.Zone), nullUUID(n.MadeBy), l.Sandboxes, l.Environments, l.RunningJobs, l.VCPUs, l.MemoryMiB,
+		account, n.By))
 	if err == nil {
 		return t, true, nil
+	}
+	if isForeignKeyViolation(err) {
+		return Project{}, false, fmt.Errorf("project %s on account %s: %w", id, account, ErrNoRow)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Project{}, false, err
@@ -121,25 +140,38 @@ type ProjectInfo struct {
 	// a project's deletion takes them, and their addons' data, along.
 	EnvironmentCount int64
 	Tokens           []ProjectToken
+	// Account and AccountTitle are the account it is on now (ADR 0059).
+	Account, AccountTitle string
 }
 
 // ListProjects returns every project ordered by name, with its number of
 // sandboxes (an environment's instance rows are none), of environments
-// (those being deleted are none) and its tokens (oldest first).
+// (those being deleted are none), its tokens (oldest first) and the
+// account it is on now.
 func (s *Store) ListProjects(ctx context.Context) ([]ProjectInfo, error) {
+	return s.ListProjectsOn(ctx, "")
+}
+
+// ListProjectsOn is ListProjects of the projects on account now; "": on
+// every account.
+func (s *Store) ListProjectsOn(ctx context.Context, account string) ([]ProjectInfo, error) {
 	rows, err := s.q.Query(ctx, `SELECT `+prefixed("t", []string{"id", "created_at", "deleting_at"})+`,
 			coalesce(t.zone, ''), t.made_by, t.limit_sandboxes, t.limit_environments, t.limit_running_jobs,
 			t.limit_vcpus, t.limit_memory_mib,
 			(SELECT count(*) FROM sandboxes s WHERE s.owner = t.id AND NOT s.instance AND NOT s.project_job),
-			(SELECT count(*) FROM environments e WHERE e.owner = t.id AND NOT e.deleting)
-		FROM projects t ORDER BY t.id`)
+			(SELECT count(*) FROM environments e WHERE e.owner = t.id AND NOT e.deleting),
+			a.id, a.title
+		FROM projects t LEFT JOIN project_accounts c ON c.project_id = t.id AND c.left_at IS NULL
+		JOIN accounts a ON a.id = coalesce(c.account_id, '`+DefaultAccount+`')
+		WHERE $1 = '' OR a.id = $1
+		ORDER BY t.id`, account)
 	if err != nil {
 		return nil, err
 	}
 	projects, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (ProjectInfo, error) {
 		var ti ProjectInfo
 		targets, finish := projectTargets(&ti.Project)
-		err := r.Scan(append(targets, &ti.SandboxCount, &ti.EnvironmentCount)...)
+		err := r.Scan(append(targets, &ti.SandboxCount, &ti.EnvironmentCount, &ti.Account, &ti.AccountTitle)...)
 		finish()
 		return ti, err
 	})
@@ -224,13 +256,15 @@ func (s *Store) DeletingProjects(ctx context.Context) ([]string, error) {
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-// BootstrapOperator creates the project "operator" with a token of hash
-// tokenHash (label "bootstrap"), but only when no project exists at all. It
-// reports whether it created them.
+// BootstrapOperator creates the project "operator" on DefaultAccount with
+// a token of hash tokenHash (label "bootstrap"), but only when no project
+// exists at all. It reports whether it created them.
 func (s *Store) BootstrapOperator(ctx context.Context, tokenHash string) (bool, error) {
 	var id string
-	err := s.q.QueryRow(ctx, `INSERT INTO projects (id) SELECT $1
-		WHERE NOT EXISTS (SELECT 1 FROM projects) ON CONFLICT DO NOTHING RETURNING id`, OperatorProject).Scan(&id)
+	err := s.q.QueryRow(ctx, `WITH t AS (INSERT INTO projects (id) SELECT $1
+			WHERE NOT EXISTS (SELECT 1 FROM projects) ON CONFLICT DO NOTHING RETURNING id, created_at),
+		h AS (INSERT INTO project_accounts (project_id, account_id, moved_at) SELECT id, $2, created_at FROM t)
+		SELECT id FROM t`, OperatorProject, DefaultAccount).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

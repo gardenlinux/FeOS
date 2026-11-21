@@ -140,10 +140,15 @@ func (s *Store) CountAdmins(ctx context.Context, project string) (int, error) {
 }
 
 // Invitation is a row of invitations: a single-use link's grant, its
-// secret stored as a hash. EnvironmentID uuid.Nil is the project.
+// secret stored as a hash. Its scope is a project (ProjectID; with
+// EnvironmentID one of its environments, uuid.Nil the project) or an
+// account (AccountID, ADR 0059; ProjectID ""), whose roles are member and
+// admin.
 type Invitation struct {
 	Hash            string
 	ProjectID       string
+	AccountID       string
+	AccountTitle    string // as read
 	EnvironmentID   uuid.UUID
 	EnvironmentName string // as read, "" for the project
 	Role            string
@@ -158,18 +163,23 @@ type Invitation struct {
 // Open reports whether the invitation can still be used at now.
 func (i Invitation) Open(now time.Time) bool { return i.UsedBy == uuid.Nil && now.Before(i.ExpiresAt) }
 
-const invitationCols = `i.hash, i.project_id, i.environment_id, coalesce(e.name, ''), i.role, i.made_by, i.created_at,
+// Account reports whether the invitation's scope is an account.
+func (i Invitation) Account() bool { return i.AccountID != "" }
+
+const invitationCols = `i.hash, coalesce(i.project_id, ''), coalesce(i.account_id, ''), coalesce(a.title, ''),
+	i.environment_id, coalesce(e.name, ''), i.role, i.made_by, i.created_at,
 	i.expires_at, i.used_by, coalesce(nullif(u.name, ''), u.email, ''), i.used_at`
 
 // invitationJoins are the joins of invitationCols, after FROM's i.
-const invitationJoins = ` LEFT JOIN environments e ON e.id = i.environment_id LEFT JOIN people u ON u.id = i.used_by`
+const invitationJoins = ` LEFT JOIN environments e ON e.id = i.environment_id LEFT JOIN people u ON u.id = i.used_by
+	LEFT JOIN accounts a ON a.id = i.account_id`
 
 func scanInvitation(row pgx.Row) (Invitation, error) {
 	var i Invitation
 	var env, usedBy *uuid.UUID
 	var usedAt *time.Time
-	if err := row.Scan(&i.Hash, &i.ProjectID, &env, &i.EnvironmentName, &i.Role, &i.MadeBy, &i.CreatedAt, &i.ExpiresAt,
-		&usedBy, &i.UsedByName, &usedAt); err != nil {
+	if err := row.Scan(&i.Hash, &i.ProjectID, &i.AccountID, &i.AccountTitle, &env, &i.EnvironmentName, &i.Role,
+		&i.MadeBy, &i.CreatedAt, &i.ExpiresAt, &usedBy, &i.UsedByName, &usedAt); err != nil {
 		return Invitation{}, err
 	}
 	i.EnvironmentID, i.UsedBy, i.UsedAt = uuidOf(env), uuidOf(usedBy), timeOf(usedAt)
@@ -177,16 +187,18 @@ func scanInvitation(row pgx.Row) (Invitation, error) {
 }
 
 // InsertInvitation stores an invitation by its hash, valid for ttl from
-// now() (the database's clock). ErrNoRow when the project does not exist
-// or the scope is not an environment of it.
+// now() (the database's clock): to n.AccountID when it is set, else to
+// n.ProjectID or one of its environments. ErrNoRow when the project or the
+// account does not exist or the scope is not an environment of it.
 func (s *Store) InsertInvitation(ctx context.Context, n Invitation, ttl time.Duration) (Invitation, error) {
-	inv, err := scanInvitation(s.q.QueryRow(ctx, `WITH i AS (INSERT INTO invitations (hash, project_id,
+	inv, err := scanInvitation(s.q.QueryRow(ctx, `WITH i AS (INSERT INTO invitations (hash, project_id, account_id,
 			environment_id, role, made_by, expires_at)
-		SELECT $1, $2, $3, $4, $5, now() + make_interval(secs => $6)
+		SELECT $1, $2, $7, $3, $4, $5, now() + make_interval(secs => $6)
 		WHERE $3::uuid IS NULL OR EXISTS (SELECT 1 FROM environments WHERE id = $3 AND owner = $2)
 		RETURNING *)
 		SELECT `+invitationCols+` FROM i`+invitationJoins,
-		n.Hash, n.ProjectID, nullUUID(n.EnvironmentID), n.Role, n.MadeBy, ttl.Seconds()))
+		n.Hash, nullString(n.ProjectID), nullUUID(n.EnvironmentID), n.Role, n.MadeBy, ttl.Seconds(),
+		nullString(n.AccountID)))
 	if errors.Is(err, pgx.ErrNoRows) || isForeignKeyViolation(err) {
 		return Invitation{}, ErrNoRow
 	}
@@ -226,4 +238,22 @@ func (s *Store) UseInvitation(ctx context.Context, hash string, person uuid.UUID
 		WHERE hash = $1 AND used_at IS NULL AND expires_at > now() RETURNING *)
 		SELECT `+invitationCols+` FROM i`+invitationJoins, hash, person))
 	return inv, noRow(err, ErrNoRow)
+}
+
+// ListAccountInvitations returns an account's invitations, open, used and
+// expired, oldest first.
+func (s *Store) ListAccountInvitations(ctx context.Context, account string) ([]Invitation, error) {
+	rows, err := s.q.Query(ctx, `SELECT `+invitationCols+` FROM invitations i`+invitationJoins+`
+		WHERE i.account_id = $1 ORDER BY i.created_at, i.hash`, account)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Invitation, error) { return scanInvitation(r) })
+}
+
+// DeleteAccountInvitation revokes an invitation of account. It reports
+// whether there was one.
+func (s *Store) DeleteAccountInvitation(ctx context.Context, account, hash string) (bool, error) {
+	tag, err := s.q.Exec(ctx, "DELETE FROM invitations WHERE account_id = $1 AND hash = $2", account, hash)
+	return tag.RowsAffected() > 0, err
 }
