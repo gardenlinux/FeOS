@@ -65,29 +65,50 @@ func ParseRole(s string) (Role, bool) {
 	return RoleNone, false
 }
 
-// Principal is who acts in a project: a person (their session) or a
-// project token. An operator acting by Basic credentials is neither and
-// names its user. The zero value is nobody: ferund itself, or a caller
-// within the process.
+// Principal is who acts in a project: a person (their session), a
+// project token, or an integration (ADR 0056), which may name the person
+// it acts for. An operator acting by Basic credentials is none of them
+// and names its user. The zero value is nobody: ferund itself, or a
+// caller within the process.
 type Principal struct {
-	// Person is the person's ID (people.id); uuid.Nil for a token.
+	// Person is the person's ID (people.id); uuid.Nil for a token and for
+	// an integration.
 	Person uuid.UUID
 	// TokenHash is the project token's hash; "" for a person.
 	TokenHash string
 	// Basic is the --admin-users user of an operator by Basic.
 	Basic string
 	// Operator: the principal is an operator (an admin session), with the
-	// rights of an admin in every project.
+	// rights of an admin in every project. An integration never is one.
 	Operator bool
+	// Integration is the integration's ID (integrations.id); uuid.Nil for
+	// every other principal.
+	Integration uuid.UUID
+	// For is the person an integration names for the request (people.id),
+	// whose grants bound what it does; uuid.Nil when it acts on its own,
+	// and for every other principal.
+	For uuid.UUID
 }
 
 // IsZero reports the zero principal.
-func (p Principal) IsZero() bool { return p.Person == uuid.Nil && p.TokenHash == "" && p.Basic == "" }
+func (p Principal) IsZero() bool {
+	return p.Person == uuid.Nil && p.TokenHash == "" && p.Basic == "" && p.Integration == uuid.Nil
+}
+
+// IsIntegration reports whether the principal is an integration, with a
+// person named or without.
+func (p Principal) IsIntegration() bool { return p.Integration != uuid.Nil }
 
 // String is the principal as made_by columns record it:
-// "person:<id>", "token:<hash>", "basic:<user>", or "" for nobody.
+// "person:<id>", "token:<hash>", "basic:<user>", "integration:<id>",
+// "integration:<id>/person:<id>" for an integration that names a person,
+// or "" for nobody.
 func (p Principal) String() string {
 	switch {
+	case p.Integration != uuid.Nil && p.For != uuid.Nil:
+		return "integration:" + p.Integration.String() + "/person:" + p.For.String()
+	case p.Integration != uuid.Nil:
+		return "integration:" + p.Integration.String()
 	case p.Person != uuid.Nil:
 		return "person:" + p.Person.String()
 	case p.TokenHash != "":
@@ -186,6 +207,13 @@ func (t Project) MayOnProject(role Role) bool { return t.Principal.IsZero() || t
 func MadeBy(ctx context.Context) string {
 	t, _ := ProjectFrom(ctx)
 	return t.Principal.String()
+}
+
+// IsIntegration reports whether a context's project request is made by
+// an integration (ADR 0056); false without a project request.
+func IsIntegration(ctx context.Context) bool {
+	t, _ := ProjectFrom(ctx)
+	return t.Principal.IsIntegration()
 }
 
 // Admin is a request made by an operator: with a password of

@@ -77,9 +77,14 @@ func (s *server) memberRoutes(operator func(string, apiHandler), person func(str
 type personKey struct{}
 
 // person is the person class: a signed-in person's session (an
-// operator's too) with a session's CSRF rules, in no project.
+// operator's too) with a session's CSRF rules, in no project. An
+// integration's bearer (a JWT) is refused, 403 integration_refused: an
+// integration is no person (ADR 0056).
 func (s *server) person(h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
+		if isJWT(bearer(r)) {
+			return errIntegrationRefused()
+		}
 		sess, ok, err := s.session(r)
 		if err != nil {
 			return err

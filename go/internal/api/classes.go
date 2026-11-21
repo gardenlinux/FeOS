@@ -297,6 +297,14 @@ type need struct {
 	// orProject is, on scopeEnv, a project role that suffices too (an
 	// environment's deletion: its admin, or write on the project).
 	orProject auth.Role
+	// noIntegration refuses an integration whatever its role (ADR 0056:
+	// an integration changes no principal of a project): 403
+	// integration_refused.
+	noIntegration bool
+	// ownIntegration lets an integration through on a route about one
+	// integration ({integration}) when that is itself (giving up its own
+	// grants); the handler checks that it is.
+	ownIntegration bool
 }
 
 func onProject(r auth.Role) need { return need{role: r} }
@@ -305,12 +313,31 @@ func onSandbox(r auth.Role) need { return need{role: r, scope: scopeSandbox} }
 func onJob(r auth.Role) need     { return need{role: r, scope: scopeJob} }
 func byHandler(r auth.Role) need { return need{role: r, scope: scopeHandler} }
 
+// noIntegration is n refusing an integration (need.noIntegration).
+func noIntegration(n need) need { n.noIntegration = true; return n }
+
+// orOwnIntegration is n letting an integration through on its own
+// {integration} (need.ownIntegration).
+func orOwnIntegration(n need) need { n.ownIntegration = true; return n }
+
 // member is the need of the routes every principal of the project may
 // call, whose answers are filtered to what it may read.
 var member = need{}
 
 // String is the need as the route table's test states it.
 func (n need) String() string {
+	s := n.base()
+	if n.noIntegration {
+		s += ", no integration"
+	}
+	if n.ownIntegration {
+		s += " or the integration itself"
+	}
+	return s
+}
+
+// base is String without what it says of integrations.
+func (n need) base() string {
 	switch {
 	case n.scope == scopeHandler:
 		return n.role.String() + " checked by the handler"
@@ -327,6 +354,22 @@ func (n need) String() string {
 	}
 	return n.role.String() + " project"
 }
+
+// codeIntegrationRefused is the code of the 403 of a route or class an
+// integration may not use whatever its role (ADR 0056).
+const codeIntegrationRefused = "integration_refused"
+
+// errIntegrationRefused is the answer to an integration on a route that
+// changes the principals of a project, or of a class it is no principal
+// of (person, provider).
+func errIntegrationRefused() error {
+	return apierr.WithCode(http.StatusForbidden, codeIntegrationRefused, "an integration changes no principal of a project")
+}
+
+// isJWT reports whether a bearer is a JWT, an integration's (exactly two
+// dots): project tokens are hex, service tokens feos-<kind>-<base64url>,
+// sandbox and route tokens base64url, none with a dot.
+func isJWT(tok string) bool { return strings.Count(tok, ".") == 2 }
 
 // errNoProject is the answer for a project the principal is no member of,
 // absent or foreign alike, and for a token's request that names another
@@ -452,12 +495,14 @@ var authTokenPrefix = pki.ServiceTokenPrefix(model.ServiceAuth)
 // feos-auth- is a service token, which must be ferun-auth's (kind auth;
 // else 401 unknown service token); any other credential is a project's
 // principal, taken exactly as the project class takes it (a token, or a
-// session that names its project, with the CSRF rules of a session). The
+// session that names its project, with the CSRF rules of a session); an
+// integration's bearer (a JWT) is refused, 403 integration_refused. The
 // route states no need: the visits service decides, on the challenge or
 // the visit, whether the caller answers for its environment.
 func (s *server) provider(h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
-		if tok := bearer(r); strings.HasPrefix(tok, authTokenPrefix) {
+		tok := bearer(r)
+		if strings.HasPrefix(tok, authTokenPrefix) {
 			svc, ok, err := s.authService(r, tok)
 			if err != nil {
 				return err
@@ -466,6 +511,11 @@ func (s *server) provider(h apiHandler) http.Handler {
 				return apierr.New(http.StatusUnauthorized, textUnknownService)
 			}
 			return h(w, r.WithContext(auth.WithService(r.Context(), svc)))
+		}
+		if isJWT(tok) {
+			// ADR 0056 sets the integration aside as a provider of
+			// visitors.
+			return errIntegrationRefused()
 		}
 		t, err := s.projectPrincipalOr(w, r, textProviderRequired)
 		if err != nil {
@@ -524,7 +574,8 @@ func (s *server) authService(r *http.Request, tok string) (auth.Service, bool, e
 	return auth.Service{Kind: t.Kind, Name: t.Name, ID: t.ID, TokenHash: hash}, true, nil
 }
 
-// allow checks a route's need: on the project, the principal's project
+// allow checks a route's need: an integration on a route that refuses
+// one is 403 integration_refused, whatever its role; on the project, the principal's project
 // grant; on an environment, the higher of that and its grant there, an
 // environment it holds no role on being absent (404). A role too low is
 // 403 role_required. An environment it resolved to check the grant
@@ -532,6 +583,9 @@ func (s *server) authService(r *http.Request, tok string) (auth.Service, bool, e
 // handler acts on the environment that was checked, whatever its name
 // names by then.
 func (s *server) allow(r *http.Request, t auth.Project, n need) (*http.Request, error) {
+	if n.noIntegration && t.Principal.IsIntegration() {
+		return r, errIntegrationRefused()
+	}
 	switch n.scope {
 	case scopeProject:
 		if t.Role >= n.role {

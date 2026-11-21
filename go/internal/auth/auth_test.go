@@ -4,8 +4,11 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // A read on a project's behalf passes on the caller's token, or its
@@ -64,5 +67,48 @@ func TestSessionOf(t *testing.T) {
 	}
 	if b, err := r.Cookie(OldSessionCookie); err != nil || b.Value != "s1" {
 		t.Errorf("old name: %v %v", b, err)
+	}
+}
+
+// A principal is recorded as made_by says: an integration by its ID, and
+// with the person it names after it; an integration is no zero principal,
+// and only it is one.
+func TestPrincipalString(t *testing.T) {
+	in := uuid.MustParse("0199a0b1-0000-7000-8000-000000000001")
+	p := uuid.MustParse("0199a0b1-0000-7000-8000-000000000002")
+	for _, c := range []struct {
+		name        string
+		p           Principal
+		want        string
+		zero, isInt bool
+	}{
+		{"nobody", Principal{}, "", true, false},
+		{"a person", Principal{Person: p}, "person:" + p.String(), false, false},
+		{"an operator", Principal{Person: p, Operator: true}, "person:" + p.String(), false, false},
+		{"a token", Principal{TokenHash: "ab12"}, "token:ab12", false, false},
+		{"basic", Principal{Basic: "ops", Operator: true}, "basic:ops", false, false},
+		{"an integration", Principal{Integration: in}, "integration:" + in.String(), false, true},
+		{"an integration naming a person", Principal{Integration: in, For: p},
+			"integration:" + in.String() + "/person:" + p.String(), false, true},
+	} {
+		if got := c.p.String(); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+		if got := c.p.IsZero(); got != c.zero {
+			t.Errorf("%s: IsZero %v", c.name, got)
+		}
+		if got := c.p.IsIntegration(); got != c.isInt {
+			t.Errorf("%s: IsIntegration %v", c.name, got)
+		}
+		ctx := WithProject(context.Background(), Project{Name: "acme", Principal: c.p})
+		if got := IsIntegration(ctx); got != c.isInt {
+			t.Errorf("%s: IsIntegration(ctx) %v", c.name, got)
+		}
+		if got := MadeBy(ctx); got != c.want {
+			t.Errorf("%s: MadeBy %q, want %q", c.name, got, c.want)
+		}
+	}
+	if IsIntegration(context.Background()) {
+		t.Error("IsIntegration without a project request")
 	}
 }
