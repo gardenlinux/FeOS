@@ -74,8 +74,8 @@ func routeToken(r *http.Request) (tok string, creds []string, header bool) {
 
 // ferunBearer reports whether a request's Authorization, any of its
 // values, carries a FeRun credential as its bearer token, a project's
-// token, a sandbox's or an integration's (the scheme in any case): one the
-// door refuses to pass on to an upstream. An integration's is a JWT whose
+// token, a sandbox's (whether or not it is good now) or an integration's
+// (the scheme in any case): one the door refuses to pass on to an upstream. An integration's is a JWT whose
 // issuer and subject, read without its signature, are a registered
 // integration's (ADR 0056); any other JWT is the upstream's affair.
 func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error) {
@@ -92,10 +92,12 @@ func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error
 		case !errors.Is(err, model.ErrUnknownToken):
 			return false, err
 		}
-		switch _, _, err := s.st.ResolveSandboxToken(ctx, hash); {
+		// Any sandbox token, also one its integration's access no longer
+		// backs (ADR 0056): that access can come back, and the token with it.
+		switch _, err := s.st.GetSandboxToken(ctx, hash); {
 		case err == nil:
 			return true, nil
-		case !errors.Is(err, model.ErrUnknownToken):
+		case !errors.Is(err, store.ErrNoRow):
 			return false, err
 		}
 		if iss, sub, ok := jwtSubject(tok); ok {

@@ -556,6 +556,24 @@ func TestRouteDoor(t *testing.T) {
 	if forwards() != before0 {
 		t.Fatal("an integration's bearer was forwarded")
 	}
+	// A sandbox token the integration minted, which its access no longer
+	// backs (it holds no grant), is still a FeRun credential: the access
+	// can come back, and the token with it.
+	fecode, err := h.st.GetIntegration(ctx, "fecode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lapsedTok := "lapsed-sandbox-token"
+	if _, err := h.st.MintSandboxToken(ctx, store.HashToken(lapsedTok), sb, "s", "", fecode.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.st.ResolveSandboxToken(ctx, store.HashToken(lapsedTok)); !errors.Is(err, model.ErrUnknownToken) {
+		t.Fatalf("a lapsed integration's sandbox token resolves: %v", err)
+	}
+	wantPlain(t, withHeader(tok.Token, "Bearer "+lapsedTok), 401, "route token required\n")
+	if forwards() != before0 {
+		t.Fatal("a lapsed integration's sandbox token was forwarded")
+	}
 	if w := withHeader(tok.Token, "Bearer "+jwt("https://id.example/", "a-person")); w.Code != 200 {
 		t.Fatalf("a JWT of no integration beside the header: %d %s", w.Code, w.Body)
 	}
