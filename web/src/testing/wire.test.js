@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { WIRE_BY_PACKAGE, WIRE_NAMES, ferundFixtures, fromFerund } from './wire.js';
+import { WIRE_BY_PACKAGE, WIRE_NAMES, answerWith, answers, ferundFixtures, fromFerund, wire } from './wire.js';
 
 // The console's tests read ferund's fixtures of §2.16 once they exist and
 // the wire contract's shapes until then. These checks keep the switch
@@ -31,5 +31,18 @@ describe('wire', () => {
       const near = all.filter((f) => route(f).toLowerCase() === route(n).toLowerCase() || f.toLowerCase() === n.toLowerCase());
       expect(near, `${n} is not written, but ${near.join(', ')} is`).toEqual([]);
     }
+  });
+
+  it('a case comes from ferund\'s fixture when it has it, else from the contract\'s shape', () => {
+    for (const n of WIRE_NAMES) {
+      const all = answers(n);
+      expect(all[0]).toEqual(wire(n));
+      expect(all).toHaveLength(fromFerund(n) ? 2 : 1);
+      expect(answerWith(n, () => true)).toEqual(wire(n));
+    }
+    const [a, b] = answerWith(['GET_accounts.200', 'GET_auth_me.session.200'], (x, y) => x !== y);
+    expect(a.accounts).toBeTruthy();
+    expect(b.kind).toBe('session');
+    expect(() => answerWith('GET_accounts.200', () => false)).toThrow('no answer of GET_accounts.200 has the case');
   });
 });

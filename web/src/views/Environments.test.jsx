@@ -7,7 +7,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { api, setActiveProject } from '../api.js';
 import { response, serveFixtures } from '../testing/ferun.js';
-import { wire } from '../testing/wire.js';
+import { answerWith, wire } from '../testing/wire.js';
 import {
   DiffView, EnvHead, EnvTable, IncidentTable, IncidentView, InstanceNote, InstanceTable, LogsBody, LogsTab, DeploymentTable,
   DeploymentView, PreflightResult, ProtectedNotice, TagsBox, envCan, protectedCount,
@@ -911,12 +911,15 @@ describe('protection (ADR 0060)', () => {
     expect(on).toContain('Lift protection');
   });
 
+  const dialogCases = ({ principals: ps }) => ps.some((p) => p.losesWrite && p.kind === 'token')
+    && ps.some((p) => !p.losesWrite && offersGrant(p)) && ps.some((p) => !offersGrant(p));
+
   it('the dialog offers a grant to each without write on it otherwise, ticked for who loses write, and says a token stops deploying', () => {
-    const ps = wire('GET_environments_env_principals.200').principals;
+    // The answer's cases the dialog is about: one who loses write (a token
+    // among them), one offered a grant who does not, one who keeps what it has.
+    const ps = answerWith('GET_environments_env_principals.200', dialogCases).principals;
     const losers = ps.filter((p) => p.losesWrite);
     const offered = ps.filter(offersGrant);
-    // The answer's cases the dialog is about: one who loses write, one
-    // offered a grant who does not, one who keeps what it has.
     expect(losers.length).toBeGreaterThan(0);
     expect(offered.length).toBeGreaterThan(losers.length);
     expect(offered.length).toBeLessThan(ps.length);
@@ -940,7 +943,7 @@ describe('protection (ADR 0060)', () => {
   });
 
   it('Protect gives the ticked grants, then protects; a failure stops it', async () => {
-    const ps = wire('GET_environments_env_principals.200').principals;
+    const ps = answerWith('GET_environments_env_principals.200', dialogCases).principals;
     const calls = [];
     let failOn = '';
     vi.stubGlobal('fetch', vi.fn(async (path, init) => {

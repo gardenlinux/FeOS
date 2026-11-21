@@ -172,3 +172,24 @@ export function wire(name) {
   if (!(name in SHAPES)) throw new Error(`no answer named ${name}`);
   return structuredClone(SHAPES[name]);
 }
+
+// answers are every answer of name the tests know: ferund's fixture
+// first when it exists, then the wire contract's shape.
+export function answers(name) {
+  if (!(name in SHAPES)) throw new Error(`no answer named ${name}`);
+  const shape = structuredClone(SHAPES[name]);
+  return fromFerund(name) ? [response(name), shape] : [shape];
+}
+
+// answerWith is the first answer of names (a name, or a list of names
+// taken together, ferund's first) of which has(...answers) holds: the
+// case a test is about, from ferund's fixture when that has it, else
+// from the contract's shape, which has every case the console shows.
+// It throws when no answer has the case.
+export function answerWith(names, has) {
+  const list = Array.isArray(names) ? names : [names];
+  const tuples = list.reduce((acc, n) => acc.flatMap((t) => answers(n).map((a) => [...t, a])), [[]]);
+  const hit = tuples.find((t) => has(...t));
+  if (!hit) throw new Error(`no answer of ${list.join(' + ')} has the case`);
+  return Array.isArray(names) ? hit : hit[0];
+}

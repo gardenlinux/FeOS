@@ -7,7 +7,7 @@ import {
   moveText, myAccounts, fmtQuota, grantableRoles, higher, inviteLink, myProjects, quotaRows, roleLabel, projectAccess, projectHome,
   projectNav, viewGate,
 } from './people.js';
-import { wire } from './testing/wire.js';
+import { answerWith, wire } from './testing/wire.js';
 import { parsePath } from './routes.js';
 
 // What /auth/me decides in the UI (ADR 0031): the operator's pages for
@@ -239,6 +239,9 @@ describe('the release\'s answers (FeOS ADRs 0056, 0059, 0060)', () => {
   });
 
   it('the accounts: their page for explicit members and operators, default open to people (§0.3)', () => {
+    // The case: an explicit open account and one open to every person.
+    const session = answerWith('GET_auth_me.session.200',
+      (me) => me.accounts.some((a) => a.explicit && !a.closed) && me.accounts.some((a) => !a.explicit));
     expect(myAccounts(session).map((a) => a.name)).toEqual([...session.accounts.map((a) => a.name)].sort());
     const explicit = session.accounts.find((a) => a.explicit && !a.closed);
     const implicit = session.accounts.find((a) => !a.explicit);

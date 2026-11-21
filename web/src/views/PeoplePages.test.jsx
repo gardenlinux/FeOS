@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MeContext, can, moveTargets, moveText, myAccounts, projectAccess } from '../people.js';
-import { wire } from '../testing/wire.js';
+import { answerWith, answers, wire } from '../testing/wire.js';
 import { Account } from './Account.jsx';
 import { OperatorAccounts } from './Accounts.jsx';
 import { Integrations } from './Integrations.jsx';
@@ -43,7 +43,9 @@ describe('the operators\' accounts', () => {
 
 describe('the operators\' integrations', () => {
   it('lists each with how it signs in, its state, and names its icon-only remove', () => {
-    const list = wire('GET_admin_integrations.200').integrations;
+    // The case: one enabled, one disabled.
+    const list = answerWith('GET_admin_integrations.200',
+      (a) => a.integrations.some((i) => i.disabled) && a.integrations.some((i) => !i.disabled)).integrations;
     const out = html(<Integrations initial={list} />);
     for (const i of list) {
       expect(out).toContain(i.subject);
@@ -71,7 +73,9 @@ describe('an account\'s page', () => {
   });
 
   it('an admin of it changes roles; a project the viewer is in is a link', () => {
-    const me = wire('GET_auth_me.session.200');
+    // The case: the viewer is in one of the account's projects.
+    const [page, me] = answerWith(['GET_accounts_account.200', 'GET_auth_me.session.200'],
+      (pg, m) => pg.projects.some((p) => projectAccess(m, p.name).member));
     const out = html(withMe(me, <Account name={page.name} navigate={nav} initial={{ ...page, role: 'admin' }} />));
     expect(count(out, 'role on the account"')).toBe(page.members.length);
     for (const p of page.projects) {
@@ -92,6 +96,9 @@ describe('a project\'s account', () => {
   };
 
   it('every member reads it and its history; an admin moves it to an open account of theirs', () => {
+    // The case: the admin is on another open account.
+    const [info, me] = answerWith(['GET_project_account.200', 'GET_auth_me.session.200'],
+      (i, m) => moveTargets(myAccounts(m), i.account.name).length > 0);
     const read = text(withMe(me, <ProjectAccount project="kino" access={accessOf('read')} initial={info} />));
     expect(read).toContain(info.account.title);
     for (const m of info.moves) expect(read).toContain(moveText(m));
@@ -145,8 +152,9 @@ describe('an invitation', () => {
 
 describe('the FeCode link ?integration=<name>', () => {
   it('opens the grant for an admin of an environment alone, before the environments are read', () => {
-    const me = wire('GET_auth_me.session.200');
-    const shop = me.projects.find((p) => p.role === '' && p.environments.some((e) => e.role === 'admin'));
+    const alone = (p) => p.role === '' && p.environments.some((e) => e.role === 'admin');
+    const me = answerWith('GET_auth_me.session.200', (m) => m.projects.some(alone));
+    const shop = me.projects.find(alone);
     expect(shop).toBeTruthy();
     const a = { project: shop.project, member: true, role: shop.role, environments: shop.environments, operator: false };
     const props = { list: [], access: { ...a, can: can(a) }, envs: [], adminEnvs: [], act: nav };

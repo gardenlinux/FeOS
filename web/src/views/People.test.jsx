@@ -4,8 +4,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MeContext, projectAccess, can } from '../people.js';
-import { wire } from '../testing/wire.js';
+import { MeContext, projectAccess, can, quotaRows } from '../people.js';
+import { answerWith, answers, wire } from '../testing/wire.js';
 import { AccountList, IntegrationGrantForm, IntegrationsPane, MyProjects, TokenRows } from './People.jsx';
 import { Accounts, accountFacts, ACCOUNT_NAME } from './Accounts.jsx';
 import { QuotaBars, accountPageFacts } from './Account.jsx';
@@ -27,10 +27,12 @@ afterEach(() => vi.unstubAllGlobals());
 describe('MyProjects', () => {
   it('makes a project on an open account, default first, and lists each project\'s account', () => {
     vi.stubGlobal('location', { search: '?new' });
-    const me = wire('GET_auth_me.session.200');
+    // The screen's case: more than one open account offers a choice, and
+    // a closed one is not offered.
+    const me = answerWith('GET_auth_me.session.200',
+      (m) => m.accounts.filter((a) => !a.closed).length > 1 && m.accounts.some((a) => a.closed));
     const out = html(withMe(me, <MyProjects navigate={nav} />));
     const open = me.accounts.filter((a) => !a.closed);
-    // The screen's case: more than one open account offers a choice.
     expect(open.length).toBeGreaterThan(1);
     expect(out).toContain('aria-label="the account"');
     expect((out.match(/<option /g) || []).length).toBe(open.length);
@@ -54,7 +56,8 @@ describe('MyProjects', () => {
 
 describe('the accounts', () => {
   it('a person\'s list opens the page of an explicit one only', () => {
-    const me = wire('GET_auth_me.session.200');
+    const me = answerWith('GET_auth_me.session.200',
+      (m) => m.accounts.some((a) => a.explicit) && m.accounts.some((a) => !a.explicit) && m.accounts.some((a) => a.closed));
     const out = html(<AccountList accounts={me.accounts} navigate={nav} />);
     expect((out.match(/class="clickable"/g) || []).length).toBe(me.accounts.filter((a) => a.explicit).length);
     expect(me.accounts.some((a) => !a.explicit)).toBe(true);
@@ -78,9 +81,17 @@ describe('the accounts', () => {
   });
 
   it('shows a project\'s use against its limits, compact', () => {
-    const p = wire('GET_accounts_account.200').projects[0];
-    const out = text(<QuotaBars q={{ limits: p.limits, use: p.use }} />);
-    expect(out).toContain('sandboxes');
+    for (const page of answers('GET_accounts_account.200')) {
+      for (const p of page.projects) {
+        const out = text(<QuotaBars q={{ limits: p.limits, use: p.use }} />);
+        const shown = quotaRows({ limits: p.limits, use: p.use }).filter((r) => r.limit !== null || r.use > 0);
+        for (const r of shown) expect(out).toContain(r.label);
+        if (shown.length === 0) expect(out).toContain('nothing in use');
+      }
+    }
+    const p = answerWith('GET_accounts_account.200', (page) => page.projects.some((x) => x.limits.sandboxes != null))
+      .projects.find((x) => x.limits.sandboxes != null);
+    expect(text(<QuotaBars q={{ limits: p.limits, use: p.use }} />)).toContain('sandboxes');
     expect(text(<QuotaBars q={{ limits: {}, use: {} }} />)).toContain('nothing in use');
   });
 });
