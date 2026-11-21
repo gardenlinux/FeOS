@@ -329,6 +329,8 @@ type Engine struct {
 	httpPush httpPushes
 	// tlsSwept is the leader's sweep of TLS bindings (tls.go).
 	tlsSwept tlsSweep
+	// tlsLocks order the sends of a sandbox's TLS bindings (tls.go).
+	tlsLocks tlsLocks
 
 	// bg owns the engine's background work (finishes, syncs, renewals,
 	// detached node calls); it ends when Run returns.

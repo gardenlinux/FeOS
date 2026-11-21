@@ -52,6 +52,8 @@ func (e *Engine) SetTLSBindings(ctx context.Context, lease model.Lease, bindings
 	if len(bindings) > 0 && e.cfg.TrustDomain == "" {
 		return errNoTrustDomain
 	}
+	unlock := e.tlsLocks.lock(lease.SandboxID)
+	defer unlock()
 	row, err := e.st.GetSandbox(ctx, lease.SandboxID)
 	if err != nil {
 		return err
@@ -126,12 +128,10 @@ const (
 	tlsLoopConcurrency = 8
 )
 
-// tlsPush is the push of a pod's TLS bindings that follows a commit.
+// tlsPush is the push of a pod's TLS bindings that follows a commit: to
+// the pod of lease, with the bindings its row holds when the call goes out.
 type tlsPush struct {
-	lease    model.Lease
-	owner    string
-	envID    uuid.UUID
-	bindings []model.TemplateTLSBinding
+	lease model.Lease
 }
 
 // tlsPushOf is the push a written row asks for when its commit opened a
@@ -141,8 +141,7 @@ func tlsPushOf(w store.Sandbox, opened string) *tlsPush {
 	if opened == "" || opened == "image" || w.Node == "" || w.PodTemplate == nil || len(w.PodTemplate.TLSBindings) == 0 {
 		return nil
 	}
-	return &tlsPush{lease: model.Lease{SandboxID: w.ID, Incarnation: w.Incarnation, Node: w.Node},
-		owner: w.Owner, envID: w.EnvironmentID, bindings: w.PodTemplate.TLSBindings}
+	return &tlsPush{lease: model.Lease{SandboxID: w.ID, Incarnation: w.Incarnation, Node: w.Node}}
 }
 
 // beginTLSPush sends a pod its TLS bindings in the background, best
@@ -153,10 +152,72 @@ func (e *Engine) beginTLSPush(p tlsPush) {
 		return
 	}
 	e.goBackground(func(ctx context.Context) {
-		if err := e.pushTLSBindings(ctx, p.lease, p.owner, p.envID, p.bindings); err != nil && ctx.Err() == nil {
+		if err := e.pushCurrentTLSBindings(ctx, p.lease); err != nil && ctx.Err() == nil {
 			e.rl.warn("tls-push", "cannot send a pod its TLS bindings again", "sandbox", p.lease.SandboxID, "err", err)
 		}
 	})
+}
+
+// pushCurrentTLSBindings sends the pod of lease the TLS bindings its row
+// holds now, read under the sandbox's TLS lock: a SetTLSBindings and this
+// push of the same sandbox do not overlap in this instance, and the push
+// that reaches the node last carries the bindings written last (the node
+// keeps the set of the last call). Nothing is sent when the row is in
+// another incarnation or on another node than lease.
+func (e *Engine) pushCurrentTLSBindings(ctx context.Context, lease model.Lease) error {
+	unlock := e.tlsLocks.lock(lease.SandboxID)
+	defer unlock()
+	row, err := e.st.GetSandbox(ctx, lease.SandboxID)
+	if errors.Is(err, model.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if row.Incarnation != lease.Incarnation || row.Node != lease.Node {
+		return nil
+	}
+	var bindings []model.TemplateTLSBinding
+	if row.PodTemplate != nil {
+		bindings = row.PodTemplate.TLSBindings
+	}
+	return e.pushTLSBindings(ctx, lease, row.Owner, row.EnvironmentID, bindings)
+}
+
+// tlsLocks serialise, per sandbox, the reads of its TLS bindings with the
+// calls that send them.
+type tlsLocks struct {
+	mu sync.Mutex
+	m  map[podid.ID]*tlsLock
+}
+
+type tlsLock struct {
+	mu    sync.Mutex
+	users int
+}
+
+// lock takes the sandbox's lock and returns its release.
+func (l *tlsLocks) lock(id podid.ID) func() {
+	l.mu.Lock()
+	if l.m == nil {
+		l.m = map[podid.ID]*tlsLock{}
+	}
+	k := l.m[id]
+	if k == nil {
+		k = &tlsLock{}
+		l.m[id] = k
+	}
+	k.users++
+	l.mu.Unlock()
+	k.mu.Lock()
+	return func() {
+		k.mu.Unlock()
+		l.mu.Lock()
+		if k.users--; k.users == 0 {
+			delete(l.m, id)
+		}
+		l.mu.Unlock()
+	}
 }
 
 // tlsSweep is the sweep's state: the nodes swept in the leadership whose
@@ -209,8 +270,7 @@ func (e *Engine) tlsBindingsLoop(ctx context.Context) error {
 					wg.Done()
 				}()
 				lease := model.Lease{SandboxID: row.ID, Incarnation: row.Incarnation, Node: row.Node}
-				if err := e.pushTLSBindings(ctx, lease, row.Owner, row.EnvironmentID, row.PodTemplate.TLSBindings); err != nil &&
-					ctx.Err() == nil {
+				if err := e.pushCurrentTLSBindings(ctx, lease); err != nil && ctx.Err() == nil {
 					e.rl.warn("tls-loop", "cannot send a pod its TLS bindings again", "sandbox", row.ID, "err", err)
 				}
 			}()

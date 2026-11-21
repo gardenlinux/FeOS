@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	podv1 "github.com/gardenlinux/feos/go/gen/feos/pod/v1"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
@@ -92,5 +94,49 @@ func TestTLSBindingsAgain(t *testing.T) {
 	}
 	if got := h.serverIDs("n1", sb.ID); len(got) != 1 || got[0] != fresh {
 		t.Fatalf("after the next leadership's sweep %v, want %s", got, fresh)
+	}
+}
+
+// A push that follows a commit sends the bindings the row holds when the
+// call goes out, not those of the row the commit wrote: a SetTLSBindings
+// between the two is not undone. A lease of another incarnation sends
+// nothing.
+func TestTLSPushReadsTheRowOfNow(t *testing.T) {
+	h := newHarness(t)
+	h.addNode("n1")
+	sb := h.sandbox(256)
+	first := []model.TemplateTLSBinding{{Listen: "127.88.1.2:5432", Host: "db", Port: 5432, ALPN: "postgresql", Addon: "db"}}
+	if ok, err := h.st.SetSandboxTLSBindings(bg, sb.ID, sb.Incarnation, first); err != nil || !ok {
+		t.Fatalf("set TLS bindings: %v %v", ok, err)
+	}
+	h.ensure(sb.ID)
+	row, err := h.st.GetSandbox(bg, sb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := tlsPushOf(row, "snapshot")
+	if p == nil {
+		t.Fatal("no push for a resumed row with TLS bindings")
+	}
+
+	later := append(first, model.TemplateTLSBinding{Listen: "127.88.1.3:6379", Host: "cache", Port: 6379, Addon: "cache"})
+	if ok, err := h.st.SetSandboxTLSBindings(bg, sb.ID, sb.Incarnation, later); err != nil || !ok {
+		t.Fatalf("set TLS bindings: %v %v", ok, err)
+	}
+	if err := h.eng().pushCurrentTLSBindings(bg, p.lease); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.serverIDs("n1", sb.ID); len(got) != 2 {
+		t.Fatalf("pushed %v, want the row's two bindings of now", got)
+	}
+
+	h.stale("n1", sb.ID)
+	other := p.lease
+	other.Incarnation = uuid.New()
+	if err := h.eng().pushCurrentTLSBindings(bg, other); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.serverIDs("n1", sb.ID); len(got) != 1 || got[0] != "spiffe://"+testTD+"/earlier/path" {
+		t.Fatalf("a lease of another incarnation sent %v", got)
 	}
 }
