@@ -155,8 +155,42 @@ func SessionCookieHeader(session string) string {
 		(&http.Cookie{Name: OldSessionCookie, Value: session}).String()
 }
 
-// Project is a request made in a project: with a project's token, or with a
-// person's session that names the project (FeRun-Project).
+// PersonHeader is the header in which an integration names the person a
+// call is made for (ADR 0056): their subject at the integration's issuer.
+// Only an integration sends it.
+const PersonHeader = "FeRun-Person"
+
+// Grants are one principal's roles in a project: its grant on the project
+// (RoleNone: none) and its grants on environments, by environment ID.
+type Grants struct {
+	Project Role
+	Envs    map[uuid.UUID]Role
+}
+
+// counted is what a project grant g counts for on an environment that is
+// protected or not (ADR 0060): admin as admin, write and read as read on a
+// protected one.
+func counted(g Role, protected bool) Role {
+	if protected && g != RoleAdmin {
+		return min(g, RoleRead)
+	}
+	return g
+}
+
+// On is the role on env by ADR 0060: the higher of what the project grant
+// counts for there and the grant on env.
+func (g Grants) On(env uuid.UUID, protected bool) Role {
+	return max(counted(g.Project, protected), g.Envs[env])
+}
+
+// Plan is the role on env were it not protected: the higher of the
+// project grant and the grant on env.
+func (g Grants) Plan(env uuid.UUID) Role { return max(g.Project, g.Envs[env]) }
+
+// Project is a request made in a project: with a project's token, with a
+// person's session that names the project (FeRun-Project), or with an
+// integration's bearer that names it, and maybe the person the call is
+// made for (FeRun-Person).
 type Project struct {
 	Name string
 	// Token is the bearer the request came with: a read on the project's
@@ -169,10 +203,148 @@ type Project struct {
 	// Principal is who acts; the zero value for a caller that is not a
 	// request (and then no role check applies).
 	Principal Principal
-	// Role is the principal's project grant (an operator's: admin), and
-	// Envs its grants on environments, by environment ID.
+	// Role is the principal's own project grant (an operator's: admin),
+	// and Envs its own grants on environments, by environment ID. For an
+	// integration they are the integration's.
 	Role Role
 	Envs map[uuid.UUID]Role
+	// Named is the person an integration names (Principal.For), with their
+	// grants in the project; nil for every other request.
+	Named *NamedPerson
+	// Protected are the project's protected environments (ADR 0060).
+	Protected map[uuid.UUID]bool
+}
+
+// NamedPerson is the person an integration names for a call: the subject
+// it sent, and the person's own grants (an operator's everywhere-admin is
+// a session's and never comes through an integration).
+type NamedPerson struct {
+	Sub string
+	Grants
+}
+
+// own is the principal's own grants.
+func (t Project) own() Grants { return Grants{Project: t.Role, Envs: t.Envs} }
+
+// alone reports an integration that names nobody: it changes no protected
+// environment (ADR 0060).
+func (t Project) alone() bool { return t.Principal.IsIntegration() && t.Named == nil }
+
+// ProjectRole is the role on the project itself (the contract's §2.2): the
+// principal's project grant, for an integration naming a person the lower
+// of its and the person's.
+func (t Project) ProjectRole() Role {
+	if t.Named != nil {
+		return min(t.Role, t.Named.Project)
+	}
+	return t.Role
+}
+
+// EnvRole is the role on an environment (ADR 0031, 0056, 0060): for each
+// side (the principal; for an integration naming a person, it and the
+// person) the higher of what its project grant counts for there, admin as
+// admin and below it read on a protected environment, and its grant on the
+// environment; the lower of the two sides; and read at most on a
+// protected environment for an integration that names nobody.
+func (t Project) EnvRole(env uuid.UUID) Role {
+	p := t.Protected[env]
+	r := t.own().On(env, p)
+	if t.Named != nil {
+		r = min(r, t.Named.On(env, p))
+	}
+	if p && t.alone() {
+		r = min(r, RoleRead)
+	}
+	return r
+}
+
+// PlanRole is the role on an environment were it not protected: what a
+// plan against it needs (ADR 0060), the lower of both sides with a person.
+func (t Project) PlanRole(env uuid.UUID) Role {
+	r := t.own().Plan(env)
+	if t.Named != nil {
+		r = min(r, t.Named.Plan(env))
+	}
+	return r
+}
+
+// OwnEnvRole is the principal's own role on an environment by ADR 0060,
+// without the person it names and without the cap of an integration that
+// names nobody: an integration's integrationRole.
+func (t Project) OwnEnvRole(env uuid.UUID) Role { return t.own().On(env, t.Protected[env]) }
+
+// PersonEnvRole is the named person's role on an environment by ADR 0060;
+// RoleNone without a person.
+func (t Project) PersonEnvRole(env uuid.UUID) Role {
+	if t.Named == nil {
+		return RoleNone
+	}
+	return t.Named.On(env, t.Protected[env])
+}
+
+// MayDelete reports whether the principal may delete and rename an
+// environment: admin on it when it is protected, else admin on it or
+// write on the project.
+func (t Project) MayDelete(env uuid.UUID) bool {
+	if t.Principal.IsZero() {
+		return true
+	}
+	if t.EnvRole(env) >= RoleAdmin {
+		return true
+	}
+	return !t.Protected[env] && t.ProjectRole() >= RoleWrite
+}
+
+// EveryEnv reports whether the principal holds role on every environment
+// of the project by its project role alone, so that no environment needs
+// to be looked at: always below write, and from write on unless an
+// environment is protected and a side's project grant is below admin there
+// (or the principal is an integration that names nobody).
+func (t Project) EveryEnv(role Role) bool {
+	if t.Principal.IsZero() {
+		return true
+	}
+	if t.ProjectRole() < role {
+		return false
+	}
+	if role <= RoleRead || len(t.Protected) == 0 {
+		return true
+	}
+	return !t.alone() && t.Role == RoleAdmin && (t.Named == nil || t.Named.Project == RoleAdmin)
+}
+
+// EnvGrants are the environments either side holds a grant on: those
+// beside the project role a principal may see.
+func (t Project) EnvGrants() []uuid.UUID {
+	seen := map[uuid.UUID]bool{}
+	var out []uuid.UUID
+	add := func(m map[uuid.UUID]Role) {
+		for id := range m {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	add(t.Envs)
+	if t.Named != nil {
+		add(t.Named.Envs)
+	}
+	return out
+}
+
+// Visible reports whether the project is the principal's to see (the
+// contract's §2.2): a project role, or a role on one of its environments.
+func (t Project) Visible() bool {
+	if t.ProjectRole() > RoleNone {
+		return true
+	}
+	for _, id := range t.EnvGrants() {
+		if t.EnvRole(id) >= RoleRead {
+			return true
+		}
+	}
+	return false
 }
 
 // Passable reports whether the request has credentials to pass on
@@ -183,9 +355,16 @@ func (t Project) Passable() bool { return t.Token != "" || (t.Session != "" && t
 // behalf (a read of the sink, ADR 0026): the caller's token, or its
 // session's cookie and the project in FeRun-Project, so that the one asked
 // answers what the caller may read, as ferund's GET /api/v1/project tells
-// it. Without credentials (Passable) it sets nothing.
+// it; an integration's bearer with the project, and the person it names
+// in FeRun-Person. Without credentials (Passable) it sets nothing.
 func (t Project) PassOn(h http.Header) {
 	switch {
+	case t.Token != "" && t.Principal.IsIntegration():
+		h.Set("Authorization", "Bearer "+t.Token)
+		h.Set(ProjectHeader, t.Name)
+		if t.Named != nil {
+			h.Set(PersonHeader, t.Named.Sub)
+		}
 	case t.Token != "":
 		h.Set("Authorization", "Bearer "+t.Token)
 	case t.Passable():
@@ -194,13 +373,9 @@ func (t Project) PassOn(h http.Header) {
 	}
 }
 
-// EnvRole is the principal's role on an environment: the higher of its
-// project grant and its grant on the environment.
-func (t Project) EnvRole(env uuid.UUID) Role { return max(t.Role, t.Envs[env]) }
-
 // MayOnProject reports whether the principal holds role on the project
 // itself; a caller without a principal (not a request) may.
-func (t Project) MayOnProject(role Role) bool { return t.Principal.IsZero() || t.Role >= role }
+func (t Project) MayOnProject(role Role) bool { return t.Principal.IsZero() || t.ProjectRole() >= role }
 
 // MadeBy is the principal of a context's project request as made_by
 // records it; "" without one.

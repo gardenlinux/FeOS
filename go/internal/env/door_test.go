@@ -4,6 +4,7 @@
 package env
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,6 +64,11 @@ func TestClone(t *testing.T) {
 	}
 
 	// Copied: the latest version, sealed again for the new environment.
+	// The source is protected; the clone, a new environment, is not (ADR
+	// 0060), and every answer says which is.
+	if _, _, err := h.st.SetEnvironmentProtected(ctx, srcID, true); err != nil {
+		t.Fatal(err)
+	}
 	id := uuid.New()
 	st, err := h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", ID: id.String(),
 		Labels: map[string]string{"fecode.class": "demo"}, Secrets: map[string]CloneSecret{"token": {Copy: true}},
@@ -70,8 +76,16 @@ func TestClone(t *testing.T) {
 	if err != nil {
 		t.Fatal(describe(err))
 	}
-	if st.ID != id.String() || st.Deployment != 1 || st.Rollout.State != model.DeploymentWaiting || st.Labels["fecode.class"] != "demo" {
+	if st.ID != id.String() || st.Deployment != 1 || st.Rollout.State != model.DeploymentWaiting || st.Labels["fecode.class"] != "demo" ||
+		st.Protected {
 		t.Fatalf("clone status %+v", st)
+	}
+	if got, err := h.svc.GetEnv(ctx, projectA, "preview"); err != nil || !got.Protected {
+		t.Fatalf("source %+v %v", got, err)
+	}
+	if l, err := h.svc.ListEnvs(ctx, projectA, nil); err != nil || len(l.Environments) != 2 ||
+		l.Environments[0].Name != "demo" || l.Environments[0].Protected || !l.Environments[1].Protected {
+		t.Fatalf("list %+v %v", l, err)
 	}
 	r, err := h.st.GetDeployment(ctx, id, 1)
 	if err != nil || r.Origin != model.OriginClone || r.OriginRef != srcID.String()+"/1" ||
@@ -525,6 +539,25 @@ func TestRouteDoor(t *testing.T) {
 	}
 	if w := withHeader(tok.Token, "Bearer client-jwt"); w.Code != 200 || h.ports.last(t).authz != "Bearer client-jwt" {
 		t.Fatalf("a client's own bearer beside the header: %d %s", w.Code, w.Body)
+	}
+	// An integration's access token is a FeRun credential too (ADR 0056):
+	// a JWT of a registered integration's issuer and subject is refused,
+	// read without its signature; another JWT is the client's own.
+	if _, _, err := h.st.PutIntegration(ctx, store.IntegrationIn{Name: "fecode", Issuer: "https://id.example/",
+		Subject: "client-1"}); err != nil {
+		t.Fatal(err)
+	}
+	jwt := func(iss, sub string) string {
+		enc := base64.RawURLEncoding.EncodeToString
+		return enc([]byte(`{"alg":"RS256"}`)) + "." + enc([]byte(`{"iss":"`+iss+`","sub":"`+sub+`"}`)) + ".c2ln"
+	}
+	before0 := forwards()
+	wantPlain(t, withHeader(tok.Token, "Bearer "+jwt("https://id.example/", "client-1")), 401, "route token required\n")
+	if forwards() != before0 {
+		t.Fatal("an integration's bearer was forwarded")
+	}
+	if w := withHeader(tok.Token, "Bearer "+jwt("https://id.example/", "a-person")); w.Code != 200 {
+		t.Fatalf("a JWT of no integration beside the header: %d %s", w.Code, w.Body)
 	}
 	// Nor in a second Authorization behind the client's own.
 	before := forwards()

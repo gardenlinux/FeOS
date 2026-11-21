@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/ctl"
@@ -970,6 +971,36 @@ func TestRouteTokens(t *testing.T) {
 	}
 	_, err = h.svc.CreateRouteToken(ctx, projectB, "stage")
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
+
+	// One an integration mints records it and goes with its write there
+	// (ADR 0056).
+	in, _, err := h.st.PutIntegration(ctx, store.IntegrationIn{Name: "fecode", Issuer: "https://id.example/", Subject: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.PutIntegrationGrant(ctx, projectA, in.ID, uuid.Nil, "write", ""); err != nil {
+		t.Fatal(err)
+	}
+	ictx := auth.WithProject(ctx, auth.Project{Name: projectA, Principal: auth.Principal{Integration: in.ID}, Role: auth.RoleWrite})
+	c, err := h.svc.CreateRouteToken(ictx, projectA, "stage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded uuid.UUID
+	var by string
+	if err := h.st.Q().QueryRow(ctx, "SELECT integration_id, made_by FROM env_route_tokens WHERE hash = $1",
+		store.HashToken(c.Token)).Scan(&recorded, &by); err != nil || recorded != in.ID || by != "integration:"+in.ID.String() {
+		t.Fatalf("recorded %v %q %v", recorded, by, err)
+	}
+	if _, err := h.st.ResolveRouteToken(ctx, store.HashToken(c.Token)); err != nil {
+		t.Fatalf("minted: %v", err)
+	}
+	if _, err := h.st.DeleteIntegrationGrants(ctx, projectA, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.ResolveRouteToken(ctx, store.HashToken(c.Token)); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("its grant gone: %v", err)
+	}
 }
 
 // An environment's ID is free again once env-delete removed it; the next

@@ -62,7 +62,19 @@ var routeClasses = map[string]class{
 	"GET /api/v1/project/tokens":                     classProject,
 	"POST /api/v1/project/tokens":                    classProject,
 	"DELETE /api/v1/project/tokens/{hash}":           classProject,
-	"POST /api/v1/service-certificates":              classService,
+	"PUT /api/v1/project/tokens/{hash}/grants":       classProject,
+	"DELETE /api/v1/project/tokens/{hash}/grants":    classProject,
+
+	// Integrations (ADR 0056).
+	"GET /api/v1/integrations":                                 classPerson,
+	"GET /api/v1/admin/integrations":                           classAdmin,
+	"PUT /api/v1/admin/integrations/{integration}":             classAdmin,
+	"POST /api/v1/admin/integrations/{integration}/disable":    classAdmin,
+	"POST /api/v1/admin/integrations/{integration}/enable":     classAdmin,
+	"DELETE /api/v1/admin/integrations/{integration}":          classAdmin,
+	"PUT /api/v1/project/integrations/{integration}/grants":    classProject,
+	"DELETE /api/v1/project/integrations/{integration}/grants": classProject,
+	"POST /api/v1/service-certificates":                        classService,
 
 	"GET /api/v1/tools":                           classProject,
 	"POST /api/v1/sandboxes":                      classProject,
@@ -139,6 +151,8 @@ var routeClasses = map[string]class{
 	"POST /api/v1/environments/{env}/route-tokens":              classProject,
 	"DELETE /api/v1/environments/{env}/route-tokens":            classProject,
 	"PUT /api/v1/environments/{env}/public":                     classProject,
+	"PUT /api/v1/environments/{env}/protected":                  classProject,
+	"GET /api/v1/environments/{env}/principals":                 classProject,
 	"/api/v1/environments/{env}/http/{path...}":                 classRoute,
 
 	"POST /api/v1/domains":                    classProject,

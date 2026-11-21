@@ -5,13 +5,20 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	envs "github.com/gardenlinux/feos/go/internal/env"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
+	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // The environments' routes (ADR 0018, the contract's §5): project class,
@@ -26,8 +33,11 @@ import (
 // Each states its role and scope (ADR 0031): what reaches beyond one
 // environment (the list, a create, a clone, a spec without an
 // environment) the project's grant, the rest the environment's, where the
-// higher of the project's and the environment's grant counts. A rename and
-// a deletion are the environment's admin's or the project's writer's.
+// higher of the project's and the environment's grant counts, the
+// project's on a protected environment admin as admin and below as read
+// (ADR 0060). A rename and a deletion are the environment's admin's, or
+// the project's writer's unless it is protected; a plan is not held back
+// by protection. Route tokens are write's (ADR 0056).
 func (s *server) envRoutes(project func(n need, pattern string, h apiHandler),
 	add func(c class, pattern string, h http.Handler)) {
 	e := s.deps.Environments
@@ -40,9 +50,9 @@ func (s *server) envRoutes(project func(n need, pattern string, h apiHandler),
 	env(onProject(read), "POST /api/v1/environments/plan", s.planSpec)
 	env(member, "GET /api/v1/addons", s.addonCatalog)
 	env(onEnv(read), "GET /api/v1/environments/{env}", s.getEnv)
-	env(need{role: admin, scope: scopeEnv, orProject: write}, "PATCH /api/v1/environments/{env}", s.renameEnv)
-	env(need{role: admin, scope: scopeEnv, orProject: write}, "DELETE /api/v1/environments/{env}", s.deleteEnv)
-	env(onEnv(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
+	env(onEnvOrProject(admin, write), "PATCH /api/v1/environments/{env}", s.renameEnv)
+	env(onEnvOrProject(admin, write), "DELETE /api/v1/environments/{env}", s.deleteEnv)
+	env(onEnvPlan(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
 	env(onEnv(write), "POST /api/v1/environments/{env}/deployments", s.applyDeployment)
 	env(onEnv(read), "GET /api/v1/environments/{env}/deployments", s.listDeployments)
 	env(onEnv(read), "GET /api/v1/environments/{env}/deployments/{n}", s.getDeployment)
@@ -68,9 +78,11 @@ func (s *server) envRoutes(project func(n need, pattern string, h apiHandler),
 	env(onEnv(write), "POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
 	env(onEnv(write), "POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
 	env(onEnv(write), "POST /api/v1/environments/{env}/bindings/{name}/check", s.checkBinding)
-	env(onEnv(admin), "POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
-	env(onEnv(admin), "DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
+	env(onEnv(write), "POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
+	env(onEnv(write), "DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
 	env(onEnv(admin), "PUT /api/v1/environments/{env}/public", s.setEnvPublic)
+	env(onEnv(admin), "PUT /api/v1/environments/{env}/protected", s.setEnvProtected)
+	env(onEnv(admin), "GET /api/v1/environments/{env}/principals", s.envPrincipals)
 	add(classRoute, "/api/v1/environments/{env}/http/{path...}", http.HandlerFunc(e.ServeRoute))
 }
 
@@ -624,4 +636,153 @@ func (s *server) setEnvPublic(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, a)
+}
+
+// checkedEnvironment is the environment of t's project that the path's
+// {env} names: the one allow resolved, else resolved here; 404 for one
+// the project does not have.
+func (s *server) checkedEnvironment(r *http.Request) (store.Environment, error) {
+	t, _ := auth.ProjectFrom(r.Context())
+	ref := r.PathValue("env")
+	id, ok := checkedEnv(r, ref)
+	if !ok {
+		var err error
+		if id, err = s.envRef(r, t, ref); err != nil {
+			return store.Environment{}, err
+		}
+	}
+	e, err := s.st.GetEnvironment(r.Context(), id)
+	if isNoRow(err) || (err == nil && e.Owner != t.Name) {
+		return store.Environment{}, errNoEnvironment()
+	}
+	if err != nil {
+		return store.Environment{}, fmt.Errorf("environment %s: %w", ref, err)
+	}
+	return e, nil
+}
+
+// setEnvProtected is PUT /api/v1/environments/{env}/protected
+// {"protected": bool} (ADR 0060), by an admin of the environment:
+// protected is required (absent or null is a 400). A change is an
+// activity row of the project; the same again changes nothing.
+func (s *server) setEnvProtected(w http.ResponseWriter, r *http.Request) error {
+	var req fapi.ProtectedRequest
+	sent, err := decodeJSON(r, &req)
+	if err != nil {
+		return err
+	}
+	if raw, ok := sent["protected"]; !ok || string(raw) == "null" {
+		return apierr.New(http.StatusBadRequest, "protected is required: {\"protected\": true} or {\"protected\": false}")
+	}
+	e, err := s.checkedEnvironment(r)
+	if err != nil {
+		return err
+	}
+	if e.Deleting {
+		return apierr.New(http.StatusConflict, "environment %s is being deleted", e.Name)
+	}
+	after, changed, err := s.st.SetEnvironmentProtected(r.Context(), e.ID, req.Protected)
+	if isNoRow(err) {
+		return errNoEnvironment()
+	}
+	if err != nil {
+		return err
+	}
+	if changed {
+		kind, what := "environment_unprotected", "unprotected"
+		if after.Protected {
+			kind, what = "environment_protected", "protected"
+		}
+		by := auth.MadeBy(r.Context())
+		s.log.Info("environment "+what, "project", e.Owner, "environment", e.ID, "by", by)
+		s.record(r.Context(), store.ActivityRow{ProjectID: e.Owner, Kind: kind, Category: "lifecycle",
+			Name:   "environment " + e.Name + " " + what + " by " + by,
+			Detail: detail(map[string]any{"environment": e.ID.String(), "name": e.Name, "by": by})})
+	}
+	return writeJSON(w, http.StatusOK, fapi.ProtectedAnswer{ID: after.ID.String(), Name: after.Name,
+		Protected: after.Protected, Changed: changed})
+}
+
+// envPrincipals is GET /api/v1/environments/{env}/principals: who holds a
+// grant in the project, people not disabled, project tokens and
+// integrations, each with its grants on the project and on the
+// environment, and whether it changes the environment by its project
+// grant alone, which it only reads once the environment is protected
+// (ADR 0060's dialog, which offers each a grant on it).
+func (s *server) envPrincipals(w http.ResponseWriter, r *http.Request) error {
+	ctx, project := r.Context(), projectOf(r)
+	e, err := s.checkedEnvironment(r)
+	if err != nil {
+		return err
+	}
+	out := fapi.Principals{Principals: []fapi.Principal{}}
+	add := func(kind, id, label string, onProject, onEnv auth.Role) {
+		out.Principals = append(out.Principals, fapi.Principal{Kind: kind, ID: id, Label: label,
+			ProjectRole: onProject.String(), EnvironmentRole: onEnv.String(),
+			LosesWrite: onProject == auth.RoleWrite && onEnv < auth.RoleWrite})
+	}
+	// roles are a principal's grants on the project and on e.
+	roles := func(gs []store.MemberGrant) (auth.Role, auth.Role) {
+		var p, en auth.Role
+		for _, g := range gs {
+			role, _ := auth.ParseRole(g.Role)
+			switch g.EnvironmentID {
+			case uuid.Nil:
+				p = max(p, role)
+			case e.ID:
+				en = max(en, role)
+			}
+		}
+		return p, en
+	}
+	ms, err := s.st.ListMembers(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	for _, m := range ms {
+		if m.Disabled() {
+			continue
+		}
+		label := m.Email
+		if m.Name != "" {
+			label = m.Name + " <" + m.Email + ">"
+		}
+		p, en := roles(m.Grants)
+		add("person", m.ID.String(), label, p, en)
+	}
+	toks, err := s.st.ListProjectTokens(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	gs, err := s.st.ListGrants(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	for _, tok := range toks {
+		own := []store.MemberGrant{{Role: tok.Role, EnvironmentID: tok.EnvironmentID}}
+		for _, g := range gs {
+			if g.TokenHash == tok.Hash {
+				own = append(own, store.MemberGrant{Role: g.Role, EnvironmentID: g.EnvironmentID})
+			}
+		}
+		label := tok.Label
+		if label == "" {
+			label = "token " + tok.Hash[:8]
+		}
+		p, en := roles(own)
+		add("token", tok.Hash, label, p, en)
+	}
+	is, err := s.st.ListIntegrationGrants(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	for _, i := range is {
+		label := i.Title
+		if label == "" {
+			label = i.Name
+		}
+		p, en := roles(i.Grants)
+		add("integration", i.Name, label, p, en)
+	}
+	return writeJSON(w, http.StatusOK, out)
 }

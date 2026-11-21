@@ -80,7 +80,7 @@ func (s *server) visibleDomain(r *http.Request) (domains.Domain, error) {
 // any, and on the one it is to be bound to (ref, "" for none).
 func (s *server) allowBinding(r *http.Request, ref string) error {
 	t, _ := auth.ProjectFrom(r.Context())
-	if t.MayOnProject(admin) {
+	if t.EveryEnv(admin) {
 		return nil
 	}
 	d, err := s.visibleDomain(r)

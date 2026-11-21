@@ -319,7 +319,8 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 		if err := s.keepCredentials(r.Context(), tx, row.ID, req.ImageCredentials); err != nil {
 			return err
 		}
-		_, err = tx.CreateSandboxToken(r.Context(), hash, row.ID, firstTokenLabel, auth.MadeBy(r.Context()))
+		_, err = tx.MintSandboxToken(r.Context(), hash, row.ID, firstTokenLabel, auth.MadeBy(r.Context()),
+			mintingIntegration(r.Context()))
 		return err
 	})
 	if err != nil {
@@ -351,6 +352,13 @@ func podEnvError(err error) error {
 		return apierr.New(http.StatusUnprocessableEntity, "%s", err.Error())
 	}
 	return err
+}
+
+// mintingIntegration is the integration a token minted in this request
+// goes with (ADR 0056), uuid.Nil for every other principal.
+func mintingIntegration(ctx context.Context) uuid.UUID {
+	t, _ := auth.ProjectFrom(ctx)
+	return t.Principal.Integration
 }
 
 // writableEnv is the environment of the request's project that ref names
@@ -429,8 +437,8 @@ func (s *server) readableEnvs(r *http.Request) ([]uuid.UUID, error) {
 		return nil, nil
 	}
 	out := []uuid.UUID{}
-	for id, role := range t.Envs {
-		if role >= read {
+	for _, id := range t.EnvGrants() {
+		if t.EnvRole(id) >= read {
 			out = append(out, id)
 		}
 	}
@@ -772,7 +780,7 @@ func (s *server) createSandboxToken(w http.ResponseWriter, r *http.Request) erro
 		if err != nil {
 			return err
 		}
-		tok, err = tx.CreateSandboxToken(r.Context(), hash, id, req.Label, auth.MadeBy(r.Context()))
+		tok, err = tx.MintSandboxToken(r.Context(), hash, id, req.Label, auth.MadeBy(r.Context()), mintingIntegration(r.Context()))
 		if errors.Is(err, model.ErrNotFound) {
 			return errUnknownSandbox(id.String())
 		}

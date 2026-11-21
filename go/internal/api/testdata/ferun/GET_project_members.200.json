@@ -1,0 +1,53 @@
+{
+  "method": "GET",
+  "path": "/api/v1/project/members",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "members": [
+      {
+        "person": "0199a0b1-0000-7000-8000-000000000001",
+        "name": "ada",
+        "email": "ada@example.test",
+        "issuer": "https://id.example.test/",
+        "subject": "ada",
+        "role": "admin",
+        "madeBy": "",
+        "madeByName": "",
+        "environments": []
+      },
+      {
+        "person": "0199a0b1-0000-7000-8000-000000000002",
+        "name": "bob",
+        "email": "bob@example.test",
+        "issuer": "https://id.example.test/",
+        "subject": "bob",
+        "role": "",
+        "madeBy": "",
+        "madeByName": "",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000003",
+            "name": "stage",
+            "role": "write",
+            "madeBy": "person:0199a0b1-0000-7000-8000-000000000001",
+            "madeByName": "ada"
+          }
+        ]
+      }
+    ],
+    "integrations": [
+      {
+        "integration": "fecode",
+        "title": "Integration fecode",
+        "url": "https://fecode.example.test",
+        "disabled": false,
+        "role": "admin",
+        "madeBy": "person:0199a0b1-0000-7000-8000-000000000001",
+        "madeByName": "ada",
+        "environments": []
+      }
+    ]
+  }
+}

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
@@ -198,7 +200,7 @@ func TestSignIn(t *testing.T) {
 	w = a.serve(request{method: "POST", path: "/api/v1/admin/join-tokens", header: http.Header{"Authorization": {adminAuth()}}})
 	expect(t, w, http.StatusServiceUnavailable, "")
 	w = a.serve(withCookie(request{method: "GET", path: "/auth/me", header: http.Header{"Authorization": {adminAuth()}}}, sc))
-	expect(t, w, http.StatusOK, `{"username":"admin","admin":true,"method":"basic"}`+"\n")
+	expect(t, w, http.StatusOK, `{"kind":"basic","username":"admin","admin":true,"method":"basic","projects":[],"accounts":[]}`+"\n")
 
 	// The session under the cookie's old name (a session of the release
 	// before) is honoured, for one release.
@@ -391,7 +393,7 @@ func TestSignInRefusals(t *testing.T) {
 type me struct {
 	Sub, Person, Email, Name, Username, Picture, Method string
 	Admin                                               bool
-	Projects                                            []meProject
+	Projects                                            []fapi.MeProject
 }
 
 // The browser's state: a missing or another login cookie is refused, an
@@ -583,7 +585,7 @@ func TestSignInConfig(t *testing.T) {
 
 	basic := newEnv(t, envOptions{})
 	expect(t, basic.do("GET", "/auth/config", "", nil), http.StatusOK, `{"oidc":false,"basic":true}`+"\n")
-	expect(t, basic.do("GET", "/auth/me", adminAuth(), nil), http.StatusOK, `{"username":"admin","admin":true,"method":"basic"}`+"\n")
+	expect(t, basic.do("GET", "/auth/me", adminAuth(), nil), http.StatusOK, `{"kind":"basic","username":"admin","admin":true,"method":"basic","projects":[],"accounts":[]}`+"\n")
 	expect(t, basic.do("GET", "/auth/me", "", nil), http.StatusUnauthorized, errBody("not signed in"))
 }
 

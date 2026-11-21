@@ -1,0 +1,32 @@
+{
+  "method": "GET",
+  "path": "/auth/me",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "kind": "token",
+    "token": {
+      "label": "",
+      "role": "write",
+      "environment": "0199a0b1-0000-7000-8000-000000000001"
+    },
+    "projects": [
+      {
+        "project": "acme",
+        "role": "",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000001",
+            "name": "prod",
+            "role": "write",
+            "protected": true,
+            "plan": true,
+            "delete": false
+          }
+        ]
+      }
+    ],
+    "accounts": []
+  }
+}

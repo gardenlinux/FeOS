@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -91,8 +93,8 @@ func TestSignInPerson(t *testing.T) {
 	}
 	m := getMe()
 	if len(m.Projects) != 2 || m.Projects[0].Project != testProject || m.Projects[0].Role != "" ||
-		len(m.Projects[0].Environments) != 1 || m.Projects[0].Environments[0] != (meEnvironment{ID: stage.String(),
-		Name: "stage", Role: "write"}) || m.Projects[1].Project != "other" || m.Projects[1].Role != "read" ||
+		len(m.Projects[0].Environments) != 1 || m.Projects[0].Environments[0] != (fapi.MeEnvironment{ID: stage.String(),
+		Name: "stage", Role: "write", Plan: true}) || m.Projects[1].Project != "other" || m.Projects[1].Role != "read" ||
 		len(m.Projects[1].Environments) != 0 {
 		t.Fatalf("me %+v", m)
 	}

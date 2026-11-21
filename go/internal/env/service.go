@@ -997,7 +997,7 @@ func (s *Service) RunJob(ctx context.Context, project, env, name string) error {
 
 // CreateRouteToken is POST /api/v1/environments/{env}/route-tokens: a new
 // token of the route door (32 random bytes, base64url), shown once (201);
-// only its SHA-256 is kept.
+// only its SHA-256 is kept, and the integration that minted it, if one did.
 func (s *Service) CreateRouteToken(ctx context.Context, project, env string) (RouteToken, error) {
 	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
@@ -1007,7 +1007,9 @@ func (s *Service) CreateRouteToken(ctx context.Context, project, env string) (Ro
 	if err != nil {
 		return RouteToken{}, fmt.Errorf("mint a route token: %w", err)
 	}
-	if _, err := s.st.InsertRouteToken(ctx, hash, e.ID, auth.MadeBy(ctx)); errors.Is(err, store.ErrNoRow) {
+	// A token an integration mints goes with its access (ADR 0056).
+	t, _ := auth.ProjectFrom(ctx)
+	if _, err := s.st.MintRouteToken(ctx, hash, e.ID, auth.MadeBy(ctx), t.Principal.Integration); errors.Is(err, store.ErrNoRow) {
 		return RouteToken{}, errNoEnvironment()
 	} else if err != nil {
 		return RouteToken{}, err

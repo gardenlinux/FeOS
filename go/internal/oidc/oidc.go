@@ -373,6 +373,74 @@ func (p *Provider) Verify(ctx context.Context, d *Discovery, raw, nonce string) 
 	return IDToken{Raw: raw, Claims: c}, nil
 }
 
+// AccessClaims are the claims of a verified access token of the client
+// credentials grant: an integration's (FeOS ADR 0056).
+type AccessClaims struct {
+	// Sub is the token's subject, ClientID its client_id; they are equal.
+	Sub, ClientID string
+	Claims        Claims
+}
+
+// VerifyAccessToken checks an access token that a client got for itself
+// (the client credentials grant, RFC 9068): its signature by the
+// provider's keys (the key set fetched again once for an unknown key id,
+// at most once a minute), iss exactly the issuer, aud holding audience
+// exactly, exp present and not more than 60 s past, iat (when present) and
+// nbf (when present) not more than 60 s ahead, and a sub and a client_id
+// that are equal: a person's access token, whatever its audience, is
+// refused. A refusal is *ErrRefused with a fixed reason; the provider's
+// keys out of reach *ErrProvider.
+func (p *Provider) VerifyAccessToken(ctx context.Context, raw, audience string) (AccessClaims, error) {
+	d, err := p.Discovery(ctx)
+	if err != nil {
+		return AccessClaims{}, err
+	}
+	keys, err := p.keySet(ctx, d, false)
+	if err != nil {
+		return AccessClaims{}, err
+	}
+	payload, err := verifyJWS(raw, keys)
+	if errors.Is(err, errUnknownKey) {
+		if keys, err = p.keySet(ctx, d, true); err != nil {
+			return AccessClaims{}, err
+		}
+		payload, err = verifyJWS(raw, keys)
+	}
+	if err != nil {
+		return AccessClaims{}, err
+	}
+	var c Claims
+	if err := json.Unmarshal(payload, &c); err != nil {
+		return AccessClaims{}, Refused("the token's claims are not a JSON object")
+	}
+	if iss := c.Str("iss"); iss != p.cfg.Issuer {
+		return AccessClaims{}, refusedf("the token's issuer is not the configured one", "%q is not %q", iss, p.cfg.Issuer)
+	}
+	if audience == "" || !slices.Contains(c.Strs("aud"), audience) {
+		return AccessClaims{}, refusedf("the token is not for this API (aud)", "%q does not hold %q", c.Strs("aud"), audience)
+	}
+	now := p.now()
+	exp, ok := c.num("exp")
+	if !ok || !now.Add(-clockSkew).Before(unixSeconds(exp)) {
+		return AccessClaims{}, Refused("the token has expired")
+	}
+	if iat, ok := c.num("iat"); ok && !unixSeconds(iat).Before(now.Add(clockSkew)) {
+		return AccessClaims{}, Refused("the token is issued in the future")
+	}
+	if nbf, ok := c.num("nbf"); ok && !unixSeconds(nbf).Before(now.Add(clockSkew)) {
+		return AccessClaims{}, Refused("the token is not valid yet (nbf)")
+	}
+	sub, client := c.Str("sub"), c.Str("client_id")
+	if sub == "" {
+		return AccessClaims{}, Refused("the token names no subject")
+	}
+	if client != sub {
+		return AccessClaims{}, refusedf("the token is not a client's own (client_id is not sub)", "client_id %q, sub %q",
+			client, sub)
+	}
+	return AccessClaims{Sub: sub, ClientID: client, Claims: c}, nil
+}
+
 // The back-channel logout token's fixed parts (OpenID Connect Back-Channel
 // Logout 1.0, §2.4).
 const (

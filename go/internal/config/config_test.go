@@ -211,6 +211,16 @@ func TestValidation(t *testing.T) {
 	if err != nil || c.PublicURL != "https://run.example" {
 		t.Fatalf("%q %v", c.PublicURL, err)
 	}
+	// The API's audience is the public URL unless set (ADR 0056), and kept
+	// exactly as set.
+	if c.APIAudience != "https://run.example" {
+		t.Fatalf("audience %q", c.APIAudience)
+	}
+	c, err = Parse([]string{"--database-url", testURL, "--public-url", "https://run.example/"},
+		env(map[string]string{"FERUN_API_AUDIENCE": "https://api.example/"}))
+	if err != nil || c.APIAudience != "https://api.example/" {
+		t.Fatalf("audience %q %v", c.APIAudience, err)
+	}
 }
 
 // Validate wraps the causes it names (%w), so that errors.Is and errors.As

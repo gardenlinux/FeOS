@@ -1,0 +1,61 @@
+{
+  "method": "GET",
+  "path": "/auth/me",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "kind": "session",
+    "sub": "op",
+    "person": "0199a0b1-0000-7000-8000-000000000001",
+    "admin": true,
+    "method": "oidc",
+    "projects": [
+      {
+        "project": "acme",
+        "role": "admin",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000002",
+            "name": "box",
+            "role": "admin",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000003",
+            "name": "prod",
+            "role": "admin",
+            "protected": true,
+            "plan": true,
+            "delete": true
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000004",
+            "name": "stage",
+            "role": "admin",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          }
+        ]
+      },
+      {
+        "project": "other",
+        "role": "admin",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000005",
+            "name": "stage",
+            "role": "admin",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          }
+        ]
+      }
+    ],
+    "accounts": []
+  }
+}

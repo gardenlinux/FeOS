@@ -183,6 +183,9 @@ type Config struct {
 	// OIDCAdminGroup makes a signed-in user an admin when the groups claim
 	// holds it.
 	OIDCAdminGroup string
+	// APIAudience is the audience an integration's access token must hold
+	// (ADR 0056), compared as an exact string; PublicURL when not set.
+	APIAudience string
 	// VisitorAuthURL is ferun-auth's base URL (ADR 0054), without a
 	// trailing slash: where a visitor of a provider of kind ferun or oidc
 	// signs in. Empty: no ferun-auth, and only providers of kind project.
@@ -447,6 +450,8 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.StringVar(&c.OIDCClientSecretFile, "oidc-client-secret-file", c.OIDCClientSecretFile,
 		"file of the OIDC client secret (client_secret_basic); required with --oidc-issuer")
 	fs.StringVar(&t.scopes, "oidc-scopes", t.scopes, "OIDC scopes, space-separated; must contain openid")
+	fs.StringVar(&c.APIAudience, "api-audience", c.APIAudience,
+		"the audience an integration's access token holds (ADR 0056), compared exactly; empty: --public-url")
 	fs.StringVar(&c.OIDCAdminGroup, "oidc-admin-group", c.OIDCAdminGroup, "a signed-in user is an admin when the groups claim holds this group")
 	fs.StringVar(&c.VisitorAuthURL, "visitor-auth-url", c.VisitorAuthURL,
 		"ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind project")
@@ -535,6 +540,9 @@ func (c *Config) finish(t *serveTexts) error {
 		return fmt.Errorf("--log-level: %w", err)
 	}
 	c.PublicURL = strings.TrimSuffix(c.PublicURL, "/")
+	if c.APIAudience == "" {
+		c.APIAudience = c.PublicURL
+	}
 	c.VisitorAuthURL = strings.TrimSuffix(c.VisitorAuthURL, "/")
 	return nil
 }

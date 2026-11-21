@@ -36,8 +36,17 @@ func scanRouteToken(row pgx.Row) (EnvRouteToken, error) {
 // made by madeBy (a principal, ADR 0031); ErrNoRow for an unknown
 // environment, ErrExists for a hash taken.
 func (s *Store) InsertRouteToken(ctx context.Context, hash string, envID uuid.UUID, madeBy string) (EnvRouteToken, error) {
-	t, err := scanRouteToken(s.q.QueryRow(ctx, `INSERT INTO env_route_tokens (hash, env_id, made_by) VALUES ($1, $2, $3)
-		RETURNING `+routeTokenCols, hash, envID, madeBy))
+	return s.MintRouteToken(ctx, hash, envID, madeBy, uuid.Nil)
+}
+
+// MintRouteToken is InsertRouteToken for a token that integration minted
+// (uuid.Nil: none), which goes with the integration's access (ADR 0056):
+// resolving it then needs the integration enabled and holding write on the
+// environment.
+func (s *Store) MintRouteToken(ctx context.Context, hash string, envID uuid.UUID, madeBy string,
+	integration uuid.UUID) (EnvRouteToken, error) {
+	t, err := scanRouteToken(s.q.QueryRow(ctx, `INSERT INTO env_route_tokens (hash, env_id, made_by, integration_id)
+		VALUES ($1, $2, $3, $4) RETURNING `+routeTokenCols, hash, envID, madeBy, nullUUID(integration)))
 	if err != nil {
 		return EnvRouteToken{}, insertError("insert route token of environment "+envID.String(), err)
 	}
@@ -45,9 +54,11 @@ func (s *Store) InsertRouteToken(ctx context.Context, hash string, envID uuid.UU
 }
 
 // ResolveRouteToken reads the route token of a hash; ErrNoRow if there is
-// none.
+// none, or when an integration minted it and its access no longer backs it
+// (integrationMayWrite).
 func (s *Store) ResolveRouteToken(ctx context.Context, hash string) (EnvRouteToken, error) {
-	t, err := scanRouteToken(s.q.QueryRow(ctx, "SELECT "+routeTokenCols+" FROM env_route_tokens WHERE hash = $1", hash))
+	t, err := scanRouteToken(s.q.QueryRow(ctx, "SELECT "+routeTokenCols+` FROM env_route_tokens
+		WHERE hash = $1 AND `+integrationMayWrite("env_route_tokens.integration_id", "env_route_tokens.env_id"), hash))
 	if err != nil {
 		return EnvRouteToken{}, noRow(err, ErrNoRow)
 	}

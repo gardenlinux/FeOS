@@ -89,6 +89,23 @@ func (s *Store) DeleteProjectToken(ctx context.Context, project, hash string) (b
 	return tag.RowsAffected() > 0, err
 }
 
+// GetProjectToken reads a token of project by its hash; ErrNoRow if the
+// project has none of it.
+func (s *Store) GetProjectToken(ctx context.Context, project, hash string) (ProjectToken, error) {
+	t, err := scanProjectToken(s.q.QueryRow(ctx, "SELECT "+projectTokenCols+` FROM project_tokens
+		WHERE project_id = $1 AND hash = $2`, project, hash))
+	return t, noRow(err, ErrNoRow)
+}
+
+// DeleteTokenGrantAt removes a token's grant (of grants, not its own) in
+// project on env (uuid.Nil: the project). It reports whether there was
+// one.
+func (s *Store) DeleteTokenGrantAt(ctx context.Context, project, hash string, env uuid.UUID) (bool, error) {
+	tag, err := s.q.Exec(ctx, `DELETE FROM grants WHERE project_id = $1 AND token_hash = $2
+		AND environment_id IS NOT DISTINCT FROM $3`, project, hash, nullUUID(env))
+	return tag.RowsAffected() > 0, err
+}
+
 // ResolveProjectToken returns the project of a token hash, ignoring a project
 // being deleted; model.ErrUnknownToken when there is none.
 func (s *Store) ResolveProjectToken(ctx context.Context, hash string) (string, error) {
@@ -131,8 +148,18 @@ func scanSandboxToken(row pgx.Row) (SandboxToken, error) {
 // (a principal, ADR 0031; "" for ferund); model.ErrNotFound when the
 // sandbox does not exist.
 func (s *Store) CreateSandboxToken(ctx context.Context, hash string, sandboxID podid.ID, label, madeBy string) (SandboxToken, error) {
-	t, err := scanSandboxToken(s.q.QueryRow(ctx, `INSERT INTO sandbox_tokens (hash, sandbox_id, label, made_by)
-		VALUES ($1, $2, $3, $4) RETURNING hash, sandbox_id, label, created_at, last_used_at`, hash, sandboxID, label, madeBy))
+	return s.MintSandboxToken(ctx, hash, sandboxID, label, madeBy, uuid.Nil)
+}
+
+// MintSandboxToken is CreateSandboxToken for a token that integration
+// minted (uuid.Nil: none), which goes with the integration's access (ADR
+// 0056): resolving it then needs the integration enabled and holding
+// write on the sandbox's environment.
+func (s *Store) MintSandboxToken(ctx context.Context, hash string, sandboxID podid.ID, label, madeBy string,
+	integration uuid.UUID) (SandboxToken, error) {
+	t, err := scanSandboxToken(s.q.QueryRow(ctx, `INSERT INTO sandbox_tokens (hash, sandbox_id, label, made_by, integration_id)
+		VALUES ($1, $2, $3, $4, $5) RETURNING hash, sandbox_id, label, created_at, last_used_at`, hash, sandboxID, label, madeBy,
+		nullUUID(integration)))
 	if isForeignKeyViolation(err) {
 		return SandboxToken{}, model.ErrNotFound
 	}
@@ -163,16 +190,34 @@ func (s *Store) DeleteSandboxToken(ctx context.Context, sandboxID podid.ID, hash
 	return tag.RowsAffected() > 0, err
 }
 
+// integrationMayWrite is the condition on a token's integration_id
+// column (tokenIntegration) and the environment (tokenEnv) it reaches
+// under which the token is still good (ADR 0056): minted by no
+// integration, or by one that is enabled and holds write on that
+// environment by its own grants, protection counted (ADR 0060) and
+// without the cap of an integration that names nobody, since the token
+// may have been minted for a person.
+func integrationMayWrite(tokenIntegration, tokenEnv string) string {
+	return `(` + tokenIntegration + ` IS NULL OR EXISTS (SELECT 1 FROM integrations i
+		JOIN environments e ON e.id = ` + tokenEnv + `
+		WHERE i.id = ` + tokenIntegration + ` AND i.disabled_at IS NULL AND EXISTS (SELECT 1 FROM grants g
+			WHERE g.integration_id = i.id AND g.project_id = e.owner AND (
+				(g.environment_id = e.id AND g.role IN ('write', 'admin'))
+				OR (g.environment_id IS NULL AND (g.role = 'admin' OR (g.role = 'write' AND NOT e.protected)))))))`
+}
+
 // ResolveSandboxToken returns the sandbox and owner of a token hash,
 // ignoring a project being deleted and an environment's instance row (the
-// sandbox doors treat it as absent; it has no token of its own);
-// model.ErrUnknownToken when there is none.
+// sandbox doors treat it as absent; it has no token of its own), and a
+// token an integration minted that its access no longer backs
+// (integrationMayWrite); model.ErrUnknownToken when there is none.
 func (s *Store) ResolveSandboxToken(ctx context.Context, hash string) (podid.ID, string, error) {
 	var id podid.ID
 	var owner string
 	err := s.q.QueryRow(ctx, `SELECT t.sandbox_id, s.owner FROM sandbox_tokens t
 		JOIN sandboxes s ON s.id = t.sandbox_id JOIN projects n ON n.id = s.owner
-		WHERE t.hash = $1 AND n.deleting_at IS NULL AND NOT s.instance AND NOT s.project_job`, hash).Scan(&id, &owner)
+		WHERE t.hash = $1 AND n.deleting_at IS NULL AND NOT s.instance AND NOT s.project_job
+			AND `+integrationMayWrite("t.integration_id", "s.environment_id"), hash).Scan(&id, &owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", model.ErrUnknownToken
 	}

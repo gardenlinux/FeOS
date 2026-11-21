@@ -1,0 +1,46 @@
+{
+  "method": "GET",
+  "path": "/auth/me",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "kind": "session",
+    "sub": "ada",
+    "person": "0199a0b1-0000-7000-8000-000000000001",
+    "method": "oidc",
+    "projects": [
+      {
+        "project": "acme",
+        "role": "write",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000002",
+            "name": "box",
+            "role": "write",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000003",
+            "name": "prod",
+            "role": "read",
+            "protected": true,
+            "plan": true,
+            "delete": false
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000004",
+            "name": "stage",
+            "role": "write",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          }
+        ]
+      }
+    ],
+    "accounts": []
+  }
+}

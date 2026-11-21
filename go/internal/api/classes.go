@@ -20,6 +20,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/pki"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -285,6 +286,10 @@ const (
 	// scopeJob: the environment of the path's project's job {id}, as
 	// scopeSandbox.
 	scopeJob
+	// scopeGrant: the scope of a grant or an invitation, the project or
+	// the environment of the body or the query, which the handler checks
+	// the role on (adminScope).
+	scopeGrant
 )
 
 // need is the role and scope a project-class route needs of its principal,
@@ -294,9 +299,13 @@ const (
 type need struct {
 	role  auth.Role
 	scope scope
-	// orProject is, on scopeEnv, a project role that suffices too (an
-	// environment's deletion: its admin, or write on the project).
+	// orProject is, on scopeEnv, a project role that suffices too while
+	// the environment is not protected (an environment's deletion: its
+	// admin, or write on the project; ADR 0060).
 	orProject auth.Role
+	// plan checks, on scopeEnv, the role the environment would give were
+	// it not protected (ADR 0060: a plan is not held back).
+	plan bool
 	// noIntegration refuses an integration whatever its role (ADR 0056:
 	// an integration changes no principal of a project): 403
 	// integration_refused.
@@ -312,6 +321,15 @@ func onEnv(r auth.Role) need     { return need{role: r, scope: scopeEnv} }
 func onSandbox(r auth.Role) need { return need{role: r, scope: scopeSandbox} }
 func onJob(r auth.Role) need     { return need{role: r, scope: scopeJob} }
 func byHandler(r auth.Role) need { return need{role: r, scope: scopeHandler} }
+func byScope(r auth.Role) need   { return need{role: r, scope: scopeGrant} }
+
+// onEnvPlan is the need of an environment's plan: r on it, protection
+// aside.
+func onEnvPlan(r auth.Role) need { return need{role: r, scope: scopeEnv, plan: true} }
+
+// onEnvOrProject is r on the environment, or p on the project while the
+// environment is not protected.
+func onEnvOrProject(r, p auth.Role) need { return need{role: r, scope: scopeEnv, orProject: p} }
 
 // noIntegration is n refusing an integration (need.noIntegration).
 func noIntegration(n need) need { n.noIntegration = true; return n }
@@ -341,12 +359,16 @@ func (n need) base() string {
 	switch {
 	case n.scope == scopeHandler:
 		return n.role.String() + " checked by the handler"
+	case n.scope == scopeGrant:
+		return n.role.String() + " by scope"
 	case n.scope == scopeSandbox:
 		return n.role.String() + " sandbox's environment"
 	case n.scope == scopeJob:
 		return n.role.String() + " job's environment"
 	case n.scope == scopeEnv && n.orProject != auth.RoleNone:
-		return n.role.String() + " environment or " + n.orProject.String() + " project"
+		return n.role.String() + " environment or " + n.orProject.String() + " project unless protected"
+	case n.scope == scopeEnv && n.plan:
+		return n.role.String() + " environment, protection aside"
 	case n.scope == scopeEnv:
 		return n.role.String() + " environment"
 	case n.role == auth.RoleNone:
@@ -358,6 +380,46 @@ func (n need) base() string {
 // codeIntegrationRefused is the code of the 403 of a route or class an
 // integration may not use whatever its role (ADR 0056).
 const codeIntegrationRefused = "integration_refused"
+
+// The codes of an integration's sign-in (ADR 0056) and of the header that
+// names a person.
+const (
+	codePersonHeaderRefused = "person_header_refused"
+	codeTokenRefused        = "token_refused"
+	codeUnknownIntegration  = "unknown_integration"
+	codeProviderUnreachable = "provider_unreachable"
+)
+
+// personHeader names the person an integration's call is made for.
+const personHeader = auth.PersonHeader
+
+// errPersonHeaderRefused is the answer to FeRun-Person from a session or a
+// project token: only an integration names a person, and a caller that
+// expects the narrowing must not get a wider answer.
+func errPersonHeaderRefused() error {
+	return apierr.WithCode(http.StatusBadRequest, codePersonHeaderRefused, "only an integration names a person")
+}
+
+// personNamed is the request's FeRun-Person: sent reports whether it has
+// the header at all; a value that is not one subject of 1 to 255
+// printable ASCII characters is 400.
+func personNamed(r *http.Request) (sub string, sent bool, err error) {
+	vs := r.Header.Values(personHeader)
+	if len(vs) == 0 {
+		return "", false, nil
+	}
+	bad := apierr.WithCode(http.StatusBadRequest, codePersonHeaderRefused,
+		"%s names one person by their subject: 1 to 255 printable ASCII characters", personHeader)
+	if len(vs) > 1 || len(vs[0]) == 0 || len(vs[0]) > 255 {
+		return "", true, bad
+	}
+	for i := 0; i < len(vs[0]); i++ {
+		if c := vs[0][i]; c < 0x20 || c > 0x7e {
+			return "", true, bad
+		}
+	}
+	return vs[0], true, nil
+}
 
 // errIntegrationRefused is the answer to an integration on a route that
 // changes the principals of a project, or of a class it is no principal
@@ -406,11 +468,17 @@ func (s *server) projectPrincipal(w http.ResponseWriter, r *http.Request) (auth.
 }
 
 // projectPrincipalOr is projectPrincipal, whose 401 for a request with no
-// credential at all says missing (the class's text).
+// credential at all says missing (the class's text). A bearer that is a
+// JWT is an integration's (integrationPrincipal); FeRun-Person from any
+// other caller is 400. The project's protected environments go with the
+// principal (ADR 0060).
 func (s *server) projectPrincipalOr(w http.ResponseWriter, r *http.Request, missing string) (auth.Project, error) {
 	ctx := r.Context()
 	named := r.Header.Get(projectHeader)
 	if tok := bearer(r); tok != "" {
+		if isJWT(tok) {
+			return s.integrationPrincipal(w, r, tok, named)
+		}
 		hash := store.HashToken(tok)
 		name, roles, err := s.st.TokenAccess(ctx, hash)
 		if errors.Is(err, model.ErrUnknownToken) {
@@ -418,6 +486,9 @@ func (s *server) projectPrincipalOr(w http.ResponseWriter, r *http.Request, miss
 		}
 		if err != nil {
 			return auth.Project{}, fmt.Errorf("token lookup: %w", err)
+		}
+		if _, sent, _ := personNamed(r); sent {
+			return auth.Project{}, errPersonHeaderRefused()
 		}
 		if named != "" && named != name {
 			return auth.Project{}, errNoProject()
@@ -429,7 +500,7 @@ func (s *server) projectPrincipalOr(w http.ResponseWriter, r *http.Request, miss
 		}
 		t := auth.Project{Name: name, Token: tok, Principal: auth.Principal{TokenHash: hash}}
 		grantRoles(&t, roles)
-		return t, nil
+		return t, s.protect(ctx, &t)
 	}
 	sess, ok, err := s.session(r)
 	if err != nil {
@@ -441,6 +512,9 @@ func (s *server) projectPrincipalOr(w http.ResponseWriter, r *http.Request, miss
 	}
 	if err := s.checkCSRF(r); err != nil {
 		return auth.Project{}, err
+	}
+	if _, sent, _ := personNamed(r); sent {
+		return auth.Project{}, errPersonHeaderRefused()
 	}
 	if named == "" {
 		return auth.Project{}, apierr.New(http.StatusBadRequest, "a session names its project in the %s header", projectHeader)
@@ -457,6 +531,124 @@ func (s *server) projectPrincipalOr(w http.ResponseWriter, r *http.Request, miss
 	grantRoles(&t, roles)
 	if sess.Admin {
 		t.Role = auth.RoleAdmin
+	}
+	return t, s.protect(ctx, &t)
+}
+
+// protect sets the protected environments of t's project (ADR 0060).
+func (s *server) protect(ctx context.Context, t *auth.Project) error {
+	ids, err := s.st.ProtectedEnvironments(ctx, t.Name)
+	if err != nil {
+		return fmt.Errorf("protected environments: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	t.Protected = make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		t.Protected[id] = true
+	}
+	return nil
+}
+
+// integrationOf signs an integration in by its bearer (ADR 0056): the
+// provider's access token for this API, verified (VerifyAccessToken), of
+// a registered integration; 401 token_refused otherwise (the reason to the
+// log only) or unknown_integration, 502 when the provider's keys cannot be
+// read. Without --oidc-issuer every such bearer is refused. A disabled
+// integration signs in; its grants have no effect (the caller decides).
+func (s *server) integrationOf(w http.ResponseWriter, r *http.Request, tok string) (store.Integration, error) {
+	refuse := func(code, text string) error {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
+		return apierr.WithCode(http.StatusUnauthorized, code, "%s", text)
+	}
+	if s.oidc == nil {
+		return store.Integration{}, refuse(codeTokenRefused, "bearer refused")
+	}
+	ctx := r.Context()
+	c, err := s.oidc.VerifyAccessToken(ctx, tok, s.cfg.APIAudience)
+	var pe *oidc.ErrProvider
+	if errors.As(err, &pe) {
+		s.log.Warn("an integration's bearer: the provider's keys", "err", err)
+		return store.Integration{}, apierr.WithCode(http.StatusBadGateway, codeProviderUnreachable,
+			"the provider's keys cannot be read")
+	}
+	if err != nil {
+		s.log.Info("an integration's bearer refused", "err", err)
+		return store.Integration{}, refuse(codeTokenRefused, "bearer refused")
+	}
+	in, err := s.st.IntegrationBySubject(ctx, s.cfg.OIDC.Issuer, c.Sub)
+	if isNoRow(err) {
+		s.log.Info("an access token of no registered integration", "sub", c.Sub)
+		return store.Integration{}, refuse(codeUnknownIntegration, "unknown integration")
+	}
+	if err != nil {
+		return store.Integration{}, fmt.Errorf("integration lookup: %w", err)
+	}
+	if s.touches.due("i:" + in.ID.String()) {
+		if err := s.st.TouchIntegration(ctx, in.ID); err != nil {
+			s.log.Warn("touch an integration", "err", err)
+		}
+	}
+	return in, nil
+}
+
+// integrationPrincipal is an integration's principal in the project it
+// names (FeRun-Project, required): its grants there, and, with
+// FeRun-Person, the person it names, whose grants bound the call (the
+// lower of two roles, ADR 0056). A project it holds no grant in, a
+// disabled integration, and a named person FeRun does not know, who is
+// disabled or holds no grant there, are an unknown project alike.
+func (s *server) integrationPrincipal(w http.ResponseWriter, r *http.Request, tok, named string) (auth.Project, error) {
+	ctx := r.Context()
+	in, err := s.integrationOf(w, r, tok)
+	if err != nil {
+		return auth.Project{}, err
+	}
+	sub, sent, err := personNamed(r)
+	if err != nil {
+		return auth.Project{}, err
+	}
+	if named == "" {
+		return auth.Project{}, apierr.New(http.StatusBadRequest, "an integration names its project in the %s header", projectHeader)
+	}
+	if in.Disabled() {
+		return auth.Project{}, errNoProject()
+	}
+	roles, exists, err := s.st.IntegrationAccess(ctx, named, in.ID)
+	if err != nil {
+		return auth.Project{}, fmt.Errorf("grants: %w", err)
+	}
+	if !exists || len(roles) == 0 {
+		return auth.Project{}, errNoProject()
+	}
+	t := auth.Project{Name: named, Token: tok, Principal: auth.Principal{Integration: in.ID}}
+	grantRoles(&t, roles)
+	if sent {
+		p, err := s.st.PersonBySubject(ctx, in.Issuer, sub)
+		if isNoRow(err) || (err == nil && p.Disabled()) {
+			return auth.Project{}, errNoProject()
+		}
+		if err != nil {
+			return auth.Project{}, fmt.Errorf("person %s: %w", sub, err)
+		}
+		proles, _, err := s.st.PersonAccess(ctx, named, p.ID)
+		if err != nil {
+			return auth.Project{}, fmt.Errorf("grants: %w", err)
+		}
+		if len(proles) == 0 {
+			return auth.Project{}, errNoProject()
+		}
+		var pt auth.Project
+		grantRoles(&pt, proles)
+		t.Named = &auth.NamedPerson{Sub: sub, Grants: auth.Grants{Project: pt.Role, Envs: pt.Envs}}
+		t.Principal.For = p.ID
+	}
+	if err := s.protect(ctx, &t); err != nil {
+		return auth.Project{}, err
+	}
+	if !t.Visible() {
+		return auth.Project{}, errNoProject()
 	}
 	return t, nil
 }
@@ -575,10 +767,14 @@ func (s *server) authService(r *http.Request, tok string) (auth.Service, bool, e
 }
 
 // allow checks a route's need: an integration on a route that refuses
-// one is 403 integration_refused, whatever its role; on the project, the principal's project
-// grant; on an environment, the higher of that and its grant there, an
-// environment it holds no role on being absent (404). A role too low is
-// 403 role_required. An environment it resolved to check the grant
+// one is 403 integration_refused, whatever its role; on the project, the
+// principal's role there (auth.Project.ProjectRole); on an environment,
+// its role there (auth.Project.EnvRole: the higher of the project grant,
+// as protection counts it, and the grant there; the lower of two for an
+// integration naming a person, ADR 0056, 0060), an environment it holds
+// no role on being absent (404). A role too low is 403 role_required.
+// The environment is resolved only when the project role does not decide
+// (auth.Project.EveryEnv). An environment it resolved to check the grant
 // there goes with the request it returns (checkedEnv), so that the
 // handler acts on the environment that was checked, whatever its name
 // names by then.
@@ -588,15 +784,18 @@ func (s *server) allow(r *http.Request, t auth.Project, n need) (*http.Request, 
 	}
 	switch n.scope {
 	case scopeProject:
-		if t.Role >= n.role {
+		if t.ProjectRole() >= n.role {
 			return r, nil
 		}
 		return r, apierr.RoleRequired(n.role.String(), "project")
 	case scopeEnv:
-		if t.Role >= n.role || (n.orProject != auth.RoleNone && t.Role >= n.orProject) {
+		switch {
+		case n.plan && t.ProjectRole() >= n.role,
+			!n.plan && t.EveryEnv(n.role),
+			n.orProject != auth.RoleNone && len(t.Protected) == 0 && t.ProjectRole() >= n.orProject:
 			return r, nil
 		}
-		if t.Role == auth.RoleNone && len(t.Envs) == 0 {
+		if t.ProjectRole() == auth.RoleNone && len(t.EnvGrants()) == 0 {
 			return r, errNoEnvironment()
 		}
 		ref := r.PathValue("env")
@@ -604,12 +803,20 @@ func (s *server) allow(r *http.Request, t auth.Project, n need) (*http.Request, 
 		if err != nil {
 			return r, err
 		}
-		if err := allowEnvID(t, id, n.role); err != nil {
-			return r, err
+		have := t.EnvRole(id)
+		if n.plan && have > auth.RoleNone {
+			have = t.PlanRole(id)
+		}
+		switch {
+		case have == auth.RoleNone:
+			return r, errNoEnvironment()
+		case have >= n.role, n.orProject != auth.RoleNone && !t.Protected[id] && t.ProjectRole() >= n.orProject:
+		default:
+			return r, apierr.RoleRequired(n.role.String(), "environment")
 		}
 		return r.WithContext(context.WithValue(r.Context(), checkedEnvKey{}, checkedEnvRef{ref: ref, id: id})), nil
 	case scopeSandbox, scopeJob:
-		if t.Role >= n.role {
+		if t.EveryEnv(n.role) {
 			return r, nil
 		}
 		return r, s.allowPodEnv(r, t, n)
@@ -654,7 +861,7 @@ func (s *server) allowPodEnv(r *http.Request, t auth.Project, n need) error {
 	if n.scope == scopeJob {
 		absent = errNoProjectJob
 	}
-	if t.Role == auth.RoleNone && len(t.Envs) == 0 {
+	if t.ProjectRole() == auth.RoleNone && len(t.EnvGrants()) == 0 {
 		return absent()
 	}
 	id, err := podid.Parse(r.PathValue("id"))
@@ -697,7 +904,7 @@ func errNoProjectJob() error { return apierr.New(http.StatusNotFound, "no such j
 // allowEnv checks role on the environment of t's project that ref names
 // (its ID or its name).
 func (s *server) allowEnv(r *http.Request, t auth.Project, ref string, role auth.Role) error {
-	if t.Role >= role {
+	if t.EveryEnv(role) {
 		return nil
 	}
 	id, err := s.envRef(r, t, ref)

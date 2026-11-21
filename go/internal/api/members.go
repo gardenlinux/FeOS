@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -56,20 +58,26 @@ func (s *server) memberRoutes(operator func(string, apiHandler), person func(str
 
 	// Members see each other in their project; a grant is changed by an
 	// admin of its scope (the project, or the body's or query's
-	// environment), which the handler checks.
-	byScope := need{role: admin, scope: scopeHandler}
+	// environment), which the handler checks. An integration changes no
+	// principal of a project (ADR 0056): members, invitations and tokens
+	// refuse it whatever its role; it reads the members and leaves.
+	grantor := noIntegration(byScope(admin))
 	project(member, "GET /api/v1/project/members", s.listMembers)
-	project(byScope, "PUT /api/v1/project/members/{person}/grants", s.putMemberGrant)
-	project(byScope, "DELETE /api/v1/project/members/{person}/grants", s.deleteMemberGrant)
+	project(grantor, "PUT /api/v1/project/members/{person}/grants", s.putMemberGrant)
+	project(grantor, "DELETE /api/v1/project/members/{person}/grants", s.deleteMemberGrant)
 	project(member, "POST /api/v1/project/leave", s.leaveProject)
 
-	project(member, "GET /api/v1/project/invitations", s.listInvitations)
-	project(byScope, "POST /api/v1/project/invitations", s.createInvitation)
-	project(byScope, "DELETE /api/v1/project/invitations/{id}", s.revokeInvitation)
+	project(noIntegration(member), "GET /api/v1/project/invitations", s.listInvitations)
+	project(grantor, "POST /api/v1/project/invitations", s.createInvitation)
+	project(grantor, "DELETE /api/v1/project/invitations/{id}", s.revokeInvitation)
 
-	project(onProject(admin), "GET /api/v1/project/tokens", s.listOwnTokens)
-	project(onProject(admin), "POST /api/v1/project/tokens", s.mintOwnToken)
-	project(onProject(admin), "DELETE /api/v1/project/tokens/{hash}", s.revokeOwnToken)
+	project(noIntegration(onProject(admin)), "GET /api/v1/project/tokens", s.listOwnTokens)
+	project(noIntegration(onProject(admin)), "POST /api/v1/project/tokens", s.mintOwnToken)
+	project(noIntegration(onProject(admin)), "DELETE /api/v1/project/tokens/{hash}", s.revokeOwnToken)
+	// A token's grants beside its own, as a member's (ADR 0060: the
+	// protect dialog gives a token a grant on the environment).
+	project(grantor, "PUT /api/v1/project/tokens/{hash}/grants", s.putTokenGrant)
+	project(grantor, "DELETE /api/v1/project/tokens/{hash}/grants", s.deleteTokenGrant)
 }
 
 // ----------------------------------------------------------- person class --
@@ -208,49 +216,62 @@ func idOrEmpty(id uuid.UUID) string {
 	return id.String()
 }
 
-// memberView is a member: a person with their role on the project ("":
-// none) and their roles on environments.
-type memberView struct {
-	Person       string        `json:"person"`
-	Name         string        `json:"name"`
-	Email        string        `json:"email"`
-	Disabled     bool          `json:"disabled,omitempty"`
-	Role         string        `json:"role"`
-	Environments []envRoleView `json:"environments"`
-}
-
-// envRoleView is a role on an environment.
-type envRoleView struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
 // listMembers is GET /api/v1/project/members: the people who hold a grant
-// in the project, with their names and e-mail addresses, which only the
-// project's members see (ADR 0031). Of the grants on environments, those
-// the principal may not read are left out.
+// in the project, with their names, e-mail addresses, issuers and
+// subjects, which only the project's members see (ADR 0031, 0056), and the
+// integrations that hold one. Of the grants on environments, those the
+// principal may not read are left out; each grant names its principal and
+// that principal's name.
 func (s *server) listMembers(w http.ResponseWriter, r *http.Request) error {
-	ms, err := s.st.ListMembers(r.Context(), projectOf(r))
+	ctx, project := r.Context(), projectOf(r)
+	ms, err := s.st.ListMembers(ctx, project)
 	if err != nil {
 		return fmt.Errorf("list members: %w", err)
 	}
-	out := struct {
-		Members []memberView `json:"members"`
-	}{Members: make([]memberView, 0, len(ms))}
+	is, err := s.st.ListIntegrationGrants(ctx, project)
+	if err != nil {
+		return fmt.Errorf("list integrations: %w", err)
+	}
+	var made []string
 	for _, m := range ms {
-		mv := memberView{Person: m.ID.String(), Name: m.Name, Email: m.Email, Disabled: m.Disabled(),
-			Environments: []envRoleView{}}
 		for _, g := range m.Grants {
+			made = append(made, g.MadeBy)
+		}
+	}
+	for _, i := range is {
+		for _, g := range i.Grants {
+			made = append(made, g.MadeBy)
+		}
+	}
+	names, err := s.st.PrincipalNames(ctx, made)
+	if err != nil {
+		return fmt.Errorf("list members: %w", err)
+	}
+	// grants splits grants into the project's role and its made_by, and
+	// the readable environments' grants.
+	grants := func(gs []store.MemberGrant) (role, madeBy string, envs []fapi.EnvGrant) {
+		envs = []fapi.EnvGrant{}
+		for _, g := range gs {
 			switch {
 			case g.EnvironmentID == uuid.Nil:
-				mv.Role = g.Role
+				role, madeBy = g.Role, g.MadeBy
 			case mayReadEnv(r, g.EnvironmentID.String()):
-				mv.Environments = append(mv.Environments, envRoleView{ID: g.EnvironmentID.String(),
-					Name: g.EnvironmentName, Role: g.Role})
+				envs = append(envs, fapi.EnvGrant{ID: g.EnvironmentID.String(), Name: g.EnvironmentName, Role: g.Role,
+					MadeBy: g.MadeBy, MadeByName: names[g.MadeBy]})
 			}
 		}
-		out.Members = append(out.Members, mv)
+		return role, madeBy, envs
+	}
+	out := fapi.Members{Members: make([]fapi.Member, 0, len(ms)), Integrations: make([]fapi.IntegrationGrant, 0, len(is))}
+	for _, m := range ms {
+		role, by, envs := grants(m.Grants)
+		out.Members = append(out.Members, fapi.Member{Person: m.ID.String(), Name: m.Name, Email: m.Email, Issuer: m.Issuer,
+			Subject: m.Sub, Disabled: m.Disabled(), Role: role, MadeBy: by, MadeByName: names[by], Environments: envs})
+	}
+	for _, i := range is {
+		role, by, envs := grants(i.Grants)
+		out.Integrations = append(out.Integrations, fapi.IntegrationGrant{Integration: i.Name, Title: i.Title, URL: i.URL,
+			Disabled: i.Disabled(), Role: role, MadeBy: by, MadeByName: names[by], Environments: envs})
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
@@ -398,14 +419,23 @@ func (s *server) deleteMemberGrant(w http.ResponseWriter, r *http.Request) error
 }
 
 // leaveProject is POST /api/v1/project/leave: a person gives up every grant
-// of theirs in the project, unless they are its last admin. A token does
-// not leave: it is revoked.
+// of theirs in the project, unless they are its last admin; an integration
+// gives up every grant of its own there (ADR 0056). A token does not
+// leave: it is revoked.
 func (s *server) leaveProject(w http.ResponseWriter, r *http.Request) error {
 	t, _ := auth.ProjectFrom(r.Context())
+	ctx := r.Context()
+	if t.Principal.IsIntegration() {
+		if _, err := s.st.DeleteIntegrationGrants(ctx, t.Name, t.Principal.Integration); err != nil {
+			return fmt.Errorf("leave: %w", err)
+		}
+		return writeJSON(w, http.StatusOK, struct {
+			Left bool `json:"left"`
+		}{true})
+	}
 	if t.Principal.Person == uuid.Nil {
 		return apierr.New(http.StatusBadRequest, "a token does not leave its project: revoke it")
 	}
-	ctx := r.Context()
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
 		return keepAdmin(ctx, tx, t.Name, func() error {
 			_, err := tx.DeletePersonGrants(ctx, t.Name, t.Principal.Person)
@@ -758,6 +788,91 @@ func (s *server) revokeOwnToken(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, struct {
 		Revoked bool `json:"revoked"`
 	}{ok})
+}
+
+func errNoToken() error { return apierr.New(http.StatusNotFound, "no such token") }
+
+// tokenOf reads the path's {hash}, a token of the project.
+func tokenOf(r *http.Request, tx *store.Store) (store.ProjectToken, error) {
+	tok, err := tx.GetProjectToken(r.Context(), projectOf(r), r.PathValue("hash"))
+	if isNoRow(err) {
+		return store.ProjectToken{}, errNoToken()
+	}
+	return tok, err
+}
+
+// putTokenGrant is PUT /api/v1/project/tokens/{hash}/grants {role,
+// environment?}: a grant of the token beside its own, on the project or on
+// the environment (its ID or name), by an admin of that scope, as a
+// member's grant is given (ADR 0060's dialog gives a token write on the
+// environment it protects).
+func (s *server) putTokenGrant(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Role        string `json:"role"`
+		Environment string `json:"environment"`
+	}
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	t, _ := auth.ProjectFrom(ctx)
+	env, err := s.adminScope(ctx, t, req.Environment)
+	if err != nil {
+		return err
+	}
+	if _, ok := auth.ParseRole(req.Role); !ok {
+		return apierr.New(http.StatusBadRequest, "role must be read, write or admin, got %q", req.Role)
+	}
+	var g store.Grant
+	err = s.st.InTx(ctx, func(tx *store.Store) error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
+			tok, err := tokenOf(r, tx)
+			if err != nil {
+				return err
+			}
+			g, err = tx.PutGrant(ctx, store.Grant{ProjectID: projectOf(r), TokenHash: tok.Hash, EnvironmentID: env,
+				Role: req.Role, MadeBy: auth.MadeBy(ctx)})
+			return err
+		})
+	})
+	if err != nil {
+		return passOr(err, "grant")
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Token       string `json:"token"`
+		Role        string `json:"role"`
+		Environment string `json:"environment"`
+	}{g.TokenHash, g.Role, idOrEmpty(g.EnvironmentID)})
+}
+
+// deleteTokenGrant is DELETE /api/v1/project/tokens/{hash}/grants
+// [?environment=<ID or name>]: the token's grant (of those beside its own)
+// on the project or on the environment goes, by an admin of that scope,
+// unless it is the project's last admin's.
+func (s *server) deleteTokenGrant(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+	t, _ := auth.ProjectFrom(ctx)
+	env, err := s.adminScope(ctx, t, r.URL.Query().Get("environment"))
+	if err != nil {
+		return err
+	}
+	var deleted bool
+	err = s.st.InTx(ctx, func(tx *store.Store) error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
+			tok, err := tokenOf(r, tx)
+			if err != nil {
+				return err
+			}
+			deleted, err = tx.DeleteTokenGrantAt(ctx, projectOf(r), tok.Hash, env)
+			return err
+		})
+	})
+	if err != nil {
+		return passOr(err, "delete grant")
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Deleted bool `json:"deleted"`
+	}{deleted})
 }
 
 // ----------------------------------------------------------------- people --

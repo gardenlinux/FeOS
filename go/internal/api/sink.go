@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -56,10 +58,11 @@ func (s *server) service(h apiHandler) http.Handler {
 }
 
 // getProject is GET /api/v1/project, which the sink asks for its readers
-// (ADR 0026, 0031): the project of the request's principal, a token or a
-// session with FeRun-Project; the principal's role on the project ("": none,
-// its grants are on environments only); and the IDs of the environments
-// it holds a grant on, sorted. The sink lets a role on the project read
+// (ADR 0026, 0031): the project of the request's principal, a token, a
+// session or an integration with FeRun-Project; the principal's effective
+// role on the project ("": none, its roles are on environments only; for
+// an integration naming a person the lower of both, ADR 0056); and the
+// IDs of the environments beside it it reads, sorted. The sink lets a role on the project read
 // every stream and span, and the others only those of the environments
 // listed. An answer of only {project} is a ferund of before people, whose
 // every token was the project's. A sink of before people reads such an
@@ -68,21 +71,17 @@ func (s *server) service(h apiHandler) http.Handler {
 // any other 403 role_required read on the project.
 func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
 	t, _ := auth.ProjectFrom(r.Context())
-	if t.Role == auth.RoleNone && r.URL.Query().Get("filter") != "environments" {
+	if t.ProjectRole() == auth.RoleNone && r.URL.Query().Get("filter") != "environments" {
 		return apierr.RoleRequired(auth.RoleRead.String(), "project")
 	}
-	envs := make([]string, 0, len(t.Envs))
-	for id, role := range t.Envs {
-		if role >= auth.RoleRead {
+	envs := []string{}
+	for _, id := range t.EnvGrants() {
+		if t.EnvRole(id) >= auth.RoleRead {
 			envs = append(envs, id.String())
 		}
 	}
 	slices.Sort(envs)
-	return writeJSON(w, http.StatusOK, struct {
-		Project      string   `json:"project"`
-		Role         string   `json:"role"`
-		Environments []string `json:"environments"`
-	}{t.Name, t.Role.String(), envs})
+	return writeJSON(w, http.StatusOK, fapi.Project{Project: t.Name, Role: t.ProjectRole().String(), Environments: envs})
 }
 
 // issueServiceCert is POST /api/v1/service-certificates {csr}: the

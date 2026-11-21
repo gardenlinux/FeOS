@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/api/v1/integrations",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "integrations": [
+      {
+        "name": "fecode",
+        "title": "FeCode",
+        "url": "https://fecode.dev"
+      }
+    ]
+  }
+}

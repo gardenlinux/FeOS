@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,9 +66,9 @@ var routeNeeds = map[string]string{
 	"POST /api/v1/environments/plan":                            "read project",
 	"GET /api/v1/addons":                                        "member",
 	"GET /api/v1/environments/{env}":                            "read environment",
-	"PATCH /api/v1/environments/{env}":                          "admin environment or write project",
-	"DELETE /api/v1/environments/{env}":                         "admin environment or write project",
-	"POST /api/v1/environments/{env}/plan":                      "write environment",
+	"PATCH /api/v1/environments/{env}":                          "admin environment or write project unless protected",
+	"DELETE /api/v1/environments/{env}":                         "admin environment or write project unless protected",
+	"POST /api/v1/environments/{env}/plan":                      "write environment, protection aside",
 	"POST /api/v1/environments/{env}/deployments":               "write environment",
 	"GET /api/v1/environments/{env}/deployments":                "read environment",
 	"GET /api/v1/environments/{env}/deployments/{n}":            "read environment",
@@ -93,9 +94,11 @@ var routeNeeds = map[string]string{
 	"POST /api/v1/environments/{env}/services/{name}/restart":   "write environment",
 	"POST /api/v1/environments/{env}/jobs/{name}/run":           "write environment",
 	"POST /api/v1/environments/{env}/bindings/{name}/check":     "write environment",
-	"POST /api/v1/environments/{env}/route-tokens":              "admin environment",
-	"DELETE /api/v1/environments/{env}/route-tokens":            "admin environment",
+	"POST /api/v1/environments/{env}/route-tokens":              "write environment",
+	"DELETE /api/v1/environments/{env}/route-tokens":            "write environment",
 	"PUT /api/v1/environments/{env}/public":                     "admin environment",
+	"PUT /api/v1/environments/{env}/protected":                  "admin environment",
+	"GET /api/v1/environments/{env}/principals":                 "admin environment",
 	"POST /api/v1/domains":                                      "admin project",
 	"GET /api/v1/domains":                                       "member",
 	"GET /api/v1/domains/{id}":                                  "member",
@@ -112,15 +115,21 @@ var routeNeeds = map[string]string{
 
 	"GET /api/v1/project/quota":                      "member",
 	"GET /api/v1/project/members":                    "member",
-	"PUT /api/v1/project/members/{person}/grants":    "admin checked by the handler",
-	"DELETE /api/v1/project/members/{person}/grants": "admin checked by the handler",
+	"PUT /api/v1/project/members/{person}/grants":    "admin by scope, no integration",
+	"DELETE /api/v1/project/members/{person}/grants": "admin by scope, no integration",
 	"POST /api/v1/project/leave":                     "member",
-	"GET /api/v1/project/invitations":                "member",
-	"POST /api/v1/project/invitations":               "admin checked by the handler",
-	"DELETE /api/v1/project/invitations/{id}":        "admin checked by the handler",
-	"GET /api/v1/project/tokens":                     "admin project",
-	"POST /api/v1/project/tokens":                    "admin project",
-	"DELETE /api/v1/project/tokens/{hash}":           "admin project",
+	"GET /api/v1/project/invitations":                "member, no integration",
+	"POST /api/v1/project/invitations":               "admin by scope, no integration",
+	"DELETE /api/v1/project/invitations/{id}":        "admin by scope, no integration",
+	"GET /api/v1/project/tokens":                     "admin project, no integration",
+	"POST /api/v1/project/tokens":                    "admin project, no integration",
+	"DELETE /api/v1/project/tokens/{hash}":           "admin project, no integration",
+	"PUT /api/v1/project/tokens/{hash}/grants":       "admin by scope, no integration",
+	"DELETE /api/v1/project/tokens/{hash}/grants":    "admin by scope, no integration",
+
+	// Integrations (ADR 0056).
+	"PUT /api/v1/project/integrations/{integration}/grants":    "admin by scope, no integration",
+	"DELETE /api/v1/project/integrations/{integration}/grants": "admin by scope or the integration itself",
 
 	// Visitors (ADR 0054), with the visits service.
 	"GET /api/v1/providers":               "member",
@@ -166,8 +175,8 @@ func TestRouteNeeds(t *testing.T) {
 	}
 }
 
-// principal is a test's caller in testProject: a token or a person's
-// session, and the roles the test expects it to have.
+// principal is a test's caller in testProject: a token, a person's
+// session or an integration, and the roles the test expects it to have.
 type principal struct {
 	name string
 	// token is the bearer; "" for a session.
@@ -176,15 +185,35 @@ type principal struct {
 	cookie  string
 	project auth.Role
 	envs    map[string]auth.Role // by environment name
+	// integration: token is an integration's JWT, which names person
+	// (FeRun-Person) when it is not "", whose grants are named; unknown,
+	// the person named is none FeRun knows.
+	integration bool
+	person      string
+	named       *side
+	unknown     bool
+}
+
+// side is one side's grants, of a named person.
+type side struct {
+	project auth.Role
+	envs    map[string]auth.Role
 }
 
 // request is a request of p: the bearer, or the cookie with FeRun-Project
-// and the UI's CSRF header.
+// and the UI's CSRF header; an integration's bearer with FeRun-Project
+// and FeRun-Person.
 func (p principal) request(method, path string, body any) request {
 	h := http.Header{}
 	rq := request{method: method, path: path, body: body, header: h}
 	if p.token != "" {
 		h.Set("Authorization", bearerOf(p.token))
+		if p.integration {
+			h.Set(projectHeader, testProject)
+			if p.person != "" {
+				h.Set(personHeader, p.person)
+			}
+		}
 		return rq
 	}
 	h.Set(projectHeader, testProject)
@@ -197,6 +226,7 @@ func (p principal) request(method, path string, body any) request {
 // prod, and principals of each kind.
 type peopleWorld struct {
 	e           *env
+	p           *oidctest.Provider
 	stage, prod uuid.UUID
 	// persons by principal name
 	persons map[string]uuid.UUID
@@ -208,7 +238,7 @@ func newPeopleWorld(t *testing.T, o envOptions) *peopleWorld {
 	p := oidctest.New(t, oidc.AlgRS256)
 	o.oidc, o.publicURL = oidcConfig(p), testPublicURL
 	e := newEnv(t, o)
-	w := &peopleWorld{e: e, stage: mkEnvRow(t, e, testProject, "stage"), prod: mkEnvRow(t, e, testProject, "prod"),
+	w := &peopleWorld{e: e, p: p, stage: mkEnvRow(t, e, testProject, "stage"), prod: mkEnvRow(t, e, testProject, "prod"),
 		persons: map[string]uuid.UUID{}}
 	mustProject(t, e, "other")
 	mkEnvRow(t, e, "other", "stage")
@@ -256,10 +286,55 @@ func (w *peopleWorld) person(t *testing.T, name string, operator bool, grants ..
 	return cookie
 }
 
+// providerPerson makes a person of the provider's issuer, whom an
+// integration names by sub, with the grants.
+func (w *peopleWorld) providerPerson(t *testing.T, sub string, grants ...store.Grant) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	p, err := w.e.st.UpsertPerson(ctx, w.p.Issuer, sub, sub+"@example.test", "Person "+sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.persons[sub] = p.ID
+	for _, g := range grants {
+		g.PersonID = p.ID
+		if g.ProjectID == "" {
+			g.ProjectID = testProject
+		}
+		if _, err := w.e.st.PutGrant(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return p.ID
+}
+
+// integration registers an integration of the provider with the grants
+// in testProject (a grant's PersonID is ignored) and returns a bearer of
+// it for the API.
+func (w *peopleWorld) integration(t *testing.T, name string, grants ...store.Grant) string {
+	t.Helper()
+	ctx := context.Background()
+	in, _, err := w.e.st.PutIntegration(ctx, store.IntegrationIn{Name: name, Title: "Integration " + name,
+		URL: "https://" + name + ".example.test", Issuer: w.p.Issuer, Subject: "client-" + name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range grants {
+		project := g.ProjectID
+		if project == "" {
+			project = testProject
+		}
+		if _, err := w.e.st.PutIntegrationGrant(ctx, project, in.ID, g.EnvironmentID, g.Role, "basic:test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return w.p.AccessToken("client-"+name, map[string]any{"aud": testPublicURL})
+}
+
 // principals are the callers of the role tests.
 func (w *peopleWorld) principals(t *testing.T) []principal {
 	R, W, A := auth.RoleRead, auth.RoleWrite, auth.RoleAdmin
-	return []principal{
+	ps := []principal{
 		{name: "admin token (FeCode's)", token: w.e.projectToken, project: A},
 		{name: "read token", token: w.token(t, "read", uuid.Nil), project: R},
 		{name: "write token", token: w.token(t, "write", uuid.Nil), project: W},
@@ -275,28 +350,96 @@ func (w *peopleWorld) principals(t *testing.T) []principal {
 		{name: "prod write", cookie: w.person(t, "pw", false, store.Grant{Role: "write", EnvironmentID: w.prod}),
 			envs: map[string]auth.Role{"prod": W}},
 	}
+	// Integrations (ADR 0056), each its own registration; the person
+	// named, the provider's.
+	n := len(w.persons)
+	id := func(s string) string { return s + "-" + strconv.Itoa(n) }
+	w.providerPerson(t, id("pa"), store.Grant{Role: "admin"})
+	w.providerPerson(t, id("ps"), store.Grant{Role: "read", EnvironmentID: w.stage})
+	w.providerPerson(t, id("pw"), store.Grant{Role: "write"})
+	ps = append(ps,
+		principal{name: "integration (project write)", integration: true, project: W,
+			token: w.integration(t, id("iw"), store.Grant{Role: "write"})},
+		principal{name: "integration (project admin)", integration: true, project: A,
+			token: w.integration(t, id("ia"), store.Grant{Role: "admin"})},
+		principal{name: "integration (env admin)", integration: true, envs: map[string]auth.Role{"stage": A},
+			token: w.integration(t, id("ie"), store.Grant{Role: "admin", EnvironmentID: w.stage})},
+		principal{name: "integration naming a project admin", integration: true, project: A, person: id("pa"),
+			named: &side{project: A}, token: w.integration(t, id("na"), store.Grant{Role: "admin"})},
+		principal{name: "integration (stage write) naming a project write", integration: true,
+			envs: map[string]auth.Role{"stage": W}, person: id("pw"), named: &side{project: W},
+			token: w.integration(t, id("nw"), store.Grant{Role: "write", EnvironmentID: w.stage})},
+		principal{name: "integration naming env read", integration: true, project: W, person: id("ps"),
+			named: &side{envs: map[string]auth.Role{"stage": R}}, token: w.integration(t, id("nr"), store.Grant{Role: "write"})},
+		principal{name: "integration naming an unknown person", integration: true, project: A, person: id("nobody"),
+			unknown: true, token: w.integration(t, id("nu"), store.Grant{Role: "admin"})},
+	)
+	return ps
+}
+
+// counted is what a project grant counts for on an environment that is
+// protected or not (ADR 0060), as the test reads the ADR.
+func counted(g auth.Role, protected bool) auth.Role {
+	if protected && g != auth.RoleAdmin {
+		return min(g, auth.RoleRead)
+	}
+	return g
+}
+
+// roles are p's role on the project, on the stage environment (protected
+// or not) and, for its plan, on stage were it not protected, as the test
+// reads ADR 0031, 0056 and 0060.
+func (p principal) roles(protected bool) (onProject, onStage, plan auth.Role) {
+	onProject = p.project
+	onStage = max(counted(p.project, protected), p.envs["stage"])
+	plan = max(p.project, p.envs["stage"])
+	if n := p.named; n != nil {
+		onProject = min(onProject, n.project)
+		onStage = min(onStage, max(counted(n.project, protected), n.envs["stage"]))
+		plan = min(plan, max(n.project, n.envs["stage"]))
+	} else if p.integration && protected {
+		onStage = min(onStage, auth.RoleRead)
+	}
+	return onProject, onStage, plan
 }
 
 // expected is what the role model says of p on a route of need want (the
-// path's environment "stage"): "pass", "403" or "404".
-func expected(p principal, want string) string {
+// path's environment "stage", protected or not): "pass", "403", "404",
+// "refused" (integration_refused) or "" for a need the handler checks.
+func expected(p principal, want string, protected bool) string {
 	role := func(s string) auth.Role { r, _ := auth.ParseRole(s); return r }
+	if p.unknown {
+		return "404"
+	}
+	if strings.Contains(want, ", no integration") && p.integration {
+		return "refused"
+	}
+	want = strings.TrimSuffix(strings.TrimSuffix(want, ", no integration"), " or the integration itself")
+	if strings.HasSuffix(want, "checked by the handler") || strings.HasSuffix(want, " by scope") {
+		return ""
+	}
+	onProject, onStage, plan := p.roles(protected)
 	words := strings.Fields(want)
 	switch {
 	case want == "member":
 		return "pass"
 	case strings.HasSuffix(want, " project") && len(words) == 2:
-		if p.project >= role(words[0]) {
+		if onProject >= role(words[0]) {
 			return "pass"
 		}
 		return "403"
 	case strings.Contains(want, "environment"):
-		eff := max(p.project, p.envs["stage"])
-		if eff >= role(words[0]) || (len(words) == 5 && p.project >= role(words[3])) {
-			return "pass"
+		have := onStage
+		if strings.HasSuffix(want, "protection aside") && have > auth.RoleNone {
+			have = plan
 		}
-		if eff == auth.RoleNone {
+		switch {
+		case onStage == auth.RoleNone:
 			return "404"
+		case have >= role(words[0]):
+			return "pass"
+		case strings.HasSuffix(want, "unless protected") && !protected && onProject >= role(words[3]):
+			return "pass"
 		}
 		return "403"
 	}
@@ -304,17 +447,21 @@ func expected(p principal, want string) string {
 }
 
 // outcome reads an answer as the role check's: refused 403 with
-// role_required, 404 for an environment, project, sandbox or job not seen,
-// else pass.
+// role_required, 403 integration_refused, 404 for an environment,
+// project, sandbox or job not seen, else pass.
 func outcome(w *httptest.ResponseRecorder) string {
 	var b struct{ Error, Code, Role, Scope string }
 	_ = json.Unmarshal(w.Body.Bytes(), &b)
 	switch {
 	case w.Code == http.StatusForbidden && b.Code == "role_required":
 		return "403"
+	case w.Code == http.StatusForbidden && b.Code == codeIntegrationRefused:
+		return "refused"
 	case w.Code == http.StatusNotFound && (b.Error == "no such environment" || b.Error == "no such project" ||
 		strings.HasPrefix(b.Error, "unknown sandbox ") || b.Error == "no such job"):
 		return "404"
+	case w.Code == http.StatusUnauthorized:
+		return "401"
 	}
 	return "pass"
 }
@@ -373,22 +520,36 @@ func TestRoles(t *testing.T) {
 	t.Parallel()
 	w := newPeopleWorld(t, envOptions{bindings: &fakeBindings{on: true}, visitors: &fakeVisitors{}})
 	var bad []string
-	for _, p := range w.principals(t) {
-		for pattern, want := range routeNeeds {
-			if strings.HasSuffix(want, "checked by the handler") || roleSkips[pattern] {
-				continue
-			}
-			method, path := concrete(pattern, w.podIn(t, pattern, w.stage))
-			if pattern == "GET /api/v1/project" {
-				// The sink's ask, which says it filters by environment
-				// (TestProjectAnswersWhatIsRead).
-				path += "?filter=environments"
-			}
-			got := outcome(w.e.serve(p.request(method, path, nil)))
-			if exp := expected(p, want); got != exp {
-				bad = append(bad, p.name+": "+pattern+": "+got+", want "+exp)
+	ps := w.principals(t)
+	for _, protected := range []bool{false, true} {
+		// ADR 0060: every route again on stage protected.
+		if _, _, err := w.e.st.SetEnvironmentProtected(context.Background(), w.stage, protected); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			for pattern, want := range routeNeeds {
+				exp := expected(p, want, protected)
+				if exp == "" || roleSkips[pattern] {
+					continue
+				}
+				method, path := concrete(pattern, w.podIn(t, pattern, w.stage))
+				if pattern == "GET /api/v1/project" {
+					// The sink's ask, which says it filters by environment
+					// (TestProjectAnswersWhatIsRead).
+					path += "?filter=environments"
+				}
+				if got := outcome(w.e.serve(p.request(method, path, nil))); got != exp {
+					what := ""
+					if protected {
+						what = " (stage protected)"
+					}
+					bad = append(bad, p.name+what+": "+pattern+": "+got+", want "+exp)
+				}
 			}
 		}
+	}
+	if _, _, err := w.e.st.SetEnvironmentProtected(context.Background(), w.stage, false); err != nil {
+		t.Fatal(err)
 	}
 	sort.Strings(bad)
 	if len(bad) > 0 {

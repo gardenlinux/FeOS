@@ -24,6 +24,11 @@ func TestPassOn(t *testing.T) {
 		{"a session", Project{Name: "acme", Session: "s1"}, http.Header{"Cookie": {"__Host-ferun_session=s1; ferun_session=s1"},
 			"Ferun-Project": {"acme"}}},
 		{"nobody", Project{Name: "acme"}, http.Header{}},
+		{"an integration", Project{Name: "acme", Token: "a.b.c", Principal: Principal{Integration: uuid.New()}},
+			http.Header{"Authorization": {"Bearer a.b.c"}, "Ferun-Project": {"acme"}}},
+		{"an integration naming a person", Project{Name: "acme", Token: "a.b.c",
+			Principal: Principal{Integration: uuid.New(), For: uuid.New()}, Named: &NamedPerson{Sub: "ada"}},
+			http.Header{"Authorization": {"Bearer a.b.c"}, "Ferun-Project": {"acme"}, "Ferun-Person": {"ada"}}},
 	} {
 		h := http.Header{}
 		c.t.PassOn(h)
@@ -110,5 +115,102 @@ func TestPrincipalString(t *testing.T) {
 	}
 	if IsIntegration(context.Background()) {
 		t.Error("IsIntegration without a project request")
+	}
+}
+
+// The effective role (the contract's §2.2) for every combination of
+// grants, protection and principal kind: what auth.Project answers is the
+// table's rule, written out here once more; EveryEnv never claims a role
+// an environment does not give; MayDelete is admin on a protected
+// environment, admin or project write otherwise.
+func TestEffectiveRoles(t *testing.T) {
+	roles := []Role{RoleNone, RoleRead, RoleWrite, RoleAdmin}
+	env := uuid.MustParse("0199a0b1-0000-7000-8000-0000000000e1")
+	capped := func(g Role, p bool) Role {
+		switch {
+		case g == RoleAdmin || !p:
+			return g
+		case g == RoleNone:
+			return RoleNone
+		}
+		return RoleRead
+	}
+	n := 0
+	for _, kind := range []string{"person", "token", "integration", "integration naming"} {
+		for _, gx := range roles {
+			for _, ex := range roles {
+				for _, gp := range roles {
+					for _, ep := range roles {
+						for _, prot := range []bool{false, true} {
+							if kind != "integration naming" && (gp != RoleNone || ep != RoleNone) {
+								continue
+							}
+							n++
+							tp := Project{Name: "acme", Role: gx, Envs: map[uuid.UUID]Role{env: ex}}
+							switch kind {
+							case "person":
+								tp.Principal = Principal{Person: uuid.New()}
+							case "token":
+								tp.Principal = Principal{TokenHash: "h"}
+							case "integration":
+								tp.Principal = Principal{Integration: uuid.New()}
+							default:
+								tp.Principal = Principal{Integration: uuid.New(), For: uuid.New()}
+								tp.Named = &NamedPerson{Sub: "s", Grants: Grants{Project: gp, Envs: map[uuid.UUID]Role{env: ep}}}
+							}
+							if prot {
+								tp.Protected = map[uuid.UUID]bool{env: true}
+							}
+							rx, px := max(capped(gx, prot), ex), max(gx, ex)
+							wantRole, wantPlan, wantProject := rx, px, gx
+							switch kind {
+							case "integration":
+								if prot {
+									wantRole = min(wantRole, RoleRead)
+								}
+							case "integration naming":
+								wantRole = min(rx, max(capped(gp, prot), ep))
+								wantPlan = min(px, max(gp, ep))
+								wantProject = min(gx, gp)
+							}
+							name := kind
+							if got := tp.EnvRole(env); got != wantRole {
+								t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: role %v, want %v", name, gx, ex, gp, ep, prot, got, wantRole)
+							}
+							if got := tp.PlanRole(env); got != wantPlan {
+								t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: plan %v, want %v", name, gx, ex, gp, ep, prot, got, wantPlan)
+							}
+							if got := tp.ProjectRole(); got != wantProject {
+								t.Errorf("%s: project %v, want %v", name, got, wantProject)
+							}
+							if got := tp.OwnEnvRole(env); got != rx {
+								t.Errorf("%s: own %v, want %v", name, got, rx)
+							}
+							wantDelete := wantRole >= RoleAdmin || (!prot && wantProject >= RoleWrite)
+							if got := tp.MayDelete(env); got != wantDelete {
+								t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: delete %v", name, gx, ex, gp, ep, prot, got)
+							}
+							for _, r := range roles[1:] {
+								// Another environment, of no grant, protected too.
+								other := uuid.New()
+								if prot {
+									tp.Protected[other] = true
+								}
+								if tp.EveryEnv(r) && (tp.EnvRole(env) < r || tp.EnvRole(other) < r) {
+									t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: EveryEnv(%v) but not on each", name, gx, ex, gp, ep,
+										prot, r)
+								}
+							}
+							if tp.Visible() != (wantProject > RoleNone || wantRole >= RoleRead) {
+								t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: visible %v", name, gx, ex, gp, ep, prot, tp.Visible())
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if n < 500 {
+		t.Fatalf("%d cases", n)
 	}
 }

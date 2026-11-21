@@ -330,6 +330,35 @@ func (p *Provider) LogoutToken(over map[string]any) string {
 	return signer.Sign(p.T, map[string]any{"alg": signer.Alg, "kid": signer.Kid, "typ": "logout+jwt"}, payload)
 }
 
+// AccessToken signs an access token of the client credentials grant, as
+// Hydra issues one with access_token_strategy jwt (RFC 9068), for the
+// client sub with claims over the valid defaults (aud
+// https://run.example.test, an hour; nil deletes one).
+func (p *Provider) AccessToken(sub string, over map[string]any) string {
+	p.T.Helper()
+	now := time.Now().Unix()
+	c := map[string]any{"iss": p.Issuer, "sub": sub, "client_id": sub, "aud": []string{AccessAudience},
+		"iat": now, "nbf": now, "exp": now + 3600, "jti": RandomString(p.T), "scp": []string{}}
+	for k, v := range over {
+		if v == nil {
+			delete(c, k)
+		} else {
+			c[k] = v
+		}
+	}
+	payload, err := json.Marshal(c)
+	if err != nil {
+		p.T.Fatal(err)
+	}
+	p.Mu.Lock()
+	signer := p.Signer
+	p.Mu.Unlock()
+	return signer.Sign(p.T, map[string]any{"alg": signer.Alg, "kid": signer.Kid, "typ": "at+jwt"}, payload)
+}
+
+// AccessAudience is the audience of AccessToken's tokens by default.
+const AccessAudience = "https://run.example.test"
+
 // AdminClaims are an admin's claims as the provider sends them.
 func AdminClaims() map[string]any {
 	return map[string]any{"sub": "0b8c5ef1-0000-4000-8000-000000000001", "email": "ada@example.test", "email_verified": true,

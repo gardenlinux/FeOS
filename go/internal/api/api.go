@@ -233,8 +233,12 @@ type Config struct {
 	// Secure when it is https, and the Origin of a request authenticated
 	// by a session must be its origin.
 	PublicURL string
-	// OIDC configures human sign-in; nil: none.
+	// OIDC configures human sign-in; nil: none. Its issuer is also the one
+	// whose access tokens an integration signs in with (ADR 0056).
 	OIDC *OIDCConfig
+	// APIAudience is the audience an integration's access token holds
+	// (--api-audience), compared exactly; "": PublicURL.
+	APIAudience string
 	// SessionTTL is the absolute lifetime of a UI session.
 	SessionTTL time.Duration
 
@@ -382,6 +386,9 @@ func newServer(cfg Config, deps Deps) *server {
 		cfg.TelemetryInterval = config.TelemetryInterval
 	}
 	cfg.PublicURL = strings.TrimSuffix(cfg.PublicURL, "/")
+	if cfg.APIAudience == "" {
+		cfg.APIAudience = cfg.PublicURL
+	}
 	st := deps.Store
 	if st == nil && deps.DB != nil {
 		st = store.New(deps.DB)
@@ -632,6 +639,9 @@ func (s *server) routes() []route {
 	// People (ADR 0031): the projects they make, the members, their
 	// grants, invitations and tokens; the operators' switch of a person.
 	s.memberRoutes(operator, person, project)
+	// Integrations (ADR 0056): their registration, and a project's grants
+	// to them.
+	s.integrationRoutes(operator, person, project)
 	s.quotaRoutes(operator, project)
 
 	// The doors with classes of their own: their answers are plain text

@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -73,8 +74,10 @@ func routeToken(r *http.Request) (tok string, creds []string, header bool) {
 
 // ferunBearer reports whether a request's Authorization, any of its
 // values, carries a FeRun credential as its bearer token, a project's
-// token or a sandbox's (the scheme in any case): one the door refuses to
-// pass on to an upstream.
+// token, a sandbox's or an integration's (the scheme in any case): one the
+// door refuses to pass on to an upstream. An integration's is a JWT whose
+// issuer and subject, read without its signature, are a registered
+// integration's (ADR 0056); any other JWT is the upstream's affair.
 func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error) {
 	for _, v := range r.Header.Values("Authorization") {
 		scheme, tok, _ := strings.Cut(strings.TrimSpace(v), " ")
@@ -95,8 +98,37 @@ func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error
 		case !errors.Is(err, model.ErrUnknownToken):
 			return false, err
 		}
+		if iss, sub, ok := jwtSubject(tok); ok {
+			switch _, err := s.st.IntegrationBySubject(ctx, iss, sub); {
+			case err == nil:
+				return true, nil
+			case !errors.Is(err, store.ErrNoRow):
+				return false, err
+			}
+		}
 	}
 	return false, nil
+}
+
+// jwtSubject reads the iss and sub of a JWT's payload without checking
+// its signature; ok false for anything that is not a JWT with both.
+func jwtSubject(tok string) (iss, sub string, ok bool) {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", "", false
+	}
+	var c struct {
+		Iss string `json:"iss"`
+		Sub string `json:"sub"`
+	}
+	if json.Unmarshal(payload, &c) != nil || c.Iss == "" || c.Sub == "" {
+		return "", "", false
+	}
+	return c.Iss, c.Sub, true
 }
 
 // routePath is the path the route door forwards: the request's path

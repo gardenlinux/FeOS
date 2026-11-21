@@ -390,7 +390,7 @@ func TestEnvironmentFixtures(t *testing.T) {
 	e := newEnv(t, envOptions{})
 	n := 0
 	for name, f := range fixtures {
-		if strings.HasPrefix(name, "ANY_") {
+		if strings.HasPrefix(name, "ANY_") || isPeopleFixture(name) {
 			continue
 		}
 		n++
