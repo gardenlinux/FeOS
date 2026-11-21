@@ -17,12 +17,13 @@ import (
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 )
 
-// 0041 (ADR 0061) renames what said tenant: after it no table, partition,
+// 0041 (ADR 0061) renames what said the old word: after it no table, partition,
 // index, sequence, column, constraint, trigger or function of the public
 // schema has the word in its name. The provider kind, a sandbox's log
-// label key, the activity kinds and their detail key are rewritten, the
-// lease of the renamed loop goes, and tenant_credentials goes, refusing
-// while it holds a row. The SQL before 0041 speaks the schema of 0040.
+// label key, the activity kinds, their detail key and the names of the
+// three renamed kinds are rewritten, the lease of the renamed loop goes, and the projects' credentials table of
+// 0033 goes, refusing while it holds a row. The SQL before 0041 speaks the
+// schema of 0040.
 func TestProjectsMigration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -51,15 +52,15 @@ func TestProjectsMigration(t *testing.T) {
 	exec(`INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, environment_id, tenant_job, log_labels) VALUES
 		('0199f0a2-0000-4000-8000-000000000041', 'acme', 'img', 1, 512, '` + env + `', true,
 		 '{"ferun.tenant": "acme", "ferun.environment": "` + env + `"}')`)
-	exec(`INSERT INTO activity (ts_ns, source, kind, tenant_id, detail) VALUES
-		(1, 'ferund', 'tenant_created', 'acme', '{"tenant": "acme", "by": "ada"}'),
-		(2, 'ferund', 'tenant_zone_set', 'acme', '{"tenant": "acme", "zone": "z"}'),
-		(3, 'ferund', 'tenant_limits', 'acme', '{"tenant": "acme"}'),
-		(4, 'ferund', 'sandbox_created', 'acme', '{"sandbox": "s"}')`)
+	exec(`INSERT INTO activity (ts_ns, source, kind, tenant_id, name, detail) VALUES
+		(1, 'ferund', 'tenant_created', 'acme', 'tenant acme created by ada', '{"tenant": "acme", "by": "ada"}'),
+		(2, 'ferund', 'tenant_zone_set', 'acme', 'tenant acme moved to zone z by ada', '{"tenant": "acme", "zone": "z"}'),
+		(3, 'ferund', 'tenant_limits', 'acme', 'limits of tenant acme set by ada', '{"tenant": "acme"}'),
+		(4, 'ferund', 'sandbox_created', 'acme', 'sandbox s of tenant acme', '{"sandbox": "s"}')`)
 	exec(`INSERT INTO leases (name, holder, epoch, acquired_at, renewed_at, expires_at) VALUES
 		('sandbox-tenant-deletion', 'i1', 1, now(), now(), now()), ('sandbox-reaper', 'i1', 1, now(), now(), now())`)
 
-	// A row in tenant_credentials (its trigger refuses a write since 0035)
+	// A row in the old credentials table (its trigger refuses a write since 0035)
 	// makes 0041 refuse, leaving nothing behind.
 	exec("ALTER TABLE tenant_credentials DISABLE TRIGGER tenant_credentials_refuse")
 	exec(`INSERT INTO tenant_credentials (tenant, name, version, upstream, mode, credential_kind, sealed)
@@ -67,8 +68,8 @@ func TestProjectsMigration(t *testing.T) {
 	exec("ALTER TABLE tenant_credentials ENABLE TRIGGER tenant_credentials_refuse")
 	err := d.Migrate(ctx, nil)
 	var pe *pgconn.PgError
-	if !errors.As(err, &pe) || pe.Code != "P0001" || !strings.Contains(pe.Message, "tenant_credentials holds rows") {
-		t.Fatalf("Migrate with a row in tenant_credentials = %v, want the migration's refusal", err)
+	if !errors.As(err, &pe) || pe.Code != "P0001" || !strings.Contains(pe.Message, "tenant_credentials holds rows") { // KEEP-TENANT: 0041's refusal
+		t.Fatalf("Migrate with a row in the old credentials table = %v, want the migration's refusal", err)
 	}
 	var recorded, renamed bool
 	if err := d.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 41),
@@ -84,18 +85,19 @@ func TestProjectsMigration(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	// No name of the public schema says tenant.
+	// No name of the public schema says the old word.
 	rows, err := d.Pool.Query(ctx, `
 		SELECT 'column ' || table_name || '.' || column_name FROM information_schema.columns
-			WHERE table_schema = 'public' AND (column_name ~* 'tenant' OR table_name ~* 'tenant')
+			WHERE table_schema = 'public' AND (column_name ~* 'tenant' OR table_name ~* 'tenant') -- KEEP-TENANT: the word looked for
 		UNION ALL SELECT 'relation ' || c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE n.nspname = 'public' AND c.relname ~* 'tenant'
+			WHERE n.nspname = 'public' AND c.relname ~* 'tenant' -- KEEP-TENANT
 		UNION ALL SELECT 'constraint ' || c.conname FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
-			WHERE n.nspname = 'public' AND c.conname ~* 'tenant'
+			WHERE n.nspname = 'public' AND c.conname ~* 'tenant' -- KEEP-TENANT
 		UNION ALL SELECT 'trigger ' || t.tgname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
-			JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND t.tgname ~* 'tenant'
+			JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND t.tgname ~* 'tenant' -- KEEP-TENANT
 		UNION ALL SELECT 'function ' || p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-			WHERE n.nspname = 'public' AND p.proname ~* 'tenant'`)
+			WHERE n.nspname = 'public' AND p.proname ~* 'tenant' -- KEEP-TENANT
+		`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +106,7 @@ func TestProjectsMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(left) > 0 {
-		t.Errorf("names that still say tenant: %v", left)
+		t.Errorf("names that still say tenant: %v", left) // KEEP-TENANT: the word the test looks for
 	}
 	// The partitions are there, and renamed with their parents.
 	var partitionCols int
@@ -137,10 +139,11 @@ func TestProjectsMigration(t *testing.T) {
 	if err := json.Unmarshal(labels, &lm); err != nil {
 		t.Fatal(err)
 	}
-	if _, old := lm["ferun.tenant"]; !job || old || lm["ferun.project"] != "acme" || lm["ferun.environment"] != env {
+	if _, old := lm["ferun.tenant"]; !job || old || // KEEP-TENANT: the key 0041 rewrites
+		lm["ferun.project"] != "acme" || lm["ferun.environment"] != env {
 		t.Errorf("sandbox: project_job %v, log labels %v; want ferun.project acme beside ferun.environment", job, lm)
 	}
-	rows, err = d.Pool.Query(ctx, "SELECT kind || ' ' || detail::text FROM activity WHERE project_id = 'acme' ORDER BY ts_ns")
+	rows, err = d.Pool.Query(ctx, "SELECT kind || ' ' || detail::text || ' ' || name FROM activity WHERE project_id = 'acme' ORDER BY ts_ns")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,10 +152,10 @@ func TestProjectsMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		`project_created {"by": "ada", "project": "acme"}`,
-		`project_zone_set {"zone": "z", "project": "acme"}`,
-		`project_limits {"project": "acme"}`,
-		`sandbox_created {"sandbox": "s"}`,
+		`project_created {"by": "ada", "project": "acme"} project acme created by ada`,
+		`project_zone_set {"zone": "z", "project": "acme"} project acme moved to zone z by ada`,
+		`project_limits {"project": "acme"} limits of project acme set by ada`,
+		`sandbox_created {"sandbox": "s"} sandbox s of tenant acme`, // KEEP-TENANT: only the three kinds' names are rewritten
 	}
 	if strings.Join(acts, "\n") != strings.Join(want, "\n") {
 		t.Errorf("activity:\n%s\nwant:\n%s", strings.Join(acts, "\n"), strings.Join(want, "\n"))
@@ -170,9 +173,9 @@ func TestProjectsMigration(t *testing.T) {
 	}
 
 	// The rebuilt checks hold the new word and refuse the old.
-	_, err = d.Pool.Exec(ctx, `INSERT INTO access_providers (project, name, kind, url) VALUES ('acme', 'old', 'tenant', 'https://x.example')`)
+	_, err = d.Pool.Exec(ctx, `INSERT INTO access_providers (project, name, kind, url) VALUES ('acme', 'old', 'tenant', 'https://x.example')`) // KEEP-TENANT: the kind of before
 	if !errors.As(err, &pe) || pe.Code != "23514" {
-		t.Errorf("provider of kind tenant: %v, want a check violation", err)
+		t.Errorf("provider of the old kind: %v, want a check violation", err)
 	}
 	_, err = d.Pool.Exec(ctx, `INSERT INTO access_providers (project, name, kind) VALUES ('acme', 'nourl', 'project')`)
 	if !errors.As(err, &pe) || pe.Code != "23514" || pe.ConstraintName != "access_providers_project_kind" {

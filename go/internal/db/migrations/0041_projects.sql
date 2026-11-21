@@ -72,6 +72,8 @@ UPDATE sandboxes SET log_labels = (log_labels - 'ferun.tenant')
 
 UPDATE activity SET kind = 'project' || substr(kind, 7)
   WHERE kind IN ('tenant_created', 'tenant_zone_set', 'tenant_limits');
+UPDATE activity SET name = regexp_replace(name, '^(limits of )?tenant ', '\1project ')
+  WHERE kind IN ('project_created', 'project_zone_set', 'project_limits');
 UPDATE activity SET detail = (detail - 'tenant') || jsonb_build_object('project', detail->'tenant')
   WHERE detail ? 'tenant';
 
