@@ -328,6 +328,7 @@ footer code { font-size: 12px; }
   <a href="#caas">CaaS</a>
   <a href="#network">Who reaches whom</a>
   <a href="#auth">Auth</a>
+  <a href="#people">Who acts</a>
   <a href="#ferund">Inside ferund</a>
   <a href="#principles">Principles</a>
   <a href="#open">Not built yet</a>
@@ -536,7 +537,7 @@ footer code { font-size: 12px; }
     <table>
       <thead><tr><th>Program</th><th>Layer</th><th>Runs as</th><th>What it does</th></tr></thead>
       <tbody>
-        <tr><td class="prog">ferund</td><td><span class="pill run">FeRun · Go</span></td><td>replicas over one PostgreSQL, three in production</td><td>Projects and tokens, sandboxes with placement, pause and hibernation, environments and deployments, the fleet and its CA, ACME for domains, REST, MCP, the port door, the management UI. Any instance serves any request; a leader, by a 15 s lease, runs the background loops.</td></tr>
+        <tr><td class="prog">ferund</td><td><span class="pill run">FeRun · Go</span></td><td>replicas over one PostgreSQL, three in production</td><td>Accounts, projects with their people, tokens and integrations, sandboxes with placement, pause and hibernation, environments and deployments, the fleet and its CA, ACME for domains, REST, MCP, the port door, the management UI. Any instance serves any request; a leader, by a 15 s lease, runs the background loops.</td></tr>
         <tr><td class="prog">ferun-ingress</td><td><span class="pill run">FeRun · Go</span></td><td>instances behind an L4 balancer of their own</td><td>HTTPS for public environments. A peer on the pod mesh with its own /96; routes from a table ferund streams to it, keeps idle services awake and wakes sleeping ones.</td></tr>
         <tr><td class="prog">ferun-auth</td><td><span class="pill run">FeRun · Go</span></td><td>identical instances beside ferund, same image, a host of its own</td><td>The access provider for the kinds <code>ferun</code> and <code>oidc</code>: OpenID Connect sign-in with PKCE, the issuers' back-channel logouts, a service token of its own kind at ferund; no database, no node connection.</td></tr>
         <tr><td class="prog">ferun-sink</td><td><span class="pill run">FeRun · Go</span></td><td>a service beside ferund, with a database of its own</td><td>Takes logs and spans over OTLP from nodes and the ingress, appends them to Kafka, Quickwit indexes them. Serves <code>/api/v1/logs</code>, <code>/api/v1/log-streams</code> and the Jaeger API; a quota per project.</td></tr>
@@ -561,7 +562,7 @@ footer code { font-size: 12px; }
     <table>
       <thead><tr><th>From → To</th><th>Path</th><th>For</th></tr></thead>
       <tbody>
-        <tr><td class="nw">FeCode, agents, admins → <code>ferund :8100</code></td><td>HTTPS through a balancer without sticky sessions, a bearer token or an OIDC session</td><td>REST, MCP at <code>/mcp</code>, ports at <code>/fwd/</code>, sign-in at <code>/auth/</code>, the UI, this page at <code>/docs/</code></td></tr>
+        <tr><td class="nw">FeCode, agents, admins → <code>ferund :8100</code></td><td>HTTPS through a balancer without sticky sessions, a project token, an integration's access token or an OIDC session</td><td>REST, MCP at <code>/mcp</code>, ports at <code>/fwd/</code>, sign-in at <code>/auth/</code>, the UI, this page at <code>/docs/</code></td></tr>
         <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>TLS 1.3, the node's client certificate, ALPN <code>feos-node/1</code></td><td>The node connection: the node is the HTTP/2 server, ferund the gRPC client of <code>feos.pod.v1</code>, <code>volume.v1</code>, <code>network.v1</code> and the other APIs</td></tr>
         <tr><td class="nw"><code>feosd</code> → <code>ferund :7443</code></td><td>ALPN <code>h2</code>, the node's certificate (without one: join only)</td><td>The uplink, <code>feos.fleet.v1</code>: join with a one-time token, certificate renewal (168 h), telemetry every 5 s, events, <code>JoinMesh</code>, the pods' certificates and sealed bindings</td></tr>
         <tr><td class="nw"><code>ferun-ingress</code> → <code>ferund :7443</code></td><td>ALPN <code>ferun-ingress/1</code>, gRPC with JSON, mTLS</td><td>Join, Hello (with the capability <code>visits</code>), <code>Sync</code> (the versioned routing table as a stream, heartbeat every 10 s, with each environment's access, its provider's sign-in address and the visits' keys), <code>Wake</code>, <code>Hold</code>, <code>RedeemVisit</code>, <code>RenewVisit</code>, <code>EndVisit</code></td></tr>
@@ -571,7 +572,8 @@ footer code { font-size: 12px; }
         <tr><td class="nw"><code>ferun-auth</code> → <code>ferund :8100</code></td><td>HTTP inside the cluster, a service token of kind <code>auth</code></td><td>Opens, accepts and rejects challenges of environments of kind <code>ferun</code> and <code>oidc</code>, reads those providers with their secrets, ends visits by an issuer's session</td></tr>
         <tr><td class="nw"><code>ferun-auth</code> → issuers</td><td>HTTPS, public addresses only, judged on the address it connects to</td><td>Discovery, keys, the code's exchange, userinfo</td></tr>
         <tr><td class="nw"><code>ferund</code> → a provider of kind <code>project</code></td><td>HTTPS, public addresses only, no redirect, 3 s, the question signed with the token key</td><td><code>POST {"visit": "&lt;id&gt;"}</code> at a renewal, at most once in 8 minutes per visit: is the visitor still admitted? The service answers only a question ferund signed for its address and that visit, against the key at <code>GET /api/v1/visit-keys</code></td></tr>
-        <tr><td class="nw">FeCode → <code>ferund :8100</code></td><td>HTTPS, its project token</td><td>Its provider <code>fecode</code>, the challenges and visits of its members-only environments, and the key of ferund's questions</td></tr>
+        <tr><td class="nw">FeCode → <code>ferund :8100</code></td><td>HTTPS, its own access token of the shared provider, <code>FeRun-Project</code> and <code>FeRun-Person</code></td><td>As the integration <code>fecode</code>: the environments, deployments, secrets and domains of the projects that grant it, for the person whose click it is, or alone</td></tr>
+        <tr><td class="nw">FeCode → <code>ferund :8100</code></td><td>HTTPS, a project token (the provider class refuses an integration)</td><td>Its provider <code>fecode</code>, the challenges and visits of its members-only environments, and the key of ferund's questions</td></tr>
         <tr><td class="nw"><code>ferun-ingress</code> → pod</td><td><span class="pill net">mesh</span> WireGuard <code>ferun-mesh</code>, UDP 51820</td><td>HTTP/1.1 to <code>[pod IPv6]:port</code>, admitted by the group <code>ing-&lt;sandbox-id&gt;</code> on the node</td></tr>
         <tr><td class="nw">pod ↔ pod across nodes</td><td><span class="pill net">mesh</span> WireGuard <code>feos-mesh</code>, UDP 51820</td><td>IPv6 from the cluster's ULA /64, a /96 per node; ferund hands out the peers</td></tr>
         <tr><td class="nw"><code>feos-guest</code> → <code>feosd</code></td><td>vsock, port 10001</td><td><code>LifecycleService.Attach</code> held open; over it the guest API, the time (ADR 0027) and the network</td></tr>
@@ -580,7 +582,7 @@ footer code { font-size: 12px; }
         <tr><td class="nw"><code>feosd</code> → <code>ferun-sink :4317</code></td><td>OTLP gRPC, mTLS with the node's certificate</td><td>Container logs from the stored offset, spans, the bindings' egress records</td></tr>
         <tr><td class="nw"><code>ferun-ingress</code> → <code>ferun-sink</code></td><td>OTLP, mTLS with the ingress's certificate</td><td>The access log and a span for every request</td></tr>
         <tr><td class="nw"><code>ferun-sink</code> → Kafka → Quickwit</td><td>topics <code>ferun-logs-v5-&lt;n&gt;d</code>, <code>ferun-traces-v4-&lt;n&gt;d</code></td><td>Kafka is the log of record, Quickwit the index and the cold store</td></tr>
-        <tr><td class="nw">FeCode → <code>ferun-sink</code></td><td>HTTPS, the FeRun token as bearer</td><td><code>/api/v1/logs</code>, live tail, <code>/api/v1/jaeger/api/…</code></td></tr>
+        <tr><td class="nw">FeCode → <code>ferun-sink</code></td><td>HTTPS, its access token with <code>FeRun-Project</code> and <code>FeRun-Person</code>, as at ferund</td><td><code>/api/v1/logs</code>, live tail, <code>/api/v1/jaeger/api/…</code></td></tr>
         <tr><td class="nw"><code>ferund</code> → <code>ferun-sink</code></td><td>HTTP inside the cluster (<code>--sink-url</code>)</td><td>Reads logs and access logs, traffic per service</td></tr>
         <tr><td class="nw"><code>ferund</code> → PostgreSQL</td><td>pgx, PostgreSQL 17 or newer, replicated synchronously</td><td>All state. The database's clock decides every lease, TTL and deadline</td></tr>
         <tr><td class="nw"><code>diskd</code> ↔ S3</td><td>S3 API, path-style</td><td>Sealed layers, chunks, hibernated pods with their memory and volumes</td></tr>
@@ -1229,12 +1231,109 @@ footer code { font-size: 12px; }
   </ul>
 </section>
 
+<!-- ============ Who acts ============ -->
+<section id="people">
+  <h2>Who acts in a project</h2>
+  <p class="prose">Three levels: an <b>account</b> says whom a project's use is charged to, the <b>project</b> is the border, and an <b>environment</b> is where things run. Three kinds of principal act in a project, each by its grants there: a person, a project token, and an <b>integration</b> such as FeCode, which works in the projects whose admins grant it a role (ADR 0056, 0059, 0060).</p>
+  <figure>
+    <div class="fig-scroll">
+<svg class="dg" viewBox="0 0 1200 420" role="img" aria-label="An account holds a project; the project holds the environments stage and prod, of which prod is protected. A person, a project token and the integration FeCode hold grants in the project. On stage the person, FeCode alone and FeCode acting for the person all write. On prod the person writes by her grant on prod, FeCode alone reads, and FeCode acting for the person reads, the lower of the two. One rule in ferund decides every check and the answer of /auth/me.">
+  <defs>
+    <marker id="m8" viewBox="0 0 10 10" refX="10" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker>
+  </defs>
+  <rect class="b-cli" x="16" y="74" width="200" height="56" rx="4"/>
+  <text class="t" x="116" y="98" text-anchor="middle">Person · Ada</text>
+  <text x="116" y="116" text-anchor="middle">a session · FeRun-Project</text>
+  <rect class="b-cli" x="16" y="174" width="200" height="56" rx="4"/>
+  <text class="t" x="116" y="198" text-anchor="middle">Project token</text>
+  <text x="116" y="216" text-anchor="middle">its own project alone</text>
+  <rect class="b-cli" x="16" y="274" width="200" height="76" rx="4"/>
+  <text class="t" x="116" y="298" text-anchor="middle">Integration · FeCode</text>
+  <text x="116" y="316" text-anchor="middle">the provider's access token</text>
+  <text class="lb" x="116" y="336" text-anchor="middle">FeRun-Project · FeRun-Person</text>
+  <path class="ln" d="M216 102H280" marker-end="url(#m8)"/>
+  <path class="ln" d="M216 202H280" marker-end="url(#m8)"/>
+  <path class="ln" d="M216 312H280" marker-end="url(#m8)"/>
+
+  <rect class="b-frame" x="256" y="16" width="640" height="392" rx="6"/>
+  <text class="t" x="272" y="38">Account · whom the use is charged to</text>
+  <text x="272" y="56">gives no role, is in no name: default, or e.g. cc-4711</text>
+
+  <rect class="b-envf" x="280" y="70" width="592" height="326" rx="6"/>
+  <text class="t" x="296" y="92">Project kino · the border</text>
+  <text x="296" y="110">grants, tokens, limits, domains are its own</text>
+  <text class="lb" x="600" y="92">Ada: write · token: write</text>
+  <text class="lb" x="600" y="110">FeCode: write · Ada on prod: write</text>
+
+  <rect class="b-runl" x="300" y="126" width="552" height="114" rx="4"/>
+  <text class="tm2" x="316" y="148">stage</text>
+  <text x="316" y="166">not protected: a project grant counts as it is</text>
+  <text class="lb" x="316" y="196">Ada</text>
+  <text class="lb" x="500" y="196">FeCode alone</text>
+  <text class="lb" x="680" y="196">FeCode for Ada</text>
+  <text class="tm2" x="316" y="220">write</text>
+  <text class="tm2" x="500" y="220">write</text>
+  <text class="tm2" x="680" y="220">write</text>
+
+  <rect class="b-run" x="300" y="258" width="552" height="122" rx="4"/>
+  <text class="tm2" x="316" y="280">prod · protected</text>
+  <text x="316" y="298">a project's read or write counts as read, admin as admin</text>
+  <text class="lb" x="316" y="328">Ada</text>
+  <text class="lb" x="500" y="328">FeCode alone</text>
+  <text class="lb" x="680" y="328">FeCode for Ada</text>
+  <text class="tm2" x="316" y="352">write</text>
+  <text class="tm2" x="500" y="352">read</text>
+  <text class="tm2" x="680" y="352">read</text>
+  <text x="316" y="370">her grant on prod</text>
+  <text x="500" y="370">alone: read at most</text>
+  <text x="680" y="370">the lower of the two</text>
+
+  <path class="ln" d="M920 170H872" marker-end="url(#m8)"/>
+  <rect class="b-run" x="920" y="70" width="264" height="200" rx="4"/>
+  <text class="tm2" x="1052" y="94" text-anchor="middle">ferund · auth.Project</text>
+  <text x="1052" y="114" text-anchor="middle">one rule for every check</text>
+  <text class="lb" x="936" y="142">role on e =</text>
+  <text class="lb" x="936" y="160">  max(G as e counts it, g(e))</text>
+  <text class="lb" x="936" y="184">for a person: min(both sides)</text>
+  <text class="lb" x="936" y="204">alone: read at most if protected</text>
+  <text class="lb" x="936" y="224">plan: protection aside</text>
+  <text x="936" y="250">route tokens are write's</text>
+  <path class="ln" d="M1052 270V300" marker-end="url(#m8)"/>
+  <rect class="b-cli" x="920" y="300" width="264" height="80" rx="4"/>
+  <text class="tm2" x="1052" y="324" text-anchor="middle">GET /auth/me</text>
+  <text x="1052" y="344" text-anchor="middle">role · plan · delete · protected</text>
+  <text x="1052" y="362" text-anchor="middle">integrationRole · personRole</text>
+</svg>
+    </div>
+    <figcaption><span class="fig-no">Fig. 8</span><b>An integration does what both may do.</b> FeCode holds <code>write</code> on the project kino, and so does Ada. On stage all three columns write. prod is protected: a project grant of <code>read</code> or <code>write</code> reads it, and changing it takes a grant on it or <code>admin</code> on the project. Ada writes there by the grant on prod the protect dialog offered her; FeCode alone reads, since an integration that names nobody changes no protected environment; FeCode acting for Ada reads, the lower of her <code>write</code> and its <code>read</code>. A project token counts as a person does. The same function answers every route's need and <code>/auth/me</code>, so a caller is never shown a role the check would refuse. The account is above all of it and in none of its names.</figcaption>
+  </figure>
+
+  <h3>The principals</h3>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Principal</th><th>Signs in with</th><th>Reaches</th><th>Never</th></tr></thead>
+      <tbody>
+        <tr><td class="prog">person</td><td>the shared provider's sign-in, a session cookie; <code>FeRun-Project</code> names the project</td><td>the projects they hold a grant in; an operator every one as <code>admin</code></td><td>sends <code>FeRun-Person</code> (400)</td></tr>
+        <tr><td class="prog">project token</td><td>a bearer of 64 hex digits</td><td>its own project, by its own grant and its grants rows</td><td>moves a project, is on an account</td></tr>
+        <tr><td class="prog">integration</td><td>its own access token from the shared provider (client credentials, the API's audience, <code>--api-audience</code>), the project in <code>FeRun-Project</code>, the person it acts for in <code>FeRun-Person</code></td><td>the projects whose admins grant it, with the lower of its and the person's role; alone, a protected environment read-only</td><td>changes members, grants, invitations or tokens, makes or moves a project, answers as a provider of visitors (403 <code>integration_refused</code>)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul class="facts">
+    <li><b>An operator registers an integration</b> by the provider's subject of its client, once; a project's admin grants it a role, on the project or one environment, and takes it back. Disabled, it reaches no project and its grants wait; removed, its grants and the tokens it minted go with it.</li>
+    <li><b>Tokens an integration mints</b>, route tokens and sandbox tokens, work while it is enabled and holds <code>write</code> on their environment by its own grants. Route tokens are <code>write</code>'s, not <code>admin</code>'s.</li>
+    <li><b>Protection is a property of an environment.</b> An environment's admin protects it; the dialog names who changes it by a project grant today and offers each a grant on it. A plan against it is not held back, a clone of it is not protected, and a clone that copies its secrets needs <code>write</code> on it.</li>
+    <li><b>Every project is on an account</b>, <code>default</code> unless another is chosen; <code>--project-creation people</code> opens <code>default</code> to every signed-in person. An account's people put projects on it and read its page, its projects' makers, admins and use, nothing inside them; <code>default</code>'s page is the operators'. A project moves to another account by its admin, who must be on that account, or by an operator; the move changes nothing else, and its history is kept.</li>
+    <li><b>The spec is one format for every caller</b> (ADR 0057): the published Go module <code>go/ferun</code> holds its types, the strict parser, the YAML reader and a client, which ferund uses itself. A spec may come in YAML on the plan, deploy and clone routes, read as the JSON it stands for with the same findings. A secret's pin may say what the code expects of it, a value or an HTTP API with its mode, which the plan checks against the environment's secret (ADR 0058).</li>
+  </ul>
+</section>
+
 <!-- ============ ferund ============ -->
 <section id="ferund">
   <h2>Inside ferund</h2>
-  <p class="prose">One Go module (<code>github.com/gardenlinux/feos/go</code>), built static, with fixed dependencies: the standard library, pgx, gRPC, Protobuf, the MCP SDK, uuid, x/crypto, x/sync. The packages under <code>go/internal/</code>, grouped by what they do:</p>
+  <p class="prose">One Go module (<code>github.com/gardenlinux/feos/go</code>), built static, with fixed dependencies: the standard library, pgx, gRPC, Protobuf, the MCP SDK, uuid, x/crypto, x/sync, franz-go. Beside it the published module <code>go/ferun</code> (<code>spec</code>, <code>api</code>, <code>client</code>), which callers such as FeCode build against and ferund uses itself, with YAML as its one dependency. The packages under <code>go/internal/</code>, grouped by what they do:</p>
   <div class="groups">
-    <div class="group"><h3>Front doors</h3><p class="pk">api · auth · apierr · oidc · mcpsrv · ports · watch · ui · ferunauth</p><p>REST with its auth classes, OIDC sign-in (and ferun-auth's, a program of its own), MCP for agents, the port door at <code>/fwd/</code>, file watches across instances, the embedded UI and this page.</p></div>
+    <div class="group"><h3>Front doors</h3><p class="pk">api · auth · apierr · oidc · mcpsrv · ports · watch · ui · ferunauth</p><p>REST with its auth classes and the one rule of a principal's roles, OIDC sign-in and integrations' access tokens (and ferun-auth's sign-in, a program of its own), MCP for agents, the port door at <code>/fwd/</code>, file watches across instances, the embedded UI and this page.</p></div>
     <div class="group"><h3>Sandbox engine</h3><p class="pk">sandbox · tools · podid</p><p>States, ops, placement (<code>binpack</code> or <code>spread</code>), sync and reconcile, tombstones, policies, images. Keyed tool calls outlive their caller (ADR 0023).</p></div>
     <div class="group"><h3>Environments</h3><p class="pk">env · env/spec · env/addons · env/ctl · env/envdeps</p><p>Deployments with plan, base, revert and tags; the controller; addons on volumes; secrets; the route door; projects' jobs.</p></div>
     <div class="group"><h3>Fleet</h3><p class="pk">nodelink · fleet · mesh · pki · leader</p><p>The nodes' port with ALPN and stream budgets, joins, certificates, telemetry, events, each node's /96 and its peers, the CA with SPIFFE IDs, the leader lease.</p></div>
@@ -1257,6 +1356,7 @@ footer code { font-size: 12px; }
     <li><b>Static musl, syscalls first.</b><span>No shared libraries, no shelling out to userspace tools. The one exception: <code>mke2fs</code> for new volumes in the guest.</span></li>
     <li><b>The database's clock decides.</b><span>Every lease, TTL and deadline in ferund uses PostgreSQL's <code>now()</code>. No node call inside a transaction.</span></li>
     <li><b>What is not declared is closed.</b><span>A deployment's references open the ports they name; nothing else reaches a pod, not even from its own environment.</span></li>
+    <li><b>One rule decides a role.</b><span>Every check and the answer of <code>/auth/me</code> use the same function, so a client offers what ferund allows and never keeps rules of its own.</span></li>
     <li><b>FeOS knows pods.</b><span>Whether a pod is an agent's sandbox or a customer's service, only FeRun knows.</span></li>
   </ul>
 </section>
@@ -1273,6 +1373,7 @@ footer code { font-size: 12px; }
     <li><b>Environments</b>: no volumes for services, no MCP tools and no CLI, no addon backups, no data on a clone.</li>
     <li><b>Ingress</b>: no DNS-01 wildcard, no L4, no h2c.</li>
     <li><b>diskd</b>: no sweep of old layers yet, no disk size per pod.</li>
+    <li><b>Accounts</b> (ADR 0059) measure and price nothing yet: no meter, no report, and whoever pays cannot stop a project.</li>
   </ul>
 </section>
 

@@ -429,10 +429,11 @@ counted twice.
 
 ## FeCode
 
-FeCode reads with its project token (project `fecode`) and lets only a
-FeCode project's members read its environments' traces (as its logs, FeCode
-ADR 0009 §12): its backend passes a member's request on to the sink with
-the environment's FeRun ID as `environment` set by FeCode, never the
-caller's. A trace ID in the Logs tab (a request's, a line's) opens the
+FeCode reads as an integration (FeOS ADR 0056): its access token, the
+project in `FeRun-Project` and the person it reads for in
+`FeRun-Person`, so that the sink answers what both may read of the
+project, by ferund's roles ([sink.md](sink.md), Readers); its backend
+passes a member's request on with the environment's FeRun ID as
+`environment` (as its logs, FeCode ADR 0009 §12). A trace ID in the Logs tab (a request's, a line's) opens the
 trace: its spans as a waterfall, top to bottom, each with its service,
 name, duration and attributes, and a link to the lines of the trace.

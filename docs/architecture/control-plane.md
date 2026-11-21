@@ -11,7 +11,18 @@ credentials), [ADR 0013](../adr/0013-traffic-records.md) (traffic records),
 [ADR 0018](../adr/0018-environments-and-deployments.md) (environments and
 deployments), [ADR 0021](../adr/0021-ingress.md) (the ingress),
 [ADR 0023](../adr/0023-calls-outlive-their-caller.md) (calls that outlive
-their caller), [ADR 0009](../adr/0009-node-os-and-packages.md) (packages).
+their caller), [ADR 0009](../adr/0009-node-os-and-packages.md) (packages),
+[ADR 0031](../adr/0031-people-in-ferun.md) (people in FeRun),
+[ADR 0056](../adr/0056-an-integration-works-in-the-projects-that-grant-it.md)
+(integrations), [ADR 0057](../adr/0057-the-spec-is-one-format-for-every-caller.md)
+(the published module and YAML),
+[ADR 0058](../adr/0058-a-spec-says-what-its-code-expects-of-a-secret.md)
+(a spec's secret expectations),
+[ADR 0059](../adr/0059-a-project-is-on-an-account.md) (accounts),
+[ADR 0060](../adr/0060-a-protected-environment-is-changed-by-a-grant-on-itself.md)
+(protected environments) and
+[ADR 0061](../adr/0061-what-ferun-called-a-tenant-is-a-project.md) <!-- KEEP-TENANT: ADR 0061's file name -->
+(the word project).
 The node's side of the wire is in [node.md](node.md#the-control-plane);
 `ferun-ingress`, the program that serves public environments' hosts, and
 ferund's side of it are in [ingress.md](ingress.md).
@@ -51,7 +62,11 @@ instance serves any request. Each has two listeners:
 Every flag has an environment variable `FERUN_<NAME>`, the flag's name in
 upper snake case (`--database-url`: `FERUN_DATABASE_URL`); a flag on the
 command line wins over its variable, and an empty variable counts as
-unset. Durations are written in Go's syntax (`90s`, `10m`, `12h`), byte
+unset. ferund, ferun-sink, ferun-ingress and ferun-auth refuse to start
+while a `FERUN_` variable of a name from before ADR 0061 is set, and
+name each with its new name, `…PROJECT…` (`config/oldnames`): an
+unknown variable is otherwise ignored, and a landscape that kept an old
+name would fall back to the default without a word. Durations are written in Go's syntax (`90s`, `10m`, `12h`), byte
 sizes as integers with an optional `KiB`, `MiB` or `GiB` suffix.
 `ferund <command> --help` lists the flags with their variables and
 defaults. `serve` migrates the database at its start; `migrate` does only
@@ -88,14 +103,15 @@ conversion).
 | `--deny-prefix` | a built-in set | a destination that preflights, bindings and the image resolver may not reach, repeatable; a set given replaces the built-in one, and `default` stands for it (`default,100.144.0.0/13` adds a network) |
 | `--admin-users` | none | `user:password,...` for the admin API: Basic, beside or instead of OIDC |
 | `--public-url` | none | the front door's external URL, e.g. `https://run.fecode.dev`; required with `--oidc-issuer` |
-| `--oidc-issuer` | none | the OIDC issuer of human sign-in, exactly as its discovery document states it |
+| `--oidc-issuer` | none | the OIDC issuer of human sign-in, exactly as its discovery document states it, and the one issuer whose access tokens sign integrations in ([Integrations](#integrations)); without it no integration signs in and the integrations' admin routes answer 503 `integrations_unavailable` |
 | `--oidc-client-id` | `ferun` | |
 | `--oidc-client-secret-file` | none | the client's secret; required with `--oidc-issuer` |
 | `--oidc-scopes` | `openid profile email` | space-separated, with `openid` |
 | `--oidc-admin-group` | `admins` | a person is an admin when the `groups` claim holds it |
+| `--api-audience` | `--public-url` | the audience an integration's access token must hold in `aud`, compared as an exact string (ADR 0056); production `https://run.fecore.dev` ([Integrations](#integrations)) |
 | `--visitor-auth-url` | none | ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind project. An absolute `https` URL without path, query or fragment (`http` only for a loopback host), whose host is neither `--public-url`'s nor under the apps zone or the project zone; a trailing `/` is trimmed ([Visitors](#visitors)) |
 | `--session-ttl` | `12h` | the absolute lifetime of a UI session |
-| `--project-creation` | `people` | who makes projects with `POST /api/v1/projects` ([Members, invitations and tokens](#members-invitations-and-tokens)): `people` (every signed-in person) or `operators` |
+| `--project-creation` | `people` | whether the account `default` is open ([Accounts](#accounts)): `people`, every signed-in person who is not disabled may put projects on it with `POST /api/v1/projects`; `operators`, only the people with a row of `default` and the operators. A member of another account makes projects on that one either way |
 | `--projects-per-person` | `3` | the most projects one person may make that are not being deleted; `0`: no bound; operators are never bound |
 | `--project-default-sandboxes`, `--project-default-environments`, `--project-default-running-jobs`, `--project-default-vcpus`, `--project-default-memory-mib` | `5`, `5`, `3`, `8`, `16384` | the limits of a project a person makes ([Quotas](#quotas)); negative: none |
 | `--bootstrap-token` | none | becomes a token of the project `operator` while no project exists |
@@ -183,11 +199,39 @@ of `proto/` is in `go/gen/feos/<api>/v1` (`make go-gen`), the rest in
 | `visits` | the projects' access providers, the challenges they answer, the visits, their codes and tokens on the ingress's connection, the provider's call ([Visitors](#visitors)) |
 | `visit`, `egress` | shared with `ferun-ingress` and `ferun-auth`, the standard library alone: the visits' formats (the sealed challenge, the token, the code, the cookies' and headers' names, the JWKS); the rule for connections to addresses others name |
 | `oidc`, `oidc/oidctest` | the OpenID Connect relying party of human sign-in and of `ferun-auth`; a test issuer |
-| `api`, `auth`, `apierr` | the REST router, its auth classes and errors, human sign-in |
+| `api`, `auth`, `apierr` | the REST router, its auth classes and errors, human sign-in, integrations' sign-in; `auth` holds a request's principal and the one rule of its effective roles ([Who acts in a project](#who-acts-in-a-project)) |
 | `ui` | the embedded build of `web/` |
 | `server` | one instance, built from its configuration, and its stop |
 | `testnode` | a Go implementation of feosd's side of the wire, for tests and development |
 | `e2e` | end-to-end tests: several instances and test nodes on one database |
+
+**The published module** ([ADR
+0057](../adr/0057-the-spec-is-one-format-for-every-caller.md)) is
+`go/ferun`, the module `github.com/gardenlinux/feos/go/ferun` with its
+own `go.mod`: what a caller of FeRun's API compiles against instead of
+keeping a copy of the format, and what ferund uses itself, so that there
+is one definition. `go/go.mod` requires it at
+`v0.0.0-00010101000000-000000000000` and replaces it with `./ferun`; the
+Dockerfiles copy its `go.mod` and `go.sum` before `go mod download`, and
+`make go-vet`, `go-test-unit` and `go-test` run in it too, its tests
+with `-race` and without a database. It depends on the standard library
+and `go.yaml.in/yaml/v3` alone, and on nothing of `go/internal`:
+
+| Package | What it is |
+|---|---|
+| `ferun/spec` | a spec's types with their JSON forms, `Parse` (the strict reader), `YAMLToJSON` and `ParseYAML` ([The deployment spec](#the-deployment-spec)), `MergePatch` (RFC 7396), `Portable` (a spec carried to another environment: its secret pins keep what the code expects and lose version and upstream), the finding and the diff's entries |
+| `ferun/api` | the answer and request types of the project class (environments, plans, deployments, secrets, domains, the catalog, the quota, `/auth/me`, members, integrations, protection), the refusal body `ErrorBody` and its codes, the headers `FeRun-Project` and `FeRun-Person`, the roles with `AtLeast` and `Lower` |
+| `ferun/client` | an HTTP client of the project class over them, one method per route, and the sink's reads; `InProject` and `ForPerson` set the two headers per call, a refusal is `*Error` with FeRun's body; it neither retries nor caches, and decodes answers leniently |
+
+Judging a spec is not published: validation, normalisation, reach, the
+diff, the bounds and the defaults stay ferund's (`env/spec`, whose
+`published.go` aliases the module's names), and a caller asks the plan.
+Its exported names are FeRun's API, under the add-only rule of
+`go/ferun/doc.go`: a field keeps its name, type and meaning; fields are
+added; one leaves only through a release in which it is still read. A
+caller built against an older module refuses a field of a spec FeRun
+gained since as unknown, so FeRun is released first. Callers pin a
+pseudo-version of a pushed commit; the module has no tag.
 
 `cmd/ferund` is the daemon; `cmd/ferun-testnode` runs a test node
 ([below](#the-test-node)); `cmd/ferun-ingress` is the ingress, with its
@@ -252,7 +296,14 @@ replicate synchronously ([Operations](#operations)).
   `jobs.log_retention_days` and `service_tokens` ([The sink](#the-sink));
   `0034_visitors.sql`, `access_providers`, `visits`, `visit_answers`,
   `environments.access` and `access_provider` and the service token kind
-  `auth` ([Visitors](#visitors))) and
+  `auth` ([Visitors](#visitors)); `0041_projects.sql`, the word project
+  in every table, column, index, constraint and activity kind (ADR
+  0061); `0042_integrations.sql`, `integrations`, their grants, the
+  tokens they mint and `environments.protected` ([Integrations](#integrations),
+  [Protected environments](#protected-environments));
+  `0043_accounts.sql`, `accounts`, `account_members`,
+  `project_accounts` and account invitations, every project on
+  `default` since it was made ([Accounts](#accounts))) and
   applied under an advisory lock, recorded in `schema_migrations`. The
   same locked section creates the cluster's MCP session key, reconciles
   `--pod-network` with the database's ([The pods'
@@ -279,7 +330,8 @@ replicate synchronously ([Operations](#operations)).
 
 The tables: `instances`, `leases`, `cluster_secrets`; `projects`,
 `project_tokens`; `people`, `grants`, `invitations` ([People and
-grants](#people-and-grants)); `nodes`, `node_telemetry` (the hot row, about a hundred
+grants](#people-and-grants)); `integrations` ([Integrations](#integrations));
+`accounts`, `account_members`, `project_accounts` ([Accounts](#accounts)); `nodes`, `node_telemetry` (the hot row, about a hundred
 updates a second at 512 nodes, never locked by placement), `node_certs`
 (every node certificate issued), `join_tokens` (of kind `node` or
 `ingress`), `node_starts`, `event_gaps`; `pod_network` (the mesh's ULA,
@@ -309,12 +361,15 @@ domains](#certificates-of-domains)); `jobs` (the projects' jobs,
 holds the visits' keys, `visit-token` (sealed) and `visit-challenge`.
 Tokens are stored as SHA-256 hashes only, and shown once, at their
 creation. The rows ferund makes for a principal carry it in `made_by`
-(ADR 0031): `person:<people.id>`, `token:<project token hash>` or
-`basic:<user>`, beside the free `author` a client sends; that is
+(ADR 0031): `person:<people.id>`, `token:<project token hash>`,
+`basic:<user>`, `integration:<integrations.id>`, or
+`integration:<integrations.id>/person:<people.id>` for an integration
+that names a person (ADR 0056), beside the free `author` a client sends; that is
 `env_deployments` (answered as `madeBy`), `env_secrets`, `env_tags`,
 `env_route_tokens`, `domains`, `sandboxes`, `sandbox_tokens`, `jobs`,
-`project_tokens`, `grants` and `invitations`; `''` is ferund's own or a
-row of a version before `0027`.
+`project_tokens`, `grants`, `invitations`, `integrations`, `accounts`,
+`account_members` and `project_accounts` (`moved_by`); `''` is ferund's
+own or a row of a version before `0027`.
 `placements`, which held the placement decisions and was written and read
 by nothing since `0003` emptied it, was dropped by `0008`. A placement's
 audit is its activity row.
@@ -1355,17 +1410,17 @@ The routes, bodies, status codes and texts are the sandbox system's;
 
 | Class | Routes | Credential |
 |---|---|---|
-| admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users` |
-| person | `POST /api/v1/projects`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no project; else 401 "sign-in required" |
-| project | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/project[/…]` (leave, members, invitations, tokens) | a project's token, or a person's session naming its project in `FeRun-Project`, with the role and scope each route states ([People and grants](#people-and-grants)) |
-| provider | `POST /api/v1/challenges/open`, `…/accept`, `…/reject`, `GET /api/v1/visits/{visit}` ([Visitors](#visitors)) | a bearer `feos-auth-…` is a service token of kind `auth` (else 401 "unknown service token"); any other credential is a project principal as in the project class, with its CSRF rules. None: 401 `{"error": "provider credential required"}` with `WWW-Authenticate: Bearer realm="ferun"`. The visits service decides who may, after opening the challenge or reading the visit |
+| admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users`; an integration is never an operator |
+| person | `POST /api/v1/projects`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept`, `/api/v1/accounts[/…]` ([Accounts](#accounts)), `GET /api/v1/integrations` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no project; else 401 "sign-in required"; an integration's bearer (a JWT) is 403 `integration_refused` |
+| project | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/project[/…]` (leave, members, invitations, tokens, integrations' grants, the account, the move) | a project's token; an integration's access token naming the project in `FeRun-Project`, and maybe a person in `FeRun-Person` ([Integrations](#integrations)); or a person's session naming its project in `FeRun-Project`; with the role and scope each route states ([Who acts in a project](#who-acts-in-a-project)) |
+| provider | `POST /api/v1/challenges/open`, `…/accept`, `…/reject`, `GET /api/v1/visits/{visit}` ([Visitors](#visitors)) | a bearer `feos-auth-…` is a service token of kind `auth` (else 401 "unknown service token"); an integration's bearer is 403 `integration_refused` (ADR 0056 sets it aside as a provider of visitors); any other credential is a project principal as in the project class, with its CSRF rules. None: 401 `{"error": "provider credential required"}` with `WWW-Authenticate: Bearer realm="ferun"`. The visits service decides who may, after opening the challenge or reading the visit |
 | auth | `POST /api/v1/visits/end`, `GET /api/v1/oidc-providers/{project}/{provider}` ([Visitors](#visitors)) | `ferun-auth`'s service token of kind `auth` alone; else 401 `{"error": "ferun-auth token required"}` with `WWW-Authenticate: Bearer realm="ferun"` |
 | sandbox | `/api/v1/sandboxes/{id}/…`: exec, files, dirs, search, fetch, processes, calls, watches, bindings | the sandbox's own token |
 | mcp | `/mcp` | the sandbox's token, with the door's own answers |
 | forward | `/fwd/…`, `/api/v1/sandboxes/{id}/ports/…` | the sandbox's token in `Authorization` alone ([ports](#ports)) |
 | route | `/api/v1/environments/{env}/http/…` | a route token of the environment ([the route door](#the-route-door)) |
 | service | `POST /api/v1/service-certificates` | a service token of kind `sink` ([The sink](#the-sink)) |
-| public | `/healthz`, `/readyz`, `/auth/…`, the UI, `GET /api/v1/visit-keys` ([Visitors](#visitors)) | none |
+| public | `/healthz`, `/readyz`, `/auth/…`, the UI, `GET /api/v1/visit-keys` ([Visitors](#visitors)) | none; `GET /auth/me` answers by whatever credential comes ([Who asks](#who-asks)) |
 
 A project's token is not accepted on a sandbox route, not even for its own
 sandbox (the forward class answers it 401 "forwarding needs a sandbox
@@ -1390,7 +1445,7 @@ it relies on the sandbox. The admin API has projects, each with `sandboxCount` (
 sandboxes, without its environments' instances), `environmentCount` (its
 environments not being deleted) and its tokens (hashed, shown once),
 nodes (with their connections to the serving instance, certificates,
-drain, removal and capacity settings), join tokens, service tokens (list and revoke, [The sink](#the-sink)), instances and the leader, and the
+drain, removal and capacity settings), join tokens, service tokens (list and revoke, [The sink](#the-sink)), integrations ([Integrations](#integrations)), accounts and the projects' moves ([Accounts](#accounts)), people, instances and the leader, and the
 activity of a sandbox or a node, with gaps and traffic records, whole
 and a deleted sandbox's too. A project reads its own sandbox's on `GET
 /api/v1/sandboxes/{id}/activity` (read on its environment, [ADR
@@ -1434,11 +1489,7 @@ routes (anyone else's is 403 "operators only"). A person an operator
 disabled (`people.disabled_at`) gets a page "Your account … is disabled
 in FeRun" and no session, and their sessions resolve no more at once.
 The session keeps the ID token's `sid`. `GET /auth/me` answers who is
-signed in: `sub`, `person`, `email`, `name`, `username`, `picture`,
-`admin` (an operator), `method` and `projects`, each `{project, role,
-environments: [{id, name, role}]}` with the person's grants (`role` ""
-for a project where they hold environment grants alone); an operator's
-are every project, as `admin`.
+signed in, and with what roles ([Who asks](#who-asks)).
 
 `POST /auth/backchannel-logout` is the provider's back-channel logout
 (OpenID Connect Back-Channel Logout 1.0), the URI of ferund's client: the
@@ -1477,17 +1528,107 @@ login dialog, only with `--admin-users` and only to a request without
 shows its own sign-in screen on a 401, so a session that expired does
 not bring up the browser's dialog over it.
 
+### Who acts in a project
+
+FeRun has three levels. An **account** (ADR 0059) says whom a project's
+use is charged to; it gives no role in its projects and is in no name
+([Accounts](#accounts)). A **project** is the border: its environments,
+sandboxes, jobs, domains, providers, limits, tokens and grants are its
+own, and whoever names what is not theirs gets the answer of an absent
+thing. An **environment** is where things run; a grant may be on it
+alone.
+
+A project-class request has one **principal** (`auth.Principal`):
+
+- a **person**, by their session (the cookie, the project in
+  `FeRun-Project`); an operator's session is `admin` in every project;
+- a **project token**, a bearer of 64 hex digits, a principal of its own
+  project alone;
+- an **integration** (ADR 0056), a bearer that is a JWT (exactly two
+  dots), the shared provider's access token for this API, naming the
+  project in `FeRun-Project` and, when it acts for a person, that
+  person's subject in `FeRun-Person` ([Integrations](#integrations)).
+
+Only an integration sends `FeRun-Person`: from a session or a project
+token it is 400 `{"error": "only an integration names a person", "code":
+"person_header_refused"}` on the project, person and admin classes (with
+Basic credentials there too) and on `/auth/me`, so that a caller
+expecting the narrowing never gets a wider answer.
+
+**The effective role** is one function (`auth.Project`), which every
+route need, every handler's check and `/auth/me` use, so that the answer
+and the check cannot differ. A side's role on environment *e*, with
+project grant *G* and grant *g(e)* there, is the higher of *g(e)* and
+what *G* counts for there: *G* itself while *e* is not protected, and on
+a protected environment `admin` as `admin` and `read` or `write` as
+`read` ([Protected environments](#protected-environments)). Then:
+
+| Principal | On the project | On environment *e* | A plan against *e* |
+|---|---|---|---|
+| a person | their project grant | their side's role | the higher of both grants, protection aside |
+| an operator's session | `admin` | `admin` | allowed |
+| a project token | its own grant and its grants rows | its side's role | as a person's |
+| an integration alone | its project grant | its side's role, and `read` at most on a protected *e* | as a person's |
+| an integration naming person P | the lower of its and P's project grant | the lower of its side's and P's side's role | the lower of both sides', protection aside |
+
+The named person's grants are their own: an operator's
+everywhere-`admin` belongs to a session and never comes through an
+integration. A project is the principal's to see when it holds a role on
+it, or on one of its environments; else it is 404 "no such project",
+whether it does not exist, the integration is disabled, or the person
+named is unknown, disabled or without a role there. An environment it
+holds no role on is 404 "no such environment". Deleting and renaming an
+environment need `admin` on it, or `write` on the project while it is
+not protected (`auth.Project.MayDelete`).
+
+#### Who asks
+
+`GET /auth/me` (public class) answers by the credential, `FeRun-Project`
+ignored, with a `kind` and the projects the caller reaches, each with
+its effective roles by the one function: `{kind, …, projects:
+[{project, role, account?, integrationRole?, personRole?, environments:
+[{id, name, role, integrationRole?, personRole?, protected, plan,
+delete}]}], accounts}`, projects and environments by name. `role` is the
+effective role (`""` on a project where only environment grants count),
+`plan` whether the caller may plan against the environment (`write` were
+it not protected), `delete` whether it may delete and rename it; an
+environment the caller does not read is left out, a project it does not
+see too. The kinds:
+
+- `session`: `sub`, `person`, `email`, `name`, `username`, `picture`,
+  `admin` (an operator), `method` `oidc`; each project with its
+  `account` ([Accounts](#accounts)), and `accounts`, those the person may
+  put projects on or read. An operator's are every live project and
+  every environment as `admin`, `plan` and `delete` true.
+- `basic`: `username`, `admin: true`, `method: basic`, no projects.
+- `token`: `token: {label, role, environment}` (the token's own grant;
+  `environment` `""` on the whole project) and its project.
+- `integration`: `integration: {name, title, url, disabled}`; with
+  `FeRun-Person`, `named: {sub, known, person?, email?, name?}`. Each
+  project and environment also says `integrationRole`, the
+  integration's own role (without the cap of acting alone), and, with a
+  person, `personRole`, the person's. The projects are those that grant
+  the integration, with a person those where both hold a grant and the
+  project is visible; a disabled integration, and a person FeRun does not
+  know or who is disabled (`known: false`), reach none (200, `projects:
+  []`).
+
+`projects` and `accounts` are never null; `accounts` is `[]` but for a
+session. The answer's Go types are the module's `api.Me` and its parts.
+
 ### People and grants
 
 ADR 0031 gives the projects members. A **grant** (`grants`) gives a
-principal a role in a scope: the principal is a person (`person_id`) or
-a project token (`token_hash`), exactly one; the scope is the project
+principal a role in a scope: the principal is a person (`person_id`), a
+project token (`token_hash`) or an integration (`integration_id`),
+exactly one (`grants_one_principal`); the scope is the project
 (`environment_id` NULL) or one environment of it; the role is `read`,
 `write` or `admin`, each including the one before. A principal holds at
-most one grant per scope; its role on an environment is the higher of
-its project grant and its grant there, its role on the project its project
-grant alone. A grant on an environment goes with the environment, every
-grant with its project, person or token. A project token's own grant is
+most one grant per scope (an integration's by an index of its own,
+`grants_integration_scope`); its role on an environment is the effective
+role above, its role on the project its project grant. A grant on an
+environment goes with the environment, every grant with its project,
+person, token or integration. A project token's own grant is
 on its row, minted with it (`project_tokens.role`, `environment_id`):
 every token made before `0027`, and every token made without a role, is
 `admin` on its project, so FeCode and FeChat go on unchanged; a token's
@@ -1503,9 +1644,12 @@ them (`made_by`, NULL for an operator's) and their limits
 deleted; `disabled_at` ends their sessions and every grant's effect, the
 grants kept.
 
-**The project class takes a principal.** A bearer is a project token, its
-project its own: a `FeRun-Project` header that names another is 404 "no
-such project". Without a bearer, a person's session cookie acts in the
+**The project class takes a principal.** A bearer of a project token is
+its project's: a `FeRun-Project` header that names another is 404 "no
+such project". A bearer that is a JWT is an integration's, which must
+name its project (400 "an integration names its project in the
+FeRun-Project header" without it; [Integrations](#integrations)).
+Without a bearer, a person's session cookie acts in the
 project its `FeRun-Project` names (400 "a session names its project in the
 FeRun-Project header" without it), with the CSRF rules of an operator's
 session (`X-Requested-With: ferun` on a change, an `Origin` the public
@@ -1513,32 +1657,44 @@ URL's); a project where the person holds no grant is 404 "no such
 project", and an operator's session holds `admin` in every project,
 recorded as the operator's own. A session of a version before people
 (no person) and an unknown cookie are 401 "project bearer required", as
-no credential is. Every project-class route states its need at the route
-in the route table (`go/internal/api`), and `TestRouteNeeds` holds the
-list:
+no credential is. The principal carries the project's protected
+environments. Every project-class route states its need at the route
+in the route table (`go/internal/api`), as `need.String()` prints it,
+and `TestRouteNeeds` holds the list:
 
 | Need | Routes |
 |---|---|
-| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the project, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/providers`, `GET /api/v1/providers/{provider}` (an environment's admin chooses among them), `GET /api/v1/project`, `GET /api/v1/project/members` (the grants on environments it reads), `GET /api/v1/project/invitations` (those of the scopes it is admin of), `POST /api/v1/project/leave` |
+| member (any grant; the answer filtered) | `GET /api/v1/environments` (the environments it reads), `GET /api/v1/addons`, `GET /api/v1/sandboxes` and `GET /api/v1/jobs` (those of the environments it reads; `?environment=` one of them, else 404), `GET /api/v1/domains`, `GET /api/v1/domains/{id}` (read on the project, or on the environment a domain is bound to; else 404 "no such domain"), `GET /api/v1/providers`, `GET /api/v1/providers/{provider}` (an environment's admin chooses among them), `GET /api/v1/project`, `GET /api/v1/project/quota`, `GET /api/v1/project/members` (the grants on environments it reads), `POST /api/v1/project/leave` |
+| member, no integration | `GET /api/v1/project/invitations` (those of the scopes it is admin of), `GET /api/v1/project/account` |
 | read on the project | `GET /api/v1/tools`, `POST /api/v1/environments/plan` |
-| write on the project | the preflights, `POST /api/v1/environments`, `…/{env}/clone` |
-| read on the sandbox's environment (ADR 0035) | a sandbox's get, tokens, access, credentials |
-| write on the sandbox's environment | a sandbox's delete, pause, resume, reaches, image credentials, tokens, credentials |
+| write on the project | the preflights, `POST /api/v1/environments`, `…/{env}/clone` (one that copies a secret or a credential needs `write` on the source environment too, which the handler checks) |
+| read on the sandbox's environment (ADR 0035) | a sandbox's get, tokens, access, activity, credentials, secrets |
+| write on the sandbox's environment | a sandbox's delete, pause, resume, reaches, image credentials, tokens, credentials, secrets |
 | write on the environment the body names, which the handler checks | a sandbox's create, a project job's create |
 | read on the job's environment | a project job's get and logs |
 | write on the job's environment | a project job's cancel and delete |
-| admin on the project | a domain's claim, check and deletion; the project's tokens (`GET`, `POST /api/v1/project/tokens`, `DELETE …/{hash}`); an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
-| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), incidents, access logs, traffic, its bindings' use, its workloads' identities |
-| write on the environment | plan, apply, revert, objects, tags, secrets' values, restarts, runs of its jobs, a binding's check |
-| admin of the scope the request names (the project, or an environment), which the handler checks | a member's grant (`PUT`, `DELETE /api/v1/project/members/{person}/grants`), an invitation's create and revocation (`POST /api/v1/project/invitations`, `DELETE …/{id}`) |
-| admin on the environment | its route tokens, `public`, its access (who it admits) and the host label; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
-| admin on the environment, or write on the project | `DELETE …/{env}` |
+| admin on the project | a domain's claim, check and deletion; an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
+| admin on the project, no integration | the project's tokens (`GET`, `POST /api/v1/project/tokens`, `DELETE …/{hash}`), the move (`POST /api/v1/project/move`) |
+| read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), credentials, incidents, access logs, traffic, its bindings' use, its workloads' identities |
+| write on the environment | apply, revert, objects, tags, secrets' values, credentials, restarts, runs of its jobs, a binding's and a secret's check, its route tokens (ADR 0056: route tokens are `write`'s) |
+| write on the environment, protection aside | `POST …/{env}/plan` ([Protected environments](#protected-environments)) |
+| admin of the scope the request names (the project, or an environment), which the handler checks, no integration | a member's grant (`PUT`, `DELETE /api/v1/project/members/{person}/grants`), a token's grant (`PUT`, `DELETE /api/v1/project/tokens/{hash}/grants`), an integration's grant (`PUT /api/v1/project/integrations/{integration}/grants`), an invitation's create and revocation (`POST /api/v1/project/invitations`, `DELETE …/{id}`) |
+| admin of the scope, or the integration itself | `DELETE /api/v1/project/integrations/{integration}/grants` |
+| admin on the environment | `public`, its access (who it admits) and the host label, `PUT …/{env}/protected`, `GET …/{env}/principals`; a domain's binding and unbinding (admin on the environment it leaves and on the one it joins, which the handler checks) |
+| admin on the environment, or write on the project unless it is protected | `PATCH …/{env}`, `DELETE …/{env}` |
 
-On an environment the higher of the principal's project grant and its
-grant there counts; an environment it holds no role on is 404 "no such
-environment", as an absent one. A principal that sees what it names but
-lacks the role is 403 `{"error": "this needs the role <role> on the
-<project|environment>", "code": "role_required", "role", "scope"}`. A
+"no integration" is checked first, before any role: an integration gets
+403 `{"error": "an integration changes no principal of a project",
+"code": "integration_refused"}` whatever it holds. On an environment the
+effective role counts; the environment is resolved only when the
+project role does not decide (no protected environment in the project,
+or a principal whose project grant covers it either way), and the one
+resolved goes with the request, so that the handler acts on the
+environment that was checked. An environment it holds no role on is
+404 "no such environment", as an absent one. A principal that sees what
+it names but lacks the role is 403 `{"error": "this needs the role <role>
+on the <project|environment>", "code": "role_required", "role",
+"scope"}` (`scope` `account` on the accounts' routes, [Accounts](#accounts)). A
 sandbox or a project's job in an environment the principal may not read
 is absent as an unknown one (404 "unknown sandbox <id>", "no such job").
 Services of runtime `attached` need write on the environment alone: they
@@ -1549,22 +1705,145 @@ project tokens with `{label, role, environment}` (role `admin` by
 default, the environment by ID or name), and lists them with `role`,
 `environment` and `madeBy`. Sandbox tokens and `/mcp` are untouched: a
 sandbox token is its sandbox's, and the door's answers are as before.
-ferund's own reads of the sink on a session's behalf (logs, traffic,
-access logs, the bindings' use) pass the session's cookie and `FeRun-Project` on
-(`auth.Project.PassOn`), as they pass a token: no service credential
-reads the sink for a project.
+ferund's own reads of the sink on a request's behalf (logs, traffic,
+access logs, the bindings' use) pass its credentials on
+(`auth.Project.PassOn`): a token as it came; a session's cookie and
+`FeRun-Project`; an integration's bearer with `FeRun-Project` and the
+person it names in `FeRun-Person`. No service credential reads the sink
+for a project.
+
+### Integrations
+
+An **integration** (ADR 0056, `0042_integrations.sql`) is software in
+front of FeRun that works in many projects, as FeCode does: a principal
+of its own, registered once by an operator, that reaches a project only
+by the grants its admins give it, with the roles people have. It makes
+and deletes no project, and it never decides who else acts.
+
+**Registration** is the operators' (admin class), each answering
+503 `integrations_unavailable` without `--oidc-issuer`:
+
+| Route | What |
+|---|---|
+| `GET /api/v1/admin/integrations` | every integration: `{name, title, url, issuer, subject, disabled, disabledAt?, createdAt, updatedAt, lastSeen?, madeBy, projects}`, `projects` the number that grant it |
+| `PUT /api/v1/admin/integrations/{integration}` `{title, url, issuer?, subject}` | 201 made, 200 changed. The name `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`, `url` empty or `https://`, `subject` 1 to 255 characters (each else 400); `issuer` is `--oidc-issuer` when left out, any other 422 `issuer_refused`; a subject another integration holds 409 `subject_taken` |
+| `POST …/{integration}/disable`, `…/enable` | `{name, disabled}`: a disabled one signs in and reaches no project; its grants stay, so enabling restores them |
+| `DELETE …/{integration}` | `{deleted: true}`: its grants and the route and sandbox tokens it minted go with it (cascade); what it made stays the projects' |
+
+Each change is an activity row (`integration_registered`, `_changed`,
+`_disabled`, `_enabled`, `_removed`). `GET /api/v1/integrations` (person
+class) lists the enabled ones, `{integrations: [{name, title, url}]}`,
+which a project's admin picks from.
+
+**Sign-in.** The integration gets an access token for itself at the
+shared provider (the client credentials grant, the audience
+`--api-audience`) and sends it as its bearer. ferund verifies it with
+the keys it reads for ID tokens (`oidc.VerifyAccessToken`): RS256, ES256
+or EdDSA, never `none` or a `crit` header; `iss` exactly
+`--oidc-issuer`; `aud` holding `--api-audience`; `exp` present and not
+past, `iat` present and not ahead, `nbf` not ahead (60 s of skew each);
+a `sub` and a `client_id` that are equal, so that a person's access
+token opens nothing whatever its audience. Then the integration of
+(`issuer`, `sub`) is looked up. A token that fails is 401 `{"error":
+"bearer refused", "code": "token_refused"}` (the reason to the log
+only), a verified one of no registered integration 401
+`unknown_integration`, both with `WWW-Authenticate: Bearer
+realm="ferun"`; when the provider's keys cannot be read, 502
+`provider_unreachable`. A failed discovery or key fetch is kept 5 s
+before the provider is asked again. Without `--oidc-issuer` every JWT
+bearer is 401 `token_refused`. Its `last_seen` is touched at most once a
+minute.
+
+**A call names its person.** With `FeRun-Person: <subject>` (1 to 255
+printable ASCII characters, else 400 `person_header_refused`), the
+subject at the integration's issuer, the call is made for that person,
+who must be known, not disabled and hold a grant in the project, and
+does what both may do: the lower of the two roles decides ([Who acts in
+a project](#who-acts-in-a-project)). Without it the call is the
+integration's own, and on a protected environment it reads at most. Its
+rows record `integration:<id>/person:<id>` or `integration:<id>`.
+
+**It acts and never decides who acts.** Whatever its role, it is refused
+(403 `integration_refused`) on the routes that change or show the
+principals of a project: members' grants, invitations, project tokens
+and their grants, an integration's grant, the project's account and its
+move; on the person class (it makes no project, joins no account) and
+the provider class. It may read the members, give up its own grants
+(`DELETE /api/v1/project/integrations/<itself>/grants`, any other
+integration's is 403) or leave (`POST /api/v1/project/leave` drops every
+grant it holds there); its `admin` grant does not count as a project's
+admin for the rule that a project keeps one. Everything else of the
+project class it does within its role: environments, deployments,
+secrets, domains and providers with `admin`, publishing with `admin` on
+the environment.
+
+**Tokens it mints.** A route token or a sandbox token minted by an
+integration (with or without a person) records it
+(`env_route_tokens.integration_id`, `sandbox_tokens.integration_id`) and
+is good only while the integration is enabled and holds `write` on the
+token's environment by its own grants, protection counted but without
+the cap of acting alone; the resolving SQL checks it on every request,
+and a token that fails is answered as an unknown one. The route door
+refuses to pass an integration's JWT (one whose `iss` and `sub` name a
+registered integration), a project token or any sandbox token on to the
+upstream ([The route door](#the-route-door)).
+
+A project's admin grants it with `PUT
+/api/v1/project/integrations/{integration}/grants {role, environment?}`
+(`{integration, role, environment}`, a disabled integration too, whose
+grant takes effect once it is enabled; unknown 404 "no such
+integration"), and removes a grant with `DELETE
+…/grants[?environment=…]` (`{deleted}`). `GET /api/v1/project/members`
+lists the integrations beside the people. The sink takes an
+integration's bearer with both headers as ferund does ([sink.md](sink.md)).
+
+### Protected environments
+
+An environment is **protected** (ADR 0060, `environments.protected`,
+false by default) or not. On a protected environment a project grant of
+`read` or `write` counts as `read`, and `admin` as `admin`; a grant on
+the environment counts as itself. So a project's writers read it, and
+changing it takes a grant on it or `admin` on the project. A plan against
+it is not held back (`write environment, protection aside`: whoever
+would write it were it not protected plans), deleting and renaming it
+need `admin` on it, and an integration that names nobody reads it
+whatever it holds ([Who acts in a project](#who-acts-in-a-project)).
+Every environment answer carries `protected`; a clone starts
+unprotected, and a clone that copies a secret or a credential needs
+`write` on its source.
+
+`PUT /api/v1/environments/{env}/protected {protected}` (admin on the
+environment; `protected` is required, else 400; 409 while it is being
+deleted) answers `{id, name, protected, changed}` and records
+`environment_protected` or `environment_unprotected` when it changed.
+An integration alone with `admin` on the project may protect an
+unprotected environment, which it is admin of, but lift no protection:
+on a protected one it reads. `GET …/{env}/principals` (admin on the
+environment) names who changes it by a project grant today, the dialog's
+list: every principal with a grant in the project, people not disabled,
+project tokens and integrations, `{kind, id, label, projectRole,
+environmentRole, losesWrite}`, the roles their grants (not effective
+roles), `id` the person's ID, the token's hash, or the integration's
+name, and `losesWrite` for a project grant of `write` without `write` or
+`admin` on the environment: those who read it once it is protected. A
+project token with `write` on the project stops deploying to it until it
+holds a grant on it (`PUT /api/v1/project/tokens/{hash}/grants`).
 
 ### Members, invitations and tokens
 
-**A person makes a project**: `POST /api/v1/projects {name}` (class
-person) makes it under today's name rule, with `made_by` the person, and
-gives them `admin` on it; the answer is `{name, createdAt, role}`, no
-token (the session acts). `--project-creation operators` keeps it to
-operators (403 "on this platform only operators make projects");
-`--projects-per-person` bounds the projects a person made that are not
-being deleted, under a lock of the person's row so that concurrent
+**A person makes a project**: `POST /api/v1/projects {name, account?}`
+(class person) makes it under today's name rule on the account named
+(`""` or none: `default`), with `made_by` the person, and gives them
+`admin` on it; the answer is `{name, createdAt, role, limits, account:
+{name, title}}`, no token (the session acts). The person must be allowed
+to put projects on the account ([Accounts](#accounts)): one they may not
+use is 404 "no such account", a closed one 409 `account_closed`; with
+`--project-creation operators`, `default` without a row of it is 403 "on
+this platform only operators make projects". `--projects-per-person`
+bounds the projects a person made that are not being deleted, on every
+account, under a lock of the person's row so that concurrent
 creates do not pass it (422 `quota_exceeded`, `resource` `projects`);
-operators are not bound. Names the platform keeps are 422
+operators are not bound. `project_created` records the account. Names the platform keeps are 422
 `reserved_name`: `operator`, `admin`, `api`, `www`, the
 `--apps-zone-owners`, and the first label of the public URL's host, of
 `--edge-name`, of `--apps-zone` and of `--project-zone`. A taken name is
@@ -1572,24 +1851,28 @@ operators are not bound. Names the platform keeps are 422
 operator makes with the admin API are as before (no maker, a token).
 
 **Members.** `GET /api/v1/project/members` answers `{members: [{person,
-name, email, disabled?, role, environments: [{id, name, role}]}]}`:
-every person with a grant in the project, which only its members see,
-`role` their project grant ("" for none), and of their environments'
-grants those the caller reads. An admin of the scope sets a member's
+name, email, issuer, subject, disabled?, role, madeBy, madeByName,
+environments: [{id, name, role, madeBy, madeByName}]}], integrations:
+[{integration, title, url, disabled, role, madeBy, madeByName,
+environments}]}`: every person and every integration with a grant in the
+project, which only its principals see, `role` the project grant ("" for
+none), of the grants on environments those the caller reads, `madeBy`
+the grant's principal and `madeByName` a name for it. Project tokens are
+not listed there; their admins list them. An admin of the scope sets a member's
 role with `PUT /api/v1/project/members/{person}/grants {role,
 environment?}` (the environment by ID or name; none: the project) and
 removes it with `DELETE …/grants[?environment=…]`; the handler checks
 the scope (403 `role_required`, an environment the caller does not see
 404). Only a member (a person with a grant in the project) is given one:
 a person joins by an invitation (404 "no such member"). `POST
-/api/v1/project/leave` gives up every grant of the calling person (a
-token is 400: it is revoked instead).
+/api/v1/project/leave` gives up every grant of the calling person, or
+of the calling integration (a token is 400: it is revoked instead).
 
 **A project keeps an admin**: removing, lowering or leaving that would
 leave a project that had an admin without one is 409 `last_admin`. Its
 admins are the people with `admin` on the project itself who are not
 disabled and its tokens with `admin` on the project (their own grant or a
-grants row); the changes of admin grants and the tokens' revocation run
+grants row), never an integration; the changes of admin grants and the tokens' revocation run
 with the project's row `FOR NO KEY UPDATE`, so two concurrent ones cannot
 both pass. The admin API's revocation of a token is an operator's and
 not checked.
@@ -1621,13 +1904,97 @@ secret is in those paths and the UI's: `ferund`'s request log writes
 as the admin API does), mints (`POST /api/v1/project/tokens {label?,
 role, environment?}`, the role required, never above the minter's role
 on the token's scope; the answer has the token once) and revokes
-(`DELETE /api/v1/project/tokens/{hash}`) the project's tokens.
+(`DELETE /api/v1/project/tokens/{hash}`) the project's tokens. A token's
+grants beside its own are set as a member's: `PUT
+/api/v1/project/tokens/{hash}/grants {role, environment?}` (`{token,
+role, environment}`) and `DELETE …/grants[?environment=…]`
+(`{deleted}`), by an admin of the scope, with the last-admin rule; an
+unknown hash is 404 "no such token". These are how the protect dialog
+keeps a token deploying ([Protected
+environments](#protected-environments)).
 
 **People**: an operator lists them (`GET /api/v1/admin/people`, the last
 seen first) and disables or enables one (`POST
 /api/v1/admin/people/{person}/disable`, `…/enable`): a disabled person's
 sessions end at once and they sign in no more; their grants stay, so
 enabling restores them.
+
+### Accounts
+
+A project is on an **account** (ADR 0059, `0043_accounts.sql`), which
+says whom its use is charged to. An account gives no role in its
+projects, and it is in nothing that names a project or what is in it:
+no name, host, route, identity, sink key or path; only activity rows and
+logs carry it. Nothing is measured or priced yet: the account is who a
+later meter will charge.
+
+- `accounts`: `id` the name, formed as a project's
+  (`^[a-z0-9][a-z0-9.-]{1,62}$`), `title`, `reference` (free text the
+  operator's accounting reads: a cost centre, an order; FeRun reads
+  nothing into it), `made_by`, `closed_at`, `closed_by`.
+- `account_members`: the people who may put projects on an account,
+  `member` or `admin`; an admin also invites and removes its people and
+  changes their roles. Being on an account gives no role in its projects.
+- `project_accounts`: a project's accounts over time, not one field.
+  Each row is the account it came to at `moved_at`, brought by
+  `moved_by` (its maker, its mover, `''` for the migration's backfill),
+  left at `left_at`; the row with `left_at` NULL is the current one, one
+  per project. The rows go with their project; an account a row names is
+  not deleted.
+- `invitations` have an account as a second kind of scope, with the
+  roles `member` and `admin`.
+
+Every installation has the account **`default`** (title "Default"), and
+every project made before `0043` is on it since it was made; it is never
+closed or deleted, holds `member` rows only, and its admins are the
+operators. `--project-creation people` opens it: every signed-in person
+who is not disabled may put projects on it, an implicit membership that
+lets them do that and nothing else; `operators` keeps it to the people
+with a row of it and the operators. Its page and its moves are the
+operators': a person's row of `default` lets them put projects on it,
+not read it.
+
+Who uses an account (`accountRole`): an operator, as admin of every
+account; a person by their row; on an open `default`, every person as a
+member. An account a caller may not use answers as one that does not
+exist, 404 "no such account". Reading its page needs a row of an account
+other than `default`, or an operator. Project tokens and integrations are
+on no account and move no project. An account that had an admin keeps
+one (409 `last_admin` "an account keeps an admin"; only admins who are
+not disabled count, under the account's row `FOR NO KEY UPDATE`). A
+closed account takes no project, new or moved (409 `account_closed`
+"account <a> is closed: it takes no new project"), keeps those it has,
+and still invites. Only an account that never held a project is deleted
+(409 `account_in_use`); `default` is never closed, deleted or given an
+admin row (422 `default_account`). An account member calling an admin's
+route of it is 403 `role_required` with `scope` `account`.
+
+| Route | Class | What |
+|---|---|---|
+| `GET /api/v1/accounts` | person | `{accounts: [{name, title, role, explicit, closed}]}`, as `/auth/me` lists them: the person's rows (`explicit` false for a row of `default`), an open `default` as `member` without a row, an operator every account as `admin` |
+| `GET /api/v1/accounts/{account}` | person | the page: `{name, title, reference, closed, role, members: [{person, name, email, role, disabled}], projects: [{name, madeBy, admins, since, deleting, limits, use}], moves}`; of a project its name, maker, admins, since when it is there and its use against its limits, nothing inside it |
+| `PUT`, `DELETE /api/v1/accounts/{account}/members/{person}` | person | an admin sets a member's role (`{role}`, `member` or `admin`; one who is no member is 404: people join by invitation) or removes them; a person removes themself, from `default` too |
+| `GET`, `POST /api/v1/accounts/{account}/invitations`, `DELETE …/{id}` | person | an admin lists, makes (`{role}`, 201 the invitation as listed with `token` and `url`, once; on `default` only operators, only as `member`) and revokes (`{revoked}`) the account's invitations |
+| `GET /api/v1/invitations/{token}`, `POST …/accept` | person | an account's invitation previews as `{account: {name, title}, role, expiresAt}`; accepting gives the higher of the role held and the invited, `{account, role}` |
+| `GET /api/v1/project/account` | project, member, no integration | `{account: {name, title}, since, moves}`, never the reference |
+| `POST /api/v1/project/move` `{account}` | project, admin project, no integration | a project's admin who may put projects on the account, or an operator, moves it there; a project token is 403 `person_required` |
+| `GET`, `POST /api/v1/admin/accounts`, `GET`, `PATCH`, `DELETE …/{account}` | admin | every account `{name, title, reference, createdAt, madeBy, closed, closedAt?, projects, members}`; make one (`{name, title?, reference?}`, 409 `name_taken`); its page as `admin`; change `title`, `reference`, `closed`; delete |
+| `PUT`, `DELETE /api/v1/admin/accounts/{account}/members/{person}` | admin | any person FeRun knows |
+| `POST /api/v1/admin/projects/{project}/move` `{account}` | admin | as the project's move; `POST /api/v1/admin/projects` takes `account` and every admin project answer carries it, `GET /api/v1/admin/projects?account=` lists one account's |
+
+**The move** locks the project `FOR UPDATE` (being deleted: 409) and the
+account `FOR SHARE`, closes the current row at `greatest(now(),
+moved_at)` and opens the next at the same instant, and changes nothing
+else of the project: no grant, token, host, name, limit or running
+thing. Its answer is `{project, account, from, movedAt, moved}`; a move
+to the account it is on writes nothing and answers `moved: false`, on a
+closed account too. A move is an activity row
+(`project_account_moved`). A move entry is `{project, from, to, at, by:
+{principal, name}}`, newest first (`from` null for the first, `by.name`
+"FeRun" for the backfill); a project's members, both accounts' people
+and the operators read it. The accounts' changes are activity rows too
+(`account_created`, `_changed`, `_closed`, `_reopened`, `_deleted`,
+`account_member_set`, `account_member_removed`).
 
 ### Quotas
 
@@ -2529,16 +2896,17 @@ in every project as its admin; everyone
 else gets their projects with their roles ("Your projects", a new one with
 `POST /api/v1/projects`), never an operator's page, and the UI calls no
 admin route for them. The browser keeps no project token: every project
-page calls with the session and names its project in `FeRun-Project`; the
-tokens an earlier UI kept in `localStorage` (`ferun-projects`) are removed
-at sign-in. The topbar holds where one works, the search (⌘K) and the
+page calls with the session and names its project in `FeRun-Project`,
+and never sends `FeRun-Person`; the tokens an earlier UI kept in
+`localStorage` (under the key `OLD_TOKENS_KEY` of `web/src/storage.js`)
+are removed at sign-in. The topbar holds where one works, the search (⌘K) and the
 person's menu (the architecture page, light or dark, sign-out). Where
 one works is a switcher at the head of the topbar's trail, in two
 columns: a project, from the person's projects with their roles, and one
 of its environments (the right column lists the environments of the
 project chosen on the left); for operators also the platform (fleet:
 nodes, ingresses, control plane, join tokens; accounts: projects,
-people). Choosing another environment keeps the page open (prod's logs
+people, integrations, accounts). Choosing another environment keeps the page open (prod's logs
 lead to stage's logs). The sidebar picks the thing, the tab bar how to
 look at it. In an environment the sidebar shows the environment as a
 card (its name, a suffix of 8 hex digits that FeCode adds dimmed; its
@@ -2641,9 +3009,18 @@ environments, the rest by their count. ⌘K (or Ctrl+K) searches the
 pages, the person's projects and the project's things by name or ID (a
 prefix of a sandbox's ID too), and opens "prod#13" or "prod 13" as
 deployment 13 of prod (`web/src/search.js`). A page hides the actions
-the role lacks (a sandbox's create, pause, resume, delete and tokens need
-`write` on the project); ferund decides anyway, and a 403 `role_required`
-reads "Your role does not allow this: it needs write on this project.". A
+the role lacks, and takes the roles from `/auth/me` alone: a project's
+`role` and each environment's `role`, `plan`, `delete` and `protected`
+(`envEntry`, `envCan`, `mayPlan` in `web/src/people.js`), never a rule
+of its own; it reads `/auth/me` again after a make, clone, rename,
+delete, protection or grant change, and once more when an environment
+it opens is not listed yet. ferund decides anyway, and a 403
+`role_required` reads "Your role does not allow this: it needs write on
+this project.". On a protected environment the environment's head says
+it is protected; whoever may plan there but not deploy gets a builder
+that plans and applies nothing, sets no secret and says why
+("protected: deploying here needs a grant on this environment, or admin
+on the project", `PROTECTED_DEPLOY`). A
 person with grants on environments alone opens a project at those
 environments. A Basic sign-in (`--admin-users`) has the operators' pages
 but no project's: the project routes take a person's session or a token.
@@ -2661,7 +3038,34 @@ A ferund without one answers 404 "no such route", and the page says it
 is not available; the quota card on a project's overview is left out. An
 invitation is shown once as a link, `/invite/<token>` (or the answer's
 `url`); opened signed out, the sign-in returns to it, and the signed-in
-person accepts it with a click.
+person accepts it with a click, a project's or an account's.
+
+The People page of a project (`/projects/<t>/members`) lists the
+integrations beside the people, with their roles and who granted them,
+and grants one from `GET /api/v1/integrations` (`PUT
+/api/v1/project/integrations/{integration}/grants`); an admin of one
+environment grants on that environment alone. FeCode links to it as
+`/projects/<t>/members?integration=<name>`, which opens the grant with
+that integration chosen, and to `/projects?new`, which makes a project,
+on an account the person chooses among `/auth/me`'s open ones,
+`default` first. An environment's Settings hold its **protection** (ADR
+0060, `ProtectBox` in `web/src/views/EnvTabs.jsx`): its state and the
+rule in words, and for an admin of it Protect… or Lift protection. The
+Protect dialog is modal: it reads `GET …/principals`, names who loses
+write, offers a grant `write` on the environment to every principal of
+a kind with a grant route that does not hold `write` there already
+(neither a project admin), ticked for those who lose write, gives the
+ticked grants one after the other and then protects; a failure stops
+it, the grants given stay and the environment is not protected. The
+project's General settings show its account and its moves (`GET
+/api/v1/project/account`), and its admin moves it to another open
+account they may use. `/accounts` lists a person's accounts (an
+operator's: every one, to make, change, close, reopen and delete one
+that never held a project), `/accounts/<a>` an account's page (its
+projects with their makers, admins and use, the moves, its people and
+invitations), and `/integrations` is the operators' registry of
+integrations (register, change, disable, enable, remove; a name already
+registered is edited, not registered again).
 
 In a project the UI shows its environments
 (`/projects/<t>/environments[/<env>[/<tab>]]`), and in each what runs in
@@ -2708,9 +3112,9 @@ revoked at once); and its settings (a clone, the delete). The writes
 beside the builder follow the role on the environment: a revert (to
 the deployed deployment from the head when the latest failed, or to any
 earlier one), tags, a service's restart, a job's run and a binding's
-check with `write`, as are a sandbox's changes and a job's run, cancel
-and delete; public, the host label and route tokens with
-`admin`. The sidebar lists, under the environment, its objects, the
+check with `write`, as are a sandbox's changes, a job's run, cancel
+and delete, and route tokens; public, the host label and protection
+with `admin`. The sidebar lists, under the environment, its objects, the
 jobs made by a call that are on their way, and its sandboxes (many
 hibernated ones folded into one entry). The project's former pages of
 sandboxes and jobs (`/projects/<t>/sandboxes[/<id>[/<tab>]]`,
@@ -2740,8 +3144,8 @@ environment to the latest when its latest deployment pins an older one
 (a plan and an apply of that deployment's spec with the pin moved).
 Everything about credentials needs a grant on the environment, read to
 see and write to change. The platform's pages add the ingresses, every person
-(disable, enable), a project's limits and zone, and join tokens of kind
-`ingress`.
+(disable, enable), the integrations, the accounts, a project's limits,
+zone and account (a move), and join tokens of kind `ingress`.
 
 The Edit action (the route's tab `builder`, `…/builder/<kind>/<name>`
 for one object's form, which an object page's Edit opens; its page is
@@ -2777,13 +3181,14 @@ exists. The draft's operations are pure modules beside
 `views/envs.js` (`draft.js`, `refs.js`, `fields.js`, `findings.js`,
 `rebase.js`, `pins.js`, `catalog.js`, `planner.js`). Below 900 px the
 list is the first screen and an object's form opens at full width. The
-role decides what it offers (`people.js`, `mayBuild`): "New
+role decides what it offers (`people.js`, `mayBuild`, `mayPlan`): "New
 environment" needs `write` on the project, a change of an environment
-`write` on it (the project grant or the environment's), an attached
-service `write` on the project; below that the builder shows the latest
-deployment's spec read-only, plans nothing (a plan needs `write`),
-applies nothing, writes no secret and
-stores no draft. The
+the effective `write` on it as `/auth/me` answers it, an attached
+service `write` on the project; where `/auth/me` says `plan` but not
+`write` (a protected environment's project writer) it plans, but applies
+nothing and sets no secret; below that the builder shows the latest
+deployment's spec read-only, plans nothing, applies nothing, writes no
+secret and stores no draft. The
 instance tables fit a 1280 px wide window. Its tests read the fixtures
 of ferund's API tests (`go/internal/api/testdata/ferun`).
 
@@ -3040,7 +3445,10 @@ an environment without deployments is a valid place for them.
 JSON, its objects in maps keyed by name (`services`, `jobs`, `addons`,
 `routes`, `secrets`, `bindings`), parsed strictly: an unknown field, a wrong type, a
 duplicate key or trailing data is a finding at its path, and null is
-absent for lists, maps and objects. Every problem is a finding
+absent for lists, maps and objects. Or YAML, read as the JSON it stands
+for ([YAML](#a-spec-in-yaml) below). The types and the strict reader are
+the published module's `ferun/spec` ([Packages](#packages)); the rules
+below are ferund's. Every problem is a finding
 `{severity, path, problem, remedy}`; an error refuses the spec. Beyond the
 shapes:
 
@@ -3049,7 +3457,9 @@ shapes:
   GiB (`resources.diskGib`, left out the guest's 8 GiB, see below), readiness by http,
   tcp or exec with an initial delay (0s), a period of at least 1 s (2s)
   and a failure threshold (3), `idle` of at least 1m only on a route's
-  target ("nothing would wake it"), `rollout.timeout` (10m). Or they run
+  target ("nothing would wake it") or `never`, every runtime's word for
+  staying awake, which an image service needs no route for and which
+  normalises away (the same deployment as no `idle`), `rollout.timeout` (10m). Or they run
   `attached`: a sandbox of the environment ([ADR
   0035](../adr/0035-everything-runs-in-an-environment.md); one of another
   environment is an error), a command, an absolute `cwd`, `idle` of at
@@ -3122,8 +3532,25 @@ shapes:
   resolve as the same name, and a binding stated in the spec of the
   secret's name are errors; an attached service has its sandbox's, and a
   sandbox that does not name the secret is a warning. A pin in `secrets`
-  of a version the HTTP secret lacks, or with an upstream and mode that
-  are not the version's, is an error.
+  of a version the HTTP secret lacks, or with an upstream that is not
+  the version's, is an error.
+- **What the code expects of a secret** ([ADR
+  0058](../adr/0058-a-spec-says-what-its-code-expects-of-a-secret.md)):
+  a pin in `secrets` may say it, `{"type": "value" | "http", "mode":
+  "name" | "intercept", "forwardedHost": bool}`, each optional.
+  `forwardedHost` is the name mode's (with `intercept` an error);
+  `type: value` with `mode`, `forwardedHost` or `upstream` is an error,
+  and so is a kind the references contradict (`type: value` and a
+  variable reading its `url` or `host`, `type: http` and a plain
+  `{secret}`), each said once at `secrets.<n>.type`. The plan compares
+  the expectation with the version it would pin (the pinned one, else
+  the latest): another kind, mode or forwarded host is an error at
+  `secrets.<n>.type`, `.mode` or `.forwardedHost` naming the
+  environment's secret and the expectation, its remedy both ways (a new
+  version of the secret, which keeps its key, or the spec's expectation
+  with the code). A missing secret's finding says what to make, an HTTP
+  secret's with its kind, mode and forwarded host. A spec without an
+  environment checks the expectation's form alone.
 - **Bindings** (`bindings`, [HTTP bindings](#http-bindings)): a DNS
   label each, at most 32, checked as a sandbox's (upstream, mode, CA,
   prefixes, rate limit, headers), the credential's secret fields (a
@@ -3187,8 +3614,11 @@ Normalisation fills the defaults, writes durations as Go does, pins
 every image to `<registry>/<repository>@sha256:…` (keeping
 `imageAsWritten`; a digest reference stays) and every referenced secret
 to its latest version, and drops the secrets nothing references. A value
-secret's pin is its version, `{"version": 3}`; an HTTP secret's carries
-its kind and what makes a pod another, the version's upstream and mode:
+secret's pin is its version, `{"version": 3}`, with a written `type:
+value` kept; an HTTP secret's carries
+its kind and what makes a pod another, the version's upstream and mode,
+and `forwardedHost` only where the spec wrote it, so that stored
+deployments do not change:
 `{"version": 2, "type": "http", "upstream": "https://api.example.com",
 "mode": "name"}`. The
 normalised spec is what a deployment stores and what plans diff. A diff
@@ -3229,6 +3659,45 @@ groups](#security-groups). The delta log of member changes, the batched
 push to the nodes (`UpdateSecurityGroups`), drops in the sink and the
 propagation metric of ADR 0034 are not in this release: the groups reach
 the nodes through `env-groups`, put whole.
+
+#### A spec in YAML
+
+The four routes that take a spec, `POST /api/v1/environments/plan`,
+`POST …/{env}/plan`, `POST …/{env}/deployments` and `POST …/{env}/clone`,
+take it in YAML when the `Content-Type` (read with
+`mime.ParseMediaType`, the charset ignored, the body UTF-8) is
+`application/yaml`, `application/x-yaml` or `text/yaml`; any other type,
+or none, is the JSON envelope as before. In YAML the body is the spec
+document alone, and the envelope's scalars come from the query: a plan's
+`?base=`, a deployment's `?base=&author=&message=`, a clone's
+`?name=&id=&deployment=&author=`. Annotations, labels and a clone's
+`secrets`, `credentials` and `data` are JSON's alone: a YAML clone copies
+no secret, and its missing-secret findings say so ("a YAML clone copies
+no secret: clone with JSON and pass secrets: …"). No other route takes
+YAML, answers are JSON, and nothing stores YAML: a deployment's spec is
+its normalised JSON.
+
+`spec.ParseYAML` reads the document into the tree `Parse` reads, so its
+findings and paths are JSON's (`go.yaml.in/yaml/v3`, its node API only;
+the scalars are resolved by the module, since v3's resolution is partly
+YAML 1.1's). One document (a second: "send one YAML document"); empty
+or only comments is "the request has no spec"; a syntax error names its
+line. A key is its scalar's text whatever its style (`true:` is the key
+`"true"`), held once; a key that is a mapping or a list is refused, and
+so is a merge key `<<` (a quoted `"<<"` is a key). A plain scalar takes
+YAML 1.2's core schema: `null`, `~` and empty are null, `true` and
+`false` (three spellings each) booleans, decimal, `0o` and `0x`
+integers and decimal floats numbers; everything else is a string, `on`,
+`yes`, `1_000` and `2026-01-01` among it; `.inf` and `.nan` are refused,
+which JSON cannot carry. Quoted, literal and folded scalars and `!!str`
+are strings; every other tag, `!` among them, is refused ("tags are not
+read: quote a string"). Aliases are followed, each use counting in full:
+the JSON may be at most `MaxSpecBytes` (1 MiB), every node visited
+counts towards a bound of as many nodes, refused ones too, the nesting is
+at most 64 deep with an alias a level, and the reading stops after 100
+errors with a last finding that says so. `spec.YAMLToJSON` gives the
+JSON instead, with the same findings, for a caller that keeps a spec in
+YAML.
 
 ### Plan, apply, revert, clone
 
@@ -3272,7 +3741,13 @@ the nodes through `env-groups`, put whole.
   that have a host, whose host is the source's (info findings), and
   with its secret pins reset. It changes no single value of the source's
   spec: a caller that wants other sizes or replicas passes its own spec.
-  `data: true` is an error: no data is copied.
+  `data: true` is an error: no data is copied. The source's pins are
+  carried as `spec.Portable` makes them: what the code expects of each
+  secret stays, its version and upstream are the new environment's. A
+  clone that copies a secret or a credential needs `write` on the source
+  besides `write` on the project (else 403 `role_required` on the
+  environment), so that a reader of a protected environment takes none
+  of its values; the clone is never protected.
 
 ### The controller
 
@@ -3848,8 +4323,10 @@ included, is 401 "route token required" in either place, and a wrong
 one in `X-FeRun-Route-Token` is never made good by `Authorization`; a
 route token of another environment is 404 "no such environment".
 `POST /api/v1/environments/{env}/route-tokens` mints one (32 random
-bytes, base64url, shown once, only its SHA-256 kept); `DELETE` revokes
-them all. The door matches the longest prefix, segment by segment, over
+bytes, base64url, shown once, only its SHA-256 kept), with `write` on
+the environment (ADR 0056: a route token reaches what `write` deploys);
+`DELETE` revokes them all. One an integration minted is good while the
+integration holds `write` there ([Integrations](#integrations)). The door matches the longest prefix, segment by segment, over
 the routes of the deployed deployment (the latest while none is deployed)
 that answer on the Host the guest sees, `X-FeRun-Host`'s or else the
 request's, canonical: those without a host and those whose host is that
@@ -3862,7 +4339,10 @@ Kubernetes binding's port refused. `X-FeRun-Route-Token` and
 `Proxy-Authorization` stop at the door; with the token from
 `X-FeRun-Route-Token` the client's `Authorization` reaches the upstream
 unchanged, unless a bearer token in it (in any of its values, the scheme
-in any case) is a FeRun credential, a project's or a sandbox's token,
+in any case) is a FeRun credential: a project's token, a sandbox's
+(also one its integration's access no longer backs, which may come
+back), or an integration's JWT (its `iss` and `sub`, read without the
+signature, a registered integration's; any other JWT is the upstream's),
 which is 401 "route token required" with nothing forwarded; with the
 token from `Authorization` that stops too. A failure
 inside ferund (the database, a stored spec that does not parse) is 500
@@ -4074,11 +4554,11 @@ name; one the project does not have is 404 "no such environment".
 | Method and path | Answers |
 |---|---|
 | `POST /api/v1/environments` `{name, id?, labels?}` | 201 its status; the same ID and name again 200; 409 `name_taken`, `id_taken` |
-| `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, openIncidents, createdAt}]}`, the labels ANDed; `state` is the latest deployment's, `none` or `deleting` |
+| `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, access, provider, protected, openIncidents, createdAt}]}`, the labels ANDed, those the caller reads; `state` is the latest deployment's, `none` or `deleting`; every environment answer carries `protected` ([Protected environments](#protected-environments)) |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
 | `PATCH /api/v1/environments/{env}` `{name}` | 200 its status under the new name ([Renaming](#renaming-an-environment)); the name it has again 200, changing nothing; 400 for a name a create refuses; 409 `name_taken` "an environment named X exists"; 409 while it is being deleted |
 | `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a project of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another project or environment holds, or a plain label that is the natural label of an existing project's environment; 409 while the platform has no apps zone (publishing) or the environment or its project is being deleted ([Public environments](#public-environments)) |
-| `POST /api/v1/environments/plan` `{spec}` | `{valid, findings, images}` |
+| `POST /api/v1/environments/plan` `{spec}` | `{valid, findings, images}`; this, `…/{env}/plan`, `…/deployments` and `…/clone` take the spec in YAML too ([A spec in YAML](#a-spec-in-yaml)) |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current, images}`, `images` `{"<as written>": "<registry>/<repository>@sha256:…"}` ([Plan](#plan-apply-revert-clone)) |
 | `GET /api/v1/addons` | the addon types' catalog ([Addons](#addons)) |
 | `POST …/{env}/deployments` `{spec, base, author?, message?, annotations?}` | 201 the deployment; 200 with `unchanged: true`; 422 `invalid_spec` with `findings`; 409 `base_mismatch` with `current` |
@@ -4099,6 +4579,8 @@ name; one the project does not have is 404 "no such environment".
 | `GET …/{env}/bindings/usage[?window=24h]` | `{window, unavailable?, truncated, bindings: [{name, requests, refused, failing, tokenFailed, blocked, lastAt, lastProblem, users}]}`, `24h` (the default) or `1h`, else 400; read from the sink, 200 with `unavailable` when it cannot be ([HTTP bindings](#http-bindings), Use) |
 | `GET …/{env}/identities` | `{trustDomain, workloads: [{kind, name, spiffeId, pods: [{pod, notAfter, node}]}]}` ([The CA](#the-ca), Who a workload is) |
 | `POST`, `DELETE …/{env}/route-tokens` | 201 `{token}`; 204 |
+| `PUT …/{env}/protected` `{protected}` | `{id, name, protected, changed}`; 400 without `protected`; 409 while it is being deleted |
+| `GET …/{env}/principals` | `{principals: [{kind, id, label, projectRole, environmentRole, losesWrite}]}` ([Protected environments](#protected-environments)) |
 | `ANY …/{env}/http/{path...}` | the route door |
 
 The deployments' earlier word worked beside the new one for one

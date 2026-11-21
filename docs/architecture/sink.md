@@ -309,19 +309,26 @@ URI and key and that it verifies to the bundle. The bundle verifies the
 nodes' certificates (ClientAuth, one URI `spiffe://<td>/node/<name>`)
 and the ingresses' (`spiffe://<td>/ingress/<name>`).
 
-**Readers** (ADR 0031). A read brings a FeRun token (`Authorization:
-Bearer …`), or, where the sink is served under `ferund`'s host (the
-Gateway's `run.<domain>`), a person's session: the cookie
+**Readers** (ADR 0031, ADR 0056). A read brings a project token
+(`Authorization: Bearer …`); an integration's access token with the
+project in `FeRun-Project` and, when it reads for a person, that
+person's subject in `FeRun-Person`; or, where the sink is served under
+`ferund`'s host (the Gateway's `run.<domain>`), a person's session: the cookie
 `__Host-ferun_session` (or, for one release, its old name
 `ferun_session`) and the project in `FeRun-Project` (400 without it). A
 session's change (`DELETE`) needs `X-Requested-With: ferun` and a
 request of the same origin (`Sec-Fetch-Site`, or `Origin` against
 `Host`; 403 otherwise), as `ferund`'s own. The sink asks `ferund` `GET
 /api/v1/project?filter=environments` with the same `Authorization`, or
-the cookie and `FeRun-Project` (`200 {"project", "role", "environments"}`;
-a 4xx but 429 passed on as it came), and keeps the answer by the
-SHA-256 of the credential and the project, a token's a minute, a
-session's 10 s. A `role` on the project reads every stream and span; a
+the cookie, with `FeRun-Project` and the `FeRun-Person` that came
+(`200 {"project", "role", "environments"}`, the effective roles of
+ferund's one rule, so that a person read through an integration gets
+what both may read; a 4xx but 429 passed on as it came: a session's or
+a token's `FeRun-Person` is ferund's 400), and keeps the answer by the
+SHA-256 of the credential, the project and the person named, a token's
+a minute, a session's and an integration's (a JWT bearer, or any
+request naming a person) 10 s, since a person loses a grant more often
+than a token is revoked. A `role` on the project reads every stream and span; a
 principal without one (a person's or a token's grants on environments)
 reads those whose `environment` is one of `environments`, a sandbox's and
 a project's job's among them (ADR 0035), and none of no environment (a
@@ -370,8 +377,8 @@ one (stream, offset) once. `--kafka-brokers` names Kafka's brokers
 before (`log_batches`, `log_lines`) went on 2026-10-31 (migration `0008`).
 
 **Partitions.** One project may hold the environments of many
-applications (FeCode's one project at FeRun holds those of all of
-FeCode's projects), so an index's lines are hashed into partitions by
+applications (FeCode's projects were all in one FeRun project before
+ADR 0056 gave each its own), so an index's lines are hashed into partitions by
 their project, environment and job (`partition_key:
 hash_mod((tenant,environment,job), <--index-partitions>)`), and a split <!-- KEEP-TENANT: Quickwit's stored name -->
 holds one partition's lines: a commit writes a split per partition that

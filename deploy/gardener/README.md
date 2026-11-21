@@ -89,7 +89,7 @@ on make's command line wins over the file.
 |---|---|
 | `DOMAIN` | the DNS zone: ferund at `run.<DOMAIN>`, FeChat at `chat.<DOMAIN>`, the registry at `oci.<DOMAIN>`; `run.<DOMAIN>` is FeRun's trust domain too |
 | `PLATFORM_REGISTRY` | where the platform's images are pushed and pulled; default `ghcr.io/gardenlinux/feos` |
-| `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it |
+| `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it: people's sign-in, and the issuer of the integrations' access tokens (ADR 0056), whose audience is ferund's `--api-audience`, `https://run.<DOMAIN>` |
 | `WORKER_POOL` | the worker pool that runs FeOS, its label `worker.gardener.cloud/pool` |
 | `NODE_NAME_PREFIX` | the beginning of the pool's node names, on IronCore `shoot--<project>--<shoot>-<pool>-`; feos-k8s removes from FeRun only nodes with it, by force, so no other shoot's nodes may match ([`config.env.example`](config.env.example)) |
 | `FERUN_NODES_IP` | the ClusterIP of the service `ferund-nodes`, which feosd and ferun-ingress dial: a free address of the shoot's service network (`spec.networking.services`) |
@@ -225,10 +225,32 @@ images:
     make -C deploy/gardener apply-fechat
     REGISTRY=ghcr.io/gardenlinux/feos fechat/deploy.sh <tag>
 
-Every other client of FeRun gets a project of its own: `POST
-/api/v1/admin/projects` with `{"name":"<project>"}`, which answers with a
-first token, and more with `POST /api/v1/admin/projects/<project>/tokens`,
-with an admin user's Basic credentials and `X-Requested-With: ferun`.
+A client of FeRun that serves one project gets a project of its own:
+`POST /api/v1/admin/projects` with `{"name":"<project>", "account":"<account>"}`
+(no account: `default`), which answers with a first token, and more
+with `POST /api/v1/admin/projects/<project>/tokens`, with an admin user's
+Basic credentials and `X-Requested-With: ferun`. People make projects
+themselves (`POST /api/v1/projects`) on the accounts they may use:
+ferund's `--project-creation` (`FERUN_PROJECT_CREATION`) is `people` by
+default, which opens the account `default` to every signed-in person;
+`operators` keeps it to the people an operator puts on it. The manifests
+do not set it.
+
+A platform that works in many projects, as FeCode does, is an
+**integration** (ADR 0056): it signs in with its own access token of
+`OIDC_ISSUER`, a client of the client credentials grant there whose
+audience includes FeRun's API audience. That audience is ferund's
+`--api-audience` (`FERUN_API_AUDIENCE`), by default its public URL,
+`https://run.<DOMAIN>`, which the manifests do not change. An operator
+registers it once by its client's subject,
+
+    PUT /api/v1/admin/integrations/<name>    {"title":"FeCode","url":"https://fecode.dev","subject":"<client id>"}
+
+and each project's admin grants it a role (the People page of the
+console, or `PUT /api/v1/project/integrations/<name>/grants`). Without
+`OIDC_ISSUER` no integration signs in. The accounts, integrations and
+the effective roles are in
+[control-plane.md](../../docs/architecture/control-plane.md#who-acts-in-a-project).
 
 ferun-ingress, once ferund runs with the apps zone: [The
 ingress](#the-ingress).
