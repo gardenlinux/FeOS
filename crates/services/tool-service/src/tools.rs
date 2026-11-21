@@ -737,6 +737,13 @@ fn rg_sync(req: RgRequest) -> RgResponse {
     }
 }
 
+/// The part of a walked path below the walk's root, without a leading "/".
+fn walk_rel<'a>(walk_root: &str, full: &'a str) -> &'a str {
+    full.strip_prefix(walk_root)
+        .unwrap_or(full)
+        .trim_start_matches('/')
+}
+
 fn join_rel(base: &str, rel: &str) -> String {
     if base.is_empty() {
         rel.to_string()
@@ -800,12 +807,10 @@ fn fd_sync(req: FdRequest) -> FdResponse {
         req.limit as usize
     };
     let prefix = label_prefix(&req.path);
+    let walk_root = toolfs::fd_walk_path(&base);
     let mut entries: Vec<String> = Vec::new();
     let mut truncated = false;
-    for ent in ignore::WalkBuilder::new(toolfs::fd_walk_path(&base))
-        .build()
-        .flatten()
-    {
+    for ent in ignore::WalkBuilder::new(&walk_root).build().flatten() {
         if ent.depth() == 0 {
             continue;
         }
@@ -813,7 +818,9 @@ fn fd_sync(req: FdRequest) -> FdResponse {
         if !name_match(&name) {
             continue;
         }
-        entries.push(format!("{prefix}{name}"));
+        // The name matches, the answer is the path below the base.
+        let full = ent.path().to_string_lossy();
+        entries.push(format!("{prefix}{}", walk_rel(&walk_root, &full)));
         if entries.len() >= lim {
             truncated = true;
             break;
@@ -903,6 +910,24 @@ mod tests {
             width,
             height,
         }))
+    }
+
+    #[test]
+    fn walked_paths_keep_their_directories() {
+        let root = "/proc/self/fd/7";
+        assert_eq!(walk_rel(root, "/proc/self/fd/7/0001-a.md"), "0001-a.md");
+        assert_eq!(
+            walk_rel(root, "/proc/self/fd/7/ADRs/0001-a.md"),
+            "ADRs/0001-a.md"
+        );
+        assert_eq!(
+            format!(
+                "{}{}",
+                label_prefix("/workspace/docs"),
+                walk_rel(root, "/proc/self/fd/7/ADRs/0001-a.md")
+            ),
+            "/workspace/docs/ADRs/0001-a.md"
+        );
     }
 
     #[test]
