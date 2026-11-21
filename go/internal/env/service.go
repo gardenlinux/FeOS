@@ -204,11 +204,12 @@ func (s *Service) DeleteEnv(ctx context.Context, project, env string) error {
 	})
 }
 
-// PlanSpec is POST /api/v1/environments/plan: a spec validated without an
-// environment (spec.ModeSpec): no secrets, no deployment to compare with, but
-// the project's sandboxes and the images.
-func (s *Service) PlanSpec(ctx context.Context, project string, req PlanSpecRequest) (PlanSpecAnswer, error) {
-	sp, fs := spec.Parse(req.Spec)
+// PlanSpec is POST /api/v1/environments/plan: a spec, written in format,
+// validated without an environment (spec.ModeSpec): no secrets, no
+// deployment to compare with, but the project's sandboxes and the images.
+func (s *Service) PlanSpec(ctx context.Context, project string, req PlanSpecRequest, format spec.Format) (
+	PlanSpecAnswer, error) {
+	sp, fs := spec.ParseAs(req.Spec, format)
 	var images map[string]string
 	if !spec.HasErrors(fs) {
 		vc, pins, err := s.loadContext(ctx, project, nil, sp, spec.ModeSpec, map[string]spec.SecretInfo{}, nil)
@@ -272,15 +273,16 @@ func nonNilStrings(ss []string) []string {
 	return ss
 }
 
-// Plan is POST /api/v1/environments/{env}/plan: parse, validate, resolve
-// the images (unresolvable: a warning), normalise, and diff against
-// req.Base or the current deployment. It changes nothing.
-func (s *Service) Plan(ctx context.Context, project, env string, req PlanRequest) (PlanAnswer, error) {
+// Plan is POST /api/v1/environments/{env}/plan: parse (in format),
+// validate, resolve the images (unresolvable: a warning), normalise, and
+// diff against req.Base or the current deployment. It changes nothing.
+func (s *Service) Plan(ctx context.Context, project, env string, req PlanRequest, format spec.Format) (PlanAnswer,
+	error) {
 	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
-	p, err := s.plan(ctx, project, e, req.Spec, req.Base, spec.ModePlan, nil, nil, false)
+	p, err := s.plan(ctx, project, e, req.Spec, format, req.Base, spec.ModePlan, nil, nil, false)
 	if err != nil {
 		return PlanAnswer{}, err
 	}
@@ -293,13 +295,14 @@ func (s *Service) Plan(ctx context.Context, project, env string, req PlanRequest
 // (BaseMismatchError), insert deployment current+1 waiting, replace the
 // older waiting and deploying ones and wake the controller. A normalised
 // spec equal to the current deployment's answers that deployment Unchanged
-// (200), unless it failed.
-func (s *Service) Apply(ctx context.Context, project, env string, req ApplyRequest) (ApplyAnswer, error) {
+// (200), unless it failed. The spec is written in format.
+func (s *Service) Apply(ctx context.Context, project, env string, req ApplyRequest, format spec.Format) (ApplyAnswer,
+	error) {
 	if err := checkDeploymentMeta(req.Author, req.Message, req.Annotations); err != nil {
 		return ApplyAnswer{}, err
 	}
-	return s.apply(ctx, project, env, applyArgs{raw: req.Spec, base: req.Base, author: req.Author, message: req.Message,
-		annotations: req.Annotations, origin: model.OriginApply})
+	return s.apply(ctx, project, env, applyArgs{raw: req.Spec, format: format, base: req.Base, author: req.Author,
+		message: req.Message, annotations: req.Annotations, origin: model.OriginApply})
 }
 
 // Deployments is GET /api/v1/environments/{env}/deployments: the newest limit
@@ -443,7 +446,7 @@ func (s *Service) objectChange(ctx context.Context, project, env, kind, name str
 		return ObjectAnswer{}, errNoObject(kind, name)
 	}
 	if dryRun {
-		p, err := s.plan(ctx, project, e, raw, &base, spec.ModePlan, nil, nil, false)
+		p, err := s.plan(ctx, project, e, raw, spec.FormatJSON, &base, spec.ModePlan, nil, nil, false)
 		if err != nil {
 			return ObjectAnswer{}, err
 		}
@@ -464,9 +467,11 @@ func (s *Service) objectChange(ctx context.Context, project, env, kind, name str
 // id>/<number>", annotations copied) is req.Spec or the source deployment's
 // spec without its attached services. No data is copied (Data is an
 // error finding); a secret reference the new environment would not have
-// is one too.
-func (s *Service) Clone(ctx context.Context, project, env string, req CloneRequest) (EnvStatus, error) {
-	return s.clone(ctx, project, env, req)
+// is one too. req.Spec is written in format; a YAML one is read as the
+// JSON it stands for before anything else.
+func (s *Service) Clone(ctx context.Context, project, env string, req CloneRequest, format spec.Format) (EnvStatus,
+	error) {
+	return s.clone(ctx, project, env, req, format)
 }
 
 // tagOf is a tag as the answers show it.

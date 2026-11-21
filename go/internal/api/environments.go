@@ -11,6 +11,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 )
 
 // The environments' routes (ADR 0018, the contract's §5): project class,
@@ -161,12 +162,18 @@ func (s *server) listEnvs(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, list)
 }
 
+// planSpec is POST /api/v1/environments/plan: {"spec"}, or the spec
+// alone in YAML.
 func (s *server) planSpec(w http.ResponseWriter, r *http.Request) error {
 	var req envs.PlanSpecRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.PlanSpec(r.Context(), projectOf(r), req)
+	if format == spec.FormatYAML {
+		req = envs.PlanSpecRequest{Spec: doc}
+	}
+	a, err := s.deps.Environments.PlanSpec(r.Context(), projectOf(r), req, format)
 	if err != nil {
 		return err
 	}
@@ -211,24 +218,46 @@ func (s *server) deleteEnv(w http.ResponseWriter, r *http.Request) error {
 	return noContent(w, http.StatusAccepted)
 }
 
+// planEnv is POST …/{env}/plan: {"spec", "base"}, or the spec alone in
+// YAML with ?base=.
 func (s *server) planEnv(w http.ResponseWriter, r *http.Request) error {
 	var req envs.PlanRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.Plan(r.Context(), projectOf(r), r.PathValue("env"), req)
+	if format == spec.FormatYAML {
+		base, err := queryIntPtr(r, "base")
+		if err != nil {
+			return err
+		}
+		req = envs.PlanRequest{Spec: doc, Base: base}
+	}
+	a, err := s.deps.Environments.Plan(r.Context(), projectOf(r), r.PathValue("env"), req, format)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, a)
 }
 
+// applyDeployment is POST …/{env}/deployments: {"spec", "base",
+// "author", "message", "annotations"}, or the spec alone in YAML with
+// ?base=&author=&message= (annotations are JSON's alone).
 func (s *server) applyDeployment(w http.ResponseWriter, r *http.Request) error {
 	var req envs.ApplyRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.Apply(r.Context(), projectOf(r), r.PathValue("env"), req)
+	if format == spec.FormatYAML {
+		base, err := queryInt(r, "base")
+		if err != nil {
+			return err
+		}
+		q := r.URL.Query()
+		req = envs.ApplyRequest{Spec: doc, Base: base, Author: q.Get("author"), Message: q.Get("message")}
+	}
+	a, err := s.deps.Environments.Apply(r.Context(), projectOf(r), r.PathValue("env"), req, format)
 	if err != nil {
 		return err
 	}
@@ -362,12 +391,26 @@ func (s *server) deleteTag(w http.ResponseWriter, r *http.Request) error {
 	return noContent(w, http.StatusNoContent)
 }
 
+// cloneEnv is POST …/{env}/clone: {"name", "id", "deployment", "spec",
+// …}, or the spec alone in YAML with ?name=&id=&deployment=&author=
+// (labels, secrets, credentials and data are JSON's alone: a YAML clone
+// copies no secret).
 func (s *server) cloneEnv(w http.ResponseWriter, r *http.Request) error {
 	var req envs.CloneRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	st, err := s.deps.Environments.Clone(r.Context(), projectOf(r), r.PathValue("env"), req)
+	if format == spec.FormatYAML {
+		deployment, err := queryIntPtr(r, "deployment")
+		if err != nil {
+			return err
+		}
+		q := r.URL.Query()
+		req = envs.CloneRequest{Name: q.Get("name"), ID: q.Get("id"), Deployment: deployment, Spec: doc,
+			Author: q.Get("author")}
+	}
+	st, err := s.deps.Environments.Clone(r.Context(), projectOf(r), r.PathValue("env"), req, format)
 	if err != nil {
 		return err
 	}

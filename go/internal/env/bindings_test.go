@@ -17,6 +17,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/bindings"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
@@ -229,7 +230,8 @@ func TestEnvBindingsPlan(t *testing.T) {
 	h.putSecret("shop", "erp-key", "k")
 	h.putSecret("shop", "pay-pass", "p")
 	internal := strings.Replace(shopSpec, "https://api.erp.example", "https://erp.internal.example", 1)
-	_, err := h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: []byte(internal), Author: "tester"})
+	_, err := h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: []byte(internal), Author: "tester"},
+		spec.FormatJSON)
 	if !strings.Contains(describe(err), "bindings.erp.upstream: erp.internal.example resolves to an internal address") {
 		t.Fatalf("an internal upstream: %s", describe(err))
 	}
@@ -238,7 +240,8 @@ func TestEnvBindingsPlan(t *testing.T) {
 	off.create("shop", nil)
 	off.putSecret("shop", "erp-key", "k")
 	off.putSecret("shop", "pay-pass", "p")
-	_, err = off.svc.Apply(off.ctx(), projectA, "shop", ApplyRequest{Spec: []byte(shopSpec), Author: "tester"})
+	_, err = off.svc.Apply(off.ctx(), projectA, "shop", ApplyRequest{Spec: []byte(shopSpec), Author: "tester"},
+		spec.FormatJSON)
 	if !strings.Contains(describe(err), "HTTP bindings are not enabled") {
 		t.Fatalf("bindings off: %s", describe(err))
 	}
@@ -270,7 +273,7 @@ func TestEnvBindingsInvalidValue(t *testing.T) {
 	h.putSecret("shop", "pay-token", "Bearer t0ken\r\nX-Injected: 1")
 
 	h.applyStored("shop", invalidSpec, 0)
-	plan, err := h.svc.Plan(h.ctx(), projectA, "shop", PlanRequest{Spec: []byte(invalidSpec)})
+	plan, err := h.svc.Plan(h.ctx(), projectA, "shop", PlanRequest{Spec: []byte(invalidSpec)}, spec.FormatJSON)
 	if err != nil || !plan.Valid {
 		t.Fatalf("plan: %+v %v", plan, err)
 	}

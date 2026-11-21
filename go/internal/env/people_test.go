@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 )
 
 // A principal that writes an environment alone may change its attached
@@ -34,7 +35,8 @@ func TestAttachedNeedsEnvWrite(t *testing.T) {
 		Envs:      map[uuid.UUID]auth.Role{e.ID: auth.RoleWrite}})
 	apply := func(ctx context.Context, raw string, base int) ApplyAnswer {
 		t.Helper()
-		a, err := h.svc.Apply(ctx, projectA, "one", ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "fecode:ada"})
+		a, err := h.svc.Apply(ctx, projectA, "one", ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "fecode:ada"},
+			spec.FormatJSON)
 		if err != nil {
 			t.Fatal(describe(err))
 		}

@@ -477,13 +477,15 @@ func nonNilImages(images map[string]string) map[string]string {
 	return images
 }
 
-// plan parses, validates and normalises raw for the environment env and
-// diffs it against deployment base (nil: the current one). secrets and
+// plan parses raw (written in format), validates and normalises it for
+// the environment env and diffs it against deployment base (nil: the
+// current one). secrets and
 // creds, when not nil, stand in for the environment's secrets and
 // credentials. stored: raw is a stored deployment's spec (a revert's, a
 // clone's of its source's), whose bindings stated in it are accepted.
-func (s *Service) plan(ctx context.Context, project string, env store.Environment, raw []byte, base *int, mode spec.Mode,
-	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo, stored bool) (planned, error) {
+func (s *Service) plan(ctx context.Context, project string, env store.Environment, raw []byte, format spec.Format,
+	base *int, mode spec.Mode, secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo, stored bool) (
+	planned, error) {
 	p := planned{base: env.Deployment, current: env.Deployment}
 	if base != nil {
 		if *base < 0 || *base > env.Deployment {
@@ -498,7 +500,7 @@ func (s *Service) plan(ctx context.Context, project string, env store.Environmen
 		}
 		p.currentSpec = cur
 	}
-	sp, fs := spec.Parse(raw)
+	sp, fs := spec.ParseAs(raw, format)
 	if spec.HasErrors(fs) {
 		p.findings = fs
 		return p, nil
@@ -542,6 +544,7 @@ func (s *Service) plan(ctx context.Context, project string, env store.Environmen
 // applyArgs are what an apply makes a deployment of.
 type applyArgs struct {
 	raw             []byte
+	format          spec.Format
 	base            int
 	author, message string
 	annotations     map[string]string
@@ -579,7 +582,7 @@ func (s *Service) applyOnce(ctx context.Context, project, ref string, a applyArg
 	if env.Deleting {
 		return ApplyAnswer{}, errDeleting(env.Name)
 	}
-	p, err := s.plan(ctx, project, env, a.raw, nil, spec.ModeApply, nil, nil, a.origin == model.OriginRevert)
+	p, err := s.plan(ctx, project, env, a.raw, a.format, nil, spec.ModeApply, nil, nil, a.origin == model.OriginRevert)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}

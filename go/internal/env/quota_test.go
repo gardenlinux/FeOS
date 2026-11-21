@@ -44,14 +44,14 @@ func TestQuotaEnvironments(t *testing.T) {
 		return fmt.Sprintf(`{"services": {"web": {"image": "nginx:1", "replicas": %d}}}`, n)
 	}
 	first := h.apply("a", replicas(3), 0)
-	plan, err := h.svc.Plan(ctx, projectA, "b", PlanRequest{Spec: json.RawMessage(replicas(2))})
+	plan, err := h.svc.Plan(ctx, projectA, "b", PlanRequest{Spec: json.RawMessage(replicas(2))}, spec.FormatJSON)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Valid || !hasFinding(plan.Findings, spec.SeverityError, "", "brings the project to 5 of its limit 4") {
 		t.Fatalf("plan %+v", plan)
 	}
-	_, err = h.svc.Apply(ctx, projectA, "b", ApplyRequest{Spec: json.RawMessage(replicas(2))})
+	_, err = h.svc.Apply(ctx, projectA, "b", ApplyRequest{Spec: json.RawMessage(replicas(2))}, spec.FormatJSON)
 	wantStatus(t, err, http.StatusUnprocessableEntity, "")
 	h.apply("b", replicas(1), 0)
 	// Lowering what one asks for passes after the limit went down.
@@ -63,12 +63,12 @@ func TestQuotaEnvironments(t *testing.T) {
 	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(2)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.svc.Clone(ctx, projectA, "a", CloneRequest{Name: "a2"})
+	_, err = h.svc.Clone(ctx, projectA, "a", CloneRequest{Name: "a2"}, spec.FormatJSON)
 	wantStatus(t, err, http.StatusUnprocessableEntity, "the project's limit of environments is 2")
 	if _, err := h.st.SetProjectLimits(ctx, projectA, store.ProjectLimits{Environments: intPtr(9), VCPUs: intPtr(4)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.svc.Clone(ctx, projectA, "a", CloneRequest{Name: "a2"})
+	_, err = h.svc.Clone(ctx, projectA, "a", CloneRequest{Name: "a2"}, spec.FormatJSON)
 	if got, _ := statusOf(err); got != http.StatusUnprocessableEntity ||
 		!hasFindingOf(err, "brings the project to 5 of its limit 4") {
 		t.Fatalf("clone: %s", describe(err))

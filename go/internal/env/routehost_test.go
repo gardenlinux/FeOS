@@ -80,7 +80,7 @@ func TestRouteHostPlan(t *testing.T) {
 	plan := func(host string) PlanAnswer {
 		t.Helper()
 		raw := strings.Replace(hostSpec, `"host": "git.fecode.example"`, `"host": "`+host+`"`, 1)
-		a, err := h.svc.Plan(ctx, projectA, "web", PlanRequest{Spec: json.RawMessage(raw)})
+		a, err := h.svc.Plan(ctx, projectA, "web", PlanRequest{Spec: json.RawMessage(raw)}, spec.FormatJSON)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,13 +110,15 @@ func TestRouteHostPlan(t *testing.T) {
 	}
 	// An apply is refused the same way.
 	raw := strings.Replace(hostSpec, "git.fecode.example", "free.example", 1)
-	_, err := h.svc.Apply(ctx, projectA, "web", ApplyRequest{Spec: json.RawMessage(raw), Author: "tester"})
+	_, err := h.svc.Apply(ctx, projectA, "web", ApplyRequest{Spec: json.RawMessage(raw), Author: "tester"},
+		spec.FormatJSON)
 	var ise *InvalidSpecError
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "routes.git.host", "is no host") {
 		t.Fatalf("apply: %v", describe(err))
 	}
 	// Without an environment, a host is checked for its form alone.
-	if a, err := h.svc.PlanSpec(ctx, projectA, PlanSpecRequest{Spec: json.RawMessage(raw)}); err != nil || !a.Valid {
+	if a, err := h.svc.PlanSpec(ctx, projectA, PlanSpecRequest{Spec: json.RawMessage(raw)},
+		spec.FormatJSON); err != nil || !a.Valid {
 		t.Fatalf("plan without an environment: %+v %v", a, err)
 	}
 }

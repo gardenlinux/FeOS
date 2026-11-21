@@ -197,7 +197,8 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 }
 
 // clone is Clone.
-func (s *Service) clone(ctx context.Context, project, ref string, req CloneRequest) (EnvStatus, error) {
+func (s *Service) clone(ctx context.Context, project, ref string, req CloneRequest, format spec.Format) (EnvStatus,
+	error) {
 	src, err := resolveEnv(ctx, s.st, project, ref, store.NoLock)
 	if err != nil {
 		return EnvStatus{}, err
@@ -247,10 +248,24 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 		srcRel = &r
 	}
 	raw := []byte(req.Spec)
+	// A YAML spec is read once, as the JSON it stands for; one that does
+	// not read is refused with the findings of its reading. An empty one
+	// is none: the source's deployment is cloned.
+	unread := false
+	if format == spec.FormatYAML && len(bytes.TrimSpace(raw)) > 0 {
+		j, yfs := spec.YAMLToJSON(raw)
+		if spec.HasErrors(yfs) {
+			fs = append(fs, yfs...)
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "spec", Problem: "the spec cannot be read",
+				Remedy: "fix the findings above"})
+			unread = true
+		}
+		raw = j
+	}
 	// stored: the clone applies its source's deployment, whose bindings
 	// stated in its spec it accepts as they ran (ADR 0055).
 	stored := false
-	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+	if !unread && (len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null") {
 		raw, stored = nil, true
 		if srcRel == nil {
 			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "deployment",
@@ -441,7 +456,8 @@ func (s *Service) clone(ctx context.Context, project, ref string, req CloneReque
 	// The plan, as deployment 1 of an environment that is not there yet.
 	var norm spec.Spec
 	if raw != nil {
-		p, err := s.plan(ctx, project, store.Environment{ID: id, Owner: project, Name: req.Name}, raw, nil, spec.ModeApply,
+		p, err := s.plan(ctx, project, store.Environment{ID: id, Owner: project, Name: req.Name}, raw, spec.FormatJSON,
+			nil, spec.ModeApply,
 			vcSecrets, vcCreds, stored)
 		if err != nil {
 			return EnvStatus{}, err

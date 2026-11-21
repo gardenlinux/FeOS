@@ -94,13 +94,14 @@ func TestCredentialRefIsTheEnvironments(t *testing.T) {
 	h.create("dev", nil)
 	h.putCredential(bs, "prod", "pay", "Bearer prod-key-1")
 
-	_, err := h.svc.Apply(h.ctx(), projectA, "dev", ApplyRequest{Spec: json.RawMessage(paySpec), Author: "tester"})
+	_, err := h.svc.Apply(h.ctx(), projectA, "dev", ApplyRequest{Spec: json.RawMessage(paySpec), Author: "tester"},
+		spec.FormatJSON)
 	if f, ok := findingAt(err, "bindings.pay.credentialRef.name"); !ok ||
 		!strings.Contains(f.Problem, "the environment has no credential pay") {
 		t.Fatalf("dev named prod's credential: %s", describe(err))
 	}
 	// A spec without an environment has no credentials either.
-	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(paySpec)})
+	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(paySpec)}, spec.FormatJSON)
 	if err != nil || ans.Valid {
 		t.Fatalf("a spec without an environment: %+v %v", ans, err)
 	}
@@ -143,7 +144,7 @@ func TestCloneCopiesCredentials(t *testing.T) {
 	h.applyStored("prod", paySpec, 0)
 	h.putCredential(bs, "prod", "pay", "Bearer prod-key-2")
 
-	_, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy"})
+	_, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy"}, spec.FormatJSON)
 	f, ok := findingAt(err, "bindings.pay.credentialRef.name")
 	if !ok || !strings.Contains(f.Remedy, `credentials: {"pay": {"copy": true}}`) {
 		t.Fatalf("a clone without the credential: %s", describe(err))
@@ -161,13 +162,13 @@ func TestCloneCopiesCredentials(t *testing.T) {
 		}
 	}
 	_, err = h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy",
-		Credentials: map[string]CloneCredential{"pay": {Copy: true}, "nope": {Copy: true}}})
+		Credentials: map[string]CloneCredential{"pay": {Copy: true}, "nope": {Copy: true}}}, spec.FormatJSON)
 	if _, ok := findingAt(err, "credentials.nope"); !ok {
 		t.Fatalf("a credential the source lacks: %s", describe(err))
 	}
 
 	st, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy",
-		Credentials: map[string]CloneCredential{"pay": {Copy: true}}})
+		Credentials: map[string]CloneCredential{"pay": {Copy: true}}}, spec.FormatJSON)
 	if err != nil {
 		t.Fatalf("clone: %s", describe(err))
 	}
@@ -204,7 +205,8 @@ func TestApplyPinsNoDeletedCredential(t *testing.T) {
 			t.Errorf("delete: %v %v", ok, err)
 		}
 	}
-	_, err := h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(s4Spec), Author: "tester"})
+	_, err := h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(s4Spec), Author: "tester"},
+		spec.FormatJSON)
 	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok || !strings.Contains(f.Problem, "no HTTP secret s4") {
 		t.Fatalf("an apply of an HTTP secret deleted after its plan: %s", describe(err))
 	}

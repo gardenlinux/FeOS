@@ -24,6 +24,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/db/dbtest"
 	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/seal"
@@ -71,6 +72,15 @@ func (f *fakeEnvs) do(c envCall, out any) error {
 	return nil
 }
 
+// withFormat is a call's arguments with the format of its spec, when it
+// is not JSON.
+func withFormat(args []any, format spec.Format) []any {
+	if format != spec.FormatJSON {
+		args = append(args, format)
+	}
+	return args
+}
+
 func (f *fakeEnvs) last(t *testing.T) envCall {
 	t.Helper()
 	f.mu.Lock()
@@ -101,21 +111,24 @@ func (f *fakeEnvs) RenameEnv(_ context.Context, project, env string, req envs.Re
 func (f *fakeEnvs) DeleteEnv(_ context.Context, project, env string) error {
 	return f.do(envCall{"DeleteEnv", project, env, nil}, nil)
 }
-func (f *fakeEnvs) PlanSpec(_ context.Context, project string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error) {
+func (f *fakeEnvs) PlanSpec(_ context.Context, project string, req envs.PlanSpecRequest, format spec.Format) (
+	envs.PlanSpecAnswer, error) {
 	var out envs.PlanSpecAnswer
-	return out, f.do(envCall{"PlanSpec", project, "", []any{req}}, &out)
+	return out, f.do(envCall{"PlanSpec", project, "", withFormat([]any{req}, format)}, &out)
 }
 func (f *fakeEnvs) Addons(_ context.Context, project string) (envs.AddonCatalog, error) {
 	var out envs.AddonCatalog
 	return out, f.do(envCall{"Addons", project, "", nil}, &out)
 }
-func (f *fakeEnvs) Plan(_ context.Context, project, env string, req envs.PlanRequest) (envs.PlanAnswer, error) {
+func (f *fakeEnvs) Plan(_ context.Context, project, env string, req envs.PlanRequest, format spec.Format) (envs.PlanAnswer,
+	error) {
 	var out envs.PlanAnswer
-	return out, f.do(envCall{"Plan", project, env, []any{req}}, &out)
+	return out, f.do(envCall{"Plan", project, env, withFormat([]any{req}, format)}, &out)
 }
-func (f *fakeEnvs) Apply(_ context.Context, project, env string, req envs.ApplyRequest) (envs.ApplyAnswer, error) {
+func (f *fakeEnvs) Apply(_ context.Context, project, env string, req envs.ApplyRequest, format spec.Format) (
+	envs.ApplyAnswer, error) {
 	var out envs.ApplyAnswer
-	return out, f.do(envCall{"Apply", project, env, []any{req}}, &out)
+	return out, f.do(envCall{"Apply", project, env, withFormat([]any{req}, format)}, &out)
 }
 func (f *fakeEnvs) Deployments(_ context.Context, project, env string, limit int) (envs.DeploymentList, error) {
 	var out envs.DeploymentList
@@ -154,9 +167,10 @@ func (f *fakeEnvs) DeleteObject(_ context.Context, project, env, kind, name stri
 	var out objectAnswer
 	return out.a, f.do(envCall{"DeleteObject", project, env, []any{req, kind, name}}, &out)
 }
-func (f *fakeEnvs) Clone(_ context.Context, project, env string, req envs.CloneRequest) (envs.EnvStatus, error) {
+func (f *fakeEnvs) Clone(_ context.Context, project, env string, req envs.CloneRequest, format spec.Format) (
+	envs.EnvStatus, error) {
 	var out envs.EnvStatus
-	return out, f.do(envCall{"Clone", project, env, []any{req}}, &out)
+	return out, f.do(envCall{"Clone", project, env, withFormat([]any{req}, format)}, &out)
 }
 func (f *fakeEnvs) Tags(_ context.Context, project, env string) (envs.TagList, error) {
 	var out envs.TagList

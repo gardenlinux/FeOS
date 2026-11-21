@@ -227,7 +227,8 @@ func TestHTTPSecretByVariable(t *testing.T) {
 		{`{"secret": "nope", "key": "url"}`, "no HTTP secret nope"},
 	} {
 		raw := `{"services": {"shop": {"image": "ghcr.io/acme/shop:1", "env": {"X": ` + c.env + `}}}}`
-		_, err := h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number})
+		_, err := h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number},
+			spec.FormatJSON)
 		if f, ok := findingAt(err, "services.shop.env.X"); !ok || !strings.Contains(f.Problem, c.problem) {
 			t.Errorf("%s: %s", c.env, describe(err))
 		}
@@ -235,12 +236,13 @@ func TestHTTPSecretByVariable(t *testing.T) {
 	// A service of the name the pods would resolve to the API.
 	raw := `{"services": {"shop": {"image": "ghcr.io/acme/shop:1", "env": {"X": {"secret": "s4", "key": "host"}}},
 	  "s4": {"image": "ghcr.io/acme/shop:1"}}}`
-	_, err = h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number})
+	_, err = h.svc.Apply(h.ctx(), projectA, "prod", ApplyRequest{Spec: json.RawMessage(raw), Base: b.Number},
+		spec.FormatJSON)
 	if f, ok := findingAt(err, "services.shop.env.X"); !ok || !strings.Contains(f.Problem, "a service's name") {
 		t.Errorf("a service named as the binding: %s", describe(err))
 	}
 	// A spec without an environment cannot look it up: a warning.
-	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(s4Spec)})
+	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(s4Spec)}, spec.FormatJSON)
 	if err != nil || !ans.Valid {
 		t.Fatalf("a spec without an environment: %+v %v", ans, err)
 	}
@@ -264,12 +266,12 @@ func TestCloneCopiesHTTPSecrets(t *testing.T) {
 	h.apply("prod", s4Spec, 0)
 	h.putHTTPSecret("prod", "s4", "key-2", "")
 
-	_, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy"})
+	_, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy"}, spec.FormatJSON)
 	if f, ok := findingAt(err, "services.shop.env.S4_URL"); !ok || !strings.Contains(f.Remedy, `secrets: {"s4": {"copy": true}}`) {
 		t.Fatalf("a clone without the HTTP secret: %s", describe(err))
 	}
 	st, err := h.svc.Clone(h.ctx(), projectA, "prod", CloneRequest{Name: "copy",
-		Secrets: map[string]CloneSecret{"s4": {Copy: true}}})
+		Secrets: map[string]CloneSecret{"s4": {Copy: true}}}, spec.FormatJSON)
 	if err != nil {
 		t.Fatalf("clone: %s", describe(err))
 	}
@@ -295,14 +297,15 @@ func TestStatedBindingsRefused(t *testing.T) {
 	h.create("shop", nil)
 	h.putSecret("shop", "erp-key", "k")
 	h.putSecret("shop", "pay-pass", "p")
-	_, err := h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: json.RawMessage(shopSpec), Author: "tester"})
+	_, err := h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: json.RawMessage(shopSpec), Author: "tester"},
+		spec.FormatJSON)
 	for _, path := range []string{"bindings.erp", "bindings.pay"} {
 		if f, ok := findingAt(err, path); !ok || f.Problem != spec.GivesWay ||
 			!strings.Contains(f.Remedy, "make an HTTP secret") {
 			t.Fatalf("a new plan's %s: %s", path, describe(err))
 		}
 	}
-	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(shopSpec)})
+	ans, err := h.svc.PlanSpec(h.ctx(), projectA, PlanSpecRequest{Spec: json.RawMessage(shopSpec)}, spec.FormatJSON)
 	if err != nil || ans.Valid {
 		t.Fatalf("a spec without an environment: %+v %v", ans, err)
 	}
@@ -311,7 +314,8 @@ func TestStatedBindingsRefused(t *testing.T) {
 	more := strings.Replace(shopSpec, `"bindings": ["erp"]}`, `"bindings": ["erp"], "replicas": 2}`, 1)
 	two := h.apply("shop", more, one.Number)
 	changed := strings.Replace(more, "https://api.erp.example", "https://api2.erp.example", 1)
-	_, err = h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: json.RawMessage(changed), Base: two.Number})
+	_, err = h.svc.Apply(h.ctx(), projectA, "shop", ApplyRequest{Spec: json.RawMessage(changed), Base: two.Number},
+		spec.FormatJSON)
 	if _, ok := findingAt(err, "bindings.erp"); !ok {
 		t.Fatalf("a changed binding: %s", describe(err))
 	}
@@ -324,7 +328,8 @@ func TestStatedBindingsRefused(t *testing.T) {
 		t.Fatalf("a revert to a deployment with bindings: %s", describe(err))
 	}
 	if _, err := h.svc.Clone(h.ctx(), projectA, "shop", CloneRequest{Name: "copy", Deployment: &one.Number,
-		Secrets: map[string]CloneSecret{"erp-key": {Copy: true}, "pay-pass": {Copy: true}}}); err != nil {
+		Secrets: map[string]CloneSecret{"erp-key": {Copy: true}, "pay-pass": {Copy: true}}},
+		spec.FormatJSON); err != nil {
 		t.Fatalf("a clone of it: %s", describe(err))
 	}
 }

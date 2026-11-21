@@ -41,12 +41,12 @@ func TestClone(t *testing.T) {
 	withDev := strings.Replace(previewSpec(sb), `"root": {"path": "/", "service": "web", "port": "http"}`,
 		`"root": {"path": "/", "service": "web", "port": "http"}, "dev": {"path": "/dev", "service": "dev", "port": "http"}`, 1)
 	if _, err := h.svc.Apply(ctx, projectA, "preview", ApplyRequest{Spec: json.RawMessage(withDev),
-		Annotations: map[string]string{"fecode.dev/revision": "r7"}}); err != nil {
+		Annotations: map[string]string{"fecode.dev/revision": "r7"}}, spec.FormatJSON); err != nil {
 		t.Fatal(describe(err))
 	}
 
 	// Without the secret, and asking for data: both refused at once.
-	_, err := h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", Data: true})
+	_, err := h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", Data: true}, spec.FormatJSON)
 	var ise *InvalidSpecError
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "data", "copying data is not available") ||
 		!hasFinding(ise.Findings, spec.SeverityError, "services.api.env.TOKEN", "the new environment has no secret token") ||
@@ -66,7 +66,7 @@ func TestClone(t *testing.T) {
 	id := uuid.New()
 	st, err := h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", ID: id.String(),
 		Labels: map[string]string{"fecode.class": "demo"}, Secrets: map[string]CloneSecret{"token": {Copy: true}},
-		Author: "a"})
+		Author: "a"}, spec.FormatJSON)
 	if err != nil {
 		t.Fatal(describe(err))
 	}
@@ -99,7 +99,7 @@ func TestClone(t *testing.T) {
 	one := 1
 	value := "fresh"
 	st, err = h.svc.Clone(ctx, projectA, src.ID, CloneRequest{Name: "demo2", Deployment: &one, Spec: json.RawMessage(given),
-		Secrets: map[string]CloneSecret{"token": {Value: &value}}})
+		Secrets: map[string]CloneSecret{"token": {Value: &value}}}, spec.FormatJSON)
 	if err != nil {
 		t.Fatal(describe(err))
 	}
@@ -112,10 +112,11 @@ func TestClone(t *testing.T) {
 	if *sp2.Services["api"].Replicas != 1 {
 		t.Fatalf("given spec %+v", sp2.Services["api"])
 	}
-	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", Secrets: map[string]CloneSecret{"token": {Copy: true}}})
+	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo", Secrets: map[string]CloneSecret{"token": {Copy: true}}},
+		spec.FormatJSON)
 	wantStatus(t, err, http.StatusConflict, "an environment named demo exists")
 	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo3", Secrets: map[string]CloneSecret{
-		"token": {Copy: true, Value: &value}, "absent": {Copy: true}}})
+		"token": {Copy: true, Value: &value}, "absent": {Copy: true}}}, spec.FormatJSON)
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "secrets.token", "is {\"copy\": true} or") ||
 		!hasFinding(ise.Findings, spec.SeverityError, "secrets.absent", "has no secret absent to copy") {
 		t.Fatalf("bad secrets %v", describe(err))
@@ -132,17 +133,18 @@ func TestClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.svc.Apply(ctx, projectB, "own", ApplyRequest{Spec: json.RawMessage(
-		`{"services": {"web": {"image": "ghcr.io/acme/web:1"}}}`)}); err != nil {
+		`{"services": {"web": {"image": "ghcr.io/acme/web:1"}}}`)}, spec.FormatJSON); err != nil {
 		t.Fatal(describe(err))
 	}
 	probe := `{"addons": {"db": {"type": "postgres", "version": "17"}}, "routes": {"bad": {"path": "x", "service": "nope"}}}`
-	_, err = h.svc.Clone(ctx, projectB, "own", CloneRequest{Name: "probe", ID: src.ID, Spec: json.RawMessage(probe)})
+	_, err = h.svc.Clone(ctx, projectB, "own", CloneRequest{Name: "probe", ID: src.ID, Spec: json.RawMessage(probe)},
+		spec.FormatJSON)
 	if errors.As(err, &ise) {
 		t.Fatalf("a foreign ID was planned: %v", describe(err))
 	}
 	wantStatus(t, err, http.StatusConflict, "an environment of id "+src.ID+" exists with another name")
 	p, err := h.svc.plan(ctx, projectB, store.Environment{ID: srcID, Owner: projectB, Name: "probe"}, json.RawMessage(probe),
-		nil, spec.ModeApply, map[string]spec.SecretInfo{}, nil, false)
+		spec.FormatJSON, nil, spec.ModeApply, map[string]spec.SecretInfo{}, nil, false)
 	if err != nil || p.valid() {
 		t.Fatalf("plan %+v %v", p, err)
 	}
@@ -153,12 +155,12 @@ func TestClone(t *testing.T) {
 	}
 
 	nine := 9
-	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo3", Deployment: &nine})
+	_, err = h.svc.Clone(ctx, projectA, "preview", CloneRequest{Name: "demo3", Deployment: &nine}, spec.FormatJSON)
 	wantStatus(t, err, http.StatusNotFound, "no such deployment")
-	_, err = h.svc.Clone(ctx, projectB, "preview", CloneRequest{Name: "demo3"})
+	_, err = h.svc.Clone(ctx, projectB, "preview", CloneRequest{Name: "demo3"}, spec.FormatJSON)
 	wantStatus(t, err, http.StatusNotFound, "no such environment")
 	h.create("bare", nil)
-	_, err = h.svc.Clone(ctx, projectA, "bare", CloneRequest{Name: "demo3"})
+	_, err = h.svc.Clone(ctx, projectA, "bare", CloneRequest{Name: "demo3"}, spec.FormatJSON)
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "deployment", "has no deployment to clone") {
 		t.Fatalf("clone of nothing %v", describe(err))
 	}

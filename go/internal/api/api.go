@@ -75,6 +75,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/db"
 	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	ingresssvc "github.com/gardenlinux/feos/go/internal/ingress/service"
 	"github.com/gardenlinux/feos/go/internal/leader"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -150,16 +151,16 @@ type Environments interface {
 	GetEnv(ctx context.Context, project, envRef string) (envs.EnvStatus, error)
 	RenameEnv(ctx context.Context, project, envRef string, req envs.RenameEnvRequest) (envs.EnvStatus, error)
 	DeleteEnv(ctx context.Context, project, envRef string) error
-	PlanSpec(ctx context.Context, project string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error)
+	PlanSpec(ctx context.Context, project string, req envs.PlanSpecRequest, format spec.Format) (envs.PlanSpecAnswer, error)
 	Addons(ctx context.Context, project string) (envs.AddonCatalog, error)
-	Plan(ctx context.Context, project, envRef string, req envs.PlanRequest) (envs.PlanAnswer, error)
-	Apply(ctx context.Context, project, envRef string, req envs.ApplyRequest) (envs.ApplyAnswer, error)
+	Plan(ctx context.Context, project, envRef string, req envs.PlanRequest, format spec.Format) (envs.PlanAnswer, error)
+	Apply(ctx context.Context, project, envRef string, req envs.ApplyRequest, format spec.Format) (envs.ApplyAnswer, error)
 	Deployments(ctx context.Context, project, envRef string, limit int) (envs.DeploymentList, error)
 	Deployment(ctx context.Context, project, envRef string, number int) (envs.DeploymentDetail, error)
 	Revert(ctx context.Context, project, envRef string, number int, req envs.RevertRequest) (envs.ApplyAnswer, error)
 	PutObject(ctx context.Context, project, envRef, kind, name string, req envs.PutObjectRequest) (envs.ObjectAnswer, error)
 	DeleteObject(ctx context.Context, project, envRef, kind, name string, req envs.DeleteObjectRequest) (envs.ObjectAnswer, error)
-	Clone(ctx context.Context, project, envRef string, req envs.CloneRequest) (envs.EnvStatus, error)
+	Clone(ctx context.Context, project, envRef string, req envs.CloneRequest, format spec.Format) (envs.EnvStatus, error)
 	Tags(ctx context.Context, project, envRef string) (envs.TagList, error)
 	Tag(ctx context.Context, project, envRef, tag string) (envs.Tag, error)
 	PutTag(ctx context.Context, project, envRef, tag string, req envs.PutTagRequest) (envs.Tag, error)

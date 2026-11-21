@@ -255,7 +255,8 @@ func (h *harness) putSecret(env, name, value string) int {
 // apply applies a spec to projectA's environment and wants a deployment.
 func (h *harness) apply(env, raw string, base int) ApplyAnswer {
 	h.t.Helper()
-	a, err := h.svc.Apply(h.ctx(), projectA, env, ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "tester"})
+	a, err := h.svc.Apply(h.ctx(), projectA, env, ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "tester"},
+		spec.FormatJSON)
 	if err != nil {
 		h.t.Fatalf("apply on %d: %v", base, describe(err))
 	}
