@@ -36,7 +36,7 @@ const (
 	removedFile = "removed"
 	wgKeyFile   = "wg.key"
 	meshFile    = "mesh.json"
-	tableFile   = "table-v3.json"
+	tableFile   = "table-v4.json"
 	tmpPrefix   = ".tmp-"
 	dirMode     = 0o700
 	fileMode    = 0o600
@@ -49,13 +49,19 @@ const (
 // guarded environments open from a cache it does not understand.
 const oldTableFile = "table.json"
 
-// priorTableFile is the table cache of the releases before a route's host
-// (ADR 0045). It is read while there is no tableFile, since what it holds
-// is what such a release served: it drops a route's host, and was never
-// given an environment with one. The first save deletes it, so that an
+// olderTableFile is the table cache of the releases before a route's host
+// (ADR 0045). The release before this one read it while it had no
+// table-v3.json; it is never read now, and the first save deletes it, as
+// oldTableFile.
+const olderTableFile = "table-v2.json"
+
+// priorTableFile is the table cache of the release before ADR 0061, whose
+// environments name their project under the earlier word. It is read
+// while there is no tableFile, through the wire's decode that takes the
+// earlier names (wire/legacy.go). The first save deletes it, so that an
 // older binary started on the same volume finds no cache, as above,
-// instead of serving every route of an environment on every host.
-const priorTableFile = "table-v2.json"
+// instead of serving from a table whose environments would name no project.
+const priorTableFile = "table-v3.json" // KEEP-TENANT: the cache of before ADR 0061 holds tenant and tenantZone
 
 // stateDir is the state directory of an instance.
 type stateDir struct {
@@ -345,13 +351,13 @@ func (d *stateDir) saveMesh(m meshPlace) error {
 	return d.write(meshFile, data)
 }
 
-// tableCache is the content of table-v3.json (and table-v2.json).
+// tableCache is the content of table-v4.json (and table-v3.json).
 type tableCache struct {
 	SavedAt time.Time   `json:"savedAt"`
 	State   *wire.State `json:"state"`
 }
 
-// loadTable reads table-v3.json, else table-v2.json (priorTableFile). No
+// loadTable reads table-v4.json, else table-v3.json (priorTableFile). No
 // file gives (nil, zero, nil).
 func (d *stateDir) loadTable() (*wire.State, time.Time, error) {
 	name := tableFile
@@ -387,7 +393,7 @@ func (d *stateDir) saveTable(s *wire.State, savedAt time.Time) error {
 	if err := d.write(tableFile, data); err != nil {
 		return err
 	}
-	for _, old := range []string{priorTableFile, oldTableFile} {
+	for _, old := range []string{priorTableFile, olderTableFile, oldTableFile} {
 		if err := os.Remove(d.file(old)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", old, err)
 		}

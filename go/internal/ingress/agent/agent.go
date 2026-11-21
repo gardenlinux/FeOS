@@ -214,7 +214,7 @@ type Agent struct {
 	repairs     uint64
 	state       *wire.State
 	tableAt     time.Time
-	cachedAt    time.Time // the savedAt of table-v3.json, as written or loaded
+	cachedAt    time.Time // the savedAt of table-v4.json, as written or loaded
 	tableWarnAt time.Time
 	// reachFailed: an attempt to reach the control plane (a join, a
 	// connection, a session) failed since Run started.

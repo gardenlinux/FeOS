@@ -20,15 +20,18 @@
 //	removed                the refusal that said the ingress was removed, until the next join
 //	wg.key                 the WireGuard private key, 32 raw bytes
 //	mesh.json              the place on the mesh: {podNetwork, prefix, address}
-//	table-v3.json          the table cache: {savedAt, state}, written 1 s after a change,
+//	table-v4.json          the table cache: {savedAt, state}, written 1 s after a change,
 //	                       and at least once a minute while heartbeats confirm it; it holds
 //	                       the domains' certificates and keys, the ACME challenges, the
-//	                       visits' keys (ADR 0054) and the routes' hosts (ADR 0045)
-//	table-v2.json          the cache of the releases before a route's host: read while there
-//	                       is no table-v3.json, and deleted by its first write, so an older
-//	                       binary started on the volume serves nothing until it is connected
-//	table.json             the cache of the releases before visits: never read, and deleted
-//	                       by the first write of table-v3.json, for the same reason
+//	                       visits' keys (ADR 0054), the routes' hosts (ADR 0045) and each
+//	                       environment's project (ADR 0061)
+//	table-v3.json          the cache of the release before ADR 0061: read, with its earlier
+//	                       names, while there is no table-v4.json, and deleted by its first
+//	                       write, so an older binary started on the volume serves nothing
+//	                       until it is connected
+//	table-v2.json,         the caches of the releases before a route's host and before
+//	table.json             visits: never read, and deleted by the first write of
+//	                       table-v4.json, for the same reason
 //
 // The certificate is renewed for the same key. A new key is made only
 // when the identity is declared lost, so tls.key and cert.json never

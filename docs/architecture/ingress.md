@@ -132,7 +132,7 @@ of the directory, so that a crash leaves the old content or the new.
 | `removed` | the refusal that said the ingress was removed, until the next join |
 | `wg.key` | the WireGuard private key, 32 raw bytes |
 | `mesh.json` | the place on the mesh: `{podNetwork, prefix, address}` |
-| `table-v3.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges, the visits' keys and the routes' hosts. Without it the agent reads a `table-v2.json` of an older binary once; the first save deletes that and a `table.json` ([Visitors](#the-tables-part), [Routing](#routing)) |
+| `table-v4.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges, the visits' keys, the routes' hosts and each environment's project. Without it the agent reads the `table-v3.json` of the release before ADR 0061 once, with its earlier names; the first save deletes that, a `table-v2.json` and a `table.json` ([Visitors](#the-tables-part), [Routing](#routing)) |
 
 The certificate is renewed for the same key; a new key is made only
 when the identity is declared lost. A new `wg.key` is made after every
@@ -441,8 +441,8 @@ nothing expires it.
 
 ### The cache
 
-At its start the agent loads `table-v3.json` (else an older binary's
-`table-v2.json`), `mesh.json` and `wg.key`,
+At its start the agent loads `table-v4.json` (else the release before's
+`table-v3.json`), `mesh.json` and `wg.key`,
 configures the mesh device and hands the cached table to the proxy before
 it contacts `ferund`: an instance that restarts while `ferund` is away
 serves at once what was routable, with the domains' certificates, and
@@ -724,8 +724,9 @@ connection; it holds no list and no rule.
   (reason `visit-unavailable`), anything else 401. A guarded environment
   never loses its `access` on an error path of the builder; a provider
   without a row gives `signIn` "".
-- The cache is `table-v3.json` (`table-v2.json` until routes had hosts),
-  and the agent's first save deletes `table.json`: an older binary started
+- The cache is `table-v4.json` (`table-v3.json` until ADR 0061,
+  `table-v2.json` until routes had hosts), and the agent's first save
+  deletes the older ones and `table.json`: an older binary started
   on the same volume finds no cache and serves nothing until `ferund`
   gives it a table without the guarded environments, instead of serving
   them open from a new cache. The new binary does not read `table.json`.
