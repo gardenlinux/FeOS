@@ -79,9 +79,17 @@ var crossOrigin http.CrossOriginProtection
 // …), else a person's session (its cookie, where the sink is served under
 // ferund's host), which names its project in FeRun-Project and whose
 // changes need X-Requested-With: ferun and a request of the same origin,
-// as ferund's do (ADR 0031).
+// as ferund's do (ADR 0031). The person an integration names
+// (FeRun-Person, ADR 0056) goes with it to ferund, which refuses it from
+// anyone else.
 func credential(r *http.Request) (Credential, error) {
 	c := Credential{Project: r.Header.Get(auth.ProjectHeader)}
+	switch vs := r.Header.Values(auth.PersonHeader); {
+	case len(vs) > 1:
+		return c, apierr.New(http.StatusBadRequest, "%s names one person", auth.PersonHeader)
+	case len(vs) == 1:
+		c.Person, c.PersonSent = vs[0], true
+	}
 	if v := r.Header.Get("Authorization"); strings.HasPrefix(v, "Bearer ") && len(v) > len("Bearer ") {
 		c.Authorization = v
 		return c, nil

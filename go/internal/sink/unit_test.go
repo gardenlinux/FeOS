@@ -173,6 +173,16 @@ func TestProjects(t *testing.T) {
 			_, _ = w.Write([]byte(`{"project":"acme","role":"write","environments":["e1"]}`))
 		case "s1 other":
 			http.Error(w, `{"error":"no such project"}`, http.StatusNotFound)
+		case "Bearer a.b.c":
+			// An integration: the person it names narrows the answer.
+			switch person, sent := r.Header["Ferun-Person"]; {
+			case !sent && r.Header.Get("FeRun-Project") == "acme":
+				_, _ = w.Write([]byte(`{"project":"acme","role":"write","environments":[]}`))
+			case sent && person[0] == "ada":
+				_, _ = w.Write([]byte(`{"project":"acme","role":"","environments":["e2"]}`))
+			default:
+				http.Error(w, `{"error":"no such project"}`, http.StatusNotFound)
+			}
 		case "Bearer broken":
 			http.Error(w, "boom", http.StatusInternalServerError)
 		default:
@@ -234,6 +244,33 @@ func TestProjects(t *testing.T) {
 	}
 	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer broken"}); err == nil || errors.As(err, &ref) {
 		t.Errorf("a failure: %v", err)
+	}
+	// An integration's bearer with the project and the person it names
+	// (ADR 0056): the person goes to ferund and is part of the key.
+	in := Credential{Authorization: "Bearer a.b.c", Project: "acme"}
+	ada := Credential{Authorization: "Bearer a.b.c", Project: "acme", Person: "ada", PersonSent: true}
+	for range 2 {
+		if got, err := ts.Resolve(ctx, in); err != nil || !reflect.DeepEqual(got, Access{Project: "acme", All: true, Write: true}) {
+			t.Fatalf("integration: %+v %v", got, err)
+		}
+		if got, err := ts.Resolve(ctx, ada); err != nil || !reflect.DeepEqual(got, Access{Project: "acme", Envs: []string{"e2"}}) {
+			t.Fatalf("naming ada: %+v %v", got, err)
+		}
+	}
+	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer a.b.c", Project: "acme", PersonSent: true}); !errors.As(err, &ref) ||
+		ref.status != 404 {
+		t.Fatalf("naming nobody: %v", err)
+	}
+	r := httptest.NewRequest("GET", "/api/v1/logs", nil)
+	r.Header.Set("Authorization", "Bearer a.b.c")
+	r.Header.Set(auth.ProjectHeader, "acme")
+	r.Header.Set(auth.PersonHeader, "ada")
+	if c, err := credential(r); err != nil || c != ada {
+		t.Fatalf("credential %+v %v", c, err)
+	}
+	r.Header.Add(auth.PersonHeader, "bob")
+	if _, err := credential(r); err == nil {
+		t.Fatal("two persons named")
 	}
 }
 

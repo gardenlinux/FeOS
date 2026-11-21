@@ -34,13 +34,18 @@ const projectCacheMax = 10000
 // out, or loses a grant, more often than a token is revoked.
 const sessionTTL = 10 * time.Second
 
-// Credential is how a reader asks: a token (Authorization: Bearer …), or
-// a person's session (its cookie's value) served under ferund's host; and
-// the project it names in FeRun-Project (a session must, a token may).
+// Credential is how a reader asks: a token (Authorization: Bearer …), an
+// integration's bearer, or a person's session (its cookie's value) served
+// under ferund's host; the project it names in FeRun-Project (a session
+// and an integration must, a token may); and the person an integration
+// names in FeRun-Person (ADR 0056), passed on as it came.
 type Credential struct {
 	Authorization string
 	Session       string
 	Project       string
+	Person        string
+	// PersonSent: the request had FeRun-Person (Person may be empty).
+	PersonSent bool
 }
 
 // key is the credential's cache key: the SHA-256 of what ferund is asked
@@ -51,7 +56,11 @@ func (c Credential) key() [32]byte {
 	if v == "" {
 		kind, v = "s", c.Session
 	}
-	return sha256.Sum256([]byte(kind + "\x00" + v + "\x00" + c.Project))
+	person := ""
+	if c.PersonSent {
+		person = "p" + c.Person
+	}
+	return sha256.Sum256([]byte(kind + "\x00" + v + "\x00" + c.Project + "\x00" + person))
 }
 
 // Access is what a reader may read, as ferund answers GET /api/v1/project
@@ -171,6 +180,9 @@ func (t *Projects) Resolve(ctx context.Context, c Credential) (Access, error) {
 	}
 	if c.Project != "" {
 		req.Header.Set(auth.ProjectHeader, c.Project)
+	}
+	if c.PersonSent {
+		req.Header.Set(auth.PersonHeader, c.Person)
 	}
 	resp, err := t.hc.Do(req)
 	if err != nil {
