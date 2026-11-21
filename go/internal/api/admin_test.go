@@ -68,7 +68,7 @@ func TestProjects(t *testing.T) {
 	e := newEnv(t, envOptions{})
 	w := e.do("POST", "/api/v1/admin/projects", adminAuth(), map[string]any{"name": "beta"})
 	expect(t, w, http.StatusCreated, "")
-	if got := keysInOrder(t, w.Body.Bytes()); strings.Join(got, ",") != "name,token,createdAt,sandboxCount" {
+	if got := keysInOrder(t, w.Body.Bytes()); strings.Join(got, ",") != "name,token,createdAt,sandboxCount,account" {
 		t.Fatalf("keys %v", got)
 	}
 	created := decode[struct {

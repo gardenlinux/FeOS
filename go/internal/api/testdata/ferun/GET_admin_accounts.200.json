@@ -1,0 +1,42 @@
+{
+  "method": "GET",
+  "path": "/api/v1/admin/accounts",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "every account with the number of projects on it and of its people",
+  "response": {
+    "accounts": [
+      {
+        "name": "cc-4711",
+        "title": "Team X",
+        "reference": "CC 4711",
+        "createdAt": "2026-11-21T19:52:08Z",
+        "madeBy": "basic:admin",
+        "closed": false,
+        "projects": 0,
+        "members": 3
+      },
+      {
+        "name": "default",
+        "title": "Default",
+        "reference": "",
+        "createdAt": "2026-11-21T19:52:06Z",
+        "madeBy": "",
+        "closed": false,
+        "projects": 2,
+        "members": 0
+      },
+      {
+        "name": "spare",
+        "title": "",
+        "reference": "",
+        "createdAt": "2026-11-21T19:52:08Z",
+        "madeBy": "basic:admin",
+        "closed": false,
+        "projects": 0,
+        "members": 0
+      }
+    ]
+  }
+}

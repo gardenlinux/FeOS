@@ -1,0 +1,23 @@
+{
+  "method": "POST",
+  "path": "/api/v1/project/move",
+  "query": {},
+  "status": 200,
+  "request": {
+    "account": "cc-4711"
+  },
+  "note": "an admin of the project who may put projects on the account moves it there; moved false when it is there already",
+  "response": {
+    "project": "acme",
+    "account": {
+      "name": "cc-4711",
+      "title": "Team X"
+    },
+    "from": {
+      "name": "default",
+      "title": "Default"
+    },
+    "movedAt": "2026-11-21T19:52:08Z",
+    "moved": true
+  }
+}

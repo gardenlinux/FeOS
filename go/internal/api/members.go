@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -130,24 +131,28 @@ func (s *server) reservedProjectName(name string) bool {
 	return slices.Contains(fixedReservedProjectNames, name) || slices.Contains(s.cfg.ReservedProjectNames, name)
 }
 
-// createPersonProject is POST /api/v1/projects {name}: a signed-in person
-// makes a project and holds admin on it (ADR 0031). --project-creation
-// operators keeps it to operators; --projects-per-person bounds the
-// projects a person made that are not being deleted (operators are not
-// bound). The project gets the default limits (--project-default-*) and its
-// default hosts in the project zone (--project-zone; the apps zone without
-// one), an operator's as well: what this route makes is a person's
-// project. No token: the session acts.
+// createPersonProject is POST /api/v1/projects {name, account?}: a
+// signed-in person makes a project on an account they may put projects on
+// (ADR 0059; "" is default) and holds admin on it (ADR 0031). default is
+// open to every signed-in person with --project-creation people, else to
+// the people on it and the operators; an account the person may not use is
+// absent (404), a closed one 409. --projects-per-person bounds the
+// projects a person made that are not being deleted, on every account
+// (operators are not bound). The project gets the default limits
+// (--project-default-*) and its default hosts in the project zone
+// (--project-zone; the apps zone without one), an operator's as well: what
+// this route makes is a person's project. No token: the session acts.
 func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	var req struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Account string `json:"account"`
 	}
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	if s.cfg.ProjectCreation == ProjectCreationOperators && !sess.Admin {
-		return apierr.New(http.StatusForbidden, "on this platform only operators make projects")
+	if req.Account == "" {
+		req.Account = store.DefaultAccount
 	}
 	if !store.ProjectNamePattern.MatchString(req.Name) {
 		return apierr.New(http.StatusBadRequest, "project name must match %s", store.ProjectNamePattern)
@@ -158,8 +163,18 @@ func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) err
 	}
 	by := sessionPrincipal(sess).String()
 	var t store.Project
+	var acct store.Account
 	err := s.st.InTx(r.Context(), func(tx *store.Store) error {
 		if _, err := tx.LockPerson(r.Context(), sess.PersonID); err != nil {
+			return err
+		}
+		var err error
+		acct, err = s.useAccount(r.Context(), tx, req.Account, sess.PersonID, sess.Admin)
+		if err != nil {
+			var e *apierr.Error
+			if req.Account == store.DefaultAccount && errors.As(err, &e) && e.Status == http.StatusNotFound {
+				return apierr.New(http.StatusForbidden, "on this platform only operators make projects")
+			}
 			return err
 		}
 		if max := s.cfg.ProjectsPerPerson; max > 0 && !sess.Admin {
@@ -172,9 +187,8 @@ func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) err
 			}
 		}
 		var created bool
-		var err error
 		t, created, err = tx.MakeProject(r.Context(), req.Name, store.NewProject{Zone: s.cfg.Zones.ForNewProject(true),
-			MadeBy: sess.PersonID, Limits: s.cfg.ProjectDefaults})
+			MadeBy: sess.PersonID, Limits: s.cfg.ProjectDefaults, Account: acct.ID, By: by})
 		if err != nil {
 			return err
 		}
@@ -191,15 +205,17 @@ func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return passOr(err, "create project")
 	}
-	s.log.Info("project created", "project", t.ID, "by", by)
+	s.log.Info("project created", "project", t.ID, "account", acct.ID, "by", by)
 	s.record(r.Context(), store.ActivityRow{ProjectID: t.ID, Kind: "project_created", Category: "lifecycle",
-		Name: "project " + t.ID + " created by " + by, Detail: detail(map[string]any{"project": t.ID, "by": by})})
+		Name:   "project " + t.ID + " created by " + by,
+		Detail: detail(map[string]any{"project": t.ID, "account": acct.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
 		Name      string     `json:"name"`
 		CreatedAt string     `json:"createdAt"`
 		Role      string     `json:"role"`
 		Limits    limitsView `json:"limits"`
-	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits)})
+		Account   accountRef `json:"account"`
+	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits), refOf(acct)})
 }
 
 // ---------------------------------------------------------------- members --
@@ -597,8 +613,9 @@ func (s *server) revokeInvitation(w http.ResponseWriter, r *http.Request) error 
 
 // previewInvitation is GET /api/v1/invitations/{token}: what an
 // invitation gives, to the signed-in person who holds its link, while it
-// is open or theirs: {project, role, environment?, environmentName?,
-// expiresAt}; otherwise 404, as an unknown one.
+// is open or theirs: to a project {project, role, environment?,
+// environmentName?, expiresAt}, to an account (ADR 0059) {account: {name,
+// title}, role, expiresAt}; otherwise 404, as an unknown one.
 func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	inv, err := s.st.GetInvitation(r.Context(), store.HashToken(r.PathValue("token")))
@@ -608,11 +625,21 @@ func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return fmt.Errorf("invitation: %w", err)
 	}
+	if inv.UsedBy != sess.PersonID && !inv.Open(time.Now()) {
+		return errNoInvitation()
+	}
+	if inv.Account() {
+		return writeJSON(w, http.StatusOK, struct {
+			Account   accountRef `json:"account"`
+			Role      string     `json:"role"`
+			ExpiresAt string     `json:"expiresAt"`
+		}{accountRef{Name: inv.AccountID, Title: inv.AccountTitle}, inv.Role, rfc3339(inv.ExpiresAt)})
+	}
 	t, err := s.st.GetProject(r.Context(), inv.ProjectID)
 	if err != nil && !isNoRow(err) {
 		return fmt.Errorf("invitation: %w", err)
 	}
-	if isNoRow(err) || t.Deleting() || (inv.UsedBy != sess.PersonID && !inv.Open(time.Now())) {
+	if isNoRow(err) || t.Deleting() {
 		return errNoInvitation()
 	}
 	return writeJSON(w, http.StatusOK, struct {
@@ -623,10 +650,21 @@ func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error
 		EnvironmentName: inv.EnvironmentName}, rfc3339(inv.ExpiresAt)})
 }
 
+// errInvitationGone is the answer to an invitation that was used or
+// expired: 410, the reason to whoever holds its link.
+func errInvitationGone(inv store.Invitation) error {
+	if inv.UsedBy != uuid.Nil {
+		return apierr.New(http.StatusGone, "this invitation was used")
+	}
+	return apierr.New(http.StatusGone, "this invitation expired")
+}
+
 // acceptInvitation is POST /api/v1/invitations/{token}/accept: the
 // signed-in person takes an open invitation and holds its grant, or the
-// higher role they hold there already. Once taken, it is gone for
-// everyone else (410); the person who took it gets the same answer again.
+// higher role they hold there already; an account's invitation makes them
+// one of its people, member or admin, the higher of what they hold and
+// what it gives. Once taken, it is gone for everyone else (410); the
+// person who took it gets the same answer again.
 func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	ctx, hash := r.Context(), store.HashToken(r.PathValue("token"))
@@ -636,6 +674,9 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 	}
 	if err != nil {
 		return fmt.Errorf("invitation: %w", err)
+	}
+	if inv.Account() {
+		return s.acceptAccountInvitation(w, r, inv)
 	}
 	var g store.Grant
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
@@ -660,10 +701,8 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 					return apierr.New(http.StatusGone, "this invitation was used")
 				}
 				return err
-			case cur.UsedBy != uuid.Nil:
-				return apierr.New(http.StatusGone, "this invitation was used")
 			}
-			return apierr.New(http.StatusGone, "this invitation expired")
+			return errInvitationGone(cur)
 		}
 		if err != nil {
 			return err
@@ -693,6 +732,63 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 		grantView
 	}{inv.ProjectID, grantView{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID),
 		EnvironmentName: inv.EnvironmentName}})
+}
+
+// acceptAccountInvitation is acceptInvitation of an account's invitation:
+// the account's row FOR NO KEY UPDATE, as its people's changes take it.
+func (s *server) acceptAccountInvitation(w http.ResponseWriter, r *http.Request, inv store.Invitation) error {
+	sess := personSession(r)
+	ctx := r.Context()
+	var role string
+	var changed bool
+	err := s.st.InTx(ctx, func(tx *store.Store) error {
+		if _, err := tx.LockAccount(ctx, inv.AccountID, store.ForNoKeyUpdate); isNoRow(err) {
+			return errNoInvitation()
+		} else if err != nil {
+			return err
+		}
+		have, err := tx.AccountMemberRole(ctx, inv.AccountID, sess.PersonID)
+		if err != nil {
+			return err
+		}
+		used, err := tx.UseInvitation(ctx, inv.Hash, sess.PersonID)
+		if isNoRow(err) {
+			cur, err := tx.GetInvitation(ctx, inv.Hash)
+			switch {
+			case isNoRow(err):
+				return errNoInvitation()
+			case err != nil:
+				return err
+			case cur.UsedBy == sess.PersonID && have != "":
+				role = have
+				return nil
+			}
+			return errInvitationGone(cur)
+		}
+		if err != nil {
+			return err
+		}
+		role = used.Role
+		if have != "" {
+			role = higherAccountRole(have, used.Role)
+		}
+		if role == have {
+			return nil
+		}
+		changed = true
+		return tx.PutAccountMember(ctx, inv.AccountID, sess.PersonID, role, used.MadeBy)
+	})
+	if err != nil {
+		return passOr(err, "accept invitation")
+	}
+	if changed {
+		s.log.Info("invitation accepted", "account", inv.AccountID, "person", sess.PersonID, "role", role)
+		s.recordMember(r, inv.AccountID, sess.PersonID, role, inv.MadeBy)
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Account string `json:"account"`
+		Role    string `json:"role"`
+	}{inv.AccountID, role})
 }
 
 // ----------------------------------------------------------------- tokens --

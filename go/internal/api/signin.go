@@ -218,13 +218,20 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if err := s.fillProjectAccounts(r.Context(), projects); err != nil {
+		return err
+	}
+	accounts, err := s.myAccounts(r.Context(), sess)
+	if err != nil {
+		return err
+	}
 	person := ""
 	if sess.PersonID != uuid.Nil {
 		person = sess.PersonID.String()
 	}
 	me := fapi.Me{Kind: "session", Sub: sess.Sub, Person: person, Email: sess.Email, Name: sess.Name,
 		Username: sess.Username, Picture: sess.Picture, Admin: sess.Admin, Method: auth.AdminOIDC, Projects: projects,
-		Accounts: []fapi.MeAccount{}}
+		Accounts: accounts}
 	return writeJSON(w, http.StatusOK, me)
 }
 

@@ -250,9 +250,10 @@ type Config struct {
 	// JoinTokenTTL is a join token's lifetime when the request names none.
 	JoinTokenTTL time.Duration
 
-	// ProjectCreation says who makes projects with POST /api/v1/projects
-	// (--project-creation, ADR 0031): ProjectCreationPeople (also "") or
-	// ProjectCreationOperators.
+	// ProjectCreation says whether the account default is open
+	// (--project-creation, ADR 0059): ProjectCreationPeople (also ""), to
+	// every signed-in person, or ProjectCreationOperators, to its people
+	// and the operators.
 	ProjectCreation string
 	// ProjectsPerPerson bounds the projects one person makes there that are
 	// not being deleted (--projects-per-person); 0: no bound. Operators are
@@ -643,6 +644,8 @@ func (s *server) routes() []route {
 	// to them.
 	s.integrationRoutes(operator, person, project)
 	s.quotaRoutes(operator, project)
+	// Accounts (ADR 0059): whom a project's use is charged to.
+	s.accountRoutes(operator, person, project)
 
 	// The doors with classes of their own: their answers are plain text
 	// (forward) or the MCP door's, not this API's JSON.

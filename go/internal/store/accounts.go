@@ -204,6 +204,18 @@ func (s *Store) AccountRole(ctx context.Context, account string, person uuid.UUI
 	return role, err
 }
 
+// AccountMemberRole is a person's row's role on an account, disabled or
+// not; "" without one.
+func (s *Store) AccountMemberRole(ctx context.Context, account string, person uuid.UUID) (string, error) {
+	var role string
+	err := s.q.QueryRow(ctx, "SELECT role FROM account_members WHERE account_id = $1 AND person_id = $2",
+		account, person).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return role, err
+}
+
 // AccountPerson is one of an account's people.
 type AccountPerson struct {
 	Person

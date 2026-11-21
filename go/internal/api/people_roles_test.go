@@ -131,6 +131,10 @@ var routeNeeds = map[string]string{
 	"PUT /api/v1/project/integrations/{integration}/grants":    "admin by scope, no integration",
 	"DELETE /api/v1/project/integrations/{integration}/grants": "admin by scope or the integration itself",
 
+	// Accounts (ADR 0059).
+	"GET /api/v1/project/account": "member, no integration",
+	"POST /api/v1/project/move":   "admin project, no integration",
+
 	// Visitors (ADR 0054), with the visits service.
 	"GET /api/v1/providers":               "member",
 	"GET /api/v1/providers/{provider}":    "member",

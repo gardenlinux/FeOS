@@ -1,0 +1,94 @@
+{
+  "method": "GET",
+  "path": "/api/v1/project/account",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "the account the project is on, since when, and its accounts over time, newest first; the first came from no account",
+  "response": {
+    "account": {
+      "name": "default",
+      "title": "Default"
+    },
+    "since": "2026-11-21T19:52:08Z",
+    "moves": [
+      {
+        "project": "acme",
+        "from": {
+          "name": "cc-4711",
+          "title": "Team X"
+        },
+        "to": {
+          "name": "default",
+          "title": "Default"
+        },
+        "at": "2026-11-21T19:52:08Z",
+        "by": {
+          "principal": "person:66cd3e9e-a6f4-4665-a4cc-e5b73b0892d0",
+          "name": "op"
+        }
+      },
+      {
+        "project": "acme",
+        "from": {
+          "name": "default",
+          "title": "Default"
+        },
+        "to": {
+          "name": "cc-4711",
+          "title": "Team X"
+        },
+        "at": "2026-11-21T19:52:08Z",
+        "by": {
+          "principal": "basic:admin",
+          "name": "admin"
+        }
+      },
+      {
+        "project": "acme",
+        "from": {
+          "name": "cc-4711",
+          "title": "Team X"
+        },
+        "to": {
+          "name": "default",
+          "title": "Default"
+        },
+        "at": "2026-11-21T19:52:08Z",
+        "by": {
+          "principal": "person:f704a1ec-63ef-40f3-a5fb-38d8fd5cb4bc",
+          "name": "pi"
+        }
+      },
+      {
+        "project": "acme",
+        "from": {
+          "name": "default",
+          "title": "Default"
+        },
+        "to": {
+          "name": "cc-4711",
+          "title": "Team X"
+        },
+        "at": "2026-11-21T19:52:08Z",
+        "by": {
+          "principal": "person:a58cf252-ba40-4730-8d33-588f336182e0",
+          "name": "aa"
+        }
+      },
+      {
+        "project": "acme",
+        "from": null,
+        "to": {
+          "name": "default",
+          "title": "Default"
+        },
+        "at": "2026-11-21T19:52:07Z",
+        "by": {
+          "principal": "",
+          "name": "FeRun"
+        }
+      }
+    ]
+  }
+}

@@ -107,11 +107,14 @@ type projectInfo struct {
 	// Zone is the zone of its default hosts (ADR 0031): the apps zone's
 	// name or the project zone's, "" while the platform serves neither.
 	Zone string `json:"zone"`
+	// Account is the account it is on (ADR 0059).
+	Account accountRef `json:"account"`
 }
 
-// listProjects is GET /api/v1/admin/projects, ordered by name.
+// listProjects is GET /api/v1/admin/projects[?account=<a>], ordered by
+// name: every project, or those on the account.
 func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
-	ts, err := s.st.ListProjects(r.Context())
+	ts, err := s.st.ListProjectsOn(r.Context(), r.URL.Query().Get("account"))
 	if err != nil {
 		return fmt.Errorf("list projects: %w", err)
 	}
@@ -122,7 +125,7 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 		ti := projectInfo{Name: t.ID, CreatedAt: rfc3339(t.CreatedAt), SandboxCount: t.SandboxCount,
 			EnvironmentCount: t.EnvironmentCount, Tokens: make([]projectTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting(),
 			MadeBy: idOrEmpty(t.MadeBy), Limits: limitsOf(t.Limits),
-			Zone: s.cfg.Zones.Of(t.Zone)}
+			Zone: s.cfg.Zones.Of(t.Zone), Account: accountRef{Name: t.Account, Title: t.AccountTitle}}
 		for _, tk := range t.Tokens {
 			ti.Tokens = append(ti.Tokens, projectTokenOf(tk))
 		}
@@ -131,14 +134,19 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, out)
 }
 
-// createProject is POST /api/v1/admin/projects {name}: the project and its
-// first token in one transaction; the token is shown once.
+// createProject is POST /api/v1/admin/projects {name, account?}: the
+// project on the account (ADR 0059; "": default, unknown 404, closed 409)
+// and its first token in one transaction; the token is shown once.
 func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Account string `json:"account"`
 	}
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
+	}
+	if req.Account == "" {
+		req.Account = store.DefaultAccount
 	}
 	if !store.ProjectNamePattern.MatchString(req.Name) {
 		return apierr.New(http.StatusBadRequest, "project name must match %s", store.ProjectNamePattern)
@@ -147,11 +155,18 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
 	}
+	a, _ := auth.AdminFrom(r.Context())
 	var t store.Project
+	var acct store.Account
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
-		var created bool
 		var err error
-		t, created, err = tx.CreateProject(r.Context(), req.Name)
+		acct, err = s.useAccount(r.Context(), tx, req.Account, uuid.Nil, true)
+		if err != nil {
+			return err
+		}
+		var created bool
+		t, created, err = tx.MakeProject(r.Context(), req.Name, store.NewProject{Account: acct.ID,
+			By: a.Principal().String()})
 		if err != nil {
 			return err
 		}
@@ -161,7 +176,6 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 			}
 			return apierr.New(http.StatusConflict, "project %s already exists", req.Name)
 		}
-		a, _ := auth.AdminFrom(r.Context())
 		_, err = tx.InsertProjectToken(r.Context(), store.ProjectToken{Hash: hash, ProjectID: req.Name,
 			Label: projectTokenLabel, Role: auth.RoleAdmin.String(), MadeBy: a.Principal().String()})
 		return err
@@ -170,15 +184,17 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 		return passOr(err, "create project")
 	}
 	by := adminOfRequest(r)
-	s.log.Info("project created", "project", req.Name, "by", by)
+	s.log.Info("project created", "project", req.Name, "account", acct.ID, "by", by)
 	s.record(r.Context(), store.ActivityRow{ProjectID: req.Name, Kind: "project_created", Category: "lifecycle",
-		Name: "project " + req.Name + " created by " + by, Detail: detail(map[string]any{"project": req.Name, "by": by})})
+		Name:   "project " + req.Name + " created by " + by,
+		Detail: detail(map[string]any{"project": req.Name, "account": acct.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
-		Name         string `json:"name"`
-		Token        string `json:"token"`
-		CreatedAt    string `json:"createdAt"`
-		SandboxCount int    `json:"sandboxCount"`
-	}{req.Name, token, rfc3339(t.CreatedAt), 0})
+		Name         string     `json:"name"`
+		Token        string     `json:"token"`
+		CreatedAt    string     `json:"createdAt"`
+		SandboxCount int        `json:"sandboxCount"`
+		Account      accountRef `json:"account"`
+	}{req.Name, token, rfc3339(t.CreatedAt), 0, refOf(acct)})
 }
 
 // zoneMove is one environment that moving its project to another zone

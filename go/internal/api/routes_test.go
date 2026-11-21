@@ -76,6 +76,25 @@ var routeClasses = map[string]class{
 	"DELETE /api/v1/project/integrations/{integration}/grants": classProject,
 	"POST /api/v1/service-certificates":                        classService,
 
+	// Accounts (ADR 0059).
+	"GET /api/v1/admin/accounts":                               classAdmin,
+	"POST /api/v1/admin/accounts":                              classAdmin,
+	"GET /api/v1/admin/accounts/{account}":                     classAdmin,
+	"PATCH /api/v1/admin/accounts/{account}":                   classAdmin,
+	"DELETE /api/v1/admin/accounts/{account}":                  classAdmin,
+	"PUT /api/v1/admin/accounts/{account}/members/{person}":    classAdmin,
+	"DELETE /api/v1/admin/accounts/{account}/members/{person}": classAdmin,
+	"POST /api/v1/admin/projects/{project}/move":               classAdmin,
+	"GET /api/v1/accounts":                                     classPerson,
+	"GET /api/v1/accounts/{account}":                           classPerson,
+	"PUT /api/v1/accounts/{account}/members/{person}":          classPerson,
+	"DELETE /api/v1/accounts/{account}/members/{person}":       classPerson,
+	"GET /api/v1/accounts/{account}/invitations":               classPerson,
+	"POST /api/v1/accounts/{account}/invitations":              classPerson,
+	"DELETE /api/v1/accounts/{account}/invitations/{id}":       classPerson,
+	"GET /api/v1/project/account":                              classProject,
+	"POST /api/v1/project/move":                                classProject,
+
 	"GET /api/v1/tools":                           classProject,
 	"POST /api/v1/sandboxes":                      classProject,
 	"GET /api/v1/sandboxes":                       classProject,
@@ -243,7 +262,7 @@ func concrete(pattern string, id string) (string, string) {
 	r := strings.NewReplacer("{id}", id, "{project}", testProject, "{node}", "n1", "{hash}", "abcdef0123",
 		"{pid}", "p1", "{wid}", "w1", "{name}", "k1", "{port}", "3000", "{path...}", "etc/hosts", "{rest...}", "x/y",
 		"{env}", "stage", "{n}", "7", "{kind}", "service", "{tag}", "v1", "{key}", "c1",
-		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n",
+		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n", "{account}", "cc-4711",
 		"{provider}", "fecode", "{visit}", "00000000-0000-4000-8000-0000000000a1")
 	return method, r.Replace(path)
 }
