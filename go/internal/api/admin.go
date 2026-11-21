@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/config"
@@ -108,7 +109,7 @@ type projectInfo struct {
 	// name or the project zone's, "" while the platform serves neither.
 	Zone string `json:"zone"`
 	// Account is the account it is on (ADR 0059).
-	Account accountRef `json:"account"`
+	Account fapi.AccountRef `json:"account"`
 }
 
 // listProjects is GET /api/v1/admin/projects[?account=<a>], ordered by
@@ -125,7 +126,7 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 		ti := projectInfo{Name: t.ID, CreatedAt: rfc3339(t.CreatedAt), SandboxCount: t.SandboxCount,
 			EnvironmentCount: t.EnvironmentCount, Tokens: make([]projectTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting(),
 			MadeBy: idOrEmpty(t.MadeBy), Limits: limitsOf(t.Limits),
-			Zone: s.cfg.Zones.Of(t.Zone), Account: accountRef{Name: t.Account, Title: t.AccountTitle}}
+			Zone: s.cfg.Zones.Of(t.Zone), Account: fapi.AccountRef{Name: t.Account, Title: t.AccountTitle}}
 		for _, tk := range t.Tokens {
 			ti.Tokens = append(ti.Tokens, projectTokenOf(tk))
 		}
@@ -189,11 +190,11 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 		Name:   "project " + req.Name + " created by " + by,
 		Detail: detail(map[string]any{"project": req.Name, "account": acct.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
-		Name         string     `json:"name"`
-		Token        string     `json:"token"`
-		CreatedAt    string     `json:"createdAt"`
-		SandboxCount int        `json:"sandboxCount"`
-		Account      accountRef `json:"account"`
+		Name         string          `json:"name"`
+		Token        string          `json:"token"`
+		CreatedAt    string          `json:"createdAt"`
+		SandboxCount int             `json:"sandboxCount"`
+		Account      fapi.AccountRef `json:"account"`
 	}{req.Name, token, rfc3339(t.CreatedAt), 0, refOf(acct)})
 }
 

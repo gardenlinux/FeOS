@@ -210,11 +210,11 @@ func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) err
 		Name:   "project " + t.ID + " created by " + by,
 		Detail: detail(map[string]any{"project": t.ID, "account": acct.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
-		Name      string     `json:"name"`
-		CreatedAt string     `json:"createdAt"`
-		Role      string     `json:"role"`
-		Limits    limitsView `json:"limits"`
-		Account   accountRef `json:"account"`
+		Name      string          `json:"name"`
+		CreatedAt string          `json:"createdAt"`
+		Role      string          `json:"role"`
+		Limits    limitsView      `json:"limits"`
+		Account   fapi.AccountRef `json:"account"`
 	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits), refOf(acct)})
 }
 
@@ -630,10 +630,10 @@ func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error
 	}
 	if inv.Account() {
 		return writeJSON(w, http.StatusOK, struct {
-			Account   accountRef `json:"account"`
-			Role      string     `json:"role"`
-			ExpiresAt string     `json:"expiresAt"`
-		}{accountRef{Name: inv.AccountID, Title: inv.AccountTitle}, inv.Role, rfc3339(inv.ExpiresAt)})
+			Account   fapi.AccountRef `json:"account"`
+			Role      string          `json:"role"`
+			ExpiresAt string          `json:"expiresAt"`
+		}{fapi.AccountRef{Name: inv.AccountID, Title: inv.AccountTitle}, inv.Role, rfc3339(inv.ExpiresAt)})
 	}
 	t, err := s.st.GetProject(r.Context(), inv.ProjectID)
 	if err != nil && !isNoRow(err) {

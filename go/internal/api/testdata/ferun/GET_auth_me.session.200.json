@@ -13,6 +13,10 @@
       {
         "project": "acme",
         "role": "write",
+        "account": {
+          "name": "default",
+          "title": "Default"
+        },
         "environments": [
           {
             "id": "0199a0b1-0000-7000-8000-000000000002",
@@ -41,6 +45,14 @@
         ]
       }
     ],
-    "accounts": []
+    "accounts": [
+      {
+        "name": "default",
+        "title": "Default",
+        "role": "member",
+        "explicit": false,
+        "closed": false
+      }
+    ]
   }
 }

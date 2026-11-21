@@ -43,10 +43,6 @@ const (
 	// CodeDefaultAccount: 422, default is never closed or deleted and
 	// holds no admin rows.
 	CodeDefaultAccount = "default_account"
-	// CodeNameTaken: 409, an account of that name exists.
-	CodeNameTaken = "name_taken"
-	// CodePersonRequired: 403, a project token moves no project.
-	CodePersonRequired = "person_required"
 )
 
 // accountRoutes adds the routes of accounts.
@@ -75,15 +71,7 @@ func (s *server) accountRoutes(operator func(string, apiHandler), person func(st
 
 // ------------------------------------------------------------- answers --
 
-// accountRef is an account as a project names it: its name and title.
-type accountRef = fapi.AccountRef
-
-func refOf(a store.Account) accountRef { return accountRef{Name: a.ID, Title: a.Title} }
-
-// meAccount is an account a person may put projects on or read, as
-// /auth/me and GET /api/v1/accounts list it. Explicit: the account's page
-// is readable to the caller (a row of it, or an operator).
-type meAccount = fapi.MeAccount
+func refOf(a store.Account) fapi.AccountRef { return fapi.AccountRef{Name: a.ID, Title: a.Title} }
 
 // personRef is a person as an account's page names them.
 type personRef struct {
@@ -127,18 +115,18 @@ type moveBy struct {
 // moveView is one of a project's accounts over time: From null for the
 // account it was made on.
 type moveView struct {
-	Project string      `json:"project"`
-	From    *accountRef `json:"from"`
-	To      accountRef  `json:"to"`
-	At      string      `json:"at"`
-	By      moveBy      `json:"by"`
+	Project string           `json:"project"`
+	From    *fapi.AccountRef `json:"from"`
+	To      fapi.AccountRef  `json:"to"`
+	At      string           `json:"at"`
+	By      moveBy           `json:"by"`
 }
 
 func moveOf(m store.AccountMove) moveView {
-	v := moveView{Project: m.Project, To: accountRef{Name: m.To, Title: m.ToTitle}, At: rfc3339(m.At),
+	v := moveView{Project: m.Project, To: fapi.AccountRef{Name: m.To, Title: m.ToTitle}, At: rfc3339(m.At),
 		By: moveBy{Principal: m.By, Name: byName(m)}}
 	if m.From != "" {
-		v.From = &accountRef{Name: m.From, Title: m.FromTitle}
+		v.From = &fapi.AccountRef{Name: m.From, Title: m.FromTitle}
 	}
 	return v
 }
@@ -199,11 +187,11 @@ func adminAccountOf(a store.AccountInfo) adminAccountView {
 
 // projectMoveAnswer is the answer of a move.
 type projectMoveAnswer struct {
-	Project string     `json:"project"`
-	Account accountRef `json:"account"`
-	From    accountRef `json:"from"`
-	MovedAt string     `json:"movedAt"`
-	Moved   bool       `json:"moved"`
+	Project string          `json:"project"`
+	Account fapi.AccountRef `json:"account"`
+	From    fapi.AccountRef `json:"from"`
+	MovedAt string          `json:"movedAt"`
+	Moved   bool            `json:"moved"`
 }
 
 // ------------------------------------------------------------- the rules --
@@ -257,15 +245,15 @@ func (s *server) accountRole(ctx context.Context, st *store.Store, person uuid.U
 // myAccounts lists the accounts a session may put projects on or read,
 // by name: an operator's are every account, as admin; a person's those of
 // their rows, and default while it is open.
-func (s *server) myAccounts(ctx context.Context, sess store.UISession) ([]meAccount, error) {
-	out := []meAccount{}
+func (s *server) myAccounts(ctx context.Context, sess store.UISession) ([]fapi.MeAccount, error) {
+	out := []fapi.MeAccount{}
 	if sess.Admin {
 		all, err := s.st.AllAccounts(ctx)
 		if err != nil {
 			return nil, internalf("accounts: %v", err)
 		}
 		for _, a := range all {
-			out = append(out, meAccount{Name: a.ID, Title: a.Title, Role: store.AccountAdmin, Explicit: true,
+			out = append(out, fapi.MeAccount{Name: a.ID, Title: a.Title, Role: store.AccountAdmin, Explicit: true,
 				Closed: a.Closed()})
 		}
 		return out, nil
@@ -280,7 +268,7 @@ func (s *server) myAccounts(ctx context.Context, sess store.UISession) ([]meAcco
 	onDefault := false
 	for _, a := range rows {
 		onDefault = onDefault || a.ID == store.DefaultAccount
-		out = append(out, meAccount{Name: a.ID, Title: a.Title, Role: a.Role, Explicit: a.ID != store.DefaultAccount,
+		out = append(out, fapi.MeAccount{Name: a.ID, Title: a.Title, Role: a.Role, Explicit: a.ID != store.DefaultAccount,
 			Closed: a.Closed()})
 	}
 	if !onDefault && s.defaultOpen() {
@@ -288,14 +276,14 @@ func (s *server) myAccounts(ctx context.Context, sess store.UISession) ([]meAcco
 		if err != nil {
 			return nil, internalf("account %s: %v", store.DefaultAccount, err)
 		}
-		out = append(out, meAccount{Name: d.ID, Title: d.Title, Role: store.AccountMember, Closed: d.Closed()})
+		out = append(out, fapi.MeAccount{Name: d.ID, Title: d.Title, Role: store.AccountMember, Closed: d.Closed()})
 		sortAccounts(out)
 	}
 	return out, nil
 }
 
-func sortAccounts(as []meAccount) {
-	slices.SortFunc(as, func(a, b meAccount) int { return strings.Compare(a.Name, b.Name) })
+func sortAccounts(as []fapi.MeAccount) {
+	slices.SortFunc(as, func(a, b fapi.MeAccount) int { return strings.Compare(a.Name, b.Name) })
 }
 
 // fillProjectAccounts sets the account of each of a session's projects.
@@ -489,7 +477,7 @@ func (s *server) listMyAccounts(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, struct {
-		Accounts []meAccount `json:"accounts"`
+		Accounts []fapi.MeAccount `json:"accounts"`
 	}{as})
 }
 
@@ -742,7 +730,7 @@ func (s *server) adminCreateAccount(w http.ResponseWriter, r *http.Request) erro
 		return fmt.Errorf("create account: %w", err)
 	}
 	if !made {
-		return apierr.WithCode(http.StatusConflict, CodeNameTaken, "an account named %s exists", req.Name)
+		return apierr.WithCode(http.StatusConflict, fapi.CodeNameTaken, "an account named %s exists", req.Name)
 	}
 	info, err := s.st.GetAccountInfo(ctx, req.Name)
 	if err != nil {
@@ -1035,7 +1023,7 @@ func (s *server) moveOwnProject(w http.ResponseWriter, r *http.Request) error {
 		return errIntegrationRefused()
 	}
 	if t.Principal.Person == uuid.Nil {
-		return apierr.WithCode(http.StatusForbidden, CodePersonRequired,
+		return apierr.WithCode(http.StatusForbidden, fapi.CodePersonRequired,
 			"a token is on no account: a person or an operator moves a project")
 	}
 	var req struct {
@@ -1092,8 +1080,8 @@ func (s *server) getProjectAccount(w http.ResponseWriter, r *http.Request) error
 			By: moveBy{Name: "FeRun"}})
 	}
 	return writeJSON(w, http.StatusOK, struct {
-		Account accountRef `json:"account"`
-		Since   string     `json:"since"`
-		Moves   []moveView `json:"moves"`
+		Account fapi.AccountRef `json:"account"`
+		Since   string          `json:"since"`
+		Moves   []moveView      `json:"moves"`
 	}{refOf(a), rfc3339(since), moves})
 }

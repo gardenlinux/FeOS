@@ -14,6 +14,10 @@
       {
         "project": "acme",
         "role": "admin",
+        "account": {
+          "name": "default",
+          "title": "Default"
+        },
         "environments": [
           {
             "id": "0199a0b1-0000-7000-8000-000000000002",
@@ -44,6 +48,10 @@
       {
         "project": "other",
         "role": "admin",
+        "account": {
+          "name": "default",
+          "title": "Default"
+        },
         "environments": [
           {
             "id": "0199a0b1-0000-7000-8000-000000000005",
@@ -56,6 +64,14 @@
         ]
       }
     ],
-    "accounts": []
+    "accounts": [
+      {
+        "name": "default",
+        "title": "Default",
+        "role": "admin",
+        "explicit": true,
+        "closed": false
+      }
+    ]
   }
 }

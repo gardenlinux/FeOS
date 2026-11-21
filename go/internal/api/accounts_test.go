@@ -285,7 +285,7 @@ func TestAdminAccounts(t *testing.T) {
 	st, txt := do("POST", "/api/v1/admin/accounts", map[string]string{"name": "Bad Name"})
 	check(st, txt, http.StatusBadRequest, "account name must match ^[a-z0-9][a-z0-9.-]{1,62}$")
 	st, txt = do("POST", "/api/v1/admin/accounts", map[string]string{"name": testAccount})
-	check(st, txt, http.StatusConflict, CodeNameTaken)
+	check(st, txt, http.StatusConflict, fapi.CodeNameTaken)
 	resp := e.do("POST", "/api/v1/admin/accounts", adminAuth(), map[string]string{"name": "spare"})
 	expect(t, resp, http.StatusCreated, "")
 	if got := keysInOrder(t, resp.Body.Bytes()); strings.Join(got, ",") !=
@@ -338,7 +338,7 @@ func TestAdminAccounts(t *testing.T) {
 	// An operator's project on an account; the list by account.
 	resp = e.do("POST", "/api/v1/admin/projects", adminAuth(), map[string]string{"name": "teamz", "account": testAccount})
 	expect(t, resp, http.StatusCreated, "")
-	if a := decode[struct{ Account accountRef }](t, resp).Account; a != (accountRef{Name: testAccount, Title: "Team Z"}) {
+	if a := decode[struct{ Account fapi.AccountRef }](t, resp).Account; a != (fapi.AccountRef{Name: testAccount, Title: "Team Z"}) {
 		t.Fatalf("on %+v", a)
 	}
 	st, txt = do("POST", "/api/v1/admin/projects", map[string]string{"name": "lost", "account": "nope"})
@@ -348,7 +348,7 @@ func TestAdminAccounts(t *testing.T) {
 	ps := decode[struct {
 		Projects []struct {
 			Name    string
-			Account accountRef
+			Account fapi.AccountRef
 		}
 	}](t, resp).Projects
 	if len(ps) != 1 || ps[0].Name != "teamz" || ps[0].Account.Name != testAccount {
@@ -478,8 +478,8 @@ func TestAccountPeople(t *testing.T) {
 		errBody("no such account"))
 	expect(t, e.serve(as(w.pi, "", "GET", "/api/v1/accounts/default/invitations", nil)), http.StatusNotFound, "")
 	resp = e.serve(as(w.pi, "", "GET", "/api/v1/accounts", nil))
-	if got := decode[struct{ Accounts []meAccount }](t, resp).Accounts; len(got) != 1 ||
-		got[0] != (meAccount{"default", "Default", "member", false, false}) {
+	if got := decode[struct{ Accounts []fapi.MeAccount }](t, resp).Accounts; len(got) != 1 ||
+		got[0] != (fapi.MeAccount{Name: "default", Title: "Default", Role: "member"}) {
 		t.Fatalf("pi's accounts %+v", got)
 	}
 	resp = e.serve(as(w.op, "", "GET", "/api/v1/accounts/default", nil))
@@ -588,7 +588,7 @@ func TestProjectOnAccount(t *testing.T) {
 	if got := keysInOrder(t, resp.Body.Bytes()); strings.Join(got, ",") != "name,createdAt,role,limits,account" {
 		t.Fatalf("keys %v", got)
 	}
-	if a := decode[struct{ Account accountRef }](t, resp).Account; a != (accountRef{Name: testAccount, Title: "Team X"}) {
+	if a := decode[struct{ Account fapi.AccountRef }](t, resp).Account; a != (fapi.AccountRef{Name: testAccount, Title: "Team X"}) {
 		t.Fatalf("on %+v", a)
 	}
 	expect(t, create(w.pi, map[string]string{"name": "pix", "account": testAccount}), http.StatusNotFound,
@@ -596,7 +596,7 @@ func TestProjectOnAccount(t *testing.T) {
 	expect(t, create(w.pi, map[string]string{"name": "pix", "account": "nope"}), http.StatusNotFound, "")
 	resp = create(w.pi, map[string]string{"name": "pix"})
 	expect(t, resp, http.StatusCreated, "")
-	if a := decode[struct{ Account accountRef }](t, resp).Account; a.Name != "default" {
+	if a := decode[struct{ Account fapi.AccountRef }](t, resp).Account; a.Name != "default" {
 		t.Fatalf("on %+v", a)
 	}
 	var d string
@@ -610,10 +610,10 @@ func TestProjectOnAccount(t *testing.T) {
 	expect(t, resp, http.StatusOK, "")
 	m := decode[struct {
 		Projects []fapi.MeProject
-		Accounts []meAccount
+		Accounts []fapi.MeAccount
 	}](t, resp)
-	if len(m.Accounts) != 2 || m.Accounts[0] != (meAccount{Name: testAccount, Title: "Team X", Role: "member", Explicit: true, Closed: false}) ||
-		m.Accounts[1] != (meAccount{Name: "default", Title: "Default", Role: "member", Explicit: false, Closed: false}) {
+	if len(m.Accounts) != 2 || m.Accounts[0] != (fapi.MeAccount{Name: testAccount, Title: "Team X", Role: "member", Explicit: true, Closed: false}) ||
+		m.Accounts[1] != (fapi.MeAccount{Name: "default", Title: "Default", Role: "member", Explicit: false, Closed: false}) {
 		t.Fatalf("accounts %+v", m.Accounts)
 	}
 	on := map[string]string{}
@@ -629,7 +629,7 @@ func TestProjectOnAccount(t *testing.T) {
 	resp = e.serve(as(w.op, "", "GET", "/auth/me", nil))
 	m = decode[struct {
 		Projects []fapi.MeProject
-		Accounts []meAccount
+		Accounts []fapi.MeAccount
 	}](t, resp)
 	if len(m.Accounts) != 2 || m.Accounts[0].Role != "admin" || !m.Accounts[1].Explicit || len(m.Projects) != 4 {
 		t.Fatalf("operator's %+v", m)
@@ -706,7 +706,7 @@ func TestProjectMove(t *testing.T) {
 		t.Fatalf("keys %v", got)
 	}
 	out := decode[projectMoveAnswer](t, resp)
-	if !out.Moved || out.Account != (accountRef{Name: testAccount, Title: "Team X"}) || out.From.Name != "default" ||
+	if !out.Moved || out.Account != (fapi.AccountRef{Name: testAccount, Title: "Team X"}) || out.From.Name != "default" ||
 		out.MovedAt == "" || out.Project != testProject {
 		t.Fatalf("moved %+v", out)
 	}
@@ -770,7 +770,7 @@ func TestProjectMove(t *testing.T) {
 	resp = e.do("GET", "/api/v1/project/account", bearerOf(tok), nil)
 	expect(t, resp, http.StatusOK, "")
 	pa := decode[struct {
-		Account accountRef
+		Account fapi.AccountRef
 		Since   string
 		Moves   []moveView
 	}](t, resp)
@@ -818,7 +818,7 @@ func TestProjectAccountWithoutRow(t *testing.T) {
 	resp := e.serve(as(w.aa, testProject, "GET", "/api/v1/project/account", nil))
 	expect(t, resp, http.StatusOK, "")
 	pa := decode[struct {
-		Account accountRef
+		Account fapi.AccountRef
 		Since   string
 		Moves   []moveView
 	}](t, resp)
