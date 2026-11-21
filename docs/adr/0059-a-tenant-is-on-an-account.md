@@ -5,9 +5,11 @@
 Every tenant is on one **account**. An account is whom the operator
 charges: a name, a reference into the operator's own accounting, and
 the people who may put tenants on it. A person makes a tenant on an
-account they are a member of. FeRun measures and prices nothing by this
-decision. It settles whose a tenant's use is, so that whatever is
-counted later has someone to go to.
+account they are a member of, and a tenant moves to another account as
+it is: who is charged changes from that moment, and nothing else of it.
+FeRun measures and prices nothing by this decision. It settles whose a
+tenant's use is, so that whatever is counted later has someone to go
+to.
 
 ## Context
 
@@ -21,6 +23,11 @@ inside a company charges what its teams use to their cost centres or to
 an order; one that serves customers charges a customer's account. Both
 are something several people share, that holds several tenants, and
 that stays when a person leaves or changes teams.
+
+Who pays also changes while a tenant runs. A team is reorganised, a
+budget ends, a trial becomes a product with a cost centre of its own,
+an application is handed to another team. The application does not
+stop for that, and its addresses do not change.
 
 Software in front of FeRun needs the same answer and has none of its
 own. FeCode works in tenants that exist, by a grant (ADR 0056), and
@@ -70,10 +77,29 @@ billing; if it does not, every platform invents them.
   the operator names, else on `default`.
 - Every member of a tenant reads which account it is on, by name and
   title. The reference is for the account's people and the operators.
-- A tenant **moves** to another account by an admin of the tenant who
-  is a member of the account that receives it, or by an operator.
-  ferund records the move with its time, so that use before and after
-  it can be told apart.
+
+### A tenant moves to another account
+
+- A tenant moves to another account at any time. An admin of the
+  tenant who is a member of the account that receives it moves it, or
+  an operator. The account it leaves is not asked: a cost leaves it.
+- The account that receives it is open. A closed account takes no
+  tenant, moved or new, and a tenant leaves a closed account as it
+  leaves any other.
+- A move changes whom the tenant's use is charged to, from its moment
+  on, and nothing else. The tenant keeps its name, its zone and hosts,
+  its domains, its people and their grants, its tokens, its limits and
+  its workloads' identities. Nothing restarts and no request fails.
+- So that this holds, the account is in nothing that names a tenant or
+  what is in it: no name, no host, no route of the API, no identity of
+  a workload, no key in the sink and no path in storage. A tenant's
+  name is unique in the installation and not within its account.
+- ferund keeps a tenant's accounts over time: each with the moment the
+  tenant came to it and who moved it. Use belongs to the account the
+  tenant was on when it happened. A move is not dated back.
+- The tenant's members, the people of both accounts and the operators
+  read the move: from which account to which, when, and by whom.
+- An integration moves no tenant, whomever it names (ADR 0056).
 
 ### Nothing is measured or priced here
 
@@ -86,6 +112,22 @@ billing; if it does not, every platform invents them.
 
 ## Alternatives considered
 
+- **The account in a tenant's address**: a name that is unique within
+  the account, routes and identities that begin with the account, as
+  three levels suggest. A move would rename the tenant: new hosts, new
+  certificates and identities for every workload, and callers that
+  break. Who pays changes more often than what an application is
+  called.
+- **A tenant fixed on its account**, and a new tenant for a new payer.
+  A change of cost centre would be the migration of a running
+  application, with its data and its domains.
+- **A move that both accounts agree to.** The account that is left has
+  nothing to refuse: it stops paying. The one that receives agrees by
+  who moves, a member of it.
+- **A move offered by the tenant's admin and taken by one of the
+  receiving account's people**, for an admin who may not spend there.
+  Until it exists that account's admin makes the tenant's admin a
+  member, or an operator moves the tenant. Backlog.
 - **The maker pays.** A person is no cost centre: they leave, change
   teams, and share a budget with others. A tenant would have to change
   hands whenever its maker does.
@@ -112,15 +154,24 @@ billing; if it does not, every platform invents them.
 
 ## Consequences
 
-- ferund gains accounts and their people, a tenant's account, the
-  routes for both in the admin API and for an account's people, and a
-  scope more for invitations. Every existing tenant is on `default`.
+- ferund gains accounts and their people, a tenant's account as a
+  history of moves and not as one field, the routes for both in the
+  admin API and for an account's people, and a scope more for
+  invitations. Every existing tenant is on `default`, and a move brings
+  each to the account that pays for it.
 - The console offers a person's accounts where a tenant is made, names
-  the account on a tenant's page, and has a page per account for its
-  people: members, tenants, their use against their limits.
+  the account on a tenant's page and moves it there, and has a page per
+  account for its people: members, tenants, those that came and left,
+  their use against their limits.
 - A meter, prices and a report per account's reference can follow
-  without a change to who is charged (backlog). Until then an operator
-  reads the tenants of an account and their use and charges by hand.
+  without a change to who is charged (backlog). The meter reads a
+  tenant's accounts over time: a tenant that moved within a month is in
+  that month's report of both accounts, each for its part. Until then
+  an operator reads the tenants of an account and their use and charges
+  by hand.
+- What is built for a tenant later, a store, a queue, a report, names
+  the tenant and looks its account up. Whatever carried the account in
+  a name or a key would break the move.
 - A platform on FeRun keeps no accounts. FeCode's projects are tenants
   on the accounts of those who made them, and what FeCode runs for a
   project is that tenant's use (FeCode's ADR 0037). FeCode itself is
@@ -140,3 +191,8 @@ straightforward once every tenant has an account, and the change this
 ADR belongs to does not need them. It amends ADR 0031 in two places:
 making a tenant names an account, and the operator's choice whether
 people make tenants is whether `default` is open to them.
+
+The move was one line in the first writing. It was written out the
+same day, when Malte asked that a project can be moved to another
+account: with the rule that keeps the account out of every name, and
+the history that a meter will read.

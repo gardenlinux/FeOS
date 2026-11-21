@@ -40,6 +40,10 @@ screen says both.
   roles in it (ADR 0031), and its names, its zone, its domains, its
   tokens, its limits and its workloads' identities are its own. An
   **environment** is in one project.
+- The three are levels of belonging and not of naming. A project is
+  named by itself and never under its account, in the API, in its
+  hosts and in its workloads' identities, so that it moves to another
+  account as it is (ADR 0059).
 - The border is where it was. One project is kept from another as one
   tenant was, and an account neither joins nor divides the projects on
   it.
@@ -107,4 +111,5 @@ nothing of it is built. Malte asked whether accounts, once they exist,
 are not the tenants. They are in the sense of who is served and
 charged, and they are not in the sense of what is kept apart, which is
 why the word goes and does not move. That the rename is whole and at
-once follows how release became deployment (ADR 0018).
+once is his decision, and follows how release became deployment
+(ADR 0018).

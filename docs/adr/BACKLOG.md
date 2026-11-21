@@ -294,7 +294,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0059
 
 - ADR 0059: a meter of what a tenant uses over time, prices, and a report per account's reference that the operator's accounting takes.
-- ADR 0059: an account's limits, its number of tenants and a budget, beside or in place of the number per person.
+- ADR 0059: an account's limits, its number of tenants and a budget, beside or in place of the number per person, checked when a tenant is made on it and when one moves to it.
+- ADR 0059: a move offered by a tenant's admin and taken by one of the receiving account's people, for an admin who is no member there.
 - ADR 0059: accounts people make themselves, with a means of payment, for an installation that serves the public.
 - ADR 0059: an account's admin suspends or deletes a tenant on it.
 - ADR 0059: an account's members filled from the provider's claims, a group or a cost centre.
