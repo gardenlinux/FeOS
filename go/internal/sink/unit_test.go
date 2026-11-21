@@ -406,6 +406,43 @@ func exportRequest(attrs []*commonv1.KeyValue, records ...*logsv1.LogRecord) *ot
 	}}}
 }
 
+// A stream's and a span's project is ferun.project, else its earlier
+// word, which a pod placed before ADR 0061 keeps for its life; without
+// either a batch is refused.
+func TestProjectLabel(t *testing.T) {
+	for _, c := range []struct {
+		attrs map[string]string
+		want  string
+	}{
+		{map[string]string{attrProject: "acme"}, "acme"},
+		{map[string]string{attrProjectLegacy: "old"}, "old"},
+		{map[string]string{attrProject: "acme", attrProjectLegacy: "acme"}, "acme"},
+		{map[string]string{attrProject: "new", attrProjectLegacy: "old"}, "new"},
+		{map[string]string{}, ""},
+	} {
+		if got := labelsOf(c.attrs, "n1", SourceContainer).Project; got != c.want {
+			t.Errorf("%v: project %q, want %q", c.attrs, got, c.want)
+		}
+	}
+	legacy := []*commonv1.KeyValue{kv(attrPod, str("p1")), kv(attrContainer, str("main")), kv(attrLogID, str("L1")),
+		kv(attrProjectLegacy, str("acme"))}
+	got, err := parseExport(exportRequest(legacy, record(0, 5, "stdout", "hi")), ingestPeer{node: "node-1"}, time.Unix(1000, 0))
+	if err != nil || len(got) != 1 || got[0].Labels.Project != "acme" {
+		t.Fatalf("a stream of before: %+v %v", got, err)
+	}
+	if _, err := parseExport(exportRequest(legacy[:3], record(0, 5, "stdout", "hi")), ingestPeer{node: "node-1"}, time.Unix(1000, 0)); err == nil {
+		t.Fatal("a stream without a project was taken")
+	}
+	attrs := podAttrs("", "env1", "web")
+	delete(attrs, attrProject)
+	attrs[attrProjectLegacy] = "acme"
+	spans, _, err := parseTraceExport(traceRequest(attrs, testSpan("0000000000000000000000000000000a", "000000000000000b", "", "GET /",
+		time.Now().UnixNano(), time.Millisecond)), ingestPeer{node: "node-1"}, time.Now())
+	if err != nil || len(spans) != 1 || spans[0].doc.Project != "acme" {
+		t.Fatalf("a span of before: %+v %v", spans, err)
+	}
+}
+
 // A stream's deployment is ferun.deployment, else its earlier word
 // ferun.release, which a pod made before keeps for its life (ADR 0018,
 // "The deployments' word").

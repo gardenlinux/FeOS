@@ -240,7 +240,7 @@ func parseExport(req *otlplogsv1.ExportLogsServiceRequest, p ingestPeer, now tim
 		if key.Pod == "" || key.Container == "" || key.LogID == "" {
 			return nil, fmt.Errorf("resource %d: %s, %s and %s are required", i, attrPod, attrContainer, attrLogID)
 		}
-		if attrs[attrProject] == "" {
+		if projectOf(attrs) == "" {
 			return nil, fmt.Errorf("resource %d: %s is required", i, attrProject)
 		}
 		source := sourceOf(attrs[attrSource])
@@ -289,6 +289,21 @@ func validSource(s string) bool {
 	return s == "" || s == SourceIngress || s == SourceEgress || s == SourceContainer
 }
 
+// attrProjectLegacy is ferun.project's earlier word (ADR 0061), which
+// ferund no longer writes: a pod keeps the labels of its insert for its
+// life, so the sink reads it where ferun.project is not set, as it reads
+// attrRelease. Removed in the next release.
+const attrProjectLegacy = "ferun.tenant" // KEEP-TENANT: pods placed before ADR 0061
+
+// projectOf is a stream's or a span's project: ferun.project, else its
+// earlier word.
+func projectOf(attrs map[string]string) string {
+	if p := attrs[attrProject]; p != "" {
+		return p
+	}
+	return attrs[attrProjectLegacy]
+}
+
 // deploymentAttr is the attribute that holds a stream's deployment:
 // ferun.deployment, else its earlier word.
 func deploymentAttr(attrs map[string]string) string {
@@ -304,7 +319,7 @@ func labelsOf(attrs map[string]string, node, source string) Labels {
 		return max(n, 0)
 	}
 	return Labels{
-		Project: attrs[attrProject], Node: node, Instance: attrs[attrInstance],
+		Project: projectOf(attrs), Node: node, Instance: attrs[attrInstance],
 		Environment: attrs[attrEnvironment], Kind: attrs[attrKind], Object: attrs[attrObject], Job: attrs[attrJob],
 		Replica: num(attrReplica), Deployment: num(deploymentAttr(attrs)), Attempt: num(attrAttempt),
 		RetentionDays: num(attrRetentionDays), Source: source, Attrs: attrs,

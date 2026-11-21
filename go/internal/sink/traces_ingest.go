@@ -94,7 +94,7 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 		for _, kv := range rs.GetResource().GetAttributes() {
 			text[kv.GetKey()] = anyText(kv.GetValue())
 		}
-		project, pod := text[attrProject], text[attrPod]
+		project, pod := projectOf(text), text[attrPod]
 		if project == "" || pod == "" {
 			return nil, 0, fmt.Errorf("resource %d: %w: %s and %s are required", i, errNotYours, attrProject, attrPod)
 		}
