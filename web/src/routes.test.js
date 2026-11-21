@@ -88,6 +88,13 @@ describe('the environments routes', () => {
     expect(canonicalPath('/projects/fecode/environments/expensa-stage/releases'))
       .toBe('/projects/fecode/environments/expensa-stage/deployments');
     expect(canonicalPath('/projects/releases/environments')).toBe('/projects/releases/environments');
+    // The pages of before ADR 0061, first, then the other rules.
+    expect(canonicalPath('/tenants')).toBe('/projects'); // KEEP-TENANT: the console's paths before ADR 0061
+    expect(canonicalPath('/tenants/fecode/members')).toBe('/projects/fecode/members'); // KEEP-TENANT: the console's paths before ADR 0061
+    expect(canonicalPath('/tenants/fecode/environments/expensa-stage/releases/7')) // KEEP-TENANT: the console's paths before ADR 0061
+      .toBe('/projects/fecode/environments/expensa-stage/deployments/7');
+    expect(parsePath('/tenants/acme/tools')).toEqual({ view: 'tools', project: 'acme' }); // KEEP-TENANT: the console's paths before ADR 0061
+    expect(canonicalPath('/nodes/tenants')).toBe('/nodes/tenants'); // KEEP-TENANT: only the first segment
     expect(parsePath('/projects/fecode/environments/expensa-stage/incidents/12'))
       .toEqual(env({ env: 'expensa-stage', tab: 'incidents', item: '12' }));
     // An object's logs under the environment's Logs, of old, are its page's.

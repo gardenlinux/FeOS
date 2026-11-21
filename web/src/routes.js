@@ -289,7 +289,8 @@ export function newSandboxPath(project, env) {
 // reachability (ADR 0034, revised).
 const EARLIER_TABS = { releases: 'deployments', edit: 'builder', groups: 'reachability' };
 
-// canonicalPath is pathname with an environment tab's earlier name
+// canonicalPath is pathname with the projects' pages under their earlier
+// word (ADR 0061) moved to /projects/..., an environment tab's earlier name
 // replaced by its name, the credentials of old (ADR 0033: their list, a
 // new one's form, one's page and its new version's form, and a
 // credential's row of the Secrets view) by their HTTP secrets' (ADR
@@ -298,6 +299,10 @@ const EARLIER_TABS = { releases: 'deployments', edit: 'builder', groups: 'reacha
 // redirects; else pathname.
 export function canonicalPath(pathname) {
   const seg = String(pathname || '/').split('/');
+  if (seg[1] === 'tenants') { // KEEP-TENANT: the console's paths before ADR 0061
+    seg[1] = 'projects';
+    pathname = seg.join('/');
+  }
   if (seg[1] === 'projects' && seg[3] === 'environments' && seg[4] && EARLIER_TABS[seg[5]]) {
     seg[5] = EARLIER_TABS[seg[5]];
     return seg.join('/');
