@@ -323,6 +323,24 @@ describe('the forms', () => {
     expect(out).not.toContain('type="password"');
     expect(t).not.toContain('Save as a new version');
   });
+
+  it('show what the code expects of a secret, and offer it for a missing one (ADR 0058)', () => {
+    const spec = setObject(STORED, 'services', 'web', { ...STORED.services.web, env: { GH: { secret: 'gh', key: 'url' } } });
+    const refs = referencesTo(spec, 'secrets', 'gh');
+    const c = ctx(spec, [{ severity: 'error', path: 'secrets.gh.mode', rest: 'mode', problem: 'the mode differs', remedy: 'r' }],
+      { httpSecrets: HTTP, project: 'kino', env: 'prod' });
+    const pin = { name: 'gh', type: 'http', pinned: 0, latest: 0, newer: false, missing: true,
+      expect: { type: 'http', mode: 'intercept' } };
+    const out = html(<SecretForm name="gh" pin={pin} refs={refs} ctx={c} onPin={nop} onRemove={nop} />);
+    const t = text(<SecretForm name="gh" pin={pin} refs={refs} ctx={c} onPin={nop} onRemove={nop} />);
+    expect(t).toContain('the code expects an HTTP secret in the intercept mode');
+    expect(t).toContain('the mode differs');
+    expect(t).toContain('New HTTP secret gh, in the intercept mode');
+    expect(out).toContain('href="/projects/kino/environments/prod/secrets/http/new?name=gh&amp;mode=intercept"');
+    const value = text(<SecretForm name="internal-token" pin={{ name: 'internal-token', pinned: 2, latest: 3, expect: { type: 'value' } }}
+      refs={[]} ctx={ctx(STORED)} onPin={nop} onRemove={nop} />);
+    expect(value).toContain('the code expects a value');
+  });
 });
 
 describe('ReviewPanel', () => {

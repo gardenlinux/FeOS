@@ -6,7 +6,7 @@ import { Icon } from '../Icon.jsx';
 import { isDnsLabel, isObject, isSecretName, objectsOf, registryHost } from './draft.js';
 import { envValueKind, refLine, refTargets, referencesTo, refsFrom, suggestVarName } from './refs.js';
 import { atField, notAt } from './findings.js';
-import { checkNewer, imageView, pinSecret, setImage } from './pins.js';
+import { checkNewer, expectationWords, imageView, newSecretQuery, pinSecret, setImage } from './pins.js';
 import { optionProblems, planText } from './catalog.js';
 import { httpSecretPath, newHttpSecretPath } from '../routes.js';
 import { refValue } from './httpSecret.js';
@@ -1163,9 +1163,10 @@ export function SecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
   if (pin.type === 'http') return <HttpSecretForm name={name} pin={pin} refs={refs} ctx={ctx} onPin={onPin} onRemove={onRemove} />;
   return (
     <div className="b-form">
-      <FormHead kind="Secret" name={name} findings={ctx.findings} fields={['version']} />
+      <FormHead kind="Secret" name={name} findings={ctx.findings} fields={['version', ...EXPECT_FIELDS]} />
       <Section title="Versions" findings={atField(ctx.findings, 'version')}>
         <div className="kv-grid">
+          <Expects pin={pin} />
           <span className="k">pinned</span>
           <span className="v">{pin.pinned ? <>version <span className="mono">{pin.pinned}</span></> : <span className="muted">the latest when deployed</span>}</span>
           <span className="k">latest</span>
@@ -1179,6 +1180,7 @@ export function SecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
           </span>
         </div>
         <FindingList list={atField(ctx.findings, 'version')} />
+        <FindingList list={EXPECT_FIELDS.flatMap((f) => atField(ctx.findings, f))} />
         {login && <p className="panel-note">A registry login reads it at its latest version whenever a pod is created, not at the pin.</p>}
         <Field label={pin.missing ? 'Set a value' : 'Set a new value'} wide
           hint={ctx.isNew ? 'kept in this page only until the first deploy, which writes it first' : 'written to the environment at once; the draft pins the version it makes'}>
@@ -1198,6 +1200,23 @@ export function SecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
   );
 }
 
+// EXPECT_FIELDS are the fields of a pin that say what the spec's code
+// expects of the secret (ADR 0058); the plan's findings at them show with
+// the secret's row.
+const EXPECT_FIELDS = ['type', 'mode', 'forwardedHost'];
+
+// Expects is the row of what the spec's code expects of a secret, when
+// it says.
+function Expects({ pin }) {
+  const words = expectationWords(pin && pin.expect);
+  if (!words) return null;
+  return (
+    <>
+      <span className="k">the code expects</span>
+      <span className="v">{words}</span>
+    </>);
+}
+
 // HttpSecretForm shows an HTTP secret the draft references (ADR 0055):
 // its pinned and latest versions and what references it. Its definition
 // and its key are written on its page in the environment's Secrets,
@@ -1207,9 +1226,10 @@ function HttpSecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
   const page = ctx.project && ctx.env && !ctx.isNew ? (known ? httpSecretPath(ctx.project, ctx.env, name) : newHttpSecretPath(ctx.project, ctx.env)) : '';
   return (
     <div className="b-form">
-      <FormHead kind="HTTP secret" name={name} findings={ctx.findings} fields={['version']} />
+      <FormHead kind="HTTP secret" name={name} findings={ctx.findings} fields={['version', ...EXPECT_FIELDS]} />
       <Section title="Versions" findings={atField(ctx.findings, 'version')}>
         <div className="kv-grid">
+          <Expects pin={pin} />
           <span className="k">pinned</span>
           <span className="v">{pin.pinned ? <>version <span className="mono">{pin.pinned}</span></> : <span className="muted">the latest when deployed</span>}</span>
           <span className="k">latest</span>
@@ -1229,9 +1249,11 @@ function HttpSecretForm({ name, pin, refs, ctx, onPin, onRemove }) {
             </>)}
         </div>
         <FindingList list={atField(ctx.findings, 'version')} />
+        <FindingList list={EXPECT_FIELDS.flatMap((f) => atField(ctx.findings, f))} />
         <p className="muted small">Its URL, its authentication and its key are written on its page, never into the draft; a
           variable gets its URL or host, and the platform adds the key at the node.</p>
-        {page && <FormLink ctx={ctx} to={page}>{known ? `HTTP secret ${name}` : 'New HTTP secret'}</FormLink>}
+        {page && <FormLink ctx={ctx} to={known ? page : page + newSecretQuery(name, pin.expect)}>
+          {known ? `HTTP secret ${name}` : `New HTTP secret ${name}${pin.expect && pin.expect.mode ? `, in the ${pin.expect.mode} mode` : ''}`}</FormLink>}
       </Section>
       <Section title="Used by">
         {refs.length === 0 ? <p className="muted small">Nothing references it: a deployment drops its pin.</p>

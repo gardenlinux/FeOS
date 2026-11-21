@@ -8,6 +8,7 @@ import { Ago, ArmButton, CopyBtn, ErrBox, PageHead, StateDot, useArm, usePoll } 
 import { fmtDateTime, shortId } from '../format.js';
 import { useEnvStatus } from '../envstatus.jsx';
 import { envPath, httpSecretPath, newHttpSecretPath, objectPath, sandboxPath, secretsPath } from '../routes.js';
+import { offeredSecret } from './pins.js';
 import {
   KINDS, REDACTED, curlOf, definitionOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel, modeWords,
   needsDeployment, pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, refValue, specSnippet, usedWords,
@@ -517,7 +518,10 @@ export function rebinds(f, cred) {
 // stands: a kept field is the latest version's value, which never
 // leaves ferund.
 export function HttpSecretForm({ project, env, cred, ec, navigate }) {
-  const [f, setF] = useState(() => (cred ? formOf(cred) : emptyForm()));
+  // A new one takes what a spec's missing secret offers (ADR 0058: its
+  // name, mode and forwarded host, from the builder's link).
+  const [f, setF] = useState(() => (cred ? formOf(cred)
+    : { ...emptyForm(), ...offeredSecret(typeof location !== 'undefined' ? location.search : '') }));
   const [bad, setBad] = useState('');
   const [saving, setSaving] = useState(false);
   const [pre, setPre] = useState(null);
