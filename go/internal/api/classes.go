@@ -229,6 +229,9 @@ func (s *server) admin(h apiHandler) http.Handler {
 			if err := s.checkBasicOrigin(r); err != nil {
 				return err
 			}
+			if _, sent, _ := personNamed(r); sent {
+				return errPersonHeaderRefused()
+			}
 			return h(w, r.WithContext(auth.WithAdmin(r.Context(), a)))
 		}
 		sess, ok, err := s.session(r)
@@ -238,6 +241,9 @@ func (s *server) admin(h apiHandler) http.Handler {
 		if ok && sess.Admin {
 			if err := s.checkCSRF(r); err != nil {
 				return err
+			}
+			if _, sent, _ := personNamed(r); sent {
+				return errPersonHeaderRefused()
 			}
 			return h(w, r.WithContext(auth.WithAdmin(r.Context(), adminOf(sess))))
 		}

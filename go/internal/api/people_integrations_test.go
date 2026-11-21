@@ -241,6 +241,14 @@ func TestIntegrationNamesAPerson(t *testing.T) {
 	expect(t, e.serve(sess), http.StatusBadRequest, refused)
 	sess.path = "/auth/me"
 	expect(t, e.serve(sess), http.StatusBadRequest, refused)
+	sess.path = "/api/v1/integrations"
+	expect(t, e.serve(sess), http.StatusBadRequest, refused)
+	op := asSession("GET", "/api/v1/admin/integrations", w.person(t, "op", true), nil)
+	op.header.Set(personHeader, "reader")
+	expect(t, e.serve(op), http.StatusBadRequest, refused)
+	basic := request{method: "GET", path: "/api/v1/admin/integrations", header: http.Header{"Authorization": {adminAuth()},
+		personHeader: {"reader"}}}
+	expect(t, e.serve(basic), http.StatusBadRequest, refused)
 
 	// What it makes records the integration and the person it named.
 	in, err := e.st.GetIntegration(context.Background(), "fecode")

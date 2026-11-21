@@ -87,7 +87,8 @@ type personKey struct{}
 // person is the person class: a signed-in person's session (an
 // operator's too) with a session's CSRF rules, in no project. An
 // integration's bearer (a JWT) is refused, 403 integration_refused: an
-// integration is no person (ADR 0056).
+// integration is no person (ADR 0056); FeRun-Person, which only an
+// integration sends, is 400 person_header_refused.
 func (s *server) person(h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
 		if isJWT(bearer(r)) {
@@ -102,6 +103,9 @@ func (s *server) person(h apiHandler) http.Handler {
 		}
 		if err := s.checkCSRF(r); err != nil {
 			return err
+		}
+		if _, sent, _ := personNamed(r); sent {
+			return errPersonHeaderRefused()
 		}
 		return h(w, r.WithContext(context.WithValue(r.Context(), personKey{}, sess)))
 	})
