@@ -110,6 +110,12 @@ const (
 // Parse reads a spec strictly (fs.Parse).
 func Parse(raw []byte) (Spec, []Finding) { return fs.Parse(raw) }
 
+// ParseYAML reads a spec in YAML strictly (fs.ParseYAML).
+func ParseYAML(raw []byte) (Spec, []Finding) { return fs.ParseYAML(raw) }
+
+// YAMLToJSON is the JSON a YAML document stands for (fs.YAMLToJSON).
+func YAMLToJSON(raw []byte) ([]byte, []Finding) { return fs.YAMLToJSON(raw) }
+
 // MergePatch applies an RFC 7396 merge patch to a JSON document
 // (fs.MergePatch).
 func MergePatch(doc, patch []byte) ([]byte, error) { return fs.MergePatch(doc, patch) }

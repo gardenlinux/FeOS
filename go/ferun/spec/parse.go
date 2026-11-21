@@ -51,9 +51,15 @@ func Parse(raw []byte) (Spec, []Finding) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		p.errorf("", "send exactly one JSON object", "the spec has data after its end")
 	}
+	return p.spec(root)
+}
+
+// spec reads a spec from the tree of a JSON or a YAML document: an
+// object, each key once, every field known and of its type.
+func (p *parser) spec(root *node) (Spec, []Finding) {
 	if root.kind != kindObject {
 		p.errorf("", "send the spec as a JSON object", "the spec is %s, not an object", root.kindName())
-		return Spec{}, p.findings
+		return Spec{}, SortFindings(p.findings)
 	}
 	p.duplicates(root, "")
 	var s Spec

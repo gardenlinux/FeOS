@@ -11,6 +11,9 @@
 //   - Parse, the strict reader: an unknown field anywhere, a value of the
 //     wrong type, a duplicate key and trailing data are error findings
 //     with their paths, the same ones ferund's plan gives;
+//   - YAMLToJSON and ParseYAML, the reader of YAML: a spec in YAML is
+//     read as the JSON it stands for, by YAML 1.2's core schema, and
+//     then as Parse reads JSON, with the same findings and paths;
 //   - MergePatch, an RFC 7396 merge patch of a spec document, with which
 //     a caller lays its own values over a spec;
 //   - Finding {severity, path, problem, remedy}, the shape of every
