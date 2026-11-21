@@ -275,7 +275,12 @@ func normService(svc Service, p Pins) Service {
 	}
 	out.Replicas = &replicas
 	out.Resources = normResources(svc.Resources)
-	if svc.Idle != "" {
+	switch svc.Idle {
+	case "", IdleNever:
+		// never says what leaving idle out says (ADR 0057): one
+		// deployment either way.
+		out.Idle = ""
+	default:
 		out.Idle = normDuration(svc.Idle, "")
 	}
 	timeout := ""

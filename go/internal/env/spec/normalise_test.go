@@ -5,6 +5,7 @@ package spec
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,5 +215,26 @@ func TestHash(t *testing.T) {
 	}
 	if _, err := json.Marshal(a); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// never is every runtime's word (ADR 0057): an image service's normalises
+// away, so two specs that differ only in it are one deployment; an
+// attached service's stays.
+func TestIdleNever(t *testing.T) {
+	const image = `{"services": {"api": {"image": "ghcr.io/acme/api:1"%s}}}`
+	without := mustParse(t, fmt.Sprintf(image, ""))
+	with := mustParse(t, fmt.Sprintf(image, `, "idle": "never"`))
+	checkFindings(t, Validate(defaultVC(ModePlan), with, nil), nil)
+	a, _ := Normalise(without, Pins{})
+	b, _ := Normalise(with, Pins{})
+	if b.Services["api"].Idle != "" || !EqualNormalised(a, b) || Hash(a) != Hash(b) {
+		t.Fatalf("an image service's never: %+v", b.Services["api"])
+	}
+	attached := mustParse(t, `{"services": {"web": {"runtime": "attached", "sandbox": "`+webSandbox+
+		`", "command": ["x"], "idle": "never"}}}`)
+	n, _ := Normalise(attached, Pins{})
+	if n.Services["web"].Idle != IdleNever {
+		t.Fatalf("an attached service's never: %+v", n.Services["web"])
 	}
 }

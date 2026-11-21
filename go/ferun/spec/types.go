@@ -77,12 +77,13 @@ type Service struct {
 	// it still runs 2 s after it was first seen running.
 	Readiness *Readiness `json:"readiness,omitempty"`
 	// Idle is how long a replica without traffic runs before it is paused
-	// (at least 1m; a route wakes it); "": never. Image runtime: route
-	// targets only. Attached runtime: how long the sandbox it runs in
-	// stays awake after its last activity once the service runs, "never"
-	// (IdleNever) for as long as it runs, "": no claim, the sandbox's own
-	// idle interval applies (ADR 0018, "An attached service idles as an
-	// image service does").
+	// (at least 1m; a route wakes it); "" or "never" (IdleNever): never,
+	// which normalisation writes as "". Image runtime: a duration for
+	// route targets only. Attached runtime: how long the sandbox it runs
+	// in stays awake after its last activity once the service runs,
+	// "never" for as long as it runs, "": no claim, the sandbox's own idle
+	// interval applies (ADR 0018, "An attached service idles as an image
+	// service does"; ADR 0057: never is every runtime's word).
 	Idle string `json:"idle,omitempty"`
 	// Rollout bounds a deployment's rollout of the service. Image runtime
 	// only.
@@ -681,7 +682,9 @@ const (
 // and default is ferund's, behind the plan: its findings name them.
 const MaxSpecBytes = 1 << 20
 
-// IdleNever keeps an attached service's sandbox awake while it runs.
+// IdleNever is every runtime's word for a service that stays awake as
+// long as it runs (ADR 0057): an image service's is what leaving idle out
+// says; an attached service's keeps its sandbox awake while it runs.
 const IdleNever = "never"
 
 // Severity is how bad a finding is.

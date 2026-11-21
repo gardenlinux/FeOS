@@ -388,7 +388,9 @@ func (v *validator) service(name string, svc Service) {
 		v.imageCredentials(p+".imageCredentials", svc.ImageCredentials)
 		v.usesOf(p+".uses", svc.Uses)
 		v.egressOf(p+".egress", svc.Egress)
-		if svc.Idle != "" {
+		// never is every runtime's word (ADR 0057): for an image service
+		// it is what no idle says, and needs no route.
+		if svc.Idle != "" && svc.Idle != IdleNever {
 			d, ok := v.duration(p+".idle", svc.Idle)
 			switch {
 			case !ok:
