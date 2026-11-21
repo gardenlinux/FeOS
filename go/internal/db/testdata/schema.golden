@@ -323,7 +323,9 @@ TABLE env_route_tokens
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN last_used_at timestamp with time zone
   COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN integration_id uuid
   CONSTRAINT FOREIGN KEY (env_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (hash)
   CREATE INDEX env_route_tokens_env ON public.env_route_tokens USING btree (env_id)
   CREATE UNIQUE INDEX env_route_tokens_pkey ON public.env_route_tokens USING btree (hash)
@@ -395,6 +397,7 @@ TABLE environments
   COLUMN deployment integer NOT NULL DEFAULT 0
   COLUMN access text NOT NULL DEFAULT 'anyone'::text
   COLUMN access_provider text
+  COLUMN protected boolean NOT NULL DEFAULT false
   CONSTRAINT CHECK (((NOT public) OR (ingress_group AND (host_label IS NOT NULL))))
   CONSTRAINT CHECK (((access = 'visitors'::text) OR (access_provider IS NULL)))
   CONSTRAINT CHECK (((host_label ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text) AND (substr(host_label, 3, 2) <> '--'::text)))
@@ -407,6 +410,7 @@ TABLE environments
   CONSTRAINT PRIMARY KEY (id)
   CONSTRAINT UNIQUE (owner, name)
   CREATE INDEX environments_owner ON public.environments USING btree (owner, created_at)
+  CREATE INDEX environments_protected ON public.environments USING btree (owner) WHERE protected
   CREATE UNIQUE INDEX environments_owner_name_key ON public.environments USING btree (owner, name)
   CREATE UNIQUE INDEX environments_pkey ON public.environments USING btree (id)
 TABLE event_gaps
@@ -428,16 +432,20 @@ TABLE grants
   COLUMN made_by text NOT NULL DEFAULT ''::text
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
-  CONSTRAINT CHECK ((num_nonnulls(person_id, token_hash) = 1))
+  COLUMN integration_id uuid
+  CONSTRAINT CHECK ((num_nonnulls(person_id, token_hash, integration_id) = 1))
   CONSTRAINT CHECK ((role = ANY (ARRAY['read'::text, 'write'::text, 'admin'::text])))
   CONSTRAINT FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE
+  CONSTRAINT FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (token_hash) REFERENCES project_tokens(hash) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX grants_environment ON public.grants USING btree (environment_id) WHERE (environment_id IS NOT NULL)
+  CREATE INDEX grants_integration ON public.grants USING btree (integration_id) WHERE (integration_id IS NOT NULL)
   CREATE INDEX grants_person ON public.grants USING btree (person_id) WHERE (person_id IS NOT NULL)
   CREATE INDEX grants_token ON public.grants USING btree (token_hash) WHERE (token_hash IS NOT NULL)
+  CREATE UNIQUE INDEX grants_integration_scope ON public.grants USING btree (project_id, integration_id, COALESCE((environment_id)::text, ''::text)) WHERE (integration_id IS NOT NULL)
   CREATE UNIQUE INDEX grants_pkey ON public.grants USING btree (id)
   CREATE UNIQUE INDEX grants_principal_scope ON public.grants USING btree (project_id, COALESCE((person_id)::text, token_hash), COALESCE((environment_id)::text, ''::text))
 TABLE host_labels
@@ -565,6 +573,26 @@ TABLE instances
   COLUMN stopping timestamp with time zone
   CONSTRAINT PRIMARY KEY (id)
   CREATE UNIQUE INDEX instances_pkey ON public.instances USING btree (id)
+TABLE integrations
+  COLUMN id uuid NOT NULL DEFAULT gen_random_uuid()
+  COLUMN name text NOT NULL
+  COLUMN title text NOT NULL DEFAULT ''::text
+  COLUMN url text NOT NULL DEFAULT ''::text
+  COLUMN issuer text NOT NULL
+  COLUMN subject text NOT NULL
+  COLUMN disabled_at timestamp with time zone
+  COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN updated_at timestamp with time zone NOT NULL DEFAULT now()
+  COLUMN last_seen timestamp with time zone
+  CONSTRAINT CHECK (((length(subject) >= 1) AND (length(subject) <= 255)))
+  CONSTRAINT CHECK ((name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text))
+  CONSTRAINT PRIMARY KEY (id)
+  CONSTRAINT UNIQUE (issuer, subject)
+  CONSTRAINT UNIQUE (name)
+  CREATE UNIQUE INDEX integrations_issuer_subject_key ON public.integrations USING btree (issuer, subject)
+  CREATE UNIQUE INDEX integrations_name_key ON public.integrations USING btree (name)
+  CREATE UNIQUE INDEX integrations_pkey ON public.integrations USING btree (id)
 TABLE invitations
   COLUMN hash text NOT NULL
   COLUMN project_id text NOT NULL
@@ -894,6 +922,8 @@ TABLE sandbox_tokens
   COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
   COLUMN last_used_at timestamp with time zone
   COLUMN made_by text NOT NULL DEFAULT ''::text
+  COLUMN integration_id uuid
+  CONSTRAINT FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
   CONSTRAINT FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id) ON DELETE CASCADE
   CONSTRAINT PRIMARY KEY (hash)
   CREATE INDEX sandbox_tokens_sandbox ON public.sandbox_tokens USING btree (sandbox_id, created_at)

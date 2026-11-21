@@ -27,9 +27,10 @@ func TestEnvCredentialsMigration(t *testing.T) {
 	d := dbtest.Open(t)
 	migrateBefore(t, d, 35)
 	migrateRange(t, d, 36, 40)
-	// 0041 drops the old table; recorded as applied, Migrate below
-	// applies 0035 alone, as the release of 0035 did.
-	if _, err := d.Pool.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES (41)"); err != nil {
+	// 0041 drops the old table; recorded as applied with those after it
+	// (which speak its schema), Migrate below applies 0035 alone, as the
+	// release of 0035 did.
+	if _, err := d.Pool.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES (41), (42)"); err != nil {
 		t.Fatal(err)
 	}
 
