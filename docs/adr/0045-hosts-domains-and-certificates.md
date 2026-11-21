@@ -54,8 +54,8 @@ same for different pairs: `shop` of `acme.io`, `shop` of `acme-io` and
 `shop-acme` of `io`; whoever published first would keep the label, so
 another project could hold the host that reads as yours. A FeRun project that is
 a product of its own, with projects of its own in it, wants to name their
-hosts: a production at `<project>.<zone>` and every other environment at
-`<environment>--<project>`.
+hosts: a production at `<its project>.<zone>` and every other environment
+at `<environment>--<its project>`.
 
 The certificates of the platform's own hosts come from the cluster's
 issuer. The domains' cannot: a project's DNS is the project's, and an ACME

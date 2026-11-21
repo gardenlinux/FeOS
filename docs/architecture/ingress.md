@@ -647,7 +647,8 @@ only when its project chooses another:
   label the environment had or would get; that one stays the project's;
 - **plain**: a chosen label without `--`, which only a project that owns
   the apps zone may choose (`--apps-zone-owners`, FeCode's installation
-  `fecode`, for a project's production at `<project>.<apps zone>`), and
+  `fecode`, for one of its projects' production at `<FeCode
+  project>.<apps zone>`), and
   only while its hosts are in the apps zone: the project zone has no
   owners, and a plain label there is a 400. A plain label is a
   DNS label of at most 63 characters, not ending in a hyphen and 16 hex
@@ -1360,7 +1361,8 @@ plain labels, since it has no owners.
   (`POST /api/v1/admin/projects`) and for every project while there is no
   project zone; the project zone's name for the projects people make, set
   at their creation (`model.Zones.ForNewProject`, `store.MakeProject`).
-  FeCode's project `fecode` stays in the apps zone with its plain labels.
+  FeCode's one project at FeRun, `fecode`, stays in the apps zone with its
+  plain labels.
 - **An operator moves a project**, `PUT /api/v1/admin/projects/{project}/zone
   {"zone": "apps.run.example.com"}` (or the apps zone's name). Its
   environments' hosts move as a changed label does: each keeps its

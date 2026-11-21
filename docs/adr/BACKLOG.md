@@ -264,7 +264,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0055
 
-- ADR 0055: migration 0035 left `project_credentials` in place for the rolling update (empty, which it checked; read by no instance since, and its trigger refuses every write); a later migration drops it, repeating 0035's refusal while the table holds a row, and its trigger function with it.
 - ADR 0055: the `…/credentials` routes and a sandbox's `credentials` field answer as the HTTP secrets' for a release; then they go, and the table `env_credentials` may take the HTTP secrets' name.
 - ADR 0055: a sandbox's own HTTP set takes no write; once no sandbox holds one, its storage and its delete go.
 - ADR 0055: a narrower use: a sandbox or a variable that takes an HTTP secret with fewer paths or a lower rate than its definition.

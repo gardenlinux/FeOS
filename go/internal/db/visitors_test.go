@@ -18,9 +18,9 @@ import (
 // private one from before admit anyone, with no provider, and the
 // release before still inserts and publishes environments with its
 // column lists. Service tokens keep their rows and take the kind auth.
-// The new tables refuse what the contracts rule out: a provider of kind
-// tenant without a URL, the reserved name ferun, an environment naming a
-// provider its tenant lacks, the delete of a provider an environment
+// The new tables refuse what the contracts rule out: a provider of the
+// project's kind without a URL, the reserved name ferun, an environment
+// naming a provider its project lacks, the delete of a provider an environment
 // names, and a visit's binding that is not a hash.
 func TestVisitorsMigration(t *testing.T) {
 	t.Parallel()
@@ -95,7 +95,7 @@ func TestVisitorsMigration(t *testing.T) {
 	refused("23514", "INSERT INTO access_providers (tenant, name, kind, url) VALUES ('acme', 'Bad_Name', 'tenant', 'https://x.example/')")
 	refused("23514", "INSERT INTO access_providers (tenant, name, kind) VALUES ('acme', 'ferun-like', 'ferun')")
 
-	// An environment names a provider of its own tenant, or ferun (NULL),
+	// An environment names a provider of its own project, or ferun (NULL),
 	// and only with visitors.
 	exec("UPDATE environments SET access = 'visitors', access_provider = 'fecode' WHERE id = $1", public)
 	exec("UPDATE environments SET access = 'visitors', access_provider = NULL WHERE id = $1", later)

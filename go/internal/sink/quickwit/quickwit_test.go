@@ -353,7 +353,7 @@ func TestQuickwit(t *testing.T) {
 	withProd := 0
 	for _, sp := range splits.Splits {
 		tags := strings.Join(sp.Tags, " ")
-		if !strings.Contains(tags, "project!") || !strings.Contains(tags, "environment!") || !strings.Contains(tags, "job!") {
+		if !strings.Contains(tags, "tenant!") || !strings.Contains(tags, "environment!") || !strings.Contains(tags, "job!") { // KEEP-TENANT: Quickwit's stored name
 			t.Errorf("split %s without its tag fields: %v", sp.SplitID, sp.Tags)
 		}
 		if strings.Contains(tags, "environment:prod") {

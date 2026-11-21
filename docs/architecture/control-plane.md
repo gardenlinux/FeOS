@@ -103,7 +103,7 @@ conversion).
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
 | `--apps-zone` | empty | the DNS zone of public environments' default hosts, `<label>.<zone>`, which `ferun-ingress` serves ([The ingress](#the-ingress)); empty: no hosts, and no environment can be made public |
 | `--project-zone` | empty | the DNS zone of the default hosts of the projects people make (ADR 0031), such as `apps.run.example.com`, which `ferun-ingress` serves with a wildcard of its own; needs `--apps-zone`, and neither may be or lie under the other; empty: every project's hosts are under `--apps-zone` ([Public environments](#public-environments)) |
-| `--apps-zone-owners` | none | the projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<project>.<zone>` ([Public environments](#public-environments)); empty: none may |
+| `--apps-zone-owners` | none | the projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<label>.<zone>`, as FeCode does for one of its projects' production ([Public environments](#public-environments)); empty: none may |
 | `--edge-name` | empty | the name projects' domains point at with a CNAME, such as `edge.fecode.dev`, which the operator publishes with the balancer's addresses ([Domains](#domains)); empty: domains are off |
 | `--edge-address` | none | an edge address beside what `--edge-name` resolves to, which a domain's A and AAAA records may name; repeatable |
 | `--domain-challenge-label` | `_ferun-challenge` | the label of a claim's TXT record, `<label>.<name>`; a lowercase DNS label that may hold `_` |
@@ -246,7 +246,8 @@ replicate synchronously ([Operations](#operations)).
   domains](#certificates-of-domains)); `0016_access_logs.sql`, the
   ingress's access log of before the sink, which `0020_drop_access_logs.sql`
   drops with its partitions ([The sink](#the-sink));
-  `0017_project_jobs.sql`, the projects' jobs and `sandboxes.project_job`
+  `0017_tenant_jobs.sql`, the projects' jobs <!-- KEEP-TENANT: an applied migration's file name -->
+  and `sandboxes.project_job`
   ([Projects' jobs](#projects-jobs)); `0019_sink.sql`, `sandboxes.log_labels`,
   `jobs.log_retention_days` and `service_tokens` ([The sink](#the-sink));
   `0034_visitors.sql`, `access_providers`, `visits`, `visit_answers`,
@@ -2493,8 +2494,10 @@ HTTP secrets and name them in their sandboxes; it needs no migration,
 and a stored deployment and a set stated before keep running.
 
 The migration of ADR 0033's credentials (`0035_env_credentials.sql`)
-refused while `project_credentials` held a row; a stored deployment that
-names a `projectCredential` still reads, as a binding without a
+refused while the projects' credentials held a row, in the table
+`tenant_credentials` that `0041_projects.sql` drops <!-- KEEP-TENANT: a name of before ADR 0061 -->
+with the same refusal; a stored deployment whose binding names a credential
+in the field `tenantCredential` still reads, as a binding without a <!-- KEEP-TENANT: a name of before ADR 0061 -->
 credential: its pods get the binding without one, and a revert or a
 clone of it is refused with a finding at the binding.
 

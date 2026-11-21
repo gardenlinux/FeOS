@@ -206,8 +206,8 @@ type Config struct {
 	AppsZone string
 	// AppsZoneOwners are the projects that own the apps zone's plain names
 	// (ADR 0021, 2026-11-01): such a project may choose a default host
-	// label without "--", as FeCode does for a project's production
-	// (<project>.<apps zone>); nil: no project may.
+	// label without "--", as FeCode does for one of its projects'
+	// production (<FeCode project>.<apps zone>); nil: no project may.
 	AppsZoneOwners []string
 	// ProjectCreation says who makes projects with POST /api/v1/projects
 	// (ADR 0031): "people" (every signed-in person) or "operators".
