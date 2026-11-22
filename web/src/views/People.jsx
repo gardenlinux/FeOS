@@ -7,7 +7,7 @@ import { Icon } from '../Icon.jsx';
 import { Ago, ArmButton, ErrBox, LiveBadge, PageHead, Secret, useArm, useNow, usePoll } from '../components.jsx';
 import { fmtDate } from '../format.js';
 import {
-  ROLES, accountLabel, accountsToMakeOn, envCan, grantableRoles, integrationRoleText, invitationState, inviteLink,
+  ROLES, accountAccess, accountLabel, accountsToMakeOn, envCan, grantableRoles, integrationRoleText, invitationState, inviteLink,
   madeByText, myAccounts, myProjects, personLabel, quotaRows, fmtQuota, roleLabel, scopeLabel, projectAccess, projectHome,
   useAccess, useMe,
 } from '../people.js';
@@ -412,6 +412,16 @@ export function IntegrationsPane({ list, access, envs, adminEnvs, act, preselect
   );
 }
 
+// grantScope is the scope a grant form offers: the one chosen, '' the
+// project; one who is no admin of the project grants on an environment
+// they are admin of, never on the project, and the environments come
+// after the first render (FeCode's link opens the form at once), so a
+// choice made before them falls to the first. '' while there is none.
+export function grantScope(adminProject, chosen, envs) {
+  if (adminProject || envs.some((e) => e.id === chosen)) return chosen;
+  return (envs[0] && envs[0].id) || '';
+}
+
 // IntegrationGrantForm grants a registered integration a role on the
 // project or on an environment the granter is admin of, and says what
 // the role lets it do (integrationRoleText).
@@ -419,7 +429,8 @@ export function IntegrationGrantForm({ granted, envs, projectRole, adminProject,
   const [registered, setRegistered] = useState(null);
   const [err, setErr] = useState('');
   const [name, setName] = useState(preselect);
-  const [env, setEnv] = useState(adminProject ? '' : ((envs[0] && envs[0].id) || ''));
+  const [chosen, setEnv] = useState(adminProject ? '' : ((envs[0] && envs[0].id) || ''));
+  const env = grantScope(adminProject, chosen, envs);
   const [role, setRole] = useState('write');
   useEffect(() => {
     let live = true;
@@ -433,15 +444,17 @@ export function IntegrationGrantForm({ granted, envs, projectRole, adminProject,
   const pick = offered.find((i) => i.name === name) || null;
   const max = env ? 'admin' : projectRole;
   const roles = grantableRoles(max);
+  const shown = roles.includes(role) ? role : roles[roles.length - 1] || '';
+  const ready = !!pick && !!shown && (adminProject || !!env);
   const scopeName = env ? ((envs.find((e) => e.id === env) || {}).name || env) : '';
   return (
-    <form className="createpanel column" onSubmit={(e) => { e.preventDefault(); if (pick) onGrant(pick.name, role, env); }}>
+    <form className="createpanel column" onSubmit={(e) => { e.preventDefault(); if (ready) onGrant(pick.name, shown, env); }}>
       <div className="inlineform">
         <select value={pick ? pick.name : ''} aria-label="the integration" onChange={(e) => setName(e.target.value)}>
           <option value="">integration…</option>
           {offered.map((i) => <option key={i.name} value={i.name}>{i.title || i.name} · {i.name}</option>)}
         </select>
-        <select value={roles.includes(role) ? role : roles[roles.length - 1] || ''} aria-label="role" onChange={(e) => setRole(e.target.value)}>
+        <select value={shown} aria-label="role" onChange={(e) => setRole(e.target.value)}>
           {roles.map((r) => <option key={r} value={r}>{r}</option>)}
         </select>
         <span className="muted small">on</span>
@@ -449,7 +462,7 @@ export function IntegrationGrantForm({ granted, envs, projectRole, adminProject,
           {adminProject && <option value="">the project</option>}
           {envs.map((x) => <option key={x.id} value={x.id}>environment {x.name}</option>)}
         </select>
-        <button type="submit" className="primary mini" disabled={!pick}>Grant</button>
+        <button type="submit" className="primary mini" disabled={!ready}>Grant</button>
         <button type="button" className="ghost mini" onClick={onCancel}><Icon name="x" size={11} /></button>
       </div>
       {pick && pick.url && <div className="small"><a href={pick.url} target="_blank" rel="noreferrer">{pick.url}</a></div>}
@@ -457,7 +470,7 @@ export function IntegrationGrantForm({ granted, envs, projectRole, adminProject,
         <p className="notice small">No integration named <span className="mono">{preselect}</span> is registered here.</p>)}
       {preselect && has(preselect) && <p className="small ok">{preselect} holds a grant on {env ? `environment ${scopeName}` : 'the project'} already.</p>}
       <ul className="role-lines">
-        {integrationRoleText(roles.includes(role) ? role : roles[roles.length - 1], env).map((l) => <li key={l}>{l}</li>)}
+        {integrationRoleText(shown, env).map((l) => <li key={l}>{l}</li>)}
       </ul>
       <ErrBox error={err} />
     </form>
@@ -490,6 +503,24 @@ function TokensPane({ project, envs, navigate }) {
   );
 }
 
+// TokenScope is a token's "on" cell: the scope of its own grant, and its
+// grants beside it (the protect dialog gives them, ADR 0060), each
+// removable with onRemove.
+export function TokenScope({ token: t, envName, onRemove = null }) {
+  return (
+    <>
+      {t.environment ? `environment ${t.environmentName || envName(t.environment)}` : 'the project'}
+      {(t.grants || []).map((g) => (
+        <span key={g.environment || 'project'} className="grantchip">
+          {g.environment ? envName(g.environment) : 'the project'} · {g.role}
+          {onRemove && (
+            <button className="iconbtn mini" title={`remove the grant on ${g.environment ? envName(g.environment) : 'the project'}`}
+              onClick={() => onRemove(t, g)}><Icon name="x" size={11} /></button>)}
+        </span>))}
+    </>
+  );
+}
+
 // TokenRows is a project's tokens as a table: hash, label, role, scope,
 // made, last used; with actions per row when given.
 export function TokenRows({ tokens, envs = [], actions = null }) {
@@ -506,7 +537,7 @@ export function TokenRows({ tokens, envs = [], actions = null }) {
             <td className="mono muted" title={t.hash}>{(t.hashPrefix || t.hash || '').slice(0, 8)}…</td>
             <td>{t.label || <span className="muted">(no label)</span>}</td>
             <td><RoleBadge role={t.role || 'admin'} /></td>
-            <td className="small">{t.environment ? `environment ${t.environmentName || envName(t.environment)}` : 'the project'}</td>
+            <td className="small"><TokenScope token={t} envName={envName} /></td>
             <td className="col-when muted">{fmtDate(t.createdAt)}</td>
             <td className="col-when">{t.lastUsedAt ? <Ago iso={t.lastUsedAt} /> : <span className="muted">never</span>}</td>
             {actions && <td className="col-quick">{actions(t)}</td>}
@@ -745,7 +776,16 @@ export function Tokens({ project }) {
                     <td className="mono muted" title={t.hash}>{(t.hashPrefix || t.hash || '').slice(0, 8)}…</td>
                     <td>{t.label || <span className="muted">(no label)</span>}</td>
                     <td><RoleBadge role={t.role || 'admin'} /></td>
-                    <td className="small">{t.environment ? `environment ${t.environmentName || envName(t.environment)}` : 'the project'}</td>
+                    <td className="small">
+                      <TokenScope token={t} envName={envName} onRemove={async (tk, g) => {
+                        try {
+                          await api.deleteTokenGrant(tk.hash, g.environment);
+                          await refresh();
+                        } catch (e) {
+                          setErr(e.message);
+                        }
+                      }} />
+                    </td>
                     <td className="col-when muted">{fmtDate(t.createdAt)}</td>
                     <td className="col-when">{t.lastUsedAt ? <Ago iso={t.lastUsedAt} /> : <span className="muted">never</span>}</td>
                     <td className="col-quick">
@@ -819,12 +859,15 @@ export function QuotaCard() {
 // ------------------------------------------------------------ invitation --
 
 // acceptedPath is where an accepted invitation leads: an account's
-// (ADR 0059) to its page, a project's to the project as me now sees it,
-// else the projects. res is the acceptance's answer, inv the preview.
+// (ADR 0059) to its page when me, read after the acceptance, may open it,
+// else to the accounts (default's page is the operators', though an
+// operator invites people to it); a project's to the project as me now
+// sees it, else the projects. res is the acceptance's answer, inv the
+// preview.
 export function acceptedPath(res, inv, me) {
   const account = (res && res.account) || (inv && inv.account) || '';
   const accountName = typeof account === 'string' ? account : account.name || '';
-  if (accountName) return `/accounts/${encodeURIComponent(accountName)}`;
+  if (accountName) return accountAccess(me, accountName).member ? `/accounts/${encodeURIComponent(accountName)}` : '/accounts';
   const name = (res && res.project) || (inv && inv.project) || '';
   return name ? projectHome(projectAccess(me, name)) : '/projects';
 }

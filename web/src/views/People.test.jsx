@@ -6,7 +6,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MeContext, projectAccess, can, quotaRows } from '../people.js';
 import { answerWith, answers, wire } from '../testing/wire.js';
-import { AccountList, IntegrationGrantForm, IntegrationsPane, MyProjects, TokenRows } from './People.jsx';
+import { AccountList, IntegrationGrantForm, IntegrationsPane, MyProjects, TokenRows, TokenScope, grantScope } from './People.jsx';
 import { Accounts, accountFacts, ACCOUNT_NAME } from './Accounts.jsx';
 import { QuotaBars, accountPageFacts } from './Account.jsx';
 import { INTEGRATION_NAME, integrationForm, integrationProblem } from './Integrations.jsx';
@@ -122,10 +122,35 @@ describe('integrations in a project', () => {
     expect(form).toContain('>the project</option>');
   });
 
+  it('an admin of an environment alone grants on an environment, also when the list comes after the form', () => {
+    const stage = { id: 'e1', name: 'stage' };
+    expect(grantScope(false, '', [])).toBe('');
+    expect(grantScope(false, '', [stage])).toBe('e1');
+    expect(grantScope(false, 'gone', [stage])).toBe('e1');
+    expect(grantScope(false, 'e1', [{ id: 'e0', name: 'dev' }, stage])).toBe('e1');
+    expect(grantScope(true, '', [stage])).toBe('');
+    // Before the list: nothing to grant on, Grant is off.
+    const before = html(<IntegrationGrantForm granted={[]} envs={[]} projectRole="read" adminProject={false} preselect="fecode" onGrant={nav} onCancel={nav} />);
+    expect(before).toMatch(/<button type="submit" class="primary mini" disabled="">Grant/);
+    expect(before).not.toContain('>the project</option>');
+    const after = html(<IntegrationGrantForm granted={[]} envs={[stage]} projectRole="read" adminProject={false} preselect="fecode" onGrant={nav} onCancel={nav} />);
+    expect(after).toContain('<option value="e1" selected="">environment stage</option>');
+    expect(after).toContain('<option value="write" selected="">write</option>');
+  });
+
   it('a project admin reads the tokens beside them', () => {
     const out = text(<TokenRows tokens={[{ hash: 'ab'.repeat(32), label: 'landscape release', role: 'write', createdAt: '2026-11-21T10:00:00Z' }]} />);
     expect(out).toContain('landscape release');
     expect(out).toContain('the project');
+  });
+
+  it('a token\'s grants beside its own show with it, removable where offered', () => {
+    const tok = { hash: 'ab'.repeat(32), label: 'release', role: 'write', grants: [{ role: 'write', environment: 'e1' }] };
+    const envName = (id) => ({ e1: 'prod' })[id] || id;
+    expect(text(<TokenScope token={tok} envName={envName} />)).toContain('the project prod · write');
+    expect(html(<TokenScope token={tok} envName={envName} />)).not.toContain('<button');
+    expect(html(<TokenScope token={tok} envName={envName} onRemove={nav} />)).toContain('title="remove the grant on prod"');
+    expect(text(<TokenRows tokens={[tok]} envs={[{ id: 'e1', name: 'prod' }]} />)).toContain('prod · write');
   });
 
   it('the project\'s access holds the account /auth/me names', () => {

@@ -625,6 +625,28 @@ export function RenameBox({ project, env, st, ec, changed, navigate }) {
   );
 }
 
+// CloneSecrets are the clone's boxes of the secrets it copies (null: still
+// loading), offered only with mayCopy, write on the source.
+export function CloneSecrets({ secrets, copy, setCopy, mayCopy }) {
+  return (
+    <div className="envfield"><span className="k">secrets</span>
+      <span className="envchecks">
+        {secrets === null && <span className="muted small">…</span>}
+        {secrets && secrets.length === 0 && <span className="muted small">none</span>}
+        {(secrets || []).map((s) => (
+          <label key={s.name} className="mono small">
+            <input type="checkbox" checked={mayCopy && !!copy[s.name]} disabled={!mayCopy}
+              onChange={(e) => setCopy((c) => ({ ...c, [s.name]: e.target.checked }))} />
+            {' '}{s.name} <span className="muted">{s.type === 'http' ? 'HTTP · ' : ''}v{s.version}</span>
+          </label>))}
+        {secrets && secrets.length > 0 && (mayCopy
+          ? <span className="muted small">copied at their latest versions; one left out the spec names fails the clone</span>
+          : <span className="muted small">copying secrets takes write on this environment; a spec that names them does not clone</span>)}
+      </span>
+    </div>
+  );
+}
+
 export function CloneBox({ project, env, st, ec, changed, navigate }) {
   const [name, setName] = useState('');
   const [deployment, setDeployment] = useState(0);
@@ -648,9 +670,12 @@ export function CloneBox({ project, env, st, ec, changed, navigate }) {
   }, [env]);
   const busy = !!(op && op.busy);
   const findings = op && op.error && op.error.body && op.error.body.findings;
+  // Copying secrets hands their values to the new environment: that takes
+  // write on this one, which a project writer lacks on a protected one.
+  const mayCopy = !!ec.write;
   const submit = async (e) => {
     e.preventDefault();
-    const body = cloneBody({ name, deployment, copy, secrets: secrets || [] });
+    const body = cloneBody({ name, deployment, copy: mayCopy ? copy : {}, secrets: secrets || [] });
     const r = await run(() => api.cloneEnvironment(env, body), (res) => `${res.name} made from deployment ${body.deployment || st.deployment}.`);
     if (r) { changed(); reload().catch(() => {}); navigate(envPath(project, r.name)); }
   };
@@ -672,18 +697,7 @@ export function CloneBox({ project, env, st, ec, changed, navigate }) {
               {(deployments || []).filter((d) => d.number !== st.deployment).map((d) => (
                 <option key={d.number} value={d.number}>deployment {d.number} · {d.state}{(d.tags || []).length ? ` · ${d.tags.join(', ')}` : ''}</option>))}
             </select></label>
-          <div className="envfield"><span className="k">secrets</span>
-            <span className="envchecks">
-              {secrets === null && <span className="muted small">…</span>}
-              {secrets && secrets.length === 0 && <span className="muted small">none</span>}
-              {(secrets || []).map((s) => (
-                <label key={s.name} className="mono small">
-                  <input type="checkbox" checked={!!copy[s.name]} onChange={(e) => setCopy((c) => ({ ...c, [s.name]: e.target.checked }))} />
-                  {' '}{s.name} <span className="muted">{s.type === 'http' ? 'HTTP · ' : ''}v{s.version}</span>
-                </label>))}
-              {secrets && secrets.length > 0 && <span className="muted small">copied at their latest versions; one left out the spec names fails the clone</span>}
-            </span>
-          </div>
+          <CloneSecrets secrets={secrets} copy={copy} setCopy={setCopy} mayCopy={mayCopy} />
           <div><button className="primary mini" type="submit" disabled={!name.trim()}>Clone</button></div>
         </fieldset>
       </form>
@@ -965,6 +979,8 @@ export function ProtectPrincipals({ list, give, setGive, env }) {
     <>
       <p className="small">
         Protected, a project grant of read or write reads {env}; changing it takes a grant on it, or admin on the project.
+        Sandbox and route tokens minted here by such a grant stop until it is lifted or their minter gets one.
+        A token&apos;s grant given here stays on Tokens, where it is removed.
         {losers.length > 0
           ? ` These change it today by a project grant of write and read it from then on, unless they get a grant on it:`
           : ' Nobody changes it today by a project grant of write alone: nobody loses write.'}

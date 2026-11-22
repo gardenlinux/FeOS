@@ -15,7 +15,7 @@ import {
 import { AboutBox, EnvOverview, KeysLine } from './EnvOverview.jsx';
 import { activityItems } from './envs.js';
 import {
-  AccessTable, CloneBox, DeleteBox, DomainsBox, ProtectBox, ProtectPrincipals, PublicBox, RouteTokenBox, TrafficTable, grantOf,
+  AccessTable, CloneBox, CloneSecrets, DeleteBox, DomainsBox, ProtectBox, ProtectPrincipals, PublicBox, RouteTokenBox, TrafficTable, grantOf,
   defaultTicks, offersGrant, principalKey, protectEnvironment,
 } from './EnvTabs.jsx';
 import { logsProblem } from './envs.js';
@@ -987,6 +987,19 @@ describe('protection (ADR 0060)', () => {
     })[k]));
     for (const c of calls) expect(c[2]).toEqual({ role: 'write', environment: 'env-1' });
     expect(grantOf({ kind: 'other', id: 'x' }, 'e')).toBeNull();
+  });
+
+  it('a clone copies secrets only with write on this environment, which a project writer lacks once protected', () => {
+    const secrets = [{ name: 'stripe', version: 2 }, { name: 'github', type: 'http', version: 1 }];
+    const copy = { stripe: true, github: true };
+    const may = html(<CloneSecrets secrets={secrets} copy={copy} setCopy={nav} mayCopy />);
+    expect(count(may, 'checked=""')).toBe(2);
+    expect(may).not.toContain('disabled=""');
+    const not = html(<CloneSecrets secrets={secrets} copy={copy} setCopy={nav} mayCopy={false} />);
+    expect(count(not, 'checked=""')).toBe(0);
+    expect(count(not, 'disabled=""')).toBe(2);
+    expect(text(<CloneSecrets secrets={secrets} copy={copy} setCopy={nav} mayCopy={false} />))
+      .toContain('copying secrets takes write on this environment');
   });
 
   it('a clone is not protected, and deleting a protected one takes admin on it', () => {

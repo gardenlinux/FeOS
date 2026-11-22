@@ -139,8 +139,17 @@ describe('an invitation', () => {
     expect(out).toContain(inv.role);
     expect(out).toContain('Accepting gives you the role.');
     expect(out).not.toContain('this account');
-    expect(acceptedPath({}, inv, me)).toBe(`/accounts/${inv.account.name}`);
-    expect(acceptedPath({ account: 'old' }, null, me)).toBe('/accounts/old');
+    // me is read after the acceptance: the account is the person's then.
+    const fresh = { ...me, accounts: [...me.accounts, { name: inv.account.name, title: inv.account.title, role: 'member', explicit: true }] };
+    expect(acceptedPath({}, inv, fresh)).toBe(`/accounts/${inv.account.name}`);
+    expect(acceptedPath({ account: inv.account.name }, null, fresh)).toBe(`/accounts/${inv.account.name}`);
+  });
+
+  it('one to default leads to the accounts: default\'s page is the operators\'', () => {
+    const me = wire('GET_auth_me.session.200');
+    expect(me.accounts.find((a) => a.name === 'default').explicit).toBe(false);
+    expect(acceptedPath({ account: 'default' }, null, me)).toBe('/accounts');
+    expect(acceptedPath({}, null, { ...me, accounts: [] })).toBe('/projects');
   });
 
   it('a project\'s leads to the project as /auth/me sees it, else to the projects', () => {
