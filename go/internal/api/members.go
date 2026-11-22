@@ -440,12 +440,16 @@ func (s *server) deleteMemberGrant(w http.ResponseWriter, r *http.Request) error
 
 // leaveProject is POST /api/v1/project/leave: a person gives up every grant
 // of theirs in the project, unless they are its last admin; an integration
-// gives up every grant of its own there (ADR 0056). A token does not
+// gives up every grant of its own there (ADR 0056), naming nobody or an
+// admin of the project (namedMayAdmin). A token does not
 // leave: it is revoked.
 func (s *server) leaveProject(w http.ResponseWriter, r *http.Request) error {
 	t, _ := auth.ProjectFrom(r.Context())
 	ctx := r.Context()
 	if t.Principal.IsIntegration() {
+		if err := namedMayAdmin(t, uuid.Nil); err != nil {
+			return err
+		}
 		if _, err := s.st.DeleteIntegrationGrants(ctx, t.Name, t.Principal.Integration); err != nil {
 			return fmt.Errorf("leave: %w", err)
 		}

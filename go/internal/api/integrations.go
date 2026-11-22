@@ -302,7 +302,8 @@ func (s *server) putIntegrationGrant(w http.ResponseWriter, r *http.Request) err
 // {integration}/grants[?environment=<ID or name>]: the integration's grant
 // on the project, or on the environment, goes, by an admin of that scope,
 // or by the integration itself, which may give up its own grants and
-// touch no other integration's (403 integration_refused).
+// touch no other integration's (403 integration_refused); naming a person,
+// only one who is an admin of that scope (namedMayAdmin).
 func (s *server) deleteIntegrationGrant(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	t, _ := auth.ProjectFrom(ctx)
@@ -317,11 +318,16 @@ func (s *server) deleteIntegrationGrant(w http.ResponseWriter, r *http.Request) 
 	}
 	env := uuid.Nil
 	switch {
-	case t.Principal.IsIntegration() && ref != "":
-		if env, err = s.envRef(r, t, ref); err != nil {
+	case t.Principal.IsIntegration():
+		if ref != "" {
+			if env, err = s.envRef(r, t, ref); err != nil {
+				return err
+			}
+		}
+		if err := namedMayAdmin(t, env); err != nil {
 			return err
 		}
-	case !t.Principal.IsIntegration():
+	default:
 		if env, err = s.adminScope(ctx, t, ref); err != nil {
 			return err
 		}
@@ -333,4 +339,22 @@ func (s *server) deleteIntegrationGrant(w http.ResponseWriter, r *http.Request) 
 	return writeJSON(w, http.StatusOK, struct {
 		Deleted bool `json:"deleted"`
 	}{deleted})
+}
+
+// namedMayAdmin bounds what an integration that names a person gives up of
+// its own grants by that person's role: they must be an admin of the scope
+// (env, uuid.Nil: the project), as they would to remove the grant
+// themselves. Otherwise a reader of the project would, through the
+// integration, take an admin's integration out of it. Naming nobody, the
+// integration gives up what it likes.
+func namedMayAdmin(t auth.Project, env uuid.UUID) error {
+	switch {
+	case t.Named == nil:
+		return nil
+	case env == uuid.Nil && t.Named.Project < auth.RoleAdmin:
+		return apierr.RoleRequired(auth.RoleAdmin.String(), "project")
+	case env != uuid.Nil && t.PersonEnvRole(env) < auth.RoleAdmin:
+		return apierr.RoleRequired(auth.RoleAdmin.String(), "environment")
+	}
+	return nil
 }
