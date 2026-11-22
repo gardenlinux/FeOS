@@ -16,6 +16,25 @@
 -- free, as a changed label's does. Chosen labels, fallbacks and the zone
 -- owners' plain labels stay where they are.
 
+-- A label of a project that is gone, held by no environment, that names
+-- a project in the zone in ADR 0063's forms (<project> or
+-- <choice>--<project>) is that project's: FeCode's environments ran in
+-- its FeRun project fecode until FeCode became a layer (ADR 0056), and
+-- the labels FeCode chose there, <environment>--<project> and <project>,
+-- are the hosts of the projects they moved to. It runs first, so that an
+-- environment gets its natural label where fecode held it.
+UPDATE host_labels h SET owner = p.id
+  FROM projects p
+ WHERE h.env_id IS NULL
+   AND NOT EXISTS (SELECT 1 FROM projects g WHERE g.id = h.owner)
+   AND h.zone = coalesce(p.zone, '')
+   AND strpos(p.id, '.') = 0 AND strpos(p.id, '--') = 0 AND p.id !~ '-[0-9a-f]{16}$'
+   AND (h.label = p.id
+        OR (length(h.label) > length(p.id) + 2
+            AND right(h.label, length(p.id) + 2) = '--' || p.id
+            AND left(h.label, length(h.label) - length(p.id) - 2) ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+            AND strpos(left(h.label, length(h.label) - length(p.id) - 2), '--') = 0));
+
 CREATE TEMP TABLE project_labels_relabel ON COMMIT DROP AS
 SELECT e.id, e.owner, coalesce(p.zone, '') AS zone,
        e.name || '--' || e.owner AS natural,

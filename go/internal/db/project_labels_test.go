@@ -18,6 +18,9 @@ import (
 // fallback where that is no label (a name of two characters) or another
 // project holds it, and its old label stays its project's, free. Chosen
 // labels, fallbacks and the plain labels of the zone owners do not move.
+// A gone project's labels that name a project in ADR 0063's forms are that
+// project's first, so dev of hb-baxxter gets dev--hb-baxxter where the gone
+// project fecode held it.
 func TestProjectLabelsMigration(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -50,6 +53,9 @@ func TestProjectLabelsMigration(t *testing.T) {
 	exec(`INSERT INTO environments (id, owner, name, public, ingress_group, host_label)
 		VALUES ($1, 'kino', 'feature-x', true, true, $2)`, feature, featureFallback)
 	exec("INSERT INTO host_labels (zone, label, owner, env_id) VALUES ('', $1, 'kino', $2)", featureFallback, feature)
+	// The gone project fecode holds dev--hb-baxxter, kino and x--y--kino:
+	// the first two go to the projects they name, the third to none.
+	exec("INSERT INTO host_labels (zone, label, owner) VALUES ('', 'dev--hb-baxxter', 'fecode'), ('', 'kino', 'fecode'), ('', 'x--y--kino', 'fecode')")
 	// Another project holds stage--kino: stage gets its fallback.
 	exec("INSERT INTO host_labels (zone, label, owner) VALUES ('', 'stage--kino', 'other')")
 
@@ -80,6 +86,13 @@ func TestProjectLabelsMigration(t *testing.T) {
 		}
 		if envID != nil || (owner != "kino" && owner != "hb-baxxter") {
 			t.Errorf("old label %s: owner %s, environment %v; want its project's, free", old, owner, envID)
+		}
+	}
+	for label, want := range map[string]string{"kino": "kino", "dev--hb-baxxter": "hb-baxxter", "x--y--kino": "fecode"} {
+		var owner string
+		if err := d.Pool.QueryRow(ctx, "SELECT owner FROM host_labels WHERE zone = '' AND label = $1", label).Scan(&owner); err != nil ||
+			owner != want {
+			t.Errorf("%s: owner %q %v, want %s", label, owner, err, want)
 		}
 	}
 	if natural, ok, _ := model.HostLabels("prod", "kino", prod); !ok || natural != "prod--kino" {

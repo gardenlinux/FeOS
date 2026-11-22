@@ -85,6 +85,13 @@ registered to their project for good, as ADR 0045 decided.
   ADR 0045 gets the natural label of this ADR, and its old host answers
   404 (ADR 0045: a changed label moves the host at once). The old label
   stays its project's.
+- A label of a project that is gone, held by no environment, that
+  names a project in this ADR's forms (`<project>` or
+  `<choice>--<project>`) becomes that project's first. FeCode's
+  environments ran in its project `fecode` until FeCode became a layer
+  (ADR 0056), and the labels FeCode chose there are the hosts of the
+  projects they moved to: `dev` of `hb-baxxter` gets `dev--hb-baxxter`,
+  and `kino` its address.
 - A chosen label from before stays where it is; a new choice follows
   this ADR.
 - The zone's owners and their plain labels go
