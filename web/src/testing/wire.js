@@ -27,8 +27,8 @@ const SHAPES = {
   'GET_auth_me.session.200': {
     kind: 'session', sub: ADA, person: P, email: 'ada@example.com', name: 'Ada', username: 'ada', picture: '', admin: false, method: 'oidc',
     projects: [
-      { project: 'kino', role: 'write', account: DEFAULT, environments: [env(PROD, 'prod', 'read', true, true, false), env(STAGE, 'stage', 'write', false, true, true)] },
-      { project: 'shop', role: '', account: TEAM, environments: [env('0199a1b2-0000-7000-8000-000000000003', 'shop-prod', 'admin', true, true, true)] },
+      { project: 'kino', role: 'write', account: DEFAULT, delete: false, environments: [env(PROD, 'prod', 'read', true, true, false), env(STAGE, 'stage', 'write', false, true, true)] },
+      { project: 'shop', role: '', account: TEAM, delete: false, environments: [env('0199a1b2-0000-7000-8000-000000000003', 'shop-prod', 'admin', true, true, true)] },
     ],
     accounts: [
       { name: 'cc-4711', title: 'Team X', role: 'admin', explicit: true, closed: false },
@@ -39,7 +39,7 @@ const SHAPES = {
   'GET_auth_me.operator.200': {
     kind: 'session', sub: 'op', person: '0199a1b2-0000-7000-8000-00000000bbbb', email: 'op@example.com', name: 'Op', admin: true, method: 'oidc',
     projects: [
-      { project: 'kino', role: 'admin', account: DEFAULT, environments: [env(PROD, 'prod', 'admin', true, true, true), env(STAGE, 'stage', 'admin', false, true, true)] },
+      { project: 'kino', role: 'admin', account: DEFAULT, delete: true, environments: [env(PROD, 'prod', 'admin', true, true, true), env(STAGE, 'stage', 'admin', false, true, true)] },
     ],
     accounts: [
       { name: 'cc-4711', title: 'Team X', role: 'admin', explicit: true, closed: false },
@@ -48,13 +48,13 @@ const SHAPES = {
   },
   'GET_auth_me.token.200': {
     kind: 'token', token: { label: 'landscape release', role: 'write', environment: PROD },
-    projects: [{ project: 'fecode-platform', role: '', environments: [env(PROD, 'prod', 'write', false, true, false)] }],
+    projects: [{ project: 'fecode-platform', role: '', delete: false, environments: [env(PROD, 'prod', 'write', false, true, false)] }],
     accounts: [],
   },
   'GET_auth_me.integration.200': {
     kind: 'integration', integration: FECODE,
     projects: [{
-      project: 'kino', role: 'write', integrationRole: 'write', environments: [
+      project: 'kino', role: 'write', integrationRole: 'write', delete: false, environments: [
         env(PROD, 'prod', 'read', true, true, false, { integrationRole: 'write' }),
         env(STAGE, 'stage', 'write', false, true, true, { integrationRole: 'write' }),
       ],
@@ -65,7 +65,7 @@ const SHAPES = {
     kind: 'integration', integration: FECODE,
     named: { sub: ADA, known: true, person: P, email: 'ada@example.com', name: 'Ada' },
     projects: [{
-      project: 'kino', role: 'write', integrationRole: 'admin', personRole: 'write', environments: [
+      project: 'kino', role: 'write', integrationRole: 'admin', personRole: 'write', delete: false, environments: [
         env(PROD, 'prod', 'read', true, true, false, { integrationRole: 'admin', personRole: 'read' }),
       ],
     }],

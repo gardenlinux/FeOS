@@ -117,6 +117,7 @@ var routeNeeds = map[string]string{
 	"GET /api/v1/project/members":                    "member",
 	"PUT /api/v1/project/members/{person}/grants":    "admin by scope, no integration",
 	"DELETE /api/v1/project/members/{person}/grants": "admin by scope, no integration",
+	"DELETE /api/v1/project":                         "admin checked by the handler",
 	"POST /api/v1/project/leave":                     "member",
 	"GET /api/v1/project/invitations":                "member, no integration",
 	"POST /api/v1/project/invitations":               "admin by scope, no integration",

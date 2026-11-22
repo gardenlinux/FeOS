@@ -283,7 +283,8 @@ const (
 	scopeEnv
 	// scopeHandler: the handler checks, on what the request names (a
 	// domain's binding: the environments it leaves and joins; a sandbox's
-	// or a job's create: the environment of its body).
+	// or a job's create: the environment of its body; a project's
+	// deletion: the project and each of its environments).
 	scopeHandler
 	// scopeSandbox: the environment of the path's sandbox {id} (ADR
 	// 0035), as scopeEnv; a sandbox in one the principal may not read is

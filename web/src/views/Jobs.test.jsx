@@ -67,13 +67,13 @@ describe('Usage and Settings', () => {
     const s = render(ME('read'), <ProjectSettings project="kino" navigate={() => {}} />);
     expect(s).toContain('<span class="kind">Project</span><h1>Settings</h1>');
     expect(s).toContain('Leave this project');
-    expect(s).not.toContain('Limits, zone and deletion');
+    expect(s).not.toContain('Limits and zone');
   });
 
   it('send an operator to the platform instead of leaving', () => {
     const s = render(ME('', true), <ProjectSettings project="kino" navigate={() => {}} />);
     expect(s).not.toContain('Leave this project');
-    expect(s).toContain('Limits, zone and deletion');
+    expect(s).toContain('Limits and zone');
     expect(s).toContain('href="/projects"');
   });
 });

@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, ArmButton, ErrBox, Secret, useArm, usePoll } from '../components.jsx';
+import { Ago, ArmButton, ErrBox, Secret, useArm, useModal, usePoll } from '../components.jsx';
 import { fmtDate, fmtDurNs, fmtNs } from '../format.js';
 import { envPath, jobPath, sandboxPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
@@ -854,9 +854,6 @@ export async function protectEnvironment(list, give, environment, env) {
   await api.setProtected(env, true);
 }
 
-// FOCUSABLE are the elements Tab reaches inside a dialog.
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
-
 // ProtectDialog names everyone with a grant in the project (ferund's
 // principals), marks those who change the environment today by a project
 // grant of write and read it once it is protected (losesWrite, ferund's),
@@ -882,44 +879,14 @@ export function ProtectDialog({ env, st, onClose, onDone }) {
     }, (e) => { if (live) setErr(e.message); });
     return () => { live = false; };
   }, [env]);
-  // Focus moves into the dialog and back to its opener when it closes.
-  useEffect(() => {
-    const opener = document.activeElement;
-    if (box.current) box.current.focus();
-    return () => {
-      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
-    };
-  }, []);
+  // Modal: focus moves in, stays in, and back to its opener on close.
+  useModal(box, onClose, busyNow);
   // Once the list is read: the first tick, else Protect.
   useEffect(() => {
     if (!list || !box.current) return;
     const first = box.current.querySelector('input[type="checkbox"]:not([disabled])') || box.current.querySelector('button.primary:not([disabled])');
     if (first) first.focus();
   }, [list]);
-  useEffect(() => {
-    const key = (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        if (!busyNow.current) onClose();
-        return;
-      }
-      if (e.key !== 'Tab' || !box.current) return;
-      const all = [...box.current.querySelectorAll(FOCUSABLE)];
-      if (all.length === 0) { e.preventDefault(); box.current.focus(); return; }
-      const first = all[0];
-      const last = all[all.length - 1];
-      const at = document.activeElement;
-      if (e.shiftKey && (at === first || !box.current.contains(at) || at === box.current)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', key, true);
-    return () => window.removeEventListener('keydown', key, true);
-  }, [onClose]);
   const protect = async () => {
     setBusy(true);
     setErr('');

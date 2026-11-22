@@ -31,6 +31,7 @@ var peopleFixtures = map[string]bool{
 	"GET_admin_integrations":          true,
 	"PUT_environments_env_protected":  true,
 	"GET_environments_env_principals": true,
+	"DELETE_project":                  true,
 }
 
 var (

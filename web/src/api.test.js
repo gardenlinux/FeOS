@@ -629,3 +629,19 @@ describe('the environments routes', () => {
     expect(calls.every((c) => c.init.body === undefined)).toBe(true);
   });
 });
+
+// A project's deletion by its admin (ADR 0031): the session in the project,
+// the name again in the body, answered as ferund's fixture has it.
+describe('a project\'s deletion', () => {
+  it('names the project in FeRun-Project and in the body', async () => {
+    setActiveProject('acme');
+    const fx = fixture('DELETE_project.202');
+    const sent = serveFixtures('DELETE_project.202');
+    const out = await api.deleteOwnProject('acme');
+    expect(sent).toHaveLength(1);
+    expect(requestOf(sent[0])).toEqual({ method: fx.method, path: fx.path, query: fx.query });
+    expect(JSON.parse(sent[0].init.body)).toEqual(fx.request);
+    expect(sent[0].init.headers['FeRun-Project']).toBe('acme');
+    expect(out).toEqual({ project: 'acme', deleting: true });
+  });
+});

@@ -446,6 +446,10 @@ export const api = {
     projectCall('DELETE', `/project/members/${enc(person)}/grants${query({ environment })}`),
   // Leaving the project: every grant of the session's person in it.
   leaveProject: () => projectCall('POST', '/project/leave'),
+  // The project's deletion by its admin or an operator, its name again
+  // (400 name_mismatch for another): {project, deleting}. Its sandboxes,
+  // environments and tokens go with it.
+  deleteOwnProject: (name) => projectCall('DELETE', '/project', { name }),
   // Invitations: single-use links with a role and a scope, valid 7 days;
   // a new one answers its secret once ({id, token, url?, role,
   // environment, expiresAt}).

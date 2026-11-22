@@ -67,21 +67,26 @@ export function myProjects(me) {
 // it (§2.3 of ferund's people answers): whether it may enter at all
 // (member), its effective role on the project ('' with roles on
 // environments alone), its environments, each with ferund's effective
-// role, protected, plan and delete, the account it is on, and whether it
-// is an operator's (admin in every project, as ferund answers it). The
-// console computes no role: it reads ferund's (ADR 0060).
+// role, protected, plan and delete, the account it is on, whether it may
+// delete the project (ferund's delete: its admin, an operator), and
+// whether it is an operator's (admin in every project, as ferund answers
+// it). The console computes no role: it reads ferund's (ADR 0060).
 export function projectAccess(me, name) {
-  const none = { project: name, member: false, role: '', environments: [], operator: false, account: null };
+  const none = { project: name, member: false, role: '', environments: [], operator: false, account: null, delete: false };
   if (!me || !name || !actsInProjects(me)) return none;
   const t = myProjects(me).find((x) => x.project === name);
   const account = (t && t.account) || null;
+  const del = !!(t && t.delete);
   if (isOperator(me)) {
     // ferund lists every live project for an operator, as admin; one
     // made a moment ago is not listed until /auth/me is read again.
-    return { project: name, member: true, role: (t && t.role) || 'admin', environments: (t && t.environments) || [], operator: true, account };
+    return {
+      project: name, member: true, role: (t && t.role) || 'admin', environments: (t && t.environments) || [], operator: true, account,
+      delete: del,
+    };
   }
   if (!t) return none;
-  return { project: name, member: true, role: t.role || '', environments: t.environments || [], operator: false, account };
+  return { project: name, member: true, role: t.role || '', environments: t.environments || [], operator: false, account, delete: del };
 }
 
 // envEntry is /auth/me's entry of an environment (its name or ID) in an
@@ -162,6 +167,9 @@ export function can(access) {
     // A person leaves a project they hold grants in; an operator is no
     // member to leave.
     leave: member && !(access && access.operator),
+    // The project's deletion, where ferund says delete (its admin, an
+    // operator; DELETE /api/v1/project).
+    deleteProject: !!(access && access.delete),
     // The nodes and the platform's pages are the operators' (admin
     // routes).
     operator: !!(access && access.operator),

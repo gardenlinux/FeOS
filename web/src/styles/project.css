@@ -12,6 +12,8 @@
 .pagehead-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .danger-zone { border-color: rgba(239, 84, 73, .28); }
 .danger-zone p { margin: 0 0 10px; }
+.delete-confirm { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 0; }
+.delete-confirm input { width: 100%; }
 
 /* jobs */
 .jobs-tbl .labels { flex-wrap: wrap; }

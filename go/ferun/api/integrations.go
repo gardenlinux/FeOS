@@ -16,7 +16,8 @@ const (
 	// CodeUnknownIntegration: a verified bearer of no registered
 	// integration (401).
 	CodeUnknownIntegration = "unknown_integration"
-	// CodePersonRequired: a project token moves a project (403, ADR 0059).
+	// CodePersonRequired: a project token moves a project (403, ADR 0059)
+	// or deletes it (ADR 0031).
 	CodePersonRequired = "person_required"
 	// CodeProviderUnreachable: the provider's keys cannot be read (502).
 	CodeProviderUnreachable = "provider_unreachable"

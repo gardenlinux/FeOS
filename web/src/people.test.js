@@ -232,6 +232,14 @@ describe('the release\'s answers (FeOS ADRs 0056, 0059, 0060)', () => {
     }
   });
 
+  it('a project\'s deletion is ferund\'s delete, for a session and an operator', () => {
+    for (const me of [session, operator]) {
+      for (const p of me.projects) expect(can(projectAccess(me, p.project)).deleteProject).toBe(p.delete);
+    }
+    expect(operator.projects.some((p) => p.delete)).toBe(true);
+    expect(can(projectAccess(session, 'not-mine')).deleteProject).toBe(false);
+  });
+
   it('an operator\'s role is ferund\'s admin on every project, one not listed yet too', () => {
     const p = operator.projects[0];
     expect(projectAccess(operator, p.project)).toMatchObject({ role: p.role, operator: true, member: true });

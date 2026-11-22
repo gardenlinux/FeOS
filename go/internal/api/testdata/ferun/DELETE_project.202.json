@@ -1,0 +1,13 @@
+{
+  "method": "DELETE",
+  "path": "/api/v1/project",
+  "query": {},
+  "status": 202,
+  "request": {
+    "name": "acme"
+  },
+  "response": {
+    "project": "acme",
+    "deleting": true
+  }
+}

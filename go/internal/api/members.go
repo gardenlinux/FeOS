@@ -54,6 +54,10 @@ func (s *server) memberRoutes(operator func(string, apiHandler), person func(str
 	operator("POST /api/v1/admin/people/{person}/enable", s.setPersonDisabled(false))
 
 	person("POST /api/v1/projects", s.createPersonProject)
+	// A project's admin deletes it (ADR 0031), an integration only for a
+	// person it names who is its admin; the handler checks it on the
+	// project and on each of its environments.
+	project(byHandler(admin), "DELETE /api/v1/project", s.deleteOwnProject)
 	person("GET /api/v1/invitations/{token}", s.previewInvitation)
 	person("POST /api/v1/invitations/{token}/accept", s.acceptInvitation)
 
@@ -216,6 +220,92 @@ func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) err
 		Limits    limitsView      `json:"limits"`
 		Account   fapi.AccountRef `json:"account"`
 	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits), refOf(acct)})
+}
+
+// deleteOwnProject is DELETE /api/v1/project {name}: the project goes as
+// an operator's delete of it does (Engine.DeleteProject: its tokens at
+// once, then its sandboxes, its environments with their addons' data, and
+// the project; the leader finishes what this request does not), 202
+// {project, deleting}. Who may is auth.Project.MayDeleteProject, the rule
+// /auth/me's delete answers by: admin on the project, an operator's
+// session too, an integration only for a person it names who is its
+// admin, as admin itself, never a project token; and deleting each of
+// its environments (MayDelete), a protected one too. name must be the
+// project the call is for (400 name_mismatch).
+func (s *server) deleteOwnProject(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+	t, _ := auth.ProjectFrom(ctx)
+	envs, err := s.st.ProjectEnvironments(ctx, []string{t.Name})
+	if err != nil {
+		return fmt.Errorf("environments: %w", err)
+	}
+	ids := liveEnvIDs(envs)
+	if !t.MayDeleteProject(ids) {
+		return errMayNotDeleteProject(t, envs)
+	}
+	var req fapi.DeleteProjectRequest
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Name != t.Name {
+		return apierr.WithCode(http.StatusBadRequest, fapi.CodeNameMismatch,
+			"the body names the project %q, the call is for %s: send {\"name\": %q}", req.Name, t.Name, t.Name)
+	}
+	by := t.Principal.String()
+	existed, err := s.deps.Engine.DeleteProject(ctx, t.Name)
+	if !existed {
+		if err != nil {
+			return internalf("delete project: %v", err)
+		}
+		return errNoProject()
+	}
+	if err != nil {
+		// Marked deleting, its tokens gone: the leader deletes the rest.
+		s.log.Warn("project deletion begun, the leader finishes it", "project", t.Name, "err", err)
+	}
+	s.log.Info("project deleted", "project", t.Name, "by", by)
+	s.record(ctx, store.ActivityRow{ProjectID: t.Name, Kind: "project_deleted", Category: "lifecycle",
+		Name:   "project " + t.Name + " deleted by " + by,
+		Detail: detail(map[string]any{"project": t.Name, "by": by, "environments": len(ids)})})
+	return writeJSON(w, http.StatusAccepted, fapi.DeleteProjectAnswer{Project: t.Name, Deleting: true})
+}
+
+// liveEnvIDs are the IDs of the environments not being deleted already:
+// those a project's deletion deletes.
+func liveEnvIDs(envs []store.EnvName) []uuid.UUID {
+	var out []uuid.UUID
+	for _, e := range envs {
+		if !e.Deleting {
+			out = append(out, e.ID)
+		}
+	}
+	return out
+}
+
+// errMayNotDeleteProject says why t may not delete its project, which
+// auth.Project.MayDeleteProject decided: a project token is 403
+// person_required, an integration naming nobody 403 integration_refused,
+// a role too low 403 role_required, on the project or on the first
+// environment it may not delete.
+func errMayNotDeleteProject(t auth.Project, envs []store.EnvName) error {
+	switch {
+	case t.Principal.TokenHash != "":
+		return apierr.WithCode(http.StatusForbidden, fapi.CodePersonRequired,
+			"a project token deletes no project: a person who is its admin does, or an integration for one it names")
+	case t.Principal.IsIntegration() && t.Named == nil:
+		return apierr.WithCode(http.StatusForbidden, codeIntegrationRefused,
+			"an integration deletes a project only for a person it names who is the project's admin")
+	case t.ProjectRole() < auth.RoleAdmin:
+		return apierr.RoleRequired(auth.RoleAdmin.String(), "project")
+	}
+	for _, e := range envs {
+		if !e.Deleting && !t.MayDelete(e.ID) {
+			return &apierr.Error{Status: http.StatusForbidden, Code: apierr.CodeRoleRequired, Role: auth.RoleAdmin.String(),
+				Scope: "environment", Msg: fmt.Sprintf("deleting the project deletes environment %s, "+
+					"which needs the role admin on it", e.Name)}
+		}
+	}
+	return apierr.RoleRequired(auth.RoleAdmin.String(), "project")
 }
 
 // ---------------------------------------------------------------- members --

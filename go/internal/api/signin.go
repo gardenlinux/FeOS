@@ -69,11 +69,12 @@ func (s *server) authConfig(w http.ResponseWriter, _ *http.Request) error {
 // principal it is there (its grants, the named person's, the project's
 // protected environments), its effective role, and every environment of
 // it the caller reads with its effective role, whether it may plan
-// against it and delete it, all by auth.Project's one rule, which every
-// check uses too (the contract's §2.2). A project the caller does not see
-// is left out, and so is one no longer there. Each says when it was made
-// (a name made again is another project). The projects come sorted by
-// name; integration says to answer an integration's own roles beside.
+// against it and delete it, and whether it may delete the project, all by
+// auth.Project's one rule, which every check uses too (the contract's
+// §2.2). A project the caller does not see is left out, and so is one no
+// longer there. Each says when it was made (a name made again is another
+// project). The projects come sorted by name; integration says to answer
+// an integration's own roles beside.
 func (s *server) meProjects(r *http.Request, ps []auth.Project, integration bool) ([]fapi.MeProject, error) {
 	out := []fapi.MeProject{}
 	if len(ps) == 0 {
@@ -108,7 +109,8 @@ func (s *server) meProjects(r *http.Request, ps []auth.Project, integration bool
 		if !t.Visible() || !there {
 			continue
 		}
-		mp := fapi.MeProject{Project: t.Name, CreatedAt: at, Role: t.ProjectRole().String(), Environments: []fapi.MeEnvironment{}}
+		mp := fapi.MeProject{Project: t.Name, CreatedAt: at, Role: t.ProjectRole().String(),
+			Delete: t.MayDeleteProject(liveEnvIDs(byProject[t.Name])), Environments: []fapi.MeEnvironment{}}
 		if integration {
 			mp.IntegrationRole = t.Role.String()
 			if t.Named != nil {

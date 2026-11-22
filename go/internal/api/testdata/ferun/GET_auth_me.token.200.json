@@ -16,6 +16,7 @@
         "project": "acme",
         "createdAt": "2026-11-21T10:00:00Z",
         "role": "",
+        "delete": false,
         "environments": [
           {
             "id": "0199a0b1-0000-7000-8000-000000000001",

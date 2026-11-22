@@ -443,7 +443,7 @@ func TestAuthMeShapes(t *testing.T) {
 	}
 	made := acme.CreatedAt.UTC().Format(time.RFC3339Nano)
 	expect(t, resp, http.StatusOK, `{"kind":"token","token":{"label":"","role":"write","environment":"`+w.prod.String()+
-		`"},"projects":[{"project":"acme","createdAt":"`+made+`","role":"","environments":[{"id":"`+w.prod.String()+`","name":"prod",`+
+		`"},"projects":[{"project":"acme","createdAt":"`+made+`","role":"","delete":false,"environments":[{"id":"`+w.prod.String()+`","name":"prod",`+
 		`"role":"write","protected":true,"plan":true,"delete":false}]}],"accounts":[]}`+"\n")
 	writeFixture(t, "GET_auth_me.token.200", w.p.Issuer, "GET", "/auth/me", nil, nil, resp)
 	expect(t, e.do("GET", "/auth/me", bearerOf("0123"), nil), http.StatusUnauthorized, errBody("unknown project token"))

@@ -119,6 +119,46 @@ export function useArm(ms = 2600) {
   return [armed, arm, disarm];
 }
 
+// FOCUSABLE are the elements Tab reaches inside a dialog.
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+// useModal makes the element of box a modal dialog: focus moves into it,
+// stays in it (Tab), and returns to what opened it when it closes; Escape
+// closes it unless busy (a ref) says it works.
+export function useModal(box, onClose, busy) {
+  useEffect(() => {
+    const opener = document.activeElement;
+    if (box.current) box.current.focus();
+    return () => {
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+    };
+  }, [box]);
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        if (!busy.current) onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !box.current) return;
+      const all = [...box.current.querySelectorAll(FOCUSABLE)];
+      if (all.length === 0) { e.preventDefault(); box.current.focus(); return; }
+      const first = all[0];
+      const last = all[all.length - 1];
+      const at = document.activeElement;
+      if (e.shiftKey && (at === first || !box.current.contains(at) || at === box.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !box.current.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [box, onClose, busy]);
+}
+
 // ---------------------------------------------------------------- widgets --
 
 // The class of a state's dot, in the form of the architecture page's

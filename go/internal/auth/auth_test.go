@@ -122,7 +122,9 @@ func TestPrincipalString(t *testing.T) {
 // grants, protection and principal kind: what auth.Project answers is the
 // table's rule, written out here once more; EveryEnv never claims a role
 // an environment does not give; MayDelete is admin on a protected
-// environment, admin or project write otherwise.
+// environment, admin or project write otherwise; MayDeleteProject is
+// admin on the project, never a token or an integration alone, and
+// MayDelete on each environment.
 func TestEffectiveRoles(t *testing.T) {
 	roles := []Role{RoleNone, RoleRead, RoleWrite, RoleAdmin}
 	env := uuid.MustParse("0199a0b1-0000-7000-8000-0000000000e1")
@@ -190,6 +192,12 @@ func TestEffectiveRoles(t *testing.T) {
 							if got := tp.MayDelete(env); got != wantDelete {
 								t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: delete %v", name, gx, ex, gp, ep, prot, got)
 							}
+							// The project's deletion: admin on it, no token, no
+							// integration alone, and each environment deletable.
+							wantProjectDelete := kind != "token" && kind != "integration" && wantProject >= RoleAdmin && wantDelete
+							if got := tp.MayDeleteProject([]uuid.UUID{env}); got != wantProjectDelete {
+								t.Errorf("%s G=%v g=%v P=%v p=%v protected %v: delete the project %v", name, gx, ex, gp, ep, prot, got)
+							}
 							for _, r := range roles[1:] {
 								// Another environment, of no grant, protected too.
 								other := uuid.New()
@@ -212,5 +220,24 @@ func TestEffectiveRoles(t *testing.T) {
 	}
 	if n < 500 {
 		t.Fatalf("%d cases", n)
+	}
+}
+
+// An operator's session deletes a project with protected environments; a
+// caller within the process may; an integration naming nobody may not,
+// whatever its grant.
+func TestMayDeleteProject(t *testing.T) {
+	env := uuid.New()
+	prot := map[uuid.UUID]bool{env: true}
+	op := Project{Name: "acme", Principal: Principal{Person: uuid.New(), Operator: true}, Role: RoleAdmin, Protected: prot}
+	if !op.MayDeleteProject([]uuid.UUID{env, uuid.New()}) {
+		t.Error("an operator may not delete it")
+	}
+	if !(Project{Name: "acme"}).MayDeleteProject([]uuid.UUID{env}) {
+		t.Error("a caller within the process may not delete it")
+	}
+	alone := Project{Name: "acme", Principal: Principal{Integration: uuid.New()}, Role: RoleAdmin}
+	if alone.MayDeleteProject(nil) {
+		t.Error("an integration naming nobody may delete it")
 	}
 }

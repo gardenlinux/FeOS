@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, notAvailable } from '../api.js';
 import { Icon } from '../Icon.jsx';
-import { Ago, ArmButton, ErrBox, KV, LiveBadge, useArm, usePoll } from '../components.jsx';
+import { Ago, ArmButton, ErrBox, KV, LiveBadge, useArm, useModal, usePoll } from '../components.jsx';
 import { fmtDateTime } from '../format.js';
 import {
   accountLabel, fmtQuota, moveTargets, moveText, myAccounts, quotaRows, useAccess, useMe,
@@ -16,8 +16,9 @@ import '../styles/project.css';
 
 // The project's usage (its use against the limits the platform's
 // operators set, ADR 0031 "Quotas per project") and its settings (who you
-// are in it, leaving it; for operators the way to the platform's project
-// list, where limits, zone and deletion are).
+// are in it, leaving it, deleting it where ferund says you may; for
+// operators the way to the platform's project list, where limits and zone
+// are).
 
 // ------------------------------------------------------------------ usage --
 
@@ -181,6 +182,7 @@ export function ProjectSettings({ project, navigate }) {
   const [armed, arm, disarm] = useArm();
   const [err, setErr] = useState('');
   const [info, setInfo] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   // An operator reads the project from the admin list: its zone, its
   // maker, whether it is being deleted. A person's answers carry no zone.
@@ -229,7 +231,7 @@ export function ProjectSettings({ project, navigate }) {
         </div>
         <p className="hint">
           {access.role === 'admin' ? 'As its admin you hand out roles on the People page. ' : ''}
-          The project&apos;s zone, limits and deletion are the platform&apos;s operators&apos;; its account is its admins&apos;.
+          The project&apos;s zone and limits are the platform&apos;s operators&apos;; its account and its deletion are its admins&apos;.
         </p>
       </section>
 
@@ -258,16 +260,87 @@ export function ProjectSettings({ project, navigate }) {
             }}>Leave {project}</ArmButton>
         </section>)}
 
+      {c.deleteProject && (
+        <section className="pane danger-zone">
+          <div className="pane-toolbar"><h2><Icon name="trash" size={14} /> Delete this project</h2></div>
+          <p className="small">
+            Deletes <span className="mono">{project}</span> with everything in it: its environments with their
+            deployments, secrets and addons&apos; data, its sandboxes and jobs, its tokens, domains and grants. Its tokens
+            stop at once; the rest goes within minutes. It cannot be undone, and its name is free for anyone then.
+          </p>
+          <button className="danger" onClick={() => setDeleting(true)}><Icon name="trash" size={14} /> Delete project</button>
+        </section>)}
+      {deleting && (
+        <DeleteProjectDialog project={project} onClose={() => setDeleting(false)}
+          onDone={async () => {
+            await reload().catch(() => {});
+            navigate('/projects');
+          }} />)}
+
       {c.operator && (
         <section className="pane">
-          <div className="pane-toolbar"><h2><Icon name="crown" size={14} /> Limits, zone and deletion</h2></div>
+          <div className="pane-toolbar"><h2><Icon name="crown" size={14} /> Limits and zone</h2></div>
           <p className="small">
-            You are an operator: no member to leave. A project's limits, its zone and its deletion are set in the
-            platform's project list.
+            You are an operator: no member to leave. A project's limits and its zone are set in the platform's
+            project list.
           </p>
           <a className="button" href="/projects" onClick={(e) => { e.preventDefault(); navigate('/projects'); }}>
             <Icon name="folder" size={14} /> Platform · Projects <Icon name="arrowRight" size={12} /></a>
         </section>)}
+    </div>
+  );
+}
+
+// DeleteProjectDialog asks for the project's name before it deletes the
+// project (DELETE /api/v1/project with the name again): Delete is offered
+// once the name typed is the project's. It is modal, and while it works
+// it does not close; a refusal is shown in it and nothing changes.
+export function DeleteProjectDialog({ project, onClose, onDone }) {
+  const [typed, setTyped] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const box = useRef(null);
+  const input = useRef(null);
+  const busyNow = useRef(false);
+  busyNow.current = busy;
+  useModal(box, onClose, busyNow);
+  // Then the name's field.
+  useEffect(() => { if (input.current) input.current.focus(); }, []);
+  const matches = typed === project;
+  const del = async () => {
+    if (!matches) return;
+    setBusy(true);
+    setErr('');
+    try {
+      await api.deleteOwnProject(project);
+      await onDone();
+    } catch (e) {
+      setErr(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="palette-back" onMouseDown={() => { if (!busyNow.current) onClose(); }}>
+      <div className="palette dialog" role="dialog" aria-modal="true" aria-label={`Delete ${project}`} tabIndex={-1} ref={box}
+        onMouseDown={(e) => e.stopPropagation()}>
+        <h3><Icon name="trash" size={16} /> Delete <span className="mono">{project}</span></h3>
+        <p className="small">
+          Everything in it goes: environments, deployments, secrets, addons&apos; data, sandboxes, jobs, tokens,
+          domains and grants. This cannot be undone.
+        </p>
+        <form onSubmit={(e) => { e.preventDefault(); del(); }}>
+          <label className="delete-confirm small">Type <b className="mono">{project}</b> to confirm
+            <input ref={input} className="mono" value={typed} autoComplete="off" spellCheck={false} disabled={busy}
+              aria-label="the project's name, to confirm" onChange={(e) => setTyped(e.target.value)} />
+          </label>
+          <ErrBox error={err} />
+          <div className="actionrow">
+            <button type="submit" className="danger" disabled={busy || !matches}>
+              <Icon name="trash" size={14} /> {busy ? 'Deleting…' : 'Delete project'}</button>
+            <button type="button" className="ghost" disabled={busy} onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

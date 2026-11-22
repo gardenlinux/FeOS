@@ -295,6 +295,28 @@ func (t Project) MayDelete(env uuid.UUID) bool {
 	return !t.Protected[env] && t.ProjectRole() >= RoleWrite
 }
 
+// MayDeleteProject reports whether the principal may delete the project
+// (ADR 0031, 0056): its role on the project is admin (an operator's
+// session is), it is no project token, an integration names a person (as
+// admin itself, both sides admin), and it may delete each of envs
+// (MayDelete), the project's environments, since the project's deletion
+// deletes every one of them, a protected one too. The DELETE route and
+// /auth/me's delete both ask it.
+func (t Project) MayDeleteProject(envs []uuid.UUID) bool {
+	if t.Principal.IsZero() {
+		return true
+	}
+	if t.Principal.TokenHash != "" || t.alone() || t.ProjectRole() < RoleAdmin {
+		return false
+	}
+	for _, id := range envs {
+		if !t.MayDelete(id) {
+			return false
+		}
+	}
+	return true
+}
+
 // EveryEnv reports whether the principal holds role on every environment
 // of the project by its project role alone, so that no environment needs
 // to be looked at: always below write, and from write on unless an

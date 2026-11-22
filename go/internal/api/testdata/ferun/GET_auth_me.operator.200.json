@@ -23,6 +23,7 @@
           "name": "default",
           "title": "Default"
         },
+        "delete": true,
         "environments": [
           {
             "id": "0199a0b1-0000-7000-8000-000000000002",
@@ -58,6 +59,7 @@
           "name": "default",
           "title": "Default"
         },
+        "delete": true,
         "environments": [
           {
             "id": "0199a0b1-0000-7000-8000-000000000005",

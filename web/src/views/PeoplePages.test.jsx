@@ -10,7 +10,7 @@ import { Account } from './Account.jsx';
 import { OperatorAccounts } from './Accounts.jsx';
 import { Integrations } from './Integrations.jsx';
 import { InviteAccept, IntegrationsPane, acceptedPath } from './People.jsx';
-import { ProjectAccount } from './ProjectPages.jsx';
+import { DeleteProjectDialog, ProjectAccount, ProjectSettings } from './ProjectPages.jsx';
 import { ProjectAccountMove } from './Projects.jsx';
 import { ProtectDialog } from './EnvTabs.jsx';
 
@@ -179,5 +179,31 @@ describe('the protect dialog', () => {
     expect(out).toContain('aria-modal="true"');
     expect(out).toContain('tabindex="-1"');
     expect(out).toContain('Reading who holds a grant…');
+  });
+});
+
+describe('deleting a project', () => {
+  it('is offered where ferund says delete, never otherwise', () => {
+    // The cases: ferund's operator may, its session of a writer may not.
+    const op = wire('GET_auth_me.operator.200');
+    const session = wire('GET_auth_me.session.200');
+    const p = op.projects.find((x) => x.delete);
+    expect(p).toBeTruthy();
+    expect(text(withMe(op, <ProjectSettings project={p.project} navigate={nav} />))).toContain('Delete this project');
+    for (const q of session.projects) {
+      expect(q.delete).toBe(false);
+      expect(text(withMe(session, <ProjectSettings project={q.project} navigate={nav} />))).not.toContain('Delete this project');
+    }
+    const admin = { ...session, projects: session.projects.map((x, i) => (i === 0 ? { ...x, role: 'admin', delete: true } : x)) };
+    expect(text(withMe(admin, <ProjectSettings project={admin.projects[0].project} navigate={nav} />))).toContain('Delete this project');
+  });
+
+  it('asks for the name in a modal dialog, Delete held back until it is typed', () => {
+    const out = html(<DeleteProjectDialog project="kino" onClose={nav} onDone={nav} />);
+    expect(out).toContain('role="dialog"');
+    expect(out).toContain('aria-modal="true"');
+    expect(out).toContain('aria-label="the project&#x27;s name, to confirm"');
+    expect(out).toMatch(/<button type="submit" class="danger" disabled="">/);
+    expect(text(<DeleteProjectDialog project="kino" onClose={nav} onDone={nav} />)).toContain('Type kino to confirm');
   });
 });
