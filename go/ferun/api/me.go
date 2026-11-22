@@ -3,11 +3,16 @@
 
 package api
 
+import "encoding/json"
+
 // Me is GET /auth/me: who the caller is, by its credential, and the
 // projects it reaches with its roles there (FeOS ADR 0056, 0060). Kind is
 // "session" (a person's or an operator's), "basic" (an operator's tooling),
 // "token" (a project token) or "integration". The roles are the effective
-// ones: what FeRun's checks decide, so that no caller computes a role.
+// ones: what FeRun's checks decide, so that no caller computes a role. A
+// session's answer carries all of the person's fields, Sub to Method,
+// empty and false ones too (MarshalJSON); the other kinds leave out what
+// they do not have.
 type Me struct {
 	Kind     string `json:"kind"`
 	Sub      string `json:"sub,omitempty"`
@@ -29,6 +34,32 @@ type Me struct {
 	Projects []MeProject `json:"projects"`
 	// Accounts are a session's (ADR 0059); [] for every other kind.
 	Accounts []MeAccount `json:"accounts"`
+}
+
+// MarshalJSON writes Me in the shape of its kind: a session's with sub,
+// person, email, name, username, picture, admin and method always, as
+// /auth/me has always answered a session (a person without a picture is
+// "picture": "", one who is no operator "admin": false); the other kinds
+// as the fields' tags say.
+func (m Me) MarshalJSON() ([]byte, error) {
+	type fields Me // Me's fields without this method
+	if m.Kind != "session" {
+		return json.Marshal(fields(m))
+	}
+	// The outer fields hide the embedded ones of the same names, and the
+	// answer keeps Me's order.
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Sub      string `json:"sub"`
+		Person   string `json:"person"`
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Username string `json:"username"`
+		Picture  string `json:"picture"`
+		Admin    bool   `json:"admin"`
+		Method   string `json:"method"`
+		fields
+	}{m.Kind, m.Sub, m.Person, m.Email, m.Name, m.Username, m.Picture, m.Admin, m.Method, fields(m)})
 }
 
 // MeToken is a project token's own grant: its role on the project, or on

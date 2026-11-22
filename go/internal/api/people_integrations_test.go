@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -407,6 +408,19 @@ func TestAuthMeShapes(t *testing.T) {
 		envNamed(m.Projects[0], "stage") != (fapi.MeEnvironment{ID: w.stage.String(), Name: "stage", Role: "write", Plan: true,
 			Delete: true}) || m.Accounts == nil {
 		t.Fatalf("session %s", resp.Body)
+	}
+	// The person's fields are all there, empty and false ones too, as a
+	// session's answer always had them: ada has no picture, no username and
+	// is no operator.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(resp.Body.Bytes(), &keys); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]string{"email": `""`, "name": `""`, "username": `""`, "picture": `""`,
+		"admin": "false", "method": `"oidc"`} {
+		if got, ok := keys[k]; !ok || string(got) != want {
+			t.Errorf("session: %s = %s (there %v), want %s", k, got, ok, want)
+		}
 	}
 	writeFixture(t, "GET_auth_me.session.200", w.p.Issuer, "GET", "/auth/me", nil, nil, resp)
 

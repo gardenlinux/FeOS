@@ -8,6 +8,11 @@
     "kind": "session",
     "sub": "ada",
     "person": "0199a0b1-0000-7000-8000-000000000001",
+    "email": "",
+    "name": "",
+    "username": "",
+    "picture": "",
+    "admin": false,
     "method": "oidc",
     "projects": [
       {

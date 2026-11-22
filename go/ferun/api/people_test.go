@@ -15,6 +15,14 @@ func TestPeopleJSON(t *testing.T) {
 		v    any
 		want string
 	}{
+		// A session carries the person's fields, empty and false ones too.
+		{Me{Kind: "session", Sub: "ada", Person: "p", Method: "oidc", Projects: []MeProject{}, Accounts: []MeAccount{}},
+			`{"kind":"session","sub":"ada","person":"p","email":"","name":"","username":"","picture":"","admin":false,` +
+				`"method":"oidc","projects":[],"accounts":[]}`},
+		{&Me{Kind: "session", Sub: "op", Person: "p", Email: "op@example.com", Name: "Op", Username: "op",
+			Picture: "https://example.com/op.png", Admin: true, Method: "oidc", Projects: []MeProject{}, Accounts: []MeAccount{}},
+			`{"kind":"session","sub":"op","person":"p","email":"op@example.com","name":"Op","username":"op",` +
+				`"picture":"https://example.com/op.png","admin":true,"method":"oidc","projects":[],"accounts":[]}`},
 		{Me{Kind: "basic", Username: "ops", Admin: true, Method: "basic", Projects: []MeProject{}, Accounts: []MeAccount{}},
 			`{"kind":"basic","username":"ops","admin":true,"method":"basic","projects":[],"accounts":[]}`},
 		{Me{Kind: "integration", Integration: &MeIntegration{Name: "fecode"}, Named: &MeNamed{Sub: "x"},
