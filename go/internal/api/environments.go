@@ -739,7 +739,8 @@ func (s *server) setEnvProtected(w http.ResponseWriter, r *http.Request) error {
 // integrations, each with its grants on the project and on the
 // environment, and whether it changes the environment by its project
 // grant alone, which it only reads once the environment is protected
-// (ADR 0060's dialog, which offers each a grant on it).
+// (ADR 0060's dialog, which offers each a grant on it). An integration is
+// not told the project's tokens.
 func (s *server) envPrincipals(w http.ResponseWriter, r *http.Request) error {
 	ctx, project := r.Context(), projectOf(r)
 	e, err := s.checkedEnvironment(r)
@@ -781,9 +782,13 @@ func (s *server) envPrincipals(w http.ResponseWriter, r *http.Request) error {
 		p, en := roles(m.Grants)
 		add("person", m.ID.String(), label, p, en)
 	}
-	toks, err := s.st.ListProjectTokens(ctx, project)
-	if err != nil {
-		return fmt.Errorf("principals: %w", err)
+	// The project's tokens are no integration's to list (GET
+	// /api/v1/project/tokens refuses one), here neither.
+	var toks []store.ProjectToken
+	if t, _ := auth.ProjectFrom(ctx); !t.Principal.IsIntegration() {
+		if toks, err = s.st.ListProjectTokens(ctx, project); err != nil {
+			return fmt.Errorf("principals: %w", err)
+		}
 	}
 	gs, err := s.st.ListGrants(ctx, project)
 	if err != nil {
