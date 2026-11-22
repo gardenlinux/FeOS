@@ -1611,7 +1611,8 @@ see too. The kinds:
   the integration, with a person those where both hold a grant and the
   project is visible; a disabled integration, and a person FeRun does not
   know or who is disabled (`known: false`), reach none (200, `projects:
-  []`).
+  []`); a disabled integration is told `named: {sub, known: false}`
+  alone, whoever the person is.
 
 `projects` and `accounts` are never null; `accounts` is `[]` but for a
 session. The answer's Go types are the module's `api.Me` and its parts.
@@ -1771,7 +1772,9 @@ move; on the person class (it makes no project, joins no account) and
 the provider class. It may read the members, give up its own grants
 (`DELETE /api/v1/project/integrations/<itself>/grants`, any other
 integration's is 403) or leave (`POST /api/v1/project/leave` drops every
-grant it holds there); its `admin` grant does not count as a project's
+grant it holds there), naming nobody or a person who is `admin` of that
+scope (of the project, to leave): a reader takes no admin's integration
+out through it; its `admin` grant does not count as a project's
 admin for the rule that a project keeps one. Everything else of the
 project class it does within its role: environments, deployments,
 secrets, domains and providers with `admin`, publishing with `admin` on
@@ -1825,9 +1828,16 @@ project tokens and integrations, `{kind, id, label, projectRole,
 environmentRole, losesWrite}`, the roles their grants (not effective
 roles), `id` the person's ID, the token's hash, or the integration's
 name, and `losesWrite` for a project grant of `write` without `write` or
-`admin` on the environment: those who read it once it is protected. A
-project token with `write` on the project stops deploying to it until it
-holds a grant on it (`PUT /api/v1/project/tokens/{hash}/grants`).
+`admin` on the environment: those who read it once it is protected (an
+integration is not told the project tokens). A project token with
+`write` on the project stops deploying to it until it holds a grant on
+it (`PUT /api/v1/project/tokens/{hash}/grants`, listed with the token by
+`GET /api/v1/project/tokens` as `grants`). Sandbox and route tokens
+minted there by a project grant of `write` stop too: resolving a token
+no integration minted checks, on a protected environment, that its
+minter (`made_by`) holds `write` on it or `admin` on the project, or is
+an operator by Basic; lifted, they work again. Deleting a domain bound
+to it needs `admin` on it, as unbinding does.
 
 ### Members, invitations and tokens
 
