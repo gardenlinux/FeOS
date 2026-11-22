@@ -68,7 +68,12 @@ func resolveEnv(ctx context.Context, st *store.Store, project, ref string, lock 
 // lockProject takes the project's row FOR SHARE and refuses a deleting
 // one: what an environment's create, deployment and secret need.
 func lockProject(ctx context.Context, tx *store.Store, project string) error {
-	t, err := tx.LockProject(ctx, project, store.ForShare)
+	return lockProjectFor(ctx, tx, project, store.ForShare)
+}
+
+// lockProjectFor is lockProject with the lock's mode.
+func lockProjectFor(ctx context.Context, tx *store.Store, project string, mode store.RowLock) error {
+	t, err := tx.LockProject(ctx, project, mode)
 	if errors.Is(err, store.ErrNoRow) {
 		return apierr.New(http.StatusUnauthorized, "unknown project token")
 	}
@@ -143,7 +148,7 @@ func wake(ctx context.Context, tx *store.Store, hints ...string) error {
 
 // zones are the platform's zones of default hosts.
 func (s *Service) zones() model.Zones {
-	return model.Zones{Apps: s.d.AppsZone, AppsOwners: s.d.AppsZoneOwners, Project: s.d.ProjectZone}
+	return model.Zones{Apps: s.d.AppsZone, Project: s.d.ProjectZone}
 }
 
 // hostZone is the zone of the project's default hosts (model.Zones.Of):

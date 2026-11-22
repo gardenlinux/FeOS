@@ -26,17 +26,12 @@ const (
 // The refusals of a chosen host label.
 const (
 	textHostLabelNotPublic = "hostLabel is given only with public: true"
-	textBadHostLabel       = "hostLabel %q: a chosen host label is a DNS label of at most 63 lowercase letters, digits and hyphens with \"--\" in it, not at its third and fourth characters, and not ending in a hyphen and 16 hex characters"
+	textBadHostLabel       = "hostLabel %q: a chosen host label is <choice>--%s, the choice without \"--\", the whole a DNS label of at most 63 lowercase letters, digits and hyphens, not with \"--\" at its third and fourth characters; %s alone is the project's address, and the environment's fallback label is its own"
 	textHostLabelTaken     = "host label %s is another project's or another environment's"
-	// textBadOwnedHostLabel refuses a label of a project that owns the apps
-	// zone, which may leave out the "--".
-	textBadOwnedHostLabel = "hostLabel %q: a chosen host label is a DNS label of at most 63 lowercase letters, digits and hyphens, not with \"--\" at its third and fourth characters, and not ending in a hyphen and 16 hex characters"
-	// textPlainLabelZone refuses a plain label of a zone owner whose
-	// hosts are in the project zone, which has no owners (ADR 0031).
-	textPlainLabelZone = "hostLabel %q: a plain host label is only for the apps zone; project %s has its hosts in %s, where a chosen host label has \"--\" in it"
-	// textHostLabelNatural refuses a plain label that is the natural label
-	// of an existing project's environment.
-	textHostLabelNatural = "host label %s is the natural label of environment %s of project %s"
+	// textNoProjectLabels refuses a label of a project whose name is no
+	// label of its own (model.ProjectLabel): it has no address, no natural
+	// and no chosen labels (ADR 0063).
+	textNoProjectLabels = "hostLabel %q: project %s has no labels of its own, its name having a dot or \"--\" in it or ending in a hyphen and 16 hex characters; its environments get their fallback labels, and a domain gives one an address"
 )
 
 // The refusals of an access (ADR 0054).
@@ -64,13 +59,15 @@ const (
 // environment its host label and its ingress group, so that its image
 // services roll once (Rolling); unpublishing keeps both, and publishing
 // again rolls nothing. hostLabel, only with public, is a label the project
-// chose (model.ChosenHostLabel, or, for a project of Deps.AppsZoneOwners
-// whose hosts are in the apps zone, also model.PlainHostLabel; else 400)
-// in its project's zone (ADR 0031): the environment gets it in place
-// of the label it had or would get, which stays the project's; one another
-// project or environment holds is a 409, and so is a plain label that is
-// the natural label of an existing project's environment, unless the
-// project holds it already (checkPlainLabel). Publishing is refused with
+// chose (model.ChosenHostLabel, "<choice>--<project>") or the project's
+// name, its address (model.ProjectLabel; ADR 0063), or the environment's
+// own fallback (model.GivenHostLabel), else 400, in its
+// project's zone (ADR 0031): the environment gets it in place of the label
+// it had or would get, which stays the project's; a chosen label another
+// project or environment holds is a 409, and so is the project's label
+// when another project holds it. The project's address moves: the
+// environment that held it gets its natural label or its fallback in the
+// same transaction. Publishing is refused with
 // 409 while the platform has no apps zone or does not serve the project's
 // zone, and either is while the environment or its project is being
 // deleted.
@@ -103,20 +100,23 @@ func (s *Service) SetPublic(ctx context.Context, project, env string, req Public
 	if hostLabel != "" && !public {
 		return PublicAnswer{}, apierr.New(http.StatusBadRequest, textHostLabelNotPublic)
 	}
-	zoneOwner := slices.Contains(s.d.AppsZoneOwners, project)
-	plain := hostLabel != "" && zoneOwner && model.PlainHostLabel(hostLabel)
-	if hostLabel != "" && !plain && !model.ChosenHostLabel(hostLabel) {
-		if zoneOwner {
-			return PublicAnswer{}, apierr.New(http.StatusBadRequest, textBadOwnedHostLabel, hostLabel)
-		}
-		return PublicAnswer{}, apierr.New(http.StatusBadRequest, textBadHostLabel, hostLabel)
+	address := hostLabel != "" && hostLabel == project
+	if hostLabel != "" && !model.ProjectLabel(project) {
+		return PublicAnswer{}, apierr.New(http.StatusBadRequest, textNoProjectLabels, hostLabel, project)
+	}
+	// Taking the project's address moves it from another environment,
+	// whose row it locks: the project's row FOR UPDATE keeps two such
+	// moves apart.
+	mode := store.ForShare
+	if address {
+		mode = store.ForUpdate
 	}
 	var before, after store.Environment
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
-		if err := lockProject(ctx, tx, project); err != nil {
+		if err := lockProjectFor(ctx, tx, project, mode); err != nil {
 			return err
 		}
-		if err := s.checkZone(ctx, tx, project, public, plain, hostLabel); err != nil {
+		if err := s.checkZone(ctx, tx, project, public); err != nil {
 			return err
 		}
 		var err error
@@ -126,6 +126,12 @@ func (s *Service) SetPublic(ctx context.Context, project, env string, req Public
 		if before.Deleting {
 			return errDeleting(before.Name)
 		}
+		// The environment's own fallback is a label too: giving the
+		// address up names it where the name gives no natural label.
+		if hostLabel != "" && !address && !model.ChosenHostLabel(hostLabel, project) &&
+			!model.GivenHostLabel(hostLabel, project, before.ID) {
+			return apierr.New(http.StatusBadRequest, textBadHostLabel, hostLabel, project, project)
+		}
 		access, provider := before.Access, before.AccessProvider
 		if public {
 			access, provider = accessAfter(before, req)
@@ -134,11 +140,6 @@ func (s *Service) SetPublic(ctx context.Context, project, env string, req Public
 			}
 		}
 		cur := before
-		if plain {
-			if err := checkPlainLabel(ctx, tx, project, hostLabel); err != nil {
-				return err
-			}
-		}
 		if hostLabel != "" {
 			cur, err = tx.SetEnvironmentHostLabel(ctx, before, hostLabel)
 			if errors.Is(err, store.ErrHostLabelTaken) {
@@ -175,7 +176,8 @@ func (s *Service) SetPublic(ctx context.Context, project, env string, req Public
 	if err != nil {
 		return PublicAnswer{}, fmt.Errorf("hosts: %w", err)
 	}
-	ans := PublicAnswer{Public: after.Public, Hosts: hosts, Rolling: public && !before.IngressGroup}
+	ans := PublicAnswer{Public: after.Public, Hosts: hosts, HostLabel: after.HostLabel,
+		ProjectAddress: holdsAddress(after), Rolling: public && !before.IngressGroup}
 	ans.Access, ans.Provider = accessOf(after)
 	if before.Public != public || before.HostLabel != after.HostLabel || before.Access != after.Access ||
 		before.AccessProvider != after.AccessProvider {
@@ -237,50 +239,14 @@ func (s *Service) checkAccess(ctx context.Context, tx *store.Store, project, acc
 }
 
 // checkZone refuses a publish of a project whose zone the platform does not
-// serve (409), and a plain label of a project whose hosts are not in the
-// apps zone (400): the project zone has no owners. tx holds the project's
-// row.
-func (s *Service) checkZone(ctx context.Context, tx *store.Store, project string, public, plain bool, label string) error {
+// serve (409). tx holds the project's row.
+func (s *Service) checkZone(ctx context.Context, tx *store.Store, project string, public bool) error {
 	t, err := tx.GetProject(ctx, project)
 	if err != nil {
 		return fmt.Errorf("project %s: %w", project, err)
 	}
-	z := s.zones()
-	switch {
-	case public && z.Of(t.Zone) == "":
+	if public && s.zones().Of(t.Zone) == "" {
 		return apierr.New(http.StatusConflict, textZoneOff, t.Zone, project)
-	case plain && !z.PlainLabels(project, t.Zone):
-		return apierr.New(http.StatusBadRequest, textPlainLabelZone, label, project, z.Of(t.Zone))
 	}
 	return nil
-}
-
-// checkPlainLabel refuses with 409 host_label_taken a plain label, in the
-// apps zone, that is the natural label of an existing project's
-// environment: split at its first hyphen (model.NaturalPair), the rest names a project, the zone's
-// owner itself included. So a zone owner never takes the host that
-// reads as an existing project's; a project made later, whose natural label
-// the owner holds, gets its fallback (store.ClaimHostLabel). A label the
-// project holds already (host_labels) stays its own and is not refused, so
-// that choosing it again, after that project came, changes nothing.
-func checkPlainLabel(ctx context.Context, tx *store.Store, project, label string) error {
-	name, other, ok := model.NaturalPair(label)
-	if !ok {
-		return nil
-	}
-	owner, err := tx.HostLabelOwner(ctx, "", label)
-	if err == nil && owner == project {
-		return nil
-	}
-	if err != nil && !errors.Is(err, store.ErrNoRow) {
-		return err
-	}
-	_, err = tx.GetProject(ctx, other)
-	if errors.Is(err, store.ErrNoRow) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("project %s: %w", other, err)
-	}
-	return apierr.WithCode(http.StatusConflict, CodeHostLabelTaken, textHostLabelNatural, label, name, other)
 }

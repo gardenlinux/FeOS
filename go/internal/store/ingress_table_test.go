@@ -117,13 +117,13 @@ func TestIngressRouting(t *testing.T) {
 				r.IdleAfterS == nil || *r.IdleAfterS != 60 {
 				t.Fatalf("instance row %+v", r)
 			}
-			if r.Owner != "acme" || r.Name != "web" || r.HostLabel != "web-acme" || r.Deployment != 1 || r.Deployed != 0 ||
+			if r.Owner != "acme" || r.Name != "web" || r.HostLabel != "web--acme" || r.Deployment != 1 || r.Deployed != 0 ||
 				!r.CreatedAt.Equal(web.CreatedAt) {
 				t.Fatalf("environment of the row %+v", r)
 			}
 		case bare.ID:
 			if r.HasInstance || r.SandboxID != "" || r.Object != "" || r.Phase != "" || r.IngressPorts != nil || r.Node != "" ||
-				r.NodeGroupVersion != 0 || r.IdleAfterS != nil || r.HostLabel != "bare-acme" {
+				r.NodeGroupVersion != 0 || r.IdleAfterS != nil || r.HostLabel != "bare--acme" {
 				t.Fatalf("row without an instance %+v", r)
 			}
 		}

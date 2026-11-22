@@ -257,7 +257,7 @@ func (s *server) setProjectZone(w http.ResponseWriter, r *http.Request) error {
 			return apierr.New(http.StatusConflict, "project %s is being deleted", name)
 		}
 		before = t.Zone
-		moves, err = tx.SetProjectZone(r.Context(), name, zone, zones.PlainLabels(name, zone))
+		moves, err = tx.SetProjectZone(r.Context(), name, zone)
 		return err
 	})
 	if err != nil {

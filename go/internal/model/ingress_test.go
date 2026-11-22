@@ -29,72 +29,81 @@ func validHostLabel(s string) bool {
 var fallbackRE = regexp.MustCompile(`-[0-9a-f]{16}$`)
 
 // unambiguous reports whether the natural label of (name, project) names
-// them alone: the name has no '-', the project no '.', and the label does
-// not end as a fallback does.
+// them alone: the name has no "--", and the project is a label of its own
+// (no '.', no "--", not ending as a fallback does).
 func unambiguous(name, project string) bool {
-	return !strings.Contains(name, "-") && !strings.Contains(project, ".") && !strings.Contains(project, "--") &&
-		!fallbackRE.MatchString(name+"-"+project)
+	return name != "" && !strings.Contains(name, "--") && !strings.HasSuffix(name, "-") && validHostLabel(project) &&
+		!strings.Contains(project, "--") && !fallbackRE.MatchString(project)
 }
 
-// A chosen label has "--", is a host label and does not end as a
-// fallback; no natural label HostLabels takes and no fallback is one.
+// A project's name is its label when it is a host label without "--"
+// that does not end as a fallback does.
+func TestProjectLabel(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{
+		"kino": true, "hb-baxxter": true, "ironcore-dashboard": true, "a1": true, strings.Repeat("k", 63): true,
+		"x0123456789abcdef": true, "x-0123456789abcde": true, "0123456789abcdef": true,
+		"shop.io": false, "a--b": false, "xn--kino": false, "kino-": false, "-kino": false, "Kino": false,
+		"x-0123456789abcdef": false, strings.Repeat("k", 64): false, "": false,
+	} {
+		if got := ProjectLabel(in); got != want {
+			t.Errorf("ProjectLabel(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// A chosen label is "<choice>--<project>" of a project with a label of its
+// own; no other project's label, natural label or fallback is one.
 func TestChosenHostLabel(t *testing.T) {
 	t.Parallel()
-	for in, want := range map[string]bool{
-		"stage--kino": true, "production--ironcore-dashboard": true, "a--b": true,
-		"stage-kino": false, "qa--kino": false, "Stage--kino": false, "stage--kino-": false, "--kino": false,
-		"stage--kino-0123456789abcdef": false, "stage--" + strings.Repeat("k", 57): false,
+	for _, c := range []struct {
+		label, project string
+		want           bool
+	}{
+		{"stage--kino", "kino", true},
+		{"production--ironcore-dashboard", "ironcore-dashboard", true},
+		{"blue-green--kino", "kino", true},
+		{"a--b", "b", true},
+		{"stage--kino", "other", false},
+		{"stage-kino", "kino", false},
+		{"kino", "kino", false},
+		{"qa--kino", "kino", false},
+		{"Stage--kino", "kino", false},
+		{"--kino", "kino", false},
+		{"x---kino", "kino", false},
+		{"a--b--kino", "kino", false},
+		{"a--b--kino", "b--kino", false},
+		{"web--shop.io", "shop.io", false},
+		{"web--x-0123456789abcdef", "x-0123456789abcdef", false},
+		{"stage--" + strings.Repeat("k", 57), strings.Repeat("k", 57), false},
 	} {
-		if got := ChosenHostLabel(in); got != want {
-			t.Errorf("%q: %v, want %v", in, got, want)
+		if got := ChosenHostLabel(c.label, c.project); got != c.want {
+			t.Errorf("ChosenHostLabel(%q, %q) = %v, want %v", c.label, c.project, got, c.want)
 		}
 	}
-	for _, in := range [][2]string{{"web", "acme"}, {"web", "a--b"}, {"web-prod", "acme"}, {"ab", "c--d"}} {
-		natural, ok, fallback := HostLabels(in[0], in[1], uuid.New())
-		if (ok && ChosenHostLabel(natural)) || ChosenHostLabel(fallback) {
-			t.Errorf("%q: natural %q (%v) or fallback %q reads as chosen", in, natural, ok, fallback)
+	for _, in := range [][2]string{{"web", "acme"}, {"web", "a--b"}, {"web-prod", "acme"}, {"ab--x", "acme"}} {
+		_, _, fallback := HostLabels(in[0], in[1], uuid.New())
+		if ChosenHostLabel(fallback, in[1]) || ChosenHostLabel(fallback, "acme") {
+			t.Errorf("%q: fallback %q reads as chosen", in, fallback)
 		}
 	}
 }
 
-// A plain label, a zone owner's, is a host label without "--" that does
-// not end as a fallback; a fallback is never one, and every label with
-// "--" is a chosen one or neither.
-func TestPlainHostLabel(t *testing.T) {
-	t.Parallel()
-	for in, want := range map[string]bool{
-		"kino": true, "ironcore-dashboard": true, "a": true, "x1": true, "web-acme": true,
-		strings.Repeat("k", 63): true, "kino-0123456789abcde": true, "kino-0123456789abcdeg": true,
-		"stage--kino": false, "xn--kino": false, "ab--": false, "Kino": false, "kino-": false, "-kino": false,
-		"kino-0123456789abcdef": false, "0123456789abcdef": true, "-0123456789abcdef": false,
-		strings.Repeat("k", 64): false, "": false, "ki_no": false, "kino.dev": false,
-	} {
-		if got := PlainHostLabel(in); got != want {
-			t.Errorf("%q: %v, want %v", in, got, want)
-		}
-		if PlainHostLabel(in) && ChosenHostLabel(in) {
-			t.Errorf("%q is plain and chosen", in)
-		}
-	}
-	for _, in := range [][2]string{{"web", "acme"}, {"web-prod", "acme"}, {"ab--x", "acme"}, {"web", "acme.io"}} {
-		if _, _, fallback := HostLabels(in[0], in[1], uuid.New()); PlainHostLabel(fallback) {
-			t.Errorf("%q: fallback %q reads as plain", in, fallback)
-		}
-	}
-}
-
-// NaturalPair splits at the first hyphen; a usable natural label splits
-// into its own pair, so a plain label is the natural label of that pair
-// alone.
+// NaturalPair splits at the one "--"; a usable natural label splits into
+// its own pair.
 func TestNaturalPair(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string][3]string{
-		"ironcore-dashboard": {"ironcore", "dashboard", "ok"},
-		"web-acme-io":        {"web", "acme-io", "ok"},
-		"kino":               {"kino", "", ""},
-		"-kino":              {"", "kino", ""},
-		"kino-":              {"kino", "", ""},
-		"":                   {"", "", ""},
+		"ironcore--dashboard": {"ironcore", "dashboard", "ok"},
+		"web--acme-io":        {"web", "acme-io", "ok"},
+		"blue-green--kino":    {"blue-green", "kino", "ok"},
+		"dev--hb-baxxter":     {"dev", "hb-baxxter", "ok"},
+		"kino":                {"kino", "", ""},
+		"web-kino":            {"web-kino", "", ""},
+		"--kino":              {"", "kino", ""},
+		"kino--":              {"kino", "", ""},
+		"a--b--c":             {"a", "b--c", ""},
+		"":                    {"", "", ""},
 	} {
 		name, project, ok := NaturalPair(in)
 		if name != want[0] || project != want[1] || ok != (want[2] == "ok") {
@@ -111,13 +120,13 @@ func TestNaturalPair(t *testing.T) {
 	}
 	for range 5000 {
 		// A project name starts with a letter or a digit (projects.id).
-		name, project := word("ab1-", 1+r.IntN(8)), word("ab1", 1)+word("ab1-.", 1+r.IntN(10))
+		name, project := word("ab1", 1)+word("ab1-", r.IntN(8)), word("ab1", 1)+word("ab1-.", 1+r.IntN(10))
 		natural, ok, _ := HostLabels(name, project, uuid.Nil)
 		if !ok {
 			continue
 		}
-		if !PlainHostLabel(natural) {
-			t.Fatalf("%q %q: natural %q is not plain", name, project, natural)
+		if !ChosenHostLabel(natural, project) || ProjectLabel(natural) {
+			t.Fatalf("%q %q: natural %q is no chosen label's form, or a project's label", name, project, natural)
 		}
 		if n, tn, ok := NaturalPair(natural); !ok || n != name || tn != project {
 			t.Fatalf("%q %q: natural %q splits into (%q, %q, %v)", name, project, natural, n, tn, ok)
@@ -150,31 +159,30 @@ func TestHostLabels(t *testing.T) {
 		naturalOK           bool
 		fallback            string
 	}{
-		{"natural", "web", "acme", "web-acme", true, "web-" + hash},
-		{"hyphenated project", "web", "acme-io", "web-acme-io", true, "web-" + hash},
-		{"dotted project", "shop", "team.acme.io", "shop-team.acme.io", false, "shop-" + hash},
-		{"hyphenated name", "web-prod", "acme", "web-prod-acme", false, "web-prod-" + hash},
-		{"a project of 16 hex characters", "web", "0123456789abcdef", "web-0123456789abcdef", false, "web-" + hash},
+		{"natural", "web", "acme", "web--acme", true, "web-" + hash},
+		{"hyphenated project", "dev", "hb-baxxter", "dev--hb-baxxter", true, "dev-" + hash},
+		{"hyphenated name", "web-prod", "acme", "web-prod--acme", true, "web-prod-" + hash},
+		{"dotted project", "shop", "team.acme.io", "shop--team.acme.io", false, "shop-" + hash},
+		{"project with --", "shop", "a--b", "shop--a--b", false, "shop-" + hash},
+		{"name with --", "a--b", "acme", "a--b--acme", false, "a--b-" + hash},
+		{"a project of 16 hex characters", "web", "0123456789abcdef", "web--0123456789abcdef", true, "web-" + hash},
 		{"a project ending in a hyphen and 16 hex characters", "web", "x-0123456789abcdef",
-			"web-x-0123456789abcdef", false, "web-" + hash},
-		{"a project ending in 16 hex characters after a letter", "web", "x0123456789abcdef",
-			"web-x0123456789abcdef", true, "web-" + hash},
+			"web--x-0123456789abcdef", false, "web-" + hash},
 		{"a project ending in a hyphen and 15 hex characters", "web", "x-0123456789abcde",
-			"web-x-0123456789abcde", true, "web-" + hash},
-		{"exactly 63 characters", strings.Repeat("a", 50), strings.Repeat("t", 12),
-			strings.Repeat("a", 50) + "-" + strings.Repeat("t", 12), true, strings.Repeat("a", 46) + "-" + hash},
-		{"64 characters", strings.Repeat("a", 50), strings.Repeat("t", 13),
-			strings.Repeat("a", 50) + "-" + strings.Repeat("t", 13), false, strings.Repeat("a", 46) + "-" + hash},
-		{"R-LDH natural", "ab--x", "acme", "ab--x-acme", false, "e-ab--x-" + hash},
-		{"R-LDH natural from the project", "ab", "-x", "ab--x", false, "ab-" + hash},
-		{"R-LDH name, natural over long", "xn--abc", strings.Repeat("t", 60),
-			"xn--abc-" + strings.Repeat("t", 60), false, "e-xn--abc-" + hash},
-		{"one character", "a", "b", "a-b", true, "a-" + hash},
-		{"two-character name", "ab", "cd", "ab-cd", true, "ab-" + hash},
+			"web--x-0123456789abcde", true, "web-" + hash},
+		{"exactly 63 characters", strings.Repeat("a", 50), strings.Repeat("t", 11),
+			strings.Repeat("a", 50) + "--" + strings.Repeat("t", 11), true, strings.Repeat("a", 46) + "-" + hash},
+		{"64 characters", strings.Repeat("a", 50), strings.Repeat("t", 12),
+			strings.Repeat("a", 50) + "--" + strings.Repeat("t", 12), false, strings.Repeat("a", 46) + "-" + hash},
+		{"R-LDH name", "xn--abc", strings.Repeat("t", 10),
+			"xn--abc--" + strings.Repeat("t", 10), false, "e-xn--abc-" + hash},
+		{"one character", "a", "b", "a--b", true, "a-" + hash},
+		{"two-character name, R-LDH natural", "qa", "kino", "qa--kino", false, "qa-" + hash},
+		{"three-character name", "dev", "kino", "dev--kino", true, "dev-" + hash},
 		{"hyphens at the cut are trimmed", strings.Repeat("a", 45) + "-" + strings.Repeat("b", 10), "t",
-			strings.Repeat("a", 45) + "-" + strings.Repeat("b", 10) + "-t", false, strings.Repeat("a", 45) + "-" + hash},
-		{"a project with an invalid character", "web", "Acme", "web-Acme", false, "web-" + hash},
-		{"a project that ends in a dot", "web", "acme.", "web-acme.", false, "web-" + hash},
+			strings.Repeat("a", 45) + "-" + strings.Repeat("b", 10) + "--t", true, strings.Repeat("a", 45) + "-" + hash},
+		{"a project with an invalid character", "web", "Acme", "web--Acme", false, "web-" + hash},
+		{"a project that ends in a dot", "web", "acme.", "web--acme.", false, "web-" + hash},
 	} {
 		natural, ok, fallback := HostLabels(c.name, c.project, id)
 		if natural != c.natural || ok != c.naturalOK || fallback != c.fallback {
@@ -200,10 +208,9 @@ func TestHostLabels(t *testing.T) {
 	}
 }
 
-// Any input, however malformed, yields an answer without a panic.
 // A label HostLabels gave an environment under any name, the one it has
-// or one it had before a rename, is its own; another's, a chosen one or
-// another project's natural label is not.
+// or one it had before a rename, is its own, and so is its project's
+// label; another's, a chosen one or another project's label is not.
 func TestGivenHostLabel(t *testing.T) {
 	t.Parallel()
 	id := uuid.MustParse("0b8f4c1e-7a2d-4e6f-9c3b-5d1a2e7f8a90")
@@ -218,11 +225,14 @@ func TestGivenHostLabel(t *testing.T) {
 		{fallback, "fecode", true},
 		{renamed, "fecode", true},
 		{others, "fecode", false},
-		{"web-fecode", "fecode", true},
-		{"web-fecode", "acme", false},
-		{"web-prod-fecode", "fecode", false},
-		{"kino--prod", "fecode", false},
+		{"web--fecode", "fecode", true},
+		{"web-prod--fecode", "fecode", true},
+		{"web--fecode", "acme", false},
+		{"web-fecode", "fecode", false},
+		{"qa--fecode", "fecode", false},
+		{"fecode", "fecode", true},
 		{"kino", "fecode", false},
+		{"shop.io", "shop.io", false},
 		{"", "fecode", false},
 	} {
 		if got := GivenHostLabel(c.label, c.project, id); got != c.want {
@@ -291,9 +301,9 @@ func TestHostLabelsCollisions(t *testing.T) {
 	t.Parallel()
 	for _, group := range [][][2]string{
 		{{"web", "acme.io"}, {"web", "acme-io"}},
-		{{"web-prod", "acme"}, {"web", "prod.acme"}},
+		{{"web-prod", "acme"}, {"web", "prod-acme"}},
 		{{"shop", "acme.io"}, {"shop", "acme-io"}, {"shop-acme", "io"}},
-		{{"shop", "acme-corp"}, {"shop-acme", "corp"}},
+		{{"a--b", "c"}, {"a", "b--c"}},
 	} {
 		seen := map[string][2]string{}
 		naturals := 0
@@ -308,12 +318,12 @@ func TestHostLabelsCollisions(t *testing.T) {
 			}
 			seen[label] = p
 		}
-		if naturals > 1 {
-			t.Errorf("%q: %d natural labels, want at most 1", group, naturals)
+		if naturals > len(group) {
+			t.Errorf("%q: %d natural labels", group, naturals)
 		}
 	}
 	for _, p := range [][2]string{{"web", "acme"}, {"web", "acme-io"}, {"shop", "acme-corp"}, {"prod", "t1"}} {
-		if natural, ok, _ := HostLabels(p[0], p[1], uuid.New()); !ok || natural != p[0]+"-"+p[1] {
+		if natural, ok, _ := HostLabels(p[0], p[1], uuid.New()); !ok || natural != p[0]+"--"+p[1] {
 			t.Errorf("%q: natural %q, ok %v", p, natural, ok)
 		}
 	}
@@ -337,6 +347,9 @@ func TestHostLabelsInjective(t *testing.T) {
 		if q, dup := owner[natural]; dup && q != p {
 			t.Fatalf("%q and %q share the natural label %q", q, p, natural)
 		}
+		if ProjectLabel(natural) {
+			t.Fatalf("%q %q: natural %q is a project's label", name, project, natural)
+		}
 		owner[natural] = p
 	}
 	// All strings over alphabet of length lo to hi.
@@ -358,7 +371,7 @@ func TestHostLabelsInjective(t *testing.T) {
 		return out
 	}
 	var names []string
-	for _, n := range all("a1-", 1, 5) {
+	for _, n := range all("a1-", 1, 6) {
 		if labelRE.MatchString(n) {
 			names = append(names, n)
 		}

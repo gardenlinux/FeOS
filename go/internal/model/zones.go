@@ -3,21 +3,16 @@
 
 package model
 
-import (
-	"slices"
-	"strings"
-)
+import "strings"
 
 // Zones are the platform's zones of default hosts (ADR 0021, ADR 0031):
-// the apps zone (--apps-zone) with the projects that own its plain labels
-// (--apps-zone-owners), and the project zone (--project-zone), where the
+// the apps zone (--apps-zone) and the project zone (--project-zone), where the
 // projects that people make get their hosts. "" switches a zone off. A
 // project's zone (projects.zone) is "" for the apps zone, else the name of
 // its zone.
 type Zones struct {
-	Apps       string
-	AppsOwners []string
-	Project    string
+	Apps    string
+	Project string
 }
 
 // Of is the zone a project whose projects.zone is zone has its default hosts
@@ -56,14 +51,6 @@ func (z Zones) Column(name string) (zone string, ok bool) {
 		return z.Project, true
 	}
 	return "", false
-}
-
-// PlainLabels reports whether project, whose projects.zone is zone, may
-// choose a plain label (PlainHostLabel): it owns the apps zone and its
-// hosts are there. The project zone has no owners, so nobody chooses a
-// plain label in it.
-func (z Zones) PlainLabels(project, zone string) bool {
-	return z.Apps != "" && z.Of(zone) == z.Apps && slices.Contains(z.AppsOwners, project)
 }
 
 // Names are the zones the platform serves, the apps zone first.

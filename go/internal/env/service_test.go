@@ -41,7 +41,7 @@ func TestRenameEnv(t *testing.T) {
 	if _, err := h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true}); err != nil {
 		t.Fatal(err)
 	}
-	hosts := []string{"stage-acme.apps.test"}
+	hosts := []string{"stage--acme.apps.test"}
 
 	ch, unsubscribe := h.d.Subscribe(db.ChanIngress)
 	defer unsubscribe()
@@ -51,7 +51,7 @@ func TestRenameEnv(t *testing.T) {
 		t.Fatalf("rename: %+v %v", st, err)
 	}
 	waitHint(t, ch, store.IngressEnvPayload(uuid.MustParse(stage.ID)))
-	if e := h.env("shop--stage"); e.HostLabel != "stage-acme" {
+	if e := h.env("shop--stage"); e.HostLabel != "stage--acme" {
 		t.Fatalf("row %+v", e)
 	}
 	for _, ref := range []string{"shop--stage", stage.ID} {
@@ -88,7 +88,7 @@ func TestRenameEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, err := h.svc.SetPublic(ctx, projectA, "live", PublicRequest{Public: true})
-	if err != nil || !slices.Equal(a.Hosts, []string{"live-acme.apps.test"}) {
+	if err != nil || !slices.Equal(a.Hosts, []string{"live--acme.apps.test"}) {
 		t.Fatalf("publish: %+v %v", a, err)
 	}
 
@@ -1313,7 +1313,7 @@ func TestSetPublic(t *testing.T) {
 	}
 
 	// Published: the host, a roll, the controller woken.
-	hosts := []string{"stage-acme.apps.test"}
+	hosts := []string{"stage--acme.apps.test"}
 	ch, unsubscribe := h.d.Subscribe(db.ChanLeader)
 	defer unsubscribe()
 	a, err := h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true})
@@ -1322,7 +1322,7 @@ func TestSetPublic(t *testing.T) {
 	}
 	waitHint(t, ch, ctl.HintReconcile)
 	waitHint(t, ch, ctl.HintGroups)
-	if e := h.env("stage"); !e.Public || !e.IngressGroup || e.HostLabel != "stage-acme" {
+	if e := h.env("stage"); !e.Public || !e.IngressGroup || e.HostLabel != "stage--acme" {
 		t.Fatalf("row %+v", e)
 	}
 	// Again, by its ID: the same answer, and nothing rolls.
@@ -1334,15 +1334,15 @@ func TestSetPublic(t *testing.T) {
 	// The routes to image services are the ingress's too, at the host;
 	// the attached service's are the route door's alone.
 	ingress := slices.Clone(byDoor)
-	ingress[0].Door, ingress[0].URL = DoorIngress, "https://stage-acme.apps.test/api"
-	ingress[2].Door, ingress[2].URL = DoorIngress, "https://stage-acme.apps.test/"
+	ingress[0].Door, ingress[0].URL = DoorIngress, "https://stage--acme.apps.test/api"
+	ingress[2].Door, ingress[2].URL = DoorIngress, "https://stage--acme.apps.test/"
 	st, err = h.svc.GetEnv(ctx, projectA, "stage")
 	if err != nil || !st.Public || !slices.Equal(st.Hosts, hosts) || !slices.Equal(st.Routes, ingress) {
 		t.Fatalf("status: %+v %v", st, err)
 	}
 	b, _ := json.Marshal(st)
-	for _, want := range []string{`"public":true,"hosts":["stage-acme.apps.test"]`,
-		`{"name":"api","path":"/api","service":"api","port":8080,"door":"ingress","url":"https://stage-acme.apps.test/api"}`,
+	for _, want := range []string{`"public":true,"hosts":["stage--acme.apps.test"]`,
+		`{"name":"api","path":"/api","service":"api","port":8080,"door":"ingress","url":"https://stage--acme.apps.test/api"}`,
 		`{"name":"dev","path":"/dev/","service":"dev","port":5173,"door":"route"}`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("status JSON lacks %s:\n%s", want, b)
@@ -1356,8 +1356,8 @@ func TestSetPublic(t *testing.T) {
 	p, err := h.svc.Plan(ctx, projectA, "stage", PlanRequest{Spec: json.RawMessage(withDev)}, spec.FormatJSON)
 	if err != nil || !p.Valid ||
 		!hasFinding(p.Findings, spec.SeverityInfo, "routes.api",
-			"served by the ingress at https://stage-acme.apps.test/api and by the route door") ||
-		!hasFinding(p.Findings, spec.SeverityInfo, "routes.root", "served by the ingress at https://stage-acme.apps.test/ and") ||
+			"served by the ingress at https://stage--acme.apps.test/api and by the route door") ||
+		!hasFinding(p.Findings, spec.SeverityInfo, "routes.root", "served by the ingress at https://stage--acme.apps.test/ and") ||
 		!hasFinding(p.Findings, spec.SeverityInfo, "routes.dev", "served by the route door alone: an attached service") ||
 		!hasFinding(p.Findings, spec.SeverityInfo, "", "nothing changes") || len(p.Findings) != 4 {
 		t.Fatalf("plan %+v %v", p, err)
@@ -1391,7 +1391,7 @@ func TestSetPublic(t *testing.T) {
 		"served by the route door; the ingress serves it once the environment is public") {
 		t.Fatalf("unpublished plan %+v %v", p, err)
 	}
-	if e := h.env("stage"); e.Public || !e.IngressGroup || e.HostLabel != "stage-acme" {
+	if e := h.env("stage"); e.Public || !e.IngressGroup || e.HostLabel != "stage--acme" {
 		t.Fatalf("unpublished row %+v", e)
 	}
 	a, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true})
@@ -1402,23 +1402,24 @@ func TestSetPublic(t *testing.T) {
 	// A label the project chose: the host moves and nothing rolls; a label
 	// not of the chosen form, one without public and one another project
 	// holds are refused, and the environment keeps its host.
-	a, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true, HostLabel: "stage--shop"})
-	if err != nil || !slices.Equal(a.Hosts, []string{"stage--shop.apps.test"}) || a.Rolling {
+	a, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true, HostLabel: "shop--acme"})
+	if err != nil || !slices.Equal(a.Hosts, []string{"shop--acme.apps.test"}) || a.Rolling {
 		t.Fatalf("chosen label: %+v %v", a, err)
 	}
-	if e := h.env("stage"); !e.Public || e.HostLabel != "stage--shop" {
+	if e := h.env("stage"); !e.Public || e.HostLabel != "shop--acme" {
 		t.Fatalf("chosen row %+v", e)
 	}
-	for _, bad := range []string{"stage-shop", "ab--shop", "Stage--shop", "x--0123456789abcdef", "stage--shop-"} {
+	for _, bad := range []string{"stage-shop", "stage--shop", "Stage--acme", "qa--acme", "x---acme", "a--b--acme",
+		"x--0123456789abcdef", strings.Repeat("s", 58) + "--acme"} {
 		_, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true, HostLabel: bad})
-		wantStatus(t, err, http.StatusBadRequest, "a chosen host label is a DNS label")
+		wantStatus(t, err, http.StatusBadRequest, "a chosen host label is <choice>--acme")
 	}
-	_, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{HostLabel: "stage--shop"})
+	_, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{HostLabel: "shop--acme"})
 	wantStatus(t, err, http.StatusBadRequest, textHostLabelNotPublic)
-	h.exec("INSERT INTO host_labels (label, owner) VALUES ('taken--x', $1)", projectB)
-	_, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true, HostLabel: "taken--x"})
-	wantStatus(t, err, http.StatusConflict, "host label taken--x is another project's")
-	if e := h.env("stage"); !e.Public || e.HostLabel != "stage--shop" {
+	h.exec("INSERT INTO host_labels (label, owner) VALUES ('taken--acme', $1)", projectB)
+	_, err = h.svc.SetPublic(ctx, projectA, "stage", PublicRequest{Public: true, HostLabel: "taken--acme"})
+	wantStatus(t, err, http.StatusConflict, "host label taken--acme is another project's")
+	if e := h.env("stage"); !e.Public || e.HostLabel != "shop--acme" {
 		t.Fatalf("kept %+v", e)
 	}
 
@@ -1446,16 +1447,16 @@ func TestSetPublic(t *testing.T) {
 		t.Fatalf("with a domain: %+v %v", a, err)
 	}
 	st, err = h.svc.GetEnv(ctx, projectA, "stage")
-	if err != nil || !slices.Equal(st.Hosts, shop) || st.HostLabel != "stage--shop" || st.Routes[2].URL != "https://shop.example/" {
+	if err != nil || !slices.Equal(st.Hosts, shop) || st.HostLabel != "shop--acme" || st.Routes[2].URL != "https://shop.example/" {
 		t.Fatalf("status with a domain: %+v %v", st, err)
 	}
 	list, err = h.svc.ListEnvs(ctx, projectA, map[string]string{})
-	if err != nil || !slices.Equal(list.Environments[1].Hosts, shop) || list.Environments[1].HostLabel != "stage--shop" {
+	if err != nil || !slices.Equal(list.Environments[1].Hosts, shop) || list.Environments[1].HostLabel != "shop--acme" {
 		t.Fatalf("list with a domain: %+v %v", list, err)
 	}
 	h.exec(`UPDATE domains SET state = 'inactive' WHERE env_id = $1`, stage.ID)
 	if st, err = h.svc.GetEnv(ctx, projectA, "stage"); err != nil ||
-		!slices.Equal(st.Hosts, []string{"stage--shop.apps.test"}) {
+		!slices.Equal(st.Hosts, []string{"shop--acme.apps.test"}) {
 		t.Fatalf("its domain inactive: %+v %v", st, err)
 	}
 
@@ -1528,16 +1529,15 @@ func TestSetPublic(t *testing.T) {
 	}
 }
 
-// A plain label (ADR 0021, 2026-11-01): a project of --apps-zone-owners may
-// choose a host label without "--", as FeCode does for a project's
-// production; any other project gets the 400 it got before. A plain label
-// is first come as every label is, and one that is the natural label of
-// an existing project's environment is refused; a project made later, whose
-// natural label the owner holds, gets its fallback, and the owner keeps
-// the label.
-func TestSetPublicPlainLabel(t *testing.T) {
+// The project's address (ADR 0063): an environment takes the project's
+// name as its label, and taking it moves it from the environment that
+// held it, which gets its natural label back; both views say which holds
+// it. Another project's name is no label of this project's, a project
+// whose name is no label has none, and an address another project holds
+// is taken.
+func TestSetPublicProjectAddress(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t, harnessOptions{appsZone: "apps.test", appsZoneOwners: []string{projectA}})
+	h := newHarness(t, harnessOptions{appsZone: "apps.test"})
 	ctx := h.ctx()
 	for _, n := range []string{"prod", "demo"} {
 		h.create(n, nil)
@@ -1553,146 +1553,125 @@ func TestSetPublicPlainLabel(t *testing.T) {
 		return ""
 	}
 
-	// The zone's owner: a plain label at its first publish, again without
-	// a change, and a label with "--" as before.
-	a, err := h.svc.SetPublic(ctx, projectA, "prod", PublicRequest{Public: true, HostLabel: "kino"})
-	if err != nil || !slices.Equal(a.Hosts, []string{"kino.apps.test"}) || !a.Rolling {
-		t.Fatalf("plain label: %+v %v", a, err)
+	// prod takes the address at its first publish, and again without a
+	// change.
+	a, err := h.svc.SetPublic(ctx, projectA, "prod", PublicRequest{Public: true, HostLabel: projectA})
+	if err != nil || !slices.Equal(a.Hosts, []string{"acme.apps.test"}) || !a.Rolling || !a.ProjectAddress ||
+		a.HostLabel != projectA {
+		t.Fatalf("the address: %+v %v", a, err)
 	}
-	if e := h.env("prod"); !e.Public || e.HostLabel != "kino" {
-		t.Fatalf("row %+v", e)
-	}
-	a, err = h.svc.SetPublic(ctx, projectA, "prod", PublicRequest{Public: true, HostLabel: "kino"})
-	if err != nil || !slices.Equal(a.Hosts, []string{"kino.apps.test"}) || a.Rolling {
+	a, err = h.svc.SetPublic(ctx, projectA, "prod", PublicRequest{Public: true, HostLabel: projectA})
+	if err != nil || !slices.Equal(a.Hosts, []string{"acme.apps.test"}) || a.Rolling {
 		t.Fatalf("again: %+v %v", a, err)
 	}
-	a, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "demo--kino"})
-	if err != nil || !slices.Equal(a.Hosts, []string{"demo--kino.apps.test"}) {
-		t.Fatalf("chosen label of the owner: %+v %v", a, err)
+
+	// demo takes it: prod gets its natural label.
+	a, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: projectA})
+	if err != nil || !slices.Equal(a.Hosts, []string{"acme.apps.test"}) || !a.ProjectAddress {
+		t.Fatalf("demo takes the address: %+v %v", a, err)
 	}
-	a, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "ironcore-dashboard"})
-	if err != nil || !slices.Equal(a.Hosts, []string{"ironcore-dashboard.apps.test"}) {
-		t.Fatalf("a hyphenated plain label no project's: %+v %v", a, err)
+	st, err := h.svc.GetEnv(ctx, projectA, "prod")
+	if err != nil || st.ProjectAddress || st.HostLabel != "prod--acme" || !slices.Equal(st.Hosts, []string{"prod--acme.apps.test"}) {
+		t.Fatalf("prod after the move: %+v %v", st, err)
+	}
+	l, err := h.svc.ListEnvs(ctx, projectA, nil)
+	if err != nil || len(l.Environments) != 2 || !l.Environments[0].ProjectAddress || l.Environments[1].ProjectAddress {
+		t.Fatalf("listing %+v %v", l, err)
+	}
+	b, _ := json.Marshal(st)
+	if !strings.Contains(string(b), `"hostLabel":"prod--acme","projectAddress":false`) {
+		t.Fatalf("status JSON %s", b)
 	}
 
-	// Not of the form: a fallback's end, R-LDH, upper case, too long.
-	for _, bad := range []string{"kino-0123456789abcdef", "xn--kino", "Kino", "kino-", strings.Repeat("k", 64)} {
+	// demo gives it up for its fallback, its own label: nobody holds it.
+	demo := h.env("demo")
+	_, _, demoFallback := model.HostLabels("demo", projectA, demo.ID)
+	if a, err := h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: demoFallback}); err != nil ||
+		a.ProjectAddress || a.HostLabel != demoFallback {
+		t.Fatalf("demo gives the address up: %+v %v", a, err)
+	}
+	_, _, prodFallback := model.HostLabels("prod", projectA, h.env("prod").ID)
+	_, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: prodFallback})
+	wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadHostLabel, prodFallback, projectA, projectA))
+
+	// Another project's name, and labels not of the form.
+	for _, bad := range []string{projectB, "kino", "demo-acme", "Acme", "qa--acme", "prod--other"} {
 		_, err = h.svc.SetPublic(ctx, projectA, "prod", PublicRequest{Public: true, HostLabel: bad})
-		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadOwnedHostLabel, bad))
+		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadHostLabel, bad, projectA, projectA))
+	}
+	_, err = h.svc.SetPublic(ctx, projectB, "prod", PublicRequest{Public: true, HostLabel: projectA})
+	wantStatus(t, err, http.StatusBadRequest, "a chosen host label is <choice>--other")
+	if a, err := h.svc.SetPublic(ctx, projectB, "prod", PublicRequest{Public: true, HostLabel: projectB}); err != nil ||
+		!slices.Equal(a.Hosts, []string{"other.apps.test"}) {
+		t.Fatalf("other's own address: %+v %v", a, err)
 	}
 
-	// Taken: another environment of the owner holds it, another project
-	// owns it, it is the natural label of an existing project's
-	// environment (the owner's own included). The environment keeps its
-	// label.
-	_, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "kino"})
-	wantStatus(t, err, http.StatusConflict, "host label kino is another project's or another environment's")
-	if code(err) != CodeHostLabelTaken {
-		t.Fatalf("code %q", code(err))
-	}
-	h.exec("INSERT INTO host_labels (label, owner) VALUES ('shop', $1)", projectB)
-	_, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "shop"})
-	wantStatus(t, err, http.StatusConflict, "host label shop is another project's or another environment's")
-	for label, msg := range map[string]string{
-		"web-other": "host label web-other is the natural label of environment web of project other",
-		"web-acme":  "host label web-acme is the natural label of environment web of project acme",
-	} {
-		_, err = h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: label})
-		wantStatus(t, err, http.StatusConflict, msg)
-		if code(err) != CodeHostLabelTaken {
-			t.Fatalf("%s: code %q", label, code(err))
-		}
-	}
-	if e := h.env("demo"); e.HostLabel != "ironcore-dashboard" {
-		t.Fatalf("kept %+v", e)
-	}
-
-	// Another project: a plain label is the 400 of before, a label with
-	// "--" is chosen.
-	for _, bad := range []string{"kino2", "web-acme"} {
-		_, err = h.svc.SetPublic(ctx, projectB, "prod", PublicRequest{Public: true, HostLabel: bad})
-		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textBadHostLabel, bad))
-	}
-	if a, err := h.svc.SetPublic(ctx, projectB, "prod", PublicRequest{Public: true, HostLabel: "prod--x"}); err != nil ||
-		!slices.Equal(a.Hosts, []string{"prod--x.apps.test"}) {
-		t.Fatalf("chosen label of another project: %+v %v", a, err)
-	}
-
-	// A project made later whose natural label the owner holds: its
-	// environment gets its fallback, and the owner keeps the label, also
-	// when it chooses it again.
-	if _, err := h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "shop-later"}); err != nil {
+	// A project whose name is no label: no address, no chosen labels, its
+	// fallback.
+	if _, _, err := h.st.CreateProject(ctx, "shop.io"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.st.CreateProject(ctx, "later"); err != nil {
-		t.Fatal(err)
-	}
-	shop, created, err := h.svc.CreateEnv(ctx, "later", CreateEnvRequest{Name: "shop"})
+	shop, created, err := h.svc.CreateEnv(ctx, "shop.io", CreateEnvRequest{Name: "web"})
 	if err != nil || !created {
 		t.Fatalf("create %v %v", created, err)
 	}
-	_, _, fallback := model.HostLabels("shop", "later", uuid.MustParse(shop.ID))
-	if a, err := h.svc.SetPublic(ctx, "later", "shop", PublicRequest{Public: true}); err != nil ||
+	for _, label := range []string{"shop.io", "web--shop.io"} {
+		_, err = h.svc.SetPublic(ctx, "shop.io", "web", PublicRequest{Public: true, HostLabel: label})
+		wantStatus(t, err, http.StatusBadRequest, fmt.Sprintf(textNoProjectLabels, label, "shop.io"))
+	}
+	_, _, fallback := model.HostLabels("web", "shop.io", uuid.MustParse(shop.ID))
+	if a, err := h.svc.SetPublic(ctx, "shop.io", "web", PublicRequest{Public: true}); err != nil ||
 		!slices.Equal(a.Hosts, []string{fallback + ".apps.test"}) {
-		t.Fatalf("later project: %+v %v (fallback %s)", a, err, fallback)
+		t.Fatalf("a dotted project: %+v %v (fallback %s)", a, err, fallback)
 	}
-	if a, err := h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "shop-later"}); err != nil ||
-		!slices.Equal(a.Hosts, []string{"shop-later.apps.test"}) {
-		t.Fatalf("the owner again: %+v %v", a, err)
-	}
-	// Its other environment may take it once the first gives it up.
-	if _, err := h.svc.SetPublic(ctx, projectA, "demo", PublicRequest{Public: true, HostLabel: "demo--kino"}); err != nil {
+
+	// A project whose name another project holds as a label (one of the
+	// labels from before ADR 0063): its address is taken.
+	h.exec("INSERT INTO host_labels (label, owner) VALUES ('later', $1)", projectA)
+	if _, _, err := h.st.CreateProject(ctx, "later"); err != nil {
 		t.Fatal(err)
 	}
-	if a, err := h.svc.SetPublic(ctx, projectA, "prod", PublicRequest{Public: true, HostLabel: "shop-later"}); err != nil ||
-		!slices.Equal(a.Hosts, []string{"shop-later.apps.test"}) {
-		t.Fatalf("the owner's other environment: %+v %v", a, err)
+	if _, created, err := h.svc.CreateEnv(ctx, "later", CreateEnvRequest{Name: "prod"}); err != nil || !created {
+		t.Fatalf("create %v %v", created, err)
+	}
+	_, err = h.svc.SetPublic(ctx, "later", "prod", PublicRequest{Public: true, HostLabel: "later"})
+	wantStatus(t, err, http.StatusConflict, "host label later is another project's or another environment's")
+	if code(err) != CodeHostLabelTaken {
+		t.Fatalf("code %q", code(err))
 	}
 }
 
 // The project zone (ADR 0031): a project there publishes under it, with its
 // natural and its chosen labels, and the status and the listing say so; a
-// zone owner moved there chooses no plain label; a project whose zone the
-// platform does not serve publishes nothing, and a move back gives it its
-// hosts again.
+// project whose zone the platform does not serve publishes nothing, and a
+// move back gives it its hosts again, its address included.
 func TestSetPublicProjectZone(t *testing.T) {
 	t.Parallel()
 	const tz = "apps.run.test"
-	h := newHarness(t, harnessOptions{appsZone: "apps.test", appsZoneOwners: []string{projectA}, projectZone: tz})
+	h := newHarness(t, harnessOptions{appsZone: "apps.test", projectZone: tz})
 	ctx := h.ctx()
 	h.create("web", nil)
 	h.exec("UPDATE projects SET zone = $1 WHERE id = $2", tz, projectA)
 
 	a, err := h.svc.SetPublic(ctx, projectA, "web", PublicRequest{Public: true})
-	if err != nil || !slices.Equal(a.Hosts, []string{"web-acme." + tz}) {
+	if err != nil || !slices.Equal(a.Hosts, []string{"web--acme." + tz}) {
 		t.Fatalf("natural label: %+v %v", a, err)
 	}
-	a, err = h.svc.SetPublic(ctx, projectA, "web", PublicRequest{Public: true, HostLabel: "web--shop"})
-	if err != nil || !slices.Equal(a.Hosts, []string{"web--shop." + tz}) {
+	a, err = h.svc.SetPublic(ctx, projectA, "web", PublicRequest{Public: true, HostLabel: "shop--acme"})
+	if err != nil || !slices.Equal(a.Hosts, []string{"shop--acme." + tz}) {
 		t.Fatalf("chosen label: %+v %v", a, err)
 	}
 	st, err := h.svc.GetEnv(ctx, projectA, "web")
-	if err != nil || !slices.Equal(st.Hosts, []string{"web--shop." + tz}) {
+	if err != nil || !slices.Equal(st.Hosts, []string{"shop--acme." + tz}) {
 		t.Fatalf("status %+v %v", st.Hosts, err)
 	}
 	l, err := h.svc.ListEnvs(ctx, projectA, nil)
-	if err != nil || len(l.Environments) != 1 || !slices.Equal(l.Environments[0].Hosts, []string{"web--shop." + tz}) {
+	if err != nil || len(l.Environments) != 1 || !slices.Equal(l.Environments[0].Hosts, []string{"shop--acme." + tz}) {
 		t.Fatalf("listing %+v %v", l, err)
 	}
-	// An owner of the apps zone, but in the project zone: no plain label.
-	_, err = h.svc.SetPublic(ctx, projectA, "web", PublicRequest{Public: true, HostLabel: "kino"})
-	wantStatus(t, err, http.StatusBadRequest, "a plain host label is only for the apps zone")
-	if e := h.env("web"); e.HostLabel != "web--shop" {
-		t.Fatalf("kept %+v", e)
-	}
-	// Another project takes the same chosen label in the apps zone.
-	if _, created, err := h.svc.CreateEnv(ctx, projectB, CreateEnvRequest{Name: "web"}); err != nil || !created {
-		t.Fatalf("create %v %v", created, err)
-	}
-	if a, err := h.svc.SetPublic(ctx, projectB, "web", PublicRequest{Public: true, HostLabel: "web--shop"}); err != nil ||
-		!slices.Equal(a.Hosts, []string{"web--shop.apps.test"}) {
-		t.Fatalf("the same label in the apps zone: %+v %v", a, err)
-	}
+	// Another project holds the same label in the apps zone (written here
+	// by hand: none chooses it now).
+	h.exec("INSERT INTO host_labels (zone, label, owner) VALUES ('', 'shop--acme', $1)", projectB)
 
 	// A zone the platform does not serve: no hosts, no publish.
 	h.exec("UPDATE projects SET zone = 'old.test' WHERE id = $1", projectA)
@@ -1706,15 +1685,15 @@ func TestSetPublicProjectZone(t *testing.T) {
 	wantStatus(t, err, http.StatusConflict, "the platform serves no zone old.test")
 
 	// An operator moves it to the apps zone (store.SetProjectZone): its
-	// label moves along, and it is the owner's plain labels' zone again.
-	if _, err := h.st.SetProjectZone(ctx, projectA, "", true); err != nil {
+	// label moves along.
+	if _, err := h.st.SetProjectZone(ctx, projectA, ""); err != nil {
 		t.Fatal(err)
 	}
-	if e := h.env("web"); e.HostLabel == "web--shop" || e.HostLabel != "web-acme" {
-		t.Fatalf("moved: web--shop is the other project's in the apps zone, so the natural label: %+v", e)
+	if e := h.env("web"); e.HostLabel != "web--acme" {
+		t.Fatalf("moved: shop--acme is the other project's in the apps zone, so the natural label: %+v", e)
 	}
-	if a, err := h.svc.SetPublic(ctx, projectA, "web", PublicRequest{Public: true, HostLabel: "kino"}); err != nil ||
-		!slices.Equal(a.Hosts, []string{"kino.apps.test"}) {
-		t.Fatalf("plain label in the apps zone: %+v %v", a, err)
+	if a, err := h.svc.SetPublic(ctx, projectA, "web", PublicRequest{Public: true, HostLabel: projectA}); err != nil ||
+		!slices.Equal(a.Hosts, []string{"acme.apps.test"}) {
+		t.Fatalf("the address in the apps zone: %+v %v", a, err)
 	}
 }

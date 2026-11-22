@@ -17,8 +17,10 @@
     "deleting": false,
     "public": true,
     "hosts": [
-      "expensa-stage-fecode.apps.fecode.dev"
+      "expensa-stage--fecode.apps.fecode.dev"
     ],
+    "projectAddress": false,
+    "projectHost": "fecode.apps.fecode.dev",
     "access": "visitors",
     "provider": "fecode",
     "protected": false,
@@ -196,7 +198,7 @@
         "service": "approval-service",
         "port": 8080,
         "door": "ingress",
-        "url": "https://expensa-stage-fecode.apps.fecode.dev/api/approval"
+        "url": "https://expensa-stage--fecode.apps.fecode.dev/api/approval"
       },
       {
         "name": "api-expense",
@@ -204,7 +206,7 @@
         "service": "expense-service",
         "port": 8080,
         "door": "ingress",
-        "url": "https://expensa-stage-fecode.apps.fecode.dev/api/expense"
+        "url": "https://expensa-stage--fecode.apps.fecode.dev/api/expense"
       },
       {
         "name": "root",
@@ -212,7 +214,7 @@
         "service": "web",
         "port": 8080,
         "door": "ingress",
-        "url": "https://expensa-stage-fecode.apps.fecode.dev/"
+        "url": "https://expensa-stage--fecode.apps.fecode.dev/"
       }
     ],
     "openIncidents": 1,

@@ -50,30 +50,40 @@ const (
 	hashLen      = 16
 )
 
+// ProjectLabel reports whether a project's name is a label of its own in
+// its zone, the project's address (ADR 0063): a DNS label as isHostLabel
+// has it, without "--" and not ending as a fallback does. A project with a
+// dot or a "--" in its name has none, and no natural or chosen labels
+// either.
+func ProjectLabel(project string) bool {
+	return isHostLabel(project) && !strings.Contains(project, "--") && !hasHashSuffix(project)
+}
+
 // HostLabels returns the candidates for an environment's default host
-// label under the apps zone (D12 of the ingress's design). natural is
-// "<name>-<project>"; it is usable when naturalOK, that is when it is
-// unambiguous and a valid label:
+// label in its project's zone (ADR 0063). natural is
+// "<name>--<project>"; it is usable when naturalOK, that is when it names
+// one pair and is a valid label:
 //
-//   - the name contains no '-', so the label splits at its first '-';
-//   - the project contains no '.', so the label holds the project as it is,
-//     and no "--", so the label has none and is never a chosen one
-//     (ChosenHostLabel);
-//   - it does not end in "-" and 16 hex characters, the form of every
-//     fallback label;
+//   - the label splits at its one "--" into the name and the project: the
+//     name has no "--" and does not end in a hyphen;
+//   - the project has a label of its own (ProjectLabel), so the project
+//     after the "--" is the whole rest;
 //   - it is a DNS label of at most 63 characters whose third and fourth
-//     characters are not "--" (RFC 5891's reserved R-LDH form).
+//     characters are not "--" (RFC 5891's reserved R-LDH form): an
+//     environment whose name has two characters gets its fallback.
 //
-// So no two (name, project) pairs share a usable natural label, and none is
-// another environment's fallback. fallback is at most 46 characters of the
-// name (prefixed "e-" when the name itself is R-LDH, trailing hyphens
-// trimmed), "-" and the first 16 hex characters of the SHA-256 of the
-// environment's UUID as text, which is a valid label and never R-LDH for
-// any valid environment name. It never panics, whatever its input.
+// So no two (name, project) pairs share a usable natural label, none is a
+// project's label (which has no "--") and none another environment's
+// fallback (its project would end as a fallback does). fallback is at
+// most 46 characters of the name (prefixed "e-" when the name itself is
+// R-LDH, trailing hyphens trimmed), "-" and the first 16 hex characters of
+// the SHA-256 of the environment's UUID as text, which is a valid label and
+// never R-LDH for any valid environment name. It never panics, whatever its
+// input.
 func HostLabels(name, project string, id uuid.UUID) (natural string, naturalOK bool, fallback string) {
-	natural = name + "-" + project
-	naturalOK = !strings.Contains(name, "-") && !strings.Contains(project, ".") && !strings.Contains(project, "--") &&
-		!hasHashSuffix(natural) && isHostLabel(natural)
+	natural = name + "--" + project
+	n, t, ok := NaturalPair(natural)
+	naturalOK = ok && n == name && t == project && ProjectLabel(project) && isHostLabel(natural)
 	p := name
 	if isRLDH(p) {
 		p = "e-" + p
@@ -84,15 +94,18 @@ func HostLabels(name, project string, id uuid.UUID) (natural string, naturalOK b
 	return natural, naturalOK, fallback
 }
 
-// GivenHostLabel reports whether label is one HostLabels gives the
-// environment id of project under some name, the one it has or one it had
-// before a rename (ADR 0037): a fallback with id's hash, or the usable
-// natural label of a name and project. A zone move keeps such a label as
-// the environment's own.
+// GivenHostLabel reports whether label is one the environment id of
+// project holds by its name or its project, the label it may keep when its
+// project moves zones: a fallback with id's hash, the usable natural label
+// of a name it has or had before a rename (ADR 0037), or the project's
+// label.
 func GivenHostLabel(label, project string, id uuid.UUID) bool {
 	sum := sha256.Sum256([]byte(id.String()))
 	if strings.HasSuffix(label, "-"+hex.EncodeToString(sum[:])[:hashLen]) && isHostLabel(label) {
 		return true
+	}
+	if label == project {
+		return ProjectLabel(project)
 	}
 	name, t, ok := NaturalPair(label)
 	if !ok || t != project {
@@ -102,33 +115,27 @@ func GivenHostLabel(label, project string, id uuid.UUID) bool {
 	return naturalOK && natural == label
 }
 
-// ChosenHostLabel reports whether s may be a default host label its
-// project chose (PUT …/public with a hostLabel): a DNS label as
-// isHostLabel has it, with "--" in it and not ending as a fallback does.
-// A natural label never has "--" and every fallback ends in its hash, so
-// a chosen label is never one HostLabels gives.
-func ChosenHostLabel(s string) bool {
-	return isHostLabel(s) && strings.Contains(s, "--") && !hasHashSuffix(s)
+// ChosenHostLabel reports whether s may be a default host label that
+// project chose for one of its environments (PUT …/public with a
+// hostLabel, ADR 0063): "<choice>--<project>", a DNS label as isHostLabel
+// has it, the choice without "--" and project one with a label of its own
+// (ProjectLabel). Its form is a natural label's, of project alone; one of
+// a name no environment of project has yet leaves that environment its
+// fallback.
+func ChosenHostLabel(s, project string) bool {
+	_, t, ok := NaturalPair(s)
+	return ok && t == project && ProjectLabel(project) && isHostLabel(s)
 }
 
-// PlainHostLabel reports whether s may be a plain label, one a project
-// that owns the apps zone chose (--apps-zone-owners, PUT …/public with a
-// hostLabel): a DNS label as isHostLabel has it, without "--" and not
-// ending as a fallback does. It is never a fallback, but it may read as a
-// natural label; NaturalPair names the only pair it can be the natural
-// label of, which the caller checks against the projects.
-func PlainHostLabel(s string) bool {
-	return isHostLabel(s) && !strings.Contains(s, "--") && !hasHashSuffix(s)
-}
-
-// NaturalPair splits a label at its first '-' into the environment's name
-// and the project whose natural label it would be ("ironcore-dashboard":
-// "ironcore" of "dashboard"); ok is false for a label without a '-' or
-// with nothing on either side of it. A natural label's name has no '-'
-// (HostLabels), so no other pair has it as its natural label.
+// NaturalPair splits a label at its first "--" into the environment's name
+// (or a project's choice) and the project ("ironcore--dashboard":
+// "ironcore" of "dashboard"); ok is false for a label without "--", with
+// nothing on either side of it, or with "--" after it as well. A project
+// with a label of its own has no "--" (ProjectLabel), so a label of its
+// has exactly one.
 func NaturalPair(label string) (name, project string, ok bool) {
-	name, project, ok = strings.Cut(label, "-")
-	return name, project, ok && name != "" && project != ""
+	name, project, ok = strings.Cut(label, "--")
+	return name, project, ok && name != "" && project != "" && !strings.Contains(project, "--")
 }
 
 // hasHashSuffix reports whether s ends in "-" and 16 lowercase hex

@@ -481,12 +481,11 @@ func TestProjectZone(t *testing.T) {
 		t.Fatalf("default %q, %v", c.ProjectZone, err)
 	}
 	c, err = Parse(base, env(map[string]string{"FERUN_APPS_ZONE": "apps.example.com",
-		"FERUN_PROJECT_ZONE": "apps.run.example.com", "FERUN_APPS_ZONE_OWNERS": "fecode"}))
+		"FERUN_PROJECT_ZONE": "apps.run.example.com"}))
 	if err != nil || c.ProjectZone != "apps.run.example.com" {
 		t.Fatalf("from the variable %q, %v", c.ProjectZone, err)
 	}
-	if z := c.Zones(); z.Apps != "apps.example.com" || z.Project != "apps.run.example.com" ||
-		len(z.AppsOwners) != 1 || z.AppsOwners[0] != "fecode" {
+	if z := c.Zones(); z.Apps != "apps.example.com" || z.Project != "apps.run.example.com" {
 		t.Fatalf("zones %+v", z)
 	}
 	for _, tc := range []struct{ apps, project, want string }{
@@ -557,37 +556,12 @@ func TestAppsZone(t *testing.T) {
 	}
 }
 
-// --apps-zone-owners: none by default; project names from the flag or
-// FERUN_APPS_ZONE_OWNERS, comma-separated, the flag winning; a name that
-// is no project's is refused.
-func TestAppsZoneOwners(t *testing.T) {
+// --apps-zone-owners is gone (ADR 0063): no project owns the apps zone's
+// plain names.
+func TestNoAppsZoneOwners(t *testing.T) {
 	t.Parallel()
-	if EnvName("apps-zone-owners") != "FERUN_APPS_ZONE_OWNERS" {
-		t.Fatal(EnvName("apps-zone-owners"))
-	}
-	c, err := Parse([]string{"--database-url", testURL}, env(nil))
-	if err != nil || c.AppsZoneOwners != nil || Default().AppsZoneOwners != nil {
-		t.Fatalf("default %q, %v", c.AppsZoneOwners, err)
-	}
-	c, err = Parse([]string{"--database-url", testURL}, env(map[string]string{"FERUN_APPS_ZONE_OWNERS": "fecode, acme.io"}))
-	if err != nil || !reflect.DeepEqual(c.AppsZoneOwners, []string{"fecode", "acme.io"}) {
-		t.Fatalf("from the variable %q, %v", c.AppsZoneOwners, err)
-	}
-	c, err = Parse([]string{"--database-url", testURL, "--apps-zone-owners", "fecode"},
-		env(map[string]string{"FERUN_APPS_ZONE_OWNERS": "other"}))
-	if err != nil || !reflect.DeepEqual(c.AppsZoneOwners, []string{"fecode"}) {
-		t.Fatalf("from the flag %q, %v", c.AppsZoneOwners, err)
-	}
-	for _, bad := range []string{"FeCode", "f", "-fecode", "fe_code", "fecode/x"} {
-		if _, err := Parse([]string{"--database-url", testURL, "--apps-zone-owners", bad}, env(nil)); err == nil ||
-			!strings.Contains(err.Error(), "--apps-zone-owners") {
-			t.Errorf("%q: %v", bad, err)
-		}
-	}
-	var b strings.Builder
-	Usage(&b, CmdServe)
-	if !strings.Contains(b.String(), "--apps-zone-owners (FERUN_APPS_ZONE_OWNERS)") {
-		t.Fatalf("serve help lacks --apps-zone-owners:\n%s", b.String())
+	if _, err := Parse([]string{"--database-url", testURL, "--apps-zone-owners", "fecode"}, env(nil)); err == nil {
+		t.Fatal("--apps-zone-owners taken")
 	}
 }
 

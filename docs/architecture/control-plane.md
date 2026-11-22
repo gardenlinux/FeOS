@@ -119,7 +119,6 @@ conversion).
 | `--pod-network` | empty | the pods' network ([The pods' mesh](#the-pods-mesh)): empty, routed, every node with a prefix of its network's; `mesh`, a ULA /64 drawn at the first start and kept in the database; or such a /64, `fdXX:XXXX:XXXX::/64` (a /48 stands for its /64 of subnet 0) |
 | `--apps-zone` | empty | the DNS zone of public environments' default hosts, `<label>.<zone>`, which `ferun-ingress` serves ([The ingress](#the-ingress)); empty: no hosts, and no environment can be made public |
 | `--project-zone` | empty | the DNS zone of the default hosts of the projects people make (ADR 0031), such as `apps.run.example.com`, which `ferun-ingress` serves with a wildcard of its own; needs `--apps-zone`, and neither may be or lie under the other; empty: every project's hosts are under `--apps-zone` ([Public environments](#public-environments)) |
-| `--apps-zone-owners` | none | the projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without `--`, `<label>.<zone>`, as FeCode does for one of its projects' production ([Public environments](#public-environments)); empty: none may |
 | `--edge-name` | empty | the name projects' domains point at with a CNAME, such as `edge.fecode.dev`, which the operator publishes with the balancer's addresses ([Domains](#domains)); empty: domains are off |
 | `--edge-address` | none | an edge address beside what `--edge-name` resolves to, which a domain's A and AAAA records may name; repeatable |
 | `--domain-challenge-label` | `_ferun-challenge` | the label of a claim's TXT record, `<label>.<name>`; a lowercase DNS label that may hold `_` |
@@ -1875,8 +1874,8 @@ bounds the projects a person made that are not being deleted, on every
 account, under a lock of the person's row so that concurrent
 creates do not pass it (422 `quota_exceeded`, `resource` `projects`);
 operators are not bound. `project_created` records the account. Names the platform keeps are 422
-`reserved_name`: `operator`, `admin`, `api`, `www`, the
-`--apps-zone-owners`, and the first label of the public URL's host, of
+`reserved_name`: `operator`, `admin`, `api`, `www`, and the first
+label of the public URL's host, of
 `--edge-name`, of `--apps-zone` and of `--project-zone`. A taken name is
 409. Projects an
 operator makes with the admin API are as before (no maker, a token).
@@ -4621,7 +4620,7 @@ name; one the project does not have is 404 "no such environment".
 | `GET /api/v1/environments?label=k=v` | `{environments: [{id, name, labels, deployment, deployed, state, public, hosts, hostLabel, access, provider, protected, openIncidents, createdAt}]}`, the labels ANDed, those the caller reads; `state` is the latest deployment's, `none` or `deleting`; every environment answer carries `protected` ([Protected environments](#protected-environments)) |
 | `GET`, `DELETE /api/v1/environments/{env}` | the status; 202 |
 | `PATCH /api/v1/environments/{env}` `{name}` | 200 its status under the new name ([Renaming](#renaming-an-environment)); the name it has again 200, changing nothing; 400 for a name a create refuses; 409 `name_taken` "an environment named X exists"; 409 while it is being deleted |
-| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, rolling}`; 400 without a boolean `public`, or for a `hostLabel` not of the chosen form (a plain one too, for a project of `--apps-zone-owners`) or without `public: true`; 409 `host_label_taken` for a chosen label another project or environment holds, or a plain label that is the natural label of an existing project's environment; 409 while the platform has no apps zone (publishing) or the environment or its project is being deleted ([Public environments](#public-environments)) |
+| `PUT /api/v1/environments/{env}/public` `{public, hostLabel?}` | `{public, hosts, hostLabel, projectAddress, rolling, access, provider}`; 400 without a boolean `public`, or for a `hostLabel` that is neither the project's name nor of the chosen form `<choice>--<project>`, for any `hostLabel` of a project whose name is no label of its own, or without `public: true`; the project's name takes the project's address from the environment that holds it (ADR 0063); 409 `host_label_taken` for a label another project or environment holds; 409 while the platform has no apps zone (publishing) or the environment or its project is being deleted ([Public environments](#public-environments)) |
 | `POST /api/v1/environments/plan` `{spec}` | `{valid, findings, images}`; this, `…/{env}/plan`, `…/deployments` and `…/clone` take the spec in YAML too ([A spec in YAML](#a-spec-in-yaml)) |
 | `POST …/{env}/plan` `{spec, base?}` | `{valid, findings, diff, base, current, images}`, `images` `{"<as written>": "<registry>/<repository>@sha256:…"}` ([Plan](#plan-apply-revert-clone)) |
 | `GET /api/v1/addons` | the addon types' catalog ([Addons](#addons)) |
@@ -4801,42 +4800,43 @@ of one of its project's providers, which the same call sets
   not serve, and for either while the environment or its project
   is being deleted. A clone never copies `public`; deploying the ingress
   makes nothing public.
-- **The label** is `<environment>-<project>` when it names that pair
-  alone: the name has no hyphen, the project no dot, it does not end in a
-  hyphen and 16 hex characters, and it is a DNS label of at most 63
-  characters without `--` as its third and fourth characters. Else it is
-  at most 46 characters of the name, a hyphen and 16 hex characters of
-  the SHA-256 of the environment's UUID ([Host
-  labels](ingress.md#host-labels)), unless the project chose one:
-  `{"public": true, "hostLabel": "stage--kino"}` gives the environment
-  that label, a DNS label with `--` in it that does not end as a
-  fallback does (400 otherwise, and without `public: true`), in place of
-  the one it had, which stays the project's; 409 `host_label_taken` when
-  another project owns it or another environment holds it. `host_labels`
-  registers every label to the project that first claimed it, in one
-  atomic upsert: another project never gets it, and its owner may claim
-  it again once no environment holds it. It changes only by a chosen
-  label.
-- **Plain labels** (ADR 0021, 2026-11-01): a project of
-  `--apps-zone-owners` (FeCode's installation: `fecode`) may also choose
-  a label without `--`, `{"public": true, "hostLabel": "kino"}`: a DNS
-  label that is not R-LDH and does not end as a fallback does (400
-  otherwise, with the chosen form's text less the `--`). One that splits
-  at its first hyphen into an environment's name and an existing
-  project, its natural label, is a 409 `host_label_taken` "host label
-  web-acme is the natural label of environment web of project acme",
-  unless `host_labels` registers it to the project already; the rest is
-  as for a chosen label. A project made later whose natural label the
-  owner holds gets its fallback. Every other project's plain label is the
-  chosen form's 400, and so is an owner's while its hosts are in the
-  project zone.
+- **The label** (ADR 0063) is `<environment>--<project>` when it names
+  that pair alone: the name has no `--` and does not end in a hyphen,
+  the project's name is a label of its own (no dot, no `--`, not ending
+  in a hyphen and 16 hex characters), and it is a DNS label of at most 63
+  characters without `--` as its third and fourth characters (so `qa`
+  gets the fallback). Else it is at most 46 characters of the name, a
+  hyphen and 16 hex characters of the SHA-256 of the environment's UUID
+  ([Host labels](ingress.md#host-labels)), unless the project chose one:
+  `{"public": true, "hostLabel": "blue--kino"}` gives the environment
+  that label, `<choice>--<project>` with the project's own name (400
+  otherwise, and without `public: true`), in place of the one it had,
+  which stays the project's; 409 `host_label_taken` when another project
+  owns it or another environment holds it. `host_labels` registers every
+  label to the project that first claimed it, in one atomic upsert:
+  another project never gets it, and its owner may claim it again once
+  no environment holds it. It changes only by a chosen label or the
+  project's address.
+- **The project's address** (ADR 0063) is the project's name as a label,
+  `<project>.<zone>`, which one environment holds at a time:
+  `{"public": true, "hostLabel": "kino"}` for project `kino` takes it,
+  locking the project's row, and the environment that held it gets its
+  natural label or its fallback in the same transaction (`ferun_ingress`
+  for both). It is given up by the environment's natural label, its
+  fallback (where its name gives no natural one) or a chosen label. The status
+  and the listing say `projectAddress` (this environment holds it) and
+  `projectHost` (the address, whichever holds it; none without a zone or
+  for a project whose name is no label). While a domain of its holder is
+  served, it answers 404 as every default host does. A project whose
+  name another project holds as a label (one from before ADR 0063) gets
+  409 `host_label_taken`.
 - **Zones** (ADR 0031): a host is `<label>.<zone>` in its project's zone,
   `projects.zone`: NULL for the apps zone (`--apps-zone`), the projects
   operators make; the project zone (`--project-zone`, such as
   `apps.run.example.com`) for the projects people make, set at their
   creation. A label is a name in its zone: `host_labels` registers it
   per zone, so a label taken in the project zone is free in the apps
-  zone. The project zone has no owners, hence no plain labels. The
+  zone. The
   status, the listing, the plans' route URLs and the ingress's table all
   use the project's zone; a zone the platform does not serve (any more)
   gives no default host. No domain can be the project zone or a name
@@ -4846,8 +4846,9 @@ of one of its project's providers, which the same call sets
   class): under the project's row lock, `projects.zone` changes and every
   environment that holds a label moves it into the new zone as a
   changed label moves (`store.SetProjectZone`): kept where it is free or
-  the project's there, and not a plain one unless the project owns the new
-  zone's plain names, else its natural label or its fallback there; the
+  the project's there, and of one of ADR 0063's forms (a plain label
+  from before goes nowhere), else its natural label or its fallback
+  there; the
   labels left behind stay the project's in their zone. `ferun_ingress`
   `env:<id>` for each, so the old hosts answer 404 at once. The answer
   is `{project, zone, environments: [{id, name, hostLabel,

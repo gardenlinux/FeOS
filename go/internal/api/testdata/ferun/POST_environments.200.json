@@ -25,6 +25,8 @@
     "deleting": false,
     "public": false,
     "hosts": [],
+    "projectAddress": false,
+    "projectHost": "fecode.apps.fecode.dev",
     "access": "anyone",
     "provider": "",
     "protected": false,

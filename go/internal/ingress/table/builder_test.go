@@ -265,7 +265,7 @@ func TestBuilderFollows(t *testing.T) {
 	}
 	want := []wire.Endpoint{{Instance: f.sb.String(), Address: "fd00:0:0:1::5", Node: "n1",
 		Ports: map[string]int{"http": 8080}, GroupVersion: 2}}
-	if e.Deployment != 1 || len(e.Hosts) != 1 || e.Hosts[0] != "web-acme.apps.example" || len(e.Services) != 1 ||
+	if e.Deployment != 1 || len(e.Hosts) != 1 || e.Hosts[0] != "web--acme.apps.example" || len(e.Services) != 1 ||
 		!reflect.DeepEqual(e.Services[0].Endpoints, want) {
 		t.Fatalf("env %+v", e)
 	}

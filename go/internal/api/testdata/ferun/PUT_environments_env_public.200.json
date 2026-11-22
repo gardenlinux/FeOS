@@ -9,8 +9,9 @@
   "response": {
     "public": true,
     "hosts": [
-      "expensa-stage-fecode.apps.fecode.dev"
+      "expensa-stage--fecode.apps.fecode.dev"
     ],
+    "projectAddress": false,
     "rolling": true,
     "access": "visitors",
     "provider": "ferun"

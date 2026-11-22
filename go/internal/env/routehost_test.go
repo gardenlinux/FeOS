@@ -37,7 +37,7 @@ const hostSpec = `{
   }
 }`
 
-// hostEnv is a public environment web of projectA at web-acme.apps.test
+// hostEnv is a public environment web of projectA at web--acme.apps.test
 // with the domains fecode.example and *.boxed.fecode.example served,
 // git.fecode.example bound and being issued, and free.example claimed and
 // unbound.
@@ -86,14 +86,14 @@ func TestRouteHostPlan(t *testing.T) {
 		}
 		return a
 	}
-	for _, host := range []string{"git.fecode.example", "api.boxed.fecode.example", "web-acme.apps.test"} {
+	for _, host := range []string{"git.fecode.example", "api.boxed.fecode.example", "web--acme.apps.test"} {
 		if a := plan(host); !a.Valid {
 			t.Errorf("host %s: %+v", host, a.Findings)
 		}
 	}
-	a := plan("web-acme.apps.test")
-	if !hasFinding(a.Findings, spec.SeverityInfo, "routes.git", "the ingress serves it at https://web-acme.apps.test/ "+
-		"once the environment is served at web-acme.apps.test") {
+	a := plan("web--acme.apps.test")
+	if !hasFinding(a.Findings, spec.SeverityInfo, "routes.git", "the ingress serves it at https://web--acme.apps.test/ "+
+		"once the environment is served at web--acme.apps.test") {
 		t.Errorf("the retired default host: %+v", a.Findings)
 	}
 	if a := plan("git.fecode.example"); !hasFinding(a.Findings, spec.SeverityInfo, "routes.git",
@@ -101,7 +101,7 @@ func TestRouteHostPlan(t *testing.T) {
 		!hasFinding(a.Findings, spec.SeverityInfo, "routes.ui", "served by the ingress at https://fecode.example/ and") {
 		t.Errorf("a domain being issued: %+v", a.Findings)
 	}
-	for _, host := range []string{"free.example", "other.example", "boxed.fecode.example", "other-acme.apps.test"} {
+	for _, host := range []string{"free.example", "other.example", "boxed.fecode.example", "other--acme.apps.test"} {
 		a := plan(host)
 		if a.Valid || !hasFinding(a.Findings, spec.SeverityError, "routes.git.host", "host "+host+" is no host of this "+
 			"environment") {

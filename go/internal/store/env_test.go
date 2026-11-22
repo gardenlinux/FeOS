@@ -822,7 +822,7 @@ func TestSetEnvironmentPublic(t *testing.T) {
 		t.Fatalf("new environment %+v", web)
 	}
 	e := publish(t, s, web.ID, true)
-	if !e.Public || !e.IngressGroup || e.HostLabel != "web-acme-io" || !e.UpdatedAt.After(web.UpdatedAt) {
+	if !e.Public || !e.IngressGroup || e.HostLabel != "web--acme-io" || !e.UpdatedAt.After(web.UpdatedAt) {
 		t.Fatalf("published %+v", e)
 	}
 	expectPayload(t, ch, ingressEnv(web.ID))
@@ -835,16 +835,16 @@ func TestSetEnvironmentPublic(t *testing.T) {
 	}
 	expectNoPayload(t, ch, ingressEnv(web.ID))
 	e = publish(t, s, web.ID, false)
-	if e.Public || !e.IngressGroup || e.HostLabel != "web-acme-io" {
+	if e.Public || !e.IngressGroup || e.HostLabel != "web--acme-io" {
 		t.Fatalf("unpublished %+v", e)
 	}
 	expectPayload(t, ch, ingressEnv(web.ID))
-	if e = publish(t, s, web.ID, true); !e.Public || e.HostLabel != "web-acme-io" {
+	if e = publish(t, s, web.ID, true); !e.Public || e.HostLabel != "web--acme-io" {
 		t.Fatalf("published again %+v", e)
 	}
 	// The summaries carry the new columns too.
 	if l, err := s.EnvSummaries(bg, "acme-io", nil); err != nil || len(l) != 1 || !l[0].Public || !l[0].IngressGroup ||
-		l[0].HostLabel != "web-acme-io" {
+		l[0].HostLabel != "web--acme-io" {
 		t.Fatalf("summaries %+v %v", l, err)
 	}
 

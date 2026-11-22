@@ -626,7 +626,7 @@ func TestIngressPublishAndRoute(t *testing.T) {
 			t.Fatalf("an instance of an environment never published: template %+v", tmpl)
 		}
 	}
-	host := "web-" + project + "." + appsZone
+	host := "web--" + project + "." + appsZone
 	if r, err := p.get(bg, host, "/"); err != nil || r.code != http.StatusNotFound || !strings.Contains(r.body, "no such host") {
 		t.Fatalf("before the publish: %+v %v", r, err)
 	}

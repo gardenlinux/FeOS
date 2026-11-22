@@ -741,7 +741,7 @@ func TestEnvironmentsEndToEnd(t *testing.T) {
 	expect(t, do("PUT", "/api/v1/environments/stage/public", map[string]any{"public": true}), http.StatusConflict,
 		errBody("the platform serves no apps zone (--apps-zone); an environment cannot be public"))
 	expect(t, do("PUT", "/api/v1/environments/stage/public", map[string]any{"public": false}), http.StatusOK,
-		`{"public":false,"hosts":[],"rolling":false,"access":"anyone","provider":""}`+"\n")
+		`{"public":false,"hosts":[],"projectAddress":false,"rolling":false,"access":"anyone","provider":""}`+"\n")
 
 	// The route door through the API's mux, with its own token.
 	w = do("POST", "/api/v1/environments/stage/route-tokens", nil)

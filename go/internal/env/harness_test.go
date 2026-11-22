@@ -180,8 +180,6 @@ type harnessOptions struct {
 	noPorts  bool
 	// appsZone is Deps.AppsZone.
 	appsZone string
-	// appsZoneOwners is Deps.AppsZoneOwners.
-	appsZoneOwners []string
 	// projectZone is Deps.ProjectZone.
 	projectZone string
 	// bindings is Deps.Bindings.
@@ -197,7 +195,7 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	st := store.New(d)
 	h := &harness{t: t, d: d, st: st, eng: &fakeEngine{bad: map[string]string{}}, ports: &fakePorts{}}
 	deps := Deps{InstanceID: "i1", DB: d, Store: st, Engine: h.eng, AppsZone: o.appsZone,
-		AppsZoneOwners: o.appsZoneOwners, ProjectZone: o.projectZone, Bindings: o.bindings, Log: dbtest.Logger(t),
+		ProjectZone: o.projectZone, Bindings: o.bindings, Log: dbtest.Logger(t),
 		VisitKinds: o.visitKinds}
 	if deps.VisitKinds == nil && !o.noVisits {
 		deps.VisitKinds = []string{model.ProviderKindProject, model.ProviderKindFerun, model.ProviderKindOIDC}

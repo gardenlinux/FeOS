@@ -697,8 +697,8 @@ func TestSetProjectZone(t *testing.T) {
 	expect(t, w, http.StatusOK, "")
 	a := decode[answer](t, w)
 	if a.Project != "beta" || a.Zone != tz || len(a.Environments) != 1 || a.Environments[0].ID != web.ID.String() ||
-		a.Environments[0].HostLabel != "web-beta" || a.Environments[0].HostLabelBefore != "web-beta" ||
-		a.Environments[0].Host != "web-beta."+tz {
+		a.Environments[0].HostLabel != "web--beta" || a.Environments[0].HostLabelBefore != "web--beta" ||
+		a.Environments[0].Host != "web--beta."+tz {
 		t.Fatalf("moved %+v", a)
 	}
 	list := decode[struct {
@@ -716,7 +716,7 @@ func TestSetProjectZone(t *testing.T) {
 	}
 	w = e.do("PUT", "/api/v1/admin/projects/beta/zone", adminAuth(), map[string]any{"zone": "apps.example.com"})
 	expect(t, w, http.StatusOK, "")
-	if a := decode[answer](t, w); a.Zone != "apps.example.com" || a.Environments[0].Host != "web-beta.apps.example.com" {
+	if a := decode[answer](t, w); a.Zone != "apps.example.com" || a.Environments[0].Host != "web--beta.apps.example.com" {
 		t.Fatalf("moved back %+v", a)
 	}
 	for _, bad := range []string{"", "other.example.com"} {

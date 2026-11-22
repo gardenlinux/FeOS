@@ -72,10 +72,6 @@ type Deps struct {
 	// (--apps-zone, ADR 0021); "": no hosts, and no environment can be
 	// made public.
 	AppsZone string
-	// AppsZoneOwners are the projects that own the apps zone's plain names
-	// (--apps-zone-owners, ADR 0021): each may choose a host label without
-	// "--" (model.PlainHostLabel); nil: no project may.
-	AppsZoneOwners []string
 	// ProjectZone is the zone of the default hosts of the projects people
 	// make (--project-zone, ADR 0031): a project whose projects.zone names it
 	// has its hosts there, and no plain labels; "": none.

@@ -33,8 +33,13 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 		return EnvStatus{}, fmt.Errorf("hosts: %w", err)
 	}
 	access, provider := accessOf(e)
+	t, err := s.st.GetProject(ctx, e.Owner)
+	if err != nil {
+		return EnvStatus{}, fmt.Errorf("the zone of project %s: %w", e.Owner, err)
+	}
 	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Deployment: e.Deployment, Deployed: e.Deployed,
-		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Access: access, Provider: provider,
+		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, ProjectAddress: holdsAddress(e),
+		ProjectHost: projectHost(e.Owner, s.zones().Of(t.Zone)), Access: access, Provider: provider,
 		Protected: e.Protected, Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
 		st.Labels = map[string]string{}
@@ -288,7 +293,22 @@ func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary 
 	access, provider := accessOf(r.Environment)
 	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Deployment: r.Deployment, Deployed: r.Deployed,
 		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel,
-		Access: access, Provider: provider, Protected: r.Protected, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
+		ProjectAddress: holdsAddress(r.Environment), ProjectHost: projectHost(r.Owner, zone), Access: access,
+		Provider: provider, Protected: r.Protected, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
+}
+
+// holdsAddress reports whether e holds its project's address, the
+// project's name as its label (ADR 0063).
+func holdsAddress(e store.Environment) bool { return e.HostLabel != "" && e.HostLabel == e.Owner }
+
+// projectHost is the project's address under zone, <project>.<zone>; ""
+// without a zone, and for a project whose name is no label of its own
+// (model.ProjectLabel).
+func projectHost(project, zone string) string {
+	if zone == "" || !model.ProjectLabel(project) {
+		return ""
+	}
+	return project + "." + zone
 }
 
 // incidentOf is an incident as the answers show it.

@@ -624,51 +624,51 @@ at yet says that the ingress serves it once it is.
 
 An environment's default host is `<label>.<zone>`, in its project's zone
 (`projects.zone`: the apps zone for none, else the project zone, ADR 0031).
-The label is a name in that zone, given at its first publish, or chosen by its project (below), and changes
-only when its project chooses another:
+The label is a name in that zone, given at its first publish, or chosen by
+its project (below), and changes only when its project chooses another or
+another environment takes the project's address. A label has one of four
+forms (ADR 0063), and each names its project:
 
-- **natural**: `<environment>-<project>`, when it names that pair alone
+- **the project's label**: the project's name, `<project>`, the
+  **project's address**. One environment of the project holds it at a
+  time: `PUT …/public {"public": true, "hostLabel": "<project>"}` takes it,
+  and the environment that held it gets its natural label (or its
+  fallback) in the same transaction. Naming its natural label, its own
+  fallback or a chosen label gives it up. A project whose name has a dot or a
+  `--`, or ends in a hyphen and 16 hex characters, has none, and no
+  natural or chosen labels either;
+- **natural**: `<environment>--<project>`, when it names that pair alone
   and is a valid label:
-  - the environment's name has no hyphen, so the label splits at its
-    first hyphen;
-  - the project has no dot, so the label holds the project as it is, and
-    no `--`, so the label has none;
-  - it does not end in a hyphen and 16 hex characters, the fallback's
-    form;
+  - it splits at its one `--` into the name and the project: the
+    environment's name has no `--` and does not end in a hyphen, and the
+    project has a label of its own;
   - it is a DNS label of at most 63 characters whose third and fourth
-    characters are not `--` (RFC 5891's reserved form);
+    characters are not `--` (RFC 5891's reserved form), so an
+    environment of two characters (`qa`) gets its fallback;
+- **chosen**: `<choice>--<project>`, a label the project names with `PUT
+  …/public {"public": true, "hostLabel": "blue--kino"}`: the project's
+  own name after the `--`, a part without `--` before it, a DNS label of
+  at most 63 characters. It replaces the label the environment had or
+  would get; that one stays the project's. Its form is a natural label's,
+  of the same project alone: one of a name no environment has yet leaves
+  that environment its fallback, as a label held does;
 - **fallback**: at most 46 characters of the name (prefixed `e-` when the
   name has that reserved form, trailing hyphens trimmed), a hyphen, and
-  the first 16 hex characters of the SHA-256 of the environment's UUID;
-- **chosen**: a label the project names with `PUT …/public {"public":
-  true, "hostLabel": "stage--kino"}`: a DNS label of at most 63
-  characters with `--` in it, not as its third and fourth characters,
-  and not ending in a hyphen and 16 hex characters. It replaces the
-  label the environment had or would get; that one stays the project's;
-- **plain**: a chosen label without `--`, which only a project that owns
-  the apps zone may choose (`--apps-zone-owners`, FeCode's installation
-  `fecode`, for one of its projects' production at `<FeCode
-  project>.<apps zone>`), and
-  only while its hosts are in the apps zone: the project zone has no
-  owners, and a plain label there is a 400. A plain label is a
-  DNS label of at most 63 characters, not ending in a hyphen and 16 hex
-  characters. One whose part after its first hyphen names an existing
-  project is refused (409 `host_label_taken`), since it is the natural
-  label of that project's environment, unless the owner holds it already.
+  the first 16 hex characters of the SHA-256 of the environment's UUID.
 
-So no two pairs of environment name and project have the same natural
-label, and no natural label is another environment's fallback: a host
-that reads as `<environment>-<project>` belongs to that project. `web` of
-`acme-io` is `web-acme-io`; `web` of `acme.io` and `web-acme` of `io`,
-which would read the same, get the fallback. A chosen label is neither
-form: no natural label has `--`, and every fallback ends in its hash.
-A plain label is never a fallback, but one with a hyphen reads as a
-natural label: `ironcore-dashboard` as `ironcore` of `dashboard`. That
-is the zone's owner's trade, bounded so: an existing project's natural
-label is refused, and a project made later whose natural label the owner
-holds gets its fallback, as for a label another project holds. A host
-that reads as `<environment>-<project>` is that project's or the zone's
-owner's.
+So no two forms meet: a project's label has no `--`, a natural or chosen
+label exactly one with its own project after it, and every fallback ends
+in its hash, a form no project's label has. Every host under a zone tells
+its project: `kino` or `…--kino`. `dev` of `hb-baxxter` is
+`dev--hb-baxxter`, and `hb-baxxter` is the project's address.
+
+Before ADR 0063 the natural label was `<environment>-<project>`, and the
+projects that owned the apps zone (`--apps-zone-owners`) chose plain
+labels without `--`. Migration `0044` gave every environment that held
+such a natural label the new one (or its fallback); the old labels stay
+their projects', free, and their hosts answer 404. Chosen labels and
+plain labels held then stay where they are; nobody chooses a plain label
+now.
 
 `host_labels` registers every label ever given, per zone (`zone`: `''`
 for the apps zone, else the zone's name, migration `0029`), with the
@@ -1353,22 +1353,20 @@ products have their hosts. `--project-zone` of `ferund` names it (empty:
 none; it needs `--apps-zone`, and neither zone may be or lie under the
 other); `Hello` and `Self` hand it to the ingress as `projectZone`. It
 has the apps zone's rules: an operator's wildcard certificate, cookies
-made host-only, no claims of names under it, the labels above, and no
-plain labels, since it has no owners.
+made host-only, no claims of names under it, and the labels above.
 
 - **A project's zone** is `projects.zone` (migration `0027`): NULL, the
   apps zone, for the projects operators make
   (`POST /api/v1/admin/projects`) and for every project while there is no
   project zone; the project zone's name for the projects people make, set
   at their creation (`model.Zones.ForNewProject`, `store.MakeProject`).
-  FeCode's one project at FeRun, `fecode`, stays in the apps zone with its
-  plain labels.
 - **An operator moves a project**, `PUT /api/v1/admin/projects/{project}/zone
   {"zone": "apps.run.example.com"}` (or the apps zone's name). Its
   environments' hosts move as a changed label does: each keeps its
   label where it may in the new zone (free, or the project's there, and
-  not a plain one unless the project owns the new zone's plain names),
-  else gets its natural label or its fallback there; the labels left
+  one of the forms above: a plain label from before goes nowhere), the
+  project's address included, else gets its natural label or its
+  fallback there; the labels left
   behind stay the project's. The old hosts answer 404 at once. The
   answer lists every environment with its label before and after and
   its new host; an activity row `project_zone_set` records the move.

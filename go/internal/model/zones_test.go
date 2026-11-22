@@ -10,10 +10,9 @@ import (
 
 // The zones of default hosts (ADR 0031): a project's hosts are in the apps
 // zone or the project zone, a zone the platform does not serve has none;
-// people's projects get the project zone while there is one; only the apps
-// zone's owners choose plain labels, and only there.
+// people's projects get the project zone while there is one.
 func TestZones(t *testing.T) {
-	z := Zones{Apps: "apps.example.com", AppsOwners: []string{"fecode"}, Project: "apps.run.example.com"}
+	z := Zones{Apps: "apps.example.com", Project: "apps.run.example.com"}
 	for zone, want := range map[string]string{
 		"": "apps.example.com", "apps.example.com": "apps.example.com",
 		"apps.run.example.com": "apps.run.example.com", "old.example.com": "",
@@ -42,17 +41,6 @@ func TestZones(t *testing.T) {
 	}
 	if _, ok := (Zones{}).Column(""); ok {
 		t.Error("no zones: the empty name is a zone")
-	}
-	for _, c := range []struct {
-		project, zone string
-		want          bool
-	}{
-		{"fecode", "", true}, {"fecode", "apps.run.example.com", false}, {"acme", "", false},
-		{"fecode", "old.example.com", false},
-	} {
-		if got := z.PlainLabels(c.project, c.zone); got != c.want {
-			t.Errorf("PlainLabels(%q, %q) = %v", c.project, c.zone, got)
-		}
 	}
 	if got := z.Names(); !slices.Equal(got, []string{"apps.example.com", "apps.run.example.com"}) {
 		t.Errorf("names %v", got)

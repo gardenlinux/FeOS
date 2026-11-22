@@ -23,8 +23,10 @@
         "state": "deploying",
         "public": true,
         "hosts": [
-          "expensa-stage-fecode.apps.fecode.dev"
+          "expensa-stage--fecode.apps.fecode.dev"
         ],
+        "projectAddress": false,
+        "projectHost": "fecode.apps.fecode.dev",
         "access": "visitors",
         "provider": "fecode",
         "protected": false,
@@ -44,6 +46,8 @@
         "state": "deployed",
         "public": false,
         "hosts": [],
+        "projectAddress": false,
+        "projectHost": "fecode.apps.fecode.dev",
         "access": "anyone",
         "provider": "",
         "protected": true,
@@ -63,6 +67,8 @@
         "state": "deployed",
         "public": false,
         "hosts": [],
+        "projectAddress": false,
+        "projectHost": "fecode.apps.fecode.dev",
         "access": "anyone",
         "provider": "",
         "protected": false,

@@ -28,7 +28,6 @@ import (
 	"github.com/gardenlinux/feos/go/internal/mesh"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/pki"
-	"github.com/gardenlinux/feos/go/internal/store"
 )
 
 // The fixed timings of ferund (§3 of the design), named here in one place.
@@ -207,11 +206,6 @@ type Config struct {
 	// which ferun-ingress serves (ADR 0021); empty: no hosts, and no
 	// environment can be public.
 	AppsZone string
-	// AppsZoneOwners are the projects that own the apps zone's plain names
-	// (ADR 0021, 2026-11-01): such a project may choose a default host
-	// label without "--", as FeCode does for one of its projects'
-	// production (<FeCode project>.<apps zone>); nil: no project may.
-	AppsZoneOwners []string
 	// ProjectCreation says whether the account default is open (ADR 0059,
 	// ADR 0031): "people", every signed-in person may put projects on it;
 	// "operators", only its people and the operators. A member of another
@@ -321,7 +315,7 @@ type Config struct {
 // Zones are the platform's zones of default hosts: the apps zone, its
 // owners and the project zone (ADR 0021, ADR 0031).
 func (c Config) Zones() model.Zones {
-	return model.Zones{Apps: c.AppsZone, AppsOwners: c.AppsZoneOwners, Project: c.ProjectZone}
+	return model.Zones{Apps: c.AppsZone, Project: c.ProjectZone}
 }
 
 // no database URL.
@@ -465,8 +459,6 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 		"the pods' network: empty, routed (every node a prefix of its network's); mesh, a ULA /64 drawn once and kept in the database; or such a /64 (fdXX:XXXX:XXXX::/64)")
 	fs.StringVar(&c.AppsZone, "apps-zone", c.AppsZone,
 		"the DNS zone of public environments' default hosts, served by ferun-ingress (ADR 0021); empty: no hosts, and no environment can be public")
-	fs.Var((*listValue)(&c.AppsZoneOwners), "apps-zone-owners",
-		"projects that own the apps zone's plain names, comma-separated or repeated: each may choose a host label without \"--\", <label>.<apps zone> (ADR 0021); empty: none may")
 	fs.StringVar(&c.ProjectCreation, "project-creation", c.ProjectCreation,
 		"whether the account default is open (ADR 0059): people (every signed-in person may make projects on it) or operators (only its people and the operators); a member of another account makes projects on that one either way")
 	fs.IntVar(&c.ProjectsPerPerson, "projects-per-person", c.ProjectsPerPerson,
@@ -639,11 +631,6 @@ func (c *Config) Validate() error {
 		case c.ProjectZone == c.AppsZone || strings.HasSuffix(c.ProjectZone, "."+c.AppsZone) ||
 			strings.HasSuffix(c.AppsZone, "."+c.ProjectZone):
 			bad("--project-zone %s and --apps-zone %s: neither may be or lie under the other", c.ProjectZone, c.AppsZone)
-		}
-	}
-	for _, tn := range c.AppsZoneOwners {
-		if !store.ProjectNamePattern.MatchString(tn) {
-			bad("--apps-zone-owners: %q is not a project name (%s)", tn, store.ProjectNamePattern)
 		}
 	}
 	if c.ProjectCreation != "people" && c.ProjectCreation != "operators" {

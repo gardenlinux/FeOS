@@ -21,11 +21,11 @@ import (
 // label lives in its project's zone.
 
 // ClaimHostLabel claims the default host label of the environment e in
-// its project's zone and returns it (D12 of the ingress's design): the
-// natural label "<name>-<project>" when model.HostLabels finds it usable,
-// that is unambiguous and a DNS label, else, or when another project owns
-// it or another environment holds it in that zone, the fallback with the
-// hash of e's ID. Since no other pair of name and project has the same
+// its project's zone and returns it (ADR 0063): the natural label
+// "<name>--<project>" when model.HostLabels finds it usable, that is
+// unambiguous and a DNS label, else, or when another project owns it or
+// another environment holds it in that zone, the fallback with the hash of
+// e's ID. Since no other pair of name and project has the same
 // usable natural label and no fallback has its form, the owner check
 // below is a second guard. A label belongs to the project that first
 // claimed it in its zone, forever, and is free again for that project
@@ -115,16 +115,20 @@ func (s *Store) HostLabelOwner(ctx context.Context, zone, label string) (string,
 // another environment holds it.
 var ErrHostLabelTaken = errors.New("host label taken")
 
-// SetEnvironmentHostLabel gives the environment e the default host label
-// its project chose (model.ChosenHostLabel or, for a project that owns the
-// apps zone and has its hosts there, model.PlainHostLabel, which the
-// caller checks) in its project's zone and returns its row. It runs in the
-// caller's transaction, with e's row and its project's locked. The label e
-// held is released first, and stays its project's like one of a deleted
-// environment; the chosen one is claimed as ClaimHostLabel claims: free,
-// or its project's with no environment holding it, else ErrHostLabelTaken.
-// A label e holds already changes nothing. A write sends ferun_ingress
-// "env:<id>", so the instances serve the new host and drop the old one.
+// SetEnvironmentHostLabel gives the environment e a default host label
+// its project chose in its project's zone (model.ChosenHostLabel, which
+// the caller checks), or the project's label, the project's address
+// (model.ProjectLabel, label e.Owner; ADR 0063), and returns its row. It
+// runs in the caller's transaction, with e's row and its project's
+// locked, the project's FOR UPDATE when label is its own. The label e held
+// is released first, and stays its project's like one of a deleted
+// environment; the new one is claimed as ClaimHostLabel claims: free, or
+// its project's with no environment holding it, else ErrHostLabelTaken.
+// The project's label moves: the environment of the project that holds it
+// gives it up and gets its natural label or its fallback, in the same
+// transaction. A label e holds already changes nothing. A write sends
+// ferun_ingress "env:<id>" for every environment whose label changed, so
+// the instances serve the new hosts and drop the old ones.
 func (s *Store) SetEnvironmentHostLabel(ctx context.Context, e Environment, label string) (Environment, error) {
 	if e.HostLabel == label {
 		return e, nil
@@ -133,8 +137,19 @@ func (s *Store) SetEnvironmentHostLabel(ctx context.Context, e Environment, labe
 	if err != nil {
 		return Environment{}, err
 	}
+	var holder *Environment
+	if label == e.Owner {
+		if holder, err = s.labelHolder(ctx, zone, label, e); err != nil {
+			return Environment{}, err
+		}
+	}
 	if _, err := s.q.Exec(ctx, "UPDATE host_labels SET env_id = NULL WHERE env_id = $1", e.ID); err != nil {
 		return Environment{}, fmt.Errorf("release the host label of environment %s: %w", e.ID, err)
+	}
+	if holder != nil {
+		if _, err := s.q.Exec(ctx, "UPDATE host_labels SET env_id = NULL WHERE env_id = $1", holder.ID); err != nil {
+			return Environment{}, fmt.Errorf("release the host label of environment %s: %w", holder.ID, err)
+		}
 	}
 	ok, err := s.takeHostLabel(ctx, zone, label, e)
 	if err != nil {
@@ -143,7 +158,32 @@ func (s *Store) SetEnvironmentHostLabel(ctx context.Context, e Environment, labe
 	if !ok {
 		return Environment{}, fmt.Errorf("host label %s for environment %s: %w", label, e.ID, ErrHostLabelTaken)
 	}
+	if holder != nil {
+		given, err := s.claimDefaultLabel(ctx, *holder, zone)
+		if err != nil {
+			return Environment{}, err
+		}
+		if _, err := s.writeHostLabel(ctx, holder.ID, given); err != nil {
+			return Environment{}, err
+		}
+	}
 	return s.writeHostLabel(ctx, e.ID, label)
+}
+
+// labelHolder returns the environment of e's project that holds label in
+// zone, its row locked FOR UPDATE; nil when none does, or one of another
+// project, whose label it stays.
+func (s *Store) labelHolder(ctx context.Context, zone, label string, e Environment) (*Environment, error) {
+	h, err := scanEnvironment(s.q.QueryRow(ctx, "SELECT "+environmentCols+` FROM environments
+		WHERE id = (SELECT env_id FROM host_labels WHERE zone = $1 AND label = $2 AND owner = $3)
+			AND id <> $4 FOR UPDATE`, zone, label, e.Owner, e.ID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the holder of host label %s: %w", label, err)
+	}
+	return &h, nil
 }
 
 // writeHostLabel writes environments.host_label and tells the ingress.
@@ -170,15 +210,15 @@ type ZoneMove struct {
 // environment that holds a label keeps it in the new zone where it may,
 // else gets its natural label or its fallback there, as at a first
 // publish. A label may move when it is free in zone or the project's
-// there, and is not a plain label unless plainOK (the project owns the new
-// zone's plain names, model.Zones.PlainLabels); its natural label and its
-// fallback, also of a name it had before a rename, are never plain ones. The labels in the old zone stay the
+// there, and is one its project chose (model.ChosenHostLabel) or one its
+// name or its project gave it (model.GivenHostLabel): a plain label of the
+// zone owners before ADR 0063 does not. The labels in the old zone stay the
 // project's, free for it alone, as a changed label's do. It locks the
 // project FOR UPDATE, runs in a transaction (the caller's, when in one),
 // sends ferun_ingress for every environment it moved and returns the
 // moves, by name; ErrNoRow for an unknown project. A move to the zone the
 // project has changes nothing.
-func (s *Store) SetProjectZone(ctx context.Context, project, zone string, plainOK bool) ([]ZoneMove, error) {
+func (s *Store) SetProjectZone(ctx context.Context, project, zone string) ([]ZoneMove, error) {
 	var moves []ZoneMove
 	err := s.InTx(ctx, func(tx *Store) error {
 		moves = nil
@@ -207,11 +247,8 @@ func (s *Store) SetProjectZone(ctx context.Context, project, zone string, plainO
 				return fmt.Errorf("release the host label of environment %s: %w", e.ID, err)
 			}
 			label := e.HostLabel
-			// Its own is one its name gave it, the one it has or one it
-			// had before a rename.
-			own := model.GivenHostLabel(label, e.Owner, e.ID)
 			ok := false
-			if own || model.ChosenHostLabel(label) || (plainOK && model.PlainHostLabel(label)) {
+			if model.GivenHostLabel(label, e.Owner, e.ID) || model.ChosenHostLabel(label, e.Owner) {
 				if ok, err = tx.takeHostLabel(ctx, zone, label, e); err != nil {
 					return err
 				}

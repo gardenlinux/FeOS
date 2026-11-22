@@ -230,7 +230,7 @@ func TestIngressGroups(t *testing.T) {
 	}
 
 	// The first publish rolls web once.
-	if e := h.setPublic(env.ID, true); !e.Public || !e.IngressGroup || e.HostLabel != "stage-t1" {
+	if e := h.setPublic(env.ID, true); !e.Public || !e.IngressGroup || e.HostLabel != "stage--t1" {
 		t.Fatalf("published %+v", e)
 	}
 	var rows []store.EnvInstanceRow
@@ -287,7 +287,7 @@ func TestIngressGroups(t *testing.T) {
 
 	// Unpublish: no rules, nothing admitted, no roll; ferun-ingress,
 	// which no pod's rules name now, stays on the node.
-	if e := h.setPublic(env.ID, false); e.Public || !e.IngressGroup || e.HostLabel != "stage-t1" {
+	if e := h.setPublic(env.ID, false); e.Public || !e.IngressGroup || e.HostLabel != "stage--t1" {
 		t.Fatalf("unpublished %+v", e)
 	}
 	eventually(t, 30*time.Second, "the ing groups without rules, nothing admitted", func() bool {

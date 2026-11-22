@@ -248,7 +248,7 @@ func TestBuilderDomains(t *testing.T) {
 	}
 	await(t, b, time.Second, "the default host back", func(s *Snapshot) bool {
 		e := envOf(s, f.env.ID)
-		return len(e.Domains) == 0 && slices.Equal(e.Hosts, []string{"web-acme.apps.example"})
+		return len(e.Domains) == 0 && slices.Equal(e.Hosts, []string{"web--acme.apps.example"})
 	})
 
 	// Without a sealer: none.

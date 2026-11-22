@@ -46,13 +46,15 @@ type EnvSummary struct {
 	// State is the latest deployment's state (Deployment…),
 	// EnvNone without a deployment, EnvDeleting.
 	State string `json:"state"`
-	// Public, Hosts, HostLabel, Access and Provider are as EnvStatus has
-	// them.
-	Public    bool     `json:"public"`
-	Hosts     []string `json:"hosts"`
-	HostLabel string   `json:"hostLabel,omitempty"`
-	Access    string   `json:"access"`
-	Provider  string   `json:"provider"`
+	// Public, Hosts, HostLabel, ProjectAddress, ProjectHost, Access and
+	// Provider are as EnvStatus has them.
+	Public         bool     `json:"public"`
+	Hosts          []string `json:"hosts"`
+	HostLabel      string   `json:"hostLabel,omitempty"`
+	ProjectAddress bool     `json:"projectAddress"`
+	ProjectHost    string   `json:"projectHost,omitempty"`
+	Access         string   `json:"access"`
+	Provider       string   `json:"provider"`
 	// Protected is as EnvStatus has it.
 	Protected     bool   `json:"protected"`
 	OpenIncidents int    `json:"openIncidents"`
@@ -80,6 +82,14 @@ type EnvStatus struct {
 	// publish or chosen by its project; empty before. It stays while a
 	// domain is its host.
 	HostLabel string `json:"hostLabel,omitempty"`
+	// ProjectAddress: its label is its project's name, the project's
+	// address, which one environment of the project holds at a time
+	// (ADR 0063).
+	ProjectAddress bool `json:"projectAddress"`
+	// ProjectHost is the project's address, <project>.<its zone>, whichever
+	// environment holds it; empty without a zone, and for a project whose
+	// name is no label of its own (a dot or "--" in it).
+	ProjectHost string `json:"projectHost,omitempty"`
 	// Access is who the ingress admits while it is public (ADR 0054):
 	// AccessAnyone or AccessVisitors, as stored, public or
 	// not (a never published one reads anyone); Provider, with visitors,
@@ -348,9 +358,10 @@ type LogsAnswer struct {
 // PublicRequest is PUT /api/v1/environments/{env}/public: whether the
 // ingress serves the environment (ADR 0021). Public is required.
 // HostLabel, with public true, is the default host's label its project
-// chooses (a DNS label with "--" in it; for a project that owns the apps
-// zone also one without); without it the environment keeps its label, or
-// gets one at its first publish. Access and Provider, only with public
+// chooses, "<choice>--<project>", or the project's name, which takes the
+// project's address from the environment that holds it (ADR 0063);
+// without it the environment keeps its label, or gets one at its first
+// publish. Access and Provider, only with public
 // true, say who the ingress admits (ADR 0054).
 type PublicRequest struct {
 	Public    bool   `json:"public"`
@@ -369,6 +380,10 @@ type PublicAnswer struct {
 	// Hosts are the environment's hosts while it is public; empty
 	// otherwise.
 	Hosts []string `json:"hosts"`
+	// HostLabel and ProjectAddress are as EnvStatus has them, after the
+	// call.
+	HostLabel      string `json:"hostLabel,omitempty"`
+	ProjectAddress bool   `json:"projectAddress"`
 	// Rolling: this call published the environment for the first time, so
 	// its image services roll once, to name their ingress groups.
 	Rolling bool `json:"rolling"`

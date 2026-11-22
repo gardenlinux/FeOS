@@ -459,7 +459,7 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 	deps := env.Deps{
 		InstanceID: i.id, DB: i.DB, Store: i.Store, Elector: i.Elector, Conns: i.Links, Engine: i.Engine,
 		Runner: runner, Ports: fwd, Sealer: sealer, AppsZone: i.cfg.AppsZone, EnvChanged: i.Domains.EnvChanged,
-		AppsZoneOwners: i.cfg.AppsZoneOwners, ProjectZone: i.cfg.ProjectZone, SinkURL: i.cfg.SinkURL, Bindings: hb,
+		ProjectZone: i.cfg.ProjectZone, SinkURL: i.cfg.SinkURL, Bindings: hb,
 		DenyPrefixes: i.cfg.DenyPrefixes, Issuer: i.Issuer, Log: i.log,
 	}
 	// The kinds of providers a publish may name (ADR 0054); nil without
@@ -974,12 +974,12 @@ func sealerOf(sl *seal.Sealer) api.Sealer {
 }
 
 // reservedProjectNames are the names no project a person makes may have
-// beside the fixed ones (ADR 0031): the apps zone's owners' and the
-// platform's host labels, the first label of the public URL's host, of
-// --edge-name, of --apps-zone, of the project zone and of ferun-auth's
-// host (--visitor-auth-url, ADR 0054).
+// beside the fixed ones (ADR 0031): the platform's host labels, the
+// first label of the public URL's host, of --edge-name, of --apps-zone,
+// of the project zone and of ferun-auth's host (--visitor-auth-url, ADR
+// 0054).
 func reservedProjectNames(cfg config.Config) []string {
-	out := slices.Clone(cfg.AppsZoneOwners)
+	var out []string
 	hosts := []string{cfg.EdgeName, cfg.AppsZone, cfg.ProjectZone, visitorAuthHost(cfg)}
 	if u, err := url.Parse(cfg.PublicURL); err == nil {
 		hosts = append(hosts, u.Hostname())
