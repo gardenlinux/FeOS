@@ -269,8 +269,9 @@ func (s *server) tokenMe(w http.ResponseWriter, r *http.Request, tok string) err
 // integrationMe is /auth/me for an integration (ADR 0056): itself, the
 // person it names, and the projects that grant it with their roles; with
 // a person named, those in which both hold a role, with the lower of
-// both and each side's own. A disabled integration reaches none, nor does
-// one naming a person FeRun does not know or who is disabled.
+// both and each side's own. A disabled integration reaches none and learns
+// no more of a person it names than the subject it sent, and one naming a
+// person FeRun does not know or who is disabled reaches none.
 func (s *server) integrationMe(w http.ResponseWriter, r *http.Request, tok string) error {
 	ctx := r.Context()
 	in, err := s.integrationOf(w, r, tok)
@@ -287,6 +288,9 @@ func (s *server) integrationMe(w http.ResponseWriter, r *http.Request, tok strin
 	var person *store.Person
 	if sent {
 		me.Named = &fapi.MeNamed{Sub: sub}
+	}
+	// A disabled integration learns nothing of the person it names.
+	if sent && !in.Disabled() {
 		p, err := s.st.PersonBySubject(ctx, in.Issuer, sub)
 		if err != nil && !isNoRow(err) {
 			return fmt.Errorf("person %s: %w", sub, err)
