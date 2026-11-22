@@ -33,7 +33,7 @@ func TestPeopleJSON(t *testing.T) {
 			Accounts: []MeAccount{}},
 			`{"kind":"integration","integration":{"name":"fecode","title":"","url":"","disabled":false},` +
 				`"named":{"sub":"x","known":false},"projects":[{"project":"kino","createdAt":"2026-11-21T09:30:00.123456Z",` +
-				`"role":"write","integrationRole":"admin",` +
+				`"role":"write","integrationRole":"admin","delete":false,` +
 				`"environments":[{"id":"e","name":"prod","role":"read","integrationRole":"admin","protected":true,"plan":true,` +
 				`"delete":false}]}],"accounts":[]}`},
 		{Me{Kind: "token", Token: &MeToken{Role: "write"}, Projects: []MeProject{}, Accounts: []MeAccount{}},

@@ -99,13 +99,18 @@ type MeNamed struct {
 // name freed by a deleted project and made again is another project, so a
 // caller that keeps something per project tells the two apart by it.
 type MeProject struct {
-	Project         string          `json:"project"`
-	CreatedAt       time.Time       `json:"createdAt"`
-	Role            string          `json:"role"`
-	IntegrationRole string          `json:"integrationRole,omitempty"`
-	PersonRole      string          `json:"personRole,omitempty"`
-	Account         *AccountRef     `json:"account,omitempty"` // a session's (ADR 0059)
-	Environments    []MeEnvironment `json:"environments"`
+	Project         string      `json:"project"`
+	CreatedAt       time.Time   `json:"createdAt"`
+	Role            string      `json:"role"`
+	IntegrationRole string      `json:"integrationRole,omitempty"`
+	PersonRole      string      `json:"personRole,omitempty"`
+	Account         *AccountRef `json:"account,omitempty"` // a session's (ADR 0059)
+	// Delete is whether the caller may delete the project (DELETE
+	// /api/v1/project): its admin, an operator, or an integration as
+	// admin itself for a person it names who is the project's admin;
+	// never an integration that names nobody, never a project token.
+	Delete       bool            `json:"delete"`
+	Environments []MeEnvironment `json:"environments"`
 }
 
 // MeEnvironment is an environment the caller reads: Role its effective

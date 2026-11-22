@@ -30,6 +30,14 @@ func (c *Client) Project(ctx context.Context) (api.Project, error) {
 	return out, c.Do(ctx, http.MethodGet, "/api/v1/project", url.Values{"filter": {"environments"}}, nil, &out)
 }
 
+// DeleteProject is DELETE /api/v1/project {name}: the project goes, with
+// everything in it (202). name is the project's name again; the caller
+// needs Me's Delete for it.
+func (c *Client) DeleteProject(ctx context.Context, name string) (api.DeleteProjectAnswer, error) {
+	var out api.DeleteProjectAnswer
+	return out, c.Do(ctx, http.MethodDelete, "/api/v1/project", nil, api.DeleteProjectRequest{Name: name}, &out)
+}
+
 // Members is GET /api/v1/project/members.
 func (c *Client) Members(ctx context.Context) (api.Members, error) {
 	var out api.Members
