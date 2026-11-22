@@ -274,7 +274,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0056
 
-- ADR 0056: proof that the person an integration names asked, for the changes that need one: the person's own token passed on, or exchanged for one bound to the call.
 - ADR 0056: an integration that admits visitors of its own, people who hold no role in the project, as an access provider by its registration (ADR 0054).
 - ADR 0056: a grant asked for from the integration's side: a link into the console that names the integration and a role, and a project made and granted in one step.
 

@@ -208,8 +208,11 @@ for itself there, without a person.
   would have proof that the person is there. The platform would hold
   its users' tokens for FeRun's whole API and keep them fresh for work
   that goes on after the person left, an agent's turn or a build.
-  Naming is weaker and says so; a proof for the changes that need one
-  is backlog.
+  Naming is weaker and says so. A proof for the changes that need one
+  alone was set aside as well (2026-11-22): the platform would keep a
+  refresh token per person and pass it up to its users, a turn or a
+  build outlives the token, and the grant with the lower of two roles
+  already bounds what a wrong name could do.
 - **The person's role alone**, or the higher of the two. The
   integration would act beyond what the project's admin granted it.
 - **An integration as an access provider**, which admits its own users
@@ -326,3 +329,8 @@ since (d036f2cf), and FeCode binds to it. Left for later: a sandbox or
 route token an integration mints naming a person is checked against the
 integration's grants alone while its environment is protected; FeCode
 refuses its agent's tools there on its side meanwhile.
+
+On 2026-11-22, after the window, Malte set aside the proof by the
+person's own token, which the backlog had kept: its refresh and its
+way up to the user cost more than it adds to a grant that bounds the
+integration and a lower of two roles that bounds the person.
