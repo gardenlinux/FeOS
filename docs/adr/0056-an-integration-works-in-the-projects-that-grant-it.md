@@ -8,8 +8,9 @@ develops and operates one application per project, is an
 operator, that signs in as itself with the shared provider's client
 credentials. It reaches a project only by a grant that the project's
 admin gives it, with the roles people have, and it is out when the
-grant goes. It makes and deletes no project. A call it makes for a
-person names that person and does what both may do: the lower of the
+grant goes. It makes no project, and deletes one only for a person it
+names who is the project's admin, as admin itself. A call it makes for
+a person names that person and does what both may do: the lower of the
 two roles decides. Whatever its role and whomever it names, it never
 decides who else has access: members, grants and project tokens are not
 its to change. `write` then works inside a project, and `admin` decides
@@ -68,7 +69,9 @@ for itself there, without a person.
   issuer and subject its tokens carry.
 - A registration reaches no project. An integration has no session and
   no console, is no member of a project and on no account (ADR 0059),
-  takes no invitation, and makes and deletes no project.
+  takes no invitation, and makes no project. It deletes one only for a
+  person it names who is the project's admin, as `admin` itself (ADR
+  0031).
 - Every signed-in person reads the registered integrations: name, title
   and URL.
 - An operator disables an integration, which ends the effect of every
@@ -333,4 +336,8 @@ refuses its agent's tools there on its side meanwhile.
 On 2026-11-22, after the window, Malte set aside the proof by the
 person's own token, which the backlog had kept: its refresh and its
 way up to the user cost more than it adds to a grant that bounds the
-integration and a lower of two roles that bounds the person.
+integration and a lower of two roles that bounds the person. The same
+day Malte decided that an integration deletes a project for a person it
+names who is the project's admin, as admin itself, where it deleted
+none (0bec7b45), so that FeCode deletes the FeRun project with its own
+(FeCode's ADR 0037).

@@ -1412,7 +1412,7 @@ The routes, bodies, status codes and texts are the sandbox system's;
 |---|---|---|
 | admin | `/api/v1/admin/…` | an operator's UI session (cookie), or Basic with `--admin-users`; an integration is never an operator |
 | person | `POST /api/v1/projects`, `GET /api/v1/invitations/{token}`, `POST /api/v1/invitations/{token}/accept`, `/api/v1/accounts[/…]` ([Accounts](#accounts)), `GET /api/v1/integrations` | a signed-in person's session (an operator's too) with the CSRF rules of a session, in no project; else 401 "sign-in required"; an integration's bearer (a JWT) is 403 `integration_refused` |
-| project | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/project[/…]` (leave, members, invitations, tokens, integrations' grants, the account, the move) | a project's token; an integration's access token naming the project in `FeRun-Project`, and maybe a person in `FeRun-Person` ([Integrations](#integrations)); or a person's session naming its project in `FeRun-Project`; with the role and scope each route states ([Who acts in a project](#who-acts-in-a-project)) |
+| project | `/api/v1/sandboxes`, `/api/v1/sandboxes/{id}` (create, list, get, delete, pause, resume, tokens, access), `/api/v1/tools`, `/api/v1/environments[/…]` but the route door, `/api/v1/domains[/…]`, `/api/v1/jobs[/…]`, `/api/v1/providers[/…]`, `/api/v1/project[/…]` (the project's deletion, leave, members, invitations, tokens, integrations' grants, the account, the move) | a project's token; an integration's access token naming the project in `FeRun-Project`, and maybe a person in `FeRun-Person` ([Integrations](#integrations)); or a person's session naming its project in `FeRun-Project`; with the role and scope each route states ([Who acts in a project](#who-acts-in-a-project)) |
 | provider | `POST /api/v1/challenges/open`, `…/accept`, `…/reject`, `GET /api/v1/visits/{visit}` ([Visitors](#visitors)) | a bearer `feos-auth-…` is a service token of kind `auth` (else 401 "unknown service token"); an integration's bearer is 403 `integration_refused` (ADR 0056 sets it aside as a provider of visitors); any other credential is a project principal as in the project class, with its CSRF rules. None: 401 `{"error": "provider credential required"}` with `WWW-Authenticate: Bearer realm="ferun"`. The visits service decides who may, after opening the challenge or reading the visit |
 | auth | `POST /api/v1/visits/end`, `GET /api/v1/oidc-providers/{project}/{provider}` ([Visitors](#visitors)) | `ferun-auth`'s service token of kind `auth` alone; else 401 `{"error": "ferun-auth token required"}` with `WWW-Authenticate: Bearer realm="ferun"` |
 | sandbox | `/api/v1/sandboxes/{id}/…`: exec, files, dirs, search, fetch, processes, calls, watches, bindings | the sandbox's own token |
@@ -1464,7 +1464,10 @@ the drain loop left in the node's status description ("draining: …",
 "drained", "cannot drain: …"); another writer's text stays. Deleting
 a project deletes its tokens at once, then its sandboxes in batches as a
 sandbox delete does, and its environments with their addons' data
-(`env-delete`); the leader finishes what a request did not.
+(`env-delete`); the leader finishes what a request did not. An operator's
+`DELETE /api/v1/admin/projects/{project}` and a project admin's `DELETE
+/api/v1/project` ([Members, invitations and
+tokens](#members-invitations-and-tokens)) take that one path.
 `/readyz` fails while the instance stops, and after its start until it is
 connected to every ready node that reported since, at most 30 s, so that a
 rolling deploy sends no requests to an instance no node has dialled yet.
@@ -1579,7 +1582,13 @@ whether it does not exist, the integration is disabled, or the person
 named is unknown, disabled or without a role there. An environment it
 holds no role on is 404 "no such environment". Deleting and renaming an
 environment need `admin` on it, or `write` on the project while it is
-not protected (`auth.Project.MayDelete`).
+not protected (`auth.Project.MayDelete`). Deleting the project
+(`auth.Project.MayDeleteProject`) needs the effective `admin` on the
+project, from a person's session, an operator's, or an integration that
+names a person (both sides `admin`); never from a project token or an
+integration that names nobody; and `MayDelete` on each of its
+environments not being deleted already, a protected one too, since the
+project's deletion deletes them all.
 
 #### Who asks
 
@@ -1587,7 +1596,7 @@ not protected (`auth.Project.MayDelete`).
 ignored, with a `kind` and the projects the caller reaches, each with
 its effective roles by the one function: `{kind, …, projects:
 [{project, createdAt, role, account?, integrationRole?, personRole?,
-environments: [{id, name, role, integrationRole?, personRole?,
+delete, environments: [{id, name, role, integrationRole?, personRole?,
 protected, plan, delete}]}], accounts}`, projects and environments by
 name. `createdAt` is when the project was made: a deleted project's name
 made again is another project, and a caller that keeps something per
@@ -1595,7 +1604,11 @@ project (FeCode its repository and transcripts) tells them apart by it,
 never by the name alone. `role` is the
 effective role (`""` on a project where only environment grants count),
 `plan` whether the caller may plan against the environment (`write` were
-it not protected), `delete` whether it may delete and rename it; an
+it not protected), `delete` whether it may delete and rename it; a
+project's `delete` whether it may delete the project (`DELETE
+/api/v1/project`, `MayDeleteProject`): true for its admin and an
+operator, for an integration only with a person named who is its admin
+and its own grant `admin`, never for a project token. An
 environment the caller does not read is left out, a project it does not
 see too. The kinds:
 
@@ -1603,7 +1616,8 @@ see too. The kinds:
   `admin` (an operator), `method` `oidc`; each project with its
   `account` ([Accounts](#accounts)), and `accounts`, those the person may
   put projects on or read. An operator's are every live project and
-  every environment as `admin`, `plan` and `delete` true.
+  every environment as `admin`, `plan` and `delete` true, and each
+  project's `delete` true.
 - `basic`: `username`, `admin: true`, `method: basic`, no projects.
 - `token`: `token: {label, role, environment}` (the token's own grant;
   `environment` `""` on the whole project) and its project.
@@ -1680,6 +1694,7 @@ and `TestRouteNeeds` holds the list:
 | write on the job's environment | a project job's cancel and delete |
 | admin on the project | a domain's claim, check and deletion; an access provider's `PUT` and `DELETE /api/v1/providers/{provider}` |
 | admin on the project, no integration | the project's tokens (`GET`, `POST /api/v1/project/tokens`, `DELETE …/{hash}`), the move (`POST /api/v1/project/move`) |
+| admin on the project and the deletion of each of its environments, which the handler checks (`MayDeleteProject`) | the project's deletion (`DELETE /api/v1/project`) |
 | read on the environment | `GET …/{env}`, its deployments, logs, tags, secrets (names and versions), credentials, incidents, access logs, traffic, its bindings' use, its workloads' identities |
 | write on the environment | apply, revert, objects, tags, secrets' values, credentials, restarts, runs of its jobs, a binding's and a secret's check, its route tokens (ADR 0056: route tokens are `write`'s) |
 | write on the environment, protection aside | `POST …/{env}/plan` ([Protected environments](#protected-environments)) |
@@ -1723,7 +1738,9 @@ An **integration** (ADR 0056, `0042_integrations.sql`) is software in
 front of FeRun that works in many projects, as FeCode does: a principal
 of its own, registered once by an operator, that reaches a project only
 by the grants its admins give it, with the roles people have. It makes
-and deletes no project, and it never decides who else acts.
+no project and deletes one only for a person it names who is the
+project's admin, as `admin` itself (`DELETE /api/v1/project`), and it
+never decides who else acts.
 
 **Registration** is the operators' (admin class), each answering
 503 `integrations_unavailable` without `--oidc-issuer`:
@@ -1863,6 +1880,24 @@ operators are not bound. `project_created` records the account. Names the platfo
 `--edge-name`, of `--apps-zone` and of `--project-zone`. A taken name is
 409. Projects an
 operator makes with the admin API are as before (no maker, a token).
+
+**A project's admin deletes it**: `DELETE /api/v1/project {name}` (class
+project, `api.DeleteProjectRequest`), `name` the project's again, so
+that a call meant for another project deletes nothing (else 400
+`name_mismatch`). Who may is `MayDeleteProject` ([Who acts in a
+project](#who-acts-in-a-project)), the rule `/auth/me`'s `delete`
+answers by: a project token is 403 `person_required`, an integration
+that names nobody 403 `integration_refused` ("an integration deletes a
+project only for a person it names who is the project's admin"), a role
+too low 403 `role_required` (on the project, or naming the environment
+it may not delete). It takes the operator's path ([REST](#rest)): its
+tokens go at once, then its sandboxes, its environments with their
+addons' data, and the project once they have; the answer is 202
+`{project, deleting: true}` (`api.DeleteProjectAnswer`), also when the
+request ends before the sandboxes have gone, which the leader finishes.
+The project is 404 "no such project" from then on, to its people and
+integrations alike. A `project_deleted` row records who
+(`person:<id>`, `integration:<id>/person:<id>`).
 
 **Members.** `GET /api/v1/project/members` answers `{members: [{person,
 name, email, issuer, subject, disabled?, role, madeBy, madeByName,
@@ -3073,7 +3108,11 @@ ticked grants one after the other and then protects; a failure stops
 it, the grants given stay and the environment is not protected. The
 project's General settings show its account and its moves (`GET
 /api/v1/project/account`), and its admin moves it to another open
-account they may use. `/accounts` lists a person's accounts (an
+account they may use. Where `/auth/me` says the project's `delete`, they
+offer Delete project: a modal dialog that asks for the project's name
+and sends it as `DELETE /api/v1/project` (`DeleteProjectDialog` in
+`web/src/views/ProjectPages.jsx`), then reads `/auth/me` again and goes
+to the projects; a refusal stays in the dialog and changes nothing. `/accounts` lists a person's accounts (an
 operator's: every one, to make, change, close, reopen and delete one
 that never held a project), `/accounts/<a>` an account's page (its
 projects with their makers, admins and use, the moves, its people and

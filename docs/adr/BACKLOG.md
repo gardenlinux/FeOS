@@ -172,7 +172,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0031
 
 - ADR 0031: a general MCP door for a person's agents (`/mcp/projects`: an OAuth 2.1 resource server taking the shared provider's audience-bound access tokens and project tokens, one tool per operation of the project class, tokens, secrets' values and image credentials left out, a `secret_generate` tool), once the provider's login app grants audiences (FeCode's ADR 0020).
-- ADR 0031: a project's admin deletes the project themselves (an operator does, through the admin API).
 - ADR 0031: a CLI with a person's tokens, and a terminal into a sandbox (needs interactive exec, ADR 0004).
 - ADR 0031: a registrable domain of its own as the project zone, keeping cookies, reputation and blocklists apart from the platform's (a subdomain of the platform's domain serves it).
 - ADR 0031: a person removed at the provider without a sign-out keeps their session until its TTL (back-channel logout covers a sign-out; FeCode's requirement A9 asks the same).

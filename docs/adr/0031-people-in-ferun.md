@@ -153,6 +153,25 @@ Two things outside FeRun shape the decision:
 - Members of a project see each other's name and e-mail address in that
   project, and nowhere else.
 
+### A project's admin deletes it
+
+- A project's **admin** deletes it, as an operator does: its tokens stop
+  at once, and its sandboxes, its environments with their addons' data
+  and the project go after them. Nothing is kept to restore. Its name is
+  free then, and a project made under it again is another (ADR 0056).
+- An operator deletes any project, through the admin API or in the
+  project's settings as its admin. A project token deletes none: ending
+  a project is a person's decision, and a token is a program's. An
+  integration deletes one only for a person it names who is the
+  project's admin, and as `admin` itself (ADR 0056).
+- Deleting the project deletes every environment of it, so whoever
+  deletes it may delete each of them, a protected one too (ADR 0060).
+- The call names the project twice, in its header and in its body, so
+  that a call meant for another project deletes nothing.
+- Who may is one rule, which the route checks and the answer about the
+  caller gives per project, so that the console and an integration offer
+  the deletion where it is allowed and nowhere else.
+
 ### The API takes a person as it takes a token
 
 - The project class accepts a person's session beside a token. A session
@@ -283,6 +302,10 @@ Two things outside FeRun shape the decision:
   migration beside it.
 - **A project per person**, no members: sharing would mean sharing a
   token, and nobody would know who changed what.
+- **Deletion by operators only**, the rule until 2026-11-22: a person who
+  made a project asked an operator to delete it, and a platform in front
+  of FeRun that deleted a project of its own left the project at FeRun
+  behind (FeCode's ADR 0037).
 - **A sandbox's activity for operators only**, the rule until
   2026-11-11, because it holds the tool calls' parameters and output.
   Those are the project's own, written by its agents in its sandboxes,
@@ -360,4 +383,7 @@ projects' jobs and attached services from the project grant to the
 environment's. The general MCP door for a person's agents, planned as a
 later step, was not built and is in the backlog. On 2026-11-11 a
 sandbox's Activity and Network went from the operators to the readers
-of its environment, without the fleet's part.
+of its environment, without the fleet's part. On 2026-11-22 Malte
+decided that a project's admin deletes it, which the backlog had kept:
+`DELETE /api/v1/project` and the console's Delete project (0bec7b45),
+an integration for a person it names who is its admin.
